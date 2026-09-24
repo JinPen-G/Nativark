@@ -59,6 +59,7 @@ export const api = {
   // ---- 当前租户：经营空间、组织、账号、角色 ----
   workspaces: () => request<BusinessWorkspace[]>("/platform/workspaces"),
   workspaceMembers: (workspaceId: string) => request<WorkspaceMember[]>(`/platform/workspaces/${workspaceId}/members`),
+  workspaceFulfillmentLocations: (workspaceId: string) => request<Array<{ id: string; name: string; code: string; status: string }>>(`/platform/workspaces/${workspaceId}/fulfillment-locations`),
   organizations: () => request<OrganizationSummary[]>("/platform/organizations"),
   saveOrganization: (payload: SaveOrganizationRequest) => request<OrganizationSummary>(payload.id ? `/platform/organizations/${payload.id}` : "/platform/organizations", { method: payload.id ? "put" : "post", data: payload }),
   setOrganizationStatus: (id: string, status: OrganizationSummary["status"], operator: string) => request<OrganizationSummary>(`/platform/organizations/${id}/status`, { method: "put", data: { status, operator } }),

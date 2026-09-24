@@ -16,8 +16,8 @@ export const websiteChannelApi = {
     const response = await http.put<ApiResult<WebsiteChannelProfileSummary>>("/platform/website-channel", payload);
     return response.data.data;
   },
-  /** 上传官网品牌图片（scene: logo|hero|category），返回可写入配置的公开 URL。 */
-  async uploadAsset(scene: "logo" | "hero" | "category", file: File) {
+  /** 上传品牌图片（scene: logo|favicon|hero|category），返回可写入配置的公开 URL。 */
+  async uploadAsset(scene: "logo" | "favicon" | "hero" | "category", file: File) {
     const form = new FormData();
     form.append("scene", scene);
     form.append("file", file);

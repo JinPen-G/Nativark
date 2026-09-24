@@ -1,12 +1,12 @@
 <page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
 <view class="screen screen--flat {{themeClass}}"><nav-bar title="出入库记录"></nav-bar>
-  <view class="section"><view class="chips"><view class="chip {{tab === 'all' ? 'chip--active' : ''}}" data-tab="all" bindtap="onTab">全部</view><view class="chip {{tab === 'out' ? 'chip--active' : ''}}" data-tab="out" bindtap="onTab">出库</view><view class="chip {{tab === 'in' ? 'chip--active' : ''}}" data-tab="in" bindtap="onTab">入库</view></view></view>
+  <view class="section"><view class="chips"><view class="chip {{tab === 'all' ? 'chip--active' : ''}}" data-tab="all" bindtap="onTab">全部</view><view class="chip {{tab === 'out' ? 'chip--active' : ''}}" data-tab="out" bindtap="onTab">出库</view><view class="chip {{tab === 'in' ? 'chip--active' : ''}}" data-tab="in" bindtap="onTab">入库</view><view class="chip {{tab === 'transfer' ? 'chip--active' : ''}}" data-tab="transfer" bindtap="onTab">转移</view><view wx:if="{{canMaintenance}}" class="chip {{tab === 'maintenance' ? 'chip--active' : ''}}" data-tab="maintenance" bindtap="onTab">维修</view></view></view>
   <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
   <view wx:else class="section section--tight ledger-list">
     <view class="ledger-entry" wx:for="{{rows}}" wx:key="id">
-      <view class="ledger-entry__date">{{item.date}}</view>
+      <view class="ledger-entry__date">{{item.date}}<text>{{item.time}}</text></view>
       <view class="ledger-entry__dot"></view>
-      <view class="card ledger-entry__card"><view class="row row--between"><view class="subtitle">{{item.name}}</view><view class="ledger-entry__quantity">{{item.quantity}}</view></view><view class="muted small mt-8">{{item.action}} · {{item.location}}</view><view wx:if="{{item.reason}}" class="muted small mt-8">{{item.reason}}</view></view>
+      <view class="card ledger-entry__card"><view class="row row--between"><view class="subtitle">{{item.name}}</view><status-tag label="{{item.action}}" tone="{{item.tone}}" small="{{true}}"></status-tag></view><view class="row row--between ledger-entry__meta"><view class="muted small">{{item.location}}<text wx:if="{{item.operator}}"> · 操作人：{{item.operator}}</text></view><view class="ledger-entry__quantity">{{item.quantity}}</view></view><view wx:if="{{item.reason}}" class="muted small mt-8">{{item.reason}}</view></view>
     </view>
   </view>
 </view>

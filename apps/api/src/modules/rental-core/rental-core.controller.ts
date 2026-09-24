@@ -44,10 +44,12 @@ import {
   CancelRentalOrderDto,
   ManageRentalAllocationDto,
   RentalOperationLockDto,
+  CreateRentalOrderInternalNoteDto,
   CreateRentalInspectionDto,
   CorrectRentalInspectionUsageDto,
   CreateRentalOrderDto,
   PartialReturnRentalOrderDto,
+  RentalHandoverDto,
   ReviewRentalInspectionExceptionDto,
   AdjustRentalInspectionExceptionDto,
   RecordRentalInspectionExceptionCustomerResponseDto,
@@ -79,6 +81,7 @@ import { RentalOrderConfirmationService } from "./rental-order-confirmation.serv
 import { RentalIdempotentActionService } from "./rental-idempotent-action.service";
 import { RentalWorkspaceReportRepository } from "./rental-workspace-report.repository";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
+import { getRequestIdentity } from "../../common/request-identity";
 import { PrismaService } from "../database/prisma.service";
 import { RentalServiceCapacityService } from "./rental-service-capacity.service";
 import { extensionRequestKey } from "./rental-service-occurrence";
@@ -206,6 +209,59 @@ export class RentalCoreController {
     const category = this.service.listCategories().find((item) => item.code === profile.categoryCode);
     if (!category) throw new Error("当前经营空间的品类定义不存在");
     return { profile, category, settings: this.service.getBusinessSettings(tenantId), groups: this.service.listItemGroups(tenantId), pricingGroups: this.service.listPricingGroups(tenantId), couponTemplates: this.service.listCouponTemplates(tenantId), locations: this.service.listLocations(tenantId), operators: this.service.listOperators(tenantId) };
+  }
+
+  /** 员工端交接证据必须是当前员工刚上传到同一订单、空间、地点和幂等批次的已完成文件。 */
+  private async assertStaffHandoverEvidence(
+    req: AuthenticatedRequest,
+    order: RentalOrder,
+    stage: "pickup" | "return",
+    batchId: string,
+    signatureId: string | undefined,
+    attachments: string[] = [],
+    template?: { fields: Array<{ code: string; label: string; type: string; required: boolean }> },
+    results: Record<string, unknown> = {}
+  ) {
+    if (!getRequestIdentity()?.staffApi) return attachments;
+    if (!signatureId) throw new BadRequestException("员工端交接必须先完成客户现场签字");
+    const photoIds: string[] = [];
+    for (const field of template?.fields ?? []) {
+      if (field.type !== "photo") continue;
+      const value = results[field.code];
+      const ids = Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim())) : [];
+      if (field.required && !ids.length) throw new BadRequestException(`请为“${field.label}”上传照片凭证`);
+      photoIds.push(...ids);
+    }
+    const ids = [...new Set([...attachments, ...photoIds, signatureId])];
+    const workspaceId = getRequestIdentity()?.workspaceId;
+    if (!workspaceId) throw new ForbiddenException("缺少已验证的经营空间");
+    const assets = await this.prisma.fileAsset.findMany({
+      where: {
+        id: { in: ids }, tenantId: req.user.tenantId, businessModule: "rental-core",
+        businessType: "rental_order", businessId: order.id, status: "active"
+      },
+      select: { id: true, uploadedBy: true, uploadScene: true, metadata: true }
+    });
+    if (assets.length !== ids.length) throw new BadRequestException("交接照片或签字未完成上傳，或不属于当前订单");
+    const locationId = stage === "pickup" ? order.fulfillmentLocationId : (order.returnLocationId ?? order.fulfillmentLocationId);
+    const locationName = stage === "pickup" ? order.fulfillmentLocationName : (order.returnLocationName ?? order.fulfillmentLocationName);
+    for (const asset of assets) {
+      const metadata = asset.metadata && typeof asset.metadata === "object" && !Array.isArray(asset.metadata)
+        ? asset.metadata as Record<string, unknown>
+        : {};
+      const isSignature = asset.id === signatureId;
+      const expectedScene = isSignature ? "handover-signature" : `${stage}-evidence`;
+      if (asset.uploadScene !== expectedScene || asset.uploadedBy !== req.user.id
+        || metadata.uploadedByUserId !== req.user.id
+        || metadata.workspaceId !== workspaceId
+        || metadata.handoverStage !== stage
+        || metadata.handoverBatchId !== batchId
+        || metadata.handoverLocationId !== locationId
+        || metadata.handoverLocationName !== locationName) {
+        throw new BadRequestException("交接证据的员工、阶段、地点或批次与当前操作不一致");
+      }
+    }
+    return ids;
   }
   // 必须先 await 业务结果再写快照：配置写方法已转为异步，若直接把 Promise 传进来
   // 就会与快照写入并发，快照可能捕获到变更前的状态。
@@ -843,7 +899,32 @@ export class RentalCoreController {
     const notificationLogs = canIncludeWorkbenchOrderTodos(req.user)
       ? this.business.listNotificationLogs(tenantId, this.context(tenantId))
       : [];
-    return buildRentalWorkbenchTodos(orders, workOrders, fundingByOrderId, extensionsByOrderId, notificationLogs);
+    const todos = buildRentalWorkbenchTodos(orders, workOrders, fundingByOrderId, extensionsByOrderId, notificationLogs);
+    const identity = getRequestIdentity();
+    const canConfirmOffline = hasPermissionCode(req.user, "rental-os:order:settle");
+    if (identity?.staffApi && canConfirmOffline && orders.length) {
+      const pending = await this.prisma.rentalOfflinePaymentRegistration.findMany({
+        where: { tenantId, workspaceId, status: "pending", orderId: { in: orders.map((order) => order.id) } },
+        include: { order: { select: { orderNo: true } } },
+        orderBy: { registeredAt: "asc" }
+      });
+      const offlineItems = pending.map((row) => ({
+        id: `offline_payment_pending:${row.id}`,
+        type: "offline_payment_pending" as const,
+        priority: "high" as const,
+        title: "线下收款待确认",
+        description: `${row.order.orderNo} · ${row.instrument === "deposit" ? "押金" : "租金 / 费用"} ¥${Number(row.amount).toFixed(2)}，请核实实际到账后确认。`,
+        href: `/rental/orders/${row.orderId}`,
+        orderId: row.orderId,
+        orderNo: row.order.orderNo,
+        amount: Number(row.amount),
+        createdAt: row.registeredAt.toISOString()
+      }));
+      todos.items.push(...offlineItems);
+      todos.items.sort((a, b) => (a.priority === b.priority ? Date.parse(a.createdAt) - Date.parse(b.createdAt) : a.priority === "high" ? -1 : 1));
+      todos.counts.offline_payment_pending = offlineItems.length;
+    }
+    return todos;
   }
   /**
    * ORDER-LIST-01：订单列表。筛选与分页在数据库里执行（见事实仓储 `queryOrders`）。
@@ -1285,11 +1366,75 @@ export class RentalCoreController {
       run: (tx) => this.allocation.manage(tenantId, id, body, tx, req.user.displayName),
       replay: async () => this.service.getOrder(tenantId, id) });
   }
+  @Get("orders/:id/internal-notes") async listInternalOrderNotes(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    const tenantId = req.user.tenantId;
+    const workspaceId = getRequestIdentity()?.workspaceId;
+    if (!workspaceId) throw new ForbiddenException("缺少已验证的经营空间");
+    await this.service.getOrder(tenantId, id);
+    const rows = await this.prisma.operationLog.findMany({
+      where: { tenantId, workspaceId, rentalOrderId: id, action: "rental.order.internal_note" },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      select: { id: true, userId: true, createdAt: true, detail: true }
+    });
+    return rows.map((row) => {
+      const detail = row.detail && typeof row.detail === "object" && !Array.isArray(row.detail) ? row.detail as Record<string, unknown> : {};
+      return { id: row.id, content: String(detail.content ?? ""), operatorName: String(detail.operator ?? "员工"), createdAt: row.createdAt.toISOString(), operatorId: row.userId ?? undefined };
+    });
+  }
+  @Post("orders/:id/internal-notes") async createInternalOrderNote(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CreateRentalOrderInternalNoteDto) {
+    const tenantId = req.user.tenantId;
+    const workspaceId = getRequestIdentity()?.workspaceId;
+    const content = body.content.trim();
+    const key = idempotencyKeyOf(req);
+    if (!workspaceId) throw new ForbiddenException("缺少已验证的经营空间");
+    if (!content || content.length > 1000) throw new BadRequestException("内部备注请填写 1 至 1000 个字符");
+    if (!key) throw new BadRequestException("内部备注必须提供 Idempotency-Key");
+    return this.idempotent.execute({
+      tenantId,
+      action: "order.internal_note",
+      key,
+      fallbackKey: `order.internal-note:${id}:${key}`,
+      request: { orderId: id, content },
+      orderId: id,
+      run: async (tx) => {
+        const order = await tx.rentalOrder.findFirst({ where: { id, tenantId, workspaceId }, select: { id: true } });
+        if (!order) throw new ForbiddenException("订单不存在或不在当前经营空间");
+        const row = await tx.operationLog.create({
+          data: {
+            tenantId, workspaceId, userId: req.user.id, rentalOrderId: id,
+            action: "rental.order.internal_note",
+            detail: { content, operator: req.user.displayName } as Prisma.InputJsonValue
+          },
+          select: { id: true, userId: true, createdAt: true, detail: true }
+        });
+        return { id: row.id, content, operatorName: req.user.displayName, createdAt: row.createdAt.toISOString(), operatorId: row.userId ?? undefined };
+      },
+      replay: async (response) => response && typeof response === "object" && typeof (response as { id?: unknown }).id === "string" ? response as { id: string; content: string; operatorName: string; createdAt: string; operatorId?: string } : undefined
+    });
+  }
   @Post("orders/:id/operation-lock") async operationLock(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: RentalOperationLockDto) {
     const allowed: RentalCoreOrderStatus[] = [];
     const operate = hasPermissionCode(req.user, "rental-os:order:operate");
     if (operate || hasPermissionCode(req.user, "rental-os:order:pickup")) allowed.push(RentalCoreOrderStatus.ReadyForPickup);
     if (operate || hasPermissionCode(req.user, "rental-os:order:return")) allowed.push(RentalCoreOrderStatus.Renting);
+    if (body.action === "force-release") {
+      if (!hasPermissionCode(req.user, "rental-os:order:reassign")) throw new ForbiddenException("人工解除交接锁需要资源改配权限");
+      if (!body.reason?.trim()) throw new BadRequestException("人工解除交接锁必须填写原因");
+      allowed.splice(0, allowed.length, RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting);
+      const key = idempotencyKeyOf(req);
+      if (!key) throw new BadRequestException("人工解除交接锁必须提供 Idempotency-Key");
+      return this.idempotent.execute({
+        tenantId: req.user.tenantId,
+        action: "order.operation_lock.force_release",
+        key,
+        fallbackKey: `operation-lock-force-release:${id}:${key}`,
+        request: { orderId: id, action: body.action, reason: body.reason.trim() },
+        orderId: id,
+        run: (tx) => this.allocation.operationLock(req.user.tenantId, id, body.action, req.user.id, req.user.displayName, body.token, allowed, body.reason, tx),
+        replay: async (response) => response && typeof response === "object" && (response as { released?: unknown }).released === true ? response as { released: true; releasedOwnerName: string; expiresAt: string } : undefined
+      });
+    }
     return this.allocation.operationLock(req.user.tenantId, id, body.action, req.user.id, req.user.displayName, body.token, allowed);
   }
   @Post("orders/:id/substitute-bundle-component") async substituteBundleComponent(
@@ -1325,6 +1470,7 @@ export class RentalCoreController {
     @Body() body: PartialReturnRentalOrderDto
   ) {
     const tenantId = req.user.tenantId;
+    const current = await this.service.getOrder(tenantId, id);
     const idempotencyKey = idempotencyKeyOf(req);
     // 部分归还是**天然可重复**的动作：数量库存租 3 件，先还 1 件、再还 1 件是两次
     // 真实归还，而两次请求体完全相同。此前兜底键是「订单 + 分配项内容哈希」，
@@ -1339,12 +1485,15 @@ export class RentalCoreController {
         "部分归还必须提供 Idempotency-Key 请求头或 batchNo，用于区分多次真实归还与同一次的网络重试"
       );
     }
+    if (idempotencyKey && body.batchNo && idempotencyKey !== body.batchNo) throw new BadRequestException("部分归还批次号必须与 Idempotency-Key 一致");
+    const evidenceBatchId = body.batchNo ?? idempotencyKey ?? `order.partial-return:${id}`;
+    await this.assertStaffHandoverEvidence(req, current, "return", evidenceBatchId, body.handoverSignatureFileAssetId);
     const order = await this.idempotent.execute({
       tenantId,
       action: "order.partial-return",
       key: idempotencyKey,
       fallbackKey: `order.partial-return:${id}:${body.batchNo}`,
-      request: { orderId: id, items: body.items, batchNo: body.batchNo },
+      request: { orderId: id, items: body.items, batchNo: body.batchNo, handoverSignatureFileAssetId: body.handoverSignatureFileAssetId },
       orderId: id,
       run: async (tx) => {
         const returnedAt = new Date().toISOString();
@@ -1838,6 +1987,13 @@ export class RentalCoreController {
         "分批归还检查必须提供 Idempotency-Key 请求头或 returnBatchNo，用于区分多次真实归还与同一次的网络重试"
       );
     }
+    if (partialReturn && inspectionKey && body.returnBatchNo && inspectionKey !== body.returnBatchNo) throw new BadRequestException("检查归还批次号必须与 Idempotency-Key 一致");
+    const evidenceBatchId = inspectionKey ?? body.returnBatchNo ?? `order.inspection:${id}:${stage ?? "unknown"}:${body.returnBatchNo ?? "whole"}`;
+    const attachments = await this.assertStaffHandoverEvidence(
+      req, current, stage === "return" ? "return" : "pickup", evidenceBatchId,
+      body.handoverSignatureFileAssetId, body.attachments ?? [], template, body.results
+    );
+    const submissionBody = { ...body, attachments, ...(getRequestIdentity()?.staffApi ? { operator: req.user.displayName } : {}) };
     // 逾期费与提前归还退款都在事务内锁单之后重算（见 returnCharges）。这里只留下
     // 与订单当前事实无关的判定。
     if (stage === "pickup") await this.business.assertPickupOpenAt(tenantId, context, current.fulfillmentLocationId, returnedAt, current.fulfillmentMode);
@@ -1858,14 +2014,15 @@ export class RentalCoreController {
       // returnedAt 同样不能进指纹，否则重试必然被判为"同键不同内容"而 409。
       request: {
         orderId: id,
-        templateId: body.templateId,
-        results: body.results,
-        returnItems: body.returnItems ?? [],
-        returnBatchNo: body.returnBatchNo,
-        exceptions: body.exceptions ?? [],
+        templateId: submissionBody.templateId,
+        results: submissionBody.results,
+        returnItems: submissionBody.returnItems ?? [],
+        returnBatchNo: submissionBody.returnBatchNo,
+        exceptions: submissionBody.exceptions ?? [],
         // 检查照片/证据引用属于请求事实的一部分；必须进入幂等指纹，
         // 否则同一批次先空提交、后补证据会被错误当作同一次请求回放。
-        attachments: body.attachments ?? []
+        attachments: submissionBody.attachments ?? [],
+        handoverSignatureFileAssetId: submissionBody.handoverSignatureFileAssetId
       },
       orderId: id,
       run: async (tx) => {
@@ -1893,7 +2050,7 @@ export class RentalCoreController {
             )
           : undefined;
         overdueAmount = charges?.overdue.amount ?? 0;
-        const created = await this.service.createInspection(tenantId, id, body, req.user.displayName, charges ?? {}, tx);
+        const created = await this.service.createInspection(tenantId, id, submissionBody, req.user.displayName, charges ?? {}, tx);
         if (stage === "return" && !partialReturn) await this.serviceCapacities.settleReturnForOrder(tenantId, created.order, returnedAt, tx);
         return created;
       },
@@ -1943,11 +2100,18 @@ export class RentalCoreController {
     return this.committed(tenantId, result);
   }
 
-  @Post("orders/:id/handover/:stage") async handover(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("stage") stage: string) {
+  @Post("orders/:id/handover/:stage") async handover(
+    @Req() req: AuthenticatedRequest,
+    @Param("id") id: string,
+    @Param("stage") stage: string,
+    @Body() body: RentalHandoverDto = {}
+  ) {
     if (stage !== "pickup" && stage !== "return") throw new BadRequestException("交接阶段无效");
     const tenantId = req.user.tenantId;
     const context = this.context(tenantId);
     const current = await this.service.getOrder(tenantId, id);
+    const handoverBatchId = idempotencyKeyOf(req) ?? `order.handover:${id}:${stage}`;
+    await this.assertStaffHandoverEvidence(req, current, stage, handoverBatchId, body.handoverSignatureFileAssetId);
     const returnedAt = new Date().toISOString();
     if (stage === "pickup") {
       // 需求 4.6.4：领取前必须重新校验……营业状态（4.5.4：报价与订单分别校验端点）。
@@ -1964,7 +2128,7 @@ export class RentalCoreController {
       action: "order.handover",
       key: idempotencyKeyOf(req),
       fallbackKey: `order.handover:${id}:${stage}`,
-      request: { orderId: id, stage },
+      request: { orderId: id, stage, handoverSignatureFileAssetId: body.handoverSignatureFileAssetId },
       orderId: id,
       run: async (tx) => {
         if (stage === "pickup") {

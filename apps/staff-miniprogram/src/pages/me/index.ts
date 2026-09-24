@@ -1,6 +1,5 @@
 import { logout } from "../../api/auth";
 import { cachedContext, contextEvents, currentLocationLabel, loadContext, type WorkspaceContext } from "../../core/context";
-import { initialOf } from "../../core/presenters";
 import { can, canTenant, currentSession, currentWorkspace, isSignedIn, sessionEvents } from "../../core/session";
 import { themeBehavior } from "../../core/theme-behavior";
 import { ROUTES, buildUrl, confirmDialog, navigate, relaunch, toast } from "../../core/ui";
@@ -18,7 +17,6 @@ interface QuickCard {
 
 interface MeData {
   displayName: string;
-  initial: string;
   account: string;
   roleLabel: string;
   tenantName: string;
@@ -30,7 +28,7 @@ interface MeData {
 
 Page({
   behaviors: [themeBehavior],
-  data: { displayName: "", initial: "·", account: "", roleLabel: "", tenantName: "", workspaceName: "", locationLabel: "", cards: [] } as MeData,
+  data: { displayName: "", account: "", roleLabel: "", tenantName: "", workspaceName: "", locationLabel: "", cards: [] } as MeData,
   offContext: undefined as (() => void) | undefined,
   offSession: undefined as (() => void) | undefined,
 
@@ -64,7 +62,6 @@ Page({
     if (can("rental-core:maintenance:view")) cards.push({ key: "workOrders", label: "工单处理", hint: "可创建/处理", icon: "tool", color: "purple" });
     this.setData({
       displayName: session.user.displayName,
-      initial: initialOf(session.user.displayName),
       account: session.user.account,
       roleLabel: session.user.isTenantAdmin ? "管理员" : session.user.roleNames[0] ?? "员工",
       tenantName: session.tenant.tenantName,

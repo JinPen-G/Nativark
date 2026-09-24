@@ -121,6 +121,7 @@ export class ClientChannelProfileService {
       revision: row?.revision ?? 0,
       brandName: row?.brandName ?? undefined,
       brandLogoUrl: row?.brandLogoUrl ?? undefined,
+      faviconUrl: row?.faviconUrl ?? undefined,
       customerServicePhone: row?.customerServicePhone ?? undefined,
       customerServiceHours: row?.customerServiceHours ?? undefined,
       userAgreement: this.agreement(row?.userAgreementName ?? null, row?.userAgreementVersion ?? null, row?.userAgreementUrl ?? null, row?.userAgreementBody ?? null, DEFAULT_AGREEMENT_NAME.userAgreement),
@@ -159,6 +160,23 @@ export class ClientChannelProfileService {
       select: { themeColor: true }
     });
     return row?.themeColor ?? undefined;
+  }
+
+  /**
+   * 登录/会话上下文使用的最小品牌字段。
+   * 只返回展示资源，不返回协议、客服配置或任何第三方凭证。
+   */
+  async getBranding(tenantId: string): Promise<Pick<ClientChannelProfileSummary, "brandName" | "brandLogoUrl" | "faviconUrl" | "themeColor">> {
+    const row = await this.prisma.clientChannelProfile.findUnique({
+      where: { tenantId },
+      select: { brandName: true, brandLogoUrl: true, faviconUrl: true, themeColor: true }
+    });
+    return {
+      brandName: row?.brandName?.trim() || undefined,
+      brandLogoUrl: row?.brandLogoUrl ?? undefined,
+      faviconUrl: row?.faviconUrl ?? undefined,
+      themeColor: row?.themeColor ?? undefined
+    };
   }
 
   private async validatedUrl(value: string | null, label: string): Promise<string | null> {
@@ -200,6 +218,7 @@ export class ClientChannelProfileService {
     if (defaultWorkspaceId && !requestedWorkspaceIds.includes(defaultWorkspaceId)) throw new BadRequestException("默认服务必须在已发布服务之内");
 
     const brandLogoUrl = await this.validatedUrl(text(input.brandLogoUrl, 512, "品牌 Logo 地址"), "品牌 Logo 地址");
+    const faviconUrl = await this.validatedUrl(text(input.faviconUrl, 512, "浏览器图标地址"), "浏览器图标地址");
     const userAgreement = this.agreementData(input.userAgreement, DEFAULT_AGREEMENT_NAME.userAgreement);
     const privacyPolicy = this.agreementData(input.privacyPolicy, DEFAULT_AGREEMENT_NAME.privacyPolicy);
     userAgreement.url = await this.validatedUrl(userAgreement.url, "用户协议外链");
@@ -209,6 +228,7 @@ export class ClientChannelProfileService {
     const data = {
       brandName: text(input.brandName, 191, "商户展示名"),
       brandLogoUrl,
+      faviconUrl,
       customerServicePhone: text(input.customerServicePhone, 32, "客服电话"),
       customerServiceHours: text(input.customerServiceHours, 64, "客服时段"),
       userAgreementName: userAgreement.name,

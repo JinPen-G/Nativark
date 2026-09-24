@@ -685,6 +685,7 @@ model ClientChannelProfile {
   revision             Int                      @default(1)
   brandName            String?                  @db.VarChar(191)
   brandLogoUrl         String?                  @db.VarChar(512)
+  faviconUrl           String?                  @db.VarChar(512)
   customerServicePhone String?                  @db.VarChar(32)
   customerServiceHours String?                  @db.VarChar(64)
   /// 协议：名称/版本/外链/正文。正文在客户端内直接渲染（简单富文本），不内置占位协议。

@@ -4,5 +4,14 @@
 .me-card .quick__icon { width: 72rpx; height: 72rpx; }
 .menu { box-shadow: none; border: 1rpx solid var(--border); padding-top: 0; padding-bottom: 0; }
 .avatar-lg { background: #E8F0FF; }
+.avatar-lg { display: flex; align-items: center; justify-content: center; }
 .me-card__title { margin-top: 14rpx; font-size: 28rpx; font-weight: 600; color: var(--text); }
 .me-card__hint { margin-top: 4rpx; font-size: 22rpx; color: var(--secondary); }
+.screen > .section { padding-left: 24rpx; padding-right: 24rpx; }
+.screen > .section--tight { padding-bottom: 12rpx; }
+.avatar-lg { width: 104rpx; height: 104rpx; font-size: 38rpx; }
+.me-card { min-height: 148rpx; padding: 16rpx 6rpx; }
+.me-card .quick__icon { width: 64rpx; height: 64rpx; }
+.me-card__title { font-size: 25rpx; margin-top: 10rpx; }
+.me-card__hint { font-size: 20rpx; }
+.menu .cell__title { font-size: 27rpx; }

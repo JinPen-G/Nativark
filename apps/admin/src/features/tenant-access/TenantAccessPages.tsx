@@ -55,6 +55,7 @@ interface WorkspaceAccessRow {
   enabled: boolean;
   roleId?: string;
   dataScope: SystemDataScope;
+  locationScope: { mode: "all" | "selected"; locationIds: string[] };
   existed: boolean;
 }
 
@@ -78,7 +79,15 @@ function useTenantAccessData() {
       return rows;
     }
   });
-  return { organizations, users, roles, workspaces, members };
+  const fulfillmentLocations = useQuery({
+    queryKey: ["tenant-access", "fulfillment-locations", (workspaces.data ?? []).map((item) => item.id).join(",")],
+    enabled: Boolean(workspaces.data),
+    queryFn: async () => Promise.all((workspaces.data ?? []).map(async (workspace) => ({
+      workspaceId: workspace.id,
+      locations: await api.workspaceFulfillmentLocations(workspace.id)
+    })))
+  });
+  return { organizations, users, roles, workspaces, members, fulfillmentLocations };
 }
 
 function dataScopeTag(scope: SystemDataScope) {
@@ -89,7 +98,7 @@ export function TenantOperationsAccountPage() {
   const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
   const currentUserId = useAuthStore((state) => state.user?.id);
-  const { organizations, users, roles, workspaces, members } = useTenantAccessData();
+  const { organizations, users, roles, workspaces, members, fulfillmentLocations } = useTenantAccessData();
   const [form] = Form.useForm<TenantOperationsAccountForm>();
   const [editing, setEditing] = useState<SystemUserRow>();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -102,6 +111,7 @@ export function TenantOperationsAccountPage() {
   const roleMap = useMemo(() => new Map((roles.data ?? []).map((role) => [role.id, role])), [roles.data]);
   const workspaceMap = useMemo(() => new Map((workspaces.data ?? []).map((workspace) => [workspace.id, workspace])), [workspaces.data]);
   const memberRows = useMemo(() => (members.data ?? []).flatMap((group) => group.members), [members.data]);
+  const locationsByWorkspace = useMemo(() => new Map((fulfillmentLocations.data ?? []).map((group) => [group.workspaceId, group.locations])), [fulfillmentLocations.data]);
 
   const refresh = async () => {
     await Promise.all([
@@ -121,6 +131,7 @@ export function TenantOperationsAccountPage() {
             workspaceId: row.workspaceId,
             roleId: row.roleId,
             dataScope: row.dataScope,
+            locationScope: row.locationScope,
             isActive: row.enabled
           }))
       };
@@ -162,6 +173,7 @@ export function TenantOperationsAccountPage() {
         enabled: member?.isActive ?? false,
         roleId: member?.roleId ?? user?.roleIds[0] ?? defaultRoleId,
         dataScope: member?.dataScope ?? roleMap.get(member?.roleId ?? user?.roleIds[0] ?? "")?.dataScope ?? "store",
+        locationScope: member?.locationScope ?? { mode: "all", locationIds: [] },
         existed: Boolean(member)
       } satisfies WorkspaceAccessRow;
     });
@@ -184,8 +196,8 @@ export function TenantOperationsAccountPage() {
     setAccessRows((rows) => rows.map((row) => row.workspaceId === workspaceId ? { ...row, ...patch } : row));
   }
 
-  const loading = organizations.isLoading || users.isLoading || roles.isLoading || workspaces.isLoading || members.isLoading;
-  const error = organizations.error ?? users.error ?? roles.error ?? workspaces.error ?? members.error;
+  const loading = organizations.isLoading || users.isLoading || roles.isLoading || workspaces.isLoading || members.isLoading || fulfillmentLocations.isLoading;
+  const error = organizations.error ?? users.error ?? roles.error ?? workspaces.error ?? members.error ?? fulfillmentLocations.error;
 
   return <>
     <PageHeader title="运营账号管理" description="账号属于租户；可访问空间、空间角色和数据范围按每个经营空间分别授权。" note={{ title: "权限分为两层", description: "角色决定可以执行哪些操作；数据范围决定在获准操作内可以看哪些数据。经营空间访问权单独授予，不能只靠隐藏菜单代替。" }} />
@@ -224,11 +236,22 @@ export function TenantOperationsAccountPage() {
         </Row>
         <Typography.Title level={5} style={{ marginTop: 12 }}>经营空间授权</Typography.Title>
         <Typography.Paragraph type="secondary">启用空间后必须指定该空间的角色；数据范围可覆盖角色默认值。关闭空间会使该账号无法进入该空间。</Typography.Paragraph>
-        <Table<WorkspaceAccessRow> rowKey="workspaceId" pagination={false} dataSource={accessRows} columns={[
+        <Table<WorkspaceAccessRow> rowKey="workspaceId" pagination={false} dataSource={accessRows} scroll={{ x: 1420 }} columns={[
           { title: "允许访问", width: 95, render: (_, row) => <Switch checked={row.enabled} disabled={editing?.id === currentUserId || workspaceMap.get(row.workspaceId)?.status !== "active"} onChange={(enabled) => updateAccess(row.workspaceId, { enabled })} /> },
           { title: "经营空间", width: 200, render: (_, row) => { const workspace = workspaceMap.get(row.workspaceId); return <><b>{workspace?.name}</b><br /><Typography.Text type="secondary">{workspace?.code}</Typography.Text></>; } },
           { title: "空间角色（操作权限）", render: (_, row) => <Select style={{ width: "100%" }} disabled={!row.enabled || editing?.id === currentUserId || workspaceMap.get(row.workspaceId)?.status !== "active"} value={row.roleId} options={activeRoles.map((role) => ({ value: role.id, label: `${role.name} · ${SCOPE_LABELS[role.scope] ?? role.scope}` }))} onChange={(roleId) => updateAccess(row.workspaceId, { roleId, dataScope: roleMap.get(roleId)?.dataScope ?? row.dataScope })} /> },
-          { title: "数据范围", width: 210, render: (_, row) => <Select style={{ width: "100%" }} disabled={!row.enabled || editing?.id === currentUserId || workspaceMap.get(row.workspaceId)?.status !== "active"} value={row.dataScope} options={DATA_SCOPE_OPTIONS.map(({ value, label }) => ({ value, label }))} onChange={(dataScope) => updateAccess(row.workspaceId, { dataScope })} /> }
+          { title: "数据范围", width: 210, render: (_, row) => <Select style={{ width: "100%" }} disabled={!row.enabled || editing?.id === currentUserId || workspaceMap.get(row.workspaceId)?.status !== "active"} value={row.dataScope} options={DATA_SCOPE_OPTIONS.map(({ value, label }) => ({ value, label }))} onChange={(dataScope) => updateAccess(row.workspaceId, { dataScope })} /> },
+          { title: "员工履约地点范围", width: 330, render: (_, row) => {
+            const disabled = !row.enabled || editing?.id === currentUserId || workspaceMap.get(row.workspaceId)?.status !== "active";
+            const locations = (locationsByWorkspace.get(row.workspaceId) ?? []).filter((location) => location.status === "enabled");
+            return <Space direction="vertical" size={6} style={{ width: "100%" }}>
+              <Select style={{ width: "100%" }} disabled={disabled} value={row.locationScope.mode} options={[
+                { value: "all", label: "全部履约地点" },
+                { value: "selected", label: "仅指定地点" }
+              ]} onChange={(mode: "all" | "selected") => updateAccess(row.workspaceId, { locationScope: { mode, locationIds: mode === "all" ? [] : row.locationScope.locationIds } })} />
+              {row.locationScope.mode === "selected" && <Select mode="multiple" style={{ width: "100%" }} disabled={disabled} placeholder="选择至少一个地点" value={row.locationScope.locationIds} options={locations.map((location) => ({ value: location.id, label: `${location.name} · ${location.code}` }))} onChange={(locationIds) => updateAccess(row.workspaceId, { locationScope: { mode: "selected", locationIds } })} />}
+            </Space>;
+          } }
         ]} />
       </Form>
     </Drawer>

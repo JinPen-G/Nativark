@@ -6,8 +6,11 @@
     <view class="seg__item {{tab === item.key ? 'seg__item--active' : ''}}" wx:for="{{tabs}}" wx:key="key" data-key="{{item.key}}" bindtap="onTab">{{item.label}}</view>
   </view>
 
-  <view class="section section--tight">
-    <view wx:if="{{canCreate}}" class="row row--between mb-12"><text class="muted small">当前范围：{{locationLabel}}</text><view class="link" bindtap="onCreate">＋ 新建订单</view></view>
+  <view class="section section--tight orders-toolbar-section">
+    <view wx:if="{{canCreate}}" class="orders-toolbar">
+      <text class="orders-toolbar__scope">当前范围：{{locationLabel}}</text>
+      <view class="link orders-toolbar__create" bindtap="onCreate">＋ 新建订单</view>
+    </view>
     <view class="orders-search-row">
       <view class="search search--surface orders-search">
         <ui-icon name="search" size="32" color="muted"></ui-icon>

@@ -14,6 +14,8 @@ export const ROUTES = {
   me: "/pages/me/index",
   order: "/pages/order/index",
   orderNew: "/pages/order-new/index",
+  allocate: "/pages/allocate/index",
+  reviews: "/pages/reviews/index",
   pickup: "/pages/pickup/index",
   return: "/pages/return/index",
   workOrders: "/pages/work-orders/index",

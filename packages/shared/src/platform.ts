@@ -153,6 +153,12 @@ export interface TenantContext {
   tenantCode: string;
   tenantName: string;
   tenantStatus: TenantStatus;
+  /** 租户客户端渠道配置的品牌展示名；未设置时回退 tenantName。 */
+  brandName?: string;
+  /** 租户品牌横版 Logo 地址；管理后台仅作展示，不承载凭证。 */
+  brandLogoUrl?: string;
+  /** 租户浏览器图标地址；未设置时回退平台图标。 */
+  faviconUrl?: string;
   /** 租户通用客户端配置的主题色；未设置时管理端与客户端各自回退默认色。 */
   themeColor?: string;
   categoryCode?: RentalCategoryCode;
@@ -782,6 +788,7 @@ export interface ClientChannelProfileSummary {
   revision: number;
   brandName?: string;
   brandLogoUrl?: string;
+  faviconUrl?: string;
   customerServicePhone?: string;
   customerServiceHours?: string;
   userAgreement?: ClientChannelAgreementConfig;
@@ -806,6 +813,8 @@ export interface SaveClientChannelProfileRequest {
   expectedRevision?: number;
   brandName?: string;
   brandLogoUrl?: string;
+  /** 浏览器标签页图标；留空回退平台默认图标。 */
+  faviconUrl?: string;
   customerServicePhone?: string;
   customerServiceHours?: string;
   userAgreement?: ClientChannelAgreementConfig;

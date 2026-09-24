@@ -100,7 +100,7 @@ import {
   type RentalCapabilityExceptionSnapshot,
   type UpdateRentalServiceOccurrenceRequest
 } from "@rental-os/shared";
-import { getRequestWorkspaceId, getRequestIdentity, runWithRequestIdentity } from "../../common/request-identity";
+import { getRequestWorkspaceId, getRequestIdentity, getRequestStaffLocationIds, runWithRequestIdentity } from "../../common/request-identity";
 import { ACTIVE_ASSIGNMENTS, allocationComplete } from "./rental-allocation-policy";
 import { RentalStateRepository } from "./rental-state.repository";
 import { DEFAULT_BUSINESS_TIME_ZONE, isValidTimeZone, businessHoursError } from "./rental-business-day";
@@ -795,7 +795,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return state.profile;
   }
 
-  listLocations(tenantId: string) { return this.state(tenantId).locations; }
+  listLocations(tenantId: string) {
+    const locationIds = getRequestStaffLocationIds();
+    const locations = this.state(tenantId).locations;
+    return locationIds === undefined ? locations : locations.filter((row) => locationIds.includes(row.id));
+  }
 
   listOperators(tenantId: string) { return this.state(tenantId).operators; }
 

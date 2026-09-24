@@ -28,7 +28,7 @@ import {
 import { RentalCoreService } from "./rental-core.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { bufferedRentalPeriod, peakReservedQuantity } from "./rental-occupancy";
-import { runWithRequestIdentity } from "../../common/request-identity";
+import { getRequestWorkspaceId, runWithRequestIdentity } from "../../common/request-identity";
 import {
   ACTIVE_ASSIGNMENTS,
   allocationComplete,
@@ -641,7 +641,7 @@ export class RentalAllocationService
   async operationLock(
     tenantId: string,
     orderId: string,
-    action: "acquire" | "release",
+    action: "acquire" | "release" | "force-release",
     userId: string,
     name: string,
     token: string | undefined,
@@ -649,9 +649,10 @@ export class RentalAllocationService
       RentalCoreOrderStatus.ReadyForPickup,
       RentalCoreOrderStatus.Renting,
     ],
+    reason?: string,
+    existingTx?: RentalFactTx,
   ) {
-    return this.prisma.$transaction(
-      async (tx) => {
+    const run = async (tx: RentalFactTx) => {
         await this.facts.lockOrder(tenantId, orderId, tx);
         const order = await this.facts.findOrder(tenantId, orderId, tx);
         if (!order) throw new NotFoundException("订单不存在");
@@ -666,7 +667,15 @@ export class RentalAllocationService
           throw new ConflictException("只有待交付或在租订单可以办理交接");
         const state = order.assignment ?? { revision: 0, history: [] };
         const previous = state.operationLock;
+        const normalizedReason = reason?.trim();
+        if (action === "force-release") {
+          if (!normalizedReason) throw new BadRequestException("人工解除交接锁必须填写原因");
+          if (!previous) throw new ConflictException("当前订单没有可解除的交接锁");
+          if (Date.parse(previous.expiresAt) <= Date.now()) throw new ConflictException("交接锁已过期，请刷新订单后继续办理");
+          if (previous.ownerId === userId) throw new ConflictException("本人持有的交接锁请正常结束办理");
+        }
         if (
+          action !== "force-release" &&
           previous &&
           Date.parse(previous.expiresAt) > Date.now() &&
           (previous.ownerId !== userId || previous.token !== token)
@@ -698,9 +707,11 @@ export class RentalAllocationService
               id: randomUUID(),
               at,
               actor: name,
-              action: `operation_${action}`,
+              action: action === "force-release" ? "operation_force_release" : `operation_${action}`,
               reason:
-                previous && Date.parse(previous.expiresAt) <= Date.now()
+                action === "force-release"
+                  ? `${normalizedReason}（解除${previous?.ownerName ?? "其他员工"}的交接锁）`
+                  : previous && Date.parse(previous.expiresAt) <= Date.now()
                   ? "超时后重新接手"
                   : undefined,
               before: [],
@@ -709,13 +720,35 @@ export class RentalAllocationService
           ],
         };
         await this.facts.saveOrderAggregate(order, [], tx);
+        if (action === "force-release" && previous) {
+          const workspaceId = getRequestWorkspaceId();
+          if (!workspaceId) throw new ConflictException("缺少经营空间上下文，无法记录人工解除审计");
+          await tx.operationLog.create({
+            data: {
+              tenantId,
+              workspaceId,
+              userId,
+              rentalOrderId: order.id,
+              action: "rental.order.operation_lock.force_release",
+              detail: {
+                operator: name,
+                reason: normalizedReason,
+                releasedOwnerId: previous.ownerId,
+                releasedOwnerName: previous.ownerName,
+                expiresAt: previous.expiresAt,
+                revision: order.assignment.revision,
+              },
+            },
+          });
+          return { released: true, releasedOwnerName: previous.ownerName, expiresAt: previous.expiresAt };
+        }
         return {
           token: order.assignment.operationLock?.token,
           expiresAt: order.assignment.operationLock?.expiresAt,
         };
-      },
-      { isolationLevel: "ReadCommitted" },
-    );
+    };
+    if (existingTx) return run(existingTx);
+    return this.prisma.$transaction(run, { isolationLevel: "ReadCommitted" });
   }
 
   /** 无论是否开启自动分配，都检查已有预分配/锁定；异常不自动解除资源锁。 */

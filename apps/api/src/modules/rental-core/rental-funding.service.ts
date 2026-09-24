@@ -270,6 +270,8 @@ export class RentalFundingService {
       failureCode?: string;
       provider?: RentalFundingEvent["provider"];
       paymentMethod?: RentalOfflinePaymentMethod;
+      /** 仅由员工待确认登记服务在结算权限确认后启用，允许首次实收为部分金额。 */
+      allowPartialInitiate?: boolean;
     },
     operator?: string,
     tx?: Prisma.TransactionClient
@@ -324,9 +326,11 @@ export class RentalFundingService {
       let effectiveAmount: number;
       if (input.action === "initiate") {
         // 首次应收/应冻结额是订单快照事实，客户端不得自行填写金额。
-        effectiveAmount = input.instrument === "rental"
-          ? due
-          : Number(input.instrument === "deposit" ? order.depositAmount + pendingFunding.depositAmount : order.preAuthAmount + pendingFunding.preauthorizationAmount);
+        effectiveAmount = input.allowPartialInitiate
+          ? Number(input.amount)
+          : input.instrument === "rental"
+            ? due
+            : Number(input.instrument === "deposit" ? order.depositAmount + pendingFunding.depositAmount : order.preAuthAmount + pendingFunding.preauthorizationAmount);
         if (effectiveAmount <= 0) {
           throw new ConflictException(
             input.instrument === "rental"
@@ -335,7 +339,7 @@ export class RentalFundingService {
                 ? "该订单没有应收押金"
                 : "该订单没有应冻结的预授权额度"
           );
-        if (input.instrument === "rental" && input.amount !== undefined && Math.abs(Number(input.amount) - effectiveAmount) > 0.005) {
+        if (!input.allowPartialInitiate && input.instrument === "rental" && input.amount !== undefined && Math.abs(Number(input.amount) - effectiveAmount) > 0.005) {
           throw new ConflictException("支付回调金额与当前订单待收金额不一致，请重新发起支付");
         }
         }

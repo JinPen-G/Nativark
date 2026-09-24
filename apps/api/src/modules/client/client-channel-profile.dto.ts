@@ -39,6 +39,9 @@ export class SaveClientChannelProfileDto implements SaveClientChannelProfileRequ
   @IsOptional() @IsString() @MaxLength(512)
   brandLogoUrl?: string;
 
+  @IsOptional() @IsString() @MaxLength(512)
+  faviconUrl?: string;
+
   @IsOptional() @IsString() @MaxLength(32)
   customerServicePhone?: string;
 

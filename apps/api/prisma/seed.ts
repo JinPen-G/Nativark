@@ -161,6 +161,7 @@ const permissions = [
   ["rental-os:order:operate", "订单操作", "租赁业务", PermissionKind.ACTION, "新建租赁订单、领取检查和归还检查"],
   ["rental-os:order:reassign", "资源解锁与改配", "租赁业务", PermissionKind.ACTION, "解锁、释放及更换订单锁定资源，必须填写原因"],
   ["rental-os:order:settle", "订单结算", "租赁业务", PermissionKind.ACTION, "确认费用、补缴、退款或月结入账"],
+  ["rental-os:order:offline-payment", "线下收款登记", "租赁业务", PermissionKind.ACTION, "登记待确认的线下收款；不含确认到账、退款或资金结算"],
   ["rental-os:member:account-manage", "会员账号与密码管理", "会员管理", PermissionKind.ACTION, "开通账号、设置临时密码和管理账号状态"],
   ["rental-os:member:review", "会员注册审核", "会员管理", PermissionKind.ACTION, "处理个人会员注册审核，不含证件审核"],
   ["rental-os:member:qualification-review", "会员证件审核", "会员管理", PermissionKind.ACTION, "处理身份证件和品类资质审核"],

@@ -2,6 +2,7 @@
  * 以及微信小程序渠道凭证（AppID/AppSecret 与连通性测试）。分别对应 `/platform/client-channel` 与 `/platform/mini-program-channel`。 */
 import type {
   ApiResult,
+  ClientChannelBootstrapResponse,
   ClientChannelProfileSummary,
   MiniProgramChannelSummary,
   MiniProgramChannelTestResult,
@@ -11,6 +12,10 @@ import type {
 import { http } from "./http";
 
 export const clientChannelApi = {
+  async getPublicBootstrap(tenantCode: string) {
+    const response = await http.get<ApiResult<ClientChannelBootstrapResponse>>("/client/v1/public/bootstrap", { params: { tenantCode, client: "web" } });
+    return response.data.data;
+  },
   async getProfile() {
     const response = await http.get<ApiResult<ClientChannelProfileSummary>>("/platform/client-channel");
     return response.data.data;

@@ -6,8 +6,8 @@ import { accessToken, clearSession, contextVersion, isSignedIn, refreshToken, sa
 /**
  * 员工端 API 的唯一请求出口。
  *
- * 第一阶段直接调用现有运营 API（/api/auth/*、/api/rental/v1/*、/api/platform/*），与 Web 后台同一套令牌与权限判定；
- * 员工专用门面 /api/staff/v1 就绪后只需改 API_PREFIX 与 api/ 层的路径常量，页面不动。
+ * 所有请求走员工专用版本门面；员工会话受众与 Web 运营会话隔离，服务端再映射到
+ * 有白名单、权限、地点范围与脱敏处理的既有 Rental Core 业务处理器。
  *
  * - 统一解包 `{ data, requestId }` 信封；错误统一成 ApiError（业务码 + 用户文案 + requestId）。
  * - 401：同一时刻只做一次刷新（单飞），刷新成功后重放原请求一次；刷新被拒绝就清空身份。
@@ -84,7 +84,7 @@ interface RawResponse {
   header: Record<string, unknown>;
 }
 
-const API_PREFIX = "/api";
+const API_PREFIX = "/api/staff/v1";
 const DEFAULT_TIMEOUT_MS = 15000;
 
 export function apiUrl(path: string, query?: RequestOptions["query"]): string {

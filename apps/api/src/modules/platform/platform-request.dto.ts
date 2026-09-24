@@ -166,6 +166,7 @@ export class SaveWorkspaceAccessDto implements SaveWorkspaceAccessRequest {
   @IsString() @IsNotEmpty() workspaceId!: string;
   @IsOptional() @IsString() @IsNotEmpty() roleId?: string;
   @IsOptional() @IsIn(DATA_SCOPES) dataScope?: SaveWorkspaceAccessRequest["dataScope"];
+  @IsOptional() @IsObject() locationScope?: SaveWorkspaceAccessRequest["locationScope"];
   @IsBoolean() isActive!: boolean;
 }
 

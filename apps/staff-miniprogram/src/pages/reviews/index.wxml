@@ -1,0 +1,66 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
+  <nav-bar title="审核待办"></nav-bar>
+
+  <view class="seg">
+    <view class="seg__item {{tab === item.key ? 'seg__item--active' : ''}}" wx:for="{{tabs}}" wx:key="key" data-key="{{item.key}}" bindtap="onTab">{{item.label}}</view>
+  </view>
+
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+
+  <view wx:else class="section section--tight">
+    <view class="card">
+      <view class="cell" wx:for="{{rows}}" wx:key="id" hover-class="btn-hover" data-id="{{item.id}}" bindtap="onOpen">
+        <view class="avatar reviews-avatar">{{item.initial}}</view>
+        <view class="cell__body ml-16">
+          <view class="cell__title row row--wrap">
+            <text class="strong">{{item.name}}</text>
+            <text class="pill">{{item.typeLabel}}</text>
+            <text wx:if="{{item.isQualification && item.qualificationType}}" class="muted small ml-8">{{item.qualificationType}}</text>
+          </view>
+          <view class="cell__desc">{{item.timeText}}</view>
+        </view>
+        <status-tag label="{{item.statusLabel}}" tone="{{item.statusTone}}" small="{{true}}"></status-tag>
+        <ui-icon name="chevron-right" size="28" color="muted" class="ml-8"></ui-icon>
+      </view>
+    </view>
+  </view>
+
+  <sheet visible="{{sheetVisible}}" title="{{detail.typeTitle}}" footer="{{detail.canDecide}}" bind:close="onCloseSheet">
+    <block wx:if="{{detail}}">
+      <view class="reviews-head">
+        <view class="avatar">{{detail.initial}}</view>
+        <view class="grow ml-16">
+          <view class="row row--wrap"><text class="subtitle">{{detail.name}}</text><status-tag class="ml-8" label="{{detail.statusLabel}}" tone="{{detail.statusTone}}" small="{{true}}"></status-tag></view>
+          <view class="muted small mt-4">{{detail.channelLabel}} · 提交于 {{detail.timeText}}</view>
+        </view>
+      </view>
+
+      <view class="card card--flat reviews-info reviews-block">
+        <view class="kv"><text class="kv__label">审核类型</text><text class="kv__value">{{detail.typeName}}</text></view>
+        <view wx:if="{{detail.isQualification}}" class="kv"><text class="kv__label">证件类型</text><text class="kv__value">{{detail.qualificationType || '—'}}</text></view>
+        <view wx:if="{{detail.referenceNoMasked}}" class="kv"><text class="kv__label">证件号（脱敏）</text><text class="kv__value">{{detail.referenceNoMasked}}</text></view>
+        <view wx:if="{{detail.issuedAt}}" class="kv"><text class="kv__label">签发日期</text><text class="kv__value">{{detail.issuedAt}}</text></view>
+        <view wx:if="{{detail.expiresAt}}" class="kv"><text class="kv__label">到期日期</text><text class="kv__value">{{detail.expiresAt}}</text></view>
+      </view>
+
+      <view wx:if="{{detail.hasEvidence}}" class="reviews-block">
+        <view class="muted small mb-8">资质附件</view>
+        <image wx:if="{{detail.attachmentUrl}}" class="reviews-evidence" src="{{detail.attachmentUrl}}" mode="widthFix" data-url="{{detail.attachmentUrl}}" bindtap="onPreview"></image>
+        <view wx:elif="{{attachmentLoading}}" class="notice notice--neutral">附件加载中…</view>
+        <view wx:else class="notice notice--neutral">{{detail.attachmentNote}}</view>
+      </view>
+
+      <view wx:if="{{detail.reason}}" class="notice notice--warning reviews-block">审核意见：{{detail.reason}}</view>
+      <view wx:if="{{detail.reviewedAt}}" class="muted small reviews-block">{{detail.reviewedBy}}{{detail.reviewedBy ? ' · ' : ''}}{{detail.reviewedAt}}</view>
+
+      <view wx:if="{{detail.viewOnly}}" class="notice notice--neutral reviews-block">你没有此类审核的租户级决策权限，仅可查看。</view>
+    </block>
+
+    <view slot="footer" wx:if="{{detail.canDecide}}" class="reviews-actions">
+      <button class="btn btn--danger" hover-class="btn-hover" bindtap="onReject">驳回</button>
+      <button class="btn btn--secondary" hover-class="btn-hover" bindtap="onSupplement">要求补件</button>
+      <button class="btn btn--primary" hover-class="btn-hover" bindtap="onApprove">通过</button>
+    </view>
+  </sheet>
+</view>

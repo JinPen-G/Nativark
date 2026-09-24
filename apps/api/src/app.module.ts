@@ -6,8 +6,10 @@ import { OperationAuditInterceptor } from "./common/operation-audit.interceptor"
 import { OperationLogService } from "./common/operation-log.service";
 import { RequestIdInterceptor } from "./common/request-id.interceptor";
 import { AuthController } from "./modules/auth/auth.controller";
+import { StaffAuthController } from "./modules/auth/staff-auth.controller";
 import { AuthService } from "./modules/auth/auth.service";
 import { FilesController } from "./modules/files/files.controller";
+import { StaffUploadsController } from "./modules/files/staff-uploads.controller";
 import { HealthController } from "./modules/health/health.controller";
 import { IntegrationsController } from "./modules/integrations/integrations.controller";
 import { IntegrationsRepository } from "./modules/integrations/integrations.repository";
@@ -57,6 +59,8 @@ import { RentalBusinessFactRepository } from "./modules/rental-core/rental-busin
 import { RentalIdempotencyRepository } from "./modules/rental-core/rental-idempotency.repository";
 import { RentalIdempotentActionService } from "./modules/rental-core/rental-idempotent-action.service";
 import { RentalFundingService } from "./modules/rental-core/rental-funding.service";
+import { StaffOfflinePaymentController } from "./modules/rental-core/staff-offline-payment.controller";
+import { StaffOfflinePaymentService } from "./modules/rental-core/staff-offline-payment.service";
 import { RentalDocumentService } from "./modules/rental-core/rental-document.service";
 import { RentalOrderConfirmationService } from "./modules/rental-core/rental-order-confirmation.service";
 import { WorkspaceCapabilityController } from "./modules/rental-core/workspace-capability.controller";
@@ -94,6 +98,7 @@ import { WebsiteAssetService } from "./modules/client/website-asset.service";
     HealthController,
     OpenApiController,
     AuthController,
+    StaffAuthController,
     PlatformController,
     MembershipController,
     RentalCoreController,
@@ -103,6 +108,8 @@ import { WebsiteAssetService } from "./modules/client/website-asset.service";
     IntegrationsController,
     TenantIntegrationController,
     FilesController,
+    StaffUploadsController,
+    StaffOfflinePaymentController,
     PaymentWebhookController,
     PaymentOperationsController,
     PaymentReconciliationController,
@@ -141,6 +148,7 @@ import { WebsiteAssetService } from "./modules/client/website-asset.service";
     RentalIdempotencyRepository,
     RentalIdempotentActionService,
     RentalFundingService,
+    StaffOfflinePaymentService,
     RentalDocumentService,
     RentalOrderConfirmationService,
     RentalServiceCapacityService,

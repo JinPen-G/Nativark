@@ -15,6 +15,9 @@ export interface RequestIdentity {
    * 经营接口对此 fail-closed（见 requireRequestWorkspaceId）。
    */
   workspaceId?: string;
+  /** 仅由员工 API 路由中间件 + 已验证 staff 会话写入，禁止通过请求参数设定。 */
+  staffApi?: boolean;
+  staffLocationScope?: { mode: "all" | "selected"; locationIds: string[] };
 }
 
 // 存储类型允许字段缺失：中间件先建立空上下文，守卫认证后才补全，
@@ -66,6 +69,21 @@ export function requireRequestTenantId(): string {
 // 可选读取：调用方需要自行处理"当前会话没有经营空间"的情况。
 export function getRequestWorkspaceId(): string | undefined {
   return requestIdentityStorage.getStore()?.workspaceId;
+}
+
+export function getRequestStaffLocationIds(): string[] | undefined {
+  const identity = requestIdentityStorage.getStore();
+  if (!identity?.staffApi) return undefined;
+  const scope = identity.staffLocationScope;
+  if (!scope || scope.mode === "all") return undefined;
+  return scope.mode === "selected" ? scope.locationIds : [];
+}
+
+/** 服务端地点过滤条件；selected 空集合对应不可能命中的 sentinel，保持 fail-closed。 */
+export function staffLocationWhere(field = "locationId") {
+  const ids = getRequestStaffLocationIds();
+  if (ids === undefined) return {};
+  return { [field]: { in: ids.length ? ids : ["__no_authorized_location__"] } };
 }
 
 /**

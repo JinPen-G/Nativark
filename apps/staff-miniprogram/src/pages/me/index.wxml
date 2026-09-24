@@ -1,10 +1,10 @@
 <page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
 <view class="screen screen--flat {{themeClass}}">
-  <nav-bar minimal="{{true}}"></nav-bar>
+  <nav-bar></nav-bar>
 
   <view class="section">
     <view class="row" hover-class="btn-hover" bindtap="onProfile">
-      <view class="avatar-lg">{{initial}}</view>
+      <view class="avatar-lg"><ui-icon name="user" size="68" color="primary" stroke="1.7"></ui-icon></view>
       <view class="grow ml-24">
         <view class="row"><text class="title">{{displayName}}</text><text class="pill">{{roleLabel}}</text></view>
         <view class="muted mt-4">{{account}} · {{tenantName}}</view>
@@ -50,6 +50,6 @@
   </view>
 
   <view class="section">
-    <button class="btn btn--block" hover-class="btn-hover" bindtap="onLogout">退出登录</button>
+    <button class="btn btn--secondary btn--block" hover-class="btn-hover" bindtap="onLogout">退出登录</button>
   </view>
 </view>

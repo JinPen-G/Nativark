@@ -35,6 +35,8 @@ interface AccessTokenPayload {
   sub: string;
   tid: string;
   sid: string;
+  /** 登录界面受众；旧令牌缺省按 operator 处理，staff 令牌必须显式携带。 */
+  aud?: AuthAudience;
   /**
    * SPACE-02：当前经营空间。可选——平台管理租户没有经营空间。
    *
@@ -46,6 +48,8 @@ interface AccessTokenPayload {
   iat: number;
   exp: number;
 }
+
+export type AuthAudience = "operator" | "staff";
 
 @Injectable()
 export class AuthService {
@@ -64,7 +68,7 @@ export class AuthService {
     @Optional() private readonly clientChannelProfile?: ClientChannelProfileService
   ) {}
 
-  async login(input: LoginRequest): Promise<LoginResponse> {
+  async login(input: LoginRequest, audience: AuthAudience = "operator"): Promise<LoginResponse> {
     const tenantCode = input.tenantCode.trim().toLowerCase();
     const account = input.account.trim();
     if (!tenantCode || !account || !input.password) {
@@ -99,11 +103,15 @@ export class AuthService {
       targetId: loginResult.user.id,
       detail: "登录成功。"
     });
+    if (audience === "staff" && loginResult.user.isSaasAdmin) {
+      throw new UnauthorizedException("该账号不能登录租户员工端");
+    }
     return this.issueSession(
       loginResult.user,
       loginResult.tenant,
       undefined,
-      loginResult.needsTenantOnboarding
+      loginResult.needsTenantOnboarding,
+      audience
     );
   }
 
@@ -125,12 +133,12 @@ export class AuthService {
     };
   }
 
-  async refresh(input: RefreshSessionRequest): Promise<LoginResponse> {
+  async refresh(input: RefreshSessionRequest, audience: AuthAudience = "operator"): Promise<LoginResponse> {
     if (!input.refreshToken) throw new UnauthorizedException("刷新令牌缺失");
     const session = await this.platformService.getAuthSessionByRefreshHash(
       hashOpaqueToken(input.refreshToken)
     );
-    if (!session) throw new UnauthorizedException("会话已失效，请重新登录");
+    if (!session || this.sessionAudience(session) !== audience) throw new UnauthorizedException("会话已失效，请重新登录");
     const user = await this.platformService.findUserById(session.userId);
     if (!user) throw new UnauthorizedException("账号或租户已停用");
     const tenant = await this.platformService.findTenantByIdForAuth(user.tenantId);
@@ -143,7 +151,7 @@ export class AuthService {
     const refreshToken = randomBytes(48).toString("base64url");
     const scoped = (await this.platformService.findWorkspaceScopedUser(user.id, workspaceId)) ?? user;
     // 响应可在写库前计算；令牌中的 sid 只有 rotate 成功创建会话后才会交给客户端。
-    const response = await this.buildLoginResponse(scoped, tenant, sessionId, workspaceId, refreshToken);
+    const response = await this.buildLoginResponse(scoped, tenant, sessionId, workspaceId, refreshToken, false, audience);
     // 旧令牌撤销和新会话创建是同一个原子操作。并发刷新只有一方能成功，且不会
     // 出现“旧会话已撤销、新会话尚未创建”的断档。
     const rotated = await this.platformService.rotateAuthSession(session.id, {
@@ -151,27 +159,29 @@ export class AuthService {
       userId: user.id,
       refreshTokenHash: hashOpaqueToken(refreshToken),
       expiresAt: new Date(Date.now() + this.refreshTtlMs),
-      currentWorkspaceId: workspaceId ?? null
+      currentWorkspaceId: workspaceId ?? null,
+      audience
     });
     if (!rotated) throw new UnauthorizedException("会话已被刷新或已失效，请重新登录");
     return response;
   }
 
-  async logout(input: RefreshSessionRequest) {
+  async logout(input: RefreshSessionRequest, audience: AuthAudience = "operator") {
     if (input.refreshToken) {
       const session = await this.platformService.getAuthSessionByRefreshHash(
         hashOpaqueToken(input.refreshToken)
       );
-      if (session) await this.platformService.revokeAuthSession(session.id);
+      if (session && this.sessionAudience(session) === audience) await this.platformService.revokeAuthSession(session.id);
     }
     return { loggedOut: true };
   }
 
   async changePassword(
     authorization: string | undefined,
-    input: ChangePasswordRequest
+    input: ChangePasswordRequest,
+    audience: AuthAudience = "operator"
   ): Promise<LoginResponse> {
-    const user = await this.resolveAccessToken(authorization);
+    const user = await this.resolveAccessToken(authorization, audience);
     if (!user) throw new UnauthorizedException("请先登录");
     const security = await this.platformService.getSecurityBaseline();
     this.assertPasswordPolicy(input.newPassword, security.passwordPolicy);
@@ -193,11 +203,11 @@ export class AuthService {
       targetId: refreshedUser.id,
       detail: "用户已修改密码，其他会话全部失效。"
     });
-    return this.issueSession(refreshedUser, tenant);
+    return this.issueSession(refreshedUser, tenant, undefined, false, audience);
   }
 
-  async getCurrentUser(authorization?: string): Promise<AuthUser> {
-    const context = await this.resolveAccessContext(authorization, { allowInvalidWorkspace: true });
+  async getCurrentUser(authorization?: string, audience: AuthAudience = "operator"): Promise<AuthUser> {
+    const context = await this.resolveAccessContext(authorization, { allowInvalidWorkspace: true, audience });
     if (!context) throw new UnauthorizedException("会话已失效，请重新登录");
     return this.toAuthUser(context.user, context.tenantUser);
   }
@@ -208,8 +218,8 @@ export class AuthService {
     }
   }
 
-  async getSessionContext(authorization?: string) {
-    const context = await this.resolveAccessContext(authorization, { allowInvalidWorkspace: true });
+  async getSessionContext(authorization?: string, audience: AuthAudience = "operator") {
+    const context = await this.resolveAccessContext(authorization, { allowInvalidWorkspace: true, audience });
     const user = context?.user;
     if (!user) throw new UnauthorizedException("会话已失效，请重新登录");
     const workspaceId = context.workspaceValid ? context.workspaceId : undefined;
@@ -217,10 +227,10 @@ export class AuthService {
     //
     // 原先固定取租户级档案，于是刷新页面后停留在非默认空间的会话会显示
     // 另一个空间的品类与 capability——前端据此渲染菜单，等于换了空间却
-    const themeColor = await this.tenantThemeColor(tenant.tenantId);
     // 沿用旧品类的界面。这与 Guard 的判定口径也不一致。
     const scope = await this.getCategoryContext(user.tenantId, workspaceId);
     const tenant = await this.platformService.findTenantByIdForAuth(user.tenantId);
+    const branding = user.isSaasAdmin ? {} : await this.tenantBranding(tenant.tenantId);
     // CORE-EXT-02C：菜单入口按**已启用能力**判定，不再按品类声明。
     //
     // `scope.capabilities` 是品类定义的 `defaultCapabilities`，即「这个品类可能相关的
@@ -232,10 +242,10 @@ export class AuthService {
     return {
       tenant: {
         tenantId: tenant.tenantId,
-        themeColor,
         tenantCode: tenant.tenantCode,
         tenantName: tenant.tenantName,
         tenantStatus: tenant.tenantStatus,
+        ...branding,
         categoryCode: scope.categoryCode,
         categoryName: scope.categoryName,
         capabilities: capabilityView?.enabled ?? []
@@ -244,6 +254,7 @@ export class AuthService {
       // 刷新页面后切换器仍需知道「在哪、能去哪」，因此这里必须带出空间列表。
       workspaces: await this.platformService.listUserWorkspaces(user.id),
       currentWorkspaceId: workspaceId,
+      locationScope: context.user.locationScope ?? { mode: "all", locationIds: [] },
       missingRequiredCapabilities: capabilityView?.missingRequired ?? [],
       capabilityProductionReady: capabilityView?.productionReady ?? false,
       workspaceRunMode: capabilityView?.runMode
@@ -304,8 +315,8 @@ export class AuthService {
     return this.platformService.findTenantByIdForAuth(tenantId);
   }
 
-  async resolveAccessToken(authorization?: string): Promise<SystemUserRow | undefined> {
-    return (await this.resolveAccessContext(authorization))?.user;
+  async resolveAccessToken(authorization?: string, audience: AuthAudience = "operator"): Promise<SystemUserRow | undefined> {
+    return (await this.resolveAccessContext(authorization, { audience }))?.user;
   }
 
   /**
@@ -317,14 +328,16 @@ export class AuthService {
    */
   async resolveAccessContext(
     authorization?: string,
-    options: { allowInvalidWorkspace?: boolean } = {}
+    options: { allowInvalidWorkspace?: boolean; audience?: AuthAudience } = {}
   ): Promise<{ user: SystemUserRow; tenantUser: SystemUserRow; workspaceId?: string; hasWorkspaces: boolean; workspaceValid: boolean } | undefined> {
     const token = authorization?.replace(/^Bearer\s+/i, "").trim();
     if (!token) return undefined;
     const payload = this.verifyAccessToken(token);
     if (!payload) return undefined;
     const session = await this.platformService.getAuthSession(payload.sid);
-    if (!session || session.userId !== payload.sub) return undefined;
+    const expectedAudience = options.audience ?? "operator";
+    if (!session || session.userId !== payload.sub || this.sessionAudience(session) !== expectedAudience) return undefined;
+    if ((payload.aud ?? "operator") !== expectedAudience) return undefined;
     const workspaceId = session.currentWorkspaceId ?? undefined;
     // 同一个请求只读取一次空间成员关系，并同时用于权限身份与有效性判断。
     // 若分两次查询，授权恰好在两次查询之间恢复时，可能出现「租户级身份 +
@@ -350,12 +363,12 @@ export class AuthService {
   }
 
   /** SPACE-02：切换当前经营空间。校验成员资格与空间状态后重新签发访问令牌。 */
-  async switchWorkspace(authorization: string | undefined, workspaceId: string): Promise<LoginResponse> {
+  async switchWorkspace(authorization: string | undefined, workspaceId: string, audience: AuthAudience = "operator"): Promise<LoginResponse> {
     const token = authorization?.replace(/^Bearer\s+/i, "").trim();
     const payload = token ? this.verifyAccessToken(token) : undefined;
     if (!payload) throw new UnauthorizedException("会话已失效，请重新登录");
     const session = await this.platformService.getAuthSession(payload.sid);
-    if (!session || session.userId !== payload.sub) throw new UnauthorizedException("会话已失效，请重新登录");
+    if (!session || session.userId !== payload.sub || this.sessionAudience(session) !== audience || (payload.aud ?? "operator") !== audience) throw new UnauthorizedException("会话已失效，请重新登录");
     if (!workspaceId?.trim()) throw new BadRequestException("经营空间不能为空");
     // 逐项校验成员关系与空间状态；无权或已冻结/停用在此抛 403。
     const resolved = await this.platformService.resolveSessionWorkspaceId(payload.sub, workspaceId.trim());
@@ -372,14 +385,15 @@ export class AuthService {
     if (!user) throw new UnauthorizedException("账号已停用");
     const tenant = await this.platformService.findTenantByIdForAuth(user.tenantId);
     // 复用现有会话（refreshToken 不变），只换访问令牌与其携带的 wid。
-    return this.buildLoginResponse(user, tenant, session.id, resolved, undefined);
+    return this.buildLoginResponse(user, tenant, session.id, resolved, undefined, false, audience);
   }
 
   private async issueSession(
     user: SystemUserRow,
     tenant: Awaited<ReturnType<PlatformService["findTenantByIdForAuth"]>>,
     requestedWorkspaceId?: string | null,
-    needsTenantOnboarding = false
+    needsTenantOnboarding = false,
+    audience: AuthAudience = "operator"
   ): Promise<LoginResponse> {
     const sessionId = randomUUID();
     const refreshToken = randomBytes(48).toString("base64url");
@@ -390,12 +404,19 @@ export class AuthService {
       user.id,
       requestedWorkspaceId ?? undefined
     );
+    if (audience === "staff" && (!workspaceId || user.isSaasAdmin)) {
+      throw new UnauthorizedException("该账号没有可进入的员工经营空间");
+    }
+    if (audience === "staff" && !(await this.platformService.findWorkspaceScopedUser(user.id, workspaceId))) {
+      throw new UnauthorizedException("该账号没有可进入的员工经营空间");
+    }
     await this.platformService.createAuthSession({
       id: sessionId,
       userId: user.id,
       refreshTokenHash: hashOpaqueToken(refreshToken),
       expiresAt: new Date(Date.now() + this.refreshTtlMs),
-      currentWorkspaceId: workspaceId ?? null
+      currentWorkspaceId: workspaceId ?? null,
+      audience
     });
     // 权限必须按解析出的空间重算：成员关系上的角色与数据范围优先于租户级默认值。
     const scoped = (await this.platformService.findWorkspaceScopedUser(user.id, workspaceId)) ?? user;
@@ -405,7 +426,8 @@ export class AuthService {
       sessionId,
       workspaceId,
       refreshToken,
-      needsTenantOnboarding
+      needsTenantOnboarding,
+      audience
     );
   }
 
@@ -419,54 +441,62 @@ export class AuthService {
     sessionId: string,
     workspaceId: string | undefined,
     refreshToken: string | undefined,
-    needsTenantOnboarding = false
+    needsTenantOnboarding = false,
+    audience: AuthAudience = "operator"
   ): Promise<LoginResponse> {
     const now = Math.floor(Date.now() / 1000);
     const accessToken = this.signAccessToken({
       sub: user.id,
       tid: user.tenantId,
       sid: sessionId,
+      aud: audience,
       wid: workspaceId,
       iat: now,
       exp: now + this.accessTtlSeconds
     });
-    const themeColor = await this.tenantThemeColor(tenant.tenantId);
     const workspaces = await this.platformService.listUserWorkspaces(user.id);
     const sessionScope = await this.getCategoryContext(user.tenantId, workspaceId);
     // 与 session-context 完全同口径：能力集是**已启用实例**，不是品类声明。
     // 两处若不一致，前端会在「刚登录」与「刷新后」看到两套菜单。
     const capabilityView = workspaceId ? await this.capabilityOverviewFor(user.tenantId, workspaceId) : undefined;
+    const branding = user.isSaasAdmin ? {} : await this.tenantBranding(tenant.tenantId);
     return {
       accessToken,
       refreshToken: refreshToken ?? "",
       expiresIn: this.accessTtlSeconds,
-        themeColor,
       tenant: {
         tenantId: tenant.tenantId,
         tenantCode: tenant.tenantCode,
         tenantName: tenant.tenantName,
         tenantStatus: tenant.tenantStatus,
+        ...branding,
         // 与 session-context 同口径：品类和能力取当前经营空间，不取租户级档案。
         categoryCode: sessionScope.categoryCode,
         categoryName: sessionScope.categoryName,
         capabilities: capabilityView?.enabled ?? []
       },
       user: await this.toAuthUser(user),
-  /** 展示配置读取失败时回退默认主题，不影响认证与业务接口。 */
-  private async tenantThemeColor(tenantId: string): Promise<string | undefined> {
-    if (!this.clientChannelProfile) return undefined;
-    try {
-      return await this.clientChannelProfile.getThemeColor(tenantId);
-    } catch (error) {
-      this.logger.warn(`读取租户 ${tenantId} 的管理后台主题色失败，回退默认色：${(error as Error).message}`);
-      return undefined;
-    }
-  }
       needsTenantOnboarding: Boolean(needsTenantOnboarding && workspaceId),
       // SPACE-02：登录返回可进入的空间与当前空间，供前端渲染切换器（前端属 SPACE-05）。
       workspaces,
       currentWorkspaceId: workspaceId
     };
+  }
+
+  /** 展示配置读取失败时回退平台默认品牌，不影响认证与业务接口。 */
+  private async tenantBranding(tenantId: string): Promise<{
+    brandName?: string;
+    brandLogoUrl?: string;
+    faviconUrl?: string;
+    themeColor?: string;
+  }> {
+    if (!this.clientChannelProfile) return {};
+    try {
+      return await this.clientChannelProfile.getBranding(tenantId);
+    } catch (error) {
+      this.logger.warn(`读取租户 ${tenantId} 的管理后台品牌失败，回退平台默认品牌：${(error as Error).message}`);
+      return {};
+    }
   }
 
   private async toAuthUser(user: SystemUserRow, baseUser?: SystemUserRow): Promise<AuthUser> {
@@ -500,6 +530,10 @@ export class AuthService {
     const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
     const signature = this.sign(`${header}.${body}`);
     return `${header}.${body}.${signature}`;
+  }
+
+  private sessionAudience(session: { audience?: string | null }): AuthAudience {
+    return session.audience === "staff" ? "staff" : "operator";
   }
 
   private verifyAccessToken(token: string): AccessTokenPayload | undefined {

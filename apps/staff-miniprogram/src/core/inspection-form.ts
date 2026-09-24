@@ -9,17 +9,19 @@ export interface InspectionFieldRow {
   options: string[];
   value: string;
   checked: boolean;
+  photos: Array<{ id: string; path: string }>;
 }
 
 export function inspectionRows(template: RentalInspectionTemplate | undefined): InspectionFieldRow[] {
-  return (template?.fields ?? []).map((field) => ({ code: field.code, label: field.label, type: field.type, required: field.required, unit: field.unit ?? "", options: field.options ?? [], value: "", checked: false }));
+  return (template?.fields ?? []).map((field) => ({ code: field.code, label: field.label, type: field.type, required: field.required, unit: field.unit ?? "", options: field.options ?? [], value: "", checked: false, photos: [] }));
 }
 
 export function inspectionResults(rows: InspectionFieldRow[]): { results: Record<string, unknown>; error?: string } {
   const results: Record<string, unknown> = {};
   for (const row of rows) {
     if (row.type === "photo") {
-      if (row.required) return { results, error: `${row.label}需要上传照片凭证；当前文件服务未提供小程序直传通道，请在运营后台办理` };
+      if (row.required && !row.photos.length) return { results, error: `请为${row.label}上传照片凭证` };
+      if (row.photos.length) results[row.code] = row.photos.map((photo) => photo.id);
       continue;
     }
     if (row.type === "boolean") { results[row.code] = row.checked; continue; }

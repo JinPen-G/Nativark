@@ -8,7 +8,9 @@ import {
   type CancelRentalOrderRequest,
   type ManageRentalAllocationRequest,
   type RentalOperationLockRequest,
+  type CreateRentalOrderInternalNoteRequest,
   type CreateRentalInspectionRequest,
+  type RentalHandoverRequest,
   type CreateRentalOrderRequest,
   type AdjustRentalInspectionExceptionRequest,
   type GrantRentalRewardRequest,
@@ -61,10 +63,12 @@ import {
   IsOptional,
   IsString,
   MaxLength,
+  MinLength,
   Min,
   Max,
   IsInt,
-  ValidateNested
+  ValidateNested,
+  ValidateIf
 } from "class-validator";
 
 export class RentalAllocationSelectionInputDto {
@@ -81,8 +85,13 @@ export class ManageRentalAllocationDto implements ManageRentalAllocationRequest 
   @IsOptional() @IsString() reason?: string;
 }
 export class RentalOperationLockDto implements RentalOperationLockRequest {
-  @IsIn(["acquire", "release"]) action!: "acquire" | "release";
+  @IsIn(["acquire", "release", "force-release"]) action!: "acquire" | "release" | "force-release";
   @IsOptional() @IsString() token?: string;
+  @ValidateIf((value: RentalOperationLockDto) => value.action === "force-release") @IsString() @MinLength(3) @MaxLength(500) reason?: string;
+}
+
+export class CreateRentalOrderInternalNoteDto implements CreateRentalOrderInternalNoteRequest {
+  @IsString() @MinLength(1) @MaxLength(1000) content!: string;
 }
 
 /**
@@ -300,6 +309,16 @@ export class PartialReturnRentalOrderDto implements PartialReturnRentalOrderRequ
   // 归还批次标识（见共享契约的说明）。长度上限与幂等键列宽一致，
   // 否则超长值会在写幂等记录时撞 MySQL 1406 变成 500，而不是这里明确的 400。
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(128) batchNo?: string;
+
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(191) handoverSignatureFileAssetId?: string;
+}
+
+export class RentalHandoverDto implements RentalHandoverRequest {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(191)
+  handoverSignatureFileAssetId?: string;
 }
 
 /**
@@ -481,6 +500,12 @@ export class CreateRentalInspectionDto implements CreateRentalInspectionRequest 
   @IsOptional()
   @IsString()
   operator?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(191)
+  handoverSignatureFileAssetId?: string;
 }
 
 export class CorrectRentalInspectionUsageDto implements CorrectRentalInspectionUsageRequest {

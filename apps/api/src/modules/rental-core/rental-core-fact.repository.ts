@@ -37,7 +37,7 @@ import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { bufferedRentalPeriod } from "./rental-occupancy";
 import { effectiveUnpaidHoldRule } from "./rental-rule-defaults";
-import { getRequestWorkspaceId } from "../../common/request-identity";
+import { getRequestStaffLocationIds, getRequestWorkspaceId } from "../../common/request-identity";
 
 /** 参与可用量计算的预占。表上直接带 startAt/endAt，因此不必回连订单。 */
 export interface ActiveReservationRow {
@@ -394,8 +394,12 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
 
   async listOrders(tenantId: string): Promise<RentalOrder[]> {
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    const locationIds = getRequestStaffLocationIds();
     const rows = await this.prisma.rentalOrder.findMany({
-      where: { tenantId, workspaceId },
+      where: { tenantId, workspaceId, ...(locationIds === undefined ? {} : { OR: [
+        { fulfillmentLocationId: { in: locationIds.length ? locationIds : ["__no_authorized_location__"] } },
+        { returnLocationId: { in: locationIds.length ? locationIds : ["__no_authorized_location__"] } }
+      ] }) },
       include: this.orderInclude,
       orderBy: { createdAt: "desc" }
     });
@@ -414,6 +418,11 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   async queryOrders(tenantId: string, query: RentalOrderListQuery & { skip?: number; take?: number }): Promise<{ items: RentalOrder[]; total: number }> {
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
     const conditions: Prisma.Sql[] = [Prisma.sql`o.\`tenantId\` = ${tenantId}`, Prisma.sql`o.\`workspaceId\` = ${workspaceId}`];
+    const locationIds = getRequestStaffLocationIds();
+    if (locationIds !== undefined) {
+      if (!locationIds.length) conditions.push(Prisma.sql`1 = 0`);
+      else conditions.push(Prisma.sql`(o.\`fulfillmentLocationId\` IN (${Prisma.join(locationIds)}) OR o.\`returnLocationId\` IN (${Prisma.join(locationIds)}))`);
+    }
     if (query.status) conditions.push(Prisma.sql`o.\`status\` = ${query.status}`);
     const keyword = query.keyword?.trim();
     if (keyword) {
@@ -939,7 +948,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     const client = tx ?? this.prisma;
     const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     const rows = await client.rentalAsset.findMany({
-      where: { tenantId, workspaceId },
+      where: { tenantId, workspaceId, ...this.staffLocationWhere() },
       include: { itemGroup: { select: { code: true, name: true } }, location: { select: { name: true } } },
       orderBy: { createdAt: "desc" }
     });
@@ -1063,7 +1072,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     const client = tx ?? this.prisma;
     const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     const rows = await client.rentalStockBalance.findMany({
-      where: { tenantId, workspaceId },
+      where: { tenantId, workspaceId, ...this.staffLocationWhere() },
       include: { itemGroup: { select: { code: true, name: true } }, location: { select: { name: true } } },
       orderBy: { updatedAt: "desc" }
     });
@@ -1149,6 +1158,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       where: {
         tenantId,
         workspaceId,
+        ...this.staffLocationWhere(),
         ...(filters.itemGroupId ? { itemGroupId: filters.itemGroupId } : {}),
         ...(filters.locationId ? { locationId: filters.locationId } : {}),
         ...(filters.batchNo ? { batchNo: filters.batchNo } : {}),
@@ -1459,7 +1469,13 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     const client = tx ?? this.prisma;
     const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     const rows = await client.rentalStockDisposition.findMany({
-      where: { tenantId, workspaceId, ...(orderId ? { orderId } : {}) }, orderBy: { createdAt: "asc" }
+      where: {
+        tenantId, workspaceId, ...(orderId ? { orderId } : {}),
+        ...(getRequestStaffLocationIds() === undefined ? {} : { order: { is: { OR: [
+          { fulfillmentLocationId: { in: getRequestStaffLocationIds()!.length ? getRequestStaffLocationIds()! : ["__no_authorized_location__"] } },
+          { returnLocationId: { in: getRequestStaffLocationIds()!.length ? getRequestStaffLocationIds()! : ["__no_authorized_location__"] } }
+        ] } } })
+      }, orderBy: { createdAt: "asc" }
     });
     return rows.map(toStockDisposition);
   }
@@ -1577,10 +1593,15 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     const client = tx ?? this.prisma;
     const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     const rows = await client.rentalWorkOrder.findMany({
-      where: { tenantId, workspaceId, ...(status ? { status } : {}) },
+      where: { tenantId, workspaceId, ...(status ? { status } : {}), ...this.staffLocationWhere() },
       orderBy: { createdAt: "desc" }
     });
     return rows.map(toWorkOrder);
+  }
+
+  private staffLocationWhere() {
+    const ids = getRequestStaffLocationIds();
+    return ids === undefined ? {} : { locationId: { in: ids.length ? ids : ["__no_authorized_location__"] } };
   }
 
   async listWorkOrderAssignees(tenantId: string, tx?: RentalFactTx): Promise<RentalWorkOrderAssignee[]> {

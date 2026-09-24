@@ -16,7 +16,9 @@ const ts = require("typescript");
 
 const root = path.resolve(__dirname, "../apps/staff-miniprogram");
 const src = path.join(root, "src");
+const apiSrc = path.resolve(__dirname, "../apps/api/src");
 const read = (file) => fs.readFileSync(path.join(src, file), "utf8");
+const readApi = (file) => fs.readFileSync(path.join(apiSrc, file), "utf8");
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? walk(path.join(dir, entry.name)) : [path.join(dir, entry.name)]));
 const app = JSON.parse(read("app.json"));
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -113,8 +115,8 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 /* ---------------- 工程结构 ---------------- */
 
-test("app.json 声明 25 个页面、4 个 Tab（工作台/订单/扫码/我的），每个页面与组件四件套齐全；组件按页面注册", () => {
-  assert.equal(app.pages.length, 25);
+test("app.json 声明 27 个页面、4 个 Tab（工作台/订单/扫码/我的），每个页面与组件四件套齐全；组件按页面注册", () => {
+  assert.equal(app.pages.length, 27);
   assert.equal(app.pages[0], "pages/login/index", "登录页必须是默认入口 pages[0]");
   assert.equal(new Set(app.pages).size, app.pages.length);
   same(app.tabBar.list.map((row) => row.text), ["工作台", "订单", "扫码", "我的"]);
@@ -163,6 +165,20 @@ test("app.json 声明 25 个页面、4 个 Tab（工作台/订单/扫码/我的�
       registeredComponents.add(componentPath);
     }
   }
+  const scanEntry = read("pages/scan/index.wxml");
+  assert.doesNotMatch(scanEntry, /<camera\b/, "扫码 Tab 一级页是操作入口，不应直接启动摄像头");
+  assert.match(scanEntry, /bindtap="onStartScan"/, "扫码入口页应提供开始扫码按钮");
+  assert.match(read("pages/scan/index.ts"), /onStartScan\(\)[\s\S]*?navigate\(ROUTES\.scanner\)/, "开始扫码按钮应打开独立取景页");
+  assert.match(read("pages/scanner/index.wxml"), /<camera\b/, "独立取景页应由相机组件识码");
+  const scanStyles = read("pages/scan/index.wxss");
+  assert.match(scanStyles, /\.scan-cta\s*\{[^}]*width:\s*100%[^}]*height:\s*148rpx/s, "扫码主按钮必须保持整栏宽和设计稿高度");
+  const appStyles = read("app.wxss");
+  assert.match(appStyles, /\.btn\s*\{[^}]*height:\s*88rpx/s, "通用按钮保持原始 88rpx 点击高度");
+  assert.match(appStyles, /\.btn--cta\s*\{\s*height:\s*96rpx/s, "主操作按钮保持原始 96rpx 点击高度");
+  assert.match(appStyles, /\.cell\s*\{[^}]*min-height:\s*104rpx/s, "个人页菜单行保持原始 104rpx 点击高度");
+  assert.match(read("staff.wxss"), /\.todo\s*\{[^}]*min-height:\s*88rpx/s, "工作台待办行保持原始 88rpx 点击高度");
+  assert.doesNotMatch(read("pages/me/index.wxss"), /\.menu\s+\.cell\s*\{[^}]*min-height\s*:/s, "个人页不得再次缩小共享菜单行高度");
+  assert.doesNotMatch(read("pages/workbench/index.wxss"), /\.todo\s*\{[^}]*min-height\s*:/s, "工作台不得再次缩小共享待办行高度");
   for (const componentPath of registeredComponents) {
     const relative = componentPath.slice(1);
     for (const ext of ["ts", "json", "wxml", "wxss"]) assert.ok(read(`${relative}.${ext}`).trim());
@@ -262,7 +278,7 @@ test("每个 WXML 事件都绑定到已实现的 Page/Component 方法，且不�
 
 /* ---------------- 多品类纪律 ---------------- */
 
-test("领取/归还检查按服务端模板校验必填和数值；照片凭证未接通时不伪造提交", () => {
+test("领取/归还检查按服务端模板校验必填和数值；照片字段只提交已上传文件资产 ID", () => {
   const { inspectionRows, inspectionResults } = runtime().load("core/inspection-form");
   const template = {
     fields: [
@@ -280,6 +296,33 @@ test("领取/归还检查按服务端模板校验必填和数值；照片凭证�
   same(inspectionResults(rows).results, { condition: "完好", usage: 12.5, ok: false });
   const photo = inspectionRows({ fields: [{ code: "evidence", label: "交接照片", type: "photo", required: true }] });
   assert.match(inspectionResults(photo).error, /上传照片凭证/);
+  photo[0].photos.push({ id: "file-evidence-1", path: "wxfile://evidence" });
+  same(inspectionResults(photo).results, { evidence: ["file-evidence-1"] });
+});
+
+test("员工交接照片、现场签字与线下收款均有服务端闭环和权限校验", () => {
+  const uploads = readApi("modules/files/staff-uploads.controller.ts");
+  const fileStorage = readApi("modules/integrations/file-storage.runtime.service.ts");
+  const orderController = readApi("modules/rental-core/rental-core.controller.ts");
+  const offlinePayments = readApi("modules/rental-core/staff-offline-payment.service.ts");
+  assert.match(fileStorage, /uploadedByUserId/);
+  assert.match(uploads, /handoverBatchId/);
+  assert.match(uploads, /handoverLocationId/);
+  assert.match(uploads, /returnLocationId: \{ in: locationIds \}/);
+  assert.match(orderController, /员工端交接必须先完成客户现场签字/);
+  assert.match(orderController, /businessId: order\.id, status: "active"/);
+  assert.match(orderController, /metadata\.handoverBatchId !== batchId/);
+  assert.match(orderController, /metadata\.uploadedByUserId !== req\.user\.id/);
+  assert.match(offlinePayments, /this\.prisma\.\$transaction\(async \(tx\)/);
+  assert.match(offlinePayments, /allowPartialInitiate: !originated/);
+  for (const route of ["pickup", "return"]) {
+    const page = read(`pages/${route}/index.ts`);
+    const wxml = read(`pages/${route}/index.wxml`);
+    assert.match(page, /uploadStaffImage/);
+    assert.match(page, /handover-signature/);
+    assert.match(wxml, /canvas-id=/);
+    assert.match(wxml, /onChooseEvidencePhoto/);
+  }
 });
 
 test("现场新增与编辑动作调用现有业务契约，创建订单携带持久幂等键", async () => {
@@ -291,8 +334,40 @@ test("现场新增与编辑动作调用现有业务契约，创建订单携带�
   await orders.createOrder({ quoteId: "quote-one", customerType: "personal", customerName: "测试", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: "loc-one", startAt: "2026-09-24T01:00:00.000Z", endAt: "2026-09-25T01:00:00.000Z", lines: [{ itemGroupId: "group-one", quantity: 1 }] }, "stable-key");
   await customers.createCustomer({ customerType: "personal", name: "测试", phone: "13800000000" });
   await customers.updatePersonalCustomer("customer-one", { name: "更新" });
-  same(rt.calls.map((call) => new URL(call.url).pathname), ["/api/rental/v1/quotes", "/api/rental/v1/orders", "/api/platform/customers", "/api/membership/personal/customer-one"]);
+  same(rt.calls.map((call) => new URL(call.url).pathname), ["/api/staff/v1/rental/v1/quotes", "/api/staff/v1/rental/v1/orders", "/api/staff/v1/platform/customers", "/api/staff/v1/membership/personal/customer-one"]);
   assert.equal(rt.calls[1].header["Idempotency-Key"], "stable-key");
+});
+
+test("订单内部备注与主管人工解除交接锁受权限保护、幂等并写入服务端审计", async () => {
+  const rt = runtime((req) => ok(req, req.url.endsWith("internal-notes") ? { id: "note-one", content: "现场情况", operatorName: "员工甲", createdAt: "2026-09-24T01:00:00.000Z" } : { released: true, releasedOwnerName: "员工乙" }));
+  rt.load("core/session").saveSession(loginResponse(), "test");
+  const orders = rt.load("api/orders");
+  await orders.listInternalOrderNotes("order-one");
+  await orders.createInternalOrderNote("order-one", { content: "现场情况" }, "note-key");
+  await orders.operationLock("order-one", { action: "force-release", reason: "员工乙离岗" }, "unlock-key");
+  same(rt.calls.map((call) => [new URL(call.url).pathname, call.method]), [
+    ["/api/staff/v1/rental/v1/orders/order-one/internal-notes", "GET"],
+    ["/api/staff/v1/rental/v1/orders/order-one/internal-notes", "POST"],
+    ["/api/staff/v1/rental/v1/orders/order-one/operation-lock", "POST"]
+  ]);
+  assert.equal(rt.calls[1].header["Idempotency-Key"], "note-key");
+  assert.deepEqual(plain(rt.calls[2].data), { action: "force-release", reason: "员工乙离岗" });
+  assert.equal(rt.calls[2].header["Idempotency-Key"], "unlock-key");
+
+  const controller = readApi("modules/rental-core/rental-core.controller.ts");
+  const allocation = readApi("modules/rental-core/rental-allocation.service.ts");
+  const policy = readApi("common/staff-api-policy.ts");
+  assert.match(controller, /@Get\("orders\/:id\/internal-notes"\)/);
+  assert.match(controller, /@Post\("orders\/:id\/internal-notes"\)/);
+  assert.match(controller, /action: "rental\.order\.internal_note"/);
+  assert.match(controller, /replay: async \(response\) => response[\s\S]*?idempotent\.execute/);
+  assert.match(controller, /人工解除交接锁需要资源改配权限/);
+  assert.match(allocation, /previous\.ownerId === userId/);
+  assert.match(read("pages/order/index.ts"), /activeOperationLock\.ownerId !== currentSession\(\)\?\.user\.id/);
+  assert.match(allocation, /人工解除交接锁必须填写原因/);
+  assert.match(allocation, /rental\.order\.operation_lock\.force_release/);
+  assert.match(policy, /action === "force-release" \? \["rental-os:order:reassign"\]/);
+  assert.match(readApi("contracts/openapi-document.ts"), /CreateRentalOrderInternalNoteRequest/);
 });
 
 test("页面不写死品类名词：行业词只能来自服务端术语 terms()，新增品类不改页面", () => {
@@ -390,7 +465,7 @@ test("切换空间的响应 refreshToken 为空时沿用旧值，并触发 works
 test("并发 401 只执行一次刷新，并用轮换后的令牌重放；刷新被拒绝则清空身份", async () => {
   let refreshCount = 0;
   const rt = runtime((req) => {
-    if (req.url.endsWith("/api/auth/refresh")) {
+    if (req.url.endsWith("/api/staff/v1/auth/refresh")) {
       refreshCount += 1;
       return ok(req, loginResponse({ accessToken: "access-two", refreshToken: "refresh-two" }));
     }
@@ -402,13 +477,13 @@ test("并发 401 只执行一次刷新，并用轮换后的令牌重放；刷新
   session.saveSession(loginResponse(), "login");
   const [a, b] = await Promise.all([http.request("/rental/v1/orders"), http.request("/rental/v1/assets")]);
   assert.equal(refreshCount, 1, "刷新必须单飞");
-  assert.match(a.echo, /\/api\/rental\/v1\/orders$/);
-  assert.match(b.echo, /\/api\/rental\/v1\/assets$/);
+  assert.match(a.echo, /\/api\/staff\/v1\/rental\/v1\/orders$/);
+  assert.match(b.echo, /\/api\/staff\/v1\/rental\/v1\/assets$/);
   assert.equal(session.accessToken(), "access-two");
   assert.equal(session.refreshToken(), "refresh-two");
 
   const rejected = runtime((req) => {
-    if (req.url.endsWith("/api/auth/refresh")) return status(req, 401, "revoked");
+    if (req.url.endsWith("/api/staff/v1/auth/refresh")) return status(req, 401, "revoked");
     return status(req, 401, "expired");
   });
   const session2 = rejected.load("core/session");
@@ -458,12 +533,12 @@ test("未配置或不安全地址时任何请求都以 NOT_CONFIGURED 失败；�
 
 test("上下文按当前空间品类解析术语；未知品类回退通用词；地点选择只做本机筛选并按空间记忆", async () => {
   const rt = runtime((req) => {
-    if (req.url.endsWith("/api/auth/session-context")) return ok(req, { ...loginResponse(), tenant: { ...loginResponse().tenant, categoryCode: "camping", categoryName: "露营装备", capabilities: ["return"] }, currentWorkspaceId: "ws-camping" });
-    if (req.url.endsWith("/api/rental/v1/categories")) return ok(req, [
+    if (req.url.endsWith("/api/staff/v1/auth/session-context")) return ok(req, { ...loginResponse(), tenant: { ...loginResponse().tenant, categoryCode: "camping", categoryName: "露营装备", capabilities: ["return"] }, currentWorkspaceId: "ws-camping" });
+    if (req.url.endsWith("/api/staff/v1/rental/v1/categories")) return ok(req, [
       { code: "camera", name: "摄影器材", terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", identifierLabel: "资产编号" }, businessModel: { assetFields: [], defaults: { inspectionFields: [] } } },
       { code: "camping", name: "露营装备", terminology: { itemLabel: "装备", itemGroupLabel: "装备型号", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", identifierLabel: "装备编号" }, businessModel: { assetFields: [{ code: "batchNo", label: "批次号", scope: "asset", type: "string" }], defaults: { inspectionFields: [{ code: "count_ok", label: "数量齐全", type: "boolean", required: true }] } } }
     ]);
-    if (req.url.endsWith("/api/rental/v1/locations")) return ok(req, [
+    if (req.url.endsWith("/api/staff/v1/rental/v1/locations")) return ok(req, [
       { id: "loc-a", code: "A", name: "中心装备仓", type: "warehouse", capabilities: ["pickup", "return"], status: "enabled" },
       { id: "loc-b", code: "B", name: "已停用仓", type: "warehouse", capabilities: ["pickup"], status: "disabled" }
     ]);

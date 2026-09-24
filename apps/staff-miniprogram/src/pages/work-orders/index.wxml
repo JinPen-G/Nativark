@@ -1,7 +1,44 @@
 <page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
 <view class="screen screen--flat {{themeClass}}">
   <nav-bar title="工单处理"></nav-bar>
-  <view class="section"><view class="chips"><view class="chip {{tab === 'open' ? 'chip--active' : ''}}" data-tab="open" bindtap="onTab">待处理</view><view class="chip {{tab === 'completed' ? 'chip--active' : ''}}" data-tab="completed" bindtap="onTab">已完成</view><view class="chip {{tab === 'all' ? 'chip--active' : ''}}" data-tab="all" bindtap="onTab">全部</view></view></view>
+  <view class="seg">
+    <view class="seg__item {{seg === 'orders' ? 'seg__item--active' : ''}}" data-seg="orders" bindtap="onSeg">养护工单</view>
+    <view class="seg__item {{seg === 'dispositions' ? 'seg__item--active' : ''}}" data-seg="dispositions" bindtap="onSeg">归还处置</view>
+  </view>
+
+  <view wx:if="{{seg === 'orders'}}" class="section"><view class="chips"><view class="chip {{tab === 'open' ? 'chip--active' : ''}}" data-tab="open" bindtap="onTab">待处理</view><view class="chip {{tab === 'completed' ? 'chip--active' : ''}}" data-tab="completed" bindtap="onTab">已完成</view><view class="chip {{tab === 'all' ? 'chip--active' : ''}}" data-tab="all" bindtap="onTab">全部</view></view></view>
+
   <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
-  <view wx:else class="section section--tight"><view class="card" wx:for="{{rows}}" wx:key="id" data-id="{{item.id}}" bindtap="onOpen"><view class="row row--between"><text class="subtitle">{{item.type}}</text><status-tag label="{{item.status}}" tone="{{item.tone}}" small="{{true}}"></status-tag></view><view class="muted small mt-8">{{item.workNo}}</view><view class="mt-16">{{item.reason}}</view><view class="muted small mt-8">{{item.location}}</view></view></view>
+
+  <view wx:elif="{{seg === 'orders'}}" class="section section--tight">
+    <view class="card" wx:for="{{rows}}" wx:key="id" data-id="{{item.id}}" bindtap="onOpen">
+      <view class="row row--between"><text class="subtitle">{{item.type}}</text><status-tag label="{{item.status}}" tone="{{item.tone}}" small="{{true}}"></status-tag></view>
+      <view class="muted small mt-8">{{item.workNo}}</view>
+      <view class="body mt-16">{{item.reason}}</view>
+      <view class="muted small mt-8">{{item.location}}</view>
+    </view>
+  </view>
+
+  <view wx:else class="section section--tight">
+    <view class="card" wx:for="{{dispRows}}" wx:key="id">
+      <view class="row row--between row--top">
+        <view class="grow">
+          <view class="subtitle ellipsis">{{item.resourceLabel}} {{item.resourceValue}}</view>
+          <view wx:if="{{item.assetLine}}" class="muted small mt-4">{{item.assetLine}}</view>
+        </view>
+        <status-tag label="{{item.statusLabel}}" tone="{{item.statusTone}}" small="{{true}}"></status-tag>
+      </view>
+      <view class="body mt-8">{{item.quantityText}}</view>
+      <view wx:if="{{item.reason}}" class="muted small mt-8">{{item.reason}}</view>
+      <view class="row row--between mt-12">
+        <view class="link small" data-order="{{item.orderId}}" bindtap="onOpenOrder">关联订单 {{item.orderId}}</view>
+        <text class="muted small">{{item.timeText}}</text>
+      </view>
+      <view wx:if="{{item.canRestore}}" class="mt-16">
+        <view wx:if="{{item.restorable}}" class="btn btn--primary btn--small btn--block" hover-class="btn-hover" data-id="{{item.id}}" bindtap="onRestore">恢复可租</view>
+        <view wx:else class="btn btn--small btn--block btn--disabled">{{item.actionLabel}}</view>
+      </view>
+      <view wx:elif="{{item.restoredText}}" class="success-text small mt-12">{{item.restoredText}}</view>
+    </view>
+  </view>
 </view>

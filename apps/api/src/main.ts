@@ -4,6 +4,7 @@ import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module";
 import { requestIdentityMiddleware } from "./common/request-identity";
+import { staffApiRoutingMiddleware } from "./common/staff-api-routing";
 
 async function bootstrap() {
   // 微信支付 v3 验签必须使用原始请求体；Express 解析后的 JSON 可能改变空白与字段顺序。
@@ -16,6 +17,7 @@ async function bootstrap() {
   if (Number.isInteger(trustProxyHops) && trustProxyHops > 0) app.set("trust proxy", trustProxyHops);
 
   app.use(requestIdentityMiddleware);
+  app.use(staffApiRoutingMiddleware);
   app.setGlobalPrefix("api");
   app.enableCors({
     credentials: true,

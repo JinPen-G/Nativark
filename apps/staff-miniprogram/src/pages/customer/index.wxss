@@ -3,3 +3,14 @@
 .customer-head .title { font-size: 34rpx; }
 .customer-card { box-shadow: none; border: 1rpx solid var(--border); }
 .customer-card .subtitle { font-weight: 700; }
+.screen > .section { padding-left: 24rpx; padding-right: 24rpx; }
+.customer-head { padding-top: 20rpx; padding-bottom: 18rpx; }
+.customer-tabs { display: flex; margin: 0 24rpx; border-radius: 12rpx; background: var(--primary-weak); padding: 5rpx; }
+.customer-tab { flex: 1; text-align: center; padding: 12rpx 0; font-size: 24rpx; color: var(--secondary); border-radius: 9rpx; }
+.customer-tab--active { color: var(--primary); font-weight: 600; background: var(--surface); box-shadow: var(--shadow); }
+.customer-card { padding: 20rpx; border-radius: 16rpx; }
+.customer-card .kv { min-height: 56rpx; }
+.customer-address { display: flex; align-items: center; gap: 12rpx; margin-top: 12rpx; padding: 14rpx; border: 1rpx solid var(--border); border-radius: 12rpx; font-size: 24rpx; }
+.customer-section-title { padding: 0 4rpx 12rpx; }
+.customer-actions { display: flex; gap: 12rpx; }
+.customer-actions .btn { flex: 1; border-radius: 12rpx; }

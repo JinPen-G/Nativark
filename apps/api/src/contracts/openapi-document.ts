@@ -272,6 +272,9 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       tenantCode: stringSchema,
       tenantName: stringSchema,
       tenantStatus: stringSchema,
+      brandName: stringSchema,
+      brandLogoUrl: stringSchema,
+      faviconUrl: stringSchema,
       themeColor: stringSchema,
       categoryCode: stringSchema,
       categoryName: stringSchema,
@@ -319,7 +322,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ClientChannelProfileSummary: objectOf(
     {
       configured: booleanSchema, revision: numberSchema,
-      brandName: stringSchema, brandLogoUrl: stringSchema, customerServicePhone: stringSchema, customerServiceHours: stringSchema,
+      brandName: stringSchema, brandLogoUrl: stringSchema, faviconUrl: stringSchema, customerServicePhone: stringSchema, customerServiceHours: stringSchema,
       userAgreement: ref("ClientChannelAgreementConfig"), privacyPolicy: ref("ClientChannelAgreementConfig"),
       helpIntro: stringSchema, helpFaq: arrayOf("ClientChannelFaqItem"), bannerTitle: stringSchema, bannerSubtitle: stringSchema, themeColor: stringSchema,
       smsLoginEnabled: booleanSchema, passwordLoginEnabled: booleanSchema,
@@ -333,7 +336,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ),
   SaveClientChannelProfileRequest: objectOf(
     {
-      expectedRevision: numberSchema, brandName: stringSchema, brandLogoUrl: stringSchema, customerServicePhone: stringSchema, customerServiceHours: stringSchema,
+      expectedRevision: numberSchema, brandName: stringSchema, brandLogoUrl: stringSchema, faviconUrl: stringSchema, customerServicePhone: stringSchema, customerServiceHours: stringSchema,
       userAgreement: ref("ClientChannelAgreementConfig"), privacyPolicy: ref("ClientChannelAgreementConfig"),
       helpIntro: stringSchema, helpFaq: arrayOf("ClientChannelFaqItem"), bannerTitle: stringSchema, bannerSubtitle: stringSchema, themeColor: stringSchema,
       smsLoginEnabled: booleanSchema, passwordLoginEnabled: booleanSchema, publishedWorkspaceIds: arrayOf(stringSchema), defaultWorkspaceId: stringSchema
@@ -1106,7 +1109,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       apiVersion: stringSchema,
       tenantCode: stringSchema,
       client: { type: "string", enum: ["wechat_miniprogram", "app", "web"] },
-      merchant: objectOf({ name: stringSchema, logoUrl: stringSchema, servicePhone: stringSchema, serviceHours: stringSchema }, ["name"], false),
+      merchant: objectOf({ name: stringSchema, logoUrl: stringSchema, faviconUrl: stringSchema, servicePhone: stringSchema, serviceHours: stringSchema }, ["name"], false),
       services: arrayOf(objectOf({ code: stringSchema, name: stringSchema, categoryCode: stringSchema, isDefault: booleanSchema, status: { type: "string", enum: ["open", "paused"] } }, ["code", "name", "categoryCode", "status"], false)),
       defaultServiceCode: stringSchema,
       agreements: objectOf({
@@ -2819,7 +2822,7 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   clientOperation("get", "/api/client/v1/public/site-resolve", "resolveClientWebsiteHost", "Public host-to-tenant resolution for the tenant website: returns the tenantCode bound to a custom domain (enabled website channel only), or null when unbound", { responseSchema: "ClientWebsiteHostResolution", authRequired: false, parameters: [{ name: "host", in: "query", required: true, schema: stringSchema }] }),
   clientOperation("get", "/api/client/v1/public/documents/{kind}", "getClientPublicDocument", "Public document body (user agreement / privacy policy / help) from the tenant client channel profile; rendered in-client, guest-readable", { responseSchema: "ClientPublicDocumentResponse", authRequired: false, parameters: [{ name: "kind", in: "path", required: true, schema: { type: "string", enum: ["user_agreement", "privacy_policy", "help"] } }, { name: "tenantCode", in: "query", required: true, schema: stringSchema }] }),
   clientOperation("get", "/api/client/v1/public/catalog", "getClientPublicCatalog", "Guest catalog for a service published to the mini-program channel (same whitelisted projection as the member catalog)", { responseSchema: "ClientCatalog", authRequired: false, parameters: [{ name: "tenantCode", in: "query", required: true, schema: stringSchema }, { name: "service", in: "query", required: true, schema: stringSchema }] }),
-  clientOperation("get", "/api/client/v1/public/website-assets/{tenantCode}/{assetId}", "getClientWebsiteAsset", "Public website brand image (logo/hero/category) by tenantCode + assetId", { rawResponseContentType: "image/*", authRequired: false, parameters: [{ name: "tenantCode", in: "path", required: true, schema: stringSchema }, { name: "assetId", in: "path", required: true, schema: stringSchema }] }),
+  clientOperation("get", "/api/client/v1/public/website-assets/{tenantCode}/{assetId}", "getClientWebsiteAsset", "Public tenant brand image (logo/favicon/hero/category) by tenantCode + assetId", { rawResponseContentType: "image/*", authRequired: false, parameters: [{ name: "tenantCode", in: "path", required: true, schema: stringSchema }, { name: "assetId", in: "path", required: true, schema: stringSchema }] }),
   clientOperation("get", "/api/client/v1/public/catalog/items/{itemGroupId}/images/{imageId}", "getClientPublicCatalogItemImage", "Guest catalog image for a published service", { rawResponseContentType: "image/*", authRequired: false, parameters: [{ name: "tenantCode", in: "query", required: true, schema: stringSchema }, { name: "service", in: "query", required: true, schema: stringSchema }] }),
   clientOperation("post", "/api/client/v1/auth/challenges", "createClientChallenge", "Create a purpose-bound verification challenge (registration or login)", { requestSchema: "ClientChallengeRequest", responseSchema: "ClientRegistrationChallengeResponse", authRequired: false }),
   clientOperation("post", "/api/client/v1/auth/sms-login", "clientSmsLogin", "Login with a login-purpose SMS proof for an already registered phone", { requestSchema: "ClientSmsLoginRequest", responseSchema: "ClientMembershipSessionResponse", authRequired: false }),

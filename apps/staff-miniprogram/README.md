@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 使用者 | 租赁客户 | 租户运营账号（与 Web 后台同一套账号与权限） |
 | 租户绑定 | 每租户一个包（`tenantCode` 打进包） | **一套包服务所有租户**，租户编码在登录页输入 |
-| 认证 | 客户令牌 `/api/client/v1` | 运营令牌 `/api/auth/*`，业务走 `/api/rental/v1/*`、`/api/platform/*` |
+| 认证 | 客户令牌 `/api/client/v1` | 独立员工会话 `/api/staff/v1/auth/*`；业务走员工白名单门面 `/api/staff/v1/*` |
 | 品牌 | 租户 Logo / 主题色 | 平台统一 Rental OS 标识，深浅色跟随系统 |
 
 ## 多品类兼容
@@ -30,9 +30,11 @@ src/
   core/                 session（会话+权限 can/canTenant）、http、context（术语/地点）、scan、labels、presenters、page、ui、theme…
   api/                  auth、context、orders、assets、workOrders、customers、workbench
   components/           nav-bar（Logo + 地点切换胶囊）、ui-icon、state-view、status-tag、sheet、money-text
-  pages/                login、workspace、workbench、orders、scan、me、order、order-new、pickup、return、work-orders、work-order、
+  pages/                login、workspace、workbench、orders、scan、scanner、me、order、order-new、pickup、return、work-orders、work-order、
                         scan-result、scan-manual、assets、asset、asset-ledger、asset-new、customers、customer、customer-edit、password、history、about
 ```
+
+页面视觉参考 `apps/设计图/` 的四张租户端员工小程序设计图。扫码 Tab 一级页是操作入口，点击“开始扫码”后才进入摄像头取景页；摄像头受限时可使用微信系统扫码或手动输入。设计图里的摄影商品和个人资料是示例，界面继续使用当前经营空间、订单和客户的真实数据；缺少商品封面时显示通用图标。
 
 ## 构建与调试
 
@@ -47,12 +49,15 @@ npm run test:staff-miniprogram             # 构建 + 静态/沙箱测试
 
 ## 后端前置（见需求 §11）
 
-当前直接复用现有运营 API。以下能力当前**不存在**，不能仅凭构建通过就上传或向员工开放：
+员工 API 门面会把白名单请求映射到既有 Rental Core 业务处理器，同时执行独立会话受众、员工权限和地点范围校验。以下闭环已接入代码，但仍需部署迁移、配置真实对象存储并完成开发者工具/真机验收后才能视为上线：
 
-- 履约地点数据范围（STAFF-BE-01）：当前地点切换只是本机筛选，服务端仍按整空间返回。
-- `/api/staff/v1` 员工门面与独立会话受众（STAFF-BE-02）：就绪后只需改 `core/http.ts` 的 `API_PREFIX` 与 `api/*` 路径常量。
-- 员工上传凭证（STAFF-BE-03）：必填照片检查项在小程序中阻止提交并提示去运营后台办理；工单附件暂不上传，`attachments` 传空。
-- 线下收款窄权限与两段式（STAFF-BE-04）：本期未放收款页。
-- 客户扫码确认交接（STAFF-BE-07）：尚未实现；当前只有员工确认交接，不能视作客户签字或客户确认。
+- 履约地点数据范围与员工独立会话（STAFF-BE-01/02）：接口按已授权地点过滤；地点选择器只影响显示，不会扩大服务端数据范围。
+- 员工上传凭证（STAFF-BE-03）：检查照片、工单证据和线下收款凭证走已签名上传会话；领取/归还提交引用已完成上传的文件 ID。现场客户签字图绑定订单、当前交接地点、操作员工、交接阶段和批次，无签字时员工端不能推进交接。
+- 线下收款（STAFF-BE-04）：员工先登记待确认金额；只有具备结算权限的人确认后才写入既有资金账本，待确认项出现在工作台。
+- 订单内部备注（STAFF-BE-08）：仅有订单操作权限的员工可添加；备注写入订单审计日志，订单查看权限可读，客户侧接口不暴露。
+- 操作锁人工解除（STAFF-BE-09）：仅有资源改配权限的主管可解除他人未过期交接锁；必须填写原因，锁状态、订单修订历史与审计日志在同一事务内更新。
+- 客户扫码确认交接（STAFF-BE-07）：需求定义的并行跨端任务，仍需员工端令牌、客户端确认页和服务端单次令牌校验；完成前员工交接以现场签字为准。
 
-订单创建使用现有服务端“报价 → 创建订单”接口；客户新增与基础资料编辑复用现有平台/会员接口。服务端业务规则或权限拒绝会直接回显，不在小程序内伪造报价或绕过门禁。现场上传与独立员工门面仍需后端专项实现和真机验收。
+**部署前置**：应用上传和下载域名须加入微信小程序合法域名；文件平台需启用真实 provider；数据库需按迁移清单部署新增的员工地点范围、会话受众、线下收款权限和待确认登记表。当前 `local_mock` 仅供开发预览，不会显示真实图片，也不可用于生产收款/交接留证。构建或静态测试通过不代表数据库迁移、对象存储、开发者工具网络域名或真机能力已验证。
+
+订单创建使用现有服务端“报价 → 创建订单”接口；客户新增与基础资料编辑复用现有平台/会员接口。服务端业务规则或权限拒绝会直接回显，不在小程序内伪造报价或绕过门禁。上线前仍须按上面的部署前置完成环境配置和真实设备验收。

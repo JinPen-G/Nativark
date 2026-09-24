@@ -223,6 +223,7 @@ export class PlatformService {
         { code: "rental-os:order:operate", name: "订单操作", description: "新建租赁订单、领取检查和归还检查" },
         { code: "rental-os:order:reassign", name: "资源解锁与改配", description: "解锁、释放及更换订单锁定资源，必须填写原因" },
         { code: "rental-os:order:settle", name: "订单结算", description: "确认费用、补缴、退款或月结入账" },
+        { code: "rental-os:order:offline-payment", name: "线下收款登记", description: "登记待确认的线下收款；不含确认到账、退款或资金结算" },
         // ORDER-CLOSE-02：裁定「该收/该退多少」与实际动钱拆成两个权限。此前四类审核
         // 都认 order:settle，而资金事件也认它，一个权限同时授予定金额和收退款。
         { code: "rental-os:order:fee-review", name: "费用裁定", description: "裁定逾期人工核价、提前归还退款、续租负差额与检查异常的金额；不含实际收退款" },
@@ -468,6 +469,7 @@ export class PlatformService {
     userId: string;
     refreshTokenHash: string;
     expiresAt: Date;
+    audience: "operator" | "staff";
     revokedAt?: Date;
     /** SPACE-02：内存模式没有经营空间，这里恒为 null，使经营接口 fail-closed。 */
     currentWorkspaceId?: string | null;
@@ -1907,6 +1909,11 @@ export class PlatformService {
     return this.platformRepository.listWorkspaceMembers(workspaceId, currentUser);
   }
 
+  listWorkspaceFulfillmentLocations(workspaceId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    return this.platformRepository.listWorkspaceFulfillmentLocations(workspaceId, currentUser);
+  }
+
   saveWorkspaceMember(workspaceId: string, input: SaveWorkspaceMemberRequest, currentUser?: SystemUserRow) {
     this.requireWorkspaceDataSource();
     return this.platformRepository.saveWorkspaceMember(workspaceId, input, currentUser);
@@ -2446,21 +2453,22 @@ export class PlatformService {
     return user && tenant?.tenantStatus === TenantStatus.Active ? this.toUserRow(user) : undefined;
   }
 
-  createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null }) {
+  createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null; audience?: "operator" | "staff" }) {
     if (this.useMysqlDataSource()) return this.platformRepository.createAuthSession(input);
-    this.authSessions.set(input.id, { ...input });
-    return input;
+    const session = { ...input, audience: input.audience ?? "operator" as const };
+    this.authSessions.set(input.id, session);
+    return session;
   }
 
   async rotateAuthSession(
     previousSessionId: string,
-    input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null }
+    input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null; audience?: "operator" | "staff" }
   ): Promise<boolean> {
     if (this.useMysqlDataSource()) return this.platformRepository.rotateAuthSession(previousSessionId, input);
     const previous = this.authSessions.get(previousSessionId);
     if (!previous || previous.revokedAt || previous.expiresAt <= new Date()) return false;
     previous.revokedAt = new Date();
-    this.authSessions.set(input.id, { ...input, currentWorkspaceId: input.currentWorkspaceId ?? null });
+    this.authSessions.set(input.id, { ...input, audience: input.audience ?? "operator", currentWorkspaceId: input.currentWorkspaceId ?? null });
     return true;
   }
 

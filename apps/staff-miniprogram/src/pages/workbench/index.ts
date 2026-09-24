@@ -29,12 +29,14 @@ interface TodoRow {
   icon: string;
   color: string;
   count: number;
+  orderId?: string;
 }
 
 interface WorkbenchData {
   view: ViewState;
   context?: WorkspaceContext;
   heroTitle: string;
+  heroLine: string;
   heroSubtitle: string;
   heroIcon: string;
   heroImage: string;
@@ -52,6 +54,7 @@ Page({
   data: {
     view: loadingState(),
     heroTitle: "",
+    heroLine: "",
     heroSubtitle: "",
     heroIcon: "box",
     heroImage: "",
@@ -102,13 +105,15 @@ Page({
     if (can("rental-core:maintenance:view")) quick.push({ key: "workOrders", label: "工单处理", icon: "tool", color: "purple" });
     const common: QuickAction[] = [];
     if (canTenant("rental-os:member:view")) common.push({ key: "customers", label: "客户查询", icon: "user-search", color: "" });
+    if (canTenant("rental-os:member:review", "rental-os:member:qualification-review")) common.push({ key: "reviews", label: "审核待办", icon: "shield", color: "purple" });
     if (can("rental-core:asset:view", "rental-core:asset:manage")) common.push({ key: "assets", label: `${t.assetLabel}管理`, icon: "box", color: "green" });
     if (can("rental-os:order:pickup", "rental-os:order:return")) common.push({ key: "ledger", label: "出入库登记", icon: "swap", color: "orange" });
     common.push({ key: "more", label: "更多功能", icon: "grid", color: "purple" });
     this.setData({
       context,
-      heroTitle: `${context.categoryName || t.itemLabel}租赁工作台`,
-      heroSubtitle: `${session.tenant.tenantName} · ${session.workspaces.find((row) => row.id === context.workspaceId)?.name ?? ""}`,
+      heroTitle: context.categoryCode === "camera" ? "专业设备" : context.categoryName || t.itemLabel,
+      heroLine: context.categoryCode === "camera" ? "让创意更简单" : "让管理更简单",
+      heroSubtitle: context.categoryCode === "camera" ? "高效 · 可靠 · 随时可用" : `${session.tenant.tenantName} · 高效管理每一次租赁`,
       heroIcon: categoryIcon(context.categoryCode),
       heroImage: categoryArtwork(context.categoryCode),
       locationLabel: currentLocationLabel(),
@@ -149,11 +154,15 @@ Page({
 
   groupTodos(items: RentalWorkbenchTodo[]): TodoRow[] {
     const counts = new Map<string, number>();
-    for (const item of items) counts.set(item.type, (counts.get(item.type) ?? 0) + 1);
-    const order = ["return_overdue", "no_show_confirmation", "no_show_notice", "fee_review", "work_order", "pending_payment", "cancelled_refund_due", "refund", "notification_failure"];
+    const firstOrderId = new Map<string, string>();
+    for (const item of items) {
+      counts.set(item.type, (counts.get(item.type) ?? 0) + 1);
+      if (item.orderId && !firstOrderId.has(item.type)) firstOrderId.set(item.type, item.orderId);
+    }
+    const order = ["return_overdue", "no_show_confirmation", "no_show_notice", "offline_payment_pending", "fee_review", "work_order", "pending_payment", "cancelled_refund_due", "refund", "notification_failure"];
     return Array.from(counts.entries())
       .sort((a, b) => (order.indexOf(a[0]) === -1 ? 99 : order.indexOf(a[0])) - (order.indexOf(b[0]) === -1 ? 99 : order.indexOf(b[0])))
-      .map(([type, count]) => ({ type, label: todoTypeLabel(type), ...todoTypeIcon(type), count }));
+      .map(([type, count]) => ({ type, label: todoTypeLabel(type), ...todoTypeIcon(type), count, orderId: firstOrderId.get(type) }));
   },
 
   /* ---------- 地点切换 ---------- */
@@ -194,6 +203,9 @@ Page({
       case "customers":
         navigate(ROUTES.customers);
         return;
+      case "reviews":
+        navigate(ROUTES.reviews);
+        return;
       case "ledger":
         navigate(ROUTES.assetLedger);
         return;
@@ -219,6 +231,11 @@ Page({
     const type = String(event.currentTarget.dataset.type ?? "");
     if (type === "work_order") {
       navigate(ROUTES.workOrders);
+      return;
+    }
+    if (type === "offline_payment_pending") {
+      const orderId = String(event.currentTarget.dataset.orderId ?? "");
+      if (orderId) navigate(buildUrl(ROUTES.order, { id: orderId }));
       return;
     }
     if (type === "return_overdue") {

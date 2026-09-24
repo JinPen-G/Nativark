@@ -1,6 +1,7 @@
 <page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
 <view class="scanner {{themeClass}}">
-  <camera class="scanner__camera" mode="scanCode" flash="{{torch ? 'on' : 'off'}}" bindscancode="onCameraScan" binderror="onCameraError"></camera>
+  <image wx:if="{{cameraError}}" class="scanner__preview" src="../../assets/scan-camera-preview.webp" mode="aspectFill"></image>
+  <camera wx:else class="scanner__camera" mode="scanCode" flash="{{torch ? 'on' : 'off'}}" bindscancode="onCameraScan" binderror="onCameraError"></camera>
   <view class="scanner__shade"></view>
   <view class="scanner__top" style="padding-top: {{statusBarHeight}}px;">
     <view class="scanner__close" bindtap="onBack"><ui-icon name="close" size="40" color="onPrimary"></ui-icon></view>

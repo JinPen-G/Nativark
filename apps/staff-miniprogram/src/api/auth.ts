@@ -3,7 +3,7 @@ import { request } from "../core/http";
 import { clearSession, refreshToken, saveSession } from "../core/session";
 
 /**
- * 认证：租户编码 + 运营账号 + 密码。与 Web 后台同一套账号；令牌由 core/session 保存。
+ * 认证：租户编码 + 运营账号 + 密码；请求员工专属认证路由并保存 staff 受众会话。
  */
 export async function login(tenantCode: string, account: string, password: string): Promise<LoginResponse> {
   const response = await request<LoginResponse>("/auth/login", { method: "POST", auth: "none", data: { tenantCode: tenantCode.trim(), account: account.trim(), password } });

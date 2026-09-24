@@ -23,6 +23,7 @@ export class SaveWorkspaceMemberDto implements SaveWorkspaceMemberRequest {
   @IsString() @IsNotEmpty() userId!: string;
   @IsOptional() @IsString() @IsNotEmpty() roleId?: string;
   @IsOptional() @IsIn(DATA_SCOPES) dataScope?: SaveWorkspaceMemberRequest["dataScope"];
+  @IsOptional() @IsObject() locationScope?: SaveWorkspaceMemberRequest["locationScope"];
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 export class SaveSharedCustomerDto implements SaveSharedCustomerRequest {

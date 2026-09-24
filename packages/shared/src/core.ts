@@ -876,6 +876,8 @@ export interface WorkspaceMember {
   userId: string;
   roleId?: string;
   dataScope?: SystemDataScope;
+  /** STAFF-BE-01：履约地点范围；缺省/all 兼容既有成员，selected 仅允许列出的地点。 */
+  locationScope?: { mode: "all" | "selected"; locationIds: string[] };
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -900,6 +902,7 @@ export interface SaveWorkspaceMemberRequest {
   userId: string;
   roleId?: string;
   dataScope?: SystemDataScope;
+  locationScope?: { mode: "all" | "selected"; locationIds: string[] };
   isActive?: boolean;
 }
 
@@ -5096,6 +5099,7 @@ export type RentalWorkbenchTodoType =
   | "fee_review"
   | "refund"
   | "work_order"
+  | "offline_payment_pending"
   /** NOTICE-01：业务事件通知未成功写入模拟发送记录，需要运营处理。 */
   | "notification_failure"
   /** 取消/爽约后仍持有押金、预授权或多收租金，待裁定 `refund_due` 审核后办理退款。 */
@@ -5162,8 +5166,13 @@ export interface ManageRentalAllocationRequest {
 }
 
 export interface RentalOperationLockRequest {
-  action: "acquire" | "release";
+  action: "acquire" | "release" | "force-release";
   token?: string;
+  reason?: string;
+}
+
+export interface CreateRentalOrderInternalNoteRequest {
+  content: string;
 }
 
 export interface RentalAllocationCandidates {
@@ -5206,6 +5215,8 @@ export interface PartialReturnRentalOrderRequest {
    * 宁可让调用方补一个标识，也不能静默丢掉一次真实归还。
    */
   batchNo?: string;
+  /** 员工现场签字文件；只引用已完成上传且服务端校验归属的文件资产。 */
+  handoverSignatureFileAssetId?: string;
 }
 
 export interface RentalOrder {
@@ -5935,7 +5946,24 @@ export interface CreateRentalInspectionRequest {
     evidenceAttachments?: string[];
   }>;
   attachments?: string[];
+  /** 员工现场签字文件；签名必须与当前订单、阶段及幂等批次一致。 */
+  handoverSignatureFileAssetId?: string;
   operator?: string;
+}
+
+export interface RentalHandoverRequest {
+  /** 无检查模板时的员工现场签字文件。 */
+  handoverSignatureFileAssetId?: string;
+}
+
+export interface CreateStaffOfflinePaymentRequest {
+  orderId: string;
+  instrument: "rental" | "deposit";
+  amount: number;
+  paymentMethod: "offline_cash" | "offline_transfer";
+  reason: string;
+  idempotencyKey: string;
+  evidenceFileAssetId?: string;
 }
 
 export interface RentalInspectionRecord {

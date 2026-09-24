@@ -8,7 +8,7 @@
     <view class="section">
       <view class="hero hero--workbench">
         <view class="hero__copy">
-          <view class="hero__title">{{heroTitle || '工作台'}}</view>
+          <view class="hero__title">{{heroTitle || '工作台'}}<view class="hero__title-line">{{heroLine || '让管理更简单'}}</view></view>
           <view class="hero__subtitle">{{heroSubtitle || '正在加载经营空间…'}}</view>
         </view>
         <view class="hero__art">
@@ -46,14 +46,14 @@
       <view class="sec-head"><view class="sec-head__title">待处理事项</view></view>
       <view class="todo-panel">
         <block wx:if="{{todos.length}}">
-          <view class="todo" wx:for="{{todos}}" wx:key="type" hover-class="btn-hover" data-type="{{item.type}}" bindtap="onTodo">
+          <view class="todo" wx:for="{{todos}}" wx:key="type" hover-class="btn-hover" data-type="{{item.type}}" data-order-id="{{item.orderId}}" bindtap="onTodo">
             <view class="todo__icon todo__icon--{{item.color}}"><ui-icon name="{{item.icon}}" size="30" color="{{item.color === 'muted' ? 'secondary' : item.color}}" stroke="1.8"></ui-icon></view>
             <view class="todo__title">{{item.label}}</view>
             <view class="badge {{item.color === 'muted' || item.color === 'info' ? 'badge--muted' : ''}}">{{item.count}}</view>
           </view>
         </block>
         <view wx:elif="{{view.status === 'loading'}}" class="skeleton skeleton--line"></view>
-        <view wx:else class="muted small center">暂无待处理事项</view>
+        <view wx:else class="todo-panel__empty">今日暂无待处理事项</view>
       </view>
     </view>
 

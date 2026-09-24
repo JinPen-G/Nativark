@@ -15,9 +15,8 @@ Page({
   onBack() { back(ROUTES.scan); },
   onToggleTorch() { this.setData({ torch: !this.data.torch }); },
   onManual() { redirect(ROUTES.scanManual); },
-  onCameraError(event: WechatMiniprogram.CameraError) {
-    const detail = event.detail as { errMsg?: string };
-    this.setData({ cameraError: detail?.errMsg || "摄像头不可用，请使用系统扫码或手动输入" });
+  onCameraError(_event: WechatMiniprogram.CameraError) {
+    this.setData({ cameraError: "摄像头暂不可用，请使用下方系统扫码或手动输入" });
   },
   onCameraScan(event: WechatMiniprogram.CameraScanCode) {
     const detail = event.detail as { result?: string };

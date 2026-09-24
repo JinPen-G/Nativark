@@ -110,6 +110,7 @@ const TODO_TYPE: Record<string, { label: string; icon: string; color: string }> 
   fee_review: { label: "费用待复核", icon: "wallet", color: "warning" },
   refund: { label: "退款待办", icon: "refresh", color: "info" },
   work_order: { label: "待处理工单", icon: "tool", color: "purple" },
+  offline_payment_pending: { label: "线下收款待确认", icon: "wallet", color: "warning" },
   notification_failure: { label: "通知发送失败", icon: "bell", color: "muted" },
   cancelled_refund_due: { label: "取消后待退款", icon: "wallet", color: "info" }
 };

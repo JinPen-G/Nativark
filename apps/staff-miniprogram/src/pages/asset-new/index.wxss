@@ -1,10 +1,12 @@
-.card { box-shadow: none; border: 1rpx solid var(--border); }
+.screen > .section { padding-left: 24rpx; padding-right: 24rpx; }
+.card { box-shadow: none; border: 1rpx solid var(--border); padding: 20rpx; border-radius: 16rpx; }
 .card > .subtitle { margin-bottom: 12rpx; }
-.field { display: flex; align-items: center; gap: 12rpx; min-height: 90rpx; border-bottom: 0; padding: 8rpx 0; }
+.field { display: flex; align-items: center; gap: 12rpx; min-height: 74rpx; border-bottom: 0; padding: 6rpx 0; }
 .field + .field { border-top: 0; }
-.field__label { width: 178rpx; flex: 0 0 auto; color: var(--text); font-size: 24rpx; }
-.field__input, .field__picker { flex: 1; min-width: 0; width: auto; height: 68rpx; min-height: 68rpx; padding: 0 16rpx; border: 1rpx solid var(--line); border-radius: 10rpx; background: var(--surface); font-size: 24rpx; }
+.field__label { width: 178rpx; flex: 0 0 auto; color: var(--text); font-size: 22rpx; }
+.field__input, .field__picker { flex: 1; min-width: 0; width: auto; height: 62rpx; min-height: 62rpx; padding: 0 14rpx; border: 1rpx solid var(--line); border-radius: 10rpx; background: var(--surface); font-size: 23rpx; }
 .field picker { flex: 1; min-width: 0; }
 .field picker .field__picker { width: 100%; }
 .field switch { margin-left: auto; }
 .bottom-bar { box-shadow: 0 -4rpx 18rpx rgba(31, 41, 55, 0.04); }
+.bottom-bar .btn { border-radius: 12rpx; }

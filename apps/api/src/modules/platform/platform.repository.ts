@@ -238,14 +238,14 @@ export class PlatformRepository {
     return user ? this.toUserRow(user) : undefined;
   }
 
-  async createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null }) {
+  async createAuthSession(input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null; audience?: "operator" | "staff" }) {
     return this.prisma.authSession.create({ data: input });
   }
 
   /** 单次刷新令牌的消费和新会话创建必须同事务完成，避免旧令牌已作废却没有替代会话。 */
   async rotateAuthSession(
     previousSessionId: string,
-    input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null }
+    input: { id: string; userId: string; refreshTokenHash: string; expiresAt: Date; currentWorkspaceId?: string | null; audience?: "operator" | "staff" }
   ): Promise<boolean> {
     return this.prisma.$transaction(async (tx) => {
       const revoked = await tx.authSession.updateMany({
@@ -487,6 +487,17 @@ export class PlatformRepository {
     return rows.map((row) => this.toWorkspaceMember(row));
   }
 
+  async listWorkspaceFulfillmentLocations(workspaceId: string, currentUser?: SystemUserRow) {
+    const tenantId = this.workspaceTenantId(currentUser);
+    const workspace = await this.prisma.businessWorkspace.findFirst({ where: { id: workspaceId, tenantId }, select: { id: true } });
+    if (!workspace) throw new NotFoundException("经营空间不存在");
+    return this.prisma.rentalFulfillmentLocation.findMany({
+      where: { tenantId, workspaceId },
+      select: { id: true, name: true, code: true, status: true },
+      orderBy: [{ name: "asc" }, { id: "asc" }]
+    });
+  }
+
   async saveWorkspaceMember(
     workspaceId: string,
     input: SaveWorkspaceMemberRequest,
@@ -508,9 +519,13 @@ export class PlatformRepository {
         const role = await tx.role.findFirst({ where: { id: input.roleId, tenantId } });
         if (!role) throw new BadRequestException("角色不存在或不属于当前租户");
       }
+      const locationScope = input.locationScope === undefined
+        ? undefined
+        : await this.validateLocationScope(tx, tenantId, workspaceId, input.locationScope);
       const data = {
         roleId: input.roleId ?? null,
         dataScope: input.dataScope ? this.toPrismaDataScope(input.dataScope) : null,
+        ...(locationScope !== undefined ? { locationScope } : {}),
         isActive: input.isActive ?? true
       };
       return tx.workspaceMember.upsert({
@@ -555,6 +570,7 @@ export class PlatformRepository {
     userId: string;
     roleId: string | null;
     dataScope: PrismaSystemDataScope | null;
+    locationScope?: Prisma.JsonValue | null;
     isActive: boolean;
     createdAt: Date;
     updatedAt: Date;
@@ -565,6 +581,9 @@ export class PlatformRepository {
       userId: row.userId,
       roleId: row.roleId ?? undefined,
       dataScope: row.dataScope ? (row.dataScope.toLowerCase() as SystemDataScope) : undefined,
+      locationScope: row.locationScope && typeof row.locationScope === "object" && !Array.isArray(row.locationScope)
+        ? row.locationScope as { mode: "all" | "selected"; locationIds: string[] }
+        : undefined,
       isActive: row.isActive,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString()
@@ -667,6 +686,17 @@ export class PlatformRepository {
     }
     // 成员关系上的数据范围优先级最高：它是"该账号在本空间"的显式授权。
     if (member.dataScope) next.dataScope = this.toSharedDataScope(member.dataScope);
+    if (member.locationScope && typeof member.locationScope === "object" && !Array.isArray(member.locationScope)) {
+      const scope = member.locationScope as { mode?: unknown; locationIds?: unknown };
+      // 坏数据按零地点处理；员工入口不能因错误 JSON 静默退回全部地点。
+      next.locationScope = scope.mode === "all"
+        ? { mode: "all", locationIds: [] }
+        : scope.mode === "selected" && Array.isArray(scope.locationIds) && scope.locationIds.every((id) => typeof id === "string")
+          ? { mode: "selected", locationIds: scope.locationIds }
+          : { mode: "selected", locationIds: [] };
+    } else {
+      next.locationScope = { mode: "all", locationIds: [] };
+    }
     return next;
   }
 
@@ -1184,9 +1214,13 @@ export class PlatformRepository {
     }
 
     for (const row of rows) {
+      const locationScope = row.locationScope === undefined
+        ? undefined
+        : await this.validateLocationScope(tx, tenantId, row.workspaceId, row.locationScope);
       const data = {
         roleId: row.roleId ?? null,
         dataScope: row.dataScope ? this.toPrismaDataScope(row.dataScope) : null,
+        ...(locationScope !== undefined ? { locationScope } : {}),
         isActive: row.isActive
       };
       await tx.workspaceMember.upsert({
@@ -2077,6 +2111,29 @@ export class PlatformRepository {
         : [...new Set([...buttonPermissionCodes, ...savedButtonPermissions])],
       dataScope: this.toSharedDataScope(role.dataScope)
     };
+  }
+
+  private async validateLocationScope(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    workspaceId: string,
+    scope: NonNullable<SaveWorkspaceAccessRequest["locationScope"]>
+  ): Promise<Prisma.InputJsonValue> {
+    if (!scope || !["all", "selected"].includes(scope.mode) || !Array.isArray(scope.locationIds) || scope.locationIds.some((id) => typeof id !== "string" || !id.trim())) {
+      throw new BadRequestException("履约地点范围格式无效");
+    }
+    if (scope.mode === "all") {
+      if (scope.locationIds.length) throw new BadRequestException("全部履约地点范围不能附带地点编号");
+      return { mode: "all", locationIds: [] };
+    }
+    const ids = [...new Set(scope.locationIds.map((id) => id.trim()))];
+    if (!ids.length) throw new BadRequestException("至少选择一个履约地点，或改为全部地点");
+    const locations = await tx.rentalFulfillmentLocation.findMany({
+      where: { tenantId, workspaceId, id: { in: ids } },
+      select: { id: true }
+    });
+    if (locations.length !== ids.length) throw new BadRequestException("履约地点不存在或不属于当前经营空间");
+    return { mode: "selected", locationIds: ids };
   }
 
   private normalizePermissionCodes(codes: string[]) {

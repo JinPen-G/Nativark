@@ -179,7 +179,7 @@ export function categoryIcon(categoryCode?: string): string {
 /** 首页横幅配图只用于视觉，不替代真实商品/资产图片。 */
 export function categoryArtwork(categoryCode?: string): string {
   const art: Record<string, string> = {
-    camera: "/assets/hero-camera.webp",
+    camera: "/assets/hero-camera-cutout.webp",
     camping: "/assets/hero-camping.webp",
     vehicle: "/assets/hero-vehicle.webp",
     construction: "/assets/hero-construction.webp"

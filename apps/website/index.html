@@ -8,6 +8,14 @@
       name="description"
       content="Rental OS 面向摄影器材、露营装备、车辆载具和工程设备等租赁企业，提供资产、订单、定价、履约、会员与经营分析的一体化 SaaS 解决方案。"
     />
+    <link
+      rel="preload"
+      as="image"
+      href="assets/hero-solutions-neutral-1440.webp"
+      imagesrcset="assets/hero-solutions-neutral-1440.webp 1440w, assets/hero-solutions-neutral-2880.webp 2880w"
+      imagesizes="100vw"
+      fetchpriority="high"
+    />
     <meta name="robots" content="index,follow,max-image-preview:large" />
     <link
       rel="canonical"
@@ -616,7 +624,7 @@
         overflow: hidden;
         min-height: 116px;
         border-radius: 14px;
-        background: var(--blue) url("assets/cta-mountain.png") center/cover
+        background: var(--blue) url("assets/cta-mountain-1280.webp") center/cover
           no-repeat;
         color: #fff;
         display: grid;
@@ -773,6 +781,86 @@
         color: var(--muted);
         font-size: 13px;
       }
+      .demo-dialog {
+        width: min(480px, 100%);
+        max-height: min(90vh, 840px);
+        overflow-y: auto;
+        text-align: left;
+      }
+      .demo-dialog .qr-platform,
+      .demo-dialog h2 {
+        text-align: left;
+      }
+      .demo-intro {
+        margin: 8px 0 16px;
+        color: var(--text);
+        font-size: 14px;
+      }
+      .demo-fields {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .demo-field {
+        display: grid;
+        gap: 5px;
+        color: var(--ink);
+        font-size: 13px;
+      }
+      .demo-field.wide {
+        grid-column: 1 / -1;
+      }
+      .demo-field input,
+      .demo-field select,
+      .demo-field textarea,
+      .demo-copy-fallback {
+        width: 100%;
+        min-height: 42px;
+        padding: 9px 11px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--page);
+        color: var(--ink);
+        font: inherit;
+        font-size: 14px;
+      }
+      .demo-field textarea,
+      .demo-copy-fallback {
+        min-height: 82px;
+        resize: vertical;
+      }
+      .demo-submit {
+        width: 100%;
+        margin-top: 15px;
+      }
+      .demo-note,
+      .demo-status {
+        margin: 11px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.55;
+      }
+      .demo-result {
+        margin-top: 14px;
+        padding-top: 14px;
+        border-top: 1px solid var(--line);
+      }
+      .demo-status {
+        margin: 0 0 10px;
+        color: var(--text);
+      }
+      .demo-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .demo-actions .btn {
+        flex: 1 1 auto;
+      }
+      .demo-copy-fallback {
+        min-height: 112px;
+        margin-top: 10px;
+      }
       body.qr-modal-open {
         overflow: hidden;
       }
@@ -786,6 +874,18 @@
         font-size: 13px;
         color: var(--text);
         margin: 5px 0;
+      }
+      .footer-placeholder {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        margin: 5px 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .footer-placeholder small {
+        font-size: 10px;
+        white-space: nowrap;
       }
       .footer-bottom {
         display: flex;
@@ -965,14 +1065,24 @@
           font-weight: 800;
         }
         .hero {
-          min-height: 706px;
+          display: flex;
+          min-height: 0;
+          flex-direction: column;
         }
         .hero-inner {
-          min-height: 706px;
-          padding-top: 64px;
+          min-height: 0;
+          padding-top: 78px;
+        }
+        .hero-media {
+          position: relative;
+          inset: auto;
+          flex: none;
+          width: 100%;
+          aspect-ratio: 2880 / 990;
         }
         .hero-slide {
-          object-position: 67% center;
+          object-fit: contain;
+          object-position: center;
         }
         html[data-theme="dark"] .hero::after {
           background: linear-gradient(
@@ -987,7 +1097,7 @@
         }
         .hero-copy {
           width: 100%;
-          padding: 54px 0 238px;
+          padding: 24px 0 28px;
         }
         .hero h1 {
           font-size: 38px;
@@ -1109,13 +1219,6 @@
     </header>
     <main id="top">
       <section class="hero">
-        <div class="hero-media" aria-hidden="true">
-          <img
-            class="hero-slide active"
-            src="assets/hero-solutions-neutral.png"
-            alt=""
-          />
-        </div>
         <div class="shell hero-inner">
           <div class="hero-copy">
             <div class="eyebrow">Rental OS – 行业解决方案</div>
@@ -1142,6 +1245,19 @@
             </div>
           </div>
         </div>
+        <div class="hero-media" aria-hidden="true">
+          <img
+            class="hero-slide active"
+            src="assets/hero-solutions-neutral-1440.webp"
+            srcset="assets/hero-solutions-neutral-1440.webp 1440w, assets/hero-solutions-neutral-2880.webp 2880w"
+            sizes="100vw"
+            width="2880"
+            height="990"
+            fetchpriority="high"
+            decoding="async"
+            alt=""
+          />
+        </div>
       </section>
       <section class="section" id="solutions">
         <div class="shell">
@@ -1156,7 +1272,14 @@
           </div>
           <div class="industry-grid">
             <article class="industry-card">
-              <img src="assets/industry-camera.png" alt="摄影设备租赁" />
+              <img
+                src="assets/industry-camera-960.webp"
+                srcset="assets/industry-camera-480.webp 480w, assets/industry-camera-960.webp 960w"
+                sizes="(max-width: 760px) calc(100vw - 30px), (max-width: 1050px) calc(50vw - 32px), 286px"
+                alt="摄影设备租赁"
+                loading="lazy"
+                decoding="async"
+              />
               <div class="industry-body">
                 <h3>摄影设备租赁</h3>
                 <p>从单机到影视设备，助力摄影器材租赁企业实现高效运营。</p>
@@ -1183,7 +1306,14 @@
               </div>
             </article>
             <article class="industry-card">
-              <img src="assets/industry-camping.png" alt="露营装备租赁" />
+              <img
+                src="assets/industry-camping-960.webp"
+                srcset="assets/industry-camping-480.webp 480w, assets/industry-camping-960.webp 960w"
+                sizes="(max-width: 760px) calc(100vw - 30px), (max-width: 1050px) calc(50vw - 32px), 286px"
+                alt="露营装备租赁"
+                loading="lazy"
+                decoding="async"
+              />
               <div class="industry-body">
                 <h3>露营装备租赁</h3>
                 <p>
@@ -1212,7 +1342,14 @@
               </div>
             </article>
             <article class="industry-card">
-              <img src="assets/industry-car.png" alt="车辆载具租赁" />
+              <img
+                src="assets/industry-car-960.webp"
+                srcset="assets/industry-car-480.webp 480w, assets/industry-car-960.webp 960w"
+                sizes="(max-width: 760px) calc(100vw - 30px), (max-width: 1050px) calc(50vw - 32px), 286px"
+                alt="车辆载具租赁"
+                loading="lazy"
+                decoding="async"
+              />
               <div class="industry-body">
                 <h3>车辆载具租赁</h3>
                 <p>支持汽车、房车、摩托车、电动车等多种车辆租赁场景。</p>
@@ -1242,7 +1379,14 @@
               </div>
             </article>
             <article class="industry-card">
-              <img src="assets/industry-excavator.png" alt="工程设备租赁" />
+              <img
+                src="assets/industry-excavator-960.webp"
+                srcset="assets/industry-excavator-480.webp 480w, assets/industry-excavator-960.webp 960w"
+                sizes="(max-width: 760px) calc(100vw - 30px), (max-width: 1050px) calc(50vw - 32px), 286px"
+                alt="工程设备租赁"
+                loading="lazy"
+                decoding="async"
+              />
               <div class="industry-body">
                 <h3>工程设备租赁</h3>
                 <p>
@@ -1378,8 +1522,12 @@
           <div class="testimonials">
             <article class="quote-card">
               <img
-                src="assets/testimonial-portrait.png"
+                src="assets/testimonial-portrait-160.webp"
+                srcset="assets/testimonial-portrait-160.webp 160w, assets/testimonial-portrait-320.webp 320w"
+                sizes="76px"
                 alt="摄影器材租赁客户"
+                loading="lazy"
+                decoding="async"
               />
               <div>
                 <p class="quote">
@@ -1392,8 +1540,12 @@
             </article>
             <article class="quote-card">
               <img
-                src="assets/testimonial-camping.png"
+                src="assets/testimonial-camping-160.webp"
+                srcset="assets/testimonial-camping-160.webp 160w, assets/testimonial-camping-320.webp 320w"
+                sizes="76px"
                 alt="露营装备租赁客户"
+                loading="lazy"
+                decoding="async"
               />
               <div>
                 <p class="quote">
@@ -1405,8 +1557,12 @@
             </article>
             <article class="quote-card">
               <img
-                src="assets/testimonial-engineering.png"
+                src="assets/testimonial-engineering-160.webp"
+                srcset="assets/testimonial-engineering-160.webp 160w, assets/testimonial-engineering-320.webp 320w"
+                sizes="76px"
                 alt="工程设备租赁客户"
+                loading="lazy"
+                decoding="async"
               />
               <div>
                 <p class="quote">
@@ -1419,7 +1575,7 @@
           </div>
         </div>
       </section>
-      <section class="cta" id="resources">
+      <section class="cta" id="consultation">
         <div class="shell cta-inner">
           <div>
             <h2>不同行业，同一套高效租赁底座。</h2>
@@ -1474,7 +1630,9 @@
           <div class="footer-col">
             <h3>产品</h3>
             <a href="#foundation">核心功能</a><a href="#scenarios">产品定位</a
-            ><a href="#resources">版本与定价</a>
+            ><span class="footer-placeholder" aria-disabled="true"
+              >版本与定价<small>即将上线</small></span
+            >
           </div>
           <div class="footer-col">
             <h3>解决方案</h3>
@@ -1489,7 +1647,11 @@
           <div class="footer-col">
             <h3>关于我们</h3>
             <a href="mailto:hello@rentalos.cn">联系我们</a
-            ><a href="#about">公司介绍</a><a href="#resources">帮助中心</a>
+            ><span class="footer-placeholder" aria-disabled="true"
+              >公司介绍<small>即将上线</small></span
+            ><span class="footer-placeholder" aria-disabled="true"
+              >帮助中心<small>即将上线</small></span
+            >
           </div>
         </div>
         <div class="footer-bottom">
@@ -1562,6 +1724,109 @@
         <p class="qr-hint" id="qrModalHint">使用微信扫描二维码</p>
       </div>
     </div>
+    <div class="qr-modal demo-modal" id="demoModal" hidden>
+      <div class="qr-modal-backdrop" data-demo-close></div>
+      <div
+        class="qr-dialog demo-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="demoModalTitle"
+        aria-describedby="demoModalDescription"
+      >
+        <button
+          class="qr-close"
+          id="demoModalClose"
+          type="button"
+          aria-label="关闭预约窗口"
+        >
+          <iconify-icon
+            class="ui-icon"
+            icon="ant-design:close-outlined"
+            aria-hidden="true"
+          ></iconify-icon>
+        </button>
+        <p class="qr-platform">预约演示</p>
+        <h2 id="demoModalTitle">填写预约信息</h2>
+        <p class="demo-intro" id="demoModalDescription">
+          留下联系方式和租赁品类，我们会据此准备演示内容。
+        </p>
+        <form id="demoRequestForm">
+          <div class="demo-fields">
+            <label class="demo-field" for="demoName">
+              姓名
+              <input id="demoName" name="name" autocomplete="name" required />
+            </label>
+            <label class="demo-field" for="demoCompany">
+              公司名称（选填）
+              <input
+                id="demoCompany"
+                name="company"
+                autocomplete="organization"
+              />
+            </label>
+            <label class="demo-field wide" for="demoContact">
+              联系方式（手机或邮箱）
+              <input
+                id="demoContact"
+                name="contact"
+                type="text"
+                autocomplete="off"
+                required
+              />
+            </label>
+            <label class="demo-field wide" for="demoCategory">
+              租赁品类
+              <select id="demoCategory" name="category" required>
+                <option value="" selected disabled>请选择</option>
+                <option value="camera">摄影器材</option>
+                <option value="outdoor">露营装备</option>
+                <option value="vehicle">车辆载具</option>
+                <option value="construction">工程设备</option>
+                <option value="other">其他</option>
+              </select>
+            </label>
+            <label class="demo-field wide" for="demoDetails">
+              补充说明（选填）
+              <textarea id="demoDetails" name="details" rows="3"></textarea>
+            </label>
+          </div>
+          <button class="btn primary demo-submit" type="submit">
+            准备预约邮件
+          </button>
+        </form>
+        <p class="demo-note">
+          此网页不会直接发送或保存信息；提交后可打开邮件草稿，或复制内容后手动发送。
+        </p>
+        <div class="demo-result" id="demoResult" hidden>
+          <p class="demo-status" id="demoStatus" role="status" aria-live="polite">
+            信息已整理好，请打开邮件草稿发送，或复制内容手动发送。
+          </p>
+          <div class="demo-actions">
+            <a
+              class="btn primary"
+              id="demoEmailLink"
+              href="mailto:hello@rentalos.cn"
+              data-demo-mail
+              >打开邮件草稿</a
+            >
+            <button
+              class="btn secondary"
+              id="demoCopyButton"
+              type="button"
+            >
+              复制邮件内容
+            </button>
+          </div>
+          <textarea
+            class="demo-copy-fallback"
+            id="demoCopyFallback"
+            aria-label="预约邮件内容"
+            readonly
+            hidden
+          ></textarea>
+        </div>
+      </div>
+    </div>
     <script>
       const heroSlides = [...document.querySelectorAll(".hero-slide")];
       let heroActive = 0;
@@ -1629,6 +1894,29 @@
         行业方案: "Industry solutions",
         平台能力: "Platform capabilities",
         预约演示: "Book a Demo",
+        填写预约信息: "Request a demo",
+        "留下联系方式和租赁品类，我们会据此准备演示内容。":
+          "Share your contact details and rental category so we can tailor the demo.",
+        姓名: "Name",
+        "公司名称（选填）": "Company (optional)",
+        "联系方式（手机或邮箱）": "Phone or email",
+        租赁品类: "Rental category",
+        请选择: "Select one",
+        摄影器材: "Camera equipment",
+        露营装备: "Outdoor equipment",
+        车辆载具: "Vehicles",
+        工程设备: "Construction equipment",
+        其他: "Other",
+        "补充说明（选填）": "Notes (optional)",
+        准备预约邮件: "Prepare email draft",
+        "此网页不会直接发送或保存信息；提交后可打开邮件草稿，或复制内容后手动发送。":
+          "This site does not send or store your details. Open the prepared email, or copy the request and send it manually.",
+        "信息已整理好，请打开邮件草稿发送，或复制内容手动发送。":
+          "Your request is ready. Open the email draft or copy the details to send manually.",
+        打开邮件草稿: "Open email draft",
+        复制邮件内容: "Copy email details",
+        预约邮件内容: "Demo request email",
+        即将上线: "Coming soon",
         "Rental OS – 行业解决方案": "Rental OS – Industry Solutions",
         面向: "Rental solutions for ",
         多行业: "multiple industries",
@@ -1773,6 +2061,16 @@
       const qrModalTitle = document.getElementById("qrModalTitle");
       const qrModalImage = document.getElementById("qrModalImage");
       const qrModalHint = document.getElementById("qrModalHint");
+      const demoModal = document.getElementById("demoModal");
+      const demoModalClose = document.getElementById("demoModalClose");
+      const demoRequestForm = document.getElementById("demoRequestForm");
+      const demoResult = document.getElementById("demoResult");
+      const demoStatus = document.getElementById("demoStatus");
+      const demoEmailLink = document.getElementById("demoEmailLink");
+      const demoCopyButton = document.getElementById("demoCopyButton");
+      const demoCopyFallback = document.getElementById("demoCopyFallback");
+      let demoReturnFocus = null;
+      let demoEmailText = "";
       let activeQrPlatform = "wechat";
       let activeLanguage = "zh";
       const qrCopy = {
@@ -1826,7 +2124,57 @@
       }
       function closeQrModal() {
         qrModal.hidden = true;
-        document.body.classList.remove("qr-modal-open");
+        if (demoModal.hidden) document.body.classList.remove("qr-modal-open");
+      }
+      function openDemoModal(event) {
+        event.preventDefault();
+        demoReturnFocus = event.currentTarget;
+        demoRequestForm.reset();
+        demoResult.hidden = true;
+        demoCopyFallback.hidden = true;
+        demoEmailText = "";
+        demoModal.hidden = false;
+        document.body.classList.add("qr-modal-open");
+        document.getElementById("demoName").focus();
+      }
+      function closeDemoModal() {
+        demoModal.hidden = true;
+        if (qrModal.hidden) document.body.classList.remove("qr-modal-open");
+        if (demoReturnFocus?.isConnected) demoReturnFocus.focus();
+      }
+      function prepareDemoEmail() {
+        const formData = new FormData(demoRequestForm);
+        const isEnglish = activeLanguage === "en";
+        const subject = isEnglish
+          ? "Rental OS demo request"
+          : "预约 Rental OS 演示";
+        const category = document
+          .getElementById("demoCategory")
+          .selectedOptions[0].textContent.trim();
+        const fields = isEnglish
+          ? [
+              `Name: ${formData.get("name")}`,
+              `Company: ${formData.get("company") || "—"}`,
+              `Contact: ${formData.get("contact")}`,
+              `Rental category: ${category}`,
+              `Notes: ${formData.get("details") || "—"}`,
+            ]
+          : [
+              `姓名：${formData.get("name")}`,
+              `公司名称：${formData.get("company") || "未填写"}`,
+              `联系方式：${formData.get("contact")}`,
+              `租赁品类：${category}`,
+              `补充说明：${formData.get("details") || "未填写"}`,
+            ];
+        const body = fields.join("\n");
+        demoEmailText = isEnglish
+          ? `To: hello@rentalos.cn\nSubject: ${subject}\n\n${body}`
+          : `收件人：hello@rentalos.cn\n主题：${subject}\n\n${body}`;
+        demoEmailLink.href = `mailto:hello@rentalos.cn?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        demoStatus.textContent = isEnglish
+          ? "Your details are ready. This site does not submit or store them; open the email draft or copy the request to send it manually."
+          : "信息已整理好。网页不会直接发送或保存，请打开邮件草稿发送，或复制内容手动发送。";
+        demoResult.hidden = false;
       }
       footerSocialButtons.forEach((button) => {
         button.addEventListener("click", () => openQrModal(button.dataset.social));
@@ -1837,8 +2185,42 @@
           closeQrModal();
         }
       });
+      document
+        .querySelectorAll('a[href^="mailto:"]:not([data-demo-mail])')
+        .forEach((link) => link.addEventListener("click", openDemoModal));
+      demoModalClose.addEventListener("click", closeDemoModal);
+      demoModal.addEventListener("click", (event) => {
+        if (event.target === demoModal || event.target.hasAttribute("data-demo-close")) {
+          closeDemoModal();
+        }
+      });
+      demoRequestForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        prepareDemoEmail();
+      });
+      demoCopyButton.addEventListener("click", async () => {
+        if (!demoEmailText) return;
+        try {
+          await navigator.clipboard.writeText(demoEmailText);
+          demoStatus.textContent =
+            activeLanguage === "en"
+              ? "Copied. Paste the details into your email to send the request."
+              : "已复制。请将内容粘贴到邮箱并发送。";
+          demoCopyFallback.hidden = true;
+        } catch (error) {
+          demoCopyFallback.value = demoEmailText;
+          demoCopyFallback.hidden = false;
+          demoCopyFallback.focus();
+          demoCopyFallback.select();
+          demoStatus.textContent =
+            activeLanguage === "en"
+              ? "Automatic copy was unavailable. The text is selected below; copy it and paste it into your email."
+              : "无法自动复制，已选中下方内容；请复制后粘贴到邮箱发送。";
+        }
+      });
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape" && !qrModal.hidden) closeQrModal();
+        if (event.key === "Escape" && !demoModal.hidden) closeDemoModal();
       });
       const translatableNodes = [];
       const walker = document.createTreeWalker(
@@ -1896,7 +2278,17 @@
           ? "Open QQ QR code"
           : "打开 QQ 二维码";
         updateQrModalCopy();
-        document.querySelectorAll('a[href^="mailto:"]').forEach((link) => {
+        demoModalClose.setAttribute(
+          "aria-label",
+          isEnglish ? "Close demo request" : "关闭预约窗口",
+        );
+        demoCopyFallback.setAttribute(
+          "aria-label",
+          isEnglish ? "Demo request email" : "预约邮件内容",
+        );
+        document
+          .querySelectorAll('a[href^="mailto:"]:not([data-demo-mail])')
+          .forEach((link) => {
           const isExpert = link.closest(".cta");
           const subject = isEnglish
             ? isExpert
@@ -1906,7 +2298,7 @@
               ? "咨询 Rental OS 行业解决方案"
               : "预约 Rental OS 演示";
           link.href = `mailto:hello@rentalos.cn?subject=${encodeURIComponent(subject)}`;
-        });
+          });
         const altTranslations = {
           摄影设备租赁: "Camera and production rentals",
           露营装备租赁: "Outdoor equipment rentals",

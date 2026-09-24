@@ -1,8 +1,11 @@
 import { LockOutlined, SafetyCertificateOutlined, UserOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Card, Form, Input, Modal, Space, Typography } from "antd";
 import { isAxiosError } from "axios";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { clientChannelApi } from "@/api/clientChannel";
+import { ADMIN_BRAND_NAME, ADMIN_DEFAULT_LOGO, applyAdminFavicon } from "@/app/branding";
 import { AppearanceSwitcher } from "@/components/AppearanceSwitcher";
 import { api } from "@/api/platform";
 import { useAuthStore } from "./authStore";
@@ -24,6 +27,21 @@ export function LoginPage() {
   const navigate = useNavigate();
   const [demoPasswordOpen, setDemoPasswordOpen] = useState(false);
   const [resettingDemoPassword, setResettingDemoPassword] = useState(false);
+  const watchedTenantCode = Form.useWatch("tenantCode", form)?.trim().toLowerCase();
+  const publicBootstrap = useQuery({
+    queryKey: ["public-admin-brand", watchedTenantCode],
+    queryFn: () => clientChannelApi.getPublicBootstrap(watchedTenantCode as string),
+    enabled: Boolean(watchedTenantCode && /^[a-z][a-z0-9_-]{1,31}$/u.test(watchedTenantCode)),
+    retry: false,
+    staleTime: 5 * 60 * 1000
+  });
+  const loginBrandName = publicBootstrap.data?.merchant.name?.trim() || ADMIN_BRAND_NAME;
+  const loginBrandLogo = publicBootstrap.data?.merchant.logoUrl?.trim() || ADMIN_DEFAULT_LOGO;
+
+  useEffect(() => {
+    document.title = loginBrandName === ADMIN_BRAND_NAME ? "登录运营台 · Rental OS" : `登录${loginBrandName}运营台`;
+    applyAdminFavicon(publicBootstrap.data?.merchant.faviconUrl);
+  }, [loginBrandName, publicBootstrap.data?.merchant.faviconUrl]);
 
   const fillLocalDemoAccount = (demo: (typeof LOCAL_DEMO_ACCOUNTS)[number]) => {
     form.setFieldsValue({ tenantCode: demo.tenantCode, account: demo.account, password: "" });
@@ -53,9 +71,9 @@ export function LoginPage() {
         <div className="login-appearance"><AppearanceSwitcher iconOnly /></div>
         <main className="login-workspace">
           <Card className="login-panel">
-            <div className="login-brand"><img src="/brand/logo-horizontal.png" alt="Rental OS" /></div>
+            <div className="login-brand"><img src={loginBrandLogo} alt={loginBrandName} /></div>
             <div className="login-panel-heading">
-              <Typography.Title level={2}>登录运营台</Typography.Title>
+              <Typography.Title level={2}>{loginBrandName === ADMIN_BRAND_NAME ? "登录运营台" : `登录${loginBrandName}运营台`}</Typography.Title>
               <Typography.Paragraph type="secondary">使用租户账号进入对应品类的租赁工作区。</Typography.Paragraph>
             </div>
           <Form form={form} layout="vertical" requiredMark={false} onFinish={async (values) => {

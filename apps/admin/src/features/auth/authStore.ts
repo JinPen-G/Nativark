@@ -44,6 +44,7 @@ interface AuthState {
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   switchWorkspace: (workspaceId: string) => Promise<void>;
   setTenantThemeColor: (themeColor?: string) => void;
+  setTenantBranding: (branding: Pick<TenantContext, "brandName" | "brandLogoUrl" | "faviconUrl" | "themeColor">) => void;
   logout: () => void;
   hasPermission: (permission?: string) => boolean;
   hasTenantMembershipPermission: (permission?: string) => boolean;
@@ -147,6 +148,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const current = get().tenant;
     if (!current) return;
     const tenant = { ...current, themeColor: themeColor?.trim() || undefined };
+    window.localStorage.setItem(keys.tenant, JSON.stringify(tenant));
+    set({ tenant });
+    window.dispatchEvent(new CustomEvent("rental-session-updated"));
+  },
+  setTenantBranding(branding) {
+    const current = get().tenant;
+    if (!current) return;
+    const tenant = {
+      ...current,
+      brandName: branding.brandName?.trim() || undefined,
+      brandLogoUrl: branding.brandLogoUrl?.trim() || undefined,
+      faviconUrl: branding.faviconUrl?.trim() || undefined,
+      themeColor: branding.themeColor?.trim() || undefined
+    };
     window.localStorage.setItem(keys.tenant, JSON.stringify(tenant));
     set({ tenant });
     window.dispatchEvent(new CustomEvent("rental-session-updated"));

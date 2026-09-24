@@ -7,7 +7,7 @@ export interface UploadedWebsiteImage { originalname: string; mimetype: string; 
 
 const MAX_BYTES = 2 * 1024 * 1024; // 官网品牌图上限 2MB
 const EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
-const SCENES = new Set(["logo", "hero", "category"]);
+const SCENES = new Set(["logo", "favicon", "hero", "category"]);
 
 /** 图片魔数校验，防止仅靠 MIME 头伪造。 */
 function matchesSignature(mimeType: string, content: Buffer): boolean {
@@ -18,7 +18,7 @@ function matchesSignature(mimeType: string, content: Buffer): boolean {
 }
 
 /**
- * WEBSITE-CHANNEL-04：官网品牌图片（Logo/Hero/品类入口图）的上传与公开读取。
+ * WEBSITE-CHANNEL-04：官网与后台品牌图片（Logo/Favicon/Hero/品类入口图）的上传与公开读取。
  * 字节直接入库；公开读取按 tenantCode + assetId，并核对图片确属该租户，避免越权读到其它文件。
  */
 @Injectable()

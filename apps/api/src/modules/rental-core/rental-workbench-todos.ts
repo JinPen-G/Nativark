@@ -18,6 +18,7 @@ const TODO_TYPES: RentalWorkbenchTodoType[] = [
   "fee_review",
   "refund",
   "work_order",
+  "offline_payment_pending",
   "notification_failure",
   "cancelled_refund_due"
 ];

@@ -15,7 +15,7 @@ type ProfileForm = SaveClientChannelProfileRequest;
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
 /** Form.Item 兼容的图片上传：上传到官网资产接口，把返回的公开 URL 写回字段；也可移除。 */
-function ImageUrlUpload({ value, onChange, scene, hint, previewHeight = 64 }: { value?: string; onChange?: (url: string) => void; scene: "logo" | "hero" | "category"; hint: string; previewHeight?: number; }) {
+function ImageUrlUpload({ value, onChange, scene, hint, previewHeight = 64 }: { value?: string; onChange?: (url: string) => void; scene: "logo" | "favicon" | "hero" | "category"; hint: string; previewHeight?: number; }) {
   const { message } = App.useApp();
   const [uploading, setUploading] = useState(false);
   const preview = value ? (value.startsWith("/") ? `${apiAssetOrigin}${value}` : value) : "";
@@ -51,7 +51,7 @@ function ProfileCard() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
   const tenantId = useAuthStore((state) => state.tenant?.tenantId);
-  const setTenantThemeColor = useAuthStore((state) => state.setTenantThemeColor);
+  const setTenantBranding = useAuthStore((state) => state.setTenantBranding);
   // 原生取色器需要合法 #RRGGBB；表单里可能是 #RGB 或空，展示时归一化，不回写表单值。
   const themeColorValue = Form.useWatch("themeColor", form);
   const themeColorSwatch = /^#[0-9a-fA-F]{6}$/.test(themeColorValue ?? "") ? (themeColorValue as string) : /^#[0-9a-fA-F]{3}$/.test(themeColorValue ?? "") ? "#" + (themeColorValue as string).slice(1).split("").map((c) => c + c).join("") : ADMIN_DEFAULT_PRIMARY_COLOR;
@@ -64,6 +64,7 @@ function ProfileCard() {
       expectedRevision: data.revision,
       brandName: data.brandName,
       brandLogoUrl: data.brandLogoUrl,
+      faviconUrl: data.faviconUrl,
       customerServicePhone: data.customerServicePhone,
       customerServiceHours: data.customerServiceHours,
       userAgreement: data.userAgreement ?? { name: "用户服务协议", version: "", url: "", body: "" },
@@ -86,7 +87,7 @@ function ProfileCard() {
       expectedRevision: profile.data?.revision,
       helpFaq: (values.helpFaq ?? []).filter((item) => item?.question?.trim() && item?.answer?.trim())
     }),
-    onSuccess: async (data) => { setTenantThemeColor(data.themeColor); await queryClient.invalidateQueries({ queryKey: ["client-channel-profile", tenantId] }); message.success("客户端渠道配置已保存"); },
+    onSuccess: async (data) => { setTenantBranding({ brandName: data.brandName, brandLogoUrl: data.brandLogoUrl, faviconUrl: data.faviconUrl, themeColor: data.themeColor }); await queryClient.invalidateQueries({ queryKey: ["client-channel-profile", tenantId] }); message.success("客户端渠道配置已保存"); },
     onError: (error: any) => message.error(error?.response?.data?.message ?? "保存失败")
   });
 
@@ -110,6 +111,7 @@ function ProfileCard() {
           <Row gutter={[16, 0]}>
             <Col xs={24} md={12}><Form.Item name="brandName" label="商户展示名" extra="登录页标题、启动配置与分享使用；缺省用租户名"><Input maxLength={191} placeholder="如：光影摄影器材租赁" /></Form.Item></Col>
             <Col xs={24} md={12}><Form.Item name="brandLogoUrl" label="商户 Logo" extra="登录页、启动配置与分享使用"><ImageUrlUpload scene="logo" previewHeight={48} hint="建议 240×80px 横版（透明背景 PNG 更佳），≤ 500KB，JPG/PNG/WebP。" /></Form.Item></Col>
+            <Col xs={24} md={12}><Form.Item name="faviconUrl" label="浏览器图标" extra="浏览器标签页与收藏夹使用；留空回退平台默认图标"><ImageUrlUpload scene="favicon" previewHeight={48} hint="建议 64×64px 方形图标，≤ 500KB，JPG/PNG/WebP。" /></Form.Item></Col>
             <Col xs={24} md={12}><Form.Item name="customerServicePhone" label="客服电话" extra="订单/付款页“联系商户”与拨号使用"><Input maxLength={32} placeholder="如：021-00000000" /></Form.Item></Col>
             <Col xs={24} md={12}><Form.Item name="customerServiceHours" label="客服时段" extra="展示文案，如“工作日 9:00-18:00”"><Input maxLength={64} /></Form.Item></Col>
           </Row>

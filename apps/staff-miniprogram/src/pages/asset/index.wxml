@@ -16,8 +16,16 @@
         <view class="kv" wx:for="{{fields}}" wx:key="label"><text class="kv__label">{{item.label}}</text><text class="kv__value">{{item.value}}</text></view>
       </view>
     </view>
-    <view class="section section--tight"><view class="card"><view class="row row--between"><view class="subtitle">状态记录</view><view class="link" bindtap="onLedger">查看库存流水</view></view><view wx:if="{{!history.length}}" class="muted mt-12">暂无记录</view><view class="cell" wx:for="{{history}}" wx:key="id"><view class="cell__body"><view class="cell__title">{{item.action}}</view><view class="cell__desc">{{item.detail}} · {{item.date}}</view></view></view></view></view>
-    <view wx:if="{{orders.length}}" class="section section--tight"><view class="card"><view class="subtitle">关联订单</view><view class="cell" wx:for="{{orders}}" wx:key="id" data-id="{{item.id}}" bindtap="onOrder"><view class="cell__body"><view class="cell__title">{{item.no}}</view><view class="cell__desc">{{item.status}}</view></view><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></view></view>
-    <view wx:if="{{canManage}}" class="bottom-bar"><button class="btn btn--primary btn--block" bindtap="onEdit">编辑{{assetLabel}}</button></view>
+    <view class="section section--tight">
+      <view class="asset-quick-grid">
+        <view wx:if="{{canManage}}" class="asset-quick" hover-class="btn-hover" bindtap="onEdit"><view class="asset-quick__icon"><ui-icon name="edit" size="42" color="primary" stroke="1.7"></ui-icon></view><view class="asset-quick__label">编辑{{assetLabel}}</view></view>
+        <view class="asset-quick" hover-class="btn-hover" bindtap="onLedger"><view class="asset-quick__icon asset-quick__icon--green"><ui-icon name="transfer" size="42" color="success" stroke="1.7"></ui-icon></view><view class="asset-quick__label">库存流水</view></view>
+        <view class="asset-quick" hover-class="btn-hover" bindtap="onScrollToRental"><view class="asset-quick__icon asset-quick__icon--orange"><ui-icon name="history" size="42" color="warning" stroke="1.7"></ui-icon></view><view class="asset-quick__label">租赁历史</view></view>
+        <view class="asset-quick" hover-class="btn-hover" bindtap="onCopy"><view class="asset-quick__icon asset-quick__icon--purple"><ui-icon name="link" size="42" color="purple" stroke="1.7"></ui-icon></view><view class="asset-quick__label">复制编号</view></view>
+      </view>
+    </view>
+    <view wx:if="{{orders.length}}" id="asset-rental-history" class="section section--tight"><view class="subtitle asset-section-head">租赁历史</view><view class="card asset-history-card"><view class="cell asset-rental-row" wx:for="{{orders}}" wx:key="id" data-id="{{item.id}}" hover-class="btn-hover" bindtap="onOrder"><view class="asset-rental-thumb"><image wx:if="{{imagePath}}" src="{{imagePath}}" mode="aspectFill"></image><ui-icon wx:else name="box" size="42" color="muted"></ui-icon></view><view class="cell__body"><view class="cell__title">{{item.customer}}</view><view class="cell__desc">{{item.period}}</view><view class="cell__desc">#{{item.no}} · {{item.status}}</view></view><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></view></view>
+    <view class="section section--tight"><view class="card asset-history-card"><view class="row row--between"><view class="subtitle">状态记录</view><view class="link" bindtap="onLedger">查看库存流水</view></view><view wx:if="{{!history.length}}" class="muted mt-12">暂无记录</view><view class="cell" wx:for="{{history}}" wx:key="id"><view class="cell__body"><view class="cell__title">{{item.action}}</view><view class="cell__desc">{{item.detail}} · {{item.date}}</view></view></view></view></view>
+    <view class="bottom-bar asset-actions"><button class="btn btn--secondary" bindtap="onLedger">库存流水</button><button wx:if="{{canManage}}" class="btn btn--primary" bindtap="onEdit">编辑{{assetLabel}}</button></view>
   </block>
 </view>

@@ -322,6 +322,11 @@ export class PlatformController {
     return this.platformService.listWorkspaceMembers(id, req.user);
   }
 
+  @Get("workspaces/:id/fulfillment-locations")
+  workspaceFulfillmentLocations(@Param("id") id: string, @Req() req: RequestWithUser) {
+    return this.platformService.listWorkspaceFulfillmentLocations(id, req.user);
+  }
+
   @Put("workspaces/:id/members")
   saveWorkspaceMember(
     @Param("id") id: string,

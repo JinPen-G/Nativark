@@ -13,12 +13,19 @@ import { ClientApiRateLimitService } from "../modules/client/client-api-rate-lim
 import { WorkspaceCapabilityService } from "../modules/rental-core/workspace-capability.service";
 import { enterRequestIdentity } from "./request-identity";
 import { matchableRequestPath } from "./request-path";
+import { isStaffAuthPath, isStaffBusinessRouteAllowed, staffRoutePermissions } from "./staff-api-policy";
+import { PrismaService } from "../modules/database/prisma.service";
 
 interface RequestLike {
   method: string;
   url: string;
+  originalUrl?: string;
   headers: Record<string, string | string[] | undefined>;
   ip?: string;
+  body?: unknown;
+  query?: Record<string, unknown>;
+  staffApiRequest?: boolean;
+  staffLocationScope?: { mode: "all" | "selected"; locationIds: string[] };
   user?: SystemUserRow;
   client?: import("../modules/client/client-auth.service").ClientRequestContext;
 }
@@ -60,6 +67,13 @@ export const PUBLIC_ROUTES = new Set([
   "/auth/change-password",
   "/auth/switch-workspace",
   "/auth/session-context",
+  "/staff/v1/auth/login",
+  "/staff/v1/auth/refresh",
+  "/staff/v1/auth/logout",
+  "/staff/v1/auth/me",
+  "/staff/v1/auth/session-context",
+  "/staff/v1/auth/change-password",
+  "/staff/v1/auth/switch-workspace",
   "/payments/webhooks/alipay",
   "/payments/webhooks/wechat_pay",
   "/payments/webhooks/alipay/refund",
@@ -127,6 +141,15 @@ export function requiredPermissions(method: string, path: string) {
   if (isPublicRoute(path) || method === "OPTIONS") {
     return [];
   }
+  if (isStaffAuthPath(path)) return [];
+  if (path.startsWith("/staff/v1/uploads/")) {
+    // The staff routing layer replaces this static superset with a scene-specific permission.
+    return ["rental-os:order:pickup", "rental-os:order:return", "rental-os:order:offline-payment", "rental-core:maintenance:manage"];
+  }
+  if (path === "/staff/v1/offline-payments") {
+    return method === "GET" ? ["rental-os:order:view"] : ["rental-os:order:offline-payment"];
+  }
+  if (/^\/staff\/v1\/offline-payments\/[^/]+\/confirm$/u.test(path)) return ["rental-os:order:settle"];
 
   if (path.startsWith("/platform/official-calendars")) {
     // 公共官方日历来源注册表（需求 4.5.2/4.5.8）。仅 SaaS 平台管理员；
@@ -204,6 +227,7 @@ export function requiredPermissions(method: string, path: string) {
     return ["system:user:manage"];
   }
   if (path.startsWith("/platform/workspaces")) {
+    if (path.endsWith("/fulfillment-locations")) return ["system:user:manage"];
     // 成员关系直接决定谁能进入哪个空间、以何角色进入，等价于授权操作，
     // 因此读也要求管理权限；空间列表本身按用户管理权限放行读。
     if (path.includes("/members")) {
@@ -479,6 +503,9 @@ export function requiredPermissions(method: string, path: string) {
   if (path.match(/^\/rental\/v1\/orders\/[^/]+$/)) {
     return ["rental-os:order:view"];
   }
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/internal-notes$/)) {
+    return method === "GET" ? ["rental-os:order:view"] : ["rental-os:order:operate"];
+  }
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/changes$/)) {
     return method === "GET" ? ["rental-os:order:view"] : ["rental-os:order:operate"];
   }
@@ -524,7 +551,7 @@ export function requiredPermissions(method: string, path: string) {
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/exceptions\/[^/]+\/customer-response$/)) return ["rental-os:order:fee-review"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/inspections\/[^/]+\/exceptions\/[^/]+\/re-review$/)) return ["rental-os:order:fee-review"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/cancel$/)) return ["rental-os:order:cancel", "rental-os:order:operate"];
-  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/operation-lock$/)) return ["rental-os:order:operate", "rental-os:order:pickup", "rental-os:order:return"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/operation-lock$/)) return ["rental-os:order:operate", "rental-os:order:pickup", "rental-os:order:return", "rental-os:order:reassign"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/handover\/pickup$/)) return ["rental-os:order:operate", "rental-os:order:pickup"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/(handover\/return|partial-return)$/)) return ["rental-os:order:operate", "rental-os:order:return"];
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/(assignments|allocation-candidates)$/)) return ["rental-os:order:operate"];
@@ -590,7 +617,8 @@ export class ApiAuthGuard implements CanActivate {
     // 直接构造守卫；缺失时能力门禁**拒绝**而不是放行（见 canActivate 内注释）。
     @Optional() private readonly capabilities?: WorkspaceCapabilityService,
     @Optional() private readonly clientAuth?: ClientAuthService,
-    @Optional() private readonly clientRateLimit?: ClientApiRateLimitService
+    @Optional() private readonly clientRateLimit?: ClientApiRateLimitService,
+    @Optional() private readonly prisma?: PrismaService
   ) {}
 
   async canActivate(context: ExecutionContext) {
@@ -599,7 +627,11 @@ export class ApiAuthGuard implements CanActivate {
     // 而本文件全是字符串前缀与正则判定。两者语义不一致时，变体路径会落到
     // requiredPermissions 末尾的 `return []` 并被当作"无需权限"放行。详见 request-path.ts。
     const path = matchableRequestPath(request.url);
-    const permissions = requiredPermissions(request.method, path);
+    const staffApiRequest = Boolean(request.staffApiRequest || /^\/api\/staff\/v1(?:\/|\?|$)/iu.test(request.originalUrl ?? ""));
+    if (staffApiRequest && !isStaffBusinessRouteAllowed(request.method, path)) {
+      throw new ForbiddenException("该接口未向员工小程序开放");
+    }
+    const permissions = staffApiRequest && isStaffAuthPath(path) ? [] : requiredPermissions(request.method, path);
 
     if (
       path === "/health" ||
@@ -607,6 +639,7 @@ export class ApiAuthGuard implements CanActivate {
       path === "/auth/login" ||
       path === "/auth/development/reset-demo-password" ||
       path === "/auth/refresh" ||
+      (staffApiRequest && ["/staff/v1/auth/login", "/staff/v1/auth/refresh", "/staff/v1/auth/logout"].includes(path)) ||
       request.method === "OPTIONS"
     ) {
       return true;
@@ -644,7 +677,8 @@ export class ApiAuthGuard implements CanActivate {
     const token = Array.isArray(authorization) ? authorization[0] : authorization;
     const tenantMembershipRoute = isTenantMembershipRoute(path);
     const accessContext = await this.authService.resolveAccessContext(token, {
-      allowInvalidWorkspace: tenantMembershipRoute || path.startsWith("/auth/") || path.startsWith("/platform/")
+      allowInvalidWorkspace: tenantMembershipRoute || path.startsWith("/auth/") || path.startsWith("/staff/v1/auth/") || path.startsWith("/platform/"),
+      audience: staffApiRequest ? "staff" : "operator"
     });
     const user = tenantMembershipRoute ? accessContext?.tenantUser : accessContext?.user;
     const workspaceId = accessContext?.workspaceId;
@@ -718,7 +752,8 @@ export class ApiAuthGuard implements CanActivate {
     if (path.startsWith("/platform/official-calendars") && !user.isSaasAdmin) {
       throw new ForbiddenException("仅 SaaS 平台管理员可以维护公共官方日历来源");
     }
-    if (!hasAnyPermission(user, permissions)) {
+    const staffPermissionOverride = staffApiRequest ? staffRoutePermissions(request.method, path, request.body) : undefined;
+    if (!hasAnyPermission(user, staffPermissionOverride ?? permissions)) {
       throw new ForbiddenException("当前账号无权访问该功能");
     }
     const capability = requiredCapability(path);
@@ -791,15 +826,134 @@ export class ApiAuthGuard implements CanActivate {
       throw new ForbiddenException("当前会话没有经营空间，请先选择经营空间");
     }
 
+    const staffLocationScope = accessContext?.user.locationScope ?? { mode: "all" as const, locationIds: [] };
+    if (staffApiRequest && !isStaffAuthPath(path)) {
+      request.staffLocationScope = staffLocationScope;
+      await this.assertStaffLocationAccess(request, path, user, workspaceId, staffLocationScope);
+    }
     enterRequestIdentity({
       tenantId: user.tenantId,
       userId: user.id,
       operationToken: typeof request.headers["x-operation-token"] === "string" ? request.headers["x-operation-token"] : undefined,
       isSaasAdmin: Boolean(user.isSaasAdmin),
       // 只从会话写入，绝不读取请求体或查询参数里的 workspaceId。
-      workspaceId
+      workspaceId,
+      staffApi: staffApiRequest,
+      staffLocationScope
     });
     request.user = user;
     return true;
+  }
+
+  private async assertStaffLocationAccess(
+    request: RequestLike,
+    path: string,
+    user: SystemUserRow,
+    workspaceId: string | undefined,
+    scope: { mode: "all" | "selected"; locationIds: string[] }
+  ) {
+    if (scope.mode === "all") return;
+    if (!this.prisma || !workspaceId || !Array.isArray(scope.locationIds) || !scope.locationIds.length) {
+      throw new ForbiddenException("员工地点范围未就绪，已拒绝访问");
+    }
+    const allowed = new Set(scope.locationIds);
+    const body = request.body && typeof request.body === "object" ? request.body as Record<string, unknown> : {};
+    const query = request.query ?? {};
+    const ensureLocations = (values: unknown[]) => {
+      const ids = values.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+      if (values.some((value) => typeof value !== "string" || !allowed.has(value))) throw new ForbiddenException("所选履约地点不在当前员工授权范围内");
+      for (const id of ids) if (!allowed.has(id)) throw new ForbiddenException("所选履约地点不在当前员工授权范围内");
+    };
+    const explicitLocations = [body.locationId, body.fulfillmentLocationId, body.returnLocationId, body.serviceLocationId, body.fromLocationId, body.toLocationId, query.locationId]
+      .filter((value) => value !== undefined && value !== null && value !== "");
+    if (explicitLocations.length) ensureLocations(explicitLocations);
+
+    const orderMatch = path.match(/^\/rental\/v1\/orders\/([^/]+)/u);
+    if (path === "/rental/v1/orders" && request.method.toUpperCase() === "POST") {
+      if (typeof body.fulfillmentLocationId !== "string") throw new ForbiddenException("员工创建订单必须指定已授予的履约地点");
+      ensureLocations([body.fulfillmentLocationId, ...(body.returnLocationId ? [body.returnLocationId] : [])]);
+    } else if (path === "/rental/v1/quotes" && request.method.toUpperCase() === "POST") {
+      if (typeof body.locationId !== "string") throw new ForbiddenException("员工报价必须指定已授予的履约地点");
+      ensureLocations([body.locationId]);
+    } else if (orderMatch && orderMatch[1] !== "expire-pending" && orderMatch[1] !== "reconcile-pickup-overdue") {
+      const order = await this.prisma.rentalOrder.findFirst({
+        where: { id: orderMatch[1], tenantId: user.tenantId, workspaceId, OR: [
+          { fulfillmentLocationId: { in: scope.locationIds } },
+          { returnLocationId: { in: scope.locationIds } }
+        ] }, select: { id: true }
+      });
+      if (!order) throw new ForbiddenException("订单不存在或不在当前员工授权地点范围内");
+      const assetIds = this.extractAssetIds(body);
+      if (assetIds.length) {
+        const assets = await this.prisma.rentalAsset.findMany({ where: { id: { in: assetIds }, tenantId: user.tenantId, workspaceId, locationId: { in: scope.locationIds } }, select: { id: true } });
+        if (assets.length !== new Set(assetIds).size) throw new ForbiddenException("订单分配的资产不在当前员工授权地点范围内");
+      }
+    }
+
+    const workOrderMatch = path.match(/^\/rental\/v1\/work-orders\/([^/]+)/u);
+    if (workOrderMatch) {
+      const row = await this.prisma.rentalWorkOrder.findFirst({ where: { id: workOrderMatch[1], tenantId: user.tenantId, workspaceId, locationId: { in: scope.locationIds } }, select: { id: true } });
+      if (!row) throw new ForbiddenException("工单不存在或不在当前员工授权地点范围内");
+    }
+    const assetMatch = path.match(/^\/rental\/v1\/assets\/([^/]+)/u);
+    if (assetMatch) {
+      const row = await this.prisma.rentalAsset.findFirst({ where: { id: assetMatch[1], tenantId: user.tenantId, workspaceId, locationId: { in: scope.locationIds } }, select: { id: true } });
+      if (!row) throw new ForbiddenException("资产不存在或不在当前员工授权地点范围内");
+    }
+    if (path === "/rental/v1/assets" && request.method.toUpperCase() !== "GET") {
+      if (typeof body.locationId !== "string") throw new ForbiddenException("资产必须绑定已授权履约地点");
+      ensureLocations([body.locationId]);
+    }
+    if (path === "/rental/v1/stock-operations" || path === "/rental/v1/stock-balances") {
+      const values = Array.isArray(body.operations) ? body.operations : Array.isArray(body.lines) ? body.lines : [];
+      const rowLocations = values.flatMap((value) => value && typeof value === "object" ? [(value as Record<string, unknown>).locationId] : []);
+      if (request.method.toUpperCase() !== "GET" && !body.locationId && !rowLocations.length) throw new ForbiddenException("库存作业必须绑定已授权履约地点");
+      if (rowLocations.length) ensureLocations(rowLocations);
+    }
+    const dispositionMatch = path.match(/^\/rental\/v1\/stock-dispositions\/([^/]+)\/restore$/u);
+    if (dispositionMatch) {
+      const row = await this.prisma.rentalStockDisposition.findFirst({
+        where: { id: dispositionMatch[1], tenantId: user.tenantId, workspaceId, order: { is: { OR: [
+          { fulfillmentLocationId: { in: scope.locationIds } },
+          { returnLocationId: { in: scope.locationIds } }
+        ] } } }, select: { id: true }
+      });
+      if (!row) throw new ForbiddenException("库存处置不存在或不在当前员工授权地点范围内");
+    }
+    const uploadMatch = path.match(/^\/staff\/v1\/uploads\/sessions(?:\/([^/]+)\/complete)?$/u);
+    if (uploadMatch) {
+      let ownerType = String(body.businessType ?? "");
+      let ownerId = String(body.businessId ?? "");
+      if (uploadMatch[1]) {
+        const session = await this.prisma.fileUploadSession.findFirst({ where: { id: uploadMatch[1], tenantId: user.tenantId }, include: { fileAsset: true } });
+        ownerType = session?.fileAsset.businessType ?? "";
+        ownerId = session?.fileAsset.businessId ?? "";
+      }
+      if (ownerType === "rental_order") {
+        const row = await this.prisma.rentalOrder.findFirst({ where: { id: ownerId, tenantId: user.tenantId, workspaceId, OR: [
+          { fulfillmentLocationId: { in: scope.locationIds } },
+          { returnLocationId: { in: scope.locationIds } }
+        ] }, select: { id: true } });
+        if (!row) throw new ForbiddenException("附件所关联订单不在当前员工授权地点范围内");
+      } else if (ownerType === "rental_work_order") {
+        const row = await this.prisma.rentalWorkOrder.findFirst({ where: { id: ownerId, tenantId: user.tenantId, workspaceId, locationId: { in: scope.locationIds } }, select: { id: true } });
+        if (!row) throw new ForbiddenException("附件所关联工单不在当前员工授权地点范围内");
+      } else throw new ForbiddenException("员工附件必须绑定当前范围内的订单或工单");
+    }
+  }
+
+  private extractAssetIds(value: unknown): string[] {
+    if (!value || typeof value !== "object") return [];
+    const found = new Set<string>();
+    const visit = (item: unknown) => {
+      if (!item || typeof item !== "object") return;
+      if (Array.isArray(item)) { item.forEach(visit); return; }
+      for (const [key, child] of Object.entries(item as Record<string, unknown>)) {
+        if ((key === "assetId" || key === "assetIds") && typeof child === "string") found.add(child);
+        else visit(child);
+      }
+    };
+    visit(value);
+    return [...found];
   }
 }

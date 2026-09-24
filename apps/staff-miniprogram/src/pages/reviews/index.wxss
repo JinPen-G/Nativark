@@ -1,0 +1,10 @@
+/* S14 审核待办：仅布局与间距，字号字重走 app.wxss 语义类，配色走 var(--token)。 */
+.reviews-avatar { width: 80rpx; height: 80rpx; }
+.cell__title.row { align-items: center; }
+
+.reviews-head { display: flex; align-items: center; padding: 4rpx 0 20rpx; }
+.reviews-block { margin-top: 20rpx; }
+.reviews-info { border: 1rpx solid var(--border); }
+.reviews-evidence { width: 100%; border-radius: var(--radius-sm); background: var(--page); }
+.reviews-actions { display: flex; gap: 12rpx; }
+.reviews-actions .btn { flex: 1; padding: 0 16rpx; }

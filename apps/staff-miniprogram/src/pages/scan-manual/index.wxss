@@ -7,3 +7,11 @@
 .hist-thumb image { width: 100%; height: 100%; }
 .card { box-shadow: none; border: 1rpx solid var(--border); }
 .theme-dark .manual-input { background: var(--surface); border: 1rpx solid var(--line); }
+.screen > .section { padding-left: 24rpx; padding-right: 24rpx; }
+.seg--even { height: 68rpx; padding: 0 20rpx; }
+.seg--even .seg__item { flex: 0 0 50%; font-size: 25rpx; }
+.seg--even .seg__item--active::after { left: 31%; right: 31%; height: 4rpx; }
+.manual-input { min-height: 68rpx; }
+.btn--cta { border-radius: 12rpx; min-height: 68rpx; }
+.sec-head__title { font-size: 28rpx; }
+.hist-thumb { width: 78rpx; height: 78rpx; margin-right: 14rpx; }

@@ -22,6 +22,9 @@ export interface FileBusinessOwner {
   uploadScene?: string;
   /** 订单、型号等空间业务必须带当前空间；客户资料和资质按租户共享。 */
   workspaceId?: string;
+  /** 员工上传时由已验证会话补入；绝不从客户端 metadata 读取操作者。 */
+  actorUserId?: string;
+  actorName?: string;
 }
 
 const UPLOAD_TTL_SECONDS = 15 * 60;
@@ -154,6 +157,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       const existingAsset = await this.prisma.fileAsset.findUniqueOrThrow({ where: { id: existing.fileAssetId } });
       if (existingAsset.tenantId !== tenantId) throw new NotFoundException("上传会话不存在或不属于当前租户");
       if (owner && !this.matchesOwner(existingAsset, owner)) throw new ConflictException("幂等键已被其他业务对象使用，请更换幂等键");
+      if (owner?.actorUserId && existingAsset.uploadedBy !== owner.actorUserId) throw new ConflictException("上传幂等键已由其他员工使用，请重新选择文件");
       if (!this.matchesUploadRequest(existingAsset, input, mimeType)) {
         throw new ConflictException("幂等键已用于不同文件上传请求，请更换幂等键");
       }
@@ -206,7 +210,17 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
             publicUrl: null,
             uploadScene: input.uploadScene.trim(),
             status: "pending_upload",
-            metadata: { ...(input.metadata ?? {}), uploadMode: mode } as Prisma.InputJsonValue
+            uploadedBy: owner?.actorUserId ?? null,
+            metadata: {
+              ...(input.metadata ?? {}),
+              ...(owner?.actorUserId ? {
+                uploadedByUserId: owner.actorUserId,
+                uploadedByName: owner.actorName ?? "",
+                uploadedAt: new Date().toISOString()
+              } : {}),
+              ...(owner?.workspaceId ? { workspaceId: owner.workspaceId } : {}),
+              uploadMode: mode
+            } as Prisma.InputJsonValue
           }
         });
         const session = await tx.fileUploadSession.create({
@@ -232,6 +246,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
           const concurrentAsset = await this.prisma.fileAsset.findUniqueOrThrow({ where: { id: concurrent.fileAssetId } });
           if (concurrentAsset.tenantId !== tenantId) throw new NotFoundException("上传会话不存在或不属于当前租户");
           if (owner && !this.matchesOwner(concurrentAsset, owner)) throw new ConflictException("幂等键已被其他业务对象使用，请更换幂等键");
+          if (owner?.actorUserId && concurrentAsset.uploadedBy !== owner.actorUserId) throw new ConflictException("上传幂等键已由其他员工使用，请重新选择文件");
           if (!this.matchesUploadRequest(concurrentAsset, input, mimeType)) {
             throw new ConflictException("幂等键已用于不同文件上传请求，请更换幂等键");
           }

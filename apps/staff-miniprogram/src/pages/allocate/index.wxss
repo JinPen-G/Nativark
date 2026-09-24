@@ -1,0 +1,9 @@
+/* allocate（配货与锁定）：仅布局，字号字重走语义类，颜色走 var(--token)，深浅色自动跟随。 */
+.alloc-meta { display: flex; flex-wrap: wrap; }
+.alloc-meta text { margin-right: 32rpx; }
+.alloc-meta text:last-child { margin-right: 0; }
+
+.alloc-qty { display: flex; align-items: center; }
+.alloc-qty__input { flex: 1; margin-left: 24rpx; }
+
+.alloc-actions { padding-top: 8rpx; }

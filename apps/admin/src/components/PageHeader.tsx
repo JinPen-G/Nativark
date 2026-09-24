@@ -3,7 +3,9 @@ import { Button, Popover, Space } from "antd";
 import { useEffect, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { findRouteByPath } from "@/app/navigation";
+import { resolveAdminBrandName } from "@/app/branding";
 import { useLocale } from "@/app/locale";
+import { useAuthStore } from "@/features/auth/authStore";
 
 /**
  * 页面顶部：左边是标题与副标题（+ 页面自己的视图切换），右边是说明和主操作。
@@ -24,15 +26,18 @@ export function PageHeader({ title, description, view, extra, note }: {
 }) {
   const location = useLocation();
   const { t, locale } = useLocale();
+  const tenant = useAuthStore((state) => state.tenant);
+  const user = useAuthStore((state) => state.user);
   const icon = findRouteByPath(location.pathname)?.icon;
   const translatedTitle = t(title);
+  const brandName = resolveAdminBrandName(tenant, user);
   const translatedDescription = t(description);
   const translatedNoteTitle = note ? t(note.title) : undefined;
   const translatedNoteDescription = note && typeof note.description === "string" ? t(note.description) : note?.description;
 
   useEffect(() => {
-    document.title = `${translatedTitle} · Rental OS`;
-  }, [translatedTitle]);
+    document.title = `${translatedTitle} · ${brandName}`;
+  }, [brandName, translatedTitle]);
 
   return (
     <>

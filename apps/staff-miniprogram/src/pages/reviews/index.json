@@ -1,0 +1,11 @@
+{
+  "navigationStyle": "custom",
+  "enablePullDownRefresh": true,
+  "usingComponents": {
+    "nav-bar": "/components/nav-bar/index",
+    "ui-icon": "/components/ui-icon/index",
+    "state-view": "/components/state-view/index",
+    "status-tag": "/components/status-tag/index",
+    "sheet": "/components/sheet/index"
+  }
+}

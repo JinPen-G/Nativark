@@ -6,3 +6,6 @@
 .ledger-entry__card { flex: 1; min-width: 0; padding: 20rpx; box-shadow: none; border: 1rpx solid var(--border); }
 .ledger-entry__card .subtitle { font-size: 25rpx; }
 .ledger-entry__quantity { color: var(--primary); font-weight: 700; }
+.ledger-entry__date text { display: block; margin-top: 4rpx; color: var(--muted); font-size: 18rpx; }
+.ledger-entry__meta { align-items: center; gap: 8rpx; margin-top: 10rpx; }
+.ledger-entry__meta .muted { flex: 1; min-width: 0; line-height: 1.45; }

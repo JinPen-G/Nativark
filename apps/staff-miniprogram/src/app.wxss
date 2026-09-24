@@ -27,9 +27,25 @@ page {
   --radius-sm: 12rpx;
   --radius-pill: 999rpx;
   --shadow: 0 4rpx 16rpx rgba(31, 41, 55, 0.05);
+  /* 统一排版 token：全端字号/字重只在这里配置，页面一律用语义类（.title/.subtitle/.section-title/.body/.caption…），
+   * 不在页面里写死 font-size/font-weight。特例（品牌大数字、价格）另有专用类。 */
+  --font-page-title: 40rpx;   /* 页面主标题 */
+  --font-title: 36rpx;        /* 卡片/区块主标题 */
+  --font-section: 32rpx;      /* 二级标题（区块标题） */
+  --font-subtitle: 30rpx;     /* 三级标题/条目标题 */
+  --font-body: 28rpx;         /* 正文 */
+  --font-secondary: 26rpx;    /* 次要说明 */
+  --font-caption: 24rpx;      /* 辅助/小字 */
+  --font-mini: 22rpx;         /* 角标/极小字 */
+  --fw-bold: 700;
+  --fw-semibold: 600;
+  --fw-medium: 500;
+  --fw-regular: 400;
+  --line-tight: 1.35;
+  --line-normal: 1.5;
   background: var(--page);
   color: var(--text);
-  font-size: 28rpx;
+  font-size: var(--font-body);
   line-height: 1.5;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -136,15 +152,17 @@ view, text, button, input, textarea, picker, scroll-view, image, navigator, swip
 .mr-16 { margin-right: 16rpx; }
 
 /* 文字 */
-.title { font-size: 36rpx; font-weight: 700; line-height: 1.35; }
-.title--page { font-size: 40rpx; font-weight: 700; }
-.subtitle { font-size: 30rpx; font-weight: 600; }
-.body { font-size: 28rpx; }
-.muted { color: var(--secondary); font-size: 26rpx; }
-.small { font-size: 24rpx; }
-.tiny { font-size: 22rpx; }
-.strong { font-weight: 600; }
-.bold { font-weight: 700; }
+/* 文字：全部引用排版 token，页面不再写死字号字重 */
+.title { font-size: var(--font-title); font-weight: var(--fw-bold); line-height: var(--line-tight); }
+.title--page { font-size: var(--font-page-title); font-weight: var(--fw-bold); }
+.subtitle { font-size: var(--font-subtitle); font-weight: var(--fw-semibold); }
+.body { font-size: var(--font-body); }
+.caption { font-size: var(--font-caption); color: var(--secondary); }
+.muted { color: var(--secondary); font-size: var(--font-secondary); }
+.small { font-size: var(--font-caption); }
+.tiny { font-size: var(--font-mini); }
+.strong { font-weight: var(--fw-semibold); }
+.bold { font-weight: var(--fw-bold); }
 .danger-text { color: var(--danger); }
 .success-text { color: var(--success); }
 .warning-text { color: var(--warning); }
@@ -153,7 +171,7 @@ view, text, button, input, textarea, picker, scroll-view, image, navigator, swip
 .ellipsis { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .clamp-2 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .center { text-align: center; }
-.section-title { font-size: 32rpx; font-weight: 700; }
+.section-title { font-size: var(--font-section); font-weight: var(--fw-bold); }
 .section-head { display: flex; align-items: center; justify-content: space-between; padding: 24rpx 0 16rpx; }
 .section-link { display: flex; align-items: center; color: var(--secondary); font-size: 26rpx; min-height: 56rpx; }
 

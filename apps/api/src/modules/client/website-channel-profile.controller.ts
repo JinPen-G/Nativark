@@ -28,7 +28,7 @@ export class WebsiteChannelProfileController {
     return this.service.save(body, req.user);
   }
 
-  /** 上传官网品牌图片（Logo/Hero/品类入口图）；返回可写入配置的公开 URL。scene: logo|hero|category。 */
+  /** 上传品牌图片（Logo/Favicon/Hero/品类入口图）；返回可写入配置的公开 URL。scene: logo|favicon|hero|category。 */
   @Post("assets")
   @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 2 * 1024 * 1024, files: 1 } }))
   uploadAsset(@Req() req: RequestWithUser, @Body("scene") scene: string, @UploadedFile() file?: UploadedWebsiteImage) {

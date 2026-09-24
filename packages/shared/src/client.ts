@@ -771,7 +771,7 @@ export interface ClientChannelBootstrapResponse {
   apiVersion: typeof CLIENT_API_VERSION;
   tenantCode: string;
   client: ClientChannelKind;
-  merchant: { name: string; logoUrl?: string; servicePhone?: string; serviceHours?: string };
+  merchant: { name: string; logoUrl?: string; faviconUrl?: string; servicePhone?: string; serviceHours?: string };
   services: Array<{ code: string; name: string; categoryCode: string; isDefault?: boolean; status: "open" | "paused" }>;
   defaultServiceCode?: string;
   agreements?: {

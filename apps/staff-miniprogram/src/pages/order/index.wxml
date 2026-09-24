@@ -1,23 +1,148 @@
 <page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
-<view class="screen {{themeClass}}">
+<view class="screen screen--order-detail {{hasActions ? 'screen--order-detail--actions' : ''}} {{themeClass}}">
   <nav-bar title="订单详情"></nav-bar>
   <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
   <block wx:else>
     <view class="section order-heading">
       <view class="row row--between"><view class="title">#{{orderNo}}</view><status-tag label="{{status}}" tone="{{tone}}" small="{{true}}"></status-tag></view>
-      <view class="link small mt-8" bindtap="onCopy">复制订单号</view>
+      <view class="order-heading__meta">下单时间：{{createdAt}}<text class="link small" bindtap="onCopy">复制订单号</text></view>
     </view>
     <view class="section section--tight">
       <view class="card order-info-card">
-        <view class="subtitle order-card-title"><ui-icon name="user" size="30" color="primary"></ui-icon><text class="ml-8">客户信息</text></view>
-        <view class="cell" bindtap="onCustomer"><view class="cell__body"><view class="cell__title">{{customer}}</view><view class="cell__desc">{{phone}}</view></view><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view>
-        <view class="link" bindtap="onCall"><ui-icon name="phone" size="26" color="primary"></ui-icon><text class="ml-8">联系客户</text></view>
+        <view class="order-card-heading">
+          <view class="subtitle order-card-title"><ui-icon name="user" size="30" color="primary"></ui-icon><text class="ml-8">客户信息</text></view>
+          <view class="link order-contact" bindtap="onCall"><ui-icon name="phone" size="26" color="primary"></ui-icon><text class="ml-8">联系客户</text></view>
+        </view>
+        <view class="cell" bindtap="onCustomer">
+          <view class="cell__body"><view class="cell__title">{{customer}}</view><view class="cell__desc">{{phone}}</view></view>
+          <ui-icon name="chevron-right" size="28" color="muted"></ui-icon>
+        </view>
+        <view wx:if="{{customerCompany}}" class="order-customer-detail"><ui-icon name="briefcase" size="28" color="muted"></ui-icon><text>{{customerCompany}}</text></view>
+        <view wx:if="{{customerRegion}}" class="order-customer-detail"><ui-icon name="pin" size="28" color="muted"></ui-icon><text>{{customerRegion}}</text></view>
       </view>
     </view>
     <view class="section section--tight"><view class="card order-info-card"><view class="subtitle order-card-title"><ui-icon name="calendar" size="30" color="primary"></ui-icon><text class="ml-8">租赁时间</text></view><view class="order-period">{{period}}</view><view class="kv"><text class="kv__label">交付方式</text><text class="kv__value">{{mode}}</text></view><view class="kv"><text class="kv__label">领取地点</text><text class="kv__value">{{pickupLocation}}</text></view><view class="kv"><text class="kv__label">归还地点</text><text class="kv__value">{{returnLocation}}</text></view></view></view>
-    <view class="section section--tight"><view class="card order-info-card"><view class="row row--between"><view class="subtitle">{{itemLabel}}清单</view><view class="muted small">共 {{lines.length}} 项</view></view><view class="order-line" wx:for="{{lines}}" wx:key="id"><view class="order-line__thumb"><image wx:if="{{item.imagePath}}" src="{{item.imagePath}}" mode="aspectFit"></image><ui-icon wx:else name="box" size="44" color="muted"></ui-icon></view><view class="grow"><view class="order-line__name">{{item.name}}</view><view class="muted small">数量 ×{{item.quantity}}</view></view><view class="order-line__price">{{item.unitPrice}}</view></view><view wx:if="{{allocations.length}}" class="subtitle mt-16">已分配资源</view><view class="cell" wx:for="{{allocations}}" wx:key="id"><view class="cell__body"><view class="cell__title">{{item.name}}</view><view class="cell__desc">数量 {{item.quantity}} · {{item.status}}</view></view></view></view></view>
-    <view class="section section--tight"><view class="card order-info-card"><view class="subtitle">费用明细</view><view class="kv"><text class="kv__label">押金</text><text class="kv__value">{{deposit}}</text></view><view class="kv order-total"><text class="kv__label">实付金额</text><text class="kv__value">{{amount}}</text></view></view></view>
+    <view class="section section--tight">
+      <view class="card order-info-card">
+        <view class="order-card-heading order-card-heading--plain"><view class="subtitle">{{itemLabel}}清单</view><view class="muted small">共 {{totalQuantity}} 件</view></view>
+        <view class="order-line" wx:for="{{lines}}" wx:key="id">
+          <view class="order-line__thumb"><image wx:if="{{item.imagePath}}" src="{{item.imagePath}}" mode="aspectFit"></image><ui-icon wx:else name="box" size="52" color="muted"></ui-icon></view>
+          <view class="grow">
+            <view class="order-line__header"><view class="order-line__name">{{item.name}}</view><text class="order-line__quantity">×{{item.quantity}}</text></view>
+            <view class="order-line__resource" wx:for="{{item.resources}}" wx:for-item="resource" wx:key="id">
+              <text class="order-line__serial" wx:if="{{resource.assetNo}}">SN：{{resource.assetNo}}</text>
+              <text class="order-line__serial" wx:else>已分配资源</text>
+              <text class="muted tiny">×{{resource.quantity}} · {{resource.statusLabel}}</text>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+    <view class="section section--tight"><view class="card order-info-card"><view class="subtitle order-card-title">费用明细</view><view class="kv"><text class="kv__label">租金</text><text class="kv__value">{{rentalAmount}}</text></view><view class="kv"><text class="kv__label">押金</text><text class="kv__value">{{deposit}}</text></view><view wx:if="{{hasService}}" class="kv"><text class="kv__label">服务费用</text><text class="kv__value">{{serviceAmount}}</text></view><view wx:if="{{hasDiscount}}" class="kv"><text class="kv__label">优惠</text><text class="kv__value">−{{discountAmount}}</text></view><view class="kv order-total"><text class="kv__label">应付金额</text><text class="kv__value">{{amount}}</text></view></view></view>
+    <view wx:if="{{canForceReleaseLock}}" class="section section--tight"><view class="card order-info-card operation-lock-card"><view class="subtitle">交接办理中</view><view class="muted small mt-8">{{operationLockOwner}} 正在办理，锁定至 {{operationLockExpiresAt}}</view><button class="btn btn--outline btn--block mt-16" loading="{{busy}}" disabled="{{busy}}" bindtap="onForceReleaseLock">人工解除交接锁</button><view class="muted tiny mt-8">需要资源改配权限；解除原因将写入订单审计。</view></view></view>
+    <view wx:if="{{canAddInternalNote || internalNotes.length}}" class="section section--tight"><view class="card order-info-card internal-notes-card"><view class="order-card-heading order-card-heading--plain"><view class="subtitle">内部备注</view><view class="muted small">仅运营可见</view></view><view wx:if="{{internalNotes.length}}" class="internal-note-list"><view wx:for="{{internalNotes}}" wx:key="id" class="internal-note"><view class="row row--between"><text class="internal-note__operator">{{item.operatorName}}</text><text class="muted tiny">{{item.createdAt}}</text></view><view class="internal-note__content">{{item.content}}</view></view></view><view wx:else class="muted small internal-note-empty">暂无内部备注</view><view wx:if="{{canAddInternalNote}}" class="internal-note-form"><textarea class="field__textarea" maxlength="1000" placeholder="记录仅供运营查看的处理信息；请勿填写证件号、支付密钥等敏感资料" value="{{internalNoteDraft}}" bindinput="onInternalNoteInput"></textarea><button class="btn btn--secondary btn--block mt-12" loading="{{internalNotesBusy}}" disabled="{{internalNotesBusy}}" bindtap="onAddInternalNote">添加内部备注</button></view></view></view>
+    <view wx:if="{{showOfflinePayments}}" class="section section--tight"><view class="card order-info-card offline-payment-card">
+      <view class="order-card-heading order-card-heading--plain"><view class="subtitle">线下收款</view><view class="muted small">登记后须由结算权限人员确认</view></view>
+      <view class="kv"><text class="kv__label">租金 / 费用待收</text><text class="kv__value">{{rentalBalanceLabel}}</text></view>
+      <view class="kv"><text class="kv__label">押金待收</text><text class="kv__value">{{depositBalanceLabel}}</text></view>
+      <view wx:if="{{canRegisterOffline}}" class="offline-payment-form">
+        <picker range="{{offlineInstrumentOptions}}" bindchange="onOfflineInstrument"><view class="offline-payment-picker">收款用途：{{offlineInstrumentOptions[offlineInstrument === 'deposit' ? 1 : 0]}}<text>⌄</text></view></picker>
+        <input class="offline-payment-input" type="digit" value="{{offlineAmount}}" placeholder="收款金额" bindinput="onOfflineAmount" />
+        <picker range="{{offlineMethodOptions}}" value="{{offlineMethodIndex}}" bindchange="onOfflineMethod"><view class="offline-payment-picker">收款方式：{{offlineMethodOptions[offlineMethodIndex]}}<text>⌄</text></view></picker>
+        <input class="offline-payment-input" value="{{offlineReason}}" placeholder="用途 / 备注" bindinput="onOfflineReason" />
+        <view class="row row--between offline-proof-row"><view class="muted small">收款凭证（可选）</view><view class="link small" bindtap="onChooseOfflineProof">{{offlineEvidenceId ? '重新上传' : '拍照 / 选择图片'}}</view></view>
+        <image wx:if="{{offlineEvidencePath}}" class="offline-proof-preview" src="{{offlineEvidencePath}}" mode="aspectFill"></image>
+        <button class="btn btn--primary btn--block offline-submit" loading="{{busy}}" disabled="{{busy || !hasOfflineFunding}}" bindtap="onRegisterOfflinePayment">登记待确认收款</button>
+      </view>
+      <view wx:if="{{offlineRegistrations.length}}" class="offline-registration-list">
+        <view wx:for="{{offlineRegistrations}}" wx:key="id" class="offline-registration">
+          <view class="row row--between"><text class="offline-registration__title">{{item.instrumentLabel}} · {{item.methodLabel}}</text><text class="offline-registration__amount">{{item.amountLabel}}</text></view>
+          <view class="muted small mt-4">{{item.reason}} · {{item.registeredAt}}</view>
+          <view wx:if="{{item.status === 'pending'}}" class="row row--between offline-pending-row"><text class="offline-pending-label">待确认</text><button wx:if="{{canConfirmOffline}}" class="btn btn--primary offline-confirm" data-id="{{item.id}}" loading="{{busy}}" disabled="{{busy}}" bindtap="onConfirmOfflinePayment">确认已到账</button></view>
+          <view wx:else class="offline-confirmed-label">已确认到账</view>
+        </view>
+      </view>
+    </view></view>
+    <view wx:if="{{canExpirePending}}" class="section section--tight"><view class="card order-info-card process-card">
+      <view class="subtitle">待支付超时</view>
+      <view class="muted small mt-8">该订单已超过待支付保留期，仍占用库存与资源。作废后释放占用，不可撤销。</view>
+      <button class="btn btn--danger btn--block mt-16" loading="{{busy}}" disabled="{{busy}}" bindtap="onExpirePending">按待支付超时作废</button>
+    </view></view>
+    <view wx:if="{{canMarkOverdue || isPickupOverdue}}" class="section section--tight"><view class="card order-info-card process-card">
+      <view class="subtitle">爽约处理</view>
+      <view wx:if="{{isPickupOverdue}}" class="muted small mt-8">
+        <block wx:if="{{pickupOverdueAtLabel}}">已于 {{pickupOverdueAtLabel}} 标记逾期未取。</block>
+        <block wx:if="{{noticeSent}}">爽约通知已于 {{noShowNoticeAtLabel}} 记录，可确认爽约或恢复领取。</block>
+        <block wx:else>请先发送爽约通知并记录，再确认爽约。</block>
+      </view>
+      <view wx:else class="muted small mt-8">客户已超过约定领取时间且未领取，可标记为逾期未取进入爽约流程。</view>
+      <button wx:if="{{canMarkOverdue}}" class="btn btn--outline btn--block mt-16" loading="{{busy}}" disabled="{{busy}}" bindtap="onMarkPickupOverdue">标记逾期未取</button>
+      <button wx:if="{{canSendNoShowNotice}}" class="btn btn--outline btn--block mt-16" loading="{{busy}}" disabled="{{busy}}" bindtap="onSendNoShowNotice">发送爽约通知</button>
+      <button wx:if="{{canConfirmNoShow}}" class="btn btn--danger btn--block mt-12" loading="{{busy}}" disabled="{{busy}}" bindtap="onConfirmNoShow">确认爽约</button>
+      <button wx:if="{{canResumePickup}}" class="btn btn--ghost btn--block mt-12" disabled="{{busy}}" bindtap="onResumePickup">恢复领取</button>
+    </view></view>
+    <view wx:if="{{canExtend}}" class="section section--tight"><view class="card order-info-card process-card">
+      <view class="order-card-heading order-card-heading--plain"><view class="subtitle">续租代办</view><view class="muted small">当前归还 {{currentEndLabel}}</view></view>
+      <button wx:if="{{!extendOpen}}" class="btn btn--secondary btn--block mt-12" bindtap="onOpenExtend">办理续租</button>
+      <block wx:if="{{extendOpen}}">
+        <view class="process-picker-row"><text class="muted small">新归还日期</text><picker class="process-picker" mode="date" value="{{extendDate}}" start="{{extendMinDate}}" data-field="extendDate" bindchange="onExtendField">{{extendDate}}</picker></view>
+        <view class="process-picker-row"><text class="muted small">新归还时间</text><picker class="process-picker" mode="time" value="{{extendTime}}" data-field="extendTime" bindchange="onExtendField">{{extendTime}}</picker></view>
+        <view class="muted small mt-8">{{extendZoneHint}}</view>
+        <button class="btn btn--outline btn--block mt-12" loading="{{extendBusy}}" disabled="{{extendBusy}}" bindtap="onPreviewExtend">试算续租差额</button>
+        <view wx:if="{{extendPreviewReady}}" class="process-preview mt-16">
+          <view class="kv"><text class="kv__label">新归还时间</text><text class="kv__value">{{extendPreview.newEndLabel}}</text></view>
+          <view class="kv"><text class="kv__label">计费单位增量</text><text class="kv__value">{{extendPreview.billableUnits}}</text></view>
+          <view class="kv"><text class="kv__label">增量租金</text><text class="kv__value">{{extendPreview.rentalLabel}}</text></view>
+          <view wx:if="{{extendPreview.hasService}}" class="kv"><text class="kv__label">增量服务费</text><text class="kv__value">{{extendPreview.serviceLabel}}</text></view>
+          <view wx:if="{{extendPreview.hasDepositDelta}}" class="kv"><text class="kv__label">押金差额</text><text class="kv__value">{{extendPreview.depositDeltaLabel}}</text></view>
+          <view wx:if="{{extendPreview.hasPreAuthDelta}}" class="kv"><text class="kv__label">预授权差额</text><text class="kv__value">{{extendPreview.preAuthDeltaLabel}}</text></view>
+          <view class="kv"><text class="kv__label strong">应补差额</text><text class="kv__value strong">{{extendPreview.payableLabel}}</text></view>
+          <view wx:if="{{extendPreview.paymentRequired}}" class="notice notice--info mt-12">正差额将生成续租待付款，由客户在客户端支付后生效。</view>
+          <view wx:elif="{{extendPreview.monthly}}" class="notice notice--success mt-12">企业月结：确认后续租直接生效，费用计入月结账单。</view>
+          <view wx:else class="notice notice--success mt-12">无需补款，确认后续租立即生效。</view>
+          <button class="btn btn--primary btn--block mt-12" loading="{{extendBusy}}" disabled="{{extendBusy}}" bindtap="onRequestExtend">确认续租</button>
+        </view>
+        <button class="btn btn--ghost btn--block mt-8" disabled="{{extendBusy}}" bindtap="onCloseExtend">取消</button>
+      </block>
+    </view></view>
+    <view wx:if="{{hasExtensionReviews}}" class="section section--tight"><view class="card order-info-card process-card">
+      <view class="order-card-heading order-card-heading--plain"><view class="subtitle">续租退款审核</view><view class="muted small">负差额待人工审核</view></view>
+      <view wx:for="{{extensionReviews}}" wx:key="id" class="review-item">
+        <view class="row row--between"><text class="strong">第 {{item.sequence}} 次续租</text><text class="review-item__amount strong">{{item.amountLabel}}</text></view>
+        <view class="muted small mt-4">续租后归还 {{item.newEndLabel}} · 通过后生成退款待办，实际退款仍在后台办理</view>
+        <view class="review-actions mt-12">
+          <button class="btn btn--outline btn--small" data-id="{{item.id}}" data-decision="approved" loading="{{reviewBusy}}" disabled="{{reviewBusy}}" bindtap="onReviewExtensionRefund">通过</button>
+          <button class="btn btn--ghost btn--small" data-id="{{item.id}}" data-decision="rejected" disabled="{{reviewBusy}}" bindtap="onReviewExtensionRefund">驳回</button>
+        </view>
+      </view>
+    </view></view>
+    <view wx:if="{{hasInspectionExceptions}}" class="section section--tight"><view class="card order-info-card process-card">
+      <view class="order-card-heading order-card-heading--plain"><view class="subtitle">检查费用</view><view class="muted small">异常费用复核 / 申诉</view></view>
+      <view wx:for="{{inspectionExceptions}}" wx:key="key" class="review-item">
+        <view class="row row--between"><text class="strong">{{item.stageLabel}}</text><text wx:if="{{item.disputed}}" class="small review-item__flag">客户申诉</text><text wx:elif="{{item.needsReview}}" class="small review-item__pending">待复核</text></view>
+        <view class="body mt-4">{{item.description}}</view>
+        <view wx:if="{{item.suggestedLabel}}" class="muted small mt-4">建议金额 {{item.suggestedLabel}}</view>
+        <view wx:if="{{item.approvedLabel}}" class="muted small mt-4">当前核准 {{item.approvedLabel}}</view>
+        <view wx:if="{{item.disputed && item.customerReason}}" class="muted small mt-4">申诉理由：{{item.customerReason}}</view>
+        <view class="review-actions mt-12">
+          <block wx:if="{{item.needsReview}}">
+            <button class="btn btn--outline btn--small" data-inspection="{{item.inspectionId}}" data-index="{{item.index}}" data-decision="approved" loading="{{reviewBusy}}" disabled="{{reviewBusy}}" bindtap="onReviewException">复核通过</button>
+            <button class="btn btn--ghost btn--small" data-inspection="{{item.inspectionId}}" data-index="{{item.index}}" data-decision="rejected" disabled="{{reviewBusy}}" bindtap="onReviewException">驳回</button>
+          </block>
+          <block wx:if="{{item.disputed}}">
+            <button class="btn btn--outline btn--small" data-inspection="{{item.inspectionId}}" data-index="{{item.index}}" loading="{{reviewBusy}}" disabled="{{reviewBusy}}" bindtap="onReReviewException">调整核准金额</button>
+            <button class="btn btn--ghost btn--small" data-inspection="{{item.inspectionId}}" data-index="{{item.index}}" disabled="{{reviewBusy}}" bindtap="onRespondException">记录客户确认</button>
+          </block>
+        </view>
+      </view>
+    </view></view>
     <view wx:if="{{error}}" class="section small" style="color:var(--danger)">{{error}}</view>
-    <view class="section section--tight order-actions"><button wx:if="{{canConfirm}}" class="btn btn--primary btn--block" loading="{{busy}}" disabled="{{busy}}" bindtap="onConfirm">确认订单</button><button wx:if="{{canAllocate}}" class="btn btn--primary btn--block" loading="{{busy}}" disabled="{{busy}}" bindtap="onAllocate">自动配货</button><button wx:if="{{canPickup}}" class="btn btn--primary btn--block" bindtap="onPickup">办理领取</button><button wx:if="{{canReturn}}" class="btn btn--primary btn--block" bindtap="onReturn">办理归还</button><button wx:if="{{canCancel}}" class="btn btn--ghost btn--block mt-12" disabled="{{busy}}" bindtap="onCancel">取消订单</button></view>
+    <view wx:if="{{hasActions}}" class="section section--tight order-actions">
+      <button wx:if="{{canConfirm}}" class="btn btn--primary btn--block" loading="{{busy}}" disabled="{{busy}}" bindtap="onConfirm">确认订单</button>
+      <button wx:if="{{canAllocate}}" class="btn btn--primary btn--block" bindtap="onAllocate">配货与锁定</button>
+      <button wx:if="{{canPickup}}" class="btn btn--primary btn--block" bindtap="onPickup">办理领取</button>
+      <button wx:if="{{canReturn}}" class="btn btn--primary btn--block" bindtap="onReturn">办理归还</button>
+      <button wx:if="{{canCancel}}" class="btn btn--ghost btn--block mt-12" disabled="{{busy}}" bindtap="onCancel">取消订单</button>
+    </view>
   </block>
 </view>

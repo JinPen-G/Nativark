@@ -1,0 +1,84 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
+  <nav-bar title="配货与锁定"></nav-bar>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+  <block wx:else>
+    <view wx:if="{{occupied}}" class="section section--tight">
+      <view class="notice notice--warning row row--between">
+        <text class="grow">{{occupiedOwner}} 正在办理，锁定至 {{occupiedUntil}}</text>
+        <text class="link" bindtap="onRefresh">刷新重试</text>
+      </view>
+    </view>
+
+    <view class="section">
+      <view class="card">
+        <view class="title">#{{orderNo}}</view>
+        <view class="muted mt-4">{{customer}}</view>
+        <view class="kv"><text class="kv__label">租期</text><text class="kv__value">{{period}}</text></view>
+        <view class="kv"><text class="kv__label">{{fulfillmentLabel}}</text><text class="kv__value">{{fulfillment}}</text></view>
+      </view>
+    </view>
+
+    <view class="section section--tight">
+      <view class="card" wx:for="{{reservations}}" wx:key="reservationId" wx:for-index="ri">
+        <view class="row row--between">
+          <view class="subtitle grow">{{item.name}}</view>
+          <status-tag label="{{item.modeLabel}}" tone="info" small="{{true}}"></status-tag>
+        </view>
+        <view class="alloc-meta mt-8">
+          <text class="small muted">需求 {{item.quantity}}</text>
+          <text class="small muted">已分配 {{item.assignedQuantity}}</text>
+          <text class="small muted">已锁定 {{item.lockedQuantity}}</text>
+        </view>
+        <block wx:if="{{item.serialized}}">
+          <view wx:if="{{item.candidates.length}}" class="stack-8 mt-12">
+            <view wx:for="{{item.candidates}}" wx:for-item="cand" wx:for-index="ci" wx:key="assetId"
+                  class="option {{cand.selected ? 'option--selected' : ''}} {{cand.available ? '' : 'option--disabled'}}"
+                  data-ri="{{ri}}" data-ci="{{ci}}" bindtap="onToggleCandidate">
+              <view class="grow">
+                <view class="body">{{identifierLabel}} {{cand.assetNo}}</view>
+                <view class="small muted mt-4"><text wx:if="{{cand.substitute}}">替代型号 {{cand.modelName}} · </text>{{cand.available ? '可分配' : cand.reason}}</view>
+              </view>
+              <view class="option__check"></view>
+            </view>
+          </view>
+          <view wx:else class="small muted mt-12">暂无可分配{{identifierLabel}}，可尝试一键配货或改配</view>
+        </block>
+        <view wx:else class="alloc-qty mt-12">
+          <text class="small muted">分配数量</text>
+          <input class="input-box alloc-qty__input" type="number" value="{{item.quantityDraft}}" placeholder="剩余需分配 {{item.remaining}}" data-ri="{{ri}}" bindinput="onQuantityInput" disabled="{{occupied}}" />
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{hasActive}}" class="section section--tight">
+      <view class="card">
+        <view class="section-title">当前分配</view>
+        <view class="muted small mt-4">勾选后对所选生效；不勾选则「锁定」对全部生效</view>
+        <view wx:for="{{allocations}}" wx:key="id" wx:for-index="index"
+              class="option {{item.selected ? 'option--selected' : ''}} mt-12" data-index="{{index}}" bindtap="onToggleAllocation">
+          <view class="grow">
+            <view class="body">{{item.assetNo || item.name || '按数量分配'}}</view>
+            <view class="small muted mt-4">{{item.name}} · ×{{item.quantity}} · {{item.statusLabel}}</view>
+          </view>
+          <view class="option__check"></view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{error}}" class="section section--tight"><view class="notice notice--danger">{{error}}</view></view>
+
+    <view class="section alloc-actions">
+      <button wx:if="{{canOperate}}" class="btn btn--primary btn--block" loading="{{busy}}" disabled="{{busy || occupied}}" bindtap="onAuto">一键配货</button>
+      <view wx:if="{{canOperate}}" class="btn-row mt-12">
+        <button class="btn btn--outline" disabled="{{busy || occupied}}" bindtap="onPreassign">预分配</button>
+        <button class="btn btn--outline" disabled="{{busy || occupied || !hasActive}}" bindtap="onLock">锁定</button>
+      </view>
+      <view wx:if="{{canReassign}}" class="btn-row mt-12">
+        <button class="btn btn--outline" disabled="{{busy || occupied || !hasLocked}}" bindtap="onUnlock">解锁</button>
+        <button class="btn btn--outline" disabled="{{busy || occupied || !hasActive}}" bindtap="onRelease">释放</button>
+        <button class="btn btn--outline" disabled="{{busy || occupied}}" bindtap="onReassign">改配</button>
+      </view>
+    </view>
+  </block>
+</view>

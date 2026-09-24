@@ -9,6 +9,8 @@
     "pages/me/index",
     "pages/order/index",
     "pages/order-new/index",
+    "pages/allocate/index",
+    "pages/reviews/index",
     "pages/pickup/index",
     "pages/return/index",
     "pages/work-orders/index",
