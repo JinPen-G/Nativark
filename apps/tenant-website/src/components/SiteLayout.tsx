@@ -46,7 +46,7 @@ export function SiteHeader() {
     { to: '/about', label: t('about') },
   ];
   return <header className={`site-header${isScrolled ? ' is-scrolled' : ''}`}>
-    <div className="header-inner shell">
+    <div className="header-inner shell homepage-section">
       <Link to={href('/')} className="brand-lockup" aria-label={`${tenant.name} ${t('home')}`}>
         <img src={tenant.logo} alt={tenant.name} className="brand-logo" />
         <span className="brand-slogan">{tenant.slogan}</span>
