@@ -41,7 +41,8 @@ export function resolveImage(source: string | undefined | null): Promise<string>
   if (/^(https?:)?\/\//i.test(source) || source.startsWith("data:") || source.startsWith("wxfile://") || source.startsWith("http://tmp/")) {
     return Promise.resolve(source);
   }
-  const url = source.startsWith("/api/") ? apiUrl(source) : source;
+  // 相对服务端路径（/rental/... 或 /api/...）交给 apiUrl 拼成带员工门面前缀的绝对地址；apiUrl 对已带 /api 的原样返回。
+  const url = source.startsWith("/") ? apiUrl(source) : source;
   const existing = cache.get(url);
   if (existing) return existing;
   const pending = schedule(() => download(url)).then((path) => {

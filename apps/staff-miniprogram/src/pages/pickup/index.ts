@@ -29,7 +29,7 @@ Page({
     try {
       const [order, templates, context, groups] = await Promise.all([getOrder(this.data.id), listInspectionTemplates("pickup"), loadContext(), listItemGroups().catch(() => [])]);
       if (order.status !== "ready_for_pickup") { this.setData({ view: blockedState("当前不能办理领取", `订单当前状态：${order.status}`) }); return; }
-      if (!can("rental-os:order:pickup", "rental-os:order:operate")) { this.setData({ view: blockedState("无领取权限", "请联系管理员授权") }); return; }
+      if (!can("rental-os:order:pickup")) { this.setData({ view: blockedState("无领取权限", "请联系管理员授权") }); return; }
       this.order = order;
       this.template = templates.find((row) => row.enabled && row.categoryCode === order.categoryCode);
       const timeZone = context.locations.find((row) => row.id === order.fulfillmentLocationId)?.timezone ?? "Asia/Shanghai";

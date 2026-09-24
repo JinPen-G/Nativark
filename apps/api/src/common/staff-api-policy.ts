@@ -24,6 +24,8 @@ export function isStaffBusinessRouteAllowed(method: string, path: string) {
   if (/^\/rental\/v1\/orders\/[^/]+\/internal-notes$/u.test(path)) return verb === "GET" || verb === "POST";
 
   if (path === "/rental/v1/categories" || path === "/rental/v1/locations" || path === "/rental/v1/item-groups" || path === "/rental/v1/inspection-templates") return verb === "GET";
+  // 型号封面图（受保护图片）：员工端列表/详情缩略图需要，只读。
+  if (/^\/rental\/v1\/item-groups\/[^/]+\/images\/[^/]+$/u.test(path)) return verb === "GET";
   if (path === "/rental/v1/orders") return verb === "GET" || verb === "POST";
   if (path === "/rental/v1/quotes") return verb === "POST";
   if (path === "/rental/v1/workbench/todos" || path === "/rental/v1/assets" || path === "/rental/v1/stock-balances" || path === "/rental/v1/stock-ledger" || path === "/rental/v1/stock-dispositions" || path === "/rental/v1/work-orders" || path === "/rental/v1/work-order-assignees") {

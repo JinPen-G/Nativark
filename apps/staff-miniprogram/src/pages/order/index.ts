@@ -64,9 +64,10 @@ Page({
       }));
       const canConfirm = order.status === "draft" && operate;
       const canAllocate = order.status === "reserved" && operate;
-      const canPickup = order.status === "ready_for_pickup" && (operate || can("rental-os:order:pickup"));
-      const canReturn = order.status === "renting" && (operate || can("rental-os:order:return"));
-      const canCancel = ["draft", "reserved", "ready_for_pickup", "pickup_overdue"].includes(order.status) && (operate || can("rental-os:order:cancel"));
+      // §2.3：取还与取消各按独立权限门控，不用 operate 兜底（缺权限按钮不出现，服务端仍独立校验）。
+      const canPickup = order.status === "ready_for_pickup" && can("rental-os:order:pickup");
+      const canReturn = order.status === "renting" && can("rental-os:order:return");
+      const canCancel = ["draft", "reserved", "ready_for_pickup", "pickup_overdue"].includes(order.status) && can("rental-os:order:cancel");
       const activeOperationLock = order.assignment?.operationLock;
       const canForceReleaseLock = Boolean(activeOperationLock && activeOperationLock.ownerId !== currentSession()?.user.id && Date.parse(activeOperationLock.expiresAt) > Date.now() && can("rental-os:order:reassign"));
       const canRegisterOffline = can("rental-os:order:offline-payment");

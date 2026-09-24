@@ -27,7 +27,8 @@ export async function listItemGroups(force = false): Promise<RentalItemGroup[]> 
   return itemGroupCache.rows;
 }
 
-/** 型号图片地址（受保护路径，经 core/images 带令牌下载；带 /api 前缀以便 resolveImage 识别）。 */
+/** 型号图片地址（受保护路径）。用员工门面相对路径，经 core/images → apiUrl 拼成 /api/staff/v1/... 带令牌下载；
+ * 不能带 /api 前缀直连 operator 路由——员工令牌受众为 staff，直连会 401，且该子路由需走门面白名单。 */
 export function itemGroupImagePath(itemGroupId: string, imageId: string): string {
-  return `/api/rental/v1/item-groups/${encodeURIComponent(itemGroupId)}/images/${encodeURIComponent(imageId)}`;
+  return `/rental/v1/item-groups/${encodeURIComponent(itemGroupId)}/images/${encodeURIComponent(imageId)}`;
 }

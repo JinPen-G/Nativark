@@ -29,7 +29,7 @@ Page({
     try {
       const [order, templates, context] = await Promise.all([getOrder(this.data.id), listInspectionTemplates("return"), loadContext()]);
       if (order.status !== "renting") { this.setData({ view: blockedState("当前不能办理归还", `订单当前状态：${order.status}`) }); return; }
-      if (!can("rental-os:order:return", "rental-os:order:operate")) { this.setData({ view: blockedState("无归还权限", "请联系管理员授权") }); return; }
+      if (!can("rental-os:order:return")) { this.setData({ view: blockedState("无归还权限", "请联系管理员授权") }); return; }
       this.order = order;
       this.template = templates.find((row) => row.enabled && row.categoryCode === order.categoryCode);
       const allocations = order.allocations.filter((row) => row.status === "picked_up").map((row) => ({ id: row.id, label: row.assetNo || order.lines.find((line) => line.id === row.orderLineId)?.itemGroupName || row.itemGroupId || "资源", max: row.quantity, quantity: String(row.quantity), selected: true }));
