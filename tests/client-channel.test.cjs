@@ -34,6 +34,8 @@ function bootstrapService(overrides) {
   return Object.assign(Object.create(ClientApiService.prototype), {
     prisma: buildPrisma(overrides),
     tenantIntegrations: { catalog: async () => ({ configs: overrides.integrationConfigs ?? [] }) },
+    // 品类名字典与员工端同源：替身返回四品类定义（名称取自 RENTAL_CATEGORY_DEFINITIONS 口径）。
+    core: { listCategories: () => overrides.categories ?? [{ code: "camera", name: "摄影器材" }, { code: "camping", name: "露营装备" }, { code: "vehicle", name: "车辆" }, { code: "construction", name: "工程设备" }] },
     // 配送开关：直接替身，避免拉起 core/runWithRequestIdentity。
     anyWorkspaceEnablesDelivery: async () => overrides.deliveryEnabled ?? false
   });
@@ -67,6 +69,7 @@ test("bootstrap: 微信渠道就绪时小程序开放微信一键登录与微信
   assert.ok(mp.loginMethods.includes("wechat_phone"), "小程序应开放微信一键登录");
   assert.equal(mp.capabilities.wechatPay, true);
   assert.equal(mp.defaultServiceCode, "camera");
+  assert.deepEqual(mp.categories.find((c) => c.code === "camera"), { code: "camera", name: "摄影器材" }, "bootstrap 下发品类名字典，客户端不再本地维护映射");
 
   // APP 渠道：读同一份品牌/协议，但不查微信凭证、不开放微信登录/支付。
   const app = await bootstrapService(base).channelBootstrap("demo", "app");

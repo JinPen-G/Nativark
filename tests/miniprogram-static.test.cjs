@@ -758,8 +758,8 @@ test("客户可理解的订单状态由订单+资金+续租事实组合，终态
 });
 
 test("面向客户的用词不暴露内部枚举，未知取值原样返回而不是空白", () => {
-  const labels = runtime().load("core/labels");
-  assert.equal(labels.categoryLabel("camera"), "摄影器材");
+  const r = runtime();
+  const labels = r.load("core/labels");
   assert.equal(labels.categoryIcon("CAMERA"), "camera");
   assert.equal(labels.categoryIcon("CAMPING"), "tent");
   assert.equal(labels.categoryIcon("CONSTRUCTION"), "crane");
@@ -770,8 +770,11 @@ test("面向客户的用词不暴露内部枚举，未知取值原样返回而�
   assert.equal(labels.inventoryLabel("consumable"), "一次性耗材（不需归还）");
   assert.equal(labels.membershipLabel("pending_activation"), "会员待审核");
   assert.equal(labels.chargeLabel("early_return_refund"), "提前归还退款");
-  assert.equal(labels.categoryLabel("unknown_code"), "unknown_code");
-  assert.equal(labels.categoryLabel(undefined), "");
+  // 品类名改由服务端 bootstrap 下发（与员工端同源），本地不再维护映射；未加载/未知时返回原码而非空白。
+  const merchant = r.load("core/merchant");
+  assert.equal(merchant.categoryName("camera"), "camera", "未加载商户信息时按原码显示，不空白");
+  assert.equal(merchant.categoryName("unknown_code"), "unknown_code");
+  assert.equal(merchant.categoryName(undefined), "");
 });
 
 test("主题色：#RGB 展开、覆盖主色三件套；系统色/非法/未设置回退空串（用系统默认）", () => {

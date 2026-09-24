@@ -252,6 +252,8 @@ export class ClientApiService {
   async channelBootstrap(tenantCode: string, client: ClientChannelKind = "wechat_miniprogram", appId?: string): Promise<ClientChannelBootstrapResponse> {
     const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true, code: true, name: true } });
     if (!tenant) throw new NotFoundException("商户不存在");
+    // 品类名字典与员工端同源（RENTAL_CATEGORY_DEFINITIONS）；客户端据此显示品类名，不再本地维护。
+    const categories = this.core.listCategories().map((row) => ({ code: String(row.code), name: row.name }));
     const profile = await this.prisma.clientChannelProfile.findUnique({
       where: { tenantId: tenant.id },
       include: { publishedWorkspaces: { where: { enabled: true }, include: { workspace: { select: { code: true, name: true, categoryCode: true, isDefault: true, status: true } } } } }
@@ -286,6 +288,7 @@ export class ClientApiService {
         client,
         merchant: { name: profile?.brandName?.trim() || tenant.name, logoUrl: profile?.brandLogoUrl ?? undefined, faviconUrl: profile?.faviconUrl ?? undefined, servicePhone: profile?.customerServicePhone ?? undefined, serviceHours: profile?.customerServiceHours ?? undefined },
         services,
+        categories,
         defaultServiceCode: services.find((row) => row.isDefault)?.code ?? services[0]?.code,
         help: { available: false, faqCount: 0 },
         loginMethods: safeLoginMethods,
@@ -313,6 +316,7 @@ export class ClientApiService {
       client,
       merchant: { name: profile.brandName?.trim() || tenant.name, logoUrl: profile.brandLogoUrl ?? undefined, faviconUrl: profile.faviconUrl ?? undefined, servicePhone: profile.customerServicePhone ?? undefined, serviceHours: profile.customerServiceHours ?? undefined },
       services,
+      categories,
       defaultServiceCode,
       agreements,
       help: { available: Boolean(profile.helpIntro?.trim()) || faqCount > 0, faqCount },

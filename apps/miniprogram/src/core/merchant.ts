@@ -34,6 +34,8 @@ export interface MerchantInfo {
   loginMethods: Array<"wechat_phone" | "sms" | "password">;
   capabilities: ClientChannelBootstrapResponse["capabilities"];
   services: MerchantService[];
+  /** 品类码 → 品类名，来自服务端 bootstrap（与员工端同源）；回退投影时按本租户服务名兜底。 */
+  categoryNames: Record<string, string>;
   defaultServiceCode?: string;
   /** 数据来自渠道启动接口（true）还是现有公开接口回退（false）。 */
   fromBootstrap: boolean;
@@ -48,6 +50,12 @@ let inflight: Promise<MerchantInfo> | undefined;
 export function cachedMerchant(): MerchantInfo | undefined {
   if (!cached) cached = readStorage<MerchantInfo>(STORAGE_KEYS.bootstrap);
   return cached;
+}
+
+/** 品类码 → 品类名，取自服务端 bootstrap 的品类字典（与员工端同源）；未知/未加载时返回原码，不空白。 */
+export function categoryName(code?: string | null): string {
+  if (!code) return "";
+  return cachedMerchant()?.categoryNames?.[code] ?? code;
 }
 
 /** 回退投影下未知的能力一律按关闭处理，页面据此隐藏入口而不是伪装可用。 */
@@ -79,6 +87,7 @@ function fromBootstrap(contract: ClientChannelBootstrapResponse): MerchantInfo {
     loginMethods: contract.loginMethods.length ? contract.loginMethods : ["password"],
     capabilities: contract.capabilities,
     services,
+    categoryNames: Object.fromEntries((contract.categories ?? []).map((row) => [row.code, row.name])),
     defaultServiceCode: contract.defaultServiceCode ?? services.find((row) => row.isDefault)?.code ?? services[0]?.code,
     fromBootstrap: true,
     fetchedAt: Date.now()
@@ -101,6 +110,7 @@ export async function loadMerchant(force = false): Promise<MerchantInfo> {
         loginMethods: ["password"],
         capabilities: CLOSED_CAPABILITIES,
         services,
+        categoryNames: Object.fromEntries(services.map((row) => [row.categoryCode, row.name])),
         defaultServiceCode: services.find((row) => row.isDefault)?.code ?? services[0]?.code,
         fromBootstrap: false,
         fetchedAt: Date.now()

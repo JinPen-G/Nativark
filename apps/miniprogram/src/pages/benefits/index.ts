@@ -1,7 +1,8 @@
 import { themeBehavior } from "../../core/theme-behavior";
 import type { ClientMembershipAssignmentView, CustomerMembershipBenefit } from "@rental-os/shared";
 import { fetchMembershipAssignments, fetchMembershipBenefits } from "../../api/profile";
-import { categoryLabel, membershipLabel } from "../../core/labels";
+import { categoryName } from "../../core/merchant";
+import { membershipLabel } from "../../core/labels";
 import { formatMoney } from "../../core/money";
 import { errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
 import { currentService, membershipStatus } from "../../core/session";
@@ -80,9 +81,9 @@ Page({
       const scope = benefit.scope;
       if (!scope || scope.type === "tenant") return { text: "全部服务", applicable: true, reason: "" };
       if (scope.type === "categories") {
-        const names = scope.categoryCodes.map(categoryLabel).join("、");
+        const names = scope.categoryCodes.map(categoryName).join("、");
         const applicable = scope.categoryCodes.includes(categoryCode as never);
-        return { text: `仅 ${names}`, applicable, reason: applicable ? "" : `当前服务（${categoryLabel(categoryCode)}）不在适用品类内` };
+        return { text: `仅 ${names}`, applicable, reason: applicable ? "" : `当前服务（${categoryName(categoryCode)}）不在适用品类内` };
       }
       // 权益按空间 ID 声明；客户端只有空间编码，无法逐一对应：不断言适用与否，以报价时的实际结果为准。
       return { text: `指定 ${scope.workspaceIds.length} 个服务`, applicable: undefined, reason: "是否适用于当前服务以报价时的实际结果为准" };

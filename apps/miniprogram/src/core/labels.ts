@@ -2,13 +2,6 @@
  * 面向客户的用词（需求 §2.2）。内部枚举一律在这里翻译，页面不直接展示技术词。
  * 未知取值返回原值而不是空串——宁可露出一个英文码，也不能把状态显示成空白。
  */
-const CATEGORY_LABELS: Record<string, string> = {
-  camera: "摄影器材",
-  camping: "露营装备",
-  vehicle: "车辆",
-  construction: "工程设备"
-};
-
 const FULFILLMENT_LABELS: Record<string, string> = {
   store_pickup_return: "门店自取",
   partner_pickup_return: "合作点取还",
@@ -100,7 +93,6 @@ function lookup(table: Record<string, string>, code: string | undefined | null):
   return table[code] ?? code;
 }
 
-export const categoryLabel = (code?: string | null) => lookup(CATEGORY_LABELS, code);
 export const fulfillmentLabel = (code?: string | null) => lookup(FULFILLMENT_LABELS, code);
 export const inventoryLabel = (code?: string | null) => lookup(INVENTORY_LABELS, code);
 export const pricingUnitLabel = (code?: string | null) => lookup(PRICING_UNIT_LABELS, code);
