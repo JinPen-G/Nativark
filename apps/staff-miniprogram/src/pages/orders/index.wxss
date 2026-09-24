@@ -13,7 +13,7 @@
 .order-card { border: 1rpx solid var(--border); box-shadow: none; padding: 22rpx; border-radius: 18rpx; }
 .order-card + .order-card { margin-top: 12rpx; }
 .order-card__body { align-items: center; margin-top: 12rpx; }
-.order-card__thumb { width: 100rpx; height: 100rpx; margin-right: 16rpx; background: #F5F8FD; }
+.order-card__thumb { width: 100rpx; height: 100rpx; margin-right: 16rpx; background: var(--page); }
 .order-card__no { font-size: var(--font-mini); color: var(--secondary); font-weight: var(--fw-medium); }
 .order-card__meta { font-size: var(--font-mini); margin-top: 3rpx; }
 .order-card__items { font-size: var(--font-caption); margin-top: 3rpx; }

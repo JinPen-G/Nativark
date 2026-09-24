@@ -111,9 +111,10 @@ Page({
     common.push({ key: "more", label: "更多功能", icon: "grid", color: "purple" });
     this.setData({
       context,
-      heroTitle: context.categoryCode === "camera" ? "专业设备" : context.categoryName || t.itemLabel,
-      heroLine: context.categoryCode === "camera" ? "让创意更简单" : "让管理更简单",
-      heroSubtitle: context.categoryCode === "camera" ? "高效 · 可靠 · 随时可用" : `${session.tenant.tenantName} · 高效管理每一次租赁`,
+      // 英雄卡文案按品类术语组合，不写死某个品类（"专业设备"等摄影文案会在露营/车辆品类显错）。
+      heroTitle: `${context.categoryName || t.itemLabel}履约`,
+      heroLine: `${t.pickupLabel} · ${t.returnLabel} · 现场处理一步到位`,
+      heroSubtitle: `${session.tenant.tenantName} · 高效管理每一次租赁`,
       heroIcon: categoryIcon(context.categoryCode),
       heroImage: categoryArtwork(context.categoryCode),
       locationLabel: currentLocationLabel(),

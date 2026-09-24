@@ -3,7 +3,7 @@
 .me-card { align-items: center; text-align: center; padding: 20rpx 8rpx; box-shadow: none; }
 .me-card .quick__icon { width: 72rpx; height: 72rpx; }
 .menu { box-shadow: none; border: 1rpx solid var(--border); padding-top: 0; padding-bottom: 0; }
-.avatar-lg { background: #E8F0FF; }
+.avatar-lg { background: var(--primary-weak); }
 .avatar-lg { display: flex; align-items: center; justify-content: center; }
 .me-card__title { margin-top: 14rpx; font-size: var(--font-body); font-weight: var(--fw-semibold); color: var(--text); }
 .me-card__hint { margin-top: 4rpx; font-size: var(--font-mini); color: var(--secondary); }
