@@ -91,7 +91,7 @@ h1, h2, h3, p { margin-top: 0; }
   height: 67px;
   pointer-events: none;
   border: 1px solid transparent;
-  border-radius: 22px;
+  border-radius: 999px;
   background: transparent;
   box-shadow: none;
   backdrop-filter: none;
@@ -479,14 +479,14 @@ main:has(.home-cta) + .site-footer { margin-top: 0; }
     right: 8px;
     left: 8px;
     height: 56px;
-    border-radius: 22px;
+    border-radius: 999px;
   }
   .site-header.is-scrolled::before {
     top: 8px;
     right: 8px;
     left: 8px;
     height: 56px;
-    border-radius: 22px;
+    border-radius: 999px;
   }
   .header-inner { height: 64px; }
   .site-header .header-inner { transform: translateY(4px); }
