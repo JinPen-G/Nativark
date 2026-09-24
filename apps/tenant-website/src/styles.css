@@ -7,7 +7,7 @@
   -webkit-font-smoothing: antialiased;
   line-height: 1.6;
   --brand: #007aff;
-  --brand-soft: #eaf1f9;
+  --brand-soft: color-mix(in srgb, var(--brand) 12%, #fff);
   --brand-contrast: #fff;
   --brand-soft-contrast: #142638;
   --ink: #142638;
@@ -286,11 +286,11 @@ main:has(.home-cta) + .site-footer { margin-top: 0; }
 .catalog-sidebar a.active, .catalog-sidebar a:hover { background: var(--brand-soft); color: var(--brand); font-weight: 500; }
 .catalog-sidebar span { color: #90a0b1; }
 .catalog-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-bottom: 20px; }
-.catalog-toolbar form { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding-left: 15px; height: 44px; width: min(100%, 390px); color: #8191a1; }
+.catalog-toolbar form { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 999px; padding-left: 15px; height: 44px; width: min(100%, 390px); color: #8191a1; overflow: hidden; }
 .catalog-toolbar form input { min-width: 0; width: 100%; flex: 1 1 auto; border: 0; outline: 0; font-size: 12px; }
-.catalog-toolbar form button { align-self: stretch; flex: 0 0 auto; border: 0; border-radius: 0 9px 9px 0; padding: 0 17px; background: var(--brand); color: var(--brand-contrast); font-size: 12px; white-space: nowrap; }
+.catalog-toolbar form button { align-self: stretch; flex: 0 0 auto; border: 0; border-radius: 0 999px 999px 0; padding: 0 20px; background: var(--brand); color: var(--brand-contrast); font-size: 12px; white-space: nowrap; }
 .catalog-toolbar > span { color: var(--muted); font-size: 12px; margin-left: auto; white-space: nowrap; }
-.catalog-toolbar select { border: 1px solid var(--line); border-radius: 9px; background: #fff; padding: 11px 12px; color: #516276; font-size: 12px; }
+.catalog-toolbar select { border: 1px solid var(--line); border-radius: 999px; background: var(--card, #fff); padding: 11px 16px; color: #516276; font-size: 12px; }
 .filter-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 20px; }
 .catalog-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .empty-state { min-height: 280px; display: flex; align-items: center; justify-content: center; flex-direction: column; background: #f6f9fc; border-radius: var(--radius-card); text-align: center; padding: 36px; }
@@ -626,7 +626,7 @@ html[data-theme="dark"] {
   --field: #111;
   --soft: #1b1b1b;
   --soft-hover: #252525;
-  --brand-soft: #1d2b3d;
+  --brand-soft: color-mix(in srgb, var(--brand) 22%, #000);
   --brand-soft-contrast: #fff;
   --header-surface: rgba(25,25,25,.6);
 }

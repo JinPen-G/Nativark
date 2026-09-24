@@ -37,9 +37,8 @@ function textOnBackground(hex: string): '#142638' | '#ffffff' {
 export function applyTenantTheme(tenant: Tenant) {
   const root = document.documentElement;
   const primaryColor = tenant.primaryColor?.trim() || PLATFORM_THEME.primaryColor;
-  const secondaryColor = tenant.secondaryColor?.trim() || PLATFORM_THEME.secondaryColor;
+  // 只注入主色与其对比色；--brand-soft / --brand-soft-contrast 由 CSS 按主色派生（见 styles.css :root），
+  // 这样次要色随主题色联动，不再依赖会与主题脱节的独立 secondaryColor。
   root.style.setProperty('--brand', primaryColor);
-  root.style.setProperty('--brand-soft', secondaryColor);
   root.style.setProperty('--brand-contrast', textOnBackground(primaryColor));
-  root.style.setProperty('--brand-soft-contrast', textOnBackground(secondaryColor));
 }
