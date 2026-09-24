@@ -12,7 +12,7 @@ function dateOffset(days: number) {
 }
 
 export function ProductDetailPage() {
-  const { tenant, href, localizeProduct, language, t } = useSite();
+  const { tenant, href, isRemote, productsReady, localizeProduct, language, t } = useSite();
   const { productId } = useParams();
   const rawProduct = siteRepository.getProduct(tenant, productId || '');
   const selectedProduct = rawProduct ? localizeProduct(rawProduct) : null;
@@ -22,6 +22,8 @@ export function ProductDetailPage() {
   const [fulfillment, setFulfillment] = useState<'pickup' | 'delivery'>('pickup');
   const [tab, setTab] = useState('intro');
   const navigate = useNavigate();
+  // 真实租户模式下商品目录第二阶段才到位；未就绪时先显示加载，避免误报“商品不存在”。
+  if (!selectedProduct && isRemote && !productsReady) return <div className="shell simple-page"><p className="mock-note">{t('loading')}…</p></div>;
   if (!selectedProduct) return <div className="shell missing-page"><h1>{t('missingProduct')}</h1><Link className="button button-dark" to={href('/products')}>{t('returnProducts')}</Link></div>;
   const product = selectedProduct;
   const category = tenant.categories.find(item => item.id === product.categoryId);

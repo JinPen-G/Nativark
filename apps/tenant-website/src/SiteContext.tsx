@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { siteRepository } from './data/siteRepository';
-import { loadRemoteSite } from './data/remoteSite';
+import { loadRemoteBootstrap, loadRemoteCatalogs } from './data/remoteSite';
 import { resolveSite, type SiteResolution } from './data/resolveTenant';
 import { clientApi } from './data/apiClient';
 import { applyColorMode, applyTenantTheme, getInitialTheme, THEME_STORAGE_KEY, type ThemeMode } from './theme';
@@ -16,6 +16,8 @@ interface SiteContextValue {
   tenantCode: string | null;
   /** 是否为真实租户模式（?tenantCode= 触发，消费后端接口）。 */
   isRemote: boolean;
+  /** 商品目录是否已就绪（真实租户模式下第二阶段加载）；演示模式恒为 true。 */
+  productsReady: boolean;
   mode: CategoryMode;
   href: (path: string) => string;
   language: Language;
@@ -67,22 +69,32 @@ export function SiteProvider({ children }: { children: ReactNode }) {
 
   const [remote, setRemote] = useState<{ code: string; tenant: Tenant } | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
+  const [productsReady, setProductsReady] = useState(false);
 
   useEffect(() => {
     if (!remoteTenantCode) {
       siteRepository.resetActiveProducts();
       setRemote(null);
       setRemoteError(null);
+      setProductsReady(true);
       return;
     }
     let cancelled = false;
     setRemote(null);
     setRemoteError(null);
-    loadRemoteSite(remoteTenantCode)
-      .then(site => {
-        if (cancelled) return;
-        siteRepository.setActiveProducts(site.products);
-        setRemote({ code: remoteTenantCode, tenant: site.tenant });
+    setProductsReady(false);
+    siteRepository.resetActiveProducts();
+    // 第一阶段：bootstrap 就绪即渲染品牌/导航/形态；第二阶段：目录到位后补齐商品与二级分类。
+    loadRemoteBootstrap(remoteTenantCode)
+      .then(({ tenant, bootstrap }) => {
+        if (cancelled) return undefined;
+        setRemote({ code: remoteTenantCode, tenant });
+        return loadRemoteCatalogs(remoteTenantCode, bootstrap).then(result => {
+          if (cancelled) return;
+          siteRepository.setActiveProducts(result.products);
+          setRemote({ code: remoteTenantCode, tenant: result.tenant });
+          setProductsReady(true);
+        }).catch(() => { if (!cancelled) setProductsReady(true); });
       })
       .catch(() => { if (!cancelled) setRemoteError('无法加载该租户官网数据'); });
     return () => { cancelled = true; };
@@ -104,18 +116,28 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   const localize = useMemo(() => (product: Product) => localizeProduct(product, language), [language]);
 
   useEffect(() => {
-    document.title = tenant.seoTitle?.trim() || `${tenant.name} · ${tenant.slogan}`;
+    const title = tenant.seoTitle?.trim() || `${tenant.name} · ${tenant.slogan}`;
+    document.title = title;
     document.documentElement.lang = language;
     applyTenantTheme(sourceTenant);
     // SEO：官网渠道配置的描述/关键词写入 <meta>，缺省用品牌描述兜底。
-    const setMeta = (name: string, content: string) => {
+    const description = tenant.seoDescription?.trim() || tenant.heroDescription?.replace(/\n/g, ' ').trim() || tenant.slogan;
+    const setMeta = (selector: string, attr: string, key: string, content: string) => {
       if (!content) return;
-      let tag = document.head.querySelector<HTMLMetaElement>(`meta[name="${name}"]`);
-      if (!tag) { tag = document.createElement('meta'); tag.setAttribute('name', name); document.head.appendChild(tag); }
+      let tag = document.head.querySelector<HTMLMetaElement>(selector);
+      if (!tag) { tag = document.createElement('meta'); tag.setAttribute(attr, key); document.head.appendChild(tag); }
       tag.setAttribute('content', content);
     };
-    setMeta('description', tenant.seoDescription?.trim() || tenant.heroDescription?.replace(/\n/g, ' ').trim() || tenant.slogan);
-    if (tenant.seoKeywords?.trim()) setMeta('keywords', tenant.seoKeywords.trim());
+    setMeta('meta[name="description"]', 'name', 'description', description);
+    if (tenant.seoKeywords?.trim()) setMeta('meta[name="keywords"]', 'name', 'keywords', tenant.seoKeywords.trim());
+    // Open Graph：分享到社交/IM 时的标题、描述与预览图。
+    setMeta('meta[property="og:title"]', 'property', 'og:title', title);
+    setMeta('meta[property="og:description"]', 'property', 'og:description', description);
+    setMeta('meta[property="og:type"]', 'property', 'og:type', 'website');
+    if (tenant.heroImage) {
+      const img = tenant.heroImage.startsWith('/') ? `${window.location.origin}${tenant.heroImage}` : tenant.heroImage;
+      setMeta('meta[property="og:image"]', 'property', 'og:image', img);
+    }
   }, [language, sourceTenant, tenant]);
 
   useEffect(() => {
@@ -148,7 +170,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     return <div className="remote-gate" role="status">{remoteError ? remoteError : '正在加载…'}</div>;
   }
 
-  return <SiteContext.Provider value={{ tenant, tenantKey, tenantCode: remoteTenantCode, isRemote, mode, href, language, setLanguage, toggleLanguage, t, localizeProduct: localize, theme, setTheme, toggleTheme }}>{children}</SiteContext.Provider>;
+  return <SiteContext.Provider value={{ tenant, tenantKey, tenantCode: remoteTenantCode, isRemote, productsReady, mode, href, language, setLanguage, toggleLanguage, t, localizeProduct: localize, theme, setTheme, toggleTheme }}>{children}</SiteContext.Provider>;
 }
 
 export function useSite() {

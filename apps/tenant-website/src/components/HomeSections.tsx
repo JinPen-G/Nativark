@@ -39,14 +39,15 @@ export function HomeHero({ mode }: { mode: CategoryMode }) {
 }
 
 export function CategorySection({ mode }: { mode: CategoryMode }) {
-  const { tenant, href, t } = useSite();
+  const { tenant, href, isRemote, productsReady, t } = useSite();
   if (mode !== 'single') return null;
-  if (mode === 'single') {
-    const category = tenant.categories[0];
-    return <section className="section shell homepage-section category-section"><SectionHeading title={t('featuredCategoryTitle')} subtitle={t('featuredCategorySubtitle', { category: category.name })} action={<Link to={href(`/category/${category.id}`)}>{t('viewAll')} <ArrowRightOutlined /></Link>} />
-      <div className="subcategory-grid">{category.children.map(child => <Link className="subcategory-card" to={href(`/category/${category.id}?sub=${child.id}`)} key={child.id}><div className="subcategory-image"><img src={child.image} alt="" loading="lazy" /></div><strong>{child.name}</strong><span>{child.description}</span></Link>)}</div>
-    </section>;
-  }
+  const category = tenant.categories[0];
+  if (!category) return null;
+  return <section className="section shell homepage-section category-section"><SectionHeading title={t('featuredCategoryTitle')} subtitle={t('featuredCategorySubtitle', { category: category.name })} action={<Link to={href(`/category/${category.id}`)}>{t('viewAll')} <ArrowRightOutlined /></Link>} />
+    {isRemote && !productsReady && category.children.length === 0
+      ? <div className="subcategory-grid subcategory-grid-loading" aria-busy="true">{Array.from({ length: 5 }, (_, i) => <div className="subcategory-skeleton" key={i} />)}</div>
+      : <div className="subcategory-grid">{category.children.map(child => <Link className="subcategory-card" to={href(`/category/${category.id}?sub=${child.id}`)} key={child.id}><div className="subcategory-image"><img src={child.image} alt="" loading="lazy" /></div><strong>{child.name}</strong><span>{child.description}</span></Link>)}</div>}
+  </section>;
 }
 
 export function SectionHeading({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
@@ -61,7 +62,7 @@ export function SceneSection({ mode }: { mode: CategoryMode }) {
 }
 
 export function ProductSection({ mode }: { mode: CategoryMode }) {
-  const { tenant, href, t } = useSite();
+  const { tenant, href, isRemote, productsReady, t } = useSite();
   const [active, setActive] = useState('all');
   const all = siteRepository.getProducts(tenant);
   const tabs = mode === 'single' ? [{ id: 'all', name: t('recommendedSort') }, { id: 'popular', name: t('featuredProductsTitle') }, { id: 'new', name: t('ratingSort') }] : [{ id: 'all', name: t('categoryAll') }, ...tenant.categories.slice(0, mode === 'multiple' ? 7 : 2).map(category => ({ id: category.id, name: category.name }))];
@@ -77,7 +78,7 @@ export function ProductSection({ mode }: { mode: CategoryMode }) {
     }
     return mixed.slice(0, mode === 'double' ? 5 : 6);
   }, [active, all, mode]);
-  return <section className="section shell homepage-section product-section"><div className="product-section-top"><SectionHeading title={mode === 'single' ? t('featuredProductsTitle') : t('featuredProductsTitleGeneral')} subtitle={mode === 'single' ? t('featuredProductsSubtitleSingle', { category: tenant.categories[0].name }) : t('featuredProductsSubtitleGeneral')} /><div className="product-tabs" role="tablist" aria-label={t('productCategory')}>{tabs.map(tab => <button role="tab" aria-selected={active === tab.id} className={active === tab.id ? 'active' : ''} key={tab.id} onClick={() => setActive(tab.id)}>{tab.name}</button>)}</div><Link className="text-link product-all-link" to={href('/products')}>{t('viewMore')} <ArrowRightOutlined /></Link></div><div className="product-grid">{visible.map(product => <ProductCard product={product} key={product.id} />)}</div></section>;
+  return <section className="section shell homepage-section product-section"><div className="product-section-top"><SectionHeading title={mode === 'single' ? t('featuredProductsTitle') : t('featuredProductsTitleGeneral')} subtitle={mode === 'single' ? t('featuredProductsSubtitleSingle', { category: tenant.categories[0].name }) : t('featuredProductsSubtitleGeneral')} /><div className="product-tabs" role="tablist" aria-label={t('productCategory')}>{tabs.map(tab => <button role="tab" aria-selected={active === tab.id} className={active === tab.id ? 'active' : ''} key={tab.id} onClick={() => setActive(tab.id)}>{tab.name}</button>)}</div><Link className="text-link product-all-link" to={href('/products')}>{t('viewMore')} <ArrowRightOutlined /></Link></div>{isRemote && !productsReady ? <div className="product-grid product-grid-loading" aria-busy="true">{Array.from({ length: mode === 'single' ? 5 : 6 }, (_, i) => <div className="product-card-skeleton" key={i} />)}</div> : <div className="product-grid">{visible.map(product => <ProductCard product={product} key={product.id} />)}</div>}</section>;
 }
 
 export function ServiceBenefits({ mode }: { mode: CategoryMode }) {

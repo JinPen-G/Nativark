@@ -777,3 +777,16 @@ html[data-theme="dark"] .home-hero-multiple .hero-benefits { background: rgba(0,
 .doc-page { max-width: 760px; }
 .doc-intro { color: var(--muted, #6b7a90); }
 .doc-text p { margin: 0 0 10px; line-height: 1.8; color: var(--ink, #1c2733); }
+
+/* 路由加载与错误兜底 */
+.route-fallback, .remote-gate { min-height: 60vh; display: flex; align-items: center; justify-content: center; color: var(--muted, #6b7a90); font-size: 15px; }
+.error-fallback { min-height: 60vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 8px; }
+.error-fallback h1 { font-size: 22px; margin: 0; }
+.error-fallback p { color: var(--muted, #6b7a90); margin: 0 0 12px; }
+.error-fallback-actions { display: flex; gap: 12px; }
+
+/* 加载骨架屏 */
+@keyframes skeleton-pulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+.product-card-skeleton { height: 300px; border-radius: 14px; background: var(--card-muted, #f1f4f8); animation: skeleton-pulse 1.3s ease-in-out infinite; }
+.subcategory-skeleton { height: 150px; border-radius: 12px; background: var(--card-muted, #f1f4f8); animation: skeleton-pulse 1.3s ease-in-out infinite; }
+html[data-theme="dark"] .product-card-skeleton, html[data-theme="dark"] .subcategory-skeleton { background: rgba(255,255,255,.06); }

@@ -95,31 +95,7 @@ export interface RemoteSite {
   products: Product[];
 }
 
-/** 加载一个真实租户的官网数据：bootstrap 定品牌与发布服务，各服务的 public/catalog 定商品。 */
-export async function loadRemoteSite(tenantCode: string): Promise<RemoteSite> {
-  const bootstrap = await clientApi.bootstrap(tenantCode);
-  const openServices = bootstrap.services.filter(service => service.status === 'open');
-
-  // 各已发布服务的公开目录并行拉取；单个服务失败不影响整体（缺目录的品类仍在导航里，只是没商品）。
-  const catalogs = await Promise.all(openServices.map(async service => {
-    try {
-      return await clientApi.publicCatalog(tenantCode, service.code);
-    } catch {
-      return null;
-    }
-  }));
-
-  const categoryImageByCode = new Map((bootstrap.website?.categoryImages ?? []).map(item => [item.code, item.imageUrl]));
-  const categories = openServices.map((service, index) => toCategory(service, catalogs[index], categoryImageByCode.get(service.code)));
-  const products: Product[] = [];
-  openServices.forEach((service, index) => {
-    const catalog = catalogs[index];
-    catalog?.items.forEach(item => {
-      const group = catalog.pricingGroups?.find(g => g.memberItemGroupIds?.includes(item.id));
-      products.push(toProduct(item, service.code, group?.id ?? item.id));
-    });
-  });
-
+function buildTenant(bootstrap: BootstrapResponse, categories: Category[]): Tenant {
   const website = bootstrap.website;
   const merchantName = bootstrap.merchant.name;
   const tenant: Tenant = {
@@ -148,11 +124,46 @@ export async function loadRemoteSite(tenantCode: string): Promise<RemoteSite> {
     seoDescription: website?.seoDescription,
     seoKeywords: website?.seoKeywords,
   };
+  tenant.categories.forEach(category => { if (!category.sceneImage) category.sceneImage = FALLBACK_SCENE; });
+  return tenant;
+}
 
-  // 缺场景图的品类回落到通用场景图，避免空图。
-  tenant.categories.forEach(category => {
-    if (!category.sceneImage) category.sceneImage = FALLBACK_SCENE;
+const openServicesOf = (bootstrap: BootstrapResponse) => bootstrap.services.filter(service => service.status === 'open');
+
+/**
+ * 第一阶段（快）：只用 bootstrap 建站——品牌、导航、单/双/多形态、官网内容块立即可渲染。
+ * 品类入口图用后台配置的图或占位；二级分类与商品留待第二阶段目录加载后补齐。
+ */
+export async function loadRemoteBootstrap(tenantCode: string): Promise<{ tenant: Tenant; bootstrap: BootstrapResponse }> {
+  const bootstrap = await clientApi.bootstrap(tenantCode);
+  const imageByCode = new Map((bootstrap.website?.categoryImages ?? []).map(item => [item.code, item.imageUrl]));
+  const categories = openServicesOf(bootstrap).map(service => toCategory(service, null, imageByCode.get(service.code)));
+  return { tenant: buildTenant(bootstrap, categories), bootstrap };
+}
+
+/**
+ * 第二阶段：各已发布服务的 public/catalog——补齐商品，并用真实商品图/定价分组丰富品类入口图与二级分类。
+ * 单个服务失败不影响整体。
+ */
+export async function loadRemoteCatalogs(tenantCode: string, bootstrap: BootstrapResponse): Promise<{ tenant: Tenant; products: Product[] }> {
+  const openServices = openServicesOf(bootstrap);
+  const catalogs = await Promise.all(openServices.map(service => clientApi.publicCatalog(tenantCode, service.code).catch(() => null)));
+  const imageByCode = new Map((bootstrap.website?.categoryImages ?? []).map(item => [item.code, item.imageUrl]));
+  const categories = openServices.map((service, index) => toCategory(service, catalogs[index], imageByCode.get(service.code)));
+  const products: Product[] = [];
+  openServices.forEach((service, index) => {
+    const catalog = catalogs[index];
+    catalog?.items.forEach(item => {
+      const group = catalog.pricingGroups?.find(g => g.memberItemGroupIds?.includes(item.id));
+      products.push(toProduct(item, service.code, group?.id ?? item.id));
+    });
   });
+  return { tenant: buildTenant(bootstrap, categories), products };
+}
 
+/** 一次性加载（bootstrap + 全部目录）；两阶段加载见 loadRemoteBootstrap / loadRemoteCatalogs。 */
+export async function loadRemoteSite(tenantCode: string): Promise<RemoteSite> {
+  const { bootstrap } = await loadRemoteBootstrap(tenantCode);
+  const { tenant, products } = await loadRemoteCatalogs(tenantCode, bootstrap);
   return { tenant, products };
 }

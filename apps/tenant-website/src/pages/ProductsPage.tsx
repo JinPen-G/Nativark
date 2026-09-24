@@ -6,7 +6,7 @@ import { ProductCard } from '../components/ProductCard';
 import { siteRepository } from '../data/siteRepository';
 
 export function ProductsPage() {
-  const { tenant, tenantKey, isRemote, href, language, localizeProduct, t } = useSite();
+  const { tenant, tenantKey, isRemote, productsReady, href, language, localizeProduct, t } = useSite();
   const { categoryId } = useParams();
   const [params, setParams] = useSearchParams();
   const category = tenant.categories.find(item => item.id === categoryId);
@@ -45,7 +45,7 @@ export function ProductsPage() {
     <div className="catalog-layout"><aside className="catalog-sidebar"><h2>{t('productCategory')}</h2><nav aria-label={t('productCategory')}><Link className={selectedCategory === 'all' ? 'active' : ''} to={href('/products')}>{t('allProducts')} <span>{siteRepository.getProducts(tenant).length}</span></Link>{tenant.categories.map(item => <Link className={selectedCategory === item.id ? 'active' : ''} key={item.id} to={href(`/category/${item.id}`)}>{item.name}<span>{siteRepository.getProducts(tenant).filter(product => product.categoryId === item.id).length}</span></Link>)}</nav></aside>
       <div className="catalog-main"><div className="catalog-toolbar"><form onSubmit={event => { event.preventDefault(); updateParam('search', searchInput.trim()); }}><SearchOutlined /><input value={searchInput} onChange={event => setSearchInput(event.target.value)} placeholder={t('searchProducts')} aria-label={t('searchAria')} /><button type="submit">{t('search')}</button></form><span>{t('itemCount', { count: filtered.length })}</span><select value={sort} onChange={event => setSort(event.target.value)} aria-label={t('sortLabel')}><option value="recommended">{t('recommendedSort')}</option><option value="price-low">{t('priceLow')}</option><option value="price-high">{t('priceHigh')}</option><option value="rating">{t('ratingSort')}</option></select></div>
         {activeCategory && activeCategory.children.length > 1 && <div className="filter-chips" aria-label={t('subcategory')}><button className={selectedSub === 'all' ? 'active' : ''} onClick={() => updateParam('sub', 'all')}>{t('categoryAll')}</button>{activeCategory.children.map(child => <button key={child.id} className={selectedSub === child.id ? 'active' : ''} onClick={() => updateParam('sub', child.id)}>{child.name}</button>)}</div>}
-        {filtered.length ? <div className="product-grid catalog-grid">{filtered.map(product => <ProductCard product={product} key={product.id} />)}</div> : <div className="empty-state"><SearchOutlined /><h2>{t('noProducts')}</h2><p>{t('tryOther')}</p><Link className="button button-dark" to={href('/products')}>{t('viewAll')} {t('allProducts')}</Link></div>}
+        {filtered.length ? <div className="product-grid catalog-grid">{filtered.map(product => <ProductCard product={product} key={product.id} />)}</div> : (isRemote && !productsReady) ? <div className="product-grid catalog-grid product-grid-loading" aria-busy="true">{Array.from({ length: 8 }, (_, i) => <div className="product-card-skeleton" key={i} />)}</div> : <div className="empty-state"><SearchOutlined /><h2>{t('noProducts')}</h2><p>{t('tryOther')}</p><Link className="button button-dark" to={href('/products')}>{t('viewAll')} {t('allProducts')}</Link></div>}
       </div>
     </div>
   </div>;
