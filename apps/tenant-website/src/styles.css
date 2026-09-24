@@ -251,7 +251,7 @@ h1, h2, h3, p { margin-top: 0; }
 .benefit-section-double { margin-top: var(--s48); }
 .steps-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; }
 .step-item { position: relative; display: flex; align-items: center; gap: 15px; }
-.step-icon { display: grid; place-items: center; width: 58px; height: 58px; flex: 0 0 58px; border-radius: 50%; background: var(--brand-soft); font-size: 25px; }
+.step-icon { display: grid; place-items: center; width: 58px; height: 58px; flex: 0 0 58px; border-radius: 50%; background: var(--brand); color: var(--brand-contrast); font-size: 25px; }
 .step-item strong { font-size: 13px; white-space: nowrap; }
 .step-item strong b { margin-right: 5px; }
 .step-item p { margin: 4px 0 0; color: var(--muted); font-size: 12px; white-space: nowrap; }
@@ -429,6 +429,7 @@ main:has(.home-cta) + .site-footer { margin-top: 0; }
   .brand-logo { width: 134px; }
   .brand-slogan { font-size: 9px; }
   .main-nav { display: none; position: absolute; top: 70px; left: 0; right: 0; background: #fff; padding: 20px 24px; box-shadow: 0 12px 25px rgba(25,40,55,.08); flex-direction: column; align-items: stretch; gap: 0; }
+  html[data-theme="dark"] .main-nav { background: var(--card); box-shadow: 0 12px 25px rgba(0,0,0,.35); }
   .main-nav.is-open { display: flex; }
   .main-nav a { padding: 10px 0; }
   .mobile-category-link { display: block; }
@@ -725,7 +726,6 @@ html[data-theme="dark"] .step-arrow { color: rgba(255,255,255,.45); }
 html[data-theme="dark"] .mock-note,
 html[data-theme="dark"] .detail-image-note { color: rgba(255,255,255,.5); }
 html[data-theme="dark"] .mobile-menu-button { color: var(--ink); }
-html[data-theme="dark"] .main-nav { background: var(--card); box-shadow: 0 12px 25px rgba(0,0,0,.35); }
 html[data-theme="dark"] .home-hero-multiple .hero-benefits { background: rgba(0,0,0,.78); }
 
 /* 真实租户模式：数据加载/失败时的轻量占位（避免用演示数据闪现）。 */
@@ -737,7 +737,7 @@ html[data-theme="dark"] .home-hero-multiple .hero-benefits { background: rgba(0,
 .login-page { max-width: 480px; }
 .login-card { border: 1px solid var(--line, #e5e9f0); border-radius: 16px; padding: 24px; background: var(--card, #fff); box-shadow: 0 10px 30px rgba(16,36,64,.06); }
 .login-tabs { display: flex; gap: 8px; margin-bottom: 20px; }
-.login-tabs button { flex: 1; height: 38px; border-radius: 10px; border: 1px solid var(--line, #e5e9f0); background: transparent; color: var(--muted, #6b7a90); font-size: 14px; cursor: pointer; }
+.login-tabs button { flex: 1; height: 38px; border-radius: var(--radius-button); border: 1px solid var(--line, #e5e9f0); background: transparent; color: var(--muted, #6b7a90); font-size: 14px; cursor: pointer; }
 .login-tabs button.active { border-color: var(--brand, #007aff); color: var(--brand, #007aff); font-weight: 600; }
 .login-form { display: flex; flex-direction: column; gap: 14px; }
 .login-form label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted, #6b7a90); }
