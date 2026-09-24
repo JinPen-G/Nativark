@@ -139,7 +139,7 @@ h1, h2, h3, p { margin-top: 0; }
 .footer-bottom { border-top: 1px solid #e1e8ef; min-height: 58px; display: flex; align-items: center; justify-content: space-between; color: #91a0af; font-size: 11px; }
 .footer-bottom-actions { display: inline-flex; align-items: center; gap: 18px; }
 .language-picker { position: relative; }
-.language-picker-trigger { min-height: 32px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid #dce5ee; border-radius: 9px; padding: 0 10px; background: rgba(255,255,255,.86); color: #657486; font: inherit; font-size: 11px; cursor: pointer; }
+.language-picker-trigger { min-height: 32px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid #dce5ee; border-radius: var(--radius-button); padding: 0 10px; background: rgba(255,255,255,.86); color: #657486; font: inherit; font-size: 11px; cursor: pointer; }
 .language-picker-trigger .anticon:first-child { font-size: 14px; color: #8190a0; }
 .language-picker-trigger .anticon:last-child { font-size: 9px; }
 .language-picker-trigger:hover { color: var(--brand); border-color: color-mix(in srgb, var(--brand) 35%, #dce5ee); }
@@ -218,7 +218,7 @@ h1, h2, h3, p { margin-top: 0; }
 .product-section-top { display: flex; align-items: flex-end; gap: 24px; margin-bottom: 24px; }
 .product-section-top .section-heading { margin-bottom: 0; margin-right: auto; }
 .product-tabs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 1px; }
-.product-tabs button, .filter-chips button { border: 0; border-radius: 8px; background: #f2f6fb; color: #586a7e; padding: 9px 14px; white-space: nowrap; font-size: 12px; font-weight: 500; }
+.product-tabs button, .filter-chips button { border: 0; border-radius: var(--radius-button); background: #f2f6fb; color: #586a7e; padding: 9px 14px; white-space: nowrap; font-size: 12px; font-weight: 500; }
 .product-tabs button.active, .filter-chips button.active { background: var(--brand); color: var(--brand-contrast); }
 .product-all-link { padding-bottom: 9px; }
 .product-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 15px; }
@@ -732,7 +732,7 @@ html[data-theme="dark"] .home-hero-multiple .hero-benefits { background: rgba(0,
 .remote-gate { min-height: 60vh; display: flex; align-items: center; justify-content: center; color: var(--muted, #6b7a90); font-size: 15px; }
 
 /* 账号入口与登录页 */
-.header-account { display: inline-flex; align-items: center; height: 36px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line, #e5e9f0); background: transparent; color: var(--ink, #1c2733); font-size: 13px; cursor: pointer; white-space: nowrap; }
+.header-account { display: inline-flex; align-items: center; height: 36px; padding: 0 12px; border-radius: var(--radius-button); border: 1px solid var(--line, #e5e9f0); background: transparent; color: var(--ink, #1c2733); font-size: 13px; cursor: pointer; white-space: nowrap; }
 .header-account:hover { border-color: var(--brand, #007aff); color: var(--brand, #007aff); }
 .login-page { max-width: 480px; }
 .login-card { border: 1px solid var(--line, #e5e9f0); border-radius: 16px; padding: 24px; background: var(--card, #fff); box-shadow: 0 10px 30px rgba(16,36,64,.06); }
