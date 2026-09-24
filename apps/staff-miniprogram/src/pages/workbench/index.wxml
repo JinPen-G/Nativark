@@ -49,7 +49,8 @@
           <view class="todo" wx:for="{{todos}}" wx:key="type" hover-class="btn-hover" data-type="{{item.type}}" data-order-id="{{item.orderId}}" bindtap="onTodo">
             <view class="todo__icon todo__icon--{{item.color}}"><ui-icon name="{{item.icon}}" size="30" color="{{item.color === 'muted' ? 'secondary' : item.color}}" stroke="1.8"></ui-icon></view>
             <view class="todo__title">{{item.label}}</view>
-            <view class="badge {{item.color === 'muted' || item.color === 'info' ? 'badge--muted' : ''}}">{{item.count}}</view>
+            <view wx:if="{{item.showCount}}" class="badge {{item.color === 'muted' || item.color === 'info' ? 'badge--muted' : ''}}">{{item.count}}</view>
+            <ui-icon wx:else name="chevron-right" size="26" color="muted"></ui-icon>
           </view>
         </block>
         <view wx:elif="{{view.status === 'loading'}}" class="skeleton skeleton--line"></view>

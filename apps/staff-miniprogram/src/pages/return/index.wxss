@@ -4,12 +4,13 @@
 .card > .subtitle { font-weight: var(--fw-bold); padding-bottom: 8rpx; }
 .form-row { min-height: 86rpx; }
 .form-row__label { width: 48%; font-size: var(--font-secondary); }
+.form-row__control { justify-content: flex-end; }
 .screen > .section { padding-left: 24rpx; padding-right: 24rpx; }
 .screen .card { padding: 18rpx; border-radius: 16rpx; }
 .return-steps { display: flex; justify-content: space-around; margin: 16rpx 24rpx 4rpx; padding: 12rpx 0; background: var(--surface); border-radius: 14rpx; }
 .return-step { flex: 1; text-align: center; color: var(--secondary); font-size: var(--font-nano); }
 .return-step text { display: flex; align-items: center; justify-content: center; width: 34rpx; height: 34rpx; margin: 0 auto 5rpx; border-radius: 50%; background: var(--line); color: var(--secondary); font-size: var(--font-mini); }
-.return-step--done text, .return-step--active text { background: var(--primary); color: #fff; }
+.return-step--done text, .return-step--active text { background: var(--primary); color: var(--on-primary); }
 .return-step--active { color: var(--primary); font-weight: var(--fw-semibold); }
 .return-summary .kv { min-height: 51rpx; }
 .return-summary .kv__value { max-width: 65%; text-align: right; font-size: var(--font-mini); }
@@ -17,6 +18,10 @@
 .return-step { position: relative; z-index: 1; }
 .return-step:not(:last-child)::after { content: ""; position: absolute; z-index: -1; top: 16rpx; left: calc(50% + 19rpx); right: calc(-50% + 19rpx); height: 2rpx; background: var(--line); }
 .return-step--done::after { background: var(--primary); }
+.device { border: 1rpx solid var(--border); border-radius: 12rpx; padding: 8rpx 16rpx; margin-top: 16rpx; }
+.device__head { display: flex; align-items: center; padding: 8rpx 0; }
+.device .form-row { border-top: 1rpx solid var(--border); }
+.shared-head { margin-top: 16rpx; }
 .inspection-photos { display: flex; flex-direction: column; align-items: flex-start; gap: 10rpx; width: 100%; }
 .photo-grid { display: flex; flex-wrap: wrap; gap: 10rpx; }
 .photo-grid image { width: 132rpx; height: 132rpx; border-radius: 10rpx; background: var(--page); }

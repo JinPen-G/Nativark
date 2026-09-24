@@ -113,6 +113,8 @@ Page({
     switch (this.data.todoFilter) {
       case "fee_review":
         return (order.feeReviews ?? []).some((row) => (row as { status?: string }).status === "pending");
+      case "pending_confirm":
+        return order.status === "draft";
       default:
         return true;
     }

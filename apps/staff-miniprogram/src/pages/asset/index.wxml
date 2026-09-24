@@ -1,31 +1,96 @@
 <page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
-<view class="screen screen--flat {{themeClass}}">
+<view class="screen {{screenPad}} {{themeClass}}">
   <nav-bar title="{{assetLabel}}详情"></nav-bar>
   <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
   <block wx:else>
-    <view class="asset-photo">
-      <image wx:if="{{imagePath}}" src="{{imagePath}}" mode="aspectFit"></image>
-      <ui-icon wx:else name="box" size="112" color="muted" stroke="1.3"></ui-icon>
+    <view class="asset-album-wrap">
+      <swiper wx:if="{{images.length}}" class="asset-album" circular="{{albumLoop}}" bindchange="onSwiperChange">
+        <swiper-item wx:for="{{images}}" wx:key="*this">
+          <image class="asset-album__img" src="{{item}}" mode="aspectFit"></image>
+        </swiper-item>
+      </swiper>
+      <view wx:else class="asset-album asset-album--empty">
+        <ui-icon name="{{placeholderIcon}}" size="120" color="muted" stroke="1.3"></ui-icon>
+      </view>
+      <view wx:if="{{imageLabel}}" class="asset-album__count">{{imageLabel}}</view>
     </view>
+
     <view class="section asset-summary">
-      <view class="row row--between"><view class="title">{{title}}</view><status-tag label="{{status}}" tone="{{tone}}" small="{{true}}"></status-tag></view>
+      <view class="asset-title-row">
+        <view class="title">{{title}}</view>
+        <status-tag label="{{status}}" tone="{{tone}}" small="{{true}}"></status-tag>
+      </view>
+      <view wx:if="{{categoryName}}" class="asset-chip-row"><view class="chip--soft">{{categoryName}}</view></view>
       <view class="card asset-details">
-        <view class="kv" bindtap="onCopy"><text class="kv__label">{{assetLabel}}编号</text><text class="kv__value asset-copy">{{assetNo}} ⧉</text></view>
+        <view class="kv asset-copy-row" bindtap="onCopy"><text class="kv__label">{{identifierLabel}}</text><text class="kv__value asset-copy">{{assetNo}} ⧉</text></view>
         <view wx:if="{{serialNo}}" class="kv"><text class="kv__label">{{serialLabel}}</text><text class="kv__value">{{serialNo}}</text></view>
-        <view class="kv"><text class="kv__label">所在地点</text><text class="kv__value">{{location}}</text></view>
+        <view class="kv"><text class="kv__label">所在{{fulfillmentLabel}}</text><text class="kv__value">{{locationName}}</text></view>
+        <view class="kv"><text class="kv__label">录入时间</text><text class="kv__value">{{entryTime}}</text></view>
         <view class="kv" wx:for="{{fields}}" wx:key="label"><text class="kv__label">{{item.label}}</text><text class="kv__value">{{item.value}}</text></view>
       </view>
     </view>
-    <view class="section section--tight">
-      <view class="asset-quick-grid">
-        <view wx:if="{{canManage}}" class="asset-quick" hover-class="btn-hover" bindtap="onEdit"><view class="asset-quick__icon"><ui-icon name="edit" size="42" color="primary" stroke="1.7"></ui-icon></view><view class="asset-quick__label">编辑{{assetLabel}}</view></view>
-        <view class="asset-quick" hover-class="btn-hover" bindtap="onLedger"><view class="asset-quick__icon asset-quick__icon--green"><ui-icon name="transfer" size="42" color="success" stroke="1.7"></ui-icon></view><view class="asset-quick__label">库存流水</view></view>
-        <view class="asset-quick" hover-class="btn-hover" bindtap="onScrollToRental"><view class="asset-quick__icon asset-quick__icon--orange"><ui-icon name="history" size="42" color="warning" stroke="1.7"></ui-icon></view><view class="asset-quick__label">租赁历史</view></view>
-        <view class="asset-quick" hover-class="btn-hover" bindtap="onCopy"><view class="asset-quick__icon asset-quick__icon--purple"><ui-icon name="link" size="42" color="purple" stroke="1.7"></ui-icon></view><view class="asset-quick__label">复制编号</view></view>
+
+    <view wx:if="{{modelFields.length}}" class="section section--tight">
+      <view class="card asset-details">
+        <view class="row row--between asset-model-head" hover-class="btn-hover" bindtap="onToggleModel">
+          <view class="subtitle">{{itemGroupLabel}}参数</view>
+          <ui-icon name="{{modelIcon}}" size="30" color="muted"></ui-icon>
+        </view>
+        <block wx:if="{{modelOpen}}">
+          <view class="kv" wx:for="{{modelFields}}" wx:key="label"><text class="kv__label">{{item.label}}</text><text class="kv__value">{{item.value}}</text></view>
+        </block>
       </view>
     </view>
-    <view wx:if="{{orders.length}}" id="asset-rental-history" class="section section--tight"><view class="subtitle asset-section-head">租赁历史</view><view class="card asset-history-card"><view class="cell asset-rental-row" wx:for="{{orders}}" wx:key="id" data-id="{{item.id}}" hover-class="btn-hover" bindtap="onOrder"><view class="asset-rental-thumb"><image wx:if="{{imagePath}}" src="{{imagePath}}" mode="aspectFill"></image><ui-icon wx:else name="box" size="42" color="muted"></ui-icon></view><view class="cell__body"><view class="cell__title">{{item.customer}}</view><view class="cell__desc">{{item.period}}</view><view class="cell__desc">#{{item.no}} · {{item.status}}</view></view><ui-icon name="chevron-right" size="28" color="muted"></ui-icon></view></view></view>
-    <view class="section section--tight"><view class="card asset-history-card"><view class="row row--between"><view class="subtitle">状态记录</view><view class="link" bindtap="onLedger">查看库存流水</view></view><view wx:if="{{!history.length}}" class="muted mt-12">暂无记录</view><view class="cell" wx:for="{{history}}" wx:key="id"><view class="cell__body"><view class="cell__title">{{item.action}}</view><view class="cell__desc">{{item.detail}} · {{item.date}}</view></view></view></view></view>
-    <view class="bottom-bar asset-actions"><button class="btn btn--secondary" bindtap="onLedger">库存流水</button><button wx:if="{{canManage}}" class="btn btn--primary" bindtap="onEdit">编辑{{assetLabel}}</button></view>
+
+    <view class="section section--tight">
+      <view class="quick-grid">
+        <view wx:if="{{canManage}}" class="quick" hover-class="btn-hover" bindtap="onEdit"><view class="quick__icon"><ui-icon name="edit" size="44" color="primary" stroke="1.7"></ui-icon></view><view class="quick__label">编辑{{assetLabel}}</view></view>
+        <view wx:if="{{canLedger}}" class="quick" hover-class="btn-hover" bindtap="onLedger"><view class="quick__icon quick__icon--green"><ui-icon name="transfer" size="44" color="success" stroke="1.7"></ui-icon></view><view class="quick__label">库存流水</view></view>
+        <view wx:if="{{canWorkOrders}}" class="quick" hover-class="btn-hover" bindtap="onWorkOrders"><view class="quick__icon quick__icon--orange"><ui-icon name="tool" size="44" color="warning" stroke="1.7"></ui-icon></view><view class="quick__label">工单处理</view></view>
+        <view class="quick" hover-class="btn-hover" bindtap="onCopy"><view class="quick__icon quick__icon--purple"><ui-icon name="link" size="44" color="purple" stroke="1.7"></ui-icon></view><view class="quick__label">复制{{identifierLabel}}</view></view>
+      </view>
+    </view>
+
+    <view wx:if="{{orders.length}}" id="asset-rental-history" class="section section--tight">
+      <view class="row row--between asset-section-head">
+        <view class="subtitle">租赁历史</view>
+        <view wx:if="{{ordersMore}}" class="link" bindtap="onViewMoreOrders">查看更多</view>
+      </view>
+      <view class="card asset-history-card">
+        <view class="cell asset-rental-row" wx:for="{{orders}}" wx:key="id" data-id="{{item.id}}" hover-class="btn-hover" bindtap="onOrder">
+          <view class="asset-rental-thumb">
+            <image wx:if="{{images.length}}" src="{{images[0]}}" mode="aspectFill"></image>
+            <ui-icon wx:else name="{{placeholderIcon}}" size="40" color="muted"></ui-icon>
+          </view>
+          <view class="cell__body">
+            <view class="cell__title">{{item.customer}}</view>
+            <view class="cell__desc">{{item.period}}</view>
+            <view class="cell__desc">#{{item.no}}</view>
+          </view>
+          <status-tag label="{{item.status}}" tone="{{item.tone}}" small="{{true}}"></status-tag>
+        </view>
+      </view>
+    </view>
+
+    <view class="section section--tight">
+      <view class="card asset-history-card">
+        <view class="row row--between asset-section-head">
+          <view class="subtitle">状态记录</view>
+          <view wx:if="{{canLedger}}" class="link" bindtap="onLedger">查看流水</view>
+        </view>
+        <view wx:if="{{!history.length}}" class="muted mt-12">暂无记录</view>
+        <view class="cell" wx:for="{{history}}" wx:key="id">
+          <view class="cell__body">
+            <view class="cell__title">{{item.action}}</view>
+            <view class="cell__desc">{{item.detail}} · {{item.date}}</view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{showBottomBar}}" class="bottom-bar asset-actions">
+      <button wx:if="{{statusTarget}}" class="btn btn--secondary" bindtap="onStatusChange">{{statusActionLabel}}</button>
+      <button wx:if="{{canScan}}" class="btn btn--primary" bindtap="onScan">扫码出库</button>
+    </view>
   </block>
 </view>

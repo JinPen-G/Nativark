@@ -1,8 +1,9 @@
-import type { RentalWorkbenchTodo } from "@rental-os/shared";
+import type { RentalOrder, RentalWorkbenchTodo } from "@rental-os/shared";
 import { listItemGroups } from "../../api/context";
 import { listOrders } from "../../api/orders";
+import { listMembershipReviews } from "../../api/reviews";
 import { workbenchTodos } from "../../api/workbench";
-import { listWorkOrders } from "../../api/workOrders";
+import { listStockDispositions, listWorkOrders } from "../../api/workOrders";
 import { cachedContext, categoryArtwork, categoryIcon, contextEvents, currentLocationLabel, inCurrentLocation, loadContext, setCurrentLocation, type WorkspaceContext } from "../../core/context";
 import { orderTabMatches, todoTypeIcon, todoTypeLabel } from "../../core/labels";
 import { errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
@@ -29,8 +30,30 @@ interface TodoRow {
   icon: string;
   color: string;
   count: number;
+  /** 是否展示计数徽标；派生类型计数取失败时只给入口（chevron），不写假数字。 */
+  showCount: boolean;
   orderId?: string;
 }
+
+/**
+ * 待处理事项的展示优先级：服务端 todos 与客户端派生类型统一排序（越靠前越紧急）。
+ * 派生类型（pending_confirm / review_task / pending_disposition）穿插在语义相邻的服务端类型之间。
+ */
+const TODO_ORDER = [
+  "return_overdue",
+  "no_show_confirmation",
+  "no_show_notice",
+  "pending_confirm",
+  "offline_payment_pending",
+  "fee_review",
+  "review_task",
+  "work_order",
+  "pending_disposition",
+  "pending_payment",
+  "cancelled_refund_due",
+  "refund",
+  "notification_failure"
+];
 
 interface WorkbenchData {
   view: ViewState;
@@ -129,10 +152,16 @@ Page({
     try {
       await loadContext();
       this.applyContext();
-      const [orders, workOrders, todos] = await Promise.all([
+      const [orders, workOrders, todos, dispositions, reviewCount] = await Promise.all([
         can("rental-os:order:view") ? listOrders() : Promise.resolve([]),
         can("rental-core:maintenance:view") ? listWorkOrders() : Promise.resolve([]),
-        can("rental-os:order:view", "rental-os:report:view", "rental-core:maintenance:view") ? workbenchTodos().catch(() => undefined) : Promise.resolve(undefined)
+        can("rental-os:order:view", "rental-os:report:view", "rental-core:maintenance:view") ? workbenchTodos().catch(() => undefined) : Promise.resolve(undefined),
+        // 归还处置计数：有养护查看权限时拉取，失败不影响工作台其它计数。
+        can("rental-core:maintenance:view") ? listStockDispositions().catch(() => undefined) : Promise.resolve(undefined),
+        // 审核待办计数（租户级）：仅有审核权限时拉取，失败则该行只给入口不写计数。
+        canTenant("rental-os:member:review", "rental-os:member:qualification-review")
+          ? listMembershipReviews({ status: "pending" }).then((rows) => rows.length).catch(() => undefined)
+          : Promise.resolve(undefined)
       ]);
       // 型号目录预热（订单卡片缩略图用），失败不影响工作台。
       void listItemGroups().catch(() => undefined);
@@ -141,10 +170,12 @@ Page({
       const pickup = scoped.filter((order) => orderTabMatches("pending_pickup", order, now)).length;
       const returned = scoped.filter((order) => orderTabMatches("pending_return", order, now)).length;
       const openWorkOrders = workOrders.filter((row) => inCurrentLocation(row.locationId) && (row.status === "pending" || row.status === "in_progress" || row.status === "pending_review")).length;
+      // 归还入库后待清洁/待维修/待复核（未恢复可租）的资源即待处置；undefined 表示未取到计数。
+      const dispositionCount = dispositions === undefined ? undefined : dispositions.filter((row) => inCurrentLocation(row.locationId) && row.status !== "restored").length;
       this.setData({
         view: readyState(),
         counts: { pickup, return: returned, workOrders: openWorkOrders, total: pickup + returned + openWorkOrders },
-        todos: this.groupTodos(todos?.items ?? [])
+        todos: this.groupTodos(todos?.items ?? [], this.buildDerivedTodos(scoped, reviewCount, dispositionCount))
       });
     } catch (error) {
       this.setData({ view: errorState(error) });
@@ -153,17 +184,38 @@ Page({
     }
   },
 
-  groupTodos(items: RentalWorkbenchTodo[]): TodoRow[] {
+  groupTodos(items: RentalWorkbenchTodo[], derived: TodoRow[]): TodoRow[] {
     const counts = new Map<string, number>();
     const firstOrderId = new Map<string, string>();
     for (const item of items) {
       counts.set(item.type, (counts.get(item.type) ?? 0) + 1);
       if (item.orderId && !firstOrderId.has(item.type)) firstOrderId.set(item.type, item.orderId);
     }
-    const order = ["return_overdue", "no_show_confirmation", "no_show_notice", "offline_payment_pending", "fee_review", "work_order", "pending_payment", "cancelled_refund_due", "refund", "notification_failure"];
-    return Array.from(counts.entries())
-      .sort((a, b) => (order.indexOf(a[0]) === -1 ? 99 : order.indexOf(a[0])) - (order.indexOf(b[0]) === -1 ? 99 : order.indexOf(b[0])))
-      .map(([type, count]) => ({ type, label: todoTypeLabel(type), ...todoTypeIcon(type), count, orderId: firstOrderId.get(type) }));
+    const serverRows: TodoRow[] = Array.from(counts.entries()).map(([type, count]) => ({ type, label: todoTypeLabel(type), ...todoTypeIcon(type), count, showCount: true, orderId: firstOrderId.get(type) }));
+    const rank = (type: string) => (TODO_ORDER.indexOf(type) === -1 ? 99 : TODO_ORDER.indexOf(type));
+    return [...serverRows, ...derived].sort((a, b) => rank(a.type) - rank(b.type));
+  },
+
+  /**
+   * 客户端派生的待处理事项：服务端 workbenchTodos() 未直接给出、但能从已有数据可靠推导的类型。
+   * 全部按权限/地点范围过滤；计数取不到时只给入口（showCount=false），绝不写假数字。
+   * - pending_confirm：草稿态订单待商户确认（服务端仅在软占用超时后才给 pending_payment，不含普通待确认）。
+   * - review_task：会员/证件审核（租户级）；计数取失败时只显示入口，点了跳审核页。
+   * - pending_disposition：归还入库后待处置的资源；点了跳工单页的归还处置页签。
+   */
+  buildDerivedTodos(scopedOrders: RentalOrder[], reviewCount: number | undefined, dispositionCount: number | undefined): TodoRow[] {
+    const rows: TodoRow[] = [];
+    const pendingConfirm = scopedOrders.filter((order) => order.status === "draft").length;
+    if (pendingConfirm > 0) rows.push({ type: "pending_confirm", label: "待确认订单", icon: "check-circle", color: "warning", count: pendingConfirm, showCount: true });
+    if (canTenant("rental-os:member:review", "rental-os:member:qualification-review")) {
+      if (reviewCount === undefined) rows.push({ type: "review_task", label: "审核待办", icon: "shield", color: "purple", count: 0, showCount: false });
+      else if (reviewCount > 0) rows.push({ type: "review_task", label: "审核待办", icon: "shield", color: "purple", count: reviewCount, showCount: true });
+    }
+    if (can("rental-core:maintenance:view")) {
+      if (dispositionCount === undefined) rows.push({ type: "pending_disposition", label: "待处置", icon: "box-in", color: "info", count: 0, showCount: false });
+      else if (dispositionCount > 0) rows.push({ type: "pending_disposition", label: "待处置", icon: "box-in", color: "info", count: dispositionCount, showCount: true });
+    }
+    return rows;
   },
 
   /* ---------- 地点切换 ---------- */
@@ -241,6 +293,18 @@ Page({
     }
     if (type === "return_overdue") {
       navigate(buildUrl(ROUTES.orders, { tab: "pending_return" }));
+      return;
+    }
+    if (type === "pending_confirm") {
+      navigate(buildUrl(ROUTES.orders, { tab: "pending_pickup", todo: "pending_confirm" }));
+      return;
+    }
+    if (type === "review_task") {
+      navigate(ROUTES.reviews);
+      return;
+    }
+    if (type === "pending_disposition") {
+      navigate(buildUrl(ROUTES.workOrders, { seg: "dispositions" }));
       return;
     }
     if (type === "no_show_notice" || type === "no_show_confirmation" || type === "pending_payment") {

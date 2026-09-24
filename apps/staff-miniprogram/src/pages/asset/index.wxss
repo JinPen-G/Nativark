@@ -1,27 +1,33 @@
-.asset-photo { height: 390rpx; margin: 16rpx 32rpx 0; border-radius: var(--radius); background: #F0F6FF; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-.asset-photo image { width: 100%; height: 100%; }
-.asset-summary { padding-top: 20rpx; }
-.asset-summary > .row { margin-bottom: 18rpx; }
-.asset-details { box-shadow: none; border: 1rpx solid var(--border); }
-.asset-copy { color: var(--primary); }
-.theme-dark .asset-photo { background: var(--surface); }
 .screen > .section { padding-left: 24rpx; padding-right: 24rpx; }
-.asset-photo { margin-left: 24rpx; margin-right: 24rpx; height: 330rpx; }
-.asset-details { padding: 18rpx; border-radius: 16rpx; }
-.asset-details .kv { min-height: 55rpx; }
-.asset-actions { display: flex; gap: 12rpx; }
-.asset-actions .btn { flex: 1; border-radius: 12rpx; }
-.asset-quick-grid { display: flex; justify-content: space-between; gap: 8rpx; }
-.asset-quick { display: flex; flex: 1; min-width: 0; flex-direction: column; align-items: center; padding: 4rpx 0 8rpx; }
-.asset-quick__icon { display: flex; width: 76rpx; height: 76rpx; align-items: center; justify-content: center; border-radius: 22rpx; background: #EAF2FF; }
-.asset-quick__icon--green { background: var(--success-weak); }
-.asset-quick__icon--orange { background: var(--warning-weak); }
-.asset-quick__icon--purple { background: rgba(124, 92, 255, 0.14); }
-.asset-quick__label { margin-top: 10rpx; color: var(--text); font-size: var(--font-mini); text-align: center; white-space: nowrap; }
-.asset-section-head { margin-bottom: 12rpx; font-size: var(--font-subtitle); font-weight: var(--fw-bold); }
-.asset-history-card { padding: 4rpx 18rpx; border: 1rpx solid var(--border); box-shadow: none; }
-.asset-rental-row { align-items: center; padding: 14rpx 0; }
+
+/* 顶部多图相册（型号主档多图）：swiper + 右下角计数角标；无图退化为品类图标占位。 */
+.asset-album-wrap { position: relative; margin: 16rpx 24rpx 0; }
+.asset-album { height: 360rpx; border-radius: var(--radius); overflow: hidden; background: var(--primary-weak); }
+.asset-album__img { width: 100%; height: 360rpx; }
+.asset-album--empty { display: flex; align-items: center; justify-content: center; }
+.asset-album__count { position: absolute; right: 20rpx; bottom: 20rpx; padding: 2rpx 18rpx; border-radius: var(--radius-pill); background: rgba(0, 0, 0, 0.5); color: #FFFFFF; font-size: var(--font-mini); }
+
+/* 概要：型号名 + 状态标签 + 品类芯片 + 基础信息卡。 */
+.asset-summary { padding-top: 20rpx; }
+.asset-title-row { display: flex; align-items: flex-start; justify-content: space-between; }
+.asset-title-row .title { flex: 1; min-width: 0; margin-right: 16rpx; }
+.asset-chip-row { margin-top: 12rpx; }
+.asset-details { margin-top: 18rpx; padding: 6rpx 20rpx; border: 1rpx solid var(--border); box-shadow: none; }
+.asset-details .kv { min-height: 56rpx; }
+.asset-copy-row { align-items: center; }
+.asset-copy { color: var(--primary); }
+.asset-model-head { min-height: 64rpx; }
+
+/* 区块标题行 */
+.asset-section-head { margin-bottom: 12rpx; }
+
+/* 租赁历史 / 状态记录列表卡 */
+.asset-history-card { padding: 4rpx 20rpx; border: 1rpx solid var(--border); box-shadow: none; }
+.asset-rental-row { align-items: center; padding: 16rpx 0; }
 .asset-rental-row + .asset-rental-row { border-top: 1rpx solid var(--border); }
-.asset-rental-thumb { width: 96rpx; height: 96rpx; margin-right: 16rpx; flex: 0 0 auto; overflow: hidden; border-radius: 10rpx; background: var(--primary-weak); }
+.asset-rental-thumb { width: 96rpx; height: 96rpx; margin-right: 16rpx; flex: 0 0 auto; overflow: hidden; border-radius: var(--radius-sm); background: var(--primary-weak); display: flex; align-items: center; justify-content: center; }
 .asset-rental-thumb image { width: 100%; height: 100%; }
-.theme-dark .asset-quick__icon { background: var(--surface); }
+
+/* 底部双按钮 */
+.asset-actions { gap: 12rpx; }
+.asset-actions .btn { flex: 1; }

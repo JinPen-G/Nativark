@@ -54,6 +54,10 @@ Page({
   context: undefined as WorkspaceContext | undefined,
   loaded: false,
   busy: false,
+  onLoad(query: Record<string, string>) {
+    // 工作台「待处置」跳转带 seg=dispositions，直接预选归还处置页签。
+    if (query.seg === "dispositions") this.setData({ seg: "dispositions" });
+  },
   onShow() { if (!isSignedIn()) { relaunch(ROUTES.login); return; } void this.load(); },
   async load() {
     if (!can("rental-core:maintenance:view")) { this.setData({ view: blockedState("无工单查看权限", "请联系租户管理员", "联系管理员", "contact") }); return; }

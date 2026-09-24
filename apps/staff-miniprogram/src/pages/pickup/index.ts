@@ -1,5 +1,5 @@
 import type { RentalInspectionTemplate, RentalOrder } from "@rental-os/shared";
-import { createInspection, getOrder, handover, listInspectionTemplates, operationLock } from "../../api/orders";
+import { createInspection, getOrder, getOrderFunding, handover, listInspectionTemplates, operationLock } from "../../api/orders";
 import { listItemGroups } from "../../api/context";
 import { loadContext, terms } from "../../core/context";
 import { describeError } from "../../core/errors";
@@ -14,11 +14,20 @@ import { formatBusinessRange } from "../../core/time";
 import { ROUTES, buildUrl, confirmDialog, relaunch, toast } from "../../core/ui";
 import { uploadStaffImage } from "../../api/uploads";
 
+/** 逐设备分组：每台参与本次交接的资源一张卡，卡内只放**逐台**勾选的 boolean 检查项。 */
+interface DeviceGroup { allocationId: string; itemGroupId: string; title: string; identifier: string; imagePath: string; fields: InspectionFieldRow[]; }
+/** 交接门禁项（需求 §4.3）：能前端判断的判断，判断不了的明确标注由服务端提交时校验，绝不伪造“全部通过”。 */
+interface GateItem { key: string; label: string; tone: string; status: string; hint: string; }
+
+const PICKUP_ALLOCATION_STATUSES = ["pre_assigned", "locked", "allocated"];
+const RESERVATION_DEAD = ["released", "expired", "cancelled"];
+
 Page({
   behaviors: [themeBehavior],
-  data: { view: loadingState() as ViewState, id: "", orderNo: "", customer: "", phone: "", period: "", location: "", itemLabel: "物品", pickupLabel: "领取", lines: [] as Array<{ id: string; name: string; quantity: number; imagePath: string }>, templateName: "", fields: [] as InspectionFieldRow[], noTemplate: false, busy: false, uploading: false, signatureWidth: 320, signatureHeight: 150, signatureDrawn: false, signatureFileAssetId: "", error: "" },
+  data: { view: loadingState() as ViewState, id: "", orderNo: "", customer: "", phone: "", period: "", location: "", itemLabel: "物品", pickupLabel: "领取", groups: [] as DeviceGroup[], sharedFields: [] as InspectionFieldRow[], hasBulk: false, gates: [] as GateItem[], templateName: "", noTemplate: false, busy: false, uploading: false, signatureWidth: 320, signatureHeight: 150, signatureDrawn: false, signatureFileAssetId: "", error: "" },
   order: undefined as RentalOrder | undefined,
   template: undefined as RentalInspectionTemplate | undefined,
+  boolCodes: [] as string[],
   signatureContext: undefined as WechatMiniprogram.CanvasContext | undefined,
   signatureDrawing: false,
   onLoad(query: Record<string, string>) { const width = Math.max(240, wx.getSystemInfoSync().windowWidth - 48); this.setData({ id: query.id ?? "", signatureWidth: width }); },
@@ -27,24 +36,57 @@ Page({
     if (!this.data.id) { this.setData({ view: blockedState("缺少订单编号", "请从订单详情重新进入") }); return; }
     this.setData({ view: loadingState() });
     try {
-      const [order, templates, context, groups] = await Promise.all([getOrder(this.data.id), listInspectionTemplates("pickup"), loadContext(), listItemGroups().catch(() => [])]);
+      const [order, templates, context, itemGroups, funding] = await Promise.all([getOrder(this.data.id), listInspectionTemplates("pickup"), loadContext(), listItemGroups().catch(() => []), getOrderFunding(this.data.id).catch(() => undefined)]);
       if (order.status !== "ready_for_pickup") { this.setData({ view: blockedState("当前不能办理领取", `订单当前状态：${order.status}`) }); return; }
       if (!can("rental-os:order:pickup")) { this.setData({ view: blockedState("无领取权限", "请联系管理员授权") }); return; }
       this.order = order;
       this.template = templates.find((row) => row.enabled && row.categoryCode === order.categoryCode);
       const timeZone = context.locations.find((row) => row.id === order.fulfillmentLocationId)?.timezone ?? "Asia/Shanghai";
-      this.setData({ view: readyState(), orderNo: order.orderNo, customer: order.customerName, phone: maskPhone(order.contactPhone), period: formatBusinessRange(order.startAt, order.effectiveEndAt ?? order.endAt, timeZone), location: order.fulfillmentLocationName, itemLabel: terms().itemLabel, pickupLabel: terms().pickupLabel, lines: order.lines.map((row) => ({ id: row.id, name: row.itemGroupName, quantity: row.quantity - (row.cancelledQuantity ?? 0), imagePath: "" })), templateName: this.template?.name ?? "无需检查模板", fields: inspectionRows(this.template), noTemplate: !this.template, error: "" }, () => this.initSignatureCanvas());
-      order.lines.forEach((line, index) => { const source = itemGroupCover(groups.find((group) => group.id === line.itemGroupId)); if (source) void resolveImage(source).then((path) => { if (path && this.data.id === order.id && this.data.lines[index]?.id === line.id) this.setData({ [`lines[${index}].imagePath`]: path }); }); });
+      const allRows = inspectionRows(this.template);
+      const boolRows = allRows.filter((row) => row.type === "boolean");
+      const sharedFields = allRows.filter((row) => row.type !== "boolean");
+      this.boolCodes = boolRows.map((row) => row.code);
+      const idLabel = terms().identifierLabel;
+      const deviceAllocs = order.allocations.filter((row) => PICKUP_ALLOCATION_STATUSES.includes(row.status));
+      const rawDevices = deviceAllocs.length
+        ? deviceAllocs.map((row) => { const line = order.lines.find((entry) => entry.id === row.orderLineId); return { allocationId: row.id, itemGroupId: row.itemGroupId ?? line?.itemGroupId ?? "", title: row.metadata?.itemGroupName ?? line?.itemGroupName ?? terms().itemGroupLabel, identifier: row.assetNo ? `${idLabel} ${row.assetNo}` : `×${row.quantity}` }; })
+        : order.lines.map((line) => ({ allocationId: line.id, itemGroupId: line.itemGroupId, title: line.itemGroupName, identifier: `×${line.quantity - (line.cancelledQuantity ?? 0)}` }));
+      const groups: DeviceGroup[] = rawDevices.map((device) => ({ allocationId: device.allocationId, itemGroupId: device.itemGroupId, title: device.title, identifier: device.identifier, imagePath: "", fields: boolRows.map((row) => ({ ...row })) }));
+      this.setData({ view: readyState(), orderNo: order.orderNo, customer: order.customerName, phone: maskPhone(order.contactPhone), period: formatBusinessRange(order.startAt, order.effectiveEndAt ?? order.endAt, timeZone), location: order.fulfillmentLocationName, itemLabel: terms().itemLabel, pickupLabel: terms().pickupLabel, groups, sharedFields, hasBulk: boolRows.length > 0, gates: this.buildGates(order, funding), templateName: this.template?.name ?? "无需检查模板", noTemplate: !this.template, error: "" }, () => this.initSignatureCanvas());
+      groups.forEach((group, index) => { const source = itemGroupCover(itemGroups.find((entry) => entry.id === group.itemGroupId)); if (source) void resolveImage(source).then((path) => { if (path && this.data.id === order.id && this.data.groups[index]?.allocationId === group.allocationId) this.setData({ [`groups[${index}].imagePath`]: path }); }); });
     } catch (error) { this.setData({ view: errorState(error) }); }
   },
-  onFieldInput(event: WechatMiniprogram.Input) { const index = Number(event.currentTarget.dataset.index); this.setData({ [`fields[${index}].value`]: String(event.detail.value ?? ""), error: "" }); },
-  onFieldBool(event: WechatMiniprogram.SwitchChange) { const index = Number(event.currentTarget.dataset.index); this.setData({ [`fields[${index}].checked`]: Boolean(event.detail.value), error: "" }); },
-  onFieldSelect(event: WechatMiniprogram.PickerChange) { const index = Number(event.currentTarget.dataset.index); this.setData({ [`fields[${index}].value`]: this.data.fields[index]?.options[Number(event.detail.value)] ?? "", error: "" }); },
+  /** 门禁核对：资源锁定与资金能从 order/funding 判断；资质与营业时段前端无法确定，标注由服务端提交时校验。 */
+  buildGates(order: RentalOrder, funding: Awaited<ReturnType<typeof getOrderFunding>> | undefined): GateItem[] {
+    const gates: GateItem[] = [];
+    if (funding) {
+      const rentalOutstanding = funding.rental.payable - funding.rental.collected;
+      const depositReady = funding.deposit.requiredAmount <= 0 || funding.deposit.collected - funding.deposit.refunded >= funding.deposit.requiredAmount;
+      const preauthReady = funding.preauthorization.requiredAmount <= 0 || funding.preauthorization.frozen - funding.preauthorization.released >= funding.preauthorization.requiredAmount;
+      const ready = rentalOutstanding <= 0.009 && depositReady && preauthReady;
+      gates.push({ key: "funding", label: "资金到位", tone: ready ? "success" : "warning", status: ready ? "已收妥" : "待满足", hint: ready ? "租金与押金已按快照收妥" : "仍有应收未收齐，见订单资金区" });
+    } else {
+      gates.push({ key: "funding", label: "资金到位", tone: "neutral", status: "提交时校验", hint: "资金状态由服务端在提交时复核" });
+    }
+    const active = order.allocations.filter((row) => ["pre_assigned", "locked", "allocated", "picked_up"].includes(row.status));
+    const required = order.reservations.filter((row) => !RESERVATION_DEAD.includes(row.status)).reduce((sum, row) => sum + Math.max(0, row.quantity - row.releasedQuantity), 0);
+    const assigned = active.reduce((sum, row) => sum + row.quantity, 0);
+    const locked = active.filter((row) => row.status !== "pre_assigned").reduce((sum, row) => sum + row.quantity, 0);
+    const lockReady = required > 0 && assigned >= required && locked >= required;
+    gates.push({ key: "resource", label: "资源锁定", tone: lockReady ? "success" : "warning", status: lockReady ? "已锁定" : "待锁定", hint: lockReady ? "本次交接资源已锁定就绪" : "存在未分配或未锁定资源" });
+    gates.push({ key: "qualification", label: "资质证件", tone: "neutral", status: "提交时校验", hint: "由服务端按品类规则校验" });
+    gates.push({ key: "business", label: "营业时段", tone: "neutral", status: "提交时校验", hint: "以营业时区与营业日历为准" });
+    return gates;
+  },
+  onFieldInput(event: WechatMiniprogram.Input) { const index = Number(event.currentTarget.dataset.index); this.setData({ [`sharedFields[${index}].value`]: String(event.detail.value ?? ""), error: "" }); },
+  onFieldBool(event: WechatMiniprogram.SwitchChange) { const gi = Number(event.currentTarget.dataset.gi); const fi = Number(event.currentTarget.dataset.fi); this.setData({ [`groups[${gi}].fields[${fi}].checked`]: Boolean(event.detail.value), error: "" }); },
+  onFieldSelect(event: WechatMiniprogram.PickerChange) { const index = Number(event.currentTarget.dataset.index); this.setData({ [`sharedFields[${index}].value`]: this.data.sharedFields[index]?.options[Number(event.detail.value)] ?? "", error: "" }); },
+  onBulkPass() { const groups = this.data.groups.map((group) => ({ ...group, fields: group.fields.map((field) => ({ ...field, checked: true })) })); this.setData({ groups, error: "" }); },
   initSignatureCanvas() { this.signatureContext = wx.createCanvasContext("pickupSignature", this); },
   currentHandoverKey() { return actionKey(this.template ? "pickup.inspection" : "pickup.handover", this.data.id, "handover"); },
   onChooseEvidencePhoto(event: WechatMiniprogram.TouchEvent) {
     const index = Number(event.currentTarget.dataset.index);
-    const field = this.data.fields[index];
+    const field = this.data.sharedFields[index];
     if (!field || this.data.uploading || field.photos.length >= 5) return;
     wx.chooseImage({ count: 5 - field.photos.length, sourceType: ["camera", "album"], sizeType: ["compressed"], success: (result) => { void this.uploadInspectionPhotos(index, result.tempFiles.map((file) => ({ path: file.path, size: file.size }))); } });
   },
@@ -55,8 +97,8 @@ Page({
       for (const file of files) {
         const mimeType = /\.png$/i.test(file.path) ? "image/png" : /\.webp$/i.test(file.path) ? "image/webp" : "image/jpeg";
         const asset = await uploadStaffImage({ path: file.path, size: file.size, fileName: `pickup-evidence-${Date.now()}.${mimeType === "image/png" ? "png" : "jpg"}`, mimeType, businessType: "rental_order", businessId: this.data.id, uploadScene: "pickup-evidence", metadata: { handoverStage: "pickup", handoverBatchId } });
-        const photos = [...(this.data.fields[index]?.photos ?? []), { id: asset.id, path: file.path }];
-        this.setData({ [`fields[${index}].photos`]: photos });
+        const photos = [...(this.data.sharedFields[index]?.photos ?? []), { id: asset.id, path: file.path }];
+        this.setData({ [`sharedFields[${index}].photos`]: photos });
       }
     } catch (error) { this.setData({ error: describeError(error).message }); }
     finally { this.setData({ uploading: false }); }
@@ -78,7 +120,7 @@ Page({
     this.signatureContext.lineTo(point.x, point.y);
     this.signatureContext.stroke();
     this.signatureContext.draw(true);
-    this.setData({ signatureDrawn: true });
+    if (!this.data.signatureDrawn) this.setData({ signatureDrawn: true });
   },
   onSignatureEnd() { this.signatureDrawing = false; },
   onClearSignature() { this.signatureContext?.clearRect(0, 0, this.data.signatureWidth, this.data.signatureHeight); this.signatureContext?.draw(); this.setData({ signatureDrawn: false, signatureFileAssetId: "" }); },
@@ -91,9 +133,18 @@ Page({
     this.setData({ signatureFileAssetId: asset.id });
     return asset.id;
   },
+  /** 逐设备勾选合并回订单级 results：boolean 项全部设备都勾选才算通过（AND）；数值/文本/选择/照片仍是订单级一份。 */
+  collectResults(): { results: Record<string, unknown>; error?: string } {
+    const results: Record<string, unknown> = {};
+    for (const code of this.boolCodes) results[code] = this.data.groups.length > 0 && this.data.groups.every((group) => { const field = group.fields.find((row) => row.code === code); return Boolean(field && field.checked); });
+    const shared = inspectionResults(this.data.sharedFields);
+    if (shared.error) return { results, error: shared.error };
+    Object.assign(results, shared.results);
+    return { results };
+  },
   async onSubmit() {
     if (this.data.busy || this.data.uploading || !this.order) return;
-    const { results, error } = inspectionResults(this.data.fields);
+    const { results, error } = this.collectResults();
     if (error) { this.setData({ error }); return; }
     if (!await confirmDialog({ title: "确认交付", content: "提交后订单将进入使用中，请先与客户当面核对资源及检查结果。" })) return;
     const action = this.template ? "pickup.inspection" : "pickup.handover";

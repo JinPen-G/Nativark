@@ -1,1 +1,1 @@
-{"navigationStyle":"custom","usingComponents":{"nav-bar":"/components/nav-bar/index","state-view":"/components/state-view/index","ui-icon":"/components/ui-icon/index"}}
+{"navigationStyle":"custom","usingComponents":{"nav-bar":"/components/nav-bar/index","state-view":"/components/state-view/index","ui-icon":"/components/ui-icon/index","status-tag":"/components/status-tag/index"}}
