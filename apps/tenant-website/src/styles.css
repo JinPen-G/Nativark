@@ -790,3 +790,8 @@ html[data-theme="dark"] .home-hero-multiple .hero-benefits { background: rgba(0,
 .product-card-skeleton { height: 300px; border-radius: 14px; background: var(--card-muted, #f1f4f8); animation: skeleton-pulse 1.3s ease-in-out infinite; }
 .subcategory-skeleton { height: 150px; border-radius: 12px; background: var(--card-muted, #f1f4f8); animation: skeleton-pulse 1.3s ease-in-out infinite; }
 html[data-theme="dark"] .product-card-skeleton, html[data-theme="dark"] .subcategory-skeleton { background: rgba(255,255,255,.06); }
+
+/* 图片加载失败时降级为中性灰底，而不是浏览器默认破图标 */
+img.img-broken { visibility: hidden; }
+.product-image-link, .subcategory-image { background: var(--card-muted, #f1f4f8); }
+html[data-theme="dark"] .product-image-link, html[data-theme="dark"] .subcategory-image { background: rgba(255,255,255,.06); }

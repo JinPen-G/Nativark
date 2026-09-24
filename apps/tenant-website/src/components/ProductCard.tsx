@@ -9,7 +9,7 @@ export function ProductCard({ product }: { product: Product }) {
   const unavailable = displayProduct.stockStatus === 'unavailable';
   return <article className="product-card">
     <Link to={href(`/product/${displayProduct.id}`)} className="product-image-link" aria-label={`${t('viewNow')} ${displayProduct.name}`}>
-      <img src={displayProduct.cover} alt={displayProduct.name} loading="lazy" />
+      <img src={displayProduct.cover} alt={displayProduct.name} loading="lazy" decoding="async" onError={(e) => { e.currentTarget.classList.add('img-broken'); }} />
       {displayProduct.badges[0] && <span className="product-badge">{displayProduct.badges[0]}</span>}
     </Link>
     <div className="product-card-body">
