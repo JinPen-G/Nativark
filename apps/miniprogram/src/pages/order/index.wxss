@@ -1,2 +1,2 @@
-.head .title { font-size: 40rpx; }
+.head .title { font-size: var(--font-page-title); }
 .bottom-bar .btn { min-width: 0; padding: 0 28rpx; }

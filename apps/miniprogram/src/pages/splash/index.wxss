@@ -59,7 +59,7 @@
 }
 .splash__hint {
   margin-top: 20rpx;
-  font-size: 24rpx;
+  font-size: var(--font-caption);
   color: #5B6B8C;
   letter-spacing: 1rpx;
 }

@@ -5,5 +5,5 @@
 .nav__logo { height: 52rpx; width: 226rpx; }
 .nav__title-row { position: relative; display: flex; align-items: center; justify-content: center; }
 .nav__back { position: absolute; left: 12rpx; top: 0; bottom: 0; width: 88rpx; display: flex; align-items: center; justify-content: center; }
-.nav__title { font-size: 34rpx; font-weight: 600; color: var(--text); max-width: 60%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.nav__title { font-size: var(--font-title); font-weight: var(--fw-semibold); color: var(--text); max-width: 60%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .nav__placeholder { width: 100%; }

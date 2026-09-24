@@ -1,5 +1,5 @@
 .coupon { display: flex; align-items: center; background: var(--surface); border-radius: 20rpx; padding: 24rpx; box-shadow: var(--shadow); margin-bottom: 16rpx; }
 .coupon--muted { opacity: 0.6; }
 .coupon__value { width: 180rpx; display: flex; flex-direction: column; align-items: center; justify-content: center; border-right: 1rpx dashed var(--line); padding-right: 16rpx; flex: 0 0 auto; }
-.coupon__number { color: var(--price); font-size: 30rpx; font-weight: 700; }
-.coupon__threshold { color: var(--secondary); font-size: 22rpx; margin-top: 4rpx; }
+.coupon__number { color: var(--price); font-size: 30rpx; font-weight: var(--fw-bold); } /* font-size 特殊展示：优惠券金额数字，非文本层级 */
+.coupon__threshold { color: var(--secondary); font-size: var(--font-mini); margin-top: 4rpx; }
