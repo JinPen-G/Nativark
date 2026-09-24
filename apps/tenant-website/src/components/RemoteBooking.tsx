@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowRightOutlined, CheckCircleOutlined, LoadingOutlined } from '@ant-design/icons';
+import { ArrowRightOutlined, LoadingOutlined } from '@ant-design/icons';
 import { useSite } from '../SiteContext';
 import { useAuth } from '../AuthContext';
 import { sessionApi } from '../data/authClient';
@@ -29,7 +29,6 @@ export function RemoteBooking({ product, startDate, endDate, quantity, fulfillme
   const [coupons, setCoupons] = useState<any[]>([]);
   const [couponId, setCouponId] = useState<string>('');
   const [ready, setReady] = useState(false);
-  const [availabilityText, setAvailabilityText] = useState('');
   const [quote, setQuote] = useState<QuoteView | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -70,16 +69,6 @@ export function RemoteBooking({ product, startDate, endDate, quantity, fulfillme
   }, [fulfillment, enabledModes]);
   const isDelivery = fulfillmentMode === 'delivery';
 
-  const checkAvailability = useCallback(async () => {
-    if (!locationId || days < 1) return;
-    setBusy(true); setError(''); setAvailabilityText('');
-    try {
-      const r = await sessionApi.availability({ locationId, startAt: toIso(startDate), endAt: toIso(endDate), lines: [{ itemGroupId: product.id, quantity }] });
-      setAvailabilityText(r.available ? t('availabilityOk') : t('availabilityNo'));
-    } catch (e: any) { setError(e?.message || t('loadFailed')); }
-    finally { setBusy(false); }
-  }, [locationId, startDate, endDate, quantity, product.id, days]);
-
   const getQuote = useCallback(async () => {
     if (!locationId || days < 1) { setError(t('invalidDate')); return; }
     if (isDelivery && !addressId) { setError(t('deliveryNeedsAddress')); return; }
@@ -95,6 +84,14 @@ export function RemoteBooking({ product, startDate, endDate, quantity, fulfillme
     } catch (e: any) { setError(e?.message || t('quoteFailed')); }
     finally { setBusy(false); }
   }, [locationId, fulfillmentMode, isDelivery, addressId, couponId, startDate, endDate, quantity, product.id, days]);
+
+  // 自动报价：就绪且参数有效时，输入变化后自动重新计价（防抖），无需手动点按钮。
+  useEffect(() => {
+    if (!ready || !locationId || days < 1) return;
+    if (isDelivery && !addressId) return;
+    const timer = window.setTimeout(() => { getQuote(); }, 450);
+    return () => window.clearTimeout(timer);
+  }, [ready, locationId, days, isDelivery, addressId, couponId, quantity, startDate, endDate, getQuote]);
 
   const submitOrder = useCallback(async () => {
     if (!quote?.id) return;
@@ -121,11 +118,7 @@ export function RemoteBooking({ product, startDate, endDate, quantity, fulfillme
       ? <label className="booking-field">{t('selectAddress')}<select value={addressId} onChange={e => { setAddressId(e.target.value); setQuote(null); }}>{addresses.map(a => <option key={a.id} value={a.id}>{addrLabel(a)}</option>)}</select></label>
       : <p className="mock-note">{t('noAddress')} <Link to={href('/account')}>{t('addAddress')}</Link></p>)}
     {coupons.length > 0 && <label className="booking-field">{t('useCoupon')}<select value={couponId} onChange={e => { setCouponId(e.target.value); setQuote(null); }}><option value="">{t('couponNone')}</option>{coupons.map((c, i) => <option key={c.id ?? i} value={c.id}>{c.name || c.templateName || c.title || t('coupon')}</option>)}</select></label>}
-    <div className="booking-remote-actions">
-      <button type="button" className="button button-outline" disabled={busy} onClick={checkAvailability}>{t('checkAvailability')}</button>
-      <button type="button" className="button button-outline" disabled={busy} onClick={getQuote}>{t('getQuote')}</button>
-    </div>
-    {availabilityText && <p className="mock-note"><CheckCircleOutlined /> {availabilityText}</p>}
+    {busy && !quote ? <p className="mock-note"><LoadingOutlined /> {t('quoting')}</p> : null}
     {quote && <>
       <div><span>{t('rentAmount')}</span><strong>¥{quote.rentalAmount ?? 0}</strong></div>
       {quote.discountAmount ? <div><span>{t('discount')}</span><strong>-¥{quote.discountAmount}</strong></div> : null}
