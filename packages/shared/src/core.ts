@@ -3587,7 +3587,7 @@ export interface RentalFundingEvent {
   /** 该 instrument 在本事件后的余额（押金实收余额 / 预授权冻结余额）。由服务端结算。 */
   balanceAfter: number;
   /** mock 或已验签的真实支付提供方；普通收款不能冒充预授权。 */
-  provider: "mock" | "alipay" | "wechat_pay";
+  provider: "mock" | "alipay" | "wechat_pay" | "stripe";
   /** 线下人工收退款的实际方式；预授权转扣/释放等内部资金动作不填。 */
   paymentMethod?: RentalOfflinePaymentMethod;
   /** 幂等键：同一 (order, instrument, action, idempotencyKey) 重复提交只落一条。 */

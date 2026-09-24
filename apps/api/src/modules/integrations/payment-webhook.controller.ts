@@ -42,6 +42,13 @@ export class PaymentWebhookController {
     return this.payments.handleWechatCallback({ body: req.body, rawBody: req.rawBody, headers: req.headers });
   }
 
+  @Post("stripe")
+  @HttpCode(200)
+  stripe(@Req() req: WebhookRequest) {
+    this.assertRate(req);
+    return this.payments.handleStripeCallback({ body: req.body, rawBody: req.rawBody, headers: req.headers });
+  }
+
   @Post("alipay/refund")
   @HttpCode(200)
   alipayRefund(@Req() req: WebhookRequest) {

@@ -4,6 +4,8 @@
  * 这里描述的是“租户可以启用哪些平台”，不是具体 SDK 的实现细节。
  * API 返回的 secretFields 只有 configured 标记，绝不返回密钥明文。
  */
+import type { RentalCurrency } from "./core";
+
 export type TenantIntegrationCapability = "sms" | "payment" | "file";
 
 export type TenantIntegrationProvider =
@@ -11,6 +13,7 @@ export type TenantIntegrationProvider =
   | "tencent_sms"
   | "alipay"
   | "wechat_pay"
+  | "stripe"
   | "aliyun_oss"
   | "tencent_cos"
   | "s3_compatible";
@@ -35,6 +38,14 @@ export interface TenantIntegrationProviderDefinition {
   description: string;
   fields: TenantIntegrationProviderField[];
   supportedMethods?: string[];
+  /**
+   * 仅支付能力使用:该收单平台可结算的币种。目录展示、启用校验与运行时选路都按
+   * 经营空间结算币种(`pricing.currency`)据此过滤——境内 CNY-only 的平台绝不出现在
+   * 境外租户的可选列表里,反之亦然。
+   */
+  settlementCurrencies?: RentalCurrency[];
+  /** 仅支付能力使用:境内收单还是跨境收单。用于分组/展示,真正的门禁是 settlementCurrencies。 */
+  audience?: "domestic" | "cross_border";
 }
 
 export interface TenantIntegrationSecretState {
@@ -128,6 +139,8 @@ export const TENANT_INTEGRATION_PROVIDERS: TenantIntegrationProviderDefinition[]
     provider: "alipay",
     name: "支付宝",
     description: "支付宝网页、手机网页或二维码收款。私钥只在服务端加密保存。",
+    audience: "domestic",
+    settlementCurrencies: ["CNY"],
     fields: [
       { key: "appId", label: "应用 ID", secret: false, required: true, inputType: "text" },
       { key: "gatewayUrl", label: "网关地址", secret: false, required: true, inputType: "url", placeholder: "https://openapi.alipay.com/gateway.do" },
@@ -142,6 +155,8 @@ export const TENANT_INTEGRATION_PROVIDERS: TenantIntegrationProviderDefinition[]
     provider: "wechat_pay",
     name: "微信支付",
     description: "微信 JSAPI、APP、Native 或 H5 收款。回调必须经过 API v3 验签。",
+    audience: "domestic",
+    settlementCurrencies: ["CNY"],
     fields: [
       { key: "mchid", label: "商户号", secret: false, required: true, inputType: "text" },
       { key: "appId", label: "应用 ID", secret: false, required: true, inputType: "text" },
@@ -155,6 +170,23 @@ export const TENANT_INTEGRATION_PROVIDERS: TenantIntegrationProviderDefinition[]
       { key: "apiV3Key", label: "API v3 密钥", secret: true, required: true, inputType: "password" }
     ],
     supportedMethods: ["jsapi", "app", "native", "h5"]
+  },
+  {
+    capability: "payment",
+    provider: "stripe",
+    name: "Stripe",
+    description: "境外收单:卡支付,并可在 Stripe 后台开启支付宝/微信作为付款方式。按外币结算到境外主体账户。",
+    audience: "cross_border",
+    // Stripe 以标准两位小数处理这些币种;MOP 不支持、TWD 有 100 整数倍特殊规则(见 stripe-payment.ts 的 fail-closed),故暂不列入。启用前以实际账户签约区域为准。
+    settlementCurrencies: ["HKD", "SGD", "USD", "EUR"],
+    fields: [
+      { key: "successUrl", label: "支付成功回跳地址", secret: false, required: true, inputType: "url", description: "客户在 Stripe 收银台完成支付后跳回的地址(通常是租户站点订单页)。" },
+      { key: "cancelUrl", label: "支付取消回跳地址", secret: false, required: true, inputType: "url", description: "客户在 Stripe 收银台取消支付后跳回的地址。" },
+      { key: "statementDescriptor", label: "对账单显示名", secret: false, required: false, inputType: "text", description: "可选;显示在持卡人对账单上的商户名。" },
+      { key: "secretKey", label: "Secret Key", secret: true, required: true, inputType: "password", description: "Stripe 密钥(sk_...),只在服务端加密保存,绝不下发前端。" },
+      { key: "webhookSecret", label: "Webhook 签名密钥", secret: true, required: true, inputType: "password", description: "Stripe Webhook 端点签名密钥(whsec_...),用于校验回调。" }
+    ],
+    supportedMethods: ["card", "alipay", "wechat_pay"]
   },
   {
     capability: "file",
@@ -202,6 +234,25 @@ export const TENANT_INTEGRATION_PROVIDERS: TenantIntegrationProviderDefinition[]
     supportedMethods: ["presigned_upload", "presigned_download"]
   }
 ];
+
+/**
+ * 按经营空间结算币种筛出可用收单平台。
+ *
+ * 这是"境内支付宝绝不给境外租户"的唯一事实源:目录展示、启用校验、运行时选路
+ * 都必须走这里,不能只在前端隐藏(前端菜单隐藏不能替代后端数据权限)。
+ * 只作用于 payment 能力;非支付平台没有结算币种,不参与筛选。
+ */
+export function paymentProviderSupportsCurrency(
+  definition: TenantIntegrationProviderDefinition,
+  currency: RentalCurrency
+): boolean {
+  if (definition.capability !== "payment") return false;
+  return Array.isArray(definition.settlementCurrencies) && definition.settlementCurrencies.includes(currency);
+}
+
+export function paymentProvidersForCurrency(currency: RentalCurrency): TenantIntegrationProviderDefinition[] {
+  return TENANT_INTEGRATION_PROVIDERS.filter((definition) => paymentProviderSupportsCurrency(definition, currency));
+}
 
 export function findTenantIntegrationProvider(
   capability: TenantIntegrationCapability,

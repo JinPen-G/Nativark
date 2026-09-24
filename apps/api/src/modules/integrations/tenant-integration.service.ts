@@ -2,7 +2,10 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException, 
 import { Prisma } from "@prisma/client";
 import {
   findTenantIntegrationProvider,
+  paymentProviderSupportsCurrency,
+  RENTAL_CURRENCY_CODES,
   TENANT_INTEGRATION_PROVIDERS,
+  type RentalCurrency,
   type SaveTenantIntegrationRequest,
   type SystemUserRow,
   type TenantIntegrationCapability,
@@ -97,12 +100,43 @@ export class TenantIntegrationService {
     };
   }
 
+  /**
+   * 目录按当前租户结算币种过滤支付平台(一租户一币种,境内/境外二选一):
+   * 境内 CNY 租户看不到跨境平台、境外租户看不到境内支付宝/微信。短信/文件平台
+   * 与币种无关,始终返回。已配置过的平台即使与当前币种不符也保留,以便管理端仍能
+   * 渲染并停用它,不会把既有配置变成无法操作的孤儿。
+   */
   async catalog(tenantId = requireRequestTenantId()): Promise<TenantIntegrationCatalogResponse> {
-    const configs = await this.prisma.tenantIntegrationConfig.findMany({
+    const [configs, currency] = await Promise.all([
+      this.prisma.tenantIntegrationConfig.findMany({
+        where: { tenantId },
+        orderBy: [{ capability: "asc" }, { provider: "asc" }]
+      }),
+      this.resolveTenantSettlementCurrency(tenantId)
+    ]);
+    const configured = new Set(configs.map((row) => row.provider));
+    const providers = TENANT_INTEGRATION_PROVIDERS.filter(
+      (definition) =>
+        definition.capability !== "payment" ||
+        paymentProviderSupportsCurrency(definition, currency) ||
+        configured.has(definition.provider)
+    );
+    return { providers, configs: configs.map((row) => this.summary(row)) };
+  }
+
+  /**
+   * 一租户一币种(境内/境外二选一):取该租户任一经营空间业务设置里的结算币种作为
+   * 租户结算币种;尚未建空间时默认 CNY(境内),即只展示境内收单平台。
+   */
+  private async resolveTenantSettlementCurrency(tenantId: string): Promise<RentalCurrency> {
+    const row = await this.prisma.rentalTenantBusinessSettings.findFirst({
       where: { tenantId },
-      orderBy: [{ capability: "asc" }, { provider: "asc" }]
+      select: { settings: true },
+      orderBy: { updatedAt: "desc" }
     });
-    return { providers: TENANT_INTEGRATION_PROVIDERS, configs: configs.map((row) => this.summary(row)) };
+    const settings = (row?.settings ?? {}) as { pricing?: { currency?: string } };
+    const currency = settings.pricing?.currency;
+    return currency && RENTAL_CURRENCY_CODES.includes(currency as RentalCurrency) ? (currency as RentalCurrency) : "CNY";
   }
 
   /**
@@ -234,6 +268,14 @@ export class TenantIntegrationService {
     if (user?.isSaasAdmin) throw new BadRequestException("SaaS 平台账号不能写入租户自有第三方配置");
     const definition = this.definition(capability, provider);
     if (!input.enabled && input.isDefault) throw new BadRequestException("停用的平台不能设为默认平台");
+    // 按结算币种守住收单平台:境外租户不能启用境内 CNY-only 的支付宝/微信,反之亦然。
+    // 目录已隐藏不匹配的平台,这里是后端强约束——前端隐藏不能替代后端数据权限。
+    if (capability === "payment" && input.enabled) {
+      const currency = await this.resolveTenantSettlementCurrency(tenantId);
+      if (!paymentProviderSupportsCurrency(definition, currency)) {
+        throw new BadRequestException(`该收单平台不支持当前结算币种(${currency})，无法启用；请选择支持该币种的收单平台`);
+      }
+    }
     const settings = this.jsonObject(input.settings, "平台配置参数必须是对象");
     const credentials = input.credentials ? this.jsonObject(input.credentials, "平台密钥必须是对象") : {};
     const settingKeys = new Set(definition.fields.filter((field) => !field.secret).map((field) => field.key));

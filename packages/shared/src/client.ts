@@ -341,7 +341,7 @@ export interface ClientPaymentCapabilitiesResponse {
 export interface ClientPaymentIntentRequest {
   /** 第一阶段真实支付只承接租金/费用；押金和预授权仍由独立资金能力处理。 */
   instrument: "rental" | "deposit" | "preauthorization";
-  method: "alipay" | "wechat_pay";
+  method: "alipay" | "wechat_pay" | "stripe";
   idempotencyKey: string;
 }
 
@@ -363,8 +363,8 @@ export interface ClientWechatJsapiParameters {
 export interface ClientPaymentIntentResponse {
   apiVersion: typeof CLIENT_API_VERSION;
   intentId: string;
-  provider: "alipay" | "wechat_pay";
-  method: "alipay" | "wechat_pay";
+  provider: "alipay" | "wechat_pay" | "stripe";
+  method: "alipay" | "wechat_pay" | "stripe";
   instrument: "rental" | "deposit" | "preauthorization";
   amount: number;
   currency: string;

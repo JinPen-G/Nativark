@@ -67,6 +67,11 @@ const fakeClient = {
       return { count };
     }
   },
+  rentalTenantBusinessSettings: {
+    // 默认无经营空间业务设置 → resolveTenantSettlementCurrency 回落 CNY(境内),
+    // 本套用例的支付宝/微信均支持 CNY,币种门禁对它们放行。
+    findFirst: async () => null
+  },
   $transaction: async (callback) => {
     const snapshot = new Map([...rows].map(([key, row]) => [key, { ...row, settings: { ...row.settings }, secretFields: [...row.secretFields] }]));
     try {

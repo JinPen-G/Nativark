@@ -76,6 +76,7 @@ export const PUBLIC_ROUTES = new Set([
   "/staff/v1/auth/switch-workspace",
   "/payments/webhooks/alipay",
   "/payments/webhooks/wechat_pay",
+  "/payments/webhooks/stripe",
   "/payments/webhooks/alipay/refund",
   "/payments/webhooks/wechat_pay/refund"
 ]);
@@ -639,6 +640,9 @@ export class ApiAuthGuard implements CanActivate {
       path === "/auth/login" ||
       path === "/auth/development/reset-demo-password" ||
       path === "/auth/refresh" ||
+      // 支付/退款回调无运营登录态,必须匿名放行到控制器;安全边界是各平台的签名/商户/金额/事件幂等校验。
+      // PUBLIC_ROUTES 只把它们标为"无需权限",并不等于"免鉴权",因此这里显式匿名放行(POST)。
+      (request.method === "POST" && path.startsWith("/payments/webhooks/")) ||
       (staffApiRequest && ["/staff/v1/auth/login", "/staff/v1/auth/refresh", "/staff/v1/auth/logout"].includes(path)) ||
       request.method === "OPTIONS"
     ) {

@@ -1365,7 +1365,10 @@ export class ClientApiService {
     this.requireActiveMembership(context);
     await this.assertClientOrder(context, orderId);
     const enabledMethods = this.context(context.tenantId).settings.payment.enabledMethods;
-    if (!(enabledMethods?.length ? enabledMethods : DEFAULT_RENTAL_PAYMENT_METHODS).includes(input.method)) {
+    const methods = enabledMethods?.length ? enabledMethods : DEFAULT_RENTAL_PAYMENT_METHODS;
+    // Stripe(跨境收单)不由经营空间的收款方式开关管控,而是由租户第三方支付配置(启用+默认+币种匹配+连接测试)决定;
+    // 空间级开关只管线下/支付宝/微信这类空间自选方式。stripe 的可用性在 payments.createPaymentIntent 内按币种与配置门禁。
+    if (input.method !== "stripe" && !methods.includes(input.method)) {
       throw new ConflictException("该线上支付方式尚未在经营空间设置中启用");
     }
     return this.payments.createPaymentIntent(context.tenantId, context.workspaceId, orderId, input);
