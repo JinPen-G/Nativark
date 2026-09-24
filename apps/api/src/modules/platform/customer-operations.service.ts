@@ -1,10 +1,14 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import type {
   ChangeCustomerAccountStatusRequest,
   ChangeCustomerMembershipStatusRequest,
   CustomerAccount,
   CustomerAccountStatus,
   CustomerMembershipStatus,
+  CustomerProfileOrderQuery,
+  CustomerProfileOverview,
+  SaveCustomerProfileAddressRequest,
   CustomerStatusAction,
   CustomerTransactability,
   SharedCustomerProfile,
@@ -458,5 +462,364 @@ export class CustomerOperationsService {
       throw new ForbiddenException("查看敏感资料访问审计需要「客户敏感资料解密」权限");
     }
     return this.operations.listSensitiveAccess(tenantId, customerId);
+  }
+
+  /**
+   * 客户资料页的聚合读模型。
+   *
+   * 这是管理端查看资料的唯一汇总入口：身份主档按租户读取，订单、地址、
+   * 会员方案授予、积分、奖励和优惠券都保留 workspace 维度，避免页面把不同
+   * 品类空间的经营事实错误地合并成一个余额或一张“总订单”。
+   */
+  async getProfileOverview(
+    tenantId: string,
+    workspaceId: string | undefined,
+    customerId: string,
+    user?: SystemUserRow,
+    query: CustomerProfileOrderQuery = {}
+  ): Promise<CustomerProfileOverview> {
+    const profile = await this.getCustomerDetail(tenantId, workspaceId, customerId, user);
+    const page = Math.max(1, Math.floor(query.page ?? 1));
+    const pageSize = Math.min(50, Math.max(1, Math.floor(query.pageSize ?? 20)));
+    const orderWhere: Prisma.RentalOrderWhereInput = {
+      tenantId,
+      OR: [
+        { customerId },
+        { contractSubjectCustomerId: customerId },
+        { payerSubjectCustomerId: customerId },
+        { userSubjectCustomerId: customerId },
+        { membershipSnapshot: { path: "$.personalCustomerId", equals: customerId } }
+      ]
+    };
+
+    const [
+      addresses,
+      qualificationRevisions,
+      statusHistory,
+      ordersTotal,
+      orders,
+      benefitAccounts,
+      rewards,
+      coupons,
+      assignments,
+      corporateRelations,
+      sensitiveAccess
+    ] = await Promise.all([
+      this.prisma.customerDeliveryAddress.findMany({
+        where: { tenantId, customerId, status: "active" },
+        orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }]
+      }),
+      this.prisma.customerQualificationRevision.findMany({
+        where: { tenantId, customerId },
+        orderBy: [{ submittedAt: "desc" }, { createdAt: "desc" }]
+      }),
+      this.operations.listStatusHistory(tenantId, customerId),
+      this.prisma.rentalOrder.count({ where: orderWhere }),
+      this.prisma.rentalOrder.findMany({
+        where: orderWhere,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          orderNo: true,
+          workspaceId: true,
+          categoryCode: true,
+          status: true,
+          customerId: true,
+          contractSubjectCustomerId: true,
+          payerSubjectCustomerId: true,
+          userSubjectCustomerId: true,
+          membershipSnapshot: true,
+          startAt: true,
+          endAt: true,
+          effectiveEndAt: true,
+          finalPayableAmount: true,
+          currency: true,
+          createdAt: true,
+          workspace: { select: { id: true, name: true } }
+        }
+      }),
+      this.prisma.rentalBenefitAccount.findMany({
+        where: { tenantId, customerId },
+        orderBy: [{ updatedAt: "desc" }],
+        include: { workspace: { select: { id: true, name: true, categoryCode: true } } }
+      }),
+      this.prisma.rentalRewardLedgerEntry.findMany({
+        where: { tenantId, customerId },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: 200,
+        include: { workspace: { select: { id: true, name: true } } }
+      }),
+      this.prisma.rentalCustomerCoupon.findMany({
+        where: { tenantId, customerId },
+        orderBy: [{ claimedAt: "desc" }, { id: "desc" }],
+        take: 200,
+        include: { workspace: { select: { id: true, name: true } } }
+      }),
+      this.prisma.customerMembershipPlanAssignment.findMany({
+        where: { tenantId, customerId },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        include: { plan: { select: { name: true } } }
+      }),
+      this.prisma.customerCorporateMembership.findMany({
+        where: { tenantId, OR: [{ corporateCustomerId: customerId }, { personalCustomerId: customerId }] },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        include: {
+          corporateCustomer: { select: { id: true, name: true } },
+          personalCustomer: { select: { id: true, name: true } }
+        }
+      }),
+      this.canReveal(user)
+        ? this.operations.listSensitiveAccess(tenantId, customerId)
+        : Promise.resolve(undefined)
+    ]);
+
+    return {
+      profile,
+      addresses: addresses.map((row) => ({
+        id: row.id,
+        revision: row.revision,
+        recipient: row.recipient,
+        phoneMasked: row.phoneMasked,
+        countryCode: row.countryCode,
+        province: row.province,
+        city: row.city,
+        district: row.district ?? undefined,
+        detail: row.detail,
+        postalCode: row.postalCode ?? undefined,
+        latitude: row.latitude === null ? undefined : Number(row.latitude),
+        longitude: row.longitude === null ? undefined : Number(row.longitude),
+        isDefault: row.isDefault,
+        updatedAt: row.updatedAt.toISOString()
+      })),
+      qualificationRevisions: qualificationRevisions.map((row) => ({
+        id: row.id,
+        tenantId: row.tenantId,
+        workspaceId: row.workspaceId,
+        customerId: row.customerId,
+        qualificationType: row.qualificationType,
+        categoryCode: String(row.categoryCode).toLowerCase() as CustomerProfileOverview["qualificationRevisions"][number]["categoryCode"],
+        capabilityCode: row.capabilityCode ?? undefined,
+        applicableScope: row.applicableScope as never,
+        referenceNoMasked: row.referenceNoMasked ?? undefined,
+        issuedAt: row.issuedAt?.toISOString(),
+        expiresAt: row.expiresAt?.toISOString(),
+        evidenceRef: row.evidenceRef ?? undefined,
+        source: row.source,
+        submittedBy: row.submittedBy ?? undefined,
+        submittedAt: row.submittedAt.toISOString(),
+        qualificationStatus: row.qualificationStatus as never,
+        reviewStatus: row.reviewStatus as never,
+        reviewReason: row.reviewReason ?? undefined,
+        reviewedBy: row.reviewedBy ?? undefined,
+        reviewedAt: row.reviewedAt?.toISOString(),
+        reviewId: row.reviewId ?? undefined,
+        createdAt: row.createdAt.toISOString()
+      })),
+      statusHistory,
+      sensitiveAccess,
+      corporateRelations: corporateRelations.map((row) => ({
+        id: row.id,
+        corporateCustomerId: row.corporateCustomerId,
+        corporateName: row.corporateCustomer.name,
+        personalCustomerId: row.personalCustomerId,
+        personalCustomerName: row.personalCustomer.name,
+        role: row.role,
+        department: row.department ?? undefined,
+        employeeNo: row.employeeNo ?? undefined,
+        status: row.status,
+        effectiveFrom: row.effectiveFrom.toISOString(),
+        effectiveTo: row.effectiveTo?.toISOString(),
+        reason: row.reason ?? undefined
+      })),
+      membershipPlanAssignments: assignments.map((row) => ({
+        id: row.id,
+        planId: row.planId,
+        planVersionId: row.planVersionId,
+        planName: row.plan.name,
+        source: row.source,
+        status: row.status,
+        effectiveFrom: row.effectiveFrom.toISOString(),
+        effectiveTo: row.effectiveTo?.toISOString(),
+        reason: row.reason ?? undefined,
+        revokedAt: row.revokedAt?.toISOString(),
+        revokeReason: row.revokeReason ?? undefined,
+        snapshot: (row.snapshot ?? {}) as Record<string, unknown>,
+        createdAt: row.createdAt.toISOString()
+      })),
+      benefits: {
+        accounts: benefitAccounts.map((row) => ({
+          workspaceId: row.workspace.id,
+          workspaceName: row.workspace.name,
+          categoryCode: String(row.workspace.categoryCode).toLowerCase() as CustomerProfileOverview["benefits"]["accounts"][number]["categoryCode"],
+          pointsBalance: Number(row.pointsBalance),
+          marketingBalance: Number(row.marketingBalance),
+          availableRewardCouponCount: row.availableRewardCouponCount,
+          updatedAt: row.updatedAt.toISOString()
+        })),
+        rewards: rewards.map((row) => ({
+          id: row.id,
+          workspaceId: row.workspace.id,
+          workspaceName: row.workspace.name,
+          rewardType: row.rewardType,
+          amount: Number(row.amount),
+          triggerType: row.triggerType,
+          status: row.status,
+          reason: row.reason,
+          appliedAt: row.appliedAt?.toISOString(),
+          createdAt: row.createdAt.toISOString(),
+          reversedAt: row.reversedAt?.toISOString()
+        })),
+        coupons: coupons.map((row) => ({
+          id: row.id,
+          workspaceId: row.workspace.id,
+          workspaceName: row.workspace.name,
+          templateName: row.templateName,
+          templateCode: row.templateCode,
+          templateVersion: row.templateVersion,
+          discountType: row.discountType,
+          discountValue: Number(row.discountValue),
+          status: row.status,
+          grantReason: row.grantReason,
+          effectiveFrom: row.effectiveFrom.toISOString(),
+          effectiveTo: row.effectiveTo.toISOString(),
+          lockedOrderId: row.lockedOrderId ?? undefined,
+          redeemedOrderId: row.redeemedOrderId ?? undefined,
+          lockedDiscountAmount: row.lockedDiscountAmount === null ? undefined : Number(row.lockedDiscountAmount),
+          createdAt: row.claimedAt.toISOString()
+        }))
+      },
+      orders: {
+        items: orders.map((row) => {
+          const snapshot = row.membershipSnapshot as { personalCustomerId?: unknown } | null;
+          const relation = new Set<"customer" | "contract_subject" | "payer" | "user" | "booking_identity">();
+          if (row.customerId === customerId) relation.add("customer");
+          if (row.contractSubjectCustomerId === customerId) relation.add("contract_subject");
+          if (row.payerSubjectCustomerId === customerId) relation.add("payer");
+          if (row.userSubjectCustomerId === customerId) relation.add("user");
+          if (snapshot?.personalCustomerId === customerId) relation.add("booking_identity");
+          return {
+            id: row.id,
+            orderNo: row.orderNo,
+            workspaceId: row.workspace.id,
+            workspaceName: row.workspace.name,
+            categoryCode: String(row.categoryCode).toLowerCase() as CustomerProfileOverview["orders"]["items"][number]["categoryCode"],
+            status: String(row.status).toLowerCase(),
+            relation: [...relation],
+            startAt: row.startAt.toISOString(),
+            endAt: row.endAt.toISOString(),
+            effectiveEndAt: row.effectiveEndAt?.toISOString(),
+            finalPayableAmount: Number(row.finalPayableAmount),
+            currency: row.currency,
+            createdAt: row.createdAt.toISOString()
+          };
+        }),
+        page,
+        pageSize,
+        total: ordersTotal
+      }
+    };
+  }
+
+  private addressPhone(value: string | undefined, existing?: string | null) {
+    const candidate = value?.trim() || existing?.trim() || "";
+    if (!candidate) throw new BadRequestException("联系电话不能为空");
+    const phone = candidate.replace(/[\s-]/gu, "");
+    if (/\*/u.test(phone) || !/^\+?[0-9]{6,20}$/u.test(phone)) {
+      throw new BadRequestException("联系电话格式无效；编辑时留空表示保留原电话");
+    }
+    return phone;
+  }
+
+  private addressText(value: string | undefined, label: string, max: number, required: boolean) {
+    const text = value?.trim() ?? "";
+    if (!text && required) throw new BadRequestException(`${label}不能为空`);
+    if (text.length > max) throw new BadRequestException(`${label}最多 ${max} 个字符`);
+    return text || undefined;
+  }
+
+  private addressView(row: {
+    id: string; revision: number; recipient: string; phoneMasked: string; countryCode: string;
+    province: string; city: string; district: string | null; detail: string; postalCode: string | null;
+    latitude: Prisma.Decimal | null; longitude: Prisma.Decimal | null; isDefault: boolean; updatedAt: Date;
+  }) {
+    return {
+      id: row.id,
+      revision: row.revision,
+      recipient: row.recipient,
+      phoneMasked: row.phoneMasked,
+      countryCode: row.countryCode,
+      province: row.province,
+      city: row.city,
+      district: row.district ?? undefined,
+      detail: row.detail,
+      postalCode: row.postalCode ?? undefined,
+      latitude: row.latitude === null ? undefined : Number(row.latitude),
+      longitude: row.longitude === null ? undefined : Number(row.longitude),
+      isDefault: row.isDefault,
+      updatedAt: row.updatedAt.toISOString()
+    };
+  }
+
+  async saveCustomerAddress(tenantId: string, customerId: string, input: SaveCustomerProfileAddressRequest) {
+    const customer = await this.prisma.customerProfile.findFirst({ where: { tenantId, id: customerId }, select: { id: true } });
+    if (!customer) throw new NotFoundException("客户不存在");
+    const saved = await this.prisma.$transaction(async (tx) => {
+      const existing = input.id
+        ? await tx.customerDeliveryAddress.findFirst({ where: { tenantId, customerId, id: input.id, status: "active" } })
+        : null;
+      if (input.id && !existing) throw new NotFoundException("地址不存在");
+      if (existing && input.revision !== undefined && input.revision !== existing.revision) throw new ConflictException("地址已被修改，请刷新后重试");
+      if (!existing && !input.phone) {
+        throw new BadRequestException("新地址必须填写联系电话");
+      }
+      if (!existing) {
+        const count = await tx.customerDeliveryAddress.count({ where: { tenantId, customerId, status: "active" } });
+        if (count >= 20) throw new ConflictException("最多保存 20 个配送地址");
+      }
+      const phone = this.addressPhone(input.phone, existing?.phone);
+      const countryCode = (this.addressText(input.countryCode, "国家/地区", 8, false) ?? "CN").toUpperCase();
+      if (!/^[A-Z]{2,8}$/u.test(countryCode)) throw new BadRequestException("国家/地区编码无效");
+      const data = {
+        recipient: this.addressText(input.recipient, "收件人", 120, true)!,
+        phone,
+        phoneMasked: this.mask(phone),
+        countryCode,
+        province: this.addressText(input.province, "省/直辖市", 64, true)!,
+        city: this.addressText(input.city, "城市", 64, true)!,
+        district: this.addressText(input.district, "区/县", 64, false) ?? null,
+        detail: this.addressText(input.detail, "详细地址", 255, true)!,
+        postalCode: this.addressText(input.postalCode, "邮编", 16, false) ?? null,
+        latitude: input.latitude === undefined ? null : new Prisma.Decimal(input.latitude),
+        longitude: input.longitude === undefined ? null : new Prisma.Decimal(input.longitude)
+      };
+      const makeDefault = input.isDefault === true || (!existing && (await tx.customerDeliveryAddress.count({ where: { tenantId, customerId, status: "active", isDefault: true } })) === 0);
+      if (makeDefault) {
+        await tx.customerDeliveryAddress.updateMany({
+          where: { tenantId, customerId, status: "active", isDefault: true, ...(existing ? { id: { not: existing.id } } : {}) },
+          data: { isDefault: false }
+        });
+      }
+      if (existing) {
+        const updated = await tx.customerDeliveryAddress.updateMany({
+          where: { id: existing.id, tenantId, customerId, status: "active", revision: existing.revision },
+          data: { ...data, isDefault: input.isDefault === undefined ? existing.isDefault : input.isDefault, revision: existing.revision + 1 }
+        });
+        if (updated.count !== 1) throw new ConflictException("地址已被修改，请刷新后重试");
+        return tx.customerDeliveryAddress.findUniqueOrThrow({ where: { id: existing.id } });
+      }
+      return tx.customerDeliveryAddress.create({ data: { tenantId, customerId, ...data, isDefault: makeDefault, status: "active" } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    return this.addressView(saved);
+  }
+
+  async removeCustomerAddress(tenantId: string, customerId: string, addressId: string) {
+    const updated = await this.prisma.customerDeliveryAddress.updateMany({
+      where: { tenantId, customerId, id: addressId, status: "active" },
+      data: { status: "deleted", isDefault: false }
+    });
+    if (updated.count !== 1) throw new NotFoundException("地址不存在");
+    return { success: true as const };
   }
 }

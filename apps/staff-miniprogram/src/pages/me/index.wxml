@@ -25,7 +25,7 @@
   </view>
 
   <view wx:if="{{cards.length}}" class="section section--tight">
-    <view class="row gap-16">
+    <view class="row me-cards gap-16">
       <view class="card me-card grow" wx:for="{{cards}}" wx:key="key" hover-class="btn-hover" data-key="{{item.key}}" bindtap="onCard">
         <view class="quick__icon {{item.color ? 'quick__icon--' + item.color : ''}}"><ui-icon name="{{item.icon}}" size="40" color="{{item.color === 'green' ? 'success' : item.color === 'purple' ? 'purple' : 'primary'}}" stroke="1.7"></ui-icon></view>
         <view class="me-card__title">{{item.label}}</view>
@@ -46,6 +46,18 @@
     <view class="card menu">
       <view class="cell" hover-class="btn-hover" bindtap="onHelp"><view class="cell__icon"><ui-icon name="question" size="40" color="text"></ui-icon></view><view class="cell__body"><view class="cell__title">帮助中心</view></view><ui-icon name="chevron-right" size="30" color="muted"></ui-icon></view>
       <view class="cell" hover-class="btn-hover" bindtap="onAbout"><view class="cell__icon"><ui-icon name="info" size="40" color="text"></ui-icon></view><view class="cell__body"><view class="cell__title">关于我们</view></view><ui-icon name="chevron-right" size="30" color="muted"></ui-icon></view>
+    </view>
+  </view>
+
+  <view class="section section--tight">
+    <view class="card">
+      <view class="row row--between" style="min-height:88rpx">
+        <view>
+          <view class="subtitle">深色模式</view>
+          <view class="field__hint mt-4">{{themeModeHint}}</view>
+        </view>
+        <switch checked="{{darkMode}}" color="#1677FF" bindchange="onThemeModeChange"></switch>
+      </view>
     </view>
   </view>
 

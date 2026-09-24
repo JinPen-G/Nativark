@@ -4,6 +4,8 @@
  * 页面只使用语义层级，不在组件里重新决定字号和字重。Ant Design 的基础
  * token 由 theme.tsx 消费，自定义 CSS 通过同一份 token 注入 CSS 变量。
  */
+import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
+
 export const ADMIN_FONT_FAMILY =
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif";
 
@@ -20,6 +22,15 @@ export function resolveAdminPrimaryColor(value?: string | null) {
   return `#${expanded.toUpperCase()}`;
 }
 
+/**
+ * 租户可配置的后台基础圆角。这里只接受平台规定的整数范围，
+ * 旧会话或异常数据也会在前端安全回退，不把任意值写进 CSS。
+ */
+export function resolveAdminCornerRadius(value?: number | null) {
+  if (!Number.isInteger(value)) return ADMIN_UI_CORNER_RADIUS_DEFAULT;
+  return Math.min(ADMIN_UI_CORNER_RADIUS_MAX, Math.max(ADMIN_UI_CORNER_RADIUS_MIN, value as number));
+}
+
 export const ADMIN_TYPOGRAPHY = {
   body: { size: 14, lineHeight: 22, weight: 400 },
   pageTitle: { size: 20, lineHeight: 28, weight: 600 },
@@ -33,6 +44,20 @@ export const ADMIN_TYPOGRAPHY = {
 } as const;
 
 const px = (value: number) => `${value}px`;
+
+/** 将圆角语义 token 注入 CSS；Tabs、选中菜单和普通按钮共用 control 圆角。 */
+export function applyAdminRadiusTokens(root: HTMLElement, value?: number | null) {
+  const control = resolveAdminCornerRadius(value);
+  const small = Math.max(4, Math.round(control * 0.75));
+  const large = Math.min(24, Math.round(control * 1.33));
+  const values: Record<string, string> = {
+    "--rental-ui-radius-control": px(control),
+    "--rental-ui-radius-sm": px(small),
+    "--rental-ui-radius-lg": px(large),
+    "--rental-ui-radius-pill": "9999px"
+  };
+  for (const [name, tokenValue] of Object.entries(values)) root.style.setProperty(name, tokenValue);
+}
 
 /** 将语义 token 注入 CSS，避免自定义样式散落魔法数字。 */
 export function applyAdminTypographyTokens(root: HTMLElement) {

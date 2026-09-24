@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Drawer, Form, Input, InputNumber, Select, Space, Switch, Table, Tag, Tooltip, Typography } from "antd";
 import { useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
+import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -29,43 +30,52 @@ const kindMeta = {
   shared: { label: "跨品类共享", color: "purple" }
 } as const;
 
+const capabilityOptionLabels: Record<string, string> = {
+  mileage: "里程",
+  hours: "工时",
+  shutter: "快门次数",
+};
+
 /** 按注册表的 configSchema 渲染表单项：管理端与服务端共用同一份字段描述。 */
 function ConfigField({ field }: { field: RentalCapabilityConfigField }) {
-  const rules = field.required ? [{ required: true, message: `${field.label}为必填` }] : [];
+  const { t } = useLocale();
+  const fieldLabel = field.label ?? field.key;
+  const fieldDescription = field.description ? t(field.description) : undefined;
+  const rules = field.required ? [{ required: true, message: `${t(fieldLabel)}${t("为必填")}` }] : [];
   if (field.type === "number") {
     return (
-      <Form.Item name={["config", field.key]} label={field.label} rules={rules} extra={field.description}>
+      <Form.Item name={["config", field.key]} label={t(fieldLabel)} rules={rules} extra={fieldDescription}>
         <InputNumber min={field.min} max={field.max} style={{ width: "100%" }} />
       </Form.Item>
     );
   }
   if (field.type === "boolean") {
     return (
-      <Form.Item name={["config", field.key]} label={field.label} valuePropName="checked" extra={field.description}>
+      <Form.Item name={["config", field.key]} label={t(fieldLabel)} valuePropName="checked" extra={fieldDescription}>
         <Switch />
       </Form.Item>
     );
   }
   if (field.type === "enum") {
     return (
-      <Form.Item name={["config", field.key]} label={field.label} rules={rules} extra={field.description}>
-        <Select options={(field.options ?? []).map((option) => ({ value: option, label: option }))} />
+      <Form.Item name={["config", field.key]} label={t(fieldLabel)} rules={rules} extra={fieldDescription}>
+        <Select options={(field.options ?? []).map((option) => ({ value: option, label: t(capabilityOptionLabels[option] ?? option) }))} />
       </Form.Item>
     );
   }
   if (field.type === "compatibility_relations") {
     return (
-      <Form.Item name={["config", field.key]} label={field.label} rules={rules} extra={field.description}>
+      <Form.Item name={["config", field.key]} label={t(fieldLabel)} rules={rules} extra={fieldDescription}>
         <Input.TextArea
           rows={12}
           spellCheck={false}
-          placeholder={'[{"id":"adapter-rf-ef","relationType":"mount_adapter","source":{"kind":"attribute","field":"mount","value":"EF"},"target":{"kind":"attribute","field":"mount","value":"RF"},"outcome":"allow","sourceName":"厂商规格","reason":"使用原厂转接环"}]'}
+          placeholder={t("兼容关系 JSON 示例")}
         />
       </Form.Item>
     );
   }
   return (
-    <Form.Item name={["config", field.key]} label={field.label} rules={rules} extra={field.description}>
+    <Form.Item name={["config", field.key]} label={t(fieldLabel)} rules={rules} extra={fieldDescription}>
       <Input />
     </Form.Item>
   );
@@ -79,6 +89,7 @@ interface LifecycleFormValues {
 
 export function CapabilityGovernancePage() {
   const { message } = App.useApp();
+  const { t } = useLocale();
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const canManage = hasPermission("rental-core:capability:manage");
@@ -108,9 +119,9 @@ export function CapabilityGovernancePage() {
       await invalidateAll();
       setEditing(undefined);
       form.resetFields();
-      message.success("能力状态已更新");
+      message.success(t("能力状态已更新"));
     },
-    onError: (error: Error) => message.error(error.message || "更新失败：请检查依赖、互斥能力与配置项")
+    onError: (error: Error) => message.error(error.message || t("更新失败：请检查依赖、互斥能力与配置项"))
   });
 
   const upgrade = useMutation({
@@ -121,9 +132,9 @@ export function CapabilityGovernancePage() {
       }),
     onSuccess: async () => {
       await invalidateAll();
-      message.success("能力实现版本已升级；历史报价与在途订单仍按原快照执行");
+      message.success(t("能力实现版本已升级；历史报价与在途订单仍按原快照执行"));
     },
-    onError: (error: Error) => message.error(error.message || "升级失败")
+    onError: (error: Error) => message.error(error.message || t("升级失败"))
   });
 
   function openEditor(view: WorkspaceCapabilityView) {
@@ -151,7 +162,7 @@ export function CapabilityGovernancePage() {
         try {
           return [key, JSON.parse(value)];
         } catch {
-          throw new Error(`配置项 ${view.definition.configSchema.find((field) => field.key === key)?.label ?? key} 不是有效 JSON`);
+          throw new Error(`${t("配置项")} ${t(view.definition.configSchema.find((field) => field.key === key)?.label ?? key)} ${t("不是有效 JSON")}`);
         }
       })
     );
@@ -168,7 +179,7 @@ export function CapabilityGovernancePage() {
         expectedRevision: editing.instance?.revision ?? 0
       });
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "兼容关系格式无效");
+      message.error(error instanceof Error ? error.message : t("兼容关系格式无效"));
     }
   }
 
@@ -178,8 +189,8 @@ export function CapabilityGovernancePage() {
   return (
     <>
       <PageHeader
-        title="经营空间能力"
-        description="能力的启用、暂停、停用与配置版本。菜单入口与 API 放行都以这里的「已启用」为准，品类声明不等于已启用。"
+        title={t("经营空间能力")}
+        description={t("能力的启用、暂停、停用与配置版本。菜单入口与 API 放行都以这里的「已启用」为准，品类声明不等于已启用。")}
       />
       <QueryState loading={overview.isLoading} error={overview.error}>
         {/* 「可访问」与「已达生产经营条件」分开表示：开发/演示空间可以继续验证通用
@@ -188,19 +199,19 @@ export function CapabilityGovernancePage() {
           <Alert
             type="success"
             showIcon
-            title="该经营空间已达到生产经营条件"
-            description="本品类声明的必选能力均已启用。"
+            title={t("该经营空间已达到生产经营条件")}
+            description={t("本品类声明的必选能力均已启用。")}
             style={{ marginBottom: 16 }}
           />
         ) : (
           <Alert
             type="warning"
             showIcon
-            title="该经营空间尚未达到生产经营条件"
+            title={t("该经营空间尚未达到生产经营条件")}
             description={
               missing.length
-                ? `仍缺少必选能力：${missing.join("、")}。缺失期间可以继续验证通用 Rental Core 流程，但不应据此认定品类能力已具备。`
-                : "本品类没有已实现的必选能力，暂时只能验证通用 Rental Core 流程。"
+                ? `${t("仍缺少必选能力")}：${missing.map((item) => t(item)).join("、")}。${t("缺失期间可以继续验证通用 Rental Core 流程，但不应据此认定品类能力已具备。")}`
+                : t("本品类没有已实现的必选能力，暂时只能验证通用 Rental Core 流程。")
             }
             style={{ marginBottom: 16 }}
           />
@@ -209,8 +220,8 @@ export function CapabilityGovernancePage() {
           <Alert
             type="info"
             showIcon
-            title="当前账号只有查看权限"
-            description="启用、暂停、停用与升级需要「经营空间能力治理」权限。"
+            title={t("当前账号只有查看权限")}
+            description={t("启用、暂停、停用与升级需要「经营空间能力治理」权限。")}
             style={{ marginBottom: 16 }}
           />
         )}
@@ -221,84 +232,84 @@ export function CapabilityGovernancePage() {
             scroll={{ x: 1280 }}
             columns={[
               {
-                title: "能力",
+                title: t("能力"),
                 fixed: "left",
                 render: (_, row) => (
                   <>
-                    <b>{row.definition.label}</b>
+                    <b>{t(row.definition.label)}</b>
                     <br />
                     <span className="muted">{row.definition.code}</span>
                   </>
                 )
               },
               {
-                title: "当前品类定位",
+                title: t("当前品类定位"),
                 render: (_, row) =>
                   row.providedByCore ? (
-                    <Tag color="blue">Core 内建</Tag>
+                    <Tag color="blue">{t("Core 内建")}</Tag>
                   ) : row.requiredForCategory ? (
-                    <Tag color="red">品类必选</Tag>
+                    <Tag color="red">{t("品类必选")}</Tag>
                   ) : (
-                    <Tag color={kindMeta[row.definition.kind].color}>{kindMeta[row.definition.kind].label}</Tag>
+                    <Tag color={kindMeta[row.definition.kind].color}>{t(kindMeta[row.definition.kind].label)}</Tag>
                   )
               },
               {
-                title: "状态",
+                title: t("状态"),
                 render: (_, row) => (
                   <Space orientation="vertical" size={2}>
-                    <Tag color={stateMeta[row.state].color}>{stateMeta[row.state].label}</Tag>
-                    {!row.applicable && <span className="muted">不适用于当前品类</span>}
-                    {row.applicable && !row.declaredByCategory && <span className="muted">本品类未声明</span>}
+                    <Tag color={stateMeta[row.state].color}>{t(stateMeta[row.state].label)}</Tag>
+                    {!row.applicable && <span className="muted">{t("不适用于当前品类")}</span>}
+                    {row.applicable && !row.declaredByCategory && <span className="muted">{t("本品类未声明")}</span>}
                   </Space>
                 )
               },
               {
-                title: "依赖 / 互斥",
+                title: t("依赖 / 互斥"),
                 render: (_, row) => (
                   <Space orientation="vertical" size={2}>
-                    {row.definition.dependsOn.length ? <span>依赖：{row.definition.dependsOn.join("、")}</span> : <span className="muted">无依赖</span>}
-                    {row.definition.conflictsWith.length ? <span>互斥：{row.definition.conflictsWith.join("、")}</span> : null}
+                    {row.definition.dependsOn.length ? <span>{t("依赖")}：{row.definition.dependsOn.join("、")}</span> : <span className="muted">{t("无依赖")}</span>}
+                    {row.definition.conflictsWith.length ? <span>{t("互斥")}：{row.definition.conflictsWith.join("、")}</span> : null}
                   </Space>
                 )
               },
               {
-                title: "版本",
+                title: t("版本"),
                 render: (_, row) => (
                   <Space orientation="vertical" size={2}>
-                    <span>实现：{row.instance?.implementationVersion ?? row.definition.implementationVersion ?? "未实现"}</span>
-                    <span className="muted">配置：{row.instance?.configVersion ?? "-"}</span>
-                    {row.upgradeAvailable && <Tag color="processing">可升级到 {row.definition.implementationVersion}</Tag>}
+                    <span>{t("实现")}：{row.instance?.implementationVersion ?? row.definition.implementationVersion ?? t("未实现")}</span>
+                    <span className="muted">{t("配置")}：{row.instance?.configVersion ?? "-"}</span>
+                    {row.upgradeAvailable && <Tag color="processing">{t("可升级到")} {row.definition.implementationVersion}</Tag>}
                   </Space>
                 )
               },
               {
-                title: "配置",
+                title: t("配置"),
                 render: (_, row) =>
                   row.definition.configSchema.length ? (
                     <Space orientation="vertical" size={2}>
                       {row.definition.configSchema.map((field) => (
                         <span key={field.key}>
-                          {field.label}：{String(row.instance?.config?.[field.key] ?? "-")}
+                          {t(field.label)}：{String(row.instance?.config?.[field.key] ?? "-")}
                         </span>
                       ))}
                     </Space>
                   ) : (
-                    <span className="muted">无配置项</span>
+                    <span className="muted">{t("无配置项")}</span>
                   )
               },
               {
-                title: "操作",
+                title: t("操作"),
                 fixed: "right",
                 render: (_, row) => (
                   <Space>
                     <Tooltip
                       title={
                         !row.implemented
-                          ? "该能力只登记了扩展点，尚无可执行模块，不能启用"
+                          ? t("该能力只登记了扩展点，尚无可执行模块，不能启用")
                           : row.providedByCore
-                            ? "该能力由 Rental Core 内建提供，请到对应业务规则中配置"
+                            ? t("该能力由 Rental Core 内建提供，请到对应业务规则中配置")
                           : !row.applicable
-                            ? "该能力不适用于当前经营品类"
+                            ? t("该能力不适用于当前经营品类")
                             : undefined
                       }
                     >
@@ -308,16 +319,16 @@ export function CapabilityGovernancePage() {
                         disabled={!canManage || !row.implemented || !row.applicable || row.providedByCore}
                         onClick={() => openEditor(row)}
                       >
-                        状态与配置
+                        {t("状态与配置")}
                       </Button>
                     </Tooltip>
                     {row.upgradeAvailable && (
                       <Button type="link" loading={upgrade.isPending} disabled={!canManage} onClick={() => upgrade.mutate(row)}>
-                        升级
+                        {t("升级")}
                       </Button>
                     )}
                     <Button type="link" icon={<HistoryOutlined />} onClick={() => setAuditCode(row.definition.code)}>
-                      审计
+                      {t("审计")}
                     </Button>
                   </Space>
                 )
@@ -331,48 +342,48 @@ export function CapabilityGovernancePage() {
         className="data-panel"
         title={
           <Space>
-            <span>生命周期审计</span>
-            {auditCode ? <Tag>{auditCode}</Tag> : <Tag>全部能力</Tag>}
+            <span>{t("生命周期审计")}</span>
+            {auditCode ? <Tag>{auditCode}</Tag> : <Tag>{t("全部能力")}</Tag>}
           </Space>
         }
-        extra={auditCode ? <Button onClick={() => setAuditCode(undefined)}>查看全部</Button> : null}
+        extra={auditCode ? <Button onClick={() => setAuditCode(undefined)}>{t("查看全部")}</Button> : null}
         style={{ marginTop: 16 }}
       >
         <Typography.Paragraph type="secondary">
-          审计只追加不修改。每次启用、暂停、停用、改配置与升级都必须填写原因，事后要能解释这项经营决策。
+          {t("审计只追加不修改。每次启用、暂停、停用、改配置与升级都必须填写原因，事后要能解释这项经营决策。")}
         </Typography.Paragraph>
         <QueryState loading={audits.isLoading} error={audits.error}>
           <Table
             rowKey={(row) => `${row.code}:${row.at}:${row.action}`}
             dataSource={audits.data ?? []}
             columns={[
-              { title: "时间", dataIndex: "at" },
-              { title: "能力", dataIndex: "code" },
-              { title: "动作", dataIndex: "action" },
-              { title: "状态变化", render: (_, row) => `${row.fromStatus ?? "（无实例）"} → ${row.toStatus}` },
-              { title: "实现 / 配置版本", render: (_, row) => `${row.implementationVersion ?? "-"} / ${row.configVersion ?? "-"}` },
+              { title: t("时间"), dataIndex: "at" },
+              { title: t("能力"), dataIndex: "code" },
+              { title: t("动作"), dataIndex: "action" },
+              { title: t("状态变化"), render: (_, row) => `${row.fromStatus ? t(row.fromStatus) : t("（无实例）")} → ${t(row.toStatus)}` },
+              { title: t("实现 / 配置版本"), render: (_, row) => `${row.implementationVersion ?? "-"} / ${row.configVersion ?? "-"}` },
               {
-                title: "配置快照",
+                title: t("配置快照"),
                 render: (_, row) => row.configSnapshot
-                  ? <Tooltip title={<pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{JSON.stringify(row.configSnapshot, null, 2)}</pre>}><Button type="link" size="small">查看</Button></Tooltip>
+                  ? <Tooltip title={<pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{JSON.stringify(row.configSnapshot, null, 2)}</pre>}><Button type="link" size="small">{t("查看")}</Button></Tooltip>
                   : "-"
               },
-              { title: "原因", dataIndex: "reason" },
-              { title: "操作人", dataIndex: "operator" }
+              { title: t("原因"), dataIndex: "reason" },
+              { title: t("操作人"), dataIndex: "operator" }
             ]}
           />
         </QueryState>
       </Card>
 
       <Drawer
-        title={editing ? `${editing.definition.label} · 状态与配置` : "状态与配置"}
+        title={editing ? `${t(editing.definition.label)} · ${t("状态与配置")}` : t("状态与配置")}
         size={560}
         open={Boolean(editing)}
         destroyOnHidden
         onClose={() => setEditing(undefined)}
         extra={
           <Button type="primary" loading={save.isPending} onClick={() => form.submit()}>
-            保存
+            {t("保存")}
           </Button>
         }
       >
@@ -385,24 +396,24 @@ export function CapabilityGovernancePage() {
             <Alert
               type="info"
               showIcon
-              title="暂停与停用会立即收回菜单入口与 API 放行"
-              description="已启用是唯一可用状态。暂停后该能力的接口会返回 403，历史数据不受影响。"
+              title={t("暂停与停用会立即收回菜单入口与 API 放行")}
+              description={t("已启用是唯一可用状态。暂停后该能力的接口会返回 403，历史数据不受影响。")}
               style={{ marginBottom: 16 }}
             />
-            <Form.Item name="status" label="目标状态" rules={[{ required: true }]}>
+            <Form.Item name="status" label={t("目标状态")} rules={[{ required: true }]}>
               <Select
                 options={[
-                  { value: "enabled", label: "启用" },
-                  { value: "paused", label: "暂停" },
-                  { value: "disabled", label: "停用" }
+                  { value: "enabled", label: t("启用") },
+                  { value: "paused", label: t("暂停") },
+                  { value: "disabled", label: t("停用") }
                 ]}
               />
             </Form.Item>
             {editing.definition.configSchema.map((field) => (
               <ConfigField key={field.key} field={field} />
             ))}
-            <Form.Item name="reason" label="变更原因" rules={[{ required: true, message: "变更能力状态必须填写原因" }]}>
-              <Input.TextArea rows={3} maxLength={500} showCount placeholder="例如：门店已具备配送人员与车辆，开通同城配送" />
+            <Form.Item name="reason" label={t("变更原因")} rules={[{ required: true, message: t("变更能力状态必须填写原因") }]}>
+              <Input.TextArea rows={3} maxLength={500} showCount placeholder={t("例如：门店已具备配送人员与车辆，开通同城配送")} />
             </Form.Item>
           </Form>
         )}

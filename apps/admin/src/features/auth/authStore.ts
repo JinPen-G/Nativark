@@ -44,7 +44,7 @@ interface AuthState {
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   switchWorkspace: (workspaceId: string) => Promise<void>;
   setTenantThemeColor: (themeColor?: string) => void;
-  setTenantBranding: (branding: Pick<TenantContext, "brandName" | "brandLogoUrl" | "faviconUrl" | "themeColor">) => void;
+  setTenantBranding: (branding: Pick<TenantContext, "brandName" | "brandLogoUrl" | "faviconUrl" | "themeColor" | "adminCornerRadius">) => void;
   logout: () => void;
   hasPermission: (permission?: string) => boolean;
   hasTenantMembershipPermission: (permission?: string) => boolean;
@@ -160,7 +160,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       brandName: branding.brandName?.trim() || undefined,
       brandLogoUrl: branding.brandLogoUrl?.trim() || undefined,
       faviconUrl: branding.faviconUrl?.trim() || undefined,
-      themeColor: branding.themeColor?.trim() || undefined
+      themeColor: branding.themeColor?.trim() || undefined,
+      adminCornerRadius: branding.adminCornerRadius
     };
     window.localStorage.setItem(keys.tenant, JSON.stringify(tenant));
     set({ tenant });

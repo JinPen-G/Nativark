@@ -8,7 +8,8 @@ import { PlatformService } from "./platform.service";
 import { CustomerOperationsService } from "./customer-operations.service";
 import {
   ChangeCustomerAccountStatusDto,
-  ChangeCustomerMembershipStatusDto
+  ChangeCustomerMembershipStatusDto,
+  SaveCustomerProfileAddressDto
 } from "./customer-operations-request.dto";
 import {
   RecordCustomerCorporateCreditPaymentDto,
@@ -146,6 +147,41 @@ export class PlatformController {
   @Get("customers/:customerId")
   customerDetail(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
     return this.platformService.getCustomerDetail(customerId, req.user);
+  }
+
+  /** CUSTOMER-PROFILE-01：资料页聚合读取。订单只返回轻量摘要，完整订单仍走订单中心权限。 */
+  @Get("customers/:customerId/profile")
+  customerProfileOverview(
+    @Param("customerId") customerId: string,
+    @Query("page") page: string | undefined,
+    @Query("pageSize") pageSize: string | undefined,
+    @Req() req: RequestWithUser
+  ) {
+    const parse = (value: string | undefined) => {
+      if (value === undefined || value.trim() === "") return undefined;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    };
+    return this.platformService.getCustomerProfileOverview(customerId, { page: parse(page), pageSize: parse(pageSize) }, req.user);
+  }
+
+  /** 客户资料页维护配送地址；电话缺省表示保留原值，服务端始终只返回脱敏电话。 */
+  @Put("customers/:customerId/addresses")
+  saveCustomerProfileAddress(
+    @Param("customerId") customerId: string,
+    @Body() body: SaveCustomerProfileAddressDto,
+    @Req() req: RequestWithUser
+  ) {
+    return this.platformService.saveCustomerProfileAddress(customerId, body, req.user);
+  }
+
+  @Delete("customers/:customerId/addresses/:addressId")
+  removeCustomerProfileAddress(
+    @Param("customerId") customerId: string,
+    @Param("addressId") addressId: string,
+    @Req() req: RequestWithUser
+  ) {
+    return this.platformService.removeCustomerProfileAddress(customerId, addressId, req.user);
   }
 
   /** CUSTOMER-01B：为客户开通登录账号。幂等，已有账号直接返回。 */

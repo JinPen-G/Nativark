@@ -1,5 +1,5 @@
 .scan-art { background: rgba(22, 119, 255, 0.10); }
-.hero--soft { min-height: 270rpx; background: #EAF3FF; padding: 36rpx 30rpx; }
+.hero--soft { min-height: 270rpx; padding: 36rpx 30rpx; }
 .hero--soft .hero__title { font-size: var(--font-page-title); }
 .hero--soft .hero__subtitle { max-width: 65%; font-size: var(--font-caption); margin-top: 10rpx; }
 .hero--soft .scan-hero__line { margin-top: 0; }
@@ -13,5 +13,4 @@
 .scan-entry__title { margin-top: 16rpx; font-size: var(--font-subtitle); font-weight: var(--fw-semibold); color: var(--text); }
 .scan-entry__hint { margin-top: 6rpx; font-size: var(--font-mini); color: var(--secondary); }
 .scan-tips { background: var(--primary-weak); box-shadow: none; }
-.theme-dark .hero--soft { background: #1B2C45; }
 .scan-tips__item { margin-top: 12rpx; font-size: var(--font-caption); color: var(--secondary); line-height: 1.6; }

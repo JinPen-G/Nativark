@@ -26,6 +26,7 @@ import dayjs from "dayjs";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
+import { useLocale } from "@/app/locale";
 import { QueryState } from "@/components/QueryState";
 import { CalendarMonthGrid } from "@/features/settings/CalendarMonthGrid";
 import { CalendarRangeModal } from "@/features/settings/CalendarRangeModal";
@@ -69,6 +70,7 @@ const previewFieldLabels: Record<string, string> = {
  */
 export function CalendarTab({ permissions }: { permissions: GovernancePermissions }) {
   const { message } = App.useApp();
+  const { t } = useLocale();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { canManagePrice, canEditCalendar, canPublishCalendar, canViewCalendarHistory, canSeeCalendar } = permissions;
@@ -138,9 +140,9 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
       await queryClient.invalidateQueries({
         queryKey: ["rental-core", "calendar", year],
       });
-      message.success("租户日历覆盖已保存");
+      message.success(t("租户日历覆盖已保存"));
     },
-    onError: () => message.error("日期或价格系数无效"),
+    onError: () => message.error(t("日期或价格系数无效")),
   });
   /**
    * 引用公共官方来源版本生成/更新本空间年度草稿（需求 4.5.2）。
@@ -164,16 +166,16 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
       const preserved = result?.importPreservedOverrides ?? [];
       if (preserved.length) {
         message.warning(
-          `官方来源已应用到草稿。${preserved.length} 个日期存在人工覆盖，已保留原覆盖：${preserved.join("、")}`,
+          `${t("官方来源已应用到草稿。")} ${preserved.length} ${t("个日期存在人工覆盖，已保留原覆盖")}：${preserved.join("、")}`,
         );
       } else {
-        message.success("官方来源已应用到草稿，请核对后发布");
+        message.success(t("官方来源已应用到草稿，请核对后发布"));
       }
     },
     onError: (error) =>
       message.error(
         (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
-          "应用官方来源失败",
+          t("应用官方来源失败"),
       ),
   });
   const publishCalendar = useMutation({
@@ -188,12 +190,12 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
       await queryClient.invalidateQueries({
         queryKey: ["rental-core", "calendar-versions", year],
       });
-      message.success("年度营业日历已发布，后续报价将记录该版本");
+      message.success(t("年度营业日历已发布，后续报价将记录该版本"));
     },
     onError: (error) =>
       message.error(
         (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
-          "发布失败：需填写变更原因",
+          t("发布失败：需填写变更原因"),
       ),
   });
   /**
@@ -212,12 +214,12 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
       await queryClient.invalidateQueries({
         queryKey: ["rental-core", "calendar", year],
       });
-      message.success(`已按该版本生成新草稿 v${created.version}，请核对后发布`);
+      message.success(`${t("已按该版本生成新草稿")} v${created.version}，${t("请核对后发布")}`);
     },
     onError: (error) =>
       message.error(
         (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
-          "恢复失败：必须填写原因，且不能恢复当前正在编辑的版本",
+          t("恢复失败：必须填写原因，且不能恢复当前正在编辑的版本"),
       ),
   });
   /** 作废草稿版本（需求 4.5.7）。原因必填，作废后该草稿不再进入编辑视图。 */
@@ -233,12 +235,12 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
       await queryClient.invalidateQueries({
         queryKey: ["rental-core", "calendar", year],
       });
-      message.success("草稿版本已作废，并记录了作废原因");
+      message.success(t("草稿版本已作废，并记录了作废原因"));
     },
     onError: (error) =>
       message.error(
         (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
-          "作废失败：只能作废草稿版本，且必须填写原因",
+          t("作废失败：只能作废草稿版本，且必须填写原因"),
       ),
   });
   const removeDayOverride = useMutation({
@@ -250,9 +252,9 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
       await queryClient.invalidateQueries({
         queryKey: ["rental-core", "calendar", year],
       });
-      message.success("人工覆盖已移除，该日期恢复为官方日历或每周模板");
+      message.success(t("人工覆盖已移除，该日期恢复为官方日历或每周模板"));
     },
-    onError: () => message.error("移除失败：该日期没有人工覆盖，或未填写调整原因"),
+    onError: () => message.error(t("移除失败：该日期没有人工覆盖，或未填写调整原因")),
   });
 
   function openDay(row: RentalCalendarDay) {
@@ -282,7 +284,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                 currentYear - 1,
                 currentYear,
                 currentYear + 1,
-              ].map((value) => ({ value, label: `${value} 年` }))}
+              ].map((value) => ({ value, label: `${value} ${t("年")}` }))}
             />
             <Tag
               color={
@@ -291,17 +293,17 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                   : "warning"
               }
             >
-              {calendar.data?.status} · v{calendar.data?.version}
+              {t(calendarStatusLabels[calendar.data?.status ?? ""] ?? calendar.data?.status ?? "")} · v{calendar.data?.version}
             </Tag>
             <Typography.Text type="secondary">
-              {calendar.data?.sourceName ?? "未引用官方来源"}
+              {calendar.data?.sourceName ?? t("未引用官方来源")}
             </Typography.Text>
           </Space>
           <Space>
             {/* 需求 4.5.9：默认月历视图，全年逐日长列表仅作为可选视图保留。 */}
             <Switch
-              checkedChildren="列表"
-              unCheckedChildren="月历"
+              checkedChildren={t("列表")}
+              unCheckedChildren={t("月历")}
               checked={calendarListView}
               onChange={setCalendarListView}
             />
@@ -311,7 +313,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                 setHistoryOpen(true);
               }}
             >
-              历史版本
+              {t("历史版本")}
             </Button>
             {canEditCalendar && (
               <Button
@@ -321,7 +323,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                   setRangeOpen(true);
                 }}
               >
-                新增日期范围覆盖
+                {t("新增日期范围覆盖")}
               </Button>
             )}
             {canEditCalendar && (
@@ -331,11 +333,11 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                   setRangeOpen(true);
                 }}
               >
-                移除日期范围覆盖
+                {t("移除日期范围覆盖")}
               </Button>
             )}
             {canEditCalendar && (
-              <Button onClick={() => setImportOpen(true)}>应用官方来源</Button>
+              <Button onClick={() => setImportOpen(true)}>{t("应用官方来源")}</Button>
             )}
             {canPublishCalendar && (
               <Button
@@ -346,7 +348,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                   setPublishOpen(true);
                 }}
               >
-                发布年度版本
+                {t("发布年度版本")}
               </Button>
             )}
           </Space>
@@ -358,12 +360,12 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           <Alert
             type="warning"
             showIcon
-            title={`当前引用的官方来源有新版本 v${calendar.data.latestOfficialSourceVersion}`}
-            description="平台已登记该年度更新的官方节假日数据。应用后会在草稿上生成新的一版，仍需发布才生效，且不会改动已有报价与订单。"
+            title={`${t("当前引用的官方来源有新版本")} v${calendar.data.latestOfficialSourceVersion}`}
+            description={t("平台已登记该年度更新的官方节假日数据。应用后会在草稿上生成新的一版，仍需发布才生效，且不会改动已有报价与订单。")}
             action={
               canEditCalendar ? (
                 <Button size="small" onClick={() => setImportOpen(true)}>
-                  查看 / 应用
+                  {t("查看 / 应用")}
                 </Button>
               ) : undefined
             }
@@ -372,12 +374,12 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           <Alert
             type="info"
             showIcon
-            title={`平台已登记该年度可用的官方来源（${calendar.data.availableOfficialSourceCount ?? 0} 个），可选择应用`}
-            description="本经营空间尚未引用任何官方来源版本；当前日历按每周默认模板与人工覆盖生成。选择来源时可查看各来源的公告日期与版本。"
+            title={`${t("平台已登记该年度可用的官方来源")}（${calendar.data.availableOfficialSourceCount ?? 0} ${t("个")}），${t("可选择应用")}`}
+            description={t("本经营空间尚未引用任何官方来源版本；当前日历按每周默认模板与人工覆盖生成。选择来源时可查看各来源的公告日期与版本。")}
             action={
               canEditCalendar ? (
                 <Button size="small" onClick={() => setImportOpen(true)}>
-                  选择官方来源
+                  {t("选择官方来源")}
                 </Button>
               ) : undefined
             }
@@ -386,22 +388,22 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           <Alert
             type="info"
             showIcon
-            title="当前没有可用的官方来源"
-            description="平台登记过该年度官方来源，但目前全部已停用；如需应用请联系平台管理员恢复来源。"
+            title={t("当前没有可用的官方来源")}
+            description={t("平台登记过该年度官方来源，但目前全部已停用；如需应用请联系平台管理员恢复来源。")}
           />
         ) : !calendar.data?.sourceName ? (
           <Alert
             type="info"
             showIcon
-            title="平台尚未登记该年度公共官方来源"
-            description="官方节假日来源由 SaaS 平台管理员维护；登记后这里会提示可选择应用。"
+            title={t("平台尚未登记该年度公共官方来源")}
+            description={t("官方节假日来源由 SaaS 平台管理员维护；登记后这里会提示可选择应用。")}
           />
         ) : null}
         <Alert
           type="info"
           showIcon
-          title="法定节假日与调休工作日必须来自有来源记录的年度数据"
-          description="租户可以覆盖特殊营业日、停业日和营业时段；特殊价格只在价格模块维护，日历保存规则引用。报价会记录命中的年度日历与价格版本。"
+          title={t("法定节假日与调休工作日必须来自有来源记录的年度数据")}
+          description={t("租户可以覆盖特殊营业日、停业日和营业时段；特殊价格只在价格模块维护，日历保存规则引用。报价会记录命中的年度日历与价格版本。")}
         />
         {/* 需求 4.5.9：默认渲染自然月七列月历，点击日期查看/编辑；全年长列表按需切换。 */}
         {!calendarListView && (
@@ -415,37 +417,37 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           />
         )}
         {calendarListView && (
-        <Card className="data-panel" title="全年逐日列表（可选视图）">
+        <Card className="data-panel" title={t("全年逐日列表（可选视图）")}>
           <Table<RentalCalendarDay>
             rowKey="date"
             size="small"
             dataSource={calendar.data?.days ?? []}
             pagination={{ pageSize: 31, showSizeChanger: false }}
             columns={[
-              { title: "日期", dataIndex: "date" },
+              { title: t("日期"), dataIndex: "date" },
               {
-                title: "类型",
+                title: t("类型"),
                 dataIndex: "dayType",
-                render: (value) => <Tag>{calendarDayTypeLabels[value as string] ?? value}</Tag>,
+                render: (value) => <Tag>{t(calendarDayTypeLabels[value as string] ?? value)}</Tag>,
               },
-              { title: "名称", dataIndex: "name" },
-              { title: "历史系数（兼容）", dataIndex: "pricingMultiplier" },
+              { title: t("名称"), dataIndex: "name" },
+              { title: t("历史系数（兼容）"), dataIndex: "pricingMultiplier" },
               {
-                title: "停业",
+                title: t("停业"),
                 dataIndex: "closed",
-                render: (value) => (value ? "是" : "否"),
+                render: (value) => (value ? t("是") : t("否")),
               },
               {
                 // 四态营业状态与营业时段此前在表格上完全不可见，于是「限时营业 →
                 // 正常营业」这种翻转在界面上看不出来（需求 4.5.4/4.5.1）。
-                title: "营业状态",
+                title: t("营业状态"),
                 dataIndex: "businessStatus",
                 render: (value, row) => (
-                  <Tag>{businessStatusLabels[(value as string) ?? (row.closed ? "closed" : "open")] ?? value}</Tag>
+                  <Tag>{t(businessStatusLabels[(value as string) ?? (row.closed ? "closed" : "open")] ?? value)}</Tag>
                 ),
               },
               {
-                title: "营业时段",
+                title: t("营业时段"),
                 render: (_, row) =>
                   row.hours?.windows?.length ? (
                     <Space orientation="vertical" size={0}>
@@ -455,21 +457,21 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                       {(row.hours.pickup?.length || row.hours.return?.length) && (
                         <Typography.Text type="secondary" className="text-meta">
                           {row.hours.pickup?.length
-                            ? `取 ${row.hours.pickup.map((w) => `${w.start}-${w.end}`).join("、")}`
+                            ? `${t("取")} ${row.hours.pickup.map((w) => `${w.start}-${w.end}`).join("、")}`
                             : ""}
                           {row.hours.return?.length
-                            ? ` 还 ${row.hours.return.map((w) => `${w.start}-${w.end}`).join("、")}`
+                            ? ` ${t("还")} ${row.hours.return.map((w) => `${w.start}-${w.end}`).join("、")}`
                             : ""}
                         </Typography.Text>
                       )}
                     </Space>
                   ) : (
-                    <Typography.Text type="secondary">沿用每周模板</Typography.Text>
+                    <Typography.Text type="secondary">{t("沿用每周模板")}</Typography.Text>
                   ),
               },
-              { title: "来源", dataIndex: "source" },
+              { title: t("来源"), dataIndex: "source" },
               {
-                title: "被覆盖的原始值",
+                title: t("被覆盖的原始值"),
                 // 需求 4.5.3：日期详情必须能说明当前结果的来源并展示被覆盖的原始值。
                 // 只显示"来源=人工覆盖"而不显示原值，运营无法判断撤销后会恢复成什么。
                 render: (_, row) =>
@@ -478,10 +480,10 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                       <Typography.Text className="text-meta">
                         {row.overriddenFrom
                           ? `${row.overriddenFrom.name} · ${row.overriddenFrom.dayType} · ×${row.overriddenFrom.pricingMultiplier}`
-                          : "每周模板"}
+                          : t("每周模板")}
                       </Typography.Text>
                       <Typography.Text type="secondary" className="text-meta">
-                        {row.overrideReason ?? "未记录原因"}
+                        {row.overrideReason ?? t("未记录原因")}
                         {row.overrideBy ? ` · ${row.overrideBy}` : ""}
                       </Typography.Text>
                     </Space>
@@ -490,12 +492,12 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                   ),
               },
               {
-                title: "操作",
+                title: t("操作"),
                 render: (_, row) =>
                   canEditCalendar ? (
                     <Space size={0}>
                       <Button type="link" onClick={() => openDay(row)}>
-                        租户覆盖
+                        {t("租户覆盖")}
                       </Button>
                       {row.source === "tenant_override" && (
                         <Button
@@ -506,12 +508,12 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                             setRevertTarget(row);
                           }}
                         >
-                          移除覆盖
+                          {t("移除覆盖")}
                         </Button>
                       )}
                     </Space>
                   ) : (
-                    <Typography.Text type="secondary">只读</Typography.Text>
+                    <Typography.Text type="secondary">{t("只读")}</Typography.Text>
                   ),
               },
             ]}
@@ -530,7 +532,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
       </Space>
 
       <Drawer
-        title={`覆盖营业日 · ${calendarDay?.date ?? ""}`}
+        title={`${t("覆盖营业日")} · ${calendarDay?.date ?? ""}`}
         size={480}
         open={Boolean(calendarDay)}
         onClose={() => setCalendarDay(undefined)}
@@ -542,7 +544,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
             loading={saveDay.isPending}
             onClick={() => calendarDayForm.submit()}
           >
-            保存覆盖
+            {t("保存覆盖")}
           </Button>
         }
       >
@@ -563,13 +565,13 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
               showIcon
               title={
                 calendarDay.overrideScope.kind === "range"
-                  ? `属于范围覆盖：${calendarDay.overrideScope.rangeStart} ~ ${calendarDay.overrideScope.rangeEnd}`
-                  : "单日覆盖"
+                  ? `${t("属于范围覆盖")}：${calendarDay.overrideScope.rangeStart} ~ ${calendarDay.overrideScope.rangeEnd}`
+                  : t("单日覆盖")
               }
               description={
-                `批次 ${calendarDay.overrideScope.batchId}` +
+                `${t("批次")} ${calendarDay.overrideScope.batchId}` +
                 (calendarDay.overrideScope.startDateTime
-                  ? `；起止时点 ${calendarDay.overrideScope.startDateTime} ~ ${calendarDay.overrideScope.endDateTime}`
+                  ? `；${t("起止时点")} ${calendarDay.overrideScope.startDateTime} ~ ${calendarDay.overrideScope.endDateTime}`
                   : "")
               }
             />
@@ -577,24 +579,24 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           {calendarDay && (calendar.data?.timePriceSummary ?? []).find((row) => row.date === calendarDay.date)?.entries.length ? (
             <Card
               size="small"
-              title="当日分时价格摘要"
+              title={t("当日分时价格摘要")}
               style={{ marginBottom: 16 }}
-              extra={canManagePrice ? <Button type="link" onClick={() => navigate("/rental/pricing")}>进入价格版本与调价</Button> : undefined}
+              extra={canManagePrice ? <Button type="link" onClick={() => navigate("/rental/pricing")}>{t("进入价格版本与调价")}</Button> : undefined}
             >
               <Space orientation="vertical" size={4}>
                 {(calendar.data?.timePriceSummary ?? []).find((row) => row.date === calendarDay.date)!.entries.map((entry, index) => (
                   <Typography.Text key={`${entry.version}-${entry.unit}-${entry.timeLabel}-${index}`}>
-                    {entry.planCode ?? `价格版本 ${entry.version}`} · {entry.itemGroupCodes.join("、")} · {entry.timeLabel} ×{entry.multiplier}
-                    {entry.overrideRef ? ` · 引用 ${entry.overrideRef}` : ""}
+                    {entry.planCode ?? `${t("价格版本")} ${entry.version}`} · {entry.itemGroupCodes.join("、")} · {entry.timeLabel} ×{entry.multiplier}
+                    {entry.overrideRef ? ` · ${t("引用")} ${entry.overrideRef}` : ""}
                   </Typography.Text>
                 ))}
               </Space>
             </Card>
           ) : null}
-          <Form.Item name="date" label="日期">
+          <Form.Item name="date" label={t("日期")}>
             <Input disabled />
           </Form.Item>
-          <Form.Item name="dayType" label="日期类型">
+          <Form.Item name="dayType" label={t("日期类型")}>
             <Select
               options={[
                 "workday",
@@ -602,10 +604,10 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                 "statutory_holiday",
                 "makeup_workday",
                 "tenant_special",
-              ].map((value) => ({ value, label: calendarDayTypeLabels[value] ?? value }))}
+              ].map((value) => ({ value, label: t(calendarDayTypeLabels[value] ?? value) }))}
             />
           </Form.Item>
-          <Form.Item name="name" label="名称">
+          <Form.Item name="name" label={t("名称")}>
             <Input />
           </Form.Item>
           <Form.Item name="pricingMultiplier" hidden>
@@ -615,21 +617,21 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
             style={{ marginBottom: 16 }}
             type="info"
             showIcon
-            title="日历不再直接设置价格系数"
-            description="逐商品价格、日期类型价格和一次性分时价格都在「价格版本与调价」中维护；日期范围覆盖只保存一次性规则引用。"
+            title={t("日历不再直接设置价格系数")}
+            description={t("逐商品价格、日期类型价格和一次性分时价格都在「价格版本与调价」中维护；日期范围覆盖只保存一次性规则引用。")}
           />
-          <Form.Item name="pricingOverrideRef" label="一次性价格引用" tooltip="填写「价格版本与调价」中一次性日期时间价格规则的引用标识；留空表示不引用特殊价格。">
+          <Form.Item name="pricingOverrideRef" label={t("一次性价格引用")} tooltip={t("填写「价格版本与调价」中一次性日期时间价格规则的引用标识；留空表示不引用特殊价格。") }>
             <Input allowClear placeholder="例如 NATIONAL-DAY-2026" />
           </Form.Item>
           <Form.Item
             name="overrideReason"
-            label="调整原因"
+            label={t("调整原因")}
             rules={[{ required: true }]}
-            tooltip="人工覆盖必须留下原因；操作人与调整时间由服务端记录。移除覆盖会恢复到官方日历或每周模板的原值。"
+            tooltip={t("人工覆盖必须留下原因；操作人与调整时间由服务端记录。移除覆盖会恢复到官方日历或每周模板的原值。")}
           >
             <Input />
           </Form.Item>
-          <Form.Item name="closed" label="停业" valuePropName="checked">
+          <Form.Item name="closed" label={t("停业")} valuePropName="checked">
             <Switch />
           </Form.Item>
           {/* 四态营业状态（需求 4.5.4）。此前抽屉只有「停业」开关、没有四态选择器，
@@ -637,13 +639,13 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
               这里显式给出选择器让运营能真正改它。 */}
           <Form.Item
             name="businessStatus"
-            label="营业状态"
-            tooltip="留空表示按「停业」开关推导（停业=停止营业、否则正常营业）。限时营业需要配营业时段才会真正限制时点；自助营业需要地点声明自助能力。"
+            label={t("营业状态")}
+            tooltip={t("留空表示按「停业」开关推导（停业=停止营业、否则正常营业）。限时营业需要配营业时段才会真正限制时点；自助营业需要地点声明自助能力。")}
           >
             <Select
               allowClear
-              placeholder="留空按停业开关推导"
-              options={Object.entries(businessStatusLabels).map(([value, label]) => ({ value, label }))}
+              placeholder={t("留空按停业开关推导")}
+              options={Object.entries(businessStatusLabels).map(([value, label]) => ({ value, label: t(label) }))}
             />
           </Form.Item>
           {/* 营业时段是结构化对象，本轮不做可视化时段编辑器。它**不注册为表单字段**：
@@ -657,7 +659,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
       {/* 引用公共官方来源版本（需求 4.5.2/4.5.8）。空间侧不再手填原始官方 JSON：
           公共数据由 SaaS 平台管理员在注册表里维护，这里只能挑一版应用到本空间草稿。 */}
       <Drawer
-        title={`应用 ${year} 年公共官方日历来源`}
+        title={`${t("应用")} ${year} ${t("年公共官方日历来源")}`}
         size={720}
         open={importOpen}
         onClose={() => setImportOpen(false)}
@@ -667,8 +669,8 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           <Alert
             type="info"
             showIcon
-            title="官方数据是公共基础来源，由平台维护、按版本发布"
-            description="应用某一版只会生成或更新本经营空间的草稿；已有的人工覆盖会被保留，本版未包含的日期会回落到每周模板。确认后仍需你自己发布。"
+            title={t("官方数据是公共基础来源，由平台维护、按版本发布")}
+            description={t("应用某一版只会生成或更新本经营空间的草稿；已有的人工覆盖会被保留，本版未包含的日期会回落到每周模板。确认后仍需你自己发布。")}
           />
           <QueryState loading={officialSourceVersions.isLoading} error={officialSourceVersions.error}>
             <Table
@@ -676,19 +678,19 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
               size="small"
               dataSource={officialSourceVersions.data ?? []}
               pagination={false}
-              locale={{ emptyText: `平台尚未登记 ${year} 年度的官方来源版本，请联系 SaaS 平台管理员` }}
+              locale={{ emptyText: `${t("平台尚未登记")} ${year} ${t("年度的官方来源版本，请联系 SaaS 平台管理员")}` }}
               columns={[
-                { title: "来源", dataIndex: "sourceName" },
-                { title: "来源版本", dataIndex: "version", width: 100, render: (value) => `v${value}` },
+                { title: t("来源"), dataIndex: "sourceName" },
+                { title: t("来源版本"), dataIndex: "version", width: 100, render: (value) => `v${value}` },
                 {
-                  title: "官方发布日期",
+                  title: t("官方发布日期"),
                   dataIndex: "publishedAt",
                   width: 130,
                   render: (value) => dayjs(value as string).format("YYYY-MM-DD"),
                 },
-                { title: "日期条数", dataIndex: "dayCount", width: 90 },
+                { title: t("日期条数"), dataIndex: "dayCount", width: 90 },
                 {
-                  title: "操作",
+                  title: t("操作"),
                   width: 110,
                   render: (_, row) => (
                     <Button
@@ -696,7 +698,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                       loading={applyOfficialSource.isPending}
                       onClick={() => applyOfficialSource.mutate(row.id)}
                     >
-                      应用到草稿
+                      {t("应用到草稿")}
                     </Button>
                   ),
                 },
@@ -706,12 +708,12 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
         </Space>
       </Drawer>
       <Modal
-        title="发布年度营业日历"
+        title={t("发布年度营业日历")}
         open={publishOpen}
         onCancel={() => setPublishOpen(false)}
         onOk={() => publishForm.submit()}
         confirmLoading={publishCalendar.isPending}
-        okText="发布"
+        okText={t("发布")}
         width={760}
         forceRender
         destroyOnHidden
@@ -724,8 +726,8 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           <Alert
             type="info"
             showIcon
-            title="发布后不可原地修改"
-            description="当前已发布版本会被标记为「已被替代」并保留，历史报价仍可追溯原版本；变更原因与相对上一版本的日期差异会一并记录。"
+            title={t("发布后不可原地修改")}
+            description={t("当前已发布版本会被标记为「已被替代」并保留，历史报价仍可追溯原版本；变更原因与相对上一版本的日期差异会一并记录。")}
             style={{ marginBottom: 16 }}
           />
           {/* 需求 4.5.8：发布前必须展示受影响日期以及停业、营业时间、履约能力和特殊价格变化；
@@ -734,20 +736,20 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
             {publishPreview.data && (
               <Space orientation="vertical" size={12} style={{ width: "100%", marginBottom: 16 }}>
                 <Descriptions size="small" column={2} bordered>
-                  <Descriptions.Item label="待发布版本">v{publishPreview.data.draftVersion}</Descriptions.Item>
-                  <Descriptions.Item label="当前已发布">
+                  <Descriptions.Item label={t("待发布版本")}>v{publishPreview.data.draftVersion}</Descriptions.Item>
+                  <Descriptions.Item label={t("当前已发布")}>
                     {publishPreview.data.publishedVersion
                       ? `v${publishPreview.data.publishedVersion}`
-                      : "无（首次发布）"}
+                      : t("无（首次发布）")}
                   </Descriptions.Item>
-                  <Descriptions.Item label="受影响日期">
-                    {publishPreview.data.dates.length} 天
+                  <Descriptions.Item label={t("受影响日期")}>
+                    {publishPreview.data.dates.length} {t("天")}
                   </Descriptions.Item>
-                  <Descriptions.Item label="公共官方来源">
+                  <Descriptions.Item label={t("公共官方来源")}>
                     {publishPreview.data.officialSourceConfirmed ? (
-                      <Tag color="success">已确认</Tag>
+                      <Tag color="success">{t("已确认")}</Tag>
                     ) : (
-                      <Tag color="warning">尚未确认</Tag>
+                      <Tag color="warning">{t("尚未确认")}</Tag>
                     )}
                   </Descriptions.Item>
                 </Descriptions>
@@ -755,20 +757,20 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                   <Alert
                     type="info"
                     showIcon
-                    title="该年度首次发布：差异基准是每周默认营业模板"
-                    description="下面列出的是这次发布相对周模板真正带来的业务变化（人工覆盖、官方节假日、停业或限时、特殊价格）；与「空日历」比会把全年 365 天都列出来，没有筛选价值。"
+                    title={t("该年度首次发布：差异基准是每周默认营业模板")}
+                    description={t("下面列出的是这次发布相对周模板真正带来的业务变化（人工覆盖、官方节假日、停业或限时、特殊价格）；与「空日历」比会把全年 365 天都列出来，没有筛选价值。")}
                   />
                 )}
                 <>
                     <Space size={8} wrap>
                       <Tag color="volcano">
-                        营业状态/停业 {publishPreview.data.closureChanges.length} 天
+                        {t("营业状态/停业")} {publishPreview.data.closureChanges.length} {t("天")}
                       </Tag>
                       <Tag color="geekblue">
-                        营业与履约时段 {publishPreview.data.hoursChanges.length} 天
+                        {t("营业与履约时段")} {publishPreview.data.hoursChanges.length} {t("天")}
                       </Tag>
                       <Tag color="gold">
-                        特殊价格 {publishPreview.data.pricingChanges.length} 天
+                        {t("特殊价格")} {publishPreview.data.pricingChanges.length} {t("天")}
                       </Tag>
                     </Space>
                     {publishPreview.data.dates.length > 0 && (
@@ -778,32 +780,32 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                         dataSource={publishPreview.data.dates}
                         pagination={{ pageSize: 6, showSizeChanger: false }}
                         columns={[
-                          { title: "日期", dataIndex: "date", width: 110 },
+                          { title: t("日期"), dataIndex: "date", width: 110 },
                           {
-                            title: "变化",
+                            title: t("变化"),
                             dataIndex: "changedFields",
                             render: (fields: string[], row) =>
                               row.change !== "changed" ? (
-                                <Tag>{row.change === "added" ? "新增日期" : "移除日期"}</Tag>
+                                <Tag>{row.change === "added" ? t("新增日期") : t("移除日期")}</Tag>
                               ) : (
                                 <Space size={4} wrap>
                                   {fields.map((field) => (
-                                    <Tag key={field}>{previewFieldLabels[field] ?? field}</Tag>
+                                    <Tag key={field}>{t(previewFieldLabels[field] ?? field)}</Tag>
                                   ))}
                                 </Space>
                               ),
                           },
                           {
-                            title: "发布前 → 发布后",
+                            title: t("发布前 → 发布后"),
                             render: (_, row) => (
                               <Typography.Text className="text-meta">
                                 {row.before
-                                  ? `${businessStatusLabels[row.before.businessStatus ?? (row.before.closed ? "closed" : "open")]} ×${row.before.pricingMultiplier}`
-                                  : "（无）"}
+                                  ? `${t(businessStatusLabels[row.before.businessStatus ?? (row.before.closed ? "closed" : "open")] ?? row.before.businessStatus ?? "open")} ×${row.before.pricingMultiplier}`
+                                  : t("（无）")}
                                 {" → "}
                                 {row.after
-                                  ? `${businessStatusLabels[row.after.businessStatus ?? (row.after.closed ? "closed" : "open")]} ×${row.after.pricingMultiplier}`
-                                  : "（无）"}
+                                  ? `${t(businessStatusLabels[row.after.businessStatus ?? (row.after.closed ? "closed" : "open")] ?? row.after.businessStatus ?? "open")} ×${row.after.pricingMultiplier}`
+                                  : t("（无）")}
                               </Typography.Text>
                             ),
                           },
@@ -815,15 +817,15 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                   <Alert
                     type="warning"
                     showIcon
-                    title={`有 ${publishPreview.data.futureOrders.length} 张未来订单落在受影响日期上`}
+                    title={`${t("有")} ${publishPreview.data.futureOrders.length} ${t("张未来订单落在受影响日期上")}`}
                     description={
                       <Space orientation="vertical" size={0}>
                         <Typography.Text className="text-meta">
-                          发布不会改动这些订单，它们继续按各自的订单快照执行；如需调整请单独处理。
+                          {t("发布不会改动这些订单，它们继续按各自的订单快照执行；如需调整请单独处理。")}
                         </Typography.Text>
                         {publishPreview.data.futureOrders.slice(0, 5).map((order) => (
                           <Typography.Text key={order.orderId} type="secondary" className="text-meta">
-                            {order.orderNo} · {order.status} · 重叠 {order.affectedDates.join("、")}
+                            {order.orderNo} · {order.status} · {t("重叠")} {order.affectedDates.join("、")}
                           </Typography.Text>
                         ))}
                       </Space>
@@ -835,12 +837,12 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           </QueryState>
           <Form.Item
             name="changeReason"
-            label="变更原因"
+            label={t("变更原因")}
             rules={[
-              { required: true, whitespace: true, message: "请填写变更原因" },
+              { required: true, whitespace: true, message: t("请填写变更原因") },
             ]}
           >
-            <Input.TextArea rows={3} placeholder="例如：按国务院办公厅通知更新国庆调休" />
+            <Input.TextArea rows={3} placeholder={t("例如：按国务院办公厅通知更新国庆调休")} />
           </Form.Item>
         </Form>
       </Modal>
@@ -848,7 +850,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           后端端点早已就绪，但此前没有任何界面入口，「客服/财务查看历史版本」「完整追溯」
           都没形成闭环。 */}
       <Drawer
-        title={`${year} 年度日历历史版本`}
+        title={`${year} ${t("年度日历历史版本")}`}
         open={historyOpen}
         onClose={() => setHistoryOpen(false)}
         size={880}
@@ -858,8 +860,8 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           <Alert
             type="info"
             showIcon
-            title="历史版本只读保留，不得删除或原地改回"
-            description="已发布版本被新版本取代后进入「已被替代」，历史报价仍按原版本追溯；只有草稿可以作废。"
+            title={t("历史版本只读保留，不得删除或原地改回")}
+            description={t("已发布版本被新版本取代后进入「已被替代」，历史报价仍按原版本追溯；只有草稿可以作废。")}
           />
           <QueryState loading={calendarVersions.isLoading} error={calendarVersions.error}>
             <Table<RentalCalendarVersionSummary>
@@ -870,21 +872,21 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
               onRow={(row) => ({ onClick: () => setHistoryVersion(row.version) })}
               rowClassName={(row) => (row.version === historyVersion ? "ant-table-row-selected" : "")}
               columns={[
-                { title: "版本", dataIndex: "version", width: 90, render: (value) => `v${value}` },
+                { title: t("版本"), dataIndex: "version", width: 90, render: (value) => `v${value}` },
                 {
-                  title: "状态",
+                  title: t("状态"),
                   dataIndex: "status",
                   width: 100,
-                  render: (value) => <Tag>{calendarStatusLabels[value as string] ?? value}</Tag>,
+                  render: (value) => <Tag>{t(calendarStatusLabels[value as string] ?? value)}</Tag>,
                 },
-                { title: "上一版本", dataIndex: "previousVersion", width: 100, render: (value) => (value ? `v${value}` : "—") },
+                { title: t("上一版本"), dataIndex: "previousVersion", width: 100, render: (value) => (value ? `v${value}` : "—") },
                 {
-                  title: "日期/覆盖/审计",
+                  title: t("日期/覆盖/审计"),
                   width: 130,
                   render: (_, row) => `${row.dayCount} / ${row.overrideCount} / ${row.overrideAuditCount}`,
                 },
                 {
-                  title: "差异",
+                  title: t("差异"),
                   width: 150,
                   render: (_, row) =>
                     row.publishDiffCounts
@@ -892,22 +894,22 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                       : "—",
                 },
                 {
-                  title: "变更原因/发布人",
+                  title: t("变更原因/发布人"),
                   render: (_, row) => (
                     <Space orientation="vertical" size={0}>
                       <Typography.Text className="text-meta">{row.changeReason ?? "—"}</Typography.Text>
                       <Typography.Text type="secondary" className="text-meta">
                         {row.publishedBy ?? ""}
-                        {row.voidReason ? `作废：${row.voidReason}` : ""}
+                        {row.voidReason ? `${t("作废")}：${row.voidReason}` : ""}
                       </Typography.Text>
                     </Space>
                   ),
                 },
                 {
-                  title: "操作",
+                  title: t("操作"),
                   width: 170,
                   render: (_, row) => {
-                    if (!canEditCalendar) return <Typography.Text type="secondary">只读</Typography.Text>;
+                    if (!canEditCalendar) return <Typography.Text type="secondary">{t("只读")}</Typography.Text>;
                     return (
                       <Space size={0}>
                         {row.status === "draft" ? (
@@ -920,7 +922,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                               setVoidTarget(row);
                             }}
                           >
-                            作废
+                            {t("作废")}
                           </Button>
                         ) : (
                           // 需求 4.5.7：恢复旧规则必须以旧内容生成新版本，不得原地改回。
@@ -932,7 +934,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                               setRestoreTarget(row);
                             }}
                           >
-                            以此版本建新草稿
+                            {t("以此版本建新草稿")}
                           </Button>
                         )}
                       </Space>
@@ -945,10 +947,10 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           {historyVersion && (
             <Card
               className="data-panel"
-              title={`v${historyVersion} 差异与覆盖审计`}
+              title={`v${historyVersion} ${t("差异与覆盖审计")}`}
               extra={
                 <Button size="small" onClick={() => setHistoryVersion(undefined)}>
-                  收起
+                  {t("收起")}
                 </Button>
               }
             >
@@ -956,18 +958,18 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                 {calendarVersionDetail.data && (
                   <Space orientation="vertical" size={12} style={{ width: "100%" }}>
                     <Descriptions size="small" column={2} bordered>
-                      <Descriptions.Item label="状态">
-                        {calendarStatusLabels[calendarVersionDetail.data.status] ?? calendarVersionDetail.data.status}
+                      <Descriptions.Item label={t("状态")}>
+                        {t(calendarStatusLabels[calendarVersionDetail.data.status] ?? calendarVersionDetail.data.status)}
                       </Descriptions.Item>
-                      <Descriptions.Item label="官方来源">
-                        {calendarVersionDetail.data.sourceName ?? "无"}
+                      <Descriptions.Item label={t("官方来源")}>
+                        {calendarVersionDetail.data.sourceName ?? t("无")}
                       </Descriptions.Item>
-                      <Descriptions.Item label="发布时间">
+                      <Descriptions.Item label={t("发布时间")}>
                         {calendarVersionDetail.data.publishedAt
                           ? dayjs(calendarVersionDetail.data.publishedAt).format("YYYY-MM-DD HH:mm")
-                          : "未发布"}
+                          : t("未发布")}
                       </Descriptions.Item>
-                      <Descriptions.Item label="被替代时间">
+                      <Descriptions.Item label={t("被替代时间")}>
                         {calendarVersionDetail.data.supersededAt
                           ? dayjs(calendarVersionDetail.data.supersededAt).format("YYYY-MM-DD HH:mm")
                           : "—"}
@@ -975,18 +977,18 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                     </Descriptions>
                     {calendarVersionDetail.data.publishDiff ? (
                       <Descriptions size="small" column={3} bordered>
-                        <Descriptions.Item label="新增日期">
+                        <Descriptions.Item label={t("新增日期")}>
                           {calendarVersionDetail.data.publishDiff.added.join("、") || "—"}
                         </Descriptions.Item>
-                        <Descriptions.Item label="移除日期">
+                        <Descriptions.Item label={t("移除日期")}>
                           {calendarVersionDetail.data.publishDiff.removed.join("、") || "—"}
                         </Descriptions.Item>
-                        <Descriptions.Item label="变更日期">
+                        <Descriptions.Item label={t("变更日期")}>
                           {calendarVersionDetail.data.publishDiff.changed.join("、") || "—"}
                         </Descriptions.Item>
                       </Descriptions>
                     ) : (
-                      <Typography.Text type="secondary">该版本没有相对上一版本的差异记录（首次发布或尚未发布）。</Typography.Text>
+                      <Typography.Text type="secondary">{t("该版本没有相对上一版本的差异记录（首次发布或尚未发布）。")}</Typography.Text>
                     )}
                   </Space>
                 )}
@@ -998,32 +1000,32 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
                   style={{ marginTop: 12 }}
                   dataSource={(calendarAudits.data ?? []).filter((row) => row.version === historyVersion)}
                   pagination={{ pageSize: 8, showSizeChanger: false }}
-                  locale={{ emptyText: "该版本没有人工覆盖调整" }}
+                  locale={{ emptyText: t("该版本没有人工覆盖调整") }}
                   columns={[
-                    { title: "日期", dataIndex: "date", width: 110 },
+                    { title: t("日期"), dataIndex: "date", width: 110 },
                     {
-                      title: "动作",
+                      title: t("动作"),
                       dataIndex: "action",
                       width: 100,
-                      render: (value) => <Tag>{auditActionLabels[value as string] ?? value}</Tag>,
+                      render: (value) => <Tag>{t(auditActionLabels[value as string] ?? value)}</Tag>,
                     },
-                    { title: "原因", dataIndex: "reason" },
-                    { title: "操作人", dataIndex: "operator", width: 120, render: (value) => value ?? "—" },
+                    { title: t("原因"), dataIndex: "reason" },
+                    { title: t("操作人"), dataIndex: "operator", width: 120, render: (value) => value ?? "—" },
                     {
-                      title: "时间",
+                      title: t("时间"),
                       dataIndex: "at",
                       width: 150,
                       render: (value) => dayjs(value as string).format("YYYY-MM-DD HH:mm"),
                     },
                     {
-                      title: "前 → 后",
+                      title: t("前 → 后"),
                       render: (_, row) => (
                         <Typography.Text className="text-meta">
                           {row.before
                             ? `${row.before.dayType} ×${row.before.pricingMultiplier}`
-                            : "（无）"}
+                            : t("（无）")}
                           {" → "}
-                          {row.after ? `${row.after.dayType} ×${row.after.pricingMultiplier}` : "（无）"}
+                          {row.after ? `${row.after.dayType} ×${row.after.pricingMultiplier}` : t("（无）")}
                         </Typography.Text>
                       ),
                     },
@@ -1035,12 +1037,12 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
         </Space>
       </Drawer>
       <Modal
-        title={voidTarget ? `作废草稿 v${voidTarget.version}` : "作废草稿"}
+        title={voidTarget ? `${t("作废草稿")} v${voidTarget.version}` : t("作废草稿")}
         open={Boolean(voidTarget)}
         onCancel={() => setVoidTarget(undefined)}
         onOk={() => voidForm.submit()}
         confirmLoading={voidVersion.isPending}
-        okText="确认作废"
+        okText={t("确认作废")}
         okButtonProps={{ danger: true }}
         forceRender
         destroyOnHidden
@@ -1055,26 +1057,26 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           <Alert
             type="warning"
             showIcon
-            title="只有草稿可以作废"
-            description="作废后该草稿不再进入编辑视图，但记录本身保留并写入作废原因、操作人与时间；已发布版本请发布新版本替代，已被替代版本必须保留以供历史报价追溯。"
+            title={t("只有草稿可以作废")}
+            description={t("作废后该草稿不再进入编辑视图，但记录本身保留并写入作废原因、操作人与时间；已发布版本请发布新版本替代，已被替代版本必须保留以供历史报价追溯。")}
             style={{ marginBottom: 16 }}
           />
           <Form.Item
             name="reason"
-            label="作废原因"
-            rules={[{ required: true, whitespace: true, message: "请填写作废原因" }]}
+            label={t("作废原因")}
+            rules={[{ required: true, whitespace: true, message: t("请填写作废原因") }]}
           >
-            <Input.TextArea rows={3} placeholder="例如：录错年度，弃用该草稿" />
+            <Input.TextArea rows={3} placeholder={t("例如：录错年度，弃用该草稿")} />
           </Form.Item>
         </Form>
       </Modal>
       <Modal
-        title={restoreTarget ? `以 v${restoreTarget.version} 的内容建新草稿` : "恢复历史版本"}
+        title={restoreTarget ? `${t("以 v")} ${restoreTarget.version} ${t("的内容建新草稿")}` : t("恢复历史版本")}
         open={Boolean(restoreTarget)}
         onCancel={() => setRestoreTarget(undefined)}
         onOk={() => restoreForm.submit()}
         confirmLoading={restoreVersion.isPending}
-        okText="生成新草稿"
+        okText={t("生成新草稿")}
         forceRender
         destroyOnHidden
       >
@@ -1088,26 +1090,26 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
           <Alert
             type="info"
             showIcon
-            title="恢复不会原地改回旧版本"
-            description="会以该版本的逐日内容生成一个新草稿；被恢复的版本与当前已发布版本都保持原样。新草稿仍需经发布前预检、填写变更原因后再发布。"
+            title={t("恢复不会原地改回旧版本")}
+            description={t("会以该版本的逐日内容生成一个新草稿；被恢复的版本与当前已发布版本都保持原样。新草稿仍需经发布前预检、填写变更原因后再发布。")}
             style={{ marginBottom: 16 }}
           />
           <Form.Item
             name="reason"
-            label="恢复原因"
-            rules={[{ required: true, whitespace: true, message: "请填写恢复原因" }]}
+            label={t("恢复原因")}
+            rules={[{ required: true, whitespace: true, message: t("请填写恢复原因") }]}
           >
-            <Input.TextArea rows={3} placeholder="例如：新版调休有误，回到上一版官方安排" />
+            <Input.TextArea rows={3} placeholder={t("例如：新版调休有误，回到上一版官方安排")} />
           </Form.Item>
         </Form>
       </Modal>
       <Modal
-        title={`移除 ${revertTarget?.date ?? ""} 的人工覆盖`}
+        title={`${t("移除")} ${revertTarget?.date ?? ""} ${t("的人工覆盖")}`}
         open={Boolean(revertTarget)}
         onCancel={() => setRevertTarget(undefined)}
         onOk={() => revertForm.submit()}
         confirmLoading={removeDayOverride.isPending}
-        okText="移除覆盖"
+        okText={t("移除覆盖")}
         okButtonProps={{ danger: true }}
         forceRender
         destroyOnHidden
@@ -1128,20 +1130,20 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
             showIcon
             title={
               revertTarget?.overriddenFrom
-                ? `将恢复为：${revertTarget.overriddenFrom.name} · ${revertTarget.overriddenFrom.dayType} · 价格系数 ×${revertTarget.overriddenFrom.pricingMultiplier}`
-                : "该日期没有官方原值，将按每周模板重算"
+                ? `${t("将恢复为")}：${revertTarget.overriddenFrom.name} · ${revertTarget.overriddenFrom.dayType} · ${t("价格系数")} ×${revertTarget.overriddenFrom.pricingMultiplier}`
+                : t("该日期没有官方原值，将按每周模板重算")
             }
-            description="移除不会把该日期变成空白日；原覆盖内容、撤销原因与操作人会进入审计流水。"
+            description={t("移除不会把该日期变成空白日；原覆盖内容、撤销原因与操作人会进入审计流水。")}
             style={{ marginBottom: 16 }}
           />
           <Form.Item
             name="overrideReason"
-            label="调整原因"
+            label={t("调整原因")}
             rules={[
-              { required: true, whitespace: true, message: "请填写移除原因" },
+              { required: true, whitespace: true, message: t("请填写移除原因") },
             ]}
           >
-            <Input.TextArea rows={3} placeholder="例如：误将国庆首日标为停业，恢复官方安排" />
+            <Input.TextArea rows={3} placeholder={t("例如：误将国庆首日标为停业，恢复官方安排")} />
           </Form.Item>
         </Form>
       </Modal>

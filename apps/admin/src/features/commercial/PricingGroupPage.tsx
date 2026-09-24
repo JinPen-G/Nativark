@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Card, Drawer, Form, Input, InputNumber, Select, Space, Table, Tag, Typography } from "antd";
 import { useMemo, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
+import { useLocale } from "@/app/locale";
 import { resolveTenantNavigationLabels } from "@/app/navigation-terminology";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
@@ -11,6 +12,7 @@ import { PRICE_VERSIONS_QUERY_KEY, usePriceVersions } from "./usePriceVersions";
 
 export function PricingGroupPage() {
   const { message } = App.useApp();
+  const { locale, t } = useLocale();
   const queryClient = useQueryClient();
   const [keyword, setKeyword] = useState("");
   const [editing, setEditing] = useState<RentalPricingGroup>();
@@ -33,21 +35,21 @@ export function PricingGroupPage() {
       setOpen(false);
       setEditing(undefined);
       form.resetFields();
-      message.success("定价分组已保存");
+      message.success(t("定价分组已保存"));
     },
-    onError: () => message.error("保存失败，请检查编码、成员型号和库存方式")
+    onError: () => message.error(t("保存失败，请检查编码、成员型号和库存方式"))
   });
   const rows = useMemo(
     () => (pricingGroups.data ?? []).filter((row) => `${row.code}${row.name}${row.members.map((item) => item.name).join("")}`.toLowerCase().includes(keyword.toLowerCase())),
     [pricingGroups.data, keyword]
   );
-  const routeLabel = resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "定价分组";
-  const itemLabel = profile.data?.terminology.itemLabel ?? "商品";
-  const itemGroupLabel = profile.data?.terminology.itemGroupLabel ?? "产品型号";
+  const routeLabel = t(resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "定价分组");
+  const itemLabel = t(profile.data?.terminology.itemLabel ?? "商品");
+  const itemGroupLabel = t(profile.data?.terminology.itemGroupLabel ?? "产品型号");
 
   function edit(record?: RentalPricingGroup) {
     if (!settings.data) {
-      message.error(settings.isError ? "基础经营设置读取失败，请刷新后重试" : "基础经营设置仍在加载，请稍后重试");
+      message.error(t(settings.isError ? "基础经营设置读取失败，请刷新后重试" : "基础经营设置仍在加载，请稍后重试"));
       return;
     }
     setEditing(record);
@@ -72,70 +74,70 @@ export function PricingGroupPage() {
   return <>
     <PageHeader
       title={routeLabel}
-      description={`建立面向客户的${itemLabel}价格档位，并选择可承接该档位的${itemGroupLabel}。`}
+      description={locale === "en-US" ? `Create customer-facing ${itemLabel} pricing tiers and select the ${itemGroupLabel} that can fulfill each tier.` : `建立面向客户的${itemLabel}价格档位，并选择可承接该档位的${itemGroupLabel}。`}
       note={{
-        title: `定价分组不是${itemGroupLabel}`,
-        description: `一个定价分组可以包含多个${itemGroupLabel}；同一${itemGroupLabel}也可以加入多个定价分组。资产与库存始终只维护一份，报价后由系统选择实际承接型号。`
+        title: locale === "en-US" ? `A pricing group is not a ${itemGroupLabel}` : `定价分组不是${itemGroupLabel}`,
+        description: locale === "en-US" ? `A pricing group can contain multiple ${itemGroupLabel}; the same ${itemGroupLabel} can belong to multiple pricing groups. Assets and inventory are maintained only once; the quote selects the actual fulfilling model.` : `一个定价分组可以包含多个${itemGroupLabel}；同一${itemGroupLabel}也可以加入多个定价分组。资产与库存始终只维护一份，报价后由系统选择实际承接型号。`
       }}
-      extra={<Button type="primary" icon={<PlusOutlined />} disabled={settings.isLoading || settings.isError} onClick={() => edit()}>新增定价分组</Button>}
+      extra={<Button type="primary" icon={<PlusOutlined />} disabled={settings.isLoading || settings.isError} onClick={() => edit()}>{t("新增定价分组")}</Button>}
     />
     <Card className="data-panel">
-      <Input allowClear prefix={<SearchOutlined />} value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索分组或成员型号" style={{ width: 320, marginBottom: 16 }} />
+      <Input allowClear prefix={<SearchOutlined />} value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder={t("搜索分组或成员型号")} style={{ width: 320, marginBottom: 16 }} />
       <QueryState loading={pricingGroups.isLoading || models.isLoading || settings.isLoading} error={pricingGroups.error || models.error || settings.error}>
         <Table<RentalPricingGroup> rowKey="id" dataSource={rows} columns={[
-          { title: "定价分组", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code} · v{row.version}</span></> },
-          { title: `包含的${profile.data?.terminology.itemGroupLabel ?? "产品型号"}`, render: (_, row) => <Space size={[4, 4]} wrap>{row.members.length ? row.members.map((member) => <Tag color="blue" key={member.id}>{member.name} · {member.code}</Tag>) : <Tag>未配置</Tag>}</Space> },
-          { title: "默认计价", render: (_, row) => row.defaultPricingUnit ? RENTAL_PRICING_UNIT_LABELS[row.defaultPricingUnit] : "跟随价格配置" },
+          { title: t("定价分组"), render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code} · v{row.version}</span></> },
+          { title: `${t("包含的")}${itemGroupLabel}`, render: (_, row) => <Space size={[4, 4]} wrap>{row.members.length ? row.members.map((member) => <Tag color="processing" key={member.id}>{member.name} · {member.code}</Tag>) : <Tag>{t("未配置")}</Tag>}</Space> },
+          { title: t("默认计价"), render: (_, row) => row.defaultPricingUnit ? t(RENTAL_PRICING_UNIT_LABELS[row.defaultPricingUnit] ?? row.defaultPricingUnit) : t("跟随价格配置") },
           { title: "当前基本价", render: (_, row) => {
             const rates = (currentVersionDetail.data?.rates ?? []).filter((rate) => (rate.pricingGroupId ?? rate.itemGroupId) === row.id);
-            return rates.length ? <Space size={[4, 4]} wrap>{rates.map((rate) => <Tag color="processing" key={`${rate.itemGroupId}:${rate.unit}`}>{formatRentalMoney(rate.baseAmount, currency)} / {RENTAL_PRICING_UNIT_LABELS[rate.unit]}</Tag>)}</Space> : <Tag color="warning">历史分组未配置</Tag>;
+            return rates.length ? <Space size={[4, 4]} wrap>{rates.map((rate) => <Tag color="processing" key={`${rate.itemGroupId}:${rate.unit}`}>{formatRentalMoney(rate.baseAmount, currency)} / {t(RENTAL_PRICING_UNIT_LABELS[rate.unit] ?? rate.unit)}</Tag>)}</Space> : <Tag color="warning">{t("历史分组未配置")}</Tag>;
           } },
-          { title: "状态", dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{value === "enabled" ? "启用" : "停用"}</Tag> },
-          { title: "操作", width: 100, render: (_, row) => <Button type="link" icon={<EditOutlined />} onClick={() => edit(row)}>编辑</Button> }
+          { title: t("状态"), dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{t(value === "enabled" ? "启用" : "停用")}</Tag> },
+          { title: t("操作"), width: 100, render: (_, row) => <Button type="link" icon={<EditOutlined />} onClick={() => edit(row)}>{t("编辑")}</Button> }
         ]} />
       </QueryState>
     </Card>
-    <Drawer title={editing ? "编辑定价分组" : "新增定价分组"} size={640} open={open} destroyOnHidden onClose={() => setOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>保存</Button>}>
+    <Drawer title={t(editing ? "编辑定价分组" : "新增定价分组")} size={640} open={open} destroyOnHidden onClose={() => setOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>{t("保存")}</Button>}>
       <Form<SaveRentalPricingGroupRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, id: editing?.id, defaultPricingUnit: editing ? values.defaultPricingUnit : values.initialRates?.[0]?.unit })}>
-        <Form.Item name="code" label="分组编码" rules={[{ required: true }]}><Input disabled={Boolean(editing)} placeholder="COMFORT_SEDAN" /></Form.Item>
-        <Form.Item name="name" label="分组名称" rules={[{ required: true }]}><Input placeholder={`如：标准${itemLabel}分组`} /></Form.Item>
-        <Form.Item name="memberItemGroupIds" label={`包含的${profile.data?.terminology.itemGroupLabel ?? "产品型号"}`} rules={[{ required: true, type: "array", min: 1 }]} extra="同一型号可以加入多个定价分组；库存不会因此复制。">
+        <Form.Item name="code" label={t("分组编码")} rules={[{ required: true }]}><Input disabled={Boolean(editing)} placeholder="COMFORT_SEDAN" /></Form.Item>
+        <Form.Item name="name" label={t("分组名称")} rules={[{ required: true }]}><Input placeholder={locale === "en-US" ? `e.g. Standard ${itemLabel} group` : `如：标准${itemLabel}分组`} /></Form.Item>
+        <Form.Item name="memberItemGroupIds" label={`${t("包含的")}${itemGroupLabel}`} rules={[{ required: true, type: "array", min: 1 }]} extra={t("同一型号可以加入多个定价分组；库存不会因此复制。")}>
           <Select mode="multiple" showSearch={{ optionFilterProp: "label" }} optionRender={(option) => {
             const model = (models.data ?? []).find((item) => item.id === option.value);
             const specification = model ? [model.attributes.manufacturer, model.attributes.brand, model.attributes.model, model.attributes.trim].filter(Boolean).join(" · ") : "";
             return <Space orientation="vertical" size={0}><span>{option.label}</span>{specification && <span className="muted">{specification}</span>}</Space>;
           }} options={(models.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: `${item.name} · ${item.code}` }))} />
         </Form.Item>
-        {!editing && <Card size="small" title="基本价" style={{ marginBottom: 16 }}>
-          <Typography.Paragraph type="secondary">只需选择计价单位并填写对应价格。第一行作为该分组的默认计价单位。</Typography.Paragraph>
+        {!editing && <Card size="small" title={t("基本价")} style={{ marginBottom: 16 }}>
+          <Typography.Paragraph type="secondary">{t("只需选择计价单位并填写对应价格。第一行作为该分组的默认计价单位。")}</Typography.Paragraph>
           <Form.List
             name="initialRates"
             rules={[{ validator: async (_, value) => {
-              if (!value?.length) throw new Error("至少填写一条基本价");
-              if (new Set(value.map((row: { unit?: string }) => row.unit)).size !== value.length) throw new Error("同一个计价单位不能重复");
+              if (!value?.length) throw new Error(t("至少填写一条基本价"));
+              if (new Set(value.map((row: { unit?: string }) => row.unit)).size !== value.length) throw new Error(t("同一个计价单位不能重复"));
             } }]}
           >
             {(fields, { add, remove }, { errors }) => <Space orientation="vertical" size={8} style={{ width: "100%" }}>
               {fields.map((field, index) => <Space key={field.key} align="start" style={{ width: "100%" }}>
-                <Form.Item name={[field.name, "unit"]} label={index === 0 ? "计价单位（默认）" : "计价单位"} rules={[{ required: true, message: "请选择计价单位" }]}>
-                  <Select style={{ width: 220 }} options={(settings.data?.pricing.enabledUnits ?? []).map((value) => ({ value, label: RENTAL_PRICING_UNIT_LABELS[value] ?? value }))} />
+                <Form.Item name={[field.name, "unit"]} label={index === 0 ? t("计价单位（默认）") : t("计价单位")} rules={[{ required: true, message: t("请选择计价单位") }]}>
+                  <Select style={{ width: 220 }} options={(settings.data?.pricing.enabledUnits ?? []).map((value) => ({ value, label: t(RENTAL_PRICING_UNIT_LABELS[value] ?? value) }))} />
                 </Form.Item>
-                <Form.Item name={[field.name, "baseAmount"]} label="价格" rules={[{ required: true, message: "请填写价格" }]}>
+                <Form.Item name={[field.name, "baseAmount"]} label={t("价格")} rules={[{ required: true, message: t("请填写价格") }]}>
                   <InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: 220 }} />
                 </Form.Item>
-                <Form.Item name={[field.name, "preAuthAmount"]} label="预授权额度（可选）" tooltip="该型号的预授权冻结基数。是否真的预授权由「业务规则」页的预授权规则决定；留空表示按规则默认处理。">
+                <Form.Item name={[field.name, "preAuthAmount"]} label={t("预授权额度（可选）")} tooltip={t("该型号的预授权冻结基数。是否真的预授权由「业务规则」页的预授权规则决定；留空表示按规则默认处理。")}>
                   <InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: 220 }} />
                 </Form.Item>
-                <Button danger type="text" aria-label="删除基本价" icon={<DeleteOutlined />} disabled={fields.length === 1} onClick={() => remove(field.name)} style={{ marginTop: 30 }} />
+                <Button danger type="text" aria-label={t("删除基本价")} icon={<DeleteOutlined />} disabled={fields.length === 1} onClick={() => remove(field.name)} style={{ marginTop: 30 }} />
               </Space>)}
               <Form.ErrorList errors={errors} />
-              <Button icon={<PlusOutlined />} disabled={fields.length >= (settings.data?.pricing.enabledUnits.length ?? 0)} onClick={() => add({ unit: undefined, baseAmount: 0, preAuthAmount: undefined })}>增加计价单位</Button>
+              <Button icon={<PlusOutlined />} disabled={fields.length >= (settings.data?.pricing.enabledUnits.length ?? 0)} onClick={() => add({ unit: undefined, baseAmount: 0, preAuthAmount: undefined })}>{t("增加计价单位")}</Button>
             </Space>}
           </Form.List>
         </Card>}
-        {editing && <Form.Item name="defaultPricingUnit" label="默认计价单位"><Select allowClear options={(settings.data?.pricing.enabledUnits ?? []).map((value) => ({ value, label: RENTAL_PRICING_UNIT_LABELS[value] ?? value }))} /></Form.Item>}
-        <Form.Item name="description" label="说明"><Input.TextArea rows={3} /></Form.Item>
-        <Form.Item name="status" label="状态" rules={[{ required: true }]}><Select options={[{ value: "enabled", label: "启用" }, { value: "disabled", label: "停用" }]} /></Form.Item>
+        {editing && <Form.Item name="defaultPricingUnit" label={t("默认计价单位")}><Select allowClear options={(settings.data?.pricing.enabledUnits ?? []).map((value) => ({ value, label: t(RENTAL_PRICING_UNIT_LABELS[value] ?? value) }))} /></Form.Item>}
+        <Form.Item name="description" label={t("说明")}><Input.TextArea rows={3} /></Form.Item>
+        <Form.Item name="status" label={t("状态")} rules={[{ required: true }]}><Select options={[{ value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item>
       </Form>
     </Drawer>
   </>;

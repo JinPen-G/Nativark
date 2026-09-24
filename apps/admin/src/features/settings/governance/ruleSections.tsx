@@ -1,7 +1,8 @@
 import type { RentalCategoryDefinition, RentalRuleVersion, SaveRentalRuleVersionRequest } from "@rental-os/shared";
-import { Alert, Col, Form, Input, InputNumber, Row, Select, Switch, Typography } from "antd";
-import type { FormInstance } from "antd";
+import { Alert, Col, Form as AntdForm, Input, InputNumber, Row, Select, Switch, Typography } from "antd";
+import type { FormInstance, FormItemProps } from "antd";
 import type { ReactNode } from "react";
+import { useLocale } from "@/app/locale";
 import { normalizeSecurityRules } from "@/features/settings/securityRuleForm";
 import {
   lateFeeTypeLabels,
@@ -21,6 +22,7 @@ export type RuleForm = RentalRuleVersion["config"] & { changeReason: string };
 export interface RuleSectionContext {
   form: FormInstance<RuleForm>;
   category: RentalCategoryDefinition;
+  t: (value: string) => string;
 }
 
 export interface RuleSection {
@@ -33,8 +35,29 @@ export interface RuleSection {
   render: (context: RuleSectionContext) => ReactNode;
 }
 
-const selectOptions = (labels: Record<string, string>, order: string[]) =>
-  order.map((value) => ({ value, label: labels[value] ?? value }));
+const selectOptions = (labels: Record<string, string>, order: string[], t: (value: string) => string) =>
+  order.map((value) => ({ value, label: t(labels[value] ?? value) }));
+
+/** 规则表单的字段标签、说明与校验提示统一走管理后台词典。 */
+function LocalizedFormItem({ label, tooltip, extra, rules, ...props }: FormItemProps) {
+  const { t } = useLocale();
+  return (
+    <AntdForm.Item
+      {...props}
+      label={typeof label === "string" ? t(label) : label}
+      tooltip={typeof tooltip === "string" ? t(tooltip) : tooltip}
+      extra={typeof extra === "string" ? t(extra) : extra}
+      rules={rules?.map((rule) =>
+        typeof rule === "object" && rule && "message" in rule && typeof rule.message === "string"
+          ? { ...rule, message: t(rule.message) }
+          : rule,
+      )}
+    />
+  );
+}
+
+// 该文件只使用 Form.Item；保留原来的调用形态，同时让所有规则字段统一经过词典。
+const Form = { ...AntdForm, Item: LocalizedFormItem };
 
 /**
  * 「业务规则」抽屉的 7 个分区，**按录入顺序**排列。RulesTab 直接 map 这份清单渲染，
@@ -48,7 +71,7 @@ export const RULE_SECTIONS: RuleSection[] = [
     key: "pricing-basis",
     title: "计价基础",
     description: "决定按什么时间单位计费。",
-    render: () => (
+    render: ({ t }) => (
       <>
         <Row gutter={12}>
           <Col span={8}>
@@ -69,7 +92,7 @@ export const RULE_SECTIONS: RuleSection[] = [
               <Select
                 mode="multiple"
                 allowClear
-                placeholder="留空表示不按边界计费"
+                placeholder={t("留空表示不按边界计费")}
                 options={Array.from({ length: 24 }, (_, hour) => ({
                   value: hour,
                   label: `${String(hour).padStart(2, "0")}:00`,
@@ -98,7 +121,7 @@ export const RULE_SECTIONS: RuleSection[] = [
           </Col>
         </Row>
         <Typography.Text type="secondary">
-          按连续 24 小时分段，不按午夜切日。使用同一定价分组、同一价格版本的 24 小时日价；未配置日价不能使用。发布后随新订单规则固定，不改变已有订单。
+          {t("按连续 24 小时分段，不按午夜切日。使用同一定价分组、同一价格版本的 24 小时日价；未配置日价不能使用。发布后随新订单规则固定，不改变已有订单。")}
         </Typography.Text>
       </>
     ),
@@ -107,7 +130,7 @@ export const RULE_SECTIONS: RuleSection[] = [
     key: "fulfillment",
     title: "领取与归还",
     description: "领取和归还时的检查与缓冲要求。",
-    render: () => (
+    render: ({ t }) => (
       <Row gutter={12}>
         <Col span={12}>
           <Form.Item
@@ -174,7 +197,7 @@ export const RULE_SECTIONS: RuleSection[] = [
     key: "payment-deposit",
     title: "收款与押金",
     description: "何时收款、押金与预授权怎么算。",
-    render: ({ form, category }) => (
+    render: ({ form, category, t }) => (
       <Row gutter={12}>
         <Col span={8}>
           <Form.Item
@@ -182,7 +205,7 @@ export const RULE_SECTIONS: RuleSection[] = [
             label="支付时点"
             tooltip="作用：决定客户在流程哪一步付款。默认下单时；线下账期指企业月结等先用后付。"
           >
-            <Select options={selectOptions(paymentTimingLabels, ["order", "confirmation", "pickup", "offline_terms"])} />
+            <Select options={selectOptions(paymentTimingLabels, ["order", "confirmation", "pickup", "offline_terms"], t)} />
           </Form.Item>
         </Col>
         <Col span={8}>
@@ -204,7 +227,7 @@ export const RULE_SECTIONS: RuleSection[] = [
             rules={[{ required: true }]}
           >
             <Select
-              options={Object.entries(securityRuleLabels).map(([value, label]) => ({ value, label }))}
+              options={Object.entries(securityRuleLabels).map(([value, label]) => ({ value, label: t(label) }))}
               onChange={(mode) => {
                 if (mode !== "order_fixed") form.resetFields([["deposit", "fixedAmount"]]);
               }}
@@ -234,7 +257,7 @@ export const RULE_SECTIONS: RuleSection[] = [
               options={(category.businessModel.supportsPreauthorization
                 ? Object.entries(preauthorizationRuleLabels)
                 : [["none", securityRuleLabels.none]]
-              ).map(([value, label]) => ({ value, label }))}
+              ).map(([value, label]) => ({ value, label: t(label) }))}
               onChange={(mode) => {
                 if (mode !== "order_fixed") form.resetFields([["preauthorization", "fixedAmount"]]);
                 if (mode !== "risk_surcharge") form.resetFields([["preauthorization", "riskSurchargeAmount"]]);
@@ -268,7 +291,7 @@ export const RULE_SECTIONS: RuleSection[] = [
     key: "cancellation-overdue",
     title: "取消、爽约与逾期",
     description: "客户提前取消、过期未取、逾期归还时如何计费；金额按下单时的规则版本冻结。",
-    render: () => (
+    render: ({ t }) => (
       <Row gutter={12}>
         <Col span={8}>
           <Form.Item
@@ -285,7 +308,7 @@ export const RULE_SECTIONS: RuleSection[] = [
             label="晚取消收费"
             tooltip="作用：进入收费区间后按哪种方式计取消费。默认不收取。"
           >
-            <Select options={selectOptions(lateFeeTypeLabels, ["none", "fixed_amount", "percentage"])} />
+            <Select options={selectOptions(lateFeeTypeLabels, ["none", "fixed_amount", "percentage"], t)} />
           </Form.Item>
         </Col>
         <Col span={8}>
@@ -343,7 +366,7 @@ export const RULE_SECTIONS: RuleSection[] = [
             label="爽约费用类型"
             tooltip="作用：判定爽约后按哪种方式收费。默认不收取。"
           >
-            <Select options={selectOptions(lateFeeTypeLabels, ["none", "fixed_amount", "percentage"])} />
+            <Select options={selectOptions(lateFeeTypeLabels, ["none", "fixed_amount", "percentage"], t)} />
           </Form.Item>
         </Col>
         <Col span={8}>
@@ -371,7 +394,7 @@ export const RULE_SECTIONS: RuleSection[] = [
             label="逾期收费"
             tooltip="不收取＝不计逾期费；按小时＝按已购单位折算小时价；按下一计费周期＝按逾期占用的计价周期数；租金倍数＝原租金固定倍率；人工核定＝转人工处理；按小时折日＝宽限后按小时比例、超过阈值转日费。"
           >
-            <Select options={selectOptions(overdueFeeModeLabels, ["none", "hourly", "next_period", "multiplier", "manual_review", "hourly_to_daily"])} />
+            <Select options={selectOptions(overdueFeeModeLabels, ["none", "hourly", "next_period", "multiplier", "manual_review", "hourly_to_daily"], t)} />
           </Form.Item>
         </Col>
         <Col span={8}>
@@ -405,13 +428,13 @@ export const RULE_SECTIONS: RuleSection[] = [
     key: "extension-early-return",
     title: "续租与提前归还",
     description: "允许续租/提前归还时的计费。",
-    render: () => (
+    render: ({ t }) => (
       <>
         <Alert
           type="info"
           showIcon
-          title="选择本空间的续租计费方式"
-          description="单独计费保留原租期金额，新增时段按申请时价格计算；完整重算沿用原价格与原优惠，再扣此前已计金额。两种方式都检查后续占用及缓冲。发布后新订单固定所选方式，改设置不影响旧订单。"
+          title={t("选择本空间的续租计费方式")}
+          description={t("单独计费保留原租期金额，新增时段按申请时价格计算；完整重算沿用原价格与原优惠，再扣此前已计金额。两种方式都检查后续占用及缓冲。发布后新订单固定所选方式，改设置不影响旧订单。")}
           style={{ marginBottom: 12 }}
         />
         <Row gutter={12}>
@@ -422,7 +445,7 @@ export const RULE_SECTIONS: RuleSection[] = [
               tooltip="作用：续租新增时段怎么计价。默认单独计费；完整重算会按原价格与原优惠重算整租期再扣已计金额。"
               rules={[{ required: true }]}
             >
-              <Select options={[{ value: "incremental", label: "新增时段单独计费（原方式）" }, { value: "original_total", label: "按原价格重算完整租期，只补差价" }]} />
+              <Select options={[{ value: "incremental", label: t("新增时段单独计费（原方式）") }, { value: "original_total", label: t("按原价格重算完整租期，只补差价") }]} />
             </Form.Item>
           </Col>
           <Col span={8}>
@@ -463,9 +486,9 @@ export const RULE_SECTIONS: RuleSection[] = [
             >
               <Select
                 options={[
-                  { value: "none", label: "不退租金" },
-                  { value: "auto", label: "按规则自动退" },
-                  { value: "manual_review", label: "人工审批后退" },
+                  { value: "none", label: t("不退租金") },
+                  { value: "auto", label: t("按规则自动退") },
+                  { value: "manual_review", label: t("人工审批后退") },
                 ]}
               />
             </Form.Item>
@@ -511,7 +534,7 @@ export const RULE_SECTIONS: RuleSection[] = [
     key: "damage-qualification",
     title: "损坏与资质",
     description: "损坏定责与下单前的资质门槛。",
-    render: () => (
+    render: ({ t }) => (
       <Row gutter={12}>
         <Col span={8}>
           <Form.Item
@@ -567,13 +590,13 @@ export const RULE_SECTIONS: RuleSection[] = [
     key: "tax",
     title: "税",
     description: "开票与计税展示。",
-    render: () => (
+    render: ({ t }) => (
       <>
         <Alert
           type="info"
           showIcon
-          title="标价即含税，客户看到的应付金额不变"
-          description="税额由含税额反算（含税额 × 税率 ÷ (1 + 税率)），只进报表与开票，不改变报价与订单的应付金额。押金不计税。香港等无增值税的空间填 0 即可。"
+          title={t("标价即含税，客户看到的应付金额不变")}
+          description={t("税额由含税额反算（含税额 × 税率 ÷ (1 + 税率)），只进报表与开票，不改变报价与订单的应付金额。押金不计税。香港等无增值税的空间填 0 即可。")}
           style={{ marginBottom: 12 }}
         />
         <Row gutter={12}>
@@ -588,7 +611,7 @@ export const RULE_SECTIONS: RuleSection[] = [
           </Col>
           <Col span={8}>
             <Form.Item name={["tax", "label"]} label="票面税种" tooltip="仅用于展示与开票参考，不参与计算">
-              <Input placeholder="例如：增值税 13%" />
+              <Input placeholder={t("例如：增值税 13%")} />
             </Form.Item>
           </Col>
           {/* inclusive 恒为 true：价外税还没实现，给个只读开关比留一个能拨错的选项安全。 */}

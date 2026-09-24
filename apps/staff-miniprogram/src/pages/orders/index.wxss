@@ -1,20 +1,19 @@
 .screen > .section { padding-left: 32rpx; padding-right: 32rpx; }
-.seg { height: 76rpx; padding: 0 12rpx; justify-content: space-between; }
+.seg { height: 88rpx; padding: 0 12rpx; justify-content: space-between; }
 .seg__item { padding: 0 12rpx; font-size: var(--font-secondary); }
 .seg__item--active::after { left: 12rpx; right: 12rpx; }
 .orders-toolbar-section { padding-bottom: 12rpx; }
 .orders-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; min-height: 56rpx; padding-top: 16rpx; }
 .orders-toolbar__scope { flex: 1; min-width: 0; overflow: hidden; color: var(--secondary); font-size: var(--font-mini); line-height: 1.4; white-space: nowrap; text-overflow: ellipsis; }
-.orders-toolbar__create { display: flex; align-items: center; justify-content: flex-end; flex: 0 0 auto; min-height: 40rpx; padding-left: 8rpx; font-size: var(--font-caption); white-space: nowrap; }
+.orders-toolbar__create { display: flex; align-items: center; justify-content: flex-end; flex: 0 0 auto; min-height: 88rpx; padding-left: 16rpx; font-size: var(--font-caption); white-space: nowrap; }
 .search__input { font-size: var(--font-secondary); color: var(--text); min-height: 52rpx; }
 .orders-search-row { display: flex; align-items: center; gap: 12rpx; }
-.orders-search { flex: 1; min-width: 0; background: #F2F6FC; border: 0; padding: 8rpx 18rpx; }
-.orders-filter { width: 58rpx; height: 76rpx; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
-.order-card { border: 1rpx solid var(--border); box-shadow: none; padding: 22rpx; border-radius: 18rpx; }
+.orders-search { flex: 1; min-width: 0; height: 88rpx; padding: 8rpx 18rpx; }
+.orders-filter { width: 88rpx; height: 88rpx; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.order-card { border: 1rpx solid var(--border); box-shadow: none; padding: 20rpx; border-radius: var(--radius); }
 .order-card + .order-card { margin-top: 12rpx; }
 .order-card__body { align-items: center; margin-top: 12rpx; }
 .order-card__thumb { width: 100rpx; height: 100rpx; margin-right: 16rpx; background: var(--page); }
 .order-card__no { font-size: var(--font-mini); color: var(--secondary); font-weight: var(--fw-medium); }
 .order-card__meta { font-size: var(--font-mini); margin-top: 3rpx; }
 .order-card__items { font-size: var(--font-caption); margin-top: 3rpx; }
-.theme-dark .orders-search { background: var(--surface); border: 1rpx solid var(--line); }

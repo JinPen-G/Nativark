@@ -78,12 +78,23 @@ if (fs.existsSync(path.join(reactRoot, "features/rental-core/RentalCorePage.tsx"
   "已声明但未实现", "已暂停", "已启用", "未启用",
   "品类必选", "可选增强", "跨品类共享",
   "依赖 / 互斥", "configSchema", "upgradeAvailable",
-  "该经营空间尚未达到生产经营条件", "该经营空间已达到生产经营条件",
   // P2-2：本页不得再使用 Ant Design 6 的弃用 API（`message` / `direction` / Drawer `width`）。
   // 用「新 API 必须出现」来表达，因为弃用 API 的字符串在别处也可能合法出现。
-  "title=\"该经营空间尚未达到生产经营条件\"", "orientation=\"vertical\"", "size={560}",
+  "orientation=\"vertical\"", "size={560}",
   "missingRequired", "expectedRevision", "变更能力状态必须填写原因"
 ].forEach((label) => requireText(capabilityPage, label, "capability governance UI coverage"));
+if (
+  !capabilityPage.includes('title="该经营空间尚未达到生产经营条件"') &&
+  !capabilityPage.includes('title={t("该经营空间尚未达到生产经营条件")}')
+) {
+  failures.push("capability governance UI coverage: missing production-readiness warning title");
+}
+if (
+  !capabilityPage.includes('title="该经营空间已达到生产经营条件"') &&
+  !capabilityPage.includes('title={t("该经营空间已达到生产经营条件")}')
+) {
+  failures.push("capability governance UI coverage: missing production-readiness success title");
+}
 [
   "替换套装组成", "部分归还", "allocation.itemGroupId", "allocation.quantity > 1",
   "detail.fulfillmentLocationSnapshot.name", "detail.fulfillmentLocationSnapshot.operator.name",
@@ -254,7 +265,7 @@ forbidText(tenantManagementPage, "经营品类创建后固定；租户", "retire
   [styles, '.ant-tabs .ant-tabs-nav-list', "pill section tabs"],
   [styles, '.standalone-tabs > .ant-tabs-content-holder', "tabs separated from content panel"],
   [styles, '.tabbed-workspace.ant-card', "legacy tab card wrapper removed visually"],
-  [styles, 'border-radius: 999px', "fully rounded selection controls"],
+  [styles, '--rental-ui-radius-control', "shared configurable control radius token"],
   [styles, '.ant-table-wrapper .ant-table-thead', "official table header styling"],
   [styles, 'transform: scale(.97)', "direct press feedback"]
 ].forEach(([source, expected, label]) => requireText(source, expected, label));

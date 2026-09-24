@@ -1,16 +1,13 @@
-.customer-head { display: flex; align-items: center; padding-top: 28rpx; padding-bottom: 32rpx; }
+.customer-head { display: flex; align-items: center; padding-top: 20rpx; padding-bottom: 18rpx; }
 .customer-avatar { width: 112rpx; height: 112rpx; flex: 0 0 auto; background: var(--primary-weak); }
 .customer-head .title { font-size: var(--font-title); }
-.customer-card { box-shadow: none; border: 1rpx solid var(--border); }
+.customer-card { box-shadow: none; border: 1rpx solid var(--border); padding: 20rpx; border-radius: var(--radius); }
 .customer-card .subtitle { font-weight: var(--fw-bold); }
-.screen > .section { padding-left: 24rpx; padding-right: 24rpx; }
-.customer-head { padding-top: 20rpx; padding-bottom: 18rpx; }
-.customer-tabs { display: flex; margin: 0 24rpx; border-radius: 12rpx; background: var(--primary-weak); padding: 5rpx; }
+.customer-card .kv { min-height: 56rpx; }
+.customer-tabs { display: flex; margin: 0 32rpx; border-radius: var(--radius-sm); background: var(--primary-weak); padding: 5rpx; }
 .customer-tab { flex: 1; text-align: center; padding: 12rpx 0; font-size: var(--font-caption); color: var(--secondary); border-radius: 9rpx; }
 .customer-tab--active { color: var(--primary); font-weight: var(--fw-semibold); background: var(--surface); box-shadow: var(--shadow); }
-.customer-card { padding: 20rpx; border-radius: 16rpx; }
-.customer-card .kv { min-height: 56rpx; }
-.customer-address { display: flex; align-items: center; gap: 12rpx; margin-top: 12rpx; padding: 14rpx; border: 1rpx solid var(--border); border-radius: 12rpx; font-size: var(--font-caption); }
+.customer-address { display: flex; align-items: center; gap: 12rpx; margin-top: 12rpx; padding: 14rpx; border: 1rpx solid var(--border); border-radius: var(--radius-sm); font-size: var(--font-caption); }
 .customer-section-title { padding: 0 4rpx 12rpx; }
 .customer-actions { display: flex; gap: 12rpx; }
-.customer-actions .btn { flex: 1; border-radius: 12rpx; }
+.customer-actions .btn { flex: 1; border-radius: var(--radius-sm); }

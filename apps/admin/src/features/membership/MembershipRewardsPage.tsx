@@ -3,6 +3,7 @@ import type { GrantRentalRewardRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Form, Input, Select, Space, Table, Tag } from "antd";
 import { rentalCoreApi } from "@/api/rentalCore";
+import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -17,6 +18,7 @@ import { useAuthStore } from "@/features/auth/authStore";
  */
 export function MembershipRewardsPage() {
   const { message, modal } = App.useApp();
+  const { t } = useLocale();
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const canManagePrice = hasPermission("rental-os:price:manage");
@@ -51,10 +53,10 @@ export function MembershipRewardsPage() {
         queryClient.invalidateQueries({ queryKey: ["rental-core", "benefit-accounts"] }),
         queryClient.invalidateQueries({ queryKey: ["rental-core", "customer-coupons"] }),
       ]);
-      message.success("奖励流水已按幂等键生成");
+      message.success(t("奖励流水已按幂等键生成"));
     },
     onError: () =>
-      message.error("生成失败：规则未启用、触发条件不匹配或参数不完整"),
+      message.error(t("生成失败：规则未启用、触发条件不匹配或参数不完整")),
   });
   const reverseReward = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) =>
@@ -65,26 +67,26 @@ export function MembershipRewardsPage() {
         queryClient.invalidateQueries({ queryKey: ["rental-core", "benefit-accounts"] }),
         queryClient.invalidateQueries({ queryKey: ["rental-core", "customer-coupons"] }),
       ]);
-      message.success("奖励已撤销并保留流水");
+      message.success(t("奖励已撤销并保留流水"));
     },
   });
 
   return (
     <>
       <PageHeader
-        title="会员激励"
-        description="人工补发奖励、客户权益账户与奖励流水；奖励触发规则在「品类与业务规则 → 会员奖励规则」配置。"
+        title={t("会员激励")}
+        description={t("人工补发奖励、客户权益账户与奖励流水；奖励触发规则在「品类与业务规则 → 会员奖励规则」配置。")}
       />
       <Alert
         type="info"
         showIcon
-        title="注册、实名审核和首单完成会自动触发奖励判断"
-        description="下方人工入口只用于补偿与联调；自动事件使用客户事件幂等键。积分、营销余额和奖励券会进入 Rental Core 权益账户；营销余额不是支付机构资金账户。奖励触发规则在「品类与业务规则 → 会员奖励规则」维护。"
+        title={t("注册、实名审核和首单完成会自动触发奖励判断")}
+        description={t("下方人工入口只用于补偿与联调；自动事件使用客户事件幂等键。积分、营销余额和奖励券会进入 Rental Core 权益账户；营销余额不是支付机构资金账户。奖励触发规则在「品类与业务规则 → 会员奖励规则」维护。")}
         style={{ marginBottom: 16 }}
       />
       <QueryState loading={rewards.isLoading || benefitAccounts.isLoading} error={rewards.error || benefitAccounts.error}>
         <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-          <Card title="人工补发奖励流水">
+          <Card title={t("人工补发奖励流水")}>
             <Form
               form={rewardForm}
               layout="inline"
@@ -92,28 +94,28 @@ export function MembershipRewardsPage() {
             >
               <Form.Item
                 name="customerId"
-                label="客户"
+                label={t("客户")}
                 rules={[{ required: true }]}
               >
                 <Input />
               </Form.Item>
-              <Form.Item name="triggerType" label="触发">
+              <Form.Item name="triggerType" label={t("触发")}>
                 <Select
                   style={{ width: 180 }}
                   options={[
-                    { value: "registration", label: "注册赠礼" },
-                    { value: "identity_verified", label: "实名通过" },
-                    { value: "first_order_completed", label: "首单完成" },
-                    { value: "referral", label: "直接邀请补发" },
+                    { value: "registration", label: t("注册赠礼") },
+                    { value: "identity_verified", label: t("实名通过") },
+                    { value: "first_order_completed", label: t("首单完成") },
+                    { value: "referral", label: t("直接邀请补发") },
                   ]}
                 />
               </Form.Item>
-              <Form.Item name="relatedCustomerId" label="关联客户">
+              <Form.Item name="relatedCustomerId" label={t("关联客户")}>
                 <Input />
               </Form.Item>
               <Form.Item
                 name="idempotencyKey"
-                label="业务幂等键"
+                label={t("业务幂等键")}
                 rules={[{ required: true }]}
               >
                 <Input />
@@ -123,45 +125,45 @@ export function MembershipRewardsPage() {
                 type="primary"
                 loading={grantReward.isPending}
               >
-                生成并入账
+                {t("生成并入账")}
               </Button>
             </Form>
           </Card>
-          <Card className="data-panel" title="客户权益账户">
+          <Card className="data-panel" title={t("客户权益账户")}>
             <Table
               rowKey="customerId"
               dataSource={benefitAccounts.data ?? []}
-              locale={{ emptyText: "还没有客户获得过积分、营销余额或奖励券" }}
+              locale={{ emptyText: t("还没有客户获得过积分、营销余额或奖励券") }}
               columns={[
-                { title: "客户", dataIndex: "customerId" },
-                { title: "积分", dataIndex: "pointsBalance", align: "right" },
-                { title: "营销余额", dataIndex: "marketingBalance", align: "right", render: (value) => formatRentalMoney(Number(value), currency) },
-                { title: "可用奖励券", dataIndex: "availableRewardCouponCount", align: "right" },
-                { title: "更新时间", dataIndex: "updatedAt" },
+                { title: t("客户"), dataIndex: "customerId" },
+                { title: t("积分"), dataIndex: "pointsBalance", align: "right" },
+                { title: t("营销余额"), dataIndex: "marketingBalance", align: "right", render: (value) => formatRentalMoney(Number(value), currency) },
+                { title: t("可用奖励券"), dataIndex: "availableRewardCouponCount", align: "right" },
+                { title: t("更新时间"), dataIndex: "updatedAt" },
               ]}
             />
           </Card>
-          <Card className="data-panel" title="奖励流水">
+          <Card className="data-panel" title={t("奖励流水")}>
             <Table
               rowKey="id"
               dataSource={rewards.data ?? []}
-              locale={{ emptyText: "还没有奖励流水：自动事件未触发，也没有人工补发" }}
+              locale={{ emptyText: t("还没有奖励流水：自动事件未触发，也没有人工补发") }}
               columns={[
-                { title: "客户", dataIndex: "customerId" },
+                { title: t("客户"), dataIndex: "customerId" },
                 {
-                  title: "奖励",
+                  title: t("奖励"),
                   render: (_, row) => `${row.rewardType} ${row.amount}`,
                 },
-                { title: "触发", dataIndex: "triggerType" },
-                { title: "幂等键", dataIndex: "idempotencyKey" },
+                { title: t("触发"), dataIndex: "triggerType" },
+                { title: t("幂等键"), dataIndex: "idempotencyKey" },
                 {
-                  title: "状态",
+                  title: t("状态"),
                   dataIndex: "status",
                   render: (value) => <Tag>{value}</Tag>,
                 },
-                { title: "原因", dataIndex: "reason" },
+                { title: t("原因"), dataIndex: "reason" },
                 {
-                  title: "操作",
+                  title: t("操作"),
                   render: (_, row) =>
                     row.status === "granted" ? (
                       <Button
@@ -169,17 +171,17 @@ export function MembershipRewardsPage() {
                         type="link"
                         onClick={() =>
                           modal.confirm({
-                            title: "撤销奖励",
-                            content: "撤销会保留原流水与撤销时间。",
+                            title: t("撤销奖励"),
+                            content: t("撤销会保留原流水与撤销时间。"),
                             onOk: () =>
                               reverseReward.mutate({
                                 id: row.id,
-                                reason: "运营人工撤销",
+                                reason: t("运营人工撤销"),
                               }),
                           })
                         }
                       >
-                        撤销
+                        {t("撤销")}
                       </Button>
                     ) : (
                       "-"

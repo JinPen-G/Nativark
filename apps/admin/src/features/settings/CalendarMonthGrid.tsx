@@ -2,6 +2,7 @@ import { Button, Card, Space, Tag, Tooltip, Typography } from "antd";
 import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import type { CSSProperties } from "react";
 import type { RentalCalendarDay, RentalCalendarTimePriceDay } from "@rental-os/shared";
+import { useLocale } from "@/app/locale";
 
 /**
  * PRICE-02A（需求 4.5.9）：按自然月展示的七列月历。
@@ -53,7 +54,7 @@ const sourceColors: Record<string, string> = {
   tenant_override: "volcano",
 };
 
-const WEEKDAY_LABELS = ["一", "二", "三", "四", "五", "六", "日"];
+const WEEKDAY_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 
 /** 该月第一天是星期几（周一=0）。日历键是 UTC 日期，按 UTC 计算星期。 */
 function firstWeekdayOfMonth(year: number, month: number): number {
@@ -95,6 +96,7 @@ export function CalendarMonthGrid({
   timePriceSummary?: RentalCalendarTimePriceDay[];
   onDayClick: (day: RentalCalendarDay) => void;
 }) {
+  const { t } = useLocale();
   const byDate = new Map(days.map((day) => [day.date, day]));
   const summaryByDate = new Map((timePriceSummary ?? []).map((row) => [row.date, row]));
   const leading = firstWeekdayOfMonth(year, month);
@@ -110,7 +112,7 @@ export function CalendarMonthGrid({
     }),
   ];
 
-  const monthLabel = `${year} 年 ${month} 月`;
+  const monthLabel = `${year} ${t("年")} ${month} ${t("月")}`;
   return (
     <Card
       title={
@@ -118,14 +120,14 @@ export function CalendarMonthGrid({
           <Button
             size="small"
             icon={<LeftOutlined />}
-            aria-label="上一月"
+            aria-label={t("上一月")}
             onClick={() => onMonthChange(month === 1 ? 12 : month - 1)}
           />
           <Typography.Text strong>{monthLabel}</Typography.Text>
           <Button
             size="small"
             icon={<RightOutlined />}
-            aria-label="下一月"
+            aria-label={t("下一月")}
             onClick={() => onMonthChange(month === 12 ? 1 : month + 1)}
           />
         </Space>
@@ -134,7 +136,7 @@ export function CalendarMonthGrid({
         <Space size={4} wrap>
           {(Object.keys(sourceLabels) as Array<keyof typeof sourceLabels>).map((source) => (
             <Tag key={source} color={sourceColors[source]}>
-              {sourceLabels[source]}
+              {t(sourceLabels[source])}
             </Tag>
           ))}
         </Space>
@@ -143,7 +145,7 @@ export function CalendarMonthGrid({
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
         {WEEKDAY_LABELS.map((label) => (
           <Typography.Text key={label} type="secondary" className="calendar-weekday">
-            周{label}
+            {t(label)}
           </Typography.Text>
         ))}
         {cells.map((cell, index) => {
@@ -155,12 +157,12 @@ export function CalendarMonthGrid({
               key={cell.date}
               title={
                 day.source === "tenant_override"
-                  ? `人工覆盖：${day.overrideReason ?? "未记录原因"}${day.overrideBy ? `（${day.overrideBy}）` : ""}${
+                  ? `${t("人工覆盖")}：${day.overrideReason ?? t("未记录原因")}${day.overrideBy ? `（${day.overrideBy}）` : ""}${
                       day.overrideScope && day.overrideScope.kind === "range"
-                        ? `；范围 ${day.overrideScope.rangeStart} ~ ${day.overrideScope.rangeEnd}`
+                        ? `；${t("范围")} ${day.overrideScope.rangeStart} ~ ${day.overrideScope.rangeEnd}`
                         : ""
                     }`
-                  : `${sourceLabels[day.source]} · 点击查看详情`
+                  : `${t(sourceLabels[day.source])} · ${t("点击查看详情")}`
               }
             >
               <button type="button" style={cellStyle} onClick={() => onDayClick(day)}>
@@ -169,20 +171,20 @@ export function CalendarMonthGrid({
                     {cell.dayNumber}
                   </Typography.Text>
                   <Space size={2}>
-                  {day.source === "tenant_override" && <Tag color="volcano" style={{ marginInlineEnd: 0 }}>覆盖</Tag>}
+                  {day.source === "tenant_override" && <Tag color="volcano" style={{ marginInlineEnd: 0 }}>{t("覆盖")}</Tag>}
                   {summaryByDate.get(cell.date)?.entries.length ? (
                     <Tooltip title={summaryByDate.get(cell.date)!.entries.map((entry) => `${entry.planCode ?? `价格版本 ${entry.version}`} · ${entry.timeLabel} ×${entry.multiplier}`).join("；")}>
-                      <Tag color="gold" style={{ marginInlineEnd: 0 }}>分时</Tag>
+                      <Tag color="gold" style={{ marginInlineEnd: 0 }}>{t("分时")}</Tag>
                     </Tooltip>
                   ) : null}
                   </Space>
                 </Space>
                 <Space size={2} wrap style={{ rowGap: 0 }}>
                   <Tag color={dayTypeColors[day.dayType]} className="calendar-day-tag" style={{ marginInlineEnd: 0 }}>
-                    {dayTypeLabels[day.dayType] ?? day.dayType}
+                    {t(dayTypeLabels[day.dayType] ?? day.dayType)}
                   </Tag>
                   <Tag color={businessStatusColors[status]} className="calendar-day-tag" style={{ marginInlineEnd: 0 }}>
-                    {businessStatusLabels[status] ?? status}
+                    {t(businessStatusLabels[status] ?? status)}
                   </Tag>
                 </Space>
                 <Typography.Text className="calendar-day-note" ellipsis>
@@ -201,7 +203,7 @@ export function CalendarMonthGrid({
                 {cell.dayNumber}
               </Typography.Text>
               <Typography.Text type="secondary" className="calendar-day-note">
-                无数据
+                {t("无数据")}
               </Typography.Text>
             </div>
           );
@@ -209,12 +211,12 @@ export function CalendarMonthGrid({
         })}
       </div>
       <Typography.Paragraph type="secondary" className="calendar-help" style={{ marginTop: 12, marginBottom: 0 }}>
-        图例——日期类型：<Tag>工作日</Tag>
-        <Tag color="orange">周末</Tag>
-        <Tag color="red">法定节假日</Tag>
-        <Tag color="blue">调休工作日</Tag>
-        <Tag color="purple">空间特殊日</Tag>
-        ；营业状态：正常 / 限时 / 停止 / 自助；角标「覆盖」表示该日期存在人工覆盖，点击日期查看基础值、生效值与覆盖详情。
+        {t("图例——日期类型")}：<Tag>{t("工作日")}</Tag>
+        <Tag color="orange">{t("周末")}</Tag>
+        <Tag color="red">{t("法定节假日")}</Tag>
+        <Tag color="blue">{t("调休工作日")}</Tag>
+        <Tag color="purple">{t("空间特殊日")}</Tag>
+        ；{t("营业状态")}{t("正常")} / {t("限时")} / {t("停止")} / {t("自助")}；{t("角标「覆盖」表示该日期存在人工覆盖，点击日期查看基础值、生效值与覆盖详情。")}
       </Typography.Paragraph>
     </Card>
   );

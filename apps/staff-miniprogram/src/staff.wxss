@@ -5,7 +5,7 @@
 .hero__title { font-size: var(--font-page-title); font-weight: var(--fw-bold); line-height: 1.25; }
 .hero__subtitle { margin-top: 10rpx; font-size: var(--font-caption); opacity: 0.9; }
 .hero__art { position: absolute; right: 24rpx; top: 50%; transform: translateY(-50%); width: 160rpx; height: 160rpx; display: flex; align-items: center; justify-content: center; border-radius: 32rpx; background: rgba(255, 255, 255, 0.16); }
-.hero--soft { background: linear-gradient(135deg, #EAF2FF 0%, #F4F8FF 100%); color: var(--text); box-shadow: none; }
+.hero--soft { background: var(--primary-weak); color: var(--text); box-shadow: none; }
 .hero--soft .hero__subtitle { color: var(--secondary); opacity: 1; }
 
 /* 四宫格快捷入口 */

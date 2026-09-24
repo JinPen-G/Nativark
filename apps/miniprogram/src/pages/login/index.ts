@@ -18,6 +18,7 @@ import { ROUTES, buildUrl, callPhone, navigate, redirect, safeRoute, toast } fro
 interface LoginData {
   merchantName: string;
   merchantInitial: string;
+  merchantLogo: string;
   servicePhone: string;
   agreementName: string;
   agreementVersion: string;
@@ -46,6 +47,7 @@ Page({
   data: {
     merchantName: "",
     merchantInitial: "·",
+    merchantLogo: "",
     servicePhone: "",
     agreementName: "用户服务协议",
     agreementVersion: "",
@@ -96,6 +98,8 @@ Page({
     this.setData({
       merchantName: info.name,
       merchantInitial: info.name.trim().charAt(0) || "·",
+      // 品牌图只接受 https 远程图（商户在渠道配置里上传）；缺省/非法时留空，由页面回落到商户名首字，绝不用平台品牌图冒充商户。
+      merchantLogo: typeof info.logoUrl === "string" && /^https:\/\//i.test(info.logoUrl) ? info.logoUrl : "",
       servicePhone: info.servicePhone ?? "",
       agreementsProvided: Boolean(agreements),
       agreementName: agreements?.userAgreement.name ?? "用户服务协议",
@@ -330,6 +334,11 @@ Page({
 
   onContact() {
     callPhone(this.data.servicePhone);
+  },
+
+  /** 商户品牌图加载失败（坏链/未加白名单）：回落到商户名首字头像，不显示破图。 */
+  onLogoError() {
+    if (this.data.merchantLogo) this.setData({ merchantLogo: "" });
   },
 
   onBrowse() {

@@ -2,8 +2,9 @@
 <view class="screen screen--flat login {{themeClass}}">
   <nav-bar></nav-bar>
   <view class="login__brand">
-    <image class="login__mark" src="/assets/logo-mark.png" mode="aspectFit"></image>
-    <view class="title">欢迎使用 Rental OS</view>
+    <image wx:if="{{merchantLogo}}" class="login__mark" src="{{merchantLogo}}" mode="aspectFit" binderror="onLogoError"></image>
+    <view wx:else class="avatar login__avatar">{{merchantInitial}}</view>
+    <view class="title">{{merchantName ? merchantName : '欢迎登录'}}</view>
     <view class="muted mt-8">一个账号租用本商户多种设备</view>
   </view>
 

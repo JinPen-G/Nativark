@@ -2,12 +2,14 @@ import type { SaveCustomerMembershipQualificationTypeRequest } from "@rental-os/
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Checkbox, Form, Input, Table } from "antd";
 import { membershipApi } from "@/api/membership";
+import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 
 export function QualificationTypesEditor() {
   const { message } = App.useApp();
+  const { t } = useLocale();
   const queryClient = useQueryClient();
   const workspaceId = useAuthStore(state => state.currentWorkspaceId);
   const hasPermission = useAuthStore(state => state.hasPermission);
@@ -21,25 +23,26 @@ export function QualificationTypesEditor() {
     await queryClient.invalidateQueries({ queryKey: ["membership-qualification-types", workspaceId] });
     await queryClient.invalidateQueries({ queryKey: ["membership-qualification-options", workspaceId] });
     form.resetFields();
-    message.success("证件类型已保存");
+    message.success(t("证件类型已保存"));
   } });
-  if (!canView) return <Alert type="warning" title="需要当前空间的证件配置权限" />;
+  if (!canView) return <Alert type="warning" title={t("需要当前空间的证件配置权限")} />;
   return <QueryState loading={types.isLoading} error={types.error}>
-    <Alert type="info" showIcon title="仅配置当前经营空间" description="这里维护本空间使用的证件类型；不授予租户会员资料维护权，也不改变已提交的证件与审核历史。" style={{ marginBottom: 16 }} />
+    <Alert type="info" showIcon title={t("仅配置当前经营空间")} description={t("这里维护本空间使用的证件类型；不授予租户会员资料维护权，也不改变已提交的证件与审核历史。")} style={{ marginBottom: 16 }} />
     <Form form={form} layout="vertical" disabled={!canManage} onFinish={values => canManage && save.mutate(values)}>
-      <Form.Item label="编码" name="code" rules={[{ required: true }]}><Input /></Form.Item>
-      <Form.Item label="名称" name="name" rules={[{ required: true }]}><Input /></Form.Item>
-      <Form.Item name="requiredForBooking" valuePropName="checked"><Checkbox>下单必需</Checkbox></Form.Item>
-      <Button type="primary" htmlType="submit" loading={save.isPending}>新增证件类型</Button>
+      <Form.Item label={t("编码")} name="code" rules={[{ required: true }]}><Input /></Form.Item>
+      <Form.Item label={t("名称")} name="name" rules={[{ required: true }]}><Input /></Form.Item>
+      <Form.Item name="requiredForBooking" valuePropName="checked"><Checkbox>{t("下单必需")}</Checkbox></Form.Item>
+      <Button type="primary" htmlType="submit" loading={save.isPending}>{t("新增证件类型")}</Button>
     </Form>
     <Table rowKey="id" size="small" style={{ marginTop: 20 }} dataSource={types.data ?? []} pagination={false} columns={[
-      { title: "名称", dataIndex: "name" }, { title: "编码", dataIndex: "code" },
-      { title: "下单要求", render: (_, row) => row.requiredForBooking ? "必需" : "可选" },
-      { title: "状态", dataIndex: "status", render: value => value === "enabled" ? "已启用" : "已停用" }
+      { title: t("名称"), dataIndex: "name" }, { title: t("编码"), dataIndex: "code" },
+      { title: t("下单要求"), render: (_, row) => row.requiredForBooking ? t("必需") : t("可选") },
+      { title: t("状态"), dataIndex: "status", render: value => value === "enabled" ? t("已启用") : t("已停用") }
     ]} />
   </QueryState>;
 }
 
 export function QualificationTypesPage() {
-  return <><PageHeader title="空间证件类型" description="按当前经营空间配置业务所需证件。" /><QualificationTypesEditor /></>;
+  const { t } = useLocale();
+  return <><PageHeader title={t("空间证件类型")} description={t("按当前经营空间配置业务所需证件。")} /><QualificationTypesEditor /></>;
 }

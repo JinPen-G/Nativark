@@ -2,6 +2,7 @@ import { logout } from "../../api/auth";
 import { cachedContext, contextEvents, currentLocationLabel, loadContext, type WorkspaceContext } from "../../core/context";
 import { can, canTenant, currentSession, currentWorkspace, isSignedIn, sessionEvents } from "../../core/session";
 import { themeBehavior } from "../../core/theme-behavior";
+import { currentTheme, setThemePreference, themePreference } from "../../core/theme";
 import { ROUTES, buildUrl, confirmDialog, navigate, relaunch, toast } from "../../core/ui";
 
 /**
@@ -24,11 +25,24 @@ interface MeData {
   locationLabel: string;
   cards: QuickCard[];
   context?: WorkspaceContext;
+  /** 深浅色开关：darkMode 为当前是否深色，themeModeHint 说明当前跟随系统还是已固定。 */
+  darkMode: boolean;
+  themeModeHint: string;
 }
 
 Page({
   behaviors: [themeBehavior],
-  data: { displayName: "", account: "", roleLabel: "", tenantName: "", workspaceName: "", locationLabel: "", cards: [] } as MeData,
+  data: {
+    displayName: "",
+    account: "",
+    roleLabel: "",
+    tenantName: "",
+    workspaceName: "",
+    locationLabel: "",
+    cards: [],
+    darkMode: currentTheme() === "dark",
+    themeModeHint: themePreference() === "system" ? "跟随系统" : currentTheme() === "dark" ? "已固定为深色模式" : "已固定为浅色模式"
+  } as MeData,
   offContext: undefined as (() => void) | undefined,
   offSession: undefined as (() => void) | undefined,
 
@@ -47,8 +61,25 @@ Page({
       relaunch(ROUTES.login);
       return;
     }
+    this.syncThemePreference();
     this.render();
     loadContext().then(() => this.render()).catch(() => undefined);
+  },
+
+  /** 与全局主题偏好对齐（切换后返回本页时同步开关状态与说明）。 */
+  syncThemePreference() {
+    const preference = themePreference();
+    const darkMode = currentTheme() === "dark";
+    this.setData({
+      darkMode,
+      themeModeHint: preference === "system" ? "跟随系统" : darkMode ? "已固定为深色模式" : "已固定为浅色模式"
+    });
+  },
+
+  onThemeModeChange(event: WechatMiniprogram.SwitchChange) {
+    const darkMode = Boolean(event.detail.value);
+    setThemePreference(darkMode ? "dark" : "light");
+    this.setData({ darkMode, themeModeHint: darkMode ? "已固定为深色模式" : "已固定为浅色模式" });
   },
 
   render() {

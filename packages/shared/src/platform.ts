@@ -161,10 +161,17 @@ export interface TenantContext {
   faviconUrl?: string;
   /** 租户通用客户端配置的主题色；未设置时管理端与客户端各自回退默认色。 */
   themeColor?: string;
+  /** 管理后台基础控件圆角（px）；由租户在受限范围内配置，未设置时使用平台默认值。 */
+  adminCornerRadius?: number;
   categoryCode?: RentalCategoryCode;
   categoryName?: string;
   capabilities?: RentalCapability[];
 }
+
+/** 管理后台圆角的可配置范围。数值只表达基础控件圆角，胶囊与圆形控件仍是平台保留形态。 */
+export const ADMIN_UI_CORNER_RADIUS_MIN = 8;
+export const ADMIN_UI_CORNER_RADIUS_MAX = 20;
+export const ADMIN_UI_CORNER_RADIUS_DEFAULT = 12;
 
 export interface AuthUser {
   id: string;
@@ -799,6 +806,8 @@ export interface ClientChannelProfileSummary {
   bannerSubtitle?: string;
   /** 客户端与管理后台主题色（#RRGGBB）；未设置时各端用系统默认色。 */
   themeColor?: string;
+  /** 管理后台基础控件圆角（px）；胶囊页签与圆形图标按钮不受此值强行变形。 */
+  adminCornerRadius: number;
   smsLoginEnabled: boolean;
   passwordLoginEnabled: boolean;
   publishedWorkspaceIds: string[];
@@ -825,6 +834,8 @@ export interface SaveClientChannelProfileRequest {
   bannerSubtitle?: string;
   /** 客户端与管理后台主题色（#RRGGBB）；留空表示回退系统默认色。 */
   themeColor?: string;
+  /** 管理后台基础控件圆角（8-20px）；留空沿用当前值或平台默认值。 */
+  adminCornerRadius?: number;
   smsLoginEnabled: boolean;
   passwordLoginEnabled: boolean;
   publishedWorkspaceIds: string[];

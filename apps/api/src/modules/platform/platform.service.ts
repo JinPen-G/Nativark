@@ -9,7 +9,9 @@ import {
   SaveWorkspaceMemberRequest,
   ChangeCustomerAccountStatusRequest,
   ChangeCustomerMembershipStatusRequest,
+  CustomerProfileOrderQuery,
   MergeCustomersRequest,
+  SaveCustomerProfileAddressRequest,
   SaveCustomerContractRequest,
   SaveCustomerCreditRequest,
   RecordCustomerCorporateCreditPaymentRequest,
@@ -1579,6 +1581,30 @@ export class PlatformService {
       customerId,
       currentUser
     );
+  }
+
+  getCustomerProfileOverview(customerId: string, query: CustomerProfileOrderQuery = {}, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().getProfileOverview(
+      tenantId,
+      getRequestWorkspaceId(),
+      customerId,
+      currentUser,
+      query
+    );
+  }
+
+  saveCustomerProfileAddress(customerId: string, input: SaveCustomerProfileAddressRequest, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().saveCustomerAddress(tenantId, customerId, input);
+  }
+
+  removeCustomerProfileAddress(customerId: string, addressId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().removeCustomerAddress(tenantId, customerId, addressId);
   }
 
   listSharedCustomersMasked(currentUser?: SystemUserRow) {

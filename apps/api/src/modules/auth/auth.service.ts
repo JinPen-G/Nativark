@@ -489,6 +489,7 @@ export class AuthService {
     brandLogoUrl?: string;
     faviconUrl?: string;
     themeColor?: string;
+    adminCornerRadius?: number;
   }> {
     if (!this.clientChannelProfile) return {};
     try {

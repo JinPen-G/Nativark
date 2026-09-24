@@ -4,7 +4,7 @@
 
   <view class="section">
     <view class="profile" hover-class="btn-hover" bindtap="onProfileTap">
-      <view class="avatar"><image src="/assets/logo-mark.png" mode="aspectFit"></image></view>
+      <view class="avatar">{{avatarInitial}}</view>
       <view class="grow ml-16">
         <block wx:if="{{signedIn}}">
           <view class="title">{{phoneMasked}}</view>

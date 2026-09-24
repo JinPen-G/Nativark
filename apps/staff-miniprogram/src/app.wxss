@@ -52,8 +52,10 @@ page {
   -webkit-font-smoothing: antialiased;
 }
 
-/* 深色模式：跟随系统。只翻转中性色（背景/卡片/文字/边框/阴影），品牌主色与状态色保持一致。
- * 走 var(--token) 的元素自动跟随；图标由 ui-icon 按语义色板另行处理。租户主题色仍由 page-meta 覆盖 --primary。 */
+/* 深色模式：跟随系统。翻转中性色（背景/卡片/文字/边框/阴影）；品牌主色保持不变（--primary）。
+ * 状态色（success/warning/danger/price）在深色下统一调亮一档，与 ui-icon 语义色板取值一致——
+ * 保证同语义的图标与文字/标签同色，且在深底上有足够对比度。走 var(--token) 的元素自动跟随；
+ * 租户主题色仍由 page-meta 覆盖 --primary。 */
 /* 深色令牌集中一处：系统深色（media）与用户强制深色（.theme-dark）共用同一组值。 */
 .theme-dark {
   --primary-weak: rgba(59, 144, 255, 0.18);
@@ -64,6 +66,10 @@ page {
   --muted: #5A6373;
   --border: #2A2E36;
   --line: #333842;
+  --success: #3FBF87;
+  --warning: #F0A63C;
+  --danger: #F26F73;
+  --price: #FF6A5A;
   --success-weak: #123024;
   --warning-weak: #33280F;
   --danger-weak: #3A1E1F;
@@ -82,6 +88,10 @@ page {
     --muted: #5A6373;
     --border: #2A2E36;
     --line: #333842;
+    --success: #3FBF87;
+    --warning: #F0A63C;
+    --danger: #F26F73;
+    --price: #FF6A5A;
     --success-weak: #123024;
     --warning-weak: #33280F;
     --danger-weak: #3A1E1F;
@@ -100,6 +110,10 @@ page {
   --muted: #B4BBC8;
   --border: #EEF1F5;
   --line: #E5E9F0;
+  --success: #22A06B;
+  --warning: #E8890C;
+  --danger: #E5484D;
+  --price: #FF4D3A;
   --success-weak: #E8F7EF;
   --warning-weak: #FFF4E0;
   --danger-weak: #FDECEC;

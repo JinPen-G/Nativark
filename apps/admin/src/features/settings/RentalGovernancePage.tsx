@@ -11,6 +11,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Form, Tabs } from "antd";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
+import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { CalendarTab } from "./governance/CalendarTab";
@@ -98,6 +99,7 @@ const TABS: GovernanceTabDefinition[] = [
  */
 export function RentalGovernancePage() {
   const { message } = App.useApp();
+  const { t } = useLocale();
   const queryClient = useQueryClient();
   const permissions = useGovernancePermissions();
   const permittedTabs = useMemo(() => TABS.filter((definition) => definition.permitted(permissions)), [permissions]);
@@ -163,21 +165,33 @@ export function RentalGovernancePage() {
       await queryClient.invalidateQueries({
         queryKey: ["rental-core", "business-settings"],
       });
-      message.success("租户经营设置已保存");
+      message.success(t("租户经营设置已保存"));
     },
     onError: (error) =>
       message.error(
         (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
-          "保存租户设置失败，请检查填写内容",
+          t("保存租户设置失败，请检查填写内容"),
       ),
   });
 
   const activeTab = permittedTabs.find((definition) => definition.key === tab);
+  const localizedTabs = permittedTabs.map((definition) => ({
+    ...definition,
+    label: definition.key === "category"
+      ? t("品类与租赁方式")
+      : definition.key === "rules"
+        ? <span><SafetyCertificateOutlined />{t("业务规则")}</span>
+        : definition.key === "calendar"
+          ? <span><CalendarOutlined />{t("营业日历")}</span>
+          : definition.key === "membership"
+            ? <span><TeamOutlined />{t("会员奖励规则")}</span>
+            : <span><NotificationOutlined />{t("通知模板")}</span>
+  }));
   return (
     <>
       <PageHeader
-        title="品类与业务规则"
-        description="租户经营品类决定允许范围；价格、日历、规则、奖励与通知均按版本留痕。"
+        title={t("品类与业务规则")}
+        description={t("租户经营品类决定允许范围；价格、日历、规则、奖励与通知均按版本留痕。")}
         extra={
           <Button
             type="primary"
@@ -185,7 +199,7 @@ export function RentalGovernancePage() {
             loading={saveSettings.isPending}
             onClick={() => settingsForm.submit()}
           >
-            保存租户设置
+            {t("保存租户设置")}
           </Button>
         }
       />
@@ -193,7 +207,7 @@ export function RentalGovernancePage() {
         className="standalone-tabs"
         activeKey={tab}
         onChange={(key) => setTab(key as TabKey)}
-        items={permittedTabs.map(({ key, label }) => ({ key, label }))}
+        items={localizedTabs.map(({ key, label }) => ({ key, label }))}
       />
       {!(settings.data && category) && <Form form={settingsForm} style={{ display: "none" }} />}
       <QueryState

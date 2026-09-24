@@ -13,6 +13,7 @@ import { useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
+import { useLocale } from "@/app/locale";
 
 /**
  * REPORT-01A/01B：当前经营空间经营报表。
@@ -53,6 +54,7 @@ const assetStatusLabels: Record<string, string> = {
 const percent = (value: number) => `${(Number(value) * 100).toFixed(2)}%`;
 export function WorkspaceOperationReportPage() {
   const { message } = App.useApp();
+  const { t } = useLocale();
   const [range, setRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
   const [locationId, setLocationId] = useState<string>();
   const [customerId, setCustomerId] = useState<string>();
@@ -75,7 +77,7 @@ export function WorkspaceOperationReportPage() {
   });
 
   const data = report.data;
-  const itemLabel = profile.data?.terminology.itemLabel ?? "租赁标的";
+  const itemLabel = t(profile.data?.terminology.itemLabel ?? "租赁标的");
 
   /**
    * 导出走同一组筛选。
@@ -93,9 +95,9 @@ export function WorkspaceOperationReportPage() {
       anchor.download = `operation-report-${dayjs().format("YYYYMMDDHHmmss")}.csv`;
       anchor.click();
       URL.revokeObjectURL(url);
-      message.success("报表已导出（口径、筛选与权限与页面一致）");
+      message.success(t("报表已导出（口径、筛选与权限与页面一致）"));
     } catch (error) {
-      message.error((error as Error).message || "导出失败");
+      message.error((error as Error).message || t("导出失败"));
     } finally {
       setExporting(false);
     }
@@ -103,8 +105,8 @@ export function WorkspaceOperationReportPage() {
   return (
     <>
       <PageHeader
-        title="经营报表"
-        description={`当前经营空间的${itemLabel}订单、收入、优惠、异常、库存与地点客户口径。指标定义四个品类一致，仅标题使用品类术语。`}
+        title={t("经营报表")}
+        description={`${t("当前经营空间的")} ${itemLabel}${t("订单、收入、优惠、异常、库存与地点客户口径。指标定义四个品类一致，仅标题使用品类术语。")}`}
         view={
           <Space wrap>
             <DatePicker.RangePicker
@@ -112,13 +114,13 @@ export function WorkspaceOperationReportPage() {
               value={range}
               onChange={(value) => setRange(value as [Dayjs | null, Dayjs | null] | null)}
               presets={[
-                { label: "本月", value: [dayjs().startOf("month"), dayjs().endOf("month")] },
-                { label: "近 30 天", value: [dayjs().add(-29, "day"), dayjs()] }
+                { label: t("本月"), value: [dayjs().startOf("month"), dayjs().endOf("month")] },
+                { label: t("近 30 天"), value: [dayjs().add(-29, "day"), dayjs()] }
               ]}
             />
             <Select
               allowClear
-              placeholder="履约地点"
+              placeholder={t("履约地点")}
               style={{ minWidth: 180 }}
               value={locationId}
               onChange={(value) => setLocationId(value)}
@@ -126,15 +128,15 @@ export function WorkspaceOperationReportPage() {
             />
             <Select
               allowClear
-              placeholder="客户类型"
+              placeholder={t("客户类型")}
               style={{ minWidth: 130 }}
               value={customerType}
               onChange={(value) => setCustomerType(value)}
-              options={[{ value: "personal", label: "个人客户" }, { value: "corporate", label: "企业客户" }]}
+              options={[{ value: "personal", label: t("个人客户") }, { value: "corporate", label: t("企业客户") }]}
             />
             <Input
               allowClear
-              placeholder="客户 id"
+              placeholder={t("客户 id")}
               style={{ width: 200 }}
               value={customerId}
               onChange={(event) => setCustomerId(event.target.value)}
@@ -142,15 +144,15 @@ export function WorkspaceOperationReportPage() {
           </Space>
         }
         note={{
-          title: "口径说明",
-          description: "订单量为非草稿订单数；租赁收入只含租金；优惠金额为方案优惠与券优惠合计；应收金额为调账后应收，税为价内税——「不含税应收」与「其中税额」是它的拆分，不要相加；异常费用取订单费用行中的逾期、损坏与取消。仅统计当前经营空间，不做跨空间汇总；导出与本页使用同一份数据与筛选。"
+          title: t("口径说明"),
+          description: t("订单量为非草稿订单数；租赁收入只含租金；优惠金额为方案优惠与券优惠合计；应收金额为调账后应收，税为价内税——「不含税应收」与「其中税额」是它的拆分，不要相加；异常费用取订单费用行中的逾期、损坏与取消。仅统计当前经营空间，不做跨空间汇总；导出与本页使用同一份数据与筛选。")
         }}
         extra={
           <Space>
             <Button icon={<DownloadOutlined />} loading={exporting} onClick={() => void exportCsv()}>
-              导出 CSV
+              {t("导出 CSV")}
             </Button>
-            <Button icon={<ReloadOutlined />} aria-label="刷新经营报表" onClick={() => void report.refetch()} />
+            <Button icon={<ReloadOutlined />} aria-label={t("刷新经营报表")} onClick={() => void report.refetch()} />
           </Space>
         }
       />
@@ -161,6 +163,7 @@ export function WorkspaceOperationReportPage() {
   );
 }
 function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
+  const { t } = useLocale();
   // 币种取报表自带的快照，而不是再去读一次业务设置：金额是按这个币种算出来的，
   // 两处各读一次就有机会显示成不一致的单位。
   const money = (value: number) => formatRentalMoney(Number(value), data.currency);
@@ -168,15 +171,15 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
   // 空空间返回全零是服务端口径；页面如实显示 0，不显示「暂无数据」——
   // 「0 单」与「没查到」是两件事，后者会让人以为报表坏了。
   const cards = [
-    { label: "订单量", value: data.orderCount, precision: 0 },
-    { label: "租赁收入", value: data.rentalRevenue, prefix: symbol, precision: 2 },
-    { label: "优惠金额", value: data.discountTotal, prefix: symbol, precision: 2 },
-    { label: "应收金额", value: data.receivableTotal, prefix: symbol, precision: 2 },
+    { label: t("订单量"), value: data.orderCount, precision: 0 },
+    { label: t("租赁收入"), value: data.rentalRevenue, prefix: symbol, precision: 2 },
+    { label: t("优惠金额"), value: data.discountTotal, prefix: symbol, precision: 2 },
+    { label: t("应收金额"), value: data.receivableTotal, prefix: symbol, precision: 2 },
     // 价内税：税额已含在应收里，两个卡片是同一笔钱的拆分，不是可以相加的两项。
-    { label: "不含税应收", value: data.netOfTaxTotal, prefix: symbol, precision: 2 },
-    { label: "其中税额", value: data.taxTotal, prefix: symbol, precision: 2 },
-    { label: "异常费用", value: data.exceptionFeeTotal, prefix: symbol, precision: 2 },
-    { label: "异常订单", value: data.exceptionOrderCount, precision: 0 }
+    { label: t("不含税应收"), value: data.netOfTaxTotal, prefix: symbol, precision: 2 },
+    { label: t("其中税额"), value: data.taxTotal, prefix: symbol, precision: 2 },
+    { label: t("异常费用"), value: data.exceptionFeeTotal, prefix: symbol, precision: 2 },
+    { label: t("异常订单"), value: data.exceptionOrderCount, precision: 0 }
   ];
   const assets = data.utilization.serializedAssets;
   const stock = data.utilization.quantityStock;
@@ -194,43 +197,43 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
         ))}
       </Row>
 
-      <Card className="data-panel" title="订单量按状态" style={{ marginTop: 16 }}>
+      <Card className="data-panel" title={t("订单量按状态")} style={{ marginTop: 16 }}>
         {data.statusBreakdown.length ? (
           <Space wrap>
             {data.statusBreakdown.map((row) => (
               <Tag key={row.status} color={row.status === RentalCoreOrderStatus.Cancelled ? "default" : "processing"}>
-                {statusLabels[row.status] ?? row.status}：{row.count}
+                {t(statusLabels[row.status] ?? row.status)}：{row.count}
               </Tag>
             ))}
           </Space>
         ) : (
-          <span className="muted">当前经营空间尚无非草稿订单</span>
+          <span className="muted">{t("当前经营空间尚无非草稿订单")}</span>
         )}
       </Card>
 
-      <Card className="data-panel" title="异常费用构成" style={{ marginTop: 16 }}>
+      <Card className="data-panel" title={t("异常费用构成")} style={{ marginTop: 16 }}>
         <Table
           size="small"
           rowKey="type"
           pagination={false}
           dataSource={data.exceptionFeeBreakdown}
-          locale={{ emptyText: "当前经营空间没有异常费用" }}
+          locale={{ emptyText: t("当前经营空间没有异常费用") }}
           columns={[
-            { title: "类型", render: (_: unknown, row) => exceptionLabels[row.type] ?? row.type },
-            { title: "金额", align: "right", render: (_: unknown, row) => money(row.amount) },
-            { title: "涉及订单", align: "right", dataIndex: "orderCount" }
+            { title: t("类型"), render: (_: unknown, row) => t(exceptionLabels[row.type] ?? row.type) },
+            { title: t("金额"), align: "right", render: (_: unknown, row) => money(row.amount) },
+            { title: t("涉及订单"), align: "right", dataIndex: "orderCount" }
           ]}
         />
         <div className="muted" style={{ marginTop: 8 }}>
-          一张订单同时逾期与损坏时，「异常订单」按去重后的订单计，因此可能小于各类型涉及订单之和。
+          {t("一张订单同时逾期与损坏时，「异常订单」按去重后的订单计，因此可能小于各类型涉及订单之和。")}
         </div>
       </Card>
       {/* 快照与区间必须在同一张卡里说清楚，否则「在租占比」会被当成区间利用率。 */}
-      <Card className="data-panel" title="库存与资产（当前快照）" style={{ marginTop: 16 }}>
+      <Card className="data-panel" title={t("库存与资产（当前快照）")} style={{ marginTop: 16 }}>
         <Alert
           type="warning"
           showIcon
-          title="这一节是读取瞬间的快照，不是区间利用率"
+          title={t("这一节是读取瞬间的快照，不是区间利用率")}
           description={data.historicalCaliberGaps.map((gap) => <div key={gap}>· {gap}</div>)}
           style={{ marginBottom: 12 }}
         />
@@ -239,43 +242,43 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
             <Descriptions
               size="small"
               column={1}
-              title={`序列化资产（时点 ${assets.snapshotAt.slice(0, 19).replace("T", " ")}）`}
+              title={`${t("序列化资产")} (${assets.snapshotAt.slice(0, 19).replace("T", " ")})`}
               items={[
-                { key: "total", label: "在册资产数", children: `${assets.totalCount}（含停用）` },
-                { key: "operable", label: "可运营资产数（分母）", children: `${assets.operableCount}　= 在册 - 停用` },
-                { key: "rented", label: "在租资产数（分子）", children: assets.rentedCount },
-                { key: "ratio", label: "在租占比", children: percent(assets.rentedRatio) }
+                { key: "total", label: t("在册资产数"), children: `${assets.totalCount}（${t("含停用")}）` },
+                { key: "operable", label: t("可运营资产数（分母）"), children: `${assets.operableCount}　= ${t("在册")} - ${t("停用")}` },
+                { key: "rented", label: t("在租资产数（分子）"), children: assets.rentedCount },
+                { key: "ratio", label: t("在租占比"), children: percent(assets.rentedRatio) }
               ]}
             />
             <Space wrap style={{ marginTop: 8 }}>
               {assets.statusBreakdown.length
                 ? assets.statusBreakdown.map((row) => (
-                    <Tag key={row.status}>{assetStatusLabels[row.status] ?? row.status}：{row.count}</Tag>
+                    <Tag key={row.status}>{t(assetStatusLabels[row.status] ?? row.status)}：{row.count}</Tag>
                   ))
-                : <span className="muted">当前经营空间尚无序列化资产</span>}
+                : <span className="muted">{t("当前经营空间尚无序列化资产")}</span>}
             </Space>
           </Col>
           <Col xs={24} xl={12}>
             <Descriptions
               size="small"
               column={1}
-              title={`数量库存（时点 ${stock.snapshotAt.slice(0, 19).replace("T", " ")}）`}
+              title={`${t("数量库存")} (${stock.snapshotAt.slice(0, 19).replace("T", " ")})`}
               items={[
-                { key: "onhand", label: "在库总量（分母）", children: stock.onHandTotal },
-                { key: "reserved", label: "已占用（分子）", children: stock.reservedTotal },
-                { key: "maintenance", label: "维修占用", children: `${stock.maintenanceTotal}　既不可租也不算已出租` },
-                { key: "available", label: "可租余量", children: `${stock.availableTotal}　= 在库 - 已占用 - 维修` },
-                { key: "ratio", label: "占用比", children: percent(stock.reservedRatio) }
+                { key: "onhand", label: t("在库总量（分母）"), children: stock.onHandTotal },
+                { key: "reserved", label: t("已占用（分子）"), children: stock.reservedTotal },
+                { key: "maintenance", label: t("维修占用"), children: `${stock.maintenanceTotal}　${t("既不可租也不算已出租")}` },
+                { key: "available", label: t("可租余量"), children: `${stock.availableTotal}　= ${t("在库")} - ${t("已占用")} - ${t("维修")}` },
+                { key: "ratio", label: t("占用比"), children: percent(stock.reservedRatio) }
               ]}
             />
             <Descriptions
               size="small"
               column={1}
-              title="区间订单占用"
+              title={t("区间订单占用")}
               style={{ marginTop: 8 }}
               items={[
-                { key: "hours", label: "占用时长合计", children: `${occupancy.totalHours} 小时（只有分子，不产出比率）` },
-                { key: "avg", label: "平均租期", children: `${occupancy.averageHours} 小时` }
+                { key: "hours", label: t("占用时长合计"), children: `${occupancy.totalHours} ${t("小时")}（${t("只有分子，不产出比率")}）` },
+                { key: "avg", label: t("平均租期"), children: `${occupancy.averageHours} ${t("小时")}` }
               ]}
             />
           </Col>
@@ -283,47 +286,46 @@ function ReportBody({ data }: { data: RentalWorkspaceOperationReport }) {
       </Card>
       {/* 维度表分页展示：地点与客户基数可能很大，一次全渲染会把页面拖死。
           分页只是展示层的事——数字本身已由服务端聚合，不受翻页影响。 */}
-      <Card className="data-panel" title="地点维度" style={{ marginTop: 16 }}>
+      <Card className="data-panel" title={t("地点维度")} style={{ marginTop: 16 }}>
         <Table<RentalWorkspaceLocationBreakdownRow>
           size="small"
           rowKey="locationId"
           dataSource={data.locationBreakdown}
           pagination={{ pageSize: 10, hideOnSinglePage: true }}
-          locale={{ emptyText: "当前筛选下没有订单" }}
+          locale={{ emptyText: t("当前筛选下没有订单") }}
           columns={[
-            { title: "履约地点", render: (_: unknown, row) => <><b>{row.locationName}</b><br /><span className="muted">{row.locationId}</span></> },
-            { title: "订单量", align: "right", dataIndex: "orderCount" },
-            { title: "租赁收入", align: "right", render: (_: unknown, row) => money(row.rentalRevenue) },
-            { title: "优惠金额", align: "right", render: (_: unknown, row) => money(row.discountTotal) },
-            { title: "应收金额", align: "right", render: (_: unknown, row) => money(row.receivableTotal) },
-            { title: "异常费用", align: "right", render: (_: unknown, row) => money(row.exceptionFeeTotal) }
+            { title: t("履约地点"), render: (_: unknown, row) => <><b>{row.locationName}</b><br /><span className="muted">{row.locationId}</span></> },
+            { title: t("订单量"), align: "right", dataIndex: "orderCount" },
+            { title: t("租赁收入"), align: "right", render: (_: unknown, row) => money(row.rentalRevenue) },
+            { title: t("优惠金额"), align: "right", render: (_: unknown, row) => money(row.discountTotal) },
+            { title: t("应收金额"), align: "right", render: (_: unknown, row) => money(row.receivableTotal) },
+            { title: t("异常费用"), align: "right", render: (_: unknown, row) => money(row.exceptionFeeTotal) }
           ]}
         />
         <div className="muted" style={{ marginTop: 8 }}>
-          地点名称取下单时快照；主档改名不改写历史订单，因此这里显示的是该地点订单最多的那个名称。
-          逐行订单量与金额相加等于上方总量，可与订单明细对账。
+          {t("地点名称取下单时快照；主档改名不改写历史订单，因此这里显示的是该地点订单最多的那个名称。逐行订单量与金额相加等于上方总量，可与订单明细对账。")}
         </div>
       </Card>
 
-      <Card className="data-panel" title="客户维度" style={{ marginTop: 16 }}>
+      <Card className="data-panel" title={t("客户维度")} style={{ marginTop: 16 }}>
         <Table<RentalWorkspaceCustomerBreakdownRow>
           size="small"
           rowKey={(row) => row.customerId ?? `name:${row.customerName}`}
           dataSource={data.customerBreakdown}
           pagination={{ pageSize: 10, hideOnSinglePage: true }}
-          locale={{ emptyText: "当前筛选下没有订单" }}
+          locale={{ emptyText: t("当前筛选下没有订单") }}
           columns={[
-            { title: "客户", render: (_: unknown, row) => <><b>{row.customerName}</b><br /><span className="muted">{row.customerId ?? "无主档 id"}</span></> },
-            { title: "类型", render: (_: unknown, row) => <Tag color={row.customerType === "corporate" ? "purple" : "blue"}>{row.customerType === "corporate" ? "企业" : "个人"}</Tag> },
-            { title: "订单量", align: "right", dataIndex: "orderCount" },
-            { title: "租赁收入", align: "right", render: (_: unknown, row) => money(row.rentalRevenue) },
-            { title: "优惠金额", align: "right", render: (_: unknown, row) => money(row.discountTotal) },
-            { title: "应收金额", align: "right", render: (_: unknown, row) => money(row.receivableTotal) },
-            { title: "异常费用", align: "right", render: (_: unknown, row) => money(row.exceptionFeeTotal) }
+            { title: t("客户"), render: (_: unknown, row) => <><b>{row.customerName}</b><br /><span className="muted">{row.customerId ?? t("无主档 id")}</span></> },
+            { title: t("类型"), render: (_: unknown, row) => <Tag color={row.customerType === "corporate" ? "purple" : "blue"}>{t(row.customerType === "corporate" ? "企业" : "个人")}</Tag> },
+            { title: t("订单量"), align: "right", dataIndex: "orderCount" },
+            { title: t("租赁收入"), align: "right", render: (_: unknown, row) => money(row.rentalRevenue) },
+            { title: t("优惠金额"), align: "right", render: (_: unknown, row) => money(row.discountTotal) },
+            { title: t("应收金额"), align: "right", render: (_: unknown, row) => money(row.receivableTotal) },
+            { title: t("异常费用"), align: "right", render: (_: unknown, row) => money(row.exceptionFeeTotal) }
           ]}
         />
         <div className="muted" style={{ marginTop: 8 }}>
-          只展示客户名与类型；手机号、证件号不进报表与导出——报表不是客户资料的第二个出口。
+          {t("只展示客户名与类型；手机号、证件号不进报表与导出——报表不是客户资料的第二个出口。")}
         </div>
       </Card>
     </>

@@ -54,9 +54,17 @@ function useMinWidth(query: string) {
   return matches;
 }
 
-/** 侧栏在窄屏改成抽屉：`lg` 以下（<992px）没有常驻侧栏，由悬浮按钮唤出。 */
+/**
+ * 侧栏的响应式分档：
+ * - 1200px 及以上默认展开完整侧栏；
+ * - 768px～1199px 保留桌面布局，但默认收起为图标栏；
+ * - 768px 以下才使用移动端抽屉。
+ */
+const DESKTOP_MIN_WIDTH = "(min-width: 768px)";
+const WIDE_DESKTOP_MIN_WIDTH = "(min-width: 1200px)";
+
 export function AppShell({ children }: { children: ReactNode }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => !window.matchMedia(WIDE_DESKTOP_MIN_WIDTH).matches);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const navRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
@@ -64,7 +72,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { message } = App.useApp();
   const { t } = useLocale();
   const { mode } = useAppearance();
-  const isDesktop = useMinWidth("(min-width: 992px)");
+  const isDesktop = useMinWidth(DESKTOP_MIN_WIDTH);
+  const isWideDesktop = useMinWidth(WIDE_DESKTOP_MIN_WIDTH);
   const tenant = useAuthStore((state) => state.tenant);
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
@@ -142,6 +151,16 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   // 路由变化即关抽屉：窄屏点完菜单还压着一层浮层，等于点了没反应。
   useEffect(() => { setDrawerOpen(false); }, [location.pathname]);
+
+  // 进入真正的移动端时交给抽屉；回到窄桌面时自动恢复图标栏，避免把移动端状态带回桌面。
+  // 从窄桌面恢复到宽桌面时自动展开；宽桌面内的手动收起不会因普通重渲染被覆盖。
+  useEffect(() => {
+    if (!isDesktop) {
+      setCollapsed(false);
+      return;
+    }
+    setCollapsed(!isWideDesktop);
+  }, [isDesktop, isWideDesktop]);
   /**
    * 刷新后把选中项滚进视野。
    *

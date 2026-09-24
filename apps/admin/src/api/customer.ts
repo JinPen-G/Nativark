@@ -12,6 +12,9 @@ import type {
   CustomerSensitiveAccessAuditEntry,
   CustomerStatusHistoryEntry,
   CustomerMembership,
+  CustomerProfileOrderQuery,
+  CustomerProfileOverview,
+  SaveCustomerProfileAddressRequest,
   MergeCustomersRequest,
   SaveCustomerContractRequest,
   SaveCustomerCreditRequest,
@@ -33,6 +36,12 @@ export const customerApi = {
   /** 租户级客户主档列表（跨空间可见是设计：同一客户不必在每个空间重复注册）。 */
   list: () => request<SharedCustomerProfile[]>("/platform/customers"),
   detail: (customerId: string) => request<SharedCustomerProfile>(`/platform/customers/${customerId}`),
+  profileOverview: (customerId: string, params?: CustomerProfileOrderQuery) =>
+    request<CustomerProfileOverview>(`/platform/customers/${customerId}/profile`, { params }),
+  saveAddress: (customerId: string, data: SaveCustomerProfileAddressRequest) =>
+    request<CustomerProfileOverview["addresses"][number]>(`/platform/customers/${customerId}/addresses`, { method: "put", data }),
+  removeAddress: (customerId: string, addressId: string) =>
+    request<{ success: true }>(`/platform/customers/${customerId}/addresses/${addressId}`, { method: "delete" }),
 
   ensureAccount: (customerId: string) =>
     request<CustomerAccount>(`/platform/customers/${customerId}/account`, { method: "post" }),

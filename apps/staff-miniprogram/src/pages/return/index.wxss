@@ -5,9 +5,8 @@
 .form-row { min-height: 86rpx; }
 .form-row__label { width: 48%; font-size: var(--font-secondary); }
 .form-row__control { justify-content: flex-end; }
-.screen > .section { padding-left: 24rpx; padding-right: 24rpx; }
-.screen .card { padding: 18rpx; border-radius: 16rpx; }
-.return-steps { display: flex; justify-content: space-around; margin: 16rpx 24rpx 4rpx; padding: 12rpx 0; background: var(--surface); border-radius: 14rpx; }
+.screen .card { padding: 20rpx; border-radius: var(--radius); }
+.return-steps { display: flex; justify-content: space-around; margin: 16rpx 32rpx 4rpx; padding: 12rpx 0; background: var(--surface); border-radius: 14rpx; }
 .return-step { flex: 1; text-align: center; color: var(--secondary); font-size: var(--font-nano); }
 .return-step text { display: flex; align-items: center; justify-content: center; width: 34rpx; height: 34rpx; margin: 0 auto 5rpx; border-radius: 50%; background: var(--line); color: var(--secondary); font-size: var(--font-mini); }
 .return-step--done text, .return-step--active text { background: var(--primary); color: var(--on-primary); }

@@ -44,6 +44,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
+import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 
 type FormValues = Omit<RentalQuoteRequest, "startAt" | "endAt" | "services"> & {
@@ -64,6 +65,7 @@ const fulfillmentModeLabels: Record<string, string> = {
 
 export function RentalOrderCreatePage() {
   const { message } = App.useApp();
+  const { t, locale } = useLocale();
   const navigate = useNavigate();
   const [form] = Form.useForm<FormValues>();
   const [quote, setQuote] = useState<RentalQuoteSnapshotV1>();
@@ -97,12 +99,12 @@ export function RentalOrderCreatePage() {
   const createQuote = useMutation({
     mutationFn: rentalCoreApi.createQuote,
     onSuccess: setQuote,
-    onError: (error: Error) => message.error(error.message || "报价失败，请检查会员资格、价格、库存与规则"),
+    onError: (error: Error) => message.error(error.message || t("报价失败，请检查会员资格、价格、库存与规则")),
   });
   const createOrder = useMutation({
     mutationFn: rentalCoreApi.createOrder,
     onSuccess: setCreated,
-    onError: (error: Error) => message.error(error.message || "创建失败，报价可能过期或资格、库存已变化"),
+    onError: (error: Error) => message.error(error.message || t("创建失败，报价可能过期或资格、库存已变化")),
   });
 
   useEffect(() => {
@@ -138,7 +140,7 @@ export function RentalOrderCreatePage() {
   async function quoteOrder() {
     const values = await form.validateFields();
     if (!selectedMember) {
-      message.error("请选择租户内的有效个人会员");
+      message.error(t("请选择租户内的有效个人会员"));
       return;
     }
     createQuote.mutate({
@@ -190,32 +192,32 @@ export function RentalOrderCreatePage() {
 
   if (created) {
     return <>
-      <PageHeader title="新建租赁订单" description="订单已经创建完成。" extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>返回订单</Button>} />
+      <PageHeader title={t("新建租赁订单")} description={t("订单已经创建完成。")} extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>{t("返回订单")}</Button>} />
       <Card className="data-panel">
         <Result
           status="success"
           icon={<CheckCircleOutlined />}
-          title="租赁订单已创建"
-          subTitle={`${created.orderNo} 已进入订单主流程。`}
+          title={t("租赁订单已创建")}
+          subTitle={`${created.orderNo} ${t("已进入订单主流程")}`}
           extra={[
-            <Button key="detail" type="primary" onClick={() => navigate(`/rental/orders/${created.id}`)}>查看订单</Button>,
-            <Button key="new" onClick={startAnotherOrder}>继续新建</Button>,
+            <Button key="detail" type="primary" onClick={() => navigate(`/rental/orders/${created.id}`)}>{t("查看订单")}</Button>,
+            <Button key="new" onClick={startAnotherOrder}>{t("继续新建")}</Button>,
           ]}
         />
       </Card>
     </>;
   }
 
-  const itemLabel = profile.data?.terminology.itemLabel ?? "商品";
-  const itemGroupLabel = `${profile.data?.terminology.itemLabel ?? "商品"}定价分组`;
-  const pickupLabel = profile.data?.terminology.pickupLabel ?? "领取";
-  const returnLabel = profile.data?.terminology.returnLabel ?? "归还";
+  const itemLabel = t(profile.data?.terminology.itemLabel ?? "商品");
+  const itemGroupLabel = locale === "en-US" ? `${itemLabel} ${t("定价分组")}` : `${itemLabel}定价分组`;
+  const pickupLabel = t(profile.data?.terminology.pickupLabel ?? "领取");
+  const returnLabel = t(profile.data?.terminology.returnLabel ?? "归还");
 
   return <>
     <PageHeader
-      title="新建租赁订单"
-      description={`在一个页面内完成会员、${itemGroupLabel}、增值服务、优惠和报价确认。`}
-      extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>返回订单</Button>}
+      title={t("新建租赁订单")}
+      description={locale === "en-US" ? `Complete member, ${itemGroupLabel}, value-added service, discount, and quote confirmation on one page.` : `在一个页面内完成会员、${itemGroupLabel}、增值服务、优惠和报价确认。`}
+      extra={<Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/rental/orders")}>{t("返回订单")}</Button>}
     />
     <Form<FormValues> form={form} layout="vertical" onValuesChange={() => setQuote(undefined)}>
       <Row gutter={[16, 16]} align="top">
@@ -223,12 +225,12 @@ export function RentalOrderCreatePage() {
           <Space orientation="vertical" size={16} style={{ width: "100%" }}>
             <Row gutter={[16, 16]}>
               <Col xs={24} lg={12}>
-                <Card className="data-panel" title={<Space><UserOutlined />会员与预约身份</Space>} style={{ height: "100%" }}>
-                  <Form.Item name="customerId" label="预约会员" rules={[{ required: true, message: "请选择个人会员" }]}>
+                <Card className="data-panel" title={<Space><UserOutlined />{t("会员与预约身份")}</Space>} style={{ height: "100%" }}>
+                  <Form.Item name="customerId" label={t("预约会员")} rules={[{ required: true, message: t("请选择个人会员") }]}>
                     <Select
                       showSearch={{ optionFilterProp: "label" }}
                       loading={members.isLoading}
-                      placeholder="搜索姓名或手机号"
+                      placeholder={t("搜索姓名或手机号")}
                       options={(members.data ?? []).filter((item) => item.membershipStatus === "active").map((item) => ({
                         value: item.customerId,
                         label: `${item.name} · ${item.phoneMasked}`,
@@ -236,15 +238,15 @@ export function RentalOrderCreatePage() {
                       onChange={() => form.setFieldValue("bookingIdentity", { bookingIdentity: "personal", enterpriseContractAndPayer: false })}
                     />
                   </Form.Item>
-                  <Form.Item name={["bookingIdentity", "bookingIdentity"]} label="以什么身份预约" rules={[{ required: true }]}>
+                  <Form.Item name={["bookingIdentity", "bookingIdentity"]} label={t("以什么身份预约")} rules={[{ required: true }]}>
                     <Radio.Group
                       block
                       optionType="button"
                       buttonStyle="solid"
                       disabled={!customerId}
                       options={[
-                        { value: "personal", label: "个人（默认）" },
-                        { value: "enterprise_employee", label: "企业员工", disabled: !(bookingOptions.data?.length) },
+                        { value: "personal", label: t("个人（默认）") },
+                        { value: "enterprise_employee", label: t("企业员工"), disabled: !(bookingOptions.data?.length) },
                       ]}
                       onChange={(event) => form.setFieldValue("bookingIdentity", {
                         bookingIdentity: event.target.value,
@@ -254,44 +256,44 @@ export function RentalOrderCreatePage() {
                   </Form.Item>
                   {enterpriseMode && <Row gutter={12}>
                     <Col span={14}>
-                      <Form.Item name={["bookingIdentity", "corporateCustomerId"]} label="所属企业" rules={[{ required: true, message: "请选择企业" }]}>
+                      <Form.Item name={["bookingIdentity", "corporateCustomerId"]} label={t("所属企业")} rules={[{ required: true, message: t("请选择企业") }]}>
                         <Select loading={bookingOptions.isLoading} options={(bookingOptions.data ?? []).map((item) => ({
                           value: item.corporateCustomerId,
-                          label: `${item.corporateCustomerName}${item.role === "admin" ? " · 企业管理员" : ""}`,
+                          label: `${item.corporateCustomerName}${item.role === "admin" ? ` · ${t("企业管理员")}` : ""}`,
                         }))} />
                       </Form.Item>
                     </Col>
                     <Col span={10}>
-                      <Form.Item name={["bookingIdentity", "enterpriseContractAndPayer"]} label="企业签约付款" valuePropName="checked">
-                        <Switch checkedChildren="企业" unCheckedChildren="个人" />
+                      <Form.Item name={["bookingIdentity", "enterpriseContractAndPayer"]} label={t("企业签约付款")} valuePropName="checked">
+                        <Switch checkedChildren={t("企业")} unCheckedChildren={t("个人")} />
                       </Form.Item>
                     </Col>
                   </Row>}
-                  {(members.error || bookingOptions.error) && <Alert showIcon type="error" title="会员或企业身份加载失败" description={members.error?.message ?? bookingOptions.error?.message} style={{ marginBottom: 12 }} />}
+                  {(members.error || bookingOptions.error) && <Alert showIcon type="error" title={t("会员或企业身份加载失败")} description={members.error?.message ?? bookingOptions.error?.message} style={{ marginBottom: 12 }} />}
                   {selectedMember
-                    ? <Alert showIcon type="info" title={`${selectedMember.name} · ${selectedMember.phoneMasked}`} description="租户统一会员。下单仅显示必要信息，会员状态、资质及本空间适用权益由服务端在报价时复核。" />
-                    : <Alert showIcon type="info" title="先选择会员，再选择个人或企业预约身份" />}
+                    ? <Alert showIcon type="info" title={`${selectedMember.name} · ${selectedMember.phoneMasked}`} description={t("租户统一会员。下单仅显示必要信息，会员状态、资质及本空间适用权益由服务端在报价时复核。")} />
+                    : <Alert showIcon type="info" title={t("先选择会员，再选择个人或企业预约身份")} />}
                 </Card>
               </Col>
               <Col xs={24} lg={12}>
-                <Card className="data-panel" title={<Space><CalendarOutlined />租赁时间与履约</Space>} style={{ height: "100%" }}>
+                <Card className="data-panel" title={<Space><CalendarOutlined />{t("租赁时间与履约")}</Space>} style={{ height: "100%" }}>
                   <Row gutter={12}>
                     <Col span={12}>
-                      <Form.Item name="fulfillmentLocationId" label={`${pickupLabel}地点`} rules={[{ required: true }]}>
+                      <Form.Item name="fulfillmentLocationId" label={`${pickupLabel}${t("地点")}`} rules={[{ required: true }]}>
                         <Select options={(locations.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: item.name }))} />
                       </Form.Item>
                     </Col>
                     <Col span={12}>
-                      <Form.Item name="returnLocationId" label={`${returnLabel}地点`}>
-                        <Select allowClear placeholder="默认同领取地点" options={(locations.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: item.name }))} />
+                      <Form.Item name="returnLocationId" label={`${returnLabel}${t("地点")}`}>
+                        <Select allowClear placeholder={t("默认同领取地点")} options={(locations.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: item.name }))} />
                       </Form.Item>
                     </Col>
                   </Row>
-                  <Form.Item name="period" label="租赁时间" rules={[{ required: true }]}>
+                  <Form.Item name="period" label={t("租赁时间")} rules={[{ required: true }]}>
                     <DatePicker.RangePicker showTime style={{ width: "100%" }} />
                   </Form.Item>
-                  <Form.Item name="fulfillmentMode" label="履约方式" rules={[{ required: true }]} style={{ marginBottom: 0 }}>
-                    <Select options={(settings.data?.fulfillment.enabledModes ?? []).map((value) => ({ value, label: fulfillmentModeLabels[value] ?? value }))} />
+                  <Form.Item name="fulfillmentMode" label={t("履约方式")} rules={[{ required: true }]} style={{ marginBottom: 0 }}>
+                    <Select options={(settings.data?.fulfillment.enabledModes ?? []).map((value) => ({ value, label: t(fulfillmentModeLabels[value] ?? value) }))} />
                   </Form.Item>
                 </Card>
               </Col>
@@ -299,10 +301,10 @@ export function RentalOrderCreatePage() {
 
             <Card
               className="data-panel"
-              title={<Space><AppstoreOutlined />选择{itemGroupLabel}</Space>}
-              extra={<Typography.Text type="secondary">支持一张订单添加多项</Typography.Text>}
+              title={<Space><AppstoreOutlined />{t("选择")}{itemGroupLabel}</Space>}
+              extra={<Typography.Text type="secondary">{t("支持一张订单添加多项")}</Typography.Text>}
             >
-              <Form.Item name="pricingPlanId" label="计价方案" rules={[{ required: true }]} style={{ maxWidth: 420 }}>
+              <Form.Item name="pricingPlanId" label={t("计价方案")} rules={[{ required: true }]} style={{ maxWidth: 420 }}>
                 <Select options={(pricing.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: `${item.name} · v${item.version}` }))} />
               </Form.Item>
               <Form.List name="lines">
@@ -315,33 +317,33 @@ export function RentalOrderCreatePage() {
                         </Form.Item>
                       </Col>
                       <Col xs={8} md={4}>
-                        <Form.Item name={[field.name, "quantity"]} label="数量" rules={[{ required: true }]}>
+                        <Form.Item name={[field.name, "quantity"]} label={t("数量")} rules={[{ required: true }]}>
                           <InputNumber min={1} precision={0} style={{ width: "100%" }} />
                         </Form.Item>
                       </Col>
                       <Col xs={8} md={5}>
-                        <Form.Item name={[field.name, "pricingUnit"]} label="计价单位">
-                          <Select allowClear placeholder="自动" options={[...new Set((pricing.data ?? []).flatMap((plan) => plan.rates.map((rate) => rate.unit)))].map((value) => ({ value, label: unitLabels[value] ?? value }))} />
+                        <Form.Item name={[field.name, "pricingUnit"]} label={t("计价单位")}>
+                          <Select allowClear placeholder={t("自动")} options={[...new Set((pricing.data ?? []).flatMap((plan) => plan.rates.map((rate) => rate.unit)))].map((value) => ({ value, label: t(unitLabels[value] ?? value) }))} />
                         </Form.Item>
                       </Col>
                       <Col xs={6} md={3}>
-                        <Form.Item name={[field.name, "usageQuantity"]} label="使用量">
+                        <Form.Item name={[field.name, "usageQuantity"]} label={t("使用量")}>
                           <InputNumber min={0} precision={0} style={{ width: "100%" }} />
                         </Form.Item>
                       </Col>
                       <Col xs={2} md={2}>
-                        {fields.length > 1 && <Button danger type="text" icon={<DeleteOutlined />} aria-label={`删除${itemLabel}`} onClick={() => remove(field.name)} />}
+                        {fields.length > 1 && <Button danger type="text" icon={<DeleteOutlined />} aria-label={`${t("删除")}${itemLabel}`} onClick={() => remove(field.name)} />}
                       </Col>
                     </Row>
                   </Card>)}
-                  <Button block type="dashed" icon={<PlusOutlined />} onClick={() => add({ quantity: 1 })}>继续添加定价分组</Button>
+                  <Button block type="dashed" icon={<PlusOutlined />} onClick={() => add({ quantity: 1 })}>{t("继续添加定价分组")}</Button>
                 </Space>}
               </Form.List>
             </Card>
 
-            <Card className="data-panel" title={<Space><GiftOutlined />增值服务</Space>}>
+            <Card className="data-panel" title={<Space><GiftOutlined />{t("增值服务")}</Space>}>
               {(services.data ?? []).filter((item) => item.status === "enabled").length === 0
-                ? <Typography.Text type="secondary">当前没有可选增值服务</Typography.Text>
+                ? <Typography.Text type="secondary">{t("当前没有可选增值服务")}</Typography.Text>
                 : <Row gutter={[12, 12]}>
                   {(services.data ?? []).filter((item) => item.status === "enabled").map((service) => {
                     const selected = selectedServices.find((item) => item.serviceId === service.id);
@@ -372,31 +374,31 @@ export function RentalOrderCreatePage() {
         <Col xs={24} xl={7}>
           <div style={{ position: "sticky", top: 16 }}>
             <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-              <Card className="data-panel" title={<Space><TagsOutlined />优惠与权益</Space>}>
-                <Form.Item name="discountPlanId" label="优惠方案" extra="可留空，由服务端自动匹配最优方案。">
-                  <Select allowClear placeholder="自动匹配" options={(discounts.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: item.name }))} />
+              <Card className="data-panel" title={<Space><TagsOutlined />{t("优惠与权益")}</Space>}>
+                <Form.Item name="discountPlanId" label={t("优惠方案")} extra={t("可留空，由服务端自动匹配最优方案。")}>
+                  <Select allowClear placeholder={t("自动匹配")} options={(discounts.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: item.name }))} />
                 </Form.Item>
-                <Form.Item name="customerCouponId" label="会员优惠券" style={{ marginBottom: 0 }}>
+                <Form.Item name="customerCouponId" label={t("会员优惠券")} style={{ marginBottom: 0 }}>
                   <Select
                     allowClear
                     disabled={!customerId}
-                    placeholder={customerId ? "选择可用优惠券" : "请先选择会员"}
+                    placeholder={customerId ? t("选择可用优惠券") : t("请先选择会员")}
                     options={(coupons.data ?? []).filter((item) => item.status === "claimed").map((item) => ({
                       value: item.id,
-                      label: `${item.templateName} · ${item.effectiveTo.slice(0, 10)} 到期`,
+                      label: `${item.templateName} · ${item.effectiveTo.slice(0, 10)} ${t("到期")}`,
                     }))}
                   />
                 </Form.Item>
               </Card>
 
-              <Card className="data-panel" title={<Space><CalculatorOutlined />费用明细</Space>}>
-                {!quote && <Alert showIcon type="info" title="填写完成后生成报价" description="价格、库存、营业日历、会员资格和优惠均由服务端统一计算。" />}
+              <Card className="data-panel" title={<Space><CalculatorOutlined />{t("费用明细")}</Space>}>
+                {!quote && <Alert showIcon type="info" title={t("填写完成后生成报价")} description={t("价格、库存、营业日历、会员资格和优惠均由服务端统一计算。")} />}
                 {quote && <>
                   <Space orientation="vertical" size={8} style={{ width: "100%" }}>
                     {quote.chargeLines.map((line) => <Row key={line.code} justify="space-between" wrap={false} gutter={12}>
                       <Col flex="auto">
-                        <Typography.Text>{line.name}</Typography.Text>
-                        {line.detail && <div><Typography.Text type="secondary" className="text-meta">{line.detail}</Typography.Text></div>}
+                        <Typography.Text>{t(line.name)}</Typography.Text>
+                        {line.detail && <div><Typography.Text type="secondary" className="text-meta">{t(line.detail)}</Typography.Text></div>}
                       </Col>
                       <Col><Typography.Text strong={line.amount > 0}>{money(line.amount)}</Typography.Text></Col>
                     </Row>)}
@@ -406,21 +408,21 @@ export function RentalOrderCreatePage() {
                     size="small"
                     column={1}
                     items={[
-                      { key: "identity", label: "预约身份", children: quote.membershipSnapshot ? <Space wrap><span>{quote.membershipSnapshot.personalCustomerName}</span>{quote.membershipSnapshot.corporateCustomerName && <Tag color="blue">{quote.membershipSnapshot.corporateCustomerName}</Tag>}</Space> : "个人" },
-                      { key: "discount", label: "优惠合计", children: `-${money(quote.discountAmount + quote.couponAmount)}` },
-                      { key: "deposit", label: "押金/预授权", children: money(quote.depositAmount) },
+                      { key: "identity", label: t("预约身份"), children: quote.membershipSnapshot ? <Space wrap><span>{quote.membershipSnapshot.personalCustomerName}</span>{quote.membershipSnapshot.corporateCustomerName && <Tag color="blue">{quote.membershipSnapshot.corporateCustomerName}</Tag>}</Space> : t("个人") },
+                      { key: "discount", label: t("优惠合计"), children: `-${money(quote.discountAmount + quote.couponAmount)}` },
+                      { key: "deposit", label: t("押金/预授权"), children: money(quote.depositAmount) },
                     ]}
                   />
                   <Divider style={{ margin: "16px 0 12px" }} />
                   <Row justify="space-between" align="middle">
-                    <Typography.Text>应付金额</Typography.Text>
+                    <Typography.Text>{t("应付金额")}</Typography.Text>
                     <Typography.Text strong className="order-quote-total">{money(quote.payableAmount)}</Typography.Text>
                   </Row>
                 </>}
                 <Button block size="large" type={quote ? "default" : "primary"} loading={createQuote.isPending} onClick={quoteOrder} style={{ marginTop: 16 }}>
-                  {quote ? "重新计算报价" : "生成报价"}
+                  {quote ? t("重新计算报价") : t("生成报价")}
                 </Button>
-                {quote && <Button block size="large" type="primary" loading={createOrder.isPending} onClick={submitOrder} style={{ marginTop: 10 }}>确认并创建订单</Button>}
+                {quote && <Button block size="large" type="primary" loading={createOrder.isPending} onClick={submitOrder} style={{ marginTop: 10 }}>{t("确认并创建订单")}</Button>}
               </Card>
             </Space>
           </div>

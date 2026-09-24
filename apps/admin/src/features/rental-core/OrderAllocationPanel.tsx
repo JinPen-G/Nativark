@@ -26,6 +26,7 @@ import { rentalCoreApi } from "@/api/rentalCore";
 import { useAuthStore } from "@/features/auth/authStore";
 import { QueryState } from "@/components/QueryState";
 import { ItemGroupPhoto } from "@/features/catalog/ItemGroupPhoto";
+import { useLocale } from "@/app/locale";
 
 const labels: Record<string, string> = {
   pre_assigned: "预分配",
@@ -46,6 +47,7 @@ const labels: Record<string, string> = {
   exception_resolved: "分配异常已解除",
 };
 export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
+  const { t, locale } = useLocale();
   const { message } = App.useApp();
   const qc = useQueryClient();
   const has = useAuthStore((s) => s.hasPermission);
@@ -102,7 +104,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
         qc.invalidateQueries({ queryKey: ["rental-core", "order", order.id] }),
         qc.invalidateQueries({ queryKey: ["rental-core", "orders"] }),
       ]);
-      message.success("分配结果已更新");
+      message.success(t("分配结果已更新"));
     },
     onError: (error: Error) => {
       const detail = isAxiosError(error)
@@ -111,7 +113,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
       message.error(
         (Array.isArray(detail) ? detail.join("；") : detail) ||
           error.message ||
-          "资源已变化，请刷新后重试",
+          t("资源已变化，请刷新后重试"),
       );
       void qc.invalidateQueries({
         queryKey: ["rental-core", "order", order.id],
@@ -145,7 +147,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
       ([, s]) => s.assetIds?.length || s.quantity,
     );
     if (!entries.length) {
-      message.warning("请选择至少一项资源或数量");
+      message.warning(t("请选择至少一项资源或数量"));
       return;
     }
     const replacing = entries.some(([id, s]) => {
@@ -165,7 +167,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
       );
     });
     if (replacing && (!canReassign || !reason.trim())) {
-      message.warning("跨型号或更换锁定资源需要改配权限，并填写原因");
+      message.warning(t("跨型号或更换锁定资源需要改配权限，并填写原因"));
       return;
     }
     mutation.mutate({
@@ -181,13 +183,13 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
   return (
     <>
       <Card
-        title="预约商品与实际分配"
+        title={t("预约商品与实际分配")}
         extra={
           editable &&
           canOperate && (
             <Space wrap>
               <Button disabled={locked || mutation.isPending} onClick={begin}>
-                选择资源 / 改配
+                {t("选择资源 / 改配")}
               </Button>
               <Button
                 disabled={
@@ -197,7 +199,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
                 }
                 onClick={() => mutation.mutate({ action: "preassign" })}
               >
-                自动补齐预分配
+                {t("自动补齐预分配")}
               </Button>
               <Button
                 type="primary"
@@ -209,7 +211,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
                 }
                 onClick={() => mutation.mutate({ action: "lock" })}
               >
-                锁定已分配资源
+                {t("锁定已分配资源")}
               </Button>
             </Space>
           )
@@ -227,12 +229,12 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
           title={
             order.assignment?.issue ??
             (editable
-              ? `${progress.label} · 已分配 ${progress.assigned}/${progress.required} · 已锁定 ${progress.locked}/${progress.required}`
-              : "交付资源记录")
+              ? `${t(progress.label)} · ${t("已分配")} ${progress.assigned}/${progress.required} · ${t("已锁定")} ${progress.locked}/${progress.required}`
+              : t("交付资源记录"))
           }
           description={
             editable
-              ? "按完整租期和前后缓冲检查资源；全部必要资源锁定后才能办理领取。预分配不会重复扣减预留库存。"
+              ? t("按完整租期和前后缓冲检查资源；全部必要资源锁定后才能办理领取。预分配不会重复扣减预留库存。")
               : undefined
           }
           style={{ marginBottom: 16 }}
@@ -240,7 +242,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
         {locked && (
           <Alert
             type="info"
-            title={`${order.assignment!.operationLock!.ownerName} 正在办理，结束办理后才能改配`}
+            title={`${order.assignment!.operationLock!.ownerName} ${t("正在办理，结束办理后才能改配")}`}
             style={{ marginBottom: 12 }}
           />
         )}
@@ -249,10 +251,10 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
           pagination={false}
           dataSource={active}
           scroll={{ x: 760 }}
-          locale={{ emptyText: "尚未分配实际资源，预约库存仍保留" }}
+          locale={{ emptyText: t("尚未分配实际资源，预约库存仍保留") }}
           columns={[
             {
-              title: "商品照片",
+              title: t("商品照片"),
               width: 88,
               render: (_, a) => {
                 const g = groups.data?.find((g) => g.id === a.itemGroupId);
@@ -261,12 +263,12 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
                 return g && cover ? (
                   <ItemGroupPhoto groupId={g.id} image={cover} />
                 ) : (
-                  "未上传"
+                  t("未上传")
                 );
               },
             },
             {
-              title: "预订分组 / 实际型号",
+              title: t("预订分组 / 实际型号"),
               render: (_, a) => (
                 <>
                   <b>
@@ -283,28 +285,28 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
               ),
             },
             {
-              title: "资源编号 / 数量",
+              title: t("资源编号 / 数量"),
               render: (_, a) => (
                 <>
-                  {a.assetNo ?? "数量库存"} × {a.quantity}
+                  {a.assetNo ?? t("数量库存")} × {a.quantity}
                 </>
               ),
             },
             {
-              title: "分配状态",
+              title: t("分配状态"),
               render: (_, a) => (
                 <Space orientation="vertical" size={0}>
                   <Tag color={a.status === "pre_assigned" ? "orange" : "blue"}>
-                    {labels[a.status]}
+                    {t(labels[a.status] ?? a.status)}
                   </Tag>
                   {a.metadata?.protected && (
-                    <span className="muted">人工保护</span>
+                    <span className="muted">{t("人工保护")}</span>
                   )}
                 </Space>
               ),
             },
             {
-              title: "操作",
+              title: t("操作"),
               render: (_, a) =>
                 editable && canOperate ? (
                   <Space>
@@ -319,7 +321,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
                           })
                         }
                       >
-                        锁定
+                        {t("锁定")}
                       </Button>
                     )}
                     {canReassign &&
@@ -329,7 +331,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
                           disabled={locked}
                           onClick={() => confirmAction("unlock", [a.id])}
                         >
-                          解锁
+                          {t("解锁")}
                         </Button>
                       )}
                     {canReassign && (
@@ -339,7 +341,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
                         disabled={locked}
                         onClick={() => confirmAction("release", [a.id])}
                       >
-                        释放
+                        {t("释放")}
                       </Button>
                     )}
                   </Space>
@@ -352,16 +354,16 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
       </Card>
       {!!order.assignment?.history.length && (
         <Card
-          title={`分配与办理记录（${order.assignment.history.length}）`}
+          title={`${t("分配与办理记录")} (${order.assignment.history.length})`}
           extra={
             <Button type="text" onClick={() => setHistoryOpen((v) => !v)}>
-              {historyOpen ? "收起记录" : "展开记录"}
+              {historyOpen ? t("收起记录") : t("展开记录")}
             </Button>
           }
         >
           {!historyOpen && (
             <span className="muted">
-              最近：
+              {t("最近")}：
               {new Date(order.assignment.history.at(-1)!.at).toLocaleString()} ·{" "}
               {order.assignment.history.at(-1)!.actor} ·{" "}
               {labels[order.assignment.history.at(-1)!.action] ??
@@ -376,29 +378,29 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
                 content: (
                   <>
                     <b>
-                      {h.actor} · {labels[h.action] ?? h.action}
+                      {h.actor} · {t(labels[h.action] ?? h.action)}
                     </b>
                     {h.reason && <p>{h.reason}</p>}
                     {!!h.before.length && (
                       <div className="muted">
-                        变更前：
+                        {t("变更前")}：
                         {h.before
                           .filter((a) => !["released", "returned", "consumed"].includes(a.status))
                           .map(
                             (a) =>
-                              `${a.assetNo ?? a.metadata?.itemGroupName ?? "数量库存"} × ${a.quantity}（${labels[a.status]}）`,
+                              `${a.assetNo ?? a.metadata?.itemGroupName ?? t("数量库存")} × ${a.quantity} (${t(labels[a.status] ?? a.status)})`,
                           )
-                          .join("、") || "无分配"}
+                          .join(locale === "en-US" ? ", " : "、") || t("无分配")}
                       </div>
                     )}
                     {!!h.after.length && (
                       <div className="muted">
-                        变更后：
+                        {t("变更后")}：
                         {h.after
                           .filter((a) => !["released", "returned", "consumed"].includes(a.status))
                           .map(
                             (a) =>
-                              `${a.assetNo ?? a.metadata?.itemGroupName ?? "数量库存"} × ${a.quantity}（${labels[a.status]}）`,
+                              `${a.assetNo ?? a.metadata?.itemGroupName ?? t("数量库存")} × ${a.quantity} (${t(labels[a.status] ?? a.status)})`,
                           )
                           .join("、")}
                       </div>
@@ -413,22 +415,22 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
       <Drawer
         title={
           confirmation
-            ? `${labels[confirmation.action]}资源`
-            : "选择本次履约资源"
+            ? `${t(labels[confirmation.action] ?? confirmation.action)}${t("资源")}`
+            : t("选择本次履约资源")
         }
         open={open}
         onClose={() => setOpen(false)}
         size={860}
         footer={
           <Space>
-            <Button onClick={() => setOpen(false)}>取消</Button>
+            <Button onClick={() => setOpen(false)}>{t("取消")}</Button>
             <Button
               type="primary"
               loading={mutation.isPending}
               disabled={confirmation ? !reason.trim() : !candidates.data}
               onClick={submit}
             >
-              {confirmation ? "确认操作" : "保存分配"}
+              {confirmation ? t("确认操作") : t("保存分配")}
             </Button>
           </Space>
         }
@@ -440,10 +442,10 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
                 <Card
                   key={r.reservationId}
                   size="small"
-                  title={`${r.itemGroupName} · 需要 ${r.quantity} · 已分配 ${r.assignedQuantity}`}
+                  title={`${r.itemGroupName} · ${t("需要")} ${r.quantity} · ${t("已分配")} ${r.assignedQuantity}`}
                 >
                   <Select
-                    aria-label="履约型号"
+                    aria-label={t("履约型号")}
                     style={{ width: "100%", marginBottom: 12 }}
                     value={
                       selection[r.reservationId]?.itemGroupId ?? r.itemGroupId
@@ -466,7 +468,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
                     <Select
                       mode="multiple"
                       style={{ width: "100%" }}
-                      placeholder="选择实际资产；不可用项会说明原因"
+                      placeholder={t("选择实际资产；不可用项会说明原因")}
                       value={selection[r.reservationId]?.assetIds ?? []}
                       onChange={(assetIds) =>
                         setSelection((s) => ({
@@ -495,7 +497,7 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
                       min={1}
                       max={r.quantity}
                       precision={0}
-                      placeholder="分配数量"
+                      placeholder={t("分配数量")}
                       value={selection[r.reservationId]?.quantity}
                       onChange={(quantity) =>
                         setSelection((s) => ({
@@ -509,18 +511,18 @@ export function OrderAllocationPanel({ order }: { order: RentalOrder }) {
                     />
                   )}
                   <p className="muted">
-                    未选择的明细保持不变。可在下单时定价组范围内切换型号，每条预留选择一种型号；库存预留同步转移，订单价格不变。跨型号或更换已锁定资源需改配权限与原因。
+                    {t("未选择的明细保持不变。可在下单时定价组范围内切换型号，每条预留选择一种型号；库存预留同步转移，订单价格不变。跨型号或更换已锁定资源需改配权限与原因。")}
                   </p>
                 </Card>
               ))}
             </Space>
           </QueryState>
         )}
-        <p>操作原因{confirmation && "（必填）"}</p>
+        <p>{t("操作原因")}{confirmation && `（${t("必填")}）`}</p>
         <Input.TextArea
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="解锁、释放、改配请说明原因"
+          placeholder={t("解锁、释放、改配请说明原因")}
           rows={3}
         />
       </Drawer>

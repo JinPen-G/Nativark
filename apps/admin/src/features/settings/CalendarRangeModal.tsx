@@ -27,6 +27,7 @@ import {
   RentalDayType,
 } from "@rental-os/shared";
 import { rentalCoreApi } from "@/api/rentalCore";
+import { useLocale } from "@/app/locale";
 
 type RangeRow = RentalCalendarRangeOverridePreview["days"][number] | RentalCalendarRangeRemovePreview["days"][number];
 
@@ -60,12 +61,13 @@ type FieldKey = "dayType" | "name" | "pricingOverrideRef" | "businessStatus" | "
 
 /** 需求 4.5.9：周期性分时价格由 PRICE-03 价格计划维护，月历只消费其只读摘要。 */
 function PricePlaceholder() {
+  const { t } = useLocale();
   return (
     <Alert
       type="info"
       showIcon
-      title="一次性特殊价格由价格模块提供"
-      description="价格值由价格计划维护；日历范围覆盖只保存一次性价格规则的稳定引用，不保存商品价格或空间统一系数。"
+      title={t("一次性特殊价格由价格模块提供")}
+      description={t("价格值由价格计划维护；日历范围覆盖只保存一次性价格规则的稳定引用，不保存商品价格或空间统一系数。")}
     />
   );
 }
@@ -87,6 +89,7 @@ export function CalendarRangeModal({
   onApplied: (result: ApplyRentalCalendarRangeOverrideResult | ApplyRentalCalendarRangeRemoveResult, mode: "override" | "remove") => void;
 }) {
   const { message } = App.useApp();
+  const { t } = useLocale();
   const queryClient = useQueryClient();
   const [form] = Form.useForm();
   const [step, setStep] = useState<"input" | "preview">("input");
@@ -131,9 +134,9 @@ export function CalendarRangeModal({
         overrideReason?: string;
       };
       const [start, end] = values.range ?? [];
-      if (!start || !end) throw new Error("请选择日期范围");
+      if (!start || !end) throw new Error(t("请选择日期范围"));
       if (mode === "override" && useDatetime && (!values.startDateTime || !values.endDateTime)) {
-        throw new Error("日期时间范围必须同时提供开始与结束时点");
+        throw new Error(t("日期时间范围必须同时提供开始与结束时点"));
       }
       const startDate = start.format("YYYY-MM-DD");
       const endDate = end.format("YYYY-MM-DD");
@@ -158,9 +161,9 @@ export function CalendarRangeModal({
       };
       if (mode === "override") {
         if (!Object.values(payload.fields ?? {}).some((value) => value !== undefined)) {
-          throw new Error("至少选择并填写一个要设置的字段");
+          throw new Error(t("至少选择并填写一个要设置的字段"));
         }
-        if (!values.overrideReason?.trim()) throw new Error("请填写调整原因");
+        if (!values.overrideReason?.trim()) throw new Error(t("请填写调整原因"));
         return rentalCoreApi.calendarRangePreview(year, payload as Parameters<typeof rentalCoreApi.calendarRangePreview>[1]);
       }
       return rentalCoreApi.calendarRangeRemovePreview(year, payload);
@@ -188,7 +191,7 @@ export function CalendarRangeModal({
         overrideReason?: string;
       };
       const [start, end] = values.range ?? [];
-      if (!start || !end) throw new Error("请选择日期范围");
+      if (!start || !end) throw new Error(t("请选择日期范围"));
       const startDate = start.format("YYYY-MM-DD");
       const endDate = end.format("YYYY-MM-DD");
       if (mode === "override") {
@@ -222,8 +225,8 @@ export function CalendarRangeModal({
     onSuccess: (result) => {
       message.success(
         mode === "override"
-          ? `范围覆盖已应用：${(result as ApplyRentalCalendarRangeOverrideResult).appliedCount} 天，批次 ${(result as ApplyRentalCalendarRangeOverrideResult).batchId}`
-          : `范围移除完成：恢复 ${(result as ApplyRentalCalendarRangeRemoveResult).removedCount} 天`
+          ? `${t("范围覆盖已应用")}：${(result as ApplyRentalCalendarRangeOverrideResult).appliedCount} ${t("天")}，${t("批次")} ${(result as ApplyRentalCalendarRangeOverrideResult).batchId}`
+          : `${t("范围移除完成")}：${t("恢复")} ${(result as ApplyRentalCalendarRangeRemoveResult).removedCount} ${t("天")}`
       );
       queryClient.invalidateQueries({ queryKey: ["rental-core", "calendar", year] });
       onApplied(result, mode);
@@ -239,15 +242,15 @@ export function CalendarRangeModal({
       "hasOverride" in row;
     if (mode === "remove") {
       return [
-        { title: "日期", dataIndex: "date", width: 110 },
+        { title: t("日期"), dataIndex: "date", width: 110 },
         {
-          title: "有覆盖",
+          title: t("有覆盖"),
           dataIndex: "hasOverride",
           width: 70,
-          render: (value: boolean) => (value ? <Tag color="volcano">是</Tag> : <Tag>否</Tag>),
+          render: (value: boolean) => (value ? <Tag color="volcano">{t("是")}</Tag> : <Tag>{t("否")}</Tag>),
         },
         {
-          title: "当前值",
+          title: t("当前值"),
           render: (_, row) => {
             const status = "conflict" in row ? row.current.businessStatus ?? (row.current.closed ? "closed" : "open") : row.current.businessStatus ?? (row.current.closed ? "closed" : "open");
             return (
@@ -258,34 +261,34 @@ export function CalendarRangeModal({
           },
         },
         {
-          title: "移除后恢复为",
+          title: t("移除后恢复为"),
           render: (_, row) =>
             isRemoveRow(row) && row.hasOverride ? (
               <Space size={4}>
                 <Tag color={row.restoredSource === "official_cn" ? "geekblue" : "default"}>
-                  {row.restoredSource === "official_cn" ? "官方日历" : "每周模板"}
+                  {row.restoredSource === "official_cn" ? t("官方日历") : t("每周模板")}
                 </Tag>
                 <Typography.Text className="text-meta">
                   {row.restored.dayType} · {row.restored.name}
                 </Typography.Text>
               </Space>
             ) : (
-              <Typography.Text type="secondary">保持不变</Typography.Text>
+              <Typography.Text type="secondary">{t("保持不变")}</Typography.Text>
             ),
         },
       ];
     }
     const isOverrideRow = (row: RangeRow): row is RentalCalendarRangeOverridePreview["days"][number] => "conflict" in row;
     const overrideColumns: ColumnsType<RentalCalendarRangeOverridePreview["days"][number]> = [
-      { title: "日期", dataIndex: "date", width: 110 },
+      { title: t("日期"), dataIndex: "date", width: 110 },
       {
-        title: "冲突",
+        title: t("冲突"),
         dataIndex: "conflict",
         width: 70,
-        render: (value: boolean) => (value ? <Tag color="volcano">已有覆盖</Tag> : <Tag>无</Tag>),
+        render: (value: boolean) => (value ? <Tag color="volcano">{t("已有覆盖")}</Tag> : <Tag>{t("无")}</Tag>),
       },
       {
-        title: "基础值（模板/官方）",
+        title: t("基础值（模板/官方）"),
         render: (_, raw) => {
           if (!isOverrideRow(raw)) return null;
           const row = raw;
@@ -298,7 +301,7 @@ export function CalendarRangeModal({
         },
       },
       {
-        title: "当前生效值",
+        title: t("当前生效值"),
         render: (_, raw) => {
           if (!isOverrideRow(raw)) return null;
           const row = raw;
@@ -311,7 +314,7 @@ export function CalendarRangeModal({
         },
       },
       {
-        title: "应用后",
+        title: t("应用后"),
         render: (_, raw) => {
           if (!isOverrideRow(raw)) return null;
           const row = raw;
@@ -319,13 +322,13 @@ export function CalendarRangeModal({
             <Typography.Text className="text-meta">
               {row.after.dayType} · {row.after.businessStatus ?? (row.after.closed ? "closed" : "open")}
               {row.after.hours?.windows?.length ? ` · ${row.after.hours.windows.map((w) => `${w.start}-${w.end}`).join("、")}` : ""}
-              {row.after.pricingOverrideRef ? ` · 特殊价格引用 ${row.after.pricingOverrideRef}` : ""}
+              {row.after.pricingOverrideRef ? ` · ${t("特殊价格引用")} ${row.after.pricingOverrideRef}` : ""}
             </Typography.Text>
           );
         },
       },
       {
-        title: "将替换的字段",
+        title: t("将替换的字段"),
         dataIndex: "changedFields",
         render: (value: string[]) => value.map((field) => <Tag key={field}>{field}</Tag>),
       },
@@ -338,7 +341,7 @@ export function CalendarRangeModal({
 
   return (
     <Drawer
-      title={mode === "override" ? `新增日期范围覆盖 · ${year} 年` : `移除日期范围覆盖 · ${year} 年`}
+      title={mode === "override" ? `${t("新增日期范围覆盖")} · ${year} ${t("年")}` : `${t("移除日期范围覆盖")} · ${year} ${t("年")}`}
       size={880}
       open={open}
       onClose={close}
@@ -346,18 +349,18 @@ export function CalendarRangeModal({
       extra={
         step === "input" ? (
           <Button type="primary" loading={previewMutation.isPending} onClick={() => previewMutation.mutate()}>
-            预览影响
+            {t("预览影响")}
           </Button>
         ) : (
           <Space>
-            <Button onClick={() => setStep("input")}>返回修改</Button>
+            <Button onClick={() => setStep("input")}>{t("返回修改")}</Button>
             {mode === "override" ? (
               <Button type="primary" danger={needsAck} loading={applyMutation.isPending} disabled={needsAck} onClick={() => applyMutation.mutate()}>
-                确认应用（{overridePreview?.totalDays ?? 0} 天）
+                {t("确认应用")}（{overridePreview?.totalDays ?? 0} {t("天")}）
               </Button>
             ) : (
               <Button type="primary" loading={applyMutation.isPending} onClick={() => applyMutation.mutate()}>
-                确认移除（{removePreview?.overrideCount ?? 0} 天）
+                {t("确认移除")}（{removePreview?.overrideCount ?? 0} {t("天")}）
               </Button>
             )}
           </Space>
@@ -367,8 +370,8 @@ export function CalendarRangeModal({
       <Form form={form} layout="vertical" initialValues={{ hoursStart: "09:00", hoursEnd: "18:00" }}>
         <Form.Item
           name="range"
-          label="日期范围（同一自然年内；跨年度请按年度分两次提交）"
-          rules={[{ required: true, message: "请选择日期范围" }]}
+          label={t("日期范围（同一自然年内；跨年度请按年度分两次提交）")}
+          rules={[{ required: true, message: t("请选择日期范围") }]}
         >
           <DatePicker.RangePicker
             style={{ width: "100%" }}
@@ -385,33 +388,33 @@ export function CalendarRangeModal({
         </Form.Item>
         {mode === "override" && (
           <>
-            <Form.Item label="按日期时间选择范围（可选）" tooltip="日历字段按整天生效；起止时点会记录到覆盖范围并在日期详情展示，一次性价格覆盖的时段语义由价格模块承接。">
+            <Form.Item label={t("按日期时间选择范围（可选）")} tooltip={t("日历字段按整天生效；起止时点会记录到覆盖范围并在日期详情展示，一次性价格覆盖的时段语义由价格模块承接。")}>
               <Checkbox
                 checked={useDatetime}
                 onChange={(event) => setUseDatetime(event.target.checked)}
               >
-                指定开始与结束时点
+                {t("指定开始与结束时点")}
               </Checkbox>
             </Form.Item>
             {useDatetime && (
               <Space size={16} wrap>
-                <Form.Item name="startDateTime" label="开始时点" rules={[{ required: useDatetime }]}>
+                <Form.Item name="startDateTime" label={t("开始时点")} rules={[{ required: useDatetime }]}>
                   <DatePicker showTime format="YYYY-MM-DD HH:mm" />
                 </Form.Item>
-                <Form.Item name="endDateTime" label="结束时点" rules={[{ required: useDatetime }]}>
+                <Form.Item name="endDateTime" label={t("结束时点")} rules={[{ required: useDatetime }]}>
                   <DatePicker showTime format="YYYY-MM-DD HH:mm" />
                 </Form.Item>
               </Space>
             )}
-            <Divider titlePlacement="left">要设置的字段（未勾选字段保持原值）</Divider>
+            <Divider titlePlacement="left">{t("要设置的字段（未勾选字段保持原值）")}</Divider>
             <Space size={24} wrap>
               {(
                 [
-                  ["dayType", "日期类型"],
-                  ["name", "名称"],
-                  ["pricingOverrideRef", "一次性价格引用"],
-                  ["businessStatus", "营业状态"],
-                  ["hours", "营业时段"],
+                  ["dayType", t("日期类型")],
+                  ["name", t("名称")],
+                  ["pricingOverrideRef", t("一次性价格引用")],
+                  ["businessStatus", t("营业状态")],
+                  ["hours", t("营业时段")],
                 ] as Array<[FieldKey, string]>
               ).map(([key, label]) => (
                 <Checkbox
@@ -424,31 +427,31 @@ export function CalendarRangeModal({
               ))}
             </Space>
             {selectedFields.dayType && (
-              <Form.Item name="dayType" label="日期类型" rules={[{ required: selectedFields.dayType }]}>
-                <Select options={dayTypeOptions} />
+              <Form.Item name="dayType" label={t("日期类型")} rules={[{ required: selectedFields.dayType }]}>
+                <Select options={dayTypeOptions.map((option) => ({ ...option, label: t(option.label) }))} />
               </Form.Item>
             )}
             {selectedFields.name && (
-              <Form.Item name="name" label="名称（节日 / 调休 / 特殊日名）" rules={[{ required: selectedFields.name }]}>
+              <Form.Item name="name" label={t("名称（节日 / 调休 / 特殊日名）")} rules={[{ required: selectedFields.name }]}>
                 <Input />
               </Form.Item>
             )}
             {selectedFields.pricingOverrideRef && (
-              <Form.Item name="pricingOverrideRef" label="一次性价格引用" tooltip="填写基础定价中一次性特殊价格规则的引用标识；价格值仍由商品价格版本维护。" rules={[{ required: selectedFields.pricingOverrideRef }]}>
+              <Form.Item name="pricingOverrideRef" label={t("一次性价格引用")} tooltip={t("填写基础定价中一次性特殊价格规则的引用标识；价格值仍由商品价格版本维护。")} rules={[{ required: selectedFields.pricingOverrideRef }]}>
                 <Input placeholder="例如 NATIONAL-DAY-2026" />
               </Form.Item>
             )}
             {selectedFields.businessStatus && (
-              <Form.Item name="businessStatus" label="营业状态" rules={[{ required: selectedFields.businessStatus }]}>
-                <Select options={businessStatusOptions} />
+              <Form.Item name="businessStatus" label={t("营业状态")} rules={[{ required: selectedFields.businessStatus }]}>
+                <Select options={businessStatusOptions.map((option) => ({ ...option, label: t(option.label) }))} />
               </Form.Item>
             )}
             {selectedFields.hours && (
               <Space size={16} wrap>
-                <Form.Item name="hoursStart" label="营业开始" rules={[{ required: selectedFields.hours }]}>
+                <Form.Item name="hoursStart" label={t("营业开始")} rules={[{ required: selectedFields.hours }]}>
                   <Input placeholder="09:00" />
                 </Form.Item>
-                <Form.Item name="hoursEnd" label="营业结束" rules={[{ required: selectedFields.hours }]}>
+                <Form.Item name="hoursEnd" label={t("营业结束")} rules={[{ required: selectedFields.hours }]}>
                   <Input placeholder="18:00" />
                 </Form.Item>
               </Space>
@@ -457,14 +460,14 @@ export function CalendarRangeModal({
               style={{ marginBottom: 16 }}
               type="info"
               showIcon
-              title="价格说明"
-              description="本抽屉不设置商品价格，也不会因为价格时段把整天改成假日；周期性分时价格由价格计划维护（PRICE-03）。"
+              title={t("价格说明")}
+              description={t("本抽屉不设置商品价格，也不会因为价格时段把整天改成假日；周期性分时价格由价格计划维护（PRICE-03）。")}
             />
             <PricePlaceholder />
             <Form.Item
               name="overrideReason"
-              label="调整原因（必填，随本批全部日期一起记录）"
-              rules={[{ required: true, message: "请填写调整原因" }]}
+              label={t("调整原因（必填，随本批全部日期一起记录）")}
+              rules={[{ required: true, message: t("请填写调整原因") }]}
               style={{ marginTop: 16 }}
             >
               <Input maxLength={191} />
@@ -474,8 +477,8 @@ export function CalendarRangeModal({
         {mode === "remove" && (
           <Form.Item
             name="overrideReason"
-            label="移除原因（必填）"
-            rules={[{ required: true, message: "请填写移除原因" }]}
+            label={t("移除原因（必填）")}
+            rules={[{ required: true, message: t("请填写移除原因") }]}
           >
             <Input maxLength={191} />
           </Form.Item>
@@ -489,24 +492,24 @@ export function CalendarRangeModal({
             showIcon
             title={
               mode === "override"
-                ? `预览：共 ${overridePreview?.totalDays ?? 0} 天，其中 ${overridePreview?.conflictCount ?? 0} 天已有人工覆盖`
-                : `移除预览：范围内 ${removePreview?.overrideCount ?? 0} 天有人工覆盖，其余保持不变`
+                ? `${t("预览：共")} ${overridePreview?.totalDays ?? 0} ${t("天，其中")} ${overridePreview?.conflictCount ?? 0} ${t("天已有人工覆盖")}`
+                : `${t("移除预览：范围内")} ${removePreview?.overrideCount ?? 0} ${t("天有人工覆盖，其余保持不变")}`
             }
             description={
               mode === "override"
-                ? "应用将一次性写入全部日期（共用原因、批次与操作时间，只推进一次版本修订）；与他人的并发编辑会返回 409，请刷新后重试。"
-                : "移除后日期恢复到官方日历或每周模板；只影响范围内的已有覆盖，不会产生空白日。"
+                ? t("应用将一次性写入全部日期（共用原因、批次与操作时间，只推进一次版本修订）；与他人的并发编辑会返回 409，请刷新后重试。")
+                : t("移除后日期恢复到官方日历或每周模板；只影响范围内的已有覆盖，不会产生空白日。")
             }
           />
           {needsAck && (
             <Alert
               type="warning"
               showIcon
-              title={`有 ${conflicts.length} 天已存在人工覆盖，必须明确确认后才能应用`}
-              description={`冲突日期：${conflicts.map((row) => row.date).join("、")}。应用会替换这些日期上现有人工覆盖的原因与取值（历史审计保留在覆盖审计流水里）。`}
+              title={`${t("有")} ${conflicts.length} ${t("天已存在人工覆盖，必须明确确认后才能应用")}`}
+              description={`${t("冲突日期")}：${conflicts.map((row) => row.date).join("、")}。${t("应用会替换这些日期上现有人工覆盖的原因与取值（历史审计保留在覆盖审计流水里）。")}`}
               action={
                 <Checkbox checked={conflictAcknowledged} onChange={(event) => setConflictAcknowledged(event.target.checked)}>
-                  我已确认替换上述日期的现有人工覆盖
+                  {t("我已确认替换上述日期的现有人工覆盖")}
                 </Checkbox>
               }
             />

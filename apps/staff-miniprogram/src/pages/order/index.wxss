@@ -3,7 +3,7 @@
 .order-heading { padding-top: 20rpx; padding-bottom: 16rpx; }
 .order-heading .title { font-size: var(--font-title); line-height: 1.35; }
 .order-heading__meta { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; margin-top: 8rpx; color: var(--secondary); font-size: var(--font-mini); }
-.order-info-card { box-shadow: none; border: 1rpx solid var(--border); padding: 24rpx; border-radius: 18rpx; }
+.order-info-card { box-shadow: none; border: 1rpx solid var(--border); padding: 24rpx; border-radius: var(--radius); }
 .order-info-card .cell__title { font-weight: var(--fw-semibold); }
 .order-info-card .kv { min-height: 58rpx; }
 .order-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; min-height: 44rpx; }
@@ -37,10 +37,10 @@
 .offline-registration__title { color: var(--text); font-size: var(--font-secondary); font-weight: var(--fw-semibold); }
 .offline-registration__amount { color: var(--primary); font-size: var(--font-secondary); font-weight: var(--fw-semibold); }
 .offline-pending-row { margin-top: 12rpx; }
-.offline-pending-label, .offline-confirmed-label { color: var(--warning, #D97706); font-size: var(--font-caption); }
-.offline-confirmed-label { margin-top: 10rpx; color: var(--success, #168A58); }
+.offline-pending-label, .offline-confirmed-label { color: var(--warning); font-size: var(--font-caption); }
+.offline-confirmed-label { margin-top: 10rpx; color: var(--success); }
 .offline-confirm { min-height: 64rpx; margin: 0; padding: 0 20rpx; font-size: var(--font-caption); line-height: 64rpx; }
-.operation-lock-card { border-color: var(--warning, #D97706); }
+.operation-lock-card { border-color: var(--warning); }
 .internal-notes-card { padding-bottom: 20rpx; }
 .internal-note-list { margin-top: 12rpx; border-top: 1rpx solid var(--border); }
 .internal-note { padding: 16rpx 0; border-bottom: 1rpx solid var(--border); }

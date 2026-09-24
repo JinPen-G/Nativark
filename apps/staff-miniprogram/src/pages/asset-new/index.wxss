@@ -1,5 +1,4 @@
-.screen > .section { padding-left: 24rpx; padding-right: 24rpx; }
-.card { box-shadow: none; border: 1rpx solid var(--border); padding: 20rpx; border-radius: 16rpx; }
+.card { box-shadow: none; border: 1rpx solid var(--border); padding: 20rpx; border-radius: var(--radius); }
 .card > .subtitle { margin-bottom: 12rpx; }
 .field { display: flex; align-items: center; gap: 12rpx; min-height: 74rpx; border-bottom: 0; padding: 6rpx 0; }
 .field + .field { border-top: 0; }

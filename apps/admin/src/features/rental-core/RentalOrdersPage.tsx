@@ -7,6 +7,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
+import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -26,6 +27,7 @@ const pageSizeOptions = [10, 20, 50, 100, RENTAL_ORDER_LIST_MAX_PAGE_SIZE].map(S
 
 export function RentalOrdersPage() {
   const navigate = useNavigate();
+  const { t } = useLocale();
   const canOperate = useAuthStore((s) => s.hasPermission("rental-os:order:operate"));
   const canCreate = useAuthStore((s) => s.hasPermission("rental-os:order:create"));
   const [page, setPage] = useState(1);
@@ -59,42 +61,44 @@ export function RentalOrdersPage() {
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
   const rows = orders.data?.items ?? [];
   const total = orders.data?.total ?? 0;
+  const itemLabel = profile.data?.terminology.itemLabel ?? "商品";
   /** 任何筛选条件变化都回到第一页，否则可能停在一个新条件下不存在的页码上。 */
   const applyFilter = <T,>(setter: (value: T) => void) => (value: T) => { setter(value); setPage(1); };
-  const statusOptions = Object.entries(statusLabels).map(([value, label]) => ({ value, label }));
+  const localizedAssignmentFilterOptions = assignmentFilterOptions.map(({ label, value }) => ({ value, label: t(label) }));
+  const statusOptions = Object.entries(statusLabels).map(([value, label]) => ({ value, label: t(label) }));
   return <>
-    <PageHeader title="租赁订单" description="按个人使用人、企业主体、租期、履约与结算状态管理当前经营空间订单。" extra={canCreate && <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/rental/orders/new")}>新建订单</Button>} />
+    <PageHeader title="租赁订单" description="按个人使用人、企业主体、租期、履约与结算状态管理当前经营空间订单。" extra={canCreate && <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/rental/orders/new")}>{t("新建订单")}</Button>} />
     <Card className="data-panel">
-      <Segmented style={{ marginBottom: 16 }} value={assignment} onChange={applyFilter(setAssignment)} options={assignmentFilterOptions} />
+      <Segmented style={{ marginBottom: 16 }} value={assignment} onChange={applyFilter(setAssignment)} options={localizedAssignmentFilterOptions} />
       <Space style={{ marginBottom: 16 }}>
-        <Checkbox checked={pendingFeeOnly} onChange={(event) => applyFilter(setPendingFeeOnly)(event.target.checked)}>只看有待审费用的订单</Checkbox>
-        <Tag color="orange">{pendingFeeCount.data?.total ?? 0} 张待裁定</Tag>
+        <Checkbox checked={pendingFeeOnly} onChange={(event) => applyFilter(setPendingFeeOnly)(event.target.checked)}>{t("只看有待审费用的订单")}</Checkbox>
+        <Tag color="orange">{pendingFeeCount.data?.total ?? 0} {t("张待裁定")}</Tag>
       </Space>
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
-        <Col xs={24} xl={10}><Input.Search allowClear prefix={<SearchOutlined />} placeholder="订单号、个人会员或企业名称，回车搜索" value={keywordInput} onChange={(event) => { setKeywordInput(event.target.value); if (!event.target.value) applyFilter(setKeyword)(""); }} onSearch={(value) => applyFilter(setKeyword)(value.trim())} /></Col>
+        <Col xs={24} xl={10}><Input.Search allowClear prefix={<SearchOutlined />} placeholder={t("订单号、个人会员或企业名称，回车搜索")} value={keywordInput} onChange={(event) => { setKeywordInput(event.target.value); if (!event.target.value) applyFilter(setKeyword)(""); }} onSearch={(value) => applyFilter(setKeyword)(value.trim())} /></Col>
         <Col xs={24} md={12} xl={7}><DatePicker.RangePicker value={period} onChange={applyFilter(setPeriod)} style={{ width: "100%" }} /></Col>
-        <Col xs={24} md={12} xl={7}><Select allowClear placeholder="全部状态" style={{ width: "100%" }} options={statusOptions} value={status} onChange={applyFilter(setStatus)} /></Col>
+        <Col xs={24} md={12} xl={7}><Select allowClear placeholder={t("全部状态")} style={{ width: "100%" }} options={statusOptions} value={status} onChange={applyFilter(setStatus)} /></Col>
       </Row>
       <QueryState loading={orders.isLoading} error={orders.error}><Table<RentalOrder> rowKey="id" dataSource={rows} loading={orders.isFetching} scroll={{ x: 1260 }}
-        pagination={{ current: page, pageSize, total, showSizeChanger: true, pageSizeOptions, showTotal: (count) => `共 ${count} 单`, onChange: (nextPage, nextSize) => { if (nextSize !== pageSize) { setPageSize(nextSize); setPage(1); } else setPage(nextPage); } }}
+        pagination={{ current: page, pageSize, total, showSizeChanger: true, pageSizeOptions, showTotal: (count) => `${t("共")} ${count} ${t("单")}`, onChange: (nextPage, nextSize) => { if (nextSize !== pageSize) { setPageSize(nextSize); setPage(1); } else setPage(nextPage); } }}
         columns={[
-        { title: "订单", fixed: "left", width: 170, render: (_, row) => <Button type="link" onClick={() => navigate(`/rental/orders/${row.id}`)}>{row.orderNo}</Button> },
-        { title: "使用人 / 主体", width: 210, render: (_, row) => <Space orientation="vertical" size={0}><b>{row.membershipSnapshot?.personalCustomerName ?? row.customerName}</b>{row.membershipSnapshot?.corporateCustomerName && <Tag color="blue">{row.membershipSnapshot.corporateCustomerName}{row.membershipSnapshot.enterpriseContractAndPayer ? " · 企业签约付款" : " · 企业权益"}</Tag>} {!row.membershipSnapshot && <span className="muted">旧客户记录</span>}</Space> },
-        { title: profile.data?.terminology.itemLabel ?? "商品", width: 220, render: (_, row) => row.lines.map((line) => `${line.itemGroupName}×${line.quantity}`).join("、") },
-        { title: "租赁时间", width: 210, render: (_, row) => {
+        { title: t("订单"), fixed: "left", width: 170, render: (_, row) => <Button type="link" onClick={() => navigate(`/rental/orders/${row.id}`)}>{row.orderNo}</Button> },
+        { title: t("使用人 / 主体"), width: 210, render: (_, row) => <Space orientation="vertical" size={0}><b>{row.membershipSnapshot?.personalCustomerName ?? row.customerName}</b>{row.membershipSnapshot?.corporateCustomerName && <Tag color="blue">{row.membershipSnapshot.corporateCustomerName}{row.membershipSnapshot.enterpriseContractAndPayer ? ` · ${t("企业签约付款")}` : ` · ${t("企业权益")}`}</Tag>} {!row.membershipSnapshot && <span className="muted">{t("旧客户记录")}</span>}</Space> },
+        { title: t(itemLabel), width: 220, render: (_, row) => row.lines.map((line) => `${line.itemGroupName}×${line.quantity}`).join("、") },
+        { title: t("租赁时间"), width: 210, render: (_, row) => {
           // 续租不改 `endAt`（需求 4.6.9），当前归还时间在 `effectiveEndAt`。
           // 列表必须显示后者，否则续租过的单在列表上看起来仍是原时间。
           const end = row.effectiveEndAt ?? row.endAt;
-          return <>{`${dayjs(row.startAt).format("MM-DD HH:mm")} → ${dayjs(end).format("MM-DD HH:mm")}`}{row.effectiveEndAt && row.effectiveEndAt !== row.endAt && <><br /><span className="muted">已续租，原 {dayjs(row.endAt).format("MM-DD HH:mm")}</span></>}</>;
+          return <>{`${dayjs(row.startAt).format("MM-DD HH:mm")} → ${dayjs(end).format("MM-DD HH:mm")}`}{row.effectiveEndAt && row.effectiveEndAt !== row.endAt && <><br /><span className="muted">{t("已续租，原")} {dayjs(row.endAt).format("MM-DD HH:mm")}</span></>}</>;
         } },
-        { title: "报价快照", width: 150, render: (_, row) => <><span>{row.quoteNo}</span><br /><span className="muted">价格 v{row.pricingPlanVersion} · 规则 v{row.ruleVersion}</span></> },
-        { title: "应付", width: 110, dataIndex: "payableAmount", render: (value, row) => formatRentalMoney(Number(value), row.currency) },
-        { title: "实际资源 / 分配", width: 240, render: (_, row) => <><div>{row.allocations.filter((a) => !["released", "returned", "consumed"].includes(a.status)).map((a) => `${a.assetNo ?? a.metadata?.itemGroupName ?? "数量库存"} × ${a.quantity}`).join("、") || "尚未分配"}</div>{["reserved", "ready_for_pickup"].includes(row.status) && <Tag color={row.assignment?.issue ? "error" : "blue"}>{row.assignment?.issue ? "待人工处理" : rentalAllocationProgress(row).label}</Tag>}</> },
-        { title: "操作", fixed: "right", width: 115, render: (_, row) => <Button type="link" onClick={() => navigate(`/rental/orders/${row.id}`)}>{!canOperate ? "查看" : row.status === "reserved" ? "分配 / 锁定" : row.status === "ready_for_pickup" ? "办理领取" : row.status === "renting" ? "办理归还" : "查看详情"}</Button> },
-        { title: "押金 / 预授权", width: 150, render: (_, row) => `${formatRentalMoney(row.depositAmount, row.currency)} / ${formatRentalMoney(row.preAuthAmount, row.currency)}` },
-        { title: "状态", fixed: "right", width: 110, dataIndex: "status", render: (value, row) => <Space orientation="vertical" size={0}>
-          <Tag color={value === "completed" ? "success" : value === "cancelled" ? "default" : "processing"}>{statusLabels[value] ?? value}</Tag>
-          {hasPendingFeeReview(row) && <Tag color="orange">待裁定费用</Tag>}
+        { title: t("报价快照"), width: 150, render: (_, row) => <><span>{row.quoteNo}</span><br /><span className="muted">{t("价格")} v{row.pricingPlanVersion} · {t("规则")} v{row.ruleVersion}</span></> },
+        { title: t("应付"), width: 110, dataIndex: "payableAmount", render: (value, row) => formatRentalMoney(Number(value), row.currency) },
+        { title: t("实际资源 / 分配"), width: 240, render: (_, row) => <><div>{row.allocations.filter((a) => !["released", "returned", "consumed"].includes(a.status)).map((a) => `${a.assetNo ?? a.metadata?.itemGroupName ?? t("数量库存")} × ${a.quantity}`).join("、") || t("尚未分配")}</div>{["reserved", "ready_for_pickup"].includes(row.status) && <Tag color={row.assignment?.issue ? "error" : "blue"}>{row.assignment?.issue ? t("待人工处理") : t(rentalAllocationProgress(row).label)}</Tag>}</> },
+        { title: t("操作"), fixed: "right", width: 115, render: (_, row) => <Button type="link" onClick={() => navigate(`/rental/orders/${row.id}`)}>{!canOperate ? t("查看") : row.status === "reserved" ? t("分配 / 锁定") : row.status === "ready_for_pickup" ? t("办理领取") : row.status === "renting" ? t("办理归还") : t("查看详情")}</Button> },
+        { title: t("押金 / 预授权"), width: 150, render: (_, row) => `${formatRentalMoney(row.depositAmount, row.currency)} / ${formatRentalMoney(row.preAuthAmount, row.currency)}` },
+        { title: t("状态"), fixed: "right", width: 110, dataIndex: "status", render: (value, row) => <Space orientation="vertical" size={0}>
+          <Tag color={value === "completed" ? "success" : value === "cancelled" ? "default" : "processing"}>{t(statusLabels[value] ?? value)}</Tag>
+          {hasPendingFeeReview(row) && <Tag color="orange">{t("待裁定费用")}</Tag>}
         </Space> }
       ]} /></QueryState>
     </Card>

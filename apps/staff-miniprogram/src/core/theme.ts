@@ -87,7 +87,7 @@ export function themeRootClass(): string {
 
 const SEMANTIC_COLORS: Record<string, [string, string]> = {
   text: ["#1F2329", "#E6E8EB"],
-  secondary: ["#8A94A6", "#8B93A1"],
+  secondary: ["#8A94A6", "#9AA3B2"],
   muted: ["#B4BBC8", "#5A6373"],
   primary: [SYSTEM_PRIMARY, SYSTEM_PRIMARY],
   onPrimary: ["#FFFFFF", "#FFFFFF"],

@@ -1,9 +1,9 @@
-/* 设计图：浅蓝横幅、独立快捷入口和轻量待办列表。 */
-.hero--workbench { min-height: 214rpx; display: flex; align-items: center; background: linear-gradient(120deg, #DDEBFF 0%, #EAF3FF 100%); color: #142A55; box-shadow: none; padding: 28rpx 30rpx; }
+/* 设计图：浅蓝横幅、独立快捷入口和轻量待办列表。背景/文字走 token，深浅色自动跟随。 */
+.hero--workbench { min-height: 214rpx; display: flex; align-items: center; background: var(--primary-weak); color: var(--text); box-shadow: none; padding: 28rpx 30rpx; }
 .hero--workbench .hero__copy { width: 57%; position: relative; z-index: 1; }
 .hero--workbench .hero__title { font-size: var(--font-title); line-height: 1.28; font-weight: var(--fw-bold); }
 .hero--workbench .hero__title-line { display: block; }
-.hero--workbench .hero__subtitle { margin-top: 12rpx; color: #506381; font-size: var(--font-mini); line-height: 1.4; opacity: 1; }
+.hero--workbench .hero__subtitle { margin-top: 12rpx; color: var(--secondary); font-size: var(--font-mini); line-height: 1.4; opacity: 1; }
 .hero--workbench .hero__art { right: 8rpx; top: 0; bottom: 0; transform: none; width: 44%; height: auto; border-radius: 0; background: transparent; overflow: hidden; }
 .hero__photo { width: 100%; height: 100%; }
 .quick-panel { padding: 4rpx 0; }
@@ -13,6 +13,3 @@
 .todo-panel { background: var(--surface); border-radius: var(--radius); padding: 0 20rpx; box-shadow: var(--shadow); }
 .todo-panel__empty { padding: 18rpx 0; text-align: center; font-size: var(--font-caption); color: var(--secondary); }
 .quick-panel--common { padding-top: 0; }
-.theme-dark .hero--workbench { background: #1B2C45; color: var(--text); }
-.theme-dark .hero--workbench .hero__subtitle { color: var(--secondary); }
-.theme-dark .hero--workbench .hero__art { background: #F8FBFF; }

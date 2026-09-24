@@ -5,6 +5,7 @@ import { CheckCircleFilled, RightOutlined, WarningFilled } from "@ant-design/ico
 import type { TenantReadinessStatus } from "@rental-os/shared";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
+import { useLocale } from "@/app/locale";
 import { useAuthStore } from "@/features/auth/authStore";
 
 /**
@@ -22,6 +23,7 @@ const STATUS_META: Record<TenantReadinessStatus["status"], { label: string; colo
 };
 
 export function TenantReadinessPage() {
+  const { t } = useLocale();
   const tenantName = useAuthStore((state) => state.tenant?.tenantName);
   const readiness = useQuery({
     queryKey: ["rental-core", "tenant-readiness"],
@@ -39,9 +41,9 @@ export function TenantReadinessPage() {
   if (readiness.error || !readiness.data) {
     return (
       <PageHeader
-        title="开业配置"
-        description="检查当前经营空间的开业配置状态。"
-        extra={<Button onClick={() => readiness.refetch()}>重试</Button>}
+        title={t("开业配置")}
+        description={t("检查当前经营空间的开业配置状态。")}
+        extra={<Button onClick={() => readiness.refetch()}>{t("重试")}</Button>}
       />
     );
   }
@@ -56,6 +58,7 @@ export function TenantReadinessPage() {
 }
 
 export function TenantReadinessBody({ data, onRefresh }: { data: TenantReadinessStatus; onRefresh: () => void }) {
+  const { t } = useLocale();
   const navigate = useNavigate();
   const statusMeta = STATUS_META[data.status];
   // 「未完成」与「会被服务端拦截」必须分开数：可暂缓项（optional）缺失不阻止开业，
@@ -70,15 +73,15 @@ export function TenantReadinessBody({ data, onRefresh }: { data: TenantReadiness
         icon={data.ready ? <CheckCircleFilled /> : <WarningFilled />}
         title={
           data.ready
-            ? `开业配置已完成，可以进行报价与订单${optionalMissing.length ? `（${optionalMissing.map((item) => item.title).join("、")}可暂缓）` : ""}`
-            : `开业配置${statusMeta.label}：还有 ${blockingItems.length} 项必做配置未完成`
+            ? `${t("开业配置已完成，可以进行报价与订单")}${optionalMissing.length ? `（${optionalMissing.map((item) => t(item.title)).join("、")}${t("可暂缓")}）` : ""}`
+            : `${t("开业配置")}${t(statusMeta.label)}：${t("还有")} ${blockingItems.length} ${t("项必做配置未完成")}`
         }
         description={
           data.ready
             ? undefined
             : data.quoteBlockers.length
-              ? `在缺项补齐前，服务端会拦截报价与订单确认：${data.quoteBlockers.join("、")}。`
-              : `当前缺失：${blockingItems.map((item) => item.title).join("、")}。`
+              ? `${t("在缺项补齐前，服务端会拦截报价与订单确认：")}${data.quoteBlockers.map((item) => t(item)).join("、")}。`
+              : `${t("当前缺失：")}${blockingItems.map((item) => t(item.title)).join("、")}。`
         }
       />
       {data.items.map((item) => (
@@ -88,21 +91,21 @@ export function TenantReadinessBody({ data, onRefresh }: { data: TenantReadiness
               {item.done ? <CheckCircleFilled style={{ color: "#52c41a" }} /> : <WarningFilled style={{ color: "#faad14" }} />}
               <Typography.Text strong>{item.title}</Typography.Text>
               <Tag color={item.unavailable ? "default" : item.done ? "success" : "warning"}>
-                {item.unavailable ? "待重试" : item.done ? "已完成" : "未完成"}
+                {item.unavailable ? t("待重试") : item.done ? t("已完成") : t("未完成")}
               </Tag>
-              {!item.done && item.optional && !item.unavailable ? <Tag>可暂缓</Tag> : null}
+              {!item.done && item.optional && !item.unavailable ? <Tag>{t("可暂缓")}</Tag> : null}
             </Space>
             <Button type="link" onClick={() => item.unavailable ? onRefresh() : navigate(item.nextHref)}>
-              {item.unavailable ? "重试" : item.done ? "查看" : "去配置"}
+              {item.unavailable ? t("重试") : item.done ? t("查看") : t("去配置")}
               <RightOutlined />
             </Button>
           </Space>
           <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 4 }}>
-            {item.done ? item.summary ?? "已完成" : item.missing}
+            {item.done ? t(item.summary ?? "已完成") : t(item.missing)}
           </Typography.Paragraph>
         </Card>
       ))}
-      <Button onClick={onRefresh}>刷新状态</Button>
+      <Button onClick={onRefresh}>{t("刷新状态")}</Button>
     </Space>
   );
 }

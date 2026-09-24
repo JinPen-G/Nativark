@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, Optional } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
 import type {
   ClientChannelFaqItem,
   ClientChannelProfileSummary,
@@ -43,6 +44,14 @@ function normalizeThemeColor(value: string | undefined): string | null {
   if (!m) throw new BadRequestException("主题色需为 #RRGGBB 十六进制颜色");
   const hex = m[1].length === 3 ? m[1].split("").map((c) => c + c).join("") : m[1];
   return `#${hex.toUpperCase()}`;
+}
+
+function normalizeAdminCornerRadius(value: number | undefined | null): number {
+  if (value === undefined || value === null) return ADMIN_UI_CORNER_RADIUS_DEFAULT;
+  if (!Number.isInteger(value) || value < ADMIN_UI_CORNER_RADIUS_MIN || value > ADMIN_UI_CORNER_RADIUS_MAX) {
+    throw new BadRequestException(`管理后台圆角必须是 ${ADMIN_UI_CORNER_RADIUS_MIN}-${ADMIN_UI_CORNER_RADIUS_MAX} 的整数（px）`);
+  }
+  return value;
 }
 
 function normalizeFaq(items: SaveClientChannelProfileRequest["helpFaq"]): ClientChannelFaqItem[] {
@@ -131,6 +140,7 @@ export class ClientChannelProfileService {
       bannerTitle: row?.bannerTitle ?? undefined,
       bannerSubtitle: row?.bannerSubtitle ?? undefined,
       themeColor: row?.themeColor ?? undefined,
+      adminCornerRadius: normalizeAdminCornerRadius(row?.adminCornerRadius),
       smsLoginEnabled: row?.smsLoginEnabled ?? true,
       passwordLoginEnabled: row?.passwordLoginEnabled ?? true,
       publishedWorkspaceIds,
@@ -166,16 +176,17 @@ export class ClientChannelProfileService {
    * 登录/会话上下文使用的最小品牌字段。
    * 只返回展示资源，不返回协议、客服配置或任何第三方凭证。
    */
-  async getBranding(tenantId: string): Promise<Pick<ClientChannelProfileSummary, "brandName" | "brandLogoUrl" | "faviconUrl" | "themeColor">> {
+  async getBranding(tenantId: string): Promise<Pick<ClientChannelProfileSummary, "brandName" | "brandLogoUrl" | "faviconUrl" | "themeColor" | "adminCornerRadius">> {
     const row = await this.prisma.clientChannelProfile.findUnique({
       where: { tenantId },
-      select: { brandName: true, brandLogoUrl: true, faviconUrl: true, themeColor: true }
+      select: { brandName: true, brandLogoUrl: true, faviconUrl: true, themeColor: true, adminCornerRadius: true }
     });
     return {
       brandName: row?.brandName?.trim() || undefined,
       brandLogoUrl: row?.brandLogoUrl ?? undefined,
       faviconUrl: row?.faviconUrl ?? undefined,
-      themeColor: row?.themeColor ?? undefined
+      themeColor: row?.themeColor ?? undefined,
+      adminCornerRadius: normalizeAdminCornerRadius(row?.adminCornerRadius)
     };
   }
 
@@ -244,6 +255,7 @@ export class ClientChannelProfileService {
       bannerTitle: text(input.bannerTitle, 64, "首页横幅标题"),
       bannerSubtitle: text(input.bannerSubtitle, 120, "首页横幅副标题"),
       themeColor: normalizeThemeColor(input.themeColor),
+      adminCornerRadius: normalizeAdminCornerRadius(input.adminCornerRadius ?? existing?.adminCornerRadius),
       smsLoginEnabled: Boolean(input.smsLoginEnabled),
       passwordLoginEnabled: Boolean(input.passwordLoginEnabled),
       defaultWorkspaceId

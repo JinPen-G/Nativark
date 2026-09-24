@@ -19,6 +19,7 @@ import {
 import dayjs from "dayjs";
 import { useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
+import { useLocale } from "@/app/locale";
 import { QueryState } from "@/components/QueryState";
 import { RuleSetupWizard } from "./RuleSetupWizard";
 import { RULE_SECTIONS, formToConfig, seedFormFromRule, type RuleForm } from "./ruleSections";
@@ -58,6 +59,7 @@ const ruleAuditActionLabels: Record<string, string> = {
  */
 export function RulesTab({ permissions, category }: { permissions: GovernancePermissions; category: RentalCategoryDefinition }) {
   const { message } = App.useApp();
+  const { t } = useLocale();
   const queryClient = useQueryClient();
   const { canEditRules, canPublishRules, canSeeRules } = permissions;
   const [ruleEditor, setRuleEditor] = useState<RentalRuleVersion>();
@@ -119,9 +121,9 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
       await queryClient.invalidateQueries({
         queryKey: ["rental-core", "rule-versions"],
       });
-      message.success("规则草稿已保存，仍需具备发布权限的人发布后才对客户生效");
+      message.success(t("规则草稿已保存，仍需具备发布权限的人发布后才对客户生效"));
     },
-    onError: () => message.error("草稿保存失败，请检查品类能力和租户设置"),
+    onError: () => message.error(t("草稿保存失败，请检查品类能力和租户设置")),
   });
   const publishRule = useMutation({
     mutationFn: (values: { reason: string; effectiveFrom?: dayjs.Dayjs }) =>
@@ -136,10 +138,10 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
       await queryClient.invalidateQueries({ queryKey: ["rental-core", "rule-versions"] });
       await queryClient.invalidateQueries({ queryKey: ["rental-core", "rule-version-audits"] });
       message.success(
-        row.status === "pending" ? "已安排生效，到点后自动按新版本报价" : "新版本已生效",
+        row.status === "pending" ? t("已安排生效，到点后自动按新版本报价") : t("新版本已生效"),
       );
     },
-    onError: (error) => message.error(errorText(error, "发布失败")),
+    onError: (error) => message.error(errorText(error, t("发布失败"))),
   });
   const restoreRule = useMutation({
     mutationFn: (values: { reason: string }) =>
@@ -149,9 +151,9 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
       ruleRestoreForm.resetFields();
       await queryClient.invalidateQueries({ queryKey: ["rental-core", "rule-versions"] });
       await queryClient.invalidateQueries({ queryKey: ["rental-core", "rule-version-audits"] });
-      message.success("已按历史版本生成新草稿，原版本保持不变");
+      message.success(t("已按历史版本生成新草稿，原版本保持不变"));
     },
-    onError: (error) => message.error(errorText(error, "恢复失败")),
+    onError: (error) => message.error(errorText(error, t("恢复失败"))),
   });
   const voidRule = useMutation({
     mutationFn: (values: { reason: string }) =>
@@ -161,9 +163,9 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
       ruleVoidForm.resetFields();
       await queryClient.invalidateQueries({ queryKey: ["rental-core", "rule-versions"] });
       await queryClient.invalidateQueries({ queryKey: ["rental-core", "rule-version-audits"] });
-      message.success("版本已作废");
+      message.success(t("版本已作废"));
     },
-    onError: (error) => message.error(errorText(error, "作废失败")),
+    onError: (error) => message.error(errorText(error, t("作废失败"))),
   });
 
   /**
@@ -198,16 +200,16 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
           <Space>
             {currentRule ? (
               <Tag color="success">
-                已生效 v{currentRule.version}
+                {t("已生效")} v{currentRule.version}
                 {currentRule.effectiveFrom
-                  ? ` · ${dayjs(currentRule.effectiveFrom).format("YYYY-MM-DD HH:mm")} 起`
+                  ? ` · ${dayjs(currentRule.effectiveFrom).format("YYYY-MM-DD HH:mm")} ${t("起")}`
                   : ""}
               </Tag>
             ) : (
-              <Tag color="error">当前没有生效版本</Tag>
+              <Tag color="error">{t("当前没有生效版本")}</Tag>
             )}
             <Typography.Text type="secondary">
-              报价按租期开始时间匹配版本，未来租期使用覆盖其开始时点的版本
+              {t("报价按租期开始时间匹配版本，未来租期使用覆盖其开始时点的版本")}
             </Typography.Text>
           </Space>
           {canEditRules && (
@@ -218,13 +220,13 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
                 type={currentRule ? "default" : "primary"}
                 onClick={() => setWizardOpen(true)}
               >
-                使用向导配置
+                {t("使用向导配置")}
               </Button>
               <Button
                 type={currentRule ? "primary" : "default"}
                 onClick={() => openRule()}
               >
-                新建草稿
+                {t("新建草稿")}
               </Button>
             </Space>
           )}
@@ -233,11 +235,11 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
           <Alert
             type="info"
             showIcon
-            title={`有 ${pendingRules.length} 个待生效版本`}
+            title={`${t("有")} ${pendingRules.length} ${t("个待生效版本")}`}
             description={pendingRules
               .map(
                 (row) =>
-                  `v${row.version} 自 ${dayjs(row.effectiveFrom).format("YYYY-MM-DD HH:mm")} 起生效`,
+                  `v${row.version} ${t("自")} ${dayjs(row.effectiveFrom).format("YYYY-MM-DD HH:mm")} ${t("起生效")}`,
               )
               .join("；")}
           />
@@ -249,92 +251,92 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
               items={[
                 {
                   key: "payment",
-                  label: "支付与占位",
-                  children: `${currentRule.config.payment.timing} · ${currentRule.config.payment.unpaidHoldMinutes} 分钟`,
+                  label: t("支付与占位"),
+                  children: `${t(currentRule.config.payment.timing)} · ${currentRule.config.payment.unpaidHoldMinutes} ${t("分钟")}`,
                 },
                 {
                   key: "deposit",
-                  label: "押金/预授权",
+                  label: t("押金/预授权"),
                   children: (() => {
                     const security = ruleSecurityGroups(currentRule.config);
-                    return `押金：${securityRuleLabels[security.deposit.mode]} · 预授权：${preauthorizationRuleLabels[security.preauthorization.mode]}`;
+                    return `${t("押金")}：${t(securityRuleLabels[security.deposit.mode])} · ${t("预授权")}：${t(preauthorizationRuleLabels[security.preauthorization.mode])}`;
                   })(),
                 },
                 {
                   key: "inspection",
-                  label: "交接检查",
-                  children: `${currentRule.config.fulfillment.pickupInspectionRequired ? "领取必检" : "领取选检"} / ${currentRule.config.fulfillment.returnInspectionRequired ? "归还必检" : "归还选检"}`,
+                  label: t("交接检查"),
+                  children: `${t(currentRule.config.fulfillment.pickupInspectionRequired ? "领取必检" : "领取选检")} / ${t(currentRule.config.fulfillment.returnInspectionRequired ? "归还必检" : "归还选检")}`,
                 },
                 {
                   key: "overdue",
-                  label: "逾期",
-                  children: `${currentRule.config.overdue.graceMinutes} 分钟 · ${currentRule.config.overdue.feeMode}`,
+                  label: t("逾期"),
+                  children: `${currentRule.config.overdue.graceMinutes} ${t("分钟")} · ${t(currentRule.config.overdue.feeMode)}`,
                 },
                 {
                   key: "cancel",
-                  label: "取消",
-                  children: `${currentRule.config.cancellation.freeBeforeHours} 小时前免费`,
+                  label: t("取消"),
+                  children: `${currentRule.config.cancellation.freeBeforeHours} ${t("小时前免费")}`,
                 },
                 {
                   key: "qualification",
-                  label: "资质",
+                  label: t("资质"),
                   children: currentRule.config.qualification.required
                     ? currentRule.config.qualification.documentTypes.join(
                         "、",
                       )
-                    : "不要求",
+                    : t("不要求"),
                 },
               ]}
             />
           </Card>
         )}
-        <Card title="版本历史">
+        <Card title={t("版本历史")}>
           <Table<RentalRuleVersion>
             rowKey="id"
             pagination={false}
             dataSource={rules.data ?? []}
             columns={[
-              { title: "版本", dataIndex: "version" },
+              { title: t("版本"), dataIndex: "version" },
               {
-                title: "状态",
+                title: t("状态"),
                 dataIndex: "status",
                 render: (value: string) => (
                   <Tag color={ruleStatusColors[value]}>
-                    {ruleStatusLabels[value] ?? value}
+                    {t(ruleStatusLabels[value] ?? value)}
                   </Tag>
                 ),
               },
               {
-                title: "生效时点",
+                title: t("生效时点"),
                 dataIndex: "effectiveFrom",
                 render: (value?: string) =>
                   value ? dayjs(value).format("YYYY-MM-DD HH:mm") : "—",
               },
-              { title: "变更原因", dataIndex: "changeReason" },
+              { title: t("变更原因"), dataIndex: "changeReason" },
               {
-                title: "来源",
+                title: t("来源"),
                 dataIndex: "restoredFromVersion",
-                render: (value?: string) => (value ? `恢复自 v${value}` : "—"),
+                render: (value?: string) => (value ? `${t("恢复自")} v${value}` : "—"),
               },
-              { title: "操作人", dataIndex: "createdBy" },
+              { title: t("操作人"), dataIndex: "createdBy" },
               {
-                title: "创建时间",
+                title: t("创建时间"),
                 dataIndex: "createdAt",
                 render: (value: string) => dayjs(value).format("YYYY-MM-DD HH:mm"),
               },
               {
-                title: "操作",
+                title: t("操作"),
                 key: "actions",
                 render: (_, row) => (
                   <Space size={4}>
                     {row.status === "draft" && canEditRules && (
                       <Button type="link" size="small" onClick={() => openRule(row)}>
-                        编辑
+                        {t("编辑")}
                       </Button>
                     )}
                     {row.status === "draft" && canPublishRules && (
                       <Button type="link" size="small" onClick={() => openRulePublish(row)}>
-                        发布
+                        {t("发布")}
                       </Button>
                     )}
                     {row.status !== "draft" && canEditRules && (
@@ -346,7 +348,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
                           setRuleRestoreTarget(row);
                         }}
                       >
-                        恢复为草稿
+                        {t("恢复为草稿")}
                       </Button>
                     )}
                     {(row.status === "pending" || row.status === "published") &&
@@ -360,7 +362,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
                             setRuleVoidTarget(row);
                           }}
                         >
-                          作废
+                          {t("作废")}
                         </Button>
                       )}
                   </Space>
@@ -369,7 +371,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
             ]}
           />
         </Card>
-        <Card title="发布与作废审计">
+        <Card title={t("发布与作废审计")}>
           <QueryState loading={ruleAudits.isLoading} error={ruleAudits.error}>
             <Table
               rowKey="id"
@@ -377,22 +379,22 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
               pagination={false}
               dataSource={ruleAudits.data ?? []}
               columns={[
-                { title: "版本", dataIndex: "version" },
+                { title: t("版本"), dataIndex: "version" },
                 {
-                  title: "动作",
+                  title: t("动作"),
                   dataIndex: "action",
-                  render: (value: string) => ruleAuditActionLabels[value] ?? value,
+                  render: (value: string) => t(ruleAuditActionLabels[value] ?? value),
                 },
                 {
-                  title: "状态变化",
+                  title: t("状态变化"),
                   key: "status",
                   render: (_, row) =>
-                    `${row.fromStatus ? (ruleStatusLabels[row.fromStatus] ?? row.fromStatus) : "—"} → ${ruleStatusLabels[row.toStatus] ?? row.toStatus}`,
+                    `${row.fromStatus ? t(ruleStatusLabels[row.fromStatus] ?? row.fromStatus) : "—"} → ${t(ruleStatusLabels[row.toStatus] ?? row.toStatus)}`,
                 },
-                { title: "原因", dataIndex: "reason" },
-                { title: "操作人", dataIndex: "operator" },
+                { title: t("原因"), dataIndex: "reason" },
+                { title: t("操作人"), dataIndex: "operator" },
                 {
-                  title: "时间",
+                  title: t("时间"),
                   dataIndex: "at",
                   render: (value: string) => dayjs(value).format("YYYY-MM-DD HH:mm"),
                 },
@@ -405,8 +407,8 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
       <Drawer
         title={
           ruleEditor?.status === "draft"
-            ? `编辑规则草稿 v${ruleEditor.version}`
-            : `新建规则草稿 · 基于 v${ruleEditor?.version ?? ""}`
+            ? `${t("编辑规则草稿")} v${ruleEditor.version}`
+            : `${t("新建规则草稿 · 基于")} v${ruleEditor?.version ?? ""}`
         }
         size={760}
         open={Boolean(ruleEditor)}
@@ -419,7 +421,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
             loading={saveRule.isPending}
             onClick={() => ruleForm.submit()}
           >
-            保存草稿
+            {t("保存草稿")}
           </Button>
         }
       >
@@ -434,18 +436,18 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
             <Card
               key={section.key}
               size="small"
-              title={section.title}
+              title={t(section.title)}
               style={index === 0 ? undefined : { marginTop: 12 }}
             >
               <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
-                {section.description}
+                {t(section.description)}
               </Typography.Text>
-              {section.render({ form: ruleForm, category })}
+              {section.render({ form: ruleForm, category, t })}
             </Card>
           ))}
           <Form.Item
             name="changeReason"
-            label="变更原因"
+            label={t("变更原因")}
             rules={[{ required: true }]}
             style={{ marginTop: 16 }}
           >
@@ -454,7 +456,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
         </Form>
       </Drawer>
       <Drawer
-        title="新建规则向导"
+        title={t("新建规则向导")}
         size={760}
         open={wizardOpen}
         onClose={() => setWizardOpen(false)}
@@ -470,7 +472,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
         )}
       </Drawer>
       <Modal
-        title={`发布规则版本 v${rulePublishTarget?.version ?? ""}`}
+        title={`${t("发布规则版本")} v${rulePublishTarget?.version ?? ""}`}
         open={Boolean(rulePublishTarget)}
         onOk={() => rulePublishForm.submit()}
         confirmLoading={publishRule.isPending}
@@ -478,7 +480,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
           setRulePublishTarget(undefined);
           setRulePublishEffectiveFrom(undefined);
         }}
-        okText="确认发布"
+        okText={t("确认发布")}
         forceRender
         destroyOnHidden
         width={640}
@@ -490,8 +492,8 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
         >
           <Form.Item
             name="effectiveFrom"
-            label="生效时点"
-            extra="留空表示立即生效；填未来时点即安排生效，到点后自动按新版本报价。生效时点必须晚于已发布的最新版本。"
+            label={t("生效时点")}
+            extra={t("留空表示立即生效；填未来时点即安排生效，到点后自动按新版本报价。生效时点必须晚于已发布的最新版本。")}
           >
             <DatePicker
               showTime
@@ -501,8 +503,8 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
           </Form.Item>
           <Form.Item
             name="reason"
-            label="发布原因"
-            rules={[{ required: true, message: "发布原因必填并写入审计" }]}
+            label={t("发布原因")}
+            rules={[{ required: true, message: t("发布原因必填并写入审计") }]}
           >
             <Input.TextArea rows={2} maxLength={500} showCount />
           </Form.Item>
@@ -515,29 +517,29 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
               items={[
                 {
                   key: "effectiveFrom",
-                  label: "生效时点",
-                  children: `${dayjs(rulePublishPreview.data.effectiveFrom).format("YYYY-MM-DD HH:mm")}（${rulePublishPreview.data.scheduled ? "待生效" : "立即生效"}）`,
+                  label: t("生效时点"),
+                  children: `${dayjs(rulePublishPreview.data.effectiveFrom).format("YYYY-MM-DD HH:mm")}（${t(rulePublishPreview.data.scheduled ? "待生效" : "立即生效")}）`,
                 },
                 {
                   key: "current",
-                  label: "当前生效版本",
+                  label: t("当前生效版本"),
                   children: rulePublishPreview.data.currentVersion
                     ? `v${rulePublishPreview.data.currentVersion}`
-                    : "无（首次发布）",
+                    : t("无（首次发布）"),
                 },
                 {
                   key: "superseded",
-                  label: "生效后被替代",
+                  label: t("生效后被替代"),
                   children: rulePublishPreview.data.supersededVersions.length
                     ? rulePublishPreview.data.supersededVersions
                         .map((value) => `v${value}`)
                         .join("、")
-                    : "无",
+                    : t("无"),
                 },
                 {
                   key: "locked",
-                  label: "已锁定报价",
-                  children: `${rulePublishPreview.data.lockedQuoteCount} 张，仍按各自规则快照结算，不受本次发布影响`,
+                  label: t("已锁定报价"),
+                  children: `${rulePublishPreview.data.lockedQuoteCount} ${t("张，仍按各自规则快照结算，不受本次发布影响")}`,
                 },
               ]}
             />
@@ -545,12 +547,12 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
         </QueryState>
       </Modal>
       <Modal
-        title={`恢复规则版本 v${ruleRestoreTarget?.version ?? ""}`}
+        title={`${t("恢复规则版本")} v${ruleRestoreTarget?.version ?? ""}`}
         open={Boolean(ruleRestoreTarget)}
         onOk={() => ruleRestoreForm.submit()}
         confirmLoading={restoreRule.isPending}
         onCancel={() => setRuleRestoreTarget(undefined)}
-        okText="生成新草稿"
+        okText={t("生成新草稿")}
         forceRender
         destroyOnHidden
       >
@@ -558,8 +560,8 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
           type="info"
           showIcon
           style={{ marginBottom: 12 }}
-          title="恢复只会按该版本的内容生成新草稿"
-          description="被恢复的版本原样保留，已发布版本不可修改；新草稿仍需具备发布权限的人发布后才对客户生效。"
+          title={t("恢复只会按该版本的内容生成新草稿")}
+          description={t("被恢复的版本原样保留，已发布版本不可修改；新草稿仍需具备发布权限的人发布后才对客户生效。")}
         />
         <Form
           form={ruleRestoreForm}
@@ -568,20 +570,20 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
         >
           <Form.Item
             name="reason"
-            label="恢复原因"
-            rules={[{ required: true, message: "恢复原因必填并写入审计" }]}
+            label={t("恢复原因")}
+            rules={[{ required: true, message: t("恢复原因必填并写入审计") }]}
           >
             <Input.TextArea rows={2} maxLength={191} showCount />
           </Form.Item>
         </Form>
       </Modal>
       <Modal
-        title={`作废规则版本 v${ruleVoidTarget?.version ?? ""}`}
+        title={`${t("作废规则版本")} v${ruleVoidTarget?.version ?? ""}`}
         open={Boolean(ruleVoidTarget)}
         onOk={() => ruleVoidForm.submit()}
         confirmLoading={voidRule.isPending}
         onCancel={() => setRuleVoidTarget(undefined)}
-        okText="确认作废"
+        okText={t("确认作废")}
         okButtonProps={{ danger: true }}
         forceRender
         destroyOnHidden
@@ -590,14 +592,14 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
           type="warning"
           showIcon
           style={{ marginBottom: 12 }}
-          title="作废后该版本不再参与任何租期的规则匹配"
-          description="若它是当前唯一生效版本，作废后落在该时段的报价会直接失败而不是回落到旧规则；请先发布替代版本。已锁定的报价与订单按各自快照结算，不受影响。"
+          title={t("作废后该版本不再参与任何租期的规则匹配")}
+          description={t("若它是当前唯一生效版本，作废后落在该时段的报价会直接失败而不是回落到旧规则；请先发布替代版本。已锁定的报价与订单按各自快照结算，不受影响。")}
         />
         <Form form={ruleVoidForm} layout="vertical" onFinish={(values) => voidRule.mutate(values)}>
           <Form.Item
             name="reason"
-            label="作废原因"
-            rules={[{ required: true, message: "作废原因必填并写入审计" }]}
+            label={t("作废原因")}
+            rules={[{ required: true, message: t("作废原因必填并写入审计") }]}
           >
             <Input.TextArea rows={2} maxLength={191} showCount />
           </Form.Item>

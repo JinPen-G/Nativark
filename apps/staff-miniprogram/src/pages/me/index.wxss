@@ -1,17 +1,10 @@
 .ml-24 { margin-left: 24rpx; }
-.me-card { display: flex; flex-direction: column; align-items: flex-start; padding: 24rpx 20rpx; }
-.me-card { align-items: center; text-align: center; padding: 20rpx 8rpx; box-shadow: none; }
-.me-card .quick__icon { width: 72rpx; height: 72rpx; }
-.menu { box-shadow: none; border: 1rpx solid var(--border); padding-top: 0; padding-bottom: 0; }
-.avatar-lg { background: var(--primary-weak); }
-.avatar-lg { display: flex; align-items: center; justify-content: center; }
-.me-card__title { margin-top: 14rpx; font-size: var(--font-body); font-weight: var(--fw-semibold); color: var(--text); }
-.me-card__hint { margin-top: 4rpx; font-size: var(--font-mini); color: var(--secondary); }
-.screen > .section { padding-left: 24rpx; padding-right: 24rpx; }
-.screen > .section--tight { padding-bottom: 12rpx; }
-.avatar-lg { width: 104rpx; height: 104rpx; font-size: 38rpx; } /* font-size 特殊展示：头像首字，非文本层级 */
-.me-card { min-height: 148rpx; padding: 16rpx 6rpx; }
+.me-cards { align-items: stretch; }
+.me-card { display: flex; flex-direction: column; align-items: center; text-align: center; min-height: 148rpx; padding: 16rpx 6rpx; box-shadow: none; }
 .me-card .quick__icon { width: 64rpx; height: 64rpx; }
-.me-card__title { font-size: var(--font-secondary); margin-top: 10rpx; }
-.me-card__hint { font-size: var(--font-mini); }
+.me-card__title { margin-top: 10rpx; font-size: var(--font-secondary); font-weight: var(--fw-semibold); color: var(--text); }
+.me-card__hint { margin-top: 4rpx; font-size: var(--font-mini); color: var(--secondary); }
+.menu { box-shadow: none; border: 1rpx solid var(--border); padding-top: 0; padding-bottom: 0; }
 .menu .cell__title { font-size: var(--font-body); }
+.avatar-lg { width: 104rpx; height: 104rpx; }
+.screen > .section--tight { padding-bottom: 12rpx; }

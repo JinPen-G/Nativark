@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Form, Input, Space, Steps, Typography } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
+import { useLocale } from "@/app/locale";
 import { RULE_SECTIONS, formToConfig, seedFormFromRule, type RuleForm } from "./ruleSections";
 import { errorText, type GovernancePermissions } from "./shared";
 
@@ -32,6 +33,7 @@ export function RuleSetupWizard({
   onClose: () => void;
 }) {
   const { message } = App.useApp();
+  const { t } = useLocale();
   const queryClient = useQueryClient();
   const { canEditRules, canPublishRules } = permissions;
   const [form] = Form.useForm<RuleForm>();
@@ -60,7 +62,7 @@ export function RuleSetupWizard({
     mutationFn: async () => {
       const values = form.getFieldsValue(true) as RuleForm;
       // 变更原因随每次保存写入审计；向导里未单列输入时给一条与 RulesTab 一致的兜底文案。
-      const changeReason = values.changeReason?.trim() || "通过新建规则向导配置";
+      const changeReason = values.changeReason?.trim() || t("通过新建规则向导配置");
       return rentalCoreApi.saveRuleVersion({
         config: formToConfig(values, category),
         changeReason,
@@ -73,16 +75,16 @@ export function RuleSetupWizard({
   const publish = useMutation({
     mutationFn: (version: string) =>
       // 立即生效：向导面向首次开业，不预约未来时点（effectiveFrom 留空即立即生效）。
-      rentalCoreApi.publishRuleVersion(version, { reason: "通过新建规则向导发布" }),
+      rentalCoreApi.publishRuleVersion(version, { reason: t("通过新建规则向导发布") }),
   });
 
   async function handleSaveDraft() {
     try {
       const row = await saveDraft.mutateAsync();
       await invalidate();
-      message.success(`草稿已保存（v${row.version}），仍需具备发布权限的人发布后才对客户生效`);
+      message.success(`${t("草稿已保存")}（v${row.version}），${t("仍需具备发布权限的人发布后才对客户生效")}`);
     } catch (error) {
-      message.error(errorText(error, "草稿保存失败，请检查品类能力和租户设置"));
+      message.error(errorText(error, t("草稿保存失败，请检查品类能力和租户设置")));
     }
   }
 
@@ -110,10 +112,10 @@ export function RuleSetupWizard({
       const row = await saveDraft.mutateAsync();
       await publish.mutateAsync(row.version);
       await invalidate();
-      message.success("规则已发布并对客户生效");
+      message.success(t("规则已发布并对客户生效"));
       onClose();
     } catch (error) {
-      message.error(errorText(error, "发布失败"));
+      message.error(errorText(error, t("发布失败")));
     }
   }
 
@@ -123,27 +125,26 @@ export function RuleSetupWizard({
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-        按业务顺序逐段配置这套租赁规则，每步只需关注当前一组。可随时「保存草稿」中途退出，
-        最后一步发布后立即对客户生效。
+        {t("按业务顺序逐段配置这套租赁规则，每步只需关注当前一组。可随时「保存草稿」中途退出，最后一步发布后立即对客户生效。")}
       </Typography.Paragraph>
       <Steps
         size="small"
         current={current}
-        items={RULE_SECTIONS.map((item) => ({ title: item.title }))}
+        items={RULE_SECTIONS.map((item) => ({ title: t(item.title) }))}
         onChange={(value) => {
           // 只允许回到已经过的步骤；向前必须走「下一步」以逐段校验。
           if (value <= maxVisited) setCurrent(value);
         }}
       />
-      <Card size="small" title={`第 ${current + 1} / ${RULE_SECTIONS.length} 步 · ${section.title}`}>
-        <Alert type="info" showIcon title={section.title} description={section.description} style={{ marginBottom: 16 }} />
+      <Card size="small" title={`${t("步骤")} ${current + 1} / ${RULE_SECTIONS.length} · ${t(section.title)}`}>
+        <Alert type="info" showIcon title={t(section.title)} description={t(section.description)} style={{ marginBottom: 16 }} />
         <Form form={form} layout="vertical">
-          {section.render({ form, category })}
+          {section.render({ form, category, t })}
           {current === lastStep && (
             <Form.Item
               name="changeReason"
-              label="变更原因"
-              rules={[{ required: true, message: "变更原因必填并写入审计" }]}
+              label={t("变更原因")}
+              rules={[{ required: true, message: t("变更原因必填并写入审计") }]}
               style={{ marginTop: 16 }}
             >
               <Input.TextArea rows={3} maxLength={500} showCount />
@@ -155,21 +156,21 @@ export function RuleSetupWizard({
         <Alert
           type="warning"
           showIcon
-          title="当前账号没有发布权限"
-          description="可保存草稿，但需要具备 rules:publish 权限的人发布后才对客户生效。"
+          title={t("当前账号没有发布权限")}
+          description={t("可保存草稿，但需要具备 rules:publish 权限的人发布后才对客户生效。")}
         />
       )}
       <div style={{ display: "flex", justifyContent: "space-between" }}>
         <Button disabled={current === 0 || pending} onClick={() => setCurrent((value) => Math.max(0, value - 1))}>
-          上一步
+          {t("上一步")}
         </Button>
         <Space>
           <Button disabled={!canEditRules} loading={saveDraft.isPending} onClick={handleSaveDraft}>
-            保存草稿
+            {t("保存草稿")}
           </Button>
           {current < lastStep ? (
             <Button type="primary" disabled={pending} onClick={handleNext}>
-              下一步
+              {t("下一步")}
             </Button>
           ) : (
             <Button
@@ -178,7 +179,7 @@ export function RuleSetupWizard({
               loading={pending}
               onClick={handlePublish}
             >
-              发布
+              {t("发布")}
             </Button>
           )}
         </Space>

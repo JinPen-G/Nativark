@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { theme, type ThemeConfig } from "antd";
-import { ADMIN_FONT_FAMILY, ADMIN_TYPOGRAPHY, applyAdminTypographyTokens, resolveAdminPrimaryColor } from "@/app/designTokens";
+import { ADMIN_FONT_FAMILY, ADMIN_TYPOGRAPHY, applyAdminTypographyTokens, resolveAdminCornerRadius, resolveAdminPrimaryColor } from "@/app/designTokens";
 
 export type AppearanceMode = "default" | "dark" | "compact";
 
@@ -182,9 +182,13 @@ export function useAppearance() {
   return context;
 }
 
-export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: string | null): ThemeConfig {
+export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: string | null, tenantCornerRadius?: number | null): ThemeConfig {
   const light = mode !== "dark";
   const primaryColor = resolveAdminPrimaryColor(tenantThemeColor);
+  const radius = resolveAdminCornerRadius(tenantCornerRadius);
+  const radiusXs = Math.max(4, Math.round(radius * 0.5));
+  const radiusSm = Math.max(4, Math.round(radius * 0.75));
+  const radiusLg = Math.min(24, Math.round(radius * 1.33));
   const algorithm = mode === "dark"
     ? theme.darkAlgorithm
     : mode === "compact"
@@ -204,11 +208,17 @@ export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: strin
     token: {
       colorPrimary: primaryColor,
       colorInfo: primaryColor,
+      // Link、文字按钮和主按钮必须使用同一品牌色；hover/active 色阶交给
+      // antd 根据这个主色生成，保留深浅主题下的可见反馈。
+      colorLink: primaryColor,
       colorSuccess: "#52c41a",
       colorWarning: "#faad14",
       colorError: "#ff4d4f",
       ...(light ? { colorBgLayout: "#f5f8ff" } : {}),
-      borderRadius: 6,
+      borderRadius: radius,
+      borderRadiusXS: radiusXs,
+      borderRadiusSM: radiusSm,
+      borderRadiusLG: radiusLg,
       fontFamily: ADMIN_FONT_FAMILY,
       fontSize: ADMIN_TYPOGRAPHY.body.size,
       lineHeight: ADMIN_TYPOGRAPHY.body.lineHeight / ADMIN_TYPOGRAPHY.body.size,
@@ -222,8 +232,8 @@ export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: strin
           // 侧栏底色由 SIDER_BG 经 --app-sider-bg 统一给出（常驻侧栏与窄屏抽屉共用一处），
           // 这里保留 transparent 只是兜住变量落地前的那一帧。顶栏已取消，headerBg/headerHeight 不再使用。
           siderBg: "transparent",
-          triggerBg: "#f0f5ff",
-          triggerColor: "rgba(0, 0, 0, 0.88)"
+          triggerBg: "var(--rental-color-primary-bg)",
+          triggerColor: "var(--rental-color-text)"
         } : { siderBg: "transparent" })
       },
       Menu: {
@@ -233,8 +243,8 @@ export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: strin
         // 二级全部常显后侧栏很长，行高压到 36 让首屏多放两三项；
         // 选中态的白卡在 .sider-nav 里用 inset 阴影画，不靠 itemSelectedBg。
         itemHeight: 36,
-        itemBorderRadius: 8,
-        subMenuItemBorderRadius: 8,
+        itemBorderRadius: radius,
+        subMenuItemBorderRadius: radius,
         itemMarginInline: 0
       },
       Card: {
@@ -248,15 +258,16 @@ export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: strin
         cellPaddingBlock: 12,
         cellPaddingInline: 8,
         headerBg: light ? "#fafafa" : undefined,
-        headerBorderRadius: 8,
-        rowHoverBg: light ? "#f5f8ff" : undefined
+        headerBorderRadius: radiusSm,
+        // 表格悬停是交互反馈，不应永远显示系统默认蓝灰色。
+        rowHoverBg: "var(--rental-color-primary-bg)"
       },
       Tabs: { horizontalItemGutter: 24 },
-      Progress: light ? {
-        circleTextColor: "rgba(0, 0, 0, 0.88)",
+      Progress: {
+        circleTextColor: "var(--rental-color-text)",
         defaultColor: primaryColor,
-        remainingColor: "rgba(0, 0, 0, 0.06)"
-      } : {}
+        remainingColor: "var(--rental-color-fill-secondary)"
+      }
     }
   };
 }

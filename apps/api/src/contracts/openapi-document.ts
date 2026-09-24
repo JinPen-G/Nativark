@@ -276,6 +276,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       brandLogoUrl: stringSchema,
       faviconUrl: stringSchema,
       themeColor: stringSchema,
+      adminCornerRadius: { type: "integer", minimum: 8, maximum: 20 },
       categoryCode: stringSchema,
       categoryName: stringSchema,
       capabilities: arrayOf(stringSchema)
@@ -325,13 +326,14 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       brandName: stringSchema, brandLogoUrl: stringSchema, faviconUrl: stringSchema, customerServicePhone: stringSchema, customerServiceHours: stringSchema,
       userAgreement: ref("ClientChannelAgreementConfig"), privacyPolicy: ref("ClientChannelAgreementConfig"),
       helpIntro: stringSchema, helpFaq: arrayOf("ClientChannelFaqItem"), bannerTitle: stringSchema, bannerSubtitle: stringSchema, themeColor: stringSchema,
+      adminCornerRadius: { type: "integer", minimum: 8, maximum: 20 },
       smsLoginEnabled: booleanSchema, passwordLoginEnabled: booleanSchema,
       publishedWorkspaceIds: arrayOf(stringSchema), defaultWorkspaceId: stringSchema,
       workspaces: arrayOf("ClientChannelWorkspaceOption"),
       readiness: objectOf({ ready: booleanSchema, missing: arrayOf(stringSchema) }, ["ready", "missing"], false),
       updatedAt: { type: "string", format: "date-time" }
     },
-    ["configured", "revision", "smsLoginEnabled", "passwordLoginEnabled", "publishedWorkspaceIds", "workspaces", "readiness"],
+    ["configured", "revision", "adminCornerRadius", "smsLoginEnabled", "passwordLoginEnabled", "publishedWorkspaceIds", "workspaces", "readiness"],
     false
   ),
   SaveClientChannelProfileRequest: objectOf(
@@ -339,6 +341,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       expectedRevision: numberSchema, brandName: stringSchema, brandLogoUrl: stringSchema, faviconUrl: stringSchema, customerServicePhone: stringSchema, customerServiceHours: stringSchema,
       userAgreement: ref("ClientChannelAgreementConfig"), privacyPolicy: ref("ClientChannelAgreementConfig"),
       helpIntro: stringSchema, helpFaq: arrayOf("ClientChannelFaqItem"), bannerTitle: stringSchema, bannerSubtitle: stringSchema, themeColor: stringSchema,
+      adminCornerRadius: { type: "integer", minimum: 8, maximum: 20 },
       smsLoginEnabled: booleanSchema, passwordLoginEnabled: booleanSchema, publishedWorkspaceIds: arrayOf(stringSchema), defaultWorkspaceId: stringSchema
     },
     ["smsLoginEnabled", "passwordLoginEnabled", "publishedWorkspaceIds"]
@@ -1111,6 +1114,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       client: { type: "string", enum: ["wechat_miniprogram", "app", "web"] },
       merchant: objectOf({ name: stringSchema, logoUrl: stringSchema, faviconUrl: stringSchema, servicePhone: stringSchema, serviceHours: stringSchema }, ["name"], false),
       services: arrayOf(objectOf({ code: stringSchema, name: stringSchema, categoryCode: stringSchema, isDefault: booleanSchema, status: { type: "string", enum: ["open", "paused"] } }, ["code", "name", "categoryCode", "status"], false)),
+      categories: arrayOf(objectOf({ code: stringSchema, name: stringSchema }, ["code", "name"], false)),
       defaultServiceCode: stringSchema,
       agreements: objectOf({
         userAgreement: objectOf({ name: stringSchema, version: stringSchema, url: stringSchema, hasBody: booleanSchema }, ["name", "version", "hasBody"], false),
@@ -1124,7 +1128,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       website: ref("ClientWebsiteConfig"),
       source: { type: "string", enum: ["channel", "workspace_directory"] }
     },
-    ["apiVersion", "tenantCode", "client", "merchant", "services", "help", "loginMethods", "capabilities", "source"],
+    ["apiVersion", "tenantCode", "client", "merchant", "services", "categories", "help", "loginMethods", "capabilities", "source"],
     false
   ),
   ClientWebsiteConfig: objectOf(
@@ -1749,6 +1753,9 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("get", "/api/platform/customers", "Platform", "listSharedCustomers", "List tenant shared customers", ["rental-os:member:view"]),
   backlogOperation("post", "/api/platform/customers", "Platform", "registerSharedCustomer", "Register a tenant member using the shared review policy", ["rental-os:member:manage"]),
   backlogOperation("get", "/api/platform/customers/{customerId}", "Platform", "getCustomerDetail", "Get customer detail with masked sensitive fields", ["rental-os:member:view"]),
+  backlogOperation("get", "/api/platform/customers/{customerId}/profile", "Platform", "getCustomerProfileOverview", "Get the categorized customer profile overview including addresses, qualifications, benefits and order summaries", ["rental-os:member:view"]),
+  backlogOperation("put", "/api/platform/customers/{customerId}/addresses", "Platform", "saveCustomerProfileAddress", "Create or update a customer delivery address; the response keeps the phone masked", ["rental-os:member:manage"]),
+  backlogOperation("delete", "/api/platform/customers/{customerId}/addresses/{addressId}", "Platform", "removeCustomerProfileAddress", "Soft-delete a customer delivery address", ["rental-os:member:manage"]),
   backlogOperation("post", "/api/platform/customers/{customerId}/account", "Platform", "ensureCustomerAccount", "Open a login account for the customer (idempotent)", ["rental-os:member:manage"]),
   backlogOperation("put", "/api/platform/customers/{customerId}/account-status", "Platform", "changeCustomerAccountStatus", "Change customer account status; close requires customer:close, other states require member:manage", ["rental-os:member:manage", "rental-os:customer:close"]),
   backlogOperation("get", "/api/platform/customers/{customerId}/status-history", "Platform", "listCustomerStatusHistory", "List customer status timeline (account and workspace scope)", ["rental-os:member:view"]),
