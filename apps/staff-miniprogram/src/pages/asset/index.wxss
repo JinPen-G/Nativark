@@ -17,8 +17,8 @@
 .asset-quick__icon--green { background: #E7F7F0; }
 .asset-quick__icon--orange { background: #FFF4DF; }
 .asset-quick__icon--purple { background: #F0ECFF; }
-.asset-quick__label { margin-top: 10rpx; color: var(--text); font-size: 21rpx; text-align: center; white-space: nowrap; }
-.asset-section-head { margin-bottom: 12rpx; font-size: 30rpx; font-weight: 700; }
+.asset-quick__label { margin-top: 10rpx; color: var(--text); font-size: var(--font-mini); text-align: center; white-space: nowrap; }
+.asset-section-head { margin-bottom: 12rpx; font-size: var(--font-subtitle); font-weight: var(--fw-bold); }
 .asset-history-card { padding: 4rpx 18rpx; border: 1rpx solid var(--border); box-shadow: none; }
 .asset-rental-row { align-items: center; padding: 14rpx 0; }
 .asset-rental-row + .asset-rental-row { border-top: 1rpx solid var(--border); }

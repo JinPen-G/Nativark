@@ -1,11 +1,11 @@
 .ledger-entry { display: flex; align-items: flex-start; gap: 12rpx; padding: 0 0 24rpx; position: relative; }
 .ledger-entry::before { content: ""; position: absolute; left: 143rpx; top: 20rpx; bottom: -6rpx; width: 2rpx; background: var(--line); }
 .ledger-entry:last-child::before { display: none; }
-.ledger-entry__date { width: 126rpx; flex: 0 0 auto; color: var(--secondary); font-size: 20rpx; line-height: 1.4; }
+.ledger-entry__date { width: 126rpx; flex: 0 0 auto; color: var(--secondary); font-size: var(--font-mini); line-height: 1.4; }
 .ledger-entry__dot { width: 14rpx; height: 14rpx; margin-top: 8rpx; border-radius: 50%; background: var(--primary); flex: 0 0 auto; position: relative; z-index: 1; }
 .ledger-entry__card { flex: 1; min-width: 0; padding: 20rpx; box-shadow: none; border: 1rpx solid var(--border); }
-.ledger-entry__card .subtitle { font-size: 25rpx; }
-.ledger-entry__quantity { color: var(--primary); font-weight: 700; }
-.ledger-entry__date text { display: block; margin-top: 4rpx; color: var(--muted); font-size: 18rpx; }
+.ledger-entry__card .subtitle { font-size: var(--font-secondary); }
+.ledger-entry__quantity { color: var(--primary); font-weight: var(--fw-bold); }
+.ledger-entry__date text { display: block; margin-top: 4rpx; color: var(--muted); font-size: var(--font-nano); }
 .ledger-entry__meta { align-items: center; gap: 8rpx; margin-top: 10rpx; }
 .ledger-entry__meta .muted { flex: 1; min-width: 0; line-height: 1.45; }

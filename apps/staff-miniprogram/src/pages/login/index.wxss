@@ -1,4 +1,4 @@
 .login__brand { display: flex; flex-direction: column; align-items: center; padding: 48rpx 0 16rpx; }
 .login__mark { width: 128rpx; height: 128rpx; }
-.login__title { margin-top: 20rpx; font-size: 40rpx; font-weight: 700; color: var(--text); }
-.login__subtitle { margin-top: 8rpx; font-size: 24rpx; color: var(--secondary); }
+.login__title { margin-top: 20rpx; font-size: var(--font-page-title); font-weight: var(--fw-bold); color: var(--text); }
+.login__subtitle { margin-top: 8rpx; font-size: var(--font-caption); color: var(--secondary); }

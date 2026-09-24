@@ -4,8 +4,8 @@
 .result-head__icon { width: 112rpx; height: 112rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
 .result-head__icon--ok { background: var(--success); box-shadow: 0 8rpx 24rpx rgba(22, 163, 74, 0.28); }
 .result-head__icon--fail { background: var(--danger-weak); }
-.result-head__title { margin-top: 20rpx; font-size: 36rpx; font-weight: 700; color: var(--text); }
-.result-head__hint { margin-top: 8rpx; font-size: 26rpx; color: var(--secondary); text-align: center; padding: 0 24rpx; line-height: 1.5; }
+.result-head__title { margin-top: 20rpx; font-size: var(--font-title); font-weight: var(--fw-bold); color: var(--text); }
+.result-head__hint { margin-top: 8rpx; font-size: var(--font-secondary); color: var(--secondary); text-align: center; padding: 0 24rpx; line-height: 1.5; }
 .result-code { word-break: break-all; }
 
 .result-card { padding: 0; overflow: hidden; }
@@ -14,15 +14,15 @@
 .result-card__thumb { width: 160rpx; height: 160rpx; border-radius: var(--radius-sm); background: var(--page); overflow: hidden; margin-right: 24rpx; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
 .result-card__thumb image { width: 100%; height: 100%; }
 .result-card__body { min-width: 0; }
-.result-card__title { font-size: 32rpx; font-weight: 600; color: var(--text); line-height: 1.35; }
+.result-card__title { font-size: var(--font-section); font-weight: var(--fw-semibold); color: var(--text); line-height: 1.35; }
 .result-card__row { display: flex; flex-direction: column; margin-top: 12rpx; }
-.result-card__label { font-size: 22rpx; color: var(--muted); }
-.result-card__value { font-size: 26rpx; color: var(--text); margin-top: 2rpx; word-break: break-all; }
+.result-card__label { font-size: var(--font-mini); color: var(--muted); }
+.result-card__value { font-size: var(--font-secondary); color: var(--text); margin-top: 2rpx; word-break: break-all; }
 .result-card__cells { display: flex; border-top: 1rpx solid var(--border); }
 .result-card__cell { flex: 1; min-width: 0; padding: 20rpx 24rpx; }
 .result-card__cell + .result-card__cell { border-left: 1rpx solid var(--border); }
-.result-card__cell-label { font-size: 22rpx; color: var(--muted); margin-bottom: 8rpx; }
-.result-card__cell-value { font-size: 28rpx; font-weight: 600; color: var(--text); }
+.result-card__cell-label { font-size: var(--font-mini); color: var(--muted); margin-bottom: 8rpx; }
+.result-card__cell-value { font-size: var(--font-body); font-weight: var(--fw-semibold); color: var(--text); }
 
 .action-icon { width: 72rpx; height: 72rpx; border-radius: 18rpx; margin-right: 20rpx; flex: 0 0 auto; }
 .scan-actions { box-shadow: none; border: 1rpx solid var(--border); }

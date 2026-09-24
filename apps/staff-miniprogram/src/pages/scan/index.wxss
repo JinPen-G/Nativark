@@ -1,17 +1,17 @@
 .scan-art { background: rgba(22, 119, 255, 0.10); }
 .hero--soft { min-height: 270rpx; background: #EAF3FF; padding: 36rpx 30rpx; }
-.hero--soft .hero__title { font-size: 40rpx; }
-.hero--soft .hero__subtitle { max-width: 65%; font-size: 24rpx; margin-top: 10rpx; }
+.hero--soft .hero__title { font-size: var(--font-page-title); }
+.hero--soft .hero__subtitle { max-width: 65%; font-size: var(--font-caption); margin-top: 10rpx; }
 .hero--soft .scan-hero__line { margin-top: 0; }
 .hero--soft .hero__art { width: 160rpx; height: 160rpx; background: #DCEBFF; }
 .scan-cta { box-sizing: border-box; display: flex; align-items: center; justify-content: center; width: 100%; min-width: 100%; height: 148rpx; border-radius: var(--radius); background: var(--primary); color: #FFFFFF; margin: 0; padding: 0 32rpx; border: 0; line-height: 1.3; box-shadow: 0 8rpx 24rpx rgba(22, 119, 255, 0.28); text-align: left; }
 .scan-cta--disabled { opacity: 0.55; }
-.scan-cta__title { font-size: 34rpx; font-weight: 700; color: #FFFFFF; }
-.scan-cta__hint { font-size: 24rpx; color: rgba(255, 255, 255, 0.85); margin-top: 4rpx; }
+.scan-cta__title { font-size: var(--font-title); font-weight: var(--fw-bold); color: #FFFFFF; }
+.scan-cta__hint { font-size: var(--font-caption); color: rgba(255, 255, 255, 0.85); margin-top: 4rpx; }
 .scan-entry { display: flex; flex-direction: column; align-items: flex-start; padding: 28rpx 24rpx; }
 .scan-entry { align-items: center; text-align: center; box-shadow: none; border: 1rpx solid var(--border); }
-.scan-entry__title { margin-top: 16rpx; font-size: 30rpx; font-weight: 600; color: var(--text); }
-.scan-entry__hint { margin-top: 6rpx; font-size: 22rpx; color: var(--secondary); }
+.scan-entry__title { margin-top: 16rpx; font-size: var(--font-subtitle); font-weight: var(--fw-semibold); color: var(--text); }
+.scan-entry__hint { margin-top: 6rpx; font-size: var(--font-mini); color: var(--secondary); }
 .scan-tips { background: var(--primary-weak); box-shadow: none; }
 .theme-dark .hero--soft { background: #1B2C45; }
-.scan-tips__item { margin-top: 12rpx; font-size: 24rpx; color: var(--secondary); line-height: 1.6; }
+.scan-tips__item { margin-top: 12rpx; font-size: var(--font-caption); color: var(--secondary); line-height: 1.6; }

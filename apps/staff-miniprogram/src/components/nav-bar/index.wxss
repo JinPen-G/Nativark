@@ -4,8 +4,8 @@
 .nav__brand { display: flex; align-items: center; padding-left: 32rpx; }
 .nav__logo { height: 52rpx; width: 226rpx; flex: 0 0 auto; }
 .nav__location { display: inline-flex; align-items: center; height: 52rpx; margin-left: 16rpx; padding: 0 14rpx 0 18rpx; border-radius: var(--radius-pill); background: var(--page); max-width: 260rpx; }
-.nav__location-text { font-size: 26rpx; color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-right: 4rpx; }
+.nav__location-text { font-size: var(--font-secondary); color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-right: 4rpx; }
 .nav__title-row { position: relative; display: flex; align-items: center; padding-left: 96rpx; }
 .nav__back { position: absolute; left: 12rpx; top: 0; bottom: 0; width: 88rpx; display: flex; align-items: center; justify-content: center; }
-.nav__title { flex: 1; text-align: center; font-size: 34rpx; font-weight: 600; color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.nav__title { flex: 1; text-align: center; font-size: var(--font-title); font-weight: var(--fw-semibold); color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .nav__placeholder { width: 100%; }

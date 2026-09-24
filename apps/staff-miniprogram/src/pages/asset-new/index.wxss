@@ -3,8 +3,8 @@
 .card > .subtitle { margin-bottom: 12rpx; }
 .field { display: flex; align-items: center; gap: 12rpx; min-height: 74rpx; border-bottom: 0; padding: 6rpx 0; }
 .field + .field { border-top: 0; }
-.field__label { width: 178rpx; flex: 0 0 auto; color: var(--text); font-size: 22rpx; }
-.field__input, .field__picker { flex: 1; min-width: 0; width: auto; height: 62rpx; min-height: 62rpx; padding: 0 14rpx; border: 1rpx solid var(--line); border-radius: 10rpx; background: var(--surface); font-size: 23rpx; }
+.field__label { width: 178rpx; flex: 0 0 auto; color: var(--text); font-size: var(--font-mini); }
+.field__input, .field__picker { flex: 1; min-width: 0; width: auto; height: 62rpx; min-height: 62rpx; padding: 0 14rpx; border: 1rpx solid var(--line); border-radius: 10rpx; background: var(--surface); font-size: var(--font-caption); }
 .field picker { flex: 1; min-width: 0; }
 .field picker .field__picker { width: 100%; }
 .field switch { margin-left: auto; }

@@ -1,1 +1,1 @@
-.cell__title { font-weight: 600; }
+.cell__title { font-weight: var(--fw-semibold); }
