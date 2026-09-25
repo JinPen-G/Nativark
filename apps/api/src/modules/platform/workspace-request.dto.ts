@@ -39,5 +39,12 @@ export class SaveSharedCustomerDto implements SaveSharedCustomerRequest {
   @IsOptional() @IsString() @MaxLength(64) region?: string;
   @IsOptional() @IsObject() qualifications?: Record<string, unknown>;
   @IsOptional() @IsString() @IsNotEmpty() corporateName?: string;
+  @IsOptional() @IsString() @MaxLength(80) unifiedSocialCreditCode?: string;
+  @IsOptional() @IsString() @MaxLength(500) registeredAddress?: string;
+  @IsOptional() @IsString() @MaxLength(120) legalRepName?: string;
+  @IsOptional() @IsString() @MaxLength(40) legalRepPhone?: string;
+  @IsOptional() @IsString() @MaxLength(120) industry?: string;
+  @IsOptional() @IsIn(["1-10", "11-50", "51-200", "200+"]) scale?: SaveSharedCustomerRequest["scale"];
+  @IsOptional() @IsBoolean() clearEmail?: boolean;
   @IsOptional() @IsString() @IsNotEmpty() corporateTaxNo?: string;
 }

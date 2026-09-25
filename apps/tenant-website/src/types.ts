@@ -40,6 +40,19 @@ export interface Testimonial {
   textEn?: string;
 }
 
+/** 门店 / 履约地点。真实模式来自后端公开目录的 locations；演示模式用内置示例门店。 */
+export interface Store {
+  id: string;
+  name: string;
+  nameEn?: string;
+  address?: string;
+  addressEn?: string;
+  businessHours?: string;
+  contactPhone?: string;
+  /** 该地点支持的能力；用于取货/归还门店筛选。缺省视为可取可还。 */
+  capabilities?: Array<'pickup' | 'return' | 'storage' | 'delivery'>;
+}
+
 export interface Tenant {
   id: string;
   name: string;
@@ -64,6 +77,8 @@ export interface Tenant {
   heroDescriptionEn?: string;
   categories: Category[];
   testimonials: Testimonial[];
+  /** 门店 / 履约地点列表。用于首页预约搜索的取货/归还门店选择；缺省或空数组时隐藏门店字段。 */
+  stores?: Store[];
   showPoweredBy?: boolean;
   // 官网特有内容（真实租户模式下由 web 渠道配置提供；演示模式可省略）。
   ctaTitle?: string;

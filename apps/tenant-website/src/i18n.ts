@@ -11,6 +11,12 @@ const dictionary = {
     switchLanguage: '切换语言', chooseLanguage: '选择语言', switchTheme: '切换颜色模式', zhLanguage: '简体中文', enLanguage: 'English',
     closeMenu: '关闭菜单', openMenu: '打开菜单', explore: '立即探索', viewAll: '查看全部', viewMore: '查看更多',
     viewNow: '立即查看', bookNow: '立即租赁', productCategory: '商品分类', categoryAll: '全部',
+    // 2.0 预约型 Hero / 搜索 / 门店
+    heroPrompt: '今天，想租点什么？', heroPromptSub: '选好品类、门店与时间，直接查看可租商品', heroExplore: '探索更多', heroViewAvailable: '查看可租商品',
+    searchCategory: '品类', searchPickup: '取货门店', searchReturn: '归还门店', searchStart: '取货时间', searchEnd: '归还时间',
+    searchSameStore: '同店租还', searchDiffStore: '异店归还', searchSelectStore: '选择门店', searchAnyStore: '不限门店', searchNeedDates: '请选择取货与归还时间', searchInvalidRange: '归还时间需晚于取货时间',
+    conditionEdit: '修改', availabilityAtOrder: '所选时段的可用性将在下单时最终确认', filteredByCondition: '已按所选门店与时段筛选', checkingAvailability: '正在核对所选时段可用性…',
+    storesTitle: '门店', storesSubtitle: '就近取还，灵活方便', storeHoursLabel: '营业时间', storeAllTitle: '全部门店',
     featuredCategoryTitle: '热门设备分类', featuredCategorySubtitle: '精选{category}，找到适合你的装备',
     featuredProductsTitle: '热门租赁设备', featuredProductsSubtitleSingle: '精选{category}，让每一次体验更自由',
     featuredProductsTitleGeneral: '热门商品推荐', featuredProductsSubtitleGeneral: '精选优质好物，开启你的精彩生活',
@@ -73,6 +79,11 @@ const dictionary = {
     switchLanguage: 'Switch language', chooseLanguage: 'Choose language', switchTheme: 'Toggle appearance', zhLanguage: '简体中文', enLanguage: 'English',
     closeMenu: 'Close menu', openMenu: 'Open menu', explore: 'Explore now', viewAll: 'View all', viewMore: 'View more',
     viewNow: 'View now', bookNow: 'Rent now', productCategory: 'Categories', categoryAll: 'All',
+    heroPrompt: 'What would you like to rent today?', heroPromptSub: 'Pick a category, store and time — then see what\'s available', heroExplore: 'Explore more', heroViewAvailable: 'See available items',
+    searchCategory: 'Category', searchPickup: 'Pickup store', searchReturn: 'Return store', searchStart: 'Pickup time', searchEnd: 'Return time',
+    searchSameStore: 'Same store', searchDiffStore: 'Different return store', searchSelectStore: 'Select a store', searchAnyStore: 'Any store', searchNeedDates: 'Please choose pickup and return times', searchInvalidRange: 'Return time must be after pickup time',
+    conditionEdit: 'Edit', availabilityAtOrder: 'Availability for your dates is confirmed at checkout', filteredByCondition: 'Filtered by your store and dates', checkingAvailability: 'Checking availability for your dates…',
+    storesTitle: 'Stores', storesSubtitle: 'Convenient pickup and return near you', storeHoursLabel: 'Hours', storeAllTitle: 'All stores',
     featuredCategoryTitle: 'Popular categories', featuredCategorySubtitle: 'Find the right gear in {category}',
     featuredProductsTitle: 'Popular rentals', featuredProductsSubtitleSingle: 'Curated {category} for more freedom in every experience',
     featuredProductsTitleGeneral: 'Popular picks', featuredProductsSubtitleGeneral: 'Quality essentials for the life you want to live',
@@ -212,6 +223,7 @@ export function localizeTenant(tenant: Tenant, language: Language): Tenant {
     heroTitle: tenant.heroTitleEn || copy?.heroTitle || tenant.heroTitle,
     heroDescription: tenant.heroDescriptionEn || copy?.heroDescription || tenant.heroDescription,
     categories: tenant.categories.map(category => localizeCategory(category, language)),
+    stores: tenant.stores?.map(store => ({ ...store, name: store.nameEn || store.name, address: store.addressEn ?? store.address })),
     testimonials: tenant.testimonials.map(review => review.textEn ? { ...review, name: review.nameEn || review.name, context: review.contextEn || review.context, text: review.textEn } : testimonialEnglish[review.text] || review),
   };
 }

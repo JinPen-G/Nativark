@@ -35,6 +35,7 @@ export function CouponPage() {
     form.setFieldsValue(record ?? {
       code: "", name: "", discountType: "fixed_amount", discountValue: 10, minimumSpend: 100,
       appliesTo: "rental", stackableWithDiscountPlans: true, totalQuota: 1000, perCustomerLimit: 1, perCustomerUseLimit: 1,
+      claimFrom: dayjs().startOf("day").toISOString(), claimTo: dayjs().add(30, "day").endOf("day").toISOString(),
       effectiveFrom: dayjs().startOf("day").toISOString(), effectiveTo: dayjs().add(30, "day").endOf("day").toISOString(),
       applicableItemGroupIds: [], status: "draft"
     });
@@ -91,8 +92,12 @@ export function CouponPage() {
             <Col span={12}><Form.Item name="totalBudget" label={t("优惠总预算（留空不限）")}><InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: "100%" }} /></Form.Item></Col>
             <Col span={12}><Form.Item name="appliesTo" label={t("作用费用")} rules={[{ required: true }]}><Select options={[{ value: "rental", label: t("商品租金与使用量") }, { value: "fulfillment", label: t("履约费") }, { value: "service", label: t("增值服务费") }]} /></Form.Item></Col>
             <Col span={12}><Form.Item name="stackableWithDiscountPlans" label={t("与自动优惠叠加")} rules={[{ required: true }]}><Select options={[{ value: true, label: t("允许") }, { value: false, label: t("不允许") }]} /></Form.Item></Col>
-            <Col span={12}><Form.Item name="effectiveFrom" label={t("生效时间")} rules={[{ required: true }]}><Input placeholder="ISO 8601 / YYYY-MM-DD" /></Form.Item></Col>
-            <Col span={12}><Form.Item name="effectiveTo" label={t("失效时间")} rules={[{ required: true }]}><Input placeholder="ISO 8601 / YYYY-MM-DD" /></Form.Item></Col>
+            <Col span={12}><Form.Item name="claimFrom" label={t("开始领取时间")} rules={[{ required: true }]}><Input placeholder="ISO 8601 / YYYY-MM-DD" /></Form.Item></Col>
+            <Col span={12}><Form.Item name="claimTo" label={t("停止领取时间")} rules={[{ required: true }]}><Input placeholder="ISO 8601 / YYYY-MM-DD" /></Form.Item></Col>
+            <Col span={12}><Form.Item name="effectiveFrom" label={t("开始使用时间")} rules={[{ required: true }]}><Input placeholder="ISO 8601 / YYYY-MM-DD" /></Form.Item></Col>
+            <Col span={12}><Form.Item name="effectiveTo" label={t("停止使用时间")} rules={[{ required: true }]}><Input placeholder="ISO 8601 / YYYY-MM-DD" /></Form.Item></Col>
+            <Col span={12}><Form.Item name="applicableRentalFrom" label={t("适用租期开始（可选）")}><Input placeholder="ISO 8601 / YYYY-MM-DD" /></Form.Item></Col>
+            <Col span={12}><Form.Item name="applicableRentalTo" label={t("适用租期结束（可选）")}><Input placeholder="ISO 8601 / YYYY-MM-DD" /></Form.Item></Col>
           </Row>
           <Form.Item name="applicableItemGroupIds" label={t("适用商品（留空为全部）")}><Select mode="multiple" showSearch={{ optionFilterProp: "label" }} options={(groups.data ?? []).map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))} /></Form.Item>
           <Form.Item name="status" label={t("状态")} rules={[{ required: true }]}><Select options={[{ value: "draft", label: t("草稿") }, { value: "scheduled", label: t("待开始") }, { value: "active", label: t("进行中") }, { value: "paused", label: t("已暂停") }, { value: "ended", label: t("已结束") }, { value: "void", label: t("已作废") }]} /></Form.Item>

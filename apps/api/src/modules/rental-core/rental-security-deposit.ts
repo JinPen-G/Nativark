@@ -1,10 +1,79 @@
 import { ConflictException } from "@nestjs/common";
 import type {
   RentalDepositRule,
+  RentalPricingRate,
   RentalPreauthorizationRule,
   RentalSecurityReduction,
   RentalSecurityRiskLevel
 } from "@rental-os/shared";
+
+export type RentalPricingSecurityRateOverride = Pick<RentalPricingRate, "unit"> &
+  Partial<Pick<RentalPricingRate, "depositAmount" | "depositMultiple" | "preAuthAmount" | "preAuthMultiple">>;
+
+/**
+ * 仅更新某个定价组的资金费率字段；基本价及其他分组费率保持不变。
+ * 输入计价单位必须与该组当前版本完全一致，防止漏改、重改或伪造新增计价行。
+ */
+export function applyPricingGroupSecurityRateOverrides(
+  rates: readonly RentalPricingRate[],
+  pricingGroupId: string,
+  overrides: readonly RentalPricingSecurityRateOverride[]
+): RentalPricingRate[] {
+  if (!overrides.length) throw new Error("至少提供一条资金费率");
+  const groupRates = rates.filter((rate) => (rate.pricingGroupId ?? rate.itemGroupId) === pricingGroupId);
+  if (!groupRates.length) throw new Error("当前价格版本没有该定价组的费率");
+  const byUnit = new Map<string, RentalPricingSecurityRateOverride>();
+  for (const row of overrides) {
+    if (byUnit.has(row.unit)) throw new Error(`计价单位重复：${row.unit}`);
+    for (const key of ["depositAmount", "depositMultiple", "preAuthAmount", "preAuthMultiple"] as const) {
+      const value = row[key];
+      if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+        throw new Error(`${key} 必须是大于等于 0 的有限数字`);
+      }
+    }
+    byUnit.set(row.unit, row);
+  }
+  const groupUnits = new Set(groupRates.map((rate) => rate.unit));
+  if (groupUnits.size !== byUnit.size || [...groupUnits].some((unit) => !byUnit.has(unit))) {
+    throw new Error("提交的计价单位必须与当前价格版本中的定价组费率完全一致");
+  }
+  return rates.map((rate) => {
+    if ((rate.pricingGroupId ?? rate.itemGroupId) !== pricingGroupId) return rate;
+    const override = byUnit.get(rate.unit)!;
+    return {
+      ...rate,
+      ...(override.depositAmount !== undefined ? { depositAmount: override.depositAmount } : {}),
+      ...(override.depositMultiple !== undefined ? { depositMultiple: override.depositMultiple } : {}),
+      ...(override.preAuthAmount !== undefined ? { preAuthAmount: override.preAuthAmount } : {}),
+      ...(override.preAuthMultiple !== undefined ? { preAuthMultiple: override.preAuthMultiple } : {})
+    };
+  });
+}
+
+/** 规则启用金额的费率覆盖校验；每个可报价单位都必须能算出正额资金义务。 */
+export function validateSecurityRateCoverage(
+  rates: readonly Pick<RentalPricingRate, "itemGroupName" | "unit" | "depositAmount" | "depositMultiple" | "preAuthAmount" | "preAuthMultiple">[],
+  depositRule: RentalDepositRule,
+  preauthRule: RentalPreauthorizationRule
+): string[] {
+  const errors: string[] = [];
+  for (const rate of rates) {
+    const label = `${rate.itemGroupName} · ${rate.unit}`;
+    if (depositRule.mode === "fixed" && !(Number(rate.depositAmount) > 0)) {
+      errors.push(`${label} 未配置正数固定押金`);
+    }
+    if (depositRule.mode === "price_multiple" && !(Number(rate.depositMultiple) > 0)) {
+      errors.push(`${label} 未配置正数押金租金倍数`);
+    }
+    if (preauthRule.mode === "fixed" && !(Number(rate.preAuthAmount ?? rate.depositAmount) > 0)) {
+      errors.push(`${label} 未配置正数预授权额度`);
+    }
+    if ((preauthRule.mode === "price_multiple" || preauthRule.mode === "risk_surcharge") && !(Number(rate.preAuthMultiple ?? rate.depositMultiple) > 0)) {
+      errors.push(`${label} 未配置正数预授权租金倍数`);
+    }
+  }
+  return errors;
+}
 
 const DEPOSIT_MODES = new Set<RentalDepositRule["mode"]>(["none", "fixed", "price_multiple", "order_fixed"]);
 const PREAUTH_MODES = new Set<RentalPreauthorizationRule["mode"]>(["none", "fixed", "price_multiple", "order_fixed", "risk_surcharge"]);

@@ -144,6 +144,7 @@
     "test:order-transaction-order": "npm run build -w @rental-os/shared && node tests/rental-order-transaction-order.test.cjs",
     "test:order-close-db": "npm run build -w @rental-os/shared && node tests/helpers/run-order-close-db.cjs",
     "test:stock-disposition": "npm run build -w @rental-os/shared && node tests/rental-stock-disposition.test.cjs",
+    "test:rental-delivery-address-privacy": "npm run build -w @rental-os/shared && node tests/rental-delivery-address-privacy.test.cjs",
     "test:stock-operations": "npm run build -w @rental-os/shared && node tests/rental-stock-operations.test.cjs",
     "test:asset-status-history": "npm run build -w @rental-os/shared && node tests/rental-asset-status-history.test.cjs",
     "test:work-order": "npm run build -w @rental-os/shared && node tests/rental-work-order.test.cjs",

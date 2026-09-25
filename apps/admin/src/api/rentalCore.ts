@@ -6,6 +6,7 @@ import type {
   TenantReadinessStatus,
   BookingMemberOption,
   CustomerMembershipBookingOption,
+  CustomerProfileAddress,
   CreateRentalInspectionRequest,
   CorrectRentalInspectionUsageRequest,
   ManageRentalAllocationRequest,
@@ -43,6 +44,7 @@ import type {
   ReviewRentalOrderFeeReviewRequest,
   RentalItemGroup,
   RentalOrder,
+  RentalDeliveryAddressSnapshot,
   RentalOrderListQuery,
   RentalOrderPage,
   ApplyRentalOrderChangeRequest,
@@ -139,6 +141,7 @@ export const rentalCoreApi = {
   categories: () => request<RentalCategoryDefinition[]>("/rental/v1/categories"),
   bookingMembers: () => request<BookingMemberOption[]>("/rental/v1/booking-members"),
   bookingOptions: (customerId: string) => request<CustomerMembershipBookingOption[]>(`/rental/v1/booking-members/${encodeURIComponent(customerId)}/booking-options`),
+  bookingDeliveryAddresses: (customerId: string) => request<CustomerProfileAddress[]>(`/rental/v1/booking-members/${encodeURIComponent(customerId)}/delivery-addresses`),
   /**
    * REPORT-01A：当前经营空间经营报表。
    *
@@ -292,6 +295,7 @@ export const rentalCoreApi = {
   applyStockOperation: (data: RentalStockOperationRequest) => request<RentalStockOperationResult>("/rental/v1/stock-operations", { method: "post", data }),
   stockDispositions: (orderId?: string) => request<RentalStockDisposition[]>("/rental/v1/stock-dispositions", { params: { orderId } }),
   restoreStockDisposition: (id: string) => request<RentalStockDisposition>(`/rental/v1/stock-dispositions/${id}/restore`, { method: "post" }),
+  writeOffStockDisposition: (id: string, reason: string) => request<RentalStockDisposition>("/rental/v1/stock-dispositions/" + id + "/write-off", { method: "post", data: { reason } }),
   workOrders: (status?: string) => request<RentalWorkOrder[]>("/rental/v1/work-orders", { params: { status } }),
   workOrderAssignees: (locationId?: string) => request<RentalWorkOrderAssignee[]>("/rental/v1/work-order-assignees", { params: { locationId } }),
   workOrderHistory: (id: string) => request<RentalWorkOrderHistoryEntry[]>(`/rental/v1/work-orders/${id}/history`),
@@ -309,6 +313,7 @@ export const rentalCoreApi = {
   orderPage: (params: RentalOrderListQuery = {}) =>
     request<RentalOrderPage>("/rental/v1/orders", { params: { ...params, page: params.page ?? 1 } }),
   order: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}`),
+  revealOrderDeliveryAddress: (id: string) => request<RentalDeliveryAddressSnapshot>(`/rental/v1/orders/${id}/delivery-address/reveal`),
   fundingEvents: (id: string) => request<RentalFundingBalance>(`/rental/v1/orders/${id}/funding-events`),
   initiateFunding: (id: string, data: InitiateRentalFundingRequest) => request<RentalFundingEvent>(`/rental/v1/orders/${id}/funding-events/initiate`, { method: "post", data }),
   appendFunding: (id: string, data: RentalFundingAmountRequest) => request<RentalFundingEvent>(`/rental/v1/orders/${id}/funding-events/append`, { method: "post", data }),

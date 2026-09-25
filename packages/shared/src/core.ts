@@ -652,6 +652,8 @@ export interface RentalCategoryTerminology {
   fulfillmentLabel: string;
   pickupLabel: string;
   returnLabel: string;
+  /** 配送/上门类履约方式的行业称呼（车辆＝送车/上门取车、物品＝配送到家）；展示层未取到时回退通用「配送」。 */
+  deliveryLabel?: string;
   identifierLabel: string;
   /**
    * 序列号的行业称呼（摄影/工程=序列号、露营=批次号、车辆=车架号）。
@@ -784,6 +786,13 @@ export interface RentalCategoryBusinessModel {
   defaultPricingUnit: RentalPricingUnit;
   fulfillmentModes: RentalFulfillmentMode[];
   locationTypes: RentalLocationType[];
+  /**
+   * 配送/上门类履约（delivery、onsite_delivery）的目的地类型：
+   * customer_address＝送到客户地址簿里的收货地址（摄影/露营/工程，进订单快照）；
+   * tenant_location＝送到租户后台建的营业点/停车据点（车辆），仍用 fulfillmentLocationId，不收客户地址。
+   * 用配置表达品类差异，避免在页面与报价里散落 categoryCode 分支。
+   */
+  deliveryDestination: "customer_address" | "tenant_location";
   settingModules: RentalSettingModule[];
   assetFields: RentalAttributeDefinition[];
   /**
@@ -1011,6 +1020,54 @@ export interface ChangeCustomerMembershipStatusRequest {
   levelName?: string;
   /** 同账号注销：注销空间会员关系时也必须显式确认人工核对项（见上）。 */
   acknowledgedManualChecks?: boolean;
+}
+
+export const CUSTOMER_RISK_TYPES = [
+  "overdue",
+  "damage_dispute",
+  "identity_anomaly",
+  "payment_dispute",
+  "other"
+] as const;
+export type CustomerRiskType = (typeof CUSTOMER_RISK_TYPES)[number];
+export const CUSTOMER_RISK_LEVELS = ["low", "medium", "high"] as const;
+export type CustomerRiskLevel = (typeof CUSTOMER_RISK_LEVELS)[number];
+export const CUSTOMER_RISK_STATUSES = ["open", "reviewing", "closed"] as const;
+export type CustomerRiskStatus = (typeof CUSTOMER_RISK_STATUSES)[number];
+
+/** 客户风控记录。租户级记录影响全部空间；空间级记录仅影响记录所属空间。 */
+export interface CustomerRiskRecordSummary {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  workspaceId?: string;
+  riskType: CustomerRiskType;
+  level: CustomerRiskLevel;
+  detail: string;
+  source: string;
+  status: CustomerRiskStatus;
+  raisedBy?: string;
+  raisedAt: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  closeReason?: string;
+  closedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 新建风险记录的范围由服务端当前会话解析，不接受 workspaceId。 */
+export interface CreateCustomerRiskRecordRequest {
+  riskType: CustomerRiskType;
+  level: CustomerRiskLevel;
+  detail: string;
+  scope: "workspace" | "tenant";
+}
+
+/** 风险复核只能推进到复核中或关闭，不能回写/重开已关闭记录。 */
+export interface ReviewCustomerRiskRecordRequest {
+  status: "reviewing" | "closed";
+  reason?: string;
 }
 
 /** CUSTOMER-01B：敏感资料访问审计条目。只追加。 */
@@ -1552,6 +1609,14 @@ export interface SaveSharedCustomerRequest {
   region?: string;
   qualifications?: Record<string, unknown>;
   corporateName?: string;
+  unifiedSocialCreditCode?: string;
+  registeredAddress?: string;
+  legalRepName?: string;
+  legalRepPhone?: string;
+  industry?: string;
+  scale?: CustomerCorporateScale;
+  clearEmail?: boolean;
+  /** @deprecated Compatibility input only; new records store this in structured corporate profile. */
   corporateTaxNo?: string;
 }
 
@@ -1601,7 +1666,7 @@ export const CUSTOMER_CORPORATE_SCALE_LABELS: Record<CustomerCorporateScale, str
 export const CUSTOMER_MEMBERSHIP_REGISTRATION_MODES = ["automatic", "manual"] as const;
 export type CustomerMembershipRegistrationMode = (typeof CUSTOMER_MEMBERSHIP_REGISTRATION_MODES)[number];
 
-export const CUSTOMER_MEMBERSHIP_REVIEW_TYPES = ["registration", "qualification"] as const;
+export const CUSTOMER_MEMBERSHIP_REVIEW_TYPES = ["registration", "corporate_registration", "qualification"] as const;
 export type CustomerMembershipReviewType = (typeof CUSTOMER_MEMBERSHIP_REVIEW_TYPES)[number];
 
 export const CUSTOMER_MEMBERSHIP_REVIEW_STATUSES = [
@@ -1664,9 +1729,36 @@ export interface SaveCorporateMembershipRequest {
   name: string;
   /** 新建企业必填；编辑留空则保留现有手机号。 */
   phone?: string;
+  /** 编辑时省略则保留已有邮箱；clearEmail 才会显式清除。 */
   email?: string;
+  clearEmail?: boolean;
   corporateName: string;
+  /** 新建企业必填；编辑留空则保留现有法定代码。接口只返回掩码。 */
+  unifiedSocialCreditCode?: string;
+  registeredAddress?: string;
+  legalRepName?: string;
+  /** 原文仅用于首次写入，数据库/API 只保留掩码。编辑省略即保留。 */
+  legalRepPhone?: string;
+  industry?: string;
+  scale?: CustomerCorporateScale;
+  /** @deprecated 仅供旧后台请求迁移期兼容；不再写入 CustomerProfile。 */
   corporateTaxNo?: string;
+}
+
+export interface CustomerCorporateProfileSummary {
+  legalName: string;
+  unifiedSocialCreditCodeMasked: string;
+  registeredAddress?: string;
+  legalRepName?: string;
+  legalRepPhoneMasked?: string;
+  industry?: string;
+  scale?: CustomerCorporateScale;
+}
+
+export interface CorporateRegistrationReviewSnapshot extends CustomerCorporateProfileSummary {
+  contactName: string;
+  contactPhoneMasked: string;
+  email?: string;
 }
 
 export interface CustomerMembershipReview {
@@ -1683,6 +1775,7 @@ export interface CustomerMembershipReview {
   reviewedBy?: string;
   reviewedAt?: string;
   qualificationSnapshot?: CustomerQualificationRevision;
+  corporateSnapshot?: CorporateRegistrationReviewSnapshot;
   createdAt: string;
   updatedAt: string;
 }
@@ -1786,6 +1879,8 @@ export interface CorporateMembershipMember {
   customerId: string;
   name: string;
   corporateName?: string;
+  email?: string;
+  corporateProfile?: CustomerCorporateProfileSummary;
   phoneMasked: string;
   membershipStatus: CustomerMembershipStatus;
   employeeCount: number;
@@ -2127,6 +2222,40 @@ export interface RentalDeliveryServiceAreaPolicy {
   areas: RentalDeliveryServiceArea[];
 }
 
+/**
+ * 配送/上门类履约的收货地址快照（进订单不可变快照，需求 4.3 同款口径：主档改动不篡改历史订单）。
+ * 事实源是客户地址簿 customer_delivery_addresses；下单时按选定地址固化一份。
+ * `phone` 为明文，仅运营视图；下发客户端前必须置空并只给 `phoneMasked`。
+ */
+export interface RentalDeliveryAddressSnapshot {
+  /** 来源地址簿记录 id，仅备查；地址内容以本快照为准，不回读地址簿。 */
+  addressId?: string;
+  recipient: string;
+  /** 明文电话，仅运营视图；客户视图必须省略。 */
+  phone?: string;
+  phoneMasked: string;
+  countryCode: string;
+  province: string;
+  city: string;
+  district?: string;
+  detail: string;
+  postalCode?: string;
+  latitude?: number;
+  longitude?: number;
+}
+
+/** 后台代客建单用的本单收货地址输入。服务端校验并固化为快照，不会替客户修改地址簿。 */
+export interface RentalDeliveryAddressDraft {
+  recipient: string;
+  phone: string;
+  countryCode?: string;
+  province: string;
+  city: string;
+  district?: string;
+  detail: string;
+  postalCode?: string;
+}
+
 export interface TenantRentalBusinessSettings {
   tenantId: string;
   /** 经营空间资源排期；缺省不启用自动任务。 */
@@ -2232,8 +2361,15 @@ export interface RentalCouponTemplate {
   totalBudget?: number;
   lockedBudget: number;
   redeemedBudget: number;
+  /** 可领取时段；旧模板回填为原 effectiveFrom/effectiveTo，保持兼容。 */
+  claimFrom: string;
+  claimTo: string;
+  /** 券可使用时间；只按报价/订单确认时点判断，不拿租赁开始时间代替。 */
   effectiveFrom: string;
   effectiveTo: string;
+  /** 可选的适用租期窗口，按租赁开始时点判断。 */
+  applicableRentalFrom?: string;
+  applicableRentalTo?: string;
   applicableItemGroupIds: string[];
   status: "draft" | "scheduled" | "active" | "paused" | "ended" | "void";
   version: string;
@@ -2255,8 +2391,12 @@ export interface SaveRentalCouponTemplateRequest {
   perCustomerLimit: number;
   perCustomerUseLimit?: number;
   totalBudget?: number;
+  claimFrom?: string;
+  claimTo?: string;
   effectiveFrom: string;
   effectiveTo: string;
+  applicableRentalFrom?: string;
+  applicableRentalTo?: string;
   applicableItemGroupIds?: string[];
   status?: RentalCouponTemplate["status"];
 }
@@ -3690,10 +3830,10 @@ export interface RentalFundingFailureRequest {
 
 export interface RentalFundingBalance {
   orderId: string;
-  /** 模拟收付款账；保证金只有实际抵扣后才计入已付，退款减少净收款。 */
-  rental: { payable: number; collected: number; refunded: number; securityCaptured: number; balance: number; pendingExtensionAmount: number };
-  /** pendingExtensionAmount 是尚未生效续租申请带来的新增资金要求。 */
-  deposit: { collected: number; captured: number; refunded: number; balance: number; requiredAmount: number; pendingExtensionAmount: number };
+  /** 模拟收付款账；保证金只有实际抵扣后才计入已付，退款减少净收款。due 为当前待收（含待补款续租，已下限 0），由服务端计算，客户端与门面统一读取，勿再自行推导。 */
+  rental: { payable: number; collected: number; refunded: number; securityCaptured: number; balance: number; pendingExtensionAmount: number; due: number };
+  /** pendingExtensionAmount 是尚未生效续租申请带来的新增资金要求；due 为当前待收押金（requiredAmount - collected，已下限 0），服务端计算。 */
+  deposit: { collected: number; captured: number; refunded: number; balance: number; requiredAmount: number; pendingExtensionAmount: number; due: number };
   preauthorization: { frozen: number; captured: number; released: number; balance: number; requiredAmount: number; pendingExtensionAmount: number };
   events: RentalFundingEvent[];
 }
@@ -3989,6 +4129,9 @@ export interface RentalCustomerCoupon {
   grantReason: string;
   status: RentalCustomerCouponStatus;
   claimedAt: string;
+  /** 领取时固化的适用租期窗口。 */
+  applicableRentalFrom?: string;
+  applicableRentalTo?: string;
   effectiveFrom: string;
   effectiveTo: string;
   lockedOrderId?: string;
@@ -4015,6 +4158,11 @@ export interface RentalQuoteCouponEvaluation {
   minimumSpend: number;
   maximumDiscount?: number;
   stackableWithDiscountPlans: boolean;
+  /** 本次校验的服务端时点与租期开始时点分开记录，便于解释有效性。 */
+  checkedAt: string;
+  rentalStartAt: string;
+  applicableRentalFrom?: string;
+  applicableRentalTo?: string;
   baseBeforeDiscount: number;
   runningBase: number;
   formula: string;
@@ -4132,6 +4280,11 @@ export interface RentalQuoteRequest {
   fulfillmentMode: RentalFulfillmentMode;
   fulfillmentLocationId: string;
   returnLocationId?: string;
+  /** 配送/上门类履约（deliveryDestination=customer_address 的品类）必填：客户地址簿里选定的收货地址 id。
+   *  服务端据此解析并把地址固化进报价/订单快照（RentalQuoteSnapshotV1.deliveryAddressSnapshot），不采信客户端自报的地址内容。 */
+  deliveryAddressId?: string;
+  /** 仅用于本单；与 deliveryAddressId 二选一，不写入客户地址簿。 */
+  deliveryAddressDraft?: RentalDeliveryAddressDraft;
   startAt: string;
   endAt: string;
   pricingPlanId?: string;
@@ -4273,6 +4426,8 @@ export interface RentalQuoteSnapshotV1 {
   quoteNo: string;
   categoryCode: RentalCategoryCode;
   request: RentalQuoteRequest;
+  /** 配送/上门类（customer_address 品类）报价固化的收货地址快照；自取或车辆据点类无此字段。下单时原样拷进订单。 */
+  deliveryAddressSnapshot?: RentalDeliveryAddressSnapshot;
   /** 新会员预约身份、主体与权益版本的服务端快照。 */
   membershipSnapshot?: RentalMembershipSnapshot;
   /** 会员方案中本次真正生效的权益与金额；只存会员关系不足以解释实际减免。 */
@@ -4503,7 +4658,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "usage_reading", "camera_compatibility", "camera_kit_handover", "inspection_care"],
     requiredCapabilities: [],
-    terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", identifierLabel: "资产编号", serialLabel: "序列号", usageMetricLabel: "快门次数", navigationLabels: { inventoryGroup: "摄影器材", itemGroups: "器材型号", pricingGroups: "器材定价分组", assets: "器材资产与库存", locations: "器材门店" } },
+    terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", deliveryLabel: "配送到家", identifierLabel: "资产编号", serialLabel: "序列号", usageMetricLabel: "快门次数", navigationLabels: { inventoryGroup: "摄影器材", itemGroups: "器材型号", pricingGroups: "器材定价分组", assets: "器材资产与库存", locations: "器材门店" } },
     attributeSchema: { brand: "string", model: "string", equipmentType: "string", mount: "string", sensor: "string", securityRiskLevel: "string", serialNo: "string", shutterCount: "number" },
     businessModel: {
       // 摄影器材的基础租金按时间计价。快门次数等读数用于交接、养护和后续
@@ -4513,6 +4668,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
       defaultPricingUnit: "day_24h",
       fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "locker_pickup_return", "delivery"],
       locationTypes: ["store", "warehouse", "locker", "delivery_hub"],
+      deliveryDestination: "customer_address",
       settingModules: [...commonSettingModules],
       assetFields: [
         securityRiskAttribute(),
@@ -4578,7 +4734,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Consumable, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "camping_kit_integrity", "camping_cleaning_turnaround"],
     requiredCapabilities: [],
-    terminology: { itemLabel: "装备", itemGroupLabel: "装备型号", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", identifierLabel: "装备编号", serialLabel: "批次号", navigationLabels: { inventoryGroup: "户外装备", itemGroups: "装备型号", pricingGroups: "装备定价分组", assets: "装备资产与库存", locations: "装备仓库" } },
+    terminology: { itemLabel: "装备", itemGroupLabel: "装备型号", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", deliveryLabel: "配送到家", identifierLabel: "装备编号", serialLabel: "批次号", navigationLabels: { inventoryGroup: "户外装备", itemGroups: "装备型号", pricingGroups: "装备定价分组", assets: "装备资产与库存", locations: "装备仓库" } },
     attributeSchema: { brand: "string", model: "string", people: "number", season: "string", material: "string", securityRiskLevel: "string", batchNo: "string" },
     businessModel: {
       // 露营装备按占用日期或夜晚计价；套装是库存/商品形态，不是脱离租期的
@@ -4587,6 +4743,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
       defaultPricingUnit: "calendar_day",
       fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "warehouse_pickup_return", "delivery"],
       locationTypes: ["store", "warehouse", "delivery_hub"],
+      deliveryDestination: "customer_address",
       settingModules: [...commonSettingModules],
       assetFields: [
         securityRiskAttribute(),
@@ -4627,7 +4784,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     supportedInventoryModes: [RentalInventoryMode.Serialized],
     defaultCapabilities: ["serialized_inventory", "pickup", "return", "delivery", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "vehicle_relocation"],
     requiredCapabilities: [],
-    terminology: { itemLabel: "车辆", itemGroupLabel: "车辆型号", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", serialLabel: "车架号", usageMetricLabel: "里程", assetCollectionLabel: "车队", navigationLabels: { inventoryGroup: "车辆型号与车队", itemGroups: "厂牌车型管理", pricingGroups: "车辆定价分组", assets: "车辆管理", locations: "门店管理" } },
+    terminology: { itemLabel: "车辆", itemGroupLabel: "车辆型号", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", deliveryLabel: "送车到点", identifierLabel: "车辆编号", serialLabel: "车架号", usageMetricLabel: "里程", assetCollectionLabel: "车队", navigationLabels: { inventoryGroup: "车辆型号与车队", itemGroups: "厂牌车型管理", pricingGroups: "车辆定价分组", assets: "车辆管理", locations: "门店管理" } },
     attributeSchema: { manufacturer: "string", brand: "string", model: "string", trim: "string", modelYear: "number", seats: "number", transmission: "string", energyType: "string", securityRiskLevel: "string", licensePlate: "string", vin: "string", color: "string", firstRegistrationDate: "date", mileage: "number" },
     businessModel: {
       // 车辆可按时间或里程等使用量计价；车组/车型组合不使用“整包一次价”。
@@ -4635,6 +4792,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
       defaultPricingUnit: "day_24h",
       fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "delivery"],
       locationTypes: ["store", "station", "warehouse", "delivery_hub"],
+      deliveryDestination: "tenant_location",
       settingModules: [...commonSettingModules],
       assetFields: [
         securityRiskAttribute(),
@@ -4693,7 +4851,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "construction_transport"],
     requiredCapabilities: [],
-    terminology: { itemLabel: "设备", itemGroupLabel: "设备型号", assetLabel: "设备资产", fulfillmentLabel: "设备仓", pickupLabel: "出库", returnLabel: "入库", identifierLabel: "设备编号", serialLabel: "序列号", usageMetricLabel: "工时", navigationLabels: { inventoryGroup: "工程设备", itemGroups: "设备型号", pricingGroups: "设备定价分组", assets: "设备台账与库存", locations: "设备仓库" } },
+    terminology: { itemLabel: "设备", itemGroupLabel: "设备型号", assetLabel: "设备资产", fulfillmentLabel: "设备仓", pickupLabel: "出库", returnLabel: "入库", deliveryLabel: "送达工地", identifierLabel: "设备编号", serialLabel: "序列号", usageMetricLabel: "工时", navigationLabels: { inventoryGroup: "工程设备", itemGroups: "设备型号", pricingGroups: "设备定价分组", assets: "设备台账与库存", locations: "设备仓库" } },
     attributeSchema: { manufacturer: "string", brand: "string", model: "string", power: "string", ratedLoad: "number", securityRiskLevel: "string", factoryNo: "string", hourMeter: "number" },
     businessModel: {
       // 工程设备支持小时、班次、长期和工时等使用量计价；附件、操作员和运输
@@ -4702,6 +4860,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
       defaultPricingUnit: "shift",
       fulfillmentModes: ["warehouse_pickup_return", "delivery", "onsite_delivery", "partner_pickup_return"],
       locationTypes: ["warehouse", "delivery_hub", "project_site"],
+      deliveryDestination: "customer_address",
       settingModules: [...commonSettingModules],
       assetFields: [
         securityRiskAttribute(),
@@ -5030,6 +5189,8 @@ export interface SaveRentalStockBalanceRequest {
 /** STOCK-OPS-01：数量与一次性耗材库存的可审计日常作业。余额是当前快照，流水才是调整来源。 */
 export const RENTAL_STOCK_OPERATION_TYPES = ["receive", "count_adjustment", "transfer", "consume", "scrap", "retire"] as const;
 export type RentalStockOperationType = (typeof RENTAL_STOCK_OPERATION_TYPES)[number];
+/** 内部租赁归还和维修隔离流水，不开放为管理端任意库存作业。 */
+export type RentalStockLedgerOperationType = RentalStockOperationType | "return_transfer" | "maintenance_quarantine" | "maintenance_release" | "maintenance_write_off";
 
 export interface RentalStockLedgerEntry {
   id: string;
@@ -5037,7 +5198,7 @@ export interface RentalStockLedgerEntry {
   workspaceId: string;
   operationId: string;
   entryKind: "single" | "out" | "in";
-  operationType: RentalStockOperationType;
+  operationType: RentalStockLedgerOperationType;
   itemGroupId: string;
   itemGroupCode: string;
   itemGroupName: string;
@@ -5046,6 +5207,8 @@ export interface RentalStockLedgerEntry {
   quantityDelta: number;
   onHandBefore: number;
   onHandAfter: number;
+  /** 维修隔离数量变化；历史/普通库存流水为 0。 */
+  maintenanceDelta: number;
   reservedQuantity: number;
   maintenanceQuantity: number;
   reason: string;
@@ -5053,6 +5216,9 @@ export interface RentalStockLedgerEntry {
   batchNo?: string;
   /** 外部入库单、盘点单、调拨单或审批单号。 */
   sourceDocumentNo?: string;
+  sourceOrderId?: string;
+  sourceInspectionId?: string;
+  sourceDispositionId?: string;
   idempotencyKey: string;
   operator: string;
   createdAt: string;
@@ -5101,13 +5267,17 @@ export interface RentalStockDisposition {
   quantity: number;
   receivedAt: string;
   bufferUntil: string;
-  status: "buffered" | "blocked" | "restored";
+  status: "buffered" | "blocked" | "restored" | "written_off";
   blockReason?: string;
   restoredQuantity: number;
   restoredAt?: string;
   restoredBy?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface WriteOffRentalStockDispositionRequest {
+  reason: string;
 }
 
 export interface RentalWorkOrder {
@@ -5517,6 +5687,8 @@ export interface RentalOrder {
   returnLocationId?: string;
   returnLocationName?: string;
   returnLocationSnapshot: RentalFulfillmentLocationSnapshot;
+  /** 配送/上门类（customer_address 品类）订单的收货地址快照（含明文电话，运营视图）；自取、车辆据点类订单无此字段。 */
+  deliveryAddressSnapshot?: RentalDeliveryAddressSnapshot;
   startAt: string;
   /**
    * 原始约定归还时间，**永不因续租而改变**（需求 4.6.9：延期是订单变更，

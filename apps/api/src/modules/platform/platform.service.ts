@@ -9,6 +9,8 @@ import {
   SaveWorkspaceMemberRequest,
   ChangeCustomerAccountStatusRequest,
   ChangeCustomerMembershipStatusRequest,
+  CreateCustomerRiskRecordRequest,
+  ReviewCustomerRiskRecordRequest,
   CustomerProfileOrderQuery,
   MergeCustomersRequest,
   SaveCustomerProfileAddressRequest,
@@ -257,7 +259,7 @@ export class PlatformService {
         { code: "rental-os:member:account-manage", name: "会员账号与密码管理", description: "开通账号、设置临时密码和管理账号状态" },
         { code: "rental-os:member:plan:manage", name: "会员方案编辑", description: "编辑个人和企业会员方案草稿、授予方案" },
         { code: "rental-os:member:plan:publish", name: "会员方案发布", description: "发布会员方案版本" },
-        { code: "rental-os:member:risk-action", name: "按钮-会员风控动作", description: "暂停、拉黑和恢复会员" },
+        { code: "rental-os:member:risk-action", name: "会员风险管理", description: "登记与复核风险记录，并执行会员风险限制" },
         // CUSTOMER-01B：敏感资料解密查看单独授权。必须出现在权限目录里——
         // 角色管理页的可选项完全来自这棵树，漏了它就没人能被授予该权限。
         { code: "rental-os:customer:reveal-sensitive", name: "客户敏感资料解密", description: "查看客户证件号等明文，并可查阅敏感访问审计" },
@@ -1680,6 +1682,51 @@ export class PlatformService {
     );
   }
 
+  listCustomerRiskRecords(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().listRiskRecords(
+      tenantId,
+      getRequestWorkspaceId(),
+      customerId,
+      currentUser
+    );
+  }
+
+  createCustomerRiskRecord(customerId: string, input: CreateCustomerRiskRecordRequest, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    this.assertCustomerActionPermission(currentUser, "rental-os:member:risk-action", "登记会员风险");
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().createRiskRecord(
+      tenantId,
+      getRequestWorkspaceId(),
+      customerId,
+      input,
+      currentUser?.displayName,
+      currentUser
+    );
+  }
+
+  reviewCustomerRiskRecord(
+    customerId: string,
+    riskRecordId: string,
+    input: ReviewCustomerRiskRecordRequest,
+    currentUser?: SystemUserRow
+  ) {
+    this.requireWorkspaceDataSource();
+    this.assertCustomerActionPermission(currentUser, "rental-os:member:risk-action", "复核会员风险");
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().reviewRiskRecord(
+      tenantId,
+      getRequestWorkspaceId(),
+      customerId,
+      riskRecordId,
+      input,
+      currentUser?.displayName,
+      currentUser
+    );
+  }
+
   listCustomerSensitiveAccess(customerId: string, currentUser?: SystemUserRow) {
     this.requireWorkspaceDataSource();
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
@@ -1819,6 +1866,12 @@ export class PlatformService {
           phone: input.phone,
           email: input.email,
           corporateName: input.corporateName?.trim() || input.name,
+          unifiedSocialCreditCode: input.unifiedSocialCreditCode,
+          registeredAddress: input.registeredAddress,
+          legalRepName: input.legalRepName,
+          legalRepPhone: input.legalRepPhone,
+          industry: input.industry,
+          scale: input.scale,
           corporateTaxNo: input.corporateTaxNo
         })).customerId
       : (await this.memberships.registerPersonal(tenantId, {

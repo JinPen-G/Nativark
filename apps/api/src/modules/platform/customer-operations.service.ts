@@ -6,6 +6,9 @@ import type {
   CustomerAccount,
   CustomerAccountStatus,
   CustomerMembershipStatus,
+  CustomerRiskRecordSummary,
+  CreateCustomerRiskRecordRequest,
+  ReviewCustomerRiskRecordRequest,
   CustomerProfileOrderQuery,
   CustomerProfileOverview,
   SaveCustomerProfileAddressRequest,
@@ -14,7 +17,7 @@ import type {
   SharedCustomerProfile,
   SystemUserRow
 } from "@rental-os/shared";
-import { CUSTOMER_ACCOUNT_STATUSES, CUSTOMER_MEMBERSHIP_STATUSES } from "@rental-os/shared";
+import { CUSTOMER_ACCOUNT_STATUSES, CUSTOMER_MEMBERSHIP_STATUSES, CUSTOMER_RISK_LEVELS, CUSTOMER_RISK_TYPES } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { CustomerOperationsRepository, type CustomerTx } from "./customer-operations.repository";
 import { SharedCustomerRepository } from "./shared-customer.repository";
@@ -584,6 +587,134 @@ export class CustomerOperationsService {
       };
     }
     return { allowed: true, accountStatus: account?.status, membershipStatus: membership.status };
+  }
+
+  private async assertRiskCustomerVisible(
+    tenantId: string,
+    workspaceId: string,
+    customerId: string,
+    user?: SystemUserRow
+  ) {
+    const scope = getRequestDataScope() ?? user?.dataScope;
+    const locationIds = getRequestLocationIds();
+    if (scope && (scope !== "all" || locationIds !== undefined)) {
+      await this.assertCustomerVisibleInRequestScope(
+        tenantId,
+        workspaceId,
+        customerId,
+        scope,
+        getRequestUserId() ?? user?.id
+      );
+    }
+  }
+
+  private assertTenantWideRiskPermission(user?: SystemUserRow) {
+    const scope = getRequestDataScope() ?? user?.dataScope;
+    const unrestricted = user?.isPlatformAdmin || user?.permissions?.includes("*") ||
+      (scope === "all" && getRequestLocationIds() === undefined);
+    if (!unrestricted) {
+      throw new ForbiddenException("创建或处理租户级风险记录需要不受空间与地点限制的管理范围");
+    }
+  }
+
+  async listRiskRecords(
+    tenantId: string,
+    workspaceId: string | undefined,
+    customerId: string,
+    user?: SystemUserRow
+  ): Promise<CustomerRiskRecordSummary[]> {
+    if (!workspaceId) throw new ForbiddenException("查看会员风险记录需要已授权的经营空间");
+    await this.assertRiskCustomerVisible(tenantId, workspaceId, customerId, user);
+    return this.operations.listRiskRecords(tenantId, customerId, workspaceId);
+  }
+
+  /**
+   * 添加风险事实必须与订单最终风控检查争用同一客户主档锁。
+   * MySQL 外键只保证关联存在，不保证子表 INSERT 等待这个业务锁；
+   * 因此所有受支持的风险写入都必须通过本事务入口。
+   */
+  async createRiskRecord(
+    tenantId: string,
+    workspaceId: string | undefined,
+    customerId: string,
+    input: CreateCustomerRiskRecordRequest,
+    operator?: string,
+    user?: SystemUserRow
+  ): Promise<CustomerRiskRecordSummary> {
+    if (!workspaceId) throw new ForbiddenException("添加会员风险记录需要已授权的经营空间");
+    if (!CUSTOMER_RISK_TYPES.includes(input.riskType) || !CUSTOMER_RISK_LEVELS.includes(input.level)) {
+      throw new BadRequestException("风险类型或等级无效");
+    }
+    const detail = input.detail?.trim();
+    if (!detail) throw new BadRequestException("风险说明不能为空");
+    if (input.scope === "tenant") this.assertTenantWideRiskPermission(user);
+    await this.assertRiskCustomerVisible(tenantId, workspaceId, customerId, user);
+
+    return this.prisma.$transaction(async (tx) => {
+      if (!(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
+        throw new NotFoundException("客户不存在或不属于当前租户");
+      }
+      return this.operations.createRiskRecord({
+        tenantId,
+        customerId,
+        workspaceId: input.scope === "tenant" ? null : workspaceId,
+        riskType: input.riskType,
+        level: input.level,
+        detail,
+        source: "manual",
+        raisedBy: operator,
+        raisedAt: new Date()
+      }, tx);
+    });
+  }
+
+  async reviewRiskRecord(
+    tenantId: string,
+    workspaceId: string | undefined,
+    customerId: string,
+    riskRecordId: string,
+    input: ReviewCustomerRiskRecordRequest,
+    operator?: string,
+    user?: SystemUserRow
+  ): Promise<CustomerRiskRecordSummary> {
+    if (!workspaceId) throw new ForbiddenException("处理会员风险记录需要已授权的经营空间");
+    if (input.status !== "reviewing" && input.status !== "closed") {
+      throw new BadRequestException("风险记录只能进入复核中或关闭状态");
+    }
+    const reason = input.reason?.trim();
+    if (input.status === "closed" && !reason) {
+      throw new BadRequestException("关闭风险记录必须填写处理结果");
+    }
+    await this.assertRiskCustomerVisible(tenantId, workspaceId, customerId, user);
+
+    return this.prisma.$transaction(async (tx) => {
+      if (!(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) {
+        throw new NotFoundException("客户不存在或不属于当前租户");
+      }
+      const current = await this.operations.findRiskRecord(tenantId, customerId, riskRecordId, workspaceId, tx);
+      if (!current) throw new NotFoundException("风险记录不存在或不在当前经营空间");
+      if (!current.workspaceId) this.assertTenantWideRiskPermission(user);
+      if (current.status === "closed") throw new ConflictException("已关闭的风险记录不可再次处理");
+      if (input.status === "reviewing" && current.status !== "open") {
+        throw new ConflictException("只有待处理的风险记录可以进入复核中");
+      }
+
+      const reviewedAt = new Date();
+      const updated = await this.operations.updateRiskRecordDecision(
+        tenantId,
+        customerId,
+        riskRecordId,
+        {
+          status: input.status,
+          reviewedBy: operator,
+          reviewedAt,
+          ...(input.status === "closed" ? { closeReason: reason, closedAt: reviewedAt } : {})
+        },
+        tx
+      );
+      if (!updated) throw new ConflictException("风险记录已被其他操作更新，请刷新后重试");
+      return updated;
+    });
   }
 
   /** 客户状态时间线：账号、会员全局事件与可选的历史空间事件。 */

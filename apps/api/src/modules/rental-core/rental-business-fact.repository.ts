@@ -68,7 +68,7 @@ export interface RentalBusinessFactStore {
   loadAll(): Promise<TenantBusinessFactSnapshot[]>;
   findQuote(tenantId: string, quoteId: string, tx?: RentalBusinessFactTx): Promise<RentalQuoteSnapshotV1 | undefined>;
   consumeQuoteIfAvailable(tenantId: string, quoteId: string, orderId: string, consumedAt: string, tx: RentalBusinessFactTx): Promise<boolean>;
-  lockCouponIfAvailable(tenantId: string, couponId: string, customerId: string | undefined, orderId: string, lockedAt: string, validAt: string, discountAmount: number, tx: RentalBusinessFactTx): Promise<boolean>;
+  lockCouponIfAvailable(tenantId: string, couponId: string, customerId: string | undefined, orderId: string, lockedAt: string, rentalStartAt: string, discountAmount: number, tx: RentalBusinessFactTx): Promise<boolean>;
   redeemCouponForOrder(tenantId: string, orderId: string, redeemedAt: string, tx: RentalBusinessFactTx): Promise<"none" | "redeemed" | "already_redeemed" | "invalid">;
   repriceOrderCoupon(tenantId: string, orderId: string, amount: number, tx: RentalBusinessFactTx): Promise<void>;
   releaseCouponForOrder(tenantId: string, orderId: string, releasedAt: string, tx: RentalBusinessFactTx): Promise<void>;
@@ -214,14 +214,14 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     customerId: string | undefined,
     orderId: string,
     lockedAt: string,
-    validAt: string,
+    rentalStartAt: string,
     discountAmount: number,
     tx: RentalBusinessFactTx
   ): Promise<boolean> {
     if (!Number.isFinite(discountAmount) || discountAmount <= 0) return false;
     const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
     const timestamp = date(lockedAt);
-    const validityTimestamp = date(validAt);
+    const rentalTimestamp = date(rentalStartAt);
     // 券行和模板行都在外层「下单」事务中加锁。不同券并发消耗同一模板预算时，
     // 模板锁把预算判断串行化；同一张券并发时，券锁保证只有一个订单能占用。
     await tx.$queryRaw(Prisma.sql`
@@ -231,10 +231,12 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     `);
     const coupon = await tx.rentalCustomerCoupon.findFirst({
       where: { id: couponId, tenantId, workspaceId },
-      select: { customerId: true, templateId: true, status: true, effectiveFrom: true, effectiveTo: true }
+      select: { customerId: true, templateId: true, status: true, effectiveFrom: true, effectiveTo: true, applicableRentalFrom: true, applicableRentalTo: true }
     });
     if (!coupon || (customerId && coupon.customerId !== customerId) || coupon.status !== "claimed"
-      || coupon.effectiveFrom > validityTimestamp || coupon.effectiveTo < validityTimestamp) return false;
+      || coupon.effectiveFrom > timestamp || coupon.effectiveTo < timestamp
+      || (coupon.applicableRentalFrom && coupon.applicableRentalFrom > rentalTimestamp)
+      || (coupon.applicableRentalTo && coupon.applicableRentalTo < rentalTimestamp)) return false;
 
     const templates = await tx.$queryRaw<Array<{ perCustomerUseLimit: number }>>(Prisma.sql`
       SELECT perCustomerUseLimit FROM rental_coupon_templates
@@ -267,7 +269,11 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
         ...(customerId ? { customerId } : {}),
         status: "claimed",
         effectiveFrom: { lte: timestamp },
-        effectiveTo: { gte: timestamp }
+        effectiveTo: { gte: timestamp },
+        AND: [
+          { OR: [{ applicableRentalFrom: null }, { applicableRentalFrom: { lte: rentalTimestamp } }] },
+          { OR: [{ applicableRentalTo: null }, { applicableRentalTo: { gte: rentalTimestamp } }] }
+        ]
       },
       data: {
         status: "locked",
@@ -510,6 +516,8 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       grantReason: coupon.grantReason,
       status: coupon.status,
       claimedAt: date(coupon.claimedAt),
+      applicableRentalFrom: optionalDate(coupon.applicableRentalFrom),
+      applicableRentalTo: optionalDate(coupon.applicableRentalTo),
       effectiveFrom: date(coupon.effectiveFrom),
       effectiveTo: date(coupon.effectiveTo),
       lockedOrderId: coupon.lockedOrderId ?? null,
@@ -946,6 +954,8 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       grantReason: row.grantReason,
       status: row.status as RentalCustomerCouponStatus,
       claimedAt: iso(row.claimedAt),
+      applicableRentalFrom: optionalIso(row.applicableRentalFrom),
+      applicableRentalTo: optionalIso(row.applicableRentalTo),
       effectiveFrom: iso(row.effectiveFrom),
       effectiveTo: iso(row.effectiveTo),
       lockedOrderId: row.lockedOrderId ?? undefined,

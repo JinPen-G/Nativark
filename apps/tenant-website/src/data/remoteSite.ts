@@ -5,7 +5,7 @@
 // 精确库存、场景图、证言）按诚实占位处理——不编造数字，由页面既有「以报价为准 / 预约时确认」文案兜底。
 
 import { clientApi, type BootstrapResponse, type CatalogItem, type PublicCatalogResponse } from './apiClient';
-import type { Category, Product, SubCategory, Tenant } from '../types';
+import type { Category, Product, Store, SubCategory, Tenant } from '../types';
 
 /** 后端一级品类编码 → 官网图标键（HomeSections 的 icons 映射）。 */
 const CATEGORY_ICON: Record<string, string> = {
@@ -90,12 +90,29 @@ function toCategory(service: BootstrapResponse['services'][number], catalog: Pub
   };
 }
 
+const STORE_CAPABILITIES = new Set(['pickup', 'return', 'storage', 'delivery']);
+
+/** public/catalog 的 location → 官网门店。后端已返回但此前映射层丢弃，这里补齐供预约搜索选门店。 */
+function toStore(location: NonNullable<PublicCatalogResponse['locations']>[number]): Store {
+  const capabilities = (location.capabilities ?? []).filter(
+    (cap): cap is 'pickup' | 'return' | 'storage' | 'delivery' => STORE_CAPABILITIES.has(cap)
+  );
+  return {
+    id: location.id,
+    name: location.name,
+    address: location.address,
+    businessHours: location.businessHours,
+    contactPhone: location.contactPhone,
+    capabilities: capabilities.length ? capabilities : undefined,
+  };
+}
+
 export interface RemoteSite {
   tenant: Tenant;
   products: Product[];
 }
 
-function buildTenant(bootstrap: BootstrapResponse, categories: Category[]): Tenant {
+function buildTenant(bootstrap: BootstrapResponse, categories: Category[], stores: Store[] = []): Tenant {
   const website = bootstrap.website;
   const merchantName = bootstrap.merchant.name;
   const tenant: Tenant = {
@@ -115,6 +132,7 @@ function buildTenant(bootstrap: BootstrapResponse, categories: Category[]): Tena
     heroDescription: website?.heroDescription || '',
     categories,
     testimonials: (website?.testimonials ?? []).map(item => ({ name: item.name, context: item.context ?? '', text: item.text })),
+    stores,
     advantages: website?.advantages,
     steps: website?.steps,
     showPoweredBy: website?.showPoweredBy ?? false,
@@ -158,7 +176,12 @@ export async function loadRemoteCatalogs(tenantCode: string, bootstrap: Bootstra
       products.push(toProduct(item, service.code, group?.id ?? item.id));
     });
   });
-  return { tenant: buildTenant(bootstrap, categories), products };
+  // 各服务的履约地点去重汇总为租户门店（供首页预约搜索选取货/归还门店）。
+  const storeById = new Map<string, Store>();
+  catalogs.forEach(catalog => (catalog?.locations ?? []).forEach(location => {
+    if (!storeById.has(location.id)) storeById.set(location.id, toStore(location));
+  }));
+  return { tenant: buildTenant(bootstrap, categories, [...storeById.values()]), products };
 }
 
 /** 一次性加载（bootstrap + 全部目录）；两阶段加载见 loadRemoteBootstrap / loadRemoteCatalogs。 */

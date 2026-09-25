@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const ts = require("typescript");
+require("ts-node").register({ transpileOnly: true, compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true } });
 
 const source = fs.readFileSync(path.join(__dirname, "../apps/admin/src/features/settings/securityRuleForm.ts"), "utf8");
 const compiled = ts.transpileModule(source, {
@@ -10,6 +11,15 @@ const compiled = ts.transpileModule(source, {
 const exported = {};
 new Function("exports", "require", compiled)(exported, require);
 const { normalizeSecurityRules } = exported;
+const { defaultRentalNoShowRule } = require("../packages/shared/src/rental-rule-defaults.ts");
+const { effectiveNoShowRule } = require("../apps/api/src/modules/rental-core/rental-rule-defaults.ts");
+
+const noShowDefault = { enabled: false, pickupGraceMinutes: 0, finalizationMinutes: 60, feeType: "none", feeValue: 0 };
+assert.deepEqual(defaultRentalNoShowRule(), noShowDefault, "未配置爽约规则必须默认不自动收费");
+assert.deepEqual(effectiveNoShowRule({}), noShowDefault, "服务端缺省必须与管理端共享默认一致");
+const ruleSectionsSource = require("node:fs").readFileSync(require("node:path").join(__dirname, "../apps/admin/src/features/settings/governance/ruleSections.tsx"), "utf8");
+assert.match(ruleSectionsSource, /noShow:\s*config\.cancellation\?\.noShow\s*\?\?\s*defaultRentalNoShowRule\(\)/u, "旧草稿编辑器必须复用默认值，不得隐式带入 100% 爽约费");
+assert.doesNotMatch(ruleSectionsSource, /noShow:\s*config\.cancellation\?\.noShow\s*\?\?\s*\{\s*enabled:\s*true/u, "管理端不得在打开未配置草稿时自动启用爽约处理");
 
 const baseConfig = {
   payment: { timing: "pickup", depositMode: "none", preauthorizationRequired: false, unpaidHoldMinutes: 15 }

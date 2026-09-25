@@ -28,6 +28,7 @@ const cases = [
     inventoryModes: ["serialized", "quantity", "bundle"],
     fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "locker_pickup_return", "delivery"],
     locationTypes: ["store", "warehouse", "locker", "delivery_hub"],
+    deliveryDestination: "customer_address",
     supportsUsagePricing: false, supportsPreauthorization: true, supportsQualificationReview: false
   },
   {
@@ -36,6 +37,7 @@ const cases = [
     inventoryModes: ["serialized", "quantity", "consumable", "bundle"],
     fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "warehouse_pickup_return", "delivery"],
     locationTypes: ["store", "warehouse", "delivery_hub"],
+    deliveryDestination: "customer_address",
     supportsUsagePricing: false, supportsPreauthorization: false, supportsQualificationReview: false
   },
   {
@@ -44,6 +46,7 @@ const cases = [
     inventoryModes: ["serialized"],
     fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "delivery"],
     locationTypes: ["store", "station", "warehouse", "delivery_hub"],
+    deliveryDestination: "tenant_location",
     supportsUsagePricing: true, supportsPreauthorization: true, supportsQualificationReview: true
   },
   {
@@ -52,6 +55,7 @@ const cases = [
     inventoryModes: ["serialized", "quantity", "bundle"],
     fulfillmentModes: ["warehouse_pickup_return", "delivery", "onsite_delivery", "partner_pickup_return"],
     locationTypes: ["warehouse", "delivery_hub", "project_site"],
+    deliveryDestination: "customer_address",
     supportsUsagePricing: true, supportsPreauthorization: true, supportsQualificationReview: true
   }
 ];
@@ -108,6 +112,7 @@ void (async () => {
     assert.deepEqual(definition.supportedInventoryModes, item.inventoryModes, `${item.categoryCode}: 库存形态必须符合品类基线`);
     assert.deepEqual(definition.businessModel.fulfillmentModes, item.fulfillmentModes, `${item.categoryCode}: 履约方式必须符合品类基线`);
     assert.deepEqual(definition.businessModel.locationTypes, item.locationTypes, `${item.categoryCode}: 地点类型必须符合品类基线`);
+    assert.equal(definition.businessModel.deliveryDestination, item.deliveryDestination, `${item.categoryCode}: 配送目的地策略必须符合品类基线`);
     assert.equal(definition.businessModel.supportsUsagePricing, item.supportsUsagePricing, `${item.categoryCode}: 使用量计价开关必须符合品类基线`);
     assert.equal(definition.businessModel.supportsPreauthorization, item.supportsPreauthorization, `${item.categoryCode}: 预授权能力必须符合品类基线`);
     assert.equal(definition.businessModel.supportsQualificationReview, item.supportsQualificationReview, `${item.categoryCode}: 资质审核能力必须符合品类基线`);
@@ -146,6 +151,76 @@ void (async () => {
     assert.ok(quote.rentalAmount > 0, `${item.categoryCode}: 相同报价链必须算出正租金`);
     assert.equal(quote.categoryCode, item.categoryCode, `${item.categoryCode}: 报价快照不得串品类`);
     assert.equal(quote.request.lines[0].itemGroupId, itemGroups[0].id, `${item.categoryCode}: 报价必须引用本空间商品`);
+
+    // 非配送/自取履约不接受收货地址：带了必须报错（core 统一校验，两端与后台一致）。
+    await assert.rejects(
+      () => business.createQuote(tenantId, ctx, {
+        customerType: "personal",
+        fulfillmentMode: mode,
+        fulfillmentLocationId: locations[0].id,
+        deliveryAddressId: "addr_should_be_rejected",
+        startAt,
+        endAt,
+        lines: [{ itemGroupId: itemGroups[0].id, quantity: 1 }]
+      }),
+      /当前履约方式不接受收货地址/u,
+      `${item.categoryCode}: 非配送履约不接受收货地址`
+    );
+
+    const deliveryLocation = locations.find((location) =>
+      location.status === "enabled" && location.capabilities.includes("delivery")
+    );
+    assert.ok(deliveryLocation, `${item.categoryCode}: 配送方式必须存在可用地点`);
+    const deliveryInput = {
+      customerType: "personal",
+      fulfillmentMode: "delivery",
+      fulfillmentLocationId: deliveryLocation.id,
+      startAt,
+      endAt,
+      lines: [{ itemGroupId: itemGroups[0].id, quantity: 1 }]
+    };
+    if (item.deliveryDestination === "customer_address") {
+      const draft = {
+        recipient: "测试收件人",
+        phone: "+86 13800008000",
+        countryCode: "CN",
+        province: "上海市",
+        city: "上海市",
+        district: "徐汇区",
+        detail: "测试路 8 号"
+      };
+      const deliveryQuote = await business.createQuote(tenantId, ctx, {
+        ...deliveryInput,
+        deliveryAddressDraft: draft
+      });
+      draft.detail = "地址簿变更后的新地址";
+      assert.equal(deliveryQuote.deliveryAddressSnapshot.recipient, "测试收件人");
+      assert.equal(deliveryQuote.deliveryAddressSnapshot.phone, "+86 13800008000");
+      assert.notEqual(deliveryQuote.deliveryAddressSnapshot.phoneMasked, "+86 13800008000");
+      assert.equal(deliveryQuote.deliveryAddressSnapshot.detail, "测试路 8 号", "报价地址快照不得跟随输入对象或地址簿后续修改");
+      await assert.rejects(
+        () => business.createQuote(tenantId, ctx, deliveryInput),
+        /配送订单必须选择已保存地址或填写本单收货地址/u,
+        `${item.categoryCode}: 客户地址型配送必须提供收货地址`
+      );
+    } else {
+      const deliveryQuote = await business.createQuote(tenantId, ctx, deliveryInput);
+      assert.equal(deliveryQuote.deliveryAddressSnapshot, undefined, "车辆送车到租户据点不应虚构客户收货地址");
+      await assert.rejects(
+        () => business.createQuote(tenantId, ctx, {
+          ...deliveryInput,
+          deliveryAddressDraft: {
+            recipient: "不应使用",
+            phone: "13800008000",
+            province: "上海",
+            city: "上海",
+            detail: "不应使用"
+          }
+        }),
+        /当前履约方式不接受收货地址/u,
+        "车辆地点交付不得被误解成客户地址配送"
+      );
+    }
 
     const rule = business.currentRule(tenantId, ctx).config;
     assert.equal(

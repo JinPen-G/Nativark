@@ -1,9 +1,9 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowRightOutlined, CameraOutlined, CarOutlined, CheckCircleOutlined, CompassOutlined,
-  CustomerServiceOutlined, GiftOutlined, HeartOutlined, HomeOutlined, LaptopOutlined,
-  SafetyCertificateOutlined, ShoppingCartOutlined, StarFilled,
+  ArrowRightOutlined, CameraOutlined, CarOutlined, CheckCircleOutlined, ClockCircleOutlined, CompassOutlined,
+  CustomerServiceOutlined, EnvironmentOutlined, GiftOutlined, HeartOutlined, HomeOutlined, LaptopOutlined,
+  PhoneOutlined, SafetyCertificateOutlined, ShoppingCartOutlined, StarFilled,
   ToolOutlined, TruckOutlined, TrophyOutlined, FileTextOutlined, InboxOutlined,
 } from '@ant-design/icons';
 import { useSite } from '../SiteContext';
@@ -131,3 +131,11 @@ export function CategoryQuickLinks({ category }: { category: Category }) {
 }
 
 export function CategoryIcon({ name }: { name: string }) { return <>{icons[name] || <GiftOutlined />}</>; }
+
+// 首页门店区：列出租户门店（真实模式来自后端 locations，演示模式为示例门店）；无门店时整段隐藏。
+export function StoreSection() {
+  const { tenant, t } = useSite();
+  const stores = tenant.stores ?? [];
+  if (stores.length === 0) return null;
+  return <section className="section shell homepage-section store-section"><SectionHeading title={t('storesTitle')} subtitle={t('storesSubtitle')} /><div className="store-grid">{stores.map(store => <article className="store-card" key={store.id}><h3><EnvironmentOutlined aria-hidden="true" /> {store.name}</h3>{store.address && <p className="store-address">{store.address}</p>}<div className="store-meta">{store.businessHours && <span><ClockCircleOutlined aria-hidden="true" /> {store.businessHours}</span>}{store.contactPhone && <a href={`tel:${store.contactPhone}`}><PhoneOutlined aria-hidden="true" /> {store.contactPhone}</a>}</div></article>)}</div></section>;
+}

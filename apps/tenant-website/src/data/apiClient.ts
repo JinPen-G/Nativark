@@ -25,6 +25,21 @@ async function getJson<T>(path: string, params: Record<string, string>): Promise
   return (body?.data ?? body) as T;
 }
 
+/** 公开（免登录）POST：查询参数带租户识别，业务入参走 JSON body。用于公开可用性检索。 */
+async function postJson<T>(path: string, params: Record<string, string>, payload: unknown): Promise<T> {
+  const query = new URLSearchParams(params).toString();
+  const response = await fetch(`${CLIENT_V1}${path}?${query}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new ApiError(response.status, `请求失败（${response.status}）`);
+  }
+  const body = await response.json();
+  return (body?.data ?? body) as T;
+}
+
 /** bootstrap 响应中官网消费到的字段（对应 shared 的 ClientChannelBootstrapResponse，本地只声明用到的部分）。 */
 export interface BootstrapWebsite {
   slogan?: string;
@@ -99,12 +114,30 @@ export interface PublicCatalogResponse {
   locations?: Array<{ id: string; code: string; name: string; address?: string; businessHours?: string; contactPhone?: string; capabilities?: string[] }>;
 }
 
+/** 公开可用性检索：给定门店 + 时段 + 候选型号，返回各行可租状态（供官网按时段/门店真实过滤商品）。 */
+export interface PublicAvailabilityRequest {
+  locationId?: string;
+  startAt: string;
+  endAt: string;
+  lines: Array<{ itemGroupId: string; quantity: number }>;
+}
+
+/** 后端返回 rental-core 的 RentalAvailabilityResult；此处按过滤所需的行级字段宽松声明，Phase 2 接入后端时对齐。 */
+export interface PublicAvailabilityResponse {
+  lines?: Array<{ itemGroupId: string; available?: boolean; availableQuantity?: number }>;
+  [key: string]: unknown;
+}
+
 export const clientApi = {
   bootstrap(tenantCode: string): Promise<BootstrapResponse> {
     return getJson<BootstrapResponse>('/public/bootstrap', { tenantCode, client: 'web' });
   },
   publicCatalog(tenantCode: string, service: string): Promise<PublicCatalogResponse> {
     return getJson<PublicCatalogResponse>('/public/catalog', { tenantCode, service });
+  },
+  /** 公开可用性检索（免登录）：按门店 + 时段过滤某服务下的候选型号。后端 public/availability（Phase 2）。 */
+  publicAvailability(tenantCode: string, service: string, payload: PublicAvailabilityRequest): Promise<PublicAvailabilityResponse> {
+    return postJson<PublicAvailabilityResponse>('/public/availability', { tenantCode, service }, payload);
   },
   /** 公开文档：用户协议 / 隐私政策 / 帮助（游客可读）。 */
   publicDocument(tenantCode: string, kind: 'user_agreement' | 'privacy_policy' | 'help'): Promise<PublicDocumentResponse> {

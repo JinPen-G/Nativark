@@ -156,7 +156,27 @@ export class ClientApiService {
     return order;
   }
 
-  private orderView(order: RentalOrder, deliveryAddress?: ClientOrderView["deliveryAddress"]): ClientOrderView {
+  private orderView(order: RentalOrder, fallbackDeliveryAddress?: ClientOrderView["deliveryAddress"]): ClientOrderView {
+    // 收货地址事实源已收敛到订单快照（core 下单时固化）；旧订单没有该快照时回落到客户端旁表快照。
+    // 客户视图一律脱敏：只取 phoneMasked，绝不下发订单快照里的明文电话。
+    const snapshot = order.deliveryAddressSnapshot;
+    const deliveryAddress: ClientOrderView["deliveryAddress"] = snapshot
+      ? {
+          addressId: snapshot.addressId,
+          recipient: snapshot.recipient,
+          phoneMasked: snapshot.phoneMasked,
+          countryCode: snapshot.countryCode,
+          province: snapshot.province,
+          city: snapshot.city,
+          district: snapshot.district,
+          detail: snapshot.detail,
+          postalCode: snapshot.postalCode,
+          latitude: snapshot.latitude,
+          longitude: snapshot.longitude,
+          // 快照本身不带采集时点，用订单创建时间近似（客户视图仅作展示）。
+          capturedAt: order.createdAt
+        }
+      : fallbackDeliveryAddress;
     return {
       deliveryAddress,
       id: order.id,
@@ -462,7 +482,10 @@ export class ClientApiService {
       fulfillment: {
         enabledModes: business.settings.fulfillment?.enabledModes ?? [],
         // 异地归还是规则版本的字段（报价按同一规则校验），不是经营设置；没有生效规则时视为不允许。
-        allowDifferentReturnLocation: this.business.effectiveRuleAt(tenantId, business)?.config.fulfillment.allowDifferentReturnLocation ?? false
+        allowDifferentReturnLocation: this.business.effectiveRuleAt(tenantId, business)?.config.fulfillment.allowDifferentReturnLocation ?? false,
+        // 配送目的地策略与配送文案取自品类定义/术语，客户端据此类型安全分流「选地址 vs 选据点」。
+        deliveryDestination: business.category.businessModel.deliveryDestination,
+        deliveryLabel: business.category.terminology.deliveryLabel
       }
     };
   }
@@ -923,25 +946,19 @@ export class ClientApiService {
   async createQuote(context: ClientRequestContext, input: ClientCreateQuoteRequest) {
     this.requireActiveMembership(context);
     await this.currentWorkspace(context);
-    const { deliveryAddressId, ...rest } = input;
     const business = this.context(context.tenantId);
-    // 配送类履约必须选本人地址；自取不接受地址（避免把地址当成“也送货”的暗示）。
-    const isDelivery = DELIVERY_MODES.has(input.fulfillmentMode);
-    if (isDelivery && !deliveryAddressId) throw new BadRequestException("配送订单必须选择收货地址");
-    if (!isDelivery && deliveryAddressId) throw new BadRequestException("自取订单不需要收货地址");
-    const address = deliveryAddressId ? await this.requireAddressService().requireOwnAddress(context, deliveryAddressId) : undefined;
     const request: RentalQuoteRequest = {
-      ...rest,
+      ...input,
       customerType: "personal",
       customerId: context.customerId,
       bookingIdentity: input.bookingIdentity ?? { bookingIdentity: "personal" }
     };
     // 与管理端走同一条服务端解析链：只选定价组时选择可承接型号；显式选型号时
     // 固化准确型号预约精度和组成员快照。客户端不能自报精度或成员范围。
+    // 收货地址（配送/上门必填、自取禁带）的归属校验与快照固化由核心 createQuote 统一处理，
+    // 地址随报价/订单快照落库，客户端、运营后台看到同一份，不再各存客户端旁表。
     const resolved = await this.core.resolvePricingGroupQuoteRequest(context.tenantId, request);
-    const quote = await this.business.createQuote(context.tenantId, business, resolved);
-    if (address) await this.requireAddressService().snapshotForQuote(context, quote.id, address);
-    return quote;
+    return this.business.createQuote(context.tenantId, business, resolved);
   }
 
   private requireAddressService(): ClientDeliveryAddressService {
@@ -989,13 +1006,10 @@ export class ClientApiService {
       endAt: quote.request.endAt,
       lines
     };
-    if (DELIVERY_MODES.has(quote.request.fulfillmentMode) && this.addresses && !(await this.addresses.hasSnapshotForQuote(context.tenantId, input.quoteId))) {
-      throw new ConflictException("配送订单缺少收货地址快照，请重新报价并选择地址");
-    }
+    // 收货地址在报价阶段已由核心解析并固化进报价/订单快照；下单直接消费报价即可，无需再查客户端旁表。
     const created = await this.orders.createOrder(context.tenantId, orderInput, `client:${context.customerId}`, business, idempotencyKeyOf(requestContext));
     const order = await this.assertClientOrder(context, created.order.id);
     await Promise.all([this.core.persist(context.tenantId), this.business.persist(context.tenantId)]);
-    if (this.addresses) await this.addresses.attachOrder(context.tenantId, input.quoteId, order.id);
     return { order: this.orderView(order, await this.addresses?.snapshotForOrder(context, order)), replayed: created.replayed };
   }
 

@@ -11,6 +11,7 @@ import {
   UserOutlined,
 } from "@ant-design/icons";
 import {
+  RENTAL_CATEGORY_DEFINITIONS,
   RENTAL_PRICING_UNIT_LABELS,
   formatRentalMoney,
   type CreateRentalOrderRequest,
@@ -30,6 +31,7 @@ import {
   Descriptions,
   Divider,
   Form,
+  Input,
   InputNumber,
   Radio,
   Result,
@@ -50,6 +52,7 @@ import { PageHeader } from "@/components/PageHeader";
 type FormValues = Omit<RentalQuoteRequest, "startAt" | "endAt" | "services"> & {
   period: [Dayjs, Dayjs];
   bookingIdentity?: RentalBookingIdentityInput;
+  deliveryAddressMode?: "saved" | "new";
 };
 type SelectedService = NonNullable<RentalQuoteRequest["services"]>[number];
 
@@ -62,6 +65,9 @@ const fulfillmentModeLabels: Record<string, string> = {
   delivery: "配送取还",
   onsite_delivery: "现场交付",
 };
+// 配送/上门类履约：目的地按品类而定（见 category.businessModel.deliveryDestination）。
+const DELIVERY_FULFILLMENT_MODES = new Set(["delivery", "onsite_delivery"]);
+const isDeliveryMode = (mode?: string) => Boolean(mode && DELIVERY_FULFILLMENT_MODES.has(mode));
 
 export function RentalOrderCreatePage() {
   const { message } = App.useApp();
@@ -73,12 +79,17 @@ export function RentalOrderCreatePage() {
   const [selectedServices, setSelectedServices] = useState<SelectedService[]>([]);
   const customerId = Form.useWatch("customerId", form);
   const bookingIdentity = Form.useWatch("bookingIdentity", form);
+  const fulfillmentMode = Form.useWatch("fulfillmentMode", form) as string | undefined;
+  const deliveryAddressMode = Form.useWatch("deliveryAddressMode", form) as "saved" | "new" | undefined;
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
   const settings = useQuery({ queryKey: ["rental-core", "business-settings"], queryFn: rentalCoreApi.businessSettings });
   // 报价与订单都在本空间生成，币种就是本空间的结算币种；报价回来后优先用它自己的快照。
   const money = (value: number) => formatRentalMoney(Number(value), quote?.currency ?? settings.data?.pricing.currency);
   const pricingGroups = useQuery({ queryKey: ["rental-core", "pricing-groups"], queryFn: rentalCoreApi.pricingGroups });
   const locations = useQuery({ queryKey: ["rental-core", "locations"], queryFn: rentalCoreApi.locations });
+  // 目的地策略和配送用语来自品类定义/档案，不按相机、车辆等品类写页面分支。
+  const categoryDefinition = RENTAL_CATEGORY_DEFINITIONS.find((item) => item.code === profile.data?.categoryCode);
+  const deliveryDestination = categoryDefinition?.businessModel.deliveryDestination ?? "customer_address";
   const pricing = useQuery({ queryKey: ["rental-core", "pricing-plans"], queryFn: rentalCoreApi.pricingPlans });
   const discounts = useQuery({ queryKey: ["rental-core", "discount-plans"], queryFn: rentalCoreApi.discountPlans });
   const services = useQuery({ queryKey: ["rental-core", "value-added-services"], queryFn: rentalCoreApi.valueAddedServices });
@@ -94,8 +105,18 @@ export function RentalOrderCreatePage() {
     queryFn: () => rentalCoreApi.customerCoupons(customerId),
     enabled: Boolean(customerId),
   });
+  // 只有配送到客户地址且选“已保存地址”时读取地址簿；自取/车辆据点方式不请求。
+  const bookingAddresses = useQuery({
+    queryKey: ["rental-core", "booking-delivery-addresses", customerId],
+    queryFn: () => rentalCoreApi.bookingDeliveryAddresses(customerId ?? ""),
+    enabled: Boolean(customerId && deliveryDestination === "customer_address" && isDeliveryMode(fulfillmentMode) && deliveryAddressMode !== "new"),
+  });
   const selectedMember = useMemo(() => members.data?.find((item) => item.customerId === customerId), [members.data, customerId]);
   const enterpriseMode = bookingIdentity?.bookingIdentity === "enterprise_employee";
+  const deliveryLabel = profile.data?.terminology.deliveryLabel;
+  const fulfillmentModeLabel = (value: string) => value === "delivery"
+    ? t(deliveryLabel ?? fulfillmentModeLabels.delivery)
+    : t(fulfillmentModeLabels[value] ?? value);
   const createQuote = useMutation({
     mutationFn: rentalCoreApi.createQuote,
     onSuccess: setQuote,
@@ -117,6 +138,7 @@ export function RentalOrderCreatePage() {
     form.setFieldsValue({
       customerType: "personal",
       bookingIdentity: { bookingIdentity: "personal", enterpriseContractAndPayer: false },
+      deliveryAddressMode: "saved",
       fulfillmentMode: settings.data?.fulfillment.enabledModes[0] ?? "store_pickup_return",
       fulfillmentLocationId: locations.data?.[0]?.id,
       period: [dayjs().add(1, "day").hour(9).minute(0), dayjs().add(2, "day").hour(18).minute(0)],
@@ -150,6 +172,12 @@ export function RentalOrderCreatePage() {
       fulfillmentMode: values.fulfillmentMode,
       fulfillmentLocationId: values.fulfillmentLocationId,
       returnLocationId: values.returnLocationId,
+      deliveryAddressId: deliveryDestination === "customer_address" && isDeliveryMode(values.fulfillmentMode) && values.deliveryAddressMode !== "new"
+        ? values.deliveryAddressId
+        : undefined,
+      deliveryAddressDraft: deliveryDestination === "customer_address" && isDeliveryMode(values.fulfillmentMode) && values.deliveryAddressMode === "new"
+        ? values.deliveryAddressDraft
+        : undefined,
       startAt: values.period[0].toISOString(),
       endAt: values.period[1].toISOString(),
       pricingPlanId: values.pricingPlanId,
@@ -235,7 +263,11 @@ export function RentalOrderCreatePage() {
                         value: item.customerId,
                         label: `${item.name} · ${item.phoneMasked}`,
                       }))}
-                      onChange={() => form.setFieldValue("bookingIdentity", { bookingIdentity: "personal", enterpriseContractAndPayer: false })}
+                      onChange={() => {
+                        form.setFieldValue("bookingIdentity", { bookingIdentity: "personal", enterpriseContractAndPayer: false });
+                        form.setFieldValue("deliveryAddressId", undefined);
+                        form.setFieldValue("deliveryAddressDraft", undefined);
+                      }}
                     />
                   </Form.Item>
                   <Form.Item name={["bookingIdentity", "bookingIdentity"]} label={t("以什么身份预约")} rules={[{ required: true }]}>
@@ -277,23 +309,87 @@ export function RentalOrderCreatePage() {
               </Col>
               <Col xs={24} lg={12}>
                 <Card className="data-panel" title={<Space><CalendarOutlined />{t("租赁时间与履约")}</Space>} style={{ height: "100%" }}>
-                  <Row gutter={12}>
-                    <Col span={12}>
-                      <Form.Item name="fulfillmentLocationId" label={`${pickupLabel}${t("地点")}`} rules={[{ required: true }]}>
-                        <Select options={(locations.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: item.name }))} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={12}>
-                      <Form.Item name="returnLocationId" label={`${returnLabel}${t("地点")}`}>
-                        <Select allowClear placeholder={t("默认同领取地点")} options={(locations.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: item.name }))} />
-                      </Form.Item>
-                    </Col>
-                  </Row>
+                  {/* 先选履约方式，再按方式驱动目的地：取还类选地点，配送到客户类选发货地点 + 收货地址。 */}
+                  <Form.Item name="fulfillmentMode" label={t("履约方式")} rules={[{ required: true }]}>
+                    <Select
+                      onChange={() => {
+                        form.setFieldValue("deliveryAddressId", undefined);
+                        form.setFieldValue("deliveryAddressDraft", undefined);
+                      }}
+                      options={(settings.data?.fulfillment.enabledModes ?? []).map((value) => ({ value, label: fulfillmentModeLabel(value) }))}
+                    />
+                  </Form.Item>
                   <Form.Item name="period" label={t("租赁时间")} rules={[{ required: true }]}>
                     <DatePicker.RangePicker showTime style={{ width: "100%" }} />
                   </Form.Item>
-                  <Form.Item name="fulfillmentMode" label={t("履约方式")} rules={[{ required: true }]} style={{ marginBottom: 0 }}>
-                    <Select options={(settings.data?.fulfillment.enabledModes ?? []).map((value) => ({ value, label: t(fulfillmentModeLabels[value] ?? value) }))} />
+                  <Form.Item noStyle shouldUpdate={(before, after) => before.fulfillmentMode !== after.fulfillmentMode}>
+                    {({ getFieldValue }) => {
+                      const mode = getFieldValue("fulfillmentMode") as string | undefined;
+                      const toCustomerAddress = deliveryDestination === "customer_address" && isDeliveryMode(mode);
+                      const locationOptions = (locations.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: item.name }));
+                      return <>
+                        <Row gutter={12}>
+                          <Col span={toCustomerAddress ? 24 : 12}>
+                            <Form.Item name="fulfillmentLocationId" label={toCustomerAddress ? t("发货地点") : `${pickupLabel}${t("地点")}`} rules={[{ required: true }]} style={toCustomerAddress ? { marginBottom: 0 } : undefined}>
+                              <Select options={locationOptions} />
+                            </Form.Item>
+                          </Col>
+                          {!toCustomerAddress && <Col span={12}>
+                            <Form.Item name="returnLocationId" label={`${returnLabel}${t("地点")}`} style={{ marginBottom: 0 }}>
+                              <Select allowClear placeholder={t("默认同领取地点")} options={locationOptions} />
+                            </Form.Item>
+                          </Col>}
+                        </Row>
+                        {toCustomerAddress && <Form.Item noStyle shouldUpdate={(before, after) => before.deliveryAddressMode !== after.deliveryAddressMode}>
+                          {({ getFieldValue }) => {
+                            const addressMode = (getFieldValue("deliveryAddressMode") ?? "saved") as "saved" | "new";
+                            return <div style={{ marginTop: 12 }}>
+                              <Form.Item name="deliveryAddressMode" label={t("收货地址方式")} style={{ marginBottom: 12 }}>
+                                <Radio.Group
+                                  optionType="button"
+                                  buttonStyle="solid"
+                                  onChange={(event) => {
+                                    form.setFieldValue("deliveryAddressId", undefined);
+                                    if (event.target.value === "saved") form.setFieldValue("deliveryAddressDraft", undefined);
+                                  }}
+                                  options={[{ value: "saved", label: t("选择已保存地址") }, { value: "new", label: t("填写本单地址") }]}
+                                />
+                              </Form.Item>
+                              {addressMode === "saved" ? <>
+                                <Form.Item
+                                  name="deliveryAddressId"
+                                  label={t("客户收货地址")}
+                                  rules={[{ required: true, message: t("请选择客户收货地址") }]}
+                                  extra={!customerId ? t("请先选择会员") : bookingAddresses.isError ? t("地址簿读取失败，请重试") : (bookingAddresses.data?.length ? undefined : t("该会员暂无已保存地址，可切换为填写本单地址"))}
+                                  style={{ marginBottom: 0 }}
+                                >
+                                  <Select
+                                    loading={bookingAddresses.isFetching}
+                                    disabled={!customerId || bookingAddresses.isError}
+                                    placeholder={t("选择客户已保存的收货地址")}
+                                    options={(bookingAddresses.data ?? []).map((address) => ({
+                                      value: address.id,
+                                      label: `${address.recipient} · ${address.phoneMasked} · ${address.province}${address.city}${address.district ?? ""}${address.detail}`,
+                                    }))}
+                                  />
+                                </Form.Item>
+                                {bookingAddresses.isError && <Button type="link" onClick={() => void bookingAddresses.refetch()}>{t("重新读取地址")}</Button>}
+                              </> : <>
+                                <Alert type="info" showIcon message={t("地址仅保存到本订单，不会修改客户地址簿")} style={{ marginBottom: 12 }} />
+                                <Row gutter={12}>
+                                  <Col xs={24} md={12}><Form.Item name={["deliveryAddressDraft", "recipient"]} label={t("收件人")} rules={[{ required: true, whitespace: true }]}><Input maxLength={120} /></Form.Item></Col>
+                                  <Col xs={24} md={12}><Form.Item name={["deliveryAddressDraft", "phone"]} label={t("联系电话")} rules={[{ required: true, whitespace: true }, { pattern: /^\+?[0-9][0-9\s()-]{5,38}$/u, message: t("请输入有效联系电话") }]}><Input type="tel" maxLength={40} /></Form.Item></Col>
+                                  <Col xs={24} md={8}><Form.Item name={["deliveryAddressDraft", "province"]} label={t("省/州")} rules={[{ required: true, whitespace: true }]}><Input maxLength={100} /></Form.Item></Col>
+                                  <Col xs={24} md={8}><Form.Item name={["deliveryAddressDraft", "city"]} label={t("城市")} rules={[{ required: true, whitespace: true }]}><Input maxLength={100} /></Form.Item></Col>
+                                  <Col xs={24} md={8}><Form.Item name={["deliveryAddressDraft", "district"]} label={t("区/县")}><Input maxLength={100} /></Form.Item></Col>
+                                  <Col span={24}><Form.Item name={["deliveryAddressDraft", "detail"]} label={t("详细地址")} rules={[{ required: true, whitespace: true }]}><Input maxLength={500} /></Form.Item></Col>
+                                </Row>
+                              </>}
+                            </div>;
+                          }}
+                        </Form.Item>}
+                      </>;
+                    }}
                   </Form.Item>
                 </Card>
               </Col>

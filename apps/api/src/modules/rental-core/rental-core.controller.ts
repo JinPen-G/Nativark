@@ -66,6 +66,7 @@ import {
   SaveRentalCouponTemplateDto,
   SaveRentalStockBalanceDto,
   ApplyRentalStockOperationDto,
+  WriteOffRentalStockDispositionDto,
   SaveTenantRentalProfileDto,
   SubstituteRentalBundleComponentDto,
   ListRentalOrdersQueryDto,
@@ -93,6 +94,8 @@ import { validateInspectionCustomerResponse } from "./rental-inspection-customer
 import { serviceCancellationAmounts, type ServiceCancellationSelection } from "./rental-service-cancellation";
 import { MembershipService } from "../platform/membership.service";
 import { CustomerCorporateSettlementService } from "../platform/customer-corporate-settlement.service";
+import { OperationLogService } from "../../common/operation-log.service";
+import { redactDeliveryAddressPhone } from "./rental-delivery-address-privacy";
 
 /** 读取标准 Idempotency-Key 请求头。大小写不敏感，超长键直接拒绝。 */
 /**
@@ -201,6 +204,7 @@ export class RentalCoreController {
     private readonly serviceCapacities: RentalServiceCapacityService,
     private readonly funding: RentalFundingService,
     private readonly documents: RentalDocumentService,
+    private readonly operationLogs: OperationLogService,
     @Optional() private readonly corporateSettlement?: CustomerCorporateSettlementService,
     @Optional() private readonly memberships?: MembershipService
   ) {}
@@ -269,7 +273,7 @@ export class RentalCoreController {
   private async committed<T>(tenantId: string, result: T | Promise<T>): Promise<T> {
     const resolved = await result;
     await Promise.all([this.service.persist(tenantId), this.business.persist(tenantId)]);
-    return resolved;
+    return redactDeliveryAddressPhone(resolved);
   }
   private async releaseCancelledOrderResources(tenantId: string, orderId: string, tx: Prisma.TransactionClient, reason: string) {
     await this.business.releaseCouponInTransaction(tenantId, orderId, tx);
@@ -300,6 +304,12 @@ export class RentalCoreController {
   bookingOptions(@Req() req: AuthenticatedRequest, @Param("customerId") customerId: string) {
     if (!this.memberships) throw new ConflictException("会员服务未就绪");
     return this.memberships.listBookingOptions(req.user.tenantId, this.service.resolveWorkspaceId(req.user.tenantId), customerId);
+  }
+
+  /** 下单选址：读取该会员在客户地址簿里的有效收货地址（配送/上门类履约用）。脱敏摘要，走下单权限。 */
+  @Get("booking-members/:customerId/delivery-addresses")
+  bookingDeliveryAddresses(@Req() req: AuthenticatedRequest, @Param("customerId") customerId: string) {
+    return this.business.listCustomerDeliveryAddresses(req.user.tenantId, customerId);
   }
   /**
    * REPORT-01A：当前经营空间的经营报表。
@@ -848,6 +858,7 @@ export class RentalCoreController {
   }
   @Get("stock-dispositions") dispositions(@Req() req: AuthenticatedRequest, @Query("orderId") orderId?: string) { return this.service.listStockDispositions(req.user.tenantId, orderId); }
   @Post("stock-dispositions/:dispositionId/restore") restoreDisposition(@Req() req: AuthenticatedRequest, @Param("dispositionId") dispositionId: string) { return this.committed(req.user.tenantId, this.service.restoreStockDisposition(req.user.tenantId, dispositionId, req.user.displayName)); }
+  @Post("stock-dispositions/:dispositionId/write-off") writeOffDisposition(@Req() req: AuthenticatedRequest, @Param("dispositionId") dispositionId: string, @Body() body: WriteOffRentalStockDispositionDto) { return this.committed(req.user.tenantId, this.service.writeOffStockDisposition(req.user.tenantId, dispositionId, body.reason, req.user.displayName)); }
   @Put("stock-balances") saveStock(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalStockBalanceDto) { return this.committed(req.user.tenantId, this.service.saveStockBalance(req.user.tenantId, body)); }
   @Get("work-orders") workOrders(@Req() req: AuthenticatedRequest, @Query("status") status?: string) {
     return this.service.listWorkOrders(req.user.tenantId, status as RentalWorkOrderStatus | undefined);
@@ -973,6 +984,23 @@ export class RentalCoreController {
   ) {
     const includeFinancial = hasPermissionCode(req.user, "rental-os:finance:view") || hasPermissionCode(req.user, "rental-os:finance:reconcile");
     return this.documents.readSnapshot(req.user.tenantId, id, type, snapshotId, { includeFinancial });
+  }
+  @Get("orders/:id/delivery-address/reveal")
+  async revealOrderDeliveryAddress(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    const permission = "rental-os:customer:reveal-sensitive";
+    if (!hasPermissionCode(req.user, permission)) throw new ForbiddenException("查看完整收件电话需要客户敏感资料解密权限");
+    const snapshot = await this.service.getDeliveryAddressForReveal(req.user.tenantId, id);
+    await this.operationLogs.record({
+      user: req.user,
+      action: "order.delivery_address.revealed",
+      targetType: "rental-order",
+      targetId: id,
+      rentalOrderId: id,
+      detail: "查看订单完整收件信息（含联系电话）",
+      metadata: { fields: ["recipient", "phone", "address"], permission },
+      requireSuccess: true
+    });
+    return snapshot;
   }
   @Get("orders/:id") order(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.getOrder(req.user.tenantId, id); }
   @Post("orders") async createOrder(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalOrderDto) {

@@ -668,8 +668,12 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               totalQuota: template.totalQuota ?? 0,
               claimedQuantity: template.claimedQuantity ?? 0,
               perCustomerLimit: template.perCustomerLimit ?? 1,
+              claimFrom: date(template.claimFrom ?? template.effectiveFrom, `couponTemplate(${template.code}).claimFrom`),
+              claimTo: date(template.claimTo ?? template.effectiveTo, `couponTemplate(${template.code}).claimTo`),
               effectiveFrom: date(template.effectiveFrom, `couponTemplate(${template.code}).effectiveFrom`),
               effectiveTo: date(template.effectiveTo, `couponTemplate(${template.code}).effectiveTo`),
+              applicableRentalFrom: optionalDate(template.applicableRentalFrom),
+              applicableRentalTo: optionalDate(template.applicableRentalTo),
               applicableItemGroupIds: jsonArray(
                 (template.applicableItemGroupIds ?? []).flatMap((id) => itemGroupIdMap.get(id) ?? [])
               ),
@@ -716,6 +720,8 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               grantReason: coupon.grantReason ?? "legacy_snapshot_backfill",
               status: coupon.status ?? "claimed",
               claimedAt: optionalDate(coupon.claimedAt) ?? new Date(),
+              applicableRentalFrom: optionalDate(coupon.applicableRentalFrom ?? template?.applicableRentalFrom),
+              applicableRentalTo: optionalDate(coupon.applicableRentalTo ?? template?.applicableRentalTo),
               effectiveFrom: date(coupon.effectiveFrom, `customerCoupon(${coupon.id}).effectiveFrom`),
               effectiveTo: date(coupon.effectiveTo, `customerCoupon(${coupon.id}).effectiveTo`),
               lockedOrderId: coupon.lockedOrderId ?? null,

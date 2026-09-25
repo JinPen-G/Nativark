@@ -1,5 +1,5 @@
 import { ArrowLeftOutlined, CheckCircleOutlined, DollarOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type AdjustRentalInspectionExceptionRequest, type ApplyRentalOrderChangeRequest, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type PreviewRentalOrderChangeRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOfflinePaymentMethod, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition, type RentalOrderChangePreview } from "@rental-os/shared";
+import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type AdjustRentalInspectionExceptionRequest, type ApplyRentalOrderChangeRequest, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type PreviewRentalOrderChangeRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalDeliveryAddressSnapshot, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOfflinePaymentMethod, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition, type RentalOrderChangePreview } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Checkbox, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
@@ -107,6 +107,7 @@ export function RentalOrderDetailPage() {
   const queryClient = useQueryClient();
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const canViewFunding = hasPermission("rental-os:order:view") || hasPermission("rental-os:order:settle");
+  const canRevealSensitive = hasPermission("rental-os:customer:reveal-sensitive");
   const canSettleFunding = hasPermission("rental-os:order:settle");
   // ORDER-CLOSE-02：裁定「该收/该退多少」与实际动钱是两个权限。只有裁定权的人看得到
   // 审核按钮但看不到收退款按钮；只有资金权的人反之。两者都不给的账号只能查看。
@@ -155,6 +156,7 @@ export function RentalOrderDetailPage() {
   const [exchangeTarget, setExchangeTarget] = useState<{ exchangeOrderLineId: string; replacementItemGroupId: string }>();
   const [serviceExecution, setServiceExecution] = useState<{ occurrence: RentalOrderServiceOccurrence; action: RentalServiceExecutionAction }>();
   const [serviceRefund, setServiceRefund] = useState<RentalOrderServiceOccurrence>();
+  const [revealedDeliveryAddress, setRevealedDeliveryAddress] = useState<{ orderId: string; snapshot: RentalDeliveryAddressSnapshot }>();
   const [extensionRefundForm] = Form.useForm<{ decision: "approved" | "rejected"; reason: string }>();
   const [partialCancelForm] = Form.useForm<ApplyRentalOrderChangeRequest>();
   const [postPickupExchangeForm] = Form.useForm<PostPickupExchangeFormValues>();
@@ -196,6 +198,11 @@ export function RentalOrderDetailPage() {
     if (serviceRefund) serviceRefundForm.setFieldsValue({ paymentMethod: offlinePaymentMethods[0] ?? "offline_cash" });
   }, [serviceRefund, serviceRefundForm, offlinePaymentMethods]);
   const operationLock = useMutation({ mutationFn: (type: "acquire" | "release") => rentalCoreApi.operationLock(id, type, operationToken), onSuccess: async (result) => { setOperationToken(result.token); await refresh(); }, onError: (e: Error) => message.error(e.message) });
+  const revealDeliveryAddress = useMutation({
+    mutationFn: () => rentalCoreApi.revealOrderDeliveryAddress(id),
+    onSuccess: (snapshot) => setRevealedDeliveryAddress({ orderId: id, snapshot }),
+    onError: (error: Error) => message.error(error.message || t("查看完整收件电话失败"))
+  });
   const closeInspection = async () => {
     if (inspectionClosing || inspect.isPending) return;
     setInspectionClosing(true);
@@ -632,6 +639,19 @@ export function RentalOrderDetailPage() {
             : `${dayjs(detail.startAt).format("MM-DD HH:mm")} → ${dayjs(detail.endAt).format("MM-DD HH:mm")}`
         },
         { key: "location", label: t("领取/归还"), children: `${detail.fulfillmentLocationSnapshot.name}（${detail.fulfillmentLocationSnapshot.operator.name}） → ${detail.returnLocationSnapshot.name}（${detail.returnLocationSnapshot.operator.name}）` },
+        ...(detail.deliveryAddressSnapshot ? [{
+          key: "deliveryAddress",
+          label: t("收货地址"),
+          children: (() => {
+            const address = revealedDeliveryAddress?.orderId === detail.id ? revealedDeliveryAddress.snapshot : detail.deliveryAddressSnapshot!;
+            const fullPhoneVisible = revealedDeliveryAddress?.orderId === detail.id;
+            return <Space wrap>
+              <span>{address.recipient} {fullPhoneVisible ? address.phone : address.phoneMasked} · {address.province}{address.city}{address.district ?? ""}{address.detail}</span>
+              {canRevealSensitive && !fullPhoneVisible && <Button type="link" size="small" loading={revealDeliveryAddress.isPending} onClick={() => revealDeliveryAddress.mutate()}>{t("查看完整收件电话")}</Button>}
+              {canRevealSensitive && fullPhoneVisible && <Button type="link" size="small" onClick={() => setRevealedDeliveryAddress(undefined)}>{t("隐藏完整收件电话")}</Button>}
+            </Space>;
+          })(),
+        }] : []),
         { key: "quote", label: t("报价"), children: detail.quoteNo },
         { key: "pricing", label: t("价格版本"), children: detail.pricingPlanVersion },
         { key: "rule", label: t("规则版本"), children: detail.ruleVersion },
@@ -841,7 +861,7 @@ export function RentalOrderDetailPage() {
               <Table<RentalStockDisposition> rowKey="id" size="small" pagination={false} dataSource={relatedDispositions.data} columns={[
                 { title: t("归还批次"), dataIndex: "returnBatchKey", ellipsis: true },
                 { title: t("数量"), dataIndex: "quantity", width: 70 },
-                { title: t("状态"), dataIndex: "status", width: 110, render: (value) => ({ buffered: <Tag color="orange">{t("周转缓冲")}</Tag>, blocked: <Tag color="red">{t("异常隔离")}</Tag>, restored: <Tag color="success">{t("已恢复")}</Tag> }[value as string] ?? String(value)) },
+                { title: t("状态"), dataIndex: "status", width: 110, render: (value) => ({ buffered: <Tag color="orange">{t("周转缓冲")}</Tag>, blocked: <Tag color="red">{t("异常隔离")}</Tag>, restored: <Tag color="success">{t("已恢复")}</Tag>, written_off: <Tag>{t("已核销")}</Tag> }[value as string] ?? String(value)) },
                 { title: t("阻断原因"), dataIndex: "blockReason", render: (value) => value ?? "-" },
                 { title: t("预计恢复"), dataIndex: "bufferUntil", width: 170, render: (value) => new Date(value).toLocaleString() }
               ]} />

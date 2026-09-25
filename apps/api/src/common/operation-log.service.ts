@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, InternalServerErrorException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import type { SystemUserRow } from "@rental-os/shared";
 import { PrismaService } from "../modules/database/prisma.service";
@@ -16,6 +16,8 @@ export interface OperationLogInput {
   operator?: string;
   detail?: string;
   metadata?: Record<string, unknown>;
+  /** Sensitive-data reads must not return data unless their audit record is durable. */
+  requireSuccess?: boolean;
 }
 
 export interface HttpMutationAuditInput {
@@ -39,6 +41,7 @@ export class OperationLogService {
     const tenantId = input.tenantId ?? input.user?.tenantId;
 
     if (!tenantId) {
+      if (input.requireSuccess) throw new InternalServerErrorException("敏感资料审计失败，未返回完整信息");
       return;
     }
 
@@ -67,6 +70,7 @@ export class OperationLogService {
         }
       });
     } catch {
+      if (input.requireSuccess) throw new InternalServerErrorException("敏感资料审计失败，未返回完整信息");
       // 审计不能阻断业务主流程；MySQL 未连接时由业务自身错误处理。
     }
   }

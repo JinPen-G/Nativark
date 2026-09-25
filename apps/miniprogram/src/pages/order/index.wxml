@@ -34,6 +34,8 @@
         <view class="kv mt-8"><view class="kv__label">方式</view><view class="kv__value">{{fulfillmentMode}}</view></view>
         <view class="kv"><view class="kv__label">领取地点</view><view class="kv__value">{{order.fulfillmentLocationName}}</view></view>
         <view wx:if="{{order.returnLocationName}}" class="kv"><view class="kv__label">归还地点</view><view class="kv__value">{{order.returnLocationName}}</view></view>
+        <view wx:if="{{hasDeliveryAddress}}" class="kv"><view class="kv__label">收货人</view><view class="kv__value">{{deliveryRecipientLine}}</view></view>
+        <view wx:if="{{hasDeliveryAddress}}" class="kv"><view class="kv__label">收货地址</view><view class="kv__value">{{deliveryAddressText}}</view></view>
         <button class="btn btn--secondary btn--block mt-16" hover-class="btn-hover" data-code="guide" bindtap="onAction">取还指引</button>
       </view>
     </view>

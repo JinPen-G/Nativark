@@ -2,9 +2,9 @@ import { useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useSite } from '../SiteContext';
 import { HomePage } from './HomePage';
-import { HomeCTA, ProductSection, RentalSteps, ServiceBenefits, Testimonials } from '../components/HomeSections';
-import { VideoScene } from '../components/v2/VideoScene';
-import { DEFAULT_HOME_VERSION, heroScenes } from '../data/heroScenes';
+import { HomeCTA, ProductSection, RentalSteps, SceneSection, ServiceBenefits, StoreSection, Testimonials } from '../components/HomeSections';
+import { VideoHero } from '../components/v2/VideoHero';
+import { DEFAULT_HOME_VERSION } from '../data/heroConfig';
 import '../homeV2.css';
 
 const HOME_VERSION_KEY = 'rental-os-home-version';
@@ -30,7 +30,7 @@ export function HomePageV2() {
   const { mode } = useSite();
 
   // 仅 2.0 首页给 <body> 挂标记：顶栏全透明融入视频（浅色文字）；
-  // 滚动到下方浅色产品区时切 v2-home-lighttop，让顶栏文字转深色保持可读。
+  // 滚过首屏到浅色产品区时切 v2-home-lighttop，让顶栏文字转深色保持可读。
   useEffect(() => {
     if (version !== 2) return;
     const body = document.body;
@@ -58,12 +58,14 @@ export function HomePageV2() {
 
   return (
     <div className="v2-home-root">
-      {heroScenes.map(scene => <VideoScene key={scene.id} scene={scene} />)}
-      {/* 电影感场景之后，自然过渡到产品官网区（复用 1.0 的产品能力/流程/评价/CTA 区块）。 */}
+      <VideoHero />
+      {/* 首屏预约 Hero 之后，进入正常内容区（复用 1.0 区块）：热门商品 → 场景 → 卖点 → 流程 → 门店 → 评价 → 品牌 CTA。 */}
       <div className="v2-product">
         <ProductSection mode={mode} />
+        <SceneSection mode={mode} />
         <ServiceBenefits mode={mode} />
         <RentalSteps />
+        <StoreSection />
         <Testimonials />
         <HomeCTA />
       </div>

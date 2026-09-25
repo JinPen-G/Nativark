@@ -1,5 +1,6 @@
 import type { RentalEarlyReturnRule, RentalExtensionRule, RentalNoShowRule, RentalRuleConfig, RentalTaxRule } from "@rental-os/shared";
 import { roundMoney } from "./rental-money";
+import { defaultRentalNoShowRule } from "@rental-os/shared";
 
 /**
  * 后加进 `RentalRuleConfig` 的规则块的缺省值。
@@ -46,16 +47,17 @@ export function effectiveTaxRule(config: RentalRuleConfig): RentalTaxRule {
  * `finalizationMinutes` 也可能缺失——此前 `listNoShowCandidateIds` 与 `confirmNoShowOrder`
  * 各写一遍 `?? 60`，这里收成一处。60 分钟必须等于新增缺省之前的行为，不得改动。
  */
-export const DEFAULT_NO_SHOW_FINALIZATION_MINUTES = 60;
+export const DEFAULT_NO_SHOW_FINALIZATION_MINUTES = defaultRentalNoShowRule().finalizationMinutes;
 
 export function effectiveNoShowRule(config: RentalRuleConfig): RentalNoShowRule {
   const rule = config.cancellation?.noShow;
+  const defaults = defaultRentalNoShowRule();
   return {
     enabled: rule?.enabled === true,
-    pickupGraceMinutes: rule?.pickupGraceMinutes ?? 0,
-    finalizationMinutes: rule?.finalizationMinutes ?? DEFAULT_NO_SHOW_FINALIZATION_MINUTES,
-    feeType: rule?.feeType ?? "none",
-    feeValue: rule?.feeValue ?? 0
+    pickupGraceMinutes: rule?.pickupGraceMinutes ?? defaults.pickupGraceMinutes,
+    finalizationMinutes: rule?.finalizationMinutes ?? defaults.finalizationMinutes,
+    feeType: rule?.feeType ?? defaults.feeType,
+    feeValue: rule?.feeValue ?? defaults.feeValue
   };
 }
 

@@ -1,8 +1,8 @@
 /**
  * 客户模型写入口归属检查。
  *
- * 为什么需要它：`customerProfile / customerAccount / customerMembership / customerMembershipReview`
- * 四个模型曾同时被五个文件直接 create / update / upsert，每处都各自复制一遍脱敏、
+ * 为什么需要它：`customerProfile / customerAccount / customerMembership / customerMembershipReview / customerCorporateProfile`
+ * 客户模型曾同时被多个文件直接 create / update / upsert，每处都各自复制一遍脱敏、
  * 状态与幂等规则——同一条不变量（会员状态不能被注册重试改写、证件号只存掩码）
  * 要在多处各守一次，漏一处就是静默偏差。现在写入口只有
  * `apps/api/src/modules/platform/shared-customer.repository.ts` 一个；其余文件只能经它的方法写。
@@ -19,7 +19,7 @@ const ROOT = path.resolve(__dirname, "..");
 const SCAN_ROOT = path.join(ROOT, "apps", "api", "src");
 const OWNER = path.join(ROOT, "apps", "api", "src", "modules", "platform", "shared-customer.repository.ts");
 
-const MODELS = ["customerProfile", "customerAccount", "customerMembership", "customerMembershipReview"];
+const MODELS = ["customerProfile", "customerAccount", "customerMembership", "customerMembershipReview", "customerCorporateProfile"];
 const WRITES = ["create", "update", "upsert", "delete", "createMany", "updateMany", "deleteMany"];
 const WRITE_PATTERN = new RegExp(`\\.(${MODELS.join("|")})\\.(${WRITES.join("|")})\\(`, "gu");
 

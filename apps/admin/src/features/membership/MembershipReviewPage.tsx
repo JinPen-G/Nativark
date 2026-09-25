@@ -12,7 +12,7 @@ const statusMeta: Record<CustomerMembershipReviewStatus, { text: string; color: 
   pending: { text: "待审核", color: "processing" }, approved: { text: "已通过", color: "success" },
   rejected: { text: "已拒绝", color: "error" }, supplement_required: { text: "待补件", color: "warning" }, cancelled: { text: "已取消", color: "default" },
 };
-const typeText: Record<string, string> = { registration: "会员注册", qualification: "资质证件" };
+const typeText: Record<string, string> = { registration: "个人会员注册", corporate_registration: "企业会员注册", qualification: "资质证件" };
 type ReviewForm = { status: "approved" | "rejected" | "supplement_required" | "cancelled"; reason?: string };
 
 export function MembershipReviewPage() {
@@ -40,7 +40,7 @@ export function MembershipReviewPage() {
       message.success(t("审核结果已保存，租户全部空间共享该结果"));
     },
   });
-  const canHandle = (row: CustomerMembershipReview) => row.reviewType === "registration" ? canRegistrationReview : canQualificationReview;
+  const canHandle = (row: CustomerMembershipReview) => row.reviewType === "registration" || row.reviewType === "corporate_registration" ? canRegistrationReview : canQualificationReview;
   const workspaceName = (workspaceId?: string) => workspaceId
     ? scopeOptions.data?.workspaces.find((workspace) => workspace.id === workspaceId)?.name ?? (scopeOptions.isLoading ? t("来源名称加载中") : t("来源空间名称不可用"))
     : t("未记录来源空间");
@@ -51,7 +51,7 @@ export function MembershipReviewPage() {
   return <QueryState loading={reviews.isLoading} error={reviews.error}>
     <PageHeader title={t("会员审核")} description={t("租户统一会员：注册策略和审核结果共享，来源空间仅供追溯。")} view={<Space>
       <Select value={filter.status} style={{ width: 120 }} options={[{ value: "", label: t("全部状态") }, ...Object.entries(statusMeta).map(([value, item]) => ({ value, label: t(item.text) }))]} onChange={(status) => setFilter((value) => ({ ...value, status: status || undefined }))} />
-      <Select value={filter.type} style={{ width: 120 }} options={[{ value: "", label: t("全部类型") }, { value: "registration", label: t("会员注册") }, { value: "qualification", label: t("资质证件") }]} onChange={(type) => setFilter((value) => ({ ...value, type: type || undefined }))} />
+      <Select value={filter.type} style={{ width: 140 }} options={[{ value: "", label: t("全部类型") }, { value: "registration", label: t("个人会员注册") }, { value: "corporate_registration", label: t("企业会员注册") }, { value: "qualification", label: t("资质证件") }]} onChange={(type) => setFilter((value) => ({ ...value, type: type || undefined }))} />
     </Space>} />
     <Alert type="info" showIcon title={t("租户统一会员")} description={t("注册策略、注册审核与资质资料在租户内共享；切换经营空间仍显示同一份会员及审核记录。来源空间仅用于追溯，不限制审核结果的共享范围。会员暂停、退出或注销影响租户全部空间；证件类型及下单要求仍由各空间配置。")} style={{ marginBottom: 16 }} />
     {scopeOptions.error && <Alert type="warning" showIcon title={t("来源空间名称加载失败")} description={scopeOptions.error.message} style={{ marginBottom: 16 }} />}
@@ -96,6 +96,17 @@ export function MembershipReviewPage() {
           <div>{t("提交时业务配置")}：{categoryName(detailTarget.qualificationSnapshot.applicableScope.categoryCode)} / {workspaceName(detailTarget.qualificationSnapshot.applicableScope.workspaceId)}</div>
           <div>{t("附件引用")}：{detailTarget.qualificationSnapshot.evidenceRef ?? t("未关联")}</div>
           <div>{t("快照审核结果")}：{t(statusMeta[detailTarget.qualificationSnapshot.reviewStatus].text)}</div>
+        </Card>}
+        {detailTarget.corporateSnapshot && <Card size="small" title={t("本次企业主体资料快照")}>
+          <div>{t("企业法定名称")}：{detailTarget.corporateSnapshot.legalName}</div>
+          <div>{t("统一社会信用代码")}：{detailTarget.corporateSnapshot.unifiedSocialCreditCodeMasked}</div>
+          <div>{t("注册地址")}：{detailTarget.corporateSnapshot.registeredAddress ?? "—"}</div>
+          <div>{t("法定代表人")}：{detailTarget.corporateSnapshot.legalRepName ?? "—"}</div>
+          <div>{t("法定代表人联系电话")}：{detailTarget.corporateSnapshot.legalRepPhoneMasked ?? "—"}</div>
+          <div>{t("行业")}：{detailTarget.corporateSnapshot.industry ?? "—"}</div>
+          <div>{t("企业规模")}：{detailTarget.corporateSnapshot.scale ?? "—"}</div>
+          <div>{t("联系人")}：{detailTarget.corporateSnapshot.contactName} · {detailTarget.corporateSnapshot.contactPhoneMasked}</div>
+          <div>{t("邮箱")}：{detailTarget.corporateSnapshot.email ?? "—"}</div>
         </Card>}
       </Space>}
     </Drawer>

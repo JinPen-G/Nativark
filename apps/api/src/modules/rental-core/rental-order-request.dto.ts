@@ -35,10 +35,12 @@ import {
   type RentalOrderExchangeInspectionSnapshot,
   type RentalPricingUnit,
   type RentalQuoteRequest,
+  type RentalDeliveryAddressDraft,
   type RentalBookingIdentityInput,
   type SaveRentalAssetRequest,
   type SaveRentalCouponTemplateRequest,
   type SaveRentalStockBalanceRequest,
+  type WriteOffRentalStockDispositionRequest,
   type RentalStockOperationRequest,
   type SaveTenantRentalProfileRequest,
   type SendRentalNotificationRequest,
@@ -68,7 +70,8 @@ import {
   Max,
   IsInt,
   ValidateNested,
-  ValidateIf
+  ValidateIf,
+  Matches
 } from "class-validator";
 
 export class RentalAllocationSelectionInputDto {
@@ -530,6 +533,17 @@ export class CorrectRentalInspectionUsageDto implements CorrectRentalInspectionU
   evidenceAttachments?: string[];
 }
 
+class RentalDeliveryAddressDraftDto implements RentalDeliveryAddressDraft {
+  @IsString() @IsNotEmpty() @MaxLength(120) recipient!: string;
+  @IsString() @IsNotEmpty() @MaxLength(40) @Matches(/^\+?[0-9][0-9\s()-]{5,38}$/u) phone!: string;
+  @IsOptional() @IsString() @MaxLength(8) countryCode?: string;
+  @IsString() @IsNotEmpty() @MaxLength(100) province!: string;
+  @IsString() @IsNotEmpty() @MaxLength(100) city!: string;
+  @IsOptional() @IsString() @MaxLength(100) district?: string;
+  @IsString() @IsNotEmpty() @MaxLength(500) detail!: string;
+  @IsOptional() @IsString() @MaxLength(20) postalCode?: string;
+}
+
 export class RentalQuoteDto implements RentalQuoteRequest {
   @IsIn(CUSTOMER_TYPES)
   customerType!: (typeof CUSTOMER_TYPES)[number];
@@ -553,6 +567,15 @@ export class RentalQuoteDto implements RentalQuoteRequest {
   @IsOptional()
   @IsString()
   returnLocationId?: string;
+
+  @IsOptional()
+  @IsString()
+  deliveryAddressId?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RentalDeliveryAddressDraftDto)
+  deliveryAddressDraft?: RentalDeliveryAddressDraftDto;
 
   @IsISO8601()
   startAt!: string;
@@ -643,6 +666,13 @@ export class SaveRentalStockBalanceDto implements SaveRentalStockBalanceRequest 
   @IsOptional()
   @IsString()
   operator?: string;
+}
+
+export class WriteOffRentalStockDispositionDto implements WriteOffRentalStockDispositionRequest {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  reason!: string;
 }
 
 export class ApplyRentalStockOperationDto implements RentalStockOperationRequest {
@@ -781,11 +811,27 @@ export class SaveRentalCouponTemplateDto implements SaveRentalCouponTemplateRequ
   @Min(0)
   totalBudget?: number;
 
+  @IsOptional()
+  @IsISO8601()
+  claimFrom?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  claimTo?: string;
+
   @IsISO8601()
   effectiveFrom!: string;
 
   @IsISO8601()
   effectiveTo!: string;
+
+  @IsOptional()
+  @IsISO8601()
+  applicableRentalFrom?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  applicableRentalTo?: string;
 
   @IsOptional()
   @IsArray()

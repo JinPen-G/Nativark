@@ -46,6 +46,7 @@ import {
   filterNotificationLogsByVisibleOrders
 } from "./rental-workbench-todos";
 import { getRequestDataScope, getRequestLocationIds } from "../../common/request-identity";
+import { redactDeliveryAddressPhone } from "./rental-delivery-address-privacy";
 import {
   InitiateRentalFundingDto,
   RentalFundingAmountDto,
@@ -151,7 +152,7 @@ export class RentalBusinessController {
   private async committed<T>(tenantId: string, result: T | Promise<T>): Promise<T> {
     const resolved = await result;
     await Promise.all([this.business.persist(tenantId), this.core.persist(tenantId)]);
-    return resolved;
+    return redactDeliveryAddressPhone(resolved);
   }
 
   @Get("pricing-plans") pricingPlans(@Req() req: AuthenticatedRequest) { return this.business.listPricingPlans(req.user.tenantId, this.context(req.user.tenantId)); }
@@ -441,5 +442,7 @@ export class RentalBusinessController {
     const resolved = await this.core.resolvePricingGroupQuoteRequest(req.user.tenantId, body);
     return this.committed(req.user.tenantId, await this.business.createQuote(req.user.tenantId, this.context(req.user.tenantId), resolved));
   }
-  @Get("quotes/:id") quoteDetail(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.business.getQuote(req.user.tenantId, this.context(req.user.tenantId), id); }
+  @Get("quotes/:id") quoteDetail(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    return redactDeliveryAddressPhone(this.business.getQuote(req.user.tenantId, this.context(req.user.tenantId), id));
+  }
 }

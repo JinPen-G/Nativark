@@ -38,8 +38,9 @@ export const siteRepository = {
 };
 
 export function rentalDays(startDate: string, endDate: string): number {
-  const start = new Date(`${startDate}T00:00:00`);
-  const end = new Date(`${endDate}T00:00:00`);
+  // 兼容纯日期与 datetime-local（含 T 时间）：按自然日计（取日期部分），时段时间不影响天数。
+  const start = new Date(`${startDate.slice(0, 10)}T00:00:00`);
+  const end = new Date(`${endDate.slice(0, 10)}T00:00:00`);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
   return Math.max(0, Math.round((end.getTime() - start.getTime()) / 86400000) + 1);
 }

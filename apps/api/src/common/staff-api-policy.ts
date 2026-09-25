@@ -38,6 +38,7 @@ export function isStaffBusinessRouteAllowed(method: string, path: string) {
   if (path === "/rental/v1/stock-operations") return verb === "POST";
   if (/^\/rental\/v1\/assets\/[^/]+(?:\/status-history)?$/u.test(path)) return verb === "GET" || (verb === "PUT" && !path.endsWith("/status-history"));
   if (/^\/rental\/v1\/stock-dispositions\/[^/]+\/restore$/u.test(path)) return verb === "POST";
+  if (/^\/rental\/v1\/stock-dispositions\/[^/]+\/write-off$/u.test(path)) return verb === "POST";
   if (/^\/rental\/v1\/work-orders\/[^/]+(?:\/(?:history|assign|start|submit|review|cancel))?$/u.test(path)) {
     if (/\/history$/u.test(path)) return verb === "GET";
     if (/\/assign$/u.test(path)) return verb === "PUT";

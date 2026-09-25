@@ -25,6 +25,7 @@ import {
   type RentalRuleConfig,
   type RentalStockBalance,
   type RentalStockLedgerEntry,
+  type RentalStockLedgerOperationType,
   type RentalStockOperationRequest,
   type RentalStockOperationType,
   type RentalStockDisposition,
@@ -67,6 +68,8 @@ export interface ActiveReservationRow {
 export interface AssetStatusChange {
   assetId: string;
   status: RentalAssetStatus;
+  /** 归还实收地点；换地点时与状态推进同事务更新。 */
+  locationId?: string;
   reason?: string;
   operator?: string;
 }
@@ -96,6 +99,29 @@ export interface StockQuarantineChange {
   locationId: string;
   /** 转入维修隔离的数量，正数。 */
   quantity: number;
+  idempotencyKey: string;
+  sourceOrderId: string;
+  sourceOrderNo: string;
+  sourceInspectionId?: string;
+  sourceDispositionId?: string;
+  batchNo: string;
+  reason: string;
+  operator: string;
+}
+
+/** 租赁归还跨地点时，在订单释放预占的同一事务中转移数量库存。 */
+export interface StockReturnTransfer {
+  itemGroupId: string;
+  fromLocationId: string;
+  toLocationId: string;
+  quantity: number;
+  idempotencyKey: string;
+  sourceOrderId: string;
+  sourceOrderNo: string;
+  sourceInspectionId?: string;
+  batchNo: string;
+  reason: string;
+  operator: string;
 }
 
 /**
@@ -171,7 +197,7 @@ export interface RentalCoreFactStore {
    */
   lockOrder(tenantId: string, orderId: string, tx: RentalFactTx): Promise<void>;
   countOrders(tenantId: string): Promise<number>;
-  saveOrderAggregate(order: RentalOrder, assetChanges?: AssetStatusChange[], tx?: RentalFactTx, stockQuarantines?: StockQuarantineChange[]): Promise<void>;
+  saveOrderAggregate(order: RentalOrder, assetChanges?: AssetStatusChange[], tx?: RentalFactTx, stockQuarantines?: StockQuarantineChange[], stockTransfers?: StockReturnTransfer[]): Promise<void>;
   lockInventoryTargets(tenantId: string, locationId: string, targets: InventoryLockTarget[], tx: RentalFactTx): Promise<void>;
   activeReservations(tenantId: string, tx?: RentalFactTx): Promise<ActiveReservationRow[]>;
   /**
@@ -206,6 +232,7 @@ export interface RentalCoreFactStore {
   listStockDispositions(tenantId: string, orderId?: string, tx?: RentalFactTx): Promise<RentalStockDisposition[]>;
   upsertStockDisposition(disposition: RentalStockDisposition, tx?: RentalFactTx): Promise<RentalStockDisposition>;
   restoreStockDisposition(tenantId: string, dispositionId: string, operator: string, tx?: RentalFactTx): Promise<RentalStockDisposition>;
+  writeOffStockDisposition(tenantId: string, dispositionId: string, reason: string, operator: string, tx?: RentalFactTx): Promise<RentalStockDisposition>;
   listWorkOrders(tenantId: string, status?: RentalWorkOrderStatus, tx?: RentalFactTx): Promise<RentalWorkOrder[]>;
   listWorkOrderAssignees(tenantId: string, locationId?: string, tx?: RentalFactTx): Promise<RentalWorkOrderAssignee[]>;
   listWorkOrderHistory(tenantId: string, workOrderId: string, tx?: RentalFactTx): Promise<RentalWorkOrderHistoryEntry[]>;
@@ -340,11 +367,15 @@ function toStockLedgerEntry(row: any): RentalStockLedgerEntry {
     quantityDelta: row.quantityDelta,
     onHandBefore: row.onHandBefore,
     onHandAfter: row.onHandAfter,
+    maintenanceDelta: row.maintenanceDelta ?? 0,
     reservedQuantity: row.reservedQuantity,
     maintenanceQuantity: row.maintenanceQuantity,
     reason: row.reason,
     batchNo: row.batchNo ?? undefined,
     sourceDocumentNo: row.sourceDocumentNo ?? undefined,
+    sourceOrderId: row.sourceOrderId ?? undefined,
+    sourceInspectionId: row.sourceInspectionId ?? undefined,
+    sourceDispositionId: row.sourceDispositionId ?? undefined,
     idempotencyKey: row.idempotencyKey,
     operator: row.operator,
     createdAt: row.createdAt.toISOString()
@@ -643,7 +674,13 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
    * 写回订单聚合。行与预占按 id upsert，分配整表替换（配货会重算整组分配），
    * 资产状态变更一并进入同一事务。
    */
-  async saveOrderAggregate(order: RentalOrder, assetChanges: AssetStatusChange[] = [], tx?: RentalFactTx, stockQuarantines: StockQuarantineChange[] = []): Promise<void> {
+  async saveOrderAggregate(
+    order: RentalOrder,
+    assetChanges: AssetStatusChange[] = [],
+    tx?: RentalFactTx,
+    stockQuarantines: StockQuarantineChange[] = [],
+    stockTransfers: StockReturnTransfer[] = []
+  ): Promise<void> {
     const orderData = {
       tenantId: order.tenantId,
       orderNo: order.orderNo,
@@ -663,6 +700,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       returnLocationId: order.returnLocationId ?? null,
       returnLocationName: order.returnLocationName ?? null,
       returnLocationSnapshot: order.returnLocationSnapshot as unknown as Prisma.InputJsonValue,
+      deliveryAddressSnapshot: (order.deliveryAddressSnapshot ?? null) as unknown as Prisma.InputJsonValue,
       startAt: new Date(order.startAt),
       endAt: new Date(order.endAt),
       // 续租只推进 effectiveEndAt，endAt 保持原始约定（需求 4.6.9）。
@@ -824,7 +862,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       const assetStatusBefore = changedAssetIds.length
         ? await client.rentalAsset.findMany({
           where: { id: { in: changedAssetIds }, tenantId: order.tenantId, workspaceId },
-          select: { id: true, assetNo: true, status: true }
+          select: { id: true, assetNo: true, status: true, locationId: true }
         })
         : [];
       const currentAssetStatus = new Map(assetStatusBefore.map((asset) => [asset.id, asset]));
@@ -833,7 +871,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         const before = currentAssetStatus.get(change.assetId);
         const updated = await client.rentalAsset.updateMany({
           where: { id: change.assetId, tenantId: order.tenantId, workspaceId },
-          data: { status: targetStatus }
+          data: { status: targetStatus, ...(change.locationId ? { locationId: change.locationId } : {}) }
         });
         if (updated.count === 1 && before && before.status !== targetStatus) {
           await appendAssetStatusHistory(client, {
@@ -852,26 +890,17 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         if (updated.count === 1 && before) currentAssetStatus.set(change.assetId, { ...before, status: targetStatus });
       }
 
-      // 数量库存的异常隔离：加进维修量，使它不再回到可用池。
-      // 与资产状态变更同一事务——分两次写会留下「订单已归还、坏货已可租」的中间态。
+      // 先把异地归还的数量库存从预占地点转到实收地点，再进行隔离；两者与订单、预占同事务。
+      for (const transfer of stockTransfers) {
+        if (transfer.quantity <= 0 || transfer.fromLocationId === transfer.toLocationId) continue;
+        await this.applyReturnStockTransfer(client, order, workspaceId, transfer);
+      }
+
+      // 数量库存的异常隔离：以维修量流水代替无来源的直接增减。
+      // 与订单、预占及资产状态变更同一事务，任一写入失败时整批回滚。
       for (const quarantine of stockQuarantines) {
         if (quarantine.quantity <= 0) continue;
-        const isolated = await client.rentalStockBalance.updateMany({
-          where: {
-            tenantId: order.tenantId,
-            workspaceId,
-            itemGroupId: quarantine.itemGroupId,
-            locationId: quarantine.locationId
-          },
-          data: { maintenanceQuantity: { increment: quarantine.quantity } }
-        });
-        // 匹配不到余额行时 updateMany 只会返回 count: 0 而不报错，隔离就被静默丢弃了。
-        // 维修量是这条路径上唯一阻止坏货回到可用池的手段，宁可让整单归还失败。
-        if (isolated.count === 0) {
-          throw new ConflictException(
-            `商品 ${quarantine.itemGroupId} 在网点 ${quarantine.locationId} 没有库存台账，无法隔离异常归还的数量`
-          );
-        }
+        await this.applyStockMaintenanceDelta(client, order.tenantId, workspaceId, quarantine, quarantine.quantity, "maintenance_quarantine");
       }
     };
 
@@ -880,6 +909,148 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       return;
     }
     await this.prisma.$transaction(write);
+  }
+
+  private async applyReturnStockTransfer(client: RentalFactTx, order: RentalOrder, workspaceId: string, transfer: StockReturnTransfer) {
+    if (!Number.isInteger(transfer.quantity) || transfer.quantity <= 0) throw new BadRequestException("归还调拨数量必须是正整数");
+    const fingerprint = createHash("sha256").update(JSON.stringify({
+      type: "return_transfer", itemGroupId: transfer.itemGroupId, fromLocationId: transfer.fromLocationId,
+      toLocationId: transfer.toLocationId, quantity: transfer.quantity, sourceOrderId: transfer.sourceOrderId,
+      sourceInspectionId: transfer.sourceInspectionId ?? null, batchNo: transfer.batchNo, reason: transfer.reason
+    })).digest("hex");
+    const existing = await client.rentalStockLedgerEntry.findMany({
+      where: { tenantId: order.tenantId, workspaceId, idempotencyKey: transfer.idempotencyKey },
+      select: { entryKind: true, requestFingerprint: true }
+    });
+    if (existing.length) {
+      if (existing.length === 2 && existing.every((entry) => entry.requestFingerprint === fingerprint)
+        && new Set(existing.map((entry) => entry.entryKind)).size === 2
+        && existing.some((entry) => entry.entryKind === "out") && existing.some((entry) => entry.entryKind === "in")) return;
+      throw new ConflictException("归还调拨流水不完整或幂等键冲突，请先核对库存台账");
+    }
+
+    const [group, locations] = await Promise.all([
+      client.rentalItemGroup.findFirst({ where: { id: transfer.itemGroupId, tenantId: order.tenantId, workspaceId }, select: { inventoryMode: true } }),
+      client.rentalFulfillmentLocation.findMany({
+        where: { id: { in: [transfer.fromLocationId, transfer.toLocationId] }, tenantId: order.tenantId, workspaceId },
+        select: { id: true }
+      })
+    ]);
+    if (!group || !["QUANTITY", "BUNDLE"].includes(group.inventoryMode)) throw new ConflictException("只有数量库存或套装库存允许进行归还地点调拨");
+    if (locations.length !== 2) throw new ConflictException("归还调拨地点不存在或不属于当前租户经营空间");
+
+    // 目的地点可能尚无余额行，先以 0 建立；来源行必须已存在，否则不能凭空制造入库。
+    await client.rentalStockBalance.upsert({
+      where: { workspaceId_itemGroupId_locationId: { workspaceId, itemGroupId: transfer.itemGroupId, locationId: transfer.toLocationId } },
+      create: { id: randomUUID(), tenantId: order.tenantId, workspaceId, itemGroupId: transfer.itemGroupId, locationId: transfer.toLocationId, onHandQuantity: 0, reservedQuantity: 0, maintenanceQuantity: 0 },
+      update: {}
+    });
+    const locationIds = [transfer.fromLocationId, transfer.toLocationId].sort();
+    const locked = await client.$queryRaw<Array<{ id: string; locationId: string; onHandQuantity: number; maintenanceQuantity: number }>>(Prisma.sql`
+      SELECT \`id\`, \`locationId\`, \`onHandQuantity\`, \`maintenanceQuantity\`
+      FROM \`rental_stock_balances\`
+      WHERE \`tenantId\` = ${order.tenantId} AND \`workspaceId\` = ${workspaceId}
+        AND \`itemGroupId\` = ${transfer.itemGroupId} AND \`locationId\` IN (${Prisma.join(locationIds)})
+      ORDER BY \`locationId\` FOR UPDATE
+    `);
+    const byLocation = new Map(locked.map((row) => [row.locationId, row]));
+    const source = byLocation.get(transfer.fromLocationId);
+    const destination = byLocation.get(transfer.toLocationId);
+    if (!source || !destination) throw new ConflictException("归还调拨库存台账不完整，不能确认实物转移");
+    const reservations = await this.activeReservations(order.tenantId, client);
+    const reservedAtSource = reservations
+      .filter((row) => row.itemGroupId === transfer.itemGroupId && row.locationId === transfer.fromLocationId)
+      .reduce((sum, row) => sum + row.quantity, 0);
+    const sourceAfter = source.onHandQuantity - transfer.quantity;
+    const destinationAfter = destination.onHandQuantity + transfer.quantity;
+    if (sourceAfter < reservedAtSource + source.maintenanceQuantity) {
+      throw new ConflictException("来源地点实物库存不足，不能完成异地归还调拨；请先核对在途和库存账");
+    }
+    const sourceUpdated = await client.rentalStockBalance.updateMany({
+      where: { id: source.id, tenantId: order.tenantId, workspaceId, onHandQuantity: source.onHandQuantity },
+      data: { onHandQuantity: sourceAfter }
+    });
+    if (sourceUpdated.count !== 1) throw new ConflictException("来源地点库存已变化，请刷新后重试");
+    const destinationUpdated = await client.rentalStockBalance.updateMany({
+      where: { id: destination.id, tenantId: order.tenantId, workspaceId, onHandQuantity: destination.onHandQuantity },
+      data: { onHandQuantity: destinationAfter }
+    });
+    if (destinationUpdated.count !== 1) throw new ConflictException("实收地点库存已变化，请刷新后重试");
+
+    const operationId = `return_${fingerprint.slice(0, 32)}`;
+    const rows = [
+      { kind: "out" as const, locationId: transfer.fromLocationId, before: source.onHandQuantity, after: sourceAfter, reserved: reservedAtSource },
+      { kind: "in" as const, locationId: transfer.toLocationId, before: destination.onHandQuantity, after: destinationAfter, reserved: reservations
+        .filter((row) => row.itemGroupId === transfer.itemGroupId && row.locationId === transfer.toLocationId)
+        .reduce((sum, row) => sum + row.quantity, 0) }
+    ];
+    for (const entry of rows) {
+      await client.rentalStockLedgerEntry.create({ data: {
+        id: randomUUID(), tenantId: order.tenantId, workspaceId, operationId, entryKind: entry.kind,
+        operationType: "return_transfer", itemGroupId: transfer.itemGroupId, locationId: entry.locationId,
+        quantityDelta: entry.kind === "out" ? -transfer.quantity : transfer.quantity,
+        onHandBefore: entry.before, onHandAfter: entry.after, maintenanceDelta: 0,
+        reservedQuantity: entry.reserved, maintenanceQuantity: entry.kind === "out" ? source.maintenanceQuantity : destination.maintenanceQuantity,
+        reason: transfer.reason, batchNo: transfer.batchNo, sourceDocumentNo: order.orderNo,
+        sourceOrderId: transfer.sourceOrderId, sourceInspectionId: transfer.sourceInspectionId ?? null,
+        idempotencyKey: transfer.idempotencyKey, requestFingerprint: fingerprint, operator: transfer.operator
+      } });
+    }
+  }
+
+  private async applyStockMaintenanceDelta(
+    client: RentalFactTx,
+    tenantId: string,
+    workspaceId: string,
+    change: StockQuarantineChange,
+    delta: number,
+    operationType: "maintenance_quarantine" | "maintenance_release"
+  ) {
+    if (!Number.isInteger(delta) || delta === 0) throw new BadRequestException("维修隔离量变更必须是非零整数");
+    const fingerprint = createHash("sha256").update(JSON.stringify({
+    operationType, itemGroupId: change.itemGroupId, locationId: change.locationId, delta,
+    sourceOrderId: change.sourceOrderId, sourceInspectionId: change.sourceInspectionId ?? null,
+    sourceDispositionId: change.sourceDispositionId ?? null,
+    batchNo: change.batchNo, reason: change.reason
+    })).digest("hex");
+    const existing = await client.rentalStockLedgerEntry.findFirst({
+      where: { tenantId, workspaceId, idempotencyKey: change.idempotencyKey, entryKind: "single" },
+      select: { requestFingerprint: true }
+    });
+    if (existing) {
+      if (existing.requestFingerprint === fingerprint) return;
+      throw new ConflictException("维修隔离流水幂等键冲突，请核对处置记录");
+    }
+    const rows = await client.$queryRaw<Array<{ id: string; onHandQuantity: number; maintenanceQuantity: number }>>(Prisma.sql`
+      SELECT \`id\`, \`onHandQuantity\`, \`maintenanceQuantity\` FROM \`rental_stock_balances\`
+      WHERE \`tenantId\` = ${tenantId} AND \`workspaceId\` = ${workspaceId}
+        AND \`itemGroupId\` = ${change.itemGroupId} AND \`locationId\` = ${change.locationId}
+      FOR UPDATE
+    `);
+    const balance = rows[0];
+    if (!balance) throw new ConflictException(`商品 ${change.itemGroupId} 在网点 ${change.locationId} 没有库存台账，无法记录维修隔离变更`);
+    const reservations = await this.activeReservations(tenantId, client);
+    const reservedQuantity = reservations
+      .filter((row) => row.itemGroupId === change.itemGroupId && row.locationId === change.locationId)
+      .reduce((sum, row) => sum + row.quantity, 0);
+    const nextMaintenance = balance.maintenanceQuantity + delta;
+    if (nextMaintenance < 0) throw new ConflictException("库存维修隔离量不足，不能恢复可租数量");
+    if (nextMaintenance + reservedQuantity > balance.onHandQuantity) throw new ConflictException("维修隔离量不能超过扣除其他订单预占后的在手库存");
+    const updated = await client.rentalStockBalance.updateMany({
+      where: { id: balance.id, tenantId, workspaceId, maintenanceQuantity: balance.maintenanceQuantity },
+      data: { maintenanceQuantity: nextMaintenance }
+    });
+    if (updated.count !== 1) throw new ConflictException("库存维修隔离量已变化，请刷新后重试");
+    await client.rentalStockLedgerEntry.create({ data: {
+      id: randomUUID(), tenantId, workspaceId, operationId: `maintenance_${fingerprint.slice(0, 32)}`,
+      entryKind: "single", operationType, itemGroupId: change.itemGroupId, locationId: change.locationId,
+      quantityDelta: 0, onHandBefore: balance.onHandQuantity, onHandAfter: balance.onHandQuantity,
+      maintenanceDelta: delta, reservedQuantity, maintenanceQuantity: nextMaintenance,
+      reason: change.reason, batchNo: change.batchNo, sourceDocumentNo: change.sourceOrderNo,
+      sourceOrderId: change.sourceOrderId, sourceInspectionId: change.sourceInspectionId ?? null,
+      sourceDispositionId: change.sourceDispositionId ?? null,
+      idempotencyKey: change.idempotencyKey, requestFingerprint: fingerprint, operator: change.operator
+    } });
   }
 
   /* ---------- 可用量与分配 ---------- */
@@ -1157,14 +1328,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   }
 
   /**
-   * 盘点写入：锁行 → 读现值 → 合并 → 落库，全程同一事务。
-   *
-   * 为什么必须锁：`maintenanceQuantity` 从"只有盘点一个写者"变成了两个——异常归还的
-   * 隔离增量也写它（见 `saveOrderAggregate`）。无锁的读-改-写会把并发的隔离整行覆盖掉，
-   * 等于把刚隔离的坏货又放回可用池，正是隔离要防的事。
-   *
-   * `maintenanceQuantity` 省略时**保留库里现值**：盘点表单常常只报在手数量，
-   * 默认清零会让一次例行盘点顺手解除隔离。要下调维修量必须显式给值。
+   * 盘点只维护在手量；维修隔离量只能由归还处置的隔离、恢复或核销流水改变。
+   * 省略 maintenanceQuantity 表示沿用现值；显式提交不同值必须拒绝，避免绕过来源流水。
    */
   async applyStockCount(input: StockCountInput): Promise<{ id: string; onHandQuantity: number; maintenanceQuantity: number }> {
     return this.prisma.$transaction(async (tx) => {
@@ -1179,7 +1344,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         where: { tenantId: input.tenantId, workspaceId, itemGroupId: input.itemGroupId, locationId: input.locationId },
         select: { id: true, maintenanceQuantity: true }
       });
-      const maintenanceQuantity = input.maintenanceQuantity ?? existing?.maintenanceQuantity ?? 0;
+      const maintenanceQuantity = existing?.maintenanceQuantity ?? 0;
+      if (input.maintenanceQuantity !== undefined && input.maintenanceQuantity !== maintenanceQuantity) {
+        throw new ConflictException("维修隔离量不能通过盘点直接修改，请在归还处置中完成恢复或核销");
+      }
       // 在手数量兜不住维修量时明确拒绝，而不是把维修量截断——截断会静默释放隔离。
       if (maintenanceQuantity > input.onHandQuantity) {
         throw new ConflictException(
@@ -1547,7 +1715,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     const existing = await client.rentalStockDisposition.findUnique({
       where: { workspaceId_dedupeKey: { workspaceId, dedupeKey: disposition.dedupeKey } }
     });
-    if (existing?.status === "restored") return toStockDisposition(existing);
+        if (existing?.status === "restored" || existing?.status === "written_off") return toStockDisposition(existing);
     const row = await client.rentalStockDisposition.upsert({
       where: { workspaceId_dedupeKey: { workspaceId, dedupeKey: disposition.dedupeKey } },
       create: {
@@ -1597,12 +1765,129 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     return tx ? run(tx) : this.prisma.$transaction(run);
   }
 
+  async writeOffStockDisposition(
+    tenantId: string,
+    dispositionId: string,
+    reason: string,
+    operator: string,
+    tx?: RentalFactTx
+  ): Promise<RentalStockDisposition> {
+    const run = async (client: RentalFactTx) => {
+      const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+      const normalizedReason = reason.trim();
+      if (!normalizedReason) throw new BadRequestException("核销必须填写原因");
+      if (normalizedReason.length > 500) throw new BadRequestException("核销原因不能超过 500 个字符");
+      const row = await client.rentalStockDisposition.findFirst({
+        where: { id: dispositionId, tenantId, workspaceId, ...this.stockDispositionVisibilityWhere() }
+      });
+      if (!row) throw new NotFoundException("库存处置不存在或不属于当前经营空间");
+      if (row.status === "written_off") {
+        const fingerprint = this.stockDispositionWriteOffFingerprint(row, normalizedReason);
+        const existing = await client.rentalStockLedgerEntry.findFirst({
+          where: { tenantId, workspaceId, idempotencyKey: `disposition:${row.id}:maintenance-write-off`, entryKind: "single" },
+          select: { requestFingerprint: true }
+        });
+        if (existing?.requestFingerprint === fingerprint) return toStockDisposition(row);
+        throw new ConflictException("该归还处置已核销，不能再次改变核销记录");
+      }
+      if (row.status === "restored") throw new ConflictException("已恢复可用的归还处置不能再核销");
+      if (row.status !== "blocked") throw new ConflictException("仅异常隔离中的数量库存可以核销");
+      if (row.assetId) throw new ConflictException("序列化资产请在资产管理中办理报废，不能按数量库存核销");
+      const remaining = row.quantity - row.restoredQuantity;
+      if (remaining <= 0) throw new ConflictException("该归还处置没有可核销的剩余数量");
+      const activeWorkOrders = await client.rentalWorkOrder.count({
+        where: { tenantId, workspaceId, dispositionId: row.id, status: { in: ["pending", "in_progress", "pending_review"] } }
+      });
+      if (activeWorkOrders > 0) throw new ConflictException("关联养护工单尚未完成处理，不能核销");
+      const sourceOrder = await client.rentalOrder.findFirst({ where: { id: row.orderId, tenantId, workspaceId }, select: { orderNo: true } });
+      if (!sourceOrder) throw new ConflictException("归还处置关联订单不存在，无法记录库存核销流水");
+
+      await this.applyStockDispositionWriteOff(client, tenantId, workspaceId, row, sourceOrder.orderNo, normalizedReason, operator);
+      const updated = await client.rentalStockDisposition.updateMany({
+        where: { id: row.id, tenantId, workspaceId, status: row.status, restoredQuantity: row.restoredQuantity },
+        data: { status: "written_off" }
+      });
+      if (updated.count !== 1) throw new ConflictException("归还处置已被其他操作修改，请刷新后重试");
+      const refreshed = await client.rentalStockDisposition.findFirst({ where: { id: row.id, tenantId, workspaceId } });
+      if (!refreshed) throw new NotFoundException("库存核销后无法读取归还处置");
+      return toStockDisposition(refreshed);
+    };
+    return tx ? run(tx) : this.prisma.$transaction(run);
+  }
+
+  private stockDispositionWriteOffFingerprint(row: {
+    id: string; itemGroupId: string; locationId: string; quantity: number; restoredQuantity: number;
+    orderId: string; inspectionId: string | null; returnBatchKey: string;
+  }, reason: string) {
+    return createHash("sha256").update(JSON.stringify({
+      operationType: "maintenance_write_off", dispositionId: row.id, itemGroupId: row.itemGroupId,
+      locationId: row.locationId, quantity: row.quantity - row.restoredQuantity, sourceOrderId: row.orderId,
+      sourceInspectionId: row.inspectionId, batchNo: row.returnBatchKey, reason
+    })).digest("hex");
+  }
+
+  private async applyStockDispositionWriteOff(
+    client: RentalFactTx,
+    tenantId: string,
+    workspaceId: string,
+    row: {
+      id: string; itemGroupId: string; locationId: string; quantity: number; restoredQuantity: number;
+      orderId: string; inspectionId: string | null; returnBatchKey: string;
+    },
+    orderNo: string,
+    reason: string,
+    operator: string
+  ) {
+    const quantity = row.quantity - row.restoredQuantity;
+    const requestFingerprint = this.stockDispositionWriteOffFingerprint(row, reason);
+    const idempotencyKey = `disposition:${row.id}:maintenance-write-off`;
+    const existing = await client.rentalStockLedgerEntry.findFirst({
+      where: { tenantId, workspaceId, idempotencyKey, entryKind: "single" },
+      select: { requestFingerprint: true }
+    });
+    if (existing) {
+      if (existing.requestFingerprint === requestFingerprint) return;
+      throw new ConflictException("库存核销流水幂等键冲突，请核对归还处置");
+    }
+    const rows = await client.$queryRaw<Array<{ id: string; onHandQuantity: number; maintenanceQuantity: number }>>(Prisma.sql`
+      SELECT \`id\`, \`onHandQuantity\`, \`maintenanceQuantity\` FROM \`rental_stock_balances\`
+      WHERE \`tenantId\` = ${tenantId} AND \`workspaceId\` = ${workspaceId}
+        AND \`itemGroupId\` = ${row.itemGroupId} AND \`locationId\` = ${row.locationId}
+      FOR UPDATE
+    `);
+    const balance = rows[0];
+    if (!balance || balance.maintenanceQuantity < quantity || balance.onHandQuantity < quantity) {
+      throw new ConflictException("维修隔离量或在手量不足，无法安全核销；请先核对库存台账");
+    }
+    const reservations = await this.activeReservations(tenantId, client);
+    const reservedQuantity = reservations
+      .filter((item) => item.itemGroupId === row.itemGroupId && item.locationId === row.locationId)
+      .reduce((sum, item) => sum + item.quantity, 0);
+    const onHandAfter = balance.onHandQuantity - quantity;
+    const maintenanceAfter = balance.maintenanceQuantity - quantity;
+    const updated = await client.rentalStockBalance.updateMany({
+      where: { id: balance.id, tenantId, workspaceId, onHandQuantity: balance.onHandQuantity, maintenanceQuantity: balance.maintenanceQuantity },
+      data: { onHandQuantity: onHandAfter, maintenanceQuantity: maintenanceAfter }
+    });
+    if (updated.count !== 1) throw new ConflictException("库存余额已变化，请刷新后重试");
+    await client.rentalStockLedgerEntry.create({ data: {
+      id: randomUUID(), tenantId, workspaceId, operationId: `maintenance_write_off_${requestFingerprint.slice(0, 24)}`,
+      entryKind: "single", operationType: "maintenance_write_off", itemGroupId: row.itemGroupId, locationId: row.locationId,
+      quantityDelta: -quantity, onHandBefore: balance.onHandQuantity, onHandAfter,
+      maintenanceDelta: -quantity, reservedQuantity, maintenanceQuantity: maintenanceAfter,
+      reason, batchNo: row.returnBatchKey, sourceDocumentNo: orderNo, sourceOrderId: row.orderId,
+      sourceInspectionId: row.inspectionId, sourceDispositionId: row.id,
+      idempotencyKey, requestFingerprint, operator
+    } });
+  }
+
   private async restoreStockDispositionInClient(client: RentalFactTx, tenantId: string, dispositionId: string, operator: string) {
     const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     const row = await client.rentalStockDisposition.findFirst({
       where: { id: dispositionId, tenantId, workspaceId, ...this.stockDispositionVisibilityWhere() }
     });
     if (!row) throw new NotFoundException("库存处置不存在或不属于当前经营空间");
+    if (row.status === "written_off") throw new ConflictException("已核销的归还处置不能恢复可用");
     if (row.status === "blocked") throw new ConflictException("该处置仍有异常阻断，须先完成关联工单验收");
     if (new Date() < row.bufferUntil) throw new ConflictException("归还后周转缓冲尚未结束，暂不能恢复可租");
     const remaining = row.quantity - row.restoredQuantity;
@@ -1612,15 +1897,25 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     });
     if (activeWorkOrders > 0) throw new ConflictException("关联养护工单尚未完成验收，不能恢复可用");
     if (!row.assetId) {
-      const stock = await client.rentalStockBalance.updateMany({
-        where: { tenantId, workspaceId, itemGroupId: row.itemGroupId, locationId: row.locationId, maintenanceQuantity: { gte: remaining } },
-        data: { maintenanceQuantity: { decrement: remaining } }
-      });
-      if (stock.count === 0) throw new ConflictException("库存维护量不足，无法安全恢复可用数量");
+      const sourceOrder = await client.rentalOrder.findFirst({ where: { id: row.orderId, tenantId, workspaceId }, select: { orderNo: true } });
+      if (!sourceOrder) throw new ConflictException("归还处置关联订单不存在，无法记录维修恢复流水");
+      await this.applyStockMaintenanceDelta(client, tenantId, workspaceId, {
+        itemGroupId: row.itemGroupId,
+        locationId: row.locationId,
+        quantity: remaining,
+        idempotencyKey: `disposition:${row.id}:maintenance-release`,
+        sourceOrderId: row.orderId,
+        sourceOrderNo: sourceOrder.orderNo,
+        sourceInspectionId: row.inspectionId ?? undefined,
+        sourceDispositionId: row.id,
+        batchNo: row.returnBatchKey,
+        reason: `归还处置 ${row.id} 完成养护，恢复可租数量`,
+        operator
+      }, -remaining, "maintenance_release");
     }
     const restoredAt = new Date();
     const updatedCount = await client.rentalStockDisposition.updateMany({
-      where: { id: row.id, tenantId, workspaceId, restoredQuantity: { lt: row.quantity }, status: { not: "restored" } },
+      where: { id: row.id, tenantId, workspaceId, restoredQuantity: { lt: row.quantity }, status: "buffered" },
       data: { status: "restored", restoredQuantity: row.quantity, restoredAt, restoredBy: operator }
     });
     if (updatedCount.count === 0) throw new ConflictException("库存处置已被其他操作恢复，请刷新后重试");
@@ -2308,6 +2603,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         id: row.returnLocationId ?? row.fulfillmentLocationId, code: "", name: row.returnLocationName ?? row.fulfillmentLocationName,
         type: "store", capabilities: [], operator: { id: "", code: "", name: "", type: "self_operated" }
       }) as unknown as RentalFulfillmentLocationSnapshot,
+      deliveryAddressSnapshot: (row.deliveryAddressSnapshot ?? undefined) as RentalOrder["deliveryAddressSnapshot"],
       startAt: iso(row.startAt),
       endAt: iso(row.endAt),
       effectiveEndAt: optionalIso(row.effectiveEndAt),

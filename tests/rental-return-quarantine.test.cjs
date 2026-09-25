@@ -31,7 +31,9 @@ const TEMPLATE = { id: "tpl_return", code: "return", version: "1", stage: "retur
 const orderFixture = (returnBufferMinutes = 0) => ({
   id: "order_1",
   tenantId: "tenant_1",
+  orderNo: "SO-1",
   status: RentalCoreOrderStatus.Renting,
+  fulfillmentLocationId: "loc_1",
   ruleSnapshot: { fulfillment: { returnBufferMinutes } },
   reservations: [
     { id: "res_q", orderLineId: "line_q", itemGroupId: "group_q", locationId: "loc_1", quantity: 2, releasedQuantity: 0, status: RentalReservationStatus.Fulfilled },
@@ -76,11 +78,11 @@ const returnInspection = (exceptions) => ({ templateId: TEMPLATE.id, results: {}
 /** 直接验证隔离量的推导：私有方法不依赖 this，可以脱离实例调用。 */
 const quarantineOf = (reservations, releasedBefore) =>
   RentalCoreService.prototype.quarantinedReturnQuantities.call(
-    {},
+    { hasReturnHold: RentalCoreService.prototype.hasReturnHold },
     { itemGroups: ITEM_GROUPS },
-    { reservations },
+    { reservations, fulfillmentLocationId: "loc_1", ruleSnapshot: { fulfillment: { returnBufferMinutes: 15 } } },
     new Map(releasedBefore)
-  );
+  ).map(({ itemGroupId, locationId, quantity }) => ({ itemGroupId, locationId, quantity }));
 
 /**
  * 仓储层的假 Prisma 事务客户端。
@@ -151,7 +153,7 @@ void (async () => {
 {
   const { instance, captured } = serviceWith(orderFixture());
   await instance.createInspection("tenant_1", "order_1", returnInspection([{ code: "scratch", description: "机身划伤" }]), "检查员");
-  assert.deepEqual(captured.stockQuarantines, [{ itemGroupId: "group_q", locationId: "loc_1", quantity: 2 }],
+  assert.deepEqual(captured.stockQuarantines.map(({ itemGroupId, locationId, quantity }) => ({ itemGroupId, locationId, quantity })), [{ itemGroupId: "group_q", locationId: "loc_1", quantity: 2 }],
     "本批归还的数量库存必须按 itemGroup + 地点进维修隔离");
   ok("带异常整单归还时数量库存进维修隔离——修复前这里是 undefined，数量直接回可用池");
 }
@@ -180,7 +182,7 @@ void (async () => {
 {
   const { instance, captured } = serviceWith(orderFixture());
   await instance.createInspection("tenant_1", "order_1", returnInspection([{ code: "scratch", description: "机身划伤" }]), "检查员");
-  assert.deepEqual(captured.assetChanges, [{ assetId: "asset_1", status: RentalAssetStatus.Maintenance }],
+  assert.deepEqual(captured.assetChanges, [{ assetId: "asset_1", status: RentalAssetStatus.Maintenance, locationId: "loc_1" }],
     "序列化资产的既有一刀切行为不能被改掉");
   assert.equal(captured.stockQuarantines.some((row) => row.itemGroupId === "group_s"), false,
     "序列化分组已经靠资产状态隔离，再按数量隔离一次就是同一件货扣两遍");
@@ -225,9 +227,9 @@ void (async () => {
 {
   const { instance, captured } = serviceWith(orderFixture(30));
   await instance.createInspection("tenant_1", "order_1", returnInspection(), "检查员");
-  assert.deepEqual(captured.stockQuarantines, [{ itemGroupId: "group_q", locationId: "loc_1", quantity: 2 }],
+  assert.deepEqual(captured.stockQuarantines.map(({ itemGroupId, locationId, quantity }) => ({ itemGroupId, locationId, quantity })), [{ itemGroupId: "group_q", locationId: "loc_1", quantity: 2 }],
     "正常归还的周转缓冲期间，数量库存也必须暂时从可用池隔离");
-  assert.deepEqual(captured.assetChanges, [{ assetId: "asset_1", status: RentalAssetStatus.Maintenance }],
+  assert.deepEqual(captured.assetChanges, [{ assetId: "asset_1", status: RentalAssetStatus.Maintenance, locationId: "loc_1" }],
     "正常归还的周转缓冲期间，序列化资产必须暂时保持维护状态");
   ok("周转缓冲期间数量与序列化库存都不可再次出租");
 }
@@ -251,51 +253,64 @@ void (async () => {
     { id: "d", itemGroupId: "group_q2", locationId: "loc_1", quantity: 4, releasedQuantity: 0 }
   ];
   assert.deepEqual(quarantineOf(reservations, []), [
-    { itemGroupId: "group_q", locationId: "loc_1", quantity: 3 },
-    { itemGroupId: "group_q", locationId: "loc_2", quantity: 1 }
-  ], "同组同地点累加、不同地点分开，未释放的预占不参与");
-  ok("隔离量按分组 + 地点聚合，未释放的预占不隔离");
+    { itemGroupId: "group_q", locationId: "loc_1", quantity: 1 },
+    { itemGroupId: "group_q", locationId: "loc_1", quantity: 2 },
+    { itemGroupId: "group_q", locationId: "loc_1", quantity: 1 }
+  ], "只处理已释放数量；各预占分别留来源，但都以实际归还地点为准");
+  ok("多条预占逐笔保留隔离来源，未释放数量不参与，归还地点统一为实收地点");
 }
 
 /* ---------- 仓储层：隔离真的落成 maintenanceQuantity 增量 ---------- */
+function fakeMaintenanceTx({ balance = { id: "stock_1", onHandQuantity: 5, maintenanceQuantity: 1 }, updateCount = 1 } = {}) {
+  const updates = [];
+  const ledgerEntries = [];
+  return {
+    updates, ledgerEntries,
+    businessWorkspace: { findFirst: async () => ({ id: "ws_1" }) },
+    $queryRaw: async () => balance ? [balance] : [],
+    rentalReservation: { findMany: async () => [] },
+    rentalStockBalance: { updateMany: async (args) => { updates.push(args); return { count: updateCount }; } },
+    rentalStockLedgerEntry: {
+      findFirst: async () => null,
+      create: async ({ data }) => { ledgerEntries.push(data); return data; }
+    }
+  };
+}
 
 {
-  const tx = fakeTx(1);
-  await repository().saveOrderAggregate(persistedOrder(), [], tx, [
-    { itemGroupId: "group_q", locationId: "loc_1", quantity: 2 }
-  ]);
-  assert.equal(tx.stockUpdates.length, 1, "隔离必须真的发出一条库存更新");
-  assert.deepEqual(tx.stockUpdates[0].where, {
-    tenantId: "tenant_1", workspaceId: "ws_1", itemGroupId: "group_q", locationId: "loc_1"
-  }, "更新必须带经营空间作用域，不能跨空间改别人的库存");
-  assert.deepEqual(tx.stockUpdates[0].data, { maintenanceQuantity: { increment: 2 } },
-    "必须是增量而不是绝对赋值——绝对赋值会覆盖掉别的隔离");
-  ok("仓储层把隔离落成带空间作用域的 maintenanceQuantity 增量");
+  const tx = fakeMaintenanceTx();
+  const change = { itemGroupId: "group_q", locationId: "loc_1", quantity: 2, idempotencyKey: "quarantine-1", sourceOrderId: "order_1", sourceOrderNo: "SO-1", sourceInspectionId: "inspection_1", sourceDispositionId: "disp_1", batchNo: "batch-1", reason: "异常隔离", operator: "检查员" };
+  await repository().applyStockMaintenanceDelta(tx, "tenant_1", "ws_1", change, 2, "maintenance_quarantine");
+  assert.equal(tx.updates.length, 1, "隔离必须更新维修量余额");
+  assert.deepEqual(tx.updates[0].where, { id: "stock_1", tenantId: "tenant_1", workspaceId: "ws_1", maintenanceQuantity: 1 }, "更新必须受租户、空间及旧维修量约束");
+  assert.deepEqual(tx.updates[0].data, { maintenanceQuantity: 3 }, "隔离按锁定余额计算，不得使用无条件 increment");
+  assert.equal(tx.ledgerEntries.length, 1, "余额变更必须同步写入一条台账流水");
+  assert.equal(tx.ledgerEntries[0].maintenanceDelta, 2);
+  assert.equal(tx.ledgerEntries[0].sourceOrderId, "order_1");
+  assert.equal(tx.ledgerEntries[0].sourceInspectionId, "inspection_1");
+  assert.equal(tx.ledgerEntries[0].sourceDispositionId, "disp_1");
+  assert.equal(tx.ledgerEntries[0].operator, "检查员");
+  ok("数量库存隔离写入带租户空间作用域的余额及订单/检查/处置来源流水");
 }
 
 /* ---------- 仓储层：匹配不到余额行必须 fail-closed ---------- */
 
 {
-  const tx = fakeTx(0);
-  await assert.rejects(
-    () => repository().saveOrderAggregate(persistedOrder(), [], tx, [
-      { itemGroupId: "group_missing", locationId: "loc_1", quantity: 1 }
-    ]),
-    /没有库存台账，无法隔离/u,
-    "updateMany 匹配 0 行时必须抛错"
-  );
-  ok("没有库存台账时整单归还失败，而不是静默把坏货放回可用池");
+  const tx = fakeMaintenanceTx({ balance: null });
+  const change = { itemGroupId: "group_q", locationId: "loc_1", quantity: 1, idempotencyKey: "quarantine-missing", sourceOrderId: "order_1", sourceOrderNo: "SO-1", batchNo: "batch-1", reason: "异常隔离", operator: "检查员" };
+  await assert.rejects(() => repository().applyStockMaintenanceDelta(tx, "tenant_1", "ws_1", change, 1, "maintenance_quarantine"), /没有库存台账，无法记录维修隔离变更/u);
+  assert.equal(tx.ledgerEntries.length, 0);
+  ok("没有库存余额时隔离 fail-closed，不留下孤立流水");
 }
 
 /* ---------- 仓储层：非正数隔离量跳过，不发无意义的写 ---------- */
 
 {
-  const tx = fakeTx(0);
-  await repository().saveOrderAggregate(persistedOrder(), [], tx, [
-    { itemGroupId: "group_q", locationId: "loc_1", quantity: 0 }
-  ]);
-  assert.equal(tx.stockUpdates.length, 0, "0 件不构成隔离，也不该因为 count 0 而抛错");
-  ok("隔离量为 0 时直接跳过，不会误报没有台账");
+  const tx = fakeMaintenanceTx({ updateCount: 0 });
+  const change = { itemGroupId: "group_q", locationId: "loc_1", quantity: 1, idempotencyKey: "quarantine-race", sourceOrderId: "order_1", sourceOrderNo: "SO-1", batchNo: "batch-1", reason: "异常隔离", operator: "检查员" };
+  await assert.rejects(() => repository().applyStockMaintenanceDelta(tx, "tenant_1", "ws_1", change, 1, "maintenance_quarantine"), /维修隔离量已变化/u);
+  assert.equal(tx.ledgerEntries.length, 0, "余额 CAS 失败时不能落流水");
+  ok("并发余额条件更新失败时不写隔离流水，整笔事务回滚");
 }
 
 /* ---------- 盘点写入不得静默解除隔离 ---------- */
@@ -315,13 +330,12 @@ void (async () => {
 
 {
   const { prisma, tx } = fakeStockPrisma({ id: "stock_1", maintenanceQuantity: 2 });
-  const saved = await new RentalCoreFactRepository(prisma).applyStockCount({
+  await assert.rejects(() => new RentalCoreFactRepository(prisma).applyStockCount({
     id: "stock_new", tenantId: "tenant_1", itemGroupId: "group_q", locationId: "loc_1",
     onHandQuantity: 5, maintenanceQuantity: 0
-  });
-  assert.equal(saved.maintenanceQuantity, 0, "显式给 0 是运营明确解除隔离，必须照做");
-  assert.equal(tx.upserts[0].update.maintenanceQuantity, 0);
-  ok("显式填 0 仍然可以解除隔离：保留现值只针对省略，不是把这一列锁死");
+  }), /维修隔离量不能通过盘点直接修改/u);
+  assert.equal(tx.upserts.length, 0, "拒绝绕过来源流水后不得写库存余额");
+  ok("盘点不能通过显式填 0 绕过处置流水释放维修隔离");
 }
 
 {

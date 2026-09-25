@@ -1,25 +1,24 @@
 import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowRightOutlined, CheckCircleOutlined, StarFilled, TruckOutlined } from '@ant-design/icons';
 import { useSite } from '../SiteContext';
 import { ProductCard } from '../components/ProductCard';
 import { SectionHeading } from '../components/HomeSections';
 import { rentalDays, siteRepository } from '../data/siteRepository';
-
-function dateOffset(days: number) {
-  const date = new Date(); date.setDate(date.getDate() + days);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
+import { nowInput, offsetDaysInput } from '../data/datetime';
 
 export function ProductDetailPage() {
   const { tenant, href, isRemote, productsReady, localizeProduct, language, t } = useSite();
   const { productId } = useParams();
+  const [params] = useSearchParams();
   const rawProduct = siteRepository.getProduct(tenant, productId || '');
   const selectedProduct = rawProduct ? localizeProduct(rawProduct) : null;
-  const [startDate, setStartDate] = useState(dateOffset(1));
-  const [endDate, setEndDate] = useState(dateOffset(3));
+  // 取还时间：优先用首页搜索带来的条件（datetime-local），否则默认明后天。
+  const [startDate, setStartDate] = useState(params.get('start') || offsetDaysInput(1));
+  const [endDate, setEndDate] = useState(params.get('end') || offsetDaysInput(3));
   const [quantity, setQuantity] = useState(1);
   const [fulfillment, setFulfillment] = useState<'pickup' | 'delivery'>('pickup');
+  const pickupStoreId = params.get('pickup') || '';
   const [tab, setTab] = useState('intro');
   const navigate = useNavigate();
   // 真实租户模式下商品目录第二阶段才到位；未就绪时先显示加载，避免误报“商品不存在”。
@@ -33,13 +32,15 @@ export function ProductDetailPage() {
   const priceUnit = product.priceUnit === '天' && language === 'en' ? 'day' : product.priceUnit;
   function book() {
     if (!available || days < 1 || quantity < 1 || quantity > product.availableQuantity) return;
-    navigate(href(`/booking/${product.id}?start=${startDate}&end=${endDate}&qty=${quantity}&fulfillment=${fulfillment}`));
+    const query = new URLSearchParams({ start: startDate, end: endDate, qty: String(quantity), fulfillment });
+    if (pickupStoreId) query.set('pickup', pickupStoreId);
+    navigate(href(`/booking/${product.id}?${query.toString()}`));
   }
   return <div className="shell detail-page"><div className="breadcrumb"><Link to={href('/')}>{t('home')}</Link><ArrowRightOutlined /><Link to={href(`/category/${product.categoryId}`)}>{category?.name}</Link><ArrowRightOutlined /><span>{product.name}</span></div>
     <div className="detail-grid"><div className="detail-gallery"><div className="detail-main-image"><img src={product.cover} alt={product.name} /></div><div className="detail-image-note"><CheckCircleOutlined /> {t('detailImageNote')}</div></div>
       <div className="detail-summary"><span className="eyebrow">{category?.name} / {t('featuredGood')}</span><h1>{product.name}</h1><p className="detail-subtitle">{product.subtitle}</p><div className="detail-rating">{product.reviewCount > 0 ? <><StarFilled /> {product.rating} <span>· {t('reviewsCount', { count: product.reviewCount })}</span></> : null}<span className="detail-availability">{available ? t('available', { count: product.availableQuantity }) : t('unavailable')}</span></div>
         <div className="detail-price"><strong>¥{product.price}</strong><span>/{priceUnit}</span><small>{t('depositConfirm', { amount: product.deposit })}</small></div>
-        <div className="rental-panel"><h2>{t('chooseRentalPlan')}</h2><div className="form-grid"><label>{t('startDate')}<input type="date" min={dateOffset(0)} value={startDate} onChange={event => { setStartDate(event.target.value); if (event.target.value > endDate) setEndDate(event.target.value); }} /></label><label>{t('endDate')}<input type="date" min={startDate} value={endDate} onChange={event => setEndDate(event.target.value)} /></label></div><div className="form-grid"><label>{t('rentalQuantity')}<select value={quantity} onChange={event => setQuantity(Number(event.target.value))}>{Array.from({ length: Math.min(product.availableQuantity, 10) }, (_, index) => <option value={index + 1} key={index}>{index + 1} {t('itemUnit')}</option>)}</select></label><label>{t('pickupDelivery')}<select value={fulfillment} onChange={event => setFulfillment(event.target.value as 'pickup' | 'delivery')}><option value="pickup">{t('pickup')}</option><option value="delivery">{t('deliveryHome')}</option></select></label></div><div className="rental-estimate"><span>{t('rentalDays')} <strong>{days} {language === 'en' ? 'day(s)' : '天'}</strong></span><span>{t('rentalEstimate')} <strong>¥{days * quantity * product.price}</strong></span></div><button className="button button-dark button-block" type="button" disabled={!available || days < 1} onClick={book}>{t('bookingTitle')}</button><p className="mock-note">{isRemote ? t('detailEstimateNote') : t('demoBookingNote')}</p></div>
+        <div className="rental-panel"><h2>{t('chooseRentalPlan')}</h2><div className="form-grid"><label>{t('startDate')}<input type="datetime-local" min={nowInput()} value={startDate} onChange={event => { setStartDate(event.target.value); if (event.target.value > endDate) setEndDate(event.target.value); }} /></label><label>{t('endDate')}<input type="datetime-local" min={startDate} value={endDate} onChange={event => setEndDate(event.target.value)} /></label></div><div className="form-grid"><label>{t('rentalQuantity')}<select value={quantity} onChange={event => setQuantity(Number(event.target.value))}>{Array.from({ length: Math.min(product.availableQuantity, 10) }, (_, index) => <option value={index + 1} key={index}>{index + 1} {t('itemUnit')}</option>)}</select></label><label>{t('pickupDelivery')}<select value={fulfillment} onChange={event => setFulfillment(event.target.value as 'pickup' | 'delivery')}><option value="pickup">{t('pickup')}</option><option value="delivery">{t('deliveryHome')}</option></select></label></div><div className="rental-estimate"><span>{t('rentalDays')} <strong>{days} {language === 'en' ? 'day(s)' : '天'}</strong></span><span>{t('rentalEstimate')} <strong>¥{days * quantity * product.price}</strong></span></div><button className="button button-dark button-block" type="button" disabled={!available || days < 1} onClick={book}>{t('bookingTitle')}</button><p className="mock-note">{isRemote ? t('detailEstimateNote') : t('demoBookingNote')}</p></div>
         <div className="detail-service"><span><CheckCircleOutlined /> {t('authenticEquipment')}</span><span><TruckOutlined /> {t('flexibleReturn')}</span><span><CheckCircleOutlined /> {t('professionalCheck')}</span></div>
       </div>
     </div>

@@ -10,6 +10,7 @@ import {
   RentalInventoryMode,
   RENTAL_SECURITY_RISK_LEVELS,
   membershipBenefitScopeMatches,
+  defaultRentalNoShowRule,
   type GrantRentalRewardRequest,
   type ImportRentalCalendarRequest,
   type RentalCalendarBusinessStatus,
@@ -57,6 +58,9 @@ import {
   type RentalQuoteServiceSnapshot,
   type RentalQuoteRequest,
   type RentalQuoteSnapshotV1,
+  type RentalDeliveryAddressSnapshot,
+  type RentalDeliveryAddressDraft,
+  type CustomerProfileAddress,
   type RentalCapabilityDecisionSnapshot,
   type RentalRewardLedgerEntry,
   type RentalRuleConfig,
@@ -372,7 +376,7 @@ function defaultRuleConfig(category: RentalCategoryDefinition): RentalRuleConfig
     overdue: { ...model.defaults.overdue },
     cancellation: {
       ...defaults.cancellation,
-      noShow: { enabled: true, pickupGraceMinutes: 30, finalizationMinutes: 60, feeType: "percentage", feeValue: 100 }
+      noShow: defaultRentalNoShowRule()
     },
     qualification: {
       required: category.businessModel.supportsQualificationReview,
@@ -3517,7 +3521,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 等待行锁期间把模板停用；事务路径必须与内存路径使用同一准入规则。
     if (template.status !== "active") throw new NotFoundException("优惠券模板不存在或不在进行中");
     const now = Date.now();
-    if (now < new Date(template.effectiveFrom).getTime() || now > new Date(template.effectiveTo).getTime()) throw new ConflictException("优惠券不在可领取有效期");
+    if (now < new Date(template.claimFrom).getTime() || now > new Date(template.claimTo).getTime()) throw new ConflictException("优惠券不在可领取时间范围");
     if (template.claimedQuantity >= template.totalQuota) throw new ConflictException("优惠券已领完");
     const customerClaimCount = tx
       ? await this.factStore.countCustomerCoupons(tenantId, templateId, customerId, tx)
@@ -3530,7 +3534,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       minimumSpend: template.minimumSpend, maximumDiscount: template.maximumDiscount,
       appliesTo: template.appliesTo, stackableWithDiscountPlans: template.stackableWithDiscountPlans,
       applicableItemGroupIds: [...template.applicableItemGroupIds], grantReason: "customer_claim",
-      status: "claimed", claimedAt: stamp(), effectiveFrom: template.effectiveFrom, effectiveTo: template.effectiveTo
+      status: "claimed", claimedAt: stamp(),
+      applicableRentalFrom: template.applicableRentalFrom, applicableRentalTo: template.applicableRentalTo,
+      effectiveFrom: template.effectiveFrom, effectiveTo: template.effectiveTo
     };
     // 构造候选模板而不是就地改 template：就地改会在事务回滚后留下多加的配额。
     const nextTemplate: RentalCouponTemplate = { ...template, claimedQuantity: template.claimedQuantity + 1, updatedAt: stamp() };
@@ -3558,7 +3564,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     context: BusinessContext,
     couponId: string | undefined,
     customerId: string | undefined,
-    at = stamp()
+    at = stamp(),
+    rentalStartAt?: string
   ): RentalCustomerCoupon | undefined {
     if (!couponId) return undefined;
     const coupon = this.customerCoupon(this.state(tenantId, context), couponId);
@@ -3566,7 +3573,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (coupon.status !== "claimed") throw new ConflictException("优惠券当前不能锁定");
     const timestamp = new Date(at).getTime();
     if (timestamp < new Date(coupon.effectiveFrom).getTime() || timestamp > new Date(coupon.effectiveTo).getTime()) {
-      throw new ConflictException("优惠券不在有效期");
+      throw new ConflictException("优惠券当前不在可使用时间范围");
+    }
+    if (rentalStartAt && (
+      (coupon.applicableRentalFrom && Date.parse(rentalStartAt) < Date.parse(coupon.applicableRentalFrom)) ||
+      (coupon.applicableRentalTo && Date.parse(rentalStartAt) > Date.parse(coupon.applicableRentalTo))
+    )) {
+      throw new ConflictException("优惠券不适用于本次租期");
     }
     return coupon;
   }
@@ -4624,7 +4637,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return roundMoney(Math.min(base, benefit.maximum === undefined ? raw : Math.min(raw, benefit.maximum)));
   }
 
-  async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest) {
+  async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest, preResolvedDeliveryAddress?: RentalDeliveryAddressSnapshot) {
     if (this.memberships && !input.bookingIdentity) input = { ...input, bookingIdentity: { bookingIdentity: "personal" } };
     const state = this.state(tenantId, context);
     // 新空间的默认价格是懒加载配置：首个报价不能先因为版本表为空而失败，
@@ -4651,6 +4664,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (new Set(input.lines.map((line) => line.pricingGroupId ?? line.itemGroupId)).size !== input.lines.length) throw new BadRequestException("同一定价分组在一次报价中只能出现一行");
     if (!context.settings.fulfillment.enabledModes.includes(input.fulfillmentMode)) throw new BadRequestException("当前租户未启用所选租赁履约方式");
     this.validateFulfillmentLocations(context, input);
+    // 收货地址（配送/上门类履约）：按品类目的地策略解析并固化进报价快照，见 resolveDeliveryAddressSnapshot。
+    const deliveryAddressSnapshot = await this.resolveDeliveryAddressSnapshot(tenantId, context, input, preResolvedDeliveryAddress);
     const plan = this.resolvePricingPlan(
       state.pricingPlans,
       input.pricingPlanId,
@@ -4700,6 +4715,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     for (const line of input.lines) {
       const group = groups.get(line.itemGroupId!);
       if (!group || line.quantity < 1 || !Number.isInteger(line.quantity)) throw new BadRequestException("报价商品或数量无效");
+      const returnBufferMinutes = Math.max(0, rule.config.fulfillment.returnBufferMinutes ?? 0);
+      if (group.attributes.securityRiskLevel === "high"
+        && !rule.config.fulfillment.returnInspectionRequired
+        && returnBufferMinutes <= 0) {
+        throw new ConflictException(`${group.name} 属于高风险商品；至少启用归还检查或设置归还周转缓冲后才能报价`);
+      }
       const pricingGroup = line.pricingGroupId ? pricingGroups.get(line.pricingGroupId) : undefined;
       if (line.pricingGroupId && (!pricingGroup || !pricingGroup.memberItemGroupIds.includes(group.id))) {
         throw new BadRequestException("报价行的产品型号不属于所选定价分组");
@@ -4882,7 +4903,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       bases: { rental: rentalAmount, fulfillment: fulfillmentAmount, service: serviceAmount },
       minimumSpendBase: rentalAmount,
       customerType: input.customerType,
-      hasCustomer: Boolean(input.customerId),
+      // 客户主档存在不等于会员有效。会员专享资格必须来自服务端已解析的
+      // 有效会员/企业员工关系快照；无会员服务或未通过审核时不能因 customerId 获得优惠。
+      hasCustomer: Boolean(resolvedMembership),
       itemGroupIds: input.lines.map((line) => line.itemGroupId!),
       pricingGroupIds: input.lines.map((line) => line.pricingGroupId).filter((value): value is string => Boolean(value)),
       rentalLines: input.lines.map((line) => {
@@ -4924,7 +4947,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     let couponEvaluation: RentalQuoteSnapshotV1["couponEvaluation"];
     if (customerCoupon) {
       if (customerCoupon.customerId !== input.customerId || customerCoupon.status !== "claimed") throw new ConflictException("优惠券不属于当前客户或不可用");
-      if (!this.inPeriod(customerCoupon.effectiveFrom, customerCoupon.effectiveTo, input.startAt)) throw new ConflictException("优惠券不在本次租期的有效期");
+      const checkedAt = stamp();
+      const checkedAtMs = Date.parse(checkedAt);
+      if (checkedAtMs < Date.parse(customerCoupon.effectiveFrom) || checkedAtMs > Date.parse(customerCoupon.effectiveTo)) {
+        throw new ConflictException("优惠券当前不在可使用时间范围");
+      }
+      if ((customerCoupon.applicableRentalFrom && Date.parse(input.startAt) < Date.parse(customerCoupon.applicableRentalFrom)) ||
+        (customerCoupon.applicableRentalTo && Date.parse(input.startAt) > Date.parse(customerCoupon.applicableRentalTo))) {
+        throw new ConflictException("优惠券不适用于本次租期");
+      }
       if (customerCoupon.applicableItemGroupIds.length > 0 && !input.lines.some((line) => customerCoupon.applicableItemGroupIds.includes(line.itemGroupId!))) throw new ConflictException("优惠券不适用于本次商品");
       if (!customerCoupon.stackableWithDiscountPlans && discountPlans.length) throw new ConflictException("所选优惠券不能与自动优惠方案叠加");
       if (discountPlans.some((item) => !item.stackableWithCoupon)) throw new ConflictException("当前优惠方案不能与优惠券叠加");
@@ -4962,6 +4993,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         minimumSpend: customerCoupon.minimumSpend,
         maximumDiscount: customerCoupon.maximumDiscount,
         stackableWithDiscountPlans: customerCoupon.stackableWithDiscountPlans,
+        checkedAt,
+        rentalStartAt: input.startAt,
+        applicableRentalFrom: customerCoupon.applicableRentalFrom,
+        applicableRentalTo: customerCoupon.applicableRentalTo,
         baseBeforeDiscount,
         runningBase,
         formula,
@@ -5266,7 +5301,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }
     const quote: RentalQuoteSnapshotV1 = {
       id: uid("quote"), tenantId, quoteNo: `RQ${timestamp.replace(/\D/g, "").slice(0, 14)}${String(state.quotes.length + 1).padStart(3, "0")}`,
-      categoryCode: context.profile.categoryCode, request: structuredClone(input), membershipSnapshot: resolvedMembership, membershipBenefitEvaluations, chargeLines, rentalLineAmounts,
+      categoryCode: context.profile.categoryCode, request: structuredClone(input), deliveryAddressSnapshot, membershipSnapshot: resolvedMembership, membershipBenefitEvaluations, chargeLines, rentalLineAmounts,
       rentalAmount, discountAmount: roundMoney(discountAmount), couponAmount: roundMoney(couponAmount), serviceAmount,
       fulfillmentAmount,
       rateSnapshot: hitRates,
@@ -5417,6 +5452,103 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     requireLocation(input.returnLocationId ?? input.fulfillmentLocationId, "return");
   }
 
+  /**
+   * 收货地址解析（配送/上门类履约）。事实源是客户地址簿 customer_delivery_addresses：
+   * 下单前按选定地址固化一份快照进报价/订单，主档之后改动不篡改历史订单（需求 4.3 同口径）。
+   *
+   * - deliveryDestination=customer_address（摄影/露营/工程）且履约方式属配送/上门：必须给收货地址；
+   *   优先用调用方已解析的快照（测试/内部），否则按 deliveryAddressId 从库中解析并校验客户归属。
+   * - 其余（自取，或车辆据点类 tenant_location）：不接受收货地址，带了即报错，避免“自取也送货”的暗示。
+   */
+  private async resolveDeliveryAddressSnapshot(
+    tenantId: string,
+    context: BusinessContext,
+    input: RentalQuoteRequest,
+    preResolved?: RentalDeliveryAddressSnapshot
+  ): Promise<RentalDeliveryAddressSnapshot | undefined> {
+    const isDelivery = DELIVERY_FULFILLMENT_MODES.has(input.fulfillmentMode);
+    const needsAddress = context.category.businessModel.deliveryDestination === "customer_address" && isDelivery;
+    if (!needsAddress) {
+      if (input.deliveryAddressId || input.deliveryAddressDraft || preResolved) throw new BadRequestException("当前履约方式不接受收货地址");
+      return undefined;
+    }
+    if (preResolved) return preResolved;
+    if (input.deliveryAddressId && input.deliveryAddressDraft) throw new BadRequestException("请选择地址簿地址或填写本单地址，不能同时提交");
+    if (input.deliveryAddressDraft) {
+      const draft = input.deliveryAddressDraft;
+      const recipient = draft.recipient.trim();
+      const phone = draft.phone.trim();
+      const province = draft.province.trim();
+      const city = draft.city.trim();
+      const detail = draft.detail.trim();
+      if (!recipient || !province || !city || !detail || !/^\+?[0-9][0-9\s()-]{5,38}$/u.test(phone)) {
+        throw new BadRequestException("请填写有效的收件人、联系电话、省市和详细地址");
+      }
+      return {
+        recipient,
+        phone,
+        phoneMasked: maskRecipient(phone),
+        countryCode: draft.countryCode?.trim() || "CN",
+        province,
+        city,
+        district: draft.district?.trim() || undefined,
+        detail,
+        postalCode: draft.postalCode?.trim() || undefined
+      };
+    }
+    if (!input.deliveryAddressId) throw new BadRequestException("配送订单必须选择已保存地址或填写本单收货地址");
+    // 只有"从地址簿取地址"这条路径才需要 customerId 定位归属；
+    // 本单一次性地址（deliveryAddressDraft，代客建单自由文本客户、无 customerId）不需要，上面已返回。
+    if (!input.customerId) throw new BadRequestException("从地址簿选择收货地址需先选择已注册客户，或改用本单地址");
+    if (!this.prisma) throw new ConflictException("配送地址服务未就绪");
+    const row = await this.prisma.customerDeliveryAddress.findFirst({
+      where: { tenantId, customerId: input.customerId, id: input.deliveryAddressId, status: "active" }
+    });
+    if (!row) throw new BadRequestException("收货地址不存在或不属于该客户");
+    return {
+      addressId: row.id,
+      recipient: row.recipient,
+      phone: row.phone,
+      phoneMasked: row.phoneMasked,
+      countryCode: row.countryCode,
+      province: row.province,
+      city: row.city,
+      district: row.district ?? undefined,
+      detail: row.detail,
+      postalCode: row.postalCode ?? undefined,
+      latitude: row.latitude === null ? undefined : Number(row.latitude),
+      longitude: row.longitude === null ? undefined : Number(row.longitude)
+    };
+  }
+
+  /**
+   * 下单选址用：某客户在地址簿里的有效收货地址（脱敏摘要）。tenant + customer 归属，不按空间隔离。
+   * 内存数据源没有地址簿，返回空表——内存模式下配送选址不可用（真实收单本就走 MySQL）。
+   */
+  async listCustomerDeliveryAddresses(tenantId: string, customerId: string): Promise<CustomerProfileAddress[]> {
+    if (!this.prisma) return [];
+    const rows = await this.prisma.customerDeliveryAddress.findMany({
+      where: { tenantId, customerId, status: "active" },
+      orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }]
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      revision: row.revision,
+      recipient: row.recipient,
+      phoneMasked: row.phoneMasked,
+      countryCode: row.countryCode,
+      province: row.province,
+      city: row.city,
+      district: row.district ?? undefined,
+      detail: row.detail,
+      postalCode: row.postalCode ?? undefined,
+      latitude: row.latitude === null ? undefined : Number(row.latitude),
+      longitude: row.longitude === null ? undefined : Number(row.longitude),
+      isDefault: row.isDefault,
+      updatedAt: row.updatedAt.toISOString()
+    }));
+  }
+
   consumeQuote(tenantId: string, context: BusinessContext, quoteId: string) {
     const quote = this.getQuote(tenantId, context, quoteId);
     if (new Date(quote.expiresAt).getTime() < Date.now()) throw new ConflictException("报价已过期，请重新报价");
@@ -5555,7 +5687,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           maximumDiscount: template.maximumDiscount, appliesTo: template.appliesTo,
           stackableWithDiscountPlans: template.stackableWithDiscountPlans,
           applicableItemGroupIds: [...template.applicableItemGroupIds], grantReason: "membership_reward",
-          status: "claimed", claimedAt: appliedAt, effectiveFrom: template.effectiveFrom, effectiveTo: template.effectiveTo
+          status: "claimed", claimedAt: appliedAt,
+          applicableRentalFrom: template.applicableRentalFrom, applicableRentalTo: template.applicableRentalTo,
+          effectiveFrom: template.effectiveFrom, effectiveTo: template.effectiveTo
         };
         state.customerCoupons.unshift(coupon); referenceIds.push(coupon.id);
         grantedCoupons.push(coupon);
@@ -6409,7 +6543,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     });
     const discounts = selectDiscountPlans(originalPlans, {
       bases: { rental: fullRentalAmount, service: fullServiceAmount, fulfillment: originalQuote.fulfillmentAmount },
-      minimumSpendBase: fullRentalAmount, customerType: args.customerType, hasCustomer: Boolean(originalQuote.request.customerId),
+      minimumSpendBase: fullRentalAmount, customerType: args.customerType, hasCustomer: Boolean(originalQuote.membershipSnapshot),
       itemGroupIds: args.lines.map((row) => row.itemGroupId),
       pricingGroupIds: args.lines.map((row) => row.pricingGroupId).filter((value): value is string => Boolean(value)),
       // 逐行金额必须传：限定商品的方案要靠它判定命中哪几行、减免多少。

@@ -3,6 +3,7 @@ import { Alert, Col, Form as AntdForm, Input, InputNumber, Row, Select, Switch, 
 import type { FormInstance, FormItemProps } from "antd";
 import type { ReactNode } from "react";
 import { useLocale } from "@/app/locale";
+import { defaultRentalNoShowRule } from "@rental-os/shared";
 import { normalizeSecurityRules } from "@/features/settings/securityRuleForm";
 import {
   lateFeeTypeLabels,
@@ -415,7 +416,7 @@ export const RULE_SECTIONS: RuleSection[] = [
           <Form.Item
             name={["cancellation", "noShow", "enabled"]}
             label="启用爽约处理"
-            tooltip="领取超过宽限后先进入待确认爽约；通知客户并达到最终时限后，才能确认爽约并释放占用。默认开启。"
+            tooltip="领取超过宽限后先进入待确认爽约；通知客户并达到最终时限后，才能确认爽约并释放占用。未配置时默认关闭。"
             valuePropName="checked"
           >
             <Switch />
@@ -710,7 +711,7 @@ export const RULE_SECTIONS: RuleSection[] = [
 /**
  * 把某个规则版本的内容回填进规则草稿表单。RulesTab 的「编辑/新建草稿」与「新建规则向导」
  * 共用这一份 seed-in 逻辑：押金/预授权由 `ruleSecurityGroups` 派生成两组独立规则，
- * 三个后加的可选块（续租、提前归还、税、爽约）缺省时补上与服务端一致的默认值，
+ * 后加的可选块（续租、提前归还、税、爽约）缺省时补上与服务端一致的默认值，
  * 避免表单只填一半、提交出过不了校验的半成品。不支持预授权的品类强制回落 `none`。
  *
  * 与旧的内联实现逐字一致：任何一处改动都会同时作用于两个入口，不再各自漂移。
@@ -734,7 +735,8 @@ export function seedFormFromRule(
     tax: config.tax ?? { rate: 0, inclusive: true },
     cancellation: {
       ...(config.cancellation ?? {}),
-      noShow: config.cancellation?.noShow ?? { enabled: true, pickupGraceMinutes: 30, finalizationMinutes: 60, feeType: "percentage", feeValue: 100 },
+      // 与服务端及新空间初始化共用默认值；打开旧草稿不能悄悄带入 100% 爽约费。
+      noShow: config.cancellation?.noShow ?? defaultRentalNoShowRule(),
     },
     changeReason: source.status === "draft" ? source.changeReason : "调整租赁业务规则",
   } as RuleForm);

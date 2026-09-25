@@ -37,6 +37,10 @@ interface OrderData {
   effectiveEndText: string;
   extended: boolean;
   fulfillmentMode: string;
+  /** 配送订单收货地址快照（脱敏，取自 ClientOrderView.deliveryAddress，非旁表）；自取订单为空。 */
+  hasDeliveryAddress: boolean;
+  deliveryRecipientLine: string;
+  deliveryAddressText: string;
   lines: Array<{ key: string; name: string; option: string; quantity: number; amount: number; allocation: string }>;
   charges: Array<{ key: string; label: string; amount: number }>;
   balance: number;
@@ -87,6 +91,9 @@ Page({
     effectiveEndText: "",
     extended: false,
     fulfillmentMode: "",
+    hasDeliveryAddress: false,
+    deliveryRecipientLine: "",
+    deliveryAddressText: "",
     lines: [],
     charges: [],
     balance: 0,
@@ -209,6 +216,9 @@ Page({
       .map((row, index) => ({ key: `${row.type}-${index}`, label: row.name || chargeLabel(row.type), amount: row.amount }));
     const balance = funding?.rental.balance ?? 0;
     const effectiveEnd = order.effectiveEndAt ?? order.endAt;
+    // 收货地址一律来自订单快照 ClientOrderView.deliveryAddress（不依赖已弃用的旁表）；仅配送订单有值。
+    const address = order.deliveryAddress;
+    const deliveryAddressText = address ? `${address.province}${address.city}${address.district ?? ""}${address.detail}` : "";
     const feeItems = (fees.items ?? []).map((item) => {
       const noteParts: string[] = [];
       if (item.adjustments.length) {
@@ -245,6 +255,9 @@ Page({
       effectiveEndText: formatBusinessDateTime(effectiveEnd, timeZone),
       extended: Boolean(order.effectiveEndAt && order.effectiveEndAt !== order.endAt),
       fulfillmentMode: fulfillmentLabel(order.fulfillmentMode),
+      hasDeliveryAddress: Boolean(address),
+      deliveryRecipientLine: address ? `${address.recipient} · ${address.phoneMasked}` : "",
+      deliveryAddressText,
       lines,
       charges,
       balance,

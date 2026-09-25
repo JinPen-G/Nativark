@@ -1,4 +1,4 @@
-import type { Category, DemoTenantKey, Product, Tenant } from '../types';
+import type { Category, DemoTenantKey, Product, Store, Tenant } from '../types';
 import { PLATFORM_THEME } from '../theme';
 
 const asset = (name: string) => `/assets/${name}.webp`;
@@ -34,6 +34,14 @@ export const categories: Category[] = [
   { id: 'sports', name: '运动户外', shortName: '运动', description: '骑行 / 球类 / 户外', icon: 'sports', image: asset('product-sports'), heroImage: asset('scene-camping'), heroTitle: '随时出发，尽情运动', heroDescription: '更多体验，轻松开始', sceneTitle: '随时出发，尽情运动', sceneImage: asset('scene-camping'), children: [{ id: 'outdoor', name: '户外运动', description: '骑行 / 球类', image: asset('product-sports') }] },
 ];
 
+/** 演示门店：真实模式下门店来自后端公开目录的 locations（见 remoteSite）。 */
+export const demoStores: Store[] = [
+  { id: 'store-city', name: '城西旗舰门店', nameEn: 'West City Flagship', address: '市中心 · 创意园 A 座 1 层', addressEn: 'Downtown · Creative Park, Block A, F1', businessHours: '09:00–21:00', contactPhone: '400-000-0001', capabilities: ['pickup', 'return', 'storage'] },
+  { id: 'store-lake', name: '东湖社区店', nameEn: 'East Lake Community', address: '东湖新区 · 湖畔广场 B2', addressEn: 'East Lake District · Lakeside Plaza B2', businessHours: '10:00–20:00', contactPhone: '400-000-0002', capabilities: ['pickup', 'return'] },
+  { id: 'store-station', name: '高铁南站取还点', nameEn: 'South Railway Point', address: '高铁南站 · 到达层便民服务区', addressEn: 'South Railway Station · Arrival Level', businessHours: '08:00–22:00', contactPhone: '400-000-0003', capabilities: ['pickup', 'return'] },
+  { id: 'store-airport', name: '机场配送仓', nameEn: 'Airport Delivery Hub', address: 'T2 航站楼 · 物流配送中心', addressEn: 'Terminal 2 · Logistics Hub', businessHours: '全天配送', contactPhone: '400-000-0004', capabilities: ['delivery', 'storage'] },
+];
+
 const sharedTenant = {
   name: 'Rental OS', logo: '/brand/logo-horizontal.png', logoCompact: '/brand/logo-mark.png',
   slogan: '好物相伴，更好生活', primaryColor: PLATFORM_THEME.primaryColor, secondaryColor: PLATFORM_THEME.secondaryColor,
@@ -41,6 +49,7 @@ const sharedTenant = {
   footerText: '好物相伴，更好生活。按需租用，让每一次体验都恰到好处。',
   heroImage: asset('multi-lifestyle-hero'), heroTitle: '好东西，不必拥有\n也能随时拥有',
   heroDescription: '数码、户外、家电、工具、母婴……\n万物皆可租，让生活更轻松',
+  stores: demoStores,
 };
 
 export const demoTenants: Record<DemoTenantKey, Tenant> = {

@@ -1,7 +1,9 @@
-放置各视频的封面图（视频加载前先显示，避免黑屏闪现）。
+放置各品类 Hero 视频的封面图（视频加载前先显示，避免黑屏闪现）。
 
-期望文件名（与 src/data/heroScenes.ts 对应）：
-  hero-01.webp ... hero-05.webp
+命名规则：与视频同名，按「品类 id」命名（配置见 src/data/heroConfig.ts）：
+  vehicle.webp / camera.webp / camping.webp / digital.webp /
+  construction.webp / home.webp / baby.webp / sports.webp
+真实租户模式：文件名 = 已发布服务的 code。
 
 建议：与对应视频首帧一致，webp 压缩。
-说明：缺失时自动回退到 heroScenes.ts 里配置的 posterFallback（现有 webp 底图）。
+说明：poster 缺失时，Hero 直接回退到该品类现有 webp 底图（heroConfig.ts 的 fallbackImage），不会黑屏。

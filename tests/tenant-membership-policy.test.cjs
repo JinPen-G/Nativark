@@ -35,12 +35,15 @@ const sourceModules = new Set([
   "apps/admin/src/app/navigation-terminology.ts",
   "apps/admin/src/features/auth/authStore.ts",
   "apps/api/src/common/api-auth.guard.ts",
+  "apps/api/src/common/staff-api-policy.ts",
+  "apps/api/src/common/organization-location-scope.ts",
   "apps/api/src/common/request-path.ts",
   "apps/api/src/common/request-identity.ts",
   "apps/api/src/common/password.ts",
   "apps/api/src/common/data-permission.ts",
   "apps/api/src/modules/platform/platform.repository.ts",
-  "apps/api/src/modules/client/client-api.service.ts"
+  "apps/api/src/modules/client/client-api.service.ts",
+  "apps/api/src/modules/rental-core/rental-inspection-customer-response.ts"
 ]);
 
 /**
@@ -291,7 +294,7 @@ for (const [method, url] of [
     const base = user({ permissions: [MEMBER_VIEW] });
     const harness = guardHarness(accessContext(base), method, url);
     await assertForbidden(harness);
-    assert.deepEqual(harness.calls, [{ token: "Bearer policy-token", options: { allowInvalidWorkspace: true } }]);
+    assert.deepEqual(harness.calls, [{ token: "Bearer policy-token", options: { allowInvalidWorkspace: true, audience: "operator" } }]);
   });
 }
 

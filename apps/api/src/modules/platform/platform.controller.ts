@@ -9,6 +9,8 @@ import { CustomerOperationsService } from "./customer-operations.service";
 import {
   ChangeCustomerAccountStatusDto,
   ChangeCustomerMembershipStatusDto,
+  CreateCustomerRiskRecordDto,
+  ReviewCustomerRiskRecordDto,
   SaveCustomerProfileAddressDto
 } from "./customer-operations-request.dto";
 import {
@@ -211,6 +213,30 @@ export class PlatformController {
     @Req() req: RequestWithUser
   ) {
     return this.platformService.changeCustomerMembershipStatus(customerId, body, req.user);
+  }
+
+  @Get("customers/:customerId/risk-records")
+  customerRiskRecords(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
+    return this.platformService.listCustomerRiskRecords(customerId, req.user);
+  }
+
+  @Post("customers/:customerId/risk-records")
+  createCustomerRiskRecord(
+    @Param("customerId") customerId: string,
+    @Body() body: CreateCustomerRiskRecordDto,
+    @Req() req: RequestWithUser
+  ) {
+    return this.platformService.createCustomerRiskRecord(customerId, body, req.user);
+  }
+
+  @Post("customers/:customerId/risk-records/:riskRecordId/decision")
+  reviewCustomerRiskRecord(
+    @Param("customerId") customerId: string,
+    @Param("riskRecordId") riskRecordId: string,
+    @Body() body: ReviewCustomerRiskRecordDto,
+    @Req() req: RequestWithUser
+  ) {
+    return this.platformService.reviewCustomerRiskRecord(customerId, riskRecordId, body, req.user);
   }
 
   /** CUSTOMER-01B：客户状态时间线（账号级 + 当前空间级同一条线）。 */

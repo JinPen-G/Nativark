@@ -1,6 +1,6 @@
-import { formatRentalMoney, type CorporateMembershipMember, type CustomerCorporateCreditLedgerEntry, type CustomerCorporateMembership, type CustomerMembershipPlanAssignment, type CustomerCorporateCredit, type SaveCustomerCreditRequest, type SaveCorporateMembershipRequest, type SaveCustomerCorporateMembershipRequest } from "@rental-os/shared";
+import { formatRentalMoney, type CorporateMembershipMember, type CustomerCorporateContract, type CustomerCorporateCreditLedgerEntry, type CustomerCorporateMembership, type CustomerCorporateInvoiceProfile, type CustomerMembershipPlanAssignment, type CustomerCorporateCredit, type SaveCustomerContractRequest, type SaveCustomerInvoiceProfileRequest, type SaveCustomerCreditRequest, type SaveCorporateMembershipRequest, type SaveCustomerCorporateMembershipRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Descriptions, Drawer, Form, Input, InputNumber, Select, Space, Table, Tag } from "antd";
+import { Alert, App, Button, Card, Checkbox, Descriptions, Drawer, Form, Input, InputNumber, Select, Space, Table, Tabs, Tag } from "antd";
 import { useEffect, useState } from "react";
 import { membershipApi } from "@/api/membership";
 import { customerApi } from "@/api/customer";
@@ -14,6 +14,8 @@ const relationMeta: Record<string, { text: string; color: string }> = { active: 
 const membershipLabel: Record<string, string> = { pending_activation: "待审核", active: "正常", suspended: "已暂停", risk_restricted: "风险受限", exited: "已退出", closed: "已注销" };
 type GrantForm = { planVersionId: string; source: "manual" | "corporate_contract"; effectiveFrom?: string; effectiveTo?: string; reason?: string };
 type CorporateDrawer = "corporate" | "employees" | "grant" | "credit";
+type InvoiceForm = SaveCustomerInvoiceProfileRequest;
+type ContractForm = SaveCustomerContractRequest;
 
 const creditCycleLabel: Record<CustomerCorporateCredit["billingCycle"], string> = {
   monthly: "月结",
@@ -47,7 +49,12 @@ export function CorporateMembershipPage() {
   const [drawer, setDrawer] = useState<CorporateDrawer>();
   const [editTarget, setEditTarget] = useState<CorporateMembershipMember>();
   const [revokeTarget, setRevokeTarget] = useState<CustomerMembershipPlanAssignment>();
+  const [corporateTab, setCorporateTab] = useState("profile");
+  const [invoiceTarget, setInvoiceTarget] = useState<CustomerCorporateInvoiceProfile>();
+  const [contractTarget, setContractTarget] = useState<CustomerCorporateContract>();
   const [corporateForm] = Form.useForm<SaveCorporateMembershipRequest>();
+  const [invoiceForm] = Form.useForm<InvoiceForm>();
+  const [contractForm] = Form.useForm<ContractForm>();
   const [employeeForm] = Form.useForm<SaveCustomerCorporateMembershipRequest>();
   const [grantForm] = Form.useForm<GrantForm>();
   const [revokeForm] = Form.useForm<{ reason: string }>();
@@ -63,6 +70,8 @@ export function CorporateMembershipPage() {
   const creditConfig = useQuery({ queryKey: ["customer-credit", selected?.customerId], queryFn: () => customerApi.credit(selected!.customerId), enabled: canViewCredit && Boolean(selected) && drawer === "credit" });
   const creditAccount = useQuery({ queryKey: ["customer-credit-account", selected?.customerId], queryFn: () => customerApi.creditAccount(selected!.customerId), enabled: canViewCredit && Boolean(creditConfig.data) && drawer === "credit" });
   const creditLedger = useQuery({ queryKey: ["customer-credit-ledger", selected?.customerId], queryFn: () => customerApi.creditLedger(selected!.customerId), enabled: canViewCredit && Boolean(creditConfig.data) && drawer === "credit" });
+  const invoiceProfiles = useQuery({ queryKey: ["customer-invoice-profiles", selected?.customerId], queryFn: () => customerApi.invoiceProfiles(selected!.customerId), enabled: canView && Boolean(selected) && drawer === "corporate" && corporateTab === "invoice" });
+  const contracts = useQuery({ queryKey: ["customer-contracts", selected?.customerId], queryFn: () => customerApi.contracts(selected!.customerId), enabled: canView && Boolean(selected) && drawer === "corporate" && corporateTab === "contracts" });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["membership-corporate"] });
   const saveCorporate = useMutation({
     mutationFn: (values: SaveCorporateMembershipRequest) => membershipApi.saveCorporate({ ...values, id: editTarget?.customerId }),
@@ -95,6 +104,28 @@ export function CorporateMembershipPage() {
       message.success(t("企业会员方案授予已撤销；历史快照保留"));
     },
   });
+  const saveInvoice = useMutation({
+    mutationFn: (values: InvoiceForm) => customerApi.saveInvoiceProfile(selected!.customerId, {
+      ...values, id: invoiceTarget?.id, expectedRevision: invoiceTarget?.revision
+    }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["customer-invoice-profiles", selected?.customerId] });
+      setInvoiceTarget(undefined);
+      invoiceForm.resetFields();
+      message.success(t("开票资料已保存"));
+    }
+  });
+  const saveContract = useMutation({
+    mutationFn: (values: ContractForm) => customerApi.saveContract(selected!.customerId, {
+      ...values, id: contractTarget?.id, expectedRevision: contractTarget?.revision
+    }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["customer-contracts", selected?.customerId] });
+      setContractTarget(undefined);
+      contractForm.resetFields();
+      message.success(t("企业合同已保存"));
+    }
+  });
   const saveCredit = useMutation({
     mutationFn: (values: SaveCustomerCreditRequest) => customerApi.saveCredit(selected!.customerId, {
       ...values,
@@ -112,9 +143,38 @@ export function CorporateMembershipPage() {
   });
   const openCorporate = (row?: CorporateMembershipMember) => {
     setEditTarget(row);
+    setSelected(row);
+    setCorporateTab("profile");
+    setInvoiceTarget(undefined);
+    setContractTarget(undefined);
     corporateForm.resetFields();
-    if (row) corporateForm.setFieldsValue({ name: row.name, corporateName: row.corporateName ?? row.name });
+    invoiceForm.resetFields();
+    contractForm.resetFields();
+    if (row) corporateForm.setFieldsValue({
+      name: row.name, corporateName: row.corporateProfile?.legalName ?? row.corporateName ?? row.name, email: row.email,
+      registeredAddress: row.corporateProfile?.registeredAddress, legalRepName: row.corporateProfile?.legalRepName,
+      industry: row.corporateProfile?.industry, scale: row.corporateProfile?.scale
+    });
     setDrawer("corporate");
+  };
+  const openInvoice = (row?: CustomerCorporateInvoiceProfile) => {
+    setInvoiceTarget(row);
+    invoiceForm.resetFields();
+    invoiceForm.setFieldsValue(row ? {
+      invoiceType: row.invoiceType, title: row.title, taxNo: row.taxNo,
+      registeredAddress: row.registeredAddress, bankName: row.bankName,
+      receiveEmail: row.receiveEmail, isDefault: row.isDefault, status: row.status,
+      clearBankAccount: false, clearContactPhone: false
+    } : { invoiceType: "vat_normal", isDefault: false, status: "active" });
+  };
+  const openContract = (row?: CustomerCorporateContract) => {
+    setContractTarget(row);
+    contractForm.resetFields();
+    contractForm.setFieldsValue(row ? {
+      contractNo: row.contractNo, name: row.name, signedAt: row.signedAt,
+      effectiveFrom: row.effectiveFrom, effectiveTo: row.effectiveTo,
+      status: row.status, fileRef: row.fileRef, terminatedReason: row.terminatedReason
+    } : { status: "draft" });
   };
   const openEmployees = (row: CorporateMembershipMember) => { setSelected(row); employeeForm.resetFields(); setDrawer("employees"); };
   const openCredit = (row: CorporateMembershipMember) => { setSelected(row); creditForm.resetFields(); setDrawer("credit"); };
@@ -150,22 +210,112 @@ export function CorporateMembershipPage() {
         { title: t("员工数"), dataIndex: "employeeCount" },
         { title: t("创建时间"), dataIndex: "createdAt", render: (value) => new Date(value).toLocaleDateString() },
         { title: t("操作"), render: (_, row) => <Space wrap>
-          <Button type="link" disabled={!canManage} onClick={() => openCorporate(row)}>{t("企业资料")}</Button>
-          <Button type="link" disabled={!canView} onClick={() => openEmployees(row)}>{t("管理员与员工")}</Button>
-          <Button type="link" disabled={!canGrant} onClick={() => { setSelected(row); grantForm.resetFields(); grantForm.setFieldsValue({ source: "manual" }); setDrawer("grant"); }}>{t("授予方案")}</Button>
+          <Button type="link" disabled={!canView} onClick={() => openCorporate(row)}>{t("企业资料")}</Button>
+          <Button type="link" disabled={!canView || row.membershipStatus !== "active"} onClick={() => openEmployees(row)}>{t("管理员与员工")}</Button>
+          <Button type="link" disabled={!canGrant || row.membershipStatus !== "active"} onClick={() => { setSelected(row); grantForm.resetFields(); grantForm.setFieldsValue({ source: "manual" }); setDrawer("grant"); }}>{t("授予方案")}</Button>
           {canViewCredit && <Button type="link" onClick={() => openCredit(row)}>{t("授信账务")}</Button>}
         </Space> },
       ]} />
     </Card>
-    <Drawer title={drawer === "employees" ? `${selected?.corporateName ?? selected?.name ?? t("企业")} · ${t("管理员与员工")}` : drawer === "grant" ? t("授予企业会员方案") : drawer === "credit" ? `${selected?.corporateName ?? selected?.name ?? t("企业")} · ${t("授信账务")}` : editTarget ? t("编辑企业会员") : t("新增企业会员")} size={drawer === "credit" ? 900 : 620} open={Boolean(drawer)} onClose={() => setDrawer(undefined)} destroyOnHidden>
-      {drawer === "corporate" && <Form form={corporateForm} layout="vertical" disabled={!canManage} onFinish={(values) => canManage && saveCorporate.mutate(values)}>
-        <Form.Item name="corporateName" label={t("企业名称")} rules={[{ required: true }]}><Input /></Form.Item>
-        <Form.Item name="name" label={t("联系人/简称")} rules={[{ required: true }]}><Input /></Form.Item>
-        <Form.Item name="phone" label={t("联系电话")} rules={editTarget ? [] : [{ required: true }]}><Input placeholder={editTarget ? t("留空则保持现有联系电话") : undefined} /></Form.Item>
-        <Form.Item name="email" label={t("邮箱")}><Input /></Form.Item>
-        <Form.Item name="corporateTaxNo" label={t("统一社会信用代码")}><Input /></Form.Item>
-        <Button type="primary" htmlType="submit" disabled={!canManage} loading={saveCorporate.isPending}>{t("保存")}</Button>
-      </Form>}
+    <Drawer title={drawer === "employees" ? `${selected?.corporateName ?? selected?.name ?? t("企业")} · ${t("管理员与员工")}` : drawer === "grant" ? t("授予企业会员方案") : drawer === "credit" ? `${selected?.corporateName ?? selected?.name ?? t("企业")} · ${t("授信账务")}` : editTarget ? t("编辑企业会员") : t("新增企业会员")} size={drawer === "credit" ? 900 : drawer === "corporate" ? 900 : 620} open={Boolean(drawer)} onClose={() => setDrawer(undefined)} destroyOnHidden>
+      {drawer === "corporate" && <Tabs activeKey={corporateTab} onChange={setCorporateTab} items={[
+        { key: "profile", label: t("企业资料"), children: <>
+          {selected?.membershipStatus === "pending_activation" && <Alert type="warning" showIcon title={t("企业会员待审核")}
+            description={t("企业必须完成主体资料人工审核后才能添加员工、获得企业权益或用于下单。个人会员自动审核设置不影响企业审核。")} style={{ marginBottom: 16 }} />}
+      <Form form={corporateForm} layout="vertical" disabled={!canManage} onFinish={(values) => canManage && saveCorporate.mutate(values)}>
+            <Form.Item name="corporateName" label={t("企业法定名称")} rules={[{ required: true, whitespace: true }]}><Input maxLength={180} /></Form.Item>
+            <Form.Item name="unifiedSocialCreditCode" label={t("统一社会信用代码")}
+              rules={!editTarget || !editTarget.corporateProfile ? [{ required: true, whitespace: true }] : []}
+              extra={editTarget?.corporateProfile
+                ? `${t("当前已保存")}：${editTarget.corporateProfile.unifiedSocialCreditCodeMasked} · ${t("留空保持不变")}`
+                : t("该历史企业尚未完成结构化资料迁移，请核对并填写有效代码；仅后台保存原值，列表和审核历史只显示掩码。")}>
+              <Input maxLength={18} autoComplete="off" placeholder={editTarget?.corporateProfile ? t("留空保持现有代码") : undefined} />
+            </Form.Item>
+            <Form.Item name="registeredAddress" label={t("注册地址")}><Input maxLength={500} /></Form.Item>
+            <Space wrap style={{ width: "100%" }}>
+              <Form.Item name="legalRepName" label={t("法定代表人")}><Input maxLength={120} /></Form.Item>
+              <Form.Item name="legalRepPhone" label={t("法定代表人联系电话")}
+                extra={editTarget?.corporateProfile?.legalRepPhoneMasked ? `${t("当前已保存")}：${editTarget.corporateProfile.legalRepPhoneMasked} · ${t("留空保持不变")}` : undefined}>
+                <Input maxLength={40} autoComplete="off" />
+              </Form.Item>
+            </Space>
+            <Space wrap style={{ width: "100%" }}>
+              <Form.Item name="industry" label={t("所属行业")}><Input maxLength={120} /></Form.Item>
+              <Form.Item name="scale" label={t("企业规模")}><Select style={{ width: 200 }} allowClear options={[
+                { value: "1-10", label: t("1-10人") }, { value: "11-50", label: t("11-50人") },
+                { value: "51-200", label: t("51-200人") }, { value: "200+", label: t("200人以上") }
+              ]} /></Form.Item>
+            </Space>
+            <Form.Item name="name" label={t("联系人/简称")} rules={[{ required: true, whitespace: true }]}><Input maxLength={120} /></Form.Item>
+            <Form.Item name="phone" label={t("联系电话")} rules={!editTarget ? [{ required: true, whitespace: true }] : []}
+              extra={editTarget ? t("为保护登录标识，现有号码不回显；留空保持不变") : undefined}>
+              <Input maxLength={40} autoComplete="off" />
+            </Form.Item>
+            <Form.Item name="email" label={t("邮箱")}><Input maxLength={160} /></Form.Item>
+            {editTarget && <Form.Item name="clearEmail" valuePropName="checked"><Checkbox>{t("清除已保存邮箱")}</Checkbox></Form.Item>}
+            <Button type="primary" htmlType="submit" disabled={!canManage} loading={saveCorporate.isPending}>{t("保存企业资料")}</Button>
+          </Form>
+        </> },
+        { key: "invoice", label: t("开票资料"), disabled: !selected, children: <QueryState loading={invoiceProfiles.isLoading} error={invoiceProfiles.error}>
+          <Space style={{ width: "100%", justifyContent: "space-between", marginBottom: 12 }}>
+            <span>{t("支持多份开票资料；设为默认时会自动取消其他默认项。敏感账号仅显示掩码。")}</span>
+            <Button disabled={!canManage} onClick={() => openInvoice()}>{t("新增开票资料")}</Button>
+          </Space>
+          <Table<CustomerCorporateInvoiceProfile> rowKey="id" size="small" dataSource={invoiceProfiles.data ?? []} pagination={false} scroll={{ x: 720 }} columns={[
+            { title: t("开票抬头"), dataIndex: "title" },
+            { title: t("类型"), render: (_, row) => row.invoiceType === "vat_special" ? t("增值税专用发票") : t("增值税普通发票") },
+            { title: t("税号"), dataIndex: "taxNo" },
+            { title: t("默认"), dataIndex: "isDefault", render: (value) => value ? t("是") : "—" },
+            { title: t("状态"), dataIndex: "status", render: (value) => value === "active" ? t("启用") : t("停用") },
+            { title: t("操作"), render: (_, row) => <Button type="link" disabled={!canManage} onClick={() => openInvoice(row)}>{t("编辑")}</Button> }
+          ]} />
+          {invoiceTarget && <Alert type="info" showIcon title={t("敏感资料保护")}
+            description={`${t("银行账号")}：${invoiceTarget.bankAccountMasked ?? t("未设置")}；${t("联系电话")}：${invoiceTarget.contactPhoneMasked ?? t("未设置")}。${t("不回显原值；留空为保留，勾选清除才会删除。")}`} style={{ margin: "16px 0" }} />}
+          <Form form={invoiceForm} layout="vertical" disabled={!canManage} onFinish={(values) => canManage && selected && saveInvoice.mutate(values)}>
+            <Form.Item name="invoiceType" label={t("发票类型")} rules={[{ required: true }]}><Select options={[{ value: "vat_normal", label: t("增值税普通发票") }, { value: "vat_special", label: t("增值税专用发票") }]} /></Form.Item>
+            <Form.Item name="title" label={t("开票抬头")} rules={[{ required: true, whitespace: true }]}><Input maxLength={180} /></Form.Item>
+            <Form.Item name="taxNo" label={t("税号")} rules={[{ required: true, whitespace: true }]}><Input maxLength={80} /></Form.Item>
+            <Form.Item name="registeredAddress" label={t("注册地址")}><Input maxLength={500} /></Form.Item>
+            <Form.Item name="bankName" label={t("开户银行")}><Input maxLength={160} /></Form.Item>
+            <Form.Item name="bankAccount" label={t("银行账号")}><Input autoComplete="off" /></Form.Item>
+            {invoiceTarget && <Form.Item name="clearBankAccount" valuePropName="checked"><Checkbox>{t("清除已保存银行账号")}</Checkbox></Form.Item>}
+            <Form.Item name="contactPhone" label={t("开票联系电话")}><Input autoComplete="off" /></Form.Item>
+            {invoiceTarget && <Form.Item name="clearContactPhone" valuePropName="checked"><Checkbox>{t("清除已保存联系电话")}</Checkbox></Form.Item>}
+            <Form.Item name="receiveEmail" label={t("接收邮箱")}><Input maxLength={160} /></Form.Item>
+            <Form.Item name="isDefault" valuePropName="checked"><Checkbox>{t("设为默认开票资料")}</Checkbox></Form.Item>
+            <Form.Item name="status" label={t("状态")}><Select options={[{ value: "active", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item>
+            <Button type="primary" htmlType="submit" disabled={!canManage} loading={saveInvoice.isPending}>{t("保存开票资料")}</Button>
+          </Form>
+        </QueryState> },
+        { key: "contracts", label: t("企业合同"), disabled: !selected, children: <QueryState loading={contracts.isLoading} error={contracts.error}>
+          <Space style={{ width: "100%", justifyContent: "space-between", marginBottom: 12 }}>
+            <span>{t("合同按企业留档；修改会递增版本，历史订单快照不随资料变动。")}</span>
+            <Button disabled={!canManage} onClick={() => openContract()}>{t("新增合同")}</Button>
+          </Space>
+          <Table<CustomerCorporateContract> rowKey="id" size="small" dataSource={contracts.data ?? []} pagination={false} scroll={{ x: 760 }} columns={[
+            { title: t("合同编号"), dataIndex: "contractNo" }, { title: t("合同名称"), dataIndex: "name" },
+            { title: t("有效期"), render: (_, row) => `${row.effectiveFrom.slice(0, 10)} ~ ${row.effectiveTo?.slice(0, 10) ?? t("长期")}` },
+            { title: t("状态"), dataIndex: "status" },
+            { title: t("操作"), render: (_, row) => <Button type="link" disabled={!canManage} onClick={() => openContract(row)}>{t("编辑")}</Button> }
+          ]} />
+          <Form form={contractForm} layout="vertical" disabled={!canManage} onFinish={(values) => canManage && selected && saveContract.mutate(values)}>
+            <Form.Item name="contractNo" label={t("合同编号")} rules={[{ required: true, whitespace: true }]}><Input maxLength={100} /></Form.Item>
+            <Form.Item name="name" label={t("合同名称")} rules={[{ required: true, whitespace: true }]}><Input maxLength={180} /></Form.Item>
+            <Space wrap style={{ width: "100%" }}>
+              <Form.Item name="signedAt" label={t("签署时间")}><Input placeholder="YYYY-MM-DD" /></Form.Item>
+              <Form.Item name="effectiveFrom" label={t("生效时间")} rules={[{ required: true }]}><Input placeholder="YYYY-MM-DD" /></Form.Item>
+              <Form.Item name="effectiveTo" label={t("失效时间")}><Input placeholder="YYYY-MM-DD" /></Form.Item>
+            </Space>
+            <Form.Item name="status" label={t("合同状态")}><Select options={[
+              { value: "draft", label: t("草稿") }, { value: "active", label: t("生效") },
+              { value: "expired", label: t("已到期") }, { value: "terminated", label: t("已终止") }
+            ]} /></Form.Item>
+            <Form.Item name="fileRef" label={t("合同文件引用")}><Input maxLength={191} /></Form.Item>
+            <Form.Item name="terminatedReason" label={t("终止原因")}><Input.TextArea rows={2} maxLength={500} /></Form.Item>
+            <Button type="primary" htmlType="submit" disabled={!canManage} loading={saveContract.isPending}>{t("保存合同")}</Button>
+          </Form>
+        </QueryState> }
+      ]} />}
       {drawer === "employees" && <QueryState loading={employees.isLoading || personal.isLoading} error={employees.error ?? personal.error}>
         <Alert type="info" showIcon title={t("企业成员关系在租户内共享")} description={t("仅可选择租户内的有效个人会员。暂停或退出员工关系后，该个人在租户全部空间均不可再使用此企业身份下单，不会注销其个人会员。")} style={{ marginBottom: 16 }} />
         {canEmployeeManage && <Form form={employeeForm} layout="vertical" disabled={!canEmployeeManage} onFinish={(values) => canEmployeeManage && saveEmployee.mutate(values)}>

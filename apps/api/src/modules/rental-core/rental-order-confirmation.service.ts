@@ -215,7 +215,8 @@ export class RentalOrderConfirmationService {
       context,
       quote.customerCouponId,
       quote.request.customerId,
-      committedAt
+      committedAt,
+      quote.request.startAt
     );
     const order = await this.core.prepareOrder(tenantId, orderInput, userName, membershipAtCommit ? { ...quote, membershipSnapshot: membershipAtCommit } : quote, resolvedSubjects);
 

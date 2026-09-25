@@ -37,10 +37,11 @@ const WORK_ORDER_STATUS_LABELS: Record<string, { label: string; color: string }>
 const DISPOSITION_STATUS_LABELS: Record<string, { label: string; color: string }> = {
   buffered: { label: "周转缓冲", color: "processing" },
   blocked: { label: "异常隔离", color: "error" },
-  restored: { label: "已恢复可用", color: "success" }
+  restored: { label: "已恢复可用", color: "success" },
+  written_off: { label: "已核销", color: "default" }
 };
 
-type DialogKind = "create" | "assign" | "submit" | "review" | "cancel" | "history" | "detail";
+type DialogKind = "create" | "assign" | "submit" | "review" | "cancel" | "history" | "detail" | "writeoff";
 type SubmitFormValues = SubmitRentalWorkOrderRequest & { attachmentsText?: string };
 
 function dateTime(value: string | undefined, locale: "zh-CN" | "en-US") {
@@ -63,6 +64,8 @@ export function MaintenanceWorkOrdersPage() {
   const [submitForm] = Form.useForm<SubmitFormValues>();
   const [reviewForm] = Form.useForm<ReviewRentalWorkOrderRequest>();
   const [cancelForm] = Form.useForm<CancelRentalWorkOrderRequest>();
+  const [writeOffForm] = Form.useForm<{ reason: string }>();
+  const [writeOffTarget, setWriteOffTarget] = useState<RentalStockDisposition>();
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState<string>();
   const [typeFilter, setTypeFilter] = useState<RentalWorkOrderType>();
@@ -93,13 +96,14 @@ export function MaintenanceWorkOrdersPage() {
   };
 
   const run = useMutation({
-    mutationFn: async (input: { kind: "create"; data: CreateRentalWorkOrderRequest } | { kind: "assign"; id: string; data: { assigneeId?: string } } | { kind: "start"; id: string } | { kind: "submit"; id: string; data: SubmitRentalWorkOrderRequest } | { kind: "review"; id: string; data: ReviewRentalWorkOrderRequest } | { kind: "cancel"; id: string; data: CancelRentalWorkOrderRequest } | { kind: "restore"; id: string }) => {
+    mutationFn: async (input: { kind: "create"; data: CreateRentalWorkOrderRequest } | { kind: "assign"; id: string; data: { assigneeId?: string } } | { kind: "start"; id: string } | { kind: "submit"; id: string; data: SubmitRentalWorkOrderRequest } | { kind: "review"; id: string; data: ReviewRentalWorkOrderRequest } | { kind: "cancel"; id: string; data: CancelRentalWorkOrderRequest } | { kind: "restore"; id: string } | { kind: "writeoff"; id: string; reason: string }) => {
       if (input.kind === "create") return rentalCoreApi.createWorkOrder(input.data);
       if (input.kind === "assign") return rentalCoreApi.assignWorkOrder(input.id, input.data);
       if (input.kind === "start") return rentalCoreApi.startWorkOrder(input.id);
       if (input.kind === "submit") return rentalCoreApi.submitWorkOrder(input.id, input.data);
       if (input.kind === "review") return rentalCoreApi.reviewWorkOrder(input.id, input.data);
       if (input.kind === "cancel") return rentalCoreApi.cancelWorkOrder(input.id, input.data);
+      if (input.kind === "writeoff") return rentalCoreApi.writeOffStockDisposition(input.id, input.reason);
       return rentalCoreApi.restoreStockDisposition(input.id);
     },
     onSuccess: async () => {
@@ -111,6 +115,8 @@ export function MaintenanceWorkOrdersPage() {
       submitForm.resetFields();
       reviewForm.resetFields();
       cancelForm.resetFields();
+      writeOffForm.resetFields();
+      setWriteOffTarget(undefined);
        message.success(t("操作已完成"));
     },
     onError: (error: Error) => message.error(error.message || t("操作失败，请刷新后重试"))
@@ -121,8 +127,13 @@ export function MaintenanceWorkOrdersPage() {
     setDialog(kind);
   }
 
-  const workOrderDispositions = (dispositions.data ?? []).filter((row) => row.status !== "restored");
+  const workOrderDispositions = (dispositions.data ?? []).filter((row) => row.status === "buffered" || row.status === "blocked");
   const availableForRestore = (row: RentalStockDisposition) => row.status === "buffered" && Date.parse(row.bufferUntil) <= Date.now();
+  const openWriteOff = (row: RentalStockDisposition) => {
+    setWriteOffTarget(row);
+    writeOffForm.resetFields();
+    setDialog("writeoff");
+  };
   useEffect(() => {
     if (dialog === "create") {
       createForm.setFieldsValue({ type: "repair", dispositionId: workOrderDispositions[0]?.id });
@@ -160,7 +171,12 @@ export function MaintenanceWorkOrdersPage() {
           { title: t("接收时间"), dataIndex: "receivedAt", width: 180, render: (value: string) => dateTime(value, locale) },
           { title: t("缓冲结束"), dataIndex: "bufferUntil", width: 180, render: (value: string) => dateTime(value, locale) },
           { title: t("阻断原因"), dataIndex: "blockReason", render: (value) => value || "-" },
-          { title: t("操作"), fixed: "right", width: 120, render: (_, row) => row.status === "buffered" && canRestore ? <Button type="link" disabled={!availableForRestore(row)} loading={run.isPending} onClick={() => run.mutate({ kind: "restore", id: row.id })}>{availableForRestore(row) ? t("恢复可用") : t("缓冲中")}</Button> : "-" }
+          { title: t("操作"), fixed: "right", width: 190, render: (_, row) => <Space size={0} wrap>
+            {row.status === "buffered" && canRestore && <Button type="link" disabled={!availableForRestore(row)} loading={run.isPending} onClick={() => run.mutate({ kind: "restore", id: row.id })}>{availableForRestore(row) ? t("恢复可用") : t("缓冲中")}</Button>}
+            {row.status === "blocked" && !row.assetId && canRestore && <Button type="link" danger loading={run.isPending} onClick={() => openWriteOff(row)}>{t("核销库存")}</Button>}
+            {row.status !== "buffered" && row.status !== "blocked" ? t(DISPOSITION_STATUS_LABELS[row.status]?.label ?? row.status) : null}
+            {row.status === "blocked" && row.assetId ? "-" : null}
+          </Space> }
         ]} />
       </Card>
       <Card title={`${t("养护工单")}（${filteredWorkOrders.length}/${workOrders.data?.length ?? 0}）`}>
@@ -213,6 +229,14 @@ export function MaintenanceWorkOrdersPage() {
         <Form.Item name="type" label={t("工单类型")} rules={[{ required: true }]}><Select options={Object.entries(WORK_ORDER_TYPE_LABELS).map(([value, label]) => ({ value, label: t(label) }))} /></Form.Item>
         <Form.Item name="assigneeId" label={t("处理人")}><Select allowClear options={assignees.data?.map((item) => ({ value: item.id, label: `${item.displayName} · ${item.account}` }))} placeholder={t("可稍后派工")} /></Form.Item>
         <Form.Item name="reason" label={t("处理要求")}><Input.TextArea rows={3} placeholder={t("可补充清洁、维修或缺件处理要求")} /></Form.Item>
+      </Form>
+    </Modal>
+    <Modal title={t("核销异常库存")} open={dialog === "writeoff"} confirmLoading={run.isPending} okText={t("确认核销")} okButtonProps={{ danger: true }} onCancel={() => setDialog(undefined)} onOk={() => writeOffForm.submit()} destroyOnHidden>
+      <Alert type="warning" showIcon title={t("核销后该数量将从在手库存中扣除，且不能恢复；请确认商品已无法修复。")} style={{ marginBottom: 16 }} />
+      <Form form={writeOffForm} layout="vertical" onFinish={({ reason }) => writeOffTarget && run.mutate({ kind: "writeoff", id: writeOffTarget.id, reason })}>
+        <Form.Item name="reason" label={t("核销原因")} rules={[{ required: true, whitespace: true, message: t("请填写核销原因") }, { max: 500, message: t("核销原因不能超过 500 个字符") }]}>
+          <Input.TextArea rows={4} maxLength={500} showCount placeholder={t("说明无法修复或继续使用的原因")} />
+        </Form.Item>
       </Form>
     </Modal>
     <Modal title={`${t("派工")}：${activeWorkOrder?.workNo ?? ""}`} open={dialog === "assign"} confirmLoading={run.isPending} onCancel={() => setDialog(undefined)} onOk={() => assignForm.submit()} destroyOnHidden>

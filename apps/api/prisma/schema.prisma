@@ -2035,8 +2035,12 @@ model RentalCouponTemplate {
   /// MKT-01B：已锁定与已核销优惠金额。可用预算 = totalBudget - lockedBudget - redeemedBudget。
   lockedBudget               Decimal                @default(0) @db.Decimal(12, 2)
   redeemedBudget             Decimal                @default(0) @db.Decimal(12, 2)
+  claimFrom                  DateTime
+  claimTo                    DateTime
   effectiveFrom              DateTime
   effectiveTo                DateTime
+  applicableRentalFrom       DateTime?
+  applicableRentalTo         DateTime?
   applicableItemGroupIds     Json
   status                     String                 @default("draft")
   version                    String
@@ -2305,11 +2309,15 @@ model RentalStockLedgerEntry {
   quantityDelta       Int
   onHandBefore        Int
   onHandAfter         Int
+  maintenanceDelta    Int                       @default(0)
   reservedQuantity    Int
   maintenanceQuantity Int
   reason              String                    @db.VarChar(500)
   batchNo             String?                   @db.VarChar(100)
   sourceDocumentNo    String?                   @db.VarChar(100)
+  sourceOrderId       String?                   @db.VarChar(191)
+  sourceInspectionId  String?                   @db.VarChar(191)
+  sourceDispositionId String?                   @db.VarChar(191)
   idempotencyKey      String                    @db.VarChar(191)
   requestFingerprint  String                    @db.Char(64)
   operator            String                    @db.VarChar(191)
@@ -2319,6 +2327,9 @@ model RentalStockLedgerEntry {
   @@index([tenantId, workspaceId, itemGroupId, locationId, createdAt], map: "rental_stock_ledger_scope_created_idx")
   @@index([tenantId, workspaceId, batchNo, createdAt], map: "rental_stock_ledger_batch_idx")
   @@index([tenantId, workspaceId, sourceDocumentNo, createdAt], map: "rental_stock_ledger_document_idx")
+  @@index([tenantId, workspaceId, sourceOrderId, createdAt], map: "rental_stock_ledger_order_idx")
+  @@index([tenantId, workspaceId, sourceInspectionId, createdAt], map: "rental_stock_ledger_inspection_idx")
+  @@index([tenantId, workspaceId, sourceDispositionId, createdAt], map: "rental_stock_ledger_disposition_idx")
   @@index([workspaceId, operationId], map: "rental_stock_ledger_operation_idx")
   @@map("rental_stock_ledger_entries")
 }
@@ -2428,6 +2439,8 @@ model RentalOrder {
   returnLocationId              String?
   returnLocationName            String?
   returnLocationSnapshot        Json?
+  /// 配送/上门类（customer_address 品类）订单的收货地址快照（含明文电话）；自取、车辆据点类为空。
+  deliveryAddressSnapshot       Json?
   startAt                       DateTime
   endAt                         DateTime
   /// 当前约定归还时间：最近一次已生效续租的 newEndAt；没有续租时与 endAt 相同。
@@ -3732,6 +3745,8 @@ model RentalCustomerCoupon {
   grantReason                String
   status                     String               @default("claimed")
   claimedAt                  DateTime             @default(now())
+  applicableRentalFrom       DateTime?
+  applicableRentalTo         DateTime?
   effectiveFrom              DateTime
   effectiveTo                DateTime
   lockedOrderId              String?

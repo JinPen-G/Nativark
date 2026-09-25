@@ -478,8 +478,12 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       totalBudget: template.totalBudget === undefined ? null : new Prisma.Decimal(template.totalBudget),
       lockedBudget: new Prisma.Decimal(template.lockedBudget),
       redeemedBudget: new Prisma.Decimal(template.redeemedBudget),
+      claimFrom: new Date(template.claimFrom),
+      claimTo: new Date(template.claimTo),
       effectiveFrom: new Date(template.effectiveFrom),
       effectiveTo: new Date(template.effectiveTo),
+      applicableRentalFrom: template.applicableRentalFrom ? new Date(template.applicableRentalFrom) : null,
+      applicableRentalTo: template.applicableRentalTo ? new Date(template.applicableRentalTo) : null,
       applicableItemGroupIds: template.applicableItemGroupIds as unknown as Prisma.InputJsonValue,
       status: template.status,
       version: template.version
@@ -691,7 +695,9 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     appliesTo: string; stackableWithDiscountPlans: boolean;
     totalQuota: number; claimedQuantity: number; perCustomerLimit: number; perCustomerUseLimit: number;
     totalBudget: Prisma.Decimal | null; lockedBudget: Prisma.Decimal; redeemedBudget: Prisma.Decimal;
+    claimFrom: Date; claimTo: Date;
     effectiveFrom: Date; effectiveTo: Date; applicableItemGroupIds: Prisma.JsonValue;
+    applicableRentalFrom: Date | null; applicableRentalTo: Date | null;
     status: string; version: string; createdAt: Date; updatedAt: Date;
   }): RentalCouponTemplate {
     return {
@@ -712,8 +718,12 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       totalBudget: row.totalBudget === null ? undefined : num(row.totalBudget),
       lockedBudget: num(row.lockedBudget),
       redeemedBudget: num(row.redeemedBudget),
+      claimFrom: iso(row.claimFrom),
+      claimTo: iso(row.claimTo),
       effectiveFrom: iso(row.effectiveFrom),
       effectiveTo: iso(row.effectiveTo),
+      applicableRentalFrom: row.applicableRentalFrom ? iso(row.applicableRentalFrom) : undefined,
+      applicableRentalTo: row.applicableRentalTo ? iso(row.applicableRentalTo) : undefined,
       applicableItemGroupIds: (row.applicableItemGroupIds ?? []) as string[],
       status: row.status as RentalCouponTemplate["status"],
       version: row.version,

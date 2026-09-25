@@ -1762,6 +1762,9 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("get", "/api/platform/customers/{customerId}/status-history", "Platform", "listCustomerStatusHistory", "List customer status timeline (account and workspace scope)", ["rental-os:member:view"]),
   backlogOperation("get", "/api/platform/customers/{customerId}/sensitive-access", "Platform", "listCustomerSensitiveAccess", "List sensitive data access audit for the customer", ["rental-os:customer:reveal-sensitive"]),
   backlogOperation("put", "/api/platform/customers/{customerId}/membership-status", "Platform", "changeCustomerMembershipStatus", "Change workspace membership status; close and risk restriction use separate permissions", ["rental-os:member:manage", "rental-os:member:risk-action", "rental-os:customer:close"]),
+  backlogOperation("get", "/api/platform/customers/{customerId}/risk-records", "Platform", "listCustomerRiskRecords", "List tenant-wide and current-workspace customer risk records", ["rental-os:member:view", "rental-os:member:risk-action"]),
+  backlogOperation("post", "/api/platform/customers/{customerId}/risk-records", "Platform", "createCustomerRiskRecord", "Create an auditable workspace or tenant risk record under the customer gate lock", ["rental-os:member:risk-action"]),
+  backlogOperation("post", "/api/platform/customers/{customerId}/risk-records/{riskRecordId}/decision", "Platform", "reviewCustomerRiskRecord", "Move an open risk into review or close it with a required outcome", ["rental-os:member:risk-action"]),
   backlogOperation("get", "/api/platform/customers/{customerId}/transactability", "Platform", "getCustomerTransactability", "Check whether the customer may start new business in the current workspace", ["rental-os:member:view"]),
   // CUSTOMER-01C：企业开票资料、合同、授信账期。按租户级客户身份维护，不按空间隔离——
   // 同一家企业在两个空间是同一家企业，开票与合同不该各存一份。
@@ -1788,6 +1791,7 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("get", "/api/membership/benefit-scope-options", "Membership", "membershipBenefitScopeOptions", "List tenant workspace and category identifiers for membership benefits", ["rental-os:member:view", "rental-os:member:plan:manage"]),
   backlogOperation("get", "/api/rental/v1/booking-members", "RentalCore", "listBookingMembers", "List minimal tenant member summaries for authorized order creation", ["rental-os:order:create"]),
   backlogOperation("get", "/api/rental/v1/booking-members/{customerId}/booking-options", "RentalCore", "listBookingMemberOptions", "List tenant corporate identities available in the current workspace booking", ["rental-os:order:create"]),
+  backlogOperation("get", "/api/rental/v1/booking-members/{customerId}/delivery-addresses", "RentalCore", "listBookingMemberDeliveryAddresses", "List a member's saved delivery addresses for authorized delivery-order creation", ["rental-os:order:create"]),
   backlogOperation("get", "/api/membership/registration-settings", "Membership", "getMembershipRegistrationSettings", "Get tenant registration review mode", ["rental-os:member:view"]),
   backlogOperation("put", "/api/membership/registration-settings", "Membership", "saveMembershipRegistrationSettings", "Set current workspace registration review mode", ["rental-os:member:manage"]),
   backlogOperation("get", "/api/membership/personal", "Membership", "listPersonalMembershipMembers", "List personal members in current workspace", ["rental-os:member:view"]),
@@ -2470,6 +2474,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Restore a return stock disposition", permissions: ["rental-core:maintenance:review", "rental-core:asset:manage"] , responseSchema: "GenericObject"
   },
   {
+    method: "post", path: "/api/rental/v1/stock-dispositions/{dispositionId}/write-off", tag: "RentalCore", operationId: "writeOffRentalStockDisposition",
+    summary: "Write off quarantined quantity stock with a reason and auditable ledger entry", permissions: ["rental-core:maintenance:review", "rental-core:asset:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+  },
+  {
     method: "get", path: "/api/rental/v1/work-orders", tag: "RentalCore", operationId: "listRentalWorkOrders",
     summary: "List maintenance work orders", permissions: ["rental-core:maintenance:view"], responseSchema: "GenericObject",
     parameters: [queryParam("status")]
@@ -2546,6 +2554,10 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   {
     method: "get", path: "/api/rental/v1/orders/{id}", tag: "RentalCore", operationId: "getRentalCoreOrder",
     summary: "Get Rental Core order", permissions: ["rental-os:order:view"], responseSchema: "GenericObject"
+  },
+  {
+    method: "get", path: "/api/rental/v1/orders/{id}/delivery-address/reveal", tag: "RentalCore", operationId: "revealRentalOrderDeliveryAddress",
+    summary: "Reveal an order delivery contact to authorized staff; access is recorded", permissions: ["rental-os:customer:reveal-sensitive"], responseSchema: "GenericObject"
   },
   {
     // DOC-PRINT-01：管理端与 APP 共用的客户可读凭证快照；不代表正式 PDF/法定票据。

@@ -226,7 +226,10 @@ export function requiredPermissions(method: string, path: string) {
   if (path.startsWith("/platform/roles/")) {
     return ["system:role:manage"];
   }
-  if (path.startsWith("/platform/organizations") || path.startsWith("/platform/users")) {
+  if (path.startsWith("/platform/organizations")) {
+    return ["system:user:manage"];
+  }
+  if (path.startsWith("/platform/users")) {
     return ["system:user:manage"];
   }
   if (path.startsWith("/platform/workspaces")) {
@@ -267,6 +270,14 @@ export function requiredPermissions(method: string, path: string) {
     }
     if (/\/(?:membership-)?closability$/u.test(path)) {
       return ["rental-os:customer:close"];
+    }
+    if (/\/risk-records\/[^/]+\/decision$/u.test(path)) {
+      return ["rental-os:member:risk-action"];
+    }
+    if (/\/risk-records$/u.test(path)) {
+      return method === "GET"
+        ? ["rental-os:member:view", "rental-os:member:manage", "rental-os:member:risk-action"]
+        : ["rental-os:member:risk-action"];
     }
     if (/\/membership-status$/u.test(path)) {
       return ["rental-os:member:manage", "rental-os:member:risk-action", "rental-os:customer:close"];
@@ -343,7 +354,7 @@ export function requiredPermissions(method: string, path: string) {
     return ["rental-os:member:view"];
   }
 
-  if (method === "GET" && (path === "/rental/v1/booking-members" || /^\/rental\/v1\/booking-members\/[^/]+\/booking-options$/u.test(path))) {
+  if (method === "GET" && (path === "/rental/v1/booking-members" || /^\/rental\/v1\/booking-members\/[^/]+\/(booking-options|delivery-addresses)$/u.test(path))) {
     return ["rental-os:order:create"];
   }
   if (path === "/rental/v1/categories") {
@@ -498,6 +509,7 @@ export function requiredPermissions(method: string, path: string) {
   if (path === "/rental/v1/orders") {
     return method === "GET" ? ["rental-os:order:view"] : ["rental-os:order:operate", "rental-os:order:create"];
   }
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/delivery-address\/reveal$/u)) return ["rental-os:customer:reveal-sensitive"];
   // DOC-PRINT-01：订单客户凭证只读订单历史快照；结算里的资金汇总由控制器
   // 再按 finance:view/reconcile 做字段级裁剪，不能因为下载凭证自动获得资金明细。
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/documents\/(quote|delivery|return|settlement)\/versions(?:\/[^/]+)?$/u)) {
@@ -893,7 +905,7 @@ export class ApiAuthGuard implements CanActivate {
     );
     const customerRoute = path.match(/^\/(?:platform\/customers|rental\/v1\/booking-members)\/([^/]+)/u);
     const customerId = customerRoute?.[1];
-    const customerOptionsRoute = /^\/rental\/v1\/booking-members\/[^/]+\/booking-options$/u.test(path);
+    const customerOptionsRoute = /^\/rental\/v1\/booking-members\/[^/]+\/(booking-options|delivery-addresses)$/u.test(path);
     const customerDetailRoute = path.startsWith("/platform/customers/") && !["search", "merge"].includes(customerId ?? "");
     const customerScopeRestricted = user.dataScope !== "all" || locationScope.mode === "selected";
     if (customerId && customerScopeRestricted && (customerDetailRoute || customerOptionsRoute)) {
@@ -1075,7 +1087,7 @@ export class ApiAuthGuard implements CanActivate {
       if (request.method.toUpperCase() !== "GET" && !body.locationId && !rowLocations.length) throw new ForbiddenException("库存作业必须绑定已授权履约地点");
       if (rowLocations.length) ensureLocations(rowLocations);
     }
-    const dispositionMatch = path.match(/^\/rental\/v1\/stock-dispositions\/([^/]+)\/restore$/u);
+    const dispositionMatch = path.match(/^\/rental\/v1\/stock-dispositions\/([^/]+)\/(?:restore|write-off)$/u);
     if (dispositionMatch) {
       const row = await prisma.rentalStockDisposition.findFirst({
         where: { id: dispositionMatch[1], tenantId: user.tenantId, workspaceId, order: { is: { OR: [

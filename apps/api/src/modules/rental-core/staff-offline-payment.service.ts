@@ -50,9 +50,7 @@ export class StaffOfflinePaymentService {
       await this.assertEvidence(tx, tenantId, orderId, input.evidenceFileAssetId);
       const balance = await this.funding.listEvents(tenantId, workspaceId, orderId, tx);
       const pending = await tx.rentalOfflinePaymentRegistration.findMany({ where: { tenantId, workspaceId, orderId, instrument: input.instrument, status: "pending" }, select: { amount: true } });
-      const outstanding = input.instrument === "rental"
-        ? roundMoney(Math.max(0, balance.rental.balance + balance.rental.pendingExtensionAmount))
-        : roundMoney(Math.max(0, balance.deposit.requiredAmount - balance.deposit.collected));
+      const outstanding = input.instrument === "rental" ? balance.rental.due : balance.deposit.due;
       const reserved = roundMoney(pending.reduce((sum, row) => sum + Number(row.amount), 0));
       if (amount > roundMoney(outstanding - reserved) + 0.005) throw new ConflictException("登记金额超过当前可收金额（含其他待确认登记）");
       return this.toResponse(await tx.rentalOfflinePaymentRegistration.create({
@@ -82,9 +80,7 @@ export class StaffOfflinePaymentService {
       const balance = await this.funding.listEvents(tenantId, workspaceId, registration.orderId, tx);
       const amount = Number(registration.amount);
       const originated = registration.instrument === "rental" ? balance.rental.collected > 0 : balance.deposit.collected > 0;
-      const outstanding = registration.instrument === "rental"
-        ? roundMoney(Math.max(0, balance.rental.balance + balance.rental.pendingExtensionAmount))
-        : roundMoney(Math.max(0, balance.deposit.requiredAmount - balance.deposit.collected));
+      const outstanding = registration.instrument === "rental" ? balance.rental.due : balance.deposit.due;
       if (amount > outstanding + 0.005) throw new ConflictException("当前待收金额已变化，登记金额超过剩余应收，请先核对订单");
       const event = await this.funding.recordEvent(tenantId, workspaceId, registration.orderId, {
         instrument: registration.instrument as "rental" | "deposit",

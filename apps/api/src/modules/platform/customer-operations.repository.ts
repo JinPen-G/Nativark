@@ -4,6 +4,10 @@ import type {
   CustomerAccount,
   CustomerAccountStatus,
   CustomerMembershipStatus,
+  CustomerRiskRecordSummary,
+  CustomerRiskStatus,
+  CustomerRiskType,
+  CustomerRiskLevel,
   CustomerSensitiveAccessAuditEntry,
   CustomerStatusAction,
   CustomerStatusHistoryEntry,
@@ -294,6 +298,117 @@ export class CustomerOperationsRepository {
       }
     });
     return count > 0;
+  }
+
+  async listRiskRecords(
+    tenantId: string,
+    customerId: string,
+    workspaceId: string,
+    tx?: CustomerTx
+  ): Promise<CustomerRiskRecordSummary[]> {
+    const rows = await this.db(tx).customerRiskRecord.findMany({
+      where: { tenantId, customerId, OR: [{ workspaceId: null }, { workspaceId }] },
+      orderBy: [{ raisedAt: "desc" }, { id: "desc" }]
+    });
+    return rows.map((row) => this.toRiskRecordSummary(row));
+  }
+
+  async findRiskRecord(
+    tenantId: string,
+    customerId: string,
+    riskRecordId: string,
+    workspaceId: string,
+    tx?: CustomerTx
+  ): Promise<CustomerRiskRecordSummary | undefined> {
+    const row = await this.db(tx).customerRiskRecord.findFirst({
+      where: {
+        id: riskRecordId,
+        tenantId,
+        customerId,
+        OR: [{ workspaceId: null }, { workspaceId }]
+      }
+    });
+    return row ? this.toRiskRecordSummary(row) : undefined;
+  }
+
+  async createRiskRecord(
+    input: {
+      tenantId: string;
+      customerId: string;
+      workspaceId: string | null;
+      riskType: CustomerRiskType;
+      level: CustomerRiskLevel;
+      detail: string;
+      source: string;
+      raisedBy?: string;
+      raisedAt: Date;
+    },
+    tx: CustomerTx
+  ): Promise<CustomerRiskRecordSummary> {
+    const row = await tx.customerRiskRecord.create({ data: input });
+    return this.toRiskRecordSummary(row);
+  }
+
+  async updateRiskRecordDecision(
+    tenantId: string,
+    customerId: string,
+    riskRecordId: string,
+    input: {
+      status: CustomerRiskStatus;
+      reviewedBy?: string;
+      reviewedAt: Date;
+      closeReason?: string;
+      closedAt?: Date;
+    },
+    tx: CustomerTx
+  ): Promise<CustomerRiskRecordSummary | undefined> {
+    const changed = await tx.customerRiskRecord.updateMany({
+      where: { id: riskRecordId, tenantId, customerId, status: { in: ["open", "reviewing"] } },
+      data: input
+    });
+    if (!changed.count) return undefined;
+    const row = await tx.customerRiskRecord.findUnique({ where: { id: riskRecordId } });
+    return row ? this.toRiskRecordSummary(row) : undefined;
+  }
+
+  private toRiskRecordSummary(row: {
+    id: string;
+    tenantId: string;
+    customerId: string;
+    workspaceId: string | null;
+    riskType: string;
+    level: string;
+    detail: string;
+    source: string;
+    status: string;
+    raisedBy: string | null;
+    raisedAt: Date;
+    reviewedBy: string | null;
+    reviewedAt: Date | null;
+    closeReason: string | null;
+    closedAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }): CustomerRiskRecordSummary {
+    return {
+      id: row.id,
+      tenantId: row.tenantId,
+      customerId: row.customerId,
+      workspaceId: row.workspaceId ?? undefined,
+      riskType: row.riskType as CustomerRiskType,
+      level: row.level as CustomerRiskLevel,
+      detail: row.detail,
+      source: row.source,
+      status: row.status as CustomerRiskStatus,
+      raisedBy: row.raisedBy ?? undefined,
+      raisedAt: row.raisedAt.toISOString(),
+      reviewedBy: row.reviewedBy ?? undefined,
+      reviewedAt: row.reviewedAt?.toISOString(),
+      closeReason: row.closeReason ?? undefined,
+      closedAt: row.closedAt?.toISOString(),
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString()
+    };
   }
 
   private toAccount(row: {

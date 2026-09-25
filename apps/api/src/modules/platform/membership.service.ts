@@ -1,10 +1,12 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
 import { Prisma, type CustomerMembershipReview as PrismaMembershipReview } from "@prisma/client";
 import type {
   AssignCustomerMembershipPlanRequest,
   BookingMemberOption,
   CorporateMembershipMember,
   CustomerCorporateMembership,
+  CustomerCorporateProfileSummary,
   CustomerMembershipBenefit,
   CustomerMembershipPlan,
   CustomerMembershipPlanAssignment,
@@ -247,7 +249,7 @@ export class MembershipService {
       await this.lockCustomer(tenantId, candidate.customerId, tx);
       const review = await tx.customerMembershipReview.findFirst({ where: { tenantId, id: reviewId } });
       if (!review) throw new NotFoundException("审核任务不存在");
-      if (review.reviewType === "registration" && !permissions.registration) throw new ForbiddenException("当前账号无权处理注册审核");
+      if ((review.reviewType === "registration" || review.reviewType === "corporate_registration") && !permissions.registration) throw new ForbiddenException("当前账号无权处理注册审核");
       if (review.reviewType === "qualification" && !permissions.qualification) throw new ForbiddenException("当前账号无权处理证件审核");
       if (review.status !== "pending" && review.status !== "supplement_required") {
         throw new ConflictException("审核任务已处理，不能重复审核");
@@ -258,15 +260,26 @@ export class MembershipService {
       const updated = await this.customers.updateReview(tenantId, review.id, {
         status: input.status, reason: reason || null, reviewedBy: operator, reviewedAt: now
       }, tx);
-      if (review.reviewType === "registration" && input.status === "approved") {
-        await this.requireCustomer(tenantId, review.customerId, "personal", tx);
+      if ((review.reviewType === "registration" || review.reviewType === "corporate_registration") && input.status === "approved") {
+        await this.requireCustomer(tenantId, review.customerId, review.reviewType === "corporate_registration" ? "corporate" : "personal", tx);
         const membership = await this.requireMembership(tenantId, review.customerId, tx);
         if (membership.status === "pending_activation") {
           await this.operations.updateMembershipStatus(tenantId, membership.id, { status: "active" }, "pending_activation", {
             customerId: review.customerId, scope: "membership", action: "activate", fromStatus: "pending_activation",
             toStatus: "active", reason: reason || "注册审核通过", operator, at: now.toISOString()
           }, tx);
+        } else if (review.reviewType === "corporate_registration") {
+          throw new ConflictException("企业会员状态已变化，不能重复通过注册审核");
         }
+      }
+      if (review.reviewType === "corporate_registration") {
+        const changed = await this.customers.updateCorporateProfileStatus(
+          tenantId,
+          review.customerId,
+          input.status === "approved" ? "active" : input.status === "rejected" ? "rejected" : "pending_review",
+          tx
+        );
+        if (changed.count !== 1) throw new ConflictException("企业法定资料缺失，审核未能完成");
       }
       if (review.reviewType === "qualification" && review.qualificationType) {
         const qualificationStatus: CustomerQualificationStatus = input.status === "approved"
@@ -620,6 +633,7 @@ export class MembershipService {
       where: { tenantId, customerType: "corporate", membership: { isNot: null } },
       include: {
         membership: true,
+        corporateProfile: true,
         corporateMembershipsAsCompany: {
           where: { tenantId, status: "active", effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }] },
           select: { role: true }
@@ -628,7 +642,16 @@ export class MembershipService {
       orderBy: [{ createdAt: "desc" }, { id: "desc" }]
     });
     return rows.map((row) => ({
-      customerId: row.id, name: row.name, corporateName: row.corporateName ?? undefined, phoneMasked: row.phoneMasked,
+      customerId: row.id, name: row.name, corporateName: row.corporateProfile?.legalName ?? row.corporateName ?? undefined, email: row.email ?? undefined, phoneMasked: row.phoneMasked,
+      corporateProfile: row.corporateProfile ? {
+        legalName: row.corporateProfile.legalName,
+        unifiedSocialCreditCodeMasked: row.corporateProfile.unifiedSocialCreditCodeMasked,
+        registeredAddress: row.corporateProfile.registeredAddress ?? undefined,
+        legalRepName: row.corporateProfile.legalRepName ?? undefined,
+        legalRepPhoneMasked: row.corporateProfile.legalRepPhoneMasked ?? undefined,
+        industry: row.corporateProfile.industry ?? undefined,
+        scale: row.corporateProfile.scale as CustomerCorporateProfileSummary["scale"]
+      } : undefined,
       membershipStatus: row.membership!.status as CorporateMembershipMember["membershipStatus"],
       employeeCount: row.corporateMembershipsAsCompany.length,
       adminCount: row.corporateMembershipsAsCompany.filter((item) => item.role === "admin").length,
@@ -637,35 +660,120 @@ export class MembershipService {
   }
 
   async saveCorporateMember(tenantId: string, input: SaveCorporateMembershipRequest) {
-    const phone = input.phone?.trim();
-    if (input.id) {
-      await this.requireMembership(tenantId, input.id);
-      const customer = await this.requireCustomer(tenantId, input.id, "corporate");
-      const nextPhone = phone || customer.phone;
-      if (nextPhone !== customer.phone) {
-        const duplicate = await this.prisma.customerProfile.findFirst({ where: { tenantId, phone: nextPhone, id: { not: customer.id } }, select: { id: true } });
-        if (duplicate) throw new ConflictException("该手机号已被其他客户主档使用");
-      }
-      const data: CustomerProfileUpdateData = {
-        name: input.name.trim(), phone: nextPhone, phoneMasked: mask(nextPhone) ?? "****", email: input.email?.trim() || null,
-        corporateName: input.corporateName.trim(), corporateTaxNo: input.corporateTaxNo?.trim() || null
-      };
-      const row = await this.customers.updateProfile(tenantId, customer.id, data);
-      if (!row) throw new NotFoundException("客户不存在");
-      return (await this.listCorporateMembers(tenantId)).find((item) => item.customerId === row.id)!;
+    const name = input.name.trim();
+    const legalName = input.corporateName.trim();
+    const suppliedPhone = input.phone?.trim();
+    const suppliedCode = (input.unifiedSocialCreditCode ?? input.corporateTaxNo)?.trim().toUpperCase();
+    if (!name || !legalName) throw new BadRequestException("企业名称和联系人不能为空");
+    if (!input.id && !suppliedPhone) throw new BadRequestException("新建企业会员必须填写联系电话");
+    if (!input.id && !suppliedCode) throw new BadRequestException("新建企业会员必须填写统一社会信用代码");
+    if (suppliedCode && !/^[0-9A-HJ-NPQRTUWXY]{18}$/u.test(suppliedCode)) {
+      throw new BadRequestException("统一社会信用代码必须为 18 位有效字符");
     }
-    if (!phone) throw new BadRequestException("新建企业会员必须填写联系电话");
-    const duplicate = await this.prisma.customerProfile.findFirst({ where: { tenantId, phone }, select: { id: true } });
-    if (duplicate) throw new ConflictException("该手机号已被其他客户主档使用");
-    const customer = await this.prisma.$transaction(async (tx) => {
-      const created = await this.customers.createProfile({
-        tenantId, customerType: "corporate", name: input.name, phone, email: input.email,
-        corporateName: input.corporateName, corporateTaxNo: input.corporateTaxNo
+
+    const execute = async () => this.prisma.$transaction(async (tx) => {
+      const existing = input.id ? await tx.customerProfile.findFirst({
+        where: { tenantId, id: input.id, customerType: "corporate" },
+        include: { membership: true, corporateProfile: true }
+      }) : undefined;
+      if (input.id && !existing) throw new NotFoundException("企业客户不存在或不属于当前租户");
+      if (existing && !existing.membership) throw new ConflictException("企业客户尚未建立会员关系");
+
+      const phone = suppliedPhone || existing?.phone;
+      if (!phone) throw new BadRequestException("新建企业会员必须填写联系电话");
+      const duplicatePhone = await tx.customerProfile.findFirst({
+        where: { tenantId, phone, ...(existing ? { id: { not: existing.id } } : {}) }, select: { id: true }
+      });
+      if (duplicatePhone) throw new ConflictException("该手机号已被其他客户主档使用");
+
+      // Never silently promote the legacy flat field: old rows can contain malformed or
+      // duplicated codes that the one-time backfill deliberately skipped. Require an
+      // explicit value when editing such a record so the operator reconciles it.
+      const code = suppliedCode || existing?.corporateProfile?.unifiedSocialCreditCode;
+      if (!code) throw new BadRequestException("企业资料缺少统一社会信用代码，请补充后保存");
+      if (!/^[0-9A-HJ-NPQRTUWXY]{18}$/u.test(code)) {
+        throw new BadRequestException("统一社会信用代码必须为 18 位有效字符");
+      }
+      const duplicateCode = await tx.customerCorporateProfile.findFirst({
+        where: { tenantId, unifiedSocialCreditCode: code, ...(existing ? { customerId: { not: existing.id } } : {}) }, select: { customerId: true }
+      });
+      if (duplicateCode) throw new ConflictException("该统一社会信用代码已登记为本租户的其他企业");
+      const legacyCorporateRows = await tx.customerProfile.findMany({
+        where: { tenantId, customerType: "corporate", corporateTaxNo: { not: null }, ...(existing ? { id: { not: existing.id } } : {}) },
+        select: { corporateTaxNo: true }
+      });
+      if (legacyCorporateRows.some((row) => row.corporateTaxNo?.trim().toUpperCase() === code)) {
+        throw new ConflictException("该统一社会信用代码仍存在未迁移的历史企业记录，请先核对企业主档");
+      }
+
+      const email = input.clearEmail ? null : input.email?.trim() || existing?.email || null;
+      const profileData: CustomerProfileUpdateData = {
+        name, phone, phoneMasked: mask(phone) ?? "****", email,
+        corporateName: legalName,
+        // 新资料只以 CustomerCorporateProfile 为法定主体资料事实源，不再双写明文税号。
+        corporateTaxNo: null
+      };
+      const customer = existing
+        ? await this.customers.updateProfile(tenantId, existing.id, profileData, tx)
+        : await this.customers.createProfile({ tenantId, customerType: "corporate", name, phone, email: email ?? undefined, corporateName: legalName }, tx);
+      if (!customer) throw new NotFoundException("企业客户不存在");
+
+      const pending = !existing || existing.membership?.status === "pending_activation";
+      const corporateProfile = await this.customers.upsertCorporateProfile({
+        tenantId, customerId: customer.id, legalName, unifiedSocialCreditCode: code,
+        unifiedSocialCreditCodeMasked: mask(code) ?? "****",
+        registeredAddress: input.registeredAddress?.trim() || existing?.corporateProfile?.registeredAddress,
+        legalRepName: input.legalRepName?.trim() || existing?.corporateProfile?.legalRepName,
+        legalRepPhoneMasked: input.legalRepPhone?.trim() ? mask(input.legalRepPhone) : existing?.corporateProfile?.legalRepPhoneMasked,
+        industry: input.industry?.trim() || existing?.corporateProfile?.industry,
+        scale: input.scale ?? existing?.corporateProfile?.scale,
+        status: pending ? "pending_review" : existing?.corporateProfile?.status ?? "active"
       }, tx);
-      await this.customers.createMembership({ tenantId, customerId: created.id, levelName: "企业会员", status: "active" }, tx);
-      return created;
+
+      if (!existing) {
+        await this.customers.createMembership({ tenantId, customerId: customer.id, levelName: "企业会员", status: "pending_activation" }, tx);
+      }
+      if (pending) {
+        const openReview = existing ? await tx.customerMembershipReview.findFirst({
+          where: { tenantId, customerId: customer.id, reviewType: "corporate_registration", status: { in: ["pending", "supplement_required"] } },
+          orderBy: { createdAt: "desc" }
+        }) : undefined;
+        if (openReview) {
+          await this.customers.updateReview(tenantId, openReview.id, {
+            status: "cancelled", reason: "企业资料已更新，已重新提交审核", reviewedBy: getRequestUserId() ?? "后台管理员", reviewedAt: new Date()
+          }, tx);
+        }
+        await this.customers.createReview({
+          tenantId, customerId: customer.id, reviewType: "corporate_registration", channel: "admin",
+          sourceWorkspaceId: getRequestWorkspaceId(), requestKey: `corp-registration:${customer.id}:${randomUUID()}`,
+          payload: {
+            corporateSnapshot: {
+              legalName: corporateProfile.legalName,
+              unifiedSocialCreditCodeMasked: corporateProfile.unifiedSocialCreditCodeMasked,
+              registeredAddress: corporateProfile.registeredAddress ?? undefined,
+              legalRepName: corporateProfile.legalRepName ?? undefined,
+              legalRepPhoneMasked: corporateProfile.legalRepPhoneMasked ?? undefined,
+              industry: corporateProfile.industry ?? undefined,
+              scale: corporateProfile.scale ?? undefined,
+              contactName: customer.name,
+              contactPhoneMasked: customer.phoneMasked,
+              email: customer.email ?? undefined
+            }
+          } as Prisma.InputJsonValue
+        }, tx);
+      }
+      return customer.id;
     });
-    return (await this.listCorporateMembers(tenantId)).find((item) => item.customerId === customer.id)!;
+
+    try {
+      const customerId = await execute();
+      return (await this.listCorporateMembers(tenantId)).find((item) => item.customerId === customerId)!;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new ConflictException("手机号或统一社会信用代码已被本租户其他客户使用");
+      }
+      throw error;
+    }
   }
 
   async listCorporateEmployees(tenantId: string, corporateCustomerId: string): Promise<CustomerCorporateMembership[]> {
@@ -680,7 +788,8 @@ export class MembershipService {
 
   async saveCorporateEmployee(tenantId: string, corporateCustomerId: string, input: SaveCustomerCorporateMembershipRequest, operator?: string) {
     await this.requireCustomer(tenantId, corporateCustomerId, "corporate");
-    await this.requireMembership(tenantId, corporateCustomerId);
+    const corporateLink = await this.requireMembership(tenantId, corporateCustomerId);
+    if (corporateLink.status !== "active") throw new ConflictException("企业会员尚未审核通过，不能维护企业员工关系");
     await this.requireCustomer(tenantId, input.personalCustomerId, "personal");
     const personalLink = await this.requireMembership(tenantId, input.personalCustomerId);
     if (personalLink.status !== "active") throw new ConflictException("只有本租户的有效个人会员才能加入企业");
@@ -817,8 +926,11 @@ export class MembershipService {
   }
 
   async assignPlan(tenantId: string, input: AssignCustomerMembershipPlanRequest, operator?: string): Promise<CustomerMembershipPlanAssignment> {
-    await this.requireCustomer(tenantId, input.customerId);
-    await this.requireMembership(tenantId, input.customerId);
+    const customer = await this.requireCustomer(tenantId, input.customerId);
+    const membership = await this.requireMembership(tenantId, input.customerId);
+    if (membership.status !== "active") {
+      throw new ConflictException(customer.customerType === "corporate" ? "企业会员尚未审核通过，不能获得企业权益" : "会员当前状态不可授予方案");
+    }
     const source = input.source ?? "manual";
     const effectiveFrom = dateOrUndefined(input.effectiveFrom) ?? new Date();
     const effectiveTo = dateOrUndefined(input.effectiveTo);
@@ -830,7 +942,6 @@ export class MembershipService {
       where: { tenantId, id: input.planVersionId, status: "published" }, include: { plan: true }
     });
     if (!version) throw new NotFoundException("可授予的已发布会员方案版本不存在");
-    const customer = await this.requireCustomer(tenantId, input.customerId);
     if (customer.customerType !== version.plan.targetType) throw new ConflictException("方案目标类型与会员类型不匹配");
     const row = await this.prisma.customerMembershipPlanAssignment.create({
       data: {
@@ -1110,12 +1221,19 @@ export class MembershipService {
   }
 
   private toReview(row: PrismaMembershipReview, customerName?: string, qualificationRevision?: Prisma.CustomerQualificationRevisionGetPayload<{}>): CustomerMembershipReview {
+    const payload = row.payload && typeof row.payload === "object" && !Array.isArray(row.payload)
+      ? row.payload as Prisma.JsonObject
+      : undefined;
+    const corporateSnapshot = payload?.corporateSnapshot && typeof payload.corporateSnapshot === "object" && !Array.isArray(payload.corporateSnapshot)
+      ? payload.corporateSnapshot as unknown as CustomerMembershipReview["corporateSnapshot"]
+      : undefined;
     return {
       id: row.id, tenantId: row.tenantId, sourceWorkspaceId: row.sourceWorkspaceId ?? undefined, customerId: row.customerId, customerName,
       reviewType: row.reviewType as CustomerMembershipReview["reviewType"], qualificationType: row.qualificationType ?? undefined,
       status: row.status as CustomerMembershipReview["status"], channel: row.channel, reason: row.reason ?? undefined,
       reviewedBy: row.reviewedBy ?? undefined, reviewedAt: row.reviewedAt?.toISOString(),
       qualificationSnapshot: qualificationRevision ? this.toQualificationRevision(qualificationRevision) : undefined,
+      corporateSnapshot,
       createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString()
     };
   }

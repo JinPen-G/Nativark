@@ -68,7 +68,7 @@ export interface UpsertAccountCredentialsInput {
 export interface CreateMembershipReviewInput {
   tenantId: string;
   customerId: string;
-  reviewType: "registration" | "qualification";
+  reviewType: "registration" | "corporate_registration" | "qualification";
   channel: "admin" | "app";
   status?: "pending";
   sourceWorkspaceId?: string;
@@ -85,7 +85,7 @@ export type CustomerMembershipReviewUpdateData = Pick<
 /**
  * 主档与会员均按租户共享；订单、资金和营销等历史业务事实仍留在原空间。
  *
- * 写入口约束：`customerProfile / customerAccount / customerMembership / customerMembershipReview`
+ * 写入口约束：`customerProfile / customerAccount / customerMembership / customerMembershipReview / customerCorporateProfile`
  * 四个模型的 create / update / upsert / delete 只允许出现在本文件，其余服务与仓储一律经由
  * 下面的写方法（都接受可选 `tx`）。`scripts/validate-customer-write-ownership.cjs` 静态把关。
  */
@@ -183,7 +183,7 @@ export class SharedCustomerRepository {
   }
 
   // ---------------------------------------------------------------------------
-  // 四个客户模型的唯一写入口。方法只做单模型写入，不含业务判断；
+  // 客户主档模型的唯一写入口。方法只做单模型写入，不含业务判断；
   // 流程级规则（注册、合并、状态机）留在各自的服务里。
   // ---------------------------------------------------------------------------
 
@@ -228,6 +228,41 @@ export class SharedCustomerRepository {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") return undefined;
       throw error;
     }
+  }
+
+  async upsertCorporateProfile(input: {
+    tenantId: string;
+    customerId: string;
+    legalName: string;
+    unifiedSocialCreditCode: string;
+    unifiedSocialCreditCodeMasked: string;
+    registeredAddress?: string | null;
+    legalRepName?: string | null;
+    legalRepPhoneMasked?: string | null;
+    industry?: string | null;
+    scale?: string | null;
+    status: string;
+  }, tx?: SharedCustomerTx) {
+    const data = {
+      legalName: input.legalName,
+      unifiedSocialCreditCode: input.unifiedSocialCreditCode,
+      unifiedSocialCreditCodeMasked: input.unifiedSocialCreditCodeMasked,
+      registeredAddress: input.registeredAddress ?? null,
+      legalRepName: input.legalRepName ?? null,
+      legalRepPhoneMasked: input.legalRepPhoneMasked ?? null,
+      industry: input.industry ?? null,
+      scale: input.scale ?? null,
+      status: input.status
+    };
+    return this.db(tx).customerCorporateProfile.upsert({
+      where: { tenantId_customerId: { tenantId: input.tenantId, customerId: input.customerId } },
+      create: { tenantId: input.tenantId, customerId: input.customerId, ...data },
+      update: data
+    });
+  }
+
+  async updateCorporateProfileStatus(tenantId: string, customerId: string, status: string, tx?: SharedCustomerTx) {
+    return this.db(tx).customerCorporateProfile.updateMany({ where: { tenantId, customerId }, data: { status } });
   }
 
   /**

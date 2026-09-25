@@ -1,7 +1,8 @@
 import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional, ServiceUnavailableException } from "@nestjs/common";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
+import { getRequestUserId } from "../../common/request-identity";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import { MembershipService } from "../platform/membership.service";
 import { FileStorageRuntimeService, type FileBusinessOwner } from "../integrations/file-storage.runtime.service";
@@ -108,6 +109,7 @@ import { roundMoney } from "./rental-money";
 import { bufferedRentalPeriod, peakReservedQuantity } from "./rental-occupancy";
 import { extensionPaymentRequired } from "./rental-extension-lifecycle";
 import { effectiveExtensionRule, effectiveNoShowRule, effectiveUnpaidHoldRule, inclusiveTaxAmount } from "./rental-rule-defaults";
+import { redactDeliveryAddressPhone } from "./rental-delivery-address-privacy";
 import { RentalFundingService } from "./rental-funding.service";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import {
@@ -118,7 +120,8 @@ import {
   type RentalFactTx,
   type RentalCoreFactStore,
   type RentalUniqueAttributeClaim,
-  type StockQuarantineChange
+  type StockQuarantineChange,
+  type StockReturnTransfer
 } from "./rental-core-fact.repository";
 import { assertRentalCategoryExtensions } from "./rental-extension-registry";
 import { appendOccurrences, extensionRequestKey, stampOccurrences } from "./rental-service-occurrence";
@@ -783,7 +786,16 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (!Number.isInteger(input.totalQuota) || input.totalQuota < 0 || !Number.isInteger(input.perCustomerLimit) || input.perCustomerLimit <= 0) throw new BadRequestException("发行量或每客限领数量无效");
     if (input.perCustomerUseLimit !== undefined && (!Number.isInteger(input.perCustomerUseLimit) || input.perCustomerUseLimit <= 0)) throw new BadRequestException("每客使用次数上限无效");
     if (input.totalBudget !== undefined && (!Number.isFinite(input.totalBudget) || input.totalBudget < 0)) throw new BadRequestException("总优惠预算无效");
-    if (new Date(input.effectiveFrom).getTime() >= new Date(input.effectiveTo).getTime()) throw new BadRequestException("优惠券有效期无效");
+    const claimFrom = input.claimFrom?.trim() || input.effectiveFrom;
+    const claimTo = input.claimTo?.trim() || input.effectiveTo;
+    const dates = [claimFrom, claimTo, input.effectiveFrom, input.effectiveTo, input.applicableRentalFrom, input.applicableRentalTo]
+      .filter((value): value is string => Boolean(value)).map((value) => Date.parse(value));
+    if (dates.some((value) => !Number.isFinite(value))) throw new BadRequestException("优惠券时间格式无效");
+    if (Date.parse(claimFrom) >= Date.parse(claimTo)) throw new BadRequestException("优惠券领取时间范围无效");
+    if (Date.parse(input.effectiveFrom) >= Date.parse(input.effectiveTo)) throw new BadRequestException("优惠券使用时间范围无效");
+    if (input.applicableRentalFrom && input.applicableRentalTo && Date.parse(input.applicableRentalFrom) > Date.parse(input.applicableRentalTo)) {
+      throw new BadRequestException("优惠券适用租期范围无效");
+    }
     const duplicate = state.couponTemplates.find((row) => row.code === input.code.trim() && row.id !== input.id);
     if (duplicate) throw new ConflictException("优惠券编码已存在");
     const invalidGroup = (input.applicableItemGroupIds ?? []).find((itemGroupId) => !state.itemGroups.some((group) => group.id === itemGroupId));
@@ -802,7 +814,14 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       stackableWithDiscountPlans: input.stackableWithDiscountPlans ?? existing?.stackableWithDiscountPlans ?? true,
       perCustomerLimit: input.perCustomerLimit, perCustomerUseLimit: input.perCustomerUseLimit ?? existing?.perCustomerUseLimit ?? 1,
       totalBudget: input.totalBudget ?? existing?.totalBudget, lockedBudget: existing?.lockedBudget ?? 0, redeemedBudget: existing?.redeemedBudget ?? 0,
+      claimFrom, claimTo,
       effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo,
+      applicableRentalFrom: input.applicableRentalFrom === undefined
+        ? existing?.applicableRentalFrom
+        : input.applicableRentalFrom.trim() || undefined,
+      applicableRentalTo: input.applicableRentalTo === undefined
+        ? existing?.applicableRentalTo
+        : input.applicableRentalTo.trim() || undefined,
       applicableItemGroupIds: [...new Set(input.applicableItemGroupIds ?? [])], status: input.status ?? existing?.status ?? "draft",
       version: nextVersion, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
@@ -1196,6 +1215,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return this.factStore.restoreStockDisposition(tenantId, dispositionId, operator);
   }
 
+  async writeOffStockDisposition(tenantId: string, dispositionId: string, reason: string, operator: string) {
+    this.state(tenantId);
+    return this.factStore.writeOffStockDisposition(tenantId, dispositionId, reason, operator);
+  }
+
   async listStockDispositions(tenantId: string, orderId?: string) {
     this.state(tenantId);
     if (orderId) await this.requireOrder(tenantId, orderId);
@@ -1234,7 +1258,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const dispositions = await this.factStore.listStockDispositions(tenantId);
     const disposition = dispositions.find((row) => row.id === input.dispositionId);
     if (!disposition) throw new NotFoundException("库存处置不存在或不属于当前经营空间");
-    if (disposition.status === "restored") throw new ConflictException("已恢复可用的库存处置不能再建养护工单");
+    if (disposition.status === "restored" || disposition.status === "written_off") throw new ConflictException("已结束的库存处置不能再建养护工单");
     const reason = input.reason?.trim() || disposition.blockReason || "归还后需要养护处理";
     const assignee = await this.resolveWorkOrderAssignee(tenantId, input.assigneeId, disposition.locationId);
     const timestamp = now();
@@ -1859,9 +1883,15 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   private publicOrder(order: RentalOrder) {
-    const result = structuredClone(order);
+    const result = redactDeliveryAddressPhone(structuredClone(order));
     if (result.assignment?.operationLock) result.assignment.operationLock.token = "";
     return result;
+  }
+
+  async getDeliveryAddressForReveal(tenantId: string, orderId: string) {
+    const order = await this.requireOrder(tenantId, orderId);
+    if (!order.deliveryAddressSnapshot) throw new NotFoundException("该订单没有配送收件地址");
+    return structuredClone(order.deliveryAddressSnapshot);
   }
 
   /**
@@ -1973,6 +2003,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       fulfillmentLocationSnapshot: this.locationSnapshot(state, location),
       returnLocationId: input.returnLocationId, returnLocationName: returnLocation.name,
       returnLocationSnapshot: this.locationSnapshot(state, returnLocation),
+      deliveryAddressSnapshot: quote.deliveryAddressSnapshot ? structuredClone(quote.deliveryAddressSnapshot) : undefined,
       startAt: input.startAt, endAt: input.endAt,
       quoteId: quote.id, quoteNo: quote.quoteNo, pricingPlanVersion: quote.pricingPlanVersion,
       // PRICE-03：价格版本引用随订单固化，与 ruleSnapshot/calendarSnapshot 同理。
@@ -2249,6 +2280,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const returnedAllocationIdsBefore = new Set(
       (order.allocations ?? []).filter((allocation) => allocation.status === "returned" || allocation.status === "released").map((allocation) => allocation.id)
     );
+    const returnBatchKey = input.batchNo ?? `partial-${id("return")}`;
+    const operator = getRequestUserId() ?? "系统";
     const releasedBeforeReturn = new Map(order.reservations.map((row) => [row.id, row.releasedQuantity]));
     await this.runHook(
       tenantId,
@@ -2263,22 +2296,24 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     await this.applyPartialReturnItems(tenantId, state, order, input.items, tx, assetChanges);
     await this.recordReturnDispositions(
       tenantId,
+      state,
       order,
       undefined,
-      input.batchNo ?? `partial-${id("return")}`,
+      returnBatchKey,
       releasedBeforeReturn,
       undefined,
       tx,
-      undefined,
+      operator,
       returnedAllocationIdsBefore,
       assetChanges
     );
     if (charges.overdue && charges.overdue.amount > 0) {
       this.applyOverdueTo(order, charges.overdue.amount, charges.overdue.returnedAt, charges.overdue.batchId);
     }
-    const stockQuarantines = this.quarantinedReturnQuantities(state, order, releasedBeforeReturn);
+    const stockQuarantines = this.quarantinedReturnQuantities(state, order, releasedBeforeReturn, returnBatchKey, undefined, operator);
+    const stockTransfers = this.returnStockTransfers(state, order, releasedBeforeReturn, returnBatchKey, undefined, operator);
     order.updatedAt = now();
-    await this.factStore.saveOrderAggregate(order, assetChanges, tx, this.hasReturnHold(order) ? stockQuarantines : []);
+    await this.factStore.saveOrderAggregate(order, assetChanges, tx, stockQuarantines, stockTransfers);
     return order;
   }
 
@@ -2451,6 +2486,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const order = await this.lockedOrder(tenantId, orderId, tx);
     const assetChanges: AssetStatusChange[] = [];
     let returnStockQuarantines: StockQuarantineChange[] = [];
+    let returnStockTransfers: StockReturnTransfer[] = [];
     if (stage === "pickup") {
       if (order.ruleSnapshot.fulfillment.pickupInspectionRequired) throw new ConflictException("当前规则要求完成领取检查");
       if (order.status !== RentalCoreOrderStatus.ReadyForPickup) throw new ConflictException("订单尚未完成配货");
@@ -2485,6 +2521,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         (order.allocations ?? []).filter((allocation) => allocation.status === "returned" || allocation.status === "released").map((allocation) => allocation.id)
       );
       const releasedBeforeReturn = new Map(order.reservations.map((row) => [row.id, row.releasedQuantity]));
+      const returnBatchKey = `handover-${id("return")}`;
       this.finishReturn(order, overdueCharge, assetChanges);
       // 整单归还后订单进入待结算，`payOrderExtension` 会因状态拒绝生效——
       // 遗留的待补款续租就此作废，不再显示补款入口也不再计入待收。
@@ -2492,9 +2529,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (earlyReturnRefund) this.applyEarlyReturnRefundTo(order, earlyReturnRefund);
       await this.recordReturnDispositions(
         tenantId,
+        state,
         order,
         undefined,
-        `handover-${id("return")}`,
+        returnBatchKey,
         releasedBeforeReturn,
         undefined,
         tx,
@@ -2502,10 +2540,12 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         returnedAllocationIdsBefore,
         assetChanges
       );
-      if (this.hasReturnHold(order)) returnStockQuarantines = this.quarantinedReturnQuantities(state, order, releasedBeforeReturn);
+      const returnOperator = operator || getRequestUserId() || "系统";
+      returnStockQuarantines = this.quarantinedReturnQuantities(state, order, releasedBeforeReturn, returnBatchKey, undefined, returnOperator);
+      returnStockTransfers = this.returnStockTransfers(state, order, releasedBeforeReturn, returnBatchKey, undefined, returnOperator);
     }
     order.updatedAt = now();
-    await this.factStore.saveOrderAggregate(order, assetChanges, tx, returnStockQuarantines);
+    await this.factStore.saveOrderAggregate(order, assetChanges, tx, returnStockQuarantines, returnStockTransfers);
     return order;
   }
 
@@ -2632,7 +2672,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       attachments: input.attachments ?? [], operator: input.operator || userName, createdAt: now()
     };
     const assetChanges: AssetStatusChange[] = [];
-    const stockQuarantines: StockQuarantineChange[] = [];
+    let stockQuarantines: StockQuarantineChange[] = [];
+    let stockTransfers: StockReturnTransfer[] = [];
     // 归还前的已释放量快照：隔离数量必须是"本批刚释放的量"，不是累计量。
     // 分批归还会多次进入这里，用累计量会把前几批已经放回可用池的数量再隔离一遍。
     const releasedBeforeReturn = new Map(order.reservations.map((row) => [row.id, row.releasedQuantity]));
@@ -2655,7 +2696,6 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         for (const change of assetChanges) change.status = RentalAssetStatus.Maintenance;
         // 数量库存此前完全没有对应处理：预占一释放，数量就回到可用池，下一单就能把
         // 坏的租出去。序列化资产靠上面这行进维护，数量库存必须靠维修量隔离。
-        stockQuarantines.push(...this.quarantinedReturnQuantities(state, order, releasedBeforeReturn));
       }
       // 逾时按本批实际归还数量落账；提前归还退款仍只在整单归还时按规则处理。
       if (charges.overdue && charges.overdue.amount > 0) this.applyOverdueTo(order, charges.overdue.amount, charges.overdue.returnedAt, charges.overdue.batchId);
@@ -2667,6 +2707,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // "检查已记录、订单未推进"的中间态。
     await this.factStore.insertInspection(record, tx);
     if (template.stage === "return") {
+      const returnBatchKey = input.returnBatchNo ?? record.id;
       const dispositionReason = input.exceptions?.length
         ? input.exceptions
           .flatMap((exception) => [exception.code, exception.description])
@@ -2675,9 +2716,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         : undefined;
       await this.recordReturnDispositions(
         tenantId,
+        state,
         order,
         record.id,
-        input.returnBatchNo ?? record.id,
+        returnBatchKey,
         releasedBeforeReturn,
         dispositionReason,
         tx,
@@ -2685,8 +2727,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         returnedAllocationIdsBefore,
         assetChanges
       );
+      stockQuarantines = this.quarantinedReturnQuantities(state, order, releasedBeforeReturn, returnBatchKey, record.id, input.operator || userName, dispositionReason);
+      stockTransfers = this.returnStockTransfers(state, order, releasedBeforeReturn, returnBatchKey, record.id, input.operator || userName);
     }
-    await this.factStore.saveOrderAggregate(order, assetChanges, tx, stockQuarantines);
+    await this.factStore.saveOrderAggregate(order, assetChanges, tx, stockQuarantines, stockTransfers);
     return { inspection: record, order };
   }
 
@@ -3079,7 +3123,17 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
         operator
       });
     } else if (input.originalDisposition === "off_shelf") {
-      stockQuarantines.push({ itemGroupId: oldGroup.id, locationId: oldLocationId, quantity: allocation.quantity });
+      stockQuarantines.push({
+        itemGroupId: oldGroup.id,
+        locationId: oldLocationId,
+        quantity: allocation.quantity,
+        idempotencyKey: `exchange-quarantine:${createHash("sha256").update(`${order.id}:${exchangeId}:${oldGroup.id}`).digest("hex")}`,
+        sourceOrderId: order.id,
+        sourceOrderNo: order.orderNo,
+        batchNo: `exchange:${exchangeId}`,
+        reason: `订单 ${order.orderNo} 取货后换货，旧商品下架不再出租`,
+        operator
+      });
     }
     allocation.status = "returned";
     allocation.metadata = {
@@ -3817,14 +3871,15 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 隔离量取"本批刚释放的量"（`releasedQuantity` 前后差值），不是预占总量：分批归还
    * 会多次走到这里，用总量会把前几批早已放回可用池的数量再隔离一遍。
    *
-   * 地点取预占自己的 `locationId`：释放预占是把可用量还给这个地点（`activeReservations`
-   * 不再计它的占用），隔离必须冲在同一个地点上。记到归还网点会变成可用量在 A 涨、
-   * 维修量在 B 涨，净额等于没隔离——数量库存的实物调拨本来也不在这条路径上建模。
+   * 处置地点取订单实际归还地点。跨地点归还的数量库存会在同一订单事务内从预占地点
+   * 转入归还地点，并写成有来源的出入库流水；异常隔离随后记在实收地点，避免把尚未
+   * 实际收回的库存重新放入原地点可租池。
    *
    * 出口是人工：`setStockBalance` 可以把维修量降回去（修好或核销后）。
    */
   private async recordReturnDispositions(
     tenantId: string,
+    state: TenantRentalState,
     order: RentalOrder,
     inspectionId: string | undefined,
     returnBatchKey: string,
@@ -3837,6 +3892,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   ) {
     const receivedAt = now();
     const bufferUntil = new Date(Date.parse(receivedAt) + Math.max(0, order.ruleSnapshot.fulfillment.returnBufferMinutes ?? 0) * 60_000).toISOString();
+    const returnLocationId = order.returnLocationId ?? order.fulfillmentLocationId;
     const returnedAllocations = (order.allocations ?? []).filter((allocation) =>
       !returnedAllocationIdsBefore.has(allocation.id) && (allocation.status === "returned" || allocation.status === "released")
     );
@@ -3865,29 +3921,45 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       for (const [partIndex, part] of dispositionParts.entries()) {
         const allocationKey = matching[partIndex]?.allocation.id ?? "fallback";
         const dedupeKey = `${returnBatchKey}:${reservation.id}:${allocationKey}`;
+        const itemGroup = state.itemGroups.find((item) => item.id === reservation.itemGroupId);
+        const unsafeHighRisk = itemGroup?.attributes?.securityRiskLevel === "high"
+          && !order.ruleSnapshot.fulfillment.returnInspectionRequired
+          && !this.hasReturnHold(order)
+          && !inspectionId;
+        const effectiveBlockReason = blockedReason ?? (unsafeHighRisk ? "高风险商品未配置必需的归还检查或周转缓冲，需人工复核后方可恢复可租" : undefined);
+        const shouldHold = Boolean(effectiveBlockReason) || this.hasReturnHold(order);
         const disposition: RentalStockDisposition = {
           id: id("disposition"), tenantId, workspaceId, orderId: order.id, inspectionId,
-          returnBatchKey, dedupeKey, itemGroupId: reservation.itemGroupId, locationId: reservation.locationId,
-          assetId: part.assetId, quantity: part.quantity, receivedAt, bufferUntil, status: blockedReason ? "blocked" : "buffered",
-          blockReason: blockedReason, restoredQuantity: 0, createdAt: receivedAt, updatedAt: receivedAt
+          returnBatchKey, dedupeKey, itemGroupId: reservation.itemGroupId, locationId: returnLocationId,
+          assetId: part.assetId, quantity: part.quantity, receivedAt, bufferUntil,
+          status: effectiveBlockReason ? "blocked" : shouldHold ? "buffered" : "restored",
+          blockReason: effectiveBlockReason,
+          restoredQuantity: shouldHold ? 0 : part.quantity,
+          restoredAt: shouldHold ? undefined : receivedAt,
+          restoredBy: shouldHold ? undefined : operator,
+          createdAt: receivedAt, updatedAt: receivedAt
         };
         const persisted = await this.factStore.upsertStockDisposition(disposition, tx);
         // 处置事实本身不能阻止序列化资产被候选分配选中；在同一订单事务里先
         // 把它置为维护，待受控恢复入口把对应处置恢复后再改回可用。
         // 异常归还即使没有缓冲时间也必须保持维护，正常归还只在周转缓冲有效时保持维护。
-        if (part.assetId && (blockedReason || this.hasReturnHold(order))) {
+        if (part.assetId) {
           const change = assetChanges.find((item) => item.assetId === part.assetId);
-          if (change) change.status = RentalAssetStatus.Maintenance;
-          else assetChanges.push({ assetId: part.assetId, status: RentalAssetStatus.Maintenance });
+          if (change) {
+            change.locationId = returnLocationId;
+            if (shouldHold) change.status = RentalAssetStatus.Maintenance;
+          } else {
+            assetChanges.push({ assetId: part.assetId, status: shouldHold ? RentalAssetStatus.Maintenance : RentalAssetStatus.Available, locationId: returnLocationId });
+          }
         }
-        if (blockedReason && this.factStore.upsertWorkOrder) {
+        if (effectiveBlockReason && this.factStore.upsertWorkOrder) {
           const persistedDisposition = persisted ?? disposition;
           const workTimestamp = now();
           await this.factStore.upsertWorkOrder({
             id: id("work"), tenantId, workspaceId, workNo: `WO${workTimestamp.replace(/\D/g, "").slice(0, 14)}${randomUUID().slice(0, 4).toUpperCase()}`,
-            type: workOrderTypeForReason(blockedReason), status: "pending", dispositionId: persistedDisposition.id,
-            orderId: order.id, inspectionId, itemGroupId: reservation.itemGroupId, locationId: reservation.locationId,
-            assetId: part.assetId, quantity: part.quantity, reason: blockedReason, attachments: [],
+            type: workOrderTypeForReason(effectiveBlockReason), status: "pending", dispositionId: persistedDisposition.id,
+            orderId: order.id, inspectionId, itemGroupId: reservation.itemGroupId, locationId: returnLocationId,
+            assetId: part.assetId, quantity: part.quantity, reason: effectiveBlockReason, attachments: [],
             createdBy: operator, createdAt: workTimestamp, updatedAt: workTimestamp
           }, tx);
         }
@@ -3902,9 +3974,14 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   private quarantinedReturnQuantities(
     state: TenantRentalState,
     order: RentalOrder,
-    releasedBefore: Map<string, number>
+    releasedBefore: Map<string, number>,
+    returnBatchKey: string,
+    sourceInspectionId: string | undefined,
+    operator: string,
+    blockedReason?: string
   ): StockQuarantineChange[] {
-    const byTarget = new Map<string, StockQuarantineChange>();
+    const result: StockQuarantineChange[] = [];
+    const returnLocationId = order.returnLocationId ?? order.fulfillmentLocationId;
     for (const reservation of order.reservations) {
       const quantity = reservation.releasedQuantity - (releasedBefore.get(reservation.id) ?? 0);
       if (quantity <= 0) continue;
@@ -3912,12 +3989,58 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       // 用不抛异常的查找：归还路径不该因为配置里少一个分组就整单失败。
       const group = state.itemGroups.find((row) => row.id === reservation.itemGroupId);
       if ([RentalInventoryMode.Serialized, RentalInventoryMode.Consumable].includes(group?.inventoryMode as RentalInventoryMode)) continue;
-      const key = `${reservation.itemGroupId}:${reservation.locationId}`;
-      const existing = byTarget.get(key);
-      if (existing) existing.quantity += quantity;
-      else byTarget.set(key, { itemGroupId: reservation.itemGroupId, locationId: reservation.locationId, quantity });
+      const unsafeHighRisk = group?.attributes?.securityRiskLevel === "high"
+        && !order.ruleSnapshot.fulfillment.returnInspectionRequired && !this.hasReturnHold(order) && !sourceInspectionId;
+      if (!blockedReason && !this.hasReturnHold(order) && !unsafeHighRisk) continue;
+      const reason = blockedReason ?? (unsafeHighRisk
+        ? "高风险商品未配置必需的归还检查或周转缓冲，隔离待人工复核"
+        : `订单归还后周转缓冲（${order.ruleSnapshot.fulfillment.returnBufferMinutes ?? 0} 分钟）`);
+      result.push({
+        itemGroupId: reservation.itemGroupId,
+        locationId: returnLocationId,
+        quantity,
+        idempotencyKey: `return-quarantine:${createHash("sha256").update(`${order.id}:${returnBatchKey}:${reservation.id}`).digest("hex")}`,
+        sourceOrderId: order.id,
+        sourceOrderNo: order.orderNo,
+        sourceInspectionId,
+        batchNo: returnBatchKey,
+        reason,
+        operator
+      });
     }
-    return [...byTarget.values()];
+    return result;
+  }
+
+  private returnStockTransfers(
+    state: TenantRentalState,
+    order: RentalOrder,
+    releasedBefore: Map<string, number>,
+    returnBatchKey: string,
+    sourceInspectionId: string | undefined,
+    operator: string
+  ): StockReturnTransfer[] {
+    const targetLocationId = order.returnLocationId ?? order.fulfillmentLocationId;
+    const transfers: StockReturnTransfer[] = [];
+    for (const reservation of order.reservations) {
+      const quantity = reservation.releasedQuantity - (releasedBefore.get(reservation.id) ?? 0);
+      if (quantity <= 0 || reservation.locationId === targetLocationId) continue;
+      const group = state.itemGroups.find((item) => item.id === reservation.itemGroupId);
+      if (![RentalInventoryMode.Quantity, RentalInventoryMode.Bundle].includes(group?.inventoryMode as RentalInventoryMode)) continue;
+      transfers.push({
+        itemGroupId: reservation.itemGroupId,
+        fromLocationId: reservation.locationId,
+        toLocationId: targetLocationId,
+        quantity,
+        idempotencyKey: `return-transfer:${createHash("sha256").update(`${order.id}:${returnBatchKey}:${reservation.id}`).digest("hex")}`,
+        sourceOrderId: order.id,
+        sourceOrderNo: order.orderNo,
+        sourceInspectionId,
+        batchNo: returnBatchKey,
+        reason: `订单 ${order.orderNo} 异地归还实物调拨`,
+        operator
+      });
+    }
+    return transfers;
   }
 
   /**

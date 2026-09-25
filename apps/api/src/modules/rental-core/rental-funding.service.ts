@@ -102,16 +102,19 @@ export class RentalFundingService {
     })));
     const events = await this.loadEvents(db, tenantId, workspaceId, orderId);
     const ledgers = deriveFundingLedgers(events);
+    const rentalBase = rentalPaymentBalance(Number(order.finalPayableAmount), events);
+    const depositRequired = Number(order.depositAmount) + effective.depositAmount + pending.depositAmount;
     return {
       orderId,
-      rental: { ...rentalPaymentBalance(Number(order.finalPayableAmount), events), pendingExtensionAmount: pending.payableAmount },
+      rental: { ...rentalBase, pendingExtensionAmount: pending.payableAmount, due: roundMoney(Math.max(0, rentalBase.balance + pending.payableAmount)) },
       deposit: {
         collected: ledgers.deposit.collected,
         captured: ledgers.deposit.captured,
         refunded: ledgers.deposit.refunded,
         balance: ledgers.deposit.balance,
-        requiredAmount: Number(order.depositAmount) + effective.depositAmount + pending.depositAmount,
-        pendingExtensionAmount: pending.depositAmount
+        requiredAmount: depositRequired,
+        pendingExtensionAmount: pending.depositAmount,
+        due: roundMoney(Math.max(0, depositRequired - ledgers.deposit.collected))
       },
       preauthorization: {
         frozen: ledgers.preauthorization.frozen,

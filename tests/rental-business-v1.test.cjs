@@ -124,11 +124,22 @@ const couponTemplate = await core.saveCouponTemplate(tenantId, {
   applicableItemGroupIds: [],
   status: "active"
 });
+const notYetClaimable = await core.saveCouponTemplate(tenantId, {
+  code: "CAMP-FUTURE-CLAIM", name: "未来领取测试券", discountType: "fixed_amount", discountValue: 5,
+  minimumSpend: 0, totalQuota: 2, perCustomerLimit: 1,
+  claimFrom: new Date(now + 24 * 60 * 60 * 1000).toISOString(),
+  claimTo: new Date(now + 2 * 24 * 60 * 60 * 1000).toISOString(),
+  effectiveFrom: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+  effectiveTo: new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString(), status: "active"
+});
+await assert.rejects(() => business.claimCoupon(tenantId, context(), notYetClaimable.id, "member_future_claim"), /可领取时间范围/u);
+ok2("优惠券领取时段与券使用时段分别判定");
 // claimCoupon 现在返回 { coupon, template }：模板的 claimedQuantity 也是本次写入的一部分，
 // 调用方需要它才能在事务提交后正确更新缓存。
 const claimResult = await business.claimCoupon(tenantId, context(), couponTemplate.id, "member_001");
 const customerCoupon = claimResult.coupon;
 assert.equal(customerCoupon.status, "claimed");
+assert.equal(customerCoupon.claimedAt >= couponTemplate.claimFrom && customerCoupon.claimedAt <= couponTemplate.claimTo, true);
 assert.equal(claimResult.template.claimedQuantity, 1, "领取应使模板已领数量加一");
 await assert.rejects(async () => business.claimCoupon(tenantId, context(), couponTemplate.id, "member_001"), /限领/);
 await core.saveCouponTemplate(tenantId, {
@@ -172,7 +183,9 @@ const usagePlanBase = {
     includedUsage: 20,
     weekendMultiplier: 1,
     holidayMultiplier: 1,
-    depositAmount: 0,
+    // 本专项覆盖使用量费率，不测试押金；但运行时安全门要求启用报价的费率
+    // 携带有效押金快照，避免在逾时断言前被无关资金配置校验拦截。
+    depositAmount: 100,
     minimumUnits: 1,
     tierMode: "progressive",
     tiers: [{ minUnits: 1, unitAmount: 2 }, { minUnits: 101, unitAmount: 1.5 }, { minUnits: 151, unitAmount: 1 }]
@@ -225,21 +238,45 @@ await assert.rejects(
 await business.savePricingPlan(tenantId, usageContext, { ...usagePlanBase, id: enabledUsagePlan.id, status: "disabled" });
 ok2("使用量累进计划拒绝缺费率/歧义阶梯，报价按逐档超额单位计费并留明细");
 
-const quote = await business.createQuote(tenantId, context(), {
-  customerType: "personal",
-  customerId: "member_001",
-  fulfillmentMode: "store_pickup_return",
-  fulfillmentLocationId: location.id,
-  startAt,
-  endAt,
-  customerCouponId: customerCoupon.id,
-  lines: [{ itemGroupId: group.id, quantity: 1 }],
-  services: [{ serviceId: selectedService.id, quantity: 1 }]
-});
+const originalCouponWindow = { from: customerCoupon.effectiveFrom, to: customerCoupon.effectiveTo };
+customerCoupon.effectiveFrom = new Date(now - 60_000).toISOString();
+customerCoupon.effectiveTo = new Date(now + 60 * 60_000).toISOString();
+const quoteUseWindowEnd = customerCoupon.effectiveTo;
+let quote;
+try {
+  quote = await business.createQuote(tenantId, context(), {
+    customerType: "personal",
+    customerId: "member_001",
+    fulfillmentMode: "store_pickup_return",
+    fulfillmentLocationId: location.id,
+    startAt,
+    endAt,
+    customerCouponId: customerCoupon.id,
+    lines: [{ itemGroupId: group.id, quantity: 1 }],
+    services: [{ serviceId: selectedService.id, quantity: 1 }]
+  });
+} finally {
+  customerCoupon.effectiveFrom = originalCouponWindow.from;
+  customerCoupon.effectiveTo = originalCouponWindow.to;
+}
 assert.ok(quote.rentalAmount > 0);
 assert.ok(quote.couponAmount > 0);
 assert.equal(quote.couponAmount, 30, "已发券必须按领取时的 30 元权益快照计算，不能跟随模板改成 1 元");
 assert.equal(quote.couponEvaluation.templateVersion, "1.0", "报价必须记录客户券固化的模板版本");
+assert.equal(quote.couponEvaluation.checkedAt <= new Date(now + 60 * 60_000).toISOString(), true);
+assert.equal(quote.couponEvaluation.rentalStartAt, startAt);
+assert.ok(Date.parse(quote.couponEvaluation.rentalStartAt) > Date.parse(quoteUseWindowEnd), "租期开始晚于券使用截止仍可在券有效时锁定");
+const originalApplicableRentalFrom = customerCoupon.applicableRentalFrom;
+try {
+  customerCoupon.applicableRentalFrom = new Date(Date.parse(startAt) + 60_000).toISOString();
+  await assert.rejects(() => business.createQuote(tenantId, context(), {
+    customerType: "personal", customerId: "member_001", fulfillmentMode: "store_pickup_return",
+    fulfillmentLocationId: location.id, startAt, endAt, customerCouponId: customerCoupon.id,
+    lines: [{ itemGroupId: group.id, quantity: 1 }]
+  }), /不适用于本次租期/u);
+} finally {
+  customerCoupon.applicableRentalFrom = originalApplicableRentalFrom;
+}
 assert.ok(quote.serviceAmount > 0);
 assert.equal(quote.calendarVersion, `${publishedCalendar.year}:${publishedCalendar.version}`);
 assert.ok(quote.chargeLines.some((line) => line.type === "coupon"));
@@ -364,7 +401,7 @@ const layerRate = {
   baseAmount: 100,
   weekendMultiplier: 1.5,
   holidayMultiplier: 2,
-  depositAmount: 0,
+  depositAmount: 100,
   minimumUnits: 1,
   preAuthAmount: 0
 };
@@ -571,6 +608,31 @@ assert.equal(
 assert.ok(mktQuote.discountAmount > 0 && mktQuote.payableAmount < mktQuote.rentalAmount, "优惠必须真的减少应付");
 ok2("MKT-01A：报价保存逐方案评估与落选原因，优惠不触碰押金与预授权");
 
+// 有客户主档但没有服务端会员关系快照，不得命中会员专享折扣。
+const memberPlanState = business.states.get(workspaceKey);
+const originalDiscountPlans = memberPlanState.discountPlans;
+memberPlanState.discountPlans = [...originalDiscountPlans, {
+  id: "member-only-plan", tenantId, categoryCode: context().profile.categoryCode, code: "MEMBER-ONLY",
+  name: "会员专享测试", status: "enabled", discountType: "fixed_amount", discountValue: 20,
+  minimumSpend: 0, appliesTo: "rental", customerScope: "member", applicableItemGroupIds: [],
+  applicableDayTypes: [], priority: 1, stackableWithOtherPlans: false, stackableWithCoupon: true,
+  effectiveFrom: new Date(now - 86_400_000).toISOString(), version: "1.0",
+  createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString()
+}];
+try {
+  const profileOnlyQuote = await business.createQuote(tenantId, context(), {
+    customerType: "personal", customerId: "profile_without_membership", fulfillmentMode: "store_pickup_return",
+    fulfillmentLocationId: location.id, startAt: mktStartAt, endAt: mktEndAt,
+    lines: [{ itemGroupId: mktGroup.id, quantity: 1, pricingUnit: "calendar_day" }]
+  });
+  const memberOnlyEvaluation = profileOnlyQuote.discountEvaluations.find((row) => row.planId === "member-only-plan");
+  assert.equal(memberOnlyEvaluation?.applied, false, "仅有客户主档不能获得会员专享方案");
+  assert.equal(memberOnlyEvaluation?.skipReason, "customer_scope_mismatch");
+} finally {
+  memberPlanState.discountPlans = originalDiscountPlans;
+}
+ok2("会员专享优惠：客户主档 ID 不能替代有效会员关系");
+
 // 会员权益必须取预约身份实际使用的方案。企业员工预约不叠加个人方案，且本次的
 // 减免与来源要固化在报价中，不能等后续方案改版后再回读当前配置。
 const membershipProbeInput = {
@@ -629,6 +691,9 @@ const saveSecurityGroup = async (attributes) => core.saveItemGroup(tenantId, {
   bundleComponents: securityGroup.bundleComponents,
   status: securityGroup.status
 });
+assert.equal(quote.couponEvaluation.checkedAt <= quote.couponEvaluation.rentalStartAt, true, "报价记录服务端校验时点与预约租期开始时点");
+assert.equal(quote.couponEvaluation.rentalStartAt, startAt);
+assert.equal(quote.couponEvaluation.applicableRentalFrom, undefined);
 await saveSecurityGroup({ ...originalSecurityAttributes, securityRiskLevel: "low" });
 const savedConfigBeforeSecurityPolicy = structuredClone(business.currentRule(tenantId, context()).config);
 const saveSecurityPolicy = async (policy) => {

@@ -2,11 +2,16 @@ import { IsBoolean, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, Max
 import {
   CUSTOMER_ACCOUNT_STATUSES,
   CUSTOMER_MEMBERSHIP_STATUSES,
+  CUSTOMER_RISK_LEVELS,
+  CUSTOMER_RISK_STATUSES,
+  CUSTOMER_RISK_TYPES,
+  type CreateCustomerRiskRecordRequest,
   type ChangeCustomerAccountStatusRequest,
   type ChangeCustomerMembershipStatusRequest,
   type CustomerAccountStatus,
   type CustomerMembershipStatus,
-  type SaveCustomerProfileAddressRequest
+  type SaveCustomerProfileAddressRequest,
+  type ReviewCustomerRiskRecordRequest
 } from "@rental-os/shared";
 
 /**
@@ -57,6 +62,32 @@ export class ChangeCustomerMembershipStatusDto implements ChangeCustomerMembersh
   @IsOptional()
   @IsBoolean()
   acknowledgedManualChecks?: boolean;
+}
+
+export class CreateCustomerRiskRecordDto implements CreateCustomerRiskRecordRequest {
+  @IsIn(CUSTOMER_RISK_TYPES as unknown as string[])
+  riskType!: CreateCustomerRiskRecordRequest["riskType"];
+
+  @IsIn(CUSTOMER_RISK_LEVELS as unknown as string[])
+  level!: CreateCustomerRiskRecordRequest["level"];
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(2000)
+  detail!: string;
+
+  @IsIn(["workspace", "tenant"])
+  scope!: "workspace" | "tenant";
+}
+
+export class ReviewCustomerRiskRecordDto implements ReviewCustomerRiskRecordRequest {
+  @IsIn(CUSTOMER_RISK_STATUSES.filter((status) => status !== "open") as unknown as string[])
+  status!: ReviewCustomerRiskRecordRequest["status"];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
 }
 
 /**

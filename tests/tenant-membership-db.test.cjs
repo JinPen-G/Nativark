@@ -84,7 +84,20 @@ async function cleanup() {
   await memberships.restorePlanVersion(tenantId, plan.id, versionId, '验证范围恢复', 'tester');
   assert.equal(JSON.stringify((await memberships.listPlanAssignments(tenantId, first.customerId))[0].snapshot), sourceSnapshot);
   ok('方案编辑和恢复不改写已有授予快照');
-  const corp = await memberships.saveCorporateMember(tenantId, { name: '统一企业', corporateName: '统一企业有限公司', phone: '13900000002' });
+  const corp = await memberships.saveCorporateMember(tenantId, {
+    name: '统一企业', corporateName: '统一企业有限公司', phone: '13900000002',
+    unifiedSocialCreditCode: `91310000${suffix.toUpperCase()}AA`
+  });
+  assert.equal(corp.membershipStatus, 'pending_activation');
+  assert.equal(corp.corporateProfile.status, 'pending_review');
+  const corporateReview = (await memberships.listReviews(tenantId, 'pending', 'corporate_registration'))
+    .find(row => row.customerId === corp.customerId);
+  assert.ok(corporateReview, '新企业会员必须进入独立主体人工审核');
+  await memberships.review(tenantId, corporateReview.id, { status: 'approved' }, 'reviewer', { registration: true, qualification: false });
+  const approvedCorp = (await memberships.listCorporateMembers(tenantId)).find(row => row.customerId === corp.customerId);
+  assert.equal(approvedCorp.membershipStatus, 'active');
+  assert.equal(approvedCorp.corporateProfile.status, 'active');
+  ok('企业新建进入独立人工审核，批准后会员和主体资料同时激活');
   const employee = await memberships.saveCorporateEmployee(tenantId, corp.customerId, { personalCustomerId: first.customerId, role: 'employee', reason: '专项' }, 'tester');
   for (const workspaceId of [camera, camping]) {
     const options = await memberships.listBookingOptions(tenantId, workspaceId, first.customerId);

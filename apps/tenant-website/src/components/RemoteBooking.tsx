@@ -5,9 +5,8 @@ import { useSite } from '../SiteContext';
 import { useAuth } from '../AuthContext';
 import { sessionApi } from '../data/authClient';
 import { rentalDays } from '../data/siteRepository';
+import { toIsoDateTime } from '../data/datetime';
 import type { Product } from '../types';
-
-function toIso(date: string) { return new Date(`${date}T09:00:00`).toISOString(); }
 
 interface QuoteView {
   id: string;
@@ -16,8 +15,8 @@ interface QuoteView {
 }
 
 /** 真实租户 + 已登录：走后端 可用性 → 报价 → 下单。金额与库存全部以服务端为准。 */
-export function RemoteBooking({ product, startDate, endDate, quantity, fulfillment }: {
-  product: Product; startDate: string; endDate: string; quantity: number; fulfillment: 'pickup' | 'delivery';
+export function RemoteBooking({ product, startDate, endDate, quantity, fulfillment, preferredLocationId }: {
+  product: Product; startDate: string; endDate: string; quantity: number; fulfillment: 'pickup' | 'delivery'; preferredLocationId?: string;
 }) {
   const { href, t, language } = useSite();
   const { currentWorkspace, switchWorkspace } = useAuth();
@@ -49,7 +48,10 @@ export function RemoteBooking({ product, startDate, endDate, quantity, fulfillme
           sessionApi.coupons().catch(() => []),
         ]);
         if (cancelled) return;
-        setLocationId((cat.locations || [])[0]?.id ?? null);
+        // 优先用首页搜索选定的取货门店（若该门店在本空间履约地点内），否则取第一个。
+        const locs = (cat.locations || []) as Array<{ id: string }>;
+        const preferred = preferredLocationId && locs.some(loc => loc.id === preferredLocationId) ? preferredLocationId : null;
+        setLocationId(preferred ?? locs[0]?.id ?? null);
         setEnabledModes(cat.fulfillment?.enabledModes ?? []);
         const list = ((addressRes as any).items as any[]) ?? [];
         setAddresses(list);
@@ -61,7 +63,7 @@ export function RemoteBooking({ product, startDate, endDate, quantity, fulfillme
       }
     })();
     return () => { cancelled = true; };
-  }, [product.categoryId]);
+  }, [product.categoryId, preferredLocationId]);
 
   const fulfillmentMode = useMemo(() => {
     if (fulfillment === 'delivery' && enabledModes.includes('delivery')) return 'delivery';
@@ -75,7 +77,7 @@ export function RemoteBooking({ product, startDate, endDate, quantity, fulfillme
     setBusy(true); setError(''); setQuote(null);
     try {
       const q = await sessionApi.createQuote({
-        fulfillmentMode, fulfillmentLocationId: locationId, startAt: toIso(startDate), endAt: toIso(endDate),
+        fulfillmentMode, fulfillmentLocationId: locationId, startAt: toIsoDateTime(startDate), endAt: toIsoDateTime(endDate),
         lines: [{ itemGroupId: product.id, quantity }],
         ...(isDelivery && addressId ? { deliveryAddressId: addressId } : {}),
         ...(couponId ? { customerCouponId: couponId } : {}),

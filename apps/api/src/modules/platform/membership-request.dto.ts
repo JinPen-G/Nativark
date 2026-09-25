@@ -101,6 +101,21 @@ export class SaveCorporateMembershipDto implements SaveCorporateMembershipReques
   @IsString() @IsNotEmpty() @MaxLength(180)
   corporateName!: string;
   @IsOptional() @IsString() @MaxLength(80)
+  unifiedSocialCreditCode?: string;
+  @IsOptional() @IsString() @MaxLength(500)
+  registeredAddress?: string;
+  @IsOptional() @IsString() @MaxLength(120)
+  legalRepName?: string;
+  @IsOptional() @IsString() @MaxLength(40)
+  legalRepPhone?: string;
+  @IsOptional() @IsString() @MaxLength(120)
+  industry?: string;
+  @IsOptional() @IsIn(["1-10", "11-50", "51-200", "200+"])
+  scale?: SaveCorporateMembershipRequest["scale"];
+  @IsOptional() @IsBoolean()
+  clearEmail?: boolean;
+  @IsOptional() @IsString() @MaxLength(80)
+  /** Legacy alias. New data is written only to the structured corporate profile. */
   corporateTaxNo?: string;
 }
 

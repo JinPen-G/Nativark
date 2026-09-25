@@ -125,7 +125,7 @@ void (async () => {
 {
   const { instance, seen } = controller();
   await instance.createInspection(req(), "order_1", {
-    templateId: TEMPLATE.id, results: {}, returnItems: [{ allocationId: "alloc_1", quantity: 1 }], returnBatchNo: "batch-1"
+    templateId: TEMPLATE.id, results: {}, returnItems: [{ allocationId: "alloc_1", quantity: 1 }], returnBatchNo: "key-1"
   });
   assert.equal(seen.overdue.length, 1, "逐批归还必须按本批实际归还数量计算逾期");
   assert.deepEqual(seen.overdue[0].outstanding, { group_q: 1 }, "逾时计费范围必须只包含本批归还数量");

@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#ffffff" />
     <meta
       name="description"
-      content="Rental OS 面向摄影器材、露营装备、车辆载具和工程设备等租赁企业，提供资产、订单、定价、履约、会员与经营分析的一体化 SaaS 解决方案。"
+      content="Rental OS 是面向多品类租赁业务的一体化经营平台：预约、订单、库存、门店、履约、会员、结算与经营分析集中管理，适配车辆、设备、摄影、露营、工具等多种租赁场景。"
     />
     <link
       rel="preload"
@@ -82,7 +82,10 @@
             v = localStorage.getItem("rental-os-home-version") || "";
           }
         } catch (e) {}
-        document.documentElement.classList.add(v === "1" ? "home-v1" : "home-v2");
+        const isV1 = v === "1";
+        document.documentElement.classList.add(isV1 ? "home-v1" : "home-v2");
+        /* 2.0 固定编辑式配色：强制浅色基底，避免深色主题 CSS 渗入（顶栏玻璃/Logo 反白等）；1.0 不受影响。 */
+        if (!isV1) { try { document.documentElement.dataset.theme = "light"; } catch (e) {} }
       })();
     </script>
     <script type="application/ld+json">
@@ -1237,8 +1240,14 @@
         }
       }
       /* ===== 官网 2.0 沉浸式视频首页（作用域 .v2-* / body.v2-home / html.home-v*） ===== */
-      html.home-v2 .hero { display: none; }
+      html.home-v2 .hero,
+      html.home-v2 #solutions,
+      html.home-v2 #scenarios,
+      html.home-v2 #foundation,
+      html.home-v2 #customers,
+      html.home-v2 #consultation { display: none; }
       html.home-v1 #v2Home { display: none; }
+      body.v2-home .theme { display: none; }
       .v2-home-root { background: #0b0f14; }
       .v2-scene {
         position: relative; width: 100%;
@@ -1289,7 +1298,7 @@
       }
       .v2-cta span { transition: transform .2s ease; }
       .v2-cta:hover span { transform: translateX(4px); }
-      .v2-scene-content > * {
+      .v2-home-root.v2-anim .v2-scene-content > * {
         opacity: 0; transform: translateY(20px);
         transition: opacity .85s cubic-bezier(.22,.61,.36,1), transform .85s cubic-bezier(.22,.61,.36,1);
       }
@@ -1306,6 +1315,17 @@
       body.v2-home:not(.v2-lighttop) .site-header .language-switch,
       body.v2-home:not(.v2-lighttop) .site-header .theme { background: transparent; border-color: rgba(255,255,255,.42); }
       body.v2-home:not(.v2-lighttop) .site-header .brand img { filter: brightness(0) invert(1); }
+      body.v2-home:not(.v2-lighttop) .site-header .menu { color: #fff; background: transparent; border-color: rgba(255,255,255,.42); }
+      /* 滚过视频区 → 顶栏转浅色磨砂 + 底分隔线（固定浅色，不随主题）。 */
+      body.v2-home.v2-lighttop .site-header::before {
+        display: block; opacity: 1; top: 0; left: 0; right: 0; height: 100%; border-radius: 0;
+        background: rgba(255,255,255,.62);
+        backdrop-filter: blur(16px) saturate(1.4); -webkit-backdrop-filter: blur(16px) saturate(1.4);
+        border-bottom: 1px solid rgba(11,15,22,.1); box-shadow: none;
+      }
+      body.v2-home.v2-lighttop .site-header .nav a,
+      body.v2-home.v2-lighttop .site-header .language-switch,
+      body.v2-home.v2-lighttop .site-header .menu { color: var(--ink); background: transparent; }
       @media (max-width: 768px) {
         .v2-scene-video { object-position: var(--scene-pos-mobile, center center); }
         .v2-scene { background-position: var(--scene-pos-mobile, center center); }
@@ -1319,6 +1339,155 @@
         .v2-scene-content > *, .v2-scene-video, .v2-cta, .v2-cta span {
           transition: none !important; transform: none !important; opacity: 1 !important;
         }
+      }
+      /* ===== 官网 2.0 编辑式内容区（固定配色；作用域 .v2-home-root / .v2-sec） ===== */
+      .v2-home-root {
+        --v2-brand: #007aff; --v2-ink: #0b0f16; --v2-body: #48525f; --v2-muted: #808b98;
+        --v2-line: rgba(11,15,22,.12); --v2-bg: #ffffff; --v2-soft: #f4f6f8;
+        --v2-dark: #0b0f14; --v2-dark-2: #12171f;
+        color: var(--v2-ink);
+      }
+      .v2-sec { position: relative; padding: clamp(76px,9vw,150px) 0; background: var(--v2-bg); color: var(--v2-ink); }
+      .v2-sec.v2-soft { background: var(--v2-soft); }
+      .v2-sec.v2-dark { background: var(--v2-dark); color: #fff; }
+      .v2-wrap { width: min(1160px, calc(100% - 48px)); margin: 0 auto; }
+      .v2-wrap.narrow { max-width: 920px; }
+      .v2-ey { margin: 0 0 clamp(18px,2vw,30px); font-size: clamp(11px,1vw,13px); font-weight: 600; letter-spacing: .3em; text-transform: uppercase; color: var(--v2-brand); }
+      .v2-dark .v2-ey { color: rgba(255,255,255,.72); }
+      .v2-h2 { margin: 0; font-weight: 600; line-height: 1.03; letter-spacing: -.025em; font-size: clamp(32px,5vw,68px); }
+      .v2-h2 .ln { display: block; }
+      .v2-lead { margin: clamp(20px,2.2vw,30px) 0 0; max-width: 62ch; font-size: clamp(16px,1.35vw,20px); line-height: 1.65; color: var(--v2-body); }
+      .v2-dark .v2-lead { color: rgba(255,255,255,.78); }
+      /* ===== 多品类斜切沉浸式 Hero（clip-path 斜切，无缝无黑边；图片占位，结构预留 video） ===== */
+      .v2-hero { position: relative; width: 100%; height: 100vh; height: 100dvh; min-height: 560px; overflow: hidden; isolation: isolate; background: #0b0f14; color: #fff; }
+      .v2-hero-panels { position: absolute; inset: 0; display: flex; }
+      .v2-hero-panel { --sl: 64px; position: relative; flex: 1 1 0; min-width: 0; overflow: hidden; cursor: pointer; margin-left: calc(var(--sl) * -1); clip-path: polygon(var(--sl) 0, 100% 0, calc(100% - var(--sl)) 100%, 0 100%); transition: flex-grow .8s cubic-bezier(.22,.61,.36,1); }
+      .v2-hero-panel:first-child { margin-left: 0; clip-path: polygon(0 0, 100% 0, calc(100% - var(--sl)) 100%, 0 100%); }
+      .v2-hero-panel:last-child { clip-path: polygon(var(--sl) 0, 100% 0, 100% 100%, 0 100%); }
+      .v2-hero-panel.is-active { flex-grow: 2.4; }
+      .v2-hero-media { position: absolute; top: 0; bottom: 0; left: 0; width: 52vw; background-image: var(--img); background-position: center; background-size: cover; z-index: 0; }
+      .v2-hero-panel::after { content: ""; position: absolute; inset: 0; z-index: 1; background: rgba(6,9,13,.44); transition: opacity .6s ease; pointer-events: none; }
+      .v2-hero-panel.is-active::after { opacity: 0; }
+      .v2-hero-panel-label { position: absolute; z-index: 2; left: 0; bottom: 0; padding: 20px 30px; display: flex; flex-direction: column; gap: 2px; opacity: .8; transition: opacity .5s ease; }
+      .v2-hero-panel.is-active .v2-hero-panel-label { opacity: 1; }
+      .v2-hero-panel-label .en { font-size: clamp(12px,1vw,15px); font-weight: 600; letter-spacing: .18em; text-transform: uppercase; }
+      .v2-hero-panel-label .zh { font-size: 12px; color: rgba(255,255,255,.82); opacity: 0; transition: opacity .5s ease; }
+      .v2-hero-panel.is-active .v2-hero-panel-label .zh { opacity: 1; }
+      .v2-hero-scrim { position: absolute; inset: 0; z-index: 2; pointer-events: none; background: radial-gradient(120% 92% at 50% 46%, rgba(6,9,13,.5) 0%, rgba(6,9,13,.26) 42%, rgba(6,9,13,.52) 100%), linear-gradient(180deg, rgba(6,9,13,.5) 0%, rgba(6,9,13,0) 24%, rgba(6,9,13,0) 60%, rgba(6,9,13,.6) 100%); }
+      .v2-hero-overlay { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: clamp(14px,1.8vw,22px); padding: 92px clamp(22px,5vw,64px) 44px; text-shadow: 0 2px 24px rgba(0,0,0,.42); pointer-events: none; }
+      .v2-hero-overlay .v2-cta { pointer-events: auto; align-self: center; margin-top: clamp(4px,1vw,12px); }
+      .v2-hero-brand { margin: 0; font-size: clamp(12px,1.1vw,15px); font-weight: 600; letter-spacing: .34em; text-transform: uppercase; color: rgba(255,255,255,.9); }
+      .v2-hero-title { margin: 0; font-weight: 600; line-height: .98; letter-spacing: -.02em; font-size: clamp(40px,7vw,104px); }
+      .v2-hero-title span { display: block; }
+      .v2-hero-sub { margin: 0; font-size: clamp(15px,1.5vw,21px); font-weight: 400; color: rgba(255,255,255,.86); }
+      .v2-home-root.v2-anim .v2-hero-overlay > * { opacity: 0; transform: translateY(20px); animation: v2HeroIn .9s cubic-bezier(.22,.61,.36,1) forwards; }
+      .v2-home-root.v2-anim .v2-hero-overlay > *:nth-child(2) { animation-delay: .1s; }
+      .v2-home-root.v2-anim .v2-hero-overlay > *:nth-child(3) { animation-delay: .18s; }
+      .v2-home-root.v2-anim .v2-hero-overlay > *:nth-child(4) { animation-delay: .26s; }
+      @keyframes v2HeroIn { to { opacity: 1; transform: none; } }
+      @media (max-width: 768px) {
+        .v2-hero-panels { flex-direction: column; }
+        .v2-hero-panel { --sl: 38px; margin-left: 0; margin-top: calc(var(--sl) * -1); clip-path: polygon(0 var(--sl), 100% 0, 100% 100%, 0 100%); }
+        .v2-hero-panel:first-child { margin-top: 0; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); }
+        .v2-hero-panel:last-child { clip-path: polygon(0 var(--sl), 100% 0, 100% 100%, 0 100%); }
+        .v2-hero-media { top: 0; bottom: 0; left: 0; width: 100%; height: 46vh; }
+        .v2-hero-panel-label { padding: 12px 22px; }
+        .v2-hero-title { font-size: clamp(34px,10vw,58px); }
+        .v2-hero-sub { font-size: 15px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .v2-hero-panel, .v2-hero-panel::after { transition: none !important; }
+        .v2-home-root.v2-anim .v2-hero-overlay > * { animation: none !important; opacity: 1 !important; transform: none !important; }
+      }
+      /* WHAT IS：定位 + 大截图占位 */
+      .v2-what-grid { display: grid; grid-template-columns: minmax(0,1fr); gap: clamp(36px,5vw,72px); align-items: center; }
+      @media (min-width: 900px) { .v2-what-grid { grid-template-columns: 0.92fr 1.08fr; } }
+      .v2-what .v2-h2 { font-size: clamp(30px, 4.2vw, 56px); }
+      /* 通用产品截图占位框（浏览器 chrome + 标注；后续替换真图） */
+      .v2-shot { position: relative; border-radius: 14px; overflow: hidden; background: #e9edf1; border: 1px solid var(--v2-line); box-shadow: 0 30px 80px -44px rgba(11,15,22,.4); }
+      .v2-dark .v2-shot { background: #1a212b; border-color: rgba(255,255,255,.12); box-shadow: 0 40px 90px -52px rgba(0,0,0,.7); }
+      .v2-shot::before { content: ""; display: block; padding-top: var(--shot-ratio, 62.5%); }
+      .v2-shot > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
+      .v2-shot-bar { position: absolute; top: 0; left: 0; right: 0; z-index: 2; height: 34px; display: flex; align-items: center; gap: 6px; padding: 0 14px; background: rgba(11,15,22,.06); border-bottom: 1px solid var(--v2-line); }
+      .v2-dark .v2-shot-bar { background: rgba(255,255,255,.06); border-bottom-color: rgba(255,255,255,.12); }
+      .v2-shot-bar i { width: 10px; height: 10px; border-radius: 50%; background: rgba(11,15,22,.16); }
+      .v2-dark .v2-shot-bar i { background: rgba(255,255,255,.2); }
+      .v2-shot-label { position: absolute; inset: 34px 0 0 0; z-index: 1; display: grid; place-items: center; align-content: center; gap: 8px; text-align: center; padding: 24px; }
+      .v2-shot-label .t { font-size: clamp(15px,1.5vw,19px); font-weight: 600; color: var(--v2-muted); }
+      .v2-shot-label .s { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--v2-muted); opacity: .72; }
+      /* 完整租赁生命周期：大编号 */
+      .v2-life-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: clamp(22px,2.4vw,34px) clamp(24px,3vw,48px); margin-top: clamp(40px,5vw,72px); }
+      @media (min-width: 720px) { .v2-life-grid { grid-template-columns: repeat(3,1fr); } }
+      @media (min-width: 1080px) { .v2-life-grid { grid-template-columns: repeat(6,1fr); } }
+      .v2-life { border-top: 2px solid var(--v2-ink); padding-top: 16px; }
+      .v2-life .n { font-size: clamp(13px,1vw,14px); font-weight: 600; color: var(--v2-brand); letter-spacing: .04em; }
+      .v2-life .t { margin: 10px 0 5px; font-size: clamp(17px,1.5vw,21px); font-weight: 600; letter-spacing: -.01em; }
+      .v2-life .d { margin: 0; font-size: 13px; line-height: 1.55; color: var(--v2-body); }
+      /* 业务能力：文字 + 大截图，左右交替 */
+      .v2-cap { display: grid; grid-template-columns: minmax(0,1fr); gap: clamp(28px,4vw,56px); align-items: center; }
+      .v2-cap + .v2-cap { margin-top: clamp(56px,8vw,120px); }
+      @media (min-width: 900px) {
+        .v2-cap { grid-template-columns: 1fr 1.15fr; }
+        .v2-cap.rev .v2-cap-text { order: 2; }
+      }
+      .v2-cap .n { font-size: clamp(13px,1vw,14px); font-weight: 600; color: var(--v2-brand); }
+      .v2-cap h3 { margin: 12px 0 0; font-size: clamp(25px,3vw,40px); font-weight: 600; line-height: 1.12; letter-spacing: -.02em; }
+      .v2-cap p { margin: 16px 0 0; font-size: clamp(15px,1.2vw,18px); line-height: 1.65; color: var(--v2-body); max-width: 46ch; }
+      /* 平台底座：大编号 6 块（近黑） */
+      .v2-found-grid { display: grid; grid-template-columns: 1fr; gap: 1px; margin-top: clamp(44px,6vw,80px); background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.14); border-radius: 16px; overflow: hidden; }
+      @media (min-width: 640px) { .v2-found-grid { grid-template-columns: repeat(2,1fr); } }
+      @media (min-width: 980px) { .v2-found-grid { grid-template-columns: repeat(3,1fr); } }
+      .v2-found { background: var(--v2-dark); padding: clamp(24px,3vw,40px); }
+      .v2-found .n { font-size: clamp(20px,2vw,26px); font-weight: 600; color: rgba(255,255,255,.38); letter-spacing: .02em; }
+      .v2-found h3 { margin: 14px 0 8px; font-size: clamp(18px,1.6vw,23px); font-weight: 600; letter-spacing: .01em; }
+      .v2-found p { margin: 0; font-size: 14px; line-height: 1.6; color: rgba(255,255,255,.66); }
+      /* 行业解决方案：压缩 2×2 */
+      .v2-ind-grid { display: grid; grid-template-columns: 1fr; gap: 14px; margin-top: clamp(40px,5vw,72px); }
+      @media (min-width: 720px) { .v2-ind-grid { grid-template-columns: 1fr 1fr; } }
+      .v2-ind { position: relative; display: block; min-height: clamp(200px,26vw,320px); border-radius: 16px; overflow: hidden; color: #fff; isolation: isolate; }
+      .v2-ind img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+      .v2-ind::after { content: ""; position: absolute; inset: 0; z-index: 1; background: linear-gradient(180deg, rgba(6,9,13,.12) 0%, rgba(6,9,13,.68) 100%); }
+      .v2-ind-cap { position: absolute; z-index: 2; left: 0; bottom: 0; padding: clamp(20px,2.4vw,32px); }
+      .v2-ind-cap .t { margin: 0; font-size: clamp(20px,2vw,28px); font-weight: 600; }
+      .v2-ind-cap .s { margin: 5px 0 0; font-size: 13px; color: rgba(255,255,255,.82); }
+      /* 产品体验：B端 + C端闭环 */
+      .v2-exp-main { margin-top: clamp(40px,5vw,72px); }
+      .v2-exp-sub { display: grid; grid-template-columns: 1fr; gap: clamp(20px,2.4vw,32px); margin-top: clamp(20px,2.4vw,32px); }
+      @media (min-width: 820px) { .v2-exp-sub { grid-template-columns: 1fr 1fr; } }
+      .v2-exp-note { margin: clamp(28px,3vw,44px) auto 0; max-width: 44ch; text-align: center; font-size: clamp(16px,1.4vw,20px); color: var(--v2-body); }
+      /* 客户案例：场景 / Demo，无虚构数字 */
+      .v2-case-grid { display: grid; grid-template-columns: 1fr; gap: clamp(18px,2vw,26px); margin-top: clamp(40px,5vw,72px); }
+      @media (min-width: 820px) { .v2-case-grid { grid-template-columns: repeat(2,1fr); } }
+      .v2-case { border: 1px solid var(--v2-line); border-radius: 16px; padding: clamp(24px,2.6vw,38px); background: var(--v2-bg); }
+      .v2-case .tag { display: inline-block; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--v2-brand); font-weight: 600; }
+      .v2-case h3 { margin: 12px 0 0; font-size: clamp(20px,2vw,26px); font-weight: 600; }
+      .v2-case p { margin: 12px 0 0; font-size: 15px; line-height: 1.65; color: var(--v2-body); }
+      .v2-case .use { margin: 18px 0 0; display: flex; flex-wrap: wrap; gap: 8px; }
+      .v2-case .use span { font-size: 12px; padding: 5px 12px; border: 1px solid var(--v2-line); border-radius: 999px; color: var(--v2-body); }
+      /* 最终 CTA（深色收尾） */
+      .v2-final { text-align: center; }
+      .v2-final .v2-h2 { margin-inline: auto; }
+      .v2-final .v2-lead { margin-inline: auto; text-align: center; }
+      .v2-final-actions { margin-top: clamp(28px,3vw,44px); display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
+      .v2-btn { min-height: 50px; padding: 0 30px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-weight: 600; font-size: 16px; border: 1px solid transparent; cursor: pointer; transition: opacity .2s ease, background-color .2s ease; }
+      .v2-btn.pri { background: var(--v2-brand); color: #fff; }
+      .v2-btn.ghost { background: transparent; color: #fff; border-color: rgba(255,255,255,.4); }
+      .v2-btn:hover { opacity: .88; }
+      /* 编辑式区块入场淡入 */
+      .v2-home-root.v2-anim .v2-reveal { opacity: 0; transform: translateY(26px); transition: opacity .8s cubic-bezier(.22,.61,.36,1), transform .8s cubic-bezier(.22,.61,.36,1); }
+      .v2-home-root.v2-anim .v2-sec.is-in .v2-reveal { opacity: 1; transform: none; }
+      .v2-home-root.v2-anim .v2-sec.is-in .v2-reveal:nth-child(2) { transition-delay: .06s; }
+      .v2-home-root.v2-anim .v2-sec.is-in .v2-reveal:nth-child(3) { transition-delay: .12s; }
+      .v2-home-root.v2-anim .v2-shot.v2-reveal { transform: translateY(30px) scale(.965); }
+      .v2-home-root.v2-anim .v2-sec.is-in .v2-shot.v2-reveal { transform: none; }
+      @media (max-width: 760px) {
+        .v2-sec { padding: 62px 0; }
+        .v2-wrap { width: min(100% - 30px, 620px); }
+        .v2-h2 { font-size: clamp(30px,9vw,42px); }
+        .v2-cap p, .v2-case p, .v2-lead { font-size: 15px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .v2-sec .v2-reveal, .v2-shot.v2-reveal { transition: none !important; transform: none !important; opacity: 1 !important; }
       }
     </style>
   </head>
@@ -1377,7 +1546,148 @@
     </header>
     <main id="top">
       <!-- 官网 2.0：沉浸式视频首页容器；由页尾脚本按场景配置渲染，1.0 模式下隐藏。 -->
-      <div id="v2Home" class="v2-home-root" aria-label="Rental OS"></div>
+      <div id="v2Home" class="v2-home-root" aria-label="Rental OS">
+        <section class="v2-hero" id="v2-hero" aria-label="Rental OS">
+          <div class="v2-hero-panels">
+            <!-- 换视频：把每块 <div class="v2-hero-media"> 换成 <video class="v2-hero-media" muted loop playsinline poster="..."></video>，同一 counter-skew 生效；脚本会只播放主场景。 -->
+            <div class="v2-hero-panel is-active" data-cat="vehicle" tabindex="0" style="--img:url('assets/industry-car-960.webp')">
+              <div class="v2-hero-media"></div>
+              <div class="v2-hero-panel-label"><span class="en">VEHICLE</span><span class="zh">车辆租赁</span></div>
+            </div>
+            <div class="v2-hero-panel" data-cat="camera" tabindex="0" style="--img:url('assets/industry-camera-960.webp')">
+              <div class="v2-hero-media"></div>
+              <div class="v2-hero-panel-label"><span class="en">CAMERA</span><span class="zh">摄影设备</span></div>
+            </div>
+            <div class="v2-hero-panel" data-cat="outdoor" tabindex="0" style="--img:url('assets/industry-camping-960.webp')">
+              <div class="v2-hero-media"></div>
+              <div class="v2-hero-panel-label"><span class="en">OUTDOOR</span><span class="zh">户外露营</span></div>
+            </div>
+            <div class="v2-hero-panel" data-cat="equipment" tabindex="0" style="--img:url('assets/industry-excavator-960.webp')">
+              <div class="v2-hero-media"></div>
+              <div class="v2-hero-panel-label"><span class="en">EQUIPMENT</span><span class="zh">工程 / 工具设备</span></div>
+            </div>
+          </div>
+          <div class="v2-hero-scrim"></div>
+          <div class="v2-hero-overlay">
+            <p class="v2-hero-brand">RENTAL OS</p>
+            <h1 class="v2-hero-title"><span>ONE OS.</span><span>EVERY RENTAL BUSINESS.</span></h1>
+            <p class="v2-hero-sub">一套系统，管理不同租赁业务。</p>
+            <a class="v2-cta" href="#v2-what">Explore <span>↓</span></a>
+          </div>
+        </section>
+        <section class="v2-sec v2-what" id="v2-what">
+          <div class="v2-wrap v2-what-grid">
+            <div>
+              <p class="v2-ey v2-reveal">WHAT IS RENTAL OS</p>
+              <h2 class="v2-h2 v2-reveal"><span class="ln">一套为多品类租赁</span><span class="ln">打造的经营系统。</span></h2>
+              <p class="v2-lead v2-reveal">预约、订单、库存、门店、履约、会员、结算和数据，集中在同一个平台管理。不同租赁品类，共享同一套成熟底座。</p>
+            </div>
+            <div class="v2-shot v2-reveal" style="--shot-ratio:64%">
+              <div class="v2-shot-bar"><i></i><i></i><i></i></div>
+              <div class="v2-shot-label"><span class="t">管理后台 · 经营概览</span><span class="s">Product screenshot</span></div>
+            </div>
+          </div>
+        </section>
+        <section class="v2-sec v2-soft">
+          <div class="v2-wrap">
+            <p class="v2-ey v2-reveal">COMPLETE RENTAL LIFECYCLE</p>
+            <h2 class="v2-h2 v2-reveal"><span class="ln">管理完整的</span><span class="ln">租赁履约过程。</span></h2>
+            <div class="v2-life-grid">
+              <div class="v2-life v2-reveal"><div class="n">01</div><p class="t">预约</p><p class="d">在线预约、可租日历与冲突提醒。</p></div>
+              <div class="v2-life v2-reveal"><div class="n">02</div><p class="t">下单</p><p class="d">条件确认，生成订单与报价。</p></div>
+              <div class="v2-life v2-reveal"><div class="n">03</div><p class="t">交付 / 取货</p><p class="d">门店自取、配送到门或据点交付。</p></div>
+              <div class="v2-life v2-reveal"><div class="n">04</div><p class="t">租用</p><p class="d">租期跟踪，续租与状态可查。</p></div>
+              <div class="v2-life v2-reveal"><div class="n">05</div><p class="t">归还</p><p class="d">归还验收、损耗与逾时判定。</p></div>
+              <div class="v2-life v2-reveal"><div class="n">06</div><p class="t">结算</p><p class="d">押金退还、费用结算与对账。</p></div>
+            </div>
+          </div>
+        </section>
+        <section class="v2-sec">
+          <div class="v2-wrap">
+            <p class="v2-ey v2-reveal">BUSINESS CAPABILITIES</p>
+            <h2 class="v2-h2 v2-reveal"><span class="ln">覆盖经营的</span><span class="ln">关键业务能力。</span></h2>
+            <div style="margin-top:clamp(48px,7vw,104px)">
+              <div class="v2-cap">
+                <div class="v2-cap-text v2-reveal"><div class="n">01</div><h3>预约与可租</h3><p>在线预约、可租日历与冲突提醒，让客户看到真正可租的商品，减少库存与档期冲突。</p></div>
+                <div class="v2-shot v2-reveal" style="--shot-ratio:66%"><div class="v2-shot-bar"><i></i><i></i><i></i></div><div class="v2-shot-label"><span class="t">可租日历 · 预约</span><span class="s">Product screenshot</span></div></div>
+              </div>
+              <div class="v2-cap rev">
+                <div class="v2-cap-text v2-reveal"><div class="n">02</div><h3>订单与履约</h3><p>从预约、取货到归还，完整记录租赁周期，每一步状态都可追踪。</p></div>
+                <div class="v2-shot v2-reveal" style="--shot-ratio:66%"><div class="v2-shot-bar"><i></i><i></i><i></i></div><div class="v2-shot-label"><span class="t">订单管理 · 履约</span><span class="s">Product screenshot</span></div></div>
+              </div>
+              <div class="v2-cap">
+                <div class="v2-cap-text v2-reveal"><div class="n">03</div><h3>多门店经营</h3><p>门店、仓库与库存统一管理，实时掌握业务数据，提升跨店协同效率。</p></div>
+                <div class="v2-shot v2-reveal" style="--shot-ratio:66%"><div class="v2-shot-bar"><i></i><i></i><i></i></div><div class="v2-shot-label"><span class="t">多门店 · 库存</span><span class="s">Product screenshot</span></div></div>
+              </div>
+            </div>
+            <div class="v2-life-grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-top:clamp(48px,6vw,88px)">
+              <div class="v2-life v2-reveal"><div class="n">04</div><p class="t">会员营销与复购</p><p class="d">会员体系、优惠券与积分，提升客户复购。</p></div>
+              <div class="v2-life v2-reveal"><div class="n">05</div><p class="t">押金与结算</p><p class="d">押金管理与多种结算方式，对账更轻松。</p></div>
+              <div class="v2-life v2-reveal"><div class="n">06</div><p class="t">用户端 / 小程序</p><p class="d">品牌官网与小程序，打通线上获客与下单。</p></div>
+            </div>
+          </div>
+        </section>
+        <section class="v2-sec v2-dark">
+          <div class="v2-wrap">
+            <p class="v2-ey v2-reveal">PLATFORM FOUNDATION</p>
+            <h2 class="v2-h2 v2-reveal"><span class="ln">ONE SYSTEM.</span><span class="ln">EVERY RENTAL BUSINESS.</span></h2>
+            <p class="v2-lead v2-reveal">不同品类，共享同一套成熟的租赁业务底座。</p>
+            <div class="v2-found-grid">
+              <div class="v2-found"><div class="n">01</div><h3>多租户</h3><p>多品牌、多门店的集团化运营，统一管理。</p></div>
+              <div class="v2-found"><div class="n">02</div><h3>订单履约</h3><p>下单、出库、配送到归还，全程可追踪。</p></div>
+              <div class="v2-found"><div class="n">03</div><h3>规则引擎</h3><p>计费、押金、逾时与业务流程灵活配置。</p></div>
+              <div class="v2-found"><div class="n">04</div><h3>营销体系</h3><p>优惠券、满减与会员权益等营销工具。</p></div>
+              <div class="v2-found"><div class="n">05</div><h3>数据分析</h3><p>经营数据、资产利用率与多维报表。</p></div>
+              <div class="v2-found"><div class="n">06</div><h3>开放 API</h3><p>对接电商、ERP 与财务系统。</p></div>
+            </div>
+          </div>
+        </section>
+        <section class="v2-sec">
+          <div class="v2-wrap">
+            <p class="v2-ey v2-reveal">INDUSTRIES</p>
+            <h2 class="v2-h2 v2-reveal"><span class="ln">BUILT FOR EVERY</span><span class="ln">RENTAL BUSINESS.</span></h2>
+            <div class="v2-ind-grid">
+              <a class="v2-ind v2-reveal" href="#v2-cta"><img src="assets/industry-camera-960.webp" alt="摄影设备租赁" loading="lazy" decoding="async" /><div class="v2-ind-cap"><p class="t">摄影设备</p><p class="s">相机 · 镜头 · 影视器材</p></div></a>
+              <a class="v2-ind v2-reveal" href="#v2-cta"><img src="assets/industry-camping-960.webp" alt="露营装备租赁" loading="lazy" decoding="async" /><div class="v2-ind-cap"><p class="t">户外露营</p><p class="s">帐篷 · 睡袋 · 户外家具</p></div></a>
+              <a class="v2-ind v2-reveal" href="#v2-cta"><img src="assets/industry-car-960.webp" alt="车辆载具租赁" loading="lazy" decoding="async" /><div class="v2-ind-cap"><p class="t">车辆载具</p><p class="s">汽车 · 房车 · 两轮出行</p></div></a>
+              <a class="v2-ind v2-reveal" href="#v2-cta"><img src="assets/industry-excavator-960.webp" alt="工程设备租赁" loading="lazy" decoding="async" /><div class="v2-ind-cap"><p class="t">工程设备</p><p class="s">工程机械 · 施工设备</p></div></a>
+            </div>
+          </div>
+        </section>
+        <section class="v2-sec v2-soft">
+          <div class="v2-wrap">
+            <p class="v2-ey v2-reveal">PRODUCT EXPERIENCE</p>
+            <h2 class="v2-h2 v2-reveal"><span class="ln">经营端与用户端，</span><span class="ln">一个平台连通。</span></h2>
+            <div class="v2-shot v2-reveal v2-exp-main" style="--shot-ratio:56%"><div class="v2-shot-bar"><i></i><i></i><i></i></div><div class="v2-shot-label"><span class="t">管理后台 · Dashboard</span><span class="s">Product screenshot</span></div></div>
+            <div class="v2-exp-sub">
+              <div class="v2-shot v2-reveal" style="--shot-ratio:64%"><div class="v2-shot-bar"><i></i><i></i><i></i></div><div class="v2-shot-label"><span class="t">用户预约官网</span><span class="s">Product screenshot</span></div></div>
+              <div class="v2-shot v2-reveal" style="--shot-ratio:64%"><div class="v2-shot-bar"><i></i><i></i><i></i></div><div class="v2-shot-label"><span class="t">移动端 · 小程序</span><span class="s">Product screenshot</span></div></div>
+            </div>
+            <p class="v2-exp-note v2-reveal">一个平台，连接经营端和用户端。</p>
+          </div>
+        </section>
+        <section class="v2-sec">
+          <div class="v2-wrap">
+            <p class="v2-ey v2-reveal">CUSTOMER CASES</p>
+            <h2 class="v2-h2 v2-reveal"><span class="ln">他们这样用</span><span class="ln">Rental OS。</span></h2>
+            <div class="v2-case-grid">
+              <div class="v2-case v2-reveal"><span class="tag">Demo Case</span><h3>摄影设备租赁</h3><p>用可租日历管理拍摄档期，套装与配件按序列号跟踪，从预约到归还统一记录。</p><div class="use"><span>门店</span><span>库存</span><span>预约</span><span>订单</span><span>会员</span></div></div>
+              <div class="v2-case v2-reveal"><span class="tag">Demo Case</span><h3>车辆载具租赁</h3><p>多门店车辆调度与档期管理，押金与结算清晰，同店 / 异店归还灵活配置。</p><div class="use"><span>多门店</span><span>档期</span><span>押金</span><span>结算</span></div></div>
+            </div>
+          </div>
+        </section>
+        <section class="v2-sec v2-dark v2-final" id="v2-cta">
+          <div class="v2-wrap narrow">
+            <p class="v2-ey v2-reveal">GET STARTED</p>
+            <h2 class="v2-h2 v2-reveal"><span class="ln">READY TO RUN YOUR</span><span class="ln">RENTAL BUSINESS?</span></h2>
+            <p class="v2-lead v2-reveal">打造属于你的租赁业务系统，从预约到归还，管理完整的租赁经营。</p>
+            <div class="v2-final-actions v2-reveal">
+              <a class="v2-btn pri" href="mailto:hello@rentalos.cn?subject=预约 Rental OS 演示">预约演示</a>
+              <a class="v2-btn ghost" href="mailto:hello@rentalos.cn?subject=咨询 Rental OS">咨询顾问</a>
+            </div>
+          </div>
+        </section>
+      </div>
       <section class="hero">
         <div class="shell hero-inner">
           <div class="hero-copy">
@@ -2201,6 +2511,80 @@
         "© 2026 Rental OS. 保留所有权利。":
           "© 2026 Rental OS. All rights reserved.",
         "隐私政策 服务条款 网站地图": "Privacy  Terms  Sitemap",
+        "面向多品类租赁业务的经营平台": "A management platform for multi-category rental businesses",
+        "从车辆到设备，从门店到线上——一个平台，适配多种租赁业务。": "From vehicles to equipment, from stores to online—one platform for many rental businesses.",
+        "预约 · 订单 · 库存 · 履约 · 结算 · 会员": "Booking · Orders · Inventory · Fulfillment · Settlement · Membership",
+        "一套为多品类租赁": "An operating system built",
+        "打造的经营系统。": "for multi-category rentals.",
+        "预约、订单、库存、门店、履约、会员、结算和数据，集中在同一个平台管理。不同租赁品类，共享同一套成熟底座。": "Booking, orders, inventory, stores, fulfillment, membership, settlement and data—all managed on one platform. Every rental category shares one mature foundation.",
+        "管理后台 · 经营概览": "Admin console · Overview",
+        "管理完整的": "Manage the entire",
+        "租赁履约过程。": "rental fulfillment process.",
+        "预约": "Booking",
+        "在线预约、可租日历与冲突提醒。": "Online booking, availability calendar and conflict alerts.",
+        "下单": "Order",
+        "条件确认，生成订单与报价。": "Confirm terms, generate orders and quotes.",
+        "交付 / 取货": "Delivery / Pickup",
+        "门店自取、配送到门或据点交付。": "In-store pickup, delivery, or station handover.",
+        "租用": "In use",
+        "租期跟踪，续租与状态可查。": "Track rental periods, renewals and status.",
+        "归还": "Return",
+        "归还验收、损耗与逾时判定。": "Return inspection, damage and overtime checks.",
+        "结算": "Settlement",
+        "押金退还、费用结算与对账。": "Deposit refunds, fee settlement and reconciliation.",
+        "覆盖经营的": "The capabilities that run",
+        "关键业务能力。": "your business.",
+        "预约与可租": "Booking & availability",
+        "在线预约、可租日历与冲突提醒，让客户看到真正可租的商品，减少库存与档期冲突。": "Online booking, availability calendar and conflict alerts show customers what is truly rentable and reduce inventory and schedule conflicts.",
+        "可租日历 · 预约": "Availability · Booking",
+        "订单与履约": "Orders & fulfillment",
+        "从预约、取货到归还，完整记录租赁周期，每一步状态都可追踪。": "From booking and pickup to return, the full rental cycle is recorded and every status is traceable.",
+        "订单管理 · 履约": "Orders · Fulfillment",
+        "门店、仓库与库存统一管理，实时掌握业务数据，提升跨店协同效率。": "Manage stores, warehouses and inventory in one place, with real-time data and better cross-store coordination.",
+        "多门店 · 库存": "Locations · Inventory",
+        "会员体系、优惠券与积分，提升客户复购。": "Memberships, coupons and points to grow repeat business.",
+        "押金管理与多种结算方式，对账更轻松。": "Deposit management and multiple settlement methods make reconciliation easier.",
+        "用户端 / 小程序": "Customer apps",
+        "品牌官网与小程序，打通线上获客与下单。": "Branded website and mini-program connect online acquisition and ordering.",
+        "不同品类，共享同一套成熟的租赁业务底座。": "Different categories, one mature rental business foundation.",
+        "多品牌、多门店的集团化运营，统一管理。": "Run multiple brands and locations centrally, in one view.",
+        "下单、出库、配送到归还，全程可追踪。": "From order and dispatch to return—fully traceable.",
+        "计费、押金、逾时与业务流程灵活配置。": "Configure pricing, deposits, overtime and workflows.",
+        "营销体系": "Marketing",
+        "优惠券、满减与会员权益等营销工具。": "Coupons, threshold discounts and member benefits.",
+        "经营数据、资产利用率与多维报表。": "Revenue, asset utilization and multi-dimensional reports.",
+        "开放 API": "Open API",
+        "对接电商、ERP 与财务系统。": "Connect commerce, ERP and finance systems.",
+        "摄影设备": "Camera gear",
+        "相机 · 镜头 · 影视器材": "Cameras · Lenses · Production",
+        "户外露营": "Outdoor & camping",
+        "帐篷 · 睡袋 · 户外家具": "Tents · Sleeping · Furniture",
+        "车辆载具": "Vehicles",
+        "汽车 · 房车 · 两轮出行": "Cars · RVs · Two-wheelers",
+        "工程设备": "Equipment",
+        "工程机械 · 施工设备": "Machinery · Construction",
+        "经营端与用户端，": "Operations and customers,",
+        "一个平台连通。": "connected on one platform.",
+        "管理后台 · Dashboard": "Admin console · Dashboard",
+        "用户预约官网": "Customer booking site",
+        "移动端 · 小程序": "Mobile · Mini-program",
+        "一个平台，连接经营端和用户端。": "One platform connecting operations and customers.",
+        "他们这样用": "How teams use",
+        "Rental OS。": "Rental OS.",
+        "用可租日历管理拍摄档期，套装与配件按序列号跟踪，从预约到归还统一记录。": "Manage shoot schedules with an availability calendar, track kits and accessories by serial number, and record everything from booking to return.",
+        "多门店车辆调度与档期管理，押金与结算清晰，同店 / 异店归还灵活配置。": "Multi-store vehicle dispatch and scheduling, with clear deposits and settlement and flexible same- or different-location returns.",
+        "门店": "Stores",
+        "库存": "Inventory",
+        "订单": "Orders",
+        "会员": "Members",
+        "多门店": "Multi-store",
+        "档期": "Scheduling",
+        "押金": "Deposits",
+        "打造属于你的租赁业务系统，从预约到归还，管理完整的租赁经营。": "Build your own rental business system—manage the full operation from booking to return.",
+        "咨询顾问": "Talk to us",
+        "一套系统，管理不同租赁业务。": "One system to run every rental business.",
+        "车辆租赁": "Vehicle rental",
+        "工程 / 工具设备": "Tools & equipment",
       };
 
       const languageKey = "rental-os-language";
@@ -2412,8 +2796,8 @@
           ? "Rental OS | Rental solutions for multiple industries"
           : "Rental OS｜面向多行业的租赁解决方案";
         document.querySelector('meta[name="description"]').content = isEnglish
-          ? "Rental OS is an all-in-one SaaS platform for camera, outdoor, vehicle and construction equipment rental businesses."
-          : "Rental OS 面向摄影器材、露营装备、车辆载具和工程设备等租赁企业，提供资产、订单、定价、履约、会员与经营分析的一体化 SaaS 解决方案。";
+          ? "Rental OS is an all-in-one operating platform for multi-category rental businesses—booking, orders, inventory, stores, fulfillment, membership, settlement and analytics in one place."
+          : "Rental OS 是面向多品类租赁业务的一体化经营平台：预约、订单、库存、门店、履约、会员、结算与经营分析集中管理，适配车辆、设备、摄影、露营、工具等多种租赁场景。";
         theme.setAttribute(
           "aria-label",
           isEnglish ? "Switch color mode" : "切换颜色模式",
@@ -2588,116 +2972,55 @@
       updateActiveNavigation();
     </script>
     <script>
-      /* 官网 2.0 沉浸视频首页：场景配置集中管理；渲染 + IntersectionObserver 播放控制 + 三级兜底。 */
+      /* 官网 2.0：多品类斜切 Hero（主场景每 6s 轮播扩大 + Hover/聚焦交互，结构预留 video）+ 编辑式区块入场 + 顶栏两态。
+         文案写在 HTML（利于 SEO / 无 JS / 语言切换）；相对路径适配 /rental-os-website/ 子路径。 */
       (() => {
+        if (!document.documentElement.classList.contains("home-v2")) return;
         const root = document.getElementById("v2Home");
-        // 仅 2.0 模式渲染（html.home-v2）；1.0 模式(?home=1)保持原英雄不动。
-        if (!root || !document.documentElement.classList.contains("home-v2")) return;
-
-        const scenes = [
-          { kind: "hero", video: "/assets/video/hero-01.mp4", poster: "/assets/poster/hero-01.webp",
-            fallback: "/assets/hero-solutions-neutral-1440.webp",
-            title: ["RENT", "ANYTHING.", "", "MANAGE", "EVERYTHING."],
-            subtitle: "面向多品类租赁业务的新一代管理平台",
-            cta: { label: "Explore", to: "#next", arrow: "↓" } },
-          { kind: "scene", video: "/assets/video/hero-02.mp4", poster: "/assets/poster/hero-02.webp",
-            fallback: "/assets/industry-car-960.webp", eyebrow: "01 / VEHICLE",
-            title: ["VEHICLE"], subtitle: "车辆载具租赁",
-            cta: { label: "View", to: "#solutions", arrow: "→" } },
-          { kind: "scene", video: "/assets/video/hero-03.mp4", poster: "/assets/poster/hero-03.webp",
-            fallback: "/assets/industry-camera-960.webp", eyebrow: "02 / EQUIPMENT",
-            title: ["EQUIPMENT"], subtitle: "设备 · 摄影器材 · 工具租赁",
-            cta: { label: "View", to: "#solutions", arrow: "→" } },
-          { kind: "scene", video: "/assets/video/hero-04.mp4", poster: "/assets/poster/hero-04.webp",
-            fallback: "/assets/cta-mountain-1280.webp", eyebrow: "03 / MOBILITY",
-            title: ["MOBILITY"], subtitle: "两轮出行 · 自行车 · 电动车",
-            cta: { label: "View", to: "#solutions", arrow: "→" } },
-          { kind: "scene", video: "/assets/video/hero-05.mp4", poster: "/assets/poster/hero-05.webp",
-            fallback: "/assets/hero-solutions-neutral-2880.webp", eyebrow: "04 / ANYTHING",
-            title: ["ANYTHING"], subtitle: "One OS. Every Rental Business.",
-            cta: { label: "Explore solutions", to: "#solutions", arrow: "→" } },
-        ];
-
-        function el(tag, cls, text) {
-          const n = document.createElement(tag);
-          if (cls) n.className = cls;
-          if (text != null) n.textContent = text;
-          return n;
-        }
-        const observed = [];
-        scenes.forEach((s) => {
-          const sec = el("section", "v2-scene v2-scene-" + s.kind);
-          sec.style.setProperty("--scene-fallback", 'url("' + s.fallback + '")');
-          if (s.objectPosition) sec.style.setProperty("--scene-pos", s.objectPosition);
-          if (s.objectPositionMobile) sec.style.setProperty("--scene-pos-mobile", s.objectPositionMobile);
-
-          const video = document.createElement("video");
-          video.className = "v2-scene-video";
-          video.muted = true; video.loop = true; video.autoplay = true;
-          video.setAttribute("playsinline", ""); video.preload = "metadata";
-          if (s.poster) video.poster = s.poster;
-          video.src = s.video;
-          video.addEventListener("loadeddata", () => sec.classList.add("is-ready"), { once: true });
-          sec.appendChild(video);
-          sec.appendChild(el("div", "v2-scene-scrim"));
-
-          const content = el("div", "v2-scene-content");
-          if (s.eyebrow) content.appendChild(el("p", "v2-eyebrow", s.eyebrow));
-          const h = el(s.kind === "hero" ? "h1" : "h2", "v2-title");
-          s.title.forEach((line) => {
-            const span = el("span", line === "" ? "v2-gap" : null, line === "" ? null : line);
-            if (line === "") span.setAttribute("aria-hidden", "true");
-            h.appendChild(span);
-          });
-          content.appendChild(h);
-          if (s.subtitle) content.appendChild(el("p", "v2-subtitle", s.subtitle));
-          if (s.cta) {
-            const cta = document.createElement("a");
-            cta.className = "v2-cta";
-            cta.href = s.cta.to;
-            cta.appendChild(document.createTextNode(s.cta.label + " "));
-            cta.appendChild(el("span", null, s.cta.arrow || "→"));
-            if (s.cta.to === "#next") {
-              cta.addEventListener("click", (e) => {
-                e.preventDefault();
-                const reduce = matchMedia("(prefers-reduced-motion:reduce)").matches;
-                if (sec.nextElementSibling)
-                  sec.nextElementSibling.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
-              });
-            }
-            content.appendChild(cta);
-          }
-          sec.appendChild(content);
-          root.appendChild(sec);
-          observed.push(sec);
-        });
+        if (!root) return;
         document.body.classList.add("v2-home");
+        root.classList.add("v2-anim");
+        const reduce = matchMedia("(prefers-reduced-motion:reduce)").matches;
 
-        // IntersectionObserver：进视口才 play + 淡入，离开 pause（不会多视频同放）。
-        const io = new IntersectionObserver((entries) => {
-          entries.forEach((entry) => {
-            const sec = entry.target;
-            const video = sec.querySelector("video");
-            if (entry.isIntersecting) {
-              sec.classList.add("is-inview");
-              if (video) { const p = video.play(); if (p && p.catch) p.catch(() => {}); }
-            } else if (video) {
-              video.pause();
-            }
+        // 多品类 Hero：主场景每 6s 轮播扩大、其余收窄；Hover/聚焦某区暂停并置为主场景。
+        // 预留视频：某区放入 <video class="v2-hero-media"> 时，仅主场景播放、其余暂停（控制首屏性能）。
+        const hero = document.getElementById("v2-hero");
+        if (hero) {
+          const panels = [...hero.querySelectorAll(".v2-hero-panel")];
+          let active = 0, timer = null;
+          function apply(i) {
+            active = i;
+            panels.forEach((p, idx) => {
+              const on = idx === i;
+              p.classList.toggle("is-active", on);
+              const v = p.querySelector("video");
+              if (v) { if (on && !reduce) { const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); } else v.pause(); }
+            });
+          }
+          function stop() { if (timer) { clearInterval(timer); timer = null; } }
+          function start() { if (reduce || panels.length < 2) return; stop(); timer = setInterval(() => apply((active + 1) % panels.length), 6000); }
+          panels.forEach((p, i) => {
+            p.addEventListener("mouseenter", () => { apply(i); stop(); });
+            p.addEventListener("focusin", () => { apply(i); stop(); });
           });
-        }, { threshold: 0.5 });
-        observed.forEach((sec) => io.observe(sec));
-
-        // 顶栏在浅色产品区转深色：侦测首个产品区(#solutions)是否触及顶栏。
-        const lightAnchor = document.getElementById("solutions");
-        let ticking = false;
-        function updateHeader() {
-          ticking = false;
-          if (!lightAnchor) return;
-          document.body.classList.toggle("v2-lighttop", lightAnchor.getBoundingClientRect().top <= 72);
+          hero.addEventListener("mouseleave", start);
+          // 仅当 Hero 在视口内才轮播，滚离即停（省电、避免离屏持续重排/重绘）。
+          if ("IntersectionObserver" in window) {
+            new IntersectionObserver((es) => { es.forEach((e) => { e.isIntersecting ? start() : stop(); }); }, { threshold: 0.25 }).observe(hero);
+          }
+          apply(0);
+          start();
         }
-        function onScroll() { if (!ticking) { ticking = true; requestAnimationFrame(updateHeader); } }
-        updateHeader();
+
+        // 编辑式内容区入场 + 顶栏两态：滚动驱动，稳健且在离屏预览中也生效。
+        const secs = [...root.querySelectorAll(".v2-sec")];
+        const anchor = document.getElementById("v2-what");
+        function onScroll() {
+          const vh = window.innerHeight;
+          secs.forEach((s) => { if (!s.classList.contains("is-in") && s.getBoundingClientRect().top < vh * 0.9) s.classList.add("is-in"); });
+          if (anchor) document.body.classList.toggle("v2-lighttop", anchor.getBoundingClientRect().top <= 76);
+        }
+        onScroll();
         window.addEventListener("scroll", onScroll, { passive: true });
         window.addEventListener("resize", onScroll);
       })();
