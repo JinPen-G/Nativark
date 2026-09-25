@@ -62,7 +62,7 @@ Page({
   buildGates(order: RentalOrder, funding: Awaited<ReturnType<typeof getOrderFunding>> | undefined): GateItem[] {
     const gates: GateItem[] = [];
     if (funding) {
-      // 读服务端权威待收（含线上/合并支付已入账、退款回冲、待补款续租），与提交时的 assertReadyForPickup 同源。
+      // 读服务端权威待收（含线上支付已入账、退款回冲、待补款续租），与提交时的 assertReadyForPickup 同源。
       const rentalOutstanding = funding.rental.due;
       const depositReady = funding.deposit.requiredAmount <= 0 || funding.deposit.collected - funding.deposit.refunded >= funding.deposit.requiredAmount;
       const preauthReady = funding.preauthorization.requiredAmount <= 0 || funding.preauthorization.frozen - funding.preauthorization.released >= funding.preauthorization.requiredAmount;

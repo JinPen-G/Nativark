@@ -50,7 +50,7 @@ Page({
       return row.quantityDelta > 0 && row.operationType !== "transfer";
     }).map((row) => {
       const { date, time } = splitInstant(row.createdAt, timeZone);
-      const labels: Record<RentalStockLedgerEntry["operationType"], string> = { receive: "入库", count_adjustment: "盘点调整", transfer: "转移", consume: "领用", scrap: "报损", retire: "退役", return_transfer: "归还回库", maintenance_quarantine: "维修隔离", maintenance_release: "维修解除" };
+      const labels: Record<RentalStockLedgerEntry["operationType"], string> = { receive: "入库", count_adjustment: "盘点调整", transfer: "转移", consume: "领用", scrap: "报损", retire: "退役", return_transfer: "归还回库", maintenance_quarantine: "维修隔离", maintenance_release: "维修解除", maintenance_write_off: "维修核销" };
       const tone = row.operationType === "transfer" ? "warning" : row.quantityDelta > 0 ? "success" : "danger";
       return { id: row.id, name: row.itemGroupName, action: labels[row.operationType], tone, location: row.locationName, date, time, quantity: `${row.quantityDelta > 0 ? "+" : ""}${row.quantityDelta}`, reason: row.reason, operator: row.operator, sortAt: Date.parse(row.createdAt) || 0 };
     });

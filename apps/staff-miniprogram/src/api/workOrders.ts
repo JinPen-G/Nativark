@@ -1,4 +1,4 @@
-import type { AssignRentalWorkOrderRequest, CancelRentalWorkOrderRequest, RentalStockDisposition, RentalWorkOrder, RentalWorkOrderAssignee, RentalWorkOrderHistoryEntry, RentalWorkOrderStatus, ReviewRentalWorkOrderRequest, SubmitRentalWorkOrderRequest } from "@rental-os/shared";
+import type { AssignRentalWorkOrderRequest, RentalStockDisposition, RentalWorkOrder, RentalWorkOrderHistoryEntry, RentalWorkOrderStatus, ReviewRentalWorkOrderRequest, SubmitRentalWorkOrderRequest } from "@rental-os/shared";
 import { request } from "../core/http";
 
 /**
@@ -18,10 +18,6 @@ export function workOrderHistory(workOrderId: string): Promise<RentalWorkOrderHi
   return request<RentalWorkOrderHistoryEntry[]>(`/rental/v1/work-orders/${encodeURIComponent(workOrderId)}/history`);
 }
 
-export function listWorkOrderAssignees(): Promise<RentalWorkOrderAssignee[]> {
-  return request<RentalWorkOrderAssignee[]>("/rental/v1/work-order-assignees");
-}
-
 export function assignWorkOrder(workOrderId: string, input: AssignRentalWorkOrderRequest): Promise<RentalWorkOrder> {
   return request<RentalWorkOrder>(`/rental/v1/work-orders/${encodeURIComponent(workOrderId)}/assign`, { method: "PUT", data: input });
 }
@@ -36,10 +32,6 @@ export function submitWorkOrder(workOrderId: string, input: SubmitRentalWorkOrde
 
 export function reviewWorkOrder(workOrderId: string, input: ReviewRentalWorkOrderRequest): Promise<RentalWorkOrder> {
   return request<RentalWorkOrder>(`/rental/v1/work-orders/${encodeURIComponent(workOrderId)}/review`, { method: "POST", data: input });
-}
-
-export function cancelWorkOrder(workOrderId: string, input: CancelRentalWorkOrderRequest): Promise<RentalWorkOrder> {
-  return request<RentalWorkOrder>(`/rental/v1/work-orders/${encodeURIComponent(workOrderId)}/cancel`, { method: "POST", data: input });
 }
 
 export function listStockDispositions(orderId?: string): Promise<RentalStockDisposition[]> {

@@ -14,10 +14,6 @@ export async function listOrders(query: RentalOrderListQuery = {}): Promise<Rent
   return Array.isArray(result) ? result : result.items;
 }
 
-export function queryOrders(query: RentalOrderListQuery): Promise<RentalOrderPage> {
-  return request<RentalOrderPage>(ORDERS, { query: { page: query.page ?? 1, pageSize: query.pageSize ?? 20, status: query.status, keyword: query.keyword, from: query.from, to: query.to, pendingFeeOnly: query.pendingFeeOnly } });
-}
-
 export function getOrder(orderId: string): Promise<RentalOrder> {
   return request<RentalOrder>(orderPath(orderId));
 }

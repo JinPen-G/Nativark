@@ -28,10 +28,7 @@ function unknownResultOr(error: unknown): string {
   return describeError(error).message;
 }
 
-/**
- * 客户在线支付（含跨品类合并支付）与退款渠道的展示口径。押金线下收款走登记列表，不在此重复。
- * 合并支付回落到与单笔在线支付相同的按单 rental/initiate 资金事件，只是 reason 带“合并支付”。
- */
+/** 客户在线支付与退款渠道的展示口径。押金线下收款走登记列表，不在此重复。 */
 const ONLINE_FUNDING_PROVIDERS = ["wechat_pay", "alipay", "stripe"];
 function fundingChannelLabel(provider: string): string {
   return provider === "wechat_pay" ? "微信支付" : provider === "alipay" ? "支付宝" : provider === "stripe" ? "境外银行卡" : "在线支付";
@@ -39,7 +36,7 @@ function fundingChannelLabel(provider: string): string {
 
 Page({
   behaviors: [themeBehavior],
-  data: { view: loadingState() as ViewState, id: "", orderNo: "", status: "", tone: "neutral", createdAt: "", customer: "", phone: "", customerCompany: "", customerRegion: "", period: "", pickupLocation: "", returnLocation: "", mode: "", itemLabel: "物品", pickupLabel: "领取", returnLabel: "归还", identifierLabel: "编号", hasDeliveryAddress: false, deliveryLabel: "配送", deliveryRecipient: "", deliveryPhone: "", deliveryPhoneCallable: "", deliveryAddressText: "", lines: [] as Array<{ id: string; name: string; quantity: number; imagePath: string; resources: Array<{ id: string; assetNo: string; quantity: number; statusLabel: string }> }>, totalQuantity: 0, amount: "", deposit: "", rentalAmount: "", discountAmount: "", serviceAmount: "", hasDiscount: false, hasService: false, hasActions: false, canConfirm: false, canAllocate: false, canPickup: false, canReturn: false, canCancel: false, canForceReleaseLock: false, operationLockOwner: "", operationLockExpiresAt: "", internalNotes: [] as RentalOrderInternalNote[], canAddInternalNote: false, internalNoteDraft: "", internalNotesBusy: false, showOfflinePayments: false, canRegisterOffline: false, canConfirmOffline: false, rentalOutstanding: 0, depositOutstanding: 0, rentalBalanceLabel: "—", depositBalanceLabel: "—", offlineRegistrations: [] as Array<StaffOfflinePaymentRegistration & { instrumentLabel: string; methodLabel: string; amountLabel: string }>, offlineInstrument: "rental" as "rental" | "deposit", offlineInstrumentOptions: ["租金 / 费用", "押金"], offlineMethodOptions: ["现金", "银行转账"], offlineMethodIndex: 0, offlineAmount: "", offlineReason: "现场线下收款", offlineEvidenceId: "", offlineEvidencePath: "", hasOfflineFunding: false, onlineCollections: [] as Array<{ id: string; methodLabel: string; directionLabel: string; amountLabel: string; timeLabel: string; refund: boolean; merged: boolean }>, hasOnlineCollections: false, canExpirePending: false, canMarkOverdue: false, isPickupOverdue: false, noticeSent: false, noShowNoticeAtLabel: "", pickupOverdueAtLabel: "", canSendNoShowNotice: false, canConfirmNoShow: false, canResumePickup: false, canExtend: false, currentEndLabel: "", extendOpen: false, extendDate: "", extendTime: "", extendMinDate: "", extendZoneHint: "", extendBusy: false, extendPreviewReady: false, extendPreview: null as null | { newEndLabel: string; payableLabel: string; depositDeltaLabel: string; hasDepositDelta: boolean; preAuthDeltaLabel: string; hasPreAuthDelta: boolean; rentalLabel: string; serviceLabel: string; hasService: boolean; billableUnits: number; paymentRequired: boolean; monthly: boolean }, extensionReviews: [] as Array<{ id: string; sequence: number; newEndLabel: string; amountLabel: string }>, hasExtensionReviews: false, inspectionExceptions: [] as Array<{ inspectionId: string; index: number; key: string; stageLabel: string; description: string; suggestedLabel: string; approvedLabel: string; needsReview: boolean; disputed: boolean; customerReason: string }>, hasInspectionExceptions: false, reviewBusy: false, busy: false, error: "" },
+  data: { view: loadingState() as ViewState, id: "", orderNo: "", status: "", tone: "neutral", createdAt: "", customer: "", phone: "", customerCompany: "", customerRegion: "", period: "", pickupLocation: "", returnLocation: "", mode: "", itemLabel: "物品", pickupLabel: "领取", returnLabel: "归还", identifierLabel: "编号", hasDeliveryAddress: false, deliveryLabel: "配送", deliveryRecipient: "", deliveryPhone: "", deliveryPhoneCallable: "", deliveryAddressText: "", lines: [] as Array<{ id: string; name: string; quantity: number; imagePath: string; resources: Array<{ id: string; assetNo: string; quantity: number; statusLabel: string }> }>, totalQuantity: 0, amount: "", deposit: "", rentalAmount: "", discountAmount: "", serviceAmount: "", hasDiscount: false, hasService: false, hasActions: false, canConfirm: false, canAllocate: false, canPickup: false, canReturn: false, canCancel: false, canForceReleaseLock: false, operationLockOwner: "", operationLockExpiresAt: "", internalNotes: [] as RentalOrderInternalNote[], canAddInternalNote: false, internalNoteDraft: "", internalNotesBusy: false, showOfflinePayments: false, canRegisterOffline: false, canConfirmOffline: false, rentalOutstanding: 0, depositOutstanding: 0, rentalBalanceLabel: "—", depositBalanceLabel: "—", offlineRegistrations: [] as Array<StaffOfflinePaymentRegistration & { instrumentLabel: string; methodLabel: string; amountLabel: string }>, offlineInstrument: "rental" as "rental" | "deposit", offlineInstrumentOptions: ["租金 / 费用", "押金"], offlineMethodOptions: ["现金", "银行转账"], offlineMethodIndex: 0, offlineAmount: "", offlineReason: "现场线下收款", offlineEvidenceId: "", offlineEvidencePath: "", hasOfflineFunding: false, onlineCollections: [] as Array<{ id: string; methodLabel: string; directionLabel: string; amountLabel: string; timeLabel: string; refund: boolean }>, hasOnlineCollections: false, canExpirePending: false, canMarkOverdue: false, isPickupOverdue: false, noticeSent: false, noShowNoticeAtLabel: "", pickupOverdueAtLabel: "", canSendNoShowNotice: false, canConfirmNoShow: false, canResumePickup: false, canExtend: false, currentEndLabel: "", extendOpen: false, extendDate: "", extendTime: "", extendMinDate: "", extendZoneHint: "", extendBusy: false, extendPreviewReady: false, extendPreview: null as null | { newEndLabel: string; payableLabel: string; depositDeltaLabel: string; hasDepositDelta: boolean; preAuthDeltaLabel: string; hasPreAuthDelta: boolean; rentalLabel: string; serviceLabel: string; hasService: boolean; billableUnits: number; paymentRequired: boolean; monthly: boolean }, extensionReviews: [] as Array<{ id: string; sequence: number; newEndLabel: string; amountLabel: string }>, hasExtensionReviews: false, inspectionExceptions: [] as Array<{ inspectionId: string; index: number; key: string; stageLabel: string; description: string; suggestedLabel: string; approvedLabel: string; needsReview: boolean; disputed: boolean; customerReason: string }>, hasInspectionExceptions: false, reviewBusy: false, busy: false, error: "" },
   order: undefined as RentalOrder | undefined,
   extensions: [] as RentalOrderExtension[],
   inspections: [] as RentalInspectionRecord[],
@@ -197,7 +194,7 @@ Page({
       methodLabel: row.paymentMethod === "offline_transfer" ? "银行转账" : "现金",
       amountLabel: formatMoney(row.amount, currency)
     }));
-    // 客户在线支付（含合并支付）与退款：从服务端资金事件流直接读取，员工不再只看到“待收 0”而无凭据。
+    // 客户在线支付与退款：从服务端资金事件流直接读取，员工不再只看到“待收 0”而无凭据。
     const onlineCollections = (funding?.events ?? [])
       .filter((event) => ONLINE_FUNDING_PROVIDERS.indexOf(event.provider) >= 0 && ["initiate", "append", "refund", "capture"].indexOf(event.action) >= 0 && (event.instrument === "rental" || event.instrument === "deposit"))
       .map((event) => {
@@ -209,8 +206,7 @@ Page({
           directionLabel: refund ? "退款" : capture ? "押金抵扣" : event.instrument === "deposit" ? "押金收款" : "收款",
           amountLabel: (refund ? "−" : "") + formatMoney(event.amount, currency),
           timeLabel: formatBusinessDateTime(event.at, this.timeZone),
-          refund,
-          merged: typeof event.reason === "string" && event.reason.indexOf("合并支付") >= 0
+          refund
         };
       })
       .reverse();

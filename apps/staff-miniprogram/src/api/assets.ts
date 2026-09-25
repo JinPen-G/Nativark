@@ -1,4 +1,4 @@
-import type { RentalAsset, RentalAssetStatusHistory, RentalStockBalance, RentalStockLedgerEntry, RentalStockOperationRequest, SaveRentalAssetRequest } from "@rental-os/shared";
+import type { RentalAsset, RentalAssetStatusHistory, RentalStockBalance, RentalStockLedgerEntry, SaveRentalAssetRequest } from "@rental-os/shared";
 import { request } from "../core/http";
 
 /**
@@ -43,11 +43,4 @@ export function listStockBalances(): Promise<RentalStockBalance[]> {
 
 export function listStockLedger(filters: { itemGroupId?: string; locationId?: string; batchNo?: string; limit?: number } = {}): Promise<RentalStockLedgerEntry[]> {
   return request<RentalStockLedgerEntry[]>("/rental/v1/stock-ledger", { query: { itemGroupId: filters.itemGroupId, locationId: filters.locationId, batchNo: filters.batchNo, limit: filters.limit } });
-}
-
-/** 数量库存操作（转移/入库/盘点/报损）；幂等键由调用方持久化后传入。 */
-export async function applyStockOperation(input: RentalStockOperationRequest): Promise<unknown> {
-  const result = await request<unknown>("/rental/v1/stock-operations", { method: "POST", data: input, idempotencyKey: input.idempotencyKey });
-  invalidateAssets();
-  return result;
 }

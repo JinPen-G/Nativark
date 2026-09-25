@@ -1,6 +1,6 @@
 import type { CompleteFileUploadRequest, CreateFileUploadSessionRequest, FileAssetSummary, FileDownloadUrlSummary, FileUploadSessionSummary } from "@rental-os/shared";
 import { newKey } from "../core/keys";
-import { authHeaders, request } from "../core/http";
+import { request } from "../core/http";
 
 export interface LocalStaffImage {
   path: string;
@@ -77,9 +77,4 @@ export async function staffUploadDownloadUrl(fileAssetId: string): Promise<strin
   const result = await request<FileDownloadUrlSummary>(`/uploads/${encodeURIComponent(fileAssetId)}/download-url`);
   // 模拟存储只返回元数据接口地址，不是可供 <image> 读取的图片文件。
   return result.mode === "provider" ? result.downloadUrl : "";
-}
-
-/** Used only where a component cannot attach auth headers, e.g. an image preview. */
-export function staffUploadAuthHeaders() {
-  return authHeaders();
 }

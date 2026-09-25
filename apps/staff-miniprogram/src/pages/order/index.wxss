@@ -27,7 +27,6 @@
 .offline-payment-card { border-color: var(--border); }
 .collection-record { padding: 16rpx 0; border-top: 1rpx solid var(--border); }
 .collection-record__label { display: flex; align-items: center; gap: 12rpx; min-width: 0; color: var(--text); font-size: var(--font-secondary); font-weight: var(--fw-semibold); }
-.collection-record__tag { flex: 0 0 auto; padding: 2rpx 12rpx; border-radius: var(--radius-pill); background: var(--primary-weak); color: var(--primary); font-size: var(--font-mini); }
 .collection-record__amount { flex: 0 0 auto; color: var(--success); font-size: var(--font-secondary); font-weight: var(--fw-semibold); }
 .collection-record__amount--refund { color: var(--danger); }
 .offline-payment-form { padding-top: 12rpx; }

@@ -1,4 +1,4 @@
-import type { ChangePasswordRequest, LoginResponse, SessionContextResponse } from "@rental-os/shared";
+import type { ChangePasswordRequest, LoginResponse } from "@rental-os/shared";
 import { request } from "../core/http";
 import { clearSession, refreshToken, saveSession } from "../core/session";
 
@@ -21,10 +21,6 @@ export async function logout(): Promise<void> {
     }
   }
   clearSession("logout");
-}
-
-export function sessionContext(): Promise<SessionContextResponse> {
-  return request<SessionContextResponse>("/auth/session-context", { scope: "tenant" });
 }
 
 /** 切换经营空间：服务端校验成员资格后换发访问令牌（refreshToken 不变）。 */
