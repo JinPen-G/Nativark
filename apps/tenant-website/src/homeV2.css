@@ -123,22 +123,24 @@
   padding-top: clamp(48px, 7vw, 104px);
 }
 
-/* —— 顶栏浮在视频上：未滚动时转浅色，深色视频上可读；不改结构、不改 Logo —— */
-body.v2-home .site-header { position: fixed; }
-body.v2-home .site-header:not(.is-scrolled) .main-nav a,
-body.v2-home .site-header:not(.is-scrolled) .brand-slogan,
-body.v2-home .site-header:not(.is-scrolled) .header-orders,
-body.v2-home .site-header:not(.is-scrolled) .header-account,
-body.v2-home .site-header:not(.is-scrolled) .language-switcher-header,
-body.v2-home .site-header:not(.is-scrolled) .theme-switcher-header { color: #fff; }
-body.v2-home .site-header:not(.is-scrolled) .header-account,
-body.v2-home .site-header:not(.is-scrolled) .language-switcher-header,
-body.v2-home .site-header:not(.is-scrolled) .theme-switcher-header,
-body.v2-home .site-header:not(.is-scrolled) .header-search { border-color: rgba(255, 255, 255, .4); }
-body.v2-home .site-header:not(.is-scrolled) .header-search,
-body.v2-home .site-header:not(.is-scrolled) .header-search input { color: #fff; }
-body.v2-home .site-header:not(.is-scrolled) .header-search input::placeholder { color: rgba(255, 255, 255, .6); }
-html[data-theme="light"] body.v2-home .site-header:not(.is-scrolled) .brand-logo { filter: brightness(0) invert(1); }
+/* —— 2.0 顶栏：全透明融入整页，去掉玻璃浮窗与实底；浮在视频上用浅色，滚到浅色产品区转回深色 —— */
+body.v2-home .site-header { position: fixed; background: transparent; }
+html[data-theme="dark"] body.v2-home .site-header { background: transparent; }
+body.v2-home .site-header::before { display: none; }
+body.v2-home:not(.v2-home-lighttop) .site-header .main-nav a,
+body.v2-home:not(.v2-home-lighttop) .site-header .brand-slogan,
+body.v2-home:not(.v2-home-lighttop) .site-header .header-orders,
+body.v2-home:not(.v2-home-lighttop) .site-header .header-account,
+body.v2-home:not(.v2-home-lighttop) .site-header .language-switcher-header,
+body.v2-home:not(.v2-home-lighttop) .site-header .theme-switcher-header { color: #fff; }
+body.v2-home:not(.v2-home-lighttop) .site-header .header-account,
+body.v2-home:not(.v2-home-lighttop) .site-header .language-switcher-header,
+body.v2-home:not(.v2-home-lighttop) .site-header .theme-switcher-header,
+body.v2-home:not(.v2-home-lighttop) .site-header .header-search { border-color: rgba(255, 255, 255, .4); }
+body.v2-home:not(.v2-home-lighttop) .site-header .header-search,
+body.v2-home:not(.v2-home-lighttop) .site-header .header-search input { color: #fff; }
+body.v2-home:not(.v2-home-lighttop) .site-header .header-search input::placeholder { color: rgba(255, 255, 255, .6); }
+html[data-theme="light"] body.v2-home:not(.v2-home-lighttop) .site-header .brand-logo { filter: brightness(0) invert(1); }
 
 /* —— 移动端 —— */
 @media (max-width: 768px) {

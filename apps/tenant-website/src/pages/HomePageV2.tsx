@@ -29,11 +29,28 @@ export function HomePageV2() {
   const version = resolveVersion(params.get('home'));
   const { mode } = useSite();
 
-  // 仅 2.0 首页给 <body> 挂标记：让全局浮窗顶栏在深色视频上转为浅色文字（见 homeV2.css）。
+  // 仅 2.0 首页给 <body> 挂标记：顶栏全透明融入视频（浅色文字）；
+  // 滚动到下方浅色产品区时切 v2-home-lighttop，让顶栏文字转深色保持可读。
   useEffect(() => {
     if (version !== 2) return;
-    document.body.classList.add('v2-home');
-    return () => document.body.classList.remove('v2-home');
+    const body = document.body;
+    body.classList.add('v2-home');
+    let ticking = false;
+    const update = () => {
+      ticking = false;
+      const product = document.querySelector('.v2-product');
+      const overLight = product ? product.getBoundingClientRect().top <= 72 : false;
+      body.classList.toggle('v2-home-lighttop', overLight);
+    };
+    const onScroll = () => { if (!ticking) { ticking = true; requestAnimationFrame(update); } };
+    update();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      body.classList.remove('v2-home', 'v2-home-lighttop');
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
   }, [version]);
 
   // 保留 1.0：?home=1 时原样渲染旧首页。
