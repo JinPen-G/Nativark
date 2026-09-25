@@ -1377,7 +1377,10 @@ export class RentalCoreController {
     const line = order.lines.find((row) => row.id === exchangeOrderLineId);
     if (!line || !["serialized", "quantity"].includes(line.inventoryMode)) throw new BadRequestException("换货订单行不存在或库存方式不支持");
     const activeLineQuantity = line.quantity - (line.cancelledQuantity ?? 0);
-    if (!order.allocations.some((row) => row.orderLineId === line.id && row.status === "picked_up" && row.quantity === activeLineQuantity)) {
+    const pickedUpQuantity = order.allocations
+      .filter((row) => row.orderLineId === line.id && row.status === "picked_up")
+      .reduce((sum, row) => sum + row.quantity, 0);
+    if (pickedUpQuantity !== activeLineQuantity) {
       throw new ConflictException("只有整行已领取的商品可以查询换货候选");
     }
     const replacementGroup = this.service.listItemGroups(tenantId).find((row) => row.id === replacementItemGroupId);
@@ -1400,8 +1403,8 @@ export class RentalCoreController {
         locationId: order.fulfillmentLocationId,
         inventoryMode: line.inventoryMode,
         quantity: activeLineQuantity,
-        assignedQuantity: order.allocations.filter((row) => row.orderLineId === line.id && row.status === "picked_up").reduce((sum, row) => sum + row.quantity, 0),
-        lockedQuantity: order.allocations.filter((row) => row.orderLineId === line.id && row.status === "picked_up").reduce((sum, row) => sum + row.quantity, 0),
+        assignedQuantity: pickedUpQuantity,
+        lockedQuantity: pickedUpQuantity,
         models: [{ itemGroupId: replacementGroup.id, name: replacementGroup.name, enabled: true }],
         candidates: replacementAssets
       }]

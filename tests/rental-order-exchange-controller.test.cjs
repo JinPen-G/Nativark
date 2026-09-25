@@ -56,6 +56,18 @@ async function run() {
   assert.deepEqual(response.reservations[0].candidates, [candidateAsset]);
   console.log("PASS 换货候选读取 fulfilled 预留并在订单领取地点计算资产冲突");
 
+  const { controller: splitAllocations } = fixture({ order: {
+    lines: [{ id: "line_1", itemGroupId: "model_old", quantity: 2, inventoryMode: "serialized" }],
+    allocations: [
+      { id: "allocation_1", orderLineId: "line_1", status: "picked_up", quantity: 1 },
+      { id: "allocation_2", orderLineId: "line_1", status: "picked_up", quantity: 1 }
+    ]
+  } });
+  const splitResponse = await splitAllocations.allocationCandidates({ user: { tenantId: "tenant_1" } }, "order_exchange_controller", "line_1", "model_new");
+  assert.equal(splitResponse.reservations[0].assignedQuantity, 2);
+  assert.equal(splitResponse.reservations[0].lockedQuantity, 2);
+  console.log("PASS 同一订单行分配到两台资产并全部领取后，整行换货候选可正常查询");
+
   await assert.rejects(
     () => controller.allocationCandidates({ user: { tenantId: "tenant_1" } }, "order_exchange_controller", "line_1", undefined),
     /必须同时指定订单行和替换型号/u
