@@ -1,6 +1,6 @@
 import type { ClientCatalogLocation, ClientCatalogResponse } from "@rental-os/shared";
 import { configProblem } from "../../config/public";
-import { cachedCatalog, hydrateImages, loadCatalog, nearestLocation, primaryLocation, searchItems, setPendingSearch, toItemCard, type ItemCard } from "../../core/catalogStore";
+import { cachedCatalog, loadCatalog, nearestLocation, primaryLocation, searchItems, setPendingSearch, toItemCard, type ItemCard } from "../../core/catalogStore";
 import { cachedUserLocation, distanceMeters, formatDistance, requestUserLocation, type GeoPoint } from "../../core/geo";
 import { themeBehavior } from "../../core/theme-behavior";
 import { isApiError } from "../../core/http";
@@ -9,7 +9,7 @@ import { cachedMerchant, findService, loadMerchant, merchantEvents, resolveServi
 import { blockedState, emptyState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
 import { contextVersion, isSignedIn, sessionEvents } from "../../core/session";
 import { switchService } from "../../core/flow";
-import { ROUTES, buildUrl, callPhone, navigate } from "../../core/ui";
+import { ROUTES, buildUrl, callPhone, navigate, toast } from "../../core/ui";
 
 /**
  * P01 首页（V2 设计稿）：搜索 → 主题横幅 → 品类入口 → 热门推荐 → 附近服务点。
@@ -167,10 +167,6 @@ Page({
         view: cards.length ? readyState() : emptyState("当前服务暂无设备", "商户还没有在此服务上架设备。", "", "", "none")
       });
       this.renderNearby(cachedUserLocation());
-      hydrateImages(cards, (index, path) => {
-        if (version !== contextVersion() || this.data.cards[index]?.id !== cards[index].id) return;
-        this.setData({ [`cards[${index}].imagePath`]: path });
-      });
     } catch (error) {
       if (token !== this.loadVersion || version !== contextVersion() || isApiError(error, "STALE_CONTEXT")) return;
       if (!isSignedIn() && isApiError(error) && (error.code === "UNAVAILABLE" || error.code === "AUTH_REQUIRED")) {
@@ -200,7 +196,7 @@ Page({
     const target = this.data.services.find((row) => row.code === code);
     if (!target) return;
     if (target.paused) {
-      wx.showToast({ title: "该服务暂停新租，历史订单可在“订单”查看", icon: "none" });
+      toast("该服务暂停新租，历史订单可在“订单”查看", { duration: 3000 });
       return;
     }
     try {

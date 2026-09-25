@@ -91,7 +91,8 @@ Component({
     attached() {
       // 系统深/浅色切换时重渲染（语义色会解析出新 hex）；直接传 hex 的图标解析后不变，重渲染无副作用。
       const offTheme = themeEvents.on(() => this.render());
-      const offMerchant = merchantEvents.on(() => this.render());
+      // 仅当图标色依赖租户主色（primary）时才随商户信息刷新重渲染，避免长列表里大量图标无谓重绘。
+      const offMerchant = merchantEvents.on(() => { if ((this.data as { color: string }).color === "primary") this.render(); });
       (this as unknown as { _themeOff?: () => void })._themeOff = () => { offTheme(); offMerchant(); };
       this.render();
     },

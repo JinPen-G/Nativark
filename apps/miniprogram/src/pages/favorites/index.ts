@@ -1,17 +1,12 @@
 import { themeBehavior } from "../../core/theme-behavior";
 import { favoriteEvents, listFavorites, removeFavorite, type FavoriteItem } from "../../core/favorites";
-import { resolveImage } from "../../core/images";
 import { isSignedIn } from "../../core/session";
 import { ROUTES, buildUrl, navigate } from "../../core/ui";
 
-/** 我的收藏（本机保存）：收藏只是再看/再租的意图，进入详情后按当时的目录与报价为准。 */
-interface FavoriteRow extends FavoriteItem {
-  imagePath: string;
-}
-
+/** 我的收藏（本机保存）：收藏只是再看/再租的意图，进入详情后按当时的目录与报价为准。图片由 lazy-image 组件自解析。 */
 Page({
   behaviors: [themeBehavior],
-  data: { rows: [] as FavoriteRow[], signedIn: false },
+  data: { rows: [] as FavoriteItem[], signedIn: false },
   unsubscribe: undefined as (() => void) | undefined,
 
   onLoad() {
@@ -27,14 +22,7 @@ Page({
   },
 
   refresh() {
-    const rows: FavoriteRow[] = listFavorites().map((item) => ({ ...item, imagePath: this.data.rows.find((row) => row.itemId === item.itemId)?.imagePath ?? "" }));
-    this.setData({ rows, signedIn: isSignedIn() });
-    rows.forEach((row, index) => {
-      if (!row.imageSource || row.imagePath || !isSignedIn()) return;
-      resolveImage(row.imageSource).then((path) => {
-        if (path && this.data.rows[index]?.itemId === row.itemId) this.setData({ [`rows[${index}].imagePath`]: path });
-      });
-    });
+    this.setData({ rows: listFavorites(), signedIn: isSignedIn() });
   },
 
   onOpen(event: WechatMiniprogram.TouchEvent) {

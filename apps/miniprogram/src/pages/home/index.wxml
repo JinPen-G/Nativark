@@ -46,8 +46,7 @@
       <view wx:else class="grid">
         <view class="grid__item" wx:for="{{cards}}" wx:key="id" data-id="{{item.id}}" hover-class="btn-hover" bindtap="onItemTap">
           <view class="thumb">
-            <image wx:if="{{item.imagePath}}" class="thumb__img" src="{{item.imagePath}}" mode="aspectFill" lazy-load></image>
-            <view wx:else class="thumb__placeholder">{{item.hasImage ? '加载中' : '暂无图片'}}</view>
+            <lazy-image source="{{item.imageSource}}"></lazy-image>
           </view>
           <view class="grid__name clamp-2">{{item.name}}</view>
           <view class="grid__price">

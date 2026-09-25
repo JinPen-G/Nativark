@@ -11,6 +11,7 @@ export const ROUTES = {
   me: "/pages/me/index",
   item: "/pages/item/index",
   checkout: "/pages/checkout/index",
+  cart: "/pages/cart/index",
   pay: "/pages/pay/index",
   order: "/pages/order/index",
   extend: "/pages/extend/index",
@@ -136,7 +137,7 @@ export function confirmDialog(options: { title: string; content: string; confirm
       content: options.content,
       confirmText: options.confirmText ?? "确定",
       cancelText: options.cancelText ?? "取消",
-      confirmColor: options.danger ? "#B42318" : "#165DDB",
+      confirmColor: options.danger ? "#E5484D" : "#1677FF",
       success: (res) => resolve(Boolean(res.confirm)),
       fail: () => resolve(false)
     });

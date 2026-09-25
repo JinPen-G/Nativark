@@ -1,6 +1,7 @@
 import { themeBehavior } from "../../core/theme-behavior";
 import type { RentalCustomerCoupon } from "@rental-os/shared";
 import { fetchCoupons } from "../../api/catalog";
+import { serverNow } from "../../core/clock";
 import { formatMoney } from "../../core/money";
 import { emptyState, errorState, handleCommonViewAction, loadingState, readyState } from "../../core/page";
 import { currentService } from "../../core/session";
@@ -44,7 +45,7 @@ Page({
   },
 
   row(coupon: RentalCustomerCoupon): CouponRow {
-    const usable = coupon.status === "claimed" && Date.parse(coupon.effectiveTo) > Date.now();
+    const usable = coupon.status === "claimed" && Date.parse(coupon.effectiveTo) > serverNow();
     const labels: Record<string, string> = { claimed: usable ? "可用" : "已过期", locked: "使用中", redeemed: "已使用", expired: "已过期", void: "已作废" };
     return {
       id: coupon.id,

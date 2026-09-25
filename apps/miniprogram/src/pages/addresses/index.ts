@@ -28,6 +28,7 @@ interface AddressData {
   errors: FieldErrors;
   submitting: boolean;
   formError: string;
+  deletingId: string;
 }
 
 const EMPTY_FORM: AddressForm = { recipient: "", phone: "", province: "", city: "", district: "", detail: "", isDefault: false };
@@ -42,7 +43,8 @@ Page({
     form: { ...EMPTY_FORM },
     errors: {},
     submitting: false,
-    formError: ""
+    formError: "",
+    deletingId: ""
   } as AddressData,
 
   editingId: "" as string,
@@ -164,15 +166,18 @@ Page({
   async onDelete(event: WechatMiniprogram.TouchEvent) {
     const id = String(event.currentTarget.dataset.id ?? "");
     const item = this.data.items.find((row) => row.id === id);
-    if (!item) return;
+    if (!item || this.data.deletingId) return;
     const confirmed = await confirmDialog({ title: "删除地址", content: `确认删除“${item.recipient}·${item.city}${item.detail}”吗？已提交订单上的收货地址不受影响。`, confirmText: "删除", danger: true });
     if (!confirmed) return;
+    this.setData({ deletingId: id });
     try {
       await deleteAddress(item.id);
       await this.load();
       toast("已删除");
     } catch (error) {
       toast(describeError(error).message, { duration: 3000 });
+    } finally {
+      this.setData({ deletingId: "" });
     }
   },
 

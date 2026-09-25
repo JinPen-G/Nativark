@@ -22,8 +22,7 @@
       <view class="card">
         <view class="line" wx:for="{{lines}}" wx:key="key">
           <view class="line__thumb">
-            <image wx:if="{{item.imagePath}}" src="{{item.imagePath}}" mode="aspectFill"></image>
-            <view wx:else class="thumb__placeholder">暂无图片</view>
+            <lazy-image source="{{item.imageSource}}"></lazy-image>
           </view>
           <view class="grow">
             <view class="subtitle clamp-2">{{item.name}}</view>
@@ -38,7 +37,7 @@
         </view>
         <view class="row row--between mt-8">
           <view class="muted small">商户在租赁选项允许的型号范围内安排设备</view>
-          <view class="link small" bindtap="onAddMore">继续添加</view>
+          <view class="link small" hover-class="btn-hover" bindtap="onAddMore">继续添加</view>
         </view>
       </view>
     </view>
@@ -66,8 +65,8 @@
           <view class="grow ml-12">
             <view class="subtitle">取还方式</view>
             <view class="toggle mt-12">
-              <view class="toggle__item {{method === 'pickup' ? 'toggle__item--active' : ''}}" data-method="pickup" bindtap="onPickMethod"><ui-icon name="store" size="30" color="{{method === 'pickup' ? 'primary' : 'text'}}"></ui-icon><text class="ml-8">门店自提</text></view>
-              <view wx:if="{{deliveryAvailable}}" class="toggle__item {{method === 'delivery' ? 'toggle__item--active' : ''}}" data-method="delivery" bindtap="onPickMethod"><ui-icon name="truck" size="30" color="{{method === 'delivery' ? 'primary' : 'text'}}"></ui-icon><text class="ml-8">同城配送</text></view>
+              <view class="toggle__item {{method === 'pickup' ? 'toggle__item--active' : ''}}" hover-class="btn-hover" data-method="pickup" bindtap="onPickMethod"><ui-icon name="store" size="30" color="{{method === 'pickup' ? 'primary' : 'text'}}"></ui-icon><text class="ml-8">门店自提</text></view>
+              <view wx:if="{{deliveryAvailable}}" class="toggle__item {{method === 'delivery' ? 'toggle__item--active' : ''}}" hover-class="btn-hover" data-method="delivery" bindtap="onPickMethod"><ui-icon name="truck" size="30" color="{{method === 'delivery' ? 'primary' : 'text'}}"></ui-icon><text class="ml-8">同城配送</text></view>
             </view>
             <view wx:if="{{!deliveryAvailable}}" class="muted small mt-8">本商户当前仅支持门店自提</view>
           </view>
@@ -253,7 +252,7 @@
       <view wx:if="{{addressesLoading}}" class="muted">正在读取收货地址…</view>
       <view wx:elif="{{addressesError}}" class="notice notice--danger">{{addressesError}}</view>
       <view wx:elif="{{!addresses.length}}" class="muted">还没有收货地址，请先添加</view>
-      <view class="link tap-area mt-16" bindtap="onManageAddresses">管理 / 新增收货地址</view>
+      <view class="link tap-area mt-16" hover-class="btn-hover" bindtap="onManageAddresses">管理 / 新增收货地址</view>
     </sheet>
 
     <sheet visible="{{showCouponSheet}}" title="选择优惠券" bind:close="onCloseCoupons">
@@ -268,7 +267,8 @@
         </view>
         <view class="option__check"></view>
       </view>
-      <view wx:if="{{!coupons.length}}" class="muted">你在当前服务没有可用的优惠券</view>
+      <view wx:if="{{couponsError}}" class="notice notice--warning">优惠券暂时读取失败，可关闭本面板稍后重试。</view>
+      <view wx:elif="{{!coupons.length}}" class="muted">你在当前服务没有可用的优惠券</view>
       <view class="muted small mt-16">选择后由商户系统重新报价，实际优惠以报价为准。</view>
     </sheet>
   </block>

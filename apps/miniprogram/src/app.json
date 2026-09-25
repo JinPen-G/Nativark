@@ -7,6 +7,7 @@
     "pages/me/index",
     "pages/item/index",
     "pages/checkout/index",
+    "pages/cart/index",
     "pages/pay/index",
     "pages/order/index",
     "pages/extend/index",

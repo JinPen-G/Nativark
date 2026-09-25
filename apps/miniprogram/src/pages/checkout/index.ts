@@ -5,10 +5,9 @@ import { createOrder } from "../../api/orders";
 import { fetchPaymentCapabilities } from "../../api/payments";
 import { CartLocked, abandonSubmission, beginSubmission, bindQuote, cartMissing, completeSubmission, getCart, isDeliveryMode, markSubmissionUnknown, quoteIsCurrent, removeLine, setLineQuantity, updateCart, type CartState } from "../../core/cart";
 import { loadCatalog, primaryLocation } from "../../core/catalogStore";
-import { formatRemaining, remainingMs } from "../../core/clock";
+import { formatRemaining, remainingMs, serverNow } from "../../core/clock";
 import { describeError } from "../../core/errors";
 import { isApiError } from "../../core/http";
-import { resolveImage } from "../../core/images";
 import { chargeLabel, pricingUnitLabel } from "../../core/labels";
 import { formatMoney, startingPriceParts } from "../../core/money";
 import { blockedState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
@@ -31,7 +30,6 @@ interface LineRow {
   option: string;
   quantity: number;
   imageSource: string;
-  imagePath: string;
   priceText: string;
   amount: number | undefined;
 }
@@ -88,6 +86,7 @@ interface CheckoutData {
   returnLabel: string;
   coupons: CouponRow[];
   couponText: string;
+  couponsError: boolean;
   showCouponSheet: boolean;
   services: Array<{ id: string; name: string; description: string; selected: boolean }>;
   memo: string;
@@ -148,6 +147,7 @@ Page({
     returnLabel: "与取货门店相同",
     coupons: [],
     couponText: "暂无可用优惠券",
+    couponsError: false,
     showCouponSheet: false,
     services: [],
     memo: "",
@@ -241,13 +241,16 @@ Page({
       return;
     }
     if (cart.submission) {
-      // 结果未知的提交：先把当时的报价读出来供核对，再按同键重放拿结果，而不是再报价。
+      // 结果未知的提交：先把目录与当时报价读出来渲染清单/时间/门店供核对，再按同键重放拿结果，而不是再报价。
       this.setData({ view: loadingState(), locked: true, cart });
       try {
-        const quote = await fetchQuote(cart.submission.quoteId);
+        const [catalog, quote] = await Promise.all([loadCatalog(cart.serviceCode, false), fetchQuote(cart.submission.quoteId)]);
+        this.catalog = catalog;
+        this.applyCatalog(catalog, catalog.timeZone || zoneOf(cart.serviceCode) || DEFAULT_ZONE);
+        this.syncFromCart(getCart());
         this.render(quote);
       } catch {
-        // 报价读不到也要给出恢复入口。
+        // 目录/报价读不到也要给出恢复入口。
       }
       await this.submit(true);
       return;
@@ -331,7 +334,6 @@ Page({
         option: line.pricingGroupName ?? "",
         quantity: line.quantity,
         imageSource: line.imageSource ?? item?.images?.[0]?.url ?? "",
-        imagePath: previous?.imagePath ?? "",
         priceText: price.available ? `${price.symbol}${price.number}${price.unit}` : "",
         amount: previous?.amount
       };
@@ -356,13 +358,6 @@ Page({
       memo: cart.memo ?? "",
       services: this.data.services.map((row) => ({ ...row, selected: cart.services.some((item) => item.serviceId === row.id) })),
       couponText: cart.couponId ? this.data.coupons.find((row) => row.id === cart.couponId)?.name ?? "已选优惠券" : this.data.coupons.some((row) => row.usable) ? "有可用优惠券，点击选择" : "暂无可用优惠券"
-    });
-    const version = contextVersion();
-    lines.forEach((line, index) => {
-      if (!line.imageSource || line.imagePath) return;
-      resolveImage(line.imageSource).then((path) => {
-        if (path && contextVersion() === version && this.data.lines[index]?.key === line.key) this.setData({ [`lines[${index}].imagePath`]: path });
-      });
     });
   },
 
@@ -563,14 +558,16 @@ Page({
   async loadCoupons() {
     try {
       this.rawCoupons = await fetchCoupons();
+      this.setData({ couponsError: false });
     } catch {
       this.rawCoupons = [];
+      this.setData({ couponsError: true });
     }
     this.setData({ coupons: this.rawCoupons.map((coupon) => this.couponRow(coupon)) });
   },
 
   couponRow(coupon: RentalCustomerCoupon): CouponRow {
-    const usable = coupon.status === "claimed" && Date.parse(coupon.effectiveTo) > Date.now();
+    const usable = coupon.status === "claimed" && Date.parse(coupon.effectiveTo) > serverNow();
     const currency = this.data.currency || undefined;
     const value = coupon.discountType === "percentage" ? `${coupon.discountValue}% 折扣` : formatMoney(coupon.discountValue, currency);
     const threshold = coupon.minimumSpend > 0 ? `，满 ${formatMoney(coupon.minimumSpend, currency)} 可用` : "";

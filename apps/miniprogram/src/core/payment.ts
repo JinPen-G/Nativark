@@ -2,7 +2,7 @@ import type { ClientPaymentCapabilitiesResponse, ClientPaymentIntentResponse, Cl
 import { fetchFunding } from "../api/orders";
 import { closePaymentIntent, createMiniProgramPaymentIntent, fetchPaymentIntent, refreshPaymentIntent } from "../api/payments";
 import { remainingMs } from "./clock";
-import { ApiError } from "./http";
+import { ApiError, isApiError } from "./http";
 import { actionKey, releaseActionKey } from "./keys";
 import { STORAGE_KEYS, readStorage, writeStorage } from "./storage";
 
@@ -78,7 +78,10 @@ export async function obtainIntent(orderId: string): Promise<ClientPaymentIntent
     let existing: ClientPaymentIntentResponse | undefined;
     try {
       existing = await fetchPaymentIntent(orderId, remembered);
-    } catch {
+    } catch (error) {
+      // 只有明确 404（旧单确实不存在）才可继续新建；网络/超时/5xx 只是暂时查不到，
+      // 保留旧单并抛出让调用方重试，绝不盲目新建（否则会撞服务端“一单一待付”的 409 死循环）。
+      if (!isApiError(error, "NOT_FOUND")) throw error;
       existing = undefined;
     }
     if (existing?.status === "paid") return existing;
@@ -157,7 +160,8 @@ export const VERIFY_SCHEDULE_MS = [2000, 5000, 10000, 10000] as const;
 export async function verifyWithRetries(orderId: string, intentId: string, onAttempt?: (attempt: number, result: PaymentVerification) => void): Promise<PaymentVerification> {
   let last: PaymentVerification = { confirmed: false, status: "unknown" };
   for (let attempt = 0; attempt < VERIFY_SCHEDULE_MS.length; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, VERIFY_SCHEDULE_MS[attempt]));
+    // 先立即查一次（款可能已秒到账），之后再按退避序列等待重试，不让秒付用户空等首个间隔。
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, VERIFY_SCHEDULE_MS[attempt]));
     last = await verifyPayment(orderId, intentId);
     onAttempt?.(attempt + 1, last);
     if (last.confirmed || last.status === "failed" || last.status === "closed" || last.status === "funding_failed") break;

@@ -74,3 +74,6 @@
 @keyframes splash-spin {
   to { transform: rotate(360deg); }
 }
+@media (prefers-reduced-motion: reduce) {
+  .splash__logo, .splash__ring { animation: none; }
+}

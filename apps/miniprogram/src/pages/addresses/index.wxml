@@ -21,7 +21,7 @@
         <view class="row gap-8 mt-16">
           <button wx:if="{{!item.isDefault}}" class="btn btn--small btn--secondary" hover-class="btn-hover" data-id="{{item.id}}" bindtap="onSetDefault">设为默认</button>
           <button class="btn btn--small btn--outline" hover-class="btn-hover" data-id="{{item.id}}" bindtap="onEdit">编辑</button>
-          <button class="btn btn--small btn--ghost" hover-class="btn-hover" data-id="{{item.id}}" bindtap="onDelete">删除</button>
+          <button class="btn btn--small btn--ghost" hover-class="btn-hover" data-id="{{item.id}}" bindtap="onDelete" disabled="{{deletingId === item.id}}">{{deletingId === item.id ? '删除中…' : '删除'}}</button>
         </view>
       </view>
     </view>

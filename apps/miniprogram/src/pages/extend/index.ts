@@ -119,7 +119,9 @@ Page({
       });
     } catch (error) {
       if (isApiError(error, "STALE_CONTEXT")) return;
-      this.setData({ view: errorState(error) });
+      // 二次加载失败保留当前续租信息，只在首屏无数据时整屏报错。
+      if (this.data.order) toast("刷新失败，已保留当前续租信息");
+      else this.setData({ view: errorState(error) });
     }
   },
 

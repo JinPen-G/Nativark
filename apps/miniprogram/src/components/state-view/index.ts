@@ -10,6 +10,8 @@ Component({
     message: { type: String, value: "" },
     actionText: { type: String, value: "" },
     secondaryText: { type: String, value: "" },
+    /** 加载骨架形状：list（列表行）/ detail（详情大图）/ form（表单），缺省用通用骨架，与真实内容结构更贴合。 */
+    skeleton: { type: String, value: "" },
     compact: { type: Boolean, value: false }
   },
   methods: {

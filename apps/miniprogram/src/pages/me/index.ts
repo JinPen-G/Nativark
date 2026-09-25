@@ -23,6 +23,7 @@ interface MeData {
   avatarInitial: string;
   phoneMasked: string;
   membershipStatus: string;
+  membershipRestricted: boolean;
   membershipLabel: string;
   membershipTone: string;
   planName: string;
@@ -50,6 +51,7 @@ Page({
     avatarInitial: "·",
     phoneMasked: "",
     membershipStatus: "",
+    membershipRestricted: false,
     membershipLabel: "",
     membershipTone: "neutral",
     planName: "",
@@ -86,8 +88,13 @@ Page({
     const session = currentSession();
     const displayName = session?.customer.displayName ?? "";
     this.setData({ signedIn: Boolean(session), displayName, avatarInitial: displayName.trim().charAt(0) || "·", phoneMasked: session?.customer.loginIdentifierMasked ?? "", favoriteCount: listFavorites().length, wechatBound: isWechatBound() });
+    if (session) {
+      void this.loadStatus();
+    } else {
+      // 退出登录：清空上一账号的会员/审核/资质私有状态，避免登出态仍展示上一个人的信息。
+      this.setData({ view: readyState(), membershipStatus: "", membershipRestricted: false, membershipLabel: "", membershipTone: "neutral", planName: "", planHint: "", reviewText: "", qualificationSummary: "" });
+    }
     this.syncMemberTitle();
-    if (session) void this.loadStatus();
   },
 
   syncMemberTitle() {
@@ -121,6 +128,7 @@ Page({
       avatarInitial: status.displayName.trim().charAt(0) || "·",
       phoneMasked: status.phoneMasked,
       membershipStatus: membership,
+      membershipRestricted: membership === "suspended" || membership === "restricted",
       membershipLabel: membershipLabel(membership),
       membershipTone: membership === "active" ? "success" : membership === "pending_activation" ? "warning" : "danger",
       reviewText: latestReview && latestReview.status !== "approved" ? `注册审核：${reviewLabel(latestReview.status)}${latestReview.reason ? `（${latestReview.reason}）` : ""}` : "",

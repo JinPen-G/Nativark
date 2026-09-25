@@ -67,7 +67,7 @@
     <view class="field">
       <view class="field__label field__label--required">证件图片（JPEG/PNG，不超过 10MB）</view>
       <view class="row gap-16 mt-8">
-        <view class="evidence" bindtap="onChooseImage">
+        <view class="evidence" hover-class="btn-hover" bindtap="onChooseImage">
           <image wx:if="{{imagePath}}" class="evidence__img" src="{{imagePath}}" mode="aspectFit"></image>
           <view wx:else class="evidence__placeholder">点击选择图片</view>
         </view>

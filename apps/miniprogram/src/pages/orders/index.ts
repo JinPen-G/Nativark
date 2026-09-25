@@ -58,6 +58,7 @@ Page({
   unsubscribe: undefined as (() => void) | undefined,
   loadVersion: 0,
   busy: false,
+  filling: false,
 
   onLoad(options: Record<string, string | undefined>) {
     const filter = String(options.filter ?? "all") as OrderFilterKey;
@@ -100,6 +101,7 @@ Page({
       const rows = response.items.map((item) => this.toRow(item));
       this.setData({ rows, page: 1, hasMore: response.total > rows.length });
       this.applyFilter();
+      void this.ensureFilterFilled();
       this.hydrate(rows);
     } catch (error) {
       if (token !== this.loadVersion || isApiError(error, "STALE_CONTEXT")) return;
@@ -180,10 +182,27 @@ Page({
     });
   },
 
+  /**
+   * 分类 Tab 是客户端按展示状态过滤（服务端只按创建顺序分页）。窄分类下匹配项可能落在后续分页，
+   * 且短列表触底不触发：不足一屏且仍有更多时自动续拉，直到本页凑够或再无更多，避免误显“该分类没有订单”。
+   */
+  async ensureFilterFilled() {
+    if (this.filling) return;
+    this.filling = true;
+    try {
+      while (this.data.filter !== "all" && this.data.visible.length < PAGE_SIZE && this.data.hasMore && !this.data.loadingMore) {
+        await this.loadMore();
+      }
+    } finally {
+      this.filling = false;
+    }
+  },
+
   onFilterTap(event: WechatMiniprogram.TouchEvent) {
     const filter = String(event.currentTarget.dataset.key ?? "all") as OrderFilterKey;
     this.setData({ filter });
     this.applyFilter();
+    void this.ensureFilterFilled();
   },
 
   async onOpen(event: WechatMiniprogram.TouchEvent) {

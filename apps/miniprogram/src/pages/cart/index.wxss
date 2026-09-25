@@ -1,0 +1,19 @@
+.cart-group { margin-bottom: 20rpx; }
+.cart-group__head { display: flex; align-items: center; padding: 8rpx 0 16rpx; }
+.cart-group__name { font-size: var(--font-subtitle); font-weight: var(--fw-semibold); margin-left: 8rpx; }
+.cart-group__clear { color: var(--secondary); font-size: var(--font-caption); }
+
+/* 选择圈：与 option__check 一致的观感，作复选。 */
+.pick { width: 40rpx; height: 40rpx; border-radius: 50%; border: 2rpx solid var(--line); flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
+.pick--on { border-color: var(--primary); background: var(--primary); }
+
+.cart-line { display: flex; align-items: center; padding: 20rpx 0; }
+.cart-line + .cart-line { border-top: 1rpx solid var(--border); }
+.cart-line__thumb { width: 140rpx; height: 140rpx; border-radius: var(--radius-sm); background: var(--page); overflow: hidden; position: relative; flex: 0 0 auto; margin: 0 20rpx; }
+.cart-line__body { flex: 1; min-width: 0; }
+.cart-line__foot { display: flex; align-items: center; justify-content: space-between; margin-top: 12rpx; }
+.cart-line__del { color: var(--secondary); font-size: var(--font-caption); padding-left: 16rpx; }
+
+.cart-bar__check { display: flex; align-items: center; }
+.cart-bar__check text { margin-left: 12rpx; font-size: var(--font-secondary); }
+.cart-bar__sum { flex: 1; min-width: 0; text-align: right; margin-right: 20rpx; }

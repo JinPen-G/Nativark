@@ -6,28 +6,27 @@
     <view class="search search--surface">
       <ui-icon name="search" size="34" color="secondary"></ui-icon>
       <input class="search__input" type="text" confirm-type="search" placeholder="搜索商品名称、品牌或型号" placeholder-class="search__placeholder" maxlength="50" value="{{query}}" bindinput="onSearchInput" />
-      <view wx:if="{{query || activeFacet}}" class="search__clear" bindtap="onClear">清除</view>
+      <view wx:if="{{query || activeFacet}}" class="search__clear" hover-class="btn-hover" bindtap="onClear">清除</view>
     </view>
   </view>
 
   <view wx:if="{{services.length > 1}}" class="section section--tight">
     <scroll-view class="tabs" scroll-x enhanced show-scrollbar="{{false}}">
-      <view class="tab {{item.active ? 'tab--active' : ''}}" wx:for="{{services}}" wx:key="code" data-code="{{item.code}}" bindtap="onServiceTap">{{item.name}}</view>
+      <view class="tab {{item.active ? 'tab--active' : ''}}" wx:for="{{services}}" wx:key="code" data-code="{{item.code}}" hover-class="btn-hover" bindtap="onServiceTap">{{item.name}}</view>
     </scroll-view>
   </view>
 
   <scroll-view wx:if="{{facets.length}}" class="chips section section--tight" scroll-x enhanced show-scrollbar="{{false}}">
-    <view class="chip {{activeFacet === item ? 'chip--active' : ''}}" wx:for="{{facets}}" wx:key="*this" data-facet="{{item}}" bindtap="onFacetTap">{{item}}</view>
+    <view class="chip {{activeFacet === item ? 'chip--active' : ''}}" wx:for="{{facets}}" wx:key="*this" data-facet="{{item}}" hover-class="btn-hover" bindtap="onFacetTap">{{item}}</view>
   </scroll-view>
 
-  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" skeleton="list" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
 
   <view wx:else class="section">
     <view class="card card--flat list">
       <view class="item-row" wx:for="{{cards}}" wx:key="id" data-id="{{item.id}}" hover-class="btn-hover" bindtap="onItemTap">
         <view class="item-row__thumb">
-          <image wx:if="{{item.imagePath}}" src="{{item.imagePath}}" mode="aspectFill" lazy-load></image>
-          <view wx:else class="thumb__placeholder">{{item.hasImage ? '加载中' : '暂无图片'}}</view>
+          <lazy-image source="{{item.imageSource}}"></lazy-image>
         </view>
         <view class="item-row__body">
           <view class="item-row__name clamp-2">{{item.name}}</view>
@@ -41,5 +40,10 @@
       </view>
     </view>
     <view class="muted small center mt-16">共 {{cards.length}} 件 · 参考价以租期报价为准</view>
+  </view>
+
+  <view class="cart-fab" hover-class="btn-hover" bindtap="onCart">
+    <ui-icon name="box" size="44" color="onPrimary"></ui-icon>
+    <view wx:if="{{basketCount}}" class="cart-fab__badge">{{basketCount}}</view>
   </view>
 </view>

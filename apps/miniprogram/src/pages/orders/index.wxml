@@ -5,11 +5,11 @@
   <view class="section">
     <view class="title--page">我的订单</view>
     <scroll-view wx:if="{{signedIn}}" class="tabs mt-8" scroll-x enhanced show-scrollbar="{{false}}">
-      <view class="tab {{filter === item.key ? 'tab--active' : ''}}" wx:for="{{filters}}" wx:key="key" data-key="{{item.key}}" bindtap="onFilterTap">{{item.label}}</view>
+      <view class="tab {{filter === item.key ? 'tab--active' : ''}}" wx:for="{{filters}}" wx:key="key" data-key="{{item.key}}" hover-class="btn-hover" bindtap="onFilterTap">{{item.label}}</view>
     </scroll-view>
   </view>
 
-  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" skeleton="list" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
 
   <view wx:else class="section section--tight">
     <view class="card order" wx:for="{{visible}}" wx:key="orderId">

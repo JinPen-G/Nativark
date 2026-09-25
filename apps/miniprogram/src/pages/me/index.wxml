@@ -17,8 +17,8 @@
       </view>
       <ui-icon name="chevron-right" size="32" color="muted"></ui-icon>
     </view>
-    <view wx:if="{{reviewText}}" class="notice notice--warning mt-16">{{reviewText}}。审核期间可补充资料，暂不能提交租赁。</view>
-    <view wx:if="{{membershipStatus === 'suspended' || membershipStatus === 'restricted'}}" class="notice notice--danger mt-16">会员已受限，本商户所有服务暂停新租赁；历史订单仍可查看，如有疑问请联系商户。</view>
+    <view wx:if="{{signedIn && reviewText}}" class="notice notice--warning mt-16">{{reviewText}}。审核期间可补充资料，暂不能提交租赁。</view>
+    <view wx:if="{{signedIn && membershipRestricted}}" class="notice notice--danger mt-16">会员已受限，本商户所有服务暂停新租赁；历史订单仍可查看，如有疑问请联系商户。</view>
   </view>
 
   <view class="section section--tight">

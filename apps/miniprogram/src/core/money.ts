@@ -12,7 +12,8 @@ const SYMBOLS: Record<string, string> = {
   EUR: "€"
 };
 
-const ZERO_DECIMAL = new Set<string>([]);
+// 零小数位币种（ISO 4217 无小数），接入日/韩/越等币种时按整数显示，避免出现 ¥100.00 式错误。
+const ZERO_DECIMAL = new Set<string>(["JPY", "KRW", "VND", "CLP", "ISK", "XOF", "XAF", "PYG", "RWF", "UGX", "KMF"]);
 
 function groupThousands(integer: string): string {
   return integer.replace(/\B(?=(\d{3})+(?!\d))/g, ",");

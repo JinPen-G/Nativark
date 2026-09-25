@@ -136,7 +136,7 @@
         <view class="subtitle mt-24">取消原因</view>
         <view wx:if="{{pendingCancelKey}}" class="notice notice--warning mt-8 mb-16">上一次确认的结果尚未明确，原因已锁定；再次确认会沿用同一凭证。</view>
         <view class="chips mt-8">
-          <view class="chip {{cancelReason === item ? 'chip--active' : ''}} {{pendingCancelKey ? 'option--disabled' : ''}}" wx:for="{{cancelReasons}}" wx:key="*this" data-reason="{{item}}" bindtap="onPickReason">{{item}}</view>
+          <view class="chip {{cancelReason === item ? 'chip--active' : ''}} {{pendingCancelKey ? 'option--disabled' : ''}}" wx:for="{{cancelReasons}}" wx:key="*this" data-reason="{{item}}" hover-class="btn-hover" bindtap="onPickReason">{{item}}</view>
         </view>
         <view class="input-box mt-16"><input placeholder="补充说明（可选）" maxlength="200" value="{{cancelReason}}" disabled="{{pendingCancelKey}}" bindinput="onReasonInput" /></view>
       </block>
@@ -164,7 +164,7 @@
         <view wx:if="{{feePendingKey}}" class="notice notice--warning mt-8 mb-16">上一次提交的结果尚未明确，原因已锁定；再次提交会沿用同一凭证，不会重复处理。</view>
         <view class="subtitle mt-24">异议原因</view>
         <view class="chips mt-8">
-          <view class="chip {{feeReason === item ? 'chip--active' : ''}} {{feePendingKey ? 'chip--soft' : ''}}" wx:for="{{feeReasons}}" wx:key="*this" data-reason="{{item}}" bindtap="onPickFeeReason">{{item}}</view>
+          <view class="chip {{feeReason === item ? 'chip--active' : ''}} {{feePendingKey ? 'option--disabled' : ''}}" wx:for="{{feeReasons}}" wx:key="*this" data-reason="{{item}}" hover-class="btn-hover" bindtap="onPickFeeReason">{{item}}</view>
         </view>
         <view class="input-box mt-16"><input placeholder="补充说明（可选）" maxlength="200" value="{{feeReason}}" disabled="{{feePendingKey}}" bindinput="onFeeReasonInput" /></view>
       </block>

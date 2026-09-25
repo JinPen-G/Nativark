@@ -4,6 +4,7 @@
     "ui-icon": "/components/ui-icon/index",
     "state-view": "/components/state-view/index",
     "money-text": "/components/money-text/index",
-    "sheet": "/components/sheet/index"
+    "sheet": "/components/sheet/index",
+    "lazy-image": "/components/lazy-image/index"
   }
 }

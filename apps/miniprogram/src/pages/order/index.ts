@@ -169,7 +169,9 @@ Page({
         this.setData({ view: blockedState("订单不存在", "该订单不属于你，或所属服务当前不可访问。", "回订单列表", "none") });
         return;
       }
-      this.setData({ view: errorState(error) });
+      // 二次加载（下拉/onShow）失败时保留已加载详情，只在首屏无数据时整屏报错。
+      if (this.data.order) toast("刷新失败，已保留已加载的订单信息");
+      else this.setData({ view: errorState(error) });
     }
   },
 

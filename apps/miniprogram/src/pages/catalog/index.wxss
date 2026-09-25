@@ -1,2 +1,6 @@
 .list { padding: 0 24rpx; }
 .tabs.section--tight { padding-bottom: 0; }
+
+/* 悬浮购物车入口（不占用底部 Tab），带件数角标。 */
+.cart-fab { position: fixed; right: 28rpx; bottom: calc(120rpx + env(safe-area-inset-bottom)); width: 96rpx; height: 96rpx; border-radius: 50%; background: var(--primary); box-shadow: 0 6rpx 20rpx rgba(0, 0, 0, 0.18); display: flex; align-items: center; justify-content: center; z-index: 30; }
+.cart-fab__badge { position: absolute; top: -6rpx; right: -6rpx; min-width: 32rpx; height: 32rpx; padding: 0 8rpx; border-radius: 16rpx; background: var(--price); color: var(--on-primary); font-size: var(--font-nano); display: flex; align-items: center; justify-content: center; }

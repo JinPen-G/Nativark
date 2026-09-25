@@ -83,6 +83,7 @@ Page({
 
   onShow() {
     void this.load();
+    if (this.ticker) clearInterval(this.ticker);
     this.ticker = setInterval(() => this.tick(), 1000) as unknown as number;
   },
 

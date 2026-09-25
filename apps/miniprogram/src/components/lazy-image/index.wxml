@@ -1,0 +1,6 @@
+<image wx:if="{{phase === 'ok'}}" class="lazy-image__img" src="{{path}}" mode="{{mode}}" lazy-load binderror="onError"></image>
+<view wx:elif="{{phase === 'loading'}}" class="lazy-image__skeleton skeleton"></view>
+<view wx:else class="lazy-image__ph">
+  <ui-icon wx:if="{{fallbackIcon}}" name="{{fallbackIcon}}" size="{{iconSize}}" color="{{iconColor}}" stroke="1.5"></ui-icon>
+  <text wx:else class="lazy-image__text">{{emptyText}}</text>
+</view>

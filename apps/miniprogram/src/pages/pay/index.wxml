@@ -52,7 +52,7 @@
 
     <view class="section">
       <view class="btn-row">
-        <button class="btn" hover-class="btn-hover" bindtap="onOrder">查看订单</button>
+        <button class="btn {{phase === 'confirmed' ? 'btn--primary' : ''}}" hover-class="btn-hover" bindtap="onOrder">查看订单</button>
         <button class="btn" hover-class="btn-hover" bindtap="onContact">联系商户</button>
       </view>
     </view>

@@ -2,7 +2,7 @@
 <view class="screen {{themeClass}}">
   <nav-bar></nav-bar>
 
-  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
+  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" skeleton="detail" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
 
   <block wx:else>
     <view class="gallery">
@@ -11,7 +11,7 @@
           <image class="gallery__img" src="{{item}}" mode="aspectFill" bindtap="onPreview"></image>
         </swiper-item>
       </swiper>
-      <view wx:else class="gallery__placeholder">{{imageTotal ? '图片加载中' : '暂无图片'}}</view>
+      <view wx:else class="gallery__placeholder">{{imageTotal && !imagesResolved ? '图片加载中' : '暂无图片'}}</view>
       <view class="gallery__back" hover-class="btn-hover" bindtap="onBack"><ui-icon name="chevron-left" size="40" color="text" stroke="2.2"></ui-icon></view>
       <view class="gallery__tools">
         <view class="gallery__tool" hover-class="btn-hover" bindtap="onFavorite"><ui-icon name="heart" size="40" color="{{favorite ? 'price' : 'text'}}" filled="{{favorite}}" stroke="1.8"></ui-icon></view>
@@ -41,7 +41,7 @@
     </view>
 
     <view wx:if="{{specs.length}}" class="section section--surface">
-      <view class="row row--between" bindtap="onShowSpecs">
+      <view class="row row--between" hover-class="btn-hover" bindtap="onShowSpecs">
         <view class="section-title">主要参数</view>
         <ui-icon name="chevron-right" size="32" color="muted"></ui-icon>
       </view>
@@ -87,8 +87,9 @@
     </view>
 
     <view class="bottom-bar">
-      <button class="btn btn--outline btn--cta grow" hover-class="btn-hover" bindtap="onContact"><ui-icon name="headset" size="34" color="primary"></ui-icon><text class="ml-8">联系客服</text></button>
-      <button class="btn btn--primary btn--cta grow ml-16" hover-class="btn-hover" bindtap="onReserve">立即预约</button>
+      <button class="btn btn--outline btn--cta" hover-class="btn-hover" bindtap="onContact" style="min-width:112rpx"><ui-icon name="headset" size="34" color="primary"></ui-icon></button>
+      <button class="btn btn--outline btn--cta grow ml-12" hover-class="btn-hover" bindtap="onAddToCart">加入购物车</button>
+      <button class="btn btn--primary btn--cta grow ml-12" hover-class="btn-hover" bindtap="onReserve">立即预约</button>
     </view>
 
     <sheet visible="{{showOptionSheet}}" title="选择租赁选项" bind:close="onCloseOptions">

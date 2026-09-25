@@ -6,6 +6,7 @@ import { apiUrl, authHeaders } from "./http";
  * 同一地址只下载一次；失败返回空串，由页面显示中性占位，不用其他商品图冒充。
  */
 const cache = new Map<string, Promise<string>>();
+const MAX_CACHE = 200;
 const MAX_CONCURRENT = 4;
 let active = 0;
 const queue: Array<() => void> = [];
@@ -49,6 +50,11 @@ export function resolveImage(source: string | undefined | null): Promise<string>
     return path;
   });
   cache.set(url, pending);
+  // 有界缓存：超出上限按插入顺序淘汰最早的，避免长会话内 Map 无限增长。
+  if (cache.size > MAX_CACHE) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
   return pending;
 }
 

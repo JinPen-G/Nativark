@@ -29,6 +29,7 @@ interface LoginData {
   wechatNotice: string;
   showPassword: boolean;
   smsAvailable: boolean;
+  passwordAvailable: boolean;
   authMode: "password" | "sms";
   smsCode: string;
   smsMasked: string;
@@ -58,6 +59,7 @@ Page({
     wechatNotice: "",
     showPassword: false,
     smsAvailable: false,
+    passwordAvailable: true,
     authMode: "password",
     smsCode: "",
     smsMasked: "",
@@ -108,6 +110,7 @@ Page({
       privacyVersion: agreements?.privacyPolicy.version ?? "",
       wechatAvailable: info.loginMethods.includes("wechat_phone"),
       smsAvailable: info.loginMethods.includes("sms"),
+      passwordAvailable: info.loginMethods.includes("password"),
       authMode: info.loginMethods.includes("password") ? this.data.authMode : info.loginMethods.includes("sms") ? "sms" : this.data.authMode,
       showPassword: !info.loginMethods.includes("wechat_phone") || this.data.showPassword,
       wechatNotice: info.loginMethods.includes("wechat_phone") ? "" : "商户尚未开通微信手机号一键登录，请使用其他方式登录。",

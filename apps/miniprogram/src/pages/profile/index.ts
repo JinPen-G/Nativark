@@ -80,9 +80,13 @@ Page({
   async load() {
     try {
       const profile = await fetchProfile();
-      this.setData({ view: readyState(), profile, name: profile.name, email: profile.email ?? "" });
+      // 仅首次加载用服务端值填充可编辑的姓名/邮箱；后续 onShow 刷新只更新只读资料，
+      // 不覆盖用户尚未保存的编辑（切后台再回前台不丢输入）。
+      const first = !this.data.profile;
+      this.setData({ view: readyState(), profile, ...(first ? { name: profile.name, email: profile.email ?? "" } : {}) });
     } catch (error) {
-      this.setData({ view: errorState(error) });
+      // 已加载过则保留内容，只在首屏失败时整屏报错。
+      if (!this.data.profile) this.setData({ view: errorState(error) });
     }
   },
 

@@ -2,6 +2,7 @@ import { themeBehavior } from "../../core/theme-behavior";
 import type { ClientCatalogItem, ClientCatalogPricingGroup, ClientCatalogResponse } from "@rental-os/shared";
 import { fetchQualificationTypes } from "../../api/profile";
 import { CartLocked, CartServiceMismatch, addLine } from "../../core/cart";
+import { addToBasket } from "../../core/basket";
 import { listAttribute, loadCatalog, pricingOptionsFor, primaryLocation, specEntries, specsOf } from "../../core/catalogStore";
 import { describeError } from "../../core/errors";
 import { favoriteEvents, isFavorite, toggleFavorite } from "../../core/favorites";
@@ -31,6 +32,7 @@ interface ItemData {
   images: string[];
   imageIndex: number;
   imageTotal: number;
+  imagesResolved: boolean;
   priceSymbol: string;
   priceNumber: string;
   priceUnit: string;
@@ -60,6 +62,7 @@ Page({
     images: [],
     imageIndex: 0,
     imageTotal: 0,
+    imagesResolved: false,
     priceSymbol: "",
     priceNumber: "",
     priceUnit: "",
@@ -82,6 +85,10 @@ Page({
 
   itemId: "" as string,
   serviceCode: "" as string,
+  serviceCategoryCode: "" as string,
+  /** 选项弹层的目标动作：直接预约还是加入购物车。 */
+  pendingAction: "reserve" as "reserve" | "cart",
+  reserving: false,
   unsubscribe: undefined as (() => void) | undefined,
 
   onLoad(options: Record<string, string | undefined>) {
@@ -89,6 +96,7 @@ Page({
     this.serviceCode = options.service || (isSignedIn() ? currentServiceCode() : lastServiceCode()) || "";
     const merchant = cachedMerchant();
     const service = findService(merchant, this.serviceCode);
+    this.serviceCategoryCode = service?.categoryCode ?? "";
     this.setData({ serviceName: service?.name ?? "", servicePhone: merchant?.servicePhone ?? "", signedIn: isSignedIn(), favorite: isFavorite(this.itemId) });
     this.unsubscribe = favoriteEvents.on(() => this.setData({ favorite: isFavorite(this.itemId) }));
   },
@@ -136,11 +144,14 @@ Page({
         this.setData({ view: emptyState("登录后查看设备详情", "商户尚未开放游客浏览。", "去登录", "", "login") });
         return;
       }
-      this.setData({ view: errorState(error) });
+      // 二次加载失败保留已加载详情，只在首屏无数据时整屏报错。
+      if (this.data.item) toast("刷新失败，已保留已加载的详情");
+      else this.setData({ view: errorState(error) });
     }
   },
 
   apply(catalog: ClientCatalogResponse, item: ClientCatalogItem) {
+    const sameItem = this.data.item?.id === item.id;
     const price = startingPriceParts(item.startingPrice, pricingUnitLabel);
     const allSpecs = specEntries(item);
     const options = pricingOptionsFor(catalog, item.id);
@@ -150,8 +161,9 @@ Page({
     this.setData({
       view: readyState(),
       item,
-      images: [],
-      imageIndex: 0,
+      images: sameItem ? this.data.images : [],
+      imagesResolved: sameItem ? this.data.imagesResolved : false,
+      imageIndex: sameItem ? this.data.imageIndex : 0,
       imageTotal: item.images?.length ?? 0,
       priceSymbol: price.symbol,
       priceNumber: price.number,
@@ -170,7 +182,7 @@ Page({
     const version = contextVersion();
     Promise.all((item.images ?? []).map((image) => resolveImage(image.url))).then((paths) => {
       if (contextVersion() !== version || this.data.item?.id !== item.id) return;
-      this.setData({ images: paths.filter(Boolean) });
+      this.setData({ images: paths.filter(Boolean), imagesResolved: true });
     });
   },
 
@@ -223,7 +235,8 @@ Page({
 
   onPickOption(event: WechatMiniprogram.TouchEvent) {
     this.setData({ optionId: String(event.currentTarget.dataset.id ?? ""), showOptionSheet: false });
-    void this.reserve();
+    if (this.pendingAction === "cart") this.addCurrentToBasket();
+    else void this.reserve();
   },
 
   onStoreTap() {
@@ -236,6 +249,7 @@ Page({
 
   onReserve() {
     if (!this.data.item) return;
+    this.pendingAction = "reserve";
     if (!requireSignIn(buildUrl(ROUTES.item, { id: this.itemId, service: this.serviceCode }))) return;
     if (!this.data.options.length) {
       toast("该设备暂无可选租赁选项，请联系商户", { duration: 3000 });
@@ -248,40 +262,72 @@ Page({
     void this.reserve();
   },
 
-  /** 加入本次租赁（不锁库存）并进入确认订单页。 */
-  async reserve() {
+  /** 加入购物车（长期保存，可跨品类）：不锁库存、不要求先登录（游客购物车登录后并入本人）。 */
+  onAddToCart() {
+    if (!this.data.item) return;
+    if (!this.data.options.length) {
+      toast("该设备暂无可选租赁选项，请联系商户", { duration: 3000 });
+      return;
+    }
+    this.pendingAction = "cart";
+    if (!this.data.optionId && this.data.options.length > 1) {
+      this.setData({ showOptionSheet: true });
+      return;
+    }
+    this.addCurrentToBasket();
+  },
+
+  addCurrentToBasket() {
     const item = this.data.item;
     const option = this.data.options.find((row) => row.id === this.data.optionId) ?? this.data.options[0];
     if (!item || !option) return;
-    const line = { itemGroupId: item.id, itemName: item.name, pricingGroupId: option.id, pricingGroupName: option.name, inventoryMode: item.inventoryMode, imageSource: item.images?.[0]?.url ?? "" };
+    addToBasket(
+      { serviceCode: this.serviceCode, serviceName: this.data.serviceName, categoryCode: this.serviceCategoryCode },
+      { itemGroupId: item.id, itemName: item.name, pricingGroupId: option.id, pricingGroupName: option.name, inventoryMode: item.inventoryMode, imageSource: item.images?.[0]?.url ?? "" }
+    );
+    toast("已加入购物车", { icon: "success" });
+  },
+
+  /** 加入本次租赁（不锁库存）并进入确认订单页。 */
+  async reserve() {
+    if (this.reserving) return;
+    const item = this.data.item;
+    const option = this.data.options.find((row) => row.id === this.data.optionId) ?? this.data.options[0];
+    if (!item || !option) return;
+    this.reserving = true;
     try {
-      addLine(this.serviceCode, this.data.serviceName, line, 1);
-    } catch (error) {
-      if (error instanceof CartServiceMismatch) {
-        const confirmed = await confirmDialog({
-          title: "切换服务",
-          content: `你在“${error.currentServiceName}”还有未提交的设备。预约本设备需要清空并切换到“${this.data.serviceName}”。`,
-          confirmText: "清空并切换",
-          cancelText: "继续当前租赁",
-          danger: true
-        });
-        if (!confirmed) return;
-        const switched = await switchService(this.serviceCode, this.data.serviceName).catch((switchError) => {
-          toast(describeError(switchError).message);
-          return false;
-        });
-        if (!switched) return;
+      const line = { itemGroupId: item.id, itemName: item.name, pricingGroupId: option.id, pricingGroupName: option.name, inventoryMode: item.inventoryMode, imageSource: item.images?.[0]?.url ?? "" };
+      try {
         addLine(this.serviceCode, this.data.serviceName, line, 1);
-      } else if (error instanceof CartLocked) {
-        toast(error.message, { duration: 3000 });
-        navigate(ROUTES.checkout);
-        return;
-      } else {
-        toast(describeError(error).message);
-        return;
+      } catch (error) {
+        if (error instanceof CartServiceMismatch) {
+          const confirmed = await confirmDialog({
+            title: "切换服务",
+            content: `你在“${error.currentServiceName}”还有未提交的设备。预约本设备需要清空并切换到“${this.data.serviceName}”。`,
+            confirmText: "清空并切换",
+            cancelText: "继续当前租赁",
+            danger: true
+          });
+          if (!confirmed) return;
+          const switched = await switchService(this.serviceCode, this.data.serviceName).catch((switchError) => {
+            toast(describeError(switchError).message);
+            return false;
+          });
+          if (!switched) return;
+          addLine(this.serviceCode, this.data.serviceName, line, 1);
+        } else if (error instanceof CartLocked) {
+          toast(error.message, { duration: 3000 });
+          navigate(ROUTES.checkout);
+          return;
+        } else {
+          toast(describeError(error).message);
+          return;
+        }
       }
+      navigate(ROUTES.checkout);
+    } finally {
+      this.reserving = false;
     }
-    navigate(ROUTES.checkout);
   },
 
   onViewAction() {

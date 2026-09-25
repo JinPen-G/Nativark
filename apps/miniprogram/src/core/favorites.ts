@@ -1,5 +1,5 @@
 import { Emitter } from "./events";
-import { currentSession } from "./session";
+import { currentSession, sessionEvents } from "./session";
 import { STORAGE_KEYS, readStorage, writeStorage } from "./storage";
 
 /**
@@ -33,20 +33,25 @@ function save(store: FavoriteStore): void {
   favoriteEvents.emit({ type: "changed" });
 }
 
-export function listFavorites(): FavoriteItem[] {
+/** 登录后把游客期间的收藏并入本人（同一商品只保留一份）。只在登录事件时执行一次，读操作不再有副作用。 */
+function mergeGuestFavorites(): void {
   const store = load();
   const owner = ownerKey();
-  const mine = store[owner] ?? [];
-  // 登录后把游客期间的收藏并入本人（同一商品只保留一份）。
-  if (owner !== "guest" && store.guest?.length) {
-    const merged = [...mine];
-    for (const item of store.guest) if (!merged.some((row) => row.itemId === item.itemId)) merged.push(item);
-    store[owner] = merged;
-    delete store.guest;
-    save(store);
-    return merged;
-  }
-  return mine;
+  if (owner === "guest" || !store.guest?.length) return;
+  const merged = [...(store[owner] ?? [])];
+  for (const item of store.guest) if (!merged.some((row) => row.itemId === item.itemId)) merged.push(item);
+  store[owner] = merged;
+  delete store.guest;
+  save(store);
+}
+
+// 登录成功时把游客收藏并入本人；退出登录不动本人桶（下一个 guest 从空开始）。
+sessionEvents.on((event) => {
+  if (event.type === "signed-in") mergeGuestFavorites();
+});
+
+export function listFavorites(): FavoriteItem[] {
+  return load()[ownerKey()] ?? [];
 }
 
 export function isFavorite(itemId: string): boolean {

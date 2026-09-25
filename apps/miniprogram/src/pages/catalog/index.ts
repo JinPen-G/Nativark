@@ -1,5 +1,6 @@
 import { themeBehavior } from "../../core/theme-behavior";
-import { cachedCatalog, facetsOf, hydrateImages, loadCatalog, searchItems, takePendingSearch, toItemCard, type ItemCard } from "../../core/catalogStore";
+import { basketCount, basketEvents } from "../../core/basket";
+import { cachedCatalog, facetsOf, loadCatalog, searchItems, takePendingSearch, toItemCard, type ItemCard } from "../../core/catalogStore";
 import { switchService } from "../../core/flow";
 import { isApiError } from "../../core/http";
 import { cachedMerchant, loadMerchant, resolveServiceCode, type MerchantInfo } from "../../core/merchant";
@@ -19,14 +20,16 @@ interface CatalogData {
   cards: ItemCard[];
   view: ViewState;
   total: number;
+  basketCount: number;
 }
 
 Page({
   behaviors: [themeBehavior],
-  data: { query: "", services: [], facets: [], activeFacet: "", cards: [], view: loadingState(), total: 0 } as CatalogData,
+  data: { query: "", services: [], facets: [], activeFacet: "", cards: [], view: loadingState(), total: 0, basketCount: 0 } as CatalogData,
   serviceCode: "" as string,
   loadVersion: 0,
   unsubscribe: undefined as (() => void) | undefined,
+  offBasket: undefined as (() => void) | undefined,
 
   onLoad(options: Record<string, string | undefined>) {
     this.setData({ query: (options.q ?? "").slice(0, 50), activeFacet: options.facet ?? "" });
@@ -35,13 +38,16 @@ Page({
       this.serviceCode = "";
       void this.load(false);
     });
+    this.offBasket = basketEvents.on(() => this.setData({ basketCount: basketCount() }));
   },
 
   onUnload() {
     this.unsubscribe?.();
+    this.offBasket?.();
   },
 
   onShow() {
+    this.setData({ basketCount: basketCount() });
     const pending = takePendingSearch();
     if (pending) this.setData({ query: pending });
     void this.load(false);
@@ -99,14 +105,9 @@ Page({
     if (!catalog) return;
     const items = searchItems(catalog.items, this.data.query, this.data.activeFacet);
     const cards = items.map(toItemCard);
-    const version = contextVersion();
     this.setData({
       cards,
       view: cards.length ? readyState() : catalog.items.length ? emptyState("没有匹配的设备", "换个关键词或分类试试。", "清除筛选", "", "none") : emptyState("当前服务暂无设备", "商户还没有上架设备。", "", "", "none")
-    });
-    hydrateImages(cards, (index, path) => {
-      if (version !== contextVersion() || this.data.cards[index]?.id !== cards[index].id) return;
-      this.setData({ [`cards[${index}].imagePath`]: path });
     });
   },
 
@@ -147,6 +148,10 @@ Page({
 
   onItemTap(event: WechatMiniprogram.TouchEvent) {
     navigate(buildUrl(ROUTES.item, { id: String(event.currentTarget.dataset.id ?? ""), service: this.serviceCode }));
+  },
+
+  onCart() {
+    navigate(ROUTES.cart);
   },
 
   onViewAction() {

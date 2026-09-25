@@ -275,7 +275,13 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   }
 
   assertContext();
-  if (raw.statusCode >= 200 && raw.statusCode < 300) return unwrap(raw.data) as T;
+  if (raw.statusCode >= 200 && raw.statusCode < 300) {
+    // 2xx 但拿到非空字符串（JSON 解析失败 / 网关返回 HTML 等）：不是有效信封，按 INVALID_RESPONSE 抛出，避免脏数据流入页面。空串视为无内容（如 204/登出）放行。
+    if (typeof raw.data === "string" && raw.data.trim() !== "") {
+      throw new ApiError("INVALID_RESPONSE", "服务返回了无法识别的内容，请稍后重试", { status: raw.statusCode, requestId: headerValue(raw.header, "x-request-id"), body: raw.data });
+    }
+    return unwrap(raw.data) as T;
+  }
   throw toApiError(raw);
 }
 

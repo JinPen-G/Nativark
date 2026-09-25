@@ -1,8 +1,31 @@
 <view wx:if="{{state === 'loading'}}" class="state state--loading {{compact ? 'state--compact' : ''}}">
-  <view class="skeleton skeleton--line" style="width: 60%"></view>
-  <view class="skeleton skeleton--block"></view>
-  <view class="skeleton skeleton--line" style="width: 80%"></view>
-  <view class="skeleton skeleton--line" style="width: 40%"></view>
+  <block wx:if="{{skeleton === 'list'}}">
+    <view class="sk-row" wx:for="{{[1,2,3,4]}}" wx:key="*this">
+      <view class="skeleton sk-row__thumb"></view>
+      <view class="sk-row__body">
+        <view class="skeleton skeleton--line" style="width: 70%"></view>
+        <view class="skeleton skeleton--line" style="width: 40%"></view>
+      </view>
+    </view>
+  </block>
+  <block wx:elif="{{skeleton === 'detail'}}">
+    <view class="skeleton sk-hero"></view>
+    <view class="skeleton skeleton--line" style="width: 55%"></view>
+    <view class="skeleton skeleton--line" style="width: 80%"></view>
+    <view class="skeleton skeleton--line" style="width: 35%"></view>
+  </block>
+  <block wx:elif="{{skeleton === 'form'}}">
+    <block wx:for="{{[1,2,3]}}" wx:key="*this">
+      <view class="skeleton skeleton--line" style="width: 30%"></view>
+      <view class="skeleton sk-input"></view>
+    </block>
+  </block>
+  <block wx:else>
+    <view class="skeleton skeleton--line" style="width: 60%"></view>
+    <view class="skeleton skeleton--block"></view>
+    <view class="skeleton skeleton--line" style="width: 80%"></view>
+    <view class="skeleton skeleton--line" style="width: 40%"></view>
+  </block>
 </view>
 <view wx:elif="{{state === 'empty' || state === 'error' || state === 'blocked'}}" class="state {{compact ? 'state--compact' : ''}}">
   <view class="state__icon {{state === 'error' ? 'state__icon--error' : state === 'blocked' ? 'state__icon--blocked' : ''}}">{{state === 'error' ? '!' : state === 'blocked' ? '–' : '·'}}</view>
