@@ -37,7 +37,13 @@ import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { bufferedRentalPeriod } from "./rental-occupancy";
 import { effectiveUnpaidHoldRule } from "./rental-rule-defaults";
-import { getRequestStaffLocationIds, getRequestWorkspaceId } from "../../common/request-identity";
+import {
+  getRequestDataScope,
+  getRequestLocationIds,
+  getRequestStaffLocationIds,
+  getRequestUserId,
+  getRequestWorkspaceId
+} from "../../common/request-identity";
 
 /** 参与可用量计算的预占。表上直接带 startAt/endAt，因此不必回连订单。 */
 export interface ActiveReservationRow {
@@ -392,14 +398,31 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     allocations: { orderBy: { createdAt: "asc" } }
   } as const;
 
+  /** 订单、明细与导出共用的会话可见范围；过滤必须在数据库层完成。 */
+  private requestOrderVisibilityWhere(): Prisma.RentalOrderWhereInput {
+    const clauses: Prisma.RentalOrderWhereInput[] = [];
+    const locationIds = getRequestLocationIds();
+    if (locationIds !== undefined) {
+      const safeIds = locationIds.length ? locationIds : ["__no_authorized_location__"];
+      clauses.push({ OR: [
+        { fulfillmentLocationId: { in: safeIds } },
+        { returnLocationId: { in: safeIds } }
+      ] });
+    }
+    if (getRequestDataScope() === "own") {
+      const userId = getRequestUserId();
+      clauses.push(userId ? { OR: [
+        { createdBy: userId },
+        { workOrders: { some: { OR: [{ createdBy: userId }, { assigneeId: userId }] } } }
+      ] } : { id: "__no_current_user__" });
+    }
+    return clauses.length ? { AND: clauses } : {};
+  }
+
   async listOrders(tenantId: string): Promise<RentalOrder[]> {
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
-    const locationIds = getRequestStaffLocationIds();
     const rows = await this.prisma.rentalOrder.findMany({
-      where: { tenantId, workspaceId, ...(locationIds === undefined ? {} : { OR: [
-        { fulfillmentLocationId: { in: locationIds.length ? locationIds : ["__no_authorized_location__"] } },
-        { returnLocationId: { in: locationIds.length ? locationIds : ["__no_authorized_location__"] } }
-      ] }) },
+      where: { tenantId, workspaceId, ...this.requestOrderVisibilityWhere() },
       include: this.orderInclude,
       orderBy: { createdAt: "desc" }
     });
@@ -418,10 +441,22 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   async queryOrders(tenantId: string, query: RentalOrderListQuery & { skip?: number; take?: number }): Promise<{ items: RentalOrder[]; total: number }> {
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
     const conditions: Prisma.Sql[] = [Prisma.sql`o.\`tenantId\` = ${tenantId}`, Prisma.sql`o.\`workspaceId\` = ${workspaceId}`];
-    const locationIds = getRequestStaffLocationIds();
+    const locationIds = getRequestLocationIds();
     if (locationIds !== undefined) {
       if (!locationIds.length) conditions.push(Prisma.sql`1 = 0`);
       else conditions.push(Prisma.sql`(o.\`fulfillmentLocationId\` IN (${Prisma.join(locationIds)}) OR o.\`returnLocationId\` IN (${Prisma.join(locationIds)}))`);
+    }
+    if (getRequestDataScope() === "own") {
+      const userId = getRequestUserId();
+      if (!userId) conditions.push(Prisma.sql`1 = 0`);
+      else conditions.push(Prisma.sql`(
+        o.\`createdBy\` = ${userId}
+        OR EXISTS (
+          SELECT 1 FROM \`rental_work_orders\` wo
+          WHERE wo.\`tenantId\` = ${tenantId} AND wo.\`workspaceId\` = ${workspaceId}
+            AND wo.\`orderId\` = o.\`id\` AND (wo.\`createdBy\` = ${userId} OR wo.\`assigneeId\` = ${userId})
+        )
+      )`);
     }
     if (query.status) conditions.push(Prisma.sql`o.\`status\` = ${query.status}`);
     const keyword = query.keyword?.trim();
@@ -484,7 +519,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     const ids = idRows.map((row) => row.id);
     if (!ids.length) return { items: [], total };
     const rows = await this.prisma.rentalOrder.findMany({
-      where: { id: { in: ids }, tenantId, workspaceId },
+      where: { id: { in: ids }, tenantId, workspaceId, ...this.requestOrderVisibilityWhere() },
       include: this.orderInclude
     });
     const position = new Map(ids.map((id, index) => [id, index]));
@@ -537,7 +572,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     const client = tx ?? this.prisma;
     const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     const row = await client.rentalOrder.findFirst({
-      where: { id: orderId, tenantId, workspaceId },
+      where: { id: orderId, tenantId, workspaceId, ...this.requestOrderVisibilityWhere() },
       include: this.orderInclude
     });
     return row ? this.toDomainOrder(row) : undefined;
@@ -948,8 +983,22 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   async listAssets(tenantId: string, tx?: RentalFactTx): Promise<RentalAsset[]> {
     const client = tx ?? this.prisma;
     const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const ownScope = getRequestDataScope() === "own";
+    const userId = getRequestUserId();
+    const ownAssetIds = ownScope && userId
+      ? (await client.rentalWorkOrder.findMany({
+          where: { tenantId, workspaceId, assetId: { not: null }, OR: [{ createdBy: userId }, { assigneeId: userId }] },
+          select: { assetId: true },
+          distinct: ["assetId"]
+        })).map((row) => row.assetId).filter((id): id is string => Boolean(id))
+      : undefined;
     const rows = await client.rentalAsset.findMany({
-      where: { tenantId, workspaceId, ...this.staffLocationWhere() },
+      where: {
+        tenantId,
+        workspaceId,
+        ...this.staffLocationWhere(),
+        ...(ownScope ? { id: { in: ownAssetIds?.length ? ownAssetIds : ["__no_owned_asset__"] } } : {})
+      },
       include: { itemGroup: { select: { code: true, name: true } }, location: { select: { name: true } } },
       orderBy: { createdAt: "desc" }
     });
@@ -973,7 +1022,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   async listAssetStatusHistory(tenantId: string, assetId: string, tx?: RentalFactTx): Promise<RentalAssetStatusHistory[]> {
     const client = tx ?? this.prisma;
     const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
-    const asset = await client.rentalAsset.findFirst({ where: { id: assetId, tenantId, workspaceId }, select: { id: true } });
+    const asset = (await this.listAssets(tenantId, tx)).find((row) => row.id === assetId);
     if (!asset) throw new NotFoundException("资产不存在或不属于当前经营空间");
     const rows = await client.rentalAssetStatusHistory.findMany({
       where: { tenantId, workspaceId, assetId },
@@ -1593,23 +1642,37 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   async listWorkOrders(tenantId: string, status?: RentalWorkOrderStatus, tx?: RentalFactTx): Promise<RentalWorkOrder[]> {
     const client = tx ?? this.prisma;
     const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const userId = getRequestUserId();
     const rows = await client.rentalWorkOrder.findMany({
-      where: { tenantId, workspaceId, ...(status ? { status } : {}), ...this.staffLocationWhere() },
+      where: {
+        tenantId,
+        workspaceId,
+        ...(status ? { status } : {}),
+        ...this.staffLocationWhere(),
+        ...(getRequestDataScope() === "own" ? { OR: userId ? [{ createdBy: userId }, { assigneeId: userId }] : [{ id: "__no_current_user__" }] } : {})
+      },
       orderBy: { createdAt: "desc" }
     });
     return rows.map(toWorkOrder);
   }
 
   private staffLocationWhere() {
-    const ids = getRequestStaffLocationIds();
+    const ids = getRequestLocationIds();
     return ids === undefined ? {} : { locationId: { in: ids.length ? ids : ["__no_authorized_location__"] } };
   }
 
   async listWorkOrderAssignees(tenantId: string, tx?: RentalFactTx): Promise<RentalWorkOrderAssignee[]> {
     const client = tx ?? this.prisma;
     const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const ownScope = getRequestDataScope() === "own";
+    const userId = getRequestUserId();
     const rows = await client.workspaceMember.findMany({
-      where: { tenantId, workspaceId, isActive: true, user: { isActive: true, isSaasAdmin: false } },
+      where: {
+        tenantId,
+        workspaceId,
+        isActive: true,
+        user: { isActive: true, isSaasAdmin: false, ...(ownScope ? { id: userId ?? "__no_current_user__" } : {}) }
+      },
       include: { user: { select: { id: true, account: true, displayName: true } } },
       orderBy: { createdAt: "asc" }
     });

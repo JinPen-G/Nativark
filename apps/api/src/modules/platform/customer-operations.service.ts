@@ -19,6 +19,7 @@ import { PrismaService } from "../database/prisma.service";
 import { CustomerOperationsRepository, type CustomerTx } from "./customer-operations.repository";
 import { SharedCustomerRepository } from "./shared-customer.repository";
 import { CustomerMergeService } from "./customer-merge.service";
+import { getRequestDataScope, getRequestLocationIds, getRequestUserId, getRequestWorkspaceId } from "../../common/request-identity";
 
 /** 敏感字段的解密查看权限。与「查看客户」分开授权（需求 4.8.5）。 */
 export const CUSTOMER_REVEAL_PERMISSION = "rental-os:customer:reveal-sensitive";
@@ -112,6 +113,105 @@ export class CustomerOperationsService {
     return `${trimmed.slice(0, 3)}****${trimmed.slice(-4)}`;
   }
 
+  /**
+   * 会员主档按租户共享，但受限账号只能看到与其当前工作范围有关的客户。
+   * 目前可验证的关联是：本人在本空间建立的主档，或本空间/授权地点内已有订单。
+   * 不用“知道 customerId 就能查”作为访问凭据。
+   */
+  private async visibleCustomerIds(
+    tenantId: string,
+    workspaceId: string,
+    scope: "all" | "organization" | "store" | "own",
+    userId?: string
+  ): Promise<string[] | undefined> {
+    const locationIds = getRequestLocationIds();
+    if (scope === "all" && locationIds === undefined) return undefined;
+    if (scope === "organization") {
+      throw new ForbiddenException("组织范围尚未关联客户归属，无法安全列出客户资料");
+    }
+    if ((scope === "own" && !userId) || !workspaceId) {
+      throw new ForbiddenException("客户数据范围缺少已验证的账号或经营空间");
+    }
+    const orderRows = await this.prisma.rentalOrder.findMany({
+      where: {
+        tenantId,
+        workspaceId,
+        customerId: { not: null },
+        ...(locationIds === undefined ? {} : { fulfillmentLocationId: { in: locationIds.length ? locationIds : ["__no_authorized_location__"] } }),
+        ...(scope === "own" ? {
+          OR: [
+            { createdBy: userId! },
+            { workOrders: { some: { OR: [{ createdBy: userId! }, { assigneeId: userId! }] } } }
+          ]
+        } : {})
+      },
+      select: { customerId: true },
+      distinct: ["customerId"]
+    });
+    const ids = new Set(orderRows.flatMap((row) => row.customerId ? [row.customerId] : []));
+    // 无履约地点限制时，可见自己创建的客户主档；有地点限制时没有“客户所属地点”字段，
+    // 因而只认该授权地点已有订单，不猜测新建客户属于哪一个地点。
+    if (locationIds === undefined && (scope === "own" || scope === "store")) {
+      const created = await this.prisma.customerProfile.findMany({
+        where: {
+          tenantId,
+          createdInWorkspaceId: workspaceId,
+          ...(scope === "own" ? { createdByUserId: userId! } : {})
+        },
+        select: { id: true }
+      });
+      created.forEach((row) => ids.add(row.id));
+    }
+    return [...ids];
+  }
+
+  private async assertCustomerVisibleInRequestScope(
+    tenantId: string,
+    workspaceId: string | undefined,
+    customerId: string,
+    scope: "all" | "organization" | "store" | "own",
+    userId?: string
+  ) {
+    const currentWorkspaceId = workspaceId;
+    if (!currentWorkspaceId || (scope === "own" && !userId)) {
+      throw new ForbiddenException("客户数据范围缺少已验证的账号或经营空间");
+    }
+    const locationIds = getRequestLocationIds();
+    if (scope === "organization") throw new ForbiddenException("组织范围尚未关联客户归属，无法安全读取客户资料");
+    const profileVisible = locationIds === undefined && (scope === "own" || scope === "store")
+      ? await this.prisma.customerProfile.findFirst({
+          where: {
+            id: customerId,
+            tenantId,
+            createdInWorkspaceId: currentWorkspaceId,
+            ...(scope === "own" ? { createdByUserId: userId! } : {})
+          },
+          select: { id: true }
+        })
+      : null;
+    const orderVisible = profileVisible ? true : await this.prisma.rentalOrder.findFirst({
+      where: {
+        tenantId,
+        workspaceId: currentWorkspaceId,
+        ...(locationIds === undefined ? {} : { fulfillmentLocationId: { in: locationIds.length ? locationIds : ["__no_authorized_location__"] } }),
+        ...(scope === "own" ? {
+          OR: [
+            { createdBy: userId! },
+            { workOrders: { some: { OR: [{ createdBy: userId! }, { assigneeId: userId! }] } } }
+          ]
+        } : {}),
+        OR: [
+          { customerId },
+          { contractSubjectCustomerId: customerId },
+          { payerSubjectCustomerId: customerId },
+          { userSubjectCustomerId: customerId }
+        ]
+      },
+      select: { id: true }
+    });
+    if (!profileVisible && !orderVisible) throw new NotFoundException("客户不存在或不在当前账号的数据范围内");
+  }
+
   private canReveal(user?: SystemUserRow) {
     if (!user) return false;
     if (user.isSaasAdmin) return false;
@@ -133,6 +233,16 @@ export class CustomerOperationsService {
     user?: SystemUserRow,
     options: { action?: "detail" | "export"; reason?: string } = {}
   ): Promise<SharedCustomerProfile> {
+    const scope = getRequestDataScope() ?? user?.dataScope;
+    if (scope && (scope !== "all" || getRequestLocationIds() !== undefined)) {
+      await this.assertCustomerVisibleInRequestScope(
+        tenantId,
+        workspaceId ?? getRequestWorkspaceId(),
+        customerId,
+        scope,
+        getRequestUserId() ?? user?.id
+      );
+    }
     const profile = await this.customers.findById(tenantId, customerId);
     // 查不到即拒绝，且不区分「不存在」与「属于别的租户」——后者会变成一个
     // 探测他租户客户是否存在的信道。
@@ -166,7 +276,11 @@ export class CustomerOperationsService {
     workspaceId: string | undefined,
     user?: SystemUserRow
   ): Promise<SharedCustomerProfile[]> {
-    const rows = await this.customers.listByTenant(tenantId);
+    const scope = getRequestDataScope() ?? user?.dataScope;
+    const visibleIds = scope
+      ? await this.visibleCustomerIds(tenantId, workspaceId ?? getRequestWorkspaceId() ?? "", scope, getRequestUserId() ?? user?.id)
+      : undefined;
+    const rows = await this.customers.listByTenant(tenantId, undefined, visibleIds);
     const revealed = this.canReveal(user);
     // 列表只记一条汇总审计：逐客户一条会让一次翻页产生上百行噪声，
     // 反而淹没真正需要追责的单客户明文查看。
@@ -452,8 +566,8 @@ export class CustomerOperationsService {
   }
 
   /** 客户状态时间线：账号、会员全局事件与可选的历史空间事件。 */
-  listStatusHistory(tenantId: string, customerId: string, workspaceId?: string) {
-    return this.operations.listStatusHistory(tenantId, customerId, workspaceId);
+  listStatusHistory(tenantId: string, customerId: string, workspaceId?: string, includeWorkspaceEvents = true) {
+    return this.operations.listStatusHistory(tenantId, customerId, workspaceId, includeWorkspaceEvents);
   }
 
   /** 敏感资料访问时间线。只有具备解密权限的人才能查——否则它本身就是一份访问画像。 */
@@ -461,7 +575,25 @@ export class CustomerOperationsService {
     if (!this.canReveal(user)) {
       throw new ForbiddenException("查看敏感资料访问审计需要「客户敏感资料解密」权限");
     }
-    return this.operations.listSensitiveAccess(tenantId, customerId);
+    const locationIds = getRequestLocationIds();
+    if (locationIds !== undefined) {
+      // 审计记录尚无履约地点维度，不能把同空间其他地点的敏感访问轨迹
+      // 返回给地点受限账号；不以“客户在某地点可见”推导其整份审计可见。
+      throw new ForbiddenException("敏感资料访问审计尚未按履约地点归属，地点受限账号暂不可查看");
+    }
+    const scope = getRequestDataScope() ?? user?.dataScope;
+    const workspaceId = getRequestWorkspaceId();
+    if (!workspaceId) throw new ForbiddenException("查看敏感资料访问审计需要已授权的经营空间");
+    if (scope && (scope !== "all" || locationIds !== undefined)) {
+      await this.assertCustomerVisibleInRequestScope(
+        tenantId,
+        workspaceId,
+        customerId,
+        scope,
+        getRequestUserId() ?? user?.id
+      );
+    }
+    return this.operations.listSensitiveAccess(tenantId, customerId, workspaceId);
   }
 
   /**
@@ -478,18 +610,33 @@ export class CustomerOperationsService {
     user?: SystemUserRow,
     query: CustomerProfileOrderQuery = {}
   ): Promise<CustomerProfileOverview> {
+    if (!workspaceId) throw new ForbiddenException("查看会员经营资料需要已授权的经营空间");
     const profile = await this.getCustomerDetail(tenantId, workspaceId, customerId, user);
     const page = Math.max(1, Math.floor(query.page ?? 1));
     const pageSize = Math.min(50, Math.max(1, Math.floor(query.pageSize ?? 20)));
+    const orderVisibility: Prisma.RentalOrderWhereInput[] = [];
+    const locationIds = getRequestLocationIds();
+    if (locationIds !== undefined) {
+      orderVisibility.push({ fulfillmentLocationId: { in: locationIds.length ? locationIds : ["__no_authorized_location__"] } });
+    }
+    if (getRequestDataScope() === "own") {
+      const userId = getRequestUserId();
+      orderVisibility.push(userId ? { OR: [
+        { createdBy: userId },
+        { workOrders: { some: { OR: [{ createdBy: userId }, { assigneeId: userId }] } } }
+      ] } : { id: "__no_current_user__" });
+    }
     const orderWhere: Prisma.RentalOrderWhereInput = {
       tenantId,
+      workspaceId,
       OR: [
         { customerId },
         { contractSubjectCustomerId: customerId },
         { payerSubjectCustomerId: customerId },
         { userSubjectCustomerId: customerId },
         { membershipSnapshot: { path: "$.personalCustomerId", equals: customerId } }
-      ]
+      ],
+      ...(orderVisibility.length ? { AND: orderVisibility } : {})
     };
 
     const [
@@ -510,10 +657,10 @@ export class CustomerOperationsService {
         orderBy: [{ isDefault: "desc" }, { updatedAt: "desc" }]
       }),
       this.prisma.customerQualificationRevision.findMany({
-        where: { tenantId, customerId },
+        where: { tenantId, workspaceId, customerId },
         orderBy: [{ submittedAt: "desc" }, { createdAt: "desc" }]
       }),
-      this.operations.listStatusHistory(tenantId, customerId),
+      this.operations.listStatusHistory(tenantId, customerId, workspaceId, locationIds === undefined),
       this.prisma.rentalOrder.count({ where: orderWhere }),
       this.prisma.rentalOrder.findMany({
         where: orderWhere,
@@ -541,18 +688,18 @@ export class CustomerOperationsService {
         }
       }),
       this.prisma.rentalBenefitAccount.findMany({
-        where: { tenantId, customerId },
+        where: { tenantId, workspaceId, customerId },
         orderBy: [{ updatedAt: "desc" }],
         include: { workspace: { select: { id: true, name: true, categoryCode: true } } }
       }),
       this.prisma.rentalRewardLedgerEntry.findMany({
-        where: { tenantId, customerId },
+        where: { tenantId, workspaceId, customerId },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: 200,
         include: { workspace: { select: { id: true, name: true } } }
       }),
       this.prisma.rentalCustomerCoupon.findMany({
-        where: { tenantId, customerId },
+        where: { tenantId, workspaceId, customerId },
         orderBy: [{ claimedAt: "desc" }, { id: "desc" }],
         take: 200,
         include: { workspace: { select: { id: true, name: true } } }
@@ -570,8 +717,8 @@ export class CustomerOperationsService {
           personalCustomer: { select: { id: true, name: true } }
         }
       }),
-      this.canReveal(user)
-        ? this.operations.listSensitiveAccess(tenantId, customerId)
+      this.canReveal(user) && locationIds === undefined
+        ? this.operations.listSensitiveAccess(tenantId, customerId, workspaceId)
         : Promise.resolve(undefined)
     ]);
 

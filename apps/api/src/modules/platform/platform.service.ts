@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import { getRequestWorkspaceId, requireRequestTenantId, requireRequestWorkspaceId } from "../../common/request-identity";
+import { getRequestLocationIds, getRequestWorkspaceId, requireRequestTenantId, requireRequestWorkspaceId } from "../../common/request-identity";
 import {
   RENTAL_CATEGORY_DEFINITIONS,
   CreateBusinessWorkspaceRequest,
@@ -1557,7 +1557,7 @@ export class PlatformService {
   listSharedCustomers(currentUser?: SystemUserRow) {
     this.requireWorkspaceDataSource();
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireSharedCustomers().listByTenant(tenantId);
+    return this.requireCustomerOperations().listCustomers(tenantId, getRequestWorkspaceId(), currentUser);
   }
 
   /**
@@ -1608,13 +1608,7 @@ export class PlatformService {
   }
 
   listSharedCustomersMasked(currentUser?: SystemUserRow) {
-    this.requireWorkspaceDataSource();
-    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().listCustomers(
-      tenantId,
-      getRequestWorkspaceId(),
-      currentUser
-    );
+    return this.listSharedCustomers(currentUser);
   }
 
   ensureCustomerAccount(customerId: string, currentUser?: SystemUserRow) {
@@ -1675,7 +1669,12 @@ export class PlatformService {
   listCustomerStatusHistory(customerId: string, currentUser?: SystemUserRow) {
     this.requireWorkspaceDataSource();
     const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
-    return this.requireCustomerOperations().listStatusHistory(tenantId, customerId);
+    return this.requireCustomerOperations().listStatusHistory(
+      tenantId,
+      customerId,
+      getRequestWorkspaceId(),
+      getRequestLocationIds() === undefined
+    );
   }
 
   listCustomerSensitiveAccess(customerId: string, currentUser?: SystemUserRow) {

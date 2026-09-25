@@ -14,6 +14,7 @@ import type {
   SharedCustomerProfile
 } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
+import { getRequestDataScope, getRequestUserId, getRequestWorkspaceId } from "../../common/request-identity";
 
 export type SharedCustomerTx = Prisma.TransactionClient;
 
@@ -104,9 +105,20 @@ export class SharedCustomerRepository {
   }
 
   /** 主档与唯一会员均按租户共享，业务事实仍由业务仓储按空间查询。 */
-  async listByTenant(tenantId: string): Promise<SharedCustomerProfile[]> {
+  async listByTenant(
+    tenantId: string,
+    creatorScope?: { createdByUserId: string; createdInWorkspaceId: string },
+    customerIds?: string[]
+  ): Promise<SharedCustomerProfile[]> {
     const rows = await this.prisma.customerProfile.findMany({
-      where: { tenantId },
+      where: {
+        tenantId,
+        ...(customerIds ? { id: { in: customerIds.length ? customerIds : ["__no_visible_customer__"] } } : {}),
+        ...(creatorScope ? {
+          createdByUserId: creatorScope.createdByUserId,
+          createdInWorkspaceId: creatorScope.createdInWorkspaceId
+        } : {})
+      },
       include: { membership: true },
       orderBy: { createdAt: "desc" }
     });
@@ -176,6 +188,7 @@ export class SharedCustomerRepository {
   // ---------------------------------------------------------------------------
 
   async createProfile(input: CreateCustomerProfileInput, tx?: SharedCustomerTx): Promise<PrismaCustomerProfile> {
+    const scopeIsOperator = getRequestDataScope() !== undefined;
     return this.db(tx).customerProfile.create({
       data: {
         tenantId: input.tenantId,
@@ -193,7 +206,11 @@ export class SharedCustomerRepository {
         region: input.region ?? null,
         qualifications: (input.qualifications ?? {}) as Prisma.InputJsonValue,
         corporateName: input.corporateName?.trim() || null,
-        corporateTaxNo: input.corporateTaxNo?.trim() || null
+        corporateTaxNo: input.corporateTaxNo?.trim() || null,
+        // Creator attribution is a security boundary for `own`/`store` visibility.
+        // Never accept it from a DTO or an internal caller's input object.
+        createdByUserId: scopeIsOperator ? getRequestUserId() ?? null : null,
+        createdInWorkspaceId: scopeIsOperator ? getRequestWorkspaceId() ?? null : null
       }
     });
   }
