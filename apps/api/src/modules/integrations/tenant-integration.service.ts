@@ -66,6 +66,20 @@ export class TenantIntegrationService {
     return value as Record<string, unknown>;
   }
 
+  /** Conditional provider fields are validated as pairs; UI `required` flags alone are not a security boundary. */
+  private conditionalProviderProblem(provider: TenantIntegrationProvider, settings: Record<string, unknown>, credentials: Record<string, string>) {
+    if (provider !== "wechat_pay") return undefined;
+    const certificateSerial = String(settings.platformCertificateSerial ?? "").trim();
+    const certificate = String(credentials.wechatPlatformCertificate ?? "").trim();
+    const publicKeyId = String(settings.platformPublicKeyId ?? "").trim();
+    const publicKey = String(credentials.wechatPlatformPublicKey ?? "").trim();
+    if (Boolean(certificateSerial) !== Boolean(certificate)) return "平台证书序列号与平台证书必须成对配置";
+    if (Boolean(publicKeyId) !== Boolean(publicKey)) return "微信支付公钥 ID 与公钥必须成对配置";
+    if (!certificate && !publicKey) return "请配置一组微信平台证书或微信支付公钥验签材料";
+    if (publicKey && !/^PUB_KEY_ID_[0-9]+$/u.test(publicKeyId)) return "微信支付公钥 ID 格式无效，应为 PUB_KEY_ID_ 加数字";
+    return undefined;
+  }
+
   private configuredSecrets(row: IntegrationRow | undefined) {
     if (!row?.credentialsEncrypted) return {} as Record<string, string>;
     try {
@@ -166,6 +180,8 @@ export class TenantIntegrationService {
       .filter((field) => field.required && !String((field.secret ? credentials[field.key] : settings[field.key]) ?? "").trim())
       .map((field) => field.key);
     if (missing.length > 0) throw new ServiceUnavailableException(`默认${capability}平台配置不完整：${missing.join("、")}`);
+    const conditionalProblem = this.conditionalProviderProblem(row.provider as TenantIntegrationProvider, settings, credentials);
+    if (conditionalProblem) throw new ServiceUnavailableException(conditionalProblem);
     try {
       await validateProviderOutboundUrls(capability, row.provider, settings);
     } catch (error) {
@@ -243,6 +259,7 @@ export class TenantIntegrationService {
         .filter((field) => field.required && !String((field.secret ? credentials[field.key] : settings[field.key]) ?? "").trim())
         .map((field) => field.key);
       if (missing.length > 0) continue;
+      if (this.conditionalProviderProblem(provider, settings, credentials)) continue;
       // 回调路径只需要商户标识和验签材料，不会向 gateway/notifyUrl 发起请求。
       // 不在公开回调上为所有租户逐个做 DNS 解析，避免被伪造回调放大为
       // 大量外部 DNS 查询；真正发起支付请求的 runtimeConfig 仍会做完整出站校验。
@@ -306,6 +323,8 @@ export class TenantIntegrationService {
       })
       .map((field) => field.key);
     if (input.enabled && missing.length > 0) throw new BadRequestException(`启用前请补齐：${missing.join("、")}`);
+    const conditionalProblem = this.conditionalProviderProblem(provider, mergedSettings, mergedSecrets);
+    if (input.enabled && conditionalProblem) throw new BadRequestException(conditionalProblem);
     try {
       await validateProviderOutboundUrls(capability, provider, mergedSettings);
     } catch (error) {

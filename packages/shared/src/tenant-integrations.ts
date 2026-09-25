@@ -163,10 +163,12 @@ export const TENANT_INTEGRATION_PROVIDERS: TenantIntegrationProviderDefinition[]
       { key: "gatewayUrl", label: "网关地址", secret: false, required: false, inputType: "url", placeholder: "https://api.mch.weixin.qq.com", description: "开发或沙箱联调时可填写兼容网关；生产默认使用微信支付官方网关。" },
       { key: "notifyUrl", label: "支付通知地址", secret: false, required: true, inputType: "url" },
       { key: "refundNotifyUrl", label: "退款通知地址", secret: false, required: false, inputType: "url", description: "可选；微信退款结果通知地址。未配置时继续通过退款查询恢复，不把受理当成成功。" },
-      { key: "platformCertificateSerial", label: "平台证书序列号", secret: false, required: true, inputType: "text", description: "用于匹配微信回调请求头中的 Wechatpay-Serial，不是商户证书序列号。" },
+      { key: "platformCertificateSerial", label: "平台证书序列号", secret: false, required: false, inputType: "text", description: "旧平台证书验签模式；与微信支付公钥二选一，序列号须匹配回调头 Wechatpay-Serial。" },
+      { key: "platformPublicKeyId", label: "微信支付公钥 ID", secret: false, required: false, inputType: "text", placeholder: "PUB_KEY_ID_...", description: "公钥验签模式；与公钥文件成对填写，按回调头 Wechatpay-Serial 精确匹配。" },
       { key: "merchantPrivateKey", label: "商户私钥", secret: true, required: true, inputType: "password" },
       { key: "merchantSerialNo", label: "商户证书序列号", secret: true, required: true, inputType: "text" },
-      { key: "wechatPlatformCertificate", label: "微信支付平台证书", secret: true, required: true, inputType: "password" },
+      { key: "wechatPlatformCertificate", label: "微信支付平台证书", secret: true, required: false, inputType: "password", description: "平台证书验签模式；须与平台证书序列号成对填写。" },
+      { key: "wechatPlatformPublicKey", label: "微信支付公钥", secret: true, required: false, inputType: "password", description: "公钥验签模式；须与公钥 ID 成对填写。" },
       { key: "apiV3Key", label: "API v3 密钥", secret: true, required: true, inputType: "password" }
     ],
     supportedMethods: ["jsapi", "app", "native", "h5"]
@@ -194,7 +196,7 @@ export const TENANT_INTEGRATION_PROVIDERS: TenantIntegrationProviderDefinition[]
     name: "阿里云 OSS",
     description: "对象存储直传。客户端只拿短时上传授权，不暴露长期 AccessKey。",
     fields: [
-      { key: "region", label: "地域", secret: false, required: true, inputType: "text", placeholder: "oss-cn-hangzhou" },
+      { key: "region", label: "地域", secret: false, required: true, inputType: "text", placeholder: "cn-hangzhou" },
       { key: "endpoint", label: "Endpoint", secret: false, required: true, inputType: "url" },
       { key: "bucket", label: "Bucket", secret: false, required: true, inputType: "text" },
       { key: "objectPrefix", label: "对象前缀", secret: false, required: false, inputType: "text", placeholder: "tenant-files/" },

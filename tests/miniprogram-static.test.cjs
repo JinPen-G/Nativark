@@ -351,6 +351,23 @@ test("配置校验：地址为空或非回环 http 时任何请求都以 NOT_CON
   assert.equal(r.calls.length, 0);
 });
 
+test("租户品牌图只解析到配置的 API 域名，支持 API 相对路径并拒绝外站和路径逃逸", () => {
+  const r = runtime();
+  const { resolvePublicImageUrl } = r.load("core/public-asset");
+  assert.equal(resolvePublicImageUrl("/api/files/public/tenant/logo.png"), "https://merchant.example.invalid/api/files/public/tenant/logo.png");
+  assert.equal(resolvePublicImageUrl("https://merchant.example.invalid/api/files/public/logo.png?v=2"), "https://merchant.example.invalid/api/files/public/logo.png?v=2");
+  for (const unsafe of [
+    "https://attacker.example/api/logo.png",
+    "http://merchant.example.invalid/api/logo.png",
+    "//attacker.example/api/logo.png",
+    "/assets/logo.png",
+    "/api/files/../other-tenant/logo.png",
+    "/api/files/%2e%2e/other-tenant/logo.png",
+    "javascript:alert(1)"
+  ]) assert.equal(resolvePublicImageUrl(unsafe), undefined, `必须拒绝不可信图片地址 ${unsafe}`);
+  assert.equal(resolvePublicImageUrl(undefined), undefined);
+});
+
 test("响应信封解包不把 0/false 误判为空", () => {
   const { unwrap } = runtime().load("core/http");
   assert.equal(unwrap({ data: 0, requestId: "x" }), 0);
@@ -519,7 +536,7 @@ test("商户启动信息：拟新增启动接口缺席时退回公开服务列�
   const info = await merchant.loadMerchant(true);
   assert.equal(info.name, "示例器材租赁");
   assert.equal(info.fromBootstrap, false);
-  same(info.loginMethods, ["password"]);
+  same(info.loginMethods, [], "缺少权威渠道配置时不得推测密码登录已开放");
   assert.equal(merchant.resolveServiceCode(info), "camera");
   assert.ok(r.calls.every((req) => !req.header.Authorization), "游客启动不带令牌");
   assert.equal(merchant.resolveServiceCode({ ...info, services: [] }), undefined, "零个服务不回落其他商户");

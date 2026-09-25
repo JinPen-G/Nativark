@@ -10,6 +10,10 @@
 
   <view class="section stack">
     <view wx:if="{{wechatNotice}}" class="notice notice--neutral">{{wechatNotice}}</view>
+    <view wx:if="{{loginUnavailable}}" class="notice notice--neutral">
+      当前没有可用的登录方式，请联系商户。
+      <view class="link mt-8" bindtap="onRegister">前往注册</view>
+    </view>
 
     <button wx:if="{{wechatAvailable}}" class="btn btn--primary btn--cta btn--block" hover-class="btn-hover" open-type="getPhoneNumber" bindgetphonenumber="onPhoneNumber" disabled="{{submitting}}">{{submitting ? '登录中…' : '微信手机号登录'}}</button>
 

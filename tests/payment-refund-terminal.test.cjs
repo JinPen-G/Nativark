@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { generateKeyPairSync, X509Certificate } = require("node:crypto");
+const { createSign, generateKeyPairSync, X509Certificate } = require("node:crypto");
 const {
   PaymentRuntimeService,
   PaymentProviderDefinitiveError,
@@ -300,8 +300,64 @@ async function testWechatLiveTestValidation() {
   await assert.rejects(() => service.testConnection({ ...ok, credentials: { ...ok.credentials, apiV3Key: "short" } }), /32 字节/u);
   assert.equal(queried, 0, "本地材料校验失败时不得发起网络请求");
   ok.settings.platformCertificateSerial = serial;
-  assert.match(await service.testConnection(ok), /平台证书/u);
+  assert.match(await service.testConnection(ok), /响应验签材料/u);
   assert.equal(queried, 1);
+
+  const { privateKey: signingKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const publicKeyConfig = {
+    provider: "wechat_pay",
+    tenantId: "tenant-public-key",
+    settings: { platformPublicKeyId: "PUB_KEY_ID_123456" },
+    credentials: {
+      apiV3Key: key32,
+      wechatPlatformPublicKey: publicKey.export({ type: "spki", format: "pem" }).toString()
+    }
+  };
+  service.assertWechatCallbackMaterial(publicKeyConfig);
+  assert.throws(() => service.assertWechatCallbackMaterial({ ...publicKeyConfig, settings: { platformPublicKeyId: "wrong" } }), /公钥 ID/u);
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const nonce = "response-nonce";
+  const body = JSON.stringify({ code: "SUCCESS" });
+  const signedMessage = `${timestamp}\n${nonce}\n${body}\n`;
+  const signer = createSign("RSA-SHA256");
+  signer.update(signedMessage);
+  signer.end();
+  const signature = signer.sign(signingKey, "base64");
+  assert.equal(service.verifyWechatSignedMessage(publicKeyConfig, "PUB_KEY_ID_123456", timestamp, nonce, signature, body), true);
+  assert.equal(service.verifyWechatSignedMessage(publicKeyConfig, "PUB_KEY_ID_123457", timestamp, nonce, signature, body), false, "公钥 ID 不匹配时不得尝试其他密钥");
+  assert.doesNotThrow(() => service.verifyWechatApiResponse(publicKeyConfig, new Response(body, { headers: {
+    "Wechatpay-Timestamp": timestamp,
+    "Wechatpay-Nonce": nonce,
+    "Wechatpay-Signature": signature,
+    "Wechatpay-Serial": "PUB_KEY_ID_123456"
+  } }), body));
+  assert.throws(() => service.verifyWechatApiResponse(publicKeyConfig, new Response(body, { headers: {
+    "Wechatpay-Timestamp": timestamp,
+    "Wechatpay-Nonce": nonce,
+    "Wechatpay-Signature": signature,
+    "Wechatpay-Serial": "PUB_KEY_ID_123457"
+  } }), body), /验签失败/u);
+
+  const rawBody = Buffer.from(JSON.stringify({ resource: { nonce: "x" } }));
+  const callbackTimestamp = String(Math.floor(Date.now() / 1000));
+  const callbackNonce = "callback-nonce";
+  const callbackSigner = createSign("RSA-SHA256");
+  callbackSigner.update(`${callbackTimestamp}\n${callbackNonce}\n${rawBody.toString("utf8")}\n`);
+  callbackSigner.end();
+  const callbackSignature = callbackSigner.sign(signingKey, "base64");
+  service.callbackConfigs = async () => [publicKeyConfig];
+  await assert.rejects(() => service.handleWechatCallback({ rawBody, headers: {
+    "wechatpay-timestamp": callbackTimestamp,
+    "wechatpay-nonce": callbackNonce,
+    "wechatpay-signature": callbackSignature,
+    "wechatpay-serial": "PUB_KEY_ID_123456"
+  } }), /商户身份不匹配/u, "签名合法的公钥回调必须继续走到商户身份/资源校验");
+  await assert.rejects(() => service.handleWechatCallback({ rawBody, headers: {
+    "wechatpay-timestamp": callbackTimestamp,
+    "wechatpay-nonce": callbackNonce,
+    "wechatpay-signature": "invalid-signature",
+    "wechatpay-serial": "PUB_KEY_ID_123456"
+  } }), /验签失败/u);
 }
 
 function testFormatting() {

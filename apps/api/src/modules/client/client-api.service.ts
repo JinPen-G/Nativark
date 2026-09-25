@@ -299,7 +299,9 @@ export class ClientApiService {
       ...((profile?.smsLoginEnabled ?? true) && smsReady ? ["sms" as const] : []),
       ...((profile?.passwordLoginEnabled ?? true) ? ["password" as const] : [])
     ];
-    const safeLoginMethods = loginMethods.length ? loginMethods : ["password" as const];
+    // An empty list is meaningful: all login methods are disabled or unavailable.
+    // Do not advertise a password fallback that the server must reject.
+    const safeLoginMethods = loginMethods;
 
     if (!profile || publishedActive.length === 0) {
       // 未发布渠道不回退 ACTIVE 空间列表；只保留租户级登录/帮助入口，禁止客户端

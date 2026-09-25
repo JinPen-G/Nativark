@@ -1,5 +1,6 @@
 import { cachedMerchant, merchantEvents } from "../../core/merchant";
 import { navMetrics } from "../../core/nav";
+import { resolvePublicImageUrl } from "../../core/public-asset";
 import { back } from "../../core/ui";
 
 /** 系统默认 Logo（包内资源）；租户在运营端配置了品牌 Logo 时用租户的，否则用它，不用平台品牌冒充商户但保留一个中性占位。 */
@@ -42,9 +43,9 @@ Component({
     }
   },
   methods: {
-    /** 只接受 https 远程图（小程序 image 组件要求）；其它一律回落系统图。 */
+    /** 仅接受可信 API 域名下的租户图片；其它一律回落系统图。 */
     applyLogo(url: string | undefined) {
-      const next = typeof url === "string" && /^https:\/\//i.test(url) ? url : DEFAULT_LOGO;
+      const next = resolvePublicImageUrl(url) ?? DEFAULT_LOGO;
       if (next !== this.data.logo) this.setData({ logo: next });
     },
     /** 远程 Logo 加载失败：回落系统图，避免破图。 */

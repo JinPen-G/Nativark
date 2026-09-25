@@ -4,6 +4,7 @@ import { describeError } from "../../core/errors";
 import { isApiError } from "../../core/http";
 import { newKey } from "../../core/keys";
 import { cachedMerchant, loadMerchant, preferredServiceCode, resolveServiceCode, type MerchantInfo } from "../../core/merchant";
+import { resolvePublicImageUrl } from "../../core/public-asset";
 import { type FieldErrors } from "../../core/page";
 import { isSignedIn } from "../../core/session";
 import { themeBehavior } from "../../core/theme-behavior";
@@ -30,6 +31,7 @@ interface LoginData {
   showPassword: boolean;
   smsAvailable: boolean;
   passwordAvailable: boolean;
+  loginUnavailable: boolean;
   authMode: "password" | "sms";
   smsCode: string;
   smsMasked: string;
@@ -60,6 +62,7 @@ Page({
     showPassword: false,
     smsAvailable: false,
     passwordAvailable: true,
+    loginUnavailable: false,
     authMode: "password",
     smsCode: "",
     smsMasked: "",
@@ -100,8 +103,8 @@ Page({
     this.setData({
       merchantName: info.name,
       merchantInitial: info.name.trim().charAt(0) || "·",
-      // 品牌图只接受 https 远程图（商户在渠道配置里上传）；缺省/非法时留空，由页面回落到商户名首字，绝不用平台品牌图冒充商户。
-      merchantLogo: typeof info.logoUrl === "string" && /^https:\/\//i.test(info.logoUrl) ? info.logoUrl : "",
+      // 只接受可信 API 域名下的租户图片；缺省/非法时留空，由页面回落到商户名首字。
+      merchantLogo: resolvePublicImageUrl(info.logoUrl) ?? "",
       servicePhone: info.servicePhone ?? "",
       agreementsProvided: Boolean(agreements),
       agreementName: agreements?.userAgreement.name ?? "用户服务协议",
@@ -111,8 +114,10 @@ Page({
       wechatAvailable: info.loginMethods.includes("wechat_phone"),
       smsAvailable: info.loginMethods.includes("sms"),
       passwordAvailable: info.loginMethods.includes("password"),
+      loginUnavailable: info.loginMethods.length === 0,
       authMode: info.loginMethods.includes("password") ? this.data.authMode : info.loginMethods.includes("sms") ? "sms" : this.data.authMode,
-      showPassword: !info.loginMethods.includes("wechat_phone") || this.data.showPassword,
+      showPassword: info.loginMethods.some((method) => method === "password" || method === "sms")
+        && (!info.loginMethods.includes("wechat_phone") || this.data.showPassword),
       wechatNotice: info.loginMethods.includes("wechat_phone") ? "" : "商户尚未开通微信手机号一键登录，请使用其他方式登录。",
     });
   },

@@ -24,6 +24,7 @@ import {
 import {
   createHash,
   createDecipheriv,
+  createPublicKey,
   createSign,
   createVerify,
   randomBytes,
@@ -257,7 +258,12 @@ export function refundFailureDisposition(error: unknown): { definitive: boolean;
   return status ? { definitive: true, providerCode: `HTTP_${status}` } : { definitive: false };
 }
 
-async function fetchJson(url: string, init: RequestInit, timeoutMs = 10_000): Promise<JsonRecord> {
+async function fetchJson(
+  url: string,
+  init: RequestInit,
+  timeoutMs = 10_000,
+  validateResponse?: (response: Response, rawBody: string) => void
+): Promise<JsonRecord> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -275,6 +281,7 @@ async function fetchJson(url: string, init: RequestInit, timeoutMs = 10_000): Pr
     } catch {
       throw new PaymentProviderUnknownError();
     }
+    validateResponse?.(response, raw);
     let body: JsonRecord;
     try {
       body = JSON.parse(raw) as JsonRecord;
@@ -339,7 +346,7 @@ export class PaymentRuntimeService {
       // 已经没有人能看到错误。校验不发任何请求，只解析证书与密钥长度。
       this.assertWechatCallbackMaterial(config);
       await this.queryWechatIntent(config, merchantOrderNo);
-      return "已验证微信支付连接与平台证书（仅查询随机交易号，未创建或扣款）。";
+      return "已验证微信支付连接、响应验签材料与平台连通性（仅查询随机交易号，未创建或扣款）。";
     }
     if (config.provider === "stripe") {
       // 只读余额,校验 Secret Key 与网关连通性;不创建 Checkout、不扣款、不退款。
@@ -351,26 +358,76 @@ export class PaymentRuntimeService {
     throw new ServiceUnavailableException("未实现的支付平台适配器");
   }
 
-  /**
-   * 微信回调验签依赖三样本地材料：平台证书能解析、其序列号与配置的
-   * platformCertificateSerial 一致（否则回调按 Wechatpay-Serial 永远匹配不到）、
-   * apiV3Key 恰好 32 字节（AES-256-GCM 解密要求）。任何一项错误都让回调静默失败。
-   */
+  /** 微信证书模式和公钥模式均按精确的 Wechatpay-Serial 选择材料；不跨模式降级。 */
   assertWechatCallbackMaterial(config: TenantIntegrationRuntimeConfig) {
     const key = Buffer.from(requiredText(config.credentials.apiV3Key, "API v3 密钥"), "utf8");
     if (key.length !== 32) throw new ServiceUnavailableException(`API v3 密钥必须是 32 字节，当前 ${key.length} 字节`);
-    let certificate: X509Certificate;
+    const certificateSerialValue = valueOf(config.settings.platformCertificateSerial).trim();
+    const certificatePem = valueOf(config.credentials.wechatPlatformCertificate).trim();
+    const publicKeyId = valueOf(config.settings.platformPublicKeyId).trim();
+    const publicKeyPem = valueOf(config.credentials.wechatPlatformPublicKey).trim();
+    if (Boolean(certificateSerialValue) !== Boolean(certificatePem)) throw new ServiceUnavailableException("平台证书序列号与平台证书必须成对配置");
+    if (Boolean(publicKeyId) !== Boolean(publicKeyPem)) throw new ServiceUnavailableException("微信支付公钥 ID 与公钥必须成对配置");
+    if (!certificatePem && !publicKeyPem) throw new ServiceUnavailableException("请配置一组微信平台证书或微信支付公钥验签材料");
+
+    if (certificatePem) {
+      let certificate: X509Certificate;
+      try {
+        certificate = new X509Certificate(pem(certificatePem));
+      } catch {
+        throw new ServiceUnavailableException("微信支付平台证书无法解析，请粘贴完整的 PEM 证书（不是公钥或商户证书）");
+      }
+      const configuredSerial = certificateSerial(certificateSerialValue);
+      const actualSerial = certificateSerial(certificate.serialNumber);
+      if (configuredSerial !== actualSerial) throw new ServiceUnavailableException(`平台证书序列号不一致：配置为 ${configuredSerial}，证书实际为 ${actualSerial}`);
+      if (Date.parse(certificate.validFrom) > Date.now()) throw new ServiceUnavailableException("微信支付平台证书尚未生效");
+      if (Date.parse(certificate.validTo) < Date.now()) throw new ServiceUnavailableException("微信支付平台证书已过期，请更新平台证书");
+    }
+    if (publicKeyPem) {
+      if (!/^PUB_KEY_ID_[0-9]+$/u.test(publicKeyId)) throw new ServiceUnavailableException("微信支付公钥 ID 格式无效，应为 PUB_KEY_ID_ 加数字");
+      try {
+        const publicKey = createPublicKey(pem(publicKeyPem));
+        if (publicKey.asymmetricKeyType !== "rsa" || (publicKey.asymmetricKeyDetails?.modulusLength ?? 0) < 2048) throw new Error("not-rsa-2048");
+      } catch {
+        throw new ServiceUnavailableException("微信支付公钥无法解析或不是至少 2048 位的 RSA 公钥");
+      }
+    }
+  }
+
+  private wechatSigningKey(config: TenantIntegrationRuntimeConfig, serial: string): string | undefined {
+    const normalized = certificateSerial(serial);
+    if (/^PUB_KEY_ID_[0-9]+$/u.test(normalized)) {
+      return certificateSerial(config.settings.platformPublicKeyId) === normalized
+        ? valueOf(config.credentials.wechatPlatformPublicKey)
+        : undefined;
+    }
+    return certificateSerial(config.settings.platformCertificateSerial) === normalized
+      ? valueOf(config.credentials.wechatPlatformCertificate)
+      : undefined;
+  }
+
+  private verifyWechatSignedMessage(config: TenantIntegrationRuntimeConfig, serial: string, timestampHeader: string, nonceHeader: string, signature: string, body: string) {
+    const key = this.wechatSigningKey(config, serial);
+    if (!key || !timestampHeader || !nonceHeader || !signature) return false;
+    return verifyRsa(key, `${timestampHeader}\n${nonceHeader}\n${body}\n`, signature);
+  }
+
+  private verifyWechatApiResponse(config: TenantIntegrationRuntimeConfig, response: Response, rawBody: string) {
+    const timestampHeader = response.headers.get("Wechatpay-Timestamp") ?? "";
+    const nonceHeader = response.headers.get("Wechatpay-Nonce") ?? "";
+    const signature = response.headers.get("Wechatpay-Signature") ?? "";
+    const serial = response.headers.get("Wechatpay-Serial") ?? "";
+    const timestampSeconds = Number(timestampHeader);
+    if (!Number.isFinite(timestampSeconds) || Math.abs(Date.now() / 1000 - timestampSeconds) > 300) {
+      throw new PaymentProviderUnknownError("微信支付响应时间戳无效");
+    }
     try {
-      certificate = new X509Certificate(pem(config.credentials.wechatPlatformCertificate));
+      if (!this.verifyWechatSignedMessage(config, serial, timestampHeader, nonceHeader, signature, rawBody)) {
+        throw new Error("signature-invalid");
+      }
     } catch {
-      throw new ServiceUnavailableException("微信支付平台证书无法解析，请粘贴完整的 PEM 证书（不是公钥或商户证书）");
+      throw new PaymentProviderUnknownError("微信支付响应验签失败");
     }
-    const configuredSerial = certificateSerial(config.settings.platformCertificateSerial);
-    const actualSerial = certificateSerial(certificate.serialNumber);
-    if (configuredSerial !== actualSerial) {
-      throw new ServiceUnavailableException(`平台证书序列号不一致：配置为 ${configuredSerial}，证书实际为 ${actualSerial}`);
-    }
-    if (Date.parse(certificate.validTo) < Date.now()) throw new ServiceUnavailableException("微信支付平台证书已过期，请更新平台证书");
   }
 
   /**
@@ -1029,9 +1086,9 @@ export class PaymentRuntimeService {
     const signedAt = Number(timestampHeader);
     if (!Number.isFinite(signedAt) || Math.abs(Date.now() / 1000 - signedAt) > 300) throw new UnauthorizedException("微信支付回调已过期");
     const candidates = (await this.callbackConfigs("wechat_pay"))
-      .filter((item) => certificateSerial(item.settings.platformCertificateSerial) === serial);
-    if (candidates.length === 0) throw new UnauthorizedException("微信支付回调平台证书序列号未配置或不匹配");
-    const message = `${timestampHeader}\n${nonceHeader}\n${rawBody.toString("utf8")}\n`;
+      .filter((item) => Boolean(this.wechatSigningKey(item, serial)));
+    if (candidates.length === 0) throw new UnauthorizedException("微信支付回调证书序列号或公钥 ID 未配置或不匹配");
+    const rawText = rawBody.toString("utf8");
     let envelope: JsonRecord;
     try {
       const parsed = JSON.parse(rawBody.toString("utf8")) as unknown;
@@ -1046,7 +1103,7 @@ export class PaymentRuntimeService {
     for (const config of candidates) {
       let signatureVerified = false;
       try {
-        signatureVerified = Boolean(timestampHeader && nonceHeader && signature && verifyRsa(valueOf(config.credentials.wechatPlatformCertificate), message, signature));
+        signatureVerified = this.verifyWechatSignedMessage(config, serial, timestampHeader, nonceHeader, signature, rawText);
       } catch {
         signatureVerified = false;
       }
@@ -1107,9 +1164,9 @@ export class PaymentRuntimeService {
     const signedAt = Number(timestampHeader);
     if (!Number.isFinite(signedAt) || Math.abs(Date.now() / 1000 - signedAt) > 300) throw new UnauthorizedException("微信退款回调已过期");
     const candidates = (await this.callbackConfigs("wechat_pay"))
-      .filter((item) => certificateSerial(item.settings.platformCertificateSerial) === serial);
-    if (candidates.length === 0) throw new UnauthorizedException("微信退款回调平台证书序列号未配置或不匹配");
-    const message = `${timestampHeader}\n${nonceHeader}\n${rawBody.toString("utf8")}\n`;
+      .filter((item) => Boolean(this.wechatSigningKey(item, serial)));
+    if (candidates.length === 0) throw new UnauthorizedException("微信退款回调证书序列号或公钥 ID 未配置或不匹配");
+    const rawText = rawBody.toString("utf8");
     let envelope: JsonRecord;
     try {
       const parsed = JSON.parse(rawBody.toString("utf8")) as unknown;
@@ -1127,7 +1184,7 @@ export class PaymentRuntimeService {
     for (const config of candidates) {
       let signatureVerified = false;
       try {
-        signatureVerified = Boolean(timestampHeader && nonceHeader && signature && verifyRsa(valueOf(config.credentials.wechatPlatformCertificate), message, signature));
+        signatureVerified = this.verifyWechatSignedMessage(config, serial, timestampHeader, nonceHeader, signature, rawText);
       } catch {
         signatureVerified = false;
       }
@@ -1772,7 +1829,7 @@ export class PaymentRuntimeService {
       method,
       headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: authorization },
       body: method === "GET" ? undefined : body
-    });
+    }, 10_000, (response, rawBody) => this.verifyWechatApiResponse(config, response, rawBody));
   }
 
   private decryptWechatResource(config: TenantIntegrationRuntimeConfig, resource: JsonRecord) {

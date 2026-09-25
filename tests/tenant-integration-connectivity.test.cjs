@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { generateKeyPairSync } = require("node:crypto");
+const { createPublicKey, createSign, generateKeyPairSync } = require("node:crypto");
 const path = require("node:path");
 
 process.env.NODE_ENV = "test";
@@ -17,8 +17,8 @@ const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048, private
 const calls = [];
 const originalFetch = global.fetch;
 
-function response(status, body) {
-  return { ok: status >= 200 && status < 300, status, text: async () => typeof body === "string" ? body : JSON.stringify(body) };
+function response(status, body, headers = {}) {
+  return { ok: status >= 200 && status < 300, status, headers: new Headers(headers), text: async () => typeof body === "string" ? body : JSON.stringify(body) };
 }
 
 const smsConfig = {
@@ -41,8 +41,13 @@ const wechatConfig = {
   id: "cfg-wechat-connectivity",
   capability: "payment",
   provider: "wechat_pay",
-  settings: { mchid: "mchid-test", gatewayUrl: "https://api.mch.weixin.qq.com" },
-  credentials: { merchantPrivateKey: privateKey, merchantSerialNo: "merchant-serial" }
+  settings: { mchid: "mchid-test", gatewayUrl: "https://api.mch.weixin.qq.com", platformPublicKeyId: "PUB_KEY_ID_123456" },
+  credentials: {
+    merchantPrivateKey: privateKey,
+    merchantSerialNo: "merchant-serial",
+    apiV3Key: "01234567890123456789012345678901",
+    wechatPlatformPublicKey: createPublicKey(privateKey).export({ type: "spki", format: "pem" }).toString()
+  }
 };
 
 const ossConfig = {
@@ -63,7 +68,20 @@ async function runAdapterChecks() {
     if (String(url).includes("dysmsapi.aliyuncs.com")) return response(200, { Code: "OK" });
     if (String(url).includes("sms.tencentcloudapi.com")) return response(200, { Response: { RequestId: "query-request" } });
     if (String(url).includes("openapi.alipay.com")) return response(200, { alipay_trade_query_response: { code: "40004" } });
-    if (String(url).includes("api.mch.weixin.qq.com")) return response(404, { code: "RESOURCE_NOT_EXISTS" });
+    if (String(url).includes("api.mch.weixin.qq.com")) {
+      const body = JSON.stringify({ code: "RESOURCE_NOT_EXISTS" });
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const nonce = "wechat-connectivity-response";
+      const signer = createSign("RSA-SHA256");
+      signer.update(`${timestamp}\n${nonce}\n${body}\n`);
+      signer.end();
+      return response(404, body, {
+        "Wechatpay-Timestamp": timestamp,
+        "Wechatpay-Nonce": nonce,
+        "Wechatpay-Signature": signer.sign(privateKey, "base64"),
+        "Wechatpay-Serial": "PUB_KEY_ID_123456"
+      });
+    }
     if (String(url).includes("oss-cn-hangzhou.aliyuncs.com")) return response(404, "");
     throw new Error(`unexpected URL ${url}`);
   };
@@ -94,6 +112,7 @@ async function runAdapterChecks() {
   await fileRuntime.testConnection(ossConfig);
   assert.equal(calls.at(-1).init.method, "HEAD");
   assert.doesNotMatch(calls.at(-1).init.method, /PUT|DELETE/u);
+  assert.match(new URL(calls.at(-1).url).searchParams.get("x-oss-credential") ?? "", /\/cn-hangzhou\/oss\/aliyun_v4_request$/u, "legacy oss-cn-* configuration must use OSS V4 signing region cn-*");
 }
 
 async function runOrchestratorChecks() {

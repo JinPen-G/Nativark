@@ -102,6 +102,11 @@ async function main() {
   assert.equal(parsed[0].normalizedStatus, "paid");
   assert.equal(parsed[1].normalizedStatus, "succeeded");
   assert.equal(parsed[2].normalizedStatus, "unknown");
+  assert.throws(
+    () => parsePaymentStatementCsv(csv(), "stripe"),
+    (error) => error instanceof BadRequestException && /只支持支付宝和微信支付/u.test(error.message),
+    "Stripe 对账单必须被明确拒绝，不能让页面配置造成已支持的错觉"
+  );
   await assertBadRequest(() => parsePaymentStatementCsv(Buffer.from("kind,status,amount,currency\npayment,PAID,1,CNY"), "alipay"));
   await assertBadRequest(() => parsePaymentStatementCsv(Buffer.from("kind,status,amount,currency,merchant_order_no\n\"payment,PAID,1,CNY,order"), "alipay"));
 

@@ -78,6 +78,12 @@ export function PaymentReconciliationPage() {
       style={{ marginBottom: 16 }}
     />
     <Card title={t("导入对账文件")} style={{ marginBottom: 16 }}>
+      <Alert
+        type="warning"
+        showIcon
+        title={t("当前仅支持支付宝和微信支付的 CSV 对账文件；Stripe 文件导入尚未开放。")}
+        style={{ marginBottom: 12 }}
+      />
       <Space wrap align="end">
         <div>
           <Typography.Text type="secondary" style={{ display: "block", marginBottom: 6 }}>{t("支付平台")}</Typography.Text>

@@ -117,6 +117,16 @@ export class ClientAuthService {
     this.registration = registration ?? new CustomerRegistrationService(prisma, this.customers);
   }
 
+  /** 登录方式开关必须在服务端生效；未创建渠道资料的旧租户维持历史默认值。 */
+  private async assertLoginMethodEnabled(tenantId: string, method: "password" | "sms") {
+    const profile = await this.prisma.clientChannelProfile.findUnique({
+      where: { tenantId },
+      select: { passwordLoginEnabled: true, smsLoginEnabled: true }
+    });
+    const enabled = method === "password" ? profile?.passwordLoginEnabled : profile?.smsLoginEnabled;
+    if (enabled === false) throw new ForbiddenException("该登录方式当前未开放");
+  }
+
   private secret() {
     const secret = process.env.AUTH_TOKEN_SECRET?.trim();
     if (!secret) throw new ServiceUnavailableException("客户端认证密钥未配置");
@@ -306,6 +316,7 @@ export class ClientAuthService {
     let deliverable = true;
     if (purpose === "login") {
       if (input.method !== "sms") throw new BadRequestException("短信验证码登录只支持手机号");
+      await this.assertLoginMethodEnabled(tenant.id, "sms");
       const account = await this.prisma.customerAccount.findFirst({ where: { tenantId: tenant.id, loginPhone: identifier }, select: { status: true } });
       deliverable = Boolean(account && account.status === "active");
     }
@@ -515,6 +526,7 @@ export class ClientAuthService {
   async login(input: ClientMembershipLoginRequest) {
     const tenant = await this.prisma.tenant.findFirst({ where: { code: input.tenantCode.trim(), status: "ACTIVE" }, select: { id: true } });
     if (!tenant) throw new UnauthorizedException("账号或密码错误");
+    await this.assertLoginMethodEnabled(tenant.id, "password");
     const account = await this.prisma.customerAccount.findFirst({ where: { tenantId: tenant.id, loginPhone: normalizeIdentifier(input.loginIdentifier) }, include: { customer: true } });
     if (!account || account.status !== "active" || account.customer.status !== "active" || !account.passwordHash || !verifyPassword(account.passwordHash, input.password)) throw new UnauthorizedException("账号或密码错误");
     const workspaceCode = input.workspaceCode?.trim();
@@ -603,6 +615,7 @@ export class ClientAuthService {
   async smsLogin(input: ClientSmsLoginRequest): Promise<ClientMembershipSessionResponse> {
     const tenant = await this.prisma.tenant.findFirst({ where: { code: input.tenantCode.trim(), status: "ACTIVE" }, select: { id: true } });
     if (!tenant) throw new NotFoundException("租户不存在或未启用");
+    await this.assertLoginMethodEnabled(tenant.id, "sms");
     const phone = normalizeIdentifier(input.loginIdentifier);
     if (!/^\+?[0-9]{6,20}$/u.test(phone)) throw new BadRequestException("手机号格式无效");
     const identifierHash = hashOpaqueToken(`${tenant.id}:sms:${phone}`);

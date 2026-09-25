@@ -13,6 +13,7 @@ import { assertOutboundUrl } from "../../common/outbound-url";
 import { PrismaService } from "../database/prisma.service";
 import { TenantIntegrationService, type TenantIntegrationRuntimeConfig } from "./tenant-integration.service";
 import { OperationLogService } from "../../common/operation-log.service";
+import { createAliyunOssV4Url } from "./aliyun-oss-v4";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -57,6 +58,14 @@ function safeRegion(value: unknown) {
   return region;
 }
 
+/** OSS endpoints are commonly written as `oss-cn-hangzhou`; V4 credential scope uses `cn-hangzhou`. */
+function aliyunSigningRegion(value: unknown) {
+  const configured = safeRegion(value).toLowerCase();
+  const region = configured.startsWith("oss-") ? configured.slice("oss-".length) : configured;
+  if (!region) throw new ServiceUnavailableException("阿里云 OSS 地域无效");
+  return region;
+}
+
 function safeObjectPrefix(value: unknown) {
   const prefix = String(value ?? "").trim().replace(/^\/+|\/+$/gu, "");
   if (!prefix) return "";
@@ -65,10 +74,6 @@ function safeObjectPrefix(value: unknown) {
     throw new ServiceUnavailableException("对象存储对象前缀格式不安全");
   }
   return segments.join("/");
-}
-
-function hmacSha1Base64(key: string, value: string) {
-  return createHmac("sha1", key).update(value).digest("base64");
 }
 
 function isoBasic(date: Date) {
@@ -737,7 +742,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     if (config.provider === "aliyun_oss") {
       const base = new URL(text(settings.endpoint, "Endpoint"));
       const host = base.hostname.startsWith(`${bucket}.`) ? base.hostname : `${bucket}.${base.hostname}`;
-      return { base: `${base.protocol}//${host}`, bucket, region: safeRegion(settings.region) };
+      return { base: `${base.protocol}//${host}`, bucket, region: aliyunSigningRegion(settings.region) };
     }
     if (config.provider === "tencent_cos") {
       const region = safeRegion(text(settings.region, "地域"));
@@ -755,15 +760,18 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
   }
 
   private presignOss(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT" | "HEAD" | "DELETE", storageKey: string, mimeType: string, expiresAt: Date) {
-    const { base, bucket } = this.endpoint(config);
-    const expires = Math.floor(expiresAt.getTime() / 1000);
-    const contentType = method === "PUT" ? mimeType : "";
-    const resource = `/${bucket}/${storageKey}`;
-    const stringToSign = `${method}\n\n${contentType}\n${expires}\n${resource}`;
-    const signature = hmacSha1Base64(text(config.credentials.accessKeySecret, "AccessKey Secret"), stringToSign);
-    const url = `${base}/${encodePath(storageKey)}?OSSAccessKeyId=${encodeURIComponent(text(config.credentials.accessKeyId, "AccessKey ID"))}&Expires=${expires}&Signature=${encodeURIComponent(signature)}`;
-    const headers: Record<string, string> = method === "PUT" ? { "Content-Type": mimeType } : {};
-    return { url, headers };
+    const { base, bucket, region } = this.endpoint(config);
+    return createAliyunOssV4Url({
+      base,
+      bucket,
+      region,
+      accessKeyId: text(config.credentials.accessKeyId, "AccessKey ID"),
+      accessKeySecret: text(config.credentials.accessKeySecret, "AccessKey Secret"),
+      method,
+      storageKey,
+      mimeType,
+      expiresAt
+    });
   }
 
   private presignCos(config: TenantIntegrationRuntimeConfig, method: "GET" | "PUT" | "HEAD" | "DELETE", storageKey: string, mimeType: string, expiresAt: Date) {

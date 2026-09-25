@@ -84,7 +84,7 @@ function fromBootstrap(contract: ClientChannelBootstrapResponse): MerchantInfo {
     help: contract.help,
     banner: contract.banner,
     themeColor: contract.themeColor,
-    loginMethods: contract.loginMethods.length ? contract.loginMethods : ["password"],
+    loginMethods: contract.loginMethods,
     capabilities: contract.capabilities,
     services,
     categoryNames: Object.fromEntries((contract.categories ?? []).map((row) => [row.code, row.name])),
@@ -107,7 +107,9 @@ export async function loadMerchant(force = false): Promise<MerchantInfo> {
       const services: MerchantService[] = fallback.workspaces.map((row) => ({ code: row.code, name: row.name, categoryCode: String(row.categoryCode), isDefault: row.isDefault, status: "open" }));
       info = {
         name: fallback.tenantName,
-        loginMethods: ["password"],
+        // Without the authoritative channel bootstrap, fail closed instead of
+        // showing a login mode whose tenant setting cannot be verified.
+        loginMethods: [],
         capabilities: CLOSED_CAPABILITIES,
         services,
         categoryNames: Object.fromEntries(services.map((row) => [row.categoryCode, row.name])),
