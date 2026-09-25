@@ -1,6 +1,6 @@
 import { CheckCircleOutlined, ExperimentOutlined, PlusOutlined, SaveOutlined, UploadOutlined } from "@ant-design/icons";
 import type { SaveClientChannelProfileRequest, SaveMiniProgramChannelRequest, SaveWebsiteChannelProfileRequest } from "@rental-os/shared";
-import { Alert, App, Button, Card, Checkbox, Col, Divider, Form, Input, Row, Slider, Space, Spin, Switch, Tabs, Tag, Typography, Upload } from "antd";
+import { Alert, App, Button, Card, Checkbox, Col, Divider, Form, Input, Row, Slider, Space, Switch, Tabs, Tag, Typography, Upload } from "antd";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { clientChannelApi } from "@/api/clientChannel";
@@ -8,6 +8,7 @@ import { websiteChannelApi } from "@/api/websiteChannel";
 import { apiAssetOrigin } from "@/api/http";
 import { ADMIN_DEFAULT_PRIMARY_COLOR } from "@/app/designTokens";
 import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
+import { LoadingState } from "@/components/LoadingState";
 import { PageHeader } from "@/components/PageHeader";
 import { useAuthStore } from "@/features/auth/authStore";
 import { useLocale } from "@/app/locale";
@@ -96,7 +97,7 @@ function ProfileCard() {
     onError: (error: any) => message.error(error?.response?.data?.message ?? t("保存失败"))
   });
 
-  if (profile.isLoading) return <div style={{ textAlign: "center", padding: 60 }}><Spin size="large" /></div>;
+  if (profile.isLoading) return <div style={{ textAlign: "center", padding: 60 }}><LoadingState /></div>;
   if (profile.error || !profile.data) return <Alert showIcon type="error" title={t("无法读取客户端渠道配置")} description={t("请刷新重试。")} />;
 
   const data = profile.data;
@@ -238,7 +239,7 @@ function WechatCredentialsCard() {
     onError: (error: any) => message.error(error?.response?.data?.message ?? t("测试失败"))
   });
 
-  if (channel.isLoading) return <div style={{ textAlign: "center", padding: 40 }}><Spin /></div>;
+  if (channel.isLoading) return <div style={{ textAlign: "center", padding: 40 }}><LoadingState /></div>;
   const data = channel.data;
   const identityLocked = (data?.identityCount ?? 0) > 0;
 
@@ -320,7 +321,7 @@ function WebsiteProfileCard() {
     onError: (error: any) => message.error(error?.response?.data?.message ?? t("保存失败"))
   });
 
-  if (profile.isLoading) return <div style={{ textAlign: "center", padding: 60 }}><Spin size="large" /></div>;
+  if (profile.isLoading) return <div style={{ textAlign: "center", padding: 60 }}><LoadingState /></div>;
   if (profile.error || !profile.data) return <Alert showIcon type="error" title={t("无法读取官网渠道配置")} description={t("请刷新重试。")} />;
 
   const data = profile.data;

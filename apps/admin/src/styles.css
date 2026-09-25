@@ -781,7 +781,40 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 .order-create-shell .ant-steps { max-width: 800px; margin: 0 auto; }
 .order-create-shell section[hidden] { display: none; }
 .order-timeline .ant-timeline-item-content { min-height: 48px; }
+.query-state-loading { min-height: 280px; display: grid; place-items: center; }
 .route-loader { min-height: 360px; display: grid; place-items: center; }
+
+/* 统一页面级加载态：3×3 像素网格 + 右侧文案。动作按钮里的小型 Spin 不在此范围。 */
+.rental-loading-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--rental-color-text-secondary);
+  font-size: var(--rental-typography-body-size);
+  font-weight: var(--rental-typography-body-weight);
+  line-height: var(--rental-typography-body-line-height);
+}
+.rental-loading-grid {
+  display: grid;
+  flex: none;
+  grid-template-columns: repeat(3, 4px);
+  gap: 2px;
+  width: 16px;
+  height: 16px;
+}
+.rental-loading-cell {
+  width: 4px;
+  height: 4px;
+  border-radius: 1px;
+  background: var(--rental-color-primary);
+  opacity: .18;
+  animation: rental-pixel-on 650ms ease-in-out infinite;
+}
+@keyframes rental-pixel-on {
+  0%, 100% { opacity: .18; transform: scale(.82); }
+  45% { opacity: 1; transform: scale(1); }
+  70% { opacity: .18; transform: scale(.82); }
+}
 
 .password-change-stage {
   min-height: 100vh;
@@ -859,6 +892,7 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  .rental-loading-cell { animation: none !important; opacity: .48; transform: none; }
   .ant-btn:active:not(:disabled),
   .ant-tabs .ant-tabs-tab:active { transform: none; }
 }

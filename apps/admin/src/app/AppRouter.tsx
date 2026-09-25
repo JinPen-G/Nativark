@@ -1,8 +1,9 @@
 import { lazy, Suspense, type ReactNode } from "react";
-import { Result, Spin } from "antd";
+import { Result } from "antd";
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { APP_ROUTES, canAccessRoute, type AppRouteDefinition } from "@/app/navigation";
 import { AppShell } from "@/components/AppShell";
+import { LoadingState } from "@/components/LoadingState";
 import { useLocale } from "./locale";
 import { RequireAuth } from "@/features/auth/RequireAuth";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -41,7 +42,7 @@ const ClientChannelPage = lazy(() => import("@/features/channel/ClientChannelPag
 const PaymentReconciliationPage = lazy(() => import("@/features/settings/PaymentReconciliationPage").then((module) => ({ default: module.PaymentReconciliationPage })));
 
 function PageLoader() {
-  return <div className="route-loader"><Spin size="large" /></div>;
+  return <div className="route-loader"><LoadingState /></div>;
 }
 
 function RouteAccess({ route, children }: { route: AppRouteDefinition; children: ReactNode }) {

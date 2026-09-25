@@ -1,10 +1,11 @@
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Space, Spin, Tag, Typography } from "antd";
+import { Alert, Button, Card, Space, Tag, Typography } from "antd";
 import { CheckCircleFilled, RightOutlined, WarningFilled } from "@ant-design/icons";
 import type { TenantReadinessStatus } from "@rental-os/shared";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { PageHeader } from "@/components/PageHeader";
+import { LoadingState } from "@/components/LoadingState";
 import { useLocale } from "@/app/locale";
 import { useAuthStore } from "@/features/auth/authStore";
 
@@ -32,9 +33,7 @@ export function TenantReadinessPage() {
 
   if (readiness.isLoading) {
     return (
-      <div style={{ textAlign: "center", padding: 80 }}>
-        <Spin size="large" />
-      </div>
+      <div style={{ textAlign: "center", padding: 80 }}><LoadingState /></div>
     );
   }
 

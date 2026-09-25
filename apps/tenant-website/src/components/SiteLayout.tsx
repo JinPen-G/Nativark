@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
-import { ArrowRightOutlined, CloseOutlined, DownOutlined, GlobalOutlined, MenuOutlined, MoonOutlined, SearchOutlined, SunOutlined, UserOutlined } from '@ant-design/icons';
+import { CloseOutlined, DownOutlined, GlobalOutlined, MenuOutlined, MoonOutlined, SearchOutlined, SunOutlined, UserOutlined } from '@ant-design/icons';
 import { useSite } from '../SiteContext';
 import { useAuth } from '../AuthContext';
 
@@ -64,7 +64,7 @@ export function SiteHeader() {
       {isRemote && (isAuthenticated
         ? <Link className="header-account" to={href('/account')} onClick={() => setMenuOpen(false)} title={t('accountTitle')}>{customerName || t('accountTitle')}</Link>
         : <Link className="header-account" to={href(`/login?redirect=${encodeURIComponent('/orders')}`)} onClick={() => setMenuOpen(false)}>{t('loginCta')}</Link>)}
-      <Link className="button button-dark header-cta" to={href('/products')}>{t('rentNow')} <ArrowRightOutlined aria-hidden="true" /></Link>
+      <Link className="button button-dark header-cta" to={href('/products')}>{t('rentNow')}</Link>
       <button className="mobile-menu-button" type="button" onClick={() => setMenuOpen(!menuOpen)} aria-label={menuOpen ? t('closeMenu') : t('openMenu')} aria-expanded={menuOpen}>{menuOpen ? <CloseOutlined /> : <MenuOutlined />}</button>
     </div>
   </header>;

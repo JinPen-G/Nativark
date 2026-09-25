@@ -33,7 +33,7 @@ export function HomeHero({ mode }: { mode: CategoryMode }) {
   return <section className={`home-hero shell homepage-section home-hero-${mode}`}>
     <img src={tenant.heroImage} alt="" className="hero-background" />
     {mode === 'multiple' && <img src="/assets/multi-lifestyle-mobile.webp" alt="" className="hero-background hero-background-mobile" />}
-    <div className="home-hero-content"><span className={`eyebrow ${mode !== 'multiple' ? 'light' : ''}`}>{mode === 'single' && singleCategory ? `${singleCategory.name} ${language === 'en' ? 'rental' : '租赁'}` : tenant.slogan}</span><h1>{tenant.heroTitle}</h1><p>{tenant.heroDescription}</p><Link className={`button ${mode === 'multiple' ? 'button-dark' : 'button-white'}`} to={href(mode === 'single' && singleCategory ? `/category/${singleCategory.id}` : '/products')}>{t('explore')} <ArrowRightOutlined /></Link></div>
+    <div className="home-hero-content"><span className={`eyebrow ${mode !== 'multiple' ? 'light' : ''}`}>{mode === 'single' && singleCategory ? `${singleCategory.name} ${language === 'en' ? 'rental' : '租赁'}` : tenant.slogan}</span><h1>{tenant.heroTitle}</h1><p>{tenant.heroDescription}</p><Link className={`button ${mode === 'multiple' ? 'button-dark' : 'button-white'}`} to={href(mode === 'single' && singleCategory ? `/category/${singleCategory.id}` : '/products')}>{t('explore')}</Link></div>
     <HeroBenefitStrip light={mode !== 'multiple'} />
   </section>;
 }
@@ -58,7 +58,7 @@ export function SceneSection({ mode }: { mode: CategoryMode }) {
   const { tenant, href, language, t } = useSite();
   if (mode === 'single') return null;
   const scenes = mode === 'double' ? tenant.categories : tenant.categories.slice(0, 3);
-  return <section className="section shell homepage-section scene-section"><div className={`scene-grid scene-grid-${mode}`}>{scenes.map(category => <article key={category.id} className="scene-card"><img src={category.sceneImage} alt="" loading="lazy" /><div><span className="eyebrow light">{category.name} {language === 'en' ? 'rental' : '租赁'}</span><h2>{category.sceneTitle}</h2><p>{category.description}</p><Link className="button button-white" to={href(`/category/${category.id}`)}>{t('viewNow')} <ArrowRightOutlined /></Link></div></article>)}</div></section>;
+  return <section className="section shell homepage-section scene-section"><div className={`scene-grid scene-grid-${mode}`}>{scenes.map(category => <article key={category.id} className="scene-card"><img src={category.sceneImage} alt="" loading="lazy" /><div><span className="eyebrow light">{category.name} {language === 'en' ? 'rental' : '租赁'}</span><h2>{category.sceneTitle}</h2><p>{category.description}</p><Link className="button button-white" to={href(`/category/${category.id}`)}>{t('viewNow')}</Link></div></article>)}</div></section>;
 }
 
 export function ProductSection({ mode }: { mode: CategoryMode }) {
@@ -122,7 +122,7 @@ export function Testimonials() {
 export function HomeCTA() {
   const { href, tenant, t } = useSite();
   // 真实租户模式优先用 web 渠道配置的 CTA 文案；缺省回退到通用文案。
-  return <section className="home-cta"><img src="/assets/cta-mountains.webp" alt="" loading="lazy" /><div className="shell home-cta-inner"><div><span className="eyebrow light">{tenant.slogan}</span><h2>{tenant.ctaTitle || t('ctaTitle')}</h2><p>{tenant.ctaDescription || t('ctaDescription')}</p></div><Link className="button button-white" to={href('/products')}>{t('startRenting')} <ArrowRightOutlined /></Link></div></section>;
+  return <section className="home-cta"><img src="/assets/cta-mountains.webp" alt="" loading="lazy" /><div className="shell home-cta-inner"><div><span className="eyebrow light">{tenant.slogan}</span><h2>{tenant.ctaTitle || t('ctaTitle')}</h2><p>{tenant.ctaDescription || t('ctaDescription')}</p></div><Link className="button button-white" to={href('/products')}>{t('startRenting')}</Link></div></section>;
 }
 
 export function CategoryQuickLinks({ category }: { category: Category }) {

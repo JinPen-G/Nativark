@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowRightOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined } from '@ant-design/icons';
 import { useSite } from '../SiteContext';
 import { useAuth } from '../AuthContext';
 import { authApi, type ClientSession } from '../data/authClient';
@@ -110,7 +110,7 @@ export function LoginPage() {
   }
 
   if (!isRemote) {
-    return <div className="shell simple-page"><div className="page-intro"><span className="eyebrow">ACCOUNT</span><h1>{t('loginTitle')}</h1><p>{t('loginDemoNotice')}</p></div><Link className="button button-dark" to={href('/')}>{t('backHome')} <ArrowRightOutlined /></Link></div>;
+    return <div className="shell simple-page"><div className="page-intro"><span className="eyebrow">ACCOUNT</span><h1>{t('loginTitle')}</h1><p>{t('loginDemoNotice')}</p></div><Link className="button button-dark" to={href('/')}>{t('backHome')}</Link></div>;
   }
 
   const tabs: Array<{ id: Mode; label: string }> = [
@@ -142,7 +142,7 @@ export function LoginPage() {
         {devCode && <p className="login-dev-code"><CheckCircleOutlined /> {t('loginDevCode', { code: devCode })}</p>}
         {mode === 'register' && <label className="login-agree"><input type="checkbox" checked={agree} onChange={e => setAgree(e.target.checked)} /><span>{t('loginAgreePrefix')} <Link to={href('/agreement')}>{t('docUserAgreement')}</Link> {t('and')} <Link to={href('/privacy')}>{t('docPrivacyPolicy')}</Link></span></label>}
         {error && <p className="form-error" role="alert">{error}</p>}
-        <button type="submit" className="button button-dark button-block" disabled={pending}>{mode === 'register' ? t('loginRegisterSubmit') : t('loginSubmit')} <ArrowRightOutlined /></button>
+        <button type="submit" className="button button-dark button-block" disabled={pending}>{mode === 'register' ? t('loginRegisterSubmit') : t('loginSubmit')}</button>
       </form>
       <p className="login-foot">{t('loginFootNote')}</p>
     </div>

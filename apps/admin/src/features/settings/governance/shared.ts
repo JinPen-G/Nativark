@@ -3,6 +3,7 @@ import type {
   RentalDepositRule,
   RentalPreauthorizationRule,
   RentalRuleVersion,
+  SaveTenantRentalBusinessSettingsRequest,
   TenantRentalBusinessSettings,
 } from "@rental-os/shared";
 import { useMemo } from "react";
@@ -64,6 +65,8 @@ export interface GovernanceTabContext {
   permissions: GovernancePermissions;
   category: RentalCategoryDefinition;
   settings: TenantRentalBusinessSettings;
+  saveTab: (patch: Partial<SaveTenantRentalBusinessSettingsRequest>) => void;
+  saving: boolean;
 }
 
 /** 规则链的冲突信息（时点重叠、已发布不可改）必须原样透出，否则用户无从改正。 */

@@ -5,12 +5,13 @@ import type {
   TenantIntegrationConfigSummary,
   TenantIntegrationProviderDefinition
 } from "@rental-os/shared";
-import { Alert, App, Button, Card, Col, Empty, Form, Input, Row, Space, Spin, Switch, Tabs, Tag, Typography } from "antd";
+import { Alert, App, Button, Card, Col, Empty, Form, Input, Row, Space, Switch, Tabs, Tag, Typography } from "antd";
 import type { FormInstance } from "antd";
 import { useCallback, useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { tenantIntegrationsApi } from "@/api/tenantIntegrations";
 import { useLocale } from "@/app/locale";
+import { LoadingState } from "@/components/LoadingState";
 import { PageHeader } from "@/components/PageHeader";
 
 const CAPABILITY_LABELS: Record<TenantIntegrationCapability, string> = { sms: "短信", payment: "支付", file: "云存储" };
@@ -157,7 +158,7 @@ export function TenantIntegrationsPage() {
       if (otherKey !== key && otherKey.startsWith(capabilityPrefix)) otherForm.setFieldValue("isDefault", false);
     }
   }, []);
-  if (catalog.isLoading) return <div style={{ textAlign: "center", padding: 80 }}><Spin size="large" /></div>;
+  if (catalog.isLoading) return <div style={{ textAlign: "center", padding: 80 }}><LoadingState /></div>;
   if (catalog.error || !catalog.data) return <PageHeader title={t("第三方服务")} description={t("暂时无法读取租户第三方服务配置，请刷新重试。")} />;
   const configByProvider = new Map(catalog.data.configs.map((config) => [`${config.capability}:${config.provider}`, config]));
   return (

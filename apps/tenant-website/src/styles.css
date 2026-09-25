@@ -73,7 +73,7 @@ h1, h2, h3, p { margin-top: 0; }
 .text-link, .section-action a { display: inline-flex; align-items: center; gap: 10px; color: #465b70; font-size: 13px; font-weight: 600; }
 .text-link:hover, .section-action a:hover { color: var(--brand); }
 
-/* Header and footer. The floating header treatment mirrors apps/website. */
+/* Header and footer. On scroll, the header becomes a full-width translucent glass bar. */
 .site-header {
   height: 82px;
   position: sticky;
@@ -90,31 +90,39 @@ h1, h2, h3, p { margin-top: 0; }
   content: "";
   position: absolute;
   z-index: 0;
-  top: 8px;
-  right: clamp(8px, 1.2vw, 20px);
-  left: clamp(8px, 1.2vw, 20px);
-  height: 67px;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 100%;
   pointer-events: none;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: 0;
   background: transparent;
+  opacity: 0;
   box-shadow: none;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  transition: background-color 0.2s cubic-bezier(0.4, 0, 1, 1), border-color 0.2s cubic-bezier(0.4, 0, 1, 1);
-}
-.site-header.is-scrolled::before {
-  background: rgba(255, 255, 255, 0.6);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
-  border-color: rgba(0, 0, 0, 0.16);
+  transition: opacity 0.18s ease, background-color 0.18s ease, border-color 0.18s ease;
+}
+.site-header.is-scrolled::before {
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.6);
+  opacity: 1;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border-color: transparent;
+  border-bottom-color: rgba(0, 0, 0, 0.16);
   box-shadow: none;
 }
 .header-inner { height: 82px; position: relative; z-index: 1; display: flex; align-items: center; gap: 26px; width: 100%; box-sizing: border-box; padding-inline: clamp(16px, 2vw, 40px); }
 .brand-lockup { width: 165px; flex: 0 0 165px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .brand-logo { width: 150px; height: 32px; object-fit: contain; object-position: left center; }
 .brand-slogan { margin-left: 2px; color: var(--ink); font-size: 10px; font-weight: 400; letter-spacing: .1em; }
-.main-nav { display: flex; align-items: center; gap: 32px; margin-left: 24px; white-space: nowrap; }
+.main-nav { display: flex; align-items: center; gap: 32px; margin-left: max(0px, calc(50% - 879px)); white-space: nowrap; }
 .main-nav a { font-size: 13px; font-weight: 400; color: #293648; }
 .main-nav a:hover, .main-nav a.nav-active { color: var(--brand); }
 .main-nav a.nav-active { text-decoration: underline; text-decoration-color: var(--brand); text-underline-offset: 8px; }
@@ -479,19 +487,12 @@ main:has(.home-cta) + .site-footer { margin-top: 0; }
 @media (max-width: 760px) {
   .site-header { height: 64px; }
   .main-nav { top: 64px; }
-  .site-header::before {
-    top: 8px;
-    right: 8px;
-    left: 8px;
-    height: 56px;
-    border-radius: 999px;
-  }
   .site-header.is-scrolled::before {
-    top: 8px;
-    right: 8px;
-    left: 8px;
-    height: 56px;
-    border-radius: 999px;
+    top: 0;
+    right: 0;
+    left: 0;
+    height: 100%;
+    border-radius: 0;
   }
   .header-inner { height: 64px; }
   .site-header .header-inner { transform: translateY(4px); }
@@ -612,6 +613,15 @@ main:has(.home-cta) + .site-footer { margin-top: 0; }
   .info-grid, .guide-list { grid-template-columns: 1fr; }
 }
 
+@media (max-width: 420px) {
+  .header-inner { gap: 12px; }
+  .site-header .header-account { display: none; }
+}
+
+@media (max-width: 360px) {
+  .header-search { display: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
@@ -637,7 +647,7 @@ html[data-theme="dark"] {
 html[data-theme="dark"] body { background: var(--page); color: var(--ink); }
 html[data-theme="dark"] .site-header { background: var(--page); }
 html[data-theme="dark"] .site-header.is-scrolled { background: transparent; }
-html[data-theme="dark"] .site-header.is-scrolled::before { background: rgba(25,25,25,.6); border-color: #352f3d; }
+html[data-theme="dark"] .site-header.is-scrolled::before { background: rgba(25,25,25,.6); border-color: transparent; border-bottom-color: #352f3d; }
 html[data-theme="dark"] .brand-logo,
 html[data-theme="dark"] .footer-brand img { filter: brightness(0) invert(1); }
 html[data-theme="dark"] .main-nav a,

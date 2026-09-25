@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ArrowRightOutlined, StarFilled } from '@ant-design/icons';
+import { StarFilled } from '@ant-design/icons';
 import { useSite } from '../SiteContext';
 import type { Product } from '../types';
 
@@ -17,7 +17,7 @@ export function ProductCard({ product }: { product: Product }) {
       <p className="product-subtitle">{displayProduct.subtitle}</p>
       <div className="product-metadata"><span className={unavailable ? 'stock-out' : 'stock-ok'}>{unavailable ? t('unavailable') : displayProduct.stockStatus === 'low' ? (language === 'en' ? 'Limited stock' : '余量较少') : (language === 'en' ? 'Available' : '可预约')}</span>{displayProduct.reviewCount > 0 ? <span><StarFilled aria-hidden="true" /> {displayProduct.rating}</span> : null}</div>
       <div className="product-price"><strong>¥{displayProduct.price}</strong><span>/{displayProduct.priceUnit === '天' && language === 'en' ? 'day' : displayProduct.priceUnit}</span></div>
-      <Link className={`button button-dark product-rent ${unavailable ? 'is-disabled' : ''}`} to={unavailable ? '#' : href(`/product/${displayProduct.id}`)} aria-disabled={unavailable}>{t('bookNow')} <ArrowRightOutlined aria-hidden="true" /></Link>
+      <Link className={`button button-dark product-rent ${unavailable ? 'is-disabled' : ''}`} to={unavailable ? '#' : href(`/product/${displayProduct.id}`)} aria-disabled={unavailable}>{t('bookNow')}</Link>
     </div>
   </article>;
 }

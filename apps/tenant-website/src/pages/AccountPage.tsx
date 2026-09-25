@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowRightOutlined, DeleteOutlined, LoadingOutlined, PlusOutlined } from '@ant-design/icons';
+import { DeleteOutlined, LoadingOutlined, PlusOutlined } from '@ant-design/icons';
 import { useSite } from '../SiteContext';
 import { useAuth } from '../AuthContext';
 import { sessionApi } from '../data/authClient';
@@ -110,12 +110,12 @@ export function AccountPage() {
     if (isRemote && !isAuthenticated) navigate(href(`/login?redirect=${encodeURIComponent('/account')}`), { replace: true });
   }, [isRemote, isAuthenticated]);
 
-  if (!isRemote) return <div className="shell simple-page"><div className="page-intro"><span className="eyebrow">ACCOUNT</span><h1>{t('accountTitle')}</h1><p>{t('loginDemoNotice')}</p></div><Link className="button button-dark" to={href('/')}>{t('backHome')} <ArrowRightOutlined /></Link></div>;
+  if (!isRemote) return <div className="shell simple-page"><div className="page-intro"><span className="eyebrow">ACCOUNT</span><h1>{t('accountTitle')}</h1><p>{t('loginDemoNotice')}</p></div><Link className="button button-dark" to={href('/')}>{t('backHome')}</Link></div>;
   if (!isAuthenticated) return null;
 
   return <div className="shell simple-page account-page">
     <div className="page-intro"><span className="eyebrow">ACCOUNT</span><h1>{t('accountTitle')}</h1><p>{customerName ? t('accountGreeting', { name: customerName }) : t('accountSubtitle')}</p></div>
-    <div className="account-quicklinks"><Link className="button button-outline" to={href('/orders')}>{t('orders')} <ArrowRightOutlined /></Link><button type="button" className="button button-outline" onClick={() => { logout(); navigate(href('/')); }}>{t('logoutCta')}</button></div>
+    <div className="account-quicklinks"><Link className="button button-outline" to={href('/orders')}>{t('orders')}</Link><button type="button" className="button button-outline" onClick={() => { logout(); navigate(href('/')); }}>{t('logoutCta')}</button></div>
     <AddressBook />
     <Coupons />
     <Notifications />

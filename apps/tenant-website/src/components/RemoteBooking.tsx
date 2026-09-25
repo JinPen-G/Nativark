@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowRightOutlined, LoadingOutlined } from '@ant-design/icons';
+import { LoadingOutlined } from '@ant-design/icons';
 import { useSite } from '../SiteContext';
 import { useAuth } from '../AuthContext';
 import { sessionApi } from '../data/authClient';
@@ -129,7 +129,7 @@ export function RemoteBooking({ product, startDate, endDate, quantity, fulfillme
       <p className="mock-note">{t('quoteServerNote')}</p>
     </>}
     {error && <p className="form-error" role="alert">{error}</p>}
-    <button type="button" className="button button-dark button-block" disabled={busy || !quote} onClick={submitOrder}>{t('submitOrder')} <ArrowRightOutlined /></button>
+    <button type="button" className="button button-dark button-block" disabled={busy || !quote} onClick={submitOrder}>{t('submitOrder')}</button>
     <p className="mock-note">{language === 'en' ? 'Rental term' : '租期'}: {days} {language === 'en' ? 'day(s)' : '天'}</p>
   </div>;
 }

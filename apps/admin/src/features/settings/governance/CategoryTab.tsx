@@ -1,7 +1,10 @@
-import { RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, RENTAL_PAYMENT_METHOD_CODES, RENTAL_PRICING_UNIT_LABELS } from "@rental-os/shared";
-import type { RentalCategoryDefinition } from "@rental-os/shared";
-import { Alert, Card, Col, Form, InputNumber, Row, Select, Space, Switch, Tag } from "antd";
+import { SaveOutlined } from "@ant-design/icons";
+import { DEFAULT_RENTAL_PAYMENT_METHODS, RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, RENTAL_PAYMENT_METHOD_CODES, RENTAL_PRICING_UNIT_LABELS } from "@rental-os/shared";
+import type { RentalCategoryDefinition, TenantRentalBusinessSettings } from "@rental-os/shared";
+import { Alert, Button, Card, Col, Form, InputNumber, Row, Select, Space, Switch, Tag, Typography } from "antd";
+import { useEffect } from "react";
 import { useLocale } from "@/app/locale";
+import type { GovernanceTabContext } from "./shared";
 
 const PAYMENT_METHOD_LABELS: Record<(typeof RENTAL_PAYMENT_METHOD_CODES)[number], string> = {
   offline_cash: "线下现金",
@@ -22,14 +25,55 @@ const modeLabels: Record<string, string> = {
 /**
  * 「品类与租赁方式」页签。
  *
- * 这里的 Form.Item 全部绑定外壳的租户经营设置表单（settingsForm）：本组件不自建 Form，
- * 靠外壳 `<Form form={settingsForm} component={false}>` 的上下文注册字段，
- * 保存仍由页头「保存租户设置」一次提交整个 store。
+ * 这里独立持有本页签表单。服务端仍用整体 business-settings 快照接口，
+ * 但保存时只把本页字段作为 patch 交给外壳合并，其他页签不会被 UI 按钮隐式提交。
  */
-export function CategoryTab({ category }: { category: RentalCategoryDefinition }) {
+export type CategorySettingsFormValues = {
+  pricing: TenantRentalBusinessSettings["pricing"];
+  payment: TenantRentalBusinessSettings["payment"];
+  fulfillment: TenantRentalBusinessSettings["fulfillment"];
+  allocation: NonNullable<TenantRentalBusinessSettings["allocation"]>;
+};
+
+export function CategoryTab({
+  category,
+  settings,
+  onSave,
+  saving,
+}: Pick<GovernanceTabContext, "category" | "settings" | "saving"> & {
+  onSave: (values: CategorySettingsFormValues) => void;
+}) {
   const { t } = useLocale();
+  const [form] = Form.useForm<CategorySettingsFormValues>();
+  useEffect(() => {
+    form.setFieldsValue({
+      pricing: settings.pricing,
+      payment: {
+        ...settings.payment,
+        enabledMethods: settings.payment.enabledMethods?.length
+          ? settings.payment.enabledMethods
+          : [...DEFAULT_RENTAL_PAYMENT_METHODS],
+      },
+      fulfillment: settings.fulfillment,
+      allocation: settings.allocation ?? {
+        autoPreassign: false,
+        preassignDays: 7,
+        autoLock: false,
+        lockMinutes: 120,
+        protectManual: true,
+      },
+    });
+  }, [form, settings]);
+
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Form<CategorySettingsFormValues> form={form} layout="vertical" onFinish={onSave}>
+      <div className="table-toolbar">
+        <Typography.Text type="secondary">{t("只保存本页配置")}</Typography.Text>
+        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => form.submit()}>
+          {t("保存本页")}
+        </Button>
+      </div>
+      <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <Alert
         type="info"
         showIcon
@@ -145,6 +189,7 @@ export function CategoryTab({ category }: { category: RentalCategoryDefinition }
           </Card>
         </Col>
       </Row>
-    </Space>
+      </Space>
+    </Form>
   );
 }

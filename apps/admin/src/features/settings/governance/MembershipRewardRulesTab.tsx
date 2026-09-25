@@ -1,19 +1,37 @@
+import { SaveOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Card, Col, Form, InputNumber, Row, Select, Space, Switch } from "antd";
+import type { TenantRentalBusinessSettings } from "@rental-os/shared";
+import { Alert, Button, Card, Col, Form, InputNumber, Row, Select, Space, Switch, Typography } from "antd";
+import { useEffect } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { rewardTypeLabels } from "./ruleOptionLabels";
-import type { GovernancePermissions } from "./shared";
+import type { GovernancePermissions, GovernanceTabContext } from "./shared";
 
 /**
  * 「会员奖励规则」页签：注册赠礼与邀请奖励的触发条件与额度。
  *
- * 这些字段属于租户经营设置（`settings.membership.*`），与其他页签一样绑定外壳的
- * settingsForm、由页头「保存租户设置」统一提交。人工补发奖励、权益账户与奖励流水
- * 不是配置而是经营事实，已拆到「会员与客户 → 会员激励」独立页面。
+ * 这些字段属于租户经营设置（`settings.membership.*`），但本页签独立持有表单和保存动作。
+ * 人工补发奖励、权益账户与奖励流水不是配置而是经营事实，已拆到「会员与客户 → 会员激励」独立页面。
  */
-export function MembershipRewardRulesTab({ permissions }: { permissions: GovernancePermissions }) {
+export type MembershipSettingsFormValues = {
+  membership: TenantRentalBusinessSettings["membership"];
+};
+
+export function MembershipRewardRulesTab({
+  permissions,
+  settings,
+  onSave,
+  saving,
+}: Pick<GovernanceTabContext, "permissions" | "settings" | "saving"> & {
+  onSave: (values: MembershipSettingsFormValues) => void;
+}) {
   const { t } = useLocale();
+  const [form] = Form.useForm<MembershipSettingsFormValues>();
+  useEffect(() => {
+    form.setFieldsValue({ membership: settings.membership });
+  }, [form, settings]);
+
   const couponTemplates = useQuery({
     queryKey: ["rental-core", "coupon-templates"],
     queryFn: rentalCoreApi.couponTemplates,
@@ -23,7 +41,14 @@ export function MembershipRewardRulesTab({ permissions }: { permissions: Governa
     .filter((item) => item.status === "active")
     .map((item) => ({ value: item.id, label: item.name }));
   return (
-    <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+    <Form<MembershipSettingsFormValues> form={form} layout="vertical" onFinish={onSave}>
+      <div className="table-toolbar">
+        <Typography.Text type="secondary">{t("只保存本页配置")}</Typography.Text>
+        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => form.submit()}>
+          {t("保存本页")}
+        </Button>
+      </div>
+      <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <Alert
         type="info"
         showIcon
@@ -139,6 +164,7 @@ export function MembershipRewardRulesTab({ permissions }: { permissions: Governa
           </Card>
         </Col>
       </Row>
-    </Space>
+      </Space>
+    </Form>
   );
 }

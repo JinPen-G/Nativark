@@ -47,6 +47,6 @@ export function DocumentPage({ kind }: { kind: Kind }) {
       <details><summary>{t('faqDelivery')}</summary><p>{t('faqDeliveryText')}</p></details>
     </div> : null}
     {!loading && !doc && !fallbackHelp ? <p className="mock-note">{isRemote && missing ? t('docNotProvided') : t('docDemoNotice')}</p> : null}
-    <Link className="button button-dark" to={href('/')} style={{ marginTop: 24 }}>{t('backHome')} <ArrowRightOutlined /></Link>
+    <Link className="button button-dark" to={href('/')} style={{ marginTop: 24 }}>{t('backHome')}</Link>
   </div>;
 }
