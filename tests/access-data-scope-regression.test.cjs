@@ -7,8 +7,11 @@ require("ts-node").register({
 
 const { runWithRequestIdentity } = require("../apps/api/src/common/request-identity");
 const { ApiAuthGuard } = require("../apps/api/src/common/api-auth.guard");
+const { buildOrganizationWhere, buildSystemUserWhere, isOrganizationScopedUser } = require("../apps/api/src/common/data-permission");
 const { enabledOrganizationSubtreeIds, organizationLocationScope } = require("../apps/api/src/common/organization-location-scope");
 const { MembershipService } = require("../apps/api/src/modules/platform/membership.service");
+const { PlatformRepository } = require("../apps/api/src/modules/platform/platform.repository");
+const { PlatformService } = require("../apps/api/src/modules/platform/platform.service");
 const { RentalWorkspaceReportRepository } = require("../apps/api/src/modules/rental-core/rental-workspace-report.repository");
 const { CustomerOperationsRepository } = require("../apps/api/src/modules/platform/customer-operations.repository");
 const { RentalCoreFactRepository } = require("../apps/api/src/modules/rental-core/rental-core-fact.repository");
@@ -94,6 +97,75 @@ void (async () => {
   assert.deepEqual(enabledOrganizationSubtreeIds(organizations, "org-missing"), []);
   console.log("  PASS 组织范围只包含当前组织及连续启用的下级组织");
 
+  const scopedOrganizationUser = {
+    id: "operator-org", tenantId: "tenant-a", organizationId: "org-root", dataScope: "organization",
+    isSaasAdmin: false, isPlatformAdmin: false, permissions: []
+  };
+  assert.equal(isOrganizationScopedUser(scopedOrganizationUser), true);
+  assert.deepEqual(buildSystemUserWhere("tenant-b", scopedOrganizationUser), {
+    tenantId: "tenant-a", organizationId: "org-root"
+  });
+  assert.deepEqual(buildOrganizationWhere("tenant-b", scopedOrganizationUser), {
+    tenantId: "tenant-a", id: "org-root"
+  });
+  assert.deepEqual(buildOrganizationWhere("tenant-a", { ...scopedOrganizationUser, organizationId: undefined }), {
+    tenantId: "tenant-a", id: "__no_authorized_organization__"
+  });
+
+  const memoryPlatform = Object.create(PlatformService.prototype);
+  memoryPlatform.organizations = [
+    { id: "org-root", tenantId: "tenant-a", type: "operator", code: "ROOT", name: "根组织", status: "enabled" },
+    { id: "org-child", tenantId: "tenant-a", parentId: "org-root", type: "store", code: "CHILD", name: "下级组织", status: "enabled" },
+    { id: "org-disabled", tenantId: "tenant-a", parentId: "org-root", type: "store", code: "OFF", name: "停用组织", status: "disabled" },
+    { id: "org-hidden", tenantId: "tenant-a", parentId: "org-disabled", type: "store", code: "HIDDEN", name: "停用链下级", status: "enabled" },
+    { id: "org-sibling", tenantId: "tenant-a", type: "operator", code: "SIBLING", name: "平级组织", status: "enabled" },
+    { id: "org-other-tenant", tenantId: "tenant-b", type: "operator", code: "OTHER", name: "其他租户", status: "enabled" }
+  ];
+  memoryPlatform.users = [
+    { id: "user-root", tenantId: "tenant-a", organizationId: "org-root" },
+    { id: "user-child", tenantId: "tenant-a", organizationId: "org-child" },
+    { id: "user-disabled", tenantId: "tenant-a", organizationId: "org-disabled" },
+    { id: "user-hidden", tenantId: "tenant-a", organizationId: "org-hidden" },
+    { id: "user-sibling", tenantId: "tenant-a", organizationId: "org-sibling" },
+    { id: "user-other-tenant", tenantId: "tenant-b", organizationId: "org-root" }
+  ];
+  memoryPlatform.useMysqlDataSource = () => false;
+  memoryPlatform.toUserRow = (user) => user;
+  assert.deepEqual(memoryPlatform.listOrganizations("tenant-b", scopedOrganizationUser).map((row) => row.id), ["org-root", "org-child"]);
+  assert.deepEqual(memoryPlatform.listUsers("tenant-b", scopedOrganizationUser).map((row) => row.id), ["user-root", "user-child"]);
+  assert.deepEqual(memoryPlatform.listOrganizations("tenant-a", { ...scopedOrganizationUser, organizationId: "missing" }), []);
+  console.log("  PASS 内存模式组织与运营账号列表按当前组织启用子树和会话租户过滤");
+
+  const repositoryQueries = { organization: [], users: [] };
+  const repositoryOrganizationRows = [
+    { id: "org-root", tenantId: "tenant-a", parentId: null, type: "OPERATOR", code: "ROOT", name: "根组织", status: "enabled" },
+    { id: "org-child", tenantId: "tenant-a", parentId: "org-root", type: "STORE", code: "CHILD", name: "下级组织", status: "enabled" },
+    { id: "org-disabled", tenantId: "tenant-a", parentId: "org-root", type: "STORE", code: "OFF", name: "停用组织", status: "disabled" },
+    { id: "org-hidden", tenantId: "tenant-a", parentId: "org-disabled", type: "STORE", code: "HIDDEN", name: "停用链下级", status: "enabled" },
+    { id: "org-sibling", tenantId: "tenant-a", parentId: null, type: "OPERATOR", code: "SIBLING", name: "平级组织", status: "enabled" }
+  ];
+  const platformRepository = new PlatformRepository({
+    organizationUnit: {
+      async findMany(args) {
+        repositoryQueries.organization.push(args);
+        return repositoryOrganizationRows;
+      }
+    },
+    user: {
+      async findMany(args) {
+        repositoryQueries.users.push(args);
+        return [];
+      }
+    }
+  });
+  assert.deepEqual((await platformRepository.listOrganizations("tenant-b", scopedOrganizationUser)).map((row) => row.id), ["org-root", "org-child"]);
+  await platformRepository.listUsers("tenant-b", scopedOrganizationUser);
+  assert.deepEqual(repositoryQueries.organization[0].where, { tenantId: "tenant-a" });
+  assert.deepEqual(repositoryQueries.users[0].where, {
+    tenantId: "tenant-a", organizationId: { in: ["org-child", "org-root"] }
+  });
+  console.log("  PASS Prisma 查询条件将组织及运营账号限制在租户内的启用组织子树");
+
   const organizationQueries = [];
   const locationQueries = [];
   const scopePrisma = {
@@ -140,6 +212,18 @@ void (async () => {
   };
   await organizationAdminGuard.canActivate({ switchToHttp: () => ({ getRequest: () => organizationRequest }) });
   assert.equal(organizationQueries.length, organizationReadCount, "tenant configuration routes must not require a selected workspace");
+  await assert.rejects(
+    () => organizationAdminGuard.canActivate({ switchToHttp: () => ({ getRequest: () => ({
+      ...organizationRequest, method: "POST", body: { code: "FORGED", name: "越权组织" }
+    }) }) }),
+    /需要全租户数据范围及全部履约地点范围/u
+  );
+  await assert.rejects(
+    () => organizationAdminGuard.canActivate({ switchToHttp: () => ({ getRequest: () => ({
+      ...organizationRequest, url: "/api/platform/roles", originalUrl: "/api/platform/roles", method: "GET"
+    }) }) }),
+    /需要全租户数据范围及全部履约地点范围/u
+  );
   console.log("  PASS 组织管理接口不因组织范围账号未选择经营空间而被地点解析阻断");
 
   const locationManager = {
@@ -158,7 +242,21 @@ void (async () => {
   };
   await assert.rejects(
     () => locationMutationGuard.canActivate({ switchToHttp: () => ({ getRequest: () => unauthorizedMappingRequest }) }),
-    /只有拥有账号与组织管理权限/u
+    /需要全租户数据范围、全部履约地点范围和账号管理权限/u
+  );
+  const selectedLocationManager = {
+    ...locationManager,
+    permissions: ["system:user:manage", "rental-os:station:manage"],
+    locationScope: { mode: "selected", locationIds: ["location-a"] }
+  };
+  const selectedLocationGuard = new ApiAuthGuard({
+    async resolveAccessContext() {
+      return { user: selectedLocationManager, tenantUser: selectedLocationManager, workspaceId: "workspace-a", workspaceValid: true };
+    }
+  });
+  await assert.rejects(
+    () => selectedLocationGuard.canActivate({ switchToHttp: () => ({ getRequest: () => unauthorizedMappingRequest }) }),
+    /需要全租户数据范围、全部履约地点范围和账号管理权限/u
   );
   console.log("  PASS 仅有履约地点管理权限不能通过改组织归属扩大数据范围");
 

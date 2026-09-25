@@ -512,6 +512,7 @@ export class AuthService {
       roleNames: user.roleNames,
       scope: user.scope,
       dataScope: user.dataScope,
+      locationScope: user.locationScope ?? { mode: "all", locationIds: [] },
       organizationId: user.organizationId,
       organizationName: user.organizationName,
       isPlatformAdmin: user.isPlatformAdmin,

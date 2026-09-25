@@ -766,13 +766,32 @@ export class ApiAuthGuard implements CanActivate {
       ? request.body as Record<string, unknown>
       : undefined;
     const locationConfigurationRoute = /^\/rental\/v1\/locations(?:\/[^/]+)?$/u.test(path);
+    const tenantWideDataScope = user.isSaasAdmin || user.isPlatformAdmin || user.permissions.includes("*") || user.dataScope === "all";
+    const unrestrictedLocationScope = user.locationScope?.mode !== "selected";
+    const tenantAccessConfigurationRoute =
+      path.startsWith("/platform/users") ||
+      path.startsWith("/platform/roles") ||
+      path.startsWith("/platform/workspaces") ||
+      path.startsWith("/platform/organizations");
+    const requiresTenantWideDataScope =
+      path.startsWith("/platform/roles") ||
+      path.startsWith("/platform/workspaces") ||
+      (path.startsWith("/platform/users") && request.method.toUpperCase() !== "GET") ||
+      (path.startsWith("/platform/organizations") && request.method.toUpperCase() !== "GET");
+    if (
+      tenantAccessConfigurationRoute &&
+      requiresTenantWideDataScope &&
+      (!tenantWideDataScope || !unrestrictedLocationScope)
+    ) {
+      throw new ForbiddenException("管理租户级账号、角色、组织和空间授权需要全租户数据范围及全部履约地点范围");
+    }
     if (
       request.method.toUpperCase() !== "GET" &&
       locationConfigurationRoute &&
       requestBody && Object.prototype.hasOwnProperty.call(requestBody, "organizationId") &&
-      !hasAnyPermission(user, ["system:user:manage"])
+      (!hasAnyPermission(user, ["system:user:manage"]) || !tenantWideDataScope || !unrestrictedLocationScope)
     ) {
-      throw new ForbiddenException("只有拥有账号与组织管理权限的管理员可以调整履约地点的组织归属");
+      throw new ForbiddenException("调整履约地点组织归属需要全租户数据范围、全部履约地点范围和账号管理权限");
     }
     const capability = requiredCapability(path);
     if (capability && !user.isSaasAdmin) {
@@ -845,7 +864,8 @@ export class ApiAuthGuard implements CanActivate {
     }
 
     const configuredLocationScope = accessContext?.user.locationScope ?? { mode: "all" as const, locationIds: [] };
-    const canManageOrganizationMapping = !staffApiRequest && locationConfigurationRoute && hasAnyPermission(user, ["system:user:manage"]);
+    const canManageOrganizationMapping = !staffApiRequest && locationConfigurationRoute &&
+      tenantWideDataScope && unrestrictedLocationScope && hasAnyPermission(user, ["system:user:manage"]);
     const needsLocationScope =
       (path.startsWith("/rental/v1/") && path !== "/rental/v1/categories") ||
       (path.startsWith("/staff/v1/") && !isStaffAuthPath(path)) ||
@@ -939,6 +959,8 @@ export class ApiAuthGuard implements CanActivate {
     const allowed = new Set(scope.locationIds);
     const organizationLocationAdmin = !request.staffApiRequest &&
       /^\/rental\/v1\/locations(?:\/[^/]+)?$/u.test(path) &&
+      (user.isSaasAdmin || user.isPlatformAdmin || user.permissions.includes("*") || user.dataScope === "all") &&
+      user.locationScope?.mode !== "selected" &&
       hasAnyPermission(user, ["system:user:manage"]);
     if (user.dataScope === "organization" && !locationRestricted && !organizationLocationAdmin) {
       throw new ForbiddenException("组织数据范围未解析为授权履约地点，已拒绝访问");

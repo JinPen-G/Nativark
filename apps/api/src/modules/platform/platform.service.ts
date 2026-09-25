@@ -55,8 +55,11 @@ import {
 import {
   buildOrganizationWhere,
   buildSystemUserWhere,
-  describeDataPermission
+  describeDataPermission,
+  isOrganizationScopedUser,
+  resolveTenantIdForQuery
 } from "../../common/data-permission";
+import { enabledOrganizationSubtreeIds } from "../../common/organization-location-scope";
 import { PlatformRepository } from "./platform.repository";
 import { MembershipService } from "./membership.service";
 import { SharedCustomerRepository } from "./shared-customer.repository";
@@ -1948,6 +1951,19 @@ export class PlatformService {
     if (this.useMysqlDataSource()) {
       return this.platformRepository.listOrganizations(tenantId, currentUser);
     }
+    if (isOrganizationScopedUser(currentUser)) {
+      const scopedTenantId = resolveTenantIdForQuery(tenantId, currentUser);
+      if (!scopedTenantId || !currentUser.organizationId) return [];
+      const allowedOrganizationIds = new Set(enabledOrganizationSubtreeIds(
+        this.organizations
+          .filter((item) => item.tenantId === scopedTenantId)
+          .map((item) => ({ id: item.id, parentId: item.parentId ?? null, status: item.status })),
+        currentUser.organizationId
+      ));
+      return this.organizations.filter((item) =>
+        item.tenantId === scopedTenantId && allowedOrganizationIds.has(item.id)
+      );
+    }
     const where = buildOrganizationWhere(tenantId, currentUser);
     return this.organizations.filter((item) => {
       if (where.tenantId && item.tenantId !== where.tenantId) {
@@ -2285,6 +2301,20 @@ export class PlatformService {
   listUsers(tenantId?: string, currentUser?: SystemUserRow) {
     if (this.useMysqlDataSource()) {
       return this.platformRepository.listUsers(tenantId, currentUser);
+    }
+    if (isOrganizationScopedUser(currentUser)) {
+      const scopedTenantId = resolveTenantIdForQuery(tenantId, currentUser);
+      if (!scopedTenantId || !currentUser.organizationId) return [];
+      const allowedOrganizationIds = new Set(enabledOrganizationSubtreeIds(
+        this.organizations
+          .filter((item) => item.tenantId === scopedTenantId)
+          .map((item) => ({ id: item.id, parentId: item.parentId ?? null, status: item.status })),
+        currentUser.organizationId
+      ));
+      if (!allowedOrganizationIds.size) return [];
+      return this.users
+        .filter((user) => user.tenantId === scopedTenantId && Boolean(user.organizationId) && allowedOrganizationIds.has(user.organizationId!))
+        .map((user) => this.toUserRow(user));
     }
     const where = buildSystemUserWhere(tenantId, currentUser);
     return this.users

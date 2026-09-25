@@ -293,6 +293,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       roleIds: arrayOf(stringSchema),
       scope: stringSchema,
       dataScope: stringSchema,
+      locationScope: objectOf({ mode: stringSchema, locationIds: arrayOf(stringSchema) }, ["mode", "locationIds"]),
       organizationId: stringSchema,
       organizationName: stringSchema,
       isPlatformAdmin: booleanSchema,

@@ -59,6 +59,16 @@ export function resolveTenantIdForQuery(
   return user.tenantId;
 }
 
+export function isOrganizationScopedUser(user?: SystemUserRow): user is SystemUserRow {
+  return Boolean(
+    user &&
+    !user.isSaasAdmin &&
+    !user.isPlatformAdmin &&
+    !user.permissions.includes("*") &&
+    user.dataScope === "organization"
+  );
+}
+
 export function buildSystemUserWhere(
   requestedTenantId: string | undefined,
   user?: SystemUserRow
@@ -87,6 +97,11 @@ export function buildSystemUserWhere(
           id: user.id
         };
   }
+  if (user.dataScope === "organization") {
+    return user.organizationId
+      ? { ...where, organizationId: user.organizationId }
+      : { ...where, id: "__no_authorized_organization__" };
+  }
 
   return where;
 }
@@ -102,13 +117,16 @@ export function buildOrganizationWhere(
     return where;
   }
 
-  if (user.dataScope === "own" || user.dataScope === "store") {
+  if (user.dataScope === "own" || user.dataScope === "store" || user.dataScope === "organization") {
     return user.organizationId
       ? {
           ...where,
           id: user.organizationId
         }
-      : where;
+      : {
+          ...where,
+          id: "__no_authorized_organization__"
+        };
   }
 
   return where;

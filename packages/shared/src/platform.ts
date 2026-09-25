@@ -182,6 +182,8 @@ export interface AuthUser {
   roleIds?: string[];
   scope: RoleScope;
   dataScope?: SystemDataScope;
+  /** 当前会话的履约地点数据范围；用于隐藏越权的组织映射入口，服务端仍会独立校验。 */
+  locationScope?: { mode: "all" | "selected"; locationIds: string[] };
   organizationId?: string;
   organizationName?: string;
   isPlatformAdmin?: boolean;

@@ -19,7 +19,10 @@ export function LocationPage() {
   const { t } = useLocale();
   const queryClient = useQueryClient();
   const canManage = useAuthStore((state) => state.hasPermission("rental-os:station:manage"));
-  const canManageOrganizationMapping = useAuthStore((state) => state.hasPermission("system:user:manage"));
+  const canManageOrganizationMapping = useAuthStore((state) =>
+    state.user?.dataScope === "all" && state.user.locationScope?.mode !== "selected" && state.hasPermission("system:user:manage")
+  );
+  const canViewOrganizations = useAuthStore((state) => state.hasPermission("system:user:manage"));
   const [keyword, setKeyword] = useState("");
   const [editing, setEditing] = useState<RentalFulfillmentLocation>();
   const [editingOperator, setEditingOperator] = useState<RentalFulfillmentOperator>();
@@ -28,7 +31,7 @@ export function LocationPage() {
   const [form] = Form.useForm<SaveRentalFulfillmentLocationRequest>();
   const [operatorForm] = Form.useForm<SaveRentalFulfillmentOperatorRequest>();
   const locations = useQuery({ queryKey: ["rental-core", "locations"], queryFn: rentalCoreApi.locations });
-  const organizations = useQuery({ queryKey: ["tenant-access", "organizations"], queryFn: platformApi.organizations, enabled: canManageOrganizationMapping });
+  const organizations = useQuery({ queryKey: ["tenant-access", "organizations"], queryFn: platformApi.organizations, enabled: canViewOrganizations });
   const operators = useQuery({ queryKey: ["rental-core", "operators"], queryFn: rentalCoreApi.operators });
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
   const categories = useQuery({ queryKey: ["rental-core", "categories"], queryFn: rentalCoreApi.categories });
@@ -70,7 +73,7 @@ export function LocationPage() {
       </Card>
       <Card className="data-panel" styles={{ body: { paddingBottom: 0 } }}>
         <Space style={{ marginBottom: 16 }}><Input allowClear prefix={<SearchOutlined />} placeholder={t("搜索地点、经营主体或地址")} value={keyword} onChange={(event) => setKeyword(event.target.value)} style={{ width: 320 }} /></Space>
-          <QueryState loading={locations.isLoading || profile.isLoading || categories.isLoading || operators.isLoading || (canManageOrganizationMapping && organizations.isLoading)} error={locations.error || profile.error || categories.error || operators.error || (canManageOrganizationMapping ? organizations.error : undefined)}>
+          <QueryState loading={locations.isLoading || profile.isLoading || categories.isLoading || operators.isLoading || (canViewOrganizations && organizations.isLoading)} error={locations.error || profile.error || categories.error || operators.error || (canViewOrganizations ? organizations.error : undefined)}>
           <Table<RentalFulfillmentLocation> rowKey="id" dataSource={rows} scroll={{ x: 960 }} columns={[
             { title: t("履约地点"), fixed: "left", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code}</span></> },
             { title: t("归属组织"), render: (_, row) => row.organizationId ? organizationNames.get(row.organizationId) ?? t("已关联组织") : t("未分配") },

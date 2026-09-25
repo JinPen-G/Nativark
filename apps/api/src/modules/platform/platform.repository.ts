@@ -51,8 +51,11 @@ import { RoleScope, TenantStatus } from "@rental-os/shared";
 import { generateTemporaryPassword, hashPassword, verifyPassword } from "../../common/password";
 import {
   buildOrganizationWhere,
-  buildSystemUserWhere
+  buildSystemUserWhere,
+  isOrganizationScopedUser,
+  resolveTenantIdForQuery
 } from "../../common/data-permission";
+import { enabledOrganizationSubtreeIds } from "../../common/organization-location-scope";
 import { PrismaService } from "../database/prisma.service";
 import { getRequestWorkspaceId, requireRequestTenantId } from "../../common/request-identity";
 
@@ -736,6 +739,26 @@ export class PlatformRepository {
     tenantId?: string,
     currentUser?: SystemUserRow
   ): Promise<OrganizationSummary[]> {
+    if (isOrganizationScopedUser(currentUser)) {
+      const scopedTenantId = resolveTenantIdForQuery(tenantId, currentUser);
+      if (!scopedTenantId || !currentUser.organizationId) return [];
+      const organizations = await this.prisma.organizationUnit.findMany({
+        where: { tenantId: scopedTenantId },
+        orderBy: [{ tenantId: "asc" }, { code: "asc" }]
+      });
+      const allowedOrganizationIds = new Set(enabledOrganizationSubtreeIds(
+        organizations.map((organization) => ({
+          id: organization.id,
+          parentId: organization.parentId,
+          status: organization.status
+        })),
+        currentUser.organizationId
+      ));
+      return organizations
+        .filter((organization) => allowedOrganizationIds.has(organization.id))
+        .map((organization) => this.toOrganizationSummary(organization));
+    }
+
     const organizations = await this.prisma.organizationUnit.findMany({
       where: buildOrganizationWhere(
         tenantId,
@@ -1045,8 +1068,20 @@ export class PlatformRepository {
     tenantId?: string,
     currentUser?: SystemUserRow
   ): Promise<SystemUserRow[]> {
+    const where = buildSystemUserWhere(tenantId, currentUser) as Prisma.UserWhereInput;
+    if (isOrganizationScopedUser(currentUser)) {
+      const scopedTenantId = resolveTenantIdForQuery(tenantId, currentUser);
+      if (!scopedTenantId || !currentUser.organizationId) return [];
+      const organizations = await this.prisma.organizationUnit.findMany({
+        where: { tenantId: scopedTenantId },
+        select: { id: true, parentId: true, status: true }
+      });
+      const allowedOrganizationIds = enabledOrganizationSubtreeIds(organizations, currentUser.organizationId);
+      if (!allowedOrganizationIds.length) return [];
+      where.organizationId = { in: allowedOrganizationIds };
+    }
     const users = await this.prisma.user.findMany({
-      where: buildSystemUserWhere(tenantId, currentUser) as Prisma.UserWhereInput,
+      where,
       include: this.userInclude(),
       orderBy: [{ tenantId: "asc" }, { account: "asc" }]
     });
