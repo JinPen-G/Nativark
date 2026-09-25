@@ -154,6 +154,61 @@ await core.saveCouponTemplate(tenantId, {
 const group = context().groups.find((item) => item.code === "CAMP-TENT");
 const location = core.listLocations(tenantId)[0];
 const selectedService = business.listServices(tenantId, context())[0];
+
+// 使用量阶梯必须按超额段累进；验证计划保存门禁与报价行使用的是同一套纯计费策略。
+const usageContext = context();
+usageContext.settings = structuredClone(usageContext.settings);
+usageContext.settings.pricing.enabledUnits = [...new Set([...usageContext.settings.pricing.enabledUnits, "usage"])];
+const usagePlanBase = {
+  code: "CAMP-USAGE-PROGRESSIVE",
+  name: "用量累进价测试",
+  status: "draft",
+  effectiveFrom: new Date(now).toISOString(),
+  changeReason: "验证使用量累进阶梯",
+  rates: [{
+    itemGroupId: group.id,
+    unit: "usage",
+    baseAmount: 50,
+    includedUsage: 20,
+    weekendMultiplier: 1,
+    holidayMultiplier: 1,
+    depositAmount: 0,
+    minimumUnits: 1,
+    tierMode: "progressive",
+    tiers: [{ minUnits: 1, unitAmount: 2 }, { minUnits: 101, unitAmount: 1.5 }, { minUnits: 151, unitAmount: 1 }]
+  }]
+};
+await assert.rejects(
+  () => business.savePricingPlan(tenantId, usageContext, { ...usagePlanBase, code: "CAMP-USAGE-MISSING-RATE", rates: [{ ...usagePlanBase.rates[0], tierMode: undefined, tiers: undefined }] }),
+  /必须填写超额单价或配置分段累进阶梯/u
+);
+await assert.rejects(
+  () => business.savePricingPlan(tenantId, usageContext, { ...usagePlanBase, code: "CAMP-USAGE-WRONG-TIER", rates: [{ ...usagePlanBase.rates[0], tierMode: undefined }] }),
+  /必须选择“分段累进”/u
+);
+const usagePlan = await business.savePricingPlan(tenantId, usageContext, usagePlanBase);
+assert.equal(usagePlan.rates[0].tierMode, "progressive");
+const usageQuoteLine = business.priceRentalLine({
+  group: { id: group.id, code: group.code, name: group.name },
+  quantity: 1,
+  usageQuantity: 171,
+  rate: usagePlan.rates[0],
+  startAt,
+  endAt,
+  timeZone: "Asia/Shanghai",
+  calendars: [],
+  legacyDayTypeMultipliers: false,
+  planId: usagePlan.id,
+  planVersion: usagePlan.version,
+  codePrefix: "rental",
+  chargeType: "rental"
+});
+assert.equal(usageQuoteLine.amount, 326);
+assert.match(usageQuoteLine.chargeLine.detail, /超额分段累进/u);
+assert.match(usageQuoteLine.chargeLine.detail, /101-150.*× 1\.5.*= 75/u);
+assert.match(usageQuoteLine.chargeLine.detail, /151-151.*× 1.*= 1/u);
+ok2("使用量累进计划拒绝缺费率/歧义阶梯，报价按逐档超额单位计费并留明细");
+
 const quote = await business.createQuote(tenantId, context(), {
   customerType: "personal",
   customerId: "member_001",

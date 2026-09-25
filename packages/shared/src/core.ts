@@ -2839,11 +2839,15 @@ export interface RestoreRentalCalendarVersionRequest {
   reason: string;
 }
 
-/** 阶梯价档位：达到 `minUnits` 时整单改用 `unitAmount`（长租折扣口径）。 */
+/** 阶梯价档位。`whole_order` 是长租折扣；`progressive` 是使用量超额的分段累进单价。 */
 export interface RentalPricingTier {
+  /** 起始单位数（含）。progressive 的首档必须从 1 开始，覆盖全部超额用量。 */
   minUnits: number;
   unitAmount: number;
 }
+
+/** whole_order：达到档位后全部单位采用该档单价；progressive：只对该档覆盖的超额单位计价。 */
+export type RentalPricingTierMode = "whole_order" | "progressive";
 
 export interface RentalPricingRate {
   id: string;
@@ -2862,7 +2866,9 @@ export interface RentalPricingRate {
   minimumUnits: number;
   includedUsage?: number;
   excessUsageAmount?: number;
-  /** 阶梯价（需求 4.4）。留空表示整段按 baseAmount 计。 */
+  /** 阶梯计价模式。未指定时保留既有时间租赁「达到档位后整单换价」语义。 */
+  tierMode?: RentalPricingTierMode;
+  /** 阶梯价。时间租赁按整单重定价；使用量必须显式选择 progressive。 */
   tiers?: RentalPricingTier[];
   /** 封顶价（需求 4.4）：单行租金上限。0 是合法值（免租），undefined 表示不封顶。 */
   maxAmount?: number;

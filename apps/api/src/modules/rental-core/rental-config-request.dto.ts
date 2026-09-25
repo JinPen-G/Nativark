@@ -338,8 +338,8 @@ export class SaveTenantRentalBusinessSettingsDto implements SaveTenantRentalBusi
 
 /** 阶梯价档位。嵌套对象必须 `@ValidateNested` + `@Type`，否则内层静默不校验。 */
 export class RentalPricingTierInputDto {
-  /** 达到该单位数后整单改用 unitAmount。1 起：0 档等于没有阶梯。 */
-  @IsNumber()
+  /** 整单换价或累进档位的起点，必须为正整数。 */
+  @IsInt()
   @Min(1)
   minUnits!: number;
 
@@ -443,6 +443,11 @@ export class RentalPricingRateInputDto {
   @IsNumber()
   @Min(1)
   minimumUnits!: number;
+
+  /** 时间租赁默认按整单换价；使用量阶梯必须明确选择 progressive。 */
+  @IsOptional()
+  @IsIn(["whole_order", "progressive"])
+  tierMode?: "whole_order" | "progressive";
 
   /** 阶梯价（需求 4.4）。 */
   @IsOptional()

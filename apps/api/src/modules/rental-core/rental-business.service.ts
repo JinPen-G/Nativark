@@ -966,12 +966,40 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       }
       // 阶梯档位重复会让"取最高已达档"变成看装载顺序，同一份配置解释不出唯一价格。
       const tierKeys = new Set<number>();
+      const tiers = row.tiers ?? [];
       for (const tier of row.tiers ?? []) {
-        if (!Number.isFinite(tier.minUnits) || !Number.isFinite(tier.unitAmount) || tier.minUnits < 1 || tier.unitAmount < 0) {
-          throw new BadRequestException(`${target.name} 的阶梯价档位必须是起始单位数 ≥ 1、单价非负`);
+        if (!Number.isInteger(tier.minUnits) || !Number.isFinite(tier.unitAmount) || tier.minUnits < 1 || tier.unitAmount < 0) {
+          throw new BadRequestException(`${target.name} 的阶梯价档位必须是正整数起点、单价非负`);
         }
         if (tierKeys.has(tier.minUnits)) throw new BadRequestException(`${target.name} 的阶梯价存在重复的起始单位数 ${tier.minUnits}`);
         tierKeys.add(tier.minUnits);
+      }
+      if (row.unit === "usage") {
+        if (row.includedUsage !== undefined && (!Number.isFinite(row.includedUsage) || row.includedUsage < 0)) {
+          throw new BadRequestException(`${target.name} 的包含使用量必须是非负数`);
+        }
+        if (row.excessUsageAmount !== undefined && (!Number.isFinite(row.excessUsageAmount) || row.excessUsageAmount < 0)) {
+          throw new BadRequestException(`${target.name} 的超额单价必须是非负数`);
+        }
+        if (tiers.length) {
+          if (row.tierMode !== "progressive") {
+            throw new BadRequestException(`${target.name} 的使用量阶梯必须选择“分段累进”，不能使用长租整单换价`);
+          }
+          if (tiers.slice().sort((a, b) => a.minUnits - b.minUnits)[0]?.minUnits !== 1) {
+            throw new BadRequestException(`${target.name} 的分段累进第一档必须从第 1 个超额单位开始`);
+          }
+          if (row.excessUsageAmount !== undefined) {
+            throw new BadRequestException(`${target.name} 已配置累进阶梯，不能再同时填写统一超额单价`);
+          }
+        } else if (row.tierMode === "progressive") {
+          throw new BadRequestException(`${target.name} 选择分段累进后必须至少配置一档阶梯`);
+        } else if (row.tierMode === "whole_order") {
+          throw new BadRequestException(`${target.name} 的使用量计价不支持长租整单换价阶梯`);
+        } else if (row.excessUsageAmount === undefined) {
+          throw new BadRequestException(`${target.name} 按使用量计价必须填写超额单价或配置分段累进阶梯`);
+        }
+      } else if (row.tierMode === "progressive") {
+        throw new BadRequestException(`${target.name} 的分段累进阶梯仅适用于使用量计价`);
       }
       // 用 undefined 判空而不是真值判断：封顶 0 是合法配置（免租）。
       if (row.maxAmount !== undefined && (!Number.isFinite(row.maxAmount) || row.maxAmount < 0)) {
