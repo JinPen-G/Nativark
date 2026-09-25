@@ -1,7 +1,7 @@
-import { SaveOutlined } from "@ant-design/icons";
+import { DeleteOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { DEFAULT_RENTAL_PAYMENT_METHODS, RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, RENTAL_PAYMENT_METHOD_CODES, RENTAL_PRICING_UNIT_LABELS } from "@rental-os/shared";
 import type { RentalCategoryDefinition, TenantRentalBusinessSettings } from "@rental-os/shared";
-import { Alert, Button, Card, Col, Form, InputNumber, Row, Select, Space, Switch, Tag, Typography } from "antd";
+import { Alert, Button, Card, Col, Form, Input, InputNumber, Row, Select, Space, Switch, Tag, Typography } from "antd";
 import { useEffect } from "react";
 import { useLocale } from "@/app/locale";
 import type { GovernanceTabContext } from "./shared";
@@ -54,7 +54,10 @@ export function CategoryTab({
           ? settings.payment.enabledMethods
           : [...DEFAULT_RENTAL_PAYMENT_METHODS],
       },
-      fulfillment: settings.fulfillment,
+      fulfillment: {
+        ...settings.fulfillment,
+        deliveryServiceArea: settings.fulfillment.deliveryServiceArea ?? { mode: "all", areas: [] },
+      },
       allocation: settings.allocation ?? {
         autoPreassign: false,
         preassignDays: 7,
@@ -180,6 +183,84 @@ export function CategoryTab({
                   }),
                 )}
               />
+            </Form.Item>
+            <Form.Item
+              name={["fulfillment", "deliveryServiceArea", "mode"]}
+              label={t("本地配送服务范围")}
+              tooltip={t("仅按客户填写的省、市、区县匹配，不调用地图或估算距离。配送固定费用和异地归还费用在定价计划中设置。")}
+            >
+              <Select
+                onChange={(mode: "all" | "allowlist") => {
+                  if (mode === "all") form.setFieldValue(["fulfillment", "deliveryServiceArea", "areas"], []);
+                }}
+                options={[
+                  { value: "all", label: t("不限制地区") },
+                  { value: "allowlist", label: t("仅限指定省市区") },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item noStyle shouldUpdate={(previous, current) =>
+              previous.fulfillment?.deliveryServiceArea?.mode !== current.fulfillment?.deliveryServiceArea?.mode
+            }>
+              {({ getFieldValue }) => getFieldValue(["fulfillment", "deliveryServiceArea", "mode"]) === "allowlist" && (
+                <Form.List
+                  name={["fulfillment", "deliveryServiceArea", "areas"]}
+                  rules={[
+                    {
+                      validator: async (_, areas: Array<{ province?: string; city?: string; district?: string }> | undefined) => {
+                        if (!areas?.length || areas.some((area) => !area.province?.trim() || !area.city?.trim())) {
+                          throw new Error(t("请至少添加一个完整的省、市；区县可留空表示全市"));
+                        }
+                        if (areas.length > 100) throw new Error(t("配送区域最多配置 100 条"));
+                        const keys = areas.map((area) => [
+                          area.province!.trim().toLocaleLowerCase(),
+                          area.city!.trim().toLocaleLowerCase(),
+                          area.district?.trim().toLocaleLowerCase() ?? "",
+                        ].join("|"));
+                        if (new Set(keys).size !== keys.length) throw new Error(t("配送区域不能重复"));
+                      },
+                    },
+                  ]}
+                >
+                  {(fields, { add, remove }, { errors }) => (
+                    <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
+                      <Typography.Text type="secondary">
+                        {t("区域按客户地址精确匹配。省、市必填；区县留空表示该市全域。")}
+                      </Typography.Text>
+                      {fields.map((field) => (
+                        <Row gutter={[8, 8]} align="middle" key={field.key}>
+                          <Col xs={24} md={7}>
+                            <Form.Item name={[field.name, "province"]} style={{ marginBottom: 0 }}>
+                              <Input maxLength={64} placeholder={t("省份/直辖市")} />
+                            </Form.Item>
+                          </Col>
+                          <Col xs={24} md={7}>
+                            <Form.Item name={[field.name, "city"]} style={{ marginBottom: 0 }}>
+                              <Input maxLength={64} placeholder={t("城市")} />
+                            </Form.Item>
+                          </Col>
+                          <Col xs={20} md={7}>
+                            <Form.Item name={[field.name, "district"]} style={{ marginBottom: 0 }}>
+                              <Input maxLength={64} placeholder={t("区县，可留空")} />
+                            </Form.Item>
+                          </Col>
+                          <Col xs={4} md={3}>
+                            <Button
+                              aria-label={t("删除配送区域")}
+                              icon={<DeleteOutlined />}
+                              onClick={() => remove(field.name)}
+                            />
+                          </Col>
+                        </Row>
+                      ))}
+                      <Form.ErrorList errors={errors} />
+                      <Button disabled={fields.length >= 100} icon={<PlusOutlined />} onClick={() => add({ province: "", city: "", district: "" })}>
+                        {t("添加配送区域")}
+                      </Button>
+                    </Space>
+                  )}
+                </Form.List>
+              )}
             </Form.Item>
             <Space wrap>
               {category.businessModel.locationTypes.map((value) => (

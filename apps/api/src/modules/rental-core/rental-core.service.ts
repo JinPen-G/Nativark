@@ -218,7 +218,8 @@ function defaultBusinessSettings(
     // 付款时机、押金模式、异地归还与逾期规则不在这里：它们由首版规则版本
     // （rental-business.service.ts 的 defaultRuleConfig）按品类缺省生成并进快照。
     fulfillment: {
-      enabledModes: [...definition.businessModel.fulfillmentModes]
+      enabledModes: [...definition.businessModel.fulfillmentModes],
+      deliveryServiceArea: { mode: "all", areas: [] }
     },
     payment: {
       enabledMethods: [...DEFAULT_RENTAL_PAYMENT_METHODS]
@@ -280,7 +281,19 @@ function normalizeBusinessSettingsForCategory(
       defaultUnit,
       holidayPricingEnabled: definition.businessModel.supportsHolidayPricing && settings.pricing.holidayPricingEnabled
     },
-    fulfillment: { ...settings.fulfillment, enabledModes: safeModes },
+    fulfillment: {
+      ...settings.fulfillment,
+      enabledModes: safeModes,
+      // 兼容尚未带服务区域的旧 JSON 设置；只有管理员显式配置 allowlist 才限制报价。
+      deliveryServiceArea: settings.fulfillment.deliveryServiceArea?.mode === "allowlist"
+        ? {
+            mode: "allowlist",
+            areas: Array.isArray(settings.fulfillment.deliveryServiceArea.areas)
+              ? settings.fulfillment.deliveryServiceArea.areas
+              : []
+          }
+        : { mode: "all", areas: [] }
+    },
     calendar: {
       ...settings.calendar,
       holidayPricingEnabled: definition.businessModel.supportsHolidayPricing && settings.calendar.holidayPricingEnabled
@@ -695,6 +708,36 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (!input.fulfillment.enabledModes.length || input.fulfillment.enabledModes.some((mode) => !fulfillmentModes.has(mode))) {
       throw new BadRequestException("存在当前经营品类不支持的履约方式");
     }
+    const configuredDeliveryArea =
+      input.fulfillment.deliveryServiceArea ??
+      state.businessSettings.fulfillment.deliveryServiceArea ??
+      { mode: "all" as const, areas: [] };
+    if (configuredDeliveryArea.mode !== "all" && configuredDeliveryArea.mode !== "allowlist") {
+      throw new BadRequestException("配送服务区域模式无效");
+    }
+    if (!Array.isArray(configuredDeliveryArea.areas) || configuredDeliveryArea.areas.length > 100) {
+      throw new BadRequestException("配送服务区域最多配置 100 条");
+    }
+    const normalizedDeliveryAreas = configuredDeliveryArea.mode === "allowlist"
+      ? configuredDeliveryArea.areas.map((area) => {
+          const province = typeof area?.province === "string" ? area.province.trim() : "";
+          const city = typeof area?.city === "string" ? area.city.trim() : "";
+          const district = typeof area?.district === "string" ? area.district.trim() : "";
+          if (!province || !city || province.length > 64 || city.length > 64 || district.length > 64) {
+            throw new BadRequestException("配送区域必须填写省份和城市，区县最多 64 个字符");
+          }
+          return { province, city, ...(district ? { district } : {}) };
+        })
+      : [];
+    const areaKeys = normalizedDeliveryAreas.map((area) => [
+      area.province.toLocaleLowerCase(),
+      area.city.toLocaleLowerCase(),
+      area.district?.toLocaleLowerCase() ?? ""
+    ].join("|"));
+    if (new Set(areaKeys).size !== areaKeys.length) throw new BadRequestException("配送服务区域不能重复");
+    if (configuredDeliveryArea.mode === "allowlist" && normalizedDeliveryAreas.length === 0) {
+      throw new BadRequestException("启用按地区限制时至少添加一个配送区域");
+    }
     // 预授权与逾期参数的校验随字段一起移到规则版本（validateRule）；设置里不再有这些字段。
     if (input.pricing.holidayPricingEnabled && !definition.businessModel.supportsHolidayPricing) {
       throw new BadRequestException("当前经营品类不支持节假日差异定价");
@@ -713,6 +756,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (!input.notifications.editableChannels.length || input.notifications.enabledEvents.some((event) => !supportedNotificationEvents.has(event))) throw new BadRequestException("通知渠道不能为空，且只能启用已注册的系统事件");
     const nextSettings = {
       ...input,
+      fulfillment: {
+        ...input.fulfillment,
+        deliveryServiceArea: { mode: configuredDeliveryArea.mode, areas: normalizedDeliveryAreas }
+      },
       payment: { ...input.payment, enabledMethods: [...new Set(enabledPaymentMethods)] as RentalPaymentMethod[] },
       tenantId,
       categoryCode: definition.code,

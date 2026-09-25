@@ -2114,6 +2114,19 @@ export const RENTAL_OFFLINE_PAYMENT_METHOD_CODES = ["offline_cash", "offline_tra
 export type RentalOfflinePaymentMethod = (typeof RENTAL_OFFLINE_PAYMENT_METHOD_CODES)[number];
 export const DEFAULT_RENTAL_PAYMENT_METHODS: RentalPaymentMethod[] = [...RENTAL_PAYMENT_METHOD_CODES];
 
+/** 一个本地配送承接区域；省市必填，区县留空表示整座城市。 */
+export interface RentalDeliveryServiceArea {
+  province: string;
+  city: string;
+  district?: string;
+}
+
+/** 本地配送区域策略。allowlist 仅允许列出的区域，不调用外部地图或地理编码服务。 */
+export interface RentalDeliveryServiceAreaPolicy {
+  mode: "all" | "allowlist";
+  areas: RentalDeliveryServiceArea[];
+}
+
 export interface TenantRentalBusinessSettings {
   tenantId: string;
   /** 经营空间资源排期；缺省不启用自动任务。 */
@@ -2150,6 +2163,8 @@ export interface TenantRentalBusinessSettings {
    */
   fulfillment: {
     enabledModes: RentalFulfillmentMode[];
+    /** 本地配送地址范围。旧设置缺省按不限制读取，租户显式改为 allowlist 后才启用地区拦截。 */
+    deliveryServiceArea?: RentalDeliveryServiceAreaPolicy;
   };
   payment: {
     /** 空间允许客户/运营选择的收款方式；支付宝/微信仍需另有已验证的租户 Provider。 */

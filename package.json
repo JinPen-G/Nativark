@@ -17,6 +17,7 @@
     "test:client-security": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/client-api-security.test.cjs",
     "test:client-integration-readiness": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/client-integration-readiness.test.cjs",
     "test:client-order-document": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/client-order-document.test.cjs",
+    "test:client-delivery-service-area": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/client-delivery-service-area.test.cjs",
     "test:integrations-security": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/integrations-security.test.cjs",
     "test:integrations-memory-scope": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/integrations-memory-scope.test.cjs",
     "test:integration-connectivity": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/tenant-integration-connectivity.test.cjs",

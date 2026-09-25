@@ -195,6 +195,39 @@ export class BusinessSettingsFulfillmentInputDto {
   @ArrayNotEmpty()
   @IsIn(RENTAL_FULFILLMENT_MODES, { each: true })
   enabledModes!: (typeof RENTAL_FULFILLMENT_MODES)[number][];
+
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => BusinessSettingsDeliveryServiceAreaInputDto)
+  deliveryServiceArea?: BusinessSettingsDeliveryServiceAreaInputDto;
+}
+
+export class BusinessSettingsDeliveryAreaInputDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  province!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  city!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  district?: string;
+}
+
+export class BusinessSettingsDeliveryServiceAreaInputDto {
+  @IsIn(["all", "allowlist"])
+  mode!: "all" | "allowlist";
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BusinessSettingsDeliveryAreaInputDto)
+  areas!: BusinessSettingsDeliveryAreaInputDto[];
 }
 
 /**

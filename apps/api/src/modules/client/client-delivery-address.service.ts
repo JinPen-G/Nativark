@@ -2,7 +2,9 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { Prisma } from "@prisma/client";
 import { CLIENT_API_VERSION, type ClientDeliveryAddressListResponse, type ClientDeliveryAddressRequest, type ClientDeliveryAddressSnapshot, type ClientDeliveryAddressView } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
+import { RentalCoreService } from "../rental-core/rental-core.service";
 import type { ClientRequestContext } from "./client-auth.service";
+import { evaluateDeliveryServiceArea, type DeliveryServiceAreaDecision } from "./client-delivery-service-area";
 
 /**
  * 本人配送地址簿与订单交付快照（MP-06，需求 §11.1）。
@@ -38,11 +40,12 @@ function coordinate(value: unknown, label: string, limit: number): number | unde
 export interface StoredDeliverySnapshot extends Omit<ClientDeliveryAddressSnapshot, "phoneMasked"> {
   phone: string;
   phoneMasked: string;
+  deliveryServiceAreaDecision?: DeliveryServiceAreaDecision;
 }
 
 @Injectable()
 export class ClientDeliveryAddressService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly rentalCore: RentalCoreService) {}
 
   private view(row: AddressRow): ClientDeliveryAddressView {
     return {
@@ -135,10 +138,18 @@ export class ClientDeliveryAddressService {
   }
 
   /** 报价前校验地址归属；返回用于快照的完整信息。 */
-  async requireOwnAddress(context: ClientRequestContext, addressId: string): Promise<AddressRow> {
+  async requireOwnAddress(
+    context: ClientRequestContext,
+    addressId: string
+  ): Promise<AddressRow & { deliveryServiceAreaDecision: DeliveryServiceAreaDecision }> {
     const row = await this.prisma.customerDeliveryAddress.findFirst({ where: { tenantId: context.tenantId, customerId: context.customerId, id: addressId, status: "active" } });
     if (!row) throw new NotFoundException("配送地址不存在，请重新选择");
-    return row;
+    const policy = this.rentalCore.getBusinessSettings(context.tenantId).fulfillment.deliveryServiceArea;
+    const decision = evaluateDeliveryServiceArea(policy, row);
+    if (!decision.allowed) {
+      throw new BadRequestException("该地址不在当前经营空间的配送范围内，请更换地址或选择自取");
+    }
+    return Object.assign(row, { deliveryServiceAreaDecision: decision });
   }
 
   private snapshotOf(row: AddressRow): StoredDeliverySnapshot {
@@ -161,7 +172,12 @@ export class ClientDeliveryAddressService {
 
   /** 按报价固化快照；同一报价重复调用返回已有快照（不改写）。 */
   async snapshotForQuote(context: ClientRequestContext, quoteId: string, address: AddressRow): Promise<StoredDeliverySnapshot> {
-    const snapshot = this.snapshotOf(address);
+    const snapshot = {
+      ...this.snapshotOf(address),
+      ...("deliveryServiceAreaDecision" in address
+        ? { deliveryServiceAreaDecision: address.deliveryServiceAreaDecision }
+        : {})
+    };
     try {
       const created = await this.prisma.clientOrderDeliverySnapshot.create({
         data: { tenantId: context.tenantId, workspaceId: context.workspaceId, customerId: context.customerId, quoteId, addressId: address.id, snapshot: snapshot as unknown as Prisma.InputJsonValue }
@@ -192,7 +208,7 @@ export class ClientDeliveryAddressService {
     });
     if (!row) return undefined;
     const stored = row.snapshot as unknown as StoredDeliverySnapshot;
-    const { phone: _phone, ...rest } = stored;
+    const { phone: _phone, deliveryServiceAreaDecision: _deliveryArea, ...rest } = stored;
     return { ...rest, phoneMasked: stored.phoneMasked || maskPhone(stored.phone ?? "") };
   }
 
