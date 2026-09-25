@@ -162,4 +162,56 @@ const rejects = (fn, pattern, label) =>
   ok("押金/预授权规则校验模式与参数的跨字段约束，避免配置保存后静默失效");
 }
 
+// ============ 10. 会员保证金减免只触及明确放行的商品风险基数 ============
+{
+  const classified = [
+    { ...lines[0], securityRiskLevel: "low" },
+    { ...lines[1], securityRiskLevel: "high" }
+  ];
+  const result = computeSecurityAmounts(
+    classified,
+    { mode: "fixed", maxAmount: 100 },
+    { mode: "none" },
+    { deposit: ["low"] }
+  );
+  assert.equal(result.deposit.amount, 100, "原押金先整体封顶");
+  assert.equal(result.deposit.membershipReductionEligibleAmount, 76.92, "只有低风险行参与，并按订单封顶比例缩减可减免基数");
+  const unclassified = computeSecurityAmounts(
+    [{ ...lines[0], securityRiskLevel: undefined }],
+    { mode: "fixed" }, { mode: "none" }, { deposit: ["low", "standard", "high"] }
+  );
+  assert.equal(unclassified.deposit.membershipReductionEligibleAmount, 0, "未分级商品永不默认参与减免");
+  ok("仅空间明确允许的商品风险等级进入会员押金减免基数，未分级商品 fail-closed");
+}
+
+// ============ 11. 每单固定押金只在整单商品全部获准时可减免 ============
+{
+  const allLow = lines.map((line) => ({ ...line, securityRiskLevel: "low" }));
+  const mixed = [{ ...allLow[0] }, { ...allLow[1], securityRiskLevel: "high" }];
+  assert.equal(
+    computeSecurityAmounts(allLow, { mode: "order_fixed", fixedAmount: 500 }, { mode: "none" }, { deposit: ["low"] }).deposit.membershipReductionEligibleAmount,
+    500,
+    "全部商品均获准时整笔每单固定押金才可减免"
+  );
+  assert.equal(
+    computeSecurityAmounts(mixed, { mode: "order_fixed", fixedAmount: 500 }, { mode: "none" }, { deposit: ["low"] }).deposit.membershipReductionEligibleAmount,
+    0,
+    "混合风险订单不能把无法拆分的每单固定押金错误归因给低风险商品"
+  );
+  ok("不可按商品拆分的每单固定押金采用整单全有或全无判定");
+}
+
+// ============ 12. 预授权风险附加额不可被会员降掉 ============
+{
+  const result = computeSecurityAmounts(
+    [{ ...lines[0], securityRiskLevel: "low" }, { ...lines[1], securityRiskLevel: "high" }],
+    { mode: "none" },
+    { mode: "risk_surcharge", riskSurchargeAmount: 250 },
+    { preauthorization: ["low"] }
+  );
+  assert.equal(result.preauthorization.amount, 650, "预授权仍包括租金倍数与风险附加");
+  assert.equal(result.preauthorization.membershipReductionEligibleAmount, 300, "只有获准低风险行的倍数基数可参与，风险附加不计入");
+  ok("会员预授权减免不覆盖风险附加额或未获准商品");
+}
+
 console.log("\nAll security-deposit assertions passed.");

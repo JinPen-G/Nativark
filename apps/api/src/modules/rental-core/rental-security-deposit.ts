@@ -2,7 +2,8 @@ import { ConflictException } from "@nestjs/common";
 import type {
   RentalDepositRule,
   RentalPreauthorizationRule,
-  RentalSecurityReduction
+  RentalSecurityReduction,
+  RentalSecurityRiskLevel
 } from "@rental-os/shared";
 
 const DEPOSIT_MODES = new Set<RentalDepositRule["mode"]>(["none", "fixed", "price_multiple", "order_fixed"]);
@@ -29,7 +30,11 @@ const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 10
 
 /** 每个商品行参与押金/预授权计算所需的最小事实。 */
 export interface SecurityLineInput {
+  itemGroupId?: string;
+  pricingGroupId?: string;
   groupName: string;
+  /** 未登记时不允许会员减免命中该商品的保证金基数。 */
+  securityRiskLevel?: RentalSecurityRiskLevel;
   quantity: number;
   /** 该行日期价格与封顶处理后的租金（倍数基数）。 */
   lineRental: number;
@@ -46,6 +51,8 @@ export interface SecurityLineInput {
 export interface SecurityComputation {
   amount: number;
   basis: string[];
+  /** 当前空间明确允许的商品风险等级对应的可减免保证金基数。 */
+  membershipReductionEligibleAmount: number;
 }
 
 export interface SecurityComputationResult {
@@ -122,7 +129,11 @@ function validateNumericField(value: number | undefined, label: string, errors: 
 export function computeSecurityAmounts(
   lines: readonly SecurityLineInput[],
   depositRule: RentalDepositRule,
-  preauthRule: RentalPreauthorizationRule
+  preauthRule: RentalPreauthorizationRule,
+  membershipRiskLevels: {
+    deposit?: readonly RentalSecurityRiskLevel[];
+    preauthorization?: readonly RentalSecurityRiskLevel[];
+  } = {}
 ): SecurityComputationResult {
   const deposit = accumulate(
     lines,
@@ -135,7 +146,8 @@ export function computeSecurityAmounts(
       orderFixed: depositRule.fixedAmount ?? 0,
       riskSurcharge: 0
     },
-    depositRule.maxAmount
+    depositRule.maxAmount,
+    membershipRiskLevels.deposit
   );
   const preauthorization = accumulate(
     lines,
@@ -148,7 +160,8 @@ export function computeSecurityAmounts(
       orderFixed: preauthRule.fixedAmount ?? 0,
       riskSurcharge: preauthRule.mode === "risk_surcharge" ? (preauthRule.riskSurchargeAmount ?? 0) : 0
     },
-    preauthRule.maxAmount
+    preauthRule.maxAmount,
+    membershipRiskLevels.preauthorization
   );
   return { deposit, preauthorization };
 }
@@ -166,9 +179,10 @@ function accumulate(
   lines: readonly SecurityLineInput[],
   mode: RentalDepositRule["mode"] | RentalPreauthorizationRule["mode"],
   spec: AccumulatorSpec,
-  maxAmount?: number
+  maxAmount?: number,
+  membershipRiskLevels: readonly RentalSecurityRiskLevel[] = []
 ): SecurityComputation {
-  if (mode === "none") return { amount: 0, basis: [] };
+  if (mode === "none") return { amount: 0, basis: [], membershipReductionEligibleAmount: 0 };
 
   const basis: string[] = [];
   let gross = 0;
@@ -201,7 +215,24 @@ function accumulate(
     amount = money(maxAmount);
     basis.push(`订单上限封顶 ${maxAmount}`);
   }
-  return { amount, basis };
+  // 押金/预授权订单固定额没有自然的逐商品拆分，只有订单内所有商品都被空间规则明确
+  // 允许时，才允许会员权益作用于整笔固定额度。其余模式按可归因于允许风险等级的行基数
+  // 计算；订单上限按同一比例缩减，风险附加额不被会员权益免除。
+  const allLinesRiskAllowed = lines.length > 0 && lines.every((line) =>
+    Boolean(line.securityRiskLevel && membershipRiskLevels.includes(line.securityRiskLevel))
+  );
+  let eligibleGross = 0;
+  if (mode === "order_fixed") {
+    eligibleGross = allLinesRiskAllowed ? gross : 0;
+  } else if (membershipRiskLevels.length > 0) {
+    eligibleGross = lines.reduce((sum, line) => {
+      if (!line.securityRiskLevel || !membershipRiskLevels.includes(line.securityRiskLevel)) return sum;
+      return sum + (mode === "fixed" ? spec.perItem(line) : spec.multiple(line));
+    }, 0);
+  }
+  const capFactor = gross > 0 ? amount / gross : 0;
+  const membershipReductionEligibleAmount = money(Math.min(amount, eligibleGross * capFactor));
+  return { amount, basis, membershipReductionEligibleAmount };
 }
 
 /**

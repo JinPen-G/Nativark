@@ -8,6 +8,7 @@ import { buildCapabilityEquipment } from "./capability-equipment";
 import {
   RentalCategoryCode,
   RentalInventoryMode,
+  RENTAL_SECURITY_RISK_LEVELS,
   membershipBenefitScopeMatches,
   type GrantRentalRewardRequest,
   type ImportRentalCalendarRequest,
@@ -38,6 +39,8 @@ import {
   type CustomerMembershipBenefit,
   type RentalMembershipSnapshot,
   type RentalMembershipBenefitEvaluation,
+  type RentalMembershipSecurityReductionPolicy,
+  type RentalSecurityRiskLevel,
   type RentalCustomerBenefitAccount,
   type RentalCustomerCoupon,
   type RentalDayType,
@@ -4584,7 +4587,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 因此**变异测试证明不了**这行的必要性——它是廉价的防御，防的是将来出现就地修改。
       // 真正让历史报价可复算的是"报价自带费率快照"这件事本身，那一条有断言覆盖。
       hitRates.push(structuredClone(rate));
-      securityLines.push(priced.securityLine);
+      const securityRiskLevel = RENTAL_SECURITY_RISK_LEVELS.find((level) => level === group.attributes.securityRiskLevel);
+      securityLines.push({
+        ...priced.securityLine,
+        itemGroupId: group.id,
+        pricingGroupId: pricingGroup?.id,
+        securityRiskLevel
+      });
       calendarSnapshot.push(...priced.calendarRows);
       chargeLines.push(priced.chargeLine);
     }
@@ -4592,7 +4601,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 押金与预授权额度独立计算（需求 4.4.7）：两笔独立的钱，可只收押金、只冻结额度，
     // 或两者同时存在。逐行求和 → 订单级固定/风险项 → 订单级封顶全部交给纯函数，
     // 使「这笔押金/预授权凭什么算这么多」可逐条回放。
-    const security = computeSecurityAmounts(securityLines, depositRule, preauthRule);
+    const securityPolicies = rule.config.membershipSecurityReduction ?? {};
+    const security = computeSecurityAmounts(securityLines, depositRule, preauthRule, {
+      deposit: securityPolicies.deposit?.enabled ? securityPolicies.deposit.allowedRiskLevels ?? [] : [],
+      preauthorization: securityPolicies.preauthorization?.enabled ? securityPolicies.preauthorization.allowedRiskLevels ?? [] : []
+    });
     let depositAmount = security.deposit.amount;
     const depositBasis = security.deposit.basis;
     let preAuthAmount = security.preauthorization.amount;
@@ -4818,13 +4831,84 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 但当前还没有对应判据时 fail-closed，绝不把条件当作“默认满足”。
     const membershipBenefitEvaluations: RentalMembershipBenefitEvaluation[] = [];
     const sourceBenefits = this.membershipBenefits(resolvedMembership);
+    const buildSecurityGate = async (
+      instrument: "deposit" | "preauthorization",
+      benefitType: CustomerMembershipBenefit["type"],
+      originalAmount: number,
+      eligibleBase: number
+    ) => {
+      const policy = securityPolicies[instrument];
+      const hasBenefit = sourceBenefits.some((entry) => entry.benefit.type === benefitType);
+      const riskLevels = [...new Set(securityLines.map((line) => line.securityRiskLevel ?? "unclassified"))];
+      const assessments = securityLines.map((line) => ({
+        itemGroupId: line.itemGroupId,
+        pricingGroupId: line.pricingGroupId,
+        riskLevel: line.securityRiskLevel ?? ("unclassified" as const),
+        allowed: Boolean(policy?.enabled && line.securityRiskLevel && policy.allowedRiskLevels?.includes(line.securityRiskLevel)),
+        quantity: line.quantity
+      }));
+      if (!hasBenefit) {
+        return { originalAmount, eligibleBase, policy, check: "not_checked" as const, riskLevels, assessments };
+      }
+      if (!policy?.enabled) {
+        return {
+          originalAmount, eligibleBase, policy,
+          check: "not_enabled" as const, riskLevels, assessments,
+          skippedReason: "经营空间未启用该项会员资金减免风控规则"
+        };
+      }
+      if (eligibleBase <= 0) {
+        return {
+          originalAmount, eligibleBase, policy,
+          check: "not_checked" as const, riskLevels, assessments,
+          skippedReason: "商品风险等级未获空间规则许可，会员减免未生效"
+        };
+      }
+      if (!resolvedMembership || !this.memberships?.hasOpenRiskForBooking) {
+        return {
+          originalAmount, eligibleBase, policy,
+          check: "unavailable" as const, riskLevels, assessments,
+          skippedReason: "无法确认会员风控状态，本次减免未生效"
+        };
+      }
+      try {
+        const hasOpenRisk = await this.memberships.hasOpenRiskForBooking(
+          tenantId,
+          this.workspaceOf(tenantId),
+          resolvedMembership
+        );
+        return {
+          originalAmount, eligibleBase, policy,
+          check: hasOpenRisk ? "open_risk" as const : "clear" as const,
+          riskLevels,
+          assessments,
+          skippedReason: hasOpenRisk ? "会员存在未关闭的风险记录，本次减免未生效" : undefined
+        };
+      } catch {
+        // 可继续报价，但风控读取失败绝不能变成会员免押/降额许可。
+        return {
+          originalAmount, eligibleBase, policy,
+          check: "unavailable" as const, riskLevels, assessments,
+          skippedReason: "无法确认会员风控状态，本次减免未生效"
+        };
+      }
+    };
     const appliedMembershipPlan = resolvedMembership?.benefitSource === "corporate"
       ? resolvedMembership.corporatePlan
       : resolvedMembership?.personalPlan;
     const chooseMembershipBenefit = (
       type: CustomerMembershipBenefit["type"],
       appliesTo: RentalMembershipBenefitEvaluation["appliesTo"],
-      bases: Record<string, number>
+      bases: Record<string, number>,
+      securityGate?: {
+        originalAmount: number;
+        eligibleBase: number;
+        policy?: RentalMembershipSecurityReductionPolicy;
+        check: NonNullable<RentalMembershipBenefitEvaluation["securityRiskCheck"]>;
+        riskLevels: Array<RentalSecurityRiskLevel | "unclassified">;
+        assessments: NonNullable<RentalMembershipBenefitEvaluation["securityRiskAssessments"]>;
+        skippedReason?: string;
+      }
     ) => {
       const candidates = sourceBenefits.map((entry, index) => ({ entry, index }))
         .filter(({ entry }) => entry.benefit.type === type)
@@ -4835,9 +4919,20 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           const base = roundMoney(Object.values(candidateBases).reduce((sum, value) => sum + value, 0));
           const hasUnsupportedConditions = Object.keys(entry.benefit.conditions ?? {}).length > 0;
           const scopeMatched = membershipBenefitScopeMatches(entry.benefit.scope, this.workspaceOf(tenantId), context.category.code);
-          const amount = !scopeMatched || hasUnsupportedConditions || entry.benefit.calculation === "priority"
+          let amount = !scopeMatched || hasUnsupportedConditions || entry.benefit.calculation === "priority"
             ? 0
             : this.membershipBenefitAmount(entry.benefit, base);
+          if (securityGate) {
+            if (!securityGate.policy?.enabled || securityGate.check !== "clear" || securityGate.eligibleBase <= 0) {
+              amount = 0;
+            } else {
+              amount = roundMoney(Math.min(
+                amount,
+                securityGate.eligibleBase * (securityGate.policy.maxReductionPercent ?? 0) / 100,
+                securityGate.policy.maxReductionAmount ?? 0
+              ));
+            }
+          }
           return { entry, index, amount, hasUnsupportedConditions, scopeMatched, base, bases: candidateBases };
         })
         .sort((left, right) => right.amount - left.amount || left.index - right.index);
@@ -4861,10 +4956,20 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           base: candidate.base,
           configuredMaximum: candidate.entry.benefit.maximum,
           allocations,
+          ...(securityGate ? {
+            securityRiskLevels: [...securityGate.riskLevels],
+            securityRiskAssessments: structuredClone(securityGate.assessments),
+            securityRiskCheck: securityGate.check,
+            securityPolicySnapshot: securityGate.policy ? structuredClone(securityGate.policy) : undefined,
+            securityOriginalAmount: securityGate.originalAmount,
+            securityEligibleBase: securityGate.eligibleBase
+          } : {}),
           skippedReason: selected ? undefined : !candidate.scopeMatched
             ? "该会员权益不适用于当前经营空间或品类"
             : candidate.hasUnsupportedConditions
             ? "权益配置包含尚未支持的条件，未自动放行"
+            : securityGate?.skippedReason
+            ? securityGate.skippedReason
             : candidate.base <= 0 ? "当前没有可减免的费用基数" : "同类会员权益仅取本次优惠额最大的一个",
           detail: selected
             ? `${candidate.entry.assignment.snapshot.planName}：${candidate.entry.benefit.calculation} ${candidate.entry.benefit.value}，基数 ${candidate.base}`
@@ -4911,9 +5016,19 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         detail: membershipBenefitEvaluations.find((row) => row.type === "service_benefit" && row.appliedAmount > 0)?.detail
       });
     }
-    const depositMembershipBenefit = chooseMembershipBenefit("deposit_reduction", "deposit", { deposit: depositAmount });
+    const depositSecurityGate = await buildSecurityGate(
+      "deposit", "deposit_reduction", depositAmount, security.deposit.membershipReductionEligibleAmount
+    );
+    const depositMembershipBenefit = chooseMembershipBenefit(
+      "deposit_reduction", "deposit", { deposit: depositSecurityGate.eligibleBase }, depositSecurityGate
+    );
     depositAmount = roundMoney(Math.max(0, depositAmount - depositMembershipBenefit.amount));
-    const preauthMembershipBenefit = chooseMembershipBenefit("preauth_reduction", "preauthorization", { preauthorization: preAuthAmount });
+    const preauthorizationSecurityGate = await buildSecurityGate(
+      "preauthorization", "preauth_reduction", preAuthAmount, security.preauthorization.membershipReductionEligibleAmount
+    );
+    const preauthMembershipBenefit = chooseMembershipBenefit(
+      "preauth_reduction", "preauthorization", { preauthorization: preauthorizationSecurityGate.eligibleBase }, preauthorizationSecurityGate
+    );
     preAuthAmount = roundMoney(Math.max(0, preAuthAmount - preauthMembershipBenefit.amount));
     // 非金额权益也必须留可解释的快照；当前报价只承诺它们已识别，不假装已经改变配货优先级。
     for (const entry of sourceBenefits.filter((row) => row.benefit.type === "priority_reservation" || row.benefit.type === "quote_validity_extension")) {
@@ -5358,6 +5473,25 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (securityRuleErrors.length) throw new BadRequestException(securityRuleErrors.join("；"));
     if ((config.payment.preauthorizationRequired || preauthorizationEnabled) && !context.category.businessModel.supportsPreauthorization) {
       throw new BadRequestException("当前品类不支持预授权");
+    }
+    for (const [instrument, policy] of Object.entries(config.membershipSecurityReduction ?? {}) as Array<[
+      "deposit" | "preauthorization",
+      RentalMembershipSecurityReductionPolicy | undefined
+    ]>) {
+      if (!policy?.enabled) continue;
+      if (instrument === "preauthorization" && !context.category.businessModel.supportsPreauthorization) {
+        throw new BadRequestException("当前品类不支持会员预授权减免");
+      }
+      if (!Array.isArray(policy.allowedRiskLevels) || policy.allowedRiskLevels.length === 0
+        || policy.allowedRiskLevels.some((level) => !RENTAL_SECURITY_RISK_LEVELS.includes(level))) {
+        throw new BadRequestException(`启用会员${instrument === "deposit" ? "押金" : "预授权"}减免时，必须明确允许的商品风控等级`);
+      }
+      if (!Number.isFinite(policy.maxReductionPercent) || policy.maxReductionPercent! <= 0 || policy.maxReductionPercent! > 100) {
+        throw new BadRequestException("会员保证金减免比例上限必须大于0且不超过100%");
+      }
+      if (!Number.isFinite(policy.maxReductionAmount) || policy.maxReductionAmount! <= 0) {
+        throw new BadRequestException("会员保证金单笔减免金额上限必须大于0");
+      }
     }
     if (config.qualification.required && !context.category.businessModel.supportsQualificationReview) throw new BadRequestException("当前品类不支持资质审核");
     // 异地归还只由规则版本本身表达。早前这里还要求经营设置里同名布尔为真，但设置那份

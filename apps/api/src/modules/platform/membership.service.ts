@@ -125,6 +125,26 @@ export class MembershipService {
     return this.requireMembership(tenantId, customerId);
   }
 
+  /**
+   * 报价与下单的会员资金减免门禁：个人风险记录始终检查；企业身份预约同时检查企业主档。
+   * 事务参数用于下单最终复核，避免报价时的风险状态被当成永久授权。
+   */
+  async hasOpenRiskForBooking(
+    tenantId: string,
+    workspaceId: string,
+    snapshot: Pick<RentalMembershipSnapshot, "personalCustomerId" | "corporateCustomerId">,
+    tx?: Prisma.TransactionClient
+  ): Promise<boolean> {
+    const customerIds = [...new Set([snapshot.personalCustomerId, snapshot.corporateCustomerId].filter((id): id is string => Boolean(id)))];
+    for (const customerId of customerIds) {
+      // 会员/客户状态变更共用该行锁；订单事务在读取风险记录前先锁定所有相关主体。
+      // 不存在的主体按有风险处理，不能因并发删除/合并而放宽减免门禁。
+      if (tx && !(await this.operations.lockCustomerBusinessGate(tenantId, customerId, tx))) return true;
+      if (await this.operations.hasOpenRisk(tenantId, customerId, workspaceId, tx)) return true;
+    }
+    return false;
+  }
+
   async getRegistrationSettings(tenantId: string): Promise<CustomerMembershipRegistrationSettings> {
     const row = await this.prisma.customerMembershipRegistrationSettings.findUnique({ where: { tenantId } });
     return {

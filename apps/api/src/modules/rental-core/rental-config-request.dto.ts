@@ -1,4 +1,4 @@
-import { RENTAL_CURRENCY_CODES, RENTAL_DISCOUNT_TARGETS, RENTAL_DISCOUNT_TYPES, RENTAL_FULFILLMENT_MODES, RENTAL_INSURANCE_PROVIDER_STATUSES, RENTAL_PAYMENT_METHOD_CODES, RENTAL_PRICING_UNIT_CODES, RENTAL_SERVICE_BILLING_UNITS, RENTAL_SERVICE_SELECTION_MODES, type RentalCurrency, type RentalDayType, type RentalDiscountTarget, type RentalInsuranceProviderStatus, type RentalPricingUnit, type RentalServiceMandatoryRule, type RentalServiceSelectionMode } from "@rental-os/shared";
+import { RENTAL_CURRENCY_CODES, RENTAL_DISCOUNT_TARGETS, RENTAL_DISCOUNT_TYPES, RENTAL_FULFILLMENT_MODES, RENTAL_INSURANCE_PROVIDER_STATUSES, RENTAL_PAYMENT_METHOD_CODES, RENTAL_PRICING_UNIT_CODES, RENTAL_SECURITY_RISK_LEVELS, RENTAL_SERVICE_BILLING_UNITS, RENTAL_SERVICE_SELECTION_MODES, type RentalCurrency, type RentalDayType, type RentalDiscountTarget, type RentalInsuranceProviderStatus, type RentalPricingUnit, type RentalServiceMandatoryRule, type RentalServiceSelectionMode } from "@rental-os/shared";
 import type {
   ApplyOfficialCalendarSourceRequest,
   PublishRentalCalendarRequest,
@@ -1098,6 +1098,42 @@ export class RuleConfigTaxInputDto {
   label?: string;
 }
 
+/** 会员押金/预授权减免的空间风控门禁。启用状态下的跨字段必填由 RentalBusinessService 校验。 */
+export class RuleConfigMembershipSecurityPolicyInputDto {
+  @IsBoolean()
+  enabled!: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @IsIn(RENTAL_SECURITY_RISK_LEVELS, { each: true })
+  allowedRiskLevels?: Array<(typeof RENTAL_SECURITY_RISK_LEVELS)[number]>;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  maxReductionPercent?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  maxReductionAmount?: number;
+}
+
+export class RuleConfigMembershipSecurityReductionInputDto {
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => RuleConfigMembershipSecurityPolicyInputDto)
+  deposit?: RuleConfigMembershipSecurityPolicyInputDto;
+
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => RuleConfigMembershipSecurityPolicyInputDto)
+  preauthorization?: RuleConfigMembershipSecurityPolicyInputDto;
+}
+
 export class RentalRuleConfigInputDto implements RentalRuleConfig {
   /** 整组可缺省：既有规则快照没有这一组，历史订单必须继续按原快照复算。 */
   @IsOptional()
@@ -1124,6 +1160,13 @@ export class RentalRuleConfigInputDto implements RentalRuleConfig {
   @ValidateNested()
   @Type(() => RuleConfigPreauthorizationInputDto)
   preauthorization?: RuleConfigPreauthorizationInputDto;
+
+  /** 缺省等同关闭；启用时必须设置风险等级与双重减免上限。 */
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => RuleConfigMembershipSecurityReductionInputDto)
+  membershipSecurityReduction?: RuleConfigMembershipSecurityReductionInputDto;
 
   @IsObject()
   @ValidateNested()

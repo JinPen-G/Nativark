@@ -1894,6 +1894,19 @@ export interface RentalMembershipBenefitEvaluation {
   base?: number;
   /** 权益配置的封顶值。重算时封顶不因基数变大而放宽，因此必须一起固化。 */
   configuredMaximum?: number;
+  /** 押金/预授权权益的风控依据：商品风险级别、客户风险校验结果与当时空间限额。 */
+  securityRiskLevels?: Array<RentalSecurityRiskLevel | "unclassified">;
+  securityRiskAssessments?: Array<{
+    itemGroupId?: string;
+    pricingGroupId?: string;
+    riskLevel: RentalSecurityRiskLevel | "unclassified";
+    allowed: boolean;
+    quantity: number;
+  }>;
+  securityRiskCheck?: "not_enabled" | "not_checked" | "clear" | "open_risk" | "unavailable";
+  securityPolicySnapshot?: RentalMembershipSecurityReductionPolicy;
+  securityOriginalAmount?: number;
+  securityEligibleBase?: number;
   skippedReason?: string;
   allocations?: Record<string, number>;
   detail: string;
@@ -3557,6 +3570,21 @@ export interface RentalPreauthorizationRule {
  */
 export type RentalSecurityReductionType = "member_benefit" | "corporate_contract" | "manual_approval";
 
+/** 商品级风控等级。缺失或非法值一律按 unclassified 处理，不得自动减免保证金。 */
+export const RENTAL_SECURITY_RISK_LEVELS = ["low", "standard", "high"] as const;
+export type RentalSecurityRiskLevel = (typeof RENTAL_SECURITY_RISK_LEVELS)[number];
+
+/** 空间规则版本内的会员保证金/预授权减免门禁；规则缺失或未启用时默认不允许。 */
+export interface RentalMembershipSecurityReductionPolicy {
+  enabled: boolean;
+  /** 只有明确允许的商品风险等级参与减免；商品未分级时始终不参与。 */
+  allowedRiskLevels?: RentalSecurityRiskLevel[];
+  /** 相对于风控允许商品对应保证金/预授权基数的比例上限（0-100）。 */
+  maxReductionPercent?: number;
+  /** 单笔订单此类资金的绝对减免上限，使用空间结算币种。 */
+  maxReductionAmount?: number;
+}
+
 export interface RentalSecurityReduction {
   /** 作用对象：押金还是预授权。两者独立减免。 */
   instrument: "deposit" | "preauthorization";
@@ -3777,6 +3805,14 @@ export interface RentalRuleConfig {  /**
   deposit?: RentalDepositRule;
   /** 预授权规则（需求 4.4.7）。独立于押金，可与押金同时存在。 */
   preauthorization?: RentalPreauthorizationRule;
+  /**
+   * 会员减押金/预授权独立风控门禁。缺省等同关闭；启用时必须显式配置商品风险等级、
+   * 比例上限和单笔绝对上限。客户必须仍是有效会员且没有未关闭风险记录。
+   */
+  membershipSecurityReduction?: {
+    deposit?: RentalMembershipSecurityReductionPolicy;
+    preauthorization?: RentalMembershipSecurityReductionPolicy;
+  };
   fulfillment: {
     pickupInspectionRequired: boolean;
     returnInspectionRequired: boolean;
@@ -4433,6 +4469,15 @@ const commonSettingModules: RentalSettingModule[] = [
   "notification_templates"
 ];
 
+/** 四品类共用的商品级风控标记；不设默认值，未分级的历史商品按 unclassified 处理。 */
+const securityRiskAttribute = (): RentalAttributeDefinition => ({
+  code: "securityRiskLevel",
+  label: "商品风控等级",
+  scope: "item_group",
+  type: "select",
+  options: [...RENTAL_SECURITY_RISK_LEVELS]
+});
+
 export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
   {
     code: RentalCategoryCode.Camera,
@@ -4442,7 +4487,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "usage_reading", "camera_compatibility", "camera_kit_handover", "inspection_care"],
     requiredCapabilities: [],
     terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", identifierLabel: "资产编号", serialLabel: "序列号", usageMetricLabel: "快门次数", navigationLabels: { inventoryGroup: "摄影器材", itemGroups: "器材型号", pricingGroups: "器材定价分组", assets: "器材资产与库存", locations: "器材门店" } },
-    attributeSchema: { brand: "string", model: "string", equipmentType: "string", mount: "string", sensor: "string", serialNo: "string", shutterCount: "number" },
+    attributeSchema: { brand: "string", model: "string", equipmentType: "string", mount: "string", sensor: "string", securityRiskLevel: "string", serialNo: "string", shutterCount: "number" },
     businessModel: {
       // 摄影器材的基础租金按时间计价。快门次数等读数用于交接、养护和后续
       // 超量费用依据，不作为整件器材的基础租金单位；“整包”也不等于套装库存，
@@ -4453,6 +4498,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
       locationTypes: ["store", "warehouse", "locker", "delivery_hub"],
       settingModules: [...commonSettingModules],
       assetFields: [
+        securityRiskAttribute(),
         { code: "brand", label: "厂商", scope: "item_group", type: "string", required: true },
         { code: "model", label: "型号", scope: "item_group", type: "string", required: true },
         { code: "equipmentType", label: "器材子类型", scope: "item_group", type: "select", options: ["camera_body", "lens", "tripod", "gimbal_camera", "action_camera", "lighting", "other"] },
@@ -4516,7 +4562,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "camping_kit_integrity", "camping_cleaning_turnaround"],
     requiredCapabilities: [],
     terminology: { itemLabel: "装备", itemGroupLabel: "装备型号", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", identifierLabel: "装备编号", serialLabel: "批次号", navigationLabels: { inventoryGroup: "户外装备", itemGroups: "装备型号", pricingGroups: "装备定价分组", assets: "装备资产与库存", locations: "装备仓库" } },
-    attributeSchema: { brand: "string", model: "string", people: "number", season: "string", material: "string", batchNo: "string" },
+    attributeSchema: { brand: "string", model: "string", people: "number", season: "string", material: "string", securityRiskLevel: "string", batchNo: "string" },
     businessModel: {
       // 露营装备按占用日期或夜晚计价；套装是库存/商品形态，不是脱离租期的
       // “整包一次价”，因此不在基础计价单位里暴露 package。
@@ -4526,6 +4572,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
       locationTypes: ["store", "warehouse", "delivery_hub"],
       settingModules: [...commonSettingModules],
       assetFields: [
+        securityRiskAttribute(),
         { code: "brand", label: "品牌", scope: "item_group", type: "string", required: true },
         { code: "model", label: "型号", scope: "item_group", type: "string" },
         { code: "people", label: "适用人数", scope: "item_group", type: "number", unit: "人" },
@@ -4564,7 +4611,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     defaultCapabilities: ["serialized_inventory", "pickup", "return", "delivery", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "vehicle_relocation"],
     requiredCapabilities: [],
     terminology: { itemLabel: "车辆", itemGroupLabel: "车辆型号", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", identifierLabel: "车辆编号", serialLabel: "车架号", usageMetricLabel: "里程", assetCollectionLabel: "车队", navigationLabels: { inventoryGroup: "车辆型号与车队", itemGroups: "厂牌车型管理", pricingGroups: "车辆定价分组", assets: "车辆管理", locations: "门店管理" } },
-    attributeSchema: { manufacturer: "string", brand: "string", model: "string", trim: "string", modelYear: "number", seats: "number", transmission: "string", energyType: "string", licensePlate: "string", vin: "string", color: "string", firstRegistrationDate: "date", mileage: "number" },
+    attributeSchema: { manufacturer: "string", brand: "string", model: "string", trim: "string", modelYear: "number", seats: "number", transmission: "string", energyType: "string", securityRiskLevel: "string", licensePlate: "string", vin: "string", color: "string", firstRegistrationDate: "date", mileage: "number" },
     businessModel: {
       // 车辆可按时间或里程等使用量计价；车组/车型组合不使用“整包一次价”。
       pricingUnits: ["hour", "day_24h", "calendar_day", "week", "month", "usage"],
@@ -4573,6 +4620,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
       locationTypes: ["store", "station", "warehouse", "delivery_hub"],
       settingModules: [...commonSettingModules],
       assetFields: [
+        securityRiskAttribute(),
         { code: "manufacturer", label: "制造商", scope: "item_group", type: "string", required: true },
         { code: "brand", label: "品牌", scope: "item_group", type: "string", required: true },
         { code: "model", label: "车系 / 车型", scope: "item_group", type: "string", required: true },
@@ -4629,7 +4677,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "construction_transport"],
     requiredCapabilities: [],
     terminology: { itemLabel: "设备", itemGroupLabel: "设备型号", assetLabel: "设备资产", fulfillmentLabel: "设备仓", pickupLabel: "出库", returnLabel: "入库", identifierLabel: "设备编号", serialLabel: "序列号", usageMetricLabel: "工时", navigationLabels: { inventoryGroup: "工程设备", itemGroups: "设备型号", pricingGroups: "设备定价分组", assets: "设备台账与库存", locations: "设备仓库" } },
-    attributeSchema: { manufacturer: "string", brand: "string", model: "string", power: "string", ratedLoad: "number", factoryNo: "string", hourMeter: "number" },
+    attributeSchema: { manufacturer: "string", brand: "string", model: "string", power: "string", ratedLoad: "number", securityRiskLevel: "string", factoryNo: "string", hourMeter: "number" },
     businessModel: {
       // 工程设备支持小时、班次、长期和工时等使用量计价；附件、操作员和运输
       // 组合应由增值服务/定价分组表达，不使用含义不清的“整包一次价”。
@@ -4639,6 +4687,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
       locationTypes: ["warehouse", "delivery_hub", "project_site"],
       settingModules: [...commonSettingModules],
       assetFields: [
+        securityRiskAttribute(),
         { code: "manufacturer", label: "制造商", scope: "item_group", type: "string", required: true },
         { code: "brand", label: "品牌", scope: "item_group", type: "string" },
         { code: "model", label: "型号", scope: "item_group", type: "string", required: true },

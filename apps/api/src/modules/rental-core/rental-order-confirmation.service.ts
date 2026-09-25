@@ -232,6 +232,21 @@ export class RentalOrderConfirmationService {
           );
           if (!customerGate.allowed) throw new ConflictException(customerGate.message);
         }
+        const securityMembershipReduction = (quote.membershipBenefitEvaluations ?? []).some((evaluation) =>
+          (evaluation.appliesTo === "deposit" || evaluation.appliesTo === "preauthorization") && evaluation.appliedAmount > 0
+        );
+        if (securityMembershipReduction) {
+          if (!membershipAtCommit || !this.memberships?.hasOpenRiskForBooking) {
+            throw new ConflictException("无法复核会员风控状态，已拒绝使用该报价下单");
+          }
+          let hasOpenRisk: boolean;
+          try {
+            hasOpenRisk = await this.memberships.hasOpenRiskForBooking(tenantId, workspaceId, membershipAtCommit, tx);
+          } catch {
+            throw new ConflictException("无法复核会员风控状态，请重新报价后再试");
+          }
+          if (hasOpenRisk) throw new ConflictException("会员风控状态已变化，请重新报价后再试");
+        }
         // 先锁定序列化资产或数量余额，再在同一事务内按最新预占重新计算。
         // 并发请求会在这里串行，后到者不能继续使用事务外看到的陈旧可用量。
         await this.core.assertAvailabilityWithLocks(tenantId, {

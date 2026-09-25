@@ -38,6 +38,12 @@ export interface RuleSection {
 const selectOptions = (labels: Record<string, string>, order: string[], t: (value: string) => string) =>
   order.map((value) => ({ value, label: t(labels[value] ?? value) }));
 
+const securityRiskLevelOptions = (t: (value: string) => string) => [
+  { value: "low", label: t("低风险") },
+  { value: "standard", label: t("一般风险") },
+  { value: "high", label: t("高风险") }
+];
+
 /** 规则表单的字段标签、说明与校验提示统一走管理后台词典。 */
 function LocalizedFormItem({ label, tooltip, extra, rules, ...props }: FormItemProps) {
   const { t } = useLocale();
@@ -293,6 +299,72 @@ export const RULE_SECTIONS: RuleSection[] = [
             </Form.Item> : null}
           </Form.Item>
         </Col>
+        <Col span={24}>
+          <Alert
+            type="warning"
+            showIcon
+            title={t("会员押金/预授权减免默认关闭")}
+            description={t("启用后仅对仍有效且无未关闭风险记录的会员生效；商品必须已设置风控等级并被下方规则允许。每笔减免同时受比例上限和金额上限约束，未分级商品不参与。")}
+          />
+        </Col>
+        <Col span={12}>
+          <Form.Item
+            name={["membershipSecurityReduction", "deposit", "enabled"]}
+            label="允许会员减免押金"
+            tooltip="默认关闭。启用不代表所有会员自动免押，还需填写允许的商品风险等级和双重上限。"
+            valuePropName="checked"
+          >
+            <Switch />
+          </Form.Item>
+        </Col>
+        <Form.Item noStyle shouldUpdate={(previous, current) => previous.membershipSecurityReduction?.deposit?.enabled !== current.membershipSecurityReduction?.deposit?.enabled}>
+          {({ getFieldValue }) => getFieldValue(["membershipSecurityReduction", "deposit", "enabled"]) ? <>
+            <Col span={8}>
+              <Form.Item name={["membershipSecurityReduction", "deposit", "allowedRiskLevels"]} label="押金减免允许的商品风险等级" rules={[{ required: true, message: t("至少选择一个商品风险等级") }]}>
+                <Select mode="multiple" options={securityRiskLevelOptions(t)} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name={["membershipSecurityReduction", "deposit", "maxReductionPercent"]} label="押金减免比例上限（%）" rules={[{ required: true, message: t("请填写大于0且不超过100的比例") }]}>
+                <InputNumber min={0.01} max={100} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name={["membershipSecurityReduction", "deposit", "maxReductionAmount"]} label="押金单笔减免金额上限" rules={[{ required: true, message: t("请填写单笔减免金额上限") }]}>
+                <InputNumber min={0.01} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+          </> : null}
+        </Form.Item>
+        <Col span={12}>
+          <Form.Item
+            name={["membershipSecurityReduction", "preauthorization", "enabled"]}
+            label="允许会员降低预授权"
+            tooltip="默认关闭。预授权是冻结额度，不是已收款；不支持预授权的品类无法启用。"
+            valuePropName="checked"
+          >
+            <Switch disabled={!category.businessModel.supportsPreauthorization} />
+          </Form.Item>
+        </Col>
+        <Form.Item noStyle shouldUpdate={(previous, current) => previous.membershipSecurityReduction?.preauthorization?.enabled !== current.membershipSecurityReduction?.preauthorization?.enabled}>
+          {({ getFieldValue }) => category.businessModel.supportsPreauthorization && getFieldValue(["membershipSecurityReduction", "preauthorization", "enabled"]) ? <>
+            <Col span={8}>
+              <Form.Item name={["membershipSecurityReduction", "preauthorization", "allowedRiskLevels"]} label="预授权减免允许的商品风险等级" rules={[{ required: true, message: t("至少选择一个商品风险等级") }]}>
+                <Select mode="multiple" options={securityRiskLevelOptions(t)} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name={["membershipSecurityReduction", "preauthorization", "maxReductionPercent"]} label="预授权减免比例上限（%）" rules={[{ required: true, message: t("请填写大于0且不超过100的比例") }]}>
+                <InputNumber min={0.01} max={100} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name={["membershipSecurityReduction", "preauthorization", "maxReductionAmount"]} label="预授权单笔减免金额上限" rules={[{ required: true, message: t("请填写单笔减免金额上限") }]}>
+                <InputNumber min={0.01} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+          </> : null}
+        </Form.Item>
       </Row>
     ),
   },

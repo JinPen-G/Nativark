@@ -597,6 +597,86 @@ assert.ok(scopedQuote.membershipBenefitEvaluations.filter(row => row.scopeMatche
 scopedMembership.corporatePlan.snapshot.benefits[2].value = 99;
 assert.equal(scopedQuote.membershipBenefitEvaluations.find(row => row.appliedAmount > 0).configuredValue, 20, "修改当前方案不回写已生成报价快照");
 ok2("统一会员：报价按范围择优、说明未命中原因并冻结权益快照");
+
+// MEMBER-BENEFIT-RISK-01：押金减免必须同时满足空间规则、商品等级、会员状态与当前风险查询。
+// 配置使用不可拆分的每单固定押金，确保任一未获准商品都不会把整笔押金错误免掉。
+const securityGroup = context().groups.find((item) => item.id === mktGroup.id);
+const originalSecurityAttributes = structuredClone(securityGroup.attributes);
+const saveSecurityGroup = async (attributes) => core.saveItemGroup(tenantId, {
+  id: securityGroup.id,
+  code: securityGroup.code,
+  name: securityGroup.name,
+  inventoryMode: securityGroup.inventoryMode,
+  unit: securityGroup.unit,
+  description: securityGroup.description,
+  attributes,
+  bundleComponents: securityGroup.bundleComponents,
+  status: securityGroup.status
+});
+await saveSecurityGroup({ ...originalSecurityAttributes, securityRiskLevel: "low" });
+const savedConfigBeforeSecurityPolicy = structuredClone(business.currentRule(tenantId, context()).config);
+const saveSecurityPolicy = async (policy) => {
+  const draft = await business.saveRuleVersion(tenantId, context(), {
+    config: {
+      ...savedConfigBeforeSecurityPolicy,
+      deposit: { mode: "order_fixed", fixedAmount: 100 },
+      membershipSecurityReduction: { deposit: policy }
+    },
+    changeReason: "MEMBER-BENEFIT-RISK-01 报价门禁专项"
+  }, "test");
+  await business.publishRuleVersion(tenantId, context(), draft.version, { reason: "MEMBER-BENEFIT-RISK-01 报价门禁专项" }, "test");
+};
+scopedMembership.corporatePlan.snapshot.benefits = [
+  { type: "deposit_reduction", calculation: "percentage", value: 100 }
+];
+let securityRiskState = "clear";
+business.memberships.resolveBookingIdentity = async () => structuredClone(scopedMembership);
+business.memberships.hasOpenRiskForBooking = async () => {
+  if (securityRiskState === "unavailable") throw new Error("risk repository unavailable");
+  return securityRiskState === "open";
+};
+const securityQuoteInput = {
+  ...membershipProbeInput,
+  bookingIdentity: { bookingIdentity: "enterprise_employee", corporateCustomerId: "corp_001" }
+};
+await saveSecurityPolicy({ enabled: false });
+const disabledSecurityQuote = await business.createQuote(tenantId, context(), securityQuoteInput);
+assert.equal(disabledSecurityQuote.depositAmount, 100, "空间未启用风控规则时不得减免押金");
+assert.equal(disabledSecurityQuote.membershipBenefitEvaluations.find((row) => row.type === "deposit_reduction").securityRiskCheck, "not_enabled");
+
+await saveSecurityPolicy({ enabled: true, allowedRiskLevels: ["low"], maxReductionPercent: 50, maxReductionAmount: 30 });
+const allowedSecurityQuote = await business.createQuote(tenantId, context(), securityQuoteInput);
+const allowedSecurityBenefit = allowedSecurityQuote.membershipBenefitEvaluations.find((row) => row.type === "deposit_reduction");
+assert.equal(allowedSecurityQuote.depositAmount, 70, "清洁会员按比例及绝对金额双上限取更小值");
+assert.equal(allowedSecurityBenefit.appliedAmount, 30);
+assert.equal(allowedSecurityBenefit.securityRiskCheck, "clear");
+assert.equal(allowedSecurityBenefit.securityEligibleBase, 100);
+assert.equal(allowedSecurityBenefit.securityOriginalAmount, 100);
+assert.deepEqual(allowedSecurityBenefit.securityPolicySnapshot.allowedRiskLevels, ["low"], "报价固化当时风控许可");
+assert.deepEqual(allowedSecurityBenefit.securityRiskAssessments, [{
+  itemGroupId: mktGroup.id, pricingGroupId: undefined, riskLevel: "low", allowed: true, quantity: 1
+}], "报价按商品型号固化当时等级及是否获许可，后续改等级不改历史判断");
+
+securityRiskState = "open";
+const openRiskSecurityQuote = await business.createQuote(tenantId, context(), securityQuoteInput);
+assert.equal(openRiskSecurityQuote.depositAmount, 100, "存在未关闭风险时不可免押");
+assert.equal(openRiskSecurityQuote.membershipBenefitEvaluations.find((row) => row.type === "deposit_reduction").securityRiskCheck, "open_risk");
+
+securityRiskState = "unavailable";
+const unavailableRiskSecurityQuote = await business.createQuote(tenantId, context(), securityQuoteInput);
+assert.equal(unavailableRiskSecurityQuote.depositAmount, 100, "风控查询失败时按原押金额报价，不得放行减免");
+assert.equal(unavailableRiskSecurityQuote.membershipBenefitEvaluations.find((row) => row.type === "deposit_reduction").securityRiskCheck, "unavailable");
+
+securityRiskState = "clear";
+await saveSecurityGroup({ ...originalSecurityAttributes, securityRiskLevel: "high" });
+const disallowedLevelQuote = await business.createQuote(tenantId, context(), securityQuoteInput);
+assert.equal(disallowedLevelQuote.depositAmount, 100, "空间只允许低风险时，高风险商品不参与每单固定押金减免");
+const disallowedLevelBenefit = disallowedLevelQuote.membershipBenefitEvaluations.find((row) => row.type === "deposit_reduction");
+assert.equal(disallowedLevelBenefit.securityEligibleBase, 0);
+assert.equal(disallowedLevelBenefit.securityRiskAssessments[0].allowed, false);
+await saveSecurityGroup(originalSecurityAttributes);
+ok2("会员押金风控：空间许可、商品风险、当前风险查询、双重上限与失败关闭均在报价链路生效");
+
 // 这个专项只注入一次性会员解析 stub；后续历史报价测试没有客户主档，不能误走新会员门禁。
 business.memberships = undefined;
 

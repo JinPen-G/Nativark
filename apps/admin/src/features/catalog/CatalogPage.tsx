@@ -22,6 +22,17 @@ const cameraEquipmentTypeLabels: Record<string, [string, string]> = {
   lighting: ["灯光", "Lighting"],
   other: ["其他器材", "Other equipment"]
 };
+const securityRiskLevelLabels: Record<string, [string, string]> = {
+  low: ["低风险", "Low risk"],
+  standard: ["一般风险", "Standard risk"],
+  high: ["高风险", "High risk"]
+};
+
+function riskLevelLabels(riskLevel: string, locale: string, t: (value: string) => string) {
+  if (!riskLevel || !securityRiskLevelLabels[riskLevel]) return <Tag color="warning">{t("未分级")}</Tag>;
+  const color = riskLevel === "high" ? "error" : riskLevel === "standard" ? "processing" : "success";
+  return <Tag color={color}>{securityRiskLevelLabels[riskLevel][locale === "en-US" ? 1 : 0]}</Tag>;
+}
 
 /**
  * 品类动态属性的受控控件。
@@ -48,7 +59,11 @@ function AttributeInput({
     return <InputNumber id={id} min={0} suffix={field.unit} style={{ width: "100%" }} value={value as number} onChange={onChange as (value: number | null) => void} />;
   }
   if (field.type === "select") {
-    return <Select id={id} options={field.options?.map((option) => ({ value: option, label: field.code === "equipmentType" ? cameraEquipmentTypeLabels[option]?.[locale === "en-US" ? 1 : 0] ?? option : option }))} value={value as string} onChange={onChange as (value: string) => void} />;
+    return <Select id={id} options={field.options?.map((option) => ({ value: option, label: field.code === "equipmentType"
+      ? cameraEquipmentTypeLabels[option]?.[locale === "en-US" ? 1 : 0] ?? option
+      : field.code === "securityRiskLevel"
+        ? securityRiskLevelLabels[option]?.[locale === "en-US" ? 1 : 0] ?? option
+        : option }))} value={value as string} onChange={onChange as (value: string) => void} />;
   }
   if (field.type === "boolean") {
     // Form.Item 对该类字段使用 valuePropName="checked"，注入的是 checked 而非 value。
@@ -132,6 +147,10 @@ export function CatalogPage() {
           <Table<RentalItemGroup> rowKey="id" dataSource={rows} scroll={{ x: 960 }} columns={[
             { title: t("照片"), width: 82, render: (_, row) => row.images?.[0] ? <ItemGroupPhoto groupId={row.id} image={row.images.find((image) => image.isCover) ?? row.images[0]} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={false} styles={{ image: { height: 36 } }} /> },
             { title: itemGroupLabel, fixed: "left", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code}</span></> },
+            { title: t("商品风控等级"), width: 120, render: (_, row) => {
+              const riskLevel = String(row.attributes.securityRiskLevel ?? "");
+              return riskLevelLabels(riskLevel, locale, t);
+            } },
             ...summaryFields.map((field) => ({ title: t(field.label), render: (_: unknown, row: RentalItemGroup) => String(row.attributes[field.code] ?? "-") })),
             { title: t(resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "所属定价分组"), render: (_, row) => {
               const memberships = (pricingGroups.data ?? []).filter((pricingGroup) => pricingGroup.memberItemGroupIds.includes(row.id));
@@ -178,7 +197,7 @@ export function CatalogPage() {
           {presentation?.fixedInventoryMode && <Typography.Text type="secondary">{locale === "en-US" ? `${t("固定按“")}${t(inventoryLabels[presentation.fixedInventoryMode])}${t(" / ")}${presentation.fixedUnit}${t("”管理，具体")}${t(profile.data?.terminology.assetLabel ?? "资产")}${t("在“")}${resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? t("资产管理")}${t("”中登记。")}` : `该品类固定按“${inventoryLabels[presentation.fixedInventoryMode]} / ${presentation.fixedUnit}”管理，具体${profile.data?.terminology.assetLabel ?? "资产"}在“${resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产管理"}”中登记。`}</Typography.Text>}
           </Card>
           <Card size="small" title={`${t(category?.name ?? "品类")}${t("厂商与型号规格")}`} style={{ marginBottom: 16 }}>
-            <Row gutter={12}>{groupFields.map((field) => <Col span={12} key={field.code}><Form.Item name={["attributes", field.code]} label={t(field.label)} extra={field.unique ? t("当前经营空间内不可重复") : undefined} rules={[{ required: field.required }]} valuePropName={field.type === "boolean" ? "checked" : "value"}><AttributeInput field={field} /></Form.Item></Col>)}</Row>
+            <Row gutter={12}>{groupFields.map((field) => <Col span={12} key={field.code}><Form.Item name={["attributes", field.code]} label={t(field.label)} extra={field.code === "securityRiskLevel" ? t("未分级商品按未获风控许可处理；会员押金或预授权减免只对空间规则明确允许的等级生效。") : field.unique ? t("当前经营空间内不可重复") : undefined} rules={[{ required: field.required }]} valuePropName={field.type === "boolean" ? "checked" : "value"}><AttributeInput field={field} /></Form.Item></Col>)}</Row>
           </Card>
           <Form.Item noStyle shouldUpdate={(previous, current) => previous.inventoryMode !== current.inventoryMode}>{({ getFieldValue }) => getFieldValue("inventoryMode") === RentalInventoryMode.Bundle && (
             <Card size="small" title={t("套装组成")} style={{ marginBottom: 16 }}>
