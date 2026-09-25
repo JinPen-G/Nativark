@@ -19,8 +19,9 @@ const kitDefinition = RENTAL_CAPABILITY_MODULES.find((row) => row.code === "camp
 const cleaningDefinition = RENTAL_CAPABILITY_MODULES.find((row) => row.code === "camping_cleaning_turnaround");
 assert.equal(kitDefinition.implementationVersion, CAMPING_KIT_INTEGRITY_RULESET_VERSION);
 assert.equal(cleaningDefinition.implementationVersion, CAMPING_CLEANING_TURNAROUND_RULESET_VERSION);
-assert.ok(RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "camping").requiredCapabilities.includes("camping_kit_integrity"));
-assert.ok(RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "camping").requiredCapabilities.includes("camping_cleaning_turnaround"));
+assert.ok(RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "camping").defaultCapabilities.includes("camping_kit_integrity"));
+assert.ok(RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "camping").defaultCapabilities.includes("camping_cleaning_turnaround"));
+assert.deepEqual(RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "camping").requiredCapabilities, [], "清洁与套装能力不得在露营首期被整类强制，按 D2 适用场景逐步验收");
 assert.ok(!RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "camera").defaultCapabilities.includes("camping_kit_integrity"));
 
 const kitContext = (point, { bundle = true, countOk, exceptions = [], inspectionSkipped = false } = {}) => ({

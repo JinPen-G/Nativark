@@ -17,7 +17,7 @@ assert.ok(definition, "摄影套装交接能力必须登记");
 assert.equal(definition.implementationVersion, CAMERA_KIT_HANDOVER_RULESET_VERSION);
 assert.equal(definition.kind, "category_required");
 assert.deepEqual(definition.applicableCategories, ["camera"]);
-assert.ok(RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "camera").requiredCapabilities.includes("camera_kit_handover"));
+assert.ok(RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "camera").defaultCapabilities.includes("camera_kit_handover"));
 assert.ok(!RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "vehicle").defaultCapabilities.includes("camera_kit_handover"));
 
 const context = (point, { bundle = true, kitComplete, exceptions = [] } = {}) => ({
