@@ -1,5 +1,4 @@
 import { serverNow } from "./clock";
-import { Emitter } from "./events";
 import { newKey } from "./keys";
 import { sessionEvents } from "./session";
 import { STORAGE_KEYS, readStorage, removeStorage, writeStorage } from "./storage";
@@ -69,9 +68,6 @@ export function isDeliveryMode(mode: string | undefined): boolean {
   return mode === "delivery" || mode === "onsite_delivery";
 }
 
-export type CartEvent = { type: "changed"; cart: CartState | undefined };
-export const cartEvents = new Emitter<CartEvent>();
-
 export class CartServiceMismatch extends Error {
   constructor(readonly currentServiceCode: string, readonly currentServiceName: string) {
     super("清单中已有另一服务的商品");
@@ -94,7 +90,6 @@ sessionEvents.on((event) => {
   if (event.type === "signed-out") {
     cached = undefined;
     loaded = true;
-    cartEvents.emit({ type: "changed", cart: undefined });
   }
 });
 
@@ -110,7 +105,6 @@ function save(next: CartState | undefined): void {
   cached = next;
   if (next) writeStorage(STORAGE_KEYS.cart, next);
   else removeStorage(STORAGE_KEYS.cart);
-  cartEvents.emit({ type: "changed", cart: next });
 }
 
 export function getCart(): CartState | undefined {

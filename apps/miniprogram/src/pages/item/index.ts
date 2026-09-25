@@ -84,8 +84,6 @@ Page({
 
   itemId: "" as string,
   serviceCode: "" as string,
-  /** 选项弹层的目标动作（当前仅直接预约）。 */
-  pendingAction: "reserve" as "reserve",
   reserving: false,
   unsubscribe: undefined as (() => void) | undefined,
 
@@ -245,7 +243,6 @@ Page({
 
   onReserve() {
     if (!this.data.item) return;
-    this.pendingAction = "reserve";
     if (!requireSignIn(buildUrl(ROUTES.item, { id: this.itemId, service: this.serviceCode }))) return;
     if (!this.data.options.length) {
       toast("该设备暂无可选租赁选项，请联系商户", { duration: 3000 });

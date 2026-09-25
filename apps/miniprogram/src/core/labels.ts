@@ -103,13 +103,6 @@ export const chargeLabel = (code?: string | null) => lookup(CHARGE_LABELS, code)
 export const extensionLabel = (code?: string | null) => lookup(EXTENSION_LABELS, code);
 export const paymentMethodLabel = (code?: string | null) => lookup(PAYMENT_METHOD_LABELS, code);
 
-export const PICKUP_MODES = ["store_pickup_return", "warehouse_pickup_return", "partner_pickup_return", "locker_pickup_return"] as const;
-export const DELIVERY_MODES = ["delivery", "onsite_delivery"] as const;
-
-export function isDeliveryMode(mode: string | undefined): boolean {
-  return (DELIVERY_MODES as readonly string[]).includes(mode ?? "");
-}
-
 /** 品类对应的线性图标名（ui-icon 组件）。 */
 const CATEGORY_IMAGE_PATHS: Record<string, string> = {
   camera: "/assets/category/camera.png",
