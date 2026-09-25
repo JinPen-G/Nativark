@@ -825,6 +825,12 @@ export class RuleConfigPaymentInputDto {
   @IsInt()
   @Min(0)
   unpaidHoldMinutes!: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  quoteValidityMinutes?: number;
 }
 
 /**

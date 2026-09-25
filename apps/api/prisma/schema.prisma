@@ -2887,6 +2887,8 @@ model RentalOrderLine {
   pricingGroup                   RentalPricingGroup? @relation(fields: [pricingGroupId], references: [id], onDelete: Restrict)
   pricingGroupCode               String?
   pricingGroupName               String?
+  /// 客户按组预约或指定准确型号；旧订单默认按组预约。
+  reservationPrecision           String              @default("group") @db.VarChar(20)
   /// 下单时的成员范围，分组后续增删型号不改写历史订单。
   pricingGroupMemberItemGroupIds Json?
   /// 商品编码与名称存为下单时快照，主档改名不影响历史订单行。

@@ -931,7 +931,10 @@ export class ClientApiService {
       customerId: context.customerId,
       bookingIdentity: input.bookingIdentity ?? { bookingIdentity: "personal" }
     };
-    const quote = await this.business.createQuote(context.tenantId, business, request);
+    // 与管理端走同一条服务端解析链：只选定价组时选择可承接型号；显式选型号时
+    // 固化准确型号预约精度和组成员快照。客户端不能自报精度或成员范围。
+    const resolved = await this.core.resolvePricingGroupQuoteRequest(context.tenantId, request);
+    const quote = await this.business.createQuote(context.tenantId, business, resolved);
     if (address) await this.requireAddressService().snapshotForQuote(context, quote.id, address);
     return quote;
   }

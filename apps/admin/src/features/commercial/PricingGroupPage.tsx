@@ -125,13 +125,10 @@ export function PricingGroupPage() {
                 <Form.Item name={[field.name, "baseAmount"]} label={t("价格")} rules={[{ required: true, message: t("请填写价格") }]}>
                   <InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: 220 }} />
                 </Form.Item>
-                <Form.Item name={[field.name, "preAuthAmount"]} label={t("预授权额度（可选）")} tooltip={t("该型号的预授权冻结基数。是否真的预授权由「业务规则」页的预授权规则决定；留空表示按规则默认处理。")}>
-                  <InputNumber min={0} precision={2} prefix={rentalCurrencySymbol(currency)} style={{ width: 220 }} />
-                </Form.Item>
                 <Button danger type="text" aria-label={t("删除基本价")} icon={<DeleteOutlined />} disabled={fields.length === 1} onClick={() => remove(field.name)} style={{ marginTop: 30 }} />
               </Space>)}
               <Form.ErrorList errors={errors} />
-              <Button icon={<PlusOutlined />} disabled={fields.length >= (settings.data?.pricing.enabledUnits.length ?? 0)} onClick={() => add({ unit: undefined, baseAmount: 0, preAuthAmount: undefined })}>{t("增加计价单位")}</Button>
+              <Button icon={<PlusOutlined />} disabled={fields.length >= (settings.data?.pricing.enabledUnits.length ?? 0)} onClick={() => add({ unit: undefined, baseAmount: 0 })}>{t("增加计价单位")}</Button>
             </Space>}
           </Form.List>
         </Card>}

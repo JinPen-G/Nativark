@@ -13,6 +13,15 @@ import { useAuthStore } from "@/features/auth/authStore";
 import { ItemGroupPhoto } from "./ItemGroupPhoto";
 
 const inventoryLabels: Record<string, string> = { serialized: "序列化资产", quantity: "数量库存", consumable: "一次性耗材", bundle: "套装" };
+const cameraEquipmentTypeLabels: Record<string, [string, string]> = {
+  camera_body: ["相机机身", "Camera body"],
+  lens: ["镜头", "Lens"],
+  tripod: ["三脚架", "Tripod"],
+  gimbal_camera: ["云台相机", "Gimbal camera"],
+  action_camera: ["运动相机", "Action camera"],
+  lighting: ["灯光", "Lighting"],
+  other: ["其他器材", "Other equipment"]
+};
 
 /**
  * 品类动态属性的受控控件。
@@ -34,11 +43,12 @@ function AttributeInput({
   onChange?: (...args: never[]) => void;
   id?: string;
 }) {
+  const { locale } = useLocale();
   if (field.type === "number") {
     return <InputNumber id={id} min={0} suffix={field.unit} style={{ width: "100%" }} value={value as number} onChange={onChange as (value: number | null) => void} />;
   }
   if (field.type === "select") {
-    return <Select id={id} options={field.options?.map((option) => ({ value: option, label: option }))} value={value as string} onChange={onChange as (value: string) => void} />;
+    return <Select id={id} options={field.options?.map((option) => ({ value: option, label: field.code === "equipmentType" ? cameraEquipmentTypeLabels[option]?.[locale === "en-US" ? 1 : 0] ?? option : option }))} value={value as string} onChange={onChange as (value: string) => void} />;
   }
   if (field.type === "boolean") {
     // Form.Item 对该类字段使用 valuePropName="checked"，注入的是 checked 而非 value。

@@ -127,7 +127,7 @@ import { roundMoney } from "./rental-money";
 import { computeEarlyReturnRefund, type EarlyReturnRefund } from "./rental-early-return";
 import { extensionPaymentRequired } from "./rental-extension-lifecycle";
 import { NotificationDeliveryUnknownError, TenantIntegrationRuntimeService } from "../integrations/tenant-integration.runtime.service";
-import { effectiveEarlyReturnRule, effectiveExtensionRule, effectiveTaxRule, inclusiveTaxAmount } from "./rental-rule-defaults";
+import { effectiveEarlyReturnRule, effectiveExtensionRule, effectiveQuoteValidityMinutes, effectiveTaxRule, inclusiveTaxAmount } from "./rental-rule-defaults";
 import {
   assertRuleEffectiveFromAvailable,
   assertRuleVersionEditable,
@@ -357,7 +357,8 @@ function defaultRuleConfig(category: RentalCategoryDefinition): RentalRuleConfig
       // 否则固定押金。改这里会让新空间第一张报价的押金口径变化。
       depositMode: model.supportsPreauthorization ? "preauthorization" : "fixed",
       preauthorizationRequired: model.supportsPreauthorization,
-      unpaidHoldMinutes: 15
+      unpaidHoldMinutes: 15,
+      quoteValidityMinutes: 15
     },
     fulfillment: {
       pickupInspectionRequired: true,
@@ -4995,7 +4996,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       capabilitySnapshot: this.capabilities
         ? await this.capabilities.snapshotEnabled(tenantId, this.workspaceOf(tenantId))
         : undefined,
-      expiresAt: new Date(Date.now() + rule.config.payment.unpaidHoldMinutes * 60_000).toISOString(), createdAt: timestamp
+      expiresAt: new Date(Date.now() + effectiveQuoteValidityMinutes(rule.config) * 60_000).toISOString(), createdAt: timestamp
     };
     // Review P1-5：判定结果必须写进报价并返回，否则「需转接环」这类风险虽被发现，
     // 用户却无从知道要确认什么，下单侧也只能凭空重构一遍判断。
@@ -5334,7 +5335,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 异地归还只由规则版本本身表达。早前这里还要求经营设置里同名布尔为真，但设置那份
     // 从不进快照、也不参与报价校验（报价读的是 context.settings，规则读的是快照），两份
     // 口径只会互相打架。空间「操作上能否跨点」由地点的 return 能力与 enabledModes 决定。
-    if (config.payment.unpaidHoldMinutes < 1 || config.overdue.graceMinutes < 0 || config.overdue.feeMultiplier < 0 || config.cancellation.freeBeforeHours < 0) throw new BadRequestException("规则中的时长或费用参数无效");
+    if (config.payment.unpaidHoldMinutes < 1 || (config.payment.quoteValidityMinutes !== undefined && (!Number.isInteger(config.payment.quoteValidityMinutes) || config.payment.quoteValidityMinutes < 1 || config.payment.quoteValidityMinutes > 1440)) || config.overdue.graceMinutes < 0 || config.overdue.feeMultiplier < 0 || config.cancellation.freeBeforeHours < 0) throw new BadRequestException("规则中的时长或费用参数无效");
     const noShow = config.cancellation.noShow;
     if (noShow && (noShow.pickupGraceMinutes < 0 || noShow.finalizationMinutes < 1 || noShow.feeValue < 0 || !Number.isFinite(noShow.pickupGraceMinutes) || !Number.isFinite(noShow.finalizationMinutes) || !Number.isFinite(noShow.feeValue))) {
       throw new BadRequestException("爽约规则的领取宽限、最终确认时限和费用值无效");

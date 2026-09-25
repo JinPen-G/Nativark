@@ -10,6 +10,7 @@ import type {
 } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { aggregatePendingExtensionFunding, assertActionApplies, deriveFundingLedgers, nextBalanceAfter, rentalPaymentBalance } from "./rental-funding-events";
+import { roundMoney } from "./rental-money";
 import { pendingExtensionCountsAsDue } from "./rental-extension-lifecycle";
 
 type FundingOrder = { depositAmount: number; preAuthAmount: number; payable: number; status: string; ruleSnapshot: { payment?: { timing?: string } } };
@@ -299,7 +300,9 @@ export class RentalFundingService {
         }
       });
       if (existing) {
-        const explicitAmount = input.action !== "initiate" && input.action !== "fail" && input.amount !== undefined;
+        // 回调首次入账与幂等回放都必须核对真实金额；不能让同一键的不同金额
+        // 命中已有 initiate 事件后直接当作成功。
+        const explicitAmount = input.action !== "fail" && input.amount !== undefined;
         if (explicitAmount && Number(existing.amount) !== input.amount) {
           throw new ConflictException("相同幂等键已用于不同金额的资金事件");
         }
@@ -339,9 +342,9 @@ export class RentalFundingService {
                 ? "该订单没有应收押金"
                 : "该订单没有应冻结的预授权额度"
           );
+        }
         if (!input.allowPartialInitiate && input.instrument === "rental" && input.amount !== undefined && Math.abs(Number(input.amount) - effectiveAmount) > 0.005) {
           throw new ConflictException("支付回调金额与当前订单待收金额不一致，请重新发起支付");
-        }
         }
       } else if (input.action === "release" && input.amount === undefined) {
         effectiveAmount = ledgers.preauthorization.balance;
@@ -357,7 +360,7 @@ export class RentalFundingService {
       if (input.instrument === "rental") {
         if (["initiate", "append"].includes(input.action) && effectiveAmount > Math.max(0, due)) throw new ConflictException("收款不能超过订单及待补款续租应收");
         if (input.action === "refund" && effectiveAmount > Math.max(0, -payment.balance)) throw new ConflictException("退款不能超过已核准的待退金额，请先完成应收核减");
-        balanceAfter = Math.round((payment.collected - payment.refunded + (input.action === "refund" ? -effectiveAmount : input.action === "fail" ? 0 : effectiveAmount)) * 100) / 100;
+        balanceAfter = roundMoney(payment.collected - payment.refunded + (input.action === "refund" ? -effectiveAmount : input.action === "fail" ? 0 : effectiveAmount));
       } else balanceAfter = nextBalanceAfter(input.instrument, input.action, effectiveAmount, ledgers);
       const created = await tx.rentalFundingEvent.create({
         data: {
