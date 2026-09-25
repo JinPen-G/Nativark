@@ -207,13 +207,19 @@ export class CustomerOperationsRepository {
   async listStatusHistory(
     tenantId: string,
     customerId: string,
-    workspaceId?: string
+    workspaceId?: string,
+    includeWorkspaceEvents = true
   ): Promise<CustomerStatusHistoryEntry[]> {
     const rows = await this.prisma.customerStatusHistoryEntry.findMany({
       where: {
         tenantId,
         customerId,
-        ...(workspaceId ? { OR: [{ workspaceId }, { scope: { in: ["account", "membership"] } }] } : {})
+        ...(workspaceId ? {
+          OR: [
+            ...(includeWorkspaceEvents ? [{ workspaceId }] : []),
+            { scope: { in: ["account", "membership"] } }
+          ]
+        } : {})
       },
       orderBy: [{ at: "asc" }, { createdAt: "asc" }]
     });
@@ -254,10 +260,11 @@ export class CustomerOperationsRepository {
 
   async listSensitiveAccess(
     tenantId: string,
-    customerId: string
+    customerId: string,
+    workspaceId?: string
   ): Promise<CustomerSensitiveAccessAuditEntry[]> {
     const rows = await this.prisma.customerSensitiveAccessAudit.findMany({
-      where: { tenantId, customerId },
+      where: { tenantId, customerId, ...(workspaceId ? { workspaceId } : {}) },
       orderBy: [{ at: "asc" }, { createdAt: "asc" }]
     });
     return rows.map((row) => ({

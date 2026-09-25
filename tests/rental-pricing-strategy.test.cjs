@@ -255,6 +255,43 @@ const usageRate = rateOf({ unit: "usage", baseAmount: 50, includedUsage: 100, ex
 assert.equal(amount("usage", usageRate, 150), 120, "使用量行的封顶价必须生效（50 + 50×2 = 150 → 120）");
 assert.equal(amount("usage", rateOf({ unit: "usage", baseAmount: 50, includedUsage: 100, excessUsageAmount: 2 }), 150), 150, "未封顶时按包干+超额计");
 assert.match(explain("usage", usageRate, 150), /超额 50 × 2/, "超额用量必须在计算说明里可追溯");
+assert.throws(
+  () => amount("usage", rateOf({ unit: "usage", baseAmount: 50, includedUsage: 100 }), 150),
+  /必须明确配置超额单价/u,
+  "不得把基础包干价静默当成超额单价"
+);
+
+const progressiveUsage = rateOf({
+  unit: "usage",
+  baseAmount: 50,
+  includedUsage: 20,
+  tierMode: "progressive",
+  tiers: [
+    { minUnits: 151, unitAmount: 1 },
+    { minUnits: 1, unitAmount: 2 },
+    { minUnits: 101, unitAmount: 1.5 }
+  ]
+});
+assert.equal(amount("usage", progressiveUsage, 20), 50, "包含用量内只收基础包干费");
+assert.equal(amount("usage", progressiveUsage, 120), 250, "第 100 个超额单位仍在第一档");
+assert.equal(amount("usage", progressiveUsage, 121), 251.5, "跨过第 100 个超额单位后仅新增单位进入第二档");
+assert.equal(amount("usage", progressiveUsage, 171), 326, "跨过两档后按各档单位数累进，不对所有用量套最低单价");
+assert.deepEqual(
+  rentalPricingStrategy("usage").priceBreakdown(progressiveUsage, 171).tierBreakdown,
+  [
+    { minUnits: 1, maxUnits: 100, units: 100, unitAmount: 2, amount: 200 },
+    { minUnits: 101, maxUnits: 150, units: 50, unitAmount: 1.5, amount: 75 },
+    { minUnits: 151, maxUnits: 151, units: 1, unitAmount: 1, amount: 1 }
+  ],
+  "逐档快照应能复核每档数量、单价和小计"
+);
+assert.match(explain("usage", progressiveUsage, 171), /超额分段累进/u);
+assert.equal(amount("usage", { ...progressiveUsage, maxAmount: 300 }, 171), 300, "累进总额仍受单行封顶约束");
+assert.throws(
+  () => amount("usage", { ...progressiveUsage, tierMode: undefined }, 171),
+  /只能配置为分段累进/u,
+  "使用量阶梯没有显式标为 progressive 时不得退化成未计阶梯"
+);
 
 // 计算说明必须能解释来源：单价、单位数都要出现。
 assert.match(explain("day_24h", rateOf({}), 3), /基础价 100\/day_24h × 3/, "无阶梯时说明应给出基础价与单位数");

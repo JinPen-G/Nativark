@@ -1870,18 +1870,26 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       const pricingGroup = line.pricingGroupId
         ? state.pricingGroups.find((row) => row.id === line.pricingGroupId)
         : undefined;
-      if (line.pricingGroupId && (!pricingGroup || !pricingGroup.memberItemGroupIds.includes(group.id))) {
+      const quotedLine = quote.request.lines.find((row) => row.itemGroupId === line.itemGroupId && row.pricingGroupId === line.pricingGroupId && row.quantity === line.quantity);
+      if (!quotedLine) throw new BadRequestException("订单型号、分组或数量与服务端报价不一致");
+      const quotedMembers = quotedLine.pricingGroupMemberItemGroupIds;
+      if (line.pricingGroupId && (!pricingGroup || !(quotedMembers ?? pricingGroup.memberItemGroupIds).includes(group.id))) {
         throw new BadRequestException("订单行的产品型号不属于报价定价分组");
       }
-      const rentalCharge = quote.chargeLines.find((item) => item.code === `rental:${pricingGroup?.code ?? group.code}`);
+      const rentalCharge = quote.chargeLines.find((item) => item.code === `rental:${quotedLine.pricingGroupCode ?? pricingGroup?.code ?? group.code}`);
       if (!rentalCharge) throw new BadRequestException(`${pricingGroup?.name ?? group.name} 缺少服务端租金明细`);
       const amount = rentalCharge.amount;
+      const reservationPrecision: "group" | "exact_model" = quotedLine.reservationPrecision === "exact_model" || !pricingGroup ? "exact_model" : "group";
       return {
         id: id("line"),
         pricingGroupId: pricingGroup?.id,
-        pricingGroupCode: pricingGroup?.code,
-        pricingGroupName: pricingGroup?.name,
-        pricingGroupMemberItemGroupIds: pricingGroup ? [...pricingGroup.memberItemGroupIds] : undefined,
+        pricingGroupCode: quotedLine.pricingGroupCode ?? pricingGroup?.code,
+        pricingGroupName: quotedLine.pricingGroupName ?? pricingGroup?.name,
+        reservationPrecision,
+        // 即使旧读路径未识别预约精度，准确型号订单的允许替换范围也只能是自身。
+        pricingGroupMemberItemGroupIds: pricingGroup
+          ? reservationPrecision === "exact_model" ? [group.id] : [...(quotedMembers ?? pricingGroup.memberItemGroupIds)]
+          : undefined,
         itemGroupId: group.id,
         itemGroupCode: group.code,
         itemGroupName: group.name,
@@ -3888,7 +3896,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (!line.pricingGroupId) {
         if (!line.itemGroupId) throw new BadRequestException("请选择定价分组");
         this.group(state, line.itemGroupId);
-        resolved[index] = { ...line, itemGroupId: line.itemGroupId };
+        resolved[index] = { ...line, itemGroupId: line.itemGroupId, reservationPrecision: "exact_model" };
         continue;
       }
       if (seenPricingGroups.has(line.pricingGroupId)) throw new BadRequestException("同一定价分组在一次报价中只能出现一行");
@@ -3918,7 +3926,14 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (position >= choices.length) return true;
       const choice = choices[position];
       for (const candidate of choice.candidates) {
-        resolved[choice.index] = { ...choice.line, itemGroupId: candidate.id };
+        resolved[choice.index] = {
+          ...choice.line,
+          itemGroupId: candidate.id,
+          reservationPrecision: choice.line.itemGroupId ? "exact_model" : "group",
+          pricingGroupMemberItemGroupIds: [...choice.pricingGroup.memberItemGroupIds],
+          pricingGroupCode: choice.pricingGroup.code,
+          pricingGroupName: choice.pricingGroup.name
+        };
         const demand = resolved.filter((row): row is ResolvedLine => Boolean(row));
         const available = this.computeAvailability(state, snapshot, {
           locationId: input.fulfillmentLocationId,
@@ -4629,18 +4644,21 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     }));
   }
 
-  /**
-   * 旧空间的检查模板已经持久化，不能靠重新 seed 才看到新增的品类字段。
-   * 读路径补齐 CAM-01B 的可选清点项；不回写旧模板，避免启动时偷偷改运营配置，
-   * 但 createInspection 与页面读取共用同一份输出口径。
-   */
+  /** 旧空间的系统默认模板不在启动时回写；读取时按当前品类定义补齐可选项。
+   * 自建/另行发布的模板不受此兼容逻辑影响，运营方仍可为特定型号制定更严格模板。 */
   private inspectionTemplateForRead(categoryCode: RentalCategoryCode | undefined, template: RentalInspectionTemplate): RentalInspectionTemplate {
-    if (categoryCode !== "camera" || template.fields.some((field) => field.code === "kit_complete")) return template;
+    const definition = RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === categoryCode);
+    if (!definition || template.code !== `${categoryCode?.toUpperCase()}_${template.stage.toUpperCase()}_V1`) return template;
+    const optionalDefaults = definition.businessModel.defaults.inspectionFields.filter((field) => !field.required);
+    if (!optionalDefaults.length) return template;
     return {
       ...template,
       fields: [
-        ...template.fields.map((field) => ({ ...field })),
-        { code: "kit_complete", label: "套装附件齐全", type: "boolean", required: false }
+        ...template.fields.map((field) => {
+          const optional = optionalDefaults.find((defaultField) => defaultField.code === field.code);
+          return optional ? { ...field, required: false } : { ...field };
+        }),
+        ...optionalDefaults.filter((field) => !template.fields.some((existing) => existing.code === field.code)).map((field) => ({ ...field }))
       ]
     };
   }

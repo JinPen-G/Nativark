@@ -313,7 +313,11 @@ export function RentalOrderCreatePage() {
                     <Row gutter={12} align="middle">
                       <Col xs={24} md={10}>
                         <Form.Item name={[field.name, "pricingGroupId"]} label={`${itemGroupLabel} ${index + 1}`} rules={[{ required: true }]}>
-                          <Select showSearch={{ optionFilterProp: "label" }} options={(pricingGroups.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: `${item.code} · ${item.name}（${item.members.map((member) => member.name).join("、")}）` }))} />
+                          <Select
+                            showSearch={{ optionFilterProp: "label" }}
+                            options={(pricingGroups.data ?? []).filter((item) => item.status === "enabled").map((item) => ({ value: item.id, label: `${item.code} · ${item.name}（${item.members.map((member) => member.name).join("、")}）` }))}
+                            onChange={() => form.setFieldValue(["lines", field.name, "itemGroupId"], undefined)}
+                          />
                         </Form.Item>
                       </Col>
                       <Col xs={8} md={4}>
@@ -335,6 +339,25 @@ export function RentalOrderCreatePage() {
                         {fields.length > 1 && <Button danger type="text" icon={<DeleteOutlined />} aria-label={`${t("删除")}${itemLabel}`} onClick={() => remove(field.name)} />}
                       </Col>
                     </Row>
+                    <Form.Item noStyle shouldUpdate={(before, after) => before.lines?.[field.name]?.pricingGroupId !== after.lines?.[field.name]?.pricingGroupId}>
+                      {({ getFieldValue }) => {
+                        const selectedGroup = (pricingGroups.data ?? []).find((item) => item.id === getFieldValue(["lines", field.name, "pricingGroupId"]));
+                        return <Form.Item
+                          name={[field.name, "itemGroupId"]}
+                          label={t("预约型号（可选）")}
+                          extra={t("不选表示按定价分组预约；选定后只能分配该准确型号，不会静默替换。")}
+                          style={{ maxWidth: 520 }}
+                        >
+                          <Select
+                            allowClear
+                            showSearch={{ optionFilterProp: "label" }}
+                            placeholder={t("按分组预约")}
+                            disabled={!selectedGroup}
+                            options={(selectedGroup?.members ?? []).map((member) => ({ value: member.id, label: `${member.code} · ${member.name}` }))}
+                          />
+                        </Form.Item>;
+                      }}
+                    </Form.Item>
                   </Card>)}
                   <Button block type="dashed" icon={<PlusOutlined />} onClick={() => add({ quantity: 1 })}>{t("继续添加定价分组")}</Button>
                 </Space>}

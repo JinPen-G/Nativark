@@ -126,6 +126,16 @@ void (async () => {
   console.log("  PASS  待补款续租的押金/预授权增量可在基础目标为 0 或未收取时正常发起");
 
   await assert.rejects(
+    funding.recordEvent(tenantId, workspace.id, orderId, {
+      instrument: "rental", action: "initiate", amount: 1400,
+      idempotencyKey: `${tag}:wrong-callback-amount`, reason: "回调金额不等于订单应收"
+    }, "专项"),
+    /支付回调金额与当前订单待收金额不一致/,
+    "第三方回调金额不能被忽略后按订单应收金额入账"
+  );
+  assert.equal(await prisma.rentalFundingEvent.count({ where: { orderId, idempotencyKey: `${tag}:wrong-callback-amount` } }), 0);
+
+  await assert.rejects(
     prisma.$transaction((tx) => funding.assertReadyForPickup(tenantId, workspace.id, orderId, tx)),
     /足额收取押金/,
     "未处理押金与预授权时不得领取"

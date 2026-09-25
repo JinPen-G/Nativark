@@ -37,6 +37,7 @@ import { hashPassword } from "../../common/password";
 import { CustomerOperationsRepository } from "./customer-operations.repository";
 import { SharedCustomerRepository, type CustomerProfileUpdateData } from "./shared-customer.repository";
 import { evaluateRentalQualification, type RentalQualificationAction, type RentalQualificationCheckWindow } from "../rental-core/rental-qualification";
+import { getRequestDataScope, getRequestLocationIds, getRequestUserId, getRequestWorkspaceId } from "../../common/request-identity";
 
 const mask = (value?: string) => {
   const trimmed = value?.trim();
@@ -406,8 +407,9 @@ export class MembershipService {
   }
 
   async listPersonalOptions(tenantId: string): Promise<BookingMemberOption[]> {
+    const whereScope = await this.personalBookingOptionScope(tenantId);
     const rows = await this.prisma.customerProfile.findMany({
-      where: { tenantId, customerType: "personal", mergedIntoCustomerId: null, membership: { is: { status: "active" } } },
+      where: { tenantId, customerType: "personal", mergedIntoCustomerId: null, membership: { is: { status: "active" } }, ...(whereScope ? { AND: [whereScope] } : {}) },
       select: { id: true, name: true, phoneMasked: true, membership: { select: { status: true } } },
       orderBy: [{ name: "asc" }, { id: "asc" }]
     });
@@ -415,6 +417,88 @@ export class MembershipService {
       customerId: row.id, name: row.name, phoneMasked: row.phoneMasked,
       membershipStatus: row.membership!.status as BookingMemberOption["membershipStatus"]
     }));
+  }
+
+  private async personalBookingOptionScope(tenantId: string): Promise<Prisma.CustomerProfileWhereInput | undefined> {
+    const scope = getRequestDataScope();
+    const locationIds = getRequestLocationIds();
+    if ((!scope || scope === "all") && locationIds === undefined) return undefined;
+    if (scope === "organization") {
+      throw new ForbiddenException("组织范围尚未关联客户归属，无法安全选择会员");
+    }
+    const workspaceId = getRequestWorkspaceId();
+    const userId = getRequestUserId();
+    if (!workspaceId || (scope === "own" && !userId)) {
+      throw new ForbiddenException("会员选择范围缺少已验证的账号或经营空间");
+    }
+    const orders = await this.prisma.rentalOrder.findMany({
+      where: {
+        tenantId,
+        workspaceId,
+        customerId: { not: null },
+        ...(locationIds === undefined ? {} : { fulfillmentLocationId: { in: locationIds.length ? locationIds : ["__no_authorized_location__"] } }),
+        ...(scope === "own" ? {
+          OR: [
+            { createdBy: userId! },
+            { workOrders: { some: { OR: [{ createdBy: userId! }, { assigneeId: userId! }] } } }
+          ]
+        } : {})
+      },
+      select: { customerId: true },
+      distinct: ["customerId"]
+    });
+    const visibleIds = new Set(orders.flatMap((row) => row.customerId ? [row.customerId] : []));
+    const alternatives: Prisma.CustomerProfileWhereInput[] = [];
+    if (visibleIds.size) alternatives.push({ id: { in: [...visibleIds] } });
+    if (locationIds === undefined && (scope === "own" || scope === "store")) {
+      alternatives.push({
+        createdInWorkspaceId: workspaceId,
+        ...(scope === "own" ? { createdByUserId: userId! } : {})
+      });
+    }
+    return { OR: alternatives.length ? alternatives : [{ id: "__no_visible_customer__" }] };
+  }
+
+  private async assertPersonalBookingCustomerVisible(tenantId: string, workspaceId: string, customerId: string) {
+    const scope = getRequestDataScope();
+    const locationIds = getRequestLocationIds();
+    if ((!scope || scope === "all") && locationIds === undefined) return;
+    if (scope === "organization") throw new ForbiddenException("组织范围尚未关联客户归属，无法读取会员权益");
+    const userId = getRequestUserId();
+    if (scope === "own" && !userId) throw new ForbiddenException("本人会员范围缺少已验证账号");
+    if (locationIds === undefined && (scope === "own" || scope === "store")) {
+      const profile = await this.prisma.customerProfile.findFirst({
+        where: {
+          id: customerId,
+          tenantId,
+          createdInWorkspaceId: workspaceId,
+          ...(scope === "own" ? { createdByUserId: userId! } : {})
+        },
+        select: { id: true }
+      });
+      if (profile) return;
+    }
+    const order = await this.prisma.rentalOrder.findFirst({
+      where: {
+        tenantId,
+        workspaceId,
+        ...(locationIds === undefined ? {} : { fulfillmentLocationId: { in: locationIds.length ? locationIds : ["__no_authorized_location__"] } }),
+        ...(scope === "own" ? {
+          OR: [
+            { createdBy: userId! },
+            { workOrders: { some: { OR: [{ createdBy: userId! }, { assigneeId: userId! }] } } }
+          ]
+        } : {}),
+        OR: [
+          { customerId },
+          { contractSubjectCustomerId: customerId },
+          { payerSubjectCustomerId: customerId },
+          { userSubjectCustomerId: customerId }
+        ]
+      },
+      select: { id: true }
+    });
+    if (!order) throw new NotFoundException("会员不存在或不在当前账号的数据范围内");
   }
 
   async listPersonalMembers(tenantId: string): Promise<PersonalMembershipMember[]> {
@@ -893,6 +977,7 @@ export class MembershipService {
 
   async listBookingOptions(tenantId: string, workspaceId: string, personalCustomerId: string): Promise<CustomerMembershipBookingOption[]> {
     await this.requireWorkspace(tenantId, workspaceId);
+    await this.assertPersonalBookingCustomerVisible(tenantId, workspaceId, personalCustomerId);
     await this.requireCustomer(tenantId, personalCustomerId, "personal");
     await this.requireMembership(tenantId, personalCustomerId);
     const now = new Date();

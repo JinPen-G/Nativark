@@ -127,7 +127,7 @@ import { roundMoney } from "./rental-money";
 import { computeEarlyReturnRefund, type EarlyReturnRefund } from "./rental-early-return";
 import { extensionPaymentRequired } from "./rental-extension-lifecycle";
 import { NotificationDeliveryUnknownError, TenantIntegrationRuntimeService } from "../integrations/tenant-integration.runtime.service";
-import { effectiveEarlyReturnRule, effectiveExtensionRule, effectiveTaxRule, inclusiveTaxAmount } from "./rental-rule-defaults";
+import { effectiveEarlyReturnRule, effectiveExtensionRule, effectiveQuoteValidityMinutes, effectiveTaxRule, inclusiveTaxAmount } from "./rental-rule-defaults";
 import {
   assertRuleEffectiveFromAvailable,
   assertRuleVersionEditable,
@@ -357,7 +357,8 @@ function defaultRuleConfig(category: RentalCategoryDefinition): RentalRuleConfig
       // 否则固定押金。改这里会让新空间第一张报价的押金口径变化。
       depositMode: model.supportsPreauthorization ? "preauthorization" : "fixed",
       preauthorizationRequired: model.supportsPreauthorization,
-      unpaidHoldMinutes: 15
+      unpaidHoldMinutes: 15,
+      quoteValidityMinutes: 15
     },
     fulfillment: {
       pickupInspectionRequired: true,
@@ -965,12 +966,40 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       }
       // 阶梯档位重复会让"取最高已达档"变成看装载顺序，同一份配置解释不出唯一价格。
       const tierKeys = new Set<number>();
+      const tiers = row.tiers ?? [];
       for (const tier of row.tiers ?? []) {
-        if (!Number.isFinite(tier.minUnits) || !Number.isFinite(tier.unitAmount) || tier.minUnits < 1 || tier.unitAmount < 0) {
-          throw new BadRequestException(`${target.name} 的阶梯价档位必须是起始单位数 ≥ 1、单价非负`);
+        if (!Number.isInteger(tier.minUnits) || !Number.isFinite(tier.unitAmount) || tier.minUnits < 1 || tier.unitAmount < 0) {
+          throw new BadRequestException(`${target.name} 的阶梯价档位必须是正整数起点、单价非负`);
         }
         if (tierKeys.has(tier.minUnits)) throw new BadRequestException(`${target.name} 的阶梯价存在重复的起始单位数 ${tier.minUnits}`);
         tierKeys.add(tier.minUnits);
+      }
+      if (row.unit === "usage") {
+        if (row.includedUsage !== undefined && (!Number.isFinite(row.includedUsage) || row.includedUsage < 0)) {
+          throw new BadRequestException(`${target.name} 的包含使用量必须是非负数`);
+        }
+        if (row.excessUsageAmount !== undefined && (!Number.isFinite(row.excessUsageAmount) || row.excessUsageAmount < 0)) {
+          throw new BadRequestException(`${target.name} 的超额单价必须是非负数`);
+        }
+        if (tiers.length) {
+          if (row.tierMode !== "progressive") {
+            throw new BadRequestException(`${target.name} 的使用量阶梯必须选择“分段累进”，不能使用长租整单换价`);
+          }
+          if (tiers.slice().sort((a, b) => a.minUnits - b.minUnits)[0]?.minUnits !== 1) {
+            throw new BadRequestException(`${target.name} 的分段累进第一档必须从第 1 个超额单位开始`);
+          }
+          if (row.excessUsageAmount !== undefined) {
+            throw new BadRequestException(`${target.name} 已配置累进阶梯，不能再同时填写统一超额单价`);
+          }
+        } else if (row.tierMode === "progressive") {
+          throw new BadRequestException(`${target.name} 选择分段累进后必须至少配置一档阶梯`);
+        } else if (row.tierMode === "whole_order") {
+          throw new BadRequestException(`${target.name} 的使用量计价不支持长租整单换价阶梯`);
+        } else if (row.excessUsageAmount === undefined) {
+          throw new BadRequestException(`${target.name} 按使用量计价必须填写超额单价或配置分段累进阶梯`);
+        }
+      } else if (row.tierMode === "progressive") {
+        throw new BadRequestException(`${target.name} 的分段累进阶梯仅适用于使用量计价`);
       }
       // 用 undefined 判空而不是真值判断：封顶 0 是合法配置（免租）。
       if (row.maxAmount !== undefined && (!Number.isFinite(row.maxAmount) || row.maxAmount < 0)) {
@@ -4995,7 +5024,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       capabilitySnapshot: this.capabilities
         ? await this.capabilities.snapshotEnabled(tenantId, this.workspaceOf(tenantId))
         : undefined,
-      expiresAt: new Date(Date.now() + rule.config.payment.unpaidHoldMinutes * 60_000).toISOString(), createdAt: timestamp
+      expiresAt: new Date(Date.now() + effectiveQuoteValidityMinutes(rule.config) * 60_000).toISOString(), createdAt: timestamp
     };
     // Review P1-5：判定结果必须写进报价并返回，否则「需转接环」这类风险虽被发现，
     // 用户却无从知道要确认什么，下单侧也只能凭空重构一遍判断。
@@ -5334,7 +5363,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 异地归还只由规则版本本身表达。早前这里还要求经营设置里同名布尔为真，但设置那份
     // 从不进快照、也不参与报价校验（报价读的是 context.settings，规则读的是快照），两份
     // 口径只会互相打架。空间「操作上能否跨点」由地点的 return 能力与 enabledModes 决定。
-    if (config.payment.unpaidHoldMinutes < 1 || config.overdue.graceMinutes < 0 || config.overdue.feeMultiplier < 0 || config.cancellation.freeBeforeHours < 0) throw new BadRequestException("规则中的时长或费用参数无效");
+    if (config.payment.unpaidHoldMinutes < 1 || (config.payment.quoteValidityMinutes !== undefined && (!Number.isInteger(config.payment.quoteValidityMinutes) || config.payment.quoteValidityMinutes < 1 || config.payment.quoteValidityMinutes > 1440)) || config.overdue.graceMinutes < 0 || config.overdue.feeMultiplier < 0 || config.cancellation.freeBeforeHours < 0) throw new BadRequestException("规则中的时长或费用参数无效");
     const noShow = config.cancellation.noShow;
     if (noShow && (noShow.pickupGraceMinutes < 0 || noShow.finalizationMinutes < 1 || noShow.feeValue < 0 || !Number.isFinite(noShow.pickupGraceMinutes) || !Number.isFinite(noShow.finalizationMinutes) || !Number.isFinite(noShow.feeValue))) {
       throw new BadRequestException("爽约规则的领取宽限、最终确认时限和费用值无效");

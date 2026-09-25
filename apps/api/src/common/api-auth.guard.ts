@@ -6,6 +6,7 @@ import {
   Optional,
   UnauthorizedException
 } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { RentalCategoryCode, type RentalCapability, type SystemUserRow } from "@rental-os/shared";
 import { AuthService } from "../modules/auth/auth.service";
 import { ClientAuthService } from "../modules/client/client-auth.service";
@@ -830,10 +831,28 @@ export class ApiAuthGuard implements CanActivate {
       throw new ForbiddenException("当前会话没有经营空间，请先选择经营空间");
     }
 
-    const staffLocationScope = accessContext?.user.locationScope ?? { mode: "all" as const, locationIds: [] };
-    if (staffApiRequest && !isStaffAuthPath(path)) {
-      request.staffLocationScope = staffLocationScope;
-      await this.assertStaffLocationAccess(request, path, user, workspaceId, staffLocationScope);
+    const locationScope = accessContext?.user.locationScope ?? { mode: "all" as const, locationIds: [] };
+    const operationalRentalPath = path.startsWith("/rental/v1/") || path.startsWith("/staff/v1/");
+    const scopedRentalPath = operationalRentalPath && path !== "/rental/v1/categories";
+    const restrictedRentalRequest = scopedRentalPath && (
+      staffApiRequest ||
+      locationScope.mode === "selected" ||
+      user.dataScope !== "all"
+    );
+    if (user.dataScope === "organization" && path.startsWith("/platform/customers")) {
+      throw new ForbiddenException("组织数据范围尚未关联客户归属，请联系管理员配置明确的空间范围");
+    }
+    const customerRoute = path.match(/^\/(?:platform\/customers|rental\/v1\/booking-members)\/([^/]+)/u);
+    const customerId = customerRoute?.[1];
+    const customerOptionsRoute = /^\/rental\/v1\/booking-members\/[^/]+\/booking-options$/u.test(path);
+    const customerDetailRoute = path.startsWith("/platform/customers/") && !["search", "merge"].includes(customerId ?? "");
+    const customerScopeRestricted = user.dataScope !== "all" || locationScope.mode === "selected";
+    if (customerId && customerScopeRestricted && (customerDetailRoute || customerOptionsRoute)) {
+      await this.assertCustomerRecordAccess(user, workspaceId, locationScope, customerId);
+    }
+    if (staffApiRequest) request.staffLocationScope = locationScope;
+    if (restrictedRentalRequest && !isStaffAuthPath(path)) {
+      await this.assertStaffLocationAccess(request, path, user, workspaceId, locationScope);
     }
     enterRequestIdentity({
       tenantId: user.tenantId,
@@ -842,8 +861,11 @@ export class ApiAuthGuard implements CanActivate {
       isSaasAdmin: Boolean(user.isSaasAdmin),
       // 只从会话写入，绝不读取请求体或查询参数里的 workspaceId。
       workspaceId,
+      dataScope: user.dataScope,
+      organizationId: user.organizationId,
+      locationScope,
       staffApi: staffApiRequest,
-      staffLocationScope
+      staffLocationScope: locationScope
     });
     request.user = user;
     return true;
@@ -856,55 +878,97 @@ export class ApiAuthGuard implements CanActivate {
     workspaceId: string | undefined,
     scope: { mode: "all" | "selected"; locationIds: string[] }
   ) {
-    if (scope.mode === "all") return;
-    if (!this.prisma || !workspaceId || !Array.isArray(scope.locationIds) || !scope.locationIds.length) {
-      throw new ForbiddenException("员工地点范围未就绪，已拒绝访问");
+    const locationRestricted = scope.mode === "selected";
+    const ownScope = user.dataScope === "own";
+    const organizationScope = user.dataScope === "organization";
+    const prisma = this.prisma;
+    if (locationRestricted && (!prisma || !workspaceId || !Array.isArray(scope.locationIds) || !scope.locationIds.length)) {
+      throw new ForbiddenException("当前账号的履约地点范围未就绪，已拒绝访问");
     }
     const allowed = new Set(scope.locationIds);
+    if (organizationScope) {
+      // 经营地点目前没有 OrganizationUnit 归属字段。即使账号同时配置了地点白名单，
+      // 也无法证明那些地点都属于当前组织，因此不能用地点白名单冒充组织范围。
+      throw new ForbiddenException("组织范围尚未建立组织与履约地点的归属关系，暂不可用于经营数据访问；请改用地点或全空间范围");
+    }
+    if (!locationRestricted && !ownScope) return;
+    if (!prisma || !workspaceId) throw new ForbiddenException("当前账号的数据范围未就绪，已拒绝访问");
+    if (ownScope && (
+      path.startsWith("/rental/v1/stock-") ||
+      path === "/rental/v1/stock-balances" ||
+      path.startsWith("/rental/v1/locations") ||
+      path.startsWith("/rental/v1/fulfillment-operators")
+    )) {
+      throw new ForbiddenException("本人数据范围不适用于共享库存和地点资料，请使用地点或更高数据范围");
+    }
     const body = request.body && typeof request.body === "object" ? request.body as Record<string, unknown> : {};
     const query = request.query ?? {};
     const ensureLocations = (values: unknown[]) => {
+      if (!locationRestricted) return;
       const ids = values.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
-      if (values.some((value) => typeof value !== "string" || !allowed.has(value))) throw new ForbiddenException("所选履约地点不在当前员工授权范围内");
-      for (const id of ids) if (!allowed.has(id)) throw new ForbiddenException("所选履约地点不在当前员工授权范围内");
+      if (values.some((value) => typeof value !== "string" || !allowed.has(value))) throw new ForbiddenException("所选履约地点不在当前账号授权范围内");
+      for (const id of ids) if (!allowed.has(id)) throw new ForbiddenException("所选履约地点不在当前账号授权范围内");
     };
     const explicitLocations = [body.locationId, body.fulfillmentLocationId, body.returnLocationId, body.serviceLocationId, body.fromLocationId, body.toLocationId, query.locationId]
       .filter((value) => value !== undefined && value !== null && value !== "");
     if (explicitLocations.length) ensureLocations(explicitLocations);
 
+    if (ownScope && ["/rental/v1/quotes", "/rental/v1/orders"].includes(path) && request.method.toUpperCase() === "POST") {
+      await this.assertOwnBookingCustomers(body, user, workspaceId, scope);
+    }
+
     const orderMatch = path.match(/^\/rental\/v1\/orders\/([^/]+)/u);
     if (path === "/rental/v1/orders" && request.method.toUpperCase() === "POST") {
-      if (typeof body.fulfillmentLocationId !== "string") throw new ForbiddenException("员工创建订单必须指定已授予的履约地点");
+      if (locationRestricted && typeof body.fulfillmentLocationId !== "string") throw new ForbiddenException("当前账号创建订单必须指定已授权的履约地点");
       ensureLocations([body.fulfillmentLocationId, ...(body.returnLocationId ? [body.returnLocationId] : [])]);
     } else if (path === "/rental/v1/quotes" && request.method.toUpperCase() === "POST") {
-      if (typeof body.locationId !== "string") throw new ForbiddenException("员工报价必须指定已授予的履约地点");
+      if (locationRestricted && typeof body.locationId !== "string") throw new ForbiddenException("当前账号报价必须指定已授权的履约地点");
       ensureLocations([body.locationId]);
     } else if (orderMatch && orderMatch[1] !== "expire-pending" && orderMatch[1] !== "reconcile-pickup-overdue") {
-      const order = await this.prisma.rentalOrder.findFirst({
-        where: { id: orderMatch[1], tenantId: user.tenantId, workspaceId, OR: [
-          { fulfillmentLocationId: { in: scope.locationIds } },
-          { returnLocationId: { in: scope.locationIds } }
-        ] }, select: { id: true }
+      const clauses: Prisma.RentalOrderWhereInput[] = [];
+      if (locationRestricted) clauses.push({ OR: [
+        { fulfillmentLocationId: { in: scope.locationIds } },
+        { returnLocationId: { in: scope.locationIds } }
+      ] });
+      if (ownScope) clauses.push({ OR: [
+        { createdBy: user.id },
+        { workOrders: { some: { OR: [{ createdBy: user.id }, { assigneeId: user.id }] } } }
+      ] });
+      const order = await prisma.rentalOrder.findFirst({
+        where: { id: orderMatch[1], tenantId: user.tenantId, workspaceId, ...(clauses.length ? { AND: clauses } : {}) },
+        select: { id: true }
       });
-      if (!order) throw new ForbiddenException("订单不存在或不在当前员工授权地点范围内");
+      if (!order) throw new ForbiddenException("订单不存在或不在当前账号的数据范围内");
       const assetIds = this.extractAssetIds(body);
-      if (assetIds.length) {
-        const assets = await this.prisma.rentalAsset.findMany({ where: { id: { in: assetIds }, tenantId: user.tenantId, workspaceId, locationId: { in: scope.locationIds } }, select: { id: true } });
-        if (assets.length !== new Set(assetIds).size) throw new ForbiddenException("订单分配的资产不在当前员工授权地点范围内");
+      if (locationRestricted && assetIds.length) {
+        const assets = await prisma.rentalAsset.findMany({ where: { id: { in: assetIds }, tenantId: user.tenantId, workspaceId, locationId: { in: scope.locationIds } }, select: { id: true } });
+        if (assets.length !== new Set(assetIds).size) throw new ForbiddenException("订单分配的资产不在当前账号授权地点范围内");
       }
     }
 
     const workOrderMatch = path.match(/^\/rental\/v1\/work-orders\/([^/]+)/u);
     if (workOrderMatch) {
-      const row = await this.prisma.rentalWorkOrder.findFirst({ where: { id: workOrderMatch[1], tenantId: user.tenantId, workspaceId, locationId: { in: scope.locationIds } }, select: { id: true } });
-      if (!row) throw new ForbiddenException("工单不存在或不在当前员工授权地点范围内");
+      const row = await prisma.rentalWorkOrder.findFirst({ where: {
+        id: workOrderMatch[1], tenantId: user.tenantId, workspaceId,
+        ...(locationRestricted ? { locationId: { in: scope.locationIds } } : {}),
+        ...(ownScope ? { OR: [{ createdBy: user.id }, { assigneeId: user.id }] } : {})
+      }, select: { id: true } });
+      if (!row) throw new ForbiddenException("工单不存在或不在当前账号的数据范围内");
     }
     const assetMatch = path.match(/^\/rental\/v1\/assets\/([^/]+)/u);
     if (assetMatch) {
-      const row = await this.prisma.rentalAsset.findFirst({ where: { id: assetMatch[1], tenantId: user.tenantId, workspaceId, locationId: { in: scope.locationIds } }, select: { id: true } });
-      if (!row) throw new ForbiddenException("资产不存在或不在当前员工授权地点范围内");
+      const row = await prisma.rentalAsset.findFirst({ where: {
+        id: assetMatch[1], tenantId: user.tenantId, workspaceId,
+        ...(locationRestricted ? { locationId: { in: scope.locationIds } } : {}),
+        ...(ownScope ? { id: { in: (await prisma.rentalWorkOrder.findMany({
+          where: { tenantId: user.tenantId, workspaceId, assetId: { not: null }, OR: [{ createdBy: user.id }, { assigneeId: user.id }] },
+          select: { assetId: true }, distinct: ["assetId"]
+        })).map((workOrder) => workOrder.assetId!).filter(Boolean) } } : {})
+      }, select: { id: true } });
+      if (!row) throw new ForbiddenException("资产不存在或不在当前账号的数据范围内");
     }
     if (path === "/rental/v1/assets" && request.method.toUpperCase() !== "GET") {
+      if (ownScope) throw new ForbiddenException("本人数据范围不能登记或修改共享资产资料");
       if (typeof body.locationId !== "string") throw new ForbiddenException("资产必须绑定已授权履约地点");
       ensureLocations([body.locationId]);
     }
@@ -916,7 +980,7 @@ export class ApiAuthGuard implements CanActivate {
     }
     const dispositionMatch = path.match(/^\/rental\/v1\/stock-dispositions\/([^/]+)\/restore$/u);
     if (dispositionMatch) {
-      const row = await this.prisma.rentalStockDisposition.findFirst({
+      const row = await prisma.rentalStockDisposition.findFirst({
         where: { id: dispositionMatch[1], tenantId: user.tenantId, workspaceId, order: { is: { OR: [
           { fulfillmentLocationId: { in: scope.locationIds } },
           { returnLocationId: { in: scope.locationIds } }
@@ -929,20 +993,106 @@ export class ApiAuthGuard implements CanActivate {
       let ownerType = String(body.businessType ?? "");
       let ownerId = String(body.businessId ?? "");
       if (uploadMatch[1]) {
-        const session = await this.prisma.fileUploadSession.findFirst({ where: { id: uploadMatch[1], tenantId: user.tenantId }, include: { fileAsset: true } });
+        const session = await prisma.fileUploadSession.findFirst({ where: { id: uploadMatch[1], tenantId: user.tenantId }, include: { fileAsset: true } });
         ownerType = session?.fileAsset.businessType ?? "";
         ownerId = session?.fileAsset.businessId ?? "";
       }
       if (ownerType === "rental_order") {
-        const row = await this.prisma.rentalOrder.findFirst({ where: { id: ownerId, tenantId: user.tenantId, workspaceId, OR: [
+        const row = await prisma.rentalOrder.findFirst({ where: { id: ownerId, tenantId: user.tenantId, workspaceId, OR: [
           { fulfillmentLocationId: { in: scope.locationIds } },
           { returnLocationId: { in: scope.locationIds } }
         ] }, select: { id: true } });
         if (!row) throw new ForbiddenException("附件所关联订单不在当前员工授权地点范围内");
       } else if (ownerType === "rental_work_order") {
-        const row = await this.prisma.rentalWorkOrder.findFirst({ where: { id: ownerId, tenantId: user.tenantId, workspaceId, locationId: { in: scope.locationIds } }, select: { id: true } });
+        const row = await prisma.rentalWorkOrder.findFirst({ where: { id: ownerId, tenantId: user.tenantId, workspaceId, locationId: { in: scope.locationIds } }, select: { id: true } });
         if (!row) throw new ForbiddenException("附件所关联工单不在当前员工授权地点范围内");
       } else throw new ForbiddenException("员工附件必须绑定当前范围内的订单或工单");
+    }
+  }
+
+  private async assertCustomerRecordAccess(
+    user: SystemUserRow,
+    workspaceId: string | undefined,
+    scope: { mode: "all" | "selected"; locationIds: string[] },
+    customerId: string
+  ) {
+    if (!this.prisma || !workspaceId) throw new ForbiddenException("当前账号的客户数据范围未就绪，已拒绝访问");
+    const ownScope = user.dataScope === "own";
+    const locationRestricted = scope.mode === "selected";
+    if (user.dataScope === "organization") {
+      throw new ForbiddenException("组织范围尚未关联履约地点，已拒绝访问客户资料");
+    }
+    if (!locationRestricted && (ownScope || user.dataScope === "store")) {
+      const profile = await this.prisma.customerProfile.findFirst({
+        where: {
+          id: customerId,
+          tenantId: user.tenantId,
+          createdInWorkspaceId: workspaceId,
+          ...(ownScope ? { createdByUserId: user.id } : {})
+        },
+        select: { id: true }
+      });
+      if (profile) return;
+    }
+    const order = await this.prisma.rentalOrder.findFirst({
+      where: {
+        tenantId: user.tenantId,
+        workspaceId,
+        ...(locationRestricted ? { fulfillmentLocationId: { in: scope.locationIds } } : {}),
+        ...(ownScope ? {
+          OR: [
+            { createdBy: user.id },
+            { workOrders: { some: { OR: [{ createdBy: user.id }, { assigneeId: user.id }] } } }
+          ]
+        } : {}),
+        AND: [{ OR: [
+          { customerId },
+          { contractSubjectCustomerId: customerId },
+          { payerSubjectCustomerId: customerId },
+          { userSubjectCustomerId: customerId }
+        ] }]
+      },
+      select: { id: true }
+    });
+    if (!order) throw new ForbiddenException("客户不存在或不在当前账号的数据范围内");
+  }
+
+  private async assertOwnBookingCustomers(
+    body: Record<string, unknown>,
+    user: SystemUserRow,
+    workspaceId: string | undefined,
+    scope: { mode: "all" | "selected"; locationIds: string[] }
+  ) {
+    if (!workspaceId) throw new ForbiddenException("本人预约数据范围未就绪，已拒绝操作");
+    const customerId = typeof body.customerId === "string" ? body.customerId : undefined;
+    if (!customerId) return; // 临时客户不读取会员主档。
+    await this.assertCustomerRecordAccess(user, workspaceId, scope, customerId);
+    const identity = body.bookingIdentity && typeof body.bookingIdentity === "object"
+      ? body.bookingIdentity as Record<string, unknown>
+      : {};
+    const corporateCustomerId = typeof identity.corporateCustomerId === "string" ? identity.corporateCustomerId : undefined;
+    if (corporateCustomerId) {
+      const now = new Date();
+      const relation = await this.prisma?.customerCorporateMembership.findFirst({
+        where: {
+          tenantId: user.tenantId,
+          personalCustomerId: customerId,
+          corporateCustomerId,
+          status: "active",
+          effectiveFrom: { lte: now },
+          OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }]
+        },
+        select: { id: true }
+      });
+      if (!relation) throw new ForbiddenException("所选企业会员关系不在当前账号的数据范围内");
+    }
+    const subjects = body.subjects && typeof body.subjects === "object"
+      ? body.subjects as Record<string, unknown>
+      : {};
+    for (const key of ["contractSubjectCustomerId", "payerSubjectCustomerId", "userSubjectCustomerId"] as const) {
+      const subjectId = typeof subjects[key] === "string" ? subjects[key] as string : undefined;
+      if (!subjectId || subjectId === customerId || subjectId === corporateCustomerId) continue;
+      await this.assertCustomerRecordAccess(user, workspaceId, scope, subjectId);
     }
   }
 

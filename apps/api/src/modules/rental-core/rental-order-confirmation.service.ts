@@ -389,8 +389,10 @@ export class RentalOrderConfirmationService {
   }
 
   private assertOrderMatchesQuote(input: CreateRentalOrderRequest, quote: RentalQuoteSnapshotV1) {
-    const quotedLines = quote.request.lines.map((line) => `${line.itemGroupId}:${line.quantity}`).sort();
-    const orderLines = input.lines.map((line) => `${line.itemGroupId}:${line.quantity}`).sort();
+    // 定价分组也是报价事实，不能在确认时换成另一个包含相同型号、但价格或
+    // 允许替换范围不同的分组。预约精度仅由服务端报价快照决定，不信任客户端自报。
+    const quotedLines = quote.request.lines.map((line) => `${line.pricingGroupId ?? ""}:${line.itemGroupId}:${line.quantity}`).sort();
+    const orderLines = input.lines.map((line) => `${line.pricingGroupId ?? ""}:${line.itemGroupId}:${line.quantity}`).sort();
     if (
       quote.request.fulfillmentMode !== input.fulfillmentMode ||
       quote.request.fulfillmentLocationId !== input.fulfillmentLocationId ||

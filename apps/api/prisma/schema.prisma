@@ -564,6 +564,9 @@ model CustomerProfile {
   birthday             DateTime? @db.Date
   sourceChannel        String?   @db.VarChar(32)
   region               String?   @db.VarChar(64)
+  /// 后台账号创建该共享主档时的审计归属；客户端自助注册与历史数据为空。
+  createdByUserId      String?  @db.VarChar(191)
+  createdInWorkspaceId String?  @db.VarChar(191)
   /// 品类资质原始事实（如驾驶证、操作资格证），适用性由目标空间品类规则判断。
   qualifications       Json
   corporateName        String?
@@ -611,6 +614,7 @@ model CustomerProfile {
   @@unique([tenantId, phone], map: "customer_profiles_tenant_phone_key")
   @@unique([tenantId, sourceMemberId], map: "customer_profiles_tenant_source_member_key")
   @@index([tenantId, status], map: "customer_profiles_tenant_status_idx")
+  @@index([tenantId, createdInWorkspaceId, createdByUserId], map: "customer_profiles_creator_scope_idx")
   @@map("customer_profiles")
 }
 
@@ -2887,6 +2891,8 @@ model RentalOrderLine {
   pricingGroup                   RentalPricingGroup? @relation(fields: [pricingGroupId], references: [id], onDelete: Restrict)
   pricingGroupCode               String?
   pricingGroupName               String?
+  /// 客户按组预约或指定准确型号；旧订单默认按组预约。
+  reservationPrecision           String              @default("group") @db.VarChar(20)
   /// 下单时的成员范围，分组后续增删型号不改写历史订单。
   pricingGroupMemberItemGroupIds Json?
   /// 商品编码与名称存为下单时快照，主档改名不影响历史订单行。

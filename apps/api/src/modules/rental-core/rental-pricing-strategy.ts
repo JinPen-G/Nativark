@@ -77,6 +77,8 @@ export interface RentalPriceBreakdown {
   unitAmount: number;
   /** 命中的阶梯档起始单位数；未命中阶梯时为 undefined。 */
   tierMinUnits?: number;
+  /** 使用量分段累进的逐档可复核结果。 */
+  tierBreakdown?: Array<{ minUnits: number; maxUnits?: number; units: number; unitAmount: number; amount: number }>;
   /** 封顶前的原始金额（单价 × 逐单位系数之和）。 */
   grossAmount: number;
   /** 封顶后的单件金额；未配置封顶时等于 grossAmount。 */
@@ -98,6 +100,9 @@ const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 10
  * 客服无法一眼核对。档位缺失或都不满足时回落到 baseAmount。
  */
 function tierFor(rate: RentalPricingRate, units: number) {
+  if (rate.tierMode === "progressive") {
+    throw new BadRequestException("分段累进阶梯只适用于使用量计价");
+  }
   const tiers = (rate.tiers ?? [])
     .filter((tier) => Number.isFinite(tier.minUnits) && Number.isFinite(tier.unitAmount) && tier.minUnits <= units)
     .sort((left, right) => right.minUnits - left.minUnits);
@@ -388,34 +393,70 @@ const strategies: Record<RentalPricingUnit, RentalPricingStrategy> = {
     },
     // 使用量按里程/工时等指标计费，与日期无一一对应关系，因此不参与逐日取价。
     billableUnitDates: () => [],
-    amountPerItem: (rate, units) => {
-      const included = rate.includedUsage ?? 0;
-      const excessRate = rate.excessUsageAmount ?? rate.baseAmount;
-      return applyCap(rate, rate.baseAmount + Math.max(0, units - included) * excessRate);
-    },
-    // 使用量不走阶梯/逐单位系数：金额是「包干 + 超额 × 超额单价」。
-    // 快照里的「单位价」记超额单价，原始金额记封顶前的合计，口径与 explain 一致。
+    amountPerItem: (rate, units) => applyCap(rate, usageBreakdown(rate, units).grossAmount),
     priceBreakdown: (rate, units) => {
-      const included = rate.includedUsage ?? 0;
-      const excessRate = rate.excessUsageAmount ?? rate.baseAmount;
-      const grossAmount = money(rate.baseAmount + Math.max(0, units - included) * excessRate);
-      const amount = applyCap(rate, grossAmount);
-      return { units, unitAmount: excessRate, grossAmount, amount, capped: amount < grossAmount };
+      const detail = usageBreakdown(rate, units);
+      const amount = applyCap(rate, detail.grossAmount);
+      return {
+        units,
+        unitAmount: detail.excessUnits > 0 ? money(detail.overageAmount / detail.excessUnits) : (detail.progressive ? 0 : rate.excessUsageAmount!),
+        tierBreakdown: detail.tierBreakdown,
+        grossAmount: detail.grossAmount,
+        amount,
+        capped: amount < detail.grossAmount
+      };
     },
     explain: (rate, units) => {
-      const included = rate.includedUsage ?? 0;
-      const excessRate = rate.excessUsageAmount ?? rate.baseAmount;
-      const excess = Math.max(0, units - included);
-      const gross = rate.baseAmount + excess * excessRate;
-      const parts = [`包干 ${rate.baseAmount}（含 ${included} 用量）`];
-      parts.push(excess > 0 ? `超额 ${excess} × ${excessRate}` : "未超额");
-      if (rate.maxAmount !== undefined && gross > rate.maxAmount) {
-        parts.push(`封顶 ${rate.maxAmount}（原 ${money(gross)}）`);
+      const detail = usageBreakdown(rate, units);
+      const parts = [`包干 ${rate.baseAmount}（含 ${detail.included} 用量）`];
+      if (detail.progressive) {
+        const bands = detail.tierBreakdown ?? [];
+        parts.push(bands.length
+          ? `超额分段累进 ${bands.map((band) => `${band.minUnits}-${band.maxUnits} × ${band.unitAmount} = ${band.amount}`).join("；")}`
+          : "未超出包含用量");
+      } else {
+        parts.push(detail.excessUnits > 0 ? `超额 ${detail.excessUnits} × ${rate.excessUsageAmount}` : "未超额");
+      }
+      if (rate.maxAmount !== undefined && detail.grossAmount > rate.maxAmount) {
+        parts.push(`封顶 ${rate.maxAmount}（原 ${money(detail.grossAmount)}）`);
       }
       return parts.join("；");
     }
   }
 };
+
+function usageBreakdown(rate: RentalPricingRate, units: number) {
+  const included = rate.includedUsage ?? 0;
+  const excessUnits = Math.max(0, units - included);
+  if (rate.tierMode === "progressive") {
+    const tiers = (rate.tiers ?? []).slice().sort((left, right) => left.minUnits - right.minUnits);
+    if (!tiers.length || tiers[0].minUnits !== 1 || tiers.some((tier) => !Number.isInteger(tier.minUnits) || tier.minUnits < 1 || !Number.isFinite(tier.unitAmount) || tier.unitAmount < 0)) {
+      throw new BadRequestException("使用量分段累进阶梯无效，必须有从 1 开始且单价非负的阶梯");
+    }
+    const tierBreakdown: NonNullable<RentalPriceBreakdown["tierBreakdown"]> = [];
+    let overageAmount = 0;
+    tiers.forEach((tier, index) => {
+      const nextMin = tiers[index + 1]?.minUnits;
+      const lastUnit = nextMin === undefined ? excessUnits : Math.min(excessUnits, nextMin - 1);
+      const bandUnits = Math.max(0, lastUnit - tier.minUnits + 1);
+      if (bandUnits <= 0) return;
+      const amount = money(bandUnits * tier.unitAmount);
+      overageAmount = money(overageAmount + amount);
+      // 将最后一档的上界记录到本次实际用量，报价快照应能解释本单计了多少，
+      // 而不是只写配置中的“无上限”而让人无法核对本次覆盖范围。
+      tierBreakdown.push({ minUnits: tier.minUnits, maxUnits: lastUnit, units: bandUnits, unitAmount: tier.unitAmount, amount });
+    });
+    return { included, excessUnits, overageAmount, grossAmount: money(rate.baseAmount + overageAmount), tierBreakdown, progressive: true };
+  }
+  if (rate.tiers?.length || rate.tierMode === "whole_order") {
+    throw new BadRequestException("使用量阶梯只能配置为分段累进，不能使用整单换价阶梯");
+  }
+  if (rate.excessUsageAmount === undefined || !Number.isFinite(rate.excessUsageAmount) || rate.excessUsageAmount < 0) {
+    throw new BadRequestException("按使用量计价必须明确配置超额单价或分段累进阶梯");
+  }
+  const overageAmount = money(excessUnits * rate.excessUsageAmount);
+  return { included, excessUnits, overageAmount, grossAmount: money(rate.baseAmount + overageAmount), tierBreakdown: undefined, progressive: false };
+}
 
 /**
  * Rental Core 的计费扩展入口。新增计费模型时新增策略并登记，不修改报价主流程。

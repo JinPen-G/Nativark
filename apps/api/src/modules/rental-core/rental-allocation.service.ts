@@ -237,6 +237,7 @@ export class RentalAllocationService
     const line = order.lines.find((l) => l.id === reservation.orderLineId);
     if (
       !line?.pricingGroupId ||
+      line.reservationPrecision === "exact_model" ||
       line.inventoryMode === RentalInventoryMode.Bundle ||
       !line.pricingGroupMemberItemGroupIds?.includes(reservation.itemGroupId)
     )

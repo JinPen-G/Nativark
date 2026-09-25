@@ -15,8 +15,14 @@ export interface RequestIdentity {
    * 经营接口对此 fail-closed（见 requireRequestWorkspaceId）。
    */
   workspaceId?: string;
+  /** 当前空间成员的有效业务数据范围；仅由认证守卫从会话解析后写入。 */
+  dataScope?: "all" | "organization" | "store" | "own";
+  organizationId?: string;
+  /** 履约地点范围应用于所有运营端经营 API，不因客户端是后台还是员工端而变化。 */
+  locationScope?: { mode: "all" | "selected"; locationIds: string[] };
   /** 仅由员工 API 路由中间件 + 已验证 staff 会话写入，禁止通过请求参数设定。 */
   staffApi?: boolean;
+  /** 旧字段只为迁移兼容保留；新代码读 locationScope。 */
   staffLocationScope?: { mode: "all" | "selected"; locationIds: string[] };
 }
 
@@ -71,12 +77,28 @@ export function getRequestWorkspaceId(): string | undefined {
   return requestIdentityStorage.getStore()?.workspaceId;
 }
 
-export function getRequestStaffLocationIds(): string[] | undefined {
+export function getRequestLocationIds(): string[] | undefined {
   const identity = requestIdentityStorage.getStore();
-  if (!identity?.staffApi) return undefined;
-  const scope = identity.staffLocationScope;
+  const scope = identity?.locationScope ?? (identity?.staffApi ? identity.staffLocationScope : undefined);
   if (!scope || scope.mode === "all") return undefined;
   return scope.mode === "selected" ? scope.locationIds : [];
+}
+
+/** 兼容旧调用点；地点授权本质上属于当前空间成员，不只属于员工小程序。 */
+export function getRequestStaffLocationIds(): string[] | undefined {
+  return getRequestLocationIds();
+}
+
+export function getRequestDataScope(): RequestIdentity["dataScope"] {
+  return requestIdentityStorage.getStore()?.dataScope;
+}
+
+export function getRequestUserId(): string | undefined {
+  return requestIdentityStorage.getStore()?.userId;
+}
+
+export function getRequestOrganizationId(): string | undefined {
+  return requestIdentityStorage.getStore()?.organizationId;
 }
 
 /** 服务端地点过滤条件；selected 空集合对应不可能命中的 sentinel，保持 fail-closed。 */

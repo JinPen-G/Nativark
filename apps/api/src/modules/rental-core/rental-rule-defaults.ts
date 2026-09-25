@@ -73,6 +73,14 @@ export function effectiveUnpaidHoldRule(config: RentalRuleConfig): { unpaidHoldM
   return { unpaidHoldMinutes: Number.isFinite(minutes) && minutes >= 1 ? minutes : DEFAULT_UNPAID_HOLD_MINUTES };
 }
 
+/** 新版报价有效期独立配置；旧规则版本缺该字段时沿用当时的未支付保留时长。 */
+export function effectiveQuoteValidityMinutes(config: RentalRuleConfig): number {
+  const minutes = config.payment?.quoteValidityMinutes;
+  return Number.isInteger(minutes) && Number(minutes) >= 1 && Number(minutes) <= 1440
+    ? Number(minutes)
+    : effectiveUnpaidHoldRule(config).unpaidHoldMinutes;
+}
+
 /**
  * 价内税的税额：`含税额 × r / (1 + r)`。
  *

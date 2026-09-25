@@ -217,6 +217,15 @@ export const RULE_SECTIONS: RuleSection[] = [
             <InputNumber min={1} style={{ width: "100%" }} />
           </Form.Item>
         </Col>
+        <Col span={8}>
+          <Form.Item
+            name={["payment", "quoteValidityMinutes"]}
+            label="报价有效期（分钟）"
+            tooltip="报价可被提交订单的时长，不等于下单后的未支付库存保留时长。旧规则未设置时沿用原保留时长。"
+          >
+            <InputNumber min={1} max={1440} precision={0} style={{ width: "100%" }} />
+          </Form.Item>
+        </Col>
         <Form.Item name={["payment", "depositMode"]} hidden><Input /></Form.Item>
         <Form.Item name={["payment", "preauthorizationRequired"]} valuePropName="checked" hidden><Switch /></Form.Item>
         <Col span={8}>

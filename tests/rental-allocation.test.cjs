@@ -13,6 +13,7 @@ const {
   allocationComplete,
 } = require("../apps/api/src/modules/rental-core/rental-allocation-policy");
 const { rentalAllocationProgress } = require("@rental-os/shared");
+const { RentalAllocationService } = require("../apps/api/src/modules/rental-core/rental-allocation.service");
 const order = {
   id: "o",
   startAt: "2030-01-01T10:00:00Z",
@@ -123,6 +124,14 @@ order.allocations.push({
   status: "released",
 });
 assert.equal(allocationComplete(order, true), true, "历史释放行不重复计算");
+const allocation = new RentalAllocationService(null, null, null);
+const scopedOrder = {
+  lines: [{ id: "l", pricingGroupId: "pg", inventoryMode: "serialized", itemGroupId: "g",
+    pricingGroupMemberItemGroupIds: ["g", "alternate"], reservationPrecision: "exact_model" }]
+};
+assert.deepEqual(allocation.allowedModels(scopedOrder, order.reservations[0]), ["g"], "准确型号预约不得替换为组内其他型号");
+scopedOrder.lines[0].reservationPrecision = "group";
+assert.deepEqual(allocation.allowedModels(scopedOrder, order.reservations[0]), ["g", "alternate"], "按组预约仍可使用快照内型号");
 console.log(
   "PASS allocation policy: 14 assertions, buffers/future availability/location/partial/legacy/released",
 );

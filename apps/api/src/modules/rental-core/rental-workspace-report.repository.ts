@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable } from "@nestjs/common";
 import { Prisma, RentalOrderV1Status } from "@prisma/client";
 import type {
   RentalCategoryCode,
@@ -13,6 +13,7 @@ import type {
 import { RENTAL_EXCEPTION_CHARGE_TYPES, RentalAssetStatus, RentalCoreOrderStatus } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { roundMoney, roundRatio } from "./rental-money";
+import { getRequestDataScope, getRequestLocationIds, getRequestUserId } from "../../common/request-identity";
 
 /** 一次分页读取的订单数。内存上限与总订单量解耦，不随经营空间变大而变大。 */
 const SCAN_PAGE_SIZE = 500;
@@ -94,6 +95,20 @@ export class RentalWorkspaceReportRepository {
     if (filter.customerType && !["personal", "corporate"].includes(filter.customerType)) {
       throw new BadRequestException("客户类型只能是 personal 或 corporate");
     }
+    const clauses: Prisma.RentalOrderWhereInput[] = [];
+    const allowedLocations = getRequestLocationIds();
+    if (allowedLocations !== undefined) {
+      const safeIds = allowedLocations.length ? allowedLocations : ["__no_authorized_location__"];
+      // 报表按履约地点归属，避免一张订单因归还地点可见而泄露另一个地点的经营额。
+      clauses.push({ fulfillmentLocationId: { in: safeIds } });
+    }
+    if (getRequestDataScope() === "own") {
+      const userId = getRequestUserId();
+      clauses.push(userId ? { OR: [
+        { createdBy: userId },
+        { workOrders: { some: { OR: [{ createdBy: userId }, { assigneeId: userId }] } } }
+      ] } : { id: "__no_current_user__" });
+    }
     return {
       tenantId,
       workspaceId,
@@ -103,7 +118,8 @@ export class RentalWorkspaceReportRepository {
       ...(startAt ? { startAt } : {}),
       ...(filter.locationId ? { fulfillmentLocationId: filter.locationId } : {}),
       ...(filter.customerId ? { customerId: filter.customerId } : {}),
-      ...(filter.customerType ? { customerType: filter.customerType } : {})
+      ...(filter.customerType ? { customerType: filter.customerType } : {}),
+      ...(clauses.length ? { AND: clauses } : {})
     };
   }
   /**
@@ -197,10 +213,16 @@ export class RentalWorkspaceReportRepository {
     filter: RentalWorkspaceReportFilter,
     occupancy: { orderCount: number; hours: number }
   ): Promise<RentalWorkspaceUtilization> {
+    const allowedLocations = getRequestLocationIds();
+    const utilizationLocations = filter.locationId
+      ? (allowedLocations === undefined || allowedLocations.includes(filter.locationId) ? [filter.locationId] : ["__no_authorized_location__"])
+      : allowedLocations;
     const scope = {
       tenantId,
       workspaceId,
-      ...(filter.locationId ? { locationId: filter.locationId } : {})
+      ...(utilizationLocations === undefined
+        ? {}
+        : { locationId: { in: utilizationLocations.length ? utilizationLocations : ["__no_authorized_location__"] } })
     };
     const [assetGroups, stockSums] = await Promise.all([
       this.prisma.rentalAsset.groupBy({ by: ["status"], where: scope, _count: { _all: true } }),
@@ -360,6 +382,11 @@ export class RentalWorkspaceReportRepository {
      */
     currency: RentalCurrency = "CNY"
   ): Promise<RentalWorkspaceOperationReport> {
+    // “仅本人”可按订单/工单归属筛订单，但库存与资产利用率是空间级快照，
+    // 没有可证明的本人归属。混合返回订单小计与全空间库存会泄露总量，故整份报表拒绝。
+    if (getRequestDataScope() === "own") {
+      throw new ForbiddenException("仅本人数据范围无法查看包含空间级库存与资产快照的经营报表");
+    }
     const where = this.buildOrderWhere(tenantId, workspaceId, filter);
 
     // 计数与求和交给数据库；逐行事实（费用行 JSON、租期时长）走一趟分页扫描。

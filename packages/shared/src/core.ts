@@ -2839,11 +2839,15 @@ export interface RestoreRentalCalendarVersionRequest {
   reason: string;
 }
 
-/** 阶梯价档位：达到 `minUnits` 时整单改用 `unitAmount`（长租折扣口径）。 */
+/** 阶梯价档位。`whole_order` 是长租折扣；`progressive` 是使用量超额的分段累进单价。 */
 export interface RentalPricingTier {
+  /** 起始单位数（含）。progressive 的首档必须从 1 开始，覆盖全部超额用量。 */
   minUnits: number;
   unitAmount: number;
 }
+
+/** whole_order：达到档位后全部单位采用该档单价；progressive：只对该档覆盖的超额单位计价。 */
+export type RentalPricingTierMode = "whole_order" | "progressive";
 
 export interface RentalPricingRate {
   id: string;
@@ -2862,7 +2866,9 @@ export interface RentalPricingRate {
   minimumUnits: number;
   includedUsage?: number;
   excessUsageAmount?: number;
-  /** 阶梯价（需求 4.4）。留空表示整段按 baseAmount 计。 */
+  /** 阶梯计价模式。未指定时保留既有时间租赁「达到档位后整单换价」语义。 */
+  tierMode?: RentalPricingTierMode;
+  /** 阶梯价。时间租赁按整单重定价；使用量必须显式选择 progressive。 */
   tiers?: RentalPricingTier[];
   /** 封顶价（需求 4.4）：单行租金上限。0 是合法值（免租），undefined 表示不封顶。 */
   maxAmount?: number;
@@ -3757,6 +3763,8 @@ export interface RentalRuleConfig {  /**
     depositMode: "none" | "fixed" | "price_multiple" | "preauthorization";
     preauthorizationRequired: boolean;
     unpaidHoldMinutes: number;
+    /** 报价有效期独立于订单未支付占用时限；旧快照缺省沿用原口径。 */
+    quoteValidityMinutes?: number;
   };
   /**
    * 应付押金规则（需求 4.4.7：押金与预授权**独立配置、独立计算**，可同时存在）。
@@ -4079,8 +4087,14 @@ export interface RentalQuoteRequest {
   lines: Array<{
     /** 新订单由定价分组进入；服务端解析为实际承接库存的产品型号。 */
     pricingGroupId?: string;
-    /** 服务端解析后的产品型号；迁移前调用方仍可直接提交。 */
+    /** 显式提交表示预约准确型号；仅提交 pricingGroupId 表示允许组内分配。 */
     itemGroupId?: string;
+    /** 服务端解析后固化；客户端自报的值不可信。 */
+    reservationPrecision?: "group" | "exact_model";
+    /** 服务端报价时的组成员及名称快照；不得从客户端请求采信。 */
+    pricingGroupMemberItemGroupIds?: string[];
+    pricingGroupCode?: string;
+    pricingGroupName?: string;
     quantity: number;
     pricingUnit?: RentalPricingUnit;
     usageQuantity?: number;
@@ -4423,12 +4437,12 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
   {
     code: RentalCategoryCode.Camera,
     name: "摄影设备",
-    description: "机身、镜头、灯光和拍摄套装租赁",
+    description: "机身、镜头、三脚架、云台相机、运动相机与拍摄套装租赁",
     supportedInventoryModes: [RentalInventoryMode.Serialized, RentalInventoryMode.Quantity, RentalInventoryMode.Bundle],
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "usage_reading", "camera_compatibility", "camera_kit_handover", "inspection_care"],
     requiredCapabilities: [],
     terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", identifierLabel: "资产编号", serialLabel: "序列号", usageMetricLabel: "快门次数", navigationLabels: { inventoryGroup: "摄影器材", itemGroups: "器材型号", pricingGroups: "器材定价分组", assets: "器材资产与库存", locations: "器材门店" } },
-    attributeSchema: { brand: "string", model: "string", mount: "string", sensor: "string", serialNo: "string", shutterCount: "number" },
+    attributeSchema: { brand: "string", model: "string", equipmentType: "string", mount: "string", sensor: "string", serialNo: "string", shutterCount: "number" },
     businessModel: {
       // 摄影器材的基础租金按时间计价。快门次数等读数用于交接、养护和后续
       // 超量费用依据，不作为整件器材的基础租金单位；“整包”也不等于套装库存，
@@ -4441,6 +4455,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
       assetFields: [
         { code: "brand", label: "厂商", scope: "item_group", type: "string", required: true },
         { code: "model", label: "型号", scope: "item_group", type: "string", required: true },
+        { code: "equipmentType", label: "器材子类型", scope: "item_group", type: "select", options: ["camera_body", "lens", "tripod", "gimbal_camera", "action_camera", "lighting", "other"] },
         { code: "mount", label: "卡口", scope: "item_group", type: "select", options: ["RF", "EF", "E", "Z", "L", "M43", "A", "其他"] },
         { code: "sensor", label: "传感器规格", scope: "item_group", type: "select", options: ["full_frame", "aps_c", "m43", "medium_format", "one_inch", "other"] },
         { code: "serialNo", label: "设备序列号", scope: "asset", type: "string", required: true, unique: true },
@@ -4484,7 +4499,8 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
           // CAM-01B：套装清点是可选字段而不是全摄影订单的硬必填项；Hook 只在
           // 本单确实包含 bundle 且操作员明确填了“不齐”时阻断，兼容旧模板与非套装订单。
           { code: "kit_complete", label: "套装附件齐全", type: "boolean", required: false },
-          { code: "shutter_count", label: "快门次数", type: "number", required: true, unit: "次", usageMetric: true }
+          // 镜头、三脚架、云台/运动相机不一定有机械快门读数。
+          { code: "shutter_count", label: "快门次数（适用机型）", type: "number", required: false, unit: "次", usageMetric: true }
         ],
         sampleBaseAmount: 180,
         sampleAmountIncrement: 80
@@ -5189,6 +5205,8 @@ export interface RentalOrderLine {
   pricingGroupId?: string;
   pricingGroupCode?: string;
   pricingGroupName?: string;
+  /** 报价时客户选择的预约精度；旧订单未设置时沿用组内分配语义。 */
+  reservationPrecision?: "group" | "exact_model";
   /** 下单时的成员范围；之后修改分组不会改写历史订单。 */
   pricingGroupMemberItemGroupIds?: string[];
   itemGroupId: string;
