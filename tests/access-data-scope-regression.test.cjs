@@ -7,6 +7,7 @@ require("ts-node").register({
 
 const { runWithRequestIdentity } = require("../apps/api/src/common/request-identity");
 const { ApiAuthGuard } = require("../apps/api/src/common/api-auth.guard");
+const { enabledOrganizationSubtreeIds, organizationLocationScope } = require("../apps/api/src/common/organization-location-scope");
 const { MembershipService } = require("../apps/api/src/modules/platform/membership.service");
 const { RentalWorkspaceReportRepository } = require("../apps/api/src/modules/rental-core/rental-workspace-report.repository");
 const { CustomerOperationsRepository } = require("../apps/api/src/modules/platform/customer-operations.repository");
@@ -48,7 +49,10 @@ void (async () => {
 
   const options = await runWithRequestIdentity(identity, () => service.listPersonalOptions("tenant-a"));
   assert.deepEqual(options.map((row) => row.customerId), ["visible-customer"]);
-  assert.deepEqual(memberQueries.find((row) => row.kind === "orders").where.fulfillmentLocationId, { in: ["location-a"] });
+  assert.deepEqual(memberQueries.find((row) => row.kind === "orders").where.AND[0].OR, [
+    { fulfillmentLocationId: { in: ["location-a"] } },
+    { returnLocationId: { in: ["location-a"] } }
+  ]);
   assert.deepEqual(memberQueries.find((row) => row.kind === "members").where.AND[0].OR, [{ id: { in: ["visible-customer"] } }]);
   console.log("  PASS 预约会员选项按本人订单与授权履约地点过滤");
 
@@ -77,17 +81,149 @@ void (async () => {
   );
   console.log("  PASS 仅本人账号不能读取空间级库存聚合报表");
 
+  const organizations = [
+    { id: "org-root", parentId: null, status: "enabled" },
+    { id: "org-child", parentId: "org-root", status: "enabled" },
+    { id: "org-grandchild", parentId: "org-child", status: "enabled" },
+    { id: "org-disabled", parentId: "org-root", status: "disabled" },
+    { id: "org-hidden-descendant", parentId: "org-disabled", status: "enabled" },
+    { id: "org-sibling", parentId: null, status: "enabled" }
+  ];
+  assert.deepEqual(enabledOrganizationSubtreeIds(organizations, "org-root"), ["org-child", "org-grandchild", "org-root"]);
+  assert.deepEqual(enabledOrganizationSubtreeIds(organizations, "org-disabled"), []);
+  assert.deepEqual(enabledOrganizationSubtreeIds(organizations, "org-missing"), []);
+  console.log("  PASS 组织范围只包含当前组织及连续启用的下级组织");
+
+  const organizationQueries = [];
+  const locationQueries = [];
+  const scopePrisma = {
+    organizationUnit: {
+      async findMany(args) {
+        organizationQueries.push(args);
+        return organizations;
+      }
+    },
+    rentalFulfillmentLocation: {
+      async findMany(args) {
+        locationQueries.push(args);
+        return [{ id: "location-root" }, { id: "location-child" }];
+      },
+      async findFirst({ where }) {
+        const targetId = where.AND?.[0]?.id;
+        return ["location-root", "location-child"].includes(targetId) ? { id: targetId } : null;
+      }
+    }
+  };
+  const scopeGuard = new ApiAuthGuard({}, undefined, undefined, undefined, scopePrisma);
+  const orgUser = { id: "operator-org", tenantId: "tenant-a", organizationId: "org-root", dataScope: "organization", permissions: [] };
+  const organizationScope = await scopeGuard.resolveLocationScope(orgUser, "workspace-a", { mode: "all", locationIds: [] });
+  assert.deepEqual(organizationScope, { mode: "selected", locationIds: ["location-child", "location-root"] });
+  assert.deepEqual(organizationQueries[0].where, { tenantId: "tenant-a" });
+  assert.deepEqual(locationQueries[0].where, {
+    tenantId: "tenant-a", workspaceId: "workspace-a",
+    organizationId: { in: ["org-child", "org-grandchild", "org-root"] }
+  });
+  const organizationReadCount = organizationQueries.length;
+  const tenantOrgAdmin = {
+    id: "org-admin", tenantId: "tenant-a", organizationId: "org-root", dataScope: "organization",
+    isSaasAdmin: false, isPlatformAdmin: false, isActive: true, mustChangePassword: false,
+    permissions: ["system:user:manage"], locationScope: { mode: "all", locationIds: [] }
+  };
+  const organizationAdminGuard = new ApiAuthGuard({
+    async resolveAccessContext() {
+      return { user: tenantOrgAdmin, tenantUser: tenantOrgAdmin, workspaceId: undefined, workspaceValid: true };
+    }
+  }, undefined, undefined, undefined, scopePrisma);
+  const organizationRequest = {
+    url: "/api/platform/organizations", originalUrl: "/api/platform/organizations", method: "GET",
+    headers: { authorization: "Bearer test" }, query: {}
+  };
+  await organizationAdminGuard.canActivate({ switchToHttp: () => ({ getRequest: () => organizationRequest }) });
+  assert.equal(organizationQueries.length, organizationReadCount, "tenant configuration routes must not require a selected workspace");
+  console.log("  PASS 组织管理接口不因组织范围账号未选择经营空间而被地点解析阻断");
+
+  const locationManager = {
+    id: "location-admin", tenantId: "tenant-a", dataScope: "all", isSaasAdmin: false,
+    isPlatformAdmin: false, isActive: true, mustChangePassword: false,
+    permissions: ["rental-os:station:manage"], locationScope: { mode: "all", locationIds: [] }
+  };
+  const locationMutationGuard = new ApiAuthGuard({
+    async resolveAccessContext() {
+      return { user: locationManager, tenantUser: locationManager, workspaceId: "workspace-a", workspaceValid: true };
+    }
+  });
+  const unauthorizedMappingRequest = {
+    url: "/api/rental/v1/locations", originalUrl: "/api/rental/v1/locations", method: "POST",
+    headers: { authorization: "Bearer test" }, query: {}, body: { organizationId: "org-root" }
+  };
   await assert.rejects(
-    () => guard.assertStaffLocationAccess(
-      {},
-      "/rental/v1/orders",
-      { id: "operator-org", tenantId: "tenant-a", dataScope: "organization" },
-      "workspace-a",
-      { mode: "selected", locationIds: ["location-a"] }
-    ),
-    /组织范围尚未建立/u
+    () => locationMutationGuard.canActivate({ switchToHttp: () => ({ getRequest: () => unauthorizedMappingRequest }) }),
+    /只有拥有账号与组织管理权限/u
   );
-  console.log("  PASS 组织范围不会被未经组织映射的履约地点白名单代替");
+  console.log("  PASS 仅有履约地点管理权限不能通过改组织归属扩大数据范围");
+
+  const narrowedOrganizationScope = organizationLocationScope(
+    ["location-root", "location-child"],
+    { mode: "selected", locationIds: ["location-child", "location-outside"] }
+  );
+  assert.deepEqual(narrowedOrganizationScope, { mode: "selected", locationIds: ["location-child"] });
+  console.log("  PASS 组织映射按租户与当前空间读取，显式地点范围只能进一步缩小组织范围");
+
+  await scopeGuard.assertStaffLocationAccess(
+    { method: "POST", body: { fulfillmentLocationId: "location-child" } },
+    "/rental/v1/orders",
+    orgUser,
+    "workspace-a",
+    organizationScope
+  );
+  await assert.rejects(
+    () => scopeGuard.assertStaffLocationAccess(
+      { method: "POST", body: { fulfillmentLocationId: "location-other" } },
+      "/rental/v1/orders",
+      orgUser,
+      "workspace-a",
+      organizationScope
+    ),
+    /不在当前账号授权范围内/u
+  );
+  await scopeGuard.assertStaffLocationAccess(
+    { method: "PUT", body: { name: "组织范围内地点" } },
+    "/rental/v1/locations/location-child",
+    orgUser,
+    "workspace-a",
+    organizationScope
+  );
+  await assert.rejects(
+    () => scopeGuard.assertStaffLocationAccess(
+      { method: "PUT", body: { name: "越权地点" } },
+      "/rental/v1/locations/location-outside",
+      orgUser,
+      "workspace-a",
+      organizationScope
+    ),
+    /不在当前账号授权范围内/u
+  );
+  await assert.rejects(
+    () => scopeGuard.assertStaffLocationAccess(
+      { method: "POST", body: { name: "未映射新地点" } },
+      "/rental/v1/locations",
+      orgUser,
+      "workspace-a",
+      organizationScope
+    ),
+    /不能新建履约地点/u
+  );
+  await assert.rejects(
+    () => scopeGuard.assertStaffLocationAccess(
+      { method: "POST", body: { fulfillmentLocationId: "location-child" } },
+      "/rental/v1/orders",
+      orgUser,
+      "workspace-a",
+      { mode: "selected", locationIds: [] }
+    ),
+    /履约地点范围未就绪/u
+  );
+  console.log("  PASS 组织范围允许映射内履约、拒绝范围外地点及空映射访问");
 
   let historyWhere;
   const operations = new CustomerOperationsRepository({

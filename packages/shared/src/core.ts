@@ -4731,6 +4731,7 @@ export interface SaveTenantRentalProfileRequest {
 export interface RentalFulfillmentLocation {
   id: string;
   tenantId: string;
+  organizationId?: string;
   code: string;
   name: string;
   type: RentalLocationType;
@@ -4757,6 +4758,7 @@ export interface RentalFulfillmentLocation {
 
 export interface SaveRentalFulfillmentLocationRequest {
   id?: string;
+  organizationId?: string | null;
   code: string;
   name: string;
   type: RentalLocationType;

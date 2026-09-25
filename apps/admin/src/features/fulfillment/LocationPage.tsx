@@ -3,6 +3,7 @@ import type { RentalFulfillmentLocation, RentalFulfillmentOperator, SaveRentalFu
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Table, Tag } from "antd";
 import { useMemo, useState } from "react";
+import { api as platformApi } from "@/api/platform";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { resolveTenantNavigationLabels } from "@/app/navigation-terminology";
@@ -18,6 +19,7 @@ export function LocationPage() {
   const { t } = useLocale();
   const queryClient = useQueryClient();
   const canManage = useAuthStore((state) => state.hasPermission("rental-os:station:manage"));
+  const canManageOrganizationMapping = useAuthStore((state) => state.hasPermission("system:user:manage"));
   const [keyword, setKeyword] = useState("");
   const [editing, setEditing] = useState<RentalFulfillmentLocation>();
   const [editingOperator, setEditingOperator] = useState<RentalFulfillmentOperator>();
@@ -26,18 +28,20 @@ export function LocationPage() {
   const [form] = Form.useForm<SaveRentalFulfillmentLocationRequest>();
   const [operatorForm] = Form.useForm<SaveRentalFulfillmentOperatorRequest>();
   const locations = useQuery({ queryKey: ["rental-core", "locations"], queryFn: rentalCoreApi.locations });
+  const organizations = useQuery({ queryKey: ["tenant-access", "organizations"], queryFn: platformApi.organizations, enabled: canManageOrganizationMapping });
   const operators = useQuery({ queryKey: ["rental-core", "operators"], queryFn: rentalCoreApi.operators });
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
   const categories = useQuery({ queryKey: ["rental-core", "categories"], queryFn: rentalCoreApi.categories });
   const category = categories.data?.find((item) => item.code === profile.data?.categoryCode);
+  const organizationNames = useMemo(() => new Map((organizations.data ?? []).map((item) => [item.id, item.name])), [organizations.data]);
   const save = useMutation({ mutationFn: rentalCoreApi.saveLocation, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["rental-core", "locations"] }); setDrawerOpen(false); setEditing(undefined); form.resetFields(); message.success(t("履约地点已保存")); }, onError: () => message.error(t("保存失败，请检查地点类型、编码、经营主体和履约能力")) });
   const saveOperator = useMutation({ mutationFn: rentalCoreApi.saveOperator, onSuccess: async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ["rental-core", "operators"] }), queryClient.invalidateQueries({ queryKey: ["rental-core", "locations"] })]); setOperatorDrawerOpen(false); setEditingOperator(undefined); operatorForm.resetFields(); message.success(t("经营主体已保存")); }, onError: () => message.error(t("经营主体保存失败")) });
-  const rows = useMemo(() => (locations.data ?? []).filter((item) => !keyword || `${item.code}${item.name}${item.operatorName}${item.address}`.toLowerCase().includes(keyword.toLowerCase())), [keyword, locations.data]);
+  const rows = useMemo(() => (locations.data ?? []).filter((item) => !keyword || `${item.code}${item.name}${item.operatorName}${item.address}${organizationNames.get(item.organizationId ?? "") ?? ""}`.toLowerCase().includes(keyword.toLowerCase())), [keyword, locations.data, organizationNames]);
 
   function openEditor(record?: RentalFulfillmentLocation) {
     setEditing(record);
     form.setFieldsValue(record ? { ...record } : {
-      code: "", name: "", type: category?.businessModel.locationTypes[0] ?? "store", operatorId: operators.data?.find((item) => item.status === "enabled")?.id,
+      code: "", name: "", organizationId: undefined, type: category?.businessModel.locationTypes[0] ?? "store", operatorId: operators.data?.find((item) => item.status === "enabled")?.id,
       capabilities: ["pickup", "return", "storage"], address: "", province: "", city: "", district: "", timezone: "Asia/Shanghai", latitude: undefined, longitude: undefined, contactName: "", contactPhone: "", businessHours: "09:00-18:00", status: "enabled"
     });
     setDrawerOpen(true);
@@ -66,9 +70,10 @@ export function LocationPage() {
       </Card>
       <Card className="data-panel" styles={{ body: { paddingBottom: 0 } }}>
         <Space style={{ marginBottom: 16 }}><Input allowClear prefix={<SearchOutlined />} placeholder={t("搜索地点、经营主体或地址")} value={keyword} onChange={(event) => setKeyword(event.target.value)} style={{ width: 320 }} /></Space>
-          <QueryState loading={locations.isLoading || profile.isLoading || categories.isLoading || operators.isLoading} error={locations.error || profile.error || categories.error || operators.error}>
+          <QueryState loading={locations.isLoading || profile.isLoading || categories.isLoading || operators.isLoading || (canManageOrganizationMapping && organizations.isLoading)} error={locations.error || profile.error || categories.error || operators.error || (canManageOrganizationMapping ? organizations.error : undefined)}>
           <Table<RentalFulfillmentLocation> rowKey="id" dataSource={rows} scroll={{ x: 960 }} columns={[
             { title: t("履约地点"), fixed: "left", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code}</span></> },
+            { title: t("归属组织"), render: (_, row) => row.organizationId ? organizationNames.get(row.organizationId) ?? t("已关联组织") : t("未分配") },
             { title: t("经营主体"), render: (_, row) => <>{row.operatorName ?? t("未配置")}<br /><Tag color={row.operatorType === "partner" ? "purple" : "blue"}>{t(row.operatorType === "partner" ? "合作商" : "自营")}</Tag></> },
             { title: t("地点类型"), dataIndex: "type", render: (value) => <Tag>{t(locationTypeLabels[value] ?? value)}</Tag> },
             { title: t("履约能力"), dataIndex: "capabilities", render: (values) => <Space wrap>{values.map((value: string) => <Tag color="cyan" key={value}>{t(capabilityLabels[value] ?? value)}</Tag>)}</Space> },
@@ -81,12 +86,18 @@ export function LocationPage() {
       </Card>
 
       <Drawer title={editing ? t("编辑履约地点") : t("新增履约地点")} size={640} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>{t("保存")}</Button>}>
-        <Form<SaveRentalFulfillmentLocationRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, id: editing?.id })}>
+        <Form<SaveRentalFulfillmentLocationRequest> form={form} layout="vertical" onFinish={(values) => {
+          const payload: SaveRentalFulfillmentLocationRequest = { ...values, id: editing?.id };
+          if (canManageOrganizationMapping) payload.organizationId = values.organizationId || null;
+          else delete payload.organizationId;
+          save.mutate(payload);
+        }}>
           <Row gutter={12}>
             <Col span={12}><Form.Item name="code" label={t("地点编码")} rules={[{ required: true }]}><Input disabled={Boolean(editing)} /></Form.Item></Col>
             <Col span={12}><Form.Item name="name" label={t("地点名称")} rules={[{ required: true }]}><Input /></Form.Item></Col>
             <Col span={12}><Form.Item name="type" label={t("地点类型")} rules={[{ required: true }]}><Select options={category?.businessModel.locationTypes.map((value) => ({ value, label: t(locationTypeLabels[value] ?? value) }))} /></Form.Item></Col>
             <Col span={12}><Form.Item name="parentLocationId" label={t("上级地点")}><Select allowClear options={(locations.data ?? []).filter((item) => item.id !== editing?.id).map((item) => ({ value: item.id, label: item.name }))} /></Form.Item></Col>
+            {canManageOrganizationMapping ? <Col span={24}><Form.Item name="organizationId" label={t("归属组织")} tooltip={t("组织范围账号只能访问当前组织及下级组织明确关联的履约地点；未关联地点不会自动归属。") }><Select allowClear loading={organizations.isLoading} options={(organizations.data ?? []).filter((item) => item.status === "enabled" || item.id === editing?.organizationId).map((item) => ({ value: item.id, label: `${item.name} · ${item.code}${item.status === "enabled" ? "" : ` · ${t("已停用")}`}`, disabled: item.status !== "enabled" }))} /></Form.Item></Col> : null}
             <Col span={24}><Form.Item name="operatorId" label={t("经营主体")} rules={[{ required: true }]}><Select options={(operators.data ?? []).filter((item) => item.status === "enabled" || item.id === editing?.operatorId).map((item) => ({ value: item.id, label: `${item.name} · ${t(item.type === "partner" ? "合作商" : "自营")}` }))} /></Form.Item></Col>
           </Row>
           <Form.Item name="capabilities" label={t("履约能力")} rules={[{ required: true }]}><Select mode="multiple" options={Object.entries(capabilityLabels).map(([value, label]) => ({ value, label: t(label) }))} /></Form.Item>

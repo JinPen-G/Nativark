@@ -848,6 +848,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const result: RentalFulfillmentLocation = {
       id: existing?.id ?? id("location"),
       tenantId,
+      organizationId: input.organizationId === null ? undefined : input.organizationId?.trim() || existing?.organizationId,
       code: input.code.trim(),
       name: input.name.trim(),
       type: input.type,

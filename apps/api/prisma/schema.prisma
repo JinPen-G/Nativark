@@ -410,10 +410,12 @@ model OrganizationUnit {
   name      String
   status    String             @default("enabled")
   users     User[]
+  fulfillmentLocations RentalFulfillmentLocation[]
   createdAt DateTime           @default(now())
   updatedAt DateTime           @updatedAt
 
   @@unique([tenantId, code])
+  @@unique([tenantId, id], map: "organization_units_tenant_id_key")
   @@index([tenantId, type, status])
 }
 
@@ -2055,6 +2057,9 @@ model RentalFulfillmentLocation {
   workspaceId        String
   /// 复合外键保证空间与事实同租户，杜绝把事实挂到别的租户的空间上。
   workspace          BusinessWorkspace          @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  /// ACCESS-DATA-01：履约地点明确归属一个租户组织；空值不继承，组织范围默认不可见。
+  organizationId     String?                    @db.VarChar(191)
+  organization       OrganizationUnit?          @relation(fields: [tenantId, organizationId], references: [tenantId, id], onDelete: Restrict, onUpdate: Cascade)
   code               String
   name               String
   type               String
@@ -2090,6 +2095,7 @@ model RentalFulfillmentLocation {
   @@unique([workspaceId, code], map: "rental_locations_ws_code_key")
   @@unique([tenantId, workspaceId, id], map: "rental_locations_scope_id_key")
   @@index([tenantId, status])
+  @@index([tenantId, workspaceId, organizationId], map: "rental_locations_tenant_ws_org_idx")
   @@index([operatorId])
   @@map("rental_fulfillment_locations")
 }

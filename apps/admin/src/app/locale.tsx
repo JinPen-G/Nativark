@@ -2536,6 +2536,8 @@ const ENGLISH: Record<string, string> = {
   "新增运营账号": "Add operations account",
   "手机": "Phone",
   "归属组织": "Organization",
+  "已关联组织": "Organization assigned",
+  "组织范围账号只能访问当前组织及下级组织明确关联的履约地点；未关联地点不会自动归属。": "Accounts with organization scope can access only fulfillment locations explicitly assigned to their organization or an enabled descendant. Unassigned locations are not inherited.",
   "租户基础角色": "Tenant base role",
   "可访问空间": "Accessible workspaces",
   "未分配": "Unassigned",

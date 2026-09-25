@@ -95,6 +95,11 @@ export class SaveRentalFulfillmentLocationDto implements SaveRentalFulfillmentLo
   @IsNotEmpty()
   id?: string;
 
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  organizationId?: string | null;
+
   @IsString()
   @IsNotEmpty()
   code!: string;

@@ -16,6 +16,7 @@ import { enterRequestIdentity } from "./request-identity";
 import { matchableRequestPath } from "./request-path";
 import { isStaffAuthPath, isStaffBusinessRouteAllowed, staffRoutePermissions } from "./staff-api-policy";
 import { PrismaService } from "../modules/database/prisma.service";
+import { enabledOrganizationSubtreeIds, organizationLocationScope } from "./organization-location-scope";
 
 interface RequestLike {
   method: string;
@@ -761,6 +762,18 @@ export class ApiAuthGuard implements CanActivate {
     if (!hasAnyPermission(user, staffPermissionOverride ?? permissions)) {
       throw new ForbiddenException("当前账号无权访问该功能");
     }
+    const requestBody = request.body && typeof request.body === "object"
+      ? request.body as Record<string, unknown>
+      : undefined;
+    const locationConfigurationRoute = /^\/rental\/v1\/locations(?:\/[^/]+)?$/u.test(path);
+    if (
+      request.method.toUpperCase() !== "GET" &&
+      locationConfigurationRoute &&
+      requestBody && Object.prototype.hasOwnProperty.call(requestBody, "organizationId") &&
+      !hasAnyPermission(user, ["system:user:manage"])
+    ) {
+      throw new ForbiddenException("只有拥有账号与组织管理权限的管理员可以调整履约地点的组织归属");
+    }
     const capability = requiredCapability(path);
     if (capability && !user.isSaasAdmin) {
       // SPACE-03：品类与能力按**当前经营空间**判定，不能用租户级档案——
@@ -831,7 +844,19 @@ export class ApiAuthGuard implements CanActivate {
       throw new ForbiddenException("当前会话没有经营空间，请先选择经营空间");
     }
 
-    const locationScope = accessContext?.user.locationScope ?? { mode: "all" as const, locationIds: [] };
+    const configuredLocationScope = accessContext?.user.locationScope ?? { mode: "all" as const, locationIds: [] };
+    const canManageOrganizationMapping = !staffApiRequest && locationConfigurationRoute && hasAnyPermission(user, ["system:user:manage"]);
+    const needsLocationScope =
+      (path.startsWith("/rental/v1/") && path !== "/rental/v1/categories") ||
+      (path.startsWith("/staff/v1/") && !isStaffAuthPath(path)) ||
+      path.startsWith("/reports") ||
+      path === "/platform/workspace-customers" ||
+      path.startsWith("/platform/workspace-customers/");
+    const locationScope = canManageOrganizationMapping
+      ? { mode: "all" as const, locationIds: [] }
+      : needsLocationScope
+        ? await this.resolveLocationScope(user, workspaceId, configuredLocationScope)
+        : configuredLocationScope;
     const operationalRentalPath = path.startsWith("/rental/v1/") || path.startsWith("/staff/v1/");
     const scopedRentalPath = operationalRentalPath && path !== "/rental/v1/categories";
     const restrictedRentalRequest = scopedRentalPath && (
@@ -839,9 +864,6 @@ export class ApiAuthGuard implements CanActivate {
       locationScope.mode === "selected" ||
       user.dataScope !== "all"
     );
-    if (user.dataScope === "organization" && path.startsWith("/platform/customers")) {
-      throw new ForbiddenException("组织数据范围尚未关联客户归属，请联系管理员配置明确的空间范围");
-    }
     const customerRoute = path.match(/^\/(?:platform\/customers|rental\/v1\/booking-members)\/([^/]+)/u);
     const customerId = customerRoute?.[1];
     const customerOptionsRoute = /^\/rental\/v1\/booking-members\/[^/]+\/booking-options$/u.test(path);
@@ -871,6 +893,36 @@ export class ApiAuthGuard implements CanActivate {
     return true;
   }
 
+  private async resolveLocationScope(
+    user: SystemUserRow,
+    workspaceId: string | undefined,
+    configuredScope: { mode: "all" | "selected"; locationIds: string[] }
+  ) {
+    if (user.dataScope !== "organization") return configuredScope;
+    if (!this.prisma || !workspaceId || !user.organizationId) {
+      throw new ForbiddenException("组织数据范围缺少有效组织、经营空间或数据库上下文，已拒绝访问");
+    }
+
+    const organizations = await this.prisma.organizationUnit.findMany({
+      where: { tenantId: user.tenantId },
+      select: { id: true, parentId: true, status: true }
+    });
+    const organizationIds = enabledOrganizationSubtreeIds(organizations, user.organizationId);
+    if (!organizationIds.length) {
+      throw new ForbiddenException("当前账号所属组织不存在或已停用，已拒绝访问");
+    }
+
+    const locations = await this.prisma.rentalFulfillmentLocation.findMany({
+      where: {
+        tenantId: user.tenantId,
+        workspaceId,
+        organizationId: { in: organizationIds }
+      },
+      select: { id: true }
+    });
+    return organizationLocationScope(locations.map((location) => location.id), configuredScope);
+  }
+
   private async assertStaffLocationAccess(
     request: RequestLike,
     path: string,
@@ -880,16 +932,16 @@ export class ApiAuthGuard implements CanActivate {
   ) {
     const locationRestricted = scope.mode === "selected";
     const ownScope = user.dataScope === "own";
-    const organizationScope = user.dataScope === "organization";
     const prisma = this.prisma;
     if (locationRestricted && (!prisma || !workspaceId || !Array.isArray(scope.locationIds) || !scope.locationIds.length)) {
       throw new ForbiddenException("当前账号的履约地点范围未就绪，已拒绝访问");
     }
     const allowed = new Set(scope.locationIds);
-    if (organizationScope) {
-      // 经营地点目前没有 OrganizationUnit 归属字段。即使账号同时配置了地点白名单，
-      // 也无法证明那些地点都属于当前组织，因此不能用地点白名单冒充组织范围。
-      throw new ForbiddenException("组织范围尚未建立组织与履约地点的归属关系，暂不可用于经营数据访问；请改用地点或全空间范围");
+    const organizationLocationAdmin = !request.staffApiRequest &&
+      /^\/rental\/v1\/locations(?:\/[^/]+)?$/u.test(path) &&
+      hasAnyPermission(user, ["system:user:manage"]);
+    if (user.dataScope === "organization" && !locationRestricted && !organizationLocationAdmin) {
+      throw new ForbiddenException("组织数据范围未解析为授权履约地点，已拒绝访问");
     }
     if (!locationRestricted && !ownScope) return;
     if (!prisma || !workspaceId) throw new ForbiddenException("当前账号的数据范围未就绪，已拒绝访问");
@@ -912,6 +964,22 @@ export class ApiAuthGuard implements CanActivate {
     const explicitLocations = [body.locationId, body.fulfillmentLocationId, body.returnLocationId, body.serviceLocationId, body.fromLocationId, body.toLocationId, query.locationId]
       .filter((value) => value !== undefined && value !== null && value !== "");
     if (explicitLocations.length) ensureLocations(explicitLocations);
+
+    const locationRecordMatch = path.match(/^\/rental\/v1\/locations\/([^/]+)$/u);
+    if (locationRestricted && locationRecordMatch) {
+      const location = await prisma.rentalFulfillmentLocation.findFirst({
+        where: {
+          tenantId: user.tenantId,
+          workspaceId,
+          AND: [{ id: locationRecordMatch[1] }, { id: { in: scope.locationIds } }]
+        },
+        select: { id: true }
+      });
+      if (!location) throw new ForbiddenException("履约地点不存在或不在当前账号授权范围内");
+    }
+    if (locationRestricted && path === "/rental/v1/locations" && request.method.toUpperCase() === "POST") {
+      throw new ForbiddenException("受限地点范围账号不能新建履约地点；请由租户管理员授权或创建");
+    }
 
     if (ownScope && ["/rental/v1/quotes", "/rental/v1/orders"].includes(path) && request.method.toUpperCase() === "POST") {
       await this.assertOwnBookingCustomers(body, user, workspaceId, scope);
@@ -1019,8 +1087,22 @@ export class ApiAuthGuard implements CanActivate {
     if (!this.prisma || !workspaceId) throw new ForbiddenException("当前账号的客户数据范围未就绪，已拒绝访问");
     const ownScope = user.dataScope === "own";
     const locationRestricted = scope.mode === "selected";
-    if (user.dataScope === "organization") {
-      throw new ForbiddenException("组织范围尚未关联履约地点，已拒绝访问客户资料");
+    if (user.dataScope === "organization" && !locationRestricted) {
+      throw new ForbiddenException("组织客户范围未解析为授权履约地点，已拒绝访问");
+    }
+    const orderScope: Prisma.RentalOrderWhereInput[] = [];
+    if (locationRestricted) {
+      const locationIds = scope.locationIds.length ? scope.locationIds : ["__no_authorized_location__"];
+      orderScope.push({ OR: [
+        { fulfillmentLocationId: { in: locationIds } },
+        { returnLocationId: { in: locationIds } }
+      ] });
+    }
+    if (ownScope) {
+      orderScope.push({ OR: [
+        { createdBy: user.id },
+        { workOrders: { some: { OR: [{ createdBy: user.id }, { assigneeId: user.id }] } } }
+      ] });
     }
     if (!locationRestricted && (ownScope || user.dataScope === "store")) {
       const profile = await this.prisma.customerProfile.findFirst({
@@ -1038,19 +1120,15 @@ export class ApiAuthGuard implements CanActivate {
       where: {
         tenantId: user.tenantId,
         workspaceId,
-        ...(locationRestricted ? { fulfillmentLocationId: { in: scope.locationIds } } : {}),
-        ...(ownScope ? {
-          OR: [
-            { createdBy: user.id },
-            { workOrders: { some: { OR: [{ createdBy: user.id }, { assigneeId: user.id }] } } }
-          ]
-        } : {}),
-        AND: [{ OR: [
+        AND: [
+          ...orderScope,
+          { OR: [
           { customerId },
           { contractSubjectCustomerId: customerId },
           { payerSubjectCustomerId: customerId },
           { userSubjectCustomerId: customerId }
-        ] }]
+          ] }
+        ]
       },
       select: { id: true }
     });

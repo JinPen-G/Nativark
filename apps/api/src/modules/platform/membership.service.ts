@@ -443,26 +443,34 @@ export class MembershipService {
     const scope = getRequestDataScope();
     const locationIds = getRequestLocationIds();
     if ((!scope || scope === "all") && locationIds === undefined) return undefined;
-    if (scope === "organization") {
-      throw new ForbiddenException("组织范围尚未关联客户归属，无法安全选择会员");
+    if (scope === "organization" && locationIds === undefined) {
+      throw new ForbiddenException("组织会员范围未解析为授权履约地点，已拒绝访问");
     }
     const workspaceId = getRequestWorkspaceId();
     const userId = getRequestUserId();
     if (!workspaceId || (scope === "own" && !userId)) {
       throw new ForbiddenException("会员选择范围缺少已验证的账号或经营空间");
     }
+    const orderScope: Prisma.RentalOrderWhereInput[] = [];
+    if (locationIds !== undefined) {
+      const safeIds = locationIds.length ? locationIds : ["__no_authorized_location__"];
+      orderScope.push({ OR: [
+        { fulfillmentLocationId: { in: safeIds } },
+        { returnLocationId: { in: safeIds } }
+      ] });
+    }
+    if (scope === "own") {
+      orderScope.push({ OR: [
+        { createdBy: userId! },
+        { workOrders: { some: { OR: [{ createdBy: userId! }, { assigneeId: userId! }] } } }
+      ] });
+    }
     const orders = await this.prisma.rentalOrder.findMany({
       where: {
         tenantId,
         workspaceId,
         customerId: { not: null },
-        ...(locationIds === undefined ? {} : { fulfillmentLocationId: { in: locationIds.length ? locationIds : ["__no_authorized_location__"] } }),
-        ...(scope === "own" ? {
-          OR: [
-            { createdBy: userId! },
-            { workOrders: { some: { OR: [{ createdBy: userId! }, { assigneeId: userId! }] } } }
-          ]
-        } : {})
+        ...(orderScope.length ? { AND: orderScope } : {})
       },
       select: { customerId: true },
       distinct: ["customerId"]
@@ -483,7 +491,9 @@ export class MembershipService {
     const scope = getRequestDataScope();
     const locationIds = getRequestLocationIds();
     if ((!scope || scope === "all") && locationIds === undefined) return;
-    if (scope === "organization") throw new ForbiddenException("组织范围尚未关联客户归属，无法读取会员权益");
+    if (scope === "organization" && locationIds === undefined) {
+      throw new ForbiddenException("组织会员范围未解析为授权履约地点，已拒绝访问");
+    }
     const userId = getRequestUserId();
     if (scope === "own" && !userId) throw new ForbiddenException("本人会员范围缺少已验证账号");
     if (locationIds === undefined && (scope === "own" || scope === "store")) {
@@ -498,22 +508,32 @@ export class MembershipService {
       });
       if (profile) return;
     }
+    const orderScope: Prisma.RentalOrderWhereInput[] = [];
+    if (locationIds !== undefined) {
+      const safeIds = locationIds.length ? locationIds : ["__no_authorized_location__"];
+      orderScope.push({ OR: [
+        { fulfillmentLocationId: { in: safeIds } },
+        { returnLocationId: { in: safeIds } }
+      ] });
+    }
+    if (scope === "own") {
+      orderScope.push({ OR: [
+        { createdBy: userId! },
+        { workOrders: { some: { OR: [{ createdBy: userId! }, { assigneeId: userId! }] } } }
+      ] });
+    }
     const order = await this.prisma.rentalOrder.findFirst({
       where: {
         tenantId,
         workspaceId,
-        ...(locationIds === undefined ? {} : { fulfillmentLocationId: { in: locationIds.length ? locationIds : ["__no_authorized_location__"] } }),
-        ...(scope === "own" ? {
-          OR: [
-            { createdBy: userId! },
-            { workOrders: { some: { OR: [{ createdBy: userId! }, { assigneeId: userId! }] } } }
-          ]
-        } : {}),
-        OR: [
+        AND: [
+          ...orderScope,
+          { OR: [
           { customerId },
           { contractSubjectCustomerId: customerId },
           { payerSubjectCustomerId: customerId },
           { userSubjectCustomerId: customerId }
+          ] }
         ]
       },
       select: { id: true }

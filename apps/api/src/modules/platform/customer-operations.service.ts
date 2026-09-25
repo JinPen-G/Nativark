@@ -126,24 +126,32 @@ export class CustomerOperationsService {
   ): Promise<string[] | undefined> {
     const locationIds = getRequestLocationIds();
     if (scope === "all" && locationIds === undefined) return undefined;
-    if (scope === "organization") {
-      throw new ForbiddenException("组织范围尚未关联客户归属，无法安全列出客户资料");
+    if (scope === "organization" && locationIds === undefined) {
+      throw new ForbiddenException("组织客户范围未解析为授权履约地点，已拒绝访问");
     }
     if ((scope === "own" && !userId) || !workspaceId) {
       throw new ForbiddenException("客户数据范围缺少已验证的账号或经营空间");
+    }
+    const orderScope: Prisma.RentalOrderWhereInput[] = [];
+    if (locationIds !== undefined) {
+      const safeIds = locationIds.length ? locationIds : ["__no_authorized_location__"];
+      orderScope.push({ OR: [
+        { fulfillmentLocationId: { in: safeIds } },
+        { returnLocationId: { in: safeIds } }
+      ] });
+    }
+    if (scope === "own") {
+      orderScope.push({ OR: [
+        { createdBy: userId! },
+        { workOrders: { some: { OR: [{ createdBy: userId! }, { assigneeId: userId! }] } } }
+      ] });
     }
     const orderRows = await this.prisma.rentalOrder.findMany({
       where: {
         tenantId,
         workspaceId,
         customerId: { not: null },
-        ...(locationIds === undefined ? {} : { fulfillmentLocationId: { in: locationIds.length ? locationIds : ["__no_authorized_location__"] } }),
-        ...(scope === "own" ? {
-          OR: [
-            { createdBy: userId! },
-            { workOrders: { some: { OR: [{ createdBy: userId! }, { assigneeId: userId! }] } } }
-          ]
-        } : {})
+        ...(orderScope.length ? { AND: orderScope } : {})
       },
       select: { customerId: true },
       distinct: ["customerId"]
@@ -177,7 +185,9 @@ export class CustomerOperationsService {
       throw new ForbiddenException("客户数据范围缺少已验证的账号或经营空间");
     }
     const locationIds = getRequestLocationIds();
-    if (scope === "organization") throw new ForbiddenException("组织范围尚未关联客户归属，无法安全读取客户资料");
+    if (scope === "organization" && locationIds === undefined) {
+      throw new ForbiddenException("组织客户范围未解析为授权履约地点，已拒绝访问");
+    }
     const profileVisible = locationIds === undefined && (scope === "own" || scope === "store")
       ? await this.prisma.customerProfile.findFirst({
           where: {
@@ -189,22 +199,33 @@ export class CustomerOperationsService {
           select: { id: true }
         })
       : null;
+    const orderScope: Prisma.RentalOrderWhereInput[] = [];
+    if (locationIds !== undefined) {
+      const safeIds = locationIds.length ? locationIds : ["__no_authorized_location__"];
+      orderScope.push({ OR: [
+        { fulfillmentLocationId: { in: safeIds } },
+        { returnLocationId: { in: safeIds } }
+      ] });
+    }
+    if (scope === "own") {
+      const currentUserId = userId;
+      orderScope.push(currentUserId ? { OR: [
+        { createdBy: currentUserId },
+        { workOrders: { some: { OR: [{ createdBy: currentUserId }, { assigneeId: currentUserId }] } } }
+      ] } : { id: "__no_current_user__" });
+    }
     const orderVisible = profileVisible ? true : await this.prisma.rentalOrder.findFirst({
       where: {
         tenantId,
         workspaceId: currentWorkspaceId,
-        ...(locationIds === undefined ? {} : { fulfillmentLocationId: { in: locationIds.length ? locationIds : ["__no_authorized_location__"] } }),
-        ...(scope === "own" ? {
-          OR: [
-            { createdBy: userId! },
-            { workOrders: { some: { OR: [{ createdBy: userId! }, { assigneeId: userId! }] } } }
-          ]
-        } : {}),
-        OR: [
+        AND: [
+          ...orderScope,
+          { OR: [
           { customerId },
           { contractSubjectCustomerId: customerId },
           { payerSubjectCustomerId: customerId },
           { userSubjectCustomerId: customerId }
+          ] }
         ]
       },
       select: { id: true }
@@ -617,7 +638,11 @@ export class CustomerOperationsService {
     const orderVisibility: Prisma.RentalOrderWhereInput[] = [];
     const locationIds = getRequestLocationIds();
     if (locationIds !== undefined) {
-      orderVisibility.push({ fulfillmentLocationId: { in: locationIds.length ? locationIds : ["__no_authorized_location__"] } });
+      const safeIds = locationIds.length ? locationIds : ["__no_authorized_location__"];
+      orderVisibility.push({ OR: [
+        { fulfillmentLocationId: { in: safeIds } },
+        { returnLocationId: { in: safeIds } }
+      ] });
     }
     if (getRequestDataScope() === "own") {
       const userId = getRequestUserId();

@@ -319,6 +319,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
   async upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx): Promise<void> {
     const data = {
       tenantId: location.tenantId,
+      organizationId: location.organizationId ?? null,
       code: location.code,
       name: location.name,
       type: location.type,
@@ -346,6 +347,13 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     if (location.operatorId) {
       const operator = await client.rentalFulfillmentOperator.findFirst({ where: { id: location.operatorId, tenantId: location.tenantId, workspaceId }, select: { id: true } });
       if (!operator) throw new ConflictException("履约地点引用了其他租户或经营空间的经营主体");
+    }
+    if (location.organizationId) {
+      const organization = await client.organizationUnit.findFirst({
+        where: { id: location.organizationId, tenantId: location.tenantId, status: "enabled" },
+        select: { id: true }
+      });
+      if (!organization) throw new ConflictException("履约地点只能归属当前租户内已启用的组织");
     }
     if (location.parentLocationId) {
       const parent = await client.rentalFulfillmentLocation.findFirst({ where: { id: location.parentLocationId, tenantId: location.tenantId, workspaceId }, select: { id: true } });
@@ -572,6 +580,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
 
   private toLocation(row: {
     id: string; tenantId: string; code: string; name: string; type: string;
+    organizationId: string | null;
     operatorId: string | null; operatorType: string | null; operatorName: string | null;
     parentLocationId: string | null; capabilities: Prisma.JsonValue; address: string | null;
     province: string | null; city: string | null; district: string | null; timezone: string | null;
@@ -581,6 +590,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     return {
       id: row.id,
       tenantId: row.tenantId,
+      organizationId: row.organizationId ?? undefined,
       code: row.code,
       name: row.name,
       type: row.type as RentalLocationType,
