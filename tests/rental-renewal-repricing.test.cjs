@@ -47,6 +47,13 @@ const at = hours => new Date(Date.parse(start) + hours * 3600000).toISOString();
   const price = async (quote, hours, previous = []) => { business.getQuote = () => quote; return business.quoteOrderExtension(tenant, ctx, args(quote, hours, previous)); };
   const effective = (priced, sequence = 1) => ({ ...clone(priced), tenantId: tenant, orderId: 'renewal-test', id: `ext-${sequence}`, sequence, status: 'effective' });
   const q = fixture(); const before = clone(q);
+  const incompatibleUsage = fixture();
+  incompatibleUsage.request.lines[0].pricingUnit = 'usage';
+  incompatibleUsage.rateSnapshot[0] = { ...incompatibleUsage.rateSnapshot[0], unit: 'usage', includedUsage: 20, excessUsageAmount: 2 };
+  incompatibleUsage.ruleSnapshot.overdue.feeMode = 'next_period';
+  assert.throws(() => business.calculateOverdueCharge(tenant, ctx, incompatibleUsage, at(3.5)), /没有固定时间周期/,
+    '历史/异常订单在计算逾时费时仍须明确拒绝不兼容的使用量与下一周期组合');
+  pass('使用量费率与小时/下一周期逾时费在报价与结算计算两端均 fail-closed');
   const free = await price(q, 3);
   assert.equal(free.payableAmount, 0); assert.equal(free.paymentRequired, false); assert.equal(free.pricingSnapshot.recalculatedRentalAmount, 240);
   pass('2小时已买一天，延至3小时不重复收费');

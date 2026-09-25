@@ -1,4 +1,4 @@
-import { BadRequestException } from "@nestjs/common";
+import { BadRequestException, ConflictException } from "@nestjs/common";
 import {
   RENTAL_PRICING_UNIT_CODES,
   type RentalPricingRate,
@@ -498,6 +498,21 @@ export function billedRentalHours(
     day_24h: 24, calendar_day: 24, night: 24, week: 168, month: 720
   };
   return units * hours[rate.unit];
+}
+
+/**
+ * 小时/下一计费周期逾时需要一个可换算成时间的原始计费单位。
+ * 使用量价（里程、工时、快门等）与整包价没有固定时间周期；如果允许这类订单
+ * 按小时或下一周期逾时，计算器会在归还时才发现无法换算，导致履约已完成却无法结算。
+ * 报价时与历史订单结算时都调用此守卫，避免新订单进入不可结算状态，并让存量异常明确失败。
+ */
+export function assertTimeBasedOverdueSupported(
+  unit: RentalPricingUnit,
+  feeMode: "none" | "hourly" | "next_period" | "multiplier" | "manual_review" | "hourly_to_daily"
+) {
+  if ((feeMode === "hourly" || feeMode === "next_period") && (unit === "usage" || unit === "package")) {
+    throw new ConflictException("使用量或整包计价没有固定时间周期，不能使用小时或下一计费周期逾时费；请选择倍率、人工审核或不计逾时，或改用时间计价单位");
+  }
 }
 
 export function assertRentalPricingStrategiesComplete() {

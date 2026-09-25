@@ -8,6 +8,7 @@ require("ts-node").register({
 const {
   rentalPricingStrategy,
   assertRentalPricingStrategiesComplete,
+  assertTimeBasedOverdueSupported,
   RENTAL_PRICING_STRATEGIES
 } = require("../apps/api/src/modules/rental-core/rental-pricing-strategy.ts");
 const {
@@ -57,6 +58,20 @@ assert.equal(
 for (const unit of RENTAL_PRICING_UNIT_CODES) {
   assert.equal(RENTAL_PRICING_STRATEGIES[unit].unit, unit, `策略 ${unit} 的自述单位必须与注册键一致`);
 }
+
+/* ---------- 逾时规则与计价单位必须在报价阶段兼容 ---------- */
+
+assertTimeBasedOverdueSupported("hour", "hourly");
+assertTimeBasedOverdueSupported("day_24h", "next_period");
+assertTimeBasedOverdueSupported("usage", "manual_review");
+for (const unit of ["usage", "package"]) {
+  for (const feeMode of ["hourly", "next_period"]) {
+    assert.throws(() => assertTimeBasedOverdueSupported(unit, feeMode), /没有固定时间周期/u,
+      `${unit} 不得进入归还时才会失败的 ${feeMode} 逾时路径`);
+  }
+}
+assert.doesNotThrow(() => assertTimeBasedOverdueSupported("usage", "hourly_to_daily"),
+  "按日价分段计逾时的策略在报价处另行校验对应日价，不受此守卫限制");
 
 /* ---------- 自然日：按营业时区的日期计，不是按 24 小时块计 ---------- */
 

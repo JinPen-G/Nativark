@@ -207,6 +207,22 @@ assert.equal(usageQuoteLine.amount, 326);
 assert.match(usageQuoteLine.chargeLine.detail, /超额分段累进/u);
 assert.match(usageQuoteLine.chargeLine.detail, /101-150.*× 1\.5.*= 75/u);
 assert.match(usageQuoteLine.chargeLine.detail, /151-151.*× 1.*= 1/u);
+const enabledUsagePlan = await business.savePricingPlan(tenantId, usageContext, { ...usagePlanBase, id: usagePlan.id, status: "enabled" });
+await assert.rejects(
+  () => business.createQuote(tenantId, usageContext, {
+    customerType: "personal",
+    customerName: "使用量逾时门禁测试",
+    pricingPlanId: enabledUsagePlan.id,
+    fulfillmentMode: "store_pickup_return",
+    fulfillmentLocationId: location.id,
+    startAt,
+    endAt,
+    lines: [{ itemGroupId: group.id, quantity: 1, pricingUnit: "usage", usageQuantity: 171 }]
+  }),
+  /没有固定时间周期/u,
+  "按小时/下一周期逾时与使用量报价冲突时，必须在报价时而非归还时拒绝"
+);
+await business.savePricingPlan(tenantId, usageContext, { ...usagePlanBase, id: enabledUsagePlan.id, status: "disabled" });
 ok2("使用量累进计划拒绝缺费率/歧义阶梯，报价按逐档超额单位计费并留明细");
 
 const quote = await business.createQuote(tenantId, context(), {

@@ -122,7 +122,7 @@ import {
   originSnapshotOf
 } from "./calendar-range";
 import { applyPriceAdjustment, assertNoDatetimeOverrideOverlap, assertNoPeriodicOverlap, periodicWindowCoversDate, periodicWindowHits } from "./rental-price-adjustments";
-import { billedRentalHours, rentalPricingStrategy } from "./rental-pricing-strategy";
+import { assertTimeBasedOverdueSupported, billedRentalHours, rentalPricingStrategy } from "./rental-pricing-strategy";
 import { allocateDiscount, selectDiscountPlans } from "./rental-discount-selection";
 import { resolveQuoteServices } from "./rental-service-catalog";
 import { computeSecurityAmounts, type SecurityLineInput, validateSecurityRules } from "./rental-security-deposit";
@@ -4565,6 +4565,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
             : `${pricingGroup?.name ?? group.name} 尚未配置基础价格`
         );
       }
+      // 防止“小时/下一周期”逾时规则与使用量/整包报价组合：此前报价能创建，
+      // 但归还时 billedRentalHours 无法从这两类单位换算时间，订单会卡在待结算。
+      assertTimeBasedOverdueSupported(rate.unit, rule.config.overdue.feeMode);
       // 逐行租金交给 priceRentalLine：续租要对新增时间段跑完全相同的一段，
       // 两条路径必须共用同一个实现，否则迟早算出不同的钱。
       // 兼容开关 `pricing.holidayPricingEnabled` 只关**旧的**空间级周末/节假日倍率，
@@ -5652,6 +5655,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         const targetId = line.pricingGroupId ?? line.itemGroupId;
         const rate = quote.rateSnapshot.find((row) => pricingTargetId(row) === targetId && (!line.pricingUnit || row.unit === line.pricingUnit));
         if (!rate) throw new ConflictException("原订单缺少费率快照，无法计算逾期费");
+        assertTimeBasedOverdueSupported(rate.unit, rule.overdue.feeMode);
         const charge = quote.chargeLines.find((row) => row.code === `rental:${rate.pricingGroupCode ?? rate.itemGroupCode}`);
         if (!charge) throw new ConflictException("原订单缺少租金明细，无法计算逾期费");
         const pricingContext = {
