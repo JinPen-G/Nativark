@@ -70,7 +70,7 @@
 .v2-hero-title {
   margin: 0;
   font-weight: var(--fw-semibold);
-  font-size: clamp(38px, 5.4vw, 82px);
+  font-size: var(--fs-display-hero-v2);
   line-height: 1.03;
   letter-spacing: -.02em;
   white-space: pre-line;
@@ -79,7 +79,7 @@
 .v2-hero-sub {
   margin: 14px 0 0;
   max-width: 34ch;
-  font-size: clamp(15px, 1.4vw, 20px);
+  font-size: var(--fs-hero-sub);
   font-weight: var(--fw-regular);
   color: rgba(255, 255, 255, .9);
   white-space: pre-line;

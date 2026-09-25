@@ -74,7 +74,7 @@ export function SiteFooter() {
   const { tenant, href, t } = useSite();
   return <footer className="site-footer">
     <div className="shell footer-main">
-      <div className="footer-brand"><img src={tenant.logo} alt={tenant.name} /><p>{tenant.footerText}</p></div>
+      <div className="footer-brand"><img src={tenant.logo} alt={tenant.name} loading="lazy" decoding="async" /><p>{tenant.footerText}</p></div>
       <div><h3>{t('footerExplore')}</h3><Link to={href('/products')}>{t('allProducts')}</Link><Link to={href('/guide')}>{t('guide')}</Link><Link to={href('/orders')}>{t('orders')}</Link></div>
       <div><h3>{t('about')}</h3><Link to={href('/about')}>{t('footerBrand')}</Link><Link to={href('/help')}>{t('footerHelp')}</Link><a href={`tel:${tenant.phone}`}>{t('contactSupport')}</a></div>
       <div><h3>{t('footerLegal')}</h3><Link to={href('/agreement')}>{t('docUserAgreement')}</Link><Link to={href('/privacy')}>{t('docPrivacyPolicy')}</Link></div>
