@@ -55,6 +55,11 @@ h1, h2, h3, p { margin-top: 0; }
 }
 .section { margin-top: var(--s80); }
 .homepage-section { padding-inline: 0; }
+/* 首页大区块（英雄横幅、场景卡、商品区）是「带边距的圆角横幅」，不是全出血：
+   宽度按 --page-padding（32/24/16，随断点）从两侧收紧，与顶栏共享同一内容边缘；
+   超过 1440 上限后仍由 max-width 居中。此前只在 ≤820px 补边距，
+   821~1495px 区间整页贴边、--radius-banner 圆角不可见。 */
+.homepage-section.shell { width: calc(100% - 2 * var(--page-padding)); margin-inline: auto; }
 .eyebrow { display: inline-block; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .17em; text-transform: uppercase; margin-bottom: var(--s16); }
 .eyebrow.light { color: rgba(255,255,255,.84); }
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 12px; min-height: 44px; padding: 0 22px; border: 0; border-radius: var(--radius-button); font-size: 13px; font-weight: 600; white-space: nowrap; transition: transform .2s ease, background .2s ease, box-shadow .2s ease; }
@@ -422,7 +427,6 @@ main:has(.home-cta) + .site-footer { margin-top: 0; }
 
 @media (max-width: 820px) {
   .shell { --page-padding: 24px; }
-  .homepage-section.shell { width: calc(100% - 48px); margin-left: 24px; margin-right: 24px; }
   .site-header { height: 70px; }
   .header-inner { height: 70px; }
   .brand-lockup { width: auto; flex-basis: auto; margin-right: auto; }
@@ -495,7 +499,6 @@ main:has(.home-cta) + .site-footer { margin-top: 0; }
 
 @media (max-width: 767px) {
   .shell { --page-padding: 16px; }
-  .homepage-section.shell { width: calc(100% - 32px); margin-left: 16px; margin-right: 16px; }
 }
 
 @media (max-width: 620px) {
