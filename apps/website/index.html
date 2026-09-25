@@ -68,6 +68,23 @@
             : systemTheme;
       })();
     </script>
+    <script>
+      /* 首页版本开关：默认 2.0 沉浸视频首页；?home=1 回退 1.0（记忆到 localStorage）。
+         早于渲染设置 <html> 类，避免 1.0 英雄闪现。 */
+      (() => {
+        let v = "";
+        try {
+          const q = new URLSearchParams(location.search).get("home");
+          if (q === "1" || q === "2") {
+            localStorage.setItem("rental-os-home-version", q);
+            v = q;
+          } else {
+            v = localStorage.getItem("rental-os-home-version") || "";
+          }
+        } catch (e) {}
+        document.documentElement.classList.add(v === "1" ? "home-v1" : "home-v2");
+      })();
+    </script>
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -1219,6 +1236,90 @@
           transition: none !important;
         }
       }
+      /* ===== 官网 2.0 沉浸式视频首页（作用域 .v2-* / body.v2-home / html.home-v*） ===== */
+      html.home-v2 .hero { display: none; }
+      html.home-v1 #v2Home { display: none; }
+      .v2-home-root { background: #0b0f14; }
+      .v2-scene {
+        position: relative; width: 100%;
+        min-height: 100vh; min-height: 100dvh;
+        display: flex; overflow: hidden; isolation: isolate;
+        color: #fff; background-color: #0b0f14;
+        background-image: var(--scene-fallback);
+        background-size: cover; background-position: var(--scene-pos, center center);
+      }
+      .v2-scene-video {
+        position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%;
+        object-fit: cover; object-position: var(--scene-pos, center center);
+        background: transparent; opacity: 0; transition: opacity .6s ease;
+      }
+      .v2-scene.is-ready .v2-scene-video { opacity: 1; }
+      .v2-scene-scrim {
+        position: absolute; inset: 0; z-index: 1; pointer-events: none;
+        background:
+          linear-gradient(90deg, rgba(6,9,13,.66) 0%, rgba(6,9,13,.32) 34%, rgba(6,9,13,0) 62%),
+          linear-gradient(180deg, rgba(6,9,13,.46) 0%, rgba(6,9,13,0) 20%, rgba(6,9,13,0) 60%, rgba(6,9,13,.52) 100%);
+      }
+      .v2-scene-content {
+        position: relative; z-index: 2; align-self: center;
+        width: 100%; max-width: 1480px; margin: 0 auto;
+        padding: 0 clamp(22px, 5vw, 96px);
+        display: flex; flex-direction: column; gap: clamp(14px, 1.8vw, 24px);
+        text-shadow: 0 2px 20px rgba(0,0,0,.4);
+      }
+      .v2-eyebrow {
+        margin: 0; font-size: clamp(11px,1vw,13px); font-weight: 600;
+        letter-spacing: .3em; text-transform: uppercase; color: rgba(255,255,255,.82);
+      }
+      .v2-title { margin: 0; font-weight: 600; line-height: .98; letter-spacing: -.02em; }
+      .v2-title span { display: block; }
+      .v2-title .v2-gap { height: .38em; }
+      .v2-scene-hero .v2-title { font-size: clamp(46px, 8.4vw, 118px); }
+      .v2-scene-scene .v2-title { font-size: clamp(44px, 7.6vw, 108px); }
+      .v2-subtitle {
+        margin: 0; max-width: 42ch; font-size: clamp(14px,1.35vw,19px);
+        font-weight: 400; letter-spacing: .01em; color: rgba(255,255,255,.85);
+      }
+      .v2-cta {
+        align-self: flex-start; margin-top: clamp(6px,1.2vw,18px);
+        display: inline-flex; align-items: center; gap: 10px; padding: 8px 2px;
+        border: 0; background: none; color: #fff; font: inherit;
+        font-size: clamp(14px,1.05vw,16px); font-weight: 500; letter-spacing: .04em;
+        text-decoration: none; cursor: pointer; transition: transform .2s ease;
+      }
+      .v2-cta span { transition: transform .2s ease; }
+      .v2-cta:hover span { transform: translateX(4px); }
+      .v2-scene-content > * {
+        opacity: 0; transform: translateY(20px);
+        transition: opacity .85s cubic-bezier(.22,.61,.36,1), transform .85s cubic-bezier(.22,.61,.36,1);
+      }
+      .v2-scene.is-inview .v2-scene-content > * { opacity: 1; transform: none; }
+      .v2-scene.is-inview .v2-scene-content > *:nth-child(2) { transition-delay: .07s; }
+      .v2-scene.is-inview .v2-scene-content > *:nth-child(3) { transition-delay: .14s; }
+      .v2-scene.is-inview .v2-scene-content > *:nth-child(4) { transition-delay: .2s; }
+      /* 顶栏全透明融入视频（平台头本就 fixed+transparent，视频区去玻璃 ::before）；滚到浅色产品区恢复玻璃+常规色 */
+      body.v2-home:not(.v2-lighttop) .site-header::before { display: none; }
+      body.v2-home:not(.v2-lighttop) .site-header .nav a,
+      body.v2-home:not(.v2-lighttop) .site-header .nav .nav-placeholder,
+      body.v2-home:not(.v2-lighttop) .site-header .language-switch,
+      body.v2-home:not(.v2-lighttop) .site-header .theme { color: #fff; }
+      body.v2-home:not(.v2-lighttop) .site-header .language-switch,
+      body.v2-home:not(.v2-lighttop) .site-header .theme { background: transparent; border-color: rgba(255,255,255,.42); }
+      body.v2-home:not(.v2-lighttop) .site-header .brand img { filter: brightness(0) invert(1); }
+      @media (max-width: 768px) {
+        .v2-scene-video { object-position: var(--scene-pos-mobile, center center); }
+        .v2-scene { background-position: var(--scene-pos-mobile, center center); }
+        .v2-scene-scrim { background: linear-gradient(180deg, rgba(6,9,13,.52) 0%, rgba(6,9,13,.32) 38%, rgba(6,9,13,.34) 62%, rgba(6,9,13,.56) 100%); }
+        .v2-scene-content { padding: 0 22px; gap: 14px; }
+        .v2-scene-hero .v2-title { font-size: clamp(32px,12.5vw,60px); }
+        .v2-scene-scene .v2-title { font-size: clamp(36px,13.5vw,66px); }
+        .v2-subtitle { font-size: 14px; max-width: 32ch; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .v2-scene-content > *, .v2-scene-video, .v2-cta, .v2-cta span {
+          transition: none !important; transform: none !important; opacity: 1 !important;
+        }
+      }
     </style>
   </head>
   <body>
@@ -1275,6 +1376,8 @@
       </nav>
     </header>
     <main id="top">
+      <!-- 官网 2.0：沉浸式视频首页容器；由页尾脚本按场景配置渲染，1.0 模式下隐藏。 -->
+      <div id="v2Home" class="v2-home-root" aria-label="Rental OS"></div>
       <section class="hero">
         <div class="shell hero-inner">
           <div class="hero-copy">
@@ -2483,6 +2586,121 @@
       );
       window.addEventListener("resize", updateActiveNavigation);
       updateActiveNavigation();
+    </script>
+    <script>
+      /* 官网 2.0 沉浸视频首页：场景配置集中管理；渲染 + IntersectionObserver 播放控制 + 三级兜底。 */
+      (() => {
+        const root = document.getElementById("v2Home");
+        // 仅 2.0 模式渲染（html.home-v2）；1.0 模式(?home=1)保持原英雄不动。
+        if (!root || !document.documentElement.classList.contains("home-v2")) return;
+
+        const scenes = [
+          { kind: "hero", video: "/assets/video/hero-01.mp4", poster: "/assets/poster/hero-01.webp",
+            fallback: "/assets/hero-solutions-neutral-1440.webp",
+            title: ["RENT", "ANYTHING.", "", "MANAGE", "EVERYTHING."],
+            subtitle: "面向多品类租赁业务的新一代管理平台",
+            cta: { label: "Explore", to: "#next", arrow: "↓" } },
+          { kind: "scene", video: "/assets/video/hero-02.mp4", poster: "/assets/poster/hero-02.webp",
+            fallback: "/assets/industry-car-960.webp", eyebrow: "01 / VEHICLE",
+            title: ["VEHICLE"], subtitle: "车辆载具租赁",
+            cta: { label: "View", to: "#solutions", arrow: "→" } },
+          { kind: "scene", video: "/assets/video/hero-03.mp4", poster: "/assets/poster/hero-03.webp",
+            fallback: "/assets/industry-camera-960.webp", eyebrow: "02 / EQUIPMENT",
+            title: ["EQUIPMENT"], subtitle: "设备 · 摄影器材 · 工具租赁",
+            cta: { label: "View", to: "#solutions", arrow: "→" } },
+          { kind: "scene", video: "/assets/video/hero-04.mp4", poster: "/assets/poster/hero-04.webp",
+            fallback: "/assets/cta-mountain-1280.webp", eyebrow: "03 / MOBILITY",
+            title: ["MOBILITY"], subtitle: "两轮出行 · 自行车 · 电动车",
+            cta: { label: "View", to: "#solutions", arrow: "→" } },
+          { kind: "scene", video: "/assets/video/hero-05.mp4", poster: "/assets/poster/hero-05.webp",
+            fallback: "/assets/hero-solutions-neutral-2880.webp", eyebrow: "04 / ANYTHING",
+            title: ["ANYTHING"], subtitle: "One OS. Every Rental Business.",
+            cta: { label: "Explore solutions", to: "#solutions", arrow: "→" } },
+        ];
+
+        function el(tag, cls, text) {
+          const n = document.createElement(tag);
+          if (cls) n.className = cls;
+          if (text != null) n.textContent = text;
+          return n;
+        }
+        const observed = [];
+        scenes.forEach((s) => {
+          const sec = el("section", "v2-scene v2-scene-" + s.kind);
+          sec.style.setProperty("--scene-fallback", 'url("' + s.fallback + '")');
+          if (s.objectPosition) sec.style.setProperty("--scene-pos", s.objectPosition);
+          if (s.objectPositionMobile) sec.style.setProperty("--scene-pos-mobile", s.objectPositionMobile);
+
+          const video = document.createElement("video");
+          video.className = "v2-scene-video";
+          video.muted = true; video.loop = true; video.autoplay = true;
+          video.setAttribute("playsinline", ""); video.preload = "metadata";
+          if (s.poster) video.poster = s.poster;
+          video.src = s.video;
+          video.addEventListener("loadeddata", () => sec.classList.add("is-ready"), { once: true });
+          sec.appendChild(video);
+          sec.appendChild(el("div", "v2-scene-scrim"));
+
+          const content = el("div", "v2-scene-content");
+          if (s.eyebrow) content.appendChild(el("p", "v2-eyebrow", s.eyebrow));
+          const h = el(s.kind === "hero" ? "h1" : "h2", "v2-title");
+          s.title.forEach((line) => {
+            const span = el("span", line === "" ? "v2-gap" : null, line === "" ? null : line);
+            if (line === "") span.setAttribute("aria-hidden", "true");
+            h.appendChild(span);
+          });
+          content.appendChild(h);
+          if (s.subtitle) content.appendChild(el("p", "v2-subtitle", s.subtitle));
+          if (s.cta) {
+            const cta = document.createElement("a");
+            cta.className = "v2-cta";
+            cta.href = s.cta.to;
+            cta.appendChild(document.createTextNode(s.cta.label + " "));
+            cta.appendChild(el("span", null, s.cta.arrow || "→"));
+            if (s.cta.to === "#next") {
+              cta.addEventListener("click", (e) => {
+                e.preventDefault();
+                const reduce = matchMedia("(prefers-reduced-motion:reduce)").matches;
+                if (sec.nextElementSibling)
+                  sec.nextElementSibling.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+              });
+            }
+            content.appendChild(cta);
+          }
+          sec.appendChild(content);
+          root.appendChild(sec);
+          observed.push(sec);
+        });
+        document.body.classList.add("v2-home");
+
+        // IntersectionObserver：进视口才 play + 淡入，离开 pause（不会多视频同放）。
+        const io = new IntersectionObserver((entries) => {
+          entries.forEach((entry) => {
+            const sec = entry.target;
+            const video = sec.querySelector("video");
+            if (entry.isIntersecting) {
+              sec.classList.add("is-inview");
+              if (video) { const p = video.play(); if (p && p.catch) p.catch(() => {}); }
+            } else if (video) {
+              video.pause();
+            }
+          });
+        }, { threshold: 0.5 });
+        observed.forEach((sec) => io.observe(sec));
+
+        // 顶栏在浅色产品区转深色：侦测首个产品区(#solutions)是否触及顶栏。
+        const lightAnchor = document.getElementById("solutions");
+        let ticking = false;
+        function updateHeader() {
+          ticking = false;
+          if (!lightAnchor) return;
+          document.body.classList.toggle("v2-lighttop", lightAnchor.getBoundingClientRect().top <= 72);
+        }
+        function onScroll() { if (!ticking) { ticking = true; requestAnimationFrame(updateHeader); } }
+        updateHeader();
+        window.addEventListener("scroll", onScroll, { passive: true });
+        window.addEventListener("resize", onScroll);
+      })();
     </script>
   </body>
 </html>
