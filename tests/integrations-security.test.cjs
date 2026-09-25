@@ -73,7 +73,7 @@ assert.match(notificationSchema, /recipientEncrypted\s+String\?\s+@db\.Text/);
 assert.match(notificationSchema, /rental_notification_logs_ws_retry_idx/);
 assert.match(authSource, /CHALLENGE_COOLDOWN_SECONDS/);
 assert.match(authSource, /identifierHash/);
-assert.match(authSource, /SELECT id FROM business_workspaces/);
+assert.match(authSource, /SELECT id FROM Tenant WHERE id = \$\{tenant\.id\} FOR UPDATE/);
 assert.match(authSource, /FOR UPDATE/);
 assert.match(guardSource, /path\.startsWith\("\/platform\/integrations"\)/);
 assert.match(guardSource, /path\.startsWith\("\/rental\/v1\/notification-templates"\)[\s\S]{0,260}return \["system:integration:manage"\]/u);
