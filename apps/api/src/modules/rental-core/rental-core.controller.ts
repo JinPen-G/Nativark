@@ -449,6 +449,12 @@ export class RentalCoreController {
           holidayMultiplier: 1,
           depositAmount: 0,
           minimumUnits: 1,
+          includedUsage: row.includedUsage,
+          excessUsageAmount: row.excessUsageAmount,
+          usagePrecision: row.usagePrecision,
+          tierMode: row.tierMode,
+          tiers: row.tiers,
+          maxAmount: row.maxAmount,
           // 预授权品类的默认规则要求预授权，额度只能在这里随基本价一并给出；
           // 留空则按 0 处理，报价会被预授权闸门如实拦截。
           preAuthAmount: row.preAuthAmount ?? 0

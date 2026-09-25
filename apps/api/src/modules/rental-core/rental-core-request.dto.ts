@@ -6,6 +6,7 @@ import type {
   SaveRentalItemGroupRequest,
   SaveRentalPricingGroupRequest,
   RentalPricingGroupInitialRate,
+  RentalPricingTier,
   RentalPricingUnit,
   AssignRentalWorkOrderRequest,
   CancelRentalWorkOrderRequest,
@@ -25,6 +26,7 @@ import {
   IsString,
   Min,
   Max,
+  IsInt,
   IsNumber,
   MaxLength,
   ValidateNested
@@ -297,6 +299,45 @@ class RentalPricingGroupInitialRateInputDto implements RentalPricingGroupInitial
   @IsNumber()
   @Min(0)
   preAuthAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  includedUsage?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  excessUsageAmount?: number;
+
+  @IsOptional()
+  @IsIn([0, 1, 2])
+  usagePrecision?: 0 | 1 | 2;
+
+  @IsOptional()
+  @IsIn(["progressive"])
+  tierMode?: "progressive";
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalPricingGroupTierInputDto)
+  tiers?: RentalPricingGroupTierInputDto[];
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  maxAmount?: number;
+}
+
+class RentalPricingGroupTierInputDto implements RentalPricingTier {
+  @IsInt()
+  @Min(1)
+  minUnits!: number;
+
+  @IsNumber()
+  @Min(0)
+  unitAmount!: number;
 }
 
 export class CreateRentalWorkOrderDto implements CreateRentalWorkOrderRequest {

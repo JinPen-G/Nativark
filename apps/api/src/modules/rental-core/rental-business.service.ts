@@ -981,6 +981,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         if (row.includedUsage !== undefined && (!Number.isFinite(row.includedUsage) || row.includedUsage < 0)) {
           throw new BadRequestException(`${target.name} 的包含使用量必须是非负数`);
         }
+        if (row.usagePrecision !== undefined && ![0, 1, 2].includes(row.usagePrecision)) {
+          throw new BadRequestException(`${target.name} 的使用量精度只能是整数、0.1 或 0.01`);
+        }
         if (row.excessUsageAmount !== undefined && (!Number.isFinite(row.excessUsageAmount) || row.excessUsageAmount < 0)) {
           throw new BadRequestException(`${target.name} 的超额单价必须是非负数`);
         }
@@ -1001,8 +1004,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         } else if (row.excessUsageAmount === undefined) {
           throw new BadRequestException(`${target.name} 按使用量计价必须填写超额单价或配置分段累进阶梯`);
         }
-      } else if (row.tierMode === "progressive") {
-        throw new BadRequestException(`${target.name} 的分段累进阶梯仅适用于使用量计价`);
+      } else {
+        if (row.tierMode === "progressive") {
+          throw new BadRequestException(`${target.name} 的分段累进阶梯仅适用于使用量计价`);
+        }
+        if (row.includedUsage !== undefined || row.excessUsageAmount !== undefined || row.usagePrecision !== undefined) {
+          throw new BadRequestException(`${target.name} 的包含量、超额单价与使用量精度仅适用于使用量计价`);
+        }
       }
       // 用 undefined 判空而不是真值判断：封顶 0 是合法配置（免租）。
       if (row.maxAmount !== undefined && (!Number.isFinite(row.maxAmount) || row.maxAmount < 0)) {
@@ -4341,6 +4349,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 来自**已发布规则**（需求"由经营空间规则定义"）——两者取数来源不同，不能混。
     const pricingContext = {
       usageQuantity: args.usageQuantity,
+      usagePrecision: rate.usagePrecision,
       timeZone: args.timeZone,
       hourGranularityMinutes: rate.hourGranularityMinutes,
       shiftHours: args.shiftHours,
@@ -5647,6 +5656,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         if (!charge) throw new ConflictException("原订单缺少租金明细，无法计算逾期费");
         const pricingContext = {
           timeZone: quote.pricingContext?.timeZone ?? context.settings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE,
+          usagePrecision: rate.usagePrecision,
           hourGranularityMinutes: rate.hourGranularityMinutes,
           shiftHours: rule.pricing?.shiftHours, shiftStartHours: rule.pricing?.shiftStartHours
         };
@@ -6167,7 +6177,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       fullRentalLineAmounts[target] = roundMoney((fullRentalLineAmounts[target] ?? 0) + full.amount);
       totalBillableUnits += full.units;
       originalBillableUnits += Math.max(rate.minimumUnits, rentalPricingStrategy(rate.unit).billableUnits(args.order.startAt, args.order.endAt, {
-        timeZone, usageQuantity: originalLine?.usageQuantity, hourGranularityMinutes: rate.hourGranularityMinutes,
+        timeZone, usageQuantity: originalLine?.usageQuantity, usagePrecision: rate.usagePrecision, hourGranularityMinutes: rate.hourGranularityMinutes,
         shiftHours: rule.config.pricing?.shiftHours, shiftStartHours: rule.config.pricing?.shiftStartHours
       }));
       chargeLines.push(full.chargeLine);

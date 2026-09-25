@@ -23,6 +23,8 @@ import { DEFAULT_BUSINESS_TIME_ZONE, businessDateKey, businessDateKeyFromIndex, 
  */
 export interface RentalPricingContext {
   usageQuantity?: number;
+  /** 使用量费率的计量精度，超出时向上进位；缺省为整数。 */
+  usagePrecision?: 0 | 1 | 2;
   timeZone?: string;
   /** 小时粒度（分钟）。缺省 60；例如 30 表示不足半小时按半小时计。 */
   hourGranularityMinutes?: number;
@@ -389,7 +391,14 @@ const strategies: Record<RentalPricingUnit, RentalPricingStrategy> = {
       if (typeof usageQuantity !== "number" || !Number.isFinite(usageQuantity) || usageQuantity < 0) {
         throw new BadRequestException("按使用量计价时必须提供有效使用量");
       }
-      return Math.ceil(usageQuantity);
+      const precision = ctx?.usagePrecision ?? 0;
+      if (![0, 1, 2].includes(precision)) throw new BadRequestException("使用量计量精度无效");
+      const scale = 10 ** precision;
+      const scaled = usageQuantity * scale;
+      if (!Number.isFinite(scaled)) throw new BadRequestException("使用量超出可计量范围");
+      // 只把浮点表示误差抵消掉，仍对不足一个计量精度的用量按“开始即计”向上进位。
+      const epsilon = Math.max(1, Math.abs(scaled)) * Number.EPSILON * 4;
+      return Number((Math.ceil(scaled - epsilon) / scale).toFixed(precision));
     },
     // 使用量按里程/工时等指标计费，与日期无一一对应关系，因此不参与逐日取价。
     billableUnitDates: () => [],
@@ -409,6 +418,7 @@ const strategies: Record<RentalPricingUnit, RentalPricingStrategy> = {
     explain: (rate, units) => {
       const detail = usageBreakdown(rate, units);
       const parts = [`包干 ${rate.baseAmount}（含 ${detail.included} 用量）`];
+      if ((rate.usagePrecision ?? 0) > 0) parts.push(`用量按 0.${"0".repeat((rate.usagePrecision ?? 1) - 1)}1 进位`);
       if (detail.progressive) {
         const bands = detail.tierBreakdown ?? [];
         parts.push(bands.length

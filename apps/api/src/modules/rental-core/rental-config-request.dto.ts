@@ -523,6 +523,11 @@ export class RentalPricingRateInputDto {
   @IsNumber()
   @Min(0)
   excessUsageAmount?: number;
+
+  /** 使用量向上计费精度：整数、0.1 或 0.01。 */
+  @IsOptional()
+  @IsIn([0, 1, 2])
+  usagePrecision?: 0 | 1 | 2;
 }
 
 export class SaveRentalPricingPlanDto implements SaveRentalPricingPlanRequest {

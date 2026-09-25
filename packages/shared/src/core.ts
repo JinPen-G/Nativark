@@ -2879,6 +2879,8 @@ export interface RentalPricingRate {
   minimumUnits: number;
   includedUsage?: number;
   excessUsageAmount?: number;
+  /** 使用量进位精度：0 按整数、1 按 0.1、2 按 0.01 向上计费；缺省为 0。 */
+  usagePrecision?: 0 | 1 | 2;
   /** 阶梯计价模式。未指定时保留既有时间租赁「达到档位后整单换价」语义。 */
   tierMode?: RentalPricingTierMode;
   /** 阶梯价。时间租赁按整单重定价；使用量必须显式选择 progressive。 */
@@ -4887,6 +4889,13 @@ export interface RentalPricingGroupInitialRate {
   /** 预授权品类的可选预授权额度：默认规则要求预授权而额度为 0 时报价会 fail-closed。
    *  已启用计划禁止普通编辑、调价计划又只作用于基础价，这里是开业期唯一的配置入口。 */
   preAuthAmount?: number;
+  /** 以下字段仅用于 unit=usage；时间租赁不在新建分组时配置阶梯规则。 */
+  includedUsage?: number;
+  excessUsageAmount?: number;
+  usagePrecision?: 0 | 1 | 2;
+  tierMode?: "progressive";
+  tiers?: RentalPricingTier[];
+  maxAmount?: number;
 }
 
 export interface SaveRentalPricingGroupRequest {
@@ -4896,8 +4905,8 @@ export interface SaveRentalPricingGroupRequest {
   description?: string;
   defaultPricingUnit?: RentalPricingUnit;
   /**
-   * 新建分组时必须同时提交至少一条基本价。这里只接受“计价单位 + 价格”，
-   * 押金、节假日、阶梯价等高级规则不属于分组建立流程。
+   * 新建分组时必须同时提交至少一条基本价。常规时间租赁只配置“计价单位 + 价格”；
+   * 使用量单位必须在此配置包含量、精度与超额价格（或累进阶梯），避免生成不可报价的费率。
    */
   initialRates?: RentalPricingGroupInitialRate[];
   memberItemGroupIds: string[];

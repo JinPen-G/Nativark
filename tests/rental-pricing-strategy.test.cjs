@@ -260,6 +260,16 @@ assert.throws(
   /必须明确配置超额单价/u,
   "不得把基础包干价静默当成超额单价"
 );
+assert.equal(rentalPricingStrategy("usage").billableUnits("2026-01-01T00:00:00Z", "2026-01-01T01:00:00Z", { usageQuantity: 1.2, usagePrecision: 0 }), 2,
+  "整数精度下不足一个单位仍按开始即计向上进位");
+assert.equal(rentalPricingStrategy("usage").billableUnits("2026-01-01T00:00:00Z", "2026-01-01T01:00:00Z", { usageQuantity: 1.21, usagePrecision: 1 }), 1.3,
+  "0.1 精度下用量按开始的计量步进进位");
+assert.equal(rentalPricingStrategy("usage").billableUnits("2026-01-01T00:00:00Z", "2026-01-01T01:00:00Z", { usageQuantity: 1.231, usagePrecision: 2 }), 1.24,
+  "0.01 精度下用量按开始的计量步进进位");
+assert.equal(rentalPricingStrategy("usage").billableUnits("2026-01-01T00:00:00Z", "2026-01-01T01:00:00Z", { usageQuantity: 0.3, usagePrecision: 1 }), 0.3,
+  "浮点表示误差不能让精确 0.3 错误进位到 0.4");
+assert.match(explain("usage", { ...usageRate, usagePrecision: 1 }, 150), /按 0\.1 进位/u,
+  "报价计算说明必须披露用量精度与进位口径");
 
 const progressiveUsage = rateOf({
   unit: "usage",
