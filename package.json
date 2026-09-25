@@ -11,6 +11,7 @@
     "test:membership-workspace": "node tests/membership-workspace-scope.test.cjs",
     "test:tenant-membership-policy": "node --test tests/tenant-membership-policy.test.cjs",
     "test:tenant-membership-db": "npm run build -w @rental-os/shared && node tests/tenant-membership-db.test.cjs",
+    "test:member-benefit-risk-db": "npm run build -w @rental-os/shared && node tests/helpers/run-membership-risk-db.cjs",
     "test:membership-selector-scope": "node tests/membership-selector-workspace.test.cjs",
     "test:client-membership-contract": "npm run build -w @rental-os/shared && node tests/client-membership-contract.test.cjs",
     "test:client-security": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/client-api-security.test.cjs",
