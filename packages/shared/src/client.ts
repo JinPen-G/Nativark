@@ -377,6 +377,48 @@ export interface ClientPaymentIntentResponse {
   message?: string;
 }
 
+/**
+ * 合并支付（购物车多品类一次收款）：把多个订单的租金合并为一次 provider 交易。
+ * 收款账户为租户级，故一笔交易即可承接总额；回调成功后按成员订单分别入账，退款按子订单进行。
+ * 所有订单必须同租户、同币种、各自有未结租金；小程序不提交 openid（服务端可信绑定解析）。
+ */
+export interface ClientCreatePaymentGroupRequest {
+  orderIds: string[];
+  instrument: "rental";
+  method: "alipay" | "wechat_pay" | "stripe";
+  idempotencyKey: string;
+}
+
+/** 小程序原生微信合并支付：支付渠道和 openid 均由服务端可信上下文决定。 */
+export interface ClientMiniProgramPaymentGroupRequest {
+  orderIds: string[];
+  idempotencyKey: string;
+}
+
+export interface ClientPaymentGroupMember {
+  orderId: string;
+  orderNo: string;
+  amount: number;
+  status: "pending" | "paid" | "funding_failed";
+}
+
+export interface ClientPaymentGroupResponse {
+  apiVersion: typeof CLIENT_API_VERSION;
+  groupId: string;
+  provider: "alipay" | "wechat_pay" | "stripe";
+  method: "alipay" | "wechat_pay" | "stripe";
+  /** 合计应付（各成员订单未结租金之和）。 */
+  amount: number;
+  currency: string;
+  status: "pending" | "paid" | "failed" | "funding_failed" | "closed";
+  checkoutUrl?: string;
+  jsapi?: ClientWechatJsapiParameters;
+  expiresAt: string;
+  paidAt?: string;
+  members: ClientPaymentGroupMember[];
+  message?: string;
+}
+
 export interface ClientConfigResponse {
   apiVersion: typeof CLIENT_API_VERSION;
   tenantCode: string;
