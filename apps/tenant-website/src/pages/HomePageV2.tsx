@@ -1,0 +1,55 @@
+import { useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useSite } from '../SiteContext';
+import { HomePage } from './HomePage';
+import { HomeCTA, ProductSection, RentalSteps, ServiceBenefits, Testimonials } from '../components/HomeSections';
+import { VideoScene } from '../components/v2/VideoScene';
+import { DEFAULT_HOME_VERSION, heroScenes } from '../data/heroScenes';
+import '../homeV2.css';
+
+const HOME_VERSION_KEY = 'rental-os-home-version';
+
+// 解析首页版本：URL ?home=1|2 优先并记忆，其次上次选择，最后默认版。
+function resolveVersion(override: string | null): 1 | 2 {
+  try {
+    if (override === '1' || override === '2') {
+      localStorage.setItem(HOME_VERSION_KEY, override);
+      return Number(override) as 1 | 2;
+    }
+    const saved = localStorage.getItem(HOME_VERSION_KEY);
+    if (saved === '1' || saved === '2') return Number(saved) as 1 | 2;
+  } catch {
+    /* localStorage 不可用时回退默认版 */
+  }
+  return DEFAULT_HOME_VERSION as 1 | 2;
+}
+
+export function HomePageV2() {
+  const [params] = useSearchParams();
+  const version = resolveVersion(params.get('home'));
+  const { mode } = useSite();
+
+  // 仅 2.0 首页给 <body> 挂标记：让全局浮窗顶栏在深色视频上转为浅色文字（见 homeV2.css）。
+  useEffect(() => {
+    if (version !== 2) return;
+    document.body.classList.add('v2-home');
+    return () => document.body.classList.remove('v2-home');
+  }, [version]);
+
+  // 保留 1.0：?home=1 时原样渲染旧首页。
+  if (version === 1) return <HomePage />;
+
+  return (
+    <div className="v2-home-root">
+      {heroScenes.map(scene => <VideoScene key={scene.id} scene={scene} />)}
+      {/* 电影感场景之后，自然过渡到产品官网区（复用 1.0 的产品能力/流程/评价/CTA 区块）。 */}
+      <div className="v2-product">
+        <ProductSection mode={mode} />
+        <ServiceBenefits mode={mode} />
+        <RentalSteps />
+        <Testimonials />
+        <HomeCTA />
+      </div>
+    </div>
+  );
+}

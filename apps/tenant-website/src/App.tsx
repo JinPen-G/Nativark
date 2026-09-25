@@ -6,7 +6,7 @@ import { SiteLayout } from './components/SiteLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 // 路由级分包：首屏只加载首页所需代码，其余页面按需加载，减小初始包体。
-const HomePage = lazy(() => import('./pages/HomePage').then(m => ({ default: m.HomePage })));
+const HomePageV2 = lazy(() => import('./pages/HomePageV2').then(m => ({ default: m.HomePageV2 })));
 const ProductsPage = lazy(() => import('./pages/ProductsPage').then(m => ({ default: m.ProductsPage })));
 const ProductDetailPage = lazy(() => import('./pages/ProductDetailPage').then(m => ({ default: m.ProductDetailPage })));
 const BookingPage = lazy(() => import('./pages/BookingPage').then(m => ({ default: m.BookingPage })));
@@ -27,7 +27,7 @@ export function App() {
     <ErrorBoundary>
       <Suspense fallback={<RouteFallback />}>
         <Routes>
-          <Route path="/" element={<HomePage />} />
+          <Route path="/" element={<HomePageV2 />} />
           <Route path="/products" element={<ProductsPage />} />
           <Route path="/category/:categoryId" element={<ProductsPage />} />
           <Route path="/product/:productId" element={<ProductDetailPage />} />

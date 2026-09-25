@@ -1,0 +1,166 @@
+/* ============================================================
+   官网 2.0 沉浸式视频首页样式。作用域全部 .v2-* / body.v2-home，
+   仅由 HomePageV2 import（随 v2 chunk 代码分割），不影响 1.0。
+   ============================================================ */
+
+.v2-home-root { background: #0b0f14; }
+
+/* —— 整屏视频场景 —— */
+.v2-scene {
+  position: relative;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  overflow: hidden;
+  isolation: isolate;
+  color: #fff;
+  background-color: #0b0f14;
+  background-image: var(--scene-fallback);
+  background-size: cover;
+  background-position: var(--scene-pos, center center);
+}
+.v2-scene-video {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: var(--scene-pos, center center);
+  background: transparent;
+  opacity: 0;
+  transition: opacity .6s ease;
+}
+.v2-scene-ready .v2-scene-video { opacity: 1; }
+.v2-scene-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(6, 9, 13, .66) 0%, rgba(6, 9, 13, .32) 34%, rgba(6, 9, 13, 0) 62%),
+    linear-gradient(180deg, rgba(6, 9, 13, .46) 0%, rgba(6, 9, 13, 0) 20%, rgba(6, 9, 13, 0) 60%, rgba(6, 9, 13, .52) 100%);
+}
+
+/* —— 文字层 —— */
+.v2-scene-content {
+  position: relative;
+  z-index: 2;
+  align-self: center;
+  width: 100%;
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: 0 clamp(22px, 5vw, 96px);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(14px, 1.8vw, 24px);
+  text-shadow: 0 2px 20px rgba(0, 0, 0, .4);
+}
+.v2-scene-eyebrow {
+  margin: 0;
+  font-size: clamp(11px, 1vw, 13px);
+  font-weight: var(--fw-semibold);
+  letter-spacing: .3em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, .82);
+}
+.v2-scene-title {
+  margin: 0;
+  font-weight: var(--fw-semibold);
+  line-height: .98;
+  letter-spacing: -.02em;
+}
+.v2-title-line { display: block; }
+.v2-title-gap { display: block; height: .38em; }
+.v2-scene-hero .v2-scene-title { font-size: clamp(46px, 8.4vw, 118px); }
+.v2-scene-scene .v2-scene-title { font-size: clamp(44px, 7.6vw, 108px); }
+.v2-scene-subtitle {
+  margin: 0;
+  max-width: 42ch;
+  font-size: clamp(14px, 1.35vw, 19px);
+  font-weight: var(--fw-regular);
+  letter-spacing: .01em;
+  color: rgba(255, 255, 255, .85);
+}
+.v2-scene-cta {
+  align-self: flex-start;
+  margin-top: clamp(6px, 1.2vw, 18px);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 2px;
+  border: 0;
+  background: none;
+  color: #fff;
+  font: inherit;
+  font-size: clamp(14px, 1.05vw, 16px);
+  font-weight: var(--fw-medium);
+  letter-spacing: .04em;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform .2s ease;
+}
+.v2-scene-cta span { transition: transform .2s ease; }
+.v2-scene-cta:hover span { transform: translateX(4px); }
+
+/* —— 进入淡入（克制，无 bounce）—— */
+.v2-scene-content > * {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity .85s cubic-bezier(.22, .61, .36, 1), transform .85s cubic-bezier(.22, .61, .36, 1);
+}
+.v2-scene.is-inview .v2-scene-content > * { opacity: 1; transform: none; }
+.v2-scene.is-inview .v2-scene-content > *:nth-child(2) { transition-delay: .07s; }
+.v2-scene.is-inview .v2-scene-content > *:nth-child(3) { transition-delay: .14s; }
+.v2-scene.is-inview .v2-scene-content > *:nth-child(4) { transition-delay: .2s; }
+
+/* —— 电影感之后自然过渡到产品官网区 —— */
+.v2-product {
+  position: relative;
+  z-index: 3;
+  background: var(--page);
+  padding-top: clamp(48px, 7vw, 104px);
+}
+
+/* —— 顶栏浮在视频上：未滚动时转浅色，深色视频上可读；不改结构、不改 Logo —— */
+body.v2-home .site-header { position: fixed; }
+body.v2-home .site-header:not(.is-scrolled) .main-nav a,
+body.v2-home .site-header:not(.is-scrolled) .brand-slogan,
+body.v2-home .site-header:not(.is-scrolled) .header-orders,
+body.v2-home .site-header:not(.is-scrolled) .header-account,
+body.v2-home .site-header:not(.is-scrolled) .language-switcher-header,
+body.v2-home .site-header:not(.is-scrolled) .theme-switcher-header { color: #fff; }
+body.v2-home .site-header:not(.is-scrolled) .header-account,
+body.v2-home .site-header:not(.is-scrolled) .language-switcher-header,
+body.v2-home .site-header:not(.is-scrolled) .theme-switcher-header,
+body.v2-home .site-header:not(.is-scrolled) .header-search { border-color: rgba(255, 255, 255, .4); }
+body.v2-home .site-header:not(.is-scrolled) .header-search,
+body.v2-home .site-header:not(.is-scrolled) .header-search input { color: #fff; }
+body.v2-home .site-header:not(.is-scrolled) .header-search input::placeholder { color: rgba(255, 255, 255, .6); }
+html[data-theme="light"] body.v2-home .site-header:not(.is-scrolled) .brand-logo { filter: brightness(0) invert(1); }
+
+/* —— 移动端 —— */
+@media (max-width: 768px) {
+  .v2-scene-video { object-position: var(--scene-pos-mobile, center center); }
+  .v2-scene { background-position: var(--scene-pos-mobile, center center); }
+  .v2-scene-scrim {
+    background: linear-gradient(180deg, rgba(6, 9, 13, .52) 0%, rgba(6, 9, 13, .32) 38%, rgba(6, 9, 13, .34) 62%, rgba(6, 9, 13, .56) 100%);
+  }
+  .v2-scene-content { padding: 0 22px; gap: 14px; }
+  .v2-scene-hero .v2-scene-title { font-size: clamp(32px, 12.5vw, 60px); }
+  .v2-scene-scene .v2-scene-title { font-size: clamp(36px, 13.5vw, 66px); }
+  .v2-scene-subtitle { font-size: 14px; max-width: 32ch; }
+}
+
+/* —— 减少动效 —— */
+@media (prefers-reduced-motion: reduce) {
+  .v2-scene-content > *,
+  .v2-scene-video,
+  .v2-scene-cta,
+  .v2-scene-cta span {
+    transition: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+  }
+}
