@@ -7,7 +7,6 @@ const PREFIX = "rental-os:";
 export const STORAGE_KEYS = {
   session: `${PREFIX}session`,
   cart: `${PREFIX}cart`,
-  basket: `${PREFIX}basket`,
   bootstrap: `${PREFIX}bootstrap`,
   lastService: `${PREFIX}last-service`,
   actionKeys: `${PREFIX}action-keys`,
@@ -16,8 +15,8 @@ export const STORAGE_KEYS = {
   themeMode: `${PREFIX}theme-mode`
 } as const;
 
-/** 退出登录后仍可保留的键：商户公开信息、上次选择的服务、本机收藏、购物车与深浅色偏好不含私密数据（收藏与购物车按客户分开保存）。 */
-const KEEP_ON_SIGN_OUT = new Set<string>([STORAGE_KEYS.bootstrap, STORAGE_KEYS.lastService, STORAGE_KEYS.favorites, STORAGE_KEYS.basket, STORAGE_KEYS.themeMode]);
+/** 退出登录后仍可保留的键：商户公开信息、上次选择的服务、本机收藏与深浅色偏好，均不含私密数据（收藏按客户分开保存）。 */
+const KEEP_ON_SIGN_OUT = new Set<string>([STORAGE_KEYS.bootstrap, STORAGE_KEYS.lastService, STORAGE_KEYS.favorites, STORAGE_KEYS.themeMode]);
 
 export function readStorage<T>(key: string): T | undefined {
   try {

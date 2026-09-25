@@ -2,7 +2,6 @@ import { themeBehavior } from "../../core/theme-behavior";
 import type { ClientCatalogItem, ClientCatalogPricingGroup, ClientCatalogResponse } from "@rental-os/shared";
 import { fetchQualificationTypes } from "../../api/profile";
 import { CartLocked, CartServiceMismatch, addLine } from "../../core/cart";
-import { addToBasket } from "../../core/basket";
 import { listAttribute, loadCatalog, pricingOptionsFor, primaryLocation, specEntries, specsOf } from "../../core/catalogStore";
 import { describeError } from "../../core/errors";
 import { favoriteEvents, isFavorite, toggleFavorite } from "../../core/favorites";
@@ -85,9 +84,8 @@ Page({
 
   itemId: "" as string,
   serviceCode: "" as string,
-  serviceCategoryCode: "" as string,
-  /** 选项弹层的目标动作：直接预约还是加入购物车。 */
-  pendingAction: "reserve" as "reserve" | "cart",
+  /** 选项弹层的目标动作（当前仅直接预约）。 */
+  pendingAction: "reserve" as "reserve",
   reserving: false,
   unsubscribe: undefined as (() => void) | undefined,
 
@@ -96,7 +94,6 @@ Page({
     this.serviceCode = options.service || (isSignedIn() ? currentServiceCode() : lastServiceCode()) || "";
     const merchant = cachedMerchant();
     const service = findService(merchant, this.serviceCode);
-    this.serviceCategoryCode = service?.categoryCode ?? "";
     this.setData({ serviceName: service?.name ?? "", servicePhone: merchant?.servicePhone ?? "", signedIn: isSignedIn(), favorite: isFavorite(this.itemId) });
     this.unsubscribe = favoriteEvents.on(() => this.setData({ favorite: isFavorite(this.itemId) }));
   },
@@ -235,8 +232,7 @@ Page({
 
   onPickOption(event: WechatMiniprogram.TouchEvent) {
     this.setData({ optionId: String(event.currentTarget.dataset.id ?? ""), showOptionSheet: false });
-    if (this.pendingAction === "cart") this.addCurrentToBasket();
-    else void this.reserve();
+    void this.reserve();
   },
 
   onStoreTap() {
@@ -260,32 +256,6 @@ Page({
       return;
     }
     void this.reserve();
-  },
-
-  /** 加入购物车（长期保存，可跨品类）：不锁库存、不要求先登录（游客购物车登录后并入本人）。 */
-  onAddToCart() {
-    if (!this.data.item) return;
-    if (!this.data.options.length) {
-      toast("该设备暂无可选租赁选项，请联系商户", { duration: 3000 });
-      return;
-    }
-    this.pendingAction = "cart";
-    if (!this.data.optionId && this.data.options.length > 1) {
-      this.setData({ showOptionSheet: true });
-      return;
-    }
-    this.addCurrentToBasket();
-  },
-
-  addCurrentToBasket() {
-    const item = this.data.item;
-    const option = this.data.options.find((row) => row.id === this.data.optionId) ?? this.data.options[0];
-    if (!item || !option) return;
-    addToBasket(
-      { serviceCode: this.serviceCode, serviceName: this.data.serviceName, categoryCode: this.serviceCategoryCode },
-      { itemGroupId: item.id, itemName: item.name, pricingGroupId: option.id, pricingGroupName: option.name, inventoryMode: item.inventoryMode, imageSource: item.images?.[0]?.url ?? "" }
-    );
-    toast("已加入购物车", { icon: "success" });
   },
 
   /** 加入本次租赁（不锁库存）并进入确认订单页。 */

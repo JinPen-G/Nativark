@@ -1,5 +1,4 @@
 import { themeBehavior } from "../../core/theme-behavior";
-import { basketCount, basketEvents } from "../../core/basket";
 import { cachedCatalog, facetsOf, loadCatalog, searchItems, takePendingSearch, toItemCard, type ItemCard } from "../../core/catalogStore";
 import { switchService } from "../../core/flow";
 import { isApiError } from "../../core/http";
@@ -20,16 +19,14 @@ interface CatalogData {
   cards: ItemCard[];
   view: ViewState;
   total: number;
-  basketCount: number;
 }
 
 Page({
   behaviors: [themeBehavior],
-  data: { query: "", services: [], facets: [], activeFacet: "", cards: [], view: loadingState(), total: 0, basketCount: 0 } as CatalogData,
+  data: { query: "", services: [], facets: [], activeFacet: "", cards: [], view: loadingState(), total: 0 } as CatalogData,
   serviceCode: "" as string,
   loadVersion: 0,
   unsubscribe: undefined as (() => void) | undefined,
-  offBasket: undefined as (() => void) | undefined,
 
   onLoad(options: Record<string, string | undefined>) {
     this.setData({ query: (options.q ?? "").slice(0, 50), activeFacet: options.facet ?? "" });
@@ -38,16 +35,13 @@ Page({
       this.serviceCode = "";
       void this.load(false);
     });
-    this.offBasket = basketEvents.on(() => this.setData({ basketCount: basketCount() }));
   },
 
   onUnload() {
     this.unsubscribe?.();
-    this.offBasket?.();
   },
 
   onShow() {
-    this.setData({ basketCount: basketCount() });
     const pending = takePendingSearch();
     if (pending) this.setData({ query: pending });
     void this.load(false);
@@ -148,10 +142,6 @@ Page({
 
   onItemTap(event: WechatMiniprogram.TouchEvent) {
     navigate(buildUrl(ROUTES.item, { id: String(event.currentTarget.dataset.id ?? ""), service: this.serviceCode }));
-  },
-
-  onCart() {
-    navigate(ROUTES.cart);
   },
 
   onViewAction() {

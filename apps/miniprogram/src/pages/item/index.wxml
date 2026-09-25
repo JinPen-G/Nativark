@@ -88,7 +88,6 @@
 
     <view class="bottom-bar">
       <button class="btn btn--outline btn--cta" hover-class="btn-hover" bindtap="onContact" style="min-width:112rpx"><ui-icon name="headset" size="34" color="primary"></ui-icon></button>
-      <button class="btn btn--outline btn--cta grow ml-12" hover-class="btn-hover" bindtap="onAddToCart">加入购物车</button>
       <button class="btn btn--primary btn--cta grow ml-12" hover-class="btn-hover" bindtap="onReserve">立即预约</button>
     </view>
 

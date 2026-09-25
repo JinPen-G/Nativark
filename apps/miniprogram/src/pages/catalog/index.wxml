@@ -41,9 +41,4 @@
     </view>
     <view class="muted small center mt-16">共 {{cards.length}} 件 · 参考价以租期报价为准</view>
   </view>
-
-  <view class="cart-fab" hover-class="btn-hover" bindtap="onCart">
-    <ui-icon name="box" size="44" color="onPrimary"></ui-icon>
-    <view wx:if="{{basketCount}}" class="cart-fab__badge">{{basketCount}}</view>
-  </view>
 </view>

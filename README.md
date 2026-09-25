@@ -171,7 +171,7 @@ npm run test:miniprogram            # 36 项静态/宿主替身测试：页面/T
 
 一个租户一个包。换租户只需修改 `apps/miniprogram/src/config/public.ts` 的 `tenantCode`（首版绑定演示租户 `demo`，与 `npm run db:seed:demo` 一致）；正式发布时把 `apiOrigin` 改为 HTTPS 地址、填入该小程序的 `appId`，再执行 `npm run build:miniprogram:release`。环境变量 `MINIPROGRAM_TENANT_CODE` / `MINIPROGRAM_API_ORIGIN` / `MINIPROGRAM_APP_ID` 仅在显式设置时覆盖代码常量，供 CI 批量打包。包通过租户编码确定商户，商户名称、Logo、客服、协议、帮助等展示内容来自租户级客户端渠道配置；AppSecret 只保存在服务端 `mini_program_channels` 的加密列，不进小程序包。
 
-工程分层：`src/config/public.ts`（包内唯一部署配置，全部公开）、`src/core/*`（请求、会话、清单、支付、状态、时区、路由、收藏、目录缓存）、`src/api/*`（客户端 API 封装）、`src/contracts/planned.ts`（已交付契约清单与静态对账入口）、`src/pages/*`（22 页 / 4 Tab）、`src/components/*`（7 个组件）、`src/assets/*`（品牌 Logo 与 Tab 图标，由 `scripts/generate-assets.cjs` 生成）。共享契约只允许 `import type`，构建会拒绝运行时依赖。
+工程分层：`src/config/public.ts`（包内唯一部署配置，全部公开）、`src/core/*`（请求、会话、清单、支付、状态、时区、路由、收藏、目录缓存）、`src/api/*`（客户端 API 封装）、`src/contracts/planned.ts`（已交付契约清单与静态对账入口）、`src/pages/*`（21 页 / 4 Tab）、`src/components/*`（7 个组件）、`src/assets/*`（品牌 Logo 与 Tab 图标，由 `scripts/generate-assets.cjs` 生成）。共享契约只允许 `import type`，构建会拒绝运行时依赖。
 
 页面按 V2 设计稿实现，覆盖首页、分类、设备详情、确认订单、订单列表、我的等主要流程。用微信开发者工具导入 `apps/miniprogram`（工程根目录含 `project.config.json`，代码目录为 `dist/`）；没有正式 AppID 时选测试号，并在「详情 → 本地设置」勾选不校验合法域名。本机联调需先 `npm run dev` 启动 API 并执行过 `npm run db:seed:demo`；联调构建会在 `dist/config/public.json` 写入 `allowLocalApi: true`，仅放宽回环地址，发布构建不带该标记。
 

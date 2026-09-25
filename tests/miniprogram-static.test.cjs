@@ -137,7 +137,7 @@ test("app.json 声明 21 个页面、4 个 Tab（带图标），每个页面与�
   if ((app.requiredPrivateInfos ?? []).includes("getLocation")) {
     assert.ok(app.permission && app.permission["scope.userLocation"] && app.permission["scope.userLocation"].desc, "声明 getLocation 必须同时配 permission.scope.userLocation.desc");
   }
-  const componentTags = ["nav-bar", "ui-icon", "state-view", "money-text", "status-tag", "sheet"];
+  const componentTags = ["nav-bar", "ui-icon", "state-view", "money-text", "status-tag", "sheet", "lazy-image"];
   const registeredComponents = new Set();
   for (const route of app.pages) {
     for (const ext of ["ts", "json", "wxml", "wxss"]) assert.ok(read(`${route}.${ext}`).trim(), `${route}.${ext} 缺失或为空`);
@@ -192,10 +192,11 @@ test("页面 WXML 里的每个数据绑定都对应页面 data 的已声明字�
   const componentProps = {
     "nav-bar": ["title", "back", "transparent"],
     "ui-icon": ["name", "color", "size", "filled", "stroke"],
-    "state-view": ["state", "title", "message", "actionText", "secondaryText", "compact"],
+    "state-view": ["state", "title", "message", "actionText", "secondaryText", "compact", "skeleton"],
     "money-text": ["amount", "currency", "size", "signed", "prefix", "tone"],
     "status-tag": ["label", "tone", "small"],
-    sheet: ["visible", "title", "closable", "footer"]
+    sheet: ["visible", "title", "closable", "footer"],
+    "lazy-image": ["source", "mode", "emptyText", "fallbackIcon", "iconColor", "iconSize"]
   };
   for (const route of app.pages) {
     const tsText = read(`${route}.ts`);
@@ -229,7 +230,7 @@ test("页面 WXML 里的每个数据绑定都对应页面 data 的已声明字�
         assert.ok(dataKeys.has(name), `${route}.wxml 绑定了未声明的数据字段 ${name}（表达式：${match[1].trim()}）`);
       }
     }
-    for (const match of wxml.matchAll(/<(nav-bar|ui-icon|state-view|money-text|status-tag|sheet)\b([^>]*)>/g)) {
+    for (const match of wxml.matchAll(/<(nav-bar|ui-icon|state-view|money-text|status-tag|sheet|lazy-image)\b([^>]*)>/g)) {
       for (const attribute of match[2].matchAll(/\s([a-zA-Z:-]+)=/g)) {
         const name = attribute[1];
         if (/^(wx:|bind|catch|class$|style$|slot$|hover-class$|data-)/.test(name)) continue;

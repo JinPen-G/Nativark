@@ -26,7 +26,7 @@
 - 登录与账号：微信手机号一键登录、短信验证码登录、账号密码登录与注册、在线注销、绑定微信（用于小程序内支付）。
 - 目录与报价：游客公开目录、目录与服务端参考起价、库存与档期校验、服务端报价与优惠券。
 - 下单与订单：幂等下单、统一本人订单索引（`GET /my/orders`）、取消预览与取消、续租、检查费用确认与异议、资金状态。
-- 购物车：长期保存、可跨品类的购物车，按服务分组管理数量与勾选。单品类结算进入现有确认页；多品类合并结算与一次性收款依赖后端支付组，落地前先给出说明入口。
+- 本次租赁清单：单品类空间、单租期、单取还地点的临时清单（`core/cart`）。从商品详情「立即预约」进入确认页下单；不同品类、不同租期或不同取还地点分别预约、分别下单，不做跨品类合并结算。
 - 支付：小程序内微信 JSAPI 支付（`instrument: "rental"`，服务端返回 JSAPI 参数后调 `wx.requestPayment`；openid 只来自服务端可信绑定，不从请求体或 Native code_url 推导），同时展示线下现金、转账等方式。
 - 个人中心：资料、会员方案与权益、资质类型与提交（签名上传/下载）、收藏、优惠券、地址簿。
 
@@ -37,7 +37,7 @@ apps/miniprogram
 ├─ src/
 │  ├─ app.json / app.ts / app.wxss / theme.json / sitemap.json
 │  ├─ config/public.ts     # 包内唯一部署配置，全部公开（apiOrigin/tenantCode/appId/allowLocalApi）
-│  ├─ core/                # http、会话、支付、购物车、目录缓存、流程、主题、导航、金额…
+│  ├─ core/                # http、会话、支付、租赁清单、目录缓存、流程、主题、导航、金额…
 │  ├─ api/                 # 客户端 API 封装（auth/catalog/orders/payments/profile/addresses/merchant）
 │  ├─ components/          # nav-bar / lazy-image / money-text / sheet / state-view / status-tag / ui-icon
 │  ├─ pages/               # 页面
@@ -47,7 +47,7 @@ apps/miniprogram
 └─ project.config.json
 ```
 
-页面共 22 个（`src/app.json`），底部 4 个 Tab：首页 `home`、分类 `catalog`、订单 `orders`、我的 `me`；其余为 splash、item、checkout、cart、pay、order、extend、login、register、closure、profile、qualifications、benefits、favorites、coupons、locations、addresses、legal。
+页面共 21 个（`src/app.json`），底部 4 个 Tab：首页 `home`、分类 `catalog`、订单 `orders`、我的 `me`；其余为 splash、item、checkout、pay、order、extend、login、register、closure、profile、qualifications、benefits、favorites、coupons、locations、addresses、legal。
 
 ## 本地开发与预览
 

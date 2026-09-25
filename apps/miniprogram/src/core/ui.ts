@@ -11,7 +11,6 @@ export const ROUTES = {
   me: "/pages/me/index",
   item: "/pages/item/index",
   checkout: "/pages/checkout/index",
-  cart: "/pages/cart/index",
   pay: "/pages/pay/index",
   order: "/pages/order/index",
   extend: "/pages/extend/index",

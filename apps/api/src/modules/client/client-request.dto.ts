@@ -1,6 +1,4 @@
 import {
-  ArrayMaxSize,
-  ArrayMinSize,
   ArrayNotEmpty,
   IsArray,
   IsBoolean,
@@ -33,8 +31,6 @@ import {
   type ClientCreateQuoteRequest,
   type ClientMembershipLoginRequest,
   type ClientMiniProgramPaymentIntentRequest,
-  type ClientCreatePaymentGroupRequest,
-  type ClientMiniProgramPaymentGroupRequest,
   type ClientMyOrdersQuery,
   type ClientProfileUpdateRequest,
   type ClientOrderExtensionRequest,
@@ -547,29 +543,6 @@ export class ClientPaymentIntentRequestDto implements ClientPaymentIntentRequest
 
   @IsIn(["alipay", "wechat_pay"])
   method!: ClientPaymentIntentRequest["method"];
-
-  @IsString() @IsNotEmpty() @MaxLength(191)
-  idempotencyKey!: string;
-}
-
-export class ClientCreatePaymentGroupRequestDto implements ClientCreatePaymentGroupRequest {
-  @IsArray() @ArrayMinSize(2) @ArrayMaxSize(20) @IsString({ each: true }) @MaxLength(191, { each: true })
-  orderIds!: string[];
-
-  @IsIn(["rental"])
-  instrument!: "rental";
-
-  @IsIn(["alipay", "wechat_pay", "stripe"])
-  method!: ClientCreatePaymentGroupRequest["method"];
-
-  @IsString() @IsNotEmpty() @MaxLength(191)
-  idempotencyKey!: string;
-}
-
-/** 小程序合并支付：方式固定微信、openid 由服务端可信绑定解析，故只收订单与幂等键。 */
-export class ClientMiniProgramPaymentGroupRequestDto implements ClientMiniProgramPaymentGroupRequest {
-  @IsArray() @ArrayMinSize(2) @ArrayMaxSize(20) @IsString({ each: true }) @MaxLength(191, { each: true })
-  orderIds!: string[];
 
   @IsString() @IsNotEmpty() @MaxLength(191)
   idempotencyKey!: string;
