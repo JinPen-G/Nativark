@@ -58,6 +58,6 @@ Vite 已把 `/api` 代理到本地 API（可用 `VITE_API_TARGET` 覆盖目标�
 
 **已接入**：租户识别（含自定义域名）、品牌/主色/官网内容（bootstrap `client=web`）、已发布品类导航与首页形态、商品列表与详情（public catalog）；**登录态全链路**——短信/密码/注册登录（令牌按租户隔离、401 自动续期）、库存与档期（`/availability`）、服务端报价与押金（`/quotes`）、下单（`/orders`，自动切换到商品所属经营空间）、我的订单与详情（`/my/orders`、`/orders/:id`）、在线支付入口（`/payment-intents`，按 `/payment/capabilities` 显示可用方式，未开通则提示线下）、账户中心（配送地址簿 `/profile/addresses`、优惠券 `/coupons`、通知 `/notifications`）。演示模式（`?tenant=`）不连后端，下单仍走本地 localStorage。
 
-**仍依赖后端能力**：真实在线支付需租户在后台启用支付宝/微信并通过 live 校验（demo 租户为 offline/simulation）；后端暂无商品评价、二级分类结构与营销区块 CMS，这些位置前端按诚实占位处理。
+**仍依赖后端能力**：真实在线支付需租户在后台启用收单平台并通过 live 连接测试——境内租户用支付宝/微信（结算 CNY），境外主体租户用 **Stripe**（HKD/SGD/USD/EUR 等,收银台内可含卡与支付宝/微信付款方式）；demo 租户仍为 offline/simulation。可用币种与方式由 `/payment/capabilities` 按租户配置返回,前端据此渲染,未开通则提示线下。后端暂无商品评价、二级分类结构与营销区块 CMS，这些位置前端按诚实占位处理。
 
 **联调验证脚本**（对本地 dev API）：`node apps/tenant-website/scripts/verify-remote-mapping.mjs demo demo2`（品牌+品类+商品映射）、`node apps/tenant-website/scripts/verify-order-flow.mjs demo`（注册→登录→报价→下单→订单全链路）。

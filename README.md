@@ -2,7 +2,21 @@
 
 面向**多品类实物租赁**的多租户 SaaS 平台。一套通用租赁内核（Rental Core）经营摄影设备、露营装备、车辆载具和工程设备，品类差异通过经营空间的业务规则与按需启用的 capability 表达，而不是靠代码里的品类分支。
 
-现有交付包括**营运管理端、后台 API、原生微信小程序和企业官网**。小程序首期页面及多数接口已经实现，仍在收口真库组合、真实 AppID/支付/短信/文件和真机验收；预约网站与独立 APP 尚未启动。当前任务从[开发任务总索引](docs/多品类租赁平台开发任务.md)进入对应分册。
+现有交付包括**运营管理端、后台 API、两个微信小程序(客户端与员工端)、租户消费者官网与平台营销官网**。核心租赁、下单与在线支付适配器(境内支付宝/微信 + 境外 Stripe 多币种)均已实现,仍在收口真实 AppID / 收单账户 / 短信 / 文件、真机与真库验收;独立 APP 尚未启动。当前任务从[开发任务总索引](docs/多品类租赁平台开发任务.md)进入对应分册。
+
+各端使用与构建细节见其自身 README:[客户端小程序](apps/miniprogram/README.md)、[员工端小程序](apps/staff-miniprogram/README.md)、[租户消费者官网](apps/tenant-website/README.md)、[平台营销官网](apps/website/README.md)。
+
+## 目录
+
+- [1. 三层身份，别混淆](#1-三层身份别混淆)
+- [2. 一套内核，按空间启用能力](#2-一套内核按空间启用能力)
+- [3. 仓库地图](#3-仓库地图)
+- [4. 架构约束，以及执行它的东西](#4-架构约束以及执行它的东西)
+- [5. 本地启动](#5-本地启动)
+- [6. 验证](#6-验证)
+- [7. 运维演练](#7-运维演练)
+- [8. 已知边界与技术债](#8-已知边界与技术债)
+- [9. 文档](#9-文档)
 
 ---
 
@@ -53,16 +67,20 @@ capability 由经营空间按需启用，注册表本身在启动期做一致性
 ## 3. 仓库地图
 
 ```text
-apps/api           NestJS 10 + Prisma 5，统一前缀 /api
-apps/admin         React 19 + Ant Design 6 + Vite 8 管理端
-apps/miniprogram   原生微信小程序 + TypeScript 客户端（V2 设计稿，一个租户一个包，默认 demo 租户，尚未接真实AppID）
-apps/website       Rental OS 企业官网（不是租户预约网站）
-packages/shared    前后端唯一契约来源，按依赖方向拆成 core / platform / infrastructure / common
-apps/api/prisma    schema.prisma 与增量迁移
-scripts            契约、DTO、鉴权、管理端的静态门禁 + scripts/ops 运维演练
-tests              纯计算、静态契约、专项和真库 E2E
-docs               正式需求、分端任务、技术、数据库与界面规范
+apps/api               NestJS 10 + Prisma 5，统一前缀 /api
+apps/admin             React 19 + Ant Design 6 + Vite 8 运营管理端
+apps/miniprogram       原生微信小程序 + TypeScript 客户端（一个租户一个包，默认 demo 租户）
+apps/staff-miniprogram 原生微信小程序 + TypeScript 员工端（一套包服务所有租户，登录时输入租户编码）
+apps/tenant-website    React 19 + Vite 8 租户消费者官网（一套部署多租户，报价/下单/支付/账户）
+apps/website           Rental OS 平台营销官网（纯静态，非租户前台）
+packages/shared        前后端唯一契约来源，按依赖方向拆成 core / platform / infrastructure / common
+apps/api/prisma        schema.prisma 与增量迁移
+scripts                契约、DTO、鉴权、管理端的静态门禁 + scripts/ops 运维演练
+tests                  纯计算、静态契约、专项和真库 E2E
+docs                   正式需求、分端任务、技术、数据库与界面规范
 ```
+
+每个 `apps/*` 都有自己的 README,说明各自的构建、预览与配置;本文件只讲平台整体与共同约束。
 
 ### API 模块
 
@@ -161,7 +179,7 @@ npm run test:miniprogram            # 34 项静态/宿主替身测试：页面/T
 
 **一个租户一个包。** 换租户只改 `apps/miniprogram/src/config/public.ts` 里的 `tenantCode`（第一版绑定演示租户 `demo`，与 `npm run db:seed:demo` 一致），正式发布再把 `apiOrigin` 改成 HTTPS 地址、填上该小程序的 `appId`，然后 `npm run build:miniprogram:release`。环境变量 `MINIPROGRAM_TENANT_CODE` / `MINIPROGRAM_API_ORIGIN` / `MINIPROGRAM_APP_ID` 只在显式设置时覆盖代码常量，供 CI 批量打包。包通过租户编码确定商户，页面展示的商户名称、Logo、客服、协议和帮助内容来自租户级客户端渠道配置；**AppSecret 只保存在服务端 `mini_program_channels`（加密列），绝不进小程序包。**
 
-工程分层：`src/config/public.ts`（包内唯一部署配置，全部公开）、`src/core/*`（请求、会话、清单、支付、状态、时区、路由、收藏、目录缓存）、`src/api/*`（客户端 API 封装）、`src/contracts/planned.ts`（已交付契约清单和静态对账入口）、`src/pages/*`（20 页 / 4 Tab：首页、分类、订单、我的）与 `src/components/*`（6 个组件：自定义导航栏、线性图标、状态视图、金额、状态标签、半屏面板）、`src/assets/*`（品牌 Logo 与 Tab 图标，由 `scripts/generate-assets.cjs` 从品牌资源包生成）。共享契约只允许 `import type`，构建会拒绝运行时依赖。
+工程分层：`src/config/public.ts`（包内唯一部署配置，全部公开）、`src/core/*`（请求、会话、清单、支付、状态、时区、路由、收藏、目录缓存）、`src/api/*`（客户端 API 封装）、`src/contracts/planned.ts`（已交付契约清单和静态对账入口）、`src/pages/*`（21 页 / 4 Tab：首页、分类、订单、我的）与 `src/components/*`（6 个组件：自定义导航栏、线性图标、状态视图、金额、状态标签、半屏面板）、`src/assets/*`（品牌 Logo 与 Tab 图标，由 `scripts/generate-assets.cjs` 从品牌资源包生成）。共享契约只允许 `import type`，构建会拒绝运行时依赖。
 
 页面按 V2 设计稿实现：首页（搜索 → 主题横幅 → 品类入口 → 热门推荐 → 附近服务点）、分类（服务标签页 + 品牌/分类芯片 + 商品行，显示服务端参考起价）、设备详情（大图/收藏/分享 → 起价 → 标签 → 简介 → 主要参数 → 适用场景 → 服务门店 → 联系客服/立即预约）、确认订单（商品 → 租赁时间 → 取还方式 → 自提门店 → 优惠券 → 押金说明 → 备注 → 费用明细 → 确认预约）、订单列表（全部/待支付/待取货/租赁中/已完成，查看详情/再次下单）、我的（会员横幅、我的订单/收藏/优惠券、实名认证/常用服务点/帮助与客服/设置）。
 
@@ -225,7 +243,7 @@ npm run test:rule-version-chain-mutation
 写在这里而不是藏着，因为它们会直接影响你怎么读代码：
 
 - **早期单品类租赁域已整体退役**（2026-09-04）：旧 API 路由、业务模块、管理端 8 个退役页面、两个 API 客户端里 182 个遗留函数，以及 57 张只服务于它们的表全部删除。当前权限码统一使用 `rental-os:*` 命名空间，业务代码不再依赖旧域命名。
-- **支付、预授权、通知目前是模拟的**，状态必须用 `simulated` 或同等明确语义，不得记录或展示为真实收款、冻结、发送、送达。
+- **在线支付适配器已实现,但需真实凭证才生效**:境内支付宝/微信、境外 Stripe(多币种)已接入 `PaymentRuntimeService`(下单/查单/退款/回调验签/连接测试),收单平台按经营空间结算币种过滤——境内 = 支付宝/微信(CNY),境外 = Stripe(HKD/SGD/USD/EUR)。但每个租户须在后台配置真实密钥并通过 live 连接测试后才走真实收款;demo 与未配置租户仍为 offline/simulation,待真实收单账户联调。**押金、预授权、通知目前仍是模拟的**,状态必须用 `simulated` 或同等明确语义,不得记录或展示为真实冻结、发送、送达。
 - **不做跨空间汇总**。跨空间的订单、收入、库存、客户消费汇总不在当前阶段；未来做也只能基于明确的租户级查询权限。
 - **`tests/mysql-e2e.test.cjs` 里仍有历史专用段落**（7 处、约 49 行引用）。它需要专用库才能跑、不在默认门禁里，因此这次没有动——盲改这个 10k 行的唯一真库 E2E 只会造出一份看起来有覆盖的假象。修它需要一次带专用库的专门会话。
 - **`requiredCapability` 目前只映射两个已删除的历史调度/T-Box 前缀**。守卫层的能力门禁机制本身是活的、且被 `extension-consistency` 的变异测试钉着（未启用必拒、缺服务 fail-closed），所以刻意保留；但它需要重新指向一个**现行**的应受能力约束的路由，这是个产品决定。
@@ -248,6 +266,7 @@ npm run test:rule-version-chain-mutation
 | [已完成任务归档](docs/归档/多品类租赁平台已完成任务归档.md) | 唯一历史归档，不作为当前排期 |
 | [数据库启动与初始化](docs/数据库启动与初始化.md) | MySQL、迁移、Seed、备份与数据库验收；租户会员增量合并与共享库部署确认边界 |
 | [客户端 API 接口说明](docs/客户端API接口说明.md) | 独立客户认证、租户会员、服务空间上下文与本人订单 API 边界 |
+| [多币种收款方案调研](docs/多币种收款方案调研-20260924.md) | 跨境收单(Stripe 首发)、按结算币种适配收单平台的场景、选型与实施计划 |
 | [管理端界面设计规范](docs/管理端界面设计规范.md) | 页面结构、组件用法与视觉基线 |
 
 需求、技术、数据库和界面规范默认锁定；任务只在对应分册维护进行中和未完成项，完成后移入统一归档，不在 README 复制进度。
