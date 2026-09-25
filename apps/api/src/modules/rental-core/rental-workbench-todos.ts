@@ -28,15 +28,17 @@ export function canManageWorkspaceWideNotifications(
   dataScope: "all" | "organization" | "store" | "own" | undefined,
   locationIds: string[] | undefined
 ): boolean {
-  return dataScope === "all" && locationIds === undefined;
+  // `store` 的契约是当前会话空间内的数据；workspaceId 已由认证上下文固定。
+  // 只有组织/本人范围，或当前空间内再被地点列表缩窄时，才不是完整空间范围。
+  return (dataScope === "all" || dataScope === "store") && locationIds === undefined;
 }
 
-/** 可见订单过滤必须有可解析依据；store/organization 未映射到地点时不能退化成全空间。 */
+/** 可见订单过滤必须有可解析依据；组织范围须映射到地点，store 已由当前空间限定。 */
 export function canResolveNotificationOrderScope(
   dataScope: "all" | "organization" | "store" | "own" | undefined,
   locationIds: string[] | undefined
 ): boolean {
-  return dataScope === "all" || dataScope === "own" || locationIds !== undefined;
+  return dataScope === "all" || dataScope === "store" || dataScope === "own" || locationIds !== undefined;
 }
 
 /**

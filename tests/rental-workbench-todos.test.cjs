@@ -109,10 +109,12 @@ const visibleLogs = filterNotificationLogsByVisibleOrders([
 ], [base({ id: "order_visible" })]);
 assert.deepEqual(visibleLogs.map((row) => row.businessObjectId), ["order_visible"], "受限日志列表只保留可见订单关联记录，不暴露其他地点或无业务对象的手工记录");
 assert.equal(canManageWorkspaceWideNotifications("all", undefined), true, "完整空间范围可以管理全空间通知配置");
-assert.equal(canManageWorkspaceWideNotifications("store", undefined), false, "门店范围即使没有显式地点列表也不能管理全空间通知");
+assert.equal(canManageWorkspaceWideNotifications("store", undefined), true, "当前空间范围可以管理本空间通知配置");
+assert.equal(canManageWorkspaceWideNotifications("store", ["location_1"]), false, "进一步缩窄到部分地点后不能管理空间级通知配置");
 assert.equal(canManageWorkspaceWideNotifications("own", undefined), false, "本人范围不能管理全空间通知");
 assert.equal(canManageWorkspaceWideNotifications(undefined, undefined), false, "会话数据范围缺失时必须拒绝全空间通知管理");
-assert.equal(canResolveNotificationOrderScope("store", undefined), false, "门店范围未解析到地点时不能回退为全空间可见");
+assert.equal(canResolveNotificationOrderScope("store", undefined), true, "当前空间范围由会话 workspaceId 限定，不依赖组织地点映射");
+assert.equal(canResolveNotificationOrderScope("store", ["location_1"]), true, "门店范围被地点缩限后仍可按可见订单过滤");
 assert.equal(canResolveNotificationOrderScope("organization", ["location_1"]), true, "组织范围解析到授权地点后可按可见订单读取通知");
 assert.equal(canResolveNotificationOrderScope(undefined, undefined), false, "会话数据范围缺失时不能退化为全空间通知可见");
 
@@ -151,4 +153,4 @@ assert.match(routeSection('@Post("notification-logs/:id/query-delivery")', '@Pos
 assert.match(routeSection('@Post("notification-logs/:id/retry")', '@Post("notifications/send")'), /this\.assertNotificationLogScope\(req\.user\.tenantId, id\)/u, "单条通知重试必须校验关联订单的数据范围");
 assert.match(routeSection('@Post("notifications/send")', '@Post("quotes")'), /this\.assertWorkspaceWideNotificationScope\(\)/u, "手工通知发送必须要求完整运营数据范围");
 
-console.log(`\n工作台统一待办专项：${todos.items.length + visibleLogs.length + 18} 项全部通过`);
+console.log(`\n工作台统一待办专项：${todos.items.length + visibleLogs.length + 20} 项全部通过`);
