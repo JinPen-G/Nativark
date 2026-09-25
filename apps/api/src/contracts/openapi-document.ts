@@ -2571,7 +2571,8 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get", path: "/api/rental/v1/orders/{id}/allocation-candidates", tag: "RentalCore", operationId: "rentalAllocationCandidates",
-    summary: "Get scoped assets available for the complete buffered period", permissions: ["rental-os:order:operate"], responseSchema: "GenericObject"
+    summary: "Get scoped allocation candidates, or exchange candidates for a fulfilled order line", permissions: ["rental-os:order:operate"], responseSchema: "GenericObject",
+    parameters: [queryParam("exchangeOrderLineId"), queryParam("replacementItemGroupId")]
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/assignments", tag: "RentalCore", operationId: "manageRentalAllocations",

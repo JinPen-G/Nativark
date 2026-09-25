@@ -1,5 +1,5 @@
 import { ArrowLeftOutlined, CheckCircleOutlined, DollarOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
-import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type AdjustRentalInspectionExceptionRequest, type ApplyRentalOrderChangeRequest, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type PreviewRentalOrderChangeRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOfflinePaymentMethod, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition } from "@rental-os/shared";
+import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type AdjustRentalInspectionExceptionRequest, type ApplyRentalOrderChangeRequest, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type PreviewRentalOrderChangeRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOfflinePaymentMethod, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition, type RentalOrderChangePreview } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, App, Button, Card, Checkbox, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
@@ -18,6 +18,20 @@ import { serviceOccurrenceNetAmount, serviceOccurrenceOriginText } from "./order
 type FundingOperation = {
   instrument: RentalFundingInstrument;
   action: RentalFundingAction;
+};
+
+type PostPickupExchangeFormValues = {
+  orderLineId: string;
+  allocationId: string;
+  replacementItemGroupId: string;
+  replacementAssetId?: string;
+  replacementPricingGroupId?: string;
+  priceBasis: "original_order_price" | "replacement_current_price";
+  originalDisposition: "return_to_warehouse" | "off_shelf";
+  cancelServiceOccurrenceIds?: string[];
+  condition: string;
+  reason: string;
+  customerConfirmed: boolean;
 };
 
 const FUNDING_ACTION_LABELS: Record<RentalFundingAction, string> = {
@@ -136,10 +150,14 @@ export function RentalOrderDetailPage() {
   const [extensionRefundReview, setExtensionRefundReview] = useState<RentalOrderExtension>();
   const [partialCancelOpen, setPartialCancelOpen] = useState(false);
   const [partialCancelPreview, setPartialCancelPreview] = useState<Awaited<ReturnType<typeof rentalCoreApi.previewPartialLineCancellation>>>();
+  const [postPickupExchangeOpen, setPostPickupExchangeOpen] = useState(false);
+  const [postPickupExchangePreview, setPostPickupExchangePreview] = useState<RentalOrderChangePreview>();
+  const [exchangeTarget, setExchangeTarget] = useState<{ exchangeOrderLineId: string; replacementItemGroupId: string }>();
   const [serviceExecution, setServiceExecution] = useState<{ occurrence: RentalOrderServiceOccurrence; action: RentalServiceExecutionAction }>();
   const [serviceRefund, setServiceRefund] = useState<RentalOrderServiceOccurrence>();
   const [extensionRefundForm] = Form.useForm<{ decision: "approved" | "rejected"; reason: string }>();
   const [partialCancelForm] = Form.useForm<ApplyRentalOrderChangeRequest>();
+  const [postPickupExchangeForm] = Form.useForm<PostPickupExchangeFormValues>();
   // 试算结果单独存：金额要先摆给运营/客户确认，确认后才提交申请。
   const [extensionPreview, setExtensionPreview] = useState<RentalOrderExtensionPreview>();
   const [extensionForm] = Form.useForm<{ newEndAt: Dayjs; memo?: string }>();
@@ -149,6 +167,12 @@ export function RentalOrderDetailPage() {
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
   const templates = useQuery({ queryKey: ["rental-core", "templates"], queryFn: () => rentalCoreApi.inspectionTemplates() });
   const groups = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
+  const pricingGroups = useQuery({ queryKey: ["rental-core", "pricing-groups"], queryFn: rentalCoreApi.pricingGroups, enabled: postPickupExchangeOpen });
+  const exchangeAssetCandidates = useQuery({
+    queryKey: ["rental-core", "order", id, "exchange-candidates", exchangeTarget],
+    queryFn: () => rentalCoreApi.allocationCandidates(id, exchangeTarget),
+    enabled: postPickupExchangeOpen && Boolean(exchangeTarget)
+  });
   const businessSettings = useQuery({ queryKey: ["rental-core", "business-settings"], queryFn: rentalCoreApi.businessSettings });
   const offlinePaymentMethods = useMemo<RentalOfflinePaymentMethod[]>(() => businessSettings.data?.payment.enabledMethods?.filter((method): method is RentalOfflinePaymentMethod => method === "offline_cash" || method === "offline_transfer") ?? ["offline_cash", "offline_transfer"], [businessSettings.data?.payment.enabledMethods]);
   const funding = useQuery({ queryKey: ["rental-core", "order", id, "funding"], queryFn: () => rentalCoreApi.fundingEvents(id), enabled: Boolean(id) && canViewFunding });
@@ -346,6 +370,56 @@ export function RentalOrderDetailPage() {
     },
     onError: (error: Error) => message.error(error.message || t("部分取消失败，请刷新订单后重试"))
   });
+  const previewPostPickupExchange = useMutation({
+    mutationFn: (values: PostPickupExchangeFormValues) => rentalCoreApi.previewPostPickupExchange(id, {
+      type: "post_pickup_exchange",
+      orderLineId: values.orderLineId,
+      allocationId: values.allocationId,
+      replacementItemGroupId: values.replacementItemGroupId,
+      replacementAssetId: values.replacementAssetId,
+      replacementPricingGroupId: values.replacementPricingGroupId,
+      priceBasis: values.priceBasis,
+      originalDisposition: values.originalDisposition,
+      exchangeLocationId: detail?.fulfillmentLocationId,
+      cancelServiceOccurrenceIds: values.cancelServiceOccurrenceIds,
+      inspectionSnapshot: { condition: values.condition.trim(), customerConfirmed: false }
+    }),
+    onSuccess: (data) => setPostPickupExchangePreview(data),
+    onError: (error: Error) => message.error(t(error.message || "换货试算失败，请检查订单状态、替换型号和可用资源"))
+  });
+  const applyPostPickupExchange = useMutation({
+    mutationFn: (values: PostPickupExchangeFormValues) => {
+      if (!postPickupExchangePreview) throw new Error(t("请先试算换货差额"));
+      return rentalCoreApi.applyPostPickupExchange(id, {
+        type: "post_pickup_exchange",
+        orderLineId: values.orderLineId,
+        allocationId: values.allocationId,
+        replacementItemGroupId: values.replacementItemGroupId,
+        replacementAssetId: values.replacementAssetId,
+        replacementPricingGroupId: values.replacementPricingGroupId,
+        priceBasis: values.priceBasis,
+        originalDisposition: values.originalDisposition,
+        exchangeLocationId: detail?.fulfillmentLocationId,
+        cancelServiceOccurrenceIds: values.cancelServiceOccurrenceIds,
+        inspectionSnapshot: { condition: values.condition.trim(), customerConfirmed: true },
+        reason: values.reason.trim(),
+        customerConfirmed: true,
+        expectedUpdatedAt: postPickupExchangePreview.expectedUpdatedAt
+      });
+    },
+    onSuccess: async () => {
+      setPostPickupExchangeOpen(false);
+      setPostPickupExchangePreview(undefined);
+      setExchangeTarget(undefined);
+      postPickupExchangeForm.resetFields();
+      await refreshChanges();
+      message.success(t("换货已生效：新商品已锁定，原商品按所选方式处理，差额进入订单结算"));
+    },
+    onError: async (error: Error) => {
+      await refresh();
+      message.error(t(error.message || "换货失败：订单或替换资源已变化，请刷新并重新试算"));
+    }
+  });
   const recordExceptionCustomerResponse = useMutation({
     mutationFn: (values: RecordRentalInspectionExceptionCustomerResponseRequest) => rentalCoreApi.recordInspectionExceptionCustomerResponse(id, exceptionCustomerResponse!.inspectionId, exceptionCustomerResponse!.exceptionIndex, values, crypto.randomUUID()),
     onSuccess: async () => {
@@ -435,6 +509,18 @@ export function RentalOrderDetailPage() {
     onError: (error: Error) => message.error(error.message || t("服务退款失败，请检查已批准金额和资金余额"))
   });
   const detail = order.data;
+  const exchangeableAllocations = (detail?.status === RentalCoreOrderStatus.Renting ? detail.allocations : []).filter((allocation) => {
+    if (allocation.status !== "picked_up") return false;
+    const line = detail?.lines.find((row) => row.id === allocation.orderLineId);
+    return Boolean(line && ["serialized", "quantity"].includes(line.inventoryMode) && allocation.quantity === line.quantity - (line.cancelledQuantity ?? 0));
+  });
+  const selectedExchangeAllocationId = Form.useWatch("allocationId", postPickupExchangeForm);
+  const selectedExchangeAllocation = exchangeableAllocations.find((row) => row.id === selectedExchangeAllocationId);
+  const selectedExchangeLine = detail?.lines.find((row) => row.id === selectedExchangeAllocation?.orderLineId);
+  const selectedReplacementGroupId = Form.useWatch("replacementItemGroupId", postPickupExchangeForm);
+  const selectedExchangeCandidateRow = exchangeAssetCandidates.data?.reservations.find((row) => row.orderLineId === selectedExchangeLine?.id);
+  const exchangeReplacementGroups = selectedExchangeLine ? groups.data?.filter((group) => group.status === "enabled" && group.inventoryMode === selectedExchangeLine.inventoryMode && group.id !== selectedExchangeLine.itemGroupId) ?? [] : [];
+  const replacementPricingGroupOptions = pricingGroups.data?.filter((group) => group.status === "enabled" && group.memberItemGroupIds.includes(selectedReplacementGroupId ?? "")) ?? [];
   const cancelableServiceCount = (detail?.serviceSnapshots ?? []).filter((row) =>
     Boolean(row.occurrenceId) && (row.executionStatus ?? "not_started") === "not_started" && !row.requiredByRule
   ).length;
@@ -528,6 +614,7 @@ export function RentalOrderDetailPage() {
         {canReturn && detail.status === RentalCoreOrderStatus.Renting && (detail.allocations.filter((allocation) => allocation.status === "picked_up").length > 1 || detail.allocations.some((allocation) => allocation.status === "picked_up" && allocation.quantity > 1)) && <Button onClick={() => setPartialReturnOpen(true)}>{t(detail.ruleSnapshot?.fulfillment?.returnInspectionRequired ? "部分归还检查" : "部分归还")}</Button>}
         {detail.status === RentalCoreOrderStatus.Settling && canSettleFunding && <Button type="primary" loading={settle.isPending} disabled={settleBlockers.length > 0} title={settleBlockers.length ? `${t("服务端会拒绝关单：")}${settleBlockers.join(locale === "en-US" ? ", " : "、")}` : undefined} onClick={() => settle.mutate()}>{t("结算并关闭订单")}</Button>}
         {canExtend && [RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting].includes(detail.status) && <Button icon={<RetweetOutlined />} onClick={() => { extensionForm.resetFields(); setExtensionPreview(undefined); extensionForm.setFieldsValue({ newEndAt: dayjs(detail.effectiveEndAt ?? detail.endAt).add(1, "day") }); setExtensionOpen(true); }}>{t("续租 / 延期")}</Button>}
+        {canOperate && detail.status === RentalCoreOrderStatus.Renting && exchangeableAllocations.length > 0 && <Button onClick={() => { postPickupExchangeForm.resetFields(); postPickupExchangeForm.setFieldsValue({ priceBasis: "original_order_price", originalDisposition: "return_to_warehouse", customerConfirmed: false }); setPostPickupExchangePreview(undefined); setExchangeTarget(undefined); setPostPickupExchangeOpen(true); }}>{t("办理换货")}</Button>}
         {canOperate && [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && (detail.lines.filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).length > 1 || detail.lines.some((line) => ["quantity", "consumable"].includes(line.inventoryMode) && line.quantity - (line.cancelledQuantity ?? 0) > 1) || cancelableServiceCount > 0) && <Button onClick={() => { partialCancelForm.resetFields(); setPartialCancelPreview(undefined); setPartialCancelOpen(true); }}>{t("部分取消商品 / 服务")}</Button>}
         {canCancel && [RentalCoreOrderStatus.Draft, RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && <Button danger onClick={() => setCancelOpen(true)}>{t("取消并按规则计费")}</Button>}
       </Space>
@@ -858,6 +945,112 @@ export function RentalOrderDetailPage() {
             { title: t("金额"), align: "right", render: (_, row) => money(row.amount) },
             { title: t("计算说明"), dataIndex: "detail", render: (value) => <span className="muted">{value ?? "—"}</span> }
           ]} />
+        </Card>}
+      </Form>
+    </Modal>
+    <Modal
+      title={t("办理取货后换货")}
+      open={postPickupExchangeOpen}
+      onCancel={() => { setPostPickupExchangeOpen(false); setPostPickupExchangePreview(undefined); setExchangeTarget(undefined); postPickupExchangeForm.resetFields(); }}
+      destroyOnHidden
+      width={760}
+      footer={[
+        <Button key="cancel" onClick={() => { setPostPickupExchangeOpen(false); setPostPickupExchangePreview(undefined); setExchangeTarget(undefined); postPickupExchangeForm.resetFields(); }}>{t("取消")}</Button>,
+        <Button key="preview" loading={previewPostPickupExchange.isPending} onClick={() => postPickupExchangeForm.validateFields(["allocationId", "replacementItemGroupId", "replacementAssetId", "replacementPricingGroupId", "priceBasis", "originalDisposition", "condition", "cancelServiceOccurrenceIds"]).then((values) => previewPostPickupExchange.mutate(values))}>{t("试算换货差额")}</Button>,
+        <Button key="apply" type="primary" disabled={!postPickupExchangePreview} loading={applyPostPickupExchange.isPending} onClick={() => postPickupExchangeForm.submit()}>{t("确认换货")}</Button>
+      ]}
+    >
+      <Form
+        form={postPickupExchangeForm}
+        layout="vertical"
+        initialValues={{ priceBasis: "original_order_price", originalDisposition: "return_to_warehouse", customerConfirmed: false }}
+        onValuesChange={(changed, values) => {
+          if (Object.keys(changed).some((key) => !["customerConfirmed", "reason"].includes(key))) setPostPickupExchangePreview(undefined);
+          if (Object.prototype.hasOwnProperty.call(changed, "allocationId")) {
+            const allocation = exchangeableAllocations.find((row) => row.id === values.allocationId);
+            postPickupExchangeForm.setFieldValue("orderLineId", allocation?.orderLineId);
+            postPickupExchangeForm.setFieldValue("replacementItemGroupId", undefined);
+            postPickupExchangeForm.setFieldValue("replacementAssetId", undefined);
+            postPickupExchangeForm.setFieldValue("replacementPricingGroupId", undefined);
+            setExchangeTarget(undefined);
+          }
+          if (Object.prototype.hasOwnProperty.call(changed, "replacementItemGroupId")) {
+            postPickupExchangeForm.setFieldValue("replacementAssetId", undefined);
+            postPickupExchangeForm.setFieldValue("replacementPricingGroupId", undefined);
+            setExchangeTarget(values.orderLineId && values.replacementItemGroupId ? { exchangeOrderLineId: values.orderLineId, replacementItemGroupId: values.replacementItemGroupId } : undefined);
+          }
+        }}
+        onFinish={(values) => applyPostPickupExchange.mutate(values)}
+      >
+        <Alert type="info" showIcon title={t("仅支持租赁中的整行换货；新商品会立即锁定。原商品可返回仓库释放库存，或下架隔离。金额按所选价格依据重算，差额统一进入订单结算。")} style={{ marginBottom: 16 }} />
+        <Form.Item name="orderLineId" hidden><Input /></Form.Item>
+        <Form.Item name="allocationId" label={t("要换出的已领取商品")} rules={[{ required: true, message: t("请选择本次换货商品") }]}>
+          <Select
+            placeholder={t("选择一条完整领取的商品行")}
+            options={exchangeableAllocations.map((allocation) => {
+              const line = detail?.lines.find((row) => row.id === allocation.orderLineId);
+              return { value: allocation.id, label: (line?.itemGroupName ?? t("商品")) + " × " + allocation.quantity + (allocation.assetNo ? " · " + allocation.assetNo : "") };
+            })}
+          />
+        </Form.Item>
+        <Form.Item name="replacementItemGroupId" label={t("替换后的商品型号")} rules={[{ required: true, message: t("请选择替换型号") }]}>
+          <Select
+            placeholder={selectedExchangeLine ? t("选择同库存方式的启用型号") : t("请先选择换出商品")}
+            disabled={!selectedExchangeLine}
+            options={exchangeReplacementGroups.map((group) => ({ value: group.id, label: group.name + "（" + group.code + "）" }))}
+          />
+        </Form.Item>
+        {selectedExchangeLine?.inventoryMode === "serialized" && <Form.Item name="replacementAssetId" label={t("新商品资产")} rules={[{ required: true, message: t("请选择可用的新资产") }]}>
+          <Select
+            loading={exchangeAssetCandidates.isLoading}
+            disabled={!selectedReplacementGroupId || exchangeAssetCandidates.isError}
+            placeholder={exchangeAssetCandidates.isError ? t("无法读取候选资产，请刷新重试") : t("选择订单领取地点当前可用的资产")}
+            options={(selectedExchangeCandidateRow?.candidates ?? []).map((candidate) => ({ value: candidate.assetId, disabled: !candidate.available, label: candidate.available ? candidate.assetNo : candidate.assetNo + " · " + t(candidate.reason ?? "不可用") }))}
+          />
+        </Form.Item>}
+        {selectedExchangeLine?.pricingGroupId && selectedReplacementGroupId && !(
+          selectedExchangeLine.pricingGroupMemberItemGroupIds?.includes(selectedReplacementGroupId)
+          ?? pricingGroups.data?.find((group) => group.id === selectedExchangeLine.pricingGroupId)?.memberItemGroupIds.includes(selectedReplacementGroupId)
+          ?? false
+        ) && <Form.Item name="replacementPricingGroupId" label={t("新商品所属定价组")} rules={[{ required: true, message: t("新型号不在原定价组内，请选择一个包含该型号的定价组") }]}>
+          <Select loading={pricingGroups.isLoading} placeholder={t("选择包含该型号的定价组")} options={replacementPricingGroupOptions.map((group) => ({ value: group.id, label: group.name + "（" + group.code + "）" }))} />
+        </Form.Item>}
+        <Form.Item name="priceBasis" label={t("换货计价方式")} rules={[{ required: true }]}>
+          <Select options={[
+            { value: "original_order_price", label: t("按原订单价格版本重算") },
+            { value: "replacement_current_price", label: t("按新商品当前价格重算") }
+          ]} />
+        </Form.Item>
+        <Form.Item name="originalDisposition" label={t("原商品处理方式")} rules={[{ required: true }]}>
+          <Select options={[
+            { value: "return_to_warehouse", label: t("返回仓库并释放库存") },
+            { value: "off_shelf", label: t("下架隔离，不释放库存") }
+          ]} />
+        </Form.Item>
+        <Form.Item name="cancelServiceOccurrenceIds" label={t("一并取消未开始的可选服务")}>
+          <Select mode="multiple" allowClear placeholder={t("可选；已开始或规则强制服务不能在此取消")} options={(detail?.serviceSnapshots ?? []).filter((row) => Boolean(row.occurrenceId) && (row.executionStatus ?? "not_started") === "not_started" && !row.requiredByRule).map((row) => ({ value: row.occurrenceId, label: row.serviceName + " × " + row.quantity }))} />
+        </Form.Item>
+        <Form.Item name="condition" label={t("原商品检查情况")} rules={[{ required: true, whitespace: true, message: t("请记录原商品检查情况") }]}>
+          <Input.TextArea rows={3} maxLength={500} placeholder={t("记录外观、配件、读数和异常；异常费用仍须另行审核")} />
+        </Form.Item>
+        <Form.Item name="reason" label={t("换货原因")} rules={[{ required: true, whitespace: true, message: t("请填写换货原因") }]}>
+          <Input.TextArea rows={2} maxLength={500} placeholder={t("例如：原商品故障，经客户确认更换")} />
+        </Form.Item>
+        <Form.Item name="customerConfirmed" valuePropName="checked" rules={[{ validator: (_, value) => value ? Promise.resolve() : Promise.reject(new Error(t("办理换货前必须取得客户确认"))) }]}>
+          <Checkbox>{t("客户已确认替换商品、计价方式、差额和原商品处理方式")}</Checkbox>
+        </Form.Item>
+        {postPickupExchangePreview?.exchange && <Card size="small" title={t("换货试算结果")}>
+          <Descriptions column={2} size="small" items={[
+            { key: "from", label: t("换出商品"), children: postPickupExchangePreview.exchange.originalItemGroupName + (postPickupExchangePreview.exchange.replacementAssetNo ? " · " + postPickupExchangePreview.exchange.replacementAssetNo : "") },
+            { key: "to", label: t("替换商品"), children: postPickupExchangePreview.exchange.replacementItemGroupName + (postPickupExchangePreview.exchange.replacementAssetNo ? " · " + postPickupExchangePreview.exchange.replacementAssetNo : "") },
+            { key: "basis", label: t("价格版本"), children: postPickupExchangePreview.exchange.priceBasis === "original_order_price" ? postPickupExchangePreview.exchange.originalPriceVersion ?? "—" : postPickupExchangePreview.exchange.replacementPriceVersion ?? "—" },
+            { key: "rent", label: t("重算后应收"), children: money(postPickupExchangePreview.recalculatedPayableAmount) },
+            { key: "difference", label: t("应补差价"), children: <b>{money(postPickupExchangePreview.additionalAmount)}</b> },
+            { key: "refund", label: t("待统一结算退差"), children: money(postPickupExchangePreview.refundAmount) },
+            { key: "deposit", label: t("押金差额"), children: money(postPickupExchangePreview.depositDelta) },
+            { key: "preauth", label: t("预授权差额"), children: money(postPickupExchangePreview.preAuthDelta) }
+          ]} />
+          {postPickupExchangePreview.warnings.map((warning) => <Alert key={warning} type="warning" showIcon title={t(warning)} style={{ marginTop: 12 }} />)}
         </Card>}
       </Form>
     </Modal>

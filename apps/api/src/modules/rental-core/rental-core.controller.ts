@@ -1362,8 +1362,50 @@ export class RentalCoreController {
     });
     return this.committed(tenantId, order);
   }
-  @Get("orders/:id/allocation-candidates") async allocationCandidates(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
-    return this.allocation.candidates(req.user.tenantId, id);
+  @Get("orders/:id/allocation-candidates") async allocationCandidates(
+    @Req() req: AuthenticatedRequest,
+    @Param("id") id: string,
+    @Query("exchangeOrderLineId") exchangeOrderLineId?: string,
+    @Query("replacementItemGroupId") replacementItemGroupId?: string
+  ) {
+    const tenantId = req.user.tenantId;
+    if (!exchangeOrderLineId && !replacementItemGroupId) return this.allocation.candidates(tenantId, id);
+    if (!exchangeOrderLineId || !replacementItemGroupId) throw new BadRequestException("换货候选查询必须同时指定订单行和替换型号");
+
+    const order = await this.service.getOrder(tenantId, id);
+    if (order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以查询换货候选");
+    const line = order.lines.find((row) => row.id === exchangeOrderLineId);
+    if (!line || !["serialized", "quantity"].includes(line.inventoryMode)) throw new BadRequestException("换货订单行不存在或库存方式不支持");
+    const activeLineQuantity = line.quantity - (line.cancelledQuantity ?? 0);
+    if (!order.allocations.some((row) => row.orderLineId === line.id && row.status === "picked_up" && row.quantity === activeLineQuantity)) {
+      throw new ConflictException("只有整行已领取的商品可以查询换货候选");
+    }
+    const replacementGroup = this.service.listItemGroups(tenantId).find((row) => row.id === replacementItemGroupId);
+    if (!replacementGroup || replacementGroup.status !== "enabled" || replacementGroup.inventoryMode !== line.inventoryMode || replacementGroup.id === line.itemGroupId) {
+      throw new BadRequestException("替换型号必须是不同于原商品、且启用中的同类库存型号");
+    }
+
+    const reservation = order.reservations.find((row) => row.orderLineId === line.id && row.status === "fulfilled");
+    if (!reservation) throw new ConflictException("订单行没有已履约的资源预留");
+    const replacementAssets = line.inventoryMode === "serialized"
+      ? await this.prisma.$transaction((tx) => this.allocation.exchangeAssetCandidates(tenantId, order, replacementGroup.id, order.fulfillmentLocationId, tx))
+      : [];
+    return {
+      revision: order.assignment?.revision ?? 0,
+      reservations: [{
+        reservationId: reservation.id,
+        orderLineId: line.id,
+        itemGroupId: replacementGroup.id,
+        itemGroupName: replacementGroup.name,
+        locationId: order.fulfillmentLocationId,
+        inventoryMode: line.inventoryMode,
+        quantity: activeLineQuantity,
+        assignedQuantity: order.allocations.filter((row) => row.orderLineId === line.id && row.status === "picked_up").reduce((sum, row) => sum + row.quantity, 0),
+        lockedQuantity: order.allocations.filter((row) => row.orderLineId === line.id && row.status === "picked_up").reduce((sum, row) => sum + row.quantity, 0),
+        models: [{ itemGroupId: replacementGroup.id, name: replacementGroup.name, enabled: true }],
+        candidates: replacementAssets
+      }]
+    };
   }
   @Post("orders/:id/assignments") async manageAllocations(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: ManageRentalAllocationDto) {
     if (["unlock", "release", "reassign"].includes(body.action) && !hasPermissionCode(req.user, "rental-os:order:reassign")) throw new ForbiddenException("解锁、释放及改配需要独立的资源改配权限");

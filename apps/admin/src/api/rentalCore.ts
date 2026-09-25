@@ -322,7 +322,9 @@ export const rentalCoreApi = {
   resumePickup: (id: string, data: { reason: string }) => request<RentalOrder>(`/rental/v1/orders/${id}/resume-pickup`, { method: "post", data }),
   confirmOrder: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/confirm`, { method: "post" }),
   allocateOrder: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}/allocate`, { method: "post" }),
-  allocationCandidates: (id: string) => request<RentalAllocationCandidates>(`/rental/v1/orders/${id}/allocation-candidates`),
+  allocationCandidates: (id: string, exchange?: { exchangeOrderLineId: string; replacementItemGroupId: string }) => request<RentalAllocationCandidates>(
+    `/rental/v1/orders/${id}/allocation-candidates${exchange ? `?exchangeOrderLineId=${encodeURIComponent(exchange.exchangeOrderLineId)}&replacementItemGroupId=${encodeURIComponent(exchange.replacementItemGroupId)}` : ""}`
+  ),
   manageAllocations: (id: string, data: ManageRentalAllocationRequest) => request<RentalOrder>(`/rental/v1/orders/${id}/assignments`, { method: "post", data }),
   operationLock: (id: string, action: "acquire" | "release", token?: string) => request<{ token?: string; expiresAt?: string }>(`/rental/v1/orders/${id}/operation-lock`, { method: "post", data: { action, token } }),
   substituteBundleComponent: (id: string, data: SubstituteRentalBundleComponentRequest) => request<RentalOrder>(`/rental/v1/orders/${id}/substitute-bundle-component`, { method: "post", data }),
@@ -338,6 +340,10 @@ export const rentalCoreApi = {
     request<RentalOrderChangePreview>(`/rental/v1/orders/${id}/changes/partial-cancel/preview`, { method: "post", data }),
   applyPartialLineCancellation: (id: string, data: ApplyRentalOrderChangeRequest) =>
     request<{ order: RentalOrder; change: RentalOrderChange }>(`/rental/v1/orders/${id}/changes/partial-cancel`, { method: "post", data }),
+  previewPostPickupExchange: (id: string, data: PreviewRentalOrderChangeRequest) =>
+    request<RentalOrderChangePreview>(`/rental/v1/orders/${id}/changes/post-pickup-exchange/preview`, { method: "post", data }),
+  applyPostPickupExchange: (id: string, data: ApplyRentalOrderChangeRequest) =>
+    request<{ order: RentalOrder; change: RentalOrderChange }>(`/rental/v1/orders/${id}/changes/post-pickup-exchange`, { method: "post", data }),
   previewOrderExtension: (id: string, data: RentalOrderExtensionRequest) =>
     request<RentalOrderExtensionPreview>(`/rental/v1/orders/${id}/extensions/preview`, { method: "post", data }),
   requestOrderExtension: (id: string, data: RentalOrderExtensionRequest) =>
