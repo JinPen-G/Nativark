@@ -1,8 +1,9 @@
-import type { CorporateMembershipMember, CustomerCorporateMembership, CustomerMembershipPlanAssignment, SaveCorporateMembershipRequest, SaveCustomerCorporateMembershipRequest } from "@rental-os/shared";
+import { formatRentalMoney, type CorporateMembershipMember, type CustomerCorporateCreditLedgerEntry, type CustomerCorporateMembership, type CustomerMembershipPlanAssignment, type CustomerCorporateCredit, type SaveCustomerCreditRequest, type SaveCorporateMembershipRequest, type SaveCustomerCorporateMembershipRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Drawer, Form, Input, Select, Space, Table, Tag } from "antd";
-import { useState } from "react";
+import { Alert, App, Button, Card, Descriptions, Drawer, Form, Input, InputNumber, Select, Space, Table, Tag } from "antd";
+import { useEffect, useState } from "react";
 import { membershipApi } from "@/api/membership";
+import { customerApi } from "@/api/customer";
 import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
 import { QueryState } from "@/components/QueryState";
@@ -12,6 +13,25 @@ import { MembershipBenefitScopeSummary } from "./MembershipPlanPage";
 const relationMeta: Record<string, { text: string; color: string }> = { active: { text: "有效", color: "success" }, suspended: { text: "暂停", color: "warning" }, exited: { text: "已退出", color: "default" } };
 const membershipLabel: Record<string, string> = { pending_activation: "待审核", active: "正常", suspended: "已暂停", risk_restricted: "风险受限", exited: "已退出", closed: "已注销" };
 type GrantForm = { planVersionId: string; source: "manual" | "corporate_contract"; effectiveFrom?: string; effectiveTo?: string; reason?: string };
+type CorporateDrawer = "corporate" | "employees" | "grant" | "credit";
+
+const creditCycleLabel: Record<CustomerCorporateCredit["billingCycle"], string> = {
+  monthly: "月结",
+  semi_monthly: "半月结",
+  per_order: "按单结算"
+};
+const creditStatusLabel: Record<CustomerCorporateCredit["status"], string> = {
+  active: "启用",
+  suspended: "暂停",
+  revoked: "已撤销"
+};
+const creditEntryLabel: Record<CustomerCorporateCreditLedgerEntry["entryType"], string> = {
+  reserve: "占用额度",
+  release: "释放额度",
+  settle: "转为应收",
+  payment: "企业回款",
+  adjust: "账务调整"
+};
 
 export function CorporateMembershipPage() {
   const { message } = App.useApp();
@@ -21,15 +41,17 @@ export function CorporateMembershipPage() {
   const canManage = hasTenantMembershipPermission("rental-os:corporate:manage");
   const canEmployeeManage = hasTenantMembershipPermission("rental-os:corporate:employee-manage");
   const canView = hasTenantMembershipPermission("rental-os:corporate:view") || canManage || canEmployeeManage;
+  const canViewCredit = hasTenantMembershipPermission("rental-os:corporate:view") || canManage;
   const canGrant = hasTenantMembershipPermission("rental-os:member:plan:manage");
   const [selected, setSelected] = useState<CorporateMembershipMember>();
-  const [drawer, setDrawer] = useState<"corporate" | "employees" | "grant">();
+  const [drawer, setDrawer] = useState<CorporateDrawer>();
   const [editTarget, setEditTarget] = useState<CorporateMembershipMember>();
   const [revokeTarget, setRevokeTarget] = useState<CustomerMembershipPlanAssignment>();
   const [corporateForm] = Form.useForm<SaveCorporateMembershipRequest>();
   const [employeeForm] = Form.useForm<SaveCustomerCorporateMembershipRequest>();
   const [grantForm] = Form.useForm<GrantForm>();
   const [revokeForm] = Form.useForm<{ reason: string }>();
+  const [creditForm] = Form.useForm<SaveCustomerCreditRequest>();
   const selectedPlanVersionId = Form.useWatch("planVersionId", grantForm);
   const corporates = useQuery({ queryKey: ["membership-corporate"], queryFn: membershipApi.corporate, enabled: canView });
   const plans = useQuery({ queryKey: ["membership-plans"], queryFn: membershipApi.plans, enabled: canGrant && drawer === "grant" });
@@ -38,6 +60,9 @@ export function CorporateMembershipPage() {
   const personal = useQuery({ queryKey: ["membership-personal-options"], queryFn: membershipApi.personalOptions, enabled: canEmployeeManage && drawer === "employees" });
   const employees = useQuery({ queryKey: ["membership-corporate-employees", selected?.customerId], queryFn: () => membershipApi.corporateEmployees(selected!.customerId), enabled: canView && Boolean(selected) && drawer === "employees" });
   const assignments = useQuery({ queryKey: ["membership-plan-assignments", selected?.customerId], queryFn: () => membershipApi.planAssignments(selected!.customerId), enabled: canGrant && Boolean(selected) && drawer === "grant" });
+  const creditConfig = useQuery({ queryKey: ["customer-credit", selected?.customerId], queryFn: () => customerApi.credit(selected!.customerId), enabled: canViewCredit && Boolean(selected) && drawer === "credit" });
+  const creditAccount = useQuery({ queryKey: ["customer-credit-account", selected?.customerId], queryFn: () => customerApi.creditAccount(selected!.customerId), enabled: canViewCredit && Boolean(creditConfig.data) && drawer === "credit" });
+  const creditLedger = useQuery({ queryKey: ["customer-credit-ledger", selected?.customerId], queryFn: () => customerApi.creditLedger(selected!.customerId), enabled: canViewCredit && Boolean(creditConfig.data) && drawer === "credit" });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["membership-corporate"] });
   const saveCorporate = useMutation({
     mutationFn: (values: SaveCorporateMembershipRequest) => membershipApi.saveCorporate({ ...values, id: editTarget?.customerId }),
@@ -70,6 +95,21 @@ export function CorporateMembershipPage() {
       message.success(t("企业会员方案授予已撤销；历史快照保留"));
     },
   });
+  const saveCredit = useMutation({
+    mutationFn: (values: SaveCustomerCreditRequest) => customerApi.saveCredit(selected!.customerId, {
+      ...values,
+      expectedRevision: creditConfig.data?.revision
+    }),
+    onSuccess: async (saved) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["customer-credit", selected?.customerId] }),
+        queryClient.invalidateQueries({ queryKey: ["customer-credit-account", selected?.customerId] }),
+        queryClient.invalidateQueries({ queryKey: ["customer-credit-ledger", selected?.customerId] })
+      ]);
+      creditForm.setFieldsValue({ ...saved, reason: "" });
+      message.success(t("企业授信与账期已保存"));
+    }
+  });
   const openCorporate = (row?: CorporateMembershipMember) => {
     setEditTarget(row);
     corporateForm.resetFields();
@@ -77,6 +117,25 @@ export function CorporateMembershipPage() {
     setDrawer("corporate");
   };
   const openEmployees = (row: CorporateMembershipMember) => { setSelected(row); employeeForm.resetFields(); setDrawer("employees"); };
+  const openCredit = (row: CorporateMembershipMember) => { setSelected(row); creditForm.resetFields(); setDrawer("credit"); };
+
+  useEffect(() => {
+    if (drawer !== "credit" || creditConfig.isLoading || creditForm.isFieldsTouched()) return;
+    const row = creditConfig.data;
+    creditForm.setFieldsValue(row ? {
+      creditLimit: row.creditLimit,
+      settlementTermDays: row.settlementTermDays,
+      billingCycle: row.billingCycle,
+      status: row.status,
+      reason: ""
+    } : {
+      creditLimit: 0,
+      settlementTermDays: 30,
+      billingCycle: "monthly",
+      status: "active",
+      reason: ""
+    });
+  }, [creditConfig.data, creditConfig.isLoading, creditForm, drawer]);
 
   if (!canView) return <Alert type="warning" showIcon title={t("无权查看租户统一企业会员")} description={t("需要租户级企业会员查看、管理或员工管理权限，且数据范围为全部。")} />;
 
@@ -94,10 +153,11 @@ export function CorporateMembershipPage() {
           <Button type="link" disabled={!canManage} onClick={() => openCorporate(row)}>{t("企业资料")}</Button>
           <Button type="link" disabled={!canView} onClick={() => openEmployees(row)}>{t("管理员与员工")}</Button>
           <Button type="link" disabled={!canGrant} onClick={() => { setSelected(row); grantForm.resetFields(); grantForm.setFieldsValue({ source: "manual" }); setDrawer("grant"); }}>{t("授予方案")}</Button>
+          {canViewCredit && <Button type="link" onClick={() => openCredit(row)}>{t("授信账务")}</Button>}
         </Space> },
       ]} />
     </Card>
-    <Drawer title={drawer === "employees" ? `${selected?.corporateName ?? selected?.name ?? t("企业")} · ${t("管理员与员工")}` : drawer === "grant" ? t("授予企业会员方案") : editTarget ? t("编辑企业会员") : t("新增企业会员")} size={620} open={Boolean(drawer)} onClose={() => setDrawer(undefined)} destroyOnHidden>
+    <Drawer title={drawer === "employees" ? `${selected?.corporateName ?? selected?.name ?? t("企业")} · ${t("管理员与员工")}` : drawer === "grant" ? t("授予企业会员方案") : drawer === "credit" ? `${selected?.corporateName ?? selected?.name ?? t("企业")} · ${t("授信账务")}` : editTarget ? t("编辑企业会员") : t("新增企业会员")} size={drawer === "credit" ? 900 : 620} open={Boolean(drawer)} onClose={() => setDrawer(undefined)} destroyOnHidden>
       {drawer === "corporate" && <Form form={corporateForm} layout="vertical" disabled={!canManage} onFinish={(values) => canManage && saveCorporate.mutate(values)}>
         <Form.Item name="corporateName" label={t("企业名称")} rules={[{ required: true }]}><Input /></Form.Item>
         <Form.Item name="name" label={t("联系人/简称")} rules={[{ required: true }]}><Input /></Form.Item>
@@ -150,6 +210,51 @@ export function CorporateMembershipPage() {
             { title: t("操作"), render: (_, row) => row.status === "active" && <Button type="link" disabled={!canGrant} onClick={() => { setRevokeTarget(row); revokeForm.resetFields(); }}>{t("撤销")}</Button> },
           ]} />
         </Card>
+      </QueryState>}
+      {drawer === "credit" && <QueryState loading={creditConfig.isLoading} error={creditConfig.error}>
+        <Alert type="info" showIcon title={t("企业授信是租户级额度；押金与预授权仍独立处理。")}
+          description={t("账期订单确认时占用授信，订单结算后形成应收。调整额度必须填写原因；已有占用或应收未处理前不能把额度调低。")}
+          style={{ marginBottom: 16 }} />
+        <Card title={t("授信与账期配置")}>
+          <Form form={creditForm} layout="vertical" disabled={!canManage} onFinish={(values) => canManage && saveCredit.mutate(values)}>
+            <Space wrap align="start" style={{ width: "100%" }}>
+              <Form.Item name="creditLimit" label={t("授信额度（元）")} rules={[{ required: true }]}><InputNumber min={0} precision={2} style={{ width: 220 }} /></Form.Item>
+              <Form.Item name="settlementTermDays" label={t("账期天数")} rules={[{ required: true }]}><InputNumber min={0} precision={0} style={{ width: 180 }} /></Form.Item>
+              <Form.Item name="billingCycle" label={t("账单周期")} rules={[{ required: true }]}><Select style={{ width: 180 }} options={Object.entries(creditCycleLabel).map(([value, label]) => ({ value, label: t(label) }))} /></Form.Item>
+              <Form.Item name="status" label={t("授信状态")} rules={[{ required: true }]}><Select style={{ width: 160 }} options={Object.entries(creditStatusLabel).map(([value, label]) => ({ value, label: t(label) }))} /></Form.Item>
+            </Space>
+            <Form.Item name="reason" label={t("变更原因")} rules={[{ required: true, whitespace: true, max: 500 }]}><Input.TextArea rows={2} maxLength={500} /></Form.Item>
+            <Button type="primary" htmlType="submit" disabled={!canManage} loading={saveCredit.isPending}>{t("保存授信配置")}</Button>
+          </Form>
+        </Card>
+        {creditConfig.data && <QueryState loading={creditAccount.isLoading || creditLedger.isLoading} error={creditAccount.error ?? creditLedger.error}>
+          {creditAccount.data && <>
+            <Card title={t("当前账务余额")} style={{ marginTop: 16 }}>
+              <Descriptions size="small" column={{ xs: 1, sm: 2 }} items={[
+                { key: "limit", label: t("授信额度"), children: formatRentalMoney(creditAccount.data.creditLimit, creditAccount.data.currency) },
+                { key: "reserved", label: t("已占用"), children: formatRentalMoney(creditAccount.data.reservedAmount, creditAccount.data.currency) },
+                { key: "receivable", label: t("未回款应收"), children: formatRentalMoney(creditAccount.data.receivableAmount, creditAccount.data.currency) },
+                { key: "available", label: t("可用额度"), children: <b>{formatRentalMoney(creditAccount.data.availableAmount, creditAccount.data.currency)}</b> },
+                { key: "cycle", label: t("账单周期"), children: t(creditCycleLabel[creditAccount.data.billingCycle]) },
+                { key: "term", label: t("账期天数"), children: `${creditAccount.data.settlementTermDays} ${t("天")}` },
+                { key: "status", label: t("授信状态"), children: <Tag color={creditAccount.data.status === "active" ? "success" : "warning"}>{t(creditStatusLabel[creditAccount.data.status])}</Tag> }
+              ]} />
+              {creditAccount.data.availableAmount < 0 && <Alert type="error" showIcon title={t("当前授信敞口已超过额度，请先处理应收或授信配置。")} style={{ marginTop: 12 }} />}
+            </Card>
+            <Card title={t("授信账务流水")} style={{ marginTop: 16 }}>
+              <Table<CustomerCorporateCreditLedgerEntry> rowKey="id" size="small" dataSource={creditLedger.data ?? []} pagination={{ pageSize: 10 }} scroll={{ x: 960 }} columns={[
+                { title: t("发生时间"), dataIndex: "occurredAt", render: (value: string) => new Date(value).toLocaleString() },
+                { title: t("业务类型"), dataIndex: "entryType", render: (value: CustomerCorporateCreditLedgerEntry["entryType"]) => t(creditEntryLabel[value]) },
+                { title: t("发生金额"), render: (_: unknown, row: CustomerCorporateCreditLedgerEntry) => formatRentalMoney(row.amount, row.currency) },
+                { title: t("占用变化"), render: (_: unknown, row: CustomerCorporateCreditLedgerEntry) => formatRentalMoney(row.reservedDelta, row.currency) },
+                { title: t("应收变化"), render: (_: unknown, row: CustomerCorporateCreditLedgerEntry) => formatRentalMoney(row.receivableDelta, row.currency) },
+                { title: t("订单"), dataIndex: "orderId", render: (value?: string) => value || "—" },
+                { title: t("原因"), dataIndex: "reason" },
+                { title: t("操作人"), dataIndex: "operator", render: (value?: string) => value || "—" }
+              ]} />
+            </Card>
+          </>}
+        </QueryState>}
       </QueryState>}
     </Drawer>
     <Drawer title={`${t("撤销会员方案")}: ${revokeTarget?.snapshot.planName ?? ""}`} size={520} open={Boolean(revokeTarget)} onClose={() => { setRevokeTarget(undefined); revokeForm.resetFields(); }} destroyOnHidden>

@@ -78,6 +78,15 @@ const corporatePage = fs.readFileSync(path.join(ROOT, "apps/admin/src/features/m
 assert.match(corporatePage, /hasTenantMembershipPermission\("rental-os:corporate:employee-manage"\)/, "企业员工入口必须消费 corporate:employee-manage 操作权限");
 ok("权限区分：操作可见性只来自 permission 判断，dataScope 不被当作操作门禁");
 
+/* ---------- 企业授信账务入口：读写权限分离且不伪造账单回款 ---------- */
+assert.match(corporatePage, /const canViewCredit = hasTenantMembershipPermission\("rental-os:corporate:view"\) \|\| canManage/u, "授信账务读取需企业查看或管理权限");
+assert.match(corporatePage, /enabled: canViewCredit && Boolean\(selected\) && drawer === "credit"/u, "无权或未打开授信账务时不得发查询请求");
+assert.match(corporatePage, /disabled=\{!canManage\} onFinish=\{\(values\) => canManage && saveCredit\.mutate\(values\)\}/u, "只有企业管理权限可修改授信事实");
+assert.match(corporatePage, /customerApi\.creditAccount\(selected!\.customerId\)/u, "企业详情展示服务端授信余额摘要");
+assert.match(corporatePage, /customerApi\.creditLedger\(selected!\.customerId\)/u, "企业详情展示追加式账务流水");
+assert.doesNotMatch(corporatePage, /recordCustomerCreditPayment|creditPayment|回款金额/u, "未建立账单关联前，管理端不得伪装成账单级回款入口");
+ok("企业授信账务：权限拆分、按需加载、只读余额/流水，未暴露无账单关联的回款表单");
+
 /* ---------- 变异 1：漏 tenant/workspace ---------- */
 
 // 会员成员关系的读写必须同时带 tenantId + workspaceId（Codex P0 的教训：

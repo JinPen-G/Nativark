@@ -6,6 +6,8 @@ import type {
   CustomerClosability,
   CustomerCorporateContract,
   CustomerCorporateCredit,
+  CustomerCorporateCreditAccountSummary,
+  CustomerCorporateCreditLedgerEntry,
   CustomerCorporateInvoiceProfile,
   CustomerDuplicateCandidate,
   CustomerMergePreview,
@@ -80,10 +82,11 @@ export const customerApi = {
     request<CustomerCorporateContract>(`/platform/customers/${customerId}/contracts`, { method: "put", data }),
   credit: (customerId: string) =>
     request<CustomerCorporateCredit | undefined>(`/platform/customers/${customerId}/credit`),
-  /**
-   * 维护授信与账期。**只存事实**：本阶段不接进报价、支付或订单额度占用——
-   * 额度占用要与订单、支付、退款联动，缺这层联动就先改金额链路会留下对不上的账。
-   */
+  creditAccount: (customerId: string) =>
+    request<CustomerCorporateCreditAccountSummary>(`/platform/customers/${customerId}/credit/account`),
+  creditLedger: (customerId: string) =>
+    request<CustomerCorporateCreditLedgerEntry[]>(`/platform/customers/${customerId}/credit/ledger`),
+  /** 维护授信额度与账期配置；订单占用、应收及回款事实由服务端账务流水维护。 */
   saveCredit: (customerId: string, data: SaveCustomerCreditRequest) =>
     request<CustomerCorporateCredit>(`/platform/customers/${customerId}/credit`, { method: "put", data })
 };
