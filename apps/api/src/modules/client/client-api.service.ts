@@ -200,12 +200,13 @@ export class ClientApiService {
   async catalog(context: ClientRequestContext): Promise<ClientCatalogResponse> {
     const workspaces = await this.auth.listPublicWorkspaces(context.tenantCode);
     const workspace = workspaces.workspaces.find((row) => row.code === context.workspaceCode);
+    if (!workspace) throw new NotFoundException("当前经营空间尚未开放客户端服务");
     return this.buildCatalog(context.tenantId, context.tenantCode, {
       workspaceCode: context.workspaceCode,
       workspaceName: context.workspaceName,
       categoryCode: context.categoryCode,
       membershipStatus: context.membershipStatus,
-      isDefault: workspace?.isDefault
+      isDefault: workspace.isDefault
     });
   }
 
@@ -247,7 +248,8 @@ export class ClientApiService {
   /**
    * 渠道启动配置（MP-01 / CLIENT-CHANNEL-01）：品牌/协议/客服/帮助/横幅/已发布服务来自租户级
    * ClientChannelProfile，小程序与 APP 读同一份；微信一键登录与小程序内微信支付只在
-   * `client=wechat_miniprogram` 且微信凭证就绪时开放。未配置渠道时按启用空间回退，只有服务列表与租户名。
+   * `client=wechat_miniprogram` 且微信凭证就绪时开放。未发布任何空间时只返回租户名与客户端登录入口，
+   * 不以 ACTIVE 状态代替渠道发布。
    */
   async channelBootstrap(tenantCode: string, client: ClientChannelKind = "wechat_miniprogram", appId?: string): Promise<ClientChannelBootstrapResponse> {
     const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true, code: true, name: true } });
@@ -280,8 +282,9 @@ export class ClientApiService {
     const safeLoginMethods = loginMethods.length ? loginMethods : ["password" as const];
 
     if (!profile || publishedActive.length === 0) {
-      const workspaces = await this.prisma.businessWorkspace.findMany({ where: { tenantId: tenant.id, status: "ACTIVE" }, select: { code: true, name: true, categoryCode: true, isDefault: true }, orderBy: [{ isDefault: "desc" }, { code: "asc" }] });
-      const services = workspaces.map((row) => ({ code: row.code, name: row.name, categoryCode: String(row.categoryCode), isDefault: row.isDefault, status: "open" as const }));
+      // 未发布渠道不回退 ACTIVE 空间列表；只保留租户级登录/帮助入口，禁止客户端
+      // 发现新空间后继续浏览、注册或发起新订单。既有会话的订单售后 API 不依赖此目录。
+      const services: ClientChannelBootstrapResponse["services"] = [];
       return {
         apiVersion: CLIENT_API_VERSION,
         tenantCode: tenant.code,
@@ -289,7 +292,7 @@ export class ClientApiService {
         merchant: { name: profile?.brandName?.trim() || tenant.name, logoUrl: profile?.brandLogoUrl ?? undefined, faviconUrl: profile?.faviconUrl ?? undefined, servicePhone: profile?.customerServicePhone ?? undefined, serviceHours: profile?.customerServiceHours ?? undefined },
         services,
         categories,
-        defaultServiceCode: services.find((row) => row.isDefault)?.code ?? services[0]?.code,
+        defaultServiceCode: undefined,
         help: { available: false, faqCount: 0 },
         loginMethods: safeLoginMethods,
         capabilities: { publicCatalog: false, wechatPay: false, delivery: false, feeResponse: true, accountClosure: true },
@@ -913,11 +916,13 @@ export class ClientApiService {
 
   async availability(context: ClientRequestContext, input: { locationId: string; startAt: string; endAt: string; lines: Array<{ itemGroupId: string; quantity: number }> }) {
     this.requireActiveMembership(context);
+    await this.currentWorkspace(context);
     return this.core.availability(context.tenantId, input);
   }
 
   async createQuote(context: ClientRequestContext, input: ClientCreateQuoteRequest) {
     this.requireActiveMembership(context);
+    await this.currentWorkspace(context);
     const { deliveryAddressId, ...rest } = input;
     const business = this.context(context.tenantId);
     // 配送类履约必须选本人地址；自取不接受地址（避免把地址当成“也送货”的暗示）。
@@ -961,6 +966,8 @@ export class ClientApiService {
 
   async createOrder(context: ClientRequestContext, input: ClientCreateOrderRequest, requestContext?: ClientOrderRequestContext) {
     this.requireActiveMembership(context);
+    // 即使客户在取消发布前拿到报价，也不能在关闭渠道后新建订单。
+    await this.currentWorkspace(context);
     const business = this.context(context.tenantId);
     const quote = this.business.getQuote(context.tenantId, business, input.quoteId);
     if (quote.request.customerId !== context.customerId) throw new NotFoundException("报价不存在");

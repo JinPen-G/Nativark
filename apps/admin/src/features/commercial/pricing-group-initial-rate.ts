@@ -7,7 +7,14 @@ export type PricingGroupFormValues = Omit<SaveRentalPricingGroupRequest, "initia
 export function toPricingGroupRequest(values: PricingGroupFormValues, id?: string): SaveRentalPricingGroupRequest {
   const initialRates = values.initialRates?.map((rate) => {
     if (rate.unit !== "usage") {
-      return { unit: rate.unit, baseAmount: rate.baseAmount, preAuthAmount: rate.preAuthAmount };
+      return {
+        unit: rate.unit,
+        baseAmount: rate.baseAmount,
+        depositAmount: rate.depositAmount,
+        depositMultiple: rate.depositMultiple,
+        preAuthAmount: rate.preAuthAmount,
+        preAuthMultiple: rate.preAuthMultiple
+      };
     }
     const { usageMode, ...usageRate } = rate;
     return {

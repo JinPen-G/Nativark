@@ -6,6 +6,8 @@ import type {
   SaveRentalItemGroupRequest,
   SaveRentalPricingGroupRequest,
   RentalPricingGroupInitialRate,
+  RentalPricingGroupSecurityRateOverride,
+  UpdateRentalPricingGroupSecurityRatesRequest,
   RentalPricingTier,
   RentalPricingUnit,
   AssignRentalWorkOrderRequest,
@@ -298,7 +300,22 @@ class RentalPricingGroupInitialRateInputDto implements RentalPricingGroupInitial
   @IsOptional()
   @IsNumber()
   @Min(0)
+  depositAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  depositMultiple?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
   preAuthAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  preAuthMultiple?: number;
 
   @IsOptional()
   @IsNumber()
@@ -328,6 +345,38 @@ class RentalPricingGroupInitialRateInputDto implements RentalPricingGroupInitial
   @IsNumber()
   @Min(0)
   maxAmount?: number;
+}
+
+class RentalPricingGroupSecurityRateOverrideDto implements RentalPricingGroupSecurityRateOverride {
+  @IsIn(RENTAL_PRICING_UNIT_CODES)
+  unit!: RentalPricingUnit;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  depositAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  depositMultiple?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  preAuthAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  preAuthMultiple?: number;
+}
+
+export class UpdateRentalPricingGroupSecurityRatesDto implements UpdateRentalPricingGroupSecurityRatesRequest {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RentalPricingGroupSecurityRateOverrideDto)
+  rates!: RentalPricingGroupSecurityRateOverrideDto[];
 }
 
 class RentalPricingGroupTierInputDto implements RentalPricingTier {

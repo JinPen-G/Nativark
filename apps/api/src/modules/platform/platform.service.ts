@@ -2333,11 +2333,12 @@ export class PlatformService {
       .map((user) => this.toUserRow(user));
   }
 
-  saveUser(input: SaveSystemUserRequest, currentUser?: SystemUserRow) {
+  async saveUser(input: SaveSystemUserRequest, currentUser?: SystemUserRow) {
     const targetTenantId = this.resolveTargetTenantId(input.tenantId, currentUser);
     input = { ...input, tenantId: targetTenantId, isSaasAdmin: false };
+    await this.assertTenantAdminPrivilegeWrite(input, targetTenantId, currentUser);
     if (this.useMysqlDataSource()) {
-      return this.platformRepository.saveUser(input, targetTenantId);
+      return this.platformRepository.saveUser(input, targetTenantId, currentUser?.id);
     }
     const tenant = this.tenants.find((item) => item.tenantId === input.tenantId);
     const account = input.account.trim();
@@ -2433,15 +2434,17 @@ export class PlatformService {
    * 失败时会留下半套授权。该入口只允许在真实空间数据源上执行，避免内存
    * 演示模式伪造空间权限事实。
    */
-  saveUserWithWorkspaceAccess(
+  async saveUserWithWorkspaceAccess(
     input: SaveSystemUserAccessRequest,
     currentUser?: SystemUserRow
   ) {
     const targetTenantId = this.resolveTargetTenantId(input.tenantId, currentUser);
+    await this.assertTenantAdminPrivilegeWrite(input, targetTenantId, currentUser);
     this.requireWorkspaceDataSource();
     return this.platformRepository.saveUserWithWorkspaceAccess(
       { ...input, tenantId: targetTenantId, isSaasAdmin: false },
-      targetTenantId
+      targetTenantId,
+      currentUser?.id
     );
   }
 
@@ -2924,6 +2927,47 @@ export class PlatformService {
     return user.tenantId;
   }
 
+  /** 管理员标志和固定全权角色属于租户边界，不能仅依赖路由权限或客户端提交值。 */
+  private async assertTenantAdminPrivilegeWrite(
+    input: SaveSystemUserRequest,
+    tenantId: string,
+    currentUser?: SystemUserRow
+  ) {
+    const actorIsTenantAdmin = Boolean(
+      currentUser?.id && currentUser.tenantId === tenantId && currentUser.isPlatformAdmin && !currentUser.isSaasAdmin
+    );
+    let targetIsTenantAdmin = false;
+    const workspaceRoleIds = "workspaceAccesses" in input && Array.isArray(input.workspaceAccesses)
+      ? input.workspaceAccesses.map((access) => access.roleId).filter((roleId): roleId is string => Boolean(roleId))
+      : [];
+    const requestedRoleIds = [...new Set([...(input.roleIds ?? []), ...workspaceRoleIds])];
+    let assignsFixedAllPermissions = false;
+    if (requestedRoleIds.length) {
+      if (this.useMysqlDataSource()) {
+        assignsFixedAllPermissions = await this.platformRepository.hasFixedAllPermissionRole(requestedRoleIds, tenantId);
+      } else {
+        assignsFixedAllPermissions = requestedRoleIds.some((roleId) =>
+          this.roleRows.some((role) => role.id === roleId && role.tenantId === tenantId && role.isActive && role.fixedAllPermissions)
+        );
+      }
+    }
+    if (input.id) {
+      if (this.useMysqlDataSource()) {
+        targetIsTenantAdmin = await this.platformRepository.isTenantAdminUser(input.id, tenantId);
+      } else {
+        const target = this.users.find((user) => user.id === input.id && user.tenantId === tenantId);
+        targetIsTenantAdmin = Boolean(target && (
+          target.isPlatformAdmin || target.roleIds.some((roleId) =>
+            this.roleRows.some((role) => role.id === roleId && role.tenantId === tenantId && role.isActive && role.fixedAllPermissions)
+          )
+        ));
+      }
+    }
+    if (!actorIsTenantAdmin && (input.isPlatformAdmin === true || targetIsTenantAdmin || assignsFixedAllPermissions)) {
+      throw new ForbiddenException("只有当前租户管理员可以新增、修改或撤销租户管理员权限");
+    }
+  }
+
   private cloneSystemRulesConfig(
     config: SystemRulesConfig = this.systemRulesConfig
   ): SystemRulesConfig {
@@ -3097,7 +3141,7 @@ export class PlatformService {
     const activeRoleRows = roleRows.filter((role) => role.isActive);
     const isPlatformAdmin =
       Boolean(user.isPlatformAdmin) ||
-      roleRows.some((role) => role.fixedAllPermissions);
+      activeRoleRows.some((role) => role.fixedAllPermissions);
     const permissions = isPlatformAdmin
       ? ["*"]
       : [

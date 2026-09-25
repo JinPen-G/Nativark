@@ -4901,9 +4901,14 @@ export interface RentalPricingGroup {
 export interface RentalPricingGroupInitialRate {
   unit: RentalPricingUnit;
   baseAmount: number;
-  /** 预授权品类的可选预授权额度：默认规则要求预授权而额度为 0 时报价会 fail-closed。
-   *  已启用计划禁止普通编辑、调价计划又只作用于基础价，这里是开业期唯一的配置入口。 */
+  /** 固定押金模式下的每件押金；仅当前已生效规则要求时必填。 */
+  depositAmount?: number;
+  /** 押金租金倍数模式下的倍数；仅当前已生效规则要求时必填。 */
+  depositMultiple?: number;
+  /** 固定预授权模式的每件冻结额度；不与实收押金混为同一资金。 */
   preAuthAmount?: number;
+  /** 预授权租金倍数/风险附加模式下的倍数。 */
+  preAuthMultiple?: number;
   /** 以下字段仅用于 unit=usage；时间租赁不在新建分组时配置阶梯规则。 */
   includedUsage?: number;
   excessUsageAmount?: number;
@@ -4911,6 +4916,19 @@ export interface RentalPricingGroupInitialRate {
   tierMode?: "progressive";
   tiers?: RentalPricingTier[];
   maxAmount?: number;
+}
+
+/** 仅修改当前定价组各计价单位的押金/预授权费率，不允许改基本租金。 */
+export interface RentalPricingGroupSecurityRateOverride {
+  unit: RentalPricingUnit;
+  depositAmount?: number;
+  depositMultiple?: number;
+  preAuthAmount?: number;
+  preAuthMultiple?: number;
+}
+
+export interface UpdateRentalPricingGroupSecurityRatesRequest {
+  rates: RentalPricingGroupSecurityRateOverride[];
 }
 
 export interface SaveRentalPricingGroupRequest {

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Optional, Param, Post, Put, Query, Req, Res, UploadedFile, UseInterceptors } from "@nestjs/common";
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Optional, Param, Patch, Post, Put, Query, Req, Res, UploadedFile, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { Prisma } from "@prisma/client";
 import {
@@ -34,6 +34,7 @@ import {
   SaveRentalFulfillmentOperatorDto,
   SaveRentalItemGroupDto,
   SaveRentalPricingGroupDto,
+  UpdateRentalPricingGroupSecurityRatesDto,
   AssignRentalWorkOrderDto,
   CancelRentalWorkOrderDto,
   CreateRentalWorkOrderDto,
@@ -447,7 +448,8 @@ export class RentalCoreController {
           baseAmount: row.baseAmount,
           weekendMultiplier: 1,
           holidayMultiplier: 1,
-          depositAmount: 0,
+          depositAmount: row.depositAmount ?? 0,
+          depositMultiple: row.depositMultiple,
           minimumUnits: 1,
           includedUsage: row.includedUsage,
           excessUsageAmount: row.excessUsageAmount,
@@ -457,7 +459,8 @@ export class RentalCoreController {
           maxAmount: row.maxAmount,
           // 预授权品类的默认规则要求预授权，额度只能在这里随基本价一并给出；
           // 留空则按 0 处理，报价会被预授权闸门如实拦截。
-          preAuthAmount: row.preAuthAmount ?? 0
+          preAuthAmount: row.preAuthAmount ?? 0,
+          preAuthMultiple: row.preAuthMultiple
         }))
       }, req.user.displayName, tx, true);
     });
@@ -466,6 +469,10 @@ export class RentalCoreController {
     return this.committed(tenantId, group);
   }
   @Put("pricing-groups/:id") updatePricingGroup(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalPricingGroupDto) { return this.committed(req.user.tenantId, this.service.savePricingGroup(req.user.tenantId, { ...body, id })); }
+  @Patch("pricing-groups/:id/security-rates") updatePricingGroupSecurityRates(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: UpdateRentalPricingGroupSecurityRatesDto) {
+    if (!body.rates?.length) throw new BadRequestException("至少填写一个计价单位的押金或预授权费率");
+    return this.business.updatePricingGroupSecurityRates(req.user.tenantId, this.context(req.user.tenantId), id, body.rates, req.user.displayName);
+  }
   @Get("assets") assets(@Req() req: AuthenticatedRequest) { return this.service.listAssets(req.user.tenantId); }
   @Get("assets/:id/status-history") assetStatusHistory(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.listAssetStatusHistory(req.user.tenantId, id); }
   @Post("assets") saveAsset(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalAssetDto) { return this.committed(req.user.tenantId, this.service.saveAsset(req.user.tenantId, body)); }

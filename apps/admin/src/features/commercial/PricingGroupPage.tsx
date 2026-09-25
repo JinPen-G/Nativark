@@ -1,5 +1,5 @@
 import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from "@ant-design/icons";
-import { RENTAL_PRICING_UNIT_LABELS, formatRentalMoney, rentalCurrencySymbol, type RentalPricingGroup, type SaveRentalPricingGroupRequest } from "@rental-os/shared";
+import { RENTAL_PRICING_UNIT_LABELS, formatRentalMoney, rentalCurrencySymbol, type RentalPricingGroup, type SaveRentalPricingGroupRequest, type UpdateRentalPricingGroupSecurityRatesRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { App, Button, Card, Drawer, Form, Input, InputNumber, Select, Space, Table, Tag, Typography } from "antd";
 import { useMemo, useState } from "react";
@@ -18,13 +18,35 @@ export function PricingGroupPage() {
   const [keyword, setKeyword] = useState("");
   const [editing, setEditing] = useState<RentalPricingGroup>();
   const [open, setOpen] = useState(false);
+  const [securityEditing, setSecurityEditing] = useState<RentalPricingGroup>();
+  const [securityOpen, setSecurityOpen] = useState(false);
   const [form] = Form.useForm<PricingGroupFormValues>();
+  const [securityForm] = Form.useForm<UpdateRentalPricingGroupSecurityRatesRequest>();
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
   const models = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
   const pricingGroups = useQuery({ queryKey: ["rental-core", "pricing-groups"], queryFn: rentalCoreApi.pricingGroups });
   const settings = useQuery({ queryKey: ["rental-core", "business-settings"], queryFn: rentalCoreApi.businessSettings });
+  const rules = useQuery({ queryKey: ["rental-core", "rule-versions"], queryFn: rentalCoreApi.ruleVersions });
   const currency = settings.data?.pricing.currency;
   const { currentVersionDetail } = usePriceVersions();
+  // 已发布（含未来生效）与最新草稿都参与字段展示，避免先配价格后配资金规则时
+  // 出现“发布被拒、页面却没有补录入口”的死锁。
+  const rateRuleCandidates = (rules.data ?? []).filter((row) =>
+    row.status === "published" || row.status === "pending" || row.status === "draft"
+  );
+  const depositModes = rateRuleCandidates.map((row) => {
+    const legacyMode = row.config.payment.depositMode;
+    return row.config.deposit?.mode ?? (legacyMode === "preauthorization" ? "none" : legacyMode ?? "none");
+  });
+  const preauthorizationModes = rateRuleCandidates.map((row) =>
+    row.config.preauthorization?.mode ?? (row.config.payment.depositMode === "preauthorization" ? "fixed" : "none")
+  );
+  const securityRateFields = [
+    ...(depositModes.includes("fixed") ? [{ name: "depositAmount", label: "每件固定押金" }] : []),
+    ...(depositModes.includes("price_multiple") ? [{ name: "depositMultiple", label: "押金租金倍数" }] : []),
+    ...(preauthorizationModes.includes("fixed") ? [{ name: "preAuthAmount", label: "每件预授权额度" }] : []),
+    ...(preauthorizationModes.some((mode) => mode === "price_multiple" || mode === "risk_surcharge") ? [{ name: "preAuthMultiple", label: "预授权租金倍数" }] : [])
+  ];
   const save = useMutation({
     mutationFn: rentalCoreApi.savePricingGroup,
     onSuccess: async () => {
@@ -40,6 +62,20 @@ export function PricingGroupPage() {
     },
     onError: () => message.error(t("保存失败，请检查编码、成员型号和库存方式"))
   });
+  const saveSecurityRates = useMutation({
+    mutationFn: (data: UpdateRentalPricingGroupSecurityRatesRequest) => rentalCoreApi.updatePricingGroupSecurityRates(securityEditing!.id, data),
+    onSuccess: async (result) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: PRICE_VERSIONS_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: ["rental-core", "price-version"] })
+      ]);
+      setSecurityOpen(false);
+      setSecurityEditing(undefined);
+      securityForm.resetFields();
+      message.success(t("资金费率已保存，新价格版本已生效") + ` · ${result.version}`);
+    },
+    onError: (error) => message.error(error instanceof Error ? error.message : t("资金费率保存失败，请检查规则与待生效调价"))
+  });
   const rows = useMemo(
     () => (pricingGroups.data ?? []).filter((row) => `${row.code}${row.name}${row.members.map((item) => item.name).join("")}`.toLowerCase().includes(keyword.toLowerCase())),
     [pricingGroups.data, keyword]
@@ -49,8 +85,9 @@ export function PricingGroupPage() {
   const itemGroupLabel = t(profile.data?.terminology.itemGroupLabel ?? "产品型号");
 
   function edit(record?: RentalPricingGroup) {
-    if (!settings.data) {
-      message.error(t(settings.isError ? "基础经营设置读取失败，请刷新后重试" : "基础经营设置仍在加载，请稍后重试"));
+    if (!settings.data || !rules.data) {
+      const failed = settings.isError || rules.isError;
+      message.error(t(failed ? "基础经营设置或业务规则读取失败，请刷新后重试" : "基础经营设置或业务规则仍在加载，请稍后重试"));
       return;
     }
     setEditing(record);
@@ -72,6 +109,23 @@ export function PricingGroupPage() {
     setOpen(true);
   }
 
+  function editSecurityRates(record: RentalPricingGroup) {
+    const currentRates = (currentVersionDetail.data?.rates ?? [])
+      .filter((rate) => (rate.pricingGroupId ?? rate.itemGroupId) === record.id)
+      .map(({ unit, depositAmount, depositMultiple, preAuthAmount, preAuthMultiple }) => ({ unit, depositAmount, depositMultiple, preAuthAmount, preAuthMultiple }));
+    if (!currentRates.length) {
+      message.error(t("当前价格版本没有该定价组的费率，请先建立或发布基本价"));
+      return;
+    }
+    if (!securityRateFields.length) {
+      message.info(t("当前已发布或草稿规则没有按计价单位收取押金/预授权，无需配置此处费率"));
+      return;
+    }
+    setSecurityEditing(record);
+    securityForm.setFieldsValue({ rates: currentRates });
+    setSecurityOpen(true);
+  }
+
   return <>
     <PageHeader
       title={routeLabel}
@@ -84,7 +138,7 @@ export function PricingGroupPage() {
     />
     <Card className="data-panel">
       <Input allowClear prefix={<SearchOutlined />} value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder={t("搜索分组或成员型号")} style={{ width: 320, marginBottom: 16 }} />
-      <QueryState loading={pricingGroups.isLoading || models.isLoading || settings.isLoading} error={pricingGroups.error || models.error || settings.error}>
+      <QueryState loading={pricingGroups.isLoading || models.isLoading || settings.isLoading || rules.isLoading || currentVersionDetail.isLoading} error={pricingGroups.error || models.error || settings.error || rules.error || currentVersionDetail.error}>
         <Table<RentalPricingGroup> rowKey="id" dataSource={rows} columns={[
           { title: t("定价分组"), render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code} · v{row.version}</span></> },
           { title: `${t("包含的")}${itemGroupLabel}`, render: (_, row) => <Space size={[4, 4]} wrap>{row.members.length ? row.members.map((member) => <Tag color="processing" key={member.id}>{member.name} · {member.code}</Tag>) : <Tag>{t("未配置")}</Tag>}</Space> },
@@ -94,7 +148,10 @@ export function PricingGroupPage() {
             return rates.length ? <Space size={[4, 4]} wrap>{rates.map((rate) => <Tag color="processing" key={`${rate.itemGroupId}:${rate.unit}`}>{formatRentalMoney(rate.baseAmount, currency)} / {t(RENTAL_PRICING_UNIT_LABELS[rate.unit] ?? rate.unit)}</Tag>)}</Space> : <Tag color="warning">{t("历史分组未配置")}</Tag>;
           } },
           { title: t("状态"), dataIndex: "status", render: (value) => <Tag color={value === "enabled" ? "success" : "default"}>{t(value === "enabled" ? "启用" : "停用")}</Tag> },
-          { title: t("操作"), width: 100, render: (_, row) => <Button type="link" icon={<EditOutlined />} onClick={() => edit(row)}>{t("编辑")}</Button> }
+          { title: t("操作"), width: 190, render: (_, row) => <Space>
+            <Button type="link" icon={<EditOutlined />} onClick={() => edit(row)}>{t("编辑")}</Button>
+            <Button type="link" disabled={!securityRateFields.length || !currentVersionDetail.data} onClick={() => editSecurityRates(row)}>{t("押金/预授权")}</Button>
+          </Space> }
         ]} />
       </QueryState>
     </Card>
@@ -129,6 +186,20 @@ export function PricingGroupPage() {
                   </Form.Item>
                   <Button danger type="text" aria-label={t("删除基本价")} icon={<DeleteOutlined />} disabled={fields.length === 1} onClick={() => remove(field.name)} style={{ marginTop: 30 }} />
                 </Space>
+                {securityRateFields.length > 0 && <Card size="small" title={t("押金与预授权")} style={{ marginTop: 8 }}>
+                  <Typography.Paragraph type="secondary">{t("按当前已生效的业务规则填写本计价单位需要的资金金额；押金是实收，预授权是冻结额度，两者分别计算。")}</Typography.Paragraph>
+                  <Space align="start" wrap>
+                    {securityRateFields.map((fieldConfig) => <Form.Item
+                      key={fieldConfig.name}
+                      name={[field.name, fieldConfig.name]}
+                      label={t(fieldConfig.label)}
+                      rules={[{ required: true, message: t("当前已生效规则要求填写此金额") }, { type: "number", min: 0.01, message: t("金额或倍数必须大于 0") }]}
+                      extra={fieldConfig.name.toLowerCase().includes("multiple") ? t("按本行实际租金乘以该倍数") : t("启用对应规则时必须大于 0")}
+                    >
+                      <InputNumber min={0.01} precision={2} style={{ width: 220 }} />
+                    </Form.Item>)}
+                  </Space>
+                </Card>}
                 <Form.Item noStyle shouldUpdate={(previous, current) =>
                   previous.initialRates?.[field.name]?.unit !== current.initialRates?.[field.name]?.unit ||
                   previous.initialRates?.[field.name]?.usageMode !== current.initialRates?.[field.name]?.usageMode
@@ -198,6 +269,41 @@ export function PricingGroupPage() {
         {editing && <Form.Item name="defaultPricingUnit" label={t("默认计价单位")}><Select allowClear options={(settings.data?.pricing.enabledUnits ?? []).map((value) => ({ value, label: t(RENTAL_PRICING_UNIT_LABELS[value] ?? value) }))} /></Form.Item>}
         <Form.Item name="description" label={t("说明")}><Input.TextArea rows={3} /></Form.Item>
         <Form.Item name="status" label={t("状态")} rules={[{ required: true }]}><Select options={[{ value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item>
+      </Form>
+    </Drawer>
+    <Drawer
+      title={`${t("押金/预授权费率")} · ${securityEditing?.name ?? ""}`}
+      size={640}
+      open={securityOpen}
+      destroyOnHidden
+      onClose={() => setSecurityOpen(false)}
+      extra={<Button type="primary" loading={saveSecurityRates.isPending} onClick={() => securityForm.submit()}>{t("保存并生成新价格版本")}</Button>}
+    >
+      <Typography.Paragraph type="secondary">
+        {t("只调整本定价组的押金与预授权金额，不改基本租金。保存后会为整个经营空间追加新价格版本，历史版本和既有订单快照保持不变。")}
+      </Typography.Paragraph>
+      <Form<UpdateRentalPricingGroupSecurityRatesRequest> form={securityForm} layout="vertical" onFinish={(values) => saveSecurityRates.mutate(values)}>
+        <Form.List name="rates">
+          {(fields) => <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+            {fields.map((field) => {
+              const unit = securityForm.getFieldValue(["rates", field.name, "unit"]) as keyof typeof RENTAL_PRICING_UNIT_LABELS | undefined;
+              return <Card size="small" key={field.key} title={t(unit ? RENTAL_PRICING_UNIT_LABELS[unit] : "计价单位")}>
+                <Form.Item name={[field.name, "unit"]} hidden><Input /></Form.Item>
+                <Space align="start" wrap>
+                  {securityRateFields.map((fieldConfig) => <Form.Item
+                    key={fieldConfig.name}
+                    name={[field.name, fieldConfig.name]}
+                    label={t(fieldConfig.label)}
+                    rules={[{ required: true, message: t("当前业务规则要求填写此金额") }, { type: "number", min: 0.01, message: t("金额或倍数必须大于 0") }]}
+                    extra={fieldConfig.name.toLowerCase().includes("multiple") ? t("按本行实际租金乘以该倍数") : t("启用对应规则时必须大于 0")}
+                  >
+                    <InputNumber min={0.01} precision={2} style={{ width: 240 }} />
+                  </Form.Item>)}
+                </Space>
+              </Card>;
+            })}
+          </Space>}
+        </Form.List>
       </Form>
     </Drawer>
   </>;

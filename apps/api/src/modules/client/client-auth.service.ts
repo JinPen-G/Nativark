@@ -172,7 +172,7 @@ export class ClientAuthService {
     return payload;
   }
 
-  private async target(tenantCode: string, workspaceCode?: string) {
+  private async target(tenantCode: string, workspaceCode?: string, requirePublished = false) {
     const tenant = await this.prisma.tenant.findFirst({
       where: { code: tenantCode.trim(), status: "ACTIVE" },
       select: { id: true, code: true }
@@ -180,7 +180,12 @@ export class ClientAuthService {
     if (!tenant) throw new NotFoundException("租户不存在或未启用");
     const code = workspaceCode?.trim();
     const workspace = await this.prisma.businessWorkspace.findFirst({
-      where: { tenantId: tenant.id, ...(code ? { code } : {}), status: "ACTIVE" },
+      where: {
+        tenantId: tenant.id,
+        ...(code ? { code } : {}),
+        status: "ACTIVE",
+        ...(requirePublished ? { clientChannelPublications: { some: { tenantId: tenant.id, enabled: true } } } : {})
+      },
       select: { id: true, code: true, name: true, categoryCode: true },
       orderBy: [{ isDefault: "desc" }, { code: "asc" }]
     });
@@ -195,7 +200,11 @@ export class ClientAuthService {
     });
     if (!membership || BLOCKED_MEMBERSHIP_STATUSES.has(membership.status)) throw new ForbiddenException("客户尚未获得该租户的访问资格");
     const rows = await tx.businessWorkspace.findMany({
-      where: { tenantId, status: "ACTIVE" },
+      where: {
+        tenantId,
+        status: "ACTIVE",
+        clientChannelPublications: { some: { tenantId, enabled: true } }
+      },
       select: { code: true, name: true, categoryCode: true, isDefault: true },
       orderBy: [{ isDefault: "desc" }, { code: "asc" }]
     });
@@ -215,13 +224,15 @@ export class ClientAuthService {
     tx: Prisma.TransactionClient | PrismaService = this.prisma,
     wechatIdentityId?: string | null
   ): Promise<ClientMembershipSessionResponse> {
-    const [customer, workspace, workspaces, wechatIdentities] = await Promise.all([
+    const [customer, workspace, workspaces, wechatIdentities, membership] = await Promise.all([
       tx.customerProfile.findFirst({ where: { tenantId, id: customerId }, select: { id: true, customerType: true, name: true, phone: true, status: true } }),
-      tx.businessWorkspace.findFirst({ where: { tenantId, id: workspaceId, status: "ACTIVE" }, select: { id: true, code: true } }),
+      tx.businessWorkspace.findFirst({ where: { tenantId, id: workspaceId, status: "ACTIVE" }, select: { id: true, code: true, name: true, categoryCode: true, isDefault: true } }),
       this.workspaceRows(tenantId, customerId, tx),
-      tx.clientWechatIdentity.count({ where: { tenantId, customerId } })
+      tx.clientWechatIdentity.count({ where: { tenantId, customerId } }),
+      tx.customerMembership.findUnique({ where: { tenantId_customerId: { tenantId, customerId } }, select: { status: true } })
     ]);
     if (!customer || customer.status !== "active" || !workspace) throw new UnauthorizedException("客户或经营空间不存在");
+    if (!membership || BLOCKED_MEMBERSHIP_STATUSES.has(membership.status)) throw new ForbiddenException("客户尚未获得该租户的访问资格");
 
     const sessionId = randomBytes(16).toString("hex");
     const refreshToken = randomBytes(32).toString("base64url");
@@ -250,20 +261,28 @@ export class ClientAuthService {
       },
       workspaces,
       // 会话实际绑定的空间（服务端事实），客户端据此记录当前服务，不凭请求参数推断。
-      workspace: workspaces.find((row) => row.workspaceCode === workspace.code),
+      // 当前会话空间可能刚取消客户端发布；仍返回其身份，供已存在订单服务使用，
+      // 但它不会进入 workspaces 可切换列表。
+      workspace: workspaces.find((row) => row.workspaceCode === workspace.code) ?? {
+        workspaceCode: workspace.code,
+        workspaceName: workspace.name,
+        categoryCode: String(workspace.categoryCode),
+        membershipStatus: membership.status,
+        isDefault: workspace.isDefault
+      },
       wechatBound: wechatIdentities > 0
     };
   }
 
   async resolveTarget(tenantCode: string, workspaceCode?: string) {
-    return this.target(tenantCode, workspaceCode);
+    return this.target(tenantCode, workspaceCode, true);
   }
 
   async listPublicWorkspaces(tenantCode: string) {
     const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true, code: true, name: true } });
     if (!tenant) throw new NotFoundException("租户不存在或未启用");
     const workspaces = await this.prisma.businessWorkspace.findMany({
-      where: { tenantId: tenant.id, status: "ACTIVE" },
+      where: { tenantId: tenant.id, status: "ACTIVE", clientChannelPublications: { some: { tenantId: tenant.id, enabled: true } } },
       select: { code: true, name: true, categoryCode: true, isDefault: true },
       orderBy: [{ isDefault: "desc" }, { code: "asc" }]
     });
@@ -277,7 +296,7 @@ export class ClientAuthService {
    */
   async createChallenge(input: ClientRegistrationChallengeRequest & { purpose?: ClientChallengePurpose }): Promise<ClientRegistrationChallengeResponse> {
     const purpose: ClientChallengePurpose = input.purpose ?? "registration";
-    const { tenant, workspace } = await this.target(input.tenantCode, input.workspaceCode);
+    const { tenant, workspace } = await this.target(input.tenantCode, input.workspaceCode, purpose === "registration");
     const identifier = normalizeIdentifier(input.identifier);
     if (!identifier) throw new BadRequestException("手机号或邮箱不能为空");
     if (input.method === "sms" && !/^\+?[0-9]{6,20}$/u.test(identifier)) throw new BadRequestException("手机号格式无效");
@@ -446,7 +465,7 @@ export class ClientAuthService {
 
   async registerPersonal(input: ClientPersonalMembershipRegistrationRequest): Promise<ClientPersonalMembershipRegistrationResponse> {
     assertPassword(input.password);
-    const { tenant, workspace } = await this.target(input.tenantCode, input.workspaceCode);
+    const { tenant, workspace } = await this.target(input.tenantCode, input.workspaceCode, true);
     const phone = normalizeIdentifier(input.phone);
     if (!/^\+?[0-9]{6,20}$/u.test(phone)) throw new BadRequestException("手机号格式无效");
     const tokenHash = hashOpaqueToken(input.verificationToken);
@@ -542,7 +561,15 @@ export class ClientAuthService {
   }
 
   async switchWorkspace(context: ClientRequestContext, input: ClientSwitchWorkspaceRequest) {
-    const workspace = await this.prisma.businessWorkspace.findFirst({ where: { tenantId: context.tenantId, code: input.workspaceCode.trim(), status: "ACTIVE" }, select: { id: true } });
+    const workspace = await this.prisma.businessWorkspace.findFirst({
+      where: {
+        tenantId: context.tenantId,
+        code: input.workspaceCode.trim(),
+        status: "ACTIVE",
+        clientChannelPublications: { some: { tenantId: context.tenantId, enabled: true } }
+      },
+      select: { id: true }
+    });
     if (!workspace) throw new NotFoundException("经营空间不存在或未启用");
     return this.issueSession(context.tenantId, context.customerId, workspace.id, undefined, context.wechatIdentityId);
   }
@@ -623,14 +650,22 @@ export class ClientAuthService {
   }
 
   async sessionStatus(context: ClientRequestContext) {
-    const [customer, account, workspaces, reviews, qualifications] = await Promise.all([
+    const [customer, account, currentWorkspace, membership, workspaces, reviews, qualifications] = await Promise.all([
       this.prisma.customerProfile.findFirst({ where: { tenantId: context.tenantId, id: context.customerId }, select: { id: true, customerType: true, name: true, phoneMasked: true, email: true } }),
       this.prisma.customerAccount.findFirst({ where: { tenantId: context.tenantId, customerId: context.customerId }, select: { status: true } }),
+      this.prisma.businessWorkspace.findFirst({ where: { tenantId: context.tenantId, id: context.workspaceId, status: "ACTIVE" }, select: { code: true, name: true, categoryCode: true, isDefault: true } }),
+      this.prisma.customerMembership.findUnique({ where: { tenantId_customerId: { tenantId: context.tenantId, customerId: context.customerId } }, select: { status: true } }),
       this.workspaceRows(context.tenantId, context.customerId),
       this.prisma.customerMembershipReview.findMany({ where: { tenantId: context.tenantId, customerId: context.customerId, reviewType: "registration" }, orderBy: { updatedAt: "desc" }, take: 20 }),
       this.prisma.customerQualificationRef.findMany({ where: { tenantId: context.tenantId, customerId: context.customerId }, orderBy: { updatedAt: "desc" } })
     ]);
-    if (!customer || !account) throw new UnauthorizedException("客户账号不存在");
-    return { apiVersion: CLIENT_API_VERSION, customerId: customer.id, customerType: customer.customerType as "personal" | "corporate", displayName: customer.name, phoneMasked: customer.phoneMasked, email: customer.email ?? undefined, accountStatus: account.status as "active" | "suspended" | "closed", workspace: workspaces.find((row) => row.workspaceCode === context.workspaceCode)!, workspaces, reviews: reviews.filter((row) => row.reviewType === "registration").map((row) => ({ registrationId: row.id, status: row.status as "pending" | "approved" | "rejected" | "supplement_required" | "cancelled", reason: row.reason ?? undefined, updatedAt: row.updatedAt.toISOString() })), qualifications: qualifications.map((row) => ({ qualificationType: row.qualificationType, status: row.status as ClientMembershipQualificationStatus["status"], expiresAt: asIso(row.expiresAt), updatedAt: row.updatedAt.toISOString() })) };
+    if (!customer || !account || !currentWorkspace || !membership) throw new UnauthorizedException("客户账号或经营空间不存在");
+    return { apiVersion: CLIENT_API_VERSION, customerId: customer.id, customerType: customer.customerType as "personal" | "corporate", displayName: customer.name, phoneMasked: customer.phoneMasked, email: customer.email ?? undefined, accountStatus: account.status as "active" | "suspended" | "closed", workspace: {
+      workspaceCode: currentWorkspace.code,
+      workspaceName: currentWorkspace.name,
+      categoryCode: String(currentWorkspace.categoryCode),
+      membershipStatus: membership.status,
+      isDefault: currentWorkspace.isDefault
+    }, workspaces, reviews: reviews.filter((row) => row.reviewType === "registration").map((row) => ({ registrationId: row.id, status: row.status as "pending" | "approved" | "rejected" | "supplement_required" | "cancelled", reason: row.reason ?? undefined, updatedAt: row.updatedAt.toISOString() })), qualifications: qualifications.map((row) => ({ qualificationType: row.qualificationType, status: row.status as ClientMembershipQualificationStatus["status"], expiresAt: asIso(row.expiresAt), updatedAt: row.updatedAt.toISOString() })) };
   }
 }

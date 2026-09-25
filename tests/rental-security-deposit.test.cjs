@@ -8,8 +8,11 @@ require("ts-node").register({
 const {
   computeSecurityAmounts,
   applySecurityReduction,
-  validateSecurityRules
+  validateSecurityRules,
+  validateSecurityRateCoverage,
+  applyPricingGroupSecurityRateOverrides
 } = require("../apps/api/src/modules/rental-core/rental-security-deposit");
+const { RentalBusinessService } = require("../apps/api/src/modules/rental-core/rental-business.service");
 
 /**
  * RULE-01B 专项：押金与预授权独立计算（需求 4.4.7）。
@@ -19,6 +22,42 @@ const {
  */
 
 const ok = (message) => console.log(`  PASS  ${message}`);
+
+// ============ 0. 资金费率覆盖：各计价单位齐全、只改本分组且不改基本租金 ============
+{
+  const rates = [
+    { id: "g1-day", pricingGroupId: "group-1", itemGroupId: "group-1", itemGroupName: "标准组", unit: "calendar_day", baseAmount: 100, depositAmount: 0, preAuthAmount: 0 },
+    { id: "g1-hour", pricingGroupId: "group-1", itemGroupId: "group-1", itemGroupName: "标准组", unit: "hour", baseAmount: 20, depositAmount: 0, preAuthAmount: 0 },
+    { id: "g2-day", pricingGroupId: "group-2", itemGroupId: "group-2", itemGroupName: "其他组", unit: "calendar_day", baseAmount: 300, depositAmount: 7, preAuthAmount: 9 }
+  ];
+  const updated = applyPricingGroupSecurityRateOverrides(rates, "group-1", [
+    { unit: "calendar_day", depositAmount: 50, preAuthAmount: 800 },
+    { unit: "hour", depositAmount: 20, preAuthAmount: 300 }
+  ]);
+  assert.equal(updated[0].baseAmount, 100, "资金费率修改不改变租金基本价");
+  assert.equal(updated[0].depositAmount, 50);
+  assert.equal(updated[0].preAuthAmount, 800, "实收押金与预授权额度分开修改");
+  assert.deepEqual(updated[2], rates[2], "其他定价组完整保留");
+  assert.throws(() => applyPricingGroupSecurityRateOverrides(rates, "group-1", [{ unit: "calendar_day", depositAmount: 50 }]), /完全一致/u, "不能漏交当前计价单位");
+  assert.throws(() => applyPricingGroupSecurityRateOverrides(rates, "group-1", [{ unit: "calendar_day" }, { unit: "calendar_day" }]), /重复/u, "不能重复提交同一计价单位");
+  assert.throws(() => applyPricingGroupSecurityRateOverrides(rates, "group-1", [{ unit: "calendar_day", depositAmount: -1 }, { unit: "hour" }]), /有限数字/u, "不能写入负金额");
+  ok("资金费率仅覆盖目标组现有计价单位，基本价、其他组费率不变，漏项/重复/非法金额拒绝");
+}
+
+// ============ 0.1 业务规则要求的资金费率必须有正数配置 ============
+{
+  const rates = [
+    { itemGroupName: "标准组", unit: "calendar_day", depositAmount: 0, depositMultiple: 0, preAuthAmount: 0, preAuthMultiple: 0 }
+  ];
+  assert.equal(validateSecurityRateCoverage(rates, { mode: "fixed" }, { mode: "none" }).length, 1, "固定押金为 0 不允许发布/报价");
+  assert.equal(validateSecurityRateCoverage(rates, { mode: "price_multiple" }, { mode: "none" }).length, 1, "押金租金倍数为 0 不允许发布/报价");
+  assert.equal(validateSecurityRateCoverage(rates, { mode: "none" }, { mode: "fixed" }).length, 1, "固定预授权为 0 不允许发布/报价");
+  assert.equal(validateSecurityRateCoverage(rates, { mode: "none" }, { mode: "price_multiple" }).length, 1, "预授权租金倍数为 0 不允许发布/报价");
+  assert.deepEqual(validateSecurityRateCoverage(rates, { mode: "order_fixed", fixedAmount: 500 }, { mode: "none" }), [], "每单固定由规则本身给金额，不要求费率行");
+  const complete = [{ ...rates[0], depositAmount: 50, depositMultiple: 0.5, preAuthAmount: 800, preAuthMultiple: 1 }];
+  assert.deepEqual(validateSecurityRateCoverage(complete, { mode: "fixed" }, { mode: "price_multiple" }), [], "完整正额费率可通过");
+  ok("固定金额/租金倍数押金与预授权为 0 时失败；每单固定规则独立取规则金额");
+}
 
 // 两行商品：A 租金 300 × 2 件，B 租金 100 × 1 件。费率押金/预授权字段刻意不同以便区分取数。
 const lines = [
@@ -201,7 +240,47 @@ const rejects = (fn, pattern, label) =>
   ok("不可按商品拆分的每单固定押金采用整单全有或全无判定");
 }
 
-// ============ 12. 预授权风险附加额不可被会员降掉 ============
+// ============ 12. 价格有效期覆盖未来规则切换，停用组不阻塞发布 ============
+{
+  const service = Object.create(RentalBusinessService.prototype);
+  const futureRule = {
+    version: "v2",
+    status: "pending",
+    effectiveFrom: "2026-10-01T00:00:00.000Z",
+    config: {
+      payment: { depositMode: "fixed" },
+      deposit: { mode: "fixed" },
+      preauthorization: { mode: "none" }
+    }
+  };
+  service.state = () => ({ ruleVersions: [futureRule] });
+  service.effectiveRuleAt = (_tenantId, _context, at) =>
+    new Date(at).getTime() >= Date.parse(futureRule.effectiveFrom) ? futureRule : undefined;
+  const incompleteRate = {
+    itemGroupId: "group-active", pricingGroupId: "group-active", itemGroupName: "当前组",
+    unit: "calendar_day", baseAmount: 100, depositAmount: 0
+  };
+  assert.throws(
+    () => service.assertSecurityRateCoverageTimeline("tenant-a", {}, [incompleteRate], "2026-09-01T00:00:00.000Z", "2026-11-01T00:00:00.000Z"),
+    /v2/u,
+    "覆盖未来规则生效点的价格版本不能漏掉未来固定押金要求"
+  );
+  assert.doesNotThrow(
+    () => service.assertSecurityRateCoverageTimeline("tenant-a", {}, [incompleteRate], "2026-09-01T00:00:00.000Z", "2026-10-01T00:00:00.000Z"),
+    "价格计划在规则切换前结束时不套用尚未生效的规则"
+  );
+  assert.deepEqual(
+    service.securityRatesForEnabledTargets(
+      { pricingGroups: [{ id: "group-active", status: "enabled" }, { id: "group-disabled", status: "disabled" }], groups: [] },
+      [incompleteRate, { ...incompleteRate, itemGroupId: "group-disabled", pricingGroupId: "group-disabled" }]
+    ).map((rate) => rate.pricingGroupId),
+    ["group-active"],
+    "停用定价组的历史费率不应阻塞当前规则/价格发布"
+  );
+  ok("价格发布校验覆盖有效区间内未来规则边界，并忽略不可报价的停用组");
+}
+
+// ============ 13. 预授权风险附加额不可被会员降掉 ============
 {
   const result = computeSecurityAmounts(
     [{ ...lines[0], securityRiskLevel: "low" }, { ...lines[1], securityRiskLevel: "high" }],

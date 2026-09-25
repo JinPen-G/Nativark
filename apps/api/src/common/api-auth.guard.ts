@@ -450,6 +450,13 @@ export function requiredPermissions(method: string, path: string) {
       ? ["rental-os:price:manage", "rental-os:order:view", "rental-os:order:create"]
       : ["rental-os:price:manage"];
   }
+  // 定价分组与空间调价是价格域写操作，必须显式命中价格权限，不能落入
+  // /rental/v1 的订单权限兜底；订单创建/查看仅能读取所需目录数据。
+  if (path.startsWith("/rental/v1/pricing-groups") || path.startsWith("/rental/v1/pricing-adjustments")) {
+    return method === "GET"
+      ? ["rental-os:price:manage", "rental-os:order:view", "rental-os:order:create"]
+      : ["rental-os:price:manage"];
+  }
   if (path.startsWith("/rental/v1/pricing-plans")) {
     return method === "GET" ? ["rental-os:price:manage", "rental-os:order:view", "rental-os:order:create"] : ["rental-os:price:manage"];
   }

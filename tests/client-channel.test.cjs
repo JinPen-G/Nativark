@@ -12,6 +12,7 @@ Module._resolveFilename = function (request, ...args) {
 require("ts-node").register({ project: path.join(root, "apps/api/tsconfig.json"), transpileOnly: true });
 
 const { ClientApiService } = require("../apps/api/src/modules/client/client-api.service");
+const { ClientAuthService } = require("../apps/api/src/modules/client/client-auth.service");
 const { ClientChannelProfileService } = require("../apps/api/src/modules/client/client-channel-profile.service");
 const { WebsiteChannelProfileService } = require("../apps/api/src/modules/client/website-channel-profile.service");
 const { WebsiteAssetService } = require("../apps/api/src/modules/client/website-asset.service");
@@ -80,7 +81,7 @@ test("bootstrap: 微信渠道就绪时小程序开放微信一键登录与微信
   assert.equal(app.capabilities.wechatPay, false, "APP 不走小程序 JSAPI 支付");
 });
 
-test("bootstrap: 未配置渠道或无发布服务时回退到启用空间目录，只带租户名，不冒充品牌/协议", async () => {
+test("bootstrap: 未配置渠道或无发布服务时不暴露任何空间，只带租户名，不冒充品牌/协议", async () => {
   const svc = bootstrapService({ tenant, profile: null, wechatChannel: null, workspaces: [{ code: "camera", name: "摄影", categoryCode: "camera", isDefault: true }] });
   const result = await svc.channelBootstrap("demo", "wechat_miniprogram");
   assert.equal(result.source, "workspace_directory");
@@ -89,7 +90,89 @@ test("bootstrap: 未配置渠道或无发布服务时回退到启用空间目录
   assert.equal(result.help.available, false);
   assert.equal(result.capabilities.publicCatalog, false);
   assert.equal(result.capabilities.wechatPay, false);
-  assert.deepEqual(result.services.map((s) => s.code), ["camera"]);
+  assert.deepEqual(result.services, []);
+  assert.equal(result.defaultServiceCode, undefined);
+});
+
+test("未发布空间不进入登录后的可切换目录，但当前会话空间仍单独返回供既有订单使用", async () => {
+  const svc = Object.create(ClientAuthService.prototype);
+  const oldSecret = process.env.AUTH_TOKEN_SECRET;
+  process.env.AUTH_TOKEN_SECRET = "client-channel-test-secret";
+  const createdSessions = [];
+  const tx = {
+    customerProfile: { findFirst: async () => ({ id: "c1", customerType: "personal", name: "会员", phone: "13800000000", status: "active" }) },
+    customerMembership: { findUnique: async () => ({ status: "active" }) },
+    businessWorkspace: {
+      findFirst: async () => ({ id: "w-old", code: "old", name: "旧空间", categoryCode: "camera", isDefault: true }),
+      findMany: async ({ where }) => {
+        assert.deepEqual(where.clientChannelPublications, { some: { tenantId: "t1", enabled: true } });
+        return [{ code: "published", name: "已发布空间", categoryCode: "camping", isDefault: false }];
+      }
+    },
+    clientWechatIdentity: { count: async () => 0 },
+    clientAuthSession: { create: async ({ data }) => createdSessions.push(data) }
+  };
+  try {
+    const response = await svc.issueSession("t1", "c1", "w-old", tx);
+    assert.deepEqual(response.workspaces.map((row) => row.workspaceCode), ["published"]);
+    assert.equal(response.workspace.workspaceCode, "old");
+    assert.equal(createdSessions.length, 1, "会话仍保持原空间，既有订单链不被取消发布影响");
+  } finally {
+    if (oldSecret === undefined) delete process.env.AUTH_TOKEN_SECRET;
+    else process.env.AUTH_TOKEN_SECRET = oldSecret;
+  }
+});
+
+test("未发布空间不能被重新选中，但取消发布前已有会话仍可读取本人订单", async () => {
+  const queries = [];
+  const auth = Object.assign(Object.create(ClientAuthService.prototype), {
+    prisma: {
+      tenant: { findFirst: async () => tenant },
+      businessWorkspace: {
+        findFirst: async ({ where }) => { queries.push(where); return null; }
+      }
+    }
+  });
+  await assert.rejects(auth.resolveTarget("demo", "camera"), status(404));
+  await assert.rejects(auth.switchWorkspace({ tenantId: "t1", customerId: "c1" }, { workspaceCode: "camera" }), status(404));
+  assert.equal(queries.length, 2);
+  for (const where of queries) {
+    assert.deepEqual(where.clientChannelPublications, { some: { tenantId: "t1", enabled: true } });
+  }
+
+  const context = { tenantId: "t1", tenantCode: "demo", customerId: "c1", customerType: "personal", workspaceCode: "camera" };
+  const oldOrder = { id: "order-old", customerId: "c1", status: "reserved", lines: [], allocations: [] };
+  const client = Object.assign(Object.create(ClientApiService.prototype), {
+    core: { listOrders: async () => [oldOrder] },
+    assertClientOrder: async () => oldOrder,
+    orderView: (order) => ({ id: order.id })
+  });
+  assert.deepEqual((await client.listOrders(context, {})).items, [{ id: "order-old" }]);
+  assert.deepEqual(await client.getOrder(context, "order-old"), { id: "order-old" });
+});
+
+test("取消发布后，目录、可用性、报价和新建订单均在业务执行前被拒绝", async () => {
+  const context = { tenantId: "t1", tenantCode: "demo", customerId: "c1", workspaceCode: "camera", membershipStatus: "active" };
+  let catalogBuilt = false;
+  const noCatalog = Object.assign(Object.create(ClientApiService.prototype), {
+    auth: { listPublicWorkspaces: async () => ({ workspaces: [] }) },
+    buildCatalog: async () => { catalogBuilt = true; }
+  });
+  await assert.rejects(noCatalog.catalog(context), status(404));
+  assert.equal(catalogBuilt, false);
+
+  let businessCalls = 0;
+  const unpublished = Object.assign(Object.create(ClientApiService.prototype), {
+    requireActiveMembership: () => {},
+    currentWorkspace: async () => { const error = new Error("not published"); error.getStatus = () => 404; throw error; },
+    core: { availability: async () => { businessCalls += 1; } },
+    business: { createQuote: async () => { businessCalls += 1; }, getQuote: () => { businessCalls += 1; } },
+    context: () => ({})
+  });
+  await assert.rejects(unpublished.availability(context, {}), status(404));
+  await assert.rejects(unpublished.createQuote(context, {}), status(404));
+  await assert.rejects(unpublished.createOrder(context, {}), status(404));
+  assert.equal(businessCalls, 0, "未发布空间不得进入可用性、报价或订单计算");
 });
 
 test("bootstrap: 微信凭证缺失时小程序也不开放微信登录/支付，短信/密码按配置开放", async () => {

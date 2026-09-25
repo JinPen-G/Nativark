@@ -125,7 +125,7 @@ import { applyPriceAdjustment, assertNoDatetimeOverrideOverlap, assertNoPeriodic
 import { assertTimeBasedOverdueSupported, billedRentalHours, rentalPricingStrategy } from "./rental-pricing-strategy";
 import { allocateDiscount, selectDiscountPlans } from "./rental-discount-selection";
 import { resolveQuoteServices } from "./rental-service-catalog";
-import { computeSecurityAmounts, type SecurityLineInput, validateSecurityRules } from "./rental-security-deposit";
+import { applyPricingGroupSecurityRateOverrides, computeSecurityAmounts, type SecurityLineInput, type RentalPricingSecurityRateOverride, validateSecurityRateCoverage, validateSecurityRules } from "./rental-security-deposit";
 import { roundMoney } from "./rental-money";
 import { computeEarlyReturnRefund, type EarlyReturnRefund } from "./rental-early-return";
 import { extensionPaymentRequired } from "./rental-extension-lifecycle";
@@ -967,6 +967,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       for (const value of [row.baseAmount, row.weekendMultiplier, row.holidayMultiplier, row.depositAmount, row.minimumUnits]) {
         if (!Number.isFinite(value) || value < 0) throw new BadRequestException("价格、倍率、押金和最低计费单位必须是非负数");
       }
+      for (const value of [row.depositMultiple, row.preAuthAmount, row.preAuthMultiple]) {
+        if (value !== undefined && (!Number.isFinite(value) || value < 0)) throw new BadRequestException("押金和预授权金额/倍率必须是非负有限数字");
+      }
       // 阶梯档位重复会让"取最高已达档"变成看装载顺序，同一份配置解释不出唯一价格。
       const tierKeys = new Set<number>();
       const tiers = row.tiers ?? [];
@@ -1047,6 +1050,18 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       updatedAt: timestamp
     };
 
+    // 开启押金/预授权规则后，新增或启用的价格行必须同步具备正额资金费率，
+    // 不允许把“配置成功、报价时才发现为 0”留给客户下单流程。
+    if (result.status === "enabled") {
+      this.assertSecurityRateCoverageTimeline(
+        tenantId,
+        context,
+        this.securityRatesForEnabledTargets(context, result.rates),
+        result.effectiveFrom,
+        result.effectiveTo
+      );
+    }
+
     const prisma = this.prisma;
     const mysql = prisma && (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() === "mysql";
 
@@ -1084,6 +1099,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       const baseAtStart = await this.findSpaceVersionAt(tenantId, workspaceId, effectiveFrom, client);
       const baseRates = (baseAtStart?.rates ?? []) as unknown as RentalPricingRate[];
       const withPlan = RentalBusinessService.mergeSpaceRates(baseRates, existing?.status === "enabled" ? existing.rates : [], rates);
+      // 计划仅覆盖部分定价组；校验必须针对合并后的完整空间版本，不能只检查本次提交行。
+      this.assertSecurityRateCoverageTimeline(
+        tenantId,
+        context,
+        this.securityRatesForEnabledTargets(context, withPlan),
+        effectiveFrom,
+        result.effectiveTo
+      );
       await this.appendSpaceVersion(client, {
         tenantId,
         workspaceId,
@@ -1098,6 +1121,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       if (result.effectiveTo) {
         const effectiveTo = new Date(result.effectiveTo);
         const afterExpiry = RentalBusinessService.mergeSpaceRates(withPlan, rates, []);
+        this.assertSecurityRateCoverageTimeline(
+          tenantId,
+          context,
+          this.securityRatesForEnabledTargets(context, afterExpiry),
+          effectiveTo
+        );
         await this.appendSpaceVersion(client, {
           tenantId,
           workspaceId,
@@ -1335,6 +1364,75 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const row = await prisma.rentalPriceVersion.findFirst({ where: { tenantId, workspaceId, sequence } });
     if (!row) throw new NotFoundException("价格版本不存在");
     return { id: row.id, tenantId: row.tenantId, workspaceId: row.workspaceId, sequence: row.sequence, version: `v${row.sequence}`, effectiveFrom: row.effectiveFrom.toISOString(), changeReason: row.changeReason ?? undefined, createdBy: row.createdBy ?? undefined, createdAt: row.createdAt.toISOString(), rates: row.rates as unknown as RentalPricingRate[] };
+  }
+
+  /**
+   * F04：修正某个定价组的押金/预授权费率时，只追加一条完整空间价格版本，
+   * 不覆盖历史快照，也不允许请求顺带改基本租金或其他定价组。
+   */
+  async updatePricingGroupSecurityRates(
+    tenantId: string,
+    context: BusinessContext,
+    pricingGroupId: string,
+    overrides: readonly RentalPricingSecurityRateOverride[],
+    operator?: string
+  ) {
+    const prisma = this.prisma;
+    if (!prisma || (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() !== "mysql") {
+      throw new BadRequestException("资金费率修改需要 MySQL 空间价格版本，当前数据源不支持");
+    }
+    const pricingGroup = (context.pricingGroups ?? []).find((row) => row.id === pricingGroupId);
+    if (!pricingGroup) throw new NotFoundException("定价分组不存在");
+    const workspaceId = this.workspaceOf(tenantId);
+    const now = new Date();
+
+    const created = await prisma.$transaction(async (tx) => {
+      const pendingAdjustment = await tx.rentalPriceAdjustmentPlan.findFirst({
+        where: { tenantId, workspaceId, status: "pending" },
+        select: { code: true }
+      });
+      if (pendingAdjustment) {
+        throw new ConflictException(`空间存在待生效调价 ${pendingAdjustment.code}，请先执行或取消后再修改资金费率`);
+      }
+      const current = await this.findSpaceVersionAt(tenantId, workspaceId, now, tx);
+      if (!current) throw new ConflictException("当前没有已生效的空间价格版本，无法维护资金费率");
+      const currentRates = current.rates as unknown as RentalPricingRate[];
+      let nextRates: RentalPricingRate[];
+      try {
+        nextRates = applyPricingGroupSecurityRateOverrides(currentRates, pricingGroupId, overrides);
+      } catch (error) {
+        throw new BadRequestException(error instanceof Error ? error.message : "资金费率无效");
+      }
+      this.assertSecurityRateCoverageTimeline(
+        tenantId,
+        context,
+        nextRates.filter((rate) => pricingTargetId(rate) === pricingGroupId),
+        now
+      );
+      if (RentalBusinessService.sameRates(currentRates, nextRates)) {
+        throw new ConflictException("资金费率与当前价格版本完全一致，无需新增版本");
+      }
+      return this.appendSpaceVersion(tx, {
+        tenantId,
+        workspaceId,
+        effectiveFrom: now,
+        rates: nextRates,
+        changeReason: `维护定价分组“${pricingGroup.name}”的押金与预授权费率`,
+        createdBy: operator
+      });
+    }).catch((error) => {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new ConflictException("价格版本并发写入冲突，请刷新后重试");
+      }
+      throw error;
+    });
+    return {
+      id: created.id,
+      sequence: created.sequence,
+      version: `v${created.sequence}`,
+      effectiveFrom: created.effectiveFrom.toISOString(),
+      changeReason: created.changeReason
+    };
   }
 
   /** PRICE-03：历史快照只能通过追加新版本恢复，原版本与中间版本均保持不可变。 */
@@ -3108,6 +3206,39 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return this.effectiveRuleVersionAt(this.state(tenantId, context).ruleVersions, at);
   }
 
+  /**
+   * 校验价格快照覆盖其有效区间内所有已发布/待生效规则，而不是只看起始时点。
+   * 价格计划可能跨过一条未来规则边界；漏看该边界会让合法起始价在规则切换后变成零押金。
+   */
+  private assertSecurityRateCoverageTimeline(
+    tenantId: string,
+    context: BusinessContext,
+    rates: readonly RentalPricingRate[],
+    effectiveFrom: string | Date,
+    effectiveTo?: string | Date
+  ) {
+    const start = new Date(effectiveFrom).getTime();
+    const end = effectiveTo === undefined ? Number.POSITIVE_INFINITY : new Date(effectiveTo).getTime();
+    const instants = new Set<number>([start]);
+    for (const version of this.state(tenantId, context).ruleVersions) {
+      if (!isIssuedRuleVersion(version.status) || !version.effectiveFrom) continue;
+      const at = new Date(version.effectiveFrom).getTime();
+      if (at > start && at < end) instants.add(at);
+    }
+    for (const at of [...instants].sort((left, right) => left - right)) {
+      const rule = this.effectiveRuleAt(tenantId, context, new Date(at).toISOString());
+      if (!rule) continue;
+      const errors = validateSecurityRateCoverage(
+        rates,
+        effectiveDepositRule(rule.config),
+        effectivePreauthorizationRule(rule.config)
+      );
+      if (errors.length) {
+        throw new ConflictException(`价格版本缺少押金/预授权费率（${rule.version}）：${errors.join("；")}`);
+      }
+    }
+  }
+
   /** 草稿保存。已发布版本不可修改（需求 4.6.1），改它只能先恢复为新草稿。 */
   async saveRuleVersion(tenantId: string, context: BusinessContext, input: SaveRentalRuleVersionRequest, operator: string) {
     const state = this.state(tenantId, context);
@@ -3157,11 +3288,24 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     this.validateRule(context, target.config);
     const now = stamp();
     const effectiveFrom = input.effectiveFrom ? new Date(input.effectiveFrom).toISOString() : now;
-    if (target.config.pricing?.hourToDayEnabled || target.config.overdue.feeMode === "hourly_to_daily") {
-      const rates = (await this.resolveSpaceRates(tenantId, context, effectiveFrom)).rates;
-      const needed = rates.filter(row => target.config.overdue.feeMode === "hourly_to_daily" || row.unit === "hour");
-      if (!needed.length || needed.some(row => !rates.some(day => pricingTargetId(day) === pricingTargetId(row) && day.unit === "day_24h"))) {
-        throw new ConflictException("启用时租转日租或逾时转日费前，请先为相关定价分组配置同版本的24小时日价");
+    const depositRule = effectiveDepositRule(target.config);
+    const preauthorizationRule = effectivePreauthorizationRule(target.config);
+    const securityRequired = depositRule.mode !== "none" || preauthorizationRule.mode !== "none";
+    const needsRates = target.config.pricing?.hourToDayEnabled || target.config.overdue.feeMode === "hourly_to_daily" || securityRequired;
+    if (needsRates) {
+      const rates = this.securityRatesForEnabledTargets(
+        context,
+        await this.listSpaceRatesAt(tenantId, context, effectiveFrom)
+      );
+      if (securityRequired && rates.length) {
+        const coverageErrors = validateSecurityRateCoverage(rates, depositRule, preauthorizationRule);
+        if (coverageErrors.length) throw new ConflictException(`规则不能发布：价格版本缺少押金/预授权费率：${coverageErrors.join("；")}`);
+      }
+      if (target.config.pricing?.hourToDayEnabled || target.config.overdue.feeMode === "hourly_to_daily") {
+        const needed = rates.filter(row => target.config.overdue.feeMode === "hourly_to_daily" || row.unit === "hour");
+        if (!needed.length || needed.some(row => !rates.some(day => pricingTargetId(day) === pricingTargetId(row) && day.unit === "day_24h"))) {
+          throw new ConflictException("启用时租转日租或逾时转日费前，请先为相关定价分组配置同版本的24小时日价");
+        }
       }
     }
     assertRuleEffectiveFromAvailable(state.ruleVersions, effectiveFrom, target.id);
@@ -3263,6 +3407,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return versions
       .filter((row) => isIssuedRuleVersion(row.status) && row.effectiveFrom && new Date(row.effectiveFrom).getTime() <= new Date(at).getTime())
       .sort((a, b) => new Date(b.effectiveFrom!).getTime() - new Date(a.effectiveFrom!).getTime())[0];
+  }
+
+  /** 资金费率只约束当前可报价的定价组；停用组保留在价格快照里，不应阻塞发布。 */
+  private securityRatesForEnabledTargets(context: BusinessContext, rates: readonly RentalPricingRate[]) {
+    const enabledTargetIds = new Set([
+      ...(context.pricingGroups ?? []).filter((group) => group.status === "enabled").map((group) => group.id),
+      ...context.groups.filter((group) => group.status === "enabled").map((group) => group.id)
+    ]);
+    return rates.filter((rate) => enabledTargetIds.has(pricingTargetId(rate)));
   }
 
   private ruleVersionAudit(
@@ -4618,6 +4771,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 或两者同时存在。逐行求和 → 订单级固定/风险项 → 订单级封顶全部交给纯函数，
     // 使「这笔押金/预授权凭什么算这么多」可逐条回放。
     const securityPolicies = rule.config.membershipSecurityReduction ?? {};
+    const securityCoverageErrors = validateSecurityRateCoverage(hitRates, depositRule, preauthRule);
+    if (securityCoverageErrors.length) {
+      throw new ConflictException(`当前规则要求押金/预授权，但费率未配置完整：${securityCoverageErrors.join("；")}`);
+    }
     const security = computeSecurityAmounts(securityLines, depositRule, preauthRule, {
       deposit: securityPolicies.deposit?.enabled ? securityPolicies.deposit.allowedRiskLevels ?? [] : [],
       preauthorization: securityPolicies.preauthorization?.enabled ? securityPolicies.preauthorization.allowedRiskLevels ?? [] : []

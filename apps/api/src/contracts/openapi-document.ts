@@ -2409,6 +2409,25 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
     summary: "Update a tenant pricing group and its member models", permissions: ["rental-os:price:manage"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
+    method: "patch", path: "/api/rental/v1/pricing-groups/{id}/security-rates", tag: "RentalCore", operationId: "updateRentalPricingGroupSecurityRates",
+    summary: "Append a space price version with updated deposit and pre-authorization rates for one pricing group",
+    permissions: ["rental-os:price:manage"],
+    requestSchema: objectOf({
+      rates: {
+        type: "array",
+        minItems: 1,
+        items: objectOf({
+          unit: stringSchema,
+          depositAmount: numberSchema,
+          depositMultiple: numberSchema,
+          preAuthAmount: numberSchema,
+          preAuthMultiple: numberSchema
+        }, ["unit"], false)
+      }
+    }, ["rates"], false),
+    responseSchema: "GenericObject"
+  },
+  {
     method: "get", path: "/api/rental/v1/assets", tag: "RentalCore", operationId: "listRentalAssets",
     summary: "List serialized rental assets", permissions: ["rental-core:asset:view"], responseSchema: "GenericObject"
   },

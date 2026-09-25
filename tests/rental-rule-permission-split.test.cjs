@@ -76,4 +76,33 @@ const allows = (userPerms, required) => required.some((code) => userPerms.includ
   ok("rule-versions 分支先于合并分支命中，发布端点不被前缀退化");
 }
 
-console.log("\nAll rule-version permission-split assertions passed.");
+// PRICE-ACCESS-01：所有定价路由必须脱离通用订单权限兜底。
+{
+  const orderOnly = ["rental-os:order:operate", "rental-os:order:view", "rental-os:order:create"];
+  const priceOnly = [PRICE];
+  const routes = [
+    ["分组读取", "GET", "/rental/v1/pricing-groups"],
+    ["分组创建", "POST", "/rental/v1/pricing-groups"],
+    ["分组资金费率更新", "PATCH", "/rental/v1/pricing-groups/group-1/security-rates"],
+    ["调价列表", "GET", "/rental/v1/pricing-adjustments"],
+    ["调价创建", "POST", "/rental/v1/pricing-adjustments"],
+    ["调价确认", "POST", "/rental/v1/pricing-adjustments/adj-1/confirm"],
+    ["调价取消", "POST", "/rental/v1/pricing-adjustments/adj-1/cancel"],
+    ["版本读取", "GET", "/rental/v1/pricing-versions"],
+    ["计划读取", "GET", "/rental/v1/pricing-plans"],
+    ["计划调整确认", "POST", "/rental/v1/pricing-plans/plan-1/adjustments/adj-1/confirm"]
+  ];
+  for (const [label, method, path] of routes) {
+    const required = req(method, path);
+    if (method !== "GET") {
+      assert.deepEqual(required, [PRICE], `${label}写入只允许价格管理权限`);
+      assert.equal(allows(orderOnly, required), false, `${label}不得由订单权限放行`);
+      assert.equal(allows(priceOnly, required), true, `${label}必须允许价格管理员`);
+    } else {
+      assert.ok(required.includes(PRICE), `${label}必须允许价格管理员`);
+    }
+  }
+  ok("价格分组、版本、计划及调价的写操作均不再接受订单权限兜底");
+}
+
+console.log("\nAll rule-version and pricing permission-split assertions passed.");
