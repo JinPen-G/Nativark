@@ -23,6 +23,22 @@ const TODO_TYPES: RentalWorkbenchTodoType[] = [
   "cancelled_refund_due"
 ];
 
+/** 通知模板/手工发送/批量动作会影响整个空间，必须持有完整数据范围且没有地点限制。 */
+export function canManageWorkspaceWideNotifications(
+  dataScope: "all" | "organization" | "store" | "own" | undefined,
+  locationIds: string[] | undefined
+): boolean {
+  return dataScope === "all" && locationIds === undefined;
+}
+
+/** 可见订单过滤必须有可解析依据；store/organization 未映射到地点时不能退化成全空间。 */
+export function canResolveNotificationOrderScope(
+  dataScope: "all" | "organization" | "store" | "own" | undefined,
+  locationIds: string[] | undefined
+): boolean {
+  return dataScope === "all" || dataScope === "own" || locationIds !== undefined;
+}
+
 /**
  * 工作台路由本身也允许报表角色查看，但养护工单不是报表数据的默认组成部分。
  * 把这个判断抽成纯函数，控制器和专项测试共用，避免以后新增工作台待办时把
@@ -58,6 +74,19 @@ function add(
   input: Omit<RentalWorkbenchTodo, "priority"> & { priority?: RentalWorkbenchTodo["priority"] }
 ) {
   items.push({ ...input, priority: input.priority ?? priorityFor(input.type) });
+}
+
+/** 通知日志没有地点列，受限账号只能看到可见订单关联的业务通知。 */
+export function filterNotificationLogsByVisibleOrders(
+  logs: RentalNotificationSendLogV1[],
+  orders: RentalOrder[]
+): RentalNotificationSendLogV1[] {
+  const visibleOrderIds = new Set(orders.map((order) => order.id));
+  return logs.filter((log) =>
+    log.businessObjectType === "order" &&
+    Boolean(log.businessObjectId) &&
+    visibleOrderIds.has(log.businessObjectId!)
+  );
 }
 
 /**
@@ -197,18 +226,20 @@ export function buildRentalWorkbenchTodos(
 
   // NOTICE-01：只有带订单业务对象的失败通知才进入工作台，确保待办有明确处理出口。
   // 模拟成功、已处理历史记录和没有业务对象的手工发送不伪造成业务待办。
-  for (const log of notificationLogs.filter(
+  for (const log of filterNotificationLogsByVisibleOrders(notificationLogs, orders).filter(
     (row) => ["failed", "delivery_failed", "delivery_uncertain", "simulation_failed"].includes(row.status) && row.businessObjectType === "order" && row.businessObjectId
   )) {
     const order = orders.find((row) => row.id === log.businessObjectId);
+    // filterNotificationLogsByVisibleOrders 已保证父订单处于当前会话可见范围。
+    if (!order) continue;
     add(items, {
       id: `notification_failure:${log.id}`,
       type: "notification_failure",
       title: "业务通知发送失败",
       description: `${log.eventCode} 未成功记录发送结果${log.errorMessage ? `：${log.errorMessage}` : "，请检查通知模板与渠道配置"}。`,
-      href: order ? `/rental/orders/${order.id}` : "/rental/orders",
-      orderId: order?.id ?? log.businessObjectId,
-      orderNo: order?.orderNo,
+      href: `/rental/orders/${order.id}`,
+      orderId: order.id,
+      orderNo: order.orderNo,
       createdAt: log.createdAt,
       priority: "high"
     });

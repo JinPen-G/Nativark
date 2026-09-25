@@ -3762,6 +3762,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   listNotificationLogs(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).notificationLogs; }
 
+  async findNotificationLog(tenantId: string, id: string): Promise<RentalNotificationSendLogV1 | undefined> {
+    return (await this.factStore.findNotificationDelivery(tenantId, id))?.log;
+  }
+
   /**
    * 写入通知 outbox。真实短信先落 queued，再在事务提交后投递；这样数据库事务
    * 回滚不会留下已经调用第三方的孤儿短信。收件人明文只在当前调用栈中存在，

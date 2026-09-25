@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, Param, Post, Put, Query, Req } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpCode, NotFoundException, Param, Post, Put, Query, Req } from "@nestjs/common";
 import type {
   RentalCouponTemplate,
   RentalCustomerCoupon,
@@ -40,6 +40,12 @@ import { RentalCoreService } from "./rental-core.service";
 import { RentalIdempotentActionService } from "./rental-idempotent-action.service";
 import { RentalFundingService } from "./rental-funding.service";
 import { RentalServiceCapacityService } from "./rental-service-capacity.service";
+import {
+  canManageWorkspaceWideNotifications,
+  canResolveNotificationOrderScope,
+  filterNotificationLogsByVisibleOrders
+} from "./rental-workbench-todos";
+import { getRequestDataScope, getRequestLocationIds } from "../../common/request-identity";
 import {
   InitiateRentalFundingDto,
   RentalFundingAmountDto,
@@ -98,6 +104,31 @@ export class RentalBusinessController {
       locations: this.core.listLocations(tenantId),
       operators: this.core.listOperators(tenantId)
     };
+  }
+
+  private hasRestrictedOperationalScope(): boolean {
+    return !canManageWorkspaceWideNotifications(getRequestDataScope(), getRequestLocationIds());
+  }
+
+  private assertWorkspaceWideNotificationScope(): void {
+    if (!canManageWorkspaceWideNotifications(getRequestDataScope(), getRequestLocationIds())) {
+      throw new ForbiddenException("通知配置、手工发送和批量重试需要完整履约地点与本人范围以外的数据权限");
+    }
+  }
+
+  private async assertNotificationLogScope(tenantId: string, id: string): Promise<void> {
+    if (!this.hasRestrictedOperationalScope()) return;
+    if (!canResolveNotificationOrderScope(getRequestDataScope(), getRequestLocationIds())) {
+      throw new NotFoundException("通知记录不存在或不在当前账号的数据范围内");
+    }
+    const log = await this.business.findNotificationLog(tenantId, id);
+    if (!log || log.businessObjectType !== "order" || !log.businessObjectId) {
+      throw new NotFoundException("通知记录不存在或不在当前账号的数据范围内");
+    }
+    const visibleOrderIds = new Set((await this.core.listOrders(tenantId)).map((order) => order.id));
+    if (!visibleOrderIds.has(log.businessObjectId)) {
+      throw new NotFoundException("通知记录不存在或不在当前账号的数据范围内");
+    }
   }
 
   /**
@@ -348,20 +379,40 @@ export class RentalBusinessController {
   @Post("rewards/:id/reverse") async reverseReward(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: { reason: string }) { return this.committed(req.user.tenantId, await this.business.reverseReward(req.user.tenantId, this.context(req.user.tenantId), id, body.reason)); }
 
   @Get("notification-templates") notificationTemplates(@Req() req: AuthenticatedRequest) { return this.business.listNotificationTemplates(req.user.tenantId, this.context(req.user.tenantId)); }
-  @Post("notification-templates") async createNotificationTemplate(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalNotificationTemplateDto) { return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, this.context(req.user.tenantId), body)); }
-  @Put("notification-templates/:id") async updateNotificationTemplate(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalNotificationTemplateDto) { return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
-  @Get("notification-logs") notificationLogs(@Req() req: AuthenticatedRequest) { return this.business.listNotificationLogs(req.user.tenantId, this.context(req.user.tenantId)); }
+  @Post("notification-templates") async createNotificationTemplate(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalNotificationTemplateDto) {
+    this.assertWorkspaceWideNotificationScope();
+    return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, this.context(req.user.tenantId), body));
+  }
+  @Put("notification-templates/:id") async updateNotificationTemplate(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalNotificationTemplateDto) {
+    this.assertWorkspaceWideNotificationScope();
+    return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, this.context(req.user.tenantId), { ...body, id }));
+  }
+  @Get("notification-logs") async notificationLogs(@Req() req: AuthenticatedRequest) {
+    const tenantId = req.user.tenantId;
+    if (!this.hasRestrictedOperationalScope()) {
+      return this.business.listNotificationLogs(tenantId, this.context(tenantId));
+    }
+    if (!canResolveNotificationOrderScope(getRequestDataScope(), getRequestLocationIds())) {
+      throw new ForbiddenException("当前账号的通知记录数据范围尚未解析到履约地点，已拒绝访问");
+    }
+    const logs = this.business.listNotificationLogs(tenantId, this.context(tenantId));
+    return filterNotificationLogsByVisibleOrders(logs, await this.core.listOrders(tenantId));
+  }
   @Post("notification-logs/retry-due") async retryDueNotifications(@Req() req: AuthenticatedRequest, @Query("limit") limit?: string) {
+    this.assertWorkspaceWideNotificationScope();
     const parsedLimit = limit ? Number(limit) : 20;
     return this.committed(req.user.tenantId, this.business.retryDueNotifications(req.user.tenantId, this.context(req.user.tenantId), Number.isFinite(parsedLimit) ? parsedLimit : 20));
   }
   @Post("notification-logs/:id/query-delivery") async queryNotificationDelivery(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    await this.assertNotificationLogScope(req.user.tenantId, id);
     return this.committed(req.user.tenantId, this.business.queryNotificationDelivery(req.user.tenantId, this.context(req.user.tenantId), id));
   }
   @Post("notification-logs/:id/retry") async retryNotification(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    await this.assertNotificationLogScope(req.user.tenantId, id);
     return this.committed(req.user.tenantId, this.business.retryNotification(req.user.tenantId, this.context(req.user.tenantId), id));
   }
   @Post("notifications/send") async sendNotification(@Req() req: AuthenticatedRequest, @Body() body: SendRentalNotificationDto) {
+    this.assertWorkspaceWideNotificationScope();
     const tenantId = req.user.tenantId;
     const key = explicitIdempotencyKey(req);
     const context = this.context(tenantId);
