@@ -190,19 +190,6 @@ export class BusinessSettingsPricingInputDto {
   holidayPricingEnabled!: boolean;
 }
 
-export class BusinessSettingsFulfillmentInputDto {
-  @IsArray()
-  @ArrayNotEmpty()
-  @IsIn(RENTAL_FULFILLMENT_MODES, { each: true })
-  enabledModes!: (typeof RENTAL_FULFILLMENT_MODES)[number][];
-
-  @IsOptional()
-  @IsObject()
-  @ValidateNested()
-  @Type(() => BusinessSettingsDeliveryServiceAreaInputDto)
-  deliveryServiceArea?: BusinessSettingsDeliveryServiceAreaInputDto;
-}
-
 export class BusinessSettingsDeliveryAreaInputDto {
   @IsString()
   @IsNotEmpty()
@@ -228,6 +215,19 @@ export class BusinessSettingsDeliveryServiceAreaInputDto {
   @ValidateNested({ each: true })
   @Type(() => BusinessSettingsDeliveryAreaInputDto)
   areas!: BusinessSettingsDeliveryAreaInputDto[];
+}
+
+export class BusinessSettingsFulfillmentInputDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsIn(RENTAL_FULFILLMENT_MODES, { each: true })
+  enabledModes!: (typeof RENTAL_FULFILLMENT_MODES)[number][];
+
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => BusinessSettingsDeliveryServiceAreaInputDto)
+  deliveryServiceArea?: BusinessSettingsDeliveryServiceAreaInputDto;
 }
 
 /**
