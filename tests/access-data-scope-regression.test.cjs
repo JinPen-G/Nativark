@@ -342,12 +342,19 @@ void (async () => {
   console.log("  PASS 会员时间线按空间收口；地点受限时只返回租户级账号/会员事件");
 
   let orderListWhere;
+  const expiredDraftWheres = [];
   const factRepository = new RentalCoreFactRepository({
     businessWorkspace: { async findFirst({ where }) { return { id: where.id ?? "workspace-a" }; } },
-    rentalOrder: { async findMany({ where }) { orderListWhere = where; return []; } }
+    rentalOrder: {
+      async findMany({ where }) {
+        orderListWhere = where;
+        if (where.status === "DRAFT" && where.reservations) expiredDraftWheres.push(where);
+        return [];
+      }
+    }
   });
   await runWithRequestIdentity(identity, () => factRepository.listOrders("tenant-a"));
-  assert.deepEqual(orderListWhere.AND, [
+  const expectedOrderScope = [
     { OR: [
       { fulfillmentLocationId: { in: ["location-a"] } },
       { returnLocationId: { in: ["location-a"] } }
@@ -356,8 +363,20 @@ void (async () => {
       { createdBy: "operator-a" },
       { workOrders: { some: { OR: [{ createdBy: "operator-a" }, { assigneeId: "operator-a" }] } } }
     ] }
-  ]);
+  ];
+  assert.deepEqual(orderListWhere.AND, expectedOrderScope);
   console.log("  PASS 订单列表在数据库查询条件中同时应用地点与本人范围");
+
+  await runWithRequestIdentity(identity, () => factRepository.listExpiredDraftOrderIds(
+    "tenant-a", "2026-09-25T00:00:00.000Z", 10
+  ));
+  assert.equal(expiredDraftWheres.length, 2, "两个待过期候选查询都必须执行");
+  for (const where of expiredDraftWheres) {
+    assert.equal(where.tenantId, "tenant-a");
+    assert.equal(where.workspaceId, "workspace-a");
+    assert.deepEqual(where.AND, expectedOrderScope);
+  }
+  console.log("  PASS 批量过期待确认订单候选在数据库查询时同时应用地点与本人范围");
 
   let createdProfileData;
   const sharedCustomers = new SharedCustomerRepository({ customerProfile: { async create({ data }) { createdProfileData = data; return data; } } });

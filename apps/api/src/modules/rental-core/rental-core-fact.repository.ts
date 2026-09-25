@@ -537,6 +537,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         tenantId,
         workspaceId,
         status: "DRAFT",
+        ...this.requestOrderVisibilityWhere(),
         reservations: {
           some: { status: "SOFT", expiresAt: { lt: cutoff } }
         }
@@ -549,7 +550,13 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     //    createdAt + 待支付保留时长（读订单快照的 unpaidHoldMinutes，缺省 = 现行行为）判定。
     //    保留时长是逐单快照值，无法在 SQL 里表达，因此先取候选再在内存过滤。
     const withoutReservations = await this.prisma.rentalOrder.findMany({
-      where: { tenantId, workspaceId, status: "DRAFT", reservations: { none: {} } },
+      where: {
+        tenantId,
+        workspaceId,
+        status: "DRAFT",
+        ...this.requestOrderVisibilityWhere(),
+        reservations: { none: {} }
+      },
       select: { id: true, createdAt: true, ruleSnapshot: true },
       orderBy: { createdAt: "asc" },
       take: cap
