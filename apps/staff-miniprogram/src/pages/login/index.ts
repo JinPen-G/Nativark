@@ -92,12 +92,8 @@ Page({
       this.setData({ formError: "该账号没有可进入的经营空间，请联系租户管理员分配权限" });
       return;
     }
-    if (candidates.length > 1 && !session.currentWorkspaceId) {
-      relaunch(buildUrl(ROUTES.workspace, { redirect: this.data.redirect }));
-      return;
-    }
     if (candidates.length > 1) {
-      // 多空间但服务端已有当前空间：先进去，顶部可随时切换。
+      // 多空间：进入“选择工作范围”页（服务端已有当前空间时也可先进去、顶部再切换）。
       relaunch(buildUrl(ROUTES.workspace, { redirect: this.data.redirect }));
       return;
     }

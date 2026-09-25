@@ -1,4 +1,4 @@
-import type { CreateRentalOrderRequest, RentalFulfillmentMode, RentalQuoteSnapshotV1 } from "@rental-os/shared";
+import type { CreateRentalOrderRequest, RentalDeliveryAddressDraft, RentalFulfillmentMode, RentalQuoteSnapshotV1 } from "@rental-os/shared";
 import { listItemGroups } from "../../api/context";
 import { createOrder, quoteOrder } from "../../api/orders";
 import { loadContext, type WorkspaceContext } from "../../core/context";
@@ -19,11 +19,12 @@ Page({
     groups: [] as Array<{ id: string; name: string }>, groupId: "", groupName: "", quantity: "1",
     locations: [] as Array<{ id: string; name: string; timezone: string }>, locationId: "", locationName: "", timeZone: "Asia/Shanghai", zoneHint: "",
     modes: [] as Array<{ code: RentalFulfillmentMode; label: string }>, mode: "" as RentalFulfillmentMode | "", modeLabel: "",
+    needsAddress: false, addrRecipient: "", addrPhone: "", addrRegion: [] as string[], addrRegionText: "", addrDetail: "",
     startDate: "", startTime: "09:00", endDate: "", endTime: "18:00", today: "", quoteText: "", depositText: "", quoteNo: "", busy: false, error: ""
   },
   context: undefined as WorkspaceContext | undefined,
   quote: undefined as RentalQuoteSnapshotV1 | undefined,
-  onShow() { if (!isSignedIn()) { relaunch(ROUTES.login); return; } void this.load(); },
+  onShow() { if (!isSignedIn()) { relaunch(ROUTES.login); return; } if (this.data.view.status !== "ready") void this.load(); },
   async load() {
     if (!can("rental-os:order:create")) { this.setData({ view: blockedState("无新建订单权限", "请联系管理员授权") }); return; }
     this.setData({ view: loadingState() });
@@ -42,7 +43,8 @@ Page({
   onCustomerType(event: WechatMiniprogram.PickerChange) { this.setData({ customerType: Number(event.detail.value) === 1 ? "corporate" : "personal" }); this.invalidate(); },
   onGroup(event: WechatMiniprogram.PickerChange) { const row = this.data.groups[Number(event.detail.value)]; if (row) { this.setData({ groupId: row.id, groupName: row.name }); this.invalidate(); } },
   onLocation(event: WechatMiniprogram.PickerChange) { const row = this.data.locations[Number(event.detail.value)]; if (row) { this.setData({ locationId: row.id, locationName: row.name, timeZone: row.timezone, zoneHint: zoneLabel(row.timezone), today: todayInZone(row.timezone) }); this.invalidate(); } },
-  onMode(event: WechatMiniprogram.PickerChange) { const row = this.data.modes[Number(event.detail.value)]; if (row) { this.setData({ mode: row.code, modeLabel: row.label }); this.invalidate(); } },
+  onMode(event: WechatMiniprogram.PickerChange) { const row = this.data.modes[Number(event.detail.value)]; if (row) { const needsAddress = (row.code === "delivery" || row.code === "onsite_delivery") && this.context?.deliveryDestination === "customer_address"; this.setData({ mode: row.code, modeLabel: row.label, needsAddress }); this.invalidate(); } },
+  onRegion(event: WechatMiniprogram.PickerChange) { const region = (event.detail.value as string[]) ?? []; this.setData({ addrRegion: region, addrRegionText: region.join(" ") }); this.invalidate(); },
   onDate(event: WechatMiniprogram.PickerChange) { const field = String(event.currentTarget.dataset.field); this.setData({ [field]: String(event.detail.value ?? "") }); this.invalidate(); },
   buildRequest() {
     const quantity = Number(this.data.quantity);
@@ -53,11 +55,21 @@ Page({
     if (Date.parse(endAt) <= Date.parse(startAt)) throw new Error("结束时间必须晚于开始时间");
     return { customerType: this.data.customerType, fulfillmentMode: this.data.mode, fulfillmentLocationId: this.data.locationId, startAt, endAt, lines: [{ itemGroupId: this.data.groupId, quantity }] };
   },
+  /** 代客建单的配送地址：customer_address 品类选配送/上门时必填，作为本单一次性草稿由服务端固化进报价快照（不写入地址簿）。自取模式不带地址。 */
+  buildDelivery(): { deliveryAddressDraft?: RentalDeliveryAddressDraft } {
+    if (!this.data.needsAddress) return {};
+    const recipient = this.data.addrRecipient.trim();
+    const phone = this.data.addrPhone.trim();
+    const [province, city, district] = this.data.addrRegion;
+    const detail = this.data.addrDetail.trim();
+    if (!recipient || !phone || !province || !city || !detail) throw new Error("配送订单需填写收货人、电话、地区与详细地址");
+    return { deliveryAddressDraft: { recipient, phone, province, city, district: district || undefined, detail } };
+  },
   async onQuote() {
     if (this.data.busy) return;
     this.setData({ busy: true, error: "" });
     try {
-      const quote = await quoteOrder(this.buildRequest());
+      const quote = await quoteOrder({ ...this.buildRequest(), ...this.buildDelivery() });
       this.quote = quote;
       this.setData({ quoteNo: quote.quoteNo, quoteText: formatMoney(quote.receivableAmount, quote.currency), depositText: formatMoney(quote.depositAmount, quote.currency) });
     } catch (error) { this.setData({ error: describeError(error).message }); }

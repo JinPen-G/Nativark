@@ -1,7 +1,7 @@
 import { switchWorkspace } from "../../api/auth";
 import { categoryIcon, loadContext, setCurrentLocation, type WorkspaceContext } from "../../core/context";
 import { describeError } from "../../core/errors";
-import { errorState, loadingState, readyState, type ViewState } from "../../core/page";
+import { loadingState, readyState, type ViewState } from "../../core/page";
 import { currentSession, currentWorkspaceId, isSignedIn, type SessionWorkspace } from "../../core/session";
 import { themeBehavior } from "../../core/theme-behavior";
 import { ROUTES, relaunch, safeRoute, toast } from "../../core/ui";
@@ -52,11 +52,14 @@ Page({
   },
 
   async loadLocations() {
+    if (this.data.context) return;
     try {
       const context = await loadContext(true);
       this.setData({ context, locationId: context.currentLocationId });
     } catch (error) {
-      this.setData({ view: errorState(error) });
+      // 换发令牌成功、仅上下文加载失败时，保留空间列表可见并提示，允许再点空间或“进入”重试，
+      // 不切整屏错误态，避免卡死在没有 context 的选择页（无法进入工作台）。
+      toast(describeError(error).message, { duration: 3000 });
     }
   },
 
@@ -65,6 +68,7 @@ Page({
     if (!id || this.data.switching) return;
     if (id === currentWorkspaceId()) {
       this.setData({ selectedId: id });
+      if (!this.data.context) void this.loadLocations();
       return;
     }
     this.setData({ switching: true, selectedId: id, context: undefined });
@@ -89,6 +93,7 @@ Page({
     if (!this.data.selectedId || this.data.switching) return;
     if (!this.data.context) {
       toast("正在加载经营空间信息，请稍候");
+      void this.loadLocations();
       return;
     }
     setCurrentLocation(this.data.locationId);

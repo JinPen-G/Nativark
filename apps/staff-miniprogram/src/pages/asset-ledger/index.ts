@@ -7,7 +7,7 @@ import { workOrderStatusLabel, workOrderTypeLabel } from "../../core/labels";
 import { emptyState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
 import { can, isSignedIn } from "../../core/session";
 import { themeBehavior } from "../../core/theme-behavior";
-import { formatBusinessDateTime } from "../../core/time";
+import { splitInstant } from "../../core/time";
 import { ROUTES, buildUrl, relaunch } from "../../core/ui";
 
 interface LedgerRow { id: string; name: string; action: string; tone: string; location: string; date: string; time: string; quantity: string; reason: string; operator: string; sortAt: number; }
@@ -20,7 +20,7 @@ Page({
   onLoad(query: Record<string, string>) { this.setData({ itemGroupId: query.itemGroupId ?? "", tab: ["all", "out", "in", "transfer", "maintenance"].includes(query.tab ?? "") ? query.tab : "all" }); },
   onShow() { if (!isSignedIn()) { relaunch(ROUTES.login); return; } void this.load(); },
   async load() {
-    this.setData({ view: loadingState() });
+    if (!this.data.rows.length) this.setData({ view: loadingState() });
     try {
       const context = await loadContext();
       const canMaintenance = can("rental-core:maintenance:view");
@@ -49,15 +49,15 @@ Page({
       if (this.data.tab === "out") return row.quantityDelta < 0 && row.operationType !== "transfer";
       return row.quantityDelta > 0 && row.operationType !== "transfer";
     }).map((row) => {
-      const dateTime = formatBusinessDateTime(row.createdAt, timeZone);
-      const labels: Record<RentalStockLedgerEntry["operationType"], string> = { receive: "入库", count_adjustment: "盘点调整", transfer: "转移", consume: "领用", scrap: "报损", retire: "退役" };
+      const { date, time } = splitInstant(row.createdAt, timeZone);
+      const labels: Record<RentalStockLedgerEntry["operationType"], string> = { receive: "入库", count_adjustment: "盘点调整", transfer: "转移", consume: "领用", scrap: "报损", retire: "退役", return_transfer: "归还回库", maintenance_quarantine: "维修隔离", maintenance_release: "维修解除" };
       const tone = row.operationType === "transfer" ? "warning" : row.quantityDelta > 0 ? "success" : "danger";
-      return { id: row.id, name: row.itemGroupName, action: labels[row.operationType], tone, location: row.locationName, date: dateTime.split(" ")[0] ?? dateTime, time: dateTime.split(" ")[1] ?? "", quantity: `${row.quantityDelta > 0 ? "+" : ""}${row.quantityDelta}`, reason: row.reason, operator: row.operator, sortAt: Date.parse(row.createdAt) || 0 };
+      return { id: row.id, name: row.itemGroupName, action: labels[row.operationType], tone, location: row.locationName, date, time, quantity: `${row.quantityDelta > 0 ? "+" : ""}${row.quantityDelta}`, reason: row.reason, operator: row.operator, sortAt: Date.parse(row.createdAt) || 0 };
     });
     const maintenanceRows: LedgerRow[] = this.data.canMaintenance && ["all", "maintenance"].includes(this.data.tab) ? this.workOrders.map((row) => {
       const location = currentLocation();
-      const dateTime = formatBusinessDateTime(row.createdAt, location?.timezone ?? "Asia/Shanghai");
-      return { id: `work-order-${row.id}`, name: this.groupNames.get(row.itemGroupId) ?? this.data.assetLabel, action: workOrderTypeLabel(row.type), tone: row.status === "completed" ? "success" : "warning", location: location?.name ?? this.data.locationLabel, date: dateTime.split(" ")[0] ?? dateTime, time: dateTime.split(" ")[1] ?? "", quantity: `×${row.quantity}`, reason: `${workOrderStatusLabel(row.status)} · ${row.reason}`, operator: row.assigneeName ?? "", sortAt: Date.parse(row.createdAt) || 0 };
+      const { date, time } = splitInstant(row.createdAt, location?.timezone ?? "Asia/Shanghai");
+      return { id: `work-order-${row.id}`, name: this.groupNames.get(row.itemGroupId) ?? this.data.assetLabel, action: workOrderTypeLabel(row.type), tone: row.status === "completed" ? "success" : "warning", location: location?.name ?? this.data.locationLabel, date, time, quantity: `×${row.quantity}`, reason: `${workOrderStatusLabel(row.status)} · ${row.reason}`, operator: row.assigneeName ?? "", sortAt: Date.parse(row.createdAt) || 0 };
     }) : [];
     const rows = [...stockRows, ...maintenanceRows].sort((a, b) => b.sortAt - a.sortAt);
     const emptyTitle = this.data.tab === "maintenance" ? "暂无维护记录" : "暂无出入库记录";

@@ -38,6 +38,7 @@ Page({
     placeholderIcon: "box",
     assetLabel: "物品",
     identifierLabel: "编号",
+    statusBusy: false,
     serialLabel: "序列号",
     fulfillmentLabel: "",
     itemGroupLabel: "",
@@ -133,15 +134,17 @@ Page({
   onViewMoreOrders() { navigate(ROUTES.orders); },
   async onStatusChange() {
     const target = this.data.statusTarget;
-    if (!this.data.canManage || !target || !this.asset) return;
+    if (!this.data.canManage || !target || !this.asset || this.data.statusBusy) return;
     const asset = this.asset;
     const confirmed = await confirmDialog({ title: this.data.statusActionLabel, content: `确认将当前${this.data.assetLabel}状态调整为「${assetStatusLabel(target)}」？` });
     if (!confirmed) return;
+    this.setData({ statusBusy: true });
     try {
       await saveAsset({ id: asset.id, itemGroupId: asset.itemGroupId, assetNo: asset.assetNo, serialNo: asset.serialNo, locationId: asset.locationId, status: target as RentalAssetStatus, attributes: asset.attributes });
       toast("已更新", { icon: "success" });
       void this.load();
     } catch (error) { toast(describeError(error).message); }
+    finally { this.setData({ statusBusy: false }); }
   },
   onViewAction() { if (!handleCommonViewAction(this.data.view, { redirect: buildUrl(ROUTES.asset, { id: this.data.id }) })) void this.load(); }
 });

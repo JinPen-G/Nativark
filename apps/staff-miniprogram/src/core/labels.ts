@@ -136,7 +136,7 @@ export function fulfillmentModeLabel(mode: string): string {
     case "warehouse_pickup_return":
       return "仓库自取自还";
     case "delivery":
-      return "配送上门";
+      return t.deliveryLabel ?? "配送上门";
     case "onsite_delivery":
       return "现场交付";
     default:

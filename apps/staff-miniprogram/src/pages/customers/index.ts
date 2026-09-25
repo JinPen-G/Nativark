@@ -16,7 +16,7 @@ Page({
     void this.load();
   },
   async load() {
-    this.setData({ view: loadingState() });
+    if (!this.all.length) this.setData({ view: loadingState() });
     try { this.all = await listCustomers(); this.filter(); }
     catch (error) { this.setData({ view: errorState(error) }); }
   },

@@ -28,9 +28,18 @@ function unknownResultOr(error: unknown): string {
   return describeError(error).message;
 }
 
+/**
+ * 客户在线支付（含跨品类合并支付）与退款渠道的展示口径。押金线下收款走登记列表，不在此重复。
+ * 合并支付回落到与单笔在线支付相同的按单 rental/initiate 资金事件，只是 reason 带“合并支付”。
+ */
+const ONLINE_FUNDING_PROVIDERS = ["wechat_pay", "alipay", "stripe"];
+function fundingChannelLabel(provider: string): string {
+  return provider === "wechat_pay" ? "微信支付" : provider === "alipay" ? "支付宝" : provider === "stripe" ? "境外银行卡" : "在线支付";
+}
+
 Page({
   behaviors: [themeBehavior],
-  data: { view: loadingState() as ViewState, id: "", orderNo: "", status: "", tone: "neutral", createdAt: "", customer: "", phone: "", customerCompany: "", customerRegion: "", period: "", pickupLocation: "", returnLocation: "", mode: "", itemLabel: "物品", pickupLabel: "领取", returnLabel: "归还", identifierLabel: "编号", lines: [] as Array<{ id: string; name: string; quantity: number; imagePath: string; resources: Array<{ id: string; assetNo: string; quantity: number; statusLabel: string }> }>, totalQuantity: 0, amount: "", deposit: "", rentalAmount: "", discountAmount: "", serviceAmount: "", hasDiscount: false, hasService: false, hasActions: false, canConfirm: false, canAllocate: false, canPickup: false, canReturn: false, canCancel: false, canForceReleaseLock: false, operationLockOwner: "", operationLockExpiresAt: "", internalNotes: [] as RentalOrderInternalNote[], canAddInternalNote: false, internalNoteDraft: "", internalNotesBusy: false, showOfflinePayments: false, canRegisterOffline: false, canConfirmOffline: false, rentalOutstanding: 0, depositOutstanding: 0, rentalBalanceLabel: "—", depositBalanceLabel: "—", offlineRegistrations: [] as Array<StaffOfflinePaymentRegistration & { instrumentLabel: string; methodLabel: string; amountLabel: string }>, offlineInstrument: "rental" as "rental" | "deposit", offlineInstrumentOptions: ["租金 / 费用", "押金"], offlineMethodOptions: ["现金", "银行转账"], offlineMethodIndex: 0, offlineAmount: "", offlineReason: "现场线下收款", offlineEvidenceId: "", offlineEvidencePath: "", hasOfflineFunding: false, canExpirePending: false, canMarkOverdue: false, isPickupOverdue: false, noticeSent: false, noShowNoticeAtLabel: "", pickupOverdueAtLabel: "", canSendNoShowNotice: false, canConfirmNoShow: false, canResumePickup: false, canExtend: false, currentEndLabel: "", extendOpen: false, extendDate: "", extendTime: "", extendMinDate: "", extendZoneHint: "", extendBusy: false, extendPreviewReady: false, extendPreview: null as null | { newEndLabel: string; payableLabel: string; depositDeltaLabel: string; hasDepositDelta: boolean; preAuthDeltaLabel: string; hasPreAuthDelta: boolean; rentalLabel: string; serviceLabel: string; hasService: boolean; billableUnits: number; paymentRequired: boolean; monthly: boolean }, extensionReviews: [] as Array<{ id: string; sequence: number; newEndLabel: string; amountLabel: string }>, hasExtensionReviews: false, inspectionExceptions: [] as Array<{ inspectionId: string; index: number; key: string; stageLabel: string; description: string; suggestedLabel: string; approvedLabel: string; needsReview: boolean; disputed: boolean; customerReason: string }>, hasInspectionExceptions: false, reviewBusy: false, busy: false, error: "" },
+  data: { view: loadingState() as ViewState, id: "", orderNo: "", status: "", tone: "neutral", createdAt: "", customer: "", phone: "", customerCompany: "", customerRegion: "", period: "", pickupLocation: "", returnLocation: "", mode: "", itemLabel: "物品", pickupLabel: "领取", returnLabel: "归还", identifierLabel: "编号", hasDeliveryAddress: false, deliveryLabel: "配送", deliveryRecipient: "", deliveryPhone: "", deliveryPhoneCallable: "", deliveryAddressText: "", lines: [] as Array<{ id: string; name: string; quantity: number; imagePath: string; resources: Array<{ id: string; assetNo: string; quantity: number; statusLabel: string }> }>, totalQuantity: 0, amount: "", deposit: "", rentalAmount: "", discountAmount: "", serviceAmount: "", hasDiscount: false, hasService: false, hasActions: false, canConfirm: false, canAllocate: false, canPickup: false, canReturn: false, canCancel: false, canForceReleaseLock: false, operationLockOwner: "", operationLockExpiresAt: "", internalNotes: [] as RentalOrderInternalNote[], canAddInternalNote: false, internalNoteDraft: "", internalNotesBusy: false, showOfflinePayments: false, canRegisterOffline: false, canConfirmOffline: false, rentalOutstanding: 0, depositOutstanding: 0, rentalBalanceLabel: "—", depositBalanceLabel: "—", offlineRegistrations: [] as Array<StaffOfflinePaymentRegistration & { instrumentLabel: string; methodLabel: string; amountLabel: string }>, offlineInstrument: "rental" as "rental" | "deposit", offlineInstrumentOptions: ["租金 / 费用", "押金"], offlineMethodOptions: ["现金", "银行转账"], offlineMethodIndex: 0, offlineAmount: "", offlineReason: "现场线下收款", offlineEvidenceId: "", offlineEvidencePath: "", hasOfflineFunding: false, onlineCollections: [] as Array<{ id: string; methodLabel: string; directionLabel: string; amountLabel: string; timeLabel: string; refund: boolean; merged: boolean }>, hasOnlineCollections: false, canExpirePending: false, canMarkOverdue: false, isPickupOverdue: false, noticeSent: false, noShowNoticeAtLabel: "", pickupOverdueAtLabel: "", canSendNoShowNotice: false, canConfirmNoShow: false, canResumePickup: false, canExtend: false, currentEndLabel: "", extendOpen: false, extendDate: "", extendTime: "", extendMinDate: "", extendZoneHint: "", extendBusy: false, extendPreviewReady: false, extendPreview: null as null | { newEndLabel: string; payableLabel: string; depositDeltaLabel: string; hasDepositDelta: boolean; preAuthDeltaLabel: string; hasPreAuthDelta: boolean; rentalLabel: string; serviceLabel: string; hasService: boolean; billableUnits: number; paymentRequired: boolean; monthly: boolean }, extensionReviews: [] as Array<{ id: string; sequence: number; newEndLabel: string; amountLabel: string }>, hasExtensionReviews: false, inspectionExceptions: [] as Array<{ inspectionId: string; index: number; key: string; stageLabel: string; description: string; suggestedLabel: string; approvedLabel: string; needsReview: boolean; disputed: boolean; customerReason: string }>, hasInspectionExceptions: false, reviewBusy: false, busy: false, error: "" },
   order: undefined as RentalOrder | undefined,
   extensions: [] as RentalOrderExtension[],
   inspections: [] as RentalInspectionRecord[],
@@ -41,7 +50,7 @@ Page({
   onPullDownRefresh() { this.load().finally(() => wx.stopPullDownRefresh()); },
   async load() {
     if (!this.data.id) { this.setData({ view: blockedState("缺少订单编号", "请从订单列表重新进入") }); return; }
-    this.setData({ view: loadingState() });
+    if (!this.order) this.setData({ view: loadingState() });
     try {
       const canReadInternalNotes = can("rental-os:order:view");
       const [order, context, groups, internalNotes] = await Promise.all([getOrder(this.data.id), loadContext(), listItemGroups().catch(() => []), canReadInternalNotes ? listInternalOrderNotes(this.data.id).catch(() => []) : Promise.resolve([] as RentalOrderInternalNote[])]);
@@ -90,10 +99,19 @@ Page({
       const partiallyReturned = (order.allocations ?? []).some((row) => row.status === "returned");
       const canExtend = order.status === "renting" && !partiallyReturned && can("rental-os:order:extend");
       const currentEndAt = order.effectiveEndAt ?? order.endAt;
+      // 配送/上门类订单（品类 deliveryDestination=customer_address）带收货地址快照；取还与送车到点类为空，仍按门店显示。
+      const delivery = order.deliveryAddressSnapshot;
+      const deliveryPhonePlain = delivery?.phone ?? "";
       this.setData({
         view: readyState(), orderNo: order.orderNo, status: orderStatusLabel(order.status), tone: orderStatusTone(order.status), createdAt: formatBusinessDateTime(order.createdAt, timeZone), customer: order.customerName, customerCompany: "", customerRegion: "",
         phone: maskPhone(order.contactPhone), period: formatBusinessRange(order.startAt, order.effectiveEndAt ?? order.endAt, timeZone),
         pickupLocation: order.fulfillmentLocationName, returnLocation: order.returnLocationName ?? order.fulfillmentLocationName, mode: fulfillmentModeLabel(order.fulfillmentMode),
+        hasDeliveryAddress: Boolean(delivery),
+        deliveryLabel: terms().deliveryLabel ?? "配送",
+        deliveryRecipient: delivery?.recipient ?? "",
+        deliveryPhone: deliveryPhonePlain || delivery?.phoneMasked || "",
+        deliveryPhoneCallable: deliveryPhonePlain,
+        deliveryAddressText: delivery ? [delivery.province, delivery.city, delivery.district, delivery.detail].filter(Boolean).join(" ") : "",
         itemLabel: terms().itemLabel,
         pickupLabel: terms().pickupLabel, returnLabel: terms().returnLabel, identifierLabel: terms().identifierLabel,
         lines, totalQuantity: lines.reduce((sum, line) => sum + line.quantity, 0),
@@ -160,27 +178,52 @@ Page({
   },
   onCopy() { if (this.order) copyText(this.order.orderNo); },
   onCall() { callPhone(this.order?.contactPhone); },
+  onCallRecipient() {
+    const phone = this.data.deliveryPhoneCallable;
+    if (!phone || /[^\d+\-\s]/.test(phone)) { toast("收货人号码已脱敏，需在后台解密后再联系"); return; }
+    callPhone(phone);
+  },
   onCustomer() { if (this.order?.customerId) navigate(buildUrl(ROUTES.customer, { id: this.order.customerId })); },
   onPickup() { navigate(buildUrl(ROUTES.pickup, { id: this.data.id })); },
   onReturn() { navigate(buildUrl(ROUTES.return, { id: this.data.id })); },
   applyOfflinePayments(funding?: RentalFundingBalance, registrations: StaffOfflinePaymentRegistration[] = [], order?: RentalOrder) {
     const currentOrder = order ?? this.order;
-    const rentalOutstanding = funding ? Math.max(0, funding.rental.balance + funding.rental.pendingExtensionAmount) : 0;
-    const depositOutstanding = funding ? Math.max(0, funding.deposit.requiredAmount - funding.deposit.collected) : 0;
+    const currency = currentOrder?.currency ?? "CNY";
+    const rentalOutstanding = funding ? funding.rental.due : 0;
+    const depositOutstanding = funding ? funding.deposit.due : 0;
     const offlineRegistrations = registrations.map((row) => ({
       ...row,
       instrumentLabel: row.instrument === "deposit" ? "押金" : "租金 / 费用",
       methodLabel: row.paymentMethod === "offline_transfer" ? "银行转账" : "现金",
-      amountLabel: formatMoney(row.amount, currentOrder?.currency ?? "CNY")
+      amountLabel: formatMoney(row.amount, currency)
     }));
+    // 客户在线支付（含合并支付）与退款：从服务端资金事件流直接读取，员工不再只看到“待收 0”而无凭据。
+    const onlineCollections = (funding?.events ?? [])
+      .filter((event) => ONLINE_FUNDING_PROVIDERS.indexOf(event.provider) >= 0 && ["initiate", "append", "refund", "capture"].indexOf(event.action) >= 0 && (event.instrument === "rental" || event.instrument === "deposit"))
+      .map((event) => {
+        const refund = event.action === "refund";
+        const capture = event.action === "capture";
+        return {
+          id: event.id,
+          methodLabel: fundingChannelLabel(event.provider),
+          directionLabel: refund ? "退款" : capture ? "押金抵扣" : event.instrument === "deposit" ? "押金收款" : "收款",
+          amountLabel: (refund ? "−" : "") + formatMoney(event.amount, currency),
+          timeLabel: formatBusinessDateTime(event.at, this.timeZone),
+          refund,
+          merged: typeof event.reason === "string" && event.reason.indexOf("合并支付") >= 0
+        };
+      })
+      .reverse();
     const defaultAmount = this.data.offlineInstrument === "deposit" ? depositOutstanding : rentalOutstanding;
     this.setData({
       hasOfflineFunding: Boolean(funding),
       rentalOutstanding,
       depositOutstanding,
-      rentalBalanceLabel: funding ? formatMoney(rentalOutstanding, currentOrder?.currency ?? "CNY") : "暂不可用",
-      depositBalanceLabel: funding ? formatMoney(depositOutstanding, currentOrder?.currency ?? "CNY") : "暂不可用",
+      rentalBalanceLabel: funding ? formatMoney(rentalOutstanding, currency) : "暂不可用",
+      depositBalanceLabel: funding ? formatMoney(depositOutstanding, currency) : "暂不可用",
       offlineRegistrations,
+      onlineCollections,
+      hasOnlineCollections: onlineCollections.length > 0,
       offlineAmount: this.data.offlineAmount || (defaultAmount > 0 ? defaultAmount.toFixed(2) : "")
     });
   },
@@ -211,8 +254,8 @@ Page({
     const available = this.data.offlineInstrument === "deposit" ? this.data.depositOutstanding : this.data.rentalOutstanding;
     const reason = this.data.offlineReason.trim();
     if (!this.data.canRegisterOffline || this.data.busy) return;
-    if (!Number.isFinite(amount) || amount <= 0 || amount > available + 0.005) { this.setData({ error: "請輸入不超過當前待收金額的有效金額" }); return; }
-    if (!reason) { this.setData({ error: "請填寫收款用途或備註" }); return; }
+    if (!Number.isFinite(amount) || amount <= 0 || amount > available + 0.005) { this.setData({ error: "请输入不超过当前待收金额的有效金额" }); return; }
+    if (!reason) { this.setData({ error: "请填写收款用途或备注" }); return; }
     const paymentMethod = this.data.offlineMethodIndex === 1 ? "offline_transfer" : "offline_cash";
     const fingerprint = `${this.data.offlineInstrument}:${amount.toFixed(2)}:${paymentMethod}:${reason}:${this.data.offlineEvidenceId}`;
     const key = actionKey("offline-payment", this.data.id, fingerprint);
@@ -223,16 +266,16 @@ Page({
       this.setData({ offlineEvidenceId: "", offlineEvidencePath: "", offlineAmount: "" });
       toast("已登记，等待结算人员确认", { icon: "success" });
       await this.load();
-    } catch (error) { this.setData({ error: describeError(error).message }); }
+    } catch (error) { this.setData({ error: unknownResultOr(error) }); }
     finally { this.setData({ busy: false }); }
   },
   async onConfirmOfflinePayment(event: WechatMiniprogram.TouchEvent) {
     if (!this.data.canConfirmOffline || this.data.busy) return;
     const id = String(event.currentTarget.dataset.id ?? "");
-    if (!id || !await confirmDialog({ title: "確認線下收款", content: "確認款項已實際到帳？確認後將計入訂單資金流水。" })) return;
+    if (!id || !await confirmDialog({ title: "确认线下收款", content: "确认款项已实际到账？确认后将计入订单资金流水。" })) return;
     this.setData({ busy: true, error: "" });
-    try { await confirmOfflinePayment(id); toast("已確認到帳", { icon: "success" }); await this.load(); }
-    catch (error) { this.setData({ error: describeError(error).message }); }
+    try { await confirmOfflinePayment(id); toast("已确认到账", { icon: "success" }); await this.load(); }
+    catch (error) { this.setData({ error: unknownResultOr(error) }); }
     finally { this.setData({ busy: false }); }
   },
   async onConfirm() {

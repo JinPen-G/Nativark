@@ -89,7 +89,7 @@
     </view>
 
     <view wx:if="{{showBottomBar}}" class="bottom-bar asset-actions">
-      <button wx:if="{{statusTarget}}" class="btn btn--secondary" bindtap="onStatusChange">{{statusActionLabel}}</button>
+      <button wx:if="{{statusTarget}}" class="btn btn--secondary" bindtap="onStatusChange" disabled="{{statusBusy}}" loading="{{statusBusy}}">{{statusActionLabel}}</button>
       <button wx:if="{{canScan}}" class="btn btn--primary" bindtap="onScan">扫码出库</button>
     </view>
   </block>

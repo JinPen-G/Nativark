@@ -29,6 +29,8 @@ export interface WorkspaceContext {
   inspectionFields: RentalInspectionFieldDefinition[];
   capabilities: string[];
   fulfillmentModes: RentalFulfillmentMode[];
+  /** 配送/上门类目的地：customer_address＝送到客户收货地址（需收地址快照）；tenant_location＝送到门店/据点（车辆）。 */
+  deliveryDestination?: "customer_address" | "tenant_location";
   locations: RentalFulfillmentLocation[];
   /** 当前选中的履约地点；"" 表示“我有权限的全部地点”。 */
   currentLocationId: string;
@@ -112,6 +114,7 @@ export function loadContext(force = false): Promise<WorkspaceContext> {
       inspectionFields: definition?.businessModel.defaults.inspectionFields ?? [],
       capabilities: (session.tenant.capabilities ?? []) as string[],
       fulfillmentModes: definition?.businessModel.fulfillmentModes ?? [],
+      deliveryDestination: definition?.businessModel.deliveryDestination,
       locations: enabledLocations,
       currentLocationId: enabledLocations.some((row) => row.id === saved) ? saved : "",
       loadedAt: Date.now()

@@ -131,7 +131,7 @@ Page({
       cells.push({ label: `所在${t.fulfillmentLabel}`, value: asset.locationName || "—" });
       if (can("rental-os:order:pickup")) actions.push({ key: "pickup", title: t.pickupLabel, desc: `办理${t.assetLabel}${t.pickupLabel}`, icon: "box-out", color: "primary" });
       if (can("rental-os:order:return")) actions.push({ key: "return", title: t.returnLabel, desc: `办理${t.assetLabel}${t.returnLabel}`, icon: "box-in", color: "green" });
-      if (can("rental-os:order:pickup", "rental-os:order:allocate", "rental-os:order:write")) actions.push({ key: "bind", title: "绑定订单", desc: "关联到租赁订单", icon: "link", color: "purple" });
+      if (can("rental-os:order:operate")) actions.push({ key: "bind", title: "去配货", desc: "在待取货订单中为其配货", icon: "link", color: "purple" });
       actions.push({ key: "detail", title: "查看详情", desc: `查看${t.assetLabel}完整信息`, icon: "eye", color: "orange" });
       // 型号封面需从型号目录取；找不到用品类图标。
       if (!imageSource) {
@@ -228,8 +228,8 @@ Page({
         navigate(buildUrl(ROUTES.workOrder, { id: result.id }));
         return;
       case "bind":
-        this.remember("绑定订单");
-        toast("请在待取货订单详情内为该订单配货", { duration: 3000 });
+        this.remember("去配货");
+        toast("请在待取货订单详情内为其配货", { duration: 3000 });
         navigate(buildUrl(ROUTES.orders, { tab: "pending_pickup" }));
         return;
       case "pickup":

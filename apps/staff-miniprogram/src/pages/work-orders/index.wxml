@@ -31,7 +31,7 @@
       <view class="body mt-8">{{item.quantityText}}</view>
       <view wx:if="{{item.reason}}" class="muted small mt-8">{{item.reason}}</view>
       <view class="row row--between mt-12">
-        <view class="link small" data-order="{{item.orderId}}" bindtap="onOpenOrder">关联订单 {{item.orderId}}</view>
+        <view class="link small" data-order="{{item.orderId}}" bindtap="onOpenOrder">查看关联订单</view>
         <text class="muted small">{{item.timeText}}</text>
       </view>
       <view wx:if="{{item.canRestore}}" class="mt-16">

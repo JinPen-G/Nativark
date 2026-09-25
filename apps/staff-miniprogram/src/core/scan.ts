@@ -81,7 +81,7 @@ export async function resolveScan(code: string): Promise<ScanResult> {
   const workspaceId = currentWorkspaceId();
   const link = parseDeepLink(raw);
   const key = normalize(link?.id ?? raw);
-  const unknown: ScanResult = { kind: "unknown", code: raw, id: "", title: "未识别的码", subtitle: `在当前经营空间未找到编号为 ${raw} 的订单、${"资产"}或工单` };
+  const unknown: ScanResult = { kind: "unknown", code: raw, id: "", title: "未识别的码", subtitle: `在当前经营空间未找到编号为 ${raw} 的订单、${terms().assetLabel}、${terms().itemGroupLabel}或工单` };
   if (!key || !workspaceId) return unknown;
 
   const tryOrder = async (): Promise<ScanResult | undefined> => {

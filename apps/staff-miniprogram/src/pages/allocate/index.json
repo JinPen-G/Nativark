@@ -1,5 +1,6 @@
 {
   "navigationStyle": "custom",
+  "enablePullDownRefresh": true,
   "usingComponents": {
     "nav-bar": "/components/nav-bar/index",
     "state-view": "/components/state-view/index",

@@ -11,7 +11,7 @@ Page({
   data: { view: loadingState() as ViewState, id: "", customerType: "personal" as "personal" | "corporate", types: ["个人", "企业"], name: "", phone: "", phoneHint: "", email: "", corporateName: "", region: "", busy: false, error: "" },
   customer: undefined as SharedCustomerProfile | undefined,
   onLoad(query: Record<string, string>) { this.setData({ id: query.id ?? "" }); },
-  onShow() { if (!isSignedIn()) { relaunch(ROUTES.login); return; } void this.load(); },
+  onShow() { if (!isSignedIn()) { relaunch(ROUTES.login); return; } if (this.data.view.status !== "ready") void this.load(); },
   async load() {
     this.setData({ view: loadingState() });
     try {
@@ -33,8 +33,12 @@ Page({
     const name = this.data.name.trim(); const phone = this.data.phone.trim(); const email = this.data.email.trim(); const corporateName = this.data.corporateName.trim();
     if (!name || (!this.data.id && !phone) || (this.data.customerType === "corporate" && !corporateName)) { this.setData({ error: "请填写姓名、联系电话及必填的企业名称" }); return; }
     if (phone && !/^\+?[0-9 -]{6,20}$/.test(phone)) { this.setData({ error: "联系电话格式不正确" }); return; }
-    if (this.data.customerType === "personal" && !canTenant("rental-os:member:manage")) { this.setData({ error: "无个人客户管理权限" }); return; }
-    if (this.data.customerType === "corporate" && !canTenant("rental-os:corporate:manage")) { this.setData({ error: "无企业客户管理权限" }); return; }
+    // 新增客户：服务端 POST /platform/customers 只要 member:manage（个人/企业同一入口）；
+    // 编辑既有企业客户才需要 corporate:manage（与加载时的编辑门控一致）。
+    if (!this.data.id) {
+      if (!canTenant("rental-os:member:manage")) { this.setData({ error: "无客户新增权限" }); return; }
+    } else if (this.data.customerType === "personal" && !canTenant("rental-os:member:manage")) { this.setData({ error: "无个人客户管理权限" }); return; }
+    else if (this.data.customerType === "corporate" && !canTenant("rental-os:corporate:manage")) { this.setData({ error: "无企业客户管理权限" }); return; }
     this.setData({ busy: true, error: "" });
     try {
       let id = this.data.id;

@@ -130,7 +130,7 @@ Page({
     if (canTenant("rental-os:member:view")) common.push({ key: "customers", label: "客户查询", icon: "user-search", color: "" });
     if (canTenant("rental-os:member:review", "rental-os:member:qualification-review")) common.push({ key: "reviews", label: "审核待办", icon: "shield", color: "purple" });
     if (can("rental-core:asset:view", "rental-core:asset:manage")) common.push({ key: "assets", label: `${t.assetLabel}管理`, icon: "box", color: "green" });
-    if (can("rental-os:order:pickup", "rental-os:order:return")) common.push({ key: "ledger", label: `${t.pickupLabel}/${t.returnLabel}登记`, icon: "swap", color: "orange" });
+    if (can("rental-core:asset:view", "rental-core:asset:manage")) common.push({ key: "ledger", label: "出入库记录", icon: "swap", color: "orange" });
     common.push({ key: "more", label: "更多功能", icon: "grid", color: "purple" });
     this.setData({
       context,

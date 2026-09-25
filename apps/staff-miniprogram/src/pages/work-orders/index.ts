@@ -1,5 +1,7 @@
 import type { RentalStockDisposition, RentalWorkOrder } from "@rental-os/shared";
 import { listStockDispositions, listWorkOrders, restoreStockDisposition } from "../../api/workOrders";
+import { listItemGroups } from "../../api/context";
+import { listAssets } from "../../api/assets";
 import { currentLocationLabel, inCurrentLocation, loadContext, terms, type WorkspaceContext } from "../../core/context";
 import { describeError } from "../../core/errors";
 import { workOrderStatusLabel, workOrderStatusTone, workOrderTypeLabel, type Tone } from "../../core/labels";
@@ -54,6 +56,8 @@ Page({
   context: undefined as WorkspaceContext | undefined,
   loaded: false,
   busy: false,
+  groupNames: new Map<string, string>(),
+  assetNos: new Map<string, string>(),
   onLoad(query: Record<string, string>) {
     // 工作台「待处置」跳转带 seg=dispositions，直接预选归还处置页签。
     if (query.seg === "dispositions") this.setData({ seg: "dispositions" });
@@ -61,14 +65,21 @@ Page({
   onShow() { if (!isSignedIn()) { relaunch(ROUTES.login); return; } void this.load(); },
   async load() {
     if (!can("rental-core:maintenance:view")) { this.setData({ view: blockedState("无工单查看权限", "请联系租户管理员", "联系管理员", "contact") }); return; }
-    this.setData({ view: loadingState() });
+    if (!this.loaded) this.setData({ view: loadingState() });
     const version = contextVersion();
     try {
       this.context = await loadContext();
-      const [orders, dispositions] = await Promise.all([listWorkOrders(), listStockDispositions()]);
+      const [orders, dispositions, groups] = await Promise.all([listWorkOrders(), listStockDispositions(), listItemGroups().catch(() => [])]);
       if (version !== contextVersion()) return;
       this.all = orders;
       this.dispAll = dispositions;
+      this.groupNames = new Map(groups.map((group) => [group.id, group.name]));
+      // 处置行的 itemGroupId/assetId 是内部 ID；解析成可读的型号名与资产编号（有资产查看权限时），取不到则退化展示。
+      if (can("rental-core:asset:view", "rental-core:asset:manage")) {
+        const assets = await listAssets().catch(() => []);
+        if (version !== contextVersion()) return;
+        this.assetNos = new Map(assets.map((asset) => [asset.id, asset.assetNo]));
+      }
       this.loaded = true;
       this.render();
     } catch (error) { this.setData({ view: errorState(error) }); }
@@ -98,8 +109,8 @@ Page({
     return {
       id: row.id,
       resourceLabel: t.itemGroupLabel,
-      resourceValue: row.itemGroupId,
-      assetLine: row.assetId ? `${t.identifierLabel} ${row.assetId}` : "",
+      resourceValue: this.groupNames.get(row.itemGroupId) ?? row.itemGroupId,
+      assetLine: row.assetId ? (this.assetNos.get(row.assetId) ? `${t.identifierLabel} ${this.assetNos.get(row.assetId)}` : `已指定单台${t.assetLabel}`) : "",
       quantityText: `数量 ${row.quantity}`,
       statusLabel: meta.label,
       statusTone: meta.tone,

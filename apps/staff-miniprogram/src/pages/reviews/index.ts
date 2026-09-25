@@ -126,6 +126,7 @@ interface ReviewsData {
   rows: ReviewRow[];
   sheetVisible: boolean;
   attachmentLoading: boolean;
+  decideBusy: boolean;
   detail?: DetailVM;
 }
 
@@ -139,7 +140,8 @@ Page({
     canQualification: false,
     rows: [],
     sheetVisible: false,
-    attachmentLoading: false
+    attachmentLoading: false,
+    decideBusy: false
   } as ReviewsData,
 
   records: [] as CustomerMembershipReview[],
@@ -244,7 +246,9 @@ Page({
   onTab(event: WechatMiniprogram.TouchEvent) {
     const tab = String(event.currentTarget.dataset.key ?? "pending") as TabKey;
     if (tab === this.data.tab) return;
-    this.setData({ tab });
+    // 切页签是换一批服务端数据：清空旧列表让骨架屏出现，避免旧页签内容滞留到新数据返回。
+    this.records = [];
+    this.setData({ tab, rows: [] });
     void this.load();
   },
 
@@ -275,26 +279,30 @@ Page({
 
   async onApprove() {
     const review = this.current();
-    if (!review || !this.canDecideReview(review)) return;
+    if (!review || !this.canDecideReview(review) || this.data.decideBusy) return;
+    this.setData({ decideBusy: true });
     const ok = await confirmDialog({ title: "通过审核", content: "确认通过该审核？通过后立即对客户生效。" });
-    if (ok) await this.submit(review.id, { status: "approved" });
+    if (!ok) { this.setData({ decideBusy: false }); return; }
+    await this.submit(review.id, { status: "approved" });
   },
 
   async onReject() {
     const review = this.current();
-    if (!review || !this.canDecideReview(review)) return;
+    if (!review || !this.canDecideReview(review) || this.data.decideBusy) return;
+    this.setData({ decideBusy: true });
     const reason = await promptDialog({ title: "驳回审核", placeholder: "请填写驳回原因（必填）", danger: true });
-    if (reason === undefined) return;
-    if (!reason) { toast("请填写驳回原因"); return; }
+    if (reason === undefined) { this.setData({ decideBusy: false }); return; }
+    if (!reason) { this.setData({ decideBusy: false }); toast("请填写驳回原因"); return; }
     await this.submit(review.id, { status: "rejected", reason });
   },
 
   async onSupplement() {
     const review = this.current();
-    if (!review || !this.canDecideReview(review)) return;
+    if (!review || !this.canDecideReview(review) || this.data.decideBusy) return;
+    this.setData({ decideBusy: true });
     const reason = await promptDialog({ title: "要求补件", placeholder: "请说明需要补充的材料（必填）" });
-    if (reason === undefined) return;
-    if (!reason) { toast("请填写补件说明"); return; }
+    if (reason === undefined) { this.setData({ decideBusy: false }); return; }
+    if (!reason) { this.setData({ decideBusy: false }); toast("请填写补件说明"); return; }
     await this.submit(review.id, { status: "supplement_required", reason });
   },
 
@@ -307,6 +315,8 @@ Page({
       await this.load();
     } catch (error) {
       toast(errorText(error));
+    } finally {
+      this.setData({ decideBusy: false });
     }
   },
 

@@ -22,6 +22,12 @@
       </view>
     </view>
     <view class="section section--tight"><view class="card order-info-card"><view class="subtitle order-card-title"><ui-icon name="calendar" size="30" color="primary"></ui-icon><text class="ml-8">租赁时间</text></view><view class="order-period">{{period}}</view><view class="kv"><text class="kv__label">交付方式</text><text class="kv__value">{{mode}}</text></view><view class="kv"><text class="kv__label">{{pickupLabel}}地点</text><text class="kv__value">{{pickupLocation}}</text></view><view class="kv"><text class="kv__label">{{returnLabel}}地点</text><text class="kv__value">{{returnLocation}}</text></view></view></view>
+    <view wx:if="{{hasDeliveryAddress}}" class="section section--tight"><view class="card order-info-card">
+      <view class="order-card-heading"><view class="subtitle order-card-title"><ui-icon name="pin" size="30" color="primary"></ui-icon><text class="ml-8">{{deliveryLabel}}地址</text></view><view class="link order-contact" bindtap="onCallRecipient"><ui-icon name="phone" size="26" color="primary"></ui-icon><text class="ml-8">联系收货人</text></view></view>
+      <view class="kv"><text class="kv__label">收货人</text><text class="kv__value">{{deliveryRecipient}}</text></view>
+      <view class="kv"><text class="kv__label">联系电话</text><text class="kv__value">{{deliveryPhone}}</text></view>
+      <view class="delivery-address-detail">{{deliveryAddressText}}</view>
+    </view></view>
     <view class="section section--tight">
       <view class="card order-info-card">
         <view class="order-card-heading order-card-heading--plain"><view class="subtitle">{{itemLabel}}清单</view><view class="muted small">共 {{totalQuantity}} 件</view></view>
@@ -41,6 +47,16 @@
     <view class="section section--tight"><view class="card order-info-card"><view class="subtitle order-card-title">费用明细</view><view class="kv"><text class="kv__label">租金</text><text class="kv__value">{{rentalAmount}}</text></view><view class="kv"><text class="kv__label">押金</text><text class="kv__value">{{deposit}}</text></view><view wx:if="{{hasService}}" class="kv"><text class="kv__label">服务费用</text><text class="kv__value">{{serviceAmount}}</text></view><view wx:if="{{hasDiscount}}" class="kv"><text class="kv__label">优惠</text><text class="kv__value">−{{discountAmount}}</text></view><view class="kv order-total"><text class="kv__label">应付金额</text><text class="kv__value">{{amount}}</text></view></view></view>
     <view wx:if="{{canForceReleaseLock}}" class="section section--tight"><view class="card order-info-card operation-lock-card"><view class="subtitle">交接办理中</view><view class="muted small mt-8">{{operationLockOwner}} 正在办理，锁定至 {{operationLockExpiresAt}}</view><button class="btn btn--outline btn--block mt-16" loading="{{busy}}" disabled="{{busy}}" bindtap="onForceReleaseLock">人工解除交接锁</button><view class="muted tiny mt-8">需要资源改配权限；解除原因将写入订单审计。</view></view></view>
     <view wx:if="{{canAddInternalNote || internalNotes.length}}" class="section section--tight"><view class="card order-info-card internal-notes-card"><view class="order-card-heading order-card-heading--plain"><view class="subtitle">内部备注</view><view class="muted small">仅运营可见</view></view><view wx:if="{{internalNotes.length}}" class="internal-note-list"><view wx:for="{{internalNotes}}" wx:key="id" class="internal-note"><view class="row row--between"><text class="internal-note__operator">{{item.operatorName}}</text><text class="muted tiny">{{item.createdAt}}</text></view><view class="internal-note__content">{{item.content}}</view></view></view><view wx:else class="muted small internal-note-empty">暂无内部备注</view><view wx:if="{{canAddInternalNote}}" class="internal-note-form"><textarea class="field__textarea" maxlength="1000" placeholder="记录仅供运营查看的处理信息；请勿填写证件号、支付密钥等敏感资料" value="{{internalNoteDraft}}" bindinput="onInternalNoteInput"></textarea><button class="btn btn--secondary btn--block mt-12" loading="{{internalNotesBusy}}" disabled="{{internalNotesBusy}}" bindtap="onAddInternalNote">添加内部备注</button></view></view></view>
+    <view wx:if="{{hasOnlineCollections}}" class="section section--tight"><view class="card order-info-card">
+      <view class="order-card-heading order-card-heading--plain"><view class="subtitle">收款记录</view><view class="muted small">客户在线支付 / 合并支付</view></view>
+      <view wx:for="{{onlineCollections}}" wx:key="id" class="collection-record">
+        <view class="row row--between">
+          <view class="collection-record__label"><text>{{item.methodLabel}} · {{item.directionLabel}}</text><text wx:if="{{item.merged}}" class="collection-record__tag">合并支付</text></view>
+          <text class="collection-record__amount {{item.refund ? 'collection-record__amount--refund' : ''}}">{{item.amountLabel}}</text>
+        </view>
+        <view class="muted tiny mt-4">{{item.timeLabel}}</view>
+      </view>
+    </view></view>
     <view wx:if="{{showOfflinePayments}}" class="section section--tight"><view class="card order-info-card offline-payment-card">
       <view class="order-card-heading order-card-heading--plain"><view class="subtitle">线下收款</view><view class="muted small">登记后须由结算权限人员确认</view></view>
       <view class="kv"><text class="kv__label">租金 / 费用待收</text><text class="kv__value">{{rentalBalanceLabel}}</text></view>

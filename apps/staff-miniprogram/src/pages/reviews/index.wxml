@@ -58,9 +58,9 @@
     </block>
 
     <view slot="footer" wx:if="{{detail.canDecide}}" class="reviews-actions">
-      <button class="btn btn--danger" hover-class="btn-hover" bindtap="onReject">驳回</button>
-      <button class="btn btn--secondary" hover-class="btn-hover" bindtap="onSupplement">要求补件</button>
-      <button class="btn btn--primary" hover-class="btn-hover" bindtap="onApprove">通过</button>
+      <button class="btn btn--danger" hover-class="btn-hover" bindtap="onReject" disabled="{{decideBusy}}">驳回</button>
+      <button class="btn btn--secondary" hover-class="btn-hover" bindtap="onSupplement" disabled="{{decideBusy}}">要求补件</button>
+      <button class="btn btn--primary" hover-class="btn-hover" bindtap="onApprove" disabled="{{decideBusy}}" loading="{{decideBusy}}">通过</button>
     </view>
   </sheet>
 </view>

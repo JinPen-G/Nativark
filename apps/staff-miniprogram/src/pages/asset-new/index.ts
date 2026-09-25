@@ -16,7 +16,7 @@ Page({
   asset: undefined as RentalAsset | undefined,
   definitions: [] as RentalAttributeDefinition[],
   onLoad(query: Record<string, string>) { this.setData({ id: query.id ?? "" }); },
-  onShow() { if (!isSignedIn()) { relaunch(ROUTES.login); return; } void this.load(); },
+  onShow() { if (!isSignedIn()) { relaunch(ROUTES.login); return; } if (this.data.view.status !== "ready") void this.load(); },
   async load() {
     if (!can("rental-core:asset:manage")) { this.setData({ view: blockedState("无编辑权限", "请联系租户管理员授权库存管理权限", "联系管理员", "contact") }); return; }
     this.setData({ view: loadingState() });

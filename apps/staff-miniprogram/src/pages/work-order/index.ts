@@ -13,7 +13,7 @@ import { itemGroupCover, maskPhone } from "../../core/presenters";
 import { can, currentSession, isSignedIn } from "../../core/session";
 import { themeBehavior } from "../../core/theme-behavior";
 import { formatBusinessDateTime } from "../../core/time";
-import { ROUTES, buildUrl, confirmDialog, navigate, relaunch, toast } from "../../core/ui";
+import { ROUTES, buildUrl, confirmDialog, navigate, promptDialog, relaunch, toast } from "../../core/ui";
 
 Page({
   behaviors: [themeBehavior],
@@ -109,10 +109,18 @@ Page({
   async onReview(event: WechatMiniprogram.TouchEvent) {
     if (!this.data.canReview || this.data.busy) return;
     const decision = String(event.currentTarget.dataset.decision) === "approved" ? "approved" : "rejected";
-    const confirmed = await confirmDialog({ title: decision === "approved" ? "验收通过" : "驳回工单", content: decision === "approved" ? "确认处理结果符合要求？" : "确认驳回并要求重新处理？", danger: decision === "rejected" });
-    if (!confirmed) return;
+    let reason: string;
+    if (decision === "approved") {
+      if (!await confirmDialog({ title: "验收通过", content: "确认处理结果符合要求？" })) return;
+      reason = "现场验收通过";
+    } else {
+      const input = await promptDialog({ title: "驳回工单", placeholder: "请填写驳回原因与返工要求（必填）", confirmText: "驳回", danger: true });
+      if (input === undefined) return;
+      if (!input) { this.setData({ error: "驳回原因不能为空" }); return; }
+      reason = input;
+    }
     this.setData({ busy: true, error: "" });
-    try { await reviewWorkOrder(this.data.id, { decision, reason: decision === "approved" ? "现场验收通过" : "现场验收不通过" }); toast("已处理", { icon: "success" }); await this.load(); }
+    try { await reviewWorkOrder(this.data.id, { decision, reason }); toast("已处理", { icon: "success" }); await this.load(); }
     catch (error) { this.setData({ error: describeError(error).message }); }
     finally { this.setData({ busy: false }); }
   },

@@ -24,7 +24,7 @@ const RESERVATION_DEAD = ["released", "expired", "cancelled"];
 
 Page({
   behaviors: [themeBehavior],
-  data: { view: loadingState() as ViewState, id: "", orderNo: "", customer: "", phone: "", period: "", location: "", itemLabel: "物品", pickupLabel: "领取", groups: [] as DeviceGroup[], sharedFields: [] as InspectionFieldRow[], hasBulk: false, gates: [] as GateItem[], templateName: "", noTemplate: false, busy: false, uploading: false, signatureWidth: 320, signatureHeight: 150, signatureDrawn: false, signatureFileAssetId: "", error: "" },
+  data: { view: loadingState() as ViewState, id: "", orderNo: "", customer: "", phone: "", period: "", location: "", itemLabel: "物品", pickupLabel: "领取", groups: [] as DeviceGroup[], sharedFields: [] as InspectionFieldRow[], hasBulk: false, gates: [] as GateItem[], templateName: "", noTemplate: false, hasDeliveryAddress: false, deliveryLabel: "配送", deliveryRecipient: "", deliveryPhone: "", deliveryAddressText: "", busy: false, uploading: false, signatureWidth: 320, signatureHeight: 150, signatureDrawn: false, signatureFileAssetId: "", error: "" },
   order: undefined as RentalOrder | undefined,
   template: undefined as RentalInspectionTemplate | undefined,
   boolCodes: [] as string[],
@@ -52,7 +52,9 @@ Page({
         ? deviceAllocs.map((row) => { const line = order.lines.find((entry) => entry.id === row.orderLineId); return { allocationId: row.id, itemGroupId: row.itemGroupId ?? line?.itemGroupId ?? "", title: row.metadata?.itemGroupName ?? line?.itemGroupName ?? terms().itemGroupLabel, identifier: row.assetNo ? `${idLabel} ${row.assetNo}` : `×${row.quantity}` }; })
         : order.lines.map((line) => ({ allocationId: line.id, itemGroupId: line.itemGroupId, title: line.itemGroupName, identifier: `×${line.quantity - (line.cancelledQuantity ?? 0)}` }));
       const groups: DeviceGroup[] = rawDevices.map((device) => ({ allocationId: device.allocationId, itemGroupId: device.itemGroupId, title: device.title, identifier: device.identifier, imagePath: "", fields: boolRows.map((row) => ({ ...row })) }));
-      this.setData({ view: readyState(), orderNo: order.orderNo, customer: order.customerName, phone: maskPhone(order.contactPhone), period: formatBusinessRange(order.startAt, order.effectiveEndAt ?? order.endAt, timeZone), location: order.fulfillmentLocationName, itemLabel: terms().itemLabel, pickupLabel: terms().pickupLabel, groups, sharedFields, hasBulk: boolRows.length > 0, gates: this.buildGates(order, funding), templateName: this.template?.name ?? "无需检查模板", noTemplate: !this.template, error: "" }, () => this.initSignatureCanvas());
+      // 配送/上门类订单带收货地址快照：派送前需要知道送到哪；取还与送车到点类为空，仍只按门店显示。
+      const delivery = order.deliveryAddressSnapshot;
+      this.setData({ view: readyState(), orderNo: order.orderNo, customer: order.customerName, phone: maskPhone(order.contactPhone), period: formatBusinessRange(order.startAt, order.effectiveEndAt ?? order.endAt, timeZone), location: order.fulfillmentLocationName, hasDeliveryAddress: Boolean(delivery), deliveryLabel: terms().deliveryLabel ?? "配送", deliveryRecipient: delivery?.recipient ?? "", deliveryPhone: delivery?.phone || delivery?.phoneMasked || "", deliveryAddressText: delivery ? [delivery.province, delivery.city, delivery.district, delivery.detail].filter(Boolean).join(" ") : "", itemLabel: terms().itemLabel, pickupLabel: terms().pickupLabel, groups, sharedFields, hasBulk: boolRows.length > 0, gates: this.buildGates(order, funding), templateName: this.template?.name ?? "无需检查模板", noTemplate: !this.template, error: "" }, () => this.initSignatureCanvas());
       groups.forEach((group, index) => { const source = itemGroupCover(itemGroups.find((entry) => entry.id === group.itemGroupId)); if (source) void resolveImage(source).then((path) => { if (path && this.data.id === order.id && this.data.groups[index]?.allocationId === group.allocationId) this.setData({ [`groups[${index}].imagePath`]: path }); }); });
     } catch (error) { this.setData({ view: errorState(error) }); }
   },
@@ -60,7 +62,8 @@ Page({
   buildGates(order: RentalOrder, funding: Awaited<ReturnType<typeof getOrderFunding>> | undefined): GateItem[] {
     const gates: GateItem[] = [];
     if (funding) {
-      const rentalOutstanding = funding.rental.payable - funding.rental.collected;
+      // 读服务端权威待收（含线上/合并支付已入账、退款回冲、待补款续租），与提交时的 assertReadyForPickup 同源。
+      const rentalOutstanding = funding.rental.due;
       const depositReady = funding.deposit.requiredAmount <= 0 || funding.deposit.collected - funding.deposit.refunded >= funding.deposit.requiredAmount;
       const preauthReady = funding.preauthorization.requiredAmount <= 0 || funding.preauthorization.frozen - funding.preauthorization.released >= funding.preauthorization.requiredAmount;
       const ready = rentalOutstanding <= 0.009 && depositReady && preauthReady;
