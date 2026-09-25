@@ -1163,9 +1163,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return this.factStore.listWorkOrders(tenantId, status);
   }
 
-  async listWorkOrderAssignees(tenantId: string): Promise<RentalWorkOrderAssignee[]> {
+  async listWorkOrderAssignees(tenantId: string, locationId?: string): Promise<RentalWorkOrderAssignee[]> {
     this.state(tenantId);
-    return this.factStore.listWorkOrderAssignees(tenantId);
+    return this.factStore.listWorkOrderAssignees(tenantId, locationId);
   }
 
   async listWorkOrderHistory(tenantId: string, workOrderId: string): Promise<RentalWorkOrderHistoryEntry[]> {
@@ -1175,10 +1175,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return this.factStore.listWorkOrderHistory(tenantId, workOrderId);
   }
 
-  private async resolveWorkOrderAssignee(tenantId: string, assigneeId?: string) {
+  private async resolveWorkOrderAssignee(tenantId: string, assigneeId: string | undefined, locationId: string) {
     if (!assigneeId) return undefined;
-    const assignee = (await this.factStore.listWorkOrderAssignees(tenantId)).find((item) => item.id === assigneeId);
-    if (!assignee) throw new BadRequestException("处理人不存在、未加入当前经营空间或已停用");
+    const assignee = (await this.factStore.listWorkOrderAssignees(tenantId, locationId)).find((item) => item.id === assigneeId);
+    if (!assignee) throw new BadRequestException("处理人不存在、未加入当前经营空间、已停用或无权访问该履约地点");
     return assignee;
   }
 
@@ -1189,7 +1189,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (!disposition) throw new NotFoundException("库存处置不存在或不属于当前经营空间");
     if (disposition.status === "restored") throw new ConflictException("已恢复可用的库存处置不能再建养护工单");
     const reason = input.reason?.trim() || disposition.blockReason || "归还后需要养护处理";
-    const assignee = await this.resolveWorkOrderAssignee(tenantId, input.assigneeId);
+    const assignee = await this.resolveWorkOrderAssignee(tenantId, input.assigneeId, disposition.locationId);
     const timestamp = now();
     const workOrder: RentalWorkOrder = {
       id: id("work"),
@@ -1222,7 +1222,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const row = current.find((item) => item.id === workOrderId);
     if (!row) throw new NotFoundException("养护工单不存在或不属于当前经营空间");
     if (!["pending", "in_progress"].includes(row.status)) throw new ConflictException("当前工单状态不能派工");
-    const assignee = await this.resolveWorkOrderAssignee(tenantId, input.assigneeId);
+    const assignee = await this.resolveWorkOrderAssignee(tenantId, input.assigneeId, row.locationId);
     return this.factStore.assignWorkOrder(tenantId, workOrderId, assignee?.id, assignee?.displayName);
   }
 

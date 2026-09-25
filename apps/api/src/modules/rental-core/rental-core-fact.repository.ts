@@ -37,6 +37,13 @@ import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { bufferedRentalPeriod } from "./rental-occupancy";
 import { effectiveUnpaidHoldRule } from "./rental-rule-defaults";
+import { enabledOrganizationSubtreeIds } from "../../common/organization-location-scope";
+import {
+  assigneeCanAccessLocation,
+  assigneeScopesOverlap,
+  resolveAssigneeLocationIds,
+  resolveWorkspaceMemberDataScope
+} from "./work-order-assignee-scope";
 import {
   getRequestDataScope,
   getRequestLocationIds,
@@ -200,7 +207,7 @@ export interface RentalCoreFactStore {
   upsertStockDisposition(disposition: RentalStockDisposition, tx?: RentalFactTx): Promise<RentalStockDisposition>;
   restoreStockDisposition(tenantId: string, dispositionId: string, operator: string, tx?: RentalFactTx): Promise<RentalStockDisposition>;
   listWorkOrders(tenantId: string, status?: RentalWorkOrderStatus, tx?: RentalFactTx): Promise<RentalWorkOrder[]>;
-  listWorkOrderAssignees(tenantId: string, tx?: RentalFactTx): Promise<RentalWorkOrderAssignee[]>;
+  listWorkOrderAssignees(tenantId: string, locationId?: string, tx?: RentalFactTx): Promise<RentalWorkOrderAssignee[]>;
   listWorkOrderHistory(tenantId: string, workOrderId: string, tx?: RentalFactTx): Promise<RentalWorkOrderHistoryEntry[]>;
   upsertWorkOrder(workOrder: RentalWorkOrder, tx?: RentalFactTx): Promise<RentalWorkOrder>;
   assignWorkOrder(tenantId: string, workOrderId: string, assigneeId?: string, assigneeName?: string, tx?: RentalFactTx): Promise<RentalWorkOrder>;
@@ -1528,10 +1535,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     const rows = await client.rentalStockDisposition.findMany({
       where: {
         tenantId, workspaceId, ...(orderId ? { orderId } : {}),
-        ...(getRequestStaffLocationIds() === undefined ? {} : { order: { is: { OR: [
-          { fulfillmentLocationId: { in: getRequestStaffLocationIds()!.length ? getRequestStaffLocationIds()! : ["__no_authorized_location__"] } },
-          { returnLocationId: { in: getRequestStaffLocationIds()!.length ? getRequestStaffLocationIds()! : ["__no_authorized_location__"] } }
-        ] } } })
+        ...this.stockDispositionVisibilityWhere()
       }, orderBy: { createdAt: "asc" }
     });
     return rows.map(toStockDisposition);
@@ -1595,7 +1599,9 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
 
   private async restoreStockDispositionInClient(client: RentalFactTx, tenantId: string, dispositionId: string, operator: string) {
     const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
-    const row = await client.rentalStockDisposition.findFirst({ where: { id: dispositionId, tenantId, workspaceId } });
+    const row = await client.rentalStockDisposition.findFirst({
+      where: { id: dispositionId, tenantId, workspaceId, ...this.stockDispositionVisibilityWhere() }
+    });
     if (!row) throw new NotFoundException("库存处置不存在或不属于当前经营空间");
     if (row.status === "blocked") throw new ConflictException("该处置仍有异常阻断，须先完成关联工单验收");
     if (new Date() < row.bufferUntil) throw new ConflictException("归还后周转缓冲尚未结束，暂不能恢复可租");
@@ -1668,7 +1674,23 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     return ids === undefined ? {} : { locationId: { in: ids.length ? ids : ["__no_authorized_location__"] } };
   }
 
-  async listWorkOrderAssignees(tenantId: string, tx?: RentalFactTx): Promise<RentalWorkOrderAssignee[]> {
+  private stockDispositionVisibilityWhere(): Prisma.RentalStockDispositionWhereInput {
+    const clauses: Prisma.RentalStockDispositionWhereInput[] = [];
+    const locationIds = getRequestLocationIds();
+    if (locationIds !== undefined) {
+      clauses.push({ locationId: { in: locationIds.length ? locationIds : ["__no_authorized_location__"] } });
+    }
+    if (getRequestDataScope() === "own") {
+      const userId = getRequestUserId();
+      clauses.push({ order: { is: { OR: userId ? [
+        { createdBy: userId },
+        { workOrders: { some: { OR: [{ createdBy: userId }, { assigneeId: userId }] } } }
+      ] : [{ id: "__no_current_user__" }] } } });
+    }
+    return clauses.length ? { AND: clauses } : {};
+  }
+
+  async listWorkOrderAssignees(tenantId: string, locationId?: string, tx?: RentalFactTx): Promise<RentalWorkOrderAssignee[]> {
     const client = tx ?? this.prisma;
     const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     const ownScope = getRequestDataScope() === "own";
@@ -1680,10 +1702,85 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         isActive: true,
         user: { isActive: true, isSaasAdmin: false, ...(ownScope ? { id: userId ?? "__no_current_user__" } : {}) }
       },
-      include: { user: { select: { id: true, account: true, displayName: true } } },
+      include: {
+        role: { select: { isActive: true, fixedAllPermissions: true, dataScope: true } },
+        user: { select: {
+          id: true,
+          account: true,
+          displayName: true,
+          organizationId: true,
+          isPlatformAdmin: true,
+          role: { select: { isActive: true, fixedAllPermissions: true, dataScope: true } },
+          roleAssignments: { select: { role: { select: { isActive: true, fixedAllPermissions: true, dataScope: true } } } }
+        } }
+      },
       orderBy: { createdAt: "asc" }
     });
-    return rows.map((row) => ({ id: row.user.id, account: row.user.account, displayName: row.user.displayName }));
+    const scopedRows = rows.flatMap((row) => {
+      const dataScope = resolveWorkspaceMemberDataScope({
+        isPlatformAdmin: row.user.isPlatformAdmin,
+        memberDataScope: row.dataScope,
+        memberRoleId: row.roleId,
+        memberRole: row.role,
+        userRole: row.user.role,
+        userRoleAssignments: row.user.roleAssignments.map((assignment) => assignment.role)
+      });
+      return dataScope ? [{ row, dataScope }] : [];
+    });
+
+    const organizationIds = new Set<string>();
+    let organizations: Array<{ id: string; parentId: string | null; status: string }> = [];
+    if (scopedRows.some((item) => item.dataScope === "organization")) {
+      organizations = await client.organizationUnit.findMany({
+        where: { tenantId },
+        select: { id: true, parentId: true, status: true }
+      });
+      for (const { row, dataScope } of scopedRows) {
+        if (dataScope !== "organization" || !row.user.organizationId) continue;
+        for (const id of enabledOrganizationSubtreeIds(organizations, row.user.organizationId)) organizationIds.add(id);
+      }
+    }
+    const locationsByOrganization = new Map<string, string[]>();
+    if (organizationIds.size) {
+      const locations = await client.rentalFulfillmentLocation.findMany({
+        where: { tenantId, workspaceId, organizationId: { in: [...organizationIds] } },
+        select: { id: true, organizationId: true }
+      });
+      for (const location of locations) {
+        if (!location.organizationId) continue;
+        const ids = locationsByOrganization.get(location.organizationId) ?? [];
+        ids.push(location.id);
+        locationsByOrganization.set(location.organizationId, ids);
+      }
+    }
+
+    if (locationId) {
+      const location = await client.rentalFulfillmentLocation.findFirst({
+        where: { tenantId, workspaceId, id: locationId },
+        select: { id: true }
+      });
+      if (!location) return [];
+    }
+    const callerLocationIds = getRequestLocationIds();
+    return scopedRows.flatMap(({ row, dataScope }) => {
+      const organizationLocationIds = dataScope === "organization" && row.user.organizationId
+        ? enabledOrganizationSubtreeIds(
+            organizations,
+            row.user.organizationId
+          ).flatMap((id) => locationsByOrganization.get(id) ?? [])
+        : [];
+      const locationIds = resolveAssigneeLocationIds(
+        dataScope,
+        row.locationScope,
+        organizationLocationIds
+      );
+      const eligible = locationId
+        ? assigneeCanAccessLocation(locationIds, locationId)
+        : callerLocationIds === undefined
+          ? locationIds === undefined || locationIds.length > 0
+          : assigneeScopesOverlap(locationIds, callerLocationIds);
+      return eligible ? [{ id: row.user.id, account: row.user.account, displayName: row.user.displayName }] : [];
+    });
   }
 
   async listWorkOrderHistory(tenantId: string, workOrderId: string, tx?: RentalFactTx): Promise<RentalWorkOrderHistoryEntry[]> {

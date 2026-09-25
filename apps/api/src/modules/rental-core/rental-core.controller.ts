@@ -845,8 +845,8 @@ export class RentalCoreController {
   @Get("work-orders") workOrders(@Req() req: AuthenticatedRequest, @Query("status") status?: string) {
     return this.service.listWorkOrders(req.user.tenantId, status as RentalWorkOrderStatus | undefined);
   }
-  @Get("work-order-assignees") workOrderAssignees(@Req() req: AuthenticatedRequest) {
-    return this.service.listWorkOrderAssignees(req.user.tenantId);
+  @Get("work-order-assignees") workOrderAssignees(@Req() req: AuthenticatedRequest, @Query("locationId") locationId?: string) {
+    return this.service.listWorkOrderAssignees(req.user.tenantId, locationId);
   }
   @Get("work-orders/:id/history") workOrderHistory(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
     return this.service.listWorkOrderHistory(req.user.tenantId, id);

@@ -2457,7 +2457,8 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get", path: "/api/rental/v1/work-order-assignees", tag: "RentalCore", operationId: "listRentalWorkOrderAssignees",
-    summary: "List current workspace work order assignees", permissions: ["rental-core:maintenance:view"], responseSchema: "GenericObject"
+    summary: "List current workspace work order assignees", permissions: ["rental-core:maintenance:view"], responseSchema: "GenericObject",
+    parameters: [queryParam("locationId")]
   },
   {
     method: "post", path: "/api/rental/v1/work-orders", tag: "RentalCore", operationId: "createRentalWorkOrder",

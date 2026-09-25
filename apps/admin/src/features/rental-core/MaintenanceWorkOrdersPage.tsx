@@ -71,7 +71,17 @@ export function MaintenanceWorkOrdersPage() {
 
   const dispositions = useQuery({ queryKey: ["rental-core", "stock-dispositions"], queryFn: () => rentalCoreApi.stockDispositions() });
   const workOrders = useQuery({ queryKey: ["rental-core", "work-orders"], queryFn: () => rentalCoreApi.workOrders() });
-  const assignees = useQuery({ queryKey: ["rental-core", "work-order-assignees"], queryFn: rentalCoreApi.workOrderAssignees });
+  const selectedDispositionId = Form.useWatch("dispositionId", createForm);
+  const selectedDisposition = (dispositions.data ?? []).find((row) => row.id === selectedDispositionId);
+  const assigneeLocationId = dialog === "create"
+    ? selectedDisposition?.locationId
+    : dialog === "assign"
+      ? activeWorkOrder?.locationId
+      : undefined;
+  const assignees = useQuery({
+    queryKey: ["rental-core", "work-order-assignees", assigneeLocationId ?? null],
+    queryFn: () => rentalCoreApi.workOrderAssignees(assigneeLocationId)
+  });
   const history = useQuery({ queryKey: ["rental-core", "work-order-history", activeWorkOrder?.id], queryFn: () => rentalCoreApi.workOrderHistory(activeWorkOrder!.id), enabled: dialog === "history" && Boolean(activeWorkOrder) });
   const refresh = async () => {
     await Promise.all([

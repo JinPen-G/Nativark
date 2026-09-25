@@ -15,6 +15,13 @@ const { PlatformService } = require("../apps/api/src/modules/platform/platform.s
 const { RentalWorkspaceReportRepository } = require("../apps/api/src/modules/rental-core/rental-workspace-report.repository");
 const { CustomerOperationsRepository } = require("../apps/api/src/modules/platform/customer-operations.repository");
 const { RentalCoreFactRepository } = require("../apps/api/src/modules/rental-core/rental-core-fact.repository");
+const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
+const {
+  assigneeCanAccessLocation,
+  assigneeScopesOverlap,
+  resolveAssigneeLocationIds,
+  resolveWorkspaceMemberDataScope
+} = require("../apps/api/src/modules/rental-core/work-order-assignee-scope");
 const { SharedCustomerRepository } = require("../apps/api/src/modules/platform/shared-customer.repository");
 const { CustomerOperationsService } = require("../apps/api/src/modules/platform/customer-operations.service");
 
@@ -342,9 +349,11 @@ void (async () => {
   console.log("  PASS 会员时间线按空间收口；地点受限时只返回租户级账号/会员事件");
 
   let orderListWhere;
+  let dispositionListWhere;
   const expiredDraftWheres = [];
   const factRepository = new RentalCoreFactRepository({
     businessWorkspace: { async findFirst({ where }) { return { id: where.id ?? "workspace-a" }; } },
+    rentalStockDisposition: { async findMany({ where }) { dispositionListWhere = where; return []; } },
     rentalOrder: {
       async findMany({ where }) {
         orderListWhere = where;
@@ -378,6 +387,30 @@ void (async () => {
   }
   console.log("  PASS 批量过期待确认订单候选在数据库查询时同时应用地点与本人范围");
 
+  await runWithRequestIdentity(identity, () => factRepository.listStockDispositions("tenant-a"));
+  assert.deepEqual(dispositionListWhere.AND, [
+    { locationId: { in: ["location-a"] } },
+    { order: { is: { OR: [
+      { createdBy: "operator-a" },
+      { workOrders: { some: { OR: [{ createdBy: "operator-a" }, { assigneeId: "operator-a" }] } } }
+    ] } } }
+  ]);
+  console.log("  PASS 归还处置按处置地点及本人订单/工单归属过滤，防止工单前置记录绕过范围");
+  let restoreDispositionWhere;
+  const restoreScopeRepository = new RentalCoreFactRepository({
+    businessWorkspace: { async findFirst({ where }) { return { id: where.id ?? "workspace-a" }; } },
+    async $transaction(run) { return run(this); },
+    rentalStockDisposition: {
+      async findFirst({ where }) { restoreDispositionWhere = where; return null; }
+    }
+  });
+  await assert.rejects(
+    () => runWithRequestIdentity(identity, () => restoreScopeRepository.restoreStockDisposition("tenant-a", "outside-disposition", "operator-a")),
+    /不存在或不属于当前经营空间/u
+  );
+  assert.deepEqual(restoreDispositionWhere.AND, dispositionListWhere.AND);
+  console.log("  PASS 直接恢复归还处置的写路径复用相同地点和本人范围条件");
+
   let createdProfileData;
   const sharedCustomers = new SharedCustomerRepository({ customerProfile: { async create({ data }) { createdProfileData = data; return data; } } });
   await runWithRequestIdentity(identity, () => sharedCustomers.createProfile({
@@ -395,6 +428,125 @@ void (async () => {
     /尚未按履约地点归属/u
   );
   console.log("  PASS 地点受限账号不能读取未按地点归属的敏感访问审计");
+
+  assert.equal(resolveWorkspaceMemberDataScope({
+    memberRoleId: "role-workspace",
+    memberRole: { isActive: true, dataScope: "ORGANIZATION" },
+    memberDataScope: "STORE"
+  }), "store", "空间成员数据范围应覆盖空间角色范围");
+  assert.equal(resolveWorkspaceMemberDataScope({
+    isPlatformAdmin: true,
+    memberRoleId: "disabled-role",
+    memberRole: { isActive: false, dataScope: "ALL" },
+    memberDataScope: "ALL"
+  }), undefined, "停用的空间角色不能作为处理人授权来源");
+  assert.equal(resolveWorkspaceMemberDataScope({
+    userRoleAssignments: [
+      { isActive: true, dataScope: "OWN" },
+      { isActive: true, dataScope: "ORGANIZATION" }
+    ]
+  }), "organization", "未指定空间角色时应遵循有效租户角色范围解析");
+  assert.deepEqual(resolveAssigneeLocationIds("organization", { mode: "selected", locationIds: ["loc-a", "loc-outside"] }, ["loc-a", "loc-b"]), ["loc-a"]);
+  assert.deepEqual(resolveAssigneeLocationIds("store", { mode: "selected", locationIds: ["loc-a"] }, []), ["loc-a"]);
+  assert.equal(assigneeCanAccessLocation(["loc-a"], "loc-b"), false);
+  assert.equal(assigneeCanAccessLocation(undefined, "loc-b"), true);
+  assert.equal(assigneeScopesOverlap(["loc-b"], ["loc-a"]), false);
+  console.log("  PASS 工单处理人范围继承、组织地点映射、显式地点收窄及停用角色拒绝");
+
+  const checkedAssignmentLocations = [];
+  const workOrderService = Object.create(RentalCoreService.prototype);
+  workOrderService.state = () => ({});
+  workOrderService.factStore = {
+    async listStockDispositions() {
+      return [{ id: "disposition-a", locationId: "loc-a", status: "blocked", blockReason: "需检修" }];
+    },
+    async listWorkOrders() {
+      return [{ id: "work-order-b", locationId: "loc-b", status: "pending" }];
+    },
+    async listWorkOrderAssignees(_tenantId, locationId) {
+      checkedAssignmentLocations.push(locationId);
+      return [];
+    }
+  };
+  await assert.rejects(
+    () => workOrderService.createWorkOrder("tenant-a", { dispositionId: "disposition-a", type: "repair", assigneeId: "unauthorized-worker" }, "manager"),
+    /无权访问该履约地点/u
+  );
+  await assert.rejects(
+    () => workOrderService.assignWorkOrder("tenant-a", "work-order-b", { assigneeId: "unauthorized-worker" }),
+    /无权访问该履约地点/u
+  );
+  assert.deepEqual(checkedAssignmentLocations, ["loc-a", "loc-b"]);
+  console.log("  PASS 新建工单与改派都按工单目标地点重新校验处理人，不能绕过列表筛选");
+
+  const assigneeRows = [
+    { userId: "org-worker", roleId: null, role: null, dataScope: null, locationScope: null, user: {
+      id: "org-worker", account: "org-worker", displayName: "组织内处理人", organizationId: "org-root", isPlatformAdmin: false,
+      role: { isActive: true, fixedAllPermissions: false, dataScope: "ORGANIZATION" }, roleAssignments: []
+    } },
+    { userId: "location-worker", roleId: null, role: null, dataScope: "STORE", locationScope: { mode: "selected", locationIds: ["loc-a"] }, user: {
+      id: "location-worker", account: "location-worker", displayName: "地点内处理人", organizationId: null, isPlatformAdmin: false,
+      role: null, roleAssignments: []
+    } },
+    { userId: "outside-worker", roleId: null, role: null, dataScope: "STORE", locationScope: { mode: "selected", locationIds: ["loc-b"] }, user: {
+      id: "outside-worker", account: "outside-worker", displayName: "范围外处理人", organizationId: null, isPlatformAdmin: false,
+      role: null, roleAssignments: []
+    } },
+    { userId: "unrestricted-worker", roleId: null, role: null, dataScope: "ALL", locationScope: null, user: {
+      id: "unrestricted-worker", account: "unrestricted-worker", displayName: "全地点处理人", organizationId: null, isPlatformAdmin: false,
+      role: null, roleAssignments: []
+    } },
+    { userId: "unmapped-worker", roleId: null, role: null, dataScope: null, locationScope: null, user: {
+      id: "unmapped-worker", account: "unmapped-worker", displayName: "无有效地点处理人", organizationId: "org-disabled", isPlatformAdmin: false,
+      role: { isActive: true, fixedAllPermissions: false, dataScope: "ORGANIZATION" }, roleAssignments: []
+    } },
+    { userId: "disabled-worker", roleId: "role-disabled", role: { isActive: false, fixedAllPermissions: false, dataScope: "ALL" }, dataScope: "ALL", locationScope: null, user: {
+      id: "disabled-worker", account: "disabled-worker", displayName: "停用角色处理人", organizationId: null, isPlatformAdmin: false,
+      role: null, roleAssignments: []
+    } }
+  ];
+  const assigneeRepository = new RentalCoreFactRepository({
+    businessWorkspace: { async findFirst({ where }) { return { id: where.id ?? "workspace-a" }; } },
+    workspaceMember: { async findMany() { return assigneeRows; } },
+    organizationUnit: { async findMany() { return organizations; } },
+    rentalFulfillmentLocation: {
+      async findMany({ where }) {
+        const orgIds = new Set(where.organizationId.in);
+        return [
+          { id: "loc-a", organizationId: "org-root" },
+          { id: "loc-b", organizationId: "org-sibling" }
+        ].filter((row) => orgIds.has(row.organizationId));
+      },
+      async findFirst({ where }) { return ["loc-a", "loc-b"].includes(where.id) ? { id: where.id } : null; }
+    }
+  });
+  const locationScopedIdentity = {
+    tenantId: "tenant-a", userId: "manager-a", workspaceId: "workspace-a", isSaasAdmin: false,
+    dataScope: "all", locationScope: { mode: "selected", locationIds: ["loc-a"] }
+  };
+  const visibleAssignees = await runWithRequestIdentity(locationScopedIdentity, () => assigneeRepository.listWorkOrderAssignees("tenant-a"));
+  assert.deepEqual(visibleAssignees.map((row) => row.id).sort(), ["location-worker", "org-worker", "unrestricted-worker"]);
+  const allVisibleAssignees = await runWithRequestIdentity({
+    ...locationScopedIdentity, locationScope: { mode: "all", locationIds: [] }
+  }, () => assigneeRepository.listWorkOrderAssignees("tenant-a"));
+  assert.deepEqual(allVisibleAssignees.map((row) => row.id).sort(), ["location-worker", "org-worker", "outside-worker", "unrestricted-worker"]);
+  const eligibleAtLocation = await runWithRequestIdentity(locationScopedIdentity, () => assigneeRepository.listWorkOrderAssignees("tenant-a", "loc-a"));
+  assert.deepEqual(eligibleAtLocation.map((row) => row.id).sort(), ["location-worker", "org-worker", "unrestricted-worker"]);
+  const allLocationAssignees = await runWithRequestIdentity({
+    ...locationScopedIdentity, locationScope: { mode: "all", locationIds: [] }
+  }, () => assigneeRepository.listWorkOrderAssignees("tenant-a", "loc-b"));
+  assert.deepEqual(allLocationAssignees.map((row) => row.id).sort(), ["outside-worker", "unrestricted-worker"]);
+  await assert.rejects(
+    () => scopeGuard.assertStaffLocationAccess(
+      { method: "GET", query: { locationId: "loc-b" } },
+      "/rental/v1/work-order-assignees",
+      { id: "manager-a", tenantId: "tenant-a", dataScope: "all" },
+      "workspace-a",
+      { mode: "selected", locationIds: ["loc-a"] }
+    ),
+    /所选履约地点不在当前账号授权范围内/u
+  );
+  console.log("  PASS 工单处理人列表按请求地点可见范围过滤，目标地点校验候选人组织与地点授权");
 
   console.log("数据范围回归专项全部通过");
 })().catch((error) => {
