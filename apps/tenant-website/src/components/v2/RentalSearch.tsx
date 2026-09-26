@@ -1,4 +1,4 @@
-import { type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSite } from '../../SiteContext';
 import { useHeroSearch } from '../../hooks/useHeroSearch';
@@ -10,13 +10,22 @@ export function RentalSearch({ category, stores }: { category?: Category; stores
   const { href, t } = useSite();
   const navigate = useNavigate();
   const search = useHeroSearch();
+  const [submitting, setSubmitting] = useState(false);
   const hasStores = stores.length > 0;
   const pickupStores = stores.filter(store => !store.capabilities || store.capabilities.includes('pickup'));
   const returnStores = stores.filter(store => !store.capabilities || store.capabilities.includes('return'));
+  // 安全兜底：正常点「查看可租商品」会跳转到另一路径、本组件随首页卸载；
+  // 万一被复用于同路径场景（不卸载），800ms 后自动解除 pending，避免按钮永久禁用。
+  useEffect(() => {
+    if (!submitting) return;
+    const timer = window.setTimeout(() => setSubmitting(false), 800);
+    return () => window.clearTimeout(timer);
+  }, [submitting]);
 
   function submit(event: FormEvent) {
     event.preventDefault();
     if (search.invalidRange) return;
+    setSubmitting(true);
     const query = search.toQuery();
     const base = category ? `/category/${category.id}` : '/products';
     navigate(href(query ? `${base}?${query}` : base));
@@ -51,7 +60,7 @@ export function RentalSearch({ category, stores }: { category?: Category; stores
           <span className="v2-field-label">{t('searchEnd')}</span>
           <input type="datetime-local" value={search.endAt} min={search.startAt || search.minStart} onChange={event => search.setEndAt(event.target.value)} />
         </label>
-        <button type="submit" className="v2-search-go">{t('heroViewAvailable')}</button>
+        <button type="submit" className="v2-search-go" disabled={submitting}>{submitting ? t('searching') : t('heroViewAvailable')}</button>
       </div>
       <div className="v2-search-meta">
         {hasStores && (

@@ -4,6 +4,8 @@ import { ArrowRightOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useSite } from '../SiteContext';
 import { useAuth } from '../AuthContext';
 import { RemoteBooking } from '../components/RemoteBooking';
+import { useToast } from '../components/Toast';
+import { Img } from '../components/Img';
 import { rentalDays, siteRepository } from '../data/siteRepository';
 import { nowInput, offsetDaysInput } from '../data/datetime';
 import type { DemoOrder } from '../types';
@@ -16,6 +18,7 @@ function today() {
 export function BookingPage() {
   const { tenant, href, isRemote, localizeProduct, language, t } = useSite();
   const { isAuthenticated } = useAuth();
+  const toast = useToast();
   const { productId } = useParams();
   const [params] = useSearchParams();
   const rawProduct = siteRepository.getProduct(tenant, productId || '');
@@ -58,11 +61,12 @@ export function BookingPage() {
       rentalAmount, depositAmount, createdAt: new Date().toISOString(),
     };
     siteRepository.saveOrder(order);
+    toast.success(t('bookingSaved'));
     navigate(href(`/orders/${order.id}`));
   }
 
   const quantityMax = Math.max(1, Math.min(product.availableQuantity || 1, 10));
-  const productSection = <section className="booking-card"><div className="booking-card-heading"><span>01</span><h2>{t('chooseProduct')}</h2></div><div className="booking-product"><img src={product.cover} alt={product.name} loading="lazy" decoding="async" /><div><strong>{product.name}</strong><p>{product.subtitle}</p><span>¥{product.price} /{priceUnit}</span></div><Link to={href(`/product/${product.id}`)}>{t('details')}</Link></div></section>;
+  const productSection = <section className="booking-card"><div className="booking-card-heading"><span>01</span><h2>{t('chooseProduct')}</h2></div><div className="booking-product"><Img src={product.cover} alt={product.name} /><div><strong>{product.name}</strong><p>{product.subtitle}</p><span>¥{product.price} /{priceUnit}</span></div><Link to={href(`/product/${product.id}`)}>{t('details')}</Link></div></section>;
   const termSection = <section className="booking-card"><div className="booking-card-heading"><span>02</span><h2>{t('chooseTerm')}</h2></div><div className="form-grid"><label>{t('startDate')}<input type="datetime-local" min={nowInput()} value={startDate} onChange={event => { setStartDate(event.target.value); if (event.target.value > endDate) setEndDate(event.target.value); }} /></label><label>{t('endDate')}<input type="datetime-local" min={startDate} value={endDate} onChange={event => setEndDate(event.target.value)} /></label></div><div className="form-grid"><label>{t('rentalQuantity')}<select value={quantity} onChange={event => setQuantity(Number(event.target.value))}>{Array.from({ length: remoteMode ? quantityMax : product.availableQuantity }, (_, index) => <option value={index + 1} key={index}>{index + 1} {t('itemUnit')}</option>)}</select></label><div className="field-hint">{!remoteMode && <>{t('currentDemoQuantity', { count: product.availableQuantity })}<br /></>}{t('termTotal', { days })}</div></div></section>;
   const fulfillmentSection = <section className="booking-card"><div className="booking-card-heading"><span>03</span><h2>{t('pickupDelivery')}</h2></div><div className="choice-grid"><label className={fulfillment === 'pickup' ? 'choice-active' : ''}><input type="radio" name="fulfillment" checked={fulfillment === 'pickup'} onChange={() => setFulfillment('pickup')} /><strong>{t('pickup')}</strong><small>{t('pickupDescription')}</small></label><label className={fulfillment === 'delivery' ? 'choice-active' : ''}><input type="radio" name="fulfillment" checked={fulfillment === 'delivery'} onChange={() => setFulfillment('delivery')} /><strong>{t('deliveryHome')}</strong><small>{t('deliveryFeeDescription')}</small></label></div></section>;
 

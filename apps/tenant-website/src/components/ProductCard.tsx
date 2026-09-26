@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { StarFilled } from '@ant-design/icons';
 import { useSite } from '../SiteContext';
+import { Img } from './Img';
 import type { Product } from '../types';
 
 export function ProductCard({ product, search }: { product: Product; search?: string }) {
@@ -11,7 +12,7 @@ export function ProductCard({ product, search }: { product: Product; search?: st
   const detailTo = href(`/product/${displayProduct.id}${search ? `?${search}` : ''}`);
   return <article className="product-card">
     <Link to={detailTo} className="product-image-link" aria-label={`${t('viewNow')} ${displayProduct.name}`}>
-      <img src={displayProduct.cover} alt={displayProduct.name} loading="lazy" decoding="async" onError={(e) => { e.currentTarget.classList.add('img-broken'); }} />
+      <Img src={displayProduct.cover} alt={displayProduct.name} />
       {displayProduct.badges[0] && <span className="product-badge">{displayProduct.badges[0]}</span>}
     </Link>
     <div className="product-card-body">

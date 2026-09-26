@@ -53,6 +53,11 @@
   /* 官网 2.0 预约 Hero 的展示字号（集中管理，避免散落 clamp）。 */
   --fs-display-hero-v2: clamp(38px, 5.4vw, 82px);
   --fs-hero-sub: clamp(15px, 1.4vw, 20px);
+  /* 统一的动效时长与缓动（全站体验节奏一致；见 prefers-reduced-motion 兜底）。 */
+  --motion-fast: 150ms;
+  --motion-normal: 280ms;
+  --motion-slow: 400ms;
+  --ease-page: cubic-bezier(.22, .61, .36, 1);
 }
 
 * { box-sizing: border-box; }
@@ -852,6 +857,50 @@ html[data-theme="dark"] .product-image-link, html[data-theme="dark"] .subcategor
 .login-switch { text-align: center; font-size: 14px; color: var(--muted); margin: 6px 0 0; }
 .login-switch-link { border: 0; background: none; font: inherit; color: var(--brand); font-weight: var(--fw-semibold); cursor: pointer; padding: 0 2px; }
 .login-switch-link:hover { text-decoration: underline; }
+
+/* ================= 体验层：过渡 / 进度条 / 骨架 / 图片淡入 / Toast ================= */
+
+/* 路由过渡：旧页淡出下沉(fast)，新页淡入上移(normal)；壳不参与、无白屏 */
+.route-view { will-change: opacity, transform; }
+.route-view.is-leaving { opacity: 0; transform: translateY(6px); transition: opacity var(--motion-fast) var(--ease-page), transform var(--motion-fast) var(--ease-page); }
+.route-view.is-entering { animation: route-enter var(--motion-normal) var(--ease-page) both; }
+@keyframes route-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* 顶部细进度条，跟随主题色，无遮罩 */
+.route-progress { position: fixed; top: 0; left: 0; height: 2px; width: 0; z-index: 100; background: var(--brand); box-shadow: 0 0 6px color-mix(in srgb, var(--brand) 55%, transparent); opacity: 0; transition: width .2s var(--ease-page), opacity .3s ease; pointer-events: none; }
+.route-progress.is-active { opacity: 1; }
+
+/* 骨架：行/块占位，复用 skeleton-pulse；结构贴近真实、减少 CLS */
+.sk-line, .sk-block, .list-skeleton-row { background: var(--card-muted, #f1f4f8); animation: skeleton-pulse 1.3s ease-in-out infinite; }
+html[data-theme="dark"] .sk-line, html[data-theme="dark"] .sk-block, html[data-theme="dark"] .list-skeleton-row { background: rgba(255,255,255,.06); }
+.sk-line { height: 14px; margin-bottom: 10px; border-radius: var(--radius-small); }
+.sk-line-lg { height: 28px; width: 44%; margin-bottom: 14px; }
+.sk-line-md { height: 16px; width: 66%; }
+.sk-block { height: 240px; border-radius: var(--radius-card); }
+.sk-page { padding: 20px 0 40px; }
+.sk-page .sk-block { margin-top: 8px; }
+.list-skeleton { display: flex; flex-direction: column; gap: 12px; }
+.list-skeleton-row { height: 84px; border-radius: var(--radius-card); }
+
+/* 图片淡入：加载完成前透明 + 轻微放大，加载后淡入归位 */
+.img-fade { opacity: 0; transform: scale(1.01); transition: opacity var(--motion-normal) var(--ease-page), transform var(--motion-normal) var(--ease-page); }
+.img-fade.is-loaded { opacity: 1; transform: none; }
+
+/* Toast：顶部居中、轻量、自动消失，非大 Modal */
+.toast-host { position: fixed; left: 50%; top: 18px; transform: translateX(-50%); z-index: 200; display: flex; flex-direction: column; align-items: center; gap: 10px; pointer-events: none; }
+.toast { display: inline-flex; align-items: center; gap: 8px; max-width: 90vw; padding: 10px 16px; border-radius: var(--radius-button); background: var(--card); color: var(--ink); border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(16, 36, 64, .14); font-size: 14px; font-weight: var(--fw-medium); animation: toast-in var(--motion-normal) var(--ease-page) both; }
+.toast-icon { display: inline-flex; font-size: 16px; }
+.toast-success .toast-icon { color: #2f9e5f; }
+.toast-error .toast-icon { color: #d4574e; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+
+/* reduced-motion：取消位移/缩放/淡入动画，保留必要 Loading（骨架静态、进度条仍指示） */
+@media (prefers-reduced-motion: reduce) {
+  .route-view.is-leaving, .route-view.is-entering { animation: none !important; transition: none !important; opacity: 1 !important; transform: none !important; }
+  .img-fade { transform: none !important; transition: opacity var(--motion-fast) ease !important; }
+  .toast { animation: none !important; }
+  .sk-line, .sk-block, .list-skeleton-row, .product-card-skeleton, .subcategory-skeleton { animation: none !important; }
+}
 @media (max-width: 768px) {
   .condition-bar { gap: 6px 14px; padding: 12px 14px; }
   .condition-edit { margin-left: 0; }

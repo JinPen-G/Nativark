@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { LoadingOutlined } from '@ant-design/icons';
 import { useSite } from '../SiteContext';
 import { useAuth } from '../AuthContext';
+import { useToast } from './Toast';
 import { sessionApi } from '../data/authClient';
 import { rentalDays } from '../data/siteRepository';
 import { toIsoDateTime } from '../data/datetime';
@@ -20,6 +21,7 @@ export function RemoteBooking({ product, startDate, endDate, quantity, fulfillme
 }) {
   const { href, t, language } = useSite();
   const { currentWorkspace, switchWorkspace } = useAuth();
+  const toast = useToast();
   const navigate = useNavigate();
   const [locationId, setLocationId] = useState<string | null>(null);
   const [enabledModes, setEnabledModes] = useState<string[]>([]);
@@ -102,9 +104,9 @@ export function RemoteBooking({ product, startDate, endDate, quantity, fulfillme
       // 幂等键按报价固定：一份报价对应一次下单，网络重试可安全重放，不会重复建单。
       const res = await sessionApi.createOrder({ quoteId: quote.id }, `order-${quote.id}`);
       const order = (res.order ?? res) as { id?: string };
-      if (order?.id) navigate(href(`/orders/${order.id}`));
-      else setError(t('orderFailed'));
-    } catch (e: any) { setError(e?.message || t('orderFailed')); }
+      if (order?.id) { toast.success(t('orderSubmitted')); navigate(href(`/orders/${order.id}`)); }
+      else { setError(t('orderFailed')); toast.error(t('orderFailed')); }
+    } catch (e: any) { const msg = e?.message || t('orderFailed'); setError(msg); toast.error(msg); }
     finally { setBusy(false); }
   }, [quote, href]);
 
@@ -131,7 +133,7 @@ export function RemoteBooking({ product, startDate, endDate, quantity, fulfillme
       <p className="mock-note">{t('quoteServerNote')}</p>
     </>}
     {error && <p className="form-error" role="alert">{error}</p>}
-    <button type="button" className="button button-dark button-block" disabled={busy || !quote} onClick={submitOrder}>{t('submitOrder')}</button>
+    <button type="button" className="button button-dark button-block" disabled={busy || !quote} onClick={submitOrder}>{busy ? t('submitting') : t('submitOrder')}</button>
     <p className="mock-note">{language === 'en' ? 'Rental term' : '租期'}: {days} {language === 'en' ? 'day(s)' : '天'}</p>
   </div>;
 }
