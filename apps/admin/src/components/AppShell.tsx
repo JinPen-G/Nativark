@@ -20,6 +20,7 @@ import { useAuthStore } from "@/features/auth/authStore";
 import { AppearanceSwitcher } from "./AppearanceSwitcher";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
+import { SubscriptionExpiryFloatingCard } from "@/features/subscription/SubscriptionExpiryFloatingCard";
 
 const { Sider, Content } = Layout;
 
@@ -133,8 +134,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       section: sections.find((section) => section.routes.some((entry) => entry.path === route?.path))
     };
   }, [location.pathname, routes, sections]);
-  // 新建订单与订单详情都不在菜单里，选中态归到「订单管理」，否则进这两个页面菜单会整体失焦。
-  const selectedKey = location.pathname.startsWith("/rental/orders/") ? "/rental/orders" : location.pathname;
+  // 新建订单、订单详情、订阅子页都不在菜单里，选中态归到各自的菜单父项，否则进这些页面菜单会整体失焦。
+  const selectedKey = location.pathname.startsWith("/rental/orders/") ? "/rental/orders"
+    : location.pathname.startsWith("/settings/subscription/") ? "/settings/subscription"
+    : location.pathname.startsWith("/platform/subscriptions/") ? "/platform/subscriptions"
+    : location.pathname;
   const accountInitial = (user?.displayName ?? "运营用户").slice(0, 1).toUpperCase();
   const accountCaption = user?.roleNames?.join(" · ") || user?.organizationName || tenant?.tenantCode || t("运营账号");
   const breadcrumbMenuItems = useMemo(() => current.section?.routes.map((entry) => ({
@@ -307,6 +311,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Content className="app-content"><main className="content-canvas">{children}</main></Content>
         </Layout>
       </Layout>
+      {/* SUB-02 §5.4 到期提醒：全局左下角浮窗，随各页常驻（无数据/平台账号时自渲染为空）。 */}
+      <SubscriptionExpiryFloatingCard />
     </div>
   );
 }

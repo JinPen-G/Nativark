@@ -40,6 +40,11 @@ const TenantRolePermissionPage = lazy(() => import("@/features/tenant-access/Ten
 const TenantIntegrationsPage = lazy(() => import("@/features/settings/TenantIntegrationsPage").then((module) => ({ default: module.TenantIntegrationsPage })));
 const ClientChannelPage = lazy(() => import("@/features/channel/ClientChannelPage").then((module) => ({ default: module.ClientChannelPage })));
 const PaymentReconciliationPage = lazy(() => import("@/features/settings/PaymentReconciliationPage").then((module) => ({ default: module.PaymentReconciliationPage })));
+const TenantSubscriptionPage = lazy(() => import("@/features/subscription/TenantSubscriptionPage").then((module) => ({ default: module.TenantSubscriptionPage })));
+const SubscriptionProPage = lazy(() => import("@/features/subscription/SubscriptionProPage").then((module) => ({ default: module.SubscriptionProPage })));
+const SubscriptionRequestDetailPage = lazy(() => import("@/features/subscription/SubscriptionRequestDetailPage").then((module) => ({ default: module.SubscriptionRequestDetailPage })));
+const PlatformSubscriptionsPage = lazy(() => import("@/features/subscription/PlatformSubscriptionsPage").then((module) => ({ default: module.PlatformSubscriptionsPage })));
+const PlatformSubscriptionDetailPage = lazy(() => import("@/features/subscription/PlatformSubscriptionDetailPage").then((module) => ({ default: module.PlatformSubscriptionDetailPage })));
 
 function PageLoader() {
   return <div className="route-loader"><LoadingState /></div>;
@@ -115,6 +120,9 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.tenantIntegrations.path} element={guard(APP_ROUTES.tenantIntegrations, <TenantIntegrationsPage />)} />
             <Route path={APP_ROUTES.clientChannel.path} element={guard(APP_ROUTES.clientChannel, <ClientChannelPage />)} />
             <Route path={APP_ROUTES.paymentReconciliation.path} element={guard(APP_ROUTES.paymentReconciliation, <PaymentReconciliationPage />)} />
+            <Route path={APP_ROUTES.subscription.path} element={guard(APP_ROUTES.subscription, <TenantSubscriptionPage />)} />
+            <Route path={APP_ROUTES.subscriptionPro.path} element={guard(APP_ROUTES.subscriptionPro, <SubscriptionProPage />)} />
+            <Route path={APP_ROUTES.subscriptionRequestDetail.path} element={guard(APP_ROUTES.subscriptionRequestDetail, <SubscriptionRequestDetailPage />)} />
             <Route path={APP_ROUTES.qualificationTypes.path} element={guard(APP_ROUTES.qualificationTypes, <QualificationTypesPage />)} />
             <Route path={APP_ROUTES.membershipReviews.path} element={guard(APP_ROUTES.membershipReviews, <MembershipReviewPage />)} />
             <Route path={APP_ROUTES.personalMembers.path} element={guard(APP_ROUTES.personalMembers, <PersonalMembershipPage />)} />
@@ -123,6 +131,8 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.membershipRewards.path} element={guard(APP_ROUTES.membershipRewards, <MembershipRewardsPage />)} />
             <Route path="/platform" element={<Navigate to={APP_ROUTES.platformUsers.path} replace />} />
             <Route path={APP_ROUTES.platformTenants.path} element={guard(APP_ROUTES.platformTenants, <TenantManagementPage />)} />
+            <Route path={APP_ROUTES.platformSubscriptions.path} element={guard(APP_ROUTES.platformSubscriptions, <PlatformSubscriptionsPage />)} />
+            <Route path={APP_ROUTES.platformSubscriptionDetail.path} element={guard(APP_ROUTES.platformSubscriptionDetail, <PlatformSubscriptionDetailPage />)} />
             <Route path={APP_ROUTES.platformUsers.path} element={guard(APP_ROUTES.platformUsers, <PlatformPage />)} />
             <Route path={APP_ROUTES.platformSystem.path} element={guard(APP_ROUTES.platformSystem, <PlatformPage />)} />
             <Route path={APP_ROUTES.platformOperations.path} element={guard(APP_ROUTES.platformOperations, <PlatformOperationsPage />)} />

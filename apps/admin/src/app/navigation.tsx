@@ -5,6 +5,7 @@ import {
   BoxPlotOutlined,
   CalendarOutlined,
   ControlOutlined,
+  CrownOutlined,
   DashboardOutlined,
   FileSearchOutlined,
   FileTextOutlined,
@@ -96,7 +97,13 @@ export const APP_ROUTES = {
   platformSystem: { path: "/platform/system", label: "平台参数", permission: "system:params:manage", audience: "saas", icon: <SettingOutlined />, menu: true },
   platformOperations: { path: "/platform/operations", label: "平台运维", permission: "system:params:manage", audience: "saas", icon: <SafetyCertificateOutlined />, menu: true },
   platformTools: { path: "/platform/tools", label: "平台工具与治理", permission: "system:params:manage", audience: "saas", icon: <ControlOutlined />, menu: true },
-  platformOfficialCalendars: { path: "/platform/official-calendars", label: "公共官方日历", permission: "system:calendar-source:manage", audience: "saas", icon: <CalendarOutlined />, menu: true }
+  platformOfficialCalendars: { path: "/platform/official-calendars", label: "公共官方日历", permission: "system:calendar-source:manage", audience: "saas", icon: <CalendarOutlined />, menu: true },
+  // SUB-02/03 版本订阅：租户端「版本与订阅」(view 进入、manage 办理) + PRO 介绍/申请详情；平台端「租户订阅」(saas manage)。三个权限码与服务端守卫严格同名，legacyPermissions 留空（全新功能）。
+  subscription: { path: "/settings/subscription", label: "版本与订阅", permission: "rental-os:subscription:view", audience: "tenant", icon: <CrownOutlined />, menu: true },
+  subscriptionPro: { path: "/settings/subscription/pro", label: "PRO 介绍", permission: "rental-os:subscription:view", audience: "tenant", icon: <CrownOutlined /> },
+  subscriptionRequestDetail: { path: "/settings/subscription/requests/:id", label: "申请详情", permission: "rental-os:subscription:view", audience: "tenant", icon: <CrownOutlined /> },
+  platformSubscriptions: { path: "/platform/subscriptions", label: "租户订阅", permission: "system:subscription:manage", audience: "saas", icon: <CrownOutlined />, menu: true },
+  platformSubscriptionDetail: { path: "/platform/subscriptions/:id", label: "租户订阅详情", permission: "system:subscription:manage", audience: "saas", icon: <CrownOutlined /> }
 } satisfies Record<string, AppRouteDefinition>;
 
 export const APP_NAVIGATION: AppNavigationSection[] = [
@@ -107,11 +114,11 @@ export const APP_NAVIGATION: AppNavigationSection[] = [
   { key: "customers", label: "会员与客户", icon: <TeamOutlined />, routes: [APP_ROUTES.membershipReviews, APP_ROUTES.personalMembers, APP_ROUTES.corporateMembers, APP_ROUTES.membershipPlans, APP_ROUTES.membershipRewards] },
   // 租户侧设置按职责拆分，避免开业、业务规则、账号权限、外部服务和财务对账
   // 混在一个九项长列表里。这里只调整菜单分组，不改变任何路由或权限边界。
-  { key: "operations-foundation", label: "经营基础", icon: <SettingOutlined />, routes: [APP_ROUTES.tenantReadiness, APP_ROUTES.rentalSettings, APP_ROUTES.qualificationTypes, APP_ROUTES.rentalCapabilities] },
+  { key: "operations-foundation", label: "经营基础", icon: <SettingOutlined />, routes: [APP_ROUTES.tenantReadiness, APP_ROUTES.rentalSettings, APP_ROUTES.qualificationTypes, APP_ROUTES.rentalCapabilities, APP_ROUTES.subscription] },
   { key: "account-access", label: "账号与权限", icon: <TeamOutlined />, routes: [APP_ROUTES.tenantAccounts, APP_ROUTES.tenantRoles] },
   { key: "service-channels", label: "服务与渠道", icon: <ApiOutlined />, routes: [APP_ROUTES.tenantIntegrations, APP_ROUTES.clientChannel] },
   { key: "finance-reconciliation", label: "财务与对账", icon: <FileSearchOutlined />, routes: [APP_ROUTES.paymentReconciliation] },
-  { key: "platform-management", label: "平台管理", icon: <SettingOutlined />, routes: [APP_ROUTES.platformTenants, APP_ROUTES.platformOfficialCalendars, APP_ROUTES.platformUsers, APP_ROUTES.platformSystem, APP_ROUTES.platformOperations, APP_ROUTES.platformTools] }
+  { key: "platform-management", label: "平台管理", icon: <SettingOutlined />, routes: [APP_ROUTES.platformTenants, APP_ROUTES.platformSubscriptions, APP_ROUTES.platformOfficialCalendars, APP_ROUTES.platformUsers, APP_ROUTES.platformSystem, APP_ROUTES.platformOperations, APP_ROUTES.platformTools] }
 ];
 
 /**
