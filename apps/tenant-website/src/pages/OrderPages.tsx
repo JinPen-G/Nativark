@@ -28,7 +28,7 @@ export function OrdersPage() {
     return () => { cancelled = true; };
   }, [remote]);
 
-  const intro = <div className="page-intro"><span className="eyebrow">MY RENTALS</span><h1>{t('orders')}</h1><p>{remote ? t('myRentalsRemoteDesc') : t('myRentalsDescription')}</p></div>;
+  const intro = <div className="page-intro"><h1>{t('orders')}</h1><p>{remote ? t('myRentalsRemoteDesc') : t('myRentalsDescription')}</p></div>;
 
   if (remote) {
     if (!isAuthenticated) return null;
@@ -87,7 +87,7 @@ export function OrderDetailPage() {
     const cur = order.currency || 'CNY';
     const lines: any[] = Array.isArray(order.lines) ? order.lines : [];
     const chargeLines: any[] = Array.isArray(order.chargeLines) ? order.chargeLines : [];
-    return <div className="shell simple-page"><div className="page-intro"><span className="eyebrow">ORDER</span><h1>{order.orderNo}</h1><p>{t('orderStatus', { status: t(`orderStatus_${order.status}` as any) || order.status })}</p></div>
+    return <div className="shell simple-page"><div className="page-intro"><h1>{order.orderNo}</h1><p>{t('orderStatus', { status: t(`orderStatus_${order.status}` as any) || order.status })}</p></div>
       <div className="booking-card order-detail-card"><h2>{t('bookingInfo')}</h2>
         {lines.length > 0 && <div className="order-lines">{lines.map((line, i) => <div className="order-line" key={line.id ?? i}><span>{line.itemGroupName || line.itemGroupId} × {line.quantity ?? 1}</span><b>{money(line.amount ?? (line.unitPrice ?? 0) * (line.quantity ?? 1), cur)}</b></div>)}</div>}
         <dl className="spec-list">
@@ -116,5 +116,5 @@ export function OrderDetailPage() {
   const rawProduct = demoOrder && siteRepository.getProduct(tenant, demoOrder.productId);
   const product = rawProduct && localizeProduct(rawProduct);
   if (!demoOrder || !product) return <div className="shell missing-page"><h1>{t('missingOrder')}</h1><Link className="button button-dark" to={href('/orders')}>{t('returnOrders')}</Link></div>;
-  return <div className="shell simple-page"><div className="page-intro"><span className="eyebrow">BOOKING DETAILS</span><h1>{t('savedTitle')}</h1><p>{t('orderNumber')} {demoOrder.id}</p></div><div className="order-confirmation"><CheckCircleOutlined /><h2>{language === 'en' ? 'Saved in this browser' : '记录已保存在当前浏览器'}</h2><p>{t('savedDescription')}</p></div><div className="booking-card order-detail-card"><h2>{t('bookingInfo')}</h2><div className="booking-product"><img src={product.cover} alt={product.name} loading="lazy" decoding="async" /><div><strong>{product.name}</strong><p>{product.subtitle}</p></div></div><dl className="spec-list"><div><dt>{t('rentalDate')}</dt><dd>{demoOrder.startDate} – {demoOrder.endDate}</dd></div><div><dt>{t('rentalQuantity')}</dt><dd>{demoOrder.quantity} {t('itemUnit')}</dd></div><div><dt>{t('pickupDelivery')}</dt><dd>{demoOrder.fulfillment === 'pickup' ? t('pickup') : t('deliveryHome')}</dd></div><div><dt>{t('contactPerson')}</dt><dd>{demoOrder.contactName}</dd></div><div><dt>{t('estimatedRent')}</dt><dd>¥{demoOrder.rentalAmount}</dd></div><div><dt>{t('referenceDeposit')}</dt><dd>¥{demoOrder.depositAmount}</dd></div></dl></div><Link className="button button-dark" to={href('/products')}>{t('continueExplore')}</Link></div>;
+  return <div className="shell simple-page"><div className="page-intro"><h1>{t('savedTitle')}</h1><p>{t('orderNumber')} {demoOrder.id}</p></div><div className="order-confirmation"><CheckCircleOutlined /><h2>{language === 'en' ? 'Saved in this browser' : '记录已保存在当前浏览器'}</h2><p>{t('savedDescription')}</p></div><div className="booking-card order-detail-card"><h2>{t('bookingInfo')}</h2><div className="booking-product"><img src={product.cover} alt={product.name} loading="lazy" decoding="async" /><div><strong>{product.name}</strong><p>{product.subtitle}</p></div></div><dl className="spec-list"><div><dt>{t('rentalDate')}</dt><dd>{demoOrder.startDate} – {demoOrder.endDate}</dd></div><div><dt>{t('rentalQuantity')}</dt><dd>{demoOrder.quantity} {t('itemUnit')}</dd></div><div><dt>{t('pickupDelivery')}</dt><dd>{demoOrder.fulfillment === 'pickup' ? t('pickup') : t('deliveryHome')}</dd></div><div><dt>{t('contactPerson')}</dt><dd>{demoOrder.contactName}</dd></div><div><dt>{t('estimatedRent')}</dt><dd>¥{demoOrder.rentalAmount}</dd></div><div><dt>{t('referenceDeposit')}</dt><dd>¥{demoOrder.depositAmount}</dd></div></dl></div><Link className="button button-dark" to={href('/products')}>{t('continueExplore')}</Link></div>;
 }

@@ -94,7 +94,7 @@ export function ProductsPage() {
   const categoryDescription = category ? category.description : t('discoveryDescription');
   return <div className="shell listing-page">
     <div className="breadcrumb"><Link to={href('/')}>{t('home')}</Link><ArrowRightOutlined /> <span>{category?.name || t('allProducts')}</span></div>
-    <div className="page-intro"><span className="eyebrow">{t('exploreCollection')}</span><h1>{categoryTitle}</h1><p>{categoryDescription}</p></div>
+    <div className="page-intro"><h1>{categoryTitle}</h1><p>{categoryDescription}</p></div>
     {hasConditions && <div className="condition-bar">
       {pickup && <span className="condition-item"><EnvironmentOutlined aria-hidden="true" /> {storeName(pickup) || t('searchPickup')}{returnStore && returnStore !== pickup ? ` → ${storeName(returnStore) || t('searchReturn')}` : ''}</span>}
       {start && end && <span className="condition-item"><ClockCircleOutlined aria-hidden="true" /> {fmtDateTime(start)} – {fmtDateTime(end)}</span>}

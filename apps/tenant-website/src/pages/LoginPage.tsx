@@ -6,7 +6,10 @@ import { useAuth } from '../AuthContext';
 import { authApi, type ClientSession } from '../data/authClient';
 import { clientApi } from '../data/apiClient';
 
-type Mode = 'sms' | 'password' | 'register';
+// 登录与注册是两件事、两个入口：登录页只留「验证码 / 密码」两种登录方式，
+// 注册是登录卡下方「还没有账号？去注册」切到的独立视图（含「已有账号？去登录」返回）。
+type View = 'login' | 'register';
+type LoginMode = 'sms' | 'password';
 
 function phoneValid(phone: string) {
   return /^1\d{10}$/.test(phone.trim());
@@ -19,7 +22,8 @@ export function LoginPage() {
   const [params] = useSearchParams();
   const redirect = params.get('redirect') || '/orders';
 
-  const [mode, setMode] = useState<Mode>('sms');
+  const [view, setView] = useState<View>('login');
+  const [loginMode, setLoginMode] = useState<LoginMode>('sms');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -32,12 +36,12 @@ export function LoginPage() {
   const [pending, setPending] = useState(false);
   const timer = useRef<number | null>(null);
 
-  useEffect(() => {
-    if (isAuthenticated) navigate(href(redirect), { replace: true });
-  }, [isAuthenticated]);
-
+  useEffect(() => { if (isAuthenticated) navigate(href(redirect), { replace: true }); }, [isAuthenticated]);
   useEffect(() => () => { if (timer.current) window.clearInterval(timer.current); }, []);
 
+  const isRegister = view === 'register';
+  const needsCode = isRegister || loginMode === 'sms';
+  function switchView(next: View) { setView(next); setError(''); setCode(''); setChallengeId(null); setDevCode(null); if (timer.current) window.clearInterval(timer.current); setCountdown(0); }
   function startCountdown() {
     setCountdown(60);
     if (timer.current) window.clearInterval(timer.current);
@@ -58,8 +62,7 @@ export function LoginPage() {
     if (!phoneValid(phone)) { setError(t('requiredPhone')); return; }
     setPending(true);
     try {
-      const purpose = mode === 'register' ? 'register' : 'login';
-      const challenge = await authApi.createChallenge({ tenantCode, identifier: phone.trim(), purpose: purpose === 'register' ? 'registration' : 'login', idempotencyKey: `chal-${Date.now()}` });
+      const challenge = await authApi.createChallenge({ tenantCode, identifier: phone.trim(), purpose: isRegister ? 'registration' : 'login', idempotencyKey: `chal-${Date.now()}` });
       setChallengeId(challenge.challengeId);
       setDevCode(challenge.developmentCode ?? null);
       startCountdown();
@@ -76,14 +79,7 @@ export function LoginPage() {
     if (!tenantCode) return;
     setPending(true);
     try {
-      if (mode === 'password') {
-        if (!phoneValid(phone)) throw new Error(t('requiredPhone'));
-        land(await authApi.passwordLogin({ tenantCode, loginIdentifier: phone.trim(), password }));
-      } else if (mode === 'sms') {
-        if (!challengeId) throw new Error(t('loginNeedCode'));
-        const verified = await authApi.verifyChallenge(challengeId, code.trim());
-        land(await authApi.smsLogin({ tenantCode, loginIdentifier: phone.trim(), verificationToken: verified.verificationToken }));
-      } else {
+      if (isRegister) {
         if (!name.trim()) throw new Error(t('requiredName'));
         if (password.length < 8) throw new Error(t('loginPasswordRule'));
         if (!agree) throw new Error(t('loginNeedAgree'));
@@ -101,6 +97,13 @@ export function LoginPage() {
         });
         // 注册成功后用同一手机号密码直接登录。
         land(await authApi.passwordLogin({ tenantCode, loginIdentifier: phone.trim(), password }));
+      } else if (loginMode === 'password') {
+        if (!phoneValid(phone)) throw new Error(t('requiredPhone'));
+        land(await authApi.passwordLogin({ tenantCode, loginIdentifier: phone.trim(), password }));
+      } else {
+        if (!challengeId) throw new Error(t('loginNeedCode'));
+        const verified = await authApi.verifyChallenge(challengeId, code.trim());
+        land(await authApi.smsLogin({ tenantCode, loginIdentifier: phone.trim(), verificationToken: verified.verificationToken }));
       }
     } catch (e: any) {
       setError(e?.message || t('loginFailed'));
@@ -108,31 +111,22 @@ export function LoginPage() {
       setPending(false);
     }
   }
-
   if (!isRemote) {
-    return <div className="shell simple-page"><div className="page-intro"><span className="eyebrow">ACCOUNT</span><h1>{t('loginTitle')}</h1><p>{t('loginDemoNotice')}</p></div><Link className="button button-dark" to={href('/')}>{t('backHome')}</Link></div>;
+    return <div className="shell simple-page"><div className="page-intro"><h1>{t('loginTitle')}</h1><p>{t('loginDemoNotice')}</p></div><Link className="button button-dark" to={href('/')}>{t('backHome')}</Link></div>;
   }
 
-  const tabs: Array<{ id: Mode; label: string }> = [
-    { id: 'sms', label: t('loginSms') },
-    { id: 'password', label: t('loginPassword') },
-    { id: 'register', label: t('loginRegister') },
-  ];
-  const needsCode = mode === 'sms' || mode === 'register';
-
   return <div className="shell simple-page login-page">
-    <div className="page-intro"><span className="eyebrow">ACCOUNT</span><h1>{t('loginTitle')}</h1><p>{t('loginSubtitle')}</p></div>
+    <div className="page-intro"><h1>{isRegister ? t('loginRegister') : t('loginCta')}</h1><p>{isRegister ? t('registerSubtitle') : t('loginSubtitle')}</p></div>
     <div className="login-card">
-      <div className="login-tabs" role="tablist">
-        {tabs.map(tab => <button key={tab.id} role="tab" aria-selected={mode === tab.id} className={mode === tab.id ? 'active' : ''} onClick={() => { setMode(tab.id); setError(''); }}>{tab.label}</button>)}
-      </div>
+      {!isRegister && <div className="login-tabs" role="tablist">
+        <button type="button" role="tab" aria-selected={loginMode === 'sms'} className={loginMode === 'sms' ? 'active' : ''} onClick={() => { setLoginMode('sms'); setError(''); }}>{t('loginSms')}</button>
+        <button type="button" role="tab" aria-selected={loginMode === 'password'} className={loginMode === 'password' ? 'active' : ''} onClick={() => { setLoginMode('password'); setError(''); }}>{t('loginPassword')}</button>
+      </div>}
       <form className="login-form" onSubmit={submit}>
-        {mode === 'register' && <label>{t('contactName')}<input value={name} onChange={e => setName(e.target.value)} placeholder={t('namePlaceholder')} maxLength={120} /></label>}
+        {isRegister && <label>{t('contactName')}<input value={name} onChange={e => setName(e.target.value)} placeholder={t('namePlaceholder')} maxLength={120} /></label>}
         <label>{t('loginPhone')}<input inputMode="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder={t('phonePlaceholder')} maxLength={11} /></label>
-        {mode === 'password'
-          ? <label>{t('loginPasswordField')}<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder={t('loginPasswordPlaceholder')} /></label>
-          : null}
-        {mode === 'register' && <label>{t('loginPasswordField')}<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder={t('loginPasswordRule')} /></label>}
+        {(!isRegister && loginMode === 'password') && <label>{t('loginPasswordField')}<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder={t('loginPasswordPlaceholder')} /></label>}
+        {isRegister && <label>{t('loginPasswordField')}<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder={t('loginPasswordRule')} /></label>}
         {needsCode && <label>{t('loginCode')}
           <span className="login-code-row">
             <input inputMode="numeric" value={code} onChange={e => setCode(e.target.value)} placeholder={t('loginCodePlaceholder')} maxLength={6} />
@@ -140,11 +134,13 @@ export function LoginPage() {
           </span>
         </label>}
         {devCode && <p className="login-dev-code"><CheckCircleOutlined /> {t('loginDevCode', { code: devCode })}</p>}
-        {mode === 'register' && <label className="login-agree"><input type="checkbox" checked={agree} onChange={e => setAgree(e.target.checked)} /><span>{t('loginAgreePrefix')} <Link to={href('/agreement')}>{t('docUserAgreement')}</Link> {t('and')} <Link to={href('/privacy')}>{t('docPrivacyPolicy')}</Link></span></label>}
+        {isRegister && <label className="login-agree"><input type="checkbox" checked={agree} onChange={e => setAgree(e.target.checked)} /><span>{t('loginAgreePrefix')} <Link to={href('/agreement')}>{t('docUserAgreement')}</Link> {t('and')} <Link to={href('/privacy')}>{t('docPrivacyPolicy')}</Link></span></label>}
         {error && <p className="form-error" role="alert">{error}</p>}
-        <button type="submit" className="button button-dark button-block" disabled={pending}>{mode === 'register' ? t('loginRegisterSubmit') : t('loginSubmit')}</button>
+        <button type="submit" className="button button-dark button-block" disabled={pending}>{isRegister ? t('loginRegisterSubmit') : t('loginSubmit')}</button>
       </form>
+      <p className="login-switch">{isRegister ? t('haveAccount') : t('noAccount')} <button type="button" className="login-switch-link" onClick={() => switchView(isRegister ? 'login' : 'register')}>{isRegister ? t('loginCta') : t('loginRegister')}</button></p>
       <p className="login-foot">{t('loginFootNote')}</p>
     </div>
   </div>;
 }
+

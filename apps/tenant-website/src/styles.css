@@ -847,6 +847,11 @@ html[data-theme="dark"] .product-image-link, html[data-theme="dark"] .subcategor
 .condition-item .anticon { color: var(--brand); }
 .condition-note { color: var(--muted); font-size: 13px; }
 .condition-edit { margin-left: auto; color: var(--brand); font-weight: var(--fw-semibold); white-space: nowrap; }
+
+/* 登录/注册切换入口（登录卡底部「还没有账号？去注册」/「已有账号？去登录」） */
+.login-switch { text-align: center; font-size: 14px; color: var(--muted); margin: 6px 0 0; }
+.login-switch-link { border: 0; background: none; font: inherit; color: var(--brand); font-weight: var(--fw-semibold); cursor: pointer; padding: 0 2px; }
+.login-switch-link:hover { text-decoration: underline; }
 @media (max-width: 768px) {
   .condition-bar { gap: 6px 14px; padding: 12px 14px; }
   .condition-edit { margin-left: 0; }

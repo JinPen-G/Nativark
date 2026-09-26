@@ -32,7 +32,7 @@ export function DocumentPage({ kind }: { kind: Kind }) {
   const fallbackHelp = kind === 'help';
 
   return <div className="shell simple-page doc-page">
-    <div className="page-intro"><span className="eyebrow">{kind === 'help' ? 'HELP CENTER' : 'LEGAL'}</span><h1>{title}</h1>{doc?.version ? <p>{t('docVersion', { version: doc.version })}</p> : null}</div>
+    <div className="page-intro"><h1>{title}</h1>{doc?.version ? <p>{t('docVersion', { version: doc.version })}</p> : null}</div>
     {loading ? <p className="mock-note"><LoadingOutlined /> {t('loading')}</p> : null}
     {!loading && doc ? <div className="doc-body">
       {doc.intro ? <p className="doc-intro">{doc.intro}</p> : null}

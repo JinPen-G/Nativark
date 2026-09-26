@@ -47,8 +47,8 @@ const sharedTenant = {
   slogan: '好物相伴，更好生活', primaryColor: PLATFORM_THEME.primaryColor, secondaryColor: PLATFORM_THEME.secondaryColor,
   phone: '400-000-0000', customerService: '在线客服', address: '欢迎联系门店了解取还方式',
   footerText: '好物相伴，更好生活。按需租用，让每一次体验都恰到好处。',
-  heroImage: asset('multi-lifestyle-hero'), heroTitle: '好东西，不必拥有\n也能随时拥有',
-  heroDescription: '数码、户外、家电、工具、母婴……\n万物皆可租，让生活更轻松',
+  heroImage: asset('multi-lifestyle-hero'), heroTitle: '需要的时候\n租一件就好',
+  heroDescription: '数码、户外、家电、工具、母婴，\n按需租用，用完归还。',
   stores: demoStores,
 };
 
