@@ -168,7 +168,7 @@ button, input, textarea, select { font: inherit; }
   width: 24px;
   height: 24px;
   place-items: center;
-  border-radius: var(--rental-ui-radius-sm);
+  border-radius: min(var(--rental-ui-radius-sm), 9px);
   color: var(--rental-color-primary);
   background: var(--rental-color-primary-bg);
   font-size: var(--rental-typography-meta-size);
@@ -398,7 +398,7 @@ button, input, textarea, select { font: inherit; }
 .workspace-context .ant-breadcrumb-overlay-link {
   margin-inline: -4px;
   padding-inline: 4px;
-  border-radius: var(--rental-ui-radius-sm);
+  border-radius: min(var(--rental-ui-radius-sm), 9px);
 }
 .workspace-context .ant-breadcrumb-overlay-link:hover { background: var(--rental-color-fill-tertiary); }
 .breadcrumb-home { cursor: pointer; }
@@ -493,7 +493,7 @@ h5.ant-typography {
   height: 24px;
   place-items: center;
   padding-inline: 8px;
-  border-radius: var(--rental-ui-radius-sm);
+  border-radius: min(var(--rental-ui-radius-sm), 9px);
   color: var(--rental-color-text-secondary);
   background: var(--rental-color-fill-tertiary);
   font-size: var(--rental-typography-meta-size);
@@ -510,7 +510,7 @@ h5.ant-typography {
   gap: 8px;
   margin-bottom: 16px;
   padding: 8px 12px;
-  border-radius: var(--rental-ui-radius-lg);
+  border-radius: min(var(--rental-ui-radius-lg), 16px);
   color: var(--rental-color-text);
   background: var(--rental-color-info-bg);
   font-size: var(--rental-typography-body-size);
@@ -746,6 +746,12 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
   font-weight: var(--rental-typography-panel-title-weight);
   line-height: var(--rental-typography-panel-title-line-height);
 }
+/* 大圆角设置下，短 banner / 小徽标 / 多选标签若继续按 lg、sm 放大会退化成胶囊、出现奇怪大圆角。
+   统一按"默认档观感"封顶：信息条 ≤16px（= 默认档 lg），标签/选项块/小徽标 ≤9px（= 默认档 sm）；
+   低档位仍按比例缩小，banner 变体保持直角。 */
+.ant-alert:not(.ant-alert-banner) { border-radius: min(var(--rental-ui-radius-lg), 16px); }
+.ant-tag,
+.ant-select-selection-item { border-radius: min(var(--rental-ui-radius-sm), 9px); }
 .text-meta {
   font-size: var(--rental-typography-meta-size);
   font-weight: var(--rental-typography-meta-weight);
