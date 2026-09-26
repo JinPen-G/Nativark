@@ -159,6 +159,15 @@ export function requiredPermissions(method: string, path: string) {
     // canActivate 里另有一道 fail-closed 检查，不依赖本权限码单点把关。
     return ["system:calendar-source:manage"];
   }
+  if (path.startsWith("/platform/subscriptions")) {
+    // SUB-01 平台端：SaaS 管理员跨租户维护订阅/功能目录/标准价（§7.1/§8）。
+    // canActivate 里另有一道 fail-closed，不依赖本权限码单点把关。
+    return ["system:tenant:subscription:manage"];
+  }
+  if (path.startsWith("/platform/subscription")) {
+    // SUB-01 租户端：本租户查看/申请（§5.2/§7.2）。GET 只读，写=提交/撤销申请。
+    return method.toUpperCase() === "GET" ? ["rental-os:subscription:view"] : ["rental-os:subscription:manage"];
+  }
   if (path === "/platform/permission-tree") {
     return ["system:role:manage"];
   }
@@ -769,7 +778,8 @@ export class ApiAuthGuard implements CanActivate {
       ].includes(path) &&
       !path.startsWith("/platform/tenants") &&
       !path.startsWith("/platform/tenant-bootstrap") &&
-      !path.startsWith("/platform/official-calendars")
+      !path.startsWith("/platform/official-calendars") &&
+      !path.startsWith("/platform/subscriptions")
     ) {
       throw new ForbiddenException("SaaS 平台管理员只能访问租户管理能力");
     }
@@ -790,6 +800,11 @@ export class ApiAuthGuard implements CanActivate {
     // 不加这一道的话任一租户管理员都能改所有租户共用的官方节假日数据。
     if (path.startsWith("/platform/official-calendars") && !user.isSaasAdmin) {
       throw new ForbiddenException("仅 SaaS 平台管理员可以维护公共官方日历来源");
+    }
+    // SUB-01：租户订阅的跨租户管理是平台能力。租户内 isPlatformAdmin 在 hasAnyPermission 里
+    // 对任何权限都放行，不加这道 fail-closed，任一租户管理员都能管理所有租户的订阅。
+    if (path.startsWith("/platform/subscriptions") && !user.isSaasAdmin) {
+      throw new ForbiddenException("仅 SaaS 平台管理员可以管理租户订阅");
     }
     const staffPermissionOverride = staffApiRequest ? staffRoutePermissions(request.method, path, request.body) : undefined;
     if (!hasAnyPermission(user, staffPermissionOverride ?? permissions)) {

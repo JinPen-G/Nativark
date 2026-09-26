@@ -85,6 +85,9 @@ import { ClientChannelProfileService } from "./modules/client/client-channel-pro
 import { WebsiteChannelProfileController } from "./modules/client/website-channel-profile.controller";
 import { WebsiteChannelProfileService } from "./modules/client/website-channel-profile.service";
 import { WebsiteAssetService } from "./modules/client/website-asset.service";
+import { TenantSubscriptionController } from "./modules/subscription/subscription.controller";
+import { PlatformSubscriptionController } from "./modules/subscription/subscription-platform.controller";
+import { SubscriptionService } from "./modules/subscription/subscription.service";
 
 @Module({
   imports: [
@@ -118,7 +121,9 @@ import { WebsiteAssetService } from "./modules/client/website-asset.service";
     ClientApiController,
     MiniProgramChannelController,
     ClientChannelProfileController,
-    WebsiteChannelProfileController
+    WebsiteChannelProfileController,
+    TenantSubscriptionController,
+    PlatformSubscriptionController
   ],
   providers: [
     AuthService,
@@ -168,6 +173,7 @@ import { WebsiteAssetService } from "./modules/client/website-asset.service";
     ClientChannelProfileService,
     WebsiteChannelProfileService,
     WebsiteAssetService,
+    SubscriptionService,
     IntegrationsService,
     IntegrationsRepository,
     TenantIntegrationService,
