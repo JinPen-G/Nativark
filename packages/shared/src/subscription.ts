@@ -210,3 +210,130 @@ export interface TenantSubscriptionView {
   changeLog: SubscriptionChangeLogEntry[];
   reminder: SubscriptionExpiryReminder;
 }
+
+/* ===========================================================================
+ * SUB-01 写操作请求契约（服务 + API 层）。
+ *
+ * 目标租户一律走**路径参数**，不放进请求体，避免"体内租户"与"路径租户"不一致。
+ * 金额一律可空：缺省 = 待确认，不落 0（§14.2）。到期/时区由服务端按 §4.1 计算，
+ * 租户端不能提交"已开通"或最终权限集合（§11.2）。`expectedRevision` 用于乐观并发：
+ * 另一管理员已更新期限/价格时提示刷新、不覆盖新结果（§11.2 / A06）。
+ * =========================================================================== */
+
+/** 直接开通（§7.1/§8.2）。start 必填并明确时点；serviceYears 与 endAt 二选一。 */
+export interface ProvisionSubscriptionRequest {
+  plan: SubscriptionPlan;
+  source: SubscriptionSource;
+  startAt: string;
+  serviceYears?: number;
+  endAt?: string;
+  timeZone?: string;
+  amount?: number;
+  currency?: string;
+  taxInclusive?: boolean;
+  reason?: string;
+  expectedRevision?: number;
+}
+
+/** 续期（§4.4）。有效期内缺 startAt 接续当前截止；已过期须显式 startAt。 */
+export interface RenewSubscriptionRequest {
+  plan: SubscriptionPlan;
+  source: SubscriptionSource;
+  startAt?: string;
+  serviceYears?: number;
+  endAt?: string;
+  amount?: number;
+  currency?: string;
+  taxInclusive?: boolean;
+  reason?: string;
+  expectedRevision?: number;
+}
+
+/** 升级为 PRO（§4.4）：保持原统一截止，仅记录人工补差金额。 */
+export interface UpgradeSubscriptionProRequest {
+  source: SubscriptionSource;
+  amount?: number;
+  currency?: string;
+  taxInclusive?: boolean;
+  reason?: string;
+  expectedRevision?: number;
+}
+/** 租户提交升级/续费/降级/不续费/咨询申请（§7.2）。仅表达意向，不自动开通。 */
+export interface SubmitSubscriptionRequestRequest {
+  type: SubscriptionRequestType;
+  targetPlan?: SubscriptionPlan;
+  /** 意向模块/品类（多选），不保证规划项交付。 */
+  moduleIntent?: string[];
+  contactName?: string;
+  contactPhone?: string;
+  note?: string;
+  /** 幂等去重键；同租户同类型未关闭申请复用同一键（§7.2）。 */
+  dedupeKey: string;
+}
+
+/** 临时延长当前套餐截止（§4.4/§8.2）。须填原因；不伪造收款、不自动续费。 */
+export interface ExtendSubscriptionRequest {
+  /** 新截止时点（明确），晚于当前截止。 */
+  endAt: string;
+  reason: string;
+  expectedRevision?: number;
+}
+
+/** 登记下一段套餐（续费或下期降级，§4.4）。当前付费期不提前结束，到 effectiveAt 切换。 */
+export interface ScheduleNextSubscriptionRequest {
+  plan: SubscriptionPlan;
+  source: SubscriptionSource;
+  /** 下一段开始（= 当前截止或双方确认时点）。 */
+  effectiveAt: string;
+  serviceYears?: number;
+  endAt?: string;
+  amount?: number;
+  currency?: string;
+  reason?: string;
+}
+
+/** SaaS 管理员办理申请（§7.3）：转已办理/已拒绝，附可公开原因；实际开通另走开通接口。 */
+export interface HandleSubscriptionRequestRequest {
+  status: SubscriptionRequestStatus;
+  publicReason?: string;
+  note?: string;
+}
+/** 单租户额外授权（§3.5 tenant_specific）。目标租户走路径参数。 */
+export interface GrantTenantFeatureRequest {
+  featureCode: string;
+  reason?: string;
+}
+
+/** 撤销单租户额外授权（§3.5.8）。记录原因，保护既有承诺。 */
+export interface RevokeTenantFeatureRequest {
+  featureCode: string;
+  reason: string;
+}
+
+/** 维护功能目录条目并设当前归属（§3.3/§8）。currentOwnership=Standard 即公共下放基础版（§3.5）。 */
+export interface UpsertFeatureCatalogRequest {
+  code: string;
+  name: string;
+  module: string;
+  categories: string[];
+  defaultOwnership: FeatureOwnership;
+  currentOwnership: FeatureOwnership;
+  releaseStatus: FeatureReleaseStatus;
+  valueText?: string;
+  prerequisiteText?: string;
+  externalFeeNote?: string;
+  contentVersion?: string;
+  reason?: string;
+}
+
+/** 维护标准套餐年费（§5.2/§8）。未发布 published=false 且省略 annualFee，不落 0（§14.2）。 */
+export interface SetStandardPriceRequest {
+  plan: SubscriptionPlan;
+  annualFee?: number;
+  currency?: string;
+  taxInclusive?: boolean;
+  published: boolean;
+  priceVersion?: string;
+  note?: string;
+}
+
