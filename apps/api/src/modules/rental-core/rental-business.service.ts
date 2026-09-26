@@ -3248,20 +3248,28 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   /** 草稿保存。已发布版本不可修改（需求 4.6.1），改它只能先恢复为新草稿。 */
   async saveRuleVersion(tenantId: string, context: BusinessContext, input: SaveRentalRuleVersionRequest, operator: string) {
     const state = this.state(tenantId, context);
-    this.validateRule(context, input.config);
+    // 不支持订单资质审核的品类即使收到旧客户端/直接 API 写入的隐藏字段，也只保留中性的关闭状态。
+    // required=true 仍交给 validateRule 拒绝，避免把误配置静默“修好”后让管理员以为已生效。
+    const config = context.category.businessModel.supportsQualificationReview
+      ? input.config
+      : {
+          ...input.config,
+          qualification: { required: input.config.qualification.required, documentTypes: [], minimumValidityDays: 0 }
+        };
+    this.validateRule(context, config);
     if (!input.changeReason?.trim()) throw new BadRequestException("规则变更原因不能为空");
     const existing = input.versionId ? state.ruleVersions.find((row) => row.id === input.versionId) : undefined;
     if (input.versionId && !existing) throw new NotFoundException("规则版本不存在");
     if (existing) assertRuleVersionEditable(existing.status, existing.version);
     const draft: RentalRuleVersion = existing
-      ? { ...existing, config: structuredClone(input.config), changeReason: input.changeReason.trim(), createdBy: operator }
+      ? { ...existing, config: structuredClone(config), changeReason: input.changeReason.trim(), createdBy: operator }
       : {
           id: uid("rule"),
           tenantId,
           categoryCode: context.profile.categoryCode,
           version: nextRuleVersionNumber(state.ruleVersions),
           status: "draft",
-          config: structuredClone(input.config),
+          config: structuredClone(config),
           changeReason: input.changeReason.trim(),
           createdBy: operator,
           createdAt: stamp()

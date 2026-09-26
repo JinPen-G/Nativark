@@ -97,6 +97,21 @@ void (async () => {
     categorySettingsUi.includes("category.businessModel.fulfillmentModes.map"),
     "经营设置的履约方式必须来自当前品类定义"
   );
+  const ruleSectionsUi = readFileSync(
+    join(__dirname, "..", "apps/admin/src/features/settings/governance/ruleSections.tsx"),
+    "utf8"
+  );
+  const qualificationSectionStart = ruleSectionsUi.indexOf('key: "damage-qualification"');
+  const qualificationSectionEnd = ruleSectionsUi.indexOf('key: "tax"', qualificationSectionStart);
+  const qualificationSection = ruleSectionsUi.slice(qualificationSectionStart, qualificationSectionEnd);
+  assert.ok(
+    qualificationSection.includes("category.businessModel.supportsQualificationReview ?"),
+    "不支持资质审核的品类不得显示订单资质配置控件"
+  );
+  assert.ok(
+    qualificationSection.includes("当前品类不支持下单资质审核") && ruleSectionsUi.includes("minimumValidityDays: 0"),
+    "不适用品类应说明证件仍归会员资料管理，并在提交规则时清除无效资质配置"
+  );
   assert.ok(
     genericUiFiles.includes("category?.supportedInventoryModes.map"),
     "商品型号的库存形态必须来自当前品类定义"

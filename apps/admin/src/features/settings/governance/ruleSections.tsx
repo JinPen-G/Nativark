@@ -627,7 +627,7 @@ export const RULE_SECTIONS: RuleSection[] = [
     key: "damage-qualification",
     title: "损坏与资质",
     description: "损坏定责与下单前的资质门槛。",
-    render: ({ t }) => (
+    render: ({ t, category }) => (
       <Row gutter={12}>
         <Col span={24}>
           <Alert
@@ -646,34 +646,46 @@ export const RULE_SECTIONS: RuleSection[] = [
             <InputNumber min={0} style={{ width: "100%" }} />
           </Form.Item>
         </Col>
-        <Col span={8}>
-          <Form.Item
-            name={["qualification", "required"]}
-            label="必须审核资质"
-            tooltip="作用：开启后客户须通过资质审核才能下单。默认关闭。"
-            valuePropName="checked"
-          >
-            <Switch />
-          </Form.Item>
-        </Col>
-        <Col span={8}>
-          <Form.Item
-            name={["qualification", "documentTypes"]}
-            label="证件类型"
-            tooltip="作用：下单前需要提交并审核的证件类型；回车添加多个。留空表示不限定具体证件。"
-          >
-            <Select mode="tags" />
-          </Form.Item>
-        </Col>
-        <Col span={8}>
-          <Form.Item
-            name={["qualification", "minimumValidityDays"]}
-            label="证件到期前至少还需剩余天数"
-            tooltip="作用：证件在租期开始时的最短剩余有效天数，不足则不能下单。0 表示只要未过期即可。"
-          >
-            <InputNumber min={0} style={{ width: "100%" }} />
-          </Form.Item>
-        </Col>
+        {category.businessModel.supportsQualificationReview ? (
+          <>
+            <Col span={8}>
+              <Form.Item
+                name={["qualification", "required"]}
+                label="必须审核资质"
+                tooltip="作用：开启后客户须通过资质审核才能下单。默认关闭。"
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name={["qualification", "documentTypes"]}
+                label="证件类型"
+                tooltip="作用：下单前需要提交并审核的证件类型；回车添加多个。留空表示不限定具体证件。"
+              >
+                <Select mode="tags" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name={["qualification", "minimumValidityDays"]}
+                label="证件到期前至少还需剩余天数"
+                tooltip="作用：证件在租期开始时的最短剩余有效天数，不足则不能下单。0 表示只要未过期即可。"
+              >
+                <InputNumber min={0} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col>
+          </>
+        ) : (
+          <Col span={24}>
+            <Alert
+              type="info"
+              showIcon
+              title={t("当前品类不支持下单资质审核；证件仍可在会员资料中管理，不作为订单门槛。")}
+            />
+          </Col>
+        )}
       </Row>
     ),
   },
@@ -784,10 +796,14 @@ export function formToConfig(
       ? { feeMode: "manual_review" as const, hourlyRatePercent: undefined, dailyAfterHours: undefined }
       : {}),
   };
+  const qualification = category.businessModel.supportsQualificationReview
+    ? config.qualification
+    : { required: false, documentTypes: [], minimumValidityDays: 0 };
   return {
     ...config,
     pricing,
     overdue,
+    qualification,
     deposit,
     preauthorization,
     payment: {

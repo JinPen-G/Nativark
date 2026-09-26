@@ -26,7 +26,7 @@ const cases = [
     categoryCode: "camera", workspaceId: "ws_accept_camera",
     pricingUnits: ["hour", "day_24h", "calendar_day", "week"],
     inventoryModes: ["serialized", "quantity", "bundle"],
-    fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "locker_pickup_return", "delivery"],
+    fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "locker_pickup_return", "delivery", "carrier_shipping"],
     locationTypes: ["store", "warehouse", "locker", "delivery_hub"],
     deliveryDestination: "customer_address",
     supportsUsagePricing: false, supportsPreauthorization: true, supportsQualificationReview: false
@@ -35,7 +35,7 @@ const cases = [
     categoryCode: "camping", workspaceId: "ws_accept_camping",
     pricingUnits: ["calendar_day", "night", "week"],
     inventoryModes: ["serialized", "quantity", "consumable", "bundle"],
-    fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "warehouse_pickup_return", "delivery"],
+    fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "warehouse_pickup_return", "delivery", "carrier_shipping"],
     locationTypes: ["store", "warehouse", "delivery_hub"],
     deliveryDestination: "customer_address",
     supportsUsagePricing: false, supportsPreauthorization: false, supportsQualificationReview: false
@@ -228,6 +228,37 @@ void (async () => {
       definition.businessModel.supportsQualificationReview,
       `${item.categoryCode}: 资质门禁必须由品类定义驱动`
     );
+    const qualificationDraft = await business.saveRuleVersion(tenantId, ctx, {
+      config: {
+        ...structuredClone(rule),
+        qualification: { required: false, documentTypes: ["不适用证件"], minimumValidityDays: 30 }
+      },
+      changeReason: "四品类资质适用性验收"
+    }, "category-acceptance");
+    if (item.supportsQualificationReview) {
+      assert.deepEqual(
+        qualificationDraft.config.qualification,
+        { required: false, documentTypes: ["不适用证件"], minimumValidityDays: 30 },
+        `${item.categoryCode}: 支持资质审核的品类应保留资质规则配置`
+      );
+    } else {
+      assert.deepEqual(
+        qualificationDraft.config.qualification,
+        { required: false, documentTypes: [], minimumValidityDays: 0 },
+        `${item.categoryCode}: 不支持资质审核的品类不得保存无效资质字段`
+      );
+      await assert.rejects(
+        () => business.saveRuleVersion(tenantId, ctx, {
+          config: {
+            ...structuredClone(rule),
+            qualification: { required: true, documentTypes: ["不适用证件"], minimumValidityDays: 30 }
+          },
+          changeReason: "不支持品类不应启用资质门槛"
+        }, "category-acceptance"),
+        /当前品类不支持资质审核/u,
+        `${item.categoryCode}: API 必须拒绝为不支持的品类启用订单资质门槛`
+      );
+    }
     assert.ok(definition.businessModel.defaults.inspectionFields.length > 0, `${item.categoryCode}: 必须有领取/归还检查模板`);
 
     const unsupportedUnit = RENTAL_PRICING_UNIT_CODES.find((unit) => !item.pricingUnits.includes(unit));
