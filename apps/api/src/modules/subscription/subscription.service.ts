@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import {
   FeatureEntitlementSource,
   FeatureOwnership,
@@ -89,6 +89,15 @@ export class SubscriptionService {
     // 兼容历史/迁移数据可能残留的 0 值。
     if (!Number.isFinite(value) || value <= 0) return null;
     return { amount: value, currency, ...(taxInclusive == null ? {} : { taxInclusive }) };
+  }
+
+  /** SUB-04A：到期只停"新业务"（§4.8）——仅 Expired 拦截；未配置/待生效/有效期内一律放行
+   *（存量未登记租户不被误停业，§SUB-01E/§4.6）。守卫在各"新业务"入口调用它。 */
+  async assertTenantWithinTerm(tenantId: string): Promise<void> {
+    const sub = await this.prisma.tenantSubscription.findUnique({ where: { tenantId } });
+    if (this.deriveStatus(sub, new Date()) === SubscriptionServiceStatus.Expired) {
+      throw new ForbiddenException("SaaS 订阅已到期，暂停办理新业务；既有订单的履约、归还、退款、退押与争议不受影响，续费后恢复");
+    }
   }
 
   /** 租户「版本与订阅」页一次拉取的聚合只读视图（§5.2）。 */

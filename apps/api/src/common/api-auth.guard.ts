@@ -12,6 +12,7 @@ import { AuthService } from "../modules/auth/auth.service";
 import { ClientAuthService } from "../modules/client/client-auth.service";
 import { ClientApiRateLimitService } from "../modules/client/client-api-rate-limit.service";
 import { WorkspaceCapabilityService } from "../modules/rental-core/workspace-capability.service";
+import { SubscriptionService } from "../modules/subscription/subscription.service";
 import { enterRequestIdentity } from "./request-identity";
 import { matchableRequestPath } from "./request-path";
 import { isStaffAuthPath, isStaffBusinessRouteAllowed, staffRoutePermissions } from "./staff-api-policy";
@@ -36,6 +37,24 @@ function requiredCapability(path: string): RentalCapability | undefined {
   if (path.startsWith("/rental-os/dispatch") || path.startsWith("/rental-os/vehicles/transfer-tasks")) return "dispatch";
   if (path.startsWith("/rental-os/tbox-devices")) return "iot";
   return undefined;
+}
+
+/**
+ * SUB-04A：SaaS 订阅到期后应停止的「新业务」入口白名单（fail-safe：只拦这些，其余一律放行，
+ * 既有订单履约/归还/退款/退押/证据/争议等善后天然不受影响，§4.8）。
+ * operator 与 staff 代客下单在守卫处路径均已归一为 /rental/v1（见 staff-api-policy），故一处即覆盖两端；
+ * 客户端走独立的 /client/v1。续租/加购、取货后换货（post-pickup-exchange，可能产生差额）按新增收费承诺纳入拦截；
+ * 续租付款 /pay、试算 /preview、退款审核 /refund-review、可用量查询等不在此列，照常放行。
+ * 注：套装等价替换 substitute-bundle-component 仅限取货前 Reserved 单、同组等价互换、服务层不计差额，
+ * 属既有订单调整而非新增收费承诺，故不拦（§4.8；独立审计确认无资金泄漏）。
+ */
+export function isNewBusinessRoute(method: string, path: string): boolean {
+  if (method.toUpperCase() !== "POST") return false;
+  if (path === "/rental/v1/orders" || path === "/rental/v1/quotes") return true;
+  if (path === "/client/v1/orders" || path === "/client/v1/quotes") return true;
+  if (/^\/(?:rental|client)\/v1\/orders\/[^/]+\/extensions$/u.test(path)) return true;
+  if (/^\/rental\/v1\/orders\/[^/]+\/changes\/post-pickup-exchange$/u.test(path)) return true;
+  return false;
 }
 
 
@@ -663,7 +682,8 @@ export class ApiAuthGuard implements CanActivate {
     @Optional() private readonly capabilities?: WorkspaceCapabilityService,
     @Optional() private readonly clientAuth?: ClientAuthService,
     @Optional() private readonly clientRateLimit?: ClientApiRateLimitService,
-    @Optional() private readonly prisma?: PrismaService
+    @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly subscription?: SubscriptionService
   ) {}
 
   async canActivate(context: ExecutionContext) {
@@ -718,6 +738,7 @@ export class ApiAuthGuard implements CanActivate {
         isSaasAdmin: false,
         workspaceId: client.workspaceId
       });
+      await this.gateNewBusiness(request.method, path, client.tenantId);
       return true;
     }
 
@@ -810,6 +831,8 @@ export class ApiAuthGuard implements CanActivate {
     if (!hasAnyPermission(user, staffPermissionOverride ?? permissions)) {
       throw new ForbiddenException("当前账号无权访问该功能");
     }
+    // SUB-04A：到期租户停止新业务（operator 与 staff 代客共用 /rental/v1，一处覆盖两端；client 分支另有一处）。
+    await this.gateNewBusiness(request.method, path, user.tenantId);
     const requestBody = request.body && typeof request.body === "object"
       ? request.body as Record<string, unknown>
       : undefined;
@@ -959,6 +982,13 @@ export class ApiAuthGuard implements CanActivate {
     });
     request.user = user;
     return true;
+  }
+
+  /** SUB-04A：命中新业务白名单则校验订阅在有效期内（仅 Expired 拒）；单测未注入 SubscriptionService 时跳过（生产恒注入）。 */
+  private async gateNewBusiness(method: string, path: string, tenantId: string): Promise<void> {
+    if (!this.subscription) return;
+    if (!isNewBusinessRoute(method, path)) return;
+    await this.subscription.assertTenantWithinTerm(tenantId);
   }
 
   private async resolveLocationScope(
