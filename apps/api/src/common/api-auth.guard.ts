@@ -88,6 +88,8 @@ export const PUBLIC_ROUTES = new Set([
   "/auth/change-password",
   "/auth/switch-workspace",
   "/auth/session-context",
+  // SUB-MP：员工小程序只读订阅/权益上下文——已登录即可读自身租户（金额脱敏），不挂 RBAC 权限，与 session-context 同类（仍需登录态，非匿名）。
+  "/rental/v1/subscription/context",
   "/staff/v1/auth/login",
   "/staff/v1/auth/refresh",
   "/staff/v1/auth/logout",
@@ -949,7 +951,7 @@ export class ApiAuthGuard implements CanActivate {
         ? await this.resolveLocationScope(user, workspaceId, configuredLocationScope)
         : configuredLocationScope;
     const operationalRentalPath = path.startsWith("/rental/v1/") || path.startsWith("/staff/v1/");
-    const scopedRentalPath = operationalRentalPath && path !== "/rental/v1/categories";
+    const scopedRentalPath = operationalRentalPath && path !== "/rental/v1/categories" && path !== "/rental/v1/subscription/context";
     const restrictedRentalRequest = scopedRentalPath && (
       staffApiRequest ||
       locationScope.mode === "selected" ||

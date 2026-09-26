@@ -211,6 +211,17 @@ export interface TenantSubscriptionView {
   reminder: SubscriptionExpiryReminder;
 }
 
+/**
+ * SUB-MP：员工小程序只读「订阅/权益」工作上下文（§4.4）。
+ * 金额**结构性脱敏**——`overview` 用 Omit 去掉 currentAmount/handledAt，员工端拿不到就不可能泄漏
+ * （§SUB-MP-02「员工不看内部商业明细」），而非靠运行时省略可选字段。到期提醒 stage/remainingDays 由服务端算好。
+ */
+export interface StaffSubscriptionContext {
+  overview: Omit<TenantSubscriptionOverview, "currentAmount" | "handledAt">;
+  entitlements: SubscriptionFeatureEntitlement[];
+  reminder: SubscriptionExpiryReminder;
+}
+
 /* ===========================================================================
  * SUB-01 写操作请求契约（服务 + API 层）。
  *

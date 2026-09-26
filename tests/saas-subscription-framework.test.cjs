@@ -77,6 +77,8 @@ test("OpenAPI 契约：订阅端点齐全且带 x-requiredPermissions", () => {
   assert.deepEqual(paths["/api/platform/subscriptions/{tenantId}/provision"].post["x-requiredPermissions"], ["system:tenant:subscription:manage"]);
   assert.ok(paths["/api/platform/subscriptions/{tenantId}/feature-grants/revoke"].post, "缺撤销授权");
   assert.ok(paths["/api/platform/subscriptions/standard-prices/{plan}"].put, "缺设价");
+  assert.ok(paths["/api/rental/v1/subscription/context"].get, "缺员工端订阅上下文读端点");
+  assert.deepEqual(paths["/api/rental/v1/subscription/context"].get["x-requiredPermissions"], [], "员工上下文应无 RBAC 权限(任意已登录员工可读)");
 });
 
 test("SUB-04A isNewBusinessRoute：拦新业务(下单/报价/续租/换货)，放行善后/查询/试算/付款", () => {

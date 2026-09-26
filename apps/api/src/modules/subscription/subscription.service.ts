@@ -17,6 +17,7 @@ import {
   type RevokeTenantFeatureRequest,
   type ScheduleNextSubscriptionRequest,
   type SetStandardPriceRequest,
+  type StaffSubscriptionContext,
   type StandardPlanPricing,
   type SubmitSubscriptionRequestRequest,
   type SubscriptionChangeLogEntry,
@@ -123,6 +124,41 @@ export class SubscriptionService {
       requests: requests.map((r) => this.toRequestRecord(r)),
       changeLog: events.map((e) => this.toChangeLog(e)),
       reminder: this.buildReminder(sub, requests, now)
+    };
+  }
+
+  /** SUB-MP：员工小程序只读订阅/权益上下文（§4.4）。任意已登录员工可读自身租户；金额结构性脱敏（§SUB-MP-02）。 */
+  async getStaffContext(tenantId: string): Promise<StaffSubscriptionContext> {
+    const now = new Date();
+    const [tenant, sub, scheduled, catalog, grants, pendingRequests] = await Promise.all([
+      this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true, name: true, code: true } }),
+      this.prisma.tenantSubscription.findUnique({ where: { tenantId } }),
+      this.prisma.tenantSubscriptionSegment.findFirst({ where: { tenantId, status: "SCHEDULED" }, orderBy: { startAt: "asc" } }),
+      this.prisma.subscriptionFeatureCatalog.findMany({ orderBy: [{ module: "asc" }, { name: "asc" }] }),
+      this.prisma.tenantFeatureGrant.findMany({ where: { tenantId, revokedAt: null } }),
+      this.prisma.subscriptionRequest.findMany({ where: { tenantId, status: "PENDING" } })
+    ]);
+    if (!tenant) throw new NotFoundException("租户不存在");
+    const plan = sub ? toShared<SubscriptionPlan>(sub.plan) : SubscriptionPlan.Standard;
+    const full = this.toOverview(tenant, sub, scheduled, now);
+    // 金额结构性脱敏：显式挑字段，绝不含 currentAmount/handledAt（§SUB-MP-02 员工不看内部商业明细）。
+    const overview: StaffSubscriptionContext["overview"] = {
+      tenantId: full.tenantId,
+      tenantName: full.tenantName,
+      tenantCode: full.tenantCode,
+      plan: full.plan,
+      serviceStatus: full.serviceStatus,
+      ...(full.source ? { source: full.source } : {}),
+      ...(full.startAt ? { startAt: full.startAt } : {}),
+      ...(full.endAt ? { endAt: full.endAt } : {}),
+      ...(full.timeZone ? { timeZone: full.timeZone } : {}),
+      ...(full.next ? { next: full.next } : {}),
+      revision: full.revision
+    };
+    return {
+      overview,
+      entitlements: this.buildEntitlements(catalog, plan, new Set(grants.map((g) => g.featureCode))),
+      reminder: this.buildReminder(sub, pendingRequests, now)
     };
   }
 

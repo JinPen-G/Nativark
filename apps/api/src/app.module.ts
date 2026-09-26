@@ -87,6 +87,7 @@ import { WebsiteChannelProfileService } from "./modules/client/website-channel-p
 import { WebsiteAssetService } from "./modules/client/website-asset.service";
 import { TenantSubscriptionController } from "./modules/subscription/subscription.controller";
 import { PlatformSubscriptionController } from "./modules/subscription/subscription-platform.controller";
+import { StaffSubscriptionController } from "./modules/subscription/subscription-staff.controller";
 import { SubscriptionService } from "./modules/subscription/subscription.service";
 
 @Module({
@@ -123,7 +124,8 @@ import { SubscriptionService } from "./modules/subscription/subscription.service
     ClientChannelProfileController,
     WebsiteChannelProfileController,
     TenantSubscriptionController,
-    PlatformSubscriptionController
+    PlatformSubscriptionController,
+    StaffSubscriptionController
   ],
   providers: [
     AuthService,
