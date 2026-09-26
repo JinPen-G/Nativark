@@ -427,27 +427,35 @@ export class SubscriptionService {
   /** 租户提交升级/续费/降级/不续费/咨询申请（§7.2）：仅表达意向，不自动开通。同租户同键未关闭申请幂等复用。 */
   async submitRequest(tenantId: string, input: SubmitSubscriptionRequestRequest): Promise<SubscriptionRequestRecord> {
     if (!input.dedupeKey?.trim()) throw new BadRequestException("缺少幂等去重键");
-    const existing = await this.prisma.subscriptionRequest.findUnique({
-      where: { tenantId_dedupeKey: { tenantId, dedupeKey: input.dedupeKey } }
-    });
-    if (existing) {
-      if (existing.status === "PENDING") return this.toRequestRecord(existing);
-      throw new ConflictException("该申请键已被使用，请重新发起申请");
-    }
     const now = new Date().toISOString();
-    const created = await this.prisma.subscriptionRequest.create({
-      data: {
-        tenantId,
-        type: toDb(input.type) as DbReqType,
-        ...(input.targetPlan ? { targetPlan: toDb(input.targetPlan) as DbPlan } : {}),
-        status: "PENDING",
-        ...(input.contactName ? { contactName: input.contactName } : {}),
-        ...(input.contactPhone ? { contactPhone: input.contactPhone } : {}),
-        ...(input.moduleIntent ? { moduleIntent: input.moduleIntent } : {}),
-        ...(input.note ? { note: input.note } : {}),
-        timeline: [{ at: now, status: SubscriptionRequestStatus.Pending, note: "租户提交申请" }],
-        dedupeKey: input.dedupeKey
+    const created = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.subscriptionRequest.findUnique({
+        where: { tenantId_dedupeKey: { tenantId, dedupeKey: input.dedupeKey } }
+      });
+      // 未关闭(PENDING)同键：幂等复用，挡住租户双击/重复提交（§7.2）。
+      if (existing && existing.status === "PENDING") return existing;
+      // 命中已关闭(已办理/拒绝/撤销)同键：前端用按类型派生的稳定键，办结后应允许同类型再次发起。
+      // 释放旧键（改写为唯一 released 值，让出这个稳定键），本次作为新的一条 open 申请创建。
+      if (existing) {
+        await tx.subscriptionRequest.update({
+          where: { id: existing.id },
+          data: { dedupeKey: `released:${existing.id}` }
+        });
       }
+      return tx.subscriptionRequest.create({
+        data: {
+          tenantId,
+          type: toDb(input.type) as DbReqType,
+          ...(input.targetPlan ? { targetPlan: toDb(input.targetPlan) as DbPlan } : {}),
+          status: "PENDING",
+          ...(input.contactName ? { contactName: input.contactName } : {}),
+          ...(input.contactPhone ? { contactPhone: input.contactPhone } : {}),
+          ...(input.moduleIntent ? { moduleIntent: input.moduleIntent } : {}),
+          ...(input.note ? { note: input.note } : {}),
+          timeline: [{ at: now, status: SubscriptionRequestStatus.Pending, note: "租户提交申请" }],
+          dedupeKey: input.dedupeKey
+        }
+      });
     });
     return this.toRequestRecord(created);
   }
