@@ -1,15 +1,17 @@
 import { RightOutlined } from "@ant-design/icons";
+import { useState } from "react";
 import { Alert, Button, Card, Descriptions, Empty, Space, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { NavigateFunction } from "react-router-dom";
 import {
   SubscriptionPlan,
   SubscriptionRequestStatus,
+  SubscriptionRequestType,
   type SubscriptionRequestRecord,
-  type SubscriptionRequestType,
   type TenantSubscriptionView
 } from "@rental-os/shared";
 import { useLocale } from "@/app/locale";
+import { SubscriptionRequestModal } from "./SubscriptionRequestModal";
 import { APP_ROUTES } from "@/app/navigation";
 import {
   ENTITLEMENT_SOURCE_LABEL, PLAN_LABEL, RELEASE_STATUS_LABEL, REQUEST_STATUS_LABEL, REQUEST_STATUS_TONE,
@@ -19,6 +21,7 @@ import {
 /** §5.2 版本与订阅信息结构，由 TenantSubscriptionView 驱动。金额 null → 待确认/价格待公布（§14.2）。 */
 export function TenantSubscriptionBody({ data, canManage, navigate }: { data: TenantSubscriptionView; canManage: boolean; navigate: NavigateFunction }) {
   const { t } = useLocale();
+  const [requestType, setRequestType] = useState<SubscriptionRequestType | null>(null);
   const { overview, entitlements, standardPricing, requests, changeLog } = data;
   const openRequest = requests.find((row) => row.status === SubscriptionRequestStatus.Pending);
   const isPro = overview.plan === SubscriptionPlan.Pro;
@@ -54,10 +57,10 @@ export function TenantSubscriptionBody({ data, canManage, navigate }: { data: Te
             <Button type="primary" onClick={() => navigate(requestPath(openRequest.id))}>{t("查看申请进度")}</Button>
           ) : (
             <>
-              {!isPro && <Button type="primary" disabled={!canManage}>{t("升级 PRO")}</Button>}
-              <Button disabled={!canManage}>{t("续费")}</Button>
-              {isPro && <Button disabled={!canManage}>{t("申请下期基础版")}</Button>}
-              <Button disabled={!canManage}>{t("到期不续费")}</Button>
+              {!isPro && <Button type="primary" disabled={!canManage} onClick={() => setRequestType(SubscriptionRequestType.UpgradePro)}>{t("升级 PRO")}</Button>}
+              <Button disabled={!canManage} onClick={() => setRequestType(isPro ? SubscriptionRequestType.RenewPro : SubscriptionRequestType.RenewStandard)}>{t("续费")}</Button>
+              {isPro && <Button disabled={!canManage} onClick={() => setRequestType(SubscriptionRequestType.NextStandard)}>{t("申请下期基础版")}</Button>}
+              <Button disabled={!canManage} onClick={() => setRequestType(SubscriptionRequestType.NoRenew)}>{t("到期不续费")}</Button>
             </>
           )}
         </Space>
@@ -104,6 +107,7 @@ export function TenantSubscriptionBody({ data, canManage, navigate }: { data: Te
             : t("暂无待生效变更；到期不续费登记后当前已付费服务仍持续到到期。历史查询与数据保留按平台说明。")}
         </Typography.Text>
       </Card>
+      <SubscriptionRequestModal open={requestType !== null} type={requestType} onClose={() => setRequestType(null)} />
     </Space>
   );
 }

@@ -1,9 +1,11 @@
-import { Alert, Button, Card, Descriptions, Space, Tag, Typography } from "antd";
+import { Alert, App, Button, Card, Descriptions, Space, Tag, Typography } from "antd";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
 import { useLocale } from "@/app/locale";
 import { useAuthStore } from "@/features/auth/authStore";
 import { APP_ROUTES } from "@/app/navigation";
+import { subscriptionApi } from "@/api/subscription";
 
 /**
  * SUB-02 申请详情页（需求 §7.2/§7.3），路由 /settings/subscription/requests/:id。
@@ -16,6 +18,13 @@ export function SubscriptionRequestDetailPage() {
   const navigate = useNavigate();
   const { id = "" } = useParams();
   const canManage = useAuthStore((state) => state.hasPermission("rental-os:subscription:manage"));
+  const { message } = App.useApp();
+  const queryClient = useQueryClient();
+  const cancelMutation = useMutation({
+    mutationFn: () => subscriptionApi.cancelRequest(id),
+    onSuccess: () => { message.success(t("申请已撤销")); void queryClient.invalidateQueries({ queryKey: ["subscription", "tenant-view"] }); void queryClient.invalidateQueries({ queryKey: ["subscription", "reminder"] }); navigate(APP_ROUTES.subscription.path); },
+    onError: () => message.error(t("撤销失败，请稍后重试或联系平台"))
+  });
   const PLACEHOLDER = "待接入";
 
   return (
@@ -46,7 +55,7 @@ export function SubscriptionRequestDetailPage() {
           <Space wrap>
             <Button onClick={() => navigate(APP_ROUTES.subscription.path)}>{t("返回版本与订阅")}</Button>
             {/* 仅未办理申请可撤销；已收款 / 已开通须联系平台处理，不伪造退款（§7.2）。写动作 :manage 门禁 + 待接契约。 */}
-            <Button danger disabled={!canManage}>{t("撤销申请")}</Button>
+            <Button danger disabled={!canManage} loading={cancelMutation.isPending} onClick={() => cancelMutation.mutate()}>{t("撤销申请")}</Button>
           </Space>
         </Space>
       }
