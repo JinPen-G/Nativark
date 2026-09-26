@@ -719,9 +719,41 @@ export const RENTAL_FULFILLMENT_MODES = [
   "warehouse_pickup_return",
   "locker_pickup_return",
   "delivery",
-  "onsite_delivery"
+  "onsite_delivery",
+  "carrier_shipping"
 ] as const;
 export type RentalFulfillmentMode = (typeof RENTAL_FULFILLMENT_MODES)[number];
+
+/** 承运寄送的里程碑。实际计租从可信签收开始，到客户交承运商并留存揽收凭证结束。 */
+export const RENTAL_CARRIER_SHIPMENT_EVENT_TYPES = [
+  "outbound_dispatched",
+  "customer_signed",
+  "customer_handoff",
+  "warehouse_received"
+] as const;
+export type RentalCarrierShipmentEventType = (typeof RENTAL_CARRIER_SHIPMENT_EVENT_TYPES)[number];
+
+export interface RentalCarrierShipmentEvent {
+  id: string;
+  tenantId: string;
+  workspaceId: string;
+  orderId: string;
+  type: RentalCarrierShipmentEventType;
+  occurredAt: string;
+  carrierName: string;
+  trackingNumber: string;
+  evidenceFileAssetIds: string[];
+  recordedBy: string;
+  createdAt: string;
+}
+
+export interface CreateRentalCarrierShipmentEventRequest {
+  type: "outbound_dispatched" | "customer_handoff";
+  occurredAt: string;
+  carrierName: string;
+  trackingNumber: string;
+  evidenceFileAssetIds: string[];
+}
 /**
  * Rental Core 履约地点类型的唯一取值来源。
  *
@@ -1083,6 +1115,46 @@ export interface CustomerSensitiveAccessAuditEntry {
   permission?: string;
   reason?: string;
   at: string;
+}
+
+/** F17：客户身份核验只追加记录；证件原文不进入该记录，影像通过受限文件服务读取。 */
+export type CustomerIdentityVerificationResult = "verified" | "rejected" | "revoked";
+
+export interface CustomerIdentityVerificationSummary {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  credentialType: string;
+  result: CustomerIdentityVerificationResult;
+  evidenceFileAssetIds: string[];
+  reason: string;
+  reviewerUserId: string;
+  reviewerName: string;
+  reviewedAt: string;
+  verifiedAt?: string;
+}
+
+export interface SaveCustomerIdentityVerificationRequest {
+  credentialType: string;
+  result: CustomerIdentityVerificationResult;
+  evidenceFileAssetIds: string[];
+  reason: string;
+}
+
+/** 实名影像上传端点固定业务归属，只允许客户端提交文件元数据。 */
+export interface CreateCustomerIdentityUploadRequest {
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  idempotencyKey: string;
+}
+
+/** SHIP-01：承运凭证上传的归属与场景由订单专用路由固定，只提交文件元数据。 */
+export interface CreateCarrierEvidenceUploadRequest {
+  fileName: string;
+  mimeType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf";
+  sizeBytes: number;
+  idempotencyKey: string;
 }
 
 /** CUSTOMER-01B：客户状态历史条目（账号级与空间级同一时间线）。 */
@@ -1600,7 +1672,6 @@ export interface SaveSharedCustomerRequest {
   name: string;
   phone: string;
   email?: string;
-  identityVerified?: boolean;
   identityNo?: string;
   /** 基础画像主数据（选填）。birthday 为 ISO 日期串 YYYY-MM-DD。 */
   gender?: string;
@@ -4666,7 +4737,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
       // 套装仍按所选时间单位定价。
       pricingUnits: ["hour", "day_24h", "calendar_day", "week"],
       defaultPricingUnit: "day_24h",
-      fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "locker_pickup_return", "delivery"],
+      fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "locker_pickup_return", "delivery", "carrier_shipping"],
       locationTypes: ["store", "warehouse", "locker", "delivery_hub"],
       deliveryDestination: "customer_address",
       settingModules: [...commonSettingModules],
@@ -4735,13 +4806,13 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "camping_kit_integrity", "camping_cleaning_turnaround"],
     requiredCapabilities: [],
     terminology: { itemLabel: "装备", itemGroupLabel: "装备型号", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", deliveryLabel: "配送到家", identifierLabel: "装备编号", serialLabel: "批次号", navigationLabels: { inventoryGroup: "户外装备", itemGroups: "装备型号", pricingGroups: "装备定价分组", assets: "装备资产与库存", locations: "装备仓库" } },
-    attributeSchema: { brand: "string", model: "string", people: "number", season: "string", material: "string", securityRiskLevel: "string", batchNo: "string" },
+    attributeSchema: { brand: "string", model: "string", people: "number", season: "string", material: "string", dimensions: "string", capacity: "number", securityRiskLevel: "string", batchNo: "string" },
     businessModel: {
       // 露营装备按占用日期或夜晚计价；套装是库存/商品形态，不是脱离租期的
       // “整包一次价”，因此不在基础计价单位里暴露 package。
       pricingUnits: ["calendar_day", "night", "week"],
       defaultPricingUnit: "calendar_day",
-      fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "warehouse_pickup_return", "delivery"],
+      fulfillmentModes: ["store_pickup_return", "partner_pickup_return", "warehouse_pickup_return", "delivery", "carrier_shipping"],
       locationTypes: ["store", "warehouse", "delivery_hub"],
       deliveryDestination: "customer_address",
       settingModules: [...commonSettingModules],
@@ -4752,6 +4823,8 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         { code: "people", label: "适用人数", scope: "item_group", type: "number", unit: "人" },
         { code: "season", label: "季节规格", scope: "item_group", type: "select", options: ["三季", "四季"] },
         { code: "material", label: "材质", scope: "item_group", type: "string" },
+        { code: "dimensions", label: "展开尺寸", scope: "item_group", type: "string" },
+        { code: "capacity", label: "容量", scope: "item_group", type: "number", unit: "L" },
         { code: "batchNo", label: "批次号", scope: "asset", type: "string", unique: true },
         { code: "cleaningStatus", label: "清洁状态", scope: "transaction", type: "select", options: ["clean", "needs_cleaning", "damaged"] }
       ],
@@ -4764,7 +4837,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         fulfillment: { allowDifferentReturnLocation: false },
         payment: { timing: "order" },
         overdue: { graceMinutes: 30, feeMode: "next_period", feeMultiplier: 1 },
-        rules: { evidenceRequired: false, cancellation: { freeBeforeHours: 24, lateFeeType: "percentage", lateFeeValue: 10, weatherExceptionEnabled: true }, qualificationDocumentTypes: [] },
+        rules: { evidenceRequired: false, cancellation: { freeBeforeHours: 24, lateFeeType: "percentage", lateFeeValue: 10, weatherExceptionEnabled: false }, qualificationDocumentTypes: [] },
         initialSetup: { operatorName: "演示露营装备中心", locationName: "中心装备仓", locationType: "warehouse" },
         inspectionFields: [
           { code: "count_ok", label: "数量齐全", type: "boolean", required: true },
@@ -4785,7 +4858,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     defaultCapabilities: ["serialized_inventory", "pickup", "return", "delivery", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "vehicle_relocation"],
     requiredCapabilities: [],
     terminology: { itemLabel: "车辆", itemGroupLabel: "车辆型号", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", deliveryLabel: "送车到点", identifierLabel: "车辆编号", serialLabel: "车架号", usageMetricLabel: "里程", assetCollectionLabel: "车队", navigationLabels: { inventoryGroup: "车辆型号与车队", itemGroups: "厂牌车型管理", pricingGroups: "车辆定价分组", assets: "车辆管理", locations: "门店管理" } },
-    attributeSchema: { manufacturer: "string", brand: "string", model: "string", trim: "string", modelYear: "number", seats: "number", transmission: "string", energyType: "string", securityRiskLevel: "string", licensePlate: "string", vin: "string", color: "string", firstRegistrationDate: "date", mileage: "number" },
+    attributeSchema: { manufacturer: "string", brand: "string", model: "string", trim: "string", modelYear: "number", seats: "number", transmission: "string", energyType: "string", securityRiskLevel: "string", licensePlate: "string", vin: "string", color: "string", firstRegistrationDate: "date", insuranceExpiry: "date", inspectionExpiry: "date", mileage: "number" },
     businessModel: {
       // 车辆可按时间或里程等使用量计价；车组/车型组合不使用“整包一次价”。
       pricingUnits: ["hour", "day_24h", "calendar_day", "week", "month", "usage"],
@@ -4808,6 +4881,8 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         { code: "vin", label: "VIN（车辆识别代号）", scope: "asset", type: "string", required: true, unique: true },
         { code: "color", label: "车身颜色", scope: "asset", type: "select", options: ["黑", "白", "银", "灰", "红", "蓝", "其他"] },
         { code: "firstRegistrationDate", label: "首次登记日期", scope: "asset", type: "date" },
+        { code: "insuranceExpiry", label: "保险有效期至", scope: "asset", type: "date" },
+        { code: "inspectionExpiry", label: "年检有效期至", scope: "asset", type: "date" },
         { code: "mileage", label: "里程", scope: "transaction", type: "number", unit: "km" },
         { code: "energyLevel", label: "油量/电量", scope: "transaction", type: "number", unit: "%" }
       ],
@@ -4852,7 +4927,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
     defaultCapabilities: ["serialized_inventory", "quantity_inventory", "bundle_inventory", "pickup", "return", "delivery", "dispatch", "usage_reading", "qualification", "iot", "inspection_care", "construction_transport"],
     requiredCapabilities: [],
     terminology: { itemLabel: "设备", itemGroupLabel: "设备型号", assetLabel: "设备资产", fulfillmentLabel: "设备仓", pickupLabel: "出库", returnLabel: "入库", deliveryLabel: "送达工地", identifierLabel: "设备编号", serialLabel: "序列号", usageMetricLabel: "工时", navigationLabels: { inventoryGroup: "工程设备", itemGroups: "设备型号", pricingGroups: "设备定价分组", assets: "设备台账与库存", locations: "设备仓库" } },
-    attributeSchema: { manufacturer: "string", brand: "string", model: "string", power: "string", ratedLoad: "number", securityRiskLevel: "string", factoryNo: "string", hourMeter: "number" },
+    attributeSchema: { manufacturer: "string", brand: "string", model: "string", power: "string", ratedLoad: "number", ratedLoadUnit: "string", securityRiskLevel: "string", factoryNo: "string", inspectionExpiry: "date", hourMeter: "number" },
     businessModel: {
       // 工程设备支持小时、班次、长期和工时等使用量计价；附件、操作员和运输
       // 组合应由增值服务/定价分组表达，不使用含义不清的“整包一次价”。
@@ -4869,6 +4944,7 @@ export const RENTAL_CATEGORY_DEFINITIONS: RentalCategoryDefinition[] = [
         { code: "model", label: "型号", scope: "item_group", type: "string", required: true },
         { code: "power", label: "功率", scope: "item_group", type: "string" },
         { code: "ratedLoad", label: "额定载荷", scope: "item_group", type: "number" },
+        { code: "ratedLoadUnit", label: "额定载荷单位", scope: "item_group", type: "select", options: ["kg", "t"] },
         { code: "factoryNo", label: "出厂编号", scope: "asset", type: "string", required: true, unique: true },
         { code: "inspectionExpiry", label: "检验有效期", scope: "asset", type: "date" },
         { code: "hourMeter", label: "累计工时", scope: "transaction", type: "number", unit: "小时" }
@@ -5515,7 +5591,7 @@ export interface RentalOrderFeeReview {
    * `refund_due`：订单取消或确认爽约时仍持有押金、预授权冻结或多收的租金。
    * 这张单**不动账**——批准只表示退款/释放已获认可，实际资金动作仍由资金区按权限单独办理。
    */
-  type: "overdue" | "early_return_refund" | "service_refund" | "refund_due";
+  type: "overdue" | "early_return_refund" | "service_refund" | "refund_due" | "carrier_rental_refund";
   /** 服务退款审核对应的服务发生项；逾时审核时可记录归还批次，其他类型为空。 */
   sourceId?: string;
   /** 规则算出的建议金额，**正数**。退款类落账时取负。 */
@@ -5690,6 +5766,8 @@ export interface RentalOrder {
   /** 配送/上门类（customer_address 品类）订单的收货地址快照（含明文电话，运营视图）；自取、车辆据点类订单无此字段。 */
   deliveryAddressSnapshot?: RentalDeliveryAddressSnapshot;
   startAt: string;
+  /** 承运寄送：经凭证核验的客户实际签收时点；其他履约方式为空。 */
+  actualRentalStartAt?: string;
   /**
    * 原始约定归还时间，**永不因续租而改变**（需求 4.6.9：延期是订单变更，
    * 不得直接修改原订单结束时间）。要判断「现在几点该还」用 `effectiveEndAt`。
@@ -5702,6 +5780,8 @@ export interface RentalOrder {
    * 聚合会给这两条高频路径各加一次查询。整字段可缺省，存量订单读取时回落到 `endAt`。
    */
   effectiveEndAt?: string;
+  /** 承运寄送的当前约定归还时点（以实际签收时刻平移租期，并随续租更新）。 */
+  carrierRentalDueAt?: string;
   quoteId: string;
   quoteNo: string;
   pricingPlanVersion: string;
@@ -6371,6 +6451,8 @@ export interface RentalInspectionTemplate {
 export interface CreateRentalInspectionRequest {
   templateId: string;
   results: Record<string, unknown>;
+  /** 承运寄送领取检查使用经核验的客户签收时间；普通履约方式不得传此字段。 */
+  carrierActualAt?: string;
   /**
    * 归还阶段可指定本次实际归还的分配项。存在时是“逐批归还检查”：只释放本批
    * 已领取的资产/数量，订单仍保持租赁中；最后一批必须使用整单归还，以统一计算
@@ -6403,6 +6485,8 @@ export interface CreateRentalInspectionRequest {
 export interface RentalHandoverRequest {
   /** 无检查模板时的员工现场签字文件。 */
   handoverSignatureFileAssetId?: string;
+  /** 承运寄送领取时使用经核验的客户签收时间；普通履约方式不得传此字段。 */
+  carrierActualAt?: string;
 }
 
 export interface CreateStaffOfflinePaymentRequest {

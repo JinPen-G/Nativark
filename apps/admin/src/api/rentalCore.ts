@@ -132,7 +132,11 @@ import type {
   SaveTenantRentalBusinessSettingsRequest,
   TenantRentalBusinessSettings,
   TenantRentalProfile,
-  SubstituteRentalBundleComponentRequest
+  SubstituteRentalBundleComponentRequest,
+  RentalCarrierShipmentEvent,
+  CreateRentalCarrierShipmentEventRequest,
+  FileUploadSessionSummary,
+  FileDownloadUrlSummary
 } from "@rental-os/shared";
 import { useQuery } from "@tanstack/react-query";
 import { http, request, requestText } from "./http";
@@ -313,6 +317,16 @@ export const rentalCoreApi = {
   orderPage: (params: RentalOrderListQuery = {}) =>
     request<RentalOrderPage>("/rental/v1/orders", { params: { ...params, page: params.page ?? 1 } }),
   order: (id: string) => request<RentalOrder>(`/rental/v1/orders/${id}`),
+  carrierShipmentEvents: (id: string) => request<RentalCarrierShipmentEvent[]>(`/rental/v1/orders/${id}/carrier-shipment/events`),
+  createCarrierShipmentEvent: (id: string, data: CreateRentalCarrierShipmentEventRequest, idempotencyKey: string) => request<RentalCarrierShipmentEvent>(
+    `/rental/v1/orders/${id}/carrier-shipment/events`, { method: "post", data, headers: { "Idempotency-Key": idempotencyKey } }
+  ),
+  createCarrierEvidenceUploadSession: (id: string, data: { fileName: string; mimeType: string; sizeBytes: number; idempotencyKey: string }) =>
+    request<FileUploadSessionSummary>(`/files/rental-orders/${id}/carrier-evidence/upload-sessions`, { method: "post", data }),
+  completeCarrierEvidenceUpload: (id: string, sessionId: string) =>
+    request<{ id: string; mimeType: string }>(`/files/rental-orders/${id}/carrier-evidence/upload-sessions/${sessionId}/complete`, { method: "post", data: {} }),
+  carrierEvidenceDownloadUrl: (id: string, fileAssetId: string) =>
+    request<FileDownloadUrlSummary>(`/files/rental-orders/${id}/carrier-evidence/${fileAssetId}/download-url`),
   revealOrderDeliveryAddress: (id: string) => request<RentalDeliveryAddressSnapshot>(`/rental/v1/orders/${id}/delivery-address/reveal`),
   fundingEvents: (id: string) => request<RentalFundingBalance>(`/rental/v1/orders/${id}/funding-events`),
   initiateFunding: (id: string, data: InitiateRentalFundingRequest) => request<RentalFundingEvent>(`/rental/v1/orders/${id}/funding-events/initiate`, { method: "post", data }),

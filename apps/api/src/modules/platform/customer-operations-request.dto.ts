@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
+import { ArrayMaxSize, ArrayUnique, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min } from "class-validator";
 import {
   CUSTOMER_ACCOUNT_STATUSES,
   CUSTOMER_MEMBERSHIP_STATUSES,
@@ -11,7 +11,8 @@ import {
   type CustomerAccountStatus,
   type CustomerMembershipStatus,
   type SaveCustomerProfileAddressRequest,
-  type ReviewCustomerRiskRecordRequest
+  type ReviewCustomerRiskRecordRequest,
+  type SaveCustomerIdentityVerificationRequest
 } from "@rental-os/shared";
 
 /**
@@ -161,4 +162,25 @@ export class SaveCustomerProfileAddressDto implements SaveCustomerProfileAddress
   @IsOptional()
   @IsBoolean()
   isDefault?: boolean;
+}
+
+/** 实名核验更新只接受证件类型、结论、归属客户的已完成上传及必填原因。 */
+export class SaveCustomerIdentityVerificationDto implements SaveCustomerIdentityVerificationRequest {
+  @IsString()
+  @Matches(/^[a-z][a-z0-9_-]{0,31}$/u)
+  credentialType!: string;
+
+  @IsIn(["verified", "rejected", "revoked"])
+  result!: SaveCustomerIdentityVerificationRequest["result"];
+
+  @IsArray()
+  @ArrayUnique()
+  @ArrayMaxSize(5)
+  @IsString({ each: true })
+  evidenceFileAssetIds!: string[];
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  reason!: string;
 }

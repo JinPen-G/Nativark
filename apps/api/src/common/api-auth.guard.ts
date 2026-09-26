@@ -218,6 +218,14 @@ export function requiredPermissions(method: string, path: string) {
   // 文件列表、上传会话、完成确认和短时下载都可能触达客户/订单附件，
   // 不能因为拥有系统参数权限就获得文件数据操作能力。
   if (path.startsWith("/files")) {
+    if (/^\/files\/rental-orders\/[^/]+\/carrier-evidence(?:\/|$)/u.test(path)) {
+      return method === "GET" ? ["rental-os:order:view"] : ["rental-os:order:operate"];
+    }
+    if (path.startsWith("/files/customer-identity/")) {
+      return method === "GET"
+        ? ["rental-os:customer:reveal-sensitive"]
+        : ["rental-os:member:manage"];
+    }
     return ["system:integration:manage"];
   }
   if (path === "/platform/roles") {
@@ -244,6 +252,9 @@ export function requiredPermissions(method: string, path: string) {
       : ["system:tenant:manage"];
   }
   if (path.startsWith("/platform/customers")) {
+    if (/\/identity-verifications$/u.test(path)) {
+      return method === "GET" ? ["rental-os:customer:reveal-sensitive"] : ["rental-os:member:manage"];
+    }
     // CUSTOMER-01B：敏感资料访问审计本身就是一份访问画像（谁在什么时候查过谁），
     // 因此它需要**解密权限**，不能只凭「会员查看」。必须放在下面的通用分支之前，
     // 否则会被 `/platform/customers` 前缀吃掉，退化成只要会员查看权限即可读取。
@@ -510,6 +521,9 @@ export function requiredPermissions(method: string, path: string) {
     return method === "GET" ? ["rental-os:order:view"] : ["rental-os:order:operate", "rental-os:order:create"];
   }
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/delivery-address\/reveal$/u)) return ["rental-os:customer:reveal-sensitive"];
+  if (path.match(/^\/rental\/v1\/orders\/[^/]+\/carrier-shipment\/events$/u)) {
+    return method === "GET" ? ["rental-os:order:view"] : ["rental-os:order:operate"];
+  }
   // DOC-PRINT-01：订单客户凭证只读订单历史快照；结算里的资金汇总由控制器
   // 再按 finance:view/reconcile 做字段级裁剪，不能因为下载凭证自动获得资金明细。
   if (path.match(/^\/rental\/v1\/orders\/[^/]+\/documents\/(quote|delivery|return|settlement)\/versions(?:\/[^/]+)?$/u)) {

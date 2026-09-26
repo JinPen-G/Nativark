@@ -11,7 +11,8 @@ import {
   ChangeCustomerMembershipStatusDto,
   CreateCustomerRiskRecordDto,
   ReviewCustomerRiskRecordDto,
-  SaveCustomerProfileAddressDto
+  SaveCustomerProfileAddressDto,
+  SaveCustomerIdentityVerificationDto
 } from "./customer-operations-request.dto";
 import {
   RecordCustomerCorporateCreditPaymentDto,
@@ -165,6 +166,20 @@ export class PlatformController {
       return Number.isFinite(parsed) ? parsed : undefined;
     };
     return this.platformService.getCustomerProfileOverview(customerId, { page: parse(page), pageSize: parse(pageSize) }, req.user);
+  }
+
+  @Get("customers/:customerId/identity-verifications")
+  customerIdentityVerifications(@Param("customerId") customerId: string, @Req() req: RequestWithUser) {
+    return this.platformService.listCustomerIdentityVerifications(customerId, req.user);
+  }
+
+  @Post("customers/:customerId/identity-verifications")
+  saveCustomerIdentityVerification(
+    @Param("customerId") customerId: string,
+    @Body() body: SaveCustomerIdentityVerificationDto,
+    @Req() req: RequestWithUser
+  ) {
+    return this.platformService.saveCustomerIdentityVerification(customerId, body, req.user);
   }
 
   /** 客户资料页维护配送地址；电话缺省表示保留原值，服务端始终只返回脱敏电话。 */

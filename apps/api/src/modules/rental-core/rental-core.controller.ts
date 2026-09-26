@@ -27,7 +27,9 @@ import type {
   SaveTenantRentalBusinessSettingsRequest,
   SaveTenantRentalProfileRequest,
   RentalWorkspaceReportFilter,
-  SystemUserRow
+  SystemUserRow,
+  CreateRentalCarrierShipmentEventRequest,
+  RentalCarrierShipmentEventType
 } from "@rental-os/shared";
 import {
   SaveRentalFulfillmentLocationDto,
@@ -70,6 +72,7 @@ import {
   SaveTenantRentalProfileDto,
   SubstituteRentalBundleComponentDto,
   ListRentalOrdersQueryDto,
+  CreateRentalCarrierShipmentEventDto,
 } from "./rental-order-request.dto";
 import { effectiveExtensionRule } from "./rental-rule-defaults";
 import {
@@ -91,11 +94,13 @@ import { RentalFundingService } from "./rental-funding.service";
 import { RentalDocumentService } from "./rental-document.service";
 import { buildRentalWorkbenchTodos, canIncludeWorkbenchOrderTodos, canIncludeWorkbenchWorkOrders } from "./rental-workbench-todos";
 import { validateInspectionCustomerResponse } from "./rental-inspection-customer-response";
+import { inspectionEvidenceIds, inspectionEvidenceRequiredError } from "./rental-inspection-evidence";
 import { serviceCancellationAmounts, type ServiceCancellationSelection } from "./rental-service-cancellation";
 import { MembershipService } from "../platform/membership.service";
 import { CustomerCorporateSettlementService } from "../platform/customer-corporate-settlement.service";
 import { OperationLogService } from "../../common/operation-log.service";
 import { redactDeliveryAddressPhone } from "./rental-delivery-address-privacy";
+import { canRecordCarrierShipmentEventDirectly, carrierBillableWindow, carrierShipmentEventError, rentalOrderDueAt } from "./rental-carrier-shipment";
 
 /** 读取标准 Idempotency-Key 请求头。大小写不敏感，超长键直接拒绝。 */
 /**
@@ -120,6 +125,10 @@ function idempotencyKeyOf(req: { headers?: Record<string, unknown> }): string | 
 interface AuthenticatedRequest { user: SystemUserRow; headers?: Record<string, unknown>; }
 interface UploadedImageFile { originalname: string; mimetype: string; size: number; buffer: Buffer; }
 interface BinaryResponse { setHeader(name: string, value: string): void; send(body: Buffer): void; redirect(status: number, url: string): void; }
+
+function carrierEvidenceIds(value: Prisma.JsonValue | null | undefined): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
 
 /**
  * CAM-01A：控制器内的权限判定，口径与 Guard 的 hasAnyPermission 一致。
@@ -267,6 +276,128 @@ export class RentalCoreController {
       }
     }
     return ids;
+  }
+
+  private async assertCarrierProofFiles(
+    req: AuthenticatedRequest,
+    orderId: string,
+    fileIds: string[],
+    allowedScenes: string[]
+  ) {
+    const ids = [...new Set(fileIds.map((value) => value.trim()).filter(Boolean))];
+    if (!ids.length) throw new BadRequestException("承运寄送必须上传可核验的签收、揽收或实物验收凭证");
+    const workspaceId = getRequestIdentity()?.workspaceId;
+    if (!workspaceId) throw new ForbiddenException("缺少已验证的经营空间");
+    const assets = await this.prisma.fileAsset.findMany({
+      where: {
+        id: { in: ids }, tenantId: req.user.tenantId, businessModule: "rental-core",
+        businessType: "rental_order", businessId: orderId, status: "active", uploadScene: { in: allowedScenes }
+      },
+      select: { id: true, mimeType: true, uploadedBy: true, metadata: true }
+    });
+    if (assets.length !== ids.length) throw new BadRequestException("承运凭证必须先完成上传，且文件必须属于当前租户、空间和订单");
+    for (const asset of assets) {
+      const metadata = asset.metadata && typeof asset.metadata === "object" && !Array.isArray(asset.metadata)
+        ? asset.metadata as Record<string, unknown> : {};
+      if (metadata.workspaceId !== workspaceId) throw new BadRequestException("承运凭证不属于当前经营空间");
+      if (!asset.mimeType.startsWith("image/") && asset.mimeType !== "application/pdf") {
+        throw new BadRequestException("承运凭证只支持图片或 PDF 文件");
+      }
+      if (getRequestIdentity()?.staffApi && asset.uploadedBy !== req.user.id) {
+        throw new BadRequestException("员工端只能提交当前员工上传的承运凭证");
+      }
+    }
+    return ids;
+  }
+
+  private async carrierShipmentEvents(tenantId: string, orderId: string, tx?: Prisma.TransactionClient) {
+    const workspaceId = this.service.resolveWorkspaceId(tenantId);
+    const rows = await (tx ?? this.prisma).rentalCarrierShipmentEvent.findMany({
+      where: { tenantId, workspaceId, orderId }, orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }]
+    });
+    return rows.map((row) => ({ ...row, evidenceFileAssetIds: carrierEvidenceIds(row.evidenceFileAssetIds) }));
+  }
+
+  private async recordCarrierSignedAtPickup(
+    req: AuthenticatedRequest,
+    order: RentalOrder,
+    actualAt: string | undefined,
+    proofIds: string[],
+    tx: Prisma.TransactionClient
+  ) {
+    if (order.fulfillmentMode !== "carrier_shipping") return undefined;
+    if (!actualAt) throw new BadRequestException("承运寄送领取必须登记客户实际签收时间");
+    const signatureProof = await this.assertCarrierProofFiles(req, order.id, proofIds, ["handover-signature", "pickup-evidence", "carrier-shipment-evidence"]);
+    const events = await this.carrierShipmentEvents(req.user.tenantId, order.id, tx);
+    const error = carrierShipmentEventError({ mode: order.fulfillmentMode, orderStatus: order.status, eventType: "customer_signed", occurredAt: actualAt, events: events.map((row) => ({ type: row.type as RentalCarrierShipmentEventType, occurredAt: row.occurredAt })) });
+    if (error) throw new ConflictException(`${error}；该订单暂不自动起租，请人工核实承运轨迹和凭证`);
+    const dispatched = events.find((row) => row.type === "outbound_dispatched");
+    if (!dispatched || dispatched.evidenceFileAssetIds.length === 0) throw new ConflictException("缺少已核验的发出运单凭证，暂不自动起租");
+    return tx.rentalCarrierShipmentEvent.create({
+      data: {
+        tenantId: req.user.tenantId, workspaceId: this.service.resolveWorkspaceId(req.user.tenantId), orderId: order.id,
+        type: "customer_signed", occurredAt: new Date(actualAt), carrierName: dispatched.carrierName,
+        trackingNumber: dispatched.trackingNumber, evidenceFileAssetIds: signatureProof, recordedBy: req.user.displayName,
+        idempotencyKey: createHash("sha256").update(`${order.id}:carrier-signed`).digest("hex")
+      }
+    });
+  }
+
+  @Get("orders/:id/carrier-shipment/events")
+  async listCarrierShipmentEvents(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    const order = await this.service.getOrder(req.user.tenantId, id);
+    if (order.fulfillmentMode !== "carrier_shipping") throw new ConflictException("该订单不是承运寄送订单");
+    return this.carrierShipmentEvents(req.user.tenantId, id);
+  }
+
+  @Post("orders/:id/carrier-shipment/events")
+  async createCarrierShipmentEvent(
+    @Req() req: AuthenticatedRequest,
+    @Param("id") id: string,
+    @Body() body: CreateRentalCarrierShipmentEventDto
+  ) {
+    const tenantId = req.user.tenantId;
+    const key = idempotencyKeyOf(req);
+    if (!key) throw new BadRequestException("登记承运里程碑必须提供 Idempotency-Key");
+    const current = await this.service.getOrder(tenantId, id);
+    if (current.fulfillmentMode !== "carrier_shipping") throw new ConflictException("该订单不是承运寄送订单");
+    if (!canRecordCarrierShipmentEventDirectly(body.type)) {
+      throw new ConflictException("客户签收必须通过领取检查核验，仓库验收必须通过归还检查完成；不能单独预登记这两个里程碑");
+    }
+    const carrierName = body.carrierName.trim();
+    const trackingNumber = body.trackingNumber.trim();
+    if (!carrierName || !trackingNumber) throw new BadRequestException("承运商和运单号不能为空");
+    const evidenceFileAssetIds = await this.assertCarrierProofFiles(req, id, body.evidenceFileAssetIds, ["carrier-shipment-evidence"]);
+    const normalized = { ...body, carrierName, trackingNumber, evidenceFileAssetIds };
+    const eventIdempotencyKey = createHash("sha256").update(`${id}:${key}`).digest("hex");
+    const result = await this.idempotent.execute({
+      tenantId, action: "order.carrier-shipment-event", key,
+      // 幂等记录键列只有 191 字符；请求头虽有长度校验，但拼入订单 ID 后会越界。
+      // 事件唯一键与幂等表使用同一个固定长度摘要，仍保留 orderId 在摘要输入中。
+      fallbackKey: `carrier-shipment:${eventIdempotencyKey}`,
+      request: { orderId: id, ...normalized }, orderId: id,
+      run: async (tx) => {
+        const locked = await this.service.lockOrderForUpdate(tenantId, id, tx);
+        if (locked.fulfillmentMode !== "carrier_shipping") throw new ConflictException("该订单不是承运寄送订单");
+        const events = await this.carrierShipmentEvents(tenantId, id, tx);
+        const error = carrierShipmentEventError({
+          mode: locked.fulfillmentMode, orderStatus: locked.status, eventType: normalized.type,
+          occurredAt: normalized.occurredAt, events: events.map((row) => ({ type: row.type as RentalCarrierShipmentEventType, occurredAt: row.occurredAt }))
+        });
+        if (error) throw new ConflictException(`${error}；不自动改变计租或库存，请人工核对`);
+        return tx.rentalCarrierShipmentEvent.create({
+          data: {
+            tenantId, workspaceId: this.service.resolveWorkspaceId(tenantId), orderId: id,
+            type: normalized.type, occurredAt: new Date(normalized.occurredAt), carrierName, trackingNumber,
+            evidenceFileAssetIds, recordedBy: req.user.displayName, idempotencyKey: eventIdempotencyKey
+          }
+        });
+      },
+      replay: async () => (await this.prisma.rentalCarrierShipmentEvent.findFirst({
+        where: { tenantId, workspaceId: this.service.resolveWorkspaceId(tenantId), orderId: id, idempotencyKey: eventIdempotencyKey }
+      })) ?? undefined
+    });
+    return result;
   }
   // 必须先 await 业务结果再写快照：配置写方法已转为异步，若直接把 Promise 传进来
   // 就会与快照写入并发，快照可能捕获到变更前的状态。
@@ -626,6 +757,7 @@ export class RentalCoreController {
     const order = tx
       ? await this.service.lockOrderForUpdate(tenantId, orderId, tx)
       : await this.service.getOrder(tenantId, orderId);
+    await this.service.assertCarrierOrderResourcesMutable(tenantId, order, tx);
     if (![RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(order.status)) {
       throw new ConflictException("只有取货前的待确认或待领取订单可以部分取消");
     }
@@ -747,6 +879,7 @@ export class RentalCoreController {
     const order = tx
       ? await this.service.lockOrderForUpdate(tenantId, orderId, tx)
       : await this.service.getOrder(tenantId, orderId);
+    await this.service.assertCarrierOrderResourcesMutable(tenantId, order, tx);
     if (![RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(order.status)) {
       throw new ConflictException("只有取货前的待确认或待领取订单可以取消增值服务");
     }
@@ -1557,6 +1690,9 @@ export class RentalCoreController {
   ) {
     const tenantId = req.user.tenantId;
     const current = await this.service.getOrder(tenantId, id);
+    if (current.fulfillmentMode === "carrier_shipping") {
+      throw new ConflictException("承运寄送订单不可部分归还；客户交寄后库存仍保持在途占用，须待仓库整单验收");
+    }
     const idempotencyKey = idempotencyKeyOf(req);
     // 部分归还是**天然可重复**的动作：数量库存租 3 件，先还 1 件、再还 1 件是两次
     // 真实归还，而两次请求体完全相同。此前兜底键是「订单 + 分配项内容哈希」，
@@ -1688,6 +1824,15 @@ export class RentalCoreController {
     const order = tx
       ? await this.service.lockOrderForUpdate(tenantId, orderId, tx)
       : await this.service.getOrder(tenantId, orderId);
+    if (order.fulfillmentMode === "carrier_shipping") {
+      const events = await this.carrierShipmentEvents(tenantId, orderId, tx);
+      if (order.status !== RentalCoreOrderStatus.Renting || !order.actualRentalStartAt || !events.some((row) => row.type === "customer_signed")) {
+        throw new ConflictException("承运寄送订单须在客户签收起租后才能续租");
+      }
+      if (events.some((row) => row.type === "customer_handoff")) {
+        throw new ConflictException("客户已交承运商，计租已停止，不能再续租；费用将于仓库验收时统一核算");
+      }
+    }
     await this.service.assertOrderExtensionAvailable(tenantId, order, body.newEndAt, tx);
     const previousExtensions = await this.service.listOrderExtensions(tenantId, orderId, tx);
     const rule = effectiveExtensionRule(order.ruleSnapshot);
@@ -1704,7 +1849,11 @@ export class RentalCoreController {
         settlementMode,
         fulfillmentMode: order.fulfillmentMode,
         locationIds: [order.fulfillmentLocationId, order.returnLocationId].filter((value): value is string => Boolean(value)),
-        customerType: order.customerType
+        customerType: order.customerType,
+        ...(order.fulfillmentMode === "carrier_shipping" ? {
+          mode: "carrier_repricing" as const,
+          actualStartAt: order.actualRentalStartAt
+        } : {})
       })
     };
   }
@@ -2037,12 +2186,60 @@ export class RentalCoreController {
   ) {
     const locked = await this.service.lockOrderForUpdate(tenantId, orderId, tx);
     const quote = this.business.getQuote(tenantId, context, locked.quoteId);
-    const dueAt = locked.effectiveEndAt ?? locked.endAt;
-    const extensionPricing = (await this.service.listOrderExtensions(tenantId, orderId, tx))
+    const dueAt = locked.fulfillmentMode === "carrier_shipping" ? rentalOrderDueAt(locked) : (locked.effectiveEndAt ?? locked.endAt);
+    const extensions = (await this.service.listOrderExtensions(tenantId, orderId, tx))
       .filter((row) => row.status === "effective").at(-1)?.pricingSnapshot;
     const quantityScope = partialReturnItems
       ? returnedQuantitiesOf(locked, partialReturnItems)
       : outstandingQuantitiesOf(locked);
+    if (locked.fulfillmentMode === "carrier_shipping") {
+      if (partialReturnItems) throw new ConflictException("承运寄送必须在仓库实物验收时整单结算，不能部分释放在途库存");
+      const events = await this.carrierShipmentEvents(tenantId, orderId, tx);
+      const signed = events.find((row) => row.type === "customer_signed");
+      const handoff = events.find((row) => row.type === "customer_handoff");
+      if (!signed || !handoff || !signed.evidenceFileAssetIds.length || !handoff.evidenceFileAssetIds.length) {
+        throw new ConflictException("缺少已核验的客户签收或交寄凭证；保持库存占用并转人工核实，不能自动归还结算");
+      }
+      const signedAt = signed.occurredAt.toISOString();
+      const handoffAt = handoff.occurredAt.toISOString();
+      if (!locked.actualRentalStartAt || new Date(locked.actualRentalStartAt).getTime() !== signed.occurredAt.getTime()) {
+        throw new ConflictException("订单计租起点与客户签收证据不一致；保持库存占用并转人工核实");
+      }
+      const window = carrierBillableWindow({ signedAt, handoffAt });
+      if (!window) throw new ConflictException("客户签收和交寄时间无有效计租区间；保持库存占用并转人工核实");
+      const billableEndAt = new Date(Math.min(Date.parse(window.endAt), Date.parse(dueAt))).toISOString();
+      if (Date.parse(billableEndAt) <= Date.parse(window.startAt)) throw new ConflictException("承运计租时段与原租期不匹配；保持库存占用并转人工核实");
+      const priorExtensions = await this.service.listOrderExtensions(tenantId, orderId, tx);
+      const repriced = await this.business.quoteOrderExtension(tenantId, context, {
+        order: locked,
+        previousExtensions: priorExtensions,
+        lines: locked.lines,
+        newEndAt: billableEndAt,
+        appliedAt: returnedAt,
+        settlementMode: "immediate",
+        fulfillmentMode: locked.fulfillmentMode,
+        locationIds: [locked.fulfillmentLocationId, locked.returnLocationId].filter((value): value is string => Boolean(value)),
+        customerType: locked.customerType,
+        mode: "carrier_return_repricing",
+        actualStartAt: window.startAt
+      });
+      return {
+        overdue: {
+          amount: Date.parse(handoffAt) > Date.parse(dueAt)
+            ? this.business.calculateOverdueCharge(tenantId, context, quote, handoffAt, dueAt, quantityScope, { ruleSnapshot: locked.ruleSnapshot })
+            : 0,
+          returnedAt: handoffAt,
+          batchId
+        },
+        carrierRentalAdjustment: {
+          amount: repriced.pricingSnapshot?.differenceAmount ?? 0,
+          signedAt,
+          handoffAt,
+          priceVersion: repriced.priceVersion
+        },
+        earlyReturn: undefined
+      };
+    }
     return {
       overdue: {
         // 归还计费的规则与费率取订单冻结快照（§4.2），而非报价缓存；缺字段时计算侧回落报价并告警一次。
@@ -2051,7 +2248,7 @@ export class RentalCoreController {
         batchId
       },
       earlyReturn: includeEarlyReturn
-        ? this.business.calculateEarlyReturnRefund(tenantId, context, quote, dueAt, returnedAt, extensionRentalOf(locked), extensionPricing, { ruleSnapshot: locked.ruleSnapshot })
+        ? this.business.calculateEarlyReturnRefund(tenantId, context, quote, dueAt, returnedAt, extensionRentalOf(locked), extensions, { ruleSnapshot: locked.ruleSnapshot })
         : undefined
     };
   }
@@ -2079,10 +2276,45 @@ export class RentalCoreController {
       req, current, stage === "return" ? "return" : "pickup", evidenceBatchId,
       body.handoverSignatureFileAssetId, body.attachments ?? [], template, body.results
     );
+    const evidenceIds = inspectionEvidenceIds({ attachments, results: body.results, handoverSignatureFileAssetId: body.handoverSignatureFileAssetId });
+    const orderRule = current.ruleSnapshot as { fulfillment?: { evidenceRequired?: boolean } } | undefined;
+    const currentRule = this.business.effectiveRuleAt(tenantId, context)?.config;
+    const evidenceRequired = orderRule?.fulfillment?.evidenceRequired ?? currentRule?.fulfillment?.evidenceRequired ?? false;
+    const evidenceError = inspectionEvidenceRequiredError(evidenceRequired, evidenceIds);
+    if (evidenceError) throw new BadRequestException(evidenceError);
+    if (evidenceIds.length) {
+      const workspaceId = getRequestIdentity()?.workspaceId;
+      if (!workspaceId) throw new ForbiddenException("缺少已验证的经营空间");
+      const expectedScene = stage === "return" ? "return-evidence" : "pickup-evidence";
+      const allowedScenes = current.fulfillmentMode === "carrier_shipping"
+        ? [expectedScene, "handover-signature", "carrier-shipment-evidence"]
+        : [expectedScene, "handover-signature"];
+      const evidenceAssets = await this.prisma.fileAsset.findMany({
+        where: {
+          id: { in: evidenceIds }, tenantId, businessModule: "rental-core", businessType: "rental_order",
+          businessId: id, status: "active", uploadScene: { in: allowedScenes }
+        },
+        select: { id: true, mimeType: true, uploadedBy: true, metadata: true, uploadScene: true }
+      });
+      if (evidenceAssets.length !== evidenceIds.length || evidenceAssets.some((file) => current.fulfillmentMode === "carrier_shipping"
+        ? !file.mimeType.startsWith("image/") && file.mimeType !== "application/pdf"
+        : !file.mimeType.startsWith("image/") && !file.mimeType.startsWith("video/"))) {
+        throw new BadRequestException(current.fulfillmentMode === "carrier_shipping"
+          ? "承运检查凭证必须是已完成上传、属于当前订单的图片或 PDF"
+          : "检查影像必须是已完成上传、属于当前订单和检查阶段的图片或视频");
+      }
+      if (getRequestIdentity()?.staffApi && evidenceAssets.some((file) => file.uploadedBy !== req.user.id)) {
+        throw new BadRequestException("员工端只能提交当前员工上传的检查影像");
+      }
+    }
+    if (current.fulfillmentMode === "carrier_shipping" && stage === "return") {
+      await this.assertCarrierProofFiles(req, id, evidenceIds, ["return-evidence", "carrier-shipment-evidence"]);
+      if (partialReturn) throw new ConflictException("承运寄送须仓库整单验收后统一结算，不能部分归还");
+    }
     const submissionBody = { ...body, attachments, ...(getRequestIdentity()?.staffApi ? { operator: req.user.displayName } : {}) };
     // 逾期费与提前归还退款都在事务内锁单之后重算（见 returnCharges）。这里只留下
     // 与订单当前事实无关的判定。
-    if (stage === "pickup") await this.business.assertPickupOpenAt(tenantId, context, current.fulfillmentLocationId, returnedAt, current.fulfillmentMode);
+    if (stage === "pickup" && current.fulfillmentMode !== "carrier_shipping") await this.business.assertPickupOpenAt(tenantId, context, current.fulfillmentLocationId, returnedAt, current.fulfillmentMode);
     // 归还只进入待结算；资金账处理完后再独立关闭订单。
     const targetStatus = stage === "pickup" || partialReturn ? RentalCoreOrderStatus.Renting : RentalCoreOrderStatus.Settling;
     // 逾期通知要按真实逾期费判断是否发。它在 run 里才算出来，而只有 run 真的执行过
@@ -2108,11 +2340,16 @@ export class RentalCoreController {
         // 检查照片/证据引用属于请求事实的一部分；必须进入幂等指纹，
         // 否则同一批次先空提交、后补证据会被错误当作同一次请求回放。
         attachments: submissionBody.attachments ?? [],
-        handoverSignatureFileAssetId: submissionBody.handoverSignatureFileAssetId
+        handoverSignatureFileAssetId: submissionBody.handoverSignatureFileAssetId,
+        carrierActualAt: submissionBody.carrierActualAt
       },
       orderId: id,
       run: async (tx) => {
         if (stage === "pickup") {
+          if (current.fulfillmentMode === "carrier_shipping") {
+            const locked = await this.service.lockOrderForUpdate(tenantId, id, tx);
+            await this.recordCarrierSignedAtPickup(req, locked, body.carrierActualAt, evidenceIds, tx);
+          }
           const usesCredit = await this.usesCorporateCredit(tenantId, id, tx);
           if (usesCredit) await this.corporateSettlement?.assertReadyForPickup(tenantId, id, tx);
           await this.funding.assertReadyForPickup(
@@ -2136,7 +2373,28 @@ export class RentalCoreController {
             )
           : undefined;
         overdueAmount = charges?.overdue.amount ?? 0;
+        if (stage === "return" && current.fulfillmentMode === "carrier_shipping") {
+          const events = await this.carrierShipmentEvents(tenantId, id, tx);
+          const error = carrierShipmentEventError({
+            mode: current.fulfillmentMode, orderStatus: current.status, eventType: "warehouse_received", occurredAt: returnedAt,
+            events: events.map((row) => ({ type: row.type as RentalCarrierShipmentEventType, occurredAt: row.occurredAt }))
+          });
+          if (error) throw new ConflictException(`${error}；保持库存占用并转人工核实`);
+        }
         const created = await this.service.createInspection(tenantId, id, submissionBody, req.user.displayName, charges ?? {}, tx);
+        if (stage === "return" && current.fulfillmentMode === "carrier_shipping") {
+          const handoff = (await this.carrierShipmentEvents(tenantId, id, tx)).find((row) => row.type === "customer_handoff");
+          if (!handoff) throw new ConflictException("缺少客户交寄运单，不能登记仓库验收");
+          await tx.rentalCarrierShipmentEvent.create({
+            data: {
+              tenantId, workspaceId: this.service.resolveWorkspaceId(tenantId), orderId: id,
+              type: "warehouse_received", occurredAt: new Date(returnedAt), carrierName: handoff.carrierName,
+              trackingNumber: handoff.trackingNumber, evidenceFileAssetIds: evidenceIds,
+              recordedBy: req.user.displayName,
+              idempotencyKey: createHash("sha256").update(`${id}:warehouse-received:${inspectionKey ?? evidenceBatchId}`).digest("hex")
+            }
+          });
+        }
         if (stage === "return" && !partialReturn) await this.serviceCapacities.settleReturnForOrder(tenantId, created.order, returnedAt, tx);
         return created;
       },
@@ -2265,7 +2523,14 @@ export class RentalCoreController {
         // assertReadyToClose 之间没有共同的锁，一笔并发的费用裁定或收退款可以插在
         // 中间，结算就按旧事实判定——欠款订单被关掉、刚生成的待审事项被跳过。
         // 锁与费用裁定（reviewOrderFeeReview）、资金事件（lockedOrderScope）同一行。
-        await this.service.lockOrderForUpdate(tenantId, id, tx);
+        const locked = await this.service.lockOrderForUpdate(tenantId, id, tx);
+        if (locked.fulfillmentMode === "carrier_shipping") {
+          const events = await this.carrierShipmentEvents(tenantId, id, tx);
+          const warehouseReceipt = events.find((row) => row.type === "warehouse_received");
+          if (!warehouseReceipt || !warehouseReceipt.evidenceFileAssetIds.length) {
+            throw new ConflictException("承运寄送订单尚未完成仓库实物验收；在途库存不得释放或关闭订单");
+          }
+        }
         const inspectionRows = await tx.rentalInspectionRecord.findMany({
           where: { tenantId, workspaceId: this.service.resolveWorkspaceId(tenantId), orderId: id },
           select: { exceptions: true }

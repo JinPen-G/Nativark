@@ -11,6 +11,8 @@ import type {
   ReviewCustomerRiskRecordRequest,
   CustomerProfileOrderQuery,
   CustomerProfileOverview,
+  CustomerIdentityVerificationSummary,
+  SaveCustomerIdentityVerificationRequest,
   SaveCustomerProfileAddressRequest,
   CustomerStatusAction,
   CustomerTransactability,
@@ -587,6 +589,147 @@ export class CustomerOperationsService {
       };
     }
     return { allowed: true, accountStatus: account?.status, membershipStatus: membership.status };
+  }
+
+  private assertIdentityVerificationPermission(user: SystemUserRow | undefined, manage: boolean) {
+    if (!user || user.isSaasAdmin) throw new ForbiddenException("无权访问客户实名核验资料");
+    const permissions = new Set(user.permissions ?? []);
+    const has = (permission: string) => user.isPlatformAdmin || permissions.has("*") || permissions.has(permission);
+    if (!has(CUSTOMER_REVEAL_PERMISSION) || !has(manage ? "rental-os:member:manage" : "rental-os:member:view")) {
+      throw new ForbiddenException("需要会员查看/管理与客户敏感资料解密权限");
+    }
+  }
+
+  /** 实名记录和证据影像仍受会员数据范围限制，知道客户 ID 不构成跨空间访问授权。 */
+  async assertIdentityVerificationCustomerAccess(
+    tenantId: string,
+    customerId: string,
+    user: SystemUserRow | undefined,
+    manage: boolean
+  ) {
+    this.assertIdentityVerificationPermission(user, manage);
+    const scope = getRequestDataScope() ?? user?.dataScope;
+    if (scope && (scope !== "all" || getRequestLocationIds() !== undefined)) {
+      await this.assertCustomerVisibleInRequestScope(
+        tenantId,
+        getRequestWorkspaceId(),
+        customerId,
+        scope,
+        getRequestUserId() ?? user?.id
+      );
+    }
+    const customer = await this.prisma.customerProfile.findFirst({
+      where: { tenantId, id: customerId },
+      select: { id: true }
+    });
+    if (!customer) throw new NotFoundException("客户不存在或不在当前账号的数据范围内");
+  }
+
+  private identityVerificationSummary(row: {
+    id: string; tenantId: string; customerId: string; credentialType: string; result: string;
+    evidenceFileAssetIds: Prisma.JsonValue; reason: string; reviewerUserId: string; reviewerName: string;
+    reviewedAt: Date; verifiedAt: Date | null;
+  }): CustomerIdentityVerificationSummary {
+    const evidenceFileAssetIds = Array.isArray(row.evidenceFileAssetIds)
+      ? row.evidenceFileAssetIds.filter((value): value is string => typeof value === "string")
+      : [];
+    return {
+      id: row.id,
+      tenantId: row.tenantId,
+      customerId: row.customerId,
+      credentialType: row.credentialType,
+      result: row.result as CustomerIdentityVerificationSummary["result"],
+      evidenceFileAssetIds,
+      reason: row.reason,
+      reviewerUserId: row.reviewerUserId,
+      reviewerName: row.reviewerName,
+      reviewedAt: row.reviewedAt.toISOString(),
+      verifiedAt: row.verifiedAt?.toISOString()
+    };
+  }
+
+  async listIdentityVerifications(tenantId: string, customerId: string, user?: SystemUserRow) {
+    await this.assertIdentityVerificationCustomerAccess(tenantId, customerId, user, false);
+    const rows = await this.prisma.customerIdentityVerification.findMany({
+      where: { tenantId, customerId },
+      orderBy: [{ reviewedAt: "desc" }, { createdAt: "desc" }, { id: "desc" }]
+    });
+    await this.operations.recordSensitiveAccess(tenantId, {
+      workspaceId: getRequestWorkspaceId(), customerId, field: "customer_identity_verifications", action: "reveal",
+      revealed: true, operator: user?.displayName, permission: CUSTOMER_REVEAL_PERMISSION,
+      reason: "查看客户实名核验记录", at: stamp()
+    });
+    return rows.map((row) => this.identityVerificationSummary(row));
+  }
+
+  async saveIdentityVerification(
+    tenantId: string,
+    customerId: string,
+    input: SaveCustomerIdentityVerificationRequest,
+    user?: SystemUserRow
+  ) {
+    await this.assertIdentityVerificationCustomerAccess(tenantId, customerId, user, true);
+    const credentialType = input.credentialType.trim().toLowerCase();
+    const reason = input.reason.trim();
+    const evidenceFileAssetIds = [...new Set(input.evidenceFileAssetIds.map((id) => id.trim()).filter(Boolean))];
+    if (!/^[a-z][a-z0-9_-]{0,31}$/u.test(credentialType)) throw new BadRequestException("证件类型编码无效");
+    if (!reason || reason.length > 500) throw new BadRequestException("核验原因必填且不能超过 500 个字符");
+    if (evidenceFileAssetIds.length > 5) throw new BadRequestException("每次核验最多关联 5 个证据文件");
+    if (input.result === "verified" && evidenceFileAssetIds.length === 0) throw new BadRequestException("核验通过必须关联至少一份证据文件");
+    if (!user?.id) throw new ForbiddenException("无法确认核验操作人");
+
+    if (evidenceFileAssetIds.length) {
+      const assets = await this.prisma.fileAsset.findMany({
+        where: {
+          tenantId, id: { in: evidenceFileAssetIds }, status: "active", businessModule: "membership",
+          businessType: "customer", businessId: customerId, uploadScene: "identity-verification",
+          mimeType: { in: ["image/jpeg", "image/png", "image/webp", "application/pdf"] }
+        },
+        select: { id: true }
+      });
+      if (assets.length !== evidenceFileAssetIds.length) throw new BadRequestException("证据文件未完成上传，或不属于该客户的实名核验资料");
+    }
+
+    const now = new Date();
+    const saved = await this.prisma.$transaction(async (tx) => {
+      if (input.result === "revoked") {
+        const latestForCredential = await tx.customerIdentityVerification.findFirst({
+          where: { tenantId, customerId, credentialType },
+          orderBy: [{ reviewedAt: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+          select: { result: true }
+        });
+        if (latestForCredential?.result !== "verified") throw new ConflictException("只有当前已通过的证件核验可以撤销");
+      }
+      const row = await tx.customerIdentityVerification.create({
+        data: {
+          tenantId, customerId, credentialType, result: input.result,
+          evidenceFileAssetIds: evidenceFileAssetIds as Prisma.InputJsonValue,
+          reason, reviewerUserId: user.id, reviewerName: user.displayName, reviewedAt: now,
+          verifiedAt: input.result === "verified" ? now : null
+        }
+      });
+      if (["identity_card", "passport", "national_id"].includes(credentialType)) {
+        // 多种法定证件是各自独立的核验状态。撤销护照不能把仍有效的身份证
+        // 一并变成未认证；主档布尔只表达“至少有一种主要身份证件当前已通过”。
+        const identityRecords = await tx.customerIdentityVerification.findMany({
+          where: { tenantId, customerId, credentialType: { in: ["identity_card", "passport", "national_id"] } },
+          orderBy: [{ reviewedAt: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+          select: { credentialType: true, result: true }
+        });
+        const latestByCredential = new Map<string, string>();
+        for (const record of identityRecords) {
+          if (!latestByCredential.has(record.credentialType)) latestByCredential.set(record.credentialType, record.result);
+        }
+        await this.customers.setIdentityVerificationState(
+          tenantId,
+          customerId,
+          [...latestByCredential.values()].some((result) => result === "verified"),
+          tx
+        );
+      }
+      return row;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    return this.identityVerificationSummary(saved);
   }
 
   private async assertRiskCustomerVisible(

@@ -12,6 +12,7 @@ import {
   CreateCustomerRiskRecordRequest,
   ReviewCustomerRiskRecordRequest,
   CustomerProfileOrderQuery,
+  SaveCustomerIdentityVerificationRequest,
   MergeCustomersRequest,
   SaveCustomerProfileAddressRequest,
   SaveCustomerContractRequest,
@@ -1680,6 +1681,18 @@ export class PlatformService {
       getRequestWorkspaceId(),
       getRequestLocationIds() === undefined
     );
+  }
+
+  listCustomerIdentityVerifications(customerId: string, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().listIdentityVerifications(tenantId, customerId, currentUser);
+  }
+
+  saveCustomerIdentityVerification(customerId: string, input: SaveCustomerIdentityVerificationRequest, currentUser?: SystemUserRow) {
+    this.requireWorkspaceDataSource();
+    const tenantId = currentUser?.tenantId ?? requireRequestTenantId();
+    return this.requireCustomerOperations().saveIdentityVerification(tenantId, customerId, input, currentUser);
   }
 
   listCustomerRiskRecords(customerId: string, currentUser?: SystemUserRow) {

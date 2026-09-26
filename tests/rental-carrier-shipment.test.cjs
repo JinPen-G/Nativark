@@ -1,0 +1,72 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const ts = require("typescript");
+
+const root = path.resolve(__dirname, "..");
+const helperPath = path.join(root, "apps/api/src/modules/rental-core/rental-carrier-shipment.ts");
+const source = fs.readFileSync(helperPath, "utf8");
+const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+const helperModule = { exports: {} };
+new Function("module", "exports", compiled)(helperModule, helperModule.exports);
+const { canRecordCarrierShipmentEventDirectly, carrierSerializedCapacityConflict, carrierShipmentInventoryMutationBlocked, carrierBillableWindow, carrierShipmentEventError, rentalOrderDueAt, shiftedCarrierDueAt } = helperModule.exports;
+
+const at = (minute) => new Date(Date.UTC(2026, 8, 26, 10, minute)).toISOString();
+const dispatched = { type: "outbound_dispatched", occurredAt: at(0) };
+const signed = { type: "customer_signed", occurredAt: at(10) };
+const handoff = { type: "customer_handoff", occurredAt: at(35) };
+
+assert.equal(carrierShipmentEventError({ mode: "carrier_shipping", orderStatus: "ready_for_pickup", eventType: "outbound_dispatched", occurredAt: at(5), events: [], now: at(59) }), undefined);
+assert.match(carrierShipmentEventError({ mode: "carrier_shipping", orderStatus: "renting", eventType: "outbound_dispatched", occurredAt: at(5), events: [], now: at(59) }), /待交承运商/u);
+assert.match(carrierShipmentEventError({ mode: "carrier_shipping", orderStatus: "ready_for_pickup", eventType: "customer_signed", occurredAt: at(10), events: [], now: at(59) }), /缺少已登记/u);
+assert.equal(carrierShipmentEventError({ mode: "carrier_shipping", orderStatus: "ready_for_pickup", eventType: "customer_signed", occurredAt: signed.occurredAt, events: [dispatched], now: at(59) }), undefined);
+assert.match(carrierShipmentEventError({ mode: "carrier_shipping", orderStatus: "ready_for_pickup", eventType: "customer_signed", occurredAt: at(-1), events: [dispatched], now: at(59) }), /早于运单发出/u);
+assert.equal(carrierShipmentEventError({ mode: "carrier_shipping", orderStatus: "renting", eventType: "customer_handoff", occurredAt: handoff.occurredAt, events: [dispatched, signed], now: at(59) }), undefined);
+assert.match(carrierShipmentEventError({ mode: "carrier_shipping", orderStatus: "renting", eventType: "customer_handoff", occurredAt: handoff.occurredAt, events: [dispatched], now: at(59) }), /客户签收/u);
+assert.match(carrierShipmentEventError({ mode: "carrier_shipping", orderStatus: "renting", eventType: "warehouse_received", occurredAt: at(30), events: [dispatched, signed, handoff], now: at(59) }), /不能早于客户交寄/u);
+assert.equal(carrierShipmentEventError({ mode: "carrier_shipping", orderStatus: "renting", eventType: "warehouse_received", occurredAt: at(50), events: [dispatched, signed, handoff], now: at(59) }), undefined);
+assert.match(carrierShipmentEventError({ mode: "carrier_shipping", orderStatus: "renting", eventType: "warehouse_received", occurredAt: at(51), events: [dispatched, signed, handoff, { type: "warehouse_received", occurredAt: at(50) }], now: at(59) }), /只能登记一次/u);
+assert.equal(canRecordCarrierShipmentEventDirectly("outbound_dispatched"), true);
+assert.equal(canRecordCarrierShipmentEventDirectly("customer_handoff"), true);
+assert.equal(canRecordCarrierShipmentEventDirectly("customer_signed"), false, "签收必须与领取检查的起租事务原子落库");
+assert.equal(canRecordCarrierShipmentEventDirectly("warehouse_received"), false, "仓库验收必须与归还检查的库存释放事务原子落库");
+assert.equal(carrierShipmentInventoryMutationBlocked([dispatched]), true, "运单发出后库存持续占用");
+assert.equal(carrierShipmentInventoryMutationBlocked([dispatched, signed, handoff]), true, "客户签收及交寄都不代表仓库已验收");
+assert.equal(carrierShipmentInventoryMutationBlocked([dispatched, { type: "warehouse_received" }]), false, "仓库实物验收后才解除在途保护");
+assert.equal(carrierSerializedCapacityConflict({ eligibleAssetIds: ["asset-a", "asset-b"], currentOrderAssetIds: ["asset-a"], overlappingReservations: [{ quantity: 1 }] }), false, "保留其他可用单件资产时允许签收起租");
+assert.equal(carrierSerializedCapacityConflict({ eligibleAssetIds: ["asset-a"], currentOrderAssetIds: ["asset-a"], overlappingReservations: [{ quantity: 1 }] }), true, "签收会占用后续未配货订单最后一件资产时拒绝起租");
+assert.equal(carrierSerializedCapacityConflict({ eligibleAssetIds: ["asset-a", "asset-b"], currentOrderAssetIds: ["asset-a"], overlappingReservations: [{ quantity: 1, assetIds: ["asset-b"] }] }), false, "后续订单已锁定另一件资产时不误报冲突");
+assert.equal(carrierSerializedCapacityConflict({ eligibleAssetIds: ["asset-a"], currentOrderAssetIds: ["asset-a"], overlappingReservations: [{ quantity: 1, assetIds: ["asset-a"] }] }), true, "发现后续订单与本单已锁定同一资产时必须拒绝起租");
+assert.match(carrierShipmentEventError({ mode: "delivery", orderStatus: "renting", eventType: "customer_handoff", occurredAt: at(35), events: [dispatched, signed], now: at(59) }), /只有承运寄送/u);
+assert.match(carrierShipmentEventError({ mode: "carrier_shipping", orderStatus: "renting", eventType: "customer_handoff", occurredAt: at(60), events: [dispatched, signed], now: at(59) }), /不能晚于当前/u);
+
+assert.deepEqual(carrierBillableWindow({ signedAt: signed.occurredAt, handoffAt: handoff.occurredAt }), { startAt: signed.occurredAt, endAt: handoff.occurredAt });
+assert.equal(carrierBillableWindow({ signedAt: handoff.occurredAt, handoffAt: handoff.occurredAt }), undefined);
+assert.equal(shiftedCarrierDueAt({ fulfillmentMode: "carrier_shipping", startAt: at(0), endAt: at(60) }, at(10)), at(70));
+assert.equal(shiftedCarrierDueAt({ fulfillmentMode: "delivery", startAt: at(0), endAt: at(60) }, at(10)), undefined);
+assert.equal(rentalOrderDueAt({ fulfillmentMode: "carrier_shipping", startAt: at(0), endAt: at(60), actualRentalStartAt: at(10) }), at(70));
+assert.equal(rentalOrderDueAt({ fulfillmentMode: "carrier_shipping", startAt: at(0), endAt: at(60), actualRentalStartAt: at(10), carrierRentalDueAt: at(85) }), at(85));
+
+const controller = fs.readFileSync(path.join(root, "apps/api/src/modules/rental-core/rental-core.controller.ts"), "utf8");
+const coreService = fs.readFileSync(path.join(root, "apps/api/src/modules/rental-core/rental-core.service.ts"), "utf8");
+const orderPage = fs.readFileSync(path.join(root, "apps/admin/src/features/rental-core/RentalOrderDetailPage.tsx"), "utf8");
+const authGuard = fs.readFileSync(path.join(root, "apps/api/src/common/api-auth.guard.ts"), "utf8");
+assert.match(controller, /assertCarrierProofFiles\(req, id, body\.evidenceFileAssetIds, \["carrier-shipment-evidence"\]\)/u);
+assert.match(controller, /if \(!canRecordCarrierShipmentEventDirectly\(body\.type\)\)/u);
+assert.match(controller, /fallbackKey: `carrier-shipment:\$\{eventIdempotencyKey\}`/u);
+assert.match(controller, /type: "warehouse_received"/u);
+assert.match(controller, /carrierRentalAdjustment/u);
+assert.match(coreService, /if \(order\.fulfillmentMode === "carrier_shipping"\) \{\s*throw new ConflictException\("承运寄送订单不可部分归还/u);
+assert.match(coreService, /async assertCarrierOrderResourcesMutable[\s\S]*?listCarrierShipmentEventTypes[\s\S]*?carrierShipmentInventoryMutationBlocked/u);
+assert.match(coreService, /async markPickupOverdueOrder[\s\S]*?assertCarrierOrderResourcesMutable/u);
+assert.match(coreService, /async cancelOrder\([\s\S]*?assertCarrierOrderResourcesMutable/u);
+assert.match(coreService, /async applyPartialLineCancellation\([\s\S]*?assertCarrierOrderResourcesMutable/u);
+assert.match(coreService, /assertCarrierPickupWindowAvailable[\s\S]*?lockInventoryTargets[\s\S]*?lockAssetsForAllocation[\s\S]*?activeReservations/u);
+const allocationService = fs.readFileSync(path.join(root, "apps/api/src/modules/rental-core/rental-allocation.service.ts"), "utf8");
+assert.match(allocationService, /async manage\([\s\S]*?assertCarrierOrderResourcesMutable/u);
+assert.match(orderPage, /isCarrierShipping \|\| \(detail\.ruleSnapshot\?\.fulfillment\?\.pickupInspectionRequired/u);
+assert.match(orderPage, /!isCarrierShipping && detail\.status === RentalCoreOrderStatus\.Renting/u);
+assert.match(orderPage, /<CarrierShipmentPanel order=\{detail\} \/>/u);
+assert.match(authGuard, /carrier-shipment\\\/events\$\/u\)\)\s*\{\s*return method === "GET" \? \["rental-os:order:view"\] : \["rental-os:order:operate"\]/u);
+
+console.log("rental-carrier-shipment: carrier milestones, billing, shifted inventory capacity, evidence, UI, authorization and no-partial-return checks passed");

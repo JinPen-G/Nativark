@@ -1,7 +1,9 @@
 import { themeBehavior } from "../../core/theme-behavior";
-import type { ClientFeeItemView, ClientFulfillmentView, ClientOrderView, RentalFundingBalance, RentalOrderExtension } from "@rental-os/shared";
+import type { ClientCatalogResponse, ClientFeeItemView, ClientFulfillmentView, ClientOrderView, RentalFundingBalance, RentalOrderExtension } from "@rental-os/shared";
 import { cancelOrder, fetchFeeItems, fetchFulfillment, fetchFunding, fetchOrder, listExtensions, previewCancellation, respondToFee } from "../../api/orders";
 import { contractMissing } from "../../contracts/planned";
+import { isDeliveryMode } from "../../core/cart";
+import { loadCatalog } from "../../core/catalogStore";
 import { serverNow } from "../../core/clock";
 import { describeError } from "../../core/errors";
 import { ensureServiceForOrder } from "../../core/flow";
@@ -37,6 +39,8 @@ interface OrderData {
   effectiveEndText: string;
   extended: boolean;
   fulfillmentMode: string;
+  pickupActionLabel: string;
+  returnActionLabel: string;
   /** 配送订单收货地址快照（脱敏，取自 ClientOrderView.deliveryAddress，非旁表）；自取订单为空。 */
   hasDeliveryAddress: boolean;
   deliveryRecipientLine: string;
@@ -91,6 +95,8 @@ Page({
     effectiveEndText: "",
     extended: false,
     fulfillmentMode: "",
+    pickupActionLabel: "领取",
+    returnActionLabel: "归还",
     hasDeliveryAddress: false,
     deliveryRecipientLine: "",
     deliveryAddressText: "",
@@ -159,17 +165,19 @@ Page({
           return;
         }
       }
-      const [order, funding, fulfillment, extensions, fees] = await Promise.all([
+      const service = this.serviceCode || currentServiceCode();
+      const [order, funding, fulfillment, extensions, fees, catalog] = await Promise.all([
         fetchOrder(this.orderId),
         fetchFunding(this.orderId).catch(() => undefined),
         fetchFulfillment(this.orderId).catch(() => undefined),
         listExtensions(this.orderId).catch(() => [] as RentalOrderExtension[]),
         // 费用确认/异议未开通时服务端返回 404/501/503 → 如实标记“未开通”；其他错误（网络等）只标记“暂时读不到”，不冒充未开通。
         fetchFeeItems(this.orderId).then((r) => ({ available: true, items: r.items, pending: r.pendingCount, loadError: "" })).catch((error) => contractMissing(error) ? { available: false, loadError: "" } : { available: true, loadError: describeError(error).message }),
+        service ? loadCatalog(service, false).catch(() => undefined) : Promise.resolve(undefined),
         ensureCurrentZone()
       ]);
       if (token !== this.loadVersion) return;
-      this.render(order, funding, fulfillment, extensions, fees);
+      this.render(order, funding, fulfillment, extensions, fees, catalog);
     } catch (error) {
       if (token !== this.loadVersion || isApiError(error, "STALE_CONTEXT")) return;
       if (isApiError(error, "NOT_FOUND")) {
@@ -182,7 +190,7 @@ Page({
     }
   },
 
-  render(order: ClientOrderView, funding: RentalFundingBalance | undefined, fulfillment: ClientFulfillmentView | undefined, extensions: RentalOrderExtension[], fees: { available: boolean; items?: ClientFeeItemView[]; pending?: number; loadError: string }) {
+  render(order: ClientOrderView, funding: RentalFundingBalance | undefined, fulfillment: ClientFulfillmentView | undefined, extensions: RentalOrderExtension[], fees: { available: boolean; items?: ClientFeeItemView[]; pending?: number; loadError: string }, catalog?: ClientCatalogResponse) {
     const knownZone = zoneOf(currentServiceCode());
     const timeZone = knownZone ?? "Asia/Shanghai";
     const currency = order.currency ?? "";
@@ -231,7 +239,7 @@ Page({
         key: `${item.inspectionId}-${item.exceptionIndex}`,
         inspectionId: item.inspectionId,
         exceptionIndex: item.exceptionIndex,
-        stage: item.stage === "pickup" ? "领取检查" : "归还检查",
+        stage: item.stage === "pickup" ? `${catalog?.terminology?.pickupLabel ?? "领取"}检查` : `${catalog?.terminology?.returnLabel ?? "归还"}检查`,
         description: item.description || chargeLabel(item.code),
         amount: item.amount,
         currency: item.currency,
@@ -254,7 +262,11 @@ Page({
       endText: formatBusinessDateTime(order.endAt, timeZone),
       effectiveEndText: formatBusinessDateTime(effectiveEnd, timeZone),
       extended: Boolean(order.effectiveEndAt && order.effectiveEndAt !== order.endAt),
-      fulfillmentMode: fulfillmentLabel(order.fulfillmentMode),
+      fulfillmentMode: isDeliveryMode(order.fulfillmentMode)
+        ? catalog?.fulfillment?.deliveryLabel ?? catalog?.terminology?.deliveryLabel ?? fulfillmentLabel(order.fulfillmentMode)
+        : catalog?.terminology?.pickupLabel ?? fulfillmentLabel(order.fulfillmentMode),
+      pickupActionLabel: catalog?.terminology?.pickupLabel ?? "领取",
+      returnActionLabel: catalog?.terminology?.returnLabel ?? "归还",
       hasDeliveryAddress: Boolean(address),
       deliveryRecipientLine: address ? `${address.recipient} · ${address.phoneMasked}` : "",
       deliveryAddressText,

@@ -114,6 +114,7 @@ export function PersonalMembershipPage() {
       open={Boolean(profileTarget)}
       customerId={profileTarget?.customerId}
       canManage={canManage}
+      canView={canView}
       canReveal={canReveal}
       canViewOrders={hasTenantMembershipPermission("rental-os:order:view")}
       onClose={() => setProfileTarget(undefined)}

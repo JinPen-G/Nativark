@@ -4,11 +4,11 @@ import { createQuote, fetchCoupons, fetchQuote } from "../../api/catalog";
 import { createOrder } from "../../api/orders";
 import { fetchPaymentCapabilities } from "../../api/payments";
 import { CartLocked, abandonSubmission, beginSubmission, bindQuote, cartMissing, completeSubmission, getCart, isDeliveryMode, markSubmissionUnknown, quoteIsCurrent, removeLine, setLineQuantity, updateCart, type CartState } from "../../core/cart";
-import { loadCatalog, primaryLocation } from "../../core/catalogStore";
+import { catalogPricingUnitLabel, loadCatalog, primaryLocation } from "../../core/catalogStore";
 import { formatRemaining, remainingMs, serverNow } from "../../core/clock";
 import { describeError } from "../../core/errors";
 import { isApiError } from "../../core/http";
-import { chargeLabel, pricingUnitLabel } from "../../core/labels";
+import { chargeLabel } from "../../core/labels";
 import { formatMoney, startingPriceParts } from "../../core/money";
 import { blockedState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
 import { jsapiEnabled, offlineMethods } from "../../core/payment";
@@ -70,6 +70,12 @@ interface CheckoutData {
   unitsText: string;
   showPeriodSheet: boolean;
   method: "pickup" | "delivery";
+  pickupActionLabel: string;
+  returnActionLabel: string;
+  pickupModeLabel: string;
+  deliveryModeLabel: string;
+  pickupLocationLabel: string;
+  deliveryLocationLabel: string;
   deliveryAvailable: boolean;
   addresses: ClientDeliveryAddressView[];
   showAddressSheet: boolean;
@@ -134,6 +140,12 @@ Page({
     unitsText: "",
     showPeriodSheet: false,
     method: "pickup",
+    pickupActionLabel: "领取",
+    returnActionLabel: "归还",
+    pickupModeLabel: "领取",
+    deliveryModeLabel: "配送",
+    pickupLocationLabel: "领取地点",
+    deliveryLocationLabel: "配送地点",
     deliveryAvailable: false,
     addresses: [],
     showAddressSheet: false,
@@ -144,7 +156,7 @@ Page({
     showStoreSheet: false,
     returnLocations: [],
     showReturnSheet: false,
-    returnLabel: "与取货门店相同",
+    returnLabel: "与领取地点相同",
     coupons: [],
     couponText: "暂无可用优惠券",
     couponsError: false,
@@ -308,6 +320,12 @@ Page({
       locations,
       returnLocations: this.returnCapableLocations(),
       deliveryAvailable,
+      pickupActionLabel: catalog.fulfillment?.pickupLabel || catalog.terminology?.pickupLabel || "领取",
+      returnActionLabel: catalog.fulfillment?.returnLabel || catalog.terminology?.returnLabel || "归还",
+      pickupModeLabel: catalog.fulfillment?.pickupLabel || catalog.terminology?.pickupLabel || "领取",
+      deliveryModeLabel: catalog.fulfillment?.deliveryLabel || catalog.terminology?.deliveryLabel || "配送",
+      pickupLocationLabel: `${catalog.fulfillment?.pickupLabel || catalog.terminology?.pickupLabel || "领取"}地点`,
+      deliveryLocationLabel: catalog.fulfillment?.deliveryLabel || catalog.terminology?.deliveryLabel || "配送地点",
       services: catalog.services.filter((row) => row.enabled).map((row) => ({ id: row.id, name: row.name, description: row.description ?? "", selected: false }))
     });
     // 默认门店：清单未选或所选门店不支持当前取送方式时，预选第一家合适的门店（服务端仍会校验）。
@@ -326,7 +344,7 @@ Page({
     const returnStore = cart.returnLocationId ? this.returnCapableLocations().find((row) => row.id === cart.returnLocationId) : undefined;
     const lines: LineRow[] = cart.lines.map((line) => {
       const item = this.catalog?.items.find((row) => row.id === line.itemGroupId);
-      const price = startingPriceParts(item?.startingPrice, pricingUnitLabel);
+      const price = startingPriceParts(item?.startingPrice, (unit) => catalogPricingUnitLabel(this.catalog, unit));
       const previous = this.data.lines.find((row) => row.key === line.key);
       return {
         key: line.key,
@@ -354,7 +372,7 @@ Page({
       locations,
       store,
       returnStore,
-      returnLabel: returnStore ? returnStore.name : "与取货门店相同",
+      returnLabel: returnStore ? returnStore.name : `与${this.data.pickupActionLabel}地点相同`,
       memo: cart.memo ?? "",
       services: this.data.services.map((row) => ({ ...row, selected: cart.services.some((item) => item.serviceId === row.id) })),
       couponText: cart.couponId ? this.data.coupons.find((row) => row.id === cart.couponId)?.name ?? "已选优惠券" : this.data.coupons.some((row) => row.usable) ? "有可用优惠券，点击选择" : "暂无可用优惠券"
@@ -453,7 +471,7 @@ Page({
     if (this.data.locked) return;
     const method = String(event.currentTarget.dataset.method ?? "pickup") === "delivery" ? "delivery" : "pickup";
     if (method === "delivery" && !this.data.deliveryAvailable) {
-      toast("同城配送尚未开通，当前请选择门店自提", { duration: 3000 });
+      toast(`${this.data.deliveryModeLabel}尚未开通，当前请选择${this.data.pickupModeLabel}`, { duration: 3000 });
       return;
     }
     if (method === this.data.method) return;
@@ -727,7 +745,7 @@ Page({
       quote,
       currency,
       lines,
-      unitsText: units > 0 && unit ? `共 ${units} ${pricingUnitLabel(unit)}` : "",
+      unitsText: units > 0 && unit ? `共 ${units} ${catalogPricingUnitLabel(this.catalog, unit)}` : "",
       charges,
       benefits,
       payable: quote.payableAmount,

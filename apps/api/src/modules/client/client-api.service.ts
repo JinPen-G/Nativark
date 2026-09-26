@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import {
   CLIENT_API_VERSION,
   DEFAULT_RENTAL_PAYMENT_METHODS,
+  RENTAL_PRICING_UNIT_LABELS,
   RentalCoreOrderStatus,
   type ClientCancellationPreview,
   type ClientCatalogLocation,
@@ -474,6 +475,22 @@ export class ClientApiService {
         isDefault: workspace?.isDefault
       } satisfies ClientWorkspaceSummary,
       categoryCode: business.profile.categoryCode,
+      terminology: {
+        itemLabel: business.category.terminology.itemLabel,
+        itemGroupLabel: business.category.terminology.itemGroupLabel,
+        assetLabel: business.category.terminology.assetLabel,
+        fulfillmentLabel: business.category.terminology.fulfillmentLabel,
+        pickupLabel: business.category.terminology.pickupLabel,
+        returnLabel: business.category.terminology.returnLabel,
+        deliveryLabel: business.category.terminology.deliveryLabel,
+        usageMetricLabel: business.category.terminology.usageMetricLabel
+      },
+      pricingUnits: business.category.businessModel.pricingUnits.map((code) => ({
+        code,
+        label: code === "usage"
+          ? business.category.terminology.usageMetricLabel ?? RENTAL_PRICING_UNIT_LABELS[code]
+          : RENTAL_PRICING_UNIT_LABELS[code]
+      })),
       timeZone: business.settings.calendar.timeZone ?? "Asia/Shanghai",
       items: business.groups.filter((item) => item.status === "enabled").map((item) => ({ id: item.id, code: item.code, name: item.name, description: item.description, inventoryMode: item.inventoryMode, images: item.images?.map((image) => ({ url: summary.membershipStatus === "guest" ? `/api/client/v1/public/catalog/items/${encodeURIComponent(item.id)}/images/${encodeURIComponent(image.id)}?tenantCode=${encodeURIComponent(tenantCode)}&service=${encodeURIComponent(summary.workspaceCode)}` : `/api/client/v1/catalog/items/${encodeURIComponent(item.id)}/images/${encodeURIComponent(image.id)}`, alt: image.fileName })), attributes: item.attributes, startingPrice: startingPriceOf(item.id) })),
       pricingGroups: enabledPricingGroups.map((group) => ({ id: group.id, code: group.code, name: group.name, memberItemGroupIds: group.memberItemGroupIds, enabled: group.status === "enabled" })),
@@ -487,7 +504,9 @@ export class ClientApiService {
         allowDifferentReturnLocation: this.business.effectiveRuleAt(tenantId, business)?.config.fulfillment.allowDifferentReturnLocation ?? false,
         // 配送目的地策略与配送文案取自品类定义/术语，客户端据此类型安全分流「选地址 vs 选据点」。
         deliveryDestination: business.category.businessModel.deliveryDestination,
-        deliveryLabel: business.category.terminology.deliveryLabel
+        deliveryLabel: business.category.terminology.deliveryLabel,
+        pickupLabel: business.category.terminology.pickupLabel,
+        returnLabel: business.category.terminology.returnLabel
       }
     };
   }

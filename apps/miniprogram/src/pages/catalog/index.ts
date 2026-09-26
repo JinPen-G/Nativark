@@ -98,7 +98,7 @@ Page({
     const catalog = cachedCatalog(this.serviceCode);
     if (!catalog) return;
     const items = searchItems(catalog.items, this.data.query, this.data.activeFacet);
-    const cards = items.map(toItemCard);
+    const cards = items.map((item) => toItemCard(item, catalog));
     this.setData({
       cards,
       view: cards.length ? readyState() : catalog.items.length ? emptyState("没有匹配的设备", "换个关键词或分类试试。", "清除筛选", "", "none") : emptyState("当前服务暂无设备", "商户还没有上架设备。", "", "", "none")

@@ -5,11 +5,13 @@ import type {
   CustomerProfileOrder,
   CustomerProfileOverview,
   CustomerProfileRewardEntry,
+  CustomerIdentityVerificationSummary,
   CustomerQualificationRevision
 } from "@rental-os/shared";
 import { RENTAL_CATEGORY_DEFINITIONS } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Alert, Button, Card, Checkbox, Col, Descriptions, Divider, Drawer, Empty, Form, Input, Popconfirm, Row, Space, Statistic, Table, Tabs, Tag } from "antd";
+import { App, Alert, Button, Card, Checkbox, Col, Descriptions, Divider, Drawer, Empty, Form, Input, Popconfirm, Row, Select, Space, Statistic, Table, Tabs, Tag, Upload } from "antd";
+import type { UploadFile, UploadProps } from "antd";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { customerApi } from "@/api/customer";
@@ -28,10 +30,17 @@ type AddressForm = {
   isDefault?: boolean;
 };
 
+type IdentityForm = {
+  credentialType: string;
+  result: "verified" | "rejected" | "revoked";
+  reason: string;
+};
+
 type Props = {
   open: boolean;
   customerId?: string;
   canManage: boolean;
+  canView: boolean;
   canReveal: boolean;
   canViewOrders: boolean;
   onClose: () => void;
@@ -244,7 +253,7 @@ function AuditTab({ overview, canReveal }: { overview: CustomerProfileOverview; 
   </>;
 }
 
-export function CustomerProfileDrawer({ open, customerId, canManage, canReveal, canViewOrders, onClose, onEdit, onQualification }: Props) {
+export function CustomerProfileDrawer({ open, customerId, canManage, canView, canReveal, canViewOrders, onClose, onEdit, onQualification }: Props) {
   const { message } = App.useApp();
   const { t } = useLocale();
   const navigate = useNavigate();
@@ -254,11 +263,19 @@ export function CustomerProfileDrawer({ open, customerId, canManage, canReveal, 
   const [addressTarget, setAddressTarget] = useState<CustomerProfileAddress>();
   const [addressOpen, setAddressOpen] = useState(false);
   const [addressForm] = Form.useForm<AddressForm>();
-  useEffect(() => { setOrderPage(1); setOrderPageSize(20); setAddressOpen(false); setAddressTarget(undefined); }, [customerId]);
+  const [identityForm] = Form.useForm<IdentityForm>();
+  const [identityFiles, setIdentityFiles] = useState<UploadFile<{ id: string; mimeType: string }>[]>([]);
+  useEffect(() => { setOrderPage(1); setOrderPageSize(20); setAddressOpen(false); setAddressTarget(undefined); setIdentityFiles([]); identityForm.resetFields(); }, [customerId, identityForm]);
   const overview = useQuery({
     queryKey: ["customer-profile-overview", customerId, orderPage, orderPageSize],
     queryFn: () => customerApi.profileOverview(customerId!, { page: orderPage, pageSize: orderPageSize }),
     enabled: open && Boolean(customerId)
+  });
+  const canViewIdentity = canView && canReveal;
+  const identityVerifications = useQuery({
+    queryKey: ["customer-identity-verifications", customerId],
+    queryFn: () => customerApi.identityVerifications(customerId!),
+    enabled: open && Boolean(customerId) && canViewIdentity
   });
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ["customer-profile-overview", customerId] });
@@ -274,24 +291,123 @@ export function CustomerProfileDrawer({ open, customerId, canManage, canReveal, 
     onSuccess: async () => { await refresh(); message.success(t("地址已删除")); },
     onError: (error: Error) => message.error(error.message || t("地址删除失败"))
   });
+  const saveIdentityVerification = useMutation({
+    mutationFn: (values: IdentityForm) => customerApi.saveIdentityVerification(customerId!, {
+      ...values,
+      evidenceFileAssetIds: identityFiles.filter((file) => file.status === "done").map((file) => file.response?.id).filter((id): id is string => Boolean(id))
+    }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["customer-identity-verifications", customerId] }),
+        queryClient.invalidateQueries({ queryKey: ["customer-profile-overview", customerId] }),
+        queryClient.invalidateQueries({ queryKey: ["membership-personal"] })
+      ]);
+      identityForm.resetFields();
+      setIdentityFiles([]);
+      message.success(t("实名核验记录已保存"));
+    },
+    onError: (error: Error) => message.error(error.message || t("实名核验保存失败"))
+  });
+  const identityUploadRequest: UploadProps["customRequest"] = async (options) => {
+    try {
+      if (!customerId) throw new Error(t("客户资料尚未就绪"));
+      const file = options.file as File;
+      const session = await customerApi.createIdentityUploadSession(customerId, {
+        fileName: file.name,
+        mimeType: file.type,
+        sizeBytes: file.size,
+        idempotencyKey: crypto.randomUUID()
+      });
+      if (session.mode === "provider") {
+        if (!session.uploadUrl) throw new Error(t("文件平台未返回上传地址"));
+        const response = await fetch(session.uploadUrl, {
+          method: "PUT",
+          headers: session.uploadHeaders,
+          body: file
+        });
+        if (!response.ok) throw new Error(t("证件文件上传失败"));
+      }
+      const asset = await customerApi.completeIdentityUpload(customerId, session.sessionId);
+      options.onSuccess?.({ id: asset.id, mimeType: asset.mimeType });
+    } catch (error) {
+      options.onError?.(error instanceof Error ? error : new Error(t("证件文件上传失败")));
+    }
+  };
+  const openIdentityEvidence = async (fileId: string) => {
+    try {
+      const file = await customerApi.identityDownloadUrl(customerId!, fileId);
+      if (file.mode === "simulation") {
+        message.info(t("开发模拟文件没有实际影像内容，配置云存储后可预览"));
+        return;
+      }
+      window.open(file.downloadUrl, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : t("证件影像读取失败"));
+    }
+  };
   const current = overview.data;
-  const openAddressEditor = (address?: CustomerProfileAddress) => {
+  const profileTabs = [
+    { key: "basic", label: t("基础资料"), children: current && <ProfileSummary overview={current} canManage={canManage} onEdit={onEdit} /> },
+    { key: "account", label: t("账号与会员"), children: current && <AccountTab overview={current} /> },
+    { key: "address", label: current ? `${t("地址")} (${current.addresses.length})` : t("地址"), children: current && <AddressTab addresses={current.addresses} canManage={canManage} onAdd={() => openAddressEditor()} onEdit={openAddressEditor} onRemove={(address) => removeAddress.mutate(address)} /> },
+    { key: "qualification", label: current ? `${t("资质")} (${current.qualificationRevisions.length})` : t("资质"), children: current && <QualificationTab revisions={current.qualificationRevisions} canManage={canManage} onQualification={onQualification} /> },
+    ...(canViewIdentity ? [{
+      key: "identity",
+      label: t("实名认证"),
+      children: <Space direction="vertical" size={16} style={{ display: "flex" }}>
+        <Alert type="warning" showIcon title={t("实名核验仅记录审核事实，不代替空间业务规则")}
+          description={t("通过必须上传归属此客户的证据文件；每次核验只追加记录，普通建档不能直接把状态改成已认证。")} />
+        {canManage && <Card size="small" title={t("新增核验记录")}>
+          <Form form={identityForm} layout="vertical" onFinish={(values) => saveIdentityVerification.mutate(values)}>
+            <Row gutter={12}>
+              <Col span={12}><Form.Item name="credentialType" label={t("证件类型")} rules={[{ required: true }]}><Select options={[
+                { value: "identity_card", label: t("身份证") },
+                { value: "passport", label: t("护照") },
+                { value: "national_id", label: t("其他法定身份证件") }
+              ]} /></Form.Item></Col>
+              <Col span={12}><Form.Item name="result" label={t("核验结论")} rules={[{ required: true }]}><Select options={[
+                { value: "verified", label: t("核验通过") },
+                { value: "rejected", label: t("核验未通过") },
+                { value: "revoked", label: t("撤销既有核验") }
+              ]} /></Form.Item></Col>
+            </Row>
+            <Form.Item label={t("证件影像或核验凭证")}>
+              <Upload accept="image/jpeg,image/png,image/webp,application/pdf" multiple maxCount={5} fileList={identityFiles} customRequest={identityUploadRequest}
+                onChange={({ fileList }) => setIdentityFiles(fileList as UploadFile<{ id: string; mimeType: string }>[])}>
+                <Button disabled={!canManage || saveIdentityVerification.isPending}>{t("上传证据")}</Button>
+              </Upload>
+            </Form.Item>
+            <Form.Item name="reason" label={t("核验说明/原因")} rules={[{ required: true, whitespace: true, max: 500 }]}><Input.TextArea rows={3} maxLength={500} showCount /></Form.Item>
+            <Button type="primary" htmlType="submit" loading={saveIdentityVerification.isPending} disabled={!canManage || identityFiles.some((file) => file.status === "uploading")}>{t("保存核验记录")}</Button>
+          </Form>
+        </Card>}
+        <Card size="small" title={t("核验历史")}>
+          <QueryState loading={identityVerifications.isLoading} error={identityVerifications.error}>
+            {identityVerifications.data?.length ? <Table<CustomerIdentityVerificationSummary> size="small" rowKey="id" dataSource={identityVerifications.data} pagination={{ pageSize: 8 }} scroll={{ x: 800 }} columns={[
+              { title: t("证件类型"), dataIndex: "credentialType" },
+              { title: t("结论"), dataIndex: "result", render: (value) => <Tag color={value === "verified" ? "success" : value === "revoked" ? "default" : "error"}>{t(value === "verified" ? "已认证" : value === "revoked" ? "已撤销" : "未通过")}</Tag> },
+              { title: t("核验人"), dataIndex: "reviewerName" },
+              { title: t("核验时间"), dataIndex: "reviewedAt", render: dateTime },
+              { title: t("原因"), dataIndex: "reason" },
+              { title: t("证据"), dataIndex: "evidenceFileAssetIds", render: (ids: string[]) => ids.length ? <Space wrap>{ids.map((id) => <Button key={id} type="link" onClick={() => openIdentityEvidence(id)}>{t("查看影像")}</Button>)}</Space> : "—" }
+            ]} /> : <Empty description={t("暂无实名核验记录")} />}
+          </QueryState>
+        </Card>
+      </Space>
+    }] : []),
+    { key: "benefits", label: t("积分与权益"), children: current && <BenefitsTab overview={current} /> },
+    { key: "orders", label: current ? `${t("历史订单")} (${current.orders.total})` : t("历史订单"), children: current && <OrdersTab overview={current} canViewOrders={canViewOrders} onPageChange={(page, pageSize) => { setOrderPage(page); setOrderPageSize(pageSize); }} onOpenOrder={(orderId) => { onClose(); navigate(`/rental/orders/${orderId}`); }} /> },
+    { key: "audit", label: t("状态与审计"), children: current && <AuditTab overview={current} canReveal={canReveal} /> }
+  ];
+  function openAddressEditor(address?: CustomerProfileAddress) {
     setAddressTarget(address);
     addressForm.setFieldsValue(address ? { recipient: address.recipient, countryCode: address.countryCode, province: address.province, city: address.city, district: address.district, detail: address.detail, postalCode: address.postalCode, isDefault: address.isDefault } : { countryCode: "CN", isDefault: false });
     setAddressOpen(true);
-  };
+  }
   return <>
     <Drawer title={current ? `${t("客户资料")}: ${current.profile.name}` : t("客户资料")} size={1040} open={open} onClose={onClose} destroyOnHidden>
       <QueryState loading={overview.isLoading} error={overview.error}>
-        {current && <Tabs destroyOnHidden items={[
-          { key: "basic", label: t("基础资料"), children: <ProfileSummary overview={current} canManage={canManage} onEdit={onEdit} /> },
-          { key: "account", label: t("账号与会员"), children: <AccountTab overview={current} /> },
-          { key: "address", label: `${t("地址")} (${current.addresses.length})`, children: <AddressTab addresses={current.addresses} canManage={canManage} onAdd={() => openAddressEditor()} onEdit={openAddressEditor} onRemove={(address) => removeAddress.mutate(address)} /> },
-          { key: "qualification", label: `${t("资质")} (${current.qualificationRevisions.length})`, children: <QualificationTab revisions={current.qualificationRevisions} canManage={canManage} onQualification={onQualification} /> },
-          { key: "benefits", label: t("积分与权益"), children: <BenefitsTab overview={current} /> },
-          { key: "orders", label: `${t("历史订单")} (${current.orders.total})`, children: <OrdersTab overview={current} canViewOrders={canViewOrders} onPageChange={(page, pageSize) => { setOrderPage(page); setOrderPageSize(pageSize); }} onOpenOrder={(orderId) => { onClose(); navigate(`/rental/orders/${orderId}`); }} /> },
-          { key: "audit", label: t("状态与审计"), children: <AuditTab overview={current} canReveal={canReveal} /> }
-        ]} />}
+      {current && <Tabs destroyOnHidden items={profileTabs} />}
       </QueryState>
     </Drawer>
     <Drawer title={addressTarget ? t("编辑配送地址") : t("新增配送地址")} size={520} open={addressOpen} destroyOnHidden onClose={() => { setAddressOpen(false); setAddressTarget(undefined); addressForm.resetFields(); }} extra={<Button type="primary" loading={saveAddress.isPending} onClick={() => addressForm.submit()}>{t("保存")}</Button>}>

@@ -13,7 +13,7 @@
           </view>
         </view>
         <view class="muted mt-8">{{presentation.hint}}</view>
-        <view wx:if="{{overdue}}" class="notice notice--danger mt-16">已超过约定归还时间，请尽快归还或申请续租；逾期费用以商户规则为准。</view>
+        <view wx:if="{{overdue}}" class="notice notice--danger mt-16">已超过约定{{returnActionLabel}}时间，请尽快{{returnActionLabel}}或申请续租；逾期费用以商户规则为准。</view>
         <view class="muted small mt-16">订单号 {{order.orderNo}}</view>
       </view>
     </view>
@@ -21,22 +21,22 @@
     <view class="section section--tight">
       <view class="card">
         <view class="subtitle">租期</view>
-        <view class="kv mt-8"><view class="kv__label">约定领取</view><view class="kv__value">{{startText}}</view></view>
-        <view class="kv"><view class="kv__label">{{extended ? '原约定归还' : '约定归还'}}</view><view class="kv__value">{{endText}}</view></view>
-        <view wx:if="{{extended}}" class="kv"><view class="kv__label">当前归还时间</view><view class="kv__value kv__value--strong">{{effectiveEndText}}</view></view>
+        <view class="kv mt-8"><view class="kv__label">约定{{pickupActionLabel}}</view><view class="kv__value">{{startText}}</view></view>
+        <view class="kv"><view class="kv__label">{{extended ? '原约定' + returnActionLabel : '约定' + returnActionLabel}}</view><view class="kv__value">{{endText}}</view></view>
+        <view wx:if="{{extended}}" class="kv"><view class="kv__label">当前{{returnActionLabel}}时间</view><view class="kv__value kv__value--strong">{{effectiveEndText}}</view></view>
         <view class="muted small mt-8">{{zoneNote}}</view>
       </view>
     </view>
 
     <view class="section section--tight">
       <view class="card">
-        <view class="subtitle">交付与归还</view>
+        <view class="subtitle">{{pickupActionLabel}}与{{returnActionLabel}}</view>
         <view class="kv mt-8"><view class="kv__label">方式</view><view class="kv__value">{{fulfillmentMode}}</view></view>
-        <view class="kv"><view class="kv__label">领取地点</view><view class="kv__value">{{order.fulfillmentLocationName}}</view></view>
-        <view wx:if="{{order.returnLocationName}}" class="kv"><view class="kv__label">归还地点</view><view class="kv__value">{{order.returnLocationName}}</view></view>
+        <view class="kv"><view class="kv__label">{{pickupActionLabel}}地点</view><view class="kv__value">{{order.fulfillmentLocationName}}</view></view>
+        <view wx:if="{{order.returnLocationName}}" class="kv"><view class="kv__label">{{returnActionLabel}}地点</view><view class="kv__value">{{order.returnLocationName}}</view></view>
         <view wx:if="{{hasDeliveryAddress}}" class="kv"><view class="kv__label">收货人</view><view class="kv__value">{{deliveryRecipientLine}}</view></view>
         <view wx:if="{{hasDeliveryAddress}}" class="kv"><view class="kv__label">收货地址</view><view class="kv__value">{{deliveryAddressText}}</view></view>
-        <button class="btn btn--secondary btn--block mt-16" hover-class="btn-hover" data-code="guide" bindtap="onAction">取还指引</button>
+        <button class="btn btn--secondary btn--block mt-16" hover-class="btn-hover" data-code="guide" bindtap="onAction">{{pickupActionLabel}} / {{returnActionLabel}}指引</button>
       </view>
     </view>
 
@@ -93,7 +93,7 @@
           <view class="subtitle">检查费用确认</view>
           <status-tag wx:if="{{feePending}}" label="{{feePending}} 项待确认" tone="danger" small="{{true}}"></status-tag>
         </view>
-        <view class="muted small mt-8">领取或归还检查产生的费用请逐项处理；提交异议后商户会复核，处理前不影响你已确认的部分。</view>
+        <view class="muted small mt-8">{{pickupActionLabel}}或{{returnActionLabel}}检查产生的费用请逐项处理；提交异议后商户会复核，处理前不影响你已确认的部分。</view>
         <view class="cell" wx:for="{{feeItems}}" wx:key="key">
           <view class="cell__body">
             <view class="cell__title">{{item.stage}} · {{item.description}}</view>
@@ -148,9 +148,9 @@
       </view>
     </sheet>
 
-    <sheet visible="{{showGuide}}" title="取还指引" footer="{{true}}" bind:close="onCloseGuide">
-      <view class="kv"><view class="kv__label">去哪</view><view class="kv__value">{{order.fulfillmentLocationName}}{{order.returnLocationName && order.returnLocationName !== order.fulfillmentLocationName ? '（归还至 ' + order.returnLocationName + '）' : ''}}</view></view>
-      <view class="kv"><view class="kv__label">何时</view><view class="kv__value">{{startText}} 领取，{{effectiveEndText}} 前归还</view></view>
+    <sheet visible="{{showGuide}}" title="{{pickupActionLabel}} / {{returnActionLabel}}指引" footer="{{true}}" bind:close="onCloseGuide">
+      <view class="kv"><view class="kv__label">去哪</view><view class="kv__value">{{order.fulfillmentLocationName}}{{order.returnLocationName && order.returnLocationName !== order.fulfillmentLocationName ? '（' + returnActionLabel + '至 ' + order.returnLocationName + '）' : ''}}</view></view>
+      <view class="kv"><view class="kv__label">何时</view><view class="kv__value">{{startText}} {{pickupActionLabel}}，{{effectiveEndText}} 前{{returnActionLabel}}</view></view>
       <view class="kv"><view class="kv__label">携带</view><view class="kv__value">本人身份证件；押金按商户要求办理</view></view>
       <view class="notice notice--neutral mt-16">实物领取与归还由商户在现场登记，小程序不提供自助确认；部分归还会显示已还/未还数量。</view>
       <view slot="footer">

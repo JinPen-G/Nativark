@@ -110,6 +110,7 @@ import { bufferedRentalPeriod, peakReservedQuantity } from "./rental-occupancy";
 import { extensionPaymentRequired } from "./rental-extension-lifecycle";
 import { effectiveExtensionRule, effectiveNoShowRule, effectiveUnpaidHoldRule, inclusiveTaxAmount } from "./rental-rule-defaults";
 import { redactDeliveryAddressPhone } from "./rental-delivery-address-privacy";
+import { carrierSerializedCapacityConflict, carrierShipmentInventoryMutationBlocked, rentalOrderDueAt, shiftedCarrierDueAt } from "./rental-carrier-shipment";
 import { RentalFundingService } from "./rental-funding.service";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import {
@@ -129,6 +130,7 @@ import { serviceCancellationAmounts, type ServiceCancellationSelection } from ".
 import { buildRentalCategorySamples } from "./rental-category-samples";
 import { evaluateRentalQualification } from "./rental-qualification";
 import { RentalServiceCapacityService } from "./rental-service-capacity.service";
+import { assetValidityError } from "./rental-asset-validity";
 
 /**
  * 内存态只保留**配置**（库为事实源、这里是写穿缓存）。
@@ -221,7 +223,8 @@ function defaultBusinessSettings(
     // 付款时机、押金模式、异地归还与逾期规则不在这里：它们由首版规则版本
     // （rental-business.service.ts 的 defaultRuleConfig）按品类缺省生成并进快照。
     fulfillment: {
-      enabledModes: [...definition.businessModel.fulfillmentModes],
+      // 承运寄送需要单独完成运单、签收/揽收证据和在途库存配置；不能因为启用一个品类就默认对客开放。
+      enabledModes: definition.businessModel.fulfillmentModes.filter((mode) => mode !== "carrier_shipping"),
       deliveryServiceArea: { mode: "all", areas: [] }
     },
     payment: {
@@ -999,6 +1002,18 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (input.inventoryMode === RentalInventoryMode.Bundle) this.validateBundleComponentRules(components);
     if (input.inventoryMode !== RentalInventoryMode.Bundle) {
       this.validateAttributes(definition.businessModel.assetFields, "item_group", input.attributes ?? {});
+      if (state.profile.categoryCode === RentalCategoryCode.Camping) {
+        const capacity = input.attributes?.capacity;
+        if (capacity !== undefined && capacity !== null && capacity !== "" && (!Number.isFinite(Number(capacity)) || Number(capacity) <= 0)) throw new BadRequestException("露营装备容量必须大于0升");
+      }
+      if (state.profile.categoryCode === RentalCategoryCode.Construction) {
+        const ratedLoad = input.attributes?.ratedLoad;
+        const ratedLoadUnit = input.attributes?.ratedLoadUnit;
+        if ((ratedLoad === undefined || ratedLoad === null || ratedLoad === "") !== (ratedLoadUnit === undefined || ratedLoadUnit === null || ratedLoadUnit === "")) {
+          throw new BadRequestException("填写额定载荷时必须同时选择 kg 或 t 单位");
+        }
+        if (ratedLoad !== undefined && ratedLoad !== null && Number(ratedLoad) <= 0) throw new BadRequestException("额定载荷必须大于0");
+      }
       this.assertUniqueAttributes(
         definition.businessModel.assetFields,
         "item_group",
@@ -1436,14 +1451,14 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (![RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting].includes(order.status)) {
       throw new ConflictException("只有待领取或租用中的订单可以续租");
     }
-    this.validatePeriod(order.effectiveEndAt ?? order.endAt, newEndAt);
+    this.validatePeriod(rentalOrderDueAt(order), newEndAt);
     if (order.reservations.some(row => {
       const group = this.group(state, row.itemGroupId);
       // 一次性耗材在领取时就已完成消费并释放预占，不存在“部分归还后继续占用”
       // 的事实；混合订单仍要对其它可归还商品执行原有边界。
       return group.inventoryMode !== RentalInventoryMode.Consumable && row.releasedQuantity > 0;
     })) throw new ConflictException("已有部分归还，不能按整单自动续租，请人工处理剩余商品");
-    const period = bufferedRentalPeriod(order.startAt, newEndAt, order.ruleSnapshot);
+    const period = bufferedRentalPeriod(order.actualRentalStartAt ?? order.startAt, newEndAt, order.ruleSnapshot);
     const demands = new Map<string, { itemGroupId: string; locationId: string; quantity: number }>();
     for (const reservation of order.reservations) {
       const remaining = reservation.quantity - reservation.releasedQuantity;
@@ -1463,6 +1478,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       }
     }
     const snapshot = await this.loadInventorySnapshot(tenantId, tx);
+    for (const allocation of order.allocations.filter((row) => ACTIVE_ASSIGNMENTS.includes(row.status) && row.assetId)) {
+      const asset = snapshot.assets.find((row) => row.id === allocation.assetId);
+      if (asset) this.assertAssetDocumentsCoverPeriod(state, asset, newEndAt);
+    }
     snapshot.reservations = snapshot.reservations.filter((row) => row.orderId !== order.id);
     const assigned = new Set(order.allocations.filter((row) => ACTIVE_ASSIGNMENTS.includes(row.status)).map((row) => row.assetId).filter(Boolean));
     if (snapshot.reservations.some((row) => row.quantity > 0 && overlaps(row.startAt, row.endAt, period.startAt, period.endAt) && row.assetIds?.some((assetId) => assigned.has(assetId)))) {
@@ -1589,6 +1608,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async markPickupOverdueOrder(tenantId: string, orderId: string, tx?: RentalFactTx, operator = "system", at = now()) {
     this.state(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
+    await this.assertCarrierOrderResourcesMutable(tenantId, order, tx, true);
     if (![RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(order.status)) {
       throw new ConflictException("只有已确认或待领取订单可以进入待确认爽约");
     }
@@ -1880,6 +1900,20 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async lockOrderForUpdate(tenantId: string, orderId: string, tx: RentalFactTx) {
     this.state(tenantId);
     return this.publicOrder(await this.lockedOrder(tenantId, orderId, tx));
+  }
+
+  /**
+   * 已发出的承运包裹仍占用原资源，直到归还检查事务记录仓库实物验收。
+   * 对写操作传入同一个订单事务，确保事件检查与后续状态/库存写入不会被并发发运穿透；
+   * 只读预览可省略事务，但真正应用时仍会在写事务中再次检查。
+   */
+  async assertCarrierOrderResourcesMutable(tenantId: string, order: RentalOrder, tx?: RentalFactTx, requireTransaction = false): Promise<void> {
+    if (order.fulfillmentMode !== "carrier_shipping") return;
+    if (!tx && requireTransaction) throw new ConflictException("承运寄送订单的资源变更必须在事务内确认发运状态");
+    const events = await this.factStore.listCarrierShipmentEventTypes(tenantId, order.id, tx);
+    if (carrierShipmentInventoryMutationBlocked(events.map((type) => ({ type })))) {
+      throw new ConflictException("承运包裹仍在途，库存持续锁定；仓库完成归还验收前不能取消、爽约或改配");
+    }
   }
 
   private publicOrder(order: RentalOrder) {
@@ -2273,6 +2307,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   ) {
     const state = await this.factContext(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
+    if (order.fulfillmentMode === "carrier_shipping") {
+      throw new ConflictException("承运寄送订单不可部分归还，必须在仓库实物验收时整单收回");
+    }
     if (order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以办理部分归还");
     if (order.ruleSnapshot.fulfillment.returnInspectionRequired) throw new ConflictException("当前规则要求归还检查；部分归还须走逐批检查流程，不能直接释放资产");
     if (!input.items?.length) throw new BadRequestException("至少选择一个归还分配项");
@@ -2400,6 +2437,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   ) {
     this.state(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
+    await this.assertCarrierOrderResourcesMutable(tenantId, order, tx, true);
     if ([RentalCoreOrderStatus.Renting, RentalCoreOrderStatus.Settling, RentalCoreOrderStatus.Completed, RentalCoreOrderStatus.Cancelled, RentalCoreOrderStatus.NoShow].includes(order.status)) throw new ConflictException("当前订单状态不能取消");
     if (!reason?.trim()) throw new BadRequestException("取消原因不能为空");
     // 取消费必须基于同一事务里刚锁住的订单事实计算。保留 number 入参是为了兼容
@@ -2484,6 +2522,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   ) {
     const state = this.state(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
+    if (order.fulfillmentMode === "carrier_shipping") {
+      throw new ConflictException(stage === "pickup"
+        ? "承运寄送必须凭客户实际签收时间和签收证据办理领取检查，不能直接起租"
+        : "承运寄送必须先登记客户交寄凭证，再由仓库完成实物归还检查；不能直接完成归还或提前释放库存");
+    }
     const assetChanges: AssetStatusChange[] = [];
     let returnStockQuarantines: StockQuarantineChange[] = [];
     let returnStockTransfers: StockReturnTransfer[] = [];
@@ -2594,6 +2637,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       damage?: { amount: number; detail: string };
       /** 提前归还退款（需求 4.6.8）。`requiresReview` 时只记录不落账，等人工审批。 */
       earlyReturn?: { amount: number; requiresReview: boolean; basis: string[] };
+      /** SHIP-01：按签收至客户交寄重算的租金差额。 */
+      carrierRentalAdjustment?: { amount: number; signedAt: string; handoffAt: string; priceVersion?: string };
     } = {},
     tx?: RentalFactTx
   ) {
@@ -2607,6 +2652,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (template.stage === "pickup" && order.status !== RentalCoreOrderStatus.ReadyForPickup) throw new ConflictException("订单尚未完成配货，不能办理取件检查");
     if (template.stage === "return" && order.status !== RentalCoreOrderStatus.Renting) throw new ConflictException("只有租赁中的订单可以办理归还检查");
     if (input.returnItems?.length && template.stage !== "return") throw new BadRequestException("只有归还检查可以指定部分归还项");
+    if (order.fulfillmentMode === "carrier_shipping" && template.stage === "return" && input.returnItems?.length) {
+      throw new ConflictException("承运寄送订单必须在仓库实物验收时整单结算，不能通过部分归还提前释放在途库存");
+    }
     const partialReturnItems = template.stage === "return" && input.returnItems?.length ? input.returnItems : undefined;
     const returnableAllocationIds = new Set(
       partialReturnItems?.map((item) => item.allocationId)
@@ -2619,7 +2667,17 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       throw new ConflictException("异常关联的分配项不属于本次归还批次");
     }
     if (template.stage === "pickup") {
-      await this.assertOrderQualification(tenantId, order, "pickup", order.effectiveEndAt ?? order.endAt);
+      if (order.fulfillmentMode === "carrier_shipping") {
+        const actualStartAt = input.carrierActualAt;
+        if (!actualStartAt) throw new ConflictException("承运寄送必须登记并核验客户实际签收时间，暂不自动起租");
+        const dueAt = shiftedCarrierDueAt(order, actualStartAt);
+        if (!dueAt) throw new ConflictException("承运订单租期或签收时间无效，需人工核对后再办理起租");
+        await this.assertCarrierPickupWindowAvailable(tenantId, order, actualStartAt, dueAt, tx);
+        order.actualRentalStartAt = new Date(actualStartAt).toISOString();
+        order.carrierRentalDueAt = dueAt;
+        order.effectiveEndAt = dueAt;
+      }
+      await this.assertOrderQualification(tenantId, order, "pickup", order.fulfillmentMode === "carrier_shipping" ? rentalOrderDueAt(order) : order.effectiveEndAt ?? order.endAt);
       this.assertOutboundLocationActive(state, order);
       await this.assertAllocatedPickupReady(tenantId, order, tx);
     }
@@ -2700,6 +2758,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       // 逾时按本批实际归还数量落账；提前归还退款仍只在整单归还时按规则处理。
       if (charges.overdue && charges.overdue.amount > 0) this.applyOverdueTo(order, charges.overdue.amount, charges.overdue.returnedAt, charges.overdue.batchId);
       if (!partialReturnItems && charges.earlyReturn) this.applyEarlyReturnRefundTo(order, charges.earlyReturn);
+      if (!partialReturnItems && charges.carrierRentalAdjustment) this.applyCarrierRentalAdjustmentTo(order, charges.carrierRentalAdjustment);
       // 检查员提交的是损失建议，不能直接决定客户应付；审核通过后才追加订单费用。
     }
     order.updatedAt = now();
@@ -2806,6 +2865,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (!input.customerConfirmed) throw new ConflictException("必须先取得客户确认才能应用订单变更");
     if (!input.reason?.trim()) throw new BadRequestException("订单变更原因不能为空");
     const order = await this.lockedOrder(tenantId, orderId, tx);
+    await this.assertCarrierOrderResourcesMutable(tenantId, order, tx, true);
     if (![RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(order.status)) {
       throw new ConflictException("只有取货前的待确认或待领取订单可以部分取消");
     }
@@ -3569,6 +3629,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       detail: `${extension.originalEndAt} → ${extension.newEndAt}（${extension.settlementMode === "monthly" ? "计入月结账单" : "已补款"}）`
     });
     order.effectiveEndAt = extension.newEndAt;
+    if (order.fulfillmentMode === "carrier_shipping" && order.actualRentalStartAt) order.carrierRentalDueAt = extension.newEndAt;
     // 本次续租新增的服务作为**独立发生项**追加到订单上（MKT-02C）。
     //
     // 早先这里按 serviceId 合并、并把时段取并集。合并挡住了「容量被错放」那个坑，但代价是
@@ -3698,6 +3759,33 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     });
   }
 
+  /** 承运实际租期正差额统一到仓库归还结算；负差额必须先人工核减，再另行办理资金退款。 */
+  private applyCarrierRentalAdjustmentTo(
+    order: RentalOrder,
+    adjustment: { amount: number; signedAt: string; handoffAt: string; priceVersion?: string }
+  ) {
+    const amount = roundMoney(adjustment.amount);
+    if (amount > 0) {
+      this.applyChargeTo(order, {
+        code: `carrier-rental:${order.id}`,
+        name: "承运寄送租期重算差额（归还统一结算）",
+        type: "extension",
+        amount,
+        sourceVersion: adjustment.priceVersion ?? order.pricingPlanVersion,
+        detail: `按原价格版本及优惠快照，客户签收 ${adjustment.signedAt} 至交寄 ${adjustment.handoffAt} 重算；补款 ${amount}`
+      });
+      return;
+    }
+    if (amount < 0) {
+      this.raiseFeeReview(order, "carrier_rental_refund", -amount, [
+        `原价格版本 ${adjustment.priceVersion ?? order.pricingPlanVersion}`,
+        `客户签收 ${adjustment.signedAt}`,
+        `客户交承运商并有揽收凭证 ${adjustment.handoffAt}`,
+        `全租期重算建议核减/退款 ${-amount}；需人工审核，实际退款另走资金流程`
+      ], "carrier-rental");
+    }
+  }
+
   /**
    * 裁定一张费用审核单（需求 4.6.10 人工催收 / 4.6.8 人工审核退款）。
    *
@@ -3731,11 +3819,13 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // 不动账（押金/预授权/多收租金的实际动作由资金区按权限单独办理）。因此它不进费用明细，
     // 也不进入下面按 review.type 映射费用明细 type 的分支——那个联合类型里没有 refund_due。
     if (input.decision === "approved" && decidedAmount > 0 && review.type !== "refund_due") {
-      const isRefund = review.type === "early_return_refund" || review.type === "service_refund";
+      const isRefund = review.type === "early_return_refund" || review.type === "service_refund" || review.type === "carrier_rental_refund";
       this.applyChargeTo(order, {
         code: `${review.type}:${order.id}:${review.sourceId ?? "order"}`,
-        name: review.type === "service_refund" ? "增值服务退款（已审核）" : isRefund ? "提前归还退租金（已审核）" : "逾期费用（已审核）",
-        type: review.type === "service_refund" ? "early_return_refund" : review.type,
+        name: review.type === "service_refund" ? "增值服务退款（已审核）" : review.type === "carrier_rental_refund" ? "承运寄送租期重算核减（已审核）" : isRefund ? "提前归还退租金（已审核）" : "逾期费用（已审核）",
+        // 共享订单费用行把审核通过的租金核减统一记为提前归还退款类型；
+        // 具体成因仍由费用名称、编码和审核单类型区分，避免把后台审核类型泄漏成新费用枚举。
+        type: review.type === "service_refund" || review.type === "carrier_rental_refund" ? "early_return_refund" : review.type,
         amount: isRefund ? -decidedAmount : decidedAmount,
         sourceVersion: order.ruleVersion,
         detail: `${review.basis.join("；")}；审核认定 ${decidedAmount}（建议 ${review.suggestedAmount}）：${input.reason.trim()}`
@@ -4455,7 +4545,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       order.membershipSnapshot,
       rule,
       action,
-      { validThroughAt, minimumValidityFromAt: order.startAt }
+      { validThroughAt, minimumValidityFromAt: order.actualRentalStartAt ?? order.startAt }
     );
   }
 
@@ -4464,8 +4554,83 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const assets = await this.factStore.listAssets(tenantId, tx);
     const groups = this.capabilityEquipmentGroups(tenantId);
     const picked = allocations.filter((a) => a.assetId).map((a) => assets.find((s) => s.id === a.assetId)).filter((a): a is RentalAsset => Boolean(a));
+    for (const asset of picked) this.assertAssetDocumentsCoverPeriod(this.state(tenantId), asset, rentalOrderDueAt(order));
     const equipment = [...buildCapabilityEquipmentFromAssets(groups, picked), ...buildCapabilityEquipment(groups, allocations.filter((a) => !a.assetId).map((a) => ({ itemGroupId: a.itemGroupId!, quantity: a.quantity })))];
     await this.runHook(tenantId, "allocation_dispatch", { type: "order", id: order.id }, { ...order, equipment, capabilityExceptions: (order.capabilityExceptions ?? []).map((a) => ({ capability: a.capability, code: a.riskCode, reason: a.reason })) }, tx, operator, this.orderHookInstances(tenantId, order));
+  }
+
+  /**
+   * SHIP-01：签收晚于预约开始时，先对平移后的实际租期和缓冲期做冲突复核。
+   * 有后续订单占用相同序列化资产或数量库存时拒绝自动起租，交运营改配/人工协调。
+   */
+  private async assertCarrierPickupWindowAvailable(
+    tenantId: string,
+    order: RentalOrder,
+    actualStartAt: string,
+    dueAt: string,
+    tx?: RentalFactTx
+  ) {
+    const state = this.state(tenantId);
+    const period = bufferedRentalPeriod(actualStartAt, dueAt, order.ruleSnapshot);
+    const groups = new Map(state.itemGroups.map((row) => [row.id, row]));
+    if (tx) {
+      const targets = new Map<string, { itemGroupId: string; locationId: string; inventoryMode: RentalInventoryMode }>();
+      for (const row of order.reservations) {
+        const group = groups.get(row.itemGroupId);
+        if (!group) throw new ConflictException("承运订单商品已不存在，需人工核对配货");
+        targets.set(`${row.itemGroupId}:${row.locationId}`, { itemGroupId: row.itemGroupId, locationId: row.locationId, inventoryMode: group.inventoryMode });
+      }
+      for (const row of [...targets.values()].sort((a, b) => `${a.itemGroupId}:${a.locationId}`.localeCompare(`${b.itemGroupId}:${b.locationId}`))) {
+        await this.factStore.lockInventoryTargets(tenantId, row.locationId, [{ itemGroupId: row.itemGroupId, inventoryMode: row.inventoryMode }], tx);
+        await this.factStore.lockAssetsForAllocation(tenantId, row.itemGroupId, row.locationId, tx);
+      }
+    }
+    const [reservations, balances, assets] = await Promise.all([
+      this.factStore.activeReservations(tenantId, tx),
+      this.factStore.listStockBalances(tenantId, tx),
+      this.factStore.listAssets(tenantId, tx)
+    ]);
+    const demands = new Map<string, { itemGroupId: string; locationId: string; quantity: number }>();
+    for (const reservation of order.reservations) {
+      if (reservation.status === RentalReservationStatus.Released) continue;
+      const quantity = Math.max(0, reservation.quantity - reservation.releasedQuantity);
+      if (!quantity) continue;
+      const key = `${reservation.itemGroupId}:${reservation.locationId}`;
+      const demand = demands.get(key) ?? { itemGroupId: reservation.itemGroupId, locationId: reservation.locationId, quantity: 0 };
+      demand.quantity += quantity;
+      demands.set(key, demand);
+    }
+    for (const demand of demands.values()) {
+      const overlapping = reservations.filter((row) => row.orderId !== order.id && row.itemGroupId === demand.itemGroupId
+        && row.locationId === demand.locationId && Date.parse(row.startAt) < Date.parse(period.endAt)
+        && Date.parse(row.endAt) > Date.parse(period.startAt));
+      const group = groups.get(demand.itemGroupId);
+      if (!group) throw new ConflictException("承运订单商品已不存在，需人工核对配货");
+      if (group.inventoryMode === RentalInventoryMode.Quantity || group.inventoryMode === RentalInventoryMode.Consumable) {
+        const balance = balances.find((row) => row.itemGroupId === demand.itemGroupId && row.locationId === demand.locationId);
+        const otherReservations = reservations.filter((row) => row.orderId !== order.id && row.itemGroupId === demand.itemGroupId && row.locationId === demand.locationId);
+        const reserved = group.inventoryMode === RentalInventoryMode.Consumable
+          ? otherReservations.reduce((sum, row) => sum + row.quantity, 0)
+          : peakReservedQuantity(overlapping, period.startAt, period.endAt);
+        if (!balance || balance.onHandQuantity - balance.maintenanceQuantity - reserved < demand.quantity) {
+          throw new ConflictException(group.inventoryMode === RentalInventoryMode.Consumable
+            ? "客户签收时可用耗材库存已被其他订单预留，请先人工协调，不能自动起租"
+            : "客户签收时间导致租期/缓冲期与后续数量库存冲突，请先人工协调，不能自动起租");
+        }
+        continue;
+      }
+      const assignedAssetIds = new Set(order.allocations.filter((row) => row.itemGroupId === demand.itemGroupId && row.assetId
+        && ["locked", "allocated"].includes(row.status)).map((row) => row.assetId!));
+      const eligibleAssetIds = assets.filter((asset) => asset.itemGroupId === demand.itemGroupId && asset.locationId === demand.locationId
+        && [RentalAssetStatus.Available, RentalAssetStatus.Reserved].includes(asset.status)).map((asset) => asset.id);
+      if (carrierSerializedCapacityConflict({
+        eligibleAssetIds,
+        currentOrderAssetIds: [...assignedAssetIds],
+        overlappingReservations: overlapping.map((row) => ({ quantity: row.quantity, assetIds: row.assetIds }))
+      })) {
+        throw new ConflictException("客户签收时间导致已锁定单件资产与后续订单冲突，请先改配或人工协调，不能自动起租");
+      }
+    }
   }
 
   private async assertAllocatedPickupReady(tenantId: string, order: RentalOrder, tx?: RentalFactTx) {
@@ -4476,7 +4641,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const assets = await this.factStore.listAssets(tenantId, tx);
     const stock = await this.factStore.listStockBalances(tenantId, tx);
     const reservations = await this.factStore.activeReservations(tenantId, tx);
-    const period = bufferedRentalPeriod(order.startAt, order.effectiveEndAt ?? order.endAt, order.ruleSnapshot);
+    const rentalStartAt = order.actualRentalStartAt ?? order.startAt;
+    const rentalDueAt = rentalOrderDueAt(order);
+    const period = bufferedRentalPeriod(rentalStartAt, rentalDueAt, order.ruleSnapshot);
     for (const a of active.filter((a) => !a.assetId)) {
       const balance = stock.find((s) => s.itemGroupId === a.itemGroupId && s.locationId === order.fulfillmentLocationId);
       const needed = active.filter((x) => !x.assetId && x.itemGroupId === a.itemGroupId).reduce((sum, x) => sum + x.quantity, 0);
@@ -4491,10 +4658,20 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       if (!a.assetId) continue;
       const asset = assets.find((s) => s.id === a.assetId);
       if (!asset || ![RentalAssetStatus.Available, RentalAssetStatus.Reserved].includes(asset.status) || asset.locationId !== order.fulfillmentLocationId) throw new ConflictException("锁定资产尚未回库、正在维护或不在领取地点，请先改配或处理整备");
+      this.assertAssetDocumentsCoverPeriod(state, asset, rentalDueAt);
     }
     if (tx) await this.validateAllocationEquipment(tenantId, order, active, tx);
   }
   private validatePeriod(startAt: string, endAt: string) { const start = new Date(startAt).getTime(); const end = new Date(endAt).getTime(); if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) throw new BadRequestException("租赁起止时间无效"); }
+  private assertAssetDocumentsCoverPeriod(state: TenantRentalState, asset: RentalAsset, rentalEndAt: string) {
+    const error = assetValidityError(
+      state.profile.categoryCode,
+      asset.attributes ?? {},
+      rentalEndAt,
+      state.businessSettings.calendar.timeZone ?? DEFAULT_BUSINESS_TIME_ZONE
+    );
+    if (error) throw new ConflictException(`${asset.assetNo}：${error}`);
+  }
   private validateAttributes(
     fields: RentalAttributeDefinition[],
     scope: "item_group" | "asset",

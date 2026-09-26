@@ -78,9 +78,14 @@ export const RULE_SECTIONS: RuleSection[] = [
     key: "pricing-basis",
     title: "计价基础",
     description: "决定按什么时间单位计费。",
-    render: ({ t }) => (
-      <>
-        <Row gutter={12}>
+    render: ({ t, category }) => {
+      const units = new Set(category.businessModel.pricingUnits);
+      const supportsShift = units.has("shift");
+      const supportsHourlyToDay = units.has("hour") && units.has("day_24h");
+      return (
+        <>
+        {(supportsShift || supportsHourlyToDay) ? <Row gutter={12}>
+          {supportsShift ? <>
           <Col span={8}>
             <Form.Item
               name={["pricing", "shiftHours"]}
@@ -107,6 +112,8 @@ export const RULE_SECTIONS: RuleSection[] = [
               />
             </Form.Item>
           </Col>
+          </> : null}
+          {supportsHourlyToDay ? <>
           <Col span={8}>
             <Form.Item
               name={["pricing", "hourToDayEnabled"]}
@@ -117,27 +124,33 @@ export const RULE_SECTIONS: RuleSection[] = [
               <Switch />
             </Form.Item>
           </Col>
-          <Col span={8}>
-            <Form.Item
-              name={["pricing", "hourToDayThresholdHours"]}
-              label="超过多少小时转日租"
-              tooltip="大于 0 且不超过 24 小时。未超过阈值但小时金额达到日价，也按日价封顶。仅在上面开关开启时生效。"
-            >
-              <InputNumber min={0.01} max={24} style={{ width: "100%" }} />
-            </Form.Item>
-          </Col>
+          <Form.Item noStyle shouldUpdate={(previous, current) => previous.pricing?.hourToDayEnabled !== current.pricing?.hourToDayEnabled}>
+            {({ getFieldValue }) => getFieldValue(["pricing", "hourToDayEnabled"]) ? <Col span={8}>
+              <Form.Item
+                name={["pricing", "hourToDayThresholdHours"]}
+                label="超过多少小时转日租"
+                tooltip="大于 0 且不超过 24 小时。未超过阈值但小时金额达到日价，也按日价封顶。"
+                rules={[{ required: true, message: "启用时租转日租时，请填写阈值" }]}
+              >
+                <InputNumber min={0.01} max={24} style={{ width: "100%" }} />
+              </Form.Item>
+            </Col> : null}
+          </Form.Item>
+          </> : null}
         </Row>
-        <Typography.Text type="secondary">
+          : null}
+        {supportsHourlyToDay ? <Typography.Text type="secondary">
           {t("按连续 24 小时分段，不按午夜切日。使用同一定价分组、同一价格版本的 24 小时日价；未配置日价不能使用。发布后随新订单规则固定，不改变已有订单。")}
-        </Typography.Text>
-      </>
-    ),
+        </Typography.Text> : null}
+        </>
+      );
+    },
   },
   {
     key: "fulfillment",
     title: "领取与归还",
     description: "领取和归还时的检查与缓冲要求。",
-    render: ({ t }) => (
+    render: ({ t, category }) => (
       <Row gutter={12}>
         <Col span={12}>
           <Form.Item
@@ -181,7 +194,7 @@ export const RULE_SECTIONS: RuleSection[] = [
           <Form.Item
             name={["fulfillment", "evidenceRequired"]}
             label="必须影像证据"
-            tooltip="作用：开启后领取/归还检查必须上传照片或视频。默认关闭，关闭时证据可选。"
+            tooltip="开启后，服务端会校验领取/归还提交中至少有一份属于当前订单的有效图片或视频文件；仅填写本地路径或任意文字不算证据。"
             valuePropName="checked"
           >
             <Switch />
@@ -373,7 +386,7 @@ export const RULE_SECTIONS: RuleSection[] = [
     key: "cancellation-overdue",
     title: "取消、爽约与逾期",
     description: "客户提前取消、过期未取、逾期归还时如何计费；金额按下单时的规则版本冻结。",
-    render: ({ t }) => (
+    render: ({ t, category }) => (
       <Row gutter={12}>
         <Col span={8}>
           <Form.Item
@@ -402,15 +415,13 @@ export const RULE_SECTIONS: RuleSection[] = [
             <InputNumber min={0} style={{ width: "100%" }} />
           </Form.Item>
         </Col>
-        <Col span={8}>
-          <Form.Item
-            name={["cancellation", "weatherExceptionEnabled"]}
-            label="天气例外"
-            tooltip="作用：开启后天气或不可抗力可按例外免收取消费并留痕。默认关闭。"
-            valuePropName="checked"
-          >
-            <Switch />
-          </Form.Item>
+        <Col span={24}>
+          <Alert
+            type="info"
+            showIcon
+            title={t("天气/不可抗力免取消费暂未支持")}
+            description={t("当前不提供自动免取消费开关。特殊情况须通过费用人工审核记录依据，不会仅凭天气标记自动减免费用。")}
+          />
         </Col>
         <Col span={8}>
           <Form.Item
@@ -476,7 +487,7 @@ export const RULE_SECTIONS: RuleSection[] = [
             label="逾期收费"
             tooltip="不收取＝不计逾期费；按小时＝按已购单位折算小时价；按下一计费周期＝按逾期占用的计价周期数；租金倍数＝原租金固定倍率；人工核定＝转人工处理；按小时折日＝宽限后按小时比例、超过阈值转日费。"
           >
-            <Select options={selectOptions(overdueFeeModeLabels, ["none", "hourly", "next_period", "multiplier", "manual_review", "hourly_to_daily"], t)} />
+            <Select options={selectOptions(overdueFeeModeLabels, ["none", "hourly", "next_period", "multiplier", "manual_review", ...(category.businessModel.pricingUnits.includes("day_24h") ? ["hourly_to_daily"] : [])], t)} />
           </Form.Item>
         </Col>
         <Col span={8}>
@@ -618,15 +629,13 @@ export const RULE_SECTIONS: RuleSection[] = [
     description: "损坏定责与下单前的资质门槛。",
     render: ({ t }) => (
       <Row gutter={12}>
-        <Col span={8}>
-          <Form.Item
-            name={["damage", "manualReviewRequired"]}
-            label="损坏人工核定"
-            tooltip="作用：开启后损坏费用须人工核定才能计入，不自动收取。默认关闭。"
-            valuePropName="checked"
-          >
-            <Switch />
-          </Form.Item>
+        <Col span={24}>
+          <Alert
+            type="info"
+            showIcon
+            title={t("损坏费用始终人工核定")}
+            description={t("损坏及异常费用必须经人工核定并保留审核记录后才能进入应收；首期不支持关闭此保护。")}
+          />
         </Col>
         <Col span={8}>
           <Form.Item
@@ -735,9 +744,12 @@ export function seedFormFromRule(
     tax: config.tax ?? { rate: 0, inclusive: true },
     cancellation: {
       ...(config.cancellation ?? {}),
+      // 天气自动免取消费没有审批链；草稿编辑统一落到当前支持的关闭状态。
+      weatherExceptionEnabled: false,
       // 与服务端及新空间初始化共用默认值；打开旧草稿不能悄悄带入 100% 爽约费。
       noShow: config.cancellation?.noShow ?? defaultRentalNoShowRule(),
     },
+    damage: { ...(config.damage ?? {}), manualReviewRequired: true },
     changeReason: source.status === "draft" ? source.changeReason : "调整租赁业务规则",
   } as RuleForm);
 }
@@ -758,8 +770,24 @@ export function formToConfig(
   );
   const deposit = security.deposit;
   const preauthorization = security.preauthorization;
+  const pricingUnits = new Set(category.businessModel.pricingUnits);
+  const pricing = {
+    ...config.pricing,
+    ...(!pricingUnits.has("shift") ? { shiftHours: undefined, shiftStartHours: undefined } : {}),
+    ...(!(pricingUnits.has("hour") && pricingUnits.has("day_24h"))
+      ? { hourToDayEnabled: false, hourToDayThresholdHours: undefined }
+      : {}),
+  };
+  const overdue = {
+    ...config.overdue,
+    ...(!pricingUnits.has("day_24h") && config.overdue.feeMode === "hourly_to_daily"
+      ? { feeMode: "manual_review" as const, hourlyRatePercent: undefined, dailyAfterHours: undefined }
+      : {}),
+  };
   return {
     ...config,
+    pricing,
+    overdue,
     deposit,
     preauthorization,
     payment: {

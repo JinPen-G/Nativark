@@ -31,7 +31,6 @@ export class SaveSharedCustomerDto implements SaveSharedCustomerRequest {
   @IsString() @IsNotEmpty() name!: string;
   @IsString() @IsNotEmpty() phone!: string;
   @IsOptional() @IsEmail() email?: string;
-  @IsOptional() @IsBoolean() identityVerified?: boolean;
   @IsOptional() @IsString() @IsNotEmpty() identityNo?: string;
   @IsOptional() @IsIn(CUSTOMER_GENDERS) gender?: SaveSharedCustomerRequest["gender"];
   @IsOptional() @IsDateString() birthday?: string;

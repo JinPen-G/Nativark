@@ -1,7 +1,8 @@
 import { ArrowLeftOutlined, CheckCircleOutlined, DollarOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type AdjustRentalInspectionExceptionRequest, type ApplyRentalOrderChangeRequest, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type PreviewRentalOrderChangeRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalDeliveryAddressSnapshot, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOfflinePaymentMethod, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition, type RentalOrderChangePreview } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Checkbox, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from "antd";
+import { Alert, App, Button, Card, Checkbox, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, Upload } from "antd";
+import type { UploadFile, UploadProps } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -12,6 +13,7 @@ import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { OrderAllocationPanel } from "./OrderAllocationPanel";
 import { OrderDocumentsPanel } from "./OrderDocumentsPanel";
+import { CarrierShipmentPanel } from "./CarrierShipmentPanel";
 import { FEE_REVIEW_STATUS_COLORS, FEE_REVIEW_TYPE_LABELS, feeReviewStatusText, hasPendingFeeReview } from "./orderFeeReview";
 import { serviceOccurrenceNetAmount, serviceOccurrenceOriginText } from "./orderServiceOccurrence";
 
@@ -124,6 +126,7 @@ export function RentalOrderDetailPage() {
   const operationToken = operationSession?.id === id ? operationSession.token : sessionStorage.getItem(`rental-operation:${id}`) ?? undefined;
   const setOperationToken = (token?: string) => { if (token) sessionStorage.setItem(`rental-operation:${id}`, token); else sessionStorage.removeItem(`rental-operation:${id}`); setOperationSession({ id, token }); };
   const [inspection, setInspection] = useState<RentalInspectionTemplate>();
+  const [carrierEvidenceFiles, setCarrierEvidenceFiles] = useState<UploadFile<{ id: string; mimeType: string }>[]>([]);
   const [inspectionReturnItems, setInspectionReturnItems] = useState<Array<{ allocationId: string; quantity: number }>>();
   const [inspectionClosing, setInspectionClosing] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -168,6 +171,7 @@ export function RentalOrderDetailPage() {
   const order = useQuery({ queryKey: ["rental-core", "order", id], queryFn: () => rentalCoreApi.order(id), enabled: Boolean(id) });
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
   const templates = useQuery({ queryKey: ["rental-core", "templates"], queryFn: () => rentalCoreApi.inspectionTemplates() });
+  const carrierShipment = useQuery({ queryKey: ["rental-core", "carrier-shipment", id], queryFn: () => rentalCoreApi.carrierShipmentEvents(id), enabled: Boolean(id && order.data?.fulfillmentMode === "carrier_shipping") });
   const groups = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
   const pricingGroups = useQuery({ queryKey: ["rental-core", "pricing-groups"], queryFn: rentalCoreApi.pricingGroups, enabled: postPickupExchangeOpen });
   const exchangeAssetCandidates = useQuery({
@@ -184,8 +188,13 @@ export function RentalOrderDetailPage() {
   const refresh = async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id] }), queryClient.invalidateQueries({ queryKey: ["rental-core", "orders"] })]); };
   useEffect(() => {
     // Modal 挂载后再清空表单，避免在 Form 尚未连接时 resetFields 产生运行时告警。
-    if (inspection) inspectionForm.resetFields();
-  }, [inspection, inspectionForm]);
+    if (inspection) {
+      inspectionForm.resetFields();
+      if (inspection.stage === "pickup" && order.data?.fulfillmentMode === "carrier_shipping") {
+        inspectionForm.setFieldValue("carrierActualAt", dayjs());
+      }
+    }
+  }, [inspection, inspectionForm, order.data?.fulfillmentMode]);
   useEffect(() => {
     // Form.List 所在的 Modal 是按需挂载的，必须等它打开后再写初始行，
     // 否则 Ant Design 会报 form instance 尚未连接到 Form。
@@ -217,6 +226,7 @@ export function RentalOrderDetailPage() {
       inspectionForm.resetFields();
       setInspection(undefined);
       setInspectionReturnItems(undefined);
+      setCarrierEvidenceFiles([]);
     } catch (error) {
       // 释放失败时保留 token 和表单，避免界面关闭后订单仍被本账号锁住，
       // 也避免误导操作员以为已经结束办理。
@@ -230,7 +240,8 @@ export function RentalOrderDetailPage() {
     if (!template) { message.error(t("未配置有效的交接检查模板，请先在经营设置中配置")); return false; }
     try {
       const result = await rentalCoreApi.operationLock(id, "acquire", operationToken);
-      setOperationToken(result.token); await refresh(); setInspectionReturnItems(returnItems); setInspection(template); return true;
+      setOperationToken(result.token); await refresh(); setInspectionReturnItems(returnItems); setCarrierEvidenceFiles([]); setInspection(template);
+      return true;
     } catch { message.error(t("其他人员正在办理，或订单状态已变化，请刷新后重试")); return false; }
   };
   const action = useMutation({ mutationFn: (type: "confirm" | "allocate") => type === "confirm" ? rentalCoreApi.confirmOrder(id) : rentalCoreApi.allocateOrder(id), onSuccess: async () => { await refresh(); message.success(t("订单状态已更新")); }, onError: () => message.error(t("操作失败，请检查状态、库存或优惠券")) });
@@ -263,7 +274,44 @@ export function RentalOrderDetailPage() {
   // "又还了一批"和"同一批的网络重试"。在 mutationFn 里生成，与资金操作同一范式——
   // React Query 默认不重试 mutation，浏览器层的网络重试不会重跑这段 JS。
   const partialReturn = useMutation({ mutationFn: (input: { items: Array<{ allocationId: string; quantity: number }> }) => rentalCoreApi.partialReturnOrder(id, { ...input, batchNo: crypto.randomUUID() }, operationToken), onSuccess: async () => { setPartialReturnOpen(false); setOperationToken(undefined); await refresh(); message.success(t("部分归还已完成，剩余项目继续在租")); }, onError: () => message.error(t("部分归还失败；最后一批请使用归还检查或整单归还")) });
-  const inspect = useMutation({ mutationFn: (values: Record<string, unknown> & { attachments?: string[]; exceptions?: CreateRentalInspectionRequest["exceptions"] }) => { const { attachments, exceptions, ...results } = values; return rentalCoreApi.createInspection(id, { templateId: inspection!.id, results, returnItems: inspectionReturnItems, returnBatchNo: inspectionReturnItems?.length ? crypto.randomUUID() : undefined, attachments, exceptions }, operationToken); }, onSuccess: async () => { const wasPartialReturn = Boolean(inspectionReturnItems?.length); inspectionForm.resetFields(); setInspection(undefined); setInspectionReturnItems(undefined); setOperationToken(undefined); await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "inspections"] }), queryClient.invalidateQueries({ queryKey: ["rental-core", "work-orders", id] }), queryClient.invalidateQueries({ queryKey: ["rental-core", "stock-dispositions", id] })]); message.success(wasPartialReturn ? t("本批归还检查已保存，剩余项目继续在租") : t("检查记录已保存；异常建议须由结算人员审核后才计费")); }, onError: (error: Error) => message.error(error.message || t("检查提交失败")) });
+  const inspect = useMutation({
+    mutationFn: (values: Record<string, unknown> & { attachments?: string[]; attachmentsText?: string; exceptions?: CreateRentalInspectionRequest["exceptions"]; carrierActualAt?: Dayjs }) => {
+      const { attachments, attachmentsText, exceptions, carrierActualAt, ...results } = values;
+      const typedAttachments = [
+        ...(attachments ?? []),
+        ...(attachmentsText?.split(/[\n,]/u).map((item) => item.trim()).filter(Boolean) ?? []),
+        ...carrierEvidenceFiles.filter((file) => file.status === "done").map((file) => file.response?.id).filter((assetId): assetId is string => Boolean(assetId))
+      ];
+      return rentalCoreApi.createInspection(id, {
+        templateId: inspection!.id, results, returnItems: inspectionReturnItems,
+        returnBatchNo: inspectionReturnItems?.length ? crypto.randomUUID() : undefined,
+        attachments: [...new Set(typedAttachments)], exceptions,
+        carrierActualAt: carrierActualAt?.toISOString()
+      }, operationToken);
+    },
+    onSuccess: async () => {
+      const wasPartialReturn = Boolean(inspectionReturnItems?.length);
+      inspectionForm.resetFields(); setInspection(undefined); setInspectionReturnItems(undefined); setCarrierEvidenceFiles([]); setOperationToken(undefined);
+      await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: ["rental-core", "order", id, "inspections"] }), queryClient.invalidateQueries({ queryKey: ["rental-core", "work-orders", id] }), queryClient.invalidateQueries({ queryKey: ["rental-core", "stock-dispositions", id] }), queryClient.invalidateQueries({ queryKey: ["rental-core", "carrier-shipment", id] })]);
+      message.success(wasPartialReturn ? t("本批归还检查已保存，剩余项目继续在租") : t("检查记录已保存；异常建议须由结算人员审核后才计费"));
+    },
+    onError: (error: Error) => message.error(error.message || t("检查提交失败"))
+  });
+  const carrierEvidenceUploadRequest: UploadProps["customRequest"] = async (options) => {
+    try {
+      const file = options.file as File;
+      const session = await rentalCoreApi.createCarrierEvidenceUploadSession(id, { fileName: file.name, mimeType: file.type, sizeBytes: file.size, idempotencyKey: crypto.randomUUID() });
+      if (session.mode === "provider") {
+        if (!session.uploadUrl) throw new Error(t("文件平台未返回上传地址"));
+        const uploaded = await fetch(session.uploadUrl, { method: "PUT", headers: session.uploadHeaders, body: file });
+        if (!uploaded.ok) throw new Error(t("承运凭证上传失败"));
+      }
+      const asset = await rentalCoreApi.completeCarrierEvidenceUpload(id, session.sessionId);
+      options.onSuccess?.({ id: asset.id, mimeType: asset.mimeType });
+    } catch (error) {
+      options.onError?.(error instanceof Error ? error : new Error(t("承运凭证上传失败")));
+    }
+  };
   const fundingAction = useMutation({
     mutationFn: async (values: { amount?: number; reason: string; failureCode?: string; paymentMethod?: RentalOfflinePaymentMethod }) => {
       const operation = fundingOperation!;
@@ -516,6 +564,9 @@ export function RentalOrderDetailPage() {
     onError: (error: Error) => message.error(error.message || t("服务退款失败，请检查已批准金额和资金余额"))
   });
   const detail = order.data;
+  const isCarrierShipping = detail?.fulfillmentMode === "carrier_shipping";
+  const carrierSignedRecorded = carrierShipment.data?.some((event) => event.type === "customer_signed") ?? false;
+  const carrierHandoffRecorded = carrierShipment.data?.some((event) => event.type === "customer_handoff") ?? false;
   const exchangeableAllocations = (detail?.status === RentalCoreOrderStatus.Renting ? detail.allocations : []).filter((allocation) => {
     if (allocation.status !== "picked_up") return false;
     const line = detail?.lines.find((row) => row.id === allocation.orderLineId);
@@ -616,15 +667,16 @@ export function RentalOrderDetailPage() {
         {canOperate && noShowNoticeReady && <Button danger loading={confirmNoShow.isPending} onClick={() => { noShowForm.resetFields(); setNoShowOpen(true); }}>{t(noShowFinalReady ? "确认爽约" : "提前确认爽约")}</Button>}
         {canOperate && detail.status === RentalCoreOrderStatus.PickupOverdue && <Button loading={resumePickup.isPending} onClick={() => modal.confirm({ title: t("恢复为待领取？"), content: t("客户返回领取时，将订单从待确认爽约恢复为待领取；系统会复核资产与库存仍可交付，不改动金额或资金。"), okText: t("确认恢复"), cancelText: t("暂不处理"), onOk: () => resumePickup.mutateAsync() })}>{t("恢复领取")}</Button>}
         {((canPickup && detail.status === RentalCoreOrderStatus.ReadyForPickup) || (canReturn && detail.status === RentalCoreOrderStatus.Renting)) && <Button loading={operationLock.isPending} onClick={() => operationLock.mutate(operationToken ? "release" : "acquire")}>{t(operationToken ? "结束办理" : "开始 / 接手办理")}</Button>}
-        {canPickup && detail.status === RentalCoreOrderStatus.ReadyForPickup && ((detail.ruleSnapshot?.fulfillment?.pickupInspectionRequired ?? true) ? <Button type="primary" icon={<SafetyCertificateOutlined />} onClick={() => beginInspection("pickup")}>{t(profile.data?.terminology.pickupLabel ?? "领取")}{t("检查")}</Button> : <Button type="primary" onClick={() => handover.mutate("pickup")}>{t("直接完成")}{t(profile.data?.terminology.pickupLabel ?? "领取")}</Button>)}
-        {canReturn && detail.status === RentalCoreOrderStatus.Renting && ((detail.ruleSnapshot?.fulfillment?.returnInspectionRequired ?? true) ? <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => beginInspection("return")}>{t(profile.data?.terminology.returnLabel ?? "归还")}{t("检查")}</Button> : <Button type="primary" onClick={() => handover.mutate("return")}>{t("直接完成")}{t(profile.data?.terminology.returnLabel ?? "归还")}</Button>)}
-        {canReturn && detail.status === RentalCoreOrderStatus.Renting && (detail.allocations.filter((allocation) => allocation.status === "picked_up").length > 1 || detail.allocations.some((allocation) => allocation.status === "picked_up" && allocation.quantity > 1)) && <Button onClick={() => setPartialReturnOpen(true)}>{t(detail.ruleSnapshot?.fulfillment?.returnInspectionRequired ? "部分归还检查" : "部分归还")}</Button>}
+        {canPickup && detail.status === RentalCoreOrderStatus.ReadyForPickup && ((isCarrierShipping || (detail.ruleSnapshot?.fulfillment?.pickupInspectionRequired ?? true)) ? <Button type="primary" icon={<SafetyCertificateOutlined />} onClick={() => beginInspection("pickup")}>{t(profile.data?.terminology.pickupLabel ?? "领取")}{t("检查")}</Button> : <Button type="primary" onClick={() => handover.mutate("pickup")}>{t("直接完成")}{t(profile.data?.terminology.pickupLabel ?? "领取")}</Button>)}
+        {canReturn && detail.status === RentalCoreOrderStatus.Renting && ((isCarrierShipping || (detail.ruleSnapshot?.fulfillment?.returnInspectionRequired ?? true)) ? <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => beginInspection("return")}>{t(profile.data?.terminology.returnLabel ?? "归还")}{t("检查")}</Button> : <Button type="primary" onClick={() => handover.mutate("return")}>{t("直接完成")}{t(profile.data?.terminology.returnLabel ?? "归还")}</Button>)}
+        {canReturn && !isCarrierShipping && detail.status === RentalCoreOrderStatus.Renting && (detail.allocations.filter((allocation) => allocation.status === "picked_up").length > 1 || detail.allocations.some((allocation) => allocation.status === "picked_up" && allocation.quantity > 1)) && <Button onClick={() => setPartialReturnOpen(true)}>{t(detail.ruleSnapshot?.fulfillment?.returnInspectionRequired ? "部分归还检查" : "部分归还")}</Button>}
         {detail.status === RentalCoreOrderStatus.Settling && canSettleFunding && <Button type="primary" loading={settle.isPending} disabled={settleBlockers.length > 0} title={settleBlockers.length ? `${t("服务端会拒绝关单：")}${settleBlockers.join(locale === "en-US" ? ", " : "、")}` : undefined} onClick={() => settle.mutate()}>{t("结算并关闭订单")}</Button>}
-        {canExtend && [RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting].includes(detail.status) && <Button icon={<RetweetOutlined />} onClick={() => { extensionForm.resetFields(); setExtensionPreview(undefined); extensionForm.setFieldsValue({ newEndAt: dayjs(detail.effectiveEndAt ?? detail.endAt).add(1, "day") }); setExtensionOpen(true); }}>{t("续租 / 延期")}</Button>}
+        {canExtend && [RentalCoreOrderStatus.ReadyForPickup, RentalCoreOrderStatus.Renting].includes(detail.status) && (!isCarrierShipping || (detail.status === RentalCoreOrderStatus.Renting && carrierSignedRecorded && !carrierHandoffRecorded)) && <Button icon={<RetweetOutlined />} onClick={() => { extensionForm.resetFields(); setExtensionPreview(undefined); extensionForm.setFieldsValue({ newEndAt: dayjs(detail.effectiveEndAt ?? detail.endAt).add(1, "day") }); setExtensionOpen(true); }}>{t("续租 / 延期")}</Button>}
         {canOperate && detail.status === RentalCoreOrderStatus.Renting && exchangeableAllocations.length > 0 && <Button onClick={() => { postPickupExchangeForm.resetFields(); postPickupExchangeForm.setFieldsValue({ priceBasis: "original_order_price", originalDisposition: "return_to_warehouse", customerConfirmed: false }); setPostPickupExchangePreview(undefined); setExchangeTarget(undefined); setPostPickupExchangeOpen(true); }}>{t("办理换货")}</Button>}
         {canOperate && [RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && (detail.lines.filter((line) => (line.cancelledQuantity ?? 0) < line.quantity).length > 1 || detail.lines.some((line) => ["quantity", "consumable"].includes(line.inventoryMode) && line.quantity - (line.cancelledQuantity ?? 0) > 1) || cancelableServiceCount > 0) && <Button onClick={() => { partialCancelForm.resetFields(); setPartialCancelPreview(undefined); setPartialCancelOpen(true); }}>{t("部分取消商品 / 服务")}</Button>}
         {canCancel && [RentalCoreOrderStatus.Draft, RentalCoreOrderStatus.Reserved, RentalCoreOrderStatus.ReadyForPickup].includes(detail.status) && <Button danger onClick={() => setCancelOpen(true)}>{t("取消并按规则计费")}</Button>}
       </Space>
+      {isCarrierShipping && <CarrierShipmentPanel order={detail} />}
       <OrderAllocationPanel key={detail.id} order={detail} />
       <Card><Descriptions column={{ xs: 1, md: 2, xl: 4 }} items={[
         { key: "status", label: t("状态"), children: <Tag>{t({ draft: "待确认", reserved: "已确认", pickup_overdue: "待确认爽约", ready_for_pickup: "待领取", renting: "租赁中", return_inspection: "归还检查", settling: "待结算", completed: "已完成", cancelled: "已取消", no_show: "已爽约" }[detail.status])}</Tag> },
@@ -923,7 +975,30 @@ export function RentalOrderDetailPage() {
         ]} />
       </Card>}
     </Space>}</QueryState>
-     <Modal title={inspectionReturnItems?.length ? t("部分归还检查") : inspection?.name} open={Boolean(inspection)} onCancel={closeInspection} onOk={() => inspectionForm.submit()} confirmLoading={inspect.isPending || inspectionClosing} cancelButtonProps={{ loading: inspectionClosing, disabled: inspectionClosing || inspect.isPending }} okButtonProps={{ disabled: inspectionClosing }} closable={!inspectionClosing && !inspect.isPending} destroyOnHidden>{inspection && <Form form={inspectionForm} layout="vertical" onFinish={(values) => { const { attachmentsText, exceptionCode, exceptionDescription, exceptionAllocationId, exceptionChargeAmount, ...results } = values as Record<string, unknown> & { attachmentsText?: string; exceptionCode?: string; exceptionDescription?: string; exceptionAllocationId?: string; exceptionChargeAmount?: number }; const attachments = attachmentsText?.split(/[\n,]/u).map((item) => item.trim()).filter(Boolean); const exceptions = exceptionDescription ? [{ code: exceptionCode || "damage", description: exceptionDescription, allocationId: exceptionAllocationId, chargeAmount: Number(exceptionChargeAmount) || undefined, evidenceAttachments: attachments }] : undefined; inspect.mutate({ ...results, attachments, exceptions }); }}>{inspectionReturnItems?.length ? <Alert type="info" showIcon title={`${t("本次检查并归还")} ${inspectionReturnItems.length}${t("个分配项")}`} description={t("只会释放本批实物；剩余项目继续在租。最后一批请使用整单归还，以统一结算逾期和提前归还。")} style={{ marginBottom: 16 }} /> : null}{inspection.fields.map((field) => <Form.Item key={field.code} name={field.code} label={field.label} rules={inspectionFieldRules(field, t)}>{field.type === "number" ? <InputNumber suffix={field.unit} style={{ width: "100%" }} /> : field.type === "boolean" ? <Select options={[{ value: true, label: t("是 / 正常") }, { value: false, label: t("否 / 异常") }]} /> : <Input />}</Form.Item>)}<Form.Item name="attachmentsText" label={t("照片/证据引用")}><Input.TextArea rows={3} placeholder={t("每行填写一个文件服务返回的引用；不填写本地文件路径")} /></Form.Item>{inspection.stage === "return" && <Card size="small" title={t("异常与损坏建议（可选)")}><Alert type="info" showIcon title={t("检查员只记录事实和建议损失额，不会直接向客户计费。")} style={{ marginBottom: 12 }} /><Form.Item name="exceptionCode" label={t("异常编码")}><Input placeholder="damage / missing_item / cleaning" /></Form.Item><Form.Item name="exceptionDescription" label={t("异常说明")}><Input.TextArea rows={2} /></Form.Item><Form.Item name="exceptionAllocationId" label={t("关联实物/分配项")} extra={t("不选择时按本批全部归还资源处理")}><Select allowClear placeholder={t("选择本次归还的具体资源")} options={(detail?.allocations ?? []).filter((allocation) => allocation.status === "picked_up" && (!inspectionReturnItems?.length || inspectionReturnItems.some((item) => item.allocationId === allocation.id))).map((allocation) => ({ value: allocation.id, label: `${allocation.assetNo ?? groups.data?.find((group) => group.id === allocation.itemGroupId)?.name ?? t("数量库存")} · ${allocation.id}` }))} /></Form.Item><Form.Item name="exceptionChargeAmount" label={t("建议损失金额")}><InputNumber min={0} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item></Card>}</Form>}</Modal>
+     <Modal title={inspectionReturnItems?.length ? t("部分归还检查") : inspection?.name} open={Boolean(inspection)} onCancel={closeInspection} onOk={() => inspectionForm.submit()} confirmLoading={inspect.isPending || inspectionClosing} cancelButtonProps={{ loading: inspectionClosing, disabled: inspectionClosing || inspect.isPending }} okButtonProps={{ disabled: inspectionClosing }} closable={!inspectionClosing && !inspect.isPending} destroyOnHidden>
+      {inspection && <Form form={inspectionForm} layout="vertical" onFinish={(values) => {
+        const { attachmentsText, exceptionCode, exceptionDescription, exceptionAllocationId, exceptionChargeAmount, ...results } = values as Record<string, unknown> & { attachmentsText?: string; exceptionCode?: string; exceptionDescription?: string; exceptionAllocationId?: string; exceptionChargeAmount?: number };
+        const textEvidence = attachmentsText?.split(/[\n,]/u).map((item) => item.trim()).filter(Boolean) ?? [];
+        const uploadedEvidence = carrierEvidenceFiles.filter((file) => file.status === "done").map((file) => file.response?.id).filter((assetId): assetId is string => Boolean(assetId));
+        if (isCarrierShipping && uploadedEvidence.length === 0) {
+          message.error(t("承运订单必须上传本次签收或仓库验收凭证"));
+          return;
+        }
+        const attachments = [...new Set([...textEvidence, ...uploadedEvidence])];
+        const exceptions = exceptionDescription ? [{ code: exceptionCode || "damage", description: exceptionDescription, allocationId: exceptionAllocationId, chargeAmount: Number(exceptionChargeAmount) || undefined, evidenceAttachments: attachments }] : undefined;
+        inspect.mutate({ ...results, attachments, exceptions });
+      }}>
+        {inspectionReturnItems?.length ? <Alert type="info" showIcon title={`${t("本次检查并归还")} ${inspectionReturnItems.length}${t("个分配项")}`} description={t("只会释放本批实物；剩余项目继续在租。最后一批请使用整单归还，以统一结算逾期和提前归还。")} style={{ marginBottom: 16 }} /> : null}
+        {inspection.fields.map((field) => <Form.Item key={field.code} name={field.code} label={field.label} rules={inspectionFieldRules(field, t)}>{field.type === "number" ? <InputNumber suffix={field.unit} style={{ width: "100%" }} /> : field.type === "boolean" ? <Select options={[{ value: true, label: t("是 / 正常") }, { value: false, label: t("否 / 异常") }]} /> : <Input />}</Form.Item>)}
+        {isCarrierShipping && inspection.stage === "pickup" && <Form.Item name="carrierActualAt" label={t("客户实际签收时间（起租时间）")} rules={[{ required: true, message: t("请填写凭证对应的客户实际签收时间") }, { validator: async (_, value: Dayjs | undefined) => { if (value && value.isAfter(dayjs())) throw new Error(t("签收时间不能晚于当前时间")); } }]}><DatePicker showTime style={{ width: "100%" }} disabledDate={(date) => date.isAfter(dayjs(), "day")} /></Form.Item>}
+        {isCarrierShipping ? <Form.Item label={t("签收 / 实物验收凭证")} required extra={t("请上传与登记时间相符的客户签收或仓库验收凭证；没有可靠凭证时不要提交。") }>
+          <Upload accept="image/jpeg,image/png,image/webp,application/pdf" multiple maxCount={10} fileList={carrierEvidenceFiles} customRequest={carrierEvidenceUploadRequest} onChange={({ fileList }) => setCarrierEvidenceFiles(fileList as UploadFile<{ id: string; mimeType: string }>[])}>
+            <Button icon={<PlusOutlined />}>{t("上传凭证（图片或 PDF）")}</Button>
+          </Upload>
+        </Form.Item> : <Form.Item name="attachmentsText" label={t("照片/证据引用")}><Input.TextArea rows={3} placeholder={t("每行填写一个文件服务返回的引用；不填写本地文件路径")} /></Form.Item>}
+        {inspection.stage === "return" && <Card size="small" title={t("异常与损坏建议（可选)")}><Alert type="info" showIcon title={t("检查员只记录事实和建议损失额，不会直接向客户计费。")} style={{ marginBottom: 12 }} /><Form.Item name="exceptionCode" label={t("异常编码")}><Input placeholder="damage / missing_item / cleaning" /></Form.Item><Form.Item name="exceptionDescription" label={t("异常说明")}><Input.TextArea rows={2} /></Form.Item><Form.Item name="exceptionAllocationId" label={t("关联实物/分配项")} extra={t("不选择时按本批全部归还资源处理")}><Select allowClear placeholder={t("选择本次归还的具体资源")} options={(detail?.allocations ?? []).filter((allocation) => allocation.status === "picked_up" && (!inspectionReturnItems?.length || inspectionReturnItems.some((item) => item.allocationId === allocation.id))).map((allocation) => ({ value: allocation.id, label: `${allocation.assetNo ?? groups.data?.find((group) => group.id === allocation.itemGroupId)?.name ?? t("数量库存")} · ${allocation.id}` }))} /></Form.Item><Form.Item name="exceptionChargeAmount" label={t("建议损失金额")}><InputNumber min={0} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item></Card>}
+      </Form>}
+     </Modal>
      <Modal title={t("续租 / 延期")} open={extensionOpen} onCancel={() => { setExtensionOpen(false); setExtensionPreview(undefined); }} destroyOnHidden width={640}
       footer={[
         <Button key="cancel" onClick={() => { setExtensionOpen(false); setExtensionPreview(undefined); }}>{t("取消")}</Button>,

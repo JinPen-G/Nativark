@@ -11,7 +11,8 @@ export const FEE_REVIEW_TYPE_LABELS: Record<RentalOrderFeeReview["type"], string
   overdue: "逾期费（规则要求人工核价）",
   early_return_refund: "提前归还退款（规则要求人工审核）",
   service_refund: "增值服务退款（规则要求人工审核）",
-  refund_due: "取消/爽约后待退款（押金/预授权/多收租金）"
+  refund_due: "取消/爽约后待退款（押金/预授权/多收租金）",
+  carrier_rental_refund: "承运寄送租期重算核减（规则要求人工审核）"
 };
 
 export const FEE_REVIEW_STATUS_COLORS: Record<RentalOrderFeeReview["status"], string> = {
@@ -30,7 +31,7 @@ export function feeReviewStatusText(row: Pick<RentalOrderFeeReview, "status" | "
   if (row.status === "pending") return "待裁定";
   if (row.status === "rejected") return "已驳回（不计费/不退款）";
   if (row.type === "refund_due") return "已批准：退款/释放已获认可，待资金区办理";
-  return row.type === "early_return_refund" || row.type === "service_refund"
+  return row.type === "early_return_refund" || row.type === "service_refund" || row.type === "carrier_rental_refund"
     ? "已批准：应收已核减，待实际退款"
     : "已批准：已计入应收";
 }

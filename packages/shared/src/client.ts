@@ -12,7 +12,8 @@ import type {
   RentalFulfillmentMode,
   RentalOfflinePaymentMethod,
   RentalPaymentMethod,
-  RentalPricingUnit
+  RentalPricingUnit,
+  RentalCategoryTerminology
 } from "./core";
 import type { CompleteFileUploadRequest, FileDownloadUrlSummary, FileUploadSessionSummary } from "./infrastructure";
 
@@ -474,6 +475,10 @@ export interface ClientCatalogResponse {
   tenantCode: string;
   workspace: ClientWorkspaceSummary;
   categoryCode: string;
+  /** 当前品类服务端术语；客户端不得用其它品类的固定取还文案代替。 */
+  terminology: Pick<RentalCategoryTerminology, "itemLabel" | "itemGroupLabel" | "assetLabel" | "fulfillmentLabel" | "pickupLabel" | "returnLabel" | "deliveryLabel" | "usageMetricLabel">;
+  /** 当前品类允许使用的计价单位及统一显示名；month 明确为 30 日月，usage 使用品类读数名称。 */
+  pricingUnits: Array<{ code: RentalPricingUnit; label: string }>;
   timeZone: string;
   items: ClientCatalogItem[];
   pricingGroups: ClientCatalogPricingGroup[];
@@ -492,6 +497,8 @@ export interface ClientCatalogResponse {
     deliveryDestination: "customer_address" | "tenant_location";
     /** 配送方式的品类文案（车辆=送车到点、物品=配送到家）；未配置时客户端回退通用「配送」。 */
     deliveryLabel?: string;
+    pickupLabel: string;
+    returnLabel: string;
   };
 }
 

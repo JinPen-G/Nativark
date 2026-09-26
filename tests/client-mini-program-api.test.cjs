@@ -218,6 +218,7 @@ test("create-order replay uses assertClientOrder before returning a cached resul
   const service = api({
     core: { getOrder: async () => coreOrder({ customerId: "other" }), persist: fail },
     business: { getQuote: () => ({ request: { customerId: context.customerId, lines: [] } }), persist: fail },
+    auth: { listPublicWorkspaces: async () => ({ workspaces: [{ code: context.workspaceCode }] }) },
     orders: { createOrder: async () => ({ order: coreOrder({ customerId: "other" }), replayed: true }) }
   });
   await assert.rejects(service.createOrder(context, { quoteId: "quote-a" }), status(404));
@@ -303,6 +304,11 @@ test("OpenAPI exposes minimal typed index and JSAPI contract, documents unavaila
   assert.equal(payment.responses["200"].content["application/json"].schema.properties.data.$ref, "#/components/schemas/ClientPaymentIntentResponse");
   assert.match(payment.summary, /wechat_identity_required/u);
   const schemas = OPENAPI_DOCUMENT.components.schemas;
+  assert.deepEqual(schemas.ClientCatalog.properties.terminology.required,
+    ["itemLabel", "itemGroupLabel", "assetLabel", "fulfillmentLabel", "pickupLabel", "returnLabel"]);
+  assert.equal(schemas.ClientCatalog.properties.pricingUnits.items.additionalProperties, false);
+  assert.deepEqual(schemas.ClientCatalog.properties.fulfillment.required,
+    ["enabledModes", "allowDifferentReturnLocation", "deliveryDestination", "pickupLabel", "returnLabel"]);
   assert.deepEqual(schemas.ClientWechatJsapiParameters.required, ["timeStamp", "nonceStr", "package", "signType", "paySign"]);
   assert.equal(schemas.ClientPaymentIntentResponse.properties.jsapi.$ref, "#/components/schemas/ClientWechatJsapiParameters");
   assert.equal(schemas.MyOrderIndex.additionalProperties, false);
@@ -320,6 +326,10 @@ test("catalog projects a starting price from the effective space rates and publi
   ];
   const business = {
     profile: { categoryCode: "camera", terminology: {} },
+    category: {
+      terminology: { itemLabel: "器材", itemGroupLabel: "器材型号", assetLabel: "器材资产", fulfillmentLabel: "器材门店", pickupLabel: "取机", returnLabel: "还机", deliveryLabel: "配送到家", usageMetricLabel: "快门次数" },
+      businessModel: { pricingUnits: ["hour", "day_24h", "calendar_day", "week", "usage", "package"], deliveryDestination: "customer_address" }
+    },
     settings: { calendar: { timeZone: "Asia/Shanghai" }, pricing: { currency: "CNY" }, fulfillment: { enabledModes: ["store_pickup_return", "delivery"], allowDifferentReturnLocation: true } },
     groups: [
       { id: "cam", code: "CAM", name: "相机", status: "enabled", inventoryMode: "serialized", images: [], attributes: {} },
@@ -348,9 +358,54 @@ test("catalog projects a starting price from the effective space rates and publi
   assert.deepEqual(byId.lens.startingPrice, { amount: 80, unit: "day_24h", currency: "CNY" }, "负数费率不参与");
   assert.equal(byId.tripod.startingPrice, undefined, "停用定价分组不提供起价，也不以 0 元替代");
   assert.equal(byId.old, undefined);
+  assert.equal(catalog.terminology.pickupLabel, "取机");
+  assert.deepEqual(catalog.pricingUnits.map((unit) => unit.label), ["小时", "24 小时", "自然日", "周", "快门次数", "整包"]);
   assert.deepEqual(catalog.locations, [{ id: "l1", code: "L1", name: "静安店", status: "enabled", address: "南京西路 1266 号", latitude: 31.2231, longitude: 121.4737, businessHours: "10:00-20:00", contactPhone: "021-000000", capabilities: ["pickup", "return"] }]);
-  assert.deepEqual(catalog.fulfillment, { enabledModes: ["store_pickup_return", "delivery"], allowDifferentReturnLocation: true }, "履约方式投影透传经营空间设置");
+  assert.deepEqual(catalog.fulfillment, { enabledModes: ["store_pickup_return", "delivery"], allowDifferentReturnLocation: true, deliveryDestination: "customer_address", deliveryLabel: "配送到家", pickupLabel: "取机", returnLabel: "还机" }, "履约方式和品类术语由服务端透传");
   for (const location of catalog.locations) for (const field of ["operatorId", "operatorType", "operatorName", "settlementMode"]) assert.equal(field in location, false);
-  const noVersion = api({ context: () => business, auth: { listPublicWorkspaces: async () => ({ workspaces: [] }) }, business: { listSpaceRatesAt: async () => [], listServices: () => [], listDiscountPlans: () => [], effectiveRuleAt: () => undefined } });
+  const noVersion = api({ context: () => business, auth: { listPublicWorkspaces: async () => ({ workspaces: [{ code: "camera" }] }) }, business: { listSpaceRatesAt: async () => [], listServices: () => [], listDiscountPlans: () => [], effectiveRuleAt: () => undefined } });
   assert.ok((await noVersion.catalog(context)).items.every((item) => item.startingPrice === undefined));
+
+  const construction = {
+    ...business,
+    profile: { categoryCode: "construction", terminology: {} },
+    category: {
+      terminology: { itemLabel: "设备", itemGroupLabel: "设备型号", assetLabel: "设备资产", fulfillmentLabel: "设备仓", pickupLabel: "出库", returnLabel: "入库", deliveryLabel: "送达工地", usageMetricLabel: "工时" },
+      businessModel: { pricingUnits: ["hour", "shift", "calendar_day", "week", "month", "usage", "package"], deliveryDestination: "tenant_location" }
+    }
+  };
+  const constructionContext = { ...context, workspaceCode: "construction", categoryCode: "construction" };
+  const constructionCatalog = await api({
+    context: () => construction,
+    auth: { listPublicWorkspaces: async () => ({ workspaces: [{ code: "construction" }] }) },
+    business: { listSpaceRatesAt: async () => [], listServices: () => [], listDiscountPlans: () => [], effectiveRuleAt: () => undefined }
+  }).catalog(constructionContext);
+  assert.equal(constructionCatalog.terminology.pickupLabel, "出库");
+  assert.equal(constructionCatalog.pricingUnits.find((unit) => unit.code === "usage")?.label, "工时");
+  assert.equal(constructionCatalog.pricingUnits.find((unit) => unit.code === "month")?.label, "30 日月");
+  assert.equal(constructionCatalog.fulfillment.deliveryDestination, "tenant_location");
+
+  const categoryCases = [
+    { code: "camping", terminology: { itemLabel: "装备", itemGroupLabel: "装备型号", assetLabel: "装备资产", fulfillmentLabel: "装备仓", pickupLabel: "领用", returnLabel: "归还", deliveryLabel: "配送到家" }, usageMetricLabel: undefined, pricingUnits: ["calendar_day", "night", "week"], deliveryDestination: "customer_address" },
+    { code: "vehicle", terminology: { itemLabel: "车辆", itemGroupLabel: "车辆型号", assetLabel: "车辆", fulfillmentLabel: "门店", pickupLabel: "取车", returnLabel: "还车", deliveryLabel: "送车到点", usageMetricLabel: "里程" }, pricingUnits: ["hour", "day_24h", "calendar_day", "week", "month", "usage"], deliveryDestination: "tenant_location" }
+  ];
+  for (const item of categoryCases) {
+    const row = {
+      ...business,
+      profile: { categoryCode: item.code, terminology: {} },
+      category: {
+        terminology: { ...item.terminology, ...(item.usageMetricLabel ? { usageMetricLabel: item.usageMetricLabel } : {}) },
+        businessModel: { pricingUnits: item.pricingUnits, deliveryDestination: item.deliveryDestination }
+      }
+    };
+    const projected = await api({
+      context: () => row,
+      auth: { listPublicWorkspaces: async () => ({ workspaces: [{ code: item.code }] }) },
+      business: { listSpaceRatesAt: async () => [], listServices: () => [], listDiscountPlans: () => [], effectiveRuleAt: () => undefined }
+    }).catalog({ ...context, categoryCode: item.code, workspaceCode: item.code });
+    assert.equal(projected.terminology.pickupLabel, item.terminology.pickupLabel, `${item.code}: 当前空间取件术语来自服务端品类定义`);
+    assert.deepEqual(projected.pricingUnits.map((unit) => unit.code), item.pricingUnits, `${item.code}: 客户端只接收该品类允许的单位`);
+    assert.equal(projected.pricingUnits.find((unit) => unit.code === "usage")?.label, item.terminology.usageMetricLabel, `${item.code}: 使用量名称不得借用其它品类的固定词`);
+    assert.equal(projected.pricingUnits.find((unit) => unit.code === "month")?.label, item.pricingUnits.includes("month") ? "30 日月" : undefined);
+  }
 });

@@ -261,6 +261,7 @@ export class RentalAllocationService
     await this.facts.lockOrder(tenantId, orderId, tx);
     const order = await this.facts.findOrder(tenantId, orderId, tx);
     if (!order) throw new NotFoundException("订单不存在");
+    await this.core.assertCarrierOrderResourcesMutable(tenantId, order, tx, true);
     if (
       ![
         RentalCoreOrderStatus.Reserved,

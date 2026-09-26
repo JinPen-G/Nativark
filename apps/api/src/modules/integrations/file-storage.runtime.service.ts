@@ -18,8 +18,8 @@ import { createAliyunOssV4Url } from "./aliyun-oss-v4";
 type JsonRecord = Record<string, unknown>;
 
 export interface FileBusinessOwner {
-  businessType: string;
-  businessId: string;
+  businessType?: string;
+  businessId?: string;
   uploadScene?: string;
   /** 订单、型号等空间业务必须带当前空间；客户资料和资质按租户共享。 */
   workspaceId?: string;
@@ -525,7 +525,7 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     const session = await this.prisma.fileUploadSession.findFirst({ where: { id: sessionId, tenantId } });
     if (!session) throw new NotFoundException("上传会话不存在");
     const asset = await this.prisma.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } });
-    if (!asset || (owner && !this.matchesOwner(asset, owner))) throw new NotFoundException("上传会话不存在或不属于当前业务对象");
+    if (!asset || (owner && (!this.matchesOwner(asset, owner) || (owner.actorUserId && asset.uploadedBy !== owner.actorUserId)))) throw new NotFoundException("上传会话不存在或不属于当前业务对象");
     if (owner) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
     if (session.status === "completed") return this.assetSummary(asset);
     if (session.status !== "pending_upload") throw new ConflictException("上传会话已失效");
@@ -565,8 +565,12 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
 
   async downloadUrl(tenantId: string, fileAssetId: string, owner?: FileBusinessOwner): Promise<FileDownloadUrlSummary> {
     const asset = await this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, status: "active" } });
-    if (asset && owner && !this.matchesOwner(asset, owner)) throw new NotFoundException("文件不存在或不属于当前业务对象");
+    if (asset && owner && (!this.matchesOwner(asset, owner) || (owner.actorUserId && asset.uploadedBy !== owner.actorUserId))) throw new NotFoundException("文件不存在或不属于当前业务对象");
     if (!asset) throw new NotFoundException("文件不存在或尚未完成上传");
+    if (asset.businessType === "customer" && asset.uploadScene === "identity-verification"
+      && (owner?.businessType !== "customer" || !owner.businessId || owner.uploadScene !== "identity-verification")) {
+      throw new NotFoundException("文件不存在或不属于当前授权的客户实名核验资料");
+    }
     if (owner) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
     if (asset.storageProvider === "local_mock") {
       if (process.env.NODE_ENV === "production") {
@@ -586,7 +590,9 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
   }
 
   private matchesOwner(asset: { businessType: string; businessId: string | null; uploadScene: string }, owner: FileBusinessOwner) {
-    return asset.businessType === owner.businessType && asset.businessId === owner.businessId && (!owner.uploadScene || asset.uploadScene === owner.uploadScene);
+    return (!owner.businessType || asset.businessType === owner.businessType)
+      && (!owner.businessId || asset.businessId === owner.businessId)
+      && (!owner.uploadScene || asset.uploadScene === owner.uploadScene);
   }
 
   private matchesUploadRequest(

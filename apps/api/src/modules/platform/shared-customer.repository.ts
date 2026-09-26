@@ -24,7 +24,6 @@ export interface CreateCustomerProfileInput {
   name: string;
   phone: string;
   email?: string;
-  identityVerified?: boolean;
   /** 只接受调用方已脱敏的值；本层绝不落明文证件号。 */
   identityNoMasked?: string | null;
   /** 基础画像主数据（全部选填）。birthday 传 ISO 日期串 YYYY-MM-DD 或 null。 */
@@ -167,7 +166,6 @@ export class SharedCustomerRepository {
         name: input.name,
         phone: input.phone,
         email: input.email,
-        identityVerified: input.identityVerified,
         // 只存掩码，绝不落明文证件号。
         identityNoMasked: input.identityNo ? this.mask(input.identityNo) : null,
         qualifications: input.qualifications,
@@ -197,7 +195,8 @@ export class SharedCustomerRepository {
         phone: input.phone.trim(),
         phoneMasked: this.mask(input.phone),
         email: input.email?.trim() || null,
-        identityVerified: input.identityVerified ?? false,
+        // 实名只能由独立核验记录驱动，普通建档/编辑请求不能自行置真。
+        identityVerified: false,
         identityNoMasked: input.identityNoMasked ?? null,
         gender: input.gender ?? null,
         // birthday 以 @db.Date 存储；只取日期部分，避免时区把日期挪到相邻一天。
@@ -228,6 +227,11 @@ export class SharedCustomerRepository {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") return undefined;
       throw error;
     }
+  }
+
+  /** 实名核验事实更新入口；只能由核验服务在审核记录同一事务内调用。 */
+  async setIdentityVerificationState(tenantId: string, customerId: string, identityVerified: boolean, tx?: SharedCustomerTx) {
+    return this.db(tx).customerProfile.updateMany({ where: { tenantId, id: customerId }, data: { identityVerified } });
   }
 
   async upsertCorporateProfile(input: {

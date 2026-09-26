@@ -8,10 +8,13 @@ interface SchemaObject {
   enum?: string[];
   minLength?: number;
   maxLength?: number;
+  pattern?: string;
   minimum?: number;
   maximum?: number;
   items?: SchemaObject;
   minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
   oneOf?: SchemaObject[];
   properties?: Record<string, SchemaObject>;
   required?: string[];
@@ -531,6 +534,56 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     ["businessModule", "businessType", "businessId", "fileName", "mimeType", "sizeBytes", "uploadScene", "idempotencyKey"]
   ),
   CompleteFileUploadRequest: objectOf({ checksum: stringSchema }),
+  CreateCustomerIdentityUploadRequest: objectOf(
+    { fileName: stringSchema, mimeType: { type: "string", enum: ["image/jpeg", "image/png", "image/webp", "application/pdf"] }, sizeBytes: { type: "integer", minimum: 1, maximum: 20971520 }, idempotencyKey: stringSchema },
+    ["fileName", "mimeType", "sizeBytes", "idempotencyKey"]
+  ),
+  CreateCarrierEvidenceUploadRequest: objectOf(
+    { fileName: { type: "string", maxLength: 180 }, mimeType: { type: "string", enum: ["image/jpeg", "image/png", "image/webp", "application/pdf"] }, sizeBytes: { type: "integer", minimum: 1, maximum: 20971520 }, idempotencyKey: { type: "string", maxLength: 191 } },
+    ["fileName", "mimeType", "sizeBytes", "idempotencyKey"],
+    false
+  ),
+  CreateRentalCarrierShipmentEventRequest: objectOf(
+    {
+      type: { type: "string", enum: ["outbound_dispatched", "customer_handoff"] },
+      occurredAt: { type: "string", format: "date-time" },
+      carrierName: { type: "string", minLength: 1, maxLength: 120 },
+      trackingNumber: { type: "string", minLength: 1, maxLength: 191 },
+      evidenceFileAssetIds: { type: "array", minItems: 1, uniqueItems: true, items: stringSchema }
+    },
+    ["type", "occurredAt", "carrierName", "trackingNumber", "evidenceFileAssetIds"],
+    false
+  ),
+  RentalCarrierShipmentEventSummary: objectOf(
+    {
+      id: stringSchema, tenantId: stringSchema, workspaceId: stringSchema, orderId: stringSchema,
+      type: { type: "string", enum: ["outbound_dispatched", "customer_signed", "customer_handoff", "warehouse_received"] },
+      occurredAt: { type: "string", format: "date-time" }, carrierName: stringSchema, trackingNumber: stringSchema,
+      evidenceFileAssetIds: arrayOf(stringSchema), recordedBy: stringSchema, createdAt: { type: "string", format: "date-time" }
+    },
+    ["id", "tenantId", "workspaceId", "orderId", "type", "occurredAt", "carrierName", "trackingNumber", "evidenceFileAssetIds", "recordedBy", "createdAt"],
+    false
+  ),
+  RentalCarrierShipmentEventList: arrayOf("RentalCarrierShipmentEventSummary"),
+  SaveCustomerIdentityVerificationRequest: objectOf(
+    {
+      credentialType: { type: "string", pattern: "^[a-z][a-z0-9_-]{0,31}$" },
+      result: { type: "string", enum: ["verified", "rejected", "revoked"] },
+      evidenceFileAssetIds: { type: "array", uniqueItems: true, minItems: 0, maxItems: 5, items: stringSchema },
+      reason: { type: "string", minLength: 1, maxLength: 500 }
+    },
+    ["credentialType", "result", "evidenceFileAssetIds", "reason"]
+  ),
+  CustomerIdentityVerificationSummary: objectOf(
+    {
+      id: stringSchema, tenantId: stringSchema, customerId: stringSchema, credentialType: stringSchema,
+      result: { type: "string", enum: ["verified", "rejected", "revoked"] }, evidenceFileAssetIds: { type: "array", items: stringSchema },
+      reason: stringSchema, reviewerUserId: stringSchema, reviewerName: stringSchema,
+      reviewedAt: { type: "string", format: "date-time" }, verifiedAt: { type: "string", format: "date-time" }
+    },
+    ["id", "tenantId", "customerId", "credentialType", "result", "evidenceFileAssetIds", "reason", "reviewerUserId", "reviewerName", "reviewedAt"]
+  ),
+  CustomerIdentityVerificationList: { type: "array", items: ref("CustomerIdentityVerificationSummary") },
   FileUploadSessionSummary: objectOf(
     {
       sessionId: stringSchema,
@@ -1424,14 +1477,32 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       workspace: ref("ClientWorkspaceSummary"),
       categoryCode: stringSchema,
       timeZone: stringSchema,
+      terminology: objectOf({
+        itemLabel: stringSchema,
+        itemGroupLabel: stringSchema,
+        assetLabel: stringSchema,
+        fulfillmentLabel: stringSchema,
+        pickupLabel: stringSchema,
+        returnLabel: stringSchema,
+        deliveryLabel: stringSchema,
+        usageMetricLabel: stringSchema
+      }, ["itemLabel", "itemGroupLabel", "assetLabel", "fulfillmentLabel", "pickupLabel", "returnLabel"], false),
+      pricingUnits: arrayOf(objectOf({ code: stringSchema, label: stringSchema }, ["code", "label"], false)),
       items: arrayOf(objectSchema),
       pricingGroups: arrayOf(objectSchema),
       services: arrayOf(objectSchema),
       locations: arrayOf(objectSchema),
       discountPlans: arrayOf(objectSchema),
-      fulfillment: objectOf({ enabledModes: arrayOf(stringSchema), allowDifferentReturnLocation: booleanSchema }, ["enabledModes", "allowDifferentReturnLocation"], false)
+      fulfillment: objectOf({
+        enabledModes: arrayOf(stringSchema),
+        allowDifferentReturnLocation: booleanSchema,
+        deliveryDestination: stringSchema,
+        deliveryLabel: stringSchema,
+        pickupLabel: stringSchema,
+        returnLabel: stringSchema
+      }, ["enabledModes", "allowDifferentReturnLocation", "deliveryDestination", "pickupLabel", "returnLabel"], false)
     },
-    ["apiVersion", "tenantCode", "workspace", "categoryCode", "timeZone", "items", "pricingGroups", "services", "locations", "discountPlans", "fulfillment"]
+    ["apiVersion", "tenantCode", "workspace", "categoryCode", "timeZone", "terminology", "pricingUnits", "items", "pricingGroups", "services", "locations", "discountPlans", "fulfillment"]
   ),
   ClientAvailabilityRequest: objectOf(
     {
@@ -1710,6 +1781,12 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("post", "/api/files", "Files", "createFileAsset", "Create file asset", ["system:integration:manage"]),
   backlogOperation("post", "/api/files/upload-sessions", "Files", "createFileUploadSession", "Create a tenant-scoped presigned upload session", ["system:integration:manage"], true, "CreateFileUploadSessionRequest", "FileUploadSessionSummary"),
   backlogOperation("post", "/api/files/upload-sessions/{id}/complete", "Files", "completeFileUpload", "Confirm a presigned upload and activate its file metadata", ["system:integration:manage"], true, "CompleteFileUploadRequest", "GenericObject"),
+  backlogOperation("post", "/api/files/customer-identity/{customerId}/upload-sessions", "Files", "createCustomerIdentityUploadSession", "Create a customer identity evidence upload session bound to the tenant customer", ["rental-os:member:manage", "rental-os:customer:reveal-sensitive"], true, "CreateCustomerIdentityUploadRequest", "FileUploadSessionSummary"),
+  backlogOperation("post", "/api/files/customer-identity/{customerId}/upload-sessions/{id}/complete", "Files", "completeCustomerIdentityUpload", "Complete a customer identity evidence upload bound to the same customer and uploader", ["rental-os:member:manage", "rental-os:customer:reveal-sensitive"], true, "CompleteFileUploadRequest", "GenericObject"),
+  backlogOperation("get", "/api/files/customer-identity/{customerId}/{fileAssetId}/download-url", "Files", "customerIdentityDownloadUrl", "Create a short-lived customer identity evidence URL; also requires sensitive-data reveal and member-view permissions", ["rental-os:member:view", "rental-os:customer:reveal-sensitive"], true, undefined, "FileDownloadUrlSummary"),
+  backlogOperation("post", "/api/files/rental-orders/{orderId}/carrier-evidence/upload-sessions", "Files", "createCarrierEvidenceUploadSession", "Create an order/workspace-bound carrier shipment evidence upload session", ["rental-os:order:operate"], true, "CreateCarrierEvidenceUploadRequest", "FileUploadSessionSummary"),
+  backlogOperation("post", "/api/files/rental-orders/{orderId}/carrier-evidence/upload-sessions/{id}/complete", "Files", "completeCarrierEvidenceUpload", "Complete a carrier evidence upload for the same carrier-shipping order", ["rental-os:order:operate"], true, "CompleteFileUploadRequest", "GenericObject"),
+  backlogOperation("get", "/api/files/rental-orders/{orderId}/carrier-evidence/{fileAssetId}/download-url", "Files", "carrierEvidenceDownloadUrl", "Create a short-lived download URL for evidence attached to the current carrier-shipping order", ["rental-os:order:view"], true, undefined, "FileDownloadUrlSummary"),
   backlogOperation("post", "/api/files/upload-sessions/cleanup-expired", "Files", "cleanupExpiredFileUploads", "Invalidate expired upload sessions and clean their provider objects", ["system:integration:manage"], true, undefined, "FileUploadCleanupSummary"),
   backlogOperation("get", "/api/files/{id}/download-url", "Files", "getFileDownloadUrl", "Create a short-lived tenant-scoped download URL", ["system:integration:manage"], true, undefined, "FileDownloadUrlSummary"),
   backlogOperation("get", "/api/integrations/adapter-logs", "Integrations", "listAdapterLogs", "List adapter logs", ["system:integrations:manage"]),
@@ -1755,6 +1832,8 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("post", "/api/platform/customers", "Platform", "registerSharedCustomer", "Register a tenant member using the shared review policy", ["rental-os:member:manage"]),
   backlogOperation("get", "/api/platform/customers/{customerId}", "Platform", "getCustomerDetail", "Get customer detail with masked sensitive fields", ["rental-os:member:view"]),
   backlogOperation("get", "/api/platform/customers/{customerId}/profile", "Platform", "getCustomerProfileOverview", "Get the categorized customer profile overview including addresses, qualifications, benefits and order summaries", ["rental-os:member:view"]),
+  backlogOperation("get", "/api/platform/customers/{customerId}/identity-verifications", "Platform", "customerIdentityVerifications", "List append-only customer identity verification records; requires member-view and sensitive-data reveal permissions", ["rental-os:customer:reveal-sensitive"], true, undefined, "CustomerIdentityVerificationList"),
+  backlogOperation("post", "/api/platform/customers/{customerId}/identity-verifications", "Platform", "saveCustomerIdentityVerification", "Record an identity verification decision with tenant/customer-bound evidence and reviewer attribution; requires member-manage and sensitive-data reveal permissions", ["rental-os:member:manage"], true, "SaveCustomerIdentityVerificationRequest", "CustomerIdentityVerificationSummary"),
   backlogOperation("put", "/api/platform/customers/{customerId}/addresses", "Platform", "saveCustomerProfileAddress", "Create or update a customer delivery address; the response keeps the phone masked", ["rental-os:member:manage"]),
   backlogOperation("delete", "/api/platform/customers/{customerId}/addresses/{addressId}", "Platform", "removeCustomerProfileAddress", "Soft-delete a customer delivery address", ["rental-os:member:manage"]),
   backlogOperation("post", "/api/platform/customers/{customerId}/account", "Platform", "ensureCustomerAccount", "Open a login account for the customer (idempotent)", ["rental-os:member:manage"]),
@@ -2554,6 +2633,15 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   {
     method: "get", path: "/api/rental/v1/orders/{id}", tag: "RentalCore", operationId: "getRentalCoreOrder",
     summary: "Get Rental Core order", permissions: ["rental-os:order:view"], responseSchema: "GenericObject"
+  },
+  {
+    method: "get", path: "/api/rental/v1/orders/{id}/carrier-shipment/events", tag: "RentalCore", operationId: "listRentalCarrierShipmentEvents",
+    summary: "List carrier shipment milestones and their evidence for one carrier-shipping order", permissions: ["rental-os:order:view"], responseSchema: "RentalCarrierShipmentEventList"
+  },
+  {
+    method: "post", path: "/api/rental/v1/orders/{id}/carrier-shipment/events", tag: "RentalCore", operationId: "createRentalCarrierShipmentEvent",
+    summary: "Record outbound dispatch or customer carrier handoff with evidence; rental and inventory effects are derived from verified milestones", permissions: ["rental-os:order:operate"], requestSchema: "CreateRentalCarrierShipmentEventRequest", responseSchema: "RentalCarrierShipmentEventSummary",
+    parameters: [{ name: "Idempotency-Key", in: "header", required: true, schema: { type: "string", minLength: 1, maxLength: 191 } }]
   },
   {
     method: "get", path: "/api/rental/v1/orders/{id}/delivery-address/reveal", tag: "RentalCore", operationId: "revealRentalOrderDeliveryAddress",

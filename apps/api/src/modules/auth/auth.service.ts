@@ -21,6 +21,7 @@ import type {
 } from "@rental-os/shared";
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { hashOpaqueToken } from "../../common/password";
+import { PrismaService } from "../database/prisma.service";
 import { ClientChannelProfileService } from "../client/client-channel-profile.service";
 import { PlatformService } from "../platform/platform.service";
 import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.service";
@@ -55,6 +56,7 @@ export type AuthAudience = "operator" | "staff";
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private readonly loginFailures = new Map<string, LoginFailureState>();
+  private failedLoginPruneCounter = 0;
   private readonly accessTtlSeconds = 15 * 60;
   private readonly refreshTtlMs = 30 * 24 * 60 * 60 * 1000;
 
@@ -65,7 +67,9 @@ export class AuthService {
     // 继续用两个参数构造本服务；缺失时返回空启用集（fail-closed），不回退到品类声明。
     @Optional() private readonly capabilities?: WorkspaceCapabilityService,
     // 主题色是展示配置，不应阻断登录；可选依赖也兼容无数据库的内存测试模式。
-    @Optional() private readonly clientChannelProfile?: ClientChannelProfileService
+    @Optional() private readonly clientChannelProfile?: ClientChannelProfileService,
+    // AUTH-LOCKOUT-01：持久化跨进程失败计数；测试/纯内存模式继续使用进程内后备实现。
+    @Optional() private readonly prisma?: PrismaService
   ) {}
 
   async login(input: LoginRequest, audience: AuthAudience = "operator"): Promise<LoginResponse> {
@@ -76,7 +80,7 @@ export class AuthService {
     }
     const security = await this.platformService.getSecurityBaseline();
     const loginKey = `${tenantCode}:${account}`.toLowerCase();
-    this.assertNotLocked(loginKey);
+    await this.assertNotLocked(loginKey, security.loginRateLimit);
 
     const loginResult = await this.platformService.findUserForLogin(
       tenantCode,
@@ -84,7 +88,7 @@ export class AuthService {
       input.password
     );
     if (!loginResult) {
-      this.recordFailedLogin(loginKey, security.loginRateLimit);
+      await this.recordFailedLogin(loginKey, security.loginRateLimit);
       await this.platformService.recordSecurityAudit({
         tenantCode,
         action: "auth.login.failed",
@@ -95,7 +99,7 @@ export class AuthService {
       throw new UnauthorizedException("租户、账号或密码不正确");
     }
 
-    this.loginFailures.delete(loginKey);
+    await this.clearFailedLogin(loginKey);
     await this.platformService.recordSecurityAudit({
       tenantId: loginResult.tenant.tenantId,
       action: "auth.login.success",
@@ -126,7 +130,14 @@ export class AuthService {
     const security = await this.platformService.getSecurityBaseline();
     this.assertPasswordPolicy(password, security.passwordPolicy);
     await this.platformService.setLocalDemoAccountPassword(password);
-    this.loginFailures.clear();
+    // 重置这三个演示账号时，只清理它们各自的失败计数。清空整张表会让其他租户
+    // 的锁定状态被本地开发操作解除，既越出目标范围，也会削弱跨账号暴力破解保护。
+    const demoLoginKeyHashes = ["demo:admin", "demo2:admin", "platform:admin"]
+      .map((key) => this.loginFailureKeyHash(key));
+    for (const key of ["demo:admin", "demo2:admin", "platform:admin"]) this.loginFailures.delete(key);
+    if (this.usesPersistentLoginFailureStore()) {
+      await this.prisma!.authLoginFailure.deleteMany({ where: { loginKeyHash: { in: demoLoginKeyHashes } } });
+    }
     return {
       reset: true,
       accounts: ["demo/admin", "demo2/admin", "platform/admin"]
@@ -578,7 +589,35 @@ export class AuthService {
     if (policy.disallowDefaultPassword && password === "123456") throw new BadRequestException("不能使用默认演示密码");
   }
 
-  private assertNotLocked(loginKey: string) {
+  private usesPersistentLoginFailureStore() {
+    const dataSource = this.configService.get<string>("PLATFORM_DATA_SOURCE") ?? process.env.PLATFORM_DATA_SOURCE ?? "mysql";
+    return Boolean(this.prisma) && dataSource.trim().toLowerCase() === "mysql";
+  }
+
+  private loginFailureKeyHash(loginKey: string) {
+    return createHmac("sha256", `${this.tokenSecret()}:login-lockout-v1`).update(loginKey).digest("hex");
+  }
+
+  private async assertNotLocked(
+    loginKey: string,
+    policy: { enabled: boolean; maxFailures: number; windowMinutes: number; lockMinutes: number }
+  ) {
+    if (!policy.enabled) return;
+    if (this.usesPersistentLoginFailureStore()) {
+      const loginKeyHash = this.loginFailureKeyHash(loginKey);
+      const row = await this.prisma!.authLoginFailure.findUnique({ where: { loginKeyHash } });
+      const now = new Date();
+      if (!row) return;
+      if (row.expiresAt <= now) {
+        await this.prisma!.authLoginFailure.deleteMany({ where: { loginKeyHash, revision: row.revision } });
+        return;
+      }
+      if (row.lockedUntil && row.lockedUntil > now) {
+        const minutes = Math.ceil((row.lockedUntil.getTime() - now.getTime()) / 60_000);
+        throw new UnauthorizedException(`登录失败次数过多，请 ${minutes} 分钟后再试`);
+      }
+      return;
+    }
     const state = this.loginFailures.get(loginKey);
     if (state?.lockedUntil && state.lockedUntil > Date.now()) {
       const minutes = Math.ceil((state.lockedUntil - Date.now()) / 60_000);
@@ -586,11 +625,51 @@ export class AuthService {
     }
   }
 
-  private recordFailedLogin(
+  private async recordFailedLogin(
     loginKey: string,
     policy: { enabled: boolean; maxFailures: number; windowMinutes: number; lockMinutes: number }
   ) {
     if (!policy.enabled) return;
+    if (this.usesPersistentLoginFailureStore()) {
+      const loginKeyHash = this.loginFailureKeyHash(loginKey);
+      const now = new Date();
+      const windowMs = Math.max(1, policy.windowMinutes) * 60_000;
+      const lockMs = Math.max(1, policy.lockMinutes) * 60_000;
+      const expiresAtFor = (lockedUntil?: Date | null) => new Date(Math.max(now.getTime() + windowMs, lockedUntil?.getTime() ?? 0));
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const current = await this.prisma!.authLoginFailure.findUnique({ where: { loginKeyHash } });
+        if (!current) {
+          const lockedUntil = policy.maxFailures <= 1 ? new Date(now.getTime() + lockMs) : null;
+          try {
+            await this.prisma!.authLoginFailure.create({
+              data: { loginKeyHash, failureCount: 1, firstFailedAt: now, lockedUntil, expiresAt: expiresAtFor(lockedUntil), revision: 1 }
+            });
+          } catch (error) {
+            if ((error as { code?: string })?.code === "P2002") {
+              if (attempt === 19) throw new InternalServerErrorException("登录失败保护状态并发冲突，请稍后重试");
+              continue;
+            }
+            throw error;
+          }
+          break;
+        }
+        const resetWindow = now.getTime() - current.firstFailedAt.getTime() > windowMs;
+        const failureCount = resetWindow ? 1 : current.failureCount + 1;
+        const firstFailedAt = resetWindow ? now : current.firstFailedAt;
+        const lockedUntil = failureCount >= policy.maxFailures ? new Date(now.getTime() + lockMs) : null;
+        const updated = await this.prisma!.authLoginFailure.updateMany({
+          where: { loginKeyHash, revision: current.revision },
+          data: { failureCount, firstFailedAt, lockedUntil, expiresAt: expiresAtFor(lockedUntil), revision: { increment: 1 } }
+        });
+        if (updated.count === 1) break;
+        if (attempt === 19) throw new InternalServerErrorException("登录失败保护状态并发冲突，请稍后重试");
+      }
+      this.failedLoginPruneCounter += 1;
+      if (this.failedLoginPruneCounter % 128 === 0) {
+        await this.prisma!.authLoginFailure.deleteMany({ where: { expiresAt: { lt: now } } });
+      }
+      return;
+    }
     const now = Date.now();
     const current = this.loginFailures.get(loginKey);
     const state = current && now - current.firstFailedAt <= policy.windowMinutes * 60_000
@@ -599,5 +678,12 @@ export class AuthService {
     state.count += 1;
     if (state.count >= policy.maxFailures) state.lockedUntil = now + policy.lockMinutes * 60_000;
     this.loginFailures.set(loginKey, state);
+  }
+
+  private async clearFailedLogin(loginKey: string) {
+    this.loginFailures.delete(loginKey);
+    if (this.usesPersistentLoginFailureStore()) {
+      await this.prisma!.authLoginFailure.deleteMany({ where: { loginKeyHash: this.loginFailureKeyHash(loginKey) } });
+    }
   }
 }

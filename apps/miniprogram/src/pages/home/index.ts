@@ -158,7 +158,7 @@ Page({
       const catalog = await loadCatalog(serviceCode, force);
       if (token !== this.loadVersion || version !== contextVersion()) return;
       const items = searchItems(catalog.items, "", "").slice(0, HOT_LIMIT);
-      const cards = items.map(toItemCard);
+      const cards = items.map((item) => toItemCard(item, catalog));
       // 附近服务点必须先有真实定位：留住门店列表，按当前是否已授权渲染门店或提示。
       this.locations = catalog.locations;
       this.setData({

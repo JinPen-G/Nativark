@@ -22,6 +22,7 @@ import {
   type UpdateRentalServiceOccurrenceRequest,
   type CorrectRentalInspectionUsageRequest,
   type RentalAvailabilityRequest,
+  type CreateRentalCarrierShipmentEventRequest,
   type RentalCapability,
   type RentalFulfillmentMode,
   type InitiateRentalFundingRequest,
@@ -322,6 +323,27 @@ export class RentalHandoverDto implements RentalHandoverRequest {
   @IsNotEmpty()
   @MaxLength(191)
   handoverSignatureFileAssetId?: string;
+
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  carrierActualAt?: string;
+}
+
+export class CreateRentalCarrierShipmentEventDto implements CreateRentalCarrierShipmentEventRequest {
+  @IsIn(["outbound_dispatched", "customer_handoff"])
+  type!: "outbound_dispatched" | "customer_handoff";
+
+  @IsISO8601({ strict: true })
+  occurredAt!: string;
+
+  @IsString() @IsNotEmpty() @MaxLength(120)
+  carrierName!: string;
+
+  @IsString() @IsNotEmpty() @MaxLength(191)
+  trackingNumber!: string;
+
+  @IsArray() @ArrayNotEmpty() @IsString({ each: true }) @MaxLength(191, { each: true })
+  evidenceFileAssetIds!: string[];
 }
 
 /**
@@ -473,6 +495,10 @@ export class CreateRentalInspectionDto implements CreateRentalInspectionRequest 
   @IsString()
   @IsNotEmpty()
   templateId!: string;
+
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  carrierActualAt?: string;
 
   /** 检查结果的键由模板字段决定，无法在此静态声明，故只校验是对象。 */
   @IsObject()

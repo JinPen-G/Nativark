@@ -162,6 +162,7 @@ model Tenant {
   rentalRuleVersions                RentalRuleVersion[]
   rentalRuleVersionAudits           RentalRuleVersionAudit[]
   rentalFundingEvents               RentalFundingEvent[]
+  rentalCarrierShipmentEvents       RentalCarrierShipmentEvent[]
   rentalOfflinePaymentRegistrations RentalOfflinePaymentRegistration[]
   rentalPaymentIntents              RentalPaymentIntent[]
   rentalPaymentRefunds              RentalPaymentRefund[]
@@ -179,6 +180,7 @@ model Tenant {
   capabilityHookAudits              CapabilityHookAuditEntry[]
   rentalIdempotencyRecords          RentalOrderIdempotencyRecord[]
   customerProfiles                  CustomerProfile[]
+  customerIdentityVerifications     CustomerIdentityVerification[]
   memberships                       CustomerMembership[]
   customerAccounts                  CustomerAccount[]
   customerCorporateProfiles         CustomerCorporateProfile[]
@@ -288,6 +290,7 @@ model BusinessWorkspace {
   rentalRuleVersions                RentalRuleVersion[]
   rentalRuleVersionAudits           RentalRuleVersionAudit[]
   rentalFundingEvents               RentalFundingEvent[]
+  rentalCarrierShipmentEvents       RentalCarrierShipmentEvent[]
   rentalOfflinePaymentRegistrations RentalOfflinePaymentRegistration[]
   rentalPaymentIntents              RentalPaymentIntent[]
   rentalPaymentRefunds              RentalPaymentRefund[]
@@ -478,6 +481,23 @@ model AuthSession {
   @@map("auth_sessions")
 }
 
+/// AUTH-LOCKOUT-01：跨进程共享的运营账号失败登录计数。只存带服务端密钥的登录标识摘要，
+/// 不落租户编码、账号、手机号等原文；expiresAt 供惰性清理过期记录。
+model AuthLoginFailure {
+  id           String   @id @default(uuid())
+  loginKeyHash String   @unique(map: "auth_login_failures_login_key_hash_key") @db.Char(64)
+  failureCount Int      @default(0)
+  firstFailedAt DateTime @db.DateTime(3)
+  lockedUntil  DateTime? @db.DateTime(3)
+  expiresAt    DateTime @db.DateTime(3)
+  revision     Int      @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([expiresAt], map: "auth_login_failures_expires_idx")
+  @@map("auth_login_failures")
+}
+
 model Role {
   id                    String            @id @default(uuid())
   tenantId              String
@@ -606,6 +626,7 @@ model CustomerProfile {
   corporateMembershipsAsCompany  CustomerCorporateMembership[]      @relation("CorporateMembershipCompany")
   corporateMembershipsAsPersonal CustomerCorporateMembership[]      @relation("CorporateMembershipPersonal")
   membershipPlanAssignments      CustomerMembershipPlanAssignment[]
+  identityVerifications          CustomerIdentityVerification[]
 
   /// 供复合外键引用：让「权益/关系必须与客户同租户」可以在库层表达。
   /// 与 BusinessWorkspace 的 (tenantId, id) 同一手法。
@@ -618,6 +639,27 @@ model CustomerProfile {
   @@index([tenantId, status], map: "customer_profiles_tenant_status_idx")
   @@index([tenantId, createdInWorkspaceId, createdByUserId], map: "customer_profiles_creator_scope_idx")
   @@map("customer_profiles")
+}
+
+/// F17：实名结论的只追加审核记录。证件原文不入库；凭证影像通过文件服务保存并按客户权限下载。
+model CustomerIdentityVerification {
+  id                   String          @id @default(uuid())
+  tenantId             String          @db.VarChar(191)
+  tenant               Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId           String          @db.VarChar(191)
+  customer             CustomerProfile @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Cascade)
+  credentialType       String          @db.VarChar(32)
+  result               String          @db.VarChar(16)
+  evidenceFileAssetIds Json
+  reason               String          @db.VarChar(500)
+  reviewerUserId       String          @db.VarChar(191)
+  reviewerName         String          @db.VarChar(120)
+  reviewedAt           DateTime        @db.DateTime(3)
+  verifiedAt           DateTime?       @db.DateTime(3)
+  createdAt            DateTime        @default(now()) @db.DateTime(3)
+
+  @@index([tenantId, customerId, reviewedAt], map: "customer_identity_verifications_customer_time_idx")
+  @@map("customer_identity_verifications")
 }
 
 /// 租户统一会员关系：一个客户在租户内只有一份会员状态和等级。
@@ -2442,12 +2484,16 @@ model RentalOrder {
   /// 配送/上门类（customer_address 品类）订单的收货地址快照（含明文电话）；自取、车辆据点类为空。
   deliveryAddressSnapshot       Json?
   startAt                       DateTime
+  /// SHIP-01：凭客户签收凭证确认的实际租赁起点，仅承运寄送订单使用。
+  actualRentalStartAt           DateTime?
   endAt                         DateTime
   /// 当前约定归还时间：最近一次已生效续租的 newEndAt；没有续租时与 endAt 相同。
   ///
   /// 需求 4.6.9 明确「延期不得直接修改原订单结束时间」，因此 endAt 永远是原始约定，
   /// 逾期判定与占用冲突检查一律读本列。可空：存量订单没有它，读取侧回落到 endAt。
   effectiveEndAt                DateTime?
+  /// SHIP-01：承运寄送订单当前约定归还时点，签收时平移原租期，续租后更新。
+  carrierRentalDueAt            DateTime?
   /// 报价快照：订单已内联保存 quoteNo/版本/规则/费用行，因此不对 rental_quotes 建外键，
   /// 避免把订单生命周期耦合到报价行的存续（报价可过期清理，订单事实必须长存）。
   quoteId                       String
@@ -2534,6 +2580,7 @@ model RentalOrder {
   idempotencyRecords            RentalOrderIdempotencyRecord[]
   serviceReservations           RentalServiceReservation[]
   fundingEvents                 RentalFundingEvent[]
+  carrierShipmentEvents         RentalCarrierShipmentEvent[]
   offlinePaymentRegistrations   RentalOfflinePaymentRegistration[]
   paymentIntents                RentalPaymentIntent[]
   paymentRefunds                RentalPaymentRefund[]
@@ -2622,6 +2669,29 @@ model RentalFundingEvent {
   @@index([tenantId, workspaceId, orderId], map: "rental_funding_events_scope_idx")
   @@index([orderId, instrument, at], map: "rental_funding_events_instrument_idx")
   @@map("rental_funding_events")
+}
+
+/// SHIP-01：承运寄送的只追加里程碑。计租使用签收/揽收事件，库存只在仓库实物验收后释放。
+model RentalCarrierShipmentEvent {
+  id                    String            @id @default(uuid())
+  tenantId              String
+  tenant                Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  workspaceId           String
+  workspace             BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  orderId               String
+  order                 RentalOrder       @relation(fields: [tenantId, workspaceId, orderId], references: [tenantId, workspaceId, id], onDelete: Cascade, map: "rental_carrier_shipment_events_tenant_ws_order_fkey")
+  type                  String            @db.VarChar(32)
+  occurredAt            DateTime
+  carrierName           String            @db.VarChar(120)
+  trackingNumber        String            @db.VarChar(191)
+  evidenceFileAssetIds  Json
+  recordedBy            String            @db.VarChar(191)
+  idempotencyKey        String            @db.VarChar(191)
+  createdAt             DateTime          @default(now())
+
+  @@unique([tenantId, workspaceId, idempotencyKey], map: "rental_carrier_shipment_events_idem_key")
+  @@index([tenantId, workspaceId, orderId, occurredAt], map: "rental_carrier_shipment_events_order_time_idx")
+  @@map("rental_carrier_shipment_events")
 }
 
 /// 员工先登记、具备结算权限的人员再确认；待确认期间不进入任何资金余额。

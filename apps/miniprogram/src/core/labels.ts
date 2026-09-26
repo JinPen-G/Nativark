@@ -25,8 +25,10 @@ const PRICING_UNIT_LABELS: Record<string, string> = {
   calendar_day: "天",
   night: "晚",
   week: "周",
-  month: "月",
-  usage: "次",
+  month: "30 日月",
+  // 具体名称（里程、工时、快门次数）必须优先使用服务端当前品类目录；
+  // 无目录时只显示不误导品类的通用单位。
+  usage: "使用量",
   package: "套餐"
 };
 

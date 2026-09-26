@@ -16,13 +16,16 @@ import type {
   CustomerMembership,
   CustomerProfileOrderQuery,
   CustomerProfileOverview,
+  CustomerIdentityVerificationSummary,
   SaveCustomerProfileAddressRequest,
+  SaveCustomerIdentityVerificationRequest,
   MergeCustomersRequest,
   SaveCustomerContractRequest,
   SaveCustomerCreditRequest,
   SaveCustomerInvoiceProfileRequest,
   SharedCustomerProfile
 } from "@rental-os/shared";
+import type { CreateCustomerIdentityUploadRequest, FileDownloadUrlSummary, FileUploadSessionSummary } from "@rental-os/shared";
 import { request } from "./http";
 
 /**
@@ -40,6 +43,16 @@ export const customerApi = {
   detail: (customerId: string) => request<SharedCustomerProfile>(`/platform/customers/${customerId}`),
   profileOverview: (customerId: string, params?: CustomerProfileOrderQuery) =>
     request<CustomerProfileOverview>(`/platform/customers/${customerId}/profile`, { params }),
+  identityVerifications: (customerId: string) =>
+    request<CustomerIdentityVerificationSummary[]>(`/platform/customers/${customerId}/identity-verifications`),
+  saveIdentityVerification: (customerId: string, data: SaveCustomerIdentityVerificationRequest) =>
+    request<CustomerIdentityVerificationSummary>(`/platform/customers/${customerId}/identity-verifications`, { method: "post", data }),
+  createIdentityUploadSession: (customerId: string, data: CreateCustomerIdentityUploadRequest) =>
+    request<FileUploadSessionSummary>(`/files/customer-identity/${customerId}/upload-sessions`, { method: "post", data }),
+  completeIdentityUpload: (customerId: string, sessionId: string, data?: { checksum?: string }) =>
+    request<{ id: string; mimeType: string; fileName: string }>(`/files/customer-identity/${customerId}/upload-sessions/${sessionId}/complete`, { method: "post", data }),
+  identityDownloadUrl: (customerId: string, fileAssetId: string) =>
+    request<FileDownloadUrlSummary>(`/files/customer-identity/${customerId}/${fileAssetId}/download-url`),
   saveAddress: (customerId: string, data: SaveCustomerProfileAddressRequest) =>
     request<CustomerProfileOverview["addresses"][number]>(`/platform/customers/${customerId}/addresses`, { method: "put", data }),
   removeAddress: (customerId: string, addressId: string) =>

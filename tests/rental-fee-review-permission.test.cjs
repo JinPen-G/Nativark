@@ -117,6 +117,8 @@ ok("四条费用裁定入口都要求 order:fee-review——修复前它们都�
   assert.notEqual(FEE_REVIEW_TYPE_LABELS.overdue, FEE_REVIEW_TYPE_LABELS.early_return_refund);
   assert.match(FEE_REVIEW_TYPE_LABELS.overdue, /逾期/u);
   assert.match(FEE_REVIEW_TYPE_LABELS.early_return_refund, /提前归还/u);
+  assert.match(FEE_REVIEW_TYPE_LABELS.carrier_rental_refund, /承运寄送/u);
+  assert.match(feeReviewStatusText({ status: "approved", type: "carrier_rental_refund" }), /待实际退款/u);
   ok("逾期人工核价与提前归还退款在界面上仍是两类来源，没有被合并成统一审批");
 }
 

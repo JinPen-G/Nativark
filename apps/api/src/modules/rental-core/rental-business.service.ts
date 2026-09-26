@@ -127,11 +127,13 @@ import {
 } from "./calendar-range";
 import { applyPriceAdjustment, assertNoDatetimeOverrideOverlap, assertNoPeriodicOverlap, periodicWindowCoversDate, periodicWindowHits } from "./rental-price-adjustments";
 import { assertTimeBasedOverdueSupported, billedRentalHours, rentalPricingStrategy } from "./rental-pricing-strategy";
+import { categoryPricingRuleError } from "./category-pricing-rule-compatibility";
 import { allocateDiscount, selectDiscountPlans } from "./rental-discount-selection";
 import { resolveQuoteServices } from "./rental-service-catalog";
 import { applyPricingGroupSecurityRateOverrides, computeSecurityAmounts, type SecurityLineInput, type RentalPricingSecurityRateOverride, validateSecurityRateCoverage, validateSecurityRules } from "./rental-security-deposit";
 import { roundMoney } from "./rental-money";
 import { computeEarlyReturnRefund, type EarlyReturnRefund } from "./rental-early-return";
+import { rentalOrderDueAt } from "./rental-carrier-shipment";
 import { extensionPaymentRequired } from "./rental-extension-lifecycle";
 import { NotificationDeliveryUnknownError, TenantIntegrationRuntimeService } from "../integrations/tenant-integration.runtime.service";
 import { effectiveEarlyReturnRule, effectiveExtensionRule, effectiveQuoteValidityMinutes, effectiveTaxRule, inclusiveTaxAmount } from "./rental-rule-defaults";
@@ -5764,6 +5766,14 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   private validateRule(context: BusinessContext, config: RentalRuleConfig) {
+    if (config.cancellation.weatherExceptionEnabled) {
+      throw new BadRequestException("天气免取消费暂未支持，不能发布或保存为已启用状态；特殊情况请通过费用人工审核处理");
+    }
+    if (config.damage.manualReviewRequired !== true) {
+      throw new BadRequestException("损坏费用首期始终需要人工核定，不能关闭人工审核");
+    }
+    const categoryPricingError = categoryPricingRuleError(context.category.businessModel.pricingUnits, config);
+    if (categoryPricingError) throw new BadRequestException(categoryPricingError);
     if (config.pricing?.hourToDayEnabled && (!Number.isFinite(config.pricing.hourToDayThresholdHours) || config.pricing.hourToDayThresholdHours! <= 0 || config.pricing.hourToDayThresholdHours! > 24)) {
       throw new BadRequestException("开启时租转日租时，请填写大于0且不超过24小时的阈值");
     }
@@ -6325,7 +6335,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     tenantId: string,
     context: BusinessContext,
     args: {
-      order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "quoteId" | "depositAmount" | "preAuthAmount" | "serviceSnapshots" | "lines">;
+      order: Pick<RentalOrder, "id" | "startAt" | "endAt" | "effectiveEndAt" | "actualRentalStartAt" | "carrierRentalDueAt" | "quoteId" | "depositAmount" | "preAuthAmount" | "serviceSnapshots" | "lines">;
       previousExtensions?: RentalOrderExtension[];
       lines: Array<Pick<RentalOrderLine, "itemGroupId" | "pricingGroupId" | "quantity"> & Partial<Pick<RentalOrderLine, "id" | "inventoryMode" | "amount">>>;
       newEndAt: string;
@@ -6337,7 +6347,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       locationIds: string[];
       customerType: "personal" | "corporate";
       /** ORDER-CHANGE-01A：取消整行时复用原订单价格快照，但不走续租准入。 */
-      mode?: "line_cancellation" | "post_pickup_exchange";
+      mode?: "line_cancellation" | "post_pickup_exchange" | "carrier_repricing" | "carrier_return_repricing";
+      /** SHIP-01：以已核验的客户签收时点替代预约起点，仍使用原报价版本与优惠快照。 */
+      actualStartAt?: string;
       /** ORDER-CHANGE-01E：换货只替换一条订单行的价格事实，优惠仍按原规则重算。 */
       exchangeReplacement?: {
         lineId: string;
@@ -6353,21 +6365,30 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }
   ): Promise<RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig }> {
     const state = this.state(tenantId, context);
-    const from = args.order.effectiveEndAt ?? args.order.endAt;
+    const carrierRepricing = args.mode === "carrier_repricing" || args.mode === "carrier_return_repricing";
+    const carrierReturnRepricing = args.mode === "carrier_return_repricing";
+    const from = carrierRepricing ? rentalOrderDueAt({
+      fulfillmentMode: args.fulfillmentMode, startAt: args.order.startAt, endAt: args.order.endAt,
+      effectiveEndAt: args.order.effectiveEndAt, carrierRentalDueAt: args.order.carrierRentalDueAt,
+      actualRentalStartAt: args.order.actualRentalStartAt
+    }) : (args.order.effectiveEndAt ?? args.order.endAt);
+    const pricingStartAt = carrierRepricing ? (args.actualStartAt ?? args.order.startAt) : args.order.startAt;
     const postPickupExchange = args.mode === "post_pickup_exchange";
     const lineCancellation = args.mode === "line_cancellation" || postPickupExchange;
-    if (!lineCancellation && new Date(args.newEndAt).getTime() <= new Date(from).getTime()) {
-      throw new BadRequestException("新的归还时间必须晚于当前归还时间");
+    if (!lineCancellation && (carrierReturnRepricing
+      ? new Date(args.newEndAt).getTime() <= new Date(pricingStartAt).getTime()
+      : new Date(args.newEndAt).getTime() <= new Date(from).getTime())) {
+      throw new BadRequestException(carrierReturnRepricing ? "承运实际计租结束时间必须晚于客户签收时间" : "新的归还时间必须晚于当前归还时间");
     }
     const originalQuote = this.getQuote(tenantId, context, args.order.quoteId);
     const rule = { config: originalQuote.ruleSnapshot, version: originalQuote.ruleVersion };
-    if (!lineCancellation && !effectiveExtensionRule(rule.config).enabled) throw new ConflictException("原订单规则不允许续租");
-    if (!lineCancellation && (effectiveExtensionRule(rule.config).pricingMode ?? "incremental") === "incremental") {
+    if (!lineCancellation && !carrierRepricing && !effectiveExtensionRule(rule.config).enabled) throw new ConflictException("原订单规则不允许续租");
+    if (!lineCancellation && !carrierRepricing && (effectiveExtensionRule(rule.config).pricingMode ?? "incremental") === "incremental") {
       return this.quoteIncrementalExtension(tenantId, context, args);
     }
-    if (!lineCancellation && Date.parse(args.appliedAt) > Date.parse(from)) throw new ConflictException("订单已逾时，请先人工核价处理；不能通过原价全租期重算清除逾时费用");
+    if (!lineCancellation && !carrierRepricing && Date.parse(args.appliedAt) > Date.parse(from)) throw new ConflictException("订单已逾时，请先人工核价处理；不能通过原价全租期重算清除逾时费用");
     const previous = (args.previousExtensions ?? []).filter((row) => row.status === "effective").sort((a, b) => a.sequence - b.sequence);
-    if (!lineCancellation && from !== args.order.endAt && !previous.length) throw new ConflictException("缺少已生效续租记录，不能确定已计金额");
+    if (!lineCancellation && !carrierRepricing && from !== args.order.endAt && !previous.length) throw new ConflictException("缺少已生效续租记录，不能确定已计金额");
     if (lineCancellation && !postPickupExchange && (args.order.serviceSnapshots?.length || originalQuote.serviceSnapshots?.length || originalQuote.serviceAmount > 0)) {
       throw new ConflictException("本轮部分取消暂不支持已包含增值服务的订单，请先人工处理服务释放与退款");
     }
@@ -6378,7 +6399,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const legacyDayTypeMultipliers = savedContext?.legacyDayTypeMultipliers ?? context.settings.pricing.holidayPricingEnabled;
     const fullCalendars = this.calendarsForDateRange(tenantId, {
       ...context, settings: { ...context.settings, calendar: { ...context.settings.calendar, timeZone } }
-    }, args.order.startAt, args.newEndAt).map((current) => {
+    }, pricingStartAt, args.newEndAt).map((current) => {
       const saved = savedContext?.calendars?.find((calendar) => calendar.year === current.year);
       const version = originalQuote.calendarSnapshot.find((row) => row.year === current.year)?.calendarVersion;
       const historical = version && version !== "draft" ? state.calendars.find((calendar) => calendar.year === current.year && calendar.version === version) : undefined;
@@ -6462,7 +6483,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 全租期统一进位、选阶梯、封顶，再与已计金额求差；不再把每次续租单独起算。
       const full = this.priceRentalLine({
         ...shared,
-        startAt: args.order.startAt,
+        startAt: pricingStartAt,
         endAt: args.newEndAt,
         calendars: exchangeReplacement?.calendars ?? fullCalendars,
         codePrefix: "rental",
@@ -6471,7 +6492,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       fullRentalAmount = roundMoney(fullRentalAmount + full.amount);
       fullRentalLineAmounts[target] = roundMoney((fullRentalLineAmounts[target] ?? 0) + full.amount);
       totalBillableUnits += full.units;
-      originalBillableUnits += Math.max(rate.minimumUnits, rentalPricingStrategy(rate.unit).billableUnits(args.order.startAt, args.order.endAt, {
+      const originalCarrierDue = carrierRepricing && args.order.actualRentalStartAt
+        ? new Date(Date.parse(args.order.actualRentalStartAt) + Date.parse(args.order.endAt) - Date.parse(args.order.startAt)).toISOString()
+        : args.order.endAt;
+      originalBillableUnits += Math.max(rate.minimumUnits, rentalPricingStrategy(rate.unit).billableUnits(
+        carrierRepricing && args.order.actualRentalStartAt ? args.order.actualRentalStartAt : args.order.startAt,
+        originalCarrierDue, {
         timeZone, usageQuantity: originalLine?.usageQuantity, usagePrecision: rate.usagePrecision, hourGranularityMinutes: rate.hourGranularityMinutes,
         shiftHours: rule.config.pricing?.shiftHours, shiftStartHours: rule.config.pricing?.shiftStartHours
       }));
@@ -6553,7 +6579,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         const id = row.pricingGroupId ?? row.itemGroupId;
         return { id, itemGroupId: row.itemGroupId, pricingGroupId: row.pricingGroupId, amount: fullRentalLineAmounts[id] ?? 0 };
       }),
-      dayTypes: new Set(calendarSnapshot.map((row) => row.dayType)), rentalStartAt: args.order.startAt, workspaceId: this.workspaceOf(tenantId)
+      dayTypes: new Set(calendarSnapshot.map((row) => row.dayType)), rentalStartAt: pricingStartAt, workspaceId: this.workspaceOf(tenantId)
     });
     const planDiscountAmount = roundMoney(Object.values(discounts.discountByTarget).reduce((sum, value) => sum + value, 0));
     const oldCoupon = originalQuote.couponEvaluation;

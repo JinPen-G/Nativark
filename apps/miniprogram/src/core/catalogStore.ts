@@ -139,9 +139,14 @@ export function specEntries(item: ClientCatalogItem): Array<{ label: string; val
     .slice(0, 12);
 }
 
-export function toItemCard(item: ClientCatalogItem): ItemCard {
+export function catalogPricingUnitLabel(catalog: ClientCatalogResponse | undefined, code?: string | null): string {
+  if (!code) return "";
+  return catalog?.pricingUnits?.find((unit) => unit.code === code)?.label ?? pricingUnitLabel(code);
+}
+
+export function toItemCard(item: ClientCatalogItem, catalog?: ClientCatalogResponse): ItemCard {
   const image = item.images?.[0];
-  const price = startingPriceParts(item.startingPrice, pricingUnitLabel);
+  const price = startingPriceParts(item.startingPrice, (unit) => catalogPricingUnitLabel(catalog, unit));
   const specs = specsOf(item);
   const brand = brandOf(item);
   const desc = item.description?.trim() || [brand, ...specs].filter(Boolean).join(" · ");

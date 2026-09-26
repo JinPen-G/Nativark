@@ -37,6 +37,7 @@ import {
 import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { bufferedRentalPeriod } from "./rental-occupancy";
+import { rentalOrderDueAt } from "./rental-carrier-shipment";
 import { effectiveUnpaidHoldRule } from "./rental-rule-defaults";
 import { enabledOrganizationSubtreeIds } from "../../common/organization-location-scope";
 import {
@@ -182,6 +183,8 @@ export interface AssetStatusHistoryMetadata {
  */
 export interface RentalCoreFactStore {
   listOrders(tenantId: string): Promise<RentalOrder[]>;
+  /** 读取订单承运里程碑类型；取消、改配等资源释放动作在同一事务内复核它。 */
+  listCarrierShipmentEventTypes(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<string[]>;
   /**
    * ORDER-LIST-01：按筛选条件在数据库里分页查订单。`take` 缺省表示不分页（只筛选）。
    * 租户与空间范围与 `listOrders` 完全一致。
@@ -623,6 +626,16 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     return row ? this.toDomainOrder(row) : undefined;
   }
 
+  async listCarrierShipmentEventTypes(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<string[]> {
+    const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const rows = await client.rentalCarrierShipmentEvent.findMany({
+      where: { tenantId, workspaceId, orderId },
+      select: { type: true }
+    });
+    return rows.map((row) => row.type);
+  }
+
   /**
    * 锁只加在订单行上，子表（行、预占、分配）随聚合一起由同一事务写回，
    * 拿到订单锁即可串行同一订单的状态推进，不同订单仍并行。
@@ -702,9 +715,11 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       returnLocationSnapshot: order.returnLocationSnapshot as unknown as Prisma.InputJsonValue,
       deliveryAddressSnapshot: (order.deliveryAddressSnapshot ?? null) as unknown as Prisma.InputJsonValue,
       startAt: new Date(order.startAt),
+      actualRentalStartAt: order.actualRentalStartAt ? new Date(order.actualRentalStartAt) : null,
       endAt: new Date(order.endAt),
       // 续租只推进 effectiveEndAt，endAt 保持原始约定（需求 4.6.9）。
       effectiveEndAt: order.effectiveEndAt ? new Date(order.effectiveEndAt) : null,
+      carrierRentalDueAt: order.carrierRentalDueAt ? new Date(order.carrierRentalDueAt) : null,
       quoteId: order.quoteId,
       quoteNo: order.quoteNo,
       pricingPlanVersion: order.pricingPlanVersion,
@@ -811,8 +826,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           // 预占自带期间，使可用量查询不必回连订单表。
           // 结束端用 effectiveEndAt：续租后占用必须跟着延长，否则同一资产在延长出来的
           // 那段时间里对可用量查询是"空闲"的，会被另一张订单同时占走。
-          startAt: new Date(order.startAt),
-          endAt: new Date(order.effectiveEndAt ?? order.endAt),
+          startAt: new Date(order.fulfillmentMode === "carrier_shipping" ? (order.actualRentalStartAt ?? order.startAt) : order.startAt),
+          endAt: new Date(rentalOrderDueAt(order)),
           status: upper<$Enums.RentalReservationState>(reservation.status),
           expiresAt: reservation.expiresAt ? new Date(reservation.expiresAt) : null
         };
@@ -2605,8 +2620,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       }) as unknown as RentalFulfillmentLocationSnapshot,
       deliveryAddressSnapshot: (row.deliveryAddressSnapshot ?? undefined) as RentalOrder["deliveryAddressSnapshot"],
       startAt: iso(row.startAt),
+      actualRentalStartAt: optionalIso(row.actualRentalStartAt),
       endAt: iso(row.endAt),
       effectiveEndAt: optionalIso(row.effectiveEndAt),
+      carrierRentalDueAt: optionalIso(row.carrierRentalDueAt),
       quoteId: row.quoteId,
       quoteNo: row.quoteNo,
       pricingPlanVersion: row.pricingPlanVersion,

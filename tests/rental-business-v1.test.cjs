@@ -102,9 +102,16 @@ businessConfigStore.failCalendar = false;
 
 const currentRule = business.currentRule(tenantId, context());
 // RULE-01A：保存草稿与发布是两步。saveRuleVersion 只产出草稿，publishRuleVersion 才生效。
+await assert.rejects(
+  () => business.saveRuleVersion(tenantId, context(), {
+    config: { ...structuredClone(currentRule.config), cancellation: { ...currentRule.config.cancellation, weatherExceptionEnabled: true } },
+    changeReason: "天气自动免取消费在首期必须 fail closed"
+  }, "test"),
+  /天气免取消费暂未支持/u
+);
 const savedRule = await business.saveRuleVersion(tenantId, context(), {
-  config: { ...structuredClone(currentRule.config), cancellation: { ...currentRule.config.cancellation, weatherExceptionEnabled: true } },
-  changeReason: "测试露营天气取消规则"
+  config: { ...structuredClone(currentRule.config), cancellation: { ...currentRule.config.cancellation, weatherExceptionEnabled: false } },
+  changeReason: "测试露营取消规则"
 }, "test");
 assert.equal(savedRule.status, "draft", "保存只产出草稿，不直接生效");
 const publishedRule = await business.publishRuleVersion(tenantId, context(), savedRule.version, { reason: "发布天气取消规则" }, "test");

@@ -2,13 +2,13 @@ import { themeBehavior } from "../../core/theme-behavior";
 import type { ClientCatalogItem, ClientCatalogPricingGroup, ClientCatalogResponse } from "@rental-os/shared";
 import { fetchQualificationTypes } from "../../api/profile";
 import { CartLocked, CartServiceMismatch, addLine } from "../../core/cart";
-import { listAttribute, loadCatalog, pricingOptionsFor, primaryLocation, specEntries, specsOf } from "../../core/catalogStore";
+import { catalogPricingUnitLabel, listAttribute, loadCatalog, pricingOptionsFor, primaryLocation, specEntries, specsOf } from "../../core/catalogStore";
 import { describeError } from "../../core/errors";
 import { favoriteEvents, isFavorite, toggleFavorite } from "../../core/favorites";
 import { switchService } from "../../core/flow";
 import { isApiError } from "../../core/http";
 import { resolveImage } from "../../core/images";
-import { inventoryLabel, pricingUnitLabel } from "../../core/labels";
+import { inventoryLabel } from "../../core/labels";
 import { cachedMerchant, findService } from "../../core/merchant";
 import { startingPriceParts } from "../../core/money";
 import { emptyState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
@@ -147,7 +147,7 @@ Page({
 
   apply(catalog: ClientCatalogResponse, item: ClientCatalogItem) {
     const sameItem = this.data.item?.id === item.id;
-    const price = startingPriceParts(item.startingPrice, pricingUnitLabel);
+    const price = startingPriceParts(item.startingPrice, (unit) => catalogPricingUnitLabel(catalog, unit));
     const allSpecs = specEntries(item);
     const options = pricingOptionsFor(catalog, item.id);
     const components = ((item as unknown as { bundleComponents?: Array<{ itemGroupName: string; quantity: number; optional?: boolean }> }).bundleComponents ?? []).map((component) => ({ name: component.itemGroupName, quantity: component.quantity, optional: Boolean(component.optional) }));
