@@ -1,19 +1,29 @@
-import { Alert, Button, Card, Descriptions, Empty, Space, Tag } from "antd";
+import { Alert, Button, Card, Descriptions, Empty, Space, Table, Tag } from "antd";
+import type { ColumnsType } from "antd/es/table";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
-import { SubscriptionPlan, type TenantSubscriptionView } from "@rental-os/shared";
+import { FeatureEntitlementSource, SubscriptionPlan, type SubscriptionFeatureEntitlement, type TenantSubscriptionView } from "@rental-os/shared";
 import { PageHeader } from "@/components/PageHeader";
 import { LoadingState } from "@/components/LoadingState";
 import { useLocale } from "@/app/locale";
 import { APP_ROUTES } from "@/app/navigation";
 import { subscriptionApi } from "@/api/subscription";
-import { PLAN_LABEL, SERVICE_STATUS_LABEL, formatMoney } from "./subscriptionLabels";
+import { ENTITLEMENT_SOURCE_LABEL, PLAN_LABEL, RELEASE_STATUS_LABEL, SERVICE_STATUS_LABEL, formatMoney } from "./subscriptionLabels";
 import { PlatformSubscriptionActionForm } from "./PlatformSubscriptionActionForm";
+import { TenantFeatureGrantModal } from "./TenantFeatureGrantModal";
 
 /**
  * SUB-03 平台端「租户订阅 · 详情/办理」（§8）。概览走只读视图；直接办理表单派发写请求。
- * 额外功能授权（grant/revoke）与目录/标准价维护接口已在 api 层就绪，逐项授权 UI 为后续切片。
+ * 额外功能授权：仍需升级的功能可「额外授权」（tenant_specific，不要求整体升级）；
+ * 已额外授权的可「撤销」（须填原因）。公共下放与 PRO 自带权益随套餐/目录变化，不在此逐租户维护。
  */
+const SOURCE_TONE: Partial<Record<FeatureEntitlementSource, string>> = {
+  [FeatureEntitlementSource.StandardPublic]: "green",
+  [FeatureEntitlementSource.TenantGrant]: "blue",
+  [FeatureEntitlementSource.Pro]: "gold"
+};
+
 export function PlatformSubscriptionDetailPage() {
   const { t } = useLocale();
   const navigate = useNavigate();
@@ -33,6 +43,27 @@ export function PlatformSubscriptionDetailPage() {
 function DetailBody({ data, tenantId }: { data: TenantSubscriptionView; tenantId: string }) {
   const { t } = useLocale();
   const { overview, entitlements, requests } = data;
+  const [grantModal, setGrantModal] = useState<{ open: boolean; mode: "grant" | "revoke"; feature: SubscriptionFeatureEntitlement | null }>({ open: false, mode: "grant", feature: null });
+
+  const entitlementColumns: ColumnsType<SubscriptionFeatureEntitlement> = [
+    { title: t("功能"), key: "name", render: (_, row) => <Space orientation="vertical" size={0}><span>{row.name}</span><span className="text-meta">{row.code}</span></Space> },
+    { title: t("模块"), dataIndex: "module", key: "module" },
+    { title: t("上线状态"), dataIndex: "releaseStatus", key: "release", render: (value: SubscriptionFeatureEntitlement["releaseStatus"]) => t(RELEASE_STATUS_LABEL[value]) },
+    { title: t("权益来源"), dataIndex: "source", key: "source", render: (value: FeatureEntitlementSource) => <Tag color={SOURCE_TONE[value]}>{t(ENTITLEMENT_SOURCE_LABEL[value])}</Tag> },
+    { title: t("可用状态"), key: "available", render: (_, row) => row.available ? <span style={{ color: "var(--rental-color-success, #389e0d)" }}>{t("已可用")}</span> : row.needsConfig ? t("需先配置") : t("未启用") },
+    {
+      title: t("操作"), key: "action", render: (_, row) => {
+        if (row.source === FeatureEntitlementSource.TenantGrant) {
+          return <Button danger type="link" style={{ paddingInline: 0 }} onClick={() => setGrantModal({ open: true, mode: "revoke", feature: row })}>{t("撤销授权")}</Button>;
+        }
+        if (row.source === FeatureEntitlementSource.NeedsUpgrade) {
+          return <Button type="link" style={{ paddingInline: 0 }} onClick={() => setGrantModal({ open: true, mode: "grant", feature: row })}>{t("额外授权")}</Button>;
+        }
+        return <span className="text-meta">{t("随套餐 / 目录维护")}</span>;
+      }
+    }
+  ];
+
   return (
     <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <Card size="small" title={`${t("当前套餐与期限")}（${overview.tenantName}）`}>
@@ -50,15 +81,17 @@ function DetailBody({ data, tenantId }: { data: TenantSubscriptionView; tenantId
       </Card>
 
       <Card size="small" title={t("额外功能授权")}>
-        <Alert type="info" showIcon style={{ marginBottom: 12 }} message={t("可在功能目录「公共下放基础版」，或在此仅为该租户额外授权；保存前显示影响范围，不要求整体升级。逐项授权按钮为后续切片。")} />
-        {entitlements.length === 0 ? <Empty description={t("功能目录接入后在此选择授权")} /> : (
-          <Descriptions column={1} size="small" colon={false} items={entitlements.map((feature) => ({ key: feature.code, label: feature.name, children: feature.available ? t("已授权") : t("未授权") }))} />
-        )}
+        <Alert type="info" showIcon style={{ marginBottom: 12 }} message={t("对「仍需升级」的功能可仅为该租户额外授权，不要求整体升级；对「额外授权」来源的可撤销（须填原因）。要对所有基础版开放请在功能目录页改为公共下放。")} />
+        {entitlements.length === 0
+          ? <Empty description={t("功能目录接入后在此选择授权")} />
+          : <Table<SubscriptionFeatureEntitlement> rowKey="code" size="small" columns={entitlementColumns} dataSource={entitlements} pagination={{ pageSize: 20, hideOnSinglePage: true }} />}
       </Card>
 
       <Card size="small" title={t("申请与线下收款记录")}>
         {requests.length === 0 ? <Empty description={t("暂无记录")} /> : <Descriptions column={1} size="small" colon={false} items={requests.map((row) => ({ key: row.id, label: row.id, children: t(formatMoney(row.handledAmount)) }))} />}
       </Card>
+
+      <TenantFeatureGrantModal open={grantModal.open} mode={grantModal.mode} tenantId={tenantId} feature={grantModal.feature} onClose={() => setGrantModal({ open: false, mode: "grant", feature: null })} />
     </Space>
   );
 }

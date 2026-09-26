@@ -103,7 +103,8 @@ export const APP_ROUTES = {
   subscriptionPro: { path: "/settings/subscription/pro", label: "PRO 介绍", permission: "rental-os:subscription:view", audience: "tenant", icon: <CrownOutlined /> },
   subscriptionRequestDetail: { path: "/settings/subscription/requests/:id", label: "申请详情", permission: "rental-os:subscription:view", audience: "tenant", icon: <CrownOutlined /> },
   platformSubscriptions: { path: "/platform/subscriptions", label: "租户订阅", permission: "system:tenant:subscription:manage", audience: "saas", icon: <CrownOutlined />, menu: true },
-  platformSubscriptionDetail: { path: "/platform/subscriptions/:id", label: "租户订阅详情", permission: "system:tenant:subscription:manage", audience: "saas", icon: <CrownOutlined /> }
+  platformSubscriptionDetail: { path: "/platform/subscriptions/:id", label: "租户订阅详情", permission: "system:tenant:subscription:manage", audience: "saas", icon: <CrownOutlined /> },
+  subscriptionCatalog: { path: "/platform/subscription-catalog", label: "功能目录与定价", permission: "system:tenant:subscription:manage", audience: "saas", icon: <AppstoreOutlined />, menu: true }
 } satisfies Record<string, AppRouteDefinition>;
 
 export const APP_NAVIGATION: AppNavigationSection[] = [
@@ -118,7 +119,7 @@ export const APP_NAVIGATION: AppNavigationSection[] = [
   { key: "account-access", label: "账号与权限", icon: <TeamOutlined />, routes: [APP_ROUTES.tenantAccounts, APP_ROUTES.tenantRoles] },
   { key: "service-channels", label: "服务与渠道", icon: <ApiOutlined />, routes: [APP_ROUTES.tenantIntegrations, APP_ROUTES.clientChannel] },
   { key: "finance-reconciliation", label: "财务与对账", icon: <FileSearchOutlined />, routes: [APP_ROUTES.paymentReconciliation] },
-  { key: "platform-management", label: "平台管理", icon: <SettingOutlined />, routes: [APP_ROUTES.platformTenants, APP_ROUTES.platformSubscriptions, APP_ROUTES.platformOfficialCalendars, APP_ROUTES.platformUsers, APP_ROUTES.platformSystem, APP_ROUTES.platformOperations, APP_ROUTES.platformTools] }
+  { key: "platform-management", label: "平台管理", icon: <SettingOutlined />, routes: [APP_ROUTES.platformTenants, APP_ROUTES.platformSubscriptions, APP_ROUTES.subscriptionCatalog, APP_ROUTES.platformOfficialCalendars, APP_ROUTES.platformUsers, APP_ROUTES.platformSystem, APP_ROUTES.platformOperations, APP_ROUTES.platformTools] }
 ];
 
 /**

@@ -45,6 +45,7 @@ const SubscriptionProPage = lazy(() => import("@/features/subscription/Subscript
 const SubscriptionRequestDetailPage = lazy(() => import("@/features/subscription/SubscriptionRequestDetailPage").then((module) => ({ default: module.SubscriptionRequestDetailPage })));
 const PlatformSubscriptionsPage = lazy(() => import("@/features/subscription/PlatformSubscriptionsPage").then((module) => ({ default: module.PlatformSubscriptionsPage })));
 const PlatformSubscriptionDetailPage = lazy(() => import("@/features/subscription/PlatformSubscriptionDetailPage").then((module) => ({ default: module.PlatformSubscriptionDetailPage })));
+const SubscriptionCatalogPage = lazy(() => import("@/features/subscription/SubscriptionCatalogPage").then((module) => ({ default: module.SubscriptionCatalogPage })));
 
 function PageLoader() {
   return <div className="route-loader"><LoadingState /></div>;
@@ -133,6 +134,7 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.platformTenants.path} element={guard(APP_ROUTES.platformTenants, <TenantManagementPage />)} />
             <Route path={APP_ROUTES.platformSubscriptions.path} element={guard(APP_ROUTES.platformSubscriptions, <PlatformSubscriptionsPage />)} />
             <Route path={APP_ROUTES.platformSubscriptionDetail.path} element={guard(APP_ROUTES.platformSubscriptionDetail, <PlatformSubscriptionDetailPage />)} />
+            <Route path={APP_ROUTES.subscriptionCatalog.path} element={guard(APP_ROUTES.subscriptionCatalog, <SubscriptionCatalogPage />)} />
             <Route path={APP_ROUTES.platformUsers.path} element={guard(APP_ROUTES.platformUsers, <PlatformPage />)} />
             <Route path={APP_ROUTES.platformSystem.path} element={guard(APP_ROUTES.platformSystem, <PlatformPage />)} />
             <Route path={APP_ROUTES.platformOperations.path} element={guard(APP_ROUTES.platformOperations, <PlatformOperationsPage />)} />

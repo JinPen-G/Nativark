@@ -17,8 +17,10 @@ import type {
   RevokeTenantFeatureRequest,
   ScheduleNextSubscriptionRequest,
   SetStandardPriceRequest,
+  StandardPlanPricing,
   SubmitSubscriptionRequestRequest,
   SubscriptionExpiryReminder,
+  SubscriptionFeatureCatalogEntry,
   SubscriptionPlan,
   SubscriptionRequestRecord,
   TenantSubscriptionOverview,
@@ -46,6 +48,10 @@ export const subscriptionApi = {
   /** SaaS 平台端某租户订阅详情（§8）。 */
   platformDetail: (tenantId: string) =>
     request<TenantSubscriptionView>(`/platform/subscriptions/${encodeURIComponent(tenantId)}`),
+  /** SaaS 平台功能目录（§3.3/§8，介绍/对比/维护用）。TODO(SUB-03)：读端点待后端补齐（映射表暂无 GET）。 */
+  featureCatalog: () => request<SubscriptionFeatureCatalogEntry[]>("/platform/subscriptions/feature-catalog"),
+  /** 标准套餐年费列表（§5.2/§8）。TODO(SUB-03)：读端点待后端补齐。 */
+  standardPrices: () => request<StandardPlanPricing[]>("/platform/subscriptions/standard-prices"),
 
   // ===== 写操作（§7/§8）。目标租户走路径参数；金额可空不落 0；平台写响应以失效后重取为准，故多为 void。 =====
   // 租户端（audience tenant，:manage）
