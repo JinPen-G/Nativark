@@ -4,7 +4,7 @@
  * 页面只使用语义层级，不在组件里重新决定字号和字重。Ant Design 的基础
  * token 由 theme.tsx 消费，自定义 CSS 通过同一份 token 注入 CSS 变量。
  */
-import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
+import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_FULL, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
 
 export const ADMIN_FONT_FAMILY =
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif";
@@ -28,6 +28,8 @@ export function resolveAdminPrimaryColor(value?: string | null) {
  */
 export function resolveAdminCornerRadius(value?: number | null) {
   if (!Number.isInteger(value)) return ADMIN_UI_CORNER_RADIUS_DEFAULT;
+  // 「极致圆角」是离散档，直接放行，不参与 8-20 的区间夹取。
+  if (value === ADMIN_UI_CORNER_RADIUS_FULL) return ADMIN_UI_CORNER_RADIUS_FULL;
   return Math.min(ADMIN_UI_CORNER_RADIUS_MAX, Math.max(ADMIN_UI_CORNER_RADIUS_MIN, value as number));
 }
 

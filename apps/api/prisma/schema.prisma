@@ -757,8 +757,8 @@ model ClientChannelProfile {
   bannerSubtitle       String?                  @db.VarChar(120)
   /// 客户端主题色（#RRGGBB）；客户端覆盖 --primary 系列，未设置则用系统默认蓝。
   themeColor           String?                  @db.VarChar(16)
-  /// 管理后台基础控件圆角（8-20px）；胶囊页签、圆形图标按钮等保留形态不由此强行改变。
-  adminCornerRadius    Int?                     @db.UnsignedTinyInt
+  /// 管理后台基础控件圆角（8-20px，或极致圆角离散档 999px）；胶囊页签、圆形图标按钮等保留形态不由此强行改变。
+  adminCornerRadius    Int?                     @db.UnsignedSmallInt
   smsLoginEnabled      Boolean                  @default(true)
   passwordLoginEnabled Boolean                  @default(true)
   defaultWorkspaceId   String?

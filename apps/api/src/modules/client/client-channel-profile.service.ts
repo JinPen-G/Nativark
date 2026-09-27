@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, Optional } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
+import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_FULL, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
 import type {
   ClientChannelFaqItem,
   ClientChannelProfileSummary,
@@ -48,8 +48,10 @@ function normalizeThemeColor(value: string | undefined): string | null {
 
 function normalizeAdminCornerRadius(value: number | undefined | null): number {
   if (value === undefined || value === null) return ADMIN_UI_CORNER_RADIUS_DEFAULT;
+  // 极致圆角是允许的离散档；其余必须落在连续区间内，20 与 999 之间的值一律拒绝。
+  if (value === ADMIN_UI_CORNER_RADIUS_FULL) return value;
   if (!Number.isInteger(value) || value < ADMIN_UI_CORNER_RADIUS_MIN || value > ADMIN_UI_CORNER_RADIUS_MAX) {
-    throw new BadRequestException(`管理后台圆角必须是 ${ADMIN_UI_CORNER_RADIUS_MIN}-${ADMIN_UI_CORNER_RADIUS_MAX} 的整数（px）`);
+    throw new BadRequestException(`管理后台圆角必须是 ${ADMIN_UI_CORNER_RADIUS_MIN}-${ADMIN_UI_CORNER_RADIUS_MAX} 的整数（px），或极致圆角 ${ADMIN_UI_CORNER_RADIUS_FULL}`);
   }
   return value;
 }

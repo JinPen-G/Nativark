@@ -70,8 +70,8 @@ export class SaveClientChannelProfileDto implements SaveClientChannelProfileRequ
   @IsOptional() @IsString() @Matches(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/u, { message: "主题色需为 #RRGGBB 十六进制颜色" })
   themeColor?: string;
 
-  /** 管理后台基础控件圆角：只允许平台规定的 8-20px 范围，避免租户输入破坏布局。 */
-  @IsOptional() @IsInt() @Min(8) @Max(20)
+  /** 管理后台基础控件圆角：连续区间 8-20px，或极致圆角离散档 999px（服务层精确校验，拒绝 20 与 999 之间的值）。 */
+  @IsOptional() @IsInt() @Min(8) @Max(999)
   adminCornerRadius?: number;
 
   @IsBoolean()

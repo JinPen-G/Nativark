@@ -279,7 +279,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       brandLogoUrl: stringSchema,
       faviconUrl: stringSchema,
       themeColor: stringSchema,
-      adminCornerRadius: { type: "integer", minimum: 8, maximum: 20 },
+      adminCornerRadius: { type: "integer", minimum: 8, maximum: 999 },
       categoryCode: stringSchema,
       categoryName: stringSchema,
       capabilities: arrayOf(stringSchema)
@@ -330,7 +330,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       brandName: stringSchema, brandLogoUrl: stringSchema, faviconUrl: stringSchema, customerServicePhone: stringSchema, customerServiceHours: stringSchema,
       userAgreement: ref("ClientChannelAgreementConfig"), privacyPolicy: ref("ClientChannelAgreementConfig"),
       helpIntro: stringSchema, helpFaq: arrayOf("ClientChannelFaqItem"), bannerTitle: stringSchema, bannerSubtitle: stringSchema, themeColor: stringSchema,
-      adminCornerRadius: { type: "integer", minimum: 8, maximum: 20 },
+      adminCornerRadius: { type: "integer", minimum: 8, maximum: 999 },
       smsLoginEnabled: booleanSchema, passwordLoginEnabled: booleanSchema,
       publishedWorkspaceIds: arrayOf(stringSchema), defaultWorkspaceId: stringSchema,
       workspaces: arrayOf("ClientChannelWorkspaceOption"),
@@ -345,7 +345,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       expectedRevision: numberSchema, brandName: stringSchema, brandLogoUrl: stringSchema, faviconUrl: stringSchema, customerServicePhone: stringSchema, customerServiceHours: stringSchema,
       userAgreement: ref("ClientChannelAgreementConfig"), privacyPolicy: ref("ClientChannelAgreementConfig"),
       helpIntro: stringSchema, helpFaq: arrayOf("ClientChannelFaqItem"), bannerTitle: stringSchema, bannerSubtitle: stringSchema, themeColor: stringSchema,
-      adminCornerRadius: { type: "integer", minimum: 8, maximum: 20 },
+      adminCornerRadius: { type: "integer", minimum: 8, maximum: 999 },
       smsLoginEnabled: booleanSchema, passwordLoginEnabled: booleanSchema, publishedWorkspaceIds: arrayOf(stringSchema), defaultWorkspaceId: stringSchema
     },
     ["smsLoginEnabled", "passwordLoginEnabled", "publishedWorkspaceIds"]

@@ -172,6 +172,8 @@ export interface TenantContext {
 export const ADMIN_UI_CORNER_RADIUS_MIN = 8;
 export const ADMIN_UI_CORNER_RADIUS_MAX = 20;
 export const ADMIN_UI_CORNER_RADIUS_DEFAULT = 12;
+/** 「极致圆角」离散档：跳过 20→999 之间的所有值，只允许直接取 20 或 999（CSS 常用胶囊值）。 */
+export const ADMIN_UI_CORNER_RADIUS_FULL = 999;
 
 export interface AuthUser {
   id: string;

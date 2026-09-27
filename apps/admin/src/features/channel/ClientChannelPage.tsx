@@ -7,7 +7,7 @@ import { clientChannelApi } from "@/api/clientChannel";
 import { websiteChannelApi } from "@/api/websiteChannel";
 import { apiAssetOrigin } from "@/api/http";
 import { ADMIN_DEFAULT_PRIMARY_COLOR } from "@/app/designTokens";
-import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
+import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_FULL, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
 import { LoadingState } from "@/components/LoadingState";
 import { PageHeader } from "@/components/PageHeader";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -137,14 +137,16 @@ function ProfileCard() {
                 name="adminCornerRadius"
                 label={t("管理后台基础圆角")}
                 tooltip={t("统一影响按钮、输入框、选中菜单和页签；圆形图标按钮与开关保留各自形态")}
-                extra={t("拖动选择 8-20px；不建议使用过大的圆角，以免降低信息密度")}
+                extra={t("拖动选择 8–20px；最右一档为 999px 极致圆角——20 与 999 之间会自动吸附，不能停留在中间值")}
+                getValueProps={(value) => ({ value: value === ADMIN_UI_CORNER_RADIUS_FULL ? ADMIN_UI_CORNER_RADIUS_MAX + 4 : value })}
+                normalize={(value) => typeof value === "number" && value > ADMIN_UI_CORNER_RADIUS_MAX ? ADMIN_UI_CORNER_RADIUS_FULL : value}
               >
                 <Slider
                   min={ADMIN_UI_CORNER_RADIUS_MIN}
-                  max={ADMIN_UI_CORNER_RADIUS_MAX}
+                  max={ADMIN_UI_CORNER_RADIUS_MAX + 4}
                   step={1}
-                  marks={{ [ADMIN_UI_CORNER_RADIUS_MIN]: `${ADMIN_UI_CORNER_RADIUS_MIN}px`, [ADMIN_UI_CORNER_RADIUS_DEFAULT]: `${ADMIN_UI_CORNER_RADIUS_DEFAULT}px`, [ADMIN_UI_CORNER_RADIUS_MAX]: `${ADMIN_UI_CORNER_RADIUS_MAX}px` }}
-                  tooltip={{ formatter: (value) => value == null ? "" : `${value}px` }}
+                  marks={{ [ADMIN_UI_CORNER_RADIUS_MIN]: `${ADMIN_UI_CORNER_RADIUS_MIN}px`, [ADMIN_UI_CORNER_RADIUS_DEFAULT]: `${ADMIN_UI_CORNER_RADIUS_DEFAULT}px`, [ADMIN_UI_CORNER_RADIUS_MAX]: `${ADMIN_UI_CORNER_RADIUS_MAX}px`, [ADMIN_UI_CORNER_RADIUS_MAX + 4]: `${ADMIN_UI_CORNER_RADIUS_FULL}px` }}
+                  tooltip={{ formatter: (value) => value == null ? "" : value > ADMIN_UI_CORNER_RADIUS_MAX ? `${ADMIN_UI_CORNER_RADIUS_FULL}px` : `${value}px` }}
                 />
               </Form.Item>
             </Col>
