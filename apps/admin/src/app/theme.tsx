@@ -258,7 +258,11 @@ export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: strin
         cellPaddingBlock: 12,
         cellPaddingInline: 8,
         headerBg: light ? "#fafafa" : undefined,
-        headerBorderRadius: radiusSm,
+        // antd 用 headerBorderRadius 同时决定表头首尾圆角与整表外圆角(tableRadius)。
+        // 极致圆角档(radius=999)下 radiusSm 会涨到约 749px，把表头背景挤成帐篷形；
+        // 表格是数据密集面，圆角收敛到 radiusLg(≤24px)——8-20 连续档里 radiusSm 恒小于
+        // radiusLg，故取 min 对这些档位零影响，只压掉 999 档的畸形。
+        headerBorderRadius: Math.min(radiusSm, radiusLg),
         // 表格悬停是交互反馈，不应永远显示系统默认蓝灰色。
         rowHoverBg: "var(--rental-color-primary-bg)"
       },
