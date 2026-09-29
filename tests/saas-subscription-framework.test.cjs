@@ -24,7 +24,7 @@ const {
   isValidTimeZone
 } = require("../apps/api/src/modules/subscription/subscription-term");
 const { OPENAPI_DOCUMENT } = require("../apps/api/src/contracts/openapi-document");
-const { isNewBusinessRoute } = require("../apps/api/src/common/api-auth.guard");
+const { isNewBusinessRoute, requiredPermissions, PUBLIC_ROUTES, PUBLIC_ROUTE_PREFIXES } = require("../apps/api/src/common/api-auth.guard");
 
 test("addCalendarYears：闰日 2/29 收敛到目标年 2 月最后一日、保留时刻；四年后回到 2/29", () => {
   const from = new Date("2024-02-29T08:30:00.000Z");
@@ -71,6 +71,10 @@ test("OpenAPI 契约：订阅端点齐全且带 x-requiredPermissions", () => {
   assert.ok(paths["/api/platform/subscription/view"].get, "缺租户视图");
   assert.deepEqual(paths["/api/platform/subscription/view"].get["x-requiredPermissions"], ["rental-os:subscription:view"]);
   assert.ok(paths["/api/platform/subscription/requests"].post, "缺租户申请");
+  assert.deepEqual(requiredPermissions("GET", "/platform/subscription/reminder"), []);
+  assert.equal(PUBLIC_ROUTES.has("/platform/subscription/reminder"), false, "期限摘要仍须登录，不能放进匿名路由");
+  assert.equal(PUBLIC_ROUTE_PREFIXES.some((prefix) => "/platform/subscription/reminder".startsWith(prefix)), false);
+  assert.deepEqual(paths["/api/platform/subscription/reminder"].get["x-requiredPermissions"], []);
   assert.ok(paths["/api/platform/subscriptions"].get, "缺平台列表");
   assert.ok(paths["/api/platform/subscriptions/feature-catalog"].get, "缺功能目录读");
   assert.ok(paths["/api/platform/subscriptions/{tenantId}/provision"].post, "缺开通");

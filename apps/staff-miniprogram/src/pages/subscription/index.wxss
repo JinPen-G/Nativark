@@ -1,0 +1,2 @@
+.subscription-time { overflow-wrap: anywhere; }
+.subscription-feature { padding-top: 24rpx; margin-top: 24rpx; border-top: 1rpx solid var(--border); }

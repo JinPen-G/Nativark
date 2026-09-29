@@ -2,6 +2,7 @@ import { configProblem } from "./config/public";
 import { loadContext } from "./core/context";
 import { clearImageCache } from "./core/images";
 import { isSignedIn, sessionEvents } from "./core/session";
+import { loadSubscription } from "./core/subscription";
 import { startThemeWatch, syncNativeTheme } from "./core/theme";
 
 /**
@@ -22,5 +23,9 @@ App({
   },
   onShow() {
     syncNativeTheme();
+    if (!configProblem() && isSignedIn()) {
+      void loadContext(true).catch(() => undefined);
+      void loadSubscription(true).catch(() => undefined);
+    }
   }
 });

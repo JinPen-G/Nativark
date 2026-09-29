@@ -1903,6 +1903,45 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
 
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   {
+    method: "post",
+    path: "/api/public/demo-requests",
+    tag: "Platform",
+    operationId: "createWebsiteDemoRequest",
+    summary: "Submit a website demo request; anonymous, idempotent and IP rate-limited (5 per 10 minutes)",
+    permissions: [],
+    authRequired: false,
+    rateLimited: true,
+    requestSchema: objectOf({
+      requestKey: { type: "string", format: "uuid" },
+      name: { type: "string", minLength: 1, maxLength: 80 },
+      contactType: { type: "string", enum: ["phone", "email", "wechat"] },
+      contactValue: { type: "string", minLength: 1, maxLength: 160, description: "Phone with 7–20 digits, valid email, or 3–80 character WeChat ID (letters, digits, underscore, hyphen)." },
+      company: { type: "string", maxLength: 120 },
+      message: { type: "string", maxLength: 1000 },
+      language: { type: "string", enum: ["zh", "en"] }
+    }, ["requestKey", "name", "contactType", "contactValue", "language"], false),
+    responseSchema: objectOf({ received: booleanSchema }, ["received"], false)
+  },
+  {
+    method: "get",
+    path: "/api/platform/demo-requests",
+    tag: "Platform",
+    operationId: "listWebsiteDemoRequests",
+    summary: "SaaS administrators only: newest-first paginated website demo requests, never tenant customer data",
+    permissions: ["system:demo-request:view"],
+    parameters: [queryParam("page", { type: "integer", minimum: 1, maximum: 100000 }), queryParam("pageSize", { type: "integer", minimum: 1, maximum: 100 })],
+    responseSchema: objectOf({
+      items: arrayOf(objectOf({
+        id: stringSchema, name: stringSchema,
+        contactType: { type: "string", enum: ["phone", "email", "wechat"] },
+        contactValue: stringSchema, company: stringSchema, message: stringSchema,
+        language: { type: "string", enum: ["zh", "en"] },
+        createdAt: { type: "string", format: "date-time" }
+      }, ["id", "name", "contactType", "contactValue", "company", "message", "language", "createdAt"], false)),
+      total: { type: "integer" }, page: { type: "integer" }, pageSize: { type: "integer" }
+    }, ["items", "total", "page", "pageSize"], false)
+  },
+  {
     method: "get",
     path: "/api/openapi.json",
     tag: "Contract",
@@ -2882,7 +2921,7 @@ function rentalBusinessOperations(): ContractOperation[] { return [
   backlogOperation("post", "/api/platform/official-calendars/{id}/versions", "OfficialCalendarSource", "registerOfficialCalendarSourceVersion", "Register a new annual version of a public official calendar source", ["system:calendar-source:manage"]),
   // SUB-01 SaaS 版本订阅（§5.2/§7/§8）。租户端 platform/subscription（单数）自读/申请；平台端 platform/subscriptions（复数）跨租户管理，守卫另有 fail-closed。
   backlogOperation("get", "/api/platform/subscription/view", "Subscription", "getTenantSubscriptionView", "Get the calling tenant's subscription aggregate view", ["rental-os:subscription:view"]),
-  backlogOperation("get", "/api/platform/subscription/reminder", "Subscription", "getTenantSubscriptionReminder", "Get the calling tenant's expiry reminder", ["rental-os:subscription:view"]),
+  backlogOperation("get", "/api/platform/subscription/reminder", "Subscription", "getTenantSubscriptionReminder", "Get the authenticated tenant's expiry summary without commercial details", []),
   backlogOperation("post", "/api/platform/subscription/requests", "Subscription", "submitTenantSubscriptionRequest", "Submit an upgrade/renew/consult request for the calling tenant", ["rental-os:subscription:manage"]),
   backlogOperation("post", "/api/platform/subscription/requests/{id}/cancel", "Subscription", "cancelTenantSubscriptionRequest", "Cancel the calling tenant's own pending request", ["rental-os:subscription:manage"]),
   backlogOperation("get", "/api/platform/subscriptions", "Subscription", "listTenantSubscriptions", "List tenant subscriptions (plan/serviceStatus/dueWithin/keyword filters)", ["system:tenant:subscription:manage"]),

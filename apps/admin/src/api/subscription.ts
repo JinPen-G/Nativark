@@ -1,12 +1,4 @@
-/**
- * SUB-02/03 订阅查询与写操作 API。
- *
- * 类型来自 `@rental-os/shared`（总控 SUB-01 契约）。**端点路径已与后端控制器 f631452 逐条核对一致**：
- * 租户订阅走 `/platform/subscription/*`（audience tenant）——§5.1 要求无已配置空间的新租户也能看订阅/提交申请，
- * 而 `/rental/v1`、`/rental-os` 是空间级 fail-closed（无空间进不去），`/platform/*` 豁免空间校验，正合适；
- * 平台端走 `/platform/subscriptions/*`（audience saas，system:tenant:subscription:manage；非 SaaS 管理员 fail-closed 403）。
- * 平台端静态 GET（feature-catalog / standard-prices）在后端声明于 `:tenantId` 参数路由之前，不会被误匹配。
- */
+/** Subscription endpoints are tenant-scoped; no operating workspace is required. */
 import type {
   ExtendSubscriptionRequest,
   GrantTenantFeatureRequest,
@@ -34,16 +26,25 @@ export interface PlatformSubscriptionListQuery {
   serviceStatus?: string;
   dueWithin?: string;
   keyword?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface PlatformSubscriptionList {
+  items: TenantSubscriptionOverview[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export const subscriptionApi = {
   /** 租户「版本与订阅」页一次拉取的聚合视图（§5.2）。走 /platform（audience tenant，豁免空间校验，§5.1）。 */
   tenantView: () => request<TenantSubscriptionView>("/platform/subscription/view"),
-  /** 左下角到期浮窗只读数据（§5.4）；无提醒时后端返回 null。 */
-  expiryReminder: () => request<SubscriptionExpiryReminder | null>("/platform/subscription/reminder"),
+  /** No reminder is represented by stage=none; summary carries no monetary data. */
+  expiryReminder: () => request<SubscriptionExpiryReminder>("/platform/subscription/reminder"),
   /** SaaS 平台端租户订阅列表（§8.1）。后端 GET /platform/subscriptions，支持 plan/serviceStatus/dueWithin/keyword 筛选（f631452）。 */
   platformList: (params?: PlatformSubscriptionListQuery) =>
-    request<TenantSubscriptionOverview[]>("/platform/subscriptions", { params }),
+    request<PlatformSubscriptionList>("/platform/subscriptions", { params }),
   /** SaaS 平台端某租户订阅详情（§8）。 */
   platformDetail: (tenantId: string) =>
     request<TenantSubscriptionView>(`/platform/subscriptions/${encodeURIComponent(tenantId)}`),

@@ -15,6 +15,16 @@ import {
   type SubscriptionMoney
 } from "@rental-os/shared";
 
+import { serviceLocalTime } from "./subscriptionOperations";
+
+/** Accurate time + service zone. Missing zone is labelled UTC rather than silently using the device zone. */
+export function formatSubscriptionDate(value?: string | null, timeZone?: string): string {
+  if (!value || !Number.isFinite(Date.parse(value))) return "待平台确认";
+  const zone = timeZone || "UTC";
+  try { return `${serviceLocalTime(value, zone).replace("T", " ")}（${zone}）`; }
+  catch { return `${new Date(value).toISOString()}（服务时区待确认）`; }
+}
+
 export const PLAN_LABEL: Record<SubscriptionPlan, string> = {
   [SubscriptionPlan.Standard]: "基础版",
   [SubscriptionPlan.Pro]: "PRO"

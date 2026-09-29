@@ -7,6 +7,23 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// 官网演示预约是平台级线索，不挂租户/经营空间，不自动建立客户或会员。
+model DemoRequest {
+  id           String   @id @db.VarChar(36)
+  requestKey   String   @unique @db.VarChar(36)
+  payloadHash  String   @db.VarChar(64)
+  name         String   @db.VarChar(80)
+  contactType  String   @db.VarChar(16)
+  contactValue String   @db.VarChar(160)
+  company      String   @default("") @db.VarChar(120)
+  message      String   @db.Text
+  language     String   @db.VarChar(8)
+  createdAt    DateTime @default(now()) @db.DateTime(3)
+
+  @@index([createdAt, id])
+  @@map("platform_demo_requests")
+}
+
 enum TenantStatus {
   ACTIVE   @map("active")
   FROZEN   @map("frozen")
@@ -4117,6 +4134,7 @@ model TenantSubscription {
   /// 本期确认金额；null=待确认，不落 0（§5.2/§14.2）。
   currentAmount      Decimal?           @db.Decimal(12, 2)
   currentCurrency    String?            @db.VarChar(8)
+  currentTaxInclusive Boolean?
   sourceReason       String?            @db.VarChar(512)
   handledAt          DateTime?
   createdAt          DateTime           @default(now())
@@ -4137,6 +4155,8 @@ model TenantSubscriptionSegment {
   endAt     DateTime?
   amount    Decimal?                  @db.Decimal(12, 2)
   currency  String?                   @db.VarChar(8)
+  taxInclusive Boolean?
+  billingAnniversary DateTime?
   reason    String?                   @db.VarChar(512)
   createdAt DateTime                  @default(now())
 
@@ -4204,6 +4224,8 @@ model SubscriptionRequest {
   /// 实际办理金额；null=未办理/待确认，不落 0（§14.2）。
   handledAmount   Decimal?                  @db.Decimal(12, 2)
   handledCurrency String?                   @db.VarChar(8)
+  handledTaxInclusive Boolean?
+  linkedEventId   String?                   @db.VarChar(191)
   periodText      String?                   @db.VarChar(191)
   createdAt       DateTime                  @default(now())
   updatedAt       DateTime                  @updatedAt

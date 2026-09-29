@@ -12,6 +12,15 @@ const STORAGE_KEY = "rental_admin_locale";
  * 到中文，保证新增页面在补齐翻译前仍然可用。
  */
 const ENGLISH: Record<string, string> = {
+  "演示预约": "Demo requests",
+  "查看官网提交的演示预约，仅 SaaS 管理员可见。": "View demo requests submitted through the website. SaaS administrators only.",
+  "演示预约加载失败": "Could not load demo requests",
+  "暂无演示预约，官网提交后会显示在这里。": "No demo requests yet. Requests submitted on the website will appear here.",
+  "联系类型": "Contact method",
+  "联系方式": "Contact details",
+  "公司 / 门店名称": "Company / store",
+  "需求说明": "Requirements",
+  "微信": "WeChat",
   "概览": "Overview",
   "运营概览": "Operations Overview",
   "经营报表": "Operations Report",

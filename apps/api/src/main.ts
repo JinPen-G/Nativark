@@ -6,6 +6,7 @@ import { AppModule } from "./app.module";
 import { requestIdentityMiddleware } from "./common/request-identity";
 import { staffApiRoutingMiddleware } from "./common/staff-api-routing";
 import { assertProductionDataSource } from "./common/production-data-source.guard";
+import { apiCorsOrigins } from "./common/cors-origins";
 
 async function bootstrap() {
   process.env.PLATFORM_DATA_SOURCE = assertProductionDataSource(process.env.NODE_ENV, process.env.PLATFORM_DATA_SOURCE);
@@ -23,7 +24,7 @@ async function bootstrap() {
   app.setGlobalPrefix("api");
   app.enableCors({
     credentials: true,
-    origin: [/^http:\/\/localhost:\d+$/, /^http:\/\/127\.0\.0\.1:\d+$/]
+    origin: apiCorsOrigins(process.env.CORS_ALLOWED_ORIGINS)
   });
   app.useGlobalPipes(
     new ValidationPipe({

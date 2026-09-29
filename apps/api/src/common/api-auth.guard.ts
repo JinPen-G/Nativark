@@ -80,6 +80,7 @@ export const UNMATCHED_ROUTE_PERMISSION = "__unmatched_route__";
 export const PUBLIC_ROUTES = new Set([
   "/health",
   "/openapi.json",
+  "/public/demo-requests",
   "/auth/login",
   "/auth/development/reset-demo-password",
   "/auth/refresh",
@@ -161,6 +162,8 @@ function isPublicRoute(path: string) {
 }
 
 export function requiredPermissions(method: string, path: string) {
+  if (path === "/public/demo-requests") return method.toUpperCase() === "POST" ? [] : [UNMATCHED_ROUTE_PERMISSION];
+  if (path === "/platform/demo-requests") return method.toUpperCase() === "GET" ? ["system:demo-request:view"] : [UNMATCHED_ROUTE_PERMISSION];
   if (isClientRoute(path)) return [];
   if (isPublicRoute(path) || method === "OPTIONS") {
     return [];
@@ -185,6 +188,7 @@ export function requiredPermissions(method: string, path: string) {
     // canActivate 里另有一道 fail-closed，不依赖本权限码单点把关。
     return ["system:tenant:subscription:manage"];
   }
+  if (method.toUpperCase() === "GET" && path === "/platform/subscription/reminder") return [];
   if (path.startsWith("/platform/subscription")) {
     // SUB-01 租户端：本租户查看/申请（§5.2/§7.2）。GET 只读，写=提交/撤销申请。
     return method.toUpperCase() === "GET" ? ["rental-os:subscription:view"] : ["rental-os:subscription:manage"];
@@ -666,7 +670,7 @@ function hasAnyPermission(user: SystemUserRow, permissions: string[]) {
     // （需求 4.5.8：「导入和维护公共官方日历来源」）。后者是跨租户的公共基础数据、
     // 不含任何空间业务数据，因此不违反同款「不得借此查看空间业务数据」。
     return permissions.some(
-      (permission) => permission.startsWith("system:tenant:") || permission.startsWith("system:calendar-source:")
+      (permission) => permission.startsWith("system:tenant:") || permission.startsWith("system:calendar-source:") || permission === "system:demo-request:view"
     );
   }
   if (user.isPlatformAdmin || user.permissions.includes("*")) {
@@ -699,6 +703,12 @@ export class ApiAuthGuard implements CanActivate {
       throw new ForbiddenException("该接口未向员工小程序开放");
     }
     const permissions = staffApiRequest && isStaffAuthPath(path) ? [] : requiredPermissions(request.method, path);
+
+    if (request.method === "POST" && path === "/public/demo-requests") {
+      if (!this.clientRateLimit) throw new UnauthorizedException("预约提交安全策略未就绪");
+      await this.clientRateLimit.assertAllowed({ method: request.method, path, ip: request.ip });
+      return true;
+    }
 
     if (
       path === "/health" ||
@@ -802,7 +812,8 @@ export class ApiAuthGuard implements CanActivate {
       !path.startsWith("/platform/tenants") &&
       !path.startsWith("/platform/tenant-bootstrap") &&
       !path.startsWith("/platform/official-calendars") &&
-      !path.startsWith("/platform/subscriptions")
+      !path.startsWith("/platform/subscriptions") &&
+      path !== "/platform/demo-requests"
     ) {
       throw new ForbiddenException("SaaS 平台管理员只能访问租户管理能力");
     }
@@ -828,6 +839,9 @@ export class ApiAuthGuard implements CanActivate {
     // 对任何权限都放行，不加这道 fail-closed，任一租户管理员都能管理所有租户的订阅。
     if (path.startsWith("/platform/subscriptions") && !user.isSaasAdmin) {
       throw new ForbiddenException("仅 SaaS 平台管理员可以管理租户订阅");
+    }
+    if (path === "/platform/demo-requests" && !user.isSaasAdmin) {
+      throw new ForbiddenException("仅 SaaS 平台管理员可以查看演示预约");
     }
     const staffPermissionOverride = staffApiRequest ? staffRoutePermissions(request.method, path, request.body) : undefined;
     if (!hasAnyPermission(user, staffPermissionOverride ?? permissions)) {

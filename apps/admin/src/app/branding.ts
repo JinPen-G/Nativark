@@ -1,9 +1,9 @@
 import type { AuthUser, TenantContext } from "@rental-os/shared";
 
 export const ADMIN_BRAND_NAME = "Rental OS";
-export const ADMIN_DEFAULT_LOGO = "/brand/logo-horizontal.png";
-export const ADMIN_DEFAULT_MARK = "/brand/logo-mark-gradient.png";
-export const ADMIN_DEFAULT_FAVICON = "/brand/favicon.ico";
+export const ADMIN_DEFAULT_LOGO = "/brand/rentalos-logo-color.svg";
+export const ADMIN_DEFAULT_MARK = "/brand/rentalos-icon-1.svg";
+export const ADMIN_DEFAULT_FAVICON = "/brand/rentalos-icon-1.svg";
 
 function isTenantUser(user?: Pick<AuthUser, "isSaasAdmin">) {
   return Boolean(user && !user.isSaasAdmin);

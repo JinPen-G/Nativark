@@ -9,7 +9,7 @@ import { LocaleProvider, useLocale } from "./locale";
 import { queryClient } from "./queryClient";
 import { AppearanceProvider, createThemeConfig, useAppearance } from "./theme";
 import { useAuthStore } from "@/features/auth/authStore";
-import { applyAdminFavicon, resolveAdminFavicon } from "./branding";
+import { applyAdminFavicon } from "./branding";
 import { applyAdminRadiusTokens, resolveAdminPrimaryColor } from "./designTokens";
 
 function ThemedApp() {
@@ -23,7 +23,7 @@ function ThemedApp() {
     applyAdminRadiusTokens(document.documentElement, tenantCornerRadius);
   }, [tenantCornerRadius]);
   useEffect(() => {
-    applyAdminFavicon(resolveAdminFavicon(tenant, user));
+    applyAdminFavicon();
     const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
     if (meta) meta.content = resolveAdminPrimaryColor(tenantThemeColor);
   }, [tenant, tenantThemeColor, user]);

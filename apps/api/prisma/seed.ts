@@ -226,6 +226,7 @@ const permissions = [
   // 公共官方日历来源注册表（需求 4.5.8）。跨租户的公共基础数据，只授予 SaaS 平台管理员；
   // 它不含任何经营空间业务数据，因此与「不得借此查看空间业务数据」不冲突。
   ["system:calendar-source:manage", "公共官方日历来源维护", "系统设置", PermissionKind.ACTION],
+  ["system:demo-request:view", "演示预约查看", "平台管理", PermissionKind.MENU],
   ["system:tenant:bootstrap", "租户初始化", "系统设置", PermissionKind.ACTION],
   // SUB-01 版本订阅（§5.2/§7）。租户端查看/申请用 rental-os:*；平台端跨租户管理用 system:*。
   ["rental-os:subscription:view", "版本与订阅查看", "版本与订阅", PermissionKind.ACTION],

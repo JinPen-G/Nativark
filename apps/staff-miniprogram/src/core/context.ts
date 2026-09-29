@@ -1,7 +1,8 @@
 import type { RentalAttributeDefinition, RentalCategoryDefinition, RentalCategoryTerminology, RentalFulfillmentLocation, RentalFulfillmentMode, RentalInspectionFieldDefinition } from "@rental-os/shared";
 import { listCategories, listLocations, sessionContext } from "../api/context";
 import { Emitter } from "./events";
-import { applySessionContext, currentWorkspace, currentWorkspaceId, sessionEvents } from "./session";
+import { applySessionContext, contextVersion, currentWorkspace, currentWorkspaceId, sessionEvents } from "./session";
+import { ApiError } from "./http";
 import { STORAGE_KEYS, readStorage, writeStorage } from "./storage";
 
 /**
@@ -55,9 +56,12 @@ export const contextEvents = new Emitter<WorkspaceContext>();
 let cached: WorkspaceContext | undefined;
 let inflight: Promise<WorkspaceContext> | undefined;
 let categoryCache: RentalCategoryDefinition[] | undefined;
+let generation = 0;
+let cachedVersion = 0;
 
 sessionEvents.on((event) => {
   if (event.type === "signed-out" || event.type === "workspace-changed" || event.type === "signed-in") {
+    generation += 1;
     cached = undefined;
     inflight = undefined;
   }
@@ -65,7 +69,7 @@ sessionEvents.on((event) => {
 
 export function cachedContext(): WorkspaceContext | undefined {
   const workspaceId = currentWorkspaceId();
-  return cached && cached.workspaceId === workspaceId ? cached : undefined;
+  return cached && cached.workspaceId === workspaceId && cachedVersion === contextVersion() ? cached : undefined;
 }
 
 /** 当前术语；上下文未加载时按会话里的品类给一个合理兜底，避免页面闪“物品”。 */
@@ -89,16 +93,22 @@ export function loadContext(force = false): Promise<WorkspaceContext> {
   const existing = cachedContext();
   if (existing && !force) return Promise.resolve(existing);
   if (inflight && !force) return inflight;
-  const startWorkspace = currentWorkspaceId();
-  inflight = (async () => {
+  const startVersion = contextVersion();
+  const startGeneration = ++generation;
+  const owns = () => contextVersion() === startVersion && generation === startGeneration;
+  const assertOwner = () => { if (!owns()) throw new ApiError("STALE_CONTEXT", "经营空间或账号已切换，该上下文已作废"); };
+  const promise = (async () => {
     const [session, categories, locations] = await Promise.all([
       sessionContext().then((context) => {
+        // Guard before applying permissions: a tenant-scoped late response must not replace the new identity.
+        assertOwner();
         applySessionContext(context);
         return context;
       }),
       categoryCache ? Promise.resolve(categoryCache) : listCategories().then((rows) => (categoryCache = rows)),
       listLocations().catch(() => [] as RentalFulfillmentLocation[])
     ]);
+    assertOwner();
     const workspaceId = currentWorkspaceId();
     const workspace = currentWorkspace();
     const categoryCode = session.tenant.categoryCode ?? workspace?.categoryCode ?? "";
@@ -119,16 +129,16 @@ export function loadContext(force = false): Promise<WorkspaceContext> {
       currentLocationId: enabledLocations.some((row) => row.id === saved) ? saved : "",
       loadedAt: Date.now()
     };
-    // 切换空间期间返回的旧上下文不能覆盖新空间。
-    if (currentWorkspaceId() !== startWorkspace) return context;
+    assertOwner();
     cached = context;
+    cachedVersion = startVersion;
     contextEvents.emit(context);
     return context;
-  })();
-  inflight.finally(() => {
-    inflight = undefined;
+  })().finally(() => {
+    if (owns()) inflight = undefined;
   });
-  return inflight;
+  inflight = promise;
+  return promise;
 }
 
 /** 设置当前履约地点（"" = 全部）；只影响本机列表筛选，不改变服务端范围。 */
@@ -195,6 +205,8 @@ export function categoryArtwork(categoryCode?: string): string {
 
 /** 仅供测试。 */
 export function resetContextForTest(): void {
+  generation += 1;
+  cachedVersion = 0;
   cached = undefined;
   inflight = undefined;
   categoryCache = undefined;

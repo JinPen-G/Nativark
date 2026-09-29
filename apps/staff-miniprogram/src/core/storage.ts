@@ -16,6 +16,8 @@ export const STORAGE_KEYS = {
   drafts: `${PREFIX}drafts`,
   /** 关键动作（取消/交接/收款）的幂等键：结果未知时同键重放，绝不新键重试。 */
   actionKeys: `${PREFIX}action-keys`,
+  /** Subscription reminder dismissals; keys inside the map include account and tenant. */
+  subscriptionDismissals: `${PREFIX}subscription-dismissals`,
   themeMode: `${PREFIX}theme-mode`
 } as const;
 

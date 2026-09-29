@@ -117,9 +117,9 @@ button, input, textarea, select { font: inherit; }
 .app-brand-copy img {
   display: block;
   width: auto;
-  height: 36px;
-  max-width: 150px;
-  max-height: 36px;
+  height: 28px;
+  max-width: 124px;
+  max-height: 28px;
   object-fit: contain;
 }
 .app-brand-copy b {
@@ -754,8 +754,10 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 .ant-select-selection-item { border-radius: min(var(--rental-ui-radius-sm), 9px); }
 
 /* SUB-02 §5.4 到期提醒浮窗：视窗左下角；桌面避开左侧栏底部控件（空间切换/主题/账号卡），窄屏抽屉时贴左。 */
-.subscription-reminder { position: fixed; left: 16px; bottom: 16px; z-index: 900; max-width: 320px; }
-@media (min-width: 768px) { .subscription-reminder { left: 256px; } }
+.subscription-reminder { position: fixed; left: max(12px, env(safe-area-inset-left)); bottom: calc(76px + env(safe-area-inset-bottom)); z-index: 900; width: min(290px, calc(100vw - 24px)); max-height: min(280px, 45dvh); overflow-y: auto; overflow-wrap: anywhere; }
+.subscription-reminder-heading { display: flex; align-items: flex-start; gap: 8px; justify-content: space-between; }
+.subscription-reminder-heading > .ant-btn { flex: 0 0 auto; }
+@media (min-width: 768px) { .subscription-reminder { left: 256px; bottom: 16px; width: min(320px, calc(100vw - 272px)); } }
 .text-meta {
   font-size: var(--rental-typography-meta-size);
   font-weight: var(--rental-typography-meta-weight);

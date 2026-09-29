@@ -4,6 +4,7 @@ async (page) => {
  page.on('pageerror',e=>errors.push(e.message));
  page.on('response',r=>{if(r.status()>=400)badRequests.push({url:r.url(),status:r.status()});});
  await page.setViewportSize({width:1440,height:1000});
+ await page.emulateMedia({reducedMotion:'no-preference'});
  await page.goto('http://localhost:8137/source/');
  await page.waitForTimeout(800);
  const reject=page.locator('[data-cookie-action="reject"]');
@@ -14,8 +15,10 @@ async (page) => {
  check('Escape closes dropdown',await page.locator('.nav-dropdown').first().evaluate(e=>!e.classList.contains('is-open')));
  await page.locator('.property-card').hover();await page.waitForTimeout(800);
  check('product hover retains base image',await page.locator('.property-image').evaluate(e=>getComputedStyle(e).opacity==='1'&&e.naturalWidth>0));
- check('product hover reveals lease card',await page.locator('.lease-card').evaluate(e=>getComputedStyle(e).transform==='matrix(1, 0, 0, 1, 0, 0)'));
+ check('product hover reveals lease card',await page.locator('.lease-card').evaluate(e=>['none','matrix(1, 0, 0, 1, 0, 0)'].includes(getComputedStyle(e).transform)&&getComputedStyle(e).opacity==='1'&&e.getBoundingClientRect().width>200));
  await page.mouse.move(5,5);
+ await page.evaluate(()=>scrollTo({top:0,behavior:'instant'}));
+ await page.waitForTimeout(300);
  await page.locator('#hero-tab-1').click();
  check('hero tab switches',await page.locator('#hero-1').getAttribute('aria-hidden')==='false');
  await page.locator('#hero-tab-1').focus();
@@ -65,6 +68,8 @@ async (page) => {
  check('mobile menu closes',!(await page.locator('#mobile-menu').isVisible()));
  const metricLayout=await page.locator('.metric').evaluateAll(items=>items.map(e=>({wrap:getComputedStyle(e).whiteSpace,height:e.getBoundingClientRect().height,bodyHeight:e.closest('.outcome-content').querySelector('h3').getBoundingClientRect().height})));
  check('mobile metrics stay on one line',metricLayout.every(e=>e.wrap==='nowrap'&&e.height<=88&&e.bodyHeight>0),metricLayout);
+ await page.evaluate(()=>scrollTo({top:0,behavior:'instant'}));
+ await page.waitForTimeout(300);
  await page.locator('.hero-next').click();
  check('mobile hero next',await page.locator('#hero-1').getAttribute('aria-hidden')==='false');
  await page.emulateMedia({reducedMotion:'reduce'});

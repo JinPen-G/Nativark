@@ -12,6 +12,7 @@ export const ROUTES = {
   scan: "/pages/scan/index",
   scanner: "/pages/scanner/index",
   me: "/pages/me/index",
+  subscription: "/pages/subscription/index",
   order: "/pages/order/index",
   orderNew: "/pages/order-new/index",
   allocate: "/pages/allocate/index",

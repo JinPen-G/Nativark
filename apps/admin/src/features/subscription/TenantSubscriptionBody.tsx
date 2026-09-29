@@ -15,7 +15,7 @@ import { SubscriptionRequestModal } from "./SubscriptionRequestModal";
 import { APP_ROUTES } from "@/app/navigation";
 import {
   ENTITLEMENT_SOURCE_LABEL, PLAN_LABEL, RELEASE_STATUS_LABEL, REQUEST_STATUS_LABEL, REQUEST_STATUS_TONE,
-  REQUEST_TYPE_LABEL, SERVICE_STATUS_LABEL, formatMoney
+  REQUEST_TYPE_LABEL, SERVICE_STATUS_LABEL, formatMoney, formatSubscriptionDate
 } from "./subscriptionLabels";
 
 /** §5.2 版本与订阅信息结构，由 TenantSubscriptionView 驱动。金额 null → 待确认/价格待公布（§14.2）。 */
@@ -23,9 +23,12 @@ export function TenantSubscriptionBody({ data, canManage, navigate }: { data: Te
   const { t } = useLocale();
   const [requestType, setRequestType] = useState<SubscriptionRequestType | null>(null);
   const { overview, entitlements, standardPricing, requests, changeLog } = data;
-  const openRequest = requests.find((row) => row.status === SubscriptionRequestStatus.Pending);
   const isPro = overview.plan === SubscriptionPlan.Pro;
-  const requestPath = (id: string) => `${APP_ROUTES.subscription.path}/requests/${id}`;
+  const requestPath = (id: string) => `${APP_ROUTES.subscription.path}/requests/${encodeURIComponent(id)}`;
+  const requestButton = (type: SubscriptionRequestType, label: string, primary = false) => {
+    const pending = requests.find((row) => row.status === SubscriptionRequestStatus.Pending && row.type === type);
+    return <Button type={primary ? "primary" : "default"} disabled={!canManage} onClick={() => pending ? navigate(requestPath(pending.id)) : setRequestType(type)}>{pending ? `${t(label)} · ${t("查看申请进度")}` : t(label)}</Button>;
+  };
 
   const requestColumns: ColumnsType<SubscriptionRequestRecord> = [
     { title: t("类型"), dataIndex: "type", key: "type", render: (value: SubscriptionRequestType) => t(REQUEST_TYPE_LABEL[value]) },
@@ -44,25 +47,19 @@ export function TenantSubscriptionBody({ data, canManage, navigate }: { data: Te
           { key: "tenant", label: t("租户"), children: `${overview.tenantName}（${overview.tenantCode}）` },
           { key: "plan", label: t("当前套餐版本"), children: <Tag color={isPro ? "gold" : "default"}>{t(PLAN_LABEL[overview.plan])}</Tag> },
           { key: "status", label: t("服务状态"), children: t(SERVICE_STATUS_LABEL[overview.serviceStatus]) },
-          { key: "period", label: t("有效期"), children: overview.endAt ? `${overview.startAt ?? ""} ~ ${overview.endAt}${overview.timeZone ? `（${overview.timeZone}）` : ""}` : t("待平台确认") },
+          { key: "period", label: t("有效期 [开始, 截止)"), children: `${formatSubscriptionDate(overview.startAt, overview.timeZone)} ~ ${formatSubscriptionDate(overview.endAt, overview.timeZone)}` },
           { key: "amount", label: t("本期确认金额"), children: t(formatMoney(overview.currentAmount)) },
-          { key: "handled", label: t("办理日期"), children: overview.handledAt ?? t("待确认") }
+          { key: "handled", label: t("办理日期"), children: formatSubscriptionDate(overview.handledAt, overview.timeZone) }
         ]} />
       </Card>
 
       <Card size="small" title={t("当前操作")}>
         <Space wrap>
-          <Button onClick={() => navigate(APP_ROUTES.subscriptionPro.path)}>{t("了解 PRO")}<RightOutlined /></Button>
-          {openRequest ? (
-            <Button type="primary" onClick={() => navigate(requestPath(openRequest.id))}>{t("查看申请进度")}</Button>
-          ) : (
-            <>
-              {!isPro && <Button type="primary" disabled={!canManage} onClick={() => setRequestType(SubscriptionRequestType.UpgradePro)}>{t("升级 PRO")}</Button>}
-              <Button disabled={!canManage} onClick={() => setRequestType(isPro ? SubscriptionRequestType.RenewPro : SubscriptionRequestType.RenewStandard)}>{t("续费")}</Button>
-              {isPro && <Button disabled={!canManage} onClick={() => setRequestType(SubscriptionRequestType.NextStandard)}>{t("申请下期基础版")}</Button>}
-              <Button disabled={!canManage} onClick={() => setRequestType(SubscriptionRequestType.NoRenew)}>{t("到期不续费")}</Button>
-            </>
-          )}
+          <Button onClick={() => navigate(APP_ROUTES.subscriptionPro.path)}>{t(isPro ? "查看 PRO 权益" : "了解 PRO")}<RightOutlined /></Button>
+          {!isPro && requestButton(SubscriptionRequestType.UpgradeConsult, "升级咨询", true)}
+          {requestButton(isPro ? SubscriptionRequestType.RenewPro : SubscriptionRequestType.RenewStandard, "续费")}
+          {isPro && requestButton(SubscriptionRequestType.NextStandard, "申请下期基础版")}
+          {requestButton(SubscriptionRequestType.NoRenew, "到期不续费")}
         </Space>
       </Card>
 
@@ -95,7 +92,7 @@ export function TenantSubscriptionBody({ data, canManage, navigate }: { data: Te
           <Descriptions column={1} size="small" colon={false} items={changeLog.map((entry) => ({
             key: entry.id,
             label: `${entry.action}${entry.effectiveAt ? `（${entry.effectiveAt}）` : ""}`,
-            children: entry.afterText ?? entry.reason ?? t("—")
+            children: [entry.beforeText, entry.afterText, entry.reason].filter(Boolean).join(" → ") || t("—")
           }))} />
         )}
       </Card>

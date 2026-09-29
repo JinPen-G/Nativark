@@ -101,6 +101,8 @@ function declaredPermissionCodes() {
   return new Set([...source.slice(start, end).matchAll(/\["([^"]+)"/gu)].map((match) => match[1]));
 }
 const declared = declaredPermissionCodes();
+// This tenant-owned summary still requires authentication, but intentionally carries no commercial RBAC permission.
+const authenticatedSummaries = new Set(["GET /platform/subscription/reminder"]);
 
 for (const route of routes) {
   // 客户端 API 使用独立的 ClientAuthService/token 认证域，不属于运营 RBAC 权限树。
@@ -113,7 +115,7 @@ for (const route of routes) {
     continue;
   }
   // 零权限只允许出现在显式公共白名单里：其余任何"零权限"都是放行漏洞。
-  if (permissions.length === 0 && !isPublic(route.path)) {
+  if (permissions.length === 0 && !isPublic(route.path) && !authenticatedSummaries.has(`${route.method} ${route.path}`)) {
     zeroPermission.push(route);
   }
   for (const code of permissions) {

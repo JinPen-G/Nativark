@@ -12,10 +12,6 @@ import { PLAN_LABEL, RELEASE_STATUS_LABEL, formatMoney } from "./subscriptionLab
 import { FeatureCatalogModal } from "./FeatureCatalogModal";
 import { StandardPriceModal } from "./StandardPriceModal";
 
-/**
- * SUB-03 §3.3/§5.2/§8 平台功能目录与标准价维护页（audience saas，system:tenant:subscription:manage）。
- * 读端点待后端补齐（api 层已标 TODO）；上线状态与归属分开维护，公共下放 = 当前归属选基础版。
- */
 function ownershipLabel(value: FeatureOwnership, t: (v: string) => string) {
   return t(value === FeatureOwnership.Standard ? "基础版" : "PRO");
 }
@@ -64,8 +60,8 @@ export function SubscriptionCatalogPage() {
               : <Table<SubscriptionFeatureCatalogEntry> rowKey="code" size="small" columns={columns} dataSource={catalog.data ?? []} pagination={{ pageSize: 20, hideOnSinglePage: true }} />}
           </Card>
 
-          <StandardPriceModal open={priceModal.open} plan={priceModal.plan} current={priceModal.current} onClose={() => setPriceModal({ open: false, plan: null, current: null })} />
-          <FeatureCatalogModal open={catalogModal.open} entry={catalogModal.entry} onClose={() => setCatalogModal({ open: false, entry: null })} />
+          {priceModal.open && <StandardPriceModal open plan={priceModal.plan} current={priceModal.current} onClose={() => setPriceModal({ open: false, plan: null, current: null })} />}
+          {catalogModal.open && <FeatureCatalogModal open entry={catalogModal.entry} onClose={() => setCatalogModal({ open: false, entry: null })} />}
         </Space>
       }
     />

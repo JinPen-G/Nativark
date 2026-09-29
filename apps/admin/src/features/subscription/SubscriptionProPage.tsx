@@ -1,80 +1,74 @@
-import { RightOutlined } from "@ant-design/icons";
-import type { ReactNode } from "react";
-import { Alert, Button, Card, Space, Tag, Typography } from "antd";
+import { useState } from "react";
+import { Alert, Button, Card, Descriptions, Empty, Select, Space, Tag, Typography } from "antd";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { SubscriptionPlan, SubscriptionRequestStatus, SubscriptionRequestType, type SubscriptionFeatureEntitlement } from "@rental-os/shared";
 import { PageHeader } from "@/components/PageHeader";
+import { QueryState } from "@/components/QueryState";
 import { useLocale } from "@/app/locale";
 import { useAuthStore } from "@/features/auth/authStore";
 import { APP_ROUTES } from "@/app/navigation";
-
-/**
- * SUB-02 PRO 介绍与版本对比页（需求 §6），路由 /settings/subscription/pro。
- *
- * 静态骨架：把「当前可购买」与「规划中 / 受控试点」分区展示，用业务示例说明，
- * 不展示 capability code / 内部版本号 / 0 元 / 虚构折扣 / 自动试用（§6.2-§6.4、§6.8）。
- * 真实功能目录与标准价接总控 SUB-01 契约（TODO）。
- */
-function Block({ title, children }: { title: string; children: ReactNode }) {
-  const { t } = useLocale();
-  return <Card size="small" title={t(title)}>{children}</Card>;
-}
+import { subscriptionApi } from "@/api/subscription";
+import { SubscriptionRequestModal } from "./SubscriptionRequestModal";
+import { ENTITLEMENT_SOURCE_LABEL, PLAN_LABEL, RELEASE_STATUS_LABEL, formatMoney } from "./subscriptionLabels";
+import { groupSubscriptionFeatures, subscriptionError } from "./subscriptionOperations";
 
 export function SubscriptionProPage() {
   const { t } = useLocale();
   const navigate = useNavigate();
   const canManage = useAuthStore((state) => state.hasPermission("rental-os:subscription:manage"));
+  const userId = useAuthStore((state) => state.user?.id);
+  const tenantId = useAuthStore((state) => state.tenant?.tenantId);
+  const query = useQuery({ queryKey: ["subscription", "tenant-view", tenantId, userId], queryFn: subscriptionApi.tenantView, enabled: Boolean(tenantId && userId) });
+  const [consulting, setConsulting] = useState(false);
+  const [category, setCategory] = useState<string>();
+  const categories = [...new Set(query.data?.entitlements.flatMap((f) => f.categories) ?? [])];
+  const features = query.data?.entitlements.filter((f) => !category || !f.categories.length || f.categories.includes(category)) ?? [];
+  const groups = groupSubscriptionFeatures(features);
+  const openConsult = query.data?.requests.find((r) => r.type === SubscriptionRequestType.UpgradeConsult && r.status === SubscriptionRequestStatus.Pending);
 
-  return (
-    <PageHeader
-      title="PRO 介绍与版本对比"
-      description="了解 PRO 适合的经营场景、与基础版的差异和各品类专业模块；申请升级与版本页共用同一办理流程。"
-      view={
-        <Space orientation="vertical" size={16} style={{ width: "100%" }}>
-          <Alert
-            type="info"
-            showIcon
-            message={t("四品类首批专业包全部验收通过后 PRO 才正式销售；未满足销售条件的项目标为「升级咨询」，不代表立即可用、不会自动收款或开通。")}
-          />
-
-          <Block title="PRO 能解决什么">
-            <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-              {t("适合哪些商户、可解决的经营问题、与基础版的核心差异——用高价值器材交接、多驾驶人、施工日报等业务示例说明，不以内部实现名词作卖点。")}
-            </Typography.Paragraph>
-          </Block>
-
-          <Block title="当前可购买（已上线）">
-            <Typography.Text type="secondary">{t("仅列已实际验收、可申请启用的功能；此处不计入规划项。")}</Typography.Text>
-          </Block>
-
-          <Block title="规划中 / 受控试点">
-            <Space wrap>
-              <Tag>{t("规划中")}</Tag>
-              <Tag color="processing">{t("受控试点")}</Tag>
-            </Space>
-            <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
-              {t("规划与试点项单独展示，不计入本次办理承诺交付；试点需申请且有适用范围与未验证边界。")}
-            </Typography.Paragraph>
-          </Block>
-
-          <Block title="品类专业模块">
-            <Typography.Text type="secondary">{t("可查看全部品类介绍，也可筛选自己经营的品类；未经营品类标明需要相应空间与运营准备，不承诺升级即自动开出该品类。")}</Typography.Text>
-          </Block>
-
-          <Block title="费用与启用条件">
-            <Typography.Text type="secondary">{t("价格待公布 / 联系平台；含税与外部费用边界另计，不展示 0 元、原价或折扣。")}</Typography.Text>
-          </Block>
-
-          <Block title="常见问题">
-            <Typography.Text type="secondary">{t("升级不影响既有报价、订单与空间配置；到期与降级后专业配置保留，重新授权时重新核验依赖。")}</Typography.Text>
-          </Block>
-
-          <Space wrap>
-            <Button onClick={() => navigate(APP_ROUTES.subscription.path)}>{t("返回版本与订阅")}</Button>
-            {/* 与版本页共用同一办理流程（§6.6）；未满足销售条件时按「升级咨询」。写动作用 :manage 门禁。 */}
-            <Button type="primary" disabled={!canManage}>{t("申请升级 / 联系平台")}<RightOutlined /></Button>
-          </Space>
+  function featureBlock(title: string, entries: SubscriptionFeatureEntitlement[], description: string) {
+    return <Card size="small" title={`${t(title)}（${entries.length}）`}>
+      <Typography.Paragraph type="secondary">{t(description)}</Typography.Paragraph>
+      {!entries.length ? <Empty description={t("暂无该类功能")} /> : <Descriptions column={1} size="small" items={entries.map((feature) => ({
+        key: feature.code, label: feature.name,
+        children: <Space orientation="vertical" size={4}>
+          <Space wrap><Tag>{t(ENTITLEMENT_SOURCE_LABEL[feature.source])}</Tag><Tag>{t(RELEASE_STATUS_LABEL[feature.releaseStatus])}</Tag><span>{feature.module} · {feature.categories.join(" / ")}</span></Space>
+          {feature.valueText && <span>{feature.valueText}</span>}
+          <Typography.Text type="secondary">{t(feature.needsConfig ? "需先配置空间及业务条件" : feature.available ? "已获资格，可按权限申请启用" : "当前不可新增使用；仍须满足授权、品类及配置条件")}</Typography.Text>
+          {feature.externalFeeNote && <Typography.Text type="secondary">{feature.externalFeeNote}</Typography.Text>}
         </Space>
-      }
-    />
-  );
+      }))} />}
+    </Card>;
+  }
+
+  return <PageHeader title="PRO 介绍与版本对比" description="当前权益按本租户的公共权益与额外授权展示；功能上线不等于 PRO 正式销售开放。"
+    extra={<Button onClick={() => navigate(APP_ROUTES.subscription.path)}>{t("返回版本与订阅")}</Button>}
+    view={<QueryState loading={query.isLoading}>
+      {query.error ? <Alert type="error" message={subscriptionError(query.error, t("订阅介绍加载失败"))} action={<Button onClick={() => query.refetch()}>{t("重试")}</Button>} />
+        : query.data && <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+          <Alert type="info" showIcon message={t("正式 PRO 销售尚未开放；四品类首批专业包及销售清单全部通过后才可正式收费。目前仅接受升级咨询或有明确范围的受控试点，不自动收款或开通。")} />
+          <Card size="small" title={t("适用场景与范围")}>
+            <Typography.Paragraph>{t("基础版保留已承诺的基础租赁经营闭环。PRO 规划面向项目协同、专业交接与养护等更复杂的经营需求，以下以实际发布目录为准；已有授权不重复作为升级卖点。")}</Typography.Paragraph>
+            <Select allowClear style={{ minWidth: 200 }} placeholder={t("全部适用品类")} value={category} onChange={setCategory} options={categories.map((value) => ({ value, label: value }))} />
+            <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>{t("查看某品类不表示已经营该品类；启用仍需相应空间、人员权限和业务准备。")}</Typography.Paragraph>
+          </Card>
+          {featureBlock("已上线且本租户已包含 / 已获授权", groups.included, "无需为这些权益重复升级；到期、空间配置和安全条件仍单独校验。")}
+          {featureBlock("已上线的额外权益（仅咨询）", groups.additional, "这些功能尚未被本租户授权覆盖。单项上线不代表四品类 PRO 已正式可售。")}
+          {featureBlock("受控试点", groups.pilot, "需明确申请、适用范围和未验证边界，不向所有 PRO 租户默认开放。")}
+          {featureBlock("规划中", groups.planned, "不计入当前可购买或本次办理的交付承诺。")}
+          {groups.unavailable.length > 0 && featureBlock("暂停 / 停止新使用", groups.unavailable, "保留历史查询与既有业务善后，不代表可以新增启用。")}
+          <Card size="small" title={t("标准年费与费用边界")}>
+            <Descriptions column={{ xs: 1, md: 2 }} items={[SubscriptionPlan.Standard, SubscriptionPlan.Pro].map((plan) => {
+              const price = query.data.standardPricing.find((p) => p.plan === plan);
+              return { key: plan, label: t(PLAN_LABEL[plan]), children: <Space orientation="vertical" size={0}><span>{price?.published ? formatMoney(price.annualFee, t("价格待公布")) : t("价格待公布")}</span>{price?.note && <Typography.Text type="secondary">{price.note}</Typography.Text>}</Space> };
+            })} />
+            <Typography.Text type="secondary">{t("有效基础版升级按相同计价口径核对剩余期间补差，保持统一截止。外部按量服务及硬件另计；不自动扣费、不默认试用。发布价格也不代表 PRO 销售条件已通过。")}</Typography.Text>
+          </Card>
+          <Card size="small" title={t("常见问题")}><Typography.Text type="secondary">{t("升级不改变历史报价、订单及空间配置。到期停止新业务，既有履约、退款及结算保留；重新授权后仍须核验依赖，不自动发布旧配置。")}</Typography.Text></Card>
+          {query.data.overview.plan !== SubscriptionPlan.Pro && <Button type="primary" disabled={!canManage} onClick={() => openConsult ? navigate(`${APP_ROUTES.subscription.path}/requests/${encodeURIComponent(openConsult.id)}`) : setConsulting(true)}>{t(openConsult ? "查看咨询进度" : "提交升级咨询")}</Button>}
+          {!canManage && <Typography.Text type="secondary">{t("请联系租户管理员办理咨询与续费。")}</Typography.Text>}
+          <SubscriptionRequestModal open={consulting} type={SubscriptionRequestType.UpgradeConsult} onClose={() => setConsulting(false)} />
+        </Space>}
+    </QueryState>} />;
 }

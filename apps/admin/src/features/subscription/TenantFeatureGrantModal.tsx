@@ -1,6 +1,7 @@
 import { App, Alert, Form, Input, Modal } from "antd";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { GrantTenantFeatureRequest, RevokeTenantFeatureRequest, SubscriptionFeatureEntitlement } from "@rental-os/shared";
+import type { SubscriptionFeatureEntitlement } from "@rental-os/shared";
+import { subscriptionError } from "./subscriptionOperations";
 import { useLocale } from "@/app/locale";
 import { subscriptionApi } from "@/api/subscription";
 
@@ -16,12 +17,15 @@ export function TenantFeatureGrantModal({
   mode,
   tenantId,
   feature,
+  expectedRevision,
   onClose
 }: {
   open: boolean;
   mode: "grant" | "revoke";
   tenantId: string;
   feature: SubscriptionFeatureEntitlement | null;
+  /** Captured by the parent when opening this modal, not updated on query refetch. */
+  expectedRevision: number;
   onClose: () => void;
 }) {
   const { t } = useLocale();
@@ -32,17 +36,16 @@ export function TenantFeatureGrantModal({
 
   const mutation = useMutation({
     mutationFn: (values: FormValues) => {
-      const featureCode = feature?.code ?? "";
-      return isRevoke
-        ? subscriptionApi.revokeFeature(tenantId, { featureCode, reason: values.reason ?? "" } satisfies RevokeTenantFeatureRequest)
-        : subscriptionApi.grantFeature(tenantId, { featureCode, reason: values.reason || undefined } satisfies GrantTenantFeatureRequest);
+      if (!feature || !values.reason?.trim()) throw new Error(t("请选择功能并填写授权原因"));
+      const body = { featureCode: feature.code, reason: values.reason.trim(), expectedRevision };
+      return isRevoke ? subscriptionApi.revokeFeature(tenantId, body) : subscriptionApi.grantFeature(tenantId, body);
     },
     onSuccess: () => {
       message.success(t(isRevoke ? "已撤销额外授权" : "已额外授权"));
       void queryClient.invalidateQueries({ queryKey: ["subscription", "platform-detail", tenantId] });
       onClose();
     },
-    onError: () => message.error(t("保存失败，请稍后重试（后端服务联调中）"))
+    onError: (error) => message.error(subscriptionError(error))
   });
 
   return (
@@ -65,7 +68,7 @@ export function TenantFeatureGrantModal({
           : "仅为该租户额外授权此功能，不要求整体升级为 PRO；保存后即时生效。若需对所有基础版开放，请在功能目录页改为公共下放。")}
       />
       <Form<FormValues> form={form} layout="vertical" onFinish={(values) => mutation.mutate(values)}>
-        <Form.Item name="reason" label={t(isRevoke ? "撤销原因（必填）" : "授权原因")} rules={isRevoke ? [{ required: true, whitespace: true }] : []}>
+        <Form.Item name="reason" label={t(isRevoke ? "撤销原因（必填）" : "授权原因")} rules={[{ required: true, whitespace: true }]}>
           <Input.TextArea rows={3} maxLength={200} placeholder={t(isRevoke ? "如：试点结束 / 误授权更正" : "如：签约赠送 / 试点开放")} />
         </Form.Item>
       </Form>

@@ -88,7 +88,7 @@ Page({
     const context = cachedContext();
     const t = context?.terminology;
     const cards: QuickCard[] = [];
-    if (can("rental-core:asset:view", "rental-core:asset:manage")) cards.push({ key: "assets", label: `${t?.assetLabel ?? "物品"}管理`, hint: "查询 / 盘点记录", icon: "box", color: "" });
+    if (can("rental-core:asset:view", "rental-core:asset:manage")) cards.push({ key: "assets", label: `${t?.assetLabel ?? "物品"}管理`, hint: "查询/盘点记录", icon: "box", color: "" });
     if (can("rental-os:order:view")) cards.push({ key: "orders", label: "订单处理", hint: "可取还/核对", icon: "orders", color: "green" });
     if (can("rental-core:maintenance:view")) cards.push({ key: "workOrders", label: "工单处理", hint: "可创建/处理", icon: "tool", color: "purple" });
     this.setData({

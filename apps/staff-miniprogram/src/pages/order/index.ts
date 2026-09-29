@@ -13,6 +13,8 @@ import { formatMoney } from "../../core/money";
 import { blockedState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
 import { itemGroupCover, maskPhone } from "../../core/presenters";
 import { can, canTenant, currentSession, isSignedIn } from "../../core/session";
+import { loadSubscription, subscriptionEvents } from "../../core/subscription";
+import { staffActionAccess } from "../../core/subscription-access";
 import { themeBehavior } from "../../core/theme-behavior";
 import { formatBusinessDateTime, formatBusinessRange, splitInstant, todayInZone, zoneLabel, zonedToInstant } from "../../core/time";
 import { ROUTES, buildUrl, callPhone, confirmDialog, copyText, navigate, promptDialog, relaunch, toast } from "../../core/ui";
@@ -42,8 +44,16 @@ Page({
   inspections: [] as RentalInspectionRecord[],
   timeZone: "Asia/Shanghai",
   extPreview: undefined as RentalOrderExtensionPreview | undefined,
-  onLoad(query: Record<string, string>) { this.setData({ id: query.id ?? "" }); },
-  onShow() { if (!isSignedIn()) { relaunch(ROUTES.login); return; } void this.load(); },
+  offSubscription: undefined as (() => void) | undefined,
+  onLoad(query: Record<string, string>) {
+    this.setData({ id: query.id ?? "" });
+    this.offSubscription = subscriptionEvents.on(() => {
+      const allowed = this.order?.status === "renting" && !(this.order.allocations ?? []).some((row) => row.status === "returned") && staffActionAccess("order.extend").allowed;
+      this.setData({ canExtend: Boolean(allowed) });
+    });
+  },
+  onUnload() { this.offSubscription?.(); },
+  onShow() { if (!isSignedIn()) { relaunch(ROUTES.login); return; } void loadSubscription(true).catch(() => undefined); void this.load(); },
   onPullDownRefresh() { this.load().finally(() => wx.stopPullDownRefresh()); },
   async load() {
     if (!this.data.id) { this.setData({ view: blockedState("缺少订单编号", "请从订单列表重新进入") }); return; }
@@ -94,7 +104,7 @@ Page({
       const canResumePickup = isPickupOverdue && operate;
       // 续租代办：租用中且未发生部分归还，且持有续租权限。
       const partiallyReturned = (order.allocations ?? []).some((row) => row.status === "returned");
-      const canExtend = order.status === "renting" && !partiallyReturned && can("rental-os:order:extend");
+      const canExtend = order.status === "renting" && !partiallyReturned && staffActionAccess("order.extend").allowed;
       const currentEndAt = order.effectiveEndAt ?? order.endAt;
       // 配送/上门类订单（品类 deliveryDestination=customer_address）带收货地址快照；取还与送车到点类为空，仍按门店显示。
       const delivery = order.deliveryAddressSnapshot;

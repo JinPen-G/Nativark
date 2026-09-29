@@ -31,6 +31,7 @@ const PlatformPage = lazy(() => import("@/features/platform/PlatformPage").then(
 const PlatformOperationsPage = lazy(() => import("@/features/platform/PlatformOperationsPage").then((module) => ({ default: module.PlatformOperationsPage })));
 const PlatformToolsPage = lazy(() => import("@/features/platform/PlatformToolsPage").then((module) => ({ default: module.PlatformToolsPage })));
 const OfficialCalendarSourcePage = lazy(() => import("@/features/platform/OfficialCalendarSourcePage").then((module) => ({ default: module.OfficialCalendarSourcePage })));
+const DemoRequestsPage = lazy(() => import("@/features/platform/DemoRequestsPage").then((module) => ({ default: module.DemoRequestsPage })));
 const TenantManagementPage = lazy(() => import("@/features/platform/TenantManagementPage").then((module) => ({ default: module.TenantManagementPage })));
 const TenantReadinessPage = lazy(() => import("@/features/settings/TenantReadinessPage").then((module) => ({ default: module.TenantReadinessPage })));
 const RentalSettingsPage = lazy(() => import("@/features/settings/RentalGovernancePage").then((module) => ({ default: module.RentalGovernancePage })));
@@ -131,6 +132,7 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.membershipPlans.path} element={guard(APP_ROUTES.membershipPlans, <MembershipPlanPage />)} />
             <Route path={APP_ROUTES.membershipRewards.path} element={guard(APP_ROUTES.membershipRewards, <MembershipRewardsPage />)} />
             <Route path="/platform" element={<Navigate to={APP_ROUTES.platformUsers.path} replace />} />
+            <Route path={APP_ROUTES.platformDemoRequests.path} element={guard(APP_ROUTES.platformDemoRequests, <DemoRequestsPage />)} />
             <Route path={APP_ROUTES.platformTenants.path} element={guard(APP_ROUTES.platformTenants, <TenantManagementPage />)} />
             <Route path={APP_ROUTES.platformSubscriptions.path} element={guard(APP_ROUTES.platformSubscriptions, <PlatformSubscriptionsPage />)} />
             <Route path={APP_ROUTES.platformSubscriptionDetail.path} element={guard(APP_ROUTES.platformSubscriptionDetail, <PlatformSubscriptionDetailPage />)} />

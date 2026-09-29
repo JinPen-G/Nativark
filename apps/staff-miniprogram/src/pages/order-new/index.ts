@@ -9,6 +9,7 @@ import { formatMoney } from "../../core/money";
 import { blockedState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
 import { can, isSignedIn } from "../../core/session";
 import { themeBehavior } from "../../core/theme-behavior";
+import { requireStaffAction } from "../../core/subscription-access";
 import { todayInZone, zoneLabel, zonedToInstant } from "../../core/time";
 import { ROUTES, buildUrl, confirmDialog, relaunch, toast } from "../../core/ui";
 
@@ -24,11 +25,17 @@ Page({
   },
   context: undefined as WorkspaceContext | undefined,
   quote: undefined as RentalQuoteSnapshotV1 | undefined,
-  onShow() { if (!isSignedIn()) { relaunch(ROUTES.login); return; } if (this.data.view.status !== "ready") void this.load(); },
+  async onShow() {
+    if (!isSignedIn()) { relaunch(ROUTES.login); return; }
+    if (this.data.view.status !== "ready") { await this.load(); return; }
+    try { await requireStaffAction("order.create"); }
+    catch (error) { this.invalidate(); this.setData({ view: errorState(error) }); }
+  },
   async load() {
     if (!can("rental-os:order:create")) { this.setData({ view: blockedState("无新建订单权限", "请联系管理员授权") }); return; }
     this.setData({ view: loadingState() });
     try {
+      await requireStaffAction("order.create");
       const [context, groups] = await Promise.all([loadContext(), listItemGroups()]);
       this.context = context;
       const locations = context.locations.filter((row) => row.capabilities.includes("pickup")).map((row) => ({ id: row.id, name: row.name, timezone: row.timezone ?? "Asia/Shanghai" }));

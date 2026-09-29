@@ -1,9 +1,10 @@
 .ml-24 { margin-left: 24rpx; }
-.me-cards { align-items: stretch; }
-.me-card { display: flex; flex-direction: column; align-items: center; text-align: center; min-height: 148rpx; padding: 16rpx 6rpx; box-shadow: none; }
+.row.me-cards { align-items: stretch; }
+.row.me-cards .me-card { margin-top: 0; }
+.me-card { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; text-align: center; min-height: 148rpx; padding: 16rpx 6rpx; box-shadow: none; }
 .me-card .quick__icon { width: 64rpx; height: 64rpx; }
-.me-card__title { margin-top: 10rpx; font-size: var(--font-secondary); font-weight: var(--fw-semibold); color: var(--text); }
-.me-card__hint { margin-top: 4rpx; font-size: var(--font-mini); color: var(--secondary); }
+.me-card__title { margin-top: 10rpx; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--font-secondary); font-weight: var(--fw-semibold); color: var(--text); }
+.me-card__hint { margin-top: 4rpx; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--font-mini); color: var(--secondary); }
 .menu { box-shadow: none; border: 1rpx solid var(--border); padding-top: 0; padding-bottom: 0; }
 .menu .cell__title { font-size: var(--font-body); }
 .avatar-lg { width: 104rpx; height: 104rpx; }

@@ -2,6 +2,8 @@
 <view class="screen screen--flat {{themeClass}}">
   <nav-bar location="{{locationLabel}}" bind:location="onOpenLocation"></nav-bar>
 
+  <view class="section section--tight"><subscription-card reminder-only="{{true}}"></subscription-card></view>
+
   <state-view wx:if="{{view.status === 'error' || view.status === 'blocked'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
 
   <block wx:else>

@@ -1,0 +1,36 @@
+<page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
+<view class="screen screen--flat {{themeClass}}">
+  <nav-bar title="版本与权益"></nav-bar>
+  <view class="section"><view class="card">
+    <view class="subtitle">当前版本与服务</view>
+    <block wx:if="{{summary.ready}}">
+      <view class="row row--between mt-16"><text class="title">{{summary.plan}}</text><status-tag label="{{summary.service}}" tone="{{summary.tone}}"></status-tag></view>
+      <view class="muted small mt-16">统一截止时间</view>
+      <view class="subscription-time mt-4">{{summary.end}}</view>
+      <view class="muted small mt-16">到期停止新业务；已确认订单履约、归还及已授权善后仍可办理。</view>
+    </block>
+    <view wx:else class="muted mt-16">{{summary.message}}</view>
+    <button class="btn btn--small btn--secondary mt-16" bindtap="onRetry">刷新版本信息</button>
+  </view></view>
+  <view wx:if="{{summary.ready}}" class="section section--tight"><view class="card">
+    <view class="subtitle">{{workspaceName}} · {{categoryName}}</view>
+    <view class="muted small mt-8">空间切换只改变适用功能，不改变租户套餐。这里只读展示，不开放新的专业作业。</view>
+    <view wx:if="{{!features.length}}" class="muted mt-24">当前品类与岗位暂无适用的已发布权益条目；现有基础业务仍按原权限办理。</view>
+    <view class="subscription-feature" wx:for="{{features}}" wx:key="code">
+      <view class="row row--between"><text class="subtitle">{{item.name}}</text><text class="pill">{{item.release}}</text></view>
+      <view class="mt-8">{{item.source}}</view>
+      <view wx:if="{{item.value}}" class="muted small mt-8">{{item.value}}</view>
+      <view class="muted small mt-8">{{item.category}} · {{item.config}} · {{item.permission}}</view>
+      <view class="muted small mt-8">{{item.availability}}</view>
+    </view>
+  </view></view>
+  <view wx:if="{{summary.ready && isAdmin}}" class="section section--tight"><view class="card">
+    <button class="btn btn--secondary btn--block" bindtap="onPro">了解 PRO</button>
+    <block wx:if="{{showPro}}">
+      <view class="muted mt-16">PRO 扩展以以上当前品类的已发布目录和实际授权为准。公共权益、专项授权与 PRO 权益分开展示，升级不自动赋予员工操作权限。</view>
+      <view class="muted mt-16">规划中与受控试点不是已交付作业。员工专业模块入口待上线，本页不提供购买、支付或开通操作。</view>
+      <button class="btn btn--small btn--secondary mt-16" bindtap="onContact">联系平台</button>
+    </block>
+  </view></view>
+  <view wx:elif="{{summary.ready}}" class="section section--tight"><view class="muted small">需要调整版本或权益，请联系租户管理员。</view></view>
+</view>

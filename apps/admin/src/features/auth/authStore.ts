@@ -181,7 +181,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // SaaS 平台管理员只拿到跨租户的平台能力：租户管理，以及公共官方日历来源注册表
     // （需求 4.5.8）。与后端 hasAnyPermission 同一口径，否则菜单会把有权访问的页面藏掉。
     if (user.isSaasAdmin) {
-      return permission.startsWith("system:tenant:") || permission.startsWith("system:calendar-source:");
+      return permission.startsWith("system:tenant:") || permission.startsWith("system:calendar-source:") || permission === "system:demo-request:view";
     }
     return Boolean(user.isPlatformAdmin || user.permissions?.includes("*") || user.permissions?.includes(permission));
   },

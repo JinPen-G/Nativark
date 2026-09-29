@@ -1,0 +1,4 @@
+{
+  "navigationStyle": "custom",
+  "usingComponents": { "nav-bar": "/components/nav-bar/index", "status-tag": "/components/status-tag/index" }
+}

@@ -113,10 +113,135 @@ const ok = (req, data, header = {}) => req.success({ statusCode: 200, data: { da
 const status = (req, statusCode, message = "error") => req.success({ statusCode, data: { statusCode, message }, header: {} });
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+function subscriptionFixture(serviceStatus = "active") {
+  return {
+    overview: { tenantId: "tenant-one", tenantName: "租户", tenantCode: "demo", plan: "standard", serviceStatus, revision: 4, startAt: "2026-01-01T00:00:00Z", endAt: "2028-01-01T00:00:00Z", timeZone: "Asia/Shanghai" },
+    entitlements: [],
+    reminder: { plan: "standard", serviceStatus, stage: serviceStatus === "expired" ? "expired" : "normal", revision: 4, endAt: "2028-01-01T00:00:00Z", timeZone: "Asia/Shanghai", hasOpenRequest: false }
+  };
+}
+
+test("同身份令牌刷新不作废正在重放的订阅请求", async () => {
+  const waiting = [];
+  const rt = runtime((req) => waiting.push(req));
+  const session = rt.load("core/session");
+  session.saveSession(loginResponse(), "test");
+  const sub = rt.load("core/subscription");
+  const request = sub.loadSubscription(true);
+  await tick();
+  session.saveSession(loginResponse({ accessToken: "rotated-token" }), "refresh");
+  await tick();
+  assert.equal(waiting.length, 1);
+  assert.equal(sub.loadSubscription(), request);
+  ok(waiting[0], subscriptionFixture());
+  await request;
+  assert.equal(sub.subscriptionLoadStatus(), "ready");
+});
+
+test("订阅缓存：同上下文迟到请求不覆盖新请求，也不清除新 inflight", async () => {
+  const waiting = [];
+  const rt = runtime((req) => waiting.push(req));
+  rt.load("core/session").saveSession(loginResponse(), "test");
+  const sub = rt.load("core/subscription");
+  const old = sub.loadSubscription(true);
+  const rejected = assert.rejects(old, /已刷新/);
+  await tick();
+  const next = sub.loadSubscription(true);
+  await tick();
+  ok(waiting[0], subscriptionFixture());
+  await rejected;
+  assert.equal(sub.cachedSubscription(), undefined);
+  assert.equal(sub.loadSubscription(), next);
+  const fresh = subscriptionFixture(); fresh.overview.revision = 5;
+  ok(waiting[1], fresh);
+  await next;
+  assert.equal(sub.cachedSubscription().overview.revision, 5);
+});
+
+test("订阅缓存：跨租户迟到响应被拒，网络失败不伪造版本且可重试", async () => {
+  const waiting = [];
+  const rt = runtime((req) => waiting.push(req));
+  const session = rt.load("core/session");
+  session.saveSession(loginResponse(), "test");
+  const sub = rt.load("core/subscription");
+  const old = sub.loadSubscription();
+  const rejected = assert.rejects(old, /已刷新/);
+  await tick();
+  session.saveSession(loginResponse({ tenant: { tenantId: "tenant-two", tenantCode: "two", tenantName: "另一个租户" } }), "switch");
+  await tick();
+  ok(waiting[0], subscriptionFixture());
+  await rejected;
+  const pending = sub.loadSubscription();
+  const fails = assert.rejects(pending);
+  status(waiting[1], 500, "暂不可用");
+  await fails;
+  assert.equal(sub.cachedSubscription(), undefined);
+  assert.equal(sub.subscriptionSummary().ready, false);
+  assert.equal(sub.subscriptionLoadStatus(), "error");
+  const retry = sub.loadSubscription(); await tick();
+  const fresh = subscriptionFixture(); fresh.overview.tenantId = "tenant-two";
+  ok(waiting[2], fresh); await retry;
+  assert.equal(sub.cachedSubscription().overview.tenantId, "tenant-two");
+});
+
+test("订阅提醒关闭：账号、租户、修订、阶段和服务时区自然日隔离", async () => {
+  let facts = subscriptionFixture();
+  const rt = runtime((req) => ok(req, facts));
+  const session = rt.load("core/session");
+  session.saveSession(loginResponse(), "test");
+  const sub = rt.load("core/subscription");
+  await sub.loadSubscription();
+  const key = sub.subscriptionReminder().key;
+  assert.ok(key);
+  sub.dismissSubscriptionReminder(key);
+  assert.equal(sub.subscriptionReminder().visible, false);
+  facts = subscriptionFixture(); facts.overview.revision = 5; facts.reminder.revision = 5;
+  await sub.loadSubscription(true);
+  assert.equal(sub.subscriptionReminder().visible, true);
+  const date = new Date("2026-09-29T15:59:59Z");
+  const before = sub.reminderDismissalKey(facts, date);
+  const after = sub.reminderDismissalKey(facts, new Date("2026-09-29T16:00:00Z"));
+  assert.notEqual(before, after);
+  const urgent = structuredClone(facts); urgent.reminder.stage = "urgent";
+  assert.notEqual(before, sub.reminderDismissalKey(urgent, date));
+  session.saveSession(loginResponse({ user: { ...loginResponse().user, id: "other-user" } }), "switch");
+  assert.notEqual(before, sub.reminderDismissalKey(facts, date));
+  session.clearSession("logout");
+  assert.equal(sub.cachedSubscription(), undefined);
+  assert.equal(rt.storage.has(rt.load("core/storage").STORAGE_KEYS.subscriptionDismissals), false);
+});
+
+test("订阅动作守卫：到期新业务拒绝，履约善后仍按原权限，不用缓存授予写权限", async () => {
+  const login = loginResponse(); login.user.permissions = ["*"];
+  let facts = subscriptionFixture("expired");
+  const rt = runtime((req) => {
+    if (req.url.endsWith("/auth/session-context")) return ok(req, login);
+    if (req.url.endsWith("/subscription/context")) return ok(req, facts);
+    if (req.url.endsWith("/categories") || req.url.endsWith("/locations")) return ok(req, []);
+    ok(req, { id: "done" });
+  });
+  rt.load("core/session").saveSession(login, "test");
+  const sub = rt.load("core/subscription");
+  const access = rt.load("core/subscription-access");
+  await sub.loadSubscription();
+  for (const action of ["order.create", "order.quote", "order.extend"]) assert.equal(access.staffActionAccess(action).allowed, false);
+  for (const action of ["order.return", "order.pickup", "order.cancel", "order.settle", "maintenance.manage"]) assert.equal(access.staffActionAccess(action).allowed, true);
+  let wrote = false;
+  await assert.rejects(access.withStaffAction("order.create", async () => { wrote = true; }), /到期/);
+  assert.equal(wrote, false);
+  facts = subscriptionFixture("unconfigured");
+  await access.withStaffAction("order.create", async () => { wrote = true; });
+  assert.equal(wrote, true);
+  sub.invalidateSubscription();
+  assert.equal(access.staffActionAccess("order.create").allowed, false);
+  assert.equal(access.staffActionAccess("order.return").allowed, true);
+});
+
 /* ---------------- 工程结构 ---------------- */
 
-test("app.json 声明 27 个页面、4 个 Tab（工作台/订单/扫码/我的），每个页面与组件四件套齐全；组件按页面注册", () => {
-  assert.equal(app.pages.length, 27);
+test("app.json 声明 28 个页面、4 个 Tab（工作台/订单/扫码/我的），每个页面与组件四件套齐全；组件按页面注册", () => {
+  assert.equal(app.pages.length, 28);
+  assert.ok(app.pages.includes("pages/subscription/index"));
   assert.equal(app.pages[0], "pages/login/index", "登录页必须是默认入口 pages[0]");
   assert.equal(new Set(app.pages).size, app.pages.length);
   same(app.tabBar.list.map((row) => row.text), ["工作台", "订单", "扫码", "我的"]);
@@ -142,7 +267,7 @@ test("app.json 声明 27 个页面、4 个 Tab（工作台/订单/扫码/我的�
   assert.equal(app.window.navigationStyle, "custom");
   assert.ok(app.permission && app.permission["scope.camera"] && app.permission["scope.camera"].desc, "扫码需要声明 scope.camera 用途");
   assert.equal(app.requiredPrivateInfos, undefined, "员工端首期不申请位置等隐私接口");
-  const componentTags = ["nav-bar", "ui-icon", "state-view", "money-text", "status-tag", "sheet"];
+  const componentTags = ["nav-bar", "ui-icon", "state-view", "money-text", "status-tag", "sheet", "subscription-card"];
   const registeredComponents = new Set();
   for (const route of app.pages) {
     for (const ext of ["ts", "json", "wxml", "wxss"]) assert.ok(read(`${route}.${ext}`).trim(), `${route}.${ext} 缺失或为空`);
@@ -326,16 +451,25 @@ test("员工交接照片、现场签字与线下收款均有服务端闭环和�
 });
 
 test("现场新增与编辑动作调用现有业务契约，创建订单携带持久幂等键", async () => {
-  const rt = runtime((req) => ok(req, { id: "result-one" }));
-  rt.load("core/session").saveSession(loginResponse(), "test");
+  const login = loginResponse();
+  login.user.permissions.push("rental-os:order:create");
+  const rt = runtime((req) => {
+    if (req.url.endsWith("/auth/session-context")) return ok(req, login);
+    if (req.url.endsWith("/subscription/context")) return ok(req, subscriptionFixture());
+    if (req.url.endsWith("/categories") || req.url.endsWith("/locations")) return ok(req, []);
+    ok(req, { id: "result-one" });
+  });
+  rt.load("core/session").saveSession(login, "test");
   const orders = rt.load("api/orders");
   const customers = rt.load("api/customers");
   await orders.quoteOrder({ customerType: "personal", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: "loc-one", startAt: "2026-09-24T01:00:00.000Z", endAt: "2026-09-25T01:00:00.000Z", lines: [{ itemGroupId: "group-one", quantity: 1 }] });
   await orders.createOrder({ quoteId: "quote-one", customerType: "personal", customerName: "测试", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: "loc-one", startAt: "2026-09-24T01:00:00.000Z", endAt: "2026-09-25T01:00:00.000Z", lines: [{ itemGroupId: "group-one", quantity: 1 }] }, "stable-key");
   await customers.createCustomer({ customerType: "personal", name: "测试", phone: "13800000000" });
   await customers.updatePersonalCustomer("customer-one", { name: "更新" });
-  same(rt.calls.map((call) => new URL(call.url).pathname), ["/api/staff/v1/rental/v1/quotes", "/api/staff/v1/rental/v1/orders", "/api/staff/v1/platform/customers", "/api/staff/v1/membership/personal/customer-one"]);
-  assert.equal(rt.calls[1].header["Idempotency-Key"], "stable-key");
+  const writes = rt.calls.filter((call) => ["POST", "PATCH", "PUT"].includes(call.method));
+  same(writes.map((call) => new URL(call.url).pathname), ["/api/staff/v1/rental/v1/quotes", "/api/staff/v1/rental/v1/orders", "/api/staff/v1/platform/customers", "/api/staff/v1/membership/personal/customer-one"]);
+  assert.equal(writes[1].header["Idempotency-Key"], "stable-key");
+  assert.ok(rt.calls.filter((call) => call.url.endsWith("/subscription/context")).length >= 2);
 });
 
 test("订单内部备注与主管人工解除交接锁受权限保护、幂等并写入服务端审计", async () => {

@@ -1,5 +1,6 @@
 import type { CancelRentalOrderRequest, CreateRentalInspectionRequest, CreateRentalOrderInternalNoteRequest, CreateRentalOrderRequest, ManageRentalAllocationRequest, PartialReturnRentalOrderRequest, RentalAllocationCandidates, RentalFundingBalance, RentalInspectionRecord, RentalInspectionTemplate, RentalOperationLockRequest, RentalOrder, RentalOrderExtension, RentalOrderExtensionPreview, RentalOrderExtensionRequest, RentalOrderListQuery, RentalOrderPage, RentalQuoteRequest, RentalQuoteSnapshotV1 } from "@rental-os/shared";
 import { request } from "../core/http";
+import { withStaffAction } from "../core/subscription-access";
 
 /**
  * 订单与履约：列表/详情、配货、检查、交付/归还、以及处理层动作（确认/取消/爽约）。
@@ -76,11 +77,11 @@ export function confirmOfflinePayment(registrationId: string): Promise<unknown> 
 }
 
 export function quoteOrder(input: RentalQuoteRequest): Promise<RentalQuoteSnapshotV1> {
-  return request<RentalQuoteSnapshotV1>("/rental/v1/quotes", { method: "POST", data: input });
+  return withStaffAction("order.quote", () => request<RentalQuoteSnapshotV1>("/rental/v1/quotes", { method: "POST", data: input }));
 }
 
 export function createOrder(input: CreateRentalOrderRequest, idempotencyKey: string): Promise<RentalOrder> {
-  return request<RentalOrder>(ORDERS, { method: "POST", data: input, idempotencyKey });
+  return withStaffAction("order.create", () => request<RentalOrder>(ORDERS, { method: "POST", data: input, idempotencyKey }));
 }
 
 /* ---------- 处理层：确认 / 取消 / 超时 / 爽约 ---------- */
@@ -166,7 +167,7 @@ export function previewExtension(orderId: string, input: RentalOrderExtensionReq
 }
 
 export function requestExtension(orderId: string, input: RentalOrderExtensionRequest, idempotencyKey: string): Promise<RentalOrderExtension> {
-  return request<RentalOrderExtension>(orderPath(orderId, "/extensions"), { method: "POST", data: input, idempotencyKey });
+  return withStaffAction("order.extend", () => request<RentalOrderExtension>(orderPath(orderId, "/extensions"), { method: "POST", data: input, idempotencyKey }));
 }
 
 /** 续租负差额/逾时核价审核（order:fee-review）。通过后生成退款待办，退款执行仍在 Web。 */

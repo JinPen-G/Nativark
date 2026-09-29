@@ -1,0 +1,10 @@
+<view wx:if="{{!reminderOnly || reminder.visible || failed}}" class="card {{themeClass}}" style="{{themeStyle}}">
+  <view class="row row--between"><text class="subtitle">{{reminderOnly ? '服务到期提醒' : '版本与权益'}}</text><button wx:if="{{reminderOnly && reminder.visible}}" class="btn btn--small btn--secondary" bindtap="onDismiss">关闭</button></view>
+  <block wx:if="{{summary.ready}}">
+    <view class="row row--between mt-16"><text>{{summary.plan}}</text><status-tag label="{{summary.service}}" tone="{{summary.tone}}"></status-tag></view>
+    <view class="muted small mt-16 subscription-time">{{summary.end}}</view>
+    <view wx:if="{{reminderOnly}}" class="muted small mt-8">{{reminder.message}}</view>
+    <button class="btn btn--small btn--secondary mt-16" bindtap="onOpen">{{reminderOnly ? reminder.contact : '查看版本与权益'}}</button>
+  </block>
+  <block wx:else><view class="muted mt-16">{{summary.message}}</view><button class="btn btn--small btn--secondary mt-16" bindtap="onRetry">重试</button></block>
+</view>

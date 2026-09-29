@@ -19,6 +19,8 @@ interface ClientRateLimitRule {
 }
 
 const PUBLIC_RULES: Array<{ matcher: RegExp; method?: string; rule: ClientRateLimitRule }> = [
+  // 官网匿名演示预约复用数据库限流；与客户端会话桶隔离。
+  { matcher: /^\/public\/demo-requests$/u, method: "POST", rule: { code: "website_demo_request", windowSeconds: 600, limit: 5 } },
   { matcher: /^\/client\/v1\/auth\/login$/u, method: "POST", rule: { code: "login", windowSeconds: 600, limit: 10 } },
   { matcher: /^\/client\/v1\/auth\/registration\/challenges$/u, method: "POST", rule: { code: "registration_challenge", windowSeconds: 300, limit: 5 } },
   { matcher: /^\/client\/v1\/auth\/registration\/challenges\/[^/]+\/verify$/u, method: "POST", rule: { code: "registration_verify", windowSeconds: 300, limit: 15 } },

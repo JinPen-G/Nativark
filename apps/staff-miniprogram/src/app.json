@@ -7,6 +7,7 @@
     "pages/scan/index",
     "pages/scanner/index",
     "pages/me/index",
+    "pages/subscription/index",
     "pages/order/index",
     "pages/order-new/index",
     "pages/allocate/index",

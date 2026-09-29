@@ -33,13 +33,17 @@ export class PlatformSubscriptionController {
     @Query("plan") plan?: string,
     @Query("serviceStatus") serviceStatus?: string,
     @Query("dueWithin") dueWithin?: string,
-    @Query("keyword") keyword?: string
+    @Query("keyword") keyword?: string,
+    @Query("page") page?: string,
+    @Query("pageSize") pageSize?: string
   ) {
     return this.subscription.listOverviews({
       plan,
       serviceStatus,
-      dueWithin: dueWithin ? Number(dueWithin) : undefined,
-      keyword
+      dueWithin: dueWithin === undefined ? undefined : Number(dueWithin),
+      keyword,
+      page: page === undefined ? undefined : Number(page),
+      pageSize: pageSize === undefined ? undefined : Number(pageSize)
     });
   }
 
@@ -64,7 +68,7 @@ export class PlatformSubscriptionController {
   }
 
   @Get(":tenantId") detail(@Param("tenantId") tenantId: string) {
-    return this.subscription.getTenantView(tenantId);
+    return this.subscription.getTenantView(tenantId, true);
   }
 
   @Post(":tenantId/provision") provision(@Req() req: AuthenticatedRequest, @Param("tenantId") tenantId: string, @Body() body: ProvisionSubscriptionDto) {

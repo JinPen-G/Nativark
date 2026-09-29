@@ -24,6 +24,8 @@
     </view>
   </view>
 
+  <view class="section section--tight"><subscription-card></subscription-card></view>
+
   <view wx:if="{{cards.length}}" class="section section--tight">
     <view class="row me-cards gap-16">
       <view class="card me-card grow" wx:for="{{cards}}" wx:key="key" hover-class="btn-hover" data-key="{{item.key}}" bindtap="onCard">

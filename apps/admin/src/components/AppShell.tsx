@@ -14,7 +14,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { buildNavigationSections, canAccessRoute } from "@/app/navigation";
-import { resolveAdminBrandName, resolveAdminLogo, resolveAdminMark } from "@/app/branding";
+import { ADMIN_BRAND_NAME, ADMIN_DEFAULT_LOGO, ADMIN_DEFAULT_MARK } from "@/app/branding";
 import { useAppearance } from "@/app/theme";
 import { useAuthStore } from "@/features/auth/authStore";
 import { AppearanceSwitcher } from "./AppearanceSwitcher";
@@ -82,9 +82,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const hasCapability = useAuthStore((state) => state.hasCapability);
   const hasTenantMembershipPermission = useAuthStore((state) => state.hasTenantMembershipPermission);
   const currentWorkspaceId = useAuthStore((state) => state.currentWorkspaceId);
-  const adminBrandName = resolveAdminBrandName(tenant, user);
-  const adminLogo = resolveAdminLogo(tenant, user);
-  const adminMark = resolveAdminMark(tenant, user);
   /**
    * UI-NAV-01：导航文案取自**当前经营空间**的品类档案。
    *
@@ -186,11 +183,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="sider-brand">
         <button className="app-brand" type="button" onClick={() => navigate(homePath)}>
           <span className={`app-brand-mark${(!collapsed || inDrawer) ? " app-brand-mark-expanded" : ""}`}>
-            <img src={adminMark} alt="" aria-hidden="true" />
+            <img src={ADMIN_DEFAULT_MARK} alt="" aria-hidden="true" />
           </span>
           {(!collapsed || inDrawer) && (
             <span className="app-brand-copy">
-              <img src={adminLogo} alt={adminBrandName} />
+              <img src={ADMIN_DEFAULT_LOGO} alt={ADMIN_BRAND_NAME} />
             </span>
           )}
         </button>

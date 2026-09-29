@@ -399,6 +399,7 @@ summary:focus-visible,
 /* Original photographs and the template's 108-degree contrast treatment. */
 .hero {
   position: relative;
+  z-index: 0;
   height: 100svh;
   min-height: 720px;
   color: white;
@@ -410,13 +411,16 @@ summary:focus-visible,
   inset: 0;
   opacity: 0;
   visibility: hidden;
-  transition:
-    opacity 0.8s ease,
-    visibility 0.8s;
 }
 .hero-slide.is-active {
   visibility: visible;
   opacity: 1;
+  z-index: 2;
+}
+.hero-slide.is-outgoing {
+  visibility: visible;
+  opacity: 1;
+  z-index: 1;
 }
 .hero-slide::after {
   content: "";
@@ -458,30 +462,40 @@ summary:focus-visible,
 .hero-copy .button-row {
   margin-top: 40px;
 }
-.hero-copy h1,
-.hero-copy > p,
-.hero-copy .button-row {
-  transform: translateY(12px);
-  opacity: 0;
-  transition:
-    transform 0.7s var(--ease),
-    opacity 0.6s;
+.hero-cta-wrap {
+  position: relative;
+  display: inline-flex;
+  isolation: isolate;
 }
-.hero-slide.is-active .hero-copy h1,
-.hero-slide.is-active .hero-copy > p,
-.hero-slide.is-active .button-row {
-  transform: none;
+.hero-cta-wrap::before {
+  content: "";
+  position: absolute;
+  inset: 5px -2px -7px;
+  z-index: -1;
+  border-radius: 44px;
+  background:
+    radial-gradient(35% 95% at 8% 42%, #f99d72 0%, #f99d7200 72%),
+    radial-gradient(35% 95% at 30% 60%, #16ffde 0%, #16ffde00 72%),
+    radial-gradient(35% 95% at 52% 44%, #f99d72 0%, #f99d7200 72%),
+    radial-gradient(35% 95% at 74% 58%, #16ffde 0%, #16ffde00 72%),
+    radial-gradient(38% 95% at 96% 46%, #f99d72 0%, #f99d7200 72%),
+    linear-gradient(90deg, #16ffde, #f99d72, #16ffde);
+  filter: blur(7px);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+.hero-cta-wrap:hover::before,
+.hero-cta-wrap:focus-within::before {
   opacity: 1;
 }
-.hero-slide.is-active .hero-copy > p {
-  transition-delay: 0.07s;
-}
-.hero-slide.is-active .button-row {
-  transition-delay: 0.14s;
+.hero-cta-wrap.secondary:hover::before,
+.hero-cta-wrap.secondary:focus-within::before {
+  opacity: 0.3;
 }
 .hero-bottom {
   position: absolute;
-  z-index: 2;
+  z-index: 3;
   bottom: 32px;
   left: 0;
   right: 0;
@@ -559,6 +573,10 @@ summary:focus-visible,
 }
 
 .platform-area {
+  /* The original foreground content overtakes the slower-moving Hero. */
+  position: relative;
+  z-index: 4;
+  border-radius: 16px 16px 0 0;
   background: var(--paper);
 }
 .client-marquee {
@@ -618,14 +636,8 @@ summary:focus-visible,
   display: inline-flex;
   width: 12px;
   color: #78736d;
-  animation: dots 1.8s steps(8) infinite;
   font-family: monospace;
-  font-size: 18px;
-}
-@keyframes dots {
-  to {
-    transform: rotate(360deg);
-  }
+  font-size: 16px;
 }
 .centered {
   text-align: center;
@@ -694,6 +706,7 @@ summary:focus-visible,
 }
 .status-detail {
   position: absolute;
+  right: 24px;
   opacity: 0;
   transform: translateY(6px);
   transition:
@@ -703,12 +716,9 @@ summary:focus-visible,
 .status-name {
   transition: opacity 0.2s;
 }
-.product-card:hover .status-detail {
+.product-card.is-expanded .status-detail {
   opacity: 1;
   transform: none;
-}
-.product-card:hover .status-name {
-  opacity: 0;
 }
 .product-visual {
   height: 376px;
@@ -790,6 +800,9 @@ summary:focus-visible,
 }
 .property-card .product-visual {
   padding: 16px;
+}
+.property-photo-window {
+  width: 100%;
 }
 .property-card.is-animating .property-image {
   transform: translateX(-100px);
@@ -913,8 +926,18 @@ summary:focus-visible,
   touch-action: pan-y;
   will-change: transform;
 }
-.quote-card {
+.quote-slot,
+.quote-track > .quote-card {
   flex: 0 0 min(1280px, calc(100vw - var(--page-gutter) * 2));
+}
+.quote-slot {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+.quote-card {
+  flex: none;
+  width: 100%;
   height: 650px;
   border-radius: 24px;
   position: relative;
@@ -1059,8 +1082,9 @@ summary:focus-visible,
   gap: 24px;
   margin-top: 56px;
   overflow-x: auto;
-  padding-inline: max(20px, calc((100vw - 1440px) / 2));
-  scroll-snap-type: x proximity;
+  padding-inline: max(20px, calc((100vw - 1280px) / 2));
+  /* The template has continuous drift, not native scroll snapping. */
+  scroll-snap-type: none;
   scroll-padding-inline: 20px;
   scrollbar-width: none;
   cursor: grab;
@@ -1072,6 +1096,10 @@ summary:focus-visible,
   cursor: grabbing;
   scroll-snap-type: none;
   user-select: none;
+}
+.teams-track.is-scroll-driven {
+  /* Native snap fights the continuous spring-driven horizontal offset. */
+  scroll-snap-type: none;
 }
 .team-card {
   position: relative;
@@ -1252,29 +1280,21 @@ summary:focus-visible,
   gap: 0.05em;
 }
 .metric .metric-character {
-  display: flex;
+  display: block;
   flex: none;
+  height: 88px;
+  overflow: hidden;
+  white-space: pre;
+}
+.metric-track {
+  display: block;
+}
+.metric-glyph {
+  display: flex;
   align-items: center;
   justify-content: center;
   height: 88px;
-  line-height: 1.1%;
-  white-space: pre;
-}
-.metric.is-revealed .metric-character {
-  animation: metric-reveal 0.85s var(--ease) both;
-  animation-delay: calc(var(--i) * 0.05s);
-}
-@keyframes metric-reveal {
-  from {
-    transform: translateY(35px) rotateX(65deg);
-    opacity: 0;
-    filter: blur(10px);
-  }
-  to {
-    transform: none;
-    opacity: 1;
-    filter: blur(0);
-  }
+  line-height: 1;
 }
 .outcome-content h3 {
   font-family: "Stack Sans Headline", Arial, sans-serif;
@@ -1475,6 +1495,142 @@ summary:focus-visible,
 }
 .product-explore {
   display: none;
+}
+@media (min-width: 1200px) {
+  .product-visual {
+    padding: 16px;
+  }
+  .product-status {
+    white-space: nowrap;
+  }
+  .status-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .product-card.is-expanded .status-name {
+    overflow: visible;
+  }
+  .survey-copy strong {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .survey-copy p {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .experience-card .product-hover {
+    width: 696px;
+    height: 376px;
+    max-width: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  .property-card .product-visual {
+    padding: 32px;
+    gap: 20px;
+  }
+  .property-photo-window {
+    display: flex;
+    justify-content: center;
+    flex: 1 1 383px;
+    min-width: 0;
+    max-width: 383px;
+    height: 312px;
+    overflow: hidden;
+    border-radius: 8px;
+  }
+  .property-image {
+    width: 383px;
+    max-width: none;
+    flex: none;
+    object-position: 50% 43.5%;
+  }
+  .property-card.is-animating .property-image {
+    transform: none;
+  }
+  .property-card .lease-card {
+    position: relative;
+    top: auto;
+    right: auto;
+    flex: 0 0 0px;
+    width: 0;
+    min-width: 0;
+    padding: 0;
+    border-width: 0;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateX(30px);
+    transition:
+      flex-basis 0.5s var(--ease),
+      opacity 0.3s,
+      transform 0.5s var(--ease);
+  }
+  .property-card:not(.is-expanded) .product-visual {
+    gap: 0;
+    padding: 16px;
+  }
+  .property-card.is-expanded .lease-card {
+    flex-basis: 227px;
+    width: 227px;
+    padding: 12px;
+    border-width: 1px;
+    opacity: 1;
+    transform: none;
+  }
+  .lease-card h4 {
+    line-height: 16px;
+  }
+  .lease-card p {
+    font-size: 12px;
+  }
+  .lease-risk {
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .product-description {
+    min-height: 124px;
+  }
+  .product-card.is-expanded .product-description {
+    padding-right: 120px;
+  }
+  .product-card.is-expanded .product-explore {
+    display: flex;
+    align-items: center;
+    position: absolute;
+    right: 24px;
+    bottom: 24px;
+    border-radius: 999px;
+    color: white;
+    background: #1a1814;
+    padding: 10px 16px;
+    font-size: 14px;
+    line-height: 20px;
+    animation: explore-in 0.3s ease both;
+  }
+  .product-explore .explore-desktop {
+    display: inline;
+  }
+  .product-explore .explore-mobile,
+  .product-explore img {
+    display: none;
+  }
+}
+.explore-desktop {
+  display: none;
+}
+@keyframes explore-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 .cookie-banner {
   position: fixed;
@@ -1926,8 +2082,11 @@ summary:focus-visible,
     padding-inline: 16px;
     gap: 16px;
   }
-  .quote-card {
+  .quote-slot,
+  .quote-track > .quote-card {
     flex-basis: calc(100vw - 32px);
+  }
+  .quote-card {
     height: 600px;
     border-radius: 24px;
   }

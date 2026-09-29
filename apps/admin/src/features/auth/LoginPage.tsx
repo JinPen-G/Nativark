@@ -44,8 +44,8 @@ export function LoginPage() {
     document.title = locale === "en-US"
       ? loginBrandName === ADMIN_BRAND_NAME ? "Admin Console · Rental OS" : `${loginBrandName} Admin Console`
       : loginBrandName === ADMIN_BRAND_NAME ? "登录运营台 · Rental OS" : `登录${loginBrandName}运营台`;
-    applyAdminFavicon(publicBootstrap.data?.merchant.faviconUrl);
-  }, [locale, loginBrandName, publicBootstrap.data?.merchant.faviconUrl]);
+    applyAdminFavicon();
+  }, [locale, loginBrandName]);
 
   const fillLocalDemoAccount = (demo: (typeof LOCAL_DEMO_ACCOUNTS)[number]) => {
     form.setFieldsValue({ tenantCode: demo.tenantCode, account: demo.account, password: "" });

@@ -6,7 +6,9 @@ import { resolveImage } from "../../core/images";
 import { ORDER_TABS, orderTabMatches, type OrderTabKey } from "../../core/labels";
 import { emptyState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
 import { indexItemGroups, orderCardOf, type OrderCard } from "../../core/presenters";
-import { can, contextVersion, isSignedIn } from "../../core/session";
+import { contextVersion, isSignedIn } from "../../core/session";
+import { loadSubscription, subscriptionEvents } from "../../core/subscription";
+import { staffActionAccess } from "../../core/subscription-access";
 import { themeBehavior } from "../../core/theme-behavior";
 import { ROUTES, buildUrl, navigate, relaunch } from "../../core/ui";
 
@@ -35,6 +37,7 @@ Page({
   data: { view: loadingState(), tabs: ORDER_TABS, tab: "all", keyword: "", cards: [], total: 0, canCreate: false, locationLabel: "", showLocationSheet: false, todoFilter: "" } as OrdersData,
   all: [] as RentalOrder[],
   offContext: undefined as (() => void) | undefined,
+  offSubscription: undefined as (() => void) | undefined,
   searchTimer: undefined as number | undefined,
   requestVersion: 0,
 
@@ -42,10 +45,12 @@ Page({
     const tab = ORDER_TABS.some((row) => row.key === query.tab) ? (query.tab as OrderTabKey) : "all";
     this.setData({ tab, todoFilter: query.todo ?? "" });
     this.offContext = contextEvents.on(() => this.setData({ context: cachedContext(), locationLabel: currentLocationLabel() }));
+    this.offSubscription = subscriptionEvents.on(() => this.setData({ canCreate: staffActionAccess("order.create").allowed }));
   },
 
   onUnload() {
     this.offContext?.();
+    this.offSubscription?.();
   },
 
   onShow() {
@@ -53,6 +58,7 @@ Page({
       relaunch(ROUTES.login);
       return;
     }
+    void loadSubscription(true).catch(() => undefined);
     void this.load();
   },
 
@@ -66,7 +72,7 @@ Page({
     if (!this.all.length) this.setData({ view: loadingState() });
     try {
       const context = await loadContext();
-      this.setData({ context, locationLabel: currentLocationLabel(), canCreate: can("rental-os:order:create") });
+      this.setData({ context, locationLabel: currentLocationLabel(), canCreate: staffActionAccess("order.create").allowed });
       const [orders, groups] = await Promise.all([listOrders({ keyword: this.data.keyword.trim() || undefined }), listItemGroups().catch(() => [])]);
       if (token !== this.requestVersion || version !== contextVersion()) return;
       this.all = orders;

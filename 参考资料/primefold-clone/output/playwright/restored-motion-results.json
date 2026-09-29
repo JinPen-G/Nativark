@@ -1,0 +1,215 @@
+{
+  "checks": [
+    {
+      "name": "XI accordion interpolates widths",
+      "passed": true,
+      "detail": {
+        "initial": [
+          416,
+          416,
+          416
+        ],
+        "middle": [
+          653.875,
+          297.0625,
+          297.0625
+        ],
+        "expanded": [
+          716.921875,
+          265.53125,
+          265.546875
+        ]
+      }
+    },
+    {
+      "name": "XI final expansion matches 2.7 ratio",
+      "passed": true,
+      "detail": [
+        716.921875,
+        265.53125,
+        265.546875
+      ]
+    },
+    {
+      "name": "XI status name and detail both visible",
+      "passed": true
+    },
+    {
+      "name": "XI correct 696x376 callout animation",
+      "passed": true
+    },
+    {
+      "name": "RI accordion transfers expansion",
+      "passed": true,
+      "detail": [
+        265.53125,
+        716.921875,
+        265.546875
+      ]
+    },
+    {
+      "name": "RI image and lease sit side by side",
+      "passed": true,
+      "detail": {
+        "image": {
+          "x": 404.984375,
+          "y": 184.375,
+          "width": 383,
+          "height": 312,
+          "top": 184.375,
+          "right": 787.984375,
+          "bottom": 496.375,
+          "left": 404.984375
+        },
+        "lease": {
+          "x": 807.984375,
+          "y": 184.375,
+          "width": 227,
+          "height": 312,
+          "top": 184.375,
+          "right": 1034.984375,
+          "bottom": 496.375,
+          "left": 807.984375
+        },
+        "opacity": "1"
+      }
+    },
+    {
+      "name": "RI no incorrect XI callout overlay",
+      "passed": true
+    },
+    {
+      "name": "RI lease retains original 312px height",
+      "passed": true,
+      "detail": 312
+    },
+    {
+      "name": "interrupted spring returns to equal columns",
+      "passed": true,
+      "detail": [
+        416,
+        416,
+        416
+      ]
+    },
+    {
+      "name": "story rail follows pointer before release",
+      "passed": true,
+      "detail": {
+        "dragStart": -1304,
+        "dragMiddle": -1454
+      }
+    },
+    {
+      "name": "story drag settles on next story",
+      "passed": true
+    },
+    {
+      "name": "spinner changes Braille frames rather than rotating",
+      "passed": true,
+      "detail": [
+        "⠧",
+        "⠋",
+        "⠙",
+        "⠹",
+        "⠼"
+      ]
+    },
+    {
+      "name": "metrics use four clipped repeats",
+      "passed": true,
+      "detail": [
+        {
+          "matrix": "matrix(1, 0, 0, 1, 0, -142.76)",
+          "blur": "blur(2px)",
+          "copies": 4
+        },
+        {
+          "matrix": "matrix(1, 0, 0, 1, 0, -52.6819)",
+          "blur": "blur(1.70626px)",
+          "copies": 4
+        }
+      ]
+    },
+    {
+      "name": "metric replay shows intermediate rolling/blur",
+      "passed": true,
+      "detail": [
+        {
+          "matrix": "matrix(1, 0, 0, 1, 0, -142.76)",
+          "blur": "blur(2px)",
+          "copies": 4
+        },
+        {
+          "matrix": "matrix(1, 0, 0, 1, 0, -52.6819)",
+          "blur": "blur(1.70626px)",
+          "copies": 4
+        }
+      ]
+    },
+    {
+      "name": "metric rolls to final third repeat",
+      "passed": true,
+      "detail": [
+        "matrix(1, 0, 0, 1, 0, -264)",
+        "matrix(1, 0, 0, 1, 0, -264)"
+      ]
+    },
+    {
+      "name": "hero slides horizontally while copy follows",
+      "passed": true,
+      "detail": {
+        "slide": "matrix(1, 0, 0, 1, 595.197, 0)",
+        "title": "matrix(1, 0, 0, 1, 58.6735, 0)"
+      }
+    },
+    {
+      "name": "hero transition removes outgoing layer",
+      "passed": true
+    },
+    {
+      "name": "rapid hero selections leave only the selected panel",
+      "passed": true
+    },
+    {
+      "name": "hero button original glow restored",
+      "passed": true
+    },
+    {
+      "name": "wheel has original damping rather than immediate jump",
+      "passed": true,
+      "detail": {
+        "wheelEarly": 222,
+        "wheelLate": 600
+      }
+    },
+    {
+      "name": "programmatic scroll interrupts wheel inertia",
+      "passed": true
+    },
+    {
+      "name": "resize clears desktop expansion",
+      "passed": true
+    },
+    {
+      "name": "mobile menu does not scroll the underlying page",
+      "passed": true
+    },
+    {
+      "name": "reduced motion stops metric rolling",
+      "passed": true
+    },
+    {
+      "name": "no runtime errors",
+      "passed": true,
+      "detail": []
+    },
+    {
+      "name": "no missing assets",
+      "passed": true,
+      "detail": []
+    }
+  ],
+  "errors": [],
+  "missing": []
+}

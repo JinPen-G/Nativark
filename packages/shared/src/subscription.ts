@@ -107,9 +107,17 @@ export interface TenantSubscriptionOverview {
   currentAmount?: SubscriptionMoney | null;
   handledAt?: string;
   /** 待生效的下一段套餐（续费/降级），无则不返回（§4.1/§4.2）。 */
-  next?: { plan: SubscriptionPlan; effectiveAt?: string };
+  next?: { plan: SubscriptionPlan; effectiveAt?: string; endAt?: string };
+  anniversaryAnchor?: string;
   /** 乐观锁修订号。 */
   revision: number;
+}
+
+export interface TenantSubscriptionPage {
+  items: TenantSubscriptionOverview[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 /** 某功能对当前租户的权益（§5.2「当前功能权益」）。 */
@@ -123,6 +131,7 @@ export interface SubscriptionFeatureEntitlement {
   releaseStatus: FeatureReleaseStatus;
   /** 该功能对本租户来源：公共/特批/PRO/仍需升级（§3.5.9）。 */
   source: FeatureEntitlementSource;
+  hasTenantGrant?: boolean;
   /** 已上线且本租户已获、可申请启用（空间/权限/配置另判）。 */
   available: boolean;
   /** 需先配置空间/能力才能用（§5.3「去配置」）。 */
@@ -174,11 +183,17 @@ export interface SubscriptionRequestRecord {
   /** 可公开原因（拒绝/撤销等）。 */
   reason?: string;
   /** 处理过程时间线（§5.2 可查看处理过程）。 */
+  contactName?: string;
+  contactPhone?: string;
+  moduleIntent?: string[];
+  note?: string;
+  linkedEventId?: string;
   timeline?: Array<{ at: string; status: SubscriptionRequestStatus; note?: string }>;
 }
 
 /** 订阅变更记录（§5.2「订阅变更记录」）。 */
 export interface SubscriptionChangeLogEntry {
+  internalNote?: string;
   id: string;
   action: string;
   effectiveAt?: string;
@@ -189,6 +204,8 @@ export interface SubscriptionChangeLogEntry {
 }
 /** 左下角到期浮窗只读数据（§5.4）。 */
 export interface SubscriptionExpiryReminder {
+  revision: number;
+  timeZone?: string;
   plan: SubscriptionPlan;
   serviceStatus: SubscriptionServiceStatus;
   endAt?: string;
@@ -242,8 +259,11 @@ export interface ProvisionSubscriptionRequest {
   amount?: number;
   currency?: string;
   taxInclusive?: boolean;
+  requestId?: string;
+  priceVersion?: string;
+  note?: string;
   reason?: string;
-  expectedRevision?: number;
+  expectedRevision: number;
 }
 
 /** 续期（§4.4）。有效期内缺 startAt 接续当前截止；已过期须显式 startAt。 */
@@ -256,8 +276,11 @@ export interface RenewSubscriptionRequest {
   amount?: number;
   currency?: string;
   taxInclusive?: boolean;
+  requestId?: string;
+  priceVersion?: string;
+  note?: string;
   reason?: string;
-  expectedRevision?: number;
+  expectedRevision: number;
 }
 
 /** 升级为 PRO（§4.4）：保持原统一截止，仅记录人工补差金额。 */
@@ -266,8 +289,11 @@ export interface UpgradeSubscriptionProRequest {
   amount?: number;
   currency?: string;
   taxInclusive?: boolean;
+  requestId?: string;
+  priceVersion?: string;
+  note?: string;
   reason?: string;
-  expectedRevision?: number;
+  expectedRevision: number;
 }
 /** 租户提交升级/续费/降级/不续费/咨询申请（§7.2）。仅表达意向，不自动开通。 */
 export interface SubmitSubscriptionRequestRequest {
@@ -287,7 +313,7 @@ export interface ExtendSubscriptionRequest {
   /** 新截止时点（明确），晚于当前截止。 */
   endAt: string;
   reason: string;
-  expectedRevision?: number;
+  expectedRevision: number;
 }
 
 /** 登记下一段套餐（续费或下期降级，§4.4）。当前付费期不提前结束，到 effectiveAt 切换。 */
@@ -300,23 +326,31 @@ export interface ScheduleNextSubscriptionRequest {
   endAt?: string;
   amount?: number;
   currency?: string;
+  taxInclusive?: boolean;
+  requestId?: string;
+  priceVersion?: string;
+  note?: string;
+  expectedRevision: number;
   reason?: string;
 }
 
-/** SaaS 管理员办理申请（§7.3）：转已办理/已拒绝，附可公开原因；实际开通另走开通接口。 */
+/** SaaS 管理员办理申请（§7.3）：授权类申请由实际办理原子办结。 */
 export interface HandleSubscriptionRequestRequest {
+  expectedRevision: number;
   status: SubscriptionRequestStatus;
   publicReason?: string;
   note?: string;
 }
 /** 单租户额外授权（§3.5 tenant_specific）。目标租户走路径参数。 */
 export interface GrantTenantFeatureRequest {
+  expectedRevision: number;
   featureCode: string;
   reason?: string;
 }
 
 /** 撤销单租户额外授权（§3.5.8）。记录原因，保护既有承诺。 */
 export interface RevokeTenantFeatureRequest {
+  expectedRevision: number;
   featureCode: string;
   reason: string;
 }
@@ -339,6 +373,7 @@ export interface UpsertFeatureCatalogRequest {
 
 /** 维护标准套餐年费（§5.2/§8）。未发布 published=false 且省略 annualFee，不落 0（§14.2）。 */
 export interface SetStandardPriceRequest {
+  expectedPriceVersion?: string | null;
   plan: SubscriptionPlan;
   annualFee?: number;
   currency?: string;

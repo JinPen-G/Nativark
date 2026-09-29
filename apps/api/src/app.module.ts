@@ -89,6 +89,9 @@ import { TenantSubscriptionController } from "./modules/subscription/subscriptio
 import { PlatformSubscriptionController } from "./modules/subscription/subscription-platform.controller";
 import { StaffSubscriptionController } from "./modules/subscription/subscription-staff.controller";
 import { SubscriptionService } from "./modules/subscription/subscription.service";
+import { PublicDemoRequestController } from "./modules/demo-requests/public-demo-request.controller";
+import { PlatformDemoRequestController } from "./modules/demo-requests/platform-demo-request.controller";
+import { DemoRequestService } from "./modules/demo-requests/demo-request.service";
 
 @Module({
   imports: [
@@ -125,7 +128,9 @@ import { SubscriptionService } from "./modules/subscription/subscription.service
     WebsiteChannelProfileController,
     TenantSubscriptionController,
     PlatformSubscriptionController,
-    StaffSubscriptionController
+    StaffSubscriptionController,
+    PublicDemoRequestController,
+    PlatformDemoRequestController
   ],
   providers: [
     AuthService,
@@ -176,6 +181,7 @@ import { SubscriptionService } from "./modules/subscription/subscription.service
     WebsiteChannelProfileService,
     WebsiteAssetService,
     SubscriptionService,
+    DemoRequestService,
     IntegrationsService,
     IntegrationsRepository,
     TenantIntegrationService,

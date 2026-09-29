@@ -20,7 +20,9 @@ export function TenantSubscriptionPage() {
   const { t } = useLocale();
   const navigate = useNavigate();
   const canManage = useAuthStore((state) => state.hasPermission("rental-os:subscription:manage"));
-  const query = useQuery({ queryKey: ["subscription", "tenant-view"], queryFn: subscriptionApi.tenantView });
+  const tenantId = useAuthStore((state) => state.tenant?.tenantId);
+  const userId = useAuthStore((state) => state.user?.id);
+  const query = useQuery({ queryKey: ["subscription", "tenant-view", tenantId, userId], queryFn: subscriptionApi.tenantView, enabled: Boolean(tenantId && userId) });
 
   if (query.isLoading) return <div style={{ textAlign: "center", padding: 80 }}><LoadingState /></div>;
   if (query.error || !query.data) {
