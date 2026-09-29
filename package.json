@@ -104,6 +104,7 @@
     "test:due-job-scheduler": "node tests/rental-due-job-scheduler.test.cjs",
     "test:rental-core": "npm run build -w @rental-os/shared && node tests/rental-core-v01.test.cjs",
     "test:category-core": "npm run build -w @rental-os/shared && node tests/rental-category-core-alignment.test.cjs && node tests/rental-four-category-acceptance.test.cjs",
+    "test:category-version-migration-db": "npm run build -w @rental-os/shared && node tests/category-version-migration-db.test.cjs",
     "test:workspace-capability": "npm run build -w @rental-os/shared && node tests/workspace-capability.test.cjs",
     "test:capability-equipment": "npm run build -w @rental-os/shared && node tests/capability-equipment.test.cjs",
     "test:customer-master": "npm run build -w @rental-os/shared && node tests/customer-master-data.test.cjs",

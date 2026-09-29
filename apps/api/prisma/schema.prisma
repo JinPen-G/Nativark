@@ -261,6 +261,12 @@ model BusinessWorkspace {
   /// 唯一经营品类。外键指向品类定义表，杜绝写入未定义品类。
   categoryCode                      RentalCategoryCode
   category                          RentalCategoryDefinition                @relation(fields: [categoryCode], references: [code])
+  /// 当前采用的不可变品类定义；存量空间由兼容迁移绑定 legacy 基线。
+  categoryVersionId                 String?                                 @db.VarChar(191)
+  categoryVersion                   RentalCategoryVersion?                 @relation(fields: [categoryCode, categoryVersionId], references: [categoryCode, id])
+  categoryAdoptionRevision          Int                                     @default(0)
+  categoryAdoptions                 RentalCategoryAdoptionAudit[]
+  categoryPreparations              RentalCategoryAdoptionPreparation[]
   status                            WorkspaceStatus                         @default(ACTIVE)
   /// 兼容层标记：升级前建立的既有业务全部归属租户的默认空间。
   /// 每租户至多一个，由下方 partial-unique 的替代方案（defaultMarker）保证。
@@ -1939,6 +1945,14 @@ model RentalCategoryDefinition {
   attributeSchema         Json
   businessModel           Json
   version                 String
+  /// 开通政策独立于任何已发布正文；旧四品类保持原可创建行为。
+  openingScope            String                     @default("all") @db.VarChar(24)
+  openingTenantIds        Json?
+  openingRevision         Int                        @default(0)
+  recommendedVersionId    String?                    @db.VarChar(191)
+  recommendedVersion      RentalCategoryVersion?     @relation("RecommendedCategoryVersion", fields: [code, recommendedVersionId], references: [categoryCode, id])
+  versions                RentalCategoryVersion[]
+  governanceAudits        RentalCategoryGovernanceAudit[]
   profiles                TenantRentalProfile[]
   workspaces              BusinessWorkspace[]
   itemGroups              RentalItemGroup[]
@@ -1948,6 +1962,106 @@ model RentalCategoryDefinition {
   updatedAt               DateTime                   @updatedAt
 
   @@map("rental_category_definitions")
+}
+
+/// 品类身份之外的版本层。已发布正文只允许插入，不能更新；应用服务与专项验收执行不可变保护。
+model RentalCategoryVersion {
+  id               String                              @id @db.VarChar(191)
+  categoryCode     RentalCategoryCode
+  category         RentalCategoryDefinition            @relation(fields: [categoryCode], references: [code], onDelete: Restrict)
+  versionLabel     String                              @db.VarChar(64)
+  structureVersion Int                                 @default(1)
+  sourceVersionId  String?                             @db.VarChar(191)
+  sourceKind       String                              @db.VarChar(32)
+  status           String                              @db.VarChar(24)
+  revision         Int                                 @default(0)
+  definition       Json
+  dependencyDigest Json?
+  publishedAt      DateTime?
+  publishedBy      String?                             @db.VarChar(191)
+  publishReason    String?                             @db.VarChar(512)
+  createdAt        DateTime                            @default(now())
+  updatedAt        DateTime                            @updatedAt
+  policy           RentalCategoryVersionPolicy?
+  workspaces       BusinessWorkspace[]
+  preparations     RentalCategoryAdoptionPreparation[]
+  recommendedFor   RentalCategoryDefinition[]          @relation("RecommendedCategoryVersion")
+
+  @@unique([categoryCode, id], map: "rental_category_versions_code_id_key")
+  @@unique([categoryCode, versionLabel], map: "rental_category_versions_code_label_key")
+  @@index([categoryCode, status], map: "rental_category_versions_code_status_idx")
+  @@map("rental_category_versions")
+}
+
+/// 可修订治理政策。新建、升级、恢复分别判定；不回写已发布正文。
+model RentalCategoryVersionPolicy {
+  versionId       String                @id @db.VarChar(191)
+  version         RentalCategoryVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  createScope     String                @default("all") @db.VarChar(24)
+  createTenantIds Json?
+  upgradeScope    String                @default("all") @db.VarChar(24)
+  upgradeTenantIds Json?
+  restoreScope    String                @default("all") @db.VarChar(24)
+  restoreTenantIds Json?
+  revision        Int                   @default(0)
+  updatedAt       DateTime              @updatedAt
+
+  @@map("rental_category_version_policies")
+}
+
+model RentalCategoryGovernanceAudit {
+  id           String                   @id @default(uuid()) @db.VarChar(191)
+  categoryCode RentalCategoryCode
+  category     RentalCategoryDefinition @relation(fields: [categoryCode], references: [code], onDelete: Restrict)
+  versionId    String?                  @db.VarChar(191)
+  action       String                   @db.VarChar(48)
+  actorId      String                   @db.VarChar(191)
+  reason       String                   @db.VarChar(512)
+  before       Json?
+  after        Json?
+  createdAt    DateTime                 @default(now())
+
+  @@index([categoryCode, createdAt], map: "rental_category_governance_audits_code_time_idx")
+  @@map("rental_category_governance_audits")
+}
+
+model RentalCategoryAdoptionAudit {
+  id           String            @id @default(uuid()) @db.VarChar(191)
+  tenantId     String
+  workspaceId  String
+  workspace    BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  fromVersionId String?           @db.VarChar(191)
+  toVersionId   String            @db.VarChar(191)
+  fromRevision  Int
+  toRevision    Int
+  action        String            @db.VarChar(24)
+  actorId       String            @db.VarChar(191)
+  reason        String            @db.VarChar(512)
+  createdAt     DateTime          @default(now())
+
+  @@unique([workspaceId, toRevision], map: "rental_category_adoptions_workspace_revision_key")
+  @@index([tenantId, workspaceId, createdAt], map: "rental_category_adoptions_tenant_ws_time_idx")
+  @@map("rental_category_adoption_audits")
+}
+
+/// 候选资料不进入活动经营事实；采用时复核来源修订并在同一事务应用。
+model RentalCategoryAdoptionPreparation {
+  id             String                @id @default(uuid()) @db.VarChar(191)
+  tenantId       String
+  workspaceId    String
+  workspace      BusinessWorkspace     @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
+  targetVersionId String               @db.VarChar(191)
+  targetVersion   RentalCategoryVersion @relation(fields: [targetVersionId], references: [id], onDelete: Restrict)
+  sourceRevision Int
+  revision       Int                   @default(0)
+  patches        Json
+  createdBy      String                @db.VarChar(191)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  @@unique([workspaceId, targetVersionId], map: "rental_category_preparations_ws_version_key")
+  @@index([tenantId, workspaceId], map: "rental_category_preparations_tenant_ws_idx")
+  @@map("rental_category_adoption_preparations")
 }
 
 model TenantRentalProfile {

@@ -1503,7 +1503,8 @@ export class PlatformService {
             skipDuplicates: true
           });
         }
-      }
+      },
+      currentUser?.id
     );
     await this.rentalCoreService?.onApplicationBootstrap();
     return result;

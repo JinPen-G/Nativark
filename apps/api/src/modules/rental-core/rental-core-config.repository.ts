@@ -240,6 +240,14 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
   ): Promise<void> {
     const client = this.db(tx);
     const workspaceId = `ws_${tenantId}`;
+    const category = await client.rentalCategoryDefinition.findUnique({ where: { code: categoryCode } });
+    const version = category?.recommendedVersionId
+      ? await client.rentalCategoryVersion.findUnique({ where: { id: category.recommendedVersionId } })
+      : null;
+    if (!version || version.categoryCode !== categoryCode ||
+        !["published", "legacy_baseline"].includes(version.status)) {
+      throw new ConflictException("默认经营空间缺少可采用的品类版本");
+    }
     const workspace = await client.businessWorkspace.upsert({
       where: { id: workspaceId },
       create: {
@@ -248,6 +256,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         code: "default",
         name: RENTAL_CATEGORY_WORKSPACE_NAMES[String(categoryCode).toLowerCase() as RentalCategoryCode] ?? "租赁空间",
         categoryCode,
+        categoryVersionId: version.id,
         isDefault: true,
         defaultMarker: "default"
       },
@@ -262,6 +271,18 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     // 账号会重新获得默认空间 A 的读写权。`update: {}` 只保护"已存在但被停用"的行，
     // 挡不住"已被删除"的行重新出现。
     //
+    // 旧空间也可能没有初始化审计；只按其实际绑定补记，不把当前推荐版误写为旧空间版本。
+    if (workspace.categoryVersionId && workspace.categoryAdoptionRevision === 0) {
+      await client.rentalCategoryAdoptionAudit.upsert({
+        where: { workspaceId_toRevision: { workspaceId, toRevision: 0 } },
+        update: {},
+        create: {
+          tenantId, workspaceId, toVersionId: workspace.categoryVersionId,
+          fromRevision: 0, toRevision: 0, action: "create",
+          actorId: "system", reason: "初始化默认经营空间品类版本"
+        }
+      });
+    }
     // 首次创建的判定用 upsert 的返回值：createdAt === updatedAt 说明这次是 create。
     const isFreshWorkspace = workspace.createdAt.getTime() === workspace.updatedAt.getTime();
     if (!isFreshWorkspace) return;

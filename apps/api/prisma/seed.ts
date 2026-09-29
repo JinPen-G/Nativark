@@ -366,10 +366,36 @@ const demoWorkspaces = [
 
 async function upsertRentalCategoriesAndProfiles() {
   for (const category of rentalCategories) {
-    await prisma.rentalCategoryDefinition.upsert({
+    const stored = await prisma.rentalCategoryDefinition.upsert({
       where: { code: category.code },
-      update: category,
+      // 平台维护的身份和发布版本不得在后续 Seed 中被静默改写。
+      update: {},
       create: category
+    });
+    const versionId = `legacy:${stored.code}`;
+    await prisma.rentalCategoryVersion.upsert({
+      where: { id: versionId },
+      update: {},
+      create: {
+        id: versionId, categoryCode: stored.code, versionLabel: stored.version.slice(0, 64),
+        sourceKind: "current_db_snapshot", status: "legacy_baseline",
+        definition: asJson({
+          code: stored.code, name: stored.name, description: stored.description,
+          supportedInventoryModes: stored.supportedInventoryModes,
+          defaultCapabilities: stored.defaultCapabilities, terminology: stored.terminology,
+          attributeSchema: stored.attributeSchema, businessModel: stored.businessModel,
+          version: stored.version
+        }),
+        publishedAt: new Date(), publishedBy: "seed",
+        publishReason: "Current DB definition only; not historical order evidence"
+      }
+    });
+    await prisma.rentalCategoryVersionPolicy.upsert({
+      where: { versionId }, update: {}, create: { versionId }
+    });
+    await prisma.rentalCategoryDefinition.updateMany({
+      where: { code: stored.code, recommendedVersionId: null },
+      data: { recommendedVersionId: versionId }
     });
   }
   for (const profile of [
@@ -379,12 +405,7 @@ async function upsertRentalCategoriesAndProfiles() {
     const category = rentalCategories.find((item) => item.code === profile.categoryCode)!;
     await prisma.tenantRentalProfile.upsert({
       where: { tenantId: profile.tenantId },
-      update: {
-        categoryCode: profile.categoryCode,
-        capabilities: category.defaultCapabilities,
-        terminology: category.terminology,
-        configVersion: category.version
-      },
+      update: {},
       create: {
         tenantId: profile.tenantId,
         categoryCode: profile.categoryCode,
@@ -556,27 +577,37 @@ async function upsertRolesAndUsers() {
         ? demoWorkspaces
         : [{ id: `ws_${tenant.id}`, code: "default", name: RENTAL_CATEGORY_WORKSPACE_NAMES[String(rentalProfile.categoryCode).toLowerCase() as SharedRentalCategoryCode], categoryCode: rentalProfile.categoryCode, isDefault: true }] as const;
       for (const workspace of workspaceSeeds) {
-        await prisma.businessWorkspace.upsert({
+        const category = await prisma.rentalCategoryDefinition.findUniqueOrThrow({
+          where: { code: workspace.categoryCode }
+        });
+        if (!category.recommendedVersionId) throw new Error(`品类 ${category.code} 缺少推荐版本`);
+        const savedWorkspace = await prisma.businessWorkspace.upsert({
           where: { id: workspace.id },
-          update: {
-            code: workspace.code,
-            name: workspace.name,
-            categoryCode: workspace.categoryCode,
-            status: WorkspaceStatus.ACTIVE,
-            isDefault: workspace.isDefault,
-            defaultMarker: workspace.isDefault ? "default" : workspace.id
-          },
+          update: {},
           create: {
             id: workspace.id,
             tenantId: tenant.id,
             code: workspace.code,
             name: workspace.name,
             categoryCode: workspace.categoryCode,
+            categoryVersionId: category.recommendedVersionId,
             status: WorkspaceStatus.ACTIVE,
             isDefault: workspace.isDefault,
             defaultMarker: workspace.isDefault ? "default" : workspace.id
           }
         });
+        if (savedWorkspace.categoryVersionId && savedWorkspace.categoryAdoptionRevision === 0) {
+          await prisma.rentalCategoryAdoptionAudit.upsert({
+            where: { workspaceId_toRevision: { workspaceId: workspace.id, toRevision: 0 } },
+            update: {},
+            create: {
+              tenantId: tenant.id, workspaceId: workspace.id,
+              toVersionId: savedWorkspace.categoryVersionId,
+              fromRevision: 0, toRevision: 0, action: "seed_create",
+              actorId: "seed", reason: "演示经营空间首次绑定内置品类版本"
+            }
+          });
+        }
         for (const user of tenant.users) {
           await prisma.workspaceMember.upsert({
             where: { workspaceId_userId: { workspaceId: workspace.id, userId: user.id } },

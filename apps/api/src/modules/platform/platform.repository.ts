@@ -402,13 +402,14 @@ export class PlatformRepository {
      */
     onBeforeCommit?: (tx: Prisma.TransactionClient, workspaceId: string, tenantId: string) => Promise<void>
   ): Promise<BusinessWorkspace> {
-    return this.createBusinessWorkspaceForTenant(this.workspaceTenantId(currentUser), input, onBeforeCommit);
+    return this.createBusinessWorkspaceForTenant(this.workspaceTenantId(currentUser), input, onBeforeCommit, currentUser?.id);
   }
 
   async createBusinessWorkspaceForTenant(
     tenantId: string,
     input: CreateBusinessWorkspaceRequest,
-    onBeforeCommit?: (tx: Prisma.TransactionClient, workspaceId: string, tenantId: string) => Promise<void>
+    onBeforeCommit?: (tx: Prisma.TransactionClient, workspaceId: string, tenantId: string) => Promise<void>,
+    actorId?: string
   ): Promise<BusinessWorkspace> {
     const code = input.code?.trim().toLowerCase();
     const name = input.name?.trim();
@@ -416,8 +417,16 @@ export class PlatformRepository {
     if (code === "default") throw new BadRequestException("default 为升级兼容层保留编码，请使用其他编码");
     const categoryCode = this.toPrismaCategoryCode(input.categoryCode);
     const created = await this.prisma.$transaction(async (tx) => {
-      if (!(await tx.rentalCategoryDefinition.findUnique({ where: { code: categoryCode } }))) {
+      const category = await tx.rentalCategoryDefinition.findUnique({ where: { code: categoryCode } });
+      if (!category) {
         throw new BadRequestException("经营品类不存在");
+      }
+      const categoryVersion = category.recommendedVersionId
+        ? await tx.rentalCategoryVersion.findUnique({ where: { id: category.recommendedVersionId } })
+        : null;
+      if (!categoryVersion || categoryVersion.categoryCode !== categoryCode ||
+          !["published", "legacy_baseline"].includes(categoryVersion.status)) {
+        throw new BadRequestException("经营品类没有可采用的发布版本");
       }
       if (await tx.businessWorkspace.findFirst({ where: { tenantId, code } })) {
         throw new BadRequestException("空间编码已存在");
@@ -432,12 +441,20 @@ export class PlatformRepository {
           code,
           name,
           categoryCode,
+          categoryVersionId: categoryVersion.id,
           status: PrismaWorkspaceStatus.ACTIVE,
           isDefault: false,
           defaultMarker: workspaceId,
           // 新建空间默认 development：首期品类能力未全部实现前不能伪装为正式经营。
           // 调用方可显式请求 production；服务层会在同一事务里校验全部品类必选能力。
           runMode: input.runMode ?? "development"
+        }
+      });
+      await tx.rentalCategoryAdoptionAudit.create({
+        data: {
+          tenantId, workspaceId, toVersionId: categoryVersion.id,
+          fromRevision: 0, toRevision: 0, action: "create",
+          actorId: actorId ?? "system", reason: "新建经营空间绑定推荐品类版本"
         }
       });
       await onBeforeCommit?.(tx, workspaceId, tenantId);
