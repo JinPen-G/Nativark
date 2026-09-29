@@ -544,8 +544,8 @@
       en: "Preference settings",
     },
     "footer.hosting": {
-      zh: "不同品类，共享同一套租赁业务底座。",
-      en: "Different categories. One shared rental foundation.",
+      zh: "构建租赁世界。",
+      en: "Build a Rental World.",
     },
     "cookie.body": {
       zh: "本地保存语言与网站偏好，方便你下次继续浏览。",

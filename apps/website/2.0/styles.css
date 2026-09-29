@@ -1522,10 +1522,6 @@ summary:focus-visible,
   padding: 16px 0 24px;
   border-top: 1px solid var(--line);
 }
-.hosting-note img {
-  width: 18px;
-  height: 13px;
-}
 /* Footer language selector: same two-option popover as the existing website. */
 .footer-lower {
   display: flex;

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { theme, type ThemeConfig } from "antd";
-import { ADMIN_FONT_FAMILY, ADMIN_TYPOGRAPHY, applyAdminTypographyTokens, resolveAdminCornerRadius, resolveAdminPrimaryColor } from "@/app/designTokens";
+import { ADMIN_FONT_FAMILY, ADMIN_TYPOGRAPHY, applyAdminTypographyTokens, resolveAdminPrimaryColor, resolveAdminRadii, type AdminRadiusGroups } from "@/app/designTokens";
 
 export type AppearanceMode = "default" | "dark" | "compact";
 
@@ -182,13 +182,14 @@ export function useAppearance() {
   return context;
 }
 
-export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: string | null, tenantCornerRadius?: number | null): ThemeConfig {
+export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: string | null, radii?: AdminRadiusGroups | number | null): ThemeConfig {
   const light = mode !== "dark";
   const primaryColor = resolveAdminPrimaryColor(tenantThemeColor);
-  const radius = resolveAdminCornerRadius(tenantCornerRadius);
-  const radiusXs = Math.max(4, Math.round(radius * 0.5));
-  const radiusSm = Math.max(4, Math.round(radius * 0.75));
-  const radiusLg = Math.min(24, Math.round(radius * 1.33));
+  // 三组独立圆角：容器（卡片/弹窗/抽屉/表格）、按钮（含分段/页签/选中菜单）、输入（录入控件）。
+  // 全局基准取按钮组，容器走 borderRadiusLG，输入走各录入组件 token；圆形/胶囊保形不受此影响。
+  const { container, button, input } = resolveAdminRadii(radii);
+  const radiusXs = Math.max(4, Math.round(button * 0.5));
+  const radiusSm = Math.max(4, Math.round(button * 0.75));
   const algorithm = mode === "dark"
     ? theme.darkAlgorithm
     : mode === "compact"
@@ -215,10 +216,10 @@ export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: strin
       colorWarning: "#faad14",
       colorError: "#ff4d4f",
       ...(light ? { colorBgLayout: "#f5f8ff" } : {}),
-      borderRadius: radius,
+      borderRadius: button,
       borderRadiusXS: radiusXs,
       borderRadiusSM: radiusSm,
-      borderRadiusLG: radiusLg,
+      borderRadiusLG: container,
       fontFamily: ADMIN_FONT_FAMILY,
       fontSize: ADMIN_TYPOGRAPHY.body.size,
       lineHeight: ADMIN_TYPOGRAPHY.body.lineHeight / ADMIN_TYPOGRAPHY.body.size,
@@ -243,26 +244,33 @@ export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: strin
         // 二级全部常显后侧栏很长，行高压到 36 让首屏多放两三项；
         // 选中态的白卡在 .sider-nav 里用 inset 阴影画，不靠 itemSelectedBg。
         itemHeight: 36,
-        itemBorderRadius: radius,
-        subMenuItemBorderRadius: radius,
+        itemBorderRadius: button,
+        subMenuItemBorderRadius: button,
         itemMarginInline: 0
       },
       Card: {
         headerHeight: 56,
         bodyPadding: 24
       },
+      // 录入控件（输入组）独立圆角：与按钮/容器分档，表单里输入框可单独设方/圆。
+      Input: { borderRadius: input, borderRadiusLG: input, borderRadiusSM: Math.max(4, Math.round(input * 0.75)) },
+      InputNumber: { borderRadius: input, borderRadiusLG: input, borderRadiusSM: Math.max(4, Math.round(input * 0.75)) },
+      Select: { borderRadius: input, borderRadiusLG: input, borderRadiusSM: Math.max(4, Math.round(input * 0.75)) },
+      DatePicker: { borderRadius: input, borderRadiusLG: input, borderRadiusSM: Math.max(4, Math.round(input * 0.75)) },
+      Cascader: { borderRadius: input },
+      TreeSelect: { borderRadius: input },
+      Mentions: { borderRadius: input },
       // 工具条上的按钮偏矮，压不住 18px 的页面标题；32 → 36 只动按钮，
       // 输入框与选择器仍按全局 controlHeight，避免整站密度跟着变。
-      Button: { controlHeight: 36 },
+      Button: { controlHeight: 36, borderRadius: button, borderRadiusLG: button, borderRadiusSM: Math.max(4, Math.round(button * 0.75)) },
       Table: {
         cellPaddingBlock: 12,
         cellPaddingInline: 8,
         headerBg: light ? "#fafafa" : undefined,
         // antd 用 headerBorderRadius 同时决定表头首尾圆角与整表外圆角(tableRadius)。
-        // 极致圆角档(radius=999)下 radiusSm 会涨到约 749px，把表头背景挤成帐篷形；
-        // 表格是数据密集面，圆角收敛到 radiusLg(≤24px)——8-20 连续档里 radiusSm 恒小于
-        // radiusLg，故取 min 对这些档位零影响，只压掉 999 档的畸形。
-        headerBorderRadius: Math.min(radiusSm, radiusLg),
+        // 容器组取 999 极致档时 borderRadiusLG≈999 会把表头背景挤成帐篷形；表格是数据密集面，
+        // 表头圆角收敛到 ≤24：正常档取 radiusSm(按钮派生的小圆角)，只压掉极致档的畸形。
+        headerBorderRadius: Math.min(radiusSm, 24),
         // 表格悬停是交互反馈，不应永远显示系统默认蓝灰色。
         rowHoverBg: "var(--rental-color-primary-bg)"
       },

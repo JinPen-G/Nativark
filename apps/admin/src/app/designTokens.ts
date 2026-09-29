@@ -47,15 +47,52 @@ export const ADMIN_TYPOGRAPHY = {
 
 const px = (value: number) => `${value}px`;
 
-/** 将圆角语义 token 注入 CSS；Tabs、选中菜单和普通按钮共用 control 圆角。 */
-export function applyAdminRadiusTokens(root: HTMLElement, value?: number | null) {
-  const control = resolveAdminCornerRadius(value);
-  const small = Math.max(4, Math.round(control * 0.75));
-  const large = Math.min(24, Math.round(control * 1.33));
+/** 三组独立圆角（容器/按钮/输入）；任一组留空时回退旧的统一圆角，再回退平台默认。 */
+export interface AdminRadiusGroups {
+  container?: number | null;
+  button?: number | null;
+  input?: number | null;
+  /** 旧的统一圆角，作为三组共同的回退基准（迁移期兼容）。 */
+  legacy?: number | null;
+}
+
+/** 解析某一组圆角：优先该组自身值，其次旧统一值，再次平台默认；同样遵守 8-20 连续档 + 999 离散档。 */
+export function resolveAdminRadiusGroup(value?: number | null, legacy?: number | null) {
+  if (Number.isInteger(value)) return resolveAdminCornerRadius(value);
+  if (Number.isInteger(legacy)) return resolveAdminCornerRadius(legacy);
+  return ADMIN_UI_CORNER_RADIUS_DEFAULT;
+}
+
+function toGroups(radii: AdminRadiusGroups | number | null | undefined): AdminRadiusGroups {
+  return typeof radii === "number" || radii == null ? { legacy: radii ?? undefined } : radii;
+}
+
+/** 解析后的三组圆角像素值（供 CSS 变量与 antd token 共用同一口径）。 */
+export function resolveAdminRadii(radii: AdminRadiusGroups | number | null | undefined) {
+  const g = toGroups(radii);
+  return {
+    container: resolveAdminRadiusGroup(g.container, g.legacy),
+    button: resolveAdminRadiusGroup(g.button, g.legacy),
+    input: resolveAdminRadiusGroup(g.input, g.legacy)
+  };
+}
+
+/**
+ * 将三组圆角注入 CSS 变量。
+ * 容器（卡片/弹窗/抽屉/表格）走 -container(=旧 -lg 别名)；按钮/分段/页签/选中菜单走 -button(=旧 -control 别名)；
+ * 录入控件走 -input；胶囊 -pill 与派生小圆角 -sm 保持既有语义，圆形/头像等保形不受三档影响。
+ */
+export function applyAdminRadiusTokens(root: HTMLElement, radii: AdminRadiusGroups | number | null | undefined) {
+  const { container, button, input } = resolveAdminRadii(radii);
+  const small = Math.max(4, Math.round(button * 0.75));
   const values: Record<string, string> = {
-    "--rental-ui-radius-control": px(control),
+    "--rental-ui-radius-container": px(container),
+    "--rental-ui-radius-button": px(button),
+    "--rental-ui-radius-input": px(input),
+    // 向后兼容别名：styles.css 现有选择器仍写 -lg/-control，这里让它们分别指向容器/按钮组。
+    "--rental-ui-radius-lg": px(container),
+    "--rental-ui-radius-control": px(button),
     "--rental-ui-radius-sm": px(small),
-    "--rental-ui-radius-lg": px(large),
     "--rental-ui-radius-pill": "9999px"
   };
   for (const [name, tokenValue] of Object.entries(values)) root.style.setProperty(name, tokenValue);

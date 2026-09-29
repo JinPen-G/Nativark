@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="zh" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>圆角对比 · border-radius vs corner-shape: squircle</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --panel:#ffffff; --ink:#1c2430; --muted:#66707c;
+    --line:#e4e7ec; --accent:#4f46e5; --accent-2:#0ea5a4;
+    --round:#94a3b8; --squircle:#4f46e5;
+    --shadow:0 1px 2px rgba(16,24,40,.06),0 8px 24px rgba(16,24,40,.08);
+    --radius:16px; --k:2;
+  }
+  html[data-theme="dark"]{
+    --bg:#0f1420; --panel:#171d2b; --ink:#e7ecf3; --muted:#93a0b4;
+    --line:#26304050; --accent:#8b8cf9; --accent-2:#2dd4bf;
+    --round:#64748b; --squircle:#a5a6fb;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.45);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;padding:32px 24px 72px}
+  .wrap{max-width:1040px;margin:0 auto}
+  h1{font-size:24px;letter-spacing:-.01em;margin:0 0 6px}
+  .lede{color:var(--muted);margin:0 0 20px;max-width:70ch}
+  .badge{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;
+    font-size:13px;font-weight:600;border:1px solid var(--line)}
+  .badge.ok{color:#067647;background:#ecfdf3;border-color:#abefc6}
+  .badge.no{color:#b42318;background:#fef3f2;border-color:#fecdca}
+  html[data-theme="dark"] .badge.ok{background:#053321;border-color:#085d3a;color:#75e0a7}
+  html[data-theme="dark"] .badge.no{background:#3a0d0a;border-color:#7a271a;color:#fda29b}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:var(--shadow);margin-top:20px}
+  .card > h2{font-size:16px;margin:0 0 4px}
+  .card > .hint{color:var(--muted);font-size:13px;margin:0 0 18px}
+  .controls{display:flex;flex-wrap:wrap;gap:22px;align-items:flex-end}
+  .field{display:flex;flex-direction:column;gap:6px;min-width:200px;flex:1}
+  .field label{font-size:13px;font-weight:600;color:var(--muted)}
+  .field .val{font-variant-numeric:tabular-nums;color:var(--ink);font-weight:700}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .toggle{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+  .toggle button{border:0;background:transparent;color:var(--muted);padding:8px 16px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+  .toggle button[aria-pressed="true"]{background:var(--accent);color:#fff}
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:720px){.pair{grid-template-columns:1fr}}
+  .demoBox{height:150px;display:flex;align-items:center;justify-content:center;
+    font-weight:700;color:#fff;border-radius:var(--radius)}
+  .demoBox.round{background:linear-gradient(135deg,#64748b,#475569)}
+  .demoBox.squircle{background:linear-gradient(135deg,var(--accent),var(--accent-2))}
+  .tag{position:absolute;top:12px;left:12px;font-size:12px;font-weight:700;color:var(--muted)}
+  .cell{position:relative}
+  .warn{margin-top:10px;font-size:12px;color:#b42318}
+  html[data-theme="dark"] .warn{color:#fda29b}
+  svg .roundStroke{fill:none;stroke:var(--round);stroke-width:2;stroke-dasharray:6 5}
+  svg .squircleStroke{fill:none;stroke:var(--squircle);stroke-width:2.5}
+  svg .roundFill{fill:var(--round);opacity:.9}
+  svg .squircleFill{fill:var(--squircle)}
+  .legend{display:flex;gap:20px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:14px}
+  .legend i{display:inline-block;width:14px;height:14px;border-radius:4px;vertical-align:-2px;margin-right:6px}
+  code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:12.5px}
+  .snippet{margin-top:18px;background:#0b1020;color:#c9d3e6;border-radius:12px;padding:14px 16px;overflow:auto}
+  html[data-theme="dark"] .snippet{background:#05070d;border:1px solid var(--line)}
+  .snippet .c-prop{color:#9ecbff}.snippet .c-val{color:#8ce99a}
+  .adminRow{display:flex;gap:16px;flex-wrap:wrap;align-items:center}
+  .aCard{flex:1;min-width:220px;background:var(--panel);border:1px solid var(--line);padding:16px;border-radius:var(--radius)}
+  .aBtn{border:0;background:var(--accent);color:#fff;font:inherit;font-weight:600;padding:10px 18px;border-radius:var(--radius);cursor:pointer}
+  .aInput{border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:10px 14px;border-radius:var(--radius);min-width:180px}
+  .aTag{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);font-size:12px;font-weight:700;padding:6px 12px;border-radius:var(--radius)}
+  .footnote{color:var(--muted);font-size:12.5px;margin-top:26px;max-width:76ch}
+  .smooth{corner-shape:superellipse(var(--k))}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <header>
+    <h1>圆角对比 · <code>border-radius</code> vs <code>corner-shape: squircle</code></h1>
+    <p class="lede">左边是普通圆角（圆弧），右边加了 <code>corner-shape</code> 平滑圆角（超椭圆）。拖动滑块感受差异；下方 SVG 叠加图在任何浏览器都能看出区别。</p>
+    <span id="support" class="badge">检测中…</span>
+  </header>
+
+  <section class="card">
+    <h2>参数</h2>
+    <p class="hint">半径沿用后台 8–20 档位区间；平滑度 k 即 CSS <code>superellipse(k)</code>：k=1 是普通圆角，k=2 是 squircle。</p>
+    <div class="controls">
+      <div class="field"><label>圆角半径 <span class="val" id="rVal">16px</span></label><input type="range" id="rSlider" min="6" max="40" step="1" value="16"></div>
+      <div class="field"><label>平滑度 k（1=圆角，2=squircle）<span class="val" id="kVal">2.00</span></label><input type="range" id="kSlider" min="1" max="2.6" step="0.05" value="2"></div>
+      <div class="field" style="flex:0 0 auto">
+        <label>叠加对比</label>
+        <div class="toggle"><button id="ovOn" aria-pressed="true">开</button><button id="ovOff" aria-pressed="false">关</button></div>
+      </div>
+      <div class="field" style="flex:0 0 auto">
+        <label>主题</label>
+        <div class="toggle"><button id="lt" aria-pressed="true">浅色</button><button id="dk" aria-pressed="false">深色</button></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>① 真实 CSS 效果</h2>
+    <p class="hint">这是实际写进后台会生效的样式。若你的浏览器不支持 <code>corner-shape</code>，右侧会和左侧一样——看下面第 ② 节。</p>
+    <div class="pair">
+      <div class="cell"><span class="tag">border-radius（圆弧）</span><div class="demoBox round" id="boxRound"></div></div>
+      <div class="cell"><span class="tag">+ corner-shape: squircle</span><div class="demoBox squircle smooth" id="boxSquircle"></div></div>
+    </div>
+    <p class="warn" id="cssWarn" hidden>⚠ 当前浏览器不支持 corner-shape，右侧退回普通圆角（这正是不支持时的真实回退效果）。</p>
+    <div class="snippet" id="snippet"></div>
+  </section>
+
+  <section class="card">
+    <h2>② 形状数学对比（SVG，任何浏览器都一致）</h2>
+    <p class="hint">同一半径下，圆弧（虚线/灰）与超椭圆（实线/紫）的轮廓叠加。紫线在直边附近更贴合边缘、在对角处更饱满——这就是“更平滑”的来源。</p>
+    <div class="pair">
+      <div class="cell"><span class="tag">填充对比</span><svg id="svgFill" viewBox="0 0 320 200" width="100%" height="200" role="img" aria-label="圆角与超椭圆填充对比"></svg></div>
+      <div class="cell"><span class="tag">轮廓叠加</span><svg id="svgOverlay" viewBox="0 0 320 200" width="100%" height="200" role="img" aria-label="轮廓叠加对比"></svg></div>
+    </div>
+    <div class="legend"><span><i style="background:var(--round)"></i>圆角 border-radius（k=1 / 圆弧）</span><span><i style="background:var(--squircle)"></i>平滑 squircle（当前 k）</span></div>
+  </section>
+
+  <section class="card">
+    <h2>③ 放到后台组件上看</h2>
+    <p class="hint">卡片、按钮、输入框、标签套用当前圆角与平滑度（支持的浏览器上生效）。</p>
+    <div class="adminRow">
+      <div class="aCard smooth"><div style="font-weight:700;margin-bottom:6px">租户订阅</div><div style="color:var(--muted);font-size:13px">基础版 · 2026-12-31 到期</div></div>
+      <button class="aBtn smooth">保存办理</button>
+      <input class="aInput smooth" placeholder="搜索租户…">
+      <span class="aTag smooth">PRO 权益</span>
+    </div>
+  </section>
+
+  <p class="footnote" id="foot"></p>
+</div>
+<script>
+(function(){
+  var root=document.documentElement, $=function(id){return document.getElementById(id);};
+  var supported = (window.CSS&&CSS.supports&&(CSS.supports("corner-shape","squircle")||CSS.supports("corner-shape","superellipse(2)")))||false;
+
+  function sp(v,e){return Math.sign(v)*Math.pow(Math.abs(v),e);}
+  function superRect(x,y,W,H,r,n,seg){
+    r=Math.min(r,Math.min(W,H)/2); var e=2/n, P=[];
+    function arc(cx,cy,a0,a1){for(var i=0;i<=seg;i++){var a=a0+(a1-a0)*i/seg;P.push([(x+cx+r*sp(Math.cos(a),e)).toFixed(2),(y+cy+r*sp(Math.sin(a),e)).toFixed(2)]);}}
+    var Q=Math.PI/2;
+    arc(W-r,r,-Q,0); arc(W-r,H-r,0,Q); arc(r,H-r,Q,Math.PI); arc(r,r,Math.PI,3*Q);
+    return "M"+P.map(function(p){return p[0]+" "+p[1];}).join("L")+"Z";
+  }
+
+  function render(){
+    var r=+$("rSlider").value, k=+$("kSlider").value, n=Math.pow(2,k), overlay=$("ovOn").getAttribute("aria-pressed")==="true";
+    root.style.setProperty("--radius", r+"px");
+    root.style.setProperty("--k", k);
+    $("rVal").textContent=r+"px"; $("kVal").textContent=k.toFixed(2);
+
+    $("svgFill").innerHTML =
+      '<path class="roundFill" d="'+superRect(20,40,120,120,r,2,20)+'"/>'+
+      '<path class="squircleFill" d="'+superRect(180,40,120,120,r,n,20)+'"/>'+
+      '<text x="80" y="182" text-anchor="middle" fill="var(--muted)" font-size="12">圆角 k=1</text>'+
+      '<text x="240" y="182" text-anchor="middle" fill="var(--muted)" font-size="12">squircle k='+k.toFixed(2)+'</text>';
+    $("svgOverlay").innerHTML =
+      (overlay?'<path class="roundStroke" d="'+superRect(90,40,140,120,r,2,40)+'"/>':'')+
+      '<path class="squircleStroke" d="'+superRect(90,40,140,120,r,n,40)+'"/>';
+
+    var kw = Math.abs(k-2)<1e-9 ? "squircle" : "superellipse("+k.toFixed(2)+")";
+    $("snippet").innerHTML='.surface {<br>&nbsp;&nbsp;<span class="c-prop">border-radius</span>: <span class="c-val">'+r+'px</span>;<br>&nbsp;&nbsp;<span class="c-prop">corner-shape</span>: <span class="c-val">'+kw+'</span>;<br>}';
+  }
+
+  function badge(){
+    var b=$("support");
+    b.className="badge "+(supported?"ok":"no");
+    b.textContent=supported?"✓ 你的浏览器支持 corner-shape，第 ① / ③ 节按平滑圆角渲染":"✗ 你的浏览器暂不支持 corner-shape，第 ① / ③ 节退回普通圆角（第 ② 节 SVG 仍能看出区别）";
+    $("cssWarn").hidden=supported; $("boxSquircle").style.outline="none";
+    $("foot").innerHTML="说明：<code>corner-shape</code> 目前仍是实验性、非 Baseline 特性；不支持的浏览器会自然退回 <code>border-radius</code> 普通圆角。CSS 的 squircle=<code>superellipse(2)</code>，与 Apple 连续圆角相近但非精确复刻。第 ② 节用 SVG 超椭圆路径绘制，跨浏览器一致，用于观察形状本身。";
+  }
+
+  function press(a,b,on){ $(a).setAttribute("aria-pressed",on?"true":"false"); $(b).setAttribute("aria-pressed",on?"false":"true"); }
+  $("rSlider").addEventListener("input",render);
+  $("kSlider").addEventListener("input",render);
+  $("ovOn").addEventListener("click",function(){press("ovOn","ovOff",true);render();});
+  $("ovOff").addEventListener("click",function(){press("ovOn","ovOff",false);render();});
+  $("lt").addEventListener("click",function(){root.setAttribute("data-theme","light");press("lt","dk",true);});
+  $("dk").addEventListener("click",function(){root.setAttribute("data-theme","dark");press("dk","lt",true);});
+
+  badge(); render();
+})();
+</script>
+</body>
+</html>

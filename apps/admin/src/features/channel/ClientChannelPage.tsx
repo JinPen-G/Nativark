@@ -50,6 +50,28 @@ function ImageUrlUpload({ value, onChange, scene, hint, previewHeight = 64 }: { 
   );
 }
 
+/** 后台圆角分组滑块（容器/按钮/输入共用）：8–20px 连续档 + 999px 极致离散档，20 与 999 之间自动吸附。 */
+function AdminRadiusSlider({ name, label, tooltip, extra }: { name: string; label: string; tooltip: string; extra: string }) {
+  return (
+    <Form.Item
+      name={name}
+      label={label}
+      tooltip={tooltip}
+      extra={extra}
+      getValueProps={(value) => ({ value: value === ADMIN_UI_CORNER_RADIUS_FULL ? ADMIN_UI_CORNER_RADIUS_MAX + 4 : value })}
+      normalize={(value) => typeof value === "number" && value > ADMIN_UI_CORNER_RADIUS_MAX ? ADMIN_UI_CORNER_RADIUS_FULL : value}
+    >
+      <Slider
+        min={ADMIN_UI_CORNER_RADIUS_MIN}
+        max={ADMIN_UI_CORNER_RADIUS_MAX + 4}
+        step={1}
+        marks={{ [ADMIN_UI_CORNER_RADIUS_MIN]: `${ADMIN_UI_CORNER_RADIUS_MIN}px`, [ADMIN_UI_CORNER_RADIUS_DEFAULT]: `${ADMIN_UI_CORNER_RADIUS_DEFAULT}px`, [ADMIN_UI_CORNER_RADIUS_MAX]: `${ADMIN_UI_CORNER_RADIUS_MAX}px`, [ADMIN_UI_CORNER_RADIUS_MAX + 4]: `${ADMIN_UI_CORNER_RADIUS_FULL}px` }}
+        tooltip={{ formatter: (value) => value == null ? "" : value > ADMIN_UI_CORNER_RADIUS_MAX ? `${ADMIN_UI_CORNER_RADIUS_FULL}px` : `${value}px` }}
+      />
+    </Form.Item>
+  );
+}
+
 function ProfileCard() {
   const { t } = useLocale();
   const [form] = Form.useForm<ProfileForm>();
@@ -80,6 +102,9 @@ function ProfileCard() {
       bannerSubtitle: data.bannerSubtitle,
       themeColor: data.themeColor,
       adminCornerRadius: data.adminCornerRadius,
+      adminContainerRadius: data.adminContainerRadius,
+      adminButtonRadius: data.adminButtonRadius,
+      adminInputRadius: data.adminInputRadius,
       smsLoginEnabled: data.smsLoginEnabled,
       passwordLoginEnabled: data.passwordLoginEnabled,
       publishedWorkspaceIds: data.publishedWorkspaceIds,

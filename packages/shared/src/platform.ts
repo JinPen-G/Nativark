@@ -161,8 +161,14 @@ export interface TenantContext {
   faviconUrl?: string;
   /** 租户通用客户端配置的主题色；未设置时管理端与客户端各自回退默认色。 */
   themeColor?: string;
-  /** 管理后台基础控件圆角（px）；由租户在受限范围内配置，未设置时使用平台默认值。 */
+  /** 管理后台基础控件圆角（px，旧字段/回退基准）；由租户在受限范围内配置，未设置时使用平台默认值。 */
   adminCornerRadius?: number;
+  /** 容器（卡片/弹窗/抽屉/表格）圆角（px）；未设置时回退 adminCornerRadius 再回退平台默认。 */
+  adminContainerRadius?: number;
+  /** 按钮/分段/选中菜单圆角（px）；未设置时回退 adminCornerRadius 再回退平台默认。 */
+  adminButtonRadius?: number;
+  /** 输入/选择/日期等录入控件圆角（px）；未设置时回退 adminCornerRadius 再回退平台默认。 */
+  adminInputRadius?: number;
   categoryCode?: RentalCategoryCode;
   categoryName?: string;
   capabilities?: RentalCapability[];
@@ -810,8 +816,14 @@ export interface ClientChannelProfileSummary {
   bannerSubtitle?: string;
   /** 客户端与管理后台主题色（#RRGGBB）；未设置时各端用系统默认色。 */
   themeColor?: string;
-  /** 管理后台基础控件圆角（px）；胶囊页签与圆形图标按钮不受此值强行变形。 */
+  /** 管理后台基础控件圆角（px，旧字段/回退基准）；胶囊页签与圆形图标按钮不受此值强行变形。 */
   adminCornerRadius: number;
+  /** 容器（卡片/弹窗/抽屉/表格）圆角（px）；未设置时回退 adminCornerRadius。 */
+  adminContainerRadius?: number;
+  /** 按钮/分段/选中菜单圆角（px）；未设置时回退 adminCornerRadius。 */
+  adminButtonRadius?: number;
+  /** 输入/选择/日期等录入控件圆角（px）；未设置时回退 adminCornerRadius。 */
+  adminInputRadius?: number;
   smsLoginEnabled: boolean;
   passwordLoginEnabled: boolean;
   publishedWorkspaceIds: string[];
@@ -838,8 +850,14 @@ export interface SaveClientChannelProfileRequest {
   bannerSubtitle?: string;
   /** 客户端与管理后台主题色（#RRGGBB）；留空表示回退系统默认色。 */
   themeColor?: string;
-  /** 管理后台基础控件圆角（8-20px）；留空沿用当前值或平台默认值。 */
+  /** 管理后台基础控件圆角（8-20px 或 999，旧字段/回退基准）；留空沿用当前值或平台默认值。 */
   adminCornerRadius?: number;
+  /** 容器（卡片/弹窗/抽屉/表格）圆角（8-20px 或 999）；留空沿用当前值，再回退 adminCornerRadius。 */
+  adminContainerRadius?: number;
+  /** 按钮/分段/选中菜单圆角（8-20px 或 999）；留空沿用当前值，再回退 adminCornerRadius。 */
+  adminButtonRadius?: number;
+  /** 输入/选择/日期等录入控件圆角（8-20px 或 999）；留空沿用当前值，再回退 adminCornerRadius。 */
+  adminInputRadius?: number;
   smsLoginEnabled: boolean;
   passwordLoginEnabled: boolean;
   publishedWorkspaceIds: string[];
