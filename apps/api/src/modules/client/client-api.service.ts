@@ -57,6 +57,7 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
 import { MembershipService } from "../platform/membership.service";
 import { RentalCoreService } from "../rental-core/rental-core.service";
+import { RentalCategoryResolver } from "../rental-core/rental-category-resolver.service";
 import { RentalBusinessService, type BusinessContext } from "../rental-core/rental-business.service";
 import { RentalOrderConfirmationService } from "../rental-core/rental-order-confirmation.service";
 import { RentalIdempotentActionService } from "../rental-core/rental-idempotent-action.service";
@@ -120,7 +121,8 @@ export class ClientApiService {
     private readonly documents: RentalDocumentService,
     @Optional() private readonly corporateSettlement?: CustomerCorporateSettlementService,
     @Optional() private readonly addresses?: ClientDeliveryAddressService,
-    @Optional() private readonly wechat?: ClientWechatAuthService
+    @Optional() private readonly wechat?: ClientWechatAuthService,
+    private readonly categoryResolver?: RentalCategoryResolver
   ) {}
 
   private async context(tenantId: string): Promise<BusinessContext> {
@@ -274,8 +276,6 @@ export class ClientApiService {
   async channelBootstrap(tenantCode: string, client: ClientChannelKind = "wechat_miniprogram", appId?: string): Promise<ClientChannelBootstrapResponse> {
     const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true, code: true, name: true } });
     if (!tenant) throw new NotFoundException("商户不存在");
-    // 品类名字典与员工端同源（RENTAL_CATEGORY_DEFINITIONS）；客户端据此显示品类名，不再本地维护。
-    const categories = this.core.listCategories().map((row) => ({ code: String(row.code), name: row.name }));
     const profile = await this.prisma.clientChannelProfile.findUnique({
       where: { tenantId: tenant.id },
       include: { publishedWorkspaces: { where: { enabled: true }, include: { workspace: { select: { code: true, name: true, categoryCode: true, isDefault: true, status: true } } } } }
@@ -292,8 +292,14 @@ export class ClientApiService {
     // WEBSITE-CHANNEL-01：仅 web 渠道叠加官网特有配置；其余渠道恒为 undefined。
     const website = client === "web" ? await this.websiteConfig(tenant.id) : undefined;
 
-    // 已发布服务来自租户级配置；未配置或无发布时回退到启用空间目录（不带品牌/协议）。
+    // 只公开租户明确发布的有效空间；无发布时不回退经营空间目录。
     const publishedActive = (profile?.publishedWorkspaces ?? []).filter((row) => row.workspace.status === "ACTIVE");
+    // 公开目录仅投影租户已发布空间的采用版本，不泄露平台未开放品类或治理配置。
+    const definitions = await Promise.all(publishedActive.map(async (row) => this.categoryResolver
+      ? (await this.categoryResolver.forWorkspace(tenant.id, row.workspaceId)).definition
+      : this.core.listCategories().find((category) => category.code === String(row.workspace.categoryCode).toLowerCase())));
+    const categories = [...new Map(definitions.filter((row) => row !== undefined)
+      .map((row) => [String(row!.code), { code: String(row!.code), name: row!.name }])).values()];
     const loginMethods: ClientLoginMethod[] = [
       ...(isMiniProgram && wechatReady ? ["wechat_phone" as const] : []),
       ...((profile?.smsLoginEnabled ?? true) && smsReady ? ["sms" as const] : []),

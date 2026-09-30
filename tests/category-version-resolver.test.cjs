@@ -5,6 +5,7 @@ const { RENTAL_CATEGORY_DEFINITIONS } = require("@rental-os/shared");
 const { parsePublishedRentalCategory, RentalCategoryResolver } = require("../apps/api/dist/modules/rental-core/rental-category-resolver.service.js");
 const { WorkspaceCapabilityRepository } = require("../apps/api/dist/modules/rental-core/workspace-capability.repository.js");
 const { RentalCoreService } = require("../apps/api/dist/modules/rental-core/rental-core.service.js");
+const { ClientApiService } = require("../apps/api/dist/modules/client/client-api.service.js");
 const { prepareRentalCategoryUniqueClaims, validateRentalCategoryAttributes } = require("../apps/api/dist/modules/rental-core/rental-category-attributes.js");
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -115,5 +116,34 @@ void (async () => {
   assert.deepEqual(evaluated.requiredCapabilities, [], "嵌套交接 payload 必须使用旧单版本而非空间新版必选政策");
   await core.runHook("tenant", "settlement", { type: "order", id: order.id }, order);
   assert.deepEqual(evaluated.requiredCapabilities, [], "直接订单 payload 同样使用旧版政策");
+  const publicService = Object.create(ClientApiService.prototype);
+  const publicProfile = {
+    defaultWorkspaceId: "public-space", publishedWorkspaces: [
+      { workspaceId: "public-space", workspace: { code: "camera-rental", name: "公开空间", categoryCode: "CAMERA", isDefault: true, status: "ACTIVE" } },
+      { workspaceId: "frozen-space", workspace: { code: "frozen", name: "冻结空间", categoryCode: "CAMPING", isDefault: false, status: "FROZEN" } }
+    ]
+  };
+  publicService.prisma = {
+    tenant: { findFirst: async () => ({ id: "tenant", code: "public-tenant", name: "公开租户" }) },
+    clientChannelProfile: { findUnique: async ({ include }) => {
+      assert.equal(include.publishedWorkspaces.where.enabled, true, "未发布的空间不能进入元数据候选");
+      return publicProfile;
+    } },
+    miniProgramChannel: { findFirst: async () => null }
+  };
+  publicService.core = { listCategories: () => { throw new Error("不可读静态品类表"); } };
+  publicService.tenantIntegrations = { catalog: async () => ({ configs: [] }) };
+  publicService.anyWorkspaceEnablesDelivery = async () => false;
+  const publicReads = [];
+  publicService.categoryResolver = { forWorkspace: async (tenantId, workspaceId) => {
+    publicReads.push([tenantId, workspaceId]);
+    return { definition: { ...baseline, name: "采用版本的公开名称" } };
+  } };
+  const bootstrap = await publicService.channelBootstrap("public-tenant");
+  assert.deepEqual(publicReads, [["tenant", "public-space"]], "公开元数据只解析本租户已发布且有效的空间");
+  assert.deepEqual(bootstrap.categories, [{ code: "camera", name: "采用版本的公开名称" }]);
+  assert.deepEqual(Object.keys(bootstrap.categories[0]).sort(), ["code", "name"], "公开投影不能返回政策、字段或内部配置");
+  publicProfile.publishedWorkspaces = [];
+  assert.deepEqual((await publicService.channelBootstrap("public-tenant")).categories, [], "无公开空间时不回退平台全品类目录");
   console.log("Published rental-category parser and workspace/version resolver passed.");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
