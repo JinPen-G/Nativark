@@ -809,6 +809,28 @@ model ClientChannelWorkspace {
   @@map("client_channel_workspaces")
 }
 
+/// 品牌与外观（管理后台 UI 身份）：从客户端渠道配置拆出的独立领域。存品牌名/Logo/Favicon、主题色与四个圆角分组。
+/// 一租户一条（tenantId 唯一），保存带 revision 乐观锁；主题色作用于客户端+管理后台，圆角作用于管理后台。
+model TenantAppearanceProfile {
+  id                   String   @id @default(uuid())
+  tenantId             String   @unique(map: "tenant_appearance_profiles_tenant_key")
+  revision             Int      @default(1)
+  brandName            String?  @db.VarChar(120)
+  brandLogoUrl         String?  @db.VarChar(512)
+  faviconUrl           String?  @db.VarChar(512)
+  /// 客户端与管理后台主色（#RRGGBB）。
+  themeColor           String?  @db.VarChar(16)
+  /// 旧的统一圆角（回退基准，8-40px 或 999px）。
+  adminCornerRadius    Int?     @db.UnsignedSmallInt
+  adminContainerRadius Int?     @db.UnsignedSmallInt
+  adminButtonRadius    Int?     @db.UnsignedSmallInt
+  adminInputRadius     Int?     @db.UnsignedSmallInt
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@map("tenant_appearance_profiles")
+}
+
 /// WEBSITE-CHANNEL-01：租户级「web 官网渠道」配置。只存官网特有设定项（标语、Hero、辅助色、页脚、
 /// 联系地址、底部 CTA、SEO、Powered by 开关与官网启用开关）；商户名/Logo/协议/客服/帮助/发布服务
 /// 继续复用通用的 ClientChannelProfile，不在此重复。一租户一条（tenantId 唯一），保存带 revision 乐观锁。

@@ -176,7 +176,7 @@ export interface TenantContext {
 
 /** 管理后台圆角的可配置范围。数值只表达基础控件圆角，胶囊与圆形控件仍是平台保留形态。 */
 export const ADMIN_UI_CORNER_RADIUS_MIN = 8;
-export const ADMIN_UI_CORNER_RADIUS_MAX = 20;
+export const ADMIN_UI_CORNER_RADIUS_MAX = 40;
 export const ADMIN_UI_CORNER_RADIUS_DEFAULT = 12;
 /** 「极致圆角」离散档：跳过 20→999 之间的所有值，只允许直接取 20 或 999（CSS 常用胶囊值）。 */
 export const ADMIN_UI_CORNER_RADIUS_FULL = 999;
@@ -798,6 +798,43 @@ export interface ClientChannelWorkspaceOption {
   name: string;
   categoryCode: string;
   status: string;
+}
+
+/**
+ * 品牌与外观（管理后台 UI 身份）——从客户端渠道配置中拆出的独立领域。
+ * 覆盖品牌标识（名称/Logo/Favicon）、主题色与四个圆角分组；主题色同时作用于客户端与管理后台，
+ * 圆角作用于管理后台。数据独立存于 tenant_appearance_profiles，与客户端渠道内容分离。
+ */
+export interface TenantAppearanceProfile {
+  brandName?: string;
+  brandLogoUrl?: string;
+  faviconUrl?: string;
+  /** 客户端与管理后台主色（#RRGGBB）；未设置各端回退系统默认色。 */
+  themeColor?: string;
+  /** 旧的统一圆角（回退基准，8-40 或 999）。 */
+  adminCornerRadius?: number;
+  /** 容器（卡片/弹窗/抽屉/表格）圆角。 */
+  adminContainerRadius?: number;
+  /** 按钮/分段/页签/选中菜单圆角。 */
+  adminButtonRadius?: number;
+  /** 输入/选择/日期等录入控件圆角。 */
+  adminInputRadius?: number;
+  /** 乐观锁修订号。 */
+  revision: number;
+  updatedAt?: string;
+}
+
+/** 保存品牌与外观（§租户后台「品牌与外观」页）。expectedRevision 乐观并发，缺省字段留空=清除/回退。 */
+export interface SaveTenantAppearanceRequest {
+  expectedRevision?: number;
+  brandName?: string;
+  brandLogoUrl?: string;
+  faviconUrl?: string;
+  themeColor?: string;
+  adminCornerRadius?: number;
+  adminContainerRadius?: number;
+  adminButtonRadius?: number;
+  adminInputRadius?: number;
 }
 
 export interface ClientChannelProfileSummary {

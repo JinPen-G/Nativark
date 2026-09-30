@@ -23,6 +23,18 @@ export function resolveAdminPrimaryColor(value?: string | null) {
 }
 
 /**
+ * 品牌色转 `r, g, b`（供登录页左栏渐变用 `rgba(var(--login-brand-rgb), alpha)`）。
+ * 复用同一份十六进制校验，非法/缺省时回退品牌默认色，不把任意租户输入拼进 CSS。
+ */
+export function resolveAdminPrimaryColorRgb(value?: string | null): string {
+  const hex = resolveAdminPrimaryColor(value).slice(1);
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  return `${r}, ${g}, ${b}`;
+}
+
+/**
  * 租户可配置的后台基础圆角。这里只接受平台规定的整数范围，
  * 旧会话或异常数据也会在前端安全回退，不把任意值写进 CSS。
  */

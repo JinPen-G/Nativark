@@ -228,6 +228,10 @@ export function requiredPermissions(method: string, path: string) {
   if (path.startsWith("/platform/client-channel")) {
     return ["system:integration:manage"];
   }
+  // APPEARANCE-01：租户级「品牌与外观」（管理后台 UI 身份：品牌标识/主题色/圆角），同一渠道管理员权限。
+  if (path.startsWith("/platform/appearance")) {
+    return ["system:integration:manage"];
+  }
   // WEBSITE-CHANNEL-01：租户级 web 官网渠道配置（官网特有设定项），同一权限。
   if (path.startsWith("/platform/website-channel")) {
     return ["system:integration:manage"];

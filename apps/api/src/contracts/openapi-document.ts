@@ -327,6 +327,30 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ClientChannelAgreementConfig: objectOf({ name: stringSchema, version: stringSchema, url: stringSchema, body: stringSchema }, ["name", "version"], false),
   ClientChannelFaqItem: objectOf({ question: stringSchema, answer: stringSchema }, ["question", "answer"], false),
   ClientChannelWorkspaceOption: objectOf({ id: stringSchema, code: stringSchema, name: stringSchema, categoryCode: stringSchema, status: stringSchema }, ["id", "code", "name", "categoryCode", "status"], false),
+  TenantAppearanceProfile: objectOf(
+    {
+      brandName: stringSchema, brandLogoUrl: stringSchema, faviconUrl: stringSchema, themeColor: stringSchema,
+      adminCornerRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminContainerRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminButtonRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminInputRadius: { type: "integer", minimum: 8, maximum: 999 },
+      revision: numberSchema, updatedAt: { type: "string", format: "date-time" }
+    },
+    ["revision"],
+    false
+  ),
+  SaveTenantAppearanceRequest: objectOf(
+    {
+      expectedRevision: numberSchema,
+      brandName: stringSchema, brandLogoUrl: stringSchema, faviconUrl: stringSchema, themeColor: stringSchema,
+      adminCornerRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminContainerRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminButtonRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminInputRadius: { type: "integer", minimum: 8, maximum: 999 }
+    },
+    [],
+    false
+  ),
   ClientChannelProfileSummary: objectOf(
     {
       configured: booleanSchema, revision: numberSchema,
@@ -1822,6 +1846,9 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   backlogOperation("post", "/api/platform/mini-program-channel/test", "Platform", "testMiniProgramChannel", "Verify the mini-program AppID/AppSecret by fetching an access token only", ["system:integration:manage"], true, undefined, "MiniProgramChannelTestResult"),
   backlogOperation("get", "/api/platform/client-channel", "Platform", "getClientChannelProfile", "Get the tenant-level client channel profile (brand, service, agreements, help, published services) shared by mini-program and app", ["system:integration:manage"], true, undefined, "ClientChannelProfileSummary"),
   backlogOperation("put", "/api/platform/client-channel", "Platform", "saveClientChannelProfile", "Save the tenant-level client channel profile with optimistic revision check", ["system:integration:manage"], true, "SaveClientChannelProfileRequest", "ClientChannelProfileSummary"),
+  // APPEARANCE-01：租户级「品牌与外观」（管理后台 UI 身份：品牌标识/主题色/圆角），从客户端渠道拆出的独立领域。
+  backlogOperation("get", "/api/platform/appearance", "Platform", "getTenantAppearance", "Get the tenant-level brand & appearance profile (brand identity, theme color, corner radii)", ["system:integration:manage"], true, undefined, "TenantAppearanceProfile"),
+  backlogOperation("put", "/api/platform/appearance", "Platform", "saveTenantAppearance", "Save the tenant-level brand & appearance profile with optimistic revision check", ["system:integration:manage"], true, "SaveTenantAppearanceRequest", "TenantAppearanceProfile"),
   // WEBSITE-CHANNEL-01：租户级 web 官网渠道配置（官网特有设定项：标语、Hero、辅助色、页脚、CTA、SEO）。
   backlogOperation("get", "/api/platform/website-channel", "Platform", "getWebsiteChannelProfile", "Get the tenant-level website channel profile (website-only settings: slogan, hero, secondary color, footer, CTA, SEO)", ["system:integration:manage"], true, undefined, "WebsiteChannelProfileSummary"),
   backlogOperation("put", "/api/platform/website-channel", "Platform", "saveWebsiteChannelProfile", "Save the tenant-level website channel profile with optimistic revision check", ["system:integration:manage"], true, "SaveWebsiteChannelProfileRequest", "WebsiteChannelProfileSummary"),

@@ -40,6 +40,7 @@ const TenantOperationsAccountPage = lazy(() => import("@/features/tenant-access/
 const TenantRolePermissionPage = lazy(() => import("@/features/tenant-access/TenantAccessPages").then((module) => ({ default: module.TenantRolePermissionPage })));
 const TenantIntegrationsPage = lazy(() => import("@/features/settings/TenantIntegrationsPage").then((module) => ({ default: module.TenantIntegrationsPage })));
 const ClientChannelPage = lazy(() => import("@/features/channel/ClientChannelPage").then((module) => ({ default: module.ClientChannelPage })));
+const AppearancePage = lazy(() => import("@/features/appearance/AppearancePage").then((module) => ({ default: module.AppearancePage })));
 const PaymentReconciliationPage = lazy(() => import("@/features/settings/PaymentReconciliationPage").then((module) => ({ default: module.PaymentReconciliationPage })));
 const TenantSubscriptionPage = lazy(() => import("@/features/subscription/TenantSubscriptionPage").then((module) => ({ default: module.TenantSubscriptionPage })));
 const SubscriptionProPage = lazy(() => import("@/features/subscription/SubscriptionProPage").then((module) => ({ default: module.SubscriptionProPage })));
@@ -121,6 +122,7 @@ function ProtectedRoutes() {
             <Route path={APP_ROUTES.tenantRoles.path} element={guard(APP_ROUTES.tenantRoles, <TenantRolePermissionPage />)} />
             <Route path={APP_ROUTES.tenantIntegrations.path} element={guard(APP_ROUTES.tenantIntegrations, <TenantIntegrationsPage />)} />
             <Route path={APP_ROUTES.clientChannel.path} element={guard(APP_ROUTES.clientChannel, <ClientChannelPage />)} />
+            <Route path={APP_ROUTES.appearance.path} element={guard(APP_ROUTES.appearance, <AppearancePage />)} />
             <Route path={APP_ROUTES.paymentReconciliation.path} element={guard(APP_ROUTES.paymentReconciliation, <PaymentReconciliationPage />)} />
             <Route path={APP_ROUTES.subscription.path} element={guard(APP_ROUTES.subscription, <TenantSubscriptionPage />)} />
             <Route path={APP_ROUTES.subscriptionPro.path} element={guard(APP_ROUTES.subscriptionPro, <SubscriptionProPage />)} />
@@ -177,6 +179,8 @@ export function AppRouter() {
     <Suspense fallback={<PageLoader />}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        {/* 租户专属登录链接：/login/:tenantCode 直接显示该租户品牌，隐藏租户编码输入。 */}
+        <Route path="/login/:tenantCode" element={<LoginPage />} />
         <Route path="/*" element={<ProtectedRoutes />} />
       </Routes>
     </Suspense>

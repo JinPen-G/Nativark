@@ -11,6 +11,7 @@ import { AppearanceProvider, createThemeConfig, useAppearance } from "./theme";
 import { useAuthStore } from "@/features/auth/authStore";
 import { applyAdminFavicon } from "./branding";
 import { applyAdminRadiusTokens, resolveAdminPrimaryColor } from "./designTokens";
+import { GlobalInteractionSounds } from "@/features/sound/GlobalInteractionSounds";
 
 function ThemedApp() {
   const { mode } = useAppearance();
@@ -41,6 +42,7 @@ function ThemedApp() {
     >
       <QueryClientProvider client={queryClient}>
         <AntdApp>
+          <GlobalInteractionSounds />
           <BrowserRouter>
             <AppRouter />
           </BrowserRouter>

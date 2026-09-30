@@ -281,6 +281,15 @@ export class ClientApiService {
       where: { tenantId: tenant.id },
       include: { publishedWorkspaces: { where: { enabled: true }, include: { workspace: { select: { code: true, name: true, categoryCode: true, isDefault: true, status: true } } } } }
     });
+    // APPEARANCE-01：品牌标识/主题色已拆到独立「品牌与外观」领域，为唯一真源；缺行时回退旧渠道列（过渡期仍在库）。
+    const appearance = await this.prisma.tenantAppearanceProfile.findUnique({
+      where: { tenantId: tenant.id },
+      select: { brandName: true, brandLogoUrl: true, faviconUrl: true, themeColor: true }
+    });
+    const brandName = appearance?.brandName?.trim() || profile?.brandName?.trim() || tenant.name;
+    const brandLogoUrl = appearance?.brandLogoUrl ?? profile?.brandLogoUrl ?? undefined;
+    const brandFaviconUrl = appearance?.faviconUrl ?? profile?.faviconUrl ?? undefined;
+    const brandThemeColor = appearance?.themeColor ?? profile?.themeColor ?? undefined;
     const isMiniProgram = client === "wechat_miniprogram";
     const wechatChannel = isMiniProgram
       ? await this.prisma.miniProgramChannel.findFirst({ where: { tenantId: tenant.id, enabled: true, ...(appId?.trim() ? { appId: appId.trim() } : {}) }, select: { appSecretEncrypted: true }, orderBy: { updatedAt: "desc" } })
@@ -312,7 +321,7 @@ export class ClientApiService {
         apiVersion: CLIENT_API_VERSION,
         tenantCode: tenant.code,
         client,
-        merchant: { name: profile?.brandName?.trim() || tenant.name, logoUrl: profile?.brandLogoUrl ?? undefined, faviconUrl: profile?.faviconUrl ?? undefined, servicePhone: profile?.customerServicePhone ?? undefined, serviceHours: profile?.customerServiceHours ?? undefined },
+        merchant: { name: brandName, logoUrl: brandLogoUrl, faviconUrl: brandFaviconUrl, servicePhone: profile?.customerServicePhone ?? undefined, serviceHours: profile?.customerServiceHours ?? undefined },
         services,
         categories,
         defaultServiceCode: undefined,
@@ -340,14 +349,14 @@ export class ClientApiService {
       apiVersion: CLIENT_API_VERSION,
       tenantCode: tenant.code,
       client,
-      merchant: { name: profile.brandName?.trim() || tenant.name, logoUrl: profile.brandLogoUrl ?? undefined, faviconUrl: profile.faviconUrl ?? undefined, servicePhone: profile.customerServicePhone ?? undefined, serviceHours: profile.customerServiceHours ?? undefined },
+      merchant: { name: brandName, logoUrl: brandLogoUrl, faviconUrl: brandFaviconUrl, servicePhone: profile.customerServicePhone ?? undefined, serviceHours: profile.customerServiceHours ?? undefined },
       services,
       categories,
       defaultServiceCode,
       agreements,
       help: { available: Boolean(profile.helpIntro?.trim()) || faqCount > 0, faqCount },
       banner: profile.bannerTitle?.trim() ? { title: profile.bannerTitle.trim(), subtitle: profile.bannerSubtitle?.trim() || undefined } : undefined,
-      themeColor: profile.themeColor ?? undefined,
+      themeColor: brandThemeColor,
       loginMethods: safeLoginMethods,
       capabilities: { publicCatalog: services.length > 0, wechatPay: isMiniProgram && wechatPayReady && wechatReady, delivery: deliveryEnabled, feeResponse: true, accountClosure: true },
       website,

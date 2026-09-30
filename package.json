@@ -74,6 +74,8 @@
     "db:generate": "node scripts/run-api-with-root-env.cjs prisma:generate",
     "db:validate": "node scripts/run-api-with-root-env.cjs prisma:validate",
     "db:migrate": "node scripts/run-api-with-root-env.cjs prisma:migrate",
+    "db:migrate:deploy": "node scripts/run-api-with-root-env.cjs prisma:migrate:deploy",
+    "db:migrate:status": "node scripts/run-api-with-root-env.cjs prisma:migrate:status",
     "db:seed": "node scripts/run-api-with-root-env.cjs prisma:seed",
     "db:comments": "node scripts/apply-column-comments.cjs",
     "db:comments:dry-run": "node scripts/apply-column-comments.cjs --dry-run",

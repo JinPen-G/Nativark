@@ -175,8 +175,25 @@ export class ClientChannelProfileService {
 
   async get(user?: SystemUserRow): Promise<ClientChannelProfileSummary> {
     const tenantId = this.tenantOf(user);
-    const [row, options] = await Promise.all([this.load(tenantId), this.workspaceOptions(tenantId)]);
-    return this.summary(row, options);
+    const [row, options, appearance] = await Promise.all([
+      this.load(tenantId),
+      this.workspaceOptions(tenantId),
+      this.prisma.tenantAppearanceProfile.findUnique({ where: { tenantId } })
+    ]);
+    const summary = this.summary(row, options);
+    if (!appearance) return summary;
+    return {
+      ...summary,
+      brandName: appearance.brandName ?? undefined,
+      brandLogoUrl: appearance.brandLogoUrl ?? undefined,
+      faviconUrl: appearance.faviconUrl ?? undefined,
+      themeColor: appearance.themeColor ?? undefined,
+      adminCornerRadius: normalizeAdminCornerRadius(appearance.adminCornerRadius),
+      adminContainerRadius: appearance.adminContainerRadius ?? undefined,
+      adminButtonRadius: appearance.adminButtonRadius ?? undefined,
+      adminInputRadius: appearance.adminInputRadius ?? undefined,
+      readiness: this.readiness(row ? { ...row, brandName: appearance.brandName } : row, options)
+    };
   }
 
   /**
@@ -293,6 +310,14 @@ export class ClientChannelProfileService {
       const row = existing
         ? await tx.clientChannelProfile.update({ where: { id: existing.id }, data: { ...data, revision: { increment: 1 } } })
         : await tx.clientChannelProfile.create({ data: { tenantId, ...data } });
+      // 品牌与主题色仍在客户端配置维护，同时更新登录/启动配置读取的外观记录。
+      // 已有外观记录只更新品牌，不把渠道里的旧圆角写回去。
+      const branding = { brandName: data.brandName, brandLogoUrl: data.brandLogoUrl, faviconUrl: data.faviconUrl, themeColor: data.themeColor };
+      await tx.tenantAppearanceProfile.upsert({
+        where: { tenantId },
+        create: { tenantId, ...branding, adminCornerRadius: data.adminCornerRadius, adminContainerRadius: data.adminContainerRadius, adminButtonRadius: data.adminButtonRadius, adminInputRadius: data.adminInputRadius },
+        update: { ...branding, revision: { increment: 1 } }
+      });
       await tx.clientChannelWorkspace.deleteMany({ where: { profileId: row.id, workspaceId: { notIn: requestedWorkspaceIds } } });
       for (const workspaceId of requestedWorkspaceIds) {
         await tx.clientChannelWorkspace.upsert({
@@ -304,7 +329,24 @@ export class ClientChannelProfileService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     await this.operationLog?.record({ tenantId, user, action: "client-channel-profile.save", targetType: "client_channel_profile", targetId: tenantId, detail: "保存客户端渠道配置", metadata: { publishedWorkspaces: requestedWorkspaceIds.length, hasUserAgreementBody: Boolean(userAgreement.body), hasPrivacyBody: Boolean(privacyPolicy.body), faqCount: faq.length } });
-    const [row, options] = await Promise.all([this.load(tenantId), this.workspaceOptions(tenantId)]);
-    return this.summary(row, options);
+    const [row, options, appearance] = await Promise.all([
+      this.load(tenantId),
+      this.workspaceOptions(tenantId),
+      this.prisma.tenantAppearanceProfile.findUnique({ where: { tenantId } })
+    ]);
+    const summary = this.summary(row, options);
+    if (!appearance) return summary;
+    return {
+      ...summary,
+      brandName: appearance.brandName ?? undefined,
+      brandLogoUrl: appearance.brandLogoUrl ?? undefined,
+      faviconUrl: appearance.faviconUrl ?? undefined,
+      themeColor: appearance.themeColor ?? undefined,
+      adminCornerRadius: normalizeAdminCornerRadius(appearance.adminCornerRadius),
+      adminContainerRadius: appearance.adminContainerRadius ?? undefined,
+      adminButtonRadius: appearance.adminButtonRadius ?? undefined,
+      adminInputRadius: appearance.adminInputRadius ?? undefined,
+      readiness: this.readiness(row ? { ...row, brandName: appearance.brandName } : row, options)
+    };
   }
 }

@@ -82,6 +82,8 @@ import { MiniProgramChannelController } from "./modules/client/mini-program-chan
 import { MiniProgramChannelService } from "./modules/client/mini-program-channel.service";
 import { ClientChannelProfileController } from "./modules/client/client-channel-profile.controller";
 import { ClientChannelProfileService } from "./modules/client/client-channel-profile.service";
+import { TenantAppearanceProfileController } from "./modules/client/tenant-appearance-profile.controller";
+import { TenantAppearanceProfileService } from "./modules/client/tenant-appearance-profile.service";
 import { WebsiteChannelProfileController } from "./modules/client/website-channel-profile.controller";
 import { WebsiteChannelProfileService } from "./modules/client/website-channel-profile.service";
 import { WebsiteAssetService } from "./modules/client/website-asset.service";
@@ -125,6 +127,7 @@ import { DemoRequestService } from "./modules/demo-requests/demo-request.service
     ClientApiController,
     MiniProgramChannelController,
     ClientChannelProfileController,
+    TenantAppearanceProfileController,
     WebsiteChannelProfileController,
     TenantSubscriptionController,
     PlatformSubscriptionController,
@@ -178,6 +181,7 @@ import { DemoRequestService } from "./modules/demo-requests/demo-request.service
     WechatMiniProgramAdapter,
     MiniProgramChannelService,
     ClientChannelProfileService,
+    TenantAppearanceProfileService,
     WebsiteChannelProfileService,
     WebsiteAssetService,
     SubscriptionService,

@@ -1,6 +1,8 @@
-import { QueryClient } from "@tanstack/react-query";
+import { MutationCache, QueryClient } from "@tanstack/react-query";
+import { createMutationSoundCallbacks } from "../features/sound/mutationSound";
 
 export const queryClient = new QueryClient({
+  mutationCache: new MutationCache(createMutationSoundCallbacks(currentSessionEpoch)),
   defaultOptions: {
     queries: {
       retry: 1,

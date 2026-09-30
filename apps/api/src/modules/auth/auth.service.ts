@@ -22,7 +22,7 @@ import type {
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { hashOpaqueToken } from "../../common/password";
 import { PrismaService } from "../database/prisma.service";
-import { ClientChannelProfileService } from "../client/client-channel-profile.service";
+import { TenantAppearanceProfileService } from "../client/tenant-appearance-profile.service";
 import { PlatformService } from "../platform/platform.service";
 import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.service";
 
@@ -66,8 +66,8 @@ export class AuthService {
     // CORE-EXT-02C：会话上下文里的能力集改为「已启用实例」。可选是为了让既有单测
     // 继续用两个参数构造本服务；缺失时返回空启用集（fail-closed），不回退到品类声明。
     @Optional() private readonly capabilities?: WorkspaceCapabilityService,
-    // 主题色是展示配置，不应阻断登录；可选依赖也兼容无数据库的内存测试模式。
-    @Optional() private readonly clientChannelProfile?: ClientChannelProfileService,
+    // 品牌与外观（主题色/圆角/品牌标识）来自独立的「品牌与外观」领域，不阻断登录；可选依赖兼容内存测试模式。
+    @Optional() private readonly tenantAppearance?: TenantAppearanceProfileService,
     // AUTH-LOCKOUT-01：持久化跨进程失败计数；测试/纯内存模式继续使用进程内后备实现。
     @Optional() private readonly prisma?: PrismaService
   ) {}
@@ -505,9 +505,9 @@ export class AuthService {
     adminButtonRadius?: number;
     adminInputRadius?: number;
   }> {
-    if (!this.clientChannelProfile) return {};
+    if (!this.tenantAppearance) return {};
     try {
-      return await this.clientChannelProfile.getBranding(tenantId);
+      return await this.tenantAppearance.getBranding(tenantId);
     } catch (error) {
       this.logger.warn(`读取租户 ${tenantId} 的管理后台品牌失败，回退平台默认品牌：${(error as Error).message}`);
       return {};
