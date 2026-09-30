@@ -70,9 +70,21 @@ export class SaveClientChannelProfileDto implements SaveClientChannelProfileRequ
   @IsOptional() @IsString() @Matches(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/u, { message: "主题色需为 #RRGGBB 十六进制颜色" })
   themeColor?: string;
 
-  /** 管理后台基础控件圆角：连续区间 8-20px，或极致圆角离散档 999px（服务层精确校验，拒绝 20 与 999 之间的值）。 */
+  /** 管理后台基础控件圆角（旧字段/回退基准）：连续区间 8-20px，或极致圆角离散档 999px（服务层精确校验，拒绝 20 与 999 之间的值）。 */
   @IsOptional() @IsInt() @Min(8) @Max(999)
   adminCornerRadius?: number;
+
+  /** 容器（卡片/弹窗/抽屉/表格）圆角；同 8-20px 连续档或 999px 极致档，留空回退旧统一值。 */
+  @IsOptional() @IsInt() @Min(8) @Max(999)
+  adminContainerRadius?: number;
+
+  /** 按钮/分段/页签/选中菜单圆角；同 8-20px 连续档或 999px 极致档，留空回退旧统一值。 */
+  @IsOptional() @IsInt() @Min(8) @Max(999)
+  adminButtonRadius?: number;
+
+  /** 输入/选择/日期等录入控件圆角；同 8-20px 连续档或 999px 极致档，留空回退旧统一值。 */
+  @IsOptional() @IsInt() @Min(8) @Max(999)
+  adminInputRadius?: number;
 
   @IsBoolean()
   smsLoginEnabled!: boolean;

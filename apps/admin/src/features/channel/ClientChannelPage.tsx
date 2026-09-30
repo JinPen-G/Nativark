@@ -118,7 +118,7 @@ function ProfileCard() {
       expectedRevision: profile.data?.revision,
       helpFaq: (values.helpFaq ?? []).filter((item) => item?.question?.trim() && item?.answer?.trim())
     }),
-    onSuccess: async (data) => { setTenantBranding({ brandName: data.brandName, brandLogoUrl: data.brandLogoUrl, faviconUrl: data.faviconUrl, themeColor: data.themeColor, adminCornerRadius: data.adminCornerRadius }); await queryClient.invalidateQueries({ queryKey: ["client-channel-profile", tenantId] }); message.success(t("客户端渠道配置已保存")); },
+    onSuccess: async (data) => { setTenantBranding({ brandName: data.brandName, brandLogoUrl: data.brandLogoUrl, faviconUrl: data.faviconUrl, themeColor: data.themeColor, adminCornerRadius: data.adminCornerRadius, adminContainerRadius: data.adminContainerRadius, adminButtonRadius: data.adminButtonRadius, adminInputRadius: data.adminInputRadius }); await queryClient.invalidateQueries({ queryKey: ["client-channel-profile", tenantId] }); message.success(t("客户端渠道配置已保存")); },
     onError: (error: any) => message.error(error?.response?.data?.message ?? t("保存失败"))
   });
 
@@ -157,23 +157,16 @@ function ProfileCard() {
                 <Input maxLength={7} allowClear placeholder="#1677FF" addonBefore={<input type="color" value={themeColorSwatch} onChange={(e) => form.setFieldValue("themeColor", e.target.value.toUpperCase())} style={{ width: 28, height: 22, border: "none", background: "transparent", padding: 0, cursor: "pointer" }} aria-label={t("选择主题色")} />} />
               </Form.Item>
             </Col>
-            <Col xs={24} md={12}>
-              <Form.Item
-                name="adminCornerRadius"
-                label={t("管理后台基础圆角")}
-                tooltip={t("统一影响按钮、输入框、选中菜单和页签；圆形图标按钮与开关保留各自形态")}
-                extra={t("拖动选择 8–20px；最右一档为 999px 极致圆角——20 与 999 之间会自动吸附，不能停留在中间值")}
-                getValueProps={(value) => ({ value: value === ADMIN_UI_CORNER_RADIUS_FULL ? ADMIN_UI_CORNER_RADIUS_MAX + 4 : value })}
-                normalize={(value) => typeof value === "number" && value > ADMIN_UI_CORNER_RADIUS_MAX ? ADMIN_UI_CORNER_RADIUS_FULL : value}
-              >
-                <Slider
-                  min={ADMIN_UI_CORNER_RADIUS_MIN}
-                  max={ADMIN_UI_CORNER_RADIUS_MAX + 4}
-                  step={1}
-                  marks={{ [ADMIN_UI_CORNER_RADIUS_MIN]: `${ADMIN_UI_CORNER_RADIUS_MIN}px`, [ADMIN_UI_CORNER_RADIUS_DEFAULT]: `${ADMIN_UI_CORNER_RADIUS_DEFAULT}px`, [ADMIN_UI_CORNER_RADIUS_MAX]: `${ADMIN_UI_CORNER_RADIUS_MAX}px`, [ADMIN_UI_CORNER_RADIUS_MAX + 4]: `${ADMIN_UI_CORNER_RADIUS_FULL}px` }}
-                  tooltip={{ formatter: (value) => value == null ? "" : value > ADMIN_UI_CORNER_RADIUS_MAX ? `${ADMIN_UI_CORNER_RADIUS_FULL}px` : `${value}px` }}
-                />
-              </Form.Item>
+            <Col xs={24}>
+              <Typography.Text strong style={{ display: "block", marginBottom: 2 }}>{t("管理后台圆角（分组）")}</Typography.Text>
+              <Typography.Paragraph type="secondary" className="text-meta" style={{ marginBottom: 12 }}>
+                {t("容器、按钮、录入控件各自独立调节；圆形图标按钮、开关与胶囊标签保留各自形态不受影响。每组 8–20px 连续，最右一档 999px 极致圆角自动吸附；留空的组回退到旧的统一圆角。")}
+              </Typography.Paragraph>
+              <Row gutter={[16, 0]}>
+                <Col xs={24} md={8}><AdminRadiusSlider name="adminContainerRadius" label={t("容器圆角")} tooltip={t("卡片、弹窗、抽屉、表格外框等大面")} extra={t("留空回退旧的统一圆角")} /></Col>
+                <Col xs={24} md={8}><AdminRadiusSlider name="adminButtonRadius" label={t("按钮圆角")} tooltip={t("按钮、分段控件、页签、选中菜单项")} extra={t("留空回退旧的统一圆角")} /></Col>
+                <Col xs={24} md={8}><AdminRadiusSlider name="adminInputRadius" label={t("输入框圆角")} tooltip={t("输入框、选择器、日期、数字等录入控件")} extra={t("留空回退旧的统一圆角")} /></Col>
+              </Row>
             </Col>
           </Row>
         </Card>

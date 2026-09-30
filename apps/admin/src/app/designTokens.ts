@@ -56,11 +56,20 @@ export interface AdminRadiusGroups {
   legacy?: number | null;
 }
 
-/** 解析某一组圆角：优先该组自身值，其次旧统一值，再次平台默认；同样遵守 8-20 连续档 + 999 离散档。 */
-export function resolveAdminRadiusGroup(value?: number | null, legacy?: number | null) {
+/** 容器组的历史观感：旧统一圆角在卡片/表格上按 1.33× 放大并封顶 24px（与旧 borderRadiusLG 一致）。 */
+function legacyContainerRadius(unified: number) {
+  return Math.min(24, Math.round(unified * 1.33));
+}
+
+/**
+ * 解析某一组圆角：显式设了该组值就按字面像素用；否则回退旧的统一圆角——
+ * 容器沿用旧的 1.33× 放大（保持既有卡片观感），按钮/输入沿用原值；旧值也缺省时用平台默认。
+ * 这样老租户升级后默认观感不变，而新设的分组值是所见即所得的字面像素。
+ */
+export function resolveAdminRadiusGroup(value: number | null | undefined, legacy: number | null | undefined, kind: "container" | "button" | "input") {
   if (Number.isInteger(value)) return resolveAdminCornerRadius(value);
-  if (Number.isInteger(legacy)) return resolveAdminCornerRadius(legacy);
-  return ADMIN_UI_CORNER_RADIUS_DEFAULT;
+  const base = Number.isInteger(legacy) ? resolveAdminCornerRadius(legacy as number) : ADMIN_UI_CORNER_RADIUS_DEFAULT;
+  return kind === "container" ? legacyContainerRadius(base) : base;
 }
 
 function toGroups(radii: AdminRadiusGroups | number | null | undefined): AdminRadiusGroups {
@@ -71,9 +80,9 @@ function toGroups(radii: AdminRadiusGroups | number | null | undefined): AdminRa
 export function resolveAdminRadii(radii: AdminRadiusGroups | number | null | undefined) {
   const g = toGroups(radii);
   return {
-    container: resolveAdminRadiusGroup(g.container, g.legacy),
-    button: resolveAdminRadiusGroup(g.button, g.legacy),
-    input: resolveAdminRadiusGroup(g.input, g.legacy)
+    container: resolveAdminRadiusGroup(g.container, g.legacy, "container"),
+    button: resolveAdminRadiusGroup(g.button, g.legacy, "button"),
+    input: resolveAdminRadiusGroup(g.input, g.legacy, "input")
   };
 }
 

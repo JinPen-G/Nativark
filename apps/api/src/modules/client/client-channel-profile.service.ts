@@ -56,6 +56,19 @@ function normalizeAdminCornerRadius(value: number | undefined | null): number {
   return value;
 }
 
+/**
+ * 分组圆角（容器/按钮/输入）归一化：与统一圆角同档校验，但**缺省保留 null**，
+ * 不落默认值——这样某组未设置时前端回退到旧的统一圆角，而不是被强制成 12。
+ */
+function normalizeAdminRadiusGroup(value: number | undefined | null): number | null {
+  if (value === undefined || value === null) return null;
+  if (value === ADMIN_UI_CORNER_RADIUS_FULL) return value;
+  if (!Number.isInteger(value) || value < ADMIN_UI_CORNER_RADIUS_MIN || value > ADMIN_UI_CORNER_RADIUS_MAX) {
+    throw new BadRequestException(`管理后台圆角必须是 ${ADMIN_UI_CORNER_RADIUS_MIN}-${ADMIN_UI_CORNER_RADIUS_MAX} 的整数（px），或极致圆角 ${ADMIN_UI_CORNER_RADIUS_FULL}`);
+  }
+  return value;
+}
+
 function normalizeFaq(items: SaveClientChannelProfileRequest["helpFaq"]): ClientChannelFaqItem[] {
   if (!items?.length) return [];
   const out: ClientChannelFaqItem[] = [];
@@ -143,6 +156,9 @@ export class ClientChannelProfileService {
       bannerSubtitle: row?.bannerSubtitle ?? undefined,
       themeColor: row?.themeColor ?? undefined,
       adminCornerRadius: normalizeAdminCornerRadius(row?.adminCornerRadius),
+      adminContainerRadius: normalizeAdminRadiusGroup(row?.adminContainerRadius) ?? undefined,
+      adminButtonRadius: normalizeAdminRadiusGroup(row?.adminButtonRadius) ?? undefined,
+      adminInputRadius: normalizeAdminRadiusGroup(row?.adminInputRadius) ?? undefined,
       smsLoginEnabled: row?.smsLoginEnabled ?? true,
       passwordLoginEnabled: row?.passwordLoginEnabled ?? true,
       publishedWorkspaceIds,
@@ -178,17 +194,20 @@ export class ClientChannelProfileService {
    * 登录/会话上下文使用的最小品牌字段。
    * 只返回展示资源，不返回协议、客服配置或任何第三方凭证。
    */
-  async getBranding(tenantId: string): Promise<Pick<ClientChannelProfileSummary, "brandName" | "brandLogoUrl" | "faviconUrl" | "themeColor" | "adminCornerRadius">> {
+  async getBranding(tenantId: string): Promise<Pick<ClientChannelProfileSummary, "brandName" | "brandLogoUrl" | "faviconUrl" | "themeColor" | "adminCornerRadius" | "adminContainerRadius" | "adminButtonRadius" | "adminInputRadius">> {
     const row = await this.prisma.clientChannelProfile.findUnique({
       where: { tenantId },
-      select: { brandName: true, brandLogoUrl: true, faviconUrl: true, themeColor: true, adminCornerRadius: true }
+      select: { brandName: true, brandLogoUrl: true, faviconUrl: true, themeColor: true, adminCornerRadius: true, adminContainerRadius: true, adminButtonRadius: true, adminInputRadius: true }
     });
     return {
       brandName: row?.brandName?.trim() || undefined,
       brandLogoUrl: row?.brandLogoUrl ?? undefined,
       faviconUrl: row?.faviconUrl ?? undefined,
       themeColor: row?.themeColor ?? undefined,
-      adminCornerRadius: normalizeAdminCornerRadius(row?.adminCornerRadius)
+      adminCornerRadius: normalizeAdminCornerRadius(row?.adminCornerRadius),
+      adminContainerRadius: normalizeAdminRadiusGroup(row?.adminContainerRadius) ?? undefined,
+      adminButtonRadius: normalizeAdminRadiusGroup(row?.adminButtonRadius) ?? undefined,
+      adminInputRadius: normalizeAdminRadiusGroup(row?.adminInputRadius) ?? undefined
     };
   }
 
@@ -258,6 +277,9 @@ export class ClientChannelProfileService {
       bannerSubtitle: text(input.bannerSubtitle, 120, "首页横幅副标题"),
       themeColor: normalizeThemeColor(input.themeColor),
       adminCornerRadius: normalizeAdminCornerRadius(input.adminCornerRadius ?? existing?.adminCornerRadius),
+      adminContainerRadius: normalizeAdminRadiusGroup(input.adminContainerRadius ?? existing?.adminContainerRadius),
+      adminButtonRadius: normalizeAdminRadiusGroup(input.adminButtonRadius ?? existing?.adminButtonRadius),
+      adminInputRadius: normalizeAdminRadiusGroup(input.adminInputRadius ?? existing?.adminInputRadius),
       smsLoginEnabled: Boolean(input.smsLoginEnabled),
       passwordLoginEnabled: Boolean(input.passwordLoginEnabled),
       defaultWorkspaceId

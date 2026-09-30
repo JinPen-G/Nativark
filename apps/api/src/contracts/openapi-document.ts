@@ -280,6 +280,9 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       faviconUrl: stringSchema,
       themeColor: stringSchema,
       adminCornerRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminContainerRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminButtonRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminInputRadius: { type: "integer", minimum: 8, maximum: 999 },
       categoryCode: stringSchema,
       categoryName: stringSchema,
       capabilities: arrayOf(stringSchema)
@@ -331,6 +334,9 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       userAgreement: ref("ClientChannelAgreementConfig"), privacyPolicy: ref("ClientChannelAgreementConfig"),
       helpIntro: stringSchema, helpFaq: arrayOf("ClientChannelFaqItem"), bannerTitle: stringSchema, bannerSubtitle: stringSchema, themeColor: stringSchema,
       adminCornerRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminContainerRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminButtonRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminInputRadius: { type: "integer", minimum: 8, maximum: 999 },
       smsLoginEnabled: booleanSchema, passwordLoginEnabled: booleanSchema,
       publishedWorkspaceIds: arrayOf(stringSchema), defaultWorkspaceId: stringSchema,
       workspaces: arrayOf("ClientChannelWorkspaceOption"),
@@ -346,6 +352,9 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       userAgreement: ref("ClientChannelAgreementConfig"), privacyPolicy: ref("ClientChannelAgreementConfig"),
       helpIntro: stringSchema, helpFaq: arrayOf("ClientChannelFaqItem"), bannerTitle: stringSchema, bannerSubtitle: stringSchema, themeColor: stringSchema,
       adminCornerRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminContainerRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminButtonRadius: { type: "integer", minimum: 8, maximum: 999 },
+      adminInputRadius: { type: "integer", minimum: 8, maximum: 999 },
       smsLoginEnabled: booleanSchema, passwordLoginEnabled: booleanSchema, publishedWorkspaceIds: arrayOf(stringSchema), defaultWorkspaceId: stringSchema
     },
     ["smsLoginEnabled", "passwordLoginEnabled", "publishedWorkspaceIds"]

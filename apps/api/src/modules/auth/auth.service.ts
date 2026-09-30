@@ -501,6 +501,9 @@ export class AuthService {
     faviconUrl?: string;
     themeColor?: string;
     adminCornerRadius?: number;
+    adminContainerRadius?: number;
+    adminButtonRadius?: number;
+    adminInputRadius?: number;
   }> {
     if (!this.clientChannelProfile) return {};
     try {
