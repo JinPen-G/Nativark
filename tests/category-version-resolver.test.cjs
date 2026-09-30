@@ -57,6 +57,13 @@ assert.throws(() => prepareRentalCategoryUniqueClaims(candidateFields, "item_gro
 assert.throws(() => prepareRentalCategoryUniqueClaims(candidateFields, "item_group", [{ id: "a", attributes: {} }]), /不能为空/u);
 assert.throws(() => validateRentalCategoryAttributes([{ code: "choice", label: "选项", scope: "asset", type: "select", options: ["1"] }], "asset", { choice: 1 }), /允许选项/u);
 assert.throws(() => validateRentalCategoryAttributes([{ code: "date", label: "日期", scope: "asset", type: "date" }], "asset", { date: true }), /有效日期/u);
+const dateFields = [{ code: "date", label: "日期", scope: "asset", type: "date" }];
+for (const invalid of ["2026-02-30", "2026-02-29", "2026-02-30T12:00:00+08:00", "2026-04-31", "1", "2026-13-01"]) {
+  assert.throws(() => validateRentalCategoryAttributes(dateFields, "asset", { date: invalid }), /有效日期/u, `不可自动折算无效日期 ${invalid}`);
+}
+for (const valid of ["2024-02-29", "2026-02-28", "2024-02-29T23:30:00-08:00"]) {
+  assert.doesNotThrow(() => validateRentalCategoryAttributes(dateFields, "asset", { date: valid }), "有效闰日及带时区日期应保持可用");
+}
 void (async () => {
   let currentVersionId = "published-v1";
   const versions = new Map([

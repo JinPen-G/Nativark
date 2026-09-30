@@ -2,6 +2,15 @@ import { BadRequestException, ConflictException } from "@nestjs/common";
 import type { RentalAttributeDefinition } from "@rental-os/shared";
 const hasOwn = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
 
+/** Date.parse can normalize impossible dates (e.g. February 30); those are not business dates. */
+function validRentalAttributeDate(value: unknown): boolean {
+  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) return false;
+  const day = /^(\d{4}-\d{2}-\d{2})(?:$|T)/u.exec(value);
+  if (!day) return false;
+  const calendarDay = new Date(`${day[1]}T00:00:00.000Z`);
+  return Number.isFinite(calendarDay.getTime()) && calendarDay.toISOString().slice(0, 10) === day[1];
+}
+
 export function normalizedRentalAttributeValue(value: unknown): string | undefined {
   if (value === undefined || value === null || value === "") return undefined;
   if (typeof value === "string") return value.normalize("NFKC").trim().toUpperCase() || undefined;
@@ -25,7 +34,7 @@ export function validateRentalCategoryAttributes(
     if (field.type === "string" && typeof value !== "string") throw new BadRequestException(`${field.label}必须是文本`);
     if (field.type === "number" && (typeof value !== "number" || !Number.isFinite(value))) throw new BadRequestException(`${field.label}必须是有效数字`);
     if (field.type === "boolean" && typeof value !== "boolean") throw new BadRequestException(`${field.label}必须是布尔值`);
-    if (field.type === "date" && (typeof value !== "string" || !Number.isFinite(new Date(value).getTime()))) throw new BadRequestException(`${field.label}必须是有效日期`);
+    if (field.type === "date" && !validRentalAttributeDate(value)) throw new BadRequestException(`${field.label}必须是有效日期`);
     if (field.type === "select" && (typeof value !== "string" || !field.options?.includes(value))) throw new BadRequestException(`${field.label}不在允许选项中`);
   }
 }
