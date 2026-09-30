@@ -37,6 +37,7 @@ import {
 } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
+import { validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
 import { bufferedRentalPeriod } from "./rental-occupancy";
 import { rentalOrderDueAt } from "./rental-carrier-shipment";
 import { effectiveUnpaidHoldRule } from "./rental-rule-defaults";
@@ -221,7 +222,7 @@ export interface RentalCoreFactStore {
   allocatedAssetIds(tenantId: string, tx?: RentalFactTx, excludeOrderId?: string): Promise<Set<string>>;
   listAssets(tenantId: string, tx?: RentalFactTx): Promise<RentalAsset[]>;
   listAssetStatusHistory(tenantId: string, assetId: string, tx?: RentalFactTx): Promise<RentalAssetStatusHistory[]>;
-  upsertAsset(asset: RentalAsset, uniqueAttributes?: RentalUniqueAttributeClaim[], statusChange?: AssetStatusHistoryMetadata): Promise<void>;
+  upsertAsset(asset: RentalAsset, uniqueAttributes?: RentalUniqueAttributeClaim[], statusChange?: AssetStatusHistoryMetadata, expectedBinding?: CategoryWriteBinding): Promise<void>;
   listStockBalances(tenantId: string, tx?: RentalFactTx): Promise<RentalStockBalance[]>;
   upsertStockBalance(balance: RentalStockBalance): Promise<void>;
   /**
@@ -1249,7 +1250,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   async upsertAsset(
     asset: RentalAsset,
     uniqueAttributes: RentalUniqueAttributeClaim[] = [],
-    statusChange?: AssetStatusHistoryMetadata
+    statusChange?: AssetStatusHistoryMetadata,
+    expectedBinding?: CategoryWriteBinding
   ): Promise<void> {
     const data = {
       tenantId: asset.tenantId,
@@ -1263,10 +1265,13 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     try {
       await this.prisma.$transaction(async (tx) => {
         const workspaceId = await resolveScopeWorkspaceId(tx, asset.tenantId);
+        const activeClaims = await validateActiveCategoryWrite(tx, asset.tenantId, workspaceId, {
+          id: asset.id, scope: "asset", attributes: asset.attributes, serialNo: asset.serialNo
+        }, expectedBinding);
         await tx.rentalAttributeUniqueValue.deleteMany({
           where: { tenantId: asset.tenantId, workspaceId, entityType: "asset", entityId: asset.id }
         });
-        for (const claim of uniqueAttributes) {
+        for (const claim of activeClaims) {
           try {
             await tx.rentalAttributeUniqueValue.create({
               data: {

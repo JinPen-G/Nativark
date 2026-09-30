@@ -761,6 +761,9 @@ async function main() {
   const demo = await login("demo", "admin", DEMO_PASSWORD);
   const demo2 = await login("demo2", "admin", DEMO_PASSWORD);
   if (process.env.E2E_STOP_AFTER === "category-governance-api") {
+    const activeWrites = runNode(["tests/category-active-write-db.cjs"], { env: { DATABASE_URL: TEST_DATABASE_URL } });
+    assert.equal(activeWrites.status, 0, activeWrites.stderr || activeWrites.stdout);
+    console.log(activeWrites.stdout);
     const governanceAdmin = await login("platform", "admin", PLATFORM_PASSWORD);
     await require("./category-governance-api.cjs")({ request, token: governanceAdmin.accessToken, tenantToken: demo.accessToken, mysqlQuery });
     ok("品类治理真库 API：分权限、独立保存、冲突、不可变发布、并发幂等、停止新开通与既有经营隔离");

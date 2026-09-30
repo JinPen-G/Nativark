@@ -1024,7 +1024,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   async saveItemGroup(tenantId: string, input: SaveRentalItemGroupRequest) {
     const state = this.state(tenantId);
-    const definition = await this.effectiveCategory(tenantId, state.profile.categoryCode);
+    const writeContext = await this.categoryWriteContext(tenantId, state.profile.categoryCode);
+    const definition = writeContext.definition;
     if (!definition.supportedInventoryModes.includes(input.inventoryMode)) throw new BadRequestException("当前经营品类不支持该库存模式");
     if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("标的编码和名称不能为空");
     const duplicate = state.itemGroups.find((row) => row.code === input.code && row.id !== input.id);
@@ -1077,7 +1078,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     await this.runHook(tenantId, "item_onboarding", { type: "item_group", id: result.id }, result);
     await this.configStore.upsertItemGroup(
       result, undefined,
-      this.uniqueAttributeClaims(definition.businessModel.assetFields, "item_group", result.attributes)
+      this.uniqueAttributeClaims(definition.businessModel.assetFields, "item_group", result.attributes), writeContext.binding
     );
 
     if (existing) state.itemGroups.splice(state.itemGroups.indexOf(existing), 1, result); else state.itemGroups.unshift(result);
@@ -1223,7 +1224,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (group.inventoryMode !== RentalInventoryMode.Serialized) throw new BadRequestException("只有序列化库存可以登记独立资产");
     const location = this.activeLocation(state, input.locationId, "storage");
     if (!input.assetNo?.trim()) throw new BadRequestException("资产编号不能为空");
-    const definition = await this.effectiveCategory(tenantId, state.profile.categoryCode);
+    const writeContext = await this.categoryWriteContext(tenantId, state.profile.categoryCode);
+    const definition = writeContext.definition;
     const assetNo = input.assetNo.trim();
     const assets = await this.factStore.listAssets(tenantId);
     const assetAttributes = { ...(input.attributes ?? {}) };
@@ -1256,7 +1258,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     await this.factStore.upsertAsset(
       result,
       this.uniqueAttributeClaims(definition.businessModel.assetFields, "asset", assetAttributes, attributeAliases),
-      { reason: input.id ? "资产资料维护" : "资产登记", operator: input.operator }
+      { reason: input.id ? "资产资料维护" : "资产登记", operator: input.operator }, writeContext.binding
     );
     return result;
   }
@@ -4538,6 +4540,12 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const resolved = await this.categoryResolver.forWorkspace(tenantId, this.workspaceOf(tenantId));
     if (resolved.definition.code !== code) throw new ConflictException("经营空间品类与商品资料不一致");
     return resolved.definition;
+  }
+  private async categoryWriteContext(tenantId: string, code: RentalCategoryCode) {
+    if (!this.categoryResolver) return { definition: this.category(code), binding: undefined };
+    const resolved = await this.categoryResolver.forWorkspace(tenantId, this.workspaceOf(tenantId));
+    if (resolved.definition.code !== code) throw new ConflictException("经营空间品类与商品资料不一致");
+    return { definition: resolved.definition, binding: { categoryVersionId: resolved.categoryVersionId, adoptionRevision: resolved.adoptionRevision } };
   }
   private group(state: TenantRentalState, groupId: string) { const found = state.itemGroups.find((row) => row.id === groupId); if (!found) throw new NotFoundException("标的分组不存在"); return found; }
   private location(state: TenantRentalState, locationId: string) { const found = state.locations.find((row) => row.id === locationId); if (!found) throw new NotFoundException("履约网点不存在"); return found; }

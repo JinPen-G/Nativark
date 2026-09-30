@@ -1,6 +1,7 @@
 import { ConflictException, Injectable } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { assertCategoryAdoptionAllowed } from "./category-governance-policy";
+import { validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
 import { Prisma, type $Enums } from "@prisma/client";
 import type {
   RentalBundleComponent,
@@ -76,7 +77,7 @@ export interface RentalConfigStore {
   upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx): Promise<void>;
   upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx): Promise<void>;
   upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx): Promise<void>;
-  upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx, uniqueAttributes?: RentalUniqueAttributeClaim[]): Promise<void>;
+  upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx, uniqueAttributes?: RentalUniqueAttributeClaim[], expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertPricingGroup?(group: RentalPricingGroup, tx?: RentalConfigTx): Promise<void>;
   upsertCouponTemplate(template: RentalCouponTemplate, tx?: RentalConfigTx): Promise<void>;
   /** 在领券事务内锁定模板行，串行化不同幂等键对同一配额的竞争。 */
@@ -408,7 +409,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
   }
 
   /** 套装组成是独立表，整组替换以免留下已被移除的组件行。 */
-  async upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx, uniqueAttributes?: RentalUniqueAttributeClaim[]): Promise<void> {
+  async upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx, uniqueAttributes?: RentalUniqueAttributeClaim[], expectedBinding?: CategoryWriteBinding): Promise<void> {
     const data = {
       tenantId: group.tenantId,
       categoryCode: upper<$Enums.RentalCategoryCode>(group.categoryCode),
@@ -424,6 +425,9 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     // 有外层事务时直接复用它——Prisma 不支持嵌套交互式事务，自己再开一个会报错。
     const write = async (client: RentalConfigTx) => {
       const workspaceId = await resolveScopeWorkspaceId(client, group.tenantId);
+      const activeClaims = await validateActiveCategoryWrite(client, group.tenantId, workspaceId, {
+        id: group.id, scope: "item_group", attributes: group.attributes, inventoryMode: group.inventoryMode, categoryCode: group.categoryCode
+      }, expectedBinding);
       const existing = await client.rentalItemGroup.findUnique({ where: { id: group.id }, select: { tenantId: true, workspaceId: true } });
       assertScopedWrite(existing, group.tenantId, workspaceId, "产品型号");
       const componentIds = [...new Set(group.bundleComponents.map((component) => component.itemGroupId))];
@@ -431,11 +435,11 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         const components = await client.rentalItemGroup.findMany({ where: { id: { in: componentIds }, tenantId: group.tenantId, workspaceId }, select: { id: true } });
         if (components.length !== componentIds.length) throw new ConflictException("套装组成引用了其他租户或经营空间的产品型号");
       }
-      if (uniqueAttributes) {
+      {
         await client.rentalAttributeUniqueValue.deleteMany({
           where: { tenantId: group.tenantId, workspaceId, entityType: "item_group", entityId: group.id }
         });
-        for (const claim of uniqueAttributes) {
+        for (const claim of activeClaims) {
           try {
             await client.rentalAttributeUniqueValue.create({ data: {
               id: `attruniq_${createHash("sha256").update(`${workspaceId}|item_group|${claim.fieldCode}|${claim.normalizedValue}`).digest("hex")}`,

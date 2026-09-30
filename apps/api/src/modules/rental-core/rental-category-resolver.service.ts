@@ -225,6 +225,17 @@ export function parsePublishedRentalCategory(value: unknown, expectedCode: strin
   return candidate;
 }
 
+/** One decoder for historical reads and transaction-local active writes. */
+export function resolveRentalCategoryVersionBody(version: { categoryCode: string; structureVersion: number; status: string; definition: unknown } | null, categoryCode: string): RentalCategoryDefinition {
+  if (!version || String(version.categoryCode).toLowerCase() !== categoryCode) throw new ConflictException("业务引用的品类版本不存在或编码不匹配");
+  if (version.structureVersion !== 1) throw new ConflictException("当前程序不支持该品类结构版本，请升级兼容程序");
+  if (version.status === "legacy_baseline") {
+    const runtime = RENTAL_CATEGORY_DEFINITIONS.find((item) => item.code === categoryCode);
+    if (!runtime || !isDeepStrictEqual(version.definition, runtime)) throw new ConflictException("旧库品类快照与运行定义不一致，需先完成显式对账");
+  } else if (version.status !== "published") throw new ConflictException("业务不可引用未发布的品类版本");
+  return parsePublishedRentalCategory(version.definition, categoryCode);
+}
+
 /** Workspace binding is always re-read. Only a published version body can be cached later. */
 @Injectable()
 export class RentalCategoryResolver {
@@ -233,21 +244,7 @@ export class RentalCategoryResolver {
   /** Historical work reads the version named by the quote/order, never the current workspace binding. */
   async forVersion(categoryCode: string, versionId: string, tx?: Prisma.TransactionClient): Promise<RentalCategoryDefinition> {
     const version = await (tx ?? this.prisma).rentalCategoryVersion.findUnique({ where: { id: versionId } });
-    if (!version || String(version.categoryCode).toLowerCase() !== categoryCode) {
-      throw new ConflictException("业务引用的品类版本不存在或编码不匹配");
-    }
-    if (version.structureVersion !== 1) {
-      throw new ConflictException("当前程序不支持该品类结构版本，请升级兼容程序");
-    }
-    if (version.status === "legacy_baseline") {
-      const runtime = RENTAL_CATEGORY_DEFINITIONS.find((item) => item.code === categoryCode);
-      if (!runtime || !isDeepStrictEqual(version.definition, runtime)) {
-        throw new ConflictException("旧库品类快照与运行定义不一致，需先完成显式对账");
-      }
-    } else if (version.status !== "published") {
-      throw new ConflictException("业务不可引用未发布的品类版本");
-    }
-    return parsePublishedRentalCategory(version.definition, categoryCode);
+    return resolveRentalCategoryVersionBody(version, categoryCode);
   }
 
   /** Creation reads the recommended immutable body inside the caller's transaction. */
