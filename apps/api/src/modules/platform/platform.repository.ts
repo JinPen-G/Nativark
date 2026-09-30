@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import { assertCategoryAdoptionAllowed } from "../rental-core/category-governance-policy";
 import {
   ConfigStatus,
   OrganizationType as PrismaOrganizationType,
@@ -417,6 +418,7 @@ export class PlatformRepository {
     if (code === "default") throw new BadRequestException("default 为升级兼容层保留编码，请使用其他编码");
     const categoryCode = this.toPrismaCategoryCode(input.categoryCode);
     const created = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT code FROM rental_category_definitions WHERE code = ${categoryCode.toLowerCase()} FOR UPDATE`);
       const category = await tx.rentalCategoryDefinition.findUnique({ where: { code: categoryCode } });
       if (!category) {
         throw new BadRequestException("经营品类不存在");
@@ -428,6 +430,7 @@ export class PlatformRepository {
           !["published", "legacy_baseline"].includes(categoryVersion.status)) {
         throw new BadRequestException("经营品类没有可采用的发布版本");
       }
+      await assertCategoryAdoptionAllowed(tx, tenantId, categoryCode, categoryVersion.id, "create");
       if (await tx.businessWorkspace.findFirst({ where: { tenantId, code } })) {
         throw new BadRequestException("空间编码已存在");
       }

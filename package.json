@@ -67,6 +67,7 @@
     "test:rental-inspection-evidence": "npm run build -w @rental-os/api && node tests/rental-inspection-evidence.test.cjs",
     "test:rental-carrier-shipment": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/rental-carrier-shipment.test.cjs",
     "test:category-pricing-rule-compatibility": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/category-pricing-rule-compatibility.test.cjs",
+    "test:category-governance": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/category-governance.test.cjs",
     "test:client-channel": "npm run build -w @rental-os/shared && node --test tests/client-channel.test.cjs",
     "test:client-channel-login-gates": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/client-channel-login-gates.test.cjs",
     "test:tenant-website-resolve": "node --test tests/tenant-website-resolve.test.cjs",

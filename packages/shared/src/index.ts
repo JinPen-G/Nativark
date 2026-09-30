@@ -17,3 +17,4 @@ export * from "./workspace-names";
 export * from "./rental-rule-defaults";
 export * from "./subscription";
 export * from "./demo-request";
+export * from "./category-governance";

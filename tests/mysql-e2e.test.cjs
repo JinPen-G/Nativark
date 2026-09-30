@@ -760,6 +760,12 @@ async function main() {
   ok("无 token 请求返回 401");
   const demo = await login("demo", "admin", DEMO_PASSWORD);
   const demo2 = await login("demo2", "admin", DEMO_PASSWORD);
+  if (process.env.E2E_STOP_AFTER === "category-governance-api") {
+    const governanceAdmin = await login("platform", "admin", PLATFORM_PASSWORD);
+    await require("./category-governance-api.cjs")({ request, token: governanceAdmin.accessToken, tenantToken: demo.accessToken, mysqlQuery });
+    ok("品类治理真库 API：分权限、独立保存、冲突、不可变发布、并发幂等、停止新开通与既有经营隔离");
+    await maybeStopAfter("category-governance-api");
+  }
   assert.equal(demo.tenant.categoryCode, "camera");
   assert.equal(demo2.tenant.categoryCode, "camping");
   ok("demo=camera / demo2=camping，品类编码为小写领域值");

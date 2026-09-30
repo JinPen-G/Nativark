@@ -44,6 +44,8 @@ import { PlatformService } from "./modules/platform/platform.service";
 import { RentalCoreController } from "./modules/rental-core/rental-core.controller";
 import { RentalCoreService } from "./modules/rental-core/rental-core.service";
 import { RentalCategoryResolver } from "./modules/rental-core/rental-category-resolver.service";
+import { CategoryGovernanceController } from "./modules/rental-core/category-governance.controller";
+import { CategoryGovernanceService } from "./modules/rental-core/category-governance.service";
 import { RentalAllocationService } from "./modules/rental-core/rental-allocation.service";
 import { RentalDueJobScheduler } from "./modules/rental-core/rental-due-job.scheduler";
 import { RentalBusinessController } from "./modules/rental-core/rental-business.controller";
@@ -108,6 +110,7 @@ import { DemoRequestService } from "./modules/demo-requests/demo-request.service
     AuthController,
     StaffAuthController,
     PlatformController,
+    CategoryGovernanceController,
     MembershipController,
     RentalCoreController,
     RentalBusinessController,
@@ -148,6 +151,7 @@ import { DemoRequestService } from "./modules/demo-requests/demo-request.service
     OperationLogService,
     RentalCoreService,
     RentalCategoryResolver,
+    CategoryGovernanceService,
     RentalAllocationService,
     RentalDueJobScheduler,
     RentalBusinessService,

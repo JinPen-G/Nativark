@@ -162,6 +162,12 @@ function isPublicRoute(path: string) {
 }
 
 export function requiredPermissions(method: string, path: string) {
+  if (path === "/platform/rental-categories" || path.startsWith("/platform/rental-categories/")) {
+    if (path.endsWith("/audits")) return ["system:rental-category:audit"];
+    if (path.endsWith("/opening-policy")) return ["system:rental-category:opening"];
+    if (path.endsWith("/publish") || path.endsWith("/adoption-policy")) return ["system:rental-category:publish"];
+    return method === "GET" || path.endsWith("/validate") ? ["system:rental-category:view"] : ["system:rental-category:edit"];
+  }
   if (path === "/public/demo-requests") return method.toUpperCase() === "POST" ? [] : [UNMATCHED_ROUTE_PERMISSION];
   if (path === "/platform/demo-requests") return method.toUpperCase() === "GET" ? ["system:demo-request:view"] : [UNMATCHED_ROUTE_PERMISSION];
   if (isClientRoute(path)) return [];
@@ -666,6 +672,9 @@ function hasAnyPermission(user: SystemUserRow, permissions: string[]) {
     return true;
   }
   if (user.isSaasAdmin) {
+    if (permissions.some((permission) => permission.startsWith("system:rental-category:"))) {
+      return permissions.some((permission) => user.permissions.includes(permission) || user.permissions.includes("*"));
+    }
     // SaaS 平台管理员只拿到跨租户的平台能力：租户管理，以及公共官方日历来源注册表
     // （需求 4.5.8：「导入和维护公共官方日历来源」）。后者是跨租户的公共基础数据、
     // 不含任何空间业务数据，因此不违反同款「不得借此查看空间业务数据」。
@@ -813,6 +822,7 @@ export class ApiAuthGuard implements CanActivate {
       !path.startsWith("/platform/tenant-bootstrap") &&
       !path.startsWith("/platform/official-calendars") &&
       !path.startsWith("/platform/subscriptions") &&
+      !path.startsWith("/platform/rental-categories") &&
       path !== "/platform/demo-requests"
     ) {
       throw new ForbiddenException("SaaS 平台管理员只能访问租户管理能力");
@@ -839,6 +849,9 @@ export class ApiAuthGuard implements CanActivate {
     // 对任何权限都放行，不加这道 fail-closed，任一租户管理员都能管理所有租户的订阅。
     if (path.startsWith("/platform/subscriptions") && !user.isSaasAdmin) {
       throw new ForbiddenException("仅 SaaS 平台管理员可以管理租户订阅");
+    }
+    if (path.startsWith("/platform/rental-categories") && !user.isSaasAdmin) {
+      throw new ForbiddenException("仅 SaaS 平台管理员可以治理租赁品类");
     }
     if (path === "/platform/demo-requests" && !user.isSaasAdmin) {
       throw new ForbiddenException("仅 SaaS 平台管理员可以查看演示预约");

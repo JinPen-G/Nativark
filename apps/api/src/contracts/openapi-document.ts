@@ -1902,6 +1902,24 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
 ];
 
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
+  ...([
+    ["get", "", "listPlatformRentalCategoryGovernance", "List category governance summaries", "view"],
+    ["get", "/capability-catalog", "rentalCategoryCapabilityCatalog", "Read executable capability and pricing catalog", "view"],
+    ["get", "/{code}", "rentalCategoryDetail", "Read category identity and immutable versions", "view"],
+    ["get", "/{code}/candidates/{tenantId}/{operation}", "rentalCategoryAdoptionCandidates", "Read versions allowed by the same opening and adoption scope predicates used at commit", "view"],
+    ["post", "/{code}/drafts", "createRentalCategoryDraft", "Clone a published same-category version into a draft", "edit", objectOf({ sourceVersionId: stringSchema, versionLabel: stringSchema, reason: stringSchema }, ["sourceVersionId", "versionLabel", "reason"], false)],
+    ["patch", "/{code}/versions/{id}/sections/{section}", "patchRentalCategoryDraftSection", "Save only the selected draft section with revision checking", "edit", objectOf({ expectedRevision: { type: "integer", minimum: 0 }, values: objectSchema, reason: stringSchema }, ["expectedRevision", "values", "reason"], false)],
+    ["post", "/{code}/versions/{id}/validate", "validateRentalCategoryDraft", "Validate executable category dependencies without publication", "view"],
+    ["get", "/{code}/versions/{id}/preview", "previewRentalCategoryDraft", "Preview section changes without changing tenant facts", "view"],
+    ["post", "/{code}/versions/{id}/publish", "publishRentalCategoryDraft", "Publish the whole draft atomically; adoption is closed by default", "publish", objectOf({ expectedRevision: { type: "integer", minimum: 0 }, idempotencyKey: stringSchema, reason: stringSchema }, ["expectedRevision", "idempotencyKey", "reason"], false)],
+    ["post", "/{code}/versions/{id}/archive", "archiveRentalCategoryDraft", "Archive an unpublished draft only", "edit", objectOf({ expectedRevision: { type: "integer", minimum: 0 }, reason: stringSchema }, ["expectedRevision", "reason"], false)],
+    ["put", "/{code}/opening-policy", "saveRentalCategoryOpeningPolicy", "Set category opening scope independently of existing tenant spaces", "opening", objectOf({ expectedRevision: { type: "integer", minimum: 0 }, scope: { type: "string", enum: ["all", "pilot", "unopened", "stopped"] }, tenantIds: arrayOf(stringSchema), recommendedVersionId: stringSchema, reason: stringSchema }, ["expectedRevision", "scope", "tenantIds", "reason"], false)],
+    ["put", "/{code}/versions/{id}/adoption-policy", "saveRentalCategoryAdoptionPolicy", "Set independent create, upgrade and restore qualification", "publish", objectOf({ expectedRevision: { type: "integer", minimum: 0 }, createScope: { type: "string", enum: ["all", "pilot", "none"] }, createTenantIds: arrayOf(stringSchema), upgradeScope: { type: "string", enum: ["all", "pilot", "none"] }, upgradeTenantIds: arrayOf(stringSchema), restoreScope: { type: "string", enum: ["all", "pilot", "none"] }, restoreTenantIds: arrayOf(stringSchema), reason: stringSchema }, ["expectedRevision", "createScope", "createTenantIds", "upgradeScope", "upgradeTenantIds", "restoreScope", "restoreTenantIds", "reason"], false)],
+    ["get", "/{code}/audits", "rentalCategoryGovernanceAudits", "Read platform configuration audit records, not tenant business data", "audit"]
+  ] as Array<[HttpMethod, string, string, string, string, SchemaObject?]>).map(([method, suffix, operationId, summary, permission, requestSchema]): ContractOperation => ({
+    method, path: `/api/platform/rental-categories${suffix}`, tag: "Platform Rental Core",
+    operationId, summary, permissions: [`system:rental-category:${permission}`], requestSchema, responseSchema: "GenericObject"
+  })),
   {
     method: "post",
     path: "/api/public/demo-requests",

@@ -1,5 +1,6 @@
 import { ConflictException, Injectable } from "@nestjs/common";
 import { createHash } from "node:crypto";
+import { assertCategoryAdoptionAllowed } from "./category-governance-policy";
 import { Prisma, type $Enums } from "@prisma/client";
 import type {
   RentalBundleComponent,
@@ -193,6 +194,12 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
   }
 
   async upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx): Promise<void> {
+    // The opening-policy lock must live through profile and workspace creation.
+    // Autocommit SELECT FOR UPDATE would release it before the protected write.
+    if (!tx) {
+      await this.prisma.$transaction((client) => this.upsertProfile(profile, client));
+      return;
+    }
     const data = {
       categoryCode: upper<$Enums.RentalCategoryCode>(profile.categoryCode),
       capabilities: profile.capabilities as unknown as Prisma.InputJsonValue,
@@ -250,6 +257,8 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
   ): Promise<void> {
     const client = this.db(tx);
     const workspaceId = `ws_${tenantId}`;
+    await client.$queryRaw(Prisma.sql`SELECT code FROM rental_category_definitions WHERE code = ${categoryCode.toLowerCase()} FOR UPDATE`);
+    const existingWorkspace = await client.businessWorkspace.findUnique({ where: { id: workspaceId } });
     const category = await client.rentalCategoryDefinition.findUnique({ where: { code: categoryCode } });
     const version = category?.recommendedVersionId
       ? await client.rentalCategoryVersion.findUnique({ where: { id: category.recommendedVersionId } })
@@ -258,6 +267,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         !["published", "legacy_baseline"].includes(version.status)) {
       throw new ConflictException("默认经营空间缺少可采用的品类版本");
     }
+    if (!existingWorkspace) await assertCategoryAdoptionAllowed(client, tenantId, categoryCode, version.id, "create");
     const workspace = await client.businessWorkspace.upsert({
       where: { id: workspaceId },
       create: {

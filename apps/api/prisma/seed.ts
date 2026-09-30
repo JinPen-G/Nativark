@@ -233,7 +233,12 @@ const permissions = [
   // SUB-01 版本订阅（§5.2/§7）。租户端查看/申请用 rental-os:*；平台端跨租户管理用 system:*。
   ["rental-os:subscription:view", "版本与订阅查看", "版本与订阅", PermissionKind.ACTION],
   ["rental-os:subscription:manage", "版本与订阅申请", "版本与订阅", PermissionKind.ACTION],
-  ["system:tenant:subscription:manage", "租户订阅管理", "系统设置", PermissionKind.ACTION]
+  ["system:tenant:subscription:manage", "租户订阅管理", "系统设置", PermissionKind.ACTION],
+  ["system:rental-category:view", "租赁品类查看", "租赁内核", PermissionKind.ACTION],
+  ["system:rental-category:edit", "租赁品类草稿编辑", "租赁内核", PermissionKind.ACTION],
+  ["system:rental-category:publish", "租赁品类发布与采用资格", "租赁内核", PermissionKind.ACTION],
+  ["system:rental-category:opening", "租赁品类开通政策", "租赁内核", PermissionKind.ACTION],
+  ["system:rental-category:audit", "租赁品类审计查看", "租赁内核", PermissionKind.ACTION]
 ] as const;
 
 const roleTemplates = [
@@ -323,7 +328,7 @@ const saasRoleTemplate = {
   enabledBusinessScopes: ["SAAS_PLATFORM"],
   permissions: permissions
     .map(([code]) => code)
-    .filter((code) => code.startsWith("system:tenant:")),
+    .filter((code) => code.startsWith("system:tenant:") || code.startsWith("system:rental-category:")),
   buttonPermissions: [],
   dataScope: SystemDataScope.ALL
 } as const;
