@@ -1,12 +1,12 @@
 import { CheckCircleOutlined, ExperimentOutlined, PlusOutlined, SaveOutlined, UploadOutlined } from "@ant-design/icons";
 import type { SaveClientChannelProfileRequest, SaveMiniProgramChannelRequest, SaveWebsiteChannelProfileRequest } from "@rental-os/shared";
 import { Alert, App, Button, Card, Checkbox, Col, Divider, Form, Input, Row, Slider, Space, Switch, Tabs, Tag, Typography, Upload } from "antd";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { clientChannelApi } from "@/api/clientChannel";
 import { websiteChannelApi } from "@/api/websiteChannel";
 import { apiAssetOrigin } from "@/api/http";
-import { ADMIN_DEFAULT_PRIMARY_COLOR } from "@/app/designTokens";
+import { ADMIN_DEFAULT_PRIMARY_COLOR, resolveAdminRadii } from "@/app/designTokens";
 import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_FULL, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
 import { LoadingState } from "@/components/LoadingState";
 import { PageHeader } from "@/components/PageHeader";
@@ -50,25 +50,66 @@ function ImageUrlUpload({ value, onChange, scene, hint, previewHeight = 64 }: { 
   );
 }
 
-/** 后台圆角分组滑块（容器/按钮/输入共用）：8–20px 连续档 + 999px 极致离散档，20 与 999 之间自动吸附。 */
-function AdminRadiusSlider({ name, label, tooltip, extra }: { name: string; label: string; tooltip: string; extra: string }) {
+/**
+ * 后台圆角分组滑块。allowFull=true（按钮组）时最右追加 999px 极致离散档（20 与 999 自动吸附）；
+ * false（容器/输入组）时仅 8–20px 连续，不提供 999。
+ */
+function AdminRadiusSlider({ name, label, tooltip, extra, allowFull = true }: { name: string; label: string; tooltip: string; extra: string; allowFull?: boolean }) {
+  const sliderMax = allowFull ? ADMIN_UI_CORNER_RADIUS_MAX + 4 : ADMIN_UI_CORNER_RADIUS_MAX;
+  const marks: Record<number, string> = {
+    [ADMIN_UI_CORNER_RADIUS_MIN]: `${ADMIN_UI_CORNER_RADIUS_MIN}px`,
+    [ADMIN_UI_CORNER_RADIUS_DEFAULT]: `${ADMIN_UI_CORNER_RADIUS_DEFAULT}px`,
+    [ADMIN_UI_CORNER_RADIUS_MAX]: `${ADMIN_UI_CORNER_RADIUS_MAX}px`,
+    ...(allowFull ? { [ADMIN_UI_CORNER_RADIUS_MAX + 4]: `${ADMIN_UI_CORNER_RADIUS_FULL}px` } : {})
+  };
   return (
     <Form.Item
       name={name}
       label={label}
       tooltip={tooltip}
       extra={extra}
-      getValueProps={(value) => ({ value: value === ADMIN_UI_CORNER_RADIUS_FULL ? ADMIN_UI_CORNER_RADIUS_MAX + 4 : value })}
-      normalize={(value) => typeof value === "number" && value > ADMIN_UI_CORNER_RADIUS_MAX ? ADMIN_UI_CORNER_RADIUS_FULL : value}
+      getValueProps={(value) => ({ value: value === ADMIN_UI_CORNER_RADIUS_FULL ? sliderMax : value })}
+      normalize={(value) => typeof value === "number" && value > ADMIN_UI_CORNER_RADIUS_MAX ? (allowFull ? ADMIN_UI_CORNER_RADIUS_FULL : ADMIN_UI_CORNER_RADIUS_MAX) : value}
     >
       <Slider
         min={ADMIN_UI_CORNER_RADIUS_MIN}
-        max={ADMIN_UI_CORNER_RADIUS_MAX + 4}
+        max={sliderMax}
         step={1}
-        marks={{ [ADMIN_UI_CORNER_RADIUS_MIN]: `${ADMIN_UI_CORNER_RADIUS_MIN}px`, [ADMIN_UI_CORNER_RADIUS_DEFAULT]: `${ADMIN_UI_CORNER_RADIUS_DEFAULT}px`, [ADMIN_UI_CORNER_RADIUS_MAX]: `${ADMIN_UI_CORNER_RADIUS_MAX}px`, [ADMIN_UI_CORNER_RADIUS_MAX + 4]: `${ADMIN_UI_CORNER_RADIUS_FULL}px` }}
-        tooltip={{ formatter: (value) => value == null ? "" : value > ADMIN_UI_CORNER_RADIUS_MAX ? `${ADMIN_UI_CORNER_RADIUS_FULL}px` : `${value}px` }}
+        marks={marks}
+        tooltip={{ formatter: (value) => value == null ? "" : allowFull && value > ADMIN_UI_CORNER_RADIUS_MAX ? `${ADMIN_UI_CORNER_RADIUS_FULL}px` : `${value}px` }}
       />
     </Form.Item>
+  );
+}
+
+/**
+ * 圆角实时预览：用解析后的像素 + squircle 形状渲染一个样例框，随滑块即时更新。
+ * corner-shape 用内联样式下发，不支持的浏览器忽略该属性、自然退回圆弧。
+ */
+function RadiusPreview({ kind, radius }: { kind: "container" | "button" | "input"; radius: number }) {
+  const shape = { borderRadius: radius, cornerShape: "squircle" } as unknown as CSSProperties;
+  const meta = <span style={{ color: "var(--rental-color-text-description)", fontSize: 12 }}>{radius}px</span>;
+  if (kind === "button") {
+    return (
+      <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ ...shape, display: "inline-flex", alignItems: "center", height: 32, padding: "0 16px", background: "var(--rental-color-primary)", color: "#fff", fontSize: 13, fontWeight: 600 }}>按钮</span>
+        {meta}
+      </div>
+    );
+  }
+  if (kind === "input") {
+    return (
+      <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ ...shape, display: "inline-flex", alignItems: "center", height: 32, padding: "0 12px", minWidth: 120, border: "1px solid var(--rental-color-border)", background: "var(--rental-color-bg-container)", color: "var(--rental-color-text-description)", fontSize: 13 }}>输入框示例</span>
+        {meta}
+      </div>
+    );
+  }
+  return (
+    <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10 }}>
+      <span style={{ ...shape, display: "inline-flex", alignItems: "center", height: 44, padding: "0 18px", border: "1px solid var(--rental-color-border-secondary)", background: "var(--rental-color-bg-container)", color: "var(--rental-color-text)", fontSize: 13, boxShadow: "var(--rental-box-shadow-tertiary)" }}>容器卡片</span>
+      {meta}
+    </div>
   );
 }
 
@@ -82,6 +123,12 @@ function ProfileCard() {
   // 原生取色器需要合法 #RRGGBB；表单里可能是 #RGB 或空，展示时归一化，不回写表单值。
   const themeColorValue = Form.useWatch("themeColor", form);
   const themeColorSwatch = /^#[0-9a-fA-F]{6}$/.test(themeColorValue ?? "") ? (themeColorValue as string) : /^#[0-9a-fA-F]{3}$/.test(themeColorValue ?? "") ? "#" + (themeColorValue as string).slice(1).split("").map((c) => c + c).join("") : ADMIN_DEFAULT_PRIMARY_COLOR;
+  // 三组圆角实时预览：跟随滑块解析成与运行时同口径的像素（含容器 1.33× 兼容与留空回退），喂给下方样例框。
+  const watchContainerRadius = Form.useWatch("adminContainerRadius", form);
+  const watchButtonRadius = Form.useWatch("adminButtonRadius", form);
+  const watchInputRadius = Form.useWatch("adminInputRadius", form);
+  const watchLegacyRadius = Form.useWatch("adminCornerRadius", form);
+  const previewRadii = resolveAdminRadii({ container: watchContainerRadius, button: watchButtonRadius, input: watchInputRadius, legacy: watchLegacyRadius });
   const profile = useQuery({ queryKey: ["client-channel-profile", tenantId], queryFn: clientChannelApi.getProfile, enabled: Boolean(tenantId) });
 
   useEffect(() => {
@@ -160,12 +207,21 @@ function ProfileCard() {
             <Col xs={24}>
               <Typography.Text strong style={{ display: "block", marginBottom: 2 }}>{t("管理后台圆角（分组）")}</Typography.Text>
               <Typography.Paragraph type="secondary" className="text-meta" style={{ marginBottom: 12 }}>
-                {t("容器、按钮、录入控件各自独立调节；圆形图标按钮、开关与胶囊标签保留各自形态不受影响。每组 8–20px 连续，最右一档 999px 极致圆角自动吸附；留空的组回退到旧的统一圆角。")}
+                {t("容器、按钮、录入控件各自独立调节；圆形图标按钮、开关与胶囊标签保留各自形态不受影响。仅按钮组可选最右的 999px 极致圆角（胶囊按钮），容器与输入为 8–20px；留空的组回退到旧的统一圆角。支持的浏览器拐角为平滑超椭圆，不支持的自然退回圆弧。")}
               </Typography.Paragraph>
               <Row gutter={[16, 0]}>
-                <Col xs={24} md={8}><AdminRadiusSlider name="adminContainerRadius" label={t("容器圆角")} tooltip={t("卡片、弹窗、抽屉、表格外框等大面")} extra={t("留空回退旧的统一圆角")} /></Col>
-                <Col xs={24} md={8}><AdminRadiusSlider name="adminButtonRadius" label={t("按钮圆角")} tooltip={t("按钮、分段控件、页签、选中菜单项")} extra={t("留空回退旧的统一圆角")} /></Col>
-                <Col xs={24} md={8}><AdminRadiusSlider name="adminInputRadius" label={t("输入框圆角")} tooltip={t("输入框、选择器、日期、数字等录入控件")} extra={t("留空回退旧的统一圆角")} /></Col>
+                <Col xs={24} md={8}>
+                  <AdminRadiusSlider name="adminContainerRadius" label={t("容器圆角")} tooltip={t("卡片、弹窗、抽屉、表格外框等大面")} extra={t("留空回退旧的统一圆角")} allowFull={false} />
+                  <RadiusPreview kind="container" radius={previewRadii.container} />
+                </Col>
+                <Col xs={24} md={8}>
+                  <AdminRadiusSlider name="adminButtonRadius" label={t("按钮圆角")} tooltip={t("按钮、分段控件、页签、选中菜单项")} extra={t("留空回退旧的统一圆角；最右档为 999px 胶囊")} />
+                  <RadiusPreview kind="button" radius={previewRadii.button} />
+                </Col>
+                <Col xs={24} md={8}>
+                  <AdminRadiusSlider name="adminInputRadius" label={t("输入框圆角")} tooltip={t("输入框、选择器、日期、数字等录入控件")} extra={t("留空回退旧的统一圆角")} allowFull={false} />
+                  <RadiusPreview kind="input" radius={previewRadii.input} />
+                </Col>
               </Row>
             </Col>
           </Row>

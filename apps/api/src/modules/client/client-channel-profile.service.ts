@@ -60,9 +60,13 @@ function normalizeAdminCornerRadius(value: number | undefined | null): number {
  * 分组圆角（容器/按钮/输入）归一化：与统一圆角同档校验，但**缺省保留 null**，
  * 不落默认值——这样某组未设置时前端回退到旧的统一圆角，而不是被强制成 12。
  */
-function normalizeAdminRadiusGroup(value: number | undefined | null): number | null {
+function normalizeAdminRadiusGroup(value: number | undefined | null, allowFull = true): number | null {
   if (value === undefined || value === null) return null;
-  if (value === ADMIN_UI_CORNER_RADIUS_FULL) return value;
+  if (value === ADMIN_UI_CORNER_RADIUS_FULL) {
+    // 极致圆角 999 仅按钮组可用；容器/输入不提供该档（写入时挡住越过 UI 的注入）。
+    if (allowFull) return value;
+    throw new BadRequestException(`该项圆角仅支持 ${ADMIN_UI_CORNER_RADIUS_MIN}-${ADMIN_UI_CORNER_RADIUS_MAX} 的整数（px），不支持极致圆角 ${ADMIN_UI_CORNER_RADIUS_FULL}`);
+  }
   if (!Number.isInteger(value) || value < ADMIN_UI_CORNER_RADIUS_MIN || value > ADMIN_UI_CORNER_RADIUS_MAX) {
     throw new BadRequestException(`管理后台圆角必须是 ${ADMIN_UI_CORNER_RADIUS_MIN}-${ADMIN_UI_CORNER_RADIUS_MAX} 的整数（px），或极致圆角 ${ADMIN_UI_CORNER_RADIUS_FULL}`);
   }
@@ -277,9 +281,9 @@ export class ClientChannelProfileService {
       bannerSubtitle: text(input.bannerSubtitle, 120, "首页横幅副标题"),
       themeColor: normalizeThemeColor(input.themeColor),
       adminCornerRadius: normalizeAdminCornerRadius(input.adminCornerRadius ?? existing?.adminCornerRadius),
-      adminContainerRadius: normalizeAdminRadiusGroup(input.adminContainerRadius ?? existing?.adminContainerRadius),
-      adminButtonRadius: normalizeAdminRadiusGroup(input.adminButtonRadius ?? existing?.adminButtonRadius),
-      adminInputRadius: normalizeAdminRadiusGroup(input.adminInputRadius ?? existing?.adminInputRadius),
+      adminContainerRadius: normalizeAdminRadiusGroup(input.adminContainerRadius ?? existing?.adminContainerRadius, false),
+      adminButtonRadius: normalizeAdminRadiusGroup(input.adminButtonRadius ?? existing?.adminButtonRadius, true),
+      adminInputRadius: normalizeAdminRadiusGroup(input.adminInputRadius ?? existing?.adminInputRadius, false),
       smsLoginEnabled: Boolean(input.smsLoginEnabled),
       passwordLoginEnabled: Boolean(input.passwordLoginEnabled),
       defaultWorkspaceId

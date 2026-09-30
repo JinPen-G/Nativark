@@ -938,3 +938,45 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 
 /* SPACE-05：经营空间切换器的下拉项样式在 .sider-workspace 一节，此处不再重复。 */
 
+/* ============================================================================
+ * 平滑圆角（corner-shape: squircle）——渐进增强。
+ *
+ * 只改拐角"形状"（超椭圆），不改圆角"大小"（大小仍由三组 --rental-ui-radius-*
+ * 与 antd token 决定）。支持的浏览器（Chrome/Edge 139+ 等）拐角更顺滑；不支持的
+ * 浏览器整段规则被忽略，自然退回普通圆弧，无需任何回退代码。
+ *
+ * 选择器一律用 :where() 保持 0 优先级：apply 段在前、reset 段在后，
+ * 于是同时命中两段的元素（如圆形图标按钮既是 .ant-btn 又是 .ant-btn-icon-only）
+ * 按源码顺序由后面的 reset 收敛回圆弧，圆形/胶囊/开关/头像不会被 squircle 掰方。
+ * ========================================================================== */
+@supports (corner-shape: squircle) {
+  /* 有限圆角的面与控件：容器 / 按钮 / 录入 / 浮层，全部走平滑超椭圆。 */
+  :where(
+    .ant-card, .ant-modal-content, .ant-drawer-content, .ant-table-container,
+    .ant-collapse, .ant-collapse-content, .ant-alert, .ant-popover-inner,
+    .ant-tooltip-inner, .ant-dropdown-menu, .ant-notification-notice,
+    .ant-message-notice-content, .ant-list, .ant-tag,
+    .ant-btn, .ant-btn-group, .ant-radio-button-wrapper, .ant-pagination-item,
+    .ant-segmented, .ant-segmented-item, .ant-segmented-thumb,
+    .ant-tabs-nav-list, .ant-tabs-tab, .ant-tabs-ink-bar,
+    .ant-menu-item, .ant-menu-submenu-title,
+    .ant-input, .ant-input-affix-wrapper, .ant-input-number,
+    .ant-input-number-affix-wrapper, .ant-select-selector, .ant-picker,
+    .ant-input-group-addon, .ant-input-number-group-addon, .ant-input-search-button,
+    .workspace-select, .account-card, .sider-link, .metric-card,
+    .password-change-panel, .password-change-icon, .login-frame,
+    .standalone-tabs > .ant-tabs-content-holder
+  ) {
+    corner-shape: squircle;
+  }
+  /* 保形例外：圆形与胶囊维持标准圆弧——squircle 会把它们掰成带尖角的方团。 */
+  :where(
+    .ant-btn-circle, .ant-btn-icon-only, .ant-avatar, .ant-avatar-image,
+    .ant-switch, .ant-switch-handle, .ant-badge-count, .ant-badge-dot,
+    .ant-scroll-number, .ant-radio-inner, .ant-slider-handle,
+    .ant-float-btn, .ant-back-top, .appearance-toggle, .appearance-toggle *
+  ) {
+    corner-shape: round;
+  }
+}
+

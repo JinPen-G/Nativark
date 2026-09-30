@@ -23,7 +23,7 @@ Windows 下双击本目录的 `start-preview.cmd`，会用本机 Python 3 启动
 | 底部动态波纹背景的 WebGL 渲染及参数 | `js/effects.js` |
 | 图片及标志 | `assets/images/` |
 | 原模板图标 | `assets/icons/` |
-| 原模板字体 | `assets/fonts/` |
+| Inter 字体许可 | `assets/vendor/Inter-LICENSE.md` |
 | 原 Lottie JSON 和波纹 shader | `assets/animations/` |
 
 `styles.css` 顶部 `:root` 是通用颜色与宽度参数。主要响应式断点为 1199、959、599px；每块区域都有语义化 class 和注释。网站不需要 `output/` 中的检查脚本。
@@ -32,7 +32,9 @@ Windows 下双击本目录的 `start-preview.cmd`，会用本机 Python 3 启动
 
 页脚右下角点击展开 `简体中文 / English`，与旧官网一样是选项选择，不是开关。优先采用用户选择并保存到 `localStorage` 的 `rental-os-language`；首次访问根据浏览器首选语言自动选择：`zh` 开头的语言用简体中文，英语及其他所有语言默认英文。手动选择后刷新仍保留。支持键盘上下键、Enter、Escape 和点击外部关闭。
 
-HTML 的 `data-i18n` 标记对应 `js/i18n.js` 中的文字键。修改文案时同时更新 HTML 中的中文默认文案及字典中的中英文；翻译只更新文字节点，不重建轮播或数字动画。模板英文字体保留，中文补充系统 UI 字体兜底，不下载新字体。
+HTML 的 `data-i18n` 标记对应 `js/i18n.js` 中的文字键。修改文案时同时更新 HTML 中的中文默认文案及字典中的中英文；翻译只更新文字节点，不重建轮播或数字动画。
+
+标题、正文、导航和按钮统一使用 Inter 与系统中文字体链，集中配置在 `styles.css` 的 `--font-sans`。Inter 通过 `https://rsms.me/inter/inter.css` 远程加载，不在仓库保存字体文件；远程加载失败时使用系统字体。正文 400，导航、按钮和卡片标题 500，大标题与大数字 600。原 Favorit 试用字体和 Stack Sans 已移除。Inter 使用 SIL OFL 1.1，许可声明位于 `assets/vendor/Inter-LICENSE.md`。
 
 ## 交互与动效
 

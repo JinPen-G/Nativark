@@ -1,47 +1,8 @@
 /* Native source reconstruction. Tokens are intentionally centralized for later edits. */
-@font-face {
-  font-family: "Stack Sans Text";
-  src: url("assets/fonts/text.woff2") format("woff2");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Stack Sans Headline";
-  src: url("assets/fonts/headline.woff2") format("woff2");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Inter";
-  src: url("assets/fonts/inter.woff2") format("woff2");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Inter";
-  src: url("assets/fonts/inter-500.woff2") format("woff2");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Inter";
-  src: url("assets/fonts/inter-600.woff2") format("woff2");
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "ABC Favorit Trial Book";
-  src: url("assets/fonts/favorit.woff2") format("woff2");
-  font-weight: 350;
-  font-style: normal;
-  font-display: swap;
-}
 :root {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", "Segoe UI", Arial,
+    sans-serif;
   --paper: #faf9f8;
   --ink: #212121;
   --muted: #666;
@@ -63,24 +24,27 @@ body {
   margin: 0;
   color: var(--ink);
   background: #fff;
-  font:
-    400 14px/20px Inter,
-    "PingFang SC",
-    "Microsoft YaHei",
-    "Noto Sans SC",
-    Arial,
-    sans-serif;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
   letter-spacing: -0.006em;
   -webkit-font-smoothing: antialiased;
 }
 button,
 input,
+select,
+textarea,
 summary {
   font: inherit;
 }
-/* Keep the template's Latin fonts; Chinese copy uses the device's UI font. */
+/* Latin text uses Inter; Chinese text falls back to the device's UI font. */
 [data-i18n]:lang(zh-CN) {
   font-family: inherit;
+}
+button,
+.button {
+  font-weight: 500;
 }
 button,
 a,
@@ -114,16 +78,12 @@ h4 {
 h1,
 h2,
 h3 {
-  font-family:
-    "Stack Sans Headline", "PingFang SC", "Microsoft YaHei", "Noto Sans SC",
-    Arial, sans-serif;
-  font-weight: 400;
+  font-family: var(--font-sans);
+  font-weight: 600;
 }
 h1 {
-  font-family:
-    "ABC Favorit Trial Book", "PingFang SC", "Microsoft YaHei", "Noto Sans SC",
-    Arial, sans-serif;
-  font-weight: 350;
+  font-family: var(--font-sans);
+  font-weight: 600;
   font-size: 64px;
   line-height: 72px;
   letter-spacing: -0.04em;
@@ -134,10 +94,8 @@ h2 {
   letter-spacing: 0.02em;
 }
 h3 {
-  font-family:
-    "ABC Favorit Trial Book", "PingFang SC", "Microsoft YaHei", "Noto Sans SC",
-    Arial, sans-serif;
-  font-weight: 350;
+  font-family: var(--font-sans);
+  font-weight: 500;
   font-size: 24px;
   line-height: 28px;
   letter-spacing: -0.01em;
@@ -463,11 +421,9 @@ summary:focus-visible,
 .hero-copy h1 {
   max-width: 810px;
 }
-#hero-0 h1 {
-  font-family:
-    "Stack Sans Headline", "PingFang SC", "Microsoft YaHei", "Noto Sans SC",
-    Arial, sans-serif;
-  font-weight: 400;
+  #hero-0 h1 {
+    font-family: var(--font-sans);
+  font-weight: 600;
   letter-spacing: 0.02em;
   max-width: 650px;
 }
@@ -538,8 +494,7 @@ summary:focus-visible,
   background: #ffffff29;
   backdrop-filter: blur(3.55px);
   border-radius: 8px;
-  font-family:
-    Inter, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", Arial, sans-serif;
+  font-family: var(--font-sans);
   font-size: 16px;
   line-height: 24px;
   letter-spacing: -0.04em;
@@ -1002,10 +957,8 @@ summary:focus-visible,
 }
 .quote-content h2 {
   max-width: 800px;
-  font-family:
-    "Stack Sans Headline", "PingFang SC", "Microsoft YaHei", "Noto Sans SC",
-    Arial, sans-serif;
-  font-weight: 400;
+  font-family: var(--font-sans);
+  font-weight: 600;
   letter-spacing: 0.02em;
 }
 .quote-content .button {
@@ -1160,10 +1113,8 @@ summary:focus-visible,
   padding: 32px;
 }
 .team-content h3 {
-  font-family:
-    "Stack Sans Headline", "PingFang SC", "Microsoft YaHei", "Noto Sans SC",
-    Arial, sans-serif;
-  font-weight: 400;
+  font-family: var(--font-sans);
+  font-weight: 500;
   font-size: 20px;
   line-height: 28px;
   letter-spacing: normal;
@@ -1231,7 +1182,7 @@ summary:focus-visible,
   border-color: #24b59d;
 }
 .trust-point strong {
-  font-weight: 400;
+  font-weight: 500;
   font-size: 16px;
   line-height: 24px;
   color: #111;
@@ -1297,13 +1248,11 @@ summary:focus-visible,
   flex-direction: column;
 }
 .metric {
-  font-family:
-    "ABC Favorit Trial Book", "PingFang SC", "Microsoft YaHei", "Noto Sans SC",
-    Arial, sans-serif;
+  font-family: var(--font-sans);
   font-size: 80px;
   line-height: 88px;
-  font-weight: 350;
-  font-feature-settings: "ss11" on;
+  font-weight: 600;
+  font-variant-numeric: lining-nums tabular-nums;
   letter-spacing: -0.03em;
   margin-bottom: 0;
   flex: none;
@@ -1330,10 +1279,8 @@ summary:focus-visible,
   line-height: 1;
 }
 .outcome-content h3 {
-  font-family:
-    "Stack Sans Headline", "PingFang SC", "Microsoft YaHei", "Noto Sans SC",
-    Arial, sans-serif;
-  font-weight: 400;
+  font-family: var(--font-sans);
+  font-weight: 500;
   font-size: 32px;
   line-height: 40px;
   letter-spacing: normal;
@@ -1459,7 +1406,7 @@ summary:focus-visible,
   width: 596px;
 }
 .footer-links h4 {
-  font-weight: 400;
+  font-weight: 500;
   margin-bottom: 24px;
 }
 .footer-links a {
@@ -1503,9 +1450,8 @@ summary:focus-visible,
   height: 18px;
   display: grid;
   place-items: center;
-  font-family:
-    "PingFang SC", "Microsoft YaHei", "Noto Sans SC", Arial, sans-serif;
-  font-weight: 700;
+  font-family: var(--font-sans);
+  font-weight: 500;
 }
 .social-links img {
   width: 16px;
@@ -2141,10 +2087,8 @@ a[data-link-pending]:focus-visible {
     padding-top: 156px;
   }
   #hero-0 h1 {
-    font-family:
-      "ABC Favorit Trial Book", "PingFang SC", "Microsoft YaHei",
-      "Noto Sans SC", Arial, sans-serif;
-    font-weight: 350;
+    font-family: var(--font-sans);
+    font-weight: 600;
     letter-spacing: -0.04em;
   }
   .desktop-break {
@@ -2358,10 +2302,8 @@ a[data-link-pending]:focus-visible {
   .quote-content h2 {
     font-size: 32px;
     line-height: 40px;
-    font-family:
-      "ABC Favorit Trial Book", "PingFang SC", "Microsoft YaHei",
-      "Noto Sans SC", Arial, sans-serif;
-    font-weight: 350;
+    font-family: var(--font-sans);
+    font-weight: 600;
     letter-spacing: -0.02em;
   }
   .quote-person {
