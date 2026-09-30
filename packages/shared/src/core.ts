@@ -6136,6 +6136,8 @@ export interface RentalExtensionPricingSnapshot {
 }
 
 export interface RentalOrderExtension {
+  /** 本次动作的品类政策及真正执行的计价实现；存量缺省不补写。 */
+  executionBasis?: RentalOrderActionExecutionBasis;
   id: string;
   tenantId: string;
   workspaceId: string;
@@ -6158,11 +6160,11 @@ export interface RentalOrderExtension {
   /** 本次需补的正应付差额（已重算原优惠）；负差额另走退款审核。 */
   payableAmount: number;
   currency: string;
-  /** 原订单空间级价格版本，不随申请时现价改变。 */
+  /** 本次实际价格版本：原价补差沿用原报价；独立续租采用申请时适用版本。 */
   priceVersionId?: string;
   priceVersion?: string;
   ruleVersion: string;
-  /** 申请时的费率、规则与日历快照，供事后复算这一段。 */
+  /** 本次实际费率、规则与日历快照；取值来源由 executionBasis 区分。 */
   rateSnapshot: RentalPricingRate[];
   ruleSnapshot: RentalRuleConfig;
   calendarSnapshot: RentalQuoteCalendarDay[];
@@ -6230,6 +6232,7 @@ export interface RentalOrderExtensionRequest {
  * 用 `Partial` 表达会让调用方分不清"这个字段现在没有"和"这个字段永远没有"。
  */
 export interface RentalOrderExtensionPreview {
+  executionBasis?: RentalOrderActionExecutionBasis;
   pricingSnapshot?: RentalExtensionPricingSnapshot;
   orderId: string;
   originalEndAt: string;
@@ -6261,6 +6264,17 @@ export interface RentalOrderExtensionPreview {
 }
 
 export type RentalOrderExchangePriceBasis = "original_order_price" | "replacement_current_price";
+export interface RentalOrderActionExecutionBasis {
+  pricingMode: "incremental" | "original_total";
+  policySource: "current_workspace" | "original_quote";
+  categoryCode: RentalCategoryCode;
+  originalCategoryVersionId?: string;
+  categoryVersionId?: string;
+  adoptionRevision?: number;
+  /** 只有来源版本有历史证据时保存正文，不用静态模板伪造旧政策。 */
+  categoryPolicySnapshot?: RentalCategoryDefinition;
+  pricingStrategies: Array<{ unit: RentalPricingUnit; implementationVersion: string }>;
+}
 export type RentalOrderExchangeDisposition = "return_to_warehouse" | "off_shelf";
 
 /** 取货后换货时追加的检查快照；金额只能由服务端依据其中的事实计算。 */

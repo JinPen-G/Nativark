@@ -129,7 +129,7 @@ import {
   originSnapshotOf
 } from "./calendar-range";
 import { applyPriceAdjustment, assertNoDatetimeOverrideOverlap, assertNoPeriodicOverlap, periodicWindowCoversDate, periodicWindowHits } from "./rental-price-adjustments";
-import { assertTimeBasedOverdueSupported, billedRentalHours, rentalPricingStrategy } from "./rental-pricing-strategy";
+import { assertTimeBasedOverdueSupported, billedRentalHours, rentalPricingStrategy, rentalPricingStrategyReference } from "./rental-pricing-strategy";
 import { categoryPricingRuleError } from "./category-pricing-rule-compatibility";
 import { allocateDiscount, selectDiscountPlans } from "./rental-discount-selection";
 import { resolveQuoteServices } from "./rental-service-catalog";
@@ -6158,6 +6158,35 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return roundMoney(Math.min(amount, rule.damage.chargeLimit ?? amount));
   }
 
+  /** Record the policy and executable strategy references actually used by this action. */
+  private async extensionExecutionBasis(tenantId: string, context: BusinessContext, originalQuote: RentalQuoteSnapshotV1, rates: RentalPricingRate[], pricingMode: "incremental" | "original_total", pricingRule: RentalRuleConfig) {
+    const current = pricingMode === "incremental" && this.categoryResolver
+      ? await this.categoryResolver.forWorkspace(tenantId, this.workspaceOf(tenantId)) : undefined;
+    if (current && !isDeepStrictEqual(context.category, current.definition)) {
+      throw new ConflictException("品类版本在续租准备期间已变化，请刷新后重新试算");
+    }
+    const historical = originalQuote.categoryVersionId && this.categoryResolver
+      ? await this.categoryResolver.forVersion(originalQuote.categoryCode, originalQuote.categoryVersionId) : undefined;
+    const categoryPolicySnapshot = current?.definition ?? (pricingMode === "original_total" ? historical : undefined);
+    const units = new Set(rates.map((rate) => rate.unit));
+    if (units.has("hour") && pricingRule.pricing?.hourToDayEnabled) units.add("day_24h");
+    for (const unit of units) {
+      if (current && !current.definition.businessModel.pricingUnits.includes(unit) && !historical?.businessModel.pricingUnits.includes(unit)) {
+        throw new ConflictException(`缺少 ${unit} 计价单位的历史兼容政策，不能自动续租`);
+      }
+    }
+    return {
+      pricingMode,
+      policySource: pricingMode === "incremental" ? "current_workspace" as const : "original_quote" as const,
+      categoryCode: originalQuote.categoryCode,
+      originalCategoryVersionId: originalQuote.categoryVersionId,
+      categoryVersionId: current?.categoryVersionId ?? (pricingMode === "original_total" ? originalQuote.categoryVersionId : undefined),
+      adoptionRevision: current?.adoptionRevision,
+      categoryPolicySnapshot: structuredClone(categoryPolicySnapshot),
+      pricingStrategies: [...units].map(rentalPricingStrategyReference)
+    };
+  }
+
   /**
    * 续租 / 延期的增量报价（需求 4.6.9）。
    *
@@ -6236,8 +6265,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 一次性耗材在领取时已经完成一次性消费，续租只延长其它可归还商品的占用，
       // 不应再为耗材按新增时段重复计费或重新查当前价格。
       if (line.inventoryMode === RentalInventoryMode.Consumable) continue;
+      if (!unit) throw new ConflictException(`${pricingGroup?.name ?? group.name} 缺少原订单计价单位依据，不能自动续租`);
       const rate = spaceVersion.rates.find(
-        (item) => pricingTargetId(item) === target && (unit === undefined || item.unit === unit)
+        (item) => pricingTargetId(item) === target && item.unit === unit
       );
       if (!rate) {
         throw new ConflictException(
@@ -6360,6 +6390,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       priceVersionId: versionedSpaceVersion.versionId,
       priceVersion: versionedSpaceVersion.version,
       ruleVersion: rule.version,
+      executionBasis: await this.extensionExecutionBasis(tenantId, context, originalQuote, rateSnapshot, "incremental", rule.config),
       rateSnapshot,
       ruleSnapshot: structuredClone({ ...rule.config, extension: extensionRule })
     };
@@ -6746,6 +6777,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         chargeLines: deltaLines, fullChargeLines: chargeLines,
         refundReview: differenceAmount < 0 ? { amount: -differenceAmount, status: "pending" } : undefined
       },
+      executionBasis: await this.extensionExecutionBasis(tenantId, context, originalQuote, rateSnapshot, "original_total", rule.config),
       ruleVersion: rule.version,
       rateSnapshot,
       ruleSnapshot: structuredClone(rule.config)

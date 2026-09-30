@@ -3025,6 +3025,8 @@ model PaymentReconciliationLine {
 /// 订单当前该还的时间由 rental_orders.effectiveEndAt 表达，只有本表 status=effective 才推进它。
 /// 幂等：`(workspaceId, orderId, idempotencyKey)` 唯一，重复提交只落一条。
 model RentalOrderExtension {
+  /// 本次续租实际采用的品类政策和计价实现；历史无证据保留 NULL。
+  executionBasis   Json?
   /// 原价格/优惠全租期重算结果、差额明细与退款审核。
   pricingSnapshot  Json?
   id               String            @id @default(uuid())

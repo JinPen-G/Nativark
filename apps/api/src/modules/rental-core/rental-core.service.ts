@@ -3585,6 +3585,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       priceVersionId: priced.priceVersionId,
       priceVersion: priced.priceVersion,
       ruleVersion: priced.ruleVersion,
+      executionBasis: structuredClone(priced.executionBasis),
       rateSnapshot: priced.rateSnapshot,
       ruleSnapshot: priced.ruleSnapshot,
       calendarSnapshot: priced.calendarSnapshot,
