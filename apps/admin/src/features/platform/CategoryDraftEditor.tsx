@@ -147,10 +147,14 @@ export function CategoryDraftEditor({ code, initial, editable, canPublish, saved
       if (preview.revision !== version.revision) { message.error(t("草稿修订冲突，输入已保留，请重新核对最新版本")); return; }
       const differenceKinds: Record<string, string> = { added: "新增", removed: "移除", changed: "修改", required_added: "新增必填要求", unique_enabled: "启用唯一要求", type_changed: "字段类型变化", scope_narrowed: "支持范围收窄" };
       const displayValue = (value: unknown) => value === null || value === undefined ? "—" : typeof value === "string" ? value : JSON.stringify(value);
-      modal.confirm({ title: t("确认整体发布品类版本？"), width: "90%", content: <Space orientation="vertical"><span>{t("发布后正文不可修改；新版本采用资格默认关闭，不会改变已有空间绑定。")}</span><span>{t("变更页签")}: {preview.changedSections.map((key) => t(titles[key])).join("、")}</span><span>{t("现有品类空间数")}: {preview.affectedSpaces}</span>
+      let confirmation: { destroy: () => void };
+      confirmation = modal.confirm({ title: t("确认整体发布品类版本？"), width: "90%", content: <Space orientation="vertical"><span>{t("发布后正文不可修改；新版本采用资格默认关闭，不会改变已有空间绑定。")}</span><span>{t("变更页签")}: {preview.changedSections.map((key) => t(titles[key])).join("、")}</span><span>{t("现有品类空间数")}: {preview.affectedSpaces}</span>
         <Table size="small" rowKey="path" dataSource={preview.differences ?? []} pagination={{ pageSize: 10 }} scroll={{ x: 650 }} columns={[
           { title: t("变更字段"), dataIndex: "label" }, { title: t("变更类型"), dataIndex: "kind", render: (value: string) => t(differenceKinds[value] ?? value) },
-          { title: t("变更前"), dataIndex: "before", render: displayValue }, { title: t("变更后"), dataIndex: "after", render: displayValue }
+          { title: t("变更前"), dataIndex: "before", render: displayValue }, { title: t("变更后"), dataIndex: "after", render: displayValue },
+          ...(editable ? [{ title: t("操作"), render: (_: unknown, row: { section: CategoryDraftSection }) => <Button onClick={() => {
+            confirmation.destroy(); setSection(row.section); setValues(project(version, row.section)); setDirty(false); setErrors([]);
+          }}>{t("返回对应页签修改")}</Button> }] : [])
         ]} />
       </Space>, onOk: async () => {
         setBusy(true);

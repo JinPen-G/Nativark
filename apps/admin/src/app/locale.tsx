@@ -64,6 +64,7 @@ const ENGLISH: Record<string, string> = {
   "字段编码格式不正确": "Invalid field code format",
   "字段编码已存在": "Field code already exists",
   "字段类型不合法": "Invalid field type",
+  "返回对应页签修改": "Return to section to edit",
   "有未保存的改动，确定放弃吗？": "Discard unsaved changes?",
   "当前页签草稿已保存": "Current draft section saved",
   "草稿修订冲突，输入已保留，请重新核对最新版本": "Draft revision conflict. Your input is preserved; compare it with the latest version.",
