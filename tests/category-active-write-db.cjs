@@ -51,9 +51,12 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     const rule = { id: `${fixture}_rule`, tenantId: "tenant_001", categoryCode: "camera", version: "1.0", status: "draft", config: { fixture: true }, changeReason: "fixture", createdBy: "fixture", createdAt: new Date().toISOString() };
     const ruleAudit = { id: `${fixture}_ruleaudit`, tenantId: "tenant_001", workspaceId, ruleVersionId: rule.id, version: rule.version, action: "publish", fromStatus: "draft", toStatus: "pending", reason: "fixture", at: rule.createdAt };
     const nextRule = { ...rule, status: "pending", effectiveFrom: "2030-01-01T00:00:00Z" };
+    const price = { id: `${fixture}_price`, tenantId: "tenant_001", categoryCode: "camera", code: "P", name: "专项价格", currency: "CNY", status: "draft", version: "1.0", effectiveFrom: rule.createdAt, createdAt: rule.createdAt, rates: [{ itemGroupId: input.id, unit: "hour", amount: 10 }] };
+    const stalePrice = assert.rejects(context(() => business.upsertPricingPlan(price, undefined, oldBinding)), /版本已变化/);
     const staleRule = assert.rejects(context(() => business.upsertRuleVersion(rule, oldBinding)), /版本已变化/);
     const stalePublish = assert.rejects(context(() => business.writeRuleVersionWithAudit(nextRule, ruleAudit, [], oldBinding)), /版本已变化/);
-    unlock(); await switching; await Promise.all([rejected, staleSettings, staleLocation, staleCapability, staleRule, stalePublish]);
+    unlock(); await switching; await Promise.all([rejected, staleSettings, staleLocation, staleCapability, staleRule, stalePublish, stalePrice]);
+    assert.equal(await db.rentalPricingPlan.count({ where: { workspaceId } }), 0);
     assert.equal(await db.rentalItemGroup.count({ where: { workspaceId } }), 0, "旧请求不能在切换后写入");
     assert.equal(await db.rentalTenantBusinessSettings.count({ where: { workspaceId } }), 0);
     assert.equal(await db.rentalFulfillmentLocation.count({ where: { workspaceId } }), 0);
@@ -62,6 +65,10 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal(await db.rentalRuleVersion.count({ where: { workspaceId } }), 0);
     assert.equal(await db.rentalRuleVersionAudit.count({ where: { workspaceId } }), 0);
     const currentBinding = { categoryVersionId: versionId, adoptionRevision: 1 };
+    await context(() => business.upsertPricingPlan(price, undefined, currentBinding));
+    await assert.rejects(context(() => business.upsertPricingPlan({ ...price, rates: [{ itemGroupId: input.id, unit: "shift", amount: 10 }] })), /不支持/);
+    await assert.rejects(context(() => business.upsertPricingPlan({ ...price, fulfillmentFees: [{ mode: "onsite_delivery", amount: 1 }] })), /不支持/);
+    assert.equal((await db.rentalPricingPlan.findUnique({ where: { id: price.id } })).rates[0].unit, "hour", "拒绝不适用价格不能覆盖已提交费率");
     await context(() => business.upsertRuleVersion(rule, currentBinding));
     await context(() => business.upsertRuleVersion({ ...rule, config: { fixture: "updated" } }, currentBinding));
     await assert.rejects(context(() => business.writeRuleVersionWithAudit(nextRule, ruleAudit, [], currentBinding)), /正文已变化/);

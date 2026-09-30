@@ -59,7 +59,7 @@ export interface TenantBusinessConfigSnapshot {
  */
 export interface RentalBusinessConfigStore {
   loadAll(): Promise<TenantBusinessConfigSnapshot[]>;
-  upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx): Promise<void>;
+  upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertDiscountPlan(plan: RentalDiscountPlan): Promise<void>;
   upsertService(service: RentalValueAddedService): Promise<void>;
   upsertCalendar(
@@ -182,7 +182,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     });
   }
 
-  async upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx): Promise<void> {
+  async upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void> {
     const data = {
       tenantId: plan.tenantId,
       categoryCode: upper<$Enums.RentalCategoryCode>(plan.categoryCode),
@@ -198,15 +198,23 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       // 与"配了一个空清单"在语义上同义，但省掉一次无意义的 JSON 解析。
       fulfillmentFees: (plan.fulfillmentFees ?? null) as unknown as Prisma.InputJsonValue
     };
-    const client = tx ?? this.prisma;
-    const workspaceId = await resolveScopeWorkspaceId(client, plan.tenantId);
+    // Resolve outside our transaction so the workspace lock is its first read:
+    // a normal scope SELECT before waiting for the lock would establish an old
+    // MySQL repeatable-read snapshot of the price rows.
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, plan.tenantId);
+    const write = async (client: RentalConfigTx) => {
+    const { definition } = await lockActiveCategoryBinding(client, plan.tenantId, workspaceId, expectedBinding, plan.categoryCode);
     const existing = await client.rentalPricingPlan.findUnique({ where: { id: plan.id }, select: { tenantId: true, workspaceId: true } });
     assertScopedWrite(existing, plan.tenantId, workspaceId, "基础定价计划");
+    if (plan.rates.some((rate) => !definition.businessModel.pricingUnits.includes(rate.unit))) throw new ConflictException("价格计划包含当前品类不支持的计价单位");
+    if (plan.fulfillmentFees?.some((fee) => !definition.businessModel.fulfillmentModes.includes(fee.mode))) throw new ConflictException("价格计划包含当前品类不支持的履约收费方式");
     await client.rentalPricingPlan.upsert({
       where: { id: plan.id },
       create: { workspaceId, id: plan.id, ...data, createdAt: new Date(plan.createdAt) },
       update: data
     });
+    };
+    if (tx) await write(tx); else await this.prisma.$transaction(write);
   }
 
   async upsertDiscountPlan(plan: RentalDiscountPlan): Promise<void> {
