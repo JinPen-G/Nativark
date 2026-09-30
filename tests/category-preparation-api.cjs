@@ -72,5 +72,9 @@ module.exports = async ({ request, platformToken, tenantToken, mysqlQuery }) => 
   const incompatible = await call("GET", path);
   assert.equal(incompatible.businessCompatibility.valid, false);
   assert.ok(incompatible.businessCompatibility.blockers.some((row) => row.domain === "price" && row.id === "e2e_category_future_price"), "不能只看今天价格而忽略已发布的未来价格");
+  mysqlQuery(`INSERT INTO rental_rule_versions (id,tenantId,workspaceId,categoryCode,version,status,config,changeReason,createdBy,effectiveFrom,createdAt) SELECT 'e2e_category_future_safety',tenantId,id,categoryCode,'e2e-future-safety','published',JSON_OBJECT('payment',JSON_OBJECT('preauthorizationRequired',false,'depositMode','none'),'overdue',JSON_OBJECT('feeMode','none'),'qualification',JSON_OBJECT('required',true),'fulfillment',JSON_OBJECT('pickupInspectionRequired',true,'returnInspectionRequired',true)),'兼容专项','fixture','2126-01-01',NOW() FROM business_workspaces WHERE id=(SELECT workspaceId FROM rental_category_adoption_preparations WHERE targetVersionId='${draft.id}' AND tenantId='tenant_001'); UPDATE rental_inspection_templates SET enabled=false WHERE tenantId='tenant_001' AND workspaceId=(SELECT workspaceId FROM rental_category_adoption_preparations WHERE targetVersionId='${draft.id}' AND tenantId='tenant_001') AND stage='return';`);
+  const safetyPreview = await call("GET", path);
+  assert.ok(safetyPreview.businessCompatibility.blockers.some((row) => row.domain === "inspection" && row.id === "e2e_category_future_safety:return"), "未来要求归还检查的规则不能使用停用模板");
+  if (!source.definition.businessModel.supportsQualificationReview) assert.ok(safetyPreview.businessCompatibility.blockers.some((row) => row.domain === "rule" && row.id === "e2e_category_future_safety"), "新版不支持资质审核时须指出未来规则冲突");
   console.log("category-preparation-api: 会话空间与独立权限、两类必填准备、活动事实不变、修订冲突、跨实体及陈旧来源拒绝通过");
 };

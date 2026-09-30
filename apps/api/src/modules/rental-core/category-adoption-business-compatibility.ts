@@ -25,8 +25,9 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
   locations: Array<{ id: string; type: string; status: string }>;
   prices: CategoryTimedConfiguration<RentalPricingRate[]>[];
   rules: CategoryTimedConfiguration<RentalRuleConfig>[];
+  inspections?: Array<{ id: string; stage: string; enabled: boolean; fields: unknown }>;
 }, now: Date) {
-  const blockers: Array<{ domain: "settings" | "location" | "price" | "rule"; id: string; message: string }> = [];
+  const blockers: Array<{ domain: "settings" | "location" | "price" | "rule" | "inspection"; id: string; message: string }> = [];
   const add = (domain: typeof blockers[number]["domain"], id: string, message: string) => blockers.push({ domain, id, message });
   const model = target.businessModel;
   if (input.settings) {
@@ -57,7 +58,17 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
     if (error) add("rule", rule.id, error);
     const payment = rule.value.payment;
     if (!model.supportsPreauthorization && (payment.preauthorizationRequired || payment.depositMode === "preauthorization" || (rule.value.preauthorization && rule.value.preauthorization.mode !== "none"))) add("rule", rule.id, "当前或未来规则启用预授权，但目标品类不支持");
+    if (!model.supportsPreauthorization && rule.value.membershipSecurityReduction?.preauthorization?.enabled) add("rule", rule.id, "当前或未来规则启用会员预授权减免，但目标品类不支持");
+    if (!model.supportsQualificationReview && rule.value.qualification?.required) add("rule", rule.id, "当前或未来规则要求资质审核，但目标品类不支持，请通过规则发布机制调整");
+    // Existing tenant templates are business facts, not category defaults. Never
+    // replace them automatically when the platform changes its default fields.
+    if (input.inspections) {
+      for (const stage of ["pickup", "return"] as const) {
+        const required = stage === "pickup" ? rule.value.fulfillment?.pickupInspectionRequired : rule.value.fulfillment?.returnInspectionRequired;
+        if (required && !input.inspections.some((template) => template.enabled && template.stage === stage && Array.isArray(template.fields))) add("inspection", `${rule.id}:${stage}`, `当前或未来规则要求${stage === "pickup" ? "领取" : "归还"}检查，但没有可读取的启用模板`);
+      }
+    }
   }
   return { valid: blockers.length === 0, blockers, checkedPriceVersionIds: prices.map((row) => row.id), checkedRuleVersionIds: rules.map((row) => row.id),
-    scope: "settings_locations_price_units_rule_pricing_preauthorization", complete: false as const };
+    scope: "settings_locations_price_units_rule_pricing_preauthorization_qualification_inspection_presence", complete: false as const };
 }

@@ -75,14 +75,15 @@ export class CategoryAdoptionPreparationService {
         validation = { valid: true, errors: [] };
       } catch (error) { validation = { valid: false, errors: [error instanceof Error ? error.message : "预备资料校验失败"] }; }
       const where = { tenantId: user.tenantId, workspaceId: context.workspaceId };
-      const [settings, locations, prices, rules] = await Promise.all([
+      const [settings, locations, prices, rules, inspections] = await Promise.all([
         tx.rentalTenantBusinessSettings.findFirst({ where }),
         tx.rentalFulfillmentLocation.findMany({ where, select: { id: true, type: true, status: true } }),
         tx.rentalPriceVersion.findMany({ where, select: { id: true, effectiveFrom: true, sequence: true, rates: true } }),
-        tx.rentalRuleVersion.findMany({ where: { ...where, status: { in: ["published", "pending", "superseded"] }, voidedAt: null }, select: { id: true, effectiveFrom: true, config: true } })
+        tx.rentalRuleVersion.findMany({ where: { ...where, status: { in: ["published", "pending", "superseded"] }, voidedAt: null }, select: { id: true, effectiveFrom: true, config: true } }),
+        tx.rentalInspectionTemplate.findMany({ where, select: { id: true, stage: true, enabled: true, fields: true } })
       ]);
       const businessCompatibility = categoryAdoptionBusinessCompatibility(context.definition, {
-        settings: settings ? settings.settings as unknown as TenantRentalBusinessSettings : null, locations,
+        settings: settings ? settings.settings as unknown as TenantRentalBusinessSettings : null, locations, inspections,
         prices: prices.map((row) => ({ ...row, value: row.rates as unknown as RentalPricingRate[] })),
         rules: rules.map((row) => ({ ...row, sequence: 0, value: row.config as unknown as RentalRuleConfig }))
       }, new Date());

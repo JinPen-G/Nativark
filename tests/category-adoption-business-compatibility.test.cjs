@@ -27,5 +27,13 @@ const ties = [timed("older-price", "2026-09-01", {}, 1), timed("new-price", "202
 assert.deepEqual(categoryCurrentAndFuture(ties, now).map((row) => row.id), ["new-price"]);
 assert.equal(categoryCurrentAndFuture(ties.map((row) => ({ ...row, sequence: 0 })), now).length, 2, "歧义规则不能静默忽略");
 assert.equal(check(target, { ...input, rules: [timed("tie-a", "2026-09-01", rule), timed("tie-b", "2026-09-01", rule)] }, now).blockers.length, 2, "即使配置都兼容，也必须拒绝歧义生效组合");
+target.businessModel.supportsQualificationReview = false;
+const safetyRule = { ...rule, qualification: { required: true }, membershipSecurityReduction: { preauthorization: { enabled: true } }, fulfillment: { pickupInspectionRequired: true, returnInspectionRequired: true } };
+const safetyInput = { ...input, rules: [timed("historical-safety", "2025-01-01", safetyRule), timed("current-safety", "2026-09-01", rule), timed("future-safety", "2027-01-01", safetyRule)], inspections: [{ id: "pickup", stage: "pickup", enabled: true, fields: [] }, { id: "disabled-return", stage: "return", enabled: false, fields: [] }] };
+const safetyBefore = structuredClone(safetyInput);
+const safetyResult = check(target, safetyInput, now);
+assert.deepEqual(safetyResult.blockers.map((row) => row.id), ["future-safety", "future-safety", "future-safety:return"], "未来资质、会员预授权减免及停用归还模板不能被遗漏；历史规则不影响新业务");
+assert.equal(check(target, { ...safetyInput, inspections: [{ id: "broken", stage: "pickup", enabled: true, fields: {} }] }, now).blockers.filter((row) => row.domain === "inspection").length, 2, "错误结构不能冒充可读取模板");
+assert.deepEqual(safetyInput, safetyBefore, "不以新版默认项覆盖租户模板、旧规则或资金配置");
 assert.deepEqual(input, { settings: null, locations: [], prices: [timed("historical", "2025-01-01", [{ unit: "shift" }]), timed("current", "2026-09-01", [{ unit: "hour" }])], rules: [] }, "检查不得改写当前或历史资料");
 console.log("category-adoption-business-compatibility: 当前/未来组合、历史保留、范围收窄、规则依赖及部分校验边界通过");
