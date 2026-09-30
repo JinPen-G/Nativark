@@ -9,6 +9,9 @@ import { resolveRentalCategoryVersionBody } from "./rental-category-resolver.ser
 import { prepareCategoryAdoptionRecords } from "./category-adoption-records";
 import { categoryDefinitionDifferences } from "./category-definition-diff";
 import { categoryAdoptionBusinessCompatibility } from "./category-adoption-business-compatibility";
+import { WorkspaceCapabilityService } from "./workspace-capability.service";
+import { CapabilityHookRuntime } from "./capability-hook.runtime";
+import type { RentalCapability, RentalCapabilityConfig, RentalCapabilityLifecycleStatus } from "@rental-os/shared";
 
 export const CATEGORY_ADOPTION_MANAGE = "rental-os:category:adopt";
 export function assertCategoryPreparationPermission(user: SystemUserRow) {
@@ -17,7 +20,7 @@ export function assertCategoryPreparationPermission(user: SystemUserRow) {
 }
 @Injectable()
 export class CategoryAdoptionPreparationService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly capabilities: WorkspaceCapabilityService, private readonly hooks: CapabilityHookRuntime) {}
   async candidates(user: SystemUserRow, operation: string) {
     assertCategoryPreparationPermission(user);
     if (operation !== "upgrade" && operation !== "restore") throw new BadRequestException("版本操作只能是升级或恢复");
@@ -75,23 +78,27 @@ export class CategoryAdoptionPreparationService {
         validation = { valid: true, errors: [] };
       } catch (error) { validation = { valid: false, errors: [error instanceof Error ? error.message : "预备资料校验失败"] }; }
       const where = { tenantId: user.tenantId, workspaceId: context.workspaceId };
-      const [settings, locations, prices, rules, inspections] = await Promise.all([
+      const [settings, locations, prices, rules, inspections, capabilityInstances] = await Promise.all([
         tx.rentalTenantBusinessSettings.findFirst({ where }),
         tx.rentalFulfillmentLocation.findMany({ where, select: { id: true, type: true, status: true } }),
         tx.rentalPriceVersion.findMany({ where, select: { id: true, effectiveFrom: true, sequence: true, rates: true } }),
         tx.rentalRuleVersion.findMany({ where: { ...where, status: { in: ["published", "pending", "superseded"] }, voidedAt: null }, select: { id: true, effectiveFrom: true, config: true } }),
-        tx.rentalInspectionTemplate.findMany({ where, select: { id: true, stage: true, enabled: true, fields: true } })
+        tx.rentalInspectionTemplate.findMany({ where, select: { id: true, stage: true, enabled: true, fields: true } }),
+        tx.workspaceCapabilityInstance.findMany({ where, select: { code: true, status: true, implementationVersion: true, config: true } })
       ]);
       const businessCompatibility = categoryAdoptionBusinessCompatibility(context.definition, {
         settings: settings ? settings.settings as unknown as TenantRentalBusinessSettings : null, locations, inspections,
         prices: prices.map((row) => ({ ...row, value: row.rates as unknown as RentalPricingRate[] })),
         rules: rules.map((row) => ({ ...row, sequence: 0, value: row.config as unknown as RentalRuleConfig }))
       }, new Date());
+      const capabilityCompatibility = this.capabilities.adoptionCompatibility(context.definition, capabilityInstances.map((row) => ({ ...row, code: row.code as RentalCapability, status: row.status as RentalCapabilityLifecycleStatus, config: row.config as RentalCapabilityConfig })), this.hooks.registeredVersions());
+      const compatibility = { ...businessCompatibility, valid: businessCompatibility.valid && capabilityCompatibility.valid, blockers: [...businessCompatibility.blockers, ...capabilityCompatibility.blockers], checkedCapabilityCodes: capabilityCompatibility.checkedCapabilityCodes,
+        scope: `${businessCompatibility.scope}_capability_instances` };
       return { sourceVersionId: context.workspace.categoryVersionId, sourceRevision: context.workspace.categoryAdoptionRevision,
         targetVersionId: targetId, targetVersionLabel: context.target.versionLabel, targetDefinition: context.definition,
         differences: categoryDefinitionDifferences(context.sourceDefinition, context.definition),
         preparation: context.preparation ? { id: context.preparation.id, revision: context.preparation.revision, sourceRevision: context.preparation.sourceRevision, patches: context.preparation.patches } : null,
-        validation, validationScope: "entity_attributes_inventory_uniqueness", businessCompatibility, stale, previewOnly: true, adoptionImplemented: false,
+        validation, validationScope: "entity_attributes_inventory_uniqueness", businessCompatibility: compatibility, stale, previewOnly: true, adoptionImplemented: false,
         entities: { itemGroups: context.records.groups.map((row) => ({ id: row.id, name: row.name, updatedAt: row.updatedAt.toISOString(), attributes: Object.fromEntries(Object.entries(row.attributes).filter(([key]) => key !== "__itemGroupMedia")) })),
           assets: context.records.assets.map((row) => ({ id: row.id, assetNo: row.assetNo, updatedAt: row.updatedAt.toISOString(), serialNo: row.serialNo, attributes: row.attributes })) } };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });

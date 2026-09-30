@@ -76,5 +76,12 @@ module.exports = async ({ request, platformToken, tenantToken, mysqlQuery }) => 
   const safetyPreview = await call("GET", path);
   assert.ok(safetyPreview.businessCompatibility.blockers.some((row) => row.domain === "inspection" && row.id === "e2e_category_future_safety:return"), "未来要求归还检查的规则不能使用停用模板");
   if (!source.definition.businessModel.supportsQualificationReview) assert.ok(safetyPreview.businessCompatibility.blockers.some((row) => row.domain === "rule" && row.id === "e2e_category_future_safety"), "新版不支持资质审核时须指出未来规则冲突");
+  mysqlQuery(`INSERT INTO workspace_capability_instances (id,tenantId,workspaceId,code,status,implementationVersion,configVersion,config,revision,createdAt,updatedAt) SELECT 'e2e_category_invalid_capability',tenantId,workspaceId,'camera_kit_handover','enabled','missing-implementation','v1',JSON_OBJECT(),1,NOW(),NOW() FROM rental_category_adoption_preparations WHERE targetVersionId='${draft.id}' AND tenantId='tenant_001';`);
+  const capabilityPreview = await call("GET", path);
+  assert.ok(capabilityPreview.businessCompatibility.blockers.some((row) => row.domain === "capability" && row.id === "camera_kit_handover"), "已启用实例的缺失实现不能被忽略");
+  assert.ok(capabilityPreview.businessCompatibility.checkedCapabilityCodes.includes("camera_kit_handover"));
+  mysqlQuery("UPDATE workspace_capability_instances SET status='disabled' WHERE id='e2e_category_invalid_capability';");
+  const disabledPreview = await call("GET", path);
+  assert.ok(!disabledPreview.businessCompatibility.checkedCapabilityCodes.includes("camera_kit_handover"), "停用实例保留事实但不执行当前组合");
   console.log("category-preparation-api: 会话空间与独立权限、两类必填准备、活动事实不变、修订冲突、跨实体及陈旧来源拒绝通过");
 };

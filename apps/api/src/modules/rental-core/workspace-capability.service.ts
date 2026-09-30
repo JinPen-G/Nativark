@@ -6,6 +6,7 @@ import {
   type RentalCapability,
   type RentalCapabilityConfig,
   type RentalCategoryCode,
+  type RentalCategoryDefinition,
   type RentalCapabilityConfigField,
   type RentalCapabilityDefinition,
   type RentalCompatibilityEntityRef,
@@ -49,6 +50,42 @@ function nextConfigVersion(current?: string) {
 @Injectable()
 export class WorkspaceCapabilityService {
   constructor(private readonly repository: WorkspaceCapabilityRepository) {}
+
+  /** Read-only adoption preflight. Reuse the actual configuration validator;
+   * do not initialize defaults, upgrade implementations or overwrite instances. */
+  adoptionCompatibility(
+    target: RentalCategoryDefinition,
+    instances: Array<Pick<WorkspaceCapabilityInstance, "code" | "status" | "implementationVersion" | "config">>,
+    registeredVersions: string[],
+    registry: RentalCapabilityDefinition[] = RENTAL_CAPABILITY_MODULES
+  ) {
+    const definitions = new Map(registry.map((definition) => [definition.code, definition]));
+    const declared = new Set(target.defaultCapabilities);
+    const active = new Map(instances.filter((row) => row.status === "enabled" && !CORE_CAPABILITIES.has(row.code)).map((row) => [row.code, row]));
+    const errors: Array<{ domain: "capability"; id: string; message: string }> = [];
+    const add = (code: string, message: string) => errors.push({ domain: "capability", id: code, message });
+    const applicable = (definition: RentalCapabilityDefinition) => definition.applicableCategories === "all" || definition.applicableCategories.includes(target.code);
+    const enabled = (code: RentalCapability) => CORE_CAPABILITIES.has(code)
+      ? Boolean(declared.has(code) && definitions.get(code) && applicable(definitions.get(code)!))
+      : active.has(code);
+    for (const code of target.requiredCapabilities) {
+      if (!enabled(code)) add(code, "目标品类必选能力未启用，请在能力管理中明确配置；采用预览不会自动启用");
+    }
+    const hookCodes = new Set(registeredVersions.map((key) => key.split("@")[0]));
+    for (const instance of active.values()) {
+      const definition = definitions.get(instance.code);
+      if (!definition) { add(instance.code, "已启用能力未在执行注册表登记"); continue; }
+      if (!applicable(definition) || (!declared.has(instance.code) && definition.kind !== "shared")) add(instance.code, "已启用能力不适用于目标品类或未获目标品类声明");
+      if (!definition.implementationVersion || (hookCodes.has(instance.code)
+        ? !registeredVersions.includes(`${instance.code}@${instance.implementationVersion}`)
+        : instance.implementationVersion !== definition.implementationVersion)) add(instance.code, "已启用能力的明确实现版本不可执行，请通过能力升级机制处理");
+      for (const code of definition.dependsOn) if (!enabled(code)) add(instance.code, `已启用能力缺少目标组合依赖 ${code}`);
+      for (const code of definition.conflictsWith) if (enabled(code)) add(instance.code, `已启用能力与目标组合中的 ${code} 互斥`);
+      try { this.validatedConfig(definition, instance.config); }
+      catch (error) { add(instance.code, error instanceof Error ? error.message : "能力配置校验失败"); }
+    }
+    return { valid: errors.length === 0, blockers: errors, checkedCapabilityCodes: [...active.keys()].sort(), complete: false as const };
+  }
 
   /** 某能力在该空间是否**真正可用**。菜单与 API 门禁只能用这个判定（CORE-EXT-02C 消费）。 */
   async isEnabled(tenantId: string, code: RentalCapability, workspaceId?: string): Promise<boolean> {
