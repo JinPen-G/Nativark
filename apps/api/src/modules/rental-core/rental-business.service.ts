@@ -1955,6 +1955,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   listDiscountPlans(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).discountPlans; }
 
   async saveDiscountPlan(tenantId: string, context: BusinessContext, input: SaveRentalDiscountPlanRequest) {
+    const binding = await this.categoryConfigurationBinding(tenantId, context);
     const state = this.state(tenantId, context);
     if (!input.code?.trim() || !input.name?.trim() || !input.changeReason?.trim()) throw new BadRequestException("优惠编码、名称和变更原因不能为空");
     if (input.discountType === "percentage" && (input.discountValue <= 0 || input.discountValue > 100)) throw new BadRequestException("百分比优惠必须大于 0 且不超过 100");
@@ -1990,7 +1991,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       code: input.code.trim(), name: input.name.trim(), version: versionAfter(existing?.version),
       createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
-    await this.configStore.upsertDiscountPlan(result);
+    await this.configStore.upsertDiscountPlan(result, binding);
 
     if (existing) Object.assign(existing, result); else state.discountPlans.unshift(result);
     return result;
@@ -1999,6 +2000,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   listServices(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).services; }
 
   async saveService(tenantId: string, context: BusinessContext, input: SaveRentalValueAddedServiceRequest) {
+    const binding = await this.categoryConfigurationBinding(tenantId, context);
     const state = this.state(tenantId, context);
     if (!input.code?.trim() || !input.name?.trim() || !input.terms?.trim() || !input.termsVersion?.trim()) throw new BadRequestException("服务编码、名称及条款不能为空");
     if (input.price < 0 || input.maximumQuantity < 1) throw new BadRequestException("服务价格或数量限制无效");
@@ -2066,7 +2068,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       code: input.code.trim(), name: input.name.trim(), version: versionAfter(existing?.version),
       createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
-    await this.configStore.upsertService(result);
+    await this.configStore.upsertService(result, binding);
 
     if (existing) Object.assign(existing, result); else state.services.unshift(result);
     return result;

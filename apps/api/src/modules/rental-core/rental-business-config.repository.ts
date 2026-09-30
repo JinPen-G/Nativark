@@ -60,8 +60,8 @@ export interface TenantBusinessConfigSnapshot {
 export interface RentalBusinessConfigStore {
   loadAll(): Promise<TenantBusinessConfigSnapshot[]>;
   upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
-  upsertDiscountPlan(plan: RentalDiscountPlan): Promise<void>;
-  upsertService(service: RentalValueAddedService): Promise<void>;
+  upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding): Promise<void>;
+  upsertService(service: RentalValueAddedService, expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertCalendar(
     calendar: RentalCalendarYear,
     expectedRevision?: number,
@@ -217,7 +217,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     if (tx) await write(tx); else await this.prisma.$transaction(write);
   }
 
-  async upsertDiscountPlan(plan: RentalDiscountPlan): Promise<void> {
+  async upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding): Promise<void> {
     const data = {
       tenantId: plan.tenantId,
       categoryCode: upper<$Enums.RentalCategoryCode>(plan.categoryCode),
@@ -243,16 +243,19 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       version: plan.version
     };
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, plan.tenantId);
-    const existing = await this.prisma.rentalDiscountPlan.findUnique({ where: { id: plan.id }, select: { tenantId: true, workspaceId: true } });
-    assertScopedWrite(existing, plan.tenantId, workspaceId, "优惠方案");
-    await this.prisma.rentalDiscountPlan.upsert({
-      where: { id: plan.id },
-      create: { workspaceId, id: plan.id, ...data, createdAt: new Date(plan.createdAt) },
-      update: data
+    await this.prisma.$transaction(async (tx) => {
+      await lockActiveCategoryBinding(tx, plan.tenantId, workspaceId, expectedBinding, plan.categoryCode);
+      const existing = await tx.rentalDiscountPlan.findUnique({ where: { id: plan.id }, select: { tenantId: true, workspaceId: true } });
+      assertScopedWrite(existing, plan.tenantId, workspaceId, "优惠方案");
+      await tx.rentalDiscountPlan.upsert({
+        where: { id: plan.id },
+        create: { workspaceId, id: plan.id, ...data, createdAt: new Date(plan.createdAt) },
+        update: data
+      });
     });
   }
 
-  async upsertService(service: RentalValueAddedService): Promise<void> {
+  async upsertService(service: RentalValueAddedService, expectedBinding?: CategoryWriteBinding): Promise<void> {
     const data = {
       tenantId: service.tenantId,
       categoryCode: upper<$Enums.RentalCategoryCode>(service.categoryCode),
@@ -282,7 +285,10 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, service.tenantId);
     const snapshot = JSON.parse(JSON.stringify({ ...service, workspaceId })) as Prisma.InputJsonValue;
     await this.prisma.$transaction(async (tx) => {
-      const existing = await tx.rentalValueAddedService.findUnique({ where: { id: service.id }, select: { tenantId: true, workspaceId: true } });
+      const { definition } = await lockActiveCategoryBinding(tx, service.tenantId, workspaceId, expectedBinding, service.categoryCode);
+      const modes = [...service.applicableFulfillmentModes, ...(service.mandatoryRule?.fulfillmentModes ?? [])];
+      if (modes.some((mode) => !definition.businessModel.fulfillmentModes.includes(mode))) throw new ConflictException("增值服务包含当前品类不支持的履约方式");
+      const existing = await tx.rentalValueAddedService.findUnique({ where: { id: service.id }, select: { tenantId: true, workspaceId: true, version: true } });
       assertScopedWrite(existing, service.tenantId, workspaceId, "增值服务");
       await tx.rentalValueAddedService.upsert({
         where: { id: service.id },
@@ -301,6 +307,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
         select: { snapshot: true }
       });
       if (existingVersion) {
+        if (existing && existing.version !== service.version) throw new ConflictException("增值服务版本已前进，历史版本不可覆盖当前主档；请刷新后重试");
         if (canonicalJson(existingVersion.snapshot) !== canonicalJson(snapshot)) {
           throw new ConflictException(
             `增值服务 ${service.code} 的版本 ${service.version} 已存在，不能原地改写；请递增服务版本后再保存`
