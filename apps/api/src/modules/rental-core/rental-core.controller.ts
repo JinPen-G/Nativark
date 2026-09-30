@@ -676,6 +676,7 @@ export class RentalCoreController {
 
     const cancelledServiceOccurrenceIds = [...new Set((body.cancelServiceOccurrenceIds ?? []).map((value) => value.trim()).filter(Boolean))];
     const previousExtensions = await this.service.listOrderExtensions(tenantId, orderId, tx);
+    const appliedAt = new Date().toISOString();
     const quoted = await this.business.quotePostPickupExchange(tenantId, context, {
       order,
       previousExtensions,
@@ -684,7 +685,7 @@ export class RentalCoreController {
       replacementPricingGroupId: body.replacementPricingGroupId?.trim() || undefined,
       priceBasis,
       exchangeCancelledServiceOccurrenceIds: cancelledServiceOccurrenceIds,
-      appliedAt: new Date().toISOString(),
+      appliedAt,
       fulfillmentMode: order.fulfillmentMode,
       locationIds: [order.fulfillmentLocationId, order.returnLocationId].filter((value): value is string => Boolean(value)),
       customerType: order.customerType
@@ -744,7 +745,8 @@ export class RentalCoreController {
         replacementAssetId,
         replacementAssetNo: selectedCandidate?.assetNo,
         cancelledServiceOccurrenceIds,
-        inspectionSnapshot
+        inspectionSnapshot,
+        executionBasis: await this.business.captureExchangeExecutionBasis(tenantId, context, priceBasis, appliedAt, quoted.priced)
       },
       warnings: [
         "换货差额不在确认时立即收款，统一在归还结算时处理",

@@ -938,6 +938,72 @@ async function main() {
     ok("续租真实 API：独立续租试算/申请、未到账拒绝、模拟补款生效、读回及补款重放均保留动作依据");
     await maybeStopAfter("renewal-api");
   }
+  if (process.env.E2E_STOP_AFTER === "exchange-api") {
+    const mutateTemplate = (mode) => {
+      const probe = runNode(["tests/helpers/exchange-template-fixture.cjs"], { env: { DATABASE_URL: TEST_DATABASE_URL, EXCHANGE_ORDER_ID: orderId, EXCHANGE_FIXTURE_MODE: mode } });
+      assert.equal(probe.status, 0, probe.stderr || probe.stdout);
+    };
+    mutateTemplate("prepare");
+    const originalAllocation = pickedUp.order.allocations.find((row) => row.assetId && row.orderLineId === pickedUp.order.lines[0].id);
+    assert.ok(originalAllocation);
+    const replacementGroup = serialized.find((row) => row.id !== originalAllocation.itemGroupId);
+    assert.ok(replacementGroup, "换货夹具必须使用另一个商品型号");
+    const newAsset = await request("POST", "/api/rental/v1/assets", {
+      itemGroupId: replacementGroup.id, assetNo: "E2E-EXCHANGE-NEW", locationId: location.id,
+      attributes: { serialNo: "E2E-EXCHANGE-SERIAL" }
+    }, demo.accessToken);
+    assert.equal(newAsset.status, 201, `换货资产夹具失败: ${JSON.stringify(newAsset.body).slice(0, 300)}`);
+    const changeRequest = { type: "post_pickup_exchange", orderLineId: originalAllocation.orderLineId, allocationId: originalAllocation.id,
+      replacementItemGroupId: replacementGroup.id, replacementAssetId: newAsset.body.data.id,
+      priceBasis: "original_order_price", originalDisposition: "return_to_warehouse", inspectionSnapshot: { condition: "正常", customerConfirmed: true },
+      customerConfirmed: true, reason: "E2E 替换实物并冻结独立检查依据" };
+    const preview = await request("POST", `/api/rental/v1/orders/${orderId}/changes/post-pickup-exchange/preview`, changeRequest, demo.accessToken);
+    assert.equal(preview.status, 201, `换货试算失败: ${JSON.stringify(preview.body).slice(0, 300)}`);
+    const applied = await request("POST", `/api/rental/v1/orders/${orderId}/changes/post-pickup-exchange`, {
+      ...changeRequest, expectedUpdatedAt: preview.body.data.expectedUpdatedAt
+    }, demo.accessToken);
+    assert.equal(applied.status, 201, `换货应用失败: ${JSON.stringify(applied.body).slice(0, 300)}`);
+    const changed = applied.body.data;
+    assert.deepEqual(changed.order.inspectionTemplateSnapshots, quote.body.data.inspectionTemplateSnapshots, "换货不能追改原订单模板");
+    assert.ok(changed.change.diff.exchange.executionBasis.inspectionTemplateSnapshots.find((row) => row.stage === "return").fields.some((row) => row.code === "replacement_check"));
+    const replacement = changed.order.allocations.find((row) => row.assetId === newAsset.body.data.id && row.metadata?.exchangeId === changed.change.id);
+    assert.ok(replacement);
+    const changesRead = await request("GET", `/api/rental/v1/orders/${orderId}/changes`, null, demo.accessToken);
+    assert.equal(changesRead.status, 200);
+    assert.deepEqual(changesRead.body.data.find((row) => row.id === changed.change.id).diff.exchange.executionBasis, changed.change.diff.exchange.executionBasis);
+    mutateTemplate("disable");
+    const templates = await request("GET", `/api/rental/v1/inspection-templates?stage=return&orderId=${orderId}`, null, demo.accessToken);
+    assert.equal(templates.status, 200);
+    const replacementTemplate = templates.body.data.find((row) => row.exchangeId === changed.change.id);
+    const oldTemplate = templates.body.data.find((row) => !row.exchangeId);
+    assert.ok(replacementTemplate && oldTemplate);
+    assert.ok(replacementTemplate.fields.some((row) => row.code === "replacement_check" && row.required));
+    assert.ok(!oldTemplate.fields.some((row) => row.code === "replacement_check"));
+    const input = { templateId: replacementTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 100 },
+      attachments: [inspectionEvidence(orderId, "return")], returnItems: [{ allocationId: replacement.id, quantity: replacement.quantity }], returnBatchNo: "E2E-EXCHANGE-RETURN" };
+    const missing = await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, input, demo.accessToken);
+    assert.equal(missing.status, 400, `缺换货必填项必须拒绝: ${JSON.stringify(missing.body).slice(0, 300)}`);
+    const mixed = await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, { ...input, results: { ...input.results, replacement_check: true }, returnItems: undefined }, demo.accessToken);
+    assert.equal(mixed.status, 409, "混合商品不可共用替换商品模板整单归还");
+    const returnedReplacement = await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, { ...input, results: { ...input.results, replacement_check: true } }, demo.accessToken);
+    assert.equal(returnedReplacement.status, 201, `换货归还失败: ${JSON.stringify(returnedReplacement.body).slice(0, 300)}`);
+    assert.equal(returnedReplacement.body.data.inspection.baselineInspectionId, undefined);
+    assert.equal(returnedReplacement.body.data.inspection.templateId, replacementTemplate.sourceTemplateId);
+    assert.equal(returnedReplacement.body.data.inspection.exchangeId, changed.change.id);
+    const inspectionsRead = await request("GET", `/api/rental/v1/orders/${orderId}/inspections`, null, demo.accessToken);
+    assert.equal(inspectionsRead.status, 200);
+    assert.equal(inspectionsRead.body.data.find((row) => row.id === returnedReplacement.body.data.inspection.id).exchangeId, changed.change.id, "独立换货依据关联必须真实读回");
+    assert.ok(returnedReplacement.body.data.inspection.usageReadings.every((row) => row.delta === undefined), "新资产不能借用旧资产读数生成使用量");
+    const finalReturn = await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, {
+      templateId: oldTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 9100 }, attachments: [inspectionEvidence(orderId, "return")]
+    }, demo.accessToken);
+    assert.equal(finalReturn.status, 201, `原商品最终归还失败: ${JSON.stringify(finalReturn.body).slice(0, 300)}`);
+    assert.equal(finalReturn.body.data.order.status, "settling");
+    const settled = await closeMockFundedOrder(orderId, demo.accessToken, `e2e:exchange:${orderId}`);
+    assert.equal(settled.status, 201, `换货结算失败: ${JSON.stringify(settled.body).slice(0, 300)}`);
+    ok("换货真实 API：动作依据读回、原快照不改、模板停用后独立检查、缺必填/混批拒绝、分批归还及模拟资金结算");
+    await maybeStopAfter("exchange-api");
+  }
   const returnTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=return", null, demo.accessToken)).body.data[0];
   const returnResponse = await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, { templateId: returnTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 9100 }, attachments: [inspectionEvidence(orderId, "return")], exceptions: [{ code: "damage", description: "E2E 损坏", chargeAmount: 66 }] }, demo.accessToken);
   assert.equal(returnResponse.status, 201, `归还检查失败: ${JSON.stringify(returnResponse.body).slice(0, 300)}`);

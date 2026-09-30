@@ -31,6 +31,8 @@ import {
   type RentalDepositRule,
   type RentalFulfillmentMode,
   type RentalOrder,
+  type RentalOrderExchangeExecutionBasis,
+  type RentalOrderExchangePriceBasis,
   type RentalOrderExtension,
   type RentalRepricingContext,
   type RentalOrderExtensionPreview,
@@ -6784,12 +6786,33 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     };
   }
 
+  /** Freeze the replacement action's execution evidence separately from the original order. */
+  async captureExchangeExecutionBasis(
+    tenantId: string, context: BusinessContext, priceBasis: RentalOrderExchangePriceBasis, effectiveFrom: string,
+    priced: RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig }
+  ): Promise<RentalOrderExchangeExecutionBasis> {
+    const current = this.categoryResolver ? await this.categoryResolver.forWorkspace(tenantId, this.workspaceOf(tenantId)) : undefined;
+    if (current && !isDeepStrictEqual(current.definition, context.category)) throw new ConflictException("品类版本在换货准备期间已变化，请重新试算");
+    if (!this.coreConfigStore.listInspectionTemplates) throw new ConflictException("换货检查配置读取未就绪，不能伪造空检查依据");
+    const templates = await this.coreConfigStore.listInspectionTemplates(tenantId, this.workspaceOf(tenantId));
+    if (templates.some((row) => row.tenantId !== tenantId || row.categoryCode !== context.category.code)) throw new ConflictException("换货检查模板与租户或品类不一致");
+    const units = new Set(priced.rateSnapshot.map((row) => row.unit));
+    if (units.has("hour") && priced.ruleSnapshot.pricing?.hourToDayEnabled) units.add("day_24h");
+    return structuredClone({
+      categoryCode: context.category.code, categoryVersionId: current?.categoryVersionId, adoptionRevision: current?.adoptionRevision,
+      categoryPolicySnapshot: current?.definition, effectiveFrom, priceBasis,
+      pricingStrategies: [...units].map(rentalPricingStrategyReference),
+      rateSnapshot: priced.rateSnapshot, ruleSnapshot: priced.ruleSnapshot, calendarSnapshot: priced.calendarSnapshot,
+      pricingSnapshot: priced.pricingSnapshot,
+      inspectionTemplateSnapshots: templates.filter((row) => row.enabled).map((row) => snapshotInspectionTemplate(context.category, row)),
+      capabilitySnapshot: this.capabilities ? await this.capabilities.snapshotEnabled(tenantId, this.workspaceOf(tenantId)) : undefined
+    });
+  }
+
   /**
    * ORDER-CHANGE-01E：取货后换货的全租期重算。
-   *
-   * 只替换一条完整订单行，避免在第一版里把一条数量行拆成两个不同商品后，
-   * 还要重新分摊优惠、押金与服务容量。原价模式复用订单费率快照；现价模式
-   * 只替换目标行的当前空间价格版本，其余商品、原优惠、券和会员权益仍按原快照重算。
+   * 只替换一条完整订单行；原价模式复用订单费率快照，现价模式只替换目标行的
+   * 当前空间价格版本，其余商品、原优惠、券和会员权益仍按原快照重算。
    */
   async quotePostPickupExchange(
     tenantId: string,

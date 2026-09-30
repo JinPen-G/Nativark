@@ -4,6 +4,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { getRequestUserId } from "../../common/request-identity";
 import { snapshotInspectionTemplate } from "./rental-inspection-template-snapshot";
+import { assertInspectionAllocationScope, exchangeBasis, exchangeInspectionTemplates } from "./rental-exchange-inspection";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import { MembershipService } from "../platform/membership.service";
 import { FileStorageRuntimeService, type FileBusinessOwner } from "../integrations/file-storage.runtime.service";
@@ -2629,18 +2630,22 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return order;
   }
 
-  async listInspectionTemplates(tenantId: string, stage?: "pickup" | "return", order?: RentalOrder) {
+  async listInspectionTemplates(tenantId: string, stage?: "pickup" | "return", order?: RentalOrder, tx?: RentalFactTx) {
     const state = this.state(tenantId);
     if (order && order.tenantId !== tenantId) throw new ForbiddenException("订单不属于当前租户");
     if (order?.inspectionTemplateSnapshots !== undefined) {
-      return structuredClone(order.inspectionTemplateSnapshots.filter((row) => !stage || row.stage === stage));
+      const originals = order.inspectionTemplateSnapshots.filter((row) => !stage || row.stage === stage);
+      if (stage === "pickup" || !(order.allocations ?? []).some((row) => (row.status === "picked_up" || row.status === "locked") && row.metadata?.exchangeId)) return structuredClone(originals);
+      return exchangeInspectionTemplates(order, originals, await this.factStore.listOrderChanges(tenantId, order.id, tx)).filter((row) => !stage || row.stage === stage);
     }
     const definition = order?.categoryVersionId && this.categoryResolver
       ? await this.categoryResolver.forVersion(order.categoryCode, order.categoryVersionId)
       : await this.getWorkspaceCategory(tenantId);
-    return state.inspectionTemplates
+    const originals = state.inspectionTemplates
       .filter((row) => !stage || row.stage === stage)
       .map((row) => this.inspectionTemplateForRead(definition, row));
+    if (!order || stage === "pickup" || !(order.allocations ?? []).some((row) => (row.status === "picked_up" || row.status === "locked") && row.metadata?.exchangeId)) return originals;
+    return exchangeInspectionTemplates(order, originals, await this.factStore.listOrderChanges(tenantId, order.id, tx)).filter((row) => !stage || row.stage === stage);
   }
 
   async listInspections(tenantId: string, orderId: string) {
@@ -2688,7 +2693,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   ) {
     const state = this.state(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
-    const frozenTemplates = order.inspectionTemplateSnapshots;
+    const frozenTemplates = order.inspectionTemplateSnapshots !== undefined || (order.allocations ?? []).some((row) => (row.status === "picked_up" || row.status === "locked") && row.metadata?.exchangeId)
+      ? await this.listInspectionTemplates(tenantId, undefined, order, tx) : undefined;
     const storedTemplate = (frozenTemplates ?? state.inspectionTemplates).find((row) => row.id === input.templateId && row.enabled);
     const inspectionCategory = order.categoryVersionId && this.categoryResolver
       ? await this.categoryResolver.forVersion(order.categoryCode, order.categoryVersionId, tx)
@@ -2706,8 +2712,19 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const partialReturnItems = template.stage === "return" && input.returnItems?.length ? input.returnItems : undefined;
     const returnableAllocationIds = new Set(
       partialReturnItems?.map((item) => item.allocationId)
-        ?? order.allocations.filter((allocation) => allocation.status === "picked_up").map((allocation) => allocation.id)
+        ?? order.allocations.filter((allocation) => allocation.status === "picked_up" || (allocation.status === "locked" && allocation.metadata?.exchangeId)).map((allocation) => allocation.id)
     );
+    assertInspectionAllocationScope(template, [...returnableAllocationIds]);
+    const replacementChange = template.exchangeId ? (await this.factStore.listOrderChanges(tenantId, order.id, tx)).find((row) => row.id === template.exchangeId) : undefined;
+    const replacementBasis = replacementChange && exchangeBasis(replacementChange);
+    const hookOrder = template.stage === "return" && template.allocationIds ? {
+      ...order,
+      lines: order.lines.filter((row) => order.allocations.some((allocation) => returnableAllocationIds.has(allocation.id) && allocation.orderLineId === row.id)),
+      allocations: order.allocations.filter((row) => returnableAllocationIds.has(row.id)),
+      reservations: order.reservations.filter((row) => order.allocations.some((allocation) => returnableAllocationIds.has(allocation.id) && allocation.orderLineId === row.orderLineId && allocation.itemGroupId === row.itemGroupId)),
+      ...(replacementBasis ? { categoryVersionId: replacementBasis.categoryVersionId, capabilitySnapshot: replacementBasis.capabilitySnapshot,
+        capabilityPolicy: replacementBasis.capabilitySnapshot?.length ? "snapshot" as const : "legacy_empty" as const } : {})
+    } : order;
     const invalidExceptionAllocation = (input.exceptions ?? []).find(
       (exception) => exception.allocationId && !returnableAllocationIds.has(exception.allocationId)
     );
@@ -2735,15 +2752,17 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       tenantId,
       template.stage === "pickup" ? "pickup_delivery" : "return_inspection",
       { type: "order", id: order.id },
-      { order, stage: template.stage, results: input.results, exceptions: input.exceptions ?? [], charges, partialReturn: partialReturnItems },
+      { order: hookOrder, stage: template.stage, results: input.results, exceptions: input.exceptions ?? [], charges, partialReturn: partialReturnItems },
       tx,
       input.operator || userName,
-      this.orderHookInstances(tenantId, order)
+      this.orderHookInstances(tenantId, hookOrder)
     );
-    const pickupBaseline = template.stage === "return"
+    // Replacement pickup evidence is not the old asset's pickup reading. Without a separately
+    // captured replacement baseline, leave comparisons unbased rather than invent usage deltas.
+    const pickupBaseline = template.stage === "return" && !template.exchangeId
       ? (await this.factStore.listInspections(tenantId, orderId)).find((row) => row.stage === "pickup")
       : undefined;
-    const comparisons = template.stage === "return"
+    const comparisons = template.stage === "return" && !template.exchangeId
       ? template.fields.map((field) => ({
           fieldCode: field.code,
           baseline: pickupBaseline?.results[field.code],
@@ -2761,7 +2780,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       return [{ fieldCode: field.code, baseline, current, delta: baseline === undefined ? undefined : current - baseline }];
     });
     const record: RentalInspectionRecord = {
-      id: id("inspection"), tenantId, orderId, stage: template.stage, templateId: template.id,
+      id: id("inspection"), tenantId, orderId, stage: template.stage, templateId: template.sourceTemplateId ?? template.id,
+      exchangeId: template.exchangeId,
       templateCode: template.code, templateVersion: template.version, results: input.results,
       baselineInspectionId: pickupBaseline?.id,
       comparisons,

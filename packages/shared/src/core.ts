@@ -6286,6 +6286,23 @@ export interface RentalOrderExchangeInspectionSnapshot {
   customerConfirmed: boolean;
 }
 
+/** Server-created replacement-goods evidence; never supplied by an exchange request. */
+export interface RentalOrderExchangeExecutionBasis {
+  categoryCode: RentalCategoryCode;
+  categoryVersionId?: string;
+  adoptionRevision?: number;
+  categoryPolicySnapshot?: RentalCategoryDefinition;
+  effectiveFrom: string;
+  priceBasis: RentalOrderExchangePriceBasis;
+  pricingStrategies: Array<{ unit: RentalPricingUnit; implementationVersion: string }>;
+  rateSnapshot: RentalPricingRate[];
+  ruleSnapshot: RentalRuleConfig;
+  calendarSnapshot: RentalQuoteCalendarDay[];
+  pricingSnapshot?: RentalExtensionPricingSnapshot;
+  inspectionTemplateSnapshots: RentalInspectionTemplate[];
+  capabilitySnapshot?: RentalWorkspaceCapabilitySnapshotEntry[];
+}
+
 /** ORDER-CHANGE-01A/01B/01C/01E：订单变更试算结果。 */
 export interface RentalOrderChangePreview {
   orderId: string;
@@ -6330,6 +6347,7 @@ export interface RentalOrderChangePreview {
     replacementAssetNo?: string;
     cancelledServiceOccurrenceIds?: string[];
     inspectionSnapshot: RentalOrderExchangeInspectionSnapshot;
+    executionBasis?: RentalOrderExchangeExecutionBasis;
   };
   warnings: string[];
 }
@@ -6468,6 +6486,12 @@ export interface RentalInspectionTemplate {
   version: string;
   fields: RentalInspectionFieldDefinition[];
   enabled: boolean;
+  /** Read-only order projection: this template applies only to these actual resources. */
+  allocationIds?: string[];
+  /** Original stored template ID; projection IDs are never database foreign keys. */
+  sourceTemplateId?: string;
+  /** Read-only projection identifying the replacement-goods change. */
+  exchangeId?: string;
 }
 
 export interface CreateRentalInspectionRequest {
@@ -6529,6 +6553,8 @@ export interface RentalInspectionRecord {
   templateId: string;
   templateCode: string;
   templateVersion: string;
+  /** Replacement action whose frozen requirements were used for this inspection. */
+  exchangeId?: string;
   results: Record<string, unknown>;
   /** 归还检查引用的领取基线；领取记录本身为空。 */
   baselineInspectionId?: string;

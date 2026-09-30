@@ -2799,7 +2799,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/changes/post-pickup-exchange", tag: "RentalCore", operationId: "applyRentalOrderPostPickupExchange",
-    summary: "Apply a post-pickup item exchange and defer the difference to settlement", permissions: ["rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Apply a post-pickup exchange, freeze replacement policy/inspection/capability evidence and defer the difference to settlement", permissions: ["rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/extensions/preview", tag: "RentalCore", operationId: "previewRentalOrderExtension",
@@ -2824,7 +2824,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   {
     method: "get", path: "/api/rental/v1/inspection-templates", tag: "RentalCore", operationId: "listRentalInspectionTemplates",
     parameters: [queryParam("stage", { type: "string", enum: ["pickup", "return"] }), queryParam("orderId")],
-    summary: "List inspection templates; orderId selects immutable order requirements, otherwise current configuration", permissions: ["rental-os:order:view"], responseSchema: "GenericObject"
+    summary: "List inspection templates; orderId projects immutable original/replacement requirements with allocationIds for separate return batches, otherwise current configuration", permissions: ["rental-os:order:view"], responseSchema: "GenericObject"
   },
   {
     method: "get", path: "/api/rental/v1/orders/{id}/inspections", tag: "RentalCore", operationId: "listRentalOrderInspections",

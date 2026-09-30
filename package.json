@@ -181,6 +181,7 @@
     "test:order-extension": "npm run build -w @rental-os/shared && node tests/rental-extension.test.cjs && node tests/rental-renewal-repricing.test.cjs",
     "test:order-change": "npm run build -w @rental-os/shared && node tests/rental-order-change.test.cjs",
     "test:order-exchange": "npm run build -w @rental-os/shared && node tests/rental-order-exchange.test.cjs && node tests/rental-order-exchange-controller.test.cjs",
+    "test:exchange-inspection": "npm run build -w @rental-os/shared && npm run build -w @rental-os/api && node tests/rental-exchange-inspection.test.cjs",
     "test:renewal-persistence": "npm run build -w @rental-os/shared && node tests/helpers/run-renewal-persistence-db.cjs",
     "test:tax": "npm run build -w @rental-os/shared && node tests/rental-tax.test.cjs",
     "test:currency": "npm run build -w @rental-os/shared && node tests/rental-currency.test.cjs",

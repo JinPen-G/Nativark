@@ -2259,7 +2259,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   private toInspectionRecord(row: any): RentalInspectionRecord {
     const results = structuredClone((row.results ?? {}) as Record<string, unknown>);
     const meta = results.__r1InspectionMeta as
-      | Pick<RentalInspectionRecord, "baselineInspectionId" | "comparisons" | "usageReadings" | "usageCorrections" | "returnedItems">
+      | Pick<RentalInspectionRecord, "exchangeId" | "baselineInspectionId" | "comparisons" | "usageReadings" | "usageCorrections" | "returnedItems">
       | undefined;
     delete results.__r1InspectionMeta;
     return {
@@ -2270,6 +2270,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       templateId: row.templateId,
       templateCode: row.templateCode,
       templateVersion: row.templateVersion,
+      exchangeId: meta?.exchangeId,
       results,
       baselineInspectionId: meta?.baselineInspectionId,
       comparisons: meta?.comparisons,
@@ -2307,6 +2308,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         results: {
           ...record.results,
           __r1InspectionMeta: {
+            exchangeId: record.exchangeId,
             baselineInspectionId: record.baselineInspectionId,
             comparisons: record.comparisons ?? [],
             usageReadings: record.usageReadings ?? [],
