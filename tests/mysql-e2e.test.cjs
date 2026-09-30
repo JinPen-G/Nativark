@@ -897,6 +897,47 @@ async function main() {
   const pickedUp = pickupResponse.body.data;
   assert.equal(pickedUp.order.status, "renting");
   assert.equal((await assetStatus()).find((row) => row.id === trackedAssetId).status, "rented", "领取后资产应为 rented");
+  if (process.env.E2E_STOP_AFTER === "renewal-api") {
+    const newEndAt = new Date(Date.parse(endAt) + 86400000).toISOString();
+    const preview = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/preview`, { newEndAt }, demo.accessToken);
+    assert.equal(preview.status, 201, `续租试算失败: ${JSON.stringify(preview.body).slice(0, 300)}`);
+    const basis = preview.body.data.executionBasis;
+    assert.equal(quote.body.data.ruleSnapshot.extension?.pricingMode ?? "incremental", "incremental", "本用例使用缺省独立续租规则");
+    assert.equal(basis.pricingMode, "incremental");
+    assert.equal(basis.policySource, "current_workspace");
+    assert.equal(basis.originalCategoryVersionId, quote.body.data.categoryVersionId);
+    assert.equal(basis.categoryVersionId, quote.body.data.categoryVersionId);
+    assert.ok(basis.categoryPolicySnapshot && basis.pricingStrategies.length > 0);
+    const requested = await request("POST", `/api/rental/v1/orders/${orderId}/extensions`, { newEndAt }, demo.accessToken);
+    assert.equal(requested.status, 201, `续租申请失败: ${JSON.stringify(requested.body).slice(0, 300)}`);
+    const extension = requested.body.data.extension;
+    assert.equal(extension.status, "pending_payment");
+    assert.ok(extension.payableAmount > 0);
+    assert.deepEqual(extension.executionBasis, basis);
+    assert.equal(requested.body.data.order.effectiveEndAt ?? requested.body.data.order.endAt, endAt, "待补款不能推进租期");
+    const unpaid = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/${extension.id}/pay`, {}, demo.accessToken);
+    assert.equal(unpaid.status, 409, "未到账续租不能直接生效");
+    for (const [instrument, amount] of [["rental", extension.payableAmount], ["deposit", extension.depositDelta], ["preauthorization", extension.preAuthDelta]]) {
+      if (amount <= 0) continue;
+      const funded = await request("POST", `/api/rental/v1/orders/${orderId}/funding-events/append`, {
+        instrument, amount, idempotencyKey: `e2e:${extension.id}:${instrument}`, reason: "续租专项模拟补款，不是供应商交易"
+      }, demo.accessToken);
+      assert.equal(funded.status, 201, `续租补款失败: ${JSON.stringify(funded.body).slice(0, 300)}`);
+    }
+    const paid = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/${extension.id}/pay`, {}, demo.accessToken);
+    assert.equal(paid.status, 201, `续租生效失败: ${JSON.stringify(paid.body).slice(0, 300)}`);
+    assert.equal(paid.body.data.order.effectiveEndAt, newEndAt);
+    assert.equal(paid.body.data.extension.status, "effective");
+    assert.deepEqual(paid.body.data.extension.executionBasis, basis);
+    const reread = await request("GET", `/api/rental/v1/orders/${orderId}/extensions`, null, demo.accessToken);
+    assert.equal(reread.status, 200);
+    assert.deepEqual(reread.body.data.find((row) => row.id === extension.id).executionBasis, basis);
+    const replay = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/${extension.id}/pay`, {}, demo.accessToken);
+    assert.equal(replay.status, 201);
+    assert.deepEqual(replay.body.data.extension.executionBasis, basis);
+    ok("续租真实 API：独立续租试算/申请、未到账拒绝、模拟补款生效、读回及补款重放均保留动作依据");
+    await maybeStopAfter("renewal-api");
+  }
   const returnTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=return", null, demo.accessToken)).body.data[0];
   const returnResponse = await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, { templateId: returnTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 9100 }, attachments: [inspectionEvidence(orderId, "return")], exceptions: [{ code: "damage", description: "E2E 损坏", chargeAmount: 66 }] }, demo.accessToken);
   assert.equal(returnResponse.status, 201, `归还检查失败: ${JSON.stringify(returnResponse.body).slice(0, 300)}`);
