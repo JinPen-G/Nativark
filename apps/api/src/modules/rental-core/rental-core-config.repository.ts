@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable } from "@nestjs/comm
 import { createHash } from "node:crypto";
 import { assertCategoryAdoptionAllowed } from "./category-governance-policy";
 import { lockActiveCategoryBinding, validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
-import { Prisma, type $Enums } from "@prisma/client";
+import { Prisma, type $Enums, type RentalCouponTemplate as CouponTemplateRow } from "@prisma/client";
 import type {
   RentalBundleComponent,
   RentalCategoryCode,
@@ -79,7 +79,7 @@ export interface RentalConfigStore {
   upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx, uniqueAttributes?: RentalUniqueAttributeClaim[], expectedBinding?: CategoryWriteBinding, allowMediaWrite?: boolean): Promise<void>;
   upsertPricingGroup?(group: RentalPricingGroup, tx?: RentalConfigTx): Promise<void>;
-  upsertCouponTemplate(template: RentalCouponTemplate, tx?: RentalConfigTx): Promise<void>;
+  upsertCouponTemplate(template: RentalCouponTemplate, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
   /** 在领券事务内锁定模板行，串行化不同幂等键对同一配额的竞争。 */
   lockCouponTemplateForClaim(tenantId: string, templateId: string, tx: RentalConfigTx): Promise<RentalCouponTemplate | undefined>;
   upsertInspectionTemplate(template: RentalInspectionTemplate, tx?: RentalConfigTx): Promise<void>;
@@ -550,7 +550,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
-  async upsertCouponTemplate(template: RentalCouponTemplate, tx?: RentalConfigTx): Promise<void> {
+  async upsertCouponTemplate(template: RentalCouponTemplate, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void> {
     const data = {
       tenantId: template.tenantId,
       code: template.code,
@@ -578,15 +578,37 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       status: template.status,
       version: template.version
     };
-    const client = this.db(tx);
-    const workspaceId = await resolveScopeWorkspaceId(client, template.tenantId);
-    const existing = await client.rentalCouponTemplate.findUnique({ where: { id: template.id }, select: { tenantId: true, workspaceId: true } });
-    assertScopedWrite(existing, template.tenantId, workspaceId, "优惠券模板");
-    await client.rentalCouponTemplate.upsert({
-      where: { id: template.id },
-      create: { workspaceId, id: template.id, ...data, createdAt: new Date(template.createdAt) },
-      update: data
-    });
+    const write = async (client: RentalConfigTx) => {
+      const workspaceId = await resolveScopeWorkspaceId(client, template.tenantId);
+      await lockActiveCategoryBinding(client, template.tenantId, workspaceId, expectedBinding);
+      // Locking reads must provide the values too: a caller's outer transaction may
+      // already have a REPEATABLE READ snapshot from before a concurrent claim.
+      const rows = await client.$queryRaw<CouponTemplateRow[]>(Prisma.sql`
+        SELECT * FROM rental_coupon_templates WHERE id = ${template.id} FOR UPDATE
+      `);
+      const existing = rows[0];
+      assertScopedWrite(existing, template.tenantId, workspaceId, "优惠券模板");
+      if (existing) {
+        if ((!tx || expectedBinding) && (existing.claimedQuantity !== template.claimedQuantity
+          || Number(existing.lockedBudget) !== template.lockedBudget || Number(existing.redeemedBudget) !== template.redeemedBudget)) {
+          throw new ConflictException("优惠券配额或预算已变化，请刷新后重新保存");
+        }
+        if (template.totalQuota < existing.claimedQuantity) throw new BadRequestException("发行量不能低于已领取数量");
+        if (template.totalBudget !== undefined && template.totalBudget < Number(existing.lockedBudget) + Number(existing.redeemedBudget)) {
+          throw new BadRequestException("总预算不能低于已锁定与已核销预算");
+        }
+        if (expectedBinding && template.version !== `${Number(existing.version.split(".")[0]) + 1}.0`) {
+          throw new ConflictException("优惠券模板已被其他人员修改，请刷新后重新保存");
+        }
+      }
+      await client.rentalCouponTemplate.upsert({
+        where: { id: template.id },
+        create: { workspaceId, id: template.id, ...data, createdAt: new Date(template.createdAt) },
+        update: data
+      });
+    };
+    if (tx) await write(tx);
+    else await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   async lockCouponTemplateForClaim(
@@ -595,18 +617,17 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     tx: RentalConfigTx
   ): Promise<RentalCouponTemplate | undefined> {
     const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
-    await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-      SELECT \`id\` FROM \`rental_coupon_templates\`
+    await lockActiveCategoryBinding(tx, tenantId, workspaceId);
+    const rows = await tx.$queryRaw<CouponTemplateRow[]>(Prisma.sql`
+      SELECT * FROM \`rental_coupon_templates\`
       WHERE \`id\` = ${templateId}
         AND \`tenantId\` = ${tenantId}
         AND \`workspaceId\` = ${workspaceId}
         AND \`status\` = 'active'
       FOR UPDATE
     `);
-    const row = await tx.rentalCouponTemplate.findFirst({
-      where: { id: templateId, tenantId, workspaceId, status: "active" }
-    });
-    return row ? this.toCouponTemplate(row) : undefined;
+    const row = rows[0];
+    return row ? this.toCouponTemplate({ ...row, stackableWithDiscountPlans: Boolean(row.stackableWithDiscountPlans) }) : undefined;
   }
 
   async upsertInspectionTemplate(template: RentalInspectionTemplate, tx?: RentalConfigTx): Promise<void> {

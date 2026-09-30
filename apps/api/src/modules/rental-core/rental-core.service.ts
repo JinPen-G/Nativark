@@ -819,6 +819,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   async saveCouponTemplate(tenantId: string, input: SaveRentalCouponTemplateRequest) {
     const state = this.state(tenantId);
+    const { binding } = await this.categoryWriteContext(tenantId, state.profile.categoryCode);
     if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("优惠券编码和名称不能为空");
     if (!Number.isFinite(input.discountValue) || input.discountValue <= 0) throw new BadRequestException("优惠值必须大于 0");
     if (input.discountType === "percentage" && input.discountValue > 100) throw new BadRequestException("折扣百分比不能超过 100");
@@ -865,7 +866,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       applicableItemGroupIds: [...new Set(input.applicableItemGroupIds ?? [])], status: input.status ?? existing?.status ?? "draft",
       version: nextVersion, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
-    await this.configStore.upsertCouponTemplate(result);
+    await this.configStore.upsertCouponTemplate(result, undefined, binding);
 
     if (existing) state.couponTemplates.splice(state.couponTemplates.indexOf(existing), 1, result); else state.couponTemplates.unshift(result);
     return result;

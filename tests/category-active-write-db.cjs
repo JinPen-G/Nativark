@@ -181,6 +181,32 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.deepEqual((await db.rentalAsset.findUniqueOrThrow({ where: { id: asset.id } })).attributes.retiredProof, { evidence: "latest" }, "资产资料编辑必须保留锁后最新的退役字段证据");
     await assert.rejects(context(() => facts.upsertAsset({ ...asset, attributes: { retiredProof: null } })), /不可修改/);
     assert.equal(await db.rentalAttributeUniqueValue.count({ where: { workspaceId, entityType: "asset", entityId: asset.id } }), 1, "被拒绝的编辑不得删除原唯一声明");
+    const coupon = { id: `${fixture}_coupon`, tenantId: "tenant_001", code: "C", name: "专项券", discountType: "amount", discountValue: 10, minimumSpend: 0, appliesTo: "rental", stackableWithDiscountPlans: true, totalQuota: 10, claimedQuantity: 0, perCustomerLimit: 2, perCustomerUseLimit: 1, totalBudget: 100, lockedBudget: 0, redeemedBudget: 0, claimFrom: "2020-01-01T00:00:00Z", claimTo: "2126-01-01T00:00:00Z", effectiveFrom: "2020-01-01T00:00:00Z", effectiveTo: "2126-01-01T00:00:00Z", applicableItemGroupIds: [input.id], status: "active", version: "1.0", createdAt: rule.createdAt };
+    await assert.rejects(context(() => repo.upsertCouponTemplate(coupon, undefined, oldBinding)), /版本已变化/);
+    assert.equal(await db.rentalCouponTemplate.count({ where: { workspaceId } }), 0);
+    await context(() => repo.upsertCouponTemplate(coupon, undefined, currentBinding));
+    await db.rentalCouponTemplate.update({ where: { id: coupon.id }, data: { claimedQuantity: 2, lockedBudget: 15, redeemedBudget: 5 } });
+    await assert.rejects(context(() => repo.upsertCouponTemplate({ ...coupon, version: "2.0" }, undefined, currentBinding)), /配额或预算已变化/);
+    const freshCoupon = { ...coupon, claimedQuantity: 2, lockedBudget: 15, redeemedBudget: 5, version: "2.0" };
+    await assert.rejects(context(() => repo.upsertCouponTemplate({ ...freshCoupon, totalQuota: 1 }, undefined, currentBinding)), /发行量/);
+    await assert.rejects(context(() => repo.upsertCouponTemplate({ ...freshCoupon, totalBudget: 19 }, undefined, currentBinding)), /总预算/);
+    await context(() => repo.upsertCouponTemplate(freshCoupon, undefined, currentBinding));
+    await assert.rejects(context(() => repo.upsertCouponTemplate(freshCoupon, undefined, currentBinding)), /其他人员修改/);
+    // Establish an outer RR snapshot, then commit a newer claim from another connection.
+    await db.$transaction(async (tx) => {
+      assert.equal((await tx.rentalCouponTemplate.findUniqueOrThrow({ where: { id: coupon.id } })).claimedQuantity, 2);
+      await db.rentalCouponTemplate.update({ where: { id: coupon.id }, data: { claimedQuantity: 3 } });
+      const lockedCoupon = await context(() => repo.lockCouponTemplateForClaim("tenant_001", coupon.id, tx));
+      assert.equal(lockedCoupon.claimedQuantity, 3, "锁定读必须返回最新配额而不是外层旧快照");
+      assert.deepEqual(lockedCoupon.applicableItemGroupIds, [input.id]);
+      assert.equal(lockedCoupon.stackableWithDiscountPlans, true);
+      await context(() => repo.upsertCouponTemplate({ ...lockedCoupon, claimedQuantity: 4 }, tx));
+    });
+    const storedCoupon = await db.rentalCouponTemplate.findUniqueOrThrow({ where: { id: coupon.id } });
+    assert.equal(storedCoupon.claimedQuantity, 4);
+    assert.equal(Number(storedCoupon.lockedBudget), 15);
+    assert.equal(Number(storedCoupon.redeemedBudget), 5);
+    assert.equal(storedCoupon.version, "2.0", "陈旧保存不得覆盖主档版本");
     const calendar = { tenantId: "tenant_001", year: 2030, version: "1.0", region: "CN", status: "draft", days: [], revision: 1 };
     const calendarAudit = { date: "2030-01-01", action: "override", reason: "calendar fixture", at: new Date().toISOString() };
     await context(() => business.upsertCalendar(calendar));
