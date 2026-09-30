@@ -20,6 +20,7 @@ import type {
 import { PrismaService } from "../database/prisma.service";
 import type { RentalConfigTx } from "./rental-core-config.repository";
 import { assertScopedWrite, resolveScopeWorkspaceId } from "./workspace-scope";
+import { lockActiveCategoryBinding } from "./category-active-write";
 
 const canonicalJson = (value: unknown) => JSON.stringify(value, (_key, item: unknown) => {
   if (!item || typeof item !== "object" || Array.isArray(item)) return item;
@@ -367,6 +368,12 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, calendar.tenantId);
     try {
       await this.prisma.$transaction(async (tx) => {
+      // Calendar changes participate in adoption preflight. Hold the same space
+      // lock until both the calendar and its override audit have committed.
+      await lockActiveCategoryBinding(tx, calendar.tenantId, workspaceId);
+      if (audits.some((entry) => (entry.year !== undefined && entry.year !== calendar.year) || (entry.version !== undefined && entry.version !== calendar.version))) {
+        throw new ConflictException("日历覆盖审计必须属于本次写入的年度与版本");
+      }
       if (expectedRevision === undefined) {
         await tx.rentalBusinessCalendar.upsert({
           where: { workspaceId_year_version: { workspaceId, year: calendar.year, version: calendar.version } },
@@ -486,6 +493,10 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     const nextData = this.calendarData(next);
     const supersededData = superseded ? this.calendarData(superseded) : undefined;
     await this.prisma.$transaction(async (tx) => {
+      await lockActiveCategoryBinding(tx, next.tenantId, workspaceId);
+      if (superseded && (superseded.tenantId !== next.tenantId || superseded.year !== next.year || superseded.version === next.version)) {
+        throw new ConflictException("日历发布只能替代本租户同年度的其他版本");
+      }
       // 条件更新，条件是「读到的 revision」：两人同时发布同一年度时，后者会更新到 0 行
       // 并在这里整体回滚，而不是两次都成功留下两个 published 版本。
       const conditional = async (

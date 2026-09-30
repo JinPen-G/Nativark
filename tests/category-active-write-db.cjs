@@ -5,6 +5,7 @@ const { PrismaClient } = require("@prisma/client");
 const { RENTAL_CATEGORY_DEFINITIONS } = require("@rental-os/shared");
 const { RentalCoreConfigRepository } = require("../apps/api/dist/modules/rental-core/rental-core-config.repository.js");
 const { WorkspaceCapabilityRepository } = require("../apps/api/dist/modules/rental-core/workspace-capability.repository.js");
+const { RentalBusinessConfigRepository } = require("../apps/api/dist/modules/rental-core/rental-business-config.repository.js");
 const { runWithRequestIdentity } = require("../apps/api/dist/common/request-identity.js");
 const { validateActiveCategoryWrite } = require("../apps/api/dist/modules/rental-core/category-active-write.js");
 if (!/^rental_os_e2e_/u.test(new URL(process.env.DATABASE_URL).pathname.slice(1))) throw new Error("仅允许专用 E2E 库");
@@ -14,6 +15,7 @@ const workspaceId = fixture;
 const versionId = `${fixture}_v2`;
 const repo = new RentalCoreConfigRepository(db);
 const capabilities = new WorkspaceCapabilityRepository(db);
+const business = new RentalBusinessConfigRepository(db);
 const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspaceId }, fn);
 (async () => {
   try {
@@ -86,7 +88,32 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes.__itemGroupMedia, { images: ["new"] }, "受控上传写穿到库");
     await context(() => repo.upsertItemGroup({ ...input, attributes: { identity: "GHI", __itemGroupMedia: { images: ["stale"] } } }));
     assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes.__itemGroupMedia, { images: ["new"] }, "普通资料保存不能覆盖最新图片");
-    console.log("category-active-write-db: 锁竞争后型号/设置/地点/能力旧请求拒绝、实例审计原子性、当前定义复核与唯一声明/媒体边界通过");
+    const calendar = { tenantId: "tenant_001", year: 2030, version: "1.0", region: "CN", status: "draft", days: [], revision: 1 };
+    const calendarAudit = { date: "2030-01-01", action: "override", reason: "calendar fixture", at: new Date().toISOString() };
+    await context(() => business.upsertCalendar(calendar));
+    const writes = await Promise.allSettled([
+      context(() => business.upsertCalendar({ ...calendar, revision: 2 }, 1, [calendarAudit])),
+      context(() => business.upsertCalendar({ ...calendar, revision: 2 }, 1, [calendarAudit]))
+    ]);
+    assert.equal(writes.filter((row) => row.status === "fulfilled").length, 1, "同年度旧修订竞争只能有一条成功");
+    assert.equal(await db.rentalCalendarOverrideAuditEntry.count({ where: { workspaceId } }), 1, "竞争失败不留覆盖审计");
+    const nextCalendar = { ...calendar, version: "2.0", revision: 1 };
+    await context(() => business.upsertCalendar(nextCalendar));
+    await assert.rejects(context(() => business.publishCalendarVersion(
+      { ...nextCalendar, status: "published", revision: 2 },
+      { ...calendar, status: "superseded", revision: 3 },
+      { next: 1, superseded: 1 }
+    )), /其他人修改/);
+    assert.equal((await db.rentalBusinessCalendar.findUnique({ where: { workspaceId_year_version: { workspaceId, year: 2030, version: "2.0" } } })).status, "draft", "第二行修订冲突必须回滚已写第一行");
+    await context(() => business.publishCalendarVersion(
+      { ...nextCalendar, status: "published", revision: 2 },
+      { ...calendar, status: "superseded", revision: 3 },
+      { next: 1, superseded: 2 }
+    ));
+    assert.equal(await db.rentalBusinessCalendar.count({ where: { workspaceId, status: "published" } }), 1);
+    await assert.rejects(context(() => business.upsertCalendar({ ...nextCalendar, revision: 3 }, 2, [{ ...calendarAudit, year: 2031 }])), /本次写入/);
+    assert.equal(await db.rentalCalendarOverrideAuditEntry.count({ where: { workspaceId } }), 1);
+    console.log("category-active-write-db: 型号/设置/地点/能力绑定保护、日历竞争与双行发布回滚、审计原子性及唯一声明/媒体边界通过");
   } finally {
     await db.businessWorkspace.deleteMany({ where: { id: workspaceId } });
     await db.rentalCategoryVersion.deleteMany({ where: { id: versionId } });
