@@ -1905,6 +1905,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   ...([
     ["get", "", "listPlatformRentalCategoryGovernance", "List category governance summaries", "view"],
     ["get", "/capability-catalog", "rentalCategoryCapabilityCatalog", "Read executable capability and pricing catalog", "view"],
+    ["get", "/tenant-directory", "rentalCategoryTenantDirectory", "Read bounded tenant identifiers and labels for pilot selection; no business facts", "view"],
     ["get", "/{code}", "rentalCategoryDetail", "Read category identity and immutable versions", "view"],
     ["get", "/{code}/candidates/{tenantId}/{operation}", "rentalCategoryAdoptionCandidates", "Read versions allowed by the same opening and adoption scope predicates used at commit", "view"],
     ["post", "/{code}/drafts", "createRentalCategoryDraft", "Clone a published same-category version into a draft", "edit", objectOf({ sourceVersionId: stringSchema, versionLabel: stringSchema, reason: stringSchema }, ["sourceVersionId", "versionLabel", "reason"], false)],

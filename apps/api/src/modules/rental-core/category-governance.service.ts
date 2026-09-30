@@ -87,9 +87,14 @@ export class CategoryGovernanceService {
       const workspaces = await this.prisma.businessWorkspace.findMany({ where: { categoryCode: row.code }, select: { tenantId: true } });
       const published = row.versions.filter((v) => ["published", "legacy_baseline"].includes(v.status)).sort((a, b) => (b.publishedAt?.getTime() ?? 0) - (a.publishedAt?.getTime() ?? 0));
       return { code: row.code.toLowerCase(), name: row.name, openingScope: row.openingScope, openingTenantIds: row.openingTenantIds ?? [], openingRevision: row.openingRevision,
-        recommendedVersionId: row.recommendedVersionId, latestPublished: published[0] ?? null, drafts: row.versions.filter((v) => v.status === "draft"),
+        recommendedVersionId: row.recommendedVersionId, recommendedVersionLabel: row.versions.find((v) => v.id === row.recommendedVersionId)?.versionLabel ?? null,
+        latestPublished: published[0] ?? null, drafts: row.versions.filter((v) => v.status === "draft"),
         adoptedSpaces: workspaces.length, adoptedTenants: new Set(workspaces.map((w) => w.tenantId)).size };
     }));
+  }
+  async tenantDirectory(user: SystemUserRow) {
+    assertCategoryGovernancePermission(user, P.view);
+    return this.prisma.tenant.findMany({ select: { id: true, code: true, name: true }, orderBy: { code: "asc" }, take: 1000 });
   }
   async detail(code: string, user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.view);

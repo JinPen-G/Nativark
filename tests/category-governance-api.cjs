@@ -9,9 +9,15 @@ module.exports = async function categoryGovernanceApi({ request, token, tenantTo
     return result.body.data;
   };
   assert.equal((await request("GET", base, undefined, tenantToken)).status, 403, "租户管理员不可越权治理平台品类");
+  assert.equal((await request("GET", base + "/tenant-directory", undefined, tenantToken)).status, 403);
+  const directory = await call("GET", "/tenant-directory");
+  assert.ok(directory.length > 0);
+  for (const entry of directory) assert.deepEqual(Object.keys(entry).sort(), ["code", "id", "name"], "试点选择目录只能返回身份及名称，不得夹带业务事实");
   const initial = await call("GET", "/camera");
   const source = initial.versions.find((v) => v.id === initial.recommendedVersionId);
   assert.ok(source, "已有推荐版本必须存在");
+  const summaries = await call("GET", "");
+  assert.equal(summaries.find((entry) => entry.code === "camera").recommendedVersionLabel, source.versionLabel);
   const original = structuredClone(source.definition);
   const draft = await call("POST", "/camera/drafts", { sourceVersionId: source.id, versionLabel: "e2e-governance-v2", reason: "专项复制草稿" }, 201);
   const section = `/camera/versions/${draft.id}/sections/basic`;

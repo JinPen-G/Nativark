@@ -9,6 +9,7 @@ export class CategoryGovernanceController {
   constructor(private readonly governance: CategoryGovernanceService) {}
   @Get() list(@Req() req: PlatformRequest) { return this.governance.list(req.user); }
   @Get("capability-catalog") catalog(@Req() req: PlatformRequest) { return this.governance.catalog(req.user); }
+  @Get("tenant-directory") tenants(@Req() req: PlatformRequest) { return this.governance.tenantDirectory(req.user); }
   @Get(":code") detail(@Param("code") code: string, @Req() req: PlatformRequest) { return this.governance.detail(code, req.user); }
   @Get(":code/candidates/:tenantId/:operation") candidates(@Param("code") code: string, @Param("tenantId") tenantId: string, @Param("operation") operation: string, @Req() req: PlatformRequest) { return this.governance.candidates(code, tenantId, operation, req.user); }
   @Post(":code/drafts") create(@Param("code") code: string, @Body() body: CreateCategoryDraftDto, @Req() req: PlatformRequest) { return this.governance.createDraft(code, body, req.user); }
