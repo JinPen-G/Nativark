@@ -88,17 +88,7 @@ try {
     "--from-schema-datasource", "apps/api/prisma/schema.prisma",
     "--to-schema-datamodel", "apps/api/prisma/schema.prisma", "--exit-code"
   ], { cwd: root, encoding: "utf8", env: prismaEnv, maxBuffer: 16 * 1024 * 1024 });
-  // The source database already has two unrelated FK-order drifts. Report
-  // them explicitly; any additional diff (especially our new tables) fails.
-  if (drift.status === 2) {
-    const chunks = String(drift.stdout).trim().split(/(?=\[\*\] Changed the )/u).filter(Boolean);
-    const allowed = new Set(["customer_corporate_credit_ledger", "rental_offline_payment_registrations"]);
-    const names = chunks.map((chunk) => chunk.match(/^\[\*\] Changed the `([^`]+)` table/u)?.[1]);
-    if (names.some((name) => !name || !allowed.has(name))) checkMysql(drift, "迁移后结构对齐检查");
-    console.log(`来源库既有外键漂移（本专项未改）：${names.join(", ")}`);
-  } else {
-    checkMysql(drift, "迁移后结构对齐检查");
-  }
+  checkMysql(drift, "迁移后结构对齐检查");
   const afterMigrations = Number(sql(admin, `SELECT COUNT(*) FROM \`${clone}\`.\`_prisma_migrations\``));
   if (afterMigrations <= beforeMigrations) throw new Error("没有新增迁移，演练没有覆盖本次版本层");
   const after = counts(admin, clone);
@@ -158,6 +148,10 @@ try {
       throw new Error("Seed 覆盖了已存在的品类身份或发布版本正文");
     }
   }
+  const uniqueness = spawnSync(process.execPath, ["tests/category-unique-claims-db.cjs"], {
+    cwd: root, encoding: "utf8", env: prismaEnv, maxBuffer: 16 * 1024 * 1024
+  });
+  checkMysql(uniqueness, "型号动态属性并发唯一性");
   console.log(JSON.stringify({
     result: "passed", container: CONTAINER, clone, beforeMigrations, afterMigrations,
     categories, versions, runtimeVersions, runtimeMismatches, adoptionAudits, governanceAudits, unbound,

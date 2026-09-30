@@ -113,6 +113,8 @@ import { redactDeliveryAddressPhone } from "./rental-delivery-address-privacy";
 import { carrierSerializedCapacityConflict, carrierShipmentInventoryMutationBlocked, rentalOrderDueAt, shiftedCarrierDueAt } from "./rental-carrier-shipment";
 import { RentalFundingService } from "./rental-funding.service";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
+import { RentalCategoryResolver } from "./rental-category-resolver.service";
+import { normalizedRentalAttributeValue, validateRentalCategoryAttributes } from "./rental-category-attributes";
 import {
   RentalCoreFactRepository,
   type ActiveReservationRow,
@@ -349,7 +351,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     @Optional() private readonly fileStorage?: FileStorageRuntimeService,
     // 取消/爽约后仍被订单持有的押金、预授权与多收租金，须在同一事务内读事件流推导；
     // 可选仅为保留直接构造本服务的内存单测，生产 AppModule 必然注入。
-    @Optional() private readonly funding?: RentalFundingService
+    @Optional() private readonly funding?: RentalFundingService,
+    private readonly categoryResolver?: RentalCategoryResolver
   ) {}
 
   /**
@@ -374,11 +377,23 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     instances?: WorkspaceCapabilityInstance[]
   ) {
     if (!this.hooks) return undefined;
+    const payload = subject && typeof subject === "object" ? subject as Record<string, unknown> : undefined;
+    // 交接检查节点的 payload 为 { order, results }，配货/结算节点直接传订单。
+    // 两种受控形状都必须读取订单的历史版本，不能因包了一层而失去历史政策。
+    const orderPayload = payload?.order && typeof payload.order === "object"
+      ? payload.order as Record<string, unknown> : payload;
+    const historical = subjectRef.type === "order" && orderPayload
+      ? orderPayload as Pick<RentalOrder, "categoryVersionId" | "capabilityPolicy"> : undefined;
+    const definition = historical?.categoryVersionId && this.categoryResolver
+      ? await this.categoryResolver.forVersion(this.state(tenantId).profile.categoryCode, historical.categoryVersionId)
+      : historical ? undefined : await this.getWorkspaceCategory(tenantId);
     return this.hooks.evaluate({
       point,
       tenantId,
       workspaceId: this.workspaceOf(tenantId),
       categoryCode: this.state(tenantId).profile.categoryCode,
+      // 旧单明确保留已有兼容政策，不能把升级后新增必选能力套回存量。
+      requiredCapabilities: definition?.requiredCapabilities ?? (historical?.capabilityPolicy === "legacy_empty" ? [] : undefined),
       subjectRef,
       subject,
       tx,
@@ -513,7 +528,12 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       // 品类以经营空间为准（需求 3）。
       const categoryCode = snapshot.workspaceCategoryCode;
       if (!categoryCode) continue;
-      const seeded = this.seedState(snapshot.tenantId, categoryCode, this.seedPrefix(snapshot.tenantId, snapshot.workspaceId));
+      // 有经营事实的空间由当前库配置恢复，不在启动时改写任何资料。
+      // 尚未配置的新空间则不能用代码内置默认值替代已采用的版本模板。
+      const definition = !snapshot.hasPersistedConfig && this.categoryResolver
+        ? (await this.categoryResolver.forWorkspace(snapshot.tenantId, snapshot.workspaceId)).definition
+        : undefined;
+      const seeded = this.seedState(snapshot.tenantId, categoryCode, this.seedPrefix(snapshot.tenantId, snapshot.workspaceId), "CNY", definition);
       const base = cached ?? seeded;
       // tenant_rental_profiles 是升级兼容用的租户级档案，只能还原默认空间。
       // 第二空间若直接套用它，会把 workspace 的 camping 等品类重新覆盖成租户
@@ -550,6 +570,15 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   listCategories() { return categories; }
+  async getWorkspaceCategory(tenantId: string): Promise<RentalCategoryDefinition> {
+    return this.effectiveCategory(tenantId, this.getProfile(tenantId).categoryCode);
+  }
+  async getWorkspaceCategoryInTransaction(tenantId: string, workspaceId: string, categoryCode: RentalCategoryCode, tx: RentalConfigTx): Promise<RentalCategoryDefinition> {
+    if (!this.categoryResolver) return this.category(categoryCode);
+    const { definition } = await this.categoryResolver.forWorkspace(tenantId, workspaceId, tx);
+    if (definition.code !== categoryCode) throw new ConflictException("新空间品类与初始化模板不一致");
+    return definition;
+  }
   /**
    * 初始化租户经营品类。
    *
@@ -574,7 +603,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       throw new ConflictException("已有租赁数据的租户不能切换经营品类");
     }
     if (!existing) {
-      const seeded = this.seedState(tenantId, categoryCode, tenantId, currency);
+      const definition = await this.categoryResolver?.forNewWorkspace(categoryCode, tx);
+      const seeded = this.seedState(tenantId, categoryCode, tenantId, currency, definition);
       await this.persistConfig(seeded, tx);
       seeded.configPersisted = true;
       // 先落库再发布进程缓存。persist 失败时不能让同步查找表指向一个
@@ -608,7 +638,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     tx?: RentalConfigTx
   ) {
     if (this.states.has(workspaceId)) return;
-    const seeded = this.seedState(tenantId, categoryCode, this.seedPrefix(tenantId, workspaceId));
+    const definition = (await this.categoryResolver?.forWorkspace(tenantId, workspaceId, tx))?.definition;
+    const seeded = this.seedState(tenantId, categoryCode, this.seedPrefix(tenantId, workspaceId), "CNY", definition);
     // 写入必须落在这个新空间，而不是会话当前所在的空间。
     await runWithRequestIdentity({ tenantId, workspaceId }, async () => {
       await this.persistConfig(seeded, tx);
@@ -680,7 +711,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   async saveBusinessSettings(tenantId: string, input: SaveTenantRentalBusinessSettingsRequest, operator: string) {
     const state = this.state(tenantId);
-    const definition = this.category(state.profile.categoryCode);
+    const definition = await this.effectiveCategory(tenantId, state.profile.categoryCode);
     const pricingUnits = new Set(definition.businessModel.pricingUnits);
     const fulfillmentModes = new Set(definition.businessModel.fulfillmentModes);
     const enabledPaymentMethods = input.payment.enabledMethods?.length ? input.payment.enabledMethods : DEFAULT_RENTAL_PAYMENT_METHODS;
@@ -836,7 +867,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   async saveProfile(tenantId: string, input: SaveTenantRentalProfileRequest) {
     const state = this.state(tenantId);
-    const definition = this.category(input.categoryCode);
+    const definition = await this.effectiveCategory(tenantId, input.categoryCode);
     const categoryChanged = state.profile.categoryCode !== input.categoryCode;
     if (categoryChanged) throw new ConflictException("SaaS 租户创建后经营品类固定，不能切换");
     const allowed = new Set(definition.defaultCapabilities);
@@ -894,7 +925,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   async saveLocation(tenantId: string, input: SaveRentalFulfillmentLocationRequest) {
     const state = this.state(tenantId);
-    const definition = this.category(state.profile.categoryCode);
+    const definition = await this.effectiveCategory(tenantId, state.profile.categoryCode);
     if (!definition.businessModel.locationTypes.includes(input.type)) throw new BadRequestException("当前经营品类不支持该履约地点类型");
     if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("地点编码和名称不能为空");
     let operator = input.operatorId ? state.operators.find((row) => row.id === input.operatorId) : undefined;
@@ -991,7 +1022,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   async saveItemGroup(tenantId: string, input: SaveRentalItemGroupRequest) {
     const state = this.state(tenantId);
-    const definition = this.category(state.profile.categoryCode);
+    const definition = await this.effectiveCategory(tenantId, state.profile.categoryCode);
     if (!definition.supportedInventoryModes.includes(input.inventoryMode)) throw new BadRequestException("当前经营品类不支持该库存模式");
     if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("标的编码和名称不能为空");
     const duplicate = state.itemGroups.find((row) => row.code === input.code && row.id !== input.id);
@@ -1042,7 +1073,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // 规则认为该套装组合不可用）或给出提示，但不得改写记录本身——`result` 传进去的是
     // 冻结快照，能力只能通过返回值表达意见。
     await this.runHook(tenantId, "item_onboarding", { type: "item_group", id: result.id }, result);
-    await this.configStore.upsertItemGroup(result);
+    await this.configStore.upsertItemGroup(
+      result, undefined,
+      this.uniqueAttributeClaims(definition.businessModel.assetFields, "item_group", result.attributes)
+    );
 
     if (existing) state.itemGroups.splice(state.itemGroups.indexOf(existing), 1, result); else state.itemGroups.unshift(result);
     // 定价分组只保存型号引用，成员摘要由当前型号事实派生。型号更名或停用后同步
@@ -1187,7 +1221,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (group.inventoryMode !== RentalInventoryMode.Serialized) throw new BadRequestException("只有序列化库存可以登记独立资产");
     const location = this.activeLocation(state, input.locationId, "storage");
     if (!input.assetNo?.trim()) throw new BadRequestException("资产编号不能为空");
-    const definition = this.category(state.profile.categoryCode);
+    const definition = await this.effectiveCategory(tenantId, state.profile.categoryCode);
     const assetNo = input.assetNo.trim();
     const assets = await this.factStore.listAssets(tenantId);
     const assetAttributes = { ...(input.attributes ?? {}) };
@@ -2029,6 +2063,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const order: RentalOrder = {
       id: orderId, tenantId, orderNo: `RC${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}${String(sequence).padStart(3, "0")}`,
       categoryCode: state.profile.categoryCode, status: RentalCoreOrderStatus.Draft,
+      categoryVersionId: quote.categoryVersionId,
       customerType: input.customerType, customerId: input.customerId, customerName: input.customerName.trim(), contactPhone: input.contactPhone?.trim(),
       membershipSnapshot: quote.membershipSnapshot ? structuredClone(quote.membershipSnapshot) : undefined,
       membershipBenefitEvaluations: quote.membershipBenefitEvaluations?.length ? structuredClone(quote.membershipBenefitEvaluations) : undefined,
@@ -4463,6 +4498,13 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return state;
   }
   private category(code: RentalCategoryCode) { const found = categories.find((row) => row.code === code); if (!found) throw new BadRequestException("未知经营品类"); return found; }
+  private async effectiveCategory(tenantId: string, code: RentalCategoryCode): Promise<RentalCategoryDefinition> {
+    // 单测可直接构造 RentalCoreService；正式装配必须由 AppModule 注入解析器。
+    if (!this.categoryResolver) return this.category(code);
+    const resolved = await this.categoryResolver.forWorkspace(tenantId, this.workspaceOf(tenantId));
+    if (resolved.definition.code !== code) throw new ConflictException("经营空间品类与商品资料不一致");
+    return resolved.definition;
+  }
   private group(state: TenantRentalState, groupId: string) { const found = state.itemGroups.find((row) => row.id === groupId); if (!found) throw new NotFoundException("标的分组不存在"); return found; }
   private location(state: TenantRentalState, locationId: string) { const found = state.locations.find((row) => row.id === locationId); if (!found) throw new NotFoundException("履约网点不存在"); return found; }
 
@@ -4679,22 +4721,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     aliases: Record<string, unknown> = {},
     validateRequired = true
   ) {
-    const scopedFields = fields.filter((item) => item.scope === scope);
-    const aliasCodes = new Set(Object.keys(aliases));
-    const allowedCodes = new Set(scopedFields.map((field) => field.code).filter((code) => !aliasCodes.has(code)));
-    const unknownCodes = Object.keys(attributes).filter((code) => !allowedCodes.has(code));
-    if (unknownCodes.length) throw new BadRequestException(`存在未定义的品类字段：${unknownCodes.join("、")}`);
-    for (const field of scopedFields) {
-      const value = aliases[field.code] ?? attributes[field.code];
-      const missing = value === undefined || value === null || value === "" || (typeof value === "string" && value.trim() === "");
-      if (validateRequired && field.required && missing) throw new BadRequestException(`${field.label}不能为空`);
-      if (missing) continue;
-      if (field.type === "string" && typeof value !== "string") throw new BadRequestException(`${field.label}必须是文本`);
-      if (field.type === "number" && (typeof value !== "number" || !Number.isFinite(value))) throw new BadRequestException(`${field.label}必须是有效数字`);
-      if (field.type === "boolean" && typeof value !== "boolean") throw new BadRequestException(`${field.label}必须是布尔值`);
-      if (field.type === "date" && !Number.isFinite(new Date(String(value)).getTime())) throw new BadRequestException(`${field.label}必须是有效日期`);
-      if (field.type === "select" && field.options?.length && !field.options.includes(String(value))) throw new BadRequestException(`${field.label}不在允许选项中`);
-    }
+    validateRentalCategoryAttributes(fields, scope, attributes, aliases, validateRequired);
   }
 
   private assertUniqueAttributes<T extends { id: string; attributes: Record<string, unknown> }>(
@@ -4719,8 +4746,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   private normalizedUniqueValue(value: unknown): string | undefined {
-    if (value === undefined || value === null || value === "") return undefined;
-    return typeof value === "string" ? value.normalize("NFKC").trim().toUpperCase() : JSON.stringify(value);
+    return normalizedRentalAttributeValue(value);
   }
 
   private uniqueAttributeClaims(
@@ -4846,16 +4872,16 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 地点、券模板直接改挂到新空间上（实测表现为新建空间后原空间数据消失）。
    * 默认空间沿用 tenantId 前缀以保持既有 id 不变，其余空间用自己的 id。
    */
-  private seedState(tenantId: string, categoryCode: RentalCategoryCode, idPrefix: string = tenantId, currency: RentalCurrency = "CNY"): TenantRentalState {
+  private seedState(tenantId: string, categoryCode: RentalCategoryCode, idPrefix: string = tenantId, currency: RentalCurrency = "CNY", resolvedDefinition?: RentalCategoryDefinition): TenantRentalState {
     const isSampleTenant = tenantId === "tenant_001" || tenantId === "tenant_002";
-    const definition = this.category(categoryCode); const timestamp = now(); const locationId = `${idPrefix}_location_01`;
+    const definition = resolvedDefinition ?? this.category(categoryCode); const timestamp = now(); const locationId = `${idPrefix}_location_01`;
     const initialSetup = definition.businessModel.defaults.initialSetup;
     const operator: RentalFulfillmentOperator = { id: `${idPrefix}_operator_01`, tenantId, code: "SELF", name: initialSetup.operatorName, type: "self_operated", contactName: "运营负责人", contactPhone: "13800000000", settlementMode: "self", status: "enabled", createdAt: timestamp, updatedAt: timestamp };
     const location: RentalFulfillmentLocation = { id: locationId, tenantId, code: "MAIN", name: initialSetup.locationName, type: initialSetup.locationType, operatorId: operator.id, operatorType: operator.type, operatorName: operator.name, capabilities: ["pickup", "return", "storage", "delivery"], address: "演示地址 1 号", province: "上海市", city: "上海市", district: "徐汇区", timezone: "Asia/Shanghai", contactName: "值班负责人", contactPhone: "13800000000", businessHours: "09:00-20:00", status: "enabled" };
     const samples = isSampleTenant
       ? buildRentalCategorySamples({ tenantId, idPrefix, categoryCode, location, timestamp })
       : { itemGroups: [], assets: [], stockBalances: [] };
-    const templates = this.buildInspectionTemplates(tenantId, categoryCode, idPrefix);
+    const templates = this.buildInspectionTemplates(tenantId, categoryCode, idPrefix, definition);
     return {
       profile: { tenantId, categoryCode, capabilities: [...definition.defaultCapabilities] as RentalCapability[], terminology: { ...definition.terminology }, configVersion: definition.version, initializedAt: timestamp, updatedAt: timestamp },
       businessSettings: defaultBusinessSettings(tenantId, definition, currency),
@@ -4981,8 +5007,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     };
   }
 
-  private buildInspectionTemplates(tenantId: string, categoryCode: RentalCategoryCode, idPrefix: string): RentalInspectionTemplate[] {
-    const definition = this.category(categoryCode);
+  private buildInspectionTemplates(tenantId: string, categoryCode: RentalCategoryCode, idPrefix: string, resolvedDefinition?: RentalCategoryDefinition): RentalInspectionTemplate[] {
+    const definition = resolvedDefinition ?? this.category(categoryCode);
     return (["pickup", "return"] as const).map((stage) => ({
       id: `${idPrefix}_${stage}_template`, tenantId, categoryCode,
       code: `${categoryCode.toUpperCase()}_${stage.toUpperCase()}_V1`,

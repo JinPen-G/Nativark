@@ -1,4 +1,5 @@
 import { ConflictException, Injectable } from "@nestjs/common";
+import { createHash } from "node:crypto";
 import { Prisma, type $Enums } from "@prisma/client";
 import type {
   RentalBundleComponent,
@@ -18,6 +19,7 @@ import { RENTAL_CATEGORY_WORKSPACE_NAMES } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { getRequestWorkspaceId } from "../../common/request-identity";
 import { assertScopedWrite, resolveScopeWorkspaceId } from "./workspace-scope";
+import type { RentalUniqueAttributeClaim } from "./rental-core-fact.repository";
 
 /**
  * 单个**经营空间**的全部配置，用于启动预热写穿缓存。
@@ -72,7 +74,7 @@ export interface RentalConfigStore {
   upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx): Promise<void>;
   upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx): Promise<void>;
   upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx): Promise<void>;
-  upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx): Promise<void>;
+  upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx, uniqueAttributes?: RentalUniqueAttributeClaim[]): Promise<void>;
   upsertPricingGroup?(group: RentalPricingGroup, tx?: RentalConfigTx): Promise<void>;
   upsertCouponTemplate(template: RentalCouponTemplate, tx?: RentalConfigTx): Promise<void>;
   /** 在领券事务内锁定模板行，串行化不同幂等键对同一配额的竞争。 */
@@ -388,7 +390,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
   }
 
   /** 套装组成是独立表，整组替换以免留下已被移除的组件行。 */
-  async upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx): Promise<void> {
+  async upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx, uniqueAttributes?: RentalUniqueAttributeClaim[]): Promise<void> {
     const data = {
       tenantId: group.tenantId,
       categoryCode: upper<$Enums.RentalCategoryCode>(group.categoryCode),
@@ -410,6 +412,27 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       if (componentIds.length) {
         const components = await client.rentalItemGroup.findMany({ where: { id: { in: componentIds }, tenantId: group.tenantId, workspaceId }, select: { id: true } });
         if (components.length !== componentIds.length) throw new ConflictException("套装组成引用了其他租户或经营空间的产品型号");
+      }
+      if (uniqueAttributes) {
+        await client.rentalAttributeUniqueValue.deleteMany({
+          where: { tenantId: group.tenantId, workspaceId, entityType: "item_group", entityId: group.id }
+        });
+        for (const claim of uniqueAttributes) {
+          try {
+            await client.rentalAttributeUniqueValue.create({ data: {
+              id: `attruniq_${createHash("sha256").update(`${workspaceId}|item_group|${claim.fieldCode}|${claim.normalizedValue}`).digest("hex")}`,
+              tenantId: group.tenantId, workspaceId, entityType: "item_group",
+              fieldCode: claim.fieldCode,
+              normalizedHash: createHash("sha256").update(claim.normalizedValue).digest("hex"),
+              normalizedValue: claim.normalizedValue, entityId: group.id
+            } });
+          } catch (error) {
+            if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+              throw new ConflictException(`${claim.label}已存在`);
+            }
+            throw error;
+          }
+        }
       }
       await client.rentalItemGroup.upsert({
         where: { id: group.id },
@@ -433,7 +456,14 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       await write(tx);
       return;
     }
-    await this.prisma.$transaction(write);
+    try {
+      await this.prisma.$transaction(write);
+    } catch (error) {
+      if (uniqueAttributes?.length && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+        throw new ConflictException(`${uniqueAttributes[0].label}已存在`);
+      }
+      throw error;
+    }
   }
 
   /** 定价分组与成员一次提交，避免主档已更新但成员范围仍是旧值。 */

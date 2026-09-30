@@ -37,7 +37,7 @@ void (async () => {
         if (!existing) {
           await tx.rentalCategoryVersion.create({ data: {
             id: versionId, categoryCode: prismaCode,
-            versionLabel: `builtin-${fixed.version}`,
+            versionLabel: `builtin-${fixed.version}-${digest}`,
             structureVersion: 1, sourceVersionId: legacyId,
             sourceKind: "builtin_runtime", status: "published", revision: 0,
             definition: asJson(fixed), publishedAt: new Date(),

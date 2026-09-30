@@ -168,10 +168,9 @@ export class RentalDueJobScheduler implements OnApplicationBootstrap, OnModuleDe
     );
   }
 
-  private context(tenantId: string): BusinessContext {
+  private async context(tenantId: string): Promise<BusinessContext> {
     const profile = this.core.getProfile(tenantId);
-    const category = this.core.listCategories().find((item) => item.code === profile.categoryCode);
-    if (!category) throw new Error("当前经营空间的品类定义不存在");
+    const category = await this.core.getWorkspaceCategory(tenantId);
     return {
       profile,
       category,
@@ -197,7 +196,7 @@ export class RentalDueJobScheduler implements OnApplicationBootstrap, OnModuleDe
   ) {
     return await this.business.emitNotificationEvent(
       tenantId,
-      this.context(tenantId),
+      (await this.context(tenantId)),
       eventCode,
       order.contactPhone ?? order.customerId,
       { customerName: order.customerName, orderNo: order.orderNo },
@@ -207,7 +206,7 @@ export class RentalDueJobScheduler implements OnApplicationBootstrap, OnModuleDe
 
   private async commitScope(tenantId: string) {
     await this.business.refreshFromDatabase();
-    await this.business.refreshCouponTemplateCache(tenantId, this.context(tenantId));
+    await this.business.refreshCouponTemplateCache(tenantId, (await this.context(tenantId)));
     await this.core.persist(tenantId);
   }
 
@@ -315,13 +314,13 @@ export class RentalDueJobScheduler implements OnApplicationBootstrap, OnModuleDe
 
   /** 与 `POST notification-logs/retry-due` 同源。 */
   private async retryDueNotifications(tenantId: string) {
-    await this.business.retryDueNotifications(tenantId, this.context(tenantId), RENTAL_DUE_JOB_BATCH_SIZE);
+    await this.business.retryDueNotifications(tenantId, (await this.context(tenantId)), RENTAL_DUE_JOB_BATCH_SIZE);
     await Promise.all([this.business.persist(tenantId), this.core.persist(tenantId)]);
   }
 
   /** 与 `POST pricing-plans/adjustments/run-due` 同源。 */
   private async runDuePriceAdjustments(tenantId: string) {
-    await this.business.runDuePriceAdjustments(tenantId, this.context(tenantId));
+    await this.business.runDuePriceAdjustments(tenantId, (await this.context(tenantId)));
     await Promise.all([this.business.persist(tenantId), this.core.persist(tenantId)]);
   }
 

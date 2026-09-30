@@ -1944,7 +1944,9 @@ export class PlatformService {
       }
       return;
     }
-    const category = RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === categoryCode);
+    const category = this.rentalCoreService
+      ? await this.rentalCoreService.getWorkspaceCategoryInTransaction(tenantId, workspaceId, categoryCode, tx)
+      : RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === categoryCode);
     const declared = category?.defaultCapabilities ?? [];
     const required = category?.requiredCapabilities ?? [];
     const result = await this.workspaceCapabilityService.initializeRequiredCapabilities(

@@ -4490,6 +4490,8 @@ export interface RentalQuoteChargeLine {
 }
 
 export interface RentalQuoteSnapshotV1 {
+  /** 本次报价实际采用的不可变品类版本；存量无证据时不伪造回填。 */
+  categoryVersionId?: string;
   /** 报价时的计价日历及空间计价口径，供原价续租复算。 */
   pricingContext?: RentalRepricingContext;
   id: string;
@@ -5743,6 +5745,8 @@ export interface PartialReturnRentalOrderRequest {
 }
 
 export interface RentalOrder {
+  /** 原样继承有效报价的品类版本，不在建单时读取空间最新绑定。 */
+  categoryVersionId?: string;
   id: string;
   tenantId: string;
   orderNo: string;

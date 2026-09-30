@@ -1,9 +1,11 @@
 import { BadRequestException, ConflictException, HttpException, HttpStatus, Inject, Injectable, Logger, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { CapabilityBlockedException, CapabilityHookRuntime } from "./capability-hook.runtime";
 import { CapabilityHookRepository } from "./capability-hook.repository";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
+import { RentalCategoryResolver } from "./rental-category-resolver.service";
 import { buildCapabilityEquipment } from "./capability-equipment";
 import {
   RentalCategoryCode,
@@ -461,7 +463,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     @Optional() private readonly memberships?: MembershipService,
     /** EXT-02A：真实业务短信投递；单测未装配时保留原有模拟通知语义。 */
     @Optional() private readonly notificationRuntime?: TenantIntegrationRuntimeService,
-    @Optional() private readonly secretBox?: SecretBox
+    @Optional() private readonly secretBox?: SecretBox,
+    private readonly categoryResolver?: RentalCategoryResolver
   ) {}
 
   /**
@@ -4648,6 +4651,20 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest, preResolvedDeliveryAddress?: RentalDeliveryAddressSnapshot) {
+    let categoryVersionId: string | undefined;
+    let categoryAdoptionRevision: number | undefined;
+    if (this.categoryResolver) {
+      const resolved = await this.categoryResolver.forWorkspace(tenantId, this.workspaceOf(tenantId));
+      if (resolved.definition.code !== context.profile.categoryCode) {
+        throw new ConflictException("报价经营空间与品类版本不一致");
+      }
+      if (!isDeepStrictEqual(context.category, resolved.definition)) {
+        throw new ConflictException("品类版本在报价准备期间已变化，请刷新后重新报价");
+      }
+      context = { ...context, category: resolved.definition };
+      categoryVersionId = resolved.categoryVersionId;
+      categoryAdoptionRevision = resolved.adoptionRevision;
+    }
     if (this.memberships && !input.bookingIdentity) input = { ...input, bookingIdentity: { bookingIdentity: "personal" } };
     const state = this.state(tenantId, context);
     // 新空间的默认价格是懒加载配置：首个报价不能先因为版本表为空而失败，
@@ -5311,7 +5328,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }
     const quote: RentalQuoteSnapshotV1 = {
       id: uid("quote"), tenantId, quoteNo: `RQ${timestamp.replace(/\D/g, "").slice(0, 14)}${String(state.quotes.length + 1).padStart(3, "0")}`,
-      categoryCode: context.profile.categoryCode, request: structuredClone(input), deliveryAddressSnapshot, membershipSnapshot: resolvedMembership, membershipBenefitEvaluations, chargeLines, rentalLineAmounts,
+      categoryCode: context.profile.categoryCode, categoryVersionId, request: structuredClone(input), deliveryAddressSnapshot, membershipSnapshot: resolvedMembership, membershipBenefitEvaluations, chargeLines, rentalLineAmounts,
       rentalAmount, discountAmount: roundMoney(discountAmount), couponAmount: roundMoney(couponAmount), serviceAmount,
       fulfillmentAmount,
       rateSnapshot: hitRates,
@@ -5362,8 +5379,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // Review P1-5：判定结果必须写进报价并返回，否则「需转接环」这类风险虽被发现，
     // 用户却无从知道要确认什么，下单侧也只能凭空重构一遍判断。
     quote.capabilityDecisions = await this.runQuoteHook(tenantId, context, quote);
+    await this.factStore.upsertQuote(quote, categoryVersionId && categoryAdoptionRevision !== undefined
+      ? { categoryVersionId, adoptionRevision: categoryAdoptionRevision } : undefined);
+    // 缓存只在成功提交之后发布；并发采用新版造成拒绝时不能留下幽灵报价。
     state.quotes.unshift(quote);
-    await this.factStore.upsertQuote(quote);
     return quote;
   }
 
@@ -5412,6 +5431,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         tenantId,
         workspaceId,
         categoryCode: context.category.code,
+        requiredCapabilities: context.category.requiredCapabilities,
         subjectRef: { type: "quote", id: quote.id },
         subject: { ...quote, equipment, capabilityExceptions: [] },
         at,

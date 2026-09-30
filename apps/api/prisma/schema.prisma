@@ -1984,6 +1984,8 @@ model RentalCategoryVersion {
   updatedAt        DateTime                            @updatedAt
   policy           RentalCategoryVersionPolicy?
   workspaces       BusinessWorkspace[]
+  quotes           RentalQuote[]
+  orders           RentalOrder[]
   preparations     RentalCategoryAdoptionPreparation[]
   recommendedFor   RentalCategoryDefinition[]          @relation("RecommendedCategoryVersion")
 
@@ -2589,6 +2591,9 @@ model RentalWorkOrder {
 }
 
 model RentalOrder {
+  /// 报价采用的品类版本；旧事实无证据则保留 NULL。
+  categoryVersionId             String?                        @db.VarChar(191)
+  categoryVersion               RentalCategoryVersion?         @relation(fields: [categoryCode, categoryVersionId], references: [categoryCode, id], onDelete: Restrict)
   id                            String                         @id @default(uuid())
   tenantId                      String
   tenant                        Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -3836,6 +3841,9 @@ model RentalNotificationTemplate {
 // 需求要求的不可变时点快照保留 JSON（需求 4.7）。
 
 model RentalQuote {
+  /// 报价实际采用的品类版本，不回填无法证明的存量。
+  categoryVersionId             String?                        @db.VarChar(191)
+  categoryVersion               RentalCategoryVersion?         @relation(fields: [categoryCode, categoryVersionId], references: [categoryCode, id], onDelete: Restrict)
   /// 原价续租所需的报价时区、倍率开关与计价日历。
   pricingContext                Json?
   id                            String             @id @default(uuid())

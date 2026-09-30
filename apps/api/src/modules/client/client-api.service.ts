@@ -123,10 +123,9 @@ export class ClientApiService {
     @Optional() private readonly wechat?: ClientWechatAuthService
   ) {}
 
-  private context(tenantId: string): BusinessContext {
+  private async context(tenantId: string): Promise<BusinessContext> {
     const profile = this.core.getProfile(tenantId);
-    const category = this.core.listCategories().find((item) => item.code === profile.categoryCode);
-    if (!category) throw new ConflictException("当前经营空间的品类定义不存在");
+    const category = await this.core.getWorkspaceCategory(tenantId);
     return {
       profile,
       category,
@@ -259,7 +258,7 @@ export class ClientApiService {
     });
     if (!workspace) throw new NotFoundException("该服务尚未开放游客浏览");
     return runWithRequestIdentity({ tenantId: tenant.id, workspaceId: workspace.id, isSaasAdmin: false }, async () => {
-      const business = this.context(tenant.id);
+      const business = (await this.context(tenant.id));
       const item = business.groups.find((group) => group.id === itemGroupId && group.status === "enabled");
       if (!item) throw new NotFoundException("商品不存在");
       return this.core.readItemGroupImage(tenant.id, itemGroupId, imageId);
@@ -445,7 +444,7 @@ export class ClientApiService {
   }
 
   private async buildCatalog(tenantId: string, tenantCode: string, summary: ClientWorkspaceSummary): Promise<ClientCatalogResponse> {
-    const business = this.context(tenantId);
+    const business = (await this.context(tenantId));
     const context = { tenantId, tenantCode, workspaceCode: summary.workspaceCode, workspaceName: summary.workspaceName, categoryCode: summary.categoryCode, membershipStatus: summary.membershipStatus };
     const workspace = summary;
     // 参考起价：当前生效价格版本中，覆盖该型号（直接或经其定价分组）的最低基础单价。
@@ -512,7 +511,7 @@ export class ClientApiService {
   }
 
   async readCatalogItemImage(context: ClientRequestContext, itemGroupId: string, imageId: string) {
-    const business = this.context(context.tenantId);
+    const business = (await this.context(context.tenantId));
     const item = business.groups.find((group) => group.id === itemGroupId && group.status === "enabled");
     if (!item) throw new NotFoundException("商品不存在");
     return this.core.readItemGroupImage(context.tenantId, itemGroupId, imageId);
@@ -570,7 +569,7 @@ export class ClientApiService {
   }
 
   async config(context: ClientRequestContext): Promise<ClientConfigResponse> {
-    const business = this.context(context.tenantId);
+    const business = (await this.context(context.tenantId));
     const workspace = await this.currentWorkspace(context);
     const registration = await this.prisma.customerMembershipRegistrationSettings.findUnique({
       where: { tenantId: context.tenantId },
@@ -647,7 +646,7 @@ export class ClientApiService {
   }
 
   async paymentCapabilities(context: ClientRequestContext): Promise<ClientPaymentCapabilitiesResponse> {
-    const business = this.context(context.tenantId);
+    const business = (await this.context(context.tenantId));
     const catalog = await this.tenantIntegrations.catalog(context.tenantId);
     return this.buildPaymentCapabilities(catalog.configs, business.settings.payment.enabledMethods);
   }
@@ -891,7 +890,7 @@ export class ClientApiService {
     );
     const orderIds = new Set(customerOrders.map((order) => order.id));
     const logs = this.business
-      .listNotificationLogs(context.tenantId, this.context(context.tenantId))
+      .listNotificationLogs(context.tenantId, (await this.context(context.tenantId)))
       .filter((log) => log.businessObjectType === "order" && Boolean(log.businessObjectId) && orderIds.has(log.businessObjectId!))
       .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
     const start = (page - 1) * pageSize;
@@ -967,7 +966,7 @@ export class ClientApiService {
   async createQuote(context: ClientRequestContext, input: ClientCreateQuoteRequest) {
     this.requireActiveMembership(context);
     await this.currentWorkspace(context);
-    const business = this.context(context.tenantId);
+    const business = (await this.context(context.tenantId));
     const request: RentalQuoteRequest = {
       ...input,
       customerType: "personal",
@@ -988,25 +987,25 @@ export class ClientApiService {
   }
 
   async getQuote(context: ClientRequestContext, quoteId: string) {
-    const quote = this.business.getQuote(context.tenantId, this.context(context.tenantId), quoteId);
+    const quote = this.business.getQuote(context.tenantId, (await this.context(context.tenantId)), quoteId);
     if (quote.request.customerId !== context.customerId) throw new NotFoundException("报价不存在");
     return quote;
   }
 
   async coupons(context: ClientRequestContext) {
-    return this.business.listCurrentCustomerCoupons(context.tenantId, this.context(context.tenantId), context.customerId);
+    return this.business.listCurrentCustomerCoupons(context.tenantId, (await this.context(context.tenantId)), context.customerId);
   }
 
   async claimCoupon(context: ClientRequestContext, templateId: string) {
     this.requireActiveMembership(context);
-    return this.business.claimCoupon(context.tenantId, this.context(context.tenantId), templateId, context.customerId);
+    return this.business.claimCoupon(context.tenantId, (await this.context(context.tenantId)), templateId, context.customerId);
   }
 
   async createOrder(context: ClientRequestContext, input: ClientCreateOrderRequest, requestContext?: ClientOrderRequestContext) {
     this.requireActiveMembership(context);
     // 即使客户在取消发布前拿到报价，也不能在关闭渠道后新建订单。
     await this.currentWorkspace(context);
-    const business = this.context(context.tenantId);
+    const business = (await this.context(context.tenantId));
     const quote = this.business.getQuote(context.tenantId, business, input.quoteId);
     if (quote.request.customerId !== context.customerId) throw new NotFoundException("报价不存在");
     const lines = quote.request.lines.map((line) => {
@@ -1232,7 +1231,7 @@ export class ClientApiService {
    */
   async orderDocument(context: ClientRequestContext, orderId: string, documentType: string, snapshotId?: string) {
     await this.assertClientOrder(context, orderId);
-    const business = this.context(context.tenantId);
+    const business = (await this.context(context.tenantId));
     if (snapshotId) {
       return this.documents.readSnapshot(context.tenantId, orderId, documentType, snapshotId, {
         includeFinancial: documentType === "settlement"
@@ -1256,7 +1255,7 @@ export class ClientApiService {
     if ([RentalCoreOrderStatus.Renting, RentalCoreOrderStatus.Settling, RentalCoreOrderStatus.Completed, RentalCoreOrderStatus.Cancelled, RentalCoreOrderStatus.NoShow].includes(order.status)) {
       throw new ConflictException("当前订单状态不能取消");
     }
-    const business = this.context(context.tenantId);
+    const business = (await this.context(context.tenantId));
     const calculatedAt = new Date().toISOString();
     const cancellationCharge = this.business.calculateCancellationCharge(
       context.tenantId, business, this.business.getQuote(context.tenantId, business, order.quoteId), calculatedAt
@@ -1268,7 +1267,7 @@ export class ClientApiService {
     this.requireActiveMembership(context);
     await this.assertClientOrder(context, orderId);
     const key = idempotencyKeyOf(requestContext) ?? `client:order.cancel:${orderId}`;
-    const business = this.context(context.tenantId);
+    const business = (await this.context(context.tenantId));
     const outcome = await this.idempotent.executeWithReplayFlag({
       tenantId: context.tenantId,
       action: "order.cancel",
@@ -1305,7 +1304,7 @@ export class ClientApiService {
   private async priceExtension(context: ClientRequestContext, orderId: string, input: ClientOrderExtensionRequest) {
     const order = await this.assertClientOrder(context, orderId);
     await this.core.assertOrderExtensionAvailable(context.tenantId, order, input.newEndAt);
-    const priced = await this.business.quoteOrderExtension(context.tenantId, this.context(context.tenantId), { order, previousExtensions: await this.core.listOrderExtensions(context.tenantId, orderId), lines: order.lines, newEndAt: input.newEndAt, services: input.services, appliedAt: new Date().toISOString(), settlementMode: await this.extensionSettlement(context, order), fulfillmentMode: order.fulfillmentMode, locationIds: [order.fulfillmentLocationId, order.returnLocationId].filter((id): id is string => Boolean(id)), customerType: order.customerType });
+    const priced = await this.business.quoteOrderExtension(context.tenantId, (await this.context(context.tenantId)), { order, previousExtensions: await this.core.listOrderExtensions(context.tenantId, orderId), lines: order.lines, newEndAt: input.newEndAt, services: input.services, appliedAt: new Date().toISOString(), settlementMode: await this.extensionSettlement(context, order), fulfillmentMode: order.fulfillmentMode, locationIds: [order.fulfillmentLocationId, order.returnLocationId].filter((id): id is string => Boolean(id)), customerType: order.customerType });
     const { rateSnapshot: _rateSnapshot, ruleSnapshot: _ruleSnapshot, ...preview } = priced;
     return { order, priced, preview };
   }
@@ -1409,7 +1408,7 @@ export class ClientApiService {
   async createPaymentIntent(context: ClientRequestContext, orderId: string, input: ClientPaymentIntentRequest) {
     this.requireActiveMembership(context);
     await this.assertClientOrder(context, orderId);
-    const enabledMethods = this.context(context.tenantId).settings.payment.enabledMethods;
+    const enabledMethods = (await this.context(context.tenantId)).settings.payment.enabledMethods;
     const methods = enabledMethods?.length ? enabledMethods : DEFAULT_RENTAL_PAYMENT_METHODS;
     // Stripe(跨境收单)不由经营空间的收款方式开关管控,而是由租户第三方支付配置(启用+默认+币种匹配+连接测试)决定;
     // 空间级开关只管线下/支付宝/微信这类空间自选方式。stripe 的可用性在 payments.createPaymentIntent 内按币种与配置门禁。
@@ -1422,7 +1421,7 @@ export class ClientApiService {
   async createMiniProgramPaymentIntent(context: ClientRequestContext, orderId: string, input: ClientMiniProgramPaymentIntentRequest): Promise<ClientPaymentIntentResponse> {
     this.requireActiveMembership(context);
     await this.assertClientOrder(context, orderId);
-    const enabledMethods = this.context(context.tenantId)?.settings?.payment?.enabledMethods;
+    const enabledMethods = (await this.context(context.tenantId))?.settings?.payment?.enabledMethods;
     if (!(enabledMethods?.length ? enabledMethods : DEFAULT_RENTAL_PAYMENT_METHODS).includes("wechat_pay")) {
       throw new ConflictException("微信支付尚未在经营空间设置中启用");
     }

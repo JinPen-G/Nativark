@@ -9,6 +9,7 @@ import type {
   WorkspaceCapabilityInstance
 } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
+import { RentalCategoryResolver } from "./rental-category-resolver.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 
 /**
@@ -22,7 +23,7 @@ import { resolveScopeWorkspaceId } from "./workspace-scope";
  */
 @Injectable()
 export class WorkspaceCapabilityRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly categoryResolver?: RentalCategoryResolver) {}
 
   /** 当前会话空间；无会话时取该租户默认空间（初始化/回填路径）。 */
   async currentWorkspaceId(tenantId: string): Promise<string> {
@@ -39,9 +40,18 @@ export class WorkspaceCapabilityRepository {
    */
   async workspaceScope(
     tenantId: string,
-    workspaceId: string
-  ): Promise<{ categoryCode: RentalCategoryCode; declaredCodes: RentalCapability[] }> {
-    const workspace = await this.prisma.businessWorkspace.findFirst({
+    workspaceId: string,
+    tx?: Prisma.TransactionClient
+  ): Promise<{ categoryCode: RentalCategoryCode; declaredCodes: RentalCapability[]; requiredCodes?: RentalCapability[] }> {
+    if (this.categoryResolver) {
+      const { definition } = await this.categoryResolver.forWorkspace(tenantId, workspaceId, tx);
+      return {
+        categoryCode: definition.code,
+        declaredCodes: [...definition.defaultCapabilities],
+        requiredCodes: [...definition.requiredCapabilities]
+      };
+    }
+    const workspace = await (tx ?? this.prisma).businessWorkspace.findFirst({
       where: { tenantId, id: workspaceId },
       include: { category: { select: { defaultCapabilities: true } } }
     });

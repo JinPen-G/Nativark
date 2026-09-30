@@ -264,13 +264,15 @@ export class WorkspaceCapabilityService {
    */
   async reconcileRequiredCapabilities(tenantId: string, operator?: string) {
     const workspaceId = await this.repository.currentWorkspaceId(tenantId);
-    const { categoryCode, declaredCodes } = await this.repository.workspaceScope(tenantId, workspaceId);
-    const result = await this.repository.runInTransaction((tx) =>
-      this.initializeRequiredCapabilities(tenantId, workspaceId, categoryCode, declaredCodes, tx, {
+    const { categoryCode } = await this.repository.workspaceScope(tenantId, workspaceId);
+    const result = await this.repository.runInTransaction(async (tx) => {
+      const scope = await this.repository.workspaceScope(tenantId, workspaceId, tx);
+      return this.initializeRequiredCapabilities(tenantId, workspaceId, scope.categoryCode, scope.declaredCodes, tx, {
         operator,
+        requiredCodes: scope.requiredCodes,
         reason: `运营显式对账：按品类 ${categoryCode} 初始化缺失的必选能力`
-      })
-    );
+      });
+    });
     const overview = await this.overview(tenantId, workspaceId);
     return {
       tenantId,
@@ -307,13 +309,13 @@ export class WorkspaceCapabilityService {
    */
   async overview(tenantId: string, workspaceId?: string): Promise<WorkspaceCapabilityOverview> {
     const scope = workspaceId ?? (await this.repository.currentWorkspaceId(tenantId));
-    const { categoryCode, declaredCodes } = await this.repository.workspaceScope(tenantId, scope);
+    const { categoryCode, declaredCodes, requiredCodes } = await this.repository.workspaceScope(tenantId, scope);
     const instances = new Map(
       (await this.repository.listInstances(tenantId, scope)).map((instance) => [instance.code, instance])
     );
     const declared = new Set(declaredCodes);
     const required = new Set(
-      RENTAL_CATEGORY_DEFINITIONS.find((category) => category.code === categoryCode)?.requiredCapabilities ?? []
+      requiredCodes ?? RENTAL_CATEGORY_DEFINITIONS.find((category) => category.code === categoryCode)?.requiredCapabilities ?? []
     );
     const capabilities: WorkspaceCapabilityView[] = RENTAL_CAPABILITY_MODULES.map((definition) => {
       const instance = instances.get(definition.code);

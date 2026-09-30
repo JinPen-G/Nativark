@@ -15,6 +15,8 @@ import {
   RENTAL_CATEGORY_WORKSPACE_NAMES,
   RentalCategoryCode as SharedRentalCategoryCode
 } from "@rental-os/shared";
+import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { hashPassword } from "../src/common/password";
 
 const prisma = new PrismaClient();
@@ -366,6 +368,7 @@ const demoWorkspaces = [
 
 async function upsertRentalCategoriesAndProfiles() {
   for (const category of rentalCategories) {
+    const existedBefore = await prisma.rentalCategoryDefinition.findUnique({ where: { code: category.code }, select: { code: true } });
     const stored = await prisma.rentalCategoryDefinition.upsert({
       where: { code: category.code },
       // 平台维护的身份和发布版本不得在后续 Seed 中被静默改写。
@@ -393,9 +396,30 @@ async function upsertRentalCategoriesAndProfiles() {
     await prisma.rentalCategoryVersionPolicy.upsert({
       where: { versionId }, update: {}, create: { versionId }
     });
+    const runtime = RENTAL_CATEGORY_DEFINITIONS.find((item) => item.code === String(stored.code).toLowerCase());
+    if (!runtime) throw new Error(`内置品类 ${stored.code} 缺少运行定义`);
+    const digest = createHash("sha256").update(JSON.stringify(runtime)).digest("hex").slice(0, 24);
+    const builtinId = `builtin:${runtime.code}:${digest}`;
+    const builtin = await prisma.rentalCategoryVersion.upsert({
+      where: { id: builtinId }, update: {},
+      create: {
+        id: builtinId, categoryCode: stored.code, versionLabel: `builtin-${runtime.version}-${digest}`,
+        sourceVersionId: versionId, sourceKind: "builtin_runtime", status: "published",
+        definition: asJson(runtime), publishedAt: new Date(), publishedBy: "seed",
+        publishReason: "内置运行定义首次初始化"
+      }
+    });
+    if (builtin.categoryCode !== stored.code || builtin.status !== "published" ||
+        !isDeepStrictEqual(builtin.definition, asJson(runtime))) {
+      throw new Error(`内置品类版本 ${builtinId} 与运行定义不一致，拒绝覆盖`);
+    }
+    await prisma.rentalCategoryVersionPolicy.upsert({
+      where: { versionId: builtinId }, update: {}, create: { versionId: builtinId }
+    });
     await prisma.rentalCategoryDefinition.updateMany({
       where: { code: stored.code, recommendedVersionId: null },
-      data: { recommendedVersionId: versionId }
+      // 既有库的旧定义不能被 Seed 默认作可运行版本，须显式运行对账程序。
+      data: { recommendedVersionId: existedBefore ? versionId : builtinId }
     });
   }
   for (const profile of [

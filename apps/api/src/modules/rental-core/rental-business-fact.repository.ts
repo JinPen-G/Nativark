@@ -74,7 +74,7 @@ export interface RentalBusinessFactStore {
   releaseCouponForOrder(tenantId: string, orderId: string, releasedAt: string, tx: RentalBusinessFactTx): Promise<void>;
   expireClaimedCoupons(tenantId: string, expiredAt: string): Promise<number>;
   voidClaimedCoupon(tenantId: string, couponId: string, reason: string, voidedAt: string, tx: RentalBusinessFactTx): Promise<boolean>;
-  upsertQuote(quote: RentalQuoteSnapshotV1): Promise<void>;
+  upsertQuote(quote: RentalQuoteSnapshotV1, expectedBinding?: { categoryVersionId: string; adoptionRevision: number }): Promise<void>;
   /**
    * 传入 tx 时必须使用它。领券由幂等执行器包在事务里，若这里另起连接独立提交，
    * 事务回滚撤不回这张券，会留下"幂等表已回滚、客户券已存在"的孤儿。
@@ -436,11 +436,12 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     return result.count === 1;
   }
 
-  async upsertQuote(quote: RentalQuoteSnapshotV1): Promise<void> {
+  async upsertQuote(quote: RentalQuoteSnapshotV1, expectedBinding?: { categoryVersionId: string; adoptionRevision: number }): Promise<void> {
     const data = {
       tenantId: quote.tenantId,
       quoteNo: quote.quoteNo,
       categoryCode: upper<$Enums.RentalCategoryCode>(quote.categoryCode),
+      categoryVersionId: quote.categoryVersionId ?? null,
       request: quote.request as unknown as Prisma.InputJsonValue,
       membershipSnapshot: (quote.membershipSnapshot ?? null) as unknown as Prisma.InputJsonValue,
       membershipBenefitEvaluations: (quote.membershipBenefitEvaluations ?? null) as unknown as Prisma.InputJsonValue,
@@ -482,20 +483,40 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       consumedOrderId: quote.consumedOrderId ?? null
     };
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, quote.tenantId);
-    const existing = await this.prisma.rentalQuote.findUnique({
-      where: { id: quote.id },
-      select: { tenantId: true, workspaceId: true }
-    });
-    if (existing && (existing.tenantId !== quote.tenantId || existing.workspaceId !== workspaceId)) {
-      throw new ConflictException("报价事实已属于其他租户或经营空间，拒绝覆盖");
-    }
-    if (existing) {
-      await this.prisma.rentalQuote.update({ where: { id: quote.id }, data });
-    } else {
-      await this.prisma.rentalQuote.create({
-        data: { workspaceId, id: quote.id, ...data, createdAt: date(quote.createdAt) }
+    const persist = async (client: RentalBusinessFactTx) => {
+      const existing = await client.rentalQuote.findUnique({
+        where: { id: quote.id },
+        select: { tenantId: true, workspaceId: true, categoryVersionId: true }
       });
-    }
+      if (existing && (existing.tenantId !== quote.tenantId || existing.workspaceId !== workspaceId)) {
+        throw new ConflictException("报价事实已属于其他租户或经营空间，拒绝覆盖");
+      }
+      if (existing && (existing.categoryVersionId ?? null) !== (quote.categoryVersionId ?? null)) {
+        throw new ConflictException("已有报价的品类版本依据不可改写");
+      }
+      if (existing) {
+        await client.rentalQuote.update({ where: { id: quote.id }, data });
+      } else {
+        await client.rentalQuote.create({
+          data: { workspaceId, id: quote.id, ...data, createdAt: date(quote.createdAt) }
+        });
+      }
+    };
+    if (!expectedBinding) return persist(this.prisma);
+    await this.prisma.$transaction(async (tx) => {
+      // 与空间版本采用写入竞争同一行锁，防止最后一次校验与报价写入之间穿插升级。
+      const rows = await tx.$queryRaw<Array<{ categoryVersionId: string | null; categoryAdoptionRevision: number }>>`
+        SELECT categoryVersionId, categoryAdoptionRevision FROM business_workspaces
+        WHERE id = ${workspaceId} AND tenantId = ${quote.tenantId} AND status = 'ACTIVE' FOR UPDATE
+      `;
+      const binding = rows[0];
+      if (!binding || binding.categoryVersionId !== expectedBinding.categoryVersionId ||
+          binding.categoryAdoptionRevision !== expectedBinding.adoptionRevision ||
+          quote.categoryVersionId !== expectedBinding.categoryVersionId) {
+        throw new ConflictException("品类版本在报价期间已变化，请重新报价");
+      }
+      await persist(tx);
+    });
   }
 
   async upsertCustomerCoupon(coupon: RentalCustomerCoupon, tx?: RentalBusinessFactTx): Promise<void> {
@@ -895,6 +916,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       tenantId: row.tenantId,
       quoteNo: row.quoteNo,
       categoryCode: lower<RentalCategoryCode>(row.categoryCode),
+      categoryVersionId: row.categoryVersionId ?? undefined,
       request: row.request as unknown as RentalQuoteRequest,
       membershipSnapshot: (row.membershipSnapshot ?? undefined) as unknown as RentalQuoteSnapshotV1["membershipSnapshot"],
       membershipBenefitEvaluations: (row.membershipBenefitEvaluations ?? undefined) as unknown as RentalQuoteSnapshotV1["membershipBenefitEvaluations"],

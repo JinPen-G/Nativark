@@ -42,6 +42,8 @@ export interface CapabilityHookRunInput<TSubject> {
   tenantId: string;
   workspaceId: string;
   categoryCode: RentalCategoryCode;
+  /** 服务端从本次采用/历史明确版本解析；空数组是明确政策，不是缺省。 */
+  requiredCapabilities?: RentalCapability[];
   subject: TSubject;
   operator?: string;
   at?: string;
@@ -226,7 +228,7 @@ export class CapabilityHookRuntime {
     const runnable: Array<{ instance: WorkspaceCapabilityInstance; module: RentalCapabilityHookModule }> = [];
     for (const instance of instances) {
       const definition = this.definitions.get(instance.code);
-      const required = this.requiredForCategory(input.categoryCode, instance.code);
+      const required = input.requiredCapabilities?.includes(instance.code) ?? this.requiredForCategory(input.categoryCode, instance.code);
 
       // 1) 适用品类。`save()` 启用时已校验过，因此这里为真只可能是数据不一致
       //    （错误的快照、手工改库、或品类定义事后收窄）。运行时必须独立兜底：
@@ -307,7 +309,7 @@ export class CapabilityHookRuntime {
 
     for (const { instance, module } of runnable) {
       const handler = module.hooks[input.point]!;
-      const required = this.requiredForCategory(input.categoryCode, instance.code);
+      const required = input.requiredCapabilities?.includes(instance.code) ?? this.requiredForCategory(input.categoryCode, instance.code);
       let result: RentalCapabilityHookResult;
       try {
         result = await handler({
