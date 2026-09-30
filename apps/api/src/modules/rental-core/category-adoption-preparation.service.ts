@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { CategoryEntityPreparationPatch, RentalPricingRate, RentalRuleConfig, SaveCategoryPreparationRequest, SystemUserRow, TenantRentalBusinessSettings } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { getRequestDataScope, getRequestLocationIds, requireRequestWorkspaceId } from "../../common/request-identity";
-import { assertCategoryAdoptionAllowed } from "./category-governance-policy";
+import { assertCategoryAdoptionAllowed, categoryScopeAllows } from "./category-governance-policy";
 import { resolveRentalCategoryVersionBody } from "./rental-category-resolver.service";
 import { prepareCategoryAdoptionRecords } from "./category-adoption-records";
 import { categoryDefinitionDifferences } from "./category-definition-diff";
@@ -18,6 +18,25 @@ export function assertCategoryPreparationPermission(user: SystemUserRow) {
 @Injectable()
 export class CategoryAdoptionPreparationService {
   constructor(private readonly prisma: PrismaService) {}
+  async candidates(user: SystemUserRow, operation: string) {
+    assertCategoryPreparationPermission(user);
+    if (operation !== "upgrade" && operation !== "restore") throw new BadRequestException("版本操作只能是升级或恢复");
+    const workspaceId = requireRequestWorkspaceId();
+    const workspace = await this.prisma.businessWorkspace.findFirst({ where: { id: workspaceId, tenantId: user.tenantId, status: "ACTIVE" }, select: { categoryCode: true, categoryVersionId: true, categoryAdoptionRevision: true } });
+    if (!workspace?.categoryVersionId) throw new ConflictException("经营空间不可用或尚未绑定版本");
+    const versions = await this.prisma.rentalCategoryVersion.findMany({ where: { categoryCode: workspace.categoryCode, status: { in: ["published", "legacy_baseline"] }, id: { not: workspace.categoryVersionId } }, include: { policy: true }, orderBy: [{ publishedAt: "desc" }, { id: "asc" }] });
+    // Opening policy governs NEW spaces, not existing-space upgrades/restores.
+    // Never return definitions, pilot tenant lists, drafts or governance audits.
+    return { categoryCode: workspace.categoryCode.toLowerCase(), sourceVersionId: workspace.categoryVersionId, sourceRevision: workspace.categoryAdoptionRevision, operation,
+      versions: versions.filter((row) => row.policy && categoryScopeAllows(row.policy[`${operation}Scope`], row.policy[`${operation}TenantIds`], user.tenantId)).map((row) => {
+        try {
+          resolveRentalCategoryVersionBody(row, workspace.categoryCode.toLowerCase());
+          return { id: row.id, versionLabel: row.versionLabel, definitionExecutable: true };
+        } catch (error) {
+          return { id: row.id, versionLabel: row.versionLabel, definitionExecutable: false, unavailableReason: error instanceof Error ? error.message : "目标版本无法执行，请联系平台管理员" };
+        }
+      }) };
+  }
   private async context(tx: Prisma.TransactionClient, user: SystemUserRow, targetId: string, operation: string) {
     if (!["upgrade", "restore"].includes(operation)) throw new BadRequestException("版本操作只能是升级或恢复");
     const workspaceId = requireRequestWorkspaceId();

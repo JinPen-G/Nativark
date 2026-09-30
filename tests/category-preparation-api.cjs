@@ -2,6 +2,7 @@
 const assert = require("node:assert/strict");
 module.exports = async ({ request, platformToken, tenantToken, mysqlQuery }) => {
   const platform = "/api/platform/rental-categories";
+  const candidatePath = "/api/rental/v1/category-adoption/candidates";
   const call = async (method, path, body, token = tenantToken, expected = 200) => {
     const result = await request(method, path, body, token);
     assert.equal(result.status, expected, `${method} ${path}: ${JSON.stringify(result.body).slice(0, 900)}`);
@@ -10,6 +11,9 @@ module.exports = async ({ request, platformToken, tenantToken, mysqlQuery }) => 
   const detail = await call("GET", `${platform}/camera`, undefined, platformToken);
   const source = detail.versions.find((row) => row.id === detail.recommendedVersionId);
   const draft = await call("POST", `${platform}/camera/drafts`, { sourceVersionId: source.id, versionLabel: "e2e-preparation-required", reason: "候选必填准备" }, platformToken, 201);
+  await call("GET", candidatePath, undefined, platformToken, 403);
+  await call("GET", candidatePath + "?operation=create", undefined, tenantToken, 400);
+  assert.ok(!(await call("GET", candidatePath)).versions.some((row) => row.id === draft.id), "草稿不得进入租户目标目录");
   const fields = [...source.definition.businessModel.assetFields,
     { scope: "item_group", code: "adoptionProof", label: "目标型号资料", type: "string", required: true },
     { scope: "asset", code: "adoptionProofAsset", label: "目标资产资料", type: "select", options: ["B"], required: true }];
@@ -18,7 +22,14 @@ module.exports = async ({ request, platformToken, tenantToken, mysqlQuery }) => 
   const implemented = new Set(catalog.capabilities.filter((row) => row.implemented).map((row) => row.code));
   const prepared = await call("PATCH", `${platform}/camera/versions/${draft.id}/sections/capabilities`, { expectedRevision: attributes.revision, values: { defaultCapabilities: source.definition.defaultCapabilities.filter((code) => implemented.has(code)) }, reason: "仅已实现能力" }, platformToken);
   await call("POST", `${platform}/camera/versions/${draft.id}/publish`, { expectedRevision: prepared.revision, idempotencyKey: "e2e-preparation-publish", reason: "准备专项" }, platformToken, 201);
+  assert.ok(!(await call("GET", candidatePath)).versions.some((row) => row.id === draft.id), "已发布但未开放采用的版本不得进入目录");
   await call("PUT", `${platform}/camera/versions/${draft.id}/adoption-policy`, { expectedRevision: 0, createScope: "none", createTenantIds: [], upgradeScope: "pilot", upgradeTenantIds: ["tenant_001"], restoreScope: "none", restoreTenantIds: [], reason: "只允许本租户升级准备" }, platformToken);
+  const candidates = await call("GET", candidatePath + "?tenantId=forged&workspaceId=forged");
+  const candidate = candidates.versions.find((row) => row.id === draft.id);
+  assert.deepEqual(Object.keys(candidate).sort(), ["definitionExecutable", "id", "versionLabel"], "只投影最小元数据，不泄漏正文和租户试点清单");
+  assert.equal(candidate.definitionExecutable, true);
+  assert.ok(!candidates.versions.some((row) => row.id === candidates.sourceVersionId), "当前已采用版本不再次作为目标");
+  assert.ok(!(await call("GET", candidatePath + "?operation=restore")).versions.some((row) => row.id === draft.id), "恢复资格不能借用升级资格");
   const path = `/api/rental/v1/category-adoption/${draft.id}/preparation`;
   await call("GET", path, undefined, platformToken, 403);
   await call("GET", path + "?operation=restore", undefined, tenantToken, 403);
