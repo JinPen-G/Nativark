@@ -12,6 +12,13 @@ const STORAGE_KEY = "rental_admin_locale";
  * 到中文，保证新增页面在补齐翻译前仍然可用。
  */
 const ENGLISH: Record<string, string> = {
+  "变更字段": "Changed field",
+  "变更类型": "Change type",
+  "新增必填要求": "New required field",
+  "启用唯一要求": "Uniqueness enabled",
+  "字段类型变化": "Field type changed",
+  "支持范围收窄": "Supported scope narrowed",
+  "修改": "Changed",
   "治理记录": "Governance history",
   "发布版本": "Publish version",
   "归档草稿": "Archive draft",

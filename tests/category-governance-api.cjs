@@ -45,6 +45,7 @@ module.exports = async function categoryGovernanceApi({ request, token, tenantTo
   const preview = await call("GET", `/camera/versions/${draft.id}/preview`);
   assert.equal(preview.previewOnly, true);
   assert.ok(preview.changedSections.includes("basic"));
+  assert.ok(preview.differences.some((entry) => entry.path === "name" && entry.after === "测试摄影品类"), "发布预览应提供真实字段变化而不只是页签名称");
   const payload = { expectedRevision: prepared.revision, idempotencyKey: "e2e-publish-category-v2", reason: "完整版本发布" };
   const attempts = await Promise.all([call("POST", `/camera/versions/${draft.id}/publish`, payload, 201), call("POST", `/camera/versions/${draft.id}/publish`, payload, 201)]);
   assert.equal(attempts[0].id, attempts[1].id, "并发重复发布必须返回同一版本");

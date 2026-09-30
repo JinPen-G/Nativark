@@ -1,5 +1,5 @@
 import { request } from "./http";
-import type { CreateCategoryDraftRequest, CategoryVersionView, CategoryDraftSection, PatchCategoryDraftRequest, SaveCategoryOpeningRequest, SaveCategoryVersionPolicyRequest, RentalCapabilityModuleDefinition } from "@rental-os/shared";
+import type { CreateCategoryDraftRequest, CategoryVersionView, CategoryDraftSection, PatchCategoryDraftRequest, SaveCategoryOpeningRequest, SaveCategoryVersionPolicyRequest, RentalCapabilityModuleDefinition, CategoryDefinitionDifference } from "@rental-os/shared";
 
 export interface CategoryGovernanceSummary {
   code: string; name: string; nameEn?: string; icon?: string; openingScope: string; openingRevision: number;
@@ -21,7 +21,7 @@ export const categoryGovernanceApi = {
   createDraft: (code: string, data: CreateCategoryDraftRequest) => request<CategoryVersionView>(`/platform/rental-categories/${encodeURIComponent(code)}/drafts`, { method: "post", data }),
   patch: (code: string, id: string, section: CategoryDraftSection, data: PatchCategoryDraftRequest) => request<CategoryVersionView>(`/platform/rental-categories/${encodeURIComponent(code)}/versions/${encodeURIComponent(id)}/sections/${section}`, { method: "patch", data }),
   validate: (code: string, id: string) => request<{ valid: boolean; errors: string[] }>(`/platform/rental-categories/${encodeURIComponent(code)}/versions/${encodeURIComponent(id)}/validate`, { method: "post" }),
-  preview: (code: string, id: string) => request<{ valid: boolean; errors: string[]; changedSections: CategoryDraftSection[]; affectedSpaces: number; revision: number }>(`/platform/rental-categories/${encodeURIComponent(code)}/versions/${encodeURIComponent(id)}/preview`),
+  preview: (code: string, id: string) => request<{ valid: boolean; errors: string[]; changedSections: CategoryDraftSection[]; differences: CategoryDefinitionDifference[]; affectedSpaces: number; revision: number }>(`/platform/rental-categories/${encodeURIComponent(code)}/versions/${encodeURIComponent(id)}/preview`),
   publish: (code: string, id: string, data: { expectedRevision: number; idempotencyKey: string; reason: string }) => request<CategoryVersionView>(`/platform/rental-categories/${encodeURIComponent(code)}/versions/${encodeURIComponent(id)}/publish`, { method: "post", data }),
   opening: (code: string, data: SaveCategoryOpeningRequest) => request<unknown>(`/platform/rental-categories/${encodeURIComponent(code)}/opening-policy`, { method: "put", data }),
   policy: (code: string, id: string, data: SaveCategoryVersionPolicyRequest) => request<CategoryVersionView>(`/platform/rental-categories/${encodeURIComponent(code)}/versions/${encodeURIComponent(id)}/adoption-policy`, { method: "put", data }),

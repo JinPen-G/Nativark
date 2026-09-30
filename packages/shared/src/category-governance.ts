@@ -7,6 +7,14 @@ export const CATEGORY_GOVERNANCE_PERMISSIONS = {
 } as const;
 export const CATEGORY_DRAFT_SECTIONS = ["basic", "attributes", "inventory", "pricing", "inspection", "capabilities"] as const;
 export type CategoryDraftSection = typeof CATEGORY_DRAFT_SECTIONS[number];
+export interface CategoryDefinitionDifference {
+  section: CategoryDraftSection;
+  path: string;
+  label: string;
+  kind: "added" | "removed" | "changed" | "required_added" | "unique_enabled" | "type_changed" | "scope_narrowed";
+  before: unknown;
+  after: unknown;
+}
 export type CategoryAdoptionScope = "all" | "pilot" | "none";
 export interface CreateCategoryDraftRequest { sourceVersionId: string; versionLabel: string; reason: string }
 export interface PatchCategoryDraftRequest { expectedRevision: number; values: Record<string, unknown>; reason: string }

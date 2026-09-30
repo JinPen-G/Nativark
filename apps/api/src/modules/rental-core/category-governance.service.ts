@@ -9,6 +9,7 @@ import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import { parsePublishedRentalCategory } from "./rental-category-resolver.service";
 import { rentalPricingStrategyReference } from "./rental-pricing-strategy";
 import { categoryScopeAllows } from "./category-governance-policy";
+import { categoryDefinitionDifferences } from "./category-definition-diff";
 
 export function assertCategoryGovernancePermission(user: SystemUserRow | undefined, permission: string) {
   if (!user?.isSaasAdmin || !(user.permissions.includes(permission) || user.permissions.includes("*"))) {
@@ -176,6 +177,7 @@ export class CategoryGovernanceService {
     const before = source?.definition as any;
     const body = row.definition as any;
     return { ...this.validation(body, code), previewOnly: true, revision: row.revision, sourceVersionId: row.sourceVersionId,
+      differences: categoryDefinitionDifferences(before, body),
       changedSections: CATEGORY_DRAFT_SECTIONS.filter((section) => Object.entries(sections[section]).some(([scope, keys]) => keys.some((key) => {
         const read = (value: any) => scope === "root" ? value?.[key] : scope === "business" ? value?.businessModel?.[key] : value?.businessModel?.defaults?.[key];
         return JSON.stringify(read(body)) !== JSON.stringify(read(before));
