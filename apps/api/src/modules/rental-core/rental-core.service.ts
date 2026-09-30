@@ -717,7 +717,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   async saveBusinessSettings(tenantId: string, input: SaveTenantRentalBusinessSettingsRequest, operator: string) {
     const state = this.state(tenantId);
-    const definition = await this.effectiveCategory(tenantId, state.profile.categoryCode);
+    const { definition, binding } = await this.categoryWriteContext(tenantId, state.profile.categoryCode);
     const pricingUnits = new Set(definition.businessModel.pricingUnits);
     const fulfillmentModes = new Set(definition.businessModel.fulfillmentModes);
     const enabledPaymentMethods = input.payment.enabledMethods?.length ? input.payment.enabledMethods : DEFAULT_RENTAL_PAYMENT_METHODS;
@@ -782,7 +782,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       throw new BadRequestException("启用按地区限制时至少添加一个配送区域");
     }
     // 预授权与逾期参数的校验随字段一起移到规则版本（validateRule）；设置里不再有这些字段。
-    if (input.pricing.holidayPricingEnabled && !definition.businessModel.supportsHolidayPricing) {
+    if ((input.pricing.holidayPricingEnabled || input.calendar.holidayPricingEnabled) && !definition.businessModel.supportsHolidayPricing) {
       throw new BadRequestException("当前经营品类不支持节假日差异定价");
     }
     if (input.calendar.weekendDays.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) throw new BadRequestException("周末规则只能使用 0 到 6 的星期序号");
@@ -810,7 +810,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       updatedAt: now(),
       updatedBy: operator
     };
-    await this.configStore.upsertBusinessSettings(nextSettings, operator);
+    await this.configStore.upsertBusinessSettings(nextSettings, operator, undefined, binding);
     state.businessSettings = nextSettings;
     return state.businessSettings;
   }
@@ -931,7 +931,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   async saveLocation(tenantId: string, input: SaveRentalFulfillmentLocationRequest) {
     const state = this.state(tenantId);
-    const definition = await this.effectiveCategory(tenantId, state.profile.categoryCode);
+    const { definition, binding } = await this.categoryWriteContext(tenantId, state.profile.categoryCode);
     if (!definition.businessModel.locationTypes.includes(input.type)) throw new BadRequestException("当前经营品类不支持该履约地点类型");
     if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("地点编码和名称不能为空");
     let operator = input.operatorId ? state.operators.find((row) => row.id === input.operatorId) : undefined;
@@ -971,7 +971,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       businessHours: input.businessHours?.trim(),
       status: input.status ?? existing?.status ?? "enabled"
     };
-    await this.configStore.upsertLocation(result);
+    await this.configStore.upsertLocation(result, undefined, binding);
 
     if (existing) state.locations.splice(state.locations.indexOf(existing), 1, result); else state.locations.unshift(result);
     return result;

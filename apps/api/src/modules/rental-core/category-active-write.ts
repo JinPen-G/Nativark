@@ -6,12 +6,10 @@ import { prepareRentalCategoryUniqueClaims, reconcileRentalCategoryAttributes } 
 
 export interface CategoryWriteBinding { categoryVersionId: string; adoptionRevision: number }
 
-/** Shares the space lock with adoption. Never trust claims computed before the transaction. */
-export async function validateActiveCategoryWrite(
+/** Every configuration participating in adoption must share this transaction lock. */
+export async function lockActiveCategoryBinding(
   tx: Prisma.TransactionClient, tenantId: string, workspaceId: string,
-  input: { id: string; scope: "item_group" | "asset"; attributes: Record<string, unknown>; serialNo?: string; inventoryMode?: RentalInventoryMode; categoryCode?: string },
-  expected?: CategoryWriteBinding,
-  allowMediaWrite = false
+  expected?: CategoryWriteBinding, categoryCode?: string
 ) {
   const rows = await tx.$queryRaw<Array<{ categoryCode: string; categoryVersionId: string | null; categoryAdoptionRevision: number; status: string }>>(
     Prisma.sql`SELECT categoryCode, categoryVersionId, categoryAdoptionRevision, status FROM business_workspaces WHERE tenantId = ${tenantId} AND id = ${workspaceId} FOR UPDATE`
@@ -22,9 +20,20 @@ export async function validateActiveCategoryWrite(
     throw new ConflictException("经营空间品类版本已变化，请刷新后重新保存");
   }
   const code = workspace.categoryCode.toLowerCase();
-  if (input.categoryCode && code !== input.categoryCode) throw new ConflictException("商品型号与经营空间品类不一致");
+  if (categoryCode && code !== categoryCode) throw new ConflictException("经营配置与经营空间品类不一致");
   const version = await tx.rentalCategoryVersion.findUnique({ where: { id: workspace.categoryVersionId } });
   const definition = resolveRentalCategoryVersionBody(version, code);
+  return { definition, binding: { categoryVersionId: workspace.categoryVersionId, adoptionRevision: workspace.categoryAdoptionRevision } };
+}
+
+/** Shares the space lock with adoption. Never trust claims computed before the transaction. */
+export async function validateActiveCategoryWrite(
+  tx: Prisma.TransactionClient, tenantId: string, workspaceId: string,
+  input: { id: string; scope: "item_group" | "asset"; attributes: Record<string, unknown>; serialNo?: string; inventoryMode?: RentalInventoryMode; categoryCode?: string },
+  expected?: CategoryWriteBinding,
+  allowMediaWrite = false
+) {
+  const { definition } = await lockActiveCategoryBinding(tx, tenantId, workspaceId, expected, input.categoryCode);
   if (input.inventoryMode && !definition.supportedInventoryModes.includes(input.inventoryMode)) throw new BadRequestException("当前经营品类不支持该库存模式");
   const attributes = { ...input.attributes };
   // Media is maintained by the dedicated upload path, not a category attribute.

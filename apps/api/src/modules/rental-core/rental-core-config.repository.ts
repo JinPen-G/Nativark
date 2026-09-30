@@ -1,7 +1,7 @@
-import { ConflictException, Injectable } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { assertCategoryAdoptionAllowed } from "./category-governance-policy";
-import { validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
+import { lockActiveCategoryBinding, validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
 import { Prisma, type $Enums } from "@prisma/client";
 import type {
   RentalBundleComponent,
@@ -74,9 +74,9 @@ export interface RentalConfigStore {
   /** 全部启用的经营空间，用于服务层按空间建状态并解析「租户 → 默认空间」。 */
   listWorkspaces(): Promise<Array<{ id: string; tenantId: string; categoryCode: RentalCategoryCode; isDefault: boolean }>>;
   upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx): Promise<void>;
-  upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx): Promise<void>;
+  upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx): Promise<void>;
-  upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx): Promise<void>;
+  upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx, uniqueAttributes?: RentalUniqueAttributeClaim[], expectedBinding?: CategoryWriteBinding, allowMediaWrite?: boolean): Promise<void>;
   upsertPricingGroup?(group: RentalPricingGroup, tx?: RentalConfigTx): Promise<void>;
   upsertCouponTemplate(template: RentalCouponTemplate, tx?: RentalConfigTx): Promise<void>;
@@ -320,20 +320,28 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     }
   }
 
-  async upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx): Promise<void> {
+  async upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void> {
     const data = {
       categoryCode: upper<$Enums.RentalCategoryCode>(settings.categoryCode),
       configVersion: settings.configVersion,
       settings: settings as unknown as Prisma.InputJsonValue,
       updatedBy
     };
-    const workspaceId = await resolveScopeWorkspaceId(this.db(tx), settings.tenantId);
-    // 按经营空间 upsert：按 tenantId 会让同租户第二个空间覆盖第一个空间的业务设置。
-    await this.db(tx).rentalTenantBusinessSettings.upsert({
-      where: { workspaceId },
-      create: { workspaceId, tenantId: settings.tenantId, ...data },
-      update: data
-    });
+    const write = async (client: RentalConfigTx) => {
+      const workspaceId = await resolveScopeWorkspaceId(client, settings.tenantId);
+      const { definition } = await lockActiveCategoryBinding(client, settings.tenantId, workspaceId, expectedBinding, settings.categoryCode);
+      const model = definition.businessModel;
+      if (!settings.pricing.enabledUnits.length || settings.pricing.enabledUnits.some((unit) => !model.pricingUnits.includes(unit)) || !settings.pricing.enabledUnits.includes(settings.pricing.defaultUnit)) throw new BadRequestException("当前经营品类不支持该计价设置");
+      if (!settings.fulfillment.enabledModes.length || settings.fulfillment.enabledModes.some((mode) => !model.fulfillmentModes.includes(mode))) throw new BadRequestException("当前经营品类不支持该履约设置");
+      if (!model.supportsHolidayPricing && (settings.pricing.holidayPricingEnabled || settings.calendar.holidayPricingEnabled)) throw new BadRequestException("当前经营品类不支持节假日差异定价");
+      // 按经营空间 upsert：按 tenantId 会让同租户第二个空间覆盖第一个空间的业务设置。
+      await client.rentalTenantBusinessSettings.upsert({
+        where: { workspaceId },
+        create: { workspaceId, tenantId: settings.tenantId, ...data },
+        update: data
+      });
+    };
+    if (tx) await write(tx); else await this.prisma.$transaction(write);
   }
 
   async upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx): Promise<void> {
@@ -347,18 +355,21 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       settlementMode: operator.settlementMode ?? null,
       status: operator.status
     };
-    const client = this.db(tx);
-    const workspaceId = await resolveScopeWorkspaceId(client, operator.tenantId);
-    const existing = await client.rentalFulfillmentOperator.findUnique({ where: { id: operator.id }, select: { tenantId: true, workspaceId: true } });
-    assertScopedWrite(existing, operator.tenantId, workspaceId, "经营主体");
-    await client.rentalFulfillmentOperator.upsert({
-      where: { id: operator.id },
-      create: { workspaceId, id: operator.id, ...data, createdAt: new Date(operator.createdAt) },
-      update: data
-    });
+    const write = async (client: RentalConfigTx) => {
+      const workspaceId = await resolveScopeWorkspaceId(client, operator.tenantId);
+      await lockActiveCategoryBinding(client, operator.tenantId, workspaceId);
+      const existing = await client.rentalFulfillmentOperator.findUnique({ where: { id: operator.id }, select: { tenantId: true, workspaceId: true } });
+      assertScopedWrite(existing, operator.tenantId, workspaceId, "经营主体");
+      await client.rentalFulfillmentOperator.upsert({
+        where: { id: operator.id },
+        create: { workspaceId, id: operator.id, ...data, createdAt: new Date(operator.createdAt) },
+        update: data
+      });
+    };
+    if (tx) await write(tx); else await this.prisma.$transaction(write);
   }
 
-  async upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx): Promise<void> {
+  async upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void> {
     const data = {
       tenantId: location.tenantId,
       organizationId: location.organizationId ?? null,
@@ -382,30 +393,34 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       businessHours: location.businessHours ?? null,
       status: location.status
     };
-    const client = this.db(tx);
-    const workspaceId = await resolveScopeWorkspaceId(client, location.tenantId);
-    const existing = await client.rentalFulfillmentLocation.findUnique({ where: { id: location.id }, select: { tenantId: true, workspaceId: true } });
-    assertScopedWrite(existing, location.tenantId, workspaceId, "履约地点");
-    if (location.operatorId) {
-      const operator = await client.rentalFulfillmentOperator.findFirst({ where: { id: location.operatorId, tenantId: location.tenantId, workspaceId }, select: { id: true } });
-      if (!operator) throw new ConflictException("履约地点引用了其他租户或经营空间的经营主体");
-    }
-    if (location.organizationId) {
-      const organization = await client.organizationUnit.findFirst({
-        where: { id: location.organizationId, tenantId: location.tenantId, status: "enabled" },
-        select: { id: true }
+    const write = async (client: RentalConfigTx) => {
+      const workspaceId = await resolveScopeWorkspaceId(client, location.tenantId);
+      const { definition } = await lockActiveCategoryBinding(client, location.tenantId, workspaceId, expectedBinding);
+      if (!definition.businessModel.locationTypes.includes(location.type)) throw new BadRequestException("当前经营品类不支持该履约地点类型");
+      const existing = await client.rentalFulfillmentLocation.findUnique({ where: { id: location.id }, select: { tenantId: true, workspaceId: true } });
+      assertScopedWrite(existing, location.tenantId, workspaceId, "履约地点");
+      if (location.operatorId) {
+        const operator = await client.rentalFulfillmentOperator.findFirst({ where: { id: location.operatorId, tenantId: location.tenantId, workspaceId }, select: { id: true } });
+        if (!operator) throw new ConflictException("履约地点引用了其他租户或经营空间的经营主体");
+      }
+      if (location.organizationId) {
+        const organization = await client.organizationUnit.findFirst({
+          where: { id: location.organizationId, tenantId: location.tenantId, status: "enabled" },
+          select: { id: true }
+        });
+        if (!organization) throw new ConflictException("履约地点只能归属当前租户内已启用的组织");
+      }
+      if (location.parentLocationId) {
+        const parent = await client.rentalFulfillmentLocation.findFirst({ where: { id: location.parentLocationId, tenantId: location.tenantId, workspaceId }, select: { id: true } });
+        if (!parent) throw new ConflictException("履约地点引用了其他租户或经营空间的上级地点");
+      }
+      await client.rentalFulfillmentLocation.upsert({
+        where: { id: location.id },
+        create: { workspaceId, id: location.id, ...data },
+        update: data
       });
-      if (!organization) throw new ConflictException("履约地点只能归属当前租户内已启用的组织");
-    }
-    if (location.parentLocationId) {
-      const parent = await client.rentalFulfillmentLocation.findFirst({ where: { id: location.parentLocationId, tenantId: location.tenantId, workspaceId }, select: { id: true } });
-      if (!parent) throw new ConflictException("履约地点引用了其他租户或经营空间的上级地点");
-    }
-    await client.rentalFulfillmentLocation.upsert({
-      where: { id: location.id },
-      create: { workspaceId, id: location.id, ...data },
-      update: data
-    });
+    };
+    if (tx) await write(tx); else await this.prisma.$transaction(write);
   }
 
   /** 套装组成是独立表，整组替换以免留下已被移除的组件行。 */
@@ -603,15 +618,18 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       fields: template.fields as unknown as Prisma.InputJsonValue,
       enabled: template.enabled
     };
-    const client = this.db(tx);
-    const workspaceId = await resolveScopeWorkspaceId(client, template.tenantId);
-    const existing = await client.rentalInspectionTemplate.findUnique({ where: { id: template.id }, select: { tenantId: true, workspaceId: true } });
-    assertScopedWrite(existing, template.tenantId, workspaceId, "检查模板");
-    await client.rentalInspectionTemplate.upsert({
-      where: { id: template.id },
-      create: { workspaceId, id: template.id, ...data },
-      update: data
-    });
+    const write = async (client: RentalConfigTx) => {
+      const workspaceId = await resolveScopeWorkspaceId(client, template.tenantId);
+      await lockActiveCategoryBinding(client, template.tenantId, workspaceId, undefined, template.categoryCode);
+      const existing = await client.rentalInspectionTemplate.findUnique({ where: { id: template.id }, select: { tenantId: true, workspaceId: true } });
+      assertScopedWrite(existing, template.tenantId, workspaceId, "检查模板");
+      await client.rentalInspectionTemplate.upsert({
+        where: { id: template.id },
+        create: { workspaceId, id: template.id, ...data },
+        update: data
+      });
+    };
+    if (tx) await write(tx); else await this.prisma.$transaction(write);
   }
 
   /* ---------- 行 → 领域对象 ---------- */

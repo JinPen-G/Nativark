@@ -16,9 +16,8 @@ export function reconcileRentalCategoryAttributes(
   }
   for (const [code, value] of Object.entries(incoming)) {
     if (allowed.has(code)) active[code] = value;
-    else if (!hasOwn(persisted, code) || !isDeepStrictEqual(value, persisted[code])) {
-      throw new BadRequestException(`存在未定义或不可修改的历史品类字段：${code}`);
-    }
+    else if (!hasOwn(persisted, code)) throw new BadRequestException(`存在未定义的品类字段：${code}`);
+    else if (!isDeepStrictEqual(value, persisted[code])) throw new BadRequestException(`存在不可修改的历史品类字段：${code}`);
   }
   return { active, stored: { ...retained, ...active } };
 }

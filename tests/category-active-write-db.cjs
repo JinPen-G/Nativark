@@ -25,6 +25,9 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     await db.businessWorkspace.create({ data: { id: workspaceId, tenantId: "tenant_001", code: fixture, name: "并发写入专用空间", categoryCode: "CAMERA", categoryVersionId: baseline.recommendedVersionId, defaultMarker: fixture } });
     const oldBinding = { categoryVersionId: baseline.recommendedVersionId, adoptionRevision: 0 };
     const input = { id: `${fixture}_g1`, tenantId: "tenant_001", categoryCode: "camera", code: "G1", name: "专项型号", inventoryMode: "serialized", unit: "件", attributes: { identity: " abc " }, status: "enabled", bundleComponents: [], createdAt: new Date().toISOString() };
+    // Deliberately minimal repository fixtures, not a claim of usable business settings.
+    const settings = { tenantId: "tenant_001", categoryCode: "camera", configVersion: "fixture", pricing: { enabledUnits: ["hour"], defaultUnit: "hour", holidayPricingEnabled: false }, calendar: { holidayPricingEnabled: false }, fulfillment: { enabledModes: ["store_pickup_return"] } };
+    const location = { id: `${fixture}_location`, tenantId: "tenant_001", code: "L", name: "专项地点", type: "store", status: "enabled", capabilities: ["pickup", "return"] };
     // Hold the exact lock used by active writes, then switch while an old request is waiting.
     let locked; const ready = new Promise((resolve) => { locked = resolve; });
     let unlock; const release = new Promise((resolve) => { unlock = resolve; });
@@ -36,8 +39,19 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     await ready;
     const stale = context(() => repo.upsertItemGroup(input, undefined, [], oldBinding));
     const rejected = assert.rejects(stale, /版本已变化/);
-    unlock(); await switching; await rejected;
+    const staleSettings = assert.rejects(context(() => repo.upsertBusinessSettings(settings, "fixture", undefined, oldBinding)), /版本已变化/);
+    const staleLocation = assert.rejects(context(() => repo.upsertLocation(location, undefined, oldBinding)), /版本已变化/);
+    unlock(); await switching; await Promise.all([rejected, staleSettings, staleLocation]);
     assert.equal(await db.rentalItemGroup.count({ where: { workspaceId } }), 0, "旧请求不能在切换后写入");
+    assert.equal(await db.rentalTenantBusinessSettings.count({ where: { workspaceId } }), 0);
+    assert.equal(await db.rentalFulfillmentLocation.count({ where: { workspaceId } }), 0);
+    const currentBinding = { categoryVersionId: versionId, adoptionRevision: 1 };
+    await context(() => repo.upsertBusinessSettings(settings, "fixture", undefined, currentBinding));
+    await assert.rejects(context(() => repo.upsertBusinessSettings({ ...settings, pricing: { enabledUnits: ["shift"], defaultUnit: "shift" } }, "fixture")), /不支持/);
+    assert.deepEqual((await db.rentalTenantBusinessSettings.findUnique({ where: { workspaceId } })).settings.pricing.enabledUnits, ["hour"], "被拒绝的设置不能覆盖已提交事实");
+    await context(() => repo.upsertLocation(location, undefined, currentBinding));
+    await assert.rejects(context(() => repo.upsertLocation({ ...location, type: "project_site" })), /不支持/);
+    assert.equal((await db.rentalFulfillmentLocation.findUnique({ where: { id: location.id } })).type, "store");
     await assert.rejects(context(() => repo.upsertItemGroup({ ...input, attributes: {} }, undefined, [])), /不能为空/);
     await context(() => repo.upsertItemGroup(input, undefined, []));
     assert.equal(await db.rentalAttributeUniqueValue.count({ where: { workspaceId, entityId: input.id } }), 1, "调用方给空声明也必须按当前版本建立唯一声明");
@@ -59,7 +73,7 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes.__itemGroupMedia, { images: ["new"] }, "受控上传写穿到库");
     await context(() => repo.upsertItemGroup({ ...input, attributes: { identity: "GHI", __itemGroupMedia: { images: ["stale"] } } }));
     assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes.__itemGroupMedia, { images: ["new"] }, "普通资料保存不能覆盖最新图片");
-    console.log("category-active-write-db: 锁竞争后旧请求拒绝、当前必填复核、声明重建/改值释放/重复回滚、序列号校验通过");
+    console.log("category-active-write-db: 锁竞争后型号/设置/地点旧请求拒绝、当前定义复核与拒绝无改写、唯一声明及媒体边界通过");
   } finally {
     await db.businessWorkspace.deleteMany({ where: { id: workspaceId } });
     await db.rentalCategoryVersion.deleteMany({ where: { id: versionId } });
