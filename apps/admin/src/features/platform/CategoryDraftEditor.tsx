@@ -3,7 +3,7 @@ import { Alert, App, Button, Card, Collapse, Form, Input, InputNumber, Modal, Se
 import { CATEGORY_DRAFT_SECTIONS, RENTAL_CATEGORY_ICON_CODES, RENTAL_CAPABILITY_MODULES, RENTAL_FULFILLMENT_MODES, RENTAL_LOCATION_TYPES, RENTAL_PRICING_UNIT_CODES, RentalInventoryMode, type CategoryDraftSection, type CategoryVersionView } from "@rental-os/shared";
 import { useLocale } from "@/app/locale";
 import { categoryGovernanceApi } from "@/api/categoryGovernance";
-import { CATEGORY_ATTRIBUTE_TYPES, CATEGORY_INSPECTION_TYPES, categoryArrayUsesTags, updateCategoryField } from "./categoryDraftFields";
+import { CATEGORY_ATTRIBUTE_TYPES, CATEGORY_INSPECTION_TYPES, addCategoryAttributeSchemaField, categoryArrayUsesTags, updateCategoryField } from "./categoryDraftFields";
 import { CategoryTemplateIcon } from "./CategoryTemplateIcon";
 
 const ownership: Record<CategoryDraftSection, string[]> = {
@@ -54,11 +54,33 @@ function project(version: CategoryVersionView, section: CategoryDraftSection): R
   return projected;
 }
 
+function AttributeSchemaEditor({ value, change, disabled }: { value: Record<string, unknown>; change: (value: unknown) => void; disabled: boolean }) {
+  const { t } = useLocale();
+  const { message } = App.useApp();
+  const [code, setCode] = useState("");
+  const [type, setType] = useState<string>("string");
+  const options = CATEGORY_ATTRIBUTE_TYPES.map((entry) => ({ value: entry, label: entry }));
+  return <Card size="small" title={t("属性类型")}>
+    <Alert type="info" title={t("属性概要不代替型号与资产字段声明；必填、选项与唯一要求请在下方字段配置。")} />
+    <Table rowKey="code" size="small" pagination={false} dataSource={Object.entries(value).map(([key, entry]) => ({ code: key, type: String(entry) }))} columns={[
+      { title: t("字段编码"), dataIndex: "code" },
+      { title: t("类型"), dataIndex: "type", render: (entry: string, row: { code: string }) => <Select aria-label={`${t("类型")} ${row.code}`} value={entry} options={options} disabled={disabled} onChange={(next) => change({ ...value, [row.code]: next })} /> },
+      { title: t("操作"), render: (_, row: { code: string }) => <Button disabled={disabled} onClick={() => change(Object.fromEntries(Object.entries(value).filter(([key]) => key !== row.code)))}>{t("删除")}</Button> }
+    ]} />
+    {!disabled && <Space wrap>
+      <Input aria-label={t("新字段编码")} placeholder={t("新字段编码")} value={code} maxLength={64} onChange={(event) => setCode(event.target.value)} />
+      <Select aria-label={t("新字段类型")} value={type} options={options} onChange={setType} />
+      <Button onClick={() => { try { change(addCategoryAttributeSchemaField(value, code, type)); setCode(""); } catch (error) { message.warning(t(error instanceof Error ? error.message : "字段类型不合法")); } }}>{t("新增字段")}</Button>
+    </Space>}
+  </Card>;
+}
+
 /** Structured controls only: category administrators never need to write JSON. */
 function ValueEditor({ name, value, change, disabled, inspection = false }: { name: string; value: unknown; change: (value: unknown) => void; disabled: boolean; inspection?: boolean }) {
   const { t, locale } = useLocale();
   const [baseName, suffix] = name.split(" ");
   const label = locale === "en-US" ? name.replace(/([A-Z])/g, " $1") : `${t(labels[baseName] ?? baseName)}${suffix ? ` ${suffix}` : ""}`;
+  if (name === "attributeSchema" && record(value)) return <AttributeSchemaEditor value={value} change={change} disabled={disabled} />;
   if (typeof value === "boolean") return <Form.Item label={label}><Switch aria-label={label} checked={value} onChange={change} disabled={disabled} /></Form.Item>;
   if (typeof value === "number") return <Form.Item label={label}><InputNumber aria-label={label} value={value} onChange={(next) => { if (next !== null) change(next); }} disabled={disabled} /></Form.Item>;
   if (Array.isArray(value)) {

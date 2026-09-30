@@ -7,7 +7,7 @@ const source = fs.readFileSync(path.join(__dirname, "../apps/admin/src/features/
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const actual = { exports: {} };
 new Function("module", "exports", compiled)(actual, actual.exports);
-const { CATEGORY_ATTRIBUTE_TYPES, CATEGORY_INSPECTION_TYPES, updateCategoryField, categoryArrayUsesTags } = actual.exports;
+const { CATEGORY_ATTRIBUTE_TYPES, CATEGORY_INSPECTION_TYPES, updateCategoryField, categoryArrayUsesTags, addCategoryAttributeSchemaField } = actual.exports;
 assert(CATEGORY_INSPECTION_TYPES.includes("photo"));
 assert(CATEGORY_INSPECTION_TYPES.includes("text"));
 assert(!CATEGORY_INSPECTION_TYPES.includes("string"));
@@ -23,4 +23,9 @@ assert.deepEqual(updateCategoryField(original, "label", "状态", false).options
 for (const values of [[], ["cleaning", "delivery"]]) assert(categoryArrayUsesTags("valueAddedServicePresets", values));
 for (const name of ["assetFields", "inspectionFields"]) assert(!categoryArrayUsesTags(name, []));
 assert(!categoryArrayUsesTags("assetFields", [{ code: "serialNo" }]));
-console.log("category-governance-admin-fields: 类型域、类型切换清理、不可变编辑及空数组控件分类通过");
+const schema = { brand: "string" };
+assert.deepEqual(addCategoryAttributeSchemaField(schema, " modelYear ", "number"), { brand: "string", modelYear: "number" });
+assert.deepEqual(schema, { brand: "string" });
+for (const code of ["brand", "__proto__", "constructor", "prototype", "bad.code", "", "x".repeat(65)]) assert.throws(() => addCategoryAttributeSchemaField(schema, code, "string"));
+assert.throws(() => addCategoryAttributeSchemaField(schema, "image", "photo"));
+console.log("category-governance-admin-fields: 类型域、切换清理、不可变编辑、空数组及属性概要增删边界通过");
