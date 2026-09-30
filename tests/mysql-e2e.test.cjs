@@ -398,6 +398,65 @@ async function closeMockFundedOrder(orderId, token, keyPrefix) {
   return request("POST", `/api/rental/v1/orders/${orderId}/settle`, {}, token);
 }
 
+async function registerApprovedRentalMember(token, name, phone) {
+  const created = await request("POST", "/api/platform/customers", { customerType: "personal", name, phone }, token);
+  assert.equal(created.status, 201, `会员夹具创建失败: ${JSON.stringify(created.body).slice(0, 300)}`);
+  const customerId = created.body.data.id;
+  const reviews = await request("GET", "/api/membership/reviews?status=pending&type=registration", null, token);
+  assert.equal(reviews.status, 200);
+  const registration = reviews.body.data.find((row) => row.customerId === customerId);
+  if (registration) {
+    const approved = await request("POST", `/api/membership/reviews/${registration.id}/decision`, { status: "approved", reason: "E2E 会员夹具审核" }, token);
+    assert.equal(approved.status, 201);
+  }
+  return customerId;
+}
+
+async function configureRentalTestLocation(token, type) {
+  const createdOperator = await request("POST", "/api/rental/v1/fulfillment-operators", {
+    code: "E2E-SELF", name: "E2E 自营主体", type: "self_operated", settlementMode: "self", status: "enabled"
+  }, token);
+  assert.equal(createdOperator.status, 201, `履约主体夹具失败: ${JSON.stringify(createdOperator.body).slice(0, 300)}`);
+  const created = await request("POST", "/api/rental/v1/locations", {
+    code: "E2E-MAIN", name: "E2E 取还地点", type, operatorId: createdOperator.body.data.id,
+    capabilities: ["pickup", "return", "storage", "delivery"], address: "E2E 测试地点",
+    province: "上海市", city: "上海市", district: "徐汇区", timezone: "Asia/Shanghai",
+    contactName: "E2E 值班员", contactPhone: "13800000060", status: "enabled"
+  }, token);
+  assert.equal(created.status, 201, `履约地点夹具失败: ${JSON.stringify(created.body).slice(0, 300)}`);
+  return created.body.data;
+}
+
+async function approveRentalMemberQualifications(token, customerId, documentTypes) {
+  const types = await request("GET", "/api/membership/qualification-types", null, token);
+  assert.equal(types.status, 200);
+  for (const code of documentTypes) {
+    const existing = types.body.data.find((row) => row.code === code);
+    if (!existing || existing.status !== "enabled") {
+      const enabled = await request("PUT", "/api/membership/qualification-types", { id: existing?.id, code, name: code, status: "enabled" }, token);
+      assert.equal(enabled.status, 200, `证件类型夹具失败: ${JSON.stringify(enabled.body).slice(0, 300)}`);
+    }
+    const submitted = await request("POST", `/api/membership/personal/${customerId}/qualifications`, {
+      qualificationType: code, referenceNo: "E2E-QUALIFICATION", issuedAt: "2020-01-01",
+      expiresAt: new Date(Date.now() + 5 * 365 * 86400000).toISOString()
+    }, token);
+    assert.equal(submitted.status, 201, `资质提交失败: ${JSON.stringify(submitted.body).slice(0, 300)}`);
+    const approved = await request("POST", `/api/membership/reviews/${submitted.body.data.review.id}/decision`, { status: "approved", reason: "E2E 真实资质审核" }, token);
+    assert.equal(approved.status, 201, `资质审核失败: ${JSON.stringify(approved.body).slice(0, 300)}`);
+  }
+}
+
+function inspectionEvidence(orderId, scene, tenantId = "tenant_001") {
+  assert.match(orderId, /^[A-Za-z0-9_-]+$/u, "订单编号必须可安全用于测试夹具 SQL");
+  assert.match(scene, /^(pickup|return)$/u);
+  assert.match(tenantId, /^[A-Za-z0-9_-]+$/u);
+  const fileId = `e2e_${scene}_${randomBytes(10).toString("hex")}`;
+  // 本用例验收订单交接，不重复测对象存储上传；专用库中造一个已归属订单、
+  // 已完成上传的图片元数据夹具，仍完整走服务端影像归属及阶段校验。
+  mysqlQuery(`INSERT INTO \`FileAsset\` (\`id\`,\`tenantId\`,\`businessModule\`,\`businessType\`,\`businessId\`,\`fileName\`,\`mimeType\`,\`sizeBytes\`,\`storageKey\`,\`uploadScene\`,\`status\`,\`createdAt\`,\`updatedAt\`) VALUES ('${fileId}','${tenantId}','rental-core','rental_order','${orderId}','${scene}.png','image/png',68,'e2e/${fileId}','${scene}-evidence','active',NOW(3),NOW(3));`);
+  return fileId;
+}
+
 async function reviewInspectionException(orderId, inspectionId, exceptionIndex, amount, token, keyPrefix) {
   const reviewed = await request(
     "POST",
@@ -758,7 +817,17 @@ async function main() {
   );
   assert.equal(r1SecondCustomerResponse.status, 201, `R1 第二会员创建失败: ${JSON.stringify(r1SecondCustomerResponse.body).slice(0, 300)}`);
   const r1SecondCustomerId = r1SecondCustomerResponse.body.data.id;
-  ok("R1 订单验收使用已登记的个人会员主档");
+  // 后台注册遵循租户审核策略：手动审核时只建待激活会员，不能直接拿来下单。
+  // 通过真实审核 API 激活两个夹具，不绕开会员状态门禁。
+  const pendingReviews = await request("GET", "/api/membership/reviews?status=pending&type=registration", null, demo.accessToken);
+  assert.equal(pendingReviews.status, 200, `R1 会员审核列表读取失败: ${JSON.stringify(pendingReviews.body).slice(0, 300)}`);
+  for (const customerId of [r1CustomerId, r1SecondCustomerId]) {
+    const review = pendingReviews.body.data.find((item) => item.customerId === customerId);
+    if (!review) continue; // 自动审核策略下会员在创建时已激活。
+    const decision = await request("POST", `/api/membership/reviews/${review.id}/decision`, { status: "approved", reason: "E2E 租赁订单夹具审核" }, demo.accessToken);
+    assert.equal(decision.status, 201, `R1 会员审核失败: ${JSON.stringify(decision.body).slice(0, 300)}`);
+  }
+  ok("R1 订单验收使用已登记且审核通过的个人会员主档");
 
   console.log("== 9. Rental Core 报价→下单→履约全链路（摄影：序列化+套装） ==");
   const groups = (await request("GET", "/api/rental/v1/item-groups", null, demo.accessToken)).body.data;
@@ -815,19 +884,28 @@ async function main() {
   assert.equal((await assetStatus()).find((row) => row.id === trackedAssetId).status, "available", "资产在领取前仍应保持 available，资源锁定记录在订单分配上");
   await prepareMockFunding(order.body.data, demo.accessToken, `e2e:${orderId}`);
   const pickupTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=pickup", null, demo.accessToken)).body.data[0];
-  const pickedUp = (await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, { templateId: pickupTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 9000 } }, demo.accessToken)).body.data;
+  const pickupResponse = await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, { templateId: pickupTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 9000 }, attachments: [inspectionEvidence(orderId, "pickup")] }, demo.accessToken);
+  assert.equal(pickupResponse.status, 201, `领取检查失败: ${JSON.stringify(pickupResponse.body).slice(0, 300)}`);
+  const pickedUp = pickupResponse.body.data;
   assert.equal(pickedUp.order.status, "renting");
   assert.equal((await assetStatus()).find((row) => row.id === trackedAssetId).status, "rented", "领取后资产应为 rented");
   const returnTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=return", null, demo.accessToken)).body.data[0];
-  const returned = (await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, { templateId: returnTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 9100 }, exceptions: [{ code: "damage", description: "E2E 损坏", chargeAmount: 66 }] }, demo.accessToken)).body.data;
+  const returnResponse = await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, { templateId: returnTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 9100 }, attachments: [inspectionEvidence(orderId, "return")], exceptions: [{ code: "damage", description: "E2E 损坏", chargeAmount: 66 }] }, demo.accessToken);
+  assert.equal(returnResponse.status, 201, `归还检查失败: ${JSON.stringify(returnResponse.body).slice(0, 300)}`);
+  const returned = returnResponse.body.data;
   assert.equal(returned.order.status, "settling");
   assert.equal(returned.inspection.baselineInspectionId, pickedUp.inspection.id, "归还检查必须引用领取基线");
   assert.equal(returned.inspection.usageReadings.find((row) => row.fieldCode === "shutter_count").delta, 100, "快门使用量必须由领取与归还原始值计算");
   const reviewedReturnOrder = await reviewInspectionException(orderId, returned.inspection.id, 0, 66, demo.accessToken, `e2e:${orderId}`);
   assert.ok(reviewedReturnOrder.finalPayableAmount > reviewedReturnOrder.payableAmount, "审核通过后损坏费应进入最终应付");
+  const customerConfirmedException = await request(
+    "POST", `/api/rental/v1/orders/${orderId}/inspections/${returned.inspection.id}/exceptions/0/customer-response`,
+    { decision: "confirmed", reason: "E2E 客户确认已审核的损坏费用" }, demo.accessToken
+  );
+  assert.equal(customerConfirmedException.status, 201, `客户确认检查异常失败: ${JSON.stringify(customerConfirmedException.body).slice(0, 300)}`);
   assert.equal((await assetStatus()).find((row) => row.id === trackedAssetId).status, "maintenance", "带异常归还后资产必须等待养护，不能立即恢复可用");
   const r1Settled = await closeMockFundedOrder(orderId, demo.accessToken, `e2e:${orderId}`);
-  assert.equal(r1Settled.status, 201, "资金归零后应能结算关闭");
+  assert.equal(r1Settled.status, 201, `资金归零后应能结算关闭: ${JSON.stringify(r1Settled.body).slice(0, 500)}`);
   assert.equal(r1Settled.body.data.status, "completed");
   ok(`全链路完成 ${returned.order.orderNo}，套装+损坏费+资产状态+资金结算正确`);
 
@@ -920,7 +998,7 @@ async function main() {
   await prepareMockFunding(cat03Order.body.data, demo.accessToken, `e2e:${cat03OrderId}`);
   const cat03Pickup = await request(
     "POST", `/api/rental/v1/orders/${cat03OrderId}/inspections`,
-    { templateId: pickupTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 100 } },
+    { templateId: pickupTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 100 }, attachments: [inspectionEvidence(cat03OrderId, "pickup")] },
     demo.accessToken
   );
   assert.equal(cat03Pickup.status, 201, "CAT-03 领取检查失败");
@@ -933,7 +1011,8 @@ async function main() {
       templateId: cat03ReturnTemplate.id,
       returnBatchNo: "cat03-partial-1",
       returnItems: [{ allocationId: alternateAllocation.id, quantity: 1 }],
-      results: { appearance_ok: true, function_ok: true, shutter_count: 110 }
+      results: { appearance_ok: true, function_ok: true, shutter_count: 110 },
+      attachments: [inspectionEvidence(cat03OrderId, "return")]
     },
     demo.accessToken
   );
@@ -951,7 +1030,7 @@ async function main() {
   assert.equal(finalBatchBypass.status, 409, "最后一批不得绕过归还检查和费用结算");
   const cat03Returned = await request(
     "POST", `/api/rental/v1/orders/${cat03OrderId}/inspections`,
-    { templateId: cat03ReturnTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 120 } },
+    { templateId: cat03ReturnTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 120 }, attachments: [inspectionEvidence(cat03OrderId, "return")] },
     demo.accessToken
   );
   assert.equal(cat03Returned.status, 201, "CAT-03 最终归还检查失败");
@@ -1037,6 +1116,14 @@ async function main() {
   );
   assert.equal(campingCustomerResponse.status, 201, `露营会员创建失败: ${JSON.stringify(campingCustomerResponse.body).slice(0, 300)}`);
   const campingCustomerId = campingCustomerResponse.body.data.id;
+  const campingPendingReviews = await request("GET", "/api/membership/reviews?status=pending", null, demo2.accessToken);
+  assert.equal(campingPendingReviews.status, 200, `露营会员审核列表读取失败: ${JSON.stringify(campingPendingReviews.body).slice(0, 200)}`);
+  const campingPendingReview = campingPendingReviews.body.data.find((item) => item.customerId === campingCustomerId);
+  if (campingPendingReview) {
+    const decision = await request("POST", `/api/membership/reviews/${campingPendingReview.id}/decision`,
+      { status: "approved", reason: "E2E 露营订单夹具审核" }, demo2.accessToken);
+    assert.equal(decision.status, 201, `露营会员审核失败: ${JSON.stringify(decision.body).slice(0, 200)}`);
+  }
   const campingPricing = await request(
     "POST",
     "/api/rental/v1/pricing-plans",
@@ -1100,20 +1187,25 @@ async function main() {
   await request(
     "POST",
     `/api/rental/v1/orders/${campingOrderId}/inspections`,
-    { templateId: campingPickupTemplate.id, results: { count_ok: true, cleanliness: "良好" } },
+    { templateId: campingPickupTemplate.id, results: { count_ok: true, cleanliness: "良好" }, attachments: [inspectionEvidence(campingOrderId, "pickup", "tenant_002")] },
     demo2.accessToken
   );
   const campingReturnTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=return", null, demo2.accessToken)).body.data[0];
   const campingReturned = (await request(
     "POST",
     `/api/rental/v1/orders/${campingOrderId}/inspections`,
-    { templateId: campingReturnTemplate.id, results: { count_ok: false, cleanliness: "严重污损" }, exceptions: [{ code: "missing_part", description: "帐篷地钉缺失 2 枚", chargeAmount: 35 }, { code: "soiled", description: "折叠椅严重污损", chargeAmount: 20 }] },
+    { templateId: campingReturnTemplate.id, results: { count_ok: false, cleanliness: "严重污损" }, attachments: [inspectionEvidence(campingOrderId, "return", "tenant_002")], exceptions: [{ code: "missing_part", description: "帐篷地钉缺失 2 枚", chargeAmount: 35 }, { code: "soiled", description: "折叠椅严重污损", chargeAmount: 20 }] },
     demo2.accessToken
   )).body.data;
   assert.equal(campingReturned.order.status, "settling");
   await reviewInspectionException(campingOrderId, campingReturned.inspection.id, 0, 35, demo2.accessToken, `e2e:${campingOrderId}`);
   const campingReviewedOrder = await reviewInspectionException(campingOrderId, campingReturned.inspection.id, 1, 20, demo2.accessToken, `e2e:${campingOrderId}`);
   assert.equal(campingReviewedOrder.finalPayableAmount, campingReviewedOrder.payableAmount + 55, "审核后的缺件与污损费用应进入最终应付");
+  for (const exceptionIndex of [0, 1]) {
+    const confirmed = await request("POST", `/api/rental/v1/orders/${campingOrderId}/inspections/${campingReturned.inspection.id}/exceptions/${exceptionIndex}/customer-response`,
+      { decision: "confirmed", reason: "E2E 客户确认已审核的异常费用" }, demo2.accessToken);
+    assert.equal(confirmed.status, 201, `露营客户确认异常失败: ${JSON.stringify(confirmed.body).slice(0, 200)}`);
+  }
   const campingSettled = await closeMockFundedOrder(campingOrderId, demo2.accessToken, `e2e:${campingOrderId}`);
   assert.equal(campingSettled.body.data.status, "completed", "露营订单资金归零后必须关闭");
   const campingStockAfter = (await request("GET", "/api/rental/v1/stock-balances", null, demo2.accessToken)).body.data.find((row) => row.itemGroupId === tent.id);
@@ -1179,7 +1271,7 @@ async function main() {
   assert.equal(confirmCompleted.status, 409, "已完成订单不能再次确认");
   const allocateCompleted = await request("POST", `/api/rental/v1/orders/${orderId}/allocate`, {}, demo.accessToken);
   assert.equal(allocateCompleted.status, 409, "已完成订单不能配货");
-  const inspectCompleted = await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, { templateId: pickupTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 1 } }, demo.accessToken);
+  const inspectCompleted = await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, { templateId: pickupTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 1 }, attachments: [inspectionEvidence(orderId, "pickup")] }, demo.accessToken);
   assert.equal(inspectCompleted.status, 409, "已完成订单不能再办理检查");
   const cancelStart = new Date(Date.now() + 12 * 3600 * 1000).toISOString();
   const cancelEnd = new Date(Date.now() + 36 * 3600 * 1000).toISOString();
@@ -1731,13 +1823,15 @@ async function main() {
   console.log("== 13. 车辆租户初始化、经营空间与跨租户隔离 ==");
   const platform = await login("platform", "admin", PLATFORM_PASSWORD);
   const vehicleA = await bootstrapTenant(platform.accessToken, "e2e_vehicle_a", "vehicle");
+  const vehicleTenantId = readScalar("SELECT `id` FROM `Tenant` WHERE `code`='e2e_vehicle_a';");
   const tenantAId = vehicleA.tenant.tenantId;
   const vehicleAProfile = await request("GET", "/api/rental/v1/tenant-profile", null, vehicleA.accessToken);
   assert.equal(vehicleAProfile.status, 200, `车辆租户应能读取当前经营空间档案: ${vehicleAProfile.status}`);
   assert.equal(vehicleAProfile.body.data.categoryCode, "vehicle", "默认经营空间应保持 vehicle 品类");
   const vehicleALocations = await request("GET", "/api/rental/v1/locations", null, vehicleA.accessToken);
   assert.equal(vehicleALocations.status, 200, `车辆租户应能读取通用履约地点: ${vehicleALocations.status}`);
-  assert.ok(vehicleALocations.body.data.length >= 1, "新车辆租户应有默认履约地点");
+  assert.equal(vehicleALocations.body.data.length, 0, "普通新租户不能被塞入虚构的默认门店");
+  await configureRentalTestLocation(vehicleA.accessToken, "store");
   const vehicleAOrders = await request("GET", "/api/rental/v1/orders", null, vehicleA.accessToken);
   assert.equal(vehicleAOrders.status, 200, `新车辆租户读取通用订单列表失败: ${vehicleAOrders.status}`);
   assert.equal(vehicleAOrders.body.data.length, 0, "新车辆租户不得看到 tenant_001 的种子订单");
@@ -1860,16 +1954,41 @@ async function main() {
   const vehicleStart = new Date(Date.now() - 27 * 3600 * 1000).toISOString();
   const vehicleEnd = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
   const vehicleLines = [{ itemGroupId: truckGroup.body.data.id, quantity: 1 }];
-  const vehicleQuote = (
-    await request(
+  const vehicleMemberId = await registerApprovedRentalMember(vehicleA.accessToken, "E2E车辆客户", "13800000061");
+  // 此租户刚创建，而逾期夹具从昨天开始：通过正式发布流程配置覆盖历史起租时点的规则，
+  // 不允许测试靠缺失规则时静默回退到当前条款。
+  const vehicleRules = await request("GET", "/api/rental/v1/rule-versions", null, vehicleA.accessToken);
+  assert.equal(vehicleRules.status, 200);
+  const historicalVehicleDraft = await request("POST", "/api/rental/v1/rule-versions", {
+    config: vehicleRules.body.data[0].config,
+    changeReason: "E2E 逾期夹具的历史规则"
+  }, vehicleA.accessToken);
+  assert.equal(historicalVehicleDraft.status, 201, JSON.stringify(historicalVehicleDraft.body));
+  const historicalVehiclePublishInput = {
+    effectiveFrom: new Date(Date.now() - 30 * 86400000).toISOString(),
+    reason: "E2E 逾期夹具覆盖历史起租时点"
+  };
+  const retroactiveVehicleRule = await request("POST", `/api/rental/v1/rule-versions/${historicalVehicleDraft.body.data.version}/publish`, historicalVehiclePublishInput, vehicleA.accessToken);
+  assert.equal(retroactiveVehicleRule.status, 409, "已有已发布规则时不得插入更早的版本改写历史时间轴");
+  // 新租户尚无报价/订单：显式作废未使用的初始化规则，建立模拟已有经营历史的夹具。
+  // 不改库、不修改已发布正文，也不放宽正式发布的历史保护。
+  const unusedInitialVehicleRule = await request("POST", `/api/rental/v1/rule-versions/${vehicleRules.body.data[0].version}/void`, {
+    reason: "E2E 尚无报价和订单，作废未使用初始化规则以建立历史夹具"
+  }, vehicleA.accessToken);
+  assert.equal(unusedInitialVehicleRule.status, 201, JSON.stringify(unusedInitialVehicleRule.body));
+  const historicalVehicleRule = await request("POST", `/api/rental/v1/rule-versions/${historicalVehicleDraft.body.data.version}/publish`, historicalVehiclePublishInput, vehicleA.accessToken);
+  assert.equal(historicalVehicleRule.status, 201, JSON.stringify(historicalVehicleRule.body));
+  const vehicleQuoteResponse = await request(
       "POST",
       "/api/rental/v1/quotes",
-      { customerType: "personal", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: vehicleLocation.id, startAt: vehicleStart, endAt: vehicleEnd, lines: vehicleLines, pricingPlanId: truckPlan.body.data.id },
+      { customerId: vehicleMemberId, customerType: "personal", fulfillmentMode: "store_pickup_return", fulfillmentLocationId: vehicleLocation.id, startAt: vehicleStart, endAt: vehicleEnd, lines: vehicleLines, pricingPlanId: truckPlan.body.data.id },
       vehicleA.accessToken
-    )
-  ).body.data;
+    );
+  assert.equal(vehicleQuoteResponse.status, 201, `车辆报价失败: ${JSON.stringify(vehicleQuoteResponse.body)}`);
+  const vehicleQuote = vehicleQuoteResponse.body.data;
   const vehicleOrderBase = {
     quoteId: vehicleQuote.id,
+    customerId: vehicleMemberId,
     customerType: "personal",
     customerName: "E2E车辆客户",
     fulfillmentMode: "store_pickup_return",
@@ -1881,25 +2000,32 @@ async function main() {
   const noQualification = await request("POST", "/api/rental/v1/orders", vehicleOrderBase, vehicleA.accessToken);
   assert.equal(noQualification.status, 409, "车辆品类未通过资质审核必须拒绝下单");
   assert.match(JSON.stringify(noQualification.body), /资质审核/u, "拒绝原因应指向资质");
-  const vehicleOrder = await request("POST", "/api/rental/v1/orders", { ...vehicleOrderBase, qualificationApproved: true }, vehicleA.accessToken);
+  await approveRentalMemberQualifications(vehicleA.accessToken, vehicleMemberId, vehicleQuote.ruleSnapshot.qualification.documentTypes);
+  const approvedVehicleQuote = await request("POST", "/api/rental/v1/quotes", vehicleQuote.request, vehicleA.accessToken);
+  assert.equal(approvedVehicleQuote.status, 201, `资质审核后车辆重新报价失败: ${JSON.stringify(approvedVehicleQuote.body).slice(0, 300)}`);
+  const vehicleOrder = await request("POST", "/api/rental/v1/orders", { ...vehicleOrderBase, quoteId: approvedVehicleQuote.body.data.id }, vehicleA.accessToken);
   assert.equal(vehicleOrder.status, 201, `车辆订单创建失败: ${JSON.stringify(vehicleOrder.body).slice(0, 200)}`);
   const vehicleOrderId = vehicleOrder.body.data.id;
-  await request("POST", `/api/rental/v1/orders/${vehicleOrderId}/confirm`, {}, vehicleA.accessToken);
-  const vehicleAllocated = (await request("POST", `/api/rental/v1/orders/${vehicleOrderId}/allocate`, {}, vehicleA.accessToken)).body.data;
-  assert.ok(vehicleAllocated.allocations.length === 1 && vehicleAllocated.allocations[0].assetId, "序列化资产应绑定具体车辆");
   await prepareMockFunding(vehicleOrder.body.data, vehicleA.accessToken, `e2e:${vehicleOrderId}`);
+  const vehicleConfirmed = await request("POST", `/api/rental/v1/orders/${vehicleOrderId}/confirm`, {}, vehicleA.accessToken);
+  assert.equal(vehicleConfirmed.status, 201, `车辆订单确认失败: ${JSON.stringify(vehicleConfirmed.body)}`);
+  const vehicleAllocatedResponse = await request("POST", `/api/rental/v1/orders/${vehicleOrderId}/allocate`, {}, vehicleA.accessToken);
+  assert.equal(vehicleAllocatedResponse.status, 201, `车辆订单分配失败: ${JSON.stringify(vehicleAllocatedResponse.body)}`);
+  const vehicleAllocated = vehicleAllocatedResponse.body.data;
+  assert.ok(vehicleAllocated.allocations.length === 1 && vehicleAllocated.allocations[0].assetId, "序列化资产应绑定具体车辆");
   const vehiclePickupTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=pickup", null, vehicleA.accessToken)).body.data[0];
-  await request(
+  const vehiclePickup = await request(
     "POST",
     `/api/rental/v1/orders/${vehicleOrderId}/inspections`,
-    { templateId: vehiclePickupTemplate.id, results: { appearance_ok: true, function_ok: true, usage_reading: 1200 } },
+    { templateId: vehiclePickupTemplate.id, results: { appearance_ok: true, function_ok: true, usage_reading: 1200 }, attachments: [inspectionEvidence(vehicleOrderId, "pickup", vehicleTenantId)] },
     vehicleA.accessToken
   );
+  assert.equal(vehiclePickup.status, 201, `车辆领取检查失败: ${JSON.stringify(vehiclePickup.body)}`);
   const vehicleReturnTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=return", null, vehicleA.accessToken)).body.data[0];
   const vehicleReturned = (await request(
     "POST",
     `/api/rental/v1/orders/${vehicleOrderId}/inspections`,
-    { templateId: vehicleReturnTemplate.id, results: { appearance_ok: true, function_ok: true, usage_reading: 1580 } },
+    { templateId: vehicleReturnTemplate.id, results: { appearance_ok: true, function_ok: true, usage_reading: 1580 }, attachments: [inspectionEvidence(vehicleOrderId, "return", vehicleTenantId)] },
     vehicleA.accessToken
   )).body.data;
   assert.equal(vehicleReturned.order.status, "settling");
@@ -1914,9 +2040,10 @@ async function main() {
 
   console.log("== 15. 工程设备品类深度用例：班次计价、资质拦截与损坏费 ==");
   const construction = await bootstrapTenant(platform.accessToken, "e2e_construction", "construction");
+  const constructionTenantId = readScalar("SELECT `id` FROM `Tenant` WHERE `code`='e2e_construction';");
   const constructionProfile = (await request("GET", "/api/rental/v1/tenant-profile", null, construction.accessToken)).body.data;
   assert.equal(constructionProfile.categoryCode, "construction");
-  const constructionLocation = (await request("GET", "/api/rental/v1/locations", null, construction.accessToken)).body.data[0];
+  const constructionLocation = await configureRentalTestLocation(construction.accessToken, "warehouse");
   const excavatorGroup = await request(
     "POST",
     "/api/rental/v1/item-groups",
@@ -1941,11 +2068,12 @@ async function main() {
   const constructionStart = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
   const constructionEnd = new Date(Date.now() + 72 * 3600 * 1000).toISOString();
   const constructionLines = [{ itemGroupId: excavatorGroup.body.data.id, quantity: 1 }];
+  const constructionMemberId = await registerApprovedRentalMember(construction.accessToken, "E2E工程客户", "13800000062");
   const constructionQuote = (
     await request(
       "POST",
       "/api/rental/v1/quotes",
-      { customerType: "personal", fulfillmentMode: "warehouse_pickup_return", fulfillmentLocationId: constructionLocation.id, startAt: constructionStart, endAt: constructionEnd, lines: constructionLines, pricingPlanId: excavatorPlan.body.data.id },
+      { customerId: constructionMemberId, customerType: "personal", fulfillmentMode: "warehouse_pickup_return", fulfillmentLocationId: constructionLocation.id, startAt: constructionStart, endAt: constructionEnd, lines: constructionLines, pricingPlanId: excavatorPlan.body.data.id },
       construction.accessToken
     )
   ).body.data;
@@ -1953,6 +2081,7 @@ async function main() {
   assert.ok(excavatorRental && excavatorRental.detail.includes("shift"), `班次计价说明应包含 shift: ${excavatorRental && excavatorRental.detail}`);
   const constructionOrderBase = {
     quoteId: constructionQuote.id,
+    customerId: constructionMemberId,
     customerType: "personal",
     customerName: "E2E工程客户",
     fulfillmentMode: "warehouse_pickup_return",
@@ -1963,29 +2092,36 @@ async function main() {
   };
   const noOperatorQualification = await request("POST", "/api/rental/v1/orders", constructionOrderBase, construction.accessToken);
   assert.equal(noOperatorQualification.status, 409, "工程设备未提供操作资格必须拒绝下单");
-  const constructionOrder = await request("POST", "/api/rental/v1/orders", { ...constructionOrderBase, qualificationApproved: true }, construction.accessToken);
+  await approveRentalMemberQualifications(construction.accessToken, constructionMemberId, constructionQuote.ruleSnapshot.qualification.documentTypes);
+  const approvedConstructionQuote = await request("POST", "/api/rental/v1/quotes", constructionQuote.request, construction.accessToken);
+  assert.equal(approvedConstructionQuote.status, 201, `资质审核后工程重新报价失败: ${JSON.stringify(approvedConstructionQuote.body).slice(0, 300)}`);
+  const constructionOrder = await request("POST", "/api/rental/v1/orders", { ...constructionOrderBase, quoteId: approvedConstructionQuote.body.data.id }, construction.accessToken);
   assert.equal(constructionOrder.status, 201, `工程订单创建失败: ${JSON.stringify(constructionOrder.body).slice(0, 200)}`);
   const constructionOrderId = constructionOrder.body.data.id;
-  await request("POST", `/api/rental/v1/orders/${constructionOrderId}/confirm`, {}, construction.accessToken);
-  await request("POST", `/api/rental/v1/orders/${constructionOrderId}/allocate`, {}, construction.accessToken);
   await prepareMockFunding(constructionOrder.body.data, construction.accessToken, `e2e:${constructionOrderId}`);
+  const constructionConfirm = await request("POST", `/api/rental/v1/orders/${constructionOrderId}/confirm`, {}, construction.accessToken);
+  assert.equal(constructionConfirm.status, 201, `工程订单确认失败: ${JSON.stringify(constructionConfirm.body)}`);
+  await request("POST", `/api/rental/v1/orders/${constructionOrderId}/allocate`, {}, construction.accessToken);
   const constructionPickupTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=pickup", null, construction.accessToken)).body.data[0];
   await request(
     "POST",
     `/api/rental/v1/orders/${constructionOrderId}/inspections`,
-    { templateId: constructionPickupTemplate.id, results: { appearance_ok: true, function_ok: true, usage_reading: 320 } },
+    { templateId: constructionPickupTemplate.id, results: { appearance_ok: true, function_ok: true, usage_reading: 320 }, attachments: [inspectionEvidence(constructionOrderId, "pickup", constructionTenantId)] },
     construction.accessToken
   );
   const constructionReturnTemplate = (await request("GET", "/api/rental/v1/inspection-templates?stage=return", null, construction.accessToken)).body.data[0];
   const constructionReturned = (await request(
     "POST",
     `/api/rental/v1/orders/${constructionOrderId}/inspections`,
-    { templateId: constructionReturnTemplate.id, results: { appearance_ok: false, function_ok: true, usage_reading: 356 }, exceptions: [{ code: "damage", description: "铲斗液压油管破损", chargeAmount: 800 }] },
+    { templateId: constructionReturnTemplate.id, results: { appearance_ok: false, function_ok: true, usage_reading: 356 }, attachments: [inspectionEvidence(constructionOrderId, "return", constructionTenantId)], exceptions: [{ code: "damage", description: "铲斗液压油管破损", chargeAmount: 800 }] },
     construction.accessToken
   )).body.data;
   assert.equal(constructionReturned.order.status, "settling");
   const constructionReviewedOrder = await reviewInspectionException(constructionOrderId, constructionReturned.inspection.id, 0, 800, construction.accessToken, `e2e:${constructionOrderId}`);
   assert.equal(constructionReviewedOrder.finalPayableAmount, constructionReviewedOrder.payableAmount + 800, "审核后的工程损坏费应进入最终应付");
+  const constructionCustomerConfirmed = await request("POST", `/api/rental/v1/orders/${constructionOrderId}/inspections/${constructionReturned.inspection.id}/exceptions/0/customer-response`,
+    { decision: "confirmed", reason: "E2E 客户确认已审核的工程损坏费用" }, construction.accessToken);
+  assert.equal(constructionCustomerConfirmed.status, 201, `工程客户确认异常失败: ${JSON.stringify(constructionCustomerConfirmed.body).slice(0, 200)}`);
   // 订单侧的明细与总额同样要自洽（需求 4.4.1「明细之和等于对应总额」）。
   // 订单的明细是报价明细的拷贝，再追加取消/逾期/损坏这类异常费用，因此对应关系是：
   //   报价类明细（非押金、非预授权、非异常）之和 = 租赁应付
@@ -2013,6 +2149,8 @@ async function main() {
   const constructionSettled = await closeMockFundedOrder(constructionOrderId, construction.accessToken, `e2e:${constructionOrderId}`);
   assert.equal(constructionSettled.body.data.status, "completed", "工程订单资金归零后必须关闭");
   ok("工程设备闭环：班次计价、资质拦截、损坏费联动，订单明细与总额对账一致");
+  // 专项阶段一可单独复跑四品类核心取还闭环；后续计费/续租段不被冒称已覆盖。
+  await maybeStopAfter("four-category-core");
 
   console.log("== 15b. PRICE-01 报价可复算、阶梯价与封顶价 ==");
   // 验收要求「相同输入可复算并解释来源」。既有用例只断言金额 > 0 或后置费用的增量，
@@ -8658,6 +8796,7 @@ async function main() {
 
   const capPlatform = await login("platform", "admin", PLATFORM_PASSWORD);
   const capTenant = await bootstrapTenant(capPlatform.accessToken, "e2e_cap_camera", "camera");
+  const hookEvidenceTenantId = readScalar("SELECT `id` FROM `Tenant` WHERE `code`='e2e_cap_camera' LIMIT 1;");
   const capOverview = await request("GET", "/api/rental/v1/capabilities", null, capTenant.accessToken);
   assert.equal(capOverview.status, 200, `读能力总览失败: ${capOverview.status} ${JSON.stringify(capOverview.body).slice(0, 200)}`);
   const capViewOf = (payload, code) => payload.capabilities.find((row) => row.definition.code === code);
@@ -9262,7 +9401,7 @@ async function main() {
   const hookPickedUp = await request(
     "POST",
     `/api/rental/v1/orders/${hookOrderId}/inspections`,
-    { templateId: hookPickupTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 100 } },
+    { templateId: hookPickupTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 100 }, attachments: [inspectionEvidence(hookOrderId, "pickup", hookEvidenceTenantId)] },
     hookToken
   );
   assert.equal(hookPickedUp.status, 201, `领取检查失败: ${hookPickedUp.status} ${JSON.stringify(hookPickedUp.body).slice(0, 300)}`);
@@ -9271,7 +9410,7 @@ async function main() {
   const hookReturned = await request(
     "POST",
     `/api/rental/v1/orders/${hookOrderId}/inspections`,
-    { templateId: hookReturnTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 120 } },
+    { templateId: hookReturnTemplate.id, results: { appearance_ok: true, function_ok: true, shutter_count: 120 }, attachments: [inspectionEvidence(hookOrderId, "return", hookEvidenceTenantId)] },
     hookToken
   );
   assert.equal(hookReturned.status, 201, `归还检查失败: ${hookReturned.status} ${JSON.stringify(hookReturned.body).slice(0, 300)}`);
