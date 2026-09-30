@@ -1042,12 +1042,12 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (input.inventoryMode !== RentalInventoryMode.Bundle) {
       this.validateAttributes(definition.businessModel.assetFields, "item_group", reconciledAttributes.active);
       if (state.profile.categoryCode === RentalCategoryCode.Camping) {
-        const capacity = input.attributes?.capacity;
+        const capacity = reconciledAttributes.active.capacity;
         if (capacity !== undefined && capacity !== null && capacity !== "" && (!Number.isFinite(Number(capacity)) || Number(capacity) <= 0)) throw new BadRequestException("露营装备容量必须大于0升");
       }
       if (state.profile.categoryCode === RentalCategoryCode.Construction) {
-        const ratedLoad = input.attributes?.ratedLoad;
-        const ratedLoadUnit = input.attributes?.ratedLoadUnit;
+        const ratedLoad = reconciledAttributes.active.ratedLoad;
+        const ratedLoadUnit = reconciledAttributes.active.ratedLoadUnit;
         if ((ratedLoad === undefined || ratedLoad === null || ratedLoad === "") !== (ratedLoadUnit === undefined || ratedLoadUnit === null || ratedLoadUnit === "")) {
           throw new BadRequestException("填写额定载荷时必须同时选择 kg 或 t 单位");
         }
@@ -4981,7 +4981,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     group.attributes = { ...group.attributes, [ITEM_GROUP_MEDIA_KEY]: { images } };
     group.images = this.publicItemGroupImages(group, images);
     group.updatedAt = now();
-    await this.configStore.upsertItemGroup(group);
+    await this.configStore.upsertItemGroup(group, undefined, undefined, undefined, true);
   }
 
   private itemGroupUploadRoot() {

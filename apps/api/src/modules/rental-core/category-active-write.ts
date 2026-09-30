@@ -10,7 +10,8 @@ export interface CategoryWriteBinding { categoryVersionId: string; adoptionRevis
 export async function validateActiveCategoryWrite(
   tx: Prisma.TransactionClient, tenantId: string, workspaceId: string,
   input: { id: string; scope: "item_group" | "asset"; attributes: Record<string, unknown>; serialNo?: string; inventoryMode?: RentalInventoryMode; categoryCode?: string },
-  expected?: CategoryWriteBinding
+  expected?: CategoryWriteBinding,
+  allowMediaWrite = false
 ) {
   const rows = await tx.$queryRaw<Array<{ categoryCode: string; categoryVersionId: string | null; categoryAdoptionRevision: number; status: string }>>(
     Prisma.sql`SELECT categoryCode, categoryVersionId, categoryAdoptionRevision, status FROM business_workspaces WHERE tenantId = ${tenantId} AND id = ${workspaceId} FOR UPDATE`
@@ -32,7 +33,9 @@ export async function validateActiveCategoryWrite(
     ? await tx.rentalItemGroup.findFirst({ where: { id: input.id, tenantId, workspaceId }, select: { attributes: true } })
     : await tx.rentalAsset.findFirst({ where: { id: input.id, tenantId, workspaceId }, select: { attributes: true, serialNo: true } });
   const persisted = { ...((existing?.attributes ?? {}) as Record<string, unknown>) };
-  const media = input.scope === "item_group" ? persisted.__itemGroupMedia : undefined;
+  const media = input.scope === "item_group"
+    ? (!existing || allowMediaWrite ? input.attributes.__itemGroupMedia : persisted.__itemGroupMedia)
+    : undefined;
   if (input.scope === "item_group") delete persisted.__itemGroupMedia;
   const reconciled = reconcileRentalCategoryAttributes(definition.businessModel.assetFields, input.scope, attributes, persisted);
   const supportsSerialNo = definition.businessModel.assetFields.some((field) => field.scope === "asset" && field.code === "serialNo");

@@ -32,6 +32,8 @@ const db = {
   const retained = await validateActiveCategoryWrite(db, "t", "ws", group);
   assert.deepEqual(retained.attributes.retired, { proof: [1, false] });
   assert.deepEqual(retained.attributes.__itemGroupMedia, { images: ["old"] }, "媒体以事务内事实为准");
+  const uploaded = await validateActiveCategoryWrite(db, "t", "ws", { ...group, attributes: { identity: "ABC", __itemGroupMedia: { images: ["new"] } } }, undefined, true);
+  assert.deepEqual(uploaded.attributes.__itemGroupMedia, { images: ["new"] }, "受控图片入口必须能替换媒体资料");
   assert.equal(retained.claims.length, 1, "历史字段不参与当前唯一声明");
   await validateActiveCategoryWrite(db, "t", "ws", { ...group, attributes: { identity: "ABC", retired: { proof: [1, false] } } });
   await assert.rejects(validateActiveCategoryWrite(db, "t", "ws", { ...group, attributes: { identity: "ABC", retired: null } }), /不可修改/);

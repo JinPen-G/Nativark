@@ -55,6 +55,10 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes, { identity: "GHI", retiredProof: { original: true } });
     await assert.rejects(context(() => repo.upsertItemGroup({ ...input, attributes: { identity: "GHI", retiredProof: null } })), /不可修改/);
     assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes.retiredProof, { original: true });
+    await context(() => repo.upsertItemGroup({ ...input, attributes: { identity: "GHI", __itemGroupMedia: { images: ["new"] } } }, undefined, undefined, undefined, true));
+    assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes.__itemGroupMedia, { images: ["new"] }, "受控上传写穿到库");
+    await context(() => repo.upsertItemGroup({ ...input, attributes: { identity: "GHI", __itemGroupMedia: { images: ["stale"] } } }));
+    assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes.__itemGroupMedia, { images: ["new"] }, "普通资料保存不能覆盖最新图片");
     console.log("category-active-write-db: 锁竞争后旧请求拒绝、当前必填复核、声明重建/改值释放/重复回滚、序列号校验通过");
   } finally {
     await db.businessWorkspace.deleteMany({ where: { id: workspaceId } });
