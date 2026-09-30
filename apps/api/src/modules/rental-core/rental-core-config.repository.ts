@@ -198,7 +198,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     // The opening-policy lock must live through profile and workspace creation.
     // Autocommit SELECT FOR UPDATE would release it before the protected write.
     if (!tx) {
-      await this.prisma.$transaction((client) => this.upsertProfile(profile, client));
+      await this.prisma.$transaction((client) => this.upsertProfile(profile, client), { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
       return;
     }
     const data = {
@@ -341,7 +341,9 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         update: data
       });
     };
-    if (tx) await write(tx); else await this.prisma.$transaction(write);
+    // Scope lookup can happen before waiting for the space lock. READ COMMITTED
+    // prevents that lookup from pinning an old MySQL snapshot for later reads.
+    if (tx) await write(tx); else await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   async upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx): Promise<void> {
@@ -366,7 +368,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         update: data
       });
     };
-    if (tx) await write(tx); else await this.prisma.$transaction(write);
+    if (tx) await write(tx); else await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   async upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void> {
@@ -420,7 +422,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         update: data
       });
     };
-    if (tx) await write(tx); else await this.prisma.$transaction(write);
+    if (tx) await write(tx); else await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   /** 套装组成是独立表，整组替换以免留下已被移除的组件行。 */
@@ -494,7 +496,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       return;
     }
     try {
-      await this.prisma.$transaction(write);
+      await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     } catch (error) {
       if (uniqueAttributes?.length && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
         throw new ConflictException(`${uniqueAttributes[0].label}已存在`);
@@ -545,7 +547,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       }
     };
     if (tx) return void await write(tx);
-    await this.prisma.$transaction(write);
+    await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   async upsertCouponTemplate(template: RentalCouponTemplate, tx?: RentalConfigTx): Promise<void> {
@@ -629,7 +631,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         update: data
       });
     };
-    if (tx) await write(tx); else await this.prisma.$transaction(write);
+    if (tx) await write(tx); else await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   /* ---------- 行 → 领域对象 ---------- */

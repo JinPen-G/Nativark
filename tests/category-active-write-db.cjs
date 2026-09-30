@@ -126,6 +126,29 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes.__itemGroupMedia, { images: ["new"] }, "受控上传写穿到库");
     await context(() => repo.upsertItemGroup({ ...input, attributes: { identity: "GHI", __itemGroupMedia: { images: ["stale"] } } }));
     assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes.__itemGroupMedia, { images: ["new"] }, "普通资料保存不能覆盖最新图片");
+    // Force the scope SELECT to finish before a concurrent locked upload commits.
+    // REPEATABLE READ used to preserve the pre-upload media and overwrite it.
+    let scopeRead; const scopeReady = new Promise((resolve) => { scopeRead = resolve; });
+    let uploadLocked; const uploadReady = new Promise((resolve) => { uploadLocked = resolve; });
+    let releaseUpload; const uploadRelease = new Promise((resolve) => { releaseUpload = resolve; });
+    const upload = db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM business_workspaces WHERE id = ${workspaceId} FOR UPDATE`;
+      uploadLocked(); await uploadRelease;
+      const latest = await tx.rentalItemGroup.findUniqueOrThrow({ where: { id: input.id } });
+      await tx.rentalItemGroup.update({ where: { id: input.id }, data: { attributes: { ...latest.attributes, __itemGroupMedia: { images: ["concurrent-upload"] } } } });
+    });
+    await uploadReady;
+    const observed = new RentalCoreConfigRepository({
+      $transaction: (write, options) => db.$transaction((tx) => write(new Proxy(tx, {
+        get(target, key) {
+          if (key === "businessWorkspace") return { ...target.businessWorkspace, findFirst: async (args) => { const row = await target.businessWorkspace.findFirst(args); scopeRead(); return row; } };
+          return Reflect.get(target, key);
+        }
+      })), options)
+    });
+    const editing = context(() => observed.upsertItemGroup({ ...input, attributes: { identity: "JKL" } }));
+    await scopeReady; releaseUpload(); await upload; await editing;
+    assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes.__itemGroupMedia, { images: ["concurrent-upload"] }, "锁前范围读取不能使锁后资料仍来自旧快照");
     const calendar = { tenantId: "tenant_001", year: 2030, version: "1.0", region: "CN", status: "draft", days: [], revision: 1 };
     const calendarAudit = { date: "2030-01-01", action: "override", reason: "calendar fixture", at: new Date().toISOString() };
     await context(() => business.upsertCalendar(calendar));

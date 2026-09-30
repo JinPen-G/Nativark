@@ -6,7 +6,7 @@ const { runWithRequestIdentity } = require("../apps/api/dist/common/request-iden
 const definition = structuredClone(RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "camera"));
 const calls = [];
 const client = {
-  $transaction: async (write) => { calls.push("transaction"); return write(client); },
+  $transaction: async (write, options) => { assert.equal(options?.isolationLevel, "ReadCommitted", "自建配置事务必须避免锁前旧快照"); calls.push("transaction"); return write(client); },
   businessWorkspace: { findFirst: async () => ({ id: "ws" }) },
   $queryRaw: async () => { calls.push("lock"); return [{ categoryCode: "CAMERA", categoryVersionId: "v2", categoryAdoptionRevision: 2, status: "ACTIVE" }]; },
   rentalCategoryVersion: { findUnique: async () => { calls.push("version"); return { categoryCode: "CAMERA", structureVersion: 1, status: "published", definition }; } }
