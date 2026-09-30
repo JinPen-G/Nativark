@@ -1902,6 +1902,12 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
 ];
 
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
+  { method: "get", path: "/api/rental/v1/category-adoption/{targetId}/preparation", tag: "Rental Core", operationId: "previewCategoryAdoptionPreparation", summary: "Read current-session-space candidate fields, differences and staged inputs; operation=upgrade|restore, no active facts changed", permissions: ["rental-os:category:adopt"], responseSchema: "GenericObject" },
+  { method: "put", path: "/api/rental/v1/category-adoption/{targetId}/preparation", tag: "Rental Core", operationId: "saveCategoryAdoptionPreparation", summary: "Stage target-version model/asset attribute patches with source and entity revision checks; does not adopt or publish prices/rules", permissions: ["rental-os:category:adopt"], requestSchema: objectOf({
+    expectedSourceVersionId: stringSchema, expectedSourceRevision: { type: "integer", minimum: 0 }, expectedPreparationRevision: { type: "integer", minimum: 0 },
+    operation: { type: "string", enum: ["upgrade", "restore"] }, reason: stringSchema,
+    patches: arrayOf(objectOf({ entityType: { type: "string", enum: ["item_group", "asset"] }, entityId: stringSchema, expectedUpdatedAt: { type: "string", format: "date-time" }, values: objectSchema }, ["entityType", "entityId", "expectedUpdatedAt", "values"], false))
+  }, ["expectedSourceVersionId", "expectedSourceRevision", "expectedPreparationRevision", "operation", "reason", "patches"], false), responseSchema: "GenericObject" },
   ...([
     ["get", "", "listPlatformRentalCategoryGovernance", "List category governance summaries", "view"],
     ["get", "/capability-catalog", "rentalCategoryCapabilityCatalog", "Read executable capability and pricing catalog", "view"],

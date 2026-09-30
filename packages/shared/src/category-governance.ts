@@ -16,6 +16,20 @@ export interface CategoryDefinitionDifference {
   after: unknown;
 }
 export type CategoryAdoptionScope = "all" | "pilot" | "none";
+export interface CategoryEntityPreparationPatch {
+  entityType: "item_group" | "asset";
+  entityId: string;
+  expectedUpdatedAt: string;
+  values: Record<string, string | number | boolean>;
+}
+export interface SaveCategoryPreparationRequest {
+  expectedSourceVersionId: string;
+  expectedSourceRevision: number;
+  expectedPreparationRevision: number;
+  operation: "upgrade" | "restore";
+  patches: CategoryEntityPreparationPatch[];
+  reason: string;
+}
 export interface CreateCategoryDraftRequest { sourceVersionId: string; versionLabel: string; reason: string }
 export interface PatchCategoryDraftRequest { expectedRevision: number; values: Record<string, unknown>; reason: string }
 export interface PublishCategoryDraftRequest { expectedRevision: number; idempotencyKey: string; reason: string }

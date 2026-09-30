@@ -766,6 +766,7 @@ async function main() {
     console.log(activeWrites.stdout);
     const governanceAdmin = await login("platform", "admin", PLATFORM_PASSWORD);
     await require("./category-governance-api.cjs")({ request, token: governanceAdmin.accessToken, tenantToken: demo.accessToken, mysqlQuery });
+    await require("./category-preparation-api.cjs")({ request, platformToken: governanceAdmin.accessToken, tenantToken: demo.accessToken, mysqlQuery });
     ok("品类治理真库 API：分权限、独立保存、冲突、不可变发布、并发幂等、停止新开通与既有经营隔离");
     await maybeStopAfter("category-governance-api");
   }

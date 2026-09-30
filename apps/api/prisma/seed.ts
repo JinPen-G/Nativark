@@ -156,6 +156,7 @@ const permissions = [
   // CAM-01A：确认能力风险提示后才能带风险下单。与 :manage 分开授权（见 platform.service 注释）。
   ["rental-core:capability:override", "能力风险例外确认", "Rental Core", PermissionKind.ACTION],
   ["rental-os:rules:manage", "业务规则配置", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:category:adopt", "经营空间品类版本采用", "租赁业务", PermissionKind.ACTION],
   // RULE-01A：需求 4.6.14 明确「权限分为规则编辑、规则发布……」。发布会改变对外生效的
   // 条款，与编辑草稿是两个责任；共用一个码等于任何能改草稿的人都能直接对客户生效。
   ["rental-os:rules:publish", "业务规则发布", "租赁业务", PermissionKind.ACTION, "发布或安排规则版本生效、作废已发布或待生效版本"],

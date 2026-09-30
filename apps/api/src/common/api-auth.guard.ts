@@ -411,6 +411,7 @@ export function requiredPermissions(method: string, path: string) {
   if (path === "/rental/v1/categories") {
     return ["system:tenant:manage", "rental-os:order:view", "rental-core:catalog:view", "rental-core:asset:view"];
   }
+  if (path.startsWith("/rental/v1/category-adoption/")) return ["rental-os:category:adopt"];
   // REPORT-01A：当前经营空间的经营报表。与旧 `/reports` 同一权限口径
   // （报表查看），但数据只来自 Rental Core 规范化事实且严格按会话空间隔离。
   // 必须放在通用 `/rental/v1` 分支之前，否则会落到经营写权限上。
