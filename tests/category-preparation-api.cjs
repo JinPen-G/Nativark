@@ -26,6 +26,8 @@ module.exports = async ({ request, platformToken, tenantToken, mysqlQuery }) => 
   // Ensure demo asset facts are materialized before reading candidate revisions.
   await call("GET", "/api/rental/v1/assets");
   const current = await call("GET", path);
+  assert.equal(current.validationScope, "entity_attributes_inventory_uniqueness");
+  assert.equal(current.businessCompatibility.complete, false, "局部经营检查不得冒充完整采用验收");
   assert.equal(current.validation.valid, false, "目标新增必填时应显示真实缺项");
   assert.ok(current.entities.itemGroups.length && current.entities.assets.length, "必须覆盖型号与资产两类实体");
   const before = mysqlQuery("SELECT id, CAST(attributes AS CHAR), updatedAt FROM rental_item_groups WHERE tenantId='tenant_001' ORDER BY id; SELECT id, CAST(attributes AS CHAR), updatedAt FROM rental_assets WHERE tenantId='tenant_001' ORDER BY id; SELECT id, categoryVersionId, categoryAdoptionRevision FROM business_workspaces WHERE tenantId='tenant_001' ORDER BY id;");
@@ -52,5 +54,12 @@ module.exports = async ({ request, platformToken, tenantToken, mysqlQuery }) => 
   assert.equal(stale.validation.valid, false);
   assert.match(stale.validation.errors[0], /来源实体已修改/);
   await call("PUT", path, { ...body, expectedPreparationRevision: 1 }, tenantToken, 409);
+  // A scheduled price must be checked even when today's compatible version wins.
+  // Core GET does not initialize business price versions. Create explicit
+  // isolated fixtures instead of assuming a read has pricing side effects.
+  mysqlQuery(`INSERT INTO rental_price_versions (id,tenantId,workspaceId,sequence,effectiveFrom,rates,createdAt) SELECT 'e2e_category_current_price',tenantId,workspaceId,1000001,'2020-01-01',JSON_ARRAY(JSON_OBJECT('unit','hour','baseAmount',100)),NOW() FROM rental_category_adoption_preparations WHERE targetVersionId='${draft.id}' AND tenantId='tenant_001'; INSERT INTO rental_price_versions (id,tenantId,workspaceId,sequence,effectiveFrom,rates,createdAt) SELECT 'e2e_category_future_price',tenantId,workspaceId,1000002,'2126-01-01',JSON_ARRAY(JSON_OBJECT('unit','shift','baseAmount',100)),NOW() FROM rental_category_adoption_preparations WHERE targetVersionId='${draft.id}' AND tenantId='tenant_001';`);
+  const incompatible = await call("GET", path);
+  assert.equal(incompatible.businessCompatibility.valid, false);
+  assert.ok(incompatible.businessCompatibility.blockers.some((row) => row.domain === "price" && row.id === "e2e_category_future_price"), "不能只看今天价格而忽略已发布的未来价格");
   console.log("category-preparation-api: 会话空间与独立权限、两类必填准备、活动事实不变、修订冲突、跨实体及陈旧来源拒绝通过");
 };

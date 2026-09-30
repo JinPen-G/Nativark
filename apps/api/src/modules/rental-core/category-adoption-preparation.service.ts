@@ -1,13 +1,14 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import type { CategoryEntityPreparationPatch, SaveCategoryPreparationRequest, SystemUserRow } from "@rental-os/shared";
+import type { CategoryEntityPreparationPatch, RentalPricingRate, RentalRuleConfig, SaveCategoryPreparationRequest, SystemUserRow, TenantRentalBusinessSettings } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { getRequestDataScope, getRequestLocationIds, requireRequestWorkspaceId } from "../../common/request-identity";
 import { assertCategoryAdoptionAllowed } from "./category-governance-policy";
 import { resolveRentalCategoryVersionBody } from "./rental-category-resolver.service";
 import { prepareCategoryAdoptionRecords } from "./category-adoption-records";
 import { categoryDefinitionDifferences } from "./category-definition-diff";
+import { categoryAdoptionBusinessCompatibility } from "./category-adoption-business-compatibility";
 
 export const CATEGORY_ADOPTION_MANAGE = "rental-os:category:adopt";
 export function assertCategoryPreparationPermission(user: SystemUserRow) {
@@ -54,11 +55,23 @@ export class CategoryAdoptionPreparationService {
         prepareCategoryAdoptionRecords(context.definition, context.records.groups, context.records.assets, patches);
         validation = { valid: true, errors: [] };
       } catch (error) { validation = { valid: false, errors: [error instanceof Error ? error.message : "预备资料校验失败"] }; }
+      const where = { tenantId: user.tenantId, workspaceId: context.workspaceId };
+      const [settings, locations, prices, rules] = await Promise.all([
+        tx.rentalTenantBusinessSettings.findFirst({ where }),
+        tx.rentalFulfillmentLocation.findMany({ where, select: { id: true, type: true, status: true } }),
+        tx.rentalPriceVersion.findMany({ where, select: { id: true, effectiveFrom: true, sequence: true, rates: true } }),
+        tx.rentalRuleVersion.findMany({ where: { ...where, status: { in: ["published", "pending", "superseded"] }, voidedAt: null }, select: { id: true, effectiveFrom: true, config: true } })
+      ]);
+      const businessCompatibility = categoryAdoptionBusinessCompatibility(context.definition, {
+        settings: settings ? settings.settings as unknown as TenantRentalBusinessSettings : null, locations,
+        prices: prices.map((row) => ({ ...row, value: row.rates as unknown as RentalPricingRate[] })),
+        rules: rules.map((row) => ({ ...row, sequence: 0, value: row.config as unknown as RentalRuleConfig }))
+      }, new Date());
       return { sourceVersionId: context.workspace.categoryVersionId, sourceRevision: context.workspace.categoryAdoptionRevision,
         targetVersionId: targetId, targetVersionLabel: context.target.versionLabel, targetDefinition: context.definition,
         differences: categoryDefinitionDifferences(context.sourceDefinition, context.definition),
         preparation: context.preparation ? { id: context.preparation.id, revision: context.preparation.revision, sourceRevision: context.preparation.sourceRevision, patches: context.preparation.patches } : null,
-        validation, stale, previewOnly: true, adoptionImplemented: false,
+        validation, validationScope: "entity_attributes_inventory_uniqueness", businessCompatibility, stale, previewOnly: true, adoptionImplemented: false,
         entities: { itemGroups: context.records.groups.map((row) => ({ id: row.id, name: row.name, updatedAt: row.updatedAt.toISOString(), attributes: Object.fromEntries(Object.entries(row.attributes).filter(([key]) => key !== "__itemGroupMedia")) })),
           assets: context.records.assets.map((row) => ({ id: row.id, assetNo: row.assetNo, updatedAt: row.updatedAt.toISOString(), serialNo: row.serialNo, attributes: row.attributes })) } };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
