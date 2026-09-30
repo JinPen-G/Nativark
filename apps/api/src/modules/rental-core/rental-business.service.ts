@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, HttpException, HttpStatus, Inje
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
+import { snapshotInspectionTemplate } from "./rental-inspection-template-snapshot";
 import { CapabilityBlockedException, CapabilityHookRuntime } from "./capability-hook.runtime";
 import { CapabilityHookRepository } from "./capability-hook.repository";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
@@ -5326,7 +5327,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         );
       }
     }
+    const inspectionTemplates = this.coreConfigStore.listInspectionTemplates
+      ? await this.coreConfigStore.listInspectionTemplates(tenantId, this.workspaceOf(tenantId)) : undefined;
+    if (inspectionTemplates?.some((template) => template.tenantId !== tenantId || template.categoryCode !== context.category.code)) {
+      throw new ConflictException("检查模板与报价租户或品类不一致");
+    }
     const quote: RentalQuoteSnapshotV1 = {
+      inspectionTemplateSnapshots: inspectionTemplates?.map((template) => snapshotInspectionTemplate(context.category, template)),
       id: uid("quote"), tenantId, quoteNo: `RQ${timestamp.replace(/\D/g, "").slice(0, 14)}${String(state.quotes.length + 1).padStart(3, "0")}`,
       categoryCode: context.profile.categoryCode, categoryVersionId, request: structuredClone(input), deliveryAddressSnapshot, membershipSnapshot: resolvedMembership, membershipBenefitEvaluations, chargeLines, rentalLineAmounts,
       rentalAmount, discountAmount: roundMoney(discountAmount), couponAmount: roundMoney(couponAmount), serviceAmount,

@@ -2255,7 +2255,12 @@ export class RentalCoreController {
     };
   }
 
-  @Get("inspection-templates") templates(@Req() req: AuthenticatedRequest, @Query("stage") stage?: "pickup" | "return") { return this.service.listInspectionTemplates(req.user.tenantId, stage); }  @Get("orders/:id/inspections") inspections(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.listInspections(req.user.tenantId, id); }
+  @Get("inspection-templates") async templates(@Req() req: AuthenticatedRequest, @Query("stage") stage?: "pickup" | "return", @Query("orderId") orderId?: string) {
+    if (stage && stage !== "pickup" && stage !== "return") throw new BadRequestException("检查阶段不合法");
+    const order = orderId ? await this.service.getOrder(req.user.tenantId, orderId) : undefined;
+    return this.service.listInspectionTemplates(req.user.tenantId, stage, order);
+  }
+  @Get("orders/:id/inspections") inspections(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.listInspections(req.user.tenantId, id); }
   @Post("orders/:id/inspections") async createInspection(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CreateRentalInspectionDto) {
     const tenantId = req.user.tenantId;
     const context = (await this.context(tenantId));

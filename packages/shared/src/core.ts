@@ -4490,6 +4490,8 @@ export interface RentalQuoteChargeLine {
 }
 
 export interface RentalQuoteSnapshotV1 {
+  /** 报价时完整取还检查模板；空数组表示无启用模板，缺省仅表示存量无证据。 */
+  inspectionTemplateSnapshots?: RentalInspectionTemplate[];
   /** 本次报价实际采用的不可变品类版本；存量无证据时不伪造回填。 */
   categoryVersionId?: string;
   /** 报价时的计价日历及空间计价口径，供原价续租复算。 */
@@ -5745,6 +5747,8 @@ export interface PartialReturnRentalOrderRequest {
 }
 
 export interface RentalOrder {
+  /** 原样继承报价的取还检查要求，模板后续修改或停用不追改原单。 */
+  inspectionTemplateSnapshots?: RentalInspectionTemplate[];
   /** 原样继承有效报价的品类版本，不在建单时读取空间最新绑定。 */
   categoryVersionId?: string;
   id: string;

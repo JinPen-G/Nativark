@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { Prisma, type $Enums } from "@prisma/client";
 import {
   RentalAssetStatus,
@@ -700,6 +701,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       assignment: order.assignment ? order.assignment as unknown as Prisma.InputJsonValue : Prisma.JsonNull,
       categoryCode: upper<$Enums.RentalCategoryCode>(order.categoryCode),
       categoryVersionId: order.categoryVersionId ?? null,
+      inspectionTemplateSnapshots: order.inspectionTemplateSnapshots === undefined ? Prisma.DbNull : order.inspectionTemplateSnapshots as unknown as Prisma.InputJsonValue,
       status: upper<$Enums.RentalOrderV1Status>(order.status),
       customerType: order.customerType,
       customerId: order.customerId ?? null,
@@ -773,13 +775,16 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       const workspaceId = await resolveScopeWorkspaceId(client, order.tenantId);
       const existingOrder = await client.rentalOrder.findUnique({
         where: { id: order.id },
-        select: { tenantId: true, workspaceId: true, categoryVersionId: true }
+        select: { tenantId: true, workspaceId: true, categoryVersionId: true, inspectionTemplateSnapshots: true }
       });
       if (existingOrder && (existingOrder.tenantId !== order.tenantId || existingOrder.workspaceId !== workspaceId)) {
         throw new ConflictException("订单事实已属于其他租户或经营空间，拒绝覆盖");
       }
       if (existingOrder && (existingOrder.categoryVersionId ?? null) !== (order.categoryVersionId ?? null)) {
         throw new ConflictException("已有订单的品类版本依据不可改写");
+      }
+      if (existingOrder && !isDeepStrictEqual(existingOrder.inspectionTemplateSnapshots ?? null, order.inspectionTemplateSnapshots ?? null)) {
+        throw new ConflictException("已有订单的检查模板快照不可改写");
       }
       if (existingOrder) {
         await client.rentalOrder.update({ where: { id: order.id }, data: orderData });
@@ -2603,6 +2608,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       assignment: row.assignment ? row.assignment as unknown as RentalOrder["assignment"] : undefined,
       categoryCode: lower<RentalCategoryCode>(row.categoryCode),
       categoryVersionId: row.categoryVersionId ?? undefined,
+      inspectionTemplateSnapshots: row.inspectionTemplateSnapshots === null ? undefined : row.inspectionTemplateSnapshots as unknown as RentalOrder["inspectionTemplateSnapshots"],
       status: lower<RentalCoreOrderStatus>(row.status),
       customerType: row.customerType as RentalOrder["customerType"],
       customerId: row.customerId ?? undefined,

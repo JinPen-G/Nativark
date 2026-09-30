@@ -134,6 +134,21 @@ void (async () => {
     tenantId: "tenant", categoryCode: "camera", categoryVersionId: "published-v1"
   });
   assert.equal(oldOrderTemplates[0].fields.some((field) => field.code === "version2_optional_check"), false, "旧单不能被新版默认检查项追改");
+  const frozenOrder = {
+    tenantId: "tenant", categoryCode: "camera", categoryVersionId: "published-v1",
+    inspectionTemplateSnapshots: clone(oldOrderTemplates)
+  };
+  baselineState.inspectionTemplates[0].fields = [{ code: "changed_required", label: "后来新增", type: "string", required: true }];
+  baselineState.inspectionTemplates[0].enabled = false;
+  const frozenRead = await core.listInspectionTemplates("tenant", "pickup", frozenOrder);
+  assert.deepEqual(frozenRead, oldOrderTemplates, "模板主体修改/停用后仍读取订单完整快照");
+  frozenRead[0].fields[0].label = "外部篡改";
+  assert.deepEqual(await core.listInspectionTemplates("tenant", "pickup", frozenOrder), oldOrderTemplates, "读取结果不得泄漏快照引用");
+  assert.deepEqual(await core.listInspectionTemplates("tenant", "pickup", { ...frozenOrder, inspectionTemplateSnapshots: [] }), [], "明确空快照不得回退活动模板");
+  core.lockedOrder = async () => ({ ...frozenOrder, status: "ready_for_pickup" });
+  await assert.rejects(core.createInspection("tenant", "frozen-order", { templateId: oldOrderTemplates[0].id, results: {} }, "operator"), /缺少必填检查项/u, "当前模板已停用仍按旧单原必填项检查");
+  core.lockedOrder = async () => ({ ...frozenOrder, inspectionTemplateSnapshots: [], status: "ready_for_pickup" });
+  await assert.rejects(core.createInspection("tenant", "frozen-order", { templateId: oldOrderTemplates[0].id, results: {} }, "operator"), /模板不存在/u, "空快照不能自动改用活动模板");
   await assert.rejects(core.listInspectionTemplates("tenant", "pickup", {
     tenantId: "other", categoryCode: "camera", categoryVersionId: "published-v1"
   }), /不属于当前租户/u);

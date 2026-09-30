@@ -68,6 +68,7 @@ export type RentalConfigTx = Prisma.TransactionClient;
  */
 export interface RentalConfigStore {
   loadAll(): Promise<TenantConfigSnapshot[]>;
+  listInspectionTemplates?(tenantId: string, workspaceId: string): Promise<RentalInspectionTemplate[]>;
   /** 全部启用的经营空间，用于服务层按空间建状态并解析「租户 → 默认空间」。 */
   listWorkspaces(): Promise<Array<{ id: string; tenantId: string; categoryCode: RentalCategoryCode; isDefault: boolean }>>;
   upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx): Promise<void>;
@@ -102,6 +103,13 @@ function upper<T extends string>(value: string): T {
 @Injectable()
 export class RentalCoreConfigRepository implements RentalConfigStore {
   constructor(private readonly prisma: PrismaService) {}
+
+  async listInspectionTemplates(tenantId: string, workspaceId: string): Promise<RentalInspectionTemplate[]> {
+    const rows = await this.prisma.rentalInspectionTemplate.findMany({
+      where: { tenantId, workspaceId, enabled: true }, orderBy: { id: "asc" }
+    });
+    return rows.map((row) => this.toInspectionTemplate(row));
+  }
 
   /** 有外层事务就用它，否则用连接自身——写方法据此既能独立提交，也能并入 bootstrap 事务。 */
   private db(tx?: RentalConfigTx) {

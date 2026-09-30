@@ -81,13 +81,19 @@ void (async () => {
       assert.ok(sourceQuote && binding.categoryVersionId, "缺少品类版本报价夹具");
       const legacyQuote = await businessFacts.findQuote(scope.tenantId, sourceQuote.id);
       assert.equal(legacyQuote.categoryVersionId, undefined, "迁移不得伪造旧报价的版本证据");
-      const quote = { ...legacyQuote, id: `catgov_quote_${suffix}`, quoteNo: `CATGOV-Q-${suffix}`, categoryVersionId: binding.categoryVersionId };
+      assert.equal(legacyQuote.inspectionTemplateSnapshots, undefined, "迁移不得回填当前模板充当历史快照");
+      const templates = await repository.listInspectionTemplates(scope.tenantId, workspace.id);
+      assert.ok(templates.length, "缺少检查模板夹具");
+      const quote = { ...legacyQuote, id: `catgov_quote_${suffix}`, quoteNo: `CATGOV-Q-${suffix}`, categoryVersionId: binding.categoryVersionId, inspectionTemplateSnapshots: structuredClone(templates) };
       const expectedBinding = { categoryVersionId: binding.categoryVersionId, adoptionRevision: binding.categoryAdoptionRevision };
       const staleQuote = { ...quote, id: `${quote.id}_stale`, quoteNo: `${quote.quoteNo}-S` };
       await assert.rejects(businessFacts.upsertQuote(staleQuote, { ...expectedBinding, adoptionRevision: expectedBinding.adoptionRevision + 1 }), /报价期间已变化/u);
       assert.equal(await db.rentalQuote.count({ where: { id: staleQuote.id } }), 0, "绑定检查失败不能留下报价事实");
       await businessFacts.upsertQuote(quote, expectedBinding);
       assert.equal((await businessFacts.findQuote(scope.tenantId, quote.id)).categoryVersionId, binding.categoryVersionId, "报价版本写入/读回不能丢失");
+      assert.deepEqual((await businessFacts.findQuote(scope.tenantId, quote.id)).inspectionTemplateSnapshots, templates, "完整模板 JSON 写入/读回不能丢失");
+      await assert.rejects(businessFacts.upsertQuote({ ...quote, inspectionTemplateSnapshots: [] }), /检查模板快照不可改写/u);
+      await assert.rejects(businessFacts.upsertQuote({ ...quote, inspectionTemplateSnapshots: undefined }), /检查模板快照不可改写/u);
       await assert.rejects(businessFacts.upsertQuote({ ...quote, categoryVersionId: undefined }), /版本依据不可改写/u);
       await db.businessWorkspace.update({ where: { id: workspace.id }, data: { categoryAdoptionRevision: { increment: 1 } } });
       await assert.rejects(businessFacts.upsertQuote(staleQuote, expectedBinding), /报价期间已变化/u, "其他进程采用新版后旧请求必须立即被拒绝");
@@ -96,11 +102,15 @@ void (async () => {
       assert.ok(sourceOrder, "缺少历史订单夹具");
       const legacyOrder = await facts.findOrder(scope.tenantId, sourceOrder.id);
       assert.equal(legacyOrder.categoryVersionId, undefined, "迁移不得伪造旧订单的版本证据");
+      assert.equal(legacyOrder.inspectionTemplateSnapshots, undefined, "旧订单无检查证据时保持缺省");
       // 仅在一次性克隆库构造有版本证据的订单夹具，验证真实聚合仓储的持久化链。
-      await db.rentalOrder.update({ where: { id: sourceOrder.id }, data: { categoryVersionId: binding.categoryVersionId } });
-      await facts.saveOrderAggregate({ ...legacyOrder, categoryVersionId: binding.categoryVersionId });
+      await db.rentalOrder.update({ where: { id: sourceOrder.id }, data: { categoryVersionId: binding.categoryVersionId, inspectionTemplateSnapshots: templates } });
+      await facts.saveOrderAggregate({ ...legacyOrder, categoryVersionId: binding.categoryVersionId, inspectionTemplateSnapshots: templates });
       const restored = await facts.findOrder(scope.tenantId, sourceOrder.id);
       assert.equal(restored.categoryVersionId, binding.categoryVersionId);
+      assert.deepEqual(restored.inspectionTemplateSnapshots, templates);
+      await assert.rejects(facts.saveOrderAggregate({ ...restored, inspectionTemplateSnapshots: [] }), /检查模板快照不可改写/u);
+      await assert.rejects(facts.saveOrderAggregate({ ...restored, inspectionTemplateSnapshots: undefined }), /检查模板快照不可改写/u);
       await assert.rejects(facts.saveOrderAggregate({ ...restored, categoryVersionId: undefined }), /版本依据不可改写/u);
       for (const field of ["rentalAmount", "payableAmount", "finalPayableAmount", "depositAmount", "preAuthAmount"]) {
         assert.equal(typeof legacyOrder[field], "number", `金额断言必须有真实值：${field}`);

@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { getRequestUserId } from "../../common/request-identity";
+import { snapshotInspectionTemplate } from "./rental-inspection-template-snapshot";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import { MembershipService } from "../platform/membership.service";
 import { FileStorageRuntimeService, type FileBusinessOwner } from "../integrations/file-storage.runtime.service";
@@ -2077,6 +2078,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       quoteId: quote.id, quoteNo: quote.quoteNo, pricingPlanVersion: quote.pricingPlanVersion,
       // PRICE-03：价格版本引用随订单固化，与 ruleSnapshot/calendarSnapshot 同理。
       priceVersionId: quote.priceVersionId, priceVersion: quote.priceVersion,
+      inspectionTemplateSnapshots: structuredClone(quote.inspectionTemplateSnapshots),
       ruleVersion: quote.ruleVersion, ruleSnapshot: structuredClone(quote.ruleSnapshot), calendarVersion: quote.calendarVersion, calendarSnapshot: structuredClone(quote.calendarSnapshot), chargeLines: structuredClone(quote.chargeLines),
       // CORE-EXT-02D：能力版本快照随订单固化。在途环节的 Hook 判定都用它，
       // 因此升级或暂停能力都不改写这张已存在订单的履约规则。
@@ -2630,6 +2632,9 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   async listInspectionTemplates(tenantId: string, stage?: "pickup" | "return", order?: RentalOrder) {
     const state = this.state(tenantId);
     if (order && order.tenantId !== tenantId) throw new ForbiddenException("订单不属于当前租户");
+    if (order?.inspectionTemplateSnapshots !== undefined) {
+      return structuredClone(order.inspectionTemplateSnapshots.filter((row) => !stage || row.stage === stage));
+    }
     const definition = order?.categoryVersionId && this.categoryResolver
       ? await this.categoryResolver.forVersion(order.categoryCode, order.categoryVersionId)
       : await this.getWorkspaceCategory(tenantId);
@@ -2683,11 +2688,12 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   ) {
     const state = this.state(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
-    const storedTemplate = state.inspectionTemplates.find((row) => row.id === input.templateId && row.enabled);
+    const frozenTemplates = order.inspectionTemplateSnapshots;
+    const storedTemplate = (frozenTemplates ?? state.inspectionTemplates).find((row) => row.id === input.templateId && row.enabled);
     const inspectionCategory = order.categoryVersionId && this.categoryResolver
       ? await this.categoryResolver.forVersion(order.categoryCode, order.categoryVersionId, tx)
       : await this.getWorkspaceCategory(tenantId);
-    const template = storedTemplate ? this.inspectionTemplateForRead(inspectionCategory, storedTemplate) : undefined;
+    const template = storedTemplate ? (frozenTemplates !== undefined ? structuredClone(storedTemplate) : this.inspectionTemplateForRead(inspectionCategory, storedTemplate)) : undefined;
     if (!template) throw new NotFoundException("检查模板不存在或已停用");
     const missing = template.fields.filter((field) => field.required && (input.results[field.code] === undefined || input.results[field.code] === ""));
     if (missing.length) throw new BadRequestException(`缺少必填检查项：${missing.map((field) => field.label).join("、")}`);
@@ -5028,18 +5034,6 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   /** 旧空间的系统默认模板不在启动时回写；读取时按明确采用的品类版本补齐可选项。
    * 自建/另行发布的模板不受此兼容逻辑影响，运营方仍可为特定型号制定更严格模板。 */
   private inspectionTemplateForRead(definition: RentalCategoryDefinition, template: RentalInspectionTemplate): RentalInspectionTemplate {
-    if (template.code !== `${definition.code.toUpperCase()}_${template.stage.toUpperCase()}_V1`) return template;
-    const optionalDefaults = definition.businessModel.defaults.inspectionFields.filter((field) => !field.required);
-    if (!optionalDefaults.length) return template;
-    return {
-      ...template,
-      fields: [
-        ...template.fields.map((field) => {
-          const optional = optionalDefaults.find((defaultField) => defaultField.code === field.code);
-          return optional ? { ...field, required: false } : { ...field };
-        }),
-        ...optionalDefaults.filter((field) => !template.fields.some((existing) => existing.code === field.code)).map((field) => ({ ...field }))
-      ]
-    };
+    return snapshotInspectionTemplate(definition, template);
   }
 }

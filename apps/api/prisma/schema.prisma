@@ -2642,6 +2642,8 @@ model RentalOrder {
   pricingPlanVersion            String
   ruleVersion                   String
   ruleSnapshot                  Json
+  /// 报价继承的完整检查模板；存量无证据保留 NULL，不回填当前模板。
+  inspectionTemplateSnapshots   Json?
   calendarVersion               String?
   /// RentalQuoteCalendarDay[]：从报价拷贝的逐日计价依据。
   /// 需求 4.5.7「订单始终使用订单快照」，因此与 ruleSnapshot 一样在订单上留一份，
@@ -3892,6 +3894,8 @@ model RentalQuote {
   rateSnapshot                  Json?
   ruleVersion                   String
   ruleSnapshot                  Json
+  /// 报价时启用的完整取还检查模板；空数组与历史无证据 NULL 分开。
+  inspectionTemplateSnapshots   Json?
   calendarVersion               String?
   /// RentalQuoteCalendarDay[]：命中营业日期的结构化依据（需求 4.5.6）。
   /// 可空且不回填：存量报价只存了拼接的 calendarVersion，其中没有逐日信息，

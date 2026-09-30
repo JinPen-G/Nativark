@@ -1,5 +1,6 @@
 import { ConflictException, ForbiddenException, Injectable } from "@nestjs/common";
 import { Prisma, type $Enums } from "@prisma/client";
+import { isDeepStrictEqual } from "node:util";
 import type {
   RentalCategoryCode,
   RentalCustomerBenefitAccount,
@@ -442,6 +443,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       quoteNo: quote.quoteNo,
       categoryCode: upper<$Enums.RentalCategoryCode>(quote.categoryCode),
       categoryVersionId: quote.categoryVersionId ?? null,
+      inspectionTemplateSnapshots: quote.inspectionTemplateSnapshots === undefined ? Prisma.DbNull : quote.inspectionTemplateSnapshots as unknown as Prisma.InputJsonValue,
       request: quote.request as unknown as Prisma.InputJsonValue,
       membershipSnapshot: (quote.membershipSnapshot ?? null) as unknown as Prisma.InputJsonValue,
       membershipBenefitEvaluations: (quote.membershipBenefitEvaluations ?? null) as unknown as Prisma.InputJsonValue,
@@ -486,13 +488,16 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     const persist = async (client: RentalBusinessFactTx) => {
       const existing = await client.rentalQuote.findUnique({
         where: { id: quote.id },
-        select: { tenantId: true, workspaceId: true, categoryVersionId: true }
+        select: { tenantId: true, workspaceId: true, categoryVersionId: true, inspectionTemplateSnapshots: true }
       });
       if (existing && (existing.tenantId !== quote.tenantId || existing.workspaceId !== workspaceId)) {
         throw new ConflictException("报价事实已属于其他租户或经营空间，拒绝覆盖");
       }
       if (existing && (existing.categoryVersionId ?? null) !== (quote.categoryVersionId ?? null)) {
         throw new ConflictException("已有报价的品类版本依据不可改写");
+      }
+      if (existing && !isDeepStrictEqual(existing.inspectionTemplateSnapshots ?? null, quote.inspectionTemplateSnapshots ?? null)) {
+        throw new ConflictException("已有报价的检查模板快照不可改写");
       }
       if (existing) {
         await client.rentalQuote.update({ where: { id: quote.id }, data });
@@ -917,6 +922,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
       quoteNo: row.quoteNo,
       categoryCode: lower<RentalCategoryCode>(row.categoryCode),
       categoryVersionId: row.categoryVersionId ?? undefined,
+      inspectionTemplateSnapshots: row.inspectionTemplateSnapshots === null ? undefined : row.inspectionTemplateSnapshots as unknown as RentalQuoteSnapshotV1["inspectionTemplateSnapshots"],
       request: row.request as unknown as RentalQuoteRequest,
       membershipSnapshot: (row.membershipSnapshot ?? undefined) as unknown as RentalQuoteSnapshotV1["membershipSnapshot"],
       membershipBenefitEvaluations: (row.membershipBenefitEvaluations ?? undefined) as unknown as RentalQuoteSnapshotV1["membershipBenefitEvaluations"],

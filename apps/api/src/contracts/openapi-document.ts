@@ -2823,7 +2823,8 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get", path: "/api/rental/v1/inspection-templates", tag: "RentalCore", operationId: "listRentalInspectionTemplates",
-    summary: "List category inspection templates", permissions: ["rental-os:order:view"], responseSchema: "GenericObject"
+    parameters: [queryParam("stage", { type: "string", enum: ["pickup", "return"] }), queryParam("orderId")],
+    summary: "List inspection templates; orderId selects immutable order requirements, otherwise current configuration", permissions: ["rental-os:order:view"], responseSchema: "GenericObject"
   },
   {
     method: "get", path: "/api/rental/v1/orders/{id}/inspections", tag: "RentalCore", operationId: "listRentalOrderInspections",

@@ -869,6 +869,14 @@ async function main() {
   assert.equal(order.status, 201, `下单失败: ${JSON.stringify(order.body).slice(0, 200)}`);
   const orderId = order.body.data.id;
   assert.equal(order.body.data.status, "draft");
+  assert.ok(quote.body.data.inspectionTemplateSnapshots?.length, "新报价必须保存完整检查模板");
+  assert.deepEqual(order.body.data.inspectionTemplateSnapshots, quote.body.data.inspectionTemplateSnapshots, "建单必须原样继承报价检查要求");
+  const frozenTemplates = await request("GET", `/api/rental/v1/inspection-templates?orderId=${orderId}`, null, demo.accessToken);
+  assert.equal(frozenTemplates.status, 200);
+  assert.deepEqual(frozenTemplates.body.data, quote.body.data.inspectionTemplateSnapshots, "按订单读取的模板必须与报价相同");
+  const snapshotProbe = runNode(["tests/inspection-template-snapshot-db.cjs"], { env: { DATABASE_URL: TEST_DATABASE_URL, SNAPSHOT_ORDER_ID: orderId } });
+  assert.equal(snapshotProbe.status, 0, snapshotProbe.stderr || snapshotProbe.stdout);
+  ok("完整检查快照：报价/订单/按订单目录一致，真实仓储拒绝清空或改写，原样保存可重复执行");
   const assetStatus = async () => (await request("GET", "/api/rental/v1/assets", null, demo.accessToken)).body.data;
   await prepareMockFunding(order.body.data, demo.accessToken, `e2e:${orderId}`);
   const confirmed = await request("POST", `/api/rental/v1/orders/${orderId}/confirm`, {}, demo.accessToken);
