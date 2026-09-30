@@ -116,6 +116,20 @@ void (async () => {
   assert.deepEqual(evaluated.requiredCapabilities, [], "嵌套交接 payload 必须使用旧单版本而非空间新版必选政策");
   await core.runHook("tenant", "settlement", { type: "order", id: order.id }, order);
   assert.deepEqual(evaluated.requiredCapabilities, [], "直接订单 payload 同样使用旧版政策");
+  const version2 = versions.get("published-v2");
+  version2.definition.businessModel.defaults.inspectionFields.push({
+    code: "version2_optional_check", label: "第二版检查项", type: "boolean", required: false
+  });
+  const baselineState = core.seedState("tenant", "camera", "space", "CNY", baseline);
+  core.state = () => baselineState;
+  assert.ok((await core.listInspectionTemplates("tenant", "pickup"))[0].fields.some((field) => field.code === "version2_optional_check"), "当前模板补齐项应读取绑定版本而非静态四品类默认值");
+  const oldOrderTemplates = await core.listInspectionTemplates("tenant", "pickup", {
+    tenantId: "tenant", categoryCode: "camera", categoryVersionId: "published-v1"
+  });
+  assert.equal(oldOrderTemplates[0].fields.some((field) => field.code === "version2_optional_check"), false, "旧单不能被新版默认检查项追改");
+  await assert.rejects(core.listInspectionTemplates("tenant", "pickup", {
+    tenantId: "other", categoryCode: "camera", categoryVersionId: "published-v1"
+  }), /不属于当前租户/u);
   const publicService = Object.create(ClientApiService.prototype);
   const publicProfile = {
     defaultWorkspaceId: "public-space", publishedWorkspaces: [

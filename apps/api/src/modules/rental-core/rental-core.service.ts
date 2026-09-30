@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
@@ -2627,11 +2627,15 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return order;
   }
 
-  listInspectionTemplates(tenantId: string, stage?: "pickup" | "return") {
+  async listInspectionTemplates(tenantId: string, stage?: "pickup" | "return", order?: RentalOrder) {
     const state = this.state(tenantId);
+    if (order && order.tenantId !== tenantId) throw new ForbiddenException("订单不属于当前租户");
+    const definition = order?.categoryVersionId && this.categoryResolver
+      ? await this.categoryResolver.forVersion(order.categoryCode, order.categoryVersionId)
+      : await this.getWorkspaceCategory(tenantId);
     return state.inspectionTemplates
       .filter((row) => !stage || row.stage === stage)
-      .map((row) => this.inspectionTemplateForRead(state.profile?.categoryCode, row));
+      .map((row) => this.inspectionTemplateForRead(definition, row));
   }
 
   async listInspections(tenantId: string, orderId: string) {
@@ -2680,7 +2684,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const state = this.state(tenantId);
     const order = await this.lockedOrder(tenantId, orderId, tx);
     const storedTemplate = state.inspectionTemplates.find((row) => row.id === input.templateId && row.enabled);
-    const template = storedTemplate ? this.inspectionTemplateForRead(state.profile?.categoryCode, storedTemplate) : undefined;
+    const inspectionCategory = order.categoryVersionId && this.categoryResolver
+      ? await this.categoryResolver.forVersion(order.categoryCode, order.categoryVersionId, tx)
+      : await this.getWorkspaceCategory(tenantId);
+    const template = storedTemplate ? this.inspectionTemplateForRead(inspectionCategory, storedTemplate) : undefined;
     if (!template) throw new NotFoundException("检查模板不存在或已停用");
     const missing = template.fields.filter((field) => field.required && (input.results[field.code] === undefined || input.results[field.code] === ""));
     if (missing.length) throw new BadRequestException(`缺少必填检查项：${missing.map((field) => field.label).join("、")}`);
@@ -5018,11 +5025,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     }));
   }
 
-  /** 旧空间的系统默认模板不在启动时回写；读取时按当前品类定义补齐可选项。
+  /** 旧空间的系统默认模板不在启动时回写；读取时按明确采用的品类版本补齐可选项。
    * 自建/另行发布的模板不受此兼容逻辑影响，运营方仍可为特定型号制定更严格模板。 */
-  private inspectionTemplateForRead(categoryCode: RentalCategoryCode | undefined, template: RentalInspectionTemplate): RentalInspectionTemplate {
-    const definition = RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === categoryCode);
-    if (!definition || template.code !== `${categoryCode?.toUpperCase()}_${template.stage.toUpperCase()}_V1`) return template;
+  private inspectionTemplateForRead(definition: RentalCategoryDefinition, template: RentalInspectionTemplate): RentalInspectionTemplate {
+    if (template.code !== `${definition.code.toUpperCase()}_${template.stage.toUpperCase()}_V1`) return template;
     const optionalDefaults = definition.businessModel.defaults.inspectionFields.filter((field) => !field.required);
     if (!optionalDefaults.length) return template;
     return {

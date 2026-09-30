@@ -63,6 +63,7 @@ function controller({ locked = LOCKED, extensions = [] } = {}) {
     }
   };
   instance.business = {
+    effectiveRuleAt: () => undefined,
     getQuote: () => ({ id: "quote_1" }),
     calculateOverdueCharge: (_tenantId, _context, _quote, returnedAt, dueAt, outstanding) => {
       seen.overdue.push({ returnedAt, dueAt, outstanding });

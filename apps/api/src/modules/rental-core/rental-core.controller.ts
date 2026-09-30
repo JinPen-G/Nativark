@@ -2260,7 +2260,7 @@ export class RentalCoreController {
     const tenantId = req.user.tenantId;
     const context = (await this.context(tenantId));
     const current = await this.service.getOrder(tenantId, id);
-    const template = this.service.listInspectionTemplates(tenantId).find((row) => row.id === body.templateId);
+    const template = (await this.service.listInspectionTemplates(tenantId, undefined, current)).find((row) => row.id === body.templateId);
     const returnedAt = new Date().toISOString();
     const stage = template?.stage;
     const partialReturn = stage === "return" && Boolean(body.returnItems?.length);
