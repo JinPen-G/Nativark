@@ -9,7 +9,7 @@ export function categoryPreparationInitialValues(preview: CategoryPreparationPre
   for (const [scope, records] of [["item_group", preview.entities.itemGroups], ["asset", preview.entities.assets]] as const) {
     for (const row of records) {
       const values: CategoryPreparationValues[string] = Object.create(null);
-      const patch = patches.find((item) => item.entityType === scope && item.entityId === row.id);
+      const patch = patches.find((item) => item.entityType === scope && item.entityId === row.id && item.expectedUpdatedAt === row.updatedAt);
       for (const field of preview.targetDefinition.businessModel.assetFields.filter((item) => item.scope === scope)) {
         const current = scope === "asset" && field.code === "serialNo" ? row.serialNo : row.attributes[field.code];
         const value = patch?.values[field.code] ?? current;
