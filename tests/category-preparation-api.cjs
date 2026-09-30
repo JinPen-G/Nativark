@@ -83,5 +83,13 @@ module.exports = async ({ request, platformToken, tenantToken, mysqlQuery }) => 
   mysqlQuery("UPDATE workspace_capability_instances SET status='disabled' WHERE id='e2e_category_invalid_capability';");
   const disabledPreview = await call("GET", path);
   assert.ok(!disabledPreview.businessCompatibility.checkedCapabilityCodes.includes("camera_kit_handover"), "停用实例保留事实但不执行当前组合");
+  mysqlQuery(`DELETE FROM workspace_capability_instances WHERE id='e2e_category_invalid_capability'; INSERT INTO workspace_capability_instances (id,tenantId,workspaceId,code,status,implementationVersion,configVersion,config,revision,createdAt,updatedAt) SELECT 'e2e_category_invalid_capability',tenantId,workspaceId,'camera_compatibility','enabled','cam-1.0','v1',JSON_OBJECT('relations',JSON_ARRAY(JSON_OBJECT('id','invalid-scoped-ref','relationType','model_fit','outcome','warn','sourceName','fixture','reason','scoped-reference-test','source',JSON_OBJECT('kind','item_group','id','foreign-space-model'),'target',JSON_OBJECT('kind','attribute','field','retired_unknown_field','value','x')))),1,NOW(),NOW() FROM rental_category_adoption_preparations WHERE targetVersionId='${draft.id}' AND tenantId='tenant_001' ON DUPLICATE KEY UPDATE status=VALUES(status),implementationVersion=VALUES(implementationVersion),config=VALUES(config);`);
+  const referencesPreview = await call("GET", path);
+  assert.ok(referencesPreview.businessCompatibility.blockers.some((row) => row.domain === "capability_reference" && row.id.endsWith(":source")), "格式正确也不能引用空间外型号");
+  assert.ok(referencesPreview.businessCompatibility.blockers.some((row) => row.domain === "capability_reference" && row.id.endsWith(":target")), "目标不支持的属性不能继续当作兼容关系使用");
+  mysqlQuery(`UPDATE rental_inspection_templates SET enabled=true,fields=JSON_ARRAY() WHERE tenantId='tenant_001' AND workspaceId=(SELECT workspaceId FROM rental_category_adoption_preparations WHERE targetVersionId='${draft.id}' AND tenantId='tenant_001') AND stage='return'; UPDATE rental_rule_versions SET config=JSON_SET(config,'$.qualification.documentTypes',JSON_ARRAY('unregistered-proof')) WHERE id='e2e_category_future_safety';`);
+  const completenessPreview = await call("GET", path);
+  assert.ok(completenessPreview.businessCompatibility.blockers.some((row) => row.domain === "inspection" && row.id === "e2e_category_future_safety:return"), "空检查模板不能满足强制归还检查");
+  assert.ok(completenessPreview.businessCompatibility.blockers.some((row) => row.domain === "rule" && row.id === "e2e_category_future_safety:qualification:unregistered-proof"), "未在会话空间启用的证件不能作为资质规则依赖");
   console.log("category-preparation-api: 会话空间与独立权限、两类必填准备、活动事实不变、修订冲突、跨实体及陈旧来源拒绝通过");
 };

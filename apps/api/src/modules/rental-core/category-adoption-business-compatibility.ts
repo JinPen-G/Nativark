@@ -3,6 +3,22 @@ import { categoryPricingRuleError } from "./category-pricing-rule-compatibility"
 
 export interface CategoryTimedConfiguration<T> { id: string; effectiveFrom: Date | null; sequence: number; value: T }
 
+/** Check executable tenant templates, not the platform's replacement defaults. */
+export function categoryAdoptionInspectionFieldsValid(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length === 0) return false;
+  const codes = new Set<string>();
+  for (const field of value) {
+    if (!field || typeof field !== "object" || Array.isArray(field)) return false;
+    if (typeof field.code !== "string" || !field.code.trim() || ["__proto__", "constructor", "prototype"].includes(field.code) || codes.has(field.code)) return false;
+    codes.add(field.code);
+    if (typeof field.label !== "string" || !field.label.trim() || typeof field.required !== "boolean") return false;
+    if (!["boolean", "number", "text", "select", "photo"].includes(field.type)) return false;
+    if (field.usageMetric !== undefined && (typeof field.usageMetric !== "boolean" || (field.usageMetric && field.type !== "number"))) return false;
+    if (field.type === "select" && (!Array.isArray(field.options) || field.options.length === 0 || field.options.some((option: unknown) => typeof option !== "string" || !option.trim()) || new Set(field.options).size !== field.options.length)) return false;
+  }
+  return true;
+}
+
 /** Current and scheduled immutable configurations only. Historical snapshots remain executable under their original category. */
 export function categoryCurrentAndFuture<T>(rows: CategoryTimedConfiguration<T>[], now: Date): CategoryTimedConfiguration<T>[] {
   const dated = rows.filter((row) => row.effectiveFrom && Number.isFinite(row.effectiveFrom.getTime()));
@@ -26,6 +42,7 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
   prices: CategoryTimedConfiguration<RentalPricingRate[]>[];
   rules: CategoryTimedConfiguration<RentalRuleConfig>[];
   inspections?: Array<{ id: string; stage: string; enabled: boolean; fields: unknown }>;
+  qualificationTypes?: Array<{ code: string; categoryCode: string; capabilityCode: string | null; status: string }>;
 }, now: Date) {
   const blockers: Array<{ domain: "settings" | "location" | "price" | "rule" | "inspection"; id: string; message: string }> = [];
   const add = (domain: typeof blockers[number]["domain"], id: string, message: string) => blockers.push({ domain, id, message });
@@ -60,15 +77,23 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
     if (!model.supportsPreauthorization && (payment.preauthorizationRequired || payment.depositMode === "preauthorization" || (rule.value.preauthorization && rule.value.preauthorization.mode !== "none"))) add("rule", rule.id, "当前或未来规则启用预授权，但目标品类不支持");
     if (!model.supportsPreauthorization && rule.value.membershipSecurityReduction?.preauthorization?.enabled) add("rule", rule.id, "当前或未来规则启用会员预授权减免，但目标品类不支持");
     if (!model.supportsQualificationReview && rule.value.qualification?.required) add("rule", rule.id, "当前或未来规则要求资质审核，但目标品类不支持，请通过规则发布机制调整");
+    if (rule.value.qualification?.required && input.qualificationTypes) {
+      const codes = rule.value.qualification.documentTypes;
+      if (!Array.isArray(codes) || codes.length === 0) add("rule", rule.id, "要求资质审核的规则未指定有效证件类型");
+      else for (const code of codes) {
+        const type = input.qualificationTypes.find((row) => row.code === code && row.status === "enabled" && row.categoryCode.toLowerCase() === target.code);
+        if (!type || (type.capabilityCode && ![...target.defaultCapabilities, ...target.requiredCapabilities].some((capability) => capability === type.capabilityCode))) add("rule", `${rule.id}:qualification:${code}`, "当前或未来规则要求的证件类型未在本空间启用，或依赖目标品类未声明的能力");
+      }
+    }
     // Existing tenant templates are business facts, not category defaults. Never
     // replace them automatically when the platform changes its default fields.
     if (input.inspections) {
       for (const stage of ["pickup", "return"] as const) {
         const required = stage === "pickup" ? rule.value.fulfillment?.pickupInspectionRequired : rule.value.fulfillment?.returnInspectionRequired;
-        if (required && !input.inspections.some((template) => template.enabled && template.stage === stage && Array.isArray(template.fields))) add("inspection", `${rule.id}:${stage}`, `当前或未来规则要求${stage === "pickup" ? "领取" : "归还"}检查，但没有可读取的启用模板`);
+        if (required && !input.inspections.some((template) => template.enabled && template.stage === stage && categoryAdoptionInspectionFieldsValid(template.fields))) add("inspection", `${rule.id}:${stage}`, `当前或未来规则要求${stage === "pickup" ? "领取" : "归还"}检查，但没有有效且非空的启用模板`);
       }
     }
   }
   return { valid: blockers.length === 0, blockers, checkedPriceVersionIds: prices.map((row) => row.id), checkedRuleVersionIds: rules.map((row) => row.id),
-    scope: "settings_locations_price_units_rule_pricing_preauthorization_qualification_inspection_presence", complete: false as const };
+    scope: "settings_locations_price_units_rule_pricing_preauthorization_qualification_inspection_structure", complete: false as const };
 }
