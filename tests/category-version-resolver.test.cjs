@@ -13,6 +13,13 @@ for (const definition of RENTAL_CATEGORY_DEFINITIONS) {
   assert.deepEqual(parsePublishedRentalCategory(clone(definition), definition.code), definition);
 }
 const baseline = clone(RENTAL_CATEGORY_DEFINITIONS[0]);
+const bilingual = clone(baseline);
+bilingual.display = { nameEn: "Camera equipment", icon: "camera", defaultWorkspaceName: "摄影设备租赁", terminologyEn: { itemLabel: "Equipment", navigationLabels: { itemGroups: "Equipment models" } } };
+assert.deepEqual(parsePublishedRentalCategory(bilingual, baseline.code), bilingual, "中英文展示数据必须原样保留");
+for (const display of [{ icon: "https://unsafe/icon.svg" }, { icon: "<svg onload=alert(1)>" }, { script: "run" }, { terminologyEn: { itemLabel: {} } }, { terminologyEn: { navigationLabels: { unknown: "x" } } }, { nameEn: "x".repeat(101) }]) {
+  const invalid = clone(baseline); invalid.display = display;
+  assert.throws(() => parsePublishedRentalCategory(invalid, baseline.code), /不可执行/u);
+}
 const rejects = (change, label) => {
   const value = clone(baseline);
   change(value);

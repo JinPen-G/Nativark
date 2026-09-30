@@ -1,8 +1,8 @@
 import { request } from "./http";
-import type { CreateCategoryDraftRequest, CategoryVersionView, CategoryDraftSection, PatchCategoryDraftRequest, SaveCategoryOpeningRequest, SaveCategoryVersionPolicyRequest } from "@rental-os/shared";
+import type { CreateCategoryDraftRequest, CategoryVersionView, CategoryDraftSection, PatchCategoryDraftRequest, SaveCategoryOpeningRequest, SaveCategoryVersionPolicyRequest, RentalCapabilityModuleDefinition } from "@rental-os/shared";
 
 export interface CategoryGovernanceSummary {
-  code: string; name: string; openingScope: string; openingRevision: number;
+  code: string; name: string; nameEn?: string; icon?: string; openingScope: string; openingRevision: number;
   recommendedVersionId: string | null;
   recommendedVersionLabel?: string | null;
   latestPublished: { id: string; versionLabel: string } | null;
@@ -25,5 +25,6 @@ export const categoryGovernanceApi = {
   publish: (code: string, id: string, data: { expectedRevision: number; idempotencyKey: string; reason: string }) => request<CategoryVersionView>(`/platform/rental-categories/${encodeURIComponent(code)}/versions/${encodeURIComponent(id)}/publish`, { method: "post", data }),
   opening: (code: string, data: SaveCategoryOpeningRequest) => request<unknown>(`/platform/rental-categories/${encodeURIComponent(code)}/opening-policy`, { method: "put", data }),
   policy: (code: string, id: string, data: SaveCategoryVersionPolicyRequest) => request<CategoryVersionView>(`/platform/rental-categories/${encodeURIComponent(code)}/versions/${encodeURIComponent(id)}/adoption-policy`, { method: "put", data }),
-  catalog: () => request<{ dynamicCreationEnabled: boolean; capabilities: Array<{ code: string; label: string; implemented: boolean; implementationVersion?: string }>; pricingStrategies: Array<{ code: string; implementationVersion: string }> }>("/platform/rental-categories/capability-catalog")
+  audits: (code: string) => request<Array<{ id: string; versionId?: string; action: string; actorId: string; reason: string; createdAt: string }>>(`/platform/rental-categories/${encodeURIComponent(code)}/audits`),
+  catalog: () => request<{ dynamicCreationEnabled: boolean; capabilities: Array<RentalCapabilityModuleDefinition & { implemented: boolean }>; pricingStrategies: Array<{ code: string; implementationVersion: string }> }>("/platform/rental-categories/capability-catalog")
 };

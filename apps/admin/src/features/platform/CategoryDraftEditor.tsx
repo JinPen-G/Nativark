@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { Alert, App, Button, Card, Collapse, Form, Input, InputNumber, Modal, Select, Space, Switch, Tabs } from "antd";
-import { CATEGORY_DRAFT_SECTIONS, RENTAL_CAPABILITY_MODULES, RENTAL_FULFILLMENT_MODES, RENTAL_LOCATION_TYPES, RENTAL_PRICING_UNIT_CODES, RentalInventoryMode, type CategoryDraftSection, type CategoryVersionView } from "@rental-os/shared";
+import { CATEGORY_DRAFT_SECTIONS, RENTAL_CATEGORY_ICON_CODES, RENTAL_CAPABILITY_MODULES, RENTAL_FULFILLMENT_MODES, RENTAL_LOCATION_TYPES, RENTAL_PRICING_UNIT_CODES, RentalInventoryMode, type CategoryDraftSection, type CategoryVersionView } from "@rental-os/shared";
 import { useLocale } from "@/app/locale";
 import { categoryGovernanceApi } from "@/api/categoryGovernance";
 import { CATEGORY_ATTRIBUTE_TYPES, CATEGORY_INSPECTION_TYPES, categoryArrayUsesTags, updateCategoryField } from "./categoryDraftFields";
+import { CategoryTemplateIcon } from "./CategoryTemplateIcon";
 
 const ownership: Record<CategoryDraftSection, string[]> = {
-  basic: ["name", "description", "terminology"], attributes: ["attributeSchema", "assetFields", "catalogPresentation"],
+  basic: ["name", "description", "terminology", "display"], attributes: ["attributeSchema", "assetFields", "catalogPresentation"],
   inventory: ["supportedInventoryModes", "fulfillmentModes", "locationTypes", "deliveryDestination"],
   pricing: ["pricingUnits", "defaultPricingUnit", "settingModules", "supportsHolidayPricing", "supportsUsagePricing", "supportsPreauthorization", "payment", "overdue", "fulfillment"],
   inspection: ["supportsQualificationReview", "rules", "inspectionFields"], capabilities: ["defaultCapabilities", "requiredCapabilities", "valueAddedServicePresets"]
@@ -26,20 +27,31 @@ const labels: Record<string, string> = {
   power: "功率", ratedLoad: "额定载荷", ratedLoadUnit: "载荷单位", factoryNo: "出厂编号", hourMeter: "工时表", assetCollectionLabel: "资产集合称呼", itemGroupDescription: "型号页说明", itemGroupCodeLabel: "型号编码标签", itemGroupNameLabel: "型号名称标签", itemGroupNamePlaceholder: "型号名称提示", fixedInventoryMode: "固定库存方式", fixedUnit: "固定单位", itemGroupSummaryFields: "型号摘要字段", assetDescription: "资产页说明", assetSummaryFields: "资产摘要字段"
 };
 const choices: Record<string, readonly string[]> = {
+  icon: RENTAL_CATEGORY_ICON_CODES,
   pricingUnits: RENTAL_PRICING_UNIT_CODES, defaultPricingUnit: RENTAL_PRICING_UNIT_CODES, fulfillmentModes: RENTAL_FULFILLMENT_MODES, locationTypes: RENTAL_LOCATION_TYPES,
   supportedInventoryModes: Object.values(RentalInventoryMode), fixedInventoryMode: Object.values(RentalInventoryMode), scope: ["item_group", "asset", "transaction"], type: CATEGORY_ATTRIBUTE_TYPES,
   deliveryDestination: ["customer_address", "tenant_location"], timing: ["order", "confirmation", "pickup", "offline_terms"], feeMode: ["none", "hourly", "next_period", "multiplier", "manual_review", "hourly_to_daily"], lateFeeType: ["none", "fixed_amount", "percentage"],
   settingModules: ["pricing", "discounts", "coupons", "value_added_services", "rental_rules", "business_calendar", "membership_rewards", "notification_templates"]
 };
+Object.assign(labels, { display: "中英文展示设置", nameEn: "英文名称", descriptionEn: "英文说明", icon: "品类图标", defaultWorkspaceName: "默认空间名称", defaultWorkspaceNameEn: "默认空间英文名称", terminologyEn: "英文业务术语" });
+const iconLabels: Record<string, string> = { rental: "通用租赁", camera: "摄影设备", camping: "露营装备", construction: "工程设备", vehicle: "车辆载具", clothing: "服装", tool: "工具", package: "物品" };
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 function project(version: CategoryVersionView, section: CategoryDraftSection): Record<string, unknown> {
   const root = version.definition as unknown as Record<string, unknown>;
   const business = root.businessModel as Record<string, unknown>;
   const defaults = business.defaults as Record<string, unknown>;
-  return Object.fromEntries(ownership[section].flatMap((key) => {
+  const projected = Object.fromEntries(ownership[section].flatMap((key) => {
     const value = root[key] ?? business[key] ?? defaults[key];
     return value === undefined ? [] : [[key, structuredClone(value)]];
   }));
+  if (section === "basic") {
+    const englishTerms = Object.fromEntries(Object.entries(version.definition.terminology).map(([key, value]) => [key,
+      record(value) ? Object.fromEntries(Object.keys(value).map((field) => [field, ""])) : ""]));
+    const display = record(projected.display) ? projected.display : {};
+    projected.display = { nameEn: "", descriptionEn: "", icon: "rental", defaultWorkspaceName: "", defaultWorkspaceNameEn: "", ...display,
+      terminologyEn: { ...englishTerms, ...(record(display.terminologyEn) ? display.terminologyEn : {}) } };
+  }
+  return projected;
 }
 
 /** Structured controls only: category administrators never need to write JSON. */
@@ -72,7 +84,7 @@ function ValueEditor({ name, value, change, disabled, inspection = false }: { na
     return <Card size="small" title={label}>{Object.entries(fields).map(([key, entry]) => <ValueEditor key={key} name={key} value={entry} change={(next) => change(updateCategoryField(fields, key, next, inspection))} disabled={disabled} inspection={inspection} />)}</Card>;
   }
   const fieldChoices = inspection && name === "type" ? CATEGORY_INSPECTION_TYPES : choices[name];
-  return <Form.Item label={label}>{fieldChoices ? <Select aria-label={label} value={String(value ?? "")} options={fieldChoices.map((entry) => ({ value: entry, label: entry }))} onChange={change} disabled={disabled} /> : <Input aria-label={label} value={String(value ?? "")} onChange={(event) => change(event.target.value)} disabled={disabled} maxLength={2048} />}</Form.Item>;
+  return <Form.Item label={label}>{fieldChoices ? <Select aria-label={label} value={String(value ?? "")} options={fieldChoices.map((entry) => ({ value: entry, label: name === "icon" ? <Space><CategoryTemplateIcon code={entry} />{t(iconLabels[entry])}</Space> : entry }))} onChange={change} disabled={disabled} /> : <Input aria-label={label} value={String(value ?? "")} onChange={(event) => change(event.target.value)} disabled={disabled} maxLength={2048} />}</Form.Item>;
 }
 
 export function CategoryDraftEditor({ code, initial, editable, canPublish, saved, close }: { code: string; initial: CategoryVersionView; editable: boolean; canPublish: boolean; saved: () => void; close: () => void }) {

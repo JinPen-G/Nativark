@@ -851,10 +851,23 @@ export interface RentalCategoryBusinessModel {
   defaults: RentalCategoryDefaults;
 }
 
+/** Controlled names, never arbitrary SVG, URLs or executable icon definitions. */
+export const RENTAL_CATEGORY_ICON_CODES = ["rental", "camera", "camping", "construction", "vehicle", "clothing", "tool", "package"] as const;
+export interface RentalCategoryDisplayMetadata {
+  nameEn?: string;
+  descriptionEn?: string;
+  icon?: typeof RENTAL_CATEGORY_ICON_CODES[number];
+  defaultWorkspaceName?: string;
+  defaultWorkspaceNameEn?: string;
+  terminologyEn?: Partial<RentalCategoryTerminology>;
+}
+
 export interface RentalCategoryDefinition {
   code: RentalCategoryCode;
   name: string;
   description: string;
+  /** Optional for immutable legacy snapshots; consumers explicitly fall back to Chinese. */
+  display?: RentalCategoryDisplayMetadata;
   supportedInventoryModes: RentalInventoryMode[];
   defaultCapabilities: RentalCapability[];
   /**

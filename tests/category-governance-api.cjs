@@ -17,13 +17,19 @@ module.exports = async function categoryGovernanceApi({ request, token, tenantTo
   const source = initial.versions.find((v) => v.id === initial.recommendedVersionId);
   assert.ok(source, "已有推荐版本必须存在");
   const summaries = await call("GET", "");
+  for (const summary of summaries) {
+    assert.equal(summary.definition, undefined);
+    for (const version of [summary.latestPublished, ...summary.drafts].filter(Boolean)) assert.equal(version.definition, undefined, "列表不应泄漏完整草稿正文");
+  }
   assert.equal(summaries.find((entry) => entry.code === "camera").recommendedVersionLabel, source.versionLabel);
   const original = structuredClone(source.definition);
   const draft = await call("POST", "/camera/drafts", { sourceVersionId: source.id, versionLabel: "e2e-governance-v2", reason: "专项复制草稿" }, 201);
   const section = `/camera/versions/${draft.id}/sections/basic`;
   await call("PATCH", section, { expectedRevision: 0, values: { code: "vehicle" }, reason: "禁止跨页改身份" }, 400);
-  const patched = await call("PATCH", section, { expectedRevision: 0, values: { name: "测试摄影品类" }, reason: "仅保存基础页" });
+  const display = { nameEn: "Test camera rental", icon: "camera", defaultWorkspaceName: "摄影设备租赁", terminologyEn: { assetLabel: "Equipment asset" } };
+  const patched = await call("PATCH", section, { expectedRevision: 0, values: { name: "测试摄影品类", display }, reason: "仅保存基础页" });
   assert.equal(patched.revision, 1);
+  assert.deepEqual(patched.definition.display, display, "中英文与受控图标应持久化读回");
   assert.deepEqual(patched.definition.businessModel, original.businessModel, "基础页保存不能覆盖其他页签");
   await call("PATCH", section, { expectedRevision: 0, values: { name: "过期修改" }, reason: "并发冲突" }, 409);
   await call("PATCH", `/camera/versions/${source.id}/sections/basic`, { expectedRevision: source.revision, values: { name: "不得改发布版" }, reason: "不可变性" }, 409);
@@ -43,6 +49,7 @@ module.exports = async function categoryGovernanceApi({ request, token, tenantTo
   const attempts = await Promise.all([call("POST", `/camera/versions/${draft.id}/publish`, payload, 201), call("POST", `/camera/versions/${draft.id}/publish`, payload, 201)]);
   assert.equal(attempts[0].id, attempts[1].id, "并发重复发布必须返回同一版本");
   assert.equal(attempts[0].policy.createScope, "none");
+  assert.deepEqual(attempts[0].definition.display, display, "发布不得丢失展示元数据");
   await call("POST", `/camera/versions/${draft.id}/publish`, { ...payload, idempotencyKey: "different-idempotency-key" }, 409);
   const after = await call("GET", "/camera");
   assert.equal(after.recommendedVersionId, initial.recommendedVersionId, "发布不等于自动推荐或采用");

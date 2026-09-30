@@ -5,6 +5,7 @@ import {
   RENTAL_LOCATION_TYPES,
   RENTAL_CAPABILITY_MODULES,
   RENTAL_PRICING_UNIT_CODES,
+  RENTAL_CATEGORY_ICON_CODES,
   RentalInventoryMode,
   type RentalCategoryDefinition
 } from "@rental-os/shared";
@@ -27,7 +28,7 @@ const strings = (value: unknown): value is string[] =>
 const unique = (items: string[]) => new Set(items).size === items.length;
 const DEFINITION_KEYS = new Set([
   "code", "name", "description", "supportedInventoryModes", "defaultCapabilities",
-  "requiredCapabilities", "terminology", "attributeSchema", "businessModel", "version"
+  "requiredCapabilities", "terminology", "attributeSchema", "businessModel", "version", "display"
 ]);
 const BUSINESS_KEYS = new Set([
   "pricingUnits", "defaultPricingUnit", "fulfillmentModes", "locationTypes",
@@ -65,6 +66,22 @@ export function parsePublishedRentalCategory(value: unknown, expectedCode: strin
   if (typeof value.name !== "string" || !value.name.trim() || value.name.length > 100 ||
       typeof value.description !== "string" || value.description.length > 2000 ||
       typeof value.version !== "string" || !value.version.trim() || value.version.length > 64) fail("基础信息不合法");
+  if (value.display !== undefined) {
+    if (!object(value.display) || !onlyKeys(value.display, ["nameEn", "descriptionEn", "icon", "defaultWorkspaceName", "defaultWorkspaceNameEn", "terminologyEn"])) return fail("展示元数据结构不合法");
+    const display = value.display;
+    for (const key of ["nameEn", "descriptionEn", "defaultWorkspaceName", "defaultWorkspaceNameEn"]) {
+      if (display[key] !== undefined && (typeof display[key] !== "string" || display[key].length > (key === "descriptionEn" ? 2000 : 100))) fail(`展示文案 ${key} 不合法`);
+    }
+    if (display.icon !== undefined && !RENTAL_CATEGORY_ICON_CODES.includes(display.icon as typeof RENTAL_CATEGORY_ICON_CODES[number])) fail("图标必须从受支持集合选择");
+    if (display.terminologyEn !== undefined) {
+      if (!object(display.terminologyEn) || !onlyKeys(display.terminologyEn, ["itemLabel", "itemGroupLabel", "assetLabel", "fulfillmentLabel", "pickupLabel", "returnLabel", "identifierLabel", "deliveryLabel", "serialLabel", "usageMetricLabel", "assetCollectionLabel", "navigationLabels"])) return fail("英文术语结构不合法");
+      for (const [key, label] of Object.entries(display.terminologyEn)) {
+        if (key === "navigationLabels") {
+          if (!object(label) || !onlyKeys(label, ["inventoryGroup", "itemGroups", "pricingGroups", "assets", "locations"]) || Object.values(label).some((entry) => typeof entry !== "string" || entry.length > 100)) fail("英文导航术语不合法");
+        } else if (typeof label !== "string" || label.length > 100) fail(`英文术语 ${key} 不合法`);
+      }
+    }
+  }
   if (!strings(value.supportedInventoryModes) || !value.supportedInventoryModes.length ||
       !unique(value.supportedInventoryModes) ||
       value.supportedInventoryModes.some((mode) => !Object.values(RentalInventoryMode).includes(mode as RentalInventoryMode))) {

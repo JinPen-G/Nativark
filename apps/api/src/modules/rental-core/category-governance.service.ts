@@ -16,7 +16,7 @@ export function assertCategoryGovernancePermission(user: SystemUserRow | undefin
   }
 }
 const sections: Record<CategoryDraftSection, Record<string, string[]>> = {
-  basic: { root: ["name", "description", "terminology"] },
+  basic: { root: ["name", "description", "terminology", "display"] },
   attributes: { root: ["attributeSchema"], business: ["assetFields", "catalogPresentation"] },
   inventory: { root: ["supportedInventoryModes"], business: ["fulfillmentModes", "locationTypes", "deliveryDestination"] },
   pricing: { business: ["pricingUnits", "defaultPricingUnit", "settingModules", "supportsHolidayPricing", "supportsUsagePricing", "supportsPreauthorization"], defaults: ["payment", "overdue", "fulfillment"] },
@@ -82,13 +82,17 @@ export class CategoryGovernanceService {
   }
   async list(user: SystemUserRow) {
     assertCategoryGovernancePermission(user, P.view);
-    const rows = await this.prisma.rentalCategoryDefinition.findMany({ include: { versions: { select: { id: true, status: true, versionLabel: true, publishedAt: true } } }, orderBy: { code: "asc" } });
+    const rows = await this.prisma.rentalCategoryDefinition.findMany({ include: { versions: { select: { id: true, status: true, versionLabel: true, publishedAt: true, definition: true } } }, orderBy: { code: "asc" } });
     return Promise.all(rows.map(async (row) => {
       const workspaces = await this.prisma.businessWorkspace.findMany({ where: { categoryCode: row.code }, select: { tenantId: true } });
       const published = row.versions.filter((v) => ["published", "legacy_baseline"].includes(v.status)).sort((a, b) => (b.publishedAt?.getTime() ?? 0) - (a.publishedAt?.getTime() ?? 0));
-      return { code: row.code.toLowerCase(), name: row.name, openingScope: row.openingScope, openingTenantIds: row.openingTenantIds ?? [], openingRevision: row.openingRevision,
+      const recommended = row.versions.find((version) => version.id === row.recommendedVersionId);
+      const body = recommended?.definition as unknown as { name?: string; display?: { nameEn?: string; icon?: string } } | undefined;
+      return { code: row.code.toLowerCase(), name: body?.name ?? row.name, nameEn: body?.display?.nameEn, icon: body?.display?.icon,
+        openingScope: row.openingScope, openingTenantIds: row.openingTenantIds ?? [], openingRevision: row.openingRevision,
         recommendedVersionId: row.recommendedVersionId, recommendedVersionLabel: row.versions.find((v) => v.id === row.recommendedVersionId)?.versionLabel ?? null,
-        latestPublished: published[0] ?? null, drafts: row.versions.filter((v) => v.status === "draft"),
+        latestPublished: published[0] ? { id: published[0].id, status: published[0].status, versionLabel: published[0].versionLabel, publishedAt: published[0].publishedAt } : null,
+        drafts: row.versions.filter((v) => v.status === "draft").map((v) => ({ id: v.id, status: v.status, versionLabel: v.versionLabel })),
         adoptedSpaces: workspaces.length, adoptedTenants: new Set(workspaces.map((w) => w.tenantId)).size };
     }));
   }
