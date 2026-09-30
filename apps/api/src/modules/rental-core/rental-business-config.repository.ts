@@ -20,7 +20,7 @@ import type {
 import { PrismaService } from "../database/prisma.service";
 import type { RentalConfigTx } from "./rental-core-config.repository";
 import { assertScopedWrite, resolveScopeWorkspaceId } from "./workspace-scope";
-import { lockActiveCategoryBinding } from "./category-active-write";
+import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./category-active-write";
 
 const canonicalJson = (value: unknown) => JSON.stringify(value, (_key, item: unknown) => {
   if (!item || typeof item !== "object" || Array.isArray(item)) return item;
@@ -89,7 +89,7 @@ export interface RentalBusinessConfigStore {
     superseded?: RentalCalendarYear,
     expectedRevisions?: { next: number; superseded: number }
   ): Promise<void>;
-  upsertRuleVersion(version: RentalRuleVersion): Promise<void>;
+  upsertRuleVersion(version: RentalRuleVersion, expectedBinding?: CategoryWriteBinding): Promise<void>;
   /**
    * RULE-01A：写规则版本并追加一条审计。发布、恢复、作废三类动作都走这里。
    * 版本行与审计必须同一事务：分两次写，失败时会留下一个没有原因、没有操作者的生效版本，
@@ -99,7 +99,8 @@ export interface RentalBusinessConfigStore {
     version: RentalRuleVersion,
     audit: RentalRuleVersionAudit,
     /** 一并落库的其它版本行（如被替代版本的状态与时间戳）。 */
-    alsoWrite?: RentalRuleVersion[]
+    alsoWrite?: RentalRuleVersion[],
+    expectedBinding?: CategoryWriteBinding
   ): Promise<void>;
   loadRuleVersionAudits(tenantId: string, workspaceId: string, ruleVersionId?: string): Promise<RentalRuleVersionAudit[]>;
   upsertNotificationTemplate(template: RentalNotificationTemplateV1): Promise<void>;
@@ -560,16 +561,20 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     };
   }
 
-  async upsertRuleVersion(version: RentalRuleVersion): Promise<void> {
+  async upsertRuleVersion(version: RentalRuleVersion, expectedBinding?: CategoryWriteBinding): Promise<void> {
     const data = this.ruleVersionData(version);
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, version.tenantId);
     try {
-      const existing = await this.prisma.rentalRuleVersion.findUnique({ where: { id: version.id }, select: { tenantId: true, workspaceId: true } });
+      await this.prisma.$transaction(async (tx) => {
+      await lockActiveCategoryBinding(tx, version.tenantId, workspaceId, expectedBinding, version.categoryCode);
+      const existing = await tx.rentalRuleVersion.findUnique({ where: { id: version.id }, select: { tenantId: true, workspaceId: true, status: true, config: true } });
       assertScopedWrite(existing, version.tenantId, workspaceId, "规则版本");
-      await this.prisma.rentalRuleVersion.upsert({
+      if (existing && existing.status !== "draft" && (existing.status !== version.status || canonicalJson(existing.config) !== canonicalJson(version.config))) throw new ConflictException("已发布或历史规则不可覆盖，请恢复为新草稿");
+      await tx.rentalRuleVersion.upsert({
         where: { id: version.id },
         create: { workspaceId, id: version.id, ...data, createdAt: new Date(version.createdAt) },
         update: data
+      });
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -582,25 +587,24 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
   async writeRuleVersionWithAudit(
     version: RentalRuleVersion,
     audit: RentalRuleVersionAudit,
-    alsoWrite: RentalRuleVersion[] = []
+    alsoWrite: RentalRuleVersion[] = [],
+    expectedBinding?: CategoryWriteBinding
   ): Promise<void> {
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, version.tenantId);
     try {
       await this.prisma.$transaction(async (tx) => {
         // 同一空间的发布、恢复与作废必须串行。只在服务层检查缓存挡不住多进程并发。
-        await tx.$queryRaw(Prisma.sql`
-          SELECT id FROM business_workspaces
-           WHERE tenantId = ${version.tenantId} AND id = ${workspaceId}
-           FOR UPDATE
-        `);
+        await lockActiveCategoryBinding(tx, version.tenantId, workspaceId, expectedBinding, version.categoryCode);
+        if (audit.tenantId !== version.tenantId || audit.workspaceId !== workspaceId || audit.ruleVersionId !== version.id || audit.version !== version.version || audit.toStatus !== version.status) throw new ConflictException("规则审计与本次写入的空间或版本不一致");
         if (audit.action === "publish") {
           const persisted = await tx.rentalRuleVersion.findFirst({
             where: { id: version.id, tenantId: version.tenantId, workspaceId },
-            select: { status: true }
+            select: { status: true, config: true }
           });
           if (!persisted || persisted.status !== "draft") {
             throw new ConflictException("规则草稿状态已变化，请刷新后重试");
           }
+          if (canonicalJson(persisted.config) !== canonicalJson(version.config)) throw new ConflictException("规则草稿正文已变化，请刷新后重新预览并发布");
           const effectiveFrom = version.effectiveFrom ? new Date(version.effectiveFrom) : undefined;
           if (!effectiveFrom) throw new ConflictException("发布规则缺少生效时间");
           const issuedStatuses = ["pending", "published", "superseded"];
@@ -620,8 +624,11 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
         }
         for (const row of [version, ...alsoWrite]) {
           if (row.tenantId !== version.tenantId) throw new ConflictException("规则版本不能跨租户写入");
-          const existing = await tx.rentalRuleVersion.findUnique({ where: { id: row.id }, select: { tenantId: true, workspaceId: true } });
+          const existing = await tx.rentalRuleVersion.findUnique({ where: { id: row.id }, select: { tenantId: true, workspaceId: true, status: true, config: true } });
           assertScopedWrite(existing, version.tenantId, workspaceId, "规则版本");
+          if (existing && existing.status !== "draft" && canonicalJson(existing.config) !== canonicalJson(row.config)) throw new ConflictException("历史规则正文不可覆盖");
+          if (row.id === version.id && audit.action === "restore" && existing) throw new ConflictException("规则恢复必须建立新草稿，不能覆盖已有版本");
+          if (row.id === version.id && audit.action === "void" && (!existing || !["pending", "published"].includes(existing.status))) throw new ConflictException("规则状态已变化，当前版本不可作废");
           const data = this.ruleVersionData(row);
           await tx.rentalRuleVersion.upsert({
             where: { id: row.id },

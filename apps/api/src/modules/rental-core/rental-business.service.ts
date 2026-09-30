@@ -133,6 +133,7 @@ import {
 import { applyPriceAdjustment, assertNoDatetimeOverrideOverlap, assertNoPeriodicOverlap, periodicWindowCoversDate, periodicWindowHits } from "./rental-price-adjustments";
 import { assertTimeBasedOverdueSupported, billedRentalHours, rentalPricingStrategy, rentalPricingStrategyReference } from "./rental-pricing-strategy";
 import { categoryPricingRuleError } from "./category-pricing-rule-compatibility";
+import type { CategoryWriteBinding } from "./category-active-write";
 import { allocateDiscount, selectDiscountPlans } from "./rental-discount-selection";
 import { resolveQuoteServices } from "./rental-service-catalog";
 import { applyPricingGroupSecurityRateOverrides, computeSecurityAmounts, type SecurityLineInput, type RentalPricingSecurityRateOverride, validateSecurityRateCoverage, validateSecurityRules } from "./rental-security-deposit";
@@ -3253,6 +3254,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   /** 草稿保存。已发布版本不可修改（需求 4.6.1），改它只能先恢复为新草稿。 */
   async saveRuleVersion(tenantId: string, context: BusinessContext, input: SaveRentalRuleVersionRequest, operator: string) {
+    const binding = await this.categoryConfigurationBinding(tenantId, context);
     const state = this.state(tenantId, context);
     // 不支持订单资质审核的品类即使收到旧客户端/直接 API 写入的隐藏字段，也只保留中性的关闭状态。
     // required=true 仍交给 validateRule 拒绝，避免把误配置静默“修好”后让管理员以为已生效。
@@ -3281,7 +3283,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           createdAt: stamp()
         };
     // 草稿不改变对外生效的条款，因此不进审计表（审计只记发布、恢复、作废）。
-    await this.configStore.upsertRuleVersion(draft);
+    await this.configStore.upsertRuleVersion(draft, binding);
     if (existing) Object.assign(existing, draft);
     else state.ruleVersions.unshift(draft);
     return draft;
@@ -3299,6 +3301,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     input: PublishRentalRuleVersionRequest,
     operator: string
   ) {
+    const binding = await this.categoryConfigurationBinding(tenantId, context);
     const state = this.state(tenantId, context);
     const reason = input.reason?.trim();
     if (!reason) throw new BadRequestException("发布原因不能为空");
@@ -3345,7 +3348,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     await this.configStore.writeRuleVersionWithAudit(
       next,
       this.ruleVersionAudit(tenantId, next, "publish", target.status, next.status, reason, operator, now),
-      alsoWrite
+      alsoWrite,
+      binding
     );
     Object.assign(target, next);
     for (const row of alsoWrite) Object.assign(state.ruleVersions.find((item) => item.id === row.id)!, row);
@@ -3354,6 +3358,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   /** 恢复历史版本：生成**新草稿**，被恢复的版本原样保留（需求 4.6.1）。 */
   async restoreRuleVersion(tenantId: string, context: BusinessContext, version: string, reason: string, operator: string) {
+    const binding = await this.categoryConfigurationBinding(tenantId, context);
     const state = this.state(tenantId, context);
     const trimmed = reason?.trim();
     if (!trimmed) throw new BadRequestException("恢复原因不能为空");
@@ -3376,7 +3381,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     };
     await this.configStore.writeRuleVersionWithAudit(
       draft,
-      this.ruleVersionAudit(tenantId, draft, "restore", undefined, "draft", trimmed, operator, now)
+      this.ruleVersionAudit(tenantId, draft, "restore", undefined, "draft", trimmed, operator, now),
+      [],
+      binding
     );
     state.ruleVersions.unshift(draft);
     return draft;
@@ -3384,6 +3391,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   /** 作废待生效或已生效版本（需求 4.6.14）。已被替代的历史版本不可作废。 */
   async voidRuleVersion(tenantId: string, context: BusinessContext, version: string, reason: string, operator: string) {
+    const binding = await this.categoryConfigurationBinding(tenantId, context);
     const state = this.state(tenantId, context);
     const trimmed = reason?.trim();
     if (!trimmed) throw new BadRequestException("作废原因不能为空");
@@ -3395,7 +3403,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const next: RentalRuleVersion = { ...target, status: "void", voidedAt: now, voidedBy: operator, voidReason: trimmed };
     await this.configStore.writeRuleVersionWithAudit(
       next,
-      this.ruleVersionAudit(tenantId, next, "void", displayStatus, "void", trimmed, operator, now)
+      this.ruleVersionAudit(tenantId, next, "void", displayStatus, "void", trimmed, operator, now),
+      [],
+      binding
     );
     Object.assign(target, next);
     return next;
@@ -5800,6 +5810,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       days.push({ date, dayType: weekend ? "weekend" : "workday", name: weekend ? "周末" : "工作日", pricingMultiplier: weekend ? 1.1 : 1, closed: false, source: "week_rule" });
     }
     return { tenantId, year, region: settings.calendar.officialCalendarRegion, version: "1.0", status: "draft", days };
+  }
+
+  private async categoryConfigurationBinding(tenantId: string, context: BusinessContext): Promise<CategoryWriteBinding | undefined> {
+    if (!this.categoryResolver) return undefined;
+    const resolved = await this.categoryResolver.forWorkspace(tenantId, this.workspaceOf(tenantId));
+    if (resolved.definition.code !== context.profile.categoryCode || !isDeepStrictEqual(context.category, resolved.definition)) {
+      throw new ConflictException("品类版本在经营配置准备期间已变化，请刷新后重新保存");
+    }
+    return { categoryVersionId: resolved.categoryVersionId, adoptionRevision: resolved.adoptionRevision };
   }
 
   private validateRule(context: BusinessContext, config: RentalRuleConfig) {
