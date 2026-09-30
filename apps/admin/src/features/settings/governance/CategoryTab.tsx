@@ -5,6 +5,7 @@ import { Alert, Button, Card, Col, Form, Input, InputNumber, Row, Select, Space,
 import { useEffect } from "react";
 import { useLocale } from "@/app/locale";
 import type { GovernanceTabContext } from "./shared";
+import { CategoryPreparationEntry } from "./CategoryPreparationDialog";
 
 const PAYMENT_METHOD_LABELS: Record<(typeof RENTAL_PAYMENT_METHOD_CODES)[number], string> = {
   offline_cash: "线下现金",
@@ -77,6 +78,7 @@ export function CategoryTab({
         </Button>
       </div>
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+      <CategoryPreparationEntry />
       <Alert
         type="info"
         showIcon
