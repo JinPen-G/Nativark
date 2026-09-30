@@ -116,7 +116,7 @@ import { carrierSerializedCapacityConflict, carrierShipmentInventoryMutationBloc
 import { RentalFundingService } from "./rental-funding.service";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
 import { RentalCategoryResolver } from "./rental-category-resolver.service";
-import { normalizedRentalAttributeValue, validateRentalCategoryAttributes } from "./rental-category-attributes";
+import { normalizedRentalAttributeValue, validateRentalCategoryAttributes, reconcileRentalCategoryAttributes } from "./rental-category-attributes";
 import {
   RentalCoreFactRepository,
   type ActiveReservationRow,
@@ -1026,6 +1026,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const state = this.state(tenantId);
     const writeContext = await this.categoryWriteContext(tenantId, state.profile.categoryCode);
     const definition = writeContext.definition;
+    const existing = input.id ? state.itemGroups.find((row) => row.id === input.id) : undefined;
+    if (input.id && !existing) throw new NotFoundException("标的分组不存在");
+    const persistedAttributes = { ...(existing?.attributes ?? {}) };
+    delete persistedAttributes[ITEM_GROUP_MEDIA_KEY];
+    const reconciledAttributes = reconcileRentalCategoryAttributes(definition.businessModel.assetFields, "item_group", input.attributes ?? {}, persistedAttributes);
     if (!definition.supportedInventoryModes.includes(input.inventoryMode)) throw new BadRequestException("当前经营品类不支持该库存模式");
     if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("标的编码和名称不能为空");
     const duplicate = state.itemGroups.find((row) => row.code === input.code && row.id !== input.id);
@@ -1035,7 +1040,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     if (input.inventoryMode !== RentalInventoryMode.Bundle && components.length > 0) throw new BadRequestException("仅套装模式可以配置组成项");
     if (input.inventoryMode === RentalInventoryMode.Bundle) this.validateBundleComponentRules(components);
     if (input.inventoryMode !== RentalInventoryMode.Bundle) {
-      this.validateAttributes(definition.businessModel.assetFields, "item_group", input.attributes ?? {});
+      this.validateAttributes(definition.businessModel.assetFields, "item_group", reconciledAttributes.active);
       if (state.profile.categoryCode === RentalCategoryCode.Camping) {
         const capacity = input.attributes?.capacity;
         if (capacity !== undefined && capacity !== null && capacity !== "" && (!Number.isFinite(Number(capacity)) || Number(capacity) <= 0)) throw new BadRequestException("露营装备容量必须大于0升");
@@ -1057,17 +1062,15 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       );
     } else {
       // 套装不强制继承单品的厂商/型号必填规则，但传入的字段仍必须属于当前品类且类型正确。
-      this.validateAttributes(definition.businessModel.assetFields, "item_group", input.attributes ?? {}, {}, false);
+      this.validateAttributes(definition.businessModel.assetFields, "item_group", reconciledAttributes.active, {}, false);
     }
     const timestamp = now();
-    const existing = input.id ? state.itemGroups.find((row) => row.id === input.id) : undefined;
-    if (input.id && !existing) throw new NotFoundException("标的分组不存在");
     const media = existing?.attributes[ITEM_GROUP_MEDIA_KEY];
     const result: RentalItemGroup = {
       id: existing?.id ?? id("group"), tenantId, categoryCode: state.profile.categoryCode,
       code: input.code.trim(), name: input.name.trim(), inventoryMode: input.inventoryMode,
       unit: input.unit?.trim() || "件", description: input.description?.trim(),
-      attributes: { ...(input.attributes ?? {}), ...(media ? { [ITEM_GROUP_MEDIA_KEY]: media } : {}) },
+      attributes: { ...reconciledAttributes.stored, ...(media ? { [ITEM_GROUP_MEDIA_KEY]: media } : {}) },
       images: existing?.images ?? [],
       bundleComponents: components, status: input.status ?? existing?.status ?? "enabled",
       createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
@@ -1075,7 +1078,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     // 商品建档 Hook：落库前判定完整的待写记录。能力可以据此阻止（例如摄影兼容性
     // 规则认为该套装组合不可用）或给出提示，但不得改写记录本身——`result` 传进去的是
     // 冻结快照，能力只能通过返回值表达意见。
-    await this.runHook(tenantId, "item_onboarding", { type: "item_group", id: result.id }, result);
+    await this.runHook(tenantId, "item_onboarding", { type: "item_group", id: result.id }, { ...result, attributes: reconciledAttributes.active });
     await this.configStore.upsertItemGroup(
       result, undefined,
       this.uniqueAttributeClaims(definition.businessModel.assetFields, "item_group", result.attributes), writeContext.binding
@@ -1228,13 +1231,16 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const definition = writeContext.definition;
     const assetNo = input.assetNo.trim();
     const assets = await this.factStore.listAssets(tenantId);
+    const existing = input.id ? assets.find((row) => row.id === input.id) : undefined;
+    if (input.id && !existing) throw new NotFoundException("资产不存在");
     const assetAttributes = { ...(input.attributes ?? {}) };
     const supportsSerialNo = definition.businessModel.assetFields.some((field) => field.scope === "asset" && field.code === "serialNo");
-    if (!supportsSerialNo && input.serialNo?.trim()) throw new BadRequestException("存在未定义的品类字段：serialNo");
-    const serialNo = supportsSerialNo ? input.serialNo ?? assetAttributes.serialNo : undefined;
+    if (!supportsSerialNo && input.serialNo?.trim() && input.serialNo.trim() !== existing?.serialNo) throw new BadRequestException("存在未定义的品类字段：serialNo");
+    const serialNo = supportsSerialNo ? input.serialNo ?? assetAttributes.serialNo : existing?.serialNo;
     if (supportsSerialNo) delete assetAttributes.serialNo;
+    const reconciledAttributes = reconcileRentalCategoryAttributes(definition.businessModel.assetFields, "asset", assetAttributes, existing?.attributes);
     const attributeAliases = supportsSerialNo ? { serialNo } : {};
-    this.validateAttributes(definition.businessModel.assetFields, "asset", assetAttributes, attributeAliases);
+    this.validateAttributes(definition.businessModel.assetFields, "asset", reconciledAttributes.active, attributeAliases);
     this.assertUniqueAttributes(
       definition.businessModel.assetFields,
       "asset",
@@ -1245,16 +1251,14 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       (asset) => ({ serialNo: asset.serialNo })
     );
     if (assets.some((row) => row.assetNo === assetNo && row.id !== input.id)) throw new ConflictException("资产编号已存在");
-    const existing = input.id ? assets.find((row) => row.id === input.id) : undefined;
-    if (input.id && !existing) throw new NotFoundException("资产不存在");
     const timestamp = now();
     const result: RentalAsset = {
       id: existing?.id ?? id("asset"), tenantId, itemGroupId: group.id, itemGroupCode: group.code,
       itemGroupName: group.name, assetNo, serialNo: typeof serialNo === "string" ? serialNo.trim() : undefined,
       locationId: location.id, locationName: location.name, status: input.status ?? existing?.status ?? RentalAssetStatus.Available,
-      attributes: assetAttributes, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
+      attributes: reconciledAttributes.stored, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
-    await this.runHook(tenantId, "item_onboarding", { type: "asset", id: result.id }, result);
+    await this.runHook(tenantId, "item_onboarding", { type: "asset", id: result.id }, { ...result, attributes: reconciledAttributes.active, serialNo: supportsSerialNo ? result.serialNo : undefined });
     await this.factStore.upsertAsset(
       result,
       this.uniqueAttributeClaims(definition.businessModel.assetFields, "asset", assetAttributes, attributeAliases),

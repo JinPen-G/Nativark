@@ -1,6 +1,27 @@
 import { BadRequestException, ConflictException } from "@nestjs/common";
 import type { RentalAttributeDefinition } from "@rental-os/shared";
+import { isDeepStrictEqual } from "node:util";
 const hasOwn = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
+
+/** Retired values remain historical data, not writable fields in the active definition. */
+export function reconcileRentalCategoryAttributes(
+  fields: RentalAttributeDefinition[], scope: "item_group" | "asset",
+  incoming: Record<string, unknown>, persisted: Record<string, unknown> = {}
+) {
+  const allowed = new Set(fields.filter((field) => field.scope === scope).map((field) => field.code));
+  const active: Record<string, unknown> = {};
+  const retained: Record<string, unknown> = {};
+  for (const [code, value] of Object.entries(persisted)) {
+    if (!allowed.has(code)) retained[code] = value;
+  }
+  for (const [code, value] of Object.entries(incoming)) {
+    if (allowed.has(code)) active[code] = value;
+    else if (!hasOwn(persisted, code) || !isDeepStrictEqual(value, persisted[code])) {
+      throw new BadRequestException(`存在未定义或不可修改的历史品类字段：${code}`);
+    }
+  }
+  return { active, stored: { ...retained, ...active } };
+}
 
 /** Date.parse can normalize impossible dates (e.g. February 30); those are not business dates. */
 function validRentalAttributeDate(value: unknown): boolean {

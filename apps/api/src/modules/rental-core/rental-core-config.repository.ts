@@ -425,7 +425,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     // 有外层事务时直接复用它——Prisma 不支持嵌套交互式事务，自己再开一个会报错。
     const write = async (client: RentalConfigTx) => {
       const workspaceId = await resolveScopeWorkspaceId(client, group.tenantId);
-      const activeClaims = await validateActiveCategoryWrite(client, group.tenantId, workspaceId, {
+      const activeWrite = await validateActiveCategoryWrite(client, group.tenantId, workspaceId, {
         id: group.id, scope: "item_group", attributes: group.attributes, inventoryMode: group.inventoryMode, categoryCode: group.categoryCode
       }, expectedBinding);
       const existing = await client.rentalItemGroup.findUnique({ where: { id: group.id }, select: { tenantId: true, workspaceId: true } });
@@ -439,7 +439,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
         await client.rentalAttributeUniqueValue.deleteMany({
           where: { tenantId: group.tenantId, workspaceId, entityType: "item_group", entityId: group.id }
         });
-        for (const claim of activeClaims) {
+        for (const claim of activeWrite.claims) {
           try {
             await client.rentalAttributeUniqueValue.create({ data: {
               id: `attruniq_${createHash("sha256").update(`${workspaceId}|item_group|${claim.fieldCode}|${claim.normalizedValue}`).digest("hex")}`,
@@ -458,8 +458,8 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       }
       await client.rentalItemGroup.upsert({
         where: { id: group.id },
-        create: { workspaceId, id: group.id, ...data, createdAt: new Date(group.createdAt) },
-        update: data
+        create: { workspaceId, id: group.id, ...data, attributes: activeWrite.attributes as Prisma.InputJsonValue, createdAt: new Date(group.createdAt) },
+        update: { ...data, attributes: activeWrite.attributes as Prisma.InputJsonValue }
       });
       await client.rentalBundleComponent.deleteMany({ where: { bundleItemGroupId: group.id } });
       for (const component of group.bundleComponents) {

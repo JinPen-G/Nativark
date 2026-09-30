@@ -49,7 +49,12 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal(await db.rentalAttributeUniqueValue.count({ where: { workspaceId } }), 2, "改值应释放旧唯一声明");
     await assert.rejects(db.$transaction((tx) => validateActiveCategoryWrite(tx, "tenant_001", workspaceId, { id: "a", scope: "asset", attributes: {} })), /不能为空/);
     const assetClaims = await db.$transaction((tx) => validateActiveCategoryWrite(tx, "tenant_001", workspaceId, { id: "a", scope: "asset", serialNo: " SN1 ", attributes: {} }));
-    assert.equal(assetClaims[0].normalizedValue, "SN1");
+    assert.equal(assetClaims.claims[0].normalizedValue, "SN1");
+    await db.rentalItemGroup.update({ where: { id: input.id }, data: { attributes: { identity: "DEF", retiredProof: { original: true } } } });
+    await context(() => repo.upsertItemGroup({ ...input, attributes: { identity: "GHI" } }));
+    assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes, { identity: "GHI", retiredProof: { original: true } });
+    await assert.rejects(context(() => repo.upsertItemGroup({ ...input, attributes: { identity: "GHI", retiredProof: null } })), /不可修改/);
+    assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes.retiredProof, { original: true });
     console.log("category-active-write-db: 锁竞争后旧请求拒绝、当前必填复核、声明重建/改值释放/重复回滚、序列号校验通过");
   } finally {
     await db.businessWorkspace.deleteMany({ where: { id: workspaceId } });

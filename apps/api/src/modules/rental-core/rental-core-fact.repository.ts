@@ -1265,13 +1265,13 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     try {
       await this.prisma.$transaction(async (tx) => {
         const workspaceId = await resolveScopeWorkspaceId(tx, asset.tenantId);
-        const activeClaims = await validateActiveCategoryWrite(tx, asset.tenantId, workspaceId, {
+        const activeWrite = await validateActiveCategoryWrite(tx, asset.tenantId, workspaceId, {
           id: asset.id, scope: "asset", attributes: asset.attributes, serialNo: asset.serialNo
         }, expectedBinding);
         await tx.rentalAttributeUniqueValue.deleteMany({
           where: { tenantId: asset.tenantId, workspaceId, entityType: "asset", entityId: asset.id }
         });
-        for (const claim of activeClaims) {
+        for (const claim of activeWrite.claims) {
           try {
             await tx.rentalAttributeUniqueValue.create({
               data: {
@@ -1300,10 +1300,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           throw new ConflictException("资产事实已属于其他租户或经营空间，拒绝覆盖");
         }
         if (existing) {
-          await tx.rentalAsset.update({ where: { id: asset.id }, data });
+          await tx.rentalAsset.update({ where: { id: asset.id }, data: { ...data, attributes: activeWrite.attributes as Prisma.InputJsonValue, serialNo: activeWrite.serialNo ?? null } });
         } else {
           await tx.rentalAsset.create({
-            data: { workspaceId, id: asset.id, ...data, createdAt: new Date(asset.createdAt) }
+            data: { workspaceId, id: asset.id, ...data, attributes: activeWrite.attributes as Prisma.InputJsonValue, serialNo: activeWrite.serialNo ?? null, createdAt: new Date(asset.createdAt) }
           });
         }
         await appendAssetStatusHistory(tx, {

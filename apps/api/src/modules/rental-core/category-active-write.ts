@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import type { RentalInventoryMode } from "@rental-os/shared";
 import { resolveRentalCategoryVersionBody } from "./rental-category-resolver.service";
-import { prepareRentalCategoryUniqueClaims } from "./rental-category-attributes";
+import { prepareRentalCategoryUniqueClaims, reconcileRentalCategoryAttributes } from "./rental-category-attributes";
 
 export interface CategoryWriteBinding { categoryVersionId: string; adoptionRevision: number }
 
@@ -28,10 +28,23 @@ export async function validateActiveCategoryWrite(
   const attributes = { ...input.attributes };
   // Media is maintained by the dedicated upload path, not a category attribute.
   if (input.scope === "item_group") delete attributes.__itemGroupMedia;
+  const existing = input.scope === "item_group"
+    ? await tx.rentalItemGroup.findFirst({ where: { id: input.id, tenantId, workspaceId }, select: { attributes: true } })
+    : await tx.rentalAsset.findFirst({ where: { id: input.id, tenantId, workspaceId }, select: { attributes: true, serialNo: true } });
+  const persisted = { ...((existing?.attributes ?? {}) as Record<string, unknown>) };
+  const media = input.scope === "item_group" ? persisted.__itemGroupMedia : undefined;
+  if (input.scope === "item_group") delete persisted.__itemGroupMedia;
+  const reconciled = reconcileRentalCategoryAttributes(definition.businessModel.assetFields, input.scope, attributes, persisted);
   const supportsSerialNo = definition.businessModel.assetFields.some((field) => field.scope === "asset" && field.code === "serialNo");
-  if (input.scope === "asset" && !supportsSerialNo && input.serialNo) throw new BadRequestException("存在未定义的品类字段：serialNo");
+  const oldSerialNo = existing && "serialNo" in existing && typeof existing.serialNo === "string" ? existing.serialNo : undefined;
+  if (input.scope === "asset" && !supportsSerialNo && input.serialNo && input.serialNo !== oldSerialNo) throw new BadRequestException("存在未定义的品类字段：serialNo");
   const aliases = input.scope === "asset" && supportsSerialNo ? { serialNo: input.serialNo } : {};
-  return prepareRentalCategoryUniqueClaims(definition.businessModel.assetFields, input.scope, [{
-    id: input.id, attributes, aliases, validateRequired: input.inventoryMode !== "bundle"
+  const claims = prepareRentalCategoryUniqueClaims(definition.businessModel.assetFields, input.scope, [{
+    id: input.id, attributes: reconciled.active, aliases, validateRequired: input.inventoryMode !== "bundle"
   }]).map(({ fieldCode, label, normalizedValue }) => ({ fieldCode, label, normalizedValue }));
+  return {
+    claims,
+    attributes: { ...reconciled.stored, ...(media !== undefined ? { __itemGroupMedia: media } : {}) },
+    serialNo: supportsSerialNo ? input.serialNo : oldSerialNo
+  };
 }
