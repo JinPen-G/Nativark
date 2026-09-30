@@ -4,6 +4,7 @@ const { randomUUID } = require("node:crypto");
 const { PrismaClient } = require("@prisma/client");
 const { RENTAL_CATEGORY_DEFINITIONS } = require("@rental-os/shared");
 const { RentalCoreConfigRepository } = require("../apps/api/dist/modules/rental-core/rental-core-config.repository.js");
+const { RentalCoreFactRepository } = require("../apps/api/dist/modules/rental-core/rental-core-fact.repository.js");
 const { WorkspaceCapabilityRepository } = require("../apps/api/dist/modules/rental-core/workspace-capability.repository.js");
 const { RentalBusinessConfigRepository } = require("../apps/api/dist/modules/rental-core/rental-business-config.repository.js");
 const { runWithRequestIdentity } = require("../apps/api/dist/common/request-identity.js");
@@ -149,6 +150,37 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     const editing = context(() => observed.upsertItemGroup({ ...input, attributes: { identity: "JKL" } }));
     await scopeReady; releaseUpload(); await upload; await editing;
     assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes.__itemGroupMedia, { images: ["concurrent-upload"] }, "锁前范围读取不能使锁后资料仍来自旧快照");
+    const facts = new RentalCoreFactRepository(db);
+    const asset = { id: `${fixture}_asset`, tenantId: "tenant_001", itemGroupId: input.id, assetNo: "A1", serialNo: "SN1", locationId: location.id, status: "available", attributes: {}, createdAt: rule.createdAt };
+    await context(() => facts.upsertAsset(asset, [], undefined, currentBinding));
+    assert.equal(await db.rentalAttributeUniqueValue.count({ where: { workspaceId, entityType: "asset", entityId: asset.id } }), 1);
+    await assert.rejects(context(() => facts.upsertAsset({ ...asset, id: `${fixture}_duplicate_asset`, assetNo: "A2" })), /已存在/);
+    assert.equal(await db.rentalAsset.count({ where: { workspaceId } }), 1, "资产唯一声明冲突必须回滚资产和历史");
+    let assetScopeRead; const assetScopeReady = new Promise((resolve) => { assetScopeRead = resolve; });
+    let assetLocked; const assetReady = new Promise((resolve) => { assetLocked = resolve; });
+    let releaseAsset; const assetRelease = new Promise((resolve) => { releaseAsset = resolve; });
+    const assetUpdate = db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM business_workspaces WHERE id = ${workspaceId} FOR UPDATE`;
+      assetLocked(); await assetRelease;
+      await tx.rentalAsset.update({ where: { id: asset.id }, data: { attributes: { retiredProof: { evidence: "latest" } } } });
+    });
+    await assetReady;
+    const observedFacts = new RentalCoreFactRepository({
+      $transaction: (write, options) => {
+        assert.equal(options?.isolationLevel, "ReadCommitted", "资产自建事务必须避免锁前旧快照");
+        return db.$transaction((tx) => write(new Proxy(tx, {
+          get(target, key) {
+            if (key === "businessWorkspace") return { ...target.businessWorkspace, findFirst: async (args) => { const row = await target.businessWorkspace.findFirst(args); assetScopeRead(); return row; } };
+            return Reflect.get(target, key);
+          }
+        })), options);
+      }
+    });
+    const assetEditing = context(() => observedFacts.upsertAsset(asset, [], undefined, currentBinding));
+    await assetScopeReady; releaseAsset(); await assetUpdate; await assetEditing;
+    assert.deepEqual((await db.rentalAsset.findUniqueOrThrow({ where: { id: asset.id } })).attributes.retiredProof, { evidence: "latest" }, "资产资料编辑必须保留锁后最新的退役字段证据");
+    await assert.rejects(context(() => facts.upsertAsset({ ...asset, attributes: { retiredProof: null } })), /不可修改/);
+    assert.equal(await db.rentalAttributeUniqueValue.count({ where: { workspaceId, entityType: "asset", entityId: asset.id } }), 1, "被拒绝的编辑不得删除原唯一声明");
     const calendar = { tenantId: "tenant_001", year: 2030, version: "1.0", region: "CN", status: "draft", days: [], revision: 1 };
     const calendarAudit = { date: "2030-01-01", action: "override", reason: "calendar fixture", at: new Date().toISOString() };
     await context(() => business.upsertCalendar(calendar));

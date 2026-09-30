@@ -6,6 +6,9 @@ require("ts-node").register({
 });
 
 const { RentalCoreFactRepository } = require("../apps/api/src/modules/rental-core/rental-core-fact.repository");
+const { RENTAL_CATEGORY_DEFINITIONS } = require("@rental-os/shared");
+const definition = structuredClone(RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "vehicle"));
+definition.businessModel.assetFields = [{ code: "serialNo", scope: "asset", label: "序列号", type: "string", required: true, unique: true }];
 
 const tenantId = "tenant_status_history";
 const workspaceId = "ws_status_history";
@@ -13,12 +16,17 @@ const assets = new Map();
 const histories = [];
 
 const fakeClient = {
+  $queryRaw: async () => [{ categoryCode: "VEHICLE", categoryVersionId: "vehicle_v1", categoryAdoptionRevision: 0, status: "ACTIVE" }],
+  rentalCategoryVersion: { findUnique: async () => ({ categoryCode: "VEHICLE", structureVersion: 1, status: "published", definition }) },
   businessWorkspace: { findFirst: async () => ({ id: workspaceId }) },
   rentalAttributeUniqueValue: {
     deleteMany: async () => ({ count: 0 }),
     create: async ({ data }) => data
   },
   rentalAsset: {
+    findMany: async ({ where }) => [...assets.values()]
+      .filter((row) => row.tenantId === where.tenantId && row.workspaceId === where.workspaceId)
+      .map((row) => ({ ...row, itemGroup: { code: "VEHICLE", name: "测试车型" }, location: { name: "测试地点" } })),
     findUnique: async ({ where }) => {
       const row = assets.get(where.id);
       return row ? { tenantId: row.tenantId, workspaceId: row.workspaceId, status: row.status, assetNo: row.assetNo } : null;
@@ -26,16 +34,16 @@ const fakeClient = {
     findFirst: async ({ where }) => {
       const row = assets.get(where.id);
       return row && row.tenantId === where.tenantId && row.workspaceId === where.workspaceId
-        ? { id: row.id, assetNo: row.assetNo, status: row.status }
+        ? { id: row.id, assetNo: row.assetNo, status: row.status, attributes: row.attributes, serialNo: row.serialNo }
         : null;
     },
     create: async ({ data }) => {
-      const row = { ...data };
+      const row = { ...data, updatedAt: new Date() };
       assets.set(row.id, row);
       return row;
     },
     update: async ({ where, data }) => {
-      const row = { ...assets.get(where.id), ...data };
+      const row = { ...assets.get(where.id), ...data, updatedAt: new Date() };
       assets.set(row.id, row);
       return row;
     }
@@ -52,7 +60,10 @@ const fakeClient = {
   }
 };
 
-const prisma = { ...fakeClient, $transaction: async (callback) => callback(fakeClient) };
+const prisma = { ...fakeClient, $transaction: async (callback, options) => {
+  assert.equal(options?.isolationLevel, "ReadCommitted", "资产资料仓储的自建事务应读取锁后最新事实");
+  return callback(fakeClient);
+} };
 const facts = new RentalCoreFactRepository(prisma);
 const asset = {
   id: "asset_status_1",

@@ -1317,7 +1317,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           reason: statusChange?.reason ?? (existing ? "资产资料维护" : "资产登记"),
           operator: statusChange?.operator
         });
-      });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     } catch (error) {
       // MySQL 在多个请求同时争抢同一唯一键时可能以死锁/写冲突结束事务，
       // Prisma 映射为 P2034。唯一约束已经保证不会双写，这里只把技术性 500
