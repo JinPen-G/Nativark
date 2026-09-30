@@ -13,6 +13,7 @@ import { WorkspaceCapabilityService } from "./workspace-capability.service";
 import {
   buildCapabilityEquipment,
   buildCapabilityEquipmentFromAssets,
+  projectCapabilityEquipment,
   type CapabilityEquipmentGroup
 } from "./capability-equipment";
 import {
@@ -387,8 +388,11 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const historical = subjectRef.type === "order" && orderPayload
       ? orderPayload as Pick<RentalOrder, "categoryVersionId" | "capabilityPolicy"> : undefined;
     const definition = historical?.categoryVersionId && this.categoryResolver
-      ? await this.categoryResolver.forVersion(this.state(tenantId).profile.categoryCode, historical.categoryVersionId)
+      ? await this.categoryResolver.forVersion(this.state(tenantId).profile.categoryCode, historical.categoryVersionId, tx)
       : historical ? undefined : await this.getWorkspaceCategory(tenantId);
+    const executableSubject = definition && Array.isArray(payload?.equipment)
+      ? { ...payload, equipment: projectCapabilityEquipment(payload.equipment as RentalCapabilityEquipmentLine[], definition.businessModel.assetFields) }
+      : subject;
     return this.hooks.evaluate({
       point,
       tenantId,
@@ -397,7 +401,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       // 旧单明确保留已有兼容政策，不能把升级后新增必选能力套回存量。
       requiredCapabilities: definition?.requiredCapabilities ?? (historical?.capabilityPolicy === "legacy_empty" ? [] : undefined),
       subjectRef,
-      subject,
+      subject: executableSubject,
       tx,
       operator,
       instances
@@ -2275,9 +2279,10 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       .filter((row) => !row.assetId)
       .map((row) => ({ itemGroupId: row.itemGroupId!, quantity: row.quantity }));
     const groups = this.capabilityEquipmentGroups(tenantId);
+    const executionFields = await this.orderCapabilityFields(order, tx);
     const actualEquipment = [
-      ...buildCapabilityEquipmentFromAssets(groups, pickedAssets),
-      ...buildCapabilityEquipment(groups, quantityLines)
+      ...buildCapabilityEquipmentFromAssets(groups, pickedAssets, executionFields),
+      ...buildCapabilityEquipment(groups, quantityLines, executionFields)
     ];
     await this.runHook(
       tenantId,
@@ -4478,6 +4483,18 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return buildCapabilityEquipment(this.capabilityEquipmentGroups(tenantId), lines);
   }
 
+  async buildOrderCapabilityEquipment(tenantId: string, order: RentalOrder, tx?: RentalFactTx) {
+    const fields = await this.orderCapabilityFields(order, tx);
+    return buildCapabilityEquipment(this.capabilityEquipmentGroups(tenantId), order.lines.map((line) => ({ itemGroupId: line.itemGroupId, quantity: line.quantity })), fields);
+  }
+
+  private async orderCapabilityFields(order: RentalOrder, tx?: RentalFactTx) {
+    if (!order.categoryVersionId) return undefined; // Historical legacy orders have an empty capability execution list.
+    if (!this.categoryResolver) throw new ConflictException("订单品类版本解析器不可用，不能执行能力检查");
+    const definition = await this.categoryResolver.forVersion(order.categoryCode, order.categoryVersionId, tx);
+    return definition.businessModel.assetFields;
+  }
+
   /** 商品组查找表，供公共富化使用。 */
   private capabilityEquipmentGroups(tenantId: string): Map<string, CapabilityEquipmentGroup> {
     const state = this.state(tenantId);
@@ -4643,7 +4660,8 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     const groups = this.capabilityEquipmentGroups(tenantId);
     const picked = allocations.filter((a) => a.assetId).map((a) => assets.find((s) => s.id === a.assetId)).filter((a): a is RentalAsset => Boolean(a));
     for (const asset of picked) this.assertAssetDocumentsCoverPeriod(this.state(tenantId), asset, rentalOrderDueAt(order));
-    const equipment = [...buildCapabilityEquipmentFromAssets(groups, picked), ...buildCapabilityEquipment(groups, allocations.filter((a) => !a.assetId).map((a) => ({ itemGroupId: a.itemGroupId!, quantity: a.quantity })))];
+    const executionFields = await this.orderCapabilityFields(order, tx);
+    const equipment = [...buildCapabilityEquipmentFromAssets(groups, picked, executionFields), ...buildCapabilityEquipment(groups, allocations.filter((a) => !a.assetId).map((a) => ({ itemGroupId: a.itemGroupId!, quantity: a.quantity })), executionFields)];
     await this.runHook(tenantId, "allocation_dispatch", { type: "order", id: order.id }, { ...order, equipment, capabilityExceptions: (order.capabilityExceptions ?? []).map((a) => ({ capability: a.capability, code: a.riskCode, reason: a.reason })) }, tx, operator, this.orderHookInstances(tenantId, order));
   }
 

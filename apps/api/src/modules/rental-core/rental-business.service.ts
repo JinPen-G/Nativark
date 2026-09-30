@@ -5429,7 +5429,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const equipment = buildCapabilityEquipment(groups, quote.request.lines.map((line) => ({
       itemGroupId: line.itemGroupId!,
       quantity: line.quantity
-    })));
+    })), context.category.businessModel.assetFields);
     const instances = quote.capabilitySnapshot
       ? WorkspaceCapabilityService.instancesFromSnapshot(tenantId, workspaceId, quote.capabilitySnapshot)
       : undefined;
