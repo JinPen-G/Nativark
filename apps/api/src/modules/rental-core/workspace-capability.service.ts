@@ -428,7 +428,7 @@ export class WorkspaceCapabilityService {
       throw new ConflictException(`能力 ${input.code} 由 Rental Core 内建提供，请在对应业务规则中配置`);
     }
     const workspaceId = await this.repository.currentWorkspaceId(tenantId);
-    const { categoryCode } = await this.repository.workspaceScope(tenantId, workspaceId);
+    const { categoryCode, binding } = await this.repository.workspaceScope(tenantId, workspaceId);
     const existing = await this.repository.findInstance(tenantId, workspaceId, input.code);
 
     if (input.status === "enabled") {
@@ -509,7 +509,8 @@ export class WorkspaceCapabilityService {
         operator,
         at: now
       },
-      existing ? existing.revision : undefined
+      existing ? existing.revision : undefined,
+      binding
     );
   }
 
@@ -531,6 +532,7 @@ export class WorkspaceCapabilityService {
       throw new ConflictException(`能力 ${code} 尚无可执行模块，无法升级`);
     }
     const workspaceId = await this.repository.currentWorkspaceId(tenantId);
+    const { binding } = await this.repository.workspaceScope(tenantId, workspaceId);
     const existing = await this.repository.findInstance(tenantId, workspaceId, code);
     if (!existing) throw new NotFoundException(`能力 ${code} 尚未在本经营空间启用，无法升级`);
     if (existing.implementationVersion === definition.implementationVersion) {
@@ -562,7 +564,8 @@ export class WorkspaceCapabilityService {
         operator,
         at: now
       },
-      existing.revision
+      existing.revision,
+      binding
     );
   }
 

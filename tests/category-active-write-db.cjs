@@ -4,6 +4,7 @@ const { randomUUID } = require("node:crypto");
 const { PrismaClient } = require("@prisma/client");
 const { RENTAL_CATEGORY_DEFINITIONS } = require("@rental-os/shared");
 const { RentalCoreConfigRepository } = require("../apps/api/dist/modules/rental-core/rental-core-config.repository.js");
+const { WorkspaceCapabilityRepository } = require("../apps/api/dist/modules/rental-core/workspace-capability.repository.js");
 const { runWithRequestIdentity } = require("../apps/api/dist/common/request-identity.js");
 const { validateActiveCategoryWrite } = require("../apps/api/dist/modules/rental-core/category-active-write.js");
 if (!/^rental_os_e2e_/u.test(new URL(process.env.DATABASE_URL).pathname.slice(1))) throw new Error("仅允许专用 E2E 库");
@@ -12,6 +13,7 @@ const fixture = `catwrite_${randomUUID()}`;
 const workspaceId = fixture;
 const versionId = `${fixture}_v2`;
 const repo = new RentalCoreConfigRepository(db);
+const capabilities = new WorkspaceCapabilityRepository(db);
 const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspaceId }, fn);
 (async () => {
   try {
@@ -28,6 +30,8 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     // Deliberately minimal repository fixtures, not a claim of usable business settings.
     const settings = { tenantId: "tenant_001", categoryCode: "camera", configVersion: "fixture", pricing: { enabledUnits: ["hour"], defaultUnit: "hour", holidayPricingEnabled: false }, calendar: { holidayPricingEnabled: false }, fulfillment: { enabledModes: ["store_pickup_return"] } };
     const location = { id: `${fixture}_location`, tenantId: "tenant_001", code: "L", name: "专项地点", type: "store", status: "enabled", capabilities: ["pickup", "return"] };
+    const capability = { tenantId: "tenant_001", workspaceId, code: "camera_compatibility", status: "enabled", implementationVersion: "cam-1.0", configVersion: "v1", config: { relations: [] }, revision: 1 };
+    const capabilityAudit = { code: "camera_compatibility", action: "enable", toStatus: "enabled", reason: "仓储锁专项夹具", at: new Date().toISOString() };
     // Hold the exact lock used by active writes, then switch while an old request is waiting.
     let locked; const ready = new Promise((resolve) => { locked = resolve; });
     let unlock; const release = new Promise((resolve) => { unlock = resolve; });
@@ -41,11 +45,20 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     const rejected = assert.rejects(stale, /版本已变化/);
     const staleSettings = assert.rejects(context(() => repo.upsertBusinessSettings(settings, "fixture", undefined, oldBinding)), /版本已变化/);
     const staleLocation = assert.rejects(context(() => repo.upsertLocation(location, undefined, oldBinding)), /版本已变化/);
-    unlock(); await switching; await Promise.all([rejected, staleSettings, staleLocation]);
+    const staleCapability = assert.rejects(capabilities.saveInstance(capability, capabilityAudit, undefined, oldBinding), /版本已变化/);
+    unlock(); await switching; await Promise.all([rejected, staleSettings, staleLocation, staleCapability]);
     assert.equal(await db.rentalItemGroup.count({ where: { workspaceId } }), 0, "旧请求不能在切换后写入");
     assert.equal(await db.rentalTenantBusinessSettings.count({ where: { workspaceId } }), 0);
     assert.equal(await db.rentalFulfillmentLocation.count({ where: { workspaceId } }), 0);
+    assert.equal(await db.workspaceCapabilityInstance.count({ where: { workspaceId } }), 0);
+    assert.equal(await db.workspaceCapabilityAuditEntry.count({ where: { workspaceId } }), 0);
     const currentBinding = { categoryVersionId: versionId, adoptionRevision: 1 };
+    await capabilities.saveInstance(capability, capabilityAudit, undefined, currentBinding);
+    assert.equal(await db.workspaceCapabilityInstance.count({ where: { workspaceId } }), 1);
+    assert.equal(await db.workspaceCapabilityAuditEntry.count({ where: { workspaceId } }), 1);
+    await assert.rejects(capabilities.saveInstance({ ...capability, status: "paused", revision: 2 }, { ...capabilityAudit, action: "pause", toStatus: "paused" }, 1, oldBinding), /版本已变化/);
+    assert.equal((await db.workspaceCapabilityInstance.findFirst({ where: { workspaceId } })).status, "enabled");
+    assert.equal(await db.workspaceCapabilityAuditEntry.count({ where: { workspaceId } }), 1, "拒绝不能留下审计或状态变化");
     await context(() => repo.upsertBusinessSettings(settings, "fixture", undefined, currentBinding));
     await assert.rejects(context(() => repo.upsertBusinessSettings({ ...settings, pricing: { enabledUnits: ["shift"], defaultUnit: "shift" } }, "fixture")), /不支持/);
     assert.deepEqual((await db.rentalTenantBusinessSettings.findUnique({ where: { workspaceId } })).settings.pricing.enabledUnits, ["hour"], "被拒绝的设置不能覆盖已提交事实");
@@ -73,7 +86,7 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes.__itemGroupMedia, { images: ["new"] }, "受控上传写穿到库");
     await context(() => repo.upsertItemGroup({ ...input, attributes: { identity: "GHI", __itemGroupMedia: { images: ["stale"] } } }));
     assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes.__itemGroupMedia, { images: ["new"] }, "普通资料保存不能覆盖最新图片");
-    console.log("category-active-write-db: 锁竞争后型号/设置/地点旧请求拒绝、当前定义复核与拒绝无改写、唯一声明及媒体边界通过");
+    console.log("category-active-write-db: 锁竞争后型号/设置/地点/能力旧请求拒绝、实例审计原子性、当前定义复核与唯一声明/媒体边界通过");
   } finally {
     await db.businessWorkspace.deleteMany({ where: { id: workspaceId } });
     await db.rentalCategoryVersion.deleteMany({ where: { id: versionId } });
