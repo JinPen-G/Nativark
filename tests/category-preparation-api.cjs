@@ -91,5 +91,14 @@ module.exports = async ({ request, platformToken, tenantToken, mysqlQuery }) => 
   const completenessPreview = await call("GET", path);
   assert.ok(completenessPreview.businessCompatibility.blockers.some((row) => row.domain === "inspection" && row.id === "e2e_category_future_safety:return"), "空检查模板不能满足强制归还检查");
   assert.ok(completenessPreview.businessCompatibility.blockers.some((row) => row.domain === "rule" && row.id === "e2e_category_future_safety:qualification:unregistered-proof"), "未在会话空间启用的证件不能作为资质规则依赖");
-  console.log("category-preparation-api: 会话空间与独立权限、两类必填准备、活动事实不变、修订冲突、跨实体及陈旧来源拒绝通过");
+  // A governance-only fixture may never have initialized business prices.
+  // Create an explicit scoped plan instead of silently INSERT...SELECT zero rows.
+  mysqlQuery(`INSERT INTO rental_pricing_plans (id,tenantId,workspaceId,categoryCode,code,name,status,version,effectiveFrom,rates,fulfillmentFees,createdAt,updatedAt) SELECT 'e2e_category_fee_plan',tenantId,id,categoryCode,'ADOPT-FEES','采用费用专项','enabled','1.0','2020-01-01',JSON_ARRAY(JSON_OBJECT('unit','hour','baseAmount',100)),JSON_ARRAY(JSON_OBJECT('mode','onsite_delivery','amount',10)),NOW(),NOW() FROM business_workspaces WHERE id=(SELECT workspaceId FROM rental_category_adoption_preparations WHERE targetVersionId='${draft.id}' AND tenantId='tenant_001'); INSERT INTO rental_price_adjustment_plans (id,tenantId,workspaceId,planId,code,name,status,changes,scheduledAt,finalRates,changeReason,createdAt,updatedAt) SELECT 'e2e_category_pending_price',tenantId,workspaceId,id,'ADOPT-PENDING','采用兼容专项','pending',JSON_ARRAY(),'2126-01-01',JSON_ARRAY(JSON_OBJECT('unit','shift','baseAmount',100)),'专项',NOW(),NOW() FROM rental_pricing_plans WHERE id='e2e_category_fee_plan';`);
+  assert.equal(mysqlQuery("SELECT COUNT(*) FROM rental_price_adjustment_plans WHERE id='e2e_category_pending_price';").trim().split(/\r?\n/u).at(-1), "1", "待生效价格夹具必须确实落库");
+  const pendingPricePreview = await call("GET", path);
+  assert.ok(pendingPricePreview.businessCompatibility.blockers.some((row) => row.domain === "price" && row.id === "e2e_category_pending_price"), "尚未生成价格版本的待生效调价也必须检查");
+  assert.ok(pendingPricePreview.businessCompatibility.blockers.some((row) => row.domain === "price" && row.id.endsWith(":fulfillmentFees")), "启用价格计划的履约费用不应漏查");
+  mysqlQuery("UPDATE rental_price_adjustment_plans SET status='cancelled' WHERE id='e2e_category_pending_price';");
+  assert.ok(!(await call("GET", path)).businessCompatibility.blockers.some((row) => row.id === "e2e_category_pending_price"), "已取消计划保留历史但不参与后续执行检查");
+  console.log("category-preparation-api: 会话空间与独立权限、候选资料隔离、修订冲突、经营依赖及待生效调价/履约收费检查通过");
 };

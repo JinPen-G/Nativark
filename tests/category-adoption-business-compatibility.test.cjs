@@ -9,6 +9,17 @@ const rule = { pricing: {}, overdue: { feeMode: "none" }, payment: { preauthoriz
 const input = { settings: null, locations: [], prices: [timed("historical", "2025-01-01", [{ unit: "shift" }]), timed("current", "2026-09-01", [{ unit: "hour" }])], rules: [] };
 assert.equal(check(target, input, now).valid, true, "历史价格保留原版本，不阻碍现有兼容组合");
 const future = { ...input, prices: [...input.prices, timed("future", "2026-12-01", [{ unit: "shift" }])] };
+const pending = { id: "pending-price", status: "pending", finalRates: [{ unit: "shift" }] };
+assert.ok(check(target, { ...input, adjustments: [pending] }, now).blockers.some((row) => row.id === pending.id));
+for (const finalRates of [null, {}, [], [null]]) assert.equal(check(target, { ...input, adjustments: [{ ...pending, finalRates }] }, now).valid, false);
+for (const status of ["draft", "cancelled", "applied", "failed"]) assert.equal(check(target, { ...input, adjustments: [{ ...pending, status }] }, now).valid, true);
+assert.equal(check(target, { ...input, adjustments: [{ ...pending, finalRates: [{ unit: "hour" }] }] }, now).valid, true);
+const feePlan = { id: "fees", status: "enabled", effectiveTo: null, fulfillmentFees: [{ mode: "onsite_delivery" }] };
+assert.ok(check(target, { ...input, pricingPlans: [feePlan] }, now).blockers.some((row) => row.id === "fees:fulfillmentFees"));
+for (const over of [{ status: "disabled" }, { effectiveTo: new Date("2025-01-01") }, { fulfillmentFees: null }, { fulfillmentFees: [] }, { fulfillmentFees: [{ mode: "store_pickup_return" }] }]) assert.equal(check(target, { ...input, pricingPlans: [{ ...feePlan, ...over }] }, now).valid, true);
+const feeBefore = structuredClone(feePlan);
+check(target, { ...input, pricingPlans: [feePlan] }, now);
+assert.deepEqual(feePlan, feeBefore, "兼容检查不替换费用定义");
 assert.deepEqual(check(target, future, now).blockers.map((row) => row.id), ["future"], "未来价格不能被当前兼容价格掩盖");
 assert.equal(check(target, { ...input, locations: [{ id: "retired", type: "project_site", status: "disabled" }] }, now).valid, true);
 assert.equal(check(target, { ...input, locations: [{ id: "active", type: "project_site", status: "enabled" }] }, now).valid, false);

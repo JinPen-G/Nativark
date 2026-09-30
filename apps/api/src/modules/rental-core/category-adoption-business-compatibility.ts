@@ -43,6 +43,8 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
   rules: CategoryTimedConfiguration<RentalRuleConfig>[];
   inspections?: Array<{ id: string; stage: string; enabled: boolean; fields: unknown }>;
   qualificationTypes?: Array<{ code: string; categoryCode: string; capabilityCode: string | null; status: string }>;
+  adjustments?: Array<{ id: string; status: string; finalRates: unknown }>;
+  pricingPlans?: Array<{ id: string; status: string; effectiveTo: Date | null; fulfillmentFees: unknown }>;
 }, now: Date) {
   const blockers: Array<{ domain: "settings" | "location" | "price" | "rule" | "inspection"; id: string; message: string }> = [];
   const add = (domain: typeof blockers[number]["domain"], id: string, message: string) => blockers.push({ domain, id, message });
@@ -60,6 +62,20 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
   const prices = categoryCurrentAndFuture(input.prices, now);
   for (const price of prices) {
     if (!Array.isArray(price.value) || price.value.some((rate) => !model.pricingUnits.includes(rate.unit))) add("price", price.id, "当前或未来价格版本包含目标品类不支持的计价单位，需通过价格发布机制处理");
+  }
+  // Confirmed adjustments are executable future prices, even before a version
+  // row exists. Drafts/cancelled/applied records are not future commitments.
+  for (const adjustment of input.adjustments ?? []) {
+    if (adjustment.status !== "pending") continue;
+    if (!Array.isArray(adjustment.finalRates) || adjustment.finalRates.length === 0 || adjustment.finalRates.some((rate) => !rate || typeof rate !== "object" || !model.pricingUnits.includes(rate.unit))) {
+      add("price", adjustment.id, "待生效调价的锁定费率缺失或包含目标品类不支持的计价单位，请先取消或处理调价计划");
+    }
+  }
+  for (const plan of input.pricingPlans ?? []) {
+    if (plan.status !== "enabled" || (plan.effectiveTo && plan.effectiveTo.getTime() <= now.getTime()) || plan.fulfillmentFees === null) continue;
+    if (!Array.isArray(plan.fulfillmentFees) || plan.fulfillmentFees.some((fee) => !fee || typeof fee !== "object" || !model.fulfillmentModes.includes(fee.mode))) {
+      add("price", `${plan.id}:fulfillmentFees`, "启用价格计划的履约收费方式不兼容目标品类，请通过定价配置调整");
+    }
   }
   const rules = categoryCurrentAndFuture(input.rules, now);
   const ruleCounts = new Map<number, number>();
@@ -95,5 +111,5 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
     }
   }
   return { valid: blockers.length === 0, blockers, checkedPriceVersionIds: prices.map((row) => row.id), checkedRuleVersionIds: rules.map((row) => row.id),
-    scope: "settings_locations_price_units_rule_pricing_preauthorization_qualification_inspection_structure", complete: false as const };
+    scope: "settings_locations_price_units_pending_adjustments_fulfillment_fees_rule_pricing_preauthorization_qualification_inspection_structure", complete: false as const };
 }
