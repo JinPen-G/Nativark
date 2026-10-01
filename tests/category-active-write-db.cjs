@@ -451,6 +451,11 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal(await readEntityFacts(), phaseBefore, "经营组合拒绝回滚实体、唯一声明、能力配置及配置审计");
     assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation, "经营组合拒绝保留准备输入");
     await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: compatibleRule } });
+    await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: { ...compatibleRule, overdue: { feeMode: "hourly_to_daily", hourlyRatePercent: 0, dailyAfterHours: 8 } } } });
+    await assert.rejects(applyPhase(), /逾时每小时日价比例/);
+    assert.equal(await readEntityFacts(), phaseBefore, "逾时参数无效必须回滚候选资料、配置审计和版本绑定");
+    assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation, "参数阻碍不得清空准备资料");
+    await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: compatibleRule } });
     await assert.rejects(applyPhase({}, (tx) => new Proxy(tx, { get(client, key) {
       if (key === "rentalPriceVersion") return new Proxy(client[key], { get(model, method) {
         if (method === "findMany") return async () => { throw new Error("business-compatibility-read-failure"); };

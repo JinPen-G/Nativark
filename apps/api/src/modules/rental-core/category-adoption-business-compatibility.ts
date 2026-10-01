@@ -1,5 +1,6 @@
 import type { RentalCategoryDefinition, RentalPricingRate, RentalRuleConfig, TenantRentalBusinessSettings } from "@rental-os/shared";
 import { categoryPricingRuleError } from "./category-pricing-rule-compatibility";
+import { categoryAdoptionRuleParameterErrors } from "./category-adoption-rule-parameters";
 
 export interface CategoryTimedConfiguration<T> { id: string; effectiveFrom: Date | null; sequence: number; value: T }
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -10,7 +11,7 @@ function readableRule(value: unknown): value is RentalRuleConfig {
   if (!object(value) || !object(value.payment) || !object(value.overdue)) return false;
   if (typeof value.overdue.feeMode !== "string" || !["none", "hourly", "next_period", "multiplier", "manual_review", "hourly_to_daily"].includes(value.overdue.feeMode)) return false;
   if (!optionalBoolean(value.payment.preauthorizationRequired)) return false;
-  for (const key of ["pricing", "preauthorization", "membershipSecurityReduction", "qualification", "fulfillment"]) {
+  for (const key of ["pricing", "deposit", "preauthorization", "membershipSecurityReduction", "qualification", "fulfillment", "cancellation", "damage"]) {
     if (value[key] !== undefined && !object(value[key])) return false;
   }
   if (object(value.pricing) && (!optionalBoolean(value.pricing.hourToDayEnabled) || (value.pricing.shiftStartHours !== undefined && (!Array.isArray(value.pricing.shiftStartHours) || value.pricing.shiftStartHours.some((hour) => typeof hour !== "number" || !Number.isFinite(hour)))))) return false;
@@ -140,6 +141,7 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
     }
     const error = categoryPricingRuleError(model.pricingUnits, rule.value);
     if (error) add("rule", rule.id, error);
+    for (const parameterError of categoryAdoptionRuleParameterErrors(rule.value)) add("rule", `${rule.id}:parameters`, parameterError);
     const payment = rule.value.payment;
     if (!model.supportsPreauthorization && (payment.preauthorizationRequired || payment.depositMode === "preauthorization" || (rule.value.preauthorization && rule.value.preauthorization.mode !== "none"))) add("rule", rule.id, "当前或未来规则启用预授权，但目标品类不支持");
     if (!model.supportsPreauthorization && rule.value.membershipSecurityReduction?.preauthorization?.enabled) add("rule", rule.id, "当前或未来规则启用会员预授权减免，但目标品类不支持");

@@ -61,7 +61,7 @@ target.businessModel.supportsPreauthorization = false;
 const settings = { pricing: { enabledUnits: ["hour", "day_24h"], defaultUnit: "day_24h", holidayPricingEnabled: true }, calendar: { holidayPricingEnabled: true }, fulfillment: { enabledModes: ["onsite_delivery"] } };
 const settingsResult = check(target, { ...input, settings }, now);
 assert.equal(settingsResult.blockers.filter((row) => row.domain === "settings").length, 4);
-const rules = [timed("old-rule", "2025-01-01", { ...rule, pricing: { hourToDayEnabled: true } }), timed("current-rule", "2026-09-01", rule), timed("scheduled-rule", "2027-01-01", { ...rule, pricing: { hourToDayEnabled: true }, preauthorization: { mode: "order_fixed" } })];
+const rules = [timed("old-rule", "2025-01-01", { ...rule, pricing: { hourToDayEnabled: true } }), timed("current-rule", "2026-09-01", rule), timed("scheduled-rule", "2027-01-01", { ...rule, pricing: { hourToDayEnabled: true, hourToDayThresholdHours: 8 }, preauthorization: { mode: "order_fixed", fixedAmount: 100 } })];
 const result = check(target, { ...input, rules }, now);
 assert.deepEqual(result.checkedRuleVersionIds, ["current-rule", "scheduled-rule"]);
 assert.equal(result.blockers.filter((row) => row.id === "scheduled-rule").length, 2);
@@ -71,7 +71,7 @@ assert.deepEqual(categoryCurrentAndFuture(ties, now).map((row) => row.id), ["new
 assert.equal(categoryCurrentAndFuture(ties.map((row) => ({ ...row, sequence: 0 })), now).length, 2, "歧义规则不能静默忽略");
 assert.equal(check(target, { ...input, rules: [timed("tie-a", "2026-09-01", rule), timed("tie-b", "2026-09-01", rule)] }, now).blockers.length, 2, "即使配置都兼容，也必须拒绝歧义生效组合");
 target.businessModel.supportsQualificationReview = false;
-const safetyRule = { ...rule, qualification: { required: true }, membershipSecurityReduction: { preauthorization: { enabled: true } }, fulfillment: { pickupInspectionRequired: true, returnInspectionRequired: true } };
+const safetyRule = { ...rule, qualification: { required: true }, membershipSecurityReduction: { preauthorization: { enabled: true, allowedRiskLevels: ["standard"], maxReductionPercent: 50, maxReductionAmount: 100 } }, fulfillment: { pickupInspectionRequired: true, returnInspectionRequired: true } };
 const field = { code: "condition", label: "成色", type: "boolean", required: true };
 const safetyInput = { ...input, rules: [timed("historical-safety", "2025-01-01", safetyRule), timed("current-safety", "2026-09-01", rule), timed("future-safety", "2027-01-01", safetyRule)], inspections: [{ id: "pickup", stage: "pickup", enabled: true, fields: [field] }, { id: "disabled-return", stage: "return", enabled: false, fields: [] }] };
 const safetyBefore = structuredClone(safetyInput);
