@@ -12,6 +12,7 @@ const { runWithRequestIdentity } = require("../apps/api/dist/common/request-iden
 const { validateActiveCategoryWrite } = require("../apps/api/dist/modules/rental-core/category-active-write.js");
 const { writePreparedCategoryEntities } = require("../apps/api/dist/modules/rental-core/category-adoption-entity-writer.js");
 const { writePreparedCategoryAdoptionPhase } = require("../apps/api/dist/modules/rental-core/category-adoption-transaction-phase.js");
+const { RentalServiceCapacityService } = require("../apps/api/dist/modules/rental-core/rental-service-capacity.service.js");
 if (!/^rental_os_e2e_/u.test(new URL(process.env.DATABASE_URL).pathname.slice(1))) throw new Error("仅允许专用 E2E 库");
 const db = new PrismaClient();
 const fixture = `catwrite_${randomUUID()}`;
@@ -251,6 +252,42 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal(await db.rentalBusinessCalendar.count({ where: { workspaceId, status: "published" } }), 1);
     await assert.rejects(context(() => business.upsertCalendar({ ...nextCalendar, revision: 3 }, 2, [{ ...calendarAudit, year: 2031 }])), /本次写入/);
     assert.equal(await db.rentalCalendarOverrideAuditEntry.count({ where: { workspaceId } }), 1);
+    // Capacity configuration shares adoption's space mutex even for new rows.
+    await db.rentalValueAddedService.update({ where: { id: service.id }, data: { requiresCapacity: true } });
+    const capacityService = new RentalServiceCapacityService(db);
+    const capacityInput = { serviceId: service.id, locationId: location.id, windowStart: "2098-01-01T00:00:00Z", windowEnd: "2098-01-01T03:00:00Z", totalCapacity: 5, status: "enabled" };
+    const capacityCompetition = await Promise.allSettled([
+      context(() => capacityService.saveCapacity("tenant_001", capacityInput)),
+      context(() => capacityService.saveCapacity("tenant_001", { ...capacityInput, windowStart: "2098-01-01T01:00:00Z", windowEnd: "2098-01-01T04:00:00Z" }))
+    ]);
+    assert.equal(capacityCompetition.filter((row) => row.status === "fulfilled").length, 1, "无现存行的重叠窗口竞争只允许一个成功");
+    assert.match(capacityCompetition.find((row) => row.status === "rejected").reason.message, /不能重叠/);
+    const savedCapacity = capacityCompetition.find((row) => row.status === "fulfilled").value;
+    let capacityLocked, releaseCapacity, editorAttempted;
+    const capacityReady = new Promise((resolve) => { capacityLocked = resolve; });
+    const capacityRelease = new Promise((resolve) => { releaseCapacity = resolve; });
+    const editorReady = new Promise((resolve) => { editorAttempted = resolve; });
+    const counterCommit = db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM rental_service_capacities WHERE id = ${savedCapacity.id} FOR UPDATE`;
+      await tx.rentalServiceCapacity.update({ where: { id: savedCapacity.id }, data: { reservedQuantity: 3 } });
+      capacityLocked(); await capacityRelease;
+    });
+    await capacityReady;
+    const waitingCapacityService = new RentalServiceCapacityService(new Proxy(db, { get(client, key) {
+      if (key === "$transaction") return (write, options) => client.$transaction((tx) => write(new Proxy(tx, { get(inner, method) {
+        if (method === "$queryRaw") return (sql) => { if (sql.sql.includes("rental_service_capacities")) editorAttempted(); return inner.$queryRaw(sql); };
+        return Reflect.get(inner, method);
+      } })), options);
+      return Reflect.get(client, key);
+    } }));
+    const waitingEdit = assert.rejects(context(() => waitingCapacityService.saveCapacity("tenant_001", {
+      ...capacityInput, id: savedCapacity.id, windowStart: savedCapacity.windowStart, windowEnd: savedCapacity.windowEnd, totalCapacity: 2
+    })), /已预留与已确认/);
+    await editorReady; releaseCapacity(); await counterCommit; await waitingEdit;
+    const capacityAfter = await db.rentalServiceCapacity.findUniqueOrThrow({ where: { id: savedCapacity.id } });
+    assert.equal(capacityAfter.totalCapacity, 5, "不能用旧预留计数降低总容量");
+    assert.equal(capacityAfter.reservedQuantity, 3, "拒绝编辑不丢失并发提交的预留计数");
+    await assert.rejects(context(() => capacityService.saveCapacity("tenant_002", capacityInput)), /不属于目标租户/);
     // Internal entity phase: no public adopt endpoint or complete compatibility claim.
     const targetDefinition = structuredClone(definition);
     targetDefinition.businessModel.assetFields = [
@@ -354,6 +391,7 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     console.log("category-active-write-db: 写入绑定、锁竞争、内部采用事务的资格/修订复核、实体/绑定/审计回滚及历史保留通过");
   } finally {
     await db.rentalCustomerCoupon.deleteMany({ where: { workspaceId } });
+    await db.rentalServiceCapacity.deleteMany({ where: { workspaceId } });
     await db.businessWorkspace.deleteMany({ where: { id: workspaceId } });
     await db.rentalCategoryVersionPolicy.deleteMany({ where: { versionId: writerTargetId } });
     await db.rentalCategoryVersion.deleteMany({ where: { id: { in: [versionId, writerTargetId] } } });

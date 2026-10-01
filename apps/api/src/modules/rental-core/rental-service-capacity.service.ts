@@ -10,6 +10,7 @@ import type {
 import { PrismaService } from "../database/prisma.service";
 import { serviceReservationKey } from "./rental-service-occurrence";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
+import { lockActiveCategoryBinding } from "./category-active-write";
 
 type Tx = Prisma.TransactionClient;
 
@@ -46,6 +47,16 @@ export class RentalServiceCapacityService {
     }
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
     return this.prisma.$transaction(async (tx) => {
+      // Same space mutex as category adoption and service/location configuration.
+      // Serializes overlapping-window creation, including when no row exists yet.
+      const { definition } = await lockActiveCategoryBinding(tx, tenantId, workspaceId);
+      if (input.id) {
+        // Reservation counters may change without the space mutex. Lock the row
+        // before reading them so a waiting editor never lowers capacity below
+        // a concurrently committed reservation. Scope prevents foreign row locks.
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM rental_service_capacities
+          WHERE tenantId = ${tenantId} AND workspaceId = ${workspaceId} AND id = ${input.id} FOR UPDATE`);
+      }
       const [service, location, existingById] = await Promise.all([
         tx.rentalValueAddedService.findFirst({ where: { id: input.serviceId, tenantId, workspaceId } }),
         tx.rentalFulfillmentLocation.findFirst({ where: { id: input.locationId, tenantId, workspaceId } }),
@@ -57,6 +68,10 @@ export class RentalServiceCapacityService {
       if (!service) throw new NotFoundException("增值服务不存在");
       if (!service.requiresCapacity) throw new ConflictException("该服务未声明需要容量，不能维护容量窗口");
       if (!location) throw new NotFoundException("服务地点不存在");
+      if (input.status === "enabled" && end.getTime() > Date.now() &&
+          !definition.businessModel.locationTypes.includes(location.type as typeof definition.businessModel.locationTypes[number])) {
+        throw new ConflictException("当前品类不支持该服务容量的地点类型，请调整地点或停用容量窗口");
+      }
       if (existingById && !existing) throw new ConflictException("服务容量窗口已属于其他租户或经营空间，拒绝覆盖");
       if (input.id && !existing) throw new NotFoundException("服务容量窗口不存在");
       if (existing && input.totalCapacity < existing.reservedQuantity + existing.usedQuantity) {
@@ -113,7 +128,7 @@ export class RentalServiceCapacityService {
         }
       });
       return this.toCapacity(row);
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   /** 报价只校验，不增量写容量。过期软预留先惰性释放，避免假性不足。 */
