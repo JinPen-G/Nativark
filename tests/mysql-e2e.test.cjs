@@ -5859,23 +5859,31 @@ async function main() {
   assert.equal(writeThrough.status, 201, `写穿校验券创建失败: ${JSON.stringify(writeThrough.body)}`);
   // 未经任何重启或回填，该行必须已在库中。
   assert.equal(
-    readCount(`SELECT COUNT(*) FROM \`rental_coupon_templates\` WHERE \`code\`='${writeThroughCode}' AND \`tenantId\`='tenant_001';`),
+    readCount(`SELECT COUNT(*) FROM \`rental_coupon_templates\` WHERE \`code\`='${writeThroughCode}' AND \`tenantId\`='tenant_001' AND \`workspaceId\`='${demoForWriteThrough.currentWorkspaceId}';`),
     1,
     "配置写方法必须同步写穿到数据库，且带正确租户戳"
   );
 
-  // 初始化落库：每个有品类档案的租户，主体、地点和业务设置都不能缺。
+  // 正式空间不能自动注入演示主体/地点。只核对确实完成配置的空间，
+  // 同时反向验证尚未配置的车辆B仍为空，不能用其他空间的行掩盖缺项。
   const profiledTenants = readCount("SELECT COUNT(*) FROM `tenant_rental_profiles`;");
   assert.ok(profiledTenants >= 3, `品类档案数异常: ${profiledTenants}`);
+  const configuredSpaces = [demoForWriteThrough, demo2, vehicleA, construction, futurePricingTenant];
   for (const [table, label] of [
     ["rental_fulfillment_operators", "经营主体"],
     ["rental_fulfillment_locations", "履约地点"],
     ["rental_tenant_business_settings", "业务设置"]
   ]) {
-    const orphans = readCount(
-      `SELECT COUNT(*) FROM \`tenant_rental_profiles\` p WHERE NOT EXISTS (SELECT 1 FROM \`${table}\` t WHERE t.\`tenantId\`=p.\`tenantId\`);`
-    );
-    assert.equal(orphans, 0, `有 ${orphans} 个租户缺少${label}落库记录`);
+    for (const session of configuredSpaces) {
+      const tenantId = session.tenant.tenantId, workspaceId = session.currentWorkspaceId;
+      assert.match(tenantId, /^[A-Za-z0-9_-]+$/u); assert.match(workspaceId, /^[A-Za-z0-9_-]+$/u);
+      assert.ok(readCount(`SELECT COUNT(*) FROM \`${table}\` WHERE \`tenantId\`='${tenantId}' AND \`workspaceId\`='${workspaceId}';`) > 0,
+        `已配置空间 ${workspaceId} 缺少${label}落库记录`);
+    }
+  }
+  for (const table of ["rental_fulfillment_operators", "rental_fulfillment_locations", "rental_item_groups", "rental_assets"]) {
+    assert.equal(readCount(`SELECT COUNT(*) FROM \`${table}\` WHERE \`tenantId\`='${vehicleB.tenant.tenantId}' AND \`workspaceId\`='${vehicleB.currentWorkspaceId}';`), 0,
+      `未配置空间不得注入演示事实 ${table}`);
   }
   // 套装组成是独立表，验证 upsertItemGroup 的整组替换确实写入了组件行。
   assert.ok(
@@ -5936,7 +5944,7 @@ async function main() {
   );
   assert.equal(importedCalendar.status, 201, `应用官方来源失败: ${JSON.stringify(importedCalendar.body)}`);
   assert.equal(
-    readCount(`SELECT COUNT(*) FROM \`rental_business_calendars\` WHERE \`tenantId\`='tenant_001' AND \`year\`=${calendarYear} AND \`status\`='draft';`),
+    readCount(`SELECT COUNT(*) FROM \`rental_business_calendars\` WHERE \`tenantId\`='tenant_001' AND \`workspaceId\`='${demoForWriteThrough.currentWorkspaceId}' AND \`year\`=${calendarYear} AND \`status\`='draft';`),
     1,
     "应用来源后的日历必须以 draft 落库"
   );
@@ -5948,7 +5956,7 @@ async function main() {
   );
   assert.equal(publishedCalendar.status, 201, `日历发布失败: ${JSON.stringify(publishedCalendar.body)}`);
   assert.equal(
-    readCount(`SELECT COUNT(*) FROM \`rental_business_calendars\` WHERE \`tenantId\`='tenant_001' AND \`year\`=${calendarYear} AND \`status\`='published' AND \`sourceName\` IS NOT NULL AND JSON_LENGTH(\`days\`)>0;`),
+    readCount(`SELECT COUNT(*) FROM \`rental_business_calendars\` WHERE \`tenantId\`='tenant_001' AND \`workspaceId\`='${demoForWriteThrough.currentWorkspaceId}' AND \`year\`=${calendarYear} AND \`status\`='published' AND \`sourceName\` IS NOT NULL AND JSON_LENGTH(\`days\`)>0;`),
     1,
     "发布后的日历必须在库中为 published，且来源与按日明细都在"
   );
@@ -5960,6 +5968,7 @@ async function main() {
   );
 
   ok(`配置写穿已验证：核心与业务配置均落库（新建券模板未经重启即在库、定价/优惠/服务/规则/模板无租户遗漏、日历已发布、rates 明细非空），共 ${profiledTenants} 个租户`);
+  await maybeStopAfter("19");
 
   console.log("== 20. RC-01 业务事实以库为事实源 ==");
   // 与配置同理：API 读业务事实走服务内存副本，写穿失效时前面的 HTTP 断言仍会全绿，
