@@ -5,6 +5,7 @@ export interface CategoryPreparationEntity { id: string; updatedAt: string; attr
 export interface CategoryPreparationPreview {
   sourceVersionId: string; sourceRevision: number; targetVersionId: string; targetVersionLabel: string;
   targetDefinition: RentalCategoryDefinition; differences: CategoryDefinitionDifference[];
+  registeredCapabilityVersions?: string[];
   preparation: { revision: number; patches: { operation?: CategoryPreparationOperation; reason?: string; items?: CategoryEntityPreparationPatch[]; capabilityPatches?: CategoryCapabilityPreparationPatch[] } } | null;
   validation: { valid: boolean; errors: string[] }; stale: boolean; adoptionImplemented: boolean;
   businessCompatibility: { valid: boolean; complete: boolean; blockers: Array<{ domain: string; id: string; message: string }> };

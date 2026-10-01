@@ -216,5 +216,27 @@ module.exports = async ({ request, platformToken, tenantToken, mysqlQuery }) => 
   mysqlQuery("UPDATE workspace_capability_instances SET revision=revision-1 WHERE tenantId='tenant_001' AND workspaceId='ws_tenant_001' AND code='camera_compatibility';");
   assert.equal(mysqlQuery(capabilityFactsQuery), liveFacts);
   }
-  console.log("category-preparation-api: 经营兼容、空间关联、异常结构、空时间轴及能力配置独立准备/陈旧来源保留通过");
+  const requiredDraft = await call("POST", `${platform}/camera/drafts`, { sourceVersionId: source.id, versionLabel: "e2e-new-required-capability", reason: "新增必选能力显式准备" }, platformToken, 201);
+  const requiredSaved = await call("PATCH", `${platform}/camera/versions/${requiredDraft.id}/sections/capabilities`, {
+    expectedRevision: 0, values: { defaultCapabilities: source.definition.defaultCapabilities.filter((code) => implemented.has(code)), requiredCapabilities: [...new Set([...source.definition.requiredCapabilities, "camera_kit_handover"])] }, reason: "仅当前真实执行器"
+  }, platformToken);
+  await call("POST", `${platform}/camera/versions/${requiredDraft.id}/publish`, { expectedRevision: requiredSaved.revision, idempotencyKey: "e2e-new-required-publish", reason: "必选能力准备验证" }, platformToken, 201);
+  await call("PUT", `${platform}/camera/versions/${requiredDraft.id}/adoption-policy`, { expectedRevision: 0, createScope: "none", createTenantIds: [], upgradeScope: "all", upgradeTenantIds: [], restoreScope: "none", restoreTenantIds: [], reason: "只开放准备验证" }, platformToken);
+  const requiredPath = `/api/rental/v1/category-adoption/${requiredDraft.id}/preparation`;
+  const requiredPreview = await call("GET", requiredPath);
+  assert.ok(requiredPreview.registeredCapabilityVersions.includes("camera_kit_handover@cam-kit-1.0"));
+  assert.ok(!requiredPreview.entities.capabilities.some((row) => row.code === "camera_kit_handover"));
+  const requiredFactsQuery = "SELECT code,status,revision,implementationVersion,configVersion,CAST(config AS CHAR) FROM workspace_capability_instances WHERE tenantId='tenant_001' AND workspaceId='ws_tenant_001' ORDER BY code; SELECT COUNT(*) FROM workspace_capability_audits WHERE tenantId='tenant_001' AND workspaceId='ws_tenant_001'; SELECT categoryVersionId,categoryAdoptionRevision FROM business_workspaces WHERE id='ws_tenant_001';";
+  const requiredFacts = mysqlQuery(requiredFactsQuery);
+  const requiredBody = { expectedSourceVersionId: requiredPreview.sourceVersionId, expectedSourceRevision: requiredPreview.sourceRevision, expectedPreparationRevision: 0, operation: "upgrade", reason: "明确准备，不提前启用", patches: [], capabilityPatches: [{ intent: "enable_new", code: "camera_kit_handover", expectedRevision: 0, expectedImplementationVersion: "cam-kit-1.0", config: {} }] };
+  await call("PUT", requiredPath, { ...requiredBody, capabilityPatches: [{ ...requiredBody.capabilityPatches[0], expectedRevision: 1 }] }, tenantToken, 409);
+  const requiredResult = await call("PUT", requiredPath, requiredBody);
+  assert.equal(requiredResult.preparedOnly, true);
+  assert.equal(requiredResult.adoptionImplemented, false);
+  const requiredReadback = await call("GET", requiredPath);
+  assert.deepEqual(requiredReadback.preparation.patches.capabilityPatches, requiredBody.capabilityPatches);
+  assert.equal(requiredReadback.validation.valid, true);
+  assert.ok(!requiredReadback.businessCompatibility.blockers.some((row) => row.domain === "capability" && row.id === "camera_kit_handover"));
+  assert.equal(mysqlQuery(requiredFactsQuery), requiredFacts, "准备保存/预览均不能提前创建能力或改变绑定/审计");
+  console.log("category-preparation-api: 经营兼容、空间关联、独立准备、新增必选能力显式读回及无提前生效通过");
 };

@@ -90,10 +90,11 @@ function CategoryPreparationDialog({ workspaceId }: { workspaceId: string }) {
             {!preview.data.businessCompatibility.valid && <Alert type="warning" showIcon title={t("经营配置尚不兼容目标版本")} description={preview.data.businessCompatibility.blockers.map((row) => `${row.id}: ${row.message}`).join("；")} />}
             <Tabs className="standalone-tabs" activeKey={tab} items={[{ key: "item_group", label: t("型号资料") }, { key: "asset", label: t("资产资料") }, { key: "capabilities", label: t("能力配置") }]} onChange={(key) => { setTab(key); if (key !== "capabilities") setScope(key as typeof scope); setEntityId(undefined); }} />
             {tab === "capabilities" ? <>
-              <Typography.Text type="secondary">{t("仅准备既有启用能力的配置，不启用新能力或更换执行实现。")}</Typography.Text>
+              <Typography.Text type="secondary">{t("准备配置不会改变当前营业；新增必选能力须明确选择准备启用，仅在采用成功时生效。")}</Typography.Text>
               {preparationCapabilityDefinitions(preview.data).map((definition) => {
                 const draft = capabilityDrafts[definition.code];
-                const current = preview.data!.entities.capabilities!.find((row) => row.code === definition.code)!;
+                const current = preview.data!.entities.capabilities?.find((row) => row.code === definition.code);
+                const newCapability = draft?.intent === "enable_new";
                 const changeConfig = (key: string, value: string | number | boolean | undefined) => {
                   if (!draft) return;
                   setCapabilityDrafts((previous) => ({ ...previous, [definition.code]: { ...draft, fields: { ...draft.fields, [key]: value ?? "" } } }));
@@ -101,7 +102,11 @@ function CategoryPreparationDialog({ workspaceId }: { workspaceId: string }) {
                 };
                 return <Space key={definition.code} orientation="vertical" style={{ width: "100%" }}>
                   <Typography.Text strong>{t(definition.label)} · {draft?.expectedImplementationVersion} · r{draft?.expectedRevision}</Typography.Text>
-                  {draft && (draft.expectedRevision !== current.revision || draft.expectedImplementationVersion !== current.implementationVersion) && <Alert type="warning" showIcon title={t("来源或准备修订已变化，输入已保留，请重新核对")} />}
+                  {draft && current && (newCapability || draft.expectedRevision !== current.revision || draft.expectedImplementationVersion !== current.implementationVersion) && <Alert type="warning" showIcon title={t("来源或准备修订已变化，输入已保留，请重新核对")} />}
+                  {newCapability && <Button disabled={loading} onClick={() => {
+                    setCapabilityDrafts((previous) => ({ ...previous, [definition.code]: { ...draft, selected: !draft.selected } })); setDirty(true);
+                  }}>{t(draft.selected ? "取消准备启用" : "准备启用新增必选能力")}</Button>}
+                  {newCapability && <Typography.Text type="secondary">{t(draft.selected ? "已选择准备启用，保存不立即启用" : "尚未选择准备启用")}</Typography.Text>}
                   {definition.configSchema.map((field) => {
                     const value = draft?.fields[field.key]; const label = `${t(field.label)}${field.required ? " *" : ""}`;
                     return <Space key={field.key} orientation="vertical" style={{ width: "100%" }}>
@@ -114,10 +119,10 @@ function CategoryPreparationDialog({ workspaceId }: { workspaceId: string }) {
                       {field.description && <Typography.Text type="secondary">{t(field.description)}</Typography.Text>}
                     </Space>;
                   })}
-                  <Button disabled={loading} onClick={() => modal.confirm({ title: t("放弃未保存的预备资料？"), onOk: () => {
+                  {current && <Button disabled={loading} onClick={() => modal.confirm({ title: t("放弃未保存的预备资料？"), onOk: () => {
                     const fresh = initialCapabilityDrafts({ ...preview.data!, preparation: null }, operation)[definition.code];
                     setCapabilityDrafts((previous) => ({ ...previous, [definition.code]: fresh })); setDirty(true);
-                  } })}>{t("使用当前活动配置重新准备")}</Button>
+                  } })}>{t("使用当前活动配置重新准备")}</Button>}
                 </Space>;
               })}
               {!preparationCapabilityDefinitions(preview.data).length && <Typography.Text type="secondary">{t("暂无需要准备的资料")}</Typography.Text>}

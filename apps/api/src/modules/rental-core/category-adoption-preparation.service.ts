@@ -104,6 +104,7 @@ export class CategoryAdoptionPreparationService {
       };
       return { sourceVersionId: context.workspace.categoryVersionId, sourceRevision: context.workspace.categoryAdoptionRevision,
         targetVersionId: targetId, targetVersionLabel: context.target.versionLabel, targetDefinition: context.definition,
+        registeredCapabilityVersions: this.hooks.registeredVersions().filter((key) => context.definition.requiredCapabilities.includes(key.split("@")[0] as RentalCapability)),
         differences: categoryDefinitionDifferences(context.sourceDefinition, context.definition),
         preparation: context.preparation ? { id: context.preparation.id, revision: context.preparation.revision, sourceRevision: context.preparation.sourceRevision, patches: context.preparation.patches } : null,
         validation, validationScope: "entity_attributes_inventory_uniqueness", businessCompatibility, commercialContext, stale, previewOnly: true, adoptionImplemented: false,
