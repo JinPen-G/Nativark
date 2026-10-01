@@ -2590,33 +2590,30 @@ async function main() {
   assert.equal(shortRent.rentalAmount, 100, `1 小时仍占用 1 个自然日，应为 100：实际 ${shortRent.rentalAmount}`);
   // 8) 有效期必须参与判定。早前只看 status，`effectiveFrom`/`effectiveTo` 存了却从不判断：
   //    过期计划照样给新报价定价，未生效计划也会被提前使用，两者都直接算错钱。
+  const expiredPlanInput = {
+    code: "E2E-PRICE-EXPIRED",
+    name: "E2E 已过期价格",
+    changeReason: "PRICE-01 既有过期计划验收",
+    effectiveFrom: new Date(Date.now() - 30 * 86400000).toISOString(),
+    effectiveTo: new Date(Date.now() - 3 * 86400000).toISOString(),
+    rates: [{ itemGroupId: priceGroupId, unit: "calendar_day", baseAmount: 999,
+      weekendMultiplier: 1, holidayMultiplier: 1, depositAmount: 500, minimumUnits: 1 }]
+  };
+  const expiredBackfill = await request("POST", "/api/rental/v1/pricing-plans",
+    { ...expiredPlanInput, status: "enabled" }, construction.accessToken);
+  assert.equal(expiredBackfill.status, 409, "不得经普通接口倒插已启用的历史价格版本");
+  assert.equal(readCount("SELECT COUNT(*) FROM `rental_pricing_plans` WHERE `code`='E2E-PRICE-EXPIRED';"), 0,
+    "拒绝倒插不能遗留价格计划");
+  // 在一次性专用库构造既有历史事实，验证过期过滤；不是生产写入路径或倒插发布成功。
   const expiredPlan = await request(
     "POST",
     "/api/rental/v1/pricing-plans",
-    {
-      code: "E2E-PRICE-EXPIRED",
-      name: "E2E 已过期价格",
-      changeReason: "PRICE-01 有效期验收",
-      status: "enabled",
-      effectiveFrom: new Date(Date.now() - 30 * 86400000).toISOString(),
-      // 结束时间必须**严格早于**上面 E2E-PRICE-TIER 的生效时间（now-1d）：两者若首尾相接到
-      // 同一毫秒级别就会被「同商品同单位不得重叠」判为重叠。过期留档计划本就该在现行计划开始前结束。
-      effectiveTo: new Date(Date.now() - 3 * 86400000).toISOString(),
-      rates: [
-        {
-          itemGroupId: priceGroupId,
-          unit: "calendar_day",
-          baseAmount: 999,
-          weekendMultiplier: 1,
-          holidayMultiplier: 1,
-          depositAmount: 500,
-          minimumUnits: 1
-        }
-      ]
-    },
+    { ...expiredPlanInput, status: "draft" },
     construction.accessToken
   );
-  assert.equal(expiredPlan.status, 201, `过期计划应允许保存（历史留档）: ${JSON.stringify(expiredPlan.body).slice(0, 200)}`);
+  assert.equal(expiredPlan.status, 201, `过期计划草稿夹具创建失败: ${JSON.stringify(expiredPlan.body).slice(0, 200)}`);
+  assert.match(expiredPlan.body.data.id, /^[A-Za-z0-9_-]+$/u, "历史夹具标识必须可安全用于专用库查询");
+  mysqlQuery(`UPDATE \`rental_pricing_plans\` SET \`status\`='enabled' WHERE \`id\`='${expiredPlan.body.data.id}';`);
   const expiredQuote = await request(
     "POST",
     "/api/rental/v1/quotes",
