@@ -174,6 +174,12 @@ export class RentalServiceCapacityService {
           id: capacity.id,
           tenantId,
           workspaceId,
+          // An editor may move an unused window after findCapacity. The same
+          // row ID is not proof that it still covers this service occurrence.
+          serviceId: capacity.serviceId,
+          locationId: capacity.locationId,
+          windowStart: capacity.windowStart,
+          windowEnd: capacity.windowEnd,
           status: "enabled",
           totalCapacity: { gte: capacity.reservedQuantity + capacity.usedQuantity + snapshot.capacityQuantity },
           reservedQuantity: capacity.reservedQuantity,

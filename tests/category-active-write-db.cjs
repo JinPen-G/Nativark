@@ -288,6 +288,32 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal(capacityAfter.totalCapacity, 5, "不能用旧预留计数降低总容量");
     assert.equal(capacityAfter.reservedQuantity, 3, "拒绝编辑不丢失并发提交的预留计数");
     await assert.rejects(context(() => capacityService.saveCapacity("tenant_002", capacityInput)), /不属于目标租户/);
+    // Read a usable window, then move it through the real editor before the
+    // conditional reservation write. No order FK is reached on this rejection.
+    await db.rentalServiceCapacity.update({ where: { id: savedCapacity.id }, data: { reservedQuantity: 0 } });
+    let staleCapacityRead, resumeCapacityReservation;
+    const staleCapacityReady = new Promise((resolve) => { staleCapacityRead = resolve; });
+    const capacityReservationRelease = new Promise((resolve) => { resumeCapacityReservation = resolve; });
+    const staleCapacityReservation = assert.rejects(context(() => db.$transaction((tx) => capacityService.reserveForOrder("tenant_001", {
+      id: `${fixture}_not_persisted_order`, reservations: [], serviceSnapshots: [{ serviceId: service.id, serviceName: service.name,
+        requiresCapacity: true, capacityQuantity: 1, serviceLocationId: location.id,
+        scheduledStartAt: new Date(Date.parse(savedCapacity.windowStart) + 900000).toISOString(),
+        scheduledEndAt: new Date(Date.parse(savedCapacity.windowStart) + 1800000).toISOString() }]
+    }, `${fixture}_stale_capacity`, new Proxy(tx, { get(client, key) {
+      if (key === "rentalServiceCapacity") return new Proxy(client[key], { get(model, method) {
+        if (method === "findFirst") return async (args) => { const row = await model.findFirst(args); assert.equal(row.id, savedCapacity.id); staleCapacityRead(); await capacityReservationRelease; return row; };
+        return Reflect.get(model, method);
+      } });
+      return Reflect.get(client, key);
+    } })), { isolationLevel: "ReadCommitted", timeout: 10000 })), /容量已被其他订单占用/);
+    await staleCapacityReady;
+    const movedCapacity = await context(() => capacityService.saveCapacity("tenant_001", {
+      ...capacityInput, id: savedCapacity.id, windowStart: "2099-01-01T00:00:00Z", windowEnd: "2099-01-01T03:00:00Z"
+    }));
+    resumeCapacityReservation(); await staleCapacityReservation;
+    assert.equal((await db.rentalServiceCapacity.findUniqueOrThrow({ where: { id: savedCapacity.id } })).reservedQuantity, 0, "窗口改期后陈旧预留不能扣容量");
+    assert.equal(await db.rentalServiceReservation.count({ where: { workspaceId } }), 0, "陈旧预留不可登记流水");
+    assert.equal(movedCapacity.windowStart, "2099-01-01T00:00:00.000Z");
     // Internal entity phase: no public adopt endpoint or complete compatibility claim.
     const targetDefinition = structuredClone(definition);
     targetDefinition.businessModel.assetFields = [
