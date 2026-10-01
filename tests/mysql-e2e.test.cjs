@@ -455,7 +455,7 @@ async function verifyFourCategoryRenewals(session, customerId) {
       const reason = `四品类续租 ${workspace.categoryCode}/${pricingMode}`;
       const draft = await request("POST", "/api/rental/v1/rule-versions", {
         changeReason: reason, config: { ...currentRule.config,
-          fulfillment: { ...currentRule.config.fulfillment, pickupBufferMinutes: 0, returnBufferMinutes: 60 },
+          fulfillment: { ...currentRule.config.fulfillment, pickupBufferMinutes: 30, returnBufferMinutes: 60 },
           extension: { enabled: true, forceImmediateWhenOverdue: true, ...currentRule.config.extension, pricingMode } }
       }, token);
       assert.equal(draft.status, 201, `${reason}: ${JSON.stringify(draft.body).slice(0, 250)}`);
@@ -489,15 +489,25 @@ async function verifyFourCategoryRenewals(session, customerId) {
         return response.body.data;
       };
       assert.equal((await inspect("pickup")).order.status, "renting");
-      const makeBufferBlocker = async (phase) => {
+      const makeBufferBlocker = async (phase, startOffsetMinutes = 30) => {
         const capacity = group.inventoryMode === "serialized"
           ? (await get("assets")).filter((row) => row.itemGroupId === group.id && row.locationId === location.id && ["available", "reserved", "rented"].includes(row.status)).length
           : (await get("stock-balances")).filter((row) => row.itemGroupId === group.id && row.locationId === location.id).reduce((sum, row) => sum + row.onHandQuantity - row.maintenanceQuantity, 0);
         assert.ok(capacity > 0);
-        const nextStart = new Date(Date.parse(newEndAt) + 30 * 60000).toISOString();
+        const nextStart = new Date(Date.parse(newEndAt) + startOffsetMinutes * 60000).toISOString();
         const nextInput = { ...input, startAt: nextStart, endAt: new Date(Date.parse(nextStart) + 86400000).toISOString(), lines: [{ itemGroupId: group.id, quantity: capacity }] };
         const nextQuote = await request("POST", "/api/rental/v1/quotes", nextInput, token);
         assert.equal(nextQuote.status, 201, `${reason}/${phase}后单报价: ${JSON.stringify(nextQuote.body).slice(0, 250)}`);
+        assert.equal(nextQuote.body.data.ruleSnapshot.fulfillment.pickupBufferMinutes, 30);
+        assert.equal(frozenQuote.ruleSnapshot.fulfillment.returnBufferMinutes, 60);
+        const nextBufferedStart = Date.parse(nextStart) - 30 * 60000;
+        const extendedBufferedEnd = Date.parse(newEndAt) + 60 * 60000;
+        if (phase === "touching") {
+          assert.equal(nextBufferedStart, extendedBufferedEnd, "半开区间的缓冲端点必须精确相接");
+        } else {
+          assert.ok(nextBufferedStart < extendedBufferedEnd, "负例必须存在真实缓冲重叠");
+          if (phase === "payment") assert.ok(Date.parse(nextStart) > extendedBufferedEnd, "补款负例只有后单领取缓冲造成冲突");
+        }
         const nextOrder = await request("POST", "/api/rental/v1/orders", { ...nextInput, quoteId: nextQuote.body.data.id, customerName: "缓冲冲突验收会员" }, token);
         assert.equal(nextOrder.status, 201);
         const nextId = nextOrder.body.data.id;
@@ -582,17 +592,21 @@ async function verifyFourCategoryRenewals(session, customerId) {
           idempotencyKey: `${prefix}:${instrument}:extension`, reason: "四品类隔离测试模拟补款，非外部支付" }, token);
         assert.equal(funded.status, 201);
       }
-      const releasePaymentBlocker = await makeBufferBlocker("payment");
+      const releasePaymentBlocker = await makeBufferBlocker("payment", 75);
       const blockedPayment = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/${extension.id}/pay`, {}, token);
       assert.equal(blockedPayment.status, 409, `${reason}补款后出现缓冲冲突仍不得生效`);
       assert.match(blockedPayment.body.message, /缓冲/u);
       assert.equal((await get(`orders/${orderId}`)).effectiveEndAt ?? endAt, endAt);
       assert.equal(readCount(`SELECT COUNT(*) FROM \`rental_order_extensions\` WHERE ${extensionWhere} AND \`status\`='pending_payment';`), 1);
       await releasePaymentBlocker();
+      const releaseTouchingBlocker = await makeBufferBlocker("touching", 90);
+      const touchingPreview = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/preview`, { newEndAt }, token);
+      assert.equal(touchingPreview.status, 201, `${reason}缓冲端点相接允许试算`);
       const paid = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/${extension.id}/pay`, {}, token);
       assert.equal(paid.status, 201, `${reason}生效: ${JSON.stringify(paid.body).slice(0, 300)}`);
       assert.equal(paid.body.data.order.effectiveEndAt, newEndAt); assert.equal(paid.body.data.extension.status, "effective");
       assert.deepEqual(paid.body.data.extension.executionBasis, basis);
+      await releaseTouchingBlocker();
       const replay = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/${extension.id}/pay`, {}, token);
       assert.equal(replay.status, 201);
       assert.deepEqual(replay.body.data.extension, paid.body.data.extension, `${reason}重复生效不得重写续租事实`);
