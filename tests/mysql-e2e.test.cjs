@@ -5720,8 +5720,19 @@ async function main() {
   await maybeStopAfter("15v");
 
   console.log("== 16. 双租户并发隔离 ==");
-
-
+  // 以前用编码前缀判断归属，会将本轮合法新增的分时商品误报为串租户。
+  // 用登录所选空间的真实落库ID集合对账，同时核对返回租户戳和HTTP状态。
+  const isolationScopes = {
+    demo: { tenantId: "tenant_001", workspaceId: demo.currentWorkspaceId },
+    demo2: { tenantId: "tenant_002", workspaceId: demo2.currentWorkspaceId },
+    vehicleA: { tenantId: tenantAId, workspaceId: vehicleA.currentWorkspaceId }
+  };
+  for (const scope of Object.values(isolationScopes)) {
+    assert.ok(scope.workspaceId, "并发隔离必须以真实登录空间为基准");
+    scope.expectedIds = readRows(`SELECT \`id\` FROM \`rental_item_groups\` WHERE \`tenantId\`='${scope.tenantId}' AND \`workspaceId\`='${scope.workspaceId}';`)
+      .map((row) => row.id).sort();
+    assert.ok(scope.expectedIds.length > 0, "隔离基准不能是空集合");
+  }
   const rounds = 12;
   const concurrent = [];
   for (let i = 0; i < rounds; i += 1) {
@@ -5731,13 +5742,10 @@ async function main() {
   }
   const settled = await Promise.all(concurrent);
   for (const item of settled) {
-    if (item.tenant === "demo") {
-      assert.ok(item.res.body.data.every((group) => group.code.startsWith("CAM-") || group.code.startsWith("E2E-CAT03-")), "并发中 demo 数据串线");
-    } else if (item.tenant === "demo2") {
-      assert.ok(item.res.body.data.every((group) => group.code.startsWith("CAMP-")), "并发中 demo2 数据串线");
-    } else {
-      assert.ok(item.res.body.data.every((group) => group.code.startsWith("E2E-TRUCK")), "并发中车辆租户数据串线");
-    }
+    const scope = isolationScopes[item.tenant];
+    assert.equal(item.res.status, 200, `${item.tenant}: 并发读取失败`);
+    assert.ok(item.res.body.data.every((group) => group.tenantId === scope.tenantId), `${item.tenant}: 并发中租户戳串线`);
+    assert.deepEqual(item.res.body.data.map((group) => group.id).sort(), scope.expectedIds, `${item.tenant}: 返回数据不等于当前空间落库集合`);
   }
   ok(`${settled.length} 个并发请求全部命中本租户数据`);
 
@@ -5815,6 +5823,7 @@ async function main() {
   assert.equal(restoredOrders.length, orderRows, "重启后订单列表必须与表中行数一致");
   assert.ok(restoredOrders.some((row) => row.status === "completed"), "已完成订单必须从表中恢复");
   ok(`核心事实以库为事实源：${orderRows} 单/${lineRows} 行落表，资产状态与金额在库，重启后从表恢复且不重复`);
+  await maybeStopAfter("18");
 
   console.log("== 19. RC-01 配置写穿：API 写入必须真正落库 ==");
   // 这一节不可省：API 读配置走的是服务内存写穿缓存，因此即使写穿完全没生效，
