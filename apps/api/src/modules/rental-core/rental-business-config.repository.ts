@@ -716,14 +716,19 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
 
   async upsertNotificationTemplate(template: RentalNotificationTemplateV1): Promise<void> {
     const data = this.notificationTemplateData(template);
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, template.tenantId);
-    const existing = await this.prisma.rentalNotificationTemplate.findUnique({ where: { id: template.id }, select: { tenantId: true, workspaceId: true } });
-    assertScopedWrite(existing, template.tenantId, workspaceId, "通知模板");
-    await this.prisma.rentalNotificationTemplate.upsert({
-      where: { id: template.id },
-      create: { workspaceId, id: template.id, ...data },
-      update: data
-    });
+    await this.prisma.$transaction(async (tx) => {
+      const workspaceId = await resolveScopeWorkspaceId(tx, template.tenantId);
+      // MySQL 的 Prisma upsert 可能拆成读取和创建；并发首次补落默认配置
+      // 不能同时观察到“模板不存在”。与品类采用共用空间锁，并在锁后检查范围。
+      await lockActiveCategoryBinding(tx, template.tenantId, workspaceId);
+      const existing = await tx.rentalNotificationTemplate.findUnique({ where: { id: template.id }, select: { tenantId: true, workspaceId: true } });
+      assertScopedWrite(existing, template.tenantId, workspaceId, "通知模板");
+      await tx.rentalNotificationTemplate.upsert({
+        where: { id: template.id },
+        create: { workspaceId, id: template.id, ...data },
+        update: data
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   async replaceNotificationTemplateVersion(

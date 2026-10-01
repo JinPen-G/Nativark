@@ -37,6 +37,14 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     ];
     await db.rentalCategoryVersion.create({ data: { id: versionId, categoryCode: "CAMERA", versionLabel: fixture, sourceKind: "test", status: "published", structureVersion: 1, definition } });
     await db.businessWorkspace.create({ data: { id: workspaceId, tenantId: "tenant_001", code: fixture, name: "并发写入专用空间", categoryCode: "CAMERA", categoryVersionId: baseline.recommendedVersionId, defaultMarker: fixture } });
+    const notification = { id: `${fixture}_notification`, tenantId: "tenant_001", eventCode: "order_confirmed", channel: "sms", name: "并发初始化模板", title: "订单通知", body: "订单已确认", variableSchema: {}, status: "enabled", version: "1.0", updatedAt: new Date().toISOString() };
+    // 两个独立仓储实例共同首次写入：依赖数据库空间锁，而不是进程内 Promise。
+    const notificationWriters = [business, new RentalBusinessConfigRepository(db)];
+    await Promise.all(Array.from({ length: 8 }, (_, index) => context(() => notificationWriters[index % 2].upsertNotificationTemplate(notification))));
+    assert.equal(await db.rentalNotificationTemplate.count({ where: { id: notification.id, tenantId: "tenant_001", workspaceId } }), 1, "并发补落模板必须全部成功且仅一条事实");
+    const otherNotificationSpace = await db.businessWorkspace.findFirstOrThrow({ where: { tenantId: "tenant_001", id: { not: workspaceId }, status: "ACTIVE" } });
+    await assert.rejects(runWithRequestIdentity({ tenantId: "tenant_001", workspaceId: otherNotificationSpace.id }, () => business.upsertNotificationTemplate({ ...notification, body: "越界覆盖" })), /其他.*空间|作用域|不属于|越权/);
+    assert.equal((await db.rentalNotificationTemplate.findUniqueOrThrow({ where: { id: notification.id } })).body, notification.body, "串空间覆盖必须拒绝并保留模板事实");
     const oldBinding = { categoryVersionId: baseline.recommendedVersionId, adoptionRevision: 0 };
     const input = { id: `${fixture}_g1`, tenantId: "tenant_001", categoryCode: "camera", code: "G1", name: "专项型号", inventoryMode: "serialized", unit: "件", attributes: { identity: " abc " }, status: "enabled", bundleComponents: [], createdAt: new Date().toISOString() };
     // Deliberately minimal repository fixtures, not a claim of usable business settings.
