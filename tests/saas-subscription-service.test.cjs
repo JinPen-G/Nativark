@@ -95,6 +95,46 @@ test("品类商业快照按截止边界拒绝、只读投影接续段、不擅�
   const unconfigured = await service.readCategoryCommercialContext("t2", client, NOW);
   assert.equal(unconfigured.serviceStatus, "unconfigured"); assert.equal(unconfigured.newBusinessAllowed, true);
 });
+
+test("商业屏障按租户再有序功能行锁，仅返回实际依赖并在锁等待后读取期限", async (t) => {
+  clock(t);
+  const { service, state, client } = fixture(subscription({ endAt: new Date(NOW.getTime() + 1000) }));
+  state.features.push(...["a", "b", "unrelated"].map((code) => ({ code, name: code, module: "core", categories: ["camera"], currentOwnership: "STANDARD", defaultOwnership: "STANDARD", releaseStatus: "RELEASED" })));
+  const locks = [];
+  const before = clone(state);
+  client.$queryRaw = async (query, value) => {
+    assert.match(query.sql ?? query.join("?"), /FOR UPDATE/);
+    locks.push(value);
+    if (locks.length === 1) return [{ id: value }];
+    if (value === "b") t.mock.timers.setTime(NOW.getTime() + 2000);
+    return [{ code: value }];
+  };
+  const result = await service.lockCategoryCommercialContext("t1", client, ["b", "a", "b"]);
+  assert.deepEqual(locks, ["t1", "a", "b"]);
+  assert.deepEqual(result.lockedFeatureCodes, ["a", "b"]);
+  assert.deepEqual(result.entitlements.map((row) => row.code), ["a", "b"]);
+  assert.equal(result.newBusinessAllowed, false, "不能使用等待锁之前尚未到期的时间");
+  assert.equal(result.checkedAt, new Date(NOW.getTime() + 2000).toISOString());
+  assert.equal(result.complete, false);
+  assert.deepEqual(state, before);
+});
+
+test("商业屏障未知或非精确目录编码拒绝、不伪造空目录授权，空依赖仍锁住期限", async () => {
+  const { service, client } = fixture();
+  for (const codes of [null, [""], [" a "], [1], ["x".repeat(192)]]) await assert.rejects(service.lockCategoryCommercialContext("t1", client, codes), /编码无效/);
+  let mode = "missing", locks = 0;
+  client.$queryRaw = async (query, value) => {
+    locks++;
+    if ((query.sql ?? query.join("?")).includes("FROM Tenant")) return [{ id: value }];
+    return mode === "missing" ? [] : [{ code: "OTHER" }];
+  };
+  await assert.rejects(service.lockCategoryCommercialContext("t1", client, ["missing"]), /未登记/);
+  mode = "other";
+  await assert.rejects(service.lockCategoryCommercialContext("t1", client, ["other"]), /编码不一致/);
+  const before = locks;
+  const empty = await service.lockCategoryCommercialContext("t1", client, []);
+  assert.equal(locks, before + 1); assert.deepEqual(empty.entitlements, []);
+});
 function clock(t, now = NOW) { t.mock.timers.enable({ apis: ["Date"], now }); }
 
 test("等待锁跨过授权生效时点后必须拒绝旧修订", async (t) => {

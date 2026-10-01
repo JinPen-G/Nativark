@@ -141,10 +141,10 @@ export class SubscriptionService {
    * transaction, scheduled-term activation writes, prices or internal notes.
    * Final adoption still needs tenant/catalog locking and explicit capability
    * to commercial-feature mappings; this snapshot is not an authorization. */
-  async readCategoryCommercialContext(tenantId: string, tx: Prisma.TransactionClient, now: Date) {
+  async readCategoryCommercialContext(tenantId: string, tx: Prisma.TransactionClient, now: Date, featureCodes?: readonly string[]) {
     const [state, catalog, grants] = await Promise.all([
       this.readState(tx, tenantId, now),
-      tx.subscriptionFeatureCatalog.findMany({ orderBy: [{ module: "asc" }, { name: "asc" }] }),
+      tx.subscriptionFeatureCatalog.findMany({ ...(featureCodes ? { where: { code: { in: [...featureCodes] } } } : {}), orderBy: [{ module: "asc" }, { name: "asc" }] }),
       tx.tenantFeatureGrant.findMany({ where: { tenantId, revokedAt: null, effectiveAt: { lte: now } } })
     ]);
     const serviceStatus = this.deriveStatus(state.current, now);
@@ -156,6 +156,30 @@ export class SubscriptionService {
         .map((row) => ({ code: row.code, categories: row.categories, available: row.available })),
       complete: false as const, scope: "current_subscription_term_and_feature_snapshot_without_capability_mapping"
     };
+  }
+
+  /** Internal adoption barrier, not a public authorization endpoint.
+   * Call BEFORE category/policy -> space locks in the same ReadCommitted tx.
+   * Required codes come from trusted code-owned capability mappings, never a
+   * client's selection. Missing catalog rows fail closed (no RC gap-lock claim).
+   * Parent lock serializes provision/term/grant/revoke; per-code row locks match
+   * catalog updates. Unrelated catalog entries are neither locked nor returned.
+   * Caller still owns capability mappings, applicability and final adoption. */
+  async lockCategoryCommercialContext(tenantId: string, tx: Prisma.TransactionClient, featureCodes: readonly string[]) {
+    if (!Array.isArray(featureCodes) || featureCodes.some((code) => typeof code !== "string" || !code.trim() || code !== code.trim() || code.length > 191)) {
+      throw new BadRequestException("品类商业依赖编码无效");
+    }
+    const codes = [...new Set(featureCodes)].sort();
+    await this.lockTenant(tx, tenantId);
+    for (const code of codes) {
+      const rows = await tx.$queryRaw<Array<{ code: string }>>`SELECT code FROM subscription_feature_catalog WHERE code=${code} FOR UPDATE`;
+      if (rows.length !== 1 || rows[0].code !== code) throw new ConflictException("品类依赖的商业功能未登记或编码不一致，采用未完成");
+    }
+    // Waiting for either lock may cross an expiry or scheduled activation.
+    const now = new Date();
+    const context = await this.readCategoryCommercialContext(tenantId, tx, now, codes);
+    return { ...context, checkedAt: now.toISOString(), lockedFeatureCodes: codes,
+      scope: "locked_subscription_term_and_required_feature_snapshot_without_capability_mapping" };
   }
 
   async getStaffContext(tenantId: string): Promise<StaffSubscriptionContext> {

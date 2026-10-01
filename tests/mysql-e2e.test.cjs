@@ -761,6 +761,9 @@ async function main() {
   const demo = await login("demo", "admin", DEMO_PASSWORD);
   const demo2 = await login("demo2", "admin", DEMO_PASSWORD);
   if (process.env.E2E_STOP_AFTER === "category-governance-api") {
+    const commercialLocks = runNode(["tests/category-commercial-lock-db.cjs"], { env: { DATABASE_URL: TEST_DATABASE_URL } });
+    assert.equal(commercialLocks.status, 0, commercialLocks.stderr || commercialLocks.stdout);
+    console.log(commercialLocks.stdout);
     const activeWrites = runNode(["tests/category-active-write-db.cjs"], { env: { DATABASE_URL: TEST_DATABASE_URL } });
     assert.equal(activeWrites.status, 0, activeWrites.stderr || activeWrites.stdout);
     console.log(activeWrites.stdout);

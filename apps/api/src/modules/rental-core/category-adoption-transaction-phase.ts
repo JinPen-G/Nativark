@@ -9,7 +9,8 @@ import { writePreparedCategoryEntities } from "./category-adoption-entity-writer
 /** Internal transactional write phase, NOT an adoption endpoint or complete gate.
  * Caller must first authorize the session's whole-space access and validate ALL
  * business/commercial dependencies in this SAME ReadCommitted transaction, using
- * identity/policy -> space lock order. Never call with a separate preview result.
+ * tenant/commercial catalog -> identity/policy -> space lock order. Never call
+ * with a separate preview result; acquire the commercial barrier before this phase.
  * No public route invokes this phase while complete compatibility is unavailable.
  * Caller owns commit, idempotency and post-commit cache invalidation. */
 export async function writePreparedCategoryAdoptionPhase(
