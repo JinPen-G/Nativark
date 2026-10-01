@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
 import { Alert, App, Button, Card, Collapse, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tabs } from "antd";
 import { CATEGORY_DRAFT_SECTIONS, RENTAL_CATEGORY_ICON_CODES, RENTAL_CAPABILITY_MODULES, RENTAL_FULFILLMENT_MODES, RENTAL_LOCATION_TYPES, RENTAL_PRICING_UNIT_CODES, RentalInventoryMode, type CategoryDraftSection, type CategoryVersionView } from "@rental-os/shared";
 import { useLocale } from "@/app/locale";
@@ -120,12 +121,8 @@ export function CategoryDraftEditor({ code, initial, editable, canPublish, saved
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [publishKey, setPublishKey] = useState(() => crypto.randomUUID());
-  useEffect(() => {
-    const handler = (event: BeforeUnloadEvent) => { if (dirty) event.preventDefault(); };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [dirty]);
-  const guarded = (action: () => void) => dirty ? modal.confirm({ title: t("有未保存的改动，确定放弃吗？"), onOk: action }) : action();
+  const hasUnsavedInput = dirty || Boolean(reason.trim());
+  const guarded = (action: () => void) => hasUnsavedInput ? modal.confirm({ title: t("有未保存的改动，确定放弃吗？"), onOk: action }) : action();
   const canEdit = editable && version.status === "draft" && !busy;
   const save = async () => {
     if (!reason.trim()) { message.warning(t("请填写变更原因")); return; }
@@ -168,6 +165,7 @@ export function CategoryDraftEditor({ code, initial, editable, canPublish, saved
     finally { setBusy(false); }
   };
   return <Modal title={`${t("品类版本")} ${version.versionLabel} · ${t("修订")} ${version.revision}`} open footer={null} width="90%" mask={{ closable: false }} onCancel={() => { if (!busy) guarded(close); }}>
+    <UnsavedChangesGuard dirty={hasUnsavedInput} busy={busy} />
     <Alert type="info" showIcon title={t("每个页签只保存自己的草稿；保存不会发布或改变经营空间。已发布版本只读。")} />
     <Tabs activeKey={section} onChange={(key) => { if (!busy) guarded(() => { const next = key as CategoryDraftSection; setSection(next); setValues(project(version, next)); setDirty(false); setReason(""); setErrors([]); }); }} items={CATEGORY_DRAFT_SECTIONS.map((key) => ({ key, label: t(titles[key]) }))} />
     <Form layout="vertical">{Object.entries(values).map(([key, value]) => <ValueEditor key={key} name={key} value={value} change={(next) => { setValues((current) => ({ ...current, [key]: next })); setDirty(true); }} disabled={!canEdit} />)}</Form>

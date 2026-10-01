@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { categoryPreparationApi, type CategoryPreparationOperation } from "@/api/categoryPreparation";
 import { useLocale } from "@/app/locale";
 import { QueryState } from "@/components/QueryState";
+import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
 import { useAuthStore } from "@/features/auth/authStore";
 import { categoryPreparationInitialValues, categoryPreparationPatches, preparationEntityKey, type CategoryPreparationValues } from "./categoryPreparationFields";
 import { capabilityPreparationPatches, initialCapabilityDrafts, preparationCapabilityDefinitions, type CapabilityPreparationDrafts } from "./categoryPreparationCapabilities";
@@ -29,11 +30,6 @@ function CategoryPreparationDialog({ workspaceId }: { workspaceId: string }) {
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => {
-    const leave = (event: BeforeUnloadEvent) => { if (open && dirty) { event.preventDefault(); event.returnValue = ""; } };
-    window.addEventListener("beforeunload", leave);
-    return () => window.removeEventListener("beforeunload", leave);
-  }, [open, dirty]);
   const candidates = useQuery({ queryKey: ["category-preparation", workspaceId, operation], queryFn: () => categoryPreparationApi.candidates(operation), enabled: open, refetchOnWindowFocus: false });
   const preview = useQuery({ queryKey: ["category-preparation-preview", workspaceId, operation, targetId], queryFn: () => categoryPreparationApi.preview(targetId!, operation), enabled: open && Boolean(targetId), refetchOnWindowFocus: false });
   useEffect(() => {
@@ -75,6 +71,7 @@ function CategoryPreparationDialog({ workspaceId }: { workspaceId: string }) {
   };
   const loading = busy || preview.isFetching;
   return <>
+    <UnsavedChangesGuard dirty={open && dirty} busy={busy} />
     <Button onClick={() => setOpen(true)}>{t("准备品类版本资料")}</Button>
     <Modal title={t("品类版本预备资料")} open={open} footer={null} width="90%" mask={{ closable: false }} onCancel={() => guarded(() => setOpen(false))}>
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
