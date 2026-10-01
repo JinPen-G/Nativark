@@ -14,12 +14,20 @@ assert.ok(check(target, { ...input, adjustments: [pending] }, now).blockers.some
 for (const finalRates of [null, {}, [], [null]]) assert.equal(check(target, { ...input, adjustments: [{ ...pending, finalRates }] }, now).valid, false);
 for (const status of ["draft", "cancelled", "applied", "failed"]) assert.equal(check(target, { ...input, adjustments: [{ ...pending, status }] }, now).valid, true);
 assert.equal(check(target, { ...input, adjustments: [{ ...pending, finalRates: [{ unit: "hour" }] }] }, now).valid, true);
-const feePlan = { id: "fees", status: "enabled", effectiveTo: null, fulfillmentFees: [{ mode: "onsite_delivery" }] };
+const feePlan = { id: "fees", status: "enabled", effectiveTo: null, rates: [{ unit: "hour" }], fulfillmentFees: [{ mode: "onsite_delivery" }] };
 assert.ok(check(target, { ...input, pricingPlans: [feePlan] }, now).blockers.some((row) => row.id === "fees:fulfillmentFees"));
 for (const over of [{ status: "disabled" }, { effectiveTo: new Date("2025-01-01") }, { fulfillmentFees: null }, { fulfillmentFees: [] }, { fulfillmentFees: [{ mode: "store_pickup_return" }] }]) assert.equal(check(target, { ...input, pricingPlans: [{ ...feePlan, ...over }] }, now).valid, true);
 const feeBefore = structuredClone(feePlan);
 check(target, { ...input, pricingPlans: [feePlan] }, now);
 assert.deepEqual(feePlan, feeBefore, "兼容检查不替换费用定义");
+for (const rates of [null, {}, [], [null], [[]], [{ unit: "shift" }]]) {
+  const plan = { ...feePlan, fulfillmentFees: null, rates };
+  const before = structuredClone(plan);
+  assert.deepEqual(check(target, { ...input, pricingPlans: [plan] }, now).blockers.map((row) => row.id), ["fees:rates"], "不设置履约费也必须检查计划费率单位");
+  assert.deepEqual(plan, before, "阻碍报告不修改非法计划费率");
+  for (const override of [{ status: "disabled" }, { effectiveTo: now }]) assert.equal(check(target, { ...input, pricingPlans: [{ ...plan, ...override }] }, now).valid, true, "停用和恰好到期计划不阻碍采用");
+}
+for (const value of [[null], [[]], [{ unit: "unknown" }]]) assert.equal(check(target, { ...input, prices: [timed("malformed", "2026-09-01", value)] }, now).valid, false, "非法价格结构必须报告阻碍而非抛出类型错误");
 const service = { id: "service", status: "enabled", applicableFulfillmentModes: ["onsite_delivery"], mandatoryRule: { fulfillmentModes: ["onsite_delivery"] } };
 const serviceBefore = structuredClone(service);
 assert.deepEqual(check(target, { ...input, services: [service] }, now).blockers.map((row) => row.id), ["service:fulfillmentModes", "service:mandatoryRule"]);

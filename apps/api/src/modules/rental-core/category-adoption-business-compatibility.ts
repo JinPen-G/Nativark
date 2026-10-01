@@ -44,7 +44,7 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
   inspections?: Array<{ id: string; stage: string; enabled: boolean; fields: unknown }>;
   qualificationTypes?: Array<{ code: string; categoryCode: string; capabilityCode: string | null; status: string }>;
   adjustments?: Array<{ id: string; status: string; finalRates: unknown }>;
-  pricingPlans?: Array<{ id: string; status: string; effectiveTo: Date | null; fulfillmentFees: unknown }>;
+  pricingPlans?: Array<{ id: string; status: string; effectiveTo: Date | null; fulfillmentFees: unknown; rates: unknown }>;
   services?: Array<{ id: string; status: string; applicableFulfillmentModes: unknown; mandatoryRule: unknown }>;
 }, now: Date) {
   const blockers: Array<{ domain: "settings" | "location" | "price" | "rule" | "inspection" | "service"; id: string; message: string }> = [];
@@ -62,7 +62,7 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
   }
   const prices = categoryCurrentAndFuture(input.prices, now);
   for (const price of prices) {
-    if (!Array.isArray(price.value) || price.value.some((rate) => !model.pricingUnits.includes(rate.unit))) add("price", price.id, "当前或未来价格版本包含目标品类不支持的计价单位，需通过价格发布机制处理");
+    if (!Array.isArray(price.value) || price.value.some((rate) => !rate || typeof rate !== "object" || Array.isArray(rate) || !model.pricingUnits.includes(rate.unit))) add("price", price.id, "当前或未来价格版本包含目标品类不支持的计价单位，需通过价格发布机制处理");
   }
   // Confirmed adjustments are executable future prices, even before a version
   // row exists. Drafts/cancelled/applied records are not future commitments.
@@ -73,7 +73,11 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
     }
   }
   for (const plan of input.pricingPlans ?? []) {
-    if (plan.status !== "enabled" || (plan.effectiveTo && plan.effectiveTo.getTime() <= now.getTime()) || plan.fulfillmentFees === null) continue;
+    if (plan.status !== "enabled" || (plan.effectiveTo && plan.effectiveTo.getTime() <= now.getTime())) continue;
+    if (!Array.isArray(plan.rates) || plan.rates.length === 0 || plan.rates.some((rate) => !rate || typeof rate !== "object" || Array.isArray(rate) || !model.pricingUnits.includes(rate.unit))) {
+      add("price", `${plan.id}:rates`, "启用价格计划的费率缺失或包含目标品类不支持的计价单位，请通过定价配置调整");
+    }
+    if (plan.fulfillmentFees === null) continue;
     if (!Array.isArray(plan.fulfillmentFees) || plan.fulfillmentFees.some((fee) => !fee || typeof fee !== "object" || !model.fulfillmentModes.includes(fee.mode))) {
       add("price", `${plan.id}:fulfillmentFees`, "启用价格计划的履约收费方式不兼容目标品类，请通过定价配置调整");
     }
