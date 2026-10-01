@@ -6,6 +6,7 @@ import { useLocale } from "@/app/locale";
 import { QueryState } from "@/components/QueryState";
 import { useAuthStore } from "@/features/auth/authStore";
 import { categoryPreparationInitialValues, categoryPreparationPatches, preparationEntityKey, type CategoryPreparationValues } from "./categoryPreparationFields";
+import { capabilityPreparationPatches, initialCapabilityDrafts, preparationCapabilityDefinitions, type CapabilityPreparationDrafts } from "./categoryPreparationCapabilities";
 
 export function CategoryPreparationEntry() {
   const hasPermission = useAuthStore((state) => state.hasPermission);
@@ -19,6 +20,8 @@ function CategoryPreparationDialog({ workspaceId }: { workspaceId: string }) {
   const [operation, setOperation] = useState<CategoryPreparationOperation>("upgrade");
   const [targetId, setTargetId] = useState<string>();
   const [scope, setScope] = useState<"item_group" | "asset">("item_group");
+  const [tab, setTab] = useState("item_group");
+  const [capabilityDrafts, setCapabilityDrafts] = useState<CapabilityPreparationDrafts>({});
   const [entityId, setEntityId] = useState<string>();
   const [values, setValues] = useState<CategoryPreparationValues>({});
   const [reason, setReason] = useState("");
@@ -36,6 +39,7 @@ function CategoryPreparationDialog({ workspaceId }: { workspaceId: string }) {
   useEffect(() => {
     if (!preview.data || dirty) return;
     setValues(categoryPreparationInitialValues(preview.data, operation));
+    setCapabilityDrafts(initialCapabilityDrafts(preview.data, operation));
     setReason(preview.data.preparation?.patches.operation === operation ? preview.data.preparation.patches.reason ?? "" : "");
   }, [preview.data, operation, dirty]);
   const guarded = (action: () => void) => {
@@ -56,7 +60,8 @@ function CategoryPreparationDialog({ workspaceId }: { workspaceId: string }) {
     if (!preview.data || !targetId || !reason.trim()) { message.warning(t("请填写准备原因")); return; }
     setBusy(true);
     try {
-      await categoryPreparationApi.save(targetId, { expectedSourceVersionId: preview.data.sourceVersionId, expectedSourceRevision: preview.data.sourceRevision, expectedPreparationRevision: preview.data.preparation?.revision ?? 0, operation, reason, patches: categoryPreparationPatches(preview.data, values) });
+      const capabilityPatches = capabilityPreparationPatches(preview.data, capabilityDrafts);
+      await categoryPreparationApi.save(targetId, { expectedSourceVersionId: preview.data.sourceVersionId, expectedSourceRevision: preview.data.sourceRevision, expectedPreparationRevision: preview.data.preparation?.revision ?? 0, operation, reason, patches: categoryPreparationPatches(preview.data, values), capabilityPatches });
       if (!mounted.current) return;
       const refreshed = await preview.refetch();
       if (!mounted.current) return;
@@ -65,7 +70,7 @@ function CategoryPreparationDialog({ workspaceId }: { workspaceId: string }) {
     } catch (error) {
       if (!mounted.current) return;
       const response = error as { response?: { status?: number; data?: { message?: string } } };
-      message.error(response.response?.status === 409 ? t("来源或准备修订已变化，输入已保留，请重新核对") : response.response?.data?.message ?? t("保存失败，输入已保留"));
+      message.error(response.response?.status === 409 ? t("来源或准备修订已变化，输入已保留，请重新核对") : response.response?.data?.message ?? (error instanceof Error ? t(error.message) : t("保存失败，输入已保留")));
     } finally { if (mounted.current) setBusy(false); }
   };
   const loading = busy || preview.isFetching;
@@ -83,7 +88,40 @@ function CategoryPreparationDialog({ workspaceId }: { workspaceId: string }) {
           {preview.data && <>
             {(!preview.data.validation.valid || preview.data.stale) && <Alert type="warning" showIcon title={t("预备资料需补齐或重新核对")} description={preview.data.validation.errors.join("；")} />}
             {!preview.data.businessCompatibility.valid && <Alert type="warning" showIcon title={t("经营配置尚不兼容目标版本")} description={preview.data.businessCompatibility.blockers.map((row) => `${row.id}: ${row.message}`).join("；")} />}
-            <Tabs className="standalone-tabs" activeKey={scope} items={[{ key: "item_group", label: t("型号资料") }, { key: "asset", label: t("资产资料") }]} onChange={(key) => { setScope(key as typeof scope); setEntityId(undefined); }} />
+            <Tabs className="standalone-tabs" activeKey={tab} items={[{ key: "item_group", label: t("型号资料") }, { key: "asset", label: t("资产资料") }, { key: "capabilities", label: t("能力配置") }]} onChange={(key) => { setTab(key); if (key !== "capabilities") setScope(key as typeof scope); setEntityId(undefined); }} />
+            {tab === "capabilities" ? <>
+              <Typography.Text type="secondary">{t("仅准备既有启用能力的配置，不启用新能力或更换执行实现。")}</Typography.Text>
+              {preparationCapabilityDefinitions(preview.data).map((definition) => {
+                const draft = capabilityDrafts[definition.code];
+                const current = preview.data!.entities.capabilities!.find((row) => row.code === definition.code)!;
+                const changeConfig = (key: string, value: string | number | boolean | undefined) => {
+                  if (!draft) return;
+                  setCapabilityDrafts((previous) => ({ ...previous, [definition.code]: { ...draft, fields: { ...draft.fields, [key]: value ?? "" } } }));
+                  setDirty(true);
+                };
+                return <Space key={definition.code} orientation="vertical" style={{ width: "100%" }}>
+                  <Typography.Text strong>{t(definition.label)} · {draft?.expectedImplementationVersion} · r{draft?.expectedRevision}</Typography.Text>
+                  {draft && (draft.expectedRevision !== current.revision || draft.expectedImplementationVersion !== current.implementationVersion) && <Alert type="warning" showIcon title={t("来源或准备修订已变化，输入已保留，请重新核对")} />}
+                  {definition.configSchema.map((field) => {
+                    const value = draft?.fields[field.key]; const label = `${t(field.label)}${field.required ? " *" : ""}`;
+                    return <Space key={field.key} orientation="vertical" style={{ width: "100%" }}>
+                      <Typography.Text>{label}</Typography.Text>
+                      {field.type === "number" ? <InputNumber aria-label={label} disabled={loading || !draft} min={field.min} max={field.max} value={typeof value === "number" ? value : null} onChange={(next) => changeConfig(field.key, next ?? undefined)} />
+                        : field.type === "boolean" ? <Select aria-label={label} disabled={loading || !draft} allowClear value={typeof value === "boolean" ? String(value) : undefined} options={[{ value: "true", label: t("是") }, { value: "false", label: t("否") }]} onChange={(next) => changeConfig(field.key, next === undefined ? undefined : next === "true")} />
+                          : field.type === "enum" ? <Select aria-label={label} disabled={loading || !draft} allowClear value={typeof value === "string" && value ? value : undefined} options={field.options?.map((option) => ({ value: option, label: t(option) }))} onChange={(next) => changeConfig(field.key, next)} />
+                            : field.type === "compatibility_relations" ? <Input.TextArea aria-label={label} disabled={loading || !draft} rows={8} maxLength={200000} value={typeof value === "string" ? value : ""} onChange={(event) => changeConfig(field.key, event.target.value)} />
+                              : <Input aria-label={label} disabled={loading || !draft} value={typeof value === "string" ? value : ""} onChange={(event) => changeConfig(field.key, event.target.value)} />}
+                      {field.description && <Typography.Text type="secondary">{t(field.description)}</Typography.Text>}
+                    </Space>;
+                  })}
+                  <Button disabled={loading} onClick={() => modal.confirm({ title: t("放弃未保存的预备资料？"), onOk: () => {
+                    const fresh = initialCapabilityDrafts({ ...preview.data!, preparation: null }, operation)[definition.code];
+                    setCapabilityDrafts((previous) => ({ ...previous, [definition.code]: fresh })); setDirty(true);
+                  } })}>{t("使用当前活动配置重新准备")}</Button>
+                </Space>;
+              })}
+              {!preparationCapabilityDefinitions(preview.data).length && <Typography.Text type="secondary">{t("暂无需要准备的资料")}</Typography.Text>}
+            </> : <>
             <Select aria-label={t("选择待准备的资料")} value={entity?.id} disabled={loading} showSearch={{ optionFilterProp: "label" }} options={rows.map((row) => ({ value: row.id, label: row.name ?? row.assetNo ?? row.id }))} onChange={setEntityId} style={{ width: "100%" }} />
             {entity && fields.map((field) => {
               const value = values[preparationEntityKey(scope, entity.id)]?.[field.code];
@@ -97,6 +135,7 @@ function CategoryPreparationDialog({ workspaceId }: { workspaceId: string }) {
               </Space>;
             })}
             {!rows.length && <Typography.Text type="secondary">{t("暂无需要准备的资料")}</Typography.Text>}
+            </>}
             <Input.TextArea aria-label={t("准备原因")} placeholder={t("准备原因")} value={reason} maxLength={512} disabled={loading} onChange={(event) => { setReason(event.target.value); setDirty(true); }} />
             <Space wrap>
               <Button disabled={loading} onClick={() => guarded(() => { void preview.refetch(); })}>{t("重新读取并核对")}</Button>

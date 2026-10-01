@@ -44,3 +44,37 @@ assert.deepEqual({ ...result[1].values }, { serialNo: "SN2", amount: "" });
 assert.deepEqual(preview, before, "表单投影和补丁生成不能改活动资料、媒体或服务端预览");
 assert.equal(patches(preview, initial({ ...preview, preparation: null }, "upgrade")).length, 0, "未改变事实无需生成补丁");
 console.log("category-preparation-admin-fields: 作用域同 ID 区分、候选读回、退役/媒体隔离、序列号专列、false/0、失效准备及差异补丁通过");
+const capabilitySource = fs.readFileSync("apps/admin/src/features/settings/governance/categoryPreparationCapabilities.ts", "utf8");
+const capabilityCompiled = ts.transpileModule(capabilitySource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+const capExports = {};
+new Function("exports", "require", capabilityCompiled)(capExports, require);
+const capPreview = { ...structuredClone(preview), targetDefinition: structuredClone(RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "camera")), entities: { ...preview.entities, capabilities: [
+  { code: "camera_compatibility", status: "enabled", revision: 9, implementationVersion: "cam-1.0", configVersion: "v3", config: { relations: [], powerMarginPercent: 0 } },
+  { code: "vehicle_driving_license", status: "enabled", revision: 1, implementationVersion: "core-1.0", config: {} }
+] }, preparation: { revision: 1, patches: { operation: "upgrade", capabilityPatches: [
+  { code: "camera_compatibility", expectedRevision: 8, expectedImplementationVersion: "old", config: { relations: [], powerMarginPercent: 25 } }
+] } } };
+const capBefore = structuredClone(capPreview);
+const capDrafts = capExports.initialCapabilityDrafts(capPreview, "upgrade");
+assert.deepEqual(Object.keys(capDrafts), ["camera_compatibility"]);
+assert.equal(capDrafts.camera_compatibility.expectedRevision, 8, "旧输入不得伪装为最新修订");
+assert.equal(capDrafts.camera_compatibility.expectedImplementationVersion, "old");
+capDrafts.camera_compatibility.fields.unknown = "不能提交";
+const capPatches = capExports.capabilityPreparationPatches(capPreview, capDrafts);
+assert.deepEqual(capPatches[0].config, { relations: [], powerMarginPercent: 25 });
+assert.equal(capPatches[0].expectedRevision, 8);
+const freshCaps = capExports.initialCapabilityDrafts({ ...capPreview, preparation: null }, "upgrade");
+assert.equal(freshCaps.camera_compatibility.expectedRevision, 9);
+assert.equal(freshCaps.camera_compatibility.fields.powerMarginPercent, 0);
+assert.equal(capExports.initialCapabilityDrafts({ ...capPreview, stale: true }, "upgrade").camera_compatibility.expectedRevision, 9);
+for (const invalid of ["not JSON", "{}", "null"]) {
+  freshCaps.camera_compatibility.fields.relations = invalid;
+  assert.throws(() => capExports.capabilityPreparationPatches(capPreview, freshCaps), /JSON|数组/);
+}
+assert.deepEqual(capPreview, capBefore, "准备表单不能原地改活动配置或保存信封");
+assert.deepEqual(capExports.preparationCapabilityDefinitions({ ...capPreview, entities: { ...capPreview.entities, capabilities: [] } }), []);
+const pausedPreview = structuredClone(capPreview);
+pausedPreview.entities.capabilities[0].status = "paused";
+assert.throws(() => capExports.capabilityPreparationPatches(pausedPreview, {}), /不再适用/, "不可静默删掉已保存的失效补丁");
+assert.throws(() => capExports.capabilityPreparationPatches(pausedPreview, capDrafts), /状态|适用范围/);
+console.log("category-preparation-admin-capabilities: 按声明字段、范围、零值、陈旧来源保留、明确重新准备及结构化数组校验通过");

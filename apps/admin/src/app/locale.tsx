@@ -13,6 +13,12 @@ const STORAGE_KEY = "rental_admin_locale";
  */
 const ENGLISH: Record<string, string> = {
   "准备品类版本资料": "Prepare category version data",
+  "能力配置": "Capability configuration",
+  "仅准备既有启用能力的配置，不启用新能力或更换执行实现。": "Prepare configurations for existing enabled capabilities only. This does not enable new capabilities or change implementations.",
+  "使用当前活动配置重新准备": "Prepare again from the current active configuration",
+  "能力预备输入缺失，请重新读取并核对": "Capability preparation input is missing. Reload and verify it.",
+  "能力状态或目标适用范围已变化，请重新读取并核对": "The capability status or target applicability has changed. Reload and verify it.",
+  "存在不再适用的能力预备配置，请核对能力状态": "A prepared capability configuration is no longer applicable. Check its lifecycle status.",
   "品类版本预备资料": "Category version preparation",
   "这里只保存候选资料，不切换品类版本、不修改当前价格与规则。正式采用尚未开放。": "Only candidate data is saved here. The active category, prices and rules remain unchanged. Final adoption is not available yet.",
   "版本操作": "Version operation",
