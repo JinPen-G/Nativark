@@ -3243,16 +3243,20 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 按时点匹配唯一规则版本（需求 4.6.1）。报价必须传**租期开始时间**，
    * 不传等于按「现在」匹配，未来租期就会套上今天的条款。
    */
-  currentRule(tenantId: string, context: BusinessContext, at = stamp()) {
-    return matchRuleVersionAt(this.state(tenantId, context).ruleVersions, at);
+  currentRule(tenantId: string, context: BusinessContext, at?: string) {
+    // Lazy initialization timestamps the default rule; only then read an implicit "now".
+    // An explicitly supplied rental start still retains its exact historical boundary.
+    const versions = this.state(tenantId, context).ruleVersions;
+    return matchRuleVersionAt(versions, at ?? stamp());
   }
 
   /**
    * 某时点生效的规则版本，**不抛错**：没有已发布规则返回 undefined。
    * 给只读投影（客户端目录、开业就绪）用；报价与订单推进必须继续用 fail-closed 的 `currentRule`。
    */
-  effectiveRuleAt(tenantId: string, context: BusinessContext, at = stamp()): RentalRuleVersion | undefined {
-    return this.effectiveRuleVersionAt(this.state(tenantId, context).ruleVersions, at);
+  effectiveRuleAt(tenantId: string, context: BusinessContext, at?: string): RentalRuleVersion | undefined {
+    const versions = this.state(tenantId, context).ruleVersions;
+    return this.effectiveRuleVersionAt(versions, at ?? stamp());
   }
 
   /**
