@@ -8,6 +8,7 @@ import { categoryAdoptionMarketingReferences } from "./category-adoption-marketi
 import { categoryAdoptionPriceReferences } from "./category-adoption-price-references";
 import { categoryAdoptionServiceCapacity } from "./category-adoption-service-capacity";
 import { categoryAdoptionProductGraph } from "./category-adoption-product-graph";
+import { categoryAdoptionPriceStructure } from "./category-adoption-price-structure";
 
 /** Shared transaction reader for preparation and the eventual adoption gate.
  * Caller holds the category/policy -> space mutex; records must be freshly read
@@ -53,9 +54,10 @@ export async function readCategoryAdoptionCompatibility(
   const references = categoryAdoptionCapabilityReferences(target, candidateInstances, records);
   const marketing = categoryAdoptionMarketingReferences({ groups: records.groups, pricingGroups, locations, discounts, coupons, services }, now);
   const priceReferences = categoryAdoptionPriceReferences({ groups: records.groups, pricingGroups, prices: prices.map((row) => ({ ...row, value: row.rates })), adjustments, plans: pricingPlans }, now);
+  const priceStructure = categoryAdoptionPriceStructure({ prices: prices.map((row) => ({ ...row, value: row.rates })), adjustments, plans: pricingPlans }, now);
   const capacityCompatibility = categoryAdoptionServiceCapacity(target, { services: capacityServices, locations, capacities }, now);
   const productGraph = categoryAdoptionProductGraph(target, { groups: records.groups, assets: records.assets, locations, pricingGroups });
-  const compatibility = { ...businessCompatibility, valid: businessCompatibility.valid && capabilityCompatibility.valid && references.valid && marketing.valid && priceReferences.valid && capacityCompatibility.valid && productGraph.valid, blockers: [...businessCompatibility.blockers, ...capabilityCompatibility.blockers, ...references.blockers, ...marketing.blockers, ...priceReferences.blockers, ...capacityCompatibility.blockers, ...productGraph.blockers], checkedCapabilityCodes: capabilityCompatibility.checkedCapabilityCodes,
-    scope: `${businessCompatibility.scope}_capability_instances_references_marketing_entity_references_price_target_references_service_capacity_locations_product_graph` };
+  const compatibility = { ...businessCompatibility, valid: businessCompatibility.valid && capabilityCompatibility.valid && references.valid && marketing.valid && priceReferences.valid && priceStructure.valid && capacityCompatibility.valid && productGraph.valid, blockers: [...businessCompatibility.blockers, ...capabilityCompatibility.blockers, ...references.blockers, ...marketing.blockers, ...priceReferences.blockers, ...priceStructure.blockers, ...capacityCompatibility.blockers, ...productGraph.blockers], checkedCapabilityCodes: capabilityCompatibility.checkedCapabilityCodes,
+    scope: `${businessCompatibility.scope}_capability_instances_references_marketing_entity_references_price_target_references_price_structure_service_capacity_locations_product_graph` };
   return compatibility;
 }

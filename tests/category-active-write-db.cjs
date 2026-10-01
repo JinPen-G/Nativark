@@ -475,6 +475,11 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
       return Reflect.get(client, key);
     } })), /business-compatibility-read-failure/);
     assert.equal(await readEntityFacts(), phaseBefore, "经营读取失败不能伪装成兼容，全部候选写入与配置审计回滚");
+    const candidatePrice = await db.rentalPriceVersion.create({ data: { tenantId: "tenant_001", workspaceId, sequence: 1, effectiveFrom: new Date("2026-01-01"), changeReason: "采用费率结构回滚专项", createdBy: "fixture", rates: [{ itemGroupId: input.id, unit: "hour", baseAmount: -1, weekendMultiplier: 1, holidayMultiplier: 1, depositAmount: 0, minimumUnits: 1 }] } });
+    await assert.rejects(applyPhase(), /费率字段不符合定价输入契约/);
+    assert.equal(await readEntityFacts(), phaseBefore, "非法当前费率回滚候选实体、能力、绑定和审计");
+    assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation);
+    await db.rentalPriceVersion.delete({ where: { id: candidatePrice.id } });
     const staleCapabilityBefore = await db.workspaceCapabilityInstance.findFirstOrThrow({ where: { workspaceId, code: "camera_compatibility" } });
     await db.workspaceCapabilityInstance.updateMany({ where: { workspaceId }, data: { revision: 2 } });
     await assert.rejects(applyPhase(), /已变化/);
