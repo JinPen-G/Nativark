@@ -1,10 +1,11 @@
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import type { CategoryEntityPreparationPatch } from "@rental-os/shared";
+import type { CategoryCapabilityPreparationPatch, CategoryEntityPreparationPatch } from "@rental-os/shared";
 import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./category-active-write";
 import { assertCategoryAdoptionAllowed } from "./category-governance-policy";
 import { resolveRentalCategoryVersionBody } from "./rental-category-resolver.service";
 import { writePreparedCategoryEntities } from "./category-adoption-entity-writer";
+import { writePreparedCategoryCapabilities, type CategoryAdoptionCapabilityRuntime } from "./category-adoption-capability-writer";
 
 /** Internal transactional write phase, NOT an adoption endpoint or complete gate.
  * Caller must first authorize the session's whole-space access and validate ALL
@@ -19,7 +20,8 @@ export async function writePreparedCategoryAdoptionPhase(
     tenantId: string; workspaceId: string; actorId: string; targetVersionId: string;
     operation: "upgrade" | "restore"; expected: CategoryWriteBinding;
     expectedPreparationRevision: number;
-  }
+  },
+  capabilityRuntime?: CategoryAdoptionCapabilityRuntime
 ) {
   const { tenantId, workspaceId, targetVersionId, expected, operation } = input;
   if (!["upgrade", "restore"].includes(operation) || !input.actorId.trim() || input.actorId.length > 191 ||
@@ -44,11 +46,17 @@ export async function writePreparedCategoryAdoptionPhase(
   if (typeof envelope.reason !== "string" || !envelope.reason.trim() || envelope.reason.length > 512 || !Array.isArray(envelope.items)) {
     throw new ConflictException("预备资料格式或采用原因无效，请重新准备");
   }
-  if (envelope.capabilityPatches !== undefined && (!Array.isArray(envelope.capabilityPatches) || envelope.capabilityPatches.length)) {
-    throw new ConflictException("能力预备配置尚未接入原子写入阶段，采用未完成；预备输入已保留");
+  if (envelope.capabilityPatches !== undefined && !Array.isArray(envelope.capabilityPatches)) {
+    throw new ConflictException("能力预备配置格式无效，采用未完成；预备输入已保留");
+  }
+  if (Array.isArray(envelope.capabilityPatches) && envelope.capabilityPatches.length && !capabilityRuntime) {
+    throw new ConflictException("未提供可信能力执行器，采用未完成；预备输入已保留");
   }
   const definition = resolveRentalCategoryVersionBody(target, identity.categoryCode.toLowerCase());
   const entities = await writePreparedCategoryEntities(tx, tenantId, workspaceId, expected, definition, envelope.items);
+  const capabilities = Array.isArray(envelope.capabilityPatches) && envelope.capabilityPatches.length
+    ? await writePreparedCategoryCapabilities(tx, tenantId, workspaceId, expected, definition, envelope.capabilityPatches as CategoryCapabilityPreparationPatch[], input.actorId, envelope.reason.trim(), capabilityRuntime!)
+    : { changedCapabilityCodes: [] };
   const toRevision = expected.adoptionRevision + 1;
   const changed = await tx.businessWorkspace.updateMany({ where: {
     tenantId, id: workspaceId, status: "ACTIVE", categoryCode: identity.categoryCode,
@@ -61,5 +69,5 @@ export async function writePreparedCategoryAdoptionPhase(
     actorId: input.actorId, reason: envelope.reason.trim()
   } });
   // Keep preparation intact on success as well as rollback; never initialize data.
-  return { targetVersionId, adoptionRevision: toRevision, auditId: audit.id, entities };
+  return { targetVersionId, adoptionRevision: toRevision, auditId: audit.id, entities, capabilities };
 }

@@ -6,12 +6,14 @@ const { RENTAL_CATEGORY_DEFINITIONS } = require("@rental-os/shared");
 const { RentalCoreConfigRepository } = require("../apps/api/dist/modules/rental-core/rental-core-config.repository.js");
 const { RentalCoreFactRepository } = require("../apps/api/dist/modules/rental-core/rental-core-fact.repository.js");
 const { WorkspaceCapabilityRepository } = require("../apps/api/dist/modules/rental-core/workspace-capability.repository.js");
+const { WorkspaceCapabilityService } = require("../apps/api/dist/modules/rental-core/workspace-capability.service.js");
 const { RentalBusinessConfigRepository } = require("../apps/api/dist/modules/rental-core/rental-business-config.repository.js");
 const { RentalBusinessFactRepository } = require("../apps/api/dist/modules/rental-core/rental-business-fact.repository.js");
 const { runWithRequestIdentity } = require("../apps/api/dist/common/request-identity.js");
 const { validateActiveCategoryWrite } = require("../apps/api/dist/modules/rental-core/category-active-write.js");
 const { writePreparedCategoryEntities } = require("../apps/api/dist/modules/rental-core/category-adoption-entity-writer.js");
 const { writePreparedCategoryAdoptionPhase } = require("../apps/api/dist/modules/rental-core/category-adoption-transaction-phase.js");
+const { writePreparedCategoryCapabilities } = require("../apps/api/dist/modules/rental-core/category-adoption-capability-writer.js");
 const { RentalServiceCapacityService } = require("../apps/api/dist/modules/rental-core/rental-service-capacity.service.js");
 const { MembershipService } = require("../apps/api/dist/modules/platform/membership.service.js");
 if (!/^rental_os_e2e_/u.test(new URL(process.env.DATABASE_URL).pathname.slice(1))) throw new Error("仅允许专用 E2E 库");
@@ -358,6 +360,8 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
       db.rentalAsset.findMany({ where: { workspaceId }, orderBy: { id: "asc" } }),
       db.rentalAttributeUniqueValue.findMany({ where: { workspaceId }, orderBy: { id: "asc" } }),
       db.businessWorkspace.findUniqueOrThrow({ where: { id: workspaceId } }),
+      db.workspaceCapabilityInstance.findMany({ where: { workspaceId }, orderBy: { code: "asc" } }),
+      db.workspaceCapabilityAuditEntry.findMany({ where: { workspaceId }, orderBy: { id: "asc" } }),
       db.rentalCategoryAdoptionAudit.findMany({ where: { workspaceId }, orderBy: { id: "asc" } })
     ]));
     const entityGroups = await db.rentalItemGroup.findMany({ where: { workspaceId }, orderBy: { id: "asc" } });
@@ -393,11 +397,13 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     const preparation = await db.rentalCategoryAdoptionPreparation.create({ data: {
       tenantId: "tenant_001", workspaceId, targetVersionId: writerTargetId, sourceRevision: currentBinding.adoptionRevision,
       revision: 1, createdBy: "entity-phase-fixture", patches: { sourceVersionId: currentBinding.categoryVersionId,
-        operation: "upgrade", reason: "内部事务组件真库验证，不代表完整采用接口", items: freshPatches }
+        operation: "upgrade", reason: "内部事务组件真库验证，不代表完整采用接口", items: freshPatches,
+        capabilityPatches: [{ code: "camera_compatibility", expectedRevision: 1, expectedImplementationVersion: "cam-1.0", config: { relations: [], powerMarginPercent: 25 } }] }
     } });
     const phaseInput = { tenantId: "tenant_001", workspaceId, targetVersionId: writerTargetId, expected: currentBinding,
       expectedPreparationRevision: 1, operation: "upgrade", actorId: "entity-phase-fixture" };
-    const applyPhase = (overrides = {}, decorate = (tx) => tx) => db.$transaction((tx) => writePreparedCategoryAdoptionPhase(decorate(tx), { ...phaseInput, ...overrides }), rc);
+    const capabilityRuntime = { capabilities: new WorkspaceCapabilityService({}), registeredVersions: ["camera_compatibility@cam-1.0"] };
+    const applyPhase = (overrides = {}, decorate = (tx) => tx, runtime = capabilityRuntime) => db.$transaction((tx) => writePreparedCategoryAdoptionPhase(decorate(tx), { ...phaseInput, ...overrides }, runtime), rc);
     const phaseBefore = await readEntityFacts();
     await assert.rejects(applyPhase(), /采用范围/);
     await db.rentalCategoryVersionPolicy.update({ where: { versionId: writerTargetId }, data: { upgradeScope: "pilot", upgradeTenantIds: ["tenant_002"] } });
@@ -411,6 +417,28 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     await assert.rejects(applyPhase({ expected: oldBinding }), /版本已变化/);
     await assert.rejects(applyPhase({ actorId: " " }), /操作人/);
     assert.equal(await readEntityFacts(), phaseBefore, "资格及修订拒绝不得改动活动资料或绑定");
+    await assert.rejects(applyPhase({}, (tx) => tx, null), /可信能力执行器/);
+    const staleCapabilityBefore = await db.workspaceCapabilityInstance.findFirstOrThrow({ where: { workspaceId, code: "camera_compatibility" } });
+    await db.workspaceCapabilityInstance.updateMany({ where: { workspaceId }, data: { revision: 2 } });
+    await assert.rejects(applyPhase(), /已变化/);
+    await db.workspaceCapabilityInstance.updateMany({ where: { workspaceId }, data: { revision: 1, updatedAt: staleCapabilityBefore.updatedAt } });
+    assert.equal(await readEntityFacts(), phaseBefore, "能力来源过期不得留下实体写入");
+    await assert.rejects(applyPhase({}, (tx) => new Proxy(tx, { get(client, key) {
+      if (key === "workspaceCapabilityAuditEntry") return new Proxy(client[key], { get(model, method) {
+        if (method === "create") return async () => { throw new Error("capability-audit-failure"); };
+        return Reflect.get(model, method);
+      } });
+      return Reflect.get(client, key);
+    } })), /capability-audit-failure/);
+    assert.equal(await readEntityFacts(), phaseBefore, "能力审计失败回滚配置、实体和绑定");
+    await assert.rejects(applyPhase({}, (tx) => new Proxy(tx, { get(client, key) {
+      if (key === "workspaceCapabilityInstance") return new Proxy(client[key], { get(model, method) {
+        if (method === "updateMany") return async () => ({ count: 0 });
+        return Reflect.get(model, method);
+      } });
+      return Reflect.get(client, key);
+    } })), /来源已变化/);
+    assert.equal(await readEntityFacts(), phaseBefore, "能力CAS拒绝回滚实体写入且不留审计");
     let phaseAuditAttempts = 0;
     await assert.rejects(applyPhase({}, (tx) => new Proxy(tx, { get(client, key) {
       if (key === "rentalCategoryAdoptionAudit") return new Proxy(client[key], { get(model, method) {
@@ -444,6 +472,24 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal(phaseAudit.reason, preparation.patches.reason);
     assert.equal(phaseAudit.fromVersionId, currentBinding.categoryVersionId);
     assert.equal(phaseAudit.toRevision, currentBinding.adoptionRevision + 1);
+    assert.deepEqual(phaseResult.capabilities.changedCapabilityCodes, ["camera_compatibility"]);
+    const finalCapability = await db.workspaceCapabilityInstance.findFirstOrThrow({ where: { workspaceId, code: "camera_compatibility" } });
+    assert.equal(finalCapability.revision, 2);
+    assert.equal(finalCapability.configVersion, "v2");
+    assert.equal(finalCapability.implementationVersion, "cam-1.0");
+    assert.equal(finalCapability.status, "enabled");
+    assert.equal(finalCapability.config.powerMarginPercent, 25);
+    const configureAudits = await db.workspaceCapabilityAuditEntry.findMany({ where: { workspaceId, action: "configure", operator: phaseInput.actorId } });
+    assert.equal(configureAudits.length, 1);
+    assert.deepEqual(configureAudits[0].configSnapshot, finalCapability.config);
+    assert.equal(configureAudits[0].reason, preparation.patches.reason);
+    const noOpBefore = await readEntityFacts();
+    const noOp = await db.$transaction((tx) => writePreparedCategoryCapabilities(tx, "tenant_001", workspaceId,
+      { categoryVersionId: writerTargetId, adoptionRevision: currentBinding.adoptionRevision + 1 }, targetDefinition,
+      [{ code: finalCapability.code, expectedRevision: 2, expectedImplementationVersion: "cam-1.0", config: finalCapability.config }],
+      phaseInput.actorId, "无变化配置复验", capabilityRuntime), rc);
+    assert.deepEqual(noOp.changedCapabilityCodes, []);
+    assert.equal(await readEntityFacts(), noOpBefore, "重复相同配置不得增加修订、审计或修改时间");
     assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation, "成功不删除准备资料或重复初始化");
     console.log("category-active-write-db: 写入绑定、锁竞争、内部采用事务的资格/修订复核、实体/绑定/审计回滚及历史保留通过");
   } finally {

@@ -761,6 +761,9 @@ async function main() {
   const demo = await login("demo", "admin", DEMO_PASSWORD);
   const demo2 = await login("demo2", "admin", DEMO_PASSWORD);
   if (process.env.E2E_STOP_AFTER === "category-governance-api") {
+    const capabilityWriter = runNode(["tests/category-adoption-capability-writer.test.cjs"]);
+    assert.equal(capabilityWriter.status, 0, capabilityWriter.stderr || capabilityWriter.stdout);
+    console.log(capabilityWriter.stdout);
     const commercialLocks = runNode(["tests/category-commercial-lock-db.cjs"], { env: { DATABASE_URL: TEST_DATABASE_URL } });
     assert.equal(commercialLocks.status, 0, commercialLocks.stderr || commercialLocks.stdout);
     console.log(commercialLocks.stdout);
