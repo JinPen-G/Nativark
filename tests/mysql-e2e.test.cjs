@@ -427,6 +427,112 @@ async function configureRentalTestLocation(token, type) {
   return created.body.data;
 }
 
+async function verifyFourCategoryRenewals(session, customerId) {
+  let token = session.accessToken;
+  const baseStart = new Date(Date.now() + 2 * 86400000);
+  baseStart.setUTCHours(2, 0, 0, 0);
+  for (const workspace of session.workspaces) {
+    const switched = await request("POST", "/api/auth/switch-workspace", { workspaceId: workspace.id }, token);
+    assert.equal(switched.status, 201); token = switched.body.data.accessToken;
+    const get = async (path) => {
+      const response = await request("GET", `/api/rental/v1/${path}`, null, token);
+      assert.equal(response.status, 200, `${workspace.categoryCode}/${path}: ${JSON.stringify(response.body).slice(0, 200)}`);
+      return response.body.data;
+    };
+    const profile = await get("tenant-profile");
+    assert.equal(profile.categoryCode, workspace.categoryCode);
+    const groups = await get("item-groups");
+    const group = groups.find((row) => row.status === "enabled" && ["serialized", "quantity"].includes(row.inventoryMode));
+    assert.ok(group, `${workspace.categoryCode} 缺少可执行基础商品`);
+    const location = (await get("locations")).find((row) => row.status === "enabled" && row.capabilities.includes("pickup") && row.capabilities.includes("return"));
+    assert.ok(location);
+    const mode = workspace.categoryCode === "construction" ? "warehouse_pickup_return" : "store_pickup_return";
+    for (const pricingMode of ["incremental", "original_total"]) {
+      const currentRule = await get("rule-versions/current");
+      if (currentRule.config.qualification.required) await approveRentalMemberQualifications(token, customerId, currentRule.config.qualification.documentTypes);
+      const reason = `四品类续租 ${workspace.categoryCode}/${pricingMode}`;
+      const draft = await request("POST", "/api/rental/v1/rule-versions", {
+        changeReason: reason, config: { ...currentRule.config, extension: { enabled: true, forceImmediateWhenOverdue: true, ...currentRule.config.extension, pricingMode } }
+      }, token);
+      assert.equal(draft.status, 201, `${reason}: ${JSON.stringify(draft.body).slice(0, 250)}`);
+      const published = await request("POST", `/api/rental/v1/rule-versions/${draft.body.data.version}/publish`, { reason }, token);
+      assert.equal(published.status, 201, `${reason}: ${JSON.stringify(published.body).slice(0, 250)}`);
+      const startAt = baseStart.toISOString(), endAt = new Date(baseStart.getTime() + 2 * 86400000).toISOString();
+      const newEndAt = new Date(baseStart.getTime() + 3 * 86400000).toISOString();
+      const input = { customerType: "personal", customerId, fulfillmentMode: mode, fulfillmentLocationId: location.id,
+        startAt, endAt, lines: [{ itemGroupId: group.id, quantity: 1 }] };
+      const quote = await request("POST", "/api/rental/v1/quotes", input, token);
+      assert.equal(quote.status, 201, `${reason}报价: ${JSON.stringify(quote.body).slice(0, 300)}`);
+      const frozenQuote = structuredClone(quote.body.data);
+      assert.equal(frozenQuote.ruleSnapshot.extension.pricingMode, pricingMode);
+      const created = await request("POST", "/api/rental/v1/orders", { ...input, quoteId: frozenQuote.id, customerName: "四品类续租会员", contactPhone: "13800000002" }, token);
+      assert.equal(created.status, 201, `${reason}建单: ${JSON.stringify(created.body).slice(0, 300)}`);
+      const orderId = created.body.data.id, prefix = `e2e:matrix:${orderId}`;
+      await prepareMockFunding(created.body.data, token, prefix);
+      const confirmed = await request("POST", `/api/rental/v1/orders/${orderId}/confirm`, {}, token);
+      assert.equal(confirmed.status, 201, `${reason}确认: ${JSON.stringify(confirmed.body).slice(0, 300)}`);
+      const allocated = await request("POST", `/api/rental/v1/orders/${orderId}/allocate`, {}, token);
+      assert.equal(allocated.status, 201, `${reason}配货: ${JSON.stringify(allocated.body).slice(0, 300)}`);
+      const inspect = async (stage) => {
+        const templates = await get(`inspection-templates?orderId=${orderId}&stage=${stage}`);
+        const template = templates.find((row) => row.stage === stage);
+        assert.ok(template, `${reason}缺少${stage}模板`);
+        const evidence = inspectionEvidence(orderId, stage);
+        const results = Object.fromEntries(template.fields.map((field) => [field.code,
+          field.type === "boolean" ? true : field.type === "number" ? 100 : field.type === "photo" ? [evidence] : field.type === "select" ? field.options[0] : "良好"]));
+        const response = await request("POST", `/api/rental/v1/orders/${orderId}/inspections`, { templateId: template.id, results, attachments: [evidence] }, token);
+        assert.equal(response.status, 201, `${reason}/${stage}: ${JSON.stringify(response.body).slice(0, 300)}`);
+        return response.body.data;
+      };
+      assert.equal((await inspect("pickup")).order.status, "renting");
+      const preview = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/preview`, { newEndAt }, token);
+      assert.equal(preview.status, 201, `${reason}试算: ${JSON.stringify(preview.body).slice(0, 300)}`);
+      const basis = preview.body.data.executionBasis;
+      assert.equal(basis.categoryCode, workspace.categoryCode);
+      assert.equal(basis.pricingMode, pricingMode);
+      assert.equal(basis.policySource, pricingMode === "incremental" ? "current_workspace" : "original_quote");
+      assert.equal(basis.originalCategoryVersionId, frozenQuote.categoryVersionId);
+      assert.ok(basis.categoryPolicySnapshot && basis.pricingStrategies.length);
+      const requested = await request("POST", `/api/rental/v1/orders/${orderId}/extensions`, { newEndAt }, token);
+      assert.equal(requested.status, 201, `${reason}申请: ${JSON.stringify(requested.body).slice(0, 300)}`);
+      const extension = requested.body.data.extension;
+      if (pricingMode === "original_total") {
+        assert.deepEqual(extension.rateSnapshot, frozenQuote.rateSnapshot);
+        assert.deepEqual(extension.ruleSnapshot, frozenQuote.ruleSnapshot);
+        assert.equal(extension.pricingSnapshot.method, "original_version_difference");
+      }
+      assert.match(extension.id, /^[A-Za-z0-9_-]+$/u);
+      const extensionWhere = `\`tenantId\`='tenant_001' AND \`workspaceId\`='${workspace.id}' AND \`id\`='${extension.id}'`;
+      assert.equal(readCount(`SELECT COUNT(*) FROM \`rental_order_extensions\` WHERE ${extensionWhere} AND \`status\`='pending_payment';`), 1);
+      assert.equal(extension.status, "pending_payment"); assert.ok(extension.payableAmount > 0);
+      assert.deepEqual(extension.executionBasis, basis);
+      assert.equal(requested.body.data.order.effectiveEndAt ?? requested.body.data.order.endAt, endAt);
+      const unpaid = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/${extension.id}/pay`, {}, token);
+      assert.equal(unpaid.status, 409, `${reason}未补款不可推进`);
+      for (const [instrument, amount] of [["rental", extension.payableAmount], ["deposit", extension.depositDelta], ["preauthorization", extension.preAuthDelta]]) {
+        if (amount <= 0) continue;
+        const funded = await request("POST", `/api/rental/v1/orders/${orderId}/funding-events/append`, { instrument, amount,
+          idempotencyKey: `${prefix}:${instrument}:extension`, reason: "四品类隔离测试模拟补款，非外部支付" }, token);
+        assert.equal(funded.status, 201);
+      }
+      const paid = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/${extension.id}/pay`, {}, token);
+      assert.equal(paid.status, 201, `${reason}生效: ${JSON.stringify(paid.body).slice(0, 300)}`);
+      assert.equal(paid.body.data.order.effectiveEndAt, newEndAt); assert.equal(paid.body.data.extension.status, "effective");
+      assert.deepEqual(paid.body.data.extension.executionBasis, basis);
+      assert.equal(readCount(`SELECT COUNT(*) FROM \`rental_order_extensions\` WHERE ${extensionWhere} AND \`status\`='effective';`), 1);
+      assert.deepEqual(JSON.parse(readScalar(`SELECT CAST(\`executionBasis\` AS CHAR) FROM \`rental_order_extensions\` WHERE ${extensionWhere};`)), basis);
+      assert.deepEqual((await get(`orders/${orderId}/extensions`)).find((row) => row.id === extension.id).executionBasis, basis);
+      const rereadQuote = await get(`quotes/${frozenQuote.id}`);
+      assert.deepEqual(rereadQuote.rateSnapshot, frozenQuote.rateSnapshot); assert.deepEqual(rereadQuote.ruleSnapshot, frozenQuote.ruleSnapshot);
+      assert.equal(rereadQuote.rentalAmount, frozenQuote.rentalAmount);
+      const returned = await inspect("return"); assert.equal(returned.order.status, "settling");
+      const settled = await closeMockFundedOrder(orderId, token, prefix); assert.equal(settled.status, 201, `${reason}结算: ${JSON.stringify(settled.body).slice(0, 300)}`);
+      assert.equal(settled.body.data.status, "completed");
+      ok(`${reason}: 真实取货/续租/未到账拒绝/模拟补款/读回/原快照保护/归还结算`);
+    }
+  }
+}
+
 async function approveRentalMemberQualifications(token, customerId, documentTypes) {
   const types = await request("GET", "/api/membership/qualification-types", null, token);
   assert.equal(types.status, 200);
@@ -852,6 +958,10 @@ async function main() {
     assert.equal(decision.status, 201, `R1 会员审核失败: ${JSON.stringify(decision.body).slice(0, 300)}`);
   }
   ok("R1 订单验收使用已登记且审核通过的个人会员主档");
+  if (process.env.E2E_STOP_AFTER === "four-category-renewal-api") {
+    await verifyFourCategoryRenewals(demo, r1CustomerId);
+    await maybeStopAfter("four-category-renewal-api");
+  }
 
   console.log("== 9. Rental Core 报价→下单→履约全链路（摄影：序列化+套装） ==");
   const groups = (await request("GET", "/api/rental/v1/item-groups", null, demo.accessToken)).body.data;
