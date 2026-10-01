@@ -485,8 +485,24 @@ async function verifyFourCategoryRenewals(session, customerId) {
         return response.body.data;
       };
       assert.equal((await inspect("pickup")).order.status, "renting");
+      const beforePriceChange = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/preview`, { newEndAt }, token);
+      assert.equal(beforePriceChange.status, 201);
+      const quotedRate = frozenQuote.rateSnapshot.find((row) => row.itemGroupId === group.id);
+      assert.ok(quotedRate && quotedRate.baseAmount > 0);
+      const plan = (await get("pricing-plans")).find((row) => row.status === "enabled" && row.rates.some((rate) => rate.itemGroupId === group.id && rate.unit === quotedRate.unit && rate.baseAmount === quotedRate.baseAmount));
+      assert.ok(plan, `${reason}缺少原价对应的启用计划`);
+      const adjustment = await request("POST", `/api/rental/v1/pricing-plans/${plan.id}/adjustments`, {
+        code: `E2E-RENEW-${orderId}`, name: reason, changeReason: "续租前通过正式调价入口把目标费率加倍",
+        changes: [{ itemGroupId: group.id, unit: quotedRate.unit, op: "percent", value: 100 }]
+      }, token);
+      assert.equal(adjustment.status, 201, `${reason}调价: ${JSON.stringify(adjustment.body).slice(0, 300)}`);
+      const priceChanged = await request("POST", `/api/rental/v1/pricing-plans/${plan.id}/adjustments/${adjustment.body.data.id}/confirm`, null, token);
+      assert.equal(priceChanged.status, 201);
+      assert.equal(priceChanged.body.data.status, "applied");
+      assert.notEqual(priceChanged.body.data.versionId, frozenQuote.priceVersionId);
       const preview = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/preview`, { newEndAt }, token);
       assert.equal(preview.status, 201, `${reason}试算: ${JSON.stringify(preview.body).slice(0, 300)}`);
+      assert.equal(preview.body.data.rentalAmount, beforePriceChange.body.data.rentalAmount * (pricingMode === "incremental" ? 2 : 1), `${reason}调价后的续租租金必须体现实际价格来源`);
       const basis = preview.body.data.executionBasis;
       assert.equal(basis.categoryCode, workspace.categoryCode);
       assert.equal(basis.pricingMode, pricingMode);
@@ -496,6 +512,8 @@ async function verifyFourCategoryRenewals(session, customerId) {
       const requested = await request("POST", `/api/rental/v1/orders/${orderId}/extensions`, { newEndAt }, token);
       assert.equal(requested.status, 201, `${reason}申请: ${JSON.stringify(requested.body).slice(0, 300)}`);
       const extension = requested.body.data.extension;
+      assert.equal(extension.rateSnapshot.find((row) => row.itemGroupId === group.id && row.unit === quotedRate.unit)?.baseAmount,
+        quotedRate.baseAmount * (pricingMode === "incremental" ? 2 : 1));
       if (pricingMode === "original_total") {
         assert.deepEqual(extension.rateSnapshot, frozenQuote.rateSnapshot);
         assert.deepEqual(extension.ruleSnapshot, frozenQuote.ruleSnapshot);
@@ -519,6 +537,9 @@ async function verifyFourCategoryRenewals(session, customerId) {
       assert.equal(paid.status, 201, `${reason}生效: ${JSON.stringify(paid.body).slice(0, 300)}`);
       assert.equal(paid.body.data.order.effectiveEndAt, newEndAt); assert.equal(paid.body.data.extension.status, "effective");
       assert.deepEqual(paid.body.data.extension.executionBasis, basis);
+      const replay = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/${extension.id}/pay`, {}, token);
+      assert.equal(replay.status, 201);
+      assert.deepEqual(replay.body.data.extension, paid.body.data.extension, `${reason}重复生效不得重写续租事实`);
       assert.equal(readCount(`SELECT COUNT(*) FROM \`rental_order_extensions\` WHERE ${extensionWhere} AND \`status\`='effective';`), 1);
       assert.deepEqual(JSON.parse(readScalar(`SELECT CAST(\`executionBasis\` AS CHAR) FROM \`rental_order_extensions\` WHERE ${extensionWhere};`)), basis);
       assert.deepEqual((await get(`orders/${orderId}/extensions`)).find((row) => row.id === extension.id).executionBasis, basis);
@@ -528,7 +549,7 @@ async function verifyFourCategoryRenewals(session, customerId) {
       const returned = await inspect("return"); assert.equal(returned.order.status, "settling");
       const settled = await closeMockFundedOrder(orderId, token, prefix); assert.equal(settled.status, 201, `${reason}结算: ${JSON.stringify(settled.body).slice(0, 300)}`);
       assert.equal(settled.body.data.status, "completed");
-      ok(`${reason}: 真实取货/续租/未到账拒绝/模拟补款/读回/原快照保护/归还结算`);
+      ok(`${reason}: 正式调价后实际计费来源/真实取货续租/未到账拒绝/模拟补款与重放/读回/原快照保护/归还结算`);
     }
   }
 }
