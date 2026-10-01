@@ -1,13 +1,17 @@
-import { CheckCircleOutlined, CloudServerOutlined, ExperimentOutlined, SaveOutlined, SettingOutlined } from "@ant-design/icons";
+import { CheckCircleOutlined, CloudServerOutlined, SettingOutlined } from "@ant-design/icons";
 import type {
   SaveTenantIntegrationRequest,
   TenantIntegrationCapability,
   TenantIntegrationConfigSummary,
   TenantIntegrationProviderDefinition
 } from "@rental-os/shared";
-import { Alert, App, Button, Card, Col, Empty, Form, Input, Row, Space, Switch, Tabs, Tag, Typography } from "antd";
+import { App, Card, Col, Empty, Row, Space, Tag, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Alert } from "@/components/ui";
+import { Input, Switch } from "@/components/ui";
+import { ActionButton, SaveButton, Tabs } from "@/components/ui";
 import type { FormInstance } from "antd";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { tenantIntegrationsApi } from "@/api/tenantIntegrations";
 import { useLocale } from "@/app/locale";
@@ -36,6 +40,7 @@ function ProviderCard({
   const liveVerified = config?.lastTestStatus === "passed" && config.lastTestMode === "live";
   const { message } = App.useApp();
   const queryClient = useQueryClient();
+  const [testFeedback, setTestFeedback] = useState<"failed" | "live" | "config" | null>(null);
   const save = useMutation({
     mutationFn: (values: SaveTenantIntegrationRequest) => tenantIntegrationsApi.save(definition.capability, definition.provider, {
       ...values,
@@ -134,8 +139,15 @@ function ProviderCard({
           ))}
         </Row>
         <Space>
-          <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={save.isPending}>{t("保存配置")}</Button>
-          <Button icon={<ExperimentOutlined />} onClick={() => test.mutate()} loading={test.isPending}>{t("测试连接")}</Button>
+          <SaveButton label={t("保存配置")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} />
+          <ActionButton variant="secondary" className="arc-action-connect" label={testFeedback === "failed" ? t("连接失败，重试") : t("测试连接")}
+            pendingLabel={t("测试中")} successLabel={testFeedback === "live" ? t("连接成功") : t("配置完整（未联网）")}
+            pending={test.isPending} disabled={save.isPending} onActionError={() => setTestFeedback("failed")} onAction={async () => {
+            setTestFeedback(null);
+            const result = await test.mutateAsync();
+            if (!result.ok) throw new Error(result.message);
+            setTestFeedback(result.mode === "live" ? "live" : "config");
+          }} />
           {config?.lastTestAt ? <Typography.Text type="secondary">{t("上次测试")}: {config.lastTestAt}</Typography.Text> : null}
         </Space>
       </Form>

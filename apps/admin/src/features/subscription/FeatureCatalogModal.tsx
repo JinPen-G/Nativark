@@ -1,4 +1,8 @@
-import { App, Alert, Form, Input, Modal, Select } from "antd";
+import { App, Modal } from "antd";
+import { Form } from "@/components/ui";
+import { Alert } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Select } from "@/components/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   FeatureOwnership,

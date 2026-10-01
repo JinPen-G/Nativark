@@ -1,6 +1,10 @@
 import type { RentalCategoryDefinition, RentalRuleVersion } from "@rental-os/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Form, Input, Space, Steps, Typography } from "antd";
+import { App, Card, Space, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Alert, Steps } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { useEffect, useRef, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
@@ -130,6 +134,7 @@ export function RuleSetupWizard({
       <Steps
         size="small"
         current={current}
+        reachable={maxVisited}
         items={RULE_SECTIONS.map((item) => ({ title: t(item.title) }))}
         onChange={(value) => {
           // 只允许回到已经过的步骤；向前必须走「下一步」以逐段校验。

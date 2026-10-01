@@ -1,7 +1,12 @@
-import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
+import { PlusOutlined } from "@ant-design/icons";
 import { RentalAssetStatus, RentalInventoryMode, type RentalAsset, type RentalAssetStatusHistory, type RentalAttributeDefinition, type RentalStockBalance, type SaveRentalAssetRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Switch, Table, Tabs, Tag } from "antd";
+import { App, Card, Col, InputNumber, Row, Space, Tag } from "antd";
+import { Form } from "@/components/ui";
+import { Alert, Table } from "@/components/ui";
+import { Switch } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Button, Drawer, SearchField, Select, Tabs } from "@/components/ui";
 import { useEffect, useMemo, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
@@ -103,7 +108,7 @@ export function AssetWorkspacePage() {
       <PageHeader title={resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产与库存"} description={locale === "en-US" ? "Maintain each serialized asset or quantity stock by location. Shared manufacturer and model details come from the product model master." : presentation?.assetDescription ?? "维护每件序列化资产或各地点的数量库存；厂商型号等共享资料由产品型号主档提供。"} note={{ title: `${t(profile.data?.terminology.assetLabel ?? category?.name ?? "当前品类资产")}${t("是具体可交付实体")}`, description: t("每条独立资产必须关联一个产品型号；厂商和型号不在这里重复填写，领取/归还使用量属于订单履约记录。") }} extra={canManage && activeTab === "assets" ? <Button type="primary" icon={<PlusOutlined />} onClick={() => openAssetEditor()}>{locale === "en-US" ? `${t("新增")} ${t(profile.data?.terminology.assetLabel ?? "资产")}` : `${t("新增")}${t(profile.data?.terminology.assetLabel ?? "资产")}`}</Button> : undefined} />
       {visibleTabs.length > 1 && <Tabs className="standalone-tabs" activeKey={activeTab} onChange={(key) => setActiveTab(key as "assets" | "stock")} items={visibleTabs} />}
       <Card className="data-panel" styles={{ body: { paddingBottom: 0 } }}>
-        <Space wrap style={{ marginBottom: 16 }}><Input allowClear prefix={<SearchOutlined />} placeholder={locale === "en-US" ? `${t(profile.data?.terminology.identifierLabel ?? "资产编号")}, ${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")} or ${t(profile.data?.terminology.fulfillmentLabel ?? "履约地点")}` : `${profile.data?.terminology.identifierLabel ?? "资产编号"}、${profile.data?.terminology.itemGroupLabel ?? "产品型号"}或${profile.data?.terminology.fulfillmentLabel ?? "履约地点"}`} value={keyword} onChange={(event) => setKeyword(event.target.value)} style={{ width: 360 }} /></Space>
+        <Space wrap style={{ marginBottom: 16 }}><SearchField label={t("搜索资产")} placeholder={locale === "en-US" ? `${t(profile.data?.terminology.identifierLabel ?? "资产编号")}, ${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")} or ${t(profile.data?.terminology.fulfillmentLabel ?? "履约地点")}` : `${profile.data?.terminology.identifierLabel ?? "资产编号"}、${profile.data?.terminology.itemGroupLabel ?? "产品型号"}或${profile.data?.terminology.fulfillmentLabel ?? "履约地点"}`} value={keyword} onValueChange={setKeyword} style={{ width: 360 }} /></Space>
         <QueryState loading={assets.isLoading || stocks.isLoading || groups.isLoading || locations.isLoading || dispositions.isLoading || profile.isLoading || categories.isLoading} error={assets.error || stocks.error || groups.error || locations.error || dispositions.error || profile.error || categories.error}>
           {activeTab === "assets" ? <Table<RentalAsset> rowKey="id" dataSource={assetRows} scroll={{ x: 960 }} columns={[
             { title: locale === "en-US" ? `${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")} ${t("照片")}` : `${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")}${t("照片")}`, width: 110, fixed: "left", render: (_, row) => {

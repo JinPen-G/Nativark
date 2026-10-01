@@ -1,5 +1,6 @@
 import type { RentalCategoryDefinition, RentalRuleVersion, SaveRentalRuleVersionRequest } from "@rental-os/shared";
-import { Alert, Col, Form as AntdForm, Input, InputNumber, Row, Select, Switch, Typography } from "antd";
+import { Col, InputNumber, Row, Typography } from "antd";
+import { Alert, Form as BaseForm, Input, Select, Switch } from "@/components/ui";
 import type { FormInstance, FormItemProps } from "antd";
 import type { ReactNode } from "react";
 import { useLocale } from "@/app/locale";
@@ -49,7 +50,7 @@ const securityRiskLevelOptions = (t: (value: string) => string) => [
 function LocalizedFormItem({ label, tooltip, extra, rules, ...props }: FormItemProps) {
   const { t } = useLocale();
   return (
-    <AntdForm.Item
+    <BaseForm.Item
       {...props}
       label={typeof label === "string" ? t(label) : label}
       tooltip={typeof tooltip === "string" ? t(tooltip) : tooltip}
@@ -64,7 +65,7 @@ function LocalizedFormItem({ label, tooltip, extra, rules, ...props }: FormItemP
 }
 
 // 该文件只使用 Form.Item；保留原来的调用形态，同时让所有规则字段统一经过词典。
-const Form = { ...AntdForm, Item: LocalizedFormItem };
+const Form = { ...BaseForm, Item: LocalizedFormItem };
 
 /**
  * 「业务规则」抽屉的 7 个分区，**按录入顺序**排列。RulesTab 直接 map 这份清单渲染，

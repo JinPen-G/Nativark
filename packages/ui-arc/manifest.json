@@ -1,0 +1,3231 @@
+{
+  "retrievedAt": "2026-09-30T17:55:11.625Z",
+  "source": "https://uiarc.dev/r/registry.json",
+  "entries": [
+    {
+      "name": "arc-foundation",
+      "dependencies": [],
+      "files": [
+        {
+          "path": "registry/foundation.css",
+          "sha256": "d7dcec62d67fe81b96318dd9896d37c469b117e9e9e6a0fae5042912b786a9d0",
+          "normalizedSha256": "d09f7031c00a0ead7683d34b7ab97b411bdc4731a12cc63e3ae41d3bc1c72237",
+          "matches": true
+        },
+        {
+          "path": "registry/motion-tokens.ts",
+          "sha256": "13af43b57ed38e5b72cfc06ff0ccc39b0593721f04840e73532893593cc61491",
+          "normalizedSha256": "52b6b94bb2590044f54e0ae8650611eed89ad503109e2e2d5f7efd2a9e349ef5",
+          "matches": true
+        },
+        {
+          "path": "lib/motion-tokens.ts",
+          "sha256": "839abae0d0767d20dad2535911fb55e9aa930d00ea0154ae6210393da641f201",
+          "normalizedSha256": "0bf910d9be4d6eb43380002eeb7d0d66efffa41424893f7b294dad7cc98378c4",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "button",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/button/button.tsx",
+          "sha256": "eceff451b488f681e8c25f9aed4764588919adfd371ec5f6f54e97c9b148b962",
+          "normalizedSha256": "cf7a9cf797742eede5817bd6e934f7a2fe62ce1bc96c64135094af5eee116b34",
+          "matches": true
+        },
+        {
+          "path": "registry/components/button/button.module.css",
+          "sha256": "b6efc172a5943185c76e910c1d2300575091d56fe5655cb8f581cf946687e1d3",
+          "normalizedSha256": "a73c039d7149da74dc4ec8ee0d73efaed082863acd27e9dca1181c701d7e9bcd",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "action-button",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/action-button/action-button.tsx",
+          "sha256": "cd3353e6449e6f96bf26b5a07fbb9845f1de0ea17404d452155363aed368a93b",
+          "normalizedSha256": "d97561ef2bdc13058d1fd6d838caf3e5af54c1b8f08e5cd7827fc656f788cda6",
+          "matches": true
+        },
+        {
+          "path": "registry/components/action-button/action-button.module.css",
+          "sha256": "cba6d983f59e7b448b9606bbdcc2ef981111705b068aca0bf7fa522c6cd4c6ef",
+          "normalizedSha256": "601823a476604aae7a7750301a3255ad7762635263aaa229c43ed92355cd9ffe",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "split-button",
+      "dependencies": [
+        "@radix-ui/react-dropdown-menu",
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/split-button/split-button.tsx",
+          "sha256": "59019cb6f1b3b7cdcd246a57ea482c784b3850a14a162799ff929bf1763b876d",
+          "normalizedSha256": "c59b02eaf2b9b7ce2b6dbb8eba04a523133e51d66ad48da1fcf86e04e2aeacf1",
+          "matches": true
+        },
+        {
+          "path": "registry/components/split-button/split-button.module.css",
+          "sha256": "60185681ad372563ed8f228b0888f05f22e12e28fd3f651fb0ce55872ca1407a",
+          "normalizedSha256": "c9fd3e2492936a91b9dbc7e26973090f0be3e302000199842fab360674eff106",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "dropdown-menu",
+      "dependencies": [
+        "@radix-ui/react-dropdown-menu",
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/dropdown-menu/dropdown-menu.tsx",
+          "sha256": "bb10d226cd13acdd4de47603f260cac426b50510efcfb66aa23c880b29353a57",
+          "normalizedSha256": "d7f5059be930270c047a7dc44af3bb3d08821f25c936bcef669f1780305afea0",
+          "matches": true
+        },
+        {
+          "path": "registry/components/dropdown-menu/dropdown-menu.module.css",
+          "sha256": "5a9c29589aa91525baad4e5f038961513234a9f0435c47b1c94df5ba0e1ef4c9",
+          "normalizedSha256": "f616e37a7bfd797e1b048212bdca68ee78bf78497d6d6aef45ef2f2b8274e2b4",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "context-menu",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/context-menu/context-menu.tsx",
+          "sha256": "3bc96ec9c77acb50183d49021667344158ceb1f060da6c047b5e2b7e5c2edd2e",
+          "normalizedSha256": "2640efd6db3631ab7e3b14f7be1e55028d9d7ee8338631cef01420f39847ab9b",
+          "matches": true
+        },
+        {
+          "path": "registry/components/context-menu/context-menu.module.css",
+          "sha256": "0c3e55f0ec8ff4db016b0073bb91ae7a611a2fd6a0053fb9728681cbbe019580",
+          "normalizedSha256": "07c5f5bfeecca7bd8e3695cf94e2982cd682a0ce9d9fb2b19616f1a776fa869d",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "copy-button",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/copy-button/copy-button.tsx",
+          "sha256": "00d739c4979f6a04a24568d8cea29cfc84a53a00a702cac964e3487333048856",
+          "normalizedSha256": "c970bc591e99c5768988f663d52f3646f8599dc07c96fc1dd655636be7ce25ff",
+          "matches": true
+        },
+        {
+          "path": "registry/components/copy-button/copy-button.module.css",
+          "sha256": "c7bbad6df501ed109431f8ab2c397279494ccf0c71332ae15289a99d2808039c",
+          "normalizedSha256": "df1031f57012900111aa541452251cce72c1e697d66fd6cd39dac41a205c5c1e",
+          "matches": true
+        },
+        {
+          "path": "lib/use-copy-feedback.ts",
+          "sha256": "88d0ae55bb3e241f529912a4802bbf014e4ba437025acc90ab13e012702273c5",
+          "normalizedSha256": "e4a1571e1b5fdec78561ad57dc905cda1ce620609a4997dffb2ab87189007531",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "drawer",
+      "dependencies": [
+        "@radix-ui/react-dialog",
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/drawer/drawer.tsx",
+          "sha256": "2adecbea514516d7a3c6a344154270a7b90de4d5dff3a64dc10fb688c1bd2eba",
+          "normalizedSha256": "64a0a7a0108b2f4a2a40b8d568bce604b0c7c4df340345c64451f5a57f70b84e",
+          "matches": true
+        },
+        {
+          "path": "registry/components/drawer/drawer.module.css",
+          "sha256": "aa27fdf0aa995285f0cf513fcf355b037018c2a1a72c63fac4909a40055a7dd2",
+          "normalizedSha256": "a16fca2d8aca0b5406e84587ad0acefad615924933547f026fbfc674aa690d7c",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "theme-switch",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/theme-switch/theme-switch.tsx",
+          "sha256": "097e2622d96100fec1d1562ac70aa96d1b563ce0a35772edcecaa1a128f4afd5",
+          "normalizedSha256": "32ee4b1d69b46af777c21b278cacf0391725f5246d790f55f1539dde9f03d1a6",
+          "matches": true
+        },
+        {
+          "path": "registry/components/theme-switch/theme-switch.module.css",
+          "sha256": "d6b1367fa6f480067aa70c9282d3aa3ad17904a4e2867bbba6b13807962218ce",
+          "normalizedSha256": "c34741c2297f8f4ac8e364b3cf8f15f0aaa272dd58313229891f46a76f896e12",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "theme-switch-eclipse",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/theme-switch/theme-switch.tsx",
+          "sha256": "097e2622d96100fec1d1562ac70aa96d1b563ce0a35772edcecaa1a128f4afd5",
+          "normalizedSha256": "32ee4b1d69b46af777c21b278cacf0391725f5246d790f55f1539dde9f03d1a6",
+          "matches": true
+        },
+        {
+          "path": "registry/components/theme-switch/theme-switch.module.css",
+          "sha256": "d6b1367fa6f480067aa70c9282d3aa3ad17904a4e2867bbba6b13807962218ce",
+          "normalizedSha256": "c34741c2297f8f4ac8e364b3cf8f15f0aaa272dd58313229891f46a76f896e12",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "theme-switch-split",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/theme-switch/theme-switch.tsx",
+          "sha256": "097e2622d96100fec1d1562ac70aa96d1b563ce0a35772edcecaa1a128f4afd5",
+          "normalizedSha256": "32ee4b1d69b46af777c21b278cacf0391725f5246d790f55f1539dde9f03d1a6",
+          "matches": true
+        },
+        {
+          "path": "registry/components/theme-switch/theme-switch.module.css",
+          "sha256": "d6b1367fa6f480067aa70c9282d3aa3ad17904a4e2867bbba6b13807962218ce",
+          "normalizedSha256": "c34741c2297f8f4ac8e364b3cf8f15f0aaa272dd58313229891f46a76f896e12",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "theme-switch-rise",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/theme-switch/theme-switch.tsx",
+          "sha256": "097e2622d96100fec1d1562ac70aa96d1b563ce0a35772edcecaa1a128f4afd5",
+          "normalizedSha256": "32ee4b1d69b46af777c21b278cacf0391725f5246d790f55f1539dde9f03d1a6",
+          "matches": true
+        },
+        {
+          "path": "registry/components/theme-switch/theme-switch.module.css",
+          "sha256": "d6b1367fa6f480067aa70c9282d3aa3ad17904a4e2867bbba6b13807962218ce",
+          "normalizedSha256": "c34741c2297f8f4ac8e364b3cf8f15f0aaa272dd58313229891f46a76f896e12",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "avatar",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/avatar/avatar.tsx",
+          "sha256": "5a7a42f6db8a476209f02eb898348e797b9f556e09ef5411c67b7ce1a48cddef",
+          "normalizedSha256": "a726bfde23ba934b46b3ffd1c64d64509ebb1ca50e6a5876e55b4756c00a90be",
+          "matches": true
+        },
+        {
+          "path": "registry/components/avatar/avatar.module.css",
+          "sha256": "adc82b4ee79f4422737c03a3b7836a3fad9315dc84848d164bfb24ffc3d96ce5",
+          "normalizedSha256": "245b1b7b0bd5b57676f0378f1decc12907b43d164bf422ccc8d0c334cbd2be2d",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "avatar-group",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/avatar-group/avatar-group.tsx",
+          "sha256": "87b140750014bedcbb2f757d0b75bb07e985b3ed2379bc086716520994a3fc30",
+          "normalizedSha256": "53b4328d2955fdfdab7a23dbcb128a5c67e1ebc113657cf5c74abaf8954cafa8",
+          "matches": true
+        },
+        {
+          "path": "registry/components/avatar-group/avatar-group.module.css",
+          "sha256": "306ce1e7ed4db4922117f009b3d8b147405a548553af25f72211c7e29e6239b9",
+          "normalizedSha256": "1517d1deb99763e34d2a32ebdd71a70dcae588f8dd9ac77e0fb3edba3d6894b4",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "input",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/input/input.tsx",
+          "sha256": "6fbf4ece044e148000e882b86336c5f220fec0983195224c2179e5022117813d",
+          "normalizedSha256": "1fff7805e9cc6980441d7446b40e17aaccda82fc44600f275ac3fb63ee3b2ee8",
+          "matches": true
+        },
+        {
+          "path": "registry/components/input/input.module.css",
+          "sha256": "8c1d215e6958cb9c2b4f9690ba0b56f74a6859949f9638de22fa0ca5a343669b",
+          "normalizedSha256": "55645c2fe6ce7bd399eea2e8a95f237041adbcd9ee56c013ee110758364240d0",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "textarea",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/textarea/textarea.tsx",
+          "sha256": "bcd18af550ab2d08bc3d21762bcba0395a429ce34657975ebbddb38218c1f7c7",
+          "normalizedSha256": "1563833d5a25dc75fd65ba8449335194a4a063b02e727f11954785a6541b2d65",
+          "matches": true
+        },
+        {
+          "path": "registry/components/textarea/textarea.module.css",
+          "sha256": "143fdd6e2b3ad97c6d24f4d824e442836428be542169d8e1b9b24091058127e9",
+          "normalizedSha256": "05b66f4cb3d0a2f816e0f557fd38e02681882173dcffc7265fee769655f52426",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "select",
+      "dependencies": [
+        "@radix-ui/react-select",
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/select/select.tsx",
+          "sha256": "d6c199141644265f5981a94a2f3285ac68c2c4d61a45981835e47ed4ad21bdad",
+          "normalizedSha256": "286161abbcbf3af47fc9f862de1000a75accf80a3ea804d3c962ae671454d3f6",
+          "matches": true
+        },
+        {
+          "path": "registry/components/select/select.module.css",
+          "sha256": "3c2d00542b6d757969a951c02267da4dd87320e4e6890d096bf871066923e9c6",
+          "normalizedSha256": "dde94219f79e214d4587f2dbf175cec4f820506cd569863d384059163c86ff2a",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "combobox",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/combobox/combobox.tsx",
+          "sha256": "135003efc7dc5f15e8cd54fe181a5a060d9a8886fb3b53e6a79313961737688b",
+          "normalizedSha256": "eb2eedc419c2efcffeb4703db8c3f499c5732c8f7d1db2143735465bfc69de3d",
+          "matches": true
+        },
+        {
+          "path": "registry/components/combobox/combobox.module.css",
+          "sha256": "78a0e0bcec6cb3b16ccd44269a6dabc3b80de9c44d274f904f43f7dc8d3b19ee",
+          "normalizedSha256": "a04b9d63266ffb6df7a7ff8af4fce15b3ae59b25bbe33ddc31f857296495b765",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "checkbox",
+      "dependencies": [
+        "@radix-ui/react-checkbox",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/checkbox/checkbox.tsx",
+          "sha256": "74086327e712e6ef541840eabfea1a6465b4e06f4cc5537ab6317cd9acd49bbe",
+          "normalizedSha256": "df7c361b85e988bdfdc86bbedf42f8ece835c792aadb20422e78b699ba182433",
+          "matches": true
+        },
+        {
+          "path": "registry/components/checkbox/checkbox.module.css",
+          "sha256": "0e7f4de2ad61c88a7961ea60f4a9f2e61d0926f2072f4515c6a8459ada9c017c",
+          "normalizedSha256": "1691dd7112df1dfa8456808fe68f66cf05b3d2aa45b761460240055fc50ac1ea",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "switch",
+      "dependencies": [
+        "@radix-ui/react-switch",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/switch/switch.tsx",
+          "sha256": "da58d509063b4693f31d49f3a61f2c90129fba3bbe730f4e6a75f0ea4e1d68b9",
+          "normalizedSha256": "864ac177f8894d9a43aae8344a4092d1d8e683603bf658faf273070d7dd1a3f2",
+          "matches": true
+        },
+        {
+          "path": "registry/components/switch/switch.module.css",
+          "sha256": "858b785b722912fadbd1977f66ec2462fc09d4e39638d2184a74ab5b4c8b1489",
+          "normalizedSha256": "5f42c2c5567b7a772d372e766a9d7a05be71aa7afb9dd903ec73cafff45a51ba",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "multi-select",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/multi-select/multi-select.tsx",
+          "sha256": "81d4a520e614ec6cb2188e5a09e301f31babb294d4b466492ebefe1ab0f4831d",
+          "normalizedSha256": "de4be7f710629a83c07534859922226bfb00beff31f417c918d33c8a48d2674b",
+          "matches": true
+        },
+        {
+          "path": "registry/components/multi-select/multi-select.module.css",
+          "sha256": "f2185133be9549cb1b977cb0ed02f39ec3cc910d981427c28dc20a4fd31c006d",
+          "normalizedSha256": "bb99015c4f6694b130561b1958b21ddaad8c40d7d6adc6ab776d6b810ebe4f00",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "number-field",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/number-field/number-field.tsx",
+          "sha256": "7452ce8e97b08dfb331459e0ccb66f3ef5fa147f4b9acc3b3934b06e37c22659",
+          "normalizedSha256": "9bb60161147f0b3f4c87791500ec570d00afe77ccb14cbc8a3ebd1a02ab315be",
+          "matches": true
+        },
+        {
+          "path": "registry/components/number-field/number-field.module.css",
+          "sha256": "c38f20f76c078699859f9e9333d242997b3c1d8a8c89872627992e362a003035",
+          "normalizedSha256": "22727a714cc7895b2df5599ea4a44b0f3fa3be2f6ffceba8ef7541f77f211174",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "password-field",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/password-field/password-field.tsx",
+          "sha256": "1866de136cb0bcb5b98e76de7d9565759fd6b1d2a3a49f6c6ce7fcf3aad0c1e9",
+          "normalizedSha256": "87e084a45dca92b5f37dc11af8c8b4a7077015a97762917bf27d60c3fef3f60d",
+          "matches": true
+        },
+        {
+          "path": "registry/components/password-field/password-field.module.css",
+          "sha256": "97bb1119228ac63b8a2b4f152b448b1e6672166e4b6bf3f9316b0437dd41e64a",
+          "normalizedSha256": "88bcee4ce01b95e49e92f638faad0b2105236f0d2671302bd75a6e91d01798a5",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "search-field",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/search-field/search-field.tsx",
+          "sha256": "87f29c3eb39572b2971182b2082628a74224bd17f10e2569f5ed9f9331824899",
+          "normalizedSha256": "adfc3d006b2fef073384d8afabc1e3a63be7d86aeac7869400aa43439a4d84a1",
+          "matches": true
+        },
+        {
+          "path": "registry/components/search-field/search-field.module.css",
+          "sha256": "3497a4e863e7f3a41775e95a6488411ac67afafb6acd2ad964e9b437982638d4",
+          "normalizedSha256": "9fb579e07f20d6bd1a91b6ef68b70b4109a796789d963bd1f06718f07ddd02f8",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "tag-input",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/tag-input/tag-input.tsx",
+          "sha256": "59e2a862701f69dc750d6f6e45a1e9e7e77049ca8f6c9307a00964f60987f4ab",
+          "normalizedSha256": "cb54290bd9ddc4f921066632e113ae5d3604a18194a730ff81e9f5fc206fa6a8",
+          "matches": true
+        },
+        {
+          "path": "registry/components/tag-input/tag-input.module.css",
+          "sha256": "044feb6b6a45afd78f418c9f5a03643fd83e2700a2a8a0732f04f0dea0b5ad63",
+          "normalizedSha256": "ab71d7499a01749bd1f6f8a9df54a11d48e08626403dab7db0afb836226f37cb",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "file-dropzone",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/file-dropzone/file-dropzone.tsx",
+          "sha256": "8f9a86a4d4ea4426d8eef7cdb7dad803420dadb444e27361160768889fc027bb",
+          "normalizedSha256": "295349659cbbcf0aa2e130aa0f1b4624132ba0f4a433a5f195c99554d55ed37b",
+          "matches": true
+        },
+        {
+          "path": "registry/components/file-dropzone/file-dropzone.module.css",
+          "sha256": "25265e30446cddb1a28137c0991b541c66a094f91650b04094d85266dfe90ca9",
+          "normalizedSha256": "03be571d71ecdc89b00c15a44ccca3d61b7bbeaa1194fb17bb876b7caa388b3a",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "radio-group",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/radio-group/radio-group.tsx",
+          "sha256": "738f29b106381cf1e53af0c67ce4efa073ad4cd68107e1e62c48760fc613d4cd",
+          "normalizedSha256": "b9219c22333230f72a696bda14448ffd6d35097e23593ade9992f48a858f146f",
+          "matches": true
+        },
+        {
+          "path": "registry/components/radio-group/radio-group.module.css",
+          "sha256": "9fe2795b19ce99153054d71d5e700594826b6c2831cf3dfb7faded8cfedfee3e",
+          "normalizedSha256": "626b3ad85c05a9c06991a4d5cccfcf2aaf370f36b44e8c75ad735541d5454da1",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "segmented-control",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/segmented-control/segmented-control.tsx",
+          "sha256": "30e0038170e7b95705ddb1a27e9d10c8953022ac05662cd237564894f3a92b55",
+          "normalizedSha256": "ed4b7ae31799b6580c21be9a7f04cb8e452e42ce65336ff5607ad29a669e0cfe",
+          "matches": true
+        },
+        {
+          "path": "registry/components/segmented-control/segmented-control.module.css",
+          "sha256": "2d63bd1089a0ecb22e2dd006c03f0c527c6b3a291e5ea556ba6de7273af445e8",
+          "normalizedSha256": "0ea7647cb546d9b9ba06e9afdfa0253bee678f6a94b7d6832d1168169e9b2fca",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "calendar",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/calendar/calendar.tsx",
+          "sha256": "8535c728eb763addfdad803b019d9d7502b4dba967ab52917bc63651cae85506",
+          "normalizedSha256": "63c3588568c6c894ef55bef8f488c4928d53a7242985e7554d7e3f8d598f8024",
+          "matches": true
+        },
+        {
+          "path": "registry/components/calendar/calendar.module.css",
+          "sha256": "a10e0d2ee8541fa0618545c8535fdfdebd8b057974f70e63dc8304d9f95af4c6",
+          "normalizedSha256": "3a79bccae8ad0a0e762d4177e5b6c9650bd2652d91aaa3b499dfcffd325544b7",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "date-picker",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/date-picker/date-picker.tsx",
+          "sha256": "2f1d170035b90e6b449744e70b9162ceb19af02e811c2c883802f8c3f7efc4d0",
+          "normalizedSha256": "311844af9a57b109bf60359fa33ec860d4a0511eae75eeda1ef3e3101dc83082",
+          "matches": true
+        },
+        {
+          "path": "registry/components/date-picker/date-picker.module.css",
+          "sha256": "9fb3702a1a8685969298f546499d8a16557055666e0ab57ed73daff58f709c63",
+          "normalizedSha256": "bf3ed20e595b99a3729526f88775718b020d2c114e1c79381778701869af060b",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "time-picker",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/time-picker/time-picker.tsx",
+          "sha256": "e5263e1b9abb91d0bbe23947e5519aa75aaa19bbc7a97593a2aae52116b2d1bc",
+          "normalizedSha256": "b286c6d1b13880dd952ba13ff366c3c62930c2bb990288438fe67f49ae4030fa",
+          "matches": true
+        },
+        {
+          "path": "registry/components/time-picker/time-picker.module.css",
+          "sha256": "97cd2de2bea1f5d55626111e853883fdf335df1e31efba34c1d491e7189a9ffa",
+          "normalizedSha256": "b72ab94242da48779ffde447d82955ea357bc74cbf80252b904481bc14eaa0ff",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "accordion",
+      "dependencies": [
+        "@radix-ui/react-accordion",
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/accordion/accordion.tsx",
+          "sha256": "c8838a35c0c5284386dd6cffb11c169447dd2871690d73f0e968c26f5323018a",
+          "normalizedSha256": "a78cf7f2f64b45c5e283c97c555c570979a90db247d9b22c982e87d8f0262917",
+          "matches": true
+        },
+        {
+          "path": "registry/components/accordion/accordion.module.css",
+          "sha256": "bdade6e956501b0147991cdb222dd9c67b866832c3151e4a2b6889300c9b8c66",
+          "normalizedSha256": "1d3eacc6d31681eb4c9585787e23183199f915580d7b7bd97353b93f3932e1d5",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "dialog",
+      "dependencies": [
+        "@radix-ui/react-dialog",
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/dialog/dialog.tsx",
+          "sha256": "447b23d1081618f3a1f26225fe0a5a58f65c1cd93ee7cde08e47a3217a703d78",
+          "normalizedSha256": "cb14f7223145df6ebe0a36fa497f0e93030d2de48f00416206fe055ea0c7d120",
+          "matches": true
+        },
+        {
+          "path": "registry/components/dialog/dialog.module.css",
+          "sha256": "567491d1dd6f95d95ebabed09a14e30ace4e2f0fb3984a1ce6c5f85e05494a61",
+          "normalizedSha256": "1b7fc679e8c95e0c2474066cca267bb4637cedfa26a32ec8402989d104c2aa3e",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "popover",
+      "dependencies": [
+        "@radix-ui/react-popover"
+      ],
+      "files": [
+        {
+          "path": "registry/components/popover/popover.tsx",
+          "sha256": "c564d1974bc55e805cb92e37ab0d5dbf48b46429353981985f50adab2c93ff4c",
+          "normalizedSha256": "a77b1c91ee217c18f44685496094771832584880e9fffe750a52c54e23a0a9f4",
+          "matches": true
+        },
+        {
+          "path": "registry/components/popover/popover.module.css",
+          "sha256": "43b98996b065d20f3dc4e149915a854f38057e91c7574310e3897046faf6fbd3",
+          "normalizedSha256": "96c82a73d70eca2faba575ac940ca5ce8cf342d4ae23f6fcccafe8efdc56e089",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "tooltip",
+      "dependencies": [
+        "@radix-ui/react-tooltip",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/tooltip/tooltip.tsx",
+          "sha256": "c0700a1061c13d3679eea09fa6d0211638cd840a7c95bb1d8b233ba89ae83ffd",
+          "normalizedSha256": "6cb3b927f8a0fa60f4420396f151fba282eac13392f55b052ca97039a4e548c3",
+          "matches": true
+        },
+        {
+          "path": "registry/components/tooltip/tooltip.module.css",
+          "sha256": "1cc5c7e4317a6f31acdf785fdc3945954ec03ab9a5067261b1837f793757e9b5",
+          "normalizedSha256": "fb9f168ae807c82d03e04c8a202c278c61e88d66ef0497c4872f02470ce1e2b4",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "tabs",
+      "dependencies": [
+        "@radix-ui/react-tabs",
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/tabs/tabs.tsx",
+          "sha256": "7765d4cff17ea1dada7782677143c2ea98ca7a8e914f44b2bb115379e4e1c9a8",
+          "normalizedSha256": "5d30603486041b45d6b76d04b92e3640434a0b416adfab9570b0fc35feebe37a",
+          "matches": true
+        },
+        {
+          "path": "registry/components/tabs/tabs.module.css",
+          "sha256": "2c18f9dd330dd96ce0106072d491443fb394df03305672a05485b4a67fd28d23",
+          "normalizedSha256": "9e73d3d1a7bde6f3c9eda051275b22510b3fd4a147078ec22781127f0a16be25",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "expandable-card",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/expandable-card/expandable-card.tsx",
+          "sha256": "f4f0d8622e1a55f23dca103b533bae614bf9355055adbab4d02e37560ca81e85",
+          "normalizedSha256": "184231ba5241cde27375e9178b1e8f89dde0f4594541528a9483f6b27e7b62ab",
+          "matches": true
+        },
+        {
+          "path": "registry/components/expandable-card/expandable-card.module.css",
+          "sha256": "f85ff47844ffd2c845c71fc10e4cf7872c00823dd54882b99ec3ea4515881d7e",
+          "normalizedSha256": "d8ec05b76e326129bc2a0901d3a8d2f4f605dd073f3dc92d167c514b74de1d54",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "breadcrumb",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/breadcrumb/breadcrumb.tsx",
+          "sha256": "586030838f47e867d5992d5373e6e67bfb1dc8311cd0f316cb4b95f1a746aef0",
+          "normalizedSha256": "ecf81b07f1ede0c7fa45d3458c82a3f019492ee8fa4d82b8592cae73ed2e5a82",
+          "matches": true
+        },
+        {
+          "path": "registry/components/breadcrumb/breadcrumb.module.css",
+          "sha256": "6d5cf4237388ae5e48daf381429d97d3401de7839c96a96b2d5f5a588e4edbd9",
+          "normalizedSha256": "46277bd988cc81cdb64bb56d05acd409c79b50a8b0e00cc59f358d38a55d94e2",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "alert",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/alert/alert.tsx",
+          "sha256": "97f9ffa4d9ea317e53755c85a212261b491cab47068d19332f7e347a7efbf639",
+          "normalizedSha256": "ae85caf8915dce1a2e7866f0ab69d0bddbc4d4898d1bda2747ab40e408fe4071",
+          "matches": true
+        },
+        {
+          "path": "registry/components/alert/alert.module.css",
+          "sha256": "2a811753598388e58fccd54b58175fc520f6dff34e06132fe741bc465de94fec",
+          "normalizedSha256": "a2db89144fb05b3cdc17fd601a3f2b9cf2ac0da7a1be74ee303fe2d81ed7e0e4",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "toast",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/toast/toast.tsx",
+          "sha256": "8dcf45c0ed55f7583120f9b093ff5a22f4a347eafc494e4fff3c543a640ed61a",
+          "normalizedSha256": "ff8af379662950d9862bde18719e5be5234eaeb8c5ecbd4c3a1da1c38879aa76",
+          "matches": true
+        },
+        {
+          "path": "registry/components/toast/toast.module.css",
+          "sha256": "7ecb6af5caa59c27e0df59f38ca6cfb7a088e3e9346a79356b8006671fc6edb5",
+          "normalizedSha256": "9435dede072739878255946c32dffccc98752b393d21e1cb80ac81dd360f6124",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "progress",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/progress/progress.tsx",
+          "sha256": "a534c5b11b53fb586965e2897f0769ca3938801beee0e54d2c2f399ceae15ff0",
+          "normalizedSha256": "3e17690759421e7caa8f57ac94eb9ceb3b6ad91d320ee8780fba2b1c3684a2be",
+          "matches": true
+        },
+        {
+          "path": "registry/components/progress/progress.module.css",
+          "sha256": "b1d5a36aa3b3d38683904c6e722d95569ea862255ad9d3dfd1c306bde2497f70",
+          "normalizedSha256": "742948e606de577f70296d8df2e7c52ce62d356421e1a10bb5681035a916a3be",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "skeleton",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/skeleton/skeleton.tsx",
+          "sha256": "c19b31176b1a490ff8c3ea79d6655001c8f2300ed40e24e3d5e1caada3a8f64c",
+          "normalizedSha256": "66bee862216865005d6a08bf32911cc11c6041cee250d2136f4cd17f3ea86929",
+          "matches": true
+        },
+        {
+          "path": "registry/components/skeleton/skeleton.module.css",
+          "sha256": "29e4d2b6539380098b4baf43b7623779ab001fac956a54e890af0d823a990cf3",
+          "normalizedSha256": "9e424dcb6d13f445771bc987a04208801267ddc92c081cc2922fad2dbca5a764",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "badge",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/badge/badge.tsx",
+          "sha256": "480c680c7ab7d06eee774226e99a54171c2f61ad82f381a1ea787dc0c3284d38",
+          "normalizedSha256": "490701afff8f8e109e35dafdc448636752b332bab11dbc0c7eddeb55adb85063",
+          "matches": true
+        },
+        {
+          "path": "registry/components/badge/badge.module.css",
+          "sha256": "e870891d804e29e20327f6e865908050d7a657cd02431587f920ab7a931d1a71",
+          "normalizedSha256": "7260d6675ded0340899a43451f1e2ee0b5b9a909ce087e36ecd09fce4fb04acc",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "card",
+      "dependencies": [
+        "@radix-ui/react-dialog",
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/card/card.tsx",
+          "sha256": "d92d6eacdf589fa9ff7e109bddfcdba2ed785995027d73a52ce0dbbed3246c7a",
+          "normalizedSha256": "4205f110afcb7caf797a281bc7434a0063a4b0d610eda5f6d270b4ca4bc180eb",
+          "matches": true
+        },
+        {
+          "path": "registry/components/card/card.module.css",
+          "sha256": "bf2052a0c644a14af0e88ba169f7763d25661c31fee6896271dd0c9bea7d72f2",
+          "normalizedSha256": "8628770bfafb4d2f75fcf05a5e43c09a2583bc05fd14faea86cdccd2f4158e47",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "metric-card",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/metric-card/metric-card.tsx",
+          "sha256": "1df2f0b361bdf57a6d4b4f5219cfbde4069ddf524bef79c521d3c74c37fd52f1",
+          "normalizedSha256": "94c63c4f45abf93c41a5beff4403a0da8031dd949aaee7cb4750ad4d62d918f0",
+          "matches": true
+        },
+        {
+          "path": "registry/components/metric-card/metric-card.module.css",
+          "sha256": "2615b310bf55912844a8abeb0917b117c20ed6e5abaf2e397cdcd1c535c9b43e",
+          "normalizedSha256": "f59fb8c39f0582836303113e3d77fd960fa5423eb1f50e4b48c3cca3934a0b3c",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "empty-state",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/empty-state/empty-state.tsx",
+          "sha256": "19b0a90c26593f568f9b0cc05134e7ce72f56a33faff67da359ba8ffda181af8",
+          "normalizedSha256": "c0e43699071f456e61a098a68354031efe35bdb1e4f01db3c674a436b79eafdb",
+          "matches": true
+        },
+        {
+          "path": "registry/components/empty-state/empty-state.module.css",
+          "sha256": "e65e4c4b6e3bd31b8925cb6a5d58e8c4826ffca6efb100f786c70428f98afc1a",
+          "normalizedSha256": "ef41937faf2226c2d42196d9ed04776626e22a735fb2162445f9844be1f18c35",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "tree-view",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/tree-view/tree-view.tsx",
+          "sha256": "d354d1cc9d119ebe1fe77ebff6603d7fdbe586553ae441bdbedc6b649b55e8b1",
+          "normalizedSha256": "8f2ff752dbd50c42e35112bd34d0121295f5b7b19f30e1870e47d7c4d71625fd",
+          "matches": true
+        },
+        {
+          "path": "registry/components/tree-view/tree-view.module.css",
+          "sha256": "36e1c87a23962c4d3b98c7abff65315598b945e2609f3d8cb287bff3b9870336",
+          "normalizedSha256": "a42e7077e7919d3b8705dfebdab6a9d8c20420a9a3a75143dd483a4b8b9d1c86",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "pagination",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/pagination/pagination.tsx",
+          "sha256": "cf33dc5cfcb666e5966056820e84c0f1194d673118a4df20afe41d795c6cef03",
+          "normalizedSha256": "c442ca5b9a99f687b6db3efc920c9c0649c0db4e1283f173a578223628897c14",
+          "matches": true
+        },
+        {
+          "path": "registry/components/pagination/pagination.module.css",
+          "sha256": "8f3f94e14442e6367ebd94a8eab04f2279e9bdcd03135299b1aed75d7c6740fa",
+          "normalizedSha256": "b20b532bd78a5c7a2665bc7fcc96d4ea9459ff76daef94dc413f51cadc5638c7",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "filter-toolbar",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/filter-toolbar/filter-toolbar.tsx",
+          "sha256": "a7ed765cdbd2a9c9c57f24f1b89ac60c6aceb5e36f9bd5b648a9cdfee2d84dd8",
+          "normalizedSha256": "e98e5dbd67f1b827e718e93174312a1c4fa65748171025141bac44912c164dc3",
+          "matches": true
+        },
+        {
+          "path": "registry/components/filter-toolbar/filter-toolbar.module.css",
+          "sha256": "e6d408a3d31a1b32eafa21482c7b0575567b0b425a62fb92842d3ac7b6d1751e",
+          "normalizedSha256": "6b101fd2cdf284617816225d0712bff99543c5542bd74441c2bbcae8385b3dd1",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "sortable-data-table",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/sortable-data-table/sortable-data-table.tsx",
+          "sha256": "e83730c108b7c5452501cd7413f39ff98d4b7c82b14c05d7507cba9a3b4e6c0b",
+          "normalizedSha256": "501c18a0f32507205402ec615ca11f1361731fec65e4e75e2d00b4ec9aeeaf36",
+          "matches": true
+        },
+        {
+          "path": "registry/components/sortable-data-table/sortable-data-table.module.css",
+          "sha256": "e13a086dba25df8a48aa2a5804d0400e5267125a7399d6d8fafbbdb9cd02b473",
+          "normalizedSha256": "340daf1e672f5399014f2a8381ab951bbefb59a7ac30ae0e2fb03c44a52c36b8",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "sparkline",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/sparkline/sparkline.tsx",
+          "sha256": "8218dd746624f2bb2f71927117e15341ce29fa83fed96c15d0a821555e71a712",
+          "normalizedSha256": "a42f735cf53c0c03418a9d45a17bde7d38adee0e9f8e9f1adce7927dcc976049",
+          "matches": true
+        },
+        {
+          "path": "registry/components/sparkline/sparkline.module.css",
+          "sha256": "da0cd0a1183dfe0df37c5e7ac12b664e0cac7c2082db6754e652d1aa5d235e2c",
+          "normalizedSha256": "3b8a6d3046f27660d0dc30f47463a4e94a7b6d782289cf680430cffd66db91d1",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "gauge",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/gauge/gauge.tsx",
+          "sha256": "58d19970a76e154f90538b99ab2038c77d58b1c033888ec17cb340a61f242d44",
+          "normalizedSha256": "8b393a8ee903b3f81a81ef22d1df64f662c3b00167c7968ffc95647781edc61a",
+          "matches": true
+        },
+        {
+          "path": "registry/components/gauge/gauge.module.css",
+          "sha256": "a234412792921b2e3681e698b49d82c34283db727196f305146b0a11c6a5a16f",
+          "normalizedSha256": "86ea24ed0999f4a3f14b9f47c73b64f30632d98849620911b3603ce7812ce23c",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "animated-counter",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/animated-counter/animated-counter.tsx",
+          "sha256": "eb0e65dd86eace501c190bbb569fa5fb50d958f9373e154913ce13641609d655",
+          "normalizedSha256": "318d26236d070b7d76749d2c43f45987930fdba0e0bb0322b2e02bd7efabd37a",
+          "matches": true
+        },
+        {
+          "path": "registry/components/animated-counter/animated-counter.module.css",
+          "sha256": "3cc7db9e431a6564abce8424c80ae239c76374dd131ec56206577cb838983be9",
+          "normalizedSha256": "19c4c7b85b888863100307ad32f86abf51902bb30d9f78f11d3d66b4a28be57e",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "code-block",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/code-block/code-block.tsx",
+          "sha256": "16fb25e8f17f4d11f1ab4a5c0bdc84dd070ffd9bc7089d93f177a8ce800f1c51",
+          "normalizedSha256": "063ff0d83fea3b5cc700ea2eda0c6fddf867641e01c07e62202253db491d99e3",
+          "matches": true
+        },
+        {
+          "path": "registry/components/code-block/code-block.module.css",
+          "sha256": "3419a73d0396bb47f3a834181fbc5435e84013bbf827cf7961dc5dfcc4d3946b",
+          "normalizedSha256": "24d78a8bc2477b1dcb222de88d176716656d6986ed69cced27debcb762412a7c",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "text-reveal",
+      "dependencies": [],
+      "files": [
+        {
+          "path": "registry/components/text-reveal/text-reveal.tsx",
+          "sha256": "84d48ec706a138e925e9df20cfa9b172a16baae8fefd127e46276da44144a5af",
+          "normalizedSha256": "b1dc36204394e226003553affb71a48f1bee71d7bafa7dddf64ed21947d38014",
+          "matches": true
+        },
+        {
+          "path": "registry/components/text-reveal/text-reveal.module.css",
+          "sha256": "007f312d13eb17d57f016a963d2a0248b74cd43be3e21fa340e2dabd0f5ce838",
+          "normalizedSha256": "29924cb68a04a692d0a1531ae6a69f2d3b022d4d252b85503516576e6b2e682d",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "in-view-title",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/in-view-title/in-view-title.tsx",
+          "sha256": "022601dfbc2b36d07d583d0c68547df4db09de7a8c675516048803e146289045",
+          "normalizedSha256": "c9cc6627d747b176af4feac33d39eceb4e9b4705456dbe23f810aee1f5d163c8",
+          "matches": true
+        },
+        {
+          "path": "registry/components/in-view-title/in-view-title.module.css",
+          "sha256": "7af8fbeef5d0d75b4d5853b88d0bd6cb6834073f6548746a6350183666ffac44",
+          "normalizedSha256": "cca2611194f89148ea9b2a825d5a0887501935ec85a77a073ea78785cd96ff94",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "text-morph",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/text-morph/text-morph.tsx",
+          "sha256": "6801b98e6c8864094443ee9ef819f5c2040a4b35146139228af775c80cdde1ef",
+          "normalizedSha256": "cd3f51f48566775e235c064a4e7bdf7f5d98c9d7004a15b5db27c8979e06e474",
+          "matches": true
+        },
+        {
+          "path": "registry/components/text-morph/text-morph.module.css",
+          "sha256": "bd51e5ba739e7b7272ad4b46fb500617aaaefb2ae4303010edaea6057f975989",
+          "normalizedSha256": "d4b03a91492f35545dd86bf4cfe3ac4a4b09fff29e7e35c1b9c14e17d162d2dd",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "text-shimmer",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/text-shimmer/text-shimmer.tsx",
+          "sha256": "5f99b0dfd53091441a654f16e6b3ebde31f57f7c1b4d3c0a629a6b1ef7eea0d4",
+          "normalizedSha256": "32410b6b52e30e7a1a7cc35604fcd8207324187d1e86e3c605b5aee2609e963e",
+          "matches": true
+        },
+        {
+          "path": "registry/components/text-shimmer/text-shimmer.module.css",
+          "sha256": "846d51e0a77bed48048232b1f08ddb196d7f7b3b876eca1d80ddd11e8c5ec3bf",
+          "normalizedSha256": "69ff9a104819d6451f82363b8691d69cd4a29131e0cfc6ed7233966ebde198e6",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "hold-to-confirm",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/hold-to-confirm/hold-to-confirm.tsx",
+          "sha256": "c93ede22e30474e47655729e65f690ed1b3f1731b54ca04ad5ae4f387e72ba96",
+          "normalizedSha256": "19ec04a0280df8cdbb0ee60b510da2397ead9a30efb63a351bf69ade98b1769d",
+          "matches": true
+        },
+        {
+          "path": "registry/components/hold-to-confirm/hold-to-confirm.module.css",
+          "sha256": "fd6c3a124c6150d9053ab2ccc642c6a31654007f7b6b6cb45ea5f43185ecd748",
+          "normalizedSha256": "2824de27c339805874982f2b46afe21153125fd7fd161cbe6fe6921164b761d3",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "swipe-actions",
+      "dependencies": [
+        "@radix-ui/react-dropdown-menu",
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/swipe-actions/swipe-actions.tsx",
+          "sha256": "75c161bc8f047ab6d31816b51ad256029313726fc99fc49c217ebb90999430c3",
+          "normalizedSha256": "4f3e0cdb68938539542440c03f991a72d1b501eb99db3960873f1984386332c6",
+          "matches": true
+        },
+        {
+          "path": "registry/components/swipe-actions/swipe-actions.module.css",
+          "sha256": "547a2f909ddb0091f82a937c2e59dc3cb224f06f1ed37f79730014e1392ac0b5",
+          "normalizedSha256": "124a224cb539bcf7e7eec65ee7fc7d43489fe4be00f3d0f49d95f72965b480e2",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "slider",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/slider/slider.tsx",
+          "sha256": "587334c8ca3ff51673c4106a1fc948ca70153c98f51b631c20c79a50a16e2db0",
+          "normalizedSha256": "761aeb56f83ac75a62a5adb4eda4dcd75fb623e394c79f8d8712a7fc44123ea5",
+          "matches": true
+        },
+        {
+          "path": "registry/components/slider/slider.module.css",
+          "sha256": "73c4906ef77b19643eccb2297909dd0c9542f297a2911377214b011f1237d36e",
+          "normalizedSha256": "0b57a77b0e7391fc55c087f128cc5b9631af3cbbedd7015c90a039329be5dc8f",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "inline-edit",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/inline-edit/inline-edit.tsx",
+          "sha256": "0c95ddb1c6d7dc436b78a0d5919da8ed3e57c9f57fe5a084b658110373f4494f",
+          "normalizedSha256": "2d3581e36a14b12e686fb4c464f69ecd9ebf19988c005b0935b55a271b2f1f53",
+          "matches": true
+        },
+        {
+          "path": "registry/components/inline-edit/inline-edit.module.css",
+          "sha256": "dbbe33366ea89a5f3bb5d6880801069e644c154c4aa28b7adc14ecee12593071",
+          "normalizedSha256": "4e881aea623506250dd62351d2e847813a24d06f18a083df57d07ac52d9563a6",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "chip-group",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/chip-group/chip-group.tsx",
+          "sha256": "dfa54768547d3361b0757040b1593d0d692dc27ead4b47d829b2db1177dde2f6",
+          "normalizedSha256": "ea0bda213b09616d271da34fd37eea59a4ba7dd69828a3d3bfe9e89ec779fa36",
+          "matches": true
+        },
+        {
+          "path": "registry/components/chip-group/chip-group.module.css",
+          "sha256": "6be4131c5b4c3fc348be597fc26f99f424673c2ddf0798fff6bd46609543b6f5",
+          "normalizedSha256": "f74b151a4530b48d625e1f8dcf27a83f1ba1e6ddfa691b3e4efc71f6b54c5887",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "password-strength",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/password-strength/password-strength.tsx",
+          "sha256": "db117d5c127f0a8f4c54f7f33892ab3336c0afd685a417f5b56a2c743a040ba3",
+          "normalizedSha256": "6b7c2b32bfbda0fe1627cf303d19647602c80d9f917a2137cce3eb0bfe7abb90",
+          "matches": true
+        },
+        {
+          "path": "registry/components/password-strength/password-strength.module.css",
+          "sha256": "4d840c953d2704d2e3b5bc95982fa8010b2cfa722447c180581c4c86bd3e2c9c",
+          "normalizedSha256": "04843847e786e4d93f2a2d0c60efd8892dd4d0c23f02ec635818c2bdcd717d30",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "bottom-sheet",
+      "dependencies": [
+        "@radix-ui/react-dialog",
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/bottom-sheet/bottom-sheet.tsx",
+          "sha256": "497f494d1888f4858267153762ff3c712ade73b80c2f96808861abed1569cb05",
+          "normalizedSha256": "1f5eb8542317d9461b69a8a94603d64f33294334f555e48916cadbba66e56cac",
+          "matches": true
+        },
+        {
+          "path": "registry/components/bottom-sheet/bottom-sheet.module.css",
+          "sha256": "0be8c753ba8b1c79fbb2d4d63b50308ad512c5067ced1ea57654884b6d0f20af",
+          "normalizedSha256": "55679634a7287b9f7317923a07eb3c19a3e003fd57cc657eb744f016c0939a33",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "hover-card",
+      "dependencies": [
+        "@radix-ui/react-popover",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/hover-card/hover-card.tsx",
+          "sha256": "2381928d32112a0148c9e26a71d73d7f5dd814d0c9a8cc5ed26005c8e226df1d",
+          "normalizedSha256": "69100fd76338aa2ff4cfdcb37cab670bb31890594c5679b78456b311ae3e4017",
+          "matches": true
+        },
+        {
+          "path": "registry/components/hover-card/hover-card.module.css",
+          "sha256": "d3658e6fedd0845aaec4046a0d42ae0166baeda10732fb6240e67eb89397ede8",
+          "normalizedSha256": "c17edf4946c50256a04b5a98b1196a28dfa4c763aec8779d37275ac6de784fbc",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "resizable-panels",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/resizable-panels/resizable-panels.tsx",
+          "sha256": "53566d4e1c88e1ed5157fb9ba8ee2d6735a2910062d05ad3afd54fa058dfdcbd",
+          "normalizedSha256": "1a5e0878d90aae099c7a13e58447c53f4d056b64d93d41a058be62d3a21e1e42",
+          "matches": true
+        },
+        {
+          "path": "registry/components/resizable-panels/resizable-panels.module.css",
+          "sha256": "397b64c3b1ca43486b139f18239b6c54aa25146e060f6773b923386f62a7c7f9",
+          "normalizedSha256": "4dababfb63ae9e12d57764d14abe84268e93a82072bab38fd6cd5459974cf059",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "toast-stack",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/toast-stack/toast-stack.tsx",
+          "sha256": "4aa603bd672a5adfe50b10dcb53631399eb1e58f9c57f42d0b1bd766b7cde6e0",
+          "normalizedSha256": "9f83fa1e0ac5c3848d2ee9c6ac7d00a98550c36acb2fecde97032336c3a140de",
+          "matches": true
+        },
+        {
+          "path": "registry/components/toast-stack/toast-stack.module.css",
+          "sha256": "2adb1f57f8705d4cf9b758055fbd2b3a045f588f2d347b9321b0d0d131ddb954",
+          "normalizedSha256": "24c4a3a2c6bca0385393220892412706d447da25a851d3bee959c9e93cf87963",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "usage-meter",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/usage-meter/usage-meter.tsx",
+          "sha256": "2cb13d062cf67178517890f69e2f91f5e9830bc62d56246e5f50f42dcb71ef57",
+          "normalizedSha256": "ebcbaac449cb3c3dcabff3073ea2397e01866e8f52e80d1a558ff8d8e0715f8c",
+          "matches": true
+        },
+        {
+          "path": "registry/components/usage-meter/usage-meter.module.css",
+          "sha256": "4306932201e68a04e7d7625ae644e2c64e237714d9ebaa24c9b7d8b928175d1e",
+          "normalizedSha256": "a722e50bf29181e1ac3d7fe3916112f9f67aaa5c5c31c7b558fac8d3d95113af",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "image-compare",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/image-compare/image-compare.tsx",
+          "sha256": "ce127efb80e732915826c5d1efc20869a379866d5c661c545ada4433cc2d569b",
+          "normalizedSha256": "b592197f57f75ece5c1ed00e6f3d591d2891f8e2f11622496283316e4be57ce4",
+          "matches": true
+        },
+        {
+          "path": "registry/components/image-compare/image-compare.module.css",
+          "sha256": "024a003a765e695c750820f12ebbe63383d91b47eefe1f19ea3a776f3f6fbe24",
+          "normalizedSha256": "1d251618b6038ce5131ec98f0cac1dde6b2eccfff37b9222643b96c9526d6eb6",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "carousel",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/carousel/carousel.tsx",
+          "sha256": "6dbd556a40da77e77e16aa77fc5fb96591fe7f9bfbfe2406379f359166860f60",
+          "normalizedSha256": "7a7bcacbce15804874670278b7a749e82a9be1559f15430dd8dbf013bab5e1b2",
+          "matches": true
+        },
+        {
+          "path": "registry/components/carousel/carousel.module.css",
+          "sha256": "84ce7cba5841c26f5c4406f2992047468d4eb6179fb5ca4777005d6075f1c17d",
+          "normalizedSha256": "b8affe3a6c290a1f1372de3a07d38ec9f560db284d2d11cbb6b0f4994953e638",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "bar-chart",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/bar-chart/bar-chart.tsx",
+          "sha256": "b0cc18bd8653c5a97008f357b95c7eda237b89fb65968240d0921041582209e6",
+          "normalizedSha256": "f740be35b5d732b5ca74e787aff8a445cf231f830b8e51a66adc279935052cf0",
+          "matches": true
+        },
+        {
+          "path": "registry/components/bar-chart/bar-chart.module.css",
+          "sha256": "11ab4c8f76d5fe85c7931b04c65d9f8c9d6325307712a9f1020c8076df69c371",
+          "normalizedSha256": "3c24207631bcd6744dd7b57c312862dfa1e0ee87b75bc092ad12ac19ad7a0909",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "activity-heatmap",
+      "dependencies": [
+        " animate=",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/activity-heatmap/activity-heatmap.tsx",
+          "sha256": "3ec643a88a515af79b4b7365bffdb5561b76d403d5afba079647ac40c1446ac9",
+          "normalizedSha256": "36ad029a72163226857c84da1f478d92c98eba1544dcd02220122412911bfd50",
+          "matches": true
+        },
+        {
+          "path": "registry/components/activity-heatmap/activity-heatmap.module.css",
+          "sha256": "4edd33023fde6c9275bd87ba6ad9d960322e339e37eb7c2ea2ea52d4478161b9",
+          "normalizedSha256": "7f7b1835f3ea0d1089ee7c5d1a335bad288238f4b3a890cebb071dccb6494cdf",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "timeline",
+      "dependencies": [
+        " animate=",
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/timeline/timeline.tsx",
+          "sha256": "10dbc668478c5b4818ae3e41b73f668ff5dccc1d88d44d45e8ffd44dda268d8d",
+          "normalizedSha256": "aad4506477d2807305794e8f1772cbec0a86042b602310b473b131f99c8fd683",
+          "matches": true
+        },
+        {
+          "path": "registry/components/timeline/timeline.module.css",
+          "sha256": "bfa90b0a1158d4e3699a31522e1741678463b6f2400cc96bbffde3709b01d1bb",
+          "normalizedSha256": "8886acb0b0c7929f1a9292284985f964d790f6b371c944af1b905dcaaed38955",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "user-menu",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/user-menu/user-menu.tsx",
+          "sha256": "0a7768d44fd735c17c75710a407a663b36836d26222133aeb9237670eb49538c",
+          "normalizedSha256": "a1eef613dcf48cb1db7256d9859a395d5c5164bf3126475c09085f4dfd0abae4",
+          "matches": true
+        },
+        {
+          "path": "registry/components/user-menu/user-menu.module.css",
+          "sha256": "9102cccb8a33ddfd1c7ce5d7538a17869526352883fa6033e662fa2ea26e0bb1",
+          "normalizedSha256": "7e9334d58b0f19d6ecbc92889ec2f3521be3664ca98e225180c4474882c70500",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "stepper",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/stepper/stepper.tsx",
+          "sha256": "bef2b5fe3d0af993402a1205f56d5f4d6f179f41e24567b7b7f331dd959de3b4",
+          "normalizedSha256": "4f83acff40bd1e268394197b5ae642b3efa8c22796917926102b8847bc242fc8",
+          "matches": true
+        },
+        {
+          "path": "registry/components/stepper/stepper.module.css",
+          "sha256": "d495e43e23d4866dd9cced3b336b134a0a80072ebfc833129a63306bafcb54dc",
+          "normalizedSha256": "6daea26537877bbecf72b133843338b030786e8bfd93e8bf638e79c097163afe",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "signature-pad",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/signature-pad/signature-pad.tsx",
+          "sha256": "f903af8a4c6951dda03d8dd51dcb2a1d96713ac1cac55ddd73a636e711c9659e",
+          "normalizedSha256": "1e3e8fb078b6fbf10269b3ba9727d16ed0397cd2ba100acb6e3a878bcbed84d5",
+          "matches": true
+        },
+        {
+          "path": "registry/components/signature-pad/signature-pad.module.css",
+          "sha256": "58c64727950539975ccccb4f457ea40a2b55bf1331ec18a5a1ddfac8c8aa26e6",
+          "normalizedSha256": "5e328048d66e039b4dc9887b35470f68486d464765b93811cb2eb0ca952da3f4",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "date-range-picker",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/date-range-picker/date-range-picker.tsx",
+          "sha256": "fb690ca0d1a31b1c1001580d53c82aba24a348626d64bc893238b139f49f61c9",
+          "normalizedSha256": "9ef5ba3e09f3e4b769d878da61a80d841e520a8f5469402e5fdea7ff13f8c0f3",
+          "matches": true
+        },
+        {
+          "path": "registry/components/date-range-picker/date-range-picker.module.css",
+          "sha256": "fae33a7e8804574e98700a0d5282ef04d7f9fbc3851ff3323b46be563cad1a0b",
+          "normalizedSha256": "751403eae88d14c536723cdb7b83b3b30f1d9c788b6854207ec812e1a6f50c61",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "color-picker",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/color-picker/color-picker.tsx",
+          "sha256": "ec9b61a9fb2f544a83b26378701ba3d2d057866073e2ee00ae36bb7e7e5b4609",
+          "normalizedSha256": "f585acc62f0e8f809346f7e13acc1f7524f47208908cefa544e0e32c53832e1e",
+          "matches": true
+        },
+        {
+          "path": "registry/components/color-picker/color-picker.module.css",
+          "sha256": "ae9afb1a4e3a89902be52b620db7c4fdea881b168c6375c0fd98a5b23a788298",
+          "normalizedSha256": "77e53fd130ce984ad8d0221d5402fef48c0b2a92bca4954a5849dbec1b6fadf2",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "line-chart",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/line-chart/line-chart.tsx",
+          "sha256": "a57d744729052ba4536f1aa068e924b3a714c242b241191dfefd7cb5f241e4b4",
+          "normalizedSha256": "ff99e996bba4b1b3ee69d36a2e8d53313767d7cc1765774a5fd1f196ebe4f2dd",
+          "matches": true
+        },
+        {
+          "path": "registry/components/line-chart/line-chart.module.css",
+          "sha256": "9b2ec6535e1534f345c63b3c45a430ade2807e0954c74723fc4a8b6320af8973",
+          "normalizedSha256": "aa2a93f9b5384891009d9ed80353ec7fdd8ed9c7c410df40ee1f90513f9b0de2",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "donut-chart",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/donut-chart/donut-chart.tsx",
+          "sha256": "66bf948fabce83c9a68b78aa3e3e35e5a6af53809b58b25009248a89838ea723",
+          "normalizedSha256": "7f829128fb652dde070a1394ebca1f6d80e8527d47d228feac4abd6ef6a7d92b",
+          "matches": true
+        },
+        {
+          "path": "registry/components/donut-chart/donut-chart.module.css",
+          "sha256": "ff2b3a7611bf9e141b00bda32cec89ff943a1380f49aa99838e67e6d2a9031bd",
+          "normalizedSha256": "c5583a41965662469c378eac415d3e470a2cbbff2573eb2935d086055b34b7fe",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "streamgraph",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/streamgraph/streamgraph.tsx",
+          "sha256": "d2dab1d5ad811903807973a8608e94cb9cb02d63f13614b4154511901df2d74b",
+          "normalizedSha256": "ecaf2d6f82164e83ed53ef510d521400741502dff77f7e8558ae0afb20ff2a10",
+          "matches": true
+        },
+        {
+          "path": "registry/components/streamgraph/streamgraph.module.css",
+          "sha256": "f3b366899e413d7d7c0b4ca5bd1e2957227fe0a310bec945666dcdee9a281c90",
+          "normalizedSha256": "44aca1edcea64b776e452060adc5d05be19f625cc10aa62f5d1259040eff82cb",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "brush-chart",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/brush-chart/brush-chart.tsx",
+          "sha256": "642546b3bd5e167579b1dd99c8d4f5b28b2d03787559a188a82d1413acb28166",
+          "normalizedSha256": "0351cc7469d1bb8466c1a4a39038b2917dc0c6487d730a2057477f26883e48bd",
+          "matches": true
+        },
+        {
+          "path": "registry/components/brush-chart/brush-chart.module.css",
+          "sha256": "446099978f613b2afc8ea1ed3ff8d85534c3f3843846cfb47b9f8e7145d2abbd",
+          "normalizedSha256": "9e5b437f7e37b4b4129fc580c12038d3e7f22404e79b112c104722168faf14fb",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "ridgeline",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/ridgeline/ridgeline.tsx",
+          "sha256": "0e70a0b80f644aaf5c390f578096cda03e0567305b03adf175d95a128f5b1e23",
+          "normalizedSha256": "bb0f014b9356c4ef46390b1b90d372e540d4468d1c46c130ea2e7966d8f60b44",
+          "matches": true
+        },
+        {
+          "path": "registry/components/ridgeline/ridgeline.module.css",
+          "sha256": "687db362bbc0112d8bfd04a94a4093ccee6e3a51334c051c5463bc2c4eae4e3c",
+          "normalizedSha256": "d24b94a99a789eced990db890cbc986b1161d6059563395ba11f4b745256b111",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "treemap",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/treemap/treemap.tsx",
+          "sha256": "a11c2241bd7a9116eecae94f4b01312b841c18e09e52dd413a731a7f126d98da",
+          "normalizedSha256": "42ae4e0556db89341b195f589186d9e57fed4309a46df0537f05ca6a48eb5b9d",
+          "matches": true
+        },
+        {
+          "path": "registry/components/treemap/treemap.module.css",
+          "sha256": "5e1f032efb722dffcfdced0de8b140cac92b4c3c92e2dab5ee2a164c6f442687",
+          "normalizedSha256": "a425eb1c8f1a3945ca7ff74766acee1f0b1064c305467298906e7021554efa58",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "waffle-chart",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/waffle-chart/waffle-chart.tsx",
+          "sha256": "b114926635319e866dbddf43ff96985a6ce4b1f826859f0f3e86fbaee1db118d",
+          "normalizedSha256": "b839ce2113673a10fb8858ac22e95a64340e7ffe8ccc2b0fa693ac440cf0cc9f",
+          "matches": true
+        },
+        {
+          "path": "registry/components/waffle-chart/waffle-chart.module.css",
+          "sha256": "a4f13f51d66efc461f738188900c96d51779214b070d888c9f71c22830ee3fe2",
+          "normalizedSha256": "ad6265c1493053f91ce647d891c13b32e3b453f1919c474bc2418a17fd9b2045",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "slope-chart",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/slope-chart/slope-chart.tsx",
+          "sha256": "b9ec5b93ebe973bee55ca0d6515c61e4109d4940f2e53945192469067f20d75b",
+          "normalizedSha256": "bcd3ad2fddb02bbf7fb1ef63a6099065e26139d1089ae4487bc93db54a86a123",
+          "matches": true
+        },
+        {
+          "path": "registry/components/slope-chart/slope-chart.module.css",
+          "sha256": "9bcca413457574fc5b26d320bb23ee0eb90a8b53f514bd475122075e4907292e",
+          "normalizedSha256": "b4aa38520f89d3a9fc8afacbef3dde1ca134f4b465024bd7e5ff6912175d1e8b",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "announcement-bar",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/announcement-bar/announcement-bar.tsx",
+          "sha256": "996d7cf0967973abe38a532a517779c9e38d83ef3adfe30c158b6df9ec25d173",
+          "normalizedSha256": "d38d0f7cfe1a1d82ef354dfc95f7f488f9477e5d7b088a9328f85a94ab0e5feb",
+          "matches": true
+        },
+        {
+          "path": "registry/components/announcement-bar/announcement-bar.module.css",
+          "sha256": "260ebb2f9e603a7d31944b608e2c5eb6ddc53f3b184689e1c4262112fbff2a83",
+          "normalizedSha256": "6455380c691b6e2c1d00f1b24088b767b7771ca29f353c896d482367a883a49d",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "phone-input",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/phone-input/phone-input.tsx",
+          "sha256": "9988bebda097d1ba32c141f0defe5b97b585aa0e6113d33444da8bc013486cd8",
+          "normalizedSha256": "c1d301cf5510ef78cb4815d286a356897208b742df9bdfc4fceb4a8e040601c6",
+          "matches": true
+        },
+        {
+          "path": "registry/components/phone-input/phone-input.module.css",
+          "sha256": "6ec2546d959158093e0b6caa0b19f980e9c1ba4b77169d33d1964cad51be66ed",
+          "normalizedSha256": "4d2ad155b98d803c7f821505541abbc1557993179430b43d8c33f8e3cc321ff8",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "shortcut-recorder",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/shortcut-recorder/shortcut-recorder.tsx",
+          "sha256": "be842ca1749669bae788ecb0f048d7d50e72964e7776fb6833ee4225b6595283",
+          "normalizedSha256": "a126733295c13831b4b8d4b79dbc52c20553b0d6cf4528f381c2a9b7be25e28d",
+          "matches": true
+        },
+        {
+          "path": "registry/components/shortcut-recorder/shortcut-recorder.module.css",
+          "sha256": "e4f7a4bf512d18bb81dbd5c3c42d87efc98d42313187a723205813013e3ff629",
+          "normalizedSha256": "e3005be170065d72b2586f6b83464411845a144deb223dea3913432daa513ceb",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "confirm-morph",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/confirm-morph/confirm-morph.tsx",
+          "sha256": "eeeb0adabfb7cc7d378710c667541df881ca2cb92ea198121d00071def2b8540",
+          "normalizedSha256": "1f99c417abbe7fab8c91cd7caf345e2ccf6e4b77b700147646fabc2fda181a36",
+          "matches": true
+        },
+        {
+          "path": "registry/components/confirm-morph/confirm-morph.module.css",
+          "sha256": "e812dddf4fa6db999bccee79967ec9f478f29a2be6323d11999ec529b7b74d99",
+          "normalizedSha256": "7cc35f9e5d51b8247d03a05dd825126b390f093c6a7268515508e2ef5edead3b",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "mention-input",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/mention-input/mention-input.tsx",
+          "sha256": "e0b7f0d993224bc2262b30058c2f88efe2f51ef43ee652b540e8850fbe7c1c91",
+          "normalizedSha256": "6ca008cade23107fc6b1d01b7644fb84f9aff8cfa95c05ff887a1ab5311cd1b5",
+          "matches": true
+        },
+        {
+          "path": "registry/components/mention-input/mention-input.module.css",
+          "sha256": "31eb1e358ab4a70f782205f1154ee3e190263b423fd0d0c76c43168780287a88",
+          "normalizedSha256": "52f789baf18af28ae3259e0677d2921d1c57d5a156f42e9d0666f6eb8e07ca77",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "chat-thread",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/chat-thread/chat-thread.tsx",
+          "sha256": "0a41c25faf585a12fc68f1ac9bc8080e076ff1fb0fe273e23c9b08c7463adf21",
+          "normalizedSha256": "91573146bf2afa87cddfe659c922ceb463e6ab190e8fea709bbbbd1bd40689ad",
+          "matches": true
+        },
+        {
+          "path": "registry/components/chat-thread/chat-thread.module.css",
+          "sha256": "763523ad1c9692961cefb8eb700370a4573e34f0cc3482f12721b286616bc335",
+          "normalizedSha256": "fedaf24fefb624466fe5b4ace98344acbe4ffafd1e1526f00c7ab130d55b7acb",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "rich-text-editor",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/rich-text-editor/rich-text-editor.tsx",
+          "sha256": "dd8cf11b18f2cb9c2367ed3c6ac69be7419ca10e6d3ccb1630b7488a5c1f3599",
+          "normalizedSha256": "08268cd08cfe3585d2e20f375971575a44b11d6823d37828afc8fc3605d62047",
+          "matches": true
+        },
+        {
+          "path": "registry/components/rich-text-editor/rich-text-editor.module.css",
+          "sha256": "ee99bba44e8673772391fdd3899f2c6bfea2b44b15d9ddd4139885f9a6ca45a7",
+          "normalizedSha256": "76f0d9a1e9834d160b77ba456a1ebb8ce8f1afde40b38d2810fc8e34d312471c",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "billing-toggle",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/billing-toggle/billing-toggle.tsx",
+          "sha256": "4473e03b517c1613fa997430b86cbd7b8efc97407b0e5f79958f93ad6041337f",
+          "normalizedSha256": "0e4d3363a9a143dec30ea54bb84d5d0ac51db24f45a4d9616696d8de22388a24",
+          "matches": true
+        },
+        {
+          "path": "registry/components/billing-toggle/billing-toggle.module.css",
+          "sha256": "a494e7ca8a12374bafaf1484fdd04e9a37da3b91b0b301bbe344ca596a4af0e9",
+          "normalizedSha256": "1e2ca85fcdff760f8f6efcaeda3fd5fb369c4dde4af761ee394e03f48fca52a3",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "scroll-area",
+      "dependencies": [],
+      "files": [
+        {
+          "path": "registry/components/scroll-area/scroll-area.tsx",
+          "sha256": "82c53c56af335d0a6d808ecd4cbb3c97e8fa83ca56ccd35f71605ae8dd8b0891",
+          "normalizedSha256": "b5ad8a0adf9c7d323d4829a459aac00764946f37bf34356987bc3dbfed72ec70",
+          "matches": true
+        },
+        {
+          "path": "registry/components/scroll-area/scroll-area.module.css",
+          "sha256": "5eaa354037b9bc4bb67440bf99677cdadb61bef975d36b6fbf572ffb9188ca55",
+          "normalizedSha256": "ccdc3ebeaba5d28e60823595191a0e9b1808df8e0e6aa788eff05b5d85d192a7",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "radio-cards",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/radio-cards/radio-cards.tsx",
+          "sha256": "fd2598065ed408090c02d07ca3563d7920d1dbfdb8ecee42b8d879faabb7e268",
+          "normalizedSha256": "07b46632e9d6b3e1bd753a97035b39d18382cac746bf1c2db9b72f5c91aca8fe",
+          "matches": true
+        },
+        {
+          "path": "registry/components/radio-cards/radio-cards.module.css",
+          "sha256": "8f3f80726ef946b0665ae033de3eefa3013678c8f59bac57882be15fa03543ba",
+          "normalizedSha256": "a9f87cddac7d5f62fb40fb36a0cd873c2aa7db627603903b8cdbaeac2382cb92",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "comment-thread",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/comment-thread/comment-thread.tsx",
+          "sha256": "888565da3a9baf394975441d59276802bcec18909c22bc2232967cc79ab0790d",
+          "normalizedSha256": "c8bb52046b133dcee866234b1d570a74b65a6ef44d50a1619cb1ade7b72bb5e5",
+          "matches": true
+        },
+        {
+          "path": "registry/components/comment-thread/comment-thread.module.css",
+          "sha256": "fa255bad8b03edfd160141925b6907ad109eef2e185ed5fa6c99d0e5395dc735",
+          "normalizedSha256": "4adab14432507df2f7a2dec49d633939c3bcec93c5be5d32368e3ae465ba587a",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "slot-text",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/slot-text/slot-text.tsx",
+          "sha256": "2f8d4917792fa1501ef07bd53da4520966f0cf4e96e16711cf80c11501168e31",
+          "normalizedSha256": "a9070f5cbe248e56563810dd5e31a5ac43c46805a066ae09479b8c63035c161c",
+          "matches": true
+        },
+        {
+          "path": "registry/components/slot-text/slot-text.module.css",
+          "sha256": "d72527fa79c320f29b9502891e5b04e12aa044bcd77754e598811853872b09a8",
+          "normalizedSha256": "c588f6f24d46f0dfe871155dcaae5dee24d6fe5401f6fa08a49d94c182c5c9cd",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "signup-form",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/signup-form/signup-form.tsx",
+          "sha256": "0f9f973dfeb5af488c8c89759d243d7d4c38d15a7b4039c6a934ad80346a5cae",
+          "normalizedSha256": "817dd4a7dcdfd3a65f80a846f9895bcb239f5f61a4d2e39ff5936d756e429cce",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/signup-form/signup-form.module.css",
+          "sha256": "a47c109f140dd84e73feb17bbdf7e2eaa6eeade63425c052ea159ef3ced54ada",
+          "normalizedSha256": "48bf030fbc2e833fa9cc24200d46fe19e2d77dfab58b74e4398e79780280dfcc",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "logo-marquee",
+      "dependencies": [
+        "lucide-react"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/logo-marquee/logo-marquee.tsx",
+          "sha256": "971209dd76c7f25261c64e5d2621f92867c9220e1a5e8a4068fc7d4fee30ee07",
+          "normalizedSha256": "9f9c9bdaaa861b5bbc2f202a5dc548fdfcf82276b913224ab3456dcf57fce2f3",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/logo-marquee/logo-marquee.module.css",
+          "sha256": "58d58087ea0471d21a8fb8bb3973f3b02151230d3571f90c3ce9245b3d8e8269",
+          "normalizedSha256": "2b99d3e53149229e87ce2a434a29c75a8c96e9af51ad5e6742c10aea42f366f5",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "plan-comparison",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/plan-comparison/plan-comparison.tsx",
+          "sha256": "63ed03233b8bfbad0f96df3ee87f2df4eb192ad291782f50c55b0de7d238f81b",
+          "normalizedSha256": "d1188257e19a198e316b773c3463da09bda8cad4bc5e59ebff37e97624684c73",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/plan-comparison/plan-comparison.module.css",
+          "sha256": "365445b47c699e8e6dce4c81aab689bac7bec0216e613c99dc74bc24afba2f6a",
+          "normalizedSha256": "08d53ca05da111266a7a3084a12bae969a7cd139a10f4e82cbeb9b8af7e15a31",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "command-palette",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/command-palette/command-palette.tsx",
+          "sha256": "abaeb3d8156f9dee4b1712cd3286d2c4ac915453a9452c4690515b473413c310",
+          "normalizedSha256": "ba19b08de529bc64e5113dd8ca6f868275b7e553f95112631de97173eeecdc5c",
+          "matches": true
+        },
+        {
+          "path": "registry/components/command-palette/command-palette.module.css",
+          "sha256": "f06e18253cecdb3797415629700b9c6c0fc0c0d4efc5504386be8ef44a47bcf8",
+          "normalizedSha256": "db6bb13782204662954cb2a3f332f4b4b8aada9dee68f5f1c39ca1e1ba222dc1",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "notification-center",
+      "dependencies": [
+        "@radix-ui/react-popover",
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/notification-center/notification-center.tsx",
+          "sha256": "2be1f317ec287ea0e71032bacea7efaf58fe3f4d99ec5298cb2508cf3047b35d",
+          "normalizedSha256": "2ec1f60228c42b8071836dc2a4c3051e42f398bdf6ddd57a9fb19180dbea61a3",
+          "matches": true
+        },
+        {
+          "path": "registry/components/notification-center/notification-center.module.css",
+          "sha256": "0e139ba854324c1ef7b57a2d3a86d9294b37990273a3961bfd556fe5347ecf4b",
+          "normalizedSha256": "b54af12986b5b2fdabc98eb7076a98592cb8e880c94857cd2321abc4bff300b4",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "file-upload",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/file-upload/file-upload.tsx",
+          "sha256": "142ec58eb6c1650e0984a1e132bc4ff87da93a3d5b0911579acd2903a7a964e6",
+          "normalizedSha256": "1011dd293ab88a2cad22be82944fe85dc26f479ac80fe2dea442fd692be77a22",
+          "matches": true
+        },
+        {
+          "path": "registry/components/file-upload/file-upload.module.css",
+          "sha256": "1528b1fa73046e64855d87b6c41c182ee7b2a10e91d6ec513e6386479543df21",
+          "normalizedSha256": "14c8b5ec9ce95caa3ba779b9762311ae3ec34b3560b974341e9d3c5b29f66eae",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "otp-input",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/otp-input/otp-input.tsx",
+          "sha256": "95ba96c84b796926f6086c3531c226b42078dc5f3eaf7b877742a2246d925949",
+          "normalizedSha256": "65d4f2c4bd44c759411a4165aee049657b5da2a43b03a9c2b36e5fe3222d0fdf",
+          "matches": true
+        },
+        {
+          "path": "registry/components/otp-input/otp-input.module.css",
+          "sha256": "d7c979a678fd80a1d2c77374aeb69964018242a855685894bf48dca5291229de",
+          "normalizedSha256": "c3941d549798314389ccfa75d8f84024605fd46f24e87294745f016af46cfbe8",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "changelog-feed",
+      "dependencies": [
+        "@halden/node",
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/changelog-feed/changelog-feed.tsx",
+          "sha256": "0c5b43546bda69f88e0fba54aa8edf1471823b0740edb6e6954dcbdef92ead9b",
+          "normalizedSha256": "6b85f265de808acc5e7864ce4474f0439700d4419bd9235985a4f4ddd4580eec",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/changelog-feed/changelog-feed.module.css",
+          "sha256": "6034bfe3cce8d852888a74cad42923796a10a2e085fd2e46bc0f9a085e6fe33c",
+          "normalizedSha256": "33653b441eb008b142c547a94b43ce6c6fd552e46e7579e0df4f36e37d690033",
+          "matches": true
+        },
+        {
+          "path": "lib/media.ts",
+          "sha256": "765732e3b5112fcff330137ab9a8c63c641d5662f1dddba5cc8abf2bb02ffdb0",
+          "normalizedSha256": "952d88dfcd8954f514b619cf00cf6d919cd96cb6ab886dfd9164dc2b7fec14af",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "sign-in",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/sign-in/sign-in.tsx",
+          "sha256": "facf37b7ba48cd6bc70e5a6619879cb51bef67a50c9a1d2ba8217b3a605b7063",
+          "normalizedSha256": "1f013f1568230928b68b8cdc796a54beafbb0fc2fd14faed00beba8b2024fa92",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/sign-in/sign-in.module.css",
+          "sha256": "50aa6a05d9eaa4e1f429ec98583f9198e9db73fadca75d00e2e4ef082cf5500a",
+          "normalizedSha256": "e49ec915527a8dfc14fee5359c59ffed29c829bdf0d0c8a2a42fcaf3aedeb37b",
+          "matches": true
+        },
+        {
+          "path": "lib/media.ts",
+          "sha256": "765732e3b5112fcff330137ab9a8c63c641d5662f1dddba5cc8abf2bb02ffdb0",
+          "normalizedSha256": "952d88dfcd8954f514b619cf00cf6d919cd96cb6ab886dfd9164dc2b7fec14af",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "page-header",
+      "dependencies": [
+        "@radix-ui/react-dropdown-menu",
+        "@radix-ui/react-tabs",
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/page-header/page-header.tsx",
+          "sha256": "ded722b589da027c44d63f01431b0984dafcb1484f9f03cf5650749081b9cd18",
+          "normalizedSha256": "d768a9fbb7ffae0d19d5775402361017e4f134384e5db0b7f54691c6b1f86411",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/page-header/page-header.module.css",
+          "sha256": "70bd6338c6dedb44eae5392dfb623d1f2da7d152cdcc2d3e646b3149e8704cea",
+          "normalizedSha256": "46bfeb2cc52f60e8ad56b62670dd41c56d4d700f2e8b38d9f8c7f541bb99d08c",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "empty-states",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/empty-states/empty-states.tsx",
+          "sha256": "e0d334950cb9ba1115686c67cbfc6f287e3c1f4c322b3f5b4b23e774114c3118",
+          "normalizedSha256": "5717bfa8eaa91c868231ba94e060f1248ca6ab2e52284fddb91fff37efa86fcc",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/empty-states/empty-states.module.css",
+          "sha256": "42487688955998bf6177fc6f5894775a29fb3fccb285f9ae8c4a9c987196598c",
+          "normalizedSha256": "69e989c94eb223caa7d8c07cf4081db93aa9d73b8dcd9d5182e37b2358a80b62",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/empty-states/empty-states-art.ts",
+          "sha256": "140c23071d412b8131fd30b39d47ee234254b7d3133875ae1eb7c8cde3973d07",
+          "normalizedSha256": "1f19c556555d9007a1f6d8bdc650905130eda56b3b1038d9335ac9aee92e6720",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "login-centered",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/login-centered/login-centered.tsx",
+          "sha256": "b51f997aada5c6e4acab5498cefd0e627cf6c258d18caf62c903b0c4cec3aa89",
+          "normalizedSha256": "ffddb152e7139bc7c7bf3fb8007e1247d3df3390c8a7d7b5b6442dc4f108c22b",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/login-centered/login-centered.module.css",
+          "sha256": "21075028855c4ff8a2ede6986698fd04c339a1f1e57266c040d4e99b377dc40a",
+          "normalizedSha256": "1b2ef378748fc7858fb132433293a07d9c23f7b7ce9b0e0e51728637adb5ee8f",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "site-header",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/site-header/site-header.tsx",
+          "sha256": "db95046e0de4248dd5dd0533b855504f92392018b8032609efd3a06033a659bd",
+          "normalizedSha256": "015827106a46171fbdd8e68f7f4910924d9737aba0916ffc10c3b8abb165ec0e",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/site-header/site-header.module.css",
+          "sha256": "d4c04d82a7226475e5344568d02b5bf35d32d08fac6ce3ad5191597f6cfe065a",
+          "normalizedSha256": "ea4a2f3ca5d29496853b13085153143a6ed4d55691e3eda436b90537b2a64dfa",
+          "matches": true
+        },
+        {
+          "path": "lib/media.ts",
+          "sha256": "765732e3b5112fcff330137ab9a8c63c641d5662f1dddba5cc8abf2bb02ffdb0",
+          "normalizedSha256": "952d88dfcd8954f514b619cf00cf6d919cd96cb6ab886dfd9164dc2b7fec14af",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "site-footer",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/site-footer/site-footer.tsx",
+          "sha256": "3d04396f7cbcb1a4a728570109111884de752f1b118b5c66531ce5242fa9aded",
+          "normalizedSha256": "2e78a3801352716a65a5bb2c12376582fdcbb620d267830bccc922a228e56c06",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/site-footer/site-footer.module.css",
+          "sha256": "f4c31d99f59aa96a8d6144ff9140d3423c5a27b49f3bdb6a5061ec8cd7700d56",
+          "normalizedSha256": "6686b933c5eef4dec9d518c77c12268227d2b9aaac50e2b384cf82f01e0e8bea",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "hero-section",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/hero-section/hero-section.tsx",
+          "sha256": "c519d00e3ae1f6cb2096ae7f43f8c23220dc2323b3736839e307eae5e68badd9",
+          "normalizedSha256": "f9039317cc172891de8e58476d851c8c4abd827eb69704142ef89bf27233e474",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/hero-section/hero-section.module.css",
+          "sha256": "b39e877b2a7d99776a27f4dd4bc627de8598fca77089a04618b2ef75c32c5a82",
+          "normalizedSha256": "1bffa744d228ae2c7494f493e4e6a22b4ac3e87dbc6d24b73b40748938fc9232",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/hero-section/hero-content.tsx",
+          "sha256": "a012922cac3e44c890f5fe40c5e8b0e86cfcea06af7ba05d18b326d9f3b2ece8",
+          "normalizedSha256": "d7bbbb0219d0acabeccd7d1a34db4636841ac20072d51117a964b3700acfc9be",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/hero-section/hero-content.module.css",
+          "sha256": "0fb963f57acb7e7f8104b8bbf69e52eb3460cd6379e646d1516fb4d15370017c",
+          "normalizedSha256": "6e9ee2098f4617a144c82db235c61f2570cbf88eef46f89b8f1da85b867a2f23",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/hero-section/hero-motion.ts",
+          "sha256": "9417e58d14437195fcc445c0170265a81064bebacf37d988713c06e33f5dd397",
+          "normalizedSha256": "2e9c19e82945e0da4330cb994fdc2a5a3cc7432312abc85a2280640f27f1acc3",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/hero-section/hero-mesh.tsx",
+          "sha256": "8ba632a7f7e84aacf9e37e503d2b63dd5a74bb3da7584f9f1a5d5804f92726e7",
+          "normalizedSha256": "49cff44e8c5957ca58d80f76025b476270f66bfacae4b4d1136caf27b5b4ee85",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/hero-section/hero-mesh.module.css",
+          "sha256": "bf374595c4b0aaf81330682d95bbfb1befaaefc558d9a4612c51527045ea0b7a",
+          "normalizedSha256": "eb167ef48d1e2467221734a66c1c21826a2f2d844f69bb5d9d02f309203c3757",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/hero-section/hero-cadence.tsx",
+          "sha256": "edb81cd4b7c7e12a55800b79bf07943f9d1e61cde18fe4e0e3814ce02d0569df",
+          "normalizedSha256": "d79af3b1d228c2a7bd15faceda9c22d214e8c7190eb8a146bba50b70ca0d14b2",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/hero-section/hero-cadence.module.css",
+          "sha256": "367e55e0e7cbcecc665c8c48fb173f19e5961c764f2c34d5fca2f4f51e86a445",
+          "normalizedSha256": "69931f73b7fe64b2274db9b91c11ae24a0a89475a36a92f098a1bee915b7564b",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/hero-section/hero-relay.tsx",
+          "sha256": "a01b1672ae7f22f8097792ee501faf4218c05fa96964ce321dcf3cfafb9c9cb0",
+          "normalizedSha256": "7956cc1f6fc6820d250e8d8b0b88e6d2b9d3435ad7482eb9708633aa74c37424",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/hero-section/hero-relay.module.css",
+          "sha256": "9969bbcf9a16f493faae4bd21c1d9918b2b3cec2fe5c34d45f854598987e533f",
+          "normalizedSha256": "3453428b1c3fd79c53476602eadc82371f466b2c5bee56566c57c6dc2178dfd0",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/hero-section/hero-lumen.tsx",
+          "sha256": "488e550a778815cb2b4c4ee901648e5ac94b482519f978ab95872a7e6c0a861e",
+          "normalizedSha256": "c05d4b44f439fcf9c4c23bd6288ffa3acb6ef063db06b26ff69131a96d663786",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/hero-section/hero-lumen.module.css",
+          "sha256": "dd18a6e755d057f597057b75135236abeef7bfe30ff22ccefb1bb549c1e3c879",
+          "normalizedSha256": "048bd2f45a49f3856403dbac411f1869bdbc6d568033b4269d8084835109cc3e",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/hero-section/hero-lumen-data.ts",
+          "sha256": "e54292ee38546177d33c504266f4b66a5f6da6406ed9cae2d5353b80185b2208",
+          "normalizedSha256": "11814243f08b0068db16d7a898caecbdadc56c8022d593eeecc5f8e4d378e682",
+          "matches": true
+        },
+        {
+          "path": "lib/media.ts",
+          "sha256": "765732e3b5112fcff330137ab9a8c63c641d5662f1dddba5cc8abf2bb02ffdb0",
+          "normalizedSha256": "952d88dfcd8954f514b619cf00cf6d919cd96cb6ab886dfd9164dc2b7fec14af",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "faq-section",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/faq-section/faq-section.tsx",
+          "sha256": "888c8aeb13ce59ba1c97ecaf781980dd01a1e9f78f00abf5bcd51a0ef47bbac3",
+          "normalizedSha256": "c2ce63a5c3d0ae0f852cdf8061015dcf17e78900238c31c8cc665605e7f65bef",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/faq-section/faq-section.module.css",
+          "sha256": "10dfef55c7ae55bb50f95858fa34cfb659fe32cb29af827750ee2bf974ba1a40",
+          "normalizedSha256": "cc1f9308ee452b490cef747fe4ffd9da43bf0ae6a24f912553072e8891915648",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "contact-section",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/contact-section/contact-section.tsx",
+          "sha256": "a14e84117eb49f284012cdb59d601e5f311a85558916ed8938af15981413220f",
+          "normalizedSha256": "889a3483133f9f64bfd09e56673a3c392cdb766a8e0040edeb7a6724526a8784",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/contact-section/contact-section.module.css",
+          "sha256": "8384235affa582cbd2bec2632125f843295b78d25dc898e74e48885bcdf6a7da",
+          "normalizedSha256": "c08c63a6884d15207e9917f1b8ef30cc9e43ca6cab33a28822e689f742cb4a51",
+          "matches": true
+        },
+        {
+          "path": "lib/media.ts",
+          "sha256": "765732e3b5112fcff330137ab9a8c63c641d5662f1dddba5cc8abf2bb02ffdb0",
+          "normalizedSha256": "952d88dfcd8954f514b619cf00cf6d919cd96cb6ab886dfd9164dc2b7fec14af",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "blog-grid",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/blog-grid/blog-grid.tsx",
+          "sha256": "ca6bce4575f3b54335dc3c1e9e7197bbdbac83935ea17b789d1cf173748c0010",
+          "normalizedSha256": "106ea00d5633f3969f5e2453e5f2008140d33d0ff6ac30e34501b8c499833acd",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/blog-grid/blog-grid-data.ts",
+          "sha256": "f52d7e3618005f1cb09feddd679a1f3c820b7959e43743b26e589cc806a04be9",
+          "normalizedSha256": "a73e0c61bfca5cae66bdd97e33a2e495938e2accbc40513d76c59a95f58c61a3",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/blog-grid/blog-grid.module.css",
+          "sha256": "d0796c5dc2731257c24068cd6af364c52181e6ee902b96f7602e5bd1aa32fbb5",
+          "normalizedSha256": "d741ec32337727ee14d064dae572c02d6bd887b04f87580dde57dbb83c8e46fe",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "comparison-table",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/comparison-table/comparison-table.tsx",
+          "sha256": "de0df5bd409c4f369ba66e7df1dc66c1ad5fc741201926706b56e7719e84cfe6",
+          "normalizedSha256": "9b0b421b2830ecee0b86fe6242bb55f5dd5b8ac6c48a7f25fc3bf4a5733f948d",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/comparison-table/comparison-table-data.ts",
+          "sha256": "3410f9d5483fd7a84affbc5bf58fefad09a8b0ee035197131e65737477a1105a",
+          "normalizedSha256": "c30d017d382919b688e45a7556017dbfa416612c88b89b471308062813530bfd",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/comparison-table/comparison-table.module.css",
+          "sha256": "d986c4577bbdc58747857accb6d22411f38b7fb62a336ec75c731241b1dce5a5",
+          "normalizedSha256": "256da193a90b766ceb6a5abc8ca8e4cf0e689baf4e4c07d6947e450d5bb1df99",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "stats-band",
+      "dependencies": [
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/stats-band/stats-band.tsx",
+          "sha256": "f7ad4c1bec8cf1f0a7f1a9a870c479e785f32d20e6a431f8cdd0c0511c6ed9e8",
+          "normalizedSha256": "0f0663d8a46011464b0818fc88c41c6617c00fc430da470022d1e108ab527f6b",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/stats-band/stats-band-data.ts",
+          "sha256": "e0cc847732c8d3bd64a81299a1199c03136525b71d7c8854c1ccb7c3f2ef70a4",
+          "normalizedSha256": "5f31617bdac08a48ebd59984931e78e3d1501523cbd8b1a4182da6009c9738a9",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/stats-band/stats-band.module.css",
+          "sha256": "47e6eeac3c4cedeb2b6efd93697e200d2f9241046b619bb3e32dbe1721255467",
+          "normalizedSha256": "370fbf3fed1dffd1a194a341c17064f06f0a9721be470f614e86e07d2ed3819f",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/stats-band/stats-band-world.ts",
+          "sha256": "ffb88c3b89a1f4aec5842980eb8442b101f804c7e3f2405dae73c2428d3d9eec",
+          "normalizedSha256": "fef027052ffb513bfea8fad8a51d5674b924e5c2d109b532f016767e04925454",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "cta-section",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/cta-section/cta-section.tsx",
+          "sha256": "bbed9c1914c8ffcf6154d70beaa5484353ca5d1bd123e1925008e12c5367b7fe",
+          "normalizedSha256": "ba7bd786a9f11bead949ec1d5075058968d1e1d26850c7afa53472c54a109944",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/cta-section/cta-section-data.ts",
+          "sha256": "644f0c0371e64af5480bacfa9380466682072e8dc847055b61ee349635f6fb4b",
+          "normalizedSha256": "216b4cd69346e8fdb2a77ca56b7e9dc578dafc446344978add1e252024e6d91a",
+          "matches": true
+        },
+        {
+          "path": "lib/media.ts",
+          "sha256": "765732e3b5112fcff330137ab9a8c63c641d5662f1dddba5cc8abf2bb02ffdb0",
+          "normalizedSha256": "952d88dfcd8954f514b619cf00cf6d919cd96cb6ab886dfd9164dc2b7fec14af",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/cta-section/cta-section.module.css",
+          "sha256": "e7aec16de66910b5e1a2c60af49dd6e7fa2490af9b92b7270b69346043acc99b",
+          "normalizedSha256": "c3f87af47cffee5af61e1aab3a3e01f9d824eeb47a2ad1a87140f89976fef013",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "newsletter-signup",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/newsletter-signup/newsletter-signup.tsx",
+          "sha256": "5f5ee982353be2ab89c8857aa0d60044023856c70fadca3399e886888f85631d",
+          "normalizedSha256": "72939a96e0479a354456ce81fed0d8078a90a1ddd21d3beaf78d8d6bed10d74b",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/newsletter-signup/newsletter-signup-data.ts",
+          "sha256": "5d989f13f3d682e4478be6f41d97950242ef08c7b9eafe51a390f5e2d1e2dbeb",
+          "normalizedSha256": "8a2e1ddf3be0d26f6b12ac14ae4f5668ce18ce9f7789b2571e12d9326658a786",
+          "matches": true
+        },
+        {
+          "path": "lib/media.ts",
+          "sha256": "765732e3b5112fcff330137ab9a8c63c641d5662f1dddba5cc8abf2bb02ffdb0",
+          "normalizedSha256": "952d88dfcd8954f514b619cf00cf6d919cd96cb6ab886dfd9164dc2b7fec14af",
+          "matches": true
+        },
+        {
+          "path": "registry/blocks/newsletter-signup/newsletter-signup.module.css",
+          "sha256": "86d0d1d58bfaf4abe4db53572408b90fa97a7d6c9ae0e7e52ead0874776a8384",
+          "normalizedSha256": "4ce42ffde62daa5b01e155577eda662b248a6683cc84640962169a7270eefc15",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "expanding-search",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/expanding-search/expanding-search.tsx",
+          "sha256": "c63466bf1331ac39a8479a0984939f11a91000a8143f1556fdd785b202bcb98e",
+          "normalizedSha256": "134249deb02d23da60f02fe8b19d9fd53193bfd1cc68b44aa33c24379c4f3864",
+          "matches": true
+        },
+        {
+          "path": "registry/components/expanding-search/expanding-search.module.css",
+          "sha256": "828e8910f9a6bba366aa5bf6e9ac6c366c00f2062f033e517837369dd89f628e",
+          "normalizedSha256": "db24f25a0ffcdaabad0eaab69c3fa127a1d2ef29a565e179c6e7dd2b8ff624b3",
+          "matches": true
+        }
+      ]
+    },
+    {
+      "name": "json-viewer",
+      "dependencies": [
+        "lucide-react",
+        "motion"
+      ],
+      "files": [
+        {
+          "path": "registry/components/json-viewer/json-viewer.tsx",
+          "sha256": "eb9596825441a4bdee49fe9b3ad1718116437425d6895c651cb0a98298c279ab",
+          "normalizedSha256": "3918563bd71dd359468334a21147bb63323a69eb0479c318f12942170f36d6a5",
+          "matches": true
+        },
+        {
+          "path": "registry/components/json-viewer/json-viewer.module.css",
+          "sha256": "c99416c3925dc73efdde54d5c2817c55c9a7e429051eb24c3b04b01f1139cb7a",
+          "normalizedSha256": "131f5fc04edaeee9e86e91cf23a7625f723e6ea0d5a4218a266ab06058836799",
+          "matches": true
+        }
+      ]
+    }
+  ],
+  "pro": [
+    {
+      "name": "morph-nav",
+      "docs": "https://uiarc.dev/components/morph-nav",
+      "tier": "pro"
+    },
+    {
+      "name": "dock",
+      "docs": "https://uiarc.dev/components/dock",
+      "tier": "pro"
+    },
+    {
+      "name": "wallet-stack",
+      "docs": "https://uiarc.dev/components/wallet-stack",
+      "tier": "pro"
+    },
+    {
+      "name": "liquid-tab-bar",
+      "docs": "https://uiarc.dev/components/liquid-tab-bar",
+      "tier": "pro"
+    },
+    {
+      "name": "now-playing",
+      "docs": "https://uiarc.dev/components/now-playing",
+      "tier": "pro"
+    },
+    {
+      "name": "photo-grid",
+      "docs": "https://uiarc.dev/components/photo-grid",
+      "tier": "pro"
+    },
+    {
+      "name": "control-center",
+      "docs": "https://uiarc.dev/components/control-center",
+      "tier": "pro"
+    },
+    {
+      "name": "cover-flow",
+      "docs": "https://uiarc.dev/components/cover-flow",
+      "tier": "pro"
+    },
+    {
+      "name": "activity-rings",
+      "docs": "https://uiarc.dev/components/activity-rings",
+      "tier": "pro"
+    },
+    {
+      "name": "stretch-refresh",
+      "docs": "https://uiarc.dev/components/stretch-refresh",
+      "tier": "pro"
+    },
+    {
+      "name": "orbit-menu",
+      "docs": "https://uiarc.dev/components/orbit-menu",
+      "tier": "pro"
+    },
+    {
+      "name": "time-dial",
+      "docs": "https://uiarc.dev/components/time-dial",
+      "tier": "pro"
+    },
+    {
+      "name": "booking-pill",
+      "docs": "https://uiarc.dev/components/booking-pill",
+      "tier": "pro"
+    },
+    {
+      "name": "voice-recorder",
+      "docs": "https://uiarc.dev/components/voice-recorder",
+      "tier": "pro"
+    },
+    {
+      "name": "data-grid",
+      "docs": "https://uiarc.dev/components/data-grid",
+      "tier": "pro"
+    },
+    {
+      "name": "lightbox-gallery",
+      "docs": "https://uiarc.dev/components/lightbox-gallery",
+      "tier": "pro"
+    },
+    {
+      "name": "morph-loader",
+      "docs": "https://uiarc.dev/components/morph-loader",
+      "tier": "pro"
+    },
+    {
+      "name": "voice-orb",
+      "docs": "https://uiarc.dev/components/voice-orb",
+      "tier": "pro"
+    },
+    {
+      "name": "action-morph",
+      "docs": "https://uiarc.dev/components/action-morph",
+      "tier": "pro"
+    },
+    {
+      "name": "share-sheet",
+      "docs": "https://uiarc.dev/components/share-sheet",
+      "tier": "pro"
+    },
+    {
+      "name": "race-bar-chart",
+      "docs": "https://uiarc.dev/components/race-bar-chart",
+      "tier": "pro"
+    },
+    {
+      "name": "sunburst",
+      "docs": "https://uiarc.dev/components/sunburst",
+      "tier": "pro"
+    },
+    {
+      "name": "sankey-flow",
+      "docs": "https://uiarc.dev/components/sankey-flow",
+      "tier": "pro"
+    },
+    {
+      "name": "funnel-chart",
+      "docs": "https://uiarc.dev/components/funnel-chart",
+      "tier": "pro"
+    },
+    {
+      "name": "radar-chart",
+      "docs": "https://uiarc.dev/components/radar-chart",
+      "tier": "pro"
+    },
+    {
+      "name": "realtime-stream",
+      "docs": "https://uiarc.dev/components/realtime-stream",
+      "tier": "pro"
+    },
+    {
+      "name": "product-gallery",
+      "docs": "https://uiarc.dev/components/product-gallery",
+      "tier": "pro"
+    },
+    {
+      "name": "sheet-stack",
+      "docs": "https://uiarc.dev/components/sheet-stack",
+      "tier": "pro"
+    },
+    {
+      "name": "dot-grid",
+      "docs": "https://uiarc.dev/components/dot-grid",
+      "tier": "pro"
+    },
+    {
+      "name": "glass-card",
+      "docs": "https://uiarc.dev/components/glass-card",
+      "tier": "pro"
+    },
+    {
+      "name": "glass-tabbar",
+      "docs": "https://uiarc.dev/components/glass-tabbar",
+      "tier": "pro"
+    },
+    {
+      "name": "skeleton-morph",
+      "docs": "https://uiarc.dev/components/skeleton-morph",
+      "tier": "pro"
+    },
+    {
+      "name": "orbit-logos",
+      "docs": "https://uiarc.dev/components/orbit-logos",
+      "tier": "pro"
+    },
+    {
+      "name": "data-flow",
+      "docs": "https://uiarc.dev/components/data-flow",
+      "tier": "pro"
+    },
+    {
+      "name": "payment-flow",
+      "docs": "https://uiarc.dev/components/payment-flow",
+      "tier": "pro"
+    },
+    {
+      "name": "date-reel",
+      "docs": "https://uiarc.dev/components/date-reel",
+      "tier": "pro"
+    },
+    {
+      "name": "multi-region-failover",
+      "docs": "https://uiarc.dev/components/multi-region-failover",
+      "tier": "pro"
+    },
+    {
+      "name": "vector-search",
+      "docs": "https://uiarc.dev/components/vector-search",
+      "tier": "pro"
+    },
+    {
+      "name": "typewriter-terminal",
+      "docs": "https://uiarc.dev/components/typewriter-terminal",
+      "tier": "pro"
+    },
+    {
+      "name": "link-unfurl",
+      "docs": "https://uiarc.dev/components/link-unfurl",
+      "tier": "pro"
+    },
+    {
+      "name": "release-readiness",
+      "docs": "https://uiarc.dev/components/blocks/release-readiness",
+      "tier": "pro"
+    },
+    {
+      "name": "wallet-card",
+      "docs": "https://uiarc.dev/components/blocks/wallet-card",
+      "tier": "pro"
+    },
+    {
+      "name": "team-directory",
+      "docs": "https://uiarc.dev/components/blocks/team-directory",
+      "tier": "pro"
+    },
+    {
+      "name": "project-board",
+      "docs": "https://uiarc.dev/components/blocks/project-board",
+      "tier": "pro"
+    },
+    {
+      "name": "invoice-studio",
+      "docs": "https://uiarc.dev/components/blocks/invoice-studio",
+      "tier": "pro"
+    },
+    {
+      "name": "availability-picker",
+      "docs": "https://uiarc.dev/components/blocks/availability-picker",
+      "tier": "pro"
+    },
+    {
+      "name": "metrics-dashboard",
+      "docs": "https://uiarc.dev/components/blocks/metrics-dashboard",
+      "tier": "pro"
+    },
+    {
+      "name": "media-player",
+      "docs": "https://uiarc.dev/components/blocks/media-player",
+      "tier": "pro"
+    },
+    {
+      "name": "support-conversation",
+      "docs": "https://uiarc.dev/components/blocks/support-conversation",
+      "tier": "pro"
+    },
+    {
+      "name": "inbox-triage",
+      "docs": "https://uiarc.dev/components/blocks/inbox-triage",
+      "tier": "pro"
+    },
+    {
+      "name": "multi-step-form",
+      "docs": "https://uiarc.dev/components/blocks/multi-step-form",
+      "tier": "pro"
+    },
+    {
+      "name": "team-showcase",
+      "docs": "https://uiarc.dev/components/blocks/team-showcase",
+      "tier": "pro"
+    },
+    {
+      "name": "testimonial-stage",
+      "docs": "https://uiarc.dev/components/blocks/testimonial-stage",
+      "tier": "pro"
+    },
+    {
+      "name": "usage-pricing",
+      "docs": "https://uiarc.dev/components/blocks/usage-pricing",
+      "tier": "pro"
+    },
+    {
+      "name": "ai-composer",
+      "docs": "https://uiarc.dev/components/blocks/ai-composer",
+      "tier": "pro"
+    },
+    {
+      "name": "workspace-sidebar",
+      "docs": "https://uiarc.dev/components/blocks/workspace-sidebar",
+      "tier": "pro"
+    },
+    {
+      "name": "settings-page",
+      "docs": "https://uiarc.dev/components/blocks/settings-page",
+      "tier": "pro"
+    },
+    {
+      "name": "sidebar-rail",
+      "docs": "https://uiarc.dev/components/blocks/sidebar-rail",
+      "tier": "pro"
+    },
+    {
+      "name": "docs-sidebar",
+      "docs": "https://uiarc.dev/components/blocks/docs-sidebar",
+      "tier": "pro"
+    },
+    {
+      "name": "integrations",
+      "docs": "https://uiarc.dev/components/blocks/integrations",
+      "tier": "pro"
+    },
+    {
+      "name": "billing-overview",
+      "docs": "https://uiarc.dev/components/blocks/billing-overview",
+      "tier": "pro"
+    },
+    {
+      "name": "api-keys",
+      "docs": "https://uiarc.dev/components/blocks/api-keys",
+      "tier": "pro"
+    },
+    {
+      "name": "inbox-sidebar",
+      "docs": "https://uiarc.dev/components/blocks/inbox-sidebar",
+      "tier": "pro"
+    },
+    {
+      "name": "team-members",
+      "docs": "https://uiarc.dev/components/blocks/team-members",
+      "tier": "pro"
+    },
+    {
+      "name": "revenue-explorer",
+      "docs": "https://uiarc.dev/components/blocks/revenue-explorer",
+      "tier": "pro"
+    },
+    {
+      "name": "journey-flow",
+      "docs": "https://uiarc.dev/components/blocks/journey-flow",
+      "tier": "pro"
+    },
+    {
+      "name": "login-immersive",
+      "docs": "https://uiarc.dev/components/blocks/login-immersive",
+      "tier": "pro"
+    },
+    {
+      "name": "security-settings",
+      "docs": "https://uiarc.dev/components/blocks/security-settings",
+      "tier": "pro"
+    },
+    {
+      "name": "login-split",
+      "docs": "https://uiarc.dev/components/blocks/login-split",
+      "tier": "pro"
+    },
+    {
+      "name": "cohort-retention",
+      "docs": "https://uiarc.dev/components/blocks/cohort-retention",
+      "tier": "pro"
+    },
+    {
+      "name": "support-widget",
+      "docs": "https://uiarc.dev/components/blocks/support-widget",
+      "tier": "pro"
+    },
+    {
+      "name": "usage-forecast",
+      "docs": "https://uiarc.dev/components/blocks/usage-forecast",
+      "tier": "pro"
+    },
+    {
+      "name": "mrr-waterfall",
+      "docs": "https://uiarc.dev/components/blocks/mrr-waterfall",
+      "tier": "pro"
+    },
+    {
+      "name": "webhooks",
+      "docs": "https://uiarc.dev/components/blocks/webhooks",
+      "tier": "pro"
+    },
+    {
+      "name": "roles-permissions",
+      "docs": "https://uiarc.dev/components/blocks/roles-permissions",
+      "tier": "pro"
+    },
+    {
+      "name": "metric-explorer",
+      "docs": "https://uiarc.dev/components/blocks/metric-explorer",
+      "tier": "pro"
+    },
+    {
+      "name": "activity-terrain",
+      "docs": "https://uiarc.dev/components/blocks/activity-terrain",
+      "tier": "pro"
+    },
+    {
+      "name": "revenue-globe",
+      "docs": "https://uiarc.dev/components/blocks/revenue-globe",
+      "tier": "pro"
+    },
+    {
+      "name": "customer-galaxy",
+      "docs": "https://uiarc.dev/components/blocks/customer-galaxy",
+      "tier": "pro"
+    },
+    {
+      "name": "semantic-zoom",
+      "docs": "https://uiarc.dev/components/blocks/semantic-zoom",
+      "tier": "pro"
+    },
+    {
+      "name": "layout-morph",
+      "docs": "https://uiarc.dev/components/blocks/layout-morph",
+      "tier": "pro"
+    },
+    {
+      "name": "agent-run",
+      "docs": "https://uiarc.dev/components/blocks/agent-run",
+      "tier": "pro"
+    },
+    {
+      "name": "week-calendar",
+      "docs": "https://uiarc.dev/components/blocks/week-calendar",
+      "tier": "pro"
+    },
+    {
+      "name": "scroll-story",
+      "docs": "https://uiarc.dev/components/blocks/scroll-story",
+      "tier": "pro"
+    },
+    {
+      "name": "spotlight-grid",
+      "docs": "https://uiarc.dev/components/blocks/spotlight-grid",
+      "tier": "pro"
+    },
+    {
+      "name": "invite-people",
+      "docs": "https://uiarc.dev/components/blocks/invite-people",
+      "tier": "pro"
+    },
+    {
+      "name": "cart-drawer",
+      "docs": "https://uiarc.dev/components/blocks/cart-drawer",
+      "tier": "pro"
+    },
+    {
+      "name": "pricing-calculator",
+      "docs": "https://uiarc.dev/components/blocks/pricing-calculator",
+      "tier": "pro"
+    },
+    {
+      "name": "ai-chat",
+      "docs": "https://uiarc.dev/components/blocks/ai-chat",
+      "tier": "pro"
+    },
+    {
+      "name": "checkout-summary",
+      "docs": "https://uiarc.dev/components/blocks/checkout-summary",
+      "tier": "pro"
+    },
+    {
+      "name": "usage-billing",
+      "docs": "https://uiarc.dev/components/blocks/usage-billing",
+      "tier": "pro"
+    },
+    {
+      "name": "kpi-drilldown",
+      "docs": "https://uiarc.dev/components/blocks/kpi-drilldown",
+      "tier": "pro"
+    },
+    {
+      "name": "feature-bento",
+      "docs": "https://uiarc.dev/components/blocks/feature-bento",
+      "tier": "pro"
+    },
+    {
+      "name": "product-listing",
+      "docs": "https://uiarc.dev/components/blocks/product-listing",
+      "tier": "pro"
+    },
+    {
+      "name": "product-detail",
+      "docs": "https://uiarc.dev/components/blocks/product-detail",
+      "tier": "pro"
+    },
+    {
+      "name": "hero-signup",
+      "docs": "https://uiarc.dev/components/blocks/hero-signup",
+      "tier": "pro"
+    },
+    {
+      "name": "market-terminal",
+      "docs": "https://uiarc.dev/components/blocks/market-terminal",
+      "tier": "pro"
+    },
+    {
+      "name": "budget-variance",
+      "docs": "https://uiarc.dev/components/blocks/budget-variance",
+      "tier": "pro"
+    },
+    {
+      "name": "small-multiples",
+      "docs": "https://uiarc.dev/components/blocks/small-multiples",
+      "tier": "pro"
+    },
+    {
+      "name": "connected-scatter",
+      "docs": "https://uiarc.dev/components/blocks/connected-scatter",
+      "tier": "pro"
+    },
+    {
+      "name": "line-replay",
+      "docs": "https://uiarc.dev/components/blocks/line-replay",
+      "tier": "pro"
+    }
+  ]
+}

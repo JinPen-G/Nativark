@@ -1,0 +1,238 @@
+/* Integration overrides only. Vendor component CSS/motion stays unchanged. */
+:root {
+  --radius-control: var(--rental-ui-radius-button, 18px);
+  --radius-panel: var(--rental-ui-radius-container, 26px);
+  --radius-surface: 34px;
+  --font-body: var(--rental-typography-font-family);
+  --font-display: var(--rental-typography-font-family);
+  --focus-ring: var(--accent);
+}
+[data-rental-arc-action] { border-radius: var(--rental-ui-radius-button, 18px); }
+[data-rental-arc-action][data-button-kind="secondary"] {
+  background: var(--surface);
+  border-color: var(--border-strong);
+  color: var(--foreground);
+}
+/* Replace only the idle arrow glyph; its original Arc motion container, pending
+   spinner and drawn success check remain untouched. */
+.arc-action-connect[data-state="idle"] svg {
+  stroke: transparent;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 22v-5M9 8V2M15 8V2M7 8h10v4a5 5 0 0 1-10 0V8Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.arc-copy-action button { border-radius: var(--rental-ui-radius-button, 18px); }
+[data-rental-arc-button][data-button-kind="link"] { padding-inline: 6px; min-height: 28px; }
+[data-rental-arc-button][data-button-kind="link"]:not([data-button-danger]) { color: var(--accent); }
+:root[data-tenant-accent] [data-rental-arc-button][data-button-kind="primary"] {
+  background: var(--accent); border-color: var(--accent); color: var(--accent-foreground);
+}
+.arc-segmented-block > div { width: 100%; }
+.rental-arc-drawer { z-index: 920; }
+/* Radix tooltip portals must sit above both drawer and existing AntD modal layers. */
+:root [data-radix-popper-content-wrapper]:has([role="tooltip"]) { z-index: 1200 !important; }
+.rental-arc-drawer > div:first-child { align-items: center; }
+.rental-arc-drawer > div:first-child > div:first-child { min-width: 0; flex: 1; }
+.rental-arc-drawer > div:first-child > button { order: 3; }
+.arc-drawer-actions { display: flex; align-items: center; gap: 8px; order: 2; }
+.arc-drawer-footer { position: sticky; bottom: 0; background: var(--surface-raised); padding-top: 16px; }
+.rental-arc-drawer > div:nth-child(2) { flex: 1; }
+[data-rental-arc-drawer][data-side="right"] { border-radius: var(--radius-panel) 0 0 var(--radius-panel); }
+[data-rental-arc-drawer][data-side="left"] { border-radius: 0 var(--radius-panel) var(--radius-panel) 0; }
+[data-selected="true"][role="menuitem"] { color: var(--accent-strong); background: var(--accent-subtle); }
+.arc-form-field { display: block; width: 100%; }
+.arc-form-field > div { gap: 0; }
+.arc-form-field > div > label:empty { display: none; }
+.arc-form-field input, .arc-form-field textarea { border-radius: var(--rental-ui-radius-input, 18px); font-size: var(--rental-typography-body-size); }
+.arc-form-field[data-size="small"] input { min-height: 32px; }
+.arc-form-field[data-size="large"] input { min-height: 50px; }
+/* Keep keyboard focus visible despite the upstream foundation's no-outline policy. */
+:root [data-rental-arc-button]:focus-visible, :root .arc-form-field:not(.arc-password-field):not(.arc-password-strength):not(.arc-phone-field) :is(input,textarea):focus-visible,
+:root :is([role="tab"],[role="menuitem"],[role="switch"]):focus-visible {
+  outline: 2px solid var(--accent) !important; outline-offset: 3px;
+}
+:root .arc-copy-action button:focus-visible, :root .arc-theme-switch button:focus-visible {
+  outline: 2px solid var(--accent) !important; outline-offset: 3px;
+}
+.arc-date-field { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; min-width: 0; }
+.arc-date-field > div:first-child { flex: 1; min-width: 150px; }
+.arc-date-field > div:first-child > label:empty { display: none; }
+.arc-date-range { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
+.arc-date-range > :first-child { flex: 1 1 auto; min-width: 0; }
+.arc-search-field, .arc-select-field { position: relative; min-width: 0; width: 100%; }
+/* The source fields retain their real label for assistive technology without adding a second visual label to filter bars. */
+.arc-search-field [class*="field"] > label,
+.arc-select-field [class*="field"] > label { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.arc-select-field [class*="field"] { gap: 0; }
+.arc-multi-no-clear [class*="clear"] { display: none; }
+.arc-multi-no-clear [class*="hasClear"] [class*="chevron"] { margin-left: 0; }
+.arc-checkbox-field { display: inline-flex; min-width: 0; }
+.arc-password-field[data-status="error"] [class*="shell"] { border-color: var(--danger); }
+.arc-password-field[data-status="warning"] [class*="shell"] { border-color: var(--warning); }
+.arc-select-field .arc-select-trigger-with-clear { padding-right: 48px; }
+.arc-select-clear { position: absolute; z-index: 1; top: 50%; right: 32px; display: grid; width: 24px; height: 24px; place-items: center; transform: translateY(-50%); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--text-muted); cursor: pointer; transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard); }
+.arc-select-clear:hover:not(:disabled) { background: var(--surface-muted); color: var(--foreground); }
+.arc-select-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.arc-select-clear:disabled { cursor: not-allowed; opacity: .5; }
+.arc-select-field[data-status="error"] [class*="trigger"] { border-color: var(--danger); }
+.arc-select-field[data-status="warning"] [class*="trigger"] { border-color: var(--warning); }
+.arc-select-field[data-status="error"] input { border-color: var(--danger); }
+.arc-select-field[data-status="warning"] input { border-color: var(--warning); }
+.arc-range-endpoints { display: flex; flex-wrap: wrap; gap: 12px; }
+.arc-time-fields { display: flex; align-items: center; gap: 8px; }
+.arc-seconds { display: flex; align-items: center; gap: 4px; }
+.arc-seconds input { width: 60px; border-radius: var(--radius-control); border: 1px solid var(--border); background: var(--surface); padding: 6px; }
+.arc-range-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Order-list trial: UIArc sortable-data-table visual tokens over the existing
+   business table engine. Keep fixed columns and horizontal scrolling intact. */
+.arc-orders-table .ant-table-container {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--foreground);
+  font-family: var(--font-body);
+}
+.arc-orders-table .ant-table {
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+  letter-spacing: var(--tracking-body);
+}
+.arc-orders-table .ant-table-container table { border-collapse: separate; border-spacing: 0; }
+.arc-orders-table .ant-table-thead > tr > th {
+  height: 44px;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.arc-orders-table .ant-table-thead > tr > th::before { display: none; }
+.arc-orders-table .ant-table-tbody > tr > td {
+  height: 52px;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface);
+  color: var(--foreground);
+  font-weight: 400;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+  transition: background-color var(--duration-standard) var(--ease-standard), color var(--duration-standard) var(--ease-standard);
+}
+.arc-orders-table .ant-table-tbody > tr:last-child > td { border-bottom: 0; }
+.arc-orders-table .ant-table-placeholder > td { height: 120px; color: var(--text-muted); }
+@media (hover: hover) and (pointer: fine) {
+  .arc-orders-table .ant-table-tbody > tr:not(.ant-table-placeholder):hover > td,
+  .arc-orders-table .ant-table-tbody > tr:not(.ant-table-placeholder) > td.ant-table-cell-row-hover {
+    background: color-mix(in oklch, var(--foreground) 3%, var(--surface));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .arc-orders-table .ant-table-tbody > tr > td { transition: none; }
+}
+.arc-table-scope { margin-bottom: var(--space-2); font-size: var(--text-xs); }
+/* The original source owns sorting/motion/mobile folding. Only retain the
+   order list's existing desktop pinned identifier, operation and status columns. */
+@media (min-width: 621px) {
+  .arc-animated-order-table table { min-width: 1785px; }
+  .arc-animated-order-table th:nth-child(1), .arc-animated-order-table td:nth-child(1) { position: sticky; left: 0; z-index: 2; }
+  .arc-animated-order-table th:nth-child(8), .arc-animated-order-table td:nth-child(8) { position: sticky; right: 110px; z-index: 2; }
+  .arc-animated-order-table th:nth-child(10), .arc-animated-order-table td:nth-child(10) { position: sticky; right: 0; z-index: 2; }
+}
+.arc-pagination { display: flex; flex-wrap: wrap; gap: 12px; justify-content: flex-end; align-items: center; margin-top: 16px; }
+.arc-pagination-main { display: flex; flex-direction: row; align-items: center; gap: 12px; }
+.arc-pagination-summary { font-size: var(--text-xs); color: var(--text-muted); }
+.arc-pagination-jump { display: flex; gap: 8px; align-items: center; }
+.arc-pagination-jump input { max-width: 80px; }
+.arc-color-field { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.arc-color-field [class*="alpha"] { display: none; }
+.arc-rich-field [contenteditable], .arc-rich-field [role="textbox"] { min-height: 180px; }
+.arc-rich-field { border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); min-width: 0; }
+.arc-rich-toolbar { display: flex; align-items: center; gap: 4px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.arc-rich-count { margin-inline-start: auto; color: var(--text-muted); font-size: var(--text-xs); }
+.arc-rich-columns { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+.arc-rich-writing { padding: 24px; min-width: 0; }
+.arc-rich-output { padding: 16px 20px; border-inline-start: 1px solid var(--border); background: var(--surface-muted); min-width: 0; border-bottom-right-radius: var(--radius-panel); }
+.arc-rich-output-toolbar { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.arc-rich-output pre { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: var(--text-sm); line-height: 1.7; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 20px; min-height: 180px; }
+.arc-rich-limit { padding: 8px 20px; border-top: 1px solid var(--border); text-align: end; }
+@media (max-width: 640px) { .arc-rich-columns { grid-template-columns: minmax(0, 1fr); } .arc-rich-output { border-inline-start: 0; border-top: 1px solid var(--border); } }
+.arc-upload-field { min-width: 220px; width: 100%; }
+.arc-password-field label:empty { display: none; }
+.arc-password-field [class*="shell"] { border-radius: var(--rental-ui-radius-input, var(--radius-control)); }
+/* Password inputs sit inside the source shell: never add a second input height. */
+.arc-password-field input { border-radius: 0; }
+.arc-password-strength [class*="shell"], .arc-phone-field [class*="shell"] { border-radius: var(--rental-ui-radius-input, var(--radius-control)); }
+/* A standalone login step needs space for source focus rings and an open country picker. */
+.login-preview-viewport { overflow: visible; min-width: 0; padding: 6px; margin: -6px; }
+:root .rental-toast-viewport { z-index: 1300; }
+.arc-alert-actions { margin-top: var(--space-3); }
+.sider-nav .arc-sidebar-menu:not(.ant-menu-inline-collapsed) .ant-menu-item {
+  position: relative;
+  isolation: isolate;
+  overflow: visible;
+}
+.sider-nav .arc-sidebar-menu:not(.ant-menu-inline-collapsed) .ant-menu-item-selected {
+  background: transparent !important;
+}
+.arc-sidebar-pill {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: var(--rental-ui-radius-control);
+  background: var(--rental-color-primary);
+  pointer-events: none;
+}
+.arc-sidebar-pill::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 1px;
+  height: 16px;
+  border-radius: 1px;
+  background: var(--rental-color-text-light-solid);
+  content: "";
+  transform: translateY(-50%);
+}
+:root {
+  --rental-form-field-gap: var(--space-5, 20px);
+  --rental-form-label-gap: var(--space-2, 8px);
+  --rental-form-hint-gap: var(--space-2, 8px);
+  --rental-form-section-gap: var(--space-8, 32px);
+  --rental-form-label-weight: 500;
+}
+.arc-form-item.ant-form-item { margin-bottom: var(--rental-form-field-gap); min-width: 0; }
+.arc-form-item .ant-form-item-label > label {
+  color: var(--foreground);
+  font-size: var(--text-sm);
+  font-weight: var(--rental-form-label-weight);
+  line-height: var(--leading-body);
+  height: auto;
+}
+.arc-form.ant-form-vertical .arc-form-item > .ant-form-item-row > .ant-form-item-label,
+.arc-form-item.ant-form-item-vertical > .ant-form-item-row > .ant-form-item-label {
+  padding-bottom: var(--rental-form-label-gap);
+}
+.arc-form-item .ant-form-item-required::before { color: var(--danger) !important; }
+.arc-form-item .ant-form-item-extra,
+.arc-form-item .ant-form-item-explain {
+  padding-top: var(--rental-form-hint-gap);
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
+  min-height: 0;
+}
+.arc-form-item .ant-form-item-extra { color: var(--text-muted); }
+.arc-form-item .ant-form-item-explain-error { color: var(--danger); }
+.arc-form-item .ant-form-item-explain-warning { color: var(--warning); }
+/* Original field owns its alert; keep Ant's error store but avoid duplicate visible/live copy. */
+.arc-form-item:has(.arc-native-feedback) .ant-form-item-explain { display: none; }
+.arc-native-feedback [class*="messageSlot"] { margin-top: var(--rental-form-hint-gap); }
+.arc-form-section { min-width: 0; margin-block: var(--rental-form-section-gap); }
+.arc-form-section:first-child { margin-top: 0; }
+.arc-form-section-heading { margin-bottom: var(--rental-form-field-gap); }
+.arc-form-section-heading h3 { margin: 0; font-size: var(--rental-typography-section-title-size, 16px); font-weight: 600; line-height: var(--leading-heading); }
+.arc-form-section-heading p { margin: var(--rental-form-label-gap) 0 0; color: var(--text-muted); font-size: var(--text-sm); }
+.arc-form-section-fields { min-width: 0; }

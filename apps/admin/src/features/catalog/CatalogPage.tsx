@@ -1,7 +1,12 @@
-import { DeleteOutlined, MinusCircleOutlined, PlusOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
+import { DeleteOutlined, MinusCircleOutlined, PlusOutlined, UploadOutlined } from "@ant-design/icons";
 import { RentalInventoryMode, type RentalAttributeDefinition, type RentalItemGroup, type SaveRentalItemGroupRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Col, Drawer, Empty, Form, Input, InputNumber, Row, Select, Space, Switch, Table, Tag, Typography, Upload } from "antd";
+import { App, Card, Col, Empty, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Alert, Table, Upload } from "@/components/ui";
+import { Switch } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Button, Drawer, SaveButton, SearchField, Select } from "@/components/ui";
 import type { UploadFile } from "antd";
 import { useMemo, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
@@ -142,7 +147,7 @@ export function CatalogPage() {
     <>
       <PageHeader title={t(resolveTenantNavigationLabels(profile.data?.terminology).routes.itemGroups ?? "商品目录")} description={locale === "en-US" ? "Maintain product models, shared specifications, and inventory modes for this category. Commercial pricing groups and individual assets are managed separately." : presentation?.itemGroupDescription ?? "按经营品类维护产品型号、共享规格和库存形态；商业定价分组与具体资产在各自页面维护。"} note={{ title: `${itemGroupLabel}${t("是厂商产品主档，不是定价分组")}`, description: locale === "en-US" ? `This page stores manufacturer, brand, model, and shared specifications. ${t(profile.data?.terminology.identifierLabel ?? "资产编号")} and other per-asset information are maintained in “${t(resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产管理")}”; customer-facing commercial groups are created in “${t(resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "定价分组") }”.` : `这里保存厂商、品牌、型号和共享规格；${profile.data?.terminology.identifierLabel ?? "资产编号"}等单件信息在“${resolveTenantNavigationLabels(profile.data?.terminology).routes.assets ?? "资产管理"}”登记，面向客户的商业分组在“${resolveTenantNavigationLabels(profile.data?.terminology).routes.pricingGroups ?? "定价分组"}”建立。` }} extra={canManage ? <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>{locale === "en-US" ? `${t("新增")} ${itemGroupLabel}` : `${t("新增")}${itemGroupLabel}`}</Button> : undefined} />
       <Card className="data-panel" styles={{ body: { paddingBottom: 0 } }}>
-        <Space style={{ marginBottom: 16 }}><Input allowClear prefix={<SearchOutlined />} placeholder={t("搜索编码、名称或规格")} value={keyword} onChange={(event) => setKeyword(event.target.value)} style={{ width: 300 }} /></Space>
+        <Space style={{ marginBottom: 16 }}><SearchField label={t("搜索商品型号")} placeholder={t("搜索编码、名称或规格")} value={keyword} onValueChange={setKeyword} style={{ width: 300 }} /></Space>
         <QueryState loading={groups.isLoading || pricingGroups.isLoading || profile.isLoading || categories.isLoading} error={groups.error || pricingGroups.error || profile.error || categories.error}>
           <Table<RentalItemGroup> rowKey="id" dataSource={rows} scroll={{ x: 960 }} columns={[
             { title: t("照片"), width: 82, render: (_, row) => row.images?.[0] ? <ItemGroupPhoto groupId={row.id} image={row.images.find((image) => image.isCover) ?? row.images[0]} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={false} styles={{ image: { height: 36 } }} /> },
@@ -165,7 +170,7 @@ export function CatalogPage() {
         </QueryState>
       </Card>
 
-      <Drawer title={editing ? `${t("编辑")}${itemGroupLabel}` : `${t("新增")}${itemGroupLabel}`} size={760} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>{t("保存")}</Button>}>
+      <Drawer title={editing ? `${t("编辑")}${itemGroupLabel}` : `${t("新增")}${itemGroupLabel}`} size={760} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<SaveButton label={t("保存")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync({ ...values, inventoryMode: presentation?.fixedInventoryMode ?? values.inventoryMode, unit: presentation?.fixedUnit ?? values.unit, id: editing?.id })} />}>
         <Form<SaveRentalItemGroupRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, inventoryMode: presentation?.fixedInventoryMode ?? values.inventoryMode, unit: presentation?.fixedUnit ?? values.unit, id: editing?.id })}>
           <Card size="small" title={`${itemGroupLabel}${t("照片")}`} style={{ marginBottom: 16 }}>
             <Typography.Paragraph type="secondary">{t("上传型号的标准展示图，第一张作为列表封面；具体资产的实拍、状态和损伤照片在资产管理中维护。")}</Typography.Paragraph>

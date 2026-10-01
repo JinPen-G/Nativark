@@ -10,7 +10,13 @@ import type {
 } from "@rental-os/shared";
 import { RENTAL_CATEGORY_DEFINITIONS } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Alert, Button, Card, Checkbox, Col, Descriptions, Divider, Drawer, Empty, Form, Input, Popconfirm, Row, Select, Space, Statistic, Table, Tabs, Tag, Upload } from "antd";
+import { App, Card, Col, Descriptions, Divider, Empty, Row, Space, Statistic, Tag } from "antd";
+import { Checkbox } from "@/components/ui";
+import { Form } from "@/components/ui";
+import { Alert, Table, Upload } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Select } from "@/components/ui";
+import { Button, ConfirmAction, Drawer, Tabs } from "@/components/ui";
 import type { UploadFile, UploadProps } from "antd";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -114,7 +120,7 @@ function AddressTab({ addresses, canManage, onAdd, onEdit, onRemove }: {
   canManage: boolean;
   onAdd: () => void;
   onEdit: (address: CustomerProfileAddress) => void;
-  onRemove: (address: CustomerProfileAddress) => void;
+  onRemove: (address: CustomerProfileAddress) => Promise<unknown>;
 }) {
   const { t } = useLocale();
   return <>
@@ -126,7 +132,7 @@ function AddressTab({ addresses, canManage, onAdd, onEdit, onRemove }: {
       { title: t("详细地址"), dataIndex: "detail" },
       { title: t("默认"), dataIndex: "isDefault", render: (value) => value ? <Tag color="processing">{t("默认")}</Tag> : "—" },
       { title: t("更新于"), dataIndex: "updatedAt", render: dateTime },
-      { title: t("操作"), render: (_, row) => <Space><Button type="link" disabled={!canManage} onClick={() => onEdit(row)}>{t("编辑")}</Button><Popconfirm title={t("确认删除这个地址？")} onConfirm={() => onRemove(row)} disabled={!canManage}><Button type="link" danger disabled={!canManage}>{t("删除")}</Button></Popconfirm></Space> }
+      { title: t("操作"), render: (_, row) => <Space><Button type="link" disabled={!canManage} onClick={() => onEdit(row)}>{t("编辑")}</Button><ConfirmAction label={t("删除")} prompt={t("确认删除这个地址？")} onConfirm={() => onRemove(row)} disabled={!canManage} /></Space> }
     ]} /> : <Empty description={t("暂无配送地址")} />}
   </>;
 }
@@ -349,12 +355,12 @@ export function CustomerProfileDrawer({ open, customerId, canManage, canView, ca
   const profileTabs = [
     { key: "basic", label: t("基础资料"), children: current && <ProfileSummary overview={current} canManage={canManage} onEdit={onEdit} /> },
     { key: "account", label: t("账号与会员"), children: current && <AccountTab overview={current} /> },
-    { key: "address", label: current ? `${t("地址")} (${current.addresses.length})` : t("地址"), children: current && <AddressTab addresses={current.addresses} canManage={canManage} onAdd={() => openAddressEditor()} onEdit={openAddressEditor} onRemove={(address) => removeAddress.mutate(address)} /> },
+    { key: "address", label: current ? `${t("地址")} (${current.addresses.length})` : t("地址"), children: current && <AddressTab addresses={current.addresses} canManage={canManage} onAdd={() => openAddressEditor()} onEdit={openAddressEditor} onRemove={(address) => removeAddress.mutateAsync(address)} /> },
     { key: "qualification", label: current ? `${t("资质")} (${current.qualificationRevisions.length})` : t("资质"), children: current && <QualificationTab revisions={current.qualificationRevisions} canManage={canManage} onQualification={onQualification} /> },
     ...(canViewIdentity ? [{
       key: "identity",
       label: t("实名认证"),
-      children: <Space direction="vertical" size={16} style={{ display: "flex" }}>
+      children: <Space orientation="vertical" size={16} style={{ display: "flex" }}>
         <Alert type="warning" showIcon title={t("实名核验仅记录审核事实，不代替空间业务规则")}
           description={t("通过必须上传归属此客户的证据文件；每次核验只追加记录，普通建档不能直接把状态改成已认证。")} />
         {canManage && <Card size="small" title={t("新增核验记录")}>

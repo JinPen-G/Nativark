@@ -1,5 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Alert, Button, Card, Drawer, Form, Input, Modal, Space, Switch, Table, Tag, Typography } from "antd";
+import { App, Card, Modal, Space, Tag, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Alert, Table } from "@/components/ui";
+import { Switch } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Button, Drawer } from "@/components/ui";
 import dayjs from "dayjs";
 import { useState } from "react";
 import type { OfficialCalendarSource } from "@rental-os/shared";

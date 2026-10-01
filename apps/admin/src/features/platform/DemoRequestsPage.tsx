@@ -1,5 +1,7 @@
 import { ReloadOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Space, Table } from "antd";
+import { Card, Space } from "antd";
+import { Alert, Table } from "@/components/ui";
+import { Button } from "@/components/ui";
 import type { ColumnsType } from "antd/es/table";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";

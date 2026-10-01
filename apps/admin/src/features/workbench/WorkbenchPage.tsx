@@ -1,7 +1,9 @@
 import { ArrowRightOutlined, ReloadOutlined } from "@ant-design/icons";
 import { RentalCoreOrderStatus, formatRentalMoney, type RentalAssetStatus, type RentalWorkbenchTodo, type RentalWorkbenchTodoType, type RentalWorkspaceReportFilter } from "@rental-os/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Progress, Segmented, Space, Statistic, Table, Tag, Typography } from "antd";
+import { App, Card, Space, Statistic, Tag, Typography } from "antd";
+import { Alert, Progress, Table } from "@/components/ui";
+import { ActionButton, Button, Segmented } from "@/components/ui";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { rentalCoreApi } from "@/api/rentalCore";
@@ -118,7 +120,7 @@ export function WorkbenchPage() {
   }
 
   return <>
-    <PageHeader title="运营概览" description={`${profile.data?.terminology.itemLabel ?? "租赁标的"}、订单与库存指标来自当前经营空间的经营报表，与报表页、导出同一口径。`} view={<Segmented value={period} onChange={(value) => setPeriod(String(value))} options={["今日", "本周", "本月"].map((value) => ({ value, label: t(value) }))} />} extra={<Space><Button shape="circle" aria-label={t("刷新经营概览")} icon={<ReloadOutlined />} onClick={refresh} />{canReconcilePayments && <Button loading={reconcilePayments.isPending} onClick={() => reconcilePayments.mutate()}>{t("核对支付与退款")}</Button>}</Space>} />
+    <PageHeader title="运营概览" description={`${profile.data?.terminology.itemLabel ?? "租赁标的"}、订单与库存指标来自当前经营空间的经营报表，与报表页、导出同一口径。`} view={<Segmented value={period} onChange={(value) => setPeriod(String(value))} options={["今日", "本周", "本月"].map((value) => ({ value, label: t(value) }))} />} extra={<Space><Button shape="circle" aria-label={t("刷新经营概览")} icon={<ReloadOutlined />} onClick={refresh} />{canReconcilePayments && <ActionButton label={t("核对支付与退款")} pending={reconcilePayments.isPending} onAction={async () => { const result = await reconcilePayments.mutateAsync(); if (result.failed > 0 || result.pending > 0) throw new Error("Reconciliation requires attention"); }} />}</Space>} />
     <QueryState loading={loading} error={error}>
       {showMetrics ? <div className="metric-grid">
         {canViewOrders && <>

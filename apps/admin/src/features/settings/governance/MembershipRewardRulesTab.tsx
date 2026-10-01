@@ -1,7 +1,12 @@
 import { SaveOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import type { TenantRentalBusinessSettings } from "@rental-os/shared";
-import { Alert, Button, Card, Col, Form, InputNumber, Row, Select, Space, Switch, Typography } from "antd";
+import { Card, Col, InputNumber, Row, Space, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Alert } from "@/components/ui";
+import { Switch } from "@/components/ui";
+import { Select } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { useEffect } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";

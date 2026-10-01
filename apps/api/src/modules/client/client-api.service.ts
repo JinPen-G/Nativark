@@ -284,8 +284,9 @@ export class ClientApiService {
     // APPEARANCE-01：品牌标识/主题色已拆到独立「品牌与外观」领域，为唯一真源；缺行时回退旧渠道列（过渡期仍在库）。
     const appearance = await this.prisma.tenantAppearanceProfile.findUnique({
       where: { tenantId: tenant.id },
-      select: { brandName: true, brandLogoUrl: true, faviconUrl: true, themeColor: true }
+      select: { brandName: true, brandLogoUrl: true, faviconUrl: true, themeColor: true, adminLoginJson: true }
     });
+    const adminLogin = client === "web" ? (appearance?.adminLoginJson ?? undefined) as ClientChannelBootstrapResponse["adminLogin"] : undefined;
     const brandName = appearance?.brandName?.trim() || profile?.brandName?.trim() || tenant.name;
     const brandLogoUrl = appearance?.brandLogoUrl ?? profile?.brandLogoUrl ?? undefined;
     const brandFaviconUrl = appearance?.faviconUrl ?? profile?.faviconUrl ?? undefined;
@@ -329,6 +330,7 @@ export class ClientApiService {
         loginMethods: safeLoginMethods,
         capabilities: { publicCatalog: false, wechatPay: false, delivery: false, feeResponse: true, accountClosure: true },
         website,
+        adminLogin,
         source: "workspace_directory"
       };
     }
@@ -360,6 +362,7 @@ export class ClientApiService {
       loginMethods: safeLoginMethods,
       capabilities: { publicCatalog: services.length > 0, wechatPay: isMiniProgram && wechatPayReady && wechatReady, delivery: deliveryEnabled, feeResponse: true, accountClosure: true },
       website,
+      adminLogin,
       source: "channel"
     };
   }

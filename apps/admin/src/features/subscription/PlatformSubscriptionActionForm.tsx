@@ -1,5 +1,10 @@
 import { useState } from "react";
-import { App, Alert, Button, Form, Input, InputNumber, Select, Space, Typography } from "antd";
+import { App, InputNumber, Space, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Alert } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Select } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { SubscriptionPlan, SubscriptionSource, type StandardPlanPricing, type SubscriptionRequestRecord, type TenantSubscriptionOverview } from "@rental-os/shared";
 import { useLocale } from "@/app/locale";

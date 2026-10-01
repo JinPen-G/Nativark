@@ -38,6 +38,7 @@
           <view class="skeleton skeleton--line" style="width: 80%"></view>
           <view class="skeleton skeleton--line" style="width: 60%"></view>
         </view>
+        <rich-text wx:elif="{{provided && richNodes}}" class="body mt-16" nodes="{{richNodes}}"></rich-text>
         <view wx:elif="{{provided && body}}" class="body mt-16" style="white-space:pre-wrap">{{body}}</view>
         <view wx:elif="{{provided && url}}" class="mt-16">
           <view class="body">商户以外部链接提供本文档，请在浏览器打开以下地址阅读完整内容：</view>

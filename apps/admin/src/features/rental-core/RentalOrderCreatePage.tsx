@@ -20,28 +20,13 @@ import {
   type RentalQuoteSnapshotV1,
 } from "@rental-os/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import {
-  Alert,
-  App,
-  Button,
-  Card,
-  Checkbox,
-  Col,
-  DatePicker,
-  Descriptions,
-  Divider,
-  Form,
-  Input,
-  InputNumber,
-  Radio,
-  Result,
-  Row,
-  Select,
-  Space,
-  Switch,
-  Tag,
-  Typography,
-} from "antd";
+import { App, Card, Col, Descriptions, Divider, InputNumber, Radio, Result, Row, Space, Tag, Typography } from "antd";
+import { Checkbox } from "@/components/ui";
+import { Form } from "@/components/ui";
+import { Alert, DatePicker } from "@/components/ui";
+import { Switch } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Button, Select } from "@/components/ui";
 import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";

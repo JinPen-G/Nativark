@@ -1,10 +1,13 @@
-import { SaveOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Card, Col, Form, Row, Slider, Space, Typography } from "antd";
+import { App, Card, Col, Row, Slider, Space, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Alert } from "@/components/ui";
+import { Button, ColorPicker, SaveButton } from "@/components/ui";
 import { useEffect, type CSSProperties } from "react";
 import { useMutation, useQuery, queryOptions, useQueryClient } from "@tanstack/react-query";
 import type { SaveTenantAppearanceRequest } from "@rental-os/shared";
 import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_FULL, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
 import { appearanceApi } from "@/api/appearance";
+import { accountAppearanceApi } from "@/api/accountAppearance";
 import { resolveAdminRadii } from "@/app/designTokens";
 import { LoadingState } from "@/components/LoadingState";
 import { PageHeader } from "@/components/PageHeader";
@@ -42,7 +45,41 @@ function RadiusPreview({ kind, radius }: { kind: "container" | "button" | "input
 
 type AppearanceForm = Pick<SaveTenantAppearanceRequest, "adminContainerRadius" | "adminButtonRadius" | "adminInputRadius">;
 
-/** 圆角是租户配置；音效是浏览器本地偏好。品牌及主题色仍在客户端配置维护。 */
+/** 账户级主题色：跟随登录账户、与租户品牌色相互独立。单字段独立表单、独立保存。 */
+function AccountThemeColorCard() {
+  const { t } = useLocale();
+  const [form] = Form.useForm<{ themeColor?: string }>();
+  const { message } = App.useApp();
+  const queryClient = useQueryClient();
+  const setAccountThemeColor = useAuthStore((state) => state.setAccountThemeColor);
+  const profile = useQuery({ queryKey: ["account-appearance"], queryFn: accountAppearanceApi.getProfile });
+  useEffect(() => { if (profile.data) form.setFieldsValue({ themeColor: profile.data.themeColor }); }, [profile.data, form]);
+  const save = useMutation({
+    meta: { soundFeedback: true },
+    mutationFn: (values: { themeColor?: string }) => accountAppearanceApi.saveProfile({ themeColor: values.themeColor }),
+    onSuccess: (data) => {
+      setAccountThemeColor(data.themeColor);
+      void queryClient.invalidateQueries({ queryKey: ["account-appearance"] });
+      message.success(t("主题色已保存"));
+    },
+    onError: (error: any) => message.error(error?.response?.data?.message ?? t("保存失败"))
+  });
+  return (
+    <Card size="small" title={t("管理后台主题色")}>
+      <Typography.Paragraph type="secondary" className="text-meta" style={{ marginBottom: 12 }}>
+        {t("仅影响你自己的管理后台主色，跟随登录账户；留空使用平台默认色。与租户品牌色相互独立。")}
+      </Typography.Paragraph>
+      <Form form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
+        <Form.Item name="themeColor" rules={[{ pattern: /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, message: t("请输入 #RRGGBB 十六进制颜色") }]}>
+          <ColorPicker label={t("主题色")} />
+        </Form.Item>
+        <SaveButton label={t("保存主题色")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} />
+      </Form>
+    </Card>
+  );
+}
+
+/** 圆角是租户级配置；主题色跟随登录账户；音效是浏览器本地偏好。品牌色在客户端配置维护。 */
 export function AppearancePage() {
   const { t } = useLocale();
   const [form] = Form.useForm<AppearanceForm>();
@@ -85,6 +122,7 @@ export function AppearancePage() {
     <>
       <PageHeader title="外观与音效" description="设置管理后台圆角与界面音效。品牌标识及主题色请在客户端配置中维护。" />
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
+        <AccountThemeColorCard />
         {profile.isLoading ? <LoadingState /> : profile.error || !profile.data ? (
           <Alert showIcon type="error" title={t("无法读取圆角设置")} description={<Button onClick={() => profile.refetch()}>{t("重试")}</Button>} />
         ) : (
@@ -98,7 +136,7 @@ export function AppearancePage() {
                 <Col xs={24} md={8}><AdminRadiusSlider name="adminButtonRadius" label={t("按钮圆角")} tooltip={t("按钮、分段控件、页签、选中菜单项")} /><RadiusPreview kind="button" radius={previewRadii.button} /></Col>
                 <Col xs={24} md={8}><AdminRadiusSlider name="adminInputRadius" label={t("输入框圆角")} tooltip={t("输入框、选择器、日期、数字等录入控件")} allowFull={false} /><RadiusPreview kind="input" radius={previewRadii.input} /></Col>
               </Row>
-              <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={save.isPending} style={{ marginTop: 16 }}>{t("保存圆角设置")}</Button>
+              <SaveButton label={t("保存圆角设置")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} style={{ marginTop: 16 }} />
             </Card>
           </Form>
         )}

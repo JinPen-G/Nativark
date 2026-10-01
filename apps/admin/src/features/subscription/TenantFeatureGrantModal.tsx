@@ -1,4 +1,7 @@
-import { App, Alert, Form, Input, Modal } from "antd";
+import { App, Modal } from "antd";
+import { Form } from "@/components/ui";
+import { Alert } from "@/components/ui";
+import { Input } from "@/components/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { SubscriptionFeatureEntitlement } from "@rental-os/shared";
 import { subscriptionError } from "./subscriptionOperations";

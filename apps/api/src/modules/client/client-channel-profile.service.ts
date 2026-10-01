@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, Optional } from "@n
 import { Prisma } from "@prisma/client";
 import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_FULL, ADMIN_UI_CORNER_RADIUS_MAX, ADMIN_UI_CORNER_RADIUS_MIN } from "@rental-os/shared";
 import type {
+  AdminLoginBranding,
   ClientChannelFaqItem,
   ClientChannelProfileSummary,
   ClientChannelReadiness,
@@ -188,6 +189,7 @@ export class ClientChannelProfileService {
       brandLogoUrl: appearance.brandLogoUrl ?? undefined,
       faviconUrl: appearance.faviconUrl ?? undefined,
       themeColor: appearance.themeColor ?? undefined,
+      adminLogin: (appearance.adminLoginJson ?? undefined) as AdminLoginBranding | undefined,
       adminCornerRadius: normalizeAdminCornerRadius(appearance.adminCornerRadius),
       adminContainerRadius: appearance.adminContainerRadius ?? undefined,
       adminButtonRadius: appearance.adminButtonRadius ?? undefined,
@@ -244,6 +246,41 @@ export class ClientChannelProfileService {
     return value;
   }
 
+  private async normalizeAdminLogin(value: AdminLoginBranding, tenantId: string): Promise<Prisma.InputJsonObject> {
+    const keys = ["backgroundImageUrl", "title", "description", "highlights", "footerText"];
+    if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !keys.includes(key))) {
+      throw new BadRequestException("登录页配置格式无效");
+    }
+    const copy: Record<string, Prisma.InputJsonValue> = {};
+    for (const [key, max, label] of [["title", 80, "登录页标题"], ["description", 300, "登录页说明"], ["footerText", 160, "登录页底部文字"]] as const) {
+      const normalized = text(value[key], max, label);
+      if (normalized) copy[key] = normalized;
+    }
+    if (value.highlights !== undefined) {
+      if (!Array.isArray(value.highlights) || value.highlights.length > 3) throw new BadRequestException("登录页能力介绍最多三项");
+      copy.highlights = value.highlights.map((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item) || Object.keys(item).some((key) => key !== "title" && key !== "description")) {
+          throw new BadRequestException("登录页能力介绍格式无效");
+        }
+        const title = text(item.title, 24, "能力名称");
+        const description = text(item.description, 80, "能力说明");
+        return { ...(title ? { title } : {}), ...(description ? { description } : {}) };
+      });
+    }
+    const backgroundImageUrl = text(value.backgroundImageUrl, 512, "登录页背景图");
+    if (backgroundImageUrl) {
+      const match = /^\/api\/client\/v1\/public\/website-assets\/([a-z][a-z0-9_-]{1,31})\/([a-zA-Z0-9_-]+)$/u.exec(backgroundImageUrl);
+      if (!match) throw new BadRequestException("登录页背景图必须使用本租户上传的图片");
+      const asset = await this.prisma.websiteAsset.findFirst({
+        where: { id: match[2], tenantId, tenant: { code: match[1] }, mimeType: { in: ["image/jpeg", "image/png", "image/webp"] } },
+        select: { id: true }
+      });
+      if (!asset) throw new BadRequestException("登录页背景图不存在或不属于当前租户");
+      copy.backgroundImageUrl = backgroundImageUrl;
+    }
+    return copy;
+  }
+
   private agreementData(input: SaveClientChannelProfileRequest["userAgreement"], fallbackName: string) {
     if (!input) return { name: null, version: null, url: null, body: null };
     const version = text(input.version, 64, "协议版本");
@@ -270,6 +307,7 @@ export class ClientChannelProfileService {
     const defaultWorkspaceId = text(input.defaultWorkspaceId, 191, "默认服务");
     if (defaultWorkspaceId && !requestedWorkspaceIds.includes(defaultWorkspaceId)) throw new BadRequestException("默认服务必须在已发布服务之内");
 
+    const adminLoginJson = input.adminLogin === undefined ? undefined : await this.normalizeAdminLogin(input.adminLogin, tenantId);
     const brandLogoUrl = await this.validatedUrl(text(input.brandLogoUrl, 512, "品牌 Logo 地址"), "品牌 Logo 地址");
     const faviconUrl = await this.validatedUrl(text(input.faviconUrl, 512, "浏览器图标地址"), "浏览器图标地址");
     const userAgreement = this.agreementData(input.userAgreement, DEFAULT_AGREEMENT_NAME.userAgreement);
@@ -312,7 +350,7 @@ export class ClientChannelProfileService {
         : await tx.clientChannelProfile.create({ data: { tenantId, ...data } });
       // 品牌与主题色仍在客户端配置维护，同时更新登录/启动配置读取的外观记录。
       // 已有外观记录只更新品牌，不把渠道里的旧圆角写回去。
-      const branding = { brandName: data.brandName, brandLogoUrl: data.brandLogoUrl, faviconUrl: data.faviconUrl, themeColor: data.themeColor };
+      const branding = { brandName: data.brandName, brandLogoUrl: data.brandLogoUrl, faviconUrl: data.faviconUrl, themeColor: data.themeColor, ...(adminLoginJson !== undefined ? { adminLoginJson } : {}) };
       await tx.tenantAppearanceProfile.upsert({
         where: { tenantId },
         create: { tenantId, ...branding, adminCornerRadius: data.adminCornerRadius, adminContainerRadius: data.adminContainerRadius, adminButtonRadius: data.adminButtonRadius, adminInputRadius: data.adminInputRadius },
@@ -342,6 +380,7 @@ export class ClientChannelProfileService {
       brandLogoUrl: appearance.brandLogoUrl ?? undefined,
       faviconUrl: appearance.faviconUrl ?? undefined,
       themeColor: appearance.themeColor ?? undefined,
+      adminLogin: (appearance.adminLoginJson ?? undefined) as AdminLoginBranding | undefined,
       adminCornerRadius: normalizeAdminCornerRadius(appearance.adminCornerRadius),
       adminContainerRadius: appearance.adminContainerRadius ?? undefined,
       adminButtonRadius: appearance.adminButtonRadius ?? undefined,

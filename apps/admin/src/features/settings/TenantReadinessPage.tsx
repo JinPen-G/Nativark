@@ -1,6 +1,8 @@
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Space, Tag, Typography } from "antd";
+import { Card, Space, Tag, Typography } from "antd";
+import { Alert } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { CheckCircleFilled, RightOutlined, WarningFilled } from "@ant-design/icons";
 import type { TenantReadinessStatus } from "@rental-os/shared";
 import { rentalCoreApi } from "@/api/rentalCore";

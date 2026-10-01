@@ -1,4 +1,4 @@
-import type { ClientChannelAgreementConfig, ClientChannelFaqItem, SaveClientChannelProfileRequest } from "@rental-os/shared";
+import type { AdminLoginBranding, ClientChannelAgreementConfig, ClientChannelFaqItem, SaveClientChannelProfileRequest } from "@rental-os/shared";
 import { Type } from "class-transformer";
 import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from "class-validator";
 
@@ -29,7 +29,35 @@ export class ClientChannelFaqItemDto implements ClientChannelFaqItem {
  * 租户级客户端渠道配置（CLIENT-CHANNEL-01）。小程序与 APP 共用；微信凭证另走 SaveMiniProgramChannelDto。
  * expectedRevision 用于并发保护：不一致则拒绝保存，防止两人互相覆盖。
  */
+export class AdminLoginHighlightDto {
+  @IsOptional() @IsString() @MaxLength(24)
+  title?: string;
+
+  @IsOptional() @IsString() @MaxLength(80)
+  description?: string;
+}
+
+export class AdminLoginBrandingDto implements AdminLoginBranding {
+  @IsOptional() @IsString() @MaxLength(512)
+  backgroundImageUrl?: string;
+
+  @IsOptional() @IsString() @MaxLength(80)
+  title?: string;
+
+  @IsOptional() @IsString() @MaxLength(300)
+  description?: string;
+
+  @IsOptional() @IsArray() @ArrayMaxSize(3) @ValidateNested({ each: true }) @Type(() => AdminLoginHighlightDto)
+  highlights?: AdminLoginHighlightDto[];
+
+  @IsOptional() @IsString() @MaxLength(160)
+  footerText?: string;
+}
+
 export class SaveClientChannelProfileDto implements SaveClientChannelProfileRequest {
+  @IsOptional() @ValidateNested() @Type(() => AdminLoginBrandingDto)
+  adminLogin?: AdminLoginBrandingDto;
+
   @IsOptional() @IsInt() @Min(0)
   expectedRevision?: number;
 
@@ -67,7 +95,7 @@ export class SaveClientChannelProfileDto implements SaveClientChannelProfileRequ
   bannerSubtitle?: string;
 
   /** 主题色：#RGB 或 #RRGGBB；服务层再归一化为大写 #RRGGBB。留空表示回退系统默认色。 */
-  @IsOptional() @IsString() @Matches(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/u, { message: "主题色需为 #RRGGBB 十六进制颜色" })
+  @IsOptional() @IsString() @Matches(/^(?:#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}))?$/u, { message: "主题色需为 #RRGGBB 十六进制颜色" })
   themeColor?: string;
 
   /** 管理后台基础控件圆角（旧字段/回退基准）：连续区间 8-20px，或极致圆角离散档 999px（服务层精确校验，拒绝 20 与 999 之间的值）。 */

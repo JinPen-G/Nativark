@@ -10,7 +10,13 @@ import type {
   SavePlatformFilterPresetRequest,
   SavePlatformNumberRuleRequest,
 } from "@rental-os/shared";
-import { App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Switch, Table, Tabs, Tag, Typography } from "antd";
+import { App, Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Table } from "@/components/ui";
+import { Switch } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Select } from "@/components/ui";
+import { Button, Drawer, Tabs } from "@/components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { platformOpsApi } from "@/api/platformOps";

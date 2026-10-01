@@ -1,4 +1,4 @@
-import { Tooltip } from "antd";
+import { Tooltip } from "@/components/ui";
 import { useLocale, type AdminLocale } from "@/app/locale";
 
 /** 左下角语言切换：展开时显示中/EN，收起侧栏时保留一个可点击的目标语言。 */

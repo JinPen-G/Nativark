@@ -9,7 +9,8 @@ import { ADMIN_UI_CORNER_RADIUS_DEFAULT, ADMIN_UI_CORNER_RADIUS_FULL, ADMIN_UI_C
 export const ADMIN_FONT_FAMILY =
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif";
 
-export const ADMIN_DEFAULT_PRIMARY_COLOR = "#1677FF";
+export const ADMIN_DEFAULT_PRIMARY_COLOR = "#353535";
+export const ARC_DEFAULT_RADII = { container: 26, button: 18, input: 18 } as const;
 
 const HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/u;
 
@@ -80,6 +81,7 @@ function legacyContainerRadius(unified: number) {
  */
 export function resolveAdminRadiusGroup(value: number | null | undefined, legacy: number | null | undefined, kind: "container" | "button" | "input") {
   if (Number.isInteger(value)) return resolveAdminCornerRadius(value);
+  if (!Number.isInteger(legacy)) return ARC_DEFAULT_RADII[kind];
   const base = Number.isInteger(legacy) ? resolveAdminCornerRadius(legacy as number) : ADMIN_UI_CORNER_RADIUS_DEFAULT;
   return kind === "container" ? legacyContainerRadius(base) : base;
 }

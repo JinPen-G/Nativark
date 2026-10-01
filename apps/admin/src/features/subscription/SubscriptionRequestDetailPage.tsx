@@ -1,4 +1,6 @@
-import { Alert, App, Button, Card, Empty, Popconfirm, Space } from "antd";
+import { App, Card, Empty, Popconfirm, Space } from "antd";
+import { Alert } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";

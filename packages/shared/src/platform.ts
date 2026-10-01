@@ -198,6 +198,8 @@ export interface AuthUser {
   isSaasAdmin?: boolean;
   mustChangePassword?: boolean;
   permissions?: string[];
+  /** 账户级管理后台主题色（#RRGGBB），跟随登录账户、与租户品牌色（TenantContext.themeColor）相互独立；未设置时管理后台主色回退平台默认色。 */
+  accountThemeColor?: string;
   tenantMembership?: {
     permissions: string[];
     dataScope: SystemDataScope;
@@ -776,7 +778,7 @@ export interface ClientChannelAgreementConfig {
   version: string;
   /** 可选外部链接（HTTPS）。 */
   url?: string;
-  /** 正文（简单富文本/纯文本），客户端内直接渲染；保存时按长度限制。 */
+  /** 纯文本或 CLIENT_RICH_TEXT_PREFIX + 安全文档节点 JSON；用 parseClientRichText 识别。不可直接作为 HTML 执行；总长度含格式标记不超过 20000 字符。 */
   body?: string;
 }
 
@@ -837,6 +839,26 @@ export interface SaveTenantAppearanceRequest {
   adminInputRadius?: number;
 }
 
+/** 账户级外观（跟随登录账户，与租户品牌色相互独立）。目前仅管理后台主题色。 */
+export interface AccountAppearanceProfile {
+  /** 该账户的管理后台主题色（#RRGGBB）；未设置时管理后台主色回退平台默认色。 */
+  themeColor?: string;
+  updatedAt?: string;
+}
+
+/** 保存账户级外观（管理后台「外观与音效」页）。留空=清除→回退平台默认色。 */
+export interface SaveAccountAppearanceRequest {
+  themeColor?: string;
+}
+
+export interface AdminLoginBranding {
+  backgroundImageUrl?: string;
+  title?: string;
+  description?: string;
+  highlights?: Array<{ title?: string; description?: string }>;
+  footerText?: string;
+}
+
 export interface ClientChannelProfileSummary {
   configured: boolean;
   revision: number;
@@ -851,6 +873,7 @@ export interface ClientChannelProfileSummary {
   helpFaq: ClientChannelFaqItem[];
   bannerTitle?: string;
   bannerSubtitle?: string;
+  adminLogin?: AdminLoginBranding;
   /** 客户端与管理后台主题色（#RRGGBB）；未设置时各端用系统默认色。 */
   themeColor?: string;
   /** 管理后台基础控件圆角（px，旧字段/回退基准）；胶囊页签与圆形图标按钮不受此值强行变形。 */
@@ -885,6 +908,7 @@ export interface SaveClientChannelProfileRequest {
   helpFaq?: ClientChannelFaqItem[];
   bannerTitle?: string;
   bannerSubtitle?: string;
+  adminLogin?: AdminLoginBranding;
   /** 客户端与管理后台主题色（#RRGGBB）；留空表示回退系统默认色。 */
   themeColor?: string;
   /** 管理后台基础控件圆角（8-20px 或 999，旧字段/回退基准）；留空沿用当前值或平台默认值。 */

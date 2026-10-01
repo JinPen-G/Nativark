@@ -10,7 +10,11 @@ import type {
   SubmitRentalWorkOrderRequest
 } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Descriptions, Empty, Form, Input, Modal, Select, Space, Table, Tag, Typography } from "antd";
+import { App, Card, Descriptions, Empty, Modal, Space, Tag, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Alert, Table } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Button, SearchField, Select } from "@/components/ui";
 import { useEffect, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
@@ -184,7 +188,7 @@ export function MaintenanceWorkOrdersPage() {
           <Select allowClear value={statusFilter} onChange={setStatusFilter} placeholder={t("状态")} style={{ width: 130 }} options={Object.entries(WORK_ORDER_STATUS_LABELS).map(([value, item]) => ({ value, label: t(item.label) }))} />
           <Select allowClear value={typeFilter} onChange={setTypeFilter} placeholder={t("类型")} style={{ width: 130 }} options={Object.entries(WORK_ORDER_TYPE_LABELS).map(([value, label]) => ({ value, label: t(label) }))} />
           <Select allowClear value={assigneeFilter} onChange={setAssigneeFilter} placeholder={t("负责人")} style={{ width: 190 }} options={assignees.data?.map((item) => ({ value: item.id, label: item.displayName }))} />
-          <Input allowClear value={resourceFilter} onChange={(event) => setResourceFilter(event.target.value)} placeholder={t("搜索工单、商品、资产、地点或订单")} style={{ width: 280 }} />
+          <SearchField label={t("搜索养护工单")} value={resourceFilter} onValueChange={setResourceFilter} placeholder={t("搜索工单、商品、资产、地点或订单")} style={{ width: 280 }} />
           <Button onClick={() => { setStatusFilter(undefined); setTypeFilter(undefined); setAssigneeFilter(undefined); setResourceFilter(""); }}>{t("清除筛选")}</Button>
         </Space>
         <Table<RentalWorkOrder> rowKey="id" dataSource={filteredWorkOrders} pagination={{ pageSize: 8 }} scroll={{ x: 1280 }} locale={{ emptyText: <Empty description={t("暂无匹配的养护工单")} /> }} columns={[

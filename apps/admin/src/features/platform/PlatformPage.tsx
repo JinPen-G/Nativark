@@ -1,6 +1,12 @@
-import { DeleteOutlined, EditOutlined, KeyOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
+import { DeleteOutlined, EditOutlined, KeyOutlined, PlusOutlined } from "@ant-design/icons";
 import type { OrganizationSummary, SaveOrganizationRequest, SaveSystemRoleRequest, SaveSystemUserRequest, SystemRoleRow, SystemRulesConfig, SystemUserRow } from "@rental-os/shared";
-import { Alert, App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Switch, Table, Tabs, Tag, Typography } from "antd";
+import { App, Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Alert, Table } from "@/components/ui";
+import { Switch } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Select } from "@/components/ui";
+import { Button, ConfirmAction, CopyButton, Drawer, SaveButton, Tabs } from "@/components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
@@ -50,7 +56,7 @@ export function PlatformPage() {
   const toggleOrganization = useMutation({ mutationFn: ({ id, status }: { id: string; status: OrganizationSummary["status"] }) => api.setOrganizationStatus(id, status, operator), onSuccess: async () => { await refreshPlatform(); message.success(t("组织状态已更新")); }, onError: () => message.error(t("组织状态更新失败，请检查下级组织和关联账号")) });
   const saveUser = useMutation({ mutationFn: api.saveUser, onSuccess: async () => { await refreshPlatform(); closeEditor(); message.success(t("账号已保存")); }, onError: () => message.error(t("账号保存失败，请检查账号唯一性、组织和角色")) });
   const toggleUser = useMutation({ mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) => api.setUserStatus(id, isActive), onSuccess: async () => { await refreshPlatform(); message.success(t("账号状态已更新")); }, onError: () => message.error(t("账号状态更新失败")) });
-  const resetPassword = useMutation({ mutationFn: api.resetUserPassword, onSuccess: (result) => modal.success({ title: t("密码已重置"), content: <><Typography.Paragraph>{result.message}</Typography.Paragraph><Typography.Text code copyable>{result.temporaryPassword}</Typography.Text></> }), onError: () => message.error(t("密码重置失败")) });
+  const resetPassword = useMutation({ mutationFn: api.resetUserPassword, onSuccess: (result) => modal.success({ title: t("密码已重置"), content: <><Typography.Paragraph>{result.message}</Typography.Paragraph><Typography.Text code>{result.temporaryPassword}</Typography.Text><CopyButton value={result.temporaryPassword} /></> }), onError: () => message.error(t("密码重置失败")) });
   const saveRole = useMutation({ mutationFn: api.saveRole, onSuccess: async () => { await refreshPlatform(); closeEditor(); message.success(t("角色已保存")); }, onError: () => message.error(t("角色保存失败，请检查角色编码和权限")) });
   const deleteRole = useMutation({ mutationFn: api.deleteRole, onSuccess: async () => { await refreshPlatform(); message.success(t("角色已删除")); }, onError: () => message.error(t("角色无法删除，可能是预设角色或仍被账号使用")) });
   const saveRules = useMutation({
@@ -98,10 +104,6 @@ export function PlatformPage() {
     modal.confirm({ title: `${t("重置账号密码")} ${record.account}?`, content: t("重置后会生成临时密码，请通过安全渠道交付给账号持有人，并要求首次登录后修改。"), okText: t("确认重置"), onOk: () => resetPassword.mutateAsync(record.id) });
   }
 
-  function confirmDeleteRole(record: SystemRoleRow) {
-    modal.confirm({ title: `${t("删除角色")} ${record.name}？`, content: t("预设角色或仍分配给账号的角色无法删除。删除操作不可撤销。"), okText: t("确认删除"), okButtonProps: { danger: true }, onOk: () => deleteRole.mutateAsync(record.id) });
-  }
-
   return (
     <>
       <PageHeader title={t("平台配置")} description={t("管理组织、账号、角色权限、审计与系统参数。数据范围仍由后端 API 强制执行。")} />
@@ -142,7 +144,7 @@ export function PlatformPage() {
                 { title: t("权限数"), render: (_, record) => record.fixedAllPermissions ? t("全部") : record.permissions.length + record.buttonPermissions.length },
                 { title: t("业务范围"), dataIndex: "enabledBusinessScopes", render: (values: string[]) => values.join("、") },
                 { title: t("状态"), dataIndex: "isActive", render: (value) => <Tag color={value ? "success" : "default"}>{value ? t("启用") : t("停用")}</Tag> },
-                { title: t("操作"), fixed: "right", render: (_, record) => record.fixedAllPermissions ? <Tag>{t("预设角色")}</Tag> : <Space size={0}><Button type="link" icon={<EditOutlined />} onClick={() => openRole(record)}>{t("编辑")}</Button><Button type="link" danger icon={<DeleteOutlined />} onClick={() => confirmDeleteRole(record)}>{t("删除")}</Button></Space> }
+                { title: t("操作"), fixed: "right", render: (_, record) => record.fixedAllPermissions ? <Tag>{t("预设角色")}</Tag> : <Space size={0}><Button type="link" icon={<EditOutlined />} onClick={() => openRole(record)}>{t("编辑")}</Button><ConfirmAction label={t("删除")} icon={<DeleteOutlined />} prompt={<>{`${t("删除角色")} ${record.name}？`} {t("预设角色或仍分配给账号的角色无法删除。删除操作不可撤销。")}</>} onConfirm={() => deleteRole.mutateAsync(record.id)} /></Space> }
               ]} /></>
             },
             {
@@ -166,26 +168,26 @@ export function PlatformPage() {
                   <Col xs={24} xl={12}><Card size="small" title={t("资产维护")}><Row gutter={12}><Col span={12}><Form.Item name={["fleet", "maintenance", "thresholdMileage"]} label={t("维护阈值（公里）")}><InputNumber min={0} style={{ width: "100%" }} /></Form.Item></Col><Col span={12}><Form.Item name={["fleet", "maintenance", "thresholdMonths"]} label={t("维护周期（月）")}><InputNumber min={1} style={{ width: "100%" }} /></Form.Item></Col><Col span={12}><Form.Item name={["fleet", "cleaning", "thresholdCount"]} label={t("清洁阈值（次）")}><InputNumber min={1} style={{ width: "100%" }} /></Form.Item></Col><Col span={12}><Form.Item name={["fleet", "cleaning", "thresholdDays"]} label={t("清洁周期（天）")}><InputNumber min={1} style={{ width: "100%" }} /></Form.Item></Col></Row></Card></Col>
                   <Col span={24}><Card size="small" title={t("AI 接入")}><Row gutter={12}><Col xs={24} md={6}><Form.Item name={["aiModel", "enabled"]} label={t("启用")} valuePropName="checked"><Switch /></Form.Item></Col><Col xs={24} md={6}><Form.Item name={["aiModel", "provider"]} label={t("提供方")}><Select options={[{ value: "OPENAI", label: "OpenAI" }, { value: "GEMINI", label: "Gemini" }, { value: "OPENAI_COMPATIBLE", label: "OpenAI Compatible" }]} /></Form.Item></Col><Col xs={24} md={6}><Form.Item name={["aiModel", "modelName"]} label={t("模型名称")}><Input /></Form.Item></Col><Col xs={24} md={6}><Form.Item name={["aiModel", "baseUrl"]} label="Base URL"><Input /></Form.Item></Col></Row><Space><Button loading={testAi.isPending} onClick={() => testAi.mutate()}>{t("测试连接")}</Button><Tag color={rules.data.aiModel.lastTestStatus === "成功" ? "success" : "default"}>{rules.data.aiModel.lastTestStatus ? t(rules.data.aiModel.lastTestStatus) : t("未测试")}</Tag><Typography.Text type="secondary">{rules.data.aiModel.lastTestTime}</Typography.Text></Space></Card></Col>
                 </Row>
-                <div className="form-actions"><Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={saveRules.isPending}>{t("保存系统参数")}</Button></div>
+                <div className="form-actions"><SaveButton label={t("保存系统参数")} form={rulesForm} pending={saveRules.isPending} onSave={(values) => saveRules.mutateAsync({ ...rules.data!, ...values })} /></div>
               </Form>}</QueryState>
             }
           ]} />
         </Card>
       </QueryState>
 
-      <Drawer title={editingOrganization ? t("编辑组织") : t("新增组织")} open={editor === "organization"} size={500} destroyOnHidden onClose={closeEditor} extra={<Button type="primary" loading={saveOrganization.isPending} onClick={() => organizationForm.submit()}>{t("保存")}</Button>}>
+      <Drawer title={editingOrganization ? t("编辑组织") : t("新增组织")} open={editor === "organization"} size={500} destroyOnHidden onClose={closeEditor} extra={<SaveButton label={t("保存")} form={organizationForm} pending={saveOrganization.isPending} onSave={(values) => saveOrganization.mutateAsync({ ...values, id: editingOrganization?.id, operator })} />}>
         <Form form={organizationForm} layout="vertical" onFinish={(values) => saveOrganization.mutate({ ...values, id: editingOrganization?.id, operator })}>
           <Form.Item name="tenantId" hidden><Input /></Form.Item><Form.Item name="name" label={t("组织名称")} rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="code" label={t("组织编码")} rules={[{ required: true }]}><Input disabled={Boolean(editingOrganization)} /></Form.Item><Form.Item name="type" label={t("组织类型")} rules={[{ required: true }]}><Select options={[{ value: "operator", label: t("营运中心") }, { value: "car_shop", label: t("业务公司") }, { value: "store", label: t("门店") }, { value: "station", label: t("履约点") }]} /></Form.Item><Form.Item name="parentId" label={t("上级组织")}><Select allowClear options={(organizations.data ?? []).filter((item) => item.id !== editingOrganization?.id).map((item) => ({ value: item.id, label: item.name }))} /></Form.Item><Form.Item name="status" label={t("状态")}><Select options={[{ value: "enabled", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item>
         </Form>
       </Drawer>
 
-      <Drawer title={editingUser ? t("编辑账号") : t("新增账号")} open={editor === "user"} size={520} destroyOnHidden onClose={closeEditor} extra={<Button type="primary" loading={saveUser.isPending} onClick={() => userForm.submit()}>{t("保存")}</Button>}>
+      <Drawer title={editingUser ? t("编辑账号") : t("新增账号")} open={editor === "user"} size={520} destroyOnHidden onClose={closeEditor} extra={<SaveButton label={t("保存")} form={userForm} pending={saveUser.isPending} onSave={(values) => saveUser.mutateAsync({ ...values, id: editingUser?.id })} />}>
         <Form form={userForm} layout="vertical" onFinish={(values) => saveUser.mutate({ ...values, id: editingUser?.id })}>
           <Form.Item name="tenantId" hidden><Input /></Form.Item><Form.Item name="account" label={t("登录账号")} rules={[{ required: true }]}><Input disabled={Boolean(editingUser)} /></Form.Item><Form.Item name="displayName" label={t("显示名称")} rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="phone" label={t("联系电话")}><Input /></Form.Item><Form.Item name="organizationId" label={t("所属组织")}><Select allowClear options={organizationOptions} /></Form.Item><Form.Item name="roleIds" label={t("角色")} rules={[{ required: true }]}><Select mode="multiple" options={roleOptions} /></Form.Item><Space size="large"><Form.Item name="isPlatformAdmin" label={t("租户管理员")} valuePropName="checked"><Switch /></Form.Item><Form.Item name="isActive" label={t("启用")} valuePropName="checked"><Switch /></Form.Item></Space>
         </Form>
       </Drawer>
 
-      <Drawer title={editingRole ? t("编辑角色") : t("新增角色")} open={editor === "role"} size={680} destroyOnHidden onClose={closeEditor} extra={<Button type="primary" loading={saveRole.isPending} onClick={() => roleForm.submit()}>{t("保存")}</Button>}>
+      <Drawer title={editingRole ? t("编辑角色") : t("新增角色")} open={editor === "role"} size={680} destroyOnHidden onClose={closeEditor} extra={<SaveButton label={t("保存")} form={roleForm} pending={saveRole.isPending} onSave={(values) => saveRole.mutateAsync({ ...values, id: editingRole?.id })} />}>
         <Form form={roleForm} layout="vertical" onFinish={(values) => saveRole.mutate({ ...values, id: editingRole?.id })}>
           <Row gutter={12}><Col span={12}><Form.Item name="name" label={t("角色名称")} rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={12}><Form.Item name="code" label={t("角色编码")} rules={[{ required: true }]}><Input disabled={Boolean(editingRole)} /></Form.Item></Col></Row><Form.Item name="description" label={t("角色说明")}><Input.TextArea rows={2} /></Form.Item><Row gutter={12}><Col span={12}><Form.Item name="scope" label={t("作用域")} rules={[{ required: true }]}><Select options={[{ value: "operator", label: t("营运中心") }, { value: "car_shop", label: t("业务公司") }, { value: "store", label: t("门店") }, { value: "station", label: t("履约点") }]} /></Form.Item></Col><Col span={12}><Form.Item name="dataScope" label={t("数据范围")} rules={[{ required: true }]}><Select options={[{ value: "all", label: t("全部") }, { value: "organization", label: t("所属组织") }, { value: "store", label: t("所属门店") }, { value: "own", label: t("仅本人") }]} /></Form.Item></Col></Row><Form.Item name="enabledBusinessScopes" label={t("业务范围")}><Select mode="tags" options={[{ value: "STORE_STANDARD" }, { value: "STORE_24H" }, { value: "SYSTEM_GLOBAL" }]} /></Form.Item><Form.Item name="permissions" label={t("页面与业务权限")}><Select mode="multiple" showSearch={{ optionFilterProp: "label" }} options={permissionOptions.filter((item) => !item.label.includes("按钮-"))} /></Form.Item><Form.Item name="buttonPermissions" label={t("按钮权限")}><Select mode="multiple" showSearch={{ optionFilterProp: "label" }} options={permissionOptions.filter((item) => item.label.includes("按钮-"))} /></Form.Item><Form.Item name="isActive" label={t("启用")} valuePropName="checked"><Switch /></Form.Item>
         </Form>

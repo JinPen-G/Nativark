@@ -7,7 +7,13 @@ import type {
   WorkspaceCapabilityView
 } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Drawer, Form, Input, InputNumber, Select, Space, Switch, Table, Tag, Tooltip, Typography } from "antd";
+import { App, Card, InputNumber, Space, Tag, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Alert, Table } from "@/components/ui";
+import { Switch } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Select } from "@/components/ui";
+import { Button, Drawer, Tooltip } from "@/components/ui";
 import { useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";

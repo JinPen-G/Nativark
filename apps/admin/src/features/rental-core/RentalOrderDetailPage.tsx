@@ -1,7 +1,12 @@
 import { ArrowLeftOutlined, CheckCircleOutlined, DollarOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type AdjustRentalInspectionExceptionRequest, type ApplyRentalOrderChangeRequest, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type PreviewRentalOrderChangeRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalDeliveryAddressSnapshot, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOfflinePaymentMethod, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition, type RentalOrderChangePreview } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Checkbox, DatePicker, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, Upload } from "antd";
+import { App, Card, Descriptions, InputNumber, Modal, Space, Tag, Typography } from "antd";
+import { Checkbox } from "@/components/ui";
+import { Form } from "@/components/ui";
+import { Alert, DatePicker, Table, Upload } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { ActionButton, Button, Select } from "@/components/ui";
 import type { UploadFile, UploadProps } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useMemo, useState } from "react";
@@ -661,9 +666,9 @@ export function RentalOrderDetailPage() {
     <QueryState loading={order.isLoading} error={order.error}>{detail && <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <Space wrap>
         {canOperate && detail.status === RentalCoreOrderStatus.Draft && detail.reservations.some((row) => row.status === "soft" && row.expiresAt && Date.parse(row.expiresAt) < Date.now()) && <Button danger loading={expirePending.isPending} onClick={() => modal.confirm({ title: t("处理待支付超时？"), content: t("系统会取消该订单，并释放库存预占、服务容量和优惠券占用。"), okText: t("确认处理"), cancelText: t("暂不处理"), okButtonProps: { danger: true }, onOk: () => expirePending.mutateAsync() })}>{t("处理待支付超时")}</Button>}
-        {canOperate && detail.status === RentalCoreOrderStatus.Draft && <Button type="primary" onClick={() => action.mutate("confirm")}>{t("确认订单并核销优惠券")}</Button>}
+        {canOperate && detail.status === RentalCoreOrderStatus.Draft && <ActionButton label={t("确认订单并核销优惠券")} pending={action.isPending} onAction={() => action.mutateAsync("confirm")} />}
         {canOperate && pickupOverdueReady && <Button danger loading={markPickupOverdue.isPending} onClick={() => modal.confirm({ title: t("进入待确认爽约？"), content: t("订单将标记为领取超时，但不会立即释放资源或收取爽约费用；请先通知客户，达到最终时限后再确认爽约。"), okText: t("确认进入"), cancelText: t("暂不处理"), okButtonProps: { danger: true }, onOk: () => markPickupOverdue.mutateAsync() })}>{t("领取超时")}</Button>}
-        {canOperate && detail.status === RentalCoreOrderStatus.PickupOverdue && !detail.noShowNoticeAt && <Button loading={sendNoShowNotice.isPending} onClick={() => sendNoShowNotice.mutate()}>{t("通知客户")}</Button>}
+        {canOperate && detail.status === RentalCoreOrderStatus.PickupOverdue && !detail.noShowNoticeAt && <ActionButton label={t("通知客户")} successLabel={t("客户通知记录已保存")} pending={sendNoShowNotice.isPending} onAction={() => sendNoShowNotice.mutateAsync()} />}
         {canOperate && noShowNoticeReady && <Button danger loading={confirmNoShow.isPending} onClick={() => { noShowForm.resetFields(); setNoShowOpen(true); }}>{t(noShowFinalReady ? "确认爽约" : "提前确认爽约")}</Button>}
         {canOperate && detail.status === RentalCoreOrderStatus.PickupOverdue && <Button loading={resumePickup.isPending} onClick={() => modal.confirm({ title: t("恢复为待领取？"), content: t("客户返回领取时，将订单从待确认爽约恢复为待领取；系统会复核资产与库存仍可交付，不改动金额或资金。"), okText: t("确认恢复"), cancelText: t("暂不处理"), onOk: () => resumePickup.mutateAsync() })}>{t("恢复领取")}</Button>}
         {((canPickup && detail.status === RentalCoreOrderStatus.ReadyForPickup) || (canReturn && detail.status === RentalCoreOrderStatus.Renting)) && <Button loading={operationLock.isPending} onClick={() => operationLock.mutate(operationToken ? "release" : "acquire")}>{t(operationToken ? "结束办理" : "开始 / 接手办理")}</Button>}

@@ -1,6 +1,7 @@
 import type { CustomerMembershipReview, CustomerMembershipReviewStatus } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Drawer, Form, Input, Modal, Radio, Select, Space, Table, Tag } from "antd";
+import { App, Card, Modal, Radio, Space, Tag } from "antd";
+import { Alert, Button, Drawer, Form, Input, Select, Table } from "@/components/ui";
 import { useState } from "react";
 import { membershipApi } from "@/api/membership";
 import { useLocale } from "@/app/locale";

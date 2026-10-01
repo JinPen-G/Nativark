@@ -7,7 +7,9 @@ import type {
   RentalOrder,
   RentalReservation
 } from "@rental-os/shared";
-import { Alert, Button, Card, Descriptions, Modal, Space, Table, Tag, Typography } from "antd";
+import { Card, Descriptions, Modal, Space, Tag, Typography } from "antd";
+import { Alert, Table } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { useMemo, useState } from "react";
 import { useLocale } from "@/app/locale";
 

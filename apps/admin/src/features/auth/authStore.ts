@@ -44,6 +44,8 @@ interface AuthState {
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   switchWorkspace: (workspaceId: string) => Promise<void>;
   setTenantThemeColor: (themeColor?: string) => void;
+  /** 账户级管理后台主题色（跟随登录账户，与租户品牌色独立）。保存后立即换肤。 */
+  setAccountThemeColor: (themeColor?: string) => void;
   setTenantBranding: (branding: Pick<TenantContext, "brandName" | "brandLogoUrl" | "faviconUrl" | "themeColor" | "adminCornerRadius" | "adminContainerRadius" | "adminButtonRadius" | "adminInputRadius">) => void;
   logout: () => void;
   hasPermission: (permission?: string) => boolean;
@@ -150,6 +152,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const tenant = { ...current, themeColor: themeColor?.trim() || undefined };
     window.localStorage.setItem(keys.tenant, JSON.stringify(tenant));
     set({ tenant });
+    window.dispatchEvent(new CustomEvent("rental-session-updated"));
+  },
+  setAccountThemeColor(themeColor) {
+    const current = get().user;
+    if (!current) return;
+    const user = { ...current, accountThemeColor: themeColor?.trim() || undefined };
+    window.localStorage.setItem(keys.user, JSON.stringify(user));
+    set({ user });
     window.dispatchEvent(new CustomEvent("rental-session-updated"));
   },
   setTenantBranding(branding) {

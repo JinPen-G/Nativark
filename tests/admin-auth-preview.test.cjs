@@ -1,0 +1,31 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const root = path.resolve(__dirname, '..');
+const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const preview = read('apps/admin/src/features/auth/AuthCodePreview.tsx');
+const login = read('apps/admin/src/features/auth/LoginPage.tsx');
+assert.doesNotMatch(preview, /from\s+["'][^"']*(?:api\/|authStore)|\b(?:fetch|axios)\s*[.(]|(?:localStorage|sessionStorage)\.setItem/);
+assert.match(preview, /真实密码未修改/);
+assert.match(preview, /未建立登录会话/);
+assert.match(preview, /setPassword\(""\); setConfirmation\(""\); go\("done"\)/);
+assert.match(preview, /password !== confirmation/);
+assert.match(preview, /window\.clearTimeout/);
+assert.match(preview, /<PhoneInput/);
+assert.match(preview, /<PasswordStrength/);
+assert.match(preview, /login-preview-viewport/);
+assert.doesNotMatch(preview, /className=\{styles\.viewport\}/);
+assert.match(login, /<PasswordField autoComplete="current-password"/);
+assert.match(login, /SaveButton[^\n]+onSave=\{submitPasswordLogin\}/);
+assert.match(login, /name: t\("微信"\)/);
+assert.doesNotMatch(login, /GitHub|GithubOutlined|<Input[^\n]+size="large"/);
+assert.match(login, /useFeedback/);
+assert.doesNotMatch(login, /message\.(info|success|error)\(/);
+const manifest = JSON.parse(read('packages/ui-arc/manifest.json'));
+for (const file of ['registry/components/otp-input/otp-input.tsx', 'registry/components/password-field/password-field.tsx']) {
+  const expected = manifest.entries.flatMap(entry => entry.files).find(entry => entry.path === file);
+  const normalized = read(`packages/ui-arc/vendor/${file}`).replace(/\r\n/g, '\n').trimEnd();
+  assert.equal(crypto.createHash('sha256').update(normalized).digest('hex'), expected.normalizedSha256);
+}
+console.log('admin-auth-preview: UI-only boundary, transient passwords, WeChat entry and original OTP/password source checks passed (static guards, not real auth acceptance)');

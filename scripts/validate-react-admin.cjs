@@ -251,7 +251,7 @@ forbidText(tenantManagementPage, "经营品类创建后固定；租户", "retire
   [themeSource, 'theme.darkAlgorithm', "official dark algorithm"],
   [themeSource, '"default" | "dark" | "compact"', "official appearance presets"],
   [themeSource, 'theme.compactAlgorithm', "official compact algorithm"],
-  [themeSource, 'bodyBg: "#f5f8ff"', "official dashboard layout background"],
+  [themeSource, 'bodyBg: palette.background', "shared UIArc dashboard layout background"],
   [themeSource, 'activeBarBorderWidth: 0', "official dashboard menu treatment"],
   [appearanceSwitcher, '切换外观主题', "theme switcher"],
   [loginPage, 'login-frame', "compact framed login composition"],

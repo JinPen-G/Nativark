@@ -1,4 +1,8 @@
-import { Alert, App, Button, Card, Descriptions, Empty, Form, Input, Modal, Space, Table, Tag } from "antd";
+import { App, Card, Descriptions, Empty, Modal, Space, Tag } from "antd";
+import { Form } from "@/components/ui";
+import { Alert, Table } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Button } from "@/components/ui";
 import type { ColumnsType } from "antd/es/table";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";

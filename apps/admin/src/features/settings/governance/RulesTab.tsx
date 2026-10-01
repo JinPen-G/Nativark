@@ -1,21 +1,10 @@
 import type { RentalCategoryDefinition, RentalRuleVersion } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Alert,
-  App,
-  Button,
-  Card,
-  DatePicker,
-  Descriptions,
-  Drawer,
-  Form,
-  Input,
-  Modal,
-  Space,
-  Table,
-  Tag,
-  Typography,
-} from "antd";
+import { App, Card, Descriptions, Modal, Space, Tag, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Alert, DatePicker, Table } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Button, Drawer, SaveButton } from "@/components/ui";
 import dayjs from "dayjs";
 import { useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
@@ -416,13 +405,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
         forceRender
         destroyOnHidden
         extra={
-          <Button
-            type="primary"
-            loading={saveRule.isPending}
-            onClick={() => ruleForm.submit()}
-          >
-            {t("保存草稿")}
-          </Button>
+          <SaveButton label={t("保存草稿")} form={ruleForm} pending={saveRule.isPending} onSave={(values) => saveRule.mutateAsync(values)} />
         }
       >
         <Form

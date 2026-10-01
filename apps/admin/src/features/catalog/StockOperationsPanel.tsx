@@ -8,7 +8,11 @@ import type {
   RentalStockOperationType
 } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Table, Tag, Typography } from "antd";
+import { App, Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Table } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Button, Drawer, Select } from "@/components/ui";
 import { useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";

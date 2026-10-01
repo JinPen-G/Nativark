@@ -1,12 +1,16 @@
 import {
   BellOutlined,
+  BgColorsOutlined,
   HomeOutlined,
   LayoutOutlined,
   LogoutOutlined,
   MenuOutlined,
-  MoreOutlined
+  MoreOutlined,
+  TranslationOutlined
 } from "@ant-design/icons";
-import { App, Avatar, Breadcrumb, Button, Drawer, Dropdown, Layout, Menu, Tooltip } from "antd";
+import { App, Avatar, Breadcrumb, Layout } from "antd";
+import { Button, Drawer, Dropdown, Tooltip, SidebarMenu } from "@/components/ui";
+import { motion } from "motion/react";
 import type { MenuProps } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -208,28 +212,45 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="sider-workspace"><WorkspaceSwitcher /></div>
       )}
 
-      <div className="sider-nav" ref={navRef}>
-        <Menu
+      <motion.div layoutScroll className="sider-nav" ref={navRef}>
+        <SidebarMenu
           mode="inline"
           inlineCollapsed={collapsed && !inDrawer}
           selectedKeys={[selectedKey]}
           items={buildMenuItems(collapsed && !inDrawer)}
           onClick={({ key }) => { if (String(key).startsWith("/")) navigate(String(key)); }}
         />
-      </div>
+      </motion.div>
 
       <div className="sider-tools">
-        <div className="sider-preferences">
-          <AppearanceSwitcher iconOnly={collapsed && !inDrawer} />
-          <LanguageSwitcher iconOnly={collapsed && !inDrawer} />
-        </div>
+        {collapsed && !inDrawer ? (
+          <div className="sider-preferences">
+            <AppearanceSwitcher iconOnly />
+            <LanguageSwitcher iconOnly />
+          </div>
+        ) : (
+          <div className="sider-preferences">
+            {/* 每行同构：左侧 icon + 文案，右侧分段开关；语言行在主题行下方。 */}
+            <div className="sider-pref-row">
+              <span className="sider-pref-icon" aria-hidden="true"><BgColorsOutlined /></span>
+              <span className="sider-pref-label">{t("主题")}</span>
+              <AppearanceSwitcher />
+            </div>
+            <div className="sider-pref-row">
+              <span className="sider-pref-icon" aria-hidden="true"><TranslationOutlined /></span>
+              <span className="sider-pref-label">{t("语言")}</span>
+              <LanguageSwitcher />
+            </div>
+          </div>
+        )}
+        {/* 通知入口暂时隐藏：数据源尚未接入，先不展示占位按钮。恢复时把下面这块取消注释即可。
         <Tooltip title={collapsed && !inDrawer ? t("通知") : t(NOTICE_HINT)} placement={collapsed && !inDrawer ? "right" : "top"}>
-          {/* 占位入口：还没有数据源，因此点击如实说明「未接入」，而不是静默无反应。 */}
           <button className="sider-link" type="button" aria-label={t("通知")} onClick={() => message.info(t(NOTICE_HINT))}>
             <BellOutlined />
             {(!collapsed || inDrawer) && <span className="sider-link-label">{t("通知")}</span>}
           </button>
         </Tooltip>
+        */}
       </div>
 
       <div className="sider-account">

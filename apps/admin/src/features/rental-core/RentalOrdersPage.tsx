@@ -1,8 +1,10 @@
-import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
+import { PlusOutlined } from "@ant-design/icons";
 import type { RentalCoreOrderStatus, RentalOrder, RentalOrderAssignmentFilter, RentalOrderListQuery } from "@rental-os/shared";
-import { RENTAL_ORDER_LIST_DEFAULT_PAGE_SIZE, RENTAL_ORDER_LIST_MAX_PAGE_SIZE, formatRentalMoney, rentalAllocationProgress } from "@rental-os/shared";
+import { RENTAL_ORDER_LIST_DEFAULT_PAGE_SIZE, formatRentalMoney, rentalAllocationProgress } from "@rental-os/shared";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Button, Card, Checkbox, DatePicker, Input, Row, Col, Segmented, Select, Space, Table, Tag } from "antd";
+import { Card, Row, Col, Space, Tag } from "antd";
+import { Checkbox } from "@/components/ui";
+import { AnimatedTable, Button, DatePicker, SearchField, Segmented, Select } from "@/components/ui";
 import dayjs, { type Dayjs } from "dayjs";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -23,7 +25,12 @@ const assignmentFilterOptions: Array<{ label: string; value: RentalOrderAssignme
   { label: "已锁定", value: "locked" },
   { label: "分配异常", value: "issue" }
 ];
-const pageSizeOptions = [10, 20, 50, 100, RENTAL_ORDER_LIST_MAX_PAGE_SIZE].map(String);
+const orderSortValue = (row: RentalOrder, column: number): unknown => [
+  row.orderNo, row.membershipSnapshot?.personalCustomerName ?? row.customerName,
+  row.lines.map(line => line.itemGroupName).join("、"), new Date(row.startAt), row.quoteNo,
+  Number(row.payableAmount), row.allocations.filter(a => !["released", "returned", "consumed"].includes(a.status)).reduce((sum, a) => sum + a.quantity, 0),
+  undefined, Number(row.depositAmount), row.status,
+][column];
 
 export function RentalOrdersPage() {
   const navigate = useNavigate();
@@ -75,12 +82,18 @@ export function RentalOrdersPage() {
         <Tag color="orange">{pendingFeeCount.data?.total ?? 0} {t("张待裁定")}</Tag>
       </Space>
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
-        <Col xs={24} xl={10}><Input.Search allowClear prefix={<SearchOutlined />} placeholder={t("订单号、个人会员或企业名称，回车搜索")} value={keywordInput} onChange={(event) => { setKeywordInput(event.target.value); if (!event.target.value) applyFilter(setKeyword)(""); }} onSearch={(value) => applyFilter(setKeyword)(value.trim())} /></Col>
-        <Col xs={24} md={12} xl={7}><DatePicker.RangePicker value={period} onChange={applyFilter(setPeriod)} style={{ width: "100%" }} /></Col>
-        <Col xs={24} md={12} xl={7}><Select allowClear placeholder={t("全部状态")} style={{ width: "100%" }} options={statusOptions} value={status} onChange={applyFilter(setStatus)} /></Col>
+        <Col xs={24} md={8}><SearchField label={t("搜索订单")} placeholder={t("订单号、个人会员或企业名称，回车搜索")} value={keywordInput} onValueChange={(value) => { setKeywordInput(value); if (!value) applyFilter(setKeyword)(""); }} onSearch={(value) => applyFilter(setKeyword)(value.trim())} /></Col>
+        <Col xs={24} md={8}><DatePicker.RangePicker value={period} onChange={applyFilter(setPeriod)} style={{ width: "100%" }} presets={[
+          { label: t("今天"), value: (): [Dayjs, Dayjs] => [dayjs().startOf("day"), dayjs().endOf("day")] },
+          { label: t("近 7 天"), value: (): [Dayjs, Dayjs] => [dayjs().subtract(6, "day").startOf("day"), dayjs().endOf("day")] },
+          { label: t("本月"), value: (): [Dayjs, Dayjs] => [dayjs().startOf("month"), dayjs().endOf("month")] },
+          { label: t("近 30 天"), value: (): [Dayjs, Dayjs] => [dayjs().subtract(29, "day").startOf("day"), dayjs().endOf("day")] },
+          { label: t("近 90 天"), value: (): [Dayjs, Dayjs] => [dayjs().subtract(89, "day").startOf("day"), dayjs().endOf("day")] }
+        ]} /></Col>
+        <Col xs={24} md={8}><Select allowClear placeholder={t("全部状态")} style={{ width: "100%" }} options={statusOptions} value={status} onChange={value => applyFilter(setStatus)(value as RentalCoreOrderStatus | undefined)} /></Col>
       </Row>
-      <QueryState loading={orders.isLoading} error={orders.error}><Table<RentalOrder> rowKey="id" dataSource={rows} loading={orders.isFetching} scroll={{ x: 1260 }}
-        pagination={{ current: page, pageSize, total, showSizeChanger: true, pageSizeOptions, showTotal: (count) => `${t("共")} ${count} ${t("单")}`, onChange: (nextPage, nextSize) => { if (nextSize !== pageSize) { setPageSize(nextSize); setPage(1); } else setPage(nextPage); } }}
+      <QueryState loading={orders.isLoading} error={orders.error}><AnimatedTable<RentalOrder> sorting={false} sortValue={orderSortValue} rowKey="id" dataSource={rows} loading={orders.isFetching}
+        pagination={{ current: page, pageSize, total, showSizeChanger: false, showTotal: (count) => `${t("共")} ${count} ${t("单")}`, onChange: (nextPage, nextSize) => { if (nextSize !== pageSize) { setPageSize(nextSize); setPage(1); } else setPage(nextPage); } }}
         columns={[
         { title: t("订单"), fixed: "left", width: 170, render: (_, row) => <Button type="link" onClick={() => navigate(`/rental/orders/${row.id}`)}>{row.orderNo}</Button> },
         { title: t("使用人 / 主体"), width: 210, render: (_, row) => <Space orientation="vertical" size={0}><b>{row.membershipSnapshot?.personalCustomerName ?? row.customerName}</b>{row.membershipSnapshot?.corporateCustomerName && <Tag color="blue">{row.membershipSnapshot.corporateCustomerName}{row.membershipSnapshot.enterpriseContractAndPayer ? ` · ${t("企业签约付款")}` : ` · ${t("企业权益")}`}</Tag>} {!row.membershipSnapshot && <span className="muted">{t("旧客户记录")}</span>}</Space> },

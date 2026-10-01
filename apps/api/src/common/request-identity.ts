@@ -97,6 +97,15 @@ export function getRequestUserId(): string | undefined {
   return requestIdentityStorage.getStore()?.userId;
 }
 
+// fail-closed：账户级自助设置的唯一取值入口。缺少已验证账号身份时直接拒绝，不做任何回退。
+export function requireRequestUserId(): string {
+  const userId = requestIdentityStorage.getStore()?.userId;
+  if (!userId) {
+    throw new ForbiddenException("缺少已验证的账号身份，拒绝访问");
+  }
+  return userId;
+}
+
 export function getRequestOrganizationId(): string | undefined {
   return requestIdentityStorage.getStore()?.organizationId;
 }

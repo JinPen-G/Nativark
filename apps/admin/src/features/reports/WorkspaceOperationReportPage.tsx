@@ -7,7 +7,11 @@ import type {
 } from "@rental-os/shared";
 import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol } from "@rental-os/shared";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Col, DatePicker, Descriptions, Input, Row, Select, Space, Statistic, Table, Tag } from "antd";
+import { App, Card, Col, Descriptions, Row, Space, Statistic, Tag } from "antd";
+import { Alert, DatePicker, Table } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Select } from "@/components/ui";
+import { Button } from "@/components/ui";
 import dayjs, { type Dayjs } from "dayjs";
 import { useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";

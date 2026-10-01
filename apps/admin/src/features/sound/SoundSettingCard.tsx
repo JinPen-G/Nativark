@@ -1,4 +1,8 @@
-import { App, Button, Card, Select, Slider, Space, Switch, Typography } from "antd";
+import { App, Card, Space, Typography } from "antd";
+import { Slider } from "@/components/ui";
+import { Switch } from "@/components/ui";
+import { Button } from "@/components/ui";
+import { Select } from "@/components/ui";
 import { SoundOutlined } from "@ant-design/icons";
 import { useSyncExternalStore } from "react";
 import { useLocale } from "@/app/locale";
@@ -39,9 +43,8 @@ export function SoundSettingCard() {
           <Typography.Text type="secondary">{t("仅在已接入的真实操作结果或通知事件到达时播放。")}</Typography.Text>
         </Space>
         <div style={{ width: "100%", maxWidth: 360 }}>
-          <Typography.Text>{t("音量")}：{Math.round(preferences.volume * 100)}%</Typography.Text>
-          <Slider aria-label={t("音量")} min={0} max={100} value={Math.round(preferences.volume * 100)}
-            onChange={value => soundPreferences.update({ volume: value / 100 })} />
+          <Slider label={t("音量")} min={0} max={100} value={Math.round(preferences.volume * 100)} format={value => `${value}%`}
+            onValueChange={value => soundPreferences.update({ volume: value / 100 })} />
         </div>
         <Space orientation="vertical" size={8}>
           <Typography.Text>{t("交互音试听")}</Typography.Text>

@@ -1,7 +1,12 @@
 import { SearchOutlined, UploadOutlined } from "@ant-design/icons";
 import type { PaymentStatementBatchSummary, PaymentStatementLineSummary } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Drawer, Empty, Form, Input, Select, Space, Table, Tag, Typography, Upload } from "antd";
+import { App, Card, Empty, Space, Tag, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Alert, Table, Upload } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Select } from "@/components/ui";
+import { Button, Drawer } from "@/components/ui";
 import type { UploadFile } from "antd";
 import { useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";

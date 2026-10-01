@@ -106,13 +106,15 @@ export const PUBLIC_ROUTES = new Set([
 ]);
 
 /**
- * 公共前缀：带路径参数、无法用精确匹配表达的自助路由。
+ * 公共前缀：已登录即可访问、不挂业务权限的自助路由（仍由 canActivate 校验会话，匿名一律 401）。
  *
- * 目前只有筛选预设——它是**租户级列表筛选偏好**，不承载任何业务数据，
- * 且服务层对非 SaaS 管理员一律用会话的 `user.tenantId`（忽略请求里的 tenantId），
- * 因此不存在跨租户读写。给它挂一个具体业务权限反而会让普通运营存不了自己的筛选条件。
+ * - 筛选预设：**租户级列表筛选偏好**，不承载业务数据，服务层对非 SaaS 管理员一律用会话的
+ *   `user.tenantId`（忽略请求里的 tenantId），不存在跨租户读写。
+ * - 账户级外观：登录账户本人的管理后台主题色，服务层按会话 `user.id` 作用域（忽略请求体 userId），
+ *   任何已登录账号只能读写自己的，与租户品牌色相互独立。
+ * 给这类自助设置挂具体业务权限，反而会让普通运营存不了自己的偏好。
  */
-export const PUBLIC_ROUTE_PREFIXES = ["/platform/filter-presets"];
+export const PUBLIC_ROUTE_PREFIXES = ["/platform/filter-presets", "/platform/account-appearance"];
 
 /** 客户端认证域：不走运营角色权限树，但仍由 ApiAuthGuard 校验客户令牌。 */
 export const CLIENT_ROUTE_PREFIXES = ["/client/v1"];
@@ -817,6 +819,7 @@ export class ApiAuthGuard implements CanActivate {
       !path.startsWith("/platform/tenant-bootstrap") &&
       !path.startsWith("/platform/official-calendars") &&
       !path.startsWith("/platform/subscriptions") &&
+      !path.startsWith("/platform/account-appearance") &&
       path !== "/platform/demo-requests"
     ) {
       throw new ForbiddenException("SaaS 平台管理员只能访问租户管理能力");

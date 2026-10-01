@@ -1,4 +1,5 @@
-import { Button, Card, Space, Tag, Tooltip, Typography } from "antd";
+import { Card, Space, Tag, Typography } from "antd";
+import { Button, Tooltip } from "@/components/ui";
 import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import type { CSSProperties } from "react";
 import type { RentalCalendarDay, RentalCalendarTimePriceDay } from "@rental-os/shared";

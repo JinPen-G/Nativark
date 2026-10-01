@@ -471,11 +471,27 @@ model User {
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
+  appearancePreference UserAppearancePreference?
+
   @@unique([tenantId, account])
   /// 供成员关系的复合外键引用：成员必须指向**同租户**的账号，
   /// 从库层杜绝「把别的租户的用户加进本空间」。
   @@unique([tenantId, id], map: "users_tenant_id_key")
   @@index([tenantId, organizationId])
+}
+
+/// 账户级外观偏好（跟随登录账户，与租户品牌色相互独立）：目前仅存管理后台主题色。
+/// 一账户一条（userId 唯一），随账号删除级联清理；未设置时管理后台主色回退平台默认色。
+model UserAppearancePreference {
+  id         String   @id @default(uuid())
+  userId     String   @unique(map: "user_appearance_preferences_user_key")
+  /// 该账户的管理后台主题色（#RRGGBB）；未设置时回退平台默认色。与租户品牌色无关。
+  themeColor String?  @db.VarChar(16)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_appearance_preferences")
 }
 
 model AuthSession {
@@ -825,6 +841,7 @@ model TenantAppearanceProfile {
   adminContainerRadius Int?     @db.UnsignedSmallInt
   adminButtonRadius    Int?     @db.UnsignedSmallInt
   adminInputRadius     Int?     @db.UnsignedSmallInt
+  adminLoginJson       Json?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 

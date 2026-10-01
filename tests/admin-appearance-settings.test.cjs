@@ -123,6 +123,74 @@ test('brand sync failure rolls back the channel write in the transaction', async
   assert.equal(f.state.appearance.brandName, initial.brandName);
 });
 
+test('login branding round-trips through the channel facade without changing radii', async () => {
+  const f = fixture();
+  const backgroundImageUrl = '/api/client/v1/public/website-assets/login-test/login-bg';
+  f.db.websiteAsset = { findFirst: async ({ where }) => {
+    assert.equal(where.tenantId, user.tenantId);
+    assert.equal(where.tenant.code, 'login-test');
+    assert.equal(where.id, 'login-bg');
+    assert.deepEqual(where.mimeType.in, ['image/jpeg', 'image/png', 'image/webp']);
+    return { id: 'login-bg' };
+  } };
+  const adminLogin = { backgroundImageUrl, title: '  租赁\n更简单  ', description: ' 租户说明 ', highlights: [{}, { title: ' 中间项 ', description: ' 第二项说明 ' }, {}], footerText: ' 欢迎回来 ' };
+  const saved = await f.channel.save({ expectedRevision: 1, publishedWorkspaceIds: [], adminLogin }, user);
+  const expected = { backgroundImageUrl, title: '租赁\n更简单', description: '租户说明', highlights: [{}, { title: '中间项', description: '第二项说明' }, {}], footerText: '欢迎回来' };
+  assert.deepEqual(saved.adminLogin, expected);
+  assert.deepEqual((await f.channel.get(user)).adminLogin, expected);
+  assert.equal(f.state.channel.adminLoginJson, undefined, 'only the canonical appearance stores login branding');
+  assert.equal(f.state.appearance.adminButtonRadius, 999);
+  assert.equal(f.state.appearance.adminContainerRadius, 20);
+  await f.appearance.save({ expectedRevision: 4, adminInputRadius: 18 }, user);
+  assert.deepEqual(f.state.appearance.adminLoginJson, expected);
+  await assert.rejects(f.channel.save({ expectedRevision: 1, publishedWorkspaceIds: [], adminLogin: {} }, user), e => e.getStatus() === 409);
+  assert.deepEqual(f.state.appearance.adminLoginJson, expected);
+});
+
+test('login branding omission preserves, replacement clears fields, and empty object resets', async () => {
+  const f = fixture({ ...initial, adminLoginJson: { title: '原始标题', backgroundImageUrl: '/api/client/v1/public/website-assets/login-test/login-bg' } });
+  await f.channel.save({ publishedWorkspaceIds: [] }, user);
+  assert.equal(f.state.appearance.adminLoginJson.title, '原始标题');
+  await f.channel.save({ publishedWorkspaceIds: [], adminLogin: { backgroundImageUrl: '', title: ' 新标题 ', highlights: [{ title: ' ' }, {}, { description: '第三项' }] } }, user);
+  assert.deepEqual(f.state.appearance.adminLoginJson, { title: '新标题', highlights: [{}, {}, { description: '第三项' }] });
+  await f.channel.save({ publishedWorkspaceIds: [], adminLogin: {} }, user);
+  assert.deepEqual((await f.channel.get(user)).adminLogin, {});
+});
+
+test('login branding rejects malformed objects and oversized text before any write', async () => {
+  for (const adminLogin of [null, [], 'text', { unknown: 'x' }, { title: 42 }, { title: 'a'.repeat(81) }, { description: 'a'.repeat(301) }, { footerText: 'a'.repeat(161) }, { highlights: {} }, { highlights: [{}, {}, {}, {}] }, { highlights: [null] }, { highlights: [{ other: 'x' }] }, { highlights: [{ title: 'a'.repeat(25) }] }, { highlights: [{ description: 'a'.repeat(81) }] }]) {
+    const f = fixture();
+    await assert.rejects(f.channel.save({ publishedWorkspaceIds: [], adminLogin }, user), e => e.getStatus() === 400);
+    assert.deepEqual(f.state.writes, []);
+  }
+});
+
+test('login background accepts only existing same-tenant uploaded images', async () => {
+  const f = fixture();
+  let lookups = 0;
+  f.db.websiteAsset = { findFirst: async ({ where }) => {
+    lookups += 1;
+    assert.equal(where.tenantId, user.tenantId);
+    return null;
+  } };
+  for (const backgroundImageUrl of ['https://foreign.example/bg.png', '//foreign.example/bg.png', '/api/client/v1/public/website-assets/other/asset?x=1', '/api/client/v1/public/website-assets/other/../asset', '/api/client/v1/public/website-assets/other/asset#fragment']) {
+    await assert.rejects(f.channel.save({ publishedWorkspaceIds: [], adminLogin: { backgroundImageUrl } }, user), e => e.getStatus() === 400);
+  }
+  assert.equal(lookups, 0);
+  await assert.rejects(f.channel.save({ publishedWorkspaceIds: [], adminLogin: { backgroundImageUrl: '/api/client/v1/public/website-assets/other/asset' } }, user), e => e.getStatus() === 400);
+  assert.equal(lookups, 1);
+  assert.deepEqual(f.state.writes, []);
+});
+
+test('first login branding save creates canonical config and transactional failure leaves it unchanged', async () => {
+  const f = fixture(null);
+  await f.channel.save({ publishedWorkspaceIds: [], adminLogin: { title: '新建登录页' } }, user);
+  assert.equal(f.state.appearance.adminLoginJson.title, '新建登录页');
+  f.db.clientChannelWorkspace.deleteMany = async () => { throw new Error('rollback'); };
+  await assert.rejects(f.channel.save({ publishedWorkspaceIds: [], adminLogin: { title: '不可保存' } }, user), /rollback/);
+  assert.equal(f.state.appearance.adminLoginJson.title, '新建登录页');
+});
+
 test('settings are mounted in the requested pages and sound has an unambiguous module path', () => {
   const read = rel => fs.readFileSync(path.join(__dirname, '..', 'apps/admin/src', rel), 'utf8');
   const appearance = read('features/appearance/AppearancePage.tsx');

@@ -6,7 +6,8 @@ import {
 } from "@ant-design/icons";
 import type { SaveTenantRentalBusinessSettingsRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Tabs } from "antd";
+import { App } from "antd";
+import { Tabs } from "@/components/ui";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";

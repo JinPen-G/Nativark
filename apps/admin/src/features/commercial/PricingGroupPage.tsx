@@ -1,7 +1,11 @@
-import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from "@ant-design/icons";
+import { DeleteOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import { RENTAL_PRICING_UNIT_LABELS, formatRentalMoney, rentalCurrencySymbol, type RentalPricingGroup, type SaveRentalPricingGroupRequest, type UpdateRentalPricingGroupSecurityRatesRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Button, Card, Drawer, Form, Input, InputNumber, Select, Space, Table, Tag, Typography } from "antd";
+import { App, Card, InputNumber, Space, Tag, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Table } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Button, Drawer, SaveButton, SearchField, Select } from "@/components/ui";
 import { useMemo, useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
@@ -137,7 +141,7 @@ export function PricingGroupPage() {
       extra={<Button type="primary" icon={<PlusOutlined />} disabled={settings.isLoading || settings.isError} onClick={() => edit()}>{t("新增定价分组")}</Button>}
     />
     <Card className="data-panel">
-      <Input allowClear prefix={<SearchOutlined />} value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder={t("搜索分组或成员型号")} style={{ width: 320, marginBottom: 16 }} />
+      <SearchField label={t("搜索定价分组")} value={keyword} onValueChange={setKeyword} placeholder={t("搜索分组或成员型号")} style={{ width: 320, marginBottom: 16 }} />
       <QueryState loading={pricingGroups.isLoading || models.isLoading || settings.isLoading || rules.isLoading || currentVersionDetail.isLoading} error={pricingGroups.error || models.error || settings.error || rules.error || currentVersionDetail.error}>
         <Table<RentalPricingGroup> rowKey="id" dataSource={rows} columns={[
           { title: t("定价分组"), render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code} · v{row.version}</span></> },
@@ -155,7 +159,7 @@ export function PricingGroupPage() {
         ]} />
       </QueryState>
     </Card>
-    <Drawer title={t(editing ? "编辑定价分组" : "新增定价分组")} size={640} open={open} destroyOnHidden onClose={() => setOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>{t("保存")}</Button>}>
+    <Drawer title={t(editing ? "编辑定价分组" : "新增定价分组")} size={640} open={open} destroyOnHidden onClose={() => setOpen(false)} extra={<SaveButton label={t("保存")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(toPricingGroupRequest(values, editing?.id))} />}>
       <Form<PricingGroupFormValues> form={form} layout="vertical" onFinish={(values) => save.mutate(toPricingGroupRequest(values, editing?.id))}>
         <Form.Item name="code" label={t("分组编码")} rules={[{ required: true }]}><Input disabled={Boolean(editing)} placeholder="COMFORT_SEDAN" /></Form.Item>
         <Form.Item name="name" label={t("分组名称")} rules={[{ required: true }]}><Input placeholder={locale === "en-US" ? `e.g. Standard ${itemLabel} group` : `如：标准${itemLabel}分组`} /></Form.Item>
@@ -277,7 +281,7 @@ export function PricingGroupPage() {
       open={securityOpen}
       destroyOnHidden
       onClose={() => setSecurityOpen(false)}
-      extra={<Button type="primary" loading={saveSecurityRates.isPending} onClick={() => securityForm.submit()}>{t("保存并生成新价格版本")}</Button>}
+      extra={<SaveButton label={t("保存并生成新价格版本")} form={securityForm} pending={saveSecurityRates.isPending} onSave={(values) => saveSecurityRates.mutateAsync(values)} />}
     >
       <Typography.Paragraph type="secondary">
         {t("只调整本定价组的押金与预授权金额，不改基本租金。保存后会为整个经营空间追加新价格版本，历史版本和既有订单快照保持不变。")}

@@ -1,5 +1,9 @@
 import { PlusOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Input, Modal, Segmented, Select, Space, Table, Tag } from "antd";
+import { Card, Modal, Space, Tag } from "antd";
+import { Alert, Table } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { SearchField, Select } from "@/components/ui";
+import { Button, Segmented } from "@/components/ui";
 import type { ColumnsType } from "antd/es/table";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -47,7 +51,7 @@ export function PlatformSubscriptionsPage() {
           <Segmented value={plan} onChange={(value) => { setPlan(String(value)); resetPage(); }} options={[{ value: "all", label: t("全部") }, { value: "standard", label: t("基础版") }, { value: "pro", label: "PRO" }]} />
           <Select style={{ minWidth: 160 }} placeholder={t("服务状态")} allowClear value={serviceStatus} onChange={(value) => { setServiceStatus(value); resetPage(); }} options={Object.values(SubscriptionServiceStatus).map((value) => ({ value, label: t(SERVICE_STATUS_LABEL[value]) }))} />
           <Select style={{ minWidth: 160 }} placeholder={t("到期范围")} allowClear value={dueWithin} onChange={(value) => { setDueWithin(value); resetPage(); }} options={[{ value: "7", label: t("7 天内到期") }, { value: "30", label: t("30 天内到期") }, { value: "expired", label: t("已过期") }]} />
-          <Input.Search style={{ minWidth: 220 }} allowClear placeholder={t("搜索租户名称 / 编码")} onSearch={(value) => { setKeyword(value); resetPage(); }} />
+          <SearchField label={t("搜索租户订阅")} style={{ minWidth: 220 }} placeholder={t("搜索租户名称 / 编码")} onSearch={(value) => { setKeyword(value); resetPage(); }} />
         </Space>
         <QueryState loading={query.isLoading}>
           {query.error ? <Alert type="error" showIcon message={t("租户订阅列表加载失败")} action={<Button onClick={() => query.refetch()}>{t("重试")}</Button>} />

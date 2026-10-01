@@ -4,6 +4,16 @@ export const ADMIN_BRAND_NAME = "Rental OS";
 export const ADMIN_DEFAULT_LOGO = "/brand/rentalos-logo-color.svg";
 export const ADMIN_DEFAULT_MARK = "/brand/rentalos-icon-1.svg";
 export const ADMIN_DEFAULT_FAVICON = "/brand/rentalos-icon-1.svg";
+export const ADMIN_LOGIN_DEFAULTS = {
+  title: "租赁生意，\n有序运转。",
+  description: "从预订、交付到归还与结算，把资产、订单和客户放在同一个工作台。",
+  highlights: [
+    { title: "管好资产", description: "在库、在租与维护" },
+    { title: "跟进订单", description: "预订、交付与归还" },
+    { title: "连接客户", description: "会员、权益与往来" }
+  ],
+  footerText: "多品类经营，一个工作台。"
+} as const;
 
 function isTenantUser(user?: Pick<AuthUser, "isSaasAdmin">) {
   return Boolean(user && !user.isSaasAdmin);

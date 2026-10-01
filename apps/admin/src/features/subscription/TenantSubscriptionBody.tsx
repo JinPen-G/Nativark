@@ -1,6 +1,8 @@
 import { RightOutlined } from "@ant-design/icons";
 import { useState } from "react";
-import { Alert, Button, Card, Descriptions, Empty, Space, Table, Tag, Typography } from "antd";
+import { Card, Descriptions, Empty, Space, Tag, Typography } from "antd";
+import { Alert, Table } from "@/components/ui";
+import { Button } from "@/components/ui";
 import type { ColumnsType } from "antd/es/table";
 import type { NavigateFunction } from "react-router-dom";
 import {

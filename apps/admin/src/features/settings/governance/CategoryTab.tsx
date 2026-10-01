@@ -1,7 +1,13 @@
 import { DeleteOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { DEFAULT_RENTAL_PAYMENT_METHODS, RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, RENTAL_PAYMENT_METHOD_CODES, RENTAL_PRICING_UNIT_LABELS } from "@rental-os/shared";
 import type { RentalCategoryDefinition, TenantRentalBusinessSettings } from "@rental-os/shared";
-import { Alert, Button, Card, Col, Form, Input, InputNumber, Row, Select, Space, Switch, Tag, Typography } from "antd";
+import { Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Alert } from "@/components/ui";
+import { Switch } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Select } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { useEffect } from "react";
 import { useLocale } from "@/app/locale";
 import type { GovernanceTabContext } from "./shared";

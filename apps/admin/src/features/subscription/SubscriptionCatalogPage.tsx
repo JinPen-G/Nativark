@@ -1,5 +1,7 @@
 import { PlusOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Descriptions, Space, Table, Tag } from "antd";
+import { Card, Descriptions, Space, Tag } from "antd";
+import { Alert, Table } from "@/components/ui";
+import { Button } from "@/components/ui";
 import type { ColumnsType } from "antd/es/table";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";

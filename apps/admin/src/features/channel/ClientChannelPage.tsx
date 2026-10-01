@@ -1,12 +1,18 @@
-import { CheckCircleOutlined, ExperimentOutlined, PlusOutlined, SaveOutlined, UploadOutlined } from "@ant-design/icons";
+import { CheckCircleOutlined, PlusOutlined } from "@ant-design/icons";
 import type { SaveClientChannelProfileRequest, SaveMiniProgramChannelRequest, SaveWebsiteChannelProfileRequest } from "@rental-os/shared";
-import { Alert, App, Button, Card, Checkbox, Col, Divider, Form, Input, Row, Space, Switch, Tabs, Tag, Typography, Upload } from "antd";
+import { App, Card, Col, Divider, Row, Space, Tag, Typography } from "antd";
+import { Checkbox } from "@/components/ui";
+import { Form } from "@/components/ui";
+import { Alert, FileUpload, type FileUploadItem } from "@/components/ui";
+import { Switch } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { ActionButton, Button, ColorPicker, RichTextEditor, SaveButton, Tabs } from "@/components/ui";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { clientChannelApi } from "@/api/clientChannel";
 import { websiteChannelApi } from "@/api/websiteChannel";
 import { apiAssetOrigin } from "@/api/http";
-import { ADMIN_DEFAULT_PRIMARY_COLOR } from "@/app/designTokens";
+import { ADMIN_LOGIN_DEFAULTS } from "@/app/branding";
 import { LoadingState } from "@/components/LoadingState";
 import { PageHeader } from "@/components/PageHeader";
 import { useAuthStore } from "@/features/auth/authStore";
@@ -14,35 +20,27 @@ import { useLocale } from "@/app/locale";
 
 type ProfileForm = SaveClientChannelProfileRequest;
 
-const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
-
 /** Form.Item 兼容的图片上传：上传到官网资产接口，把返回的公开 URL 写回字段；也可移除。 */
 function ImageUrlUpload({ value, onChange, scene, hint, previewHeight = 64 }: { value?: string; onChange?: (url: string) => void; scene: "logo" | "favicon" | "hero" | "category"; hint: string; previewHeight?: number; }) {
   const { t } = useLocale();
   const { message } = App.useApp();
-  const [uploading, setUploading] = useState(false);
+  const [files, setFiles] = useState<FileUploadItem[]>([]);
   const preview = value ? (value.startsWith("/") ? `${apiAssetOrigin}${value}` : value) : "";
   return (
     <div>
       {preview ? <img src={preview} alt="" style={{ height: previewHeight, maxWidth: 240, objectFit: "contain", borderRadius: 8, border: "1px solid #eee", display: "block", marginBottom: 8, background: "#fafafa" }} /> : null}
       <Space>
-        <Upload
+        <FileUpload
           accept="image/jpeg,image/png,image/webp"
-          showUploadList={false}
-          beforeUpload={(file) => {
-            if (!IMAGE_TYPES.includes(file.type)) { message.error(t("只支持 JPG、PNG 或 WebP 图片")); return Upload.LIST_IGNORE; }
-            if (file.size > 2 * 1024 * 1024) { message.error(t("单张图片不能超过 2MB")); return Upload.LIST_IGNORE; }
-            setUploading(true);
-            websiteChannelApi.uploadAsset(scene, file as File)
-              .then((result) => { onChange?.(result.url); message.success(t("图片已上传")); })
-              .catch((error: any) => message.error(error?.response?.data?.message ?? t("上传失败")))
-              .finally(() => setUploading(false));
-            return false;
+          multiple={false} maxSize={2 * 1024 * 1024} value={files} onChange={setFiles}
+          label={value ? t("重新上传") : t("上传图片")}
+          description={t("只支持 JPG、PNG 或 WebP 图片，单张不超过 2MB")}
+          onUpload={async (file, options) => {
+            try { const result = await websiteChannelApi.uploadAsset(scene, file); if (options.signal.aborted) throw new DOMException("Aborted", "AbortError"); onChange?.(result.url); message.success(t("图片已上传")); }
+            catch (error) { if (!options.signal.aborted) message.error(t("上传失败")); throw error; }
           }}
-        >
-          <Button icon={<UploadOutlined />} loading={uploading}>{value ? t("重新上传") : t("上传图片")}</Button>
-        </Upload>
-        {value ? <Button type="text" danger onClick={() => onChange?.("")}>{t("移除")}</Button> : null}
+        />
+        {value ? <Button type="text" danger onClick={() => { onChange?.(""); setFiles([]); }}>{t("移除")}</Button> : null}
       </Space>
       <Typography.Text type="secondary" className="text-meta" style={{ display: "block", marginTop: 6 }}>{t(hint)}</Typography.Text>
     </div>
@@ -57,8 +55,6 @@ function ProfileCard() {
   const tenantId = useAuthStore((state) => state.tenant?.tenantId);
   const setTenantBranding = useAuthStore((state) => state.setTenantBranding);
   // 原生取色器需要合法 #RRGGBB；表单里可能是 #RGB 或空，展示时归一化，不回写表单值。
-  const themeColorValue = Form.useWatch("themeColor", form);
-  const themeColorSwatch = /^#[0-9a-fA-F]{6}$/.test(themeColorValue ?? "") ? (themeColorValue as string) : /^#[0-9a-fA-F]{3}$/.test(themeColorValue ?? "") ? "#" + (themeColorValue as string).slice(1).split("").map((c) => c + c).join("") : ADMIN_DEFAULT_PRIMARY_COLOR;
   const profile = useQuery({ queryKey: ["client-channel-profile", tenantId], queryFn: clientChannelApi.getProfile, enabled: Boolean(tenantId) });
 
   useEffect(() => {
@@ -77,6 +73,16 @@ function ProfileCard() {
       helpFaq: data.helpFaq ?? [],
       bannerTitle: data.bannerTitle,
       bannerSubtitle: data.bannerSubtitle,
+      adminLogin: {
+        backgroundImageUrl: data.adminLogin?.backgroundImageUrl ?? "",
+        title: data.adminLogin?.title ?? "",
+        description: data.adminLogin?.description ?? "",
+        highlights: ADMIN_LOGIN_DEFAULTS.highlights.map((_, index) => ({
+          title: data.adminLogin?.highlights?.[index]?.title ?? "",
+          description: data.adminLogin?.highlights?.[index]?.description ?? ""
+        })),
+        footerText: data.adminLogin?.footerText ?? ""
+      },
       themeColor: data.themeColor,
       smsLoginEnabled: data.smsLoginEnabled,
       passwordLoginEnabled: data.passwordLoginEnabled,
@@ -96,7 +102,8 @@ function ProfileCard() {
       setTenantBranding({ brandName: data.brandName, brandLogoUrl: data.brandLogoUrl, faviconUrl: data.faviconUrl, themeColor: data.themeColor, adminCornerRadius: data.adminCornerRadius, adminContainerRadius: data.adminContainerRadius, adminButtonRadius: data.adminButtonRadius, adminInputRadius: data.adminInputRadius });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["client-channel-profile", tenantId] }),
-        queryClient.invalidateQueries({ queryKey: ["tenant-appearance"] })
+        queryClient.invalidateQueries({ queryKey: ["tenant-appearance"] }),
+        queryClient.invalidateQueries({ queryKey: ["public-admin-brand"] })
       ]);
       message.success(t("客户端渠道配置已保存"));
     },
@@ -122,6 +129,7 @@ function ProfileCard() {
         <Card size="small" title={t("品牌与客服")}>
           <Row gutter={[16, 0]}>
             <Col xs={24} md={12}><Form.Item name="brandName" label={t("商户展示名")} extra={t("登录页标题、启动配置与分享使用；缺省用租户名")}><Input maxLength={191} placeholder={t("如：光影摄影器材租赁")} /></Form.Item></Col>
+            <Col xs={24} md={12}><Form.Item name="themeColor" label={t("品牌色")} tooltip={t("客户端与官网的品牌主色；#RRGGBB，留空回退平台默认色")} extra={t("用于客户端与官网品牌展示，不影响管理后台主色")} rules={[{ pattern: /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, message: t("请输入 #RRGGBB 十六进制颜色") }]}><ColorPicker label={t("品牌色")} /></Form.Item></Col>
             <Col xs={24} md={12}><Form.Item name="brandLogoUrl" label={t("商户 Logo")} extra={t("登录页、启动配置与分享使用")}><ImageUrlUpload scene="logo" previewHeight={48} hint="建议 240×80px 横版（透明背景 PNG 更佳），≤ 500KB，JPG/PNG/WebP。" /></Form.Item></Col>
             <Col xs={24} md={12}><Form.Item name="faviconUrl" label={t("浏览器图标")} extra={t("浏览器标签页与收藏夹使用；留空回退平台默认图标")}><ImageUrlUpload scene="favicon" previewHeight={48} hint="建议 64×64px 方形图标，≤ 500KB，JPG/PNG/WebP。" /></Form.Item></Col>
             <Col xs={24} md={12}><Form.Item name="customerServicePhone" label={t("客服电话")} extra={t("订单/付款页“联系商户”与拨号使用")}><Input maxLength={32} placeholder={t("如：021-00000000")} /></Form.Item></Col>
@@ -129,15 +137,44 @@ function ProfileCard() {
           </Row>
         </Card>
 
+        <Card size="small" title={t("管理后台登录页")} style={{ marginTop: 16 }}>
+          <Typography.Paragraph type="secondary">{t("仅影响管理后台登录页左侧，不影响客户官网。留空使用平台默认文案，上传或移除图片后请保存配置。")}</Typography.Paragraph>
+          <Form.Item name={["adminLogin", "backgroundImageUrl"]} label={t("左侧背景图")}>
+            <ImageUrlUpload scene="hero" previewHeight={160} hint="建议使用竖版图片，主体居中；自动裁切并叠加深色遮罩。JPG/PNG/WebP，最大 2MB。" />
+          </Form.Item>
+          <Row gutter={[16, 0]}>
+            <Col xs={24} md={12}>
+              <Form.Item name={["adminLogin", "title"]} label={t("登录页标题")} rules={[{ max: 80 }]}>
+                <Input.TextArea rows={2} maxLength={80} placeholder={t(ADMIN_LOGIN_DEFAULTS.title)} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item name={["adminLogin", "description"]} label={t("登录页说明")} rules={[{ max: 300 }]}>
+                <Input.TextArea rows={3} maxLength={300} placeholder={t(ADMIN_LOGIN_DEFAULTS.description)} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={[16, 0]}>
+            {ADMIN_LOGIN_DEFAULTS.highlights.map((item, index) => (
+              <Col xs={24} md={8} key={item.title}>
+                <Form.Item name={["adminLogin", "highlights", index, "title"]} label={`${t("底部介绍")} ${index + 1}`} rules={[{ max: 24 }]}>
+                  <Input maxLength={24} placeholder={t(item.title)} />
+                </Form.Item>
+                <Form.Item name={["adminLogin", "highlights", index, "description"]} label={t("介绍说明")} rules={[{ max: 80 }]}>
+                  <Input.TextArea rows={2} maxLength={80} placeholder={t(item.description)} />
+                </Form.Item>
+              </Col>
+            ))}
+          </Row>
+          <Form.Item name={["adminLogin", "footerText"]} label={t("底部补充文字")} rules={[{ max: 160 }]}>
+            <Input.TextArea rows={2} maxLength={160} placeholder={t(ADMIN_LOGIN_DEFAULTS.footerText)} />
+          </Form.Item>
+        </Card>
+
         <Card size="small" title={t("首页横幅（可选）")} style={{ marginTop: 16 }}>
           <Row gutter={[16, 0]}>
             <Col xs={24} md={12}><Form.Item name="bannerTitle" label={t("横幅标题")} extra={t("缺省使用品牌文案")}><Input maxLength={64} /></Form.Item></Col>
             <Col xs={24} md={12}><Form.Item name="bannerSubtitle" label={t("横幅副标题")}><Input maxLength={120} /></Form.Item></Col>
-            <Col xs={24} md={12}>
-              <Form.Item name="themeColor" label={t("主题色")} tooltip={t("留空使用系统默认蓝 #1677FF；设置后客户端与管理后台主色跟随")} extra={t("客户端与管理后台主色；#RRGGBB，留空回退系统色")} rules={[{ pattern: /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, message: t("请输入 #RRGGBB 十六进制颜色") }]}>
-                <Input maxLength={7} allowClear placeholder="#1677FF" addonBefore={<input type="color" value={themeColorSwatch} onChange={(e) => form.setFieldValue("themeColor", e.target.value.toUpperCase())} style={{ width: 28, height: 22, border: "none", background: "transparent", padding: 0, cursor: "pointer" }} aria-label={t("选择主题色")} />} />
-              </Form.Item>
-            </Col>
           </Row>
         </Card>
 
@@ -148,7 +185,7 @@ function ProfileCard() {
             <Col xs={24} md={8}><Form.Item name={["userAgreement", "version"]} label={t("版本")} extra={t("如 2026-09 / v1.2")}><Input maxLength={64} /></Form.Item></Col>
             <Col xs={24} md={8}><Form.Item name={["userAgreement", "url"]} label={t("外部链接（可选）")}><Input maxLength={512} placeholder="https://..." /></Form.Item></Col>
           </Row>
-          <Form.Item name={["userAgreement", "body"]} label={t("正文")}><Input.TextArea rows={6} maxLength={20000} showCount placeholder={t("协议正文（纯文本或简单富文本）")} /></Form.Item>
+          <Form.Item name={["userAgreement", "body"]} label={t("正文")} rules={[{ max: 20000, message: t("正文不能超过 20000 字符") }]}><RichTextEditor placeholder={t("协议正文（纯文本或简单富文本）")} /></Form.Item>
         </Card>
 
         <Card size="small" title={t("隐私政策")} style={{ marginTop: 16 }}>
@@ -157,7 +194,7 @@ function ProfileCard() {
             <Col xs={24} md={8}><Form.Item name={["privacyPolicy", "version"]} label={t("版本")}><Input maxLength={64} /></Form.Item></Col>
             <Col xs={24} md={8}><Form.Item name={["privacyPolicy", "url"]} label={t("外部链接（可选）")}><Input maxLength={512} placeholder="https://..." /></Form.Item></Col>
           </Row>
-          <Form.Item name={["privacyPolicy", "body"]} label={t("正文")}><Input.TextArea rows={6} maxLength={20000} showCount placeholder={t("隐私政策正文")} /></Form.Item>
+          <Form.Item name={["privacyPolicy", "body"]} label={t("正文")} rules={[{ max: 20000, message: t("正文不能超过 20000 字符") }]}><RichTextEditor placeholder={t("隐私政策正文")} /></Form.Item>
         </Card>
 
         <Card size="small" title={t("帮助与常见问题")} style={{ marginTop: 16 }}>
@@ -197,7 +234,7 @@ function ProfileCard() {
         </Card>
 
         <Space style={{ marginTop: 16 }}>
-          <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={save.isPending}>{t("保存配置")}</Button>
+          <SaveButton label={t("保存配置")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} />
           {data.updatedAt ? <Typography.Text type="secondary">{t("上次更新")}：{data.updatedAt}</Typography.Text> : null}
         </Space>
       </Form>
@@ -249,8 +286,8 @@ function WechatCredentialsCard() {
         </Row>
         <Form.Item name="enabled" label={t("启用渠道")} valuePropName="checked" extra={t("启用前须已填写 AppSecret")}><Switch /></Form.Item>
         <Space>
-          <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={save.isPending}>{t("保存凭证")}</Button>
-          <Button icon={<ExperimentOutlined />} onClick={() => test.mutate()} loading={test.isPending} disabled={!data?.secretConfigured && !enabled}>{t("测试连接")}</Button>
+          <SaveButton label={t("保存凭证")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} />
+          <ActionButton label={t("测试连接")} pendingLabel={t("检测中")} successLabel={t("检测通过")} pending={test.isPending} disabled={!data?.secretConfigured && !enabled} onAction={async () => { const result = await test.mutateAsync(); if (!result.ok) throw new Error(result.message); }} />
           {data?.lastTestAt ? <Typography.Text type="secondary">{t("上次测试")}：{data.lastTestAt}</Typography.Text> : null}
         </Space>
         {data?.lastTestStatus === "failed" && data.lastTestError ? <Alert style={{ marginTop: 12 }} showIcon type="error" title={t("上次测试失败")} description={data.lastTestError} /> : null}
@@ -438,7 +475,7 @@ function WebsiteProfileCard() {
         </Card>
 
         <Space style={{ marginTop: 16 }}>
-          <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={save.isPending}>{t("保存配置")}</Button>
+          <SaveButton label={t("保存配置")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} />
           {data.updatedAt ? <Typography.Text type="secondary">{t("上次更新")}：{data.updatedAt}</Typography.Text> : null}
         </Space>
       </Form>

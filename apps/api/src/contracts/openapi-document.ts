@@ -351,12 +351,23 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     [],
     false
   ),
+  // 账户级外观（跟随登录账户的管理后台主题色，与租户品牌色相互独立）。
+  AccountAppearanceProfile: objectOf({ themeColor: stringSchema, updatedAt: { type: "string", format: "date-time" } }, [], false),
+  SaveAccountAppearanceRequest: objectOf({ themeColor: stringSchema }, [], false),
+  AdminLoginBranding: objectOf({
+    backgroundImageUrl: { type: "string", maxLength: 512 },
+    title: { type: "string", maxLength: 80 },
+    description: { type: "string", maxLength: 300 },
+    highlights: { type: "array", maxItems: 3, items: objectOf({ title: { type: "string", maxLength: 24 }, description: { type: "string", maxLength: 80 } }, [], false) },
+    footerText: { type: "string", maxLength: 160 }
+  }, [], false),
   ClientChannelProfileSummary: objectOf(
     {
       configured: booleanSchema, revision: numberSchema,
       brandName: stringSchema, brandLogoUrl: stringSchema, faviconUrl: stringSchema, customerServicePhone: stringSchema, customerServiceHours: stringSchema,
       userAgreement: ref("ClientChannelAgreementConfig"), privacyPolicy: ref("ClientChannelAgreementConfig"),
       helpIntro: stringSchema, helpFaq: arrayOf("ClientChannelFaqItem"), bannerTitle: stringSchema, bannerSubtitle: stringSchema, themeColor: stringSchema,
+      adminLogin: ref("AdminLoginBranding"),
       adminCornerRadius: { type: "integer", minimum: 8, maximum: 999 },
       adminContainerRadius: { type: "integer", minimum: 8, maximum: 999 },
       adminButtonRadius: { type: "integer", minimum: 8, maximum: 999 },
@@ -375,6 +386,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       expectedRevision: numberSchema, brandName: stringSchema, brandLogoUrl: stringSchema, faviconUrl: stringSchema, customerServicePhone: stringSchema, customerServiceHours: stringSchema,
       userAgreement: ref("ClientChannelAgreementConfig"), privacyPolicy: ref("ClientChannelAgreementConfig"),
       helpIntro: stringSchema, helpFaq: arrayOf("ClientChannelFaqItem"), bannerTitle: stringSchema, bannerSubtitle: stringSchema, themeColor: stringSchema,
+      adminLogin: ref("AdminLoginBranding"),
       adminCornerRadius: { type: "integer", minimum: 8, maximum: 999 },
       adminContainerRadius: { type: "integer", minimum: 8, maximum: 999 },
       adminButtonRadius: { type: "integer", minimum: 8, maximum: 999 },
@@ -1200,6 +1212,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
       tenantCode: stringSchema,
       client: { type: "string", enum: ["wechat_miniprogram", "app", "web"] },
       merchant: objectOf({ name: stringSchema, logoUrl: stringSchema, faviconUrl: stringSchema, servicePhone: stringSchema, serviceHours: stringSchema }, ["name"], false),
+      adminLogin: ref("AdminLoginBranding"),
       services: arrayOf(objectOf({ code: stringSchema, name: stringSchema, categoryCode: stringSchema, isDefault: booleanSchema, status: { type: "string", enum: ["open", "paused"] } }, ["code", "name", "categoryCode", "status"], false)),
       categories: arrayOf(objectOf({ code: stringSchema, name: stringSchema }, ["code", "name"], false)),
       defaultServiceCode: stringSchema,
@@ -1849,6 +1862,9 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
   // APPEARANCE-01：租户级「品牌与外观」（管理后台 UI 身份：品牌标识/主题色/圆角），从客户端渠道拆出的独立领域。
   backlogOperation("get", "/api/platform/appearance", "Platform", "getTenantAppearance", "Get the tenant-level brand & appearance profile (brand identity, theme color, corner radii)", ["system:integration:manage"], true, undefined, "TenantAppearanceProfile"),
   backlogOperation("put", "/api/platform/appearance", "Platform", "saveTenantAppearance", "Save the tenant-level brand & appearance profile with optimistic revision check", ["system:integration:manage"], true, "SaveTenantAppearanceRequest", "TenantAppearanceProfile"),
+  // 账户级外观自助：登录账户本人的管理后台主题色，跟随账户、与租户品牌色相互独立；任何已登录账号读写自己的（无业务权限）。
+  backlogOperation("get", "/api/platform/account-appearance", "Platform", "getAccountAppearance", "Get the signed-in account's admin theme color (follows the account, independent of the tenant brand color)", [], true, undefined, "AccountAppearanceProfile"),
+  backlogOperation("put", "/api/platform/account-appearance", "Platform", "saveAccountAppearance", "Save the signed-in account's admin theme color", [], true, "SaveAccountAppearanceRequest", "AccountAppearanceProfile"),
   // WEBSITE-CHANNEL-01：租户级 web 官网渠道配置（官网特有设定项：标语、Hero、辅助色、页脚、CTA、SEO）。
   backlogOperation("get", "/api/platform/website-channel", "Platform", "getWebsiteChannelProfile", "Get the tenant-level website channel profile (website-only settings: slogan, hero, secondary color, footer, CTA, SEO)", ["system:integration:manage"], true, undefined, "WebsiteChannelProfileSummary"),
   backlogOperation("put", "/api/platform/website-channel", "Platform", "saveWebsiteChannelProfile", "Save the tenant-level website channel profile with optimistic revision check", ["system:integration:manage"], true, "SaveWebsiteChannelProfileRequest", "WebsiteChannelProfileSummary"),

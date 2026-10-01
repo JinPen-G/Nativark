@@ -1,0 +1,76 @@
+# Rental OS / UIArc source library
+
+## Source and license
+
+- Official source: https://uiarc.dev/r/registry.json
+- Catalog: https://uiarc.dev/r/catalog.json
+- License: https://uiarc.dev/license (free source: MIT, copyright 2026 Elia Kuratli).
+- Snapshot: 122 public components/blocks plus foundation, 262 unique source files (2026-10-01 registry reconciliation).
+- `manifest.json` records registry entries, dependencies and source hashes.
+- 101 Pro entries are catalog metadata only, not downloaded, installed or imitated. Their source requires an appropriate license.
+- The upstream agent skill is not installed as project instructions.
+
+## Structure
+
+- `vendor/registry/foundation.css`: original light/dark, eight accent palettes, chart colors, dimensions, shadows, CSS timing/easing.
+- `vendor/registry/motion-tokens.ts`: original durations, springs, easing, stagger and blur presets.
+- `vendor/registry/components`, `vendor/registry/blocks`: original React/CSS-module source, including currently unused components.
+- Admin aliases `@/registry/*` and `@/lib/motion-tokens` resolve here. Import individual modules, never a barrel of the entire library.
+- Unused components are reserved source, not added to the production bundle or automatically given all optional dependencies.
+- Full import/source inventory: [COMPONENTS.md](./COMPONENTS.md). Re-scan with `node scripts/audit-admin-components.cjs` (stdout only); `--json` exposes remaining direct Ant imports and hash mismatches. Downloaded/referenced source is not runtime acceptance.
+
+2026-10-01 follow-up: ordinary standalone checkboxes, simple multiple selectors, label-filtered searchable single selectors and the sound-volume slider now use original public components. Complex group/event/search contracts still retain explicit compatibility paths; original sizes and motion are unchanged. Expanding-search and json-viewer were added as reserved source after checking the live registry.
+
+## Usage and compatibility
+
+Authentication fields also expose the original PasswordField, PasswordStrength and PhoneInput adapters. Strength rules mirror the existing eight-character/letter/number/symbol policy rather than the upstream demo policy. The code/recovery preview uses E.164 phone validity and a non-clipping step frame. Only the source shell draws password focus; the inner input does not receive an extra generic outline. Login result messages use the original ToastStack through FeedbackProvider; other AntD message/notification consumers are not silently overridden. Rich inline Alert details use the source component; block/custom-rendered details retain an explicit compatibility fallback to avoid invalid nested paragraphs. Browser acceptance covered the recovery preview, rule meter, mismatch rejection, cleared password state, country selection, 375px sizing and zero API writes.
+
+Existing admin pages use `@/components/ui`, which preserves AntD Form, permissions, disabled/loading state, real async mutations and tenant preferences.
+
+New pages should first use this adapter entry for Button, ActionButton, SaveButton, CopyButton, Input, Switch, Drawer, Dropdown, Tabs, Segmented, Tooltip, ConfirmAction, DatePicker, TimePicker, TimeInput, ColorPicker, RichTextEditor, Upload, FileUpload, Pagination, Table, Alert, Steps and Progress. For a new capability, import the corresponding registry component directly and install only its declared, reviewed dependencies.
+
+ActionButton uses the original upstream text morph, spring width, spinner and drawn success check. `onAction` must return a real promise and reject on failed results (including HTTP-success responses whose business `ok` is false). SaveButton validates its supplied AntD form before awaiting `onSave`; retain the same payload transforms and domain checks as the existing Enter-key `onFinish`. CopyButton uses the original clipboard feedback, defaulting to icon-only so upstream hard-coded English result text does not leak into Chinese pages. Ordinary navigation/cancel buttons retain press/hover animation without pretending to perform a save.
+
+Examples of additional available source: number-field, phone-input, tag-input, select, combobox, multi-select, calendar, time-picker, confirm-morph, file-upload, charts and layout blocks.
+
+Do not replace complex table, tree, nullable/string-mode number fields, search/OTP/password contracts or keep-alive drawers by silently dropping unsupported features. The adapters deliberately fall back to AntD for those cases.
+
+ConfirmAction must receive the actual `mutateAsync` promise. Offer Undo only if a real reverse operation exists. Required forms must not treat an empty numeric input as zero.
+
+Date/time adapters preserve Dayjs values and seconds, null clearing and Form disabled state. Complex disabled-time/custom-panel contracts explicitly retain AntD. TimeInput stores HH:mm strings. Table keeps AntD's business row/selection engine and uses Arc pagination for compatible configurations; custom sorting/filtering/tree pagination retains AntD. Alert/Steps/Progress retain AntD for unsupported complex content or special modes.
+
+Use FileUpload for new uploads and return the real upload promise; failures must reject. Upload is the existing AntD-contract adapter, not a fake upload timer. Remote previews, custom removal vetoes and incompatible automatic-upload guards retain AntD. Cancelled uploads must not overwrite the persisted asset URL.
+
+RichTextEditor stores `rental-rich-text:v1` followed by whitelisted JSON document nodes in the existing body string, not executable HTML. Existing plain-text documents remain unchanged when opened. The shared codec rejects unsafe links/attributes/tags and limits document size/depth. The tenant website and customer miniprogram legal readers are updated together; other client implementations must consume this codec before enabling rich document authoring. API document bodies remain limited to 20,000 characters. Tests: `node tests/client-rich-text.test.cjs` after building shared.
+
+The rich editor presents the upstream editing surface alongside Markdown/HTML output, with original editor undo/redo history, restore-to-loaded-document, word count and original CopyButton clipboard feedback. There is no outer edit/preview tab. On narrow screens the two panels stack. Pagination uses the original moving page mark/window and arrows; quick jump is an adapter input, not a reason to fall back to the Ant pager. Custom itemRender/select-slot and complex table filter/tree contracts still have explicit compatibility fallbacks; current business page imports use the adapter entry. Browser fixture acceptance does not substitute for authenticated business-page acceptance.
+
+## Theme and motion
+
+2026-10-01 theme correction: checked the documentation site's actual page CSS `/_next/static/css/35c9d8b23d654900.css`. Default is its straight horizontal reveal (`inset(0 100% 0 0)` to `inset(0)`, 380ms); rise is its straight vertical reveal (`inset(100% 0 0)` to `inset(0)`, 360ms). Both use `cubic-bezier(.22,1,.36,1)`, without invented reverse paths. The former custom moving ellipses were removed. Upstream eclipse remains optional, and the previous circular mask is separately retained as `legacy-reveal`, disabled by default. Static/build verification does not prove browser visual acceptance.
+
+2026-10-01 form integration: `@/components/ui/Form` retains Ant Form's store, validation, dependencies, dynamic lists, disabled context, static APIs and ref behavior while applying a shared field presentation via `Form`, `Form.Item` and optional `FormSection`. Labels, required marks, helper/error spacing and section spacing use named admin CSS tokens. Compatible plain UIArc Inputs receive the current Ant validation error through their original animated alert row; controls with richer/unsupported contracts retain Ant's own validation feedback. All existing admin Form imports route through the adapter entry. This is a presentation-layer change: no API payload or validation rule was changed.
+
+Original component motion and CSS stay in vendor, unchanged. Integration overrides belong to `apps/admin/src/components/ui/arc-bridge.css`.
+
+The default palette is UIArc neutral; tenant color overrides remain authoritative. Existing tenant radius values are preserved. If no legacy or explicit tenant value exists, defaults are button/input 18px and panel 26px. Button sounds still use the existing global interaction system.
+
+AntD's theme consumes converted UIArc OKLCH colors; no arbitrary tenant CSS is interpolated. Switching tenant/logout removes old accent overrides. Keyboard focus remains visible as a deliberate accessibility integration override.
+
+The free ThemeSwitch owns icon/button animation; the existing platform provider owns whole-page View Transition, persistence and reduced-motion fallback. Pro Sidebar is not included; the existing accessible sidebar remains.
+
+## Validation
+
+2026-10-01 follow-up review: Ant multiple selection enables search by default, so the native non-searchable MultiSelect path now requires explicit `showSearch={false}`. Existing searchable fields retain their search rather than silently losing it. Select reads Form validation status, preserves stored values missing from the current options, respects zero-valued tag limits and localizes clear labels. Fixed-row TextArea no longer falls back merely because Form injects a ref; focus, cursor, nativeElement and validation feedback are preserved. Ordinary `Input.Password` calls now use the original PasswordField, with Ant fallback for custom icons/visibility and richer contracts. Inventory scanning includes CSS-module imports as source references; this is not evidence that the whole upstream component is used unchanged. These follow-up checks are static/type/build checks, not browser acceptance.
+
+2026-10-01 sidebar motion: inspected the public documentation-site library sidebar at https://uiarc.dev/docs/introduction (delivered chunk `48217-2a405ddc9bf87a0b.js`). Its active pill uses a shared `layoutId`, `spring.morph`, and a `layoutScroll` ancestor. SidebarMenu integrates that mechanism using the existing MIT foundation motion tokens, without copying the whole site or installing the gated Pro Sidebar. AntD retains keyboard, permissions, routes and collapsed popup navigation; tenant colors/radii remain authoritative. Browser fixtures covered intermediate motion frames, rapid retargeting, scrolling, collapsed popup selection, a single final highlight and live reduced-motion preference changes. This is component-level verification, not an authenticated all-page regression. Desktop/mobile breakpoint logic is unchanged.
+
+Source snapshot hashes are verified against the public registry after normalizing Windows line endings/trailing newline. This proves source acquisition, not a runtime acceptance test for every reserved component. Only components imported into the admin are build-checked; browser checks must separately cover forms, popups, drawers, theme and async confirmation.
+
+2026-10-01 action integration: 20 SaveButton call sites, five ActionButton call sites and three CopyButton call sites, in addition to destructive ConfirmAction integrations. Browser fixture checks covered validation blocking requests, a two-input form's Enter-key save issuing exactly one request, promise rejection/retry, real clipboard write feedback, tenant color/radius application/reset, and nested modal/drawer Escape retaining the parent draft. Production build, admin static contract and adapter AntD lint passed. These checks do not constitute real-account acceptance of every business API or Pro-component availability.
+
+2026-10-01 field/feedback integration: compatible date/range/time, color, rich document, file upload, table pagination, alert, stepper and progress adapters are connected to existing pages. Browser fixtures verified date changes preserving seconds, explicit partial-range constraints, inherited Form disabled state, actual table page changes, failed upload retry/real response retention, cancellation ignoring a late success, and calendar Escape preserving the containing drawer draft. Shared codec regression checks, shared/admin builds, tenant-website/miniprogram type checks, admin static contract and adapter AntD lint passed. Original snapshot integrity: 258 files, zero normalized-hash mismatches. This is component-level acceptance, not an authenticated regression of every business page or a real-device miniprogram test.
+
+Remaining migration boundaries: nullable/string-mode money fields, searchable/multiple/tree selectors, complex file previews/transports, custom table filtering/sorting and other unsupported modes retain their existing components until individually adapted and accepted. Their upstream public sources are reserved; presence in vendor does not mean a completed page migration. The production build still reports a shared chunk larger than 500 kB. The scoped admin dependency audit reports two high-severity findings (axios and picomatch); no blanket dependency upgrades or audit-force changes were made during this visual migration.
+
+Admin authentication UI: real password sign-in remains connected to the existing API and tenant/onboarding routes. Login fields now use the original public Input/PasswordField (no affix fallback or large-height override); the submit action uses the original ActionButton through SaveButton. SMS/email code sign-in and phone/email password recovery are explicitly UI-only previews: the visible demo code is 123456, no messages are sent, no session is issued and no password is persisted. The public OtpInput and LoginCentered CSS/step-motion parameters are reused without changing vendor. Google/Apple/WeChat buttons are preview entry points only; GitHub is not rendered. Tenant-specific URLs/branding and development demo accounts remain supported. Browser checks confirmed original 44px field/button dimensions, invalid email/code/confirmation rejection, preview flows with zero API writes, password reveal, and exactly one intercepted password-login POST on Enter. Real SMS/email delivery, recovery challenge verification and third-party authorization are not implemented by this preview.

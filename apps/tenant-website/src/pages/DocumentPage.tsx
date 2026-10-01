@@ -3,6 +3,14 @@ import { Link } from 'react-router-dom';
 import { ArrowRightOutlined, LoadingOutlined } from '@ant-design/icons';
 import { useSite } from '../SiteContext';
 import { clientApi, type PublicDocumentResponse } from '../data/apiClient';
+import { createElement, type ReactNode } from 'react';
+import { parseClientRichText, type ClientRichTextNode } from '@rental-os/shared';
+
+function DocumentBody({ body }: { body: string }) {
+  const nodes = parseClientRichText(body);
+  const render = (items: ClientRichTextNode[]): ReactNode[] => items.map((node, index) => node.type === 'text' ? node.text : createElement(node.name, { key: index, ...(node.name === 'a' ? { href: node.attrs?.href, rel: 'noreferrer' } : {}) }, ...(['br', 'hr'].includes(node.name) ? [] : render(node.children))));
+  return <div className="doc-text">{nodes ? render(nodes) : body.split('\n').map((line, index) => <p key={index}>{line}</p>)}</div>;
+}
 
 type Kind = 'user_agreement' | 'privacy_policy' | 'help';
 
@@ -36,7 +44,7 @@ export function DocumentPage({ kind }: { kind: Kind }) {
     {loading ? <p className="mock-note"><LoadingOutlined /> {t('loading')}</p> : null}
     {!loading && doc ? <div className="doc-body">
       {doc.intro ? <p className="doc-intro">{doc.intro}</p> : null}
-      {doc.body ? <div className="doc-text">{doc.body.split('\n').map((line, i) => <p key={i}>{line}</p>)}</div> : null}
+      {doc.body ? <DocumentBody body={doc.body} /> : null}
       {doc.url ? <p><a href={doc.url} target="_blank" rel="noreferrer">{t('docExternalLink')} <ArrowRightOutlined /></a></p> : null}
       {doc.faq?.length ? <div className="faq-list">{doc.faq.map((item, i) => <details key={i}><summary>{item.question}</summary><p>{item.answer}</p></details>)}</div> : null}
       {!doc.body && !doc.url && !doc.intro && !doc.faq?.length ? <p className="mock-note">{t('docNotProvided')}</p> : null}

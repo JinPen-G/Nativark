@@ -23,6 +23,7 @@ import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { hashOpaqueToken } from "../../common/password";
 import { PrismaService } from "../database/prisma.service";
 import { TenantAppearanceProfileService } from "../client/tenant-appearance-profile.service";
+import { AccountAppearanceService } from "../client/account-appearance.service";
 import { PlatformService } from "../platform/platform.service";
 import { WorkspaceCapabilityService } from "../rental-core/workspace-capability.service";
 
@@ -68,6 +69,8 @@ export class AuthService {
     @Optional() private readonly capabilities?: WorkspaceCapabilityService,
     // 品牌与外观（主题色/圆角/品牌标识）来自独立的「品牌与外观」领域，不阻断登录；可选依赖兼容内存测试模式。
     @Optional() private readonly tenantAppearance?: TenantAppearanceProfileService,
+    // 账户级外观（跟随登录账户的管理后台主题色），与租户品牌色独立；可选，缺失时不阻断登录。
+    @Optional() private readonly accountAppearance?: AccountAppearanceService,
     // AUTH-LOCKOUT-01：持久化跨进程失败计数；测试/纯内存模式继续使用进程内后备实现。
     @Optional() private readonly prisma?: PrismaService
   ) {}
@@ -514,9 +517,21 @@ export class AuthService {
     }
   }
 
+  /** 账户级主题色读取失败时回退未设置，不影响认证与会话组装。 */
+  private async accountThemeColor(userId: string): Promise<string | undefined> {
+    if (!this.accountAppearance) return undefined;
+    try {
+      return await this.accountAppearance.getThemeColor(userId);
+    } catch (error) {
+      this.logger.warn(`读取账户 ${userId} 的管理后台主题色失败，回退未设置：${(error as Error).message}`);
+      return undefined;
+    }
+  }
+
   private async toAuthUser(user: SystemUserRow, baseUser?: SystemUserRow): Promise<AuthUser> {
     const tenantUser = baseUser ?? await this.platformService.findUserById(user.id);
     if (!tenantUser?.isActive || tenantUser.tenantId !== user.tenantId) throw new UnauthorizedException("账号或租户已停用");
+    const accountThemeColor = await this.accountThemeColor(user.id);
     return {
       id: user.id,
       tenantId: user.tenantId,
@@ -533,6 +548,7 @@ export class AuthService {
       isSaasAdmin: user.isSaasAdmin,
       mustChangePassword: user.mustChangePassword,
       permissions: user.permissions,
+      accountThemeColor,
       tenantMembership: {
         permissions: tenantUser.isSaasAdmin ? [] : tenantUser.permissions,
         dataScope: tenantUser.dataScope,

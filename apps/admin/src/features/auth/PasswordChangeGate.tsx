@@ -1,5 +1,9 @@
 import { LockOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Form, Input, Typography } from "antd";
+import { App, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Alert } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { useState } from "react";
 import { useLocale } from "@/app/locale";
 import { useAuthStore } from "./authStore";

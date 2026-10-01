@@ -1,7 +1,12 @@
 import type { CustomerAccountStatus, CustomerMembershipPlanAssignment, CustomerMembershipStatus, CustomerQualificationRevision, PersonalMembershipMember, SubmitCustomerQualificationRequest } from "@rental-os/shared";
 import { CUSTOMER_GENDERS, CUSTOMER_GENDER_LABELS, CUSTOMER_SOURCE_CHANNELS, CUSTOMER_SOURCE_CHANNEL_LABELS } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Checkbox, Drawer, Form, Input, Radio, Select, Space, Table, Tag, Tooltip } from "antd";
+import { App, Card, Radio, Space, Tag } from "antd";
+import { Checkbox } from "@/components/ui";
+import { Form } from "@/components/ui";
+import { Alert, Table } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Button, Drawer, Select, Tooltip } from "@/components/ui";
 import { useState } from "react";
 import { customerApi } from "@/api/customer";
 import { membershipApi } from "@/api/membership";

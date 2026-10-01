@@ -5,7 +5,12 @@ import type {
   SaveCustomerMembershipPlanRequest,
 } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Checkbox, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Table, Tag } from "antd";
+import { App, Card, Col, InputNumber, Row, Space, Tag } from "antd";
+import { Checkbox } from "@/components/ui";
+import { Form } from "@/components/ui";
+import { Alert, Table } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Button, Drawer, SaveButton, Select } from "@/components/ui";
 import { useState } from "react";
 import { membershipApi } from "@/api/membership";
 import { useLocale } from "@/app/locale";
@@ -205,7 +210,7 @@ export function MembershipPlanPage() {
             <Button disabled={!canManage} onClick={() => add({ type: "rental_discount", calculation: "percentage", value: 0, scope: { type: "tenant" } })}>{t("添加权益")}</Button>
           </>}
         </Form.List>
-        <Button type="primary" htmlType="submit" disabled={!canManage || scopeOptions.isError} loading={save.isPending} style={{ marginTop: 20 }}>{t("保存草稿")}</Button>
+        <SaveButton label={t("保存草稿")} form={form} disabled={!canManage || scopeOptions.isError} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} style={{ marginTop: 20 }} />
       </Form>
     </Drawer>
     <Drawer title={`${historyPlan?.name ?? t("会员方案")} · ${t("版本历史")} `} size={900} open={Boolean(historyPlan)} onClose={() => setHistoryPlan(undefined)} destroyOnHidden>

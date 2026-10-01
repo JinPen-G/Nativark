@@ -1,4 +1,5 @@
-import { Alert, Button } from "antd";
+import { Alert } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";

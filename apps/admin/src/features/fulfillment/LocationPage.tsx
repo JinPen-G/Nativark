@@ -1,7 +1,8 @@
-import { PlusOutlined, SearchOutlined } from "@ant-design/icons";
+import { PlusOutlined } from "@ant-design/icons";
 import type { RentalFulfillmentLocation, RentalFulfillmentOperator, SaveRentalFulfillmentLocationRequest, SaveRentalFulfillmentOperatorRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Button, Card, Col, Drawer, Form, Input, InputNumber, Row, Select, Space, Table, Tag } from "antd";
+import { App, Card, Col, InputNumber, Row, Space, Tag } from "antd";
+import { Button, Drawer, Form, Input, SaveButton, SearchField, Select, Table } from "@/components/ui";
 import { useMemo, useState } from "react";
 import { api as platformApi } from "@/api/platform";
 import { rentalCoreApi } from "@/api/rentalCore";
@@ -72,7 +73,7 @@ export function LocationPage() {
         </QueryState>
       </Card>
       <Card className="data-panel" styles={{ body: { paddingBottom: 0 } }}>
-        <Space style={{ marginBottom: 16 }}><Input allowClear prefix={<SearchOutlined />} placeholder={t("搜索地点、经营主体或地址")} value={keyword} onChange={(event) => setKeyword(event.target.value)} style={{ width: 320 }} /></Space>
+        <Space style={{ marginBottom: 16 }}><SearchField label={t("搜索履约地点")} placeholder={t("搜索地点、经营主体或地址")} value={keyword} onValueChange={setKeyword} style={{ width: 320 }} /></Space>
           <QueryState loading={locations.isLoading || profile.isLoading || categories.isLoading || operators.isLoading || (canViewOrganizations && organizations.isLoading)} error={locations.error || profile.error || categories.error || operators.error || (canViewOrganizations ? organizations.error : undefined)}>
           <Table<RentalFulfillmentLocation> rowKey="id" dataSource={rows} scroll={{ x: 960 }} columns={[
             { title: t("履约地点"), fixed: "left", render: (_, row) => <><b>{row.name}</b><br /><span className="muted">{row.code}</span></> },
@@ -88,7 +89,12 @@ export function LocationPage() {
         </QueryState>
       </Card>
 
-      <Drawer title={editing ? t("编辑履约地点") : t("新增履约地点")} size={640} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>{t("保存")}</Button>}>
+      <Drawer title={editing ? t("编辑履约地点") : t("新增履约地点")} size={640} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<SaveButton label={t("保存")} form={form} pending={save.isPending} onSave={(values) => {
+        const payload: SaveRentalFulfillmentLocationRequest = { ...values, id: editing?.id };
+        if (canManageOrganizationMapping) payload.organizationId = values.organizationId || null;
+        else delete payload.organizationId;
+        return save.mutateAsync(payload);
+      }} />}>
         <Form<SaveRentalFulfillmentLocationRequest> form={form} layout="vertical" onFinish={(values) => {
           const payload: SaveRentalFulfillmentLocationRequest = { ...values, id: editing?.id };
           if (canManageOrganizationMapping) payload.organizationId = values.organizationId || null;
@@ -123,7 +129,7 @@ export function LocationPage() {
           </Row>
         </Form>
       </Drawer>
-      <Drawer title={editingOperator ? t("编辑经营主体") : t("新增经营主体")} size={560} open={operatorDrawerOpen} destroyOnHidden onClose={() => setOperatorDrawerOpen(false)} extra={<Button type="primary" loading={saveOperator.isPending} onClick={() => operatorForm.submit()}>{t("保存")}</Button>}>
+      <Drawer title={editingOperator ? t("编辑经营主体") : t("新增经营主体")} size={560} open={operatorDrawerOpen} destroyOnHidden onClose={() => setOperatorDrawerOpen(false)} extra={<SaveButton label={t("保存")} form={operatorForm} pending={saveOperator.isPending} onSave={(values) => saveOperator.mutateAsync({ ...values, id: editingOperator?.id })} />}>
         <Form<SaveRentalFulfillmentOperatorRequest> form={operatorForm} layout="vertical" onFinish={(values) => saveOperator.mutate({ ...values, id: editingOperator?.id })}>
           <Row gutter={12}>
             <Col span={12}><Form.Item name="code" label={t("主体编码")} rules={[{ required: true }]}><Input disabled={Boolean(editingOperator)} /></Form.Item></Col>

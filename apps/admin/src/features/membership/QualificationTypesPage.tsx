@@ -1,6 +1,11 @@
 import type { SaveCustomerMembershipQualificationTypeRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Checkbox, Form, Input, Table } from "antd";
+import { App } from "antd";
+import { Checkbox } from "@/components/ui";
+import { Form } from "@/components/ui";
+import { Alert, Table } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { SaveButton } from "@/components/ui";
 import { membershipApi } from "@/api/membership";
 import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";
@@ -32,7 +37,7 @@ export function QualificationTypesEditor() {
       <Form.Item label={t("编码")} name="code" rules={[{ required: true }]}><Input /></Form.Item>
       <Form.Item label={t("名称")} name="name" rules={[{ required: true }]}><Input /></Form.Item>
       <Form.Item name="requiredForBooking" valuePropName="checked"><Checkbox>{t("下单必需")}</Checkbox></Form.Item>
-      <Button type="primary" htmlType="submit" loading={save.isPending}>{t("新增证件类型")}</Button>
+      <SaveButton label={t("新增证件类型")} successLabel={t("已完成")} form={form} disabled={!canManage} pending={save.isPending} onSave={(values) => save.mutateAsync(values)} />
     </Form>
     <Table rowKey="id" size="small" style={{ marginTop: 20 }} dataSource={types.data ?? []} pagination={false} columns={[
       { title: t("名称"), dataIndex: "name" }, { title: t("编码"), dataIndex: "code" },

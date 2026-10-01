@@ -1,6 +1,11 @@
 import { formatRentalMoney, type CorporateMembershipMember, type CustomerCorporateContract, type CustomerCorporateCreditLedgerEntry, type CustomerCorporateMembership, type CustomerCorporateInvoiceProfile, type CustomerMembershipPlanAssignment, type CustomerCorporateCredit, type SaveCustomerContractRequest, type SaveCustomerInvoiceProfileRequest, type SaveCustomerCreditRequest, type SaveCorporateMembershipRequest, type SaveCustomerCorporateMembershipRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Checkbox, Descriptions, Drawer, Form, Input, InputNumber, Select, Space, Table, Tabs, Tag } from "antd";
+import { App, Card, Descriptions, InputNumber, Space, Tag } from "antd";
+import { Checkbox } from "@/components/ui";
+import { Form } from "@/components/ui";
+import { Alert, Table } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Button, Drawer, Select, Tabs } from "@/components/ui";
 import { useEffect, useState } from "react";
 import { membershipApi } from "@/api/membership";
 import { customerApi } from "@/api/customer";

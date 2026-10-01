@@ -1,5 +1,6 @@
 import { InfoCircleOutlined } from "@ant-design/icons";
-import { Button, Popover, Space } from "antd";
+import { Popover, Space } from "antd";
+import { Button } from "@/components/ui";
 import { useEffect, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { findRouteByPath } from "@/app/navigation";

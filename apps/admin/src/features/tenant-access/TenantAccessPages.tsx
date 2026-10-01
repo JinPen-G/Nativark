@@ -12,24 +12,13 @@ import type {
 } from "@rental-os/shared";
 import { RoleScope } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Alert,
-  App,
-  Button,
-  Card,
-  Checkbox,
-  Col,
-  Drawer,
-  Form,
-  Input,
-  Row,
-  Select,
-  Space,
-  Switch,
-  Table,
-  Tag,
-  Typography
-} from "antd";
+import { App, Card, Col, Row, Space, Tag, Typography } from "antd";
+import { Checkbox } from "@/components/ui";
+import { Form } from "@/components/ui";
+import { Alert, Table } from "@/components/ui";
+import { Input, Switch } from "@/components/ui";
+import { Select } from "@/components/ui";
+import { Button, ConfirmAction, CopyButton, Drawer, SaveButton } from "@/components/ui";
 import { useMemo, useState } from "react";
 import { api } from "@/api/platform";
 import { useLocale } from "@/app/locale";
@@ -146,7 +135,7 @@ export function TenantOperationsAccountPage() {
       if (user.temporaryPassword) {
         modal.success({
           title: t("运营账号已创建"),
-          content: <><Typography.Paragraph>{t("请将以下临时密码安全交给账号持有人，首次登录必须修改。")}</Typography.Paragraph><Typography.Text code copyable>{user.temporaryPassword}</Typography.Text></>
+          content: <><Typography.Paragraph>{t("请将以下临时密码安全交给账号持有人，首次登录必须修改。")}</Typography.Paragraph><Typography.Text code>{user.temporaryPassword}</Typography.Text><CopyButton value={user.temporaryPassword} /></>
         });
       } else {
         message.success(t("运营账号与空间权限已保存"));
@@ -163,7 +152,7 @@ export function TenantOperationsAccountPage() {
 
   const resetPassword = useMutation({
     mutationFn: api.resetUserPassword,
-    onSuccess: (result) => modal.success({ title: t("密码已重置"), content: <><Typography.Paragraph>{t(result.message)}</Typography.Paragraph><Typography.Text code copyable>{result.temporaryPassword}</Typography.Text></> }),
+    onSuccess: (result) => modal.success({ title: t("密码已重置"), content: <><Typography.Paragraph>{t(result.message)}</Typography.Paragraph><Typography.Text code>{result.temporaryPassword}</Typography.Text><CopyButton value={result.temporaryPassword} /></> }),
     onError: () => message.error(t("密码重置失败"))
   });
 
@@ -221,7 +210,7 @@ export function TenantOperationsAccountPage() {
       </Card>
     </QueryState>
 
-    <Drawer title={editing ? t("编辑运营账号") : t("新增运营账号")} open={drawerOpen} size="large" destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>{t("保存账号与空间权限")}</Button>}>
+    <Drawer title={editing ? t("编辑运营账号") : t("新增运营账号")} open={drawerOpen} size="large" destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<SaveButton label={t("保存账号与空间权限")} form={form} pending={save.isPending} onSave={(values) => { const { roleId, ...rest } = values; return save.mutateAsync({ ...rest, roleIds: roleId ? [roleId] : [] }); }} />}>
       <Form<TenantOperationsAccountForm> form={form} layout="vertical" onFinish={(values) => {
         const { roleId, ...rest } = values;
         save.mutate({ ...rest, roleIds: roleId ? [roleId] : [] });
@@ -312,12 +301,12 @@ export function TenantRolePermissionPage() {
           { title: t("默认数据范围"), dataIndex: "dataScope", width: 200, render: (value: SystemDataScope) => dataScopeTag(value, t) },
           { title: t("操作权限"), width: 130, render: (_, record) => record.fixedAllPermissions ? <Tag color="purple">{t("全部权限")}</Tag> : `${new Set([...record.permissions, ...record.buttonPermissions]).size} ${t("项")}` },
           { title: t("状态"), dataIndex: "isActive", width: 100, render: (value) => <Tag color={value ? "success" : "default"}>{t(value ? "启用" : "停用")}</Tag> },
-          { title: t("操作"), fixed: "right", width: 170, render: (_, record) => record.fixedAllPermissions ? <Tag>{t("系统预设")}</Tag> : <Space size={0}><Button type="link" icon={<EditOutlined />} onClick={() => openEditor(record)}>{t("编辑")}</Button><Button danger type="link" onClick={() => modal.confirm({ title: `${t("删除角色")} ${record.name}？`, content: t("已分配给账号或空间的角色不能删除。"), okButtonProps: { danger: true }, onOk: () => remove.mutateAsync(record.id) })}>{t("删除")}</Button></Space> }
+          { title: t("操作"), fixed: "right", width: 170, render: (_, record) => record.fixedAllPermissions ? <Tag>{t("系统预设")}</Tag> : <Space size={0}><Button type="link" icon={<EditOutlined />} onClick={() => openEditor(record)}>{t("编辑")}</Button><ConfirmAction label={t("删除")} prompt={<>{`${t("删除角色")} ${record.name}？`} {t("已分配给账号或空间的角色不能删除。")}</>} onConfirm={() => remove.mutateAsync(record.id)} /></Space> }
         ]} />
       </Card>
     </QueryState>
 
-    <Drawer title={editing ? t("编辑角色") : t("新增角色")} open={open} size="large" destroyOnHidden onClose={() => setOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>{t("保存角色")}</Button>}>
+    <Drawer title={editing ? t("编辑角色") : t("新增角色")} open={open} size="large" destroyOnHidden onClose={() => setOpen(false)} extra={<SaveButton label={t("保存角色")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync({ ...values, id: editing?.id, buttonPermissions: [] })} />}>
       <Form<SaveSystemRoleRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, id: editing?.id, buttonPermissions: [] })}>
         <Row gutter={16}>
           <Col span={12}><Form.Item name="name" label={t("角色名称")} rules={[{ required: true }]}><Input /></Form.Item></Col>

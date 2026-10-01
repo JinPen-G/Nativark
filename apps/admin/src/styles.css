@@ -22,9 +22,9 @@ html[data-theme-switching] *::after {
   transition: none !important;
   animation: none !important;
 }
-/* 主题揭示：View Transitions 默认会给新旧两帧各做一次交叉淡入，而我们要的是
-   「新帧被一张圆形遮罩揭开」。所以只关掉旧帧的默认动画——它留在下层原地不动，
-   新帧叠在上层，由切换时注入的 mask 动画负责揭开。
+/* 主题页面过渡：View Transitions 默认会给新旧两帧各做一次交叉淡入，而我们要的是
+   「新帧被横向 eclipse、纵向 rise 或旧圆形 reveal 揭开」。所以只关掉旧帧的默认动画——
+   它留在下层原地不动，新帧叠在上层，由切换时注入的策略动画负责揭开。
    注意 `*` 命中的是元素、不会命中 ::view-transition-* 这些伪元素，
    因此上面的过渡开关不会误伤揭示动画本身。 */
 ::view-transition-old(root) { animation: none; z-index: 1; mix-blend-mode: normal; }
@@ -246,18 +246,51 @@ button, input, textarea, select { font: inherit; }
   padding: 8px;
   border-top: 1px solid var(--rental-color-border-secondary);
 }
-/* 语言与主题共用左下角的第一行；通知仍独占下一行，避免在窄侧栏里挤压文案。 */
+/* 主题在上、语言在下，各占一行；每行左侧图标 + 文案，右侧分段开关。 */
 .sider-preferences {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+/* 偏好行与 .sider-link 同构（同样的行高、内边距与图标间距），但尾部放的是分段开关而非纯文案。 */
+.sider-pref-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 8px;
   min-width: 0;
 }
-.sider-preferences > .sider-link-static {
+.sider-pref-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--rental-color-text-secondary);
+}
+.sider-pref-label {
   flex: 1;
   min-width: 0;
+  color: var(--rental-color-text-secondary);
+  font-size: var(--rental-typography-body-size);
+  line-height: var(--rental-typography-body-line-height);
 }
-.sider-preferences .sider-link-static { padding-inline: 0; }
+/* 偏好行里的分段开关整体压低：轨道 padding 3px + 按钮 22px = 28px，比 36px 的行更透气。 */
+.sider-pref-row .appearance-toggle,
+.sider-pref-row .language-toggle { padding: 3px; }
+.sider-pref-row .appearance-toggle-thumb {
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+}
+html[data-appearance="dark"] .sider-pref-row .appearance-toggle-thumb { transform: translateX(26px); }
+.sider-pref-row .appearance-toggle-option {
+  width: 22px;
+  height: 22px;
+}
+.sider-pref-row .language-toggle button {
+  min-width: 24px;
+  height: 22px;
+}
 .language-toggle {
   display: inline-flex;
   flex: 0 0 auto;
@@ -377,14 +410,14 @@ button, input, textarea, select { font: inherit; }
 }
 .sider-drawer .sider-shell { background: var(--app-sider-bg, var(--rental-color-bg-layout)); }
 
-/* 内容区是独立的白色面板，与侧栏之间留出间隙，形成图里的双面板观感。 */
+/* 内容面板使用 UIArc 原版 surface，保留深浅色层级及现有双面板布局。 */
 .app-workspace {
   min-width: 0;
   margin: 6px 6px 6px 0;
   overflow: hidden;
   border: 1px solid var(--rental-color-border-secondary);
   border-radius: var(--rental-ui-radius-lg);
-  background: var(--rental-color-bg-container);
+  background: var(--surface);
 }
 .workspace-context {
   display: flex;
@@ -859,6 +892,7 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 
 .password-change-panel .ant-alert { margin: 20px 0; }
 
+/* 外层：原有的带留白/圆角/描边视口容器（login-stage 6px 内边距 + login-frame 14px 圆角），保持不变。 */
 .login-stage { min-height: 100vh; padding: 6px; background: var(--rental-color-fill-tertiary); }
 .login-frame {
   position: relative;
@@ -870,13 +904,118 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
   background: var(--rental-color-bg-layout);
   box-shadow: 0 2px 12px rgba(0, 0, 0, .1);
 }
-/* 外观开关浮在框的右上角：不再为它单独留一条横栏。 */
 .login-appearance { position: absolute; z-index: 1; top: 14px; right: 16px; }
-/* 品牌移进登录卡内部，作为标题上方的一行。 */
+.login-workspace {
+  display: grid;
+  min-height: 0;
+  overflow-y: auto;
+  place-items: safe center;
+  padding: 64px 32px 40px;
+  background: var(--rental-color-bg-layout);
+}
+
+.login-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  width: min(1080px, 100%);
+  overflow: hidden;
+  border: 1px solid var(--rental-color-border-secondary);
+  border-radius: 24px;
+  background: var(--rental-color-bg-container);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 12px 32px rgba(0, 0, 0, .08);
+}
+@media (min-width: 880px) {
+  .login-card {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr);
+    min-height: clamp(580px, 74vh, 680px);
+  }
+}
+.login-card-brand {
+  --login-brand-surface: #353535;
+  --login-brand-heading: #ffffff;
+  --login-brand-copy: #cccccc;
+  --login-brand-rule: #5c5c5c;
+  position: relative;
+  isolation: isolate;
+  display: none;
+  grid-template-rows: auto 1fr auto;
+  gap: 48px;
+  padding: 44px clamp(28px, 3.5vw, 48px) 36px;
+  color: var(--login-brand-heading);
+  background: var(--login-brand-surface);
+}
+@media (min-width: 880px) {
+  .login-card-brand { display: grid; }
+}
+.login-brand-background { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.login-brand-background img { width: 100%; height: 100%; object-fit: cover; }
+.login-brand-background::after { content: ""; position: absolute; inset: 0; background: rgba(0, 0, 0, .7); }
+.login-card-brand .login-brand { align-self: start; margin-bottom: 0; }
+.login-card-brand .login-brand img { width: 156px; height: 44px; max-height: none; object-position: left center; }
+.login-brand--platform img { filter: brightness(0) invert(1); }
+.login-card-brand .login-brand--tenant img {
+  height: 52px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #ffffff;
+  object-position: center;
+}
+.login-card-brand-copy { align-self: center; min-width: 0; padding: 12px 0; }
+.login-card-brand-title {
+  margin: 0 0 24px;
+  color: var(--login-brand-heading);
+  font-size: clamp(32px, 3.2vw, 44px);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -.025em;
+  overflow-wrap: anywhere;
+}
+.login-card-brand-title { white-space: pre-line; }
+.login-card-brand-tagline {
+  max-width: 34ch;
+  margin: 0;
+  color: var(--login-brand-copy);
+  font-size: 15px;
+  line-height: 1.9;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+.login-card-brand-footer { overflow-wrap: anywhere; white-space: pre-line; }
+.login-brand-capabilities {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+.login-brand-capabilities dt { margin-bottom: 8px; font-size: 15px; font-weight: 600; }
+.login-brand-capabilities dd {
+  margin: 0;
+  color: var(--login-brand-copy);
+  font-size: 12px;
+  line-height: 1.75;
+}
+.login-brand-note {
+  margin: 28px 0 0;
+  padding-top: 20px;
+  border-top: 1px solid var(--login-brand-rule);
+  color: var(--login-brand-copy);
+  font-size: 12px;
+  line-height: 1.75;
+}
+.login-card-form { min-width: 0; align-self: center; padding: 48px clamp(32px, 4.5vw, 64px); }
+@media (max-width: 879px) {
+  .login-card { max-width: 520px; }
+  .login-card-form { padding: 40px 28px; }
+}
+
 .login-brand { display: flex; align-items: center; margin-bottom: 20px; color: var(--rental-color-text-heading); }
 .login-brand img { width: 148px; height: auto; max-height: 48px; object-fit: contain; }
-.login-workspace { display: grid; min-height: 0; place-items: center; padding: 32px 24px; background: var(--rental-color-bg-layout); }
-.login-panel { width: min(520px, 100%); }
+/* 左栏可见时，右栏顶部的紧凑品牌行让位给左栏，避免同一屏两次出现 Logo。 */
+.login-brand--compact { display: flex; }
+@media (min-width: 880px) {
+  .login-brand--compact { display: none; }
+}
 .login-panel-heading h2 {
   margin: 0 0 4px !important;
   font-size: var(--rental-typography-login-title-size) !important;
@@ -884,16 +1023,29 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
   line-height: var(--rental-typography-login-title-line-height) !important;
 }
 .login-panel-heading p { margin-bottom: 24px !important; }
-.login-panel .ant-alert { margin-bottom: 24px; }
-.login-demo-hints { margin: 20px 0 0 !important; }
+.login-card-form .ant-alert { margin-bottom: 24px; }
+.login-error.ant-alert { margin-bottom: 16px; }
+.login-switch-tenant { margin-top: 12px !important; text-align: center; font-size: var(--rental-typography-meta-size); }
+.login-demo { margin-top: 20px; }
+.login-demo-toggle.ant-btn { padding-left: 0; font-size: var(--rental-typography-meta-size); }
+.login-demo-hints { margin: 12px 0 0 !important; }
 .login-demo-hints .ant-alert-description {
   font-size: var(--rental-typography-meta-size);
   line-height: var(--rental-typography-meta-line-height);
 }
 .login-demo-hints .ant-typography { margin-bottom: 8px; }
 .login-demo-accounts { display: flex; }
-.login-panel .ant-form-item { margin-bottom: 16px; }
-.login-panel .ant-btn-primary { margin-top: 8px; }
+.login-card-form .ant-form-item { margin-bottom: 16px; }
+.login-card-form .ant-btn-primary { margin-top: 8px; }
+.login-methods { margin-bottom: var(--space-6); }
+.login-submit { width: 100% !important; }
+.login-code-preview { display: grid; gap: var(--space-5); }
+.login-preview-links { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+.login-preview-target { color: var(--text-secondary); overflow-wrap: anywhere; margin: 0; }
+.login-preview-result { display: grid; gap: var(--space-3); }
+.login-provider-preview { display: grid; gap: var(--space-3); }
+.login-provider-preview > div:first-child { margin-bottom: 0; }
+.login-preview-result h3 { font-size: var(--rental-typography-section-title-size); font-weight: var(--rental-typography-section-title-weight); }
 .login-support {
   display: block;
   margin-top: 24px;
@@ -934,49 +1086,12 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
   .metric-grid { grid-template-columns: 1fr; }
   .login-workspace { padding: 16px; }
   .sider-drawer-trigger { top: 8px; left: 8px; }
+  /* 窄屏内层卡片贴边留白收窄、去描边/阴影，避免"外框里还套一层卡片框"的双重边界感。 */
+  .login-card { border: 0; box-shadow: none; border-radius: 0; }
+  .login-card-form { padding: 28px 20px; }
 }
 
 /* SPACE-05：经营空间切换器的下拉项样式在 .sider-workspace 一节，此处不再重复。 */
 
-/* ============================================================================
- * 平滑圆角（corner-shape: squircle）——渐进增强。
- *
- * 只改拐角"形状"（超椭圆），不改圆角"大小"（大小仍由三组 --rental-ui-radius-*
- * 与 antd token 决定）。支持的浏览器（Chrome/Edge 139+ 等）拐角更顺滑；不支持的
- * 浏览器整段规则被忽略，自然退回普通圆弧，无需任何回退代码。
- *
- * 选择器一律用 :where() 保持 0 优先级：apply 段在前、reset 段在后，
- * 于是同时命中两段的元素（如圆形图标按钮既是 .ant-btn 又是 .ant-btn-icon-only）
- * 按源码顺序由后面的 reset 收敛回圆弧，圆形/胶囊/开关/头像不会被 squircle 掰方。
- * ========================================================================== */
-@supports (corner-shape: squircle) {
-  /* 有限圆角的面与控件：容器 / 按钮 / 录入 / 浮层，全部走平滑超椭圆。 */
-  :where(
-    .ant-card, .ant-modal-content, .ant-drawer-content, .ant-table-container,
-    .ant-collapse, .ant-collapse-content, .ant-alert, .ant-popover-inner,
-    .ant-tooltip-inner, .ant-dropdown-menu, .ant-notification-notice,
-    .ant-message-notice-content, .ant-list, .ant-tag,
-    .ant-btn, .ant-btn-group, .ant-radio-button-wrapper, .ant-pagination-item,
-    .ant-segmented, .ant-segmented-item, .ant-segmented-thumb,
-    .ant-tabs-nav-list, .ant-tabs-tab, .ant-tabs-ink-bar,
-    .ant-menu-item, .ant-menu-submenu-title,
-    .ant-input, .ant-input-affix-wrapper, .ant-input-number,
-    .ant-input-number-affix-wrapper, .ant-select-selector, .ant-picker,
-    .ant-input-group-addon, .ant-input-number-group-addon, .ant-input-search-button,
-    .workspace-select, .account-card, .sider-link, .metric-card,
-    .password-change-panel, .password-change-icon, .login-frame,
-    .standalone-tabs > .ant-tabs-content-holder
-  ) {
-    corner-shape: squircle;
-  }
-  /* 保形例外：圆形与胶囊维持标准圆弧——squircle 会把它们掰成带尖角的方团。 */
-  :where(
-    .ant-btn-circle, .ant-btn-icon-only, .ant-avatar, .ant-avatar-image,
-    .ant-switch, .ant-switch-handle, .ant-badge-count, .ant-badge-dot,
-    .ant-scroll-number, .ant-radio-inner, .ant-slider-handle,
-    .ant-float-btn, .ant-back-top, .appearance-toggle, .appearance-toggle *
-  ) {
-    corner-shape: round;
-  }
-}
+/* 圆角形状固定为标准圆弧（border-radius 原生）——用户偏好干净大圆角，不用 corner-shape squircle 的外鼓感。 */
 

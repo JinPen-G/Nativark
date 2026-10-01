@@ -1,20 +1,11 @@
 import { useState } from "react";
 import { isAxiosError } from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Alert,
-  App,
-  Button,
-  Card,
-  Drawer,
-  Input,
-  InputNumber,
-  Select,
-  Space,
-  Table,
-  Tag,
-  Timeline,
-} from "antd";
+import { App, Card, InputNumber, Space, Tag, Timeline } from "antd";
+import { Alert, Table } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Select } from "@/components/ui";
+import { Button, Drawer } from "@/components/ui";
 import {
   RentalInventoryMode,
   rentalAllocationProgress,

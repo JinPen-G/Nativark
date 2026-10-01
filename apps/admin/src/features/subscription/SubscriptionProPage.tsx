@@ -1,5 +1,8 @@
 import { useState } from "react";
-import { Alert, Button, Card, Descriptions, Empty, Select, Space, Tag, Typography } from "antd";
+import { Card, Descriptions, Empty, Space, Tag, Typography } from "antd";
+import { Alert } from "@/components/ui";
+import { Button } from "@/components/ui";
+import { Select } from "@/components/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { SubscriptionPlan, SubscriptionRequestStatus, SubscriptionRequestType, type SubscriptionFeatureEntitlement } from "@rental-os/shared";

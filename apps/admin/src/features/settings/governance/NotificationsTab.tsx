@@ -5,22 +5,12 @@ import type {
   TenantRentalBusinessSettings,
 } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  App,
-  Button,
-  Card,
-  Col,
-  Drawer,
-  Form,
-  Input,
-  Modal,
-  Row,
-  Select,
-  Space,
-  Table,
-  Tag,
-  Typography,
-} from "antd";
+import { App, Card, Col, Modal, Row, Space, Tag, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Table } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Select } from "@/components/ui";
+import { Button, Drawer, SaveButton } from "@/components/ui";
 import { useState } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { notificationChannelLabels, notificationEventLabels } from "./ruleOptionLabels";
@@ -294,13 +284,7 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
         forceRender
         destroyOnHidden
         extra={
-          <Button
-            type="primary"
-            loading={saveTemplate.isPending}
-            onClick={() => templateForm.submit()}
-          >
-            保存新版本
-          </Button>
+          <SaveButton label="保存新版本" form={templateForm} pending={saveTemplate.isPending} onSave={(values) => saveTemplate.mutateAsync(values)} />
         }
       >
         <Form

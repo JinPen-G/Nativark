@@ -1,21 +1,12 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  Alert,
-  App,
-  Button,
-  Checkbox,
-  DatePicker,
-  Divider,
-  Drawer,
-  Form,
-  Input,
-  Select,
-  Space,
-  Table,
-  Tag,
-  Typography,
-} from "antd";
+import { App, Divider, Space, Tag, Typography } from "antd";
+import { Checkbox } from "@/components/ui";
+import { Form } from "@/components/ui";
+import { Alert, DatePicker, Table, TimeInput } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Select } from "@/components/ui";
+import { Button, Drawer } from "@/components/ui";
 import type { ColumnsType } from "antd/es/table";
 import type { Dayjs } from "dayjs";
 import {
@@ -383,7 +374,7 @@ export function CalendarRangeModal({
                 form.setFieldValue("range", [start, endOfYearIfDifferent(start, form.getFieldValue("range")?.[1])]);
               }
             }}
-            disabledDate={(current) => current.year() !== form.getFieldValue("range")?.[0]?.year() && Boolean(form.getFieldValue("range")?.[0])}
+            disabledDate={(current, info) => Boolean(info.from && current.year() !== info.from.year())}
           />
         </Form.Item>
         {mode === "override" && (
@@ -449,10 +440,10 @@ export function CalendarRangeModal({
             {selectedFields.hours && (
               <Space size={16} wrap>
                 <Form.Item name="hoursStart" label={t("营业开始")} rules={[{ required: selectedFields.hours }]}>
-                  <Input placeholder="09:00" />
+                  <TimeInput label={t("营业开始")} />
                 </Form.Item>
                 <Form.Item name="hoursEnd" label={t("营业结束")} rules={[{ required: selectedFields.hours }]}>
-                  <Input placeholder="18:00" />
+                  <TimeInput label={t("营业结束")} />
                 </Form.Item>
               </Space>
             )}

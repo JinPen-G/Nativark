@@ -1,7 +1,12 @@
 import { ApartmentOutlined, EditOutlined, KeyOutlined, PauseCircleOutlined, PlusOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import type { BusinessWorkspace, CreateBusinessWorkspaceRequest, RentalCategoryCode, TenantBootstrapRequest, TenantSummary, UpdateBusinessWorkspaceRequest, UpdateTenantStatusRequest } from "@rental-os/shared";
 import { RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, TenantStatus } from "@rental-os/shared";
-import { App, Button, Card, Descriptions, Drawer, Form, Input, Segmented, Select, Space, Table, Tag, Typography } from "antd";
+import { App, Card, Descriptions, Space, Tag, Typography } from "antd";
+import { Form } from "@/components/ui";
+import { Table } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Select } from "@/components/ui";
+import { Button, Drawer, Segmented } from "@/components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { api } from "@/api/platform";
@@ -205,6 +210,10 @@ export function TenantManagementPage() {
               { title: t("租户"), fixed: "left", width: 230, render: (_, row) => <><b>{row.tenantName}</b><br /><span className="muted">{row.tenantCode}</span></> },
               { title: t("经营空间"), width: 220, render: (_, row) => <Space size={[4, 4]} wrap><b>{row.workspaceCount ?? 0} {t("个")}</b>{row.workspaceCategoryCodes?.map((code) => <Tag key={code}>{t(categoryNames.get(code) ?? code)}</Tag>)}</Space> },
               { title: t("状态"), width: 100, dataIndex: "tenantStatus", render: (value: TenantStatus) => <Tag color={statusMeta[value].color}>{t(statusMeta[value].label)}</Tag> },
+              { title: t("专属登录链接"), width: 280, render: (_, row) => {
+                const url = new URL(`/login/${encodeURIComponent(row.tenantCode)}`, window.location.origin).href;
+                return <Typography.Text copyable={{ text: url }}><a href={url} target="_blank" rel="noopener noreferrer" title={url} style={{ display: "inline-block", maxWidth: 230, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "bottom" }}>{url}</a></Typography.Text>;
+              } },
               { title: t("组织"), width: 90, dataIndex: "organizationCount" },
               { title: t("账号"), width: 90, dataIndex: "userCount" },
               { title: t("订单"), width: 90, dataIndex: "orderCount" },

@@ -1,7 +1,8 @@
 import { formatRentalMoney } from "@rental-os/shared";
 import type { GrantRentalRewardRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, Form, Input, Select, Space, Table, Tag } from "antd";
+import { App, Card, Space, Tag } from "antd";
+import { Alert, Button, Form, Input, Select, Table } from "@/components/ui";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
 import { PageHeader } from "@/components/PageHeader";

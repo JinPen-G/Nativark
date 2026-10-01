@@ -84,6 +84,8 @@ import { ClientChannelProfileController } from "./modules/client/client-channel-
 import { ClientChannelProfileService } from "./modules/client/client-channel-profile.service";
 import { TenantAppearanceProfileController } from "./modules/client/tenant-appearance-profile.controller";
 import { TenantAppearanceProfileService } from "./modules/client/tenant-appearance-profile.service";
+import { AccountAppearanceController } from "./modules/client/account-appearance.controller";
+import { AccountAppearanceService } from "./modules/client/account-appearance.service";
 import { WebsiteChannelProfileController } from "./modules/client/website-channel-profile.controller";
 import { WebsiteChannelProfileService } from "./modules/client/website-channel-profile.service";
 import { WebsiteAssetService } from "./modules/client/website-asset.service";
@@ -128,6 +130,7 @@ import { DemoRequestService } from "./modules/demo-requests/demo-request.service
     MiniProgramChannelController,
     ClientChannelProfileController,
     TenantAppearanceProfileController,
+    AccountAppearanceController,
     WebsiteChannelProfileController,
     TenantSubscriptionController,
     PlatformSubscriptionController,
@@ -182,6 +185,7 @@ import { DemoRequestService } from "./modules/demo-requests/demo-request.service
     MiniProgramChannelService,
     ClientChannelProfileService,
     TenantAppearanceProfileService,
+    AccountAppearanceService,
     WebsiteChannelProfileService,
     WebsiteAssetService,
     SubscriptionService,

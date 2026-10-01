@@ -1,5 +1,6 @@
 import { CloseOutlined } from "@ant-design/icons";
-import { Button, Card, Space, Typography } from "antd";
+import { Card, Space, Typography } from "antd";
+import { Button } from "@/components/ui";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";

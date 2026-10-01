@@ -1,4 +1,8 @@
-import { App, Alert, Form, Input, InputNumber, Modal, Select, Switch } from "antd";
+import { App, InputNumber, Modal } from "antd";
+import { Form } from "@/components/ui";
+import { Alert } from "@/components/ui";
+import { Input, Switch } from "@/components/ui";
+import { Select } from "@/components/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { SubscriptionPlan, type SetStandardPriceRequest, type StandardPlanPricing } from "@rental-os/shared";
 import { useLocale } from "@/app/locale";

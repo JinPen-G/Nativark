@@ -9,6 +9,10 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     resolve: {
       alias: {
+        "@/registry": fileURLToPath(new URL("../../packages/ui-arc/vendor/registry", import.meta.url)),
+        "@/lib/motion-tokens": fileURLToPath(new URL("../../packages/ui-arc/vendor/lib/motion-tokens.ts", import.meta.url)),
+        "@/lib/media": fileURLToPath(new URL("../../packages/ui-arc/vendor/lib/media.ts", import.meta.url)),
+        "@/lib/use-copy-feedback": fileURLToPath(new URL("../../packages/ui-arc/vendor/lib/use-copy-feedback.ts", import.meta.url)),
         "@": fileURLToPath(new URL("./src", import.meta.url)),
         "@rental-os/shared": fileURLToPath(
           new URL("../../packages/shared/src/index.ts", import.meta.url)

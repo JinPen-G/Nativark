@@ -1,13 +1,23 @@
 import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { theme, type ThemeConfig } from "antd";
-import { ADMIN_FONT_FAMILY, ADMIN_TYPOGRAPHY, applyAdminTypographyTokens, resolveAdminPrimaryColor, resolveAdminRadii, type AdminRadiusGroups } from "@/app/designTokens";
+import { getArcPalette } from "./arcTokens";
+import { ADMIN_FONT_FAMILY, ADMIN_TYPOGRAPHY, applyAdminTypographyTokens, resolveAdminRadii, type AdminRadiusGroups } from "@/app/designTokens";
+import type { ThemeSwitchVariant } from "@/registry/components/theme-switch/theme-switch";
 
 export type AppearanceMode = "default" | "dark" | "compact";
+export type AppearanceTransition = Extract<ThemeSwitchVariant, "eclipse" | "rise" | "reveal"> | "legacy-reveal";
 
-/** 切换时的揭示圆心：传触发控件，圆从它中心扩散；缺省取视口中心。 */
+/**
+ * UIArc 原站的直边横向 reveal 扫屏。`rise`（上下）和旧的 `legacy-reveal`（圆形）仍完整保留，
+ * 只是不作为当前后台的默认动效；需要切换时由 AppearanceSwitcher 的 transition 指定。
+ */
+export const DEFAULT_APPEARANCE_TRANSITION: AppearanceTransition = "reveal";
+
+/** 切换来源；仅旧 legacy-reveal 需要用触发控件定位圆心。 */
 interface AppearanceOrigin {
   element?: HTMLElement | null;
+  transition?: AppearanceTransition;
 }
 
 interface AppearanceContextValue {
@@ -17,20 +27,6 @@ interface AppearanceContextValue {
 
 const STORAGE_KEY = "rental_admin_appearance";
 const AppearanceContext = createContext<AppearanceContextValue | null>(null);
-
-/**
- * 侧栏底色。浅色下比内容面板的白略沉——白色留给内容区，两者靠底色差与描边区分；
- * 深色下沿用外壳底色，与之前一致。
- *
- * 走 CSS 变量而不是 antd 的 `Layout.lightSiderBg`：常驻侧栏是 `Layout.Sider`，
- * 窄屏那份是 Drawer 里的普通 div，后者拿不到 Sider 的组件 token。
- * 一个变量同时管住两处，颜色仍然只写在这个文件里。
- */
-const SIDER_BG: Record<AppearanceMode, string> = {
-  default: "#f7f7f7",
-  compact: "#f7f7f7",
-  dark: "var(--rental-color-bg-layout)"
-};
 
 function readInitialMode(): AppearanceMode {
   const stored = window.localStorage.getItem(STORAGE_KEY);
@@ -50,7 +46,7 @@ function readInitialMode(): AppearanceMode {
 const THEME_SWITCH_MS = 120;
 
 /**
- * 圆形揭示（BoardUI 同款）。
+ * 旧圆形揭示（BoardUI 同款，保留但不默认启用）。
  *
  * 用 View Transitions 把新旧两帧各拍一张快照，再给新帧挂一张**软边圆形遮罩**，
  * 让它从触发控件的位置扩散到覆盖全屏，而不是整屏一起变色。
@@ -66,6 +62,78 @@ const THEME_REVEAL_MASK = `url("data:image/svg+xml,${encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><filter id="blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2" /></filter></defs><circle cx="50" cy="50" r="42" fill="white" filter="url(#blur)" /></svg>'
 )}")`;
 
+/**
+ * UIArc 原站页面 CSS：/_next/static/css/35c9d8b23d654900.css，2026-10-01 核对。
+ * reveal：inset(0 100% 0 0) → inset(0)，380ms；rise：inset(100% 0 0) → inset(0)，360ms。
+ * 两种主题均按同一路径揭示，缓动保持 cubic-bezier(.22,1,.36,1)。
+ * eclipse 是原站另外提供的居中椭圆，不作为默认策略。
+ *
+ * 旧圆形效果单独命名为 legacy-reveal，保留但不默认启用。
+ */
+function themeTransitionStyle(transition: AppearanceTransition, next: AppearanceMode, origin?: AppearanceOrigin) {
+  if (transition === "reveal") {
+    return `
+      ::view-transition-new(root) { animation: rental-theme-wipe 380ms cubic-bezier(.22,1,.36,1) both; }
+      @keyframes rental-theme-wipe {
+        from { clip-path: inset(0 100% 0 0); }
+        to { clip-path: inset(0); }
+      }
+    `;
+  }
+  if (transition === "eclipse") {
+    return `
+      ::view-transition-new(root) { animation: rental-theme-eclipse 430ms cubic-bezier(.22,1,.36,1) both; }
+      @keyframes rental-theme-eclipse {
+        from { clip-path: ellipse(0 110%); }
+        to { clip-path: ellipse(80% 110%); }
+      }
+    `;
+  }
+
+  if (transition === "rise") {
+    return `
+      ::view-transition-new(root) { animation: rental-theme-rise 360ms cubic-bezier(.22,1,.36,1) both; }
+      @keyframes rental-theme-rise {
+        from { clip-path: inset(100% 0 0); }
+        to { clip-path: inset(0); }
+      }
+    `;
+  }
+
+  // 旧圆形揭示保留为 legacy-reveal：从切换按钮中心扩散，未作为默认效果使用。
+  const rect = origin?.element?.getBoundingClientRect();
+  const centerX = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+  const centerY = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
+  const x = Math.min(Math.max(centerX, 0), window.innerWidth);
+  const y = Math.min(Math.max(centerY, 0), window.innerHeight);
+  const size = 2.5 * Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+  const offsetX = x - size / 2;
+  const offsetY = y - size / 2;
+  return `
+    ::view-transition-new(root) {
+      -webkit-mask-image: ${THEME_REVEAL_MASK};
+      mask-image: ${THEME_REVEAL_MASK};
+      -webkit-mask-repeat: no-repeat;
+      mask-repeat: no-repeat;
+      animation: rental-theme-reveal ${THEME_REVEAL_MS}ms ${THEME_REVEAL_EASING} both;
+    }
+    @keyframes rental-theme-reveal {
+      from {
+        -webkit-mask-position: ${x}px ${y}px;
+        mask-position: ${x}px ${y}px;
+        -webkit-mask-size: 0px 0px;
+        mask-size: 0px 0px;
+      }
+      to {
+        -webkit-mask-position: ${offsetX}px ${offsetY}px;
+        mask-position: ${offsetX}px ${offsetY}px;
+        -webkit-mask-size: ${size}px ${size}px;
+        mask-size: ${size}px ${size}px;
+      }
+    }
+  `;
+}
+
 export function AppearanceProvider({ children }: { children: ReactNode }) {
   const [mode, setModeState] = useState<AppearanceMode>(readInitialMode);
   const revealTimer = useRef<number>(0);
@@ -73,6 +141,7 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
 
   const setMode = useCallback((next: AppearanceMode, origin?: AppearanceOrigin) => {
     const root = document.documentElement;
+    const transitionKind = origin?.transition ?? DEFAULT_APPEARANCE_TRANSITION;
 
     /**
      * 无 View Transitions 或用户要求减少动效时，退回原来的即时切换。
@@ -87,52 +156,20 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // 一次只放一个揭示：动画期间重复点击直接丢弃，否则两张快照会互相打架。
+    // 一次只放一个页面过渡：动画期间重复点击直接丢弃，否则两张快照会互相打架。
     if (revealing.current) return;
     revealing.current = true;
 
-    // 圆心取触发控件中点并夹进视口；半径取圆心到视口最远角的距离。
-    const rect = origin?.element?.getBoundingClientRect();
-    const centerX = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
-    const centerY = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
-    const x = Math.min(Math.max(centerX, 0), window.innerWidth);
-    const y = Math.min(Math.max(centerY, 0), window.innerHeight);
-    const size = 2.5 * Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
-    const offsetX = x - size / 2;
-    const offsetY = y - size / 2;
-
     /**
-     * 揭示期间同样关掉全局过渡：否则变量落地那几帧里，有过渡的元素还在慢慢染色，
-     * 会被拍进"新帧"快照，跟圆形遮罩叠成两层动画。
+     * 页面过渡期间同样关掉全局过渡：否则变量落地那几帧里，有过渡的元素还在慢慢染色，
+     * 会被拍进"新帧"快照，和横扫/升起/圆形效果叠成两层动画。
      */
     root.dataset.themeSwitching = "";
     window.clearTimeout(revealTimer.current);
 
     const revealStyle = document.createElement("style");
     revealStyle.id = THEME_REVEAL_STYLE_ID;
-    revealStyle.textContent = `
-      ::view-transition-new(root) {
-        -webkit-mask-image: ${THEME_REVEAL_MASK};
-        mask-image: ${THEME_REVEAL_MASK};
-        -webkit-mask-repeat: no-repeat;
-        mask-repeat: no-repeat;
-        animation: rental-theme-reveal ${THEME_REVEAL_MS}ms ${THEME_REVEAL_EASING} both;
-      }
-      @keyframes rental-theme-reveal {
-        from {
-          -webkit-mask-position: ${x}px ${y}px;
-          mask-position: ${x}px ${y}px;
-          -webkit-mask-size: 0px 0px;
-          mask-size: 0px 0px;
-        }
-        to {
-          -webkit-mask-position: ${offsetX}px ${offsetY}px;
-          mask-position: ${offsetX}px ${offsetY}px;
-          -webkit-mask-size: ${size}px ${size}px;
-          mask-size: ${size}px ${size}px;
-        }
-      }
-    `;
+    revealStyle.textContent = themeTransitionStyle(transitionKind, next, origin);
     document.head.appendChild(revealStyle);
 
     /**
@@ -162,8 +199,10 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
    */
   useLayoutEffect(() => {
     document.documentElement.dataset.appearance = mode;
+    document.documentElement.dataset.theme = mode === "dark" ? "dark" : "light";
     document.documentElement.style.colorScheme = mode === "dark" ? "dark" : "light";
-    document.documentElement.style.setProperty("--app-sider-bg", SIDER_BG[mode]);
+    // 常驻菜单与移动抽屉共用 UIArc 原版背景；深浅色由 foundation token 控制。
+    document.documentElement.style.setProperty("--app-sider-bg", "var(--background)");
     window.localStorage.setItem(STORAGE_KEY, mode);
   }, [mode]);
 
@@ -184,7 +223,8 @@ export function useAppearance() {
 
 export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: string | null, radii?: AdminRadiusGroups | number | null): ThemeConfig {
   const light = mode !== "dark";
-  const primaryColor = resolveAdminPrimaryColor(tenantThemeColor);
+  const palette = getArcPalette(!light, tenantThemeColor);
+  const primaryColor = palette.primary;
   // 三组独立圆角：容器（卡片/弹窗/抽屉/表格）、按钮（含分段/页签/选中菜单）、输入（录入控件）。
   // 全局基准取按钮组，容器走 borderRadiusLG，输入走各录入组件 token；圆形/胶囊保形不受此影响。
   const { container, button, input } = resolveAdminRadii(radii);
@@ -212,10 +252,15 @@ export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: strin
       // Link、文字按钮和主按钮必须使用同一品牌色；hover/active 色阶交给
       // antd 根据这个主色生成，保留深浅主题下的可见反馈。
       colorLink: primaryColor,
-      colorSuccess: "#52c41a",
-      colorWarning: "#faad14",
-      colorError: "#ff4d4f",
-      ...(light ? { colorBgLayout: "#f5f8ff" } : {}),
+      colorSuccess: palette.success,
+      colorWarning: palette.warning,
+      colorError: palette.danger,
+      colorBgLayout: palette.background,
+      colorBgContainer: palette.surface,
+      colorBgElevated: palette.raised,
+      colorText: palette.foreground,
+      colorTextSecondary: palette.secondary,
+      colorBorder: palette.border,
       borderRadius: button,
       borderRadiusXS: radiusXs,
       borderRadiusSM: radiusSm,
@@ -228,9 +273,9 @@ export function createThemeConfig(mode: AppearanceMode, tenantThemeColor?: strin
     components: {
       Layout: {
         ...(light ? {
-          bodyBg: "#f5f8ff",
-          footerBg: "#f5f8ff",
-          // 侧栏底色由 SIDER_BG 经 --app-sider-bg 统一给出（常驻侧栏与窄屏抽屉共用一处），
+          bodyBg: palette.background,
+          footerBg: palette.background,
+          // 侧栏底色由 UIArc --background 经 --app-sider-bg 统一给出（常驻侧栏与窄屏抽屉共用一处），
           // 这里保留 transparent 只是兜住变量落地前的那一帧。顶栏已取消，headerBg/headerHeight 不再使用。
           siderBg: "transparent",
           triggerBg: "var(--rental-color-primary-bg)",

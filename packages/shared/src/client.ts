@@ -15,6 +15,7 @@ import type {
   RentalPricingUnit,
   RentalCategoryTerminology
 } from "./core";
+import type { AdminLoginBranding } from "./platform";
 import type { CompleteFileUploadRequest, FileDownloadUrlSummary, FileUploadSessionSummary } from "./infrastructure";
 
 export const CLIENT_API_VERSION = "v1" as const;
@@ -783,6 +784,7 @@ export interface ClientChannelBootstrapResponse {
   tenantCode: string;
   client: ClientChannelKind;
   merchant: { name: string; logoUrl?: string; faviconUrl?: string; servicePhone?: string; serviceHours?: string };
+  adminLogin?: AdminLoginBranding;
   services: Array<{ code: string; name: string; categoryCode: string; isDefault?: boolean; status: "open" | "paused" }>;
   /** 品类名/术语字典，来源同为服务端 RENTAL_CATEGORY_DEFINITIONS；客户端据此显示品类名，不再本地维护映射（与员工端同源）。 */
   categories: Array<{ code: string; name: string }>;

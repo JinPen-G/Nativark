@@ -1,7 +1,11 @@
 import { DownloadOutlined, PlusOutlined } from "@ant-design/icons";
 import type { CreateRentalCarrierShipmentEventRequest, RentalCarrierShipmentEvent, RentalOrder } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Card, DatePicker, Descriptions, Form, Input, Space, Tag, Timeline, Upload } from "antd";
+import { App, Card, Descriptions, Space, Tag, Timeline } from "antd";
+import { Form } from "@/components/ui";
+import { Alert, DatePicker, Upload } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Button } from "@/components/ui";
 import type { UploadFile, UploadProps } from "antd";
 import dayjs from "dayjs";
 import { useState } from "react";

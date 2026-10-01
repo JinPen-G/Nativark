@@ -21,8 +21,9 @@ const { OPENAPI_DOCUMENT } = require("../apps/api/src/contracts/openapi-document
 const status = (value) => (error) => error?.getStatus?.() === value;
 
 /** 构造一个只实现本用例所需方法的 prisma 替身。 */
-function buildPrisma({ tenant, profile, wechatChannel, workspaces = [], websiteProfile = null }) {
+function buildPrisma({ tenant, profile, appearance = null, wechatChannel, workspaces = [], websiteProfile = null }) {
   return {
+    tenantAppearanceProfile: { findUnique: async () => appearance },
     tenant: { findFirst: async () => tenant },
     clientChannelProfile: { findUnique: async () => profile },
     websiteChannelProfile: { findUnique: async () => websiteProfile },
@@ -202,11 +203,13 @@ test("public documents: 协议返回正文，帮助返回 FAQ，未提供时 404
 test("profile save: 就绪判定要求品牌/客服/两份协议正文/至少一个发布服务；发布服务必须属于本租户且启用", async () => {
   const calls = { upserts: [], deletes: 0, written: null };
   const tx = {
+    tenantAppearanceProfile: { upsert: async () => ({}) },
     clientChannelProfile: { update: async ({ data }) => { calls.written = data; return { id: "p1", ...data }; }, create: async ({ data }) => { calls.written = data; return { id: "p1", ...data }; } },
     clientChannelWorkspace: { deleteMany: async () => { calls.deletes += 1; }, upsert: async ({ create }) => { calls.upserts.push(create.workspaceId); } }
   };
   let stored = null;
   const prisma = {
+    tenantAppearanceProfile: { findUnique: async () => null },
     clientChannelProfile: { findUnique: async () => stored, update: tx.clientChannelProfile.update, create: tx.clientChannelProfile.create },
     businessWorkspace: { findMany: async ({ where }) => (where?.id?.in ? where.id.in.filter((id) => id === "w-cam").map((id) => ({ id, status: "ACTIVE" })) : [{ id: "w-cam", code: "camera", name: "摄影", categoryCode: "camera", status: "ACTIVE" }]) },
     clientChannelWorkspace: tx.clientChannelWorkspace,
@@ -255,6 +258,23 @@ test("OpenAPI: 渠道配置与公开文档契约齐全，凭证 schema 不再含
   assert.equal(schemas.SaveMiniProgramChannelRequest.properties.brandName, undefined, "凭证请求不应再含 brandName");
   assert.ok(schemas.ClientChannelProfileSummary.properties.readiness, "缺 profile readiness");
   assert.ok(schemas.ClientPublicDocumentResponse.properties.body, "缺文档 body");
+});
+
+test("bootstrap: admin login branding is web-only and independent of channel publication", async () => {
+  const adminLogin = { title: '租户标题', description: '租户说明', highlights: [{}, { title: '第二项' }], footerText: '底部文字' };
+  for (const profile of [null, { ...publishedProfile, publishedWorkspaces: [] }, publishedProfile]) {
+    const svc = bootstrapService({ tenant, profile, appearance: { adminLoginJson: adminLogin }, wechatChannel: null, websiteProfile: { enabled: false } });
+    const web = await svc.channelBootstrap('demo', 'web');
+    assert.deepEqual(web.adminLogin, adminLogin);
+    assert.equal(web.website, undefined);
+    for (const client of ['app', 'wechat_miniprogram']) assert.equal((await svc.channelBootstrap('demo', client)).adminLogin, undefined);
+  }
+  const empty = bootstrapService({ tenant, profile: null, wechatChannel: null });
+  assert.equal((await empty.channelBootstrap('demo', 'web')).adminLogin, undefined);
+  assert.equal(OPENAPI_DOCUMENT.components.schemas.AdminLoginBranding.additionalProperties, false);
+  assert.equal(OPENAPI_DOCUMENT.components.schemas.AdminLoginBranding.properties.highlights.maxItems, 3);
+  assert.ok(OPENAPI_DOCUMENT.components.schemas.SaveClientChannelProfileRequest.properties.adminLogin);
+  assert.ok(OPENAPI_DOCUMENT.components.schemas.ClientChannelBootstrapResponse.properties.adminLogin);
 });
 
 const websiteProfileRow = {

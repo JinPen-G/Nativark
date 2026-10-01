@@ -1,5 +1,6 @@
 import { themeBehavior } from "../../core/theme-behavior";
 import type { ClientHelpFaqItem, ClientPublicDocumentKind } from "@rental-os/shared";
+import { parseClientRichText, type ClientRichTextNode } from "@rental-os/shared";
 import { fetchPublicDocument } from "../../api/merchant";
 import { cachedMerchant, loadMerchant, type MerchantInfo } from "../../core/merchant";
 import { ROUTES, back, callPhone } from "../../core/ui";
@@ -24,6 +25,7 @@ interface LegalData {
   version: string;
   provided: boolean;
   body: string;
+  richNodes: ClientRichTextNode[] | null;
   url: string;
   helpIntro: string;
   faq: ClientHelpFaqItem[];
@@ -44,6 +46,7 @@ Page({
     version: "",
     provided: false,
     body: "",
+    richNodes: null,
     url: "",
     helpIntro: "",
     faq: [] as ClientHelpFaqItem[],
@@ -84,7 +87,7 @@ Page({
       if (kind === "help") {
         this.setData({ provided: true, helpIntro: doc.intro ?? "", faq: doc.faq ?? [], loading: false });
       } else {
-        this.setData({ provided: true, docName: doc.name || this.data.docName, version: doc.version ?? this.data.version, body: doc.body ?? "", url: doc.url ?? "", loading: false });
+        this.setData({ provided: true, docName: doc.name || this.data.docName, version: doc.version ?? this.data.version, body: doc.body ?? "", richNodes: parseClientRichText(doc.body ?? ""), url: doc.url ?? "", loading: false });
       }
     } catch {
       this.setData({ provided: false, loading: false });
