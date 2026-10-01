@@ -11,6 +11,7 @@ import { categoryDefinitionDifferences } from "./category-definition-diff";
 import { categoryAdoptionBusinessCompatibility } from "./category-adoption-business-compatibility";
 import { categoryAdoptionCapabilityReferences } from "./category-adoption-references";
 import { categoryAdoptionMarketingReferences } from "./category-adoption-marketing-references";
+import { categoryAdoptionPriceReferences } from "./category-adoption-price-references";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import type { RentalCapability, RentalCapabilityConfig, RentalCapabilityLifecycleStatus } from "@rental-os/shared";
@@ -90,7 +91,7 @@ export class CategoryAdoptionPreparationService {
         tx.workspaceCapabilityInstance.findMany({ where, select: { code: true, status: true, implementationVersion: true, config: true } }),
         tx.customerMembershipQualificationType.findMany({ where, select: { code: true, categoryCode: true, capabilityCode: true, status: true } }),
         tx.rentalPriceAdjustmentPlan.findMany({ where: { ...where, status: "pending" }, select: { id: true, status: true, finalRates: true } }),
-        tx.rentalPricingPlan.findMany({ where: { ...where, status: "enabled" }, select: { id: true, status: true, effectiveTo: true, fulfillmentFees: true } }),
+        tx.rentalPricingPlan.findMany({ where: { ...where, status: "enabled" }, select: { id: true, status: true, effectiveTo: true, fulfillmentFees: true, rates: true } }),
         tx.rentalValueAddedService.findMany({ where: { ...where, status: "enabled" }, select: { id: true, status: true, applicableFulfillmentModes: true, applicableItemGroupIds: true, applicableLocationIds: true, mandatoryRule: true } }),
         tx.rentalPricingGroup.findMany({ where, select: { id: true } }),
         tx.rentalDiscountPlan.findMany({ where: { ...where, status: "enabled" }, select: { id: true, status: true, effectiveTo: true, applicableItemGroupIds: true, applicablePricingGroupIds: true } }),
@@ -104,8 +105,9 @@ export class CategoryAdoptionPreparationService {
       const capabilityCompatibility = this.capabilities.adoptionCompatibility(context.definition, capabilityInstances.map((row) => ({ ...row, code: row.code as RentalCapability, status: row.status as RentalCapabilityLifecycleStatus, config: row.config as RentalCapabilityConfig })), this.hooks.registeredVersions());
       const references = categoryAdoptionCapabilityReferences(context.definition, capabilityInstances, context.records);
       const marketing = categoryAdoptionMarketingReferences({ groups: context.records.groups, pricingGroups, locations, discounts, coupons, services }, now);
-      const compatibility = { ...businessCompatibility, valid: businessCompatibility.valid && capabilityCompatibility.valid && references.valid && marketing.valid, blockers: [...businessCompatibility.blockers, ...capabilityCompatibility.blockers, ...references.blockers, ...marketing.blockers], checkedCapabilityCodes: capabilityCompatibility.checkedCapabilityCodes,
-        scope: `${businessCompatibility.scope}_capability_instances_references_marketing_entity_references` };
+      const priceReferences = categoryAdoptionPriceReferences({ groups: context.records.groups, pricingGroups, prices: prices.map((row) => ({ ...row, value: row.rates })), adjustments, plans: pricingPlans }, now);
+      const compatibility = { ...businessCompatibility, valid: businessCompatibility.valid && capabilityCompatibility.valid && references.valid && marketing.valid && priceReferences.valid, blockers: [...businessCompatibility.blockers, ...capabilityCompatibility.blockers, ...references.blockers, ...marketing.blockers, ...priceReferences.blockers], checkedCapabilityCodes: capabilityCompatibility.checkedCapabilityCodes,
+        scope: `${businessCompatibility.scope}_capability_instances_references_marketing_entity_references_price_target_references` };
       return { sourceVersionId: context.workspace.categoryVersionId, sourceRevision: context.workspace.categoryAdoptionRevision,
         targetVersionId: targetId, targetVersionLabel: context.target.versionLabel, targetDefinition: context.definition,
         differences: categoryDefinitionDifferences(context.sourceDefinition, context.definition),
