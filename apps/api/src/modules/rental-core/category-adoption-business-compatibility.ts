@@ -1,6 +1,7 @@
 import type { RentalCategoryDefinition, RentalPricingRate, RentalRuleConfig, TenantRentalBusinessSettings } from "@rental-os/shared";
 import { categoryPricingRuleError } from "./category-pricing-rule-compatibility";
 import { categoryAdoptionRuleParameterErrors } from "./category-adoption-rule-parameters";
+import { categoryAdoptionRuleStructureErrors } from "./category-adoption-rule-structure";
 
 export interface CategoryTimedConfiguration<T> { id: string; effectiveFrom: Date | null; sequence: number; value: T }
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -141,6 +142,7 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
     }
     const error = categoryPricingRuleError(model.pricingUnits, rule.value);
     if (error) add("rule", rule.id, error);
+    for (const structureError of categoryAdoptionRuleStructureErrors(rule.value)) add("rule", `${rule.id}:structure`, structureError);
     for (const parameterError of categoryAdoptionRuleParameterErrors(rule.value)) add("rule", `${rule.id}:parameters`, parameterError);
     const payment = rule.value.payment;
     if (!model.supportsPreauthorization && (payment.preauthorizationRequired || payment.depositMode === "preauthorization" || (rule.value.preauthorization && rule.value.preauthorization.mode !== "none"))) add("rule", rule.id, "当前或未来规则启用预授权，但目标品类不支持");

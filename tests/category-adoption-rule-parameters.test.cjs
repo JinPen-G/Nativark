@@ -30,8 +30,14 @@ assert.ok(check({ ...rule, cancellation: { weatherExceptionEnabled: true } }).le
 for (const noShow of [null, [], {}, { pickupGraceMinutes: 0, finalizationMinutes: 1, feeType: "percentage", feeValue: 101 }]) assert.ok(check({ ...rule, cancellation: { noShow } }).length);
 const target = RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "camera"), now = new Date("2026-10-01");
 const timed = (id, effectiveFrom, value) => ({ id, effectiveFrom: new Date(effectiveFrom), sequence: 0, value });
-const invalid = { ...rule, overdue: { feeMode: "hourly_to_daily", hourlyRatePercent: 0, dailyAfterHours: 8 } };
-const input = { settings: null, locations: [], prices: [], rules: [timed("historical", "2025-01-01", invalid), timed("current", "2026-01-01", rule)] };
+const executable = {
+  ...rule, payment: { ...rule.payment, timing: "order", unpaidHoldMinutes: 15 }, overdue: { ...rule.overdue, graceMinutes: 0, feeMultiplier: 0 },
+  fulfillment: { pickupInspectionRequired: false, returnInspectionRequired: false, evidenceRequired: false, allowDifferentReturnLocation: false },
+  cancellation: { freeBeforeHours: 24, lateFeeType: "none", lateFeeValue: 0, weatherExceptionEnabled: false },
+  qualification: { required: false, documentTypes: [], minimumValidityDays: 0 }, damage: { manualReviewRequired: true }
+};
+const invalid = { ...executable, overdue: { ...executable.overdue, feeMode: "hourly_to_daily", hourlyRatePercent: 0, dailyAfterHours: 8 } };
+const input = { settings: null, locations: [], prices: [], rules: [timed("historical", "2025-01-01", invalid), timed("current", "2026-01-01", executable)] };
 const before = structuredClone(input);
 assert.equal(preview(target, input, now).valid, true, "不追改历史参数");
 const candidate = preview(target, { ...input, rules: [...input.rules, timed("future", "2027-01-01", invalid)] }, now);

@@ -5,7 +5,13 @@ const { categoryAdoptionBusinessCompatibility: check, categoryCurrentAndFuture, 
 const target = structuredClone(RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "camera"));
 const now = new Date("2026-09-30T00:00:00Z");
 const timed = (id, date, value, sequence = 0) => ({ id, effectiveFrom: new Date(date), sequence, value });
-const rule = { pricing: {}, overdue: { feeMode: "none" }, payment: { preauthorizationRequired: false, depositMode: "none" } };
+const rule = {
+  pricing: {}, overdue: { feeMode: "none", graceMinutes: 0, feeMultiplier: 0 },
+  payment: { timing: "order", unpaidHoldMinutes: 15, preauthorizationRequired: false, depositMode: "none" },
+  fulfillment: { pickupInspectionRequired: false, returnInspectionRequired: false, evidenceRequired: false, allowDifferentReturnLocation: false },
+  cancellation: { freeBeforeHours: 24, lateFeeType: "none", lateFeeValue: 0, weatherExceptionEnabled: false },
+  qualification: { required: false, documentTypes: [], minimumValidityDays: 0 }, damage: { manualReviewRequired: true }
+};
 const input = { settings: null, locations: [], prices: [timed("historical", "2025-01-01", [{ unit: "shift" }]), timed("current", "2026-09-01", [{ unit: "hour" }])], rules: [] };
 assert.equal(check(target, input, now).valid, true, "历史价格保留原版本，不阻碍现有兼容组合");
 for (const settings of [false, [], {}, { pricing: {} }, { pricing: { enabledUnits: "hour" }, fulfillment: { enabledModes: [] }, calendar: {} }]) {
@@ -71,7 +77,7 @@ assert.deepEqual(categoryCurrentAndFuture(ties, now).map((row) => row.id), ["new
 assert.equal(categoryCurrentAndFuture(ties.map((row) => ({ ...row, sequence: 0 })), now).length, 2, "歧义规则不能静默忽略");
 assert.equal(check(target, { ...input, rules: [timed("tie-a", "2026-09-01", rule), timed("tie-b", "2026-09-01", rule)] }, now).blockers.length, 2, "即使配置都兼容，也必须拒绝歧义生效组合");
 target.businessModel.supportsQualificationReview = false;
-const safetyRule = { ...rule, qualification: { required: true }, membershipSecurityReduction: { preauthorization: { enabled: true, allowedRiskLevels: ["standard"], maxReductionPercent: 50, maxReductionAmount: 100 } }, fulfillment: { pickupInspectionRequired: true, returnInspectionRequired: true } };
+const safetyRule = { ...rule, qualification: { ...rule.qualification, required: true }, membershipSecurityReduction: { preauthorization: { enabled: true, allowedRiskLevels: ["standard"], maxReductionPercent: 50, maxReductionAmount: 100 } }, fulfillment: { ...rule.fulfillment, pickupInspectionRequired: true, returnInspectionRequired: true } };
 const field = { code: "condition", label: "成色", type: "boolean", required: true };
 const safetyInput = { ...input, rules: [timed("historical-safety", "2025-01-01", safetyRule), timed("current-safety", "2026-09-01", rule), timed("future-safety", "2027-01-01", safetyRule)], inspections: [{ id: "pickup", stage: "pickup", enabled: true, fields: [field] }, { id: "disabled-return", stage: "return", enabled: false, fields: [] }] };
 const safetyBefore = structuredClone(safetyInput);
@@ -93,7 +99,7 @@ for (const template of [{ id: "broken-optional", stage: "pickup", enabled: true,
   assert.deepEqual(optionalInput, before);
   assert.equal(check(target, { ...optionalInput, inspections: [{ ...template, enabled: false }] }, now).valid, true, "停用异常模板作为历史事实保留");
 }
-const qualificationRule = { ...rule, qualification: { required: true, documentTypes: ["license"] } };
+const qualificationRule = { ...rule, qualification: { ...rule.qualification, required: true, documentTypes: ["license"] } };
 const qualificationInput = { ...input, rules: [timed("qual", "2026-09-01", qualificationRule)], qualificationTypes: [{ code: "license", categoryCode: "CAMERA", capabilityCode: null, status: "enabled" }] };
 target.businessModel.supportsQualificationReview = true;
 assert.equal(check(target, qualificationInput, now).valid, true);

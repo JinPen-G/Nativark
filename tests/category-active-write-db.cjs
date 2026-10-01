@@ -409,7 +409,13 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     // Earlier repository probes intentionally used unreadable rule JSON. The
     // write phase now checks scoped business facts too; provide a compatible
     // executable projection rather than bypassing that check in the writer.
-    const compatibleRule = { pricing: {}, payment: { preauthorizationRequired: false, depositMode: "none" }, overdue: { feeMode: "none" } };
+    const compatibleRule = {
+      pricing: {}, payment: { timing: "order", unpaidHoldMinutes: 15, preauthorizationRequired: false, depositMode: "none" },
+      overdue: { feeMode: "none", graceMinutes: 0, feeMultiplier: 0 },
+      fulfillment: { pickupInspectionRequired: false, returnInspectionRequired: false, evidenceRequired: false, allowDifferentReturnLocation: false },
+      cancellation: { freeBeforeHours: 24, lateFeeType: "none", lateFeeValue: 0, weatherExceptionEnabled: false },
+      qualification: { required: false, documentTypes: [], minimumValidityDays: 0 }, damage: { manualReviewRequired: true }
+    };
     await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: compatibleRule } });
     const phaseBefore = await readEntityFacts();
     await assert.rejects(applyPhase(), /采用范围/);
@@ -451,10 +457,15 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal(await readEntityFacts(), phaseBefore, "经营组合拒绝回滚实体、唯一声明、能力配置及配置审计");
     assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation, "经营组合拒绝保留准备输入");
     await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: compatibleRule } });
-    await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: { ...compatibleRule, overdue: { feeMode: "hourly_to_daily", hourlyRatePercent: 0, dailyAfterHours: 8 } } } });
+    await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: { ...compatibleRule, overdue: { ...compatibleRule.overdue, feeMode: "hourly_to_daily", hourlyRatePercent: 0, dailyAfterHours: 8 } } } });
     await assert.rejects(applyPhase(), /逾时每小时日价比例/);
     assert.equal(await readEntityFacts(), phaseBefore, "逾时参数无效必须回滚候选资料、配置审计和版本绑定");
     assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation, "参数阻碍不得清空准备资料");
+    await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: compatibleRule } });
+    await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: { ...compatibleRule, tax: { rate: 2, inclusive: true } } } });
+    await assert.rejects(applyPhase(), /tax.rate/);
+    assert.equal(await readEntityFacts(), phaseBefore, "规则契约拒绝回滚资料、配置、绑定及审计");
+    assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation);
     await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: compatibleRule } });
     await assert.rejects(applyPhase({}, (tx) => new Proxy(tx, { get(client, key) {
       if (key === "rentalPriceVersion") return new Proxy(client[key], { get(model, method) {
