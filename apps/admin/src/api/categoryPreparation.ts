@@ -1,4 +1,4 @@
-import type { CategoryDefinitionDifference, CategoryEntityPreparationPatch, RentalCategoryDefinition, SaveCategoryPreparationRequest } from "@rental-os/shared";
+import type { CategoryDefinitionDifference, CategoryEntityPreparationPatch, RentalCategoryDefinition, SaveCategoryPreparationRequest, SubscriptionServiceStatus } from "@rental-os/shared";
 import { request } from "./http";
 export type CategoryPreparationOperation = "upgrade" | "restore";
 export interface CategoryPreparationEntity { id: string; updatedAt: string; attributes: Record<string, unknown>; name?: string; assetNo?: string; serialNo?: string | null }
@@ -8,6 +8,7 @@ export interface CategoryPreparationPreview {
   preparation: { revision: number; patches: { operation?: CategoryPreparationOperation; reason?: string; items?: CategoryEntityPreparationPatch[] } } | null;
   validation: { valid: boolean; errors: string[] }; stale: boolean; adoptionImplemented: boolean;
   businessCompatibility: { valid: boolean; complete: boolean; blockers: Array<{ domain: string; id: string; message: string }> };
+  commercialContext: { serviceStatus: SubscriptionServiceStatus; revision: number; newBusinessAllowed: boolean; entitlements: Array<{ code: string; categories: string[]; available: boolean }>; complete: false; scope: string };
   entities: { itemGroups: CategoryPreparationEntity[]; assets: CategoryPreparationEntity[] };
 }
 export const categoryPreparationApi = {

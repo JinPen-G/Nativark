@@ -1,22 +1,17 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import type { CategoryEntityPreparationPatch, RentalPricingRate, RentalRuleConfig, SaveCategoryPreparationRequest, SystemUserRow, TenantRentalBusinessSettings } from "@rental-os/shared";
+import type { CategoryEntityPreparationPatch, SaveCategoryPreparationRequest, SystemUserRow } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { getRequestDataScope, getRequestLocationIds, requireRequestWorkspaceId } from "../../common/request-identity";
 import { assertCategoryAdoptionAllowed, categoryScopeAllows } from "./category-governance-policy";
 import { resolveRentalCategoryVersionBody } from "./rental-category-resolver.service";
 import { prepareCategoryAdoptionRecords } from "./category-adoption-records";
 import { categoryDefinitionDifferences } from "./category-definition-diff";
-import { categoryAdoptionBusinessCompatibility } from "./category-adoption-business-compatibility";
-import { categoryAdoptionCapabilityReferences } from "./category-adoption-references";
-import { categoryAdoptionMarketingReferences } from "./category-adoption-marketing-references";
-import { categoryAdoptionPriceReferences } from "./category-adoption-price-references";
-import { categoryAdoptionServiceCapacity } from "./category-adoption-service-capacity";
-import { categoryAdoptionProductGraph } from "./category-adoption-product-graph";
+import { readCategoryAdoptionCompatibility } from "./category-adoption-compatibility-reader";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
-import type { RentalCapability, RentalCapabilityConfig, RentalCapabilityLifecycleStatus } from "@rental-os/shared";
+import { SubscriptionService } from "../subscription/subscription.service";
 
 export const CATEGORY_ADOPTION_MANAGE = "rental-os:category:adopt";
 export function assertCategoryPreparationPermission(user: SystemUserRow) {
@@ -25,7 +20,7 @@ export function assertCategoryPreparationPermission(user: SystemUserRow) {
 }
 @Injectable()
 export class CategoryAdoptionPreparationService {
-  constructor(private readonly prisma: PrismaService, private readonly capabilities: WorkspaceCapabilityService, private readonly hooks: CapabilityHookRuntime) {}
+  constructor(private readonly prisma: PrismaService, private readonly capabilities: WorkspaceCapabilityService, private readonly hooks: CapabilityHookRuntime, private readonly subscriptions: SubscriptionService) {}
   async candidates(user: SystemUserRow, operation: string) {
     assertCategoryPreparationPermission(user);
     if (operation !== "upgrade" && operation !== "restore") throw new BadRequestException("版本操作只能是升级或恢复");
@@ -83,42 +78,18 @@ export class CategoryAdoptionPreparationService {
         prepareCategoryAdoptionRecords(context.definition, context.records.groups, context.records.assets, patches);
         validation = { valid: true, errors: [] };
       } catch (error) { validation = { valid: false, errors: [error instanceof Error ? error.message : "预备资料校验失败"] }; }
-      const where = { tenantId: user.tenantId, workspaceId: context.workspaceId };
-      const [settings, locations, prices, rules, inspections, capabilityInstances, qualificationTypes, adjustments, pricingPlans, services, pricingGroups, discounts, coupons, capacities, capacityServices] = await Promise.all([
-        tx.rentalTenantBusinessSettings.findFirst({ where }),
-        tx.rentalFulfillmentLocation.findMany({ where, select: { id: true, type: true, status: true } }),
-        tx.rentalPriceVersion.findMany({ where, select: { id: true, effectiveFrom: true, sequence: true, rates: true } }),
-        tx.rentalRuleVersion.findMany({ where: { ...where, status: { in: ["published", "pending", "superseded"] }, voidedAt: null }, select: { id: true, effectiveFrom: true, config: true } }),
-        tx.rentalInspectionTemplate.findMany({ where, select: { id: true, stage: true, enabled: true, fields: true } }),
-        tx.workspaceCapabilityInstance.findMany({ where, select: { code: true, status: true, implementationVersion: true, config: true } }),
-        tx.customerMembershipQualificationType.findMany({ where, select: { code: true, categoryCode: true, capabilityCode: true, status: true } }),
-        tx.rentalPriceAdjustmentPlan.findMany({ where: { ...where, status: "pending" }, select: { id: true, status: true, finalRates: true } }),
-        tx.rentalPricingPlan.findMany({ where: { ...where, status: "enabled" }, select: { id: true, status: true, effectiveTo: true, fulfillmentFees: true, rates: true } }),
-        tx.rentalValueAddedService.findMany({ where: { ...where, status: "enabled" }, select: { id: true, status: true, applicableFulfillmentModes: true, applicableItemGroupIds: true, applicableLocationIds: true, mandatoryRule: true } }),
-        tx.rentalPricingGroup.findMany({ where, select: { id: true, status: true, defaultPricingUnit: true, members: { select: { itemGroupId: true } } } }),
-        tx.rentalDiscountPlan.findMany({ where: { ...where, status: "enabled" }, select: { id: true, status: true, effectiveTo: true, applicableItemGroupIds: true, applicablePricingGroupIds: true } }),
-        tx.rentalCouponTemplate.findMany({ where: { ...where, status: { in: ["active", "scheduled"] } }, select: { id: true, status: true, applicableItemGroupIds: true } }),
-        tx.rentalServiceCapacity.findMany({ where: { ...where, status: "enabled", windowEnd: { gt: now } }, select: { id: true, serviceId: true, locationId: true, status: true, windowEnd: true } }),
-        tx.rentalValueAddedService.findMany({ where, select: { id: true, status: true, requiresCapacity: true } })
-      ]);
-      const businessCompatibility = categoryAdoptionBusinessCompatibility(context.definition, {
-        settings: settings ? settings.settings as unknown as TenantRentalBusinessSettings : null, locations, inspections, qualificationTypes, adjustments, pricingPlans, services,
-        prices: prices.map((row) => ({ ...row, value: row.rates as unknown as RentalPricingRate[] })),
-        rules: rules.map((row) => ({ ...row, sequence: 0, value: row.config as unknown as RentalRuleConfig }))
-      }, now);
-      const capabilityCompatibility = this.capabilities.adoptionCompatibility(context.definition, capabilityInstances.map((row) => ({ ...row, code: row.code as RentalCapability, status: row.status as RentalCapabilityLifecycleStatus, config: row.config as RentalCapabilityConfig })), this.hooks.registeredVersions());
-      const references = categoryAdoptionCapabilityReferences(context.definition, capabilityInstances, context.records);
-      const marketing = categoryAdoptionMarketingReferences({ groups: context.records.groups, pricingGroups, locations, discounts, coupons, services }, now);
-      const priceReferences = categoryAdoptionPriceReferences({ groups: context.records.groups, pricingGroups, prices: prices.map((row) => ({ ...row, value: row.rates })), adjustments, plans: pricingPlans }, now);
-      const capacityCompatibility = categoryAdoptionServiceCapacity(context.definition, { services: capacityServices, locations, capacities }, now);
-      const productGraph = categoryAdoptionProductGraph(context.definition, { groups: context.records.groups, assets: context.records.assets, locations, pricingGroups });
-      const compatibility = { ...businessCompatibility, valid: businessCompatibility.valid && capabilityCompatibility.valid && references.valid && marketing.valid && priceReferences.valid && capacityCompatibility.valid && productGraph.valid, blockers: [...businessCompatibility.blockers, ...capabilityCompatibility.blockers, ...references.blockers, ...marketing.blockers, ...priceReferences.blockers, ...capacityCompatibility.blockers, ...productGraph.blockers], checkedCapabilityCodes: capabilityCompatibility.checkedCapabilityCodes,
-        scope: `${businessCompatibility.scope}_capability_instances_references_marketing_entity_references_price_target_references_service_capacity_locations_product_graph` };
+      const compatibility = await readCategoryAdoptionCompatibility(tx, user.tenantId, context.workspaceId, context.definition, context.records, this.capabilities, this.hooks, now);
+      const commercialContext = await this.subscriptions.readCategoryCommercialContext(user.tenantId, tx, now);
+      const businessCompatibility = {
+        ...compatibility, valid: compatibility.valid && commercialContext.newBusinessAllowed,
+        blockers: [...compatibility.blockers, ...(!commercialContext.newBusinessAllowed ? [{ domain: "commercial", id: "subscription_term", message: "当前订阅已到期，采用新版本前请办理续期；资料准备与既有订单善后不会被自动修改" }] : [])],
+        scope: `${compatibility.scope}_subscription_term_snapshot`
+      };
       return { sourceVersionId: context.workspace.categoryVersionId, sourceRevision: context.workspace.categoryAdoptionRevision,
         targetVersionId: targetId, targetVersionLabel: context.target.versionLabel, targetDefinition: context.definition,
         differences: categoryDefinitionDifferences(context.sourceDefinition, context.definition),
         preparation: context.preparation ? { id: context.preparation.id, revision: context.preparation.revision, sourceRevision: context.preparation.sourceRevision, patches: context.preparation.patches } : null,
-        validation, validationScope: "entity_attributes_inventory_uniqueness", businessCompatibility: compatibility, stale, previewOnly: true, adoptionImplemented: false,
+        validation, validationScope: "entity_attributes_inventory_uniqueness", businessCompatibility, commercialContext, stale, previewOnly: true, adoptionImplemented: false,
         entities: { itemGroups: context.records.groups.map((row) => ({ id: row.id, name: row.name, updatedAt: row.updatedAt.toISOString(), attributes: Object.fromEntries(Object.entries(row.attributes).filter(([key]) => key !== "__itemGroupMedia")) })),
           assets: context.records.assets.map((row) => ({ id: row.id, assetNo: row.assetNo, updatedAt: row.updatedAt.toISOString(), serialNo: row.serialNo, attributes: row.attributes })) } };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });

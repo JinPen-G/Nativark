@@ -68,6 +68,33 @@ function fixture(initial = subscription()) {
   return { state, client, service: new SubscriptionService(client), queries };
 }
 const historical = { source: "historical_register", reason: "约定服务登记" };
+test("品类商业快照只使用调用者事务、最小披露并区分生效/撤销授权", async () => {
+  const { service, state, client } = fixture();
+  const feature = (code, releaseStatus = "RELEASED") => ({ code, name: code, module: "core", categories: ["camera"], defaultOwnership: "PRO", currentOwnership: "PRO", releaseStatus, externalFeeNote: "内部费用", valueText: "说明" });
+  state.features.push(feature("public"), feature("pilot", "PILOT"), feature("future", "PILOT"), feature("revoked", "PILOT"));
+  state.grants.push({ tenantId: "t1", featureCode: "pilot", effectiveAt: NOW, revokedAt: null }, { tenantId: "t1", featureCode: "future", effectiveAt: new Date(NOW.getTime() + 1), revokedAt: null }, { tenantId: "t1", featureCode: "revoked", effectiveAt: NOW, revokedAt: NOW }, { tenantId: "t2", featureCode: "future", effectiveAt: NOW, revokedAt: null });
+  const before = clone(state);
+  service.prisma = new Proxy({}, { get() { throw new Error("事务外读取或嵌套事务"); } });
+  const result = await service.readCategoryCommercialContext("t1", client, NOW);
+  assert.deepEqual(Object.keys(result).sort(), ["complete", "entitlements", "newBusinessAllowed", "revision", "scope", "serviceStatus"]);
+  assert.equal(result.complete, false); assert.equal(result.newBusinessAllowed, true);
+  assert.deepEqual(result.entitlements.map((r) => [r.code, r.available]), [["public", true], ["pilot", true], ["future", false], ["revoked", false]]);
+  assert.deepEqual(Object.keys(result.entitlements[0]).sort(), ["available", "categories", "code"]);
+  assert.doesNotMatch(JSON.stringify(result), /内部费用|currentAmount|valueText/);
+  assert.deepEqual(state, before);
+});
+
+test("品类商业快照按截止边界拒绝、只读投影接续段、不擅改未配置策略", async () => {
+  const { service, state, client } = fixture(subscription({ endAt: NOW }));
+  assert.equal((await service.readCategoryCommercialContext("t1", client, NOW)).newBusinessAllowed, false);
+  state.segments.push(segment({ startAt: NOW, endAt: new Date("2028-01-01") }));
+  const before = clone(state);
+  const resumed = await service.readCategoryCommercialContext("t1", client, NOW);
+  assert.equal(resumed.newBusinessAllowed, true); assert.equal(resumed.revision, 2);
+  assert.deepEqual(state, before, "不物化排期、不递增数据库修订");
+  const unconfigured = await service.readCategoryCommercialContext("t2", client, NOW);
+  assert.equal(unconfigured.serviceStatus, "unconfigured"); assert.equal(unconfigured.newBusinessAllowed, true);
+});
 function clock(t, now = NOW) { t.mock.timers.enable({ apis: ["Date"], now }); }
 
 test("等待锁跨过授权生效时点后必须拒绝旧修订", async (t) => {

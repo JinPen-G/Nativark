@@ -137,6 +137,27 @@ export class SubscriptionService {
     });
   }
 
+  /** Minimal read-only snapshot inside the caller's transaction. No nested
+   * transaction, scheduled-term activation writes, prices or internal notes.
+   * Final adoption still needs tenant/catalog locking and explicit capability
+   * to commercial-feature mappings; this snapshot is not an authorization. */
+  async readCategoryCommercialContext(tenantId: string, tx: Prisma.TransactionClient, now: Date) {
+    const [state, catalog, grants] = await Promise.all([
+      this.readState(tx, tenantId, now),
+      tx.subscriptionFeatureCatalog.findMany({ orderBy: [{ module: "asc" }, { name: "asc" }] }),
+      tx.tenantFeatureGrant.findMany({ where: { tenantId, revokedAt: null, effectiveAt: { lte: now } } })
+    ]);
+    const serviceStatus = this.deriveStatus(state.current, now);
+    return {
+      serviceStatus, revision: state.current?.revision ?? 0,
+      // Same existing new-business term boundary as assertTenantWithinTerm.
+      newBusinessAllowed: serviceStatus !== SubscriptionServiceStatus.Expired,
+      entitlements: this.buildEntitlements(catalog, state.current, new Set(grants.map((row) => row.featureCode)), now)
+        .map((row) => ({ code: row.code, categories: row.categories, available: row.available })),
+      complete: false as const, scope: "current_subscription_term_and_feature_snapshot_without_capability_mapping"
+    };
+  }
+
   async getStaffContext(tenantId: string): Promise<StaffSubscriptionContext> {
     return this.prisma.$transaction(async (tx) => {
       const now = new Date();

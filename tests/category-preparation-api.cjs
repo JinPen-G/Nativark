@@ -56,15 +56,30 @@ module.exports = async ({ request, platformToken, tenantToken, mysqlQuery }) => 
   const after = mysqlQuery("SELECT id, CAST(attributes AS CHAR), updatedAt FROM rental_item_groups WHERE tenantId='tenant_001' ORDER BY id; SELECT id, CAST(attributes AS CHAR), updatedAt FROM rental_assets WHERE tenantId='tenant_001' ORDER BY id; SELECT id, categoryVersionId, categoryAdoptionRevision FROM business_workspaces WHERE tenantId='tenant_001' ORDER BY id;");
   assert.equal(after, before, "准备不得修改任何活动资料或绑定");
   assert.equal((await call("GET", path)).validation.valid, true);
-  await call("PUT", path, { ...body, expectedPreparationRevision: 1, patches: [{ ...patches[0], entityId: "cross-space-id" }, ...patches.slice(1)] }, tenantToken, 400);
-  assert.equal((await call("GET", path)).preparation.revision, 1, "失败不得推进准备修订");
+  assert.equal(mysqlQuery("SELECT COUNT(*) FROM tenant_subscriptions WHERE tenantId='tenant_001';").trim().split(/\r?\n/u).at(-1), "0", "本专项订阅夹具不得覆盖已有订阅");
+  mysqlQuery("INSERT INTO tenant_subscriptions (id,tenantId,revision,plan,source,startAt,endAt,createdAt,updatedAt) VALUES ('e2e_category_term','tenant_001',1,'standard','historical_register','2020-01-01','2020-01-02',NOW(),NOW());");
+  const expired = await call("GET", path);
+  assert.equal(expired.commercialContext.serviceStatus, "expired");
+  assert.equal(expired.commercialContext.complete, false);
+  assert.equal(expired.businessCompatibility.valid, false);
+  assert.ok(expired.businessCompatibility.blockers.some((row) => row.domain === "commercial" && row.id === "subscription_term"));
+  assert.doesNotMatch(JSON.stringify(expired.commercialContext), /currentAmount|internalNote|sourceReason/);
+  const termFacts = mysqlQuery("SELECT revision,startAt,endAt,updatedAt FROM tenant_subscriptions WHERE id='e2e_category_term';");
+  const repaired = await call("PUT", path, { ...body, expectedPreparationRevision: 1 });
+  assert.equal(repaired.revision, 2, "到期资料准备仍可保存，不等于允许正式采用");
+  assert.equal(mysqlQuery("SELECT revision,startAt,endAt,updatedAt FROM tenant_subscriptions WHERE id='e2e_category_term';"), termFacts, "预览与准备不修改商业期限");
+  mysqlQuery("UPDATE tenant_subscriptions SET endAt='2126-01-01' WHERE id='e2e_category_term';");
+  assert.ok(!(await call("GET", path)).businessCompatibility.blockers.some((row) => row.domain === "commercial"), "恢复有效期限后不误报到期");
+  mysqlQuery("DELETE FROM tenant_subscriptions WHERE id='e2e_category_term';");
+  await call("PUT", path, { ...body, expectedPreparationRevision: 2, patches: [{ ...patches[0], entityId: "cross-space-id" }, ...patches.slice(1)] }, tenantToken, 400);
+  assert.equal((await call("GET", path)).preparation.revision, 2, "失败不得推进准备修订");
   const id = patches[0].entityId;
   assert.match(id, /^[A-Za-z0-9_-]+$/u);
   mysqlQuery(`UPDATE rental_item_groups SET updatedAt=DATE_ADD(updatedAt, INTERVAL 1 SECOND) WHERE id='${id}';`);
   const stale = await call("GET", path);
   assert.equal(stale.validation.valid, false);
   assert.match(stale.validation.errors[0], /来源实体已修改/);
-  await call("PUT", path, { ...body, expectedPreparationRevision: 1 }, tenantToken, 409);
+  await call("PUT", path, { ...body, expectedPreparationRevision: 2 }, tenantToken, 409);
   // A scheduled price must be checked even when today's compatible version wins.
   // Core GET does not initialize business price versions. Create explicit
   // isolated fixtures instead of assuming a read has pricing side effects.
