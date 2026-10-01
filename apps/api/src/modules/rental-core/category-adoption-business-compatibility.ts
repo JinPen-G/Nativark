@@ -45,8 +45,9 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
   qualificationTypes?: Array<{ code: string; categoryCode: string; capabilityCode: string | null; status: string }>;
   adjustments?: Array<{ id: string; status: string; finalRates: unknown }>;
   pricingPlans?: Array<{ id: string; status: string; effectiveTo: Date | null; fulfillmentFees: unknown }>;
+  services?: Array<{ id: string; status: string; applicableFulfillmentModes: unknown; mandatoryRule: unknown }>;
 }, now: Date) {
-  const blockers: Array<{ domain: "settings" | "location" | "price" | "rule" | "inspection"; id: string; message: string }> = [];
+  const blockers: Array<{ domain: "settings" | "location" | "price" | "rule" | "inspection" | "service"; id: string; message: string }> = [];
   const add = (domain: typeof blockers[number]["domain"], id: string, message: string) => blockers.push({ domain, id, message });
   const model = target.businessModel;
   if (input.settings) {
@@ -75,6 +76,20 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
     if (plan.status !== "enabled" || (plan.effectiveTo && plan.effectiveTo.getTime() <= now.getTime()) || plan.fulfillmentFees === null) continue;
     if (!Array.isArray(plan.fulfillmentFees) || plan.fulfillmentFees.some((fee) => !fee || typeof fee !== "object" || !model.fulfillmentModes.includes(fee.mode))) {
       add("price", `${plan.id}:fulfillmentFees`, "启用价格计划的履约收费方式不兼容目标品类，请通过定价配置调整");
+    }
+  }
+  const compatibleServiceModes = (value: unknown) => value === null || value === undefined
+    || (Array.isArray(value) && value.every((mode) => typeof mode === "string" && model.fulfillmentModes.includes(mode as typeof model.fulfillmentModes[number])));
+  for (const service of input.services ?? []) {
+    if (service.status !== "enabled") continue;
+    if (!compatibleServiceModes(service.applicableFulfillmentModes)) {
+      add("service", `${service.id}:fulfillmentModes`, "启用增值服务的适用履约方式不兼容目标品类，请通过服务配置调整");
+    }
+    if (service.mandatoryRule !== null && service.mandatoryRule !== undefined) {
+      if (typeof service.mandatoryRule !== "object" || Array.isArray(service.mandatoryRule)
+        || !compatibleServiceModes((service.mandatoryRule as Record<string, unknown>).fulfillmentModes)) {
+        add("service", `${service.id}:mandatoryRule`, "启用增值服务的强制触发履约条件不兼容目标品类，请通过服务配置调整");
+      }
     }
   }
   const rules = categoryCurrentAndFuture(input.rules, now);
@@ -111,5 +126,5 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
     }
   }
   return { valid: blockers.length === 0, blockers, checkedPriceVersionIds: prices.map((row) => row.id), checkedRuleVersionIds: rules.map((row) => row.id),
-    scope: "settings_locations_price_units_pending_adjustments_fulfillment_fees_rule_pricing_preauthorization_qualification_inspection_structure", complete: false as const };
+    scope: "settings_locations_price_units_pending_adjustments_fulfillment_fees_service_fulfillment_modes_rule_pricing_preauthorization_qualification_inspection_structure", complete: false as const };
 }

@@ -100,5 +100,14 @@ module.exports = async ({ request, platformToken, tenantToken, mysqlQuery }) => 
   assert.ok(pendingPricePreview.businessCompatibility.blockers.some((row) => row.domain === "price" && row.id.endsWith(":fulfillmentFees")), "启用价格计划的履约费用不应漏查");
   mysqlQuery("UPDATE rental_price_adjustment_plans SET status='cancelled' WHERE id='e2e_category_pending_price';");
   assert.ok(!(await call("GET", path)).businessCompatibility.blockers.some((row) => row.id === "e2e_category_pending_price"), "已取消计划保留历史但不参与后续执行检查");
-  console.log("category-preparation-api: 会话空间与独立权限、候选资料隔离、修订冲突、经营依赖及待生效调价/履约收费检查通过");
+  mysqlQuery(`INSERT INTO rental_value_added_services (id,tenantId,workspaceId,categoryCode,code,name,serviceType,billingUnit,price,termsVersion,terms,applicableItemGroupIds,applicableFulfillmentModes,mandatoryRule,status,version,createdAt,updatedAt) SELECT 'e2e_category_incompatible_service',tenantId,id,categoryCode,'ADOPT-SERVICE','采用服务专项','other','per_order',10,'1.0','专项条款',JSON_ARRAY(),JSON_ARRAY('onsite_delivery'),JSON_OBJECT('fulfillmentModes',JSON_ARRAY('onsite_delivery')),'enabled','1.0',NOW(),NOW() FROM business_workspaces WHERE id=(SELECT workspaceId FROM rental_category_adoption_preparations WHERE targetVersionId='${draft.id}' AND tenantId='tenant_001');`);
+  assert.equal(mysqlQuery("SELECT COUNT(*) FROM rental_value_added_services WHERE id='e2e_category_incompatible_service';").trim().split(/\r?\n/u).at(-1), "1", "服务兼容夹具必须确实落库");
+  const serviceFacts = mysqlQuery("SELECT CAST(applicableFulfillmentModes AS CHAR),CAST(mandatoryRule AS CHAR),version FROM rental_value_added_services WHERE id='e2e_category_incompatible_service';");
+  const servicePreview = await call("GET", path);
+  assert.ok(servicePreview.businessCompatibility.blockers.some((row) => row.domain === "service" && row.id === "e2e_category_incompatible_service:fulfillmentModes"), "启用服务的适用履约方式必须检查");
+  assert.ok(servicePreview.businessCompatibility.blockers.some((row) => row.domain === "service" && row.id === "e2e_category_incompatible_service:mandatoryRule"), "强制服务触发的履约方式必须检查");
+  mysqlQuery("UPDATE rental_value_added_services SET status='disabled' WHERE id='e2e_category_incompatible_service';");
+  assert.ok(!(await call("GET", path)).businessCompatibility.blockers.some((row) => row.id.startsWith("e2e_category_incompatible_service:")), "停用服务保留资料但不阻挡目标版本预览");
+  assert.equal(mysqlQuery("SELECT CAST(applicableFulfillmentModes AS CHAR),CAST(mandatoryRule AS CHAR),version FROM rental_value_added_services WHERE id='e2e_category_incompatible_service';"), serviceFacts, "采用预览不得改写服务配置及版本");
+  console.log("category-preparation-api: 会话空间与独立权限、候选资料隔离、修订冲突、经营依赖及待生效调价/履约收费/增值服务检查通过");
 };

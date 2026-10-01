@@ -79,7 +79,7 @@ export class CategoryAdoptionPreparationService {
         validation = { valid: true, errors: [] };
       } catch (error) { validation = { valid: false, errors: [error instanceof Error ? error.message : "预备资料校验失败"] }; }
       const where = { tenantId: user.tenantId, workspaceId: context.workspaceId };
-      const [settings, locations, prices, rules, inspections, capabilityInstances, qualificationTypes, adjustments, pricingPlans] = await Promise.all([
+      const [settings, locations, prices, rules, inspections, capabilityInstances, qualificationTypes, adjustments, pricingPlans, services] = await Promise.all([
         tx.rentalTenantBusinessSettings.findFirst({ where }),
         tx.rentalFulfillmentLocation.findMany({ where, select: { id: true, type: true, status: true } }),
         tx.rentalPriceVersion.findMany({ where, select: { id: true, effectiveFrom: true, sequence: true, rates: true } }),
@@ -88,10 +88,11 @@ export class CategoryAdoptionPreparationService {
         tx.workspaceCapabilityInstance.findMany({ where, select: { code: true, status: true, implementationVersion: true, config: true } }),
         tx.customerMembershipQualificationType.findMany({ where, select: { code: true, categoryCode: true, capabilityCode: true, status: true } }),
         tx.rentalPriceAdjustmentPlan.findMany({ where: { ...where, status: "pending" }, select: { id: true, status: true, finalRates: true } }),
-        tx.rentalPricingPlan.findMany({ where: { ...where, status: "enabled" }, select: { id: true, status: true, effectiveTo: true, fulfillmentFees: true } })
+        tx.rentalPricingPlan.findMany({ where: { ...where, status: "enabled" }, select: { id: true, status: true, effectiveTo: true, fulfillmentFees: true } }),
+        tx.rentalValueAddedService.findMany({ where: { ...where, status: "enabled" }, select: { id: true, status: true, applicableFulfillmentModes: true, mandatoryRule: true } })
       ]);
       const businessCompatibility = categoryAdoptionBusinessCompatibility(context.definition, {
-        settings: settings ? settings.settings as unknown as TenantRentalBusinessSettings : null, locations, inspections, qualificationTypes, adjustments, pricingPlans,
+        settings: settings ? settings.settings as unknown as TenantRentalBusinessSettings : null, locations, inspections, qualificationTypes, adjustments, pricingPlans, services,
         prices: prices.map((row) => ({ ...row, value: row.rates as unknown as RentalPricingRate[] })),
         rules: rules.map((row) => ({ ...row, sequence: 0, value: row.config as unknown as RentalRuleConfig }))
       }, new Date());

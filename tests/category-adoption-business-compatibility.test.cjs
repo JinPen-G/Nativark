@@ -20,6 +20,21 @@ for (const over of [{ status: "disabled" }, { effectiveTo: new Date("2025-01-01"
 const feeBefore = structuredClone(feePlan);
 check(target, { ...input, pricingPlans: [feePlan] }, now);
 assert.deepEqual(feePlan, feeBefore, "兼容检查不替换费用定义");
+const service = { id: "service", status: "enabled", applicableFulfillmentModes: ["onsite_delivery"], mandatoryRule: { fulfillmentModes: ["onsite_delivery"] } };
+const serviceBefore = structuredClone(service);
+assert.deepEqual(check(target, { ...input, services: [service] }, now).blockers.map((row) => row.id), ["service:fulfillmentModes", "service:mandatoryRule"]);
+assert.equal(check(target, { ...input, services: [{ ...service, status: "disabled" }] }, now).valid, true);
+for (const value of [null, undefined, [], ["store_pickup_return"]]) {
+  assert.equal(check(target, { ...input, services: [{ ...service, applicableFulfillmentModes: value, mandatoryRule: { fulfillmentModes: value } }] }, now).valid, true);
+}
+for (const value of [{}, "store_pickup_return", [null], ["unknown"]]) {
+  assert.equal(check(target, { ...input, services: [{ ...service, applicableFulfillmentModes: value, mandatoryRule: null }] }, now).valid, false);
+}
+for (const value of [[], "invalid", { fulfillmentModes: {} }, { fulfillmentModes: ["unknown"] }]) {
+  assert.equal(check(target, { ...input, services: [{ ...service, applicableFulfillmentModes: [], mandatoryRule: value }] }, now).valid, false);
+}
+check(target, { ...input, services: [service] }, now);
+assert.deepEqual(service, serviceBefore, "采用预览不得替换服务条件或历史权益");
 assert.deepEqual(check(target, future, now).blockers.map((row) => row.id), ["future"], "未来价格不能被当前兼容价格掩盖");
 assert.equal(check(target, { ...input, locations: [{ id: "retired", type: "project_site", status: "disabled" }] }, now).valid, true);
 assert.equal(check(target, { ...input, locations: [{ id: "active", type: "project_site", status: "enabled" }] }, now).valid, false);
