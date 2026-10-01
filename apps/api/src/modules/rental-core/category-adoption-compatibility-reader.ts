@@ -28,7 +28,7 @@ export async function readCategoryAdoptionCompatibility(
     tx.rentalFulfillmentLocation.findMany({ where, select: { id: true, type: true, status: true } }),
     tx.rentalPriceVersion.findMany({ where, select: { id: true, effectiveFrom: true, sequence: true, rates: true } }),
     tx.rentalRuleVersion.findMany({ where: { ...where, status: { in: ["published", "pending", "superseded"] }, voidedAt: null }, select: { id: true, effectiveFrom: true, config: true } }),
-    tx.rentalInspectionTemplate.findMany({ where, select: { id: true, stage: true, enabled: true, fields: true } }),
+    tx.rentalInspectionTemplate.findMany({ where, select: { id: true, categoryCode: true, stage: true, enabled: true, fields: true } }),
     tx.workspaceCapabilityInstance.findMany({ where, select: { code: true, status: true, implementationVersion: true, config: true } }),
     tx.customerMembershipQualificationType.findMany({ where, select: { code: true, categoryCode: true, capabilityCode: true, status: true } }),
     tx.rentalPriceAdjustmentPlan.findMany({ where: { ...where, status: "pending" }, select: { id: true, status: true, finalRates: true } }),

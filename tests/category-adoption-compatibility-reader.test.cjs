@@ -40,6 +40,7 @@ const capabilities = { adoptionCompatibility(definition, instances, versions) {
   assert.equal(calls.length, 15);
   assert.deepEqual({ data, records, target }, before);
   assert.deepEqual(calls.find((row) => row.model === "rentalServiceCapacity").query.where.windowEnd, { gt: now });
+  assert.equal(calls.find((row) => row.model === "rentalInspectionTemplate").query.select.categoryCode, true, "启用模板归属必须进入事务投影");
   data.rentalPricingGroup[0].members = [{ itemGroupId: "foreign" }];
   data.rentalPriceVersion.push({ id: "future", effectiveFrom: new Date("2126-01-01"), sequence: 1, rates: [{ itemGroupId: "foreign", unit: "shift" }] });
   const invalid = await read(tx, "t", "w", target, records, capabilities, { registeredVersions: () => ["test"] }, now);

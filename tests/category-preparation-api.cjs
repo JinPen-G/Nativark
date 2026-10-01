@@ -179,5 +179,13 @@ module.exports = async ({ request, platformToken, tenantToken, mysqlQuery }) => 
   assert.ok((await call("GET", path)).businessCompatibility.blockers.some((row) => row.domain === "rule" && row.id === "e2e_category_future_safety" && row.message.includes("结构")), "非文本费率模式不能触发隐式转换或500");
   mysqlQuery(`INSERT INTO rental_price_versions (id,tenantId,workspaceId,sequence,effectiveFrom,rates,createdAt) SELECT 'e2e_graph_empty_price',tenantId,workspaceId,1000003,'2127-01-01',JSON_ARRAY(),NOW() FROM rental_category_adoption_preparations WHERE targetVersionId='${draft.id}' AND tenantId='tenant_001';`);
   assert.ok(!(await call("GET", path)).businessCompatibility.blockers.some((row) => row.domain === "price_reference" && row.id === "e2e_graph_empty_price"), "最后计划到期后的空价格时间轴不应误报损坏对象引用");
+  mysqlQuery(`UPDATE rental_rule_versions SET config=JSON_OBJECT('payment',JSON_OBJECT(),'overdue',JSON_OBJECT('feeMode','none'),'fulfillment',JSON_OBJECT('pickupInspectionRequired',false,'returnInspectionRequired',false)) WHERE id='e2e_category_future_safety'; INSERT INTO rental_inspection_templates (id,tenantId,workspaceId,categoryCode,code,name,stage,version,fields,enabled,createdAt,updatedAt) SELECT 'e2e_category_return_template',tenantId,id,categoryCode,'ADOPT-BROKEN-TEMPLATE','可选检查异常夹具','return','1.0',JSON_OBJECT('broken',true),true,NOW(),NOW() FROM business_workspaces WHERE id=(SELECT workspaceId FROM rental_category_adoption_preparations WHERE targetVersionId='${draft.id}' AND tenantId='tenant_001');`);
+  const brokenTemplates = await call("GET", path);
+  assert.ok(brokenTemplates.businessCompatibility.blockers.some((row) => row.domain === "inspection" && row.id === "e2e_category_return_template"), "即使新规则不强制检查，启用的畸形模板也会进入报价快照，不能漏查");
+  assert.equal(mysqlQuery("SELECT JSON_TYPE(fields) FROM rental_inspection_templates WHERE id='e2e_category_return_template';").trim().split(/\r?\n/u).at(-1), "OBJECT", "预览不覆盖模板正文");
+  mysqlQuery("UPDATE rental_inspection_templates SET fields=JSON_ARRAY(),categoryCode='VEHICLE' WHERE id='e2e_category_return_template';");
+  assert.ok((await call("GET", path)).businessCompatibility.blockers.some((row) => row.domain === "inspection" && row.id === "e2e_category_return_template"), "同一空间中残留其他品类模板也会让真实报价拒绝，采用预检须同步拒绝");
+  mysqlQuery("UPDATE rental_inspection_templates SET enabled=false WHERE id='e2e_category_return_template';");
+  assert.ok(!(await call("GET", path)).businessCompatibility.blockers.some((row) => row.domain === "inspection" && row.id === "e2e_category_return_template"), "停用异常模板不阻碍新组合、不影响旧单检查快照");
   console.log("category-preparation-api: 经营兼容、容量、真实外空间关联、异常结构及空价格时间轴保留检查通过");
 };

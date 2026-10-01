@@ -20,8 +20,8 @@ function readableRule(value: unknown): value is RentalRuleConfig {
 }
 
 /** Check executable tenant templates, not the platform's replacement defaults. */
-export function categoryAdoptionInspectionFieldsValid(value: unknown): boolean {
-  if (!Array.isArray(value) || value.length === 0) return false;
+export function categoryAdoptionInspectionFieldsValid(value: unknown, allowEmpty = false): boolean {
+  if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) return false;
   const codes = new Set<string>();
   for (const field of value) {
     if (!field || typeof field !== "object" || Array.isArray(field)) return false;
@@ -57,7 +57,7 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
   locations: Array<{ id: string; type: string; status: string }>;
   prices: CategoryTimedConfiguration<RentalPricingRate[]>[];
   rules: CategoryTimedConfiguration<RentalRuleConfig>[];
-  inspections?: Array<{ id: string; stage: string; enabled: boolean; fields: unknown }>;
+  inspections?: Array<{ id: string; categoryCode?: string; stage: string; enabled: boolean; fields: unknown }>;
   qualificationTypes?: Array<{ code: string; categoryCode: string; capabilityCode: string | null; status: string }>;
   adjustments?: Array<{ id: string; status: string; finalRates: unknown }>;
   pricingPlans?: Array<{ id: string; status: string; effectiveTo: Date | null; fulfillmentFees: unknown; rates: unknown }>;
@@ -79,6 +79,14 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
   }
   for (const location of input.locations) {
     if (location.status === "enabled" && !model.locationTypes.includes(location.type as typeof model.locationTypes[number])) add("location", location.id, "启用地点类型不在目标品类范围，请先处理地点");
+  }
+  // Quotes snapshot every enabled template, even when the rule does not make
+  // inspection mandatory. A different valid template cannot hide a broken one.
+  // Empty optional templates remain legal; mandatory stages still need fields.
+  for (const template of input.inspections ?? []) {
+    if (template.enabled && ((template.categoryCode !== undefined && template.categoryCode.toLowerCase() !== target.code) || !["pickup", "return"].includes(template.stage) || !categoryAdoptionInspectionFieldsValid(template.fields, true))) {
+      add("inspection", template.id, "启用检查模板的品类、阶段或字段结构不可执行，请在检查配置中修复或停用；不会改写旧单快照");
+    }
   }
   const prices = categoryCurrentAndFuture(input.prices, now);
   for (const price of prices) {

@@ -77,13 +77,22 @@ const safetyInput = { ...input, rules: [timed("historical-safety", "2025-01-01",
 const safetyBefore = structuredClone(safetyInput);
 const safetyResult = check(target, safetyInput, now);
 assert.deepEqual(safetyResult.blockers.map((row) => row.id), ["future-safety", "future-safety", "future-safety:return"], "未来资质、会员预授权减免及停用归还模板不能被遗漏；历史规则不影响新业务");
-assert.equal(check(target, { ...safetyInput, inspections: [{ id: "broken", stage: "pickup", enabled: true, fields: {} }] }, now).blockers.filter((row) => row.domain === "inspection").length, 2, "错误结构不能冒充可读取模板");
+assert.equal(check(target, { ...safetyInput, inspections: [{ id: "broken", stage: "pickup", enabled: true, fields: {} }] }, now).blockers.filter((row) => row.domain === "inspection").length, 3, "错误启用模板本身及两个强制阶段均须报告");
 assert.deepEqual(safetyInput, safetyBefore, "不以新版默认项覆盖租户模板、旧规则或资金配置");
 assert.equal(inspectionValid([]), false, "空模板不能满足强制检查");
 assert.equal(inspectionValid([field]), true);
 for (const invalid of [[field, field], [{ ...field, code: "__proto__" }], [{ ...field, required: "true" }], [{ ...field, usageMetric: true }], [{ ...field, type: "select", options: [] }], [{ ...field, type: "unsupported" }]]) assert.equal(inspectionValid(invalid), false);
 assert.equal(inspectionValid([{ ...field, type: "number", usageMetric: true }]), true);
 assert.equal(inspectionValid([{ ...field, type: "select", options: ["ok", "bad"] }]), true);
+assert.equal(inspectionValid([], true), true, "非强制模板允许空字段，但不能满足强制检查");
+assert.equal(check(target, { ...input, inspections: [{ id: "empty-optional", categoryCode: "CAMERA", stage: "pickup", enabled: true, fields: [] }] }, now).valid, true, "同品类可选空模板不能误报不可采用");
+for (const template of [{ id: "broken-optional", stage: "pickup", enabled: true, fields: {} }, { id: "wrong-category", categoryCode: "VEHICLE", stage: "pickup", enabled: true, fields: [field] }, { id: "bad-stage", stage: "unknown", enabled: true, fields: [field] }, { id: "bad-options", stage: "return", enabled: true, fields: [{ ...field, type: "select", options: [] }] }]) {
+  const optionalInput = { ...input, inspections: [template, { id: "valid", stage: "pickup", enabled: true, fields: [field] }] };
+  const before = structuredClone(optionalInput);
+  assert.deepEqual(check(target, optionalInput, now).blockers.filter((row) => row.domain === "inspection").map((row) => row.id), [template.id], "无强制规则或另一有效模板不能掩盖异常启用模板");
+  assert.deepEqual(optionalInput, before);
+  assert.equal(check(target, { ...optionalInput, inspections: [{ ...template, enabled: false }] }, now).valid, true, "停用异常模板作为历史事实保留");
+}
 const qualificationRule = { ...rule, qualification: { required: true, documentTypes: ["license"] } };
 const qualificationInput = { ...input, rules: [timed("qual", "2026-09-01", qualificationRule)], qualificationTypes: [{ code: "license", categoryCode: "CAMERA", capabilityCode: null, status: "enabled" }] };
 target.businessModel.supportsQualificationReview = true;
