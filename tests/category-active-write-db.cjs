@@ -10,11 +10,13 @@ const { RentalBusinessConfigRepository } = require("../apps/api/dist/modules/ren
 const { RentalBusinessFactRepository } = require("../apps/api/dist/modules/rental-core/rental-business-fact.repository.js");
 const { runWithRequestIdentity } = require("../apps/api/dist/common/request-identity.js");
 const { validateActiveCategoryWrite } = require("../apps/api/dist/modules/rental-core/category-active-write.js");
+const { writePreparedCategoryEntities } = require("../apps/api/dist/modules/rental-core/category-adoption-entity-writer.js");
 if (!/^rental_os_e2e_/u.test(new URL(process.env.DATABASE_URL).pathname.slice(1))) throw new Error("仅允许专用 E2E 库");
 const db = new PrismaClient();
 const fixture = `catwrite_${randomUUID()}`;
 const workspaceId = fixture;
 const versionId = `${fixture}_v2`;
+const writerTargetId = `${fixture}_entity_v3`;
 const repo = new RentalCoreConfigRepository(db);
 const capabilities = new WorkspaceCapabilityRepository(db);
 const business = new RentalBusinessConfigRepository(db);
@@ -248,11 +250,70 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal(await db.rentalBusinessCalendar.count({ where: { workspaceId, status: "published" } }), 1);
     await assert.rejects(context(() => business.upsertCalendar({ ...nextCalendar, revision: 3 }, 2, [{ ...calendarAudit, year: 2031 }])), /本次写入/);
     assert.equal(await db.rentalCalendarOverrideAuditEntry.count({ where: { workspaceId } }), 1);
-    console.log("category-active-write-db: 型号/设置/地点/能力绑定保护、日历竞争与双行发布回滚、审计原子性及唯一声明/媒体边界通过");
+    // Internal entity phase: no public adopt endpoint or complete compatibility claim.
+    const targetDefinition = structuredClone(definition);
+    targetDefinition.businessModel.assetFields = [
+      ...targetDefinition.businessModel.assetFields.map((field) => ({ ...field, unique: false })),
+      { code: "adoptionProof", scope: "item_group", label: "型号采用资料", type: "string", required: true, unique: true },
+      { code: "adoptionProof", scope: "asset", label: "资产采用资料", type: "string", required: true, unique: true }
+    ];
+    await db.rentalCategoryVersion.create({ data: { id: writerTargetId, categoryCode: "CAMERA", versionLabel: writerTargetId, sourceKind: "test", status: "published", structureVersion: 1, definition: targetDefinition } });
+    const readEntityFacts = async () => JSON.stringify(await Promise.all([
+      db.rentalItemGroup.findMany({ where: { workspaceId }, orderBy: { id: "asc" } }),
+      db.rentalAsset.findMany({ where: { workspaceId }, orderBy: { id: "asc" } }),
+      db.rentalAttributeUniqueValue.findMany({ where: { workspaceId }, orderBy: { id: "asc" } }),
+      db.businessWorkspace.findUniqueOrThrow({ where: { id: workspaceId } }),
+      db.rentalCategoryAdoptionAudit.findMany({ where: { workspaceId }, orderBy: { id: "asc" } })
+    ]));
+    const entityGroups = await db.rentalItemGroup.findMany({ where: { workspaceId }, orderBy: { id: "asc" } });
+    const entityAssets = await db.rentalAsset.findMany({ where: { workspaceId }, orderBy: { id: "asc" } });
+    const entityPatches = [
+      ...entityGroups.map((row, i) => ({ entityType: "item_group", entityId: row.id, expectedUpdatedAt: row.updatedAt.toISOString(), values: { adoptionProof: `proof-${i}` } })),
+      ...entityAssets.map((row, i) => ({ entityType: "asset", entityId: row.id, expectedUpdatedAt: row.updatedAt.toISOString(), values: { adoptionProof: `proof-${i}` } }))
+    ];
+    const entityBefore = await readEntityFacts();
+    const writeEntities = (tx, patches = entityPatches) => writePreparedCategoryEntities(tx, "tenant_001", workspaceId, currentBinding, targetDefinition, patches);
+    const rc = { isolationLevel: "ReadCommitted" };
+    await assert.rejects(db.$transaction((tx) => writePreparedCategoryEntities(tx, "tenant_001", workspaceId, oldBinding, targetDefinition, entityPatches), rc), /版本已变化/);
+    await assert.rejects(db.$transaction((tx) => writeEntities(tx, entityPatches.map((patch) => ({ ...patch, values: { adoptionProof: "duplicate" } }))), rc), /已存在/);
+    let entityClaimWrites = 0;
+    await assert.rejects(db.$transaction((tx) => writeEntities(new Proxy(tx, { get(client, key) {
+      if (key === "rentalAttributeUniqueValue") return new Proxy(client[key], { get(model, method) {
+        if (method === "create") return (args) => { if (++entityClaimWrites === 2) throw new Error("entity-claim-failure"); return model.create(args); };
+        return Reflect.get(model, method);
+      } });
+      return Reflect.get(client, key);
+    } })), rc), /entity-claim-failure/);
+    assert.equal(entityClaimWrites, 2, "失败应发生在删除旧声明并写入第一条新声明之后");
+    assert.equal(await readEntityFacts(), entityBefore, "实体补丁、旧声明、绑定和审计须随外层事务失败全部保持");
+    // A newly created record must participate even if absent from saved patches.
+    const newGroup = { ...entityGroups[0], id: `${fixture}_after_preparation`, code: "AFTER", attributes: { identity: "new-record" } };
+    await db.rentalItemGroup.create({ data: newGroup });
+    await assert.rejects(db.$transaction((tx) => writeEntities(tx), rc), /不能为空/);
+    await db.rentalItemGroup.delete({ where: { id: newGroup.id } });
+    await db.rentalItemGroup.update({ where: { id: entityGroups[0].id }, data: { updatedAt: new Date(entityGroups[0].updatedAt.getTime() + 1000) } });
+    await assert.rejects(db.$transaction((tx) => writeEntities(tx), rc), /来源实体已修改/);
+    const freshPatches = entityPatches.map((patch) => patch.entityId === entityGroups[0].id ? { ...patch, expectedUpdatedAt: new Date(entityGroups[0].updatedAt.getTime() + 1000).toISOString() } : patch);
+    const result = await db.$transaction(async (tx) => {
+      const applied = await writeEntities(tx, freshPatches);
+      await tx.businessWorkspace.update({ where: { id: workspaceId }, data: { categoryVersionId: writerTargetId, categoryAdoptionRevision: currentBinding.adoptionRevision + 1 } });
+      await tx.rentalCategoryAdoptionAudit.create({ data: { tenantId: "tenant_001", workspaceId, fromVersionId: currentBinding.categoryVersionId, toVersionId: writerTargetId, fromRevision: currentBinding.adoptionRevision, toRevision: currentBinding.adoptionRevision + 1, action: "upgrade", actorId: "entity-phase-fixture", reason: "内部实体组件真库验证，不代表完整采用接口" } });
+      return applied;
+    }, rc);
+    assert.equal(result.itemGroupClaimCount, entityGroups.length);
+    assert.equal(result.assetClaimCount, entityAssets.length);
+    const finalClaims = await db.rentalAttributeUniqueValue.findMany({ where: { workspaceId } });
+    assert.equal(finalClaims.length, entityGroups.length + entityAssets.length);
+    assert.ok(finalClaims.every((row) => row.fieldCode === "adoptionProof"), "退役的唯一约束不能残留");
+    const finalGroup = await db.rentalItemGroup.findUniqueOrThrow({ where: { id: entityGroups[0].id } });
+    for (const [key, value] of Object.entries(entityGroups[0].attributes)) assert.deepEqual(finalGroup.attributes[key], value, "媒体及历史资料保留");
+    assert.equal((await db.businessWorkspace.findUniqueOrThrow({ where: { id: workspaceId } })).categoryVersionId, writerTargetId);
+    assert.equal(await db.rentalCategoryAdoptionAudit.count({ where: { workspaceId, actorId: "entity-phase-fixture" } }), 1);
+    console.log("category-active-write-db: 写入绑定、锁竞争、实体采用内部组件的补丁/唯一声明/失败回滚及历史保留通过");
   } finally {
     await db.rentalCustomerCoupon.deleteMany({ where: { workspaceId } });
     await db.businessWorkspace.deleteMany({ where: { id: workspaceId } });
-    await db.rentalCategoryVersion.deleteMany({ where: { id: versionId } });
+    await db.rentalCategoryVersion.deleteMany({ where: { id: { in: [versionId, writerTargetId] } } });
     await db.$disconnect();
   }
 })().catch((error) => { console.error(error); process.exitCode = 1; });
