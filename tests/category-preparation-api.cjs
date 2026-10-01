@@ -129,5 +129,19 @@ module.exports = async ({ request, platformToken, tenantToken, mysqlQuery }) => 
   mysqlQuery("UPDATE rental_coupon_templates SET status='paused' WHERE id='e2e_category_invalid_coupon';");
   assert.ok(!(await call("GET", path)).businessCompatibility.blockers.some((row) => row.domain === "marketing_reference"), "已停用服务与券模板、已过期方案保留配置但不阻挡预览");
   assert.equal(mysqlQuery("SELECT CAST(applicableItemGroupIds AS CHAR) FROM rental_coupon_templates WHERE id='e2e_category_invalid_coupon';").trim().split(/\r?\n/u).at(-1), '["foreign-space-model"]', "预览不清洗券模板历史配置");
-  console.log("category-preparation-api: 会话空间、候选资料、修订冲突、经营依赖及服务/优惠/券的营销引用检查通过");
+  // Disabled locations are absent from the active-location check, but an enabled
+  // service capacity still preserves its configured location for future reuse.
+  mysqlQuery(`UPDATE rental_value_added_services SET status='enabled',requiresCapacity=true,applicableItemGroupIds=JSON_ARRAY(),applicableLocationIds=JSON_ARRAY(),mandatoryRule=NULL WHERE id='e2e_category_incompatible_service'; INSERT INTO rental_fulfillment_locations (id,tenantId,workspaceId,code,name,type,capabilities,status,createdAt,updatedAt) SELECT 'e2e_category_capacity_location',tenantId,workspaceId,'ADOPT-CAPACITY','容量采用地点','unsupported',JSON_ARRAY(),'disabled',NOW(),NOW() FROM rental_category_adoption_preparations WHERE targetVersionId='${draft.id}' AND tenantId='tenant_001'; INSERT INTO rental_service_capacities (id,tenantId,workspaceId,serviceId,locationId,windowStart,windowEnd,totalCapacity,reservedQuantity,usedQuantity,status,createdAt,updatedAt) SELECT 'e2e_category_capacity',tenantId,workspaceId,'e2e_category_incompatible_service','e2e_category_capacity_location','2125-01-01','2126-01-01',4,0,0,'enabled',NOW(),NOW() FROM rental_category_adoption_preparations WHERE targetVersionId='${draft.id}' AND tenantId='tenant_001';`);
+  const capacityFacts = mysqlQuery("SELECT id,serviceId,locationId,windowStart,windowEnd,totalCapacity,reservedQuantity,usedQuantity,status,updatedAt FROM rental_service_capacities WHERE id='e2e_category_capacity'; SELECT COUNT(*) FROM rental_service_reservations WHERE capacityId='e2e_category_capacity';");
+  assert.ok((await call("GET", path)).businessCompatibility.blockers.some((row) => row.domain === "service_capacity" && row.id === "e2e_category_capacity"), "未结束启用容量的目标地点类型必须检查，即使地点当前停用");
+  assert.equal(mysqlQuery("SELECT id,serviceId,locationId,windowStart,windowEnd,totalCapacity,reservedQuantity,usedQuantity,status,updatedAt FROM rental_service_capacities WHERE id='e2e_category_capacity'; SELECT COUNT(*) FROM rental_service_reservations WHERE capacityId='e2e_category_capacity';"), capacityFacts, "预览不改写容量计数或创建预留");
+  for (const statement of ["UPDATE rental_service_capacities SET status='disabled' WHERE id='e2e_category_capacity';", "UPDATE rental_service_capacities SET status='enabled',windowEnd='2020-01-02',windowStart='2020-01-01' WHERE id='e2e_category_capacity';", "UPDATE rental_service_capacities SET windowStart='2125-01-01',windowEnd='2126-01-01' WHERE id='e2e_category_capacity'; UPDATE rental_value_added_services SET status='disabled' WHERE id='e2e_category_incompatible_service';"]) {
+    mysqlQuery(statement);
+    assert.ok(!(await call("GET", path)).businessCompatibility.blockers.some((row) => row.domain === "service_capacity"), "停用/已结束容量或停用服务不阻碍新采用，不重写历史预留");
+  }
+  const allowedLocation = source.definition.businessModel.locationTypes[0];
+  assert.match(allowedLocation, /^[a-z_]+$/u);
+  mysqlQuery(`UPDATE rental_value_added_services SET status='enabled' WHERE id='e2e_category_incompatible_service'; UPDATE rental_fulfillment_locations SET type='${allowedLocation}' WHERE id='e2e_category_capacity_location';`);
+  assert.ok(!(await call("GET", path)).businessCompatibility.blockers.some((row) => row.domain === "service_capacity"), "本空间兼容地点的容量不应误报");
+  console.log("category-preparation-api: 会话空间、候选资料、修订冲突、经营依赖及营销/容量引用检查通过");
 };

@@ -12,6 +12,7 @@ import { categoryAdoptionBusinessCompatibility } from "./category-adoption-busin
 import { categoryAdoptionCapabilityReferences } from "./category-adoption-references";
 import { categoryAdoptionMarketingReferences } from "./category-adoption-marketing-references";
 import { categoryAdoptionPriceReferences } from "./category-adoption-price-references";
+import { categoryAdoptionServiceCapacity } from "./category-adoption-service-capacity";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import type { RentalCapability, RentalCapabilityConfig, RentalCapabilityLifecycleStatus } from "@rental-os/shared";
@@ -82,7 +83,7 @@ export class CategoryAdoptionPreparationService {
         validation = { valid: true, errors: [] };
       } catch (error) { validation = { valid: false, errors: [error instanceof Error ? error.message : "预备资料校验失败"] }; }
       const where = { tenantId: user.tenantId, workspaceId: context.workspaceId };
-      const [settings, locations, prices, rules, inspections, capabilityInstances, qualificationTypes, adjustments, pricingPlans, services, pricingGroups, discounts, coupons] = await Promise.all([
+      const [settings, locations, prices, rules, inspections, capabilityInstances, qualificationTypes, adjustments, pricingPlans, services, pricingGroups, discounts, coupons, capacities, capacityServices] = await Promise.all([
         tx.rentalTenantBusinessSettings.findFirst({ where }),
         tx.rentalFulfillmentLocation.findMany({ where, select: { id: true, type: true, status: true } }),
         tx.rentalPriceVersion.findMany({ where, select: { id: true, effectiveFrom: true, sequence: true, rates: true } }),
@@ -95,7 +96,9 @@ export class CategoryAdoptionPreparationService {
         tx.rentalValueAddedService.findMany({ where: { ...where, status: "enabled" }, select: { id: true, status: true, applicableFulfillmentModes: true, applicableItemGroupIds: true, applicableLocationIds: true, mandatoryRule: true } }),
         tx.rentalPricingGroup.findMany({ where, select: { id: true } }),
         tx.rentalDiscountPlan.findMany({ where: { ...where, status: "enabled" }, select: { id: true, status: true, effectiveTo: true, applicableItemGroupIds: true, applicablePricingGroupIds: true } }),
-        tx.rentalCouponTemplate.findMany({ where: { ...where, status: { in: ["active", "scheduled"] } }, select: { id: true, status: true, applicableItemGroupIds: true } })
+        tx.rentalCouponTemplate.findMany({ where: { ...where, status: { in: ["active", "scheduled"] } }, select: { id: true, status: true, applicableItemGroupIds: true } }),
+        tx.rentalServiceCapacity.findMany({ where: { ...where, status: "enabled", windowEnd: { gt: now } }, select: { id: true, serviceId: true, locationId: true, status: true, windowEnd: true } }),
+        tx.rentalValueAddedService.findMany({ where, select: { id: true, status: true, requiresCapacity: true } })
       ]);
       const businessCompatibility = categoryAdoptionBusinessCompatibility(context.definition, {
         settings: settings ? settings.settings as unknown as TenantRentalBusinessSettings : null, locations, inspections, qualificationTypes, adjustments, pricingPlans, services,
@@ -106,8 +109,9 @@ export class CategoryAdoptionPreparationService {
       const references = categoryAdoptionCapabilityReferences(context.definition, capabilityInstances, context.records);
       const marketing = categoryAdoptionMarketingReferences({ groups: context.records.groups, pricingGroups, locations, discounts, coupons, services }, now);
       const priceReferences = categoryAdoptionPriceReferences({ groups: context.records.groups, pricingGroups, prices: prices.map((row) => ({ ...row, value: row.rates })), adjustments, plans: pricingPlans }, now);
-      const compatibility = { ...businessCompatibility, valid: businessCompatibility.valid && capabilityCompatibility.valid && references.valid && marketing.valid && priceReferences.valid, blockers: [...businessCompatibility.blockers, ...capabilityCompatibility.blockers, ...references.blockers, ...marketing.blockers, ...priceReferences.blockers], checkedCapabilityCodes: capabilityCompatibility.checkedCapabilityCodes,
-        scope: `${businessCompatibility.scope}_capability_instances_references_marketing_entity_references_price_target_references` };
+      const capacityCompatibility = categoryAdoptionServiceCapacity(context.definition, { services: capacityServices, locations, capacities }, now);
+      const compatibility = { ...businessCompatibility, valid: businessCompatibility.valid && capabilityCompatibility.valid && references.valid && marketing.valid && priceReferences.valid && capacityCompatibility.valid, blockers: [...businessCompatibility.blockers, ...capabilityCompatibility.blockers, ...references.blockers, ...marketing.blockers, ...priceReferences.blockers, ...capacityCompatibility.blockers], checkedCapabilityCodes: capabilityCompatibility.checkedCapabilityCodes,
+        scope: `${businessCompatibility.scope}_capability_instances_references_marketing_entity_references_price_target_references_service_capacity_locations` };
       return { sourceVersionId: context.workspace.categoryVersionId, sourceRevision: context.workspace.categoryAdoptionRevision,
         targetVersionId: targetId, targetVersionLabel: context.target.versionLabel, targetDefinition: context.definition,
         differences: categoryDefinitionDifferences(context.sourceDefinition, context.definition),
