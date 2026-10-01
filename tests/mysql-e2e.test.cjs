@@ -5977,6 +5977,10 @@ async function main() {
   // 奖励与权益账户默认规则是关闭的（membership.signupRewardEnabled=false），
   // 前面各节从未触发发奖。这里先启用注册奖励再真实发一次，而不是把断言放宽——
   // 断言测试不产生的数据没有意义，放宽同样没有意义。
+  const rewardMemberId = await registerApprovedRentalMember(demoForWriteThrough.accessToken, "E2E奖励事实会员", "13800000064");
+  assert.match(rewardMemberId, /^[A-Za-z0-9_-]+$/u);
+  const rewardScopeSql = `\`tenantId\`='tenant_001' AND \`workspaceId\`='${demoForWriteThrough.currentWorkspaceId}' AND \`customerId\`='${rewardMemberId}'`;
+  assert.equal(readCount(`SELECT COALESCE(SUM(\`pointsBalance\`),0) FROM \`rental_benefit_accounts\` WHERE ${rewardScopeSql};`), 0, "新奖励会员必须在启用奖励前建立，初始积分为0");
   const settingsBefore = (await request("GET", "/api/rental/v1/business-settings", null, demoForWriteThrough.accessToken)).body.data;
   const enableReward = await request(
     "PUT",
@@ -5991,7 +5995,7 @@ async function main() {
   const grant = await request(
     "POST",
     "/api/rental/v1/rewards/grant",
-    { customerId: "e2e_reward_member", triggerType: "registration", idempotencyKey: "e2e:reward:once" },
+    { customerId: rewardMemberId, triggerType: "registration", idempotencyKey: "e2e:reward:once" },
     demoForWriteThrough.accessToken
   );
   assert.equal(grant.status, 201, `发放奖励失败: ${JSON.stringify(grant.body)}`);
@@ -5999,7 +6003,7 @@ async function main() {
   const grantAgain = await request(
     "POST",
     "/api/rental/v1/rewards/grant",
-    { customerId: "e2e_reward_member", triggerType: "registration", idempotencyKey: "e2e:reward:once" },
+    { customerId: rewardMemberId, triggerType: "registration", idempotencyKey: "e2e:reward:once" },
     demoForWriteThrough.accessToken
   );
   assert.equal(grantAgain.status, 201, "重复发放应幂等返回既有流水");
@@ -6009,25 +6013,25 @@ async function main() {
     "同一幂等键在库中只能有一条奖励流水"
   );
   assert.equal(
-    readCount("SELECT ROUND(`pointsBalance`) FROM `rental_benefit_accounts` WHERE `customerId`='e2e_reward_member';"),
+    readCount(`SELECT ROUND(\`pointsBalance\`) FROM \`rental_benefit_accounts\` WHERE ${rewardScopeSql};`),
     88,
     "奖励入账后权益账户余额必须落库"
   );
   // 不同幂等键不是重放：两笔合法奖励同时到达同一客户时，余额必须累加，
   // 不能由两个进程缓存快照的绝对 upsert 互相覆盖。
   const parallelRewards = await Promise.all([
-    request("POST", "/api/rental/v1/rewards/grant", { customerId: "e2e_reward_member", triggerType: "registration", idempotencyKey: "e2e:reward:parallel:a" }, demoForWriteThrough.accessToken),
-    request("POST", "/api/rental/v1/rewards/grant", { customerId: "e2e_reward_member", triggerType: "registration", idempotencyKey: "e2e:reward:parallel:b" }, demoForWriteThrough.accessToken)
+    request("POST", "/api/rental/v1/rewards/grant", { customerId: rewardMemberId, triggerType: "registration", idempotencyKey: "e2e:reward:parallel:a" }, demoForWriteThrough.accessToken),
+    request("POST", "/api/rental/v1/rewards/grant", { customerId: rewardMemberId, triggerType: "registration", idempotencyKey: "e2e:reward:parallel:b" }, demoForWriteThrough.accessToken)
   ]);
   assert.ok(parallelRewards.every((response) => response.status === 201), `不同键并行发奖失败: ${JSON.stringify(parallelRewards.map((response) => response.body))}`);
   assert.equal(
-    readCount("SELECT ROUND(`pointsBalance`) FROM `rental_benefit_accounts` WHERE `customerId`='e2e_reward_member';"),
+    readCount(`SELECT ROUND(\`pointsBalance\`) FROM \`rental_benefit_accounts\` WHERE ${rewardScopeSql};`),
     264,
     "不同幂等键的并行奖励必须原子累加到账户余额"
   );
   const parallelBenefitAccount = (
-    await request("GET", "/api/rental/v1/benefit-accounts?customerId=e2e_reward_member", null, demoForWriteThrough.accessToken)
-  ).body.data.find((row) => row.customerId === "e2e_reward_member");
+    await request("GET", `/api/rental/v1/benefit-accounts?customerId=${rewardMemberId}`, null, demoForWriteThrough.accessToken)
+  ).body.data.find((row) => row.customerId === rewardMemberId);
   assert.equal(parallelBenefitAccount?.pointsBalance, 264, "并发奖励结束后 API 缓存余额必须与数据库一致，不得被旧刷新覆盖");
 
   const factRows = {
@@ -6119,6 +6123,7 @@ async function main() {
   ok(
     `快照已降级：清空快照中的券/奖励/报价后重启，仍从库恢复出 ${couponsAfterTamper.length} 张券与 ${rewardsAfterTamper.length} 条奖励流水`
   );
+  await maybeStopAfter("21");
 
   console.log("== RC-04. 订单创建业务幂等 ==");
   // 幂等只能用真实并发与重放来证明：静态检查看不出"重复请求是否重复占了库存"。
@@ -6837,7 +6842,7 @@ async function main() {
   // 硬编码值一旦被上游用例改变就会失败，且失败原因与本节要验证的东西无关。
   // 本节真正的不变量是「重启并用同一键再发一次，余额不变」，因此比对前后值即可。
   const benefitBeforeRestart = readCount(
-    "SELECT ROUND(`pointsBalance`) FROM `rental_benefit_accounts` WHERE `customerId`='e2e_reward_member';"
+    `SELECT ROUND(\`pointsBalance\`) FROM \`rental_benefit_accounts\` WHERE ${rewardScopeSql};`
   );
   assert.ok(benefitBeforeRestart > 0, "前置条件：权益账户应已有余额");
   await stopApi();
@@ -6847,7 +6852,7 @@ async function main() {
   const regrant = await request(
     "POST",
     "/api/rental/v1/rewards/grant",
-    { customerId: "e2e_reward_member", triggerType: "registration", idempotencyKey: "e2e:reward:once" },
+    { customerId: rewardMemberId, triggerType: "registration", idempotencyKey: "e2e:reward:once" },
     demoReward.accessToken
   );
   assert.equal(regrant.status, 201, `重启后同键发放应幂等返回既有流水: ${JSON.stringify(regrant.body)}`);
@@ -6858,7 +6863,7 @@ async function main() {
   );
   // 权益账户余额同样不能被二次入账。
   assert.equal(
-    readCount("SELECT ROUND(`pointsBalance`) FROM `rental_benefit_accounts` WHERE `customerId`='e2e_reward_member';"),
+    readCount(`SELECT ROUND(\`pointsBalance\`) FROM \`rental_benefit_accounts\` WHERE ${rewardScopeSql};`),
     benefitBeforeRestart,
     `重复发放不得重复累加权益余额（重启前 ${benefitBeforeRestart}）`
   );
