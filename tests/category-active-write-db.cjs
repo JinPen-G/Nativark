@@ -406,6 +406,11 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     const capabilityRuntime = { capabilities: new WorkspaceCapabilityService({}), registeredVersions: ["camera_compatibility@cam-1.0"] };
     const subscriptions = new SubscriptionService(db);
     const applyPhase = (overrides = {}, decorate = (tx) => tx, runtime = capabilityRuntime, commercial = subscriptions) => db.$transaction((tx) => writePreparedCategoryAdoptionPhase(decorate(tx), { ...phaseInput, ...overrides }, runtime, commercial), { ...rc, timeout: 20000 });
+    // Earlier repository probes intentionally used unreadable rule JSON. The
+    // write phase now checks scoped business facts too; provide a compatible
+    // executable projection rather than bypassing that check in the writer.
+    const compatibleRule = { pricing: {}, payment: { preauthorizationRequired: false, depositMode: "none" }, overdue: { feeMode: "none" } };
+    await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: compatibleRule } });
     const phaseBefore = await readEntityFacts();
     await assert.rejects(applyPhase(), /采用范围/);
     await db.rentalCategoryVersionPolicy.update({ where: { versionId: writerTargetId }, data: { upgradeScope: "pilot", upgradeTenantIds: ["tenant_002"] } });
@@ -433,6 +438,27 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     await assert.rejects(applyPhase({}, (tx) => tx, capabilityRuntime, { lockCategoryCommercialContext: async () => ({ newBusinessAllowed: true, entitlements: [], lockedFeatureCodes: ["foreign_dependency"] }) }), /商业依赖/);
     assert.equal(await readEntityFacts(), phaseBefore, "商业拒绝不能留下实体、配置、绑定或审计写入");
     await assert.rejects(applyPhase({}, (tx) => tx, null), /可信能力执行器/);
+    await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: { fixture: true } } });
+    let candidateEntityWrites = 0;
+    await assert.rejects(applyPhase({}, (tx) => new Proxy(tx, { get(client, key) {
+      if (key === "rentalItemGroup") return new Proxy(client[key], { get(model, method) {
+        if (method === "updateMany") return (args) => { candidateEntityWrites++; return model.updateMany(args); };
+        return Reflect.get(model, method);
+      } });
+      return Reflect.get(client, key);
+    } })), /规则结构不可读取/);
+    assert.ok(candidateEntityWrites > 0, "阻碍必须在本事务候选资料写入后复核，不采用旧预览");
+    assert.equal(await readEntityFacts(), phaseBefore, "经营组合拒绝回滚实体、唯一声明、能力配置及配置审计");
+    assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation, "经营组合拒绝保留准备输入");
+    await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: compatibleRule } });
+    await assert.rejects(applyPhase({}, (tx) => new Proxy(tx, { get(client, key) {
+      if (key === "rentalPriceVersion") return new Proxy(client[key], { get(model, method) {
+        if (method === "findMany") return async () => { throw new Error("business-compatibility-read-failure"); };
+        return Reflect.get(model, method);
+      } });
+      return Reflect.get(client, key);
+    } })), /business-compatibility-read-failure/);
+    assert.equal(await readEntityFacts(), phaseBefore, "经营读取失败不能伪装成兼容，全部候选写入与配置审计回滚");
     const staleCapabilityBefore = await db.workspaceCapabilityInstance.findFirstOrThrow({ where: { workspaceId, code: "camera_compatibility" } });
     await db.workspaceCapabilityInstance.updateMany({ where: { workspaceId }, data: { revision: 2 } });
     await assert.rejects(applyPhase(), /已变化/);
@@ -473,6 +499,8 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal(phaseCompetition.filter((row) => row.status === "fulfilled").length, 1, "同来源修订只能成功一次");
     assert.match(phaseCompetition.find((row) => row.status === "rejected").reason.message, /版本已变化/);
     const phaseResult = phaseCompetition.find((row) => row.status === "fulfilled").value;
+    assert.equal(phaseResult.businessCompatibility.valid, true);
+    assert.equal(phaseResult.businessCompatibility.complete, false, "内部检查通过仍不表示全部经营闸门已实现");
     const result = phaseResult.entities;
     assert.equal(result.itemGroupClaimCount, entityGroups.length);
     assert.equal(result.assetClaimCount, entityAssets.length);

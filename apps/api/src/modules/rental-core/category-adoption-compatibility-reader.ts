@@ -20,7 +20,8 @@ export async function readCategoryAdoptionCompatibility(
     groups: Array<{ id: string; status: string; inventoryMode: string; bundleComponents: Array<{ componentItemGroupId: string; quantity: number }> }>;
     assets: Array<{ id: string; itemGroupId: string; locationId: string }>;
   },
-  capabilities: WorkspaceCapabilityService, hooks: CapabilityHookRuntime, now: Date,
+  capabilities: Pick<WorkspaceCapabilityService, "prepareAdoptionConfigs" | "adoptionCompatibility">,
+  hooks: Pick<CapabilityHookRuntime, "registeredVersions">, now: Date,
   capabilityPatches: CategoryCapabilityPreparationPatch[] = []
 ) {
   const where = { tenantId, workspaceId };

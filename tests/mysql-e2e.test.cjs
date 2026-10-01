@@ -2351,7 +2351,7 @@ async function main() {
       "POST",
       "/api/rental/v1/quotes",
       {
-        customerType: "corporate",
+        customerType: "personal", customerId: constructionMemberId,
         // 工程品类启用的是仓储自提，不是门店自提（品类 capability 决定）。
         fulfillmentMode: "warehouse_pickup_return",
         fulfillmentLocationId: constructionLocation.id,
@@ -2480,7 +2480,7 @@ async function main() {
       "POST",
       "/api/rental/v1/quotes",
       {
-        customerType: "corporate",
+        customerType: "personal", customerId: constructionMemberId,
         fulfillmentMode: "warehouse_pickup_return",
         fulfillmentLocationId: constructionLocation.id,
         startAt: "2027-07-05T09:00:00+08:00",
@@ -2495,15 +2495,23 @@ async function main() {
   };
   const lockedBefore = await lockQuoteWith(lockPlan.body.data.id);
   assert.equal(lockedBefore.rentalAmount, 300, `锁价前应为 3 个自然日 × 100 = 300：实际 ${lockedBefore.rentalAmount}`);
-  // 对**同一个计划**发布新版本，把基础价从 100 抬到 500。
-  const repriced = await request(
-    "POST",
-    "/api/rental/v1/pricing-plans",
-    { id: lockPlan.body.data.id, ...lockPlanPayload(500, "PRICE-01 锁价验收：发布新价") },
-    construction.accessToken
-  );
+  const forbiddenOverwrite = await request("POST", "/api/rental/v1/pricing-plans", {
+    id: lockPlan.body.data.id, ...lockPlanPayload(500, "锁价用例：验证已启用计划不可直接覆盖")
+  }, construction.accessToken);
+  assert.equal(forbiddenOverwrite.status, 409, "普通保存不能覆盖已启用价格");
+  assert.equal(JSON.parse(readScalar(`SELECT \`rates\` FROM \`rental_pricing_plans\` WHERE \`id\`='${lockPlan.body.data.id}';`))[0].baseAmount, 100, "拒绝覆盖须保留原价格事实");
+  // 已启用计划不能普通编辑覆盖；用正式调价草稿→确认产生新空间版本。
+  const repriceDraft = await request("POST", `/api/rental/v1/pricing-plans/${lockPlan.body.data.id}/adjustments`, {
+    code: "E2E-LOCK-REPRICE", name: "E2E 锁价调价",
+    changes: [{ itemGroupId: lockGroupId, unit: "calendar_day", op: "set_base", value: 500 }],
+    changeReason: "PRICE-01 锁价验收：发布新价"
+  }, construction.accessToken);
+  assert.equal(repriceDraft.status, 201, `调价草稿失败: ${JSON.stringify(repriceDraft.body).slice(0, 250)}`);
+  const repriced = await request("POST", `/api/rental/v1/pricing-plans/${lockPlan.body.data.id}/adjustments/${repriceDraft.body.data.id}/confirm`, null, construction.accessToken);
   assert.equal(repriced.status, 201, `发布新价失败: ${JSON.stringify(repriced.body).slice(0, 250)}`);
-  assert.notEqual(repriced.body.data.version, lockPlan.body.data.version, "发布新价必须产生新的版本号");
+  assert.equal(repriced.body.data.status, "applied");
+  assert.ok(repriced.body.data.versionId);
+  assert.notEqual(repriced.body.data.versionId, lockedBefore.priceVersionId, "发布新价必须追加独立空间价格版本");
   // 从 API 读回原报价：金额、费率快照与版本号都必须是锁价时的值。
   const reread = await request("GET", `/api/rental/v1/quotes/${lockedBefore.id}`, null, construction.accessToken);
   assert.equal(reread.status, 200, `读回报价失败: ${JSON.stringify(reread.body).slice(0, 200)}`);
@@ -2525,6 +2533,8 @@ async function main() {
   );
   // 新报价必须用新价——否则"锁价"就变成了"永远不涨价"。
   const afterReprice = await lockQuoteWith(lockPlan.body.data.id);
+  assert.equal(afterReprice.priceVersionId, repriced.body.data.versionId, "新报价必须绑定实际发布的新空间价格版本");
+  assert.equal(reread.body.data.priceVersionId, lockedBefore.priceVersionId, "旧报价的空间价格版本引用不可改写");
   assert.equal(
     afterReprice.rentalAmount,
     1500,
@@ -2611,7 +2621,7 @@ async function main() {
     "POST",
     "/api/rental/v1/quotes",
     {
-      customerType: "corporate",
+      customerType: "personal", customerId: constructionMemberId,
       fulfillmentMode: "warehouse_pickup_return",
       fulfillmentLocationId: constructionLocation.id,
       startAt: "2027-03-02T09:00:00+08:00",
@@ -2631,7 +2641,7 @@ async function main() {
     "POST",
     "/api/rental/v1/quotes",
     {
-      customerType: "corporate",
+      customerType: "personal", customerId: constructionMemberId,
       fulfillmentMode: "warehouse_pickup_return",
       fulfillmentLocationId: constructionLocation.id,
       startAt: "2027-03-02T09:00:00+08:00",
@@ -2685,7 +2695,7 @@ async function main() {
     "POST",
     "/api/rental/v1/quotes",
     {
-      customerType: "corporate",
+      customerType: "personal", customerId: constructionMemberId,
       fulfillmentMode: "warehouse_pickup_return",
       fulfillmentLocationId: constructionLocation.id,
       startAt: new Date(Date.now() + 2 * 86400000).toISOString(),
@@ -2705,7 +2715,7 @@ async function main() {
     "POST",
     "/api/rental/v1/quotes",
     {
-      customerType: "corporate",
+      customerType: "personal", customerId: constructionMemberId,
       fulfillmentMode: "warehouse_pickup_return",
       fulfillmentLocationId: constructionLocation.id,
       startAt: new Date(Date.now() + 60 * 86400000).toISOString(),
@@ -2803,7 +2813,7 @@ async function main() {
       "POST",
       "/api/rental/v1/quotes",
       {
-        customerType: "corporate",
+        customerType: "personal", customerId: constructionMemberId,
         fulfillmentMode: "warehouse_pickup_return",
         fulfillmentLocationId: constructionLocation.id,
         // 2 个自然日 → 租金 200
@@ -2963,7 +2973,7 @@ async function main() {
   assert.equal(dpPlan.status, 201, `押金预授权计划失败: ${JSON.stringify(dpPlan.body).slice(0, 250)}`);
   const dpQuote = async () => {
     const res = await request("POST", "/api/rental/v1/quotes", {
-      customerType: "corporate", fulfillmentMode: "warehouse_pickup_return",
+      customerType: "personal", customerId: constructionMemberId, fulfillmentMode: "warehouse_pickup_return",
       fulfillmentLocationId: constructionLocation.id,
       startAt: "2027-04-06T09:00:00+08:00", endAt: "2027-04-08T09:00:00+08:00",
       pricingPlanId: dpPlan.body.data.id, lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
@@ -3091,7 +3101,7 @@ async function main() {
       "POST",
       "/api/rental/v1/quotes",
       {
-        customerType: "corporate",
+        customerType: "personal", customerId: constructionMemberId,
         fulfillmentMode: "warehouse_pickup_return",
         fulfillmentLocationId: constructionLocation.id,
         startAt: "2027-06-07T09:00:00+08:00",
@@ -3225,7 +3235,7 @@ async function main() {
     "POST",
     "/api/rental/v1/quotes",
     {
-      customerType: "corporate",
+      customerType: "personal", customerId: constructionMemberId,
       fulfillmentMode: "warehouse_pickup_return",
       fulfillmentLocationId: constructionLocation.id,
       startAt: "2027-06-07T09:00:00+08:00",
@@ -3271,7 +3281,7 @@ async function main() {
     "POST",
     "/api/rental/v1/quotes",
     {
-      customerType: "corporate",
+      customerType: "personal", customerId: constructionMemberId,
       fulfillmentMode: "warehouse_pickup_return",
       fulfillmentLocationId: constructionLocation.id,
       startAt: "2027-06-07T09:00:00+08:00",
@@ -3426,7 +3436,7 @@ async function main() {
       "POST",
       "/api/rental/v1/quotes",
       {
-        customerType: "corporate",
+        customerType: "personal", customerId: constructionMemberId,
         fulfillmentMode: "warehouse_pickup_return",
         fulfillmentLocationId: constructionLocation.id,
         startAt,
@@ -4170,7 +4180,7 @@ async function main() {
   assert.equal(deliveryPublish.status, 201, `发布配送时段草稿失败: ${deliveryPublish.status} ${JSON.stringify(deliveryPublish.body).slice(0, 220)}`);
   const deliveryQuote = (startAt, endAt) =>
     request("POST", "/api/rental/v1/quotes", {
-      customerType: "corporate", fulfillmentMode: "delivery", fulfillmentLocationId: constructionLocation.id,
+      customerType: "personal", customerId: constructionMemberId, fulfillmentMode: "delivery", fulfillmentLocationId: constructionLocation.id,
       startAt, endAt, pricingPlanId: pricePlan.body.data.id, lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
     }, construction.accessToken);
   const deliveryOutside = await deliveryQuote(`${deliveryDate}T10:00:00+08:00`, `${closedYear}-09-22T14:00:00+08:00`);
@@ -4542,7 +4552,7 @@ async function main() {
   const firstPubOrderQuote = await closedQuote(`${previewYear}-07-14T10:00:00+08:00`, `${previewYear}-07-16T10:00:00+08:00`);
   assert.equal(firstPubOrderQuote.status, 201, `首发预检用例报价失败: ${firstPubOrderQuote.status} ${JSON.stringify(firstPubOrderQuote.body).slice(0, 220)}`);
   const firstPubOrder = await request("POST", "/api/rental/v1/orders", {
-    quoteId: firstPubOrderQuote.body.data.id, customerType: "corporate", customerName: "E2E 首发预检客户",
+    quoteId: firstPubOrderQuote.body.data.id, customerType: "personal", customerId: constructionMemberId, customerName: "E2E 首发预检客户",
     fulfillmentMode: "warehouse_pickup_return", fulfillmentLocationId: constructionLocation.id,
     startAt: `${previewYear}-07-14T10:00:00+08:00`, endAt: `${previewYear}-07-16T10:00:00+08:00`,
     lines: [{ itemGroupId: priceGroupId, quantity: 1 }], qualificationApproved: true
@@ -4570,7 +4580,7 @@ async function main() {
   const previewQuote = await closedQuote(`${previewYear}-07-14T10:00:00+08:00`, `${previewYear}-07-16T10:00:00+08:00`);
   assert.equal(previewQuote.status, 201, `预览用例报价失败: ${previewQuote.status} ${JSON.stringify(previewQuote.body).slice(0, 220)}`);
   const previewOrder = await request("POST", "/api/rental/v1/orders", {
-    quoteId: previewQuote.body.data.id, customerType: "corporate", customerName: "E2E 预览客户",
+    quoteId: previewQuote.body.data.id, customerType: "personal", customerId: constructionMemberId, customerName: "E2E 预览客户",
     fulfillmentMode: "warehouse_pickup_return", fulfillmentLocationId: constructionLocation.id,
     startAt: `${previewYear}-07-14T10:00:00+08:00`, endAt: `${previewYear}-07-16T10:00:00+08:00`,
     lines: [{ itemGroupId: priceGroupId, quantity: 1 }], qualificationApproved: true
@@ -5212,7 +5222,7 @@ async function main() {
       "POST",
       "/api/rental/v1/quotes",
       {
-        customerType: "corporate",
+        customerType: "personal", customerId: r1CustomerId,
         fulfillmentMode: "store_pickup_return",
         fulfillmentLocationId: dtLocation.id,
         startAt,
@@ -5376,7 +5386,7 @@ async function main() {
     "POST",
     "/api/rental/v1/quotes",
     {
-      customerType: "corporate",
+      customerType: "personal", customerId: constructionMemberId,
       fulfillmentMode: "warehouse_pickup_return",
       fulfillmentLocationId: constructionLocation.id,
       startAt: new Date(Date.now() + 3600000).toISOString(),
@@ -5462,7 +5472,7 @@ async function main() {
     "POST",
     "/api/rental/v1/quotes",
     {
-      customerType: "corporate",
+      customerType: "personal", customerId: constructionMemberId,
       fulfillmentMode: "warehouse_pickup_return",
       fulfillmentLocationId: constructionLocation.id,
       startAt: `${adjFriday}T09:00:00+08:00`,
@@ -5546,7 +5556,7 @@ async function main() {
     "POST",
     "/api/rental/v1/quotes",
     {
-      customerType: "corporate",
+      customerType: "personal", customerId: constructionMemberId,
       fulfillmentMode: "warehouse_pickup_return",
       fulfillmentLocationId: constructionLocation.id,
       startAt: `${adjFriday}T14:00:00+08:00`,
@@ -5562,7 +5572,7 @@ async function main() {
     "POST",
     "/api/rental/v1/quotes",
     {
-      customerType: "corporate",
+      customerType: "personal", customerId: constructionMemberId,
       fulfillmentMode: "warehouse_pickup_return",
       fulfillmentLocationId: constructionLocation.id,
       startAt: `${adjFriday}T10:00:00+08:00`,

@@ -8,6 +8,7 @@ import { writePreparedCategoryEntities } from "./category-adoption-entity-writer
 import { writePreparedCategoryCapabilities, type CategoryAdoptionCapabilityRuntime } from "./category-adoption-capability-writer";
 import type { SubscriptionService } from "../subscription/subscription.service";
 import { categoryCommercialCompatibility, categoryCommercialRequirements } from "./category-adoption-commercial";
+import { readCategoryAdoptionCompatibility } from "./category-adoption-compatibility-reader";
 
 /** Internal transactional write phase, NOT an adoption endpoint or complete gate.
  * Caller must authorize the session's whole-space access and validate ALL
@@ -61,7 +62,7 @@ export async function writePreparedCategoryAdoptionPhase(
   if (envelope.capabilityPatches !== undefined && !Array.isArray(envelope.capabilityPatches)) {
     throw new ConflictException("能力预备配置格式无效，采用未完成；预备输入已保留");
   }
-  if (Array.isArray(envelope.capabilityPatches) && envelope.capabilityPatches.length && !capabilityRuntime) {
+  if (!capabilityRuntime) {
     throw new ConflictException("未提供可信能力执行器，采用未完成；预备输入已保留");
   }
   const definition = resolveRentalCategoryVersionBody(target, identity.categoryCode.toLowerCase());
@@ -78,8 +79,21 @@ export async function writePreparedCategoryAdoptionPhase(
   if (!commercial.valid) throw new ConflictException(commercial.blockers.map((row) => row.message).join("；"));
   const entities = await writePreparedCategoryEntities(tx, tenantId, workspaceId, expected, definition, envelope.items);
   const capabilities = Array.isArray(envelope.capabilityPatches) && envelope.capabilityPatches.length
-    ? await writePreparedCategoryCapabilities(tx, tenantId, workspaceId, expected, definition, envelope.capabilityPatches as CategoryCapabilityPreparationPatch[], input.actorId, envelope.reason.trim(), capabilityRuntime!)
+    ? await writePreparedCategoryCapabilities(tx, tenantId, workspaceId, expected, definition, envelope.capabilityPatches as CategoryCapabilityPreparationPatch[], input.actorId, envelope.reason.trim(), capabilityRuntime)
     : { changedCapabilityCodes: [] };
+  // Inspect the actual candidate facts written in THIS transaction, including
+  // concurrent records absent from preparation. A failed check rolls back the
+  // entity/configuration writes and their audits; never trust a prior preview.
+  // This reader remains partial: passing it does not open the public adoption
+  // route or waive the caller's remaining final-gate responsibilities.
+  const [candidateGroups, candidateAssets] = await Promise.all([
+    tx.rentalItemGroup.findMany({ where: { tenantId, workspaceId }, include: { bundleComponents: { select: { componentItemGroupId: true, quantity: true } } } }),
+    tx.rentalAsset.findMany({ where: { tenantId, workspaceId } })
+  ]);
+  const businessCompatibility = await readCategoryAdoptionCompatibility(tx, tenantId, workspaceId, definition,
+    { groups: candidateGroups, assets: candidateAssets }, capabilityRuntime.capabilities,
+    { registeredVersions: () => capabilityRuntime.registeredVersions }, new Date());
+  if (!businessCompatibility.valid) throw new ConflictException(businessCompatibility.blockers.map((row) => row.message).join("；"));
   const toRevision = expected.adoptionRevision + 1;
   const changed = await tx.businessWorkspace.updateMany({ where: {
     tenantId, id: workspaceId, status: "ACTIVE", categoryCode: identity.categoryCode,
@@ -92,5 +106,5 @@ export async function writePreparedCategoryAdoptionPhase(
     actorId: input.actorId, reason: envelope.reason.trim()
   } });
   // Keep preparation intact on success as well as rollback; never initialize data.
-  return { targetVersionId, adoptionRevision: toRevision, auditId: audit.id, entities, capabilities, checkedFeatureCodes: commercial.checkedFeatureCodes };
+  return { targetVersionId, adoptionRevision: toRevision, auditId: audit.id, entities, capabilities, checkedFeatureCodes: commercial.checkedFeatureCodes, businessCompatibility };
 }
