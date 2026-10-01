@@ -40,7 +40,7 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     const oldBinding = { categoryVersionId: baseline.recommendedVersionId, adoptionRevision: 0 };
     const input = { id: `${fixture}_g1`, tenantId: "tenant_001", categoryCode: "camera", code: "G1", name: "专项型号", inventoryMode: "serialized", unit: "件", attributes: { identity: " abc " }, status: "enabled", bundleComponents: [], createdAt: new Date().toISOString() };
     // Deliberately minimal repository fixtures, not a claim of usable business settings.
-    const settings = { tenantId: "tenant_001", categoryCode: "camera", configVersion: "fixture", pricing: { enabledUnits: ["hour"], defaultUnit: "hour", holidayPricingEnabled: false }, calendar: { holidayPricingEnabled: false }, fulfillment: { enabledModes: ["store_pickup_return"] } };
+    const settings = { tenantId: "tenant_001", categoryCode: "camera", configVersion: "fixture", pricing: { enabledUnits: ["hour"], defaultUnit: "hour", holidayPricingEnabled: false }, calendar: { weekendDays: [0, 6], officialCalendarRegion: "CN", holidayPricingEnabled: false }, fulfillment: { enabledModes: ["store_pickup_return"] } };
     const location = { id: `${fixture}_location`, tenantId: "tenant_001", code: "L", name: "专项地点", type: "store", status: "enabled", capabilities: ["pickup", "return"] };
     const capability = { tenantId: "tenant_001", workspaceId, code: "camera_compatibility", status: "enabled", implementationVersion: "cam-1.0", configVersion: "v1", config: { relations: [] }, revision: 1 };
     const capabilityAudit = { code: "camera_compatibility", action: "enable", toStatus: "enabled", reason: "仓储锁专项夹具", at: new Date().toISOString() };
@@ -480,6 +480,12 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal(await readEntityFacts(), phaseBefore, "非法当前费率回滚候选实体、能力、绑定和审计");
     assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation);
     await db.rentalPriceVersion.delete({ where: { id: candidatePrice.id } });
+    const settingsBefore = await db.rentalTenantBusinessSettings.findUniqueOrThrow({ where: { workspaceId } });
+    await db.rentalTenantBusinessSettings.update({ where: { workspaceId }, data: { settings: { ...settingsBefore.settings, calendar: { ...settingsBefore.settings.calendar, timeZone: "Invalid/Zone" } } } });
+    await assert.rejects(applyPhase(), /经营日历时区不可执行/);
+    assert.equal(await readEntityFacts(), phaseBefore, "无效经营时区拒绝后全部候选写入回滚");
+    assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation);
+    await db.rentalTenantBusinessSettings.update({ where: { workspaceId }, data: { settings: settingsBefore.settings, updatedAt: settingsBefore.updatedAt } });
     const staleCapabilityBefore = await db.workspaceCapabilityInstance.findFirstOrThrow({ where: { workspaceId, code: "camera_compatibility" } });
     await db.workspaceCapabilityInstance.updateMany({ where: { workspaceId }, data: { revision: 2 } });
     await assert.rejects(applyPhase(), /已变化/);
