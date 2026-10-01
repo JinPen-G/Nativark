@@ -152,6 +152,44 @@ void (async () => {
     assert.equal(quote.categoryCode, item.categoryCode, `${item.categoryCode}: 报价快照不得串品类`);
     assert.equal(quote.request.lines[0].itemGroupId, itemGroups[0].id, `${item.categoryCode}: 报价必须引用本空间商品`);
 
+    // 服务级矩阵：四品类均使用同一续租入口，并各自保留原单位与执行依据。
+    // 这里只验试算契约，不把替身仓储当作库存冲突/真实订单状态验收。
+    const newEndAt = new Date(Date.parse(endAt) + 24 * 60 * 60 * 1000).toISOString();
+    const renewalArgs = {
+      order: { id: `renewal_${item.categoryCode}`, quoteId: quote.id, startAt, endAt,
+        depositAmount: quote.depositAmount, preAuthAmount: quote.preAuthAmount },
+      lines: quote.request.lines.map((line) => ({ itemGroupId: line.itemGroupId,
+        pricingGroupId: line.pricingGroupId, quantity: line.quantity })),
+      newEndAt, appliedAt: new Date(Date.parse(startAt) + 3600000).toISOString(),
+      settlementMode: "immediate", fulfillmentMode: mode, locationIds: [locations[0].id], customerType: "personal"
+    };
+    for (const pricingMode of ["original_total", "incremental"]) {
+      // 显式构造两种原订单规则快照，不能因某品类默认值只验证一种续租口径。
+      quote.ruleSnapshot.extension = { enabled: true, forceImmediateWhenOverdue: true, pricingMode };
+      const frozenQuote = structuredClone(quote);
+      const renewed = await business.quoteOrderExtension(tenantId, ctx, renewalArgs);
+      assert.equal(renewed.originalEndAt, endAt);
+      assert.equal(renewed.newEndAt, newEndAt);
+      assert.ok(renewed.rentalAmount > 0, `${item.categoryCode}/${pricingMode}: 新增一天应有租金`);
+      assert.equal(renewed.executionBasis.pricingMode, pricingMode);
+      assert.equal(renewed.executionBasis.categoryCode, item.categoryCode);
+      assert.equal(renewed.executionBasis.policySource, pricingMode === "original_total" ? "original_quote" : "current_workspace");
+      assert.ok(renewed.executionBasis.pricingStrategies.length > 0);
+      assert.deepEqual(renewed.rateSnapshot.map((row) => row.unit), quote.rateSnapshot.map((row) => row.unit),
+        `${item.categoryCode}/${pricingMode}: 续租不能静默切换原计价单位`);
+      assert.ok(renewed.depositDelta >= 0 && renewed.preAuthDelta >= 0);
+      if (pricingMode === "original_total") {
+        assert.equal(renewed.pricingSnapshot.method, "original_version_difference");
+        assert.equal(renewed.ruleVersion, quote.ruleVersion);
+        assert.deepEqual(renewed.rateSnapshot, quote.rateSnapshot);
+        assert.equal(renewed.rentalAmount, renewed.pricingSnapshot.recalculatedRentalAmount - quote.rentalAmount);
+      }
+      assert.deepEqual(quote, frozenQuote, `${item.categoryCode}/${pricingMode}: 试算不能改写原报价`);
+      await assert.rejects(() => business.quoteOrderExtension(tenantId, ctx, { ...renewalArgs, newEndAt: endAt }),
+        /新的归还时间必须晚于当前归还时间/u);
+      console.log(`PASS four-category renewal ${item.categoryCode}/${pricingMode}: units, execution basis, immutable quote, end boundary`);
+    }
+
     // 非配送/自取履约不接受收货地址：带了必须报错（core 统一校验，两端与后台一致）。
     await assert.rejects(
       () => business.createQuote(tenantId, ctx, {
