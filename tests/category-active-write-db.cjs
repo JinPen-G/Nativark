@@ -13,6 +13,7 @@ const { validateActiveCategoryWrite } = require("../apps/api/dist/modules/rental
 const { writePreparedCategoryEntities } = require("../apps/api/dist/modules/rental-core/category-adoption-entity-writer.js");
 const { writePreparedCategoryAdoptionPhase } = require("../apps/api/dist/modules/rental-core/category-adoption-transaction-phase.js");
 const { RentalServiceCapacityService } = require("../apps/api/dist/modules/rental-core/rental-service-capacity.service.js");
+const { MembershipService } = require("../apps/api/dist/modules/platform/membership.service.js");
 if (!/^rental_os_e2e_/u.test(new URL(process.env.DATABASE_URL).pathname.slice(1))) throw new Error("仅允许专用 E2E 库");
 const db = new PrismaClient();
 const fixture = `catwrite_${randomUUID()}`;
@@ -78,6 +79,36 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal(await db.rentalRuleVersion.count({ where: { workspaceId } }), 0);
     assert.equal(await db.rentalRuleVersionAudit.count({ where: { workspaceId } }), 0);
     const currentBinding = { categoryVersionId: versionId, adoptionRevision: 1 };
+    // Qualification-type mutations wait on the same space lock as adoption.
+    const qualificationInput = { code: `${fixture}_license`, name: "专项资格证", status: "enabled", requiredForBooking: true };
+    let qualificationLocked, releaseQualification, qualificationAttempted;
+    const qualificationReady = new Promise((resolve) => { qualificationLocked = resolve; });
+    const qualificationRelease = new Promise((resolve) => { releaseQualification = resolve; });
+    const qualificationWriterReady = new Promise((resolve) => { qualificationAttempted = resolve; });
+    const freezeQualificationSpace = db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM business_workspaces WHERE id = ${workspaceId} FOR UPDATE`;
+      await tx.businessWorkspace.update({ where: { id: workspaceId }, data: { status: "FROZEN" } });
+      qualificationLocked(); await qualificationRelease;
+    });
+    await qualificationReady;
+    const waitingMembership = new MembershipService(new Proxy(db, { get(client, key) {
+      if (key === "$transaction") return (write, options) => client.$transaction((tx) => write(new Proxy(tx, { get(inner, method) {
+        if (method === "$queryRaw") return (sql) => { if (sql.sql.includes("business_workspaces")) qualificationAttempted(); return inner.$queryRaw(sql); };
+        return Reflect.get(inner, method);
+      } })), options);
+      return Reflect.get(client, key);
+    } }), {});
+    const waitingQualification = assert.rejects(context(() => waitingMembership.saveQualificationType("tenant_001", workspaceId, qualificationInput)), /不可用/);
+    await qualificationWriterReady; releaseQualification(); await freezeQualificationSpace; await waitingQualification;
+    assert.equal(await db.customerMembershipQualificationType.count({ where: { workspaceId } }), 0, "等待期间空间冻结不能新增证件类型");
+    await db.businessWorkspace.update({ where: { id: workspaceId }, data: { status: "ACTIVE" } });
+    const memberships = new MembershipService(db, {});
+    const qualification = await context(() => memberships.saveQualificationType("tenant_001", workspaceId, qualificationInput));
+    assert.equal(qualification.requiredForBooking, true);
+    const disabledQualification = await context(() => memberships.saveQualificationType("tenant_001", workspaceId, { ...qualificationInput, id: qualification.id, status: "disabled" }));
+    assert.equal(disabledQualification.status, "disabled");
+    await assert.rejects(context(() => memberships.saveQualificationType("tenant_002", workspaceId, { ...qualificationInput, id: qualification.id })), /不属于本租户/);
+    assert.equal((await db.customerMembershipQualificationType.findUniqueOrThrow({ where: { id: qualification.id } })).status, "disabled");
     await context(() => business.upsertDiscountPlan(discount, currentBinding));
     await context(() => business.upsertService(service, currentBinding));
     await assert.rejects(context(() => business.upsertService({ ...service, version: "2.0", applicableFulfillmentModes: ["onsite_delivery"] })), /不支持/);
