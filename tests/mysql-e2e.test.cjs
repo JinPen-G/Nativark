@@ -5485,10 +5485,14 @@ async function main() {
   console.log("== 15u. PRICE-03 不可变价格版本与调价计划（立即/定时/重叠拒绝） ==");
   // 需求 4.4.3：价格版本是完整、不可变结果；调价计划只存差异，确认时生成完整新版本；
   // 重叠时段在保存/确认时拒绝；新版本不影响有效报价与历史订单。
-  const adjBeforeVersions = Number(readScalar(`SELECT COUNT(*) FROM \`rental_price_versions\` WHERE \`planId\`='${pricePlan.body.data.id}';`));
+  const adjBeforeVersions = Number(readScalar(`SELECT COUNT(*) FROM \`rental_price_versions\` WHERE \`tenantId\`='${construction.tenant.tenantId}';`));
   assert.ok(adjBeforeVersions >= 1, "15b 的保存应已生成价格版本行（保存即调价）");
-  const v1Rates = JSON.parse(readScalar(`SELECT \`rates\` FROM \`rental_price_versions\` WHERE \`planId\`='${pricePlan.body.data.id}' AND \`version\`='v1';`));
-  assert.equal(v1Rates[0].baseAmount, 100, "v1 版本的基础价应为 100");
+  const adjOriginalQuote = await priceQuoteFor("2046-03-06T09:00:00+08:00", "2046-03-07T09:00:00+08:00");
+  const adjOriginalVersionId = adjOriginalQuote.priceVersionId;
+  assert.ok(adjOriginalVersionId, "报价必须引用实际空间价格版本");
+  const v1Rates = JSON.parse(readScalar(`SELECT \`rates\` FROM \`rental_price_versions\` WHERE \`id\`='${adjOriginalVersionId}';`));
+  const adjRate = (rates) => rates.find((row) => row.itemGroupId === priceGroupId && row.unit === "calendar_day");
+  assert.equal(adjRate(v1Rates)?.baseAmount, 100, "调价前版本的目标基础价应为 100");
 
   // (a) 立即调价：百分比 +10%，确认时生成完整新版本，预览给出最终价。
   const adjCreate = await request(
@@ -5513,9 +5517,13 @@ async function main() {
   assert.equal(adjConfirm.status, 201, `确认调价失败: ${adjConfirm.status} ${JSON.stringify(adjConfirm.body).slice(0, 200)}`);
   assert.equal(adjConfirm.body.data.status, "applied", "立即确认应直接生效");
   const v2Rates = JSON.parse(readScalar(`SELECT \`rates\` FROM \`rental_price_versions\` WHERE \`id\`='${adjConfirm.body.data.versionId}';`));
-  assert.equal(v2Rates[0].baseAmount, 110, "新版本应为 110");
-  const v1After = JSON.parse(readScalar(`SELECT \`rates\` FROM \`rental_price_versions\` WHERE \`planId\`='${pricePlan.body.data.id}' AND \`version\`='v1';`));
-  assert.equal(v1After[0].baseAmount, 100, "旧版本必须原样保留（不可变）");
+  assert.equal(adjRate(v2Rates)?.baseAmount, 110, "新版本的目标基础价应为 110");
+  const v1After = JSON.parse(readScalar(`SELECT \`rates\` FROM \`rental_price_versions\` WHERE \`id\`='${adjOriginalVersionId}';`));
+  assert.deepEqual(v1After, v1Rates, "旧完整空间版本必须原样保留（不可变）");
+  const adjOldQuoteAfter = await request("GET", `/api/rental/v1/quotes/${adjOriginalQuote.id}`, null, construction.accessToken);
+  assert.equal(adjOldQuoteAfter.status, 200);
+  assert.equal(adjOldQuoteAfter.body.data.priceVersionId, adjOriginalVersionId);
+  assert.equal(adjOldQuoteAfter.body.data.rentalAmount, adjOriginalQuote.rentalAmount, "调价不得改写已锁价报价");
 
   // (b) 新版本按租期开始时间命中：未来租期用 110；租期开始早于新版本生效的报价仍按 v1 的 100 复算。
   const adjFriday = (() => {
@@ -5579,25 +5587,34 @@ async function main() {
   assert.ok(/重叠/.test(overlapSave.body.message || ""), `409 应说明时段重叠: ${overlapSave.body.message}`);
 
   // (d) 合法的跨周周期时段（周五 12:00 → 周一 00:00 周末价）真实生效：
-  //     周五 14:00 起租（取价时点在时段内）→ 3 天全 1.5 = 450；
-  //     周五 10:00 起租 → 首日取价时点在时段外按 100、周六周日按 150 → 400。
+  //     自然日计价占周五至周一4日：14:00起租得150×3+100=550；
+  //     10:00起租首日不命中周期价，得100+150×2+100=500。
+  // 新商品使用独立计划验证分时时段；不原地重写已启用计划的费率。
+  const weekendGroup = await request("POST", "/api/rental/v1/item-groups", {
+    code: "E2E-PRICE-WEEKEND", name: "E2E 周期时段设备", inventoryMode: "quantity", unit: "台",
+    attributes: { manufacturer: "E2E工程", model: "PRICE-WEEKEND" }
+  }, construction.accessToken);
+  assert.equal(weekendGroup.status, 201, `周期时段型号创建失败: ${JSON.stringify(weekendGroup.body).slice(0, 200)}`);
+  const weekendGroupId = weekendGroup.body.data.id;
   const weekendSave = await request(
-    "PUT",
-    `/api/rental/v1/pricing-plans/${pricePlan.body.data.id}`,
+    "POST",
+    "/api/rental/v1/pricing-plans",
     {
-      code: "E2E-PRICE-TIER",
-      name: "E2E 阶梯与封顶价格",
+      code: "E2E-PRICE-WEEKEND",
+      name: "E2E 周期时段价格",
       changeReason: "E2E 周五 12:00 起周末价",
       status: "enabled",
-      effectiveFrom: new Date(Date.now() - 86400000).toISOString(),
+      effectiveFrom: new Date().toISOString(),
       rates: [
         {
-          itemGroupId: priceGroupId,
+          itemGroupId: weekendGroupId,
           unit: "calendar_day",
           baseAmount: 100,
           weekendMultiplier: 1,
           holidayMultiplier: 1,
           depositAmount: 500,
+          depositMultiple: 1.5,
+          preAuthAmount: 500,
           minimumUnits: 1,
           periodicWindows: [
             { fromWeekday: 5, fromTime: "12:00", toWeekday: 6, toTime: "00:00", multiplier: 1.5 },
@@ -5608,7 +5625,7 @@ async function main() {
     },
     construction.accessToken
   );
-  assert.equal(weekendSave.status, 200, `合法周期时段保存失败: ${weekendSave.status} ${JSON.stringify(weekendSave.body).slice(0, 200)}`);
+  assert.equal(weekendSave.status, 201, `合法周期时段保存失败: ${weekendSave.status} ${JSON.stringify(weekendSave.body).slice(0, 200)}`);
   const weekendEnd = new Date(new Date(`${adjFriday}T00:00:00Z`).getTime() + 3 * 86400000).toISOString().slice(0, 10);
   const weekendQuoteInside = await request(
     "POST",
@@ -5619,8 +5636,8 @@ async function main() {
       fulfillmentLocationId: constructionLocation.id,
       startAt: `${adjFriday}T14:00:00+08:00`,
       endAt: `${weekendEnd}T14:00:00+08:00`,
-      pricingPlanId: pricePlan.body.data.id,
-      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+      pricingPlanId: weekendSave.body.data.id,
+      lines: [{ itemGroupId: weekendGroupId, quantity: 1 }]
     },
     construction.accessToken
   );
@@ -5635,8 +5652,8 @@ async function main() {
       fulfillmentLocationId: constructionLocation.id,
       startAt: `${adjFriday}T10:00:00+08:00`,
       endAt: `${weekendEnd}T10:00:00+08:00`,
-      pricingPlanId: pricePlan.body.data.id,
-      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+      pricingPlanId: weekendSave.body.data.id,
+      lines: [{ itemGroupId: weekendGroupId, quantity: 1 }]
     },
     construction.accessToken
   );
@@ -5646,11 +5663,11 @@ async function main() {
   // (e) 定时调价：scheduledAt 未来 → 确认后待生效 → 到期执行生成新版本（与立即同一版本机制）。
   const adjScheduled = await request(
     "POST",
-    `/api/rental/v1/pricing-plans/${pricePlan.body.data.id}/adjustments`,
+    `/api/rental/v1/pricing-plans/${weekendSave.body.data.id}/adjustments`,
     {
       code: `E2E-ADJ-SCHED-${Date.now().toString(36)}`,
       name: "E2E 定时调价",
-      changes: [{ itemGroupId: priceGroupId, unit: "calendar_day", op: "fixed", value: 5 }],
+      changes: [{ itemGroupId: weekendGroupId, unit: "calendar_day", op: "fixed", value: 5 }],
       scheduledAt: new Date(Date.now() + 2000).toISOString(),
       changeReason: "E2E 定时 +5"
     },
@@ -5659,7 +5676,7 @@ async function main() {
   assert.equal(adjScheduled.status, 201, `定时调价创建失败: ${adjScheduled.status}`);
   const adjScheduleConfirm = await request(
     "POST",
-    `/api/rental/v1/pricing-plans/${pricePlan.body.data.id}/adjustments/${adjScheduled.body.data.id}/confirm`,
+    `/api/rental/v1/pricing-plans/${weekendSave.body.data.id}/adjustments/${adjScheduled.body.data.id}/confirm`,
     null,
     construction.accessToken
   );
@@ -5672,16 +5689,16 @@ async function main() {
   const schedVersion = JSON.parse(
     readScalar(`SELECT \`rates\` FROM \`rental_price_versions\` WHERE \`id\`='${adjRunDue.body.data.results[0].versionId}';`)
   );
-  assert.equal(schedVersion[0].baseAmount, 105, "定时执行基于最新版本（(d) 已把基础价整单重置为 100）+5 = 105");
+  assert.equal(schedVersion.find((row) => row.itemGroupId === weekendGroupId && row.unit === "calendar_day")?.baseAmount, 105, "定时执行基于独立周期计划的 100 + 5 = 105");
 
-  ok("价格版本与调价计划：保存即生成不可变版本行、旧版本原样保留；调价计划确认前给出逐行最终价、立即确认生成新版本（v2=110）、新版本按租期开始时间命中（未来租期 220（2×110，避开阶梯档））；重叠周期时段保存 400；合法跨周时段（周五 12:00 → 周一 00:00 周末价）真实生效（550/500，含周一取价时点在时段外的边界）；定时调价待生效到期执行生成新版本（105 = (d) 重置后的 100 + 5）");
+  ok("价格版本与调价计划：空间版本按实际ID读取且旧完整版本/报价不变；立即调价目标100→110，新报价2自然日220；重叠周期时段保存409；独立商品跨周时段真实生效550/500；定时调价待生效到期执行生成新版本，目标100→105");
 
   await maybeStopAfter("15u");
 
   console.log("== 15v. PRICE-02B 月历分时摘要：与报价同一命中助手、同一价格版本 ==");
   // 需求 4.5.9：月历只读消费 PRICE-03 的价格事实，周五仍显示工作日但可叠加分时标记；
   // 摘要由服务端用与报价同一个命中助手（periodicWindowCoversDate）计算，月历不复制
-  // 价格值、不建立第二套事实。15u(d) 已给 E2E-PRICE-TIER 配了「周五 12:00 → 周一 00:00」
+  // 价格值、不建立第二套事实。15u(d) 已给 E2E-PRICE-WEEKEND 配了「周五 12:00 → 周一 00:00」
   // 的跨周时段（系数 1.5），2046-03-10 是周五。
   const sumCalendar = (await request("GET", "/api/rental/v1/calendars/2046", null, construction.accessToken)).body.data;
   assert.ok(Array.isArray(sumCalendar.timePriceSummary), "日历 GET 必须返回 timePriceSummary");
@@ -5689,10 +5706,10 @@ async function main() {
   assert.ok(sumFriday, "周五应有分时摘要");
   const sumEntry = sumFriday.entries.find((entry) => entry.source === "periodic");
   assert.ok(sumEntry, "周五摘要应含周期时段条目");
-  assert.equal(sumEntry.planCode, "E2E-PRICE-TIER", "摘要应带计划编码");
+  assert.equal(sumEntry.planCode, "E2E-PRICE-WEEKEND", "摘要应带计划编码");
   assert.equal(sumEntry.multiplier, 1.5, "摘要应带系数 1.5");
   assert.match(sumEntry.version, /^v/, "摘要必须带价格版本号（与报价命中同源）");
-  assert.ok(sumEntry.itemGroupCodes.includes("E2E-PRICE-KIT"), "摘要应列适用商品组编码");
+  assert.ok(sumEntry.itemGroupCodes.includes("E2E-PRICE-WEEKEND"), "摘要应列适用商品组编码");
   const sumTuesday = sumCalendar.timePriceSummary.find((row) => row.date === "2046-03-13");
   assert.ok(!sumTuesday, "周二（时段右端开之后）不得有分时摘要");
   const sumSunday = sumCalendar.timePriceSummary.find((row) => row.date === "2046-03-11");
