@@ -10,6 +10,7 @@ import { categoryAdoptionServiceCapacity } from "./category-adoption-service-cap
 import { categoryAdoptionProductGraph, type CategoryAdoptionBundleComponent } from "./category-adoption-product-graph";
 import { categoryAdoptionPriceStructure } from "./category-adoption-price-structure";
 import { categoryAdoptionSettingsExecutionErrors } from "./category-adoption-settings-execution";
+import { categoryAdoptionFulfillmentReferences } from "./category-adoption-fulfillment-references";
 
 /** Shared transaction reader for preparation and the eventual adoption gate.
  * Caller holds the category/policy -> space mutex; records must be freshly read
@@ -27,9 +28,9 @@ export async function readCategoryAdoptionCompatibility(
   capabilityPatches: CategoryCapabilityPreparationPatch[] = []
 ) {
   const where = { tenantId, workspaceId };
-  const [settings, locations, prices, rules, inspections, capabilityInstances, qualificationTypes, adjustments, pricingPlans, services, pricingGroups, discounts, coupons, capacities, capacityServices] = await Promise.all([
+  const [settings, locations, prices, rules, inspections, capabilityInstances, qualificationTypes, adjustments, pricingPlans, services, pricingGroups, discounts, coupons, capacities, capacityServices, operators] = await Promise.all([
     tx.rentalTenantBusinessSettings.findFirst({ where }),
-    tx.rentalFulfillmentLocation.findMany({ where, select: { id: true, type: true, status: true } }),
+    tx.rentalFulfillmentLocation.findMany({ where, select: { id: true, type: true, status: true, operatorId: true, parentLocationId: true, capabilities: true } }),
     tx.rentalPriceVersion.findMany({ where, select: { id: true, effectiveFrom: true, sequence: true, rates: true } }),
     tx.rentalRuleVersion.findMany({ where: { ...where, status: { in: ["published", "pending", "superseded"] }, voidedAt: null }, select: { id: true, effectiveFrom: true, config: true } }),
     tx.rentalInspectionTemplate.findMany({ where, select: { id: true, categoryCode: true, stage: true, enabled: true, fields: true } }),
@@ -42,7 +43,8 @@ export async function readCategoryAdoptionCompatibility(
     tx.rentalDiscountPlan.findMany({ where: { ...where, status: "enabled" }, select: { id: true, status: true, effectiveTo: true, applicableItemGroupIds: true, applicablePricingGroupIds: true } }),
     tx.rentalCouponTemplate.findMany({ where: { ...where, status: { in: ["active", "scheduled"] } }, select: { id: true, status: true, applicableItemGroupIds: true } }),
     tx.rentalServiceCapacity.findMany({ where: { ...where, status: "enabled", windowEnd: { gt: now } }, select: { id: true, serviceId: true, locationId: true, status: true, windowEnd: true } }),
-    tx.rentalValueAddedService.findMany({ where, select: { id: true, status: true, requiresCapacity: true } })
+    tx.rentalValueAddedService.findMany({ where, select: { id: true, status: true, requiresCapacity: true } }),
+    tx.rentalFulfillmentOperator.findMany({ where, select: { id: true } })
   ]);
   const businessCompatibility = categoryAdoptionBusinessCompatibility(target, {
     settings: settings ? settings.settings as unknown as TenantRentalBusinessSettings : null, locations, inspections, qualificationTypes, adjustments, pricingPlans, services,
@@ -62,6 +64,7 @@ export async function readCategoryAdoptionCompatibility(
     .map((message) => ({ domain: "settings_execution" as const, id: "settings", message }));
   const compatibility = { ...businessCompatibility, valid: businessCompatibility.valid && capabilityCompatibility.valid && references.valid && marketing.valid && priceReferences.valid && priceStructure.valid && capacityCompatibility.valid && productGraph.valid, blockers: [...businessCompatibility.blockers, ...capabilityCompatibility.blockers, ...references.blockers, ...marketing.blockers, ...priceReferences.blockers, ...priceStructure.blockers, ...capacityCompatibility.blockers, ...productGraph.blockers], checkedCapabilityCodes: capabilityCompatibility.checkedCapabilityCodes,
     scope: `${businessCompatibility.scope}_capability_instances_references_marketing_entity_references_price_target_references_price_structure_service_capacity_locations_product_graph` };
-  return { ...compatibility, valid: compatibility.valid && settingsExecution.length === 0,
-    blockers: [...compatibility.blockers, ...settingsExecution], scope: `${compatibility.scope}_calendar_allocation_execution` };
+  const fulfillment = categoryAdoptionFulfillmentReferences({ locations, operators });
+  return { ...compatibility, valid: compatibility.valid && settingsExecution.length === 0 && fulfillment.valid,
+    blockers: [...compatibility.blockers, ...settingsExecution, ...fulfillment.blockers], scope: `${compatibility.scope}_calendar_allocation_execution_fulfillment_references` };
 }

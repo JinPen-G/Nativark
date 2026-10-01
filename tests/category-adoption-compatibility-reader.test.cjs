@@ -8,7 +8,8 @@ const target = structuredClone(RENTAL_CATEGORY_DEFINITIONS.find((row) => row.cod
 const now = new Date("2026-10-01T00:00:00Z");
 const data = {
   rentalTenantBusinessSettings: null,
-  rentalFulfillmentLocation: [{ id: "l", type: "store", status: "enabled" }],
+  rentalFulfillmentLocation: [{ id: "l", type: "store", status: "enabled", operatorId: "op", parentLocationId: null, capabilities: ["pickup", "return"] }],
+  rentalFulfillmentOperator: [{ id: "op" }],
   rentalPriceVersion: [], rentalRuleVersion: [], rentalInspectionTemplate: [],
   workspaceCapabilityInstance: [], customerMembershipQualificationType: [],
   rentalPriceAdjustmentPlan: [], rentalPricingPlan: [], rentalValueAddedService: [],
@@ -37,8 +38,14 @@ const capabilities = { adoptionCompatibility(definition, instances, versions) {
   const before = structuredClone({ data, records, target });
   const result = await read(tx, "t", "w", target, records, capabilities, { registeredVersions: () => ["test"] }, now);
   assert.equal(result.valid, true); assert.equal(result.complete, false);
-  assert.equal(calls.length, 15);
+  assert.equal(calls.length, 16);
+  assert.equal(calls.find((row) => row.model === "rentalFulfillmentLocation").query.select.operatorId, true);
   assert.deepEqual({ data, records, target }, before);
+  data.rentalFulfillmentLocation[0].operatorId = "foreign";
+  const foreignOperator = await read(tx, "t", "w", target, records, capabilities, { registeredVersions: () => ["test"] }, now);
+  assert.equal(foreignOperator.valid, false);
+  assert.ok(foreignOperator.blockers.some((row) => row.domain === "fulfillment_reference"));
+  data.rentalFulfillmentLocation[0].operatorId = "op";
   const emptyBundleRecords = { ...records, groups: [...records.groups,
     { id: "empty-bundle", status: "enabled", inventoryMode: "BUNDLE", bundleComponents: [] }] };
   const brokenGraph = await read(tx, "t", "w", target, emptyBundleRecords, capabilities, { registeredVersions: () => ["test"] }, now);
@@ -84,5 +91,5 @@ const capabilities = { adoptionCompatibility(definition, instances, versions) {
   assert.equal(commercialReads, 1, "无权限在商业读取前拒绝");
   commercialFails = true;
   await assert.rejects(preview(), /订阅读取失败/, "商业读取异常不可伪装成未配置或兼容");
-  console.log("category-adoption-compatibility-reader: 15个同事务空间读取、只读、目标关联和未来价格复用通过");
+  console.log("category-adoption-compatibility-reader: 16个同事务空间读取、只读、履约关联和未来价格复用通过");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

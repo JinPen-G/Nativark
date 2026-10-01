@@ -49,7 +49,7 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     const input = { id: `${fixture}_g1`, tenantId: "tenant_001", categoryCode: "camera", code: "G1", name: "专项型号", inventoryMode: "serialized", unit: "件", attributes: { identity: " abc " }, status: "enabled", bundleComponents: [], createdAt: new Date().toISOString() };
     // Deliberately minimal repository fixtures, not a claim of usable business settings.
     const settings = { tenantId: "tenant_001", categoryCode: "camera", configVersion: "fixture", pricing: { enabledUnits: ["hour"], defaultUnit: "hour", holidayPricingEnabled: false }, calendar: { weekendDays: [0, 6], officialCalendarRegion: "CN", holidayPricingEnabled: false }, fulfillment: { enabledModes: ["store_pickup_return"] } };
-    const location = { id: `${fixture}_location`, tenantId: "tenant_001", code: "L", name: "专项地点", type: "store", status: "enabled", capabilities: ["pickup", "return"] };
+    const location = { id: `${fixture}_location`, tenantId: "tenant_001", code: "L", name: "专项地点", type: "store", operatorId: `${fixture}_operator`, status: "enabled", capabilities: ["pickup", "return"] };
     const capability = { tenantId: "tenant_001", workspaceId, code: "camera_compatibility", status: "enabled", implementationVersion: "cam-1.0", configVersion: "v1", config: { relations: [] }, revision: 1 };
     const capabilityAudit = { code: "camera_compatibility", action: "enable", toStatus: "enabled", reason: "仓储锁专项夹具", at: new Date().toISOString() };
     // Hold the exact lock used by active writes, then switch while an old request is waiting.
@@ -150,6 +150,7 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     await context(() => repo.upsertBusinessSettings(settings, "fixture", undefined, currentBinding));
     await assert.rejects(context(() => repo.upsertBusinessSettings({ ...settings, pricing: { enabledUnits: ["shift"], defaultUnit: "shift" } }, "fixture")), /不支持/);
     assert.deepEqual((await db.rentalTenantBusinessSettings.findUnique({ where: { workspaceId } })).settings.pricing.enabledUnits, ["hour"], "被拒绝的设置不能覆盖已提交事实");
+    await context(() => repo.upsertOperator({ id: location.operatorId, tenantId: "tenant_001", code: "OP", name: "专项运营方", type: "self_operated", settlementMode: "self", status: "enabled", createdAt: new Date().toISOString() }));
     await context(() => repo.upsertLocation(location, undefined, currentBinding));
     await assert.rejects(context(() => repo.upsertLocation({ ...location, type: "project_site" })), /不支持/);
     assert.equal((await db.rentalFulfillmentLocation.findUnique({ where: { id: location.id } })).type, "store");
@@ -453,6 +454,14 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal(finalCommercialReads, 1, "写入前须重新按最终时点读取权益，不复用锁前快照");
     await assert.rejects(applyPhase({}, (tx) => tx, capabilityRuntime, { lockCategoryCommercialContext: async () => ({ newBusinessAllowed: true, entitlements: [], lockedFeatureCodes: ["foreign_dependency"] }) }), /商业依赖/);
     assert.equal(await readEntityFacts(), phaseBefore, "商业拒绝不能留下实体、配置、绑定或审计写入");
+    await db.rentalFulfillmentLocation.update({ where: { id: location.id }, data: { operatorId: null } });
+    await assert.rejects(applyPhase(), /所属运营方不存在/);
+    assert.equal(await readEntityFacts(), phaseBefore, "履约引用拒绝必须回滚候选资料、能力、绑定与审计");
+    assert.equal((await db.rentalFulfillmentLocation.findUniqueOrThrow({ where: { id: location.id } })).operatorId, null, "拒绝不偷偷修复存量地点");
+    await db.rentalFulfillmentLocation.update({ where: { id: location.id }, data: { operatorId: location.operatorId, capabilities: ["unknown"] } });
+    await assert.rejects(applyPhase(), /有效的取还/);
+    assert.equal(await readEntityFacts(), phaseBefore);
+    await db.rentalFulfillmentLocation.update({ where: { id: location.id }, data: { capabilities: location.capabilities } });
     // 准备之后新增的空套装也必须参与本事务最终图校验，不能只信准备清单。
     const invalidBundleId = `${fixture}_invalid_bundle`;
     await db.rentalItemGroup.create({ data: { id: invalidBundleId, tenantId: "tenant_001", workspaceId,
