@@ -4233,6 +4233,10 @@ async function main() {
   const deliveryQuote = (startAt, endAt) =>
     request("POST", "/api/rental/v1/quotes", {
       customerType: "personal", customerId: constructionMemberId, fulfillmentMode: "delivery", fulfillmentLocationId: constructionLocation.id,
+      deliveryAddressDraft: {
+        recipient: "E2E 配送收件人", phone: "13800000062", countryCode: "CN",
+        province: "上海市", city: "上海市", district: "徐汇区", detail: "测试路 8 号"
+      },
       startAt, endAt, pricingPlanId: pricePlan.body.data.id, lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
     }, construction.accessToken);
   const deliveryOutside = await deliveryQuote(`${deliveryDate}T10:00:00+08:00`, `${closedYear}-09-22T14:00:00+08:00`);
@@ -4590,7 +4594,9 @@ async function main() {
   console.log("== 15n. PRICE-02 发布前影响预览（Codex #5） ==");
   // 需求 4.5.8：发布前必须展示受影响日期以及停业、营业时间、履约能力和特殊价格变化；
   // 存在未来订单时必须提示，但**不得直接改变**这些订单。
-  const previewYear = 2038;
+  // 使用未配置且处于已审核操作资格证有效期内的年度；不能靠
+  // qualificationApproved 入参绕过真实资质覆盖租期的校验。
+  const previewYear = 2029;
   const previewDate = `${previewYear}-07-15`;
   // 先造一版已发布：该日期正常营业、系数 1、有营业时段。
   const previewSeed = await request("PUT", `/api/rental/v1/calendars/${previewYear}/days/${previewDate}`, {
@@ -5366,7 +5372,7 @@ async function main() {
     "/api/rental/v1/quotes",
     {
             customerType: "personal",
-      customerId: "recheck_customer",
+      customerId: constructionMemberId,
       fulfillmentMode: "warehouse_pickup_return",
       fulfillmentLocationId: constructionLocation.id,
       startAt: "2027-08-11T09:00:00+08:00",
@@ -5392,7 +5398,7 @@ async function main() {
     {
       quoteId: recheckQuote.body.data.id,
             customerType: "personal",
-            customerId: "recheck_customer",
+            customerId: constructionMemberId,
       customerName: "E2E 复查客户",
       qualificationApproved: true,
       fulfillmentMode: "warehouse_pickup_return",
@@ -5420,7 +5426,7 @@ async function main() {
     {
       quoteId: recheckQuote.body.data.id,
             customerType: "personal",
-            customerId: "recheck_customer",
+            customerId: constructionMemberId,
       customerName: "E2E 复查客户",
       qualificationApproved: true,
       fulfillmentMode: "warehouse_pickup_return",
