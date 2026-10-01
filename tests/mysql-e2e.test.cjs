@@ -760,6 +760,11 @@ async function main() {
   ok("无 token 请求返回 401");
   const demo = await login("demo", "admin", DEMO_PASSWORD);
   const demo2 = await login("demo2", "admin", DEMO_PASSWORD);
+  if (process.env.E2E_STOP_AFTER === "15e") {
+    const concurrentConfigWrites = runNode(["tests/category-active-write-db.cjs"], { env: { DATABASE_URL: TEST_DATABASE_URL } });
+    assert.equal(concurrentConfigWrites.status, 0, concurrentConfigWrites.stderr || concurrentConfigWrites.stdout);
+    console.log(concurrentConfigWrites.stdout);
+  }
   if (process.env.E2E_STOP_AFTER === "category-governance-api") {
     const commercialCompatibility = runNode(["tests/category-adoption-commercial.test.cjs"]);
     assert.equal(commercialCompatibility.status, 0, commercialCompatibility.stderr || commercialCompatibility.stdout);
@@ -2195,7 +2200,7 @@ async function main() {
   const excavatorPlan = await request(
     "POST",
     "/api/rental/v1/pricing-plans",
-    { effectiveFrom: new Date(Date.now() - 86400000).toISOString(), code: "E2E-EXCA-PRICE", name: "E2E 挖掘机价格", changeReason: "E2E 品类深度用例", status: "enabled", rates: [{ itemGroupId: excavatorGroup.body.data.id, unit: "shift", baseAmount: 1500, weekendMultiplier: 1.1, holidayMultiplier: 1.25, depositAmount: 5000, minimumUnits: 1 }] },
+    { effectiveFrom: new Date(Date.now() - 86400000).toISOString(), code: "E2E-EXCA-PRICE", name: "E2E 挖掘机价格", changeReason: "E2E 品类深度用例", status: "enabled", rates: [{ itemGroupId: excavatorGroup.body.data.id, unit: "shift", baseAmount: 1500, weekendMultiplier: 1.1, holidayMultiplier: 1.25, depositAmount: 5000, depositMultiple: 1.5, preAuthAmount: 5000, minimumUnits: 1 }] },
     construction.accessToken
   );
   assert.equal(excavatorPlan.status, 201, `工程定价计划失败: ${JSON.stringify(excavatorPlan.body).slice(0, 200)}`);
@@ -2464,6 +2469,9 @@ async function main() {
         weekendMultiplier: 1,
         holidayMultiplier: 1,
         depositAmount: 500,
+        // 后续空间级规则切换要求所有活动商品都有对应资金费率，不能只配被报价商品。
+        depositMultiple: 1.5,
+        preAuthAmount: 500,
         minimumUnits: 1
       }
     ]
@@ -2663,6 +2671,17 @@ async function main() {
   //
   // 造一版"从 30 天后才生效"的计划：今天报今天的租期不该命中它，
   // 今天报 60 天后的租期必须命中它。早前按 Date.now() 判定，后者会漏。
+  // 未来版本独占一个测试租户，不能污染随后立即调价的空间时间轴。
+  // 不删除已发布版本，不在当前空间倒插价格来“清理”测试现场。
+  const futurePricingTenant = await bootstrapTenant(platform.accessToken, "e2e_future_pricing", "construction");
+  const futurePricingLocation = await configureRentalTestLocation(futurePricingTenant.accessToken, "warehouse");
+  const futurePricingGroup = await request("POST", "/api/rental/v1/item-groups", {
+    code: "E2E-FUTURE-GROUP", name: "E2E 未来价格商品", inventoryMode: "quantity", unit: "套",
+    attributes: { manufacturer: "E2E重工", model: "FUTURE-KIT" }
+  }, futurePricingTenant.accessToken);
+  assert.equal(futurePricingGroup.status, 201, `未来价格商品创建失败: ${JSON.stringify(futurePricingGroup.body).slice(0, 250)}`);
+  const futurePricingGroupId = futurePricingGroup.body.data.id;
+  const futurePricingMemberId = await registerApprovedRentalMember(futurePricingTenant.accessToken, "E2E未来价格客户", "13800000063");
   const futurePlan = await request(
     "POST",
     "/api/rental/v1/pricing-plans",
@@ -2674,7 +2693,7 @@ async function main() {
       effectiveFrom: new Date(Date.now() + 30 * 86400000).toISOString(),
       rates: [
         {
-          itemGroupId: priceGroupId,
+          itemGroupId: futurePricingGroupId,
           unit: "calendar_day",
           baseAmount: 777,
           weekendMultiplier: 1,
@@ -2684,7 +2703,7 @@ async function main() {
         }
       ]
     },
-    construction.accessToken
+    futurePricingTenant.accessToken
   );
   assert.equal(futurePlan.status, 201, `未来生效计划创建失败: ${JSON.stringify(futurePlan.body).slice(0, 200)}`);
   // 指名一个对该租期尚未生效的计划 → 必须拒绝，而不是拿它定价。
@@ -2692,15 +2711,15 @@ async function main() {
     "POST",
     "/api/rental/v1/quotes",
     {
-      customerType: "personal", customerId: constructionMemberId,
+      customerType: "personal", customerId: futurePricingMemberId,
       fulfillmentMode: "warehouse_pickup_return",
-      fulfillmentLocationId: constructionLocation.id,
+      fulfillmentLocationId: futurePricingLocation.id,
       startAt: new Date(Date.now() + 2 * 86400000).toISOString(),
       endAt: new Date(Date.now() + 3 * 86400000).toISOString(),
       pricingPlanId: futurePlan.body.data.id,
-      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+      lines: [{ itemGroupId: futurePricingGroupId, quantity: 1 }]
     },
-    construction.accessToken
+    futurePricingTenant.accessToken
   );
   assert.equal(
     tooEarly.status,
@@ -2712,15 +2731,15 @@ async function main() {
     "POST",
     "/api/rental/v1/quotes",
     {
-      customerType: "personal", customerId: constructionMemberId,
+      customerType: "personal", customerId: futurePricingMemberId,
       fulfillmentMode: "warehouse_pickup_return",
-      fulfillmentLocationId: constructionLocation.id,
+      fulfillmentLocationId: futurePricingLocation.id,
       startAt: new Date(Date.now() + 60 * 86400000).toISOString(),
       endAt: new Date(Date.now() + 61 * 86400000).toISOString(),
       pricingPlanId: futurePlan.body.data.id,
-      lines: [{ itemGroupId: priceGroupId, quantity: 1 }]
+      lines: [{ itemGroupId: futurePricingGroupId, quantity: 1 }]
     },
-    construction.accessToken
+    futurePricingTenant.accessToken
   );
   assert.equal(laterRental.status, 201, `未来租期应能使用未来生效计划: ${JSON.stringify(laterRental.body).slice(0, 250)}`);
   // 同一时钟点相隔 1 天 → 占用 2 个营业日期（自然日按日期计，不是按 24 小时块计），
@@ -2778,7 +2797,7 @@ async function main() {
       name: "E2E 倍数押金价格",
       changeReason: "PRICE-01 押金模式验收",
       status: "enabled",
-      effectiveFrom: new Date(Date.now() - 3600000).toISOString(),
+      effectiveFrom: new Date().toISOString(),
       rates: [
         {
           itemGroupId: priceGroupId,
@@ -2956,7 +2975,7 @@ async function main() {
       name: "E2E 押金与预授权",
       changeReason: "PRICE-01 押金预授权独立验收",
       status: "enabled",
-      effectiveFrom: new Date(Date.now() - 7200000).toISOString(),
+      effectiveFrom: new Date().toISOString(),
       rates: [
         {
           itemGroupId: priceGroupId, unit: "calendar_day", baseAmount: 100,
@@ -3064,7 +3083,7 @@ async function main() {
       name: "E2E 履约费价格",
       changeReason: "PRICE-01 履约费验收",
       status: "enabled",
-      effectiveFrom: new Date(Date.now() - 3600000).toISOString(),
+      effectiveFrom: new Date().toISOString(),
       rates: [
         {
           itemGroupId: priceGroupId,
@@ -3135,6 +3154,17 @@ async function main() {
   // 异地归还需要先在业务设置里放开（CAT-04 加的校验，行为正确）。
   // 用完还原，避免影响后续用例。
   const ffBaseSettings = (await request("GET", "/api/rental/v1/business-settings", null, construction.accessToken)).body.data;
+  const ffOriginalRule = (await request("GET", "/api/rental/v1/rule-versions/current", null, construction.accessToken)).body.data;
+  assert.ok(ffOriginalRule, "异地归还夹具须有原生效规则");
+  const publishFfReturnRule = async (allow, reason) => {
+    const draft = await request("POST", "/api/rental/v1/rule-versions", {
+      changeReason: reason,
+      config: { ...ffOriginalRule.config, fulfillment: { ...ffOriginalRule.config.fulfillment, allowDifferentReturnLocation: allow } }
+    }, construction.accessToken);
+    assert.equal(draft.status, 201, `异地归还规则草稿失败: ${JSON.stringify(draft.body).slice(0, 250)}`);
+    const published = await request("POST", `/api/rental/v1/rule-versions/${draft.body.data.version}/publish`, { reason }, construction.accessToken);
+    assert.equal(published.status, 201, `异地归还规则发布失败: ${JSON.stringify(published.body).slice(0, 250)}`);
+  };
   const ffPutSettings = (fulfillmentPatch) =>
     request(
       "PUT",
@@ -3163,6 +3193,10 @@ async function main() {
       return created.body.data.id;
     })());
   assert.notEqual(ffReturnId, constructionLocation.id, "归还地点必须与取件地点不同，否则跨点附加费不会触发");
+  const ffUnpublishedCross = await request("POST", "/api/rental/v1/quotes", { ...sameLocation.request, returnLocationId: ffReturnId }, construction.accessToken);
+  assert.equal(ffUnpublishedCross.status, 400, "只修改旧经营设置不能绕过尚未启用异地归还的生效规则");
+  assert.match(ffUnpublishedCross.body.message, /生效规则未启用异地归还/);
+  await publishFfReturnRule(true, "E2E 履约费用验收启用异地归还");
   const crossLocation = await ffQuote({ returnLocationId: ffReturnId });
   assert.equal(
     crossLocation.fulfillmentAmount,
@@ -3183,7 +3217,7 @@ async function main() {
   assert.equal(snapshotRates.length, 1, "报价必须固化命中的费率");
   assert.equal(snapshotRates[0].baseAmount, 100, "费率快照必须含基础价");
   assert.equal(snapshotRates[0].unit, "calendar_day", "费率快照必须含计价单位");
-  // 改掉计划的基础价并递增版本后，旧报价的费率快照不得随之改变。
+  // 普通保存必须拒绝覆盖活动计划；正式调价追加版本后，旧报价仍使用旧快照。
   const bumped = await request(
     "POST",
     "/api/rental/v1/pricing-plans",
@@ -3209,7 +3243,26 @@ async function main() {
     },
     construction.accessToken
   );
-  assert.equal(bumped.status, 201, `改价失败: ${JSON.stringify(bumped.body).slice(0, 250)}`);
+  assert.equal(bumped.status, 409, "已启用计划不可通过普通保存覆盖");
+  assert.equal(JSON.parse(readScalar(`SELECT \`rates\` FROM \`rental_pricing_plans\` WHERE \`id\`='${ffPlan.body.data.id}';`))[0].baseAmount, 100, "拒绝覆盖后原计划费率必须不变");
+  const ffAdjustment = await request("POST", `/api/rental/v1/pricing-plans/${ffPlan.body.data.id}/adjustments`, {
+    code: "E2E-FF-REPRICE", name: "E2E 履约报价锁价调价",
+    changes: [{ itemGroupId: priceGroupId, unit: "calendar_day", op: "set_base", value: 999 }],
+    changeReason: "PRICE-01 正式调价后旧报价仍可复算"
+  }, construction.accessToken);
+  assert.equal(ffAdjustment.status, 201, `履约费调价草稿失败: ${JSON.stringify(ffAdjustment.body).slice(0, 250)}`);
+  const ffApplied = await request("POST", `/api/rental/v1/pricing-plans/${ffPlan.body.data.id}/adjustments/${ffAdjustment.body.data.id}/confirm`, null, construction.accessToken);
+  assert.equal(ffApplied.status, 201, `履约费调价确认失败: ${JSON.stringify(ffApplied.body).slice(0, 250)}`);
+  assert.equal(ffApplied.body.data.status, "applied");
+  assert.ok(ffApplied.body.data.versionId);
+  assert.notEqual(ffApplied.body.data.versionId, sameLocation.priceVersionId, "调价须追加新版本，不能覆盖原报价引用的版本");
+  const ffNewQuote = await ffQuote({});
+  assert.equal(ffNewQuote.rentalAmount, 1998, "新报价须使用 999 × 2 个自然日的新价");
+  assert.equal(ffNewQuote.fulfillmentAmount, 60, "调基础价不得丢失原履约费用");
+  const ffOldQuote = await request("GET", `/api/rental/v1/quotes/${sameLocation.id}`, null, construction.accessToken);
+  assert.equal(ffOldQuote.status, 200);
+  assert.equal(ffOldQuote.body.data.rentalAmount, 200, "原报价租金不得随调价变化");
+  assert.equal(ffOldQuote.body.data.priceVersionId, sameLocation.priceVersionId, "原报价价格版本引用必须保持不变");
   assert.equal(
     Number(
       JSON.parse(
@@ -3217,8 +3270,7 @@ async function main() {
       )[0].baseAmount
     ),
     100,
-    "改价并递增版本后，旧报价的费率快照必须仍是 100——这是 Codex 指出的「版本非不可变快照」" +
-      "的兜底：计划行被覆盖后旧版本内容消失，只有报价自带费率才能按原价复算"
+    "正式调价追加版本后，旧报价的费率快照必须仍是 100"
   );
 
   // 还原异地归还开关。
@@ -3226,6 +3278,7 @@ async function main() {
     allowDifferentReturnLocation: ffBaseSettings.fulfillment.allowDifferentReturnLocation
   });
   assert.equal(restoreCross.status, 200, "还原异地归还开关失败");
+  await publishFfReturnRule(ffOriginalRule.config.fulfillment.allowDifferentReturnLocation, "E2E 履约费用验收还原异地归还规则");
 
   // ③ 显式指定不存在的计价单位必须报错，不能静默换成别的单位算钱。
   const wrongUnit = await request(
@@ -3258,7 +3311,7 @@ async function main() {
       name: "E2E 无履约费",
       changeReason: "PRICE-01 履约费缺省验收",
       status: "enabled",
-      effectiveFrom: new Date(Date.now() - 3600000).toISOString(),
+      effectiveFrom: new Date().toISOString(),
       rates: [
         {
           itemGroupId: priceGroupId,
@@ -3305,6 +3358,8 @@ async function main() {
   ok(
     "履约费用已生效：同地 60 / 异地 100 且进应付、明细带计划版本、未配置时为 0 且无空行、合计落库"
   );
+
+  await maybeStopAfter("15e");
 
   console.log("== 15c. PRICE-01 营业时区按经营空间配置且真正影响计价 ==");
   // 项目负责人 2026-08-25 决定按租户配置时区。业务设置在 SPACE-03 之后按**经营空间**
@@ -10511,6 +10566,9 @@ async function maybeStopAfter(marker) {
       process.exitCode = 0;
     } else {
       console.error(`\nE2E 失败: ${error.message}`);
+      // HTTP 响应和子进程日志使用不同管道；给已到达的异常日志一个事件循环窗口，
+      // 避免只打印启动日志而丢失触发 500 的真实原因。不是业务重试或吞错。
+      await new Promise((resolve) => setTimeout(resolve, 100));
       // 断言层只看到状态码，成因在 API 子进程里；附上日志尾部避免无从下手。
       if (apiLogRef && apiLogRef.length) {
         console.error("--- API 日志尾部 ---");
