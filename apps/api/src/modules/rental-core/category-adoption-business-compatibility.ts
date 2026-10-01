@@ -2,6 +2,22 @@ import type { RentalCategoryDefinition, RentalPricingRate, RentalRuleConfig, Ten
 import { categoryPricingRuleError } from "./category-pricing-rule-compatibility";
 
 export interface CategoryTimedConfiguration<T> { id: string; effectiveFrom: Date | null; sequence: number; value: T }
+const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
+const optionalBoolean = (value: unknown) => value === undefined || typeof value === "boolean";
+
+/** Minimum shape consumed by this preview, not a substitute for full rule validation. */
+function readableRule(value: unknown): value is RentalRuleConfig {
+  if (!object(value) || !object(value.payment) || !object(value.overdue)) return false;
+  if (typeof value.overdue.feeMode !== "string" || !["none", "hourly", "next_period", "multiplier", "manual_review", "hourly_to_daily"].includes(value.overdue.feeMode)) return false;
+  if (!optionalBoolean(value.payment.preauthorizationRequired)) return false;
+  for (const key of ["pricing", "preauthorization", "membershipSecurityReduction", "qualification", "fulfillment"]) {
+    if (value[key] !== undefined && !object(value[key])) return false;
+  }
+  if (object(value.pricing) && (!optionalBoolean(value.pricing.hourToDayEnabled) || (value.pricing.shiftStartHours !== undefined && (!Array.isArray(value.pricing.shiftStartHours) || value.pricing.shiftStartHours.some((hour) => typeof hour !== "number" || !Number.isFinite(hour)))))) return false;
+  if (object(value.qualification) && !optionalBoolean(value.qualification.required)) return false;
+  if (object(value.fulfillment) && (!optionalBoolean(value.fulfillment.pickupInspectionRequired) || !optionalBoolean(value.fulfillment.returnInspectionRequired))) return false;
+  return true;
+}
 
 /** Check executable tenant templates, not the platform's replacement defaults. */
 export function categoryAdoptionInspectionFieldsValid(value: unknown): boolean {
@@ -50,12 +66,16 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
   const blockers: Array<{ domain: "settings" | "location" | "price" | "rule" | "inspection" | "service"; id: string; message: string }> = [];
   const add = (domain: typeof blockers[number]["domain"], id: string, message: string) => blockers.push({ domain, id, message });
   const model = target.businessModel;
-  if (input.settings) {
+  if (input.settings !== null) {
     const settings = input.settings;
-    if (settings.pricing.enabledUnits.some((unit) => !model.pricingUnits.includes(unit))) add("settings", "pricing.enabledUnits", "现有启用计价单位不在目标品类范围，请通过经营设置调整");
-    if (!model.pricingUnits.includes(settings.pricing.defaultUnit) || !settings.pricing.enabledUnits.includes(settings.pricing.defaultUnit)) add("settings", "pricing.defaultUnit", "现有默认计价单位不兼容目标品类");
-    if (settings.fulfillment.enabledModes.some((mode) => !model.fulfillmentModes.includes(mode))) add("settings", "fulfillment.enabledModes", "现有启用履约方式不在目标品类范围，请通过经营设置调整");
-    if (!model.supportsHolidayPricing && (settings.pricing.holidayPricingEnabled || settings.calendar.holidayPricingEnabled)) add("settings", "holidayPricingEnabled", "目标品类不支持当前启用的节假日计价设置");
+    if (!object(settings) || !object(settings.pricing) || !Array.isArray(settings.pricing.enabledUnits) || !object(settings.fulfillment) || !Array.isArray(settings.fulfillment.enabledModes) || !object(settings.calendar) || !optionalBoolean(settings.pricing.holidayPricingEnabled) || !optionalBoolean(settings.calendar.holidayPricingEnabled)) {
+      add("settings", "structure", "经营设置结构不可读取，请通过经营设置修复后重新预览");
+    } else {
+      if (settings.pricing.enabledUnits.some((unit) => !model.pricingUnits.includes(unit))) add("settings", "pricing.enabledUnits", "现有启用计价单位不在目标品类范围，请通过经营设置调整");
+      if (!model.pricingUnits.includes(settings.pricing.defaultUnit) || !settings.pricing.enabledUnits.includes(settings.pricing.defaultUnit)) add("settings", "pricing.defaultUnit", "现有默认计价单位不兼容目标品类");
+      if (settings.fulfillment.enabledModes.some((mode) => !model.fulfillmentModes.includes(mode))) add("settings", "fulfillment.enabledModes", "现有启用履约方式不在目标品类范围，请通过经营设置调整");
+      if (!model.supportsHolidayPricing && (settings.pricing.holidayPricingEnabled || settings.calendar.holidayPricingEnabled)) add("settings", "holidayPricingEnabled", "目标品类不支持当前启用的节假日计价设置");
+    }
   }
   for (const location of input.locations) {
     if (location.status === "enabled" && !model.locationTypes.includes(location.type as typeof model.locationTypes[number])) add("location", location.id, "启用地点类型不在目标品类范围，请先处理地点");
@@ -106,6 +126,10 @@ export function categoryAdoptionBusinessCompatibility(target: RentalCategoryDefi
     if (ruleCounts.get(rule.effectiveFrom!.getTime())! > 1) add("rule", rule.id, "同一生效时点存在多个规则版本，请通过规则作废机制处理歧义");
   }
   for (const rule of rules) {
+    if (!readableRule(rule.value)) {
+      add("rule", rule.id, "当前或未来规则结构不可读取，请通过规则发布机制处理；不会自动补默认值");
+      continue;
+    }
     const error = categoryPricingRuleError(model.pricingUnits, rule.value);
     if (error) add("rule", rule.id, error);
     const payment = rule.value.payment;

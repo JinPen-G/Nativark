@@ -13,6 +13,7 @@ import { categoryAdoptionCapabilityReferences } from "./category-adoption-refere
 import { categoryAdoptionMarketingReferences } from "./category-adoption-marketing-references";
 import { categoryAdoptionPriceReferences } from "./category-adoption-price-references";
 import { categoryAdoptionServiceCapacity } from "./category-adoption-service-capacity";
+import { categoryAdoptionProductGraph } from "./category-adoption-product-graph";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import type { RentalCapability, RentalCapabilityConfig, RentalCapabilityLifecycleStatus } from "@rental-os/shared";
@@ -58,7 +59,7 @@ export class CategoryAdoptionPreparationService {
     const [target, source, groups, assets, preparation] = await Promise.all([
       tx.rentalCategoryVersion.findUnique({ where: { id: targetId } }),
       tx.rentalCategoryVersion.findUnique({ where: { id: workspace.categoryVersionId } }),
-      tx.rentalItemGroup.findMany({ where: { tenantId: user.tenantId, workspaceId }, orderBy: { id: "asc" } }),
+      tx.rentalItemGroup.findMany({ where: { tenantId: user.tenantId, workspaceId }, include: { bundleComponents: { select: { componentItemGroupId: true, quantity: true } } }, orderBy: { id: "asc" } }),
       tx.rentalAsset.findMany({ where: { tenantId: user.tenantId, workspaceId }, orderBy: { id: "asc" } }),
       tx.rentalCategoryAdoptionPreparation.findUnique({ where: { workspaceId_targetVersionId: { workspaceId, targetVersionId: targetId } } })
     ]);
@@ -94,7 +95,7 @@ export class CategoryAdoptionPreparationService {
         tx.rentalPriceAdjustmentPlan.findMany({ where: { ...where, status: "pending" }, select: { id: true, status: true, finalRates: true } }),
         tx.rentalPricingPlan.findMany({ where: { ...where, status: "enabled" }, select: { id: true, status: true, effectiveTo: true, fulfillmentFees: true, rates: true } }),
         tx.rentalValueAddedService.findMany({ where: { ...where, status: "enabled" }, select: { id: true, status: true, applicableFulfillmentModes: true, applicableItemGroupIds: true, applicableLocationIds: true, mandatoryRule: true } }),
-        tx.rentalPricingGroup.findMany({ where, select: { id: true } }),
+        tx.rentalPricingGroup.findMany({ where, select: { id: true, status: true, defaultPricingUnit: true, members: { select: { itemGroupId: true } } } }),
         tx.rentalDiscountPlan.findMany({ where: { ...where, status: "enabled" }, select: { id: true, status: true, effectiveTo: true, applicableItemGroupIds: true, applicablePricingGroupIds: true } }),
         tx.rentalCouponTemplate.findMany({ where: { ...where, status: { in: ["active", "scheduled"] } }, select: { id: true, status: true, applicableItemGroupIds: true } }),
         tx.rentalServiceCapacity.findMany({ where: { ...where, status: "enabled", windowEnd: { gt: now } }, select: { id: true, serviceId: true, locationId: true, status: true, windowEnd: true } }),
@@ -110,8 +111,9 @@ export class CategoryAdoptionPreparationService {
       const marketing = categoryAdoptionMarketingReferences({ groups: context.records.groups, pricingGroups, locations, discounts, coupons, services }, now);
       const priceReferences = categoryAdoptionPriceReferences({ groups: context.records.groups, pricingGroups, prices: prices.map((row) => ({ ...row, value: row.rates })), adjustments, plans: pricingPlans }, now);
       const capacityCompatibility = categoryAdoptionServiceCapacity(context.definition, { services: capacityServices, locations, capacities }, now);
-      const compatibility = { ...businessCompatibility, valid: businessCompatibility.valid && capabilityCompatibility.valid && references.valid && marketing.valid && priceReferences.valid && capacityCompatibility.valid, blockers: [...businessCompatibility.blockers, ...capabilityCompatibility.blockers, ...references.blockers, ...marketing.blockers, ...priceReferences.blockers, ...capacityCompatibility.blockers], checkedCapabilityCodes: capabilityCompatibility.checkedCapabilityCodes,
-        scope: `${businessCompatibility.scope}_capability_instances_references_marketing_entity_references_price_target_references_service_capacity_locations` };
+      const productGraph = categoryAdoptionProductGraph(context.definition, { groups: context.records.groups, assets: context.records.assets, locations, pricingGroups });
+      const compatibility = { ...businessCompatibility, valid: businessCompatibility.valid && capabilityCompatibility.valid && references.valid && marketing.valid && priceReferences.valid && capacityCompatibility.valid && productGraph.valid, blockers: [...businessCompatibility.blockers, ...capabilityCompatibility.blockers, ...references.blockers, ...marketing.blockers, ...priceReferences.blockers, ...capacityCompatibility.blockers, ...productGraph.blockers], checkedCapabilityCodes: capabilityCompatibility.checkedCapabilityCodes,
+        scope: `${businessCompatibility.scope}_capability_instances_references_marketing_entity_references_price_target_references_service_capacity_locations_product_graph` };
       return { sourceVersionId: context.workspace.categoryVersionId, sourceRevision: context.workspace.categoryAdoptionRevision,
         targetVersionId: targetId, targetVersionLabel: context.target.versionLabel, targetDefinition: context.definition,
         differences: categoryDefinitionDifferences(context.sourceDefinition, context.definition),

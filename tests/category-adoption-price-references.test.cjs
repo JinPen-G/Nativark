@@ -5,7 +5,7 @@ const now = new Date("2026-10-01"), rate = { itemGroupId: "g", unit: "hour" };
 const timed = (id, date, value) => ({ id, effectiveFrom: new Date(date), sequence: 1, value });
 const input = { groups: [{ id: "g" }], pricingGroups: [{ id: "p" }], prices: [timed("old", "2025-01-01", [{ itemGroupId: "retired", unit: "hour" }]), timed("current", "2026-01-01", [rate])], adjustments: [], plans: [] };
 assert.equal(check(input, now).valid, true);
-for (const value of [null, [], {}, [null], [{ unit: "hour" }], [{ ...rate, pricingGroupId: "foreign" }], [rate, rate]]) {
+for (const value of [null, {}, [null], [{ unit: "hour" }], [{ ...rate, pricingGroupId: "foreign" }], [rate, rate]]) {
   assert.equal(check({ ...input, prices: [timed("current", "2026-01-01", value)] }, now).valid, false);
 }
 assert.equal(check({ ...input, prices: [timed("current", "2026-01-01", [{ ...rate, itemGroupId: "legacy-alias", pricingGroupId: "p" }])] }, now).valid, true, "分组优先，非执行旧别名不当作目标");
@@ -17,4 +17,8 @@ assert.equal(check({ ...input, adjustments: [{ id: "pending", status: "pending",
 assert.equal(check({ ...input, adjustments: [{ id: "past", status: "applied", finalRates: plan.rates }] }, now).valid, true);
 const before = structuredClone(input); check(input, now); assert.deepEqual(input, before);
 assert.equal(check(input, now).complete, false);
+assert.equal(check({ ...input, prices: [timed("expired-final-plan", "2026-01-01", [])] }, now).valid, true, "最后一个计划到期产生空时间轴版本是合法事实，不等于报价可用");
+assert.equal(check({ ...input, prices: [...input.prices, timed("future-empty", "2099-01-01", [])] }, now).valid, true);
+assert.equal(check({ ...input, plans: [{ ...plan, rates: [] }] }, now).valid, false, "启用计划仍必须有费率");
+assert.equal(check({ ...input, adjustments: [{ id: "empty-pending", status: "pending", finalRates: [] }] }, now).valid, false, "待生效调价仍必须有费率");
 console.log("category-adoption-price-references: 执行目标优先级、当前/未来/待调价/启用计划、重复单位、历史保留通过");

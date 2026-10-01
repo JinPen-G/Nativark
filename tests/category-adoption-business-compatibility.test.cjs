@@ -8,6 +8,15 @@ const timed = (id, date, value, sequence = 0) => ({ id, effectiveFrom: new Date(
 const rule = { pricing: {}, overdue: { feeMode: "none" }, payment: { preauthorizationRequired: false, depositMode: "none" } };
 const input = { settings: null, locations: [], prices: [timed("historical", "2025-01-01", [{ unit: "shift" }]), timed("current", "2026-09-01", [{ unit: "hour" }])], rules: [] };
 assert.equal(check(target, input, now).valid, true, "历史价格保留原版本，不阻碍现有兼容组合");
+for (const settings of [false, [], {}, { pricing: {} }, { pricing: { enabledUnits: "hour" }, fulfillment: { enabledModes: [] }, calendar: {} }]) {
+  assert.ok(check(target, { ...input, settings }, now).blockers.some((row) => row.id === "structure"), "异常经营设置应返回阻碍，不抛出服务器错误");
+}
+for (const value of [null, [], {}, { payment: {}, overdue: null }, { ...rule, pricing: [] }, { ...rule, qualification: "required" }, { ...rule, fulfillment: { pickupInspectionRequired: "false" } }, { ...rule, overdue: { feeMode: "unknown" } }, { ...rule, overdue: { feeMode: { toString: "none" } } }]) {
+  const bad = { ...input, rules: [timed("invalid-current", "2026-01-01", value)] }, before = structuredClone(bad);
+  assert.ok(check(target, bad, now).blockers.some((row) => row.id === "invalid-current"));
+  assert.deepEqual(bad, before, "预览不补默认值或修改规则正文");
+  assert.equal(check(target, { ...input, rules: [timed("invalid-old", "2025-01-01", value), timed("valid-current", "2026-01-01", rule)] }, now).valid, true, "历史异常不改写也不误作当前规则");
+}
 const future = { ...input, prices: [...input.prices, timed("future", "2026-12-01", [{ unit: "shift" }])] };
 const pending = { id: "pending-price", status: "pending", finalRates: [{ unit: "shift" }] };
 assert.ok(check(target, { ...input, adjustments: [pending] }, now).blockers.some((row) => row.id === pending.id));
