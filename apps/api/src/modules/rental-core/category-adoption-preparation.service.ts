@@ -55,7 +55,7 @@ export class CategoryAdoptionPreparationService {
     const [target, source, groups, assets, preparation, capabilityRows] = await Promise.all([
       tx.rentalCategoryVersion.findUnique({ where: { id: targetId } }),
       tx.rentalCategoryVersion.findUnique({ where: { id: workspace.categoryVersionId } }),
-      tx.rentalItemGroup.findMany({ where: { tenantId: user.tenantId, workspaceId }, include: { bundleComponents: { select: { componentItemGroupId: true, quantity: true } } }, orderBy: { id: "asc" } }),
+      tx.rentalItemGroup.findMany({ where: { tenantId: user.tenantId, workspaceId }, include: { bundleComponents: { select: { componentItemGroupId: true, quantity: true, optional: true, substitutionGroup: true } } }, orderBy: { id: "asc" } }),
       tx.rentalAsset.findMany({ where: { tenantId: user.tenantId, workspaceId }, orderBy: { id: "asc" } }),
       tx.rentalCategoryAdoptionPreparation.findUnique({ where: { workspaceId_targetVersionId: { workspaceId, targetVersionId: targetId } } }),
       tx.workspaceCapabilityInstance.findMany({ where: { tenantId: user.tenantId, workspaceId }, select: { code: true, status: true, revision: true, implementationVersion: true, configVersion: true, config: true } })

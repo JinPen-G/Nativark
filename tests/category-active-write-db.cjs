@@ -453,6 +453,23 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal(finalCommercialReads, 1, "写入前须重新按最终时点读取权益，不复用锁前快照");
     await assert.rejects(applyPhase({}, (tx) => tx, capabilityRuntime, { lockCategoryCommercialContext: async () => ({ newBusinessAllowed: true, entitlements: [], lockedFeatureCodes: ["foreign_dependency"] }) }), /商业依赖/);
     assert.equal(await readEntityFacts(), phaseBefore, "商业拒绝不能留下实体、配置、绑定或审计写入");
+    // 准备之后新增的空套装也必须参与本事务最终图校验，不能只信准备清单。
+    const invalidBundleId = `${fixture}_invalid_bundle`;
+    await db.rentalItemGroup.create({ data: { id: invalidBundleId, tenantId: "tenant_001", workspaceId,
+      categoryCode: "CAMERA", code: "INVALID-BUNDLE", name: "空组成候选", inventoryMode: "BUNDLE",
+      unit: "套", attributes: {}, status: "enabled" } });
+    const bundleBefore = await readEntityFacts();
+    await assert.rejects(applyPhase(), /启用套装缺少组成/);
+    assert.equal(await readEntityFacts(), bundleBefore, "空套装拒绝必须回滚补丁、唯一声明、能力配置、绑定与审计");
+    await db.rentalBundleComponent.create({ data: { bundleItemGroupId: invalidBundleId,
+      componentItemGroupId: entityGroups[0].id, quantity: 1, optional: true, substitutionGroup: "NO-DEFAULT" } });
+    await assert.rejects(applyPhase(), /替代组缺少唯一默认项/);
+    assert.equal(await readEntityFacts(), bundleBefore, "替代组拒绝不得改写候选实体及其他经营事实");
+    assert.equal(await db.rentalBundleComponent.count({ where: { bundleItemGroupId: invalidBundleId } }), 1, "拒绝不得删除候选组成");
+    assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation, "拒绝须保留准备输入");
+    await db.rentalBundleComponent.deleteMany({ where: { bundleItemGroupId: invalidBundleId } });
+    await db.rentalItemGroup.delete({ where: { id: invalidBundleId } });
+    assert.equal(await readEntityFacts(), phaseBefore);
     await assert.rejects(applyPhase({}, (tx) => tx, null), /可信能力执行器/);
     await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: { fixture: true } } });
     let candidateEntityWrites = 0;

@@ -7,7 +7,7 @@ import { categoryAdoptionCapabilityReferences } from "./category-adoption-refere
 import { categoryAdoptionMarketingReferences } from "./category-adoption-marketing-references";
 import { categoryAdoptionPriceReferences } from "./category-adoption-price-references";
 import { categoryAdoptionServiceCapacity } from "./category-adoption-service-capacity";
-import { categoryAdoptionProductGraph } from "./category-adoption-product-graph";
+import { categoryAdoptionProductGraph, type CategoryAdoptionBundleComponent } from "./category-adoption-product-graph";
 import { categoryAdoptionPriceStructure } from "./category-adoption-price-structure";
 import { categoryAdoptionSettingsExecutionErrors } from "./category-adoption-settings-execution";
 
@@ -19,7 +19,7 @@ export async function readCategoryAdoptionCompatibility(
   tx: Prisma.TransactionClient, tenantId: string, workspaceId: string,
   target: RentalCategoryDefinition,
   records: {
-    groups: Array<{ id: string; status: string; inventoryMode: string; bundleComponents: Array<{ componentItemGroupId: string; quantity: number }> }>;
+    groups: Array<{ id: string; status: string; inventoryMode: string; bundleComponents: CategoryAdoptionBundleComponent[] }>;
     assets: Array<{ id: string; itemGroupId: string; locationId: string }>;
   },
   capabilities: Pick<WorkspaceCapabilityService, "prepareAdoptionConfigs" | "adoptionCompatibility">,

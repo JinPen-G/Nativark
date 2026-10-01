@@ -39,6 +39,11 @@ const capabilities = { adoptionCompatibility(definition, instances, versions) {
   assert.equal(result.valid, true); assert.equal(result.complete, false);
   assert.equal(calls.length, 15);
   assert.deepEqual({ data, records, target }, before);
+  const emptyBundleRecords = { ...records, groups: [...records.groups,
+    { id: "empty-bundle", status: "enabled", inventoryMode: "BUNDLE", bundleComponents: [] }] };
+  const brokenGraph = await read(tx, "t", "w", target, emptyBundleRecords, capabilities, { registeredVersions: () => ["test"] }, now);
+  assert.equal(brokenGraph.valid, false);
+  assert.ok(brokenGraph.blockers.some((row) => row.domain === "bundle_reference"));
   assert.deepEqual(calls.find((row) => row.model === "rentalServiceCapacity").query.where.windowEnd, { gt: now });
   assert.equal(calls.find((row) => row.model === "rentalInspectionTemplate").query.select.categoryCode, true, "启用模板归属必须进入事务投影");
   const { WorkspaceCapabilityService } = require("../apps/api/dist/modules/rental-core/workspace-capability.service.js");

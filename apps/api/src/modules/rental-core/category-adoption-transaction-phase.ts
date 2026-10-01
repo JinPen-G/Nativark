@@ -87,7 +87,7 @@ export async function writePreparedCategoryAdoptionPhase(
   // This reader remains partial: passing it does not open the public adoption
   // route or waive the caller's remaining final-gate responsibilities.
   const [candidateGroups, candidateAssets] = await Promise.all([
-    tx.rentalItemGroup.findMany({ where: { tenantId, workspaceId }, include: { bundleComponents: { select: { componentItemGroupId: true, quantity: true } } } }),
+    tx.rentalItemGroup.findMany({ where: { tenantId, workspaceId }, include: { bundleComponents: { select: { componentItemGroupId: true, quantity: true, optional: true, substitutionGroup: true } } } }),
     tx.rentalAsset.findMany({ where: { tenantId, workspaceId } })
   ]);
   const businessCompatibility = await readCategoryAdoptionCompatibility(tx, tenantId, workspaceId, definition,
