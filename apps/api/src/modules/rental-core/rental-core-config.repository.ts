@@ -71,6 +71,7 @@ export type RentalConfigTx = Prisma.TransactionClient;
 export interface RentalConfigStore {
   loadAll(): Promise<TenantConfigSnapshot[]>;
   listInspectionTemplates?(tenantId: string, workspaceId: string): Promise<RentalInspectionTemplate[]>;
+  listCouponTemplates?(tenantId: string, workspaceId: string): Promise<RentalCouponTemplate[]>;
   /** 全部启用的经营空间，用于服务层按空间建状态并解析「租户 → 默认空间」。 */
   listWorkspaces(): Promise<Array<{ id: string; tenantId: string; categoryCode: RentalCategoryCode; isDefault: boolean }>>;
   upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx): Promise<void>;
@@ -548,6 +549,13 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     };
     if (tx) return void await write(tx);
     await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  }
+
+  async listCouponTemplates(tenantId: string, workspaceId: string): Promise<RentalCouponTemplate[]> {
+    const rows = await this.prisma.rentalCouponTemplate.findMany({
+      where: { tenantId, workspaceId }, orderBy: { createdAt: "desc" }
+    });
+    return rows.map((row) => this.toCouponTemplate(row));
   }
 
   async upsertCouponTemplate(template: RentalCouponTemplate, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void> {

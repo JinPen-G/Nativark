@@ -3569,7 +3569,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     await this.assertCustomerInCurrentWorkspace(tenantId, customerId);
     if (!tx && this.prisma && (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() === "mysql") {
       const result = await this.prisma.$transaction((transaction) =>
-        this.claimCoupon(tenantId, context, templateId, customerId, transaction)
+        this.claimCoupon(tenantId, context, templateId, customerId, transaction),
+        { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted }
       );
       this.applyCouponClaimToCache(tenantId, context, result.coupon, result.template);
       return result;
@@ -3755,7 +3756,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       };
       try {
         const result = await this.prisma.$transaction((transaction) =>
-          this.grantReward(tenantId, transactionContext, input, transaction, transactionState)
+          this.grantReward(tenantId, transactionContext, input, transaction, transactionState),
+          { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted }
         );
         // 只在事务提交后从库重建缓存，绝不以事务开始前的快照回滚共享状态。
         await this.refreshFromDatabase();

@@ -7,6 +7,7 @@ const { RentalCoreConfigRepository } = require("../apps/api/dist/modules/rental-
 const { RentalCoreFactRepository } = require("../apps/api/dist/modules/rental-core/rental-core-fact.repository.js");
 const { WorkspaceCapabilityRepository } = require("../apps/api/dist/modules/rental-core/workspace-capability.repository.js");
 const { RentalBusinessConfigRepository } = require("../apps/api/dist/modules/rental-core/rental-business-config.repository.js");
+const { RentalBusinessFactRepository } = require("../apps/api/dist/modules/rental-core/rental-business-fact.repository.js");
 const { runWithRequestIdentity } = require("../apps/api/dist/common/request-identity.js");
 const { validateActiveCategoryWrite } = require("../apps/api/dist/modules/rental-core/category-active-write.js");
 if (!/^rental_os_e2e_/u.test(new URL(process.env.DATABASE_URL).pathname.slice(1))) throw new Error("仅允许专用 E2E 库");
@@ -207,6 +208,21 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal(Number(storedCoupon.lockedBudget), 15);
     assert.equal(Number(storedCoupon.redeemedBudget), 5);
     assert.equal(storedCoupon.version, "2.0", "陈旧保存不得覆盖主档版本");
+    const businessFacts = new RentalBusinessFactRepository(db);
+    const claimCustomer = `${fixture}_claim_customer`;
+    await context(() => db.$transaction(async (tx) => {
+      assert.equal(await businessFacts.countCustomerCoupons("tenant_001", coupon.id, claimCustomer, tx), 0);
+      await db.rentalCustomerCoupon.create({ data: {
+        id: `${fixture}_customer_coupon`, tenantId: "tenant_001", workspaceId, customerId: claimCustomer,
+        templateId: coupon.id, templateCode: coupon.code, templateName: coupon.name, templateVersion: "2.0",
+        discountType: "amount", discountValue: 10, minimumSpend: 0, applicableItemGroupIds: [input.id],
+        grantReason: "fixture", status: "claimed", effectiveFrom: new Date(coupon.effectiveFrom), effectiveTo: new Date(coupon.effectiveTo)
+      } });
+      await repo.lockCouponTemplateForClaim("tenant_001", coupon.id, tx);
+      assert.equal(await businessFacts.countCustomerCoupons("tenant_001", coupon.id, claimCustomer, tx), 1, "RC 事务必须看到锁前并发提交的客户领券事实");
+    }, { isolationLevel: "ReadCommitted" }));
+    assert.equal((await repo.listCouponTemplates("tenant_001", workspaceId))[0].claimedQuantity, 4);
+    assert.deepEqual(await repo.listCouponTemplates("tenant_002", workspaceId), [], "定向配置读取不能跨租户空间");
     const calendar = { tenantId: "tenant_001", year: 2030, version: "1.0", region: "CN", status: "draft", days: [], revision: 1 };
     const calendarAudit = { date: "2030-01-01", action: "override", reason: "calendar fixture", at: new Date().toISOString() };
     await context(() => business.upsertCalendar(calendar));
@@ -234,6 +250,7 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal(await db.rentalCalendarOverrideAuditEntry.count({ where: { workspaceId } }), 1);
     console.log("category-active-write-db: 型号/设置/地点/能力绑定保护、日历竞争与双行发布回滚、审计原子性及唯一声明/媒体边界通过");
   } finally {
+    await db.rentalCustomerCoupon.deleteMany({ where: { workspaceId } });
     await db.businessWorkspace.deleteMany({ where: { id: workspaceId } });
     await db.rentalCategoryVersion.deleteMany({ where: { id: versionId } });
     await db.$disconnect();

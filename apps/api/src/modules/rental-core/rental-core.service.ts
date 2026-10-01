@@ -817,7 +817,23 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
 
   listCouponTemplates(tenantId: string) { return this.state(tenantId).couponTemplates; }
 
+  async readCouponTemplates(tenantId: string) {
+    const state = this.state(tenantId);
+    if (this.configStore.listCouponTemplates) {
+      const beforeRead = JSON.stringify(state.couponTemplates);
+      const rows = await this.configStore.listCouponTemplates(tenantId, this.resolveWorkspaceId(tenantId));
+      // Do not let a delayed read replace a newer local write or refresh.
+      // Preserve the array reference used by in-flight business contexts.
+      if (JSON.stringify(state.couponTemplates) === beforeRead) {
+        state.couponTemplates.splice(0, state.couponTemplates.length, ...rows);
+      }
+      return rows;
+    }
+    return state.couponTemplates;
+  }
+
   async saveCouponTemplate(tenantId: string, input: SaveRentalCouponTemplateRequest) {
+    await this.readCouponTemplates(tenantId);
     const state = this.state(tenantId);
     const { binding } = await this.categoryWriteContext(tenantId, state.profile.categoryCode);
     if (!input.code?.trim() || !input.name?.trim()) throw new BadRequestException("优惠券编码和名称不能为空");
