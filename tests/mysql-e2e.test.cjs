@@ -429,6 +429,7 @@ async function configureRentalTestLocation(token, type) {
 
 async function verifyFourCategoryRenewals(session, customerId) {
   let token = session.accessToken;
+  const completedCases = [];
   const baseStart = new Date(Date.now() + 2 * 86400000);
   baseStart.setUTCHours(2, 0, 0, 0);
   for (const workspace of session.workspaces) {
@@ -549,9 +550,31 @@ async function verifyFourCategoryRenewals(session, customerId) {
       const returned = await inspect("return"); assert.equal(returned.order.status, "settling");
       const settled = await closeMockFundedOrder(orderId, token, prefix); assert.equal(settled.status, 201, `${reason}结算: ${JSON.stringify(settled.body).slice(0, 300)}`);
       assert.equal(settled.body.data.status, "completed");
+      completedCases.push({ workspaceId: workspace.id, orderId, quote: frozenQuote,
+        extension: structuredClone((await get(`orders/${orderId}/extensions`)).find((row) => row.id === extension.id)) });
       ok(`${reason}: 正式调价后实际计费来源/真实取货续租/未到账拒绝/模拟补款与重放/读回/原快照保护/归还结算`);
     }
   }
+  await stopApi();
+  startApi();
+  if (!(await waitHealth())) fail("四品类续租后重启超时");
+  token = (await login("demo", "admin", DEMO_PASSWORD)).accessToken;
+  for (const item of completedCases) {
+    const switched = await request("POST", "/api/auth/switch-workspace", { workspaceId: item.workspaceId }, token);
+    assert.equal(switched.status, 201); token = switched.body.data.accessToken;
+    const order = await request("GET", `/api/rental/v1/orders/${item.orderId}`, null, token);
+    assert.equal(order.status, 200); assert.equal(order.body.data.status, "completed");
+    assert.equal(order.body.data.effectiveEndAt, item.extension.newEndAt);
+    const extensions = await request("GET", `/api/rental/v1/orders/${item.orderId}/extensions`, null, token);
+    assert.equal(extensions.status, 200); assert.equal(extensions.body.data.length, 1);
+    assert.deepEqual(extensions.body.data[0], item.extension, "重启后完整续租事实必须原样恢复");
+    const quote = await request("GET", `/api/rental/v1/quotes/${item.quote.id}`, null, token);
+    assert.equal(quote.status, 200);
+    for (const key of ["rateSnapshot", "ruleSnapshot", "priceVersionId", "rentalAmount"]) assert.deepEqual(quote.body.data[key], item.quote[key]);
+    assert.equal(readCount(`SELECT COUNT(*) FROM \`rental_order_extensions\` WHERE \`tenantId\`='tenant_001' AND \`workspaceId\`='${item.workspaceId}' AND \`orderId\`='${item.orderId}';`), 1);
+  }
+  assert.equal(completedCases.length, 8);
+  ok("四品类两模式8条续租重启恢复：已结算订单、完整续租事实和原报价保持一致，无重复续租落表");
 }
 
 async function approveRentalMemberQualifications(token, customerId, documentTypes) {
