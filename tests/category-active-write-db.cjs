@@ -350,6 +350,7 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal(movedCapacity.windowStart, "2099-01-01T00:00:00.000Z");
     // Internal entity phase: no public adopt endpoint or complete compatibility claim.
     const targetDefinition = structuredClone(definition);
+    targetDefinition.requiredCapabilities = [...new Set([...targetDefinition.requiredCapabilities, "camera_kit_handover"])];
     targetDefinition.businessModel.assetFields = [
       ...targetDefinition.businessModel.assetFields.map((field) => ({ ...field, unique: false })),
       { code: "adoptionProof", scope: "item_group", label: "型号采用资料", type: "string", required: true, unique: true },
@@ -399,11 +400,12 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
       tenantId: "tenant_001", workspaceId, targetVersionId: writerTargetId, sourceRevision: currentBinding.adoptionRevision,
       revision: 1, createdBy: "entity-phase-fixture", patches: { sourceVersionId: currentBinding.categoryVersionId,
         operation: "upgrade", reason: "内部事务组件真库验证，不代表完整采用接口", items: freshPatches,
-        capabilityPatches: [{ code: "camera_compatibility", expectedRevision: 1, expectedImplementationVersion: "cam-1.0", config: { relations: [], powerMarginPercent: 25 } }] }
+        capabilityPatches: [{ code: "camera_compatibility", expectedRevision: 1, expectedImplementationVersion: "cam-1.0", config: { relations: [], powerMarginPercent: 25 } },
+          { code: "camera_kit_handover", intent: "enable_new", expectedRevision: 0, expectedImplementationVersion: "cam-kit-1.0", config: {} }] }
     } });
     const phaseInput = { tenantId: "tenant_001", workspaceId, targetVersionId: writerTargetId, expected: currentBinding,
       expectedPreparationRevision: 1, operation: "upgrade", actorId: "entity-phase-fixture" };
-    const capabilityRuntime = { capabilities: new WorkspaceCapabilityService({}), registeredVersions: ["camera_compatibility@cam-1.0"] };
+    const capabilityRuntime = { capabilities: new WorkspaceCapabilityService({}), registeredVersions: ["camera_compatibility@cam-1.0", "camera_kit_handover@cam-kit-1.0"] };
     const subscriptions = new SubscriptionService(db);
     const applyPhase = (overrides = {}, decorate = (tx) => tx, runtime = capabilityRuntime, commercial = subscriptions) => db.$transaction((tx) => writePreparedCategoryAdoptionPhase(decorate(tx), { ...phaseInput, ...overrides }, runtime, commercial), { ...rc, timeout: 20000 });
     // Earlier repository probes intentionally used unreadable rule JSON. The
@@ -499,6 +501,23 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
       return Reflect.get(client, key);
     } })), /capability-audit-failure/);
     assert.equal(await readEntityFacts(), phaseBefore, "能力审计失败回滚配置、实体和绑定");
+    let newEnableAuditAttempts = 0;
+    await assert.rejects(applyPhase({}, (tx) => new Proxy(tx, { get(client, key) {
+      if (key === "workspaceCapabilityAuditEntry") return new Proxy(client[key], { get(model, method) {
+        if (method === "create") return async (args) => {
+          if (args.data.action === "enable" && args.data.code === "camera_kit_handover") {
+            ++newEnableAuditAttempts;
+            assert.equal(await tx.workspaceCapabilityInstance.count({ where: { workspaceId, code: "camera_kit_handover", status: "enabled" } }), 1);
+            throw new Error("new-required-capability-audit-failure");
+          }
+          return model.create(args);
+        };
+        return Reflect.get(model, method);
+      } });
+      return Reflect.get(client, key);
+    } })), /new-required-capability-audit-failure/);
+    assert.equal(newEnableAuditAttempts, 1);
+    assert.equal(await readEntityFacts(), phaseBefore, "新能力已创建后的审计失败须回滚全部候选配置、实体和绑定");
     await assert.rejects(applyPhase({}, (tx) => new Proxy(tx, { get(client, key) {
       if (key === "workspaceCapabilityInstance") return new Proxy(client[key], { get(model, method) {
         if (method === "updateMany") return async () => ({ count: 0 });
@@ -542,7 +561,15 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     assert.equal(phaseAudit.reason, preparation.patches.reason);
     assert.equal(phaseAudit.fromVersionId, currentBinding.categoryVersionId);
     assert.equal(phaseAudit.toRevision, currentBinding.adoptionRevision + 1);
-    assert.deepEqual(phaseResult.capabilities.changedCapabilityCodes, ["camera_compatibility"]);
+    assert.deepEqual(phaseResult.capabilities.changedCapabilityCodes, ["camera_compatibility", "camera_kit_handover"]);
+    const newCapability = await db.workspaceCapabilityInstance.findFirstOrThrow({ where: { workspaceId, code: "camera_kit_handover" } });
+    assert.equal(newCapability.status, "enabled");
+    assert.equal(newCapability.revision, 1);
+    assert.equal(newCapability.configVersion, "v1");
+    assert.deepEqual(newCapability.config, {});
+    const enableAudits = await db.workspaceCapabilityAuditEntry.findMany({ where: { workspaceId, code: newCapability.code, action: "enable", operator: phaseInput.actorId } });
+    assert.equal(enableAudits.length, 1);
+    assert.deepEqual(enableAudits[0].configSnapshot, {});
     const finalCapability = await db.workspaceCapabilityInstance.findFirstOrThrow({ where: { workspaceId, code: "camera_compatibility" } });
     assert.equal(finalCapability.revision, 2);
     assert.equal(finalCapability.configVersion, "v2");

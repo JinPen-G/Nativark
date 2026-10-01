@@ -9,8 +9,9 @@ export class CategoryEntityPreparationPatchDto implements CategoryEntityPreparat
   @IsObject() values!: CategoryEntityPreparationPatch["values"];
 }
 export class CategoryCapabilityPreparationPatchDto implements CategoryCapabilityPreparationPatch {
+  @IsOptional() @IsIn(["configure", "enable_new"]) intent?: CategoryCapabilityPreparationPatch["intent"];
   @IsString() @Matches(/\S/u) @MaxLength(191) code!: CategoryCapabilityPreparationPatch["code"];
-  @IsInt() @Min(1) expectedRevision!: number;
+  @IsInt() @Min(0) expectedRevision!: number;
   @IsString() @Matches(/\S/u) @MaxLength(191) expectedImplementationVersion!: string;
   @IsObject() config!: CategoryCapabilityPreparationPatch["config"];
 }

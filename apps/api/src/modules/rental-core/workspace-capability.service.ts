@@ -95,15 +95,19 @@ export class WorkspaceCapabilityService {
   ): T[] {
     if (!Array.isArray(patches) || patches.length > 100) throw new BadRequestException("能力预备配置必须是受控数组（最多100项）");
     const replacements = new Map<string, RentalCapabilityConfig>();
+    const additions: T[] = [];
     for (const patch of patches) {
-      if (!patch || Object.keys(patch).some((key) => !["code", "expectedRevision", "expectedImplementationVersion", "config"].includes(key)) || typeof patch.code !== "string" || replacements.has(patch.code) ||
-          !Number.isSafeInteger(patch.expectedRevision) || patch.expectedRevision < 1 ||
+      if (!patch || Object.keys(patch).some((key) => !["intent", "code", "expectedRevision", "expectedImplementationVersion", "config"].includes(key)) ||
+          (patch.intent !== undefined && !["configure", "enable_new"].includes(patch.intent)) || typeof patch.code !== "string" || replacements.has(patch.code) ||
+          !Number.isSafeInteger(patch.expectedRevision) || patch.expectedRevision < (patch.intent === "enable_new" ? 0 : 1) ||
           typeof patch.expectedImplementationVersion !== "string" || !patch.expectedImplementationVersion.trim() ||
           !patch.config || typeof patch.config !== "object" || Array.isArray(patch.config)) {
         throw new BadRequestException("能力预备配置编码、修订、实现或配置格式无效/重复");
       }
       const instance = instances.find((row) => row.code === patch.code);
-      if (!instance || instance.status !== "enabled" || instance.revision !== patch.expectedRevision || instance.implementationVersion !== patch.expectedImplementationVersion) {
+      const enableNew = patch.intent === "enable_new";
+      if (enableNew ? instance !== undefined || patch.expectedRevision !== 0 :
+          !instance || instance.status !== "enabled" || instance.revision !== patch.expectedRevision || instance.implementationVersion !== patch.expectedImplementationVersion) {
         throw new ConflictException("能力实例不存在、未启用或已变化，请重新准备配置");
       }
       const definition = DEFINITIONS.get(patch.code);
@@ -112,13 +116,23 @@ export class WorkspaceCapabilityService {
           (!target.defaultCapabilities.includes(patch.code) && definition.kind !== "shared")) {
         throw new BadRequestException("该能力不能在目标品类准备配置");
       }
+      if (enableNew && (!target.requiredCapabilities.includes(patch.code) || !target.defaultCapabilities.includes(patch.code) || patch.expectedImplementationVersion !== definition.implementationVersion)) {
+        throw new BadRequestException("仅允许明确准备目标必选的新能力，且必须使用当前登记实现");
+      }
       const hookRegistered = registeredVersions.some((key) => key.split("@")[0] === patch.code);
-      if (!definition.implementationVersion || (hookRegistered ? !registeredVersions.includes(`${patch.code}@${instance.implementationVersion}`) : instance.implementationVersion !== definition.implementationVersion)) {
+      if (enableNew && !registeredVersions.includes(`${patch.code}@${patch.expectedImplementationVersion}`)) {
+        throw new ConflictException("新能力实现尚未注册执行器，不能准备配置");
+      }
+      if (!definition.implementationVersion || (hookRegistered ? !registeredVersions.includes(`${patch.code}@${patch.expectedImplementationVersion}`) : patch.expectedImplementationVersion !== definition.implementationVersion)) {
         throw new ConflictException("能力明确实现版本不可执行，不能准备配置");
       }
       replacements.set(patch.code, this.validatedConfig(definition, patch.config));
+      // A detached compatibility projection, not a stored instance or runtime
+      // identity. Only the transactional writer may create it after final checks.
+      if (enableNew) additions.push({ code: patch.code, status: "enabled", revision: 0,
+        implementationVersion: patch.expectedImplementationVersion, config: replacements.get(patch.code)! } as T);
     }
-    return instances.map((row) => replacements.has(row.code) ? { ...row, config: replacements.get(row.code)! } : row);
+    return [...instances.map((row) => replacements.has(row.code) ? { ...row, config: replacements.get(row.code)! } : row), ...additions];
   }
 
   /** 某能力在该空间是否**真正可用**。菜单与 API 门禁只能用这个判定（CORE-EXT-02C 消费）。 */

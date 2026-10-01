@@ -31,9 +31,11 @@ export interface SaveCategoryPreparationRequest {
   capabilityPatches?: CategoryCapabilityPreparationPatch[];
   reason: string;
 }
-/** Full replacement of an existing enabled instance's config only. No activation
- * or implementation switch is implied by preparing a category version. */
+/** Explicit candidate intent, never an immediate activation. enable_new is
+ * restricted to an absent target-required instance and its registered current
+ * implementation; existing paused/disabled instances need their own lifecycle. */
 export interface CategoryCapabilityPreparationPatch {
+  intent?: "configure" | "enable_new";
   code: RentalCapability;
   expectedRevision: number;
   expectedImplementationVersion: string;

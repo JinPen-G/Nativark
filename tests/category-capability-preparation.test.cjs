@@ -26,5 +26,24 @@ assert.throws(() => service.prepareAdoptionConfigs(target, [{ ...instance, statu
 assert.throws(() => service.prepareAdoptionConfigs({ ...target, code: "vehicle" }, [instance], [patch], hooks), /目标品类/);
 assert.throws(() => service.prepareAdoptionConfigs(target, [{ ...instance, implementationVersion: "missing" }], [{ ...patch, expectedImplementationVersion: "missing" }], hooks), /不可执行/);
 const legacy = { ...instance, implementationVersion: "previous" };
+const requiredTarget = structuredClone(target);
+requiredTarget.requiredCapabilities.push("camera_kit_handover");
+const newPatch = { code: "camera_kit_handover", intent: "enable_new", expectedRevision: 0, expectedImplementationVersion: "cam-kit-1.0", config: {} };
+const newHooks = [...hooks, "camera_kit_handover@cam-kit-1.0"];
+const newInput = structuredClone(newPatch);
+const candidates = service.prepareAdoptionConfigs(requiredTarget, [], [newPatch], newHooks);
+assert.equal(candidates[0].status, "enabled");
+assert.equal(candidates[0].revision, 0);
+assert.deepEqual(candidates[0].config, {});
+assert.deepEqual(newPatch, newInput, "新能力准备不得修改输入或自动填默认值");
+assert.throws(() => service.prepareAdoptionConfigs(target, [], [newPatch], newHooks));
+for (const change of [{ intent: "configure" }, { intent: "unexpected" }, { expectedRevision: 1 }, { expectedImplementationVersion: "previous" }]) {
+  assert.throws(() => service.prepareAdoptionConfigs(requiredTarget, [], [{ ...newPatch, ...change }], newHooks));
+}
+for (const status of ["enabled", "paused", "disabled"]) {
+  assert.throws(() => service.prepareAdoptionConfigs(requiredTarget, [{ ...candidates[0], status }], [newPatch], newHooks));
+}
+assert.throws(() => service.prepareAdoptionConfigs(requiredTarget, [], [newPatch], hooks));
+assert.throws(() => service.prepareAdoptionConfigs(requiredTarget, [], [newPatch, newPatch], newHooks));
 assert.equal(service.prepareAdoptionConfigs(target, [legacy], [{ ...patch, expectedImplementationVersion: "previous" }], [...hooks, "camera_compatibility@previous"])[0].implementationVersion, "previous");
 console.log("category-capability-preparation: 真实配置结构、来源修订/实现、跨品类/未启用/重复拒绝、只读投影及历史实现保留通过");

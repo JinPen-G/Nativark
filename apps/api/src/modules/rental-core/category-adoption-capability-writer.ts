@@ -14,7 +14,8 @@ export interface CategoryAdoptionCapabilityRuntime {
 /** Internal phase: caller has authorized and checked eligibility and ALL business /
  * commercial dependencies, in this same RC transaction. Entity patches must have
  * been applied first; binding and adoption audit follow in the same transaction.
- * Never enables new instances, switches implementations, or touches old snapshots. */
+ * Only explicit absent target-required candidates can be enabled; never resumes
+ * existing instances, switches implementations, or touches old snapshots. */
 export async function writePreparedCategoryCapabilities(
   tx: Prisma.TransactionClient, tenantId: string, workspaceId: string,
   expected: CategoryWriteBinding, target: RentalCategoryDefinition,
@@ -37,8 +38,26 @@ export async function writePreparedCategoryCapabilities(
   }
   const changedCapabilityCodes: string[] = [];
   for (const patch of patches) {
-    const current = rows.find((row) => row.code === patch.code)!;
+    const current = rows.find((row) => row.code === patch.code);
     const config = projected.find((row) => row.code === patch.code)!.config;
+    if (patch.intent === "enable_new") {
+      // Projection validated absence, revision zero, required declaration and
+      // executable implementation under the same space mutex. No defaults.
+      try {
+        await tx.workspaceCapabilityInstance.create({ data: { ...where, code: patch.code, status: "enabled",
+          revision: 1, implementationVersion: patch.expectedImplementationVersion, configVersion: "v1",
+          config: config as Prisma.InputJsonValue, enabledAt: new Date(), updatedBy: actorId } });
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new ConflictException("新能力实例已被创建，请重新准备；采用未完成");
+        throw error;
+      }
+      await tx.workspaceCapabilityAuditEntry.create({ data: { ...where, code: patch.code, action: "enable",
+        toStatus: "enabled", implementationVersion: patch.expectedImplementationVersion, configVersion: "v1",
+        configSnapshot: config as Prisma.InputJsonValue, reason, operator: actorId, at: new Date() } });
+      changedCapabilityCodes.push(patch.code);
+      continue;
+    }
+    if (!current) throw new ConflictException("能力配置来源不存在，采用未完成");
     if (isDeepStrictEqual(current.config, config)) continue;
     const version = /^v([1-9]\d*)$/u.exec(current.configVersion);
     const sequence = version ? Number(version[1]) : NaN;
