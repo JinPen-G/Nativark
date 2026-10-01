@@ -1,4 +1,4 @@
-import type { RentalCategoryDefinition } from "./core";
+import type { RentalCategoryDefinition, RentalCapability, RentalCapabilityConfig } from "./core";
 
 export const CATEGORY_GOVERNANCE_PERMISSIONS = {
   view: "system:rental-category:view", edit: "system:rental-category:edit",
@@ -28,7 +28,16 @@ export interface SaveCategoryPreparationRequest {
   expectedPreparationRevision: number;
   operation: "upgrade" | "restore";
   patches: CategoryEntityPreparationPatch[];
+  capabilityPatches?: CategoryCapabilityPreparationPatch[];
   reason: string;
+}
+/** Full replacement of an existing enabled instance's config only. No activation
+ * or implementation switch is implied by preparing a category version. */
+export interface CategoryCapabilityPreparationPatch {
+  code: RentalCapability;
+  expectedRevision: number;
+  expectedImplementationVersion: string;
+  config: RentalCapabilityConfig;
 }
 export interface CreateCategoryDraftRequest { sourceVersionId: string; versionLabel: string; reason: string }
 export interface PatchCategoryDraftRequest { expectedRevision: number; values: Record<string, unknown>; reason: string }

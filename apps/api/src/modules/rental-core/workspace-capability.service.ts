@@ -19,6 +19,7 @@ import {
   type WorkspaceCapabilityView,
   type RentalWorkspaceCapabilitySnapshotEntry
 } from "@rental-os/shared";
+import type { CategoryCapabilityPreparationPatch } from "@rental-os/shared";
 import { WorkspaceCapabilityRepository } from "./workspace-capability.repository";
 
 /** 初始化必须在调用方的事务里执行，因此显式收窄为事务客户端。 */
@@ -85,6 +86,39 @@ export class WorkspaceCapabilityService {
       catch (error) { add(instance.code, error instanceof Error ? error.message : "能力配置校验失败"); }
     }
     return { valid: errors.length === 0, blockers: errors, checkedCapabilityCodes: [...active.keys()].sort(), complete: false as const };
+  }
+
+  /** Read-only candidate projection. Caller supplies fresh same-space rows under
+   * the workspace mutex; never activates an instance or changes its executor. */
+  prepareAdoptionConfigs<T extends Pick<WorkspaceCapabilityInstance, "code" | "status" | "revision" | "implementationVersion" | "config">>(
+    target: RentalCategoryDefinition, instances: T[], patches: CategoryCapabilityPreparationPatch[], registeredVersions: string[] = []
+  ): T[] {
+    if (!Array.isArray(patches) || patches.length > 100) throw new BadRequestException("能力预备配置必须是受控数组（最多100项）");
+    const replacements = new Map<string, RentalCapabilityConfig>();
+    for (const patch of patches) {
+      if (!patch || Object.keys(patch).some((key) => !["code", "expectedRevision", "expectedImplementationVersion", "config"].includes(key)) || typeof patch.code !== "string" || replacements.has(patch.code) ||
+          !Number.isSafeInteger(patch.expectedRevision) || patch.expectedRevision < 1 ||
+          typeof patch.expectedImplementationVersion !== "string" || !patch.expectedImplementationVersion.trim() ||
+          !patch.config || typeof patch.config !== "object" || Array.isArray(patch.config)) {
+        throw new BadRequestException("能力预备配置编码、修订、实现或配置格式无效/重复");
+      }
+      const instance = instances.find((row) => row.code === patch.code);
+      if (!instance || instance.status !== "enabled" || instance.revision !== patch.expectedRevision || instance.implementationVersion !== patch.expectedImplementationVersion) {
+        throw new ConflictException("能力实例不存在、未启用或已变化，请重新准备配置");
+      }
+      const definition = DEFINITIONS.get(patch.code);
+      if (!definition || CORE_CAPABILITIES.has(patch.code) ||
+          (definition.applicableCategories !== "all" && !definition.applicableCategories.includes(target.code)) ||
+          (!target.defaultCapabilities.includes(patch.code) && definition.kind !== "shared")) {
+        throw new BadRequestException("该能力不能在目标品类准备配置");
+      }
+      const hookRegistered = registeredVersions.some((key) => key.split("@")[0] === patch.code);
+      if (!definition.implementationVersion || (hookRegistered ? !registeredVersions.includes(`${patch.code}@${instance.implementationVersion}`) : instance.implementationVersion !== definition.implementationVersion)) {
+        throw new ConflictException("能力明确实现版本不可执行，不能准备配置");
+      }
+      replacements.set(patch.code, this.validatedConfig(definition, patch.config));
+    }
+    return instances.map((row) => replacements.has(row.code) ? { ...row, config: replacements.get(row.code)! } : row);
   }
 
   /** 某能力在该空间是否**真正可用**。菜单与 API 门禁只能用这个判定（CORE-EXT-02C 消费）。 */

@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import type { RentalCategoryDefinition, RentalPricingRate, RentalRuleConfig, TenantRentalBusinessSettings, RentalCapability, RentalCapabilityConfig, RentalCapabilityLifecycleStatus } from "@rental-os/shared";
+import type { CategoryCapabilityPreparationPatch, RentalCategoryDefinition, RentalPricingRate, RentalRuleConfig, TenantRentalBusinessSettings, RentalCapability, RentalCapabilityConfig, RentalCapabilityLifecycleStatus } from "@rental-os/shared";
 import type { WorkspaceCapabilityService } from "./workspace-capability.service";
 import type { CapabilityHookRuntime } from "./capability-hook.runtime";
 import { categoryAdoptionBusinessCompatibility } from "./category-adoption-business-compatibility";
@@ -20,7 +20,8 @@ export async function readCategoryAdoptionCompatibility(
     groups: Array<{ id: string; status: string; inventoryMode: string; bundleComponents: Array<{ componentItemGroupId: string; quantity: number }> }>;
     assets: Array<{ id: string; itemGroupId: string; locationId: string }>;
   },
-  capabilities: WorkspaceCapabilityService, hooks: CapabilityHookRuntime, now: Date
+  capabilities: WorkspaceCapabilityService, hooks: CapabilityHookRuntime, now: Date,
+  capabilityPatches: CategoryCapabilityPreparationPatch[] = []
 ) {
   const where = { tenantId, workspaceId };
   const [settings, locations, prices, rules, inspections, capabilityInstances, qualificationTypes, adjustments, pricingPlans, services, pricingGroups, discounts, coupons, capacities, capacityServices] = await Promise.all([
@@ -29,7 +30,7 @@ export async function readCategoryAdoptionCompatibility(
     tx.rentalPriceVersion.findMany({ where, select: { id: true, effectiveFrom: true, sequence: true, rates: true } }),
     tx.rentalRuleVersion.findMany({ where: { ...where, status: { in: ["published", "pending", "superseded"] }, voidedAt: null }, select: { id: true, effectiveFrom: true, config: true } }),
     tx.rentalInspectionTemplate.findMany({ where, select: { id: true, categoryCode: true, stage: true, enabled: true, fields: true } }),
-    tx.workspaceCapabilityInstance.findMany({ where, select: { code: true, status: true, implementationVersion: true, config: true } }),
+    tx.workspaceCapabilityInstance.findMany({ where, select: { code: true, status: true, revision: true, implementationVersion: true, config: true } }),
     tx.customerMembershipQualificationType.findMany({ where, select: { code: true, categoryCode: true, capabilityCode: true, status: true } }),
     tx.rentalPriceAdjustmentPlan.findMany({ where: { ...where, status: "pending" }, select: { id: true, status: true, finalRates: true } }),
     tx.rentalPricingPlan.findMany({ where: { ...where, status: "enabled" }, select: { id: true, status: true, effectiveTo: true, fulfillmentFees: true, rates: true } }),
@@ -45,8 +46,10 @@ export async function readCategoryAdoptionCompatibility(
     prices: prices.map((row) => ({ ...row, value: row.rates as unknown as RentalPricingRate[] })),
     rules: rules.map((row) => ({ ...row, sequence: 0, value: row.config as unknown as RentalRuleConfig }))
   }, now);
-  const capabilityCompatibility = capabilities.adoptionCompatibility(target, capabilityInstances.map((row) => ({ ...row, code: row.code as RentalCapability, status: row.status as RentalCapabilityLifecycleStatus, config: row.config as RentalCapabilityConfig })), hooks.registeredVersions());
-  const references = categoryAdoptionCapabilityReferences(target, capabilityInstances, records);
+  const instances = capabilityInstances.map((row) => ({ ...row, code: row.code as RentalCapability, status: row.status as RentalCapabilityLifecycleStatus, config: row.config as RentalCapabilityConfig }));
+  const candidateInstances = capabilityPatches.length ? capabilities.prepareAdoptionConfigs(target, instances, capabilityPatches, hooks.registeredVersions()) : instances;
+  const capabilityCompatibility = capabilities.adoptionCompatibility(target, candidateInstances, hooks.registeredVersions());
+  const references = categoryAdoptionCapabilityReferences(target, candidateInstances, records);
   const marketing = categoryAdoptionMarketingReferences({ groups: records.groups, pricingGroups, locations, discounts, coupons, services }, now);
   const priceReferences = categoryAdoptionPriceReferences({ groups: records.groups, pricingGroups, prices: prices.map((row) => ({ ...row, value: row.rates })), adjustments, plans: pricingPlans }, now);
   const capacityCompatibility = categoryAdoptionServiceCapacity(target, { services: capacityServices, locations, capacities }, now);

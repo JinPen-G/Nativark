@@ -187,5 +187,34 @@ module.exports = async ({ request, platformToken, tenantToken, mysqlQuery }) => 
   assert.ok((await call("GET", path)).businessCompatibility.blockers.some((row) => row.domain === "inspection" && row.id === "e2e_category_return_template"), "同一空间中残留其他品类模板也会让真实报价拒绝，采用预检须同步拒绝");
   mysqlQuery("UPDATE rental_inspection_templates SET enabled=false WHERE id='e2e_category_return_template';");
   assert.ok(!(await call("GET", path)).businessCompatibility.blockers.some((row) => row.domain === "inspection" && row.id === "e2e_category_return_template"), "停用异常模板不阻碍新组合、不影响旧单检查快照");
-  console.log("category-preparation-api: 经营兼容、容量、真实外空间关联、异常结构及空价格时间轴保留检查通过");
+  {
+  // Candidate capability configuration never changes the live instance or its audit.
+  const capabilityPreview = await call("GET", path);
+  const live = capabilityPreview.entities.capabilities.find((row) => row.code === "camera_compatibility" && row.status === "enabled");
+  assert.ok(live, "演示摄影空间必须有已启用的真实兼容能力");
+  const capabilityFactsQuery = "SELECT code,status,revision,implementationVersion,configVersion,CAST(config AS CHAR) FROM workspace_capability_instances WHERE tenantId='tenant_001' AND workspaceId='ws_tenant_001' ORDER BY code; SELECT COUNT(*) FROM workspace_capability_audits WHERE tenantId='tenant_001' AND workspaceId='ws_tenant_001';";
+  const liveFacts = mysqlQuery(capabilityFactsQuery);
+  const refreshedPatches = [
+    ...capabilityPreview.entities.itemGroups.map((row) => ({ entityType: "item_group", entityId: row.id, expectedUpdatedAt: row.updatedAt, values: { adoptionProof: "ready" } })),
+    ...capabilityPreview.entities.assets.map((row) => ({ entityType: "asset", entityId: row.id, expectedUpdatedAt: row.updatedAt, values: { adoptionProofAsset: "B" } }))
+  ];
+  const capabilityBody = { ...body, patches: refreshedPatches, expectedPreparationRevision: capabilityPreview.preparation.revision, capabilityPatches: [{ code: live.code, expectedRevision: live.revision, expectedImplementationVersion: live.implementationVersion, config: { relations: [] } }] };
+  await call("PUT", path, { ...capabilityBody, capabilityPatches: [{ ...capabilityBody.capabilityPatches[0], config: { unsupported: true } }] }, tenantToken, 400);
+  await call("PUT", path, { ...capabilityBody, capabilityPatches: [{ ...capabilityBody.capabilityPatches[0], expectedRevision: live.revision + 1 }] }, tenantToken, 409);
+  let configured = await call("PUT", path, capabilityBody);
+  assert.equal(configured.revision, capabilityPreview.preparation.revision + 1);
+  assert.deepEqual((await call("GET", path)).preparation.patches.capabilityPatches, capabilityBody.capabilityPatches);
+  configured = await call("PUT", path, { ...body, patches: refreshedPatches, expectedPreparationRevision: configured.revision });
+  assert.deepEqual((await call("GET", path)).preparation.patches.capabilityPatches, capabilityBody.capabilityPatches, "旧版资料客户端省略能力字段时不得清空独立预备配置");
+  assert.equal(mysqlQuery(capabilityFactsQuery), liveFacts, "保存和预览不能改活动能力、版本、修订或审计");
+  mysqlQuery("UPDATE workspace_capability_instances SET revision=revision+1 WHERE tenantId='tenant_001' AND workspaceId='ws_tenant_001' AND code='camera_compatibility';");
+  const staleCapability = await call("GET", path);
+  assert.equal(staleCapability.validation.valid, false);
+  assert.ok(staleCapability.validation.errors.some((error) => error.includes("能力实例")));
+  assert.deepEqual(staleCapability.preparation.patches.capabilityPatches, capabilityBody.capabilityPatches, "冲突后保留待修正输入");
+  await call("PUT", path, { ...capabilityBody, expectedPreparationRevision: configured.revision }, tenantToken, 409);
+  mysqlQuery("UPDATE workspace_capability_instances SET revision=revision-1 WHERE tenantId='tenant_001' AND workspaceId='ws_tenant_001' AND code='camera_compatibility';");
+  assert.equal(mysqlQuery(capabilityFactsQuery), liveFacts);
+  }
+  console.log("category-preparation-api: 经营兼容、空间关联、异常结构、空时间轴及能力配置独立准备/陈旧来源保留通过");
 };

@@ -36,13 +36,16 @@ export async function writePreparedCategoryAdoptionPhase(
     tx.rentalCategoryVersion.findUnique({ where: { id: targetVersionId } }),
     tx.rentalCategoryAdoptionPreparation.findFirst({ where: { tenantId, workspaceId, targetVersionId } })
   ]);
-  const envelope = preparation?.patches as { sourceVersionId?: string; operation?: string; reason?: string; items?: CategoryEntityPreparationPatch[] } | undefined;
+  const envelope = preparation?.patches as { sourceVersionId?: string; operation?: string; reason?: string; items?: CategoryEntityPreparationPatch[]; capabilityPatches?: unknown } | undefined;
   if (!preparation || preparation.revision !== input.expectedPreparationRevision || preparation.sourceRevision !== expected.adoptionRevision ||
       envelope?.sourceVersionId !== expected.categoryVersionId || envelope.operation !== operation) {
     throw new ConflictException("预备资料或来源版本修订已变化，请重新准备");
   }
   if (typeof envelope.reason !== "string" || !envelope.reason.trim() || envelope.reason.length > 512 || !Array.isArray(envelope.items)) {
     throw new ConflictException("预备资料格式或采用原因无效，请重新准备");
+  }
+  if (envelope.capabilityPatches !== undefined && (!Array.isArray(envelope.capabilityPatches) || envelope.capabilityPatches.length)) {
+    throw new ConflictException("能力预备配置尚未接入原子写入阶段，采用未完成；预备输入已保留");
   }
   const definition = resolveRentalCategoryVersionBody(target, identity.categoryCode.toLowerCase());
   const entities = await writePreparedCategoryEntities(tx, tenantId, workspaceId, expected, definition, envelope.items);

@@ -41,6 +41,18 @@ const capabilities = { adoptionCompatibility(definition, instances, versions) {
   assert.deepEqual({ data, records, target }, before);
   assert.deepEqual(calls.find((row) => row.model === "rentalServiceCapacity").query.where.windowEnd, { gt: now });
   assert.equal(calls.find((row) => row.model === "rentalInspectionTemplate").query.select.categoryCode, true, "启用模板归属必须进入事务投影");
+  const { WorkspaceCapabilityService } = require("../apps/api/dist/modules/rental-core/workspace-capability.service.js");
+  const liveCapability = { code: "camera_compatibility", status: "enabled", revision: 7, implementationVersion: "cam-1.0", config: { relations: [{ id: "r", relationType: "model_fit", source: { kind: "item_group", id: "foreign" }, target: { kind: "asset", id: "a" }, outcome: "warn", sourceName: "fixture", reason: "fixture" }] } };
+  data.workspaceCapabilityInstance = [liveCapability];
+  const liveBefore = structuredClone(data.workspaceCapabilityInstance);
+  const actualCapabilities = new WorkspaceCapabilityService({});
+  const actualHooks = { registeredVersions: () => ["camera_compatibility@cam-1.0"] };
+  const unprepared = await read(tx, "t", "w", target, records, actualCapabilities, actualHooks, now);
+  assert.ok(unprepared.blockers.some((row) => row.domain === "capability_reference"));
+  const prepared = await read(tx, "t", "w", target, records, actualCapabilities, actualHooks, now, [{ code: liveCapability.code, expectedRevision: 7, expectedImplementationVersion: "cam-1.0", config: { relations: [] } }]);
+  assert.ok(!prepared.blockers.some((row) => row.domain === "capability_reference"), "引用检查必须消费准备配置，不应重复检查旧活动关系");
+  assert.deepEqual(data.workspaceCapabilityInstance, liveBefore, "共享读取不能改变活动关系");
+  data.workspaceCapabilityInstance = [];
   data.rentalPricingGroup[0].members = [{ itemGroupId: "foreign" }];
   data.rentalPriceVersion.push({ id: "future", effectiveFrom: new Date("2126-01-01"), sequence: 1, rates: [{ itemGroupId: "foreign", unit: "shift" }] });
   const invalid = await read(tx, "t", "w", target, records, capabilities, { registeredVersions: () => ["test"] }, now);

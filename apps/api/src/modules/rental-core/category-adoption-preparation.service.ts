@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import type { CategoryEntityPreparationPatch, SaveCategoryPreparationRequest, SystemUserRow } from "@rental-os/shared";
+import type { CategoryCapabilityPreparationPatch, CategoryEntityPreparationPatch, RentalCapability, RentalCapabilityConfig, RentalCapabilityLifecycleStatus, SaveCategoryPreparationRequest, SystemUserRow } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { getRequestDataScope, getRequestLocationIds, requireRequestWorkspaceId } from "../../common/request-identity";
 import { assertCategoryAdoptionAllowed, categoryScopeAllows } from "./category-governance-policy";
@@ -51,34 +51,48 @@ export class CategoryAdoptionPreparationService {
     const workspace = await tx.businessWorkspace.findFirst({ where: { id: workspaceId, tenantId: user.tenantId, status: "ACTIVE" } });
     if (!workspace?.categoryVersionId) throw new ConflictException("经营空间不可用或尚未绑定版本");
     if (workspace.categoryCode !== identity.categoryCode || workspace.categoryVersionId === targetId) throw new ConflictException("目标版本已采用或品类身份已变化");
-    const [target, source, groups, assets, preparation] = await Promise.all([
+    const [target, source, groups, assets, preparation, capabilityRows] = await Promise.all([
       tx.rentalCategoryVersion.findUnique({ where: { id: targetId } }),
       tx.rentalCategoryVersion.findUnique({ where: { id: workspace.categoryVersionId } }),
       tx.rentalItemGroup.findMany({ where: { tenantId: user.tenantId, workspaceId }, include: { bundleComponents: { select: { componentItemGroupId: true, quantity: true } } }, orderBy: { id: "asc" } }),
       tx.rentalAsset.findMany({ where: { tenantId: user.tenantId, workspaceId }, orderBy: { id: "asc" } }),
-      tx.rentalCategoryAdoptionPreparation.findUnique({ where: { workspaceId_targetVersionId: { workspaceId, targetVersionId: targetId } } })
+      tx.rentalCategoryAdoptionPreparation.findUnique({ where: { workspaceId_targetVersionId: { workspaceId, targetVersionId: targetId } } }),
+      tx.workspaceCapabilityInstance.findMany({ where: { tenantId: user.tenantId, workspaceId }, select: { code: true, status: true, revision: true, implementationVersion: true, configVersion: true, config: true } })
     ]);
     const code = identity.categoryCode.toLowerCase();
     const definition = resolveRentalCategoryVersionBody(target, code);
     const sourceDefinition = resolveRentalCategoryVersionBody(source, code);
     const records = { groups: groups.map((row) => ({ ...row, attributes: row.attributes as Record<string, unknown> })), assets: assets.map((row) => ({ ...row, attributes: row.attributes as Record<string, unknown> })) };
-    return { workspace, workspaceId, target: target!, definition, sourceDefinition, preparation, records };
+    const capabilityInstances = capabilityRows.map((row) => ({ ...row, code: row.code as RentalCapability, status: row.status as RentalCapabilityLifecycleStatus, config: row.config as RentalCapabilityConfig }));
+    return { workspace, workspaceId, target: target!, definition, sourceDefinition, preparation, records, capabilityInstances };
   }
   async preview(user: SystemUserRow, targetId: string, operation: string) {
     assertCategoryPreparationPermission(user);
     return this.prisma.$transaction(async (tx) => {
       const context = await this.context(tx, user, targetId, operation);
       const now = new Date();
-      const envelope = context.preparation?.patches as { sourceVersionId?: string; operation?: string; items?: CategoryEntityPreparationPatch[] } | undefined;
+      const envelope = context.preparation?.patches as { sourceVersionId?: string; operation?: string; items?: CategoryEntityPreparationPatch[]; capabilityPatches?: CategoryCapabilityPreparationPatch[] } | undefined;
       const patches = envelope?.operation === operation ? envelope.items ?? [] : [];
       const stale = Boolean(context.preparation && (context.preparation.sourceRevision !== context.workspace.categoryAdoptionRevision || envelope?.sourceVersionId !== context.workspace.categoryVersionId));
       let validation: { valid: boolean; errors: string[] };
+      let candidateCapabilityPatches: CategoryCapabilityPreparationPatch[] = [];
+      let candidateRecords = context.records;
       try {
         if (stale) throw new ConflictException("当前绑定已变化，预备资料必须重新准备");
-        prepareCategoryAdoptionRecords(context.definition, context.records.groups, context.records.assets, patches);
+        const projected = prepareCategoryAdoptionRecords(context.definition, context.records.groups, context.records.assets, patches);
+        const groups = new Map(projected.itemGroups.map((row) => [row.id, row]));
+        const assets = new Map(projected.assets.map((row) => [row.id, row]));
+        candidateRecords = {
+          groups: context.records.groups.map((row) => ({ ...row, attributes: groups.get(row.id)!.attributes })),
+          assets: context.records.assets.map((row) => ({ ...row, attributes: assets.get(row.id)!.attributes, serialNo: assets.get(row.id)!.serialNo ?? null }))
+        };
+        if (envelope?.operation === operation && envelope.capabilityPatches !== undefined) {
+          this.capabilities.prepareAdoptionConfigs(context.definition, context.capabilityInstances, envelope.capabilityPatches, this.hooks.registeredVersions());
+          candidateCapabilityPatches = envelope.capabilityPatches;
+        }
         validation = { valid: true, errors: [] };
       } catch (error) { validation = { valid: false, errors: [error instanceof Error ? error.message : "预备资料校验失败"] }; }
-      const compatibility = await readCategoryAdoptionCompatibility(tx, user.tenantId, context.workspaceId, context.definition, context.records, this.capabilities, this.hooks, now);
+      const compatibility = await readCategoryAdoptionCompatibility(tx, user.tenantId, context.workspaceId, context.definition, candidateRecords, this.capabilities, this.hooks, now, candidateCapabilityPatches);
       const commercialContext = await this.subscriptions.readCategoryCommercialContext(user.tenantId, tx, now);
       const businessCompatibility = {
         ...compatibility, valid: compatibility.valid && commercialContext.newBusinessAllowed,
@@ -91,7 +105,8 @@ export class CategoryAdoptionPreparationService {
         preparation: context.preparation ? { id: context.preparation.id, revision: context.preparation.revision, sourceRevision: context.preparation.sourceRevision, patches: context.preparation.patches } : null,
         validation, validationScope: "entity_attributes_inventory_uniqueness", businessCompatibility, commercialContext, stale, previewOnly: true, adoptionImplemented: false,
         entities: { itemGroups: context.records.groups.map((row) => ({ id: row.id, name: row.name, updatedAt: row.updatedAt.toISOString(), attributes: Object.fromEntries(Object.entries(row.attributes).filter(([key]) => key !== "__itemGroupMedia")) })),
-          assets: context.records.assets.map((row) => ({ id: row.id, assetNo: row.assetNo, updatedAt: row.updatedAt.toISOString(), serialNo: row.serialNo, attributes: row.attributes })) } };
+          assets: context.records.assets.map((row) => ({ id: row.id, assetNo: row.assetNo, updatedAt: row.updatedAt.toISOString(), serialNo: row.serialNo, attributes: row.attributes })),
+          capabilities: context.capabilityInstances ?? [] } };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
   async save(user: SystemUserRow, targetId: string, body: SaveCategoryPreparationRequest) {
@@ -102,7 +117,16 @@ export class CategoryAdoptionPreparationService {
       if (context.workspace.categoryVersionId !== body.expectedSourceVersionId || context.workspace.categoryAdoptionRevision !== body.expectedSourceRevision) throw new ConflictException("来源品类版本已变化，请刷新后重新准备");
       if ((context.preparation?.revision ?? 0) !== body.expectedPreparationRevision) throw new ConflictException("预备资料修订已变化，输入未应用到活动资料");
       prepareCategoryAdoptionRecords(context.definition, context.records.groups, context.records.assets, body.patches);
-      const data = { sourceRevision: body.expectedSourceRevision, patches: JSON.parse(JSON.stringify({ sourceVersionId: body.expectedSourceVersionId, operation: body.operation, reason: body.reason.trim(), items: body.patches })) as Prisma.InputJsonValue };
+      const prior = context.preparation?.patches as { sourceVersionId?: string; operation?: string; capabilityPatches?: CategoryCapabilityPreparationPatch[] } | undefined;
+      const retained = prior?.sourceVersionId === body.expectedSourceVersionId && prior.operation === body.operation && context.preparation?.sourceRevision === body.expectedSourceRevision ? prior.capabilityPatches : undefined;
+      // Old entity-only clients must not silently erase separately prepared config.
+      // An explicit [] discards config; omission retains it only for the same source/operation.
+      const capabilityPatches = body.capabilityPatches !== undefined ? body.capabilityPatches : retained === undefined ? [] : retained;
+      const preparedCapabilities = this.capabilities.prepareAdoptionConfigs(context.definition, context.capabilityInstances, capabilityPatches, this.hooks.registeredVersions());
+      // Normalize through the actual implementation schema, not arbitrary JSON merging.
+      const normalizedPatches = capabilityPatches.map((patch) => ({ ...patch, config: preparedCapabilities.find((row) => row.code === patch.code)!.config }));
+      if (Buffer.byteLength(JSON.stringify(normalizedPatches)) > 256 * 1024) throw new BadRequestException("能力预备配置超过256KB");
+      const data = { sourceRevision: body.expectedSourceRevision, patches: JSON.parse(JSON.stringify({ sourceVersionId: body.expectedSourceVersionId, operation: body.operation, reason: body.reason.trim(), items: body.patches, capabilityPatches: normalizedPatches })) as Prisma.InputJsonValue };
       const saved = context.preparation ? await tx.rentalCategoryAdoptionPreparation.update({ where: { id: context.preparation.id }, data: { ...data, revision: { increment: 1 } } })
         : await tx.rentalCategoryAdoptionPreparation.create({ data: { ...data, id: randomUUID(), tenantId: user.tenantId, workspaceId: context.workspaceId, targetVersionId: targetId, revision: 1, createdBy: user.id } });
       return { id: saved.id, revision: saved.revision, sourceRevision: saved.sourceRevision, targetVersionId: targetId, preparedOnly: true, adoptionImplemented: false };
