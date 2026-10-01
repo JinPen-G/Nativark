@@ -50,6 +50,7 @@ const capExports = {};
 new Function("exports", "require", capabilityCompiled)(capExports, require);
 const capPreview = { ...structuredClone(preview), targetDefinition: structuredClone(RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "camera")), entities: { ...preview.entities, capabilities: [
   { code: "camera_compatibility", status: "enabled", revision: 9, implementationVersion: "cam-1.0", configVersion: "v3", config: { relations: [], powerMarginPercent: 0 } },
+  { code: "delivery", status: "enabled", revision: 1, implementationVersion: "core-1.0", config: {} },
   { code: "vehicle_driving_license", status: "enabled", revision: 1, implementationVersion: "core-1.0", config: {} }
 ] }, preparation: { revision: 1, patches: { operation: "upgrade", capabilityPatches: [
   { code: "camera_compatibility", expectedRevision: 8, expectedImplementationVersion: "old", config: { relations: [], powerMarginPercent: 25 } }

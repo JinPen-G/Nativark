@@ -3,10 +3,16 @@ const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
 const { PrismaClient } = require("@prisma/client");
 const { SubscriptionService } = require("../apps/api/dist/modules/subscription/subscription.service.js");
+const { RENTAL_CATEGORY_DEFINITIONS } = require("@rental-os/shared");
+const { CATEGORY_COMMERCIAL_REQUIREMENTS, categoryCommercialRequirements, categoryCommercialCompatibility } = require("../apps/api/dist/modules/rental-core/category-adoption-commercial.js");
 if (!/^rental_os_e2e_/u.test(new URL(process.env.DATABASE_URL).pathname.slice(1))) throw new Error("仅允许专用 E2E 库");
 const db = new PrismaClient();
 const fixture = `commercial_${randomUUID()}`;
 const codes = [`${fixture}_a`, `${fixture}_b`];
+// An explicit fixture mapping exercises a paid dependency without creating a
+// production billing product or changing current Core charging behavior.
+const target = RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "camera");
+const requirements = categoryCommercialRequirements(target, [{ code: "camera_compatibility", status: "enabled" }], { ...CATEGORY_COMMERCIAL_REQUIREMENTS, camera_compatibility: [codes[0]] });
 const rc = { isolationLevel: "ReadCommitted", timeout: 20000 };
 function latch() { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; }
 function observedClient(match, attempted) {
@@ -58,11 +64,14 @@ async function holdBarrier(writer, match, inspect) {
     await db.tenantFeatureGrant.create({ data: { tenantId: fixture, featureCode: codes[0] } });
     await holdBarrier((writer) => writer.revokeFeature(fixture, { featureCode: codes[0], expectedRevision: 1, reason: fixture }), (sql) => sql.includes("FROM Tenant"), (snapshot) => {
       assert.equal(snapshot.entitlements[0].available, true);
+      assert.equal(categoryCommercialCompatibility("camera", requirements, snapshot).valid, true);
+      assert.equal(categoryCommercialCompatibility("vehicle", requirements, snapshot).valid, false);
       assert.deepEqual(snapshot.lockedFeatureCodes, [codes[0]]);
       assert.equal(snapshot.complete, false);
     });
     const revoked = await db.$transaction((tx) => service.lockCategoryCommercialContext(fixture, tx, [codes[0]]), rc);
     assert.equal(revoked.entitlements[0].available, false);
+    assert.equal(categoryCommercialCompatibility("camera", requirements, revoked).valid, false, "撤权后真实权益必须拒绝");
     assert.equal(revoked.revision, 2);
     await holdBarrier((writer) => writer.upsertFeatureCatalog(codes[0], catalogInput("planned")), (sql) => sql.includes("subscription_feature_catalog"), (snapshot) => assert.equal(snapshot.entitlements.length, 1));
     assert.equal((await db.subscriptionFeatureCatalog.findUniqueOrThrow({ where: { code: codes[0] } })).releaseStatus, "PLANNED");
@@ -90,7 +99,9 @@ async function holdBarrier(writer, match, inspect) {
       await bounded(attempted.promise);
       assert.equal(settled, false);
       release.resolve(); await correction;
-      assert.equal((await waiting).newBusinessAllowed, false);
+      const expiredContext = await waiting;
+      assert.equal(expiredContext.newBusinessAllowed, false);
+      assert.equal(categoryCommercialCompatibility("camera", requirements, expiredContext).valid, false);
     } finally { release.resolve(); await Promise.allSettled([correction, ...(waiting ? [waiting] : [])]); }
     const beforeEvents = await db.subscriptionEvent.count({ where: { tenantId: fixture } });
     await assert.rejects(db.$transaction((tx) => service.lockCategoryCommercialContext(fixture, tx, [`${fixture}_missing`]), rc), /未登记/);

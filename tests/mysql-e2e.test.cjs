@@ -761,6 +761,9 @@ async function main() {
   const demo = await login("demo", "admin", DEMO_PASSWORD);
   const demo2 = await login("demo2", "admin", DEMO_PASSWORD);
   if (process.env.E2E_STOP_AFTER === "category-governance-api") {
+    const commercialCompatibility = runNode(["tests/category-adoption-commercial.test.cjs"]);
+    assert.equal(commercialCompatibility.status, 0, commercialCompatibility.stderr || commercialCompatibility.stdout);
+    console.log(commercialCompatibility.stdout);
     const capabilityWriter = runNode(["tests/category-adoption-capability-writer.test.cjs"]);
     assert.equal(capabilityWriter.status, 0, capabilityWriter.stderr || capabilityWriter.stdout);
     console.log(capabilityWriter.stdout);

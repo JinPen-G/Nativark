@@ -12,6 +12,7 @@ import { readCategoryAdoptionCompatibility } from "./category-adoption-compatibi
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
 import { CapabilityHookRuntime } from "./capability-hook.runtime";
 import { SubscriptionService } from "../subscription/subscription.service";
+import { categoryCommercialCompatibility, categoryCommercialRequirements } from "./category-adoption-commercial";
 
 export const CATEGORY_ADOPTION_MANAGE = "rental-os:category:adopt";
 export function assertCategoryPreparationPermission(user: SystemUserRow) {
@@ -93,11 +94,13 @@ export class CategoryAdoptionPreparationService {
         validation = { valid: true, errors: [] };
       } catch (error) { validation = { valid: false, errors: [error instanceof Error ? error.message : "预备资料校验失败"] }; }
       const compatibility = await readCategoryAdoptionCompatibility(tx, user.tenantId, context.workspaceId, context.definition, candidateRecords, this.capabilities, this.hooks, now, candidateCapabilityPatches);
-      const commercialContext = await this.subscriptions.readCategoryCommercialContext(user.tenantId, tx, now);
+      const commercialRequirements = categoryCommercialRequirements(context.definition, context.capabilityInstances ?? []);
+      const commercialContext = await this.subscriptions.readCategoryCommercialContext(user.tenantId, tx, now, commercialRequirements.featureCodes);
+      const commercialCompatibility = categoryCommercialCompatibility(context.definition.code, commercialRequirements, commercialContext);
       const businessCompatibility = {
-        ...compatibility, valid: compatibility.valid && commercialContext.newBusinessAllowed,
-        blockers: [...compatibility.blockers, ...(!commercialContext.newBusinessAllowed ? [{ domain: "commercial", id: "subscription_term", message: "当前订阅已到期，采用新版本前请办理续期；资料准备与既有订单善后不会被自动修改" }] : [])],
-        scope: `${compatibility.scope}_subscription_term_snapshot`
+        ...compatibility, valid: compatibility.valid && commercialCompatibility.valid,
+        blockers: [...compatibility.blockers, ...commercialCompatibility.blockers],
+        scope: `${compatibility.scope}_${commercialCompatibility.scope}`
       };
       return { sourceVersionId: context.workspace.categoryVersionId, sourceRevision: context.workspace.categoryAdoptionRevision,
         targetVersionId: targetId, targetVersionLabel: context.target.versionLabel, targetDefinition: context.definition,

@@ -16,6 +16,7 @@ const { writePreparedCategoryAdoptionPhase } = require("../apps/api/dist/modules
 const { writePreparedCategoryCapabilities } = require("../apps/api/dist/modules/rental-core/category-adoption-capability-writer.js");
 const { RentalServiceCapacityService } = require("../apps/api/dist/modules/rental-core/rental-service-capacity.service.js");
 const { MembershipService } = require("../apps/api/dist/modules/platform/membership.service.js");
+const { SubscriptionService } = require("../apps/api/dist/modules/subscription/subscription.service.js");
 if (!/^rental_os_e2e_/u.test(new URL(process.env.DATABASE_URL).pathname.slice(1))) throw new Error("仅允许专用 E2E 库");
 const db = new PrismaClient();
 const fixture = `catwrite_${randomUUID()}`;
@@ -403,7 +404,8 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     const phaseInput = { tenantId: "tenant_001", workspaceId, targetVersionId: writerTargetId, expected: currentBinding,
       expectedPreparationRevision: 1, operation: "upgrade", actorId: "entity-phase-fixture" };
     const capabilityRuntime = { capabilities: new WorkspaceCapabilityService({}), registeredVersions: ["camera_compatibility@cam-1.0"] };
-    const applyPhase = (overrides = {}, decorate = (tx) => tx, runtime = capabilityRuntime) => db.$transaction((tx) => writePreparedCategoryAdoptionPhase(decorate(tx), { ...phaseInput, ...overrides }, runtime), rc);
+    const subscriptions = new SubscriptionService(db);
+    const applyPhase = (overrides = {}, decorate = (tx) => tx, runtime = capabilityRuntime, commercial = subscriptions) => db.$transaction((tx) => writePreparedCategoryAdoptionPhase(decorate(tx), { ...phaseInput, ...overrides }, runtime, commercial), { ...rc, timeout: 20000 });
     const phaseBefore = await readEntityFacts();
     await assert.rejects(applyPhase(), /采用范围/);
     await db.rentalCategoryVersionPolicy.update({ where: { versionId: writerTargetId }, data: { upgradeScope: "pilot", upgradeTenantIds: ["tenant_002"] } });
@@ -417,6 +419,19 @@ const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspa
     await assert.rejects(applyPhase({ expected: oldBinding }), /版本已变化/);
     await assert.rejects(applyPhase({ actorId: " " }), /操作人/);
     assert.equal(await readEntityFacts(), phaseBefore, "资格及修订拒绝不得改动活动资料或绑定");
+    await assert.rejects(applyPhase({}, (tx) => tx, capabilityRuntime, null), /可信商业授权/);
+    let finalCommercialReads = 0;
+    await assert.rejects(applyPhase({}, (tx) => tx, capabilityRuntime, {
+      lockCategoryCommercialContext: (...args) => subscriptions.lockCategoryCommercialContext(...args),
+      readCategoryCommercialContext: async (tenantId, tx, now, codes) => {
+        finalCommercialReads++;
+        assert.equal(tenantId, "tenant_001"); assert.ok(now instanceof Date); assert.deepEqual(codes, []);
+        return { newBusinessAllowed: false, entitlements: [] };
+      }
+    }), /订阅已到期/);
+    assert.equal(finalCommercialReads, 1, "写入前须重新按最终时点读取权益，不复用锁前快照");
+    await assert.rejects(applyPhase({}, (tx) => tx, capabilityRuntime, { lockCategoryCommercialContext: async () => ({ newBusinessAllowed: true, entitlements: [], lockedFeatureCodes: ["foreign_dependency"] }) }), /商业依赖/);
+    assert.equal(await readEntityFacts(), phaseBefore, "商业拒绝不能留下实体、配置、绑定或审计写入");
     await assert.rejects(applyPhase({}, (tx) => tx, null), /可信能力执行器/);
     const staleCapabilityBefore = await db.workspaceCapabilityInstance.findFirstOrThrow({ where: { workspaceId, code: "camera_compatibility" } });
     await db.workspaceCapabilityInstance.updateMany({ where: { workspaceId }, data: { revision: 2 } });

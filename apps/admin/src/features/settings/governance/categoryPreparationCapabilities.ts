@@ -1,8 +1,9 @@
-import { RENTAL_CAPABILITY_MODULES, type CategoryCapabilityPreparationPatch, type RentalCapabilityConfig } from "@rental-os/shared";
+import { RENTAL_CAPABILITY_MODULES, RENTAL_CORE_CAPABILITY_CODES, type CategoryCapabilityPreparationPatch, type RentalCapabilityConfig } from "@rental-os/shared";
 import type { CategoryPreparationOperation, CategoryPreparationPreview } from "@/api/categoryPreparation";
 export type CapabilityPreparationDrafts = Record<string, { expectedRevision: number; expectedImplementationVersion: string; fields: Record<string, string | number | boolean> }>;
 export function preparationCapabilityDefinitions(preview: CategoryPreparationPreview) {
   return RENTAL_CAPABILITY_MODULES.filter((definition) => definition.configSchema.length > 0
+    && !(RENTAL_CORE_CAPABILITY_CODES as readonly string[]).includes(definition.code)
     && (definition.applicableCategories === "all" || definition.applicableCategories.includes(preview.targetDefinition.code))
     && (definition.kind === "shared" || preview.targetDefinition.defaultCapabilities.includes(definition.code))
     && preview.entities.capabilities?.some((row) => row.code === definition.code && row.status === "enabled"));
