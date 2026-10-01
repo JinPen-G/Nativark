@@ -443,17 +443,20 @@ async function verifyFourCategoryRenewals(session, customerId) {
     const profile = await get("tenant-profile");
     assert.equal(profile.categoryCode, workspace.categoryCode);
     const groups = await get("item-groups");
-    const group = groups.find((row) => row.status === "enabled" && ["serialized", "quantity"].includes(row.inventoryMode));
-    assert.ok(group, `${workspace.categoryCode} 缺少可执行基础商品`);
+    const matrixGroups = groups.filter((row) => row.status === "enabled" && ["serialized", "quantity"].includes(row.inventoryMode));
+    assert.ok(matrixGroups.length >= 2, `${workspace.categoryCode} 两模式必须有独立基础商品，不能复用尚在归还缓冲中的库存`);
     const location = (await get("locations")).find((row) => row.status === "enabled" && row.capabilities.includes("pickup") && row.capabilities.includes("return"));
     assert.ok(location);
     const mode = workspace.categoryCode === "construction" ? "warehouse_pickup_return" : "store_pickup_return";
-    for (const pricingMode of ["incremental", "original_total"]) {
+    for (const [caseIndex, pricingMode] of ["incremental", "original_total"].entries()) {
+      const group = matrixGroups[caseIndex];
       const currentRule = await get("rule-versions/current");
       if (currentRule.config.qualification.required) await approveRentalMemberQualifications(token, customerId, currentRule.config.qualification.documentTypes);
       const reason = `四品类续租 ${workspace.categoryCode}/${pricingMode}`;
       const draft = await request("POST", "/api/rental/v1/rule-versions", {
-        changeReason: reason, config: { ...currentRule.config, extension: { enabled: true, forceImmediateWhenOverdue: true, ...currentRule.config.extension, pricingMode } }
+        changeReason: reason, config: { ...currentRule.config,
+          fulfillment: { ...currentRule.config.fulfillment, pickupBufferMinutes: 0, returnBufferMinutes: 60 },
+          extension: { enabled: true, forceImmediateWhenOverdue: true, ...currentRule.config.extension, pricingMode } }
       }, token);
       assert.equal(draft.status, 201, `${reason}: ${JSON.stringify(draft.body).slice(0, 250)}`);
       const published = await request("POST", `/api/rental/v1/rule-versions/${draft.body.data.version}/publish`, { reason }, token);
@@ -486,6 +489,51 @@ async function verifyFourCategoryRenewals(session, customerId) {
         return response.body.data;
       };
       assert.equal((await inspect("pickup")).order.status, "renting");
+      const makeBufferBlocker = async (phase) => {
+        const capacity = group.inventoryMode === "serialized"
+          ? (await get("assets")).filter((row) => row.itemGroupId === group.id && row.locationId === location.id && ["available", "reserved", "rented"].includes(row.status)).length
+          : (await get("stock-balances")).filter((row) => row.itemGroupId === group.id && row.locationId === location.id).reduce((sum, row) => sum + row.onHandQuantity - row.maintenanceQuantity, 0);
+        assert.ok(capacity > 0);
+        const nextStart = new Date(Date.parse(newEndAt) + 30 * 60000).toISOString();
+        const nextInput = { ...input, startAt: nextStart, endAt: new Date(Date.parse(nextStart) + 86400000).toISOString(), lines: [{ itemGroupId: group.id, quantity: capacity }] };
+        const nextQuote = await request("POST", "/api/rental/v1/quotes", nextInput, token);
+        assert.equal(nextQuote.status, 201, `${reason}/${phase}后单报价: ${JSON.stringify(nextQuote.body).slice(0, 250)}`);
+        const nextOrder = await request("POST", "/api/rental/v1/orders", { ...nextInput, quoteId: nextQuote.body.data.id, customerName: "缓冲冲突验收会员" }, token);
+        assert.equal(nextOrder.status, 201);
+        const nextId = nextOrder.body.data.id;
+        await prepareMockFunding(nextOrder.body.data, token, `${prefix}:blocker:${phase}`);
+        assert.equal((await request("POST", `/api/rental/v1/orders/${nextId}/confirm`, {}, token)).status, 201);
+        const nextAllocated = await request("POST", `/api/rental/v1/orders/${nextId}/allocate`, {}, token);
+        assert.equal(nextAllocated.status, 201, `${reason}/${phase}后单分配: ${JSON.stringify(nextAllocated.body).slice(0, 250)}`);
+        if (group.inventoryMode === "serialized") {
+          const originalAsset = allocated.body.data.allocations.find((row) => row.assetId).assetId;
+          assert.ok(nextAllocated.body.data.allocations.some((row) => row.assetId === originalAsset), "后单必须实际锁定本单资产，而非只有总量冲突");
+        }
+        assert.ok(Date.parse(nextInput.startAt) > Date.parse(newEndAt), "冲突必须仅来自缓冲，不是实际租期重叠");
+        return async () => {
+          const cancelled = await request("POST", `/api/rental/v1/orders/${nextId}/cancel`, { reason: "缓冲冲突验收完毕，释放后续占用" }, token);
+          assert.equal(cancelled.status, 201);
+          const funds = await get(`orders/${nextId}/funding-events`);
+          for (const [instrument, amount] of [["rental", Math.max(0, -funds.rental.balance)], ["deposit", Math.max(0, funds.deposit.balance)]]) {
+            if (!amount) continue;
+            assert.equal((await request("POST", `/api/rental/v1/orders/${nextId}/funding-events/refund`, {
+              instrument, amount, idempotencyKey: `${prefix}:${phase}:${instrument}:refund`, reason: "隔离测试取消后单退还模拟资金"
+            }, token)).status, 201);
+          }
+          if (funds.preauthorization.balance > 0) assert.equal((await request("POST", `/api/rental/v1/orders/${nextId}/funding-events/release`, {
+            idempotencyKey: `${prefix}:${phase}:preauth:release`, reason: "取消后单释放模拟预授权"
+          }, token)).status, 201);
+        };
+      };
+      const releaseFirstBlocker = await makeBufferBlocker("request");
+      for (const suffix of ["/preview", ""]) {
+        const blocked = await request("POST", `/api/rental/v1/orders/${orderId}/extensions${suffix}`, { newEndAt }, token);
+        assert.equal(blocked.status, 409, `${reason}缓冲冲突必须拒绝${suffix}: ${JSON.stringify(blocked.body).slice(0, 250)}`);
+        assert.match(blocked.body.message, /缓冲/u);
+      }
+      assert.equal((await get(`orders/${orderId}/extensions`)).length, 0, "冲突申请不得遗留续租记录");
+      assert.equal((await get(`orders/${orderId}`)).effectiveEndAt ?? endAt, endAt);
+      await releaseFirstBlocker();
       const beforePriceChange = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/preview`, { newEndAt }, token);
       assert.equal(beforePriceChange.status, 201);
       const quotedRate = frozenQuote.rateSnapshot.find((row) => row.itemGroupId === group.id);
@@ -534,6 +582,13 @@ async function verifyFourCategoryRenewals(session, customerId) {
           idempotencyKey: `${prefix}:${instrument}:extension`, reason: "四品类隔离测试模拟补款，非外部支付" }, token);
         assert.equal(funded.status, 201);
       }
+      const releasePaymentBlocker = await makeBufferBlocker("payment");
+      const blockedPayment = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/${extension.id}/pay`, {}, token);
+      assert.equal(blockedPayment.status, 409, `${reason}补款后出现缓冲冲突仍不得生效`);
+      assert.match(blockedPayment.body.message, /缓冲/u);
+      assert.equal((await get(`orders/${orderId}`)).effectiveEndAt ?? endAt, endAt);
+      assert.equal(readCount(`SELECT COUNT(*) FROM \`rental_order_extensions\` WHERE ${extensionWhere} AND \`status\`='pending_payment';`), 1);
+      await releasePaymentBlocker();
       const paid = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/${extension.id}/pay`, {}, token);
       assert.equal(paid.status, 201, `${reason}生效: ${JSON.stringify(paid.body).slice(0, 300)}`);
       assert.equal(paid.body.data.order.effectiveEndAt, newEndAt); assert.equal(paid.body.data.extension.status, "effective");
