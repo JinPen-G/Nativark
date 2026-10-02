@@ -602,7 +602,13 @@ async function verifyFourCategoryRenewals(session, customerId) {
       const releaseTouchingBlocker = await makeBufferBlocker("touching", 90);
       const touchingPreview = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/preview`, { newEndAt }, token);
       assert.equal(touchingPreview.status, 201, `${reason}缓冲端点相接允许试算`);
-      const paid = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/${extension.id}/pay`, {}, token);
+      // Different transport keys exercise the order/extension lock, not only same-key deduplication.
+      const parallelPayments = await Promise.all(["a", "b"].map((attempt) => request("POST",
+        `/api/rental/v1/orders/${orderId}/extensions/${extension.id}/pay`, {}, token,
+        { "Idempotency-Key": `${prefix}:apply:${attempt}` })));
+      for (const result of parallelPayments) assert.equal(result.status, 201, `${reason}并发生效: ${JSON.stringify(result.body).slice(0, 300)}`);
+      const paid = parallelPayments[0];
+      assert.deepEqual(parallelPayments[1].body.data.extension, paid.body.data.extension, "不同请求键的并发请求必须返回同一生效事实");
       assert.equal(paid.status, 201, `${reason}生效: ${JSON.stringify(paid.body).slice(0, 300)}`);
       assert.equal(paid.body.data.order.effectiveEndAt, newEndAt); assert.equal(paid.body.data.extension.status, "effective");
       assert.deepEqual(paid.body.data.extension.executionBasis, basis);
@@ -613,6 +619,18 @@ async function verifyFourCategoryRenewals(session, customerId) {
       assert.equal(readCount(`SELECT COUNT(*) FROM \`rental_order_extensions\` WHERE ${extensionWhere} AND \`status\`='effective';`), 1);
       assert.deepEqual(JSON.parse(readScalar(`SELECT CAST(\`executionBasis\` AS CHAR) FROM \`rental_order_extensions\` WHERE ${extensionWhere};`)), basis);
       assert.deepEqual((await get(`orders/${orderId}/extensions`)).find((row) => row.id === extension.id).executionBasis, basis);
+      assert.match(orderId, /^[A-Za-z0-9_-]+$/u);
+      const orderWhere = `\`tenantId\`='tenant_001' AND \`workspaceId\`='${workspace.id}' AND \`id\`='${orderId}'`;
+      const storedCharges = JSON.parse(readScalar(`SELECT CAST(\`chargeLines\` AS CHAR) FROM \`rental_orders\` WHERE ${orderWhere};`));
+      const expectedCharges = extension.pricingSnapshot
+        ? extension.pricingSnapshot.chargeLines.filter((row) => row.amount !== 0)
+          .map((row) => ({ code: `extension:${extension.sequence}:${row.code}`, amount: row.amount })).sort((a, b) => a.code.localeCompare(b.code))
+        : [{ code: `extension:${extension.sequence}`, amount: extension.payableAmount }];
+      assert.ok(expectedCharges.length > 0, "并发费用断言必须有实际非零费用");
+      const extensionCharges = (rows) => rows.filter((row) => row.sourceId === extension.id)
+        .map((row) => ({ code: row.code, amount: row.amount })).sort((a, b) => a.code.localeCompare(b.code));
+      assert.deepEqual(extensionCharges(storedCharges), expectedCharges, "并发生效和重放后数据库费用只能追加一份");
+      assert.deepEqual(extensionCharges((await get(`orders/${orderId}`)).chargeLines), expectedCharges);
       const rereadQuote = await get(`quotes/${frozenQuote.id}`);
       assert.deepEqual(rereadQuote.rateSnapshot, frozenQuote.rateSnapshot); assert.deepEqual(rereadQuote.ruleSnapshot, frozenQuote.ruleSnapshot);
       assert.equal(rereadQuote.rentalAmount, frozenQuote.rentalAmount);
