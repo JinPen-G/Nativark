@@ -9,7 +9,10 @@ import type {
   WorkspaceCapabilityInstance
 } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
+import { RentalCategoryResolver } from "./rental-category-resolver.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
+import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./category-active-write";
+import { RENTAL_CAPABILITY_MODULES, RENTAL_CORE_CAPABILITY_CODES } from "@rental-os/shared";
 
 /**
  * CORE-EXT-02A：经营空间 capability 实例与生命周期审计的持久化。
@@ -22,7 +25,7 @@ import { resolveScopeWorkspaceId } from "./workspace-scope";
  */
 @Injectable()
 export class WorkspaceCapabilityRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly categoryResolver?: RentalCategoryResolver) {}
 
   /** 当前会话空间；无会话时取该租户默认空间（初始化/回填路径）。 */
   async currentWorkspaceId(tenantId: string): Promise<string> {
@@ -39,9 +42,22 @@ export class WorkspaceCapabilityRepository {
    */
   async workspaceScope(
     tenantId: string,
-    workspaceId: string
-  ): Promise<{ categoryCode: RentalCategoryCode; declaredCodes: RentalCapability[] }> {
-    const workspace = await this.prisma.businessWorkspace.findFirst({
+    workspaceId: string,
+    tx?: Prisma.TransactionClient
+  ): Promise<{ categoryCode: RentalCategoryCode; declaredCodes: RentalCapability[]; requiredCodes?: RentalCapability[]; binding?: CategoryWriteBinding }> {
+    if (this.categoryResolver) {
+      const resolved = tx
+        ? await lockActiveCategoryBinding(tx, tenantId, workspaceId)
+        : await this.categoryResolver.forWorkspace(tenantId, workspaceId);
+      const { definition } = resolved;
+      return {
+        categoryCode: definition.code,
+        declaredCodes: [...definition.defaultCapabilities],
+        requiredCodes: [...definition.requiredCapabilities],
+        binding: "binding" in resolved ? resolved.binding : { categoryVersionId: resolved.categoryVersionId, adoptionRevision: resolved.adoptionRevision }
+      };
+    }
+    const workspace = await (tx ?? this.prisma).businessWorkspace.findFirst({
       where: { tenantId, id: workspaceId },
       include: { category: { select: { defaultCapabilities: true } } }
     });
@@ -125,6 +141,11 @@ export class WorkspaceCapabilityRepository {
     tx: Prisma.TransactionClient
   ): Promise<RentalCapability[]> {
     if (!instances.length) return [];
+    const scope = instances[0];
+    const { definition } = await lockActiveCategoryBinding(tx, scope.tenantId, scope.workspaceId);
+    for (const instance of instances) {
+      if (instance.tenantId !== scope.tenantId || instance.workspaceId !== scope.workspaceId || !definition.requiredCapabilities.includes(instance.code)) throw new ConflictException("能力初始化范围或品类必选声明已变化，请重新对账");
+    }
     const inserted: RentalCapability[] = [];
     for (const instance of instances) {
       const result = await tx.workspaceCapabilityInstance.createMany({
@@ -212,7 +233,8 @@ export class WorkspaceCapabilityRepository {
   async saveInstance(
     instance: WorkspaceCapabilityInstance,
     audit: WorkspaceCapabilityAuditEvent,
-    expectedRevision?: number
+    expectedRevision?: number,
+    expectedBinding?: CategoryWriteBinding
   ): Promise<WorkspaceCapabilityInstance> {
     const data = {
       status: instance.status,
@@ -227,6 +249,25 @@ export class WorkspaceCapabilityRepository {
     };
     try {
       return await this.prisma.$transaction(async (tx) => {
+        const { definition } = await lockActiveCategoryBinding(tx, instance.tenantId, instance.workspaceId, expectedBinding);
+        if (audit.code !== instance.code) throw new ConflictException("能力审计与实例编码不一致");
+        const modules = new Map(RENTAL_CAPABILITY_MODULES.map((row) => [row.code, row]));
+        const core = new Set<RentalCapability>(RENTAL_CORE_CAPABILITY_CODES);
+        const declared = new Set(definition.defaultCapabilities);
+        const rows = await tx.workspaceCapabilityInstance.findMany({ where: { tenantId: instance.tenantId, workspaceId: instance.workspaceId } });
+        const active = new Set(rows.filter((row) => row.status === "enabled" && !core.has(row.code as RentalCapability)).map((row) => row.code));
+        if (instance.status === "enabled") active.add(instance.code); else active.delete(instance.code);
+        const enabled = (code: RentalCapability) => core.has(code)
+          ? Boolean(declared.has(code) && modules.get(code) && (modules.get(code)!.applicableCategories === "all" || modules.get(code)!.applicableCategories.includes(definition.code)))
+          : active.has(code);
+        const module = modules.get(instance.code);
+        if (instance.status === "enabled") {
+          if (!module || !module.implementationVersion || (module.applicableCategories !== "all" && !module.applicableCategories.includes(definition.code)) || (module.kind !== "shared" && !declared.has(instance.code))) throw new ConflictException("能力未实现或不适用于当前品类声明");
+          for (const dependency of module.dependsOn) if (!enabled(dependency)) throw new ConflictException(`能力 ${instance.code} 依赖 ${dependency}，请先启用它`);
+          for (const conflict of module.conflictsWith) if (enabled(conflict)) throw new ConflictException(`能力 ${instance.code} 与已启用的 ${conflict} 互斥`);
+        } else {
+          for (const code of active) if (modules.get(code as RentalCapability)?.dependsOn.includes(instance.code)) throw new ConflictException(`已启用能力 ${code} 依赖 ${instance.code}，请先处理依赖能力`);
+        }
         if (expectedRevision === undefined) {
           await tx.workspaceCapabilityInstance.create({
             data: {

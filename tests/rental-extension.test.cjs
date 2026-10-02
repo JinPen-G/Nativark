@@ -254,5 +254,66 @@ void (async () => {
   ok("增量续租不会因耗材价格版本变化而重新计价");
   group.inventoryMode = originalInventoryMode;
 
+  /* ---------- 动作版本依据与缺失原单位 fail-closed ---------- */
+  const historicalCategory = structuredClone(ctx.category);
+  const currentCategory = { ...structuredClone(ctx.category), name: "新发布的品类政策" };
+  const currentContext = { ...ctx, category: currentCategory };
+  quote.categoryVersionId = "category-v1";
+  business.categoryResolver = {
+    forWorkspace: async () => ({ definition: currentCategory, categoryVersionId: "category-v2", adoptionRevision: 2 }),
+    forVersion: async (code, id) => { assert.equal(id, "category-v1"); return historicalCategory; }
+  };
+  const incremental = await business.quoteOrderExtension(tenantId, currentContext, { ...baseArgs, newEndAt: extendedTo });
+  assert.equal(incremental.executionBasis.categoryVersionId, "category-v2");
+  assert.equal(incremental.executionBasis.originalCategoryVersionId, "category-v1");
+  assert.equal(incremental.executionBasis.policySource, "current_workspace");
+  assert.equal(incremental.executionBasis.adoptionRevision, 2);
+  assert.ok(incremental.executionBasis.pricingStrategies.every((row) => row.implementationVersion === "1"));
+  currentCategory.name = "随后编辑";
+  assert.equal(incremental.executionBasis.categoryPolicySnapshot.name, "新发布的品类政策", "动作快照不能引用可变对象");
+  quote.ruleSnapshot.extension.pricingMode = "original_total";
+  const originalMode = await business.quoteOrderExtension(tenantId, currentContext, { ...baseArgs, newEndAt: extendedTo });
+  assert.equal(originalMode.executionBasis.categoryVersionId, "category-v1");
+  assert.equal(originalMode.executionBasis.policySource, "original_quote");
+  assert.deepEqual(originalMode.executionBasis.categoryPolicySnapshot, historicalCategory);
+  ok("独立续租记录当前政策，原价补差记录原政策，实现版本与正文快照各自独立");
+
+  const resolveSpaceRates = business.resolveSpaceRates;
+  business.resolveSpaceRates = async () => ({ rates: quote.rateSnapshot.map((row) => ({ ...row, baseAmount: row.baseAmount * 2 })), versionId: "new-price", version: "2" });
+  quote.ruleSnapshot.extension.pricingMode = "incremental";
+  const changedPrice = await business.quoteOrderExtension(tenantId, currentContext, { ...baseArgs, newEndAt: extendedTo });
+  assert.equal(changedPrice.priceVersionId, "new-price");
+  assert.equal(changedPrice.rentalAmount, incremental.rentalAmount * 2);
+  quote.ruleSnapshot.extension.pricingMode = "original_total";
+  const unchangedOriginal = await business.quoteOrderExtension(tenantId, currentContext, { ...baseArgs, newEndAt: extendedTo });
+  assert.equal(unchangedOriginal.rentalAmount, originalMode.rentalAmount);
+  business.resolveSpaceRates = resolveSpaceRates;
+  ok("现价上涨影响独立续租，不影响原价全租期补差");
+
+  quote.ruleSnapshot.extension.pricingMode = "incremental";
+  const preservedRates = quote.rateSnapshot;
+  quote.rateSnapshot = [];
+  await assert.rejects(() => business.quoteOrderExtension(tenantId, currentContext, { ...baseArgs, newEndAt: extendedTo }), /缺少原订单计价单位依据/u);
+  quote.rateSnapshot = preservedRates;
+  ok("没有原计价单位时明确拒绝，不能静默改用当前价格任意单位");
+  const unit = preservedRates[0].unit;
+  currentCategory.businessModel.pricingUnits = currentCategory.businessModel.pricingUnits.filter((row) => row !== unit);
+  const compatible = await business.quoteOrderExtension(tenantId, currentContext, { ...baseArgs, newEndAt: extendedTo });
+  assert.equal(compatible.executionBasis.pricingStrategies[0].unit, unit);
+  quote.categoryVersionId = undefined;
+  await assert.rejects(() => business.quoteOrderExtension(tenantId, currentContext, { ...baseArgs, newEndAt: extendedTo }), /历史兼容政策/u);
+  ok("新版收窄单位时有原版政策可保留单位执行；缺历史证据则明确拒绝");
+  const { rentalPricingStrategy } = require("../apps/api/src/modules/rental-core/rental-pricing-strategy");
+  assert.throws(() => rentalPricingStrategy(unit, "missing-version"), /实现版本不可用/u);
+  assert.throws(() => rentalPricingStrategy(unit, "constructor"), /实现版本不可用/u);
+  ok("缺失计价实现版本不允许静默切换到默认算法");
+
+  quote.categoryVersionId = "category-v1";
+  const hourlyBasis = await business.extensionExecutionBasis(tenantId, currentContext, quote,
+    [{ ...preservedRates[0], unit: "hour" }], "original_total",
+    { ...quote.ruleSnapshot, pricing: { ...quote.ruleSnapshot.pricing, hourToDayEnabled: true } });
+  assert.deepEqual(hourlyBasis.pricingStrategies.map((entry) => entry.unit), ["hour", "day_24h"]);
+  ok("时租转日租的动作依据同时记录小时和24小时策略，不漏记实际使用的算法");
+
   console.log(`\n续租/延期专项：${passed} 项全部通过`);
 })();

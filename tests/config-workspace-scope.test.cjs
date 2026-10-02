@@ -21,6 +21,11 @@ function rejects(promise, pattern, label) {
 
 function scopedClient(model, existing) {
   return {
+    async $transaction(write) { return write(this); },
+    async $queryRaw() { return [{ categoryCode: "CAMERA", categoryVersionId: "baseline", categoryAdoptionRevision: 0, status: "ACTIVE" }]; },
+    rentalCategoryVersion: {
+      async findUnique() { return { categoryCode: "CAMERA", structureVersion: 1, status: "published", definition: require("@rental-os/shared").RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "camera") }; }
+    },
     businessWorkspace: {
       async findFirst() { return { id: "workspace-current" }; }
     },

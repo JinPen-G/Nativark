@@ -15,6 +15,8 @@ import {
   RENTAL_CATEGORY_WORKSPACE_NAMES,
   RentalCategoryCode as SharedRentalCategoryCode
 } from "@rental-os/shared";
+import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { hashPassword } from "../src/common/password";
 
 const prisma = new PrismaClient();
@@ -154,6 +156,7 @@ const permissions = [
   // CAM-01A：确认能力风险提示后才能带风险下单。与 :manage 分开授权（见 platform.service 注释）。
   ["rental-core:capability:override", "能力风险例外确认", "Rental Core", PermissionKind.ACTION],
   ["rental-os:rules:manage", "业务规则配置", "租赁业务", PermissionKind.ACTION],
+  ["rental-os:category:adopt", "经营空间品类版本采用", "租赁业务", PermissionKind.ACTION],
   // RULE-01A：需求 4.6.14 明确「权限分为规则编辑、规则发布……」。发布会改变对外生效的
   // 条款，与编辑草稿是两个责任；共用一个码等于任何能改草稿的人都能直接对客户生效。
   ["rental-os:rules:publish", "业务规则发布", "租赁业务", PermissionKind.ACTION, "发布或安排规则版本生效、作废已发布或待生效版本"],
@@ -231,7 +234,12 @@ const permissions = [
   // SUB-01 版本订阅（§5.2/§7）。租户端查看/申请用 rental-os:*；平台端跨租户管理用 system:*。
   ["rental-os:subscription:view", "版本与订阅查看", "版本与订阅", PermissionKind.ACTION],
   ["rental-os:subscription:manage", "版本与订阅申请", "版本与订阅", PermissionKind.ACTION],
-  ["system:tenant:subscription:manage", "租户订阅管理", "系统设置", PermissionKind.ACTION]
+  ["system:tenant:subscription:manage", "租户订阅管理", "系统设置", PermissionKind.ACTION],
+  ["system:rental-category:view", "租赁品类查看", "租赁内核", PermissionKind.ACTION],
+  ["system:rental-category:edit", "租赁品类草稿编辑", "租赁内核", PermissionKind.ACTION],
+  ["system:rental-category:publish", "租赁品类发布与采用资格", "租赁内核", PermissionKind.ACTION],
+  ["system:rental-category:opening", "租赁品类开通政策", "租赁内核", PermissionKind.ACTION],
+  ["system:rental-category:audit", "租赁品类审计查看", "租赁内核", PermissionKind.ACTION]
 ] as const;
 
 const roleTemplates = [
@@ -321,7 +329,7 @@ const saasRoleTemplate = {
   enabledBusinessScopes: ["SAAS_PLATFORM"],
   permissions: permissions
     .map(([code]) => code)
-    .filter((code) => code.startsWith("system:tenant:")),
+    .filter((code) => code.startsWith("system:tenant:") || code.startsWith("system:rental-category:")),
   buttonPermissions: [],
   dataScope: SystemDataScope.ALL
 } as const;
@@ -366,10 +374,58 @@ const demoWorkspaces = [
 
 async function upsertRentalCategoriesAndProfiles() {
   for (const category of rentalCategories) {
-    await prisma.rentalCategoryDefinition.upsert({
+    const existedBefore = await prisma.rentalCategoryDefinition.findUnique({ where: { code: category.code }, select: { code: true } });
+    const stored = await prisma.rentalCategoryDefinition.upsert({
       where: { code: category.code },
-      update: category,
+      // 平台维护的身份和发布版本不得在后续 Seed 中被静默改写。
+      update: {},
       create: category
+    });
+    const versionId = `legacy:${stored.code}`;
+    await prisma.rentalCategoryVersion.upsert({
+      where: { id: versionId },
+      update: {},
+      create: {
+        id: versionId, categoryCode: stored.code, versionLabel: stored.version.slice(0, 64),
+        sourceKind: "current_db_snapshot", status: "legacy_baseline",
+        definition: asJson({
+          code: stored.code, name: stored.name, description: stored.description,
+          supportedInventoryModes: stored.supportedInventoryModes,
+          defaultCapabilities: stored.defaultCapabilities, terminology: stored.terminology,
+          attributeSchema: stored.attributeSchema, businessModel: stored.businessModel,
+          version: stored.version
+        }),
+        publishedAt: new Date(), publishedBy: "seed",
+        publishReason: "Current DB definition only; not historical order evidence"
+      }
+    });
+    await prisma.rentalCategoryVersionPolicy.upsert({
+      where: { versionId }, update: {}, create: { versionId }
+    });
+    const runtime = RENTAL_CATEGORY_DEFINITIONS.find((item) => item.code === String(stored.code).toLowerCase());
+    if (!runtime) throw new Error(`内置品类 ${stored.code} 缺少运行定义`);
+    const digest = createHash("sha256").update(JSON.stringify(runtime)).digest("hex").slice(0, 24);
+    const builtinId = `builtin:${runtime.code}:${digest}`;
+    const builtin = await prisma.rentalCategoryVersion.upsert({
+      where: { id: builtinId }, update: {},
+      create: {
+        id: builtinId, categoryCode: stored.code, versionLabel: `builtin-${runtime.version}-${digest}`,
+        sourceVersionId: versionId, sourceKind: "builtin_runtime", status: "published",
+        definition: asJson(runtime), publishedAt: new Date(), publishedBy: "seed",
+        publishReason: "内置运行定义首次初始化"
+      }
+    });
+    if (builtin.categoryCode !== stored.code || builtin.status !== "published" ||
+        !isDeepStrictEqual(builtin.definition, asJson(runtime))) {
+      throw new Error(`内置品类版本 ${builtinId} 与运行定义不一致，拒绝覆盖`);
+    }
+    await prisma.rentalCategoryVersionPolicy.upsert({
+      where: { versionId: builtinId }, update: {}, create: { versionId: builtinId }
+    });
+    await prisma.rentalCategoryDefinition.updateMany({
+      where: { code: stored.code, recommendedVersionId: null },
+      // 既有库的旧定义不能被 Seed 默认作可运行版本，须显式运行对账程序。
+      data: { recommendedVersionId: existedBefore ? versionId : builtinId }
     });
   }
   for (const profile of [
@@ -379,12 +435,7 @@ async function upsertRentalCategoriesAndProfiles() {
     const category = rentalCategories.find((item) => item.code === profile.categoryCode)!;
     await prisma.tenantRentalProfile.upsert({
       where: { tenantId: profile.tenantId },
-      update: {
-        categoryCode: profile.categoryCode,
-        capabilities: category.defaultCapabilities,
-        terminology: category.terminology,
-        configVersion: category.version
-      },
+      update: {},
       create: {
         tenantId: profile.tenantId,
         categoryCode: profile.categoryCode,
@@ -556,27 +607,37 @@ async function upsertRolesAndUsers() {
         ? demoWorkspaces
         : [{ id: `ws_${tenant.id}`, code: "default", name: RENTAL_CATEGORY_WORKSPACE_NAMES[String(rentalProfile.categoryCode).toLowerCase() as SharedRentalCategoryCode], categoryCode: rentalProfile.categoryCode, isDefault: true }] as const;
       for (const workspace of workspaceSeeds) {
-        await prisma.businessWorkspace.upsert({
+        const category = await prisma.rentalCategoryDefinition.findUniqueOrThrow({
+          where: { code: workspace.categoryCode }
+        });
+        if (!category.recommendedVersionId) throw new Error(`品类 ${category.code} 缺少推荐版本`);
+        const savedWorkspace = await prisma.businessWorkspace.upsert({
           where: { id: workspace.id },
-          update: {
-            code: workspace.code,
-            name: workspace.name,
-            categoryCode: workspace.categoryCode,
-            status: WorkspaceStatus.ACTIVE,
-            isDefault: workspace.isDefault,
-            defaultMarker: workspace.isDefault ? "default" : workspace.id
-          },
+          update: {},
           create: {
             id: workspace.id,
             tenantId: tenant.id,
             code: workspace.code,
             name: workspace.name,
             categoryCode: workspace.categoryCode,
+            categoryVersionId: category.recommendedVersionId,
             status: WorkspaceStatus.ACTIVE,
             isDefault: workspace.isDefault,
             defaultMarker: workspace.isDefault ? "default" : workspace.id
           }
         });
+        if (savedWorkspace.categoryVersionId && savedWorkspace.categoryAdoptionRevision === 0) {
+          await prisma.rentalCategoryAdoptionAudit.upsert({
+            where: { workspaceId_toRevision: { workspaceId: workspace.id, toRevision: 0 } },
+            update: {},
+            create: {
+              tenantId: tenant.id, workspaceId: workspace.id,
+              toVersionId: savedWorkspace.categoryVersionId,
+              fromRevision: 0, toRevision: 0, action: "seed_create",
+              actorId: "seed", reason: "演示经营空间首次绑定内置品类版本"
+            }
+          });
+        }
         for (const user of tenant.users) {
           await prisma.workspaceMember.upsert({
             where: { workspaceId_userId: { workspaceId: workspace.id, userId: user.id } },

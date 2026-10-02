@@ -209,7 +209,7 @@ assert.equal(service.listItemGroups(newTenant).length, 0);
 const configured = await service.saveProfile(newTenant, { categoryCode: "construction" });
 assert.equal(configured.categoryCode, "construction", "an empty tenant can select its single rental category");
 await assert.rejects(async () => service.saveProfile(newTenant, { categoryCode: "vehicle" }), /创建后经营品类固定/, "initialized SaaS tenant category must be immutable even before products are created");
-assert.equal(service.listInspectionTemplates(newTenant, "pickup")[0].categoryCode, "construction");
+assert.equal((await service.listInspectionTemplates(newTenant, "pickup"))[0].categoryCode, "construction");
 await assert.rejects(async () => service.saveItemGroup(newTenant, {
   code: "EXC-001",
   name: "测试挖掘机",

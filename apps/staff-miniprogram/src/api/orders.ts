@@ -134,8 +134,8 @@ export function operationLock(orderId: string, input: RentalOperationLockRequest
 
 /* ---------- 检查 / 交付 / 归还 ---------- */
 
-export function listInspectionTemplates(stage?: "pickup" | "return"): Promise<RentalInspectionTemplate[]> {
-  return request<RentalInspectionTemplate[]>("/rental/v1/inspection-templates", { query: { stage } });
+export function listInspectionTemplates(stage?: "pickup" | "return", orderId?: string): Promise<RentalInspectionTemplate[]> {
+  return request<RentalInspectionTemplate[]>("/rental/v1/inspection-templates", { query: { stage, orderId } });
 }
 
 export function listInspections(orderId: string): Promise<RentalInspectionRecord[]> {

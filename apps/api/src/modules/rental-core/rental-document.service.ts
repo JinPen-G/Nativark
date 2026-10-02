@@ -33,7 +33,7 @@ export class RentalDocumentService {
     const order = await this.core.getOrder(tenantId, orderId);
     const [inspections, templates] = await Promise.all([
       this.core.listInspections(tenantId, orderId),
-      Promise.resolve(this.core.listInspectionTemplates(tenantId))
+      this.core.listInspectionTemplates(tenantId, undefined, order)
     ]);
     const funding = type === "settlement" && options.includeFinancial
       ? await this.funding.listEvents(tenantId, this.core.resolveWorkspaceId(tenantId), orderId)

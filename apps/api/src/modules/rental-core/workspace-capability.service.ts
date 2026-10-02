@@ -6,6 +6,7 @@ import {
   type RentalCapability,
   type RentalCapabilityConfig,
   type RentalCategoryCode,
+  type RentalCategoryDefinition,
   type RentalCapabilityConfigField,
   type RentalCapabilityDefinition,
   type RentalCompatibilityEntityRef,
@@ -18,6 +19,7 @@ import {
   type WorkspaceCapabilityView,
   type RentalWorkspaceCapabilitySnapshotEntry
 } from "@rental-os/shared";
+import type { CategoryCapabilityPreparationPatch } from "@rental-os/shared";
 import { WorkspaceCapabilityRepository } from "./workspace-capability.repository";
 
 /** 初始化必须在调用方的事务里执行，因此显式收窄为事务客户端。 */
@@ -49,6 +51,89 @@ function nextConfigVersion(current?: string) {
 @Injectable()
 export class WorkspaceCapabilityService {
   constructor(private readonly repository: WorkspaceCapabilityRepository) {}
+
+  /** Read-only adoption preflight. Reuse the actual configuration validator;
+   * do not initialize defaults, upgrade implementations or overwrite instances. */
+  adoptionCompatibility(
+    target: RentalCategoryDefinition,
+    instances: Array<Pick<WorkspaceCapabilityInstance, "code" | "status" | "implementationVersion" | "config">>,
+    registeredVersions: string[],
+    registry: RentalCapabilityDefinition[] = RENTAL_CAPABILITY_MODULES
+  ) {
+    const definitions = new Map(registry.map((definition) => [definition.code, definition]));
+    const declared = new Set(target.defaultCapabilities);
+    const active = new Map(instances.filter((row) => row.status === "enabled" && !CORE_CAPABILITIES.has(row.code)).map((row) => [row.code, row]));
+    const errors: Array<{ domain: "capability"; id: string; message: string }> = [];
+    const add = (code: string, message: string) => errors.push({ domain: "capability", id: code, message });
+    const applicable = (definition: RentalCapabilityDefinition) => definition.applicableCategories === "all" || definition.applicableCategories.includes(target.code);
+    const enabled = (code: RentalCapability) => CORE_CAPABILITIES.has(code)
+      ? Boolean(declared.has(code) && definitions.get(code) && applicable(definitions.get(code)!))
+      : active.has(code);
+    for (const code of target.requiredCapabilities) {
+      if (!enabled(code)) add(code, "目标品类必选能力未启用，请在能力管理中明确配置；采用预览不会自动启用");
+    }
+    const hookCodes = new Set(registeredVersions.map((key) => key.split("@")[0]));
+    for (const instance of active.values()) {
+      const definition = definitions.get(instance.code);
+      if (!definition) { add(instance.code, "已启用能力未在执行注册表登记"); continue; }
+      if (!applicable(definition) || (!declared.has(instance.code) && definition.kind !== "shared")) add(instance.code, "已启用能力不适用于目标品类或未获目标品类声明");
+      if (!definition.implementationVersion || (hookCodes.has(instance.code)
+        ? !registeredVersions.includes(`${instance.code}@${instance.implementationVersion}`)
+        : instance.implementationVersion !== definition.implementationVersion)) add(instance.code, "已启用能力的明确实现版本不可执行，请通过能力升级机制处理");
+      for (const code of definition.dependsOn) if (!enabled(code)) add(instance.code, `已启用能力缺少目标组合依赖 ${code}`);
+      for (const code of definition.conflictsWith) if (enabled(code)) add(instance.code, `已启用能力与目标组合中的 ${code} 互斥`);
+      try { this.validatedConfig(definition, instance.config); }
+      catch (error) { add(instance.code, error instanceof Error ? error.message : "能力配置校验失败"); }
+    }
+    return { valid: errors.length === 0, blockers: errors, checkedCapabilityCodes: [...active.keys()].sort(), complete: false as const };
+  }
+
+  /** Read-only candidate projection. Caller supplies fresh same-space rows under
+   * the workspace mutex; never activates an instance or changes its executor. */
+  prepareAdoptionConfigs<T extends Pick<WorkspaceCapabilityInstance, "code" | "status" | "revision" | "implementationVersion" | "config">>(
+    target: RentalCategoryDefinition, instances: T[], patches: CategoryCapabilityPreparationPatch[], registeredVersions: string[] = []
+  ): T[] {
+    if (!Array.isArray(patches) || patches.length > 100) throw new BadRequestException("能力预备配置必须是受控数组（最多100项）");
+    const replacements = new Map<string, RentalCapabilityConfig>();
+    const additions: T[] = [];
+    for (const patch of patches) {
+      if (!patch || Object.keys(patch).some((key) => !["intent", "code", "expectedRevision", "expectedImplementationVersion", "config"].includes(key)) ||
+          (patch.intent !== undefined && !["configure", "enable_new"].includes(patch.intent)) || typeof patch.code !== "string" || replacements.has(patch.code) ||
+          !Number.isSafeInteger(patch.expectedRevision) || patch.expectedRevision < (patch.intent === "enable_new" ? 0 : 1) ||
+          typeof patch.expectedImplementationVersion !== "string" || !patch.expectedImplementationVersion.trim() ||
+          !patch.config || typeof patch.config !== "object" || Array.isArray(patch.config)) {
+        throw new BadRequestException("能力预备配置编码、修订、实现或配置格式无效/重复");
+      }
+      const instance = instances.find((row) => row.code === patch.code);
+      const enableNew = patch.intent === "enable_new";
+      if (enableNew ? instance !== undefined || patch.expectedRevision !== 0 :
+          !instance || instance.status !== "enabled" || instance.revision !== patch.expectedRevision || instance.implementationVersion !== patch.expectedImplementationVersion) {
+        throw new ConflictException("能力实例不存在、未启用或已变化，请重新准备配置");
+      }
+      const definition = DEFINITIONS.get(patch.code);
+      if (!definition || CORE_CAPABILITIES.has(patch.code) ||
+          (definition.applicableCategories !== "all" && !definition.applicableCategories.includes(target.code)) ||
+          (!target.defaultCapabilities.includes(patch.code) && definition.kind !== "shared")) {
+        throw new BadRequestException("该能力不能在目标品类准备配置");
+      }
+      if (enableNew && (!target.requiredCapabilities.includes(patch.code) || !target.defaultCapabilities.includes(patch.code) || patch.expectedImplementationVersion !== definition.implementationVersion)) {
+        throw new BadRequestException("仅允许明确准备目标必选的新能力，且必须使用当前登记实现");
+      }
+      const hookRegistered = registeredVersions.some((key) => key.split("@")[0] === patch.code);
+      if (enableNew && !registeredVersions.includes(`${patch.code}@${patch.expectedImplementationVersion}`)) {
+        throw new ConflictException("新能力实现尚未注册执行器，不能准备配置");
+      }
+      if (!definition.implementationVersion || (hookRegistered ? !registeredVersions.includes(`${patch.code}@${patch.expectedImplementationVersion}`) : patch.expectedImplementationVersion !== definition.implementationVersion)) {
+        throw new ConflictException("能力明确实现版本不可执行，不能准备配置");
+      }
+      replacements.set(patch.code, this.validatedConfig(definition, patch.config));
+      // A detached compatibility projection, not a stored instance or runtime
+      // identity. Only the transactional writer may create it after final checks.
+      if (enableNew) additions.push({ code: patch.code, status: "enabled", revision: 0,
+        implementationVersion: patch.expectedImplementationVersion, config: replacements.get(patch.code)! } as T);
+    }
+    return [...instances.map((row) => replacements.has(row.code) ? { ...row, config: replacements.get(row.code)! } : row), ...additions];
+  }
 
   /** 某能力在该空间是否**真正可用**。菜单与 API 门禁只能用这个判定（CORE-EXT-02C 消费）。 */
   async isEnabled(tenantId: string, code: RentalCapability, workspaceId?: string): Promise<boolean> {
@@ -264,13 +349,15 @@ export class WorkspaceCapabilityService {
    */
   async reconcileRequiredCapabilities(tenantId: string, operator?: string) {
     const workspaceId = await this.repository.currentWorkspaceId(tenantId);
-    const { categoryCode, declaredCodes } = await this.repository.workspaceScope(tenantId, workspaceId);
-    const result = await this.repository.runInTransaction((tx) =>
-      this.initializeRequiredCapabilities(tenantId, workspaceId, categoryCode, declaredCodes, tx, {
+    const { categoryCode } = await this.repository.workspaceScope(tenantId, workspaceId);
+    const result = await this.repository.runInTransaction(async (tx) => {
+      const scope = await this.repository.workspaceScope(tenantId, workspaceId, tx);
+      return this.initializeRequiredCapabilities(tenantId, workspaceId, scope.categoryCode, scope.declaredCodes, tx, {
         operator,
+        requiredCodes: scope.requiredCodes,
         reason: `运营显式对账：按品类 ${categoryCode} 初始化缺失的必选能力`
-      })
-    );
+      });
+    });
     const overview = await this.overview(tenantId, workspaceId);
     return {
       tenantId,
@@ -307,13 +394,13 @@ export class WorkspaceCapabilityService {
    */
   async overview(tenantId: string, workspaceId?: string): Promise<WorkspaceCapabilityOverview> {
     const scope = workspaceId ?? (await this.repository.currentWorkspaceId(tenantId));
-    const { categoryCode, declaredCodes } = await this.repository.workspaceScope(tenantId, scope);
+    const { categoryCode, declaredCodes, requiredCodes } = await this.repository.workspaceScope(tenantId, scope);
     const instances = new Map(
       (await this.repository.listInstances(tenantId, scope)).map((instance) => [instance.code, instance])
     );
     const declared = new Set(declaredCodes);
     const required = new Set(
-      RENTAL_CATEGORY_DEFINITIONS.find((category) => category.code === categoryCode)?.requiredCapabilities ?? []
+      requiredCodes ?? RENTAL_CATEGORY_DEFINITIONS.find((category) => category.code === categoryCode)?.requiredCapabilities ?? []
     );
     const capabilities: WorkspaceCapabilityView[] = RENTAL_CAPABILITY_MODULES.map((definition) => {
       const instance = instances.get(definition.code);
@@ -389,7 +476,7 @@ export class WorkspaceCapabilityService {
       throw new ConflictException(`能力 ${input.code} 由 Rental Core 内建提供，请在对应业务规则中配置`);
     }
     const workspaceId = await this.repository.currentWorkspaceId(tenantId);
-    const { categoryCode } = await this.repository.workspaceScope(tenantId, workspaceId);
+    const { categoryCode, binding } = await this.repository.workspaceScope(tenantId, workspaceId);
     const existing = await this.repository.findInstance(tenantId, workspaceId, input.code);
 
     if (input.status === "enabled") {
@@ -470,7 +557,8 @@ export class WorkspaceCapabilityService {
         operator,
         at: now
       },
-      existing ? existing.revision : undefined
+      existing ? existing.revision : undefined,
+      binding
     );
   }
 
@@ -492,6 +580,7 @@ export class WorkspaceCapabilityService {
       throw new ConflictException(`能力 ${code} 尚无可执行模块，无法升级`);
     }
     const workspaceId = await this.repository.currentWorkspaceId(tenantId);
+    const { binding } = await this.repository.workspaceScope(tenantId, workspaceId);
     const existing = await this.repository.findInstance(tenantId, workspaceId, code);
     if (!existing) throw new NotFoundException(`能力 ${code} 尚未在本经营空间启用，无法升级`);
     if (existing.implementationVersion === definition.implementationVersion) {
@@ -523,7 +612,8 @@ export class WorkspaceCapabilityService {
         operator,
         at: now
       },
-      existing.revision
+      existing.revision,
+      binding
     );
   }
 

@@ -20,6 +20,7 @@ import type {
 import { PrismaService } from "../database/prisma.service";
 import type { RentalConfigTx } from "./rental-core-config.repository";
 import { assertScopedWrite, resolveScopeWorkspaceId } from "./workspace-scope";
+import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./category-active-write";
 
 const canonicalJson = (value: unknown) => JSON.stringify(value, (_key, item: unknown) => {
   if (!item || typeof item !== "object" || Array.isArray(item)) return item;
@@ -58,9 +59,9 @@ export interface TenantBusinessConfigSnapshot {
  */
 export interface RentalBusinessConfigStore {
   loadAll(): Promise<TenantBusinessConfigSnapshot[]>;
-  upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx): Promise<void>;
-  upsertDiscountPlan(plan: RentalDiscountPlan): Promise<void>;
-  upsertService(service: RentalValueAddedService): Promise<void>;
+  upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
+  upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding): Promise<void>;
+  upsertService(service: RentalValueAddedService, expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertCalendar(
     calendar: RentalCalendarYear,
     expectedRevision?: number,
@@ -88,7 +89,7 @@ export interface RentalBusinessConfigStore {
     superseded?: RentalCalendarYear,
     expectedRevisions?: { next: number; superseded: number }
   ): Promise<void>;
-  upsertRuleVersion(version: RentalRuleVersion): Promise<void>;
+  upsertRuleVersion(version: RentalRuleVersion, expectedBinding?: CategoryWriteBinding): Promise<void>;
   /**
    * RULE-01A：写规则版本并追加一条审计。发布、恢复、作废三类动作都走这里。
    * 版本行与审计必须同一事务：分两次写，失败时会留下一个没有原因、没有操作者的生效版本，
@@ -98,7 +99,8 @@ export interface RentalBusinessConfigStore {
     version: RentalRuleVersion,
     audit: RentalRuleVersionAudit,
     /** 一并落库的其它版本行（如被替代版本的状态与时间戳）。 */
-    alsoWrite?: RentalRuleVersion[]
+    alsoWrite?: RentalRuleVersion[],
+    expectedBinding?: CategoryWriteBinding
   ): Promise<void>;
   loadRuleVersionAudits(tenantId: string, workspaceId: string, ruleVersionId?: string): Promise<RentalRuleVersionAudit[]>;
   upsertNotificationTemplate(template: RentalNotificationTemplateV1): Promise<void>;
@@ -180,7 +182,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     });
   }
 
-  async upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx): Promise<void> {
+  async upsertPricingPlan(plan: RentalPricingPlanV1, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void> {
     const data = {
       tenantId: plan.tenantId,
       categoryCode: upper<$Enums.RentalCategoryCode>(plan.categoryCode),
@@ -196,18 +198,26 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       // 与"配了一个空清单"在语义上同义，但省掉一次无意义的 JSON 解析。
       fulfillmentFees: (plan.fulfillmentFees ?? null) as unknown as Prisma.InputJsonValue
     };
-    const client = tx ?? this.prisma;
-    const workspaceId = await resolveScopeWorkspaceId(client, plan.tenantId);
+    // Resolve outside our transaction so the workspace lock is its first read:
+    // a normal scope SELECT before waiting for the lock would establish an old
+    // MySQL repeatable-read snapshot of the price rows.
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, plan.tenantId);
+    const write = async (client: RentalConfigTx) => {
+    const { definition } = await lockActiveCategoryBinding(client, plan.tenantId, workspaceId, expectedBinding, plan.categoryCode);
     const existing = await client.rentalPricingPlan.findUnique({ where: { id: plan.id }, select: { tenantId: true, workspaceId: true } });
     assertScopedWrite(existing, plan.tenantId, workspaceId, "基础定价计划");
+    if (plan.rates.some((rate) => !definition.businessModel.pricingUnits.includes(rate.unit))) throw new ConflictException("价格计划包含当前品类不支持的计价单位");
+    if (plan.fulfillmentFees?.some((fee) => !definition.businessModel.fulfillmentModes.includes(fee.mode))) throw new ConflictException("价格计划包含当前品类不支持的履约收费方式");
     await client.rentalPricingPlan.upsert({
       where: { id: plan.id },
       create: { workspaceId, id: plan.id, ...data, createdAt: new Date(plan.createdAt) },
       update: data
     });
+    };
+    if (tx) await write(tx); else await this.prisma.$transaction(write);
   }
 
-  async upsertDiscountPlan(plan: RentalDiscountPlan): Promise<void> {
+  async upsertDiscountPlan(plan: RentalDiscountPlan, expectedBinding?: CategoryWriteBinding): Promise<void> {
     const data = {
       tenantId: plan.tenantId,
       categoryCode: upper<$Enums.RentalCategoryCode>(plan.categoryCode),
@@ -233,16 +243,19 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
       version: plan.version
     };
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, plan.tenantId);
-    const existing = await this.prisma.rentalDiscountPlan.findUnique({ where: { id: plan.id }, select: { tenantId: true, workspaceId: true } });
-    assertScopedWrite(existing, plan.tenantId, workspaceId, "优惠方案");
-    await this.prisma.rentalDiscountPlan.upsert({
-      where: { id: plan.id },
-      create: { workspaceId, id: plan.id, ...data, createdAt: new Date(plan.createdAt) },
-      update: data
+    await this.prisma.$transaction(async (tx) => {
+      await lockActiveCategoryBinding(tx, plan.tenantId, workspaceId, expectedBinding, plan.categoryCode);
+      const existing = await tx.rentalDiscountPlan.findUnique({ where: { id: plan.id }, select: { tenantId: true, workspaceId: true } });
+      assertScopedWrite(existing, plan.tenantId, workspaceId, "优惠方案");
+      await tx.rentalDiscountPlan.upsert({
+        where: { id: plan.id },
+        create: { workspaceId, id: plan.id, ...data, createdAt: new Date(plan.createdAt) },
+        update: data
+      });
     });
   }
 
-  async upsertService(service: RentalValueAddedService): Promise<void> {
+  async upsertService(service: RentalValueAddedService, expectedBinding?: CategoryWriteBinding): Promise<void> {
     const data = {
       tenantId: service.tenantId,
       categoryCode: upper<$Enums.RentalCategoryCode>(service.categoryCode),
@@ -272,7 +285,10 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, service.tenantId);
     const snapshot = JSON.parse(JSON.stringify({ ...service, workspaceId })) as Prisma.InputJsonValue;
     await this.prisma.$transaction(async (tx) => {
-      const existing = await tx.rentalValueAddedService.findUnique({ where: { id: service.id }, select: { tenantId: true, workspaceId: true } });
+      const { definition } = await lockActiveCategoryBinding(tx, service.tenantId, workspaceId, expectedBinding, service.categoryCode);
+      const modes = [...service.applicableFulfillmentModes, ...(service.mandatoryRule?.fulfillmentModes ?? [])];
+      if (modes.some((mode) => !definition.businessModel.fulfillmentModes.includes(mode))) throw new ConflictException("增值服务包含当前品类不支持的履约方式");
+      const existing = await tx.rentalValueAddedService.findUnique({ where: { id: service.id }, select: { tenantId: true, workspaceId: true, version: true } });
       assertScopedWrite(existing, service.tenantId, workspaceId, "增值服务");
       await tx.rentalValueAddedService.upsert({
         where: { id: service.id },
@@ -291,6 +307,7 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
         select: { snapshot: true }
       });
       if (existingVersion) {
+        if (existing && existing.version !== service.version) throw new ConflictException("增值服务版本已前进，历史版本不可覆盖当前主档；请刷新后重试");
         if (canonicalJson(existingVersion.snapshot) !== canonicalJson(snapshot)) {
           throw new ConflictException(
             `增值服务 ${service.code} 的版本 ${service.version} 已存在，不能原地改写；请递增服务版本后再保存`
@@ -367,6 +384,12 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, calendar.tenantId);
     try {
       await this.prisma.$transaction(async (tx) => {
+      // Calendar changes participate in adoption preflight. Hold the same space
+      // lock until both the calendar and its override audit have committed.
+      await lockActiveCategoryBinding(tx, calendar.tenantId, workspaceId);
+      if (audits.some((entry) => (entry.year !== undefined && entry.year !== calendar.year) || (entry.version !== undefined && entry.version !== calendar.version))) {
+        throw new ConflictException("日历覆盖审计必须属于本次写入的年度与版本");
+      }
       if (expectedRevision === undefined) {
         await tx.rentalBusinessCalendar.upsert({
           where: { workspaceId_year_version: { workspaceId, year: calendar.year, version: calendar.version } },
@@ -486,6 +509,10 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     const nextData = this.calendarData(next);
     const supersededData = superseded ? this.calendarData(superseded) : undefined;
     await this.prisma.$transaction(async (tx) => {
+      await lockActiveCategoryBinding(tx, next.tenantId, workspaceId);
+      if (superseded && (superseded.tenantId !== next.tenantId || superseded.year !== next.year || superseded.version === next.version)) {
+        throw new ConflictException("日历发布只能替代本租户同年度的其他版本");
+      }
       // 条件更新，条件是「读到的 revision」：两人同时发布同一年度时，后者会更新到 0 行
       // 并在这里整体回滚，而不是两次都成功留下两个 published 版本。
       const conditional = async (
@@ -549,16 +576,20 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
     };
   }
 
-  async upsertRuleVersion(version: RentalRuleVersion): Promise<void> {
+  async upsertRuleVersion(version: RentalRuleVersion, expectedBinding?: CategoryWriteBinding): Promise<void> {
     const data = this.ruleVersionData(version);
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, version.tenantId);
     try {
-      const existing = await this.prisma.rentalRuleVersion.findUnique({ where: { id: version.id }, select: { tenantId: true, workspaceId: true } });
+      await this.prisma.$transaction(async (tx) => {
+      await lockActiveCategoryBinding(tx, version.tenantId, workspaceId, expectedBinding, version.categoryCode);
+      const existing = await tx.rentalRuleVersion.findUnique({ where: { id: version.id }, select: { tenantId: true, workspaceId: true, status: true, config: true } });
       assertScopedWrite(existing, version.tenantId, workspaceId, "规则版本");
-      await this.prisma.rentalRuleVersion.upsert({
+      if (existing && existing.status !== "draft" && (existing.status !== version.status || canonicalJson(existing.config) !== canonicalJson(version.config))) throw new ConflictException("已发布或历史规则不可覆盖，请恢复为新草稿");
+      await tx.rentalRuleVersion.upsert({
         where: { id: version.id },
         create: { workspaceId, id: version.id, ...data, createdAt: new Date(version.createdAt) },
         update: data
+      });
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -571,25 +602,24 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
   async writeRuleVersionWithAudit(
     version: RentalRuleVersion,
     audit: RentalRuleVersionAudit,
-    alsoWrite: RentalRuleVersion[] = []
+    alsoWrite: RentalRuleVersion[] = [],
+    expectedBinding?: CategoryWriteBinding
   ): Promise<void> {
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, version.tenantId);
     try {
       await this.prisma.$transaction(async (tx) => {
         // 同一空间的发布、恢复与作废必须串行。只在服务层检查缓存挡不住多进程并发。
-        await tx.$queryRaw(Prisma.sql`
-          SELECT id FROM business_workspaces
-           WHERE tenantId = ${version.tenantId} AND id = ${workspaceId}
-           FOR UPDATE
-        `);
+        await lockActiveCategoryBinding(tx, version.tenantId, workspaceId, expectedBinding, version.categoryCode);
+        if (audit.tenantId !== version.tenantId || audit.workspaceId !== workspaceId || audit.ruleVersionId !== version.id || audit.version !== version.version || audit.toStatus !== version.status) throw new ConflictException("规则审计与本次写入的空间或版本不一致");
         if (audit.action === "publish") {
           const persisted = await tx.rentalRuleVersion.findFirst({
             where: { id: version.id, tenantId: version.tenantId, workspaceId },
-            select: { status: true }
+            select: { status: true, config: true }
           });
           if (!persisted || persisted.status !== "draft") {
             throw new ConflictException("规则草稿状态已变化，请刷新后重试");
           }
+          if (canonicalJson(persisted.config) !== canonicalJson(version.config)) throw new ConflictException("规则草稿正文已变化，请刷新后重新预览并发布");
           const effectiveFrom = version.effectiveFrom ? new Date(version.effectiveFrom) : undefined;
           if (!effectiveFrom) throw new ConflictException("发布规则缺少生效时间");
           const issuedStatuses = ["pending", "published", "superseded"];
@@ -609,8 +639,11 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
         }
         for (const row of [version, ...alsoWrite]) {
           if (row.tenantId !== version.tenantId) throw new ConflictException("规则版本不能跨租户写入");
-          const existing = await tx.rentalRuleVersion.findUnique({ where: { id: row.id }, select: { tenantId: true, workspaceId: true } });
+          const existing = await tx.rentalRuleVersion.findUnique({ where: { id: row.id }, select: { tenantId: true, workspaceId: true, status: true, config: true } });
           assertScopedWrite(existing, version.tenantId, workspaceId, "规则版本");
+          if (existing && existing.status !== "draft" && canonicalJson(existing.config) !== canonicalJson(row.config)) throw new ConflictException("历史规则正文不可覆盖");
+          if (row.id === version.id && audit.action === "restore" && existing) throw new ConflictException("规则恢复必须建立新草稿，不能覆盖已有版本");
+          if (row.id === version.id && audit.action === "void" && (!existing || !["pending", "published"].includes(existing.status))) throw new ConflictException("规则状态已变化，当前版本不可作废");
           const data = this.ruleVersionData(row);
           await tx.rentalRuleVersion.upsert({
             where: { id: row.id },
@@ -683,14 +716,19 @@ export class RentalBusinessConfigRepository implements RentalBusinessConfigStore
 
   async upsertNotificationTemplate(template: RentalNotificationTemplateV1): Promise<void> {
     const data = this.notificationTemplateData(template);
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, template.tenantId);
-    const existing = await this.prisma.rentalNotificationTemplate.findUnique({ where: { id: template.id }, select: { tenantId: true, workspaceId: true } });
-    assertScopedWrite(existing, template.tenantId, workspaceId, "通知模板");
-    await this.prisma.rentalNotificationTemplate.upsert({
-      where: { id: template.id },
-      create: { workspaceId, id: template.id, ...data },
-      update: data
-    });
+    await this.prisma.$transaction(async (tx) => {
+      const workspaceId = await resolveScopeWorkspaceId(tx, template.tenantId);
+      // MySQL 的 Prisma upsert 可能拆成读取和创建；并发首次补落默认配置
+      // 不能同时观察到“模板不存在”。与品类采用共用空间锁，并在锁后检查范围。
+      await lockActiveCategoryBinding(tx, template.tenantId, workspaceId);
+      const existing = await tx.rentalNotificationTemplate.findUnique({ where: { id: template.id }, select: { tenantId: true, workspaceId: true } });
+      assertScopedWrite(existing, template.tenantId, workspaceId, "通知模板");
+      await tx.rentalNotificationTemplate.upsert({
+        where: { id: template.id },
+        create: { workspaceId, id: template.id, ...data },
+        update: data
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   async replaceNotificationTemplateVersion(

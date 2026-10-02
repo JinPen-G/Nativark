@@ -1,9 +1,26 @@
 import { BadRequestException } from "@nestjs/common";
 import type {
   RentalAsset,
+  RentalAttributeDefinition,
   RentalCapabilityEquipmentLine,
   RentalInventoryMode
 } from "@rental-os/shared";
+
+function projectedAttributes(attributes: Record<string, unknown>, fields: RentalAttributeDefinition[] | undefined, scope: "item_group" | "asset") {
+  if (!fields) return { ...attributes }; // Explicit legacy path; no active definition is guessed.
+  const allowed = new Set(fields.filter((field) => field.scope === scope).map((field) => field.code));
+  return Object.fromEntries(Object.entries(attributes).filter(([code]) => allowed.has(code)));
+}
+
+/** Preserve stored history but expose only the fields understood by this execution version. */
+export function projectCapabilityEquipment(
+  equipment: RentalCapabilityEquipmentLine[], fields: RentalAttributeDefinition[]
+): RentalCapabilityEquipmentLine[] {
+  const allowed = new Set(fields.filter((field) => field.scope === "item_group" || field.scope === "asset").map((field) => field.code));
+  return equipment.map((line) => ({ ...line, attributes: Object.fromEntries(
+    Object.entries(line.attributes ?? {}).filter(([code]) => allowed.has(code))
+  ) }));
+}
 
 /** 富化只需要商品组的这几项，因此收窄接口而不是依赖完整的 RentalItemGroup。 */
 export interface CapabilityEquipmentGroup {
@@ -33,7 +50,8 @@ export interface CapabilityEquipmentLineInput {
  */
 export function buildCapabilityEquipment(
   groups: Map<string, CapabilityEquipmentGroup>,
-  lines: CapabilityEquipmentLineInput[]
+  lines: CapabilityEquipmentLineInput[],
+  fields?: RentalAttributeDefinition[]
 ): RentalCapabilityEquipmentLine[] {
   return lines.map((line) => {
     const group = groups.get(line.itemGroupId);
@@ -45,7 +63,7 @@ export function buildCapabilityEquipment(
       itemGroupName: group.name,
       inventoryMode: group.inventoryMode,
       quantity: line.quantity,
-      attributes: { ...(group.attributes ?? {}) }
+      attributes: projectedAttributes(group.attributes ?? {}, fields, "item_group")
     };
   });
 }
@@ -62,7 +80,8 @@ export function buildCapabilityEquipment(
  */
 export function buildCapabilityEquipmentFromAssets(
   groups: Map<string, CapabilityEquipmentGroup>,
-  assets: Array<Pick<RentalAsset, "id" | "assetNo" | "itemGroupId" | "attributes">>
+  assets: Array<Pick<RentalAsset, "id" | "assetNo" | "itemGroupId" | "attributes">>,
+  fields?: RentalAttributeDefinition[]
 ): RentalCapabilityEquipmentLine[] {
   return assets.map((asset) => {
     const group = groups.get(asset.itemGroupId);
@@ -76,7 +95,7 @@ export function buildCapabilityEquipmentFromAssets(
       quantity: 1,
       assetId: asset.id,
       assetNo: asset.assetNo,
-      attributes: { ...(group.attributes ?? {}), ...(asset.attributes ?? {}) }
+      attributes: { ...projectedAttributes(group.attributes ?? {}, fields, "item_group"), ...projectedAttributes(asset.attributes ?? {}, fields, "asset") }
     };
   });
 }

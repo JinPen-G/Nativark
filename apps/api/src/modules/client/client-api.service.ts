@@ -57,6 +57,7 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
 import { MembershipService } from "../platform/membership.service";
 import { RentalCoreService } from "../rental-core/rental-core.service";
+import { RentalCategoryResolver } from "../rental-core/rental-category-resolver.service";
 import { RentalBusinessService, type BusinessContext } from "../rental-core/rental-business.service";
 import { RentalOrderConfirmationService } from "../rental-core/rental-order-confirmation.service";
 import { RentalIdempotentActionService } from "../rental-core/rental-idempotent-action.service";
@@ -120,13 +121,13 @@ export class ClientApiService {
     private readonly documents: RentalDocumentService,
     @Optional() private readonly corporateSettlement?: CustomerCorporateSettlementService,
     @Optional() private readonly addresses?: ClientDeliveryAddressService,
-    @Optional() private readonly wechat?: ClientWechatAuthService
+    @Optional() private readonly wechat?: ClientWechatAuthService,
+    private readonly categoryResolver?: RentalCategoryResolver
   ) {}
 
-  private context(tenantId: string): BusinessContext {
+  private async context(tenantId: string): Promise<BusinessContext> {
     const profile = this.core.getProfile(tenantId);
-    const category = this.core.listCategories().find((item) => item.code === profile.categoryCode);
-    if (!category) throw new ConflictException("当前经营空间的品类定义不存在");
+    const category = await this.core.getWorkspaceCategory(tenantId);
     return {
       profile,
       category,
@@ -259,7 +260,7 @@ export class ClientApiService {
     });
     if (!workspace) throw new NotFoundException("该服务尚未开放游客浏览");
     return runWithRequestIdentity({ tenantId: tenant.id, workspaceId: workspace.id, isSaasAdmin: false }, async () => {
-      const business = this.context(tenant.id);
+      const business = (await this.context(tenant.id));
       const item = business.groups.find((group) => group.id === itemGroupId && group.status === "enabled");
       if (!item) throw new NotFoundException("商品不存在");
       return this.core.readItemGroupImage(tenant.id, itemGroupId, imageId);
@@ -275,8 +276,6 @@ export class ClientApiService {
   async channelBootstrap(tenantCode: string, client: ClientChannelKind = "wechat_miniprogram", appId?: string): Promise<ClientChannelBootstrapResponse> {
     const tenant = await this.prisma.tenant.findFirst({ where: { code: tenantCode.trim(), status: "ACTIVE" }, select: { id: true, code: true, name: true } });
     if (!tenant) throw new NotFoundException("商户不存在");
-    // 品类名字典与员工端同源（RENTAL_CATEGORY_DEFINITIONS）；客户端据此显示品类名，不再本地维护。
-    const categories = this.core.listCategories().map((row) => ({ code: String(row.code), name: row.name }));
     const profile = await this.prisma.clientChannelProfile.findUnique({
       where: { tenantId: tenant.id },
       include: { publishedWorkspaces: { where: { enabled: true }, include: { workspace: { select: { code: true, name: true, categoryCode: true, isDefault: true, status: true } } } } }
@@ -303,8 +302,14 @@ export class ClientApiService {
     // WEBSITE-CHANNEL-01：仅 web 渠道叠加官网特有配置；其余渠道恒为 undefined。
     const website = client === "web" ? await this.websiteConfig(tenant.id) : undefined;
 
-    // 已发布服务来自租户级配置；未配置或无发布时回退到启用空间目录（不带品牌/协议）。
+    // 只公开租户明确发布的有效空间；无发布时不回退经营空间目录。
     const publishedActive = (profile?.publishedWorkspaces ?? []).filter((row) => row.workspace.status === "ACTIVE");
+    // 公开目录仅投影租户已发布空间的采用版本，不泄露平台未开放品类或治理配置。
+    const definitions = await Promise.all(publishedActive.map(async (row) => this.categoryResolver
+      ? (await this.categoryResolver.forWorkspace(tenant.id, row.workspaceId)).definition
+      : this.core.listCategories().find((category) => category.code === String(row.workspace.categoryCode).toLowerCase())));
+    const categories = [...new Map(definitions.filter((row) => row !== undefined)
+      .map((row) => [String(row!.code), { code: String(row!.code), name: row!.name }])).values()];
     const loginMethods: ClientLoginMethod[] = [
       ...(isMiniProgram && wechatReady ? ["wechat_phone" as const] : []),
       ...((profile?.smsLoginEnabled ?? true) && smsReady ? ["sms" as const] : []),
@@ -457,7 +462,7 @@ export class ClientApiService {
   }
 
   private async buildCatalog(tenantId: string, tenantCode: string, summary: ClientWorkspaceSummary): Promise<ClientCatalogResponse> {
-    const business = this.context(tenantId);
+    const business = (await this.context(tenantId));
     const context = { tenantId, tenantCode, workspaceCode: summary.workspaceCode, workspaceName: summary.workspaceName, categoryCode: summary.categoryCode, membershipStatus: summary.membershipStatus };
     const workspace = summary;
     // 参考起价：当前生效价格版本中，覆盖该型号（直接或经其定价分组）的最低基础单价。
@@ -524,7 +529,7 @@ export class ClientApiService {
   }
 
   async readCatalogItemImage(context: ClientRequestContext, itemGroupId: string, imageId: string) {
-    const business = this.context(context.tenantId);
+    const business = (await this.context(context.tenantId));
     const item = business.groups.find((group) => group.id === itemGroupId && group.status === "enabled");
     if (!item) throw new NotFoundException("商品不存在");
     return this.core.readItemGroupImage(context.tenantId, itemGroupId, imageId);
@@ -582,7 +587,7 @@ export class ClientApiService {
   }
 
   async config(context: ClientRequestContext): Promise<ClientConfigResponse> {
-    const business = this.context(context.tenantId);
+    const business = (await this.context(context.tenantId));
     const workspace = await this.currentWorkspace(context);
     const registration = await this.prisma.customerMembershipRegistrationSettings.findUnique({
       where: { tenantId: context.tenantId },
@@ -659,7 +664,7 @@ export class ClientApiService {
   }
 
   async paymentCapabilities(context: ClientRequestContext): Promise<ClientPaymentCapabilitiesResponse> {
-    const business = this.context(context.tenantId);
+    const business = (await this.context(context.tenantId));
     const catalog = await this.tenantIntegrations.catalog(context.tenantId);
     return this.buildPaymentCapabilities(catalog.configs, business.settings.payment.enabledMethods);
   }
@@ -903,7 +908,7 @@ export class ClientApiService {
     );
     const orderIds = new Set(customerOrders.map((order) => order.id));
     const logs = this.business
-      .listNotificationLogs(context.tenantId, this.context(context.tenantId))
+      .listNotificationLogs(context.tenantId, (await this.context(context.tenantId)))
       .filter((log) => log.businessObjectType === "order" && Boolean(log.businessObjectId) && orderIds.has(log.businessObjectId!))
       .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
     const start = (page - 1) * pageSize;
@@ -979,7 +984,7 @@ export class ClientApiService {
   async createQuote(context: ClientRequestContext, input: ClientCreateQuoteRequest) {
     this.requireActiveMembership(context);
     await this.currentWorkspace(context);
-    const business = this.context(context.tenantId);
+    const business = (await this.context(context.tenantId));
     const request: RentalQuoteRequest = {
       ...input,
       customerType: "personal",
@@ -1000,25 +1005,25 @@ export class ClientApiService {
   }
 
   async getQuote(context: ClientRequestContext, quoteId: string) {
-    const quote = this.business.getQuote(context.tenantId, this.context(context.tenantId), quoteId);
+    const quote = this.business.getQuote(context.tenantId, (await this.context(context.tenantId)), quoteId);
     if (quote.request.customerId !== context.customerId) throw new NotFoundException("报价不存在");
     return quote;
   }
 
   async coupons(context: ClientRequestContext) {
-    return this.business.listCurrentCustomerCoupons(context.tenantId, this.context(context.tenantId), context.customerId);
+    return this.business.listCurrentCustomerCoupons(context.tenantId, (await this.context(context.tenantId)), context.customerId);
   }
 
   async claimCoupon(context: ClientRequestContext, templateId: string) {
     this.requireActiveMembership(context);
-    return this.business.claimCoupon(context.tenantId, this.context(context.tenantId), templateId, context.customerId);
+    return this.business.claimCoupon(context.tenantId, (await this.context(context.tenantId)), templateId, context.customerId);
   }
 
   async createOrder(context: ClientRequestContext, input: ClientCreateOrderRequest, requestContext?: ClientOrderRequestContext) {
     this.requireActiveMembership(context);
     // 即使客户在取消发布前拿到报价，也不能在关闭渠道后新建订单。
     await this.currentWorkspace(context);
-    const business = this.context(context.tenantId);
+    const business = (await this.context(context.tenantId));
     const quote = this.business.getQuote(context.tenantId, business, input.quoteId);
     if (quote.request.customerId !== context.customerId) throw new NotFoundException("报价不存在");
     const lines = quote.request.lines.map((line) => {
@@ -1244,7 +1249,7 @@ export class ClientApiService {
    */
   async orderDocument(context: ClientRequestContext, orderId: string, documentType: string, snapshotId?: string) {
     await this.assertClientOrder(context, orderId);
-    const business = this.context(context.tenantId);
+    const business = (await this.context(context.tenantId));
     if (snapshotId) {
       return this.documents.readSnapshot(context.tenantId, orderId, documentType, snapshotId, {
         includeFinancial: documentType === "settlement"
@@ -1268,7 +1273,7 @@ export class ClientApiService {
     if ([RentalCoreOrderStatus.Renting, RentalCoreOrderStatus.Settling, RentalCoreOrderStatus.Completed, RentalCoreOrderStatus.Cancelled, RentalCoreOrderStatus.NoShow].includes(order.status)) {
       throw new ConflictException("当前订单状态不能取消");
     }
-    const business = this.context(context.tenantId);
+    const business = (await this.context(context.tenantId));
     const calculatedAt = new Date().toISOString();
     const cancellationCharge = this.business.calculateCancellationCharge(
       context.tenantId, business, this.business.getQuote(context.tenantId, business, order.quoteId), calculatedAt
@@ -1280,7 +1285,7 @@ export class ClientApiService {
     this.requireActiveMembership(context);
     await this.assertClientOrder(context, orderId);
     const key = idempotencyKeyOf(requestContext) ?? `client:order.cancel:${orderId}`;
-    const business = this.context(context.tenantId);
+    const business = (await this.context(context.tenantId));
     const outcome = await this.idempotent.executeWithReplayFlag({
       tenantId: context.tenantId,
       action: "order.cancel",
@@ -1317,7 +1322,7 @@ export class ClientApiService {
   private async priceExtension(context: ClientRequestContext, orderId: string, input: ClientOrderExtensionRequest) {
     const order = await this.assertClientOrder(context, orderId);
     await this.core.assertOrderExtensionAvailable(context.tenantId, order, input.newEndAt);
-    const priced = await this.business.quoteOrderExtension(context.tenantId, this.context(context.tenantId), { order, previousExtensions: await this.core.listOrderExtensions(context.tenantId, orderId), lines: order.lines, newEndAt: input.newEndAt, services: input.services, appliedAt: new Date().toISOString(), settlementMode: await this.extensionSettlement(context, order), fulfillmentMode: order.fulfillmentMode, locationIds: [order.fulfillmentLocationId, order.returnLocationId].filter((id): id is string => Boolean(id)), customerType: order.customerType });
+    const priced = await this.business.quoteOrderExtension(context.tenantId, (await this.context(context.tenantId)), { order, previousExtensions: await this.core.listOrderExtensions(context.tenantId, orderId), lines: order.lines, newEndAt: input.newEndAt, services: input.services, appliedAt: new Date().toISOString(), settlementMode: await this.extensionSettlement(context, order), fulfillmentMode: order.fulfillmentMode, locationIds: [order.fulfillmentLocationId, order.returnLocationId].filter((id): id is string => Boolean(id)), customerType: order.customerType });
     const { rateSnapshot: _rateSnapshot, ruleSnapshot: _ruleSnapshot, ...preview } = priced;
     return { order, priced, preview };
   }
@@ -1421,7 +1426,7 @@ export class ClientApiService {
   async createPaymentIntent(context: ClientRequestContext, orderId: string, input: ClientPaymentIntentRequest) {
     this.requireActiveMembership(context);
     await this.assertClientOrder(context, orderId);
-    const enabledMethods = this.context(context.tenantId).settings.payment.enabledMethods;
+    const enabledMethods = (await this.context(context.tenantId)).settings.payment.enabledMethods;
     const methods = enabledMethods?.length ? enabledMethods : DEFAULT_RENTAL_PAYMENT_METHODS;
     // Stripe(跨境收单)不由经营空间的收款方式开关管控,而是由租户第三方支付配置(启用+默认+币种匹配+连接测试)决定;
     // 空间级开关只管线下/支付宝/微信这类空间自选方式。stripe 的可用性在 payments.createPaymentIntent 内按币种与配置门禁。
@@ -1434,7 +1439,7 @@ export class ClientApiService {
   async createMiniProgramPaymentIntent(context: ClientRequestContext, orderId: string, input: ClientMiniProgramPaymentIntentRequest): Promise<ClientPaymentIntentResponse> {
     this.requireActiveMembership(context);
     await this.assertClientOrder(context, orderId);
-    const enabledMethods = this.context(context.tenantId)?.settings?.payment?.enabledMethods;
+    const enabledMethods = (await this.context(context.tenantId))?.settings?.payment?.enabledMethods;
     if (!(enabledMethods?.length ? enabledMethods : DEFAULT_RENTAL_PAYMENT_METHODS).includes("wechat_pay")) {
       throw new ConflictException("微信支付尚未在经营空间设置中启用");
     }

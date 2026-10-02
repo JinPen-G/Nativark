@@ -851,10 +851,23 @@ export interface RentalCategoryBusinessModel {
   defaults: RentalCategoryDefaults;
 }
 
+/** Controlled names, never arbitrary SVG, URLs or executable icon definitions. */
+export const RENTAL_CATEGORY_ICON_CODES = ["rental", "camera", "camping", "construction", "vehicle", "clothing", "tool", "package"] as const;
+export interface RentalCategoryDisplayMetadata {
+  nameEn?: string;
+  descriptionEn?: string;
+  icon?: typeof RENTAL_CATEGORY_ICON_CODES[number];
+  defaultWorkspaceName?: string;
+  defaultWorkspaceNameEn?: string;
+  terminologyEn?: Partial<RentalCategoryTerminology>;
+}
+
 export interface RentalCategoryDefinition {
   code: RentalCategoryCode;
   name: string;
   description: string;
+  /** Optional for immutable legacy snapshots; consumers explicitly fall back to Chinese. */
+  display?: RentalCategoryDisplayMetadata;
   supportedInventoryModes: RentalInventoryMode[];
   defaultCapabilities: RentalCapability[];
   /**
@@ -4492,6 +4505,10 @@ export interface RentalQuoteChargeLine {
 }
 
 export interface RentalQuoteSnapshotV1 {
+  /** 报价时完整取还检查模板；空数组表示无启用模板，缺省仅表示存量无证据。 */
+  inspectionTemplateSnapshots?: RentalInspectionTemplate[];
+  /** 本次报价实际采用的不可变品类版本；存量无证据时不伪造回填。 */
+  categoryVersionId?: string;
   /** 报价时的计价日历及空间计价口径，供原价续租复算。 */
   pricingContext?: RentalRepricingContext;
   id: string;
@@ -5745,6 +5762,10 @@ export interface PartialReturnRentalOrderRequest {
 }
 
 export interface RentalOrder {
+  /** 原样继承报价的取还检查要求，模板后续修改或停用不追改原单。 */
+  inspectionTemplateSnapshots?: RentalInspectionTemplate[];
+  /** 原样继承有效报价的品类版本，不在建单时读取空间最新绑定。 */
+  categoryVersionId?: string;
   id: string;
   tenantId: string;
   orderNo: string;
@@ -6130,6 +6151,8 @@ export interface RentalExtensionPricingSnapshot {
 }
 
 export interface RentalOrderExtension {
+  /** 本次动作的品类政策及真正执行的计价实现；存量缺省不补写。 */
+  executionBasis?: RentalOrderActionExecutionBasis;
   id: string;
   tenantId: string;
   workspaceId: string;
@@ -6152,11 +6175,11 @@ export interface RentalOrderExtension {
   /** 本次需补的正应付差额（已重算原优惠）；负差额另走退款审核。 */
   payableAmount: number;
   currency: string;
-  /** 原订单空间级价格版本，不随申请时现价改变。 */
+  /** 本次实际价格版本：原价补差沿用原报价；独立续租采用申请时适用版本。 */
   priceVersionId?: string;
   priceVersion?: string;
   ruleVersion: string;
-  /** 申请时的费率、规则与日历快照，供事后复算这一段。 */
+  /** 本次实际费率、规则与日历快照；取值来源由 executionBasis 区分。 */
   rateSnapshot: RentalPricingRate[];
   ruleSnapshot: RentalRuleConfig;
   calendarSnapshot: RentalQuoteCalendarDay[];
@@ -6224,6 +6247,7 @@ export interface RentalOrderExtensionRequest {
  * 用 `Partial` 表达会让调用方分不清"这个字段现在没有"和"这个字段永远没有"。
  */
 export interface RentalOrderExtensionPreview {
+  executionBasis?: RentalOrderActionExecutionBasis;
   pricingSnapshot?: RentalExtensionPricingSnapshot;
   orderId: string;
   originalEndAt: string;
@@ -6255,6 +6279,17 @@ export interface RentalOrderExtensionPreview {
 }
 
 export type RentalOrderExchangePriceBasis = "original_order_price" | "replacement_current_price";
+export interface RentalOrderActionExecutionBasis {
+  pricingMode: "incremental" | "original_total";
+  policySource: "current_workspace" | "original_quote";
+  categoryCode: RentalCategoryCode;
+  originalCategoryVersionId?: string;
+  categoryVersionId?: string;
+  adoptionRevision?: number;
+  /** 只有来源版本有历史证据时保存正文，不用静态模板伪造旧政策。 */
+  categoryPolicySnapshot?: RentalCategoryDefinition;
+  pricingStrategies: Array<{ unit: RentalPricingUnit; implementationVersion: string }>;
+}
 export type RentalOrderExchangeDisposition = "return_to_warehouse" | "off_shelf";
 
 /** 取货后换货时追加的检查快照；金额只能由服务端依据其中的事实计算。 */
@@ -6264,6 +6299,23 @@ export interface RentalOrderExchangeInspectionSnapshot {
   exceptions?: Array<{ code: string; description: string; chargeAmount?: number }>;
   attachments?: string[];
   customerConfirmed: boolean;
+}
+
+/** Server-created replacement-goods evidence; never supplied by an exchange request. */
+export interface RentalOrderExchangeExecutionBasis {
+  categoryCode: RentalCategoryCode;
+  categoryVersionId?: string;
+  adoptionRevision?: number;
+  categoryPolicySnapshot?: RentalCategoryDefinition;
+  effectiveFrom: string;
+  priceBasis: RentalOrderExchangePriceBasis;
+  pricingStrategies: Array<{ unit: RentalPricingUnit; implementationVersion: string }>;
+  rateSnapshot: RentalPricingRate[];
+  ruleSnapshot: RentalRuleConfig;
+  calendarSnapshot: RentalQuoteCalendarDay[];
+  pricingSnapshot?: RentalExtensionPricingSnapshot;
+  inspectionTemplateSnapshots: RentalInspectionTemplate[];
+  capabilitySnapshot?: RentalWorkspaceCapabilitySnapshotEntry[];
 }
 
 /** ORDER-CHANGE-01A/01B/01C/01E：订单变更试算结果。 */
@@ -6310,6 +6362,7 @@ export interface RentalOrderChangePreview {
     replacementAssetNo?: string;
     cancelledServiceOccurrenceIds?: string[];
     inspectionSnapshot: RentalOrderExchangeInspectionSnapshot;
+    executionBasis?: RentalOrderExchangeExecutionBasis;
   };
   warnings: string[];
 }
@@ -6448,6 +6501,12 @@ export interface RentalInspectionTemplate {
   version: string;
   fields: RentalInspectionFieldDefinition[];
   enabled: boolean;
+  /** Read-only order projection: this template applies only to these actual resources. */
+  allocationIds?: string[];
+  /** Original stored template ID; projection IDs are never database foreign keys. */
+  sourceTemplateId?: string;
+  /** Read-only projection identifying the replacement-goods change. */
+  exchangeId?: string;
 }
 
 export interface CreateRentalInspectionRequest {
@@ -6509,6 +6568,8 @@ export interface RentalInspectionRecord {
   templateId: string;
   templateCode: string;
   templateVersion: string;
+  /** Replacement action whose frozen requirements were used for this inspection. */
+  exchangeId?: string;
   results: Record<string, unknown>;
   /** 归还检查引用的领取基线；领取记录本身为空。 */
   baselineInspectionId?: string;

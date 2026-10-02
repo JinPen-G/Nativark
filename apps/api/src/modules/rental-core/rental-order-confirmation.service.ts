@@ -273,7 +273,7 @@ export class RentalOrderConfirmationService {
           // 器材属性与确认都是数据，Core 不读它们、不做品类判断。
           subject: {
             ...order,
-            equipment: this.core.buildCapabilityEquipment(tenantId, order.lines.map((line) => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))),
+            equipment: await this.core.buildOrderCapabilityEquipment(tenantId, order, tx),
             // 只把 prepareOrder 已严格校验、且与报价判断绑定的不可变快照交给 Hook。
             // 绝不能再消费原始请求，否则无效 decisionId 会绕过快照校验。
             capabilityExceptions: (order.capabilityExceptions ?? []).map((row) => ({

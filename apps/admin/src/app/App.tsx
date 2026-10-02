@@ -2,7 +2,7 @@ import { App as AntdApp, ConfigProvider } from "antd";
 import enUS from "antd/locale/en_US";
 import zhCN from "antd/locale/zh_CN";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter } from "react-router-dom";
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { useEffect, useLayoutEffect, useMemo } from "react";
 import { AppRouter } from "./AppRouter";
 import { LocaleProvider, useLocale } from "./locale";
@@ -14,6 +14,9 @@ import { applyAdminRadiusTokens, resolveAdminPrimaryColor } from "./designTokens
 import { GlobalInteractionSounds } from "@/features/sound/GlobalInteractionSounds";
 import { applyArcThemeTokens } from "./arcTokens";
 import { FeedbackProvider } from "@/components/ui/Feedback";
+
+// Keep existing descendant routes; data router supplies supported SPA blockers.
+const router = createBrowserRouter([{ path: "*", element: <AppRouter /> }]);
 
 function ThemedApp() {
   const { mode } = useAppearance();
@@ -52,10 +55,8 @@ function ThemedApp() {
       <QueryClientProvider client={queryClient}>
         <AntdApp>
           <FeedbackProvider>
-          <GlobalInteractionSounds />
-          <BrowserRouter>
-            <AppRouter />
-          </BrowserRouter>
+            <GlobalInteractionSounds />
+            <RouterProvider router={router} />
           </FeedbackProvider>
         </AntdApp>
       </QueryClientProvider>

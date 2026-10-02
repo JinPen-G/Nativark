@@ -40,6 +40,7 @@ import { CustomerOperationsRepository } from "./customer-operations.repository";
 import { SharedCustomerRepository, type CustomerProfileUpdateData } from "./shared-customer.repository";
 import { evaluateRentalQualification, type RentalQualificationAction, type RentalQualificationCheckWindow } from "../rental-core/rental-qualification";
 import { getRequestDataScope, getRequestLocationIds, getRequestUserId, getRequestWorkspaceId } from "../../common/request-identity";
+import { lockActiveCategoryBinding } from "../rental-core/category-active-write";
 
 const mask = (value?: string) => {
   const trimmed = value?.trim();
@@ -349,18 +350,24 @@ export class MembershipService {
 
   async saveQualificationType(tenantId: string, workspaceId: string, input: SaveCustomerMembershipQualificationTypeRequest) {
     const workspace = await this.requireWorkspace(tenantId, workspaceId);
-    const existing = input.id
-      ? await this.prisma.customerMembershipQualificationType.findFirst({ where: { tenantId, workspaceId, id: input.id } })
-      : undefined;
-    if (input.id && !existing) throw new NotFoundException("证件类型不存在");
-    const row = existing
-      ? await this.prisma.customerMembershipQualificationType.update({
+    const row = await this.prisma.$transaction(async (tx) => {
+      // Qualification types are active adoption dependencies. Serialize all
+      // mutations (including disable/code changes) with the space's adoption.
+      // Read the existing row only AFTER the mutex in ReadCommitted isolation.
+      await lockActiveCategoryBinding(tx, tenantId, workspaceId, undefined, workspace.categoryCode.toLowerCase());
+      const existing = input.id
+        ? await tx.customerMembershipQualificationType.findFirst({ where: { tenantId, workspaceId, id: input.id } })
+        : undefined;
+      if (input.id && !existing) throw new NotFoundException("证件类型不存在");
+      return existing
+      ? tx.customerMembershipQualificationType.update({
           where: { id: existing.id },
           data: { code: input.code.trim(), name: input.name.trim(), capabilityCode: input.capabilityCode?.trim() || null, requiredForBooking: input.requiredForBooking ?? false, status: input.status ?? "enabled" }
         })
-      : await this.prisma.customerMembershipQualificationType.create({
+      : tx.customerMembershipQualificationType.create({
           data: { tenantId, workspaceId, code: input.code.trim(), name: input.name.trim(), categoryCode: workspace.categoryCode, capabilityCode: input.capabilityCode?.trim() || null, requiredForBooking: input.requiredForBooking ?? false, status: input.status ?? "enabled" }
         });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     return (await this.listQualificationTypes(tenantId, workspaceId)).find((item) => item.id === row.id)!;
   }
 

@@ -1,9 +1,12 @@
 import { BadRequestException, ConflictException, HttpException, HttpStatus, Inject, Injectable, Logger, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import { snapshotInspectionTemplate } from "./rental-inspection-template-snapshot";
 import { CapabilityBlockedException, CapabilityHookRuntime } from "./capability-hook.runtime";
 import { CapabilityHookRepository } from "./capability-hook.repository";
 import { WorkspaceCapabilityService } from "./workspace-capability.service";
+import { RentalCategoryResolver } from "./rental-category-resolver.service";
 import { buildCapabilityEquipment } from "./capability-equipment";
 import {
   RentalCategoryCode,
@@ -28,6 +31,8 @@ import {
   type RentalDepositRule,
   type RentalFulfillmentMode,
   type RentalOrder,
+  type RentalOrderExchangeExecutionBasis,
+  type RentalOrderExchangePriceBasis,
   type RentalOrderExtension,
   type RentalRepricingContext,
   type RentalOrderExtensionPreview,
@@ -126,8 +131,9 @@ import {
   originSnapshotOf
 } from "./calendar-range";
 import { applyPriceAdjustment, assertNoDatetimeOverrideOverlap, assertNoPeriodicOverlap, periodicWindowCoversDate, periodicWindowHits } from "./rental-price-adjustments";
-import { assertTimeBasedOverdueSupported, billedRentalHours, rentalPricingStrategy } from "./rental-pricing-strategy";
+import { assertTimeBasedOverdueSupported, billedRentalHours, rentalPricingStrategy, rentalPricingStrategyReference } from "./rental-pricing-strategy";
 import { categoryPricingRuleError } from "./category-pricing-rule-compatibility";
+import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./category-active-write";
 import { allocateDiscount, selectDiscountPlans } from "./rental-discount-selection";
 import { resolveQuoteServices } from "./rental-service-catalog";
 import { applyPricingGroupSecurityRateOverrides, computeSecurityAmounts, type SecurityLineInput, type RentalPricingSecurityRateOverride, validateSecurityRateCoverage, validateSecurityRules } from "./rental-security-deposit";
@@ -461,7 +467,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     @Optional() private readonly memberships?: MembershipService,
     /** EXT-02A：真实业务短信投递；单测未装配时保留原有模拟通知语义。 */
     @Optional() private readonly notificationRuntime?: TenantIntegrationRuntimeService,
-    @Optional() private readonly secretBox?: SecretBox
+    @Optional() private readonly secretBox?: SecretBox,
+    private readonly categoryResolver?: RentalCategoryResolver
   ) {}
 
   /**
@@ -687,6 +694,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     if (!plans.length) return;
     const tenantId = plans[0].tenantId;
     const workspaceId = this.workspaceOf(tenantId);
+    const { definition } = await lockActiveCategoryBinding(tx, tenantId, workspaceId);
+    if (plans.some((plan) => plan.categoryCode !== definition.code || plan.rates.some((rate) => !definition.businessModel.pricingUnits.includes(rate.unit)))) throw new ConflictException("初始价格不适用于当前品类，请重新配置");
     const existing = await tx.rentalPriceVersion.findFirst({
       where: { tenantId, workspaceId, sequence: 1 },
       select: { id: true }
@@ -944,6 +953,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     tx?: RentalConfigTx,
     deferCache = false
   ) {
+    const binding = await this.categoryConfigurationBinding(tenantId, context);
     const state = this.state(tenantId, context);
     if (!input.code?.trim() || !input.name?.trim() || !input.changeReason?.trim()) throw new BadRequestException("定价编码、名称和变更原因不能为空");
     if (!input.rates.length) throw new BadRequestException("定价计划至少需要一条价格");
@@ -1074,7 +1084,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 草稿/停用是编辑工作区状态：它们不能污染报价唯一事实源。只有明确启用时，
     // 才把「该生效时刻的空间完整价格」追加进不可变时间轴。
     if (!mysql || result.status !== "enabled") {
-      await this.configStore.upsertPricingPlan(result, tx);
+      await this.configStore.upsertPricingPlan(result, tx, binding);
       if (!deferCache) this.commitPricingPlan(tenantId, context, result);
       return result;
     }
@@ -1096,12 +1106,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // 只改已启用计划的名称等元数据，不产生空版本；其余情况是草稿/停用转启用，
     // 需要以目标生效时刻的旧版本为基线，而不是以保存时刻的现值为基线。
     if (wasEnabled && samePrice) {
-      await this.configStore.upsertPricingPlan(result, tx);
+      await this.configStore.upsertPricingPlan(result, tx, binding);
       if (!deferCache) this.commitPricingPlan(tenantId, context, result);
       return result;
     }
 
     const write = async (client: RentalConfigTx) => {
+      await lockActiveCategoryBinding(client, tenantId, workspaceId, binding, context.profile.categoryCode);
       const baseAtStart = await this.findSpaceVersionAt(tenantId, workspaceId, effectiveFrom, client);
       const baseRates = (baseAtStart?.rates ?? []) as unknown as RentalPricingRate[];
       const withPlan = RentalBusinessService.mergeSpaceRates(baseRates, existing?.status === "enabled" ? existing.rates : [], rates);
@@ -1144,7 +1155,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       }
       // 计划当前值与版本写入同一事务。失败时两者一起回滚，不能留下编辑行与
       // 生效事实分叉的半成品。
-      await this.configStore.upsertPricingPlan(result, client);
+      await this.configStore.upsertPricingPlan(result, client, binding);
     };
     const writePromise = tx ? write(tx) : prisma.$transaction(write);
     await writePromise.catch((error) => {
@@ -1227,6 +1238,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       createdBy?: string;
     }
   ) {
+    const { definition } = await lockActiveCategoryBinding(tx, input.tenantId, input.workspaceId);
+    if (input.rates.some((rate) => !definition.businessModel.pricingUnits.includes(rate.unit))) throw new ConflictException("空间价格版本包含当前品类不支持的计价单位");
     await this.assertAppendOnlyTimeline(tx, input.tenantId, input.workspaceId, input.effectiveFrom);
     const agg = await tx.rentalPriceVersion.aggregate({
       _max: { sequence: true },
@@ -1383,6 +1396,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     overrides: readonly RentalPricingSecurityRateOverride[],
     operator?: string
   ) {
+    const binding = await this.categoryConfigurationBinding(tenantId, context);
     const prisma = this.prisma;
     if (!prisma || (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() !== "mysql") {
       throw new BadRequestException("资金费率修改需要 MySQL 空间价格版本，当前数据源不支持");
@@ -1393,6 +1407,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const now = new Date();
 
     const created = await prisma.$transaction(async (tx) => {
+      await lockActiveCategoryBinding(tx, tenantId, workspaceId, binding, context.profile.categoryCode);
       const pendingAdjustment = await tx.rentalPriceAdjustmentPlan.findFirst({
         where: { tenantId, workspaceId, status: "pending" },
         select: { code: true }
@@ -1443,6 +1458,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   /** PRICE-03：历史快照只能通过追加新版本恢复，原版本与中间版本均保持不可变。 */
   async restoreSpacePriceVersion(tenantId: string, context: BusinessContext, sequence: number, reason: string, operator?: string) {
+    const binding = await this.categoryConfigurationBinding(tenantId, context);
     const prisma = this.prisma;
     if (!prisma) throw new BadRequestException("价格版本仅在 MySQL 数据源下可用");
     if (!reason?.trim()) throw new BadRequestException("恢复原因不能为空");
@@ -1450,6 +1466,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const state = this.state(tenantId, context);
     const enabledPlans = state.pricingPlans.filter((plan) => plan.status === "enabled");
     const restored = await prisma.$transaction(async (tx) => {
+      await lockActiveCategoryBinding(tx, tenantId, workspaceId, binding, context.profile.categoryCode);
       const target = await tx.rentalPriceVersion.findFirst({ where: { tenantId, workspaceId, sequence } });
       if (!target) throw new NotFoundException("要恢复的价格版本不存在");
       const pending = await tx.rentalPriceAdjustmentPlan.findFirst({
@@ -1615,6 +1632,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     input: CreateRentalPriceAdjustmentRequest,
     operator?: string
   ) {
+    const binding = await this.categoryConfigurationBinding(tenantId, context);
     const prisma = this.prisma;
     if (!prisma) throw new BadRequestException("调价计划仅在 MySQL 数据源下可用");
     if (!input.code?.trim()) throw new BadRequestException("调价计划编码不能为空");
@@ -1635,8 +1653,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       assertNoDatetimeOverrideOverlap(rate.datetimeOverrides, plan.name + " · " + rate.itemGroupCode);
     }
     const workspaceId = this.workspaceOf(tenantId);
-    const adjustment = await prisma.rentalPriceAdjustmentPlan
-      .create({
+    const adjustment = await prisma.$transaction(async (tx) => {
+      const { definition } = await lockActiveCategoryBinding(tx, tenantId, workspaceId, binding, context.profile.categoryCode);
+      if (nextRates.some((rate) => !definition.businessModel.pricingUnits.includes(rate.unit))) throw new ConflictException("调价计划包含当前品类不支持的计价单位");
+      return tx.rentalPriceAdjustmentPlan.create({
         data: {
           tenantId,
           workspaceId,
@@ -1649,6 +1669,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           changeReason: input.changeReason.trim(),
           createdBy: operator
         }
+      });
       })
       .catch((error) => {
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -1667,6 +1688,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    *   确认时的结果，基础版本被其他调价推进则按失败处理（结果与确认展示一致）。
    */
   async confirmPriceAdjustment(tenantId: string, context: BusinessContext, planId: string, adjustmentId: string, operator?: string) {
+    const binding = await this.categoryConfigurationBinding(tenantId, context);
     const prisma = this.prisma;
     if (!prisma) throw new BadRequestException("调价计划仅在 MySQL 数据源下可用");
     const plan = this.state(tenantId, context).pricingPlans.find((row) => row.id === planId);
@@ -1682,6 +1704,11 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 定时计划按计划生效时点预览并锁定。一个空间同一时刻只允许一条待生效链：
       // 否则多个计划会同时基于同一旧版本，到期后只能让后执行者失败，确认页却无法说明最终价。
       await prisma.$transaction(async (tx) => {
+        const { definition } = await lockActiveCategoryBinding(tx, tenantId, workspaceId, binding, context.profile.categoryCode);
+        const currentAdjustment = await tx.rentalPriceAdjustmentPlan.findFirst({ where: { id: adjustmentId, tenantId, workspaceId, planId } });
+        if (!currentAdjustment || currentAdjustment.status !== "draft" || !isDeepStrictEqual(currentAdjustment.changes, adjustment.changes) || currentAdjustment.scheduledAt?.getTime() !== scheduledAt) {
+          throw new ConflictException("调价草稿已被修改或处理，请刷新后重试");
+        }
         const otherPending = await tx.rentalPriceAdjustmentPlan.findFirst({
           where: { tenantId, workspaceId, status: "pending", id: { not: adjustmentId } },
           select: { code: true, scheduledAt: true }
@@ -1693,6 +1720,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         await this.assertAppendOnlyTimeline(tx, tenantId, workspaceId, targetAt);
         const base = await this.resolveSpaceRates(tenantId, context, targetAt.toISOString(), tx);
         const { rates: finalRates } = applyPriceAdjustment(base.rates, adjustment.changes as unknown as RentalPriceAdjustmentChange[]);
+        if (finalRates.some((rate) => !definition.businessModel.pricingUnits.includes(rate.unit))) throw new ConflictException("定时调价包含当前品类不支持的计价单位");
         const baseVersionId = "versionId" in base ? base.versionId : undefined;
         const pending = await tx.rentalPriceAdjustmentPlan.updateMany({
           where: { id: adjustmentId, tenantId, workspaceId, status: "draft" },
@@ -1708,21 +1736,25 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       });
       return { id: adjustmentId, status: "pending" as const };
     }
-    const versionId = await this.applyPriceAdjustmentInternal(tenantId, context, planId, adjustmentId, operator);
+    const versionId = await this.applyPriceAdjustmentInternal(tenantId, context, planId, adjustmentId, operator, binding);
     return { id: adjustmentId, status: "applied" as const, versionId };
   }
 
   /** PRICE-03：取消调价计划（草稿/待生效可取消，已生效不可撤回）。取消原因独立记录。 */
   async cancelPriceAdjustment(tenantId: string, context: BusinessContext, planId: string, adjustmentId: string, reason: string) {
+    const binding = await this.categoryConfigurationBinding(tenantId, context);
     const prisma = this.prisma;
     if (!prisma) throw new BadRequestException("调价计划仅在 MySQL 数据源下可用");
     if (!reason?.trim()) throw new BadRequestException("取消调价计划必须填写原因");
     const plan = this.state(tenantId, context).pricingPlans.find((row) => row.id === planId);
     if (!plan) throw new NotFoundException("定价计划不存在");
     const workspaceId = this.workspaceOf(tenantId);
-    const pending = await prisma.rentalPriceAdjustmentPlan.updateMany({
-      where: { id: adjustmentId, tenantId, workspaceId, planId, status: { in: ["draft", "pending"] } },
-      data: { status: "cancelled", cancelReason: reason.trim() }
+    const pending = await prisma.$transaction(async (tx) => {
+      await lockActiveCategoryBinding(tx, tenantId, workspaceId, binding, context.profile.categoryCode);
+      return tx.rentalPriceAdjustmentPlan.updateMany({
+        where: { id: adjustmentId, tenantId, workspaceId, planId, status: { in: ["draft", "pending"] } },
+        data: { status: "cancelled", cancelReason: reason.trim() }
+      });
     });
     if (!pending.count) throw new ConflictException("调价计划不存在或已生效，不可取消");
     return { id: adjustmentId, status: "cancelled" as const };
@@ -1757,9 +1789,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         results.push({ id: adjustment.id, status: "applied", versionId });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        await prisma.rentalPriceAdjustmentPlan.updateMany({
-          where: { id: adjustment.id, tenantId, workspaceId, status: "pending" },
-          data: { status: "failed", failureReason: message.slice(0, 191) }
+        await prisma.$transaction(async (tx) => {
+          await lockActiveCategoryBinding(tx, tenantId, workspaceId);
+          await tx.rentalPriceAdjustmentPlan.updateMany({
+            where: { id: adjustment.id, tenantId, workspaceId, status: "pending" },
+            data: { status: "failed", failureReason: message.slice(0, 191) }
+          });
         });
         results.push({ id: adjustment.id, status: "failed" });
       }
@@ -1775,7 +1810,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    *   effectiveFrom = scheduledAt（定时）或当前时刻（立即）；
    * - 计划行现值同步延后到事务提交成功之后。
    */
-  private async applyPriceAdjustmentInternal(tenantId: string, context: BusinessContext, planId: string, adjustmentId: string, operator?: string): Promise<string> {
+  private async applyPriceAdjustmentInternal(tenantId: string, context: BusinessContext, planId: string, adjustmentId: string, operator?: string, expectedBinding?: CategoryWriteBinding): Promise<string> {
+    const binding = expectedBinding ?? await this.categoryConfigurationBinding(tenantId, context);
     const prisma = this.prisma;
     if (!prisma) throw new BadRequestException("调价计划仅在 MySQL 数据源下可用");
     const workspaceId = this.workspaceOf(tenantId);
@@ -1787,8 +1823,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     }
     const plan = this.state(tenantId, context).pricingPlans.find((row) => row.id === planId);
     if (!plan) throw new NotFoundException("定价计划不存在");
-    const changes = adjustment.changes as unknown as RentalPriceAdjustmentChange[];
     const appliedResult = await prisma.$transaction(async (tx) => {
+      await lockActiveCategoryBinding(tx, tenantId, workspaceId, binding, context.profile.categoryCode);
+      // 锁后重新读取，不能用事务外的草稿绕过已确认定时计划的最终费率。
+      const adjustment = await tx.rentalPriceAdjustmentPlan.findFirst({ where: { id: adjustmentId, tenantId, workspaceId, planId } });
+      if (!adjustment || (adjustment.status !== "draft" && adjustment.status !== "pending")) throw new ConflictException("调价计划不存在或不在可执行状态");
+      if (adjustment.scheduledAt && adjustment.scheduledAt.getTime() > Date.now()) throw new ConflictException("定时调价尚未到生效时间");
+      const changes = adjustment.changes as unknown as RentalPriceAdjustmentChange[];
       if (adjustment.status === "draft") {
         const pending = await tx.rentalPriceAdjustmentPlan.findFirst({
           where: { tenantId, workspaceId, status: "pending" },
@@ -1914,6 +1955,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   listDiscountPlans(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).discountPlans; }
 
   async saveDiscountPlan(tenantId: string, context: BusinessContext, input: SaveRentalDiscountPlanRequest) {
+    const binding = await this.categoryConfigurationBinding(tenantId, context);
     const state = this.state(tenantId, context);
     if (!input.code?.trim() || !input.name?.trim() || !input.changeReason?.trim()) throw new BadRequestException("优惠编码、名称和变更原因不能为空");
     if (input.discountType === "percentage" && (input.discountValue <= 0 || input.discountValue > 100)) throw new BadRequestException("百分比优惠必须大于 0 且不超过 100");
@@ -1949,7 +1991,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       code: input.code.trim(), name: input.name.trim(), version: versionAfter(existing?.version),
       createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
-    await this.configStore.upsertDiscountPlan(result);
+    await this.configStore.upsertDiscountPlan(result, binding);
 
     if (existing) Object.assign(existing, result); else state.discountPlans.unshift(result);
     return result;
@@ -1958,6 +2000,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   listServices(tenantId: string, context: BusinessContext) { return this.state(tenantId, context).services; }
 
   async saveService(tenantId: string, context: BusinessContext, input: SaveRentalValueAddedServiceRequest) {
+    const binding = await this.categoryConfigurationBinding(tenantId, context);
     const state = this.state(tenantId, context);
     if (!input.code?.trim() || !input.name?.trim() || !input.terms?.trim() || !input.termsVersion?.trim()) throw new BadRequestException("服务编码、名称及条款不能为空");
     if (input.price < 0 || input.maximumQuantity < 1) throw new BadRequestException("服务价格或数量限制无效");
@@ -2025,7 +2068,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       code: input.code.trim(), name: input.name.trim(), version: versionAfter(existing?.version),
       createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp
     };
-    await this.configStore.upsertService(result);
+    await this.configStore.upsertService(result, binding);
 
     if (existing) Object.assign(existing, result); else state.services.unshift(result);
     return result;
@@ -3200,16 +3243,20 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
    * 按时点匹配唯一规则版本（需求 4.6.1）。报价必须传**租期开始时间**，
    * 不传等于按「现在」匹配，未来租期就会套上今天的条款。
    */
-  currentRule(tenantId: string, context: BusinessContext, at = stamp()) {
-    return matchRuleVersionAt(this.state(tenantId, context).ruleVersions, at);
+  currentRule(tenantId: string, context: BusinessContext, at?: string) {
+    // Lazy initialization timestamps the default rule; only then read an implicit "now".
+    // An explicitly supplied rental start still retains its exact historical boundary.
+    const versions = this.state(tenantId, context).ruleVersions;
+    return matchRuleVersionAt(versions, at ?? stamp());
   }
 
   /**
    * 某时点生效的规则版本，**不抛错**：没有已发布规则返回 undefined。
    * 给只读投影（客户端目录、开业就绪）用；报价与订单推进必须继续用 fail-closed 的 `currentRule`。
    */
-  effectiveRuleAt(tenantId: string, context: BusinessContext, at = stamp()): RentalRuleVersion | undefined {
-    return this.effectiveRuleVersionAt(this.state(tenantId, context).ruleVersions, at);
+  effectiveRuleAt(tenantId: string, context: BusinessContext, at?: string): RentalRuleVersion | undefined {
+    const versions = this.state(tenantId, context).ruleVersions;
+    return this.effectiveRuleVersionAt(versions, at ?? stamp());
   }
 
   /**
@@ -3247,6 +3294,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   /** 草稿保存。已发布版本不可修改（需求 4.6.1），改它只能先恢复为新草稿。 */
   async saveRuleVersion(tenantId: string, context: BusinessContext, input: SaveRentalRuleVersionRequest, operator: string) {
+    const binding = await this.categoryConfigurationBinding(tenantId, context);
     const state = this.state(tenantId, context);
     // 不支持订单资质审核的品类即使收到旧客户端/直接 API 写入的隐藏字段，也只保留中性的关闭状态。
     // required=true 仍交给 validateRule 拒绝，避免把误配置静默“修好”后让管理员以为已生效。
@@ -3275,7 +3323,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           createdAt: stamp()
         };
     // 草稿不改变对外生效的条款，因此不进审计表（审计只记发布、恢复、作废）。
-    await this.configStore.upsertRuleVersion(draft);
+    await this.configStore.upsertRuleVersion(draft, binding);
     if (existing) Object.assign(existing, draft);
     else state.ruleVersions.unshift(draft);
     return draft;
@@ -3293,6 +3341,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     input: PublishRentalRuleVersionRequest,
     operator: string
   ) {
+    const binding = await this.categoryConfigurationBinding(tenantId, context);
     const state = this.state(tenantId, context);
     const reason = input.reason?.trim();
     if (!reason) throw new BadRequestException("发布原因不能为空");
@@ -3339,7 +3388,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     await this.configStore.writeRuleVersionWithAudit(
       next,
       this.ruleVersionAudit(tenantId, next, "publish", target.status, next.status, reason, operator, now),
-      alsoWrite
+      alsoWrite,
+      binding
     );
     Object.assign(target, next);
     for (const row of alsoWrite) Object.assign(state.ruleVersions.find((item) => item.id === row.id)!, row);
@@ -3348,6 +3398,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   /** 恢复历史版本：生成**新草稿**，被恢复的版本原样保留（需求 4.6.1）。 */
   async restoreRuleVersion(tenantId: string, context: BusinessContext, version: string, reason: string, operator: string) {
+    const binding = await this.categoryConfigurationBinding(tenantId, context);
     const state = this.state(tenantId, context);
     const trimmed = reason?.trim();
     if (!trimmed) throw new BadRequestException("恢复原因不能为空");
@@ -3370,7 +3421,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     };
     await this.configStore.writeRuleVersionWithAudit(
       draft,
-      this.ruleVersionAudit(tenantId, draft, "restore", undefined, "draft", trimmed, operator, now)
+      this.ruleVersionAudit(tenantId, draft, "restore", undefined, "draft", trimmed, operator, now),
+      [],
+      binding
     );
     state.ruleVersions.unshift(draft);
     return draft;
@@ -3378,6 +3431,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   /** 作废待生效或已生效版本（需求 4.6.14）。已被替代的历史版本不可作废。 */
   async voidRuleVersion(tenantId: string, context: BusinessContext, version: string, reason: string, operator: string) {
+    const binding = await this.categoryConfigurationBinding(tenantId, context);
     const state = this.state(tenantId, context);
     const trimmed = reason?.trim();
     if (!trimmed) throw new BadRequestException("作废原因不能为空");
@@ -3389,7 +3443,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const next: RentalRuleVersion = { ...target, status: "void", voidedAt: now, voidedBy: operator, voidReason: trimmed };
     await this.configStore.writeRuleVersionWithAudit(
       next,
-      this.ruleVersionAudit(tenantId, next, "void", displayStatus, "void", trimmed, operator, now)
+      this.ruleVersionAudit(tenantId, next, "void", displayStatus, "void", trimmed, operator, now),
+      [],
+      binding
     );
     Object.assign(target, next);
     return next;
@@ -3517,7 +3573,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     await this.assertCustomerInCurrentWorkspace(tenantId, customerId);
     if (!tx && this.prisma && (process.env.PLATFORM_DATA_SOURCE ?? "mysql").toLowerCase() === "mysql") {
       const result = await this.prisma.$transaction((transaction) =>
-        this.claimCoupon(tenantId, context, templateId, customerId, transaction)
+        this.claimCoupon(tenantId, context, templateId, customerId, transaction),
+        { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted }
       );
       this.applyCouponClaimToCache(tenantId, context, result.coupon, result.template);
       return result;
@@ -3703,7 +3760,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       };
       try {
         const result = await this.prisma.$transaction((transaction) =>
-          this.grantReward(tenantId, transactionContext, input, transaction, transactionState)
+          this.grantReward(tenantId, transactionContext, input, transaction, transactionState),
+          { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted }
         );
         // 只在事务提交后从库重建缓存，绝不以事务开始前的快照回滚共享状态。
         await this.refreshFromDatabase();
@@ -4654,6 +4712,20 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest, preResolvedDeliveryAddress?: RentalDeliveryAddressSnapshot) {
+    let categoryVersionId: string | undefined;
+    let categoryAdoptionRevision: number | undefined;
+    if (this.categoryResolver) {
+      const resolved = await this.categoryResolver.forWorkspace(tenantId, this.workspaceOf(tenantId));
+      if (resolved.definition.code !== context.profile.categoryCode) {
+        throw new ConflictException("报价经营空间与品类版本不一致");
+      }
+      if (!isDeepStrictEqual(context.category, resolved.definition)) {
+        throw new ConflictException("品类版本在报价准备期间已变化，请刷新后重新报价");
+      }
+      context = { ...context, category: resolved.definition };
+      categoryVersionId = resolved.categoryVersionId;
+      categoryAdoptionRevision = resolved.adoptionRevision;
+    }
     if (this.memberships && !input.bookingIdentity) input = { ...input, bookingIdentity: { bookingIdentity: "personal" } };
     const state = this.state(tenantId, context);
     // 新空间的默认价格是懒加载配置：首个报价不能先因为版本表为空而失败，
@@ -5315,9 +5387,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         );
       }
     }
+    const inspectionTemplates = this.coreConfigStore.listInspectionTemplates
+      ? await this.coreConfigStore.listInspectionTemplates(tenantId, this.workspaceOf(tenantId)) : undefined;
+    if (inspectionTemplates?.some((template) => template.tenantId !== tenantId || template.categoryCode !== context.category.code)) {
+      throw new ConflictException("检查模板与报价租户或品类不一致");
+    }
     const quote: RentalQuoteSnapshotV1 = {
+      inspectionTemplateSnapshots: inspectionTemplates?.map((template) => snapshotInspectionTemplate(context.category, template)),
       id: uid("quote"), tenantId, quoteNo: `RQ${timestamp.replace(/\D/g, "").slice(0, 14)}${String(state.quotes.length + 1).padStart(3, "0")}`,
-      categoryCode: context.profile.categoryCode, request: structuredClone(input), deliveryAddressSnapshot, membershipSnapshot: resolvedMembership, membershipBenefitEvaluations, chargeLines, rentalLineAmounts,
+      categoryCode: context.profile.categoryCode, categoryVersionId, request: structuredClone(input), deliveryAddressSnapshot, membershipSnapshot: resolvedMembership, membershipBenefitEvaluations, chargeLines, rentalLineAmounts,
       rentalAmount, discountAmount: roundMoney(discountAmount), couponAmount: roundMoney(couponAmount), serviceAmount,
       fulfillmentAmount,
       rateSnapshot: hitRates,
@@ -5368,8 +5446,10 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // Review P1-5：判定结果必须写进报价并返回，否则「需转接环」这类风险虽被发现，
     // 用户却无从知道要确认什么，下单侧也只能凭空重构一遍判断。
     quote.capabilityDecisions = await this.runQuoteHook(tenantId, context, quote);
+    await this.factStore.upsertQuote(quote, categoryVersionId && categoryAdoptionRevision !== undefined
+      ? { categoryVersionId, adoptionRevision: categoryAdoptionRevision } : undefined);
+    // 缓存只在成功提交之后发布；并发采用新版造成拒绝时不能留下幽灵报价。
     state.quotes.unshift(quote);
-    await this.factStore.upsertQuote(quote);
     return quote;
   }
 
@@ -5407,7 +5487,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     const equipment = buildCapabilityEquipment(groups, quote.request.lines.map((line) => ({
       itemGroupId: line.itemGroupId!,
       quantity: line.quantity
-    })));
+    })), context.category.businessModel.assetFields);
     const instances = quote.capabilitySnapshot
       ? WorkspaceCapabilityService.instancesFromSnapshot(tenantId, workspaceId, quote.capabilitySnapshot)
       : undefined;
@@ -5418,6 +5498,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         tenantId,
         workspaceId,
         categoryCode: context.category.code,
+        requiredCapabilities: context.category.requiredCapabilities,
         subjectRef: { type: "quote", id: quote.id },
         subject: { ...quote, equipment, capabilityExceptions: [] },
         at,
@@ -5779,6 +5860,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return { tenantId, year, region: settings.calendar.officialCalendarRegion, version: "1.0", status: "draft", days };
   }
 
+  private async categoryConfigurationBinding(tenantId: string, context: BusinessContext): Promise<CategoryWriteBinding | undefined> {
+    if (!this.categoryResolver) return undefined;
+    const resolved = await this.categoryResolver.forWorkspace(tenantId, this.workspaceOf(tenantId));
+    if (resolved.definition.code !== context.profile.categoryCode || !isDeepStrictEqual(context.category, resolved.definition)) {
+      throw new ConflictException("品类版本在经营配置准备期间已变化，请刷新后重新保存");
+    }
+    return { categoryVersionId: resolved.categoryVersionId, adoptionRevision: resolved.adoptionRevision };
+  }
+
   private validateRule(context: BusinessContext, config: RentalRuleConfig) {
     if (config.cancellation.weatherExceptionEnabled) {
       throw new BadRequestException("天气免取消费暂未支持，不能发布或保存为已启用状态；特殊情况请通过费用人工审核处理");
@@ -6137,6 +6227,35 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return roundMoney(Math.min(amount, rule.damage.chargeLimit ?? amount));
   }
 
+  /** Record the policy and executable strategy references actually used by this action. */
+  private async extensionExecutionBasis(tenantId: string, context: BusinessContext, originalQuote: RentalQuoteSnapshotV1, rates: RentalPricingRate[], pricingMode: "incremental" | "original_total", pricingRule: RentalRuleConfig) {
+    const current = pricingMode === "incremental" && this.categoryResolver
+      ? await this.categoryResolver.forWorkspace(tenantId, this.workspaceOf(tenantId)) : undefined;
+    if (current && !isDeepStrictEqual(context.category, current.definition)) {
+      throw new ConflictException("品类版本在续租准备期间已变化，请刷新后重新试算");
+    }
+    const historical = originalQuote.categoryVersionId && this.categoryResolver
+      ? await this.categoryResolver.forVersion(originalQuote.categoryCode, originalQuote.categoryVersionId) : undefined;
+    const categoryPolicySnapshot = current?.definition ?? (pricingMode === "original_total" ? historical : undefined);
+    const units = new Set(rates.map((rate) => rate.unit));
+    if (units.has("hour") && pricingRule.pricing?.hourToDayEnabled) units.add("day_24h");
+    for (const unit of units) {
+      if (current && !current.definition.businessModel.pricingUnits.includes(unit) && !historical?.businessModel.pricingUnits.includes(unit)) {
+        throw new ConflictException(`缺少 ${unit} 计价单位的历史兼容政策，不能自动续租`);
+      }
+    }
+    return {
+      pricingMode,
+      policySource: pricingMode === "incremental" ? "current_workspace" as const : "original_quote" as const,
+      categoryCode: originalQuote.categoryCode,
+      originalCategoryVersionId: originalQuote.categoryVersionId,
+      categoryVersionId: current?.categoryVersionId ?? (pricingMode === "original_total" ? originalQuote.categoryVersionId : undefined),
+      adoptionRevision: current?.adoptionRevision,
+      categoryPolicySnapshot: structuredClone(categoryPolicySnapshot),
+      pricingStrategies: [...units].map(rentalPricingStrategyReference)
+    };
+  }
+
   /**
    * 续租 / 延期的增量报价（需求 4.6.9）。
    *
@@ -6215,8 +6334,9 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       // 一次性耗材在领取时已经完成一次性消费，续租只延长其它可归还商品的占用，
       // 不应再为耗材按新增时段重复计费或重新查当前价格。
       if (line.inventoryMode === RentalInventoryMode.Consumable) continue;
+      if (!unit) throw new ConflictException(`${pricingGroup?.name ?? group.name} 缺少原订单计价单位依据，不能自动续租`);
       const rate = spaceVersion.rates.find(
-        (item) => pricingTargetId(item) === target && (unit === undefined || item.unit === unit)
+        (item) => pricingTargetId(item) === target && item.unit === unit
       );
       if (!rate) {
         throw new ConflictException(
@@ -6339,6 +6459,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       priceVersionId: versionedSpaceVersion.versionId,
       priceVersion: versionedSpaceVersion.version,
       ruleVersion: rule.version,
+      executionBasis: await this.extensionExecutionBasis(tenantId, context, originalQuote, rateSnapshot, "incremental", rule.config),
       rateSnapshot,
       ruleSnapshot: structuredClone({ ...rule.config, extension: extensionRule })
     };
@@ -6725,18 +6846,40 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
         chargeLines: deltaLines, fullChargeLines: chargeLines,
         refundReview: differenceAmount < 0 ? { amount: -differenceAmount, status: "pending" } : undefined
       },
+      executionBasis: await this.extensionExecutionBasis(tenantId, context, originalQuote, rateSnapshot, "original_total", rule.config),
       ruleVersion: rule.version,
       rateSnapshot,
       ruleSnapshot: structuredClone(rule.config)
     };
   }
 
+  /** Freeze the replacement action's execution evidence separately from the original order. */
+  async captureExchangeExecutionBasis(
+    tenantId: string, context: BusinessContext, priceBasis: RentalOrderExchangePriceBasis, effectiveFrom: string,
+    priced: RentalOrderExtensionPreview & { rateSnapshot: RentalPricingRate[]; ruleSnapshot: RentalRuleConfig }
+  ): Promise<RentalOrderExchangeExecutionBasis> {
+    const current = this.categoryResolver ? await this.categoryResolver.forWorkspace(tenantId, this.workspaceOf(tenantId)) : undefined;
+    if (current && !isDeepStrictEqual(current.definition, context.category)) throw new ConflictException("品类版本在换货准备期间已变化，请重新试算");
+    if (!this.coreConfigStore.listInspectionTemplates) throw new ConflictException("换货检查配置读取未就绪，不能伪造空检查依据");
+    const templates = await this.coreConfigStore.listInspectionTemplates(tenantId, this.workspaceOf(tenantId));
+    if (templates.some((row) => row.tenantId !== tenantId || row.categoryCode !== context.category.code)) throw new ConflictException("换货检查模板与租户或品类不一致");
+    const units = new Set(priced.rateSnapshot.map((row) => row.unit));
+    if (units.has("hour") && priced.ruleSnapshot.pricing?.hourToDayEnabled) units.add("day_24h");
+    return structuredClone({
+      categoryCode: context.category.code, categoryVersionId: current?.categoryVersionId, adoptionRevision: current?.adoptionRevision,
+      categoryPolicySnapshot: current?.definition, effectiveFrom, priceBasis,
+      pricingStrategies: [...units].map(rentalPricingStrategyReference),
+      rateSnapshot: priced.rateSnapshot, ruleSnapshot: priced.ruleSnapshot, calendarSnapshot: priced.calendarSnapshot,
+      pricingSnapshot: priced.pricingSnapshot,
+      inspectionTemplateSnapshots: templates.filter((row) => row.enabled).map((row) => snapshotInspectionTemplate(context.category, row)),
+      capabilitySnapshot: this.capabilities ? await this.capabilities.snapshotEnabled(tenantId, this.workspaceOf(tenantId)) : undefined
+    });
+  }
+
   /**
    * ORDER-CHANGE-01E：取货后换货的全租期重算。
-   *
-   * 只替换一条完整订单行，避免在第一版里把一条数量行拆成两个不同商品后，
-   * 还要重新分摊优惠、押金与服务容量。原价模式复用订单费率快照；现价模式
-   * 只替换目标行的当前空间价格版本，其余商品、原优惠、券和会员权益仍按原快照重算。
+   * 只替换一条完整订单行；原价模式复用订单费率快照，现价模式只替换目标行的
+   * 当前空间价格版本，其余商品、原优惠、券和会员权益仍按原快照重算。
    */
   async quotePostPickupExchange(
     tenantId: string,

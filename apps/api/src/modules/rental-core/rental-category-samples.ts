@@ -52,7 +52,7 @@ const itemGroup = (
 
 const cameraSamples: RentalCategorySampleFactory = (input) => {
   const body = itemGroup(input, "CAM-BODY", "全画幅相机机身", RentalInventoryMode.Serialized, "台", {
-    brand: "Sony", model: "Alpha 7 IV", mount: "E", sensor: "全画幅"
+    brand: "Sony", model: "Alpha 7 IV", mount: "E", sensor: "full_frame"
   });
   const lens = itemGroup(input, "CAM-LENS", "24-70mm 标准镜头", RentalInventoryMode.Serialized, "支", {
     brand: "Sony", model: "FE 24-70mm F2.8 GM II", mount: "E"
@@ -135,7 +135,7 @@ const vehicleSamples: RentalCategorySampleFactory = (input) => {
       locationId: input.location.id,
       locationName: input.location.name,
       status: RentalAssetStatus.Available,
-      attributes: { licensePlate: `粤B·R${String(sequence).padStart(4, "0")}`, vin: `LDEMO2026VEH${String(sequence).padStart(4, "0")}`, color: index === 0 ? "白色" : "黑色", firstRegistrationDate: "2026-01-15" },
+      attributes: { licensePlate: `粤B·R${String(sequence).padStart(4, "0")}`, vin: `LDEMO2026VEH${String(sequence).padStart(4, "0")}`, color: index === 0 ? "白" : "黑", firstRegistrationDate: "2026-01-15" },
       createdAt: input.timestamp,
       updatedAt: input.timestamp
     };
@@ -150,10 +150,10 @@ const vehicleSamples: RentalCategorySampleFactory = (input) => {
 
 const constructionSamples: RentalCategorySampleFactory = (input) => {
   const excavator = itemGroup(input, "CON-EXCAVATOR", "小型挖掘机", RentalInventoryMode.Serialized, "台", {
-    manufacturer: "三一重工", brand: "SANY", model: "SY35U", power: "21.5kW", ratedLoad: 3.78
+    manufacturer: "三一重工", brand: "SANY", model: "SY35U", power: "21.5kW", ratedLoad: 3.78, ratedLoadUnit: "t"
   });
   const barriers = itemGroup(input, "CON-BARRIER", "施工围挡", RentalInventoryMode.Quantity, "片", {
-    manufacturer: "演示工程物资", brand: "RIMO", model: "B-2000", ratedLoad: 20
+    manufacturer: "演示工程物资", brand: "RIMO", model: "B-2000", ratedLoad: 20, ratedLoadUnit: "kg"
   });
   const asset: RentalAsset = {
     id: `${excavator.id}_asset_1`,

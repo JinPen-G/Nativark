@@ -177,7 +177,7 @@ export function RentalOrderDetailPage() {
   const [serviceRefundForm] = Form.useForm<{ reason: string; paymentMethod?: RentalOfflinePaymentMethod }>();
   const order = useQuery({ queryKey: ["rental-core", "order", id], queryFn: () => rentalCoreApi.order(id), enabled: Boolean(id) });
   const profile = useQuery({ queryKey: ["rental-core", "profile"], queryFn: rentalCoreApi.profile });
-  const templates = useQuery({ queryKey: ["rental-core", "templates"], queryFn: () => rentalCoreApi.inspectionTemplates() });
+  const templates = useQuery({ queryKey: ["rental-core", "templates", id], queryFn: () => rentalCoreApi.inspectionTemplates(undefined, id), enabled: Boolean(id) });
   const carrierShipment = useQuery({ queryKey: ["rental-core", "carrier-shipment", id], queryFn: () => rentalCoreApi.carrierShipmentEvents(id), enabled: Boolean(id && order.data?.fulfillmentMode === "carrier_shipping") });
   const groups = useQuery({ queryKey: ["rental-core", "groups"], queryFn: rentalCoreApi.itemGroups });
   const pricingGroups = useQuery({ queryKey: ["rental-core", "pricing-groups"], queryFn: rentalCoreApi.pricingGroups, enabled: postPickupExchangeOpen });

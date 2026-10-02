@@ -218,10 +218,9 @@ export class RentalCoreController {
     @Optional() private readonly memberships?: MembershipService
   ) {}
 
-  private context(tenantId: string): BusinessContext {
+  private async context(tenantId: string): Promise<BusinessContext> {
     const profile = this.service.getProfile(tenantId);
-    const category = this.service.listCategories().find((item) => item.code === profile.categoryCode);
-    if (!category) throw new Error("当前经营空间的品类定义不存在");
+    const category = await this.service.getWorkspaceCategory(tenantId);
     return { profile, category, settings: this.service.getBusinessSettings(tenantId), groups: this.service.listItemGroups(tenantId), pricingGroups: this.service.listPricingGroups(tenantId), couponTemplates: this.service.listCouponTemplates(tenantId), locations: this.service.listLocations(tenantId), operators: this.service.listOperators(tenantId) };
   }
 
@@ -418,12 +417,15 @@ export class RentalCoreController {
   private async emitOrderEvent(tenantId: string, eventCode: string, order: { id: string; orderNo: string; customerName: string; contactPhone?: string; customerId?: string }) {
     // 业务对象随事件传入，服务端据此生成空间级幂等键——同一订单同一事件重放不再二次发信。
     return await this.business.emitNotificationEvent(
-      tenantId, this.context(tenantId), eventCode, order.contactPhone ?? order.customerId,
+      tenantId, (await this.context(tenantId)), eventCode, order.contactPhone ?? order.customerId,
       { customerName: order.customerName, orderNo: order.orderNo },
       { type: "order", id: order.id }
     );
   }
-  @Get("categories") categories() { return this.service.listCategories(); }
+  @Get("categories") async categories(@Req() req: AuthenticatedRequest) {
+    // 租户业务元数据只展示会话空间已采用的正文；平台全品类管理另走 SaaS 接口。
+    return [await this.service.getWorkspaceCategory(req.user.tenantId)];
+  }
 
   @Get("booking-members")
   bookingMembers(@Req() req: AuthenticatedRequest) {
@@ -520,11 +522,11 @@ export class RentalCoreController {
   }
   @Get("tenant-profile") profile(@Req() req: AuthenticatedRequest) { return this.service.getProfile(req.user.tenantId); }
   /** TENANT-READY-01：当前空间开业配置状态（服务端权威判定，含缺项与下一步入口）。 */
-  @Get("tenant-readiness") tenantReadiness(@Req() req: AuthenticatedRequest) { return this.business.tenantReadiness(req.user.tenantId, this.context(req.user.tenantId)); }
+  @Get("tenant-readiness") async tenantReadiness(@Req() req: AuthenticatedRequest) { return this.business.tenantReadiness(req.user.tenantId, (await this.context(req.user.tenantId))); }
   @Put("tenant-profile") saveProfile(@Req() req: AuthenticatedRequest, @Body() body: SaveTenantRentalProfileDto) { return this.committed(req.user.tenantId, this.service.saveProfile(req.user.tenantId, body)); }
   @Get("business-settings") businessSettings(@Req() req: AuthenticatedRequest) { return this.service.getBusinessSettings(req.user.tenantId); }
   @Put("business-settings") saveBusinessSettings(@Req() req: AuthenticatedRequest, @Body() body: SaveTenantRentalBusinessSettingsDto) { return this.committed(req.user.tenantId, this.service.saveBusinessSettings(req.user.tenantId, body, req.user.displayName)); }
-  @Get("coupon-templates") couponTemplates(@Req() req: AuthenticatedRequest) { return this.service.listCouponTemplates(req.user.tenantId); }
+  @Get("coupon-templates") couponTemplates(@Req() req: AuthenticatedRequest) { return this.service.readCouponTemplates(req.user.tenantId); }
   @Post("coupon-templates") saveCouponTemplate(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalCouponTemplateDto) { return this.committed(req.user.tenantId, this.service.saveCouponTemplate(req.user.tenantId, body)); }
   @Put("coupon-templates/:id") updateCouponTemplate(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalCouponTemplateDto) { return this.committed(req.user.tenantId, this.service.saveCouponTemplate(req.user.tenantId, { ...body, id })); }
   @Get("locations") locations(@Req() req: AuthenticatedRequest) { return this.service.listLocations(req.user.tenantId); }
@@ -574,7 +576,7 @@ export class RentalCoreController {
         tx,
         true
       );
-      const context = this.context(tenantId);
+      const context = (await this.context(tenantId));
       const pricingGroups = [group, ...(context.pricingGroups ?? []).filter((row) => row.id !== group.id)];
       plan = await this.business.savePricingPlan(tenantId, { ...context, pricingGroups }, {
         code: `BASE-${group.code}-${group.id.slice(-8)}`,
@@ -606,13 +608,13 @@ export class RentalCoreController {
       }, req.user.displayName, tx, true);
     });
     this.service.commitPricingGroup(group);
-    this.business.commitPricingPlan(tenantId, { ...this.context(tenantId), pricingGroups: [group, ...this.service.listPricingGroups(tenantId).filter((row) => row.id !== group.id)] }, plan);
+    this.business.commitPricingPlan(tenantId, { ...(await this.context(tenantId)), pricingGroups: [group, ...this.service.listPricingGroups(tenantId).filter((row) => row.id !== group.id)] }, plan);
     return this.committed(tenantId, group);
   }
   @Put("pricing-groups/:id") updatePricingGroup(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalPricingGroupDto) { return this.committed(req.user.tenantId, this.service.savePricingGroup(req.user.tenantId, { ...body, id })); }
-  @Patch("pricing-groups/:id/security-rates") updatePricingGroupSecurityRates(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: UpdateRentalPricingGroupSecurityRatesDto) {
+  @Patch("pricing-groups/:id/security-rates") async updatePricingGroupSecurityRates(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: UpdateRentalPricingGroupSecurityRatesDto) {
     if (!body.rates?.length) throw new BadRequestException("至少填写一个计价单位的押金或预授权费率");
-    return this.business.updatePricingGroupSecurityRates(req.user.tenantId, this.context(req.user.tenantId), id, body.rates, req.user.displayName);
+    return this.business.updatePricingGroupSecurityRates(req.user.tenantId, (await this.context(req.user.tenantId)), id, body.rates, req.user.displayName);
   }
   @Get("assets") assets(@Req() req: AuthenticatedRequest) { return this.service.listAssets(req.user.tenantId); }
   @Get("assets/:id/status-history") assetStatusHistory(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.listAssetStatusHistory(req.user.tenantId, id); }
@@ -653,7 +655,7 @@ export class RentalCoreController {
     if (allocation.quantity !== activeQuantity) throw new ConflictException("本轮只能整行换货，不能拆换部分数量");
     if (["consumable", "bundle"].includes(line.inventoryMode)) throw new ConflictException("一次性耗材和套装暂不支持取货后换货");
 
-    const context = this.context(tenantId);
+    const context = (await this.context(tenantId));
     const replacementGroup = context.groups.find((row) => row.id === replacementItemGroupId);
     if (!replacementGroup || replacementGroup.status !== "enabled") throw new ConflictException("换货目标商品不存在或已停用");
     if (replacementGroup.inventoryMode !== line.inventoryMode) throw new ConflictException("换货前后库存方式必须一致");
@@ -674,6 +676,7 @@ export class RentalCoreController {
 
     const cancelledServiceOccurrenceIds = [...new Set((body.cancelServiceOccurrenceIds ?? []).map((value) => value.trim()).filter(Boolean))];
     const previousExtensions = await this.service.listOrderExtensions(tenantId, orderId, tx);
+    const appliedAt = new Date().toISOString();
     const quoted = await this.business.quotePostPickupExchange(tenantId, context, {
       order,
       previousExtensions,
@@ -682,7 +685,7 @@ export class RentalCoreController {
       replacementPricingGroupId: body.replacementPricingGroupId?.trim() || undefined,
       priceBasis,
       exchangeCancelledServiceOccurrenceIds: cancelledServiceOccurrenceIds,
-      appliedAt: new Date().toISOString(),
+      appliedAt,
       fulfillmentMode: order.fulfillmentMode,
       locationIds: [order.fulfillmentLocationId, order.returnLocationId].filter((value): value is string => Boolean(value)),
       customerType: order.customerType
@@ -742,7 +745,8 @@ export class RentalCoreController {
         replacementAssetId,
         replacementAssetNo: selectedCandidate?.assetNo,
         cancelledServiceOccurrenceIds,
-        inspectionSnapshot
+        inspectionSnapshot,
+        executionBasis: await this.business.captureExchangeExecutionBasis(tenantId, context, priceBasis, appliedAt, quoted.priced)
       },
       warnings: [
         "换货差额不在确认时立即收款，统一在归还结算时处理",
@@ -812,7 +816,7 @@ export class RentalCoreController {
     const remaining = activeLines
       .map((line) => ({ ...line, quantity: line.quantity - (cancellationByLine.get(line.id) ?? 0) }))
       .filter((line) => line.quantity > 0);
-    const priced = await this.business.quoteOrderLineCancellation(tenantId, this.context(tenantId), {
+    const priced = await this.business.quoteOrderLineCancellation(tenantId, (await this.context(tenantId)), {
       order,
       lines: remaining.map((line) => {
         const original = activeLines.find((row) => row.id === line.id)!;
@@ -912,7 +916,7 @@ export class RentalCoreController {
       return { occurrence, selection: { occurrenceId: selection.occurrenceId, quantity } };
     });
     const normalizedServiceItems = selectedServices.map((row) => row.selection);
-    const priced = await this.business.quoteOrderServiceCancellation(tenantId, this.context(tenantId), {
+    const priced = await this.business.quoteOrderServiceCancellation(tenantId, (await this.context(tenantId)), {
       order,
       serviceItems: normalizedServiceItems
     });
@@ -1054,7 +1058,7 @@ export class RentalCoreController {
     }));
 
     const notificationLogs = canIncludeWorkbenchOrderTodos(req.user)
-      ? this.business.listNotificationLogs(tenantId, this.context(tenantId))
+      ? this.business.listNotificationLogs(tenantId, (await this.context(tenantId)))
       : [];
     const todos = buildRentalWorkbenchTodos(orders, workOrders, fundingByOrderId, extensionsByOrderId, notificationLogs);
     const identity = getRequestIdentity();
@@ -1137,7 +1141,7 @@ export class RentalCoreController {
   }
   @Get("orders/:id") order(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.getOrder(req.user.tenantId, id); }
   @Post("orders") async createOrder(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalOrderDto) {
-    const context = this.context(req.user.tenantId);
+    const context = (await this.context(req.user.tenantId));
     // CAM-01A：带风险下单必须「有权限 + 填原因」。原因由 DTO 与能力 Hook 共同保证
     // （空原因不算确认），权限只能在这里判——Hook 上下文里没有鉴权信息，
     // 而 Guard 按路径判权限、看不到请求体，因此这道检查必须落在控制器。
@@ -1209,7 +1213,7 @@ export class RentalCoreController {
       }
     }
     await this.business.refreshFromDatabase();
-    await this.business.refreshCouponTemplateCache(tenantId, this.context(tenantId));
+    await this.business.refreshCouponTemplateCache(tenantId, (await this.context(tenantId)));
     await this.service.persist(tenantId);
     return {
       scanned: candidates.length,
@@ -1244,7 +1248,7 @@ export class RentalCoreController {
     });
     if (!replayed) await this.emitOrderEvent(tenantId, "order.cancelled", order);
     await this.business.refreshFromDatabase();
-    await this.business.refreshCouponTemplateCache(tenantId, this.context(tenantId));
+    await this.business.refreshCouponTemplateCache(tenantId, (await this.context(tenantId)));
     return this.committed(tenantId, order);
   }
 
@@ -1327,7 +1331,7 @@ export class RentalCoreController {
       }
     }
     await this.business.refreshFromDatabase();
-    await this.business.refreshCouponTemplateCache(tenantId, this.context(tenantId));
+    await this.business.refreshCouponTemplateCache(tenantId, (await this.context(tenantId)));
     await this.service.persist(tenantId);
     return {
       scanned: overdueCandidates.length + noShowCandidates.length,
@@ -1383,7 +1387,7 @@ export class RentalCoreController {
     const tenantId = req.user.tenantId;
     const current = await this.service.getOrder(tenantId, id);
     if (current.status !== RentalCoreOrderStatus.PickupOverdue) throw new ConflictException("订单不在待确认爽约状态");
-    const context = this.context(tenantId);
+    const context = (await this.context(tenantId));
     const logs = await this.business.emitNotificationEvent(
       tenantId,
       context,
@@ -1443,7 +1447,7 @@ export class RentalCoreController {
     });
     if (!replayed) await this.emitOrderEvent(tenantId, "order.no_show", order);
     await this.business.refreshFromDatabase();
-    await this.business.refreshCouponTemplateCache(tenantId, this.context(tenantId));
+    await this.business.refreshCouponTemplateCache(tenantId, (await this.context(tenantId)));
     return this.committed(tenantId, order);
   }
 
@@ -1504,7 +1508,7 @@ export class RentalCoreController {
     });
     // 内部权益已与订单同事务提交；此处只发布已提交的数据到进程缓存。
     await this.business.refreshFromDatabase();
-    await this.business.refreshCouponTemplateCache(tenantId, this.context(tenantId));
+    await this.business.refreshCouponTemplateCache(tenantId, (await this.context(tenantId)));
     // 回放时跳过通知：通知是外部副作用，同键重试不该让客户收到第二条短信。
     if (!replayed) await this.emitOrderEvent(tenantId, "order.confirmed", order);
     return this.committed(tenantId, order);
@@ -1721,7 +1725,7 @@ export class RentalCoreController {
         const returnedAt = new Date().toISOString();
         const charges = await this.returnCharges(
           tenantId,
-          this.context(tenantId),
+          (await this.context(tenantId)),
           id,
           returnedAt,
           tx,
@@ -1739,7 +1743,7 @@ export class RentalCoreController {
     return this.committed(tenantId, order);
   }
   @Post("orders/:id/cancel") async cancel(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CancelRentalOrderDto) {
-    const context = this.context(req.user.tenantId);
+    const context = (await this.context(req.user.tenantId));
     const { result: order, replayed: cancelReplayed } = await this.idempotent.executeWithReplayFlag({
       tenantId: req.user.tenantId,
       action: "order.cancel",
@@ -1818,7 +1822,7 @@ export class RentalCoreController {
   }
 
   private async priceExtension(tenantId: string, orderId: string, body: RentalOrderExtensionDto, tx?: Prisma.TransactionClient) {
-    const context = this.context(tenantId);
+    const context = (await this.context(tenantId));
     // 申请路径传 tx：必须在事务内锁住订单行之后再加载订单、有效续租与可用量，
     // 否则定价和可用量判定用的是锁之前的事实。试算路径不传，只作展示。
     const order = tx
@@ -2253,12 +2257,17 @@ export class RentalCoreController {
     };
   }
 
-  @Get("inspection-templates") templates(@Req() req: AuthenticatedRequest, @Query("stage") stage?: "pickup" | "return") { return this.service.listInspectionTemplates(req.user.tenantId, stage); }  @Get("orders/:id/inspections") inspections(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.listInspections(req.user.tenantId, id); }
+  @Get("inspection-templates") async templates(@Req() req: AuthenticatedRequest, @Query("stage") stage?: "pickup" | "return", @Query("orderId") orderId?: string) {
+    if (stage && stage !== "pickup" && stage !== "return") throw new BadRequestException("检查阶段不合法");
+    const order = orderId ? await this.service.getOrder(req.user.tenantId, orderId) : undefined;
+    return this.service.listInspectionTemplates(req.user.tenantId, stage, order);
+  }
+  @Get("orders/:id/inspections") inspections(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.service.listInspections(req.user.tenantId, id); }
   @Post("orders/:id/inspections") async createInspection(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CreateRentalInspectionDto) {
     const tenantId = req.user.tenantId;
-    const context = this.context(tenantId);
+    const context = (await this.context(tenantId));
     const current = await this.service.getOrder(tenantId, id);
-    const template = this.service.listInspectionTemplates(tenantId).find((row) => row.id === body.templateId);
+    const template = (await this.service.listInspectionTemplates(tenantId, undefined, current)).find((row) => row.id === body.templateId);
     const returnedAt = new Date().toISOString();
     const stage = template?.stage;
     const partialReturn = stage === "return" && Boolean(body.returnItems?.length);
@@ -2452,7 +2461,7 @@ export class RentalCoreController {
   ) {
     if (stage !== "pickup" && stage !== "return") throw new BadRequestException("交接阶段无效");
     const tenantId = req.user.tenantId;
-    const context = this.context(tenantId);
+    const context = (await this.context(tenantId));
     const current = await this.service.getOrder(tenantId, id);
     const handoverBatchId = idempotencyKeyOf(req) ?? `order.handover:${id}:${stage}`;
     await this.assertStaffHandoverEvidence(req, current, stage, handoverBatchId, body.handoverSignatureFileAssetId);
@@ -2510,7 +2519,7 @@ export class RentalCoreController {
 
   @Post("orders/:id/settle") async settle(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
     const tenantId = req.user.tenantId;
-    const context = this.context(tenantId);
+    const context = (await this.context(tenantId));
     const order = await this.idempotent.execute({
       tenantId,
       action: "order.settle",

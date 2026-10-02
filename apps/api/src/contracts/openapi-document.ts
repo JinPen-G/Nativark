@@ -1967,6 +1967,32 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
 ];
 
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
+  { method: "get", path: "/api/rental/v1/category-adoption/candidates", tag: "Rental Core", operationId: "listCategoryAdoptionCandidates", summary: "List same-category published target IDs and labels allowed for the session tenant/space; operation=upgrade|restore; no bodies, pilot lists or platform drafts", permissions: ["rental-os:category:adopt"], responseSchema: "GenericObject" },
+  { method: "get", path: "/api/rental/v1/category-adoption/{targetId}/preparation", tag: "Rental Core", operationId: "previewCategoryAdoptionPreparation", summary: "Read current-session-space candidate fields, differences and staged inputs; operation=upgrade|restore, no active facts changed", permissions: ["rental-os:category:adopt"], responseSchema: "GenericObject" },
+  { method: "put", path: "/api/rental/v1/category-adoption/{targetId}/preparation", tag: "Rental Core", operationId: "saveCategoryAdoptionPreparation", summary: "Stage target-version model/asset attribute patches with source and entity revision checks; does not adopt or publish prices/rules", permissions: ["rental-os:category:adopt"], requestSchema: objectOf({
+    expectedSourceVersionId: stringSchema, expectedSourceRevision: { type: "integer", minimum: 0 }, expectedPreparationRevision: { type: "integer", minimum: 0 },
+    operation: { type: "string", enum: ["upgrade", "restore"] }, reason: stringSchema,
+    patches: arrayOf(objectOf({ entityType: { type: "string", enum: ["item_group", "asset"] }, entityId: stringSchema, expectedUpdatedAt: { type: "string", format: "date-time" }, values: objectSchema }, ["entityType", "entityId", "expectedUpdatedAt", "values"], false))
+  }, ["expectedSourceVersionId", "expectedSourceRevision", "expectedPreparationRevision", "operation", "reason", "patches"], false), responseSchema: "GenericObject" },
+  ...([
+    ["get", "", "listPlatformRentalCategoryGovernance", "List category governance summaries", "view"],
+    ["get", "/capability-catalog", "rentalCategoryCapabilityCatalog", "Read executable capability and pricing catalog", "view"],
+    ["get", "/tenant-directory", "rentalCategoryTenantDirectory", "Read bounded tenant identifiers and labels for pilot selection; no business facts", "view"],
+    ["get", "/{code}", "rentalCategoryDetail", "Read category identity and immutable versions", "view"],
+    ["get", "/{code}/candidates/{tenantId}/{operation}", "rentalCategoryAdoptionCandidates", "Read versions allowed by the same opening and adoption scope predicates used at commit", "view"],
+    ["post", "/{code}/drafts", "createRentalCategoryDraft", "Clone a published same-category version into a draft", "edit", objectOf({ sourceVersionId: stringSchema, versionLabel: stringSchema, reason: stringSchema }, ["sourceVersionId", "versionLabel", "reason"], false)],
+    ["patch", "/{code}/versions/{id}/sections/{section}", "patchRentalCategoryDraftSection", "Save only the selected draft section with revision checking", "edit", objectOf({ expectedRevision: { type: "integer", minimum: 0 }, values: objectSchema, reason: stringSchema }, ["expectedRevision", "values", "reason"], false)],
+    ["post", "/{code}/versions/{id}/validate", "validateRentalCategoryDraft", "Validate executable category dependencies without publication", "view"],
+    ["get", "/{code}/versions/{id}/preview", "previewRentalCategoryDraft", "Preview section changes without changing tenant facts", "view"],
+    ["post", "/{code}/versions/{id}/publish", "publishRentalCategoryDraft", "Publish the whole draft atomically; adoption is closed by default", "publish", objectOf({ expectedRevision: { type: "integer", minimum: 0 }, idempotencyKey: stringSchema, reason: stringSchema }, ["expectedRevision", "idempotencyKey", "reason"], false)],
+    ["post", "/{code}/versions/{id}/archive", "archiveRentalCategoryDraft", "Archive an unpublished draft only", "edit", objectOf({ expectedRevision: { type: "integer", minimum: 0 }, reason: stringSchema }, ["expectedRevision", "reason"], false)],
+    ["put", "/{code}/opening-policy", "saveRentalCategoryOpeningPolicy", "Set category opening scope independently of existing tenant spaces", "opening", objectOf({ expectedRevision: { type: "integer", minimum: 0 }, scope: { type: "string", enum: ["all", "pilot", "unopened", "stopped"] }, tenantIds: arrayOf(stringSchema), recommendedVersionId: stringSchema, reason: stringSchema }, ["expectedRevision", "scope", "tenantIds", "reason"], false)],
+    ["put", "/{code}/versions/{id}/adoption-policy", "saveRentalCategoryAdoptionPolicy", "Set independent create, upgrade and restore qualification", "publish", objectOf({ expectedRevision: { type: "integer", minimum: 0 }, createScope: { type: "string", enum: ["all", "pilot", "none"] }, createTenantIds: arrayOf(stringSchema), upgradeScope: { type: "string", enum: ["all", "pilot", "none"] }, upgradeTenantIds: arrayOf(stringSchema), restoreScope: { type: "string", enum: ["all", "pilot", "none"] }, restoreTenantIds: arrayOf(stringSchema), reason: stringSchema }, ["expectedRevision", "createScope", "createTenantIds", "upgradeScope", "upgradeTenantIds", "restoreScope", "restoreTenantIds", "reason"], false)],
+    ["get", "/{code}/audits", "rentalCategoryGovernanceAudits", "Read platform configuration audit records, not tenant business data", "audit"]
+  ] as Array<[HttpMethod, string, string, string, string, SchemaObject?]>).map(([method, suffix, operationId, summary, permission, requestSchema]): ContractOperation => ({
+    method, path: `/api/platform/rental-categories${suffix}`, tag: "Platform Rental Core",
+    operationId, summary, permissions: [`system:rental-category:${permission}`], requestSchema, responseSchema: "GenericObject"
+  })),
   {
     method: "post",
     path: "/api/public/demo-requests",
@@ -2864,7 +2890,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/changes/post-pickup-exchange", tag: "RentalCore", operationId: "applyRentalOrderPostPickupExchange",
-    summary: "Apply a post-pickup item exchange and defer the difference to settlement", permissions: ["rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Apply a post-pickup exchange, freeze replacement policy/inspection/capability evidence and defer the difference to settlement", permissions: ["rental-os:order:operate"], requestSchema: "GenericObject", responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/extensions/preview", tag: "RentalCore", operationId: "previewRentalOrderExtension",
@@ -2888,7 +2914,8 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "get", path: "/api/rental/v1/inspection-templates", tag: "RentalCore", operationId: "listRentalInspectionTemplates",
-    summary: "List category inspection templates", permissions: ["rental-os:order:view"], responseSchema: "GenericObject"
+    parameters: [queryParam("stage", { type: "string", enum: ["pickup", "return"] }), queryParam("orderId")],
+    summary: "List inspection templates; orderId projects immutable original/replacement requirements with allocationIds for separate return batches, otherwise current configuration", permissions: ["rental-os:order:view"], responseSchema: "GenericObject"
   },
   {
     method: "get", path: "/api/rental/v1/orders/{id}/inspections", tag: "RentalCore", operationId: "listRentalOrderInspections",

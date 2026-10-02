@@ -54,7 +54,8 @@ const { ApiAuthGuard } = require("../apps/api/src/common/api-auth.guard");
     ),
     /import \{ ClientApiRateLimitService \} from .*client-api-rate-limit\.service/u
   );
-  assert.equal(ApiAuthGuard.length, 4, "守卫必须保留限流服务的运行时注入参数");
+  const injectedGuard = new ApiAuthGuard({}, undefined, undefined, limiter);
+  assert.equal(injectedGuard.clientRateLimit, limiter, "守卫必须保留限流服务的运行时注入参数，新增其他依赖不应使专项误报");
 
   // clientAddress：来源地址只在一个入口取值，不自行读取转发头。
   assert.equal(clientAddress({ ip: " 203.0.113.9 " }), "203.0.113.9");
@@ -121,6 +122,7 @@ const { ApiAuthGuard } = require("../apps/api/src/common/api-auth.guard");
   const challenges = new Map();
   const smsSent = [];
   const authPrisma = {
+    clientChannelProfile: { findUnique: async () => null },
     tenant: { findFirst: async ({ where }) => (where.code === tenant.code ? tenant : null) },
     businessWorkspace: { findFirst: async () => workspace },
     customerAccount: { findFirst: async ({ where }) => accounts.get(where.loginPhone) ?? null },

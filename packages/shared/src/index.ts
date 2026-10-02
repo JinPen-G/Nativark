@@ -18,3 +18,4 @@ export * from "./rental-rule-defaults";
 export * from "./subscription";
 export * from "./demo-request";
 export * from "./client-rich-text";
+export * from "./category-governance";
