@@ -1,4 +1,5 @@
 import { AI_NATIVE_COMPONENT_SCHEMAS } from "./ai-native-schemas";
+import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "./ai-task-draft-schemas";
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -181,6 +182,7 @@ function buildPaths(operations: ContractOperation[]) {
 export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   // AIN-02/S01：只公开草案结构，无对应运行路由；不得据此认为工具已可执行。
   ...AI_NATIVE_COMPONENT_SCHEMAS,
+  ...AI_TASK_DRAFT_COMPONENT_SCHEMAS,
   OpenApiDocument: objectSchema,
   GenericObject: objectSchema,
   RentalOperationLockRequest: {

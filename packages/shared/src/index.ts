@@ -20,3 +20,4 @@ export * from "./demo-request";
 export * from "./client-rich-text";
 export * from "./category-governance";
 export * from "./ai-native";
+export * from "./ai-task-draft";
