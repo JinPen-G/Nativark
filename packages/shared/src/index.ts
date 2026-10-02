@@ -31,3 +31,5 @@ export { AI_KNOWLEDGE_DRAFT_SCHEMAS } from "./ai-knowledge-draft-schemas";
 export { AI_USAGE_DRAFT_SCHEMAS } from "./ai-usage-draft-schemas";
 export { AI_EVENTS_DRAFT_SCHEMAS } from "./ai-events-draft-schemas";
 export { AI_INSPECTION_DRAFT_SCHEMAS } from "./ai-inspection-draft-schemas";
+export * from "./ai-proposal-draft";
+export { AI_PROPOSAL_DRAFT_SCHEMAS } from "./ai-proposal-draft-schemas";
