@@ -88,7 +88,7 @@ export function evaluateAiStepTransitionDraft(previous: AiStepStateDraft, next: 
     pending: ["running", "cancelled"], running: ["succeeded", "failed", "unknown"],
     unknown: ["succeeded", "failed"], failed: ["running"], succeeded: [], cancelled: []
   };
-  if (!Object.hasOwn(permitted, from) || !permitted[from].includes(to)) return deny("transition_denied");
+  if (!Object.prototype.hasOwnProperty.call(permitted, from) || !permitted[from].includes(to)) return deny("transition_denied");
   const expectedReason = from === "pending" ? (to === "running" ? "start" : "not_started_cancelled")
     : from === "failed" ? "retry_known_failure"
     : from === "unknown" ? (to === "succeeded" ? "reconciled_committed" : "reconciled_not_committed")

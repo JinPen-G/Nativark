@@ -1,5 +1,6 @@
 import { AI_NATIVE_COMPONENT_SCHEMAS } from "./ai-native-schemas";
 import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "./ai-task-draft-schemas";
+import { AI_LEAF_COMPONENT_SCHEMAS } from "./ai-leaf-components";
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -8,7 +9,14 @@ export interface SchemaObject {
   type?: string;
   format?: string;
   description?: string;
-  enum?: (string | boolean)[];
+  enum?: (string | number | boolean)[];
+  exclusiveMinimum?: boolean;
+  exclusiveMaximum?: boolean;
+  not?: SchemaObject;
+  allOf?: SchemaObject[];
+  anyOf?: SchemaObject[];
+  writeOnly?: boolean;
+  readOnly?: boolean;
   minLength?: number;
   maxLength?: number;
   pattern?: string;
@@ -183,6 +191,7 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   // AIN-02/S01：只公开草案结构，无对应运行路由；不得据此认为工具已可执行。
   ...AI_NATIVE_COMPONENT_SCHEMAS,
   ...AI_TASK_DRAFT_COMPONENT_SCHEMAS,
+  ...AI_LEAF_COMPONENT_SCHEMAS,
   OpenApiDocument: objectSchema,
   GenericObject: objectSchema,
   RentalOperationLockRequest: {

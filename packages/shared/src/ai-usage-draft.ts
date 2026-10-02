@@ -30,7 +30,7 @@ export type AiTenantModelSettingsSummaryDraft = AiTenantModelSettingsSummaryBase
   | { mode: "tenant_managed"; protocol: string; baseUrl: string; model: string; credentialState: "configured" | "missing" | "rotation_required" }
 );
 export interface AiUsageSettingsDraft {
-  draftVersion: typeof AI_USAGE_DRAFT_VERSION; scope: Extract<AiExecutionScope, { kind: "tenant" }>;
+  draftVersion: typeof AI_USAGE_DRAFT_VERSION; scope: Extract<AiExecutionScope, { kind: "tenant" | "platform" }>;
   config: AiGatewayConfigReferenceDraft;
   gates: { platform: AiSettingGateDraft; tenant: AiSettingGateDraft; scene: AiSettingGateDraft };
   sceneCode: string; allowedModels: string[]; allowedScenes: string[];
@@ -38,7 +38,7 @@ export interface AiUsageSettingsDraft {
 }
 export interface AiUsageAssociationDraft {
   requestId: string; runId: string; stepId: string; actionId: string; idempotencyKey: string;
-  scope: Extract<AiExecutionScope, { kind: "tenant" | "workspace" }>;
+  scope: AiExecutionScope;
   config: AiGatewayConfigReferenceDraft; priceVersion: string;
 }
 interface AiUsageRecordBaseDraft { draftVersion: typeof AI_USAGE_DRAFT_VERSION; reservationId: string; revision: number; association: AiUsageAssociationDraft }
