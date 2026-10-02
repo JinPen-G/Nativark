@@ -1,7 +1,15 @@
 import type { AiExecutionContext, AiOrderExplainRequestDraft } from "./ai-native";
 /** AIN-C03 leaf draft only; not exported, not a model/authorization/connection implementation. */
-export const AI_GATEWAY_DRAFT_VERSION = "ain-c03-draft-1" as const;
-export type AiGatewayFeatureDraft = "tools" | "structured_output" | "image" | "audio" | "streaming";
+export const AI_GATEWAY_DRAFT_VERSION = "ain-c03-draft-2" as const;
+export type AiGatewayFeatureDraft = "text" | "tools" | "structured_output" | "image" | "audio" | "streaming" | "embedding" | "reasoning";
+export type AiGatewayServiceModeDraft = "platform_managed" | "tenant_managed";
+/** Probe evidence only, never authorization. Unverified is not unsupported or supported. */
+export type AiGatewayCapabilityAssessmentDraft = {
+  feature: AiGatewayFeatureDraft;
+} & (
+  | { status: "supported" | "unsupported"; evidence: "mock" | "live"; methodVersion: string; checkedAt: string; configRevision: number }
+  | { status: "unverified"; reason: "not_tested" | "probe_unavailable" | "configuration_changed" }
+);
 export interface AiGatewayCapabilitiesDraft {
   draftVersion: typeof AI_GATEWAY_DRAFT_VERSION;
   protocol: string; provider: string; model: string; configRevision: number;
@@ -10,10 +18,14 @@ export interface AiGatewayCapabilitiesDraft {
   evidence: "mock" | "live";
 }
 /** These are server-established references, not bearer capabilities or model-selected settings. */
-export interface AiGatewayConfigReferenceDraft {
+interface AiGatewayConfigReferenceBaseDraft {
   tenantId: string; configId: string; configRevision: number; credentialRef: string;
   protocol: string; provider: string; model: string;
 }
+export type AiGatewayConfigReferenceDraft = AiGatewayConfigReferenceBaseDraft & (
+  | { serviceMode: "platform_managed"; configurationScope: { kind: "platform" } }
+  | { serviceMode: "tenant_managed"; configurationScope: { kind: "tenant"; tenantId: string } }
+);
 export type AiGatewayContentDraft =
   | { kind: "text"; text: string }
   | { kind: "image"; attachmentId: string; attachmentRevision: number }
@@ -28,7 +40,9 @@ export interface AiGatewayCallDraft {
   /** Trusted server envelope only. Model-facing messages/tools never supply context/config. */
   context: AiExecutionContext;
   config: AiGatewayConfigReferenceDraft;
-  expectation: { model: string; configRevision: number; features: AiGatewayFeatureDraft[] };
+  /** The Agent needs a scene and capabilities, never a supplier/model. Model pin is server-only. */
+  sceneCode: string;
+  expectation: { model?: string; configRevision: number; requiredFeatures: AiGatewayFeatureDraft[]; optionalFeatures: AiGatewayFeatureDraft[] };
   messages: Array<{ role: "system" | "user" | "assistant"; content: AiGatewayContentDraft[] }>;
   /** Currently only the C02 input example is typed. Other tools await their own strict inputs. */
   authorizedToolRequests: AiOrderExplainRequestDraft[];

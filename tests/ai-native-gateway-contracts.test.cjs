@@ -7,7 +7,24 @@ const validators = h.validatorsFor(schemas, base);
 const yes = (n, x) => assert.equal(validators[n](x), true, JSON.stringify(validators[n].errors));
 const no = (n, x) => assert.equal(validators[n](x), false, `${n} accepted invalid input`);
 test("all C03 closed components resolve C01/C02 references without publishing routes", () => h.checkClosed(schemas, { ...base, ...schemas }));
+for (const assessment of f.assessments) test(`C03 capability ${assessment.status} requires distinct evidence, not connection inference`, () => {
+  yes("AiGatewayCapabilityAssessmentDraft", assessment);
+  no("AiGatewayCapabilityAssessmentDraft", { ...assessment, connectionSucceeded: true });
+  if (assessment.status === "unverified") no("AiGatewayCapabilityAssessmentDraft", { ...assessment, evidence: "live" });
+  else { const incomplete = { ...assessment }; delete incomplete.checkedAt; no("AiGatewayCapabilityAssessmentDraft", incomplete); }
+  assert.deepEqual(h.compileConsumer(`import type { AiGatewayCapabilityAssessmentDraft } from "../packages/shared/src/ai-gateway-draft"; const assessment: AiGatewayCapabilityAssessmentDraft = ${JSON.stringify(assessment)};`), []);
+});
 test("tenant-selected protocol and model are independent of requested expectation", () => { yes("AiGatewayCallDraft", f.call); yes("AiGatewayCapabilitiesDraft", f.capabilities); assert.notEqual(f.call.expectation.model, f.call.config.model); });
+test("C03 dual mode resolves platform ownership without asking Agent for a model", () => {
+  yes("AiGatewayConfigReferenceDraft", f.platformConfig);
+  const { model, ...expectation } = f.call.expectation;
+  yes("AiGatewayCallDraft", { ...f.call, config: f.platformConfig, expectation });
+  no("AiGatewayConfigReferenceDraft", { ...f.platformConfig, configurationScope: f.config.configurationScope });
+  no("AiGatewayConfigReferenceDraft", { ...f.config, configurationScope: { kind: "platform" } });
+  no("AiGatewayConfigReferenceDraft", { ...f.config, serviceMode: "unknown" });
+  for (const feature of ["text", "embedding", "reasoning"]) yes("AiGatewayCapabilitiesDraft", { ...f.capabilities, features: [feature] });
+  no("AiGatewayCallDraft", { ...f.call, draftVersion: "ain-c03-draft-1" });
+});
 for (const kind of ["text", "image", "audio"]) test(`C03 ${kind} content branch requires resource reference not URL`, () => {
   const value = kind === "text" ? { kind, text: "Synthetic" } : { kind, attachmentId: "attachment-test", attachmentRevision: 1 };
   yes("AiGatewayContentDraft", value); no("AiGatewayContentDraft", { ...value, url: "https://untrusted.test" });
@@ -41,6 +58,8 @@ const caps: AiGatewayCapabilitiesDraft = ${JSON.stringify(f.capabilities)};
 const results: AiGatewayResultDraft[] = ${JSON.stringify([f.completed, f.unknown, ...f.failures])};
 const events: AiGatewayStreamEventDraft[] = ${JSON.stringify(f.events)};
 const usages: AiGatewayUsageDraft[] = ${JSON.stringify(f.usages)};
+const platform: typeof call.config = ${JSON.stringify(f.platformConfig)};
+const noModel: AiGatewayCallDraft = { ...call, config: platform, expectation: { configRevision: 1, requiredFeatures: ["tools", "structured_output"], optionalFeatures: ["image"] } };
 // @ts-expect-error unknown usage never reports zero
 const zero: AiGatewayUsageDraft = { kind: "unknown", reason: "not_returned", nextAction: "reconcile", inputTokens: 0 };
 // @ts-expect-error model cannot override credentials
