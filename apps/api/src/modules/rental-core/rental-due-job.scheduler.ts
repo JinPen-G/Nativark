@@ -187,7 +187,7 @@ export class RentalDueJobScheduler implements OnApplicationBootstrap, OnModuleDe
   private async releaseCancelledOrderResources(tenantId: string, orderId: string, tx: Prisma.TransactionClient, reason: string) {
     await this.business.releaseCouponInTransaction(tenantId, orderId, tx);
     await this.serviceCapacities.releaseForOrder(tenantId, orderId, reason, new Date().toISOString(), tx);
-    await this.corporateSettlement?.releaseOrderCredit(tenantId, orderId, reason, tx);
+    await this.corporateSettlement?.settleCancelledOrderCredit(tenantId, orderId, reason, tx);
   }
 
   private async emitOrderEvent(
@@ -264,7 +264,7 @@ export class RentalDueJobScheduler implements OnApplicationBootstrap, OnModuleDe
             return latest.status === RentalCoreOrderStatus.PickupOverdue ? latest : undefined;
           },
         });
-        if (!replayed && !order.noShowNoticeAt) {
+        if (!order.noShowNoticeAt) {
           const logs = await this.emitOrderEvent(tenantId, "order.pickup_overdue", order);
           if (logs.length) {
             await this.idempotent.execute({

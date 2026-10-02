@@ -3976,8 +3976,13 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
     // 幂等：同一空间同一业务事件（带 idempotencyKey）只落一条。
     // 先查缓存快速短路；DB 唯一索引是最终裁决，兜住并发与缓存未命中。
-    if (options.idempotencyKey && state.notificationLogs.some((item) => item.idempotencyKey === options.idempotencyKey)) {
-      return undefined;
+    const existingNotification = options.idempotencyKey
+      ? state.notificationLogs.find((item) => item.idempotencyKey === options.idempotencyKey)
+      : undefined;
+    if (existingNotification) {
+      // 幂等不再发送，但须回放最新投递事实；否则失败后重试成功的通知无法
+      // 补齐订单的通知时间。缓存可能仍为 failed，优先读取持久化结果。
+      return (await this.factStore.findNotificationDelivery(tenantId, existingNotification.id))?.log ?? existingNotification;
     }
 
     if (template.channel === "sms" && !isSmsRecipient(input.recipient)) {
@@ -4340,7 +4345,8 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
           undefined,
           { businessObjectType: businessObject?.type, businessObjectId: businessObject?.id, idempotencyKey }
         );
-        if (log && ["sent", "simulated"].includes(log.status)) logs.push(log);
+        if (log && (["sent", "delivery_pending", "delivered"].includes(log.status)
+          || (log.status === "simulated" && process.env.NODE_ENV !== "production"))) logs.push(log);
       } catch (error) {
         // 失败不能伪装成已送达，也不能静默丢掉。保留一条失败事实，
         // 让工作台按订单业务对象生成待办；主订单动作仍不因单个通知模板失败回滚。

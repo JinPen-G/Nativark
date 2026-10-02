@@ -452,6 +452,19 @@ export const OPENAPI_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     { amount: numberSchema, reason: stringSchema, idempotencyKey: stringSchema },
     ["amount", "reason", "idempotencyKey"]
   ),
+  ReviewRentalInspectionExceptionRequest: objectOf(
+    {
+      decision: { type: "string", enum: ["approved", "rejected"] },
+      approvedChargeAmount: { type: "number", minimum: 0 },
+      waiverDecision: { type: "string", enum: ["covered", "excluded"], description: "Required for a positive approved charge when the order has damage waiver services; review frozen terms and record the basis in reason." },
+      incidentAt: { type: "string", format: "date-time", description: "Verified incident time, required with incidentBasis for positive damage assessments on orders with waiver services. Must not be inferred from inspection time." },
+      incidentBasis: { type: "string", minLength: 1, maxLength: 1000 },
+      waiverOccurrenceId: { type: "string", maxLength: 200, description: "Optional explicit occurrence from frozen order services." },
+      liability: { type: "string", enum: ["customer", "normal_wear", "lessor", "third_party", "undetermined"], description: "A positive customer charge requires an explicit customer liability decision supported by reason." },
+      reason: { type: "string", minLength: 1 }
+    },
+    ["decision", "reason"]
+  ),
   PaymentRefundResponse: objectOf(
     {
       refundId: stringSchema,
@@ -2891,7 +2904,7 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/inspections/{inspectionId}/exceptions/{exceptionIndex}/review", tag: "RentalCore", operationId: "reviewRentalOrderInspectionException",
-    summary: "Approve or reject a suggested inspection exception charge", permissions: ["rental-os:order:fee-review"], requestSchema: "GenericObject", responseSchema: "GenericObject"
+    summary: "Approve or reject a suggested inspection exception charge", permissions: ["rental-os:order:fee-review"], requestSchema: "ReviewRentalInspectionExceptionRequest", responseSchema: "GenericObject"
   },
   {
     method: "post", path: "/api/rental/v1/orders/{id}/inspections/{inspectionId}/exceptions/{exceptionIndex}/customer-response", tag: "RentalCore", operationId: "recordRentalOrderInspectionExceptionCustomerResponse",

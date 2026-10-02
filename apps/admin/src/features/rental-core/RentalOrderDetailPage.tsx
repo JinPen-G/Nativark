@@ -27,6 +27,8 @@ type FundingOperation = {
   action: RentalFundingAction;
 };
 
+type ExceptionReviewValues = { decision: "approved" | "rejected"; approvedChargeAmount?: number; waiverDecision?: "covered" | "excluded"; liability?: "customer" | "normal_wear" | "lessor" | "third_party" | "undetermined"; incidentAt?: string; incidentBasis?: string; waiverOccurrenceId?: string; reason: string };
+
 type PostPickupExchangeFormValues = {
   orderLineId: string;
   allocationId: string;
@@ -151,7 +153,7 @@ export function RentalOrderDetailPage() {
   const [substitutionForm] = Form.useForm<{ toItemGroupId: string }>();
   const [partialReturnForm] = Form.useForm<{ items: Array<{ allocationId: string; quantity: number }> }>();
   const [fundingForm] = Form.useForm<{ amount?: number; reason: string; failureCode?: string; paymentMethod?: RentalOfflinePaymentMethod }>();
-  const [exceptionReviewForm] = Form.useForm<{ decision: "approved" | "rejected"; approvedChargeAmount?: number; reason: string }>();
+  const [exceptionReviewForm] = Form.useForm<ExceptionReviewValues>();
   const [exceptionCustomerResponseForm] = Form.useForm<RecordRentalInspectionExceptionCustomerResponseRequest>();
   const [exceptionAdjustmentForm] = Form.useForm<AdjustRentalInspectionExceptionRequest>();
   const [usageCorrectionForm] = Form.useForm<{ correctedCurrent: number; reason: string; evidenceAttachments?: string }>();
@@ -394,7 +396,7 @@ export function RentalOrderDetailPage() {
     onSuccess: async () => { setExtensionRefundReview(undefined); extensionRefundForm.resetFields(); await refreshExtensions(); message.success(t("退款审核已记录；通过仅核减应收，不代表实际退款到账")); },
     onError: () => message.error(t("审核失败：记录可能已处理或被后续续租替代，请刷新后重试"))
   });
-  const reviewException = useMutation({    mutationFn: (values: { decision: "approved" | "rejected"; approvedChargeAmount?: number; reason: string }) => rentalCoreApi.reviewInspectionException(id, exceptionReview!.inspectionId, exceptionReview!.exceptionIndex, values),
+  const reviewException = useMutation({    mutationFn: (values: ExceptionReviewValues) => rentalCoreApi.reviewInspectionException(id, exceptionReview!.inspectionId, exceptionReview!.exceptionIndex, values),
     onSuccess: async () => {
       setExceptionReview(undefined);
       exceptionReviewForm.resetFields();
@@ -622,6 +624,9 @@ export function RentalOrderDetailPage() {
       ? "有待审核的续租退款差额" : undefined,
     (inspections.data ?? []).some((row) => row.exceptions.some((exception) => exception.reviewStatus === "pending"))
       ? "有待审核的检查异常" : undefined,
+    (inspections.data ?? []).some((row) => row.exceptions.some((exception) => exception.reviewStatus === "approved"
+      && Number(exception.approvedChargeAmount ?? 0) > 0 && exception.customerResponseStatus !== "confirmed"))
+      ? "有异常费用待客户确认或申诉处理" : undefined,
     // MKT-02D：只有带 occurrenceId 的新履约发生项进入状态机；旧订单服务快照
     // 没有实际履约字段，不能因缺省值而永久阻断历史订单结算。
     (detail?.serviceSnapshots ?? []).some((row) => Boolean(row.occurrenceId) && ["not_started", "in_progress"].includes(row.executionStatus ?? "not_started"))
@@ -859,10 +864,12 @@ export function RentalOrderDetailPage() {
           { title: t("建议费用"), dataIndex: "suggestedChargeAmount", render: (value) => value === undefined ? "-" : money(Number(value)) },
           { title: t("审核"), dataIndex: "reviewStatus", render: (value) => <Tag color={value === "approved" ? "green" : value === "rejected" ? "default" : "orange"}>{value === "approved" ? t("已通过") : value === "rejected" ? t("已驳回") : t("待审核")}</Tag> },
           { title: t("最终费用"), dataIndex: "approvedChargeAmount", render: (value) => value === undefined ? "-" : money(Number(value)) },
+          { title: t("赔偿责任认定"), dataIndex: "liability", render: (value: string | undefined) => t(({ customer: "客户承担赔偿责任", normal_wear: "正常使用损耗", lessor: "出租方责任", third_party: "第三方责任，非客户承担", undetermined: "责任未明，暂不收费" } as Record<string, string>)[value ?? "undetermined"] ?? "责任未明，暂不收费") },
+          { title: t("事故与免赔裁定依据"), render: (_, row) => <><Typography.Text>{row.incidentAt ? dayjs(row.incidentAt).format("YYYY-MM-DD HH:mm") : t("未登记")}</Typography.Text><br /><Typography.Text type="secondary">{row.incidentBasis ?? "-"}</Typography.Text>{row.waiverCustomerChargeCeiling !== undefined && <><br />{t("客户承担上限")}: {money(row.waiverCustomerChargeCeiling)}<br /><Typography.Text type="secondary">{row.waiverOccurrenceId ?? row.waiverServiceId} · {row.waiverTermsVersion}</Typography.Text></>}</> },
           { title: t("客户响应"), render: (_, row) => row.customerResponseStatus === "pending" ? <Tag color="orange">{t("待确认/申诉")}</Tag> : row.customerResponseStatus === "confirmed" ? <Tag color="green">{t("已确认")}</Tag> : row.customerResponseStatus === "disputed" ? <Tag color="red">{t("已申诉")}</Tag> : row.customerResponseStatus === "not_required" ? <Tag>{t("无需确认")}</Tag> : "-" },
           { title: t("操作"), render: (_, row) => {
             const canReview = canReviewFees && row.reviewStatus === "pending";
-            const canRecordResponse = canReviewFees && row.reviewStatus === "approved" && Number(row.approvedChargeAmount ?? 0) > 0 && ["pending", "disputed"].includes(row.customerResponseStatus ?? "");
+            const canRecordResponse = canReviewFees && row.reviewStatus === "approved" && Number(row.approvedChargeAmount ?? 0) > 0 && row.customerResponseStatus !== "confirmed";
             const canAdjust = canReviewFees && row.reviewStatus === "approved" && row.customerResponseStatus === "disputed" && Number(row.approvedChargeAmount ?? 0) > 0;
             return <Space>
              {canReview && <Button type="link" onClick={() => { setExceptionReview({ inspectionId: row.inspectionId, exceptionIndex: row.exceptionIndex, description: row.description, suggested: row.suggestedChargeAmount }); exceptionReviewForm.setFieldsValue({ decision: "approved", approvedChargeAmount: row.suggestedChargeAmount }); }}>{t("审核")}</Button>}
@@ -1269,7 +1276,14 @@ export function RentalOrderDetailPage() {
       <Alert type="info" showIcon title={exceptionReview?.description} description={`${t("检查员建议费用：")}${exceptionReview?.suggested === undefined ? t("未填写") : money(exceptionReview.suggested)}。${t("最终费用由具备结算权限的人员确认。")}`} style={{ marginBottom: 16 }} />
       <Form form={exceptionReviewForm} layout="vertical" onFinish={(values) => reviewException.mutate(values)}>
         <Form.Item name="decision" label={t("审核结论")} rules={[{ required: true }]}><Select options={[{ value: "approved", label: t("通过并计费") }, { value: "rejected", label: t("驳回，不计费") }]} /></Form.Item>
+        <Form.Item name="liability" label={t("赔偿责任认定")} rules={[{ required: true }]} extra={t("正数客户费用须有客户责任依据；正常损耗和责任未明不能收费。请在审核理由中记录证据与合同依据。")}><Select options={[{ value: "customer", label: t("客户承担赔偿责任") }, { value: "normal_wear", label: t("正常使用损耗") }, { value: "lessor", label: t("出租方责任") }, { value: "third_party", label: t("第三方责任，非客户承担") }, { value: "undetermined", label: t("责任未明，暂不收费") }]} /></Form.Item>
         <Form.Item noStyle shouldUpdate={(before, after) => before.decision !== after.decision}>{({ getFieldValue }) => getFieldValue("decision") === "approved" ? <Form.Item name="approvedChargeAmount" label={t("最终费用")} rules={[{ required: true }]}><InputNumber min={0} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item> : null}</Form.Item>
+        {(detail?.serviceSnapshots ?? []).some((service) => service.serviceType === "damage_waiver") && <Form.Item noStyle shouldUpdate={(before, after) => before.decision !== after.decision}>{({ getFieldValue }) => getFieldValue("decision") === "approved" ? <Form.Item name="waiverDecision" label={t("损坏免赔适用性")} preserve={false} rules={[{ required: true }]} extra={t("请核对冻结条款、异常商品与责任范围，并在审核理由中说明依据。费用填写免赔计算前的裁定金额。")}><Select options={[{ value: "covered", label: t("符合免赔条款，按快照计算减免") }, { value: "excluded", label: t("不适用免赔，按裁定金额计费") }]} /></Form.Item> : null}</Form.Item>}
+        {(detail?.serviceSnapshots ?? []).some((service) => service.serviceType === "damage_waiver") && <Form.Item noStyle shouldUpdate={(before, after) => before.decision !== after.decision || before.approvedChargeAmount !== after.approvedChargeAmount}>{({ getFieldValue }) => getFieldValue("decision") === "approved" && Number(getFieldValue("approvedChargeAmount")) > 0 ? <>
+          <Form.Item name="incidentAt" label={t("实际事故时间")} preserve={false} rules={[{ required: true }]} getValueProps={(value: string | undefined) => ({ value: value ? dayjs(value) : null })} getValueFromEvent={(value: Dayjs | null) => value?.toISOString()} extra={t("按事故证据填写，不要以检查或审核时间代替。")}> <DatePicker showTime format="YYYY-MM-DD HH:mm" /></Form.Item>
+          <Form.Item name="incidentBasis" label={t("事故时间核实依据")} preserve={false} rules={[{ required: true, whitespace: true }, { max: 1000 }]}><Input.TextArea rows={3} /></Form.Item>
+          <Form.Item name="waiverOccurrenceId" label={t("指定冻结免赔发生项")} preserve={false} extra={t("可留空按可适用保障比较；不叠加不同发生项的额度。")}> <Select allowClear options={(detail?.serviceSnapshots ?? []).filter((service) => service.serviceType === "damage_waiver" && service.occurrenceId).map((service) => ({ value: service.occurrenceId!, label: `${service.serviceName} · ${service.termsVersion} · ${service.scheduledStartAt ?? "-"} → ${service.scheduledEndAt ?? "-"}` }))} /></Form.Item>
+        </> : null}</Form.Item>}
         <Form.Item name="reason" label={t("审核理由")} rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item>
       </Form>
     </Modal>

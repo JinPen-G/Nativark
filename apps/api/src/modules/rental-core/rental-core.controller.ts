@@ -93,7 +93,7 @@ import { extensionRequestKey } from "./rental-service-occurrence";
 import { RentalFundingService } from "./rental-funding.service";
 import { RentalDocumentService } from "./rental-document.service";
 import { buildRentalWorkbenchTodos, canIncludeWorkbenchOrderTodos, canIncludeWorkbenchWorkOrders } from "./rental-workbench-todos";
-import { validateInspectionCustomerResponse } from "./rental-inspection-customer-response";
+import { inspectionClosureError, validateInspectionCustomerResponse } from "./rental-inspection-customer-response";
 import { inspectionEvidenceIds, inspectionEvidenceRequiredError } from "./rental-inspection-evidence";
 import { serviceCancellationAmounts, type ServiceCancellationSelection } from "./rental-service-cancellation";
 import { MembershipService } from "../platform/membership.service";
@@ -409,7 +409,7 @@ export class RentalCoreController {
   private async releaseCancelledOrderResources(tenantId: string, orderId: string, tx: Prisma.TransactionClient, reason: string) {
     await this.business.releaseCouponInTransaction(tenantId, orderId, tx);
     await this.serviceCapacities.releaseForOrder(tenantId, orderId, reason, new Date().toISOString(), tx);
-    await this.corporateSettlement?.releaseOrderCredit(tenantId, orderId, reason, tx);
+    await this.corporateSettlement?.settleCancelledOrderCredit(tenantId, orderId, reason, tx);
   }
 
   private async usesCorporateCredit(tenantId: string, orderId: string, tx?: Prisma.TransactionClient) {
@@ -1275,7 +1275,7 @@ export class RentalCoreController {
           }
         });
         let notice: "recorded" | "pending" | "not_required" = order.noShowNoticeAt ? "recorded" : "pending";
-        if (!replayed && !order.noShowNoticeAt) {
+        if (!order.noShowNoticeAt) {
           const logs = await this.emitOrderEvent(tenantId, "order.pickup_overdue", order);
           if (logs.length) {
             await this.idempotent.execute({
@@ -1356,7 +1356,7 @@ export class RentalCoreController {
       }
     });
     let committedOrder = order;
-    if (!replayed && !order.noShowNoticeAt) {
+    if (!order.noShowNoticeAt) {
       const logs = await this.emitOrderEvent(tenantId, "order.pickup_overdue", order);
       if (logs.length) {
         const noticed = await this.idempotent.execute({
@@ -2535,17 +2535,8 @@ export class RentalCoreController {
           where: { tenantId, workspaceId: this.service.resolveWorkspaceId(tenantId), orderId: id },
           select: { exceptions: true }
         });
-        const hasPendingException = inspectionRows.some((row) =>
-          (row.exceptions as unknown as Array<{ reviewStatus?: string }>).some((exception) => exception.reviewStatus === "pending")
-        );
-        if (hasPendingException) throw new ConflictException("仍有检查异常待审核，不能关闭订单");
-        const hasUnconfirmedException = inspectionRows.some((row) =>
-          (row.exceptions as unknown as Array<{ reviewStatus?: string; approvedChargeAmount?: number; customerResponseStatus?: string }>).some((exception) =>
-            exception.reviewStatus === "approved" && Number(exception.approvedChargeAmount ?? 0) > 0
-              && (exception.customerResponseStatus === "pending" || exception.customerResponseStatus === "disputed")
-          )
-        );
-        if (hasUnconfirmedException) throw new ConflictException("还有检查异常费用待客户确认或申诉处理，不能关闭订单");
+        const inspectionError = inspectionClosureError(inspectionRows);
+        if (inspectionError) throw new ConflictException(inspectionError);
         const usesCredit = await this.usesCorporateCredit(tenantId, id, tx);
         await this.funding.assertReadyToClose(
           tenantId,
@@ -2649,6 +2640,7 @@ export class RentalCoreController {
     const exceptionIndex = Number(exceptionIndexText);
     if (!Number.isInteger(exceptionIndex) || exceptionIndex < 0) throw new BadRequestException("异常序号无效");
     if (body.decision === "approved" && body.approvedChargeAmount === undefined) throw new BadRequestException("审核通过时必须填写最终费用");
+    if (!body.reason.trim()) throw new BadRequestException("审核理由不能为空");
     const result = await this.idempotent.execute({
       tenantId,
       action: "order.inspection-exception.review",
@@ -2666,7 +2658,9 @@ export class RentalCoreController {
         const approvedAmount = body.decision === "approved" ? Number(body.approvedChargeAmount) : 0;
         const approved = await this.service.approveInspectionException(
           tenantId, id, inspectionId, exceptionIndex, approvedAmount,
-          `${String(exception.description)}；审核：${body.reason}`, tx, row.createdAt.toISOString()
+          `${String(exception.description)}；审核：${body.reason}`, tx, row.createdAt.toISOString(),
+          { waiverDecision: body.waiverDecision, liability: body.liability, allocationId: typeof exception.allocationId === "string" ? exception.allocationId : undefined,
+            incidentAt: body.incidentAt, incidentBasis: body.incidentBasis, waiverOccurrenceId: body.waiverOccurrenceId }
         );
         Object.assign(exception, {
           reviewStatus: body.decision,
@@ -2674,6 +2668,15 @@ export class RentalCoreController {
           customerResponseStatus: body.decision === "approved" && approved.approvedChargeAmount > 0 ? "pending" : "not_required",
           customerResponseHistory: [],
           reviewReason: body.reason,
+          liability: body.liability ?? "undetermined",
+          waiverDecision: body.decision === "approved" ? body.waiverDecision : undefined,
+          assessedDamageAmount: approved.assessedDamageAmount,
+          waiverCustomerChargeCeiling: approved.waiverCustomerChargeCeiling,
+          waiverOccurrenceId: approved.waiverOccurrenceId,
+          waiverServiceId: approved.waiverServiceId,
+          waiverTermsVersion: approved.waiverTermsVersion,
+          incidentAt: approved.incidentAt,
+          incidentBasis: approved.incidentBasis,
           reviewedBy: req.user.displayName,
           reviewedAt: new Date().toISOString()
         });
@@ -2702,8 +2705,10 @@ export class RentalCoreController {
     const workspaceId = this.service.resolveWorkspaceId(tenantId);
     const exceptionIndex = Number(exceptionIndexText);
     if (!Number.isInteger(exceptionIndex) || exceptionIndex < 0) throw new BadRequestException("异常序号无效");
+    const responseReason = body.reason.trim();
+    if (!responseReason) throw new BadRequestException("请填写客户确认或申诉的记录依据");
     const responseFallbackHash = createHash("sha256")
-      .update(JSON.stringify({ inspectionId, exceptionIndex, decision: body.decision, reason: body.reason.trim() }))
+      .update(JSON.stringify({ inspectionId, exceptionIndex, decision: body.decision, reason: responseReason }))
       .digest("hex")
       .slice(0, 32);
     const result = await this.idempotent.execute({
@@ -2731,10 +2736,10 @@ export class RentalCoreController {
         const history = Array.isArray(exception.customerResponseHistory)
           ? exception.customerResponseHistory as Array<Record<string, unknown>>
           : [];
-        history.push({ decision: body.decision, reason: body.reason, operator: req.user.displayName, respondedAt });
+        history.push({ decision: body.decision, reason: responseReason, operator: req.user.displayName, respondedAt });
         Object.assign(exception, {
           customerResponseStatus: body.decision,
-          customerResponseReason: body.reason,
+          customerResponseReason: responseReason,
           customerRespondedBy: req.user.displayName,
           customerRespondedAt: respondedAt,
           customerResponseHistory: history
@@ -2786,6 +2791,16 @@ export class RentalCoreController {
           throw new ConflictException("只有已审核且客户已申诉的异常费用可以复核");
         }
         const previousAmount = Number(exception.approvedChargeAmount ?? 0);
+        if (Number(body.approvedChargeAmount) > 0 && ["normal_wear", "lessor", "third_party", "undetermined"].includes(String(exception.liability))) {
+          throw new ConflictException("该异常未认定客户赔偿责任，金额复核不能重新向客户计费");
+        }
+        if (Number(body.approvedChargeAmount) > previousAmount && exception.liability !== "customer") {
+          throw new ConflictException("提高异常费用前必须先明确客户赔偿责任，存量未认定记录不能直接加收");
+        }
+        if (Number(body.approvedChargeAmount) > previousAmount && exception.waiverDecision === "covered"
+          && typeof exception.waiverCustomerChargeCeiling !== "number") {
+          throw new ConflictException("存量免赔裁定缺少客户承担上限，不能直接加收，须先核对原条款");
+        }
         const adjustmentHistory = Array.isArray(exception.adjustmentHistory)
           ? exception.adjustmentHistory as Array<Record<string, unknown>>
           : [];
@@ -2800,7 +2815,9 @@ export class RentalCoreController {
           body.reason,
           req.user.displayName,
           adjustmentHistory.length + 1,
-          tx
+          tx,
+          exception.waiverDecision === "covered" && typeof exception.waiverCustomerChargeCeiling === "number"
+            ? exception.waiverCustomerChargeCeiling : undefined
         );
         const adjustedAt = new Date().toISOString();
         adjustmentHistory.push({ fromAmount: previousAmount, toAmount: adjusted.approvedChargeAmount, reason: body.reason, operator: req.user.displayName, adjustedAt });

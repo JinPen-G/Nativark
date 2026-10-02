@@ -7,6 +7,7 @@ require("ts-node").register({
 
 const { RentalCoreService } = require("../apps/api/src/modules/rental-core/rental-core.service");
 const { RentalCoreController } = require("../apps/api/src/modules/rental-core/rental-core.controller");
+const { RentalBusinessService } = require("../apps/api/src/modules/rental-core/rental-business.service");
 
 let passed = 0;
 const ok = (message) => { passed += 1; console.log(`  PASS  ${message}`); };
@@ -63,6 +64,9 @@ void (async () => {
   const marked = await service.markPickupOverdueOrder("tenant_1", order.id, undefined, "运营员", "2026-09-10T09:31:00.000Z");
   assert.equal(marked.status, "pickup_overdue");
   assert.equal(marked.pickupOverdueAt, "2026-09-10T09:31:00.000Z");
+  assert.deepEqual(await service.listPickupOverdueOrderIds("tenant_1", "2026-09-10T10:00:00.000Z", 20), [order.id], "已超时但缺通知的订单必须继续扫描以补通知");
+  await service.markPickupOverdueOrder("tenant_1", order.id, undefined, "运营员", "2026-09-10T10:00:00.000Z");
+  assert.equal(order.pickupOverdueAt, "2026-09-10T09:31:00.000Z", "补通知不能重置超时事实");
   ok("领取超时只进入待确认爽约，不提前释放资源或进入终态");
 
   await assert.rejects(
@@ -70,8 +74,8 @@ void (async () => {
     /必须先记录客户通知/u
   );
   await service.recordNoShowNotice("tenant_1", order.id, "2026-09-10T09:32:00.000Z");
-  assert.deepEqual(await service.listNoShowCandidateIds("tenant_1", "2026-09-10T10:30:59.000Z", 20), []);
-  assert.deepEqual(await service.listNoShowCandidateIds("tenant_1", "2026-09-10T10:31:00.000Z", 20), [order.id]);
+  assert.deepEqual(await service.listNoShowCandidateIds("tenant_1", "2026-09-10T10:31:59.000Z", 20), []);
+  assert.deepEqual(await service.listNoShowCandidateIds("tenant_1", "2026-09-10T10:32:00.000Z", 20), [order.id]);
   ok("必须先记录通知，且通知后的最终时限未到不能确认爽约");
 
   const earlyOrder = orderWith({ id: "order_no_show_early" });
@@ -82,7 +86,7 @@ void (async () => {
   assert.equal(earlyConfirmed.status, "no_show");
   ok("已通知后，具备操作权限的人员可以填写原因提前确认爽约");
 
-  const confirmed = await service.confirmNoShowOrder("tenant_1", order.id, "客户未按约领取", undefined, "运营员", "2026-09-10T10:31:00.000Z");
+  const confirmed = await service.confirmNoShowOrder("tenant_1", order.id, "客户未按约领取", undefined, "运营员", "2026-09-10T10:32:00.000Z");
   assert.equal(confirmed.status, "no_show");
   assert.equal(confirmed.noShowReason, "客户未按约领取");
   assert.equal(confirmed.chargeLines.find((row) => row.code === `cancellation:${order.id}`).amount, 25);
@@ -126,6 +130,16 @@ void (async () => {
     /通知发送失败，客户通知尚未记录/u
   );
   ok("通知模板发送失败时返回真实失败原因，不误报为未启用模板");
+
+  const business = Object.create(RentalBusinessService.prototype);
+  business.state = () => ({
+    notificationTemplates: [{ id: "template_retry", status: "enabled", variableSchema: {} }],
+    notificationLogs: [{ id: "notice_retry", idempotencyKey: "retry-key", status: "failed" }]
+  });
+  business.factStore = { findNotificationDelivery: async () => ({ log: { id: "notice_retry", status: "delivered" } }) };
+  const refreshed = await business.sendNotification("tenant_1", {}, { templateId: "template_retry", recipient: "13800000000", variables: {} }, undefined, { idempotencyKey: "retry-key" });
+  assert.equal(refreshed.status, "delivered", "失败通知重试后必须回放最新投递结果，不再用缓存失败状态挡住通知补录");
+  ok("通知幂等回放使用最新持久化投递事实，支持失败后的恢复");
 
   console.log(`\nRULE-CLOSE-01 领取超时与爽约专项：${passed} 项全部通过`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });

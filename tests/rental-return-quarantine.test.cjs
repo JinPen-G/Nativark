@@ -147,6 +147,43 @@ function fakeStockPrisma(existing) {
 }
 
 void (async () => {
+  {
+    const order = orderFixture();
+    order.status = RentalCoreOrderStatus.ReadyForPickup;
+    order.allocations.forEach((allocation) => { allocation.status = "locked"; });
+    const { instance, captured } = serviceWith(order);
+    instance.state = () => ({ profile: { categoryCode: "camera" }, itemGroups: ITEM_GROUPS,
+      inspectionTemplates: [{ ...TEMPLATE, stage: "pickup" }] });
+    instance.assertOrderQualification = async () => {};
+    instance.assertOutboundLocationActive = () => {};
+    instance.assertAllocatedPickupReady = async () => {};
+    instance.markPickedUp = async () => { order.status = RentalCoreOrderStatus.Renting; };
+    await instance.createInspection("tenant_1", order.id, returnInspection([
+      { code: "existing-scratch", description: "领取时已有划痕", allocationId: "alloc_s" }
+    ]), "operator", {}, {});
+    assert.equal(captured.inspection.exceptions[0].allocationId, "alloc_s");
+    assert.equal(captured.inspection.stage, "pickup");
+    await assert.rejects(() => instance.createInspection("tenant_1", order.id, returnInspection([
+      { code: "wrong-resource", description: "无关资源", allocationId: "another-order-allocation" }
+    ]), "operator", {}, {}), /订单尚未完成配货/u);
+    order.status = RentalCoreOrderStatus.ReadyForPickup;
+    await assert.rejects(() => instance.createInspection("tenant_1", order.id, returnInspection([
+      { code: "wrong-resource", description: "无关资源", allocationId: "another-order-allocation" }
+    ]), "operator", {}, {}), /不属于本次检查批次/u);
+    ok("领取检查可关联已锁定资源登记已有损伤，但不能关联其他订单资源");
+  }
+
+  {
+    const order = orderFixture();
+    const { instance, captured } = serviceWith(order);
+    const transaction = { name: "inspection-transaction" };
+    let receivedTx;
+    instance.factStore.listInspections = async (_tenant, _order, tx) => { receivedTx = tx; return []; };
+    await instance.createInspection("tenant_1", order.id, returnInspection(), "operator", {}, transaction);
+    assert.equal(receivedTx, transaction);
+    assert.equal(captured.inspection.stage, "return");
+    ok("归还检查在同一订单事务读取领取基线");
+  }
 
 /* ---------- 带异常整单归还：数量库存必须进隔离 ---------- */
 
@@ -164,14 +201,24 @@ void (async () => {
   const { instance, captured } = serviceWith(orderFixture());
   await instance.createInspection("tenant_1", "order_1", returnInspection([{ code: "scratch", description: "镜头划伤", allocationId: "alloc_s" }]), "检查员");
   assert.equal(captured.inspection.exceptions[0].allocationId, "alloc_s", "异常记录必须保留具体分配项标识");
+  assert.deepEqual(captured.stockQuarantines, [], "明确定位到序列资产的异常不能隔离正常数量库存");
+  assert.equal(captured.assetChanges[0].status, RentalAssetStatus.Maintenance);
   ok("多行归还异常保留具体分配项，费用审核和养护链可以继续追溯资源");
+}
+
+{
+  const { instance, captured } = serviceWith(orderFixture());
+  await instance.createInspection("tenant_1", "order_1", returnInspection([{ code: "damage", description: "数量批次损坏", allocationId: "alloc_q" }]), "检查员");
+  assert.equal(captured.assetChanges[0].status, RentalAssetStatus.Available, "数量库存的异常不能隔离无异常的独立资产");
+  assert.equal(captured.stockQuarantines[0].quantity, 2);
+  ok("明确定位到数量库存的异常只隔离对应批次，正常独立资产恢复可用");
 }
 
 {
   const { instance } = serviceWith(orderFixture());
   await assert.rejects(
     () => instance.createInspection("tenant_1", "order_1", returnInspection([{ code: "scratch", description: "越界资源", allocationId: "alloc_other" }]), "检查员"),
-    /异常关联的分配项不属于本次归还批次/u,
+    /异常关联的分配项不属于本次检查批次/u,
     "异常不能关联订单外或未在本次归还的分配项"
   );
   ok("异常关联分配项必须属于本订单当前归还批次");

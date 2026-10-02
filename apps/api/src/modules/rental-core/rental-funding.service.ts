@@ -276,6 +276,8 @@ export class RentalFundingService {
       paymentMethod?: RentalOfflinePaymentMethod;
       /** 仅由员工待确认登记服务在结算权限确认后启用，允许首次实收为部分金额。 */
       allowPartialInitiate?: boolean;
+      /** 仅供已验签且已核对原支付单金额的 Provider 入账调用；不对 HTTP DTO 开放。 */
+      verifiedExternalReceipt?: boolean;
     },
     operator?: string,
     tx?: Prisma.TransactionClient
@@ -289,6 +291,11 @@ export class RentalFundingService {
       // 否则两笔并发抵扣都可能读到同一个旧余额并同时成功。
       const order = await this.lockedOrderScope(tx, tenantId, workspaceId, orderId);
       assertActionApplies(input.instrument, input.action);
+      const externalReceipt = input.verifiedExternalReceipt === true;
+      if (externalReceipt && (input.instrument !== "rental" || input.action !== "initiate"
+        || !["alipay", "wechat_pay", "stripe"].includes(input.provider ?? ""))) {
+        throw new ConflictException("真实到账只能由已核验的支付平台登记租金收款");
+      }
 
       // 命中既有同键事件即回放（重试/恢复）。锁内查询同时兜住并发重试。
       const existing = await tx.rentalFundingEvent.findUnique({
@@ -332,7 +339,7 @@ export class RentalFundingService {
       let effectiveAmount: number;
       if (input.action === "initiate") {
         // 首次应收/应冻结额是订单快照事实，客户端不得自行填写金额。
-        effectiveAmount = input.allowPartialInitiate
+        effectiveAmount = externalReceipt || input.allowPartialInitiate
           ? Number(input.amount)
           : input.instrument === "rental"
             ? due
@@ -346,7 +353,7 @@ export class RentalFundingService {
                 : "该订单没有应冻结的预授权额度"
           );
         }
-        if (!input.allowPartialInitiate && input.instrument === "rental" && input.amount !== undefined && Math.abs(Number(input.amount) - effectiveAmount) > 0.005) {
+        if (!externalReceipt && !input.allowPartialInitiate && input.instrument === "rental" && input.amount !== undefined && Math.abs(Number(input.amount) - effectiveAmount) > 0.005) {
           throw new ConflictException("支付回调金额与当前订单待收金额不一致，请重新发起支付");
         }
       } else if (input.action === "release" && input.amount === undefined) {
@@ -361,7 +368,9 @@ export class RentalFundingService {
       if (input.action === "capture" && effectiveAmount > Math.max(0, payment.balance)) throw new ConflictException("保证金抵扣不能超过尚未支付的应收费用");
       let balanceAfter: number;
       if (input.instrument === "rental") {
-        if (["initiate", "append"].includes(input.action) && effectiveAmount > Math.max(0, due)) throw new ConflictException("收款不能超过订单及待补款续租应收");
+        // 已发生的真实到账必须入账。取消/核减/并发付款产生的超收形成负应收
+        // （待退款），由原支付退款链收尾，不能用当前应收拒绝外部资金事实。
+        if (!externalReceipt && ["initiate", "append"].includes(input.action) && effectiveAmount > Math.max(0, due)) throw new ConflictException("收款不能超过订单及待补款续租应收");
         if (input.action === "refund" && effectiveAmount > Math.max(0, -payment.balance)) throw new ConflictException("退款不能超过已核准的待退金额，请先完成应收核减");
         balanceAfter = roundMoney(payment.collected - payment.refunded + (input.action === "refund" ? -effectiveAmount : input.action === "fail" ? 0 : effectiveAmount));
       } else balanceAfter = nextBalanceAfter(input.instrument, input.action, effectiveAmount, ledgers);

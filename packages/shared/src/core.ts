@@ -2232,7 +2232,7 @@ export interface CustomerCorporateCreditLedgerEntry {
   customerId: string;
   workspaceId?: string;
   orderId?: string;
-  entryType: "reserve" | "release" | "settle" | "payment" | "adjust";
+  entryType: "reserve" | "release" | "settle" | "payment" | "payment_allocation" | "adjust";
   amount: number;
   reservedDelta: number;
   receivableDelta: number;
@@ -3591,6 +3591,8 @@ export interface RentalQuoteServiceSnapshot {
   formula: string;
   coverageLimit?: number;
   deductible?: number;
+  /** 报价时冻结的商品适用范围；空数组表示不限商品，存量未冻结记录须人工核对条款。 */
+  applicableItemGroupIds?: string[];
   termsVersion: string;
   /** 条款正文快照。 */
   terms: string;
@@ -6537,6 +6539,16 @@ export interface RentalInspectionRecord {
     reviewStatus: "pending" | "approved" | "rejected";
     approvedChargeAmount?: number;
     reviewReason?: string;
+    liability?: "customer" | "normal_wear" | "lessor" | "third_party" | "undetermined";
+    waiverDecision?: "covered" | "excluded";
+    /** 首次审核损失额和免赔裁定依据；金额复核不得改写这批历史事实。 */
+    assessedDamageAmount?: number;
+    waiverCustomerChargeCeiling?: number;
+    waiverOccurrenceId?: string;
+    waiverServiceId?: string;
+    waiverTermsVersion?: string;
+    incidentAt?: string;
+    incidentBasis?: string;
     reviewedBy?: string;
     reviewedAt?: string;
     /** 正数异常费用审核后，必须记录客户确认或申诉，才能进入结算。存量记录缺省表示旧链路。 */
@@ -6574,6 +6586,15 @@ export interface CorrectRentalInspectionUsageRequest {
 export interface ReviewRentalInspectionExceptionRequest {
   decision: "approved" | "rejected";
   approvedChargeAmount?: number;
+  /** 有免赔服务且计费时必须明确核对事故责任与条款，不以购买事实自动认定适用。 */
+  waiverDecision?: "covered" | "excluded";
+  /** 有免赔服务的正数损失裁定须明确实际事故时间与核实依据，不能使用检查时间代替。 */
+  incidentAt?: string;
+  incidentBasis?: string;
+  /** 可明确指定冻结的保障发生项；不读取当前服务配置。 */
+  waiverOccurrenceId?: string;
+  /** 赔偿责任审核；正数客户费用必须明确为 customer，不能将正常损耗当作损坏收费。 */
+  liability?: "customer" | "normal_wear" | "lessor" | "third_party" | "undetermined";
   reason: string;
 }
 

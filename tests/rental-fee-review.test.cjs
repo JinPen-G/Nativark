@@ -21,7 +21,8 @@ function service() {
   const saved = [];
   instance.factStore = {
     saveOrderAggregate: async (order) => { saved.push(structuredClone(order)); },
-    listExtensions: async () => []
+    listExtensions: async () => [],
+    listInspections: async () => []
   };
   instance.lockedOrder = async () => instance.__order;
   instance.runHook = async () => {};
@@ -154,6 +155,7 @@ void (async () => {
   assert.equal(rejected.feeReviews[0].status, "rejected");
   assert.equal(rejected.finalPayableAmount, 1000, "驳回不产生任何金额");
   assert.equal(rejected.chargeLines.length, 1);
+  assert.equal(rejected.feeReviews[0].decidedAmount, 0, "驳回裁定不能回显成批准了建议额");
   ok("驳回只记录结论，不产生金额");
 }
 
@@ -175,6 +177,33 @@ void (async () => {
   const closed = await instance.settleOrder("tenant_1", "order_1", {}, "结算员");
   assert.equal(closed.status, RentalCoreOrderStatus.Completed);
   ok("裁定完成后可以正常结清");
+}
+
+{
+  const { instance, saved } = service();
+  const row = order();
+  for (const amount of [NaN, Infinity, -1]) {
+    assert.throws(() => instance.raiseFeeReview(row, "overdue", amount, ["非法建议"]), /有限的非负/u);
+  }
+  for (const amount of [NaN, Infinity, 1e308]) {
+    const before = structuredClone(row);
+    assert.throws(() => instance.applyChargeTo(row, { code: "invalid", type: "damage", amount }), /无效账目/u);
+    assert.deepEqual(row, before, "非法费用不能先污染聚合再报错");
+  }
+  instance.applyOverdueTo(row, 120, "2026-09-05T10:00:00.000Z");
+  instance.__order = row;
+  await instance.reviewOrderFeeReview("tenant_1", "order_1", row.feeReviews[0].id, { decision: "approved", reason: "首次确认" }, "operator", {});
+  instance.applyOverdueTo(row, 120, "2026-09-05T10:00:00.000Z");
+  const duplicate = row.feeReviews.find((review) => review.status === "pending");
+  const before = structuredClone(row);
+  const savedBefore = saved.length;
+  await assert.rejects(() => instance.reviewOrderFeeReview("tenant_1", "order_1", duplicate.id,
+    { decision: "approved", reason: "重复确认" }, "operator", {}), /来源费用已入账/u);
+  assert.deepEqual(row, before, "不能把重复来源标成已批准但不入账");
+  assert.equal(saved.length, savedBefore);
+  await instance.reviewOrderFeeReview("tenant_1", "order_1", duplicate.id, { decision: "rejected", reason: "清理重复待办" }, "operator", {});
+  assert.equal(row.finalPayableAmount, 1120);
+  ok("非法金额无副作用，重复来源拒绝再批准但可驳回收口");
 }
 
 console.log(`\n费用审核单专项：${passed} 项全部通过`);

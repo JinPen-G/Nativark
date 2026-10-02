@@ -252,6 +252,28 @@ export class ReviewRentalInspectionExceptionDto implements ReviewRentalInspectio
   @Min(0)
   approvedChargeAmount?: number;
 
+  @IsOptional()
+  @IsIn(["covered", "excluded"])
+  waiverDecision?: "covered" | "excluded";
+
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  incidentAt?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  incidentBasis?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  waiverOccurrenceId?: string;
+
+  @IsOptional()
+  @IsIn(["customer", "normal_wear", "lessor", "third_party", "undetermined"])
+  liability?: "customer" | "normal_wear" | "lessor" | "third_party" | "undetermined";
+
   @IsString()
   @IsNotEmpty()
   reason!: string;

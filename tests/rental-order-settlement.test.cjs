@@ -62,6 +62,7 @@ void (async () => {
   // 检查员填的建议额不能越过订单损坏上限；有免赔服务时只把客户实际承担部分入账。
   {
     const service = Object.create(RentalCoreService.prototype);
+    const waiverReview = (overrides = {}) => ({ waiverDecision: "covered", liability: "customer", incidentAt: "2026-09-10T12:00:00.000Z", incidentBasis: "已核对客户事故记录与仪表照片", ...overrides });
     const baseOrder = () => ({
       id: "order_damage", status: RentalCoreOrderStatus.Settling, ruleVersion: "rule_v1",
       payableAmount: 1000, finalPayableAmount: 1000, totalAmount: 1000, adjustmentAmount: 0, taxRate: 0,
@@ -71,12 +72,17 @@ void (async () => {
     let order = baseOrder();
     service.lockedOrder = async () => order;
     service.factStore = { saveOrderAggregate: async () => undefined };
-    const approved = await service.approveInspectionException("tenant", order.id, "inspection_1", 0, 250, "划痕", {});
+    await assert.rejects(() => service.approveInspectionException("tenant", order.id, "inspection_missing", 0, 250, "划痕", {}, undefined, { liability: "customer" }), /明确审核损坏免赔/u);
+    for (const liability of [undefined, "normal_wear", "lessor", "third_party", "undetermined"]) {
+      await assert.rejects(() => service.approveInspectionException("tenant", order.id, "inspection_liability", 0, 250, "检查差异", {}, undefined, { waiverDecision: "covered", liability }), /必须明确客户赔偿责任/u);
+      assert.equal(order.chargeLines.length, 0);
+    }
+    const approved = await service.approveInspectionException("tenant", order.id, "inspection_1", 0, 250, "划痕", {}, undefined, waiverReview());
     assert.equal(approved.approvedChargeAmount, 100, "免赔额之外被保障的部分不应再向客户收费");
     assert.equal(order.finalPayableAmount, 1100);
     order = baseOrder();
     await assert.rejects(
-      () => service.approveInspectionException("tenant", order.id, "inspection_2", 0, 1500, "重大损坏", {}),
+      () => service.approveInspectionException("tenant", order.id, "inspection_2", 0, 1500, "重大损坏", {}, undefined, waiverReview()),
       /超过订单规则上限/u
     );
     assert.equal(order.chargeLines.length, 0, "超上限审核不得留下任何费用行");
@@ -84,16 +90,25 @@ void (async () => {
     order.serviceSnapshots[0].scheduledStartAt = "2026-09-10T00:00:00.000Z";
     order.serviceSnapshots[0].scheduledEndAt = "2026-09-11T00:00:00.000Z";
     const lateReview = await service.approveInspectionException(
-      "tenant", order.id, "inspection_3", 0, 250, "保障期内发现、期后审核", {}, "2026-09-10T12:00:00.000Z"
+      "tenant", order.id, "inspection_3", 0, 250, "保障期内发生、期后检查", {}, "2026-09-12T12:00:00.000Z", waiverReview()
     );
     assert.equal(lateReview.approvedChargeAmount, 100, "延迟审核不能让保障期内的异常失去免赔");
     order = baseOrder();
     order.serviceSnapshots[0].scheduledStartAt = "2026-09-10T00:00:00.000Z";
     order.serviceSnapshots[0].scheduledEndAt = "2026-09-11T00:00:00.000Z";
     const outside = await service.approveInspectionException(
-      "tenant", order.id, "inspection_4", 0, 250, "保障期外发现", {}, "2026-09-12T12:00:00.000Z"
+      "tenant", order.id, "inspection_4", 0, 250, "保障期外发生", {}, "2026-09-12T12:00:00.000Z", waiverReview({ waiverDecision: "excluded", incidentAt: "2026-09-12T12:00:00.000Z" })
     );
     assert.equal(outside.approvedChargeAmount, 250, "保障期外的异常不能因审核时刻改变而命中免赔");
+    order = baseOrder();
+    order.serviceSnapshots[0].applicableItemGroupIds = ["group_other"];
+    order.allocations = [{ id: "asset_allocation", itemGroupId: "group_actual" }];
+    await assert.rejects(() => service.approveInspectionException("tenant", order.id, "inspection_scope", 0, 250, "范围不符", {}, undefined, waiverReview({ allocationId: "asset_allocation" })), /没有覆盖/u);
+    assert.equal(order.chargeLines.length, 0);
+    order = baseOrder();
+    order.serviceSnapshots[0].coverageLimit = 0;
+    const noCoverage = await service.approveInspectionException("tenant", order.id, "inspection_zero_cap", 0, 250, "零保障额度", {}, undefined, waiverReview());
+    assert.equal(noCoverage.approvedChargeAmount, 250, "免赔计算不能让客户承担额超过原裁定金额");
     ok("检查异常计费同时受免赔服务和订单损坏上限约束");
   }
 

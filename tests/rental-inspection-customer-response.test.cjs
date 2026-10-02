@@ -5,7 +5,7 @@ require("ts-node").register({
   compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true }
 });
 
-const { validateInspectionCustomerResponse } = require("../apps/api/src/modules/rental-core/rental-inspection-customer-response");
+const { inspectionClosureError, validateInspectionCustomerResponse } = require("../apps/api/src/modules/rental-core/rental-inspection-customer-response");
 const { RentalCoreController } = require("../apps/api/src/modules/rental-core/rental-core.controller");
 
 let passed = 0;
@@ -52,6 +52,19 @@ assert.match(
   "申诉后可以追加记录客户确认"
 );
 ok("申诉后的后续确认保留可操作出口");
+for (const currentStatus of [undefined, "not_required", "pending", "disputed"]) {
+  assert.match(inspectionClosureError([{ exceptions: [{ reviewStatus: "approved", approvedChargeAmount: 30, customerResponseStatus: currentStatus }] }]), /待客户确认/u);
+}
+assert.equal(inspectionClosureError([{ exceptions: [{ reviewStatus: "approved", approvedChargeAmount: 30, customerResponseStatus: "confirmed" }] }]), undefined);
+assert.equal(inspectionClosureError([{ exceptions: [{ reviewStatus: "rejected" }, { reviewStatus: "approved", approvedChargeAmount: 0 }] }]), undefined);
+assert.match(inspectionClosureError([{ exceptions: [{ reviewStatus: "pending" }] }]), /待审核/u);
+assert.match(inspectionClosureError([{ exceptions: [{ reviewStatus: "approved", approvedChargeAmount: NaN }] }]), /金额无效/u);
+for (const invalidAmount of [null, "", "0", false, [], undefined, -1, Infinity]) {
+  assert.match(inspectionClosureError([{ exceptions: [{ reviewStatus: "approved", approvedChargeAmount: invalidAmount }] }]), /金额无效/u);
+}
+assert.equal(validateInspectionCustomerResponse({ reviewStatus: "approved", approvedChargeAmount: 30, currentStatus: "not_required", decision: "confirmed" }), undefined);
+assert.match(validateInspectionCustomerResponse({ reviewStatus: "approved", approvedChargeAmount: NaN, decision: "confirmed" }), /已批准/u);
+ok("缺失或错误响应状态不能关单，存量正数费用可补录真实响应");
 
 void (async () => {
 {
@@ -74,6 +87,11 @@ void (async () => {
     findFirst: async () => row,
     update: async ({ data }) => { row.exceptions = data.exceptions; return row; }
   } }) };
+  await assert.rejects(instance.recordInspectionExceptionCustomerResponse(
+    { user: { tenantId: "tenant_1", displayName: "客服" }, headers: {} },
+    "order_1", "inspection_1", "0", { decision: "confirmed", reason: "   " }
+  ), /记录依据/u);
+  assert.equal(row.exceptions[0].customerResponseStatus, "pending", "空白依据不能写入确认状态");
   const response = await instance.recordInspectionExceptionCustomerResponse(
     { user: { tenantId: "tenant_1", displayName: "客服" }, headers: {} },
     "order_1", "inspection_1", "0", { decision: "confirmed", reason: "客户现场确认损坏费用" }

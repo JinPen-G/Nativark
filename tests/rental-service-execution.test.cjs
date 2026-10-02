@@ -64,7 +64,7 @@ function orderWith(occurrence) {
 function serviceFor(order, calls) {
   const service = Object.create(RentalCoreService.prototype);
   service.lockedOrder = async () => order;
-  service.factStore = { saveOrderAggregate: async () => { calls.saved += 1; } };
+  service.factStore = { saveOrderAggregate: async () => { calls.saved += 1; }, listInspections: async () => [] };
   service.serviceCapacities = {
     markUsedForOccurrence: async (...args) => calls.used.push(args),
     releaseForOccurrence: async (...args) => calls.released.push(args),

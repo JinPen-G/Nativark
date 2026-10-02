@@ -37,6 +37,7 @@ const creditEntryLabel: Record<CustomerCorporateCreditLedgerEntry["entryType"], 
   release: "释放额度",
   settle: "转为应收",
   payment: "企业回款",
+  payment_allocation: "回款核销",
   adjust: "账务调整"
 };
 

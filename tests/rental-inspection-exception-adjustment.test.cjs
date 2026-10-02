@@ -114,5 +114,24 @@ void (async () => {
   assert.equal(exception.customerResponseReason, undefined, "复核后应清除旧申诉文本，避免误读为最新响应");
   ok("控制器复核入口保留金额历史并重新打开客户确认门禁");
 
+  inspectionRow.exceptions[0].liability = "customer";
+  inspectionRow.exceptions[0].waiverDecision = "covered";
+  inspectionRow.exceptions[0].customerResponseStatus = "disputed";
+  await assert.rejects(() => controller.reReviewInspectionException(
+    { user: { tenantId: "tenant_1", displayName: "复核员" }, headers: {} }, order.id, inspectionRow.id, "0",
+    { approvedChargeAmount: 50, reason: "提高旧免赔费用" }
+  ), /存量免赔裁定缺少客户承担上限/u);
+  assert.equal(inspectionRow.exceptions[0].approvedChargeAmount, 20);
+  let ceiling;
+  inspectionRow.exceptions[0].waiverCustomerChargeCeiling = 30;
+  controller.service.adjustInspectionExceptionCharge = async (...args) => { ceiling = args[11]; return { order, approvedChargeAmount: 25 }; };
+  await controller.reReviewInspectionException(
+    { user: { tenantId: "tenant_1", displayName: "复核员" }, headers: {} }, order.id, inspectionRow.id, "0",
+    { approvedChargeAmount: 25, reason: "原裁定范围内复核" }
+  );
+  assert.equal(ceiling, 30, "控制器必须把冻结免赔上限传给费用内核");
+  assert.equal(inspectionRow.exceptions[0].waiverCustomerChargeCeiling, 30, "复核不能覆盖首次保障上限");
+  ok("旧免赔不能直接加收，新裁定上限贯穿控制器和费用内核");
+
   console.log(`\n检查异常费用复核专项：${passed} 项全部通过`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });

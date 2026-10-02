@@ -110,6 +110,10 @@ const ok = (message) => { passed += 1; console.log(`  PASS  ${message}`); };
     idempotencyKey: "payment-1"
   }, "operator");
   assert.equal(afterPayment.receivableAmount, 50);
+  const allocated = db.ledger.rows.filter((row) => row.entryType === "payment_allocation" && row.orderId === orderId);
+  assert.equal(allocated.length, 1);
+  assert.equal(Number(allocated[0].receivableDelta), -80);
+  assert.equal(db.ledger.rows.filter((row) => row.entryType === "payment").reduce((sum, row) => sum + Number(row.amount), 0), 80, "回款与核销类型分开，收入统计不重复累计");
   const paymentReplay = await service.recordPayment(tenantId, customerId, {
     amount: 80,
     reason: "企业回款",
@@ -121,6 +125,58 @@ const ok = (message) => { passed += 1; console.log(`  PASS  ${message}`); };
     /不能超过企业当前应收/u
   );
   ok("企业回款支持部分回款、幂等重试，并拒绝超额登记");
+
+  await assert.rejects(() => service.recordPayment(tenantId, customerId, {
+    amount: 80, reason: "另一笔回款", idempotencyKey: "payment-1"
+  }, "operator"), /幂等键已用于不同/u);
+  ok("回款幂等重试同时核对原因，不能复用流水冒充另一笔回款");
+
+  const cancelledDb = new FakeDb();
+  const cancelledService = new CustomerCorporateSettlementService(cancelledDb);
+  await cancelledService.reserveOrderCredit(tenantId, orderId, cancelledDb);
+  cancelledDb.currentOrder.finalPayableAmount = money(25);
+  const cancellation = await cancelledService.settleCancelledOrderCredit(tenantId, orderId, "取消费", cancelledDb);
+  assert.equal(cancellation.reservedAmount, 0);
+  assert.equal(cancellation.receivableAmount, 25);
+  await cancelledService.settleCancelledOrderCredit(tenantId, orderId, "取消费", cancelledDb);
+  assert.equal((await cancelledService.account(tenantId, customerId)).receivableAmount, 25);
+  ok("企业订单取消费转应收、释放剩余额度，重复取消不重复计费");
+
+  const excessDb = new FakeDb();
+  const excessService = new CustomerCorporateSettlementService(excessDb);
+  await excessService.reserveOrderCredit(tenantId, orderId, excessDb);
+  excessDb.currentOrder.finalPayableAmount = money(650);
+  const excess = await excessService.settleOrderCredit(tenantId, orderId, excessDb);
+  assert.equal(excess.receivableAmount, 650);
+  assert.equal(excess.availableAmount, -150);
+  await excessService.recordPayment(tenantId, customerId, { amount: 200, reason: "偿还超额债务", idempotencyKey: "excess-payment" });
+  assert.equal((await excessService.account(tenantId, customerId)).receivableAmount, 450);
+  ok("真实最终债务超过授信仍可入账并回款，不把额度限制误用成账务阻断");
+
+  const zeroDb = new FakeDb();
+  const zeroService = new CustomerCorporateSettlementService(zeroDb);
+  await zeroService.reserveOrderCredit(tenantId, orderId, zeroDb);
+  zeroDb.currentOrder.finalPayableAmount = money(0);
+  await zeroService.settleCancelledOrderCredit(tenantId, orderId, "免费取消", zeroDb);
+  const zeroCount = zeroDb.ledger.rows.length;
+  await zeroService.settleCancelledOrderCredit(tenantId, orderId, "免费取消", zeroDb);
+  assert.equal(zeroDb.ledger.rows.length, zeroCount);
+  assert.equal((await zeroService.account(tenantId, customerId)).reservedAmount, 0);
+  ok("零费用取消保留结算幂等标记，不反复释放额度");
+
+  const splitDb = new FakeDb();
+  const splitService = new CustomerCorporateSettlementService(splitDb);
+  await splitService.reserveOrderCredit(tenantId, orderId, splitDb);
+  await splitService.settleOrderCredit(tenantId, orderId, splitDb);
+  splitDb.currentOrder = { ...splitDb.currentOrder, id: "order-second", finalPayableAmount: money(60) };
+  await splitService.reserveOrderCredit(tenantId, "order-second", splitDb);
+  await splitService.settleOrderCredit(tenantId, "order-second", splitDb);
+  await splitService.recordPayment(tenantId, customerId, { amount: 130, reason: "分单回款", idempotencyKey: "split-payment" });
+  const firstDebt = splitDb.ledger.rows.filter((row) => row.orderId === orderId).reduce((sum, row) => sum + Number(row.receivableDelta), 0);
+  const secondDebt = splitDb.ledger.rows.filter((row) => row.orderId === "order-second").reduce((sum, row) => sum + Number(row.receivableDelta), 0);
+  assert.equal(firstDebt, 0);
+  assert.equal(secondDebt, 30);
+  ok("一笔回款按应收入账顺序跨订单核销，总账和逐单余额一致");
 
   console.log(`\n企业授信账期专项：${passed} 项全部通过`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });

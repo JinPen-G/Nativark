@@ -196,6 +196,7 @@ export function resolveQuoteServices(
       formula: `${service.price} × ${quantity} 份 × ${billingUnits} ${service.billingUnit} = ${amount}`,
       coverageLimit: service.coverageLimit,
       deductible: service.deductible,
+      applicableItemGroupIds: [...(service.applicableItemGroupIds ?? [])],
       termsVersion: service.termsVersion,
       terms: service.terms,
       eligibility: rows,

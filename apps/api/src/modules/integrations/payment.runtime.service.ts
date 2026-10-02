@@ -700,13 +700,16 @@ export class PaymentRuntimeService {
       }
 
       const funding = await this.funding.listEvents(tenantId, workspaceId, orderId, tx);
-      const pendingRefunds = await tx.rentalPaymentRefund.findMany({
-        where: { tenantId, workspaceId, orderId, status: { in: ["pending", "accepted", "funding_pending"] } },
+      const refundReservations = await tx.rentalPaymentRefund.findMany({
+        where: { tenantId, workspaceId, orderId, status: { in: ["pending", "accepted", "funding_pending", "succeeded"] } },
         select: { amount: true, status: true, paymentIntentId: true }
       });
+      // 成功退款已体现在订单资金余额中，不能在订单级再次扣减；但原支付单
+      // 可退上限必须同时扣除成功退款和处理中退款，防止重复选中已退完的支付单。
+      const pendingRefunds = refundReservations.filter((row) => row.status !== "succeeded");
       const alreadyRequested = money(pendingRefunds.reduce((sum, row) => sum + Number(row.amount), 0));
       const remainingApproved = money(Math.max(0, -funding.rental.balance) - alreadyRequested);
-      const intentAlreadyRequested = money(pendingRefunds
+      const intentAlreadyRequested = money(refundReservations
         .filter((row) => row.paymentIntentId === intentId)
         .reduce((sum, row) => sum + Number(row.amount), 0));
       const remainingIntent = money(Math.max(0, Number(locked.amount) - intentAlreadyRequested));
@@ -2070,6 +2073,8 @@ export class PaymentRuntimeService {
         const intent = await tx.rentalPaymentIntent.findFirst({ where: { id: input.intentId, tenantId: input.tenantId } });
         if (!intent) throw new NotFoundException("支付单不存在");
         if (intent.provider !== input.provider || intent.method !== input.provider) throw new ConflictException("支付单提供方与回调不匹配");
+        // 入账金额认原支付单，不认此刻可能已经取消、核减或另行收款的订单应收。
+        this.assertPaidAmount(input.amount, Number(intent.amount));
         if (intent.externalTransactionId && intent.externalTransactionId !== input.externalTransactionId) {
           throw new ConflictException("支付单已绑定其他第三方交易编号，不能接受新的成功交易");
         }
@@ -2112,7 +2117,8 @@ export class PaymentRuntimeService {
           amount: input.amount,
           idempotencyKey: `payment:${intent.id}`,
           reason: `${input.provider === "alipay" ? "支付宝" : input.provider === "stripe" ? "Stripe" : "微信支付"}异步回调入账`,
-          provider: input.provider
+          provider: input.provider,
+          verifiedExternalReceipt: true
         }, `provider:${input.provider}`, tx);
         await tx.rentalPaymentIntent.update({
           where: { id: intent.id },
@@ -2130,7 +2136,8 @@ export class PaymentRuntimeService {
   }
 
   private assertPaidAmount(actual: number, expected: number) {
-    if (!Number.isFinite(actual) || Math.abs(money(actual) - money(expected)) > 0.005) throw new ConflictException("支付回调金额与支付单不一致");
+    if (!Number.isFinite(actual) || !Number.isFinite(expected) || actual <= 0 || expected <= 0
+      || Math.abs(money(actual) - money(expected)) > 0.005) throw new ConflictException("支付回调金额与支付单不一致");
   }
 
   private toResponse(row: PaymentIntentRow, jsapi?: ClientWechatJsapiParameters): ClientPaymentIntentResponse {

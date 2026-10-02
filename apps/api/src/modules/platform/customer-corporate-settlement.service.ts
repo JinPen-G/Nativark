@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type {
   CustomerCorporateCreditAccountSummary,
   CustomerCorporateCreditLedgerEntry,
@@ -201,7 +201,11 @@ export class CustomerCorporateSettlementService {
     if (reservedAfter.lt(CENT.neg()) || receivableAfter.lt(CENT.neg())) {
       throw new ConflictException("授信账面不能出现负的占用或应收");
     }
-    if (reservedAfter.plus(receivableAfter).gt(this.decimal(credit.creditLimit).plus(CENT))) {
+    // 授信额度控制新的业务占用，不能拒绝记录已经产生的最终费用/债权。
+    // 真实结算超额后 availableAmount 可以为负；下一笔 reserve 仍会被门禁拦截。
+    const finalDebt = ["settle", "adjust"].includes(input.entryType) && reservedDelta.lte(ZERO);
+    if (!finalDebt && reservedDelta.plus(receivableDelta).gt(CENT)
+      && reservedAfter.plus(receivableAfter).gt(this.decimal(credit.creditLimit).plus(CENT))) {
       throw new ConflictException("企业可用授信额度不足");
     }
 
@@ -356,14 +360,23 @@ export class CustomerCorporateSettlementService {
     return this.account(tenantId, customerId, tx);
   }
 
+  /** 取消/爽约仍是一笔最终结算：取消费转应收，只有无债权的额度才能释放。 */
+  async settleCancelledOrderCredit(tenantId: string, orderId: string, reason: string, tx: Prisma.TransactionClient, operator?: string) {
+    if (await this.requiresCreditSettlement(tenantId, orderId, tx)) {
+      return this.settleOrderCredit(tenantId, orderId, tx, operator);
+    }
+    return this.releaseOrderCredit(tenantId, orderId, reason, tx, operator);
+  }
+
   async settleOrderCredit(tenantId: string, orderId: string, tx: Prisma.TransactionClient, operator?: string) {
     const order = await this.order(tenantId, orderId, tx);
     const customerId = this.corporatePayer(order);
     if (!customerId) return undefined;
+    await this.lockCredit(tx, tenantId, customerId);
     const rows = await tx.customerCorporateCreditLedger.findMany({ where: { tenantId, customerId, orderId }, orderBy: { occurredAt: "asc" } });
     const reserved = this.decimal(rows.reduce((sum, row) => sum.plus(row.reservedDelta), ZERO));
     const receivable = this.decimal(rows.reduce((sum, row) => sum.plus(row.receivableDelta), ZERO));
-    const payments = this.decimal(rows.filter((row) => row.entryType === "payment").reduce((sum, row) => sum.plus(row.receivableDelta.neg()), ZERO));
+    const payments = this.decimal(rows.filter((row) => ["payment", "payment_allocation"].includes(row.entryType)).reduce((sum, row) => sum.plus(row.receivableDelta.neg()), ZERO));
     const targetReceivable = this.decimal(Math.max(0, Number(order.finalPayableAmount) - this.number(payments)));
     if (receivable.gt(targetReceivable.plus(CENT))) {
       throw new ConflictException("订单最终应收低于已登记企业回款，请先处理退款或账务调整");
@@ -403,7 +416,7 @@ export class CustomerCorporateSettlementService {
           reason: "订单结算转企业应收",
           operator
         });
-      } else if (releaseAmount.lte(CENT)) {
+      } else {
         // 零金额订单也要留一条幂等事实，避免结算重试反复重新计算。
         await this.append(tx, {
           tenantId,
@@ -488,7 +501,8 @@ export class CustomerCorporateSettlementService {
         }
       });
       if (existing) {
-        if (existing.entryType !== "payment" || !this.decimal(existing.amount).eq(this.decimal(input.amount))) {
+        if (existing.entryType !== "payment" || !this.decimal(existing.amount).eq(this.decimal(input.amount))
+          || existing.reason !== input.reason.trim() || existing.currency !== (input.currency ?? "CNY")) {
           throw new ConflictException("相同授信回款幂等键已用于不同的业务事实");
         }
         return this.account(tenantId, customerId, tx);
@@ -496,18 +510,51 @@ export class CustomerCorporateSettlementService {
       const current = await this.state(tx, tenantId, customerId);
       const amount = this.decimal(input.amount);
       if (current.receivableAmount.lt(amount.minus(CENT))) throw new ConflictException("回款不能超过企业当前应收");
+      // 一条总回款事实 + 多条逐单核销事实；总回款本身不再扣余额，防止重复记账。
+      // 对已形成应收的订单按首次入账顺序核销，旧的无订单应收明确留为 legacy，
+      // 不凭空归给当前经营空间或某一订单。
+      const rows = await tx.customerCorporateCreditLedger.findMany({ where: { tenantId, customerId }, orderBy: { occurredAt: "asc" } });
+      const debts = new Map<string, { workspaceId: string | undefined; amount: Prisma.Decimal }>();
+      for (const row of rows) {
+        if (!row.orderId) continue;
+        const debt = debts.get(row.orderId) ?? { workspaceId: row.workspaceId ?? undefined, amount: ZERO };
+        debt.amount = debt.amount.plus(row.receivableDelta);
+        debts.set(row.orderId, debt);
+      }
       await this.append(tx, {
         tenantId,
         customerId,
         entryType: "payment",
         amount,
         reservedDelta: ZERO,
-        receivableDelta: amount.neg(),
+        receivableDelta: ZERO,
         currency: input.currency ?? "CNY",
         idempotencyKey: input.idempotencyKey,
         reason: input.reason,
         operator
       });
+      let remaining = amount;
+      for (const [orderId, debt] of debts) {
+        if (remaining.lte(CENT)) break;
+        const applied = Prisma.Decimal.min(remaining, Prisma.Decimal.max(ZERO, debt.amount)).toDecimalPlaces(2);
+        if (applied.lte(CENT)) continue;
+        await this.append(tx, {
+          tenantId, customerId, orderId, workspaceId: debt.workspaceId,
+          entryType: "payment_allocation", amount: applied, reservedDelta: ZERO, receivableDelta: applied.neg(),
+          currency: input.currency ?? "CNY",
+          idempotencyKey: `payment.allocation:${createHash("sha256").update(`${input.idempotencyKey}:${orderId}`).digest("hex")}`,
+          reason: `${input.reason.trim()}（逐单核销）`, operator
+        });
+        remaining = remaining.minus(applied);
+      }
+      if (remaining.gt(CENT)) {
+        await this.append(tx, {
+          tenantId, customerId, entryType: "payment_allocation", amount: remaining,
+          reservedDelta: ZERO, receivableDelta: remaining.neg(), currency: input.currency ?? "CNY",
+          idempotencyKey: `payment.legacy:${createHash("sha256").update(input.idempotencyKey).digest("hex")}`,
+          reason: `${input.reason.trim()}（核销未关联订单的历史应收）`, operator
+        });
+      }
       void credit;
       return this.account(tenantId, customerId, tx);
     });

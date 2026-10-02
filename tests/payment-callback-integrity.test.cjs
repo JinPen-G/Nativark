@@ -12,6 +12,7 @@ function makeHarness({ intentStatus = "pending", externalTransactionId = null, e
     orderId: "order-1",
     provider: "alipay",
     method: "alipay",
+    amount: 12.34,
     status: intentStatus,
     externalTransactionId,
     paidAt: intentStatus === "paid" ? new Date("2026-09-14T00:00:00Z") : null
@@ -75,6 +76,15 @@ const baseInput = {
 };
 
 async function main() {
+  for (const amount of [12.33, 12.35, NaN, 0]) {
+    const invalid = makeHarness();
+    await assert.rejects(() => invalid.service.settleVerifiedPayment({ ...baseInput, amount }), /金额与支付单不一致/u);
+    assert.equal(invalid.fundingCalls, 0);
+    assert.equal(invalid.events.size, 0);
+  }
+  const invalidIntent = makeHarness();
+  invalidIntent.intent.amount = undefined;
+  await assert.rejects(() => invalidIntent.service.settleVerifiedPayment(baseInput), /金额与支付单不一致/u);
   const mismatch = makeHarness({ intentStatus: "paid", externalTransactionId: "trade-existing" });
   await assert.rejects(
     () => mismatch.service.settleVerifiedPayment({ ...baseInput, externalTransactionId: "trade-other" }),

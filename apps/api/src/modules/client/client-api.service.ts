@@ -1293,7 +1293,7 @@ export class ClientApiService {
         const order = await this.core.cancelOrder(context.tenantId, orderId, input.reason, (locked) => this.business.calculateCancellationCharge(context.tenantId, business, this.business.getQuote(context.tenantId, business, locked.quoteId)), tx, `client:${context.customerId}`);
         await this.business.releaseCouponInTransaction(context.tenantId, orderId, tx);
         await this.serviceCapacities.releaseForOrder(context.tenantId, orderId, "client_order_cancelled", new Date().toISOString(), tx);
-        await this.corporateSettlement?.releaseOrderCredit(context.tenantId, orderId, "client_order_cancelled", tx, `client:${context.customerId}`);
+        await this.corporateSettlement?.settleCancelledOrderCredit(context.tenantId, orderId, "client_order_cancelled", tx, `client:${context.customerId}`);
         return order;
       },
       replay: async () => {

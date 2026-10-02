@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
+import { usageDelta } from "./rental-usage-reading";
 import { Prisma, type $Enums } from "@prisma/client";
 import {
   RentalAssetStatus,
@@ -242,7 +243,7 @@ export interface RentalCoreFactStore {
   upsertWorkOrder(workOrder: RentalWorkOrder, tx?: RentalFactTx): Promise<RentalWorkOrder>;
   assignWorkOrder(tenantId: string, workOrderId: string, assigneeId?: string, assigneeName?: string, tx?: RentalFactTx): Promise<RentalWorkOrder>;
   transitionWorkOrder(tenantId: string, workOrderId: string, action: "start" | "submit" | "review" | "cancel", operator: string, input?: { result?: string; attachments?: string[]; decision?: "approved" | "rejected"; reason?: string }, tx?: RentalFactTx): Promise<RentalWorkOrder>;
-  listInspections(tenantId: string, orderId: string): Promise<RentalInspectionRecord[]>;
+  listInspections(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalInspectionRecord[]>;
   insertInspection(record: RentalInspectionRecord, tx?: RentalFactTx): Promise<void>;
   correctInspectionUsage(
     tenantId: string,
@@ -2274,9 +2275,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     };
   }
 
-  async listInspections(tenantId: string, orderId: string): Promise<RentalInspectionRecord[]> {
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
-    const rows = await this.prisma.rentalInspectionRecord.findMany({
+  async listInspections(tenantId: string, orderId: string, tx?: RentalFactTx): Promise<RentalInspectionRecord[]> {
+    const client = tx ?? this.prisma;
+    const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    const rows = await client.rentalInspectionRecord.findMany({
       where: { tenantId, workspaceId, orderId },
       orderBy: { createdAt: "desc" }
     });
@@ -2340,10 +2342,20 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     if (!input.reason.trim()) throw new BadRequestException("使用量修正必须填写原因");
     const previous = usageReadings[index];
     if (previous.current === input.correctedCurrent) throw new ConflictException("修正后的读数与当前有效读数相同");
+    const correctedDelta = usageDelta(input.correctedCurrent, previous.baseline);
+    if (row.stage === "pickup") {
+      const returns = await client.rentalInspectionRecord.findMany({ where: { tenantId, workspaceId, orderId, stage: "return" } });
+      const hasDependent = returns.some((record) => {
+        const stored = record.results as Record<string, unknown> | null;
+        const dependency = stored?.__r1InspectionMeta as { baselineInspectionId?: string } | undefined;
+        return dependency?.baselineInspectionId === inspectionId;
+      });
+      if (hasDependent) throw new ConflictException("该领取基线已有归还记录引用，不能单独修正；须同步复核关联读数与费用");
+    }
     usageReadings[index] = {
       ...previous,
       current: input.correctedCurrent,
-      delta: previous.baseline === undefined ? undefined : input.correctedCurrent - previous.baseline
+      delta: correctedDelta
     };
     const correction = {
       id: randomUUID(),
