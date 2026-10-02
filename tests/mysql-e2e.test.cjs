@@ -444,6 +444,10 @@ async function verifyFourCategoryRenewals(session, customerId, options = {}) {
     assert.equal(switched.status, 201); token = switched.body.data.accessToken;
     const get = async (path) => {
       const response = await request("GET", `/api/rental/v1/${path}`, null, token);
+      if (path === "rule-versions/current" && response.status !== 200) {
+        const rules = await request("GET", "/api/rental/v1/rule-versions", null, token);
+        console.error("Rule lookup diagnostic", workspace.categoryCode, JSON.stringify(rules.body.data?.map(row => ({ version: row.version, status: row.status, effectiveFrom: row.effectiveFrom })) ?? rules.body));
+      }
       assert.equal(response.status, 200, `${workspace.categoryCode}/${path}: ${JSON.stringify(response.body).slice(0, 200)}`);
       return response.body.data;
     };

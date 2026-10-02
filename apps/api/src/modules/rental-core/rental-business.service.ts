@@ -601,6 +601,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
   }
 
   async persist(tenantId: string) {
+    // 默认配置分批写入时，运行期刷新不得把中间态（已有价格、尚无规则）
+    // 覆盖回同一内存对象，否则后续规则写入会读到被清空的数组。
+    // 与提交后刷新共用队列；失败不阻断后续任务，不改变库缺失时的 fail-closed 行为。
+    const next = this.refreshQueue.catch(() => undefined).then(() => this.persistScope(tenantId));
+    this.refreshQueue = next;
+    await next;
+  }
+
+  private async persistScope(tenantId: string) {
     // 快照已按经营空间存档：直接存**当前**空间的状态。
     // 此前因为快照按 tenantId 键，这里必须固定挑默认空间，否则在第二个空间触发
     // persist 会覆盖默认空间的存档；主键换成空间后该权衡消失。
