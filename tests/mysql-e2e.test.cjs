@@ -430,6 +430,7 @@ async function configureRentalTestLocation(token, type) {
 async function verifyFourCategoryRenewals(session, customerId) {
   let token = session.accessToken;
   const completedCases = [];
+  const inventoryRaceWinners = { renewal: 0, nextOrder: 0 };
   const baseStart = new Date(Date.now() + 2 * 86400000);
   baseStart.setUTCHours(2, 0, 0, 0);
   for (const workspace of session.workspaces) {
@@ -489,10 +490,11 @@ async function verifyFourCategoryRenewals(session, customerId) {
         return response.body.data;
       };
       assert.equal((await inspect("pickup")).order.status, "renting");
-      const makeBufferBlocker = async (phase, startOffsetMinutes = 30) => {
-        const capacity = group.inventoryMode === "serialized"
+      const inventoryCapacity = async () => group.inventoryMode === "serialized"
           ? (await get("assets")).filter((row) => row.itemGroupId === group.id && row.locationId === location.id && ["available", "reserved", "rented"].includes(row.status)).length
           : (await get("stock-balances")).filter((row) => row.itemGroupId === group.id && row.locationId === location.id).reduce((sum, row) => sum + row.onHandQuantity - row.maintenanceQuantity, 0);
+      const makeBufferBlocker = async (phase, startOffsetMinutes = 30) => {
+        const capacity = await inventoryCapacity();
         assert.ok(capacity > 0);
         const nextStart = new Date(Date.parse(newEndAt) + startOffsetMinutes * 60000).toISOString();
         const nextInput = { ...input, startAt: nextStart, endAt: new Date(Date.parse(nextStart) + 86400000).toISOString(), lines: [{ itemGroupId: group.id, quantity: capacity }] };
@@ -599,9 +601,39 @@ async function verifyFourCategoryRenewals(session, customerId) {
       assert.equal((await get(`orders/${orderId}`)).effectiveEndAt ?? endAt, endAt);
       assert.equal(readCount(`SELECT COUNT(*) FROM \`rental_order_extensions\` WHERE ${extensionWhere} AND \`status\`='pending_payment';`), 1);
       await releasePaymentBlocker();
+      const raceStart = new Date(Date.parse(newEndAt) + 75 * 60000).toISOString();
+      const raceInput = { ...input, startAt: raceStart, endAt: new Date(Date.parse(raceStart) + 86400000).toISOString(),
+        lines: [{ itemGroupId: group.id, quantity: await inventoryCapacity() }] };
+      const raceQuote = await request("POST", "/api/rental/v1/quotes", raceInput, token);
+      assert.equal(raceQuote.status, 201);
+      assert.match(raceQuote.body.data.id, /^[A-Za-z0-9_-]+$/u);
+      const [racedRenewal, racedOrder] = await Promise.all([
+        request("POST", `/api/rental/v1/orders/${orderId}/extensions/${extension.id}/pay`, {}, token,
+          { "Idempotency-Key": `${prefix}:inventory-race:renewal` }),
+        request("POST", "/api/rental/v1/orders", { ...raceInput, quoteId: raceQuote.body.data.id, customerName: "库存竞争验收会员" }, token,
+          { "Idempotency-Key": `${prefix}:inventory-race:next` })
+      ]);
+      assert.deepEqual([racedRenewal.status, racedOrder.status].sort(), [201, 409],
+        `${reason}续租与后单竞争只能一方成功: ${JSON.stringify([racedRenewal.body, racedOrder.body]).slice(0, 500)}`);
+      const raceOrderWhere = `\`tenantId\`='tenant_001' AND \`workspaceId\`='${workspace.id}' AND \`quoteId\`='${raceQuote.body.data.id}'`;
+      if (racedOrder.status === 201) {
+        inventoryRaceWinners.nextOrder++;
+        assert.match(racedRenewal.body.message, /缓冲/u);
+        assert.equal((await get(`orders/${orderId}`)).effectiveEndAt ?? endAt, endAt);
+        assert.equal(readCount(`SELECT COUNT(*) FROM \`rental_order_extensions\` WHERE ${extensionWhere} AND \`status\`='pending_payment';`), 1);
+        assert.equal(readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE ${raceOrderWhere};`), 1);
+        assert.equal((await request("POST", `/api/rental/v1/orders/${racedOrder.body.data.id}/cancel`, { reason: "竞争验证完成，释放未收款后单" }, token)).status, 201);
+      } else {
+        inventoryRaceWinners.renewal++;
+        assert.equal(racedRenewal.body.data.order.effectiveEndAt, newEndAt);
+        assert.equal(readCount(`SELECT COUNT(*) FROM \`rental_order_extensions\` WHERE ${extensionWhere} AND \`status\`='effective';`), 1);
+        assert.equal(readCount(`SELECT COUNT(*) FROM \`rental_orders\` WHERE ${raceOrderWhere};`), 0, "败方下单事务不能残留订单");
+      }
       const releaseTouchingBlocker = await makeBufferBlocker("touching", 90);
-      const touchingPreview = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/preview`, { newEndAt }, token);
-      assert.equal(touchingPreview.status, 201, `${reason}缓冲端点相接允许试算`);
+      if (racedRenewal.status !== 201) {
+        const touchingPreview = await request("POST", `/api/rental/v1/orders/${orderId}/extensions/preview`, { newEndAt }, token);
+        assert.equal(touchingPreview.status, 201, `${reason}缓冲端点相接允许试算`);
+      }
       // Different transport keys exercise the order/extension lock, not only same-key deduplication.
       const parallelPayments = await Promise.all(["a", "b"].map((attempt) => request("POST",
         `/api/rental/v1/orders/${orderId}/extensions/${extension.id}/pay`, {}, token,
@@ -639,9 +671,11 @@ async function verifyFourCategoryRenewals(session, customerId) {
       assert.equal(settled.body.data.status, "completed");
       completedCases.push({ workspaceId: workspace.id, orderId, quote: frozenQuote,
         extension: structuredClone((await get(`orders/${orderId}/extensions`)).find((row) => row.id === extension.id)) });
-      ok(`${reason}: 正式调价后实际计费来源/真实取货续租/未到账拒绝/模拟补款与重放/读回/原快照保护/归还结算`);
+      ok(`${reason}: 正式调价/领取缓冲/后单竞争单赢家/模拟补款与重放/单次费用/原快照保护/归还结算`);
     }
   }
+  assert.equal(inventoryRaceWinners.renewal + inventoryRaceWinners.nextOrder, 8);
+  console.log(`  库存竞争实际赢家: ${JSON.stringify(inventoryRaceWinners)}（不要求人为指定调度顺序）`);
   await stopApi();
   startApi();
   if (!(await waitHealth())) fail("四品类续租后重启超时");
