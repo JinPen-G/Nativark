@@ -19,6 +19,8 @@ const { randomBytes } = require("node:crypto");
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
+const { createOwnedDatabase } = require("./helpers/e2e-database-ownership.cjs");
+let cleanupOwnedDatabase;
 
 const ROOT = path.resolve(__dirname, "..");
 const API_DIR = path.join(ROOT, "apps", "api");
@@ -67,7 +69,9 @@ function requiredCredential(name) {
   return value;
 }
 
-const TEST_DB = process.env.E2E_DATABASE_NAME || "rental_os_e2e";
+const TEST_DB = process.env.E2E_DATABASE_NAME;
+assert.ok(TEST_DB && /^rental_os_e2e_[a-z0-9_]+$/u.test(TEST_DB),
+  "E2E_DATABASE_NAME must explicitly name a new rental_os_e2e_* database; no default database is allowed");
 const MYSQL_CONTAINER = process.env.E2E_MYSQL_CONTAINER || "rental-os-mysql";
 const MYSQL_ROOT_PASSWORD = requiredCredential("MYSQL_ROOT_PASSWORD");
 const DEMO_PASSWORD = requiredCredential("E2E_DEMO_PASSWORD");
@@ -225,6 +229,8 @@ function request(method, requestPath, body, token, extraHeaders) {
         }
       },
       (res) => {
+        // Preserve multi-byte characters split across network chunks.
+        res.setEncoding("utf8");
         let data = "";
         res.on("data", (chunk) => (data += chunk));
         res.on("end", () => {
@@ -427,7 +433,7 @@ async function configureRentalTestLocation(token, type) {
   return created.body.data;
 }
 
-async function verifyFourCategoryRenewals(session, customerId) {
+async function verifyFourCategoryRenewals(session, customerId, options = {}) {
   let token = session.accessToken;
   const completedCases = [];
   const inventoryRaceWinners = { renewal: 0, nextOrder: 0 };
@@ -478,9 +484,9 @@ async function verifyFourCategoryRenewals(session, customerId) {
       assert.equal(confirmed.status, 201, `${reason}确认: ${JSON.stringify(confirmed.body).slice(0, 300)}`);
       const allocated = await request("POST", `/api/rental/v1/orders/${orderId}/allocate`, {}, token);
       assert.equal(allocated.status, 201, `${reason}配货: ${JSON.stringify(allocated.body).slice(0, 300)}`);
-      const inspect = async (stage) => {
+      const inspect = async (stage, exchangeId) => {
         const templates = await get(`inspection-templates?orderId=${orderId}&stage=${stage}`);
-        const template = templates.find((row) => row.stage === stage);
+        const template = templates.find((row) => row.stage === stage && (!exchangeId || row.exchangeId === exchangeId));
         assert.ok(template, `${reason}缺少${stage}模板`);
         const evidence = inspectionEvidence(orderId, stage);
         const results = Object.fromEntries(template.fields.map((field) => [field.code,
@@ -663,14 +669,112 @@ async function verifyFourCategoryRenewals(session, customerId) {
         .map((row) => ({ code: row.code, amount: row.amount })).sort((a, b) => a.code.localeCompare(b.code));
       assert.deepEqual(extensionCharges(storedCharges), expectedCharges, "并发生效和重放后数据库费用只能追加一份");
       assert.deepEqual(extensionCharges((await get(`orders/${orderId}`)).chargeLines), expectedCharges);
+      let exchangedFact;
+      if (options.exchange) {
+        const priceBasis = caseIndex === 0 ? "original_order_price" : "replacement_current_price";
+        const originalDisposition = caseIndex === 0 ? "return_to_warehouse" : "off_shelf";
+        const replacementGroup = await request("POST", "/api/rental/v1/item-groups", {
+          code: `E2E-SWAP-${orderId}`, name: `${workspace.categoryCode}换货目标`, inventoryMode: group.inventoryMode,
+          attributes: Object.fromEntries(Object.entries(group.attributes).filter(([key]) => key !== "__itemGroupMedia"))
+        }, token);
+        assert.equal(replacementGroup.status, 201, `${reason}换货型号: ${JSON.stringify(replacementGroup.body).slice(0, 250)}`);
+        const replacementId = replacementGroup.body.data.id;
+        let replacementAssetId;
+        const oldAllocation = (await get(`orders/${orderId}`)).allocations.find((row) => row.status === "picked_up");
+        assert.ok(oldAllocation);
+        const oldStock = group.inventoryMode === "quantity" ? (await get("stock-balances")).find((row) => row.itemGroupId === group.id && row.locationId === location.id) : null;
+        if (group.inventoryMode === "serialized") {
+          const oldAsset = (await get("assets")).find((row) => row.id === oldAllocation.assetId);
+          const attributes = structuredClone(oldAsset.attributes);
+          for (const key of ["serialNo", "vin", "licensePlate", "factoryNo"]) if (key in attributes) attributes[key] = `E2E-${orderId}-${key}`;
+          const asset = await request("POST", "/api/rental/v1/assets", {
+            itemGroupId: replacementId, assetNo: `E2E-SWAP-${orderId}`, locationId: location.id,
+            serialNo: oldAsset.serialNo ? `E2E-SWAP-${orderId}` : undefined, attributes
+          }, token);
+          assert.equal(asset.status, 201, `${reason}换货实物: ${JSON.stringify(asset.body).slice(0, 250)}`);
+          replacementAssetId = asset.body.data.id;
+        } else {
+          assert.equal((await request("PUT", "/api/rental/v1/stock-balances", {
+            itemGroupId: replacementId, locationId: location.id, onHandQuantity: 1
+          }, token)).status, 200);
+        }
+        const rate = { itemGroupId: replacementId, unit: quotedRate.unit, baseAmount: quotedRate.baseAmount * 3,
+          weekendMultiplier: quotedRate.weekendMultiplier, holidayMultiplier: quotedRate.holidayMultiplier,
+          depositAmount: quotedRate.depositAmount, minimumUnits: quotedRate.minimumUnits };
+        const newPlan = await request("POST", "/api/rental/v1/pricing-plans", { code: `E2E-SWAP-${orderId}`, name: "换货独立现价",
+          status: "enabled", effectiveFrom: new Date().toISOString(), changeReason: "隔离测试换货目标三倍价", rates: [rate] }, token);
+        assert.equal(newPlan.status, 201, `${reason}换货现价: ${JSON.stringify(newPlan.body).slice(0, 300)}`);
+        const changeInput = { type: "post_pickup_exchange", orderLineId: oldAllocation.orderLineId, allocationId: oldAllocation.id,
+          replacementItemGroupId: replacementId, replacementAssetId, priceBasis, originalDisposition,
+          inspectionSnapshot: { condition: "正常", customerConfirmed: true }, customerConfirmed: true, reason: "四品类换货矩阵" };
+        const changePreview = await request("POST", `/api/rental/v1/orders/${orderId}/changes/post-pickup-exchange/preview`, changeInput, token);
+        assert.equal(changePreview.status, 201, `${reason}换货试算: ${JSON.stringify(changePreview.body).slice(0, 300)}`);
+        const changeBody = { ...changeInput, expectedUpdatedAt: changePreview.body.data.expectedUpdatedAt };
+        const changeHeaders = { "Idempotency-Key": `${prefix}:exchange` };
+        const changed = await request("POST", `/api/rental/v1/orders/${orderId}/changes/post-pickup-exchange`, changeBody, token, changeHeaders);
+        assert.equal(changed.status, 201, `${reason}换货确认: ${JSON.stringify(changed.body).slice(0, 300)}`);
+        exchangedFact = changed.body.data.change;
+        assert.equal(exchangedFact.diff.exchange.executionBasis.priceBasis, priceBasis);
+        assert.equal(exchangedFact.diff.exchange.executionBasis.categoryCode, workspace.categoryCode);
+        assert.equal(exchangedFact.diff.exchange.executionBasis.rateSnapshot.find((row) => row.unit === quotedRate.unit).baseAmount,
+          quotedRate.baseAmount * (priceBasis === "replacement_current_price" ? 3 : 1), "实际费率必须来自所选原价或三倍目标现价");
+        assert.deepEqual(changed.body.data.order.inspectionTemplateSnapshots, frozenQuote.inspectionTemplateSnapshots);
+        assert.ok(changed.body.data.order.allocations.some((row) => row.itemGroupId === replacementId && row.status === "locked" && row.metadata?.exchangeId === exchangedFact.id));
+        if (group.inventoryMode === "serialized") {
+          const assets = await get("assets");
+          assert.equal(assets.find((row) => row.id === oldAllocation.assetId).status, originalDisposition === "off_shelf" ? "disabled" : "available");
+          assert.equal(assets.find((row) => row.id === replacementAssetId).status, "rented");
+        } else if (originalDisposition === "off_shelf") {
+          assert.equal((await get("stock-balances")).find((row) => row.itemGroupId === group.id && row.locationId === location.id).maintenanceQuantity,
+            oldStock.maintenanceQuantity + oldAllocation.quantity);
+        }
+        assert.deepEqual((await get(`orders/${orderId}/changes`)).find((row) => row.id === exchangedFact.id), exchangedFact);
+        const exchangeReplay = await request("POST", `/api/rental/v1/orders/${orderId}/changes/post-pickup-exchange`, changeBody, token, changeHeaders);
+        assert.equal(exchangeReplay.status, 201);
+        assert.deepEqual(exchangeReplay.body.data.change, exchangedFact);
+        assert.equal((await get(`orders/${orderId}/changes`)).length, 1);
+      }
       const rereadQuote = await get(`quotes/${frozenQuote.id}`);
       assert.deepEqual(rereadQuote.rateSnapshot, frozenQuote.rateSnapshot); assert.deepEqual(rereadQuote.ruleSnapshot, frozenQuote.ruleSnapshot);
       assert.equal(rereadQuote.rentalAmount, frozenQuote.rentalAmount);
-      const returned = await inspect("return"); assert.equal(returned.order.status, "settling");
+      const returned = await inspect("return", exchangedFact?.id); assert.equal(returned.order.status, "settling");
+      if (exchangedFact) {
+        assert.equal(returned.inspection.exchangeId, exchangedFact.id);
+        // No refund review is created for a zero/positive exchange difference.
+        const pendingReviews = (returned.order.feeReviews ?? []).filter((row) => row.status === "pending");
+        if (pendingReviews.length) {
+          const blocked = await request("POST", `/api/rental/v1/orders/${orderId}/settle`, {}, token);
+          assert.equal(blocked.status, 409, "换货退款未裁定不得结算关单");
+          assert.equal((await get(`orders/${orderId}`)).status, "settling");
+        }
+        for (const review of pendingReviews) {
+          assert.equal(review.type, "early_return_refund");
+          assert.equal(review.sourceId, exchangedFact.id, "只裁定本次换货差额，不能吞掉其他费用异常");
+          const reviewBody = { decision: "approved", reason: "E2E 核对换货差额后批准核减" };
+          const reviewHeaders = { "Idempotency-Key": `${prefix}:exchange-review:${review.id}` };
+          const reviewed = await request("POST", `/api/rental/v1/orders/${orderId}/fee-reviews/${review.id}/review`, reviewBody, token, reviewHeaders);
+          assert.equal(reviewed.status, 201);
+          const replayed = await request("POST", `/api/rental/v1/orders/${orderId}/fee-reviews/${review.id}/review`, reviewBody, token, reviewHeaders);
+          assert.equal(replayed.status, 201);
+          const chargeCode = `${review.type}:${orderId}:${exchangedFact.id}`;
+          const charges = replayed.body.data.chargeLines.filter((row) => row.code === chargeCode);
+          assert.equal(charges.length, 1, "审核重放不重复核减费用");
+          assert.equal(charges[0].amount, -review.suggestedAmount);
+        }
+        const funds = await get(`orders/${orderId}/funding-events`);
+        if (Number(funds.rental.balance) < 0) {
+          const refund = await request("POST", `/api/rental/v1/orders/${orderId}/funding-events/refund`, {
+            instrument: "rental", amount: -Number(funds.rental.balance),
+            idempotencyKey: `${prefix}:exchange-rental-refund`, reason: "E2E 归还时退还换货核减的模拟租金"
+          }, token);
+          assert.equal(refund.status, 201, `${reason}换货退款: ${JSON.stringify(refund.body).slice(0, 300)}`);
+          assert.equal(Number((await get(`orders/${orderId}/funding-events`)).rental.balance), 0);
+        }
+      }
       const settled = await closeMockFundedOrder(orderId, token, prefix); assert.equal(settled.status, 201, `${reason}结算: ${JSON.stringify(settled.body).slice(0, 300)}`);
       assert.equal(settled.body.data.status, "completed");
       completedCases.push({ workspaceId: workspace.id, orderId, quote: frozenQuote,
-        extension: structuredClone((await get(`orders/${orderId}/extensions`)).find((row) => row.id === extension.id)) });
+        extension: structuredClone((await get(`orders/${orderId}/extensions`)).find((row) => row.id === extension.id)), exchange: exchangedFact });
       ok(`${reason}: 正式调价/领取缓冲/后单竞争单赢家/模拟补款与重放/单次费用/原快照保护/归还结算`);
     }
   }
@@ -683,6 +787,11 @@ async function verifyFourCategoryRenewals(session, customerId) {
   for (const item of completedCases) {
     const switched = await request("POST", "/api/auth/switch-workspace", { workspaceId: item.workspaceId }, token);
     assert.equal(switched.status, 201); token = switched.body.data.accessToken;
+    if (item.exchange) {
+      const changes = await request("GET", `/api/rental/v1/orders/${item.orderId}/changes`, null, token);
+      assert.equal(changes.status, 200);
+      assert.deepEqual(changes.body.data.find((row) => row.id === item.exchange.id), item.exchange);
+    }
     const order = await request("GET", `/api/rental/v1/orders/${item.orderId}`, null, token);
     assert.equal(order.status, 200); assert.equal(order.body.data.status, "completed");
     assert.equal(order.body.data.effectiveEndAt, item.extension.newEndAt);
@@ -812,12 +921,9 @@ async function main() {
   ok(`配置校验通过（测试库 ${TEST_DB}，容器 ${MYSQL_CONTAINER}，端口 ${API_PORT}）`);
 
   console.log("== 1. 准备专用测试库 ==");
-  mysqlRootExec(
-    `DROP DATABASE IF EXISTS \`${TEST_DB}\`;\n` +
-      `CREATE DATABASE \`${TEST_DB}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n` +
-      `GRANT ALL PRIVILEGES ON \`${TEST_DB}\`.* TO 'rental_os'@'%';`
-  );
-  ok(`测试库 ${TEST_DB} 已重建`);
+  cleanupOwnedDatabase = createOwnedDatabase(TEST_DB, mysqlRootExec);
+  mysqlRootExec(`GRANT ALL PRIVILEGES ON \`${TEST_DB}\`.* TO 'rental_os'@'%';`);
+  ok(`测试库 ${TEST_DB} 已新建（预检查不存在）`);
 
   console.log("== 2. 空库全量迁移与 schema drift 检查 ==");
   const migrateEnv = { DATABASE_URL: TEST_DATABASE_URL };
@@ -1126,6 +1232,10 @@ async function main() {
   if (process.env.E2E_STOP_AFTER === "four-category-renewal-api") {
     await verifyFourCategoryRenewals(demo, r1CustomerId);
     await maybeStopAfter("four-category-renewal-api");
+  }
+  if (process.env.E2E_STOP_AFTER === "four-category-exchange-api") {
+    await verifyFourCategoryRenewals(demo, r1CustomerId, { exchange: true });
+    await maybeStopAfter("four-category-exchange-api");
   }
 
   console.log("== 9. Rental Core 报价→下单→履约全链路（摄影：序列化+套装） ==");
@@ -10886,7 +10996,7 @@ async function maybeStopAfter(marker) {
       // 前缀分段按计划结束：不算失败，finally 仍会清理测试库。
       process.exitCode = 0;
     } else {
-      console.error(`\nE2E 失败: ${error.message}`);
+      console.error(`\nE2E 失败: ${error.stack || error.message}`);
       // HTTP 响应和子进程日志使用不同管道；给已到达的异常日志一个事件循环窗口，
       // 避免只打印启动日志而丢失触发 500 的真实原因。不是业务重试或吞错。
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -10900,10 +11010,10 @@ async function maybeStopAfter(marker) {
   } finally {
     await stopApi();
     try {
-      assert.match(TEST_DB, /^[a-z][a-z0-9_]{2,62}$/u);
-      assert.ok(TEST_DB.includes("e2e"));
-      mysqlRootExec(`DROP DATABASE IF EXISTS \`${TEST_DB}\`;`);
-      console.log(`清理完成：测试库 ${TEST_DB} 已删除`);
+      if (cleanupOwnedDatabase) {
+        cleanupOwnedDatabase();
+        console.log(`清理完成：本次创建的测试库 ${TEST_DB} 已删除`);
+      }
     } catch {
       console.error("警告：测试库清理失败，请手动检查");
     }
