@@ -1,0 +1,634 @@
+"use strict";
+const assert = require("node:assert/strict");
+const { randomUUID } = require("node:crypto");
+const { PrismaClient } = require("@prisma/client");
+const { RENTAL_CATEGORY_DEFINITIONS } = require("@rental-os/shared");
+const { RentalCoreConfigRepository } = require("../apps/api/dist/modules/rental-core/rental-core-config.repository.js");
+const { RentalCoreFactRepository } = require("../apps/api/dist/modules/rental-core/rental-core-fact.repository.js");
+const { WorkspaceCapabilityRepository } = require("../apps/api/dist/modules/rental-core/workspace-capability.repository.js");
+const { WorkspaceCapabilityService } = require("../apps/api/dist/modules/rental-core/workspace-capability.service.js");
+const { RentalBusinessConfigRepository } = require("../apps/api/dist/modules/rental-core/rental-business-config.repository.js");
+const { RentalBusinessFactRepository } = require("../apps/api/dist/modules/rental-core/rental-business-fact.repository.js");
+const { runWithRequestIdentity } = require("../apps/api/dist/common/request-identity.js");
+const { validateActiveCategoryWrite } = require("../apps/api/dist/modules/rental-core/category-active-write.js");
+const { writePreparedCategoryEntities } = require("../apps/api/dist/modules/rental-core/category-adoption-entity-writer.js");
+const { writePreparedCategoryAdoptionPhase } = require("../apps/api/dist/modules/rental-core/category-adoption-transaction-phase.js");
+const { writePreparedCategoryCapabilities } = require("../apps/api/dist/modules/rental-core/category-adoption-capability-writer.js");
+const { RentalServiceCapacityService } = require("../apps/api/dist/modules/rental-core/rental-service-capacity.service.js");
+const { MembershipService } = require("../apps/api/dist/modules/platform/membership.service.js");
+const { SubscriptionService } = require("../apps/api/dist/modules/subscription/subscription.service.js");
+if (!/^rental_os_e2e_/u.test(new URL(process.env.DATABASE_URL).pathname.slice(1))) throw new Error("仅允许专用 E2E 库");
+const db = new PrismaClient();
+const fixture = `catwrite_${randomUUID()}`;
+const workspaceId = fixture;
+const versionId = `${fixture}_v2`;
+const writerTargetId = `${fixture}_entity_v3`;
+const repo = new RentalCoreConfigRepository(db);
+const capabilities = new WorkspaceCapabilityRepository(db);
+const business = new RentalBusinessConfigRepository(db);
+const context = (fn) => runWithRequestIdentity({ tenantId: "tenant_001", workspaceId }, fn);
+(async () => {
+  try {
+    const baseline = await db.rentalCategoryDefinition.findUniqueOrThrow({ where: { code: "CAMERA" } });
+    const definition = structuredClone(RENTAL_CATEGORY_DEFINITIONS.find((row) => row.code === "camera"));
+    definition.businessModel.assetFields = [
+      { code: "identity", scope: "item_group", label: "型号身份", type: "string", required: true, unique: true },
+      { code: "serialNo", scope: "asset", label: "序列号", type: "string", required: true, unique: true }
+    ];
+    await db.rentalCategoryVersion.create({ data: { id: versionId, categoryCode: "CAMERA", versionLabel: fixture, sourceKind: "test", status: "published", structureVersion: 1, definition } });
+    await db.businessWorkspace.create({ data: { id: workspaceId, tenantId: "tenant_001", code: fixture, name: "并发写入专用空间", categoryCode: "CAMERA", categoryVersionId: baseline.recommendedVersionId, defaultMarker: fixture } });
+    const notification = { id: `${fixture}_notification`, tenantId: "tenant_001", eventCode: "order_confirmed", channel: "sms", name: "并发初始化模板", title: "订单通知", body: "订单已确认", variableSchema: {}, status: "enabled", version: "1.0", updatedAt: new Date().toISOString() };
+    // 两个独立仓储实例共同首次写入：依赖数据库空间锁，而不是进程内 Promise。
+    const notificationWriters = [business, new RentalBusinessConfigRepository(db)];
+    await Promise.all(Array.from({ length: 8 }, (_, index) => context(() => notificationWriters[index % 2].upsertNotificationTemplate(notification))));
+    assert.equal(await db.rentalNotificationTemplate.count({ where: { id: notification.id, tenantId: "tenant_001", workspaceId } }), 1, "并发补落模板必须全部成功且仅一条事实");
+    const otherNotificationSpace = await db.businessWorkspace.findFirstOrThrow({ where: { tenantId: "tenant_001", id: { not: workspaceId }, status: "ACTIVE" } });
+    await assert.rejects(runWithRequestIdentity({ tenantId: "tenant_001", workspaceId: otherNotificationSpace.id }, () => business.upsertNotificationTemplate({ ...notification, body: "越界覆盖" })), /其他.*空间|作用域|不属于|越权/);
+    assert.equal((await db.rentalNotificationTemplate.findUniqueOrThrow({ where: { id: notification.id } })).body, notification.body, "串空间覆盖必须拒绝并保留模板事实");
+    const oldBinding = { categoryVersionId: baseline.recommendedVersionId, adoptionRevision: 0 };
+    const input = { id: `${fixture}_g1`, tenantId: "tenant_001", categoryCode: "camera", code: "G1", name: "专项型号", inventoryMode: "serialized", unit: "件", attributes: { identity: " abc " }, status: "enabled", bundleComponents: [], createdAt: new Date().toISOString() };
+    // Deliberately minimal repository fixtures, not a claim of usable business settings.
+    const settings = { tenantId: "tenant_001", categoryCode: "camera", configVersion: "fixture", pricing: { enabledUnits: ["hour"], defaultUnit: "hour", holidayPricingEnabled: false }, calendar: { weekendDays: [0, 6], officialCalendarRegion: "CN", holidayPricingEnabled: false }, fulfillment: { enabledModes: ["store_pickup_return"] } };
+    const location = { id: `${fixture}_location`, tenantId: "tenant_001", code: "L", name: "专项地点", type: "store", operatorId: `${fixture}_operator`, status: "enabled", capabilities: ["pickup", "return"] };
+    const capability = { tenantId: "tenant_001", workspaceId, code: "camera_compatibility", status: "enabled", implementationVersion: "cam-1.0", configVersion: "v1", config: { relations: [] }, revision: 1 };
+    const capabilityAudit = { code: "camera_compatibility", action: "enable", toStatus: "enabled", reason: "仓储锁专项夹具", at: new Date().toISOString() };
+    // Hold the exact lock used by active writes, then switch while an old request is waiting.
+    let locked; const ready = new Promise((resolve) => { locked = resolve; });
+    let unlock; const release = new Promise((resolve) => { unlock = resolve; });
+    const switching = db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM business_workspaces WHERE id = ${workspaceId} FOR UPDATE`;
+      locked(); await release;
+      await tx.businessWorkspace.update({ where: { id: workspaceId }, data: { categoryVersionId: versionId, categoryAdoptionRevision: 1 } });
+    });
+    await ready;
+    const stale = context(() => repo.upsertItemGroup(input, undefined, [], oldBinding));
+    const rejected = assert.rejects(stale, /版本已变化/);
+    const staleSettings = assert.rejects(context(() => repo.upsertBusinessSettings(settings, "fixture", undefined, oldBinding)), /版本已变化/);
+    const staleLocation = assert.rejects(context(() => repo.upsertLocation(location, undefined, oldBinding)), /版本已变化/);
+    const staleCapability = assert.rejects(capabilities.saveInstance(capability, capabilityAudit, undefined, oldBinding), /版本已变化/);
+    const rule = { id: `${fixture}_rule`, tenantId: "tenant_001", categoryCode: "camera", version: "1.0", status: "draft", config: { fixture: true }, changeReason: "fixture", createdBy: "fixture", createdAt: new Date().toISOString() };
+    const ruleAudit = { id: `${fixture}_ruleaudit`, tenantId: "tenant_001", workspaceId, ruleVersionId: rule.id, version: rule.version, action: "publish", fromStatus: "draft", toStatus: "pending", reason: "fixture", at: rule.createdAt };
+    const nextRule = { ...rule, status: "pending", effectiveFrom: "2030-01-01T00:00:00Z" };
+    const price = { id: `${fixture}_price`, tenantId: "tenant_001", categoryCode: "camera", code: "P", name: "专项价格", currency: "CNY", status: "draft", version: "1.0", effectiveFrom: rule.createdAt, createdAt: rule.createdAt, rates: [{ itemGroupId: input.id, unit: "hour", amount: 10 }] };
+    const discount = { id: `${fixture}_discount`, tenantId: "tenant_001", categoryCode: "camera", code: "D", name: "专项优惠", status: "enabled", discountType: "percentage", discountValue: 10, minimumSpend: 0, appliesTo: "rental", customerScope: "all", applicableItemGroupIds: [], applicableDayTypes: [], priority: 100, stackableWithOtherPlans: false, stackableWithCoupon: true, effectiveFrom: rule.createdAt, version: "1.0", createdAt: rule.createdAt, updatedAt: rule.createdAt };
+    const service = { id: `${fixture}_service`, tenantId: "tenant_001", categoryCode: "camera", code: "S", name: "专项服务", serviceType: "other", billingUnit: "per_order", price: 10, minimumQuantity: 1, maximumQuantity: 5, termsVersion: "1.0", terms: "专项条款", applicableItemGroupIds: [], applicableFulfillmentModes: [], applicableLocationIds: [], customerScope: "all", selectionMode: "optional", requiresCapacity: false, status: "enabled", version: "1.0", createdAt: rule.createdAt, updatedAt: rule.createdAt };
+    const staleDiscount = assert.rejects(context(() => business.upsertDiscountPlan(discount, oldBinding)), /版本已变化/);
+    const staleService = assert.rejects(context(() => business.upsertService(service, oldBinding)), /版本已变化/);
+    const stalePrice = assert.rejects(context(() => business.upsertPricingPlan(price, undefined, oldBinding)), /版本已变化/);
+    const staleRule = assert.rejects(context(() => business.upsertRuleVersion(rule, oldBinding)), /版本已变化/);
+    const stalePublish = assert.rejects(context(() => business.writeRuleVersionWithAudit(nextRule, ruleAudit, [], oldBinding)), /版本已变化/);
+    unlock(); await switching; await Promise.all([rejected, staleSettings, staleLocation, staleCapability, staleRule, stalePublish, stalePrice, staleDiscount, staleService]);
+    assert.equal(await db.rentalDiscountPlan.count({ where: { workspaceId } }), 0);
+    assert.equal(await db.rentalValueAddedService.count({ where: { workspaceId } }), 0);
+    assert.equal(await db.rentalValueAddedServiceVersion.count({ where: { workspaceId } }), 0);
+    assert.equal(await db.rentalPricingPlan.count({ where: { workspaceId } }), 0);
+    assert.equal(await db.rentalItemGroup.count({ where: { workspaceId } }), 0, "旧请求不能在切换后写入");
+    assert.equal(await db.rentalTenantBusinessSettings.count({ where: { workspaceId } }), 0);
+    assert.equal(await db.rentalFulfillmentLocation.count({ where: { workspaceId } }), 0);
+    assert.equal(await db.workspaceCapabilityInstance.count({ where: { workspaceId } }), 0);
+    assert.equal(await db.workspaceCapabilityAuditEntry.count({ where: { workspaceId } }), 0);
+    assert.equal(await db.rentalRuleVersion.count({ where: { workspaceId } }), 0);
+    assert.equal(await db.rentalRuleVersionAudit.count({ where: { workspaceId } }), 0);
+    const currentBinding = { categoryVersionId: versionId, adoptionRevision: 1 };
+    // Qualification-type mutations wait on the same space lock as adoption.
+    const qualificationInput = { code: `${fixture}_license`, name: "专项资格证", status: "enabled", requiredForBooking: true };
+    let qualificationLocked, releaseQualification, qualificationAttempted;
+    const qualificationReady = new Promise((resolve) => { qualificationLocked = resolve; });
+    const qualificationRelease = new Promise((resolve) => { releaseQualification = resolve; });
+    const qualificationWriterReady = new Promise((resolve) => { qualificationAttempted = resolve; });
+    const freezeQualificationSpace = db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM business_workspaces WHERE id = ${workspaceId} FOR UPDATE`;
+      await tx.businessWorkspace.update({ where: { id: workspaceId }, data: { status: "FROZEN" } });
+      qualificationLocked(); await qualificationRelease;
+    });
+    await qualificationReady;
+    const waitingMembership = new MembershipService(new Proxy(db, { get(client, key) {
+      if (key === "$transaction") return (write, options) => client.$transaction((tx) => write(new Proxy(tx, { get(inner, method) {
+        if (method === "$queryRaw") return (sql) => { if (sql.sql.includes("business_workspaces")) qualificationAttempted(); return inner.$queryRaw(sql); };
+        return Reflect.get(inner, method);
+      } })), options);
+      return Reflect.get(client, key);
+    } }), {});
+    const waitingQualification = assert.rejects(context(() => waitingMembership.saveQualificationType("tenant_001", workspaceId, qualificationInput)), /不可用/);
+    await qualificationWriterReady; releaseQualification(); await freezeQualificationSpace; await waitingQualification;
+    assert.equal(await db.customerMembershipQualificationType.count({ where: { workspaceId } }), 0, "等待期间空间冻结不能新增证件类型");
+    await db.businessWorkspace.update({ where: { id: workspaceId }, data: { status: "ACTIVE" } });
+    const memberships = new MembershipService(db, {});
+    const qualification = await context(() => memberships.saveQualificationType("tenant_001", workspaceId, qualificationInput));
+    assert.equal(qualification.requiredForBooking, true);
+    const disabledQualification = await context(() => memberships.saveQualificationType("tenant_001", workspaceId, { ...qualificationInput, id: qualification.id, status: "disabled" }));
+    assert.equal(disabledQualification.status, "disabled");
+    await assert.rejects(context(() => memberships.saveQualificationType("tenant_002", workspaceId, { ...qualificationInput, id: qualification.id })), /不属于本租户/);
+    assert.equal((await db.customerMembershipQualificationType.findUniqueOrThrow({ where: { id: qualification.id } })).status, "disabled");
+    await context(() => business.upsertDiscountPlan(discount, currentBinding));
+    await context(() => business.upsertService(service, currentBinding));
+    await assert.rejects(context(() => business.upsertService({ ...service, version: "2.0", applicableFulfillmentModes: ["onsite_delivery"] })), /不支持/);
+    await assert.rejects(context(() => business.upsertService({ ...service, version: "2.0", selectionMode: "mandatory", mandatoryRule: { fulfillmentModes: ["onsite_delivery"] } })), /不支持/);
+    assert.equal(await db.rentalValueAddedServiceVersion.count({ where: { workspaceId } }), 1);
+    await context(() => business.upsertService({ ...service, version: "2.0", price: 20 }, currentBinding));
+    await assert.rejects(context(() => business.upsertService(service, currentBinding)), /历史版本不可覆盖/);
+    assert.equal((await db.rentalValueAddedService.findUnique({ where: { id: service.id } })).version, "2.0", "旧服务重放不得退回主档");
+    assert.equal(await db.rentalValueAddedServiceVersion.count({ where: { workspaceId } }), 2, "旧快照保留且拒绝请求不新增快照");
+    await context(() => business.upsertPricingPlan(price, undefined, currentBinding));
+    await assert.rejects(context(() => business.upsertPricingPlan({ ...price, rates: [{ itemGroupId: input.id, unit: "shift", amount: 10 }] })), /不支持/);
+    await assert.rejects(context(() => business.upsertPricingPlan({ ...price, fulfillmentFees: [{ mode: "onsite_delivery", amount: 1 }] })), /不支持/);
+    assert.equal((await db.rentalPricingPlan.findUnique({ where: { id: price.id } })).rates[0].unit, "hour", "拒绝不适用价格不能覆盖已提交费率");
+    await context(() => business.upsertRuleVersion(rule, currentBinding));
+    await context(() => business.upsertRuleVersion({ ...rule, config: { fixture: "updated" } }, currentBinding));
+    await assert.rejects(context(() => business.writeRuleVersionWithAudit(nextRule, ruleAudit, [], currentBinding)), /正文已变化/);
+    assert.equal(await db.rentalRuleVersionAudit.count({ where: { workspaceId } }), 0);
+    await context(() => business.writeRuleVersionWithAudit({ ...nextRule, config: { fixture: "updated" } }, ruleAudit, [], currentBinding));
+    await assert.rejects(context(() => business.upsertRuleVersion({ ...rule, config: {} }, currentBinding)), /不可覆盖/);
+    assert.equal((await db.rentalRuleVersion.findUnique({ where: { id: rule.id } })).status, "pending");
+    assert.equal(await db.rentalRuleVersionAudit.count({ where: { workspaceId } }), 1);
+    await capabilities.saveInstance(capability, capabilityAudit, undefined, currentBinding);
+    assert.equal(await db.workspaceCapabilityInstance.count({ where: { workspaceId } }), 1);
+    assert.equal(await db.workspaceCapabilityAuditEntry.count({ where: { workspaceId } }), 1);
+    await assert.rejects(capabilities.saveInstance({ ...capability, status: "paused", revision: 2 }, { ...capabilityAudit, action: "pause", toStatus: "paused" }, 1, oldBinding), /版本已变化/);
+    assert.equal((await db.workspaceCapabilityInstance.findFirst({ where: { workspaceId } })).status, "enabled");
+    assert.equal(await db.workspaceCapabilityAuditEntry.count({ where: { workspaceId } }), 1, "拒绝不能留下审计或状态变化");
+    await context(() => repo.upsertBusinessSettings(settings, "fixture", undefined, currentBinding));
+    await assert.rejects(context(() => repo.upsertBusinessSettings({ ...settings, pricing: { enabledUnits: ["shift"], defaultUnit: "shift" } }, "fixture")), /不支持/);
+    assert.deepEqual((await db.rentalTenantBusinessSettings.findUnique({ where: { workspaceId } })).settings.pricing.enabledUnits, ["hour"], "被拒绝的设置不能覆盖已提交事实");
+    await context(() => repo.upsertOperator({ id: location.operatorId, tenantId: "tenant_001", code: "OP", name: "专项运营方", type: "self_operated", settlementMode: "self", status: "enabled", createdAt: new Date().toISOString() }));
+    await context(() => repo.upsertLocation(location, undefined, currentBinding));
+    await assert.rejects(context(() => repo.upsertLocation({ ...location, type: "project_site" })), /不支持/);
+    assert.equal((await db.rentalFulfillmentLocation.findUnique({ where: { id: location.id } })).type, "store");
+    await assert.rejects(context(() => repo.upsertItemGroup({ ...input, attributes: {} }, undefined, [])), /不能为空/);
+    await context(() => repo.upsertItemGroup(input, undefined, []));
+    assert.equal(await db.rentalAttributeUniqueValue.count({ where: { workspaceId, entityId: input.id } }), 1, "调用方给空声明也必须按当前版本建立唯一声明");
+    const duplicate = { ...input, id: `${fixture}_g2`, code: "G2", attributes: { identity: "ＡＢＣ" } };
+    await assert.rejects(context(() => repo.upsertItemGroup(duplicate, undefined, [])), /已存在/);
+    assert.equal(await db.rentalItemGroup.count({ where: { workspaceId } }), 1);
+    await context(() => repo.upsertItemGroup({ ...input, attributes: { identity: "DEF" } }));
+    await context(() => repo.upsertItemGroup(duplicate));
+    assert.equal(await db.rentalAttributeUniqueValue.count({ where: { workspaceId } }), 2, "改值应释放旧唯一声明");
+    await assert.rejects(db.$transaction((tx) => validateActiveCategoryWrite(tx, "tenant_001", workspaceId, { id: "a", scope: "asset", attributes: {} })), /不能为空/);
+    const assetClaims = await db.$transaction((tx) => validateActiveCategoryWrite(tx, "tenant_001", workspaceId, { id: "a", scope: "asset", serialNo: " SN1 ", attributes: {} }));
+    assert.equal(assetClaims.claims[0].normalizedValue, "SN1");
+    await db.rentalItemGroup.update({ where: { id: input.id }, data: { attributes: { identity: "DEF", retiredProof: { original: true } } } });
+    await context(() => repo.upsertItemGroup({ ...input, attributes: { identity: "GHI" } }));
+    assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes, { identity: "GHI", retiredProof: { original: true } });
+    await assert.rejects(context(() => repo.upsertItemGroup({ ...input, attributes: { identity: "GHI", retiredProof: null } })), /不可修改/);
+    assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes.retiredProof, { original: true });
+    await context(() => repo.upsertItemGroup({ ...input, attributes: { identity: "GHI", __itemGroupMedia: { images: ["new"] } } }, undefined, undefined, undefined, true));
+    assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes.__itemGroupMedia, { images: ["new"] }, "受控上传写穿到库");
+    await context(() => repo.upsertItemGroup({ ...input, attributes: { identity: "GHI", __itemGroupMedia: { images: ["stale"] } } }));
+    assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes.__itemGroupMedia, { images: ["new"] }, "普通资料保存不能覆盖最新图片");
+    // Force the scope SELECT to finish before a concurrent locked upload commits.
+    // REPEATABLE READ used to preserve the pre-upload media and overwrite it.
+    let scopeRead; const scopeReady = new Promise((resolve) => { scopeRead = resolve; });
+    let uploadLocked; const uploadReady = new Promise((resolve) => { uploadLocked = resolve; });
+    let releaseUpload; const uploadRelease = new Promise((resolve) => { releaseUpload = resolve; });
+    const upload = db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM business_workspaces WHERE id = ${workspaceId} FOR UPDATE`;
+      uploadLocked(); await uploadRelease;
+      const latest = await tx.rentalItemGroup.findUniqueOrThrow({ where: { id: input.id } });
+      await tx.rentalItemGroup.update({ where: { id: input.id }, data: { attributes: { ...latest.attributes, __itemGroupMedia: { images: ["concurrent-upload"] } } } });
+    });
+    await uploadReady;
+    const observed = new RentalCoreConfigRepository({
+      $transaction: (write, options) => db.$transaction((tx) => write(new Proxy(tx, {
+        get(target, key) {
+          if (key === "businessWorkspace") return { ...target.businessWorkspace, findFirst: async (args) => { const row = await target.businessWorkspace.findFirst(args); scopeRead(); return row; } };
+          return Reflect.get(target, key);
+        }
+      })), options)
+    });
+    const editing = context(() => observed.upsertItemGroup({ ...input, attributes: { identity: "JKL" } }));
+    await scopeReady; releaseUpload(); await upload; await editing;
+    assert.deepEqual((await db.rentalItemGroup.findUnique({ where: { id: input.id } })).attributes.__itemGroupMedia, { images: ["concurrent-upload"] }, "锁前范围读取不能使锁后资料仍来自旧快照");
+    const facts = new RentalCoreFactRepository(db);
+    const asset = { id: `${fixture}_asset`, tenantId: "tenant_001", itemGroupId: input.id, assetNo: "A1", serialNo: "SN1", locationId: location.id, status: "available", attributes: {}, createdAt: rule.createdAt };
+    await context(() => facts.upsertAsset(asset, [], undefined, currentBinding));
+    assert.equal(await db.rentalAttributeUniqueValue.count({ where: { workspaceId, entityType: "asset", entityId: asset.id } }), 1);
+    await assert.rejects(context(() => facts.upsertAsset({ ...asset, id: `${fixture}_duplicate_asset`, assetNo: "A2" })), /已存在/);
+    assert.equal(await db.rentalAsset.count({ where: { workspaceId } }), 1, "资产唯一声明冲突必须回滚资产和历史");
+    let assetScopeRead; const assetScopeReady = new Promise((resolve) => { assetScopeRead = resolve; });
+    let assetLocked; const assetReady = new Promise((resolve) => { assetLocked = resolve; });
+    let releaseAsset; const assetRelease = new Promise((resolve) => { releaseAsset = resolve; });
+    const assetUpdate = db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM business_workspaces WHERE id = ${workspaceId} FOR UPDATE`;
+      assetLocked(); await assetRelease;
+      await tx.rentalAsset.update({ where: { id: asset.id }, data: { attributes: { retiredProof: { evidence: "latest" } } } });
+    });
+    await assetReady;
+    const observedFacts = new RentalCoreFactRepository({
+      $transaction: (write, options) => {
+        assert.equal(options?.isolationLevel, "ReadCommitted", "资产自建事务必须避免锁前旧快照");
+        return db.$transaction((tx) => write(new Proxy(tx, {
+          get(target, key) {
+            if (key === "businessWorkspace") return { ...target.businessWorkspace, findFirst: async (args) => { const row = await target.businessWorkspace.findFirst(args); assetScopeRead(); return row; } };
+            return Reflect.get(target, key);
+          }
+        })), options);
+      }
+    });
+    const assetEditing = context(() => observedFacts.upsertAsset(asset, [], undefined, currentBinding));
+    await assetScopeReady; releaseAsset(); await assetUpdate; await assetEditing;
+    assert.deepEqual((await db.rentalAsset.findUniqueOrThrow({ where: { id: asset.id } })).attributes.retiredProof, { evidence: "latest" }, "资产资料编辑必须保留锁后最新的退役字段证据");
+    await assert.rejects(context(() => facts.upsertAsset({ ...asset, attributes: { retiredProof: null } })), /不可修改/);
+    assert.equal(await db.rentalAttributeUniqueValue.count({ where: { workspaceId, entityType: "asset", entityId: asset.id } }), 1, "被拒绝的编辑不得删除原唯一声明");
+    const coupon = { id: `${fixture}_coupon`, tenantId: "tenant_001", code: "C", name: "专项券", discountType: "amount", discountValue: 10, minimumSpend: 0, appliesTo: "rental", stackableWithDiscountPlans: true, totalQuota: 10, claimedQuantity: 0, perCustomerLimit: 2, perCustomerUseLimit: 1, totalBudget: 100, lockedBudget: 0, redeemedBudget: 0, claimFrom: "2020-01-01T00:00:00Z", claimTo: "2126-01-01T00:00:00Z", effectiveFrom: "2020-01-01T00:00:00Z", effectiveTo: "2126-01-01T00:00:00Z", applicableItemGroupIds: [input.id], status: "active", version: "1.0", createdAt: rule.createdAt };
+    await assert.rejects(context(() => repo.upsertCouponTemplate(coupon, undefined, oldBinding)), /版本已变化/);
+    assert.equal(await db.rentalCouponTemplate.count({ where: { workspaceId } }), 0);
+    await context(() => repo.upsertCouponTemplate(coupon, undefined, currentBinding));
+    await db.rentalCouponTemplate.update({ where: { id: coupon.id }, data: { claimedQuantity: 2, lockedBudget: 15, redeemedBudget: 5 } });
+    await assert.rejects(context(() => repo.upsertCouponTemplate({ ...coupon, version: "2.0" }, undefined, currentBinding)), /配额或预算已变化/);
+    const freshCoupon = { ...coupon, claimedQuantity: 2, lockedBudget: 15, redeemedBudget: 5, version: "2.0" };
+    await assert.rejects(context(() => repo.upsertCouponTemplate({ ...freshCoupon, totalQuota: 1 }, undefined, currentBinding)), /发行量/);
+    await assert.rejects(context(() => repo.upsertCouponTemplate({ ...freshCoupon, totalBudget: 19 }, undefined, currentBinding)), /总预算/);
+    await context(() => repo.upsertCouponTemplate(freshCoupon, undefined, currentBinding));
+    await assert.rejects(context(() => repo.upsertCouponTemplate(freshCoupon, undefined, currentBinding)), /其他人员修改/);
+    // Establish an outer RR snapshot, then commit a newer claim from another connection.
+    await db.$transaction(async (tx) => {
+      assert.equal((await tx.rentalCouponTemplate.findUniqueOrThrow({ where: { id: coupon.id } })).claimedQuantity, 2);
+      await db.rentalCouponTemplate.update({ where: { id: coupon.id }, data: { claimedQuantity: 3 } });
+      const lockedCoupon = await context(() => repo.lockCouponTemplateForClaim("tenant_001", coupon.id, tx));
+      assert.equal(lockedCoupon.claimedQuantity, 3, "锁定读必须返回最新配额而不是外层旧快照");
+      assert.deepEqual(lockedCoupon.applicableItemGroupIds, [input.id]);
+      assert.equal(lockedCoupon.stackableWithDiscountPlans, true);
+      await context(() => repo.upsertCouponTemplate({ ...lockedCoupon, claimedQuantity: 4 }, tx));
+    });
+    const storedCoupon = await db.rentalCouponTemplate.findUniqueOrThrow({ where: { id: coupon.id } });
+    assert.equal(storedCoupon.claimedQuantity, 4);
+    assert.equal(Number(storedCoupon.lockedBudget), 15);
+    assert.equal(Number(storedCoupon.redeemedBudget), 5);
+    assert.equal(storedCoupon.version, "2.0", "陈旧保存不得覆盖主档版本");
+    const businessFacts = new RentalBusinessFactRepository(db);
+    const claimCustomer = `${fixture}_claim_customer`;
+    await context(() => db.$transaction(async (tx) => {
+      assert.equal(await businessFacts.countCustomerCoupons("tenant_001", coupon.id, claimCustomer, tx), 0);
+      await db.rentalCustomerCoupon.create({ data: {
+        id: `${fixture}_customer_coupon`, tenantId: "tenant_001", workspaceId, customerId: claimCustomer,
+        templateId: coupon.id, templateCode: coupon.code, templateName: coupon.name, templateVersion: "2.0",
+        discountType: "amount", discountValue: 10, minimumSpend: 0, applicableItemGroupIds: [input.id],
+        grantReason: "fixture", status: "claimed", effectiveFrom: new Date(coupon.effectiveFrom), effectiveTo: new Date(coupon.effectiveTo)
+      } });
+      await repo.lockCouponTemplateForClaim("tenant_001", coupon.id, tx);
+      assert.equal(await businessFacts.countCustomerCoupons("tenant_001", coupon.id, claimCustomer, tx), 1, "RC 事务必须看到锁前并发提交的客户领券事实");
+    }, { isolationLevel: "ReadCommitted" }));
+    assert.equal((await repo.listCouponTemplates("tenant_001", workspaceId))[0].claimedQuantity, 4);
+    assert.deepEqual(await repo.listCouponTemplates("tenant_002", workspaceId), [], "定向配置读取不能跨租户空间");
+    const calendar = { tenantId: "tenant_001", year: 2030, version: "1.0", region: "CN", status: "draft", days: [], revision: 1 };
+    const calendarAudit = { date: "2030-01-01", action: "override", reason: "calendar fixture", at: new Date().toISOString() };
+    await context(() => business.upsertCalendar(calendar));
+    const writes = await Promise.allSettled([
+      context(() => business.upsertCalendar({ ...calendar, revision: 2 }, 1, [calendarAudit])),
+      context(() => business.upsertCalendar({ ...calendar, revision: 2 }, 1, [calendarAudit]))
+    ]);
+    assert.equal(writes.filter((row) => row.status === "fulfilled").length, 1, "同年度旧修订竞争只能有一条成功");
+    assert.equal(await db.rentalCalendarOverrideAuditEntry.count({ where: { workspaceId } }), 1, "竞争失败不留覆盖审计");
+    const nextCalendar = { ...calendar, version: "2.0", revision: 1 };
+    await context(() => business.upsertCalendar(nextCalendar));
+    await assert.rejects(context(() => business.publishCalendarVersion(
+      { ...nextCalendar, status: "published", revision: 2 },
+      { ...calendar, status: "superseded", revision: 3 },
+      { next: 1, superseded: 1 }
+    )), /其他人修改/);
+    assert.equal((await db.rentalBusinessCalendar.findUnique({ where: { workspaceId_year_version: { workspaceId, year: 2030, version: "2.0" } } })).status, "draft", "第二行修订冲突必须回滚已写第一行");
+    await context(() => business.publishCalendarVersion(
+      { ...nextCalendar, status: "published", revision: 2 },
+      { ...calendar, status: "superseded", revision: 3 },
+      { next: 1, superseded: 2 }
+    ));
+    assert.equal(await db.rentalBusinessCalendar.count({ where: { workspaceId, status: "published" } }), 1);
+    await assert.rejects(context(() => business.upsertCalendar({ ...nextCalendar, revision: 3 }, 2, [{ ...calendarAudit, year: 2031 }])), /本次写入/);
+    assert.equal(await db.rentalCalendarOverrideAuditEntry.count({ where: { workspaceId } }), 1);
+    // Capacity configuration shares adoption's space mutex even for new rows.
+    await db.rentalValueAddedService.update({ where: { id: service.id }, data: { requiresCapacity: true } });
+    const capacityService = new RentalServiceCapacityService(db);
+    const capacityInput = { serviceId: service.id, locationId: location.id, windowStart: "2098-01-01T00:00:00Z", windowEnd: "2098-01-01T03:00:00Z", totalCapacity: 5, status: "enabled" };
+    const capacityCompetition = await Promise.allSettled([
+      context(() => capacityService.saveCapacity("tenant_001", capacityInput)),
+      context(() => capacityService.saveCapacity("tenant_001", { ...capacityInput, windowStart: "2098-01-01T01:00:00Z", windowEnd: "2098-01-01T04:00:00Z" }))
+    ]);
+    assert.equal(capacityCompetition.filter((row) => row.status === "fulfilled").length, 1, "无现存行的重叠窗口竞争只允许一个成功");
+    assert.match(capacityCompetition.find((row) => row.status === "rejected").reason.message, /不能重叠/);
+    const savedCapacity = capacityCompetition.find((row) => row.status === "fulfilled").value;
+    let capacityLocked, releaseCapacity, editorAttempted;
+    const capacityReady = new Promise((resolve) => { capacityLocked = resolve; });
+    const capacityRelease = new Promise((resolve) => { releaseCapacity = resolve; });
+    const editorReady = new Promise((resolve) => { editorAttempted = resolve; });
+    const counterCommit = db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM rental_service_capacities WHERE id = ${savedCapacity.id} FOR UPDATE`;
+      await tx.rentalServiceCapacity.update({ where: { id: savedCapacity.id }, data: { reservedQuantity: 3 } });
+      capacityLocked(); await capacityRelease;
+    });
+    await capacityReady;
+    const waitingCapacityService = new RentalServiceCapacityService(new Proxy(db, { get(client, key) {
+      if (key === "$transaction") return (write, options) => client.$transaction((tx) => write(new Proxy(tx, { get(inner, method) {
+        if (method === "$queryRaw") return (sql) => { if (sql.sql.includes("rental_service_capacities")) editorAttempted(); return inner.$queryRaw(sql); };
+        return Reflect.get(inner, method);
+      } })), options);
+      return Reflect.get(client, key);
+    } }));
+    const waitingEdit = assert.rejects(context(() => waitingCapacityService.saveCapacity("tenant_001", {
+      ...capacityInput, id: savedCapacity.id, windowStart: savedCapacity.windowStart, windowEnd: savedCapacity.windowEnd, totalCapacity: 2
+    })), /已预留与已确认/);
+    await editorReady; releaseCapacity(); await counterCommit; await waitingEdit;
+    const capacityAfter = await db.rentalServiceCapacity.findUniqueOrThrow({ where: { id: savedCapacity.id } });
+    assert.equal(capacityAfter.totalCapacity, 5, "不能用旧预留计数降低总容量");
+    assert.equal(capacityAfter.reservedQuantity, 3, "拒绝编辑不丢失并发提交的预留计数");
+    await assert.rejects(context(() => capacityService.saveCapacity("tenant_002", capacityInput)), /不属于目标租户/);
+    // Read a usable window, then move it through the real editor before the
+    // conditional reservation write. No order FK is reached on this rejection.
+    await db.rentalServiceCapacity.update({ where: { id: savedCapacity.id }, data: { reservedQuantity: 0 } });
+    let staleCapacityRead, resumeCapacityReservation;
+    const staleCapacityReady = new Promise((resolve) => { staleCapacityRead = resolve; });
+    const capacityReservationRelease = new Promise((resolve) => { resumeCapacityReservation = resolve; });
+    const staleCapacityReservation = assert.rejects(context(() => db.$transaction((tx) => capacityService.reserveForOrder("tenant_001", {
+      id: `${fixture}_not_persisted_order`, reservations: [], serviceSnapshots: [{ serviceId: service.id, serviceName: service.name,
+        requiresCapacity: true, capacityQuantity: 1, serviceLocationId: location.id,
+        scheduledStartAt: new Date(Date.parse(savedCapacity.windowStart) + 900000).toISOString(),
+        scheduledEndAt: new Date(Date.parse(savedCapacity.windowStart) + 1800000).toISOString() }]
+    }, `${fixture}_stale_capacity`, new Proxy(tx, { get(client, key) {
+      if (key === "rentalServiceCapacity") return new Proxy(client[key], { get(model, method) {
+        if (method === "findFirst") return async (args) => { const row = await model.findFirst(args); assert.equal(row.id, savedCapacity.id); staleCapacityRead(); await capacityReservationRelease; return row; };
+        return Reflect.get(model, method);
+      } });
+      return Reflect.get(client, key);
+    } })), { isolationLevel: "ReadCommitted", timeout: 10000 })), /容量已被其他订单占用/);
+    await staleCapacityReady;
+    const movedCapacity = await context(() => capacityService.saveCapacity("tenant_001", {
+      ...capacityInput, id: savedCapacity.id, windowStart: "2099-01-01T00:00:00Z", windowEnd: "2099-01-01T03:00:00Z"
+    }));
+    resumeCapacityReservation(); await staleCapacityReservation;
+    assert.equal((await db.rentalServiceCapacity.findUniqueOrThrow({ where: { id: savedCapacity.id } })).reservedQuantity, 0, "窗口改期后陈旧预留不能扣容量");
+    assert.equal(await db.rentalServiceReservation.count({ where: { workspaceId } }), 0, "陈旧预留不可登记流水");
+    assert.equal(movedCapacity.windowStart, "2099-01-01T00:00:00.000Z");
+    // Internal entity phase: no public adopt endpoint or complete compatibility claim.
+    const targetDefinition = structuredClone(definition);
+    targetDefinition.requiredCapabilities = [...new Set([...targetDefinition.requiredCapabilities, "camera_kit_handover"])];
+    targetDefinition.businessModel.assetFields = [
+      ...targetDefinition.businessModel.assetFields.map((field) => ({ ...field, unique: false })),
+      { code: "adoptionProof", scope: "item_group", label: "型号采用资料", type: "string", required: true, unique: true },
+      { code: "adoptionProof", scope: "asset", label: "资产采用资料", type: "string", required: true, unique: true }
+    ];
+    await db.rentalCategoryVersion.create({ data: { id: writerTargetId, categoryCode: "CAMERA", versionLabel: writerTargetId, sourceKind: "test", status: "published", structureVersion: 1, definition: targetDefinition } });
+    const readEntityFacts = async () => JSON.stringify(await Promise.all([
+      db.rentalItemGroup.findMany({ where: { workspaceId }, orderBy: { id: "asc" } }),
+      db.rentalAsset.findMany({ where: { workspaceId }, orderBy: { id: "asc" } }),
+      db.rentalAttributeUniqueValue.findMany({ where: { workspaceId }, orderBy: { id: "asc" } }),
+      db.businessWorkspace.findUniqueOrThrow({ where: { id: workspaceId } }),
+      db.workspaceCapabilityInstance.findMany({ where: { workspaceId }, orderBy: { code: "asc" } }),
+      db.workspaceCapabilityAuditEntry.findMany({ where: { workspaceId }, orderBy: { id: "asc" } }),
+      db.rentalCategoryAdoptionAudit.findMany({ where: { workspaceId }, orderBy: { id: "asc" } })
+    ]));
+    const entityGroups = await db.rentalItemGroup.findMany({ where: { workspaceId }, orderBy: { id: "asc" } });
+    const entityAssets = await db.rentalAsset.findMany({ where: { workspaceId }, orderBy: { id: "asc" } });
+    const entityPatches = [
+      ...entityGroups.map((row, i) => ({ entityType: "item_group", entityId: row.id, expectedUpdatedAt: row.updatedAt.toISOString(), values: { adoptionProof: `proof-${i}` } })),
+      ...entityAssets.map((row, i) => ({ entityType: "asset", entityId: row.id, expectedUpdatedAt: row.updatedAt.toISOString(), values: { adoptionProof: `proof-${i}` } }))
+    ];
+    const entityBefore = await readEntityFacts();
+    const writeEntities = (tx, patches = entityPatches) => writePreparedCategoryEntities(tx, "tenant_001", workspaceId, currentBinding, targetDefinition, patches);
+    const rc = { isolationLevel: "ReadCommitted" };
+    await assert.rejects(db.$transaction((tx) => writePreparedCategoryEntities(tx, "tenant_001", workspaceId, oldBinding, targetDefinition, entityPatches), rc), /版本已变化/);
+    await assert.rejects(db.$transaction((tx) => writeEntities(tx, entityPatches.map((patch) => ({ ...patch, values: { adoptionProof: "duplicate" } }))), rc), /已存在/);
+    let entityClaimWrites = 0;
+    await assert.rejects(db.$transaction((tx) => writeEntities(new Proxy(tx, { get(client, key) {
+      if (key === "rentalAttributeUniqueValue") return new Proxy(client[key], { get(model, method) {
+        if (method === "create") return (args) => { if (++entityClaimWrites === 2) throw new Error("entity-claim-failure"); return model.create(args); };
+        return Reflect.get(model, method);
+      } });
+      return Reflect.get(client, key);
+    } })), rc), /entity-claim-failure/);
+    assert.equal(entityClaimWrites, 2, "失败应发生在删除旧声明并写入第一条新声明之后");
+    assert.equal(await readEntityFacts(), entityBefore, "实体补丁、旧声明、绑定和审计须随外层事务失败全部保持");
+    // A newly created record must participate even if absent from saved patches.
+    const newGroup = { ...entityGroups[0], id: `${fixture}_after_preparation`, code: "AFTER", attributes: { identity: "new-record" } };
+    await db.rentalItemGroup.create({ data: newGroup });
+    await assert.rejects(db.$transaction((tx) => writeEntities(tx), rc), /不能为空/);
+    await db.rentalItemGroup.delete({ where: { id: newGroup.id } });
+    await db.rentalItemGroup.update({ where: { id: entityGroups[0].id }, data: { updatedAt: new Date(entityGroups[0].updatedAt.getTime() + 1000) } });
+    await assert.rejects(db.$transaction((tx) => writeEntities(tx), rc), /来源实体已修改/);
+    const freshPatches = entityPatches.map((patch) => patch.entityId === entityGroups[0].id ? { ...patch, expectedUpdatedAt: new Date(entityGroups[0].updatedAt.getTime() + 1000).toISOString() } : patch);
+    await db.rentalCategoryVersionPolicy.create({ data: { versionId: writerTargetId, upgradeScope: "none", restoreScope: "none" } });
+    const preparation = await db.rentalCategoryAdoptionPreparation.create({ data: {
+      tenantId: "tenant_001", workspaceId, targetVersionId: writerTargetId, sourceRevision: currentBinding.adoptionRevision,
+      revision: 1, createdBy: "entity-phase-fixture", patches: { sourceVersionId: currentBinding.categoryVersionId,
+        operation: "upgrade", reason: "内部事务组件真库验证，不代表完整采用接口", items: freshPatches,
+        capabilityPatches: [{ code: "camera_compatibility", expectedRevision: 1, expectedImplementationVersion: "cam-1.0", config: { relations: [], powerMarginPercent: 25 } },
+          { code: "camera_kit_handover", intent: "enable_new", expectedRevision: 0, expectedImplementationVersion: "cam-kit-1.0", config: {} }] }
+    } });
+    const phaseInput = { tenantId: "tenant_001", workspaceId, targetVersionId: writerTargetId, expected: currentBinding,
+      expectedPreparationRevision: 1, operation: "upgrade", actorId: "entity-phase-fixture" };
+    const capabilityRuntime = { capabilities: new WorkspaceCapabilityService({}), registeredVersions: ["camera_compatibility@cam-1.0", "camera_kit_handover@cam-kit-1.0"] };
+    const subscriptions = new SubscriptionService(db);
+    const applyPhase = (overrides = {}, decorate = (tx) => tx, runtime = capabilityRuntime, commercial = subscriptions) => db.$transaction((tx) => writePreparedCategoryAdoptionPhase(decorate(tx), { ...phaseInput, ...overrides }, runtime, commercial), { ...rc, timeout: 20000 });
+    // Earlier repository probes intentionally used unreadable rule JSON. The
+    // write phase now checks scoped business facts too; provide a compatible
+    // executable projection rather than bypassing that check in the writer.
+    const compatibleRule = {
+      pricing: {}, payment: { timing: "order", unpaidHoldMinutes: 15, preauthorizationRequired: false, depositMode: "none" },
+      overdue: { feeMode: "none", graceMinutes: 0, feeMultiplier: 0 },
+      fulfillment: { pickupInspectionRequired: false, returnInspectionRequired: false, evidenceRequired: false, allowDifferentReturnLocation: false },
+      cancellation: { freeBeforeHours: 24, lateFeeType: "none", lateFeeValue: 0, weatherExceptionEnabled: false },
+      qualification: { required: false, documentTypes: [], minimumValidityDays: 0 }, damage: { manualReviewRequired: true }
+    };
+    await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: compatibleRule } });
+    const phaseBefore = await readEntityFacts();
+    await assert.rejects(applyPhase(), /采用范围/);
+    await db.rentalCategoryVersionPolicy.update({ where: { versionId: writerTargetId }, data: { upgradeScope: "pilot", upgradeTenantIds: ["tenant_002"] } });
+    await assert.rejects(applyPhase(), /采用范围/);
+    await db.rentalCategoryVersionPolicy.update({ where: { versionId: writerTargetId }, data: { upgradeScope: "all" } });
+    await assert.rejects(applyPhase({ tenantId: "tenant_002" }), /经营空间不存在/);
+    await assert.rejects(applyPhase({ operation: "restore" }), /采用范围/);
+    await db.rentalCategoryVersionPolicy.update({ where: { versionId: writerTargetId }, data: { restoreScope: "all" } });
+    await assert.rejects(applyPhase({ operation: "restore" }), /预备资料/);
+    await assert.rejects(applyPhase({ expectedPreparationRevision: 2 }), /预备资料/);
+    await assert.rejects(applyPhase({ expected: oldBinding }), /版本已变化/);
+    await assert.rejects(applyPhase({ actorId: " " }), /操作人/);
+    assert.equal(await readEntityFacts(), phaseBefore, "资格及修订拒绝不得改动活动资料或绑定");
+    await assert.rejects(applyPhase({}, (tx) => tx, capabilityRuntime, null), /可信商业授权/);
+    let finalCommercialReads = 0;
+    await assert.rejects(applyPhase({}, (tx) => tx, capabilityRuntime, {
+      lockCategoryCommercialContext: (...args) => subscriptions.lockCategoryCommercialContext(...args),
+      readCategoryCommercialContext: async (tenantId, tx, now, codes) => {
+        finalCommercialReads++;
+        assert.equal(tenantId, "tenant_001"); assert.ok(now instanceof Date); assert.deepEqual(codes, []);
+        return { newBusinessAllowed: false, entitlements: [] };
+      }
+    }), /订阅已到期/);
+    assert.equal(finalCommercialReads, 1, "写入前须重新按最终时点读取权益，不复用锁前快照");
+    await assert.rejects(applyPhase({}, (tx) => tx, capabilityRuntime, { lockCategoryCommercialContext: async () => ({ newBusinessAllowed: true, entitlements: [], lockedFeatureCodes: ["foreign_dependency"] }) }), /商业依赖/);
+    assert.equal(await readEntityFacts(), phaseBefore, "商业拒绝不能留下实体、配置、绑定或审计写入");
+    await db.rentalFulfillmentLocation.update({ where: { id: location.id }, data: { operatorId: null } });
+    await assert.rejects(applyPhase(), /所属运营方不存在/);
+    assert.equal(await readEntityFacts(), phaseBefore, "履约引用拒绝必须回滚候选资料、能力、绑定与审计");
+    assert.equal((await db.rentalFulfillmentLocation.findUniqueOrThrow({ where: { id: location.id } })).operatorId, null, "拒绝不偷偷修复存量地点");
+    await db.rentalFulfillmentLocation.update({ where: { id: location.id }, data: { operatorId: location.operatorId, capabilities: ["unknown"] } });
+    await assert.rejects(applyPhase(), /有效的取还/);
+    assert.equal(await readEntityFacts(), phaseBefore);
+    await db.rentalFulfillmentLocation.update({ where: { id: location.id }, data: { capabilities: location.capabilities } });
+    // 准备之后新增的空套装也必须参与本事务最终图校验，不能只信准备清单。
+    const invalidBundleId = `${fixture}_invalid_bundle`;
+    await db.rentalItemGroup.create({ data: { id: invalidBundleId, tenantId: "tenant_001", workspaceId,
+      categoryCode: "CAMERA", code: "INVALID-BUNDLE", name: "空组成候选", inventoryMode: "BUNDLE",
+      unit: "套", attributes: {}, status: "enabled" } });
+    const bundleBefore = await readEntityFacts();
+    await assert.rejects(applyPhase(), /启用套装缺少组成/);
+    assert.equal(await readEntityFacts(), bundleBefore, "空套装拒绝必须回滚补丁、唯一声明、能力配置、绑定与审计");
+    await db.rentalBundleComponent.create({ data: { bundleItemGroupId: invalidBundleId,
+      componentItemGroupId: entityGroups[0].id, quantity: 1, optional: true, substitutionGroup: "NO-DEFAULT" } });
+    await assert.rejects(applyPhase(), /替代组缺少唯一默认项/);
+    assert.equal(await readEntityFacts(), bundleBefore, "替代组拒绝不得改写候选实体及其他经营事实");
+    assert.equal(await db.rentalBundleComponent.count({ where: { bundleItemGroupId: invalidBundleId } }), 1, "拒绝不得删除候选组成");
+    assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation, "拒绝须保留准备输入");
+    await db.rentalBundleComponent.deleteMany({ where: { bundleItemGroupId: invalidBundleId } });
+    await db.rentalItemGroup.delete({ where: { id: invalidBundleId } });
+    assert.equal(await readEntityFacts(), phaseBefore);
+    await assert.rejects(applyPhase({}, (tx) => tx, null), /可信能力执行器/);
+    await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: { fixture: true } } });
+    let candidateEntityWrites = 0;
+    await assert.rejects(applyPhase({}, (tx) => new Proxy(tx, { get(client, key) {
+      if (key === "rentalItemGroup") return new Proxy(client[key], { get(model, method) {
+        if (method === "updateMany") return (args) => { candidateEntityWrites++; return model.updateMany(args); };
+        return Reflect.get(model, method);
+      } });
+      return Reflect.get(client, key);
+    } })), /规则结构不可读取/);
+    assert.ok(candidateEntityWrites > 0, "阻碍必须在本事务候选资料写入后复核，不采用旧预览");
+    assert.equal(await readEntityFacts(), phaseBefore, "经营组合拒绝回滚实体、唯一声明、能力配置及配置审计");
+    assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation, "经营组合拒绝保留准备输入");
+    await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: compatibleRule } });
+    await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: { ...compatibleRule, overdue: { ...compatibleRule.overdue, feeMode: "hourly_to_daily", hourlyRatePercent: 0, dailyAfterHours: 8 } } } });
+    await assert.rejects(applyPhase(), /逾时每小时日价比例/);
+    assert.equal(await readEntityFacts(), phaseBefore, "逾时参数无效必须回滚候选资料、配置审计和版本绑定");
+    assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation, "参数阻碍不得清空准备资料");
+    await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: compatibleRule } });
+    await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: { ...compatibleRule, tax: { rate: 2, inclusive: true } } } });
+    await assert.rejects(applyPhase(), /tax.rate/);
+    assert.equal(await readEntityFacts(), phaseBefore, "规则契约拒绝回滚资料、配置、绑定及审计");
+    assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation);
+    await db.rentalRuleVersion.updateMany({ where: { workspaceId }, data: { config: compatibleRule } });
+    await assert.rejects(applyPhase({}, (tx) => new Proxy(tx, { get(client, key) {
+      if (key === "rentalPriceVersion") return new Proxy(client[key], { get(model, method) {
+        if (method === "findMany") return async () => { throw new Error("business-compatibility-read-failure"); };
+        return Reflect.get(model, method);
+      } });
+      return Reflect.get(client, key);
+    } })), /business-compatibility-read-failure/);
+    assert.equal(await readEntityFacts(), phaseBefore, "经营读取失败不能伪装成兼容，全部候选写入与配置审计回滚");
+    const candidatePrice = await db.rentalPriceVersion.create({ data: { tenantId: "tenant_001", workspaceId, sequence: 1, effectiveFrom: new Date("2026-01-01"), changeReason: "采用费率结构回滚专项", createdBy: "fixture", rates: [{ itemGroupId: input.id, unit: "hour", baseAmount: -1, weekendMultiplier: 1, holidayMultiplier: 1, depositAmount: 0, minimumUnits: 1 }] } });
+    await assert.rejects(applyPhase(), /费率字段不符合定价输入契约/);
+    assert.equal(await readEntityFacts(), phaseBefore, "非法当前费率回滚候选实体、能力、绑定和审计");
+    assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation);
+    await db.rentalPriceVersion.delete({ where: { id: candidatePrice.id } });
+    const settingsBefore = await db.rentalTenantBusinessSettings.findUniqueOrThrow({ where: { workspaceId } });
+    await db.rentalTenantBusinessSettings.update({ where: { workspaceId }, data: { settings: { ...settingsBefore.settings, calendar: { ...settingsBefore.settings.calendar, timeZone: "Invalid/Zone" } } } });
+    await assert.rejects(applyPhase(), /经营日历时区不可执行/);
+    assert.equal(await readEntityFacts(), phaseBefore, "无效经营时区拒绝后全部候选写入回滚");
+    assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation);
+    await db.rentalTenantBusinessSettings.update({ where: { workspaceId }, data: { settings: settingsBefore.settings, updatedAt: settingsBefore.updatedAt } });
+    const staleCapabilityBefore = await db.workspaceCapabilityInstance.findFirstOrThrow({ where: { workspaceId, code: "camera_compatibility" } });
+    await db.workspaceCapabilityInstance.updateMany({ where: { workspaceId }, data: { revision: 2 } });
+    await assert.rejects(applyPhase(), /已变化/);
+    await db.workspaceCapabilityInstance.updateMany({ where: { workspaceId }, data: { revision: 1, updatedAt: staleCapabilityBefore.updatedAt } });
+    assert.equal(await readEntityFacts(), phaseBefore, "能力来源过期不得留下实体写入");
+    await assert.rejects(applyPhase({}, (tx) => new Proxy(tx, { get(client, key) {
+      if (key === "workspaceCapabilityAuditEntry") return new Proxy(client[key], { get(model, method) {
+        if (method === "create") return async () => { throw new Error("capability-audit-failure"); };
+        return Reflect.get(model, method);
+      } });
+      return Reflect.get(client, key);
+    } })), /capability-audit-failure/);
+    assert.equal(await readEntityFacts(), phaseBefore, "能力审计失败回滚配置、实体和绑定");
+    let newEnableAuditAttempts = 0;
+    await assert.rejects(applyPhase({}, (tx) => new Proxy(tx, { get(client, key) {
+      if (key === "workspaceCapabilityAuditEntry") return new Proxy(client[key], { get(model, method) {
+        if (method === "create") return async (args) => {
+          if (args.data.action === "enable" && args.data.code === "camera_kit_handover") {
+            ++newEnableAuditAttempts;
+            assert.equal(await tx.workspaceCapabilityInstance.count({ where: { workspaceId, code: "camera_kit_handover", status: "enabled" } }), 1);
+            throw new Error("new-required-capability-audit-failure");
+          }
+          return model.create(args);
+        };
+        return Reflect.get(model, method);
+      } });
+      return Reflect.get(client, key);
+    } })), /new-required-capability-audit-failure/);
+    assert.equal(newEnableAuditAttempts, 1);
+    assert.equal(await readEntityFacts(), phaseBefore, "新能力已创建后的审计失败须回滚全部候选配置、实体和绑定");
+    await assert.rejects(applyPhase({}, (tx) => new Proxy(tx, { get(client, key) {
+      if (key === "workspaceCapabilityInstance") return new Proxy(client[key], { get(model, method) {
+        if (method === "updateMany") return async () => ({ count: 0 });
+        return Reflect.get(model, method);
+      } });
+      return Reflect.get(client, key);
+    } })), /来源已变化/);
+    assert.equal(await readEntityFacts(), phaseBefore, "能力CAS拒绝回滚实体写入且不留审计");
+    let phaseAuditAttempts = 0;
+    await assert.rejects(applyPhase({}, (tx) => new Proxy(tx, { get(client, key) {
+      if (key === "rentalCategoryAdoptionAudit") return new Proxy(client[key], { get(model, method) {
+        if (method === "create") return async () => {
+          ++phaseAuditAttempts;
+          assert.equal((await tx.businessWorkspace.findUniqueOrThrow({ where: { id: workspaceId } })).categoryVersionId, writerTargetId);
+          throw new Error("adoption-audit-failure");
+        };
+        return Reflect.get(model, method);
+      } });
+      return Reflect.get(client, key);
+    } })), /adoption-audit-failure/);
+    assert.equal(phaseAuditAttempts, 1, "在实体和绑定写入后注入审计失败");
+    assert.equal(await readEntityFacts(), phaseBefore, "审计失败必须连同实体补丁、唯一声明及绑定全部回滚");
+    assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation, "失败保留预备资料");
+    const phaseCompetition = await Promise.allSettled([applyPhase(), applyPhase()]);
+    assert.equal(phaseCompetition.filter((row) => row.status === "fulfilled").length, 1, "同来源修订只能成功一次");
+    assert.match(phaseCompetition.find((row) => row.status === "rejected").reason.message, /版本已变化/);
+    const phaseResult = phaseCompetition.find((row) => row.status === "fulfilled").value;
+    assert.equal(phaseResult.businessCompatibility.valid, true);
+    assert.equal(phaseResult.businessCompatibility.complete, false, "内部检查通过仍不表示全部经营闸门已实现");
+    const result = phaseResult.entities;
+    assert.equal(result.itemGroupClaimCount, entityGroups.length);
+    assert.equal(result.assetClaimCount, entityAssets.length);
+    const finalClaims = await db.rentalAttributeUniqueValue.findMany({ where: { workspaceId } });
+    assert.equal(finalClaims.length, entityGroups.length + entityAssets.length);
+    assert.ok(finalClaims.every((row) => row.fieldCode === "adoptionProof"), "退役的唯一约束不能残留");
+    const finalGroup = await db.rentalItemGroup.findUniqueOrThrow({ where: { id: entityGroups[0].id } });
+    for (const [key, value] of Object.entries(entityGroups[0].attributes)) assert.deepEqual(finalGroup.attributes[key], value, "媒体及历史资料保留");
+    assert.equal((await db.businessWorkspace.findUniqueOrThrow({ where: { id: workspaceId } })).categoryVersionId, writerTargetId);
+    assert.equal(await db.rentalCategoryAdoptionAudit.count({ where: { workspaceId, actorId: "entity-phase-fixture" } }), 1);
+    const phaseAudit = await db.rentalCategoryAdoptionAudit.findUniqueOrThrow({ where: { id: phaseResult.auditId } });
+    assert.equal(phaseAudit.reason, preparation.patches.reason);
+    assert.equal(phaseAudit.fromVersionId, currentBinding.categoryVersionId);
+    assert.equal(phaseAudit.toRevision, currentBinding.adoptionRevision + 1);
+    assert.deepEqual(phaseResult.capabilities.changedCapabilityCodes, ["camera_compatibility", "camera_kit_handover"]);
+    const newCapability = await db.workspaceCapabilityInstance.findFirstOrThrow({ where: { workspaceId, code: "camera_kit_handover" } });
+    assert.equal(newCapability.status, "enabled");
+    assert.equal(newCapability.revision, 1);
+    assert.equal(newCapability.configVersion, "v1");
+    assert.deepEqual(newCapability.config, {});
+    const enableAudits = await db.workspaceCapabilityAuditEntry.findMany({ where: { workspaceId, code: newCapability.code, action: "enable", operator: phaseInput.actorId } });
+    assert.equal(enableAudits.length, 1);
+    assert.deepEqual(enableAudits[0].configSnapshot, {});
+    const finalCapability = await db.workspaceCapabilityInstance.findFirstOrThrow({ where: { workspaceId, code: "camera_compatibility" } });
+    assert.equal(finalCapability.revision, 2);
+    assert.equal(finalCapability.configVersion, "v2");
+    assert.equal(finalCapability.implementationVersion, "cam-1.0");
+    assert.equal(finalCapability.status, "enabled");
+    assert.equal(finalCapability.config.powerMarginPercent, 25);
+    const configureAudits = await db.workspaceCapabilityAuditEntry.findMany({ where: { workspaceId, action: "configure", operator: phaseInput.actorId } });
+    assert.equal(configureAudits.length, 1);
+    assert.deepEqual(configureAudits[0].configSnapshot, finalCapability.config);
+    assert.equal(configureAudits[0].reason, preparation.patches.reason);
+    const noOpBefore = await readEntityFacts();
+    const noOp = await db.$transaction((tx) => writePreparedCategoryCapabilities(tx, "tenant_001", workspaceId,
+      { categoryVersionId: writerTargetId, adoptionRevision: currentBinding.adoptionRevision + 1 }, targetDefinition,
+      [{ code: finalCapability.code, expectedRevision: 2, expectedImplementationVersion: "cam-1.0", config: finalCapability.config }],
+      phaseInput.actorId, "无变化配置复验", capabilityRuntime), rc);
+    assert.deepEqual(noOp.changedCapabilityCodes, []);
+    assert.equal(await readEntityFacts(), noOpBefore, "重复相同配置不得增加修订、审计或修改时间");
+    assert.deepEqual(await db.rentalCategoryAdoptionPreparation.findUniqueOrThrow({ where: { id: preparation.id } }), preparation, "成功不删除准备资料或重复初始化");
+    console.log("category-active-write-db: 写入绑定、锁竞争、内部采用事务的资格/修订复核、实体/绑定/审计回滚及历史保留通过");
+  } finally {
+    await db.rentalCustomerCoupon.deleteMany({ where: { workspaceId } });
+    await db.rentalServiceCapacity.deleteMany({ where: { workspaceId } });
+    await db.businessWorkspace.deleteMany({ where: { id: workspaceId } });
+    await db.rentalCategoryVersionPolicy.deleteMany({ where: { versionId: writerTargetId } });
+    await db.rentalCategoryVersion.deleteMany({ where: { id: { in: [versionId, writerTargetId] } } });
+    await db.$disconnect();
+  }
+})().catch((error) => { console.error(error); process.exitCode = 1; });

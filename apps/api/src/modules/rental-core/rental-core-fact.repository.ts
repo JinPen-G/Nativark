@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
 import { usageDelta } from "./rental-usage-reading";
+import { isDeepStrictEqual } from "node:util";
 import { Prisma, type $Enums } from "@prisma/client";
 import {
   RentalAssetStatus,
@@ -37,6 +38,7 @@ import {
 } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
+import { validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
 import { bufferedRentalPeriod } from "./rental-occupancy";
 import { rentalOrderDueAt } from "./rental-carrier-shipment";
 import { effectiveUnpaidHoldRule } from "./rental-rule-defaults";
@@ -221,7 +223,7 @@ export interface RentalCoreFactStore {
   allocatedAssetIds(tenantId: string, tx?: RentalFactTx, excludeOrderId?: string): Promise<Set<string>>;
   listAssets(tenantId: string, tx?: RentalFactTx): Promise<RentalAsset[]>;
   listAssetStatusHistory(tenantId: string, assetId: string, tx?: RentalFactTx): Promise<RentalAssetStatusHistory[]>;
-  upsertAsset(asset: RentalAsset, uniqueAttributes?: RentalUniqueAttributeClaim[], statusChange?: AssetStatusHistoryMetadata): Promise<void>;
+  upsertAsset(asset: RentalAsset, uniqueAttributes?: RentalUniqueAttributeClaim[], statusChange?: AssetStatusHistoryMetadata, expectedBinding?: CategoryWriteBinding): Promise<void>;
   listStockBalances(tenantId: string, tx?: RentalFactTx): Promise<RentalStockBalance[]>;
   upsertStockBalance(balance: RentalStockBalance): Promise<void>;
   /**
@@ -700,6 +702,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       orderNo: order.orderNo,
       assignment: order.assignment ? order.assignment as unknown as Prisma.InputJsonValue : Prisma.JsonNull,
       categoryCode: upper<$Enums.RentalCategoryCode>(order.categoryCode),
+      categoryVersionId: order.categoryVersionId ?? null,
+      inspectionTemplateSnapshots: order.inspectionTemplateSnapshots === undefined ? Prisma.DbNull : order.inspectionTemplateSnapshots as unknown as Prisma.InputJsonValue,
       status: upper<$Enums.RentalOrderV1Status>(order.status),
       customerType: order.customerType,
       customerId: order.customerId ?? null,
@@ -773,10 +777,16 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       const workspaceId = await resolveScopeWorkspaceId(client, order.tenantId);
       const existingOrder = await client.rentalOrder.findUnique({
         where: { id: order.id },
-        select: { tenantId: true, workspaceId: true }
+        select: { tenantId: true, workspaceId: true, categoryVersionId: true, inspectionTemplateSnapshots: true }
       });
       if (existingOrder && (existingOrder.tenantId !== order.tenantId || existingOrder.workspaceId !== workspaceId)) {
         throw new ConflictException("订单事实已属于其他租户或经营空间，拒绝覆盖");
+      }
+      if (existingOrder && (existingOrder.categoryVersionId ?? null) !== (order.categoryVersionId ?? null)) {
+        throw new ConflictException("已有订单的品类版本依据不可改写");
+      }
+      if (existingOrder && !isDeepStrictEqual(existingOrder.inspectionTemplateSnapshots ?? null, order.inspectionTemplateSnapshots ?? null)) {
+        throw new ConflictException("已有订单的检查模板快照不可改写");
       }
       if (existingOrder) {
         await client.rentalOrder.update({ where: { id: order.id }, data: orderData });
@@ -1241,7 +1251,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   async upsertAsset(
     asset: RentalAsset,
     uniqueAttributes: RentalUniqueAttributeClaim[] = [],
-    statusChange?: AssetStatusHistoryMetadata
+    statusChange?: AssetStatusHistoryMetadata,
+    expectedBinding?: CategoryWriteBinding
   ): Promise<void> {
     const data = {
       tenantId: asset.tenantId,
@@ -1255,10 +1266,13 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     try {
       await this.prisma.$transaction(async (tx) => {
         const workspaceId = await resolveScopeWorkspaceId(tx, asset.tenantId);
+        const activeWrite = await validateActiveCategoryWrite(tx, asset.tenantId, workspaceId, {
+          id: asset.id, scope: "asset", attributes: asset.attributes, serialNo: asset.serialNo
+        }, expectedBinding);
         await tx.rentalAttributeUniqueValue.deleteMany({
           where: { tenantId: asset.tenantId, workspaceId, entityType: "asset", entityId: asset.id }
         });
-        for (const claim of uniqueAttributes) {
+        for (const claim of activeWrite.claims) {
           try {
             await tx.rentalAttributeUniqueValue.create({
               data: {
@@ -1287,10 +1301,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           throw new ConflictException("资产事实已属于其他租户或经营空间，拒绝覆盖");
         }
         if (existing) {
-          await tx.rentalAsset.update({ where: { id: asset.id }, data });
+          await tx.rentalAsset.update({ where: { id: asset.id }, data: { ...data, attributes: activeWrite.attributes as Prisma.InputJsonValue, serialNo: activeWrite.serialNo ?? null } });
         } else {
           await tx.rentalAsset.create({
-            data: { workspaceId, id: asset.id, ...data, createdAt: new Date(asset.createdAt) }
+            data: { workspaceId, id: asset.id, ...data, attributes: activeWrite.attributes as Prisma.InputJsonValue, serialNo: activeWrite.serialNo ?? null, createdAt: new Date(asset.createdAt) }
           });
         }
         await appendAssetStatusHistory(tx, {
@@ -1304,7 +1318,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
           reason: statusChange?.reason ?? (existing ? "资产资料维护" : "资产登记"),
           operator: statusChange?.operator
         });
-      });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     } catch (error) {
       // MySQL 在多个请求同时争抢同一唯一键时可能以死锁/写冲突结束事务，
       // Prisma 映射为 P2034。唯一约束已经保证不会双写，这里只把技术性 500
@@ -2251,7 +2265,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   private toInspectionRecord(row: any): RentalInspectionRecord {
     const results = structuredClone((row.results ?? {}) as Record<string, unknown>);
     const meta = results.__r1InspectionMeta as
-      | Pick<RentalInspectionRecord, "baselineInspectionId" | "comparisons" | "usageReadings" | "usageCorrections" | "returnedItems">
+      | Pick<RentalInspectionRecord, "exchangeId" | "baselineInspectionId" | "comparisons" | "usageReadings" | "usageCorrections" | "returnedItems">
       | undefined;
     delete results.__r1InspectionMeta;
     return {
@@ -2262,6 +2276,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       templateId: row.templateId,
       templateCode: row.templateCode,
       templateVersion: row.templateVersion,
+      exchangeId: meta?.exchangeId,
       results,
       baselineInspectionId: meta?.baselineInspectionId,
       comparisons: meta?.comparisons,
@@ -2300,6 +2315,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         results: {
           ...record.results,
           __r1InspectionMeta: {
+            exchangeId: record.exchangeId,
             baselineInspectionId: record.baselineInspectionId,
             comparisons: record.comparisons ?? [],
             usageReadings: record.usageReadings ?? [],
@@ -2414,6 +2430,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         priceVersionId: extension.priceVersionId ?? null,
         priceVersion: extension.priceVersion ?? null,
         ruleVersion: extension.ruleVersion,
+        executionBasis: extension.executionBasis ? extension.executionBasis as unknown as Prisma.InputJsonValue : Prisma.DbNull,
         rateSnapshot: extension.rateSnapshot as unknown as Prisma.InputJsonValue,
         ruleSnapshot: extension.ruleSnapshot as unknown as Prisma.InputJsonValue,
         calendarSnapshot: extension.calendarSnapshot as unknown as Prisma.InputJsonValue,
@@ -2538,6 +2555,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       priceVersion: row.priceVersion ?? undefined,
       ruleVersion: row.ruleVersion,
       rateSnapshot: row.rateSnapshot as unknown as RentalOrderExtension["rateSnapshot"],
+      executionBasis: row.executionBasis ? row.executionBasis as unknown as RentalOrderExtension["executionBasis"] : undefined,
       ruleSnapshot: row.ruleSnapshot as unknown as RentalOrderExtension["ruleSnapshot"],
       calendarSnapshot: row.calendarSnapshot as unknown as RentalOrderExtension["calendarSnapshot"],
       serviceSnapshots: row.serviceSnapshots ? row.serviceSnapshots as unknown as RentalOrderExtension["serviceSnapshots"] : undefined,
@@ -2610,6 +2628,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       orderNo: row.orderNo,
       assignment: row.assignment ? row.assignment as unknown as RentalOrder["assignment"] : undefined,
       categoryCode: lower<RentalCategoryCode>(row.categoryCode),
+      categoryVersionId: row.categoryVersionId ?? undefined,
+      inspectionTemplateSnapshots: row.inspectionTemplateSnapshots === null ? undefined : row.inspectionTemplateSnapshots as unknown as RentalOrder["inspectionTemplateSnapshots"],
       status: lower<RentalCoreOrderStatus>(row.status),
       customerType: row.customerType as RentalOrder["customerType"],
       customerId: row.customerId ?? undefined,

@@ -472,8 +472,18 @@ function usageBreakdown(rate: RentalPricingRate, units: number) {
  * Rental Core 的计费扩展入口。新增计费模型时新增策略并登记，不修改报价主流程。
  * 类型与启动期完整性检查保证每个公开计费单位都有且只有一个实现。
  */
-export function rentalPricingStrategy(unit: RentalPricingUnit): RentalPricingStrategy {
-  const strategy = strategies[unit];
+const versionedStrategies: Record<string, typeof strategies> = { "1": strategies };
+
+/** Executable version references, not category-template or price-plan versions. */
+export function rentalPricingStrategyReference(unit: RentalPricingUnit) {
+  rentalPricingStrategy(unit, "1");
+  return { unit, implementationVersion: "1" };
+}
+
+export function rentalPricingStrategy(unit: RentalPricingUnit, implementationVersion = "1"): RentalPricingStrategy {
+  const registry = Object.prototype.hasOwnProperty.call(versionedStrategies, implementationVersion) ? versionedStrategies[implementationVersion] : undefined;
+  if (!registry) throw new ConflictException(`计价实现版本不可用：${implementationVersion}`);
+  const strategy = Object.prototype.hasOwnProperty.call(registry, unit) ? registry[unit] : undefined;
   if (!strategy) throw new BadRequestException(`未注册的计费策略：${unit}`);
   return strategy;
 }

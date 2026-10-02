@@ -36,7 +36,7 @@ Page({
     if (!this.data.id) { this.setData({ view: blockedState("缺少订单编号", "请从订单详情重新进入") }); return; }
     this.setData({ view: loadingState() });
     try {
-      const [order, templates, context, itemGroups, funding] = await Promise.all([getOrder(this.data.id), listInspectionTemplates("pickup"), loadContext(), listItemGroups().catch(() => []), getOrderFunding(this.data.id).catch(() => undefined)]);
+      const [order, templates, context, itemGroups, funding] = await Promise.all([getOrder(this.data.id), listInspectionTemplates("pickup", this.data.id), loadContext(), listItemGroups().catch(() => []), getOrderFunding(this.data.id).catch(() => undefined)]);
       if (order.status !== "ready_for_pickup") { this.setData({ view: blockedState("当前不能办理领取", `订单当前状态：${order.status}`) }); return; }
       if (!can("rental-os:order:pickup")) { this.setData({ view: blockedState("无领取权限", "请联系管理员授权") }); return; }
       this.order = order;

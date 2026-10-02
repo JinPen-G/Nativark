@@ -385,7 +385,7 @@ export const rentalCoreApi = {
     request<{ order: RentalOrder; occurrence: RentalOrderServiceOccurrence }>(`/rental/v1/orders/${id}/services/${encodeURIComponent(occurrenceId)}/execution`, { method: "post", data }),
   refundServiceOccurrence: (id: string, occurrenceId: string, data: RefundRentalServiceRequest) =>
     request<{ order: RentalOrder; occurrence: RentalOrderServiceOccurrence }>(`/rental/v1/orders/${id}/services/${encodeURIComponent(occurrenceId)}/refund`, { method: "post", data }),
-  inspectionTemplates: (stage?: "pickup" | "return") => request<RentalInspectionTemplate[]>("/rental/v1/inspection-templates", { params: { stage } }),
+  inspectionTemplates: (stage?: "pickup" | "return", orderId?: string) => request<RentalInspectionTemplate[]>("/rental/v1/inspection-templates", { params: { stage, orderId } }),
   inspections: (id: string) => request<RentalInspectionRecord[]>(`/rental/v1/orders/${id}/inspections`),
   createInspection: (id: string, data: CreateRentalInspectionRequest, token?: string) => request<{ inspection: RentalInspectionRecord; order: RentalOrder }>(`/rental/v1/orders/${id}/inspections`, { method: "post", data, headers: token ? { "X-Operation-Token": token } : undefined }),
   correctInspectionUsage: (id: string, inspectionId: string, data: CorrectRentalInspectionUsageRequest) => request<{ inspection: RentalInspectionRecord }>(`/rental/v1/orders/${id}/inspections/${inspectionId}/usage-correction`, { method: "post", data }),

@@ -53,6 +53,16 @@ const baseRun = (extra = {}) => ({
 });
 
 void (async () => {
+  {
+    const runtime = new CapabilityHookRuntime(fakeCapabilities([instance("delivery")]));
+    runtime.register({ code: "delivery", implementationVersion: "core-1.0", order: 1,
+      hooks: { quote_validation: () => { throw new Error("测试运行器故障"); } } });
+    const historical = await runtime.run(baseRun({ requiredCapabilities: [] }));
+    assert.equal(historical.blocked, false, "明确的旧版可选政策不能被静态/新版必选覆盖");
+    const required = await runtime.run(baseRun({ requiredCapabilities: ["delivery"] }));
+    assert.equal(required.blocked, true, "采用版本声明必选时实现故障必须阻断");
+    console.log("  ✓ 品类版本政策：同一能力故障按本次明确版本区分可选降级与必选阻断");
+  }
 
 // ============ 1. 登记表本身的门禁 ============
 {

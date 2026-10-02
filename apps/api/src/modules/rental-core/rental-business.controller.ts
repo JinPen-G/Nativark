@@ -91,10 +91,9 @@ export class RentalBusinessController {
     private readonly serviceCapacities: RentalServiceCapacityService
   ) {}
 
-  private context(tenantId: string): BusinessContext {
+  private async context(tenantId: string): Promise<BusinessContext> {
     const profile = this.core.getProfile(tenantId);
-    const category = this.core.listCategories().find((item) => item.code === profile.categoryCode);
-    if (!category) throw new Error("当前经营空间的品类定义不存在");
+    const category = await this.core.getWorkspaceCategory(tenantId);
     return {
       profile,
       category,
@@ -155,49 +154,49 @@ export class RentalBusinessController {
     return redactDeliveryAddressPhone(resolved);
   }
 
-  @Get("pricing-plans") pricingPlans(@Req() req: AuthenticatedRequest) { return this.business.listPricingPlans(req.user.tenantId, this.context(req.user.tenantId)); }
-  @Post("pricing-plans") async createPricingPlan(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalPricingPlanDto) { return this.committed(req.user.tenantId, await this.business.savePricingPlan(req.user.tenantId, this.context(req.user.tenantId), body)); }
-  @Put("pricing-plans/:id") async updatePricingPlan(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalPricingPlanDto) { return this.committed(req.user.tenantId, await this.business.savePricingPlan(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
+  @Get("pricing-plans") async pricingPlans(@Req() req: AuthenticatedRequest) { return this.business.listPricingPlans(req.user.tenantId, (await this.context(req.user.tenantId))); }
+  @Post("pricing-plans") async createPricingPlan(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalPricingPlanDto) { return this.committed(req.user.tenantId, await this.business.savePricingPlan(req.user.tenantId, (await this.context(req.user.tenantId)), body)); }
+  @Put("pricing-plans/:id") async updatePricingPlan(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalPricingPlanDto) { return this.committed(req.user.tenantId, await this.business.savePricingPlan(req.user.tenantId, (await this.context(req.user.tenantId)), { ...body, id })); }
   /** PRICE-03：空间级不可变价格版本历史。版本粒度是当前会话经营空间，不依赖 planId。 */
-  @Get("pricing-versions") priceVersions(@Req() req: AuthenticatedRequest, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
-    return this.business.listSpacePriceVersions(req.user.tenantId, this.context(req.user.tenantId), Number(page) || 1, Number(pageSize) || 20);
+  @Get("pricing-versions") async priceVersions(@Req() req: AuthenticatedRequest, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
+    return this.business.listSpacePriceVersions(req.user.tenantId, (await this.context(req.user.tenantId)), Number(page) || 1, Number(pageSize) || 20);
   }
   /** PRICE-03：空间级价格版本完整回放。 */
-  @Get("pricing-versions/:sequence") priceVersion(@Req() req: AuthenticatedRequest, @Param("sequence") sequence: string) {
-    return this.business.getSpacePriceVersion(req.user.tenantId, this.context(req.user.tenantId), Number(sequence));
+  @Get("pricing-versions/:sequence") async priceVersion(@Req() req: AuthenticatedRequest, @Param("sequence") sequence: string) {
+    return this.business.getSpacePriceVersion(req.user.tenantId, (await this.context(req.user.tenantId)), Number(sequence));
   }
   /** 以历史完整快照追加一条恢复版本，历史版本不原地修改。 */
-  @Post("pricing-versions/:sequence/restore") restorePriceVersion(@Req() req: AuthenticatedRequest, @Param("sequence") sequence: string, @Body() body: RestoreRentalPriceVersionDto) {
-    return this.committed(req.user.tenantId, this.business.restoreSpacePriceVersion(req.user.tenantId, this.context(req.user.tenantId), Number(sequence), body.reason, req.user.displayName));
+  @Post("pricing-versions/:sequence/restore") async restorePriceVersion(@Req() req: AuthenticatedRequest, @Param("sequence") sequence: string, @Body() body: RestoreRentalPriceVersionDto) {
+    return this.committed(req.user.tenantId, this.business.restoreSpacePriceVersion(req.user.tenantId, (await this.context(req.user.tenantId)), Number(sequence), body.reason, req.user.displayName));
   }
   /** PRICE-03 兼容入口：planId 只作当前空间归属校验，实际返回仍是空间版本。 */
-  @Get("pricing-plans/:id/versions") legacyPriceVersions(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
-    return this.business.listPriceVersions(req.user.tenantId, this.context(req.user.tenantId), id, Number(page) || 1, Number(pageSize) || 20);
+  @Get("pricing-plans/:id/versions") async legacyPriceVersions(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Query("page") page?: string, @Query("pageSize") pageSize?: string) {
+    return this.business.listPriceVersions(req.user.tenantId, (await this.context(req.user.tenantId)), id, Number(page) || 1, Number(pageSize) || 20);
   }
   /** PRICE-03：调价计划列表，planId 仍代表发起调整的编辑计划。 */
-  @Get("pricing-plans/:id/adjustments") listPriceAdjustments(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.business.listPriceAdjustments(req.user.tenantId, this.context(req.user.tenantId), id); }
+  @Get("pricing-plans/:id/adjustments") async listPriceAdjustments(@Req() req: AuthenticatedRequest, @Param("id") id: string) { return this.business.listPriceAdjustments(req.user.tenantId, (await this.context(req.user.tenantId)), id); }
   /** PRICE-03：执行到期的待生效调价（定时执行与立即执行走同一版本机制）。 */
-  @Post("pricing-plans/adjustments/run-due") runDuePriceAdjustments(@Req() req: AuthenticatedRequest) { return this.committed(req.user.tenantId, this.business.runDuePriceAdjustments(req.user.tenantId, this.context(req.user.tenantId))); }
+  @Post("pricing-plans/adjustments/run-due") async runDuePriceAdjustments(@Req() req: AuthenticatedRequest) { return this.committed(req.user.tenantId, this.business.runDuePriceAdjustments(req.user.tenantId, (await this.context(req.user.tenantId)))); }
   /** PRICE-03：创建调价计划（差异 + 逐行最终价预览）。 */
-  @Post("pricing-plans/:id/adjustments") createPriceAdjustment(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CreateRentalPriceAdjustmentDto) { return this.business.createPriceAdjustment(req.user.tenantId, this.context(req.user.tenantId), id, body, req.user.displayName); }
+  @Post("pricing-plans/:id/adjustments") async createPriceAdjustment(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: CreateRentalPriceAdjustmentDto) { return this.business.createPriceAdjustment(req.user.tenantId, (await this.context(req.user.tenantId)), id, body, req.user.displayName); }
   /** PRICE-03：确认——立即执行生成新版本；scheduledAt 在未来则进入待生效。 */
-  @Post("pricing-plans/:id/adjustments/:aid/confirm") confirmPriceAdjustment(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("aid") aid: string) { return this.committed(req.user.tenantId, this.business.confirmPriceAdjustment(req.user.tenantId, this.context(req.user.tenantId), id, aid, req.user.displayName)); }
+  @Post("pricing-plans/:id/adjustments/:aid/confirm") async confirmPriceAdjustment(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("aid") aid: string) { return this.committed(req.user.tenantId, this.business.confirmPriceAdjustment(req.user.tenantId, (await this.context(req.user.tenantId)), id, aid, req.user.displayName)); }
   /** PRICE-03：取消（草稿/待生效可取消，已生效不可撤回）。 */
-  @Post("pricing-plans/:id/adjustments/:aid/cancel") cancelPriceAdjustment(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("aid") aid: string, @Body() body: CancelRentalPriceAdjustmentDto) { return this.business.cancelPriceAdjustment(req.user.tenantId, this.context(req.user.tenantId), id, aid, body.reason); }
+  @Post("pricing-plans/:id/adjustments/:aid/cancel") async cancelPriceAdjustment(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Param("aid") aid: string, @Body() body: CancelRentalPriceAdjustmentDto) { return this.business.cancelPriceAdjustment(req.user.tenantId, (await this.context(req.user.tenantId)), id, aid, body.reason); }
 
   /** 运营端主入口：调价以经营空间为范围，不要求用户理解内部价格计划行。 */
-  @Get("pricing-adjustments") listSpacePriceAdjustments(@Req() req: AuthenticatedRequest) { return this.business.listSpacePriceAdjustments(req.user.tenantId, this.context(req.user.tenantId)); }
-  @Post("pricing-adjustments") createSpacePriceAdjustment(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalPriceAdjustmentDto) { return this.business.createSpacePriceAdjustment(req.user.tenantId, this.context(req.user.tenantId), body, req.user.displayName); }
-  @Post("pricing-adjustments/:aid/confirm") confirmSpacePriceAdjustment(@Req() req: AuthenticatedRequest, @Param("aid") aid: string) { return this.committed(req.user.tenantId, this.business.confirmSpacePriceAdjustment(req.user.tenantId, this.context(req.user.tenantId), aid, req.user.displayName)); }
-  @Post("pricing-adjustments/:aid/cancel") cancelSpacePriceAdjustment(@Req() req: AuthenticatedRequest, @Param("aid") aid: string, @Body() body: CancelRentalPriceAdjustmentDto) { return this.business.cancelSpacePriceAdjustment(req.user.tenantId, this.context(req.user.tenantId), aid, body.reason); }
+  @Get("pricing-adjustments") async listSpacePriceAdjustments(@Req() req: AuthenticatedRequest) { return this.business.listSpacePriceAdjustments(req.user.tenantId, (await this.context(req.user.tenantId))); }
+  @Post("pricing-adjustments") async createSpacePriceAdjustment(@Req() req: AuthenticatedRequest, @Body() body: CreateRentalPriceAdjustmentDto) { return this.business.createSpacePriceAdjustment(req.user.tenantId, (await this.context(req.user.tenantId)), body, req.user.displayName); }
+  @Post("pricing-adjustments/:aid/confirm") async confirmSpacePriceAdjustment(@Req() req: AuthenticatedRequest, @Param("aid") aid: string) { return this.committed(req.user.tenantId, this.business.confirmSpacePriceAdjustment(req.user.tenantId, (await this.context(req.user.tenantId)), aid, req.user.displayName)); }
+  @Post("pricing-adjustments/:aid/cancel") async cancelSpacePriceAdjustment(@Req() req: AuthenticatedRequest, @Param("aid") aid: string, @Body() body: CancelRentalPriceAdjustmentDto) { return this.business.cancelSpacePriceAdjustment(req.user.tenantId, (await this.context(req.user.tenantId)), aid, body.reason); }
 
-  @Get("discount-plans") discountPlans(@Req() req: AuthenticatedRequest) { return this.business.listDiscountPlans(req.user.tenantId, this.context(req.user.tenantId)); }
-  @Post("discount-plans") async createDiscountPlan(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalDiscountPlanDto) { return this.committed(req.user.tenantId, await this.business.saveDiscountPlan(req.user.tenantId, this.context(req.user.tenantId), body)); }
-  @Put("discount-plans/:id") async updateDiscountPlan(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalDiscountPlanDto) { return this.committed(req.user.tenantId, await this.business.saveDiscountPlan(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
+  @Get("discount-plans") async discountPlans(@Req() req: AuthenticatedRequest) { return this.business.listDiscountPlans(req.user.tenantId, (await this.context(req.user.tenantId))); }
+  @Post("discount-plans") async createDiscountPlan(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalDiscountPlanDto) { return this.committed(req.user.tenantId, await this.business.saveDiscountPlan(req.user.tenantId, (await this.context(req.user.tenantId)), body)); }
+  @Put("discount-plans/:id") async updateDiscountPlan(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalDiscountPlanDto) { return this.committed(req.user.tenantId, await this.business.saveDiscountPlan(req.user.tenantId, (await this.context(req.user.tenantId)), { ...body, id })); }
 
-  @Get("value-added-services") services(@Req() req: AuthenticatedRequest) { return this.business.listServices(req.user.tenantId, this.context(req.user.tenantId)); }
-  @Post("value-added-services") async createService(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalValueAddedServiceDto) { return this.committed(req.user.tenantId, await this.business.saveService(req.user.tenantId, this.context(req.user.tenantId), body)); }
-  @Put("value-added-services/:id") async updateService(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalValueAddedServiceDto) { return this.committed(req.user.tenantId, await this.business.saveService(req.user.tenantId, this.context(req.user.tenantId), { ...body, id })); }
+  @Get("value-added-services") async services(@Req() req: AuthenticatedRequest) { return this.business.listServices(req.user.tenantId, (await this.context(req.user.tenantId))); }
+  @Post("value-added-services") async createService(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalValueAddedServiceDto) { return this.committed(req.user.tenantId, await this.business.saveService(req.user.tenantId, (await this.context(req.user.tenantId)), body)); }
+  @Put("value-added-services/:id") async updateService(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalValueAddedServiceDto) { return this.committed(req.user.tenantId, await this.business.saveService(req.user.tenantId, (await this.context(req.user.tenantId)), { ...body, id })); }
   @Get("service-capacities") serviceCapacityList(@Req() req: AuthenticatedRequest, @Query("serviceId") serviceId?: string) {
     return this.serviceCapacities.listCapacities(req.user.tenantId, serviceId);
   }
@@ -215,12 +214,12 @@ export class RentalBusinessController {
   @Get("calendars/:year") async calendar(@Req() req: AuthenticatedRequest, @Param("year") year: string) {
     const calendar = this.business.getCalendar(
       req.user.tenantId,
-      this.context(req.user.tenantId),
+      (await this.context(req.user.tenantId)),
       Number(year),
       this.canSeeCalendarDraft(req.user)
     );
     // PRICE-02B：分时价格摘要（只读消费价格版本，与报价同一命中助手与营业时区）。
-    const timePriceSummary = await this.business.timePriceSummaryForYear(req.user.tenantId, this.context(req.user.tenantId), Number(year));
+    const timePriceSummary = await this.business.timePriceSummaryForYear(req.user.tenantId, (await this.context(req.user.tenantId)), Number(year));
     // 「有官方更新」只能在**同一来源**内比较：sequence 是 (来源, 年度) 内的局部序号，
     // 跨来源比大小会把「来源 A 的 v1.9」误报成「引用了来源 B v1.0 的空间该更新」。
     if (calendar.sourceVersionId) {
@@ -257,8 +256,8 @@ export class RentalBusinessController {
     }
     return { ...calendar, timePriceSummary };
   }
-  @Get("calendars/:year/versions") calendarVersions(@Req() req: AuthenticatedRequest, @Param("year") year: string) { return this.business.listCalendarVersions(req.user.tenantId, this.context(req.user.tenantId), Number(year)); }
-  @Get("calendars/:year/versions/:version") calendarVersion(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("version") version: string) { return this.business.getCalendarVersion(req.user.tenantId, this.context(req.user.tenantId), Number(year), version); }
+  @Get("calendars/:year/versions") async calendarVersions(@Req() req: AuthenticatedRequest, @Param("year") year: string) { return this.business.listCalendarVersions(req.user.tenantId, (await this.context(req.user.tenantId)), Number(year)); }
+  @Get("calendars/:year/versions/:version") async calendarVersion(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("version") version: string) { return this.business.getCalendarVersion(req.user.tenantId, (await this.context(req.user.tenantId)), Number(year), version); }
   /**
    * 经营空间引用某个**公共官方来源版本**生成/更新本年度草稿（需求 4.5.2/4.5.8）。
    *
@@ -276,7 +275,7 @@ export class RentalBusinessController {
     }
     return this.committed(
       req.user.tenantId,
-      await this.business.importOfficialCalendar(req.user.tenantId, this.context(req.user.tenantId), {
+      await this.business.importOfficialCalendar(req.user.tenantId, (await this.context(req.user.tenantId)), {
         year: version.year,
         region: version.region,
         sourceName: version.sourceName,
@@ -297,45 +296,45 @@ export class RentalBusinessController {
     const orders = await this.core.listOrders(req.user.tenantId);
     return this.business.previewCalendarPublish(
       req.user.tenantId,
-      this.context(req.user.tenantId),
+      (await this.context(req.user.tenantId)),
       Number(year),
       orders.map((order) => ({ id: order.id, orderNo: order.orderNo, status: order.status, startAt: order.startAt, endAt: order.endAt, effectiveEndAt: order.effectiveEndAt }))
     );
   }
   /** 覆盖审计流水（需求 4.5.3/4.5.8）。独立只追加表，不截断；可按版本过滤。 */
-  @Get("calendars/:year/override-audits") calendarOverrideAudits(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Query("version") version?: string) { return this.business.listCalendarOverrideAudits(req.user.tenantId, this.context(req.user.tenantId), Number(year), version); }
-  @Put("calendars/:year/days/:date") async saveCalendarDay(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("date") date: string, @Body() body: SaveRentalCalendarDayDto) { return this.committed(req.user.tenantId, await this.business.saveCalendarDay(req.user.tenantId, this.context(req.user.tenantId), Number(year), { ...body, date }, req.user.displayName)); }
-  @Delete("calendars/:year/days/:date") async removeCalendarDayOverride(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("date") date: string, @Body() body: RemoveRentalCalendarDayOverrideDto) { return this.committed(req.user.tenantId, await this.business.removeCalendarDayOverride(req.user.tenantId, this.context(req.user.tenantId), Number(year), date, body, req.user.displayName)); }
+  @Get("calendars/:year/override-audits") async calendarOverrideAudits(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Query("version") version?: string) { return this.business.listCalendarOverrideAudits(req.user.tenantId, (await this.context(req.user.tenantId)), Number(year), version); }
+  @Put("calendars/:year/days/:date") async saveCalendarDay(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("date") date: string, @Body() body: SaveRentalCalendarDayDto) { return this.committed(req.user.tenantId, await this.business.saveCalendarDay(req.user.tenantId, (await this.context(req.user.tenantId)), Number(year), { ...body, date }, req.user.displayName)); }
+  @Delete("calendars/:year/days/:date") async removeCalendarDayOverride(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("date") date: string, @Body() body: RemoveRentalCalendarDayOverrideDto) { return this.committed(req.user.tenantId, await this.business.removeCalendarDayOverride(req.user.tenantId, (await this.context(req.user.tenantId)), Number(year), date, body, req.user.displayName)); }
   /** 范围覆盖预览（需求 4.5.9）。POST 而非 GET：预览内容含未发布草稿，走编辑鉴权分支。 */
   @Post("calendars/:year/days/range-preview")
   @HttpCode(200)
-  calendarRangePreview(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: PreviewRentalCalendarRangeOverrideDto) { return this.business.previewCalendarRangeOverride(req.user.tenantId, this.context(req.user.tenantId), Number(year), body); }
+  async calendarRangePreview(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: PreviewRentalCalendarRangeOverrideDto) { return this.business.previewCalendarRangeOverride(req.user.tenantId, (await this.context(req.user.tenantId)), Number(year), body); }
   /** 应用范围覆盖：同事务全部成功或全部失败，一次 revision；既有覆盖须 overrideConfirmed。 */
-  @Post("calendars/:year/days/range") async applyCalendarRange(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: ApplyRentalCalendarRangeOverrideDto) { return this.committed(req.user.tenantId, await this.business.applyCalendarRangeOverride(req.user.tenantId, this.context(req.user.tenantId), Number(year), body, req.user.displayName)); }
+  @Post("calendars/:year/days/range") async applyCalendarRange(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: ApplyRentalCalendarRangeOverrideDto) { return this.committed(req.user.tenantId, await this.business.applyCalendarRangeOverride(req.user.tenantId, (await this.context(req.user.tenantId)), Number(year), body, req.user.displayName)); }
   /** 范围移除预览：展示每个日期恢复后的取值与来源。 */
   @Post("calendars/:year/days/range-remove-preview")
   @HttpCode(200)
-  calendarRangeRemovePreview(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: PreviewRentalCalendarRangeRemoveDto) { return this.business.previewCalendarRangeRemove(req.user.tenantId, this.context(req.user.tenantId), Number(year), body); }
+  async calendarRangeRemovePreview(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: PreviewRentalCalendarRangeRemoveDto) { return this.business.previewCalendarRangeRemove(req.user.tenantId, (await this.context(req.user.tenantId)), Number(year), body); }
   /** 应用范围移除：只移除范围内带人工覆盖的日期，恢复下一优先级来源。 */
-  @Post("calendars/:year/days/range-remove") async applyCalendarRangeRemove(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: ApplyRentalCalendarRangeRemoveDto) { return this.committed(req.user.tenantId, await this.business.applyCalendarRangeRemove(req.user.tenantId, this.context(req.user.tenantId), Number(year), body, req.user.displayName)); }
-  @Post("calendars/:year/publish") async publishCalendar(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: PublishRentalCalendarDto) { return this.committed(req.user.tenantId, await this.business.publishCalendar(req.user.tenantId, this.context(req.user.tenantId), Number(year), body, req.user.displayName)); }
-  @Post("calendars/:year/versions/:version/void") async voidCalendarVersion(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("version") version: string, @Body() body: VoidRentalCalendarDto) { return this.committed(req.user.tenantId, await this.business.voidCalendarVersion(req.user.tenantId, this.context(req.user.tenantId), Number(year), version, body, req.user.displayName)); }
+  @Post("calendars/:year/days/range-remove") async applyCalendarRangeRemove(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: ApplyRentalCalendarRangeRemoveDto) { return this.committed(req.user.tenantId, await this.business.applyCalendarRangeRemove(req.user.tenantId, (await this.context(req.user.tenantId)), Number(year), body, req.user.displayName)); }
+  @Post("calendars/:year/publish") async publishCalendar(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Body() body: PublishRentalCalendarDto) { return this.committed(req.user.tenantId, await this.business.publishCalendar(req.user.tenantId, (await this.context(req.user.tenantId)), Number(year), body, req.user.displayName)); }
+  @Post("calendars/:year/versions/:version/void") async voidCalendarVersion(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("version") version: string, @Body() body: VoidRentalCalendarDto) { return this.committed(req.user.tenantId, await this.business.voidCalendarVersion(req.user.tenantId, (await this.context(req.user.tenantId)), Number(year), version, body, req.user.displayName)); }
   /** 以某个历史版本的内容生成新草稿（需求 4.5.7 的「恢复旧规则」）。只产生草稿，仍需预检与发布。 */
-  @Post("calendars/:year/versions/:version/restore") async restoreCalendarVersion(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("version") version: string, @Body() body: RestoreRentalCalendarVersionDto) { return this.committed(req.user.tenantId, await this.business.restoreCalendarVersion(req.user.tenantId, this.context(req.user.tenantId), Number(year), version, body)); }
+  @Post("calendars/:year/versions/:version/restore") async restoreCalendarVersion(@Req() req: AuthenticatedRequest, @Param("year") year: string, @Param("version") version: string, @Body() body: RestoreRentalCalendarVersionDto) { return this.committed(req.user.tenantId, await this.business.restoreCalendarVersion(req.user.tenantId, (await this.context(req.user.tenantId)), Number(year), version, body)); }
 
-  @Get("rule-versions") ruleVersions(@Req() req: AuthenticatedRequest) { return this.business.listRuleVersions(req.user.tenantId, this.context(req.user.tenantId)); }
+  @Get("rule-versions") async ruleVersions(@Req() req: AuthenticatedRequest) { return this.business.listRuleVersions(req.user.tenantId, (await this.context(req.user.tenantId))); }
   /** at 省略即按当前时间匹配；报价按租期开始时间匹配，因此这里也允许指定时点回放。 */
-  @Get("rule-versions/current") currentRule(@Req() req: AuthenticatedRequest, @Query("at") at?: string) { return this.business.currentRule(req.user.tenantId, this.context(req.user.tenantId), at || undefined); }
-  @Get("rule-versions/audits") ruleVersionAudits(@Req() req: AuthenticatedRequest, @Query("version") version?: string) { return this.business.listRuleVersionAudits(req.user.tenantId, this.context(req.user.tenantId), version || undefined); }
-  @Get("rule-versions/:version") ruleVersion(@Req() req: AuthenticatedRequest, @Param("version") version: string) { return this.business.getRuleVersion(req.user.tenantId, this.context(req.user.tenantId), version); }
-  @Get("rule-versions/:version/publish-preview") ruleVersionPublishPreview(@Req() req: AuthenticatedRequest, @Param("version") version: string, @Query("effectiveFrom") effectiveFrom?: string) { return this.business.previewRuleVersionPublish(req.user.tenantId, this.context(req.user.tenantId), version, effectiveFrom || undefined); }
+  @Get("rule-versions/current") async currentRule(@Req() req: AuthenticatedRequest, @Query("at") at?: string) { return this.business.currentRule(req.user.tenantId, (await this.context(req.user.tenantId)), at || undefined); }
+  @Get("rule-versions/audits") async ruleVersionAudits(@Req() req: AuthenticatedRequest, @Query("version") version?: string) { return this.business.listRuleVersionAudits(req.user.tenantId, (await this.context(req.user.tenantId)), version || undefined); }
+  @Get("rule-versions/:version") async ruleVersion(@Req() req: AuthenticatedRequest, @Param("version") version: string) { return this.business.getRuleVersion(req.user.tenantId, (await this.context(req.user.tenantId)), version); }
+  @Get("rule-versions/:version/publish-preview") async ruleVersionPublishPreview(@Req() req: AuthenticatedRequest, @Param("version") version: string, @Query("effectiveFrom") effectiveFrom?: string) { return this.business.previewRuleVersionPublish(req.user.tenantId, (await this.context(req.user.tenantId)), version, effectiveFrom || undefined); }
   /** 只存草稿。已发布版本不可修改（需求 4.6.1），要改先 restore 成新草稿。 */
-  @Post("rule-versions") async saveRule(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalRuleVersionDto) { return this.committed(req.user.tenantId, await this.business.saveRuleVersion(req.user.tenantId, this.context(req.user.tenantId), body, req.user.displayName)); }
+  @Post("rule-versions") async saveRule(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalRuleVersionDto) { return this.committed(req.user.tenantId, await this.business.saveRuleVersion(req.user.tenantId, (await this.context(req.user.tenantId)), body, req.user.displayName)); }
   /** 以某个历史版本的内容生成新草稿。属编辑级动作，只认 rules:manage。 */
-  @Post("rule-versions/:version/restore") async restoreRule(@Req() req: AuthenticatedRequest, @Param("version") version: string, @Body() body: RestoreRentalRuleVersionDto) { return this.committed(req.user.tenantId, await this.business.restoreRuleVersion(req.user.tenantId, this.context(req.user.tenantId), version, body.reason, req.user.displayName)); }
+  @Post("rule-versions/:version/restore") async restoreRule(@Req() req: AuthenticatedRequest, @Param("version") version: string, @Body() body: RestoreRentalRuleVersionDto) { return this.committed(req.user.tenantId, await this.business.restoreRuleVersion(req.user.tenantId, (await this.context(req.user.tenantId)), version, body.reason, req.user.displayName)); }
   /** 发布级动作，只认 rules:publish。 */
-  @Post("rule-versions/:version/publish") async publishRule(@Req() req: AuthenticatedRequest, @Param("version") version: string, @Body() body: PublishRentalRuleVersionDto) { return this.committed(req.user.tenantId, await this.business.publishRuleVersion(req.user.tenantId, this.context(req.user.tenantId), version, body, req.user.displayName)); }
-  @Post("rule-versions/:version/void") async voidRule(@Req() req: AuthenticatedRequest, @Param("version") version: string, @Body() body: VoidRentalRuleVersionDto) { return this.committed(req.user.tenantId, await this.business.voidRuleVersion(req.user.tenantId, this.context(req.user.tenantId), version, body.reason, req.user.displayName)); }
+  @Post("rule-versions/:version/publish") async publishRule(@Req() req: AuthenticatedRequest, @Param("version") version: string, @Body() body: PublishRentalRuleVersionDto) { return this.committed(req.user.tenantId, await this.business.publishRuleVersion(req.user.tenantId, (await this.context(req.user.tenantId)), version, body, req.user.displayName)); }
+  @Post("rule-versions/:version/void") async voidRule(@Req() req: AuthenticatedRequest, @Param("version") version: string, @Body() body: VoidRentalRuleVersionDto) { return this.committed(req.user.tenantId, await this.business.voidRuleVersion(req.user.tenantId, (await this.context(req.user.tenantId)), version, body.reason, req.user.displayName)); }
 
   // RULE-01B：押金/预授权模拟资金事件（需求 4.4.7、4.6.3）。只记录资金事实，不改订单状态机。
   @Get("orders/:orderId/funding-events") fundingEvents(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string) { return this.funding.listEvents(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId); }
@@ -346,14 +345,14 @@ export class RentalBusinessController {
   @Post("orders/:orderId/funding-events/release") @HttpCode(201) async releaseFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingReleaseDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: "preauthorization", action: "release", amount: body.amount, idempotencyKey: body.idempotencyKey, reason: body.reason }, req.user.displayName)); }
   @Post("orders/:orderId/funding-events/fail") @HttpCode(201) async failFunding(@Req() req: AuthenticatedRequest, @Param("orderId") orderId: string, @Body() body: RentalFundingFailureDto) { return this.committed(req.user.tenantId, await this.funding.recordEvent(req.user.tenantId, this.core.resolveWorkspaceId(req.user.tenantId), orderId, { instrument: body.instrument, action: "fail", amount: 0, idempotencyKey: body.idempotencyKey, reason: body.reason, failureCode: body.failureCode, paymentMethod: this.core.resolveOfflinePaymentMethod(req.user.tenantId, body.paymentMethod) }, req.user.displayName)); }
 
-  @Get("customer-coupons") async customerCoupons(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listCurrentCustomerCoupons(req.user.tenantId, this.context(req.user.tenantId), customerId); }
+  @Get("customer-coupons") async customerCoupons(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listCurrentCustomerCoupons(req.user.tenantId, (await this.context(req.user.tenantId)), customerId); }
   @Post("customer-coupons/:id/void") async voidCustomerCoupon(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: { reason: string }) {
-    return this.committed(req.user.tenantId, await this.business.voidCustomerCoupon(req.user.tenantId, this.context(req.user.tenantId), id, body.reason));
+    return this.committed(req.user.tenantId, await this.business.voidCustomerCoupon(req.user.tenantId, (await this.context(req.user.tenantId)), id, body.reason));
   }
   @Post("customer-coupons/claim") async claimCoupon(@Req() req: AuthenticatedRequest, @Body() body: { templateId: string; customerId: string }) {
     const tenantId = req.user.tenantId;
     const key = explicitIdempotencyKey(req);
-    const context = this.context(tenantId);
+    const context = (await this.context(tenantId));
     // 不传键时保持原语义：第二次请求是合法的第二次领取（受 perCustomerLimit 约束）。
     if (!key) return this.committed(tenantId, (await this.business.claimCoupon(tenantId, context, body.templateId, body.customerId)).coupon);
     const { result, replayed } = await this.idempotent.executeWithReplayFlag({
@@ -374,49 +373,49 @@ export class RentalBusinessController {
     return this.committed(tenantId, result.coupon);
   }
 
-  @Get("rewards") rewards(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listRewards(req.user.tenantId, this.context(req.user.tenantId), customerId); }
-  @Get("benefit-accounts") benefitAccounts(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listBenefitAccounts(req.user.tenantId, this.context(req.user.tenantId), customerId); }
-  @Post("rewards/grant") async grantReward(@Req() req: AuthenticatedRequest, @Body() body: GrantRentalRewardDto) { return this.committed(req.user.tenantId, await this.business.grantReward(req.user.tenantId, this.context(req.user.tenantId), body)); }
-  @Post("rewards/:id/reverse") async reverseReward(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: { reason: string }) { return this.committed(req.user.tenantId, await this.business.reverseReward(req.user.tenantId, this.context(req.user.tenantId), id, body.reason)); }
+  @Get("rewards") async rewards(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listRewards(req.user.tenantId, (await this.context(req.user.tenantId)), customerId); }
+  @Get("benefit-accounts") async benefitAccounts(@Req() req: AuthenticatedRequest, @Query("customerId") customerId?: string) { return this.business.listBenefitAccounts(req.user.tenantId, (await this.context(req.user.tenantId)), customerId); }
+  @Post("rewards/grant") async grantReward(@Req() req: AuthenticatedRequest, @Body() body: GrantRentalRewardDto) { return this.committed(req.user.tenantId, await this.business.grantReward(req.user.tenantId, (await this.context(req.user.tenantId)), body)); }
+  @Post("rewards/:id/reverse") async reverseReward(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: { reason: string }) { return this.committed(req.user.tenantId, await this.business.reverseReward(req.user.tenantId, (await this.context(req.user.tenantId)), id, body.reason)); }
 
-  @Get("notification-templates") notificationTemplates(@Req() req: AuthenticatedRequest) { return this.business.listNotificationTemplates(req.user.tenantId, this.context(req.user.tenantId)); }
+  @Get("notification-templates") async notificationTemplates(@Req() req: AuthenticatedRequest) { return this.business.listNotificationTemplates(req.user.tenantId, (await this.context(req.user.tenantId))); }
   @Post("notification-templates") async createNotificationTemplate(@Req() req: AuthenticatedRequest, @Body() body: SaveRentalNotificationTemplateDto) {
     this.assertWorkspaceWideNotificationScope();
-    return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, this.context(req.user.tenantId), body));
+    return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, (await this.context(req.user.tenantId)), body));
   }
   @Put("notification-templates/:id") async updateNotificationTemplate(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() body: SaveRentalNotificationTemplateDto) {
     this.assertWorkspaceWideNotificationScope();
-    return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, this.context(req.user.tenantId), { ...body, id }));
+    return this.committed(req.user.tenantId, await this.business.saveNotificationTemplate(req.user.tenantId, (await this.context(req.user.tenantId)), { ...body, id }));
   }
   @Get("notification-logs") async notificationLogs(@Req() req: AuthenticatedRequest) {
     const tenantId = req.user.tenantId;
     if (!this.hasRestrictedOperationalScope()) {
-      return this.business.listNotificationLogs(tenantId, this.context(tenantId));
+      return this.business.listNotificationLogs(tenantId, (await this.context(tenantId)));
     }
     if (!canResolveNotificationOrderScope(getRequestDataScope(), getRequestLocationIds())) {
       throw new ForbiddenException("当前账号的通知记录数据范围尚未解析到履约地点，已拒绝访问");
     }
-    const logs = this.business.listNotificationLogs(tenantId, this.context(tenantId));
+    const logs = this.business.listNotificationLogs(tenantId, (await this.context(tenantId)));
     return filterNotificationLogsByVisibleOrders(logs, await this.core.listOrders(tenantId));
   }
   @Post("notification-logs/retry-due") async retryDueNotifications(@Req() req: AuthenticatedRequest, @Query("limit") limit?: string) {
     this.assertWorkspaceWideNotificationScope();
     const parsedLimit = limit ? Number(limit) : 20;
-    return this.committed(req.user.tenantId, this.business.retryDueNotifications(req.user.tenantId, this.context(req.user.tenantId), Number.isFinite(parsedLimit) ? parsedLimit : 20));
+    return this.committed(req.user.tenantId, this.business.retryDueNotifications(req.user.tenantId, (await this.context(req.user.tenantId)), Number.isFinite(parsedLimit) ? parsedLimit : 20));
   }
   @Post("notification-logs/:id/query-delivery") async queryNotificationDelivery(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
     await this.assertNotificationLogScope(req.user.tenantId, id);
-    return this.committed(req.user.tenantId, this.business.queryNotificationDelivery(req.user.tenantId, this.context(req.user.tenantId), id));
+    return this.committed(req.user.tenantId, this.business.queryNotificationDelivery(req.user.tenantId, (await this.context(req.user.tenantId)), id));
   }
   @Post("notification-logs/:id/retry") async retryNotification(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
     await this.assertNotificationLogScope(req.user.tenantId, id);
-    return this.committed(req.user.tenantId, this.business.retryNotification(req.user.tenantId, this.context(req.user.tenantId), id));
+    return this.committed(req.user.tenantId, this.business.retryNotification(req.user.tenantId, (await this.context(req.user.tenantId)), id));
   }
   @Post("notifications/send") async sendNotification(@Req() req: AuthenticatedRequest, @Body() body: SendRentalNotificationDto) {
     this.assertWorkspaceWideNotificationScope();
     const tenantId = req.user.tenantId;
     const key = explicitIdempotencyKey(req);
-    const context = this.context(tenantId);
+    const context = (await this.context(tenantId));
     if (!key) return this.committed(tenantId, await this.business.sendNotification(tenantId, context, body));
     const { result, replayed } = await this.idempotent.executeWithReplayFlag({
       tenantId,
@@ -440,9 +439,9 @@ export class RentalBusinessController {
 
   @Post("quotes") async quote(@Req() req: AuthenticatedRequest, @Body() body: RentalQuoteDto) {
     const resolved = await this.core.resolvePricingGroupQuoteRequest(req.user.tenantId, body);
-    return this.committed(req.user.tenantId, await this.business.createQuote(req.user.tenantId, this.context(req.user.tenantId), resolved));
+    return this.committed(req.user.tenantId, await this.business.createQuote(req.user.tenantId, (await this.context(req.user.tenantId)), resolved));
   }
-  @Get("quotes/:id") quoteDetail(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
-    return redactDeliveryAddressPhone(this.business.getQuote(req.user.tenantId, this.context(req.user.tenantId), id));
+  @Get("quotes/:id") async quoteDetail(@Req() req: AuthenticatedRequest, @Param("id") id: string) {
+    return redactDeliveryAddressPhone(this.business.getQuote(req.user.tenantId, (await this.context(req.user.tenantId)), id));
   }
 }

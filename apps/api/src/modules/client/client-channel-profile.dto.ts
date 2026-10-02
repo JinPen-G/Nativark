@@ -29,7 +29,7 @@ export class ClientChannelFaqItemDto implements ClientChannelFaqItem {
  * 租户级客户端渠道配置（CLIENT-CHANNEL-01）。小程序与 APP 共用；微信凭证另走 SaveMiniProgramChannelDto。
  * expectedRevision 用于并发保护：不一致则拒绝保存，防止两人互相覆盖。
  */
-export class AdminLoginHighlightDto {
+export class AdminLoginHighlightInputDto {
   @IsOptional() @IsString() @MaxLength(24)
   title?: string;
 
@@ -47,8 +47,8 @@ export class AdminLoginBrandingDto implements AdminLoginBranding {
   @IsOptional() @IsString() @MaxLength(300)
   description?: string;
 
-  @IsOptional() @IsArray() @ArrayMaxSize(3) @ValidateNested({ each: true }) @Type(() => AdminLoginHighlightDto)
-  highlights?: AdminLoginHighlightDto[];
+  @IsOptional() @IsArray() @ArrayMaxSize(3) @ValidateNested({ each: true }) @Type(() => AdminLoginHighlightInputDto)
+  highlights?: AdminLoginHighlightInputDto[];
 
   @IsOptional() @IsString() @MaxLength(160)
   footerText?: string;

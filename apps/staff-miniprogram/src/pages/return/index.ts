@@ -32,7 +32,7 @@ Page({
     if (!this.data.id) { this.setData({ view: blockedState("缺少订单编号", "请从订单详情重新进入") }); return; }
     this.setData({ view: loadingState() });
     try {
-      const [order, templates, context] = await Promise.all([getOrder(this.data.id), listInspectionTemplates("return"), loadContext()]);
+      const [order, templates, context] = await Promise.all([getOrder(this.data.id), listInspectionTemplates("return", this.data.id), loadContext()]);
       if (order.status !== "renting") { this.setData({ view: blockedState("当前不能办理归还", `订单当前状态：${order.status}`) }); return; }
       if (!can("rental-os:order:return")) { this.setData({ view: blockedState("无归还权限", "请联系管理员授权") }); return; }
       this.order = order;

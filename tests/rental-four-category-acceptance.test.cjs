@@ -94,6 +94,8 @@ void (async () => {
     );
     await core.onApplicationBootstrap();
     await business.onApplicationBootstrap();
+    // 读取真实 Core 初始化检查模板；仍不模拟事实仓储或事务。
+    coreConfig.listInspectionTemplates = () => core.listInspectionTemplates(tenantId);
     // 模拟升级前已经落库的宽口径设置。读取路径必须按当前品类重新收敛，
     // 否则即使新定义改对了，老空间页面仍会继续显示旧的全量选项。
     const rawState = core.state(tenantId);
@@ -151,6 +153,120 @@ void (async () => {
     assert.ok(quote.rentalAmount > 0, `${item.categoryCode}: 相同报价链必须算出正租金`);
     assert.equal(quote.categoryCode, item.categoryCode, `${item.categoryCode}: 报价快照不得串品类`);
     assert.equal(quote.request.lines[0].itemGroupId, itemGroups[0].id, `${item.categoryCode}: 报价必须引用本空间商品`);
+
+    // 服务级矩阵：四品类均使用同一续租入口，并各自保留原单位与执行依据。
+    // 这里只验试算契约，不把替身仓储当作库存冲突/真实订单状态验收。
+    const newEndAt = new Date(Date.parse(endAt) + 24 * 60 * 60 * 1000).toISOString();
+    const renewalArgs = {
+      order: { id: `renewal_${item.categoryCode}`, quoteId: quote.id, startAt, endAt,
+        depositAmount: quote.depositAmount, preAuthAmount: quote.preAuthAmount },
+      lines: quote.request.lines.map((line) => ({ itemGroupId: line.itemGroupId,
+        pricingGroupId: line.pricingGroupId, quantity: line.quantity })),
+      newEndAt, appliedAt: new Date(Date.parse(startAt) + 3600000).toISOString(),
+      settlementMode: "immediate", fulfillmentMode: mode, locationIds: [locations[0].id], customerType: "personal"
+    };
+    for (const pricingMode of ["original_total", "incremental"]) {
+      // 显式构造两种原订单规则快照，不能因某品类默认值只验证一种续租口径。
+      quote.ruleSnapshot.extension = { enabled: true, forceImmediateWhenOverdue: true, pricingMode };
+      const frozenQuote = structuredClone(quote);
+      const renewed = await business.quoteOrderExtension(tenantId, ctx, renewalArgs);
+      assert.equal(renewed.originalEndAt, endAt);
+      assert.equal(renewed.newEndAt, newEndAt);
+      assert.ok(renewed.rentalAmount > 0, `${item.categoryCode}/${pricingMode}: 新增一天应有租金`);
+      assert.equal(renewed.executionBasis.pricingMode, pricingMode);
+      assert.equal(renewed.executionBasis.categoryCode, item.categoryCode);
+      assert.equal(renewed.executionBasis.policySource, pricingMode === "original_total" ? "original_quote" : "current_workspace");
+      assert.ok(renewed.executionBasis.pricingStrategies.length > 0);
+      assert.deepEqual(renewed.rateSnapshot.map((row) => row.unit), quote.rateSnapshot.map((row) => row.unit),
+        `${item.categoryCode}/${pricingMode}: 续租不能静默切换原计价单位`);
+      assert.ok(renewed.depositDelta >= 0 && renewed.preAuthDelta >= 0);
+      if (pricingMode === "original_total") {
+        assert.equal(renewed.pricingSnapshot.method, "original_version_difference");
+        assert.equal(renewed.ruleVersion, quote.ruleVersion);
+        assert.deepEqual(renewed.rateSnapshot, quote.rateSnapshot);
+        assert.equal(renewed.rentalAmount, renewed.pricingSnapshot.recalculatedRentalAmount - quote.rentalAmount);
+      }
+      assert.deepEqual(quote, frozenQuote, `${item.categoryCode}/${pricingMode}: 试算不能改写原报价`);
+      await assert.rejects(() => business.quoteOrderExtension(tenantId, ctx, { ...renewalArgs, newEndAt: endAt }),
+        /新的归还时间必须晚于当前归还时间/u);
+      console.log(`PASS four-category renewal ${item.categoryCode}/${pricingMode}: units, execution basis, immutable quote, end boundary`);
+    }
+
+    // 独立目标型号和价格，避免两种价格来源碰巧同价而造成假阳性。
+    const originalLine = quote.request.lines[0];
+    const originalTarget = originalLine.pricingGroupId ?? originalLine.itemGroupId;
+    const originalRate = quote.rateSnapshot.find((row) =>
+      (row.pricingGroupId ?? row.itemGroupId) === originalTarget &&
+      (!originalLine.pricingUnit || row.unit === originalLine.pricingUnit));
+    assert.ok(originalRate);
+    const replacement = await core.saveItemGroup(tenantId, {
+      code: `EXCHANGE-${item.categoryCode}`, name: "专项换货目标",
+      inventoryMode: itemGroups[0].inventoryMode,
+      attributes: { ...itemGroups[0].attributes, model: `Exchange-${item.categoryCode}` }
+    });
+    const exchangeContext = { ...ctx, groups: core.listItemGroups(tenantId), pricingGroups };
+    const replacementPlan = await business.savePricingPlan(tenantId, exchangeContext, {
+      code: `EXCHANGE-PRICE-${item.categoryCode}`, name: "专项换货现价", status: "enabled",
+      effectiveFrom: new Date().toISOString(), changeReason: "四品类换货价格来源验收",
+      rates: [{ ...originalRate, itemGroupId: replacement.id, pricingGroupId: undefined,
+        baseAmount: originalRate.baseAmount * 3, tiers: [], maxAmount: undefined }]
+    });
+    const order = { ...renewalArgs.order, serviceSnapshots: [], lines: [{
+      id: `exchange-line-${item.categoryCode}`, itemGroupId: itemGroups[0].id,
+      itemGroupCode: itemGroups[0].code, itemGroupName: itemGroups[0].name,
+      pricingGroupId: originalLine.pricingGroupId, quantity: 1,
+      inventoryMode: itemGroups[0].inventoryMode, amount: quote.rentalAmount, unitPrice: originalRate.baseAmount
+    }] };
+    const exchangeArgs = { order, previousExtensions: [], orderLineId: order.lines[0].id,
+      replacementItemGroupId: replacement.id, appliedAt: renewalArgs.appliedAt,
+      fulfillmentMode: mode, locationIds: [locations[0].id], customerType: "personal" };
+    const frozenExchangeQuote = structuredClone(quote);
+    const frozenOrder = structuredClone(order);
+    for (const priceBasis of ["original_order_price", "replacement_current_price"]) {
+      const exchanged = await business.quotePostPickupExchange(tenantId, exchangeContext, { ...exchangeArgs, priceBasis });
+      assert.equal(exchanged.originalTarget, originalTarget);
+      assert.equal(exchanged.target, replacement.id);
+      assert.equal(exchanged.replacementGroup.id, replacement.id);
+      assert.equal(exchanged.priced.newEndAt, endAt);
+      assert.equal(exchanged.priced.ruleVersion, quote.ruleVersion);
+      assert.equal(exchanged.priced.rateSnapshot[0].unit, originalRate.unit);
+      assert.equal(exchanged.priced.rateSnapshot[0].baseAmount,
+        priceBasis === "original_order_price" ? originalRate.baseAmount : replacementPlan.rates[0].baseAmount);
+      assert.equal(Boolean(exchanged.currentVersion), priceBasis === "replacement_current_price");
+      assert.ok(Number.isFinite(exchanged.priced.pricingSnapshot.recalculatedPayableAmount));
+      assert.ok(exchanged.replacementAmount > 0);
+      assert.equal(exchanged.originalAmount, quote.rentalAmount);
+      if (priceBasis === "original_order_price") {
+        assert.equal(exchanged.replacementAmount, exchanged.originalAmount, "原价换货应保留该行全租期租金");
+      } else {
+        assert.ok(exchanged.replacementAmount > exchanged.originalAmount, "三倍目标现价必须反映在换货重算租金中");
+      }
+      const basis = await business.captureExchangeExecutionBasis(tenantId, exchangeContext,
+        priceBasis, exchangeArgs.appliedAt, exchanged.priced);
+      assert.equal(basis.categoryCode, item.categoryCode);
+      assert.equal(basis.priceBasis, priceBasis);
+      assert.equal(basis.effectiveFrom, exchangeArgs.appliedAt);
+      assert.deepEqual(basis.rateSnapshot, exchanged.priced.rateSnapshot);
+      assert.ok(basis.inspectionTemplateSnapshots.length > 0);
+      // 操作执行依据独立冻结，不能与可变试算对象共享引用。
+      const frozenBasis = structuredClone(basis);
+      exchanged.priced.rateSnapshot[0].baseAmount += 1;
+      assert.deepEqual(basis, frozenBasis);
+      assert.deepEqual(quote, frozenExchangeQuote, "换货试算不得改写原报价");
+      assert.deepEqual(order, frozenOrder, "换货试算不得提前改写订单行");
+      console.log(`PASS four-category exchange ${item.categoryCode}/${priceBasis}: target, rate source, immutable quote and order`);
+    }
+    await assert.rejects(() => business.quotePostPickupExchange(tenantId, exchangeContext,
+      { ...exchangeArgs, priceBasis: "original_order_price", replacementItemGroupId: itemGroups[0].id }), /不能与原商品相同/u);
+    await assert.rejects(() => business.quotePostPickupExchange(tenantId, exchangeContext,
+      { ...exchangeArgs, priceBasis: "original_order_price", orderLineId: "missing-line" }), /换货订单行不存在/u);
+    await assert.rejects(() => business.quotePostPickupExchange(tenantId, exchangeContext,
+      { ...exchangeArgs, priceBasis: "replacement_current_price",
+        appliedAt: new Date(Date.parse(replacementPlan.effectiveFrom) - 1000).toISOString() }), /缺少当前价格版本/u);
+    await assert.rejects(() => business.quotePostPickupExchange(tenantId,
+      { ...exchangeContext, groups: exchangeContext.groups.map((group) => group.id === replacement.id
+        ? { ...group, inventoryMode: group.inventoryMode === "serialized" ? "quantity" : "serialized" } : group) },
+      { ...exchangeArgs, priceBasis: "original_order_price" }), /库存方式必须一致/u);
 
     // 非配送/自取履约不接受收货地址：带了必须报错（core 统一校验，两端与后台一致）。
     await assert.rejects(

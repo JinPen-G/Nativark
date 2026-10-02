@@ -7,6 +7,7 @@ import { LoadingState } from "@/components/LoadingState";
 import { useLocale } from "./locale";
 import { RequireAuth } from "@/features/auth/RequireAuth";
 import { useAuthStore } from "@/features/auth/authStore";
+import { CATEGORY_GOVERNANCE_PREVIEW_ENABLED } from "./categoryGovernancePreview";
 
 const LoginPage = lazy(() => import("@/features/auth/LoginPage").then((module) => ({ default: module.LoginPage })));
 const WorkbenchPage = lazy(() => import("@/features/workbench/WorkbenchPage").then((module) => ({ default: module.WorkbenchPage })));
@@ -28,6 +29,8 @@ const CorporateMembershipPage = lazy(() => import("@/features/membership/Corpora
 const MembershipPlanPage = lazy(() => import("@/features/membership/MembershipPlanPage").then((module) => ({ default: module.MembershipPlanPage })));
 const MembershipRewardsPage = lazy(() => import("@/features/membership/MembershipRewardsPage").then((module) => ({ default: module.MembershipRewardsPage })));
 const PlatformPage = lazy(() => import("@/features/platform/PlatformPage").then((module) => ({ default: module.PlatformPage })));
+const CategoryGovernancePage = lazy(() => import("@/features/platform/CategoryGovernancePage").then((module) => ({ default: module.CategoryGovernancePage })));
+const CategoryCapabilityCatalogPage = lazy(() => import("@/features/platform/CategoryGovernancePage").then((module) => ({ default: module.CategoryCapabilityCatalogPage })));
 const PlatformOperationsPage = lazy(() => import("@/features/platform/PlatformOperationsPage").then((module) => ({ default: module.PlatformOperationsPage })));
 const PlatformToolsPage = lazy(() => import("@/features/platform/PlatformToolsPage").then((module) => ({ default: module.PlatformToolsPage })));
 const OfficialCalendarSourcePage = lazy(() => import("@/features/platform/OfficialCalendarSourcePage").then((module) => ({ default: module.OfficialCalendarSourcePage })));
@@ -136,6 +139,8 @@ function ProtectedRoutes() {
             <Route path="/platform" element={<Navigate to={APP_ROUTES.platformUsers.path} replace />} />
             <Route path={APP_ROUTES.platformDemoRequests.path} element={guard(APP_ROUTES.platformDemoRequests, <DemoRequestsPage />)} />
             <Route path={APP_ROUTES.platformTenants.path} element={guard(APP_ROUTES.platformTenants, <TenantManagementPage />)} />
+            {CATEGORY_GOVERNANCE_PREVIEW_ENABLED && <Route path={APP_ROUTES.platformCategories.path} element={guard(APP_ROUTES.platformCategories, <CategoryGovernancePage />)} />}
+            {CATEGORY_GOVERNANCE_PREVIEW_ENABLED && <Route path={APP_ROUTES.platformCategoryCapabilities.path} element={guard(APP_ROUTES.platformCategoryCapabilities, <CategoryCapabilityCatalogPage />)} />}
             <Route path={APP_ROUTES.platformSubscriptions.path} element={guard(APP_ROUTES.platformSubscriptions, <PlatformSubscriptionsPage />)} />
             <Route path={APP_ROUTES.platformSubscriptionDetail.path} element={guard(APP_ROUTES.platformSubscriptionDetail, <PlatformSubscriptionDetailPage />)} />
             <Route path={APP_ROUTES.subscriptionCatalog.path} element={guard(APP_ROUTES.subscriptionCatalog, <SubscriptionCatalogPage />)} />

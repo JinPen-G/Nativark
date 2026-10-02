@@ -1,0 +1,13 @@
+"use strict";
+const assert = require("node:assert/strict");
+const { assertCategoryPreparationPermission } = require("../apps/api/dist/modules/rental-core/category-adoption-preparation.service.js");
+const { runWithRequestIdentity } = require("../apps/api/dist/common/request-identity.js");
+const user = { isSaasAdmin: false, permissions: ["rental-os:category:adopt"] };
+const call = (identity, candidate = user) => runWithRequestIdentity(identity, () => assertCategoryPreparationPermission(candidate));
+assert.doesNotThrow(() => call({ dataScope: "all", locationScope: { mode: "all" } }));
+assert.throws(() => call({ dataScope: "own" }), /受限数据范围/);
+assert.throws(() => call({ dataScope: "all", locationScope: { mode: "selected", locationIds: ["one"] } }), /受限数据范围/);
+assert.throws(() => call({ dataScope: "all" }, { ...user, permissions: ["rental-os:rules:manage", "rental-os:price:manage"] }), /仅获授权/);
+assert.throws(() => call({ dataScope: "all" }, { isSaasAdmin: true, permissions: ["*"] }), /仅获授权/);
+assert.throws(() => call({}), /受限数据范围/);
+console.log("category-preparation-permission: 采用权限独立、平台不可代租户准备、受限数据/地点范围不放宽通过");

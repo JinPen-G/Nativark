@@ -25,6 +25,7 @@ import {
 import { RentalCategoryCode, type RentalCapability, type RentalCategoryTerminology } from "@rental-os/shared";
 import type { ReactNode } from "react";
 import { applyTenantNavigationLabels } from "./navigation-terminology";
+import { CATEGORY_GOVERNANCE_PREVIEW_ENABLED } from "./categoryGovernancePreview";
 
 export interface AppRouteDefinition {
   path: string;
@@ -96,6 +97,8 @@ export const APP_ROUTES = {
   appearance: { path: "/settings/appearance", label: "外观与音效", permission: "system:integration:manage", audience: "tenant", icon: <BgColorsOutlined />, menu: true },
   paymentReconciliation: { path: "/rental/payment-reconciliation", label: "支付对账", permission: "rental-os:finance:reconcile", audience: "tenant", icon: <FileSearchOutlined />, menu: true },
   platformTenants: { path: "/platform/tenants", label: "SaaS 租户", permission: "system:tenant:manage", audience: "saas", icon: <ShopOutlined />, menu: true },
+  platformCategories: { path: "/platform/rental-categories", label: "租赁品类", permission: "system:rental-category:view", audience: "saas", icon: <AppstoreOutlined />, menu: CATEGORY_GOVERNANCE_PREVIEW_ENABLED },
+  platformCategoryCapabilities: { path: "/platform/rental-category-capabilities", label: "内核能力目录", permission: "system:rental-category:view", audience: "saas", icon: <ControlOutlined />, menu: CATEGORY_GOVERNANCE_PREVIEW_ENABLED },
   platformDemoRequests: { path: "/platform/demo-requests", label: "演示预约", permission: "system:demo-request:view", audience: "saas", icon: <CalendarOutlined />, menu: true },
   platformUsers: { path: "/platform/users", label: "组织与权限", permission: "system:user:manage", audience: "saas", icon: <TeamOutlined />, menu: true },
   platformSystem: { path: "/platform/system", label: "平台参数", permission: "system:params:manage", audience: "saas", icon: <SettingOutlined />, menu: true },
@@ -112,6 +115,7 @@ export const APP_ROUTES = {
 } satisfies Record<string, AppRouteDefinition>;
 
 export const APP_NAVIGATION: AppNavigationSection[] = [
+  { key: "platform-rental-core", label: "租赁内核", icon: <ControlOutlined />, routes: [APP_ROUTES.platformCategories, APP_ROUTES.platformCategoryCapabilities] },
   { key: "overview", label: "概览", icon: <DashboardOutlined />, routes: [APP_ROUTES.workbench, APP_ROUTES.operationReport] },
   { key: "transactions", label: "租赁交易", icon: <ApartmentOutlined />, routes: [APP_ROUTES.orders] },
   { key: "inventory", label: "商品与资产", icon: <AppstoreOutlined />, routes: [APP_ROUTES.itemGroups, APP_ROUTES.assets, APP_ROUTES.workOrders, APP_ROUTES.locations] },
