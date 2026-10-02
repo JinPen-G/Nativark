@@ -19,3 +19,4 @@ export * from "./subscription";
 export * from "./demo-request";
 export * from "./client-rich-text";
 export * from "./category-governance";
+export * from "./ai-native";
