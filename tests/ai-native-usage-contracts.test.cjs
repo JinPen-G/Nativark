@@ -4,6 +4,21 @@ require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "
 const { AI_NATIVE_COMPONENT_SCHEMAS: c01 } = require("../apps/api/src/contracts/ai-native-schemas"), { AI_GATEWAY_DRAFT_SCHEMAS: c03 } = require("../packages/shared/src/ai-gateway-draft-schemas"), { AI_USAGE_DRAFT_SCHEMAS: schemas } = require("../packages/shared/src/ai-usage-draft-schemas"), f = require("./fixtures/ai-native/usage-contracts.cjs");
 const base = { ...c01, ...c03 }, validators = h.validatorsFor(schemas, base), yes = (n, x) => assert.equal(validators[n](x), true, JSON.stringify(validators[n].errors)), no = (n, x) => assert.equal(validators[n](x), false, n);
 test("C07 closed references compose C01/C03 without billing or runtime admission", () => h.checkClosed(schemas, { ...base, ...schemas }));
+test("C07 platform selection needs no provider fields and does not imply ready", () => {
+  yes("AiTenantModelSettingsInputDraft", f.platformInput);
+  yes("AiTenantModelSettingsSummaryDraft", f.platformSummary);
+  for (const patch of [{ baseUrl: f.input.baseUrl }, { protocol: f.input.protocol }, { model: f.input.model }, { secretChange: { operation: "clear" } }]) no("AiTenantModelSettingsInputDraft", { ...f.platformInput, ...patch });
+  for (const patch of [{ model: f.input.model }, { credentialState: "configured" }, { apiKey: "secret" }]) no("AiTenantModelSettingsSummaryDraft", { ...f.platformSummary, ...patch });
+  for (const availability of ["ready", "unavailable", "not_verified"]) yes("AiTenantModelSettingsSummaryDraft", { ...f.platformSummary, availability });
+});
+test("C07 explicit mode and draft upgrade, no accidental BYOK-to-platform reinterpretation", () => {
+  const missingMode = { ...f.input }; delete missingMode.mode;
+  no("AiTenantModelSettingsInputDraft", missingMode);
+  no("AiTenantModelSettingsInputDraft", { ...f.input, mode: "platform_managed" });
+  no("AiTenantModelSettingsInputDraft", { ...f.input, draftVersion: "ain-c07-draft-1" });
+  no("AiTenantModelSettingsInputDraft", { ...f.platformInput, mode: "tenant_managed" });
+  // Legacy persistence compatibility belongs to configuration service, not wire-schema coercion.
+});
 for (const quantity of f.quantities) test(`C07 ${quantity.unit} quantity cannot mix units`, () => {
   yes("AiUsageQuantityDraft", quantity); no("AiUsageQuantityDraft", { ...quantity, value: -1 });
   no("AiUsageQuantityDraft", quantity.unit === "money" ? { ...quantity, amount: 1.5 } : { ...quantity, amount: "1.000000", currency: "CNY" });
@@ -54,6 +69,10 @@ const quantities: AiUsageQuantityDraft[] = ${JSON.stringify(f.quantities)};
 const budgets: AiBudgetLimitDraft[] = ${JSON.stringify(f.budgets)};
 const input: AiTenantModelSettingsInputDraft = ${JSON.stringify(f.input)};
 const summary: AiTenantModelSettingsSummaryDraft = ${JSON.stringify(f.summary)};
+const platformInput: AiTenantModelSettingsInputDraft = ${JSON.stringify(f.platformInput)};
+const platformSummary: AiTenantModelSettingsSummaryDraft = ${JSON.stringify(f.platformSummary)};
+// @ts-expect-error platform selection must not carry tenant provider configuration
+const platformLeak: AiTenantModelSettingsInputDraft = { ...platformInput, baseUrl: "https://example.test" };
 const settings: AiUsageSettingsDraft = ${JSON.stringify(f.setting)};
 const records: AiUsageRecordDraft[] = ${JSON.stringify(f.records)};
 const mutations: AiUsageMutationResultDraft[] = ${JSON.stringify(f.mutations)};

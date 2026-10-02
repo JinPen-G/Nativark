@@ -1,6 +1,6 @@
 import type { AiExecutionScope } from "./ai-native";
 import type { AiGatewayConfigReferenceDraft, AiGatewayUsageDraft } from "./ai-gateway-draft";
-export const AI_USAGE_DRAFT_VERSION = "ain-c07-draft-1" as const;
+export const AI_USAGE_DRAFT_VERSION = "ain-c07-draft-2" as const;
 export type AiUsageQuantityDraft =
   | { unit: "tokens" | "calls"; value: number }
   /** Exactly six decimal places, currency explicit; no exchange rate or pricing default. */
@@ -10,18 +10,25 @@ export type AiBudgetLimitDraft =
   | { state: "zero"; quantity: { unit: "tokens" | "calls"; value: 0 } | { unit: "money"; amount: "0.000000"; currency: string; scale: 6 } }
   | { state: "limited"; quantity: AiUsageQuantityDraft };
 export interface AiSettingGateDraft { enabled: boolean; revision: number }
-export interface AiTenantModelSettingsInputDraft {
+interface AiTenantModelSettingsInputBaseDraft {
   draftVersion: typeof AI_USAGE_DRAFT_VERSION; configId: string; expectedRevision: number;
-  protocol: string; baseUrl: string; model: string; enabled: boolean;
-  /** Management-only write secret. Never reuse as model input/output/log schema. */
-  secretChange: { operation: "retain" } | { operation: "replace"; apiKey: string } | { operation: "clear" };
+  enabled: boolean;
 }
-export interface AiTenantModelSettingsSummaryDraft {
+export type AiTenantModelSettingsInputDraft = AiTenantModelSettingsInputBaseDraft & (
+  | { mode: "platform_managed" }
+  | { mode: "tenant_managed"; protocol: string; baseUrl: string; model: string;
+  /** Management-only write secret. Never reuse as model input/output/log schema. */
+  secretChange: { operation: "retain" } | { operation: "replace"; apiKey: string } | { operation: "clear" } }
+);
+interface AiTenantModelSettingsSummaryBaseDraft {
   draftVersion: typeof AI_USAGE_DRAFT_VERSION; tenantId: string; configId: string; configRevision: number;
-  protocol: string; baseUrl: string; model: string; enabled: boolean;
-  credentialState: "configured" | "missing" | "rotation_required";
+  enabled: boolean;
   connectionState: "not_tested" | "mock_only" | "verified_live" | "failed";
 }
+export type AiTenantModelSettingsSummaryDraft = AiTenantModelSettingsSummaryBaseDraft & (
+  | { mode: "platform_managed"; serviceName: "Rental OS AI"; routing: "automatic"; availability: "ready" | "unavailable" | "not_verified" }
+  | { mode: "tenant_managed"; protocol: string; baseUrl: string; model: string; credentialState: "configured" | "missing" | "rotation_required" }
+);
 export interface AiUsageSettingsDraft {
   draftVersion: typeof AI_USAGE_DRAFT_VERSION; scope: Extract<AiExecutionScope, { kind: "tenant" }>;
   config: AiGatewayConfigReferenceDraft;
