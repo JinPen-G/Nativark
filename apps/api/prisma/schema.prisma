@@ -142,6 +142,7 @@ model Tenant {
   adapterLogs                       ExternalAdapterLog[]
   integrationConfigs                TenantIntegrationConfig[]
   asyncJobs                         AsyncJob[]
+  aiScopes                          AiScope[]
   printJobs                         DocumentPrintJob[]
   integrationTboxDevices            TBoxDevice[]
   logs                              OperationLog[]
@@ -343,6 +344,7 @@ model BusinessWorkspace {
   workspaceCapabilityAudits         WorkspaceCapabilityAuditEntry[]
   capabilityHookAudits              CapabilityHookAuditEntry[]
   attributeUniqueValues             RentalAttributeUniqueValue[]
+  aiScopes                          AiScope[]
   createdAt                         DateTime                                @default(now())
   updatedAt                         DateTime                                @updatedAt
 
@@ -4442,4 +4444,313 @@ model SubscriptionStandardPrice {
   updatedAt    DateTime         @updatedAt
 
   @@map("subscription_standard_prices")
+}
+
+// AIN-03/S01: additive metadata only. CHECK constraints live in the paired migration.
+// No provider credentials, chat body or business facts are stored here; references reauthorize on read.
+enum AiScopeKind {
+  PLATFORM  @map("platform")
+  TENANT    @map("tenant")
+  WORKSPACE @map("workspace")
+}
+
+enum AiAudience {
+  OPERATOR   @map("operator")
+  STAFF      @map("staff")
+  CLIENT     @map("client")
+  AUTOMATION @map("automation")
+}
+
+enum AiActorKind {
+  SAAS_ADMIN @map("saas_admin")
+  USER       @map("user")
+  CUSTOMER   @map("customer")
+  AUTOMATION @map("automation")
+}
+
+enum AiTaskStatus {
+  QUEUED               @map("queued")
+  RUNNING              @map("running")
+  WAITING_INPUT        @map("waiting_input")
+  WAITING_CONFIRMATION @map("waiting_confirmation")
+  WAITING_EXTERNAL     @map("waiting_external")
+  CANCEL_REQUESTED     @map("cancel_requested")
+  SUCCEEDED            @map("succeeded")
+  PARTIALLY_SUCCEEDED  @map("partially_succeeded")
+  FAILED               @map("failed")
+  CANCELLED            @map("cancelled")
+}
+
+enum AiStepStatus {
+  PENDING   @map("pending")
+  RUNNING   @map("running")
+  SUCCEEDED @map("succeeded")
+  FAILED    @map("failed")
+  UNKNOWN   @map("unknown")
+  CANCELLED @map("cancelled")
+}
+
+enum AiStepEffect {
+  NONE      @map("none")
+  POSSIBLE  @map("possible")
+  COMMITTED @map("committed")
+}
+
+enum AiProposalStatus {
+  PENDING_CONFIRMATION @map("pending_confirmation")
+  CONFIRMED            @map("confirmed")
+  SUPERSEDED           @map("superseded")
+  CANCELLED            @map("cancelled")
+  EXPIRED              @map("expired")
+}
+
+enum AiApprovalDecision {
+  APPROVED @map("approved")
+  REJECTED @map("rejected")
+}
+
+enum AiApprovalConsumptionStatus {
+  RESERVED         @map("reserved")
+  COMMITTED        @map("committed")
+  UNKNOWN          @map("unknown")
+  FAILED_NO_EFFECT @map("failed_no_effect")
+}
+
+/// Explicit scope root; nulls are only legal in the branches enforced by the migration.
+model AiScope {
+  id          String             @id @default(uuid()) @db.VarChar(36)
+  kind        AiScopeKind
+  /// Canonical length-prefixed ASCII key; never a caller-selected capability.
+  scopeKey    String             @unique(map: "ai_scopes_key") @db.VarChar(512)
+  tenantId    String?
+  workspaceId String?
+  tenant      Tenant?            @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  workspace   BusinessWorkspace? @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
+  tasks       AiTask[]
+  createdAt   DateTime           @default(now()) @db.DateTime(3)
+
+  @@unique([id, kind], map: "ai_scopes_id_kind")
+  @@index([tenantId, workspaceId], map: "ai_scopes_tenant_workspace")
+  @@map("ai_scopes")
+}
+
+/// Owner IDs are audit references, not permanent authorization; AIN-04 resolves the live subject.
+model AiTask {
+  id                  String          @id @default(uuid()) @db.VarChar(36)
+  scopeId             String          @db.VarChar(36)
+  scopeKind           AiScopeKind
+  scope               AiScope         @relation(fields: [scopeId, scopeKind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict)
+  audience            AiAudience
+  ownerKind           AiActorKind
+  ownerId             String          @db.VarChar(191)
+  policyId            String?         @db.VarChar(191)
+  policyRevision      Int?            @db.UnsignedInt
+  policyExpiresAt     DateTime?       @db.DateTime(3)
+  contractVersion     String          @db.VarChar(64)
+  sceneCode           String          @db.VarChar(128)
+  sceneVersion        String          @db.VarChar(64)
+  traceId             String          @db.VarChar(191)
+  status              AiTaskStatus    @default(QUEUED)
+  revision            Int             @default(1) @db.UnsignedInt
+  /// Allocated with the task mutation transaction; never expose a global cross-tenant sequence.
+  eventCursor         BigInt          @default(0) @db.UnsignedBigInt
+  inputRef            String?         @db.VarChar(191)
+  resultRef           String?         @db.VarChar(191)
+  cancelRequestedAt   DateTime?       @db.DateTime(3)
+  /// Hide conversation metadata without cascading into approvals or business records.
+  archivedAt          DateTime?       @db.DateTime(3)
+  createdAt           DateTime        @default(now()) @db.DateTime(3)
+  updatedAt           DateTime        @updatedAt @db.DateTime(3)
+  runs                AiRun[]
+  steps               AiStep[]
+  proposals           AiProposal[]
+  events              AiTaskEvent[]
+
+  @@unique([scopeId, id], map: "ai_tasks_scope_id")
+  @@unique([scopeId, id, ownerKind], map: "ai_tasks_scope_actor_kind")
+  @@index([traceId], map: "ai_tasks_trace")
+  @@index([scopeId, audience, ownerKind, ownerId, createdAt], map: "ai_tasks_owner")
+  @@index([scopeId, status, updatedAt], map: "ai_tasks_status")
+  @@map("ai_tasks")
+}
+
+/// A run is a lease/attempt, not a new business action or a new budget allowance.
+model AiRun {
+  id                String       @id @default(uuid()) @db.VarChar(36)
+  scopeId           String       @db.VarChar(36)
+  taskId            String       @db.VarChar(36)
+  task              AiTask       @relation(fields: [scopeId, taskId, actorKind], references: [scopeId, id, ownerKind], onDelete: Restrict, onUpdate: Restrict)
+  /// Effective principal is distinct from the process holding the lease; this is audit, not durable permission.
+  actorKind         AiActorKind
+  actorId           String       @db.VarChar(191)
+  authorizedAt      DateTime     @db.DateTime(3)
+  sequence          Int          @db.UnsignedInt
+  status            AiTaskStatus @default(QUEUED)
+  revision          Int          @default(1) @db.UnsignedInt
+  /// Decimal(20,0) round-trips the C04 string token without JS number precision loss.
+  fencingToken      Decimal      @default(0) @db.Decimal(20, 0)
+  leaseOwnerId      String?      @db.VarChar(191)
+  leaseExpiresAt    DateTime?    @db.DateTime(3)
+  /// Versioned resolved route reference, not Base URL/key or an Agent-selected model.
+  gatewayRouteRef   String?      @db.VarChar(191)
+  promptVersion     String?      @db.VarChar(191)
+  startedAt         DateTime?    @db.DateTime(3)
+  endedAt           DateTime?    @db.DateTime(3)
+  createdAt         DateTime     @default(now()) @db.DateTime(3)
+  updatedAt         DateTime     @updatedAt @db.DateTime(3)
+  steps             AiStep[]
+
+  @@unique([scopeId, taskId, id], map: "ai_runs_scope_task_id")
+  @@unique([scopeId, taskId, sequence], map: "ai_runs_sequence")
+  @@index([status, leaseExpiresAt], map: "ai_runs_recovery")
+  @@map("ai_runs")
+}
+
+/// One logical action across retries; the original run/action/fingerprint association is stable.
+model AiStep {
+  id                  String             @id @default(uuid()) @db.VarChar(36)
+  scopeId             String             @db.VarChar(36)
+  taskId              String             @db.VarChar(36)
+  runId               String             @db.VarChar(36)
+  task                AiTask             @relation(fields: [scopeId, taskId], references: [scopeId, id], onDelete: Restrict, onUpdate: Restrict)
+  run                 AiRun              @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
+  sequence            Int                @db.UnsignedInt
+  actionId            String             @db.VarChar(191)
+  requestFingerprint  String             @db.Char(64)
+  toolCode            String             @db.VarChar(191)
+  toolVersion         String             @db.VarChar(191)
+  status              AiStepStatus       @default(PENDING)
+  effect              AiStepEffect       @default(NONE)
+  revision            Int                @default(1) @db.UnsignedInt
+  inputRef            String?            @db.VarChar(191)
+  resultRef           String?            @db.VarChar(191)
+  errorCode           String?            @db.VarChar(64)
+  createdAt           DateTime           @default(now()) @db.DateTime(3)
+  updatedAt           DateTime           @updatedAt @db.DateTime(3)
+  proposalActions     AiProposalAction[]
+
+  @@unique([scopeId, taskId, actionId], map: "ai_steps_action")
+  @@unique([scopeId, taskId, actionId, requestFingerprint], map: "ai_steps_action_fingerprint")
+  @@unique([scopeId, runId, sequence], map: "ai_steps_sequence")
+  @@index([scopeId, taskId, status], map: "ai_steps_task_status")
+  @@map("ai_steps")
+}
+
+/// Mutable proposal head; only its current immutable version can be confirmed/consumed.
+model AiProposal {
+  id              String              @id @default(uuid()) @db.VarChar(36)
+  scopeId         String              @db.VarChar(36)
+  taskId          String              @db.VarChar(36)
+  task            AiTask              @relation(fields: [scopeId, taskId], references: [scopeId, id], onDelete: Restrict, onUpdate: Restrict)
+  stateRevision   Int                 @default(1) @db.UnsignedInt
+  currentRevision Int?                @db.UnsignedInt
+  currentVersion  AiProposalVersion?  @relation("AiProposalCurrent", fields: [scopeId, taskId, id, currentRevision], references: [scopeId, taskId, proposalId, revision], onDelete: Restrict, onUpdate: Restrict)
+  status          AiProposalStatus    @default(PENDING_CONFIRMATION)
+  createdAt       DateTime            @default(now()) @db.DateTime(3)
+  updatedAt       DateTime            @updatedAt @db.DateTime(3)
+  versions        AiProposalVersion[] @relation("AiProposalVersions")
+
+  @@unique([scopeId, taskId, id], map: "ai_proposals_scope_task_id")
+  @@index([scopeId, taskId, status], map: "ai_proposals_task_status")
+  @@map("ai_proposals")
+}
+
+/// Strict C05 metadata/ref payload, never raw prompts, credentials or copied business bodies.
+model AiProposalVersion {
+  scopeId      String             @db.VarChar(36)
+  taskId       String             @db.VarChar(36)
+  proposalId   String             @db.VarChar(36)
+  revision     Int                @db.UnsignedInt
+  proposal     AiProposal         @relation("AiProposalVersions", fields: [scopeId, taskId, proposalId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
+  payloadHash  String             @db.Char(64)
+  payload      Json
+  expiresAt    DateTime           @db.DateTime(3)
+  createdAt    DateTime           @default(now()) @db.DateTime(3)
+  currentFor   AiProposal[]       @relation("AiProposalCurrent")
+  actions      AiProposalAction[]
+  approvals    AiApproval[]
+
+  @@id([scopeId, proposalId, revision])
+  @@unique([scopeId, taskId, proposalId, revision], map: "ai_proposal_versions_scope_task")
+  @@unique([scopeId, taskId, proposalId, revision, payloadHash], map: "ai_proposal_versions_hash")
+  @@map("ai_proposal_versions")
+}
+
+/// Materialized action references allow DB foreign keys; written atomically with the C05 payload.
+model AiProposalAction {
+  scopeId            String                  @db.VarChar(36)
+  taskId             String                  @db.VarChar(36)
+  proposalId         String                  @db.VarChar(36)
+  proposalRevision   Int                     @db.UnsignedInt
+  actionId           String                  @db.VarChar(191)
+  sequence           Int                     @db.UnsignedInt
+  requestFingerprint String                  @db.Char(64)
+  proposalVersion    AiProposalVersion       @relation(fields: [scopeId, taskId, proposalId, proposalRevision], references: [scopeId, taskId, proposalId, revision], onDelete: Restrict, onUpdate: Restrict)
+  step               AiStep                  @relation(fields: [scopeId, taskId, actionId, requestFingerprint], references: [scopeId, taskId, actionId, requestFingerprint], onDelete: Restrict, onUpdate: Restrict)
+  consumptions       AiApprovalConsumption[]
+
+  @@id([scopeId, proposalId, proposalRevision, actionId])
+  @@unique([scopeId, taskId, proposalId, proposalRevision, actionId, requestFingerprint], map: "ai_proposal_actions_binding")
+  @@unique([scopeId, proposalId, proposalRevision, sequence], map: "ai_proposal_actions_sequence")
+  @@map("ai_proposal_actions")
+}
+
+/// Immutable approval decision. Revocation is checked through proposal head/current authority.
+model AiApproval {
+  id               String                  @id @default(uuid()) @db.VarChar(36)
+  scopeId          String                  @db.VarChar(36)
+  taskId           String                  @db.VarChar(36)
+  proposalId       String                  @db.VarChar(36)
+  proposalRevision Int                     @db.UnsignedInt
+  payloadHash      String                  @db.Char(64)
+  proposalVersion  AiProposalVersion       @relation(fields: [scopeId, taskId, proposalId, proposalRevision, payloadHash], references: [scopeId, taskId, proposalId, revision, payloadHash], onDelete: Restrict, onUpdate: Restrict)
+  audience         AiAudience
+  actorKind        AiActorKind
+  actorId          String                  @db.VarChar(191)
+  decision         AiApprovalDecision
+  issuedAt         DateTime                @db.DateTime(3)
+  expiresAt        DateTime                @db.DateTime(3)
+  consumptions     AiApprovalConsumption[]
+
+  @@unique([scopeId, taskId, id, proposalId, proposalRevision], map: "ai_approvals_binding")
+  @@unique([scopeId, proposalId, proposalRevision, actorKind, actorId], map: "ai_approvals_actor_decision")
+  @@map("ai_approvals")
+}
+
+/// One action consumption across proposal/approval retries; Core remains the business idempotency authority.
+model AiApprovalConsumption {
+  scopeId                String                      @db.VarChar(36)
+  taskId                 String                      @db.VarChar(36)
+  actionId               String                      @db.VarChar(191)
+  approvalId             String                      @db.VarChar(36)
+  proposalId             String                      @db.VarChar(36)
+  proposalRevision       Int                         @db.UnsignedInt
+  actionFingerprint      String                      @db.Char(64)
+  approval               AiApproval                  @relation(fields: [scopeId, taskId, approvalId, proposalId, proposalRevision], references: [scopeId, taskId, id, proposalId, proposalRevision], onDelete: Restrict, onUpdate: Restrict)
+  action                 AiProposalAction            @relation(fields: [scopeId, taskId, proposalId, proposalRevision, actionId, actionFingerprint], references: [scopeId, taskId, proposalId, proposalRevision, actionId, requestFingerprint], onDelete: Restrict, onUpdate: Restrict)
+  businessIdempotencyKey  String                      @db.VarChar(191)
+  status                 AiApprovalConsumptionStatus @default(RESERVED)
+  resultRef              String?                     @db.VarChar(191)
+  createdAt              DateTime                    @default(now()) @db.DateTime(3)
+  updatedAt              DateTime                    @updatedAt @db.DateTime(3)
+
+  @@id([scopeId, taskId, actionId])
+  @@index([scopeId, businessIdempotencyKey], map: "ai_consumptions_business_key")
+  @@map("ai_approval_consumptions")
+}
+
+/// Append in the task mutation transaction; each task has its own string-serialized cursor.
+model AiTaskEvent {
+  cursor       BigInt   @db.UnsignedBigInt
+  scopeId      String   @db.VarChar(36)
+  taskId       String   @db.VarChar(36)
+  task         AiTask   @relation(fields: [scopeId, taskId], references: [scopeId, id], onDelete: Restrict, onUpdate: Restrict)
+  taskRevision Int      @db.UnsignedInt
+  type         String   @db.VarChar(32)
+  /// Minimal C04 payload/reference only; every event read must reauthorize.
+  payload      Json
+  occurredAt   DateTime @db.DateTime(3)
+
+  @@id([scopeId, taskId, cursor])
+  @@map("ai_task_events")
 }
