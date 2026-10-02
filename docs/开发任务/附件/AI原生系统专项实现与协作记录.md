@@ -318,4 +318,4 @@ HANDOFF-ID / 原任务与CLAIM-ID：
 - Core合入main `12bac46`，AI分支 `ai/ai-native-foundation-20261002` 从此基线建立；合入与部署严格区分，没有共享数据库部署。
 - AIN-CLAIM-001 / AIN-01/S01：[实现与剩余范围](AI原生系统协作切片/AIN-01-20261002-codex.md)。14项不可执行工程目录，10个候选路由由AST及原权限函数核验；无新HTTP工具代理、无模型调用、未冻结运行契约。
 - 新测试3/3、API构建、四品类参考、品类Core对齐、初始化/刷新内存回归通过；真库/浏览器证据只引用Core先前复验，没有伪造本轮AI实流。
-- 提交以 `git log -- apps/api/src/modules/ai-native/tool-baseline.ts` 追溯；此次只包含认领切片，截图不纳入提交。作者自复查不是独立Review；AIN-01仍缺完整人工样本和逐工具失败基线。
+- 实现提交 `a8cdd30`（AI专项分支，未合入main）；此次只包含认领切片，截图不纳入提交。根目录仅同步文档。作者自复查不是独立Review；AIN-01仍缺完整人工样本和逐工具失败基线。
