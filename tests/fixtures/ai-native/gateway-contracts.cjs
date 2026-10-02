@@ -1,0 +1,13 @@
+"use strict";
+const f = require("./contract-consumer.cjs");
+const version = "ain-c03-draft-1";
+const config = { tenantId: "tenant-test", configId: "config-test", configRevision: 1, credentialRef: "credential-test", protocol: "custom-compatible-protocol", provider: "tenant-selected-provider", model: "custom-org/custom-model" };
+const capabilities = { draftVersion: version, protocol: config.protocol, provider: config.provider, model: config.model, configRevision: 1, features: ["tools", "structured_output", "image", "audio", "streaming"], contextTokens: 4096, maxOutputTokens: 512, usageAvailability: "unavailable", evidence: "mock" };
+const call = { draftVersion: version, requestId: "request-test", runId: "run-test", stepId: "step-test", context: f.contexts[0], config, expectation: { model: "requested-model", configRevision: 1, features: [] }, messages: [{ role: "user", content: [{ kind: "text", text: "Synthetic input" }] }], authorizedToolRequests: [f.request], maxOutputTokens: 32, mode: "mock" };
+const usages = [{ kind: "reported", inputTokens: 2, outputTokens: 3 }, { kind: "estimated", inputTokens: 2, outputTokens: 3, methodVersion: "estimate-1" }, { kind: "unknown", reason: "not_returned", nextAction: "reconcile" }];
+const base = { draftVersion: version, requestId: "request-test", actual: config, evidence: "mock", usage: usages[0] };
+const completed = { ...base, status: "completed", text: "Synthetic", toolRequests: [] };
+const unknown = { ...base, status: "unknown", usage: usages[2], error: { code: "AI_RESULT_UNKNOWN", message: "Reconcile", retryable: false, nextAction: "reconcile" } };
+const failures = ["authentication_failed", "timeout", "cancelled", "rate_limited", "capability_unsupported", "adapter_unavailable", "configuration_changed", "invalid_response"].map(code => ({ ...base, status: "failed", error: { code, message: "Safe synthetic error", nextAction: "manual" } }));
+const events = [{ draftVersion: version, requestId: "request-test", sequence: 1, kind: "started", actual: config, evidence: "mock" }, { draftVersion: version, requestId: "request-test", sequence: 2, kind: "text_delta", delta: "Synthetic" }, { draftVersion: version, requestId: "request-test", sequence: 3, kind: "terminal", result: completed }];
+module.exports = { version, config, capabilities, call, usages, completed, unknown, failures, events };
