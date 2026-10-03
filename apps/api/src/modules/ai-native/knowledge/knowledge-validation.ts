@@ -11,6 +11,16 @@ export const scopeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('workspace'), tenantId: id, workspaceId: id }).strict(),
 ]);
 const time = z.string().datetime({ offset: true });
+const locatorSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('page'), page: z.number().int().min(1).max(100000), paragraph: z.number().int().min(1).max(100000) }).strict(),
+  z.object({ kind: z.literal('section'), sectionId: id, paragraph: z.number().int().min(1).max(100000) }).strict(),
+]);
+export const documentSourceSchema = z.object({ kind: z.literal('document'), documentId: id, documentVersion: id, chunkId: id, scope: scopeSchema, aclRevision: z.number().int().positive(), locator: locatorSchema }).strict();
+export const factSchema = z.object({ scope: scopeSchema, resourceType: z.enum(['order', 'quote', 'configuration', 'report', 'inspection', 'knowledge']), resourceId: id, observedAt: time, basis: z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('current') }).strict(), z.object({ kind: z.literal('snapshot'), version: id }).strict(),
+  z.object({ kind: z.literal('missing'), reason: z.enum(['snapshot_missing', 'source_unavailable']) }).strict(),
+  z.object({ kind: z.literal('legacy_current_fallback'), reason: z.literal('snapshot_missing') }).strict(),
+]) }).strict();
 export const draftInput = z.object({ documentId: id, documentVersion: id, attachmentId: id, title: z.string().min(1).max(256), validFrom: time, validUntil: time.optional(), operationId: id }).strict().refine(v => !v.validUntil || Date.parse(v.validUntil) > Date.parse(v.validFrom));
 export const mutationInput = z.object({ documentId: id, expectedRevision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER - 1), operationId: id }).strict();
 export function parse<T>(schema: z.ZodType<T>, input: unknown): T {

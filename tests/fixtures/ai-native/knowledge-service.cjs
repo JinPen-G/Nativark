@@ -77,4 +77,36 @@ function typecheck(emit = false) {
   if (emit) assert.equal(program.emit().emitSkipped, false);
 }
 if (require.main === module) { typecheck(process.argv.includes('--build')); console.log('knowledge actual TypeScript: zero diagnostics'); }
-module.exports = { load, root, clone, key, scope, now, context, draft, harness, parsed, published, typecheck, attempts, shared, MemoryRepository };
+function retrieval(f) {
+  const { KnowledgeSourceService } = load('knowledge-source.service');
+  const { KnowledgeRetrievalService } = load('knowledge-retrieval.service');
+  f.bodyReads = 0; f.searchCalls = [];
+  f.selection = { select: async ctx => {
+    const grant = await f.authorization.authorize(ctx, { action: 'search', scope: ctx.scope });
+    if (!grant) return null;
+    const documents = [];
+    for (const r of f.repo.heads.values()) {
+      if (key(r.document.scope) !== key(ctx.scope) || !await f.authorization.authorize(ctx, { action: 'search', scope: ctx.scope, document: r.document })) continue;
+      documents.push({ documentId: r.document.documentId, documentVersion: r.document.documentVersion, aclRevision: r.document.aclRevision });
+    }
+    return { grant, documents };
+  } };
+  f.search = { search: async input => {
+    f.searchCalls.push(clone(input)); const result = [];
+    for (const ref of input.documents) for (const c of f.repo.chunks.get(key(input.grant.scope, ref.documentId, ref.documentVersion)) ?? []) {
+      if (c.aclRevision === ref.aclRevision && c.text.toLowerCase().includes(input.query.toLowerCase())) result.push(source(c));
+    }
+    return result.slice(0, input.limit);
+  } };
+  f.content = {
+    chunk: async (_, ref) => { f.bodyReads++; return clone((f.repo.chunks.get(key(ref.scope, ref.documentId, ref.documentVersion)) ?? []).find(c => c.chunkId === ref.chunkId) ?? null); },
+    downloadReference: async (_, d) => ({ attachmentId: d.attachmentId, documentVersion: d.documentVersion }),
+    factReference: async (_, fact) => clone(fact),
+  };
+  f.sources = new KnowledgeSourceService(f.documents, f.content);
+  f.retrieval = new KnowledgeRetrievalService(f.documents, f.sources, f.selection, f.search);
+  return f;
+}
+function source(c) { return { kind: 'document', documentId: c.documentId, documentVersion: c.documentVersion, chunkId: c.chunkId, scope: clone(c.scope), aclRevision: c.aclRevision, locator: clone(c.locator) }; }
+const query = overrides => ({ requestId: 'recall-1', query: 'Synthetic', limit: 5, ...overrides });
+module.exports = { load, root, clone, key, scope, now, context, draft, harness, parsed, published, typecheck, attempts, shared, MemoryRepository, retrieval, source, query };

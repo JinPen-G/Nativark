@@ -1,6 +1,6 @@
 import type {
   AiExecutionContext, AiExecutionScope, AiKnowledgeDocumentDraft, AiKnowledgeChunkDraft,
-  AiKnowledgeOwnerDraft, AiFactReference,
+  AiKnowledgeOwnerDraft, AiFactReference, AiKnowledgeSourceDraft,
 } from '@rental-os/shared';
 
 export type KnowledgeAction = 'create' | 'read_metadata' | 'parse' | 'publish' | 'withdraw' | 'delete' | 'revise' | 'search' | 'read_body' | 'snippet' | 'resolve_source' | 'download' | 'index' | 'change_acl';
@@ -46,6 +46,21 @@ export interface KnowledgeFilePort {
 }
 export interface KnowledgeParserPort {
   parse(document: AiKnowledgeDocumentDraft, file: { mediaType: string; bytes: Uint8Array }): AiKnowledgeChunkDraft[];
+}
+export type KnowledgeDocumentConstraint = Pick<AiKnowledgeDocumentDraft, 'documentId' | 'documentVersion' | 'aclRevision'>;
+export interface KnowledgeSearchAuthorizationPort {
+  /** Enumerate only currently permitted versions, at most 100; missing workspace is denial, never a default. */
+  select(context: AiExecutionContext): Promise<{ grant: KnowledgeGrant; documents: KnowledgeDocumentConstraint[] } | null>;
+}
+export interface KnowledgeSearchPort {
+  /** Apply every supplied scope/identity/version/ACL constraint before searching; return references only, no text/counts from outside it. */
+  search(input: { grant: KnowledgeGrant; documents: KnowledgeDocumentConstraint[]; query: string; limit: number }): Promise<Array<Extract<AiKnowledgeSourceDraft, { kind: 'document' }>>>;
+}
+export interface KnowledgeContentPort {
+  chunk(context: AiExecutionContext, source: Extract<AiKnowledgeSourceDraft, { kind: 'document' }>, maxChars: number): Promise<AiKnowledgeChunkDraft | null>;
+  /** Reference only; the eventual download endpoint must reauthorize, not mint a bearer URL here. */
+  downloadReference(context: AiExecutionContext, document: AiKnowledgeDocumentDraft): Promise<{ attachmentId: string; documentVersion: string } | null>;
+  factReference(context: AiExecutionContext, fact: AiFactReference): Promise<AiFactReference | null>;
 }
 export interface KnowledgeDocumentPorts {
   repository: KnowledgeRepositoryPort;
