@@ -17,7 +17,8 @@ function load(file, transform = source => source) {
   let definition;
   vm.runInNewContext(js, {exports, Component(value){definition=value;}, require(module){
     if (!module.startsWith('.')) throw new Error('unexpected runtime dependency');
-    const relative=path.posix.join(path.posix.dirname(file),module+'.ts');
+    const extension = file.endsWith('.js') ? '.js' : '.ts';
+    const relative=path.posix.join(path.posix.dirname(file),module+extension);
     if (!relative.startsWith('apps/') || relative.includes('..')) throw new Error('out-of-scope runtime dependency');
     return load(relative);
   }, BigInt});

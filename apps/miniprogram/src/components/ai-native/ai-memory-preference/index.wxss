@@ -1,0 +1,3 @@
+.ai-memory-preference { padding: 24rpx; color: var(--text-primary, #1f2937); }
+.ai-memory-preference view { margin-bottom: 16rpx; }
+.ai-memory-preference text { display: block; white-space: normal; overflow-wrap: anywhere; }
