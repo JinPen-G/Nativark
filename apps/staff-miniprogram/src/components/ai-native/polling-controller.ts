@@ -30,3 +30,39 @@ export class AiPollingController {
   changeContext() { this.generation += 1; this.abort?.abort(); }
   destroy() { this.active = false; this.generation += 1; this.abort?.abort(); }
 }
+
+/** Host-owned clock; no timer, request or credential is acquired on construction. */
+export interface AiPollClock { schedule(action: () => void, delay: number): unknown; clear(handle: unknown): void; }
+export class AiPollingLoop {
+  private timer: unknown = null;
+  private live = false;
+  private disposed = false;
+  private busy = false;
+  private epoch = 0;
+  private context: AiReadContext | null = null;
+  constructor(private readonly controller: AiPollingController, private readonly clock: AiPollClock, private readonly interval = 2000) {}
+  start(context: AiReadContext): void {
+    if (this.disposed) return;
+    const changed = JSON.stringify(this.context) !== JSON.stringify(context);
+    if (changed) { this.controller.changeContext(); this.epoch += 1; this.context = { ...context }; }
+    if (this.live && !changed) return;
+    this.live = true; this.controller.resume(); this.clearTimer();
+    if (!this.busy) void this.tick();
+  }
+  private clearTimer(): void { if (this.timer !== null) { this.clock.clear(this.timer); this.timer = null; } }
+  private async tick(): Promise<void> {
+    if (!this.live || this.disposed || !this.context || this.busy) return;
+    this.busy = true;
+    try { await this.controller.poll(this.context); }
+    catch { this.pause(); }
+    finally {
+      this.busy = false;
+      if (this.live && !this.disposed) {
+        const epoch = this.epoch;
+        this.timer = this.clock.schedule(() => { this.timer = null; if (epoch === this.epoch) void this.tick(); }, Math.max(100, Math.min(30000, this.interval)));
+      }
+    }
+  }
+  pause(): void { this.live = false; this.epoch += 1; this.clearTimer(); this.controller.pause(); }
+  destroy(): void { this.pause(); this.disposed = true; this.context = null; this.controller.destroy(); }
+}
