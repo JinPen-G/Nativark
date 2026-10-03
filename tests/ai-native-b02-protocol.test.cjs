@@ -1,0 +1,8 @@
+'use strict';
+const test = require('node:test'), assert = require('node:assert/strict');
+const { blockNetwork } = require('./fixtures/ai-native/contract-consumer.cjs'); blockNetwork(test);
+require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
+const { ChatCompletionsAdapter } = require('../apps/api/src/modules/ai-native/chat-completions.adapter'); const { ChatCompletionsStream } = require('../apps/api/src/modules/ai-native/chat-completions-stream');
+test('provider adapter without a transport advertises no capabilities', () => { const adapter = new ChatCompletionsAdapter({ post: async () => { throw new Error('not called'); } }); assert.deepEqual(adapter.features, []); });
+test('tool calls are rejected before an unsupported capability becomes a business result', () => { const stream = new ChatCompletionsStream('synthetic-key'); const body = 'data: ' + JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'rental.order.explain', arguments: '{}' } }] } }] }) + '\n\n'; assert.throws(() => stream.push(Buffer.from(body)), e => e.code === 'CAPABILITY_UNSUPPORTED'); });
+test('structured output is not silently reported as plain text', () => { const stream = new ChatCompletionsStream('synthetic-key', 1024, { tools: false, structured: true, parse: () => ({ structuredOutput: { ok: true } }) }); stream.push(Buffer.from('data: ' + JSON.stringify({ choices: [{ index: 0, delta: { content: '{"ok":true}' }, finish_reason: 'stop' }] }) + '\n\n')); stream.push(Buffer.from('data: [DONE]\n\n')); const result = stream.finish(); assert.deepEqual(result.structuredOutput, { ok: true }); assert.equal(result.text, '{"ok":true}'); });

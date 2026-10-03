@@ -142,7 +142,6 @@ model Tenant {
   adapterLogs                       ExternalAdapterLog[]
   integrationConfigs                TenantIntegrationConfig[]
   asyncJobs                         AsyncJob[]
-  aiScopes                          AiScope[]
   printJobs                         DocumentPrintJob[]
   integrationTboxDevices            TBoxDevice[]
   logs                              OperationLog[]
@@ -234,6 +233,7 @@ model Tenant {
   rentalCoreStateSnapshot           RentalCoreStateSnapshot[]
   rentalBusinessStateSnapshot       RentalBusinessStateSnapshot[]
   businessWorkspaces                BusinessWorkspace[]
+  aiScopes                          AiScope[]
   workspaceMembers                  WorkspaceMember[]
   rentalAttributeUniqueValues       RentalAttributeUniqueValue[]
   subscription                      TenantSubscription?
@@ -355,6 +355,234 @@ model BusinessWorkspace {
   @@index([categoryCode], map: "business_workspaces_category_idx")
   @@index([tenantId, status], map: "business_workspaces_tenant_status_idx")
   @@map("business_workspaces")
+}
+
+enum AiProviderProfileRole {
+  DEFAULT    @map("default")
+  REASONING  @map("reasoning")
+  VISION     @map("vision")
+  EMBEDDING  @map("embedding")
+}
+
+/// Server-resolved profile. credentialRef is a vault reference, never a key.
+/// CAS is enforced by the revision predicate in the repository and migration
+/// uniqueness prevents two profiles with the same role in one owner scope.
+model AiProviderProfile {
+  id                 String                 @id @default(uuid()) @db.VarChar(36)
+  scopeId            String                 @db.VarChar(36)
+  scopeKind          AiScopeKind
+  profileKey         String                 @db.VarChar(64)
+  role               AiProviderProfileRole  @default(DEFAULT)
+  serviceMode        String                 @default("tenant_managed") @db.VarChar(32)
+  protocol           String                 @db.VarChar(64)
+  provider           String                 @db.VarChar(128)
+  model              String                 @db.VarChar(256)
+  credentialRef      String                 @db.VarChar(191)
+  configRevision     Int                    @default(1) @db.UnsignedInt
+  enabled            Boolean                @default(true)
+  allowedCapabilities Json
+  createdAt          DateTime               @default(now()) @db.DateTime(3)
+  updatedAt          DateTime               @updatedAt
+  disabledAt         DateTime?
+  scope              AiScope                @relation(fields: [scopeId, scopeKind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict)
+  capabilityEvidence  AiProviderCapabilityEvidence[]
+
+  @@unique([scopeId, scopeKind, profileKey], map: "ai_provider_profiles_scope_key")
+  @@unique([scopeId, scopeKind, role], map: "ai_provider_profiles_scope_role")
+  @@index([scopeKind, serviceMode, enabled], map: "ai_provider_profiles_route_idx")
+  @@map("ai_provider_profiles")
+}
+
+/// Capability evidence is revision-bound. A provider configuration change makes
+/// older evidence stale without mutating history or granting an implicit fallback.
+model AiProviderCapabilityEvidence {
+  id                 String             @id @default(uuid()) @db.VarChar(36)
+  profileId          String             @db.VarChar(36)
+  scopeId            String             @db.VarChar(36)
+  scopeKind          AiScopeKind
+  capability         String             @db.VarChar(64)
+  status             String             @db.VarChar(32)
+  source             String             @db.VarChar(32)
+  observedRevision   Int                @db.UnsignedInt
+  evidenceHash       String             @db.VarChar(128)
+  checkedAt          DateTime           @db.DateTime(3)
+  expiresAt          DateTime?
+  details            Json?
+  profile            AiProviderProfile @relation(fields: [profileId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  createdAt          DateTime           @default(now()) @db.DateTime(3)
+  updatedAt          DateTime           @updatedAt
+
+  @@unique([profileId, capability], map: "ai_provider_capability_evidence_profile_capability_key")
+  @@index([scopeId, scopeKind, capability, observedRevision], map: "ai_provider_capability_evidence_route_idx")
+  @@map("ai_provider_capability_evidence")
+}
+
+/// Durable admission record for an AI dispatch. Unknown is a first-class state:
+/// it cannot be silently retried or treated as a successful business action.
+model AiInvocationAdmission {
+  id             String   @id @default(uuid()) @db.VarChar(36)
+  tenantId       String   @db.VarChar(191)
+  workspaceId    String   @db.VarChar(191)
+  actorId        String   @db.VarChar(191)
+  callId         String   @db.VarChar(128)
+  requestHash    String   @db.VarChar(128)
+  profileId      String?  @db.VarChar(36)
+  status         String   @db.VarChar(32)
+  dispatchId     String?  @db.VarChar(128)
+  unknownReason  String?  @db.VarChar(128)
+  expiresAt      DateTime @db.DateTime(3)
+  admittedAt     DateTime @default(now()) @db.DateTime(3)
+  updatedAt      DateTime @updatedAt
+  revokedAt      DateTime?
+  completedAt    DateTime?
+
+  @@unique([tenantId, callId], map: "ai_invocation_admission_tenant_call_key")
+  @@index([tenantId, workspaceId, status], map: "ai_invocation_admission_scope_status_idx")
+  @@index([status, expiresAt], map: "ai_invocation_admission_expiry_idx")
+  @@map("ai_invocation_admissions")
+}
+
+model AiUsageReservation {
+  id              String   @id @default(uuid()) @db.VarChar(36)
+  tenantId        String   @db.VarChar(191)
+  workspaceId     String   @db.VarChar(191)
+  callId          String   @db.VarChar(128)
+  idempotencyKey  String   @db.VarChar(128)
+  status          String   @db.VarChar(32)
+  reservedUnits   Int      @db.UnsignedInt
+  actualInput     Int?     @db.UnsignedInt
+  actualOutput    Int?     @db.UnsignedInt
+  unknownReason   String?  @db.VarChar(128)
+  expiresAt       DateTime @db.DateTime(3)
+  createdAt       DateTime @default(now()) @db.DateTime(3)
+  updatedAt       DateTime @updatedAt
+  settledAt       DateTime?
+
+  @@unique([tenantId, idempotencyKey], map: "ai_usage_reservation_tenant_key")
+  @@unique([tenantId, callId], map: "ai_usage_reservation_tenant_call_key")
+  @@index([tenantId, workspaceId, status], map: "ai_usage_reservation_scope_status_idx")
+  @@map("ai_usage_reservations")
+}
+
+model AiUsageLedgerEntry {
+  id             String   @id @default(uuid()) @db.VarChar(36)
+  reservationId  String   @db.VarChar(36)
+  tenantId       String   @db.VarChar(191)
+  eventKey       String   @db.VarChar(128)
+  kind           String   @db.VarChar(32)
+  inputUnits     Int      @default(0) @db.UnsignedInt
+  outputUnits    Int      @default(0) @db.UnsignedInt
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+
+  @@unique([reservationId, eventKey], map: "ai_usage_ledger_reservation_event_key")
+  @@index([tenantId, createdAt], map: "ai_usage_ledger_tenant_created_idx")
+  @@map("ai_usage_ledger_entries")
+}
+
+model AiKnowledgeDocument {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  tenantId    String   @db.VarChar(191)
+  workspaceId String   @db.VarChar(191)
+  title       String   @db.VarChar(256)
+  status      String   @db.VarChar(32)
+  revision    Int      @default(1) @db.UnsignedInt
+  createdAt   DateTime @default(now()) @db.DateTime(3)
+  updatedAt   DateTime @updatedAt
+  withdrawnAt DateTime?
+  versions    AiKnowledgeVersion[]
+  acl         AiKnowledgeAcl[]
+
+  @@index([tenantId, workspaceId, status], map: "ai_knowledge_documents_scope_status_idx")
+  @@map("ai_knowledge_documents")
+}
+
+model AiKnowledgeVersion {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  documentId  String   @db.VarChar(36)
+  version     Int      @db.UnsignedInt
+  status      String   @db.VarChar(32)
+  contentHash String   @db.VarChar(128)
+  createdAt   DateTime @default(now()) @db.DateTime(3)
+  document    AiKnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  chunks      AiKnowledgeChunk[]
+
+  @@unique([documentId, version], map: "ai_knowledge_versions_document_version_key")
+  @@index([documentId, status], map: "ai_knowledge_versions_document_status_idx")
+  @@map("ai_knowledge_versions")
+}
+
+model AiKnowledgeChunk {
+  id         String   @id @default(uuid()) @db.VarChar(36)
+  versionId  String   @db.VarChar(36)
+  chunkIndex Int      @db.UnsignedInt
+  text       String   @db.Text
+  tokenCount Int      @db.UnsignedInt
+  version    AiKnowledgeVersion @relation(fields: [versionId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([versionId, chunkIndex], map: "ai_knowledge_chunks_version_index_key")
+  @@map("ai_knowledge_chunks")
+}
+
+model AiKnowledgeAcl {
+  id         String   @id @default(uuid()) @db.VarChar(36)
+  documentId String   @db.VarChar(36)
+  subjectType String  @db.VarChar(32)
+  subjectId   String  @db.VarChar(191)
+  permission  String  @db.VarChar(32)
+  document    AiKnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([documentId, subjectType, subjectId], map: "ai_knowledge_acl_document_subject_key")
+  @@map("ai_knowledge_acl")
+}
+
+model AiKnowledgeIndexGeneration {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  tenantId    String   @db.VarChar(191)
+  workspaceId String   @db.VarChar(191)
+  generation  Int      @db.UnsignedInt
+  status      String   @db.VarChar(32)
+  createdAt   DateTime @default(now()) @db.DateTime(3)
+
+  @@unique([tenantId, workspaceId, generation], map: "ai_knowledge_index_scope_generation_key")
+  @@index([tenantId, workspaceId, status], map: "ai_knowledge_index_scope_status_idx")
+  @@map("ai_knowledge_index_generations")
+}
+
+model AiStructuredMemory {
+  id             String   @id @default(uuid()) @db.VarChar(36)
+  tenantId       String   @db.VarChar(191)
+  workspaceId    String   @db.VarChar(191)
+  subjectType    String   @db.VarChar(32)
+  subjectId      String   @db.VarChar(191)
+  scopeRevision  Int      @db.UnsignedInt
+  content        Json
+  contentHash    String   @db.VarChar(128)
+  status         String   @db.VarChar(32)
+  expiresAt      DateTime?
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId, workspaceId, subjectType, subjectId, status], map: "ai_memory_subject_scope_idx")
+  @@map("ai_structured_memories")
+}
+
+model AiHumanConfirmation {
+  id             String   @id @default(uuid()) @db.VarChar(36)
+  tenantId       String   @db.VarChar(191)
+  workspaceId    String   @db.VarChar(191)
+  subjectId      String   @db.VarChar(191)
+  idempotencyKey String   @db.VarChar(128)
+  proposalHash   String   @db.VarChar(128)
+  proposalRevision Int    @db.UnsignedInt
+  status         String   @db.VarChar(32)
+  confirmedBy    String?  @db.VarChar(191)
+  expiresAt      DateTime?
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+  updatedAt      DateTime @updatedAt
+
+  @@unique([tenantId, idempotencyKey], map: "ai_human_confirmation_tenant_key")
+  @@index([tenantId, workspaceId, subjectId, status], map: "ai_human_confirmation_subject_idx")
+  @@map("ai_human_confirmations")
 }
 
 /// SPACE-01：账号与经营空间的成员关系。
@@ -4527,6 +4755,7 @@ model AiScope {
   tenant      Tenant?            @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   workspace   BusinessWorkspace? @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
   tasks       AiTask[]
+  profiles    AiProviderProfile[]
   createdAt   DateTime           @default(now()) @db.DateTime(3)
 
   @@unique([id, kind], map: "ai_scopes_id_kind")
