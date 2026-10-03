@@ -1,0 +1,46 @@
+import type { AiGatewayCapabilityAssessmentDraft } from "../../../../../packages/shared/src/ai-gateway-draft";
+export interface CapabilityStatusProps {
+  assessments?: readonly AiGatewayCapabilityAssessmentDraft[];
+}
+const labels: Record<string, string> = {
+  text: "文本",
+  tools: "工具调用",
+  structured_output: "结构化输出",
+  streaming: "流式",
+  image: "视觉",
+  embedding: "向量",
+  reasoning: "推理",
+  audio: "音频",
+};
+const status = (row: AiGatewayCapabilityAssessmentDraft) =>
+  "status" in row
+    ? row.status === "supported"
+      ? `${row.evidence === "mock" ? "模拟支持" : "实时支持"}`
+      : row.status === "unsupported"
+        ? "不支持"
+        : "未验证"
+    : "未验证";
+export function CapabilityStatus({ assessments }: CapabilityStatusProps) {
+  if (!assessments) return <p role="status">能力状态不可用</p>;
+  return (
+    <ul aria-label="AI 能力状态">
+      {assessments.map((row, index) => (
+        <li key={`${row.feature}-${index}`}>
+          <span>{labels[row.feature] ?? "未知能力"}</span>
+          <span>{status(row)}</span>
+          {"reason" in row && (
+            <small>
+              （
+              {row.reason === "configuration_changed"
+                ? "配置已变化"
+                : row.reason === "not_tested"
+                  ? "尚未测试"
+                  : "探测不可用"}
+              ）
+            </small>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
