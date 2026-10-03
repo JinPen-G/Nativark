@@ -60,30 +60,42 @@ export class UnifiedAiGatewayService {
   async *stream(context: GatewayContext, request: ModelRequest, signal?: AbortSignal): AsyncGenerator<GatewayStreamEvent> {
     const life = this.deadline(signal), scope = this.scope(context);
     let admissionId: string | undefined, usageId: string | undefined, dispatched = false, accounted = false, settled = false;
+    let finalResult: GatewayInvocationResult | undefined;
     try {
       const route = await this.ports.router.resolve({ consumerScope: scope, platformScope: { id: 'platform-default', kind: 'PLATFORM' }, mode: 'tenant_managed', scene: 'chat', requiredCapabilities: ['streaming'] });
       const admission = await this.ports.admission.admit({ scope, actorId: context.actorId, callId: request.callId, requestHash: requestFingerprint(request), profileId: route.profile.id, expiresAt: new Date(Date.now() + this.deadlineMs) }); admissionId = admission.id;
       const usage = await this.ports.usage.reserve({ scope: admission.scope, callId: request.callId, idempotencyKey: request.callId, reservedUnits: request.maxOutputTokens, expiresAt: new Date(Date.now() + this.deadlineMs) }); usageId = usage.id;
       await this.ports.audit.append({ callId: request.callId, tenantId: context.tenantId, workspaceId: context.workspaceId, event: 'ai.stream.admitted', status: 'accepted' });
+      if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       dispatched = true;
       let result: GatewayInvocationResult | undefined;
       for await (const event of this.ports.transport.stream(context, request, route, life.controller.signal)) {
         if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
-        if (event.kind === 'result') result = event.result;
-        yield event;
+        if (!event || result) throw new ModelGatewayError('INVALID_RESPONSE');
+        if (event.kind === 'result') {
+          if (!event.result || typeof event.result.text !== 'string') throw new ModelGatewayError('INVALID_RESPONSE');
+          result = structuredClone(event.result);
+        } else if (event.kind === 'text_delta' && typeof event.delta === 'string') {
+          yield { kind: 'text_delta', delta: event.delta };
+        } else throw new ModelGatewayError('INVALID_RESPONSE');
       }
       // A stream without a terminal result event is incomplete, never a completed call.
+      if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       if (!result) throw new ModelGatewayError('PROVIDER_FAILED');
       if (result.usage) { await this.ports.usage.settle(admission.scope, usageId, `stream:${request.callId}`, result.usage.inputTokens, result.usage.outputTokens); accounted = true; }
       else { await this.ports.usage.markUnknown(admission.scope, usageId, 'USAGE_UNAVAILABLE'); accounted = true; }
+      if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       await this.ports.admission.transition(admission.scope, request.callId, 'admitted', 'completed');
+      if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       settled = true;
+      finalResult = result;
     } catch (error) {
       settled = true;
       if (usageId && !accounted) { try { await this.ports.usage.markUnknown(scope, usageId, dispatched ? 'DISPATCH_UNKNOWN' : 'DISPATCH_NOT_STARTED'); accounted = true; } catch { /* durable reconciliation remains pending */ } }
       if (admissionId) { try { await this.ports.admission.transition(scope, request.callId, 'admitted', dispatched ? 'unknown' : 'cancelled', { unknownReason: dispatched ? 'DISPATCH_UNKNOWN' : null }); } catch { /* durable state is authoritative */ } }
       throw error instanceof ModelGatewayError ? error : new ModelGatewayError(life.reason() ?? 'PROVIDER_FAILED');
     } finally {
+      life.controller.abort();
       life.close();
       // Consumer stopped iterating before a terminal outcome: dispatched work is unresolved.
       if (!settled) {
@@ -91,5 +103,9 @@ export class UnifiedAiGatewayService {
         if (admissionId) { try { await this.ports.admission.transition(scope, request.callId, 'admitted', dispatched ? 'unknown' : 'cancelled', { unknownReason: dispatched ? 'CONSUMER_STOPPED' : null }); } catch { /* durable state is authoritative */ } }
       }
     }
+    // Publication is last: EOF, accounting and admission commit have all succeeded.
+    // Yield outside cleanup so a consumer returning here cannot mark completion unknown.
+    if (!finalResult) throw new ModelGatewayError('INVALID_RESPONSE');
+    yield { kind: 'result', result: finalResult };
   }
 }
