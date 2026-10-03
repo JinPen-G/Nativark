@@ -1,16 +1,10 @@
 "use strict";
-const test = require("node:test"), assert = require("node:assert/strict"), net = require("node:net");
+const test = require("node:test"), assert = require("node:assert/strict"), network = require("./fixtures/ai-native/contract-consumer.cjs"); network.blockNetwork(test);
 require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { TenantModelConfigService } = require("../apps/api/src/modules/ai-native/tenant-model-config.service");
 const { SecretBox } = require("../apps/api/src/common/secret-box");
 const { ModelGatewayService } = require("../apps/api/src/modules/ai-native/model-gateway.service");
 const { ChatCompletionsAdapter } = require("../apps/api/src/modules/ai-native/chat-completions.adapter");
-const originalConnect = net.Socket.prototype.connect, originalFetch = global.fetch, external = [];
-test.before(() => {
-  net.Socket.prototype.connect = function () { external.push("socket"); throw new Error("No external calls"); };
-  global.fetch = async () => { external.push("fetch"); throw new Error("No external calls"); };
-});
-test.after(() => { net.Socket.prototype.connect = originalConnect; global.fetch = originalFetch; assert.deepEqual(external, []); });
 const context = { tenantId: "synthetic-tenant", workspaceId: "synthetic-space", actorId: "synthetic-admin" };
 const input = () => ({ protocol: "openai_chat_completions", baseUrl: "https://synthetic-model.example.test/v1/", model: "custom-org/custom-model", apiKey: "synthetic-key-not-real", expectedRevision: 0 });
 function harness() {
@@ -36,9 +30,9 @@ test("tenant selects arbitrary model and URL; key is encrypted and never returne
   assert.match(row.credentialsEncrypted, /^v1:/); assert.equal(JSON.stringify(row).includes(input().apiKey), false);
   assert.deepEqual(await h.service.get(context), result);
 });
-test("missing config is null for settings and disabled for invocation", async () => {
-  const h = harness(); assert.equal(await h.service.get(context), null);
-  await rejects(() => h.service.profile(context), "DISABLED");
+test("missing config selects platform without inventing ready state or a route", async () => {
+  const h = harness(); assert.equal((await h.service.get(context)).mode, "platform_managed");
+  await rejects(() => h.service.profile(context), "PROVIDER_UNAVAILABLE");
 });
 test("initial key required; fixed supplier names and extra fields are rejected", async () => {
   const h = harness(), { apiKey, ...withoutKey } = input();
