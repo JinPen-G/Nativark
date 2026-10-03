@@ -4,6 +4,9 @@ const path = require('node:path');
 const Module = require('node:module');
 const ts = require('typescript');
 const root = path.resolve(__dirname, '../../../apps/admin/src/features/ai-native');
+const uiStub = path.resolve(__dirname, 'b05-ui-stub.cjs');
+const resolveFilename = Module._resolveFilename;
+Module._resolveFilename = function resolveFeatureUi(request, parent, isMain, options) { return request === '@/components/ui' ? uiStub : resolveFilename.call(this, request, parent, isMain, options); };
 require.extensions['.ts'] = function featureTsExtension(module, filename) {
   module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } }).outputText, filename);
 };
