@@ -9,6 +9,7 @@ export interface TaskListProps {
   page: number;
   hasNext?: boolean;
   onPageChange?: (page: number) => void;
+  onRetry?: () => void;
 }
 const labels: Record<DisplayTask["status"], string> = {
   registered: "已登记",
@@ -30,7 +31,9 @@ export function TaskList({
   page,
   hasNext = false,
   onPageChange,
+  onRetry,
 }: TaskListProps) {
+  const currentPage = Number.isSafeInteger(page) && page > 0 ? page : 1;
   if (loading && !tasks)
     return (
       <p role="status" aria-live="polite">
@@ -38,11 +41,20 @@ export function TaskList({
       </p>
     );
   if (forbidden) return <p role="status">无权限查看 AI 任务</p>;
-  if (error) return <p role="alert">任务列表加载失败：{error}</p>;
+  if (error && !tasks) {
+    return (
+      <div>
+        <p role="alert">任务列表加载失败：{error}</p>
+        {onRetry && <Button onClick={onRetry}>重试</Button>}
+      </div>
+    );
+  }
   const rows: DisplayTask[] = (tasks ?? []).map(toDisplayTask);
   if (!rows.length) return <p role="status">暂无 AI 任务</p>;
   return (
     <section aria-label="AI 任务列表" aria-busy={paging}>
+      {loading && <p role="status" aria-live="polite">正在刷新任务…</p>}
+      {error && <p role="alert">任务列表刷新失败：{error}{onRetry && <Button onClick={onRetry}>重试</Button>}</p>}
       <ul>
         {rows.map((task) => (
           <li key={task.id}>
@@ -55,15 +67,15 @@ export function TaskList({
       </ul>
       <nav aria-label="任务分页">
         <Button
-          disabled={page <= 1 || paging}
-          onClick={() => onPageChange?.(page - 1)}
+          disabled={!onPageChange || currentPage <= 1 || paging}
+          onClick={() => onPageChange?.(currentPage - 1)}
         >
           上一页
         </Button>
-        <span>第 {page} 页</span>
+        <span>第 {currentPage} 页</span>
         <Button
-          disabled={!hasNext || paging}
-          onClick={() => onPageChange?.(page + 1)}
+          disabled={!onPageChange || !hasNext || paging}
+          onClick={() => onPageChange?.(currentPage + 1)}
         >
           下一页
         </Button>

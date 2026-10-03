@@ -27,3 +27,15 @@ test('supplement input keeps host draft controlled and exposes disabled/error st
   assert.ok(markup.includes('请选择类型'));
   assert.ok(markup.includes('value="A"'));
 });
+
+test('task list disables navigation without a callback and retains rows during refresh errors', () => {
+  const { TaskList } = load('TaskList.tsx');
+  const markup = renderToStaticMarkup(React.createElement(TaskList, {
+    tasks: [{ id: 't1', scene: 'chat', status: 'running', updatedAt: 'now' }],
+    page: 0, hasNext: true, loading: true, error: '连接中断', paging: false,
+  }));
+  assert.ok(markup.includes('正在刷新任务'));
+  assert.ok(markup.includes('连接中断'));
+  assert.ok(markup.includes('t1'));
+  assert.equal((markup.match(/disabled=""/g) ?? []).length, 2);
+});
