@@ -1,0 +1,7 @@
+export type AiNativeComponent = 'router' | 'capabilityEvidence' | 'admission' | 'usageAccounting' | 'gateway' | 'knowledge' | 'memory' | 'humanConfirmation' | 'transport' | 'audit';
+export interface AiNativeWiring { [key: string]: unknown; router: unknown; capabilityEvidence: unknown; admission: unknown; usageAccounting: unknown; gateway: unknown; knowledge: unknown; memory: unknown; humanConfirmation: unknown; transport: unknown; audit: unknown; }
+export interface WiringCheck { component: AiNativeComponent; present: boolean; enabled: boolean; reason?: string; }
+const components: readonly AiNativeComponent[] = ['router', 'capabilityEvidence', 'admission', 'usageAccounting', 'gateway', 'knowledge', 'memory', 'humanConfirmation', 'transport', 'audit'];
+/** Explicit composition check. It does not create providers or register public routes. */
+export function inspectAiNativeWiring(wiring: Partial<AiNativeWiring>): WiringCheck[] { return components.map(component => { const present = wiring[component] !== undefined && wiring[component] !== null; return { component, present, enabled: present, ...(present ? {} : { reason: 'NOT_WIRED' }) }; }); }
+export function assertAiNativeWiring(wiring: Partial<AiNativeWiring>): void { const missing = inspectAiNativeWiring(wiring).filter(item => !item.present).map(item => item.component); if (missing.length) throw new Error(`AI_NATIVE_WIRING_INCOMPLETE:${missing.join(',')}`); }
