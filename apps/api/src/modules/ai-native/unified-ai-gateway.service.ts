@@ -1,3 +1,4 @@
+import { GatewayDeadline } from './gateway-deadline';
 import { ModelGatewayError, type GatewayContext, type ModelRequest } from './model-gateway.ports';
 import type { UnifiedGatewayPorts, GatewayInvocationResult, GatewayStreamEvent } from './unified-ai-gateway.ports';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
@@ -13,63 +14,65 @@ import { requestFingerprint } from '../rental-core/rental-idempotency.repository
 export class UnifiedAiGatewayService {
   constructor(private readonly ports: UnifiedGatewayPorts, private readonly deadlineMs = 120_000) { if (!Number.isSafeInteger(deadlineMs) || deadlineMs < 1 || deadlineMs > 120_000) throw new ModelGatewayError('CONFIG_INVALID'); }
 
-  private deadline(signal?: AbortSignal) {
-    if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
-    const controller = new AbortController();
-    let reason: 'TIMEOUT' | 'CANCELLED' | null = null;
-    const timer = setTimeout(() => { reason = 'TIMEOUT'; controller.abort(); }, this.deadlineMs);
-    const abort = () => { reason = reason ?? 'CANCELLED'; controller.abort(); };
-    signal?.addEventListener('abort', abort, { once: true });
-    return { controller, reason: () => reason, close: () => { clearTimeout(timer); signal?.removeEventListener('abort', abort); } };
-  }
+  private deadline(signal?: AbortSignal) { return new GatewayDeadline(this.deadlineMs, signal); }
 
   private scope(context: GatewayContext) { return { id: `${context.tenantId}:${context.workspaceId}`, kind: 'WORKSPACE' as const, tenantId: context.tenantId, workspaceId: context.workspaceId }; }
 
   async invoke(context: GatewayContext, request: ModelRequest, signal?: AbortSignal): Promise<GatewayInvocationResult> {
     const life = this.deadline(signal), scope = this.scope(context);
-    let admissionId: string | undefined, usageId: string | undefined, dispatched = false, accounted = false, settled = false;
+    let admissionId: string | undefined, usageId: string | undefined, dispatched = false, accounted = false, settled = false, closed = false;
     try {
-      const route = await this.ports.router.resolve({ consumerScope: scope, platformScope: { id: 'platform-default', kind: 'PLATFORM' }, mode: 'tenant_managed', scene: 'chat', requiredCapabilities: (request.features ?? []).map(feature => feature === 'structuredOutput' ? 'structured_output' : feature === 'streaming' ? 'streaming' : 'tools') });
-      const admission = await this.ports.admission.admit({ scope, actorId: context.actorId, callId: request.callId, requestHash: requestFingerprint(request), profileId: route.profile.id, expiresAt: new Date(Date.now() + this.deadlineMs) }); admissionId = admission.id;
-      const usage = await this.ports.usage.reserve({ scope: admission.scope, callId: request.callId, idempotencyKey: request.callId, reservedUnits: request.maxOutputTokens, expiresAt: new Date(Date.now() + this.deadlineMs) }); usageId = usage.id;
-      await this.ports.audit.append({ callId: request.callId, tenantId: context.tenantId, workspaceId: context.workspaceId, event: 'ai.invoke.admitted', status: 'accepted' });
+      const route = await life.wait(() => this.ports.router.resolve({ consumerScope: scope, platformScope: { id: 'platform-default', kind: 'PLATFORM' }, mode: 'tenant_managed', scene: 'chat', requiredCapabilities: (request.features ?? []).map(feature => feature === 'structuredOutput' ? 'structured_output' : feature === 'streaming' ? 'streaming' : 'tools') }));
+      const admission = await life.wait(() => this.ports.admission.admit({ scope, actorId: context.actorId, callId: request.callId, requestHash: requestFingerprint(request), profileId: route.profile.id, expiresAt: life.expiresAt }).then(record => { if (closed) { void life.cleanup(() => this.ports.admission.transition(scope, request.callId, 'admitted', 'cancelled')).catch(() => {}); } else admissionId = record.id; return record; })); admissionId = admission.id;
+      const usage = await life.wait(() => this.ports.usage.reserve({ scope: admission.scope, callId: request.callId, idempotencyKey: request.callId, reservedUnits: request.maxOutputTokens, expiresAt: life.expiresAt }).then(record => { if (closed) { void life.cleanup(() => this.ports.usage.markUnknown(scope, record.id, 'LATE_RESERVATION')).catch(() => {}); } else usageId = record.id; return record; })); usageId = usage.id;
+      await life.wait(() => this.ports.audit.append({ callId: request.callId, tenantId: context.tenantId, workspaceId: context.workspaceId, event: 'ai.invoke.admitted', status: 'accepted' }));
       dispatched = true;
-      const result = await this.ports.transport.invoke(context, request, route, life.controller.signal);
+      const result = await life.wait(() => this.ports.transport.invoke(context, request, route, life.controller.signal));
       // A late result after timeout/cancel must not be converted into a completed call.
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
-      if (result.usage) { await this.ports.usage.settle(admission.scope, usageId, `invoke:${request.callId}`, result.usage.inputTokens, result.usage.outputTokens); accounted = true; }
-      else { await this.ports.usage.markUnknown(admission.scope, usageId, 'USAGE_UNAVAILABLE'); accounted = true; }
-      await this.ports.admission.transition(admission.scope, request.callId, 'admitted', 'completed');
+      const reported = result.usage;
+      if (reported) { await life.wait(() => this.ports.usage.settle(admission.scope, usage.id, `invoke:${request.callId}`, reported.inputTokens, reported.outputTokens)); accounted = true; }
+      else { await life.wait(() => this.ports.usage.markUnknown(admission.scope, usage.id, 'USAGE_UNAVAILABLE')); accounted = true; }
+      await life.wait(() => this.ports.admission.transition(admission.scope, request.callId, 'admitted', 'completed'));
       settled = true;
       return { ...result, usageState: result.usage ? 'reported' : 'reconciliation_required' };
     } catch (error) {
+      const failure = error instanceof ModelGatewayError ? error : new ModelGatewayError(life.reason() ?? 'PROVIDER_FAILED');
+      closed = true;
       settled = true;
-      if (usageId && !accounted) { try { await this.ports.usage.markUnknown(scope, usageId, dispatched ? 'DISPATCH_UNKNOWN' : 'DISPATCH_NOT_STARTED'); accounted = true; } catch { /* durable reconciliation remains pending */ } }
-      if (admissionId) { try { await this.ports.admission.transition(scope, request.callId, 'admitted', dispatched ? 'unknown' : 'cancelled', { unknownReason: dispatched ? 'DISPATCH_UNKNOWN' : null }); } catch { /* durable state is authoritative */ } }
-      throw error instanceof ModelGatewayError ? error : new ModelGatewayError(life.reason() ?? 'PROVIDER_FAILED');
+      if (usageId && !accounted) { const pendingId = usageId; try { await life.cleanup(() => this.ports.usage.markUnknown(scope, pendingId, dispatched ? 'DISPATCH_UNKNOWN' : 'DISPATCH_NOT_STARTED')); accounted = true; } catch { /* durable reconciliation remains pending */ } }
+      if (admissionId) { try { await life.cleanup(() => this.ports.admission.transition(scope, request.callId, 'admitted', dispatched ? 'unknown' : 'cancelled', { unknownReason: dispatched ? 'DISPATCH_UNKNOWN' : null })); } catch { /* durable state is authoritative */ } }
+      throw failure;
     } finally {
+      closed = true;
       life.close();
       // Only reachable if compensation itself failed mid-catch; never double-report success.
       if (!settled && (usageId || admissionId)) {
-        if (usageId && !accounted) { try { await this.ports.usage.markUnknown(scope, usageId, 'DISPATCH_UNKNOWN'); } catch { /* durable reconciliation remains pending */ } }
-        if (admissionId) { try { await this.ports.admission.transition(scope, request.callId, 'admitted', dispatched ? 'unknown' : 'cancelled', { unknownReason: dispatched ? 'DISPATCH_UNKNOWN' : null }); } catch { /* durable state is authoritative */ } }
+        if (usageId && !accounted) { const pendingId = usageId; try { await life.cleanup(() => this.ports.usage.markUnknown(scope, pendingId, 'DISPATCH_UNKNOWN')); } catch { /* durable reconciliation remains pending */ } }
+        if (admissionId) { try { await life.cleanup(() => this.ports.admission.transition(scope, request.callId, 'admitted', dispatched ? 'unknown' : 'cancelled', { unknownReason: dispatched ? 'DISPATCH_UNKNOWN' : null })); } catch { /* durable state is authoritative */ } }
       }
     }
   }
 
   async *stream(context: GatewayContext, request: ModelRequest, signal?: AbortSignal): AsyncGenerator<GatewayStreamEvent> {
     const life = this.deadline(signal), scope = this.scope(context);
-    let admissionId: string | undefined, usageId: string | undefined, dispatched = false, accounted = false, settled = false;
+    let admissionId: string | undefined, usageId: string | undefined, dispatched = false, accounted = false, settled = false, closed = false;
+    let iterator: AsyncIterator<GatewayStreamEvent> | undefined;
+    let sourceDone = false;
     let finalResult: GatewayInvocationResult | undefined;
     try {
-      const route = await this.ports.router.resolve({ consumerScope: scope, platformScope: { id: 'platform-default', kind: 'PLATFORM' }, mode: 'tenant_managed', scene: 'chat', requiredCapabilities: ['streaming'] });
-      const admission = await this.ports.admission.admit({ scope, actorId: context.actorId, callId: request.callId, requestHash: requestFingerprint(request), profileId: route.profile.id, expiresAt: new Date(Date.now() + this.deadlineMs) }); admissionId = admission.id;
-      const usage = await this.ports.usage.reserve({ scope: admission.scope, callId: request.callId, idempotencyKey: request.callId, reservedUnits: request.maxOutputTokens, expiresAt: new Date(Date.now() + this.deadlineMs) }); usageId = usage.id;
-      await this.ports.audit.append({ callId: request.callId, tenantId: context.tenantId, workspaceId: context.workspaceId, event: 'ai.stream.admitted', status: 'accepted' });
+      const route = await life.wait(() => this.ports.router.resolve({ consumerScope: scope, platformScope: { id: 'platform-default', kind: 'PLATFORM' }, mode: 'tenant_managed', scene: 'chat', requiredCapabilities: ['streaming'] }));
+      const admission = await life.wait(() => this.ports.admission.admit({ scope, actorId: context.actorId, callId: request.callId, requestHash: requestFingerprint(request), profileId: route.profile.id, expiresAt: life.expiresAt }).then(record => { if (closed) { void life.cleanup(() => this.ports.admission.transition(scope, request.callId, 'admitted', 'cancelled')).catch(() => {}); } else admissionId = record.id; return record; })); admissionId = admission.id;
+      const usage = await life.wait(() => this.ports.usage.reserve({ scope: admission.scope, callId: request.callId, idempotencyKey: request.callId, reservedUnits: request.maxOutputTokens, expiresAt: life.expiresAt }).then(record => { if (closed) { void life.cleanup(() => this.ports.usage.markUnknown(scope, record.id, 'LATE_RESERVATION')).catch(() => {}); } else usageId = record.id; return record; })); usageId = usage.id;
+      await life.wait(() => this.ports.audit.append({ callId: request.callId, tenantId: context.tenantId, workspaceId: context.workspaceId, event: 'ai.stream.admitted', status: 'accepted' }));
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       dispatched = true;
       let result: GatewayInvocationResult | undefined;
-      for await (const event of this.ports.transport.stream(context, request, route, life.controller.signal)) {
+      iterator = this.ports.transport.stream(context, request, route, life.controller.signal)[Symbol.asyncIterator]();
+      while (true) {
+        const item = await life.wait(() => iterator!.next());
+        if (item.done) { sourceDone = true; break; }
+        const event = item.value;
         if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
         if (!event || result) throw new ModelGatewayError('INVALID_RESPONSE');
         if (event.kind === 'result') {
@@ -82,25 +85,32 @@ export class UnifiedAiGatewayService {
       // A stream without a terminal result event is incomplete, never a completed call.
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       if (!result) throw new ModelGatewayError('PROVIDER_FAILED');
-      if (result.usage) { await this.ports.usage.settle(admission.scope, usageId, `stream:${request.callId}`, result.usage.inputTokens, result.usage.outputTokens); accounted = true; }
-      else { await this.ports.usage.markUnknown(admission.scope, usageId, 'USAGE_UNAVAILABLE'); accounted = true; }
+      const reported = result.usage;
+      if (reported) { await life.wait(() => this.ports.usage.settle(admission.scope, usage.id, `stream:${request.callId}`, reported.inputTokens, reported.outputTokens)); accounted = true; }
+      else { await life.wait(() => this.ports.usage.markUnknown(admission.scope, usage.id, 'USAGE_UNAVAILABLE')); accounted = true; }
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
-      await this.ports.admission.transition(admission.scope, request.callId, 'admitted', 'completed');
+      await life.wait(() => this.ports.admission.transition(admission.scope, request.callId, 'admitted', 'completed'));
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       settled = true;
       finalResult = result;
     } catch (error) {
+      const failure = error instanceof ModelGatewayError ? error : new ModelGatewayError(life.reason() ?? 'PROVIDER_FAILED');
+      closed = true;
       settled = true;
-      if (usageId && !accounted) { try { await this.ports.usage.markUnknown(scope, usageId, dispatched ? 'DISPATCH_UNKNOWN' : 'DISPATCH_NOT_STARTED'); accounted = true; } catch { /* durable reconciliation remains pending */ } }
-      if (admissionId) { try { await this.ports.admission.transition(scope, request.callId, 'admitted', dispatched ? 'unknown' : 'cancelled', { unknownReason: dispatched ? 'DISPATCH_UNKNOWN' : null }); } catch { /* durable state is authoritative */ } }
-      throw error instanceof ModelGatewayError ? error : new ModelGatewayError(life.reason() ?? 'PROVIDER_FAILED');
+      if (usageId && !accounted) { const pendingId = usageId; try { await life.cleanup(() => this.ports.usage.markUnknown(scope, pendingId, dispatched ? 'DISPATCH_UNKNOWN' : 'DISPATCH_NOT_STARTED')); accounted = true; } catch { /* durable reconciliation remains pending */ } }
+      if (admissionId) { try { await life.cleanup(() => this.ports.admission.transition(scope, request.callId, 'admitted', dispatched ? 'unknown' : 'cancelled', { unknownReason: dispatched ? 'DISPATCH_UNKNOWN' : null })); } catch { /* durable state is authoritative */ } }
+      throw failure;
     } finally {
       life.controller.abort();
+      closed = true;
       life.close();
       // Consumer stopped iterating before a terminal outcome: dispatched work is unresolved.
       if (!settled) {
-        if (usageId && !accounted) { try { await this.ports.usage.markUnknown(scope, usageId, 'CONSUMER_STOPPED'); } catch { /* durable reconciliation remains pending */ } }
-        if (admissionId) { try { await this.ports.admission.transition(scope, request.callId, 'admitted', dispatched ? 'unknown' : 'cancelled', { unknownReason: dispatched ? 'CONSUMER_STOPPED' : null }); } catch { /* durable state is authoritative */ } }
+        if (usageId && !accounted) { const pendingId = usageId; try { await life.cleanup(() => this.ports.usage.markUnknown(scope, pendingId, 'CONSUMER_STOPPED')); } catch { /* durable reconciliation remains pending */ } }
+        if (admissionId) { try { await life.cleanup(() => this.ports.admission.transition(scope, request.callId, 'admitted', dispatched ? 'unknown' : 'cancelled', { unknownReason: dispatched ? 'CONSUMER_STOPPED' : null })); } catch { /* durable state is authoritative */ } }
+      }
+      if (iterator?.return && !sourceDone) {
+        try { await life.cleanup(() => iterator!.return!()); } catch { /* bounded abandonment; durable state remains pending */ }
       }
     }
     // Publication is last: EOF, accounting and admission commit have all succeeded.
