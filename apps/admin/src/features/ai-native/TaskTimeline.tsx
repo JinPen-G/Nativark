@@ -25,7 +25,7 @@ export function TaskTimeline({ taskId, steps }: TaskTimelineProps) {
     <ol aria-label="任务步骤时间线">
       {rows.map((step) => (
         <li key={step.id}>
-          <strong>{labels[step.status]}</strong>
+          <strong>{step.availability === "unavailable" ? "无法识别／待刷新" : labels[step.status]}</strong>
           <span>{step.action}</span>
           <time>{step.occurredAt ?? "时间不可用"}</time>
         </li>

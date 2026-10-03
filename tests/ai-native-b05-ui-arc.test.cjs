@@ -39,3 +39,15 @@ test('task list disables navigation without a callback and retains rows during r
   assert.ok(markup.includes('t1'));
   assert.equal((markup.match(/disabled=""/g) ?? []).length, 2);
 });
+
+test('timeline distinguishes an unknown enum from an unavailable step payload', () => {
+  const { TaskTimeline } = load('TaskTimeline.tsx');
+  const markup = renderToStaticMarkup(React.createElement(TaskTimeline, {
+    taskId: 't1', steps: [
+      { id: 's1', taskId: 't1', action: '未知动作', status: 'future_status' },
+      { id: 's2', taskId: 't1', action: '等待核对', status: 'unknown' },
+    ],
+  }));
+  assert.ok(markup.includes('无法识别／待刷新'));
+  assert.ok(markup.includes('待核对'));
+});
