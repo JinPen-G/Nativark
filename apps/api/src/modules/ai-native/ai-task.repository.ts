@@ -37,7 +37,7 @@ export class AiTaskRepositoryError extends Error {
 }
 
 /** Bound by the application to the real request/job credential, never supplied by a model. */
-export type AiTaskRepositoryOperation = "read_metadata" | "claim_run" | "release_run" | "transition_task";
+export type AiTaskRepositoryOperation = "read_metadata" | "read_events" | "claim_run" | "release_run" | "transition_task";
 export interface AiTaskRepositoryAuthority {
   resolve(taskId: string, operation: AiTaskRepositoryOperation): Promise<AiExecutionContext>;
 }
@@ -81,7 +81,9 @@ export class AiTaskRepository {
       audience: audience.toUpperCase() as AiAudience, ownerKind, ownerId,
       ...(actor.kind === "automation" ? { policyId: actor.policyId, policyRevision: actor.policyRevision, policyExpiresAt: { gt: now } } : {})
     };
-    return { where, now, actorKind: ownerKind, actorId: ownerId, authorizedAt: new Date(parsed.data.authorizedAt) };
+    const bindingKey = JSON.stringify([scope, audience, ownerKind, ownerId,
+      actor.kind === "automation" ? [actor.policyId, actor.policyRevision, actor.expiresAt] : null]);
+    return { where, now, actorKind: ownerKind, actorId: ownerId, authorizedAt: new Date(parsed.data.authorizedAt), bindingKey };
   }
 
   private async stored<T>(operation: () => Promise<T>): Promise<T> {

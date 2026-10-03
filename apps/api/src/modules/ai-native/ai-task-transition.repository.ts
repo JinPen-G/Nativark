@@ -64,11 +64,7 @@ export class AiTaskTransitionRepository {
         });
         // Reauthorize after awaited reads/lock acquisition, before any status/event commit.
         const current = await this.access.resolveAccess(input.taskId, "transition_task");
-        const principal = (access: typeof current) => JSON.stringify([
-          access.actorKind, access.actorId, access.where.audience, access.where.scope,
-          access.where.policyId, access.where.policyRevision
-        ]);
-        if (principal(initial) !== principal(current)) throw new AiTaskRepositoryError("AI_ACCESS_DENIED");
+        if (initial.bindingKey !== current.bindingKey) throw new AiTaskRepositoryError("AI_ACCESS_DENIED");
         const occurredAt = current.now.toISOString();
         const state: AiTaskTransitionStateDraft = {
           contractVersion: AI_TASK_DRAFT_VERSION, taskId: task.id, revision: task.revision,
