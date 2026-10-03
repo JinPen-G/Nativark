@@ -96,6 +96,18 @@ function main() {
     fs.copyFileSync(file, target);
   }
 
+  // Only legal's audited rich-text parser is bundled, from this checkout's source.
+  // Other shared runtime imports remain prohibited by the artifact gate below.
+  const legalFile = path.join(dist, "pages", "legal", "index.js");
+  const legalSource = fs.readFileSync(legalFile, "utf8");
+  const sharedRequire = /require\(["']@rental-os\/shared["']\)/g;
+  if (sharedRequire.test(legalSource)) {
+    if (!legalSource.includes(".parseClientRichText)")) fail("legal shared runtime import is not the approved parser");
+    const parserSource = path.resolve(root, "../../packages/shared/src/client-rich-text.ts");
+    runTsc([parserSource, "--target", "ES2019", "--module", "commonjs", "--strict", "--skipLibCheck", "--outDir", path.join(dist, "vendor", "shared-rich-text")]);
+    fs.writeFileSync(legalFile, legalSource.replace(sharedRequire, 'require("../../vendor/shared-rich-text/client-rich-text")'));
+  }
+
   // 默认值来自编译后的 config/public.js（即 src/config/public.ts 里的常量）。
   const configFile = path.join(dist, "config", "public.js");
   if (!fs.existsSync(configFile)) fail("缺少编译产物 config/public.js");
