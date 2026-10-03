@@ -29,7 +29,14 @@ const cursor = (value: string, allowZero = false) => typeof value === "string" &
   && (allowZero ? /^(0|[1-9][0-9]*)$/u : /^[1-9][0-9]*$/u).test(value);
 const deny = (reason: Extract<AiTaskTransitionDecisionDraft, { allowed: false }>["reason"]): AiTaskTransitionDecisionDraft => ({ allowed: false, reason });
 
-export function evaluateAiTaskTransitionDraft(state: AiTaskStateDraft, request: AiTaskTransitionRequestDraft): AiTaskTransitionDecisionDraft {
+/** Only persisted transition facts are needed here; do not manufacture business fact references for validation. */
+export type AiTaskTransitionStateDraft = Pick<AiTaskStateDraft, "contractVersion" | "taskId" | "revision" | "status"> & {
+  steps: Array<Pick<AiStepStateDraft, "stepId" | "runId" | "sequence" | "revision" | "actionId"> & {
+    outcome: Pick<AiStepStateDraft["outcome"], "status" | "effect">;
+  }>;
+};
+
+export function evaluateAiTaskTransitionDraft(state: AiTaskTransitionStateDraft, request: AiTaskTransitionRequestDraft): AiTaskTransitionDecisionDraft {
   if (state.contractVersion !== AI_TASK_DRAFT_VERSION || request.contractVersion !== AI_TASK_DRAFT_VERSION
     || state.taskId !== request.taskId || !state.taskId || !isStatus(state.status) || !isStatus(request.to)
     || !validRevision(state.revision) || state.revision === Number.MAX_SAFE_INTEGER
@@ -55,6 +62,11 @@ export function evaluateAiTaskTransitionDraft(state: AiTaskStateDraft, request: 
     if (!step.stepId || !step.actionId || !step.runId || !validRevision(step.sequence) || !validRevision(step.revision)
       || ids.has(step.stepId) || actions.has(step.actionId) || sequences.has(sequenceKey)
       || !step.outcome || !["pending", "running", "succeeded", "failed", "unknown", "cancelled"].includes(step.outcome.status)) return deny("invalid_state");
+    const { status, effect } = step.outcome;
+    if ((["pending", "failed", "cancelled"].includes(status) && effect !== "none")
+      || (status === "unknown" && effect !== "possible")
+      || (status === "running" && effect !== "none" && effect !== "possible")
+      || (status === "succeeded" && effect !== "none" && effect !== "committed")) return deny("invalid_state");
     ids.add(step.stepId); actions.add(step.actionId); sequences.add(sequenceKey);
   }
   if (state.status === "queued" && steps.some(step => step.outcome.status !== "pending")) return deny("invalid_state");

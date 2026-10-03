@@ -37,8 +37,9 @@ export class AiTaskRepositoryError extends Error {
 }
 
 /** Bound by the application to the real request/job credential, never supplied by a model. */
+export type AiTaskRepositoryOperation = "read_metadata" | "claim_run" | "release_run" | "transition_task";
 export interface AiTaskRepositoryAuthority {
-  resolve(taskId: string, operation: "read_metadata" | "claim_run" | "release_run"): Promise<AiExecutionContext>;
+  resolve(taskId: string, operation: AiTaskRepositoryOperation): Promise<AiExecutionContext>;
 }
 
 /**
@@ -55,7 +56,8 @@ export class AiTaskRepository {
     if (!authority || typeof authority.resolve !== "function") throw new AiTaskRepositoryError("AI_ACCESS_DENIED");
   }
 
-  private async access(taskId: string, operation: "read_metadata" | "claim_run" | "release_run") {
+  /** Internal shared access resolver for metadata and transactional repositories; never expose over HTTP. */
+  async resolveAccess(taskId: string, operation: AiTaskRepositoryOperation) {
     if (!id.safeParse(taskId).success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
     let context: AiExecutionContext;
     try { context = await this.authority.resolve(taskId, operation); }
@@ -88,7 +90,7 @@ export class AiTaskRepository {
   }
 
   async readMetadata(taskId: string) {
-    const { where } = await this.access(taskId, "read_metadata");
+    const { where } = await this.resolveAccess(taskId, "read_metadata");
     const row = await this.stored(() => this.db.aiTask.findFirst({ where, select: taskSelect }));
     // Missing and invisible are indistinguishable. No input/result reference or stored identity is returned.
     if (!row) throw new AiTaskRepositoryError("AI_RESOURCE_UNAVAILABLE");
@@ -105,7 +107,7 @@ export class AiTaskRepository {
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
     const input = parsed.data, fence = BigInt(input.expectedFencingToken);
     if (fence >= maxFence) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
-    const access = await this.access(input.taskId, "claim_run");
+    const access = await this.resolveAccess(input.taskId, "claim_run");
     const expiresAt = new Date(access.now.getTime() + input.leaseMs);
     const result = await this.stored(() => this.db.aiRun.updateMany({
       where: {
@@ -132,7 +134,7 @@ export class AiTaskRepository {
     const parsed = releaseInput.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
     const input = parsed.data;
-    const access = await this.access(input.taskId, "release_run");
+    const access = await this.resolveAccess(input.taskId, "release_run");
     const result = await this.stored(() => this.db.aiRun.updateMany({
       where: {
         id: input.runId, taskId: input.taskId, revision: input.expectedRunRevision,
