@@ -4,7 +4,7 @@ import { isIP } from "node:net";
 import type { ModelJsonTransport } from "./chat-completions.adapter";
 import { ModelGatewayError } from "./model-gateway.ports";
 import { modelEgressUrl, publicModelAddress } from "./model-egress-policy";
-import { MODEL_HEADER_BYTES, MODEL_REQUEST_BYTES, modelByteLimit, ModelResponseBuffer } from "./model-response-limits";
+import { MODEL_HEADER_BYTES, MODEL_REQUEST_BYTES, modelByteLimit, ModelResponseBuffer, ModelResponseStreamValidator } from "./model-response-limits";
 export interface ModelEgressDependencies {
   resolve(hostname: string): Promise<Array<{ address: string; family: number }>>;
   request(options: RequestOptions, response: (response: IncomingMessage) => void): ClientRequest;
@@ -18,6 +18,56 @@ export class ModelEgressTransport implements ModelJsonTransport {
     if (!dependencies || [dependencies.resolve, dependencies.request, dependencies.now, dependencies.setTimer, dependencies.clearTimer].some(v => typeof v !== "function") || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120000) throw new ModelGatewayError("CONFIG_INVALID");
   }
   async post(input: Parameters<ModelJsonTransport["post"]>[0]): Promise<{ status: number; body: string }> {
+    return this.performPost(input);
+  }
+  async *postStream(input: Parameters<ModelJsonTransport["post"]>[0]): ReturnType<NonNullable<ModelJsonTransport["postStream"]>> {
+    if (!input.signal || typeof input.signal.addEventListener !== "function") throw new ModelGatewayError("CONFIG_INVALID");
+    const controller = new AbortController(), queue: Array<{ kind: "headers"; status: number } | { kind: "chunk"; bytes: Uint8Array }> = [];
+    let queuedBytes = 0, done = false, error: unknown, wake: (() => void) | undefined;
+    let incoming: IncomingMessage | undefined, paused = false;
+    const cancel = () => controller.abort();
+    if (input.signal?.aborted) cancel();
+    input.signal?.addEventListener("abort", cancel, { once: true });
+    const notify = () => { wake?.(); wake = undefined; };
+    const push = (event: (typeof queue)[number]) => {
+      if (controller.signal.aborted) throw new ModelGatewayError("CANCELLED");
+      queuedBytes += event.kind === "chunk" ? event.bytes.byteLength : 0;
+      if (queuedBytes > input.maxResponseBytes || queue.length >= 256) throw new ModelGatewayError("INVALID_RESPONSE");
+      queue.push(event);
+      // Bound both event count and bytes. Pause a cooperative Node response BEFORE
+      // the hard cap; keep that cap for peers which ignore pause or injected fakes.
+      if (!paused && incoming && typeof incoming.pause === 'function' && (queue.length >= 32 || queuedBytes >= 65536)) {
+        paused = true; incoming.pause();
+      }
+      notify();
+    };
+    const operation = this.performPost({ ...input, signal: controller.signal }, status => push({ kind: "headers", status }),
+      bytes => push({ kind: "chunk", bytes: Uint8Array.from(bytes) }), response => { incoming = response; }, failure => { error = failure; notify(); })
+      .catch(failure => { error = failure; }).finally(() => { done = true; notify(); });
+    try {
+      for (;;) {
+        if (error) throw error;
+        if (input.signal?.aborted) throw new ModelGatewayError("CANCELLED");
+        const event = queue.shift();
+        if (event) {
+          queuedBytes -= event.kind === "chunk" ? event.bytes.byteLength : 0;
+          if (paused && queue.length <= 8 && queuedBytes <= 16384 && !done && !controller.signal.aborted && incoming && !incoming.destroyed) {
+            paused = false; incoming.resume();
+          }
+          yield event; continue;
+        }
+        if (done) break;
+        await new Promise<void>(resolve => { wake = resolve; });
+      }
+    } finally {
+      controller.abort(); input.signal?.removeEventListener("abort", cancel);
+      await operation;
+      queue.length = 0; queuedBytes = 0; incoming = undefined;
+    }
+  }
+  private async performPost(input: Parameters<ModelJsonTransport["post"]>[0], onHeaders?: (status: number) => void,
+    onChunk?: (bytes: Uint8Array) => void, onResponse?: (response: IncomingMessage) => void,
+    onFailure?: (error: ModelGatewayError) => void): Promise<{ status: number; body: string }> {
     const url = modelEgressUrl(input.url), limit = modelByteLimit(input.maxResponseBytes);
     if (input.redirects !== "error" || typeof input.body !== "string" || Buffer.byteLength(input.body) > MODEL_REQUEST_BYTES || !input.signal || input.signal.aborted) throw new ModelGatewayError(input.signal?.aborted ? "CANCELLED" : "CONFIG_INVALID");
     const entries = Object.entries(input.headers);
@@ -32,7 +82,7 @@ export class ModelEgressTransport implements ModelJsonTransport {
         input.signal.removeEventListener("abort", cancel);
         if (timer !== undefined) this.dependencies.clearTimer(timer);
         response?.removeAllListeners("data"); response?.removeAllListeners("end");
-        if (error) { response?.destroy(); request?.destroy(); reject(error); }
+        if (error) { onFailure?.(error); response?.destroy(); request?.destroy(); reject(error); }
         else resolve(result!);
       };
       const cancel = () => finish(new ModelGatewayError("CANCELLED"));
@@ -65,8 +115,9 @@ export class ModelEgressTransport implements ModelJsonTransport {
           const status = incoming.statusCode;
           const raw = incoming.rawHeaders;
           if (!Number.isInteger(status) || !status || status < 100 || status > 599 || !Array.isArray(raw) || raw.reduce((n, value) => n + Buffer.byteLength(value), 0) > MODEL_HEADER_BYTES || (incoming.headers["content-encoding"] && incoming.headers["content-encoding"] !== "identity") || (status >= 300 && status <= 399)) { finish(new ModelGatewayError("INVALID_RESPONSE")); return; }
-          const buffer = new ModelResponseBuffer(limit);
-          incoming.on("data", chunk => { if (settled) return; try { if (expired()) throw new ModelGatewayError("TIMEOUT"); buffer.append(chunk); } catch (error) { finish(error instanceof ModelGatewayError ? error : new ModelGatewayError("INVALID_RESPONSE")); } });
+          try { onResponse?.(incoming); onHeaders?.(status); } catch (error) { finish(error instanceof ModelGatewayError ? error : new ModelGatewayError("INVALID_RESPONSE")); return; }
+          const buffer = onChunk ? new ModelResponseStreamValidator(limit) : new ModelResponseBuffer(limit);
+          incoming.on("data", chunk => { if (settled) return; try { if (expired()) throw new ModelGatewayError("TIMEOUT"); buffer.append(chunk); onChunk?.(chunk); } catch (error) { finish(error instanceof ModelGatewayError ? error : new ModelGatewayError("INVALID_RESPONSE")); } });
           incoming.on("end", () => { if (settled) return; try { if (expired()) throw new ModelGatewayError("TIMEOUT"); finish(undefined, { status, body: buffer.text() }); } catch (error) { finish(error instanceof ModelGatewayError ? error : new ModelGatewayError("INVALID_RESPONSE")); } });
           incoming.on("close", () => { if (!settled) finish(new ModelGatewayError("PROVIDER_FAILED")); });
         });

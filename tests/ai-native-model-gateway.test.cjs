@@ -157,13 +157,20 @@ test("cancellation during reservation releases before dispatch", async () => {
   await rejects(() => h.run(request(), cancel.signal), "CANCELLED"); assert.equal(count(h, "release"), 1); assert.equal(count(h, "generate"), 0);
 });
 for (const code of ["TIMEOUT", "CANCELLED"]) {
-  test(`in-flight ${code} aborts adapter and reconciles; adapter ignoring abort keeps concurrency slot`, async () => {
+  test(`in-flight ${code} aborts adapter and reconciles; adapter ignoring abort keeps concurrency slot`, { timeout: 1500 }, async t => {
     const h = harness(), cancel = new AbortController(); h.profile.timeoutMs = 10;
+    let now = 0;
+    t.mock.method(performance, 'now', () => now);
+    t.mock.timers.enable({ apis: ['setTimeout'] });
     let finish, signal;
     h.adapter.generate = async input => { signal = input.signal; return new Promise(resolve => { finish = resolve; }); };
     const pending = h.run(request(), cancel.signal);
-    if (code === "CANCELLED") setTimeout(() => cancel.abort(), 1);
-    await rejects(() => pending, code); assert.equal(signal.aborted, true); assert.equal(count(h, "reconcile"), 1);
+    const failure = rejects(() => pending, code);
+    // Exercise the in-flight branch, not a machine-load-dependent predispatch expiry.
+    while (!signal) await new Promise(resolve => setImmediate(resolve));
+    if (code === 'CANCELLED') cancel.abort();
+    else { now = 11; t.mock.timers.tick(11); }
+    await failure; assert.equal(signal.aborted, true); assert.equal(count(h, "reconcile"), 1);
     await rejects(h.run, "RATE_LIMITED");
     finish({ text: "Late ignored response", usage: { inputTokens: 1, outputTokens: 1 } });
     await new Promise(resolve => setImmediate(resolve));

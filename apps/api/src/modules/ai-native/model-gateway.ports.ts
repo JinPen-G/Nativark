@@ -1,5 +1,6 @@
+import { z } from 'zod';
 /** Internal implementation ports, NOT the centrally maintained AIN-C03 wire contract. */
-export type ModelFeature = "tools" | "structuredOutput";
+export type ModelFeature = "tools" | "structuredOutput" | "streaming";
 export interface GatewayContext { tenantId: string; workspaceId: string; actorId: string; }
 export interface ModelRequest {
   callId: string;
@@ -8,13 +9,33 @@ export interface ModelRequest {
   maxOutputTokens: number;
   features?: ModelFeature[];
 }
+/** One existing internal request validator shared by Gateway and protocol adapters.
+ * Not a new public contract or an authorization decision. */
+export const modelRequestSchema = z.object({
+  callId: z.string().min(1).max(128).regex(/^[\w.:-]+$/u),
+  model: z.string().min(1).max(256).regex(/^[\w./:-]+$/u),
+  messages: z.array(z.object({ role: z.enum(['system', 'user', 'assistant']), content: z.string().max(32000) }).strict()).min(1).max(64),
+  maxOutputTokens: z.number().int().positive().max(32768),
+  features: z.array(z.enum(['tools', 'structuredOutput', 'streaming'])).max(3).optional()
+}).strict();
 export interface ModelUsage { inputTokens: number; outputTokens: number; }
-export interface AdapterResult { text: string; usage?: ModelUsage; }
+import type { AiOrderExplainRequestDraft } from '@rental-os/shared';
+export interface AdapterResult { text: string; usage?: ModelUsage; toolRequests?: AiOrderExplainRequestDraft[]; structuredOutput?: unknown; }
+export interface ProtocolToolCall { id: string; type: 'function'; function: { name: string; arguments: string }; }
+/** Server-built protocol policy only. Never loaded from model text or request fields. */
+export interface ModelResponsePolicy {
+  readonly tools: boolean; readonly structured: boolean;
+  parse(text: string, calls: readonly ProtocolToolCall[]): Pick<AdapterResult, 'toolRequests' | 'structuredOutput'>;
+}
+/** Internal protocol events, not task/approval/business completion events. */
+export type AdapterStreamEvent = { kind: "text_delta"; delta: string } | { kind: "result"; result: AdapterResult };
 export interface ModelAdapter {
   readonly provider: string;
   readonly features: readonly ModelFeature[];
   generate(input: Readonly<ModelRequest> & { signal: AbortSignal }, credential: string,
     connection?: Readonly<{ baseUrl: string }>): Promise<AdapterResult>;
+  stream?(input: Readonly<ModelRequest> & { signal: AbortSignal }, credential: string,
+    connection?: Readonly<{ baseUrl: string }>): AsyncIterable<AdapterStreamEvent>;
 }
 export interface GatewayProfile {
   enabled: boolean;
@@ -29,13 +50,13 @@ export interface GatewayProfile {
 }
 export interface GatewayPorts {
   /** Required AIN-04 adapter: must resolve fresh server identity/scope, never model claims. */
-  authorize(context: GatewayContext): Promise<void>;
-  profile(context: GatewayContext): Promise<GatewayProfile>;
+  authorize(context: GatewayContext, signal?: AbortSignal): Promise<void>;
+  profile(context: GatewayContext, signal?: AbortSignal): Promise<GatewayProfile>;
   /** Required server vault adapter. Never provided by request payload. */
-  credential(reference: string, context: GatewayContext): Promise<string>;
+  credential(reference: string, context: GatewayContext, signal?: AbortSignal): Promise<string>;
   /** Required AIN-11 adapter; no free/unmetered fallback is supplied. */
   budget: {
-    reserve(context: GatewayContext, request: { callId: string; model: string; maxOutputTokens: number }): Promise<string>;
+    reserve(context: GatewayContext, request: { callId: string; model: string; maxOutputTokens: number }, signal?: AbortSignal): Promise<string>;
     settle(reservationId: string, usage: ModelUsage): Promise<void>;
     release(reservationId: string): Promise<void>;
     reconcile(reservationId: string, reason: string): Promise<void>;
