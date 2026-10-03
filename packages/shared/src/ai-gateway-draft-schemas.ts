@@ -2,7 +2,7 @@ import { AI_GATEWAY_DRAFT_VERSION } from "./ai-gateway-draft";
 /** Browser/Node neutral JSON-Schema builders reused by the other owned leaf drafts. */
 export interface AiLeafSchemaDraft {
   [key: string]: unknown;
-  type?: string; properties?: Record<string, AiLeafSchemaDraft>; required?: readonly string[];
+  type?: string | readonly string[]; properties?: Record<string, AiLeafSchemaDraft>; required?: readonly string[];
   items?: AiLeafSchemaDraft; oneOf?: readonly AiLeafSchemaDraft[]; $ref?: string;
 }
 export const leafRef = (name: string): AiLeafSchemaDraft => ({ $ref: `#/components/schemas/${name}` });

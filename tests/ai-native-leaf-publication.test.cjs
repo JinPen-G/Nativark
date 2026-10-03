@@ -10,7 +10,7 @@ const { AI_NATIVE_COMPONENT_SCHEMAS: base } = require("../apps/api/src/contracts
 const { AI_LEAF_COMPONENT_SCHEMAS: published } = require("../apps/api/src/contracts/ai-leaf-components");
 const { aiLeafToOpenApi30: convert } = require("../apps/api/src/contracts/ai-leaf-openapi");
 const { OPENAPI_DOCUMENT, API_CONTRACT_OPERATIONS } = require("../apps/api/src/contracts/openapi-document");
-const leaves = [shared.AI_GATEWAY_DRAFT_SCHEMAS, shared.AI_KNOWLEDGE_DRAFT_SCHEMAS, shared.AI_USAGE_DRAFT_SCHEMAS, shared.AI_EVENTS_DRAFT_SCHEMAS, shared.AI_INSPECTION_DRAFT_SCHEMAS, shared.AI_PROPOSAL_DRAFT_SCHEMAS];
+const leaves = [shared.AI_GATEWAY_DRAFT_SCHEMAS, shared.AI_KNOWLEDGE_DRAFT_SCHEMAS, shared.AI_USAGE_DRAFT_SCHEMAS, shared.AI_EVENTS_DRAFT_SCHEMAS, shared.AI_INSPECTION_DRAFT_SCHEMAS, shared.AI_PROPOSAL_DRAFT_SCHEMAS, shared.AI_ORDER_FACTS_DRAFT_SCHEMAS];
 const original = Object.assign({}, ...leaves);
 // AJV consumes JSON Schema, not OpenAPI 3.0's boolean exclusive-bound spelling.
 function forAjv(value) {
@@ -120,7 +120,7 @@ test("platform tasks have explicit gateway and usage scope without a fabricated 
 });
 
 test("unsupported constraints and reference siblings fail instead of silently widening schemas", () => {
-  for (const schema of [false, null, [], { type: "null" }, { type: ["string", "null"] }, { const: {} }, { const: null }, { const: 1, enum: [2] }, { exclusiveMinimum: true }, { minimum: Infinity }, { minItems: -1 }, { pattern: 42 }, { additionalProperties: null }, { anyOf: [] }, { enum: [] }, { required: ["a", "a"] }, { unevaluatedProperties: false }, { $ref: "https://example.invalid/schema" }, { $ref: "#/components/schemas/AiToolError", description: "ignored" }]) {
+  for (const schema of [false, null, [], { type: "null" }, { type: ["string", "number"] }, { const: {} }, { const: null }, { const: 1, enum: [2] }, { exclusiveMinimum: true }, { minimum: Infinity }, { minItems: -1 }, { pattern: 42 }, { additionalProperties: null }, { anyOf: [] }, { enum: [] }, { required: ["a", "a"] }, { unevaluatedProperties: false }, { $ref: "https://example.invalid/schema" }, { $ref: "#/components/schemas/AiToolError", description: "ignored" }]) {
     assert.throws(() => convert(schema), TypeError);
   }
 });

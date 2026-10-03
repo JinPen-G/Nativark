@@ -20,6 +20,14 @@ export function aiLeafToOpenApi30(schema: unknown, path = "schema"): SchemaObjec
         output.$ref = value;
         break;
       case "type":
+        if (Array.isArray(value)) {
+          if (value.length !== 2 || !value.includes("null")) return fail("only a single type plus null is supported");
+          const nonNull = value.find(item => item !== "null");
+          if (typeof nonNull !== "string" || !["object", "array", "string", "integer", "number", "boolean"].includes(nonNull)) return fail("invalid nullable type");
+          output.type = nonNull;
+          output.nullable = true;
+          break;
+        }
         if (typeof value !== "string" || !["object", "array", "string", "integer", "number", "boolean"].includes(value)) return fail("unsupported type");
         output.type = value;
         break;
