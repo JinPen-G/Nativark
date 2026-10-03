@@ -1,0 +1,3 @@
+"use strict";
+const test = require("node:test"); const assert = require("node:assert/strict"); const rows = require("./fixtures/ai-native/b07-memory-confirmation.cjs");
+test("memory confirmation fixtures preserve revision, hash, expiry and human boundary cases", () => { assert.ok(rows.some(row => row.expectedRevision !== undefined)); assert.ok(rows.some(row => row.contentHash !== "synthetic-hash-a")); assert.ok(rows.some(row => row.state === "expired")); const automation = rows.find(row => row.automation); assert.equal(automation.actor, "automation"); assert.notEqual(automation.state, "confirmed"); assert.ok(rows.every(row => row.id.startsWith("synthetic-"))); });
