@@ -86,15 +86,16 @@ test("S07 settlement failure is accounting pending and conservatively reconciled
   await reject(() => h.gateway.generate(h.context, h.request), "ACCOUNTING_PENDING");
   assert.deepEqual(h.events.map(e => e[0]), ["reserve", "settle", "reconcile"]);
 });
-test("S07 KNOWN GAP: revision changes during budget await still dispatch old credential", async () => {
+test("S06 revision changes during budget await reject stale dispatch and release reservation", async () => {
   const h = await f.harness(classes, { onReserve: async state => state.service.changeMode({ tenantId: "tenant-test", workspaceId: "workspace-test", actorId: "operator-test" }, { mode: "platform_managed", expectedRevision: 1 }) });
-  await h.gateway.generate(h.context, h.request);
+  await reject(() => h.gateway.generate(h.context, h.request), "CONFIG_INVALID");
   assert.equal((await h.service.selection(h.context)).mode, "platform_managed");
-  assert.equal(h.peer.state.options.length, 1); assert.equal(h.peer.state.options[0].headers.Authorization, "Bearer " + h.settings.apiKey);
+  assert.equal(h.peer.state.options.length, 0); assert.deepEqual(h.events.map(e => e[0]), ["reserve", "release"]);
 });
-test("S07 KNOWN GAP: gateway authorization revoked during budget await not rechecked", async () => {
+test("S06 authorization revoked during budget await rejects before dispatch", async () => {
   const h = await f.harness(classes, { onReserve: async state => state.revoke() });
-  await h.gateway.generate(h.context, h.request);
-  assert.equal(h.scopes.length, 1); assert.equal(h.peer.state.options.length, 1);
+  await reject(() => h.gateway.generate(h.context, h.request), "FORBIDDEN");
+  assert.equal(h.scopes.length, 2); assert.equal(h.peer.state.options.length, 0);
+  assert.deepEqual(h.events.map(e => e[0]), ["reserve", "release"]);
   await reject(() => h.gateway.generate(h.context, h.request), "FORBIDDEN");
 });

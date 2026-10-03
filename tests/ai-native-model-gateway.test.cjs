@@ -1,15 +1,10 @@
 "use strict";
-const test = require("node:test"), assert = require("node:assert/strict"), net = require("node:net");
+const test = require("node:test"), assert = require("node:assert/strict");
+require("./fixtures/ai-native/contract-consumer.cjs").blockNetwork(test);
 require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node", experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { ModelGatewayService } = require("../apps/api/src/modules/ai-native/model-gateway.service");
 const { ModelGatewayModule } = require("../apps/api/src/modules/ai-native/model-gateway.module");
 const { ModelAdapterError, ModelGatewayError } = require("../apps/api/src/modules/ai-native/model-gateway.ports");
-const originalConnect = net.Socket.prototype.connect, originalFetch = global.fetch, external = [];
-test.before(() => {
-  net.Socket.prototype.connect = function () { external.push("socket"); throw new Error("No external calls"); };
-  global.fetch = async () => { external.push("fetch"); throw new Error("No external calls"); };
-});
-test.after(() => { net.Socket.prototype.connect = originalConnect; global.fetch = originalFetch; assert.deepEqual(external, []); });
 const context = { tenantId: "synthetic-tenant", workspaceId: "synthetic-space", actorId: "synthetic-actor" };
 const request = () => ({ callId: "synthetic-call", model: "synthetic-model", messages: [{ role: "user", content: "Synthetic input only" }], maxOutputTokens: 100 });
 function harness() {
@@ -34,6 +29,29 @@ function harness() {
 const rejects = (operation, code) => assert.rejects(operation, error => error instanceof ModelGatewayError && error.code === code && error.message === code);
 const count = (h, kind) => h.calls.filter(row => row[0] === kind).length;
 
+test("S06 mandatory gateway ports cannot be omitted at construction", () => {
+  const h = harness();
+  for (const name of ["authorize", "profile", "credential", "budget"]) {
+    const ports = { ...h.ports, [name]: undefined };
+    assert.throws(() => new ModelGatewayService(ports, [h.adapter]), e => e.code === "CONFIG_INVALID");
+  }
+  for (const name of ["reserve", "settle", "release", "reconcile"]) assert.throws(() => new ModelGatewayService({ ...h.ports, budget: { ...h.ports.budget, [name]: undefined } }, [h.adapter]), e => e.code === "CONFIG_INVALID");
+});
+for (const [name, code] of [["disabled", "DISABLED"], ["route", "CONFIG_INVALID"], ["key", "CREDENTIAL_UNAVAILABLE"], ["capability", "CAPABILITY_UNSUPPORTED"]]) test("S06 changed " + name + " during reserve is rechecked before dispatch", async () => {
+  const h = harness(), reserve = h.ports.budget.reserve;
+  if (name === "capability") h.adapter.features = ["tools"];
+  h.ports.budget.reserve = async (...args) => {
+    const id = await reserve(...args);
+    if (name === "disabled") h.profile.enabled = false;
+    if (name === "route") h.profile.credentialRef = "vault:rotated";
+    if (name === "key") h.ports.credential = async () => "synthetic-new-key";
+    if (name === "capability") h.adapter.features = [];
+    return id;
+  };
+  await rejects(() => h.run(name === "capability" ? { ...request(), features: ["tools"] } : request()), code);
+  assert.equal(count(h, "generate"), 0); assert.equal(count(h, "release"), 1); assert.equal(count(h, "reconcile"), 0);
+});
+
 test("tenant concurrency quota is isolated even when tenants use the same protocol", async () => {
   const h = harness(); let finish;
   h.adapter.generate = () => new Promise(resolve => { finish = () => resolve({ text: "Synthetic", usage: { inputTokens: 1, outputTokens: 1 } }); });
@@ -48,7 +66,7 @@ test("gateway executes authorized request through vault and budget and returns r
   const h = harness(), result = await h.run();
   assert.equal(result.text, "Synthetic answer"); assert.deepEqual(result.usage, { inputTokens: 5, outputTokens: 3 });
   assert.equal(result.usageState, "reported"); assert.equal(JSON.stringify(result).includes(h.secret), false);
-  assert.deepEqual(h.calls.map(row => row[0]), ["authorize", "credential", "reserve", "generate", "settle"]);
+  assert.deepEqual(h.calls.map(row => row[0]), ["authorize", "credential", "reserve", "authorize", "credential", "generate", "settle"]);
   assert.equal(count(h, "release"), 0);
 });
 test("module explicitly wires gateway but declares no controllers or automatic providers", () => {

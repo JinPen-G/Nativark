@@ -29,6 +29,9 @@ export class ModelGatewayService {
   private readonly adapters = new Map<string, ModelAdapter>();
   private readonly active = new Map<string, number>();
   constructor(private readonly ports: GatewayPorts, adapters: readonly ModelAdapter[]) {
+    if (!ports || [ports.authorize, ports.profile, ports.credential, ports.budget?.reserve,
+      ports.budget?.settle, ports.budget?.release, ports.budget?.reconcile].some(value => typeof value !== "function")
+      || !Array.isArray(adapters)) throw new ModelGatewayError("CONFIG_INVALID");
     for (const adapter of adapters) {
       if (!identifier.safeParse(adapter.provider).success || this.adapters.has(adapter.provider)) throw new ModelGatewayError("CONFIG_INVALID");
       this.adapters.set(adapter.provider, adapter);
@@ -79,6 +82,22 @@ export class ModelGatewayService {
         reservation = await this.ports.budget.reserve(scope, { callId: input.callId, model: input.model, maxOutputTokens: input.maxOutputTokens });
         if (!identifier.safeParse(reservation).success) throw new Error();
       } catch { throw new ModelGatewayError("BUDGET_UNAVAILABLE"); }
+      if (cancellation?.aborted) throw new ModelGatewayError("CANCELLED");
+      // Freshness after budget wait, not an atomic authorization/config lease.
+      try { await this.ports.authorize(scope); } catch { throw new ModelGatewayError("FORBIDDEN"); }
+      let currentProfile;
+      try {
+        const current = profileSchema.safeParse(await this.ports.profile(scope));
+        if (!current.success) throw new Error();
+        currentProfile = current.data;
+      } catch { throw new ModelGatewayError("CONFIG_INVALID"); }
+      if (!currentProfile.enabled) throw new ModelGatewayError("DISABLED");
+      if (JSON.stringify(currentProfile) !== JSON.stringify(profile)) throw new ModelGatewayError("CONFIG_INVALID");
+      try {
+        const currentKey = await this.ports.credential(profile.credentialRef, scope);
+        if (!currentKey?.trim() || currentKey !== credential) throw new Error();
+      } catch { throw new ModelGatewayError("CREDENTIAL_UNAVAILABLE"); }
+      if ((input.features ?? []).some(feature => !adapter.features.includes(feature))) throw new ModelGatewayError("CAPABILITY_UNSUPPORTED");
       if (cancellation?.aborted) throw new ModelGatewayError("CANCELLED");
       let rejectStop!: (error: ModelGatewayError) => void;
       const stopped = new Promise<never>((_, reject) => { rejectStop = reject; });
