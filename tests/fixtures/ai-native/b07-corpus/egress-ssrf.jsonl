@@ -1,0 +1,7 @@
+{"id":"synthetic_loopback","url":"https://127.0.0.1/model","expected":"blocked_private_address"}
+{"id":"synthetic_localhost","url":"https://localhost/model","expected":"blocked_local_hostname"}
+{"id":"synthetic_metadata","url":"https://169.254.169.254/latest/meta-data","expected":"blocked_private_address"}
+{"id":"synthetic_ipv6_loopback","url":"https://[::1]/model","expected":"blocked_private_address"}
+{"id":"synthetic_private_port","url":"https://10.0.0.8:8443/model","expected":"blocked_private_address"}
+{"id":"synthetic_redirect","url":"https://public.example.test/model","redirect":"http://127.0.0.1/secret","expected":"redirect_not_followed"}
+{"id":"synthetic_rebinding","url":"https://rebind.example.test/model","dnsSequence":["203.0.113.10","127.0.0.1"],"expected":"runtime_revalidation_required"}
