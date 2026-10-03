@@ -155,6 +155,9 @@ export class ModelGatewayService {
           profile.baseUrl === undefined ? undefined : { baseUrl: profile.baseUrl });
       }).finally(releaseSlot);
       const result = await wait(() => operation);
+      // This legacy text-only path must not silently discard candidate tools/structured
+      // data. The unified Intent/Port mapper is responsible for those result branches.
+      if (result?.toolRequests?.length || result?.structuredOutput !== undefined) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
       if (!result || typeof result.text !== "string" || result.text.length > 128_000 || result.text.includes(credential)) throw new ModelGatewayError("INVALID_RESPONSE");
       const usage = result.usage === undefined ? undefined : usageSchema.safeParse(result.usage);
       if (usage && !usage.success) throw new ModelGatewayError("INVALID_RESPONSE");

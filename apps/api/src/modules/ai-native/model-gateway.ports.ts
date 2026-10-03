@@ -9,7 +9,14 @@ export interface ModelRequest {
   features?: ModelFeature[];
 }
 export interface ModelUsage { inputTokens: number; outputTokens: number; }
-export interface AdapterResult { text: string; usage?: ModelUsage; }
+import type { AiOrderExplainRequestDraft } from '@rental-os/shared';
+export interface AdapterResult { text: string; usage?: ModelUsage; toolRequests?: AiOrderExplainRequestDraft[]; structuredOutput?: unknown; }
+export interface ProtocolToolCall { id: string; type: 'function'; function: { name: string; arguments: string }; }
+/** Server-built protocol policy only. Never loaded from model text or request fields. */
+export interface ModelResponsePolicy {
+  readonly tools: boolean; readonly structured: boolean;
+  parse(text: string, calls: readonly ProtocolToolCall[]): Pick<AdapterResult, 'toolRequests' | 'structuredOutput'>;
+}
 /** Internal protocol events, not task/approval/business completion events. */
 export type AdapterStreamEvent = { kind: "text_delta"; delta: string } | { kind: "result"; result: AdapterResult };
 export interface ModelAdapter {
