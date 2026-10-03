@@ -1,18 +1,13 @@
 import { z } from "zod";
 import {
-  ModelAdapterError, ModelGatewayError, type ModelAdapter, type GatewayContext,
+  ModelAdapterError, ModelGatewayError, modelRequestSchema, type ModelAdapter, type GatewayContext,
   type GatewayPorts, type ModelRequest, type ModelUsage
 } from "./model-gateway.ports";
 
 const identifier = z.string().min(1).max(128).regex(/^[\w.:-]+$/u);
 const modelIdentifier = z.string().min(1).max(256).regex(/^[\w./:-]+$/u);
 const contextSchema = z.object({ tenantId: identifier, workspaceId: identifier, actorId: identifier }).strict();
-const requestSchema = z.object({
-  callId: identifier, model: modelIdentifier,
-  messages: z.array(z.object({ role: z.enum(["system", "user", "assistant"]), content: z.string().max(32_000) }).strict()).min(1).max(64),
-  maxOutputTokens: z.number().int().positive().max(32_768),
-  features: z.array(z.enum(["tools", "structuredOutput", "streaming"])).max(3).optional()
-}).strict();
+const requestSchema = modelRequestSchema;
 const profileSchema = z.object({
   enabled: z.boolean(), provider: identifier, baseUrl: z.string().max(2048).optional(), allowedModels: z.array(modelIdentifier).min(1).max(100),
   credentialRef: identifier, timeoutMs: z.number().int().min(1).max(120_000),

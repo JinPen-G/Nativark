@@ -1,3 +1,4 @@
+import { z } from 'zod';
 /** Internal implementation ports, NOT the centrally maintained AIN-C03 wire contract. */
 export type ModelFeature = "tools" | "structuredOutput" | "streaming";
 export interface GatewayContext { tenantId: string; workspaceId: string; actorId: string; }
@@ -8,6 +9,15 @@ export interface ModelRequest {
   maxOutputTokens: number;
   features?: ModelFeature[];
 }
+/** One existing internal request validator shared by Gateway and protocol adapters.
+ * Not a new public contract or an authorization decision. */
+export const modelRequestSchema = z.object({
+  callId: z.string().min(1).max(128).regex(/^[\w.:-]+$/u),
+  model: z.string().min(1).max(256).regex(/^[\w./:-]+$/u),
+  messages: z.array(z.object({ role: z.enum(['system', 'user', 'assistant']), content: z.string().max(32000) }).strict()).min(1).max(64),
+  maxOutputTokens: z.number().int().positive().max(32768),
+  features: z.array(z.enum(['tools', 'structuredOutput', 'streaming'])).max(3).optional()
+}).strict();
 export interface ModelUsage { inputTokens: number; outputTokens: number; }
 import type { AiOrderExplainRequestDraft } from '@rental-os/shared';
 export interface AdapterResult { text: string; usage?: ModelUsage; toolRequests?: AiOrderExplainRequestDraft[]; structuredOutput?: unknown; }

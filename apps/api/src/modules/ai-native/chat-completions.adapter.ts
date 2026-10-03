@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { normalizeTenantModelBaseUrl } from "./tenant-model-config.service";
-import { ModelAdapterError, ModelGatewayError, type AdapterResult, type AdapterStreamEvent, type ModelAdapter, type ModelFeature, type ModelRequest } from "./model-gateway.ports";
+import { ModelAdapterError, ModelGatewayError, modelRequestSchema, type AdapterResult, type AdapterStreamEvent, type ModelAdapter, type ModelFeature, type ModelRequest } from "./model-gateway.ports";
+import { MODEL_REQUEST_BYTES } from './model-response-limits';
 import { ChatCompletionsStream } from "./chat-completions-stream";
 import Ajv, { type ValidateFunction } from 'ajv';
 import { AI_CONTRACT_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
@@ -110,17 +111,32 @@ export class ChatCompletionsAdapter implements ModelAdapter {
   get features(): readonly ModelFeature[] { return [...(typeof this.transport.postStream === "function" ? ['streaming' as const] : []), ...(this.policy.tools ? ['tools' as const] : []), ...(this.policy.structured ? ['structuredOutput' as const] : [])]; }
   constructor(private readonly transport: ModelJsonTransport, options: ChatProtocolOptions = {}) { this.policy = new ChatProtocolPolicy(options); }
 
+  private request(input: Readonly<ModelRequest> & { signal: AbortSignal }) {
+    if (!input || !input.signal || typeof input.signal.aborted !== 'boolean' || typeof input.signal.addEventListener !== 'function' || typeof input.signal.removeEventListener !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+    // Project only server protocol fields. Later caller mutations cannot replace
+    // messages or the cancellation signal; forged top-level tool definitions are ignored.
+    const parsed = modelRequestSchema.safeParse({ callId: input.callId, model: input.model, messages: input.messages, maxOutputTokens: input.maxOutputTokens, features: input.features });
+    if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+    return { ...parsed.data, signal: input.signal };
+  }
+  private body(value: Record<string, unknown>): string {
+    const encoded = JSON.stringify(value);
+    if (Buffer.byteLength(encoded) > MODEL_REQUEST_BYTES) throw new ModelGatewayError('INVALID_REQUEST');
+    return encoded;
+  }
+
   async *stream(input: Readonly<ModelRequest> & { signal: AbortSignal }, credential: string,
     connection?: Readonly<{ baseUrl: string }>): AsyncIterable<AdapterStreamEvent> {
     if (!this.transport.postStream) throw new ModelGatewayError("CAPABILITY_UNSUPPORTED");
-    if (!connection || !credential.trim() || /[\r\n]/u.test(credential)) throw new ModelGatewayError("CONFIG_INVALID");
+    input = this.request(input);
+    if (!connection || typeof credential !== 'string' || !/^[\x21-\x7e]{1,8192}$/.test(credential)) throw new ModelGatewayError("CONFIG_INVALID");
     const features = input.features ?? [], selected = this.policy.selected(features);
     const baseUrl = normalizeTenantModelBaseUrl(connection.baseUrl), decoder = new ChatCompletionsStream(credential, 1_048_576, selected);
     let headers = false;
     if (input.signal.aborted) throw new ModelGatewayError("CANCELLED");
     for await (const event of this.transport.postStream({ url: `${baseUrl}/chat/completions`,
       headers: { Authorization: `Bearer ${credential}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: input.model, messages: input.messages, stream: true, stream_options: { include_usage: true }, max_completion_tokens: input.maxOutputTokens, ...selected.body(features) }),
+      body: this.body({ model: input.model, messages: input.messages, stream: true, stream_options: { include_usage: true }, max_completion_tokens: input.maxOutputTokens, ...selected.body(features) }),
       signal: input.signal, maxResponseBytes: 1_048_576, redirects: "error" })) {
       if (input.signal.aborted) throw new ModelGatewayError("CANCELLED");
       if (event.kind === "headers") {
@@ -143,7 +159,8 @@ export class ChatCompletionsAdapter implements ModelAdapter {
 
   async generate(input: Readonly<ModelRequest> & { signal: AbortSignal }, credential: string,
     connection?: Readonly<{ baseUrl: string }>): Promise<AdapterResult> {
-    if (!connection || !credential.trim() || /[\r\n]/u.test(credential)) throw new ModelGatewayError("CONFIG_INVALID");
+    input = this.request(input);
+    if (!connection || typeof credential !== 'string' || !/^[\x21-\x7e]{1,8192}$/.test(credential)) throw new ModelGatewayError("CONFIG_INVALID");
     const features = input.features ?? [];
     if (features.includes('streaming')) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     const selected = this.policy.selected(features);
@@ -151,7 +168,7 @@ export class ChatCompletionsAdapter implements ModelAdapter {
     if (input.signal.aborted) throw new ModelGatewayError("CANCELLED");
     const result = await this.transport.post({ url: `${baseUrl}/chat/completions`,
       headers: { Authorization: `Bearer ${credential}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: input.model, messages: input.messages, stream: false, max_completion_tokens: input.maxOutputTokens, ...selected.body(features) }),
+      body: this.body({ model: input.model, messages: input.messages, stream: false, max_completion_tokens: input.maxOutputTokens, ...selected.body(features) }),
       signal: input.signal, maxResponseBytes: 1_048_576, redirects: "error" });
     // An injected transport may complete after cancellation. Never convert that late
     // response into a protocol success; outer Gateway accounting remains responsible.
