@@ -4,7 +4,7 @@ import { isIP } from "node:net";
 import type { ModelJsonTransport } from "./chat-completions.adapter";
 import { ModelGatewayError } from "./model-gateway.ports";
 import { modelEgressUrl, publicModelAddress } from "./model-egress-policy";
-import { MODEL_HEADER_BYTES, MODEL_REQUEST_BYTES, modelByteLimit, ModelResponseBuffer } from "./model-response-limits";
+import { MODEL_HEADER_BYTES, MODEL_REQUEST_BYTES, modelByteLimit, ModelResponseBuffer, ModelResponseStreamValidator } from "./model-response-limits";
 export interface ModelEgressDependencies {
   resolve(hostname: string): Promise<Array<{ address: string; family: number }>>;
   request(options: RequestOptions, response: (response: IncomingMessage) => void): ClientRequest;
@@ -116,7 +116,7 @@ export class ModelEgressTransport implements ModelJsonTransport {
           const raw = incoming.rawHeaders;
           if (!Number.isInteger(status) || !status || status < 100 || status > 599 || !Array.isArray(raw) || raw.reduce((n, value) => n + Buffer.byteLength(value), 0) > MODEL_HEADER_BYTES || (incoming.headers["content-encoding"] && incoming.headers["content-encoding"] !== "identity") || (status >= 300 && status <= 399)) { finish(new ModelGatewayError("INVALID_RESPONSE")); return; }
           try { onResponse?.(incoming); onHeaders?.(status); } catch (error) { finish(error instanceof ModelGatewayError ? error : new ModelGatewayError("INVALID_RESPONSE")); return; }
-          const buffer = new ModelResponseBuffer(limit);
+          const buffer = onChunk ? new ModelResponseStreamValidator(limit) : new ModelResponseBuffer(limit);
           incoming.on("data", chunk => { if (settled) return; try { if (expired()) throw new ModelGatewayError("TIMEOUT"); buffer.append(chunk); onChunk?.(chunk); } catch (error) { finish(error instanceof ModelGatewayError ? error : new ModelGatewayError("INVALID_RESPONSE")); } });
           incoming.on("end", () => { if (settled) return; try { if (expired()) throw new ModelGatewayError("TIMEOUT"); finish(undefined, { status, body: buffer.text() }); } catch (error) { finish(error instanceof ModelGatewayError ? error : new ModelGatewayError("INVALID_RESPONSE")); } });
           incoming.on("close", () => { if (!settled) finish(new ModelGatewayError("PROVIDER_FAILED")); });
