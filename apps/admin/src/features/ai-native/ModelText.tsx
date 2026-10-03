@@ -7,7 +7,7 @@ export interface ModelTextProps {
 /** Untrusted text only: neither Markdown nor tool requests execute here. */
 export function ModelText({ text, kind = "text" }: ModelTextProps) {
   const id = useId();
-  const bounded = typeof text === "string" ? text.slice(0, 20_000) : "";
+  const bounded = typeof text === "string" ? text.slice(0, 19_999) : "";
   const preview = bounded.slice(0, 800);
   return (
     <section

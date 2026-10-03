@@ -41,7 +41,7 @@ export function TaskList({
       </p>
     );
   if (forbidden) return <p role="status">无权限查看 AI 任务</p>;
-  if (error && !tasks) {
+  if (error && (!tasks || tasks.length === 0)) {
     return (
       <div>
         <p role="alert">任务列表加载失败：{error}</p>
