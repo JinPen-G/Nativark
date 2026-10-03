@@ -10,8 +10,8 @@ const root = path.resolve(__dirname, '../../..');
 function deny() { throw new Error('B09 external network forbidden'); }
 net.connect = net.createConnection = http.request = http.get = https.request = https.get = deny;
 global.fetch = deny;
-function load(file) {
-  const source = fs.readFileSync(path.join(root, file), 'utf8');
+function load(file, transform = source => source) {
+  const source = transform(fs.readFileSync(path.join(root, file), 'utf8'));
   const js = ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2019}}).outputText;
   const exports = {};
   let definition;

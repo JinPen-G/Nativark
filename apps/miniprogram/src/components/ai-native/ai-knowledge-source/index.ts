@@ -1,4 +1,4 @@
-interface SourceDisplay { id: string; version: string; title: string; location: string; status: string; }
+interface SourceDisplay { id: string; version: string; title: string; location: string; status: string; statusLabel: string; }
 type SourceHandler = (ref: { resourceId: string; version: string }) => Promise<void>;
 Component({
   properties: { sources: { type: Array, value: [] }, openHandler: { type: null, value: null } },
@@ -9,7 +9,8 @@ Component({
     project() {
       this.setData({ visibleSources: (this.data.sources as Record<string, unknown>[]).slice(0, 50).filter(item => item && typeof item.id === "string" && typeof item.version === "string").map(item => {
         const readable = item.status === "published";
-        return { id: String(item.id).slice(0, 128), version: String(item.version).slice(0, 128), status: typeof item.status === "string" ? item.status : "unavailable",
+        const statusLabel = item.status === "withdrawn" ? "已撤回" : item.status === "no_access" ? "无权限" : readable ? "已发布" : "来源失效/不可用";
+        return { id: String(item.id).slice(0, 128), version: String(item.version).slice(0, 128), status: typeof item.status === "string" ? item.status : "unavailable", statusLabel,
           title: readable && typeof item.title === "string" ? item.title.slice(0, 200) : "来源不可用",
           location: readable && typeof item.location === "string" ? item.location.slice(0, 200) : "不可用" };
       }) });
