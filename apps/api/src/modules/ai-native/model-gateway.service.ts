@@ -11,7 +11,7 @@ const requestSchema = z.object({
   callId: identifier, model: modelIdentifier,
   messages: z.array(z.object({ role: z.enum(["system", "user", "assistant"]), content: z.string().max(32_000) }).strict()).min(1).max(64),
   maxOutputTokens: z.number().int().positive().max(32_768),
-  features: z.array(z.enum(["tools", "structuredOutput"])).max(2).optional()
+  features: z.array(z.enum(["tools", "structuredOutput", "streaming"])).max(3).optional()
 }).strict();
 const profileSchema = z.object({
   enabled: z.boolean(), provider: identifier, baseUrl: z.string().max(2048).optional(), allowedModels: z.array(modelIdentifier).min(1).max(100),

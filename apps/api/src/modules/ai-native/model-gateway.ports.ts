@@ -1,5 +1,5 @@
 /** Internal implementation ports, NOT the centrally maintained AIN-C03 wire contract. */
-export type ModelFeature = "tools" | "structuredOutput";
+export type ModelFeature = "tools" | "structuredOutput" | "streaming";
 export interface GatewayContext { tenantId: string; workspaceId: string; actorId: string; }
 export interface ModelRequest {
   callId: string;
@@ -10,11 +10,15 @@ export interface ModelRequest {
 }
 export interface ModelUsage { inputTokens: number; outputTokens: number; }
 export interface AdapterResult { text: string; usage?: ModelUsage; }
+/** Internal protocol events, not task/approval/business completion events. */
+export type AdapterStreamEvent = { kind: "text_delta"; delta: string } | { kind: "result"; result: AdapterResult };
 export interface ModelAdapter {
   readonly provider: string;
   readonly features: readonly ModelFeature[];
   generate(input: Readonly<ModelRequest> & { signal: AbortSignal }, credential: string,
     connection?: Readonly<{ baseUrl: string }>): Promise<AdapterResult>;
+  stream?(input: Readonly<ModelRequest> & { signal: AbortSignal }, credential: string,
+    connection?: Readonly<{ baseUrl: string }>): AsyncIterable<AdapterStreamEvent>;
 }
 export interface GatewayProfile {
   enabled: boolean;

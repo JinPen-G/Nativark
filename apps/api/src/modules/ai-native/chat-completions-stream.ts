@@ -6,6 +6,7 @@ export class ChatCompletionsStream {
   private readonly decoder = new TextDecoder("utf-8", { fatal: true });
   private pending = "";
   private text = "";
+  private emitted = 0;
   private bytes = 0;
   private done = false;
   private stopped = false;
@@ -56,7 +57,14 @@ export class ChatCompletionsStream {
     this.text += delta;
     if (this.text.length > 128000 || this.text.includes(this.credential)) throw new ModelGatewayError("INVALID_RESPONSE");
     if (choice.finish_reason === "stop") this.stopped = true;
-    return delta;
+    // Do not expose a possible credential prefix before the next fragmented delta
+    // proves it is ordinary text. A complete echo is rejected before emission.
+    let end = this.text.length;
+    if (!this.stopped) for (let size = Math.min(this.credential.length - 1, this.text.length); size > 0; size--) {
+      if (this.text.endsWith(this.credential.slice(0, size))) { end -= size; break; }
+    }
+    const safe = this.text.slice(this.emitted, end); this.emitted = end;
+    return safe;
   }
   finish(): AdapterResult {
     try {

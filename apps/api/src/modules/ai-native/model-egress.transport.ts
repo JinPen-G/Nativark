@@ -18,6 +18,42 @@ export class ModelEgressTransport implements ModelJsonTransport {
     if (!dependencies || [dependencies.resolve, dependencies.request, dependencies.now, dependencies.setTimer, dependencies.clearTimer].some(v => typeof v !== "function") || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120000) throw new ModelGatewayError("CONFIG_INVALID");
   }
   async post(input: Parameters<ModelJsonTransport["post"]>[0]): Promise<{ status: number; body: string }> {
+    return this.performPost(input);
+  }
+  async *postStream(input: Parameters<ModelJsonTransport["post"]>[0]): ReturnType<NonNullable<ModelJsonTransport["postStream"]>> {
+    if (!input.signal || typeof input.signal.addEventListener !== "function") throw new ModelGatewayError("CONFIG_INVALID");
+    const controller = new AbortController(), queue: Array<{ kind: "headers"; status: number } | { kind: "chunk"; bytes: Uint8Array }> = [];
+    let queuedBytes = 0, done = false, error: unknown, wake: (() => void) | undefined;
+    const cancel = () => controller.abort();
+    if (input.signal?.aborted) cancel();
+    input.signal?.addEventListener("abort", cancel, { once: true });
+    const notify = () => { wake?.(); wake = undefined; };
+    const push = (event: (typeof queue)[number]) => {
+      if (controller.signal.aborted) throw new ModelGatewayError("CANCELLED");
+      queuedBytes += event.kind === "chunk" ? event.bytes.byteLength : 0;
+      if (queuedBytes > input.maxResponseBytes || queue.length >= 256) throw new ModelGatewayError("INVALID_RESPONSE");
+      queue.push(event); notify();
+    };
+    const operation = this.performPost({ ...input, signal: controller.signal }, status => push({ kind: "headers", status }),
+      bytes => push({ kind: "chunk", bytes: Uint8Array.from(bytes) }))
+      .catch(failure => { error = failure; }).finally(() => { done = true; notify(); });
+    try {
+      for (;;) {
+        if (error) throw error;
+        if (input.signal?.aborted) throw new ModelGatewayError("CANCELLED");
+        const event = queue.shift();
+        if (event) { queuedBytes -= event.kind === "chunk" ? event.bytes.byteLength : 0; yield event; continue; }
+        if (done) break;
+        await new Promise<void>(resolve => { wake = resolve; });
+      }
+    } finally {
+      controller.abort(); input.signal?.removeEventListener("abort", cancel);
+      await operation;
+      queue.length = 0;
+    }
+  }
+  private async performPost(input: Parameters<ModelJsonTransport["post"]>[0], onHeaders?: (status: number) => void,
+    onChunk?: (bytes: Uint8Array) => void): Promise<{ status: number; body: string }> {
     const url = modelEgressUrl(input.url), limit = modelByteLimit(input.maxResponseBytes);
     if (input.redirects !== "error" || typeof input.body !== "string" || Buffer.byteLength(input.body) > MODEL_REQUEST_BYTES || !input.signal || input.signal.aborted) throw new ModelGatewayError(input.signal?.aborted ? "CANCELLED" : "CONFIG_INVALID");
     const entries = Object.entries(input.headers);
@@ -65,8 +101,9 @@ export class ModelEgressTransport implements ModelJsonTransport {
           const status = incoming.statusCode;
           const raw = incoming.rawHeaders;
           if (!Number.isInteger(status) || !status || status < 100 || status > 599 || !Array.isArray(raw) || raw.reduce((n, value) => n + Buffer.byteLength(value), 0) > MODEL_HEADER_BYTES || (incoming.headers["content-encoding"] && incoming.headers["content-encoding"] !== "identity") || (status >= 300 && status <= 399)) { finish(new ModelGatewayError("INVALID_RESPONSE")); return; }
+          try { onHeaders?.(status); } catch (error) { finish(error instanceof ModelGatewayError ? error : new ModelGatewayError("INVALID_RESPONSE")); return; }
           const buffer = new ModelResponseBuffer(limit);
-          incoming.on("data", chunk => { if (settled) return; try { if (expired()) throw new ModelGatewayError("TIMEOUT"); buffer.append(chunk); } catch (error) { finish(error instanceof ModelGatewayError ? error : new ModelGatewayError("INVALID_RESPONSE")); } });
+          incoming.on("data", chunk => { if (settled) return; try { if (expired()) throw new ModelGatewayError("TIMEOUT"); buffer.append(chunk); onChunk?.(chunk); } catch (error) { finish(error instanceof ModelGatewayError ? error : new ModelGatewayError("INVALID_RESPONSE")); } });
           incoming.on("end", () => { if (settled) return; try { if (expired()) throw new ModelGatewayError("TIMEOUT"); finish(undefined, { status, body: buffer.text() }); } catch (error) { finish(error instanceof ModelGatewayError ? error : new ModelGatewayError("INVALID_RESPONSE")); } });
           incoming.on("close", () => { if (!settled) finish(new ModelGatewayError("PROVIDER_FAILED")); });
         });

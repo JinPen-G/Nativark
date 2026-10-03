@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { normalizeTenantModelBaseUrl } from "./tenant-model-config.service";
-import { ModelAdapterError, ModelGatewayError, type AdapterResult, type ModelAdapter, type ModelRequest } from "./model-gateway.ports";
+import { ModelAdapterError, ModelGatewayError, type AdapterResult, type AdapterStreamEvent, type ModelAdapter, type ModelFeature, type ModelRequest } from "./model-gateway.ports";
+import { ChatCompletionsStream } from "./chat-completions-stream";
 
 /** Required server transport: resolve/check ALL addresses, pin chosen public IP through TLS,
  * retain hostname certificate validation, forbid redirects/proxies, bound response bytes,
@@ -9,6 +10,8 @@ import { ModelAdapterError, ModelGatewayError, type AdapterResult, type ModelAda
 export interface ModelJsonTransport {
   post(request: { url: string; headers: Readonly<Record<string, string>>; body: string;
     signal: AbortSignal; maxResponseBytes: number; redirects: "error" }): Promise<{ status: number; body: string }>;
+  postStream?(request: Parameters<ModelJsonTransport["post"]>[0]): AsyncIterable<
+    { kind: "headers"; status: number } | { kind: "chunk"; bytes: Uint8Array }>;
 }
 const responseSchema = z.object({
   choices: z.array(z.object({ message: z.object({ content: z.string(), tool_calls: z.array(z.unknown()).optional() }),
@@ -20,8 +23,36 @@ const responseSchema = z.object({
 /** OpenAI-compatible text Chat Completions protocol. No fixed supplier or model. */
 export class ChatCompletionsAdapter implements ModelAdapter {
   readonly provider = "openai_chat_completions";
-  readonly features = [] as const; // Do not advertise tools/structured output until implemented.
+  get features(): readonly ModelFeature[] { return typeof this.transport.postStream === "function" ? ["streaming"] : []; }
   constructor(private readonly transport: ModelJsonTransport) {}
+
+  async *stream(input: Readonly<ModelRequest> & { signal: AbortSignal }, credential: string,
+    connection?: Readonly<{ baseUrl: string }>): AsyncIterable<AdapterStreamEvent> {
+    if (!this.transport.postStream) throw new ModelGatewayError("CAPABILITY_UNSUPPORTED");
+    if (!connection || !credential.trim() || /[\r\n]/u.test(credential)) throw new ModelGatewayError("CONFIG_INVALID");
+    if (input.features?.some(feature => feature !== "streaming")) throw new ModelGatewayError("CAPABILITY_UNSUPPORTED");
+    const baseUrl = normalizeTenantModelBaseUrl(connection.baseUrl), decoder = new ChatCompletionsStream(credential);
+    let headers = false;
+    if (input.signal.aborted) throw new ModelGatewayError("CANCELLED");
+    for await (const event of this.transport.postStream({ url: `${baseUrl}/chat/completions`,
+      headers: { Authorization: `Bearer ${credential}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: input.model, messages: input.messages, stream: true, stream_options: { include_usage: true }, max_completion_tokens: input.maxOutputTokens }),
+      signal: input.signal, maxResponseBytes: 1_048_576, redirects: "error" })) {
+      if (input.signal.aborted) throw new ModelGatewayError("CANCELLED");
+      if (event.kind === "headers") {
+        if (headers) throw new ModelGatewayError("INVALID_RESPONSE"); headers = true;
+        if (event.status === 401 || event.status === 403) throw new ModelAdapterError("AUTHENTICATION_FAILED");
+        if (event.status === 429) throw new ModelAdapterError("RATE_LIMITED");
+        if (event.status !== 200) throw new ModelAdapterError("PROVIDER_FAILED");
+      } else {
+        if (!headers) throw new ModelGatewayError("INVALID_RESPONSE");
+        for (const delta of decoder.push(event.bytes)) yield { kind: "text_delta", delta };
+      }
+    }
+    if (input.signal.aborted) throw new ModelGatewayError("CANCELLED");
+    if (!headers) throw new ModelGatewayError("INVALID_RESPONSE");
+    yield { kind: "result", result: decoder.finish() };
+  }
 
   async generate(input: Readonly<ModelRequest> & { signal: AbortSignal }, credential: string,
     connection?: Readonly<{ baseUrl: string }>): Promise<AdapterResult> {
