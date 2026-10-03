@@ -58,6 +58,41 @@ CREATE TABLE `ai_invocation_admissions` (
   PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
+CREATE TABLE `ai_usage_reservations` (
+  `id` VARCHAR(36) NOT NULL,
+  `tenantId` VARCHAR(191) NOT NULL,
+  `workspaceId` VARCHAR(191) NOT NULL,
+  `callId` VARCHAR(128) NOT NULL,
+  `idempotencyKey` VARCHAR(128) NOT NULL,
+  `status` VARCHAR(32) NOT NULL,
+  `reservedUnits` INT UNSIGNED NOT NULL,
+  `actualInput` INT UNSIGNED NULL,
+  `actualOutput` INT UNSIGNED NULL,
+  `unknownReason` VARCHAR(128) NULL,
+  `expiresAt` DATETIME(3) NOT NULL,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `settledAt` DATETIME(3) NULL,
+  UNIQUE INDEX `ai_usage_reservation_tenant_key` (`tenantId`,`idempotencyKey`),
+  UNIQUE INDEX `ai_usage_reservation_tenant_call_key` (`tenantId`,`callId`),
+  INDEX `ai_usage_reservation_scope_status_idx` (`tenantId`,`workspaceId`,`status`),
+  PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE TABLE `ai_usage_ledger_entries` (
+  `id` VARCHAR(36) NOT NULL,
+  `reservationId` VARCHAR(36) NOT NULL,
+  `tenantId` VARCHAR(191) NOT NULL,
+  `eventKey` VARCHAR(128) NOT NULL,
+  `kind` VARCHAR(32) NOT NULL,
+  `inputUnits` INT UNSIGNED NOT NULL DEFAULT 0,
+  `outputUnits` INT UNSIGNED NOT NULL DEFAULT 0,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE INDEX `ai_usage_ledger_reservation_event_key` (`reservationId`,`eventKey`),
+  INDEX `ai_usage_ledger_tenant_created_idx` (`tenantId`,`createdAt`),
+  PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 CREATE TABLE `ai_provider_profiles` (
   `id` VARCHAR(36) NOT NULL,
   `scopeId` VARCHAR(36) NOT NULL,
