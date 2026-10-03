@@ -36,6 +36,28 @@ CREATE TABLE `ai_provider_capability_evidence` (
   CONSTRAINT `ai_provider_capability_evidence_profile_fk` FOREIGN KEY (`profileId`) REFERENCES `ai_provider_profiles` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
+CREATE TABLE `ai_invocation_admissions` (
+  `id` VARCHAR(36) NOT NULL,
+  `tenantId` VARCHAR(191) NOT NULL,
+  `workspaceId` VARCHAR(191) NOT NULL,
+  `actorId` VARCHAR(191) NOT NULL,
+  `callId` VARCHAR(128) NOT NULL,
+  `requestHash` VARCHAR(128) NOT NULL,
+  `profileId` VARCHAR(36) NULL,
+  `status` VARCHAR(32) NOT NULL,
+  `dispatchId` VARCHAR(128) NULL,
+  `unknownReason` VARCHAR(128) NULL,
+  `expiresAt` DATETIME(3) NOT NULL,
+  `admittedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `revokedAt` DATETIME(3) NULL,
+  `completedAt` DATETIME(3) NULL,
+  UNIQUE INDEX `ai_invocation_admission_tenant_call_key` (`tenantId`,`callId`),
+  INDEX `ai_invocation_admission_scope_status_idx` (`tenantId`,`workspaceId`,`status`),
+  INDEX `ai_invocation_admission_expiry_idx` (`status`,`expiresAt`),
+  PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 CREATE TABLE `ai_provider_profiles` (
   `id` VARCHAR(36) NOT NULL,
   `scopeId` VARCHAR(36) NOT NULL,

@@ -442,6 +442,31 @@ model AiProviderCapabilityEvidence {
   @@map("ai_provider_capability_evidence")
 }
 
+/// Durable admission record for an AI dispatch. Unknown is a first-class state:
+/// it cannot be silently retried or treated as a successful business action.
+model AiInvocationAdmission {
+  id             String   @id @default(uuid()) @db.VarChar(36)
+  tenantId       String   @db.VarChar(191)
+  workspaceId    String   @db.VarChar(191)
+  actorId        String   @db.VarChar(191)
+  callId         String   @db.VarChar(128)
+  requestHash    String   @db.VarChar(128)
+  profileId      String?  @db.VarChar(36)
+  status         String   @db.VarChar(32)
+  dispatchId     String?  @db.VarChar(128)
+  unknownReason  String?  @db.VarChar(128)
+  expiresAt      DateTime @db.DateTime(3)
+  admittedAt     DateTime @default(now()) @db.DateTime(3)
+  updatedAt      DateTime @updatedAt
+  revokedAt      DateTime?
+  completedAt    DateTime?
+
+  @@unique([tenantId, callId], map: "ai_invocation_admission_tenant_call_key")
+  @@index([tenantId, workspaceId, status], map: "ai_invocation_admission_scope_status_idx")
+  @@index([status, expiresAt], map: "ai_invocation_admission_expiry_idx")
+  @@map("ai_invocation_admissions")
+}
+
 /// SPACE-01：账号与经营空间的成员关系。
 ///
 /// 需求 3/4.1：账号归属租户，通过成员关系进入一个或多个空间，并可在不同空间
