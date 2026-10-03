@@ -55,6 +55,17 @@ test('source and memory views redact content after withdrawal or expiry', () => 
   assert.ok(!memory.includes('secret value'));
 });
 
+test('AI service summary projects a whitelist and hides provider secrets/details', () => {
+  const { AiServiceSummary, toSafeAiServiceSummary } = load('AiServiceSummary.tsx');
+  const hostile = { draftVersion: 'ain-c07-draft-2', mode: 'platform_managed', enabled: true, availability: 'ready', connectionState: 'verified_live', baseUrl: 'https://secret.invalid', apiKey: 'secret-key', provider: 'private-provider' };
+  const safe = toSafeAiServiceSummary(hostile);
+  assert.deepEqual(safe, { mode: 'platform_managed', enabled: true, availability: 'ready', connectionState: 'verified_live' });
+  const markup = renderToStaticMarkup(React.createElement(AiServiceSummary, { summary: hostile }));
+  assert.ok(markup.includes('Rental OS AI'));
+  assert.ok(!markup.includes('secret-key'));
+  assert.ok(!markup.includes('secret.invalid'));
+});
+
 test('timeline distinguishes an unknown enum from an unavailable step payload', () => {
   const { TaskTimeline } = load('TaskTimeline.tsx');
   const markup = renderToStaticMarkup(React.createElement(TaskTimeline, {
