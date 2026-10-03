@@ -98,6 +98,18 @@ test('interactive shells expose labelled controls and live status relationships'
   assert.match(action, /aria-describedby="action-status-/);
 });
 
+test('read-only board composes feature-local views without transport props', () => {
+  const { ReadOnlyBoard } = load('ReadOnlyBoard.tsx');
+  const markup = renderToStaticMarkup(React.createElement(ReadOnlyBoard, {
+    taskId: 't1', modelText: '候选文本', tasks: [], steps: [], usage: { status: 'unknown' },
+    proposal: { title: '提案', risk: '低', changes: [] },
+    fields: [], summary: null, assessments: [], sources: [], memories: [],
+  }));
+  assert.ok(markup.includes('AI 只读工作台'));
+  assert.ok(markup.includes('提案'));
+  assert.ok(markup.includes('未知用量'));
+});
+
 test('timeline distinguishes an unknown enum from an unavailable step payload', () => {
   const { TaskTimeline } = load('TaskTimeline.tsx');
   const markup = renderToStaticMarkup(React.createElement(TaskTimeline, {
