@@ -32,12 +32,12 @@ test('W05 duplicate callId with another actor must be rejected', async () => {
   await assert.rejects(service.admit({ scope, actorId: 'actor-b', callId: 'call-a', requestHash: 'hash-a', expiresAt: existing.expiresAt }));
 });
 test('W07 settlement must select the requested reservation, not the first scope row', async () => {
-  const rows = [{ id: 'usage-a', status: 'reserved' }, { id: 'usage-b', status: 'reserved' }];
-  const reads = [];
-  const service = new UsageAccountingService({ get: async (_scope, key) => { reads.push(key); return rows.find(row => row.id === key.id) ?? rows[0]; }, reserve: async () => { throw new Error('unused'); }, transition: async (_scope, id) => rows.find(row => row.id === id), appendLedger: async () => {} });
-  const result = await service.settle(scope, 'usage-b', 'event-b', 1, 2);
-  assert.equal(result.id, 'usage-b');
-  assert.ok(reads.every(key => key.id === 'usage-b'));
+  const h = require('./fixtures/ai-native/usage-settlement.cjs');
+  const f = h.setup();
+  const result = await f.service.settle(h.scope, 'usage-target', 'event-b', 1, 2);
+  assert.equal(result.id, 'usage-target');
+  assert.ok(f.state.calls.filter(c => c[0] === 'read').every(c => c[1].where.id === 'usage-target'));
+  assert.equal(f.state.rows[0].status, 'reserved');
 });
 function ports() {
   const events = [];

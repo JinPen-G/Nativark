@@ -15,12 +15,12 @@ for (const mode of ['invoke', 'stream']) test(`pre-cancelled ${mode} touches no 
   await assert.rejects(operation, e => e.code === 'CANCELLED'); assert.equal(calls, 0);
 });
 for (const method of ['settle', 'reconcile']) test(`${method} selects exact reservation when another row is first`, async () => {
-  const reads = [], ledger = [], status = method === 'reconcile' ? 'unknown' : 'reserved';
-  const rows = [{ id: 'first', status }, { id: 'requested', status }];
-  const service = new UsageAccountingService({ get: async (_, key) => { reads.push(key); return rows.find(r => r.id === key.id) ?? rows[0]; },
-    appendLedger: async event => { ledger.push(event); }, transition: async (_, id) => ({ ...rows.find(r => r.id === id), status: 'settled' }) });
-  const result = await service[method](scope, 'requested', 'event-1', 1, 2);
-  assert.equal(result.id, 'requested'); assert.deepEqual(reads, [{ id: 'requested' }]); assert.equal(ledger[0].reservationId, 'requested');
+  const h = require('./fixtures/ai-native/usage-settlement.cjs');
+  const f = h.setup(method === 'reconcile' ? 'unknown' : 'reserved');
+  const result = await f.service[method](h.scope, 'usage-target', 'event-1', 1, 2);
+  assert.equal(result.id, 'usage-target');
+  assert.ok(f.state.calls.filter(c => c[0] === 'read').every(c => c[1].where.id === 'usage-target'));
+  assert.equal(f.state.entries[0].reservationId, 'usage-target');
 });
 test('usage lookup type no longer accepts an empty or ambiguous key', () => {
   assert.deepEqual(compileConsumer(`import type { UsageAccountingRepository } from '../apps/api/src/modules/ai-native/usage-accounting.ports';
@@ -29,5 +29,7 @@ test('usage lookup type no longer accepts an empty or ambiguous key', () => {
     // @ts-expect-error empty lookups must not select the first reservation
     r.get(s, {});
     // @ts-expect-error only one exact lookup identity
-    r.get(s, { id: 'one', callId: 'two' });`), []);
+    r.get(s, { id: 'one', callId: 'two' });
+    // @ts-expect-error settlement cannot bypass the atomic ledger operation
+    r.transition(s, 'one', 'reserved', 'settled', { input: 1, output: 2 });`), []);
 });
