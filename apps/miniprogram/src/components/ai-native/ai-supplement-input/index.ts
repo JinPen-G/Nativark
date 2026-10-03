@@ -1,10 +1,11 @@
+let nextInputInstance = 0;
 interface ClarificationField { key: string; label: string; value?: string; error?: string; readonly?: boolean; required?: boolean; }
 type ClarificationHandler = (input: { taskId: string; inputRevision: string; draft: Record<string, string> }) => Promise<void>;
 Component({
   properties: { fields: { type: Array, value: [] }, inputRevision: { type: String, value: "" }, taskId: { type: String, value: "" }, disabled: { type: Boolean, value: false }, submitHandler: { type: null, value: null } },
-  data: { localDraft: {} as Record<string, string>, visibleFields: [] as ClarificationField[], submitting: false, errorLabel: "", generation: 0, alive: true },
+  data: { instanceId: "", localDraft: {} as Record<string, string>, visibleFields: [] as ClarificationField[], submitting: false, errorLabel: "", generation: 0, alive: true },
   lifetimes: {
-    attached() { this.refreshFields(); },
+    attached() { this.setData({ instanceId: "ai-input-" + (++nextInputInstance) }); this.refreshFields(); },
     detached() { this.setData({ localDraft: {}, visibleFields: [], alive: false, generation: this.data.generation + 1 }); },
   },
   observers: {
