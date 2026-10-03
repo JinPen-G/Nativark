@@ -1,0 +1,3 @@
+'use strict';
+const test = require('node:test'); const assert = require('node:assert/strict'); const path = require('node:path'); const tool = require('../scripts/ai-native-b06-props-report.cjs');
+test('props report extracts component props and callbacks without evaluating UI', () => { const report = tool.buildPropsReport(path.resolve(__dirname, '../apps/admin/src/features/ai-native')); assert.ok(report.components.some(row => row.component === 'TaskList' && row.callbacks.includes('onPageChange'))); assert.ok(report.components.some(row => row.component === 'HumanConfirmShell')); const markdown = tool.toMarkdown(report); assert.ok(markdown.includes('| TaskList |')); });
