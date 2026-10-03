@@ -6,7 +6,8 @@ const { offlinePrismaSchema } = require("./fixtures/ai-native/prisma-offline.cjs
 require("ts-node").register({ transpileOnly: false, compilerOptions: { module: "commonjs", moduleResolution: "node", target: "es2022" } });
 const { aiPersistenceScopeColumns: columns, aiPersistenceEventCursor: cursor } = require("../apps/api/src/modules/ai-native/persistence-scope");
 const root = path.resolve(__dirname, ".."), baseline = "80a372f";
-const schema = fs.readFileSync(path.join(root, "apps/api/prisma/schema.prisma"), "utf8");
+// This verifies the immutable first migration, not the schema of every future migration.
+const schema = execFileSync("git", ["show", "de6fd4b:apps/api/prisma/schema.prisma"], { cwd: root, encoding: "utf8" });
 const before = execFileSync("git", ["show", `${baseline}:apps/api/prisma/schema.prisma`], { cwd: root, encoding: "utf8" });
 const migration = fs.readFileSync(path.join(root, "apps/api/prisma/migrations/20261003060000_ai_task_foundation/migration.sql"), "utf8");
 const checks = fs.readFileSync(path.join(__dirname, "fixtures/ai-native/persistence-checks.sql"), "utf8");

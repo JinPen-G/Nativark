@@ -4555,6 +4555,11 @@ model AiTask {
   /// Allocated with the task mutation transaction; never expose a global cross-tenant sequence.
   eventCursor         BigInt          @default(0) @db.UnsignedBigInt
   inputRef            String?         @db.VarChar(191)
+  /// Frozen creation input evidence; nullable only for tasks written before this migration.
+  inputRevision       Int?            @db.UnsignedInt
+  inputHash           String?         @db.Char(64)
+  creationKey         String?         @db.VarChar(128)
+  creationFingerprint String?         @db.Char(64)
   resultRef           String?         @db.VarChar(191)
   cancelRequestedAt   DateTime?       @db.DateTime(3)
   /// Hide conversation metadata without cascading into approvals or business records.
@@ -4568,6 +4573,7 @@ model AiTask {
 
   @@unique([scopeId, id], map: "ai_tasks_scope_id")
   @@unique([scopeId, id, ownerKind], map: "ai_tasks_scope_actor_kind")
+  @@unique([scopeId, audience, ownerKind, ownerId, creationKey], map: "ai_tasks_creation_key")
   @@index([traceId], map: "ai_tasks_trace")
   @@index([scopeId, audience, ownerKind, ownerId, createdAt], map: "ai_tasks_owner")
   @@index([scopeId, status, updatedAt], map: "ai_tasks_status")

@@ -42,6 +42,32 @@ export interface AiTaskRepositoryAuthority {
   resolve(taskId: string, operation: AiTaskRepositoryOperation): Promise<AiExecutionContext>;
 }
 
+/** Validate a context already resolved by a required authority; this helper grants no permission. */
+export function aiTaskAccessFromContext(context: AiExecutionContext, taskId: string, now: Date) {
+  if (!id.safeParse(taskId).success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
+  const parsed = identitySchema.safeParse(context);
+  if (!parsed.success) throw new AiTaskRepositoryError("AI_ACCESS_DENIED");
+  let scope;
+  try { scope = aiPersistenceScopeColumns(context.scope); }
+  catch { throw new AiTaskRepositoryError("AI_ACCESS_DENIED"); }
+  const actor = parsed.data.actor, audience = parsed.data.audience;
+  const allowedShape = actor.kind === "saas_admin" ? audience === "operator" && scope.kind === "PLATFORM"
+    : scope.kind !== "PLATFORM" && (actor.kind === "user" ? audience === "operator" || audience === "staff"
+      : actor.kind === "customer" ? audience === "client" : audience === "automation");
+  if (!allowedShape || !(now instanceof Date) || !Number.isFinite(now.getTime()) || Date.parse(parsed.data.authorizedAt) > now.getTime()
+    || (actor.kind === "automation" && Date.parse(actor.expiresAt) <= now.getTime())) throw new AiTaskRepositoryError("AI_ACCESS_DENIED");
+  const ownerKind = actor.kind.toUpperCase() as AiActorKind;
+  const ownerId = actor.kind === "customer" ? actor.customerId : actor.kind === "automation" ? actor.subjectId : actor.userId;
+  const where: Prisma.AiTaskWhereInput = {
+    id: taskId, archivedAt: null, scopeKind: scope.kind, scope: { is: scope },
+    audience: audience.toUpperCase() as AiAudience, ownerKind, ownerId,
+    ...(actor.kind === "automation" ? { policyId: actor.policyId, policyRevision: actor.policyRevision, policyExpiresAt: { gt: now } } : {})
+  };
+  const bindingKey = JSON.stringify([scope, audience, ownerKind, ownerId,
+    actor.kind === "automation" ? [actor.policyId, actor.policyRevision, actor.expiresAt] : null]);
+  return { where, now, actorKind: ownerKind, actorId: ownerId, authorizedAt: new Date(parsed.data.authorizedAt), bindingKey, scope, audience: audience.toUpperCase() as AiAudience, actor, requestId: parsed.data.requestId };
+}
+
 /**
  * Not registered in Nest or a worker. The required authority re-resolves each call;
  * owner-only access is deliberate until a separately authorized task-sharing path exists.
@@ -62,28 +88,7 @@ export class AiTaskRepository {
     let context: AiExecutionContext;
     try { context = await this.authority.resolve(taskId, operation); }
     catch { throw new AiTaskRepositoryError("AI_ACCESS_DENIED"); }
-    const parsed = identitySchema.safeParse(context);
-    if (!parsed.success) throw new AiTaskRepositoryError("AI_ACCESS_DENIED");
-    let scope;
-    try { scope = aiPersistenceScopeColumns(context.scope); }
-    catch { throw new AiTaskRepositoryError("AI_ACCESS_DENIED"); }
-    const actor = parsed.data.actor, audience = parsed.data.audience;
-    const allowedShape = actor.kind === "saas_admin" ? audience === "operator" && scope.kind === "PLATFORM"
-      : scope.kind !== "PLATFORM" && (actor.kind === "user" ? audience === "operator" || audience === "staff"
-        : actor.kind === "customer" ? audience === "client" : audience === "automation");
-    const now = this.clock();
-    if (!allowedShape || !(now instanceof Date) || !Number.isFinite(now.getTime()) || Date.parse(parsed.data.authorizedAt) > now.getTime()
-      || (actor.kind === "automation" && Date.parse(actor.expiresAt) <= now.getTime())) throw new AiTaskRepositoryError("AI_ACCESS_DENIED");
-    const ownerKind = actor.kind.toUpperCase() as AiActorKind;
-    const ownerId = actor.kind === "customer" ? actor.customerId : actor.kind === "automation" ? actor.subjectId : actor.userId;
-    const where: Prisma.AiTaskWhereInput = {
-      id: taskId, archivedAt: null, scopeKind: scope.kind, scope: { is: scope },
-      audience: audience.toUpperCase() as AiAudience, ownerKind, ownerId,
-      ...(actor.kind === "automation" ? { policyId: actor.policyId, policyRevision: actor.policyRevision, policyExpiresAt: { gt: now } } : {})
-    };
-    const bindingKey = JSON.stringify([scope, audience, ownerKind, ownerId,
-      actor.kind === "automation" ? [actor.policyId, actor.policyRevision, actor.expiresAt] : null]);
-    return { where, now, actorKind: ownerKind, actorId: ownerId, authorizedAt: new Date(parsed.data.authorizedAt), bindingKey };
+    return aiTaskAccessFromContext(context, taskId, this.clock());
   }
 
   private async stored<T>(operation: () => Promise<T>): Promise<T> {
