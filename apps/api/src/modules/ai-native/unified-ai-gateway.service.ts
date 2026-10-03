@@ -1,3 +1,4 @@
+import type { AiProfileCapability } from './provider-profile.ports';
 import { GatewayDeadline } from './gateway-deadline';
 import { ModelGatewayError, type GatewayContext, type ModelRequest } from './model-gateway.ports';
 import type { UnifiedGatewayPorts, GatewayInvocationResult, GatewayStreamEvent } from './unified-ai-gateway.ports';
@@ -16,13 +17,25 @@ export class UnifiedAiGatewayService {
 
   private deadline(signal?: AbortSignal) { return new GatewayDeadline(this.deadlineMs, signal); }
 
+  private required(request: ModelRequest, stream = false): AiProfileCapability[] {
+    const capabilities: AiProfileCapability[] = ['text'];
+    if (stream) capabilities.push('streaming');
+    for (const feature of request.features ?? []) {
+      if (feature === 'tools') capabilities.push('tools');
+      else if (feature === 'structuredOutput') capabilities.push('structured_output');
+      else if (feature === 'streaming') capabilities.push('streaming');
+      else throw new ModelGatewayError('INVALID_REQUEST');
+    }
+    return [...new Set(capabilities)];
+  }
+
   private scope(context: GatewayContext) { return { id: `${context.tenantId}:${context.workspaceId}`, kind: 'WORKSPACE' as const, tenantId: context.tenantId, workspaceId: context.workspaceId }; }
 
   async invoke(context: GatewayContext, request: ModelRequest, signal?: AbortSignal): Promise<GatewayInvocationResult> {
     const life = this.deadline(signal), scope = this.scope(context);
     let admissionId: string | undefined, usageId: string | undefined, dispatched = false, accounted = false, settled = false, closed = false;
     try {
-      const route = await life.wait(() => this.ports.router.resolve({ consumerScope: scope, platformScope: { id: 'platform-default', kind: 'PLATFORM' }, mode: 'tenant_managed', scene: 'chat', requiredCapabilities: (request.features ?? []).map(feature => feature === 'structuredOutput' ? 'structured_output' : feature === 'streaming' ? 'streaming' : 'tools') }));
+      const route = await life.wait(() => this.ports.router.resolve({ consumerScope: scope, platformScope: { id: 'platform-default', kind: 'PLATFORM' }, mode: 'tenant_managed', scene: 'chat', requiredCapabilities: this.required(request) }));
       const admission = await life.wait(() => this.ports.admission.admit({ scope, actorId: context.actorId, callId: request.callId, requestHash: requestFingerprint(request), profileId: route.profile.id, expiresAt: life.expiresAt }).then(record => { if (closed) { void life.cleanup(() => this.ports.admission.transition(scope, request.callId, 'admitted', 'cancelled')).catch(() => {}); } else admissionId = record.id; return record; })); admissionId = admission.id;
       const usage = await life.wait(() => this.ports.usage.reserve({ scope: admission.scope, callId: request.callId, idempotencyKey: request.callId, reservedUnits: request.maxOutputTokens, expiresAt: life.expiresAt }).then(record => { if (closed) { void life.cleanup(() => this.ports.usage.markUnknown(scope, record.id, 'LATE_RESERVATION')).catch(() => {}); } else usageId = record.id; return record; })); usageId = usage.id;
       await life.wait(() => this.ports.audit.append({ callId: request.callId, tenantId: context.tenantId, workspaceId: context.workspaceId, event: 'ai.invoke.admitted', status: 'accepted' }));
@@ -61,7 +74,7 @@ export class UnifiedAiGatewayService {
     let sourceDone = false;
     let finalResult: GatewayInvocationResult | undefined;
     try {
-      const route = await life.wait(() => this.ports.router.resolve({ consumerScope: scope, platformScope: { id: 'platform-default', kind: 'PLATFORM' }, mode: 'tenant_managed', scene: 'chat', requiredCapabilities: ['streaming'] }));
+      const route = await life.wait(() => this.ports.router.resolve({ consumerScope: scope, platformScope: { id: 'platform-default', kind: 'PLATFORM' }, mode: 'tenant_managed', scene: 'chat', requiredCapabilities: this.required(request, true) }));
       const admission = await life.wait(() => this.ports.admission.admit({ scope, actorId: context.actorId, callId: request.callId, requestHash: requestFingerprint(request), profileId: route.profile.id, expiresAt: life.expiresAt }).then(record => { if (closed) { void life.cleanup(() => this.ports.admission.transition(scope, request.callId, 'admitted', 'cancelled')).catch(() => {}); } else admissionId = record.id; return record; })); admissionId = admission.id;
       const usage = await life.wait(() => this.ports.usage.reserve({ scope: admission.scope, callId: request.callId, idempotencyKey: request.callId, reservedUnits: request.maxOutputTokens, expiresAt: life.expiresAt }).then(record => { if (closed) { void life.cleanup(() => this.ports.usage.markUnknown(scope, record.id, 'LATE_RESERVATION')).catch(() => {}); } else usageId = record.id; return record; })); usageId = usage.id;
       await life.wait(() => this.ports.audit.append({ callId: request.callId, tenantId: context.tenantId, workspaceId: context.workspaceId, event: 'ai.stream.admitted', status: 'accepted' }));

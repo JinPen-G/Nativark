@@ -5,7 +5,7 @@ require('ts-node').register({ transpileOnly: false, compilerOptions: { module: '
 const { ProviderRouterService } = require('../apps/api/src/modules/ai-native/provider-router.service');
 const { InvocationAdmissionService } = require('../apps/api/src/modules/ai-native/invocation-admission.service');
 
-const platform = { id: 'matrix-platform', kind: 'PLATFORM' }, tenant = { id: 'matrix-tenant', kind: 'TENANT' }, other = { id: 'matrix-other', kind: 'TENANT' };
+const platform = { id: 'matrix-platform', kind: 'PLATFORM' }, tenant = { id: 'matrix-tenant', kind: 'TENANT', tenantId: 'tenant-a' }, other = { id: 'matrix-other', kind: 'TENANT', tenantId: 'tenant-b' };
 const profile = (scope, mode, key = 'default') => ({ id: `${scope.id}-${key}`, scopeId: scope.id, scopeKind: scope.kind, profileKey: key, role: 'DEFAULT', serviceMode: mode, protocol: 'openai_chat_completions', provider: 'synthetic', model: key, credentialRef: `vault:${key}`, configRevision: 1, enabled: true, allowedCapabilities: ['text'], disabledAt: null });
 const route = (records) => new ProviderRouterService({ profiles: { list: async scope => records.filter(row => row.scopeId === scope.id && row.scopeKind === scope.kind), get: async () => null, create: async () => { throw new Error('unused'); }, update: async () => null }, capabilities: { preflight: async (row, required) => ({ allowed: required.every(capability => row.allowedCapabilities.includes(capability)), required, missing: required.filter(capability => !row.allowedCapabilities.includes(capability)), stale: [] }) } });
 
