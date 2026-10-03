@@ -51,6 +51,7 @@ export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
   ] },
   AiTaskEventDraft: { oneOf: [
     closed({ ...eventBase, type: choice("task.transition"), data: closed({ from: status, to: status, reason }) }),
+    closed({ ...eventBase, type: choice("step.registered"), data: closed({ stepId: id(), runId: id(), sequence: { type: "integer", minimum: 1, maximum: 4294967295 }, stepRevision: { type: "integer", enum: [1] } }) }),
     closed({ ...eventBase, type: choice("step.changed"), data: closed({ stepId: id(), runId: id(), stepRevision: revision, status: choice(...AI_STEP_STATUSES_DRAFT), reason: choice(...AI_STEP_TRANSITION_REASONS_DRAFT) }) }),
     closed({ ...eventBase, type: choice("task.output_ready"), data: closed({ resultId: id() }) }),
     closed({ ...eventBase, type: choice("access.revoked"), data: closed({ code: choice("AI_ACCESS_DENIED", "AI_SCOPE_CHANGED") }) })

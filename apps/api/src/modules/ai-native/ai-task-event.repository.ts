@@ -14,6 +14,7 @@ const revision = z.number().int().positive().max(4294967295);
 const inputSchema = z.object({ taskId: id, after: z.string().min(1).max(20), limit: z.number().int().min(1).max(100) }).strict();
 const dataSchemas = {
   "task.transition": z.object({ from: z.enum(AI_TASK_STATUSES_DRAFT), to: z.enum(AI_TASK_STATUSES_DRAFT), reason: z.enum(AI_TASK_TRANSITION_REASONS_DRAFT) }).strict(),
+  "step.registered": z.object({ stepId: id, runId: id, sequence: revision, stepRevision: z.literal(1) }).strict(),
   "step.changed": z.object({ stepId: id, runId: id, stepRevision: revision, status: z.enum(AI_STEP_STATUSES_DRAFT), reason: z.enum(AI_STEP_TRANSITION_REASONS_DRAFT) }).strict(),
   "task.output_ready": z.object({ resultId: id }).strict(),
   "access.revoked": z.object({ code: z.enum(["AI_ACCESS_DENIED", "AI_SCOPE_CHANGED"]) }).strict()
@@ -32,6 +33,7 @@ function wireEvent(row: EventRow): AiTaskEventDraft {
   const base = { contractVersion: AI_TASK_DRAFT_VERSION, taskId: row.taskId, cursor: row.cursor.toString(), taskRevision: row.taskRevision, occurredAt: row.occurredAt.toISOString() };
   switch (row.type) {
     case "task.transition": return { ...base, type: row.type, data: dataSchemas[row.type].parse(envelope.data.data) };
+    case "step.registered": return { ...base, type: row.type, data: dataSchemas[row.type].parse(envelope.data.data) };
     case "step.changed": return { ...base, type: row.type, data: dataSchemas[row.type].parse(envelope.data.data) };
     case "task.output_ready": return { ...base, type: row.type, data: dataSchemas[row.type].parse(envelope.data.data) };
     case "access.revoked": return { ...base, type: row.type, data: dataSchemas[row.type].parse(envelope.data.data) };

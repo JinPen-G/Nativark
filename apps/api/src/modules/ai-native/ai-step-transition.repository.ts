@@ -1,14 +1,11 @@
 import { Prisma, type PrismaClient, type AiStepStatus, type AiStepEffect } from "@prisma/client";
 import { z } from "zod";
-import Ajv from "ajv";
-import addFormats from "ajv-formats";
+import { isAiStepExecutionContext as validContext, isAiStepState as validStep } from "./task-contract-validation";
 import { createHash } from "node:crypto";
 import {
   AI_TASK_DRAFT_VERSION, AI_STEP_TRANSITION_REASONS_DRAFT,
   type AiExecutionContext, type AiStepStateDraft, type AiTaskEventDraft
 } from "@rental-os/shared";
-import { AI_NATIVE_COMPONENT_SCHEMAS } from "../../contracts/ai-native-schemas";
-import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "../../contracts/ai-task-draft-schemas";
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from "./ai-task.repository";
 import { aiPersistenceScopeColumns } from "./persistence-scope";
 import { evaluateAiStepTransitionDraft } from "./task-transition-draft";
@@ -50,20 +47,6 @@ const grantSchema = z.object({
   previousResultRef: id.nullable(), resultRef: id.nullable()
 }).strict();
 
-// Consume the existing C01/C04 schemas, rather than weakening their outcome union.
-const ajv = new Ajv({ strict: true, allErrors: false, coerceTypes: false, useDefaults: false, removeAdditional: false });
-addFormats(ajv);
-function localRefs(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(localRefs);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key,
-    key === "$ref" && typeof child === "string" ? child.replace(/^#\/components\/schemas\//u, "urn:rental:step:") : localRefs(child)]));
-}
-for (const [name, schema] of Object.entries({ ...AI_NATIVE_COMPONENT_SCHEMAS, ...AI_TASK_DRAFT_COMPONENT_SCHEMAS })) {
-  ajv.addSchema(localRefs(schema) as object, `urn:rental:step:${name}`);
-}
-const validStep = ajv.getSchema<AiStepStateDraft>("urn:rental:step:AiStepStateDraft")!;
-const validContext = ajv.getSchema<AiExecutionContext>("urn:rental:step:AiExecutionContext")!;
 const errorCode = (step: AiStepStateDraft) => "error" in step.outcome ? step.outcome.error.code : null;
 const hasResult = (step: AiStepStateDraft) => ["succeeded", "failed", "unknown"].includes(step.outcome.status);
 const denied = () => new AiTaskRepositoryError("AI_ACCESS_DENIED");

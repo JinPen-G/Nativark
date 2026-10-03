@@ -95,6 +95,7 @@ interface AiTaskEventBaseDraft {
 }
 export type AiTaskEventDraft = AiTaskEventBaseDraft & (
   | { type: "task.transition"; data: { from: AiTaskStatusDraft; to: AiTaskStatusDraft; reason: AiTaskTransitionReasonDraft } }
+  | { type: "step.registered"; data: { stepId: string; runId: string; sequence: number; stepRevision: 1 } }
   | { type: "step.changed"; data: { stepId: string; runId: string; stepRevision: number; status: AiStepStatusDraft; reason: AiStepTransitionReasonDraft } }
   | { type: "task.output_ready"; data: { resultId: string } }
   | { type: "access.revoked"; data: { code: "AI_ACCESS_DENIED" | "AI_SCOPE_CHANGED" } }
