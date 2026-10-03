@@ -1,0 +1,35 @@
+'use strict';
+const test = require('node:test'), assert = require('node:assert/strict');
+const {deferred} = require('./fixtures/ai-native/b09-host.cjs');
+const {mountFeature} = require('./fixtures/ai-native/b09-react-hooks.cjs');
+const source = {id:'synthetic-source',version:'1',status:'available',title:'Synthetic'};
+const run = action => (action.onAction ?? action.onClick)();
+test('actual source handler synchronously locks duplicate actions and surfaces safe current failure', async () => {
+ const pending = deferred(); let calls = 0;
+ const props = {sources:[source],onOpen:()=>{calls++;return pending.promise;}};
+ const host = mountFeature('KnowledgeSources',props); const action = host.actions(host.render())[0];
+ const first = run(action), second = run(action);
+ await Promise.resolve(); assert.equal(calls,1);
+ pending.reject(new Error('private credential detail'));
+ await Promise.allSettled([first,second]);
+ const tree = host.render();
+ assert.match(JSON.stringify(tree),/来源打开失败/);
+ assert.doesNotMatch(JSON.stringify(tree),/private credential/); host.unmount();
+});
+test('actual source handler drops revoked A-B-A and replaced callback feedback', async () => {
+ const pending = deferred(); const callback = ()=>pending.promise;
+ const host = mountFeature('KnowledgeSources',{sources:[source],onOpen:callback});
+ const old = host.actions(host.render())[0]; const request = run(old); await Promise.resolve();
+ host.render({sources:[{...source,status:'withdrawn'}],onOpen:callback});
+ host.render({sources:[source],onOpen:()=>Promise.resolve()});
+ pending.reject(new Error('old failure')); await Promise.allSettled([request]);
+ assert.doesNotMatch(JSON.stringify(host.render()),/来源打开失败/);
+ await assert.rejects(run(old),/不可用|已变化/); host.unmount();
+});
+test('actual source handler cannot restart from stale closures after unmount', async () => {
+ const pending = deferred(); let calls = 0;
+ const host = mountFeature('KnowledgeSources',{sources:[source],onOpen:()=>{calls++;return pending.promise;}});
+ const action = host.actions(host.render())[0]; const first = run(action); await Promise.resolve();
+ host.unmount(); pending.resolve(); await Promise.allSettled([first]);
+ await assert.rejects(run(action),/不可用|已变化/); assert.equal(calls,1);
+});

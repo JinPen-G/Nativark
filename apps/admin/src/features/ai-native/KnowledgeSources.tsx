@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Button } from "@/components/ui";
+import { ActionButton } from "@/components/ui";
+import { useResourceAction } from "./resource-action";
 export type KnowledgeSource = {
   id: string;
   title: string;
@@ -19,38 +19,29 @@ const label: Record<KnowledgeSource["status"], string> = {
   index_pending: "索引待更新",
 };
 export function KnowledgeSources({ sources, onOpen }: KnowledgeSourcesProps) {
-  const [opening, setOpening] = useState<string | null>(null);
-  const [openError, setOpenError] = useState<string | null>(null);
+  const rows: readonly KnowledgeSource[] = Array.isArray(sources) ? sources.slice(0, 50).filter(source => source && typeof source.id === "string" && typeof source.version === "string") : [];
+  const signature = JSON.stringify(rows.map(source => [source.id, source.version, source.status]));
+  const action = useResourceAction(signature, onOpen);
   if (!sources) return <p role="status">知识来源不可用</p>;
   if (!sources.length) return <p role="status">没有可展示的来源</p>;
   return (
     <ul aria-label="知识来源">
-      {sources.map((source) => (
+      {rows.map((source) => (
         <li key={`${source.id}:${source.version}`}>
           <span>{source.status === "available" ? source.title || "未命名来源" : "来源内容不可用"}</span>
           <small>版本 {source.version}</small>
           <span>{label[source.status] ?? "状态待核对"}</span>
           {source.status === "available" && (
-            <Button
-              onClick={async () => {
-                if (!onOpen || opening) return;
-                const key = `${source.id}:${source.version}`;
-                setOpening(key);
-                setOpenError(null);
-                try {
-                  await onOpen({ id: source.id, version: source.version });
-                } catch {
-                  setOpenError(key);
-                } finally {
-                  setOpening(null);
-                }
-              }}
-              disabled={!onOpen || opening !== null}
-            >
-              {opening === `${source.id}:${source.version}` ? "正在打开…" : "查看来源"}
-            </Button>
+            <ActionButton
+              key={signature}
+              label="查看来源"
+              pendingLabel="正在打开…"
+              successLabel="打开操作已结束"
+              onAction={() => action.run(JSON.stringify([source.id, source.version]), { id: source.id, version: source.version })}
+              disabled={!onOpen || action.pendingKey !== null}
+            />
           )}
-          {openError === `${source.id}:${source.version}` && <small role="alert">来源打开失败，请重试</small>}
+          {action.errorKey === JSON.stringify([source.id, source.version]) && <small role="alert">来源打开失败，请重试</small>}
         </li>
       ))}
     </ul>
