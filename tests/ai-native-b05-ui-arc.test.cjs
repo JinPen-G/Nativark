@@ -40,6 +40,21 @@ test('task list disables navigation without a callback and retains rows during r
   assert.equal((markup.match(/disabled=""/g) ?? []).length, 2);
 });
 
+test('source and memory views redact content after withdrawal or expiry', () => {
+  const { KnowledgeSources } = load('KnowledgeSources.tsx');
+  const { MemoryPreferences } = load('MemoryPreferences.tsx');
+  const source = renderToStaticMarkup(React.createElement(KnowledgeSources, {
+    sources: [{ id: 's1', title: 'secret title', version: '2', status: 'withdrawn' }],
+  }));
+  const memory = renderToStaticMarkup(React.createElement(MemoryPreferences, {
+    items: [{ id: 'm1', label: '偏好', value: 'secret value', status: 'revoked', actorKind: 'human', revision: '2' }],
+  }));
+  assert.ok(source.includes('来源内容不可用'));
+  assert.ok(!source.includes('secret title'));
+  assert.ok(memory.includes('内容不可用'));
+  assert.ok(!memory.includes('secret value'));
+});
+
 test('timeline distinguishes an unknown enum from an unavailable step payload', () => {
   const { TaskTimeline } = load('TaskTimeline.tsx');
   const markup = renderToStaticMarkup(React.createElement(TaskTimeline, {
