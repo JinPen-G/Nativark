@@ -1,0 +1,4 @@
+'use strict';
+const test = require('node:test'); const assert = require('node:assert/strict'); const path = require('node:path'); const runner = require('../scripts/ai-native-b06-offline.cjs');
+test('offline runner discovers B02-B06 tests and retains deterministic ordering', () => { const files = runner.discoverTests(path.resolve(__dirname)); assert.ok(files.some(file => file.includes('ai-native-b04'))); assert.ok(files.some(file => file.includes('ai-native-b06'))); assert.deepEqual(files, [...files].sort()); });
+test('offline runner reports a per-file result with bounded output', () => { const file = path.resolve(__dirname, 'ai-native-b06-w12-dual-mode.test.cjs'); const result = runner.runOffline(file, 10_000); assert.equal(result.status, 'passed'); assert.ok(result.file.endsWith('.test.cjs')); assert.ok(result.output.length <= 4000); });
