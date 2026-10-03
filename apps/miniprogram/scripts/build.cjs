@@ -102,7 +102,30 @@ function main() {
   const legalSource = fs.readFileSync(legalFile, "utf8");
   const sharedRequire = /require\(["']@rental-os\/shared["']\)/g;
   if (sharedRequire.test(legalSource)) {
-    if (!legalSource.includes(".parseClientRichText)")) fail("legal shared runtime import is not the approved parser");
+    const ts = require(path.join(path.dirname(resolveTsc()), "..", "lib", "typescript.js"));
+    const sourceFile = ts.createSourceFile("legal.js", legalSource, ts.ScriptTarget.Latest, true);
+    const bindings = new Set();
+    function findBindings(node) {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer &&
+          ts.isCallExpression(node.initializer) && node.initializer.expression.getText(sourceFile) === "require" &&
+          node.initializer.arguments.length === 1 && ts.isStringLiteral(node.initializer.arguments[0]) &&
+          node.initializer.arguments[0].text === "@rental-os/shared") bindings.add(node.name.text);
+      ts.forEachChild(node, findBindings);
+    }
+    findBindings(sourceFile);
+    if (bindings.size !== 1) fail("legal shared runtime import is not the approved parser binding");
+    let parserUses = 0;
+    function validateUses(node) {
+      if (ts.isIdentifier(node) && bindings.has(node.text)) {
+        if (ts.isVariableDeclaration(node.parent) && node.parent.name === node) return;
+        if (!ts.isPropertyAccessExpression(node.parent) || node.parent.expression !== node ||
+            node.parent.name.text !== "parseClientRichText") fail("legal shared runtime import uses an unapproved export");
+        parserUses += 1;
+      }
+      ts.forEachChild(node, validateUses);
+    }
+    validateUses(sourceFile);
+    if (parserUses === 0) fail("legal shared parser import is unused");
     const parserSource = path.resolve(root, "../../packages/shared/src/client-rich-text.ts");
     runTsc([parserSource, "--target", "ES2019", "--module", "commonjs", "--strict", "--skipLibCheck", "--outDir", path.join(dist, "vendor", "shared-rich-text")]);
     fs.writeFileSync(legalFile, legalSource.replace(sharedRequire, 'require("../../vendor/shared-rich-text/client-rich-text")'));
