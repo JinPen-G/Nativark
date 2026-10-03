@@ -1,0 +1,10 @@
+'use strict';
+const test = require('node:test'), assert = require('node:assert/strict');
+require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
+require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
+const { createAiNativeComposition } = require('../apps/api/src/modules/ai-native/ai-native-composition.module');
+const methods = { router: ['resolve'], capabilityEvidence: ['preflight', 'record'], admission: ['admit', 'transition'], usageAccounting: ['reserve', 'settle', 'release', 'reconcile'], gateway: ['invoke', 'stream'], knowledge: ['create', 'withdraw', 'search'], memory: ['putMemory', 'activeMemory'], humanConfirmation: ['requestConfirmation', 'confirm'], transport: ['invoke', 'stream'], audit: ['append'] };
+const complete = Object.fromEntries(Object.entries(methods).map(([key, names]) => [key, Object.fromEntries(names.map(name => [name, () => undefined]))]));
+test('factory returns unavailable when any required port is absent or incomplete', () => { const result = createAiNativeComposition({ ...complete, audit: {} }); assert.equal(result.ready, false); assert.equal(result.checks.find(row => row.component === 'audit').reason, 'MISSING_METHODS:append'); });
+test('factory marks complete method-validated wiring ready', () => { const result = createAiNativeComposition(complete); assert.equal(result.ready, true); assert.equal(result.checks.every(row => row.enabled), true); });
+test('empty objects are not enabled and no public registration occurs', () => { const result = createAiNativeComposition({}); assert.equal(result.ready, false); assert.equal(result.checks.every(row => !row.enabled), true); });
