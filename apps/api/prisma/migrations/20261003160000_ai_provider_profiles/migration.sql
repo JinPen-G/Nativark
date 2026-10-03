@@ -120,6 +120,19 @@ CREATE TABLE `ai_knowledge_index_generations` (
   `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3), UNIQUE INDEX `ai_knowledge_index_scope_generation_key` (`tenantId`,`workspaceId`,`generation`), INDEX `ai_knowledge_index_scope_status_idx` (`tenantId`,`workspaceId`,`status`), PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
+CREATE TABLE `ai_structured_memories` (
+  `id` VARCHAR(36) NOT NULL, `tenantId` VARCHAR(191) NOT NULL, `workspaceId` VARCHAR(191) NOT NULL, `subjectType` VARCHAR(32) NOT NULL, `subjectId` VARCHAR(191) NOT NULL,
+  `scopeRevision` INT UNSIGNED NOT NULL, `content` JSON NOT NULL, `contentHash` VARCHAR(128) NOT NULL, `status` VARCHAR(32) NOT NULL, `expiresAt` DATETIME(3) NULL,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3), `updatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  INDEX `ai_memory_subject_scope_idx` (`tenantId`,`workspaceId`,`subjectType`,`subjectId`,`status`), PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE TABLE `ai_human_confirmations` (
+  `id` VARCHAR(36) NOT NULL, `tenantId` VARCHAR(191) NOT NULL, `workspaceId` VARCHAR(191) NOT NULL, `subjectId` VARCHAR(191) NOT NULL, `idempotencyKey` VARCHAR(128) NOT NULL,
+  `proposalHash` VARCHAR(128) NOT NULL, `proposalRevision` INT UNSIGNED NOT NULL, `status` VARCHAR(32) NOT NULL, `confirmedBy` VARCHAR(191) NULL, `expiresAt` DATETIME(3) NULL,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3), `updatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE INDEX `ai_human_confirmation_tenant_key` (`tenantId`,`idempotencyKey`), INDEX `ai_human_confirmation_subject_idx` (`tenantId`,`workspaceId`,`subjectId`,`status`), PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 CREATE TABLE `ai_provider_profiles` (
   `id` VARCHAR(36) NOT NULL,
   `scopeId` VARCHAR(36) NOT NULL,

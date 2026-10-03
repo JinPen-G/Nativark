@@ -573,6 +573,43 @@ model AiKnowledgeIndexGeneration {
   @@map("ai_knowledge_index_generations")
 }
 
+model AiStructuredMemory {
+  id             String   @id @default(uuid()) @db.VarChar(36)
+  tenantId       String   @db.VarChar(191)
+  workspaceId    String   @db.VarChar(191)
+  subjectType    String   @db.VarChar(32)
+  subjectId      String   @db.VarChar(191)
+  scopeRevision  Int      @db.UnsignedInt
+  content        Json
+  contentHash    String   @db.VarChar(128)
+  status         String   @db.VarChar(32)
+  expiresAt      DateTime?
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+  updatedAt      DateTime @updatedAt
+
+  @@index([tenantId, workspaceId, subjectType, subjectId, status], map: "ai_memory_subject_scope_idx")
+  @@map("ai_structured_memories")
+}
+
+model AiHumanConfirmation {
+  id             String   @id @default(uuid()) @db.VarChar(36)
+  tenantId       String   @db.VarChar(191)
+  workspaceId    String   @db.VarChar(191)
+  subjectId      String   @db.VarChar(191)
+  idempotencyKey String   @db.VarChar(128)
+  proposalHash   String   @db.VarChar(128)
+  proposalRevision Int    @db.UnsignedInt
+  status         String   @db.VarChar(32)
+  confirmedBy    String?  @db.VarChar(191)
+  expiresAt      DateTime?
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+  updatedAt      DateTime @updatedAt
+
+  @@unique([tenantId, idempotencyKey], map: "ai_human_confirmation_tenant_key")
+  @@index([tenantId, workspaceId, subjectId, status], map: "ai_human_confirmation_subject_idx")
+  @@map("ai_human_confirmations")
+}
+
 /// SPACE-01：账号与经营空间的成员关系。
 ///
 /// 需求 3/4.1：账号归属租户，通过成员关系进入一个或多个空间，并可在不同空间
