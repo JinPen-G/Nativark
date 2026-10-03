@@ -93,6 +93,33 @@ CREATE TABLE `ai_usage_ledger_entries` (
   PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
+CREATE TABLE `ai_knowledge_documents` (
+  `id` VARCHAR(36) NOT NULL, `tenantId` VARCHAR(191) NOT NULL, `workspaceId` VARCHAR(191) NOT NULL,
+  `title` VARCHAR(256) NOT NULL, `status` VARCHAR(32) NOT NULL, `revision` INT UNSIGNED NOT NULL DEFAULT 1,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3), `updatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3), `withdrawnAt` DATETIME(3) NULL,
+  INDEX `ai_knowledge_documents_scope_status_idx` (`tenantId`,`workspaceId`,`status`), PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE TABLE `ai_knowledge_versions` (
+  `id` VARCHAR(36) NOT NULL, `documentId` VARCHAR(36) NOT NULL, `version` INT UNSIGNED NOT NULL, `status` VARCHAR(32) NOT NULL,
+  `contentHash` VARCHAR(128) NOT NULL, `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE INDEX `ai_knowledge_versions_document_version_key` (`documentId`,`version`), INDEX `ai_knowledge_versions_document_status_idx` (`documentId`,`status`), PRIMARY KEY (`id`),
+  CONSTRAINT `ai_knowledge_versions_document_fk` FOREIGN KEY (`documentId`) REFERENCES `ai_knowledge_documents` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE TABLE `ai_knowledge_chunks` (
+  `id` VARCHAR(36) NOT NULL, `versionId` VARCHAR(36) NOT NULL, `chunkIndex` INT UNSIGNED NOT NULL, `text` TEXT NOT NULL, `tokenCount` INT UNSIGNED NOT NULL,
+  UNIQUE INDEX `ai_knowledge_chunks_version_index_key` (`versionId`,`chunkIndex`), PRIMARY KEY (`id`),
+  CONSTRAINT `ai_knowledge_chunks_version_fk` FOREIGN KEY (`versionId`) REFERENCES `ai_knowledge_versions` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE TABLE `ai_knowledge_acl` (
+  `id` VARCHAR(36) NOT NULL, `documentId` VARCHAR(36) NOT NULL, `subjectType` VARCHAR(32) NOT NULL, `subjectId` VARCHAR(191) NOT NULL, `permission` VARCHAR(32) NOT NULL,
+  UNIQUE INDEX `ai_knowledge_acl_document_subject_key` (`documentId`,`subjectType`,`subjectId`), PRIMARY KEY (`id`),
+  CONSTRAINT `ai_knowledge_acl_document_fk` FOREIGN KEY (`documentId`) REFERENCES `ai_knowledge_documents` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE TABLE `ai_knowledge_index_generations` (
+  `id` VARCHAR(36) NOT NULL, `tenantId` VARCHAR(191) NOT NULL, `workspaceId` VARCHAR(191) NOT NULL, `generation` INT UNSIGNED NOT NULL, `status` VARCHAR(32) NOT NULL,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3), UNIQUE INDEX `ai_knowledge_index_scope_generation_key` (`tenantId`,`workspaceId`,`generation`), INDEX `ai_knowledge_index_scope_status_idx` (`tenantId`,`workspaceId`,`status`), PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 CREATE TABLE `ai_provider_profiles` (
   `id` VARCHAR(36) NOT NULL,
   `scopeId` VARCHAR(36) NOT NULL,
