@@ -130,7 +130,10 @@ export class ChatCompletionsAdapter implements ModelAdapter {
         if (event.status !== 200) throw new ModelAdapterError("PROVIDER_FAILED");
       } else {
         if (!headers) throw new ModelGatewayError("INVALID_RESPONSE");
-        for (const delta of decoder.push(event.bytes)) yield { kind: "text_delta", delta };
+        for (const delta of decoder.push(event.bytes)) {
+          if (input.signal.aborted) throw new ModelGatewayError('CANCELLED');
+          yield { kind: "text_delta", delta };
+        }
       }
     }
     if (input.signal.aborted) throw new ModelGatewayError("CANCELLED");
@@ -150,6 +153,9 @@ export class ChatCompletionsAdapter implements ModelAdapter {
       headers: { Authorization: `Bearer ${credential}`, "Content-Type": "application/json" },
       body: JSON.stringify({ model: input.model, messages: input.messages, stream: false, max_completion_tokens: input.maxOutputTokens, ...selected.body(features) }),
       signal: input.signal, maxResponseBytes: 1_048_576, redirects: "error" });
+    // An injected transport may complete after cancellation. Never convert that late
+    // response into a protocol success; outer Gateway accounting remains responsible.
+    if (input.signal.aborted) throw new ModelGatewayError('CANCELLED');
     if (result.status === 401 || result.status === 403) throw new ModelAdapterError("AUTHENTICATION_FAILED");
     if (result.status === 429) throw new ModelAdapterError("RATE_LIMITED");
     if (result.status !== 200) throw new ModelAdapterError("PROVIDER_FAILED");
