@@ -61,7 +61,8 @@ const normal = value => value.replace(/\r\n/gu, "\n");
 
 test("creation-key migration is additive and independently reproducible without DB execution", { timeout: 120000 }, () => {
   const before = execFileSync("git", ["show", "de6fd4b:apps/api/prisma/schema.prisma"], { cwd: root, encoding: "utf8" });
-  const schema = fs.readFileSync(path.join(root, "apps/api/prisma/schema.prisma"), "utf8");
+  // Reproduce this immutable migration from its committed target schema, not future schema additions.
+  const schema = execFileSync("git", ["show", "616ff60:apps/api/prisma/schema.prisma"], { cwd: root, encoding: "utf8" });
   const result = offlinePrismaSchema(schema, before);
   assert.equal(result.violations, "");
   const sql = fs.readFileSync(path.join(root, "apps/api/prisma/migrations/20261003070000_ai_task_creation_identity/migration.sql"), "utf8");
@@ -70,6 +71,13 @@ test("creation-key migration is additive and independently reproducible without 
   assert.match(sql, /CREATE UNIQUE INDEX `ai_tasks_creation_key` ON `ai_tasks`\(`scopeId`, `audience`, `ownerKind`, `ownerId`, `creationKey`\)/u);
   assert.match(sql, /`creationKey` IS NULL AND `creationFingerprint` IS NULL/u);
   assert.doesNotMatch(sql, /\b(?:DROP\s|DELETE\s+FROM|UPDATE\s+`)/iu);
+});
+
+test("current schema remains independently validated as later migrations evolve", { timeout: 120000 }, () => {
+  const current = fs.readFileSync(path.join(root, "apps/api/prisma/schema.prisma"), "utf8");
+  const result = offlinePrismaSchema(current);
+  assert.match(result.validation, /schema.*valid/iu);
+  assert.equal(result.violations, "");
 });
 
 test("task and first run are created atomically with identity and frozen input resolved by the server", async () => {
