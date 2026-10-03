@@ -11,7 +11,7 @@ const rules = [
   ['bearer', /\bBearer\s+(?!synthetic\b|test\b)[A-Za-z0-9._-]{8,}/i],
   ['pii_phone', /(?<!\d)1[3-9]\d{9}(?!\d)/],
   ['pii_id', /(?<!\d)\d{15}(?:\d{3})?(?!\d)/],
-  ['nondeterministic_time', /\b(?:Date\.now\(\)|Math\.random\(\)|crypto\.randomUUID\(\))\b/],
+  ['nondeterministic_time', /\b(?:Date\.now\(\)|Math\.random\(\)|crypto\.randomUUID\(\))/],
 ];
 function isExcepted(file, pattern, line) { return EXCEPTIONS.some(item => path.basename(file) === item.file && line.includes(item.pattern) && item.pattern === pattern); }
 function scanText(text, file = 'inline') {
