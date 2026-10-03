@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient, type AiActorKind, type AiAudience } from "@prisma/client";
 import { z } from "zod";
-import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext } from "@rental-os/shared";
+import { AI_CONTRACT_DRAFT_VERSION, AI_TASK_DRAFT_VERSION, type AiExecutionContext } from "@rental-os/shared";
 import { aiPersistenceScopeColumns } from "./persistence-scope";
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
@@ -37,7 +37,7 @@ export class AiTaskRepositoryError extends Error {
 }
 
 /** Bound by the application to the real request/job credential, never supplied by a model. */
-export type AiTaskRepositoryOperation = "read_metadata" | "read_events" | "claim_run" | "release_run" | "transition_task";
+export type AiTaskRepositoryOperation = "read_metadata" | "read_events" | "claim_run" | "claim_recovery_run" | "release_run" | "transition_task";
 export interface AiTaskRepositoryAuthority {
   resolve(taskId: string, operation: AiTaskRepositoryOperation): Promise<AiExecutionContext>;
 }
@@ -110,17 +110,36 @@ export class AiTaskRepository {
   }
 
   async claimRun(value: unknown) {
+    return this.claimLease(value, "claim_run");
+  }
+
+  /** Reacquire the original run to reload/reconcile waiting or cancelling work.
+   * Never resumes the task, clears cancellation, creates an action or dispatches a tool.
+   * The returned purpose is a routing hint, not permission; every next mutation reauthorizes.
+   */
+  async claimRecoveryRun(value: unknown) {
+    const lease = await this.claimLease(value, "claim_recovery_run");
+    return { ...lease, purpose: "recovery_only" as const };
+  }
+
+  private async claimLease(value: unknown, operation: "claim_run" | "claim_recovery_run") {
     const parsed = leaseInput.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
     const input = parsed.data, fence = BigInt(input.expectedFencingToken);
-    if (fence >= maxFence) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
-    const access = await this.resolveAccess(input.taskId, "claim_run");
+    if (fence >= maxFence || (operation === "claim_recovery_run" && fence === 0n)) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
+    const access = await this.resolveAccess(input.taskId, operation);
     const expiresAt = new Date(access.now.getTime() + input.leaseMs);
+    const taskState: Prisma.AiTaskWhereInput = operation === "claim_run"
+      ? { status: { in: [...runnable] }, cancelRequestedAt: null }
+      : { OR: [
+        { status: { in: ["WAITING_INPUT", "WAITING_CONFIRMATION", "WAITING_EXTERNAL"] }, cancelRequestedAt: null },
+        { status: "CANCEL_REQUESTED", cancelRequestedAt: { not: null } }
+      ] };
     const result = await this.stored(() => this.db.aiRun.updateMany({
       where: {
         id: input.runId, taskId: input.taskId, revision: input.expectedRunRevision,
         fencingToken: new Prisma.Decimal(input.expectedFencingToken), status: { in: [...runnable] },
-        task: { is: { ...access.where, revision: input.expectedTaskRevision, status: { in: [...runnable] }, cancelRequestedAt: null } },
+        task: { is: { ...access.where, revision: input.expectedTaskRevision, contractVersion: AI_TASK_DRAFT_VERSION, ...taskState } },
         OR: [
           { leaseOwnerId: null, leaseExpiresAt: null },
           { leaseOwnerId: { not: null }, leaseExpiresAt: { lte: access.now } }
