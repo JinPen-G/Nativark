@@ -66,6 +66,16 @@ test('AI service summary projects a whitelist and hides provider secrets/details
   assert.ok(!markup.includes('secret.invalid'));
 });
 
+test('formatters preserve units and reject invalid numeric/time input', () => {
+  const formatters = load('formatters.ts');
+  assert.deepEqual(formatters.formatAmount(0, 'tokens'), { value: '0', source: 'host', unit: 'tokens', available: true });
+  assert.equal(formatters.formatAmount(NaN, 'USD').available, false);
+  assert.equal(formatters.formatAmount(-1, 'USD').value, '未知');
+  assert.equal(formatters.formatAmount(9007199254740993n, 'calls').value, '9007199254740993');
+  assert.equal(formatters.formatTimestamp('not-a-date').value, '时间不可用');
+  assert.equal(formatters.formatUsage({ status: 'pending_reconciliation', amount: '0', unit: 'tokens' }).value, '未知用量');
+});
+
 test('timeline distinguishes an unknown enum from an unavailable step payload', () => {
   const { TaskTimeline } = load('TaskTimeline.tsx');
   const markup = renderToStaticMarkup(React.createElement(TaskTimeline, {
