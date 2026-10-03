@@ -1,0 +1,15 @@
+import type { ModelRequest, ModelUsage } from './model-gateway.ports';
+import type { GatewayContext } from './model-gateway.ports';
+import type { ProviderRouteDecision } from './provider-router.ports';
+import type { ProviderRouterService } from './provider-router.service';
+import type { InvocationAdmissionService } from './invocation-admission.service';
+import type { UsageAccountingService } from './usage-accounting.service';
+
+export interface GatewayInvocationResult { text: string; usage?: ModelUsage; usageState?: 'reported' | 'reconciliation_required'; [key: string]: unknown; }
+export type GatewayStreamEvent = { kind: 'text_delta'; delta: string } | { kind: 'result'; result: GatewayInvocationResult };
+export interface UnifiedGatewayTransport {
+  invoke(context: GatewayContext, request: ModelRequest, route: ProviderRouteDecision, signal: AbortSignal): Promise<GatewayInvocationResult>;
+  stream(context: GatewayContext, request: ModelRequest, route: ProviderRouteDecision, signal: AbortSignal): AsyncIterable<GatewayStreamEvent>;
+}
+export interface UnifiedGatewayAudit { append(entry: { callId: string; tenantId: string; workspaceId: string; event: string; status: string; detail?: string }): Promise<void>; }
+export interface UnifiedGatewayPorts { router: ProviderRouterService; admission: InvocationAdmissionService; usage: UsageAccountingService; transport: UnifiedGatewayTransport; audit: UnifiedGatewayAudit; }
