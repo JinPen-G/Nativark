@@ -15,6 +15,27 @@ CREATE TABLE `ai_scopes` (
   CONSTRAINT `ai_scopes_workspace_fk` FOREIGN KEY (`tenantId`,`workspaceId`) REFERENCES `business_workspaces` (`tenantId`,`id`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
+CREATE TABLE `ai_provider_capability_evidence` (
+  `id` VARCHAR(36) NOT NULL,
+  `profileId` VARCHAR(36) NOT NULL,
+  `scopeId` VARCHAR(36) NOT NULL,
+  `scopeKind` ENUM('platform','tenant','workspace') NOT NULL,
+  `capability` VARCHAR(64) NOT NULL,
+  `status` VARCHAR(32) NOT NULL,
+  `source` VARCHAR(32) NOT NULL,
+  `observedRevision` INT UNSIGNED NOT NULL,
+  `evidenceHash` VARCHAR(128) NOT NULL,
+  `checkedAt` DATETIME(3) NOT NULL,
+  `expiresAt` DATETIME(3) NULL,
+  `details` JSON NULL,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE INDEX `ai_provider_capability_evidence_profile_capability_key` (`profileId`,`capability`),
+  INDEX `ai_provider_capability_evidence_route_idx` (`scopeId`,`scopeKind`,`capability`,`observedRevision`),
+  PRIMARY KEY (`id`),
+  CONSTRAINT `ai_provider_capability_evidence_profile_fk` FOREIGN KEY (`profileId`) REFERENCES `ai_provider_profiles` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 CREATE TABLE `ai_provider_profiles` (
   `id` VARCHAR(36) NOT NULL,
   `scopeId` VARCHAR(36) NOT NULL,
