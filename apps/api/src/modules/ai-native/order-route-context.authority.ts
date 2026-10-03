@@ -1,3 +1,4 @@
+import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
 import { z } from 'zod';
 import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
@@ -29,6 +30,15 @@ export class AiOrderRouteContextAuthority implements AiCurrentScopeAuthority {
     this.orderId = orderId;
   }
   async resolve(): Promise<AiExecutionContext> {
+    return this.authorized(async context => context, false);
+  }
+
+  /** Server-only callback executed inside the verified ALS store, not a model tool. */
+  async withOrderRead<T>(read: (context: AiExecutionContext, orderId: string) => Promise<T>): Promise<T> {
+    return this.authorized(read, true);
+  }
+
+  private async authorized<T>(read: (context: AiExecutionContext, orderId: string) => Promise<T>, recheck: boolean): Promise<T> {
     try {
       const credential = credentialSchema.parse(structuredClone(await this.credentials.current()));
       // A fresh ALS store prevents a prior request's role/scope from authorizing this read.
@@ -53,7 +63,16 @@ export class AiOrderRouteContextAuthority implements AiCurrentScopeAuthority {
             ...(identity.organizationId ? { organizationId: identity.organizationId } : {}) }
         };
         if (!isAiStepExecutionContext(candidate)) throw Error();
-        return structuredClone(candidate);
+        const context = structuredClone(candidate);
+        const { requestId: _, authorizedAt: __, ...binding } = context;
+        const fingerprint = requestFingerprint(binding);
+        const value = await read(structuredClone(context), this.orderId);
+        if (recheck) {
+          const current = await this.resolve();
+          const { requestId: ___, authorizedAt: ____, ...currentBinding } = current;
+          if (requestFingerprint(currentBinding) !== fingerprint) throw Error();
+        }
+        return value;
       });
     } catch { throw new AiScopeResolutionError('AI_ACCESS_DENIED'); }
   }
