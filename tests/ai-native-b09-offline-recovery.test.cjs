@@ -11,7 +11,7 @@ for(const app of ['miniprogram','staff-miniprogram']) test(app+' twelve-hour pau
  proposal.onCheck({detail:{value:['read']}});assert.notEqual(proposal.data.checkedIdentity,'');
  const first=deferred();let calls=0,now=0,id=0;const scheduled=new Map(),pages=[],notices=[];
  const clock={schedule(fn,delay){scheduled.set(++id,{fn,at:now+delay});return id;},clear(key){scheduled.delete(key);}};
- const controller=new AiPollingController(()=>{calls++;return calls===1?first.promise:Promise.resolve({cursor:'2',events:[],version:'v1'});},page=>pages.push(page));
+ const controller=new AiPollingController(()=>{calls++;return calls===1?first.promise:Promise.resolve({cursor:'2',events:[],version:'v1'});},page=>{pages.push(page);return {sync:'synced'};});
  const loop=new AiPollingLoop(controller,clock,2000,{classify:()=> 'transient',notify:value=>notices.push(value)});
  const context={audience:'client',tenantId:'synthetic-tenant',taskId:'synthetic-task'};
  loop.start(context);loop.pause();proposal.update({disabled:true});

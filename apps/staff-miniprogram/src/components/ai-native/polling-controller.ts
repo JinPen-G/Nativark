@@ -25,7 +25,9 @@ class AiCancelController {
   }
 }
 export type AiReadPage = (context: AiReadContext, signal: AiCancelSignal) => Promise<AiPollPage>;
-export type AiPollListener = (page: AiPollPage) => void;
+/** Local consumption acknowledgement, not a server DTO or authorization result. */
+export interface AiPollAcceptance { sync: "synced" | "unsynced"; }
+export type AiPollListener = (page: AiPollPage) => AiPollAcceptance | void;
 
 /** Lifecycle-only controller. The host owns authorization, storage and scheduling. */
 export class AiPollingController {
@@ -35,7 +37,7 @@ export class AiPollingController {
   private generation = 0;
   private abort: AiCancelController | null = null;
   constructor(private readonly readPage: AiReadPage, private readonly onPage: AiPollListener) {}
-  async poll(context: AiReadContext): Promise<"started" | "skipped" | "stale"> {
+  async poll(context: AiReadContext): Promise<"started" | "synced" | "unsynced" | "skipped" | "stale"> {
     if (!this.active || this.paused || this.inFlight) return "skipped";
     this.inFlight = true;
     const generation = this.generation;
@@ -43,7 +45,10 @@ export class AiPollingController {
     try {
       const page = await this.readPage(context, abort.signal);
       if (!this.active || this.paused || generation !== this.generation || abort.signal.aborted) return "stale";
-      this.onPage(page); return "started";
+      const acceptance = this.onPage(page);
+      if (!this.active || this.paused || generation !== this.generation || abort.signal.aborted) return "stale";
+      if (!acceptance || typeof acceptance !== "object") return "started";
+      return acceptance?.sync === "synced" ? "synced" : "unsynced";
     } finally { if (this.abort === abort) this.abort = null; this.inFlight = false; }
   }
   pause() { this.paused = true; this.generation += 1; this.abort?.abort(); }
@@ -90,7 +95,14 @@ export class AiPollingLoop {
     let delay = Math.max(100, Math.min(30000, this.interval));
     try {
       const result = await this.controller.poll(this.context);
-      if (requestEpoch === this.epoch && result === "started") { this.failures = 0; this.recovery?.notify("synced"); }
+      if (requestEpoch === this.epoch) {
+        if (result === "synced") { this.failures = 0; this.recovery?.notify("synced"); }
+        else if (result === "started" || result === "unsynced") {
+          this.blocked = true;
+          this.pause();
+          this.recovery?.notify("unsynced");
+        }
+      }
     }
     catch (error) {
       if (requestEpoch === this.epoch) {

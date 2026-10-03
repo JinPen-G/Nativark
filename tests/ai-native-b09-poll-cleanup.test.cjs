@@ -27,7 +27,7 @@ for(const app of ['miniprogram','staff-miniprogram']) {
  test(app+' failing clock cleanup still invalidates in-flight results and cannot restart destroyed loop',async()=>{
   const {AiPollingController,AiPollingLoop}=load(file);let calls=0;const tasks=[];
   const pending=deferred();
-  const controller=new AiPollingController(()=>{calls++;return calls===1?Promise.resolve(page):pending.promise;},()=>{});
+  const controller=new AiPollingController(()=>{calls++;return calls===1?Promise.resolve(page):pending.promise;},()=>({sync:'synced'}));
   const loop=new AiPollingLoop(controller,{schedule(fn){tasks.push(fn);return tasks.length;},clear(){throw new Error('synthetic clock failure');}});
   loop.start(context);await flush();assert.equal(tasks.length,1);
   const inFlight=controller.poll(context);assert.equal(calls,2);
