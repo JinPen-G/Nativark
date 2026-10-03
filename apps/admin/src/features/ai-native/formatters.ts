@@ -2,8 +2,8 @@ export type SafeFormattedValue = { value: string; source: string | null; unit: s
 
 export function formatAmount(value: unknown, unit: unknown = null): SafeFormattedValue {
   const normalizedUnit = typeof unit === "string" && unit.trim() ? unit.trim().slice(0, 32) : null;
-  if (typeof value === "bigint") return { value: value.toString(), source: "host", unit: normalizedUnit, available: true };
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+  if (typeof value === "bigint" && value >= 0n) return { value: value.toString(), source: "host", unit: normalizedUnit, available: true };
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || (Number.isInteger(value) && !Number.isSafeInteger(value)))
     return { value: "未知", source: null, unit: normalizedUnit, available: false };
   return { value: String(value), source: "host", unit: normalizedUnit, available: true };
 }
