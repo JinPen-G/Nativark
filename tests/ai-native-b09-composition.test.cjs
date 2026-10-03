@@ -3,7 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {load,mount,deferred}=require('./fixtures/ai-native/b09-host.cjs');
 for(const app of ['miniprogram','staff-miniprogram']) test(app+' actual card, input, proposal, polling and customer result compose without automatic effects',async()=>{
  const prefix='apps/'+app+'/src/components/ai-native/';
- const card=mount(load(prefix+'ai-task-card/index.ts'),{task:{id:'synthetic-task'},disabled:false});
+ const card=mount(load(prefix+'ai-task-card/index.ts'),{task:{id:'synthetic-task'},disabled:false,available:true});
  assert.equal(card.events.length,0);card.onOpen();assert.equal(card.events[0].detail.taskId,'synthetic-task');
  const input=mount(load(prefix+'ai-supplement-input/index.ts'),{taskId:'synthetic-task',inputRevision:'1',fields:[{key:'note',label:'Note'}],submitHandler:async()=>{}});
  input.onFieldInput({currentTarget:{dataset:{key:'note'}},detail:{value:'synthetic'}});await input.onSubmit();assert.equal(input.events[0].name,'submit');

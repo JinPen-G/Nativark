@@ -1,8 +1,8 @@
 <view class="ai-task-card {{disabled ? 'ai-task-card--disabled' : ''}}" aria-label="AI任务卡片">
-  <view class="ai-task-card__head"><text class="ai-task-card__title">{{task.title || '任务不可用'}}</text><text class="ai-task-card__status">{{task.statusLabel || '状态不可用'}}</text></view>
-  <text class="ai-task-card__summary">{{task.summary || '暂无摘要'}}</text>
-  <view class="ai-task-card__meta"><text>{{task.updatedLabel || '更新时间不可用'}}</text><text>{{task.availabilityLabel || '结果不可用'}}</text></view>
-  <text wx:if="{{task.partial}}" class="ai-task-card__notice">部分完成，仍需核对</text>
-  <text wx:if="{{task.manualExitLabel}}" class="ai-task-card__exit">{{task.manualExitLabel}}</text>
-  <button class="ai-task-card__button" disabled="{{disabled}}" bindtap="onOpen">查看任务</button>
+  <view class="ai-task-card__head"><text class="ai-task-card__title">{{projection.title || '任务不可用'}}</text><text class="ai-task-card__status">{{projection.statusLabel || '状态不可用'}}</text></view>
+  <text class="ai-task-card__summary">{{projection.summary || '暂无摘要'}}</text>
+  <view class="ai-task-card__meta"><text>{{projection.updatedLabel || '更新时间不可用'}}</text><text>{{projection.availabilityLabel || '结果不可用'}}</text></view>
+  <text wx:if="{{projection.partial}}" class="ai-task-card__notice">部分完成，仍需核对</text>
+  <text wx:if="{{projection.manualExitLabel}}" class="ai-task-card__exit">{{projection.manualExitLabel}}</text>
+  <button class="ai-task-card__button" disabled="{{disabled || !available || !projection}}" aria-label="查看任务" bindtap="onOpen">查看任务</button>
 </view>
