@@ -15,7 +15,12 @@ function load(file, transform = source => source) {
   const js = ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2019}}).outputText;
   const exports = {};
   let definition;
-  vm.runInNewContext(js, {exports, Component(value){definition=value;}, require(){throw new Error('unexpected runtime dependency');}, BigInt});
+  vm.runInNewContext(js, {exports, Component(value){definition=value;}, require(module){
+    if (!module.startsWith('.')) throw new Error('unexpected runtime dependency');
+    const relative=path.posix.join(path.posix.dirname(file),module+'.ts');
+    if (!relative.startsWith('apps/') || relative.includes('..')) throw new Error('out-of-scope runtime dependency');
+    return load(relative);
+  }, BigInt});
   return definition || exports;
 }
 function mount(definition, props = {}) {

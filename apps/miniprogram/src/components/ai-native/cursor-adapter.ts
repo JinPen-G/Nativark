@@ -4,6 +4,7 @@ const integer = (value: string): bigint | null => typeof value === "string" && /
 export const initialCursorState = (taskId: string, version: string): AiCursorState => ({ taskId, version, cursor: null, events: [], sync: "synced", reason: "none" });
 export function applyCursorEvent(state: AiCursorState, event: AiCursorEvent, knownTypes: readonly string[] = []): AiCursorState {
   if (state.sync === "unsynced") return state;
+  if (!event || typeof event !== "object") return { ...state, events: [], cursor: null, sync: "unsynced", reason: "unknown_event" };
   if (event.type === "reset_required") return { ...state, events: [], cursor: null, sync: "unsynced", reason: "reset" };
   if (event.version !== state.version || event.taskId !== state.taskId) return { ...state, events: [], cursor: null, sync: "unsynced", reason: "unknown_version" };
   if (!knownTypes.includes(event.type)) return { ...state, events: [], cursor: null, sync: "unsynced", reason: "unknown_event" };
