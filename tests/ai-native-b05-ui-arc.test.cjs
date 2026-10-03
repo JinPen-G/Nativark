@@ -76,6 +76,17 @@ test('formatters preserve units and reject invalid numeric/time input', () => {
   assert.equal(formatters.formatUsage({ status: 'pending_reconciliation', amount: '0', unit: 'tokens' }).value, '未知用量');
 });
 
+test('model text and proposals remain bounded and mark candidates as unexecuted', () => {
+  const { ModelText } = load('ModelText.tsx');
+  const { ProposalPreview } = load('ProposalPreview.tsx');
+  const text = renderToStaticMarkup(React.createElement(ModelText, { kind: 'tool_candidate', text: 'x'.repeat(30000) }));
+  const changes = Array.from({ length: 201 }, (_, index) => ({ label: `f${index}`, before: 'a', after: 'b' }));
+  const proposal = renderToStaticMarkup(React.createElement(ProposalPreview, { proposal: { title: '候选', risk: '中', changes } }));
+  assert.ok(text.includes('工具动作候选（未执行）'));
+  assert.ok(text.includes('内容超过展示上限'));
+  assert.ok(proposal.includes('变更列表超过展示上限'));
+});
+
 test('timeline distinguishes an unknown enum from an unavailable step payload', () => {
   const { TaskTimeline } = load('TaskTimeline.tsx');
   const markup = renderToStaticMarkup(React.createElement(TaskTimeline, {

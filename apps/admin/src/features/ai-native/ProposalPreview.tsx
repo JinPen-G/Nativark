@@ -33,7 +33,7 @@ export function ProposalPreview({ proposal }: ProposalPreviewProps) {
           </tr>
         </thead>
         <tbody>
-          {proposal.changes.map((change) => (
+          {proposal.changes.slice(0, 200).map((change) => (
             <tr key={change.label}>
               <td>{change.label}</td>
               <td>{change.before}</td>
@@ -42,6 +42,7 @@ export function ProposalPreview({ proposal }: ProposalPreviewProps) {
           ))}
         </tbody>
       </table>
+      {proposal.changes.length > 200 && <p role="status">变更列表超过展示上限，已截断。</p>}
     </section>
   );
 }
