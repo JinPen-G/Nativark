@@ -1,4 +1,5 @@
 <view class="ai-supplement-input" aria-label="补充输入">
-  <view wx:for="{{fields}}" wx:key="key" class="ai-supplement-input__field"><text class="ai-supplement-input__label">{{item.label}}{{item.required ? '（必填）' : ''}}</text><input disabled="{{disabled || item.readonly}}" value="{{localDraft[item.key] || item.value || ''}}" data-key="{{item.key}}" bindinput="onFieldInput" aria-label="{{item.label}}" /><text wx:if="{{item.error}}" class="ai-supplement-input__error">{{item.error}}</text></view>
-  <button disabled="{{disabled}}" bindtap="onSubmit">提交补充信息</button>
+  <view wx:for="{{visibleFields}}" wx:key="key" class="ai-supplement-input__field"><text>{{item.label}}</text><input disabled="{{disabled || submitting || item.readonly}}" value="{{item.value}}" data-key="{{item.key}}" bindinput="onFieldInput" aria-label="{{item.label}}"/><text wx:if="{{item.error}}">{{item.error}}</text></view>
+  <text role="alert" wx:if="{{errorLabel}}">{{errorLabel}}</text>
+  <button disabled="{{disabled || submitting || !submitHandler}}" bindtap="onSubmit">{{submitting ? '提交中…' : '提交补充信息'}}</button>
 </view>
