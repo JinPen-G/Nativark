@@ -1,6 +1,6 @@
 import type {
   AiExecutionContext, AiExecutionScope, AiKnowledgeDocumentDraft, AiKnowledgeChunkDraft,
-  AiKnowledgeOwnerDraft, AiFactReference, AiKnowledgeSourceDraft,
+  AiKnowledgeOwnerDraft, AiFactReference, AiKnowledgeSourceDraft, AiMemoryDraft, AiPreferenceValueDraft,
 } from '@rental-os/shared';
 
 export type KnowledgeAction = 'create' | 'read_metadata' | 'parse' | 'publish' | 'withdraw' | 'delete' | 'revise' | 'search' | 'read_body' | 'snippet' | 'resolve_source' | 'download' | 'index' | 'change_acl';
@@ -72,6 +72,30 @@ export interface KnowledgeContentPort {
   /** Reference only; the eventual download endpoint must reauthorize, not mint a bearer URL here. */
   downloadReference(context: AiExecutionContext, document: AiKnowledgeDocumentDraft): Promise<{ attachmentId: string; documentVersion: string } | null>;
   factReference(context: AiExecutionContext, fact: AiFactReference): Promise<AiFactReference | null>;
+}
+export type MemoryAction = 'read' | 'propose' | 'modify' | 'confirm' | 'delete';
+export interface MemoryAuthorizationPort {
+  authorize(context: AiExecutionContext, request: { action: MemoryAction; scope: AiExecutionScope; owner: AiKnowledgeOwnerDraft; memory?: AiMemoryDraft }): Promise<KnowledgeGrant | null>;
+}
+export interface MemoryConfirmation {
+  id: string; memoryId: string; revision: number; aclRevision: number;
+  owner: AiKnowledgeOwnerDraft; scope: AiExecutionScope; audience: AiExecutionContext['audience'];
+  preference: AiPreferenceValueDraft; memoryExpiresAt: string;
+  status: 'confirmed' | 'revoked'; issuedAt: string; expiresAt: string;
+}
+export interface MemoryConfirmationPort {
+  /** Read the actual server confirmation; caller-provided IDs alone are never proof of consent. */
+  read(context: AiExecutionContext, confirmationRecordId: string): Promise<MemoryConfirmation | null>;
+}
+export interface MemoryRepositoryPort {
+  read(scope: AiExecutionScope, owner: AiKnowledgeOwnerDraft, memoryId: string): Promise<AiMemoryDraft | null>;
+  operation(scope: AiExecutionScope, owner: AiKnowledgeOwnerDraft, memoryId: string, operationId: string): Promise<KnowledgeOperation | null>;
+  /** Atomically CAS and retain the receipt. A supplied confirmation must still match the server record and be unrevoked at commit. */
+  commit(input: { scope: AiExecutionScope; owner: AiKnowledgeOwnerDraft; memoryId: string; expectedRevision: number; next: AiMemoryDraft; operation: KnowledgeOperation; confirmation?: MemoryConfirmation }): Promise<'committed' | 'conflict'>;
+}
+export interface StructuredMemoryPorts {
+  repository: MemoryRepositoryPort; authorization: MemoryAuthorizationPort;
+  confirmations: MemoryConfirmationPort; clock: KnowledgeClock;
 }
 export interface KnowledgeDocumentPorts {
   cache?: KnowledgeInvalidationPort;

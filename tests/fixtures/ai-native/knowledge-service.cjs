@@ -114,4 +114,27 @@ function retrieval(f) {
 }
 function source(c) { return { kind: 'document', documentId: c.documentId, documentVersion: c.documentVersion, chunkId: c.chunkId, scope: clone(c.scope), aclRevision: c.aclRevision, locator: clone(c.locator) }; }
 const query = overrides => ({ requestId: 'recall-1', query: 'Synthetic', limit: 5, ...overrides });
-module.exports = { load, root, clone, key, scope, now, context, draft, harness, parsed, published, typecheck, attempts, shared, MemoryRepository, retrieval, source, query };
+function memoryHarness(f = harness()) {
+  const { StructuredMemoryService } = load('structured-memory.service');
+  f.memories = new Map(); f.memoryReceipts = new Map(); f.confirmations = new Map(); f.confirmationReads = 0;
+  f.memoryRepository = {
+    read: async (scope, owner, id) => clone(f.memories.get(key(scope, owner, id)) ?? null),
+    operation: async (scope, owner, id, op) => clone(f.memoryReceipts.get(key(scope, owner, id, op)) ?? null),
+    commit: async input => {
+      const k = key(input.scope, input.owner, input.memoryId), op = key(input.scope, input.owner, input.memoryId, input.operation.id);
+      if ((f.memories.get(k)?.revision ?? 0) !== input.expectedRevision || f.memoryReceipts.has(op)) return 'conflict';
+      if (input.confirmation && key(f.confirmations.get(input.confirmation.id)) !== key(input.confirmation)) return 'conflict';
+      f.memories.set(k, clone(input.next)); f.memoryReceipts.set(op, clone(input.operation)); return 'committed';
+    },
+  };
+  f.memoryPorts = { repository: f.memoryRepository, authorization: f.authorization, clock: f.clock, confirmations: { read: async (_, id) => { f.confirmationReads++; return clone(f.confirmations.get(id) ?? null); } } };
+  f.memory = new StructuredMemoryService(f.memoryPorts);
+  f.confirm = (memory, overrides = {}) => {
+    const record = { id: 'confirm-1', memoryId: memory.memoryId, revision: memory.revision, aclRevision: memory.aclRevision, owner: clone(memory.owner), scope: clone(memory.scope), audience: 'operator', preference: clone(memory.preference), memoryExpiresAt: memory.expiresAt, status: 'confirmed', issuedAt: new Date(f.now).toISOString(), expiresAt: memory.expiresAt, ...overrides };
+    f.confirmations.set(record.id, record); return record;
+  };
+  return f;
+}
+const memoryProposal = overrides => ({ memoryId: 'memory-1', operationId: 'propose-1', expiresAt: '2026-10-04T00:00:00Z', preference: { kind: 'locale', value: 'zh-CN' }, ...overrides });
+const memoryChange = (operation, expectedRevision, extra = {}) => ({ draftVersion: shared.AI_KNOWLEDGE_DRAFT_VERSION, memoryId: 'memory-1', expectedRevision, operation, ...extra });
+module.exports = { load, root, clone, key, scope, now, context, draft, harness, parsed, published, typecheck, attempts, shared, MemoryRepository, retrieval, source, query, memoryHarness, memoryProposal, memoryChange };
