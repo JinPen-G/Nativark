@@ -1,0 +1,1 @@
+.ai-status-panel { padding: 28rpx; border-radius: 16rpx; background: var(--card, #fff); display: flex; flex-direction: column; gap: 16rpx; color: var(--text, #1f2937); }.title { font-size: 30rpx; font-weight: 600; }.ai-status-panel button { border-radius: 999rpx; }.ai-status-panel button[disabled] { opacity: .5; }
