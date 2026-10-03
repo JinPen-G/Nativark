@@ -2,7 +2,28 @@ import type { AiReadContext } from "./types";
 
 export interface AiPollPage { cursor: string | null; events: readonly unknown[]; version: string; }
 export interface AiCancelSignal { readonly aborted: boolean; onAbort(listener: () => void): void; }
-class AiCancelController { readonly signal: AiCancelSignal; private done = false; private listeners: (() => void)[] = []; constructor() { const controller = this; this.signal = { get aborted() { return controller.done; }, onAbort(listener) { if (controller.done) listener(); else controller.listeners.push(listener); } }; } abort() { if (!this.done) { this.done = true; for (const listener of this.listeners.splice(0)) listener(); } } }
+class AiCancelController {
+  readonly signal: AiCancelSignal;
+  private done = false;
+  private listeners: (() => void)[] = [];
+  constructor() {
+    const controller = this;
+    this.signal = {
+      get aborted() { return controller.done; },
+      onAbort(listener) { if (controller.done) listener(); else controller.listeners.push(listener); },
+    };
+  }
+  abort(): void {
+    if (this.done) return;
+    this.done = true;
+    let failed = false;
+    for (const listener of this.listeners.splice(0)) {
+      try { listener(); } catch { failed = true; }
+    }
+    // Report failure only after attempting every cleanup; never expose host error text.
+    if (failed) throw new Error("AI轮询取消清理失败");
+  }
+}
 export type AiReadPage = (context: AiReadContext, signal: AiCancelSignal) => Promise<AiPollPage>;
 export type AiPollListener = (page: AiPollPage) => void;
 
@@ -56,7 +77,12 @@ export class AiPollingLoop {
     this.live = true; this.controller.resume(); this.clearTimer();
     if (!this.busy) void this.tick();
   }
-  private clearTimer(): void { if (this.timer !== null) { this.clock.clear(this.timer); this.timer = null; } }
+  private clearTimer(): void {
+    if (this.timer === null) return;
+    const timer = this.timer;
+    this.timer = null;
+    try { this.clock.clear(timer); } catch { throw new Error("AI轮询时钟清理失败"); }
+  }
   private async tick(): Promise<void> {
     if (!this.live || this.disposed || !this.context || this.busy) return;
     this.busy = true;
@@ -82,8 +108,14 @@ export class AiPollingLoop {
       }
     }
   }
-  pause(): void { this.live = false; this.epoch += 1; this.clearTimer(); this.controller.pause(); }
+  pause(): void {
+    this.live = false; this.epoch += 1;
+    try { this.clearTimer(); } finally { this.controller.pause(); }
+  }
   /** Host must reauthorize/resync before invoking this explicit manual action. */
   retry(context: AiReadContext): void { if (this.disposed) return; this.blocked = false; this.failures = 0; this.pause(); this.start(context); }
-  destroy(): void { this.pause(); this.disposed = true; this.context = null; this.controller.destroy(); }
+  destroy(): void {
+    this.disposed = true; this.context = null;
+    try { this.pause(); } finally { this.controller.destroy(); }
+  }
 }
