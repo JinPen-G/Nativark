@@ -5,3 +5,4 @@ exports.Button = props => React.createElement('button', { ...clean(props), type:
 exports.ActionButton = props => React.createElement('button', { ...clean(props), type: 'button', disabled: props.disabled || props.pending }, props.pending ? props.pendingLabel ?? '处理中' : props.label);
 exports.Checkbox = props => React.createElement('input', { ...clean(props), type: 'checkbox' });
 exports.Input = props => React.createElement('input', clean(props));
+exports.Select = props => React.createElement('select', clean(props), (props.options ?? []).map(option => React.createElement('option', { key: option.value, value: option.value }, option.label)));

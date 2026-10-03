@@ -11,3 +11,19 @@ test('AI feature controls render through the UI adapter boundary in offline host
   const fields = renderToStaticMarkup(React.createElement(MissingFieldsPanel, { fields: [{ name: 'x', label: '字段', type: 'text', required: true }], draft: {} }));
   assert.ok(confirm.includes('disabled=""')); assert.ok(fields.includes('input')); assert.ok(fields.includes('disabled=""'));
 });
+
+test('supplement input keeps host draft controlled and exposes disabled/error states', () => {
+  const { MissingFieldsPanel } = load('MissingFieldsPanel.tsx');
+  const markup = renderToStaticMarkup(React.createElement(MissingFieldsPanel, {
+    taskId: 'task-1', inputRevision: 3,
+    fields: [
+      { name: 'kind', label: '类型', type: 'select', required: true, options: ['A', 'B'], error: '请选择类型' },
+      { name: 'count', label: '数量', type: 'number', required: true },
+    ],
+    draft: { kind: 'A', count: '2' }, readOnly: true, error: '暂不可提交',
+  }));
+  assert.ok(markup.includes('暂不可提交'));
+  assert.ok(markup.includes('disabled=""'));
+  assert.ok(markup.includes('请选择类型'));
+  assert.ok(markup.includes('value="A"'));
+});
