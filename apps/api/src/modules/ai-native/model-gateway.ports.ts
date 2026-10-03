@@ -29,13 +29,13 @@ export interface GatewayProfile {
 }
 export interface GatewayPorts {
   /** Required AIN-04 adapter: must resolve fresh server identity/scope, never model claims. */
-  authorize(context: GatewayContext): Promise<void>;
-  profile(context: GatewayContext): Promise<GatewayProfile>;
+  authorize(context: GatewayContext, signal?: AbortSignal): Promise<void>;
+  profile(context: GatewayContext, signal?: AbortSignal): Promise<GatewayProfile>;
   /** Required server vault adapter. Never provided by request payload. */
-  credential(reference: string, context: GatewayContext): Promise<string>;
+  credential(reference: string, context: GatewayContext, signal?: AbortSignal): Promise<string>;
   /** Required AIN-11 adapter; no free/unmetered fallback is supplied. */
   budget: {
-    reserve(context: GatewayContext, request: { callId: string; model: string; maxOutputTokens: number }): Promise<string>;
+    reserve(context: GatewayContext, request: { callId: string; model: string; maxOutputTokens: number }, signal?: AbortSignal): Promise<string>;
     settle(reservationId: string, usage: ModelUsage): Promise<void>;
     release(reservationId: string): Promise<void>;
     reconcile(reservationId: string, reason: string): Promise<void>;
