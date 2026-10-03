@@ -10,7 +10,9 @@ CREATE TABLE `ai_scopes` (
   UNIQUE INDEX `ai_scopes_scope_key` (`scopeKey`),
   UNIQUE INDEX `ai_scopes_id_kind` (`id`,`kind`),
   INDEX `ai_scopes_owner_idx` (`tenantId`,`workspaceId`),
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  CONSTRAINT `ai_scopes_tenant_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `ai_scopes_workspace_fk` FOREIGN KEY (`tenantId`,`workspaceId`) REFERENCES `business_workspaces` (`tenantId`,`id`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 CREATE TABLE `ai_provider_profiles` (
@@ -34,7 +36,5 @@ CREATE TABLE `ai_provider_profiles` (
   UNIQUE INDEX `ai_provider_profiles_scope_role` (`scopeId`,`scopeKind`,`role`),
   INDEX `ai_provider_profiles_route_idx` (`scopeKind`,`serviceMode`,`enabled`),
   PRIMARY KEY (`id`),
-  CONSTRAINT `ai_scopes_tenant_fk` FOREIGN KEY (`tenantId`) REFERENCES `Tenant` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT `ai_scopes_workspace_fk` FOREIGN KEY (`tenantId`,`workspaceId`) REFERENCES `business_workspaces` (`tenantId`,`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `ai_provider_profiles_scope_fk` FOREIGN KEY (`scopeId`,`scopeKind`) REFERENCES `ai_scopes` (`id`,`kind`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
