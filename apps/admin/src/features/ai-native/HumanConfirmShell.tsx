@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ActionButton, Checkbox } from "@/components/ui";
 export interface HumanConfirmShellProps {
   proposalId: string;
@@ -19,6 +19,9 @@ export function HumanConfirmShell({
   submitting = false,
   onConfirm,
 }: HumanConfirmShellProps) {
+  const id = useId();
+  const checkboxId = `proposal-confirm-${id}`;
+  const statusId = `proposal-status-${id}`;
   const [checked, setChecked] = useState(false);
   const identity = `${proposalId}:${revision}`;
   const [seenIdentity, setSeenIdentity] = useState(identity);
@@ -29,16 +32,17 @@ export function HumanConfirmShell({
   const disabled =
     !available || expired || submitting || !checked || !onConfirm;
   return (
-    <section aria-label="人工确认">
-      <p>
+    <section aria-label="人工确认" aria-busy={submitting}>
+      <p id={statusId} role="status" aria-live="polite">
         {expired
           ? "提案已过期"
           : available
             ? `当前版本 ${revision}`
             : "当前提案不可确认"}
       </p>
-      <label>
+      <label htmlFor={checkboxId}>
         <Checkbox
+          id={checkboxId}
           checked={checked}
           disabled={!available || expired || submitting}
           onChange={(event) => setChecked(event.target.checked)}
@@ -51,6 +55,7 @@ export function HumanConfirmShell({
         pending={submitting}
         label="提交人工确认"
         pendingLabel="提交中…"
+        aria-describedby={statusId}
         onAction={() => onConfirm!({ proposalId, revision })}
       />
     </section>

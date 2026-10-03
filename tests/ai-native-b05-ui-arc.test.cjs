@@ -87,6 +87,17 @@ test('model text and proposals remain bounded and mark candidates as unexecuted'
   assert.ok(proposal.includes('变更列表超过展示上限'));
 });
 
+test('interactive shells expose labelled controls and live status relationships', () => {
+  const { HumanConfirmShell } = load('HumanConfirmShell.tsx');
+  const { CancelRecoveryStatus } = load('CancelRecoveryStatus.tsx');
+  const confirm = renderToStaticMarkup(React.createElement(HumanConfirmShell, { proposalId: 'p', revision: '1', available: true }));
+  const action = renderToStaticMarkup(React.createElement(CancelRecoveryStatus, { status: 'unknown' }));
+  assert.match(confirm, /for="proposal-confirm-/);
+  assert.match(confirm, /aria-live="polite"/);
+  assert.match(action, /aria-live="polite"/);
+  assert.match(action, /aria-describedby="action-status-/);
+});
+
 test('timeline distinguishes an unknown enum from an unavailable step payload', () => {
   const { TaskTimeline } = load('TaskTimeline.tsx');
   const markup = renderToStaticMarkup(React.createElement(TaskTimeline, {

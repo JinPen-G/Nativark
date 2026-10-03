@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { ActionButton } from "@/components/ui";
 export type ActionLifecycle =
   | "idle"
@@ -26,16 +27,20 @@ export function CancelRecoveryStatus({
   onCancel,
   onRecover,
 }: CancelRecoveryStatusProps) {
+  const id = useId();
+  const statusId = `action-status-${id}`;
   return (
     <section aria-label="任务动作状态">
-      <p role="status">{labels[status]}</p>
+      <p id={statusId} role="status" aria-live="polite">{labels[status]}</p>
       <ActionButton
         label="请求取消"
+        aria-describedby={statusId}
         disabled={!canCancel || !onCancel}
         onAction={() => onCancel!()}
       />
       <ActionButton
         label="读取恢复候选"
+        aria-describedby={statusId}
         disabled={!canRecover || !onRecover}
         onAction={() => onRecover!()}
       />
