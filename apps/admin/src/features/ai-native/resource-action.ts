@@ -8,6 +8,7 @@ class ResourceActionGate<T> {
   private lifecycle = 0;
   private alive = true;
   private flight: Promise<void> | null = null;
+  private flightEpoch = -1;
   private pendingKey: string | null = null;
   private errorKey: string | null = null;
   constructor(private readonly notify: () => void) {}
@@ -24,7 +25,10 @@ class ResourceActionGate<T> {
   }
   run(epoch: number, key: string, input: T): Promise<void> {
     if (!this.alive || epoch !== this.epoch || !this.callback) return Promise.reject(new Error("资源操作不可用或已变化"));
-    if (this.flight) return this.flight;
+    if (this.flight) {
+      if (this.pendingKey === key && this.flightEpoch === epoch) return this.flight;
+      return Promise.reject(new Error("其他资源操作处理中，请待完成后核对"));
+    }
     const callback = this.callback, lifecycle = this.lifecycle;
     const current = () => this.alive && epoch === this.epoch && lifecycle === this.lifecycle;
     this.pendingKey = key; this.errorKey = null;
@@ -40,7 +44,7 @@ class ResourceActionGate<T> {
       if (this.flight === request) { this.flight = null; this.pendingKey = null; }
       if (this.alive) this.notify();
     });
-    this.flight = request; this.notify();
+    this.flightEpoch = epoch; this.flight = request; this.notify();
     return request;
   }
 }

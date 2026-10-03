@@ -33,3 +33,22 @@ test('actual source handler cannot restart from stale closures after unmount', a
  host.unmount(); pending.resolve(); await Promise.allSettled([first]);
  await assert.rejects(run(action),/不可用|已变化/); assert.equal(calls,1);
 });
+test('different resource cannot borrow an in-flight open result from the same render', async () => {
+ const pending = deferred(), calls = [];
+ const host = mountFeature('KnowledgeSources', {sources:[source,{...source,id:'other-source'}],onOpen:input=>{calls.push(input.id);return pending.promise;}});
+ const actions = host.actions(host.render());
+ const first = run(actions[0]); const second = run(actions[1]);
+ const rejected = assert.rejects(second,/处理中|不可用|已变化/);
+ pending.resolve(); await first; await rejected;
+ assert.deepEqual(calls,['synthetic-source']); host.unmount();
+});
+test('new resource revision cannot coalesce into an older revision dispatch', async () => {
+ const pending = deferred(); let calls = 0; const callback = ()=>{calls++;return pending.promise;};
+ const host = mountFeature('KnowledgeSources',{sources:[source],onOpen:callback});
+ const first = run(host.actions(host.render())[0]); await Promise.resolve();
+ const actions = host.actions(host.render({sources:[{...source,version:'2'}],onOpen:callback}));
+ const second = run(actions[0]); const rejected = assert.rejects(second,/处理中|不可用|已变化/);
+ await rejected; // Must reject before the older dispatch settles, not borrow its later stale rejection.
+ pending.resolve(); await Promise.allSettled([first]);
+ assert.equal(calls,1); assert.doesNotMatch(JSON.stringify(host.render()),/来源打开失败/);host.unmount();
+});

@@ -35,3 +35,10 @@ test('real React SSR never labels automation as human-confirmed or retains withd
  const html=renderToStaticMarkup(React.createElement(MemoryPreferences,{items:[{...item,status:'confirmed',actorKind:'automation',value:'synthetic-private'},{...item,id:'revoked',status:'revoked',value:'synthetic-private'}]}));
  assert.doesNotMatch(html,/synthetic-private|>已确认</);assert.match(html,/确认依据待核对/);
 });
+test('different preference cannot report review success from a competing preference promise',async()=>{
+ const pending=deferred(),calls=[];
+ const host=mountFeature('MemoryPreferences',{items:[item,{...item,id:'other-memory'}],onReview:input=>{calls.push(input.id);return pending.promise;}});
+ const actions=host.actions(host.render());const first=run(actions[0]);
+ await assert.rejects(run(actions[1]),/处理中/);
+ pending.resolve();await first;assert.deepEqual(calls,['synthetic-memory']);host.unmount();
+});
