@@ -4,9 +4,10 @@ Component({
   properties: { sources: { type: Array, value: [] }, openHandler: { type: null, value: null } },
   data: { visibleSources: [] as SourceDisplay[], opening: false, errorLabel: "", generation: 0, alive: true },
   lifetimes: { attached() { this.project(); }, detached() { this.setData({ alive: false, visibleSources: [], errorLabel: "", generation: this.data.generation + 1 }); } },
-  observers: { "sources,openHandler"() { this.setData({ generation: this.data.generation + 1, errorLabel: "" }); this.project(); } },
+  observers: { "sources,openHandler"() { if (!this.data.alive) return; this.setData({ generation: this.data.generation + 1, errorLabel: "" }); this.project(); } },
   methods: {
     project() {
+      if (!this.data.alive) return;
       this.setData({ visibleSources: (this.data.sources as Record<string, unknown>[]).slice(0, 50).filter(item => item && typeof item.id === "string" && typeof item.version === "string").map(item => {
         const readable = item.status === "published";
         const statusLabel = item.status === "withdrawn" ? "已撤回" : item.status === "no_access" ? "无权限" : readable ? "已发布" : "来源失效/不可用";

@@ -1,4 +1,5 @@
 import { boundedText, displayMeasurement } from "../display-format";
+const detachedViews = new WeakSet<object>();
 function customerText(value: unknown): string {
   if (typeof value === "string") return boundedText(value);
   if (typeof value === "number" || typeof value === "bigint") return displayMeasurement(value, null).text;
@@ -7,10 +8,11 @@ function customerText(value: unknown): string {
 Component({
   properties: { order: { type: Object, value: null }, available: { type: Boolean, value: false } },
   data: { projection: null as Record<string, string> | null },
-  lifetimes: { attached() { this.project(); }, detached() { this.setData({ projection: null }); } },
+  lifetimes: { attached() { detachedViews.delete(this); this.project(); }, detached() { detachedViews.add(this); this.setData({ projection: null }); } },
   observers: { "order,available"() { this.project(); } },
   methods: {
     project() {
+      if (detachedViews.has(this)) return;
       const order = this.data.order as Record<string, unknown> | null;
       if (!this.data.available || !order) { this.setData({ projection: null }); return; }
       this.setData({ projection: {

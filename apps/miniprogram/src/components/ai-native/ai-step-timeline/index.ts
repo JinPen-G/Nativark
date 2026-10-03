@@ -3,6 +3,7 @@ import { boundedText } from "../display-format";
 interface StepRow { id: string; ordinal: number | null; label: string; statusLabel: string; sourceLabel: string; }
 interface ViewGeneration { taskId: string; steps: unknown; blocked: boolean; }
 const generations = new WeakMap<object, ViewGeneration>();
+const detachedViews = new WeakSet<object>();
 function label(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim() ? boundedText(value) : fallback;
 }
@@ -16,12 +17,13 @@ Component({
   },
   data: { visibleSteps: [] as StepRow[] },
   lifetimes: {
-    attached() { this.project(); },
-    detached() { generations.delete(this); this.setData({ visibleSteps: [] }); },
+    attached() { detachedViews.delete(this); this.project(); },
+    detached() { detachedViews.add(this); generations.delete(this); this.setData({ visibleSteps: [] }); },
   },
   observers: { "steps,taskId,available"() { this.project(); } },
   methods: {
     project() {
+      if (detachedViews.has(this)) return;
       const { taskId, steps, available } = this.data;
       const previous = generations.get(this);
       const sameInput = previous?.steps === steps;
