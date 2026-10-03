@@ -2,6 +2,6 @@
 .ai-step-timeline__empty, .ai-step-timeline__source { color: var(--secondary, #6b7280); font-size: 26rpx; }
 .ai-step-timeline__row { display: flex; gap: 20rpx; padding: 20rpx 0; border-bottom: 1rpx solid var(--border, #e5e7eb); }
 .ai-step-timeline__index { width: 44rpx; height: 44rpx; border-radius: 50%; background: var(--primary-weak, #eff6ff); color: var(--primary, #2563eb); text-align: center; line-height: 44rpx; }
-.ai-step-timeline__body { flex: 1; display: flex; flex-direction: column; gap: 8rpx; }
+.ai-step-timeline__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8rpx; overflow-wrap: anywhere; }
 .ai-step-timeline__label { color: var(--text, #1f2937); font-size: 28rpx; }
 .ai-step-timeline__status { color: var(--primary, #2563eb); font-size: 26rpx; }
