@@ -1,0 +1,3 @@
+'use strict';
+const test = require('node:test'); const assert = require('node:assert/strict'); const path = require('node:path'); const { readJsonl } = require('../scripts/ai-native-b07-corpus-check.cjs');
+test('prompt injection corpus is data-only and covers model, knowledge and notes', async () => { const rows = await readJsonl(path.resolve(__dirname, 'fixtures/ai-native/b07-corpus/prompt-injection.jsonl')); assert.equal(rows.length, 6); assert.deepEqual(new Set(rows.map(row => row.target)), new Set(['model_text', 'knowledge', 'note'])); for (const row of rows) assert.equal(row.expected, 'untrusted_data'); });
