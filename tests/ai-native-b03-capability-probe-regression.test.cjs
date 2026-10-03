@@ -22,7 +22,7 @@ test('probe records one bounded evidence row per capability and does not send cr
 
 test('unsupported and transport failure remain distinguishable and never become supported evidence', async () => {
   const records = [];
-  const service = new AiConnectionTestService({ invoke: async (_context, request) => request.features?.[0] === 'tools' ? Promise.reject(new ModelGatewayError('CAPABILITY_UNSUPPORTED')) : Promise.reject(new Error('offline transport')); }, { record: async input => { records.push(input); return input; } });
+  const service = new AiConnectionTestService({ invoke: async (_context, request) => request.features?.[0] === 'tools' ? Promise.reject(new ModelGatewayError('CAPABILITY_UNSUPPORTED')) : Promise.reject(new Error('offline transport')) }, { record: async input => { records.push(input); return input; } });
   const result = await service.run(context, profile, ['tools', 'streaming']);
   assert.deepEqual(result.map(row => [row.capability, row.status]), [['tools', 'unsupported'], ['streaming', 'unverified']]);
   assert.equal(records.some(row => row.status === 'supported'), false);
