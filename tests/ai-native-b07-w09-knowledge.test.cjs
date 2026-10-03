@@ -1,0 +1,3 @@
+"use strict";
+const test = require("node:test"); const assert = require("node:assert/strict"); const rows = require("./fixtures/ai-native/b07-knowledge.cjs");
+test("knowledge fixtures cover language, chunking, tables, malicious markers and invalidation", () => { assert.deepEqual(new Set(rows.map(row => row.language)), new Set(["zh-CN", "en-US"])); assert.ok(rows.some(row => row.chunks.length > 1)); assert.ok(rows.every(row => Array.isArray(row.table))); assert.ok(rows.some(row => row.maliciousContent)); assert.deepEqual(new Set(rows.map(row => row.status)), new Set(["published", "withdrawn", "acl_narrowed"])); assert.ok(rows.every(row => row.id.startsWith("synthetic-"))); });
