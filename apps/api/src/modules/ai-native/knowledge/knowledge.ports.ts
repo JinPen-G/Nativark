@@ -9,6 +9,7 @@ export interface KnowledgeAuthorizationRequest {
   scope: AiExecutionScope;
   document?: AiKnowledgeDocumentDraft;
   attachmentId?: string;
+  aclRevision?: number;
   fact?: AiFactReference;
 }
 export interface KnowledgeGrant {
@@ -23,8 +24,18 @@ export interface KnowledgeAuthorizationPort {
   authorize(context: AiExecutionContext, request: KnowledgeAuthorizationRequest): Promise<KnowledgeGrant | null>;
 }
 export interface KnowledgeClock { now(): number }
-export interface KnowledgeOperation { id: string; fingerprint: string }
+export interface KnowledgeOperation { id: string; fingerprint: string; failure?: KnowledgeRecord['failure'] }
+export interface KnowledgeIndexJob {
+  operationId: string; documentVersion: string; aclRevision: number; generation: number;
+  kind: 'upsert' | 'remove'; status: 'pending' | 'completed' | 'failed';
+}
+export interface KnowledgeIndexPort {
+  /** Idempotent operationId + monotonic generation per scope/document; reject old upsert after a newer remove, also at external commit time. */
+  apply(context: AiExecutionContext, input: { scope: AiExecutionScope; documentId: string; job: KnowledgeIndexJob }): Promise<void>;
+}
+export interface KnowledgeInvalidationPort { invalidate(scope: AiExecutionScope, documentId: string): void }
 export interface KnowledgeRecord {
+  indexJob?: KnowledgeIndexJob;
   document: AiKnowledgeDocumentDraft;
   revision: number;
   parseOperationId?: string;
@@ -63,6 +74,7 @@ export interface KnowledgeContentPort {
   factReference(context: AiExecutionContext, fact: AiFactReference): Promise<AiFactReference | null>;
 }
 export interface KnowledgeDocumentPorts {
+  cache?: KnowledgeInvalidationPort;
   repository: KnowledgeRepositoryPort;
   authorization: KnowledgeAuthorizationPort;
   clock: KnowledgeClock;

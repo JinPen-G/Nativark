@@ -94,12 +94,17 @@ function retrieval(f) {
   f.search = { search: async input => {
     f.searchCalls.push(clone(input)); const result = [];
     for (const ref of input.documents) for (const c of f.repo.chunks.get(key(input.grant.scope, ref.documentId, ref.documentVersion)) ?? []) {
-      if (c.aclRevision === ref.aclRevision && c.text.toLowerCase().includes(input.query.toLowerCase())) result.push(source(c));
+      if (c.text.toLowerCase().includes(input.query.toLowerCase())) result.push(source({ ...c, aclRevision: ref.aclRevision }));
     }
     return result.slice(0, input.limit);
   } };
   f.content = {
-    chunk: async (_, ref) => { f.bodyReads++; return clone((f.repo.chunks.get(key(ref.scope, ref.documentId, ref.documentVersion)) ?? []).find(c => c.chunkId === ref.chunkId) ?? null); },
+    chunk: async (_, ref) => {
+      f.bodyReads++;
+      const chunk = (f.repo.chunks.get(key(ref.scope, ref.documentId, ref.documentVersion)) ?? []).find(c => c.chunkId === ref.chunkId);
+      const record = await f.repo.read(ref.scope, ref.documentId);
+      return chunk && record?.document.documentVersion === ref.documentVersion ? clone({ ...chunk, aclRevision: record.document.aclRevision }) : null;
+    },
     downloadReference: async (_, d) => ({ attachmentId: d.attachmentId, documentVersion: d.documentVersion }),
     factReference: async (_, fact) => clone(fact),
   };

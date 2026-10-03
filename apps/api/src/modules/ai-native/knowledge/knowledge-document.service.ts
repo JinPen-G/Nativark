@@ -1,7 +1,7 @@
 import { AI_KNOWLEDGE_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
 import type { KnowledgeDocumentPorts, KnowledgeRecord, KnowledgeAction } from './knowledge.ports';
 import { KnowledgeError, requiredPort } from './knowledge-errors';
-import { assertRecord, authorize, draftInput, fingerprint, mutationInput, parse, validateChunks } from './knowledge-validation';
+import { assertRecord, authorize, draftInput, fingerprint, mutationInput, parse, validateChunks, queueIndex } from './knowledge-validation';
 
 export class KnowledgeDocumentService {
   constructor(readonly ports: KnowledgeDocumentPorts) {
@@ -31,8 +31,9 @@ export class KnowledgeDocumentService {
 
   async save(context: AiExecutionContext, action: KnowledgeAction, before: KnowledgeRecord, next: KnowledgeRecord, operationId: string, hash: string, newVersion = false): Promise<KnowledgeRecord> {
     await authorize(this.ports.authorization, context, { action, scope: context.scope, document: before.document });
-    const result = await this.ports.repository.commit({ scope: context.scope, documentId: next.document.documentId, expectedRevision: before.revision, operation: { id: operationId, fingerprint: hash }, next, newVersion });
+    const result = await this.ports.repository.commit({ scope: context.scope, documentId: next.document.documentId, expectedRevision: before.revision, operation: { id: operationId, fingerprint: hash, ...(next.failure ? { failure: next.failure } : {}) }, next, newVersion });
     if (result !== 'committed') throw new KnowledgeError('conflict');
+    this.ports.cache?.invalidate(context.scope, next.document.documentId);
     return this.load(context, next.document.documentId, action);
   }
 
@@ -62,7 +63,7 @@ export class KnowledgeDocumentService {
     await authorize(this.ports.authorization, context, { action: 'revise', scope: context.scope, document: before.document, attachmentId: input.attachmentId });
     const { validUntil: oldExpiry, ...previous } = before.document;
     const next: KnowledgeRecord = { revision: before.revision + 1, document: { ...previous, documentVersion: input.documentVersion, attachmentId: input.attachmentId, title: input.title, validFrom: input.validFrom, ...(input.validUntil ? { validUntil: input.validUntil } : {}), publication: 'draft', parsing: 'pending', indexing: 'not_indexed' } };
-    return this.save(context, 'revise', before, next, input.operationId, hash, true);
+    return this.save(context, 'revise', before, queueIndex(next, 'remove', `${input.operationId}:index`), input.operationId, hash, true);
   }
 
   async parseDocument(context: AiExecutionContext, value: unknown): Promise<KnowledgeRecord> {
@@ -70,7 +71,7 @@ export class KnowledgeDocumentService {
     const hash = fingerprint(['parse', input]);
     if (await this.replay(context, before, input.operationId, hash)) return before;
     if (before.revision !== input.expectedRevision || before.document.publication !== 'draft' || before.document.parsing === 'parsed' || before.parseOperationId) throw new KnowledgeError('conflict');
-    const pending: KnowledgeRecord = { document: { ...before.document, parsing: 'pending', indexing: 'not_indexed' }, revision: before.revision + 1, parseOperationId: input.operationId };
+    const pending: KnowledgeRecord = { indexJob: before.indexJob, document: { ...before.document, parsing: 'pending', indexing: 'not_indexed' }, revision: before.revision + 1, parseOperationId: input.operationId };
     await this.save(context, 'parse', before, pending, input.operationId, hash);
     let chunks;
     let failure: KnowledgeRecord['failure'];
@@ -84,8 +85,8 @@ export class KnowledgeDocumentService {
       failure = error instanceof KnowledgeError && ['unsupported', 'invalid_text', 'empty_text', 'limit_exceeded'].includes(error.code) ? error.code as KnowledgeRecord['failure'] : 'parse_failed';
     }
     await authorize(this.ports.authorization, context, { action: 'parse', scope: context.scope, document: pending.document });
-    const next: KnowledgeRecord = { revision: pending.revision + 1, document: { ...pending.document, parsing: failure ? (failure === 'parse_failed' ? 'failed' : 'rejected') : 'parsed' }, ...(failure ? { failure } : {}) };
-    const result = await this.ports.repository.commit({ scope: context.scope, documentId: input.documentId, expectedRevision: pending.revision, operation: { id: `${input.operationId}:parse-result`, fingerprint: fingerprint(['parse-result', hash, failure ?? 'parsed']) }, next, ...(failure ? {} : { chunks }), newVersion: false });
+    const next: KnowledgeRecord = { indexJob: pending.indexJob, revision: pending.revision + 1, document: { ...pending.document, parsing: failure ? (failure === 'parse_failed' ? 'failed' : 'rejected') : 'parsed' }, ...(failure ? { failure } : {}) };
+    const result = await this.ports.repository.commit({ scope: context.scope, documentId: input.documentId, expectedRevision: pending.revision, operation: { id: `${input.operationId}:parse-result`, fingerprint: fingerprint(['parse-result', hash, failure ?? 'parsed']), ...(failure ? { failure } : {}) }, next, ...(failure ? {} : { chunks }), newVersion: false });
     if (result !== 'committed') throw new KnowledgeError('conflict');
     return this.load(context, input.documentId, 'parse');
   }

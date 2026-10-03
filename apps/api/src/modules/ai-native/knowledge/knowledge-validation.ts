@@ -43,6 +43,9 @@ export async function authorize(port: KnowledgeAuthorizationPort, context: AiExe
     return grant;
   } catch { return unavailable(); }
 }
+export function queueIndex(record: KnowledgeRecord, kind: 'upsert' | 'remove', operationId: string): KnowledgeRecord {
+  return { ...record, indexJob: { operationId, kind, status: 'pending', documentVersion: record.document.documentVersion, aclRevision: record.document.aclRevision, generation: record.revision } };
+}
 export function fingerprint(value: unknown): string { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
 export function visible(document: AiKnowledgeDocumentDraft, now: number): boolean {
   return document.publication === 'published' && document.parsing === 'parsed' && document.indexing === 'indexed' && Date.parse(document.validFrom) <= now && (!document.validUntil || now < Date.parse(document.validUntil));
