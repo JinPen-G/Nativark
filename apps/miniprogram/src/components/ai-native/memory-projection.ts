@@ -1,3 +1,4 @@
+import { boundedText } from "./display-format";
 /** Pure private projection. Preferences never confer business permissions. */
 export function memoryProjection(input: unknown, nowIso = ""): { label: string; value: string; status: string } {
   const item = input && typeof input === "object" ? input as Record<string, unknown> : {};
@@ -10,8 +11,8 @@ export function memoryProjection(input: unknown, nowIso = ""): { label: string; 
     nonempty(item.contentHash) && nonempty(item.confirmedContentHash) && item.contentHash === item.confirmedContentHash;
   const humanConfirmed = status === "confirmed" && item.actorKind === "human" && evidence && current;
   return {
-    label: typeof item.label === "string" ? item.label.slice(0, 200) : "偏好不可用",
-    value: (humanConfirmed || (status === "proposed" && current)) && typeof item.value === "string" ? item.value.slice(0, 4000) : "内容不可用",
+    label: typeof item.label === "string" ? boundedText(item.label, 200) : "偏好不可用",
+    value: (humanConfirmed || (status === "proposed" && current)) && typeof item.value === "string" ? boundedText(item.value) : "内容不可用",
     status: humanConfirmed ? "已由人类确认（不代表权限）" : status === "confirmed" ? "确认失效，待人工核对" : status === "proposed" && current ? "待人工确认" : "已失效/不可用",
   };
 }

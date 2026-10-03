@@ -1,6 +1,7 @@
+import { boundedText, displayMeasurement } from "../display-format";
 function customerText(value: unknown): string {
-  if (typeof value === "string") return value.slice(0, 4000);
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "string") return boundedText(value);
+  if (typeof value === "number" || typeof value === "bigint") return displayMeasurement(value, null).text;
   return "未知";
 }
 Component({
@@ -13,7 +14,7 @@ Component({
       const order = this.data.order as Record<string, unknown> | null;
       if (!this.data.available || !order) { this.setData({ projection: null }); return; }
       this.setData({ projection: {
-        title: typeof order.title === "string" ? order.title.slice(0, 200) : "订单信息不可用",
+        title: typeof order.title === "string" ? boundedText(order.title, 200) : "订单信息不可用",
         receivable: customerText(order.receivable), paid: customerText(order.paid),
         deposit: customerText(order.deposit), preAuth: customerText(order.preAuth),
         refundStatus: typeof order.refundStatus === "string" ? order.refundStatus.slice(0, 200) : "待核对",
