@@ -102,7 +102,12 @@ export class AiPollingLoop {
     catch (error) {
       if (requestEpoch === this.epoch) {
         const kind = this.recovery?.classify(error) ?? "unknown";
-        this.recovery?.notify(kind); this.failures += 1;
+        // Host callbacks can synchronously reauthorize, replace context or destroy.
+        // The old failure must not notify or block that new generation.
+        if (requestEpoch !== this.epoch || !this.live || this.disposed) return;
+        this.recovery?.notify(kind);
+        if (requestEpoch !== this.epoch || !this.live || this.disposed) return;
+        this.failures += 1;
         if (kind !== "transient" || this.failures > 3) { this.blocked = true; this.pause(); }
         else delay = Math.min(30000, delay * Math.pow(2, this.failures));
       }
