@@ -17,6 +17,7 @@ export interface EventTimelineState {
     | "none"
     | "duplicate"
     | "out_of_order"
+    | "cursor_gap"
     | "revision_rollback"
     | "scope_reset";
 }
@@ -103,6 +104,12 @@ export function reduceEvent(
       state: { ...state, notice: "out_of_order" },
       accepted: false,
       reason: "out_of_order",
+    };
+  if (currentCursor !== null && cursor !== currentCursor + 1n)
+    return {
+      state: empty(state, "cursor_gap"),
+      accepted: false,
+      reason: "cursor_gap",
     };
   if (currentRevision !== null && revision < currentRevision)
     return {
