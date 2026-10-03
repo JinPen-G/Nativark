@@ -1,6 +1,6 @@
 <view class="ai-memory-preference" aria-label="记忆与偏好">
   <text role="status" wx:if="{{!available}}">偏好不可用</text>
-  <view wx:for="{{rows}}" wx:key="id">
+  <view wx:for="{{rows}}" wx:key="rowKey">
     <text>{{item.label}}</text><text>{{item.value}}</text><text>{{item.status}}</text>
   </view>
   <text>偏好仅作展示，不是业务权限或批准记录</text>

@@ -1,3 +1,4 @@
+import { identityRows } from "../identity-rows";
 const detachedViews = new WeakSet<object>();
 function inspectionValue(value: unknown): string {
   if (value === null || value === undefined) return "缺失";
@@ -13,8 +14,8 @@ Component({
   methods: {
     project() {
       if (detachedViews.has(this)) return;
-      const items = (this.data.items as Record<string, unknown>[]).slice(0, 50).filter(item => item && typeof item.key === "string").map(item => ({
-        key: String(item.key).slice(0, 64), label: typeof item.label === "string" ? item.label.slice(0, 200) : "检查项不可用",
+      const items = identityRows(this.data.items, ["key"], 64).map(item => ({
+        key: item.key as string, label: typeof item.label === "string" ? item.label.slice(0, 200) : "检查项不可用",
         candidate: inspectionValue(item.candidate), humanValue: inspectionValue(item.humanValue),
         sourceLabel: typeof item.sourceLabel === "string" ? item.sourceLabel.slice(0, 200) : "来源不可用",
       }));
