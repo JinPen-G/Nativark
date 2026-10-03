@@ -59,7 +59,7 @@
 | AIN-13 | 订单解释 | AIN-27 | 真供应商与灰度 |
 | AIN-14 | 开业诊断提案 | AIN-28 | 独立复核交付 |
 
-AIN-X01～04为储备，不计分母。不得将原任务未完部分移入Reserved以宣称结项；此类范围变化必须负责人确认并升版。
+AIN-X01原为储备，2026-10-03负责人明确双轨接入（新租户默认平台托管、BYOK保留）纳入原AIN-02/03/05/11/24/27（ADR-005；需求v1.1）；X02～04仍储备。均不另增28项分母。不得将原任务未完部分移入Reserved以宣称结项；后续范围变化仍须负责人确认并升版。
 
 ## 3. 多AI协作协议
 
@@ -108,14 +108,55 @@ AIN-X01～04为储备，不计分母。不得将原任务未完部分移入Reser
 | CLAIM-ID / 切片 | 作者与协调确认 | 分支/工作树及基线 | 精确写入边界 / 执行阶段 |
 | --- | --- | --- | --- |
 | AIN-CLAIM-001 / AIN-01/S01 | Codex；移交Claude | 原树原分支；已提交a8cdd30、eb83783 | 已提交、待整项基线及独立复核；停止原范围续写，AIN-01不结项 |
-| AIN-CLAIM-002 / AIN-02/S01 | Claude；负责人分配，由交出协调者Codex确认 | 拟建 `D:\工作文件\rental-OS\.worktrees\claude-ai-native-foundation` / `ai/ai-native-contracts-20261002`，基线采用本交接提交；核对时树/分支尚不存在，由Claude自行创建并登记实际SHA | 仅下列Claude文件、交接后中央记录及三份主文档；身份/工具/错误契约并行草案，非正式冻结；待Claude接收/开工 |
-| AIN-CLAIM-003 / AIN-01/S02 | Codex；负责人分配，由交出协调者Codex确认 | `D:\工作文件\rental-OS\.worktrees\codex-ai-native-transition` / `ai/ai-native-foundation-20261002`，基线采用本交接提交 | 仅下列Codex三个文件；既有事实口径/失败参考基线，交接后开工 |
+| AIN-CLAIM-002 / AIN-02/S01 | Claude；负责人分配，由交出协调者Codex确认，Claude已接收 | 实际 `D:\工作文件\rental-OS\.claude\worktrees\claude-ai-native-foundation` / `ai/ai-native-contracts-s01-20261002`，基线 `f819f664784075b883098f05c7659f19a4034287`；开始时工作区干净 | 仅下列Claude文件、交接后中央记录及三份主文档；身份/工具/错误契约并行草案 `96f8cbb`，15条回归通过；作者自复查、独立Review未完成，不是正式冻结 |
+| AIN-CLAIM-003 / AIN-01/S02 | Codex；负责人分配，由交出协调者Codex确认 | `D:\工作文件\rental-OS\.worktrees\codex-ai-native-transition` / `ai/ai-native-foundation-20261002`，基线 `f819f66`，切片提交 `a9cd10c548ceb13325324f62011ca99a33f19cba` | 三文件提交范围及作者记录已核对；待独立复核/接收，32条含3个KNOWN GAP，不作安全通过或整项结项 |
+| AIN-CLAIM-004 / AIN-01/S03 | Codex；负责人回报作者完成 | 沿用Codex自有树/分支，基线 `a9cd10c548ceb13325324f62011ca99a33f19cba`，提交 `47e425b21009d831a18f29779f44ae1e34b4ce84` | 作者完成、待独立复核；本轮仅核对提交存在，未复跑，不作整项验收 |
+| AIN-CLAIM-005 / AIN-01/S04 | Codex；负责人要求先派下一批、后复核，Claude确认，经负责人转交生效 | 沿用Codex自有树/分支，基线 `47e425b21009d831a18f29779f44ae1e34b4ce84`，提交 `de52ea74c632e0120141558451694415ac0580a3` | 三文件提交已核对；作者完成、待独立复核，不作整项验收 |
+| AIN-CLAIM-006 / AIN-01/S05 | Codex；负责人要求扩大并行量，Claude确认，经负责人转交生效 | Codex自有树/分支，基线 `de52ea74c632e0120141558451694415ac0580a3`，提交 `1ba352be5edfc4edaa42a4dd0dd49d166bf0b1b3` | 三文件范围及作者记录已核对；3个索引测试是作者证据，未本轮复跑；待独立复核 |
+| AIN-CLAIM-007 / AIN-24/S01 | Codex；负责人要求扩大并行量，Claude确认，经负责人转交生效 | Codex自有树/分支，提交 `bb7d30b` | 三文件范围及作者记录已核对；5个元数据测试不是23个真实攻击测试；待独立复核 |
+| AIN-CLAIM-008 / AIN-02/S02 | Codex；负责人要求扩大并行量，Claude确认，经负责人转交生效 | 在Codex自有分支接入 `96f8cbbd3a5cd43163f08226b9a9fa70fe9d3f74`，不得携带协调文档 | 前置草案提交已具备；经负责人转交SHA后开工，消费者兼容测试及独立审阅，不改生产契约 |
+| AIN-CLAIM-009 / AIN-02/S03 | Claude；负责人要求继续最关键底座，协调者登记 | 本会话实际树/分支，基线 `96f8cbb` | C04任务/步骤/恢复与事件草案；精确文件见下文，施工中，不启动Worker或持久化运行器 |
+| AIN-CLAIM-010 / AIN-02/S04 | Codex；2026-10-03负责人要求再次扩大并行批次，Claude分配 | Codex自有树；先接入上述C01/C02提交，实际HEAD在切片记录登记 | C03模型网关叶子契约及离线schema，不导出公共入口、不接供应商，待负责人转交 |
+| AIN-CLAIM-011 / AIN-02/S05 | Codex；同批分配 | 同上；各切片独立提交 | C06知识/来源/记忆叶子契约及离线schema，不实现ACL或解析器，待负责人转交 |
+| AIN-CLAIM-012 / AIN-02/S06 | Codex；同批分配 | 同上；各切片独立提交 | C07预算/用量叶子契约及离线schema，不自行定价、不运行预算仓储，待负责人转交 |
+| AIN-CLAIM-013 / AIN-02/S07 | Codex；同批分配 | 同上；各切片独立提交 | C08业务事件/自动化政策叶子契约及离线schema，不写Outbox/Worker，不启自动化，待负责人转交 |
+| AIN-CLAIM-014 / AIN-02/S08 | Codex；同批分配 | 同上；各切片独立提交 | C09多模态检查草稿叶子契约及离线schema，不识别附件、不提交检查事实，待负责人转交 |
+
+Claude接收说明（2026-10-02）：负责人转交 `f819f664784075b883098f05c7659f19a4034287`，已核对中央确认及Codex停写约束。预定 `.worktrees/claude-ai-native-foundation` 已由本会话从交接提交创建，但工作树工具未能进入该路径、另建了上表会话隔离目录；实际目录已显式切至同一交接提交后施工。预定目录及其 `ai/ai-native-contracts-20261002` 分支保留、未写业务代码，不作为第二条开发线；不擅自清理。仅更正本会话路径/分支，不扩文件或任务边界。
 
 Claude文件白名单：`packages/shared/src/ai-native.ts`、`packages/shared/src/index.ts`、`apps/api/src/contracts/ai-native-schemas.ts`、`apps/api/src/contracts/openapi-document.ts`、`tests/ai-native-contracts.test.cjs`、`docs/开发任务/附件/AI原生系统协作切片/AIN-02-S01-20261002-claude.md`；另接管三份专项主文档及中央记录。AIN-01完整基线/契约确认未齐备前，AIN-02只能起草，不能宣称正式冻结。
 
 Codex文件白名单：`tests/ai-native-fact-baseline.test.cjs`、`tests/fixtures/ai-native/fact-baseline.cjs`、`docs/开发任务/附件/AI原生系统协作切片/AIN-01-S02-20261002-codex.md`。只能使用合成输入、内存仓储和受控依赖替身；不改原目录及测试、生产代码、shared/OpenAPI、Prisma、AppModule、前端、依赖或其他专项。不连接数据库、不创建库、不启动服务、不调用供应商。
 
-有效期：两个新认领持续至各自切片提交/交接，扩大范围或接手须由Claude重新确认；不自动过期抢占。Codex从本交接提交起只更新自己的S02记录，不同步根目录文档、不更新原28项完成率、不合入main或推送，也不向其他会话发消息；提交SHA经负责人转交。
+S03新增白名单：`tests/ai-native-authorization-baseline.test.cjs`、`tests/fixtures/ai-native/authorization-baseline.cjs`、`docs/开发任务/附件/AI原生系统协作切片/AIN-01-S03-20261002-codex.md`。只用合成输入与依赖替身，直接验证现有Guard/Controller/应用入口：同路由权限下的tenant/workspace/audience、own/地点、会员候选与预约资格、订单凭证资金裁剪、能力例外服务端actor及重放副作用。禁止复制鉴权实现、修改生产代码、读共享库或发外部请求；不重复S02事实测试，不依赖尚未冻结的AI接口。发现缺口记录KNOWN GAP及责任建议，不将刻画测试通过当安全验收。有效期至该切片交接，公共文件与主文档继续由Claude唯一维护；核验路径未占用后经负责人转交，Codex在自己的切片记录确认接收，不修改中央台账。
+
+S04新增白名单：`tests/ai-native-history-context-baseline.test.cjs`、`tests/fixtures/ai-native/history-context-baseline.cjs`、`docs/开发任务/附件/AI原生系统协作切片/AIN-01-S04-20261003-codex.md`。接S02-G04，核对历史报价/订单在savedContext、timezone、calendar、hour转day费率等缺失/版本变化组合下的真实读取路径；区分原价全租期/增量续租、两种换货价源，不能改既有业务口径。只调用已有真实函数和受控内存依赖，夹具不复制算法，不新增AI接口、生产代码、迁移或依赖。发现回退/异常只记录证据与补丁建议，KNOWN GAP不算验收。不得连接数据库/读取.env/启服务/调用供应商。S02/S03维持待复核，S04不以它们安全验收通过为前提；有效期至提交/交接，扩大范围须另确认。该三路径在Codex最近提交未存在，开工由作者再次核对未提交占用；通过负责人转交确认，不向其他会话发消息。
+
+S05新增白名单：`tests/ai-native-evidence-index.test.cjs`、`tests/fixtures/ai-native/evidence-index.cjs`、`docs/开发任务/附件/AI原生系统协作切片/AIN-01-S05-20261003-codex.md`。建立工具×事实入口×权限层×证据等级×未覆盖范围矩阵，引用S01-S04的提交/测试文件但不修改它们；静态/单元/真库/浏览器/宿主/真模型层级必须分开，不把历史通过当本轮实测，不填人工耗时或成功率。
+
+AIN-24/S01新增白名单：`tests/ai-native-threat-matrix.test.cjs`、`tests/fixtures/ai-native/threat-matrix.cjs`、`docs/开发任务/附件/AI原生系统协作切片/AIN-24-S01-20261003-codex.md`。只做离线安全负例与不变量矩阵：伪造scope/actor/audience、跨租户/空间、地点空集、字段越权、提示注入文本、未知结果重复动作、审批伪造、任意URL/SQL/终端等。只验证已有 schema/静态入口能表达拒绝条件，不伪造AI handler/模型结果，不改生产代码，不接外部服务；明确哪些需AIN-04/07/10/24后续真链路。
+
+AIN-02/S02暂缓至AIN-02/S01明确提交后再开工；预定白名单：`tests/ai-native-contract-consumer.test.cjs`、`tests/fixtures/ai-native/contract-consumer.cjs`、`docs/开发任务/附件/AI原生系统协作切片/AIN-02-S02-20261003-codex.md`。只消费已提交的shared/OpenAPI schema，检查消费者引用、版本/错误枚举和拒绝未知字段；不修改生产契约或公共导出，不自行补字段。缺失消费者或契约冲突先报告。
+
+上述三切片全部禁止修改生产代码、Prisma、依赖、中央文档、主任务、既有S01-S04文件及他人工作树；不读.env、不建库、不启服务、不调用供应商；各自独立提交，作者完成不等于原任务结项，待后续独立复核。
+
+有效期：各新认领持续至各自切片提交/交接，扩大范围或接手须由Claude重新确认；不自动过期抢占。Codex从中央交接后只更新对应获分配的独立切片记录，不同步根目录文档、不更新原28项完成率、不合入main或推送，也不向其他会话发消息；提交SHA经负责人转交。
+
+### 4.1a 2026-10-03 新批次确认与精确白名单
+
+负责人确认Codex另有自主续做提交，并再次要求大量派工。只读核对 `de52ea7..978af63` 的8个提交：`1ba352b`、`bb7d30b` 为006/007；另有 `a8e6475`（多步威胁）、`be19ae0`（幂等）、`7b67a98`（退款）、`9972d67`（检查）、`f4eede8`（关单）、`978af63`（外部地址）6个补充。全部只新增tests/fixtures/各自记录；无shared/OpenAPI/Prisma/鉴权/中央文档写入。本轮仅核对提交路径，读取006/007及地址补充作者记录，未复跑补充测试，不升级为独立验收。Codex树的两张旧截图及未提交 supplement-handoff 两文件保留，不接手或代提交。
+
+六切片完整转交提示见[批次派工](AI原生系统协作切片/20261003-codex-六切片派工.md)；经负责人转交后生效。以下是文件级写入授权，**只授权新叶子文件，不授权shared入口/OpenAPI聚合/生产运行接线**：
+
+- 008：沿用S02三个原白名单文件；前置 `96f8cbbd3a5cd43163f08226b9a9fa70fe9d3f74` 已具备。该提交只含C01/C02六文件，不含中央记录。
+- 009（Claude）：`packages/shared/src/ai-task-draft.ts`、`packages/shared/src/index.ts`、`apps/api/src/contracts/ai-task-draft-schemas.ts`、`apps/api/src/contracts/openapi-document.ts`、`apps/api/src/modules/ai-native/task-transition-draft.ts`、`tests/ai-native-task-contracts.test.cjs`、`docs/开发任务/附件/AI原生系统协作切片/AIN-02-S03-20261003-claude.md`；C04草案，不是持久化运行器。协调者继续唯一维护三主文档及本批次派工文件。
+- 010：`packages/shared/src/ai-gateway-draft.ts`、`packages/shared/src/ai-gateway-draft-schemas.ts`、`tests/ai-native-gateway-contracts.test.cjs`、`tests/fixtures/ai-native/gateway-contracts.cjs`、`docs/开发任务/附件/AI原生系统协作切片/AIN-02-S04-20261003-codex.md`。
+- 011：`packages/shared/src/ai-knowledge-draft.ts`、`packages/shared/src/ai-knowledge-draft-schemas.ts`、`tests/ai-native-knowledge-contracts.test.cjs`、`tests/fixtures/ai-native/knowledge-contracts.cjs`、`docs/开发任务/附件/AI原生系统协作切片/AIN-02-S05-20261003-codex.md`。
+- 012：`packages/shared/src/ai-usage-draft.ts`、`packages/shared/src/ai-usage-draft-schemas.ts`、`tests/ai-native-usage-contracts.test.cjs`、`tests/fixtures/ai-native/usage-contracts.cjs`、`docs/开发任务/附件/AI原生系统协作切片/AIN-02-S06-20261003-codex.md`。
+- 013：`packages/shared/src/ai-events-draft.ts`、`packages/shared/src/ai-events-draft-schemas.ts`、`tests/ai-native-events-contracts.test.cjs`、`tests/fixtures/ai-native/events-contracts.cjs`、`docs/开发任务/附件/AI原生系统协作切片/AIN-02-S07-20261003-codex.md`。
+- 014：`packages/shared/src/ai-inspection-draft.ts`、`packages/shared/src/ai-inspection-draft-schemas.ts`、`tests/ai-native-inspection-contracts.test.cjs`、`tests/fixtures/ai-native/inspection-contracts.cjs`、`docs/开发任务/附件/AI原生系统协作切片/AIN-02-S08-20261003-codex.md`。
+
+Schema叶子文件与类型同属shared包，使用JSON兼容结构，不依赖Nest/Node或API层。跨叶子复用C01/C02现有类型；测试可直接导入新叶子源码，生产消费者仍只用唯一shared入口。统一入口导出、OpenAPI components登记及正式版本冻结均留给Claude整合，不由Codex做私有端DTO或伪造路由。每切片单独提交；遇前置冲突先记录阻塞，转做其他已授权切片，不自行写被占文件。六切片之外的新增任务另请分配。
 
 | 必填字段 | 说明 |
 | --- | --- |
@@ -135,7 +176,7 @@ Codex文件白名单：`tests/ai-native-fact-baseline.test.cjs`、`tests/fixture
 | --- | --- | --- |
 | 三份专项主文档与进度归档 | Claude临时协调者 | 从本交接提交起唯一维护；Codex停止写入、不同步根目录 |
 | shared/OpenAPI/工具及事件类型 | Claude，AIN-CLAIM-002限定范围 | 首批仅起草；AIN-01与确认未齐备前不得正式冻结 |
-| Prisma schema与迁移 | 未认领 | AIN-03单一迁移整合者，不并行编号/互相删迁移 |
+| Prisma schema与迁移 | Claude（协调者）整合 | 单一迁移整合者；B02/B03 期间 AI 模型增量曾授权 Codex，已由协调者合并（2fb76a9）；后续第三方增量须协调者明确授权，不并行编号/互相删迁移 |
 | 公共鉴权与身份解析 | 未认领 | AIN-04保持原接口等价回归 |
 | 后台路由/菜单/locale聚合 | 未认领 | F线整合各场景入口，不全仓格式化 |
 | 依赖清单与lock | 未认领 | 必须说明新增依赖原因与影响范围 |
@@ -189,14 +230,15 @@ Codex文件白名单：`tests/ai-native-fact-baseline.test.cjs`、`tests/fixture
 | --- | --- | --- |
 | AIN-ADR-001 | AI Native改造形成三份独立文档，支持多AI并行与实现同步 | 用户本次明确要求；本轮仅文档交付 |
 | AIN-ADR-002 | 模型解释/规划，受控工具调用既有业务；金额、库存、状态与权限仍由Core/业务域决定 | 本需求工程基线；不更改原经营口径 |
-| AIN-ADR-003 | 先在现有后端内模块化；平台托管模型、一家真实适配器起步；BYOK/外部市场/独立APP/跨空间分析储备 | 工程规划基线；不是已经选定供应商或购买套餐 |
+| AIN-ADR-003 | 历史规划：现有后端内模块化；平台托管、一家适配器起步及BYOK储备 | 2026-10-03被ADR-005覆盖供应商/租户配置部分；保留历史，不再作为当前实现约束 |
+| AIN-ADR-005 | 平台统一 AI 默认＋租户 BYOK 可选的双轨：新租户默认 platform_managed（Rental OS AI，无需供应商字段），既有自定义配置保留 tenant_managed；供应商和模型不固定，BYOK 侧由租户配置协议/Base URL/密钥/模型标识，按协议实现适配与能力验证 | 2026-10-03负责人两次直接明确（需求v1.1）。C03/C07/配置持久化需 tenant+configRevision+credentialRef 隔离；管理设置输入与模型输入分开；真实请求仍需出网/凭据/数据授权，不授权任意HTTP工具 |
 | AIN-ADR-004 | 固定28项验收分母；主任务仅状态/剩余，实现证据和切片放独立记录 | 沿用用户要求的进度与实现过程分离方式 |
 
 ### 6.2 负责人待决
 
 | ID | 待确认 | 未确认时 | 责任/触发时点 |
 | --- | --- | --- | --- |
-| AIN-D01 | 模型供应商、模型、数据地区及真实凭据 | 中立契约与mock故障测试；真实配置关闭 | AIN-05开始真实适配前，协调者提交选择依据，负责人决定 |
+| AIN-D01 | 平台 AI 的供应商配置/模型/数据处理地区；BYOK 支持协议与数据处理责任 | 双轨已确定（ADR-005；需求v1.1）：新租户默认平台托管、BYOK 保留；中立契约/兼容迁移/mock 可继续，真实配置未验证保持关闭 | 真实连接/模型验收前确认测试配置与数据使用授权；不是供应商硬编码开关 |
 | AIN-D02 | 套餐/商业额度/超额政策 | 测试预算显式设置，不开收费或无限额度 | AIN-11商业启用前；不阻止预算机制开发 |
 | AIN-D03 | 自动动作白名单、上限、收件人和试点租户 | 影子/人工确认，R3不得无人执行 | AIN-18/27启用前；负责人明确范围 |
 | AIN-D04 | 分类留存、数据用途与供应商处理政策 | 最少合成/脱敏测试，生产敏感数据采集关闭 | 真实数据进入知识/模型前；负责人确认 |
@@ -344,3 +386,10 @@ HANDOFF-ID / 原任务与CLAIM-ID：
 - 遗留资源：保留上述截图及本树本地既有构建/依赖；没有为本次交接创建数据库、服务、端口或外部调用。进程核对只见本次检查命令对应pwsh，未发现带本树路径的node服务进程；不据此宣称整机没有服务。此前专用Core库的清理见S01引用，禁止再次清理默认或他人库。
 - 原需求范围、28项验收分母和正式关闭边界不变；所有AIN-C契约未冻结，D01～D05仍待负责人适时决定。主任务状态后续由Claude核实更新，交接不等于AIN-01结项。
 - Claude下一步：核对本交接提交与中央认领，自行创建声明的工作树/分支，登记接收与实际基线，接续002草案；核验主文档的原单人描述后统一更新。Codex接续003限定基线。禁止覆盖两边在途修改，禁止自行扩大文件范围或伪造外部验收。
+
+### AIN-IMPL-002：并行实现线与整合（2026-10-03，协调者汇总）
+
+- 契约与底座（Claude）：C01/C02 96f8cbb；C04 0597e9e；C05 80a372f；持久化骨架与隔离客户端 de6fd4b/2d41240；任务仓储 99dc6e2、状态事务 06a86cb、事件分页 85f826a、幂等创建 616ff60；网关/知识整合 941ddb7/e799073；恢复租约 515c0fb；步骤状态事务 12bc88a；步骤登记 165d0cc。
+- 网关与知识线（Codex 树）：流式/协议/出网/限额提交至 56a2058；知识五片 5bf5bef；B02 十二里程碑 bf35656；B03 配套与失败基线 2d99126；B04/B05 前端组件 e6ff657。
+- 协调整合（Claude）：144966d（含 1cd5633，50文件767项离线回归）；2fb76a9（B02/B03 辅助批合并＋核心修复：迁移创建顺序、准入完整身份绑定、精确结算、预取消、stream 全生命周期；1073/1073）；cf12ba2（B04/B05；1120/1120 含前端 mjs）。
+- 以上均为离线证据；真库、真实模型、浏览器与设备未运行；28项验收分母不变（0/28）。
