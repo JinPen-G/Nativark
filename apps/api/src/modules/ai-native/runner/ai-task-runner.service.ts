@@ -131,7 +131,7 @@ export class AiTaskRunner {
           const commit = await this.persistResult(ref, lease, safe);
           lease = commit.lease; taskRevision = commit.taskRevision;
           if (safe.kind === "unknown") return (await this.commitTaskOutcome({ status: "unknown", completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
-          if (safe.kind === "paused") return (await this.commitTaskOutcome({ status: "paused", completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
+          if (safe.kind === "paused") return (await this.commitTaskOutcome({ status: "paused", pause: safe.pause, completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
           if (safe.kind === "failed") return (await this.commitTaskOutcome({ status: "failed", completedSteps, cleanupFailed, errorCode: safe.errorCode }, lease, taskRevision)).outcome;
           completedSteps += safe.kind === "succeeded" ? 1 : 0;
           continue;
@@ -176,7 +176,7 @@ export class AiTaskRunner {
         const commit = await this.persistResult(ref, lease, result);
         lease = commit.lease; taskRevision = commit.taskRevision;
         if (result.kind === "unknown") return (await this.commitTaskOutcome({ status: "unknown", completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
-        if (result.kind === "paused") return (await this.commitTaskOutcome({ status: "paused", completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
+        if (result.kind === "paused") return (await this.commitTaskOutcome({ status: "paused", pause: result.pause, completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
         if (result.kind === "failed") return (await this.commitTaskOutcome({ status: "failed", completedSteps, cleanupFailed, errorCode: result.errorCode }, lease, taskRevision)).outcome;
         completedSteps += result.kind === "succeeded" ? 1 : 0;
       }

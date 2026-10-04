@@ -119,7 +119,8 @@ export interface AiTaskRunnerEffectPort {
 }
 
 export type AiTaskRunnerTaskOutcome =
-  | { status: "succeeded" | "paused" | "unknown"; completedSteps: number; cleanupFailed: number }
+  | { status: "succeeded" | "unknown"; completedSteps: number; cleanupFailed: number }
+  | { status: "paused"; pause: AiTaskRunnerPause; completedSteps: number; cleanupFailed: number }
   | { status: "failed"; completedSteps: number; cleanupFailed: number; errorCode: string };
 
 /** Task aggregate transition is supplied by the composition root. The runner
