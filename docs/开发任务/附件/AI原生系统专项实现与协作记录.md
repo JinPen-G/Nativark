@@ -410,3 +410,4 @@ HANDOFF-ID / 原任务与CLAIM-ID：
 - AIN-06/F01修订传递等四项集成修复提交 `751ac7e3`，全量1856项离线回归通过；不是任务级恢复闭环验收。
 - AIN-03/F02：[Profile真实Prisma类型与原子CAS返回](AI原生系统协作切片/AIN-03-F02-20261005-codex.md)，修复前3项红测，修复后Gateway/Profile/能力相关285项通过，API类型检查退出0；没有真库锁证据或生产注册。
 - AIN-03/S02、04/S02、05/S03：[租户配置持久化与BYOK接线](AI原生系统协作切片/AIN-03-S02-20261005-codex.md)：新增版本化配置模型/追加迁移、实际Prisma CAS adapter、复用当前AuthService/Guard的动作适配及已有BYOK resolver接线；修复平台mode下保存保留配置后假失败。最终完整离线1883项通过，API类型/构建、隔离schema validate/diff通过；旧B06迁移检查器本次独立退出1，其解析局限和670项历史issues单列，未隐藏。旧配置仍待受权转换、平台凭据和Profile统一revision/预算单账仍未接齐，原正式验收0/28不变。
+- AIN-03/S03、05/S04：[平台凭据持久化与transport接线](AI原生系统协作切片/AIN-03-S03-20261005-codex.md)：平台vault与既有Profile同事务CAS修订、密文目的地绑定、当前身份与配置复读；实际resolver接既有transport/协议Adapter，无租户回退。撤销窗口先红后绿，定向12/12，完整离线1894/1894（其中包含11项新增测试，第12项后追加并单独验证），API类型/build及离线Prisma validate/diff退出0、隔离生成共享产物未变。平台管理动作真实授权适配、tenant配置/Profile统一revision、能力验真及预算单账仍待推进；未生产启用、原正式验收0/28不变。

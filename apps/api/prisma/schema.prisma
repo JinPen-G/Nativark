@@ -402,11 +402,26 @@ model AiProviderProfile {
   disabledAt         DateTime?
   scope              AiScope                @relation(fields: [scopeId, scopeKind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict)
   capabilityEvidence  AiProviderCapabilityEvidence[]
+  platformConnection  AiPlatformModelConnection?
 
   @@unique([scopeId, scopeKind, profileKey], map: "ai_provider_profiles_scope_key")
   @@unique([scopeId, scopeKind, role], map: "ai_provider_profiles_scope_role")
   @@index([scopeKind, serviceMode, enabled], map: "ai_provider_profiles_route_idx")
   @@map("ai_provider_profiles")
+}
+
+/// Server-only platform vault. Profile revision and this row are committed together.
+model AiPlatformModelConnection {
+  profileId            String            @id @db.VarChar(36)
+  profile              AiProviderProfile @relation(fields: [profileId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  configRevision       Int               @db.UnsignedInt
+  baseUrl              String            @db.VarChar(2048)
+  maxOutputTokens      Int               @db.UnsignedInt
+  credentialsEncrypted String            @db.Text
+  createdAt            DateTime          @default(now()) @db.DateTime(3)
+  updatedAt            DateTime          @updatedAt @db.DateTime(3)
+
+  @@map("ai_platform_model_connections")
 }
 
 /// Capability evidence is revision-bound. A provider configuration change makes
