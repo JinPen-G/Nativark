@@ -1,4 +1,5 @@
 import { useId } from "react";
+import { safeDisplayText } from "./safe-display";
 
 export interface ModelTextProps {
   text: string;
@@ -7,7 +8,7 @@ export interface ModelTextProps {
 /** Untrusted text only: neither Markdown nor tool requests execute here. */
 export function ModelText({ text, kind = "text" }: ModelTextProps) {
   const id = useId();
-  const bounded = typeof text === "string" ? text.slice(0, 19_999) : "";
+  const bounded = safeDisplayText(text, 20_000);
   const preview = bounded.slice(0, 800);
   return (
     <section
@@ -34,7 +35,7 @@ export function ModelText({ text, kind = "text" }: ModelTextProps) {
           </p>
         </details>
       )}
-      {text.length > 20_000 && (
+      {typeof text === "string" && text.length > 20_000 && (
         <p role="status">
           内容超过展示上限，已截断。请通过受权宿主核对完整记录。
         </p>

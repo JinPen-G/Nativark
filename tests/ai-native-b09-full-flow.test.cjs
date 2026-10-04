@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { load, mount, deferred } = require('./fixtures/ai-native/b09-host.cjs');
+const { load, mountWithHost: mount, deferred } = require('./fixtures/ai-native/b09-host.cjs');
 // Host snapshots are synthetic, already-authorized display inputs, not a new HTTP DTO.
 for (const app of ['miniprogram', 'staff-miniprogram']) {
  for (const resultLabel of ['已完成', '待核对：外部结果未知']) {

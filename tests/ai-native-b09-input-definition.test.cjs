@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { load, mount } = require('./fixtures/ai-native/b09-host.cjs');
+const { load, mountWithHost: mount } = require('./fixtures/ai-native/b09-host.cjs');
 for (const app of ['miniprogram', 'staff-miniprogram']) {
   test(app + ' ambiguous and over-limit clarification definitions cannot silently submit a partial form', async () => {
     let calls = 0;

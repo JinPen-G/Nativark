@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const {load,mount,deferred}=require('./fixtures/ai-native/b09-host.cjs');
+const {load,mountWithHost: mount,deferred}=require('./fixtures/ai-native/b09-host.cjs');
 const flush=async()=>{for(let i=0;i<10;i++)await Promise.resolve();};
 for(const app of ['miniprogram','staff-miniprogram']) test(app+' twelve-hour pause retains unsynced draft but recovery rereads and cannot revive confirmation',async()=>{
  const prefix='apps/'+app+'/src/components/ai-native/';

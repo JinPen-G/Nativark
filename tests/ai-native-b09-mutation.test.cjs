@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const {load,mount,deferred}=require('./fixtures/ai-native/b09-host.cjs');
+const {load,mountWithHost: mount,deferred}=require('./fixtures/ai-native/b09-host.cjs');
 test('in-memory removal of generation, pending and cursor checks breaks their invariants',async()=>{
  const prefix='apps/miniprogram/src/components/ai-native/';
  const {AiPollingController}=load(prefix+'polling-controller.ts',source=>source.replace('generation !== this.generation','false'));

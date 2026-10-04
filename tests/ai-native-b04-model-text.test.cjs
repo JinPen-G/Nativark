@@ -11,5 +11,6 @@ test('real React render escapes malicious model text and does not execute tool c
 test('long text is collapsed with a finite upper limit and accessible summary', () => {
   const html = renderToStaticMarkup(React.createElement(ModelText, { text: 'x'.repeat(30_000) }));
   assert.ok(html.includes('<details>')); assert.ok(html.includes('<summary>')); assert.ok(html.includes('已截断'));
-  assert.equal((html.match(/x/g) || []).length, 20_000);
+  const renderedText = [...html.matchAll(/<p\b[^>]*>(x+)<\/p>/g)].map(match => match[1]).join('');
+  assert.equal(renderedText.length, 20_000);
 });

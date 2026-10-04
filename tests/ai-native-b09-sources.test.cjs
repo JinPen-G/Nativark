@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const {load,mount,deferred}=require('./fixtures/ai-native/b09-host.cjs');
+const {load,mountWithHost: mount,deferred}=require('./fixtures/ai-native/b09-host.cjs');
 for(const app of ['miniprogram','staff-miniprogram']) test(app+' revoked sources clear and late opens do not restore; automation cannot confirm memory',async()=>{
  const source={id:'synthetic-resource',version:'1',status:'published',title:'synthetic title',location:'section'};
  const pending=deferred();let calls=0;

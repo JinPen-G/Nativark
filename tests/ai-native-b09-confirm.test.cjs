@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const {load,mount,deferred}=require('./fixtures/ai-native/b09-host.cjs');
+const {load,mountWithHost: mount,deferred}=require('./fixtures/ai-native/b09-host.cjs');
 for(const app of ['miniprogram','staff-miniprogram']) test(app+' confirmation waits, locks double click and isolates late results',async()=>{
  const definition=load('apps/'+app+'/src/components/ai-native/ai-proposal-confirm/index.ts');
  const pending=deferred();let calls=0;const handler=()=>{calls++;return pending.promise;};

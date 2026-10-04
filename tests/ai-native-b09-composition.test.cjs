@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const {load,mount,deferred}=require('./fixtures/ai-native/b09-host.cjs');
+const {load,mountWithHost: mount,deferred}=require('./fixtures/ai-native/b09-host.cjs');
 for(const app of ['miniprogram','staff-miniprogram']) test(app+' actual card, input, proposal, polling and customer result compose without automatic effects',async()=>{
  const prefix='apps/'+app+'/src/components/ai-native/';
  const card=mount(load(prefix+'ai-task-card/index.ts'),{task:{id:'synthetic-task'},disabled:false,available:true});

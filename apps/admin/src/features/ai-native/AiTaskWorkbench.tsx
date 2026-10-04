@@ -204,6 +204,8 @@ export function AiTaskWorkbench({
   const eventBatch = currentDetail?.eventTimeline && currentDetail.events
     ? consumePolledEvents(currentDetail.eventTimeline, currentDetail.events)
     : null;
+  // A reset/cursor gap invalidates the old projection until the host supplies a fresh snapshot.
+  const detailSynchronized = Boolean(currentDetail) && !eventBatch?.resyncRequired;
 
   return (
     <section aria-label="AI 任务工作台" data-ai-workbench="feature-local">
@@ -238,10 +240,10 @@ export function AiTaskWorkbench({
                 action={onResync ? <ActionButton label="重新读取事件" pendingLabel="读取中…" onAction={requestResync} /> : undefined}
               />
             )}
-            <TaskTimeline taskId={taskId} steps={currentDetail.steps} />
-            {currentDetail.fields && <MissingFieldsPanel fields={currentDetail.fields} draft={currentDetail.draft ?? {}} readOnly />}
-            {currentDetail.proposal && <ProposalPreview proposal={currentDetail.proposal} />}
-            {currentDetail.proposalRef && (
+            {detailSynchronized && <TaskTimeline taskId={taskId} steps={currentDetail.steps} />}
+            {detailSynchronized && currentDetail.fields && <MissingFieldsPanel fields={currentDetail.fields} draft={currentDetail.draft ?? {}} readOnly />}
+            {detailSynchronized && currentDetail.proposal && <ProposalPreview proposal={currentDetail.proposal} />}
+            {detailSynchronized && currentDetail.proposalRef && (
               <HumanConfirmShell
                 proposalId={currentDetail.proposalRef.proposalId}
                 revision={currentDetail.proposalRef.revision}
@@ -249,7 +251,7 @@ export function AiTaskWorkbench({
                 onConfirm={onConfirm}
               />
             )}
-            {currentDetail.actionStatus && (
+            {detailSynchronized && currentDetail.actionStatus && (
               <CancelRecoveryStatus
                 status={currentDetail.actionStatus}
                 canCancel={Boolean(onCancel)}
@@ -258,10 +260,10 @@ export function AiTaskWorkbench({
                 onRecover={onRecover}
               />
             )}
-            {currentDetail.sources && <KnowledgeSources sources={currentDetail.sources} />}
-            {currentDetail.memories && <MemoryPreferences items={currentDetail.memories} />}
-            {currentDetail.serviceSummary && <AiServiceSummary summary={currentDetail.serviceSummary} />}
-            {currentDetail.assessments && <CapabilityStatus assessments={currentDetail.assessments} />}
+            {detailSynchronized && currentDetail.sources && <KnowledgeSources sources={currentDetail.sources} />}
+            {detailSynchronized && currentDetail.memories && <MemoryPreferences items={currentDetail.memories} />}
+            {detailSynchronized && currentDetail.serviceSummary && <AiServiceSummary summary={currentDetail.serviceSummary} />}
+            {detailSynchronized && currentDetail.assessments && <CapabilityStatus assessments={currentDetail.assessments} />}
           </>
         )}
         {detailState === "unavailable" && <Alert type="warning" message="宿主未提供任务详情读取能力；不会自动请求或补造结果。" />}

@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const {load,mount}=require('./fixtures/ai-native/b09-host.cjs');
+const {load,mountWithHost: mount}=require('./fixtures/ai-native/b09-host.cjs');
 for(const app of ['miniprogram','staff-miniprogram']) {
  const prefix='apps/'+app+'/src/components/ai-native/';
  test(app+' source references preserve exact id/version and reject truncated or ambiguous identities',async()=>{

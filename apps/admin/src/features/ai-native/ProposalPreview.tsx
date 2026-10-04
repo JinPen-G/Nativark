@@ -1,3 +1,5 @@
+import { proposalDisplayState } from "./proposal-preview-state";
+
 export type ProposalPreviewData = {
   title: string;
   risk: string;
@@ -7,17 +9,18 @@ export type ProposalPreviewData = {
 };
 export interface ProposalPreviewProps {
   proposal?: ProposalPreviewData | null;
+  nowIso?: string;
+  stale?: boolean;
 }
-export function ProposalPreview({ proposal }: ProposalPreviewProps) {
+export function ProposalPreview({ proposal, nowIso, stale = false }: ProposalPreviewProps) {
   if (!proposal) return <p role="status">提案不可用</p>;
+  const state = proposalDisplayState({ expiresAt: proposal.expiresAt, nowIso, stale });
   return (
     <section aria-label="提案预览">
       <h3>{proposal.title}</h3>
       <p>风险：{proposal.risk}</p>
       <p>
-        {proposal.expiresAt
-          ? `有效期至：${proposal.expiresAt}`
-          : "有效期未提供"}
+        {state === "expired" ? "提案已过期，不能作为确认依据" : state === "stale" ? "提案版本已变化，请重新读取" : state === "unavailable" ? "有效期依据不可用" : `有效期至：${proposal.expiresAt}`}
       </p>
       <p>
         {proposal.evidence

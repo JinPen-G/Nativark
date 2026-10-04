@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const {load,mount}=require('./fixtures/ai-native/b09-host.cjs');
+const {load,mountWithHost: mount}=require('./fixtures/ai-native/b09-host.cjs');
 for(const app of ['miniprogram','staff-miniprogram']) test(app+' multiple input instances isolate IDs and disabled handlers emit nothing',async()=>{
  const definition=load('apps/'+app+'/src/components/ai-native/ai-supplement-input/index.ts');
  const properties={taskId:'synthetic',inputRevision:'1',fields:[{key:'note',label:'Note'}],disabled:true,submitHandler:async()=>{throw new Error('disabled handler should not run');}};

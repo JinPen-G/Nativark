@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const {load,mount,deferred}=require('./fixtures/ai-native/b09-host.cjs');
+const {load,mountWithHost: mount,deferred}=require('./fixtures/ai-native/b09-host.cjs');
 for(const app of ['miniprogram','staff-miniprogram']) test(app+' clarification uses finite fields, waits and clears draft on identity change',async()=>{
  const definition=load('apps/'+app+'/src/components/ai-native/ai-supplement-input/index.ts');
  const pending=deferred();let calls=0;

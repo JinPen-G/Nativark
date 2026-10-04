@@ -2,14 +2,14 @@ let nextInputInstance = 0;
 interface ClarificationField { key: string; label: string; value?: string; error?: string; readonly?: boolean; required?: boolean; }
 type ClarificationHandler = (input: { taskId: string; inputRevision: string; draft: Record<string, string> }) => Promise<void>;
 Component({
-  properties: { fields: { type: Array, value: [] }, inputRevision: { type: String, value: "" }, taskId: { type: String, value: "" }, disabled: { type: Boolean, value: false }, submitHandler: { type: null, value: null } },
+  properties: { fields: { type: Array, value: [] }, inputRevision: { type: String, value: "" }, taskId: { type: String, value: "" }, disabled: { type: Boolean, value: false } },
   data: { hostAvailable: false, instanceId: "", localDraft: {} as Record<string, string>, visibleFields: [] as ClarificationField[], definitionUnavailable: false, submitting: false, errorLabel: "", generation: 0, alive: true },
   lifetimes: {
     attached() { this.setData({ instanceId: "ai-input-" + (++nextInputInstance) }); this.refreshFields(); },
     detached() { this.setData({ localDraft: {}, visibleFields: [], alive: false, generation: this.data.generation + 1 }); },
   },
   observers: {
-    "inputRevision,taskId,fields,submitHandler"() {
+    "inputRevision,taskId,fields"() {
       if (!this.data.alive) return;
       this.setData({ localDraft: {}, errorLabel: "", generation: this.data.generation + 1 });
       this.refreshFields();
@@ -50,7 +50,7 @@ Component({
       this.setData({ localDraft: { ...this.data.localDraft, [field.key]: event.detail.value.slice(0, 4000) } }); this.refreshFields();
     },
     async onSubmit(): Promise<void> {
-      const handler = (hostAction(this) ?? this.data.submitHandler) as ClarificationHandler | null;
+      const handler = hostAction(this) as ClarificationHandler | null;
       if (this.data.disabled || this.data.submitting || !this.data.alive || !this.data.taskId || !this.data.inputRevision || typeof handler !== "function") return;
       if (this.data.definitionUnavailable) { this.setData({ errorLabel: "字段定义不可用，请刷新" }); return; }
       if (this.data.visibleFields.some(field => field.required && !field.value?.trim())) { this.setData({ errorLabel: "请填写必填信息" }); return; }

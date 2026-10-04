@@ -40,5 +40,26 @@ function mount(definition, props = {}) {
   instance.detach = () => definition.lifetimes?.detached?.call(instance);
   return instance;
 }
+// Legacy scenario handler names are test-host options, never serialized component properties.
+// Keep mount() unchanged so tests of the raw component boundary cannot accidentally acquire a host.
+function mountWithHost(definition, options = {}) {
+  const split = value => {
+    const { submitHandler, confirmHandler, openHandler, ...props } = value;
+    const names = ['submitHandler', 'confirmHandler', 'openHandler'].filter(key => Object.hasOwn(value, key));
+    if (names.length > 1) throw new Error('ambiguous test host action');
+    return { props, hasAction: names.length === 1, action: names.length ? value[names[0]] : undefined };
+  };
+  const initial = split(options), instance = mount(definition, initial.props);
+  const bind = value => {
+    if (!value.hasAction) return;
+    if (typeof instance.attachHost !== 'function' || typeof instance.detachHost !== 'function') throw new Error('component has no host binding');
+    if (typeof value.action === 'function') instance.attachHost(value.action);
+    else instance.detachHost();
+  };
+  bind(initial);
+  const update = instance.update;
+  instance.update = options => { const next = split(options); update(next.props); bind(next); };
+  return instance;
+}
 function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};}
-module.exports={root,load,mount,deferred};
+module.exports={root,load,mount,mountWithHost,deferred};

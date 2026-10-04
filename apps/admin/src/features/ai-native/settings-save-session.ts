@@ -23,7 +23,13 @@ export class SettingsSaveSession {
     if (this.disposed || this.blocked || this.inFlight) throw new Error("AI 设置操作不可用");
     const generation = this.generation;
     this.inFlight = true;
-    notify("pending");
+    try {
+      notify("pending");
+    } catch {
+      // A replaced/unmounted view must not strand the local flight lock.
+      if (generation === this.generation) this.inFlight = false;
+      throw new Error("AI 设置操作不可用");
+    }
     try {
       await action();
       if (!this.disposed && generation === this.generation) notify("request_finished");

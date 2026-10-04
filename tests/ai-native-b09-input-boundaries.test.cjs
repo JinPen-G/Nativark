@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { load, mount, deferred } = require('./fixtures/ai-native/b09-host.cjs');
+const { load, mountWithHost: mount, deferred } = require('./fixtures/ai-native/b09-host.cjs');
 for (const app of ['miniprogram', 'staff-miniprogram']) {
   const file = 'apps/' + app + '/src/components/ai-native/ai-supplement-input/index.ts';
   test(app + ' disabled during submission invalidates a late success even after reenable', async () => {
