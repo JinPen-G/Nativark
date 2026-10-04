@@ -26,8 +26,14 @@ export interface TenantModelConfigPorts {
   repository: {
     read(tenantId: string): Promise<TenantModelRecord | null>;
     /** Atomic compare-and-swap, including insert at revision zero. Never blind upsert. */
-    compareAndSwap(tenantId: string, expectedRevision: number, next: TenantModelRecord): Promise<boolean>;
+    compareAndSwap(tenantId: string, expectedRevision: number, next: TenantModelRecord, context?: GatewayContext): Promise<boolean>;
   };
+}
+
+/** Stable internal vault reference; shared by the config service and atomic
+ * Profile projection. Never a credential, permission or live capability proof. */
+export function tenantModelCredentialReference(tenantId: string, revision: number) {
+  return `tenant-model:${createHash("sha256").update(tenantId).digest("hex")}:${revision}`;
 }
 
 /** Pure validation only. DNS/connection pinning must additionally happen in the egress transport. */
@@ -43,6 +49,11 @@ export function normalizeTenantModelBaseUrl(value: string) {
 export class TenantModelConfigService {
   constructor(private readonly ports: TenantModelConfigPorts, private readonly secrets: SecretBox) {
     if (!ports || typeof ports.authorize !== "function" || typeof ports.repository?.read !== "function" || typeof ports.repository?.compareAndSwap !== "function" || !secrets) throw new ModelGatewayError("CONFIG_INVALID");
+  }
+
+  private snapshot(value: unknown): unknown {
+    try { return structuredClone(value); }
+    catch { throw new ModelGatewayError('CONFIG_INVALID'); }
   }
 
   private async authorize(context: GatewayContext, action: "read" | "manage" | "invoke") {
@@ -78,7 +89,7 @@ export class TenantModelConfigService {
   }
 
   private reference(record: TenantModelRecord) {
-    return `tenant-model:${createHash("sha256").update(record.tenantId).digest("hex")}:${record.revision}`;
+    return tenantModelCredentialReference(record.tenantId, record.revision);
   }
 
   private summary(record: TenantModelRecord) {
@@ -96,8 +107,9 @@ export class TenantModelConfigService {
   }
 
   async save(context: GatewayContext, value: unknown) {
+    const request = this.snapshot(value);
     context = await this.authorize(context, "manage");
-    const parsed = settingsSchema.safeParse(value);
+    const parsed = settingsSchema.safeParse(request);
     if (!parsed.success) throw new ModelGatewayError("CONFIG_INVALID");
     const { apiKey, secretChange, expectedRevision, ...settings } = parsed.data;
     if (apiKey !== undefined && secretChange !== undefined) throw new ModelGatewayError("CONFIG_INVALID");
@@ -116,7 +128,7 @@ export class TenantModelConfigService {
     catch { throw new ModelGatewayError("CREDENTIAL_UNAVAILABLE"); }
     const next = { tenantId: context.tenantId, mode: previous?.mode ?? "tenant_managed" as const, revision: expectedRevision + 1, settings, credentialsEncrypted: encrypted };
     await this.authorize(context, 'manage');
-    if (!await this.ports.repository.compareAndSwap(context.tenantId, expectedRevision, next)) throw new ModelGatewayError("CONFIG_INVALID");
+    if (!await this.ports.repository.compareAndSwap(context.tenantId, expectedRevision, next, context)) throw new ModelGatewayError("CONFIG_INVALID");
     return this.summary(next);
   }
 
@@ -152,8 +164,9 @@ export class TenantModelConfigService {
 
   /** Mode selection is not a credential deletion operation. */
   async changeMode(context: GatewayContext, value: unknown) {
+    const request = this.snapshot(value);
     context = await this.authorize(context, "manage");
-    const input = z.object({ mode: z.enum(["platform_managed", "tenant_managed"]), expectedRevision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER - 2) }).strict().safeParse(value);
+    const input = z.object({ mode: z.enum(["platform_managed", "tenant_managed"]), expectedRevision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER - 2) }).strict().safeParse(request);
     if (!input.success) throw new ModelGatewayError("CONFIG_INVALID");
     const previous = await this.readRecord(context.tenantId);
     if ((previous?.revision ?? 0) !== input.data.expectedRevision) throw new ModelGatewayError("CONFIG_INVALID");
@@ -161,7 +174,7 @@ export class TenantModelConfigService {
     if (input.data.mode === 'tenant_managed') this.decrypt(previous!);
     const next: TenantModelRecord = { ...previous, tenantId: context.tenantId, mode: input.data.mode, revision: input.data.expectedRevision + 1 };
     await this.authorize(context, 'manage');
-    if (!await this.ports.repository.compareAndSwap(context.tenantId, input.data.expectedRevision, next)) throw new ModelGatewayError("CONFIG_INVALID");
+    if (!await this.ports.repository.compareAndSwap(context.tenantId, input.data.expectedRevision, next, context)) throw new ModelGatewayError("CONFIG_INVALID");
     return this.summary(next);
   }
 }

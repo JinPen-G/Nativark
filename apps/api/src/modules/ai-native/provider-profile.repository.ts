@@ -42,13 +42,17 @@ export class PrismaProviderProfileRepository implements ProviderProfileRepositor
   }
   async update(scope: AiProfileScope, profileKey: string, input: UpdateAiProviderProfile) {
     if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1 || input.expectedRevision >= 4294967295) throw new Error('AI_PROFILE_INVALID_REVISION');
+    if (input.credentialRef && /^(?:tenant|platform)-model:/u.test(input.credentialRef)) throw new Error('AI_PROFILE_CONFIG_OWNED');
     const data = { ...(input.enabled === undefined ? {} : { enabled: input.enabled }), ...(input.model === undefined ? {} : { model: input.model }), ...(input.credentialRef === undefined ? {} : { credentialRef: input.credentialRef }), ...(input.allowedCapabilities === undefined ? {} : { allowedCapabilities: [...input.allowedCapabilities] }), ...(input.disabledAt === undefined ? {} : { disabledAt: input.disabledAt }), configRevision: { increment: 1 } };
     try {
       // Extended unique predicate performs CAS and returns this exact write in one
       // statement. A separate get could return a later writer's revision/config.
       return record(await this.delegate.update({ where: {
         scopeId_scopeKind_profileKey: { scopeId: scope.id, scopeKind: scope.kind, profileKey },
-        configRevision: input.expectedRevision
+        configRevision: input.expectedRevision,
+        // Config-owned profiles must use their encrypted config transaction,
+        // not this generic CAS (including whitelist-only policy changes).
+        NOT: [{ credentialRef: { startsWith: 'tenant-model:' } }, { credentialRef: { startsWith: 'platform-model:' } }]
       }, data }));
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') return null;

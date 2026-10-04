@@ -18,9 +18,18 @@ const clone = value => value == null ? value : structuredClone(value);
 // Storage substitute executes the actual adapter's generated-Prisma predicates.
 // It is NOT MySQL locking, a transaction engine, or server authentication.
 function setup() {
-  const state = { rows: [], legacy: null, calls: [], authority: true, fail: null, beforeLegacy: null };
+  const state = { rows: [], profiles: [], legacy: null, calls: [], authority: true, fail: null, beforeLegacy: null };
   const write = (row, data) => Object.assign(row, Object.fromEntries(Object.entries(data).map(([key, value]) => [key, value === Prisma.DbNull ? null : clone(value)])));
   const db = {
+    aiScope: { findFirst: async args => ({ id: 'owner-tenant', ...clone(args.where) }) },
+    aiProviderProfile: {
+      findFirst: async args => clone(state.profiles.find(row => Object.entries(args.where).every(([key, value]) => row[key] === value)) ?? null),
+      create: async args => { const row = { id: 'synthetic-profile', ...clone(args.data) }; state.profiles.push(row); return clone(row); },
+      updateMany: async args => {
+        const row = state.profiles.find(row => Object.entries(args.where).every(([key, value]) => row[key] === value));
+        if (!row) return { count: 0 }; Object.assign(row, clone(args.data)); return { count: 1 };
+      }
+    },
     systemParameterSet: { findFirst: async args => { state.calls.push(['legacy', clone(args)]); if (state.beforeLegacy) await state.beforeLegacy(); return clone(state.legacy); } },
     aiTenantModelConfiguration: {
       findUnique: async args => { state.calls.push(['read', clone(args)]); return clone(state.rows.find(row => row.tenantId === args.where.tenantId) ?? null); },
@@ -42,6 +51,14 @@ function setup() {
         return { count: 1 };
       }
     }
+  };
+  let tail = Promise.resolve();
+  db.$transaction = operation => {
+    const result = tail.then(async () => {
+      const rows = clone(state.rows), profiles = clone(state.profiles);
+      try { return await operation(db); }
+      catch (error) { state.rows = rows; state.profiles = profiles; throw error; }
+    }); tail = result.catch(() => {}); return result;
   };
   const secrets = new SecretBox({ get: name => name === 'INTEGRATION_ENCRYPTION_KEY' ? 'synthetic-encryption-key-only' : 'production' });
   const authorize = async requested => {

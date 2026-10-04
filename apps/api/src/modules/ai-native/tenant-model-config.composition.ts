@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import type { SecretBox } from '../../common/secret-box';
 import { ModelGatewayError } from './model-gateway.ports';
-import { PrismaTenantModelConfigRepository } from './tenant-model-config.repository';
+import { PrismaTenantModelProfileRepository } from './tenant-model-profile.repository';
 import { TenantModelConfigService, type TenantModelConfigPorts } from './tenant-model-config.service';
 import type { AiScopeRepository } from './ai-scope.repository';
 import { TenantModelConnectionResolver, type GatewayConnectionResolver } from './routed-model-transport';
@@ -12,14 +12,14 @@ import { requestFingerprint } from '../rental-core/rental-idempotency.repository
  * be bound to current server authentication and action permission checks.
  */
 export function createPersistedTenantModelConfiguration(input: {
-  db: Pick<PrismaClient, 'aiTenantModelConfiguration' | 'systemParameterSet'>;
+  db: Pick<PrismaClient, '$transaction' | 'aiTenantModelConfiguration' | 'systemParameterSet' | 'aiScope' | 'aiProviderProfile'>;
   authorize: TenantModelConfigPorts['authorize'];
   secrets: SecretBox;
 }): TenantModelConfigService {
   if (!input || typeof input.authorize !== 'function' || typeof input.secrets?.encrypt !== 'function'
     || typeof input.secrets?.decrypt !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   return new TenantModelConfigService({ authorize: input.authorize,
-    repository: new PrismaTenantModelConfigRepository(input.db) }, input.secrets);
+    repository: new PrismaTenantModelProfileRepository(input.db, input.authorize) }, input.secrets);
 }
 
 /** Adds canonical scope ownership to the EXISTING encrypted BYOK resolver.
@@ -44,6 +44,10 @@ export function createScopeBoundTenantModelConnection(configuration: TenantModel
     };
     const before = await current(), connection = await resolver.resolve(context, profile);
     if (await current() !== before) throw new ModelGatewayError('FORBIDDEN');
+    // Canonical scope resolution is asynchronous; a mode/key change during it
+    // must not publish the credential obtained before that final check.
+    const latest = await configuration.selectionForInvocation(context);
+    if (latest.mode !== 'tenant_managed' || latest.revision !== profile.configRevision) throw new ModelGatewayError('CONFIG_INVALID');
     return connection;
   } };
 }

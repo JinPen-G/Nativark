@@ -11,7 +11,7 @@ const recordSchema = z.object({
   settings: tenantModelSettingsSchema.omit({ apiKey: true, expectedRevision: true, secretChange: true }).optional(),
   credentialsEncrypted: z.string().max(65535).regex(/^(?:|v1:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+)$/u).optional()
 }).strict();
-function checked(value: unknown): TenantModelRecord {
+export function checkedTenantModelRecord(value: unknown): TenantModelRecord {
   const parsed = recordSchema.safeParse(value);
   if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
   tenantModelMode(parsed.data);
@@ -52,12 +52,12 @@ export class PrismaTenantModelConfigRepository implements TenantModelRepository 
     const row = await this.db.aiTenantModelConfiguration.findUnique({ where: { tenantId }, select });
     if (!row) { await this.assertNoUnconvertedLegacy(tenantId); return null; }
     if (row.tenantId !== tenantId) throw new ModelGatewayError('FORBIDDEN');
-    return checked({ tenantId: row.tenantId, revision: row.revision, mode: row.mode,
+    return checkedTenantModelRecord({ tenantId: row.tenantId, revision: row.revision, mode: row.mode,
       ...(row.settings !== null ? { settings: row.settings } : {}),
       ...(row.credentialsEncrypted !== null ? { credentialsEncrypted: row.credentialsEncrypted } : {}) });
   }
   async compareAndSwap(value: string, expectedRevision: number, nextValue: TenantModelRecord): Promise<boolean> {
-    const tenantId = this.tenant(value), next = checked(nextValue);
+    const tenantId = this.tenant(value), next = checkedTenantModelRecord(nextValue);
     if (!Number.isInteger(expectedRevision) || expectedRevision < 0 || expectedRevision >= 4294967295
       || next.revision !== expectedRevision + 1 || next.tenantId !== tenantId) throw new ModelGatewayError('CONFIG_INVALID');
     // Validation projects a detached snapshot before any asynchronous operation.
