@@ -41,7 +41,7 @@ class MemoryBudgetRepository {
   async mutate(record, input) {
     const ledgerKey = `${record.id}:${input.eventKey}`;
     if (this.ledger.has(ledgerKey)) return record;
-    this.ledger.set(ledgerKey, input);
+    if (input.action !== 'dispatch') this.ledger.set(ledgerKey, input);
     if (input.action === 'dispatch') record.dispatched = true;
     if (input.action === 'unknown') { record.status = 'pending_reconciliation'; record.dispatched = true; record.unknownReason = input.reason; }
     if (input.action === 'settle' || input.action === 'reconcile') { record.status = 'settled'; record.actual = input.usage.quantity; }
@@ -81,6 +81,16 @@ test('unknown retains reservation and release is refused until reconciliation', 
   await assert.rejects(() => service.release(first.id, association, 'release-1'), (error) => error instanceof BudgetError && error.code === 'PENDING_RECONCILIATION');
   const settled = await service.reconcile(first.id, association, 'reconcile-1', 'evidence-1');
   assert.equal(settled.status, 'settled');
+});
+
+test('settlement event replay is idempotent and does not append a second ledger entry', async () => {
+  const { service, repository } = harness();
+  const first = await service.reserve(command());
+  await service.dispatch(first.id, association, 'dispatch-1');
+  const settled = await service.settle(first.id, association, 'settle-1', 'evidence-1');
+  const replay = await service.settle(first.id, association, 'settle-1', 'evidence-1');
+  assert.equal(replay.status, 'settled');
+  assert.equal(repository.ledger.size, 1);
 });
 
 test('authority change after reserve is rejected before mutation', async () => {

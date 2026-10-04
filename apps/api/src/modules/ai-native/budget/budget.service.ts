@@ -92,11 +92,13 @@ export class BudgetService {
   async dispatch(id: string, association: AiUsageAssociationDraft, eventKey: string) {
     const { record, session } = await this.load('dispatch', id, association);
     if (record.status !== 'reserved' || record.expiresAt <= this.now()) throw new BudgetError('UNAVAILABLE');
+    if (record.dispatched) throw new BudgetError('PENDING_RECONCILIATION');
     return this.repository.mutate(record, { action: 'dispatch', eventKey }, session.revalidate);
   }
   async markUnknown(id: string, association: AiUsageAssociationDraft, eventKey: string, reason: string) {
     if (!identifier(reason, 128)) throw new BudgetError('INVALID');
     const { record, session } = await this.load('unknown', id, association);
+    if (!record.dispatched && await this.evidence.dispatch(record) === 'not_dispatched') throw new BudgetError('INVALID');
     return this.repository.mutate(record, { action: 'unknown', eventKey, reason }, session.revalidate);
   }
   async release(id: string, association: AiUsageAssociationDraft, eventKey: string) {
