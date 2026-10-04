@@ -14,6 +14,8 @@ const { ProviderCapabilityService } = require('../apps/api/src/modules/ai-native
 const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
 const { AiGatewayRoutingService } = require('../apps/api/src/modules/ai-native/gateway-routing.service');
 const { UnifiedAiGatewayService } = require('../apps/api/src/modules/ai-native/unified-ai-gateway.service');
+const { PublicAiGatewayService } = require('../apps/api/src/modules/ai-native/public-ai-gateway.service');
+const { isGatewayResult } = require('../apps/api/src/modules/ai-native/gateway-contract-validation');
 const { user } = require('./fixtures/ai-native/authorization-baseline.cjs');
 const ctx = { tenantId: 'tenant-a', workspaceId: 'workspace-a', actorId: 'operator-a' };
 const request = { callId: 'route-call', model: 'caller-cannot-pin-this', messages: [{ role: 'user', content: 'synthetic' }], maxOutputTokens: 10 };
@@ -57,6 +59,31 @@ function setup(audience = 'operator') {
   const routing = new AiGatewayRoutingService(scopes, configuration, router, 'knowledge');
   return { state, rows, profiles, scopes, configuration, router, routing, authority };
 }
+const publicIntent = () => ({ draftVersion: 'ain-c03-draft-2', requestId: 'public-route-call', sceneCode: 'order.explain',
+  messages: [{ role: 'user', content: [{ kind: 'text', text: 'synthetic' }] }], requiredFeatures: ['text'], optionalFeatures: [], maxOutputTokens: 10 });
+function publicGateway(f) {
+  const g = gateway(f);
+  // This fixture explicitly runs mocked transport; it is not a live execution verifier.
+  return { ...g, public: new PublicAiGatewayService({ ports: g.ports, evidence: 'mock', verifyEvidence: async route => route.route.preflight.allowed === true },
+    [{ sceneCode: 'order.explain', routeScene: 'knowledge', maxOutputTokens: 100 }], 10000) };
+}
+for (const audience of ['operator', 'staff']) for (const mode of ['platform_managed', 'tenant_managed']) test(`public C03 envelope follows real ${audience} Guard and ${mode} owner routing`, async () => {
+  const f = setup(audience); if (mode === 'tenant_managed') f.state.record = legacy();
+  const context = await f.authority.resolve(), g = publicGateway(f);
+  const result = await g.public.invoke(context, publicIntent());
+  assert.equal(isGatewayResult(result), true); assert.equal(result.status, 'completed'); assert.equal(result.evidence, 'mock');
+  assert.equal(result.actual.serviceMode, mode); assert.equal(result.actual.model, mode === 'tenant_managed' ? 'tenant/model' : 'platform/model');
+  assert.equal(g.dispatched.length, 1); assert.equal(g.reservations[0].scope.id, 'consumer-workspace');
+});
+test('public C03 bridge cannot substitute read permission for invocation permission', async () => {
+  const f = setup(), context = await f.authority.resolve(), g = publicGateway(f); f.state.invokeAllowed = false;
+  await assert.rejects(g.public.invoke(context, publicIntent())); assert.equal(g.dispatched.length, 0); assert.equal(g.reservations.length, 0);
+});
+test('real revocation after dispatch withholds the public result and leaves accounting terminal', async () => {
+  const f = setup(), context = await f.authority.resolve(), g = publicGateway(f); f.afterDispatch = () => { f.state.active = false; };
+  await assert.rejects(g.public.invoke(context, publicIntent())); assert.equal(g.dispatched.length, 1);
+  assert.ok(g.events.includes('completed')); assert.equal(g.events.includes('unknown'), false);
+});
 const denied = e => ['FORBIDDEN','CONFIG_INVALID','CAPABILITY_UNSUPPORTED','PROVIDER_UNAVAILABLE'].includes(e.code) && e.message === e.code;
 for (const audience of ['operator','staff']) test(`actual ${audience} Guard, config selection, scope and capability services select the platform owner`, async () => {
   const f = setup(audience), out = await f.routing.resolve(ctx, ['text']);
