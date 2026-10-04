@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import type { AiGatewayIntentDraft } from '@rental-os/shared';
+import { gatewayTextIntentBindingSchema, prepareGatewayTextIntent, type GatewayTextIntentBinding } from './gateway-intent';
 import type { AiDispatchBinding } from './invocation-dispatch.service';
 import type { AiProfileCapability, AiProfileScope } from './provider-profile.ports';
 import { GatewayDeadline } from './gateway-deadline';
@@ -7,9 +10,42 @@ import type { UnifiedGatewayPorts, GatewayInvocationResult, GatewayStreamEvent }
 import { gatewayRoutingBinding } from './gateway-routing.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
+type UnresolvedRequest = Omit<ModelRequest, 'model'> & { model?: string };
+type IntentExecutionBinding = GatewayTextIntentBinding & { intentHash: string };
+const reportedTokens = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const textResultSchema = z.object({
+  text: z.string(), usage: z.object({ inputTokens: reportedTokens, outputTokens: reportedTokens }).strict().optional(),
+  toolRequests: z.array(z.never()).max(0).optional()
+}).strict();
+
 // Internal workspace facade with token-bound dispatch ownership; public C03 mapping remains separate.
 export class UnifiedAiGatewayService {
-  constructor(private readonly ports: UnifiedGatewayPorts, private readonly deadlineMs = 120_000) { if (!Number.isSafeInteger(deadlineMs) || deadlineMs < 1 || deadlineMs > 120_000) throw new ModelGatewayError('CONFIG_INVALID'); }
+  private readonly intentBinding?: GatewayTextIntentBinding;
+  constructor(private readonly ports: UnifiedGatewayPorts, private readonly deadlineMs = 120_000, intentBinding?: GatewayTextIntentBinding) {
+    if (!Number.isSafeInteger(deadlineMs) || deadlineMs < 1 || deadlineMs > 120_000) throw new ModelGatewayError('CONFIG_INVALID');
+    if (intentBinding !== undefined) {
+      const parsed = gatewayTextIntentBindingSchema.safeParse(intentBinding);
+      if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
+      this.intentBinding = Object.freeze(parsed.data);
+    }
+  }
+
+  // Workspace-only C03 input bridge. Public actual/evidence/result envelopes are not fabricated here.
+  async invokeTextIntent(context: GatewayContext, intent: AiGatewayIntentDraft, signal?: AbortSignal) {
+    if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
+    const binding = this.intentBinding;
+    if (!binding) throw new ModelGatewayError('CONFIG_INVALID');
+    const prepared = prepareGatewayTextIntent(intent, { sceneCode: binding.sceneCode, maxOutputTokens: binding.maxOutputTokens }, 'invoke');
+    return this.invokeRequest(context, prepared.request, signal, { ...binding, intentHash: prepared.intentHash });
+  }
+
+  async *streamTextIntent(context: GatewayContext, intent: AiGatewayIntentDraft, signal?: AbortSignal) {
+    if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
+    const binding = this.intentBinding;
+    if (!binding) throw new ModelGatewayError('CONFIG_INVALID');
+    const prepared = prepareGatewayTextIntent(intent, { sceneCode: binding.sceneCode, maxOutputTokens: binding.maxOutputTokens }, 'stream');
+    yield* this.streamRequest(context, prepared.request, signal, { ...binding, intentHash: prepared.intentHash });
+  }
 
   private deadline(signal?: AbortSignal) { return new GatewayDeadline(this.deadlineMs, signal); }
 
@@ -19,7 +55,13 @@ export class UnifiedAiGatewayService {
     return parsed.data;
   }
 
-  private required(request: ModelRequest, stream = false): AiProfileCapability[] {
+  private textResult(value: unknown): GatewayInvocationResult {
+    const parsed = textResultSchema.safeParse(value);
+    if (!parsed.success) throw new ModelGatewayError('INVALID_RESPONSE');
+    return parsed.data;
+  }
+
+  private required(request: UnresolvedRequest, stream = false): AiProfileCapability[] {
     const capabilities: AiProfileCapability[] = ['text'];
     if (stream) capabilities.push('streaming');
     for (const feature of request.features ?? []) {
@@ -33,16 +75,23 @@ export class UnifiedAiGatewayService {
 
   async invoke(context: GatewayContext, request: ModelRequest, signal?: AbortSignal): Promise<GatewayInvocationResult> {
     if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
-    request = this.input(request); context = structuredClone(context);
+    return this.invokeRequest(context, this.input(request), signal);
+  }
+
+  private async invokeRequest(context: GatewayContext, request: UnresolvedRequest, signal?: AbortSignal, intentBinding?: IntentExecutionBinding): Promise<GatewayInvocationResult> {
+    if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
+    request = structuredClone(request); context = structuredClone(context);
     const life = this.deadline(signal);
     let scope!: AiProfileScope;
     let binding: AiDispatchBinding | undefined;
     let admissionId: string | undefined, usageId: string | undefined, dispatched = false, accounted = false, settled = false, closed = false;
     try {
       const resolution = structuredClone(await life.wait(() => this.ports.routing.resolve(context, this.required(request))));
+      if (intentBinding && resolution.scene !== intentBinding.routeScene) throw new ModelGatewayError('CONFIG_INVALID');
       const route = resolution.route; scope = resolution.consumerScope;
-      request = this.input({ ...request, model: route.profile.model });
-      const hash = requestFingerprint({ request, routing: gatewayRoutingBinding(resolution) });
+      const transportRequest = this.input({ ...request, model: route.profile.model });
+      request = transportRequest;
+      const hash = requestFingerprint({ request, routing: gatewayRoutingBinding(resolution), ...(intentBinding ? { intentBinding } : {}) });
       if (!this.ports.dispatch || typeof this.ports.dispatch.claim !== 'function' || typeof this.ports.dispatch.finish !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
       // An admission may be shared by concurrent attempts. Only a successful claim owns cleanup.
       const admission = await life.wait(() => this.ports.admission.admit({ scope: structuredClone(scope), actorId: context.actorId, callId: request.callId, requestHash: hash, profileId: route.profile.id, expiresAt: life.expiresAt }));
@@ -57,7 +106,8 @@ export class UnifiedAiGatewayService {
       await life.wait(() => this.ports.audit.append({ callId: request.callId, tenantId: context.tenantId, workspaceId: context.workspaceId, event: 'ai.invoke.admitted', status: 'accepted' }));
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
       dispatched = true;
-      const result = structuredClone(await life.wait(() => this.ports.transport.invoke(structuredClone(context), structuredClone(request), structuredClone(route), life.controller.signal)));
+      const rawResult = structuredClone(await life.wait(() => this.ports.transport.invoke(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal)));
+      const result = intentBinding ? this.textResult(rawResult) : rawResult;
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       const reported = result.usage;
       if (reported) { await life.wait(() => this.ports.usage.settle(admission.scope, usage.id, `invoke:${request.callId}`, reported.inputTokens, reported.outputTokens)); accounted = true; }
@@ -86,7 +136,12 @@ export class UnifiedAiGatewayService {
 
   async *stream(context: GatewayContext, request: ModelRequest, signal?: AbortSignal): AsyncGenerator<GatewayStreamEvent> {
     if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
-    request = this.input(request); context = structuredClone(context);
+    yield* this.streamRequest(context, this.input(request), signal);
+  }
+
+  private async *streamRequest(context: GatewayContext, request: UnresolvedRequest, signal?: AbortSignal, intentBinding?: IntentExecutionBinding): AsyncGenerator<GatewayStreamEvent> {
+    if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
+    request = structuredClone(request); context = structuredClone(context);
     const life = this.deadline(signal);
     let scope!: AiProfileScope;
     let binding: AiDispatchBinding | undefined;
@@ -96,9 +151,11 @@ export class UnifiedAiGatewayService {
     let finalResult: GatewayInvocationResult | undefined;
     try {
       const resolution = structuredClone(await life.wait(() => this.ports.routing.resolve(context, this.required(request, true))));
+      if (intentBinding && resolution.scene !== intentBinding.routeScene) throw new ModelGatewayError('CONFIG_INVALID');
       const route = resolution.route; scope = resolution.consumerScope;
-      request = this.input({ ...request, model: route.profile.model });
-      const hash = requestFingerprint({ request, routing: gatewayRoutingBinding(resolution) });
+      const transportRequest = this.input({ ...request, model: route.profile.model });
+      request = transportRequest;
+      const hash = requestFingerprint({ request, routing: gatewayRoutingBinding(resolution), ...(intentBinding ? { intentBinding } : {}) });
       if (!this.ports.dispatch || typeof this.ports.dispatch.claim !== 'function' || typeof this.ports.dispatch.finish !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
       // An admission may be shared by concurrent attempts. Only a successful claim owns cleanup.
       const admission = await life.wait(() => this.ports.admission.admit({ scope: structuredClone(scope), actorId: context.actorId, callId: request.callId, requestHash: hash, profileId: route.profile.id, expiresAt: life.expiresAt }));
@@ -115,7 +172,7 @@ export class UnifiedAiGatewayService {
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       dispatched = true;
       let result: GatewayInvocationResult | undefined;
-      iterator = this.ports.transport.stream(structuredClone(context), structuredClone(request), structuredClone(route), life.controller.signal)[Symbol.asyncIterator]();
+      iterator = this.ports.transport.stream(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal)[Symbol.asyncIterator]();
       while (true) {
         const item = await life.wait(() => iterator!.next());
         if (item.done) { sourceDone = true; break; }
@@ -124,7 +181,7 @@ export class UnifiedAiGatewayService {
         if (!event || result) throw new ModelGatewayError('INVALID_RESPONSE');
         if (event.kind === 'result') {
           if (!event.result || typeof event.result.text !== 'string') throw new ModelGatewayError('INVALID_RESPONSE');
-          result = structuredClone(event.result);
+          result = intentBinding ? this.textResult(event.result) : structuredClone(event.result);
         } else if (event.kind === 'text_delta' && typeof event.delta === 'string') {
           const delta = event.delta;
           await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
