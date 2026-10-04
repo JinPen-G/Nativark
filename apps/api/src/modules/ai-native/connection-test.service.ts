@@ -12,7 +12,8 @@ export class AiConnectionTestService {
   async run(context: GatewayContext, profile: AiProviderProfileRecord, capabilities: readonly AiProfileCapability[]): Promise<ConnectionTestResult[]> {
     const results: ConnectionTestResult[] = [];
     for (const capability of [...new Set(capabilities)]) {
-      let status: ConnectionTestResult['status'] = 'supported', errorCode: string | undefined;
+      // This legacy probe returns text only, with no capability-specific or live evidence.
+      let status: ConnectionTestResult['status'] = 'unverified', errorCode: string | undefined;
       try {
         const result = await this.gateway.invoke(context, { callId: `connection-test:${profile.id}:${profile.configRevision}:${capability}`, model: profile.model, messages: [{ role: 'user', content: 'connection test' }], maxOutputTokens: 8, features: featureFor(capability) });
         if (!result || typeof result.text !== 'string') throw new ModelGatewayError('INVALID_RESPONSE');
