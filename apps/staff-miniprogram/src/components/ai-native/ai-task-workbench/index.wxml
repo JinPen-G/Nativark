@@ -1,0 +1,12 @@
+<view class="ai-workbench" aria-label="AI任务工作台">
+  <text role="status">{{phase}}</text>
+  <text wx:if="{{errorLabel}}" role="alert">{{errorLabel}}</text>
+  <slot name="task-card"></slot>
+  <slot name="step-timeline"></slot>
+  <slot name="clarification"></slot>
+  <slot name="proposal-confirm"></slot>
+  <slot name="knowledge-sources"></slot>
+  <slot name="memory-preferences"></slot>
+  <slot name="status-panel"></slot>
+  <slot name="inspection-draft"></slot>
+</view>

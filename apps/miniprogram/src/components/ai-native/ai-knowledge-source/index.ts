@@ -7,6 +7,14 @@ Component({
   lifetimes: { attached() { this.project(); }, detached() { this.setData({ alive: false, visibleSources: [], errorLabel: "", generation: this.data.generation + 1 }); } },
   observers: { "sources,openHandler"() { if (!this.data.alive) return; this.setData({ generation: this.data.generation + 1, errorLabel: "" }); this.project(); } },
   methods: {
+    attachHost(action: (input: unknown) => Promise<void>) {
+      bindHostAction(this, action);
+      this.setData({ generation: this.data.generation + 1, errorLabel: "" });
+    },
+    detachHost() {
+      unbindHostAction(this);
+      this.setData({ generation: this.data.generation + 1, errorLabel: "" });
+    },
     project() {
       if (!this.data.alive) return;
       this.setData({ visibleSources: identityRows(this.data.sources, ["id", "version"]).map(item => {
@@ -25,7 +33,7 @@ Component({
       const version = dataset.version ?? (dataset.source as { version?: string } | undefined)?.version;
       const matches = this.data.visibleSources.filter(item => item.id === id && (version === undefined || item.version === version));
       const source = matches.length === 1 ? matches[0] : undefined;
-      const handler = this.data.openHandler as SourceHandler | null;
+      const handler = (hostAction(this) ?? this.data.openHandler) as SourceHandler | null;
       if (!source || source.status !== "published" || !this.data.alive || this.data.opening || typeof handler !== "function") return;
       const generation = this.data.generation; const reference = { resourceId: source.id, version: source.version };
       this.setData({ opening: true, errorLabel: "" });
@@ -35,3 +43,4 @@ Component({
     },
   },
 });
+import { bindHostAction, unbindHostAction, hostAction } from "../host-binding";

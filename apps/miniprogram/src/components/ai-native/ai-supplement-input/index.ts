@@ -20,6 +20,14 @@ Component({
     },
   },
   methods: {
+    attachHost(action: (input: unknown) => Promise<void>) {
+      bindHostAction(this, action);
+      this.setData({ generation: this.data.generation + 1, errorLabel: "" });
+    },
+    detachHost() {
+      unbindHostAction(this);
+      this.setData({ generation: this.data.generation + 1, errorLabel: "" });
+    },
     refreshFields() {
       if (!this.data.alive) return;
       const fields: ClarificationField[] = Array.isArray(this.data.fields) ? this.data.fields.slice(0, 30) : [];
@@ -42,7 +50,7 @@ Component({
       this.setData({ localDraft: { ...this.data.localDraft, [field.key]: event.detail.value.slice(0, 4000) } }); this.refreshFields();
     },
     async onSubmit(): Promise<void> {
-      const handler = this.data.submitHandler as ClarificationHandler | null;
+      const handler = (hostAction(this) ?? this.data.submitHandler) as ClarificationHandler | null;
       if (this.data.disabled || this.data.submitting || !this.data.alive || !this.data.taskId || !this.data.inputRevision || typeof handler !== "function") return;
       if (this.data.definitionUnavailable) { this.setData({ errorLabel: "字段定义不可用，请刷新" }); return; }
       if (this.data.visibleFields.some(field => field.required && !field.value?.trim())) { this.setData({ errorLabel: "请填写必填信息" }); return; }
@@ -55,3 +63,4 @@ Component({
     },
   },
 });
+import { bindHostAction, unbindHostAction, hostAction } from "../host-binding";

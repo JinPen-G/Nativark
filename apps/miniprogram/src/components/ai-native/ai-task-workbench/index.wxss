@@ -1,0 +1,2 @@
+.ai-workbench { display: flex; flex-direction: column; gap: 24rpx; padding: 24rpx; overflow-wrap: anywhere; }
+
