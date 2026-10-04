@@ -1,0 +1,3 @@
+"use strict";
+const test = require("node:test"); const assert = require("node:assert/strict"); const fs = require("node:fs");
+test("both offline hosts are feature-local and synthetic only", () => { for (const file of ["apps/staff-miniprogram/src/components/ai-native/offline-host.ts", "apps/miniprogram/src/components/ai-native/offline-host.ts"]) { const source = fs.readFileSync(file, "utf8"); for (const name of ["ai-task-card", "ai-step-timeline", "ai-supplement-input", "ai-proposal-confirm", "ai-status-panel"]) assert.match(source, new RegExp(name)); assert.match(source, /synthetic-task/); assert.match(source, /result: "unknown"/); assert.doesNotMatch(source, /wx\.request|fetch\s*\(|setInterval|storage/i); } });

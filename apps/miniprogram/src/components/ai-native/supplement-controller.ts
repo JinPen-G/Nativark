@@ -1,0 +1,2 @@
+export type SupplementSubmit = (input: { taskId: string; inputRevision: string; draft: Readonly<Record<string, string>> }) => Promise<void>;
+export class SupplementController { private pending = false; async submit(input: Parameters<SupplementSubmit>[0], action: SupplementSubmit): Promise<"started" | "skipped" | "failed"> { if (this.pending) return "skipped"; this.pending = true; try { await action(input); return "started"; } catch { return "failed"; } finally { this.pending = false; } } }

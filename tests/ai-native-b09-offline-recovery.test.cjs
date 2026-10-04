@@ -1,0 +1,25 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict');
+const {load,mount,deferred}=require('./fixtures/ai-native/b09-host.cjs');
+const flush=async()=>{for(let i=0;i<10;i++)await Promise.resolve();};
+for(const app of ['miniprogram','staff-miniprogram']) test(app+' twelve-hour pause retains unsynced draft but recovery rereads and cannot revive confirmation',async()=>{
+ const prefix='apps/'+app+'/src/components/ai-native/';
+ const {AiPollingController,AiPollingLoop}=load(prefix+'polling-controller.ts');
+ const {AiDraftController}=load(prefix+'draft-controller.ts');const draft=new AiDraftController();
+ draft.set('synthetic-task','1',{note:'synthetic-note'});
+ const proposal=mount(load(prefix+'ai-proposal-confirm/index.ts'),{proposal:{id:'synthetic-proposal',revision:'1'},disabled:false,confirmHandler:async()=>{}});
+ proposal.onCheck({detail:{value:['read']}});assert.notEqual(proposal.data.checkedIdentity,'');
+ const first=deferred();let calls=0,now=0,id=0;const scheduled=new Map(),pages=[],notices=[];
+ const clock={schedule(fn,delay){scheduled.set(++id,{fn,at:now+delay});return id;},clear(key){scheduled.delete(key);}};
+ const controller=new AiPollingController(()=>{calls++;return calls===1?first.promise:Promise.resolve({cursor:'2',events:[],version:'v1'});},page=>{pages.push(page);return {sync:'synced'};});
+ const loop=new AiPollingLoop(controller,clock,2000,{classify:()=> 'transient',notify:value=>notices.push(value)});
+ const context={audience:'client',tenantId:'synthetic-tenant',taskId:'synthetic-task'};
+ loop.start(context);loop.pause();proposal.update({disabled:true});
+ now+=12*60*60*1000;assert.equal(scheduled.size,0);assert.equal(calls,1);
+ assert.equal(draft.snapshot().sync,'unsynced');assert.equal(draft.snapshot().values.note,'synthetic-note');
+ first.reject(new Error('synthetic offline'));await flush();assert.equal(pages.length,0);assert.equal(scheduled.size,0);
+ loop.retry(context);await flush();assert.equal(calls,2);assert.equal(pages.length,1);
+ assert.equal(proposal.data.checkedIdentity,'');assert.equal(proposal.events.filter(e=>e.name==='confirm').length,0);
+ loop.destroy();proposal.detach();draft.destroy();assert.equal(scheduled.size,0);assert.equal(draft.snapshot(),null);
+ assert.equal(notices.at(-1),'synced');
+});

@@ -1,0 +1,4 @@
+'use strict';
+const test = require('node:test'); const assert = require('node:assert/strict'); const data = require('./fixtures/ai-native/scenarios/orders.cjs');
+test('order explanation fixtures cover all requested actor/scope/outcome combinations', () => { assert.equal(data.scenarios.length, 45); assert.deepEqual(new Set(data.scenarios.map(item => item.actor.kind)), new Set(['operator', 'staff', 'client', 'saas_admin', 'automation'])); assert.deepEqual(new Set(data.scenarios.map(item => item.scope.kind)), new Set(['workspace', 'tenant', 'platform'])); assert.deepEqual(new Set(data.scenarios.map(item => item.expected)), new Set(['success', 'missing_evidence', 'forbidden'])); });
+test('order fixture keeps snapshots and amounts as supplied facts', () => { assert.equal(data.order.total, '120.00'); assert.equal(data.order.quoteSnapshotId, data.snapshot.id); assert.equal(data.snapshot.priceVersion, 'synthetic_price_v1'); });

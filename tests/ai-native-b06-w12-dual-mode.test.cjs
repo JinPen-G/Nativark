@@ -1,0 +1,3 @@
+'use strict';
+const test = require('node:test'); const assert = require('node:assert/strict'); const fixture = require('./fixtures/ai-native/b06-dual-mode.cjs');
+test('dual-mode fixtures separate platform and tenant-managed summaries with safe fields', () => { assert.equal(fixture.platformRows.length, 2); assert.equal(fixture.tenantRows.length, 3); for (const row of fixture.platformRows) { assert.equal(row.serviceName, 'Rental OS AI'); assert.equal('baseUrl' in row, false); assert.equal('apiKey' in row, false); assert.equal('provider' in row, false); } for (const row of fixture.tenantRows) { assert.equal('apiKey' in row, false); assert.ok(row.credentialState); } });

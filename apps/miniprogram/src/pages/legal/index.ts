@@ -1,6 +1,7 @@
 import { themeBehavior } from "../../core/theme-behavior";
 import type { ClientHelpFaqItem, ClientPublicDocumentKind } from "@rental-os/shared";
-import { parseClientRichText, type ClientRichTextNode } from "@rental-os/shared";
+import type { ClientRichTextNode } from "@rental-os/shared";
+import { parseClientRichText } from "../../vendor/shared-rich-text/client-rich-text";
 import { fetchPublicDocument } from "../../api/merchant";
 import { cachedMerchant, loadMerchant, type MerchantInfo } from "../../core/merchant";
 import { ROUTES, back, callPhone } from "../../core/ui";

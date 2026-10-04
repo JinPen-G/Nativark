@@ -1,0 +1,4 @@
+"use strict";
+const test = require("node:test"); const assert = require("node:assert/strict"); const fs = require("node:fs");
+const roots = ["apps/staff-miniprogram/src/components/ai-native", "apps/miniprogram/src/components/ai-native"];
+test("proposal shells bind human confirmation to host events and proposal identity", () => { for (const root of roots) { const component = fs.readFileSync(`${root}/ai-proposal-confirm/index.ts`, "utf8"); const gate = fs.readFileSync(`${root}/proposal-gate.ts`, "utf8"); assert.match(component, /proposalId/); assert.match(component, /revision/); assert.match(component, /triggerEvent\("confirm"/); assert.match(component, /pending/); assert.match(gate, /id: string/); assert.match(gate, /revision: string/); assert.match(gate, /setProposal\(proposal/); assert.doesNotMatch(component + gate, /approvalId|wx\.request|fetch\s*\(/); } });

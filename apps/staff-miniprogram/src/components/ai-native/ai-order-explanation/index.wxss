@@ -1,0 +1,1 @@
+.ai-order-explanation { display: flex; flex-direction: column; gap: 14rpx; padding: 24rpx; color: var(--text, #1f2937); font-size: 27rpx; }.title { font-size: 32rpx; font-weight: 600; margin-bottom: 8rpx; }

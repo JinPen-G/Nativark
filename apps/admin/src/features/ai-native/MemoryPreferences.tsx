@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Button } from "@/components/ui";
+import { ActionButton } from "@/components/ui";
+import { useResourceAction } from "./resource-action";
 export type MemoryPreference = {
   id: string;
   label: string;
@@ -20,40 +20,31 @@ const labels: Record<MemoryPreference["status"], string> = {
   revoked: "已撤回",
 };
 export function MemoryPreferences({ items, onReview }: MemoryPreferencesProps) {
-  const [reviewing, setReviewing] = useState<string | null>(null);
-  const [reviewError, setReviewError] = useState<string | null>(null);
+  const rows: readonly MemoryPreference[] = Array.isArray(items) ? items.slice(0, 50).filter(item => item && typeof item.id === "string" && typeof item.revision === "string") : [];
+  const signature = JSON.stringify(rows.map(item => [item.id, item.revision, item.status, item.actorKind, item.value, item.expiresAt]));
+  const action = useResourceAction(signature, onReview);
   if (!items) return <p role="status">记忆与偏好不可用</p>;
   return (
     <ul aria-label="记忆与偏好">
-      {items.map((item) => (
+      {rows.map((item) => (
         <li key={`${item.id}:${item.revision}`}>
           <span>{item.label}</span>
-          <span>{item.status === "confirmed" || item.status === "proposed" ? item.value : "内容不可用"}</span>
-          <span>{labels[item.status]}</span>
+          <span>{(item.status === "confirmed" && item.actorKind === "human") || item.status === "proposed" ? item.value : "内容不可用"}</span>
+          <span>{item.status === "confirmed" && item.actorKind !== "human" ? "确认依据待核对" : labels[item.status] ?? "状态待核对"}</span>
           {item.actorKind === "automation" && (
             <small>自动化建议，不代表用户已确认</small>
           )}
           {item.status === "proposed" && (
-            <Button
-              disabled={!onReview || reviewing !== null}
-              onClick={async () => {
-                if (!onReview || reviewing) return;
-                const key = `${item.id}:${item.revision}`;
-                setReviewing(key);
-                setReviewError(null);
-                try {
-                  await onReview({ id: item.id, revision: item.revision });
-                } catch {
-                  setReviewError(key);
-                } finally {
-                  setReviewing(null);
-                }
-              }}
-            >
-              {reviewing === `${item.id}:${item.revision}` ? "处理中…" : "人工核对"}
-            </Button>
+            <ActionButton
+              key={signature}
+              disabled={!onReview || action.pendingKey !== null}
+              label="人工核对"
+              pendingLabel="处理中…"
+              successLabel="核对入口已处理"
+              onAction={() => action.run(JSON.stringify([item.id, item.revision]), { id: item.id, revision: item.revision })}
+            />
           )}
-          {reviewError === `${item.id}:${item.revision}` && <small role="alert">核对启动失败，请重试</small>}
+          {action.errorKey === JSON.stringify([item.id, item.revision]) && <small role="alert">核对启动失败，请重试</small>}
         </li>
       ))}
     </ul>

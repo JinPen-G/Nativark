@@ -1,0 +1,5 @@
+'use strict';
+const fs = require('node:fs'); const path = require('node:path');
+function buildAcceptanceReport(input = {}) { const generatedAt = input.generatedAt ?? 'not-provided'; const sections = input.sections ?? []; const unrun = input.unrun ?? ['真库', '真实模型', '浏览器/设备', '外部支付']; const json = { tool: 'ai-native-b06-acceptance-report', generatedAt, inputs: sections.map(section => section.name), sections, unrun }; const markdown = ['# AI Native B06 离线验收报告', '', `生成时间：${generatedAt}`, '', '## 输入清单', ...sections.map(section => `- ${section.name}：${section.status ?? '未标注'}`), '', '## 未运行项目', ...unrun.map(item => `- ${item}`), '', '## 证据边界', '- 本报告只汇总离线工具输出，不把静态、单元或契约结果扩大为真库、浏览器、真实模型或生产验收。', ''].join('\n'); return { json, markdown }; }
+function writeAcceptanceReport(report, outDir) { fs.mkdirSync(outDir, { recursive: true }); fs.writeFileSync(path.join(outDir, 'report.json'), JSON.stringify(report.json, null, 2) + '\n'); fs.writeFileSync(path.join(outDir, 'report.md'), report.markdown); return [path.join(outDir, 'report.json'), path.join(outDir, 'report.md')]; }
+module.exports = { buildAcceptanceReport, writeAcceptanceReport };

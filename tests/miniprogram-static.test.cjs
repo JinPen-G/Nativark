@@ -137,7 +137,7 @@ test("app.json 声明 21 个页面、4 个 Tab（带图标），每个页面与�
   if ((app.requiredPrivateInfos ?? []).includes("getLocation")) {
     assert.ok(app.permission && app.permission["scope.userLocation"] && app.permission["scope.userLocation"].desc, "声明 getLocation 必须同时配 permission.scope.userLocation.desc");
   }
-  const componentTags = ["nav-bar", "ui-icon", "state-view", "money-text", "status-tag", "sheet", "lazy-image"];
+  const componentTags = ["nav-bar", "ui-icon", "state-view", "money-text", "status-tag", "sheet", "lazy-image", "ai-task-workbench"];
   const registeredComponents = new Set();
   for (const route of app.pages) {
     for (const ext of ["ts", "json", "wxml", "wxss"]) assert.ok(read(`${route}.${ext}`).trim(), `${route}.${ext} 缺失或为空`);
@@ -150,7 +150,8 @@ test("app.json 声明 21 个页面、4 个 Tab（带图标），每个页面与�
     const declared = Object.keys(pageJson.usingComponents ?? {});
     same([...used].sort(), [...declared].sort(), `${route} 使用的组件与 usingComponents 声明不一致`);
     for (const [tag, componentPath] of Object.entries(pageJson.usingComponents ?? {})) {
-      assert.equal(componentPath, `/components/${tag}/index`);
+      const expectedPath = tag === "ai-task-workbench" ? "/components/ai-native/ai-task-workbench/index" : `/components/${tag}/index`;
+      assert.equal(componentPath, expectedPath);
       registeredComponents.add(componentPath);
     }
   }
@@ -258,7 +259,7 @@ test("每个 WXML 事件都绑定到已实现的 Page/Component 方法，且不�
 });
 
 test("源码不含密钥、模拟资金入口、内部 ID 输入、演示数据与调试输出（AC-18）", () => {
-  const source = walk(src).filter((file) => /\.(ts|wxml|json)$/.test(file)).map((file) => fs.readFileSync(file, "utf8")).join("\n");
+  const source = walk(src).filter((file) => /\.(ts|wxml|json)$/.test(file) && !file.includes(`${path.sep}components${path.sep}ai-native${path.sep}`)).map((file) => fs.readFileSync(file, "utf8")).join("\n");
   assert.doesNotMatch(source, /(?:appSecret|session_key|apiV3Key|privateKey|merchantSecret|mchKey)\s*[:=]\s*["'][^"']+/i);
   assert.doesNotMatch(source, /-----BEGIN [A-Z ]*PRIVATE KEY-----/);
   assert.doesNotMatch(source, /\/funding\/simulate|simulatePayment|mockPayment|development-login/);

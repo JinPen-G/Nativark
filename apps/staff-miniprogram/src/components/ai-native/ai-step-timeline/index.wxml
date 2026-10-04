@@ -1,0 +1,7 @@
+<view class="ai-step-timeline" aria-label="AI任务步骤时间线">
+  <view wx:if="{{!visibleSteps.length}}" class="ai-step-timeline__empty">步骤不可用</view>
+  <view wx:for="{{visibleSteps}}" wx:key="id" class="ai-step-timeline__row">
+    <text class="ai-step-timeline__index">{{item.ordinal || '?'}}</text>
+    <view class="ai-step-timeline__body"><text class="ai-step-timeline__label">{{item.label || '步骤不可用'}}</text><text class="ai-step-timeline__status">{{item.statusLabel || '无法识别／待刷新'}}</text><text class="ai-step-timeline__source">{{item.sourceLabel || '来源不可用'}}</text></view>
+  </view>
+</view>

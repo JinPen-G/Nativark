@@ -1,0 +1,2 @@
+.ai-native-wrap { max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }.ai-native-action { min-height: 88rpx; white-space: normal; line-height: 1.35; }.ai-native-live { position: absolute; width: 1rpx; height: 1rpx; overflow: hidden; clip: rect(0 0 0 0); }
+@media (prefers-reduced-motion: reduce) { .ai-native-wrap, .ai-native-action { transition: none; animation: none; } }

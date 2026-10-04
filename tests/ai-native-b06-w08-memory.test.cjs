@@ -1,0 +1,3 @@
+'use strict';
+const test = require('node:test'); const assert = require('node:assert/strict'); const data = require('./fixtures/ai-native/scenarios/memory.cjs');
+test('memory fixtures cover statuses, content hash/revision changes and automation impersonation', () => { assert.deepEqual(new Set(data.records.map(item => item.status)), new Set(['proposed', 'confirmed', 'expired', 'revoked'])); assert.notEqual(data.revisionChange.oldContentHash, data.revisionChange.newContentHash); assert.equal(data.revisionChange.newRevision, 3); assert.ok(data.scenarios.some(item => item.expected === 'automation_impersonation')); });

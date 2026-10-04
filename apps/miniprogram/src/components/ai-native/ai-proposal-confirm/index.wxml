@@ -1,0 +1,6 @@
+<view class="ai-proposal-confirm" aria-label="人工确认提案">
+  <text>{{proposal.title || '提案不可用'}}</text><text wx:if="{{expired}}">提案已过期</text>
+  <checkbox-group bindchange="onCheck"><label><checkbox value="read" disabled="{{disabled || expired || pending || submitting}}" checked="{{checkedIdentity}}"/>我已阅读提案</label></checkbox-group>
+  <text wx:if="{{errorLabel}}" role="alert">{{errorLabel}}</text>
+  <button disabled="{{disabled || pending || submitting || expired || !checkedIdentity || !hostAvailable && !confirmHandler}}" bindtap="onConfirm">{{pending || submitting ? '提交中…' : '提交确认请求'}}</button>
+</view>
