@@ -110,13 +110,14 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
         const requested = quantityAtoms(quote.quantity);
         for (const row of rows) {
           const settings = policy(row).settings;
-          const active = await tx.aiBudgetAllocation.findMany({ where: { policyId: row.id, reservation: { status: { in: ['reserved', 'pending_reconciliation'] } } }, select: { reservation: { select: { reservedTokens: true, reservedCalls: true, reservedMoney: true, moneyCurrency: true, runId: true } } } });
+          const allocations = await tx.aiBudgetAllocation.findMany({ where: { policyId: row.id, reservation: { status: { in: ['reserved', 'pending_reconciliation', 'settled'] } } }, select: { reservation: { select: { status: true, reservedTokens: true, reservedCalls: true, reservedMoney: true, actualTokens: true, actualCalls: true, actualMoney: true, moneyCurrency: true, runId: true } } } });
           if (!settings.gates.platform.enabled || !settings.gates.tenant.enabled || !settings.gates.scene.enabled || settings.budget.state !== 'limited' || settings.maxConcurrent < 1 || settings.maxCallsPerRun < 1 || !settings.allowedModels.includes(quote.model) || !settings.allowedScenes.includes(command.sceneCode)) throw new BudgetError('EXHAUSTED');
+          const active = allocations.filter(item => item.reservation.status === 'reserved' || item.reservation.status === 'pending_reconciliation');
           const concurrent = active.length;
           if (concurrent >= settings.maxConcurrent || active.filter(item => item.reservation.runId === quote.association.runId).length >= settings.maxCallsPerRun) throw new BudgetError('EXHAUSTED');
           if (settings.budget.quantity.unit !== quote.quantity.unit || (settings.budget.quantity.unit === 'money' && quote.quantity.unit === 'money' && settings.budget.quantity.currency !== quote.quantity.currency)) throw new BudgetError('EXHAUSTED');
           const limit = quantityAtoms(settings.budget.quantity);
-          const used = settings.budget.quantity.unit === 'tokens' ? active.reduce((sum, item) => sum + (item.reservation.reservedTokens ?? 0n), 0n) : settings.budget.quantity.unit === 'calls' ? BigInt(active.reduce((sum, item) => sum + (item.reservation.reservedCalls ?? 0), 0)) : active.reduce((sum, item) => sum + decimalAtoms(item.reservation.reservedMoney), 0n);
+          const used = settings.budget.quantity.unit === 'tokens' ? allocations.reduce((sum, item) => sum + (item.reservation.status === 'settled' ? (item.reservation.actualTokens ?? 0n) : (item.reservation.reservedTokens ?? 0n)), 0n) : settings.budget.quantity.unit === 'calls' ? BigInt(allocations.reduce((sum, item) => sum + (item.reservation.status === 'settled' ? (item.reservation.actualCalls ?? 0) : (item.reservation.reservedCalls ?? 0)), 0)) : allocations.reduce((sum, item) => sum + decimalAtoms(item.reservation.status === 'settled' ? item.reservation.actualMoney : item.reservation.reservedMoney), 0n);
           if (used + requested > limit) throw new BudgetError('EXHAUSTED');
         }
         await revalidate();
