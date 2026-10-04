@@ -13,7 +13,12 @@ export function quantityAtoms(quantity: AiUsageQuantityDraft): bigint {
   // Prisma maps calls to unsigned INT and tokens to unsigned BIGINT in the
   // budget tables. Reject before any repository write, never rely on SQL error.
   if (quantity.unit === 'calls' && atoms > 4294967295n) throw new BudgetError('INVALID');
-  if (quantity.unit === 'tokens' && atoms > 18446744073709551615n) throw new BudgetError('INVALID');
+  // The shared draft deliberately represents token counts as JS numbers. The
+  // database column is wider, but accepting values outside the safe integer
+  // range would make a successful write impossible to read back faithfully.
+  // Reject before a transaction rather than relying on rounding or a later
+  // Number(bigint) conversion in the Prisma record projection.
+  if (quantity.unit === 'tokens' && atoms > BigInt(Number.MAX_SAFE_INTEGER)) throw new BudgetError('INVALID');
   return atoms;
 }
 export function sameUnit(left: AiUsageQuantityDraft, right: AiUsageQuantityDraft): boolean {
