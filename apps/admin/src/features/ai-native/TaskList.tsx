@@ -10,6 +10,8 @@ export interface TaskListProps {
   hasNext?: boolean;
   onPageChange?: (page: number) => void;
   onRetry?: () => void;
+  selectedTaskId?: string | null;
+  onSelectTask?: (taskId: string) => void;
 }
 const labels: Record<DisplayTask["status"], string> = {
   registered: "已登记",
@@ -32,6 +34,8 @@ export function TaskList({
   hasNext = false,
   onPageChange,
   onRetry,
+  selectedTaskId = null,
+  onSelectTask,
 }: TaskListProps) {
   const currentPage = Number.isSafeInteger(page) && page > 0 ? page : 1;
   if (loading && !tasks)
@@ -58,7 +62,16 @@ export function TaskList({
       <ul>
         {rows.map((task) => (
           <li key={task.id}>
-            <span>{task.id}</span>
+            {onSelectTask ? (
+              <Button
+                type={selectedTaskId === task.id ? "primary" : "default"}
+                disabled={task.availability !== "available"}
+                onClick={() => onSelectTask(task.id)}
+                aria-pressed={selectedTaskId === task.id}
+              >
+                {task.id}
+              </Button>
+            ) : <span>{task.id}</span>}
             <span>{task.scene}</span>
             <span>{labels[task.status]}</span>
             <time>{task.updatedAt ?? "更新时间不可用"}</time>
