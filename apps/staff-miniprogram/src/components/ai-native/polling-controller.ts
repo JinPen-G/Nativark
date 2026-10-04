@@ -66,6 +66,7 @@ export interface AiPollRecovery {
 }
 export class AiPollingLoop {
   private timer: unknown = null;
+  private timerTicket: object | null = null;
   private live = false;
   private disposed = false;
   private busy = false;
@@ -83,6 +84,7 @@ export class AiPollingLoop {
     if (!this.busy) void this.tick();
   }
   private clearTimer(): void {
+    this.timerTicket = null;
     if (this.timer === null) return;
     const timer = this.timer;
     this.timer = null;
@@ -121,7 +123,15 @@ export class AiPollingLoop {
       this.busy = false;
       if (this.live && !this.disposed) {
         const epoch = this.epoch;
-        this.timer = this.clock.schedule(() => { this.timer = null; if (epoch === this.epoch) void this.tick(); }, delay);
+        const ticket = {};
+        this.timerTicket = ticket;
+        this.timer = this.clock.schedule(() => {
+          // Cancelled or already-consumed callbacks cannot erase a newer handle.
+          if (this.timerTicket !== ticket) return;
+          this.timerTicket = null;
+          this.timer = null;
+          if (epoch === this.epoch) void this.tick();
+        }, delay);
       }
     }
   }
