@@ -62,6 +62,7 @@ export interface AiTaskRunnerRegisteredStep {
   stepRevision: number;
   taskRevision: number;
   /** A replay is metadata only. It never grants permission to invoke the effect again. */
+  runRevision?: number | null;
   replayed: boolean;
   existingStatus: AiStepStatusDraft | null;
 }

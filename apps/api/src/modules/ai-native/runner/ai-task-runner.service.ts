@@ -81,8 +81,9 @@ export class AiTaskRunner {
 
   async run(input: AiTaskRunnerInput): Promise<AiTaskRunnerOutcome> {
     const recovery = input.recovery === true;
+    const { recovery: _recovery, ...claimInput } = input;
     const initial = await this.deps.leases.readMetadata(input.taskId);
-    let lease = recovery ? await this.deps.leases.claimRecoveryRun(input) : await this.deps.leases.claimRun(input);
+    let lease = recovery ? await this.deps.leases.claimRecoveryRun(claimInput) : await this.deps.leases.claimRun(claimInput);
     let plan: AiTaskRunnerPlan;
     try {
       plan = validatePlan(await this.deps.plan.resolve(initial, lease, recovery), input);
@@ -107,6 +108,7 @@ export class AiTaskRunner {
 
         const registered = await this.deps.steps.register(stepPlan, lease);
         taskRevision = registered.taskRevision;
+        if (registered.runRevision != null) lease = { ...lease, revision: registered.runRevision };
         const ref: AiTaskRunnerStepRef = { plan: stepPlan, registered };
         if (registered.replayed) {
           if (registered.existingStatus === "unknown") return { status: "unknown", completedSteps, cleanupFailed };
@@ -125,9 +127,11 @@ export class AiTaskRunner {
             cleanupFailed += 1;
             const commit = await this.deps.steps.unknown({ plan: stepPlan, registered }, lease, safe.resultRef ?? null); lease = commit.lease; taskRevision = commit.taskRevision; return { status: "unknown", completedSteps, cleanupFailed };
           }
-          if (safe.kind === "unknown") { await this.deps.steps.unknown(ref, lease, safe.resultRef ?? null); return { status: "unknown", completedSteps, cleanupFailed }; }
-          await this.persistResult(ref, lease, safe);
+          const commit = await this.persistResult(ref, lease, safe);
+          lease = commit.lease; taskRevision = commit.taskRevision;
+          if (safe.kind === "unknown") return { status: "unknown", completedSteps, cleanupFailed };
           if (safe.kind === "paused") return { status: "paused", completedSteps, cleanupFailed };
+          if (safe.kind === "failed") return { status: "failed", completedSteps, cleanupFailed, errorCode: safe.errorCode };
           completedSteps += safe.kind === "succeeded" ? 1 : 0;
           continue;
         }
@@ -172,6 +176,7 @@ export class AiTaskRunner {
         lease = commit.lease; taskRevision = commit.taskRevision;
         if (result.kind === "unknown") return { status: "unknown", completedSteps, cleanupFailed };
         if (result.kind === "paused") return { status: "paused", completedSteps, cleanupFailed };
+        if (result.kind === "failed") return { status: "failed", completedSteps, cleanupFailed, errorCode: result.errorCode };
         completedSteps += result.kind === "succeeded" ? 1 : 0;
       }
       return { status: "succeeded", completedSteps, cleanupFailed };
@@ -206,7 +211,10 @@ export class AiTaskRunner {
         settled = true;
         reject(new AiTaskRunnerError(phase === "reconcile" ? "AI_RESULT_UNKNOWN" : "AI_RUN_LIMIT", `${phase} deadline exceeded`));
       }, limitMs);
-      operation(controller.signal).then(value => { if (!settled) { settled = true; this.clock.clearTimeout(timer); resolve(value); } }, error => {
+      let pending: Promise<T>;
+      try { pending = operation(controller.signal); }
+      catch (error) { settled = true; this.clock.clearTimeout(timer); reject(error); return; }
+      pending.then(value => { if (!settled) { settled = true; this.clock.clearTimeout(timer); resolve(value); } }, error => {
         if (!settled) { settled = true; this.clock.clearTimeout(timer); reject(error); }
       });
     });

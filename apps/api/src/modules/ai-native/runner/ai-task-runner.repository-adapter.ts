@@ -35,7 +35,7 @@ export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerReposito
     async register(plan, lease) {
       const result = await adapters.registrations.register(commands.register(plan, lease));
       return { stepId: result.stepId, runId: result.runId, sequence: result.sequence, stepRevision: result.stepRevision,
-        taskRevision: result.taskRevision, replayed: result.replayed, existingStatus: result.replayed ? null : "pending" };
+        taskRevision: result.taskRevision, runRevision: result.runRevision, replayed: result.replayed, existingStatus: result.replayed ? null : "pending" };
     },
     async start(step, lease) {
       return committed(await adapters.transitions.transition(commands.transition("start", step, lease, null)), lease);
