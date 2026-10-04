@@ -2,10 +2,10 @@ import { identityRows } from "../identity-rows";
 interface SourceDisplay { id: string; version: string; rowKey: string; title: string; location: string; status: string; statusLabel: string; }
 type SourceHandler = (ref: { resourceId: string; version: string }) => Promise<void>;
 Component({
-  properties: { sources: { type: Array, value: [] }, openHandler: { type: null, value: null } },
+  properties: { sources: { type: Array, value: [] } },
   data: { visibleSources: [] as SourceDisplay[], opening: false, errorLabel: "", generation: 0, alive: true },
   lifetimes: { attached() { this.project(); }, detached() { this.setData({ alive: false, visibleSources: [], errorLabel: "", generation: this.data.generation + 1 }); } },
-  observers: { "sources,openHandler"() { if (!this.data.alive) return; this.setData({ generation: this.data.generation + 1, errorLabel: "" }); this.project(); } },
+  observers: { "sources"() { if (!this.data.alive) return; this.setData({ generation: this.data.generation + 1, errorLabel: "" }); this.project(); } },
   methods: {
     attachHost(action: (input: unknown) => Promise<void>) {
       bindHostAction(this, action);
@@ -33,7 +33,7 @@ Component({
       const version = dataset.version ?? (dataset.source as { version?: string } | undefined)?.version;
       const matches = this.data.visibleSources.filter(item => item.id === id && (version === undefined || item.version === version));
       const source = matches.length === 1 ? matches[0] : undefined;
-      const handler = (hostAction(this) ?? this.data.openHandler) as SourceHandler | null;
+      const handler = hostAction(this) as SourceHandler | null;
       if (!source || source.status !== "published" || !this.data.alive || this.data.opening || typeof handler !== "function") return;
       const generation = this.data.generation; const reference = { resourceId: source.id, version: source.version };
       this.setData({ opening: true, errorLabel: "" });
