@@ -12,6 +12,7 @@ const policyWhere = (key: BudgetPolicyKey) => ({ scopeId: key.scopeId, scopeKind
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const rowScope = (value: BudgetPolicyKey) => ({ scopeId: value.scopeId, scopeKind: value.scopeKind });
+const decimalAtoms = (value: Prisma.Decimal | null) => value === null ? 0n : BigInt(value.toFixed(6).replace('.', ''));
 
 function policy(row: { id: string; scopeId: string; scopeKind: string; sceneCode: string; configRevision: number; settingsJson: Prisma.JsonValue }): BudgetPolicy {
   if (!scopeKinds.includes(row.scopeKind as typeof scopeKinds[number])) throw new BudgetError('UNAVAILABLE');
@@ -87,15 +88,16 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     try {
       return await this.db.$transaction(async tx => {
         const rows = await this.lockPolicies(tx, quote.policies);
-        const active = await tx.aiBudgetReservation.findMany({ where: { scopeId: consumer.scopeId, scopeKind: consumer.scopeKind, sceneCode: command.sceneCode, status: { in: ['reserved', 'pending_reconciliation'] } }, select: { reservedTokens: true, reservedCalls: true, reservedMoney: true, moneyCurrency: true, runId: true } });
         const requested = quantityAtoms(quote.quantity);
         for (const row of rows) {
           const settings = policy(row).settings;
+          const active = await tx.aiBudgetAllocation.findMany({ where: { policyId: row.id, reservation: { status: { in: ['reserved', 'pending_reconciliation'] } } }, select: { reservation: { select: { reservedTokens: true, reservedCalls: true, reservedMoney: true, moneyCurrency: true, runId: true } } } });
           if (!settings.gates.platform.enabled || !settings.gates.tenant.enabled || !settings.gates.scene.enabled || settings.budget.state !== 'limited' || settings.maxConcurrent < 1 || settings.maxCallsPerRun < 1 || !settings.allowedModels.includes(quote.model) || !settings.allowedScenes.includes(command.sceneCode)) throw new BudgetError('EXHAUSTED');
           const concurrent = active.length;
-          if (concurrent >= settings.maxConcurrent || active.filter(item => item.runId === quote.association.runId).length >= settings.maxCallsPerRun) throw new BudgetError('EXHAUSTED');
+          if (concurrent >= settings.maxConcurrent || active.filter(item => item.reservation.runId === quote.association.runId).length >= settings.maxCallsPerRun) throw new BudgetError('EXHAUSTED');
+          if (settings.budget.quantity.unit !== quote.quantity.unit || (settings.budget.quantity.unit === 'money' && quote.quantity.unit === 'money' && settings.budget.quantity.currency !== quote.quantity.currency)) throw new BudgetError('EXHAUSTED');
           const limit = quantityAtoms(settings.budget.quantity);
-          const used = settings.budget.quantity.unit === 'tokens' ? active.reduce((sum, item) => sum + (item.reservedTokens ?? 0n), 0n) : settings.budget.quantity.unit === 'calls' ? BigInt(active.reduce((sum, item) => sum + (item.reservedCalls ?? 0), 0)) : active.reduce((sum, item) => sum + BigInt(Math.round(Number(item.reservedMoney ?? 0) * 1_000_000)), 0n);
+          const used = settings.budget.quantity.unit === 'tokens' ? active.reduce((sum, item) => sum + (item.reservation.reservedTokens ?? 0n), 0n) : settings.budget.quantity.unit === 'calls' ? BigInt(active.reduce((sum, item) => sum + (item.reservation.reservedCalls ?? 0), 0)) : active.reduce((sum, item) => sum + decimalAtoms(item.reservation.reservedMoney), 0n);
           if (used + requested > limit) throw new BudgetError('EXHAUSTED');
         }
         await revalidate();
