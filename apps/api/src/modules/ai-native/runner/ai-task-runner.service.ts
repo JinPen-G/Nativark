@@ -2,7 +2,8 @@ import {
   type AiTaskRunnerClock, type AiTaskRunnerDependencies, type AiTaskRunnerEffectResult,
   type AiTaskRunnerInput, type AiTaskRunnerLease, type AiTaskRunnerLimits,
   type AiTaskRunnerOutcome, type AiTaskRunnerPlan, type AiTaskRunnerStepPlan,
-  type AiTaskRunnerStepCommit, type AiTaskRunnerStepRef
+  type AiTaskRunnerStepCommit, type AiTaskRunnerStepRef, type AiTaskRunnerTaskOutcome,
+  type AiTaskRunnerOutcomePort
 } from "./ai-task-runner.ports";
 
 export class AiTaskRunnerError extends Error {
@@ -129,9 +130,9 @@ export class AiTaskRunner {
           }
           const commit = await this.persistResult(ref, lease, safe);
           lease = commit.lease; taskRevision = commit.taskRevision;
-          if (safe.kind === "unknown") return { status: "unknown", completedSteps, cleanupFailed };
-          if (safe.kind === "paused") return { status: "paused", completedSteps, cleanupFailed };
-          if (safe.kind === "failed") return { status: "failed", completedSteps, cleanupFailed, errorCode: safe.errorCode };
+          if (safe.kind === "unknown") return (await this.commitTaskOutcome({ status: "unknown", completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
+          if (safe.kind === "paused") return (await this.commitTaskOutcome({ status: "paused", completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
+          if (safe.kind === "failed") return (await this.commitTaskOutcome({ status: "failed", completedSteps, cleanupFailed, errorCode: safe.errorCode }, lease, taskRevision)).outcome;
           completedSteps += safe.kind === "succeeded" ? 1 : 0;
           continue;
         }
@@ -174,15 +175,15 @@ export class AiTaskRunner {
         }
         const commit = await this.persistResult(ref, lease, result);
         lease = commit.lease; taskRevision = commit.taskRevision;
-        if (result.kind === "unknown") return { status: "unknown", completedSteps, cleanupFailed };
-        if (result.kind === "paused") return { status: "paused", completedSteps, cleanupFailed };
-        if (result.kind === "failed") return { status: "failed", completedSteps, cleanupFailed, errorCode: result.errorCode };
+        if (result.kind === "unknown") return (await this.commitTaskOutcome({ status: "unknown", completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
+        if (result.kind === "paused") return (await this.commitTaskOutcome({ status: "paused", completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
+        if (result.kind === "failed") return (await this.commitTaskOutcome({ status: "failed", completedSteps, cleanupFailed, errorCode: result.errorCode }, lease, taskRevision)).outcome;
         completedSteps += result.kind === "succeeded" ? 1 : 0;
       }
-      return { status: "succeeded", completedSteps, cleanupFailed };
+      return (await this.commitTaskOutcome({ status: "succeeded", completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
     } catch (error) {
       if (error instanceof AiTaskRunnerError && (error.code === "AI_RESULT_UNKNOWN" || error.code === "AI_RUN_LIMIT")) {
-        return { status: "failed", completedSteps, cleanupFailed, errorCode: error.code };
+        return (await this.commitTaskOutcome({ status: "failed", completedSteps, cleanupFailed, errorCode: error.code }, lease, taskRevision)).outcome;
       }
       if (error instanceof AiTaskRunnerError) return { status: "unavailable", completedSteps, cleanupFailed };
       throw error;
@@ -193,6 +194,21 @@ export class AiTaskRunner {
           expectedTaskRevision: taskRevision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken });
       } catch { throw new AiTaskRunnerError("AI_STORAGE_UNAVAILABLE", "lease release acknowledgement is uncertain"); }
     }
+  }
+
+  private async commitTaskOutcome(outcome: AiTaskRunnerTaskOutcome, lease: AiTaskRunnerLease, taskRevision: number) {
+    const port = this.deps.taskOutcome;
+    if (!port) return { outcome, lease, taskRevision };
+    let committed: Awaited<ReturnType<AiTaskRunnerOutcomePort["commit"]>>;
+    try { committed = await port.commit({ taskId: lease.taskId, taskRevision, lease: { ...lease }, outcome: { ...outcome } }); }
+    catch { throw new AiTaskRunnerError("AI_STORAGE_UNAVAILABLE", "task outcome commit is unavailable"); }
+    if (!committed || !Number.isSafeInteger(committed.taskRevision) || committed.taskRevision <= taskRevision
+      || !committed.lease || committed.lease.taskId !== lease.taskId || committed.lease.runId !== lease.runId
+      || committed.lease.holderId !== lease.holderId || !Number.isSafeInteger(committed.lease.revision)
+      || committed.lease.revision <= lease.revision || typeof committed.lease.fencingToken !== "string") {
+      throw new AiTaskRunnerError("AI_STORAGE_UNAVAILABLE", "task outcome commit returned an invalid fence");
+    }
+    return { outcome, lease: committed.lease, taskRevision: committed.taskRevision };
   }
 
   private async persistResult(ref: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, result: AiTaskRunnerEffectResult): Promise<AiTaskRunnerStepCommit> {

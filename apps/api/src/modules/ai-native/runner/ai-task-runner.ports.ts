@@ -118,6 +118,21 @@ export interface AiTaskRunnerEffectPort {
   cleanup?(step: AiTaskRunnerStepPlan): Promise<void>;
 }
 
+export type AiTaskRunnerTaskOutcome =
+  | { status: "succeeded" | "paused" | "unknown"; completedSteps: number; cleanupFailed: number }
+  | { status: "failed"; completedSteps: number; cleanupFailed: number; errorCode: string };
+
+/** Task aggregate transition is supplied by the composition root. The runner
+ * only reports a durable step outcome; it never implements task transitions. */
+export interface AiTaskRunnerOutcomePort {
+  commit(input: {
+    taskId: string;
+    taskRevision: number;
+    lease: AiTaskRunnerLease;
+    outcome: AiTaskRunnerTaskOutcome;
+  }): Promise<{ taskRevision: number; lease: AiTaskRunnerLease }>;
+}
+
 export interface AiTaskRunnerClock {
   now(): number;
   setTimeout(callback: () => void, delayMs: number): unknown;
@@ -129,6 +144,7 @@ export interface AiTaskRunnerDependencies {
   steps: AiTaskRunnerStepPort;
   plan: AiTaskRunnerPlanPort;
   effects: AiTaskRunnerEffectPort;
+  taskOutcome?: AiTaskRunnerOutcomePort;
   clock?: AiTaskRunnerClock;
 }
 
