@@ -9,11 +9,20 @@ Component({
     detached() { this.setData({ localDraft: {}, visibleFields: [], alive: false, generation: this.data.generation + 1 }); },
   },
   observers: {
-    "inputRevision,taskId,fields,submitHandler"() { this.setData({ localDraft: {}, errorLabel: "", generation: this.data.generation + 1 }); this.refreshFields(); },
+    "inputRevision,taskId,fields,submitHandler"() {
+      if (!this.data.alive) return;
+      this.setData({ localDraft: {}, errorLabel: "", generation: this.data.generation + 1 });
+      this.refreshFields();
+    },
+    "disabled"() {
+      if (!this.data.alive) return;
+      this.setData({ errorLabel: "", generation: this.data.generation + 1 });
+    },
   },
   methods: {
     refreshFields() {
-      const fields = (this.data.fields as ClarificationField[]).slice(0, 30);
+      if (!this.data.alive) return;
+      const fields: ClarificationField[] = Array.isArray(this.data.fields) ? this.data.fields.slice(0, 30) : [];
       const seen = new Set<string>();
       const visible = fields.filter(field => {
         if (!field || typeof field.key !== "string" || !/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(field.key) || ["__proto__", "constructor", "prototype"].includes(field.key) || typeof field.label !== "string" || seen.has(field.key)) return false;
@@ -22,7 +31,8 @@ Component({
       this.setData({ visibleFields: visible });
     },
     onFieldInput(event: WechatMiniprogram.CustomEvent) {
-      const key = event.currentTarget.dataset.key;
+      if (!this.data.alive) return;
+      const key = event?.currentTarget?.dataset?.key;
       const field = this.data.visibleFields.find(item => item.key === key);
       if (!field || field.readonly || this.data.disabled || this.data.submitting || !this.data.alive || typeof event.detail?.value !== "string") return;
       this.setData({ localDraft: { ...this.data.localDraft, [field.key]: event.detail.value.slice(0, 4000) } }); this.refreshFields();
@@ -34,8 +44,8 @@ Component({
       const generation = this.data.generation;
       const input = { taskId: this.data.taskId, inputRevision: this.data.inputRevision, draft: Object.fromEntries(this.data.visibleFields.map(field => [field.key, field.value ?? ""])) };
       this.setData({ submitting: true, errorLabel: "" });
-      try { await handler(input); if (this.data.alive && generation === this.data.generation) this.triggerEvent("submit", input); }
-      catch { if (this.data.alive && generation === this.data.generation) this.setData({ errorLabel: "提交失败，请重试" }); }
+      try { await handler(input); if (this.data.alive && !this.data.disabled && generation === this.data.generation) this.triggerEvent("submit", input); }
+      catch { if (this.data.alive && !this.data.disabled && generation === this.data.generation) this.setData({ errorLabel: "提交失败，请重试" }); }
       finally { if (this.data.alive) this.setData({ submitting: false }); }
     },
   },
