@@ -6,7 +6,7 @@ import type { AiScopeRepository } from './ai-scope.repository';
 import type { AiProviderProfileRecord } from './provider-profile.ports';
 import { ModelGatewayError, type GatewayContext } from './model-gateway.ports';
 import type { GatewayConnectionResolver } from './routed-model-transport';
-import { capabilityProfileFingerprint } from './capability-verification';
+import { capabilityNameSchema, capabilityProfileFingerprint } from './capability-verification';
 import { normalizeTenantModelBaseUrl } from './tenant-model-config.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
@@ -17,6 +17,7 @@ const saveSchema = z.object({
   protocol: z.literal('openai_chat_completions'), model: z.string().min(1).max(256).regex(/^[\w./:-]+$/u),
   baseUrl: z.string().min(1).max(2048), enabled: z.boolean(),
   maxOutputTokens: z.number().int().min(1).max(32768),
+  allowedCapabilities: z.array(capabilityNameSchema).max(7).refine(items => new Set(items).size === items.length).optional(),
   secretChange: z.discriminatedUnion('operation', [
     z.object({ operation: z.literal('retain') }).strict(),
     z.object({ operation: z.literal('replace'), apiKey: z.string().regex(/^[\x21-\x7e]{1,8192}$/u) }).strict(),
@@ -113,11 +114,16 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
       const updated = await tx.aiProviderProfile.updateMany({ where: { id: profile.id, scopeId: before.scopeId,
         scopeKind: 'PLATFORM', serviceMode: 'platform_managed', configRevision: input.expectedRevision },
         data: { configRevision: nextRevision, protocol: input.protocol, model: input.model,
+          ...(input.allowedCapabilities === undefined ? {} : { allowedCapabilities: input.allowedCapabilities }),
           credentialRef: this.reference(profile.id, nextRevision), enabled, disabledAt: enabled ? null : new Date() } });
       if (updated.count !== 1) throw new ModelGatewayError('CONFIG_INVALID');
       const data = { configRevision: nextRevision, baseUrl, maxOutputTokens: input.maxOutputTokens, credentialsEncrypted: encrypted };
       if (old) await tx.aiPlatformModelConnection.update({ where: { profileId: profile.id }, data });
       else await tx.aiPlatformModelConnection.create({ data: { profileId: profile.id, ...data } });
+      // A revocation observed while either write awaited must abort both writes.
+      // Sequential current checks do not constitute atomic dispatch authority.
+      const final = await this.management(profile.id);
+      if (final.scopeId !== before.scopeId || final.binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');
       return { profileId: profile.id, revision: nextRevision, enabled, credentialConfigured: Boolean(key) };
     });
   }

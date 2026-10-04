@@ -8,6 +8,7 @@ const { SecretBox } = require('../apps/api/src/common/secret-box');
 const { aiPersistenceScopeColumns } = require('../apps/api/src/modules/ai-native/persistence-scope');
 const { PrismaTenantModelProfileRepository } = require('../apps/api/src/modules/ai-native/tenant-model-profile.repository');
 const { PrismaProviderProfileRepository } = require('../apps/api/src/modules/ai-native/provider-profile.repository');
+const { ProviderCapabilityService } = require('../apps/api/src/modules/ai-native/provider-capability.service');
 const clone = value => structuredClone(value);
 const context = { tenantId: 'synthetic-tenant', workspaceId: 'synthetic-space', actorId: 'synthetic-user' };
 const settings = { protocol: 'openai_chat_completions', baseUrl: 'https://synthetic-model.example.test/v1', model: 'synthetic/model', enabled: true, expectedRevision: 0, apiKey: 'synthetic-secret-only' };
@@ -63,6 +64,77 @@ function harness() {
   const service = () => createPersistedTenantModelConfiguration({ db, authorize, secrets });
   return { state, db, service, authorize, secrets };
 }
+
+test('capability policy CAS advances config and Profile together, preserves BYOK and does not prove capability', async () => {
+  const h = harness(); await h.service().save(context, settings);
+  const cipher = h.state.configurations[0].credentialsEncrypted;
+  const result = await h.service().setAllowedCapabilities(context, { expectedRevision: 1, allowedCapabilities: ['text', 'streaming'] });
+  assert.deepEqual(result, { revision: 2, allowedCapabilities: ['text', 'streaming'] });
+  assert.equal(h.state.configurations[0].credentialsEncrypted, cipher);
+  assert.equal(h.state.configurations[0].revision, 2); assert.equal(h.state.profiles[0].configRevision, 2);
+  assert.deepEqual(h.state.profiles[0].allowedCapabilities, result.allowedCapabilities);
+  assert.equal(h.state.profiles[0].model, settings.model);
+  const preflight = new ProviderCapabilityService({ list: async () => [], upsert: async () => { throw Error('not a probe'); } });
+  const row = clone(h.state.profiles[0]);
+  const checked = await preflight.preflight(row, ['text']);
+  assert.equal(checked.allowed, false); assert.deepEqual(checked.missing, ['text']);
+  assert.equal(await h.service().credential(h.state.profiles[0].credentialRef, context), settings.apiKey);
+  assert.equal(JSON.stringify(result).includes(settings.apiKey), false);
+});
+
+test('policy write failure, commit rollback and revoked authority preserve both old revisions and policy', async () => {
+  for (const failure of ['profile', 'commit', 'revoked']) {
+    const h = harness(); await h.service().save(context, settings);
+    const before = { configurations: clone(h.state.configurations), profiles: clone(h.state.profiles) };
+    if (failure === 'revoked') h.state.revokeAfterProfile = true; else h.state.fail = failure;
+    await assert.rejects(h.service().setAllowedCapabilities(context, { expectedRevision: 1, allowedCapabilities: ['text'] }));
+    assert.deepEqual(h.state.configurations, before.configurations); assert.deepEqual(h.state.profiles, before.profiles);
+  }
+});
+
+test('policy and configuration competing for one revision have one winner; no silent merge', async () => {
+  const h = harness(); await h.service().save(context, settings);
+  const results = await Promise.allSettled([
+    h.service().setAllowedCapabilities(context, { expectedRevision: 1, allowedCapabilities: ['text'] }),
+    h.service().save(context, { ...settings, expectedRevision: 1, model: 'synthetic/changed' })
+  ]);
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(h.state.configurations[0].revision, 2); assert.equal(h.state.profiles[0].configRevision, 2);
+  const policyWon = results[0].status === 'fulfilled';
+  assert.deepEqual(h.state.profiles[0].allowedCapabilities, policyWon ? ['text'] : []);
+  assert.equal(h.state.profiles[0].model, policyWon ? settings.model : 'synthetic/changed');
+});
+
+test('policy commit response loss is not retried; rebuilt service reads committed revision', async () => {
+  const h = harness(); await h.service().save(context, settings); h.state.fail = 'ack';
+  await assert.rejects(h.service().setAllowedCapabilities(context, { expectedRevision: 1, allowedCapabilities: ['text'] }), /acknowledgement/);
+  assert.equal(h.state.calls.length, 2); h.state.fail = null;
+  assert.equal((await h.service().get(context)).revision, 2);
+  await assert.rejects(h.service().setAllowedCapabilities(context, { expectedRevision: 1, allowedCapabilities: [] }), code('CONFIG_INVALID'));
+  assert.deepEqual(h.state.profiles[0].allowedCapabilities, ['text']);
+});
+
+test('policy input whitelist, revision, tenant and absence are rejected without a transaction', async () => {
+  const h = harness();
+  for (const value of [
+    { expectedRevision: 1, allowedCapabilities: ['text', 'text'] },
+    { expectedRevision: 1, allowedCapabilities: ['invented'] },
+    { expectedRevision: 4294967295, allowedCapabilities: [] },
+    { expectedRevision: 1, allowedCapabilities: [], enabled: true }
+  ]) await assert.rejects(h.service().setAllowedCapabilities(context, value), code('CONFIG_INVALID'));
+  await assert.rejects(h.service().setAllowedCapabilities(context, { expectedRevision: 1, allowedCapabilities: ['text'] }), code('CONFIG_INVALID'));
+  await assert.rejects(h.service().setAllowedCapabilities({ ...context, tenantId: 'other' }, { expectedRevision: 1, allowedCapabilities: [] }), code('FORBIDDEN'));
+  assert.equal(h.state.calls.length, 0);
+});
+
+test('policy never enables retained BYOK while platform mode is selected; explicit empty clears allowlist', async () => {
+  const h = harness(); await h.service().save(context, settings);
+  await h.service().changeMode(context, { expectedRevision: 1, mode: 'platform_managed' });
+  await h.service().setAllowedCapabilities(context, { expectedRevision: 2, allowedCapabilities: ['text'] });
+  assert.equal(h.state.profiles[0].enabled, false); assert.equal(h.state.configurations[0].mode, 'platform_managed');
+  await h.service().setAllowedCapabilities(context, { expectedRevision: 3, allowedCapabilities: [] });
+  assert.deepEqual(h.state.profiles[0].allowedCapabilities, []); assert.equal(h.state.configurations[0].revision, 4);
+});
 
 test('configuration save materializes canonical tenant DEFAULT Profile with the same revision and vault reference', async () => {
   const h = harness(); await h.service().save(context, settings);

@@ -5,6 +5,8 @@ import { aiPersistenceScopeColumns } from './persistence-scope';
 import { checkedTenantModelRecord, PrismaTenantModelConfigRepository } from './tenant-model-config.repository';
 import { tenantModelMode } from './model-config-compatibility';
 import { tenantModelCredentialReference, type TenantModelConfigPorts, type TenantModelRecord } from './tenant-model-config.service';
+import { capabilityNameSchema } from './capability-verification';
+import type { AiProfileCapability } from './provider-profile.ports';
 
 type Db = Pick<PrismaClient, '$transaction' | 'aiTenantModelConfiguration' | 'systemParameterSet' | 'aiScope' | 'aiProviderProfile'>;
 type Repository = TenantModelConfigPorts['repository'];
@@ -26,6 +28,24 @@ export class PrismaTenantModelProfileRepository implements Repository {
   read(tenantId: string) { return this.records.read(tenantId); }
 
   async compareAndSwap(tenantId: string, expectedRevision: number, value: TenantModelRecord, caller?: GatewayContext) {
+    return this.commit(tenantId, expectedRevision, value, caller);
+  }
+
+  async setAllowedCapabilities(caller: GatewayContext, expectedRevision: number, value: readonly AiProfileCapability[]) {
+    const parsed = contextSchema.safeParse(caller), capabilities = z.array(capabilityNameSchema).max(7)
+      .refine(items => new Set(items).size === items.length).safeParse(value);
+    if (!parsed.success || !capabilities.success || !Number.isInteger(expectedRevision)
+      || expectedRevision < 1 || expectedRevision >= 4294967295) throw new ModelGatewayError('CONFIG_INVALID');
+    const context = parsed.data;
+    try { await this.authorize(structuredClone(context), 'manage'); } catch { throw new ModelGatewayError('FORBIDDEN'); }
+    const previous = await this.read(context.tenantId);
+    if (!previous?.settings || previous.revision !== expectedRevision) throw new ModelGatewayError('CONFIG_INVALID');
+    const next = { ...previous, revision: expectedRevision + 1 };
+    if (!await this.commit(context.tenantId, expectedRevision, next, context, capabilities.data)) throw new ModelGatewayError('CONFIG_INVALID');
+    return { revision: next.revision, allowedCapabilities: [...capabilities.data] };
+  }
+
+  private async commit(tenantId: string, expectedRevision: number, value: TenantModelRecord, caller?: GatewayContext, capabilities?: readonly AiProfileCapability[]) {
     const parsed = contextSchema.safeParse(caller), next = checkedTenantModelRecord(value);
     if (!parsed.success || parsed.data.tenantId !== tenantId || next.tenantId !== tenantId
       || !Number.isInteger(expectedRevision) || expectedRevision < 0 || expectedRevision >= 4294967295
@@ -53,6 +73,7 @@ export class PrismaTenantModelProfileRepository implements Repository {
         const enabled = mode === 'tenant_managed' && next.settings?.enabled === true && Boolean(next.credentialsEncrypted);
         const data = { configRevision: next.revision, credentialRef: tenantModelCredentialReference(tenantId, next.revision),
           enabled, disabledAt: enabled ? null : new Date(),
+          ...(capabilities === undefined ? {} : { allowedCapabilities: [...capabilities] }),
           ...(next.settings ? { model: next.settings.model, protocol: next.settings.protocol } : {}) };
         if (profile) {
           const updated = await tx.aiProviderProfile.updateMany({ where: { ...where, id: profile.id,
@@ -61,7 +82,7 @@ export class PrismaTenantModelProfileRepository implements Repository {
         } else if (next.settings) {
           await tx.aiProviderProfile.create({ data: { ...where, ...data, profileKey: 'default',
             serviceMode: 'tenant_managed', protocol: next.settings.protocol, provider: next.settings.protocol,
-            model: next.settings.model, allowedCapabilities: [] } });
+            model: next.settings.model, allowedCapabilities: [...(capabilities ?? [])] } });
         }
         // Revocation during any preceding await aborts this transaction. These
         // are sequential fresh authority checks, NOT atomic business admission.

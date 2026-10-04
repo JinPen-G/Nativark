@@ -6,6 +6,7 @@ const { PrismaPlatformModelConnection } = require('../apps/api/src/modules/ai-na
 const { SecretBox } = require('../apps/api/src/common/secret-box');
 const { RoutedModelTransport } = require('../apps/api/src/modules/ai-native/routed-model-transport');
 const { ChatCompletionsAdapter } = require('../apps/api/src/modules/ai-native/chat-completions.adapter');
+const { ProviderCapabilityService } = require('../apps/api/src/modules/ai-native/provider-capability.service');
 const clone = value => structuredClone(value);
 const context = { tenantId: 'synthetic-tenant', workspaceId: 'synthetic-space', actorId: 'synthetic-user' };
 const profile = { id: 'synthetic-profile', scopeId: 'synthetic-platform', scopeKind: 'PLATFORM', profileKey: 'default', role: 'DEFAULT',
@@ -27,7 +28,7 @@ function harness() {
     aiPlatformModelConnection: {
       findUnique: async args => target.row?.profileId === args.where.profileId ? clone(target.row) : null,
       create: async args => { if (state.fail === 'vault') throw Error('synthetic vault write failure'); target.row = clone(args.data); return clone(target.row); },
-      update: async args => { if (state.fail === 'vault') throw Error('synthetic vault write failure'); Object.assign(target.row, clone(args.data)); return clone(target.row); }
+      update: async args => { if (state.fail === 'vault') throw Error('synthetic vault write failure'); Object.assign(target.row, clone(args.data)); if (state.revokeAfterVault) state.management = false; return clone(target.row); }
     }
   });
   // Serialized transaction substitute checks real Prisma predicates and rollback.
@@ -54,6 +55,47 @@ function harness() {
   const service = () => new PrismaPlatformModelConnection(db, scopes, authority, secrets);
   return { state, service, db, scopes, authority, secrets };
 }
+
+test('platform policy is saved with vault/Profile revision and retain keeps the same usable secret', async () => {
+  const h = await configured(), old = clone(h.state.profile); h.state.mode = 'manage';
+  await h.service().save({ ...input, expectedRevision: 2, allowedCapabilities: ['text', 'streaming'], secretChange: { operation: 'retain' } });
+  assert.equal(h.state.profile.configRevision, 3); assert.equal(h.state.row.configRevision, 3);
+  assert.deepEqual(h.state.profile.allowedCapabilities, ['text', 'streaming']);
+  h.state.mode = 'invoke';
+  await assert.rejects(h.service().resolve(context, old), rejects('CONFIG_INVALID'));
+  assert.equal((await h.service().resolve(context, clone(h.state.profile))).credential, input.secretChange.apiKey);
+  const check = new ProviderCapabilityService({ list: async () => [], upsert: async () => { throw Error('not a probe'); } });
+  assert.equal((await check.preflight(clone(h.state.profile), ['text'])).allowed, false);
+});
+
+test('omitted platform policy preserves, explicit empty clears; invalid entries cannot change vault', async () => {
+  const h = await configured(); h.state.mode = 'manage';
+  const retained = { ...input, expectedRevision: 2, secretChange: { operation: 'retain' } };
+  const before = clone(h.state.row);
+  for (const allowedCapabilities of [['text', 'text'], ['invented']]) {
+    await assert.rejects(h.service().save({ ...retained, allowedCapabilities }), rejects('CONFIG_INVALID'));
+    assert.deepEqual(h.state.row, before);
+  }
+  await h.service().save(retained); assert.deepEqual(h.state.profile.allowedCapabilities, ['text']);
+  await h.service().save({ ...retained, expectedRevision: 3, allowedCapabilities: [] });
+  assert.deepEqual(h.state.profile.allowedCapabilities, []); assert.equal(h.state.row.configRevision, 4);
+});
+
+test('platform policy failure cannot leave new allowlist with old vault revision', async () => {
+  for (const failure of ['vault', 'commit']) {
+    const h = await configured(); h.state.mode = 'manage'; h.state.fail = failure;
+    const before = { profile: clone(h.state.profile), row: clone(h.state.row) };
+    await assert.rejects(h.service().save({ ...input, expectedRevision: 2, allowedCapabilities: ['streaming'], secretChange: { operation: 'retain' } }));
+    assert.deepEqual(h.state.profile, before.profile); assert.deepEqual(h.state.row, before.row);
+  }
+});
+
+test('management revoked during vault write aborts policy and configuration transaction', async () => {
+  const h = await configured(); h.state.mode = 'manage'; h.state.revokeAfterVault = true;
+  const before = { profile: clone(h.state.profile), row: clone(h.state.row) };
+  await assert.rejects(h.service().save({ ...input, expectedRevision: 2, allowedCapabilities: ['streaming'], secretChange: { operation: 'retain' } }), rejects('FORBIDDEN'));
+  assert.deepEqual(h.state.profile, before.profile); assert.deepEqual(h.state.row, before.row);
+});
 async function configured() { const h = harness(); await h.service().save(input); h.state.mode = 'invoke'; return h; }
 
 test('platform vault persists ciphertext and reconstructs actual resolver without exposing secrets in save result', async () => {

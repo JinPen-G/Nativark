@@ -4,6 +4,8 @@ import { SecretBox } from "../../common/secret-box";
 import { isPrivateOrLocalHost, parseOutboundUrl } from "../../common/outbound-url";
 import { ModelGatewayError, type GatewayContext, type GatewayProfile } from "./model-gateway.ports";
 import { tenantModelMode } from "./model-config-compatibility";
+import { capabilityNameSchema } from './capability-verification';
+import type { AiProfileCapability } from './provider-profile.ports';
 
 /** Protocol support, never a supplier/model catalogue. Extend through tested adapters. */
 export const tenantModelProtocols = ["openai_chat_completions"] as const;
@@ -27,6 +29,7 @@ export interface TenantModelConfigPorts {
     read(tenantId: string): Promise<TenantModelRecord | null>;
     /** Atomic compare-and-swap, including insert at revision zero. Never blind upsert. */
     compareAndSwap(tenantId: string, expectedRevision: number, next: TenantModelRecord, context?: GatewayContext): Promise<boolean>;
+    setAllowedCapabilities?(context: GatewayContext, expectedRevision: number, capabilities: readonly AiProfileCapability[]): Promise<{ revision: number; allowedCapabilities: readonly AiProfileCapability[] }>;
   };
 }
 
@@ -161,6 +164,18 @@ export class TenantModelConfigService {
 
   async selection(context: GatewayContext) { return this.select(context, 'read'); }
   async selectionForInvocation(context: GatewayContext) { return this.select(context, 'invoke'); }
+
+  /** Server application policy entry, not a model capability claim or public DTO.
+   * Only the atomic config/Profile adapter can implement this operation. */
+  async setAllowedCapabilities(context: GatewayContext, value: unknown) {
+    const parsed = z.object({ expectedRevision: z.number().int().min(1).max(4294967294),
+      allowedCapabilities: z.array(capabilityNameSchema).max(7).refine(items => new Set(items).size === items.length)
+    }).strict().safeParse(this.snapshot(value));
+    if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
+    context = await this.authorize(context, 'manage');
+    if (typeof this.ports.repository.setAllowedCapabilities !== 'function') throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
+    return this.ports.repository.setAllowedCapabilities(context, parsed.data.expectedRevision, parsed.data.allowedCapabilities);
+  }
 
   /** Mode selection is not a credential deletion operation. */
   async changeMode(context: GatewayContext, value: unknown) {
