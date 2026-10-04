@@ -7,6 +7,7 @@ import { AiServiceSummary, type AiServiceSummaryProps } from "./AiServiceSummary
 import { CapabilityStatus, type CapabilityStatusProps } from "./CapabilityStatus";
 import { KnowledgeSources, type KnowledgeSource } from "./KnowledgeSources";
 import { MemoryPreferences, type MemoryPreference } from "./MemoryPreferences";
+import { OrderFactsCard } from "./OrderFactsCard";
 import { toUsageDisplay, type UsageDisplayInput } from "./usage-display";
 export interface ReadOnlyBoardProps {
   tasks?: readonly unknown[];
@@ -21,6 +22,7 @@ export interface ReadOnlyBoardProps {
   usage?: UsageDisplayInput;
   sources?: readonly KnowledgeSource[];
   memories?: readonly MemoryPreference[];
+  orderFacts?: unknown;
 }
 /** Offline host composition only. It owns no transport, authorization or mutation. */
 export function ReadOnlyBoard({
@@ -36,6 +38,7 @@ export function ReadOnlyBoard({
   usage,
   sources,
   memories,
+  orderFacts,
 }: ReadOnlyBoardProps) {
   return (
     <section aria-label="AI 只读工作台">
@@ -52,6 +55,7 @@ export function ReadOnlyBoard({
       })()}
       <KnowledgeSources sources={sources} />
       <MemoryPreferences items={memories} />
+      {orderFacts !== undefined && <OrderFactsCard facts={orderFacts} />}
     </section>
   );
 }
