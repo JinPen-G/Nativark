@@ -1,25 +1,31 @@
-import { PrismaService } from '../database/prisma.service';
+import type { PrismaService } from '../database/prisma.service';
+import { Prisma, type AiProviderProfile } from '@prisma/client';
+import { z } from 'zod';
+import { capabilityNameSchema } from './capability-verification';
 import type { AiProfileScope, AiProviderProfileRecord, CreateAiProviderProfile, ProviderProfileRepository, UpdateAiProviderProfile } from './provider-profile.ports';
 
-type Delegate = {
-  findMany(args: unknown): Promise<unknown[]>;
-  findFirst(args: unknown): Promise<unknown | null>;
-  create(args: unknown): Promise<unknown>;
-  updateMany(args: unknown): Promise<{ count: number }>;
-};
+const profileRowSchema = z.object({
+  id: z.string().min(1).max(36), scopeId: z.string().min(1).max(36),
+  scopeKind: z.enum(['PLATFORM', 'TENANT', 'WORKSPACE']), profileKey: z.string().min(1).max(64),
+  role: z.enum(['DEFAULT', 'REASONING', 'VISION', 'EMBEDDING']), serviceMode: z.enum(['platform_managed', 'tenant_managed']),
+  protocol: z.string().min(1).max(64), provider: z.string().min(1).max(128), model: z.string().min(1).max(256),
+  credentialRef: z.string().min(1).max(191), configRevision: z.number().int().min(1).max(4294967295),
+  enabled: z.boolean(), disabledAt: z.date().nullable(),
+  allowedCapabilities: z.array(capabilityNameSchema).max(7).refine(values => new Set(values).size === values.length)
+});
 const keyWhere = (scope: AiProfileScope, profileKey?: string) => ({
   scopeId: scope.id, scopeKind: scope.kind, ...(profileKey === undefined ? {} : { profileKey })
 });
-function record(value: unknown): AiProviderProfileRecord {
-  const row = value as Record<string, unknown>;
-  if (!row || typeof row.id !== 'string' || typeof row.scopeId !== 'string' || typeof row.scopeKind !== 'string' || typeof row.profileKey !== 'string' || typeof row.configRevision !== 'number') throw new Error('AI_PROFILE_INVALID_ROW');
-  return { ...row, allowedCapabilities: row.allowedCapabilities as AiProviderProfileRecord['allowedCapabilities'], disabledAt: (row.disabledAt as Date | null) ?? null } as AiProviderProfileRecord;
+function record(value: AiProviderProfile): AiProviderProfileRecord {
+  const parsed = profileRowSchema.safeParse(value);
+  if (!parsed.success) throw new Error('AI_PROFILE_INVALID_ROW');
+  return parsed.data;
 }
 /** Real Prisma delegate adapter. Scope and revision predicates are always server-built. */
 export class PrismaProviderProfileRepository implements ProviderProfileRepository {
-  private readonly delegate: Delegate;
-  constructor(prisma: PrismaService) {
-    this.delegate = (prisma as unknown as { aiProviderProfile?: Delegate }).aiProviderProfile!;
+  private readonly delegate: PrismaService['aiProviderProfile'];
+  constructor(prisma: Pick<PrismaService, 'aiProviderProfile'>) {
+    this.delegate = prisma.aiProviderProfile;
     if (!this.delegate || typeof this.delegate.findMany !== 'function') throw new Error('AI_PROFILE_PRISMA_UNAVAILABLE');
   }
   async list(scope: AiProfileScope) {
@@ -35,10 +41,19 @@ export class PrismaProviderProfileRepository implements ProviderProfileRepositor
     return record(row);
   }
   async update(scope: AiProfileScope, profileKey: string, input: UpdateAiProviderProfile) {
-    if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1) throw new Error('AI_PROFILE_INVALID_REVISION');
+    if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1 || input.expectedRevision >= 4294967295) throw new Error('AI_PROFILE_INVALID_REVISION');
     const data = { ...(input.enabled === undefined ? {} : { enabled: input.enabled }), ...(input.model === undefined ? {} : { model: input.model }), ...(input.credentialRef === undefined ? {} : { credentialRef: input.credentialRef }), ...(input.allowedCapabilities === undefined ? {} : { allowedCapabilities: [...input.allowedCapabilities] }), ...(input.disabledAt === undefined ? {} : { disabledAt: input.disabledAt }), configRevision: { increment: 1 } };
-    const result = await this.delegate.updateMany({ where: { ...keyWhere(scope, profileKey), configRevision: input.expectedRevision }, data });
-    if (result.count !== 1) return null;
-    return this.get(scope, profileKey);
+    try {
+      // Extended unique predicate performs CAS and returns this exact write in one
+      // statement. A separate get could return a later writer's revision/config.
+      return record(await this.delegate.update({ where: {
+        scopeId_scopeKind_profileKey: { scopeId: scope.id, scopeKind: scope.kind, profileKey },
+        configRevision: input.expectedRevision
+      }, data }));
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') return null;
+      // Uncertain commit, validation or transport failure is not a CAS conflict.
+      throw error;
+    }
   }
 }
