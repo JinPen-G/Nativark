@@ -54,6 +54,8 @@ export interface AiTaskWorkbenchProps {
   selectedTaskId?: string | null;
   context: AiWorkbenchContext;
   visible?: boolean;
+  /** Explicit opt-in. Importing or mounting alone never reads. */
+  enabled?: boolean;
   readTask?: AiTaskDetailReader;
   onPageChange?: (page: number) => void;
   onRetry?: () => void;
@@ -78,9 +80,10 @@ export function AiTaskWorkbench({
   forbidden = false,
   page = 1,
   hasNext = false,
-  selectedTaskId: controlledTaskId = null,
+  selectedTaskId: controlledTaskId,
   context,
   visible = true,
+  enabled = false,
   readTask,
   onPageChange,
   onRetry,
@@ -90,24 +93,30 @@ export function AiTaskWorkbench({
   onCancel,
   onRecover,
 }: AiTaskWorkbenchProps) {
-  const [localTaskId, setLocalTaskId] = useState<string | null>(controlledTaskId);
+  const contextKey = JSON.stringify([context.audience, context.tenantId ?? null, context.workspaceId ?? null]);
+  const [selection, setSelection] = useState({ contextKey, taskId: controlledTaskId ?? null });
   const [detail, setDetail] = useState<AiTaskDetailProjection | null>(null);
   const [detailState, setDetailState] = useState<DetailState>("idle");
   const [detailError, setDetailError] = useState<string | null>(null);
   const [readNonce, setReadNonce] = useState(0);
   const epoch = useRef(0);
-  const taskId = controlledTaskId ?? localTaskId;
-
-  useEffect(() => {
-    setLocalTaskId(controlledTaskId);
-  }, [controlledTaskId]);
+  const resyncPending = useRef(false);
+  const taskId = controlledTaskId !== undefined ? controlledTaskId : selection.contextKey === contextKey ? selection.taskId : null;
+  const identity = JSON.stringify([contextKey, taskId, readNonce]);
+  const [loadedIdentity, setLoadedIdentity] = useState<string | null>(null);
+  const loadedReader = useRef<AiTaskDetailReader | undefined>(undefined);
+  const active = useRef({ identity, readTask, onResync, allowed: visible && enabled && !forbidden });
+  active.current = { identity, readTask, onResync, allowed: visible && enabled && !forbidden };
+  const currentDetail = active.current.allowed && loadedIdentity === identity && loadedReader.current === readTask ? detail : null;
 
   useEffect(() => {
     epoch.current += 1;
+    resyncPending.current = false;
     const currentEpoch = epoch.current;
     setDetail(null);
     setDetailError(null);
-    if (!visible) {
+    resyncPending.current = false;
+    if (!visible || forbidden) {
       setDetailState("hidden");
       return;
     }
@@ -115,32 +124,43 @@ export function AiTaskWorkbench({
       setDetailState("idle");
       return;
     }
-    if (typeof readTask !== "function") {
+    if (!enabled || typeof readTask !== "function") {
       setDetailState("unavailable");
       return;
     }
     const abort = new AbortController();
     setDetailState("loading");
-    void readTask(taskId, context, abort.signal).then(
+    void Promise.resolve().then(() => {
+      if (abort.signal.aborted) return null;
+      return readTask(taskId, context, abort.signal);
+    }).then(
       (next) => {
-        if (currentEpoch !== epoch.current || abort.signal.aborted) return;
+        if (currentEpoch !== epoch.current || abort.signal.aborted || !active.current.allowed || active.current.identity !== identity || active.current.readTask !== readTask) return;
+        if (!next || typeof next !== "object" || Array.isArray(next)) {
+          setDetailState("unavailable");
+          return;
+        }
         setDetail(next);
+        loadedReader.current = readTask;
+        setLoadedIdentity(identity);
         setDetailState("ready");
       },
       () => {
-        if (currentEpoch !== epoch.current || abort.signal.aborted) return;
+        if (currentEpoch !== epoch.current || abort.signal.aborted || !active.current.allowed || active.current.identity !== identity || active.current.readTask !== readTask) return;
         setDetailError("任务详情读取失败，请重新读取");
         setDetailState("failed");
       },
     );
     return () => {
+      epoch.current += 1;
       abort.abort();
     };
-  }, [context, readTask, taskId, visible, readNonce]);
+  }, [contextKey, readTask, taskId, visible, enabled, forbidden, readNonce]);
 
   const selectTask = (nextTaskId: string) => {
     epoch.current += 1;
-    setLocalTaskId(nextTaskId);
+    if (!visible || forbidden) return;
+    setSelection({ contextKey, taskId: nextTaskId });
     setDetail(null);
     setDetailError(null);
     setDetailState(visible && readTask ? "loading" : "unavailable");
@@ -148,16 +168,29 @@ export function AiTaskWorkbench({
   };
 
   const requestResync = async () => {
-    if (!taskId || !onResync) return;
+    if (!taskId || !onResync || !active.current.allowed || resyncPending.current) return;
+    resyncPending.current = true;
     epoch.current += 1;
+    const resyncEpoch = epoch.current;
     setDetail(null);
     setDetailError(null);
     setDetailState(readTask ? "loading" : "unavailable");
-    setReadNonce((value) => value + 1);
-    await onResync(taskId, context);
+    try {
+      await onResync(taskId, context);
+      if (epoch.current !== resyncEpoch || active.current.identity !== identity || active.current.onResync !== onResync || !active.current.allowed) return;
+      setReadNonce((value) => value + 1);
+    } catch (error) {
+      if (epoch.current === resyncEpoch && active.current.identity === identity && active.current.allowed) {
+        setDetailError("任务重新同步失败，请重新读取");
+        setDetailState("failed");
+      }
+      throw error;
+    } finally {
+      if (epoch.current === resyncEpoch) resyncPending.current = false;
+    }
   };
 
-  const title = !taskId
+  const title = forbidden ? "任务不可见：无权限" : !visible ? "当前工作台不可见" : !enabled ? "工作台读取尚未启用" : !taskId
     ? "请选择一个 AI 任务"
     : detailState === "loading"
       ? "正在读取任务详情…"
@@ -168,8 +201,8 @@ export function AiTaskWorkbench({
           : detailState === "hidden"
             ? "当前工作台不可见"
             : "任务详情";
-  const eventBatch = detail?.eventTimeline && detail.events
-    ? consumePolledEvents(detail.eventTimeline, detail.events)
+  const eventBatch = currentDetail?.eventTimeline && currentDetail.events
+    ? consumePolledEvents(currentDetail.eventTimeline, currentDetail.events)
     : null;
 
   return (
@@ -196,7 +229,7 @@ export function AiTaskWorkbench({
             onAction={requestResync}
           />
         )}
-        {detailState === "ready" && detail && taskId && (
+        {detailState === "ready" && currentDetail && taskId && (
           <>
             {eventBatch?.resyncRequired && (
               <Alert
@@ -205,30 +238,30 @@ export function AiTaskWorkbench({
                 action={onResync ? <ActionButton label="重新读取事件" pendingLabel="读取中…" onAction={requestResync} /> : undefined}
               />
             )}
-            <TaskTimeline taskId={taskId} steps={detail.steps} />
-            {detail.fields && <MissingFieldsPanel fields={detail.fields} draft={detail.draft ?? {}} readOnly />}
-            {detail.proposal && <ProposalPreview proposal={detail.proposal} />}
-            {detail.proposalRef && (
+            <TaskTimeline taskId={taskId} steps={currentDetail.steps} />
+            {currentDetail.fields && <MissingFieldsPanel fields={currentDetail.fields} draft={currentDetail.draft ?? {}} readOnly />}
+            {currentDetail.proposal && <ProposalPreview proposal={currentDetail.proposal} />}
+            {currentDetail.proposalRef && (
               <HumanConfirmShell
-                proposalId={detail.proposalRef.proposalId}
-                revision={detail.proposalRef.revision}
+                proposalId={currentDetail.proposalRef.proposalId}
+                revision={currentDetail.proposalRef.revision}
                 available={Boolean(onConfirm)}
                 onConfirm={onConfirm}
               />
             )}
-            {detail.actionStatus && (
+            {currentDetail.actionStatus && (
               <CancelRecoveryStatus
-                status={detail.actionStatus}
+                status={currentDetail.actionStatus}
                 canCancel={Boolean(onCancel)}
                 canRecover={Boolean(onRecover)}
                 onCancel={onCancel}
                 onRecover={onRecover}
               />
             )}
-            {detail.sources && <KnowledgeSources sources={detail.sources} />}
-            {detail.memories && <MemoryPreferences items={detail.memories} />}
-            {detail.serviceSummary && <AiServiceSummary summary={detail.serviceSummary} />}
-            {detail.assessments && <CapabilityStatus assessments={detail.assessments} />}
+            {currentDetail.sources && <KnowledgeSources sources={currentDetail.sources} />}
+            {currentDetail.memories && <MemoryPreferences items={currentDetail.memories} />}
+            {currentDetail.serviceSummary && <AiServiceSummary summary={currentDetail.serviceSummary} />}
+            {currentDetail.assessments && <CapabilityStatus assessments={currentDetail.assessments} />}
           </>
         )}
         {detailState === "unavailable" && <Alert type="warning" message="宿主未提供任务详情读取能力；不会自动请求或补造结果。" />}

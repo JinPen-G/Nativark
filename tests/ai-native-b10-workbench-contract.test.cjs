@@ -23,8 +23,8 @@ test('detail reads are epoch-gated and visibility-gated', () => {
   assert.match(source, /setDetailError\(null\)/);
   assert.match(source, /const currentEpoch = epoch\.current/);
   assert.match(source, /currentEpoch !== epoch\.current \|\| abort\.signal\.aborted/);
-  assert.match(source, /if \(!visible\)/);
-  assert.match(source, /return \(\) => \{\s*abort\.abort\(\);/s);
+  assert.match(source, /if \(!visible \|\| forbidden\)/);
+  assert.match(source, /return \(\) => \{\s*epoch\.current \+= 1;\s*abort\.abort\(\);/s);
 });
 
 test('status and confirmation output stays host-gated', () => {
@@ -42,5 +42,8 @@ test('workbench uses the existing event consumer and exposes resync instead of i
   assert.match(source, /重新读取快照/);
   assert.match(source, /setReadNonce\(\(value\) => value \+ 1\)/);
   assert.match(source, /const requestResync = async/);
+  assert.match(source, /enabled = false/);
+  assert.match(source, /if \(!enabled \|\| typeof readTask !== "function"\)/);
+  assert.match(source, /resyncPending\.current/);
   assert.doesNotMatch(source, /cursor\s*\+\+|Number\([^)]*cursor|parseInt\([^)]*cursor/);
 });
