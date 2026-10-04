@@ -5,6 +5,7 @@
     "state-view": "/components/state-view/index",
     "money-text": "/components/money-text/index",
     "status-tag": "/components/status-tag/index",
-    "sheet": "/components/sheet/index"
+    "sheet": "/components/sheet/index",
+    "ai-task-workbench": "/components/ai-native/ai-task-workbench/index"
   }
 }
