@@ -28,12 +28,13 @@ export interface BudgetQuote {
   quantity: AiUsageQuantityDraft;
   /** Scope keys are resolved by this trusted port, never supplied by the model. */
   policies: BudgetPolicyKey[];
+  consumerScope: BudgetPolicyKey;
   evidenceHash: string;
   expiresAt: Date;
 }
 export interface BudgetQuotePort { quote(command: Readonly<BudgetReserveCommand>, grant: Readonly<BudgetGrant>): Promise<BudgetQuote>; }
 export interface BudgetRecord {
-  id: string; revision: number; association: AiUsageAssociationDraft; callId: string; sceneCode: string;
+  id: string; scopeId: string; scopeKind: 'PLATFORM' | 'TENANT' | 'WORKSPACE'; revision: number; storageVersion: Date; association: AiUsageAssociationDraft; callId: string; sceneCode: string;
   status: BudgetStatus; reserved: AiUsageQuantityDraft; actual: AiUsageQuantityDraft | null;
   dispatched: boolean; unknownReason: string | null; expiresAt: Date;
 }
