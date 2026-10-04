@@ -25,6 +25,7 @@ export interface BudgetQuote {
   callId: string;
   sceneCode: string;
   model: string;
+  actorId: string;
   quantity: AiUsageQuantityDraft;
   /** Scope keys are resolved by this trusted port, never supplied by the model. */
   policies: BudgetPolicyKey[];
