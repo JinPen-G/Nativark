@@ -15,6 +15,7 @@ const record = { id: 'reservation', scopeId: 'workspace', scopeKind: 'WORKSPACE'
 function fakeDb() {
   const row = { id: record.id, scopeId: record.scopeId, scopeKind: record.scopeKind, actorId: record.actorId, status: 'reserved', dispatchState: 'dispatched', reservedTokens: 10n, reservedCalls: null, reservedMoney: null, moneyCurrency: null, actualTokens: null, actualCalls: null, actualMoney: null, unknownReason: null, expiresAt: record.expiresAt, updatedAt: record.storageVersion, callId: record.callId, idempotencyKey: 'idem', sceneCode: 'scene', configRevision: 2, tenantId: 'tenant', workspaceId: 'workspace' };
   const ledger = new Map();
+  Object.assign(row, { requestId: association.requestId, runId: association.runId, stepId: association.stepId, actionId: association.actionId, priceVersion: association.priceVersion });
   const db = {
     aiBudgetLedgerEntry: { findUnique: async ({ where }) => ledger.get(`${where.reservationId_eventKey.reservationId}:${where.reservationId_eventKey.eventKey}`) ?? null,
       create: async ({ data }) => { ledger.set(`${data.reservationId}:${data.eventKey}`, data); return data; } },
@@ -53,7 +54,7 @@ test('subscription entitlement adapter consumes only a formal catalog row', asyn
 });
 
 test('persisted evidence adapter rejects a row from another scope', async () => {
-  const adapter = new PersistedBudgetEvidenceAdapter({ readDispatch: async () => ({ state: 'dispatched', reservationId: 'reservation', callId: 'call', actorId: 'actor', scopeKey: 'TENANT:other' }), readUsage: async () => { throw new Error('must not read usage'); } });
+  const adapter = new PersistedBudgetEvidenceAdapter({ readDispatch: async () => ({ state: 'dispatched', reservationId: 'reservation', requestId: association.requestId, runId: association.runId, stepId: association.stepId, actionId: association.actionId, callId: 'call', actorId: 'actor', scopeKey: 'TENANT:other', configRevision: association.config.configRevision, priceVersion: association.priceVersion, dispatchToken: 'dispatch' }), readUsage: async () => { throw new Error('must not read usage'); } });
   await assert.rejects(() => adapter.dispatch(record), error => error instanceof BudgetError && error.code === 'FORBIDDEN');
 });
 
@@ -62,7 +63,7 @@ test('settled actual usage remains in the durable budget aggregate', async () =>
     gates: { platform: { enabled: true, revision: 1 }, tenant: { enabled: true, revision: 1 }, scene: { enabled: true, revision: 1 } },
     sceneCode: 'scene', allowedModels: ['model'], allowedScenes: ['scene'], budget: { state: 'limited', quantity: { unit: 'tokens', value: 10 } }, maxConcurrent: 2, maxCallsPerRun: 2 };
   const policyRow = { id: 'policy', scopeId: 'workspace', scopeKind: 'WORKSPACE', sceneCode: 'scene', configRevision: 2, settingsJson: settings };
-  const db = { aiBudgetPolicy: { findUnique: async () => policyRow }, aiBudgetAllocation: { findMany: async () => [{ reservation: { status: 'settled', reservedTokens: 4n, reservedCalls: null, reservedMoney: null, actualTokens: 10n, actualCalls: null, actualMoney: null, moneyCurrency: null, runId: 'old' } }] }, aiBudgetReservation: { create: async () => { throw new Error('must reject before create'); } }, $transaction: async callback => callback(db), $queryRaw: async () => [{ id: 'policy' }] };
+  const db = { aiScope: { findUnique: async () => ({ id: 'workspace', kind: 'WORKSPACE', tenantId: 'tenant', workspaceId: 'workspace' }) }, aiBudgetPolicy: { findUnique: async () => policyRow }, aiBudgetAllocation: { findMany: async () => [{ reservation: { status: 'settled', reservedTokens: 4n, reservedCalls: null, reservedMoney: null, actualTokens: 10n, actualCalls: null, actualMoney: null, moneyCurrency: null, runId: 'old' } }] }, aiBudgetReservation: { create: async () => { throw new Error('must reject before create'); } }, $transaction: async callback => callback(db), $queryRaw: async () => [{ id: 'policy' }] };
   const repo = new PrismaBudgetRepository(db);
   const quote = { association, callId: 'call-new', sceneCode: 'scene', model: 'model', actorId: 'actor', quantity: { unit: 'tokens', value: 1 }, policies: [{ scopeId: 'workspace', scopeKind: 'WORKSPACE', sceneCode: 'scene' }], consumerScope: { scopeId: 'workspace', scopeKind: 'WORKSPACE', sceneCode: 'scene' }, evidenceHash: 'b'.repeat(64), expiresAt: new Date('2026-10-04T12:01:00.000Z') };
   await assert.rejects(() => repo.reserve(quote, { association, callId: 'call-new', sceneCode: 'scene', expiresAt: quote.expiresAt }, 'identity', async () => {}), error => error instanceof BudgetError && error.code === 'EXHAUSTED');

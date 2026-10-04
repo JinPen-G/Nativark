@@ -48,12 +48,15 @@ export class ServerBudgetAuthorityAdapter implements BudgetAuthority {
 }
 
 export interface PersistedBudgetEvidenceSource {
-  readDispatch(reservationId: string): Promise<{ state: 'not_dispatched' | 'dispatched' | 'unknown'; reservationId: string; callId: string; actorId: string; scopeKey: string }>;
-  readUsage(reservationId: string, evidenceRef: string, reconcile: boolean): Promise<BudgetUsageEvidence & { reservationId: string; callId: string; actorId: string; scopeKey: string }>;
+  readDispatch(reservationId: string): Promise<{ state: 'not_dispatched' | 'dispatched' | 'unknown'; reservationId: string; requestId: string; runId: string; stepId: string; actionId: string; callId: string; actorId: string; scopeKey: string; configRevision: number; priceVersion: string; dispatchToken: string | null }>;
+  readUsage(reservationId: string, evidenceRef: string, reconcile: boolean): Promise<BudgetUsageEvidence & { reservationId: string; requestId: string; runId: string; stepId: string; actionId: string; callId: string; actorId: string; scopeKey: string; configRevision: number; priceVersion: string; dispatchToken: string }>;
 }
 const scopeKey = (record: Readonly<BudgetRecord>) => `${record.scopeKind}:${record.scopeId}`;
 function verify(record: Readonly<BudgetRecord>, row: { reservationId: string; callId: string; actorId: string; scopeKey: string }) {
-  if (row.reservationId !== record.id || row.callId !== record.callId || !row.actorId || row.scopeKey !== scopeKey(record)) throw new BudgetError('FORBIDDEN');
+  const linked = row as typeof row & { requestId?: string; runId?: string; stepId?: string; actionId?: string; configRevision?: number; priceVersion?: string; dispatchToken?: string | null };
+  if (row.reservationId !== record.id || row.callId !== record.callId || row.actorId !== record.actorId || row.scopeKey !== scopeKey(record)
+    || linked.requestId !== record.association.requestId || linked.runId !== record.association.runId || linked.stepId !== record.association.stepId || linked.actionId !== record.association.actionId
+    || linked.configRevision !== record.association.config.configRevision || linked.priceVersion !== record.association.priceVersion) throw new BudgetError('FORBIDDEN');
 }
 
 /** Reads persisted dispatch/usage facts; caller strings never become evidence. */
@@ -62,7 +65,9 @@ export class PersistedBudgetEvidenceAdapter {
     if (!source?.readDispatch || !source.readUsage) throw new BudgetError('UNAVAILABLE');
   }
   async dispatch(record: Readonly<BudgetRecord>) {
-    const row = await this.source.readDispatch(record.id); verify(record, row); return row.state;
+    const row = await this.source.readDispatch(record.id); verify(record, row);
+    if (row.state !== 'not_dispatched' && !row.dispatchToken) throw new BudgetError('UNAVAILABLE');
+    return row.state;
   }
   async usage(record: Readonly<BudgetRecord>, evidenceRef: string, reconcile: boolean) {
     if (!evidenceRef) throw new BudgetError('INVALID');

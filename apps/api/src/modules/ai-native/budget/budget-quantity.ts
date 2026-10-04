@@ -9,7 +9,12 @@ export function quantityAtoms(quantity: AiUsageQuantityDraft): bigint {
     return BigInt(quantity.amount.replace('.', ''));
   }
   if ((quantity.unit !== 'tokens' && quantity.unit !== 'calls') || !Number.isSafeInteger(quantity.value) || quantity.value < 0) throw new BudgetError('INVALID');
-  return BigInt(quantity.value);
+  const atoms = BigInt(quantity.value);
+  // Prisma maps calls to unsigned INT and tokens to unsigned BIGINT in the
+  // budget tables. Reject before any repository write, never rely on SQL error.
+  if (quantity.unit === 'calls' && atoms > 4294967295n) throw new BudgetError('INVALID');
+  if (quantity.unit === 'tokens' && atoms > 18446744073709551615n) throw new BudgetError('INVALID');
+  return atoms;
 }
 export function sameUnit(left: AiUsageQuantityDraft, right: AiUsageQuantityDraft): boolean {
   quantityAtoms(left); quantityAtoms(right);

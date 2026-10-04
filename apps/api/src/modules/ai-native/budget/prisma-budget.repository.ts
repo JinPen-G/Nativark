@@ -2,17 +2,20 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import type { AiUsageSettingsDraft } from '@rental-os/shared';
 import { BudgetError, type BudgetPolicy, type BudgetPolicyKey, type BudgetQuote, type BudgetRecord, type BudgetReserveCommand, type BudgetTransactionRepository, type BudgetUsageEvidence } from './budget.ports';
-import { quantityAtoms } from './budget-quantity';
+import { quantityAtoms, sameUnit } from './budget-quantity';
 import { validateBudgetSettings } from './budget-settings';
 
-type Db = Pick<PrismaClient, 'aiBudgetPolicy' | 'aiBudgetReservation' | 'aiBudgetLedgerEntry' | 'aiBudgetAllocation' | '$transaction'>;
+type Db = Pick<PrismaClient, 'aiScope' | 'aiBudgetPolicy' | 'aiBudgetReservation' | 'aiBudgetLedgerEntry' | 'aiBudgetAllocation' | '$transaction'>;
 type Tx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 const scopeKinds = ['PLATFORM', 'TENANT', 'WORKSPACE'] as const;
 const policyWhere = (key: BudgetPolicyKey) => ({ scopeId: key.scopeId, scopeKind: key.scopeKind, sceneCode: key.sceneCode });
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const rowScope = (value: BudgetPolicyKey) => ({ scopeId: value.scopeId, scopeKind: value.scopeKind });
 const decimalAtoms = (value: Prisma.Decimal | null) => value === null ? 0n : BigInt(value.toFixed(6).replace('.', ''));
+const decimalString = (atoms: bigint) => {
+  const raw = atoms.toString().padStart(7, '0');
+  return `${raw.slice(0, -6)}.${raw.slice(-6)}`;
+};
 const policyEnabled = (settings: AiUsageSettingsDraft) => Object.values(settings.gates).every(gate => gate.enabled)
   && settings.budget.state === 'limited' && settings.maxConcurrent > 0 && settings.maxCallsPerRun > 0
   && settings.allowedModels.length > 0 && settings.allowedScenes.length > 0;
@@ -29,13 +32,13 @@ function quantityFields(quantity: BudgetUsageEvidence['quantity'], prefix: 'rese
   if (quantity.unit === 'tokens') return { [`${prefix}Tokens`]: atoms };
   if (quantity.unit === 'calls') return { [`${prefix}Calls`]: Number(atoms) };
   const money = quantity as Extract<BudgetUsageEvidence['quantity'], { unit: 'money' }>;
-  return { [`${prefix}Money`]: (Number(atoms) / 1_000_000).toFixed(6), moneyCurrency: money.currency };
+  return { [`${prefix}Money`]: decimalString(atoms), moneyCurrency: money.currency };
 }
 function ledgerQuantityFields(quantity: BudgetUsageEvidence['quantity']) {
   const atoms = quantityAtoms(quantity);
   if (quantity.unit === 'tokens') return { inputTokens: atoms };
   if (quantity.unit === 'calls') return { calls: Number(atoms) };
-  return { moneyAmount: (Number(atoms) / 1_000_000).toFixed(6), moneyCurrency: (quantity as Extract<BudgetUsageEvidence['quantity'], { unit: 'money' }>).currency };
+  return { moneyAmount: decimalString(atoms), moneyCurrency: (quantity as Extract<BudgetUsageEvidence['quantity'], { unit: 'money' }>).currency };
 }
 function sameLedgerPayload(existing: { kind: string; evidenceHash: string | null; reason: string | null; inputTokens: bigint | null; calls: number | null; moneyAmount: Prisma.Decimal | null; moneyCurrency: string | null }, input: { action: string; usage?: BudgetUsageEvidence; reason?: string }) {
   const incoming = input.usage ? ledgerQuantityFields(input.usage.quantity) : {};
@@ -85,7 +88,7 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
   }
 
   private async lockPolicies(tx: Tx, keys: readonly BudgetPolicyKey[]) {
-    const ordered = [...keys].sort((a, b) => scopeKinds.indexOf(a.scopeKind) - scopeKinds.indexOf(b.scopeKind) || a.scopeId.localeCompare(b.scopeId));
+    const ordered = [...keys].sort((a, b) => scopeKinds.indexOf(a.scopeKind) - scopeKinds.indexOf(b.scopeKind) || a.scopeId.localeCompare(b.scopeId) || a.sceneCode.localeCompare(b.sceneCode));
     const rows = [] as Array<{ id: string; scopeId: string; scopeKind: string; sceneCode: string; configRevision: number; settingsJson: Prisma.JsonValue }>;
     for (const key of ordered) {
       const found = await tx.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: policyWhere(key) }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } });
@@ -93,12 +96,26 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
       // Locking the policy row is explicit and database-side; a stale update
       // cannot pass if another transaction changed its revision.
       await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_budget_policies WHERE id = ${found.id} FOR UPDATE`);
-      rows.push(found);
+      const locked = await tx.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: policyWhere(key) }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } });
+      if (!locked) throw new BudgetError('UNAVAILABLE');
+      rows.push(locked);
     }
     return rows;
   }
 
+  private async assertScopeOwnership(tx: Tx, row: { scopeId: string; scopeKind: string }, association: BudgetQuote['association']) {
+    const scope = await tx.aiScope.findUnique({ where: { id: row.scopeId }, select: { id: true, kind: true, tenantId: true, workspaceId: true } });
+    if (!scope || scope.kind !== row.scopeKind) throw new BudgetError('FORBIDDEN');
+    if (row.scopeKind === 'PLATFORM') return;
+    if (association.scope.kind === 'platform') throw new BudgetError('FORBIDDEN');
+    if (scope.tenantId !== association.scope.tenantId) throw new BudgetError('FORBIDDEN');
+    if (row.scopeKind === 'WORKSPACE' && (association.scope.kind !== 'workspace' || scope.workspaceId !== association.scope.workspaceId)) throw new BudgetError('FORBIDDEN');
+  }
+
   async reserve(quote: BudgetQuote, command: BudgetReserveCommand, identityHash: string, revalidate: () => Promise<void>) {
+    quote = structuredClone(quote);
+    command = structuredClone(command);
+    quantityAtoms(quote.quantity);
     const consumer = quote.consumerScope;
     const tenantId = quote.association.scope.kind === 'platform' ? null : quote.association.scope.tenantId;
     const workspaceId = quote.association.scope.kind === 'workspace' ? quote.association.scope.workspaceId : null;
@@ -107,6 +124,9 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
       return await this.db.$transaction(async tx => {
         const rows = await this.lockPolicies(tx, quote.policies);
         if (rows.some(row => row.sceneCode !== command.sceneCode)) throw new BudgetError('EXHAUSTED');
+        if (new Set(quote.policies.map(policy => `${policy.scopeKind}:${policy.scopeId}:${policy.sceneCode}`)).size !== quote.policies.length) throw new BudgetError('INVALID');
+        if (!rows.some(row => row.scopeId === consumer.scopeId && row.scopeKind === consumer.scopeKind && row.sceneCode === command.sceneCode)) throw new BudgetError('FORBIDDEN');
+        for (const row of rows) await this.assertScopeOwnership(tx, row, quote.association);
         const requested = quantityAtoms(quote.quantity);
         for (const row of rows) {
           const settings = policy(row).settings;
@@ -114,7 +134,7 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
           if (!settings.gates.platform.enabled || !settings.gates.tenant.enabled || !settings.gates.scene.enabled || settings.budget.state !== 'limited' || settings.maxConcurrent < 1 || settings.maxCallsPerRun < 1 || !settings.allowedModels.includes(quote.model) || !settings.allowedScenes.includes(command.sceneCode)) throw new BudgetError('EXHAUSTED');
           const active = allocations.filter(item => item.reservation.status === 'reserved' || item.reservation.status === 'pending_reconciliation');
           const concurrent = active.length;
-          if (concurrent >= settings.maxConcurrent || active.filter(item => item.reservation.runId === quote.association.runId).length >= settings.maxCallsPerRun) throw new BudgetError('EXHAUSTED');
+          if (concurrent >= settings.maxConcurrent || allocations.filter(item => item.reservation.runId === quote.association.runId).length >= settings.maxCallsPerRun) throw new BudgetError('EXHAUSTED');
           if (settings.budget.quantity.unit !== quote.quantity.unit || (settings.budget.quantity.unit === 'money' && quote.quantity.unit === 'money' && settings.budget.quantity.currency !== quote.quantity.currency)) throw new BudgetError('EXHAUSTED');
           const limit = quantityAtoms(settings.budget.quantity);
           const used = settings.budget.quantity.unit === 'tokens' ? allocations.reduce((sum, item) => sum + (item.reservation.status === 'settled' ? (item.reservation.actualTokens ?? 0n) : (item.reservation.reservedTokens ?? 0n)), 0n) : settings.budget.quantity.unit === 'calls' ? BigInt(allocations.reduce((sum, item) => sum + (item.reservation.status === 'settled' ? (item.reservation.actualCalls ?? 0) : (item.reservation.reservedCalls ?? 0)), 0)) : allocations.reduce((sum, item) => sum + decimalAtoms(item.reservation.status === 'settled' ? item.reservation.actualMoney : item.reservation.reservedMoney), 0n);
@@ -148,19 +168,32 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     return { id: row.id, scopeId: row.scopeId, scopeKind: row.scopeKind as BudgetRecord['scopeKind'], actorId: row.actorId, revision: row.configRevision, storageVersion: row.updatedAt, association, callId: row.callId, sceneCode: row.sceneCode, status: row.status === 'settled' ? 'settled' : row.status === 'released' ? 'released' : row.status === 'pending_reconciliation' ? 'pending_reconciliation' : 'reserved', reserved, actual, dispatched: row.dispatchState === 'dispatched' || row.dispatchState === 'unknown', unknownReason: row.unknownReason, expiresAt: row.expiresAt };
   }
 
-  async get(id: string, association: BudgetRecord['association']) {
-    const row = await this.db.aiBudgetReservation.findUnique({ where: { id }, select: { id: true, scopeId: true, scopeKind: true, actorId: true, status: true, dispatchState: true, reservedTokens: true, reservedCalls: true, reservedMoney: true, moneyCurrency: true, actualTokens: true, actualCalls: true, actualMoney: true, unknownReason: true, expiresAt: true, updatedAt: true, callId: true, idempotencyKey: true, sceneCode: true, configRevision: true, tenantId: true, workspaceId: true } });
-    if (!row || (association.scope.kind !== 'platform' && row.tenantId !== association.scope.tenantId) || (association.scope.kind === 'workspace' && row.workspaceId !== association.scope.workspaceId)) return null;
+  private async readRecord(db: Pick<Tx, 'aiBudgetReservation'>, id: string, association: BudgetRecord['association']) {
+    const row = await db.aiBudgetReservation.findUnique({ where: { id }, select: { id: true, scopeId: true, scopeKind: true, actorId: true, status: true, dispatchState: true, reservedTokens: true, reservedCalls: true, reservedMoney: true, moneyCurrency: true, actualTokens: true, actualCalls: true, actualMoney: true, unknownReason: true, expiresAt: true, updatedAt: true, callId: true, idempotencyKey: true, sceneCode: true, configRevision: true, tenantId: true, workspaceId: true, requestId: true, runId: true, stepId: true, actionId: true, priceVersion: true } });
+    if (!row || row.scopeKind !== association.scope.kind.toUpperCase()
+      || row.requestId !== association.requestId || row.runId !== association.runId || row.stepId !== association.stepId || row.actionId !== association.actionId
+      || row.idempotencyKey !== association.idempotencyKey || row.priceVersion !== association.priceVersion || row.configRevision !== association.config.configRevision
+      || (association.scope.kind !== 'platform' && row.tenantId !== association.scope.tenantId)
+      || (association.scope.kind === 'workspace' && row.workspaceId !== association.scope.workspaceId)) return null;
     return this.record(row, association);
   }
 
+  async get(id: string, association: BudgetRecord['association']) {
+    return this.readRecord(this.db, id, structuredClone(association));
+  }
+
   async mutate(record: BudgetRecord, input: { action: 'dispatch' | 'settle' | 'release' | 'unknown' | 'reconcile'; eventKey: string; usage?: BudgetUsageEvidence; reason?: string }, revalidate: () => Promise<void>) {
+    record = structuredClone(record);
+    input = structuredClone(input);
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input.eventKey)) throw new BudgetError('INVALID');
+    if (input.usage && !sameUnit(record.reserved, input.usage.quantity)) throw new BudgetError('INVALID');
+    if ((input.action === 'settle' || input.action === 'reconcile') && !input.usage) throw new BudgetError('INVALID');
     return this.db.$transaction(async tx => {
+      await revalidate();
       const existing = await tx.aiBudgetLedgerEntry.findUnique({ where: { reservationId_eventKey: { reservationId: record.id, eventKey: input.eventKey } }, select: { kind: true, evidenceHash: true, reason: true, inputTokens: true, calls: true, moneyAmount: true, moneyCurrency: true } });
       if (existing) {
         if (!sameLedgerPayload(existing, input)) throw new BudgetError('IDEMPOTENCY_CONFLICT');
-        const replay = await this.get(record.id, record.association);
+        const replay = await this.readRecord(tx, record.id, record.association);
         if (!replay) throw new BudgetError('UNAVAILABLE');
         return replay;
       }
@@ -169,7 +202,9 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
       const changed = await tx.aiBudgetReservation.updateMany({ where: { id: record.id, status: record.status === 'pending_reconciliation' ? 'pending_reconciliation' : 'reserved', updatedAt: record.storageVersion }, data: next });
       if (changed.count !== 1) throw new BudgetError('PENDING_RECONCILIATION');
       await tx.aiBudgetLedgerEntry.create({ data: { id: randomUUID(), reservationId: record.id, scopeId: record.scopeId, scopeKind: record.scopeKind, tenantId: record.association.scope.kind === 'platform' ? null : record.association.scope.tenantId, eventKey: input.eventKey, kind: input.action, evidenceHash: input.usage?.evidenceHash, reason: input.reason, ...(input.usage ? ledgerQuantityFields(input.usage.quantity) : {}) } });
-      return this.get(record.id, record.association) as Promise<BudgetRecord>;
+      const result = await this.readRecord(tx, record.id, record.association);
+      if (!result) throw new BudgetError('FORBIDDEN');
+      return result;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
   }
 }
