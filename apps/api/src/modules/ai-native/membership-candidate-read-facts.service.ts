@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext, type BookingMemberOption } from '@rental-os/shared';
 import { ModelGatewayError } from './model-gateway.ports';
+import type { AiBusinessReadAuthority } from './business-read-route.authority';
 
 const limitSchema = z.object({ limit: z.number().int().min(1).max(50) }).strict();
 const candidateSchema = z.object({
@@ -8,7 +9,7 @@ const candidateSchema = z.object({
   membershipStatus: z.enum(['pending_activation', 'active', 'suspended', 'risk_restricted', 'exited', 'closed'])
 }).strict();
 
-export interface AiMembershipCandidateReadAuthority { resolve(): Promise<AiExecutionContext>; }
+export type AiMembershipCandidateReadAuthority = AiBusinessReadAuthority;
 export interface AiMembershipCandidateReadPort { listPersonalOptions(tenantId: string): Promise<readonly BookingMemberOption[]>; }
 export interface AiMembershipCandidateReadProjection {
   contractVersion: typeof AI_CONTRACT_DRAFT_VERSION;
@@ -27,13 +28,12 @@ export class AiMembershipCandidateReadFactsService {
   constructor(private readonly memberships: AiMembershipCandidateReadPort,
     private readonly authority: AiMembershipCandidateReadAuthority,
     private readonly clock: () => Date = () => new Date()) {
-    if (typeof memberships?.listPersonalOptions !== 'function' || typeof authority?.resolve !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+    if (typeof memberships?.listPersonalOptions !== 'function' || typeof authority?.withRead !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   }
 
   async read(value: unknown): Promise<AiMembershipCandidateReadProjection> {
     const input = limitSchema.safeParse(value); if (!input.success) throw new ModelGatewayError('INVALID_REQUEST');
-    let context: AiExecutionContext;
-    try { context = structuredClone(await this.authority.resolve()); } catch { throw new ModelGatewayError('FORBIDDEN'); }
+    return this.authority.withRead('membership_candidates', input.data, async context => {
     const access = 'access' in context ? context.access : undefined;
     if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user' || (context.audience !== 'operator' && context.audience !== 'staff')
       || !access?.permissions.includes('rental-os:order:create')) throw new ModelGatewayError('FORBIDDEN');
@@ -48,5 +48,6 @@ export class AiMembershipCandidateReadFactsService {
       contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: context.requestId, audience: context.audience,
       scope: workspace, observedAt: observed.toISOString(), candidates: parsed.map(item => item.data!)
     };
+    });
   }
 }

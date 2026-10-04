@@ -2,26 +2,30 @@ import { z } from 'zod';
 import { AI_CONTRACT_DRAFT_VERSION, RentalInventoryMode, type AiExecutionContext, type RentalAvailabilityResult, type RentalAvailabilityRequest } from '@rental-os/shared';
 import type { RentalCoreService } from '../rental-core/rental-core.service';
 import { ModelGatewayError } from './model-gateway.ports';
+import type { AiBusinessReadAuthority } from './business-read-route.authority';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const request: z.ZodType<RentalAvailabilityRequest> = z.object({ locationId: id, startAt: z.string().datetime({ offset: true }), endAt: z.string().datetime({ offset: true }), lines: z.array(z.object({ itemGroupId: id, quantity: z.number().int().positive().max(100000) }).strict()).min(1).max(100) }).strict();
 const resultLine = z.object({ itemGroupId: id, itemGroupCode: id, itemGroupName: z.string().min(1).max(191), inventoryMode: z.nativeEnum(RentalInventoryMode), requestedQuantity: z.number().int().nonnegative(), availableQuantity: z.number().int().nonnegative(), available: z.boolean(), reasons: z.array(z.string().max(191)).max(20) }).strict();
 const result = z.object({ available: z.boolean(), locationId: id, startAt: z.string().datetime({ offset: true }), endAt: z.string().datetime({ offset: true }), lines: z.array(resultLine).max(100) }).strict();
 
-export interface AiAvailabilityReadAuthority { resolve(): Promise<AiExecutionContext>; }
+export type AiAvailabilityReadAuthority = AiBusinessReadAuthority;
 export interface AiAvailabilityReadProjection { contractVersion: typeof AI_CONTRACT_DRAFT_VERSION; requestId: string; audience: 'operator' | 'staff'; scope: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>; observedAt: string; result: RentalAvailabilityResult; }
 
 /** Calls Core's availability calculation only; it never reserves inventory or creates an order. */
 export class AiAvailabilityReadFactsService {
-  constructor(private readonly core: Pick<RentalCoreService, 'availability'>, private readonly authority: AiAvailabilityReadAuthority, private readonly clock: () => Date = () => new Date()) {}
+  constructor(private readonly core: Pick<RentalCoreService, 'availability'>, private readonly authority: AiAvailabilityReadAuthority, private readonly clock: () => Date = () => new Date()) {
+    if (typeof core?.availability !== 'function' || typeof authority?.withRead !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+  }
   async read(value: unknown): Promise<AiAvailabilityReadProjection> {
     const parsed = request.safeParse(value); if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
-    let context: AiExecutionContext; try { context = structuredClone(await this.authority.resolve()); } catch { throw new ModelGatewayError('FORBIDDEN'); }
+    return this.authority.withRead('availability', parsed.data, async context => {
     if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user' || (context.audience !== 'operator' && context.audience !== 'staff') || !('access' in context)) throw new ModelGatewayError('FORBIDDEN');
     if (context.access.locationScope.mode === 'selected' && !context.access.locationScope.locationIds.includes(parsed.data.locationId)) throw new ModelGatewayError('FORBIDDEN');
     const observed = this.clock(); if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError('CONFIG_INVALID');
     const checked = result.safeParse(await this.core.availability(context.scope.tenantId, parsed.data)); if (!checked.success) throw new ModelGatewayError('INVALID_RESPONSE');
     if (checked.data.locationId !== parsed.data.locationId || checked.data.startAt !== parsed.data.startAt || checked.data.endAt !== parsed.data.endAt) throw new ModelGatewayError('INVALID_RESPONSE');
     return { contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: context.requestId, audience: context.audience, scope: context.scope, observedAt: observed.toISOString(), result: checked.data };
+    });
   }
 }
