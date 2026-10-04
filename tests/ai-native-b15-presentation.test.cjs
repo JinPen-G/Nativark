@@ -48,6 +48,27 @@ test('source adapters do not expose callback functions through native properties
   }
 });
 
+test('native action children keep callbacks in instance host bindings', () => {
+  for (const app of ['apps/miniprogram', 'apps/staff-miniprogram']) {
+    for (const component of ['ai-supplement-input', 'ai-proposal-confirm']) {
+      const source = fs.readFileSync(path.join(root, app, 'src/components/ai-native', component, 'index.ts'), 'utf8');
+      assert.doesNotMatch(source, /submitHandler:\s*\{|confirmHandler:\s*\{/);
+      assert.match(source, /attachHost/);
+      assert.match(source, /hostAction\(this\)/);
+    }
+  }
+});
+
+test('admin and native status views expose pending/error announcements', () => {
+  const workbench = fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/AiTaskWorkbench.tsx'), 'utf8');
+  assert.match(workbench, /aria-busy=\{detailState === "loading"\}/);
+  for (const app of ['apps/miniprogram', 'apps/staff-miniprogram']) {
+    const input = fs.readFileSync(path.join(root, app, 'src/components/ai-native/ai-supplement-input/index.wxml'), 'utf8');
+    assert.match(input, /role="alert"/);
+    assert.match(input, /正在提交补充信息/);
+  }
+});
+
 test('resync-required workbench output suppresses stale detail children', () => {
   const source = fs.readFileSync(path.join(root, 'apps/admin/src/features/ai-native/AiTaskWorkbench.tsx'), 'utf8');
   assert.match(source, /detailSynchronized/);

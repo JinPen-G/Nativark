@@ -4,11 +4,11 @@ Component({
   properties: {
     proposal: { type: Object, value: null }, disabled: { type: Boolean, value: true },
     pending: { type: Boolean, value: false }, expired: { type: Boolean, value: false },
-    checked: { type: Boolean, value: false }, confirmHandler: { type: null, value: null },
+    checked: { type: Boolean, value: false },
   },
   data: { hostAvailable: false, submitting: false, errorLabel: "", checkedIdentity: "", generation: 0, alive: true },
   lifetimes: { detached() { this.setData({ alive: false, generation: this.data.generation + 1, checkedIdentity: "", errorLabel: "" }); } },
-  observers: { "proposal,disabled,expired,confirmHandler"() { this.setData({ checkedIdentity: "", generation: this.data.generation + 1, errorLabel: "" }); } },
+  observers: { "proposal,disabled,expired"() { this.setData({ checkedIdentity: "", generation: this.data.generation + 1, errorLabel: "" }); } },
   methods: {
     attachHost(action: (input: unknown) => Promise<void>) {
       bindHostAction(this, action);
@@ -28,16 +28,16 @@ Component({
       this.setData({ checkedIdentity: checked ? this.identity() : "" }); this.triggerEvent("check", { checked });
     },
     async onConfirm(): Promise<void> {
-      const identity = this.identity(); const handler = (hostAction(this) ?? this.data.confirmHandler) as ConfirmationCallback | null;
+      const identity = this.identity(); const handler = hostAction(this) as ConfirmationCallback | null;
       if (!identity || this.data.checkedIdentity !== identity || this.data.disabled || this.data.expired || this.data.pending || this.data.submitting || !this.data.alive || typeof handler !== "function") return;
       const generation = this.data.generation; const proposal = this.data.proposal as { id: string; revision: string };
       this.setData({ submitting: true, errorLabel: "" });
       try {
         await handler({ proposalId: proposal.id, revision: proposal.revision });
-        if (this.data.alive && generation === this.data.generation && this.identity() === identity && (hostAction(this) ?? this.data.confirmHandler) === handler)
+        if (this.data.alive && generation === this.data.generation && this.identity() === identity && hostAction(this) === handler)
           this.triggerEvent("confirm", { proposalId: proposal.id, revision: proposal.revision });
       } catch {
-        if (this.data.alive && generation === this.data.generation && this.identity() === identity && (hostAction(this) ?? this.data.confirmHandler) === handler) this.setData({ errorLabel: "提交失败，请核对后重试" });
+        if (this.data.alive && generation === this.data.generation && this.identity() === identity && hostAction(this) === handler) this.setData({ errorLabel: "提交失败，请核对后重试" });
       } finally { if (this.data.alive) this.setData({ submitting: false }); }
     },
   },
