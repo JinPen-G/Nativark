@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { AiUsageAssociationDraft, AiUsageSettingsDraft } from '@rental-os/shared';
+import type { AiExecutionContext, AiUsageAssociationDraft, AiUsageSettingsDraft } from '@rental-os/shared';
 import { isAiStepExecutionContext } from '../task-contract-validation';
 import { BudgetError, type BudgetAction, type BudgetAuthority, type BudgetEvidencePort, type BudgetGrant, type BudgetPolicyKey, type BudgetQuotePort, type BudgetRecord, type BudgetReserveCommand, type BudgetTransactionRepository } from './budget.ports';
 import { assertPositiveQuantity, quantityAtoms } from './budget-quantity';
