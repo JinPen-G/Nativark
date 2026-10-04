@@ -43,6 +43,7 @@ export class PlatformModelConfigService {
     return this.tenant.changeMode(context, { mode, expectedRevision });
   }
   async selection(context: GatewayContext) { return this.tenant.selection(context); }
+  async selectionForInvocation(context: GatewayContext) { return this.tenant.selectionForInvocation(context); }
   async tenantProfile(context: GatewayContext) { return this.tenant.profile(context); }
   async tenantCredential(reference: string, context: GatewayContext) { return this.tenant.credential(reference, context); }
 }

@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import type { AiExecutionContext } from '@rental-os/shared';
-import type { AiProfileScope } from './provider-profile.ports';
+import type { AiProfileScope, AiProfileServiceMode } from './provider-profile.ports';
 import { aiPersistenceScopeColumns } from './persistence-scope';
 import { isAiStepExecutionContext } from './task-contract-validation';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
@@ -33,22 +33,34 @@ export class AiScopeRepository {
       return { context, columns, binding: requestFingerprint(identity) };
     } catch { throw new AiScopeResolutionError('AI_ACCESS_DENIED'); }
   }
-  async resolveCurrent(): Promise<{ context: AiExecutionContext; scope: AiProfileScope }> {
-    const initial = await this.current();
-    let row: Prisma.AiScopeGetPayload<{ select: typeof select }> | null;
-    try { row = await this.db.aiScope.findFirst({ where: { ...initial.columns }, select }); }
+  private async lookup(columns: ReturnType<typeof aiPersistenceScopeColumns>) {
+    try { return await this.db.aiScope.findFirst({ where: { ...columns }, select }); }
     catch { throw new AiScopeResolutionError('AI_STORAGE_UNAVAILABLE'); }
-    // Discard buffered metadata if identity or permissions changed while the DB was read.
+  }
+  private project(row: Prisma.AiScopeGetPayload<{ select: typeof select }> | null, columns: ReturnType<typeof aiPersistenceScopeColumns>): AiProfileScope {
+    if (!row) throw new AiScopeResolutionError('AI_RESOURCE_UNAVAILABLE');
+    if (row.kind !== columns.kind || row.scopeKey !== columns.scopeKey
+      || row.tenantId !== columns.tenantId || row.workspaceId !== columns.workspaceId) throw new AiScopeResolutionError('AI_SCOPE_CHANGED');
+    if (typeof row.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/.test(row.id)) throw new AiScopeResolutionError('AI_STORAGE_UNAVAILABLE');
+    return { id: row.id, kind: row.kind,
+      ...(row.tenantId !== null ? { tenantId: row.tenantId } : {}),
+      ...(row.workspaceId !== null ? { workspaceId: row.workspaceId } : {}) };
+  }
+  async resolveCurrent(): Promise<{ context: AiExecutionContext; scope: AiProfileScope }> {
+    const initial = await this.current(), row = await this.lookup(initial.columns), current = await this.current();
+    if (initial.binding !== current.binding) throw new AiScopeResolutionError('AI_SCOPE_CHANGED');
+    return { context: current.context, scope: this.project(row, current.columns) };
+  }
+  async resolveRoutingScopes(mode: AiProfileServiceMode): Promise<{ context: AiExecutionContext; consumerScope: AiProfileScope; configurationScope: AiProfileScope }> {
+    if (mode !== 'platform_managed' && mode !== 'tenant_managed') throw new AiScopeResolutionError('AI_ACCESS_DENIED');
+    const initial = await this.current();
+    if (mode === 'tenant_managed' && initial.context.scope.kind === 'platform') throw new AiScopeResolutionError('AI_ACCESS_DENIED');
+    const ownerColumns = aiPersistenceScopeColumns(mode === 'platform_managed' ? { kind: 'platform' }
+      : { kind: 'tenant', tenantId: initial.columns.tenantId! });
+    const consumerRow = await this.lookup(initial.columns);
+    const ownerRow = ownerColumns.scopeKey === initial.columns.scopeKey ? consumerRow : await this.lookup(ownerColumns);
     const current = await this.current();
     if (initial.binding !== current.binding) throw new AiScopeResolutionError('AI_SCOPE_CHANGED');
-    if (!row) throw new AiScopeResolutionError('AI_RESOURCE_UNAVAILABLE');
-    if (row.kind !== current.columns.kind || row.scopeKey !== current.columns.scopeKey
-      || row.tenantId !== current.columns.tenantId || row.workspaceId !== current.columns.workspaceId) throw new AiScopeResolutionError('AI_SCOPE_CHANGED');
-    if (typeof row.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/.test(row.id)) throw new AiScopeResolutionError('AI_STORAGE_UNAVAILABLE');
-    return { context: current.context, scope: {
-      id: row.id, kind: row.kind,
-      ...(row.tenantId !== null ? { tenantId: row.tenantId } : {}),
-      ...(row.workspaceId !== null ? { workspaceId: row.workspaceId } : {})
-    } };
+    return { context: current.context, consumerScope: this.project(consumerRow, current.columns), configurationScope: this.project(ownerRow, ownerColumns) };
   }
 }

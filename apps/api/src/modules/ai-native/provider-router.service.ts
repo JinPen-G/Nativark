@@ -11,7 +11,7 @@ const scopeSchema = z.discriminatedUnion('kind', [platform,
   z.object({ id: id.max(36), kind: z.literal('TENANT'), tenantId: id }).strict(),
   z.object({ id: id.max(36), kind: z.literal('WORKSPACE'), tenantId: id, workspaceId: id }).strict()
 ]);
-const inputSchema = z.object({ consumerScope: scopeSchema, platformScope: platform, mode: z.enum(['platform_managed', 'tenant_managed']),
+const inputSchema = z.object({ consumerScope: scopeSchema, configurationScope: scopeSchema, mode: z.enum(['platform_managed', 'tenant_managed']),
   scene: z.enum(['chat', 'builder', 'vision', 'knowledge', 'reasoning']), requiredCapabilities: capabilities.refine(v => v.length > 0) }).strict();
 const profileSchema = z.object({ id: id.max(36), scopeId: id.max(36), scopeKind: z.enum(['PLATFORM', 'TENANT', 'WORKSPACE']),
   profileKey: id.max(64), role: z.enum(['DEFAULT', 'REASONING', 'VISION', 'EMBEDDING']), serviceMode: z.enum(['platform_managed', 'tenant_managed']),
@@ -36,9 +36,11 @@ export class ProviderRouterService {
   }
   async resolve(value: ProviderRouteRequest): Promise<ProviderRouteDecision> {
     const parsed = inputSchema.safeParse(value);
-    if (!parsed.success || (parsed.data.mode === 'tenant_managed' && parsed.data.consumerScope.kind === 'PLATFORM')) throw new ModelGatewayError('INVALID_REQUEST');
-    const request = structuredClone(parsed.data);
-    const scope = request.mode === 'platform_managed' ? request.platformScope : request.consumerScope;
+    if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+    const request = structuredClone(parsed.data), scope = request.configurationScope, consumer = request.consumerScope;
+    if (request.mode === 'platform_managed' ? scope.kind !== 'PLATFORM'
+      : consumer.kind === 'PLATFORM' || scope.kind !== 'TENANT' || scope.tenantId !== consumer.tenantId
+        || (consumer.kind === 'TENANT' && consumer.id !== scope.id)) throw new ModelGatewayError('INVALID_REQUEST');
     let rows;
     try { rows = z.array(profileSchema).max(100).parse(await this.ports.profiles.list(structuredClone(scope))); }
     catch { throw new ModelGatewayError('CONFIG_INVALID'); }

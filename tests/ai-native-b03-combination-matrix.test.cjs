@@ -11,11 +11,11 @@ const route = (records) => new ProviderRouterService({ profiles: { list: async s
 
 test('mode and scope matrix has no cross-scope fallback', async () => {
   const service = route([profile(platform, 'platform_managed'), profile(tenant, 'tenant_managed'), profile(other, 'tenant_managed')]);
-  const platformResult = await service.resolve({ consumerScope: tenant, platformScope: platform, mode: 'platform_managed', scene: 'chat', requiredCapabilities: ['text'] });
+  const platformResult = await service.resolve({ consumerScope: tenant, configurationScope: platform, mode: 'platform_managed', scene: 'chat', requiredCapabilities: ['text'] });
   assert.equal(platformResult.profile.scopeId, platform.id);
-  const tenantResult = await service.resolve({ consumerScope: tenant, platformScope: platform, mode: 'tenant_managed', scene: 'chat', requiredCapabilities: ['text'] });
+  const tenantResult = await service.resolve({ consumerScope: tenant, configurationScope: tenant, mode: 'tenant_managed', scene: 'chat', requiredCapabilities: ['text'] });
   assert.equal(tenantResult.profile.scopeId, tenant.id);
-  await assert.rejects(route([profile(other, 'tenant_managed')]).resolve({ consumerScope: tenant, platformScope: platform, mode: 'tenant_managed', scene: 'chat', requiredCapabilities: ['text'] }), e => e.code === 'PROVIDER_UNAVAILABLE');
+  await assert.rejects(route([profile(other, 'tenant_managed')]).resolve({ consumerScope: tenant, configurationScope: tenant, mode: 'tenant_managed', scene: 'chat', requiredCapabilities: ['text'] }), e => e.code === 'PROVIDER_UNAVAILABLE');
 });
 
 test('unknown admission cannot be reused as an admitted or safe retry', async () => {

@@ -139,12 +139,15 @@ export class TenantModelConfigService {
     return this.decrypt(record);
   }
 
-  async selection(context: GatewayContext) {
-    context = await this.authorize(context, "read");
+  private async select(context: GatewayContext, action: 'read' | 'invoke') {
+    context = await this.authorize(context, action);
     const record = await this.readRecord(context.tenantId);
-    await this.authorize(context, 'read');
+    await this.authorize(context, action);
     return { mode: tenantModelMode(record), revision: record?.revision ?? 0 };
   }
+
+  async selection(context: GatewayContext) { return this.select(context, 'read'); }
+  async selectionForInvocation(context: GatewayContext) { return this.select(context, 'invoke'); }
 
   /** Mode selection is not a credential deletion operation. */
   async changeMode(context: GatewayContext, value: unknown) {

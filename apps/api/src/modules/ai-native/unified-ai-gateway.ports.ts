@@ -1,7 +1,8 @@
 import type { ModelRequest, ModelUsage } from './model-gateway.ports';
 import type { GatewayContext } from './model-gateway.ports';
 import type { ProviderRouteDecision } from './provider-router.ports';
-import type { ProviderRouterService } from './provider-router.service';
+import type { AiGatewayRoutingService } from './gateway-routing.service';
+import type { InvocationDispatchService } from './invocation-dispatch.service';
 import type { InvocationAdmissionService } from './invocation-admission.service';
 import type { UsageAccountingService } from './usage-accounting.service';
 
@@ -12,4 +13,4 @@ export interface UnifiedGatewayTransport {
   stream(context: GatewayContext, request: ModelRequest, route: ProviderRouteDecision, signal: AbortSignal): AsyncIterable<GatewayStreamEvent>;
 }
 export interface UnifiedGatewayAudit { append(entry: { callId: string; tenantId: string; workspaceId: string; event: string; status: string; detail?: string }): Promise<void>; }
-export interface UnifiedGatewayPorts { router: ProviderRouterService; admission: InvocationAdmissionService; usage: UsageAccountingService; transport: UnifiedGatewayTransport; audit: UnifiedGatewayAudit; }
+export interface UnifiedGatewayPorts { routing: Pick<AiGatewayRoutingService, 'resolve' | 'assertCurrent'>; admission: InvocationAdmissionService; dispatch: Pick<InvocationDispatchService, 'claim' | 'finish'>; usage: UsageAccountingService; transport: UnifiedGatewayTransport; audit: UnifiedGatewayAudit; }

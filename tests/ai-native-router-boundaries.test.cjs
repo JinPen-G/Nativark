@@ -4,7 +4,7 @@ require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
 require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
 const { ProviderRouterService } = require('../apps/api/src/modules/ai-native/provider-router.service');
 const platform = { id: 'platform-id', kind: 'PLATFORM' }, scope = { id: 'tenant-id', kind: 'TENANT', tenantId: 'tenant-1' };
-const request = () => ({ consumerScope: { ...scope }, platformScope: { ...platform }, mode: 'tenant_managed', scene: 'chat', requiredCapabilities: ['text'] });
+const request = () => ({ consumerScope: { ...scope }, configurationScope: { ...scope }, mode: 'tenant_managed', scene: 'chat', requiredCapabilities: ['text'] });
 const profile = (key = 'default', role = 'DEFAULT') => ({ id: 'profile-' + key, profileKey: key, scopeId: scope.id, scopeKind: scope.kind,
   role, serviceMode: 'tenant_managed', protocol: 'openai_chat_completions', provider: 'synthetic', model: key, credentialRef: 'vault:key',
   configRevision: 1, enabled: true, disabledAt: null, allowedCapabilities: ['text','tools'] });
@@ -56,7 +56,7 @@ for (const mutate of [p => { p.enabled = false; }, p => { p.disabledAt = new Dat
 });
 test('platform route uses only explicitly provided platform owner', async () => {
   const p = { ...profile(), scopeId: platform.id, scopeKind: 'PLATFORM', serviceMode: 'platform_managed' };
-  const f = setup([p]); const out = await f.router.resolve({ ...request(), mode: 'platform_managed' });
+  const f = setup([p]); const out = await f.router.resolve({ ...request(), configurationScope: platform, mode: 'platform_managed' });
   assert.equal(out.scope.id, platform.id); assert.deepEqual(f.state.calls[0][1], platform);
 });
 test('malformed or duplicate profile list is rejected without guessing', async () => {
@@ -76,8 +76,8 @@ test('legacy invoke and stream propagate all required features including text', 
   const { UnifiedAiGatewayService } = require('../apps/api/src/modules/ai-native/unified-ai-gateway.service');
   for (const mode of ['invoke','stream']) {
     let received;
-    const gateway = new UnifiedAiGatewayService({ router: { resolve: async value => { received = value.requiredCapabilities; throw Error('stop after routing input'); } } });
-    const args = [{ tenantId: 't', workspaceId: 'w', actorId: 'a' }, { callId: 'c', model: 'm', messages: [], maxOutputTokens: 10, features: ['tools','structuredOutput'] }];
+    const gateway = new UnifiedAiGatewayService({ routing: { resolve: async (_context, required) => { received = required; throw Error('stop after routing input'); } } });
+    const args = [{ tenantId: 't', workspaceId: 'w', actorId: 'a' }, { callId: 'c', model: 'm', messages: [{ role: 'user', content: 'hello' }], maxOutputTokens: 10, features: ['tools','structuredOutput'] }];
     const operation = mode === 'invoke' ? gateway.invoke(...args) : gateway.stream(...args).next();
     await assert.rejects(operation);
     assert.deepEqual(received, mode === 'invoke' ? ['text','tools','structured_output'] : ['text','streaming','tools','structured_output']);

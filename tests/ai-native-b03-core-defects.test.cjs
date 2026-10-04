@@ -42,7 +42,7 @@ test('W07 settlement must select the requested reservation, not the first scope 
 function ports() {
   const events = [];
   return { events, ports: {
-    router: { resolve: async () => { events.push('router'); return { profile: { id: 'profile-a' } }; } },
+    routing: require('./fixtures/ai-native/unified-routing.cjs')(async () => { events.push('router'); return { profile: { id: 'profile-a' } }; }, scope),
     admission: { admit: async () => { events.push('admit'); return { id: 'admission-a', scope }; }, transition: async () => { events.push('transition'); } },
     usage: { reserve: async () => { events.push('reserve'); return { id: 'usage-a' }; }, settle: async () => { events.push('settle'); }, markUnknown: async () => { events.push('unknown'); } },
     audit: { append: async () => { events.push('audit'); } },
@@ -53,10 +53,10 @@ const context = { tenantId: 'tenant-a', workspaceId: 'space-a', actorId: 'actor-
 const request = { callId: 'call-a', model: 'synthetic-model', messages: [{ role: 'user', content: 'synthetic' }], maxOutputTokens: 4 };
 test('W08 pre-aborted invocation must never dispatch', async () => {
   const h = ports(), controller = new AbortController(); controller.abort();
-  await assert.rejects(new UnifiedAiGatewayService(h.ports, 100).invoke(context, request, controller.signal));
+  await assert.rejects(new UnifiedAiGatewayService(require('./fixtures/ai-native/unified-dispatch.cjs')(h.ports), 100).invoke(context, request, controller.signal));
   assert.equal(h.events.includes('invoke'), false);
 });
 test('W09 stream must pass admission, reserve, audit and settlement', async () => {
-  const h = ports(); for await (const _event of new UnifiedAiGatewayService(h.ports, 100).stream(context, request)) { /* drain */ }
+  const h = ports(); for await (const _event of new UnifiedAiGatewayService(require('./fixtures/ai-native/unified-dispatch.cjs')(h.ports), 100).stream(context, request)) { /* drain */ }
   for (const event of ['admit', 'reserve', 'audit', 'settle']) assert.ok(h.events.includes(event), `${event} was bypassed`);
 });

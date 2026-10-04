@@ -10,18 +10,20 @@ const request = { callId: 'c', model: 'm', messages: [{ role: 'user', content: '
 function setup(ms = 50) {
   const events = [], controller = new AbortController();
   const ports = {
-    router: { resolve: async () => { events.push('route'); return { profile: { id: 'p' } }; } },
+    routing: require('./fixtures/ai-native/unified-routing.cjs')(async () => { events.push('route'); return { profile: { id: 'p' } }; }),
     admission: { admit: async input => { events.push('admit'); return { id: 'a', scope: input.scope }; }, transition: async (_s,_c,_f,to) => { events.push('admission:' + to); } },
     usage: { reserve: async () => { events.push('reserve'); return { id: 'u' }; }, settle: async () => { events.push('settle'); }, markUnknown: async (_s,_id,reason) => { events.push('usage:' + reason); } },
     audit: { append: async () => { events.push('audit'); } },
     transport: { invoke: async () => { events.push('invoke'); return { text: 'ok', usage: { inputTokens: 1, outputTokens: 2 } }; }, stream: async function* () { events.push('stream'); yield { kind: 'result', result: { text: 'ok', usage: { inputTokens: 1, outputTokens: 2 } } }; } }
   };
-  const service = new UnifiedAiGatewayService(ports, ms);
+  const service = new UnifiedAiGatewayService(require('./fixtures/ai-native/unified-dispatch.cjs')(ports), ms);
   return { events, ports, controller, service, invoke: () => service.invoke(ctx, request, controller.signal), stream: async () => { const out = []; for await (const e of service.stream(ctx, request, controller.signal)) out.push(e); return out; } };
 }
-for (const mode of ['invoke', 'stream']) for (const stage of ['route','admit','reserve','audit','transport','settle','complete']) test(`${mode} deadline bounds uncooperative ${stage}`, { timeout: 2000 }, async () => {
+for (const mode of ['invoke', 'stream']) for (const stage of ['route','admit','claim','reserve','audit','revalidate','transport','settle','complete']) test(`${mode} deadline bounds uncooperative ${stage}`, { timeout: 2000 }, async () => {
   const f = setup();
-  if (stage === 'route') f.ports.router.resolve = never;
+  if (stage === 'route') f.ports.routing.resolve = never;
+  if (stage === 'revalidate') f.ports.routing.assertCurrent = never;
+  if (stage === 'claim') f.ports.dispatch.claim = never;
   if (stage === 'admit') f.ports.admission.admit = never;
   if (stage === 'reserve') f.ports.usage.reserve = never;
   if (stage === 'audit') f.ports.audit.append = never;
@@ -29,11 +31,11 @@ for (const mode of ['invoke', 'stream']) for (const stage of ['route','admit','r
   if (stage === 'settle') f.ports.usage.settle = never;
   if (stage === 'complete') f.ports.admission.transition = async (_s,_c,_f,to) => { if (to === 'completed') await never(); };
   await assert.rejects(f[mode](), e => e.code === 'TIMEOUT');
-  if (['route','admit','reserve','audit'].includes(stage)) assert.equal(f.events.some(e => e === 'invoke' || e === 'stream'), false);
+  if (['route','admit','claim','reserve','audit','revalidate'].includes(stage)) assert.equal(f.events.some(e => e === 'invoke' || e === 'stream'), false);
 });
 test('cancellation stops waiting for router with no dispatch', { timeout: 2000 }, async () => {
   const f = setup(10000); let entered = false;
-  f.ports.router.resolve = () => { entered = true; return never(); };
+  f.ports.routing.resolve = () => { entered = true; return never(); };
   const pending = assert.rejects(f.invoke(), e => e.code === 'CANCELLED');
   while (!entered) await tick(); f.controller.abort(); await pending; assert.equal(f.events.includes('invoke'), false);
 });
@@ -49,11 +51,11 @@ test('late reservation after timeout is retained for reconciliation, never dispa
   assert.equal(typeof complete, 'function'); complete({ id: 'late-u' }); await tick(); await tick();
   assert.ok(f.events.includes('usage:LATE_RESERVATION')); assert.equal(f.events.includes('invoke'), false);
 });
-test('late admission after timeout is cancelled without reserving usage', { timeout: 2000 }, async () => {
+test('late unclaimed admission is left untouched without reserving usage', { timeout: 2000 }, async () => {
   const f = setup(); let complete;
   f.ports.admission.admit = () => new Promise(r => { complete = r; });
   await assert.rejects(f.invoke(), e => e.code === 'TIMEOUT'); complete({ id: 'late-a' }); await tick(); await tick();
-  assert.ok(f.events.includes('admission:cancelled')); assert.equal(f.events.includes('reserve'), false);
+  assert.equal(f.events.includes('admission:cancelled'), false); assert.equal(f.events.includes('reserve'), false);
 });
 test('uncooperative iterator next and return cannot keep caller waiting indefinitely', { timeout: 2000 }, async () => {
   const f = setup(); let returned = false;

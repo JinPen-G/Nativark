@@ -9,12 +9,12 @@ const result = () => ({ kind: 'result', result: { text: 'done', usage: { inputTo
 function setup() {
   const state = { events: [], wire: [{ kind: 'text_delta', delta: 'part' }, result()], signal: null };
   const ports = {
-    router: { resolve: async () => ({ profile: { id: 'profile-1' } }) },
+    routing: require('./fixtures/ai-native/unified-routing.cjs')(async () => ({ profile: { id: 'profile-1' } })),
     admission: { admit: async input => ({ id: 'admission-1', scope: input.scope }), transition: async (_s,_c,_f,to) => { state.events.push(to); } },
     usage: { reserve: async () => ({ id: 'usage-1' }), settle: async () => { state.events.push('settle'); }, markUnknown: async () => { state.events.push('unknown-usage'); } },
     audit: { append: async () => {} }, transport: { stream: async function* (_c,_r,_route,signal) { state.signal = signal; for (const event of state.wire) yield event; if (state.afterWire) await state.afterWire(); } }
   };
-  const service = new UnifiedAiGatewayService(ports, 10000);
+  const service = new UnifiedAiGatewayService(require('./fixtures/ai-native/unified-dispatch.cjs')(ports), 10000);
   return { state, ports, service };
 }
 async function collect(f, signal) { const received = []; let error; try { for await (const e of f.service.stream(ctx, request, signal)) received.push(e); } catch (e) { error = e; } return { received, error }; }

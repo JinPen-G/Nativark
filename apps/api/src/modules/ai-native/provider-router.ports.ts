@@ -4,7 +4,7 @@ import type { CapabilityPreflight, ProviderCapabilityService } from './provider-
 export type AiRouteScene = 'chat' | 'builder' | 'vision' | 'knowledge' | 'reasoning';
 export interface ProviderRouteRequest {
   consumerScope: AiProfileScope;
-  platformScope: AiProfileScope;
+  configurationScope: AiProfileScope;
   mode: AiProfileServiceMode;
   scene: AiRouteScene;
   requiredCapabilities: readonly AiProfileCapability[];
