@@ -7,7 +7,7 @@ import { tenantModelMode } from "./model-config-compatibility";
 
 /** Protocol support, never a supplier/model catalogue. Extend through tested adapters. */
 export const tenantModelProtocols = ["openai_chat_completions"] as const;
-const settingsSchema = z.object({
+export const tenantModelSettingsSchema = z.object({
   enabled: z.boolean().default(false), protocol: z.enum(tenantModelProtocols),
   baseUrl: z.string().min(1).max(2048), model: z.string().min(1).max(256).regex(/^[\w./:-]+$/u),
   apiKey: z.string().min(1).max(8192).regex(/^[^\r\n]+$/u).optional(),
@@ -17,6 +17,7 @@ const settingsSchema = z.object({
   maxOutputTokens: z.number().int().min(1).max(32768).default(2048),
   expectedRevision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER - 2)
 }).strict();
+const settingsSchema = tenantModelSettingsSchema;
 type Settings = Omit<z.infer<typeof settingsSchema>, "apiKey" | "expectedRevision" | "secretChange">;
 export interface TenantModelRecord { tenantId: string; revision: number; mode?: "platform_managed" | "tenant_managed"; settings?: Settings; credentialsEncrypted?: string; }
 export interface TenantModelConfigPorts {

@@ -18,9 +18,10 @@ export class PlatformModelConfigService {
   constructor(ports: TenantModelConfigPorts, secrets: SecretBox) { this.tenant = new TenantModelConfigService(ports, secrets); }
   async get(context: GatewayContext): Promise<PlatformModelConfigSummary> { return this.tenant.get(context); }
   async saveTenantService(context: GatewayContext, input: unknown): Promise<PlatformModelConfigSummary> {
-    const summary = await this.tenant.save(context, input);
-    if (summary.mode !== 'tenant_managed') throw new ModelGatewayError('CONFIG_INVALID');
-    return summary;
+    // Editing retained BYOK settings does not change the selected service mode.
+    // The save has already committed: do not turn a valid platform-mode summary
+    // into a false failure response that encourages another write.
+    return this.tenant.save(context, input);
   }
   async clearTenantService(context: GatewayContext, expectedRevision: number): Promise<PlatformModelConfigSummary> {
     const current = await this.tenant.get(context);

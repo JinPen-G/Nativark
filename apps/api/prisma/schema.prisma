@@ -141,6 +141,7 @@ model Tenant {
   notificationLogs                  NotificationSendLog[]
   adapterLogs                       ExternalAdapterLog[]
   integrationConfigs                TenantIntegrationConfig[]
+  aiModelConfiguration              AiTenantModelConfiguration?
   asyncJobs                         AsyncJob[]
   printJobs                         DocumentPrintJob[]
   integrationTboxDevices            TBoxDevice[]
@@ -362,6 +363,21 @@ enum AiProviderProfileRole {
   REASONING  @map("reasoning")
   VISION     @map("vision")
   EMBEDDING  @map("embedding")
+}
+
+/// Revisioned dual-mode tenant configuration; encrypted BYOK is retained when
+/// platform mode is selected. Legacy system-rules data is never deleted here.
+model AiTenantModelConfiguration {
+  tenantId             String   @id @db.VarChar(191)
+  tenant               Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  mode                 String   @default("platform_managed") @db.VarChar(32)
+  revision             Int      @default(1) @db.UnsignedInt
+  settings             Json?
+  credentialsEncrypted String?  @db.Text
+  createdAt            DateTime @default(now()) @db.DateTime(3)
+  updatedAt            DateTime @updatedAt @db.DateTime(3)
+
+  @@map("ai_tenant_model_configurations")
 }
 
 /// Server-resolved profile. credentialRef is a vault reference, never a key.
