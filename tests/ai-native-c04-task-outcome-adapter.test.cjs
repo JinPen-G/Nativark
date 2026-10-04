@@ -20,6 +20,13 @@ test('maps unknown and pause outcomes to existing task transition reasons', asyn
   assert.deepEqual(h.calls.filter(row => row[0] === 'command').map(row => [row[0], row[1].to, row[1].reason]), [['command', 'waiting_external', 'external_pending'], ['command', 'waiting_confirmation', 'confirmation_required']]);
 });
 
+test('maps a failure after completed steps to partial success, not aggregate failure', async () => {
+  const h = harness();
+  await h.port.commit({ taskId: 'task-1', taskRevision: 8, lease, outcome: { status: 'failed', errorCode: 'AI_RESOURCE_UNAVAILABLE', completedSteps: 1, cleanupFailed: 0 } });
+  const command = h.calls.filter(row => row[0] === 'command').at(-1)[1];
+  assert.deepEqual([command.to, command.reason], ['partially_succeeded', 'completed']);
+});
+
 test('does not accept a transition response without a new aggregate revision and run fence', async () => {
   const port = createAiTaskRunnerOutcomePort({
     commands: { transition: input => input },

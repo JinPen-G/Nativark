@@ -5,7 +5,7 @@ export interface AiTaskRunnerOutcomeCommandFactory {
   transition(input: Readonly<{
     taskId: string;
     expectedRevision: number;
-    to: 'succeeded' | 'failed' | 'waiting_input' | 'waiting_confirmation' | 'waiting_external';
+    to: 'succeeded' | 'failed' | 'partially_succeeded' | 'waiting_input' | 'waiting_confirmation' | 'waiting_external';
     reason: 'completed' | 'execution_failed' | 'input_required' | 'confirmation_required' | 'external_pending';
     lease: Readonly<{ runId: string; holderId: string; revision: number; fencingToken: string }>;
   }>): unknown;
@@ -18,7 +18,9 @@ export interface AiTaskRunnerOutcomeAdapters {
 
 function target(outcome: AiTaskRunnerTaskOutcome) {
   if (outcome.status === 'succeeded') return { to: 'succeeded' as const, reason: 'completed' as const };
-  if (outcome.status === 'failed') return { to: 'failed' as const, reason: 'execution_failed' as const };
+  if (outcome.status === 'failed') return outcome.completedSteps > 0
+    ? { to: 'partially_succeeded' as const, reason: 'completed' as const }
+    : { to: 'failed' as const, reason: 'execution_failed' as const };
   if (outcome.status === 'unknown') return { to: 'waiting_external' as const, reason: 'external_pending' as const };
   if (outcome.status !== 'paused') throw new Error('AI_INVALID_INPUT');
   return outcome.pause === 'input'
