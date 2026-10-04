@@ -10,6 +10,8 @@ import { KnowledgeSources, type KnowledgeSource } from "./KnowledgeSources";
 import { MemoryPreferences, type MemoryPreference } from "./MemoryPreferences";
 import { AiServiceSummary, type AiServiceSummaryProps } from "./AiServiceSummary";
 import { CapabilityStatus, type CapabilityStatusProps } from "./CapabilityStatus";
+import { consumePolledEvents } from "./polling-consumer";
+import type { DisplayEventInput, EventTimelineState } from "./event-reducer";
 
 export type AiWorkbenchContext = Readonly<{
   audience: string;
@@ -31,6 +33,8 @@ export type AiTaskDetailProjection = Readonly<{
   serviceSummary?: AiServiceSummaryProps["summary"];
   assessments?: CapabilityStatusProps["assessments"];
   actionStatus?: ActionLifecycle;
+  eventTimeline?: EventTimelineState;
+  events?: readonly DisplayEventInput[];
 }>;
 
 export type AiTaskDetailReader = (
@@ -153,6 +157,9 @@ export function AiTaskWorkbench({
           : detailState === "hidden"
             ? "当前工作台不可见"
             : "任务详情";
+  const eventBatch = detail?.eventTimeline && detail.events
+    ? consumePolledEvents(detail.eventTimeline, detail.events)
+    : null;
 
   return (
     <section aria-label="AI 任务工作台" data-ai-workbench="feature-local">
@@ -180,6 +187,13 @@ export function AiTaskWorkbench({
         )}
         {detailState === "ready" && detail && taskId && (
           <>
+            {eventBatch?.resyncRequired && (
+              <Alert
+                type="warning"
+                message="事件未同步，请由宿主重新读取快照后再继续。"
+                action={onResync ? <ActionButton label="重新读取事件" pendingLabel="读取中…" onAction={async () => { await onResync(taskId, context); }} /> : undefined}
+              />
+            )}
             <TaskTimeline taskId={taskId} steps={detail.steps} />
             {detail.fields && <MissingFieldsPanel fields={detail.fields} draft={detail.draft ?? {}} readOnly />}
             {detail.proposal && <ProposalPreview proposal={detail.proposal} />}

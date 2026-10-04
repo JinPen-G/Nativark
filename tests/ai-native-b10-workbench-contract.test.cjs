@@ -34,3 +34,11 @@ test('status and confirmation output stays host-gated', () => {
   assert.match(source, /canRecover=\{Boolean\(onRecover\)\}/);
   assert.match(source, /宿主未提供任务详情读取能力/);
 });
+
+test('workbench uses the existing event consumer and exposes resync instead of inventing cursor fallback', () => {
+  const source = read('apps/admin/src/features/ai-native/AiTaskWorkbench.tsx');
+  assert.match(source, /consumePolledEvents/);
+  assert.match(source, /resyncRequired/);
+  assert.match(source, /重新读取快照/);
+  assert.doesNotMatch(source, /cursor\s*\+\+|Number\([^)]*cursor|parseInt\([^)]*cursor/);
+});
