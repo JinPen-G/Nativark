@@ -18,3 +18,8 @@ test('catalog projection fails closed for unsupported identity and unbounded res
   const client = new AiCatalogReadFactsService({ listItemGroups: async () => [row] }, { resolve: async () => ({ ...context, audience: 'client' }) });
   await assert.rejects(() => client.read({ limit: 2 }), error => error.code === 'FORBIDDEN');
 });
+
+test('catalog projection rejects a Core row bound to another tenant', async () => {
+  const service = new AiCatalogReadFactsService({ listItemGroups: async () => [{ ...row, tenantId: 'tenant-other' }] }, { resolve: async () => context });
+  await assert.rejects(() => service.read({ limit: 2 }), error => error.code === 'INVALID_RESPONSE');
+});

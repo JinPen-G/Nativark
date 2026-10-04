@@ -20,10 +20,11 @@ export class AiCatalogReadFactsService {
     let context: AiExecutionContext;
     try { context = structuredClone(await this.authority.resolve()); } catch { throw new ModelGatewayError('FORBIDDEN'); }
     if (context.scope.kind !== 'workspace' || (context.audience !== 'operator' && context.audience !== 'staff') || context.actor.kind !== 'user') throw new ModelGatewayError('FORBIDDEN');
-    const rows = await this.core.listItemGroups(context.scope.tenantId);
+    const workspace = context.scope;
+    const rows = await this.core.listItemGroups(workspace.tenantId);
     if (!Array.isArray(rows) || rows.length > request.data.limit) throw new ModelGatewayError('INVALID_RESPONSE');
     const parsed = rows.map(row => item.safeParse({ id: row?.id, tenantId: row?.tenantId, categoryCode: row?.categoryCode, code: row?.code, name: row?.name, status: row?.status, unit: row?.unit }));
-    if (parsed.some(result => !result.success)) throw new ModelGatewayError('INVALID_RESPONSE');
+    if (parsed.some(result => !result.success || result.data.tenantId !== workspace.tenantId)) throw new ModelGatewayError('INVALID_RESPONSE');
     const observed = this.clock(); if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError('CONFIG_INVALID');
     return { contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: context.requestId, audience: context.audience, scope: context.scope, observedAt: observed.toISOString(), items: parsed.map(result => ({ id: result.data!.id, code: result.data!.code, name: result.data!.name, categoryCode: result.data!.categoryCode, status: result.data!.status, unit: result.data!.unit })) };
   }
