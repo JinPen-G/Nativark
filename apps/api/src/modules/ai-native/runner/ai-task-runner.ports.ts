@@ -119,7 +119,7 @@ export interface AiTaskRunnerEffectPort {
 }
 
 export type AiTaskRunnerTaskOutcome =
-  | { status: "succeeded" | "unknown"; completedSteps: number; cleanupFailed: number }
+  | { status: "succeeded" | "unknown" | "cancelled"; completedSteps: number; cleanupFailed: number }
   | { status: "paused"; pause: AiTaskRunnerPause; completedSteps: number; cleanupFailed: number }
   | { status: "failed"; completedSteps: number; cleanupFailed: number; errorCode: string };
 
@@ -154,5 +154,5 @@ export interface AiTaskRunnerInput extends AiTaskRunnerClaimInput {
 }
 
 export type AiTaskRunnerOutcome =
-  | { status: "succeeded" | "paused" | "cancel_requested" | "unknown" | "unavailable"; completedSteps: number; cleanupFailed: number }
+  | { status: "succeeded" | "paused" | "cancel_requested" | "cancelled" | "unknown" | "unavailable"; completedSteps: number; cleanupFailed: number }
   | { status: "failed"; completedSteps: number; cleanupFailed: number; errorCode: string };

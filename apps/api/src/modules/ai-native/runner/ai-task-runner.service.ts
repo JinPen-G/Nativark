@@ -99,10 +99,20 @@ export class AiTaskRunner {
     const startedAt = this.clock.now();
     let completedSteps = 0, cleanupFailed = 0, calls = 0;
     try {
+      if (plan.steps.length === 0) {
+        const beforeFirstStep = await this.deps.leases.readMetadata(input.taskId);
+        if (beforeFirstStep.cancelRequestedAt !== null || beforeFirstStep.status === "cancel_requested") {
+          if (this.deps.taskOutcome) return (await this.commitTaskOutcome({ status: "cancelled", completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
+          return { status: "cancel_requested", completedSteps, cleanupFailed };
+        }
+      }
       for (const stepPlan of plan.steps) {
         if (this.clock.now() - startedAt >= plan.limits.maxTotalMs) throw new AiTaskRunnerError("AI_RUN_LIMIT", "task deadline exceeded");
         const current = await this.deps.leases.readMetadata(input.taskId);
         if (current.cancelRequestedAt !== null || current.status === "cancel_requested") {
+          if (this.deps.taskOutcome) {
+            return (await this.commitTaskOutcome({ status: "cancelled", completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
+          }
           return { status: "cancel_requested", completedSteps, cleanupFailed };
         }
         if (calls >= plan.limits.maxCalls) throw new AiTaskRunnerError("AI_RUN_LIMIT", "run call limit exceeded");

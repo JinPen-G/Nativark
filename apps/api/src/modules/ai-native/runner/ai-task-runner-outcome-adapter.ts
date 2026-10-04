@@ -5,8 +5,8 @@ export interface AiTaskRunnerOutcomeCommandFactory {
   transition(input: Readonly<{
     taskId: string;
     expectedRevision: number;
-    to: 'succeeded' | 'failed' | 'partially_succeeded' | 'waiting_input' | 'waiting_confirmation' | 'waiting_external';
-    reason: 'completed' | 'execution_failed' | 'input_required' | 'confirmation_required' | 'external_pending';
+    to: 'succeeded' | 'failed' | 'partially_succeeded' | 'waiting_input' | 'waiting_confirmation' | 'waiting_external' | 'cancelled';
+    reason: 'completed' | 'execution_failed' | 'input_required' | 'confirmation_required' | 'external_pending' | 'cancel_settled';
     lease: Readonly<{ runId: string; holderId: string; revision: number; fencingToken: string }>;
   }>): unknown;
 }
@@ -17,6 +17,7 @@ export interface AiTaskRunnerOutcomeAdapters {
 }
 
 function target(outcome: AiTaskRunnerTaskOutcome) {
+  if (outcome.status === 'cancelled') return { to: 'cancelled' as const, reason: 'cancel_settled' as const };
   if (outcome.status === 'succeeded') return { to: 'succeeded' as const, reason: 'completed' as const };
   if (outcome.status === 'failed') return outcome.completedSteps > 0
     ? { to: 'partially_succeeded' as const, reason: 'completed' as const }
