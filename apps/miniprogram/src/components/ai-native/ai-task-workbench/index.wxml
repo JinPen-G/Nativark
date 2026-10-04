@@ -1,6 +1,14 @@
 <view class="ai-workbench" aria-label="AI任务工作台">
   <text role="status">{{phase}}</text>
   <text wx:if="{{errorLabel}}" role="alert">{{errorLabel}}</text>
+  <ai-task-card wx:for="{{tasks}}" wx:key="id" task="{{item}}" available="{{taskListAvailable}}" bind:open="selectTask" />
+  <ai-step-timeline id="timeline" task-id="{{selectedTaskId}}" steps="{{steps}}" available="{{ready}}" />
+  <ai-supplement-input id="clarification" task-id="{{selectedTaskId}}" input-revision="{{inputRevision}}" fields="{{fields}}" disabled="{{!ready || !inputEnabled}}" />
+  <ai-proposal-confirm id="confirmation" proposal="{{proposal}}" disabled="{{!ready || !proposalEnabled}}" pending="{{pending}}" expired="{{proposalExpired}}" />
+  <ai-knowledge-source id="sources" sources="{{sources}}" />
+  <ai-memory-preference id="memory" items="{{memories}}" available="{{ready}}" />
+  <ai-status-panel state="{{actionState}}" manual-text="核对" manual-available="{{ready && manualEnabled}}" disabled="{{pending}}" bind:manual="onManual" />
+  <ai-order-explanation id="result" order="{{order}}" available="{{ready}}" />
   <slot name="task-card"></slot>
   <slot name="step-timeline"></slot>
   <slot name="clarification"></slot>

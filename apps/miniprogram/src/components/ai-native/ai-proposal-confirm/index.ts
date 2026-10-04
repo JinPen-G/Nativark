@@ -6,17 +6,17 @@ Component({
     pending: { type: Boolean, value: false }, expired: { type: Boolean, value: false },
     checked: { type: Boolean, value: false }, confirmHandler: { type: null, value: null },
   },
-  data: { submitting: false, errorLabel: "", checkedIdentity: "", generation: 0, alive: true },
+  data: { hostAvailable: false, submitting: false, errorLabel: "", checkedIdentity: "", generation: 0, alive: true },
   lifetimes: { detached() { this.setData({ alive: false, generation: this.data.generation + 1, checkedIdentity: "", errorLabel: "" }); } },
   observers: { "proposal,disabled,expired,confirmHandler"() { this.setData({ checkedIdentity: "", generation: this.data.generation + 1, errorLabel: "" }); } },
   methods: {
     attachHost(action: (input: unknown) => Promise<void>) {
       bindHostAction(this, action);
-      this.setData({ generation: this.data.generation + 1, errorLabel: "", checkedIdentity: "", submitting: false });
+      this.setData({ hostAvailable: true, generation: this.data.generation + 1, errorLabel: "", checkedIdentity: "", submitting: false });
     },
     detachHost() {
       unbindHostAction(this);
-      this.setData({ generation: this.data.generation + 1, errorLabel: "", checkedIdentity: "", submitting: false });
+      this.setData({ hostAvailable: false, generation: this.data.generation + 1, errorLabel: "", checkedIdentity: "", submitting: false });
     },
     identity(): string {
       const proposal = this.data.proposal as ConfirmationIdentity | null;

@@ -68,10 +68,12 @@ const blank = {
   sources: [] as unknown[], memories: [] as unknown[], inspection: [] as unknown[], order: null as Record<string, unknown> | null,
   inputRevision: "", ready: false, proposalEnabled: false, proposalExpired: true,
   actionState: "unavailable", errorLabel: "", pending: false,
+  inputEnabled: false, manualEnabled: false, inspectionEnabled: false,
 };
 Component({
+  options: { multipleSlots: true },
   properties: { tasks: { type: Array, value: [] } },
-  data: { ...blank, selectedTaskId: "", phase: "no_host" },
+  data: { ...blank, taskListAvailable: false, selectedTaskId: "", phase: "no_host" },
   lifetimes: {
     created() { instances.set(this, { host: null, context: null, epoch: 0, alive: true, shown: false, enabled: false, pending: false, loop: null, snapshot: null }); },
     detached() { this.detachHost(); state(this).alive = false; },
@@ -95,21 +97,21 @@ Component({
       const loop = r.loop; r.loop = null; r.host = null; r.context = null;
       try { loop?.destroy(); } catch { /* Local cleanup must not restore stale display. */ }
       for (const id of ["#clarification", "#confirmation", "#sources"]) this.selectComponent?.(id)?.detachHost?.();
-      if (r.alive) this.setData({ ...blank, selectedTaskId: "", phase: "no_host" });
+      if (r.alive) this.setData({ ...blank, taskListAvailable: false, selectedTaskId: "", phase: "no_host" });
     },
     hostShow(enabled = false): void {
       const r = state(this);
       if (!r.alive || !r.host) return;
       r.shown = true; r.enabled = enabled === true;
       if (!r.enabled) { this.hostHide(); return; }
-      this.setData({ phase: this.data.selectedTaskId ? "unsynced" : "no_task" });
+      this.setData({ taskListAvailable: true, phase: this.data.selectedTaskId ? "unsynced" : "no_task" });
       // Showing does not reuse old authorization or restart a loop without a snapshot.
     },
     hostHide(): void {
       const r = state(this); r.epoch += 1; r.shown = false; r.snapshot = null; r.pending = false;
       try { r.loop?.destroy(); } catch { /* Still clear private state. */ } r.loop = null;
       for (const id of ["#clarification", "#confirmation", "#sources"]) this.selectComponent?.(id)?.detachHost?.();
-      if (r.alive) this.setData({ ...blank, phase: "hidden" });
+      if (r.alive) this.setData({ ...blank, taskListAvailable: false, phase: "hidden" });
     },
     hostLogout(): void { this.detachHost(); },
     async selectTask(event: WechatMiniprogram.CustomEvent): Promise<void> {
@@ -138,6 +140,9 @@ Component({
         const order = result.order ? Object.fromEntries(["title", "receivable", "paid", "deposit", "preAuth", "refundStatus", "availabilityLabel"].map(key => [key, serial(result.order?.[key])])) : null;
         this.setData({
           ready: true, phase: "ready",
+          inputEnabled: typeof host.submitInput === "function" && typeof result.inputRevision === "string" && Boolean(result.inputRevision),
+          manualEnabled: typeof host.reconcile === "function",
+          inspectionEnabled: typeof host.inspectionDraft === "function",
           steps: projectRows(result.steps, ["id", "taskId", "ordinal", "label", "status", "sourceLabel"]),
           fields: projectRows(result.fields, ["key", "label", "value", "error", "readonly", "required"]),
           inputRevision: typeof result.inputRevision === "string" ? result.inputRevision : "",
@@ -159,7 +164,7 @@ Component({
           }
         });
         const cursor = result.cursorState;
-        if (!host.readPage || !host.clock || !cursor || cursor.taskId !== context.taskId || cursor.sync !== "synced" || typeof cursor.version !== "string" || !cursor.version || typeof cursor.cursor !== "string" || !/^(0|[1-9]\\d*)$/.test(cursor.cursor) || cursor.cursor.length > 128) {
+        if (!host.readPage || !host.clock || !cursor || cursor.taskId !== context.taskId || cursor.sync !== "synced" || typeof cursor.version !== "string" || !cursor.version || typeof cursor.cursor !== "string" || !/^(0|[1-9]\d*)$/.test(cursor.cursor) || cursor.cursor.length > 128) {
           this.setData({ phase: "snapshot_only" }); return;
         }
         let cursorState = { ...cursor, events: [] as readonly AiCursorEvent[] };

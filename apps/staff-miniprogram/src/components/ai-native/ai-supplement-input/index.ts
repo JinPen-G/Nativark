@@ -3,7 +3,7 @@ interface ClarificationField { key: string; label: string; value?: string; error
 type ClarificationHandler = (input: { taskId: string; inputRevision: string; draft: Record<string, string> }) => Promise<void>;
 Component({
   properties: { fields: { type: Array, value: [] }, inputRevision: { type: String, value: "" }, taskId: { type: String, value: "" }, disabled: { type: Boolean, value: false }, submitHandler: { type: null, value: null } },
-  data: { instanceId: "", localDraft: {} as Record<string, string>, visibleFields: [] as ClarificationField[], definitionUnavailable: false, submitting: false, errorLabel: "", generation: 0, alive: true },
+  data: { hostAvailable: false, instanceId: "", localDraft: {} as Record<string, string>, visibleFields: [] as ClarificationField[], definitionUnavailable: false, submitting: false, errorLabel: "", generation: 0, alive: true },
   lifetimes: {
     attached() { this.setData({ instanceId: "ai-input-" + (++nextInputInstance) }); this.refreshFields(); },
     detached() { this.setData({ localDraft: {}, visibleFields: [], alive: false, generation: this.data.generation + 1 }); },
@@ -22,11 +22,11 @@ Component({
   methods: {
     attachHost(action: (input: unknown) => Promise<void>) {
       bindHostAction(this, action);
-      this.setData({ generation: this.data.generation + 1, errorLabel: "" });
+      this.setData({ hostAvailable: true, generation: this.data.generation + 1, errorLabel: "", submitting: false });
     },
     detachHost() {
       unbindHostAction(this);
-      this.setData({ generation: this.data.generation + 1, errorLabel: "" });
+      this.setData({ hostAvailable: false, generation: this.data.generation + 1, errorLabel: "", localDraft: {}, visibleFields: [], submitting: false });
     },
     refreshFields() {
       if (!this.data.alive) return;
