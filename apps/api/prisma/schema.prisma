@@ -479,6 +479,115 @@ model AiUsageLedgerEntry {
   @@map("ai_usage_ledger_entries")
 }
 
+/// Durable policy row locked by budget reservation transactions.
+model AiBudgetPolicy {
+  id              String   @id @default(uuid()) @db.VarChar(36)
+  scopeId         String   @db.VarChar(36)
+  scopeKind       AiScopeKind
+  sceneCode       String   @db.VarChar(128)
+  configRevision  Int      @default(1) @db.UnsignedInt
+  enabled         Boolean  @default(false)
+  allowedModels   Json
+  allowedScenes   Json
+  settingsJson    Json
+  unitKind        String   @db.VarChar(16)
+  tokenLimit      BigInt?  @db.UnsignedBigInt
+  callLimit       Int?     @db.UnsignedInt
+  moneyLimit      Decimal? @db.Decimal(24, 6)
+  moneyCurrency   String?  @db.Char(3)
+  maxConcurrent   Int      @default(0) @db.UnsignedInt
+  maxCallsPerRun  Int      @default(0) @db.UnsignedInt
+  priceVersion    String?  @db.VarChar(64)
+  createdAt       DateTime @default(now()) @db.DateTime(3)
+  updatedAt       DateTime @updatedAt
+  scope           AiScope  @relation(fields: [scopeId, scopeKind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict)
+  allocations     AiBudgetAllocation[]
+
+  @@unique([scopeId, scopeKind, sceneCode], map: "ai_budget_policy_scope_scene_key")
+  @@index([scopeKind, enabled], map: "ai_budget_policy_route_idx")
+  @@map("ai_budget_policies")
+}
+
+/// Durable reservation bound to server-side invocation identity.
+model AiBudgetReservation {
+  id              String   @id @default(uuid()) @db.VarChar(36)
+  tenantId        String?  @db.VarChar(191)
+  workspaceId     String?  @db.VarChar(191)
+  scopeId         String   @db.VarChar(36)
+  scopeKind       AiScopeKind
+  sceneCode       String   @db.VarChar(128)
+  actorId         String   @db.VarChar(191)
+  requestId        String   @db.VarChar(191)
+  runId           String   @db.VarChar(191)
+  stepId          String   @db.VarChar(191)
+  actionId        String   @db.VarChar(191)
+  callId          String   @db.VarChar(128)
+  idempotencyKey  String   @db.VarChar(128)
+  requestHash     String   @db.Char(64)
+  configRevision  Int      @db.UnsignedInt
+  priceVersion    String?  @db.VarChar(64)
+  unitKind        String   @db.VarChar(16)
+  reservedTokens  BigInt?  @db.UnsignedBigInt
+  reservedCalls   Int?     @db.UnsignedInt
+  reservedMoney   Decimal? @db.Decimal(24, 6)
+  moneyCurrency   String?  @db.Char(3)
+  actualTokens    BigInt?  @db.UnsignedBigInt
+  actualCalls     Int?     @db.UnsignedInt
+  actualMoney     Decimal? @db.Decimal(24, 6)
+  status          String   @db.VarChar(32)
+  dispatchState   String   @db.VarChar(32)
+  unknownReason   String?  @db.VarChar(128)
+  expiresAt       DateTime @db.DateTime(3)
+  createdAt       DateTime @default(now()) @db.DateTime(3)
+  updatedAt       DateTime @updatedAt
+  settledAt       DateTime?
+  allocations     AiBudgetAllocation[]
+  ledger          AiBudgetLedgerEntry[]
+
+  @@unique([scopeId, scopeKind, idempotencyKey], map: "ai_budget_reservation_scope_key")
+  @@unique([scopeId, scopeKind, callId], map: "ai_budget_reservation_call_key")
+  @@index([scopeId, scopeKind, sceneCode, status], map: "ai_budget_reservation_policy_status_idx")
+  @@index([tenantId, workspaceId, status], map: "ai_budget_reservation_scope_status_idx")
+  @@map("ai_budget_reservations")
+}
+
+model AiBudgetLedgerEntry {
+  id              String   @id @default(uuid()) @db.VarChar(36)
+  reservationId   String   @db.VarChar(36)
+  scopeId         String   @db.VarChar(36)
+  scopeKind       AiScopeKind
+  tenantId        String?  @db.VarChar(191)
+  eventKey        String   @db.VarChar(128)
+  kind            String   @db.VarChar(32)
+  inputTokens     BigInt?  @db.UnsignedBigInt
+  outputTokens    BigInt?  @db.UnsignedBigInt
+  calls           Int?     @db.UnsignedInt
+  moneyAmount     Decimal? @db.Decimal(24, 6)
+  moneyCurrency   String?  @db.Char(3)
+  evidenceHash    String?  @db.Char(64)
+  reason          String?  @db.VarChar(128)
+  createdAt       DateTime @default(now()) @db.DateTime(3)
+  reservation     AiBudgetReservation @relation(fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([reservationId, eventKey], map: "ai_budget_ledger_reservation_event_key")
+  @@index([scopeId, scopeKind, createdAt], map: "ai_budget_ledger_scope_created_idx")
+  @@map("ai_budget_ledger_entries")
+}
+
+/// Every intersected policy is linked to the reservation; aggregate usage must
+/// traverse this table, not just the consumer scope of the invocation.
+model AiBudgetAllocation {
+  reservationId String @db.VarChar(36)
+  policyId      String @db.VarChar(36)
+  policyRevision Int @db.UnsignedInt
+  reservation AiBudgetReservation @relation(fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  policy AiBudgetPolicy @relation(fields: [policyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([reservationId, policyId])
+  @@index([policyId], map: "ai_budget_allocation_policy_idx")
+  @@map("ai_budget_allocations")
+}
+
 model AiKnowledgeDocument {
   id          String   @id @default(uuid()) @db.VarChar(36)
   tenantId    String   @db.VarChar(191)
@@ -4756,6 +4865,7 @@ model AiScope {
   workspace   BusinessWorkspace? @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
   tasks       AiTask[]
   profiles    AiProviderProfile[]
+  budgetPolicies AiBudgetPolicy[]
   createdAt   DateTime           @default(now()) @db.DateTime(3)
 
   @@unique([id, kind], map: "ai_scopes_id_kind")
