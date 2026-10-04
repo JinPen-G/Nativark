@@ -3,7 +3,7 @@ interface ClarificationField { key: string; label: string; value?: string; error
 type ClarificationHandler = (input: { taskId: string; inputRevision: string; draft: Record<string, string> }) => Promise<void>;
 Component({
   properties: { fields: { type: Array, value: [] }, inputRevision: { type: String, value: "" }, taskId: { type: String, value: "" }, disabled: { type: Boolean, value: false }, submitHandler: { type: null, value: null } },
-  data: { instanceId: "", localDraft: {} as Record<string, string>, visibleFields: [] as ClarificationField[], submitting: false, errorLabel: "", generation: 0, alive: true },
+  data: { instanceId: "", localDraft: {} as Record<string, string>, visibleFields: [] as ClarificationField[], definitionUnavailable: false, submitting: false, errorLabel: "", generation: 0, alive: true },
   lifetimes: {
     attached() { this.setData({ instanceId: "ai-input-" + (++nextInputInstance) }); this.refreshFields(); },
     detached() { this.setData({ localDraft: {}, visibleFields: [], alive: false, generation: this.data.generation + 1 }); },
@@ -23,12 +23,16 @@ Component({
     refreshFields() {
       if (!this.data.alive) return;
       const fields: ClarificationField[] = Array.isArray(this.data.fields) ? this.data.fields.slice(0, 30) : [];
+      let definitionUnavailable = !Array.isArray(this.data.fields) || this.data.fields.length > 30;
       const seen = new Set<string>();
       const visible = fields.filter(field => {
-        if (!field || typeof field.key !== "string" || !/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(field.key) || ["__proto__", "constructor", "prototype"].includes(field.key) || typeof field.label !== "string" || seen.has(field.key)) return false;
+        if (!field || typeof field.key !== "string" || !/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(field.key) || ["__proto__", "constructor", "prototype"].includes(field.key) || typeof field.label !== "string") return false;
+        if (seen.has(field.key)) { definitionUnavailable = true; return false; }
         seen.add(field.key); return true;
       }).map(field => ({ key: field.key, label: field.label.slice(0, 200), value: Object.prototype.hasOwnProperty.call(this.data.localDraft, field.key) ? this.data.localDraft[field.key] : typeof field.value === "string" ? field.value.slice(0, 4000) : "", error: typeof field.error === "string" ? field.error.slice(0, 200) : "", readonly: field.readonly === true, required: field.required === true }));
-      this.setData({ visibleFields: visible });
+      if (definitionUnavailable) {
+        this.setData({ visibleFields: [], localDraft: {}, definitionUnavailable: true, errorLabel: "字段定义不可用，请刷新" });
+      } else this.setData({ visibleFields: visible, definitionUnavailable: false });
     },
     onFieldInput(event: WechatMiniprogram.CustomEvent) {
       if (!this.data.alive) return;
@@ -40,6 +44,7 @@ Component({
     async onSubmit(): Promise<void> {
       const handler = this.data.submitHandler as ClarificationHandler | null;
       if (this.data.disabled || this.data.submitting || !this.data.alive || !this.data.taskId || !this.data.inputRevision || typeof handler !== "function") return;
+      if (this.data.definitionUnavailable) { this.setData({ errorLabel: "字段定义不可用，请刷新" }); return; }
       if (this.data.visibleFields.some(field => field.required && !field.value?.trim())) { this.setData({ errorLabel: "请填写必填信息" }); return; }
       const generation = this.data.generation;
       const input = { taskId: this.data.taskId, inputRevision: this.data.inputRevision, draft: Object.fromEntries(this.data.visibleFields.map(field => [field.key, field.value ?? ""])) };
