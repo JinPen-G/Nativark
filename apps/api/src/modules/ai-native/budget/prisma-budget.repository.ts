@@ -147,6 +147,13 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
         return this.record(created, quote.association);
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
+        // A transaction/commit failure does not prove that no reservation was
+        // committed. Never translate it into EXHAUSTED, which would invite a
+        // caller to retry a possibly durable reservation.
+        if (error instanceof BudgetError) throw error;
+        throw new BudgetError('PENDING_RECONCILIATION');
+      }
       if (error instanceof BudgetError) throw error;
       const existing = await this.db.aiBudgetReservation.findFirst({ where: { scopeId: consumer.scopeId, scopeKind: consumer.scopeKind, idempotencyKey: quote.association.idempotencyKey }, select: { id: true, requestHash: true } });
       if (existing?.requestHash === requestHash) {
@@ -154,7 +161,9 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
         if (replay) return replay;
       }
       if (existing) throw new BudgetError('IDEMPOTENCY_CONFLICT');
-      throw new BudgetError('EXHAUSTED');
+      // A unique-key race whose winner is not visible yet is also ambiguous;
+      // do not claim exhaustion or issue a second reservation.
+      throw new BudgetError('PENDING_RECONCILIATION');
     }
   }
 
