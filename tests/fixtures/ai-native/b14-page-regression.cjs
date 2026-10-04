@@ -14,6 +14,8 @@ function loadPage(app) {
     Page(value) { definition = value; },
     loadingState: () => ({ status: 'loading', title: '', message: '' }),
     themeBehavior: {},
+    isSignedIn: () => true,
+    loadSubscription: () => Promise.resolve(),
     console,
   };
   vm.runInNewContext(output, context, { filename: file });
@@ -39,9 +41,13 @@ function lifecycleProbe(definition) {
 
 function defaultOffProbe(definition) {
   const calls = [];
-  // The real page's onShow owns ordinary order loading. We intentionally do
-  // not call it here: this probe is limited to the AI entry and must not turn
-  // a page unit test into an order HTTP test.
+  const instance = {
+    data: definition.data,
+    // Only ordinary business loading is substituted; the actual Page lifecycle runs.
+    load() { calls.push('business-load'); return Promise.resolve(); },
+    selectComponent() { return { hostShow() { calls.push('ai-show'); }, readSnapshot() { calls.push('ai-read'); } }; },
+  };
+  definition.onShow?.call(instance);
   return { calls, enabled: definition.data.aiNativeEntryVisible === true };
 }
 

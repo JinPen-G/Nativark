@@ -15,7 +15,7 @@ for (const app of ['miniprogram', 'staff-miniprogram']) {
     const page = loadPage(app);
     assert.equal(page.data.aiNativeEntryVisible, false);
     const probe = defaultOffProbe(page);
-    assert.deepEqual(probe.calls, [], 'default-off page must not invoke the AI host');
+    assert.deepEqual(probe.calls, ['business-load'], 'default-off must preserve business loading without invoking AI');
     assert.equal(probe.enabled, false);
   });
 
