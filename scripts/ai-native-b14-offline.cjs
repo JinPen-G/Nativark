@@ -14,10 +14,13 @@ function runCommand(command, args, label, timeout = 120_000, runner = spawnSync)
   const guard = path.resolve(process.cwd(), 'scripts/ai-native-b06-offline-guard.cjs');
   const result = runner(command, args, {
     cwd: process.cwd(), encoding: 'utf8', timeout,
+    shell: process.platform === 'win32' && command.toLowerCase().endsWith('.cmd'),
     env: { ...process.env, DATABASE_URL: 'mysql://127.0.0.1:1/ai_native_b14_offline_invalid', AI_NATIVE_OFFLINE: '1', CI: '1' },
   });
   const timedOut = result.error?.code === 'ETIMEDOUT' || result.signal === 'SIGTERM' && result.status === null;
-  return { label, status: timedOut ? 'timeout' : result.status === 0 ? 'passed' : 'failed', exitCode: timedOut ? null : result.status, output: `${result.stdout ?? ''}${result.stderr ?? ''}`.slice(-4000), guard };
+  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+  const count = name => Number(output.match(new RegExp(`ℹ ${name} (\\d+)`))?.[1] ?? 0);
+  return { label, status: timedOut ? 'timeout' : result.status === 0 ? 'passed' : 'failed', exitCode: timedOut ? null : result.status, todo: count('todo'), skipped: count('skipped'), output: output.slice(-4000), guard };
 }
 
 function runOffline(testFile, timeout = 30_000, runner = spawnSync) {
@@ -44,7 +47,7 @@ function runSuite(options = {}) {
   const checkResults = commands().map(([command, args, label]) => runCommand(command, args, label, options.checkTimeout ?? 180_000, runner));
   const results = [...testResults, ...checkResults];
   const failed = results.filter(result => result.status !== 'passed');
-  return { tool: 'ai-native-b14-offline', generatedAt: new Date().toISOString(), tests: testResults.length, checks: checkResults.length, passed: results.length - failed.length, failed: failed.length, results, unrun: ['真实 HTTP', '数据库/迁移', '真实模型/供应商', '浏览器/微信开发者工具/真机', '支付与生产灰度'] };
+  return { tool: 'ai-native-b14-offline', generatedAt: new Date().toISOString(), tests: testResults.length, checks: checkResults.length, passed: results.length - failed.length, failed: failed.length, todo: results.reduce((sum, result) => sum + result.todo, 0), skipped: results.reduce((sum, result) => sum + result.skipped, 0), results, unrun: ['真实 HTTP', '数据库/迁移', '真实模型/供应商', '浏览器/微信开发者工具/真机', '支付与生产灰度'] };
 }
 
 if (require.main === module) {

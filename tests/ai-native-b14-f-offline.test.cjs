@@ -24,4 +24,6 @@ test('B14-F report explicitly separates offline evidence from unrun environments
   assert.equal(report.tool, 'ai-native-b14-offline');
   assert.ok(report.unrun.includes('真实模型/供应商'));
   assert.equal(typeof report.failed, 'number');
+  assert.equal(typeof report.todo, 'number');
+  assert.equal(typeof report.skipped, 'number');
 });
