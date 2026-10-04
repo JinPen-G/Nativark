@@ -565,6 +565,7 @@ model AiBudgetLedgerEntry {
   moneyAmount     Decimal? @db.Decimal(24, 6)
   moneyCurrency   String?  @db.Char(3)
   evidenceHash    String?  @db.Char(64)
+  reason          String?  @db.VarChar(128)
   createdAt       DateTime @default(now()) @db.DateTime(3)
   reservation     AiBudgetReservation @relation(fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 

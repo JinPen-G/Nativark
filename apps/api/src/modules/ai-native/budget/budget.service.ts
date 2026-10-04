@@ -76,7 +76,7 @@ export class BudgetService {
     if (!same(quote.association, command.association) || quote.callId !== command.callId || quote.sceneCode !== command.sceneCode
       || !identifier(quote.model, 256) || !identifier(quote.actorId) || quote.actorId !== this.actorId(session.grant.context) || !/^[a-f0-9]{64}$/.test(quote.evidenceHash) || !(quote.expiresAt instanceof Date) || quote.expiresAt <= this.now()
       || !Array.isArray(quote.policies) || quote.policies.length < 1 || quote.policies.length > 3
-      || !quote.consumerScope || !identifier(quote.consumerScope.scopeId, 36) || !['PLATFORM', 'TENANT', 'WORKSPACE'].includes(quote.consumerScope.scopeKind)
+      || !quote.consumerScope || quote.consumerScope.sceneCode !== command.sceneCode || !identifier(quote.consumerScope.scopeId, 36) || !['PLATFORM', 'TENANT', 'WORKSPACE'].includes(quote.consumerScope.scopeKind)
       || !quote.policies.some(policy => policy.scopeId === quote.consumerScope.scopeId && policy.scopeKind === quote.consumerScope.scopeKind)) throw new BudgetError('INVALID');
     assertPositiveQuantity(quote.quantity);
     await session.revalidate();
@@ -87,7 +87,7 @@ export class BudgetService {
     if (!identifier(id, 36)) throw new BudgetError('INVALID');
     const session = await this.session(action, { association, reservationId: id });
     const record = await this.repository.get(id, structuredClone(association));
-    if (!record || !same(record.association, association)) throw new BudgetError('FORBIDDEN');
+    if (!record || !same(record.association, association) || record.actorId !== this.actorId(session.grant.context)) throw new BudgetError('FORBIDDEN');
     await session.revalidate();
     return { record, session };
   }

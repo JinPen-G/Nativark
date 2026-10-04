@@ -34,7 +34,7 @@ class MemoryBudgetRepository {
   async reserve(quote, _command) {
     const requestHash = JSON.stringify(quote);
     if (this.record) { if (this.record.requestHash === requestHash) return this.record.value; throw new BudgetError('IDEMPOTENCY_CONFLICT'); }
-    this.record = { requestHash, value: { id: 'reservation-1', scopeId: 'scope-1', scopeKind: 'WORKSPACE', revision: 1, storageVersion: now, association: quote.association, callId: quote.callId, sceneCode: quote.sceneCode, status: 'reserved', reserved: quote.quantity, actual: null, dispatched: false, unknownReason: null, expiresAt: quote.expiresAt } };
+    this.record = { requestHash, value: { id: 'reservation-1', scopeId: 'scope-1', scopeKind: 'WORKSPACE', actorId: quote.actorId, revision: 1, storageVersion: now, association: quote.association, callId: quote.callId, sceneCode: quote.sceneCode, status: 'reserved', reserved: quote.quantity, actual: null, dispatched: false, unknownReason: null, expiresAt: quote.expiresAt } };
     return this.record.value;
   }
   async get() { return this.record?.value ?? null; }

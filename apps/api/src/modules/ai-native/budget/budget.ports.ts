@@ -35,7 +35,7 @@ export interface BudgetQuote {
 }
 export interface BudgetQuotePort { quote(command: Readonly<BudgetReserveCommand>, grant: Readonly<BudgetGrant>): Promise<BudgetQuote>; }
 export interface BudgetRecord {
-  id: string; scopeId: string; scopeKind: 'PLATFORM' | 'TENANT' | 'WORKSPACE'; revision: number; storageVersion: Date; association: AiUsageAssociationDraft; callId: string; sceneCode: string;
+  id: string; scopeId: string; scopeKind: 'PLATFORM' | 'TENANT' | 'WORKSPACE'; actorId: string; revision: number; storageVersion: Date; association: AiUsageAssociationDraft; callId: string; sceneCode: string;
   status: BudgetStatus; reserved: AiUsageQuantityDraft; actual: AiUsageQuantityDraft | null;
   dispatched: boolean; unknownReason: string | null; expiresAt: Date;
 }
