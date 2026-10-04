@@ -18,7 +18,9 @@ Component({
       }) });
     },
     async onOpen(event: WechatMiniprogram.CustomEvent): Promise<void> {
-      const dataset = event.currentTarget.dataset;
+      if (!this.data.alive) return;
+      const dataset = event?.currentTarget?.dataset;
+      if (!dataset || typeof dataset !== "object" || Array.isArray(dataset)) return;
       const id = dataset.id ?? (dataset.source as { id?: string } | undefined)?.id;
       const version = dataset.version ?? (dataset.source as { version?: string } | undefined)?.version;
       const matches = this.data.visibleSources.filter(item => item.id === id && (version === undefined || item.version === version));
