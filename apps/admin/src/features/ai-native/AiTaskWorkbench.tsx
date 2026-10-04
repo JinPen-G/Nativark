@@ -94,6 +94,7 @@ export function AiTaskWorkbench({
   const [detail, setDetail] = useState<AiTaskDetailProjection | null>(null);
   const [detailState, setDetailState] = useState<DetailState>("idle");
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [readNonce, setReadNonce] = useState(0);
   const epoch = useRef(0);
   const taskId = controlledTaskId ?? localTaskId;
 
@@ -135,7 +136,7 @@ export function AiTaskWorkbench({
     return () => {
       abort.abort();
     };
-  }, [context, readTask, taskId, visible]);
+  }, [context, readTask, taskId, visible, readNonce]);
 
   const selectTask = (nextTaskId: string) => {
     epoch.current += 1;
@@ -144,6 +145,16 @@ export function AiTaskWorkbench({
     setDetailError(null);
     setDetailState(visible && readTask ? "loading" : "unavailable");
     onSelectTask?.(nextTaskId);
+  };
+
+  const requestResync = async () => {
+    if (!taskId || !onResync) return;
+    epoch.current += 1;
+    setDetail(null);
+    setDetailError(null);
+    setDetailState(readTask ? "loading" : "unavailable");
+    setReadNonce((value) => value + 1);
+    await onResync(taskId, context);
   };
 
   const title = !taskId
@@ -182,7 +193,7 @@ export function AiTaskWorkbench({
           <ActionButton
             label="重新读取"
             pendingLabel="读取中…"
-            onAction={async () => { await onResync(taskId, context); }}
+            onAction={requestResync}
           />
         )}
         {detailState === "ready" && detail && taskId && (
@@ -191,7 +202,7 @@ export function AiTaskWorkbench({
               <Alert
                 type="warning"
                 message="事件未同步，请由宿主重新读取快照后再继续。"
-                action={onResync ? <ActionButton label="重新读取事件" pendingLabel="读取中…" onAction={async () => { await onResync(taskId, context); }} /> : undefined}
+                action={onResync ? <ActionButton label="重新读取事件" pendingLabel="读取中…" onAction={requestResync} /> : undefined}
               />
             )}
             <TaskTimeline taskId={taskId} steps={detail.steps} />

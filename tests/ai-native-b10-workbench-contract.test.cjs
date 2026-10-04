@@ -40,5 +40,7 @@ test('workbench uses the existing event consumer and exposes resync instead of i
   assert.match(source, /consumePolledEvents/);
   assert.match(source, /resyncRequired/);
   assert.match(source, /重新读取快照/);
+  assert.match(source, /setReadNonce\(\(value\) => value \+ 1\)/);
+  assert.match(source, /const requestResync = async/);
   assert.doesNotMatch(source, /cursor\s*\+\+|Number\([^)]*cursor|parseInt\([^)]*cursor/);
 });
