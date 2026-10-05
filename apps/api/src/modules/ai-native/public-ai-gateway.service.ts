@@ -47,7 +47,7 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
       || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120000 || !Array.isArray(scenes) || !scenes.length || scenes.length > 100) throw new ModelGatewayError('CONFIG_INVALID');
     const ports = runtime.ports;
     if ([ports.routing?.resolve, ports.routing?.assertCurrent, ports.admission?.admit, ports.dispatch?.claim, ports.dispatch?.finish,
-      ports.usage?.reserve, ports.usage?.settle, ports.usage?.markUnknown, ports.audit?.append, ports.transport?.invoke, ports.transport?.stream]
+      ports.budget?.reserve, ports.budget?.dispatch, ports.budget?.settle, ports.budget?.abandon, ports.audit?.append, ports.transport?.invoke, ports.transport?.stream]
       .some(method => typeof method !== 'function')) throw new ModelGatewayError('CONFIG_INVALID');
     this.runtime = { ports: { ...runtime.ports }, evidence: runtime.evidence, verifyEvidence: runtime.verifyEvidence.bind(runtime) };
     for (const item of scenes) {

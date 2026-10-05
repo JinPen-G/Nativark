@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { AiGatewayIntentDraft } from '@rental-os/shared';
 import { gatewayTextIntentBindingSchema, prepareGatewayTextIntent, type GatewayTextIntentBinding } from './gateway-intent';
+import type { GatewayAccountingCall } from './gateway-accounting.ports';
 import type { AiDispatchBinding } from './invocation-dispatch.service';
 import type { AiProfileCapability, AiProfileScope } from './provider-profile.ports';
 import { GatewayDeadline } from './gateway-deadline';
@@ -49,6 +50,12 @@ export class UnifiedAiGatewayService {
 
   private deadline(signal?: AbortSignal) { return new GatewayDeadline(this.deadlineMs, signal); }
 
+  private assertBudget() {
+    const budget = this.ports.budget;
+    if ([budget?.reserve, budget?.dispatch, budget?.settle, budget?.abandon]
+      .some(method => typeof method !== 'function')) throw new ModelGatewayError('CONFIG_INVALID');
+  }
+
   private input(request: ModelRequest): ModelRequest {
     const parsed = modelRequestSchema.safeParse(request);
     if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
@@ -80,11 +87,13 @@ export class UnifiedAiGatewayService {
 
   private async invokeRequest(context: GatewayContext, request: UnresolvedRequest, signal?: AbortSignal, intentBinding?: IntentExecutionBinding): Promise<GatewayInvocationResult> {
     if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
+    this.assertBudget();
     request = structuredClone(request); context = structuredClone(context);
     const life = this.deadline(signal);
     let scope!: AiProfileScope;
     let binding: AiDispatchBinding | undefined;
-    let admissionId: string | undefined, usageId: string | undefined, dispatched = false, accounted = false, settled = false, closed = false;
+    let budgetCall: GatewayAccountingCall | undefined;
+    let admissionId: string | undefined, reservationId: string | undefined, dispatched = false, accounted = false, settled = false, closed = false;
     try {
       const resolution = structuredClone(await life.wait(() => this.ports.routing.resolve(context, this.required(request))));
       if (intentBinding && resolution.scene !== intentBinding.routeScene) throw new ModelGatewayError('CONFIG_INVALID');
@@ -102,16 +111,25 @@ export class UnifiedAiGatewayService {
         if (closed) { void life.cleanup(() => this.ports.dispatch.finish(structuredClone(token), 'cancelled')).catch(() => {}); }
         else admissionId = admission.id;
       }));
-      const usage = await life.wait(() => this.ports.usage.reserve({ scope: admission.scope, callId: request.callId, idempotencyKey: request.callId, reservedUnits: request.maxOutputTokens, expiresAt: life.expiresAt }).then(record => { if (closed) { void life.cleanup(() => this.ports.usage.markUnknown(scope, record.id, 'LATE_RESERVATION')).catch(() => {}); } else usageId = record.id; return record; })); usageId = usage.id;
+      budgetCall = { context: structuredClone(context), binding: structuredClone(binding), expiresAt: life.expiresAt,
+        request: { callId: request.callId, model: transportRequest.model, maxOutputTokens: request.maxOutputTokens, intentHash: intentBinding?.intentHash ?? hash } };
+      const call = structuredClone(budgetCall);
+      const usage = await life.wait(() => this.ports.budget.reserve(structuredClone(call)).then(record => {
+        if (closed) { void life.cleanup(() => this.ports.budget.abandon(structuredClone(call), record.id, 'LATE_RESERVATION')).catch(() => {}); }
+        else reservationId = record.id;
+        return record;
+      })); reservationId = usage.id;
       await life.wait(() => this.ports.audit.append({ callId: request.callId, tenantId: context.tenantId, workspaceId: context.workspaceId, event: 'ai.invoke.admitted', status: 'accepted' }));
+      await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
+      await life.wait(() => this.ports.budget.dispatch(structuredClone(call), usage.id));
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
       dispatched = true;
       const rawResult = structuredClone(await life.wait(() => this.ports.transport.invoke(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal)));
       const result = intentBinding ? this.textResult(rawResult) : rawResult;
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       const reported = result.usage;
-      if (reported) { await life.wait(() => this.ports.usage.settle(admission.scope, usage.id, `invoke:${request.callId}`, reported.inputTokens, reported.outputTokens)); accounted = true; }
-      else { await life.wait(() => this.ports.usage.markUnknown(admission.scope, usage.id, 'USAGE_UNAVAILABLE')); accounted = true; }
+      if (reported) { await life.wait(() => this.ports.budget.settle(structuredClone(call), usage.id, `invoke:${request.callId}`, reported)); accounted = true; }
+      else { await life.wait(() => this.ports.budget.abandon(structuredClone(call), usage.id, 'USAGE_UNAVAILABLE')); accounted = true; }
       await life.wait(() => this.ports.dispatch.finish(structuredClone(binding!), 'completed'));
       settled = true;
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
@@ -121,14 +139,14 @@ export class UnifiedAiGatewayService {
       const terminalCommitted = settled;
       closed = true;
       settled = true;
-      if (usageId && !accounted) { const pendingId = usageId; try { await life.cleanup(() => this.ports.usage.markUnknown(scope, pendingId, dispatched ? 'DISPATCH_UNKNOWN' : 'DISPATCH_NOT_STARTED')); accounted = true; } catch { /* durable reconciliation remains pending */ } }
+      if (reservationId && !accounted) { const pendingId = reservationId; try { await life.cleanup(() => this.ports.budget.abandon(structuredClone(budgetCall!), pendingId, dispatched ? 'DISPATCH_UNKNOWN' : 'DISPATCH_NOT_STARTED')); accounted = true; } catch { /* durable reconciliation remains pending */ } }
       if (admissionId && !terminalCommitted) { try { await life.cleanup(() => this.ports.dispatch.finish(structuredClone(binding!), dispatched ? 'unknown' : 'cancelled')); } catch { /* durable state is authoritative */ } }
       throw failure;
     } finally {
       closed = true;
       life.close();
-      if (!settled && (usageId || admissionId)) {
-        if (usageId && !accounted) { const pendingId = usageId; try { await life.cleanup(() => this.ports.usage.markUnknown(scope, pendingId, 'DISPATCH_UNKNOWN')); } catch { /* durable reconciliation remains pending */ } }
+      if (!settled && (reservationId || admissionId)) {
+        if (reservationId && !accounted) { const pendingId = reservationId; try { await life.cleanup(() => this.ports.budget.abandon(structuredClone(budgetCall!), pendingId, 'DISPATCH_UNKNOWN')); } catch { /* durable reconciliation remains pending */ } }
         if (admissionId) { try { await life.cleanup(() => this.ports.dispatch.finish(structuredClone(binding!), dispatched ? 'unknown' : 'cancelled')); } catch { /* durable state is authoritative */ } }
       }
     }
@@ -141,11 +159,13 @@ export class UnifiedAiGatewayService {
 
   private async *streamRequest(context: GatewayContext, request: UnresolvedRequest, signal?: AbortSignal, intentBinding?: IntentExecutionBinding): AsyncGenerator<GatewayStreamEvent> {
     if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
+    this.assertBudget();
     request = structuredClone(request); context = structuredClone(context);
     const life = this.deadline(signal);
     let scope!: AiProfileScope;
     let binding: AiDispatchBinding | undefined;
-    let admissionId: string | undefined, usageId: string | undefined, dispatched = false, accounted = false, settled = false, closed = false;
+    let budgetCall: GatewayAccountingCall | undefined;
+    let admissionId: string | undefined, reservationId: string | undefined, dispatched = false, accounted = false, settled = false, closed = false;
     let iterator: AsyncIterator<GatewayStreamEvent> | undefined;
     let sourceDone = false;
     let finalResult: GatewayInvocationResult | undefined;
@@ -166,8 +186,17 @@ export class UnifiedAiGatewayService {
         if (closed) { void life.cleanup(() => this.ports.dispatch.finish(structuredClone(token), 'cancelled')).catch(() => {}); }
         else admissionId = admission.id;
       }));
-      const usage = await life.wait(() => this.ports.usage.reserve({ scope: admission.scope, callId: request.callId, idempotencyKey: request.callId, reservedUnits: request.maxOutputTokens, expiresAt: life.expiresAt }).then(record => { if (closed) { void life.cleanup(() => this.ports.usage.markUnknown(scope, record.id, 'LATE_RESERVATION')).catch(() => {}); } else usageId = record.id; return record; })); usageId = usage.id;
+      budgetCall = { context: structuredClone(context), binding: structuredClone(binding), expiresAt: life.expiresAt,
+        request: { callId: request.callId, model: transportRequest.model, maxOutputTokens: request.maxOutputTokens, intentHash: intentBinding?.intentHash ?? hash } };
+      const call = structuredClone(budgetCall);
+      const usage = await life.wait(() => this.ports.budget.reserve(structuredClone(call)).then(record => {
+        if (closed) { void life.cleanup(() => this.ports.budget.abandon(structuredClone(call), record.id, 'LATE_RESERVATION')).catch(() => {}); }
+        else reservationId = record.id;
+        return record;
+      })); reservationId = usage.id;
       await life.wait(() => this.ports.audit.append({ callId: request.callId, tenantId: context.tenantId, workspaceId: context.workspaceId, event: 'ai.stream.admitted', status: 'accepted' }));
+      await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
+      await life.wait(() => this.ports.budget.dispatch(structuredClone(call), usage.id));
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       dispatched = true;
@@ -191,8 +220,8 @@ export class UnifiedAiGatewayService {
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       if (!result) throw new ModelGatewayError('PROVIDER_FAILED');
       const reported = result.usage;
-      if (reported) { await life.wait(() => this.ports.usage.settle(admission.scope, usage.id, `stream:${request.callId}`, reported.inputTokens, reported.outputTokens)); accounted = true; }
-      else { await life.wait(() => this.ports.usage.markUnknown(admission.scope, usage.id, 'USAGE_UNAVAILABLE')); accounted = true; }
+      if (reported) { await life.wait(() => this.ports.budget.settle(structuredClone(call), usage.id, `stream:${request.callId}`, reported)); accounted = true; }
+      else { await life.wait(() => this.ports.budget.abandon(structuredClone(call), usage.id, 'USAGE_UNAVAILABLE')); accounted = true; }
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       await life.wait(() => this.ports.dispatch.finish(structuredClone(binding!), 'completed'));
       settled = true;
@@ -204,7 +233,7 @@ export class UnifiedAiGatewayService {
       const terminalCommitted = settled;
       closed = true;
       settled = true;
-      if (usageId && !accounted) { const pendingId = usageId; try { await life.cleanup(() => this.ports.usage.markUnknown(scope, pendingId, dispatched ? 'DISPATCH_UNKNOWN' : 'DISPATCH_NOT_STARTED')); accounted = true; } catch { /* durable reconciliation remains pending */ } }
+      if (reservationId && !accounted) { const pendingId = reservationId; try { await life.cleanup(() => this.ports.budget.abandon(structuredClone(budgetCall!), pendingId, dispatched ? 'DISPATCH_UNKNOWN' : 'DISPATCH_NOT_STARTED')); accounted = true; } catch { /* durable reconciliation remains pending */ } }
       if (admissionId && !terminalCommitted) { try { await life.cleanup(() => this.ports.dispatch.finish(structuredClone(binding!), dispatched ? 'unknown' : 'cancelled')); } catch { /* durable state is authoritative */ } }
       throw failure;
     } finally {
@@ -212,7 +241,7 @@ export class UnifiedAiGatewayService {
       closed = true;
       life.close();
       if (!settled) {
-        if (usageId && !accounted) { const pendingId = usageId; try { await life.cleanup(() => this.ports.usage.markUnknown(scope, pendingId, 'CONSUMER_STOPPED')); } catch { /* durable reconciliation remains pending */ } }
+        if (reservationId && !accounted) { const pendingId = reservationId; try { await life.cleanup(() => this.ports.budget.abandon(structuredClone(budgetCall!), pendingId, 'CONSUMER_STOPPED')); } catch { /* durable reconciliation remains pending */ } }
         if (admissionId) { try { await life.cleanup(() => this.ports.dispatch.finish(structuredClone(binding!), dispatched ? 'unknown' : 'cancelled')); } catch { /* durable state is authoritative */ } }
       }
       if (iterator?.return && !sourceDone) {

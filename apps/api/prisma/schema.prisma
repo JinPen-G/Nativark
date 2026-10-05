@@ -466,7 +466,9 @@ model AiInvocationAdmission {
   updatedAt      DateTime @updatedAt
   revokedAt      DateTime?
   completedAt    DateTime?
+  accountingReceipts AiGatewayAccountingReceipt[]
 
+  @@unique([tenantId, workspaceId, id], map: "ai_invocation_admission_scope_id")
   @@unique([tenantId, callId], map: "ai_invocation_admission_tenant_call_key")
   @@index([tenantId, workspaceId, status], map: "ai_invocation_admission_scope_status_idx")
   @@index([status, expiresAt], map: "ai_invocation_admission_expiry_idx")
@@ -536,12 +538,39 @@ model AiGatewayInvocation {
   step              AiStep   @relation(fields: [scopeId, taskId, actionId, stepFingerprint], references: [scopeId, taskId, actionId, requestFingerprint], onDelete: Restrict, onUpdate: Restrict)
   run               AiRun    @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
   executionCharges  AiTaskExecutionCharge[]
+  accountingReceipts AiGatewayAccountingReceipt[]
 
   @@unique([scopeId, taskId, id], map: "ai_gateway_invocations_scope_task_id")
   @@unique([scopeId, callId], map: "ai_gateway_invocations_scope_call_key")
   @@unique([scopeId, stepId], map: "ai_gateway_invocations_scope_step_key")
   @@index([scopeId, taskId, runId], map: "ai_gateway_invocations_task_run_idx")
   @@map("ai_gateway_invocations")
+}
+
+model AiGatewayAccountingReceipt {
+  id            String @id @default(uuid()) @db.VarChar(36)
+  scopeId       String @db.VarChar(36)
+  scopeKind     AiScopeKind
+  taskId        String @db.VarChar(36)
+  tenantId      String @db.VarChar(191)
+  workspaceId   String @db.VarChar(191)
+  invocationId  String @unique @db.VarChar(36)
+  reservationId String @unique @db.VarChar(36)
+  admissionId   String @unique @db.VarChar(36)
+  dispatchToken String @db.VarChar(128)
+  requestHash   String @db.VarChar(128)
+  state         String @default("reserved") @db.VarChar(16)
+  inputTokens   BigInt? @db.UnsignedBigInt
+  outputTokens  BigInt? @db.UnsignedBigInt
+  usageHash     String? @db.Char(64)
+  createdAt     DateTime @default(now()) @db.DateTime(3)
+  updatedAt     DateTime @updatedAt @db.DateTime(3)
+  invocation    AiGatewayInvocation @relation(fields: [scopeId, taskId, invocationId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
+  reservation   AiBudgetReservation @relation(fields: [scopeId, scopeKind, reservationId], references: [scopeId, scopeKind, id], onDelete: Restrict, onUpdate: Restrict)
+  admission     AiInvocationAdmission @relation(fields: [tenantId, workspaceId, admissionId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([scopeId, state], map: "ai_gateway_accounting_scope_state_idx")
+  @@map("ai_gateway_accounting_receipts")
 }
 
 enum AiTaskExecutionResource {
@@ -685,7 +714,9 @@ model AiBudgetReservation {
   settledAt       DateTime?
   allocations     AiBudgetAllocation[]
   ledger          AiBudgetLedgerEntry[]
+  accountingReceipts AiGatewayAccountingReceipt[]
 
+  @@unique([scopeId, scopeKind, id], map: "ai_budget_reservation_scope_id")
   @@unique([scopeId, scopeKind, idempotencyKey], map: "ai_budget_reservation_scope_key")
   @@unique([scopeId, scopeKind, callId], map: "ai_budget_reservation_call_key")
   @@index([scopeId, scopeKind, sceneCode, status], map: "ai_budget_reservation_policy_status_idx")

@@ -14,5 +14,5 @@ module.exports = function withSyntheticDispatch(ports) {
       return ports.admission.transition(binding.scope, binding.callId, 'admitted', outcome);
     }
   };
-  return ports;
+  return require('./unified-budget.cjs')(ports);
 };
