@@ -8,6 +8,7 @@ const { quantityAtoms } = require('../apps/api/src/modules/ai-native/budget/budg
 const { PrismaBudgetRepository } = require('../apps/api/src/modules/ai-native/budget/prisma-budget.repository.ts');
 const { BudgetError } = require('../apps/api/src/modules/ai-native/budget/budget.ports.ts');
 const { PersistedBudgetEvidenceAdapter } = require('../apps/api/src/modules/ai-native/budget/budget-dependency-adapters.ts');
+const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
 
 const association = { requestId: 'req', runId: 'run', stepId: 'step', actionId: 'action', idempotencyKey: 'idem', priceVersion: 'price',
   scope: { kind: 'workspace', tenantId: 'tenant', workspaceId: 'workspace' }, config: { configId: 'cfg', configRevision: 2, credentialRef: 'vault', protocol: 'openai-compatible', provider: 'synthetic', model: 'model', tenantId: 'tenant', serviceMode: 'tenant_managed', configurationScope: { kind: 'tenant', tenantId: 'tenant' } } };
@@ -29,7 +30,7 @@ test('evidence cannot authorize another actor even when call and scope match', a
 test('repository writes and reads micro-money without floating point conversion', async () => {
   const row = { id: 'reservation', scopeId: 'workspace', scopeKind: 'WORKSPACE', actorId: 'actor', status: 'reserved', dispatchState: 'dispatched', reservedTokens: null, reservedCalls: null, reservedMoney: new Prisma.Decimal('123456789012345678.123456'), moneyCurrency: 'CNY', actualTokens: null, actualCalls: null, actualMoney: null, unknownReason: null, expiresAt: new Date('2026-10-04T12:01:00.000Z'), updatedAt: new Date('2026-10-04T12:00:00.000Z'), callId: 'call', idempotencyKey: 'idem', sceneCode: 'scene', configRevision: 2, tenantId: 'tenant', workspaceId: 'workspace' };
   const ledger = [];
-  Object.assign(row, { requestId: association.requestId, runId: association.runId, stepId: association.stepId, actionId: association.actionId, priceVersion: association.priceVersion });
+  Object.assign(row, { configurationHash: requestFingerprint(association.config), requestId: association.requestId, runId: association.runId, stepId: association.stepId, actionId: association.actionId, priceVersion: association.priceVersion });
   const db = { aiBudgetReservation: { updateMany: async ({ data }) => { Object.assign(row, data); if (typeof row.actualMoney === 'string') row.actualMoney = new Prisma.Decimal(row.actualMoney); row.status = 'settled'; row.dispatchState = 'completed'; row.updatedAt = new Date(row.updatedAt.getTime() + 1); return { count: 1 }; }, findUnique: async () => row }, aiBudgetLedgerEntry: { findUnique: async () => null, create: async ({ data }) => { ledger.push(data); return data; } }, $transaction: async callback => callback(db) };
   const repo = new PrismaBudgetRepository(db);
   const record = { id: row.id, scopeId: row.scopeId, scopeKind: row.scopeKind, actorId: row.actorId, revision: 2, storageVersion: row.updatedAt, association, callId: row.callId, sceneCode: row.sceneCode, status: 'reserved', reserved: { unit: 'money', amount: '123456789012345678.123456', currency: 'CNY', scale: 6 }, actual: null, dispatched: true, unknownReason: null, expiresAt: row.expiresAt };

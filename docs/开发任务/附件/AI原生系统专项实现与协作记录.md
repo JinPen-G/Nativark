@@ -417,3 +417,13 @@ HANDOFF-ID / 原任务与CLAIM-ID：
 - AIN-05/S06（关联03/04）：[配置所属Profile白名单同事务修订](AI原生系统协作切片/AIN-05-S06-20261005-codex.md)：租户内部管理入口、平台既有保存入口将有限白名单与配置/凭据引用/Profile修订同步CAS，保留BYOK密文和mode。平台vault等待撤权先红后绿，补最终当前身份复核回滚。定向39/39、完整1919/1919、API类型/build/diff check退出0，隔离client noop、无新迁移。白名单没有升级能力证据，真实管理adapter/live验真/预算单账等仍待推进，未生产注册，原正式验收0/28不变。
 - AIN-04/S04、05/S07：[平台配置真实动作授权与显式持久化组合](AI原生系统协作切片/AIN-04-S04-20261005-codex.md)：复用实际AuthService/Guard、既有共享平台上下文、规范Scope和平台vault；限定查看/管理权限，SaaS身份不默认授权，租户管理员与未定义AI动作拒绝。授权缺口及通配符负例先红后绿，实际管理/消费链组合验证；最终定向10/10、冻结完整1929/1929、API类型/build、490条路由权限、数据范围回归/diff check退出0。正式权限目录/HTTP/首次平台Profile创建/live能力验真/预算单账仍未齐，不生产注册，原正式验收0/28不变。
 - AIN-05/S08：[能力证据真实Prisma仓储与并发修订绑定](AI原生系统协作切片/AIN-05-S08-20261005-codex.md)：移除能力证据仓储手写Delegate和unknown cast，使用真实Prisma模型/事务；当前Profile修订、scope、凭据、模型、白名单锁定，迟到结果拒绝，同内容重放幂等，缺details明确DbNull，异常/超限/停用/跨归属fail closed。13/13定向、1939/1939冻结完整回归、API类型/build/diff check退出0；仍未宣称真实MySQL锁、可信live探测、Gateway预算单账或生产验收，原正式0/28。
+
+### AIN-HANDOFF-003：Claude恢复主力与单一fork执行线（2026-10-05）
+
+- 依据负责人最新明确授权，Claude从固定交接点 `124f5e80`恢复主力/协调；唯一集成树和分支不变。用户只fork一个会话，按[执行线任务说明](AI原生系统协作切片/Fork并行任务-运行器与审批闭环-20261005.md)在独立 `ai-native-fork-execution` 树开发AIN-06/07，不接任主线，也不自动扩展多会话。
+- 主Claude独占schema/迁移/shared/OpenAPI/公共鉴权/Gateway/模型配置与能力/dispatch/usage/budget及中央文档；fork独占任务说明中的runner/task/step/审批及指定Core事务文件。互不编辑对方活动文件，旧Codex树仅只读；不因fork复制对话就取得同树写权限。
+- 本轮交接核验：原分支/HEAD正确、无MERGE_HEAD、无未提交源码，历史output未跟踪报告和保全patch全部保留。最新用户转发说明fork已在独立树施工；未自行向fork发送消息或代合其修改。
+- 主线接收fork的累计资源需求，提供AiTaskExecutionBudget/Charge、Gateway调用关联及追加迁移、内部端口，详见[主线接口答复](AI原生系统协作切片/Fork执行线-主线接口答复-20261005.md)。资源占用/消耗与AIN-11货币预算分开，旧任务未初始化关闭；schema合同不代表adapter/可信证据/正式授权源已交付。
+- 本轮自动化：交接定向113/113；预算绑定修复先22项1通过/21失败，追加变更前拒绝用例亦先红，修后相关54/54；调用关联初轮20/21、修复最终授权等待过期窗口；最终绑定/资源模型/public Gateway/dispatch组合132/132。资源模型4项包含在132项中，不重复相加。API类型通过，隔离client生成共享产物未变，Prisma validate/datamodel diff通过；真实数据库/HTTP/模型/生产未执行。
+- 独立模型审阅一次HTTP503失败，未取得审查结论，不重复派审；实际自查及离线自动化与独立Review区分。完整专项回归尚待本轮构建后执行，不用旧1939或交接1825冒充最新全量。
+- 新权限动作read_step_terminal/takeover_run与正式plan/input/result证据source仍需主线真实装配；未知动作拒绝，不把读权限映射为接管权限。调用关联的priceVersion只做绑定，不自证已批准价格或AI权益。继续AIN-03/04/05/11单账接线，正式验收0/28不变。

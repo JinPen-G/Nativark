@@ -17,13 +17,16 @@ export interface BudgetGatewayInvocationBinding {
   expiresAt: Date;
 }
 
+export interface GatewayBudgetReserveRequest {
+  callId: string; model: string; maxOutputTokens: number; intentHash: string;
+}
 export interface BudgetGatewayBindingSource {
-  resolveForReserve(context: Readonly<GatewayContext>, request: Readonly<{ callId: string; model: string; maxOutputTokens: number }>): Promise<BudgetGatewayInvocationBinding>;
+  resolveForReserve(context: Readonly<GatewayContext>, request: Readonly<GatewayBudgetReserveRequest>): Promise<BudgetGatewayInvocationBinding>;
   resolveForReservation(context: Readonly<GatewayContext>, reservationId: string): Promise<BudgetGatewayInvocationBinding>;
 }
 
 export interface BudgetGatewayLifecycle {
-  reserve(context: Readonly<GatewayContext>, request: Readonly<{ callId: string; model: string; maxOutputTokens: number }>): Promise<string>;
+  reserve(context: Readonly<GatewayContext>, request: Readonly<GatewayBudgetReserveRequest>): Promise<string>;
   dispatch(context: Readonly<GatewayContext>, reservationId: string, eventKey: string): Promise<BudgetRecord>;
   settle(context: Readonly<GatewayContext>, reservationId: string, eventKey: string, evidenceRef: string): Promise<BudgetRecord>;
   release(context: Readonly<GatewayContext>, reservationId: string, eventKey: string): Promise<BudgetRecord>;
@@ -57,7 +60,7 @@ export class BudgetGatewayAdapter implements BudgetGatewayLifecycle {
     if (!budget || !source?.resolveForReserve || !source.resolveForReservation) throw new BudgetError('UNAVAILABLE');
   }
 
-  async reserve(context: Readonly<GatewayContext>, request: Readonly<{ callId: string; model: string; maxOutputTokens: number }>) {
+  async reserve(context: Readonly<GatewayContext>, request: Readonly<GatewayBudgetReserveRequest>) {
     context = structuredClone(context);
     request = structuredClone(request);
     const binding = structuredClone(await this.source.resolveForReserve(structuredClone(context), structuredClone(request)));

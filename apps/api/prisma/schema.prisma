@@ -510,6 +510,115 @@ model AiUsageLedgerEntry {
   @@map("ai_usage_ledger_entries")
 }
 
+/// Non-financial binding for one already-authorized Gateway step; no prompt body is stored.
+model AiGatewayInvocation {
+  id                String   @id @default(uuid()) @db.VarChar(36)
+  scopeId           String   @db.VarChar(36)
+  taskId            String   @db.VarChar(36)
+  runId             String   @db.VarChar(36)
+  stepId            String   @db.VarChar(36)
+  actionId          String   @db.VarChar(191)
+  stepFingerprint   String   @db.Char(64)
+  actorId           String   @db.VarChar(191)
+  callId            String   @db.VarChar(128)
+  sceneCode         String   @db.VarChar(128)
+  mode              String   @db.VarChar(8)
+  intentHash        String   @db.Char(64)
+  registrationHash  String   @db.Char(64)
+  configuration     Json
+  configurationHash String   @db.Char(64)
+  priceVersion      String   @db.VarChar(64)
+  maxOutputTokens   Int      @db.UnsignedInt
+  leaseOwnerId      String   @db.VarChar(191)
+  fencingToken      Decimal  @db.Decimal(20, 0)
+  expiresAt         DateTime @db.DateTime(3)
+  createdAt         DateTime @default(now()) @db.DateTime(3)
+  step              AiStep   @relation(fields: [scopeId, taskId, actionId, stepFingerprint], references: [scopeId, taskId, actionId, requestFingerprint], onDelete: Restrict, onUpdate: Restrict)
+  run               AiRun    @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
+  executionCharges  AiTaskExecutionCharge[]
+
+  @@unique([scopeId, taskId, id], map: "ai_gateway_invocations_scope_task_id")
+  @@unique([scopeId, callId], map: "ai_gateway_invocations_scope_call_key")
+  @@unique([scopeId, stepId], map: "ai_gateway_invocations_scope_step_key")
+  @@index([scopeId, taskId, runId], map: "ai_gateway_invocations_task_run_idx")
+  @@map("ai_gateway_invocations")
+}
+
+enum AiTaskExecutionResource {
+  STEPS        @map("steps")
+  CALLS        @map("calls")
+  ACTIVE_MS    @map("active_ms")
+  OUTPUT_BYTES @map("output_bytes")
+}
+
+enum AiTaskExecutionChargeStatus {
+  RESERVED @map("reserved")
+  RECORDED @map("recorded")
+  UNKNOWN  @map("unknown")
+}
+
+/// Explicitly initialized task resource limits; absence disables execution, not unlimited usage.
+model AiTaskExecutionBudget {
+  scopeId             String @db.VarChar(36)
+  taskId              String @db.VarChar(36)
+  policyVersion       String @db.VarChar(64)
+  policyFingerprint   String @db.Char(64)
+  maxSteps            BigInt @db.UnsignedBigInt
+  maxCalls            BigInt @db.UnsignedBigInt
+  maxActiveMs         BigInt @db.UnsignedBigInt
+  maxOutputBytes      BigInt @db.UnsignedBigInt
+  reservedSteps       BigInt @default(0) @db.UnsignedBigInt
+  consumedSteps       BigInt @default(0) @db.UnsignedBigInt
+  reservedCalls       BigInt @default(0) @db.UnsignedBigInt
+  consumedCalls       BigInt @default(0) @db.UnsignedBigInt
+  reservedActiveMs    BigInt @default(0) @db.UnsignedBigInt
+  consumedActiveMs    BigInt @default(0) @db.UnsignedBigInt
+  reservedOutputBytes BigInt @default(0) @db.UnsignedBigInt
+  consumedOutputBytes BigInt @default(0) @db.UnsignedBigInt
+  revision            Int    @default(1) @db.UnsignedInt
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  updatedAt           DateTime @updatedAt @db.DateTime(3)
+  task                AiTask @relation(fields: [scopeId, taskId], references: [scopeId, id], onDelete: Restrict, onUpdate: Restrict)
+  charges             AiTaskExecutionCharge[]
+
+  @@id([scopeId, taskId])
+  @@map("ai_task_execution_budgets")
+}
+
+/// Resource occupancy/receipts only; never a second monetary ledger or dispatch permit.
+model AiTaskExecutionCharge {
+  scopeId              String @db.VarChar(36)
+  taskId               String @db.VarChar(36)
+  chargeId             String @db.VarChar(36)
+  runId                String @db.VarChar(36)
+  stepId               String? @db.VarChar(36)
+  actionId             String? @db.VarChar(191)
+  stepFingerprint      String? @db.Char(64)
+  gatewayInvocationId  String? @db.VarChar(36)
+  leaseOwnerId         String @db.VarChar(191)
+  fencingToken         Decimal @db.Decimal(20, 0)
+  requestFingerprint   String @db.Char(64)
+  resource             AiTaskExecutionResource
+  amount               BigInt @db.UnsignedBigInt
+  actualAmount         BigInt? @db.UnsignedBigInt
+  status               AiTaskExecutionChargeStatus @default(RESERVED)
+  outcomeFingerprint   String? @db.Char(64)
+  evidenceRef          String? @db.VarChar(191)
+  unknownReason        String? @db.VarChar(128)
+  revision             Int @default(1) @db.UnsignedInt
+  createdAt            DateTime @default(now()) @db.DateTime(3)
+  updatedAt            DateTime @updatedAt @db.DateTime(3)
+  budget               AiTaskExecutionBudget @relation(fields: [scopeId, taskId], references: [scopeId, taskId], onDelete: Restrict, onUpdate: Restrict)
+  run                  AiRun @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
+  step                 AiStep? @relation(fields: [scopeId, taskId, stepId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
+  gatewayInvocation    AiGatewayInvocation? @relation(fields: [scopeId, taskId, gatewayInvocationId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([scopeId, taskId, chargeId])
+  @@index([scopeId, taskId, status], map: "ai_task_execution_charges_status_idx")
+  @@index([scopeId, taskId, runId], map: "ai_task_execution_charges_run_idx")
+  @@map("ai_task_execution_charges")
+}
+
 /// Durable policy row locked by budget reservation transactions.
 model AiBudgetPolicy {
   id              String   @id @default(uuid()) @db.VarChar(36)
@@ -555,6 +664,8 @@ model AiBudgetReservation {
   callId          String   @db.VarChar(128)
   idempotencyKey  String   @db.VarChar(128)
   requestHash     String   @db.Char(64)
+  /// Legacy rows remain unbound until reconciled from trusted configuration evidence.
+  configurationHash String? @db.Char(64)
   configRevision  Int      @db.UnsignedInt
   priceVersion    String?  @db.VarChar(64)
   unitKind        String   @db.VarChar(16)
@@ -4940,6 +5051,7 @@ model AiTask {
   steps               AiStep[]
   proposals           AiProposal[]
   events              AiTaskEvent[]
+  executionBudget     AiTaskExecutionBudget?
 
   @@unique([scopeId, id], map: "ai_tasks_scope_id")
   @@unique([scopeId, id, ownerKind], map: "ai_tasks_scope_actor_kind")
@@ -4975,6 +5087,8 @@ model AiRun {
   createdAt         DateTime     @default(now()) @db.DateTime(3)
   updatedAt         DateTime     @updatedAt @db.DateTime(3)
   steps             AiStep[]
+  gatewayInvocations AiGatewayInvocation[]
+  executionCharges   AiTaskExecutionCharge[]
 
   @@unique([scopeId, taskId, id], map: "ai_runs_scope_task_id")
   @@unique([scopeId, taskId, sequence], map: "ai_runs_sequence")
@@ -5004,7 +5118,10 @@ model AiStep {
   createdAt           DateTime           @default(now()) @db.DateTime(3)
   updatedAt           DateTime           @updatedAt @db.DateTime(3)
   proposalActions     AiProposalAction[]
+  gatewayInvocations  AiGatewayInvocation[]
+  executionCharges    AiTaskExecutionCharge[]
 
+  @@unique([scopeId, taskId, id], map: "ai_steps_scope_task_id")
   @@unique([scopeId, taskId, actionId], map: "ai_steps_action")
   @@unique([scopeId, taskId, actionId, requestFingerprint], map: "ai_steps_action_fingerprint")
   @@unique([scopeId, runId, sequence], map: "ai_steps_sequence")

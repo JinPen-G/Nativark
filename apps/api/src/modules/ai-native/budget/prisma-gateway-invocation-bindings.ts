@@ -1,0 +1,164 @@
+import { Prisma, type PrismaClient, type AiGatewayInvocation } from '@prisma/client';
+import type { AiGatewayConfigReferenceDraft, AiGatewayIntentDraft } from '@rental-os/shared';
+import { z } from 'zod';
+import type { AiScopeRepository } from '../ai-scope.repository';
+import { isGatewayConfig, isGatewayIntent } from '../gateway-contract-validation';
+import { prepareGatewayTextIntent } from '../gateway-intent';
+import { aiPersistenceScopeColumns } from '../persistence-scope';
+import type { GatewayContext } from '../model-gateway.ports';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { BudgetError } from './budget.ports';
+import type { BudgetGatewayBindingSource, BudgetGatewayInvocationBinding, GatewayBudgetReserveRequest } from './budget-gateway-adapter';
+
+type Db = Pick<PrismaClient, '$transaction' | 'aiGatewayInvocation' | 'aiBudgetReservation' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiScope' | 'aiProviderProfile'>;
+type Reader = Omit<Db, '$transaction'>;
+const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/).min(1);
+const registration = z.object({ stepId: id.max(36), mode: z.enum(['invoke', 'stream']),
+  lease: z.object({ runId: id.max(36), holderId: id.max(191), fencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/) }).strict(),
+  intent: z.unknown(), configuration: z.unknown(), priceVersion: id.max(64), expiresAt: z.date() }).strict();
+export interface RegisterGatewayInvocation {
+  stepId: string; mode: 'invoke' | 'stream'; lease: { runId: string; holderId: string; fencingToken: string };
+  intent: AiGatewayIntentDraft; configuration: AiGatewayConfigReferenceDraft; priceVersion: string; expiresAt: Date;
+}
+
+export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSource {
+  constructor(private readonly db: Db, private readonly scopes: Pick<AiScopeRepository, 'resolveCurrent'>,
+    private readonly clock: () => Date = () => new Date()) {
+    if (typeof scopes?.resolveCurrent !== 'function' || typeof db?.$transaction !== 'function') throw new BudgetError('UNAVAILABLE');
+  }
+  private now() {
+    const now = this.clock();
+    if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw new BudgetError('UNAVAILABLE');
+    return now;
+  }
+  private async current(context?: Readonly<GatewayContext>) {
+    const resolved = structuredClone(await this.scopes.resolveCurrent());
+    const { scope, context: principal } = resolved;
+    if (principal.actor.kind !== 'user' || !['operator', 'staff'].includes(principal.audience)
+      || principal.scope.kind !== 'workspace' || scope.kind !== 'WORKSPACE'
+      || scope.tenantId !== principal.scope.tenantId || scope.workspaceId !== principal.scope.workspaceId
+      || (context && (context.actorId !== principal.actor.userId || context.tenantId !== scope.tenantId || context.workspaceId !== scope.workspaceId))) throw new BudgetError('FORBIDDEN');
+    const { requestId: _, authorizedAt: __, ...identity } = principal;
+    return { scope, context: principal, actorId: principal.actor.userId, identityHash: requestFingerprint({ identity, scope }) };
+  }
+  private async revalidate(initial: Awaited<ReturnType<PrismaGatewayInvocationBindings['current']>>) {
+    if ((await this.current()).identityHash !== initial.identityHash) throw new BudgetError('FORBIDDEN');
+  }
+  private configuration(row: AiGatewayInvocation): AiGatewayConfigReferenceDraft {
+    if (!isGatewayConfig(row.configuration) || requestFingerprint(row.configuration) !== row.configurationHash) throw new BudgetError('UNAVAILABLE');
+    return structuredClone(row.configuration);
+  }
+  private async profile(db: Reader, configuration: AiGatewayConfigReferenceDraft, tenantId: string) {
+    if (!('tenantId' in configuration) || configuration.tenantId !== tenantId) throw new BudgetError('FORBIDDEN');
+    const owner = await db.aiScope.findFirst({ where: aiPersistenceScopeColumns(configuration.configurationScope) });
+    const profile = await db.aiProviderProfile.findFirst({ where: { id: configuration.configId, enabled: true, disabledAt: null } });
+    if (!owner || !profile || profile.scopeId !== owner.id || profile.scopeKind !== owner.kind
+      || profile.configRevision !== configuration.configRevision || profile.credentialRef !== configuration.credentialRef
+      || profile.protocol !== configuration.protocol || profile.provider !== configuration.provider || profile.model !== configuration.model
+      || profile.serviceMode !== configuration.serviceMode
+      || (profile.serviceMode === 'platform_managed' ? owner.kind !== 'PLATFORM'
+        : owner.kind !== 'TENANT' || owner.tenantId !== tenantId)) throw new BudgetError('FORBIDDEN');
+    return profile;
+  }
+  private async task(db: Reader, scopeId: string, taskId: string, actorId: string, audience: string) {
+    const task = await db.aiTask.findFirst({ where: { id: taskId, scopeId, ownerId: actorId, ownerKind: 'USER' } });
+    if (!task || task.audience.toLowerCase() !== audience || task.archivedAt) throw new BudgetError('FORBIDDEN');
+    return task;
+  }
+  private async active(db: Reader, row: Pick<AiGatewayInvocation, 'scopeId' | 'taskId' | 'stepId' | 'runId' | 'actionId' | 'actorId' | 'stepFingerprint' | 'intentHash' | 'sceneCode' | 'leaseOwnerId' | 'fencingToken' | 'expiresAt'>, audience: string) {
+    const task = await this.task(db, row.scopeId, row.taskId, row.actorId, audience);
+    const run = await db.aiRun.findFirst({ where: { id: row.runId, scopeId: row.scopeId, taskId: row.taskId } });
+    const step = await db.aiStep.findFirst({ where: { id: row.stepId, scopeId: row.scopeId, taskId: row.taskId, runId: row.runId } });
+    const now = this.now();
+    if (task.status !== 'RUNNING' || task.cancelRequestedAt || task.sceneCode !== row.sceneCode
+      || !run || run.status !== 'RUNNING' || run.actorKind !== 'USER' || run.actorId !== row.actorId
+      || run.leaseOwnerId !== row.leaseOwnerId || !run.leaseExpiresAt || run.leaseExpiresAt <= now
+      || !run.fencingToken.equals(row.fencingToken) || row.expiresAt <= now
+      || !step || step.status !== 'RUNNING' || step.actionId !== row.actionId
+      || step.requestFingerprint !== row.stepFingerprint || step.requestFingerprint !== row.intentHash) throw new BudgetError('FORBIDDEN');
+    return { task, run, step };
+  }
+  async register(value: RegisterGatewayInvocation): Promise<{ id: string; replayed: boolean }> {
+    const parsed = registration.safeParse(structuredClone(value));
+    if (!parsed.success || !isGatewayIntent(parsed.data.intent) || !isGatewayConfig(parsed.data.configuration)
+      || !('tenantId' in parsed.data.configuration)) throw new BudgetError('INVALID');
+    const input = { ...parsed.data, intent: parsed.data.intent, configuration: parsed.data.configuration };
+    if (input.expiresAt <= this.now() || BigInt(input.lease.fencingToken) > 18446744073709551615n) throw new BudgetError('INVALID');
+    const prepared = prepareGatewayTextIntent(input.intent, { sceneCode: input.intent.sceneCode, maxOutputTokens: input.intent.maxOutputTokens }, input.mode);
+    const principal = await this.current();
+    try {
+      return await this.db.$transaction(async tx => {
+        const step = await tx.aiStep.findFirst({ where: { id: input.stepId, scopeId: principal.scope.id, runId: input.lease.runId } });
+        if (!step) throw new BudgetError('FORBIDDEN');
+        const candidate = { scopeId: principal.scope.id, taskId: step.taskId, runId: step.runId, stepId: step.id, actionId: step.actionId,
+          actorId: principal.actorId, stepFingerprint: step.requestFingerprint, intentHash: prepared.intentHash, sceneCode: input.intent.sceneCode,
+          leaseOwnerId: input.lease.holderId, fencingToken: new Prisma.Decimal(input.lease.fencingToken), expiresAt: input.expiresAt };
+        const active = await this.active(tx, candidate, principal.context.audience);
+        if (input.expiresAt > active.run.leaseExpiresAt!) throw new BudgetError('INVALID');
+        const taskLock = await tx.aiTask.updateMany({ where: { id: active.task.id, scopeId: candidate.scopeId, revision: active.task.revision, status: 'RUNNING', cancelRequestedAt: null, archivedAt: null }, data: { revision: active.task.revision } });
+        const runLock = await tx.aiRun.updateMany({ where: { id: active.run.id, scopeId: candidate.scopeId, taskId: candidate.taskId, revision: active.run.revision,
+          leaseOwnerId: candidate.leaseOwnerId, fencingToken: candidate.fencingToken, status: 'RUNNING', leaseExpiresAt: { gt: this.now() } }, data: { revision: active.run.revision } });
+        const stepLock = await tx.aiStep.updateMany({ where: { id: step.id, scopeId: candidate.scopeId, revision: step.revision, status: 'RUNNING', requestFingerprint: candidate.intentHash }, data: { revision: step.revision } });
+        if (taskLock.count !== 1 || runLock.count !== 1 || stepLock.count !== 1) throw new BudgetError('FORBIDDEN');
+        const profile = await this.profile(tx, input.configuration, principal.scope.tenantId!);
+        const profileLock = await tx.aiProviderProfile.updateMany({ where: { id: profile.id, configRevision: profile.configRevision, enabled: true, disabledAt: null }, data: { configRevision: profile.configRevision } });
+        if (profileLock.count !== 1) throw new BudgetError('FORBIDDEN');
+        const configurationHash = requestFingerprint(input.configuration);
+        const registrationHash = requestFingerprint({ ...candidate, fencingToken: input.lease.fencingToken, expiresAt: input.expiresAt.toISOString(),
+          callId: input.intent.requestId, mode: input.mode, configurationHash, priceVersion: input.priceVersion, maxOutputTokens: input.intent.maxOutputTokens, identity: principal.identityHash });
+        const existing = await tx.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: candidate.scopeId, callId: input.intent.requestId } } });
+        await this.revalidate(principal);
+        if (candidate.expiresAt <= this.now()) throw new BudgetError('FORBIDDEN');
+        if (existing) {
+          if (existing.registrationHash !== registrationHash) throw new BudgetError('IDEMPOTENCY_CONFLICT');
+          return { id: existing.id, replayed: true };
+        }
+        const created = await tx.aiGatewayInvocation.create({ data: { ...candidate, callId: input.intent.requestId, mode: input.mode, registrationHash,
+          configuration: { ...input.configuration, configurationScope: { ...input.configuration.configurationScope } }, configurationHash, priceVersion: input.priceVersion, maxOutputTokens: input.intent.maxOutputTokens } });
+        await this.revalidate(principal);
+        if (candidate.expiresAt <= this.now()) throw new BudgetError('FORBIDDEN');
+        return { id: created.id, replayed: false };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+    } catch (error) {
+      if (error instanceof BudgetError) throw error;
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new BudgetError('IDEMPOTENCY_CONFLICT');
+      throw new BudgetError('PENDING_RECONCILIATION');
+    }
+  }
+  private binding(row: AiGatewayInvocation, principal: Awaited<ReturnType<PrismaGatewayInvocationBindings['current']>>): BudgetGatewayInvocationBinding {
+    if (row.actorId !== principal.actorId || row.scopeId !== principal.scope.id) throw new BudgetError('FORBIDDEN');
+    return { actorId: row.actorId, sceneCode: row.sceneCode, expiresAt: new Date(row.expiresAt), association: {
+      requestId: row.callId, runId: row.runId, stepId: row.stepId, actionId: row.actionId, idempotencyKey: row.callId,
+      scope: structuredClone(principal.context.scope), config: this.configuration(row), priceVersion: row.priceVersion
+    } };
+  }
+  async resolveForReserve(context: Readonly<GatewayContext>, request: Readonly<GatewayBudgetReserveRequest>) {
+    context = structuredClone(context); request = structuredClone(request);
+    const principal = await this.current(context);
+    const row = await this.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: principal.scope.id, callId: request.callId } } });
+    if (!row || row.intentHash !== request.intentHash || row.maxOutputTokens !== request.maxOutputTokens) throw new BudgetError('FORBIDDEN');
+    const binding = this.binding(row, principal);
+    if (binding.association.config.model !== request.model) throw new BudgetError('FORBIDDEN');
+    await this.active(this.db, row, principal.context.audience);
+    await this.profile(this.db, binding.association.config, principal.scope.tenantId!);
+    await this.revalidate(principal);
+    if (row.expiresAt <= this.now()) throw new BudgetError('FORBIDDEN');
+    return binding;
+  }
+  async resolveForReservation(context: Readonly<GatewayContext>, reservationId: string) {
+    context = structuredClone(context);
+    const principal = await this.current(context);
+    const reservation = await this.db.aiBudgetReservation.findFirst({ where: { id: reservationId, scopeId: principal.scope.id, scopeKind: 'WORKSPACE', actorId: principal.actorId } });
+    if (!reservation) throw new BudgetError('FORBIDDEN');
+    const row = await this.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: principal.scope.id, callId: reservation.callId } } });
+    if (!row || reservation.configurationHash !== row.configurationHash || reservation.requestId !== row.callId
+      || reservation.runId !== row.runId || reservation.stepId !== row.stepId || reservation.actionId !== row.actionId
+      || reservation.idempotencyKey !== row.callId || reservation.sceneCode !== row.sceneCode || reservation.priceVersion !== row.priceVersion
+      || reservation.tenantId !== principal.scope.tenantId || reservation.workspaceId !== principal.scope.workspaceId) throw new BudgetError('FORBIDDEN');
+    const binding = this.binding(row, principal);
+    if (reservation.configRevision !== binding.association.config.configRevision) throw new BudgetError('FORBIDDEN');
+    await this.task(this.db, row.scopeId, row.taskId, row.actorId, principal.context.audience);
+    await this.revalidate(principal);
+    return binding;
+  }
+}

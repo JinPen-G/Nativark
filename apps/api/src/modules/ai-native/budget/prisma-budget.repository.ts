@@ -4,6 +4,7 @@ import type { AiUsageSettingsDraft } from '@rental-os/shared';
 import { BudgetError, type BudgetPolicy, type BudgetPolicyKey, type BudgetQuote, type BudgetRecord, type BudgetReserveCommand, type BudgetTransactionRepository, type BudgetUsageEvidence } from './budget.ports';
 import { quantityAtoms, sameUnit } from './budget-quantity';
 import { validateBudgetSettings } from './budget-settings';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 
 type Db = Pick<PrismaClient, 'aiScope' | 'aiBudgetPolicy' | 'aiBudgetReservation' | 'aiBudgetLedgerEntry' | 'aiBudgetAllocation' | '$transaction'>;
 type Tx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
@@ -141,7 +142,7 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
           if (used + requested > limit) throw new BudgetError('EXHAUSTED');
         }
         await revalidate();
-        const data = { id: randomUUID(), tenantId, workspaceId, scopeId: consumer.scopeId, scopeKind: consumer.scopeKind, sceneCode: command.sceneCode, actorId: quote.actorId, requestId: quote.association.requestId, runId: quote.association.runId, stepId: quote.association.stepId, actionId: quote.association.actionId, callId: quote.callId, idempotencyKey: quote.association.idempotencyKey, requestHash, configRevision: quote.association.config.configRevision, priceVersion: quote.association.priceVersion, unitKind: quote.quantity.unit, ...quantityFields(quote.quantity, 'reserved'), status: 'reserved', dispatchState: 'not_dispatched', expiresAt: quote.expiresAt };
+        const data = { id: randomUUID(), tenantId, workspaceId, scopeId: consumer.scopeId, scopeKind: consumer.scopeKind, sceneCode: command.sceneCode, actorId: quote.actorId, requestId: quote.association.requestId, runId: quote.association.runId, stepId: quote.association.stepId, actionId: quote.association.actionId, callId: quote.callId, idempotencyKey: quote.association.idempotencyKey, requestHash, configurationHash: requestFingerprint(quote.association.config), configRevision: quote.association.config.configRevision, priceVersion: quote.association.priceVersion, unitKind: quote.quantity.unit, ...quantityFields(quote.quantity, 'reserved'), status: 'reserved', dispatchState: 'not_dispatched', expiresAt: quote.expiresAt };
         const created = await tx.aiBudgetReservation.create({ data, select: { id: true, tenantId: true, workspaceId: true, scopeId: true, scopeKind: true, sceneCode: true, actorId: true, requestId: true, runId: true, stepId: true, actionId: true, callId: true, idempotencyKey: true, configRevision: true, priceVersion: true, unitKind: true, reservedTokens: true, reservedCalls: true, reservedMoney: true, moneyCurrency: true, actualTokens: true, actualCalls: true, actualMoney: true, status: true, dispatchState: true, unknownReason: true, expiresAt: true, updatedAt: true } });
         await tx.aiBudgetAllocation.createMany({ data: rows.map(row => ({ reservationId: created.id, policyId: row.id, policyRevision: row.configRevision })) });
         return this.record(created, quote.association);
@@ -178,8 +179,9 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
   }
 
   private async readRecord(db: Pick<Tx, 'aiBudgetReservation'>, id: string, association: BudgetRecord['association']) {
-    const row = await db.aiBudgetReservation.findUnique({ where: { id }, select: { id: true, scopeId: true, scopeKind: true, actorId: true, status: true, dispatchState: true, reservedTokens: true, reservedCalls: true, reservedMoney: true, moneyCurrency: true, actualTokens: true, actualCalls: true, actualMoney: true, unknownReason: true, expiresAt: true, updatedAt: true, callId: true, idempotencyKey: true, sceneCode: true, configRevision: true, tenantId: true, workspaceId: true, requestId: true, runId: true, stepId: true, actionId: true, priceVersion: true } });
-    if (!row || row.scopeKind !== association.scope.kind.toUpperCase()
+    const row = await db.aiBudgetReservation.findUnique({ where: { id }, select: { id: true, scopeId: true, scopeKind: true, actorId: true, status: true, dispatchState: true, reservedTokens: true, reservedCalls: true, reservedMoney: true, moneyCurrency: true, actualTokens: true, actualCalls: true, actualMoney: true, unknownReason: true, expiresAt: true, updatedAt: true, callId: true, idempotencyKey: true, sceneCode: true, configRevision: true, configurationHash: true, tenantId: true, workspaceId: true, requestId: true, runId: true, stepId: true, actionId: true, priceVersion: true } });
+    if (!row || row.scopeKind !== association.scope.kind.toUpperCase() || !row.configurationHash
+      || row.configurationHash !== requestFingerprint(association.config)
       || row.requestId !== association.requestId || row.runId !== association.runId || row.stepId !== association.stepId || row.actionId !== association.actionId
       || row.idempotencyKey !== association.idempotencyKey || row.priceVersion !== association.priceVersion || row.configRevision !== association.config.configRevision
       || (association.scope.kind !== 'platform' && row.tenantId !== association.scope.tenantId)
@@ -199,6 +201,9 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
     if ((input.action === 'settle' || input.action === 'reconcile') && !input.usage) throw new BudgetError('INVALID');
     return this.db.$transaction(async tx => {
       await revalidate();
+      const current = await this.readRecord(tx, record.id, record.association);
+      if (!current || current.scopeId !== record.scopeId || current.scopeKind !== record.scopeKind
+        || current.actorId !== record.actorId || current.callId !== record.callId || current.sceneCode !== record.sceneCode) throw new BudgetError('FORBIDDEN');
       const existing = await tx.aiBudgetLedgerEntry.findUnique({ where: { reservationId_eventKey: { reservationId: record.id, eventKey: input.eventKey } }, select: { kind: true, evidenceHash: true, reason: true, inputTokens: true, calls: true, moneyAmount: true, moneyCurrency: true } });
       if (existing) {
         if (!sameLedgerPayload(existing, input)) throw new BudgetError('IDEMPOTENCY_CONFLICT');
@@ -208,7 +213,8 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
       }
       await revalidate();
       const next = input.action === 'dispatch' ? { status: 'reserved', dispatchState: 'dispatched' } : input.action === 'unknown' ? { status: 'pending_reconciliation', dispatchState: 'unknown', unknownReason: input.reason ?? 'result_unknown' } : input.action === 'release' ? { status: 'released', dispatchState: 'not_dispatched' } : { status: 'settled', dispatchState: 'completed', ...(input.usage ? quantityFields(input.usage.quantity, 'actual') : {}) };
-      const changed = await tx.aiBudgetReservation.updateMany({ where: { id: record.id, status: record.status === 'pending_reconciliation' ? 'pending_reconciliation' : 'reserved', updatedAt: record.storageVersion }, data: next });
+      const changed = await tx.aiBudgetReservation.updateMany({ where: { id: record.id, scopeId: record.scopeId, scopeKind: record.scopeKind, actorId: record.actorId, callId: record.callId,
+        configurationHash: requestFingerprint(record.association.config), status: record.status === 'pending_reconciliation' ? 'pending_reconciliation' : 'reserved', updatedAt: record.storageVersion }, data: next });
       if (changed.count !== 1) throw new BudgetError('PENDING_RECONCILIATION');
       await tx.aiBudgetLedgerEntry.create({ data: { id: randomUUID(), reservationId: record.id, scopeId: record.scopeId, scopeKind: record.scopeKind, tenantId: record.association.scope.kind === 'platform' ? null : record.association.scope.tenantId, eventKey: input.eventKey, kind: input.action, evidenceHash: input.usage?.evidenceHash, reason: input.reason, ...(input.usage ? ledgerQuantityFields(input.usage.quantity) : {}) } });
       const result = await this.readRecord(tx, record.id, record.association);

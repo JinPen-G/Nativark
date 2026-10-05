@@ -1,6 +1,6 @@
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
-import { AI_GATEWAY_DRAFT_SCHEMAS, type AiGatewayIntentDraft, type AiGatewayResultDraft, type AiGatewayStreamEventDraft } from '@rental-os/shared';
+import { AI_GATEWAY_DRAFT_SCHEMAS, type AiGatewayIntentDraft, type AiGatewayResultDraft, type AiGatewayStreamEventDraft, type AiGatewayConfigReferenceDraft } from '@rental-os/shared';
 import { AI_NATIVE_COMPONENT_SCHEMAS } from '../../contracts/ai-native-schemas';
 
 const ajv = new Ajv({ strict: true, allErrors: false, coerceTypes: false, useDefaults: false, removeAdditional: false });
@@ -17,8 +17,8 @@ for (const [name, schema] of Object.entries({ ...AI_NATIVE_COMPONENT_SCHEMAS, ..
 const intent = ajv.getSchema<AiGatewayIntentDraft>('urn:rental:gateway:AiGatewayIntentDraft')!;
 const result = ajv.getSchema<AiGatewayResultDraft>('urn:rental:gateway:AiGatewayResultDraft')!;
 const event = ajv.getSchema<AiGatewayStreamEventDraft>('urn:rental:gateway:AiGatewayStreamEventDraft')!;
-const config = ajv.getSchema('urn:rental:gateway:AiGatewayConfigReferenceDraft')!;
-export const isGatewayConfig = (value: unknown): boolean => config(value) === true;
+const config = ajv.getSchema<AiGatewayConfigReferenceDraft>('urn:rental:gateway:AiGatewayConfigReferenceDraft')!;
+export const isGatewayConfig = (value: unknown): value is AiGatewayConfigReferenceDraft => config(value) === true;
 export const isGatewayIntent = (value: unknown): value is AiGatewayIntentDraft => intent(value) === true;
 export const isGatewayResult = (value: unknown): value is AiGatewayResultDraft => result(value) === true;
 export const isGatewayEvent = (value: unknown): value is AiGatewayStreamEventDraft => event(value) === true;
