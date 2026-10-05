@@ -4,6 +4,7 @@ import { requestFingerprint } from '../rental-core/rental-idempotency.repository
 import { AiTaskRepositoryError, type AiTaskRepositoryOperation } from './ai-task.repository';
 import { AiTaskCurrentActionAuthority, type AiTaskActionPolicySource, type AiTaskCredentialSource } from './task-current-action.authority';
 import type { AiScopeRepository } from './ai-scope.repository';
+import { isAiStepExecutionContext } from './task-contract-validation';
 
 const policySelect = {
   taskId: true, operation: true, revision: true, requiredPermissions: true, expiresAt: true
@@ -33,6 +34,9 @@ export class PrismaTaskActionPolicySource implements AiTaskActionPolicySource {
       throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     }
     const current = structuredClone(await this.scopes.resolveCurrent());
+    if (!isAiStepExecutionContext(context) || !isAiStepExecutionContext(current.context)) {
+      throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    }
     const { requestId: _currentRequest, authorizedAt: _currentTime, ...currentIdentity } = current.context;
     const { requestId: _request, authorizedAt: _time, ...requestedIdentity } = structuredClone(context);
     if (requestFingerprint(currentIdentity) !== requestFingerprint(requestedIdentity)) {

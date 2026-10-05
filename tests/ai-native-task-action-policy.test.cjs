@@ -5,7 +5,7 @@ const { PrismaTaskActionPolicySource, composePrismaTaskCurrentActionAuthority } 
 const { AiTaskCurrentActionAuthority } = require('../apps/api/src/modules/ai-native/task-current-action.authority');
 
 const now = new Date('2026-10-06T10:00:00.000Z');
-const context = { contractVersion: 'ain-c03-draft-2', requestId: 'request-a', authorizedAt: now.toISOString(), audience: 'operator',
+const context = { contractVersion: 'ain-c01-c02-draft-1', requestId: 'request-a', authorizedAt: now.toISOString(), audience: 'operator',
   actor: { kind: 'user', userId: 'operator-a' }, scope: { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'workspace-a' },
   access: { permissions: ['rental-os:order:view'], dataScope: 'all', locationScope: { mode: 'all', locationIds: [] } } };
 
@@ -49,6 +49,12 @@ test('context changed after scope resolution is denied', async () => {
 test('unknown operation is rejected before storage access', async () => {
   const h = setup();
   await assert.rejects(h.source.resolve('task-a', 'invented_action', context), error => error.code === 'AI_ACCESS_DENIED');
+  assert.equal(h.calls.length, 0);
+});
+
+test('stale contract contexts are rejected before reading a policy', async () => {
+  const h = setup();
+  await assert.rejects(h.source.resolve('task-a', 'takeover_run', { ...context, contractVersion: 'ain-c03-draft-2' }), error => error.code === 'AI_ACCESS_DENIED');
   assert.equal(h.calls.length, 0);
 });
 
