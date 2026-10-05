@@ -11,6 +11,7 @@ const operations: readonly AiTaskRepositoryOperation[] = [
 ];
 const id = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u;
 const permission = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u;
+const maxRevision = 4294967294;
 
 export interface AiTaskActionPolicyMutationAuthority {
   /** The composition root must bind this to a real action-level authority. */
@@ -80,15 +81,18 @@ export class PrismaTaskActionPolicyRepository {
   }
 
   private project(row: { taskId: string; operation: string; revision: number; requiredPermissions: unknown; expiresAt: Date }): AiTaskActionPolicyMutationResult {
-    if (!operations.includes(row.operation as AiTaskRepositoryOperation) || !Number.isSafeInteger(row.revision) || row.revision < 1
-      || !Array.isArray(row.requiredPermissions) || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime())) throw error('AI_STORAGE_UNAVAILABLE');
+    if (!operations.includes(row.operation as AiTaskRepositoryOperation) || !Number.isSafeInteger(row.revision) || row.revision < 1 || row.revision > maxRevision
+      || !Array.isArray(row.requiredPermissions) || row.requiredPermissions.length < 1 || row.requiredPermissions.length > 64
+      || row.requiredPermissions.some(value => typeof value !== 'string' || !permission.test(value))
+      || new Set(row.requiredPermissions).size !== row.requiredPermissions.length
+      || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime())) throw error('AI_STORAGE_UNAVAILABLE');
     return { taskId: row.taskId, operation: row.operation as AiTaskRepositoryOperation, revision: row.revision,
       requiredPermissions: [...row.requiredPermissions] as string[], expiresAt: row.expiresAt.toISOString() };
   }
 
   async put(value: AiTaskActionPolicyMutation, expectedRevision: number | null): Promise<AiTaskActionPolicyMutationResult> {
     const next = this.validate(value);
-    if (expectedRevision !== null && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1)) throw error('AI_INVALID_INPUT');
+    if (expectedRevision !== null && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || expectedRevision > maxRevision)) throw error('AI_INVALID_INPUT');
     const access = await this.access(next.taskId);
     try {
       return await this.db.$transaction(async (tx: Tx) => {
@@ -97,6 +101,7 @@ export class PrismaTaskActionPolicyRepository {
         const where = { scopeId_taskId_operation: { scopeId: access.scopeId, taskId: next.taskId, operation: next.operation } };
         const current = await tx.aiTaskActionPolicy.findUnique({ where, select: { taskId: true, operation: true, revision: true, requiredPermissions: true, expiresAt: true } });
         if (expectedRevision === null ? current !== null : current?.revision !== expectedRevision) throw error('AI_REVISION_CONFLICT');
+        if (current && (!Number.isSafeInteger(current.revision) || current.revision >= maxRevision)) throw error('AI_REVISION_CONFLICT');
         const revision = current ? current.revision + 1 : 1;
         let row;
         if (current) {
@@ -119,8 +124,8 @@ export class PrismaTaskActionPolicyRepository {
   async clear(taskId: string, operation: AiTaskRepositoryOperation, expectedRevision: number): Promise<AiTaskActionPolicyMutationResult> {
     const now = this.clock();
     if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw error('AI_INVALID_INPUT');
+    if (!operations.includes(operation) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || expectedRevision >= maxRevision) throw error('AI_INVALID_INPUT');
     const access = await this.access(taskId);
-    if (!operations.includes(operation) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 1) throw error('AI_INVALID_INPUT');
     try {
       return await this.db.$transaction(async (tx: Tx) => {
         const task = await tx.aiTask.findFirst({ where: { scopeId: access.scopeId, id: taskId, archivedAt: null }, select: { id: true } });

@@ -59,3 +59,10 @@ test('invalid policy payloads fail before transaction writes', async () => {
   await assert.rejects(h.repository.put(value({ expiresAt: new Date('2020-01-01T00:00:00.000Z') }), null), error => error.code === 'AI_INVALID_INPUT');
   assert.equal(h.state.policy, null);
 });
+
+test('revision exhaustion and unknown clear operations fail before mutation', async () => {
+  const h = setup({ policy: { scopeId: 'scope-1', taskId: 'task-1', operation: 'takeover_run', revision: 4294967294, requiredPermissions: ['rental-os:policy:write'], expiresAt: new Date('2026-10-06T13:00:00.000Z') } });
+  await assert.rejects(h.repository.put(value(), 4294967294), error => error.code === 'AI_REVISION_CONFLICT');
+  await assert.rejects(h.repository.clear('task-1', 'invented_action', 1), error => error.code === 'AI_INVALID_INPUT');
+  assert.equal(h.state.policy.revision, 4294967294);
+});
