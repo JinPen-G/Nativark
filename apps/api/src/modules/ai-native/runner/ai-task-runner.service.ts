@@ -33,37 +33,31 @@ function validateLimits(value: AiTaskRunnerLimits): AiTaskRunnerLimits {
 }
 
 function validatePlan(plan: AiTaskRunnerPlan, input: AiTaskRunnerInput): AiTaskRunnerPlan {
-  if (plan.taskId !== input.taskId || plan.runId !== input.runId || !Array.isArray(plan.steps)) {
+  if (!plan || plan.taskId !== input.taskId || plan.runId !== input.runId || !Array.isArray(plan.steps)) {
     throw new AiTaskRunnerError("AI_RESOURCE_UNAVAILABLE", "authorized task plan is unavailable");
   }
   const limits = validateLimits(plan.limits);
-  if (plan.steps.length > limits.maxSteps || plan.steps.length > limits.maxCalls) {
-    throw new AiTaskRunnerError("AI_RUN_LIMIT", "task plan exceeds the persisted run limit");
-  }
+  if (plan.steps.length > limits.maxSteps || plan.steps.length > limits.maxCalls) throw new AiTaskRunnerError("AI_RUN_LIMIT");
   for (const step of plan.steps) {
     if (!step || typeof step.registrationRef !== "string" || step.registrationRef.length < 1 || step.registrationRef.length > 191
       || typeof step.toolCode !== "string" || step.toolCode.length < 1 || step.toolCode.length > 191
       || typeof step.toolVersion !== "string" || step.toolVersion.length < 1 || step.toolVersion.length > 191
-      || !["readonly", "idempotent", "external_unknown"].includes(step.operation)) {
-      throw new AiTaskRunnerError("AI_RESOURCE_UNAVAILABLE", "task contains an unavailable step plan");
-    }
+      || !["readonly", "idempotent", "external_unknown"].includes(step.operation)) throw new AiTaskRunnerError("AI_RESOURCE_UNAVAILABLE");
   }
+  if (new Set(plan.steps.map(step => step.registrationRef)).size !== plan.steps.length) throw new AiTaskRunnerError("AI_INVALID_INPUT");
   return { ...plan, limits };
 }
 
 function boundedResult(result: AiTaskRunnerEffectResult, maxOutputBytes: number): AiTaskRunnerEffectResult {
-  if (!finiteInteger(result.outputBytes, 0, maxOutputBytes)) throw new AiTaskRunnerError("AI_RUN_LIMIT", "step output exceeds the trusted bound");
+  if (!result || !["succeeded", "failed", "paused", "unknown"].includes(result.kind)
+    || (result.kind === "paused" && !["input", "confirmation", "external"].includes(result.pause))
+    || (result.kind === "failed" && (typeof result.errorCode !== "string" || !/^[A-Z][A-Z0-9_]{0,127}$/u.test(result.errorCode)))) throw new AiTaskRunnerError("AI_RESOURCE_UNAVAILABLE");
+  if (!finiteInteger(result.outputBytes, 0, maxOutputBytes)) throw new AiTaskRunnerError("AI_RUN_LIMIT");
   if (result.resultRef !== undefined && result.resultRef !== null
-    && (typeof result.resultRef !== "string" || result.resultRef.length < 1 || result.resultRef.length > 191)) {
-    throw new AiTaskRunnerError("AI_RESOURCE_UNAVAILABLE", "step result reference is unavailable");
-  }
+    && (typeof result.resultRef !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(result.resultRef))) throw new AiTaskRunnerError("AI_RESOURCE_UNAVAILABLE");
   return result;
 }
 
-/**
- * C04 orchestration only. Persistent state transitions stay in the existing task/step
- * repositories supplied through the ports; this class does not define a second state machine.
- */
 export class AiTaskRunner {
   private readonly clock: AiTaskRunnerClock;
 
@@ -74,131 +68,116 @@ export class AiTaskRunner {
       || typeof deps.steps.register !== "function" || typeof deps.steps.start !== "function"
       || typeof deps.steps.succeed !== "function" || typeof deps.steps.fail !== "function"
       || typeof deps.steps.pause !== "function" || typeof deps.steps.unknown !== "function"
-      || typeof deps.plan.resolve !== "function" || typeof deps.effects.execute !== "function") {
-      throw new AiTaskRunnerError("AI_RESOURCE_UNAVAILABLE", "runner dependencies are not fully assembled");
-    }
+      || typeof deps.plan.resolve !== "function" || typeof deps.effects.execute !== "function"
+      || (deps.taskOutcome !== undefined && typeof deps.taskOutcome.commit !== "function")) throw new AiTaskRunnerError("AI_RESOURCE_UNAVAILABLE");
     this.clock = deps.clock ?? defaultClock;
   }
 
   async run(input: AiTaskRunnerInput): Promise<AiTaskRunnerOutcome> {
+    input = structuredClone(input);
     const recovery = input.recovery === true;
     const { recovery: _recovery, ...claimInput } = input;
-    const initial = await this.deps.leases.readMetadata(input.taskId);
-    let lease = recovery ? await this.deps.leases.claimRecoveryRun(claimInput) : await this.deps.leases.claimRun(claimInput);
-    let plan: AiTaskRunnerPlan;
-    try {
-      plan = validatePlan(await this.deps.plan.resolve(initial, lease, recovery), input);
-    } catch (error) {
-      try {
-        await this.deps.leases.releaseRun({ taskId: lease.taskId, runId: lease.runId, holderId: lease.holderId,
-          expectedTaskRevision: initial.revision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken });
-      } catch { /* the lease remains recoverable; do not redispatch */ }
-      throw error;
-    }
+    const initial = structuredClone(await this.deps.leases.readMetadata(input.taskId));
+    let lease = structuredClone(recovery ? await this.deps.leases.claimRecoveryRun(claimInput) : await this.deps.leases.claimRun(claimInput));
     let taskRevision = initial.revision;
-    const startedAt = this.clock.now();
-    let completedSteps = 0, cleanupFailed = 0, calls = 0;
-    try {
-      if (plan.steps.length === 0) {
-        const beforeFirstStep = await this.deps.leases.readMetadata(input.taskId);
-        if (beforeFirstStep.cancelRequestedAt !== null || beforeFirstStep.status === "cancel_requested") {
-          if (this.deps.taskOutcome) return (await this.commitTaskOutcome({ status: "cancelled", completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
-          return { status: "cancel_requested", completedSteps, cleanupFailed };
+    let completedSteps = 0, cleanupFailed = 0, calls = 0, outputBytes = 0;
+    let outcomeAttempted = false;
+    const advance = (commit: AiTaskRunnerStepCommit, ref?: AiTaskRunnerStepRef) => {
+      if (!commit || !finiteInteger(commit.taskRevision, taskRevision, 4294967295)
+        || !commit.lease || commit.lease.taskId !== lease.taskId || commit.lease.runId !== lease.runId
+        || commit.lease.holderId !== lease.holderId || commit.lease.fencingToken !== lease.fencingToken
+        || !finiteInteger(commit.lease.revision, lease.revision + 1, 4294967295)) throw new AiTaskRunnerError("AI_STORAGE_UNAVAILABLE");
+      lease = structuredClone(commit.lease); taskRevision = commit.taskRevision;
+      if (ref) ref.registered = { ...ref.registered, stepRevision: ref.registered.stepRevision + 1, taskRevision, runRevision: lease.revision };
+    };
+    const finish = async (outcome: AiTaskRunnerTaskOutcome): Promise<AiTaskRunnerOutcome> => {
+      if (!this.deps.taskOutcome) return outcome;
+      if (outcome.status === 'unknown') {
+        const current = await this.deps.leases.readMetadata(input.taskId);
+        if (current.status === 'waiting_external' || current.status === 'cancel_requested') {
+          taskRevision = current.revision;
+          return outcome;
         }
       }
-      for (const stepPlan of plan.steps) {
-        if (this.clock.now() - startedAt >= plan.limits.maxTotalMs) throw new AiTaskRunnerError("AI_RUN_LIMIT", "task deadline exceeded");
+      if (outcome.status !== "unknown" && outcome.status !== "paused") {
         const current = await this.deps.leases.readMetadata(input.taskId);
         if (current.cancelRequestedAt !== null || current.status === "cancel_requested") {
-          if (this.deps.taskOutcome) {
-            return (await this.commitTaskOutcome({ status: "cancelled", completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
-          }
-          return { status: "cancel_requested", completedSteps, cleanupFailed };
+          taskRevision = current.revision;
+          outcome = { status: "cancelled", completedSteps, cleanupFailed };
         }
-        if (calls >= plan.limits.maxCalls) throw new AiTaskRunnerError("AI_RUN_LIMIT", "run call limit exceeded");
-
-        const registered = await this.deps.steps.register(stepPlan, lease);
+      }
+      outcomeAttempted = true;
+      const committed = await this.commitTaskOutcome(outcome, lease, taskRevision);
+      advance(committed);
+      return committed.outcome;
+    };
+    try {
+      const plan = validatePlan(structuredClone(await this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), recovery)), input);
+      const startedAt = this.clock.now();
+      const checkCancel = async () => {
+        const current = await this.deps.leases.readMetadata(input.taskId);
+        if (current.cancelRequestedAt === null && current.status !== "cancel_requested") return false;
+        taskRevision = current.revision;
+        return true;
+      };
+      if (plan.steps.length === 0 && await checkCancel()) {
+        return this.deps.taskOutcome ? await finish({ status: "cancelled", completedSteps, cleanupFailed }) : { status: "cancel_requested", completedSteps, cleanupFailed };
+      }
+      for (const stepPlan of plan.steps) {
+        if (this.clock.now() - startedAt >= plan.limits.maxTotalMs || calls >= plan.limits.maxCalls) throw new AiTaskRunnerError("AI_RUN_LIMIT");
+        const cancelling = await checkCancel();
+        if (cancelling && !recovery) return this.deps.taskOutcome ? await finish({ status: "cancelled", completedSteps, cleanupFailed }) : { status: "cancel_requested", completedSteps, cleanupFailed };
+        const registered = structuredClone(await this.deps.steps.register(structuredClone(stepPlan), structuredClone(lease)));
         taskRevision = registered.taskRevision;
         if (registered.runRevision != null) lease = { ...lease, revision: registered.runRevision };
         const ref: AiTaskRunnerStepRef = { plan: stepPlan, registered };
-        if (registered.replayed) {
-          if (registered.existingStatus === "unknown") return { status: "unknown", completedSteps, cleanupFailed };
-          if (registered.existingStatus === "succeeded") { completedSteps += 1; continue; }
-          // A replay without a persisted terminal projection is never permission to invoke again.
-          return { status: "unavailable", completedSteps, cleanupFailed };
-        }
-
-        if (recovery && stepPlan.operation === "external_unknown") {
-          if (!this.deps.effects.reconcile) return { status: "unavailable", completedSteps, cleanupFailed };
-          if (calls >= plan.limits.maxCalls) throw new AiTaskRunnerError("AI_RUN_LIMIT", "run call limit exceeded");
-          calls += 1;
-          const result = await this.callBounded(signal => this.deps.effects.reconcile!(stepPlan, signal), plan.limits.maxStepMs, "reconcile");
-          const safe = boundedResult(result, plan.limits.maxOutputBytes);
-          if (!await this.cleanupStep(stepPlan, plan.limits.maxStepMs)) {
-            cleanupFailed += 1;
-            const commit = await this.deps.steps.unknown({ plan: stepPlan, registered }, lease, safe.resultRef ?? null); lease = commit.lease; taskRevision = commit.taskRevision; return { status: "unknown", completedSteps, cleanupFailed };
-          }
-          const commit = await this.persistResult(ref, lease, safe);
-          lease = commit.lease; taskRevision = commit.taskRevision;
-          if (safe.kind === "unknown") return (await this.commitTaskOutcome({ status: "unknown", completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
-          if (safe.kind === "paused") return (await this.commitTaskOutcome({ status: "paused", pause: safe.pause, completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
-          if (safe.kind === "failed") return (await this.commitTaskOutcome({ status: "failed", completedSteps, cleanupFailed, errorCode: safe.errorCode }, lease, taskRevision)).outcome;
-          completedSteps += safe.kind === "succeeded" ? 1 : 0;
-          continue;
-        }
-
-        const started = await this.deps.steps.start(ref, lease);
-        lease = started.lease;
-        taskRevision = started.taskRevision;
-        calls += 1;
+        if (registered.runId !== lease.runId) return { status: "unavailable", completedSteps, cleanupFailed };
+        if (registered.replayed && registered.existingStatus === "succeeded") { completedSteps++; continue; }
+        const reconcile = recovery && (stepPlan.operation === "external_unknown" || (registered.replayed && registered.existingStatus === "unknown"));
+        if (cancelling && !(registered.replayed && registered.existingStatus === 'unknown')) return { status: 'cancel_requested', completedSteps, cleanupFailed };
+        if (registered.replayed && registered.existingStatus === "unknown" && !reconcile) return await finish({ status: "unknown", completedSteps, cleanupFailed });
+        if (registered.replayed && !(reconcile && registered.existingStatus === "unknown")) return { status: "unavailable", completedSteps, cleanupFailed };
+        if (reconcile && !this.deps.effects.reconcile) return { status: "unavailable", completedSteps, cleanupFailed };
+        if (!reconcile) advance(await this.deps.steps.start(ref, structuredClone(lease)), ref);
+        calls++;
         let result: AiTaskRunnerEffectResult;
         try {
           const remaining = Math.max(1, plan.limits.maxTotalMs - (this.clock.now() - startedAt));
-          result = boundedResult(await this.callBounded(signal => this.deps.effects.execute(stepPlan, signal), Math.min(plan.limits.maxStepMs, remaining), "execute"), plan.limits.maxOutputBytes);
+          const raw = await this.callBounded(signal => reconcile
+            ? this.deps.effects.reconcile!(structuredClone(stepPlan), signal)
+            : this.deps.effects.execute(structuredClone(stepPlan), signal), Math.min(plan.limits.maxStepMs, remaining), reconcile ? "reconcile" : "execute");
+          result = boundedResult(structuredClone(raw), plan.limits.maxOutputBytes - outputBytes);
+          outputBytes += result.outputBytes;
         } catch (error) {
-          const cleaned = await this.cleanupStep(stepPlan, plan.limits.maxStepMs);
-          if (!cleaned) cleanupFailed += 1;
-          if (!cleaned && stepPlan.operation !== "readonly") {
-            const commit = await this.deps.steps.unknown(ref, lease, null);
-            lease = commit.lease; taskRevision = commit.taskRevision;
-            return { status: "unknown", completedSteps, cleanupFailed };
-          }
-          if (stepPlan.operation === "external_unknown") {
-            const commit = await this.deps.steps.unknown(ref, lease, null);
-            lease = commit.lease; taskRevision = commit.taskRevision;
-            return { status: "unknown", completedSteps, cleanupFailed };
-          }
-          const code = error instanceof AiTaskRunnerError ? error.code : "AI_RESOURCE_UNAVAILABLE";
-          const commit = await this.deps.steps.fail(ref, lease, code, null);
-          lease = commit.lease; taskRevision = commit.taskRevision;
-          return { status: "failed", completedSteps, cleanupFailed, errorCode: code };
+          // Idempotency does not prove an interrupted call had no effect.
+          result = reconcile || stepPlan.operation !== "readonly"
+            ? { kind: "unknown", resultRef: null, outputBytes: 0 }
+            : { kind: "failed", errorCode: error instanceof AiTaskRunnerError ? error.code : "AI_RESOURCE_UNAVAILABLE", resultRef: null, outputBytes: 0 };
         }
-        const cleaned = await this.cleanupStep(stepPlan, plan.limits.maxStepMs);
-        if (!cleaned) {
-          cleanupFailed += 1;
-          if (stepPlan.operation !== "readonly") {
-            const commit = await this.deps.steps.unknown(ref, lease, result.resultRef ?? null);
-            lease = commit.lease; taskRevision = commit.taskRevision;
-            return { status: "unknown", completedSteps, cleanupFailed };
-          }
-          result = { kind: "failed", errorCode: "AI_STORAGE_UNAVAILABLE", resultRef: result.resultRef ?? null, outputBytes: result.outputBytes };
+        if (!await this.cleanupStep(stepPlan, plan.limits.maxStepMs)) {
+          cleanupFailed++;
+          result = reconcile || stepPlan.operation !== "readonly"
+            ? { kind: "unknown", resultRef: result.resultRef ?? null, outputBytes: result.outputBytes }
+            : { kind: "failed", errorCode: "AI_STORAGE_UNAVAILABLE", resultRef: result.resultRef ?? null, outputBytes: result.outputBytes };
         }
-        const commit = await this.persistResult(ref, lease, result);
-        lease = commit.lease; taskRevision = commit.taskRevision;
-        if (result.kind === "unknown") return (await this.commitTaskOutcome({ status: "unknown", completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
-        if (result.kind === "paused") return (await this.commitTaskOutcome({ status: "paused", pause: result.pause, completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
-        if (result.kind === "failed") return (await this.commitTaskOutcome({ status: "failed", completedSteps, cleanupFailed, errorCode: result.errorCode }, lease, taskRevision)).outcome;
-        completedSteps += result.kind === "succeeded" ? 1 : 0;
+        if (reconcile && registered.replayed && registered.existingStatus === 'unknown' && result.kind === 'unknown') {
+          return await finish({ status: 'unknown', completedSteps, cleanupFailed });
+        }
+        advance(await this.persistResult(ref, structuredClone(lease), result), ref);
+        if (result.kind === "unknown") return await finish({ status: "unknown", completedSteps, cleanupFailed });
+        if (result.kind === "paused") return await finish({ status: "paused", pause: result.pause, completedSteps, cleanupFailed });
+        if (result.kind === "failed") return await finish({ status: "failed", errorCode: result.errorCode, completedSteps, cleanupFailed });
+        completedSteps++;
       }
-      return (await this.commitTaskOutcome({ status: "succeeded", completedSteps, cleanupFailed }, lease, taskRevision)).outcome;
+      return await finish({ status: "succeeded", completedSteps, cleanupFailed });
     } catch (error) {
-      if (error instanceof AiTaskRunnerError && (error.code === "AI_RESULT_UNKNOWN" || error.code === "AI_RUN_LIMIT")) {
-        return (await this.commitTaskOutcome({ status: "failed", completedSteps, cleanupFailed, errorCode: error.code }, lease, taskRevision)).outcome;
+      if (error instanceof AiTaskRunnerError && !outcomeAttempted && (error.code === "AI_RESULT_UNKNOWN" || error.code === "AI_RUN_LIMIT")) {
+        if (!this.deps.taskOutcome) throw error;
+        return await finish({ status: "failed", completedSteps, cleanupFailed, errorCode: error.code });
       }
       if (error instanceof AiTaskRunnerError) return { status: "unavailable", completedSteps, cleanupFailed };
       throw error;
     } finally {
-      // Release is CAS/fenced by the existing repository. A failed release is not hidden.
       try {
         await this.deps.leases.releaseRun({ taskId: lease.taskId, runId: lease.runId, holderId: lease.holderId,
           expectedTaskRevision: taskRevision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken });
@@ -210,15 +189,16 @@ export class AiTaskRunner {
     const port = this.deps.taskOutcome;
     if (!port) return { outcome, lease, taskRevision };
     let committed: Awaited<ReturnType<AiTaskRunnerOutcomePort["commit"]>>;
-    try { committed = await port.commit({ taskId: lease.taskId, taskRevision, lease: { ...lease }, outcome: { ...outcome } }); }
+    try { committed = structuredClone(await port.commit({ taskId: lease.taskId, taskRevision, lease: { ...lease }, outcome: { ...outcome } })); }
     catch { throw new AiTaskRunnerError("AI_STORAGE_UNAVAILABLE", "task outcome commit is unavailable"); }
     if (!committed || !Number.isSafeInteger(committed.taskRevision) || committed.taskRevision <= taskRevision
       || !committed.lease || committed.lease.taskId !== lease.taskId || committed.lease.runId !== lease.runId
       || committed.lease.holderId !== lease.holderId || !Number.isSafeInteger(committed.lease.revision)
-      || committed.lease.revision <= lease.revision || typeof committed.lease.fencingToken !== "string") {
-      throw new AiTaskRunnerError("AI_STORAGE_UNAVAILABLE", "task outcome commit returned an invalid fence");
-    }
-    return { outcome, lease: committed.lease, taskRevision: committed.taskRevision };
+      || committed.lease.revision <= lease.revision || committed.lease.fencingToken !== lease.fencingToken) throw new AiTaskRunnerError("AI_STORAGE_UNAVAILABLE");
+    if (committed.outcomeStatus !== undefined && !['succeeded', 'partially_succeeded', 'cancelled'].includes(committed.outcomeStatus)) throw new AiTaskRunnerError('AI_STORAGE_UNAVAILABLE');
+    const result: AiTaskRunnerOutcome = committed.outcomeStatus
+      ? { status: committed.outcomeStatus, completedSteps: outcome.completedSteps, cleanupFailed: outcome.cleanupFailed } : outcome;
+    return { outcome: result, lease: committed.lease, taskRevision: committed.taskRevision };
   }
 
   private async persistResult(ref: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, result: AiTaskRunnerEffectResult): Promise<AiTaskRunnerStepCommit> {
@@ -233,8 +213,8 @@ export class AiTaskRunner {
     return new Promise<T>((resolve, reject) => {
       let settled = false;
       const timer = this.clock.setTimeout(() => {
-        controller.abort();
         settled = true;
+        controller.abort();
         reject(new AiTaskRunnerError(phase === "reconcile" ? "AI_RESULT_UNKNOWN" : "AI_RUN_LIMIT", `${phase} deadline exceeded`));
       }, limitMs);
       let pending: Promise<T>;
@@ -248,9 +228,7 @@ export class AiTaskRunner {
 
   private async cleanupStep(step: AiTaskRunnerStepPlan, limitMs: number): Promise<boolean> {
     if (!this.deps.effects.cleanup) return true;
-    try {
-      await this.callBounded(() => this.deps.effects.cleanup!(step), limitMs, "cleanup");
-      return true;
-    } catch { return false; }
+    try { await this.callBounded(() => this.deps.effects.cleanup!(structuredClone(step)), limitMs, "cleanup"); return true; }
+    catch { return false; }
   }
 }

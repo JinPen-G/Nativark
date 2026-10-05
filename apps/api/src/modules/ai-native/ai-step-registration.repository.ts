@@ -13,6 +13,11 @@ const commandSchema = z.object({
   lease: z.object({ runId: id, holderId: id, revision, fencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict()
 }).strict();
 export type AiStepRegistrationCommand = z.infer<typeof commandSchema>;
+const replaySchema = commandSchema.extend({ stepId: id, expectedStepRevision: revision });
+export type AiStepReplayCommand = z.infer<typeof replaySchema>;
+export interface AiStepReplayAuthority {
+  resolve(command: Readonly<AiStepReplayCommand>): Promise<AiExecutionContext>;
+}
 const grantSchema = z.object({
   context: z.unknown(), registrationAllowed: z.literal(true), authorizationKey: id,
   taskId: id, registrationRef: id, expiresAt: z.string().datetime({ offset: true }),
@@ -40,7 +45,8 @@ export class AiStepRegistrationRepository {
     private readonly db: Pick<PrismaClient, "$transaction">,
     private readonly authority: AiStepRegistrationAuthority,
     private readonly clock: () => Date = () => new Date(),
-    private readonly newId: () => string = randomUUID
+    private readonly newId: () => string = randomUUID,
+    private readonly readAuthority?: AiStepReplayAuthority
   ) {
     if (!authority || typeof authority.resolve !== "function") throw denied();
   }
@@ -135,6 +141,52 @@ export class AiStepRegistrationRepository {
       if (error instanceof AiTaskRepositoryError) throw error;
       // Even a uniqueness race never retries a write; an explicit caller replay reads the existing action.
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw conflict();
+      throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
+    }
+  }
+
+  async readReplay(value: unknown) {
+    const parsed = replaySchema.safeParse(value);
+    if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
+    const input = parsed.data;
+    const { stepId, expectedStepRevision, ...registration } = input;
+    const initial = await this.resolve(registration);
+    const authorizeRead = async () => {
+      try {
+        if (!this.readAuthority) throw denied();
+        const context = structuredClone(await this.readAuthority.resolve(structuredClone(input)));
+        if (!isAiStepExecutionContext(context)) throw denied();
+        const access = aiTaskAccessFromContext(context, input.taskId, this.clock());
+        if (access.bindingKey !== initial.access.bindingKey) throw denied();
+        const { requestId: _, authorizedAt: __, ...identity } = context;
+        return { access, digest: requestFingerprint(identity) };
+      } catch { throw denied(); }
+    };
+    const before = await authorizeRead();
+    try {
+      return await this.db.$transaction(async tx => {
+        const task = await tx.aiTask.findFirst({ where: before.access.where, select: taskSelect });
+        if (!task || task.contractVersion !== AI_TASK_DRAFT_VERSION) throw new AiTaskRepositoryError("AI_RESOURCE_UNAVAILABLE");
+        const row = await tx.aiStep.findFirst({ where: { id: stepId, scopeId: task.scopeId, taskId: task.id, runId: input.lease.runId },
+          select: { ...stepSelect, status: true, effect: true, resultRef: true, errorCode: true } });
+        if (!row) throw new AiTaskRepositoryError("AI_RESOURCE_UNAVAILABLE");
+        this.verifyExisting(row, task, initial);
+        if (row.id !== stepId || row.runId !== input.lease.runId || row.revision !== expectedStepRevision) throw conflict();
+        const status = row.status.toLowerCase();
+        if (!["pending", "running", "succeeded", "failed", "unknown", "cancelled"].includes(status)
+          || (["succeeded", "failed", "unknown"].includes(status) && !id.safeParse(row.resultRef).success)
+          || (status === "unknown" && row.effect !== "POSSIBLE")
+          || (status === "succeeded" && !["NONE", "COMMITTED"].includes(row.effect))) throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
+        const current = await this.resolve(registration);
+        if (current.digest !== initial.digest) throw denied();
+        const after = await authorizeRead();
+        if (after.digest !== before.digest) throw denied();
+        return { stepId: row.id, runId: row.runId, sequence: row.sequence, stepRevision: row.revision,
+          taskRevision: task.revision, status: row.status.toLowerCase() as import("@rental-os/shared").AiStepStatusDraft,
+          resultRef: row.resultRef, errorCode: row.errorCode };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+    } catch (error) {
+      if (error instanceof AiTaskRepositoryError) throw error;
       throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
     }
   }

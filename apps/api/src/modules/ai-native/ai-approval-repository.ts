@@ -21,12 +21,13 @@ export class AiApprovalService {
     if (!repository || !authority || typeof repository.decide !== 'function' || typeof authority.authorize !== 'function') throw new AiApprovalRepositoryError('UNAVAILABLE');
   }
   async decide(input: AiApprovalDecisionInput): Promise<AiApprovalRecord> {
+    input = structuredClone(input);
     if (!input || !input.context || !input.scopeId || !input.taskId || !input.proposalId || !Number.isSafeInteger(input.proposalRevision) || input.proposalRevision < 1
       || !/^[a-f0-9]{64}$/u.test(input.reviewedPayloadHash) || !['approved', 'rejected'].includes(input.decision)) throw new AiApprovalRepositoryError('INVALID');
     const payloadHash = fingerprintAiProposalDraft(input.payload);
     if (input.payload.proposalId !== input.proposalId || input.payload.taskId !== input.taskId || input.payload.revision !== input.proposalRevision || payloadHash !== input.reviewedPayloadHash) throw new AiApprovalRepositoryError('CONFLICT');
     let principal: AiApprovalPrincipal | null;
-    try { principal = await this.authority.authorize(structuredClone(input.context), structuredClone(input)); } catch { principal = null; }
+    try { principal = structuredClone(await this.authority.authorize(structuredClone(input.context), structuredClone(input))); } catch { principal = null; }
     if (!principal || principal.scopeId !== input.scopeId) throw new AiApprovalRepositoryError('FORBIDDEN');
     try { const { context: _context, ...persisted } = input; return structuredClone(await this.repository.decide(persisted, principal)); }
     catch (error) { if (error instanceof AiApprovalRepositoryError) throw error; throw new AiApprovalRepositoryError('UNAVAILABLE'); }
@@ -39,18 +40,21 @@ const project = (row: { id: string; scopeId: string; taskId: string; proposalId:
 export class PrismaAiApprovalRepository implements AiApprovalRepository {
   constructor(private readonly db: Db, private readonly clock: () => Date = () => new Date()) {}
   async decide(input: Omit<AiApprovalDecisionInput, 'context'>, principal: AiApprovalPrincipal) {
+    input = structuredClone(input); principal = structuredClone(principal);
     const issuedAt = this.clock(), expiresAt = new Date(input.payload.expiresAt);
     if (principal.scopeId !== input.scopeId || !Number.isFinite(expiresAt.getTime()) || expiresAt <= issuedAt) throw new AiApprovalRepositoryError('INVALID');
     try {
       return await this.db.$transaction(async (tx: Tx) => {
         const proposal = await tx.aiProposal.findFirst({ where: { scopeId: input.scopeId, taskId: input.taskId, id: input.proposalId }, select: { stateRevision: true, currentRevision: true, status: true } });
         const version = await tx.aiProposalVersion.findFirst({ where: { scopeId: input.scopeId, taskId: input.taskId, proposalId: input.proposalId, revision: input.proposalRevision }, select: { payloadHash: true, expiresAt: true } });
-        if (!proposal || proposal.status !== 'PENDING_CONFIRMATION' || proposal.currentRevision !== null || proposal.stateRevision < 1 || !version || version.payloadHash !== input.reviewedPayloadHash || version.expiresAt <= issuedAt) throw new AiApprovalRepositoryError('CONFLICT');
+        if (!proposal || proposal.stateRevision < 1 || !version || version.payloadHash !== input.reviewedPayloadHash || version.expiresAt <= issuedAt) throw new AiApprovalRepositoryError('CONFLICT');
         const existing = await tx.aiApproval.findFirst({ where: { scopeId: input.scopeId, proposalId: input.proposalId, proposalRevision: input.proposalRevision, actorKind: principal.actorKind.toUpperCase() as AiActorKind, actorId: principal.actorId }, select: approvalSelect });
         if (existing) {
-          if (existing.payloadHash !== input.reviewedPayloadHash || existing.decision.toLowerCase() !== input.decision) throw new AiApprovalRepositoryError('CONFLICT');
+          if (existing.payloadHash !== input.reviewedPayloadHash || existing.decision.toLowerCase() !== input.decision
+            || proposal.currentRevision !== input.proposalRevision || proposal.status !== (input.decision === 'approved' ? 'CONFIRMED' : 'CANCELLED')) throw new AiApprovalRepositoryError('CONFLICT');
           return project(existing);
         }
+        if (proposal.status !== 'PENDING_CONFIRMATION' || proposal.currentRevision !== null) throw new AiApprovalRepositoryError('CONFLICT');
         const approvalId = randomUUID();
         const approval = await tx.aiApproval.create({ data: { id: approvalId, scopeId: input.scopeId, taskId: input.taskId, proposalId: input.proposalId, proposalRevision: input.proposalRevision, payloadHash: input.reviewedPayloadHash, audience: principal.audience.toUpperCase() as AiAudience, actorKind: principal.actorKind.toUpperCase() as AiActorKind, actorId: principal.actorId, decision: input.decision.toUpperCase() as PrismaAiApprovalDecision, issuedAt, expiresAt }, select: approvalSelect });
         const changed = await tx.aiProposal.updateMany({ where: { scopeId: input.scopeId, taskId: input.taskId, id: input.proposalId, stateRevision: proposal.stateRevision, status: 'PENDING_CONFIRMATION', currentRevision: null }, data: { stateRevision: { increment: 1 }, currentRevision: input.proposalRevision, status: input.decision === 'approved' ? 'CONFIRMED' : 'CANCELLED' } });

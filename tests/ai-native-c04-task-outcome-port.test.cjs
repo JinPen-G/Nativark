@@ -27,10 +27,11 @@ function harness(taskOutcome) {
 
 test('runner commits aggregate outcome through an injected port before releasing the latest fence', async () => {
   let committed;
-  const h = harness({ commit: async input => { committed = input; return { taskRevision: input.taskRevision + 1, lease: { ...input.lease, revision: input.lease.revision + 1, fencingToken: '4' } }; } });
+  const h = harness({ commit: async input => { committed = input; return { taskRevision: input.taskRevision + 1, lease: { ...input.lease, revision: input.lease.revision + 1 } }; } });
   const result = await h.runner.run({ taskId: 'task-1', runId: 'run-1', holderId: 'worker-1', expectedTaskRevision: 2, expectedRunRevision: 1, expectedFencingToken: '1', leaseMs: 1000 });
   assert.equal(result.status, 'succeeded'); assert.equal(committed.outcome.status, 'succeeded');
-  assert.equal(h.events[0][0], 'release'); assert.equal(h.events[0][1].expectedRunRevision, 4);
+  assert.equal(h.events[0][0], 'release'); assert.equal(h.events[0][1].expectedRunRevision, 5);
+  assert.equal(h.events[0][1].expectedTaskRevision, 6); assert.equal(h.events[0][1].expectedFencingToken, '2');
 });
 
 test('invalid task outcome fence fails closed instead of reporting success', async () => {
@@ -51,7 +52,7 @@ test('cancel request commits cancelled only when the aggregate outcome port is p
     steps: { register: async () => { throw new Error('must not register after cancel'); }, start: async () => { throw new Error('must not start'); }, succeed: async () => { throw new Error('must not succeed'); }, fail: async () => { throw new Error('must not fail'); }, pause: async () => { throw new Error('must not pause'); }, unknown: async () => { throw new Error('must not unknown'); } },
     plan: { resolve: async () => ({ taskId: 'task-1', runId: 'run-1', taskRevision: 2, steps: [], limits: { maxSteps: 1, maxTotalMs: 1000, maxStepMs: 100, maxOutputBytes: 1000, maxConcurrent: 1, maxCalls: 1 } }) },
     effects: { execute: async () => { throw new Error('must not execute'); } },
-    taskOutcome: { commit: async input => { committed = input; return { taskRevision: input.taskRevision + 1, lease: { ...input.lease, revision: input.lease.revision + 1, fencingToken: '3' } }; } }
+    taskOutcome: { commit: async input => { committed = input; return { taskRevision: input.taskRevision + 1, lease: { ...input.lease, revision: input.lease.revision + 1 } }; } }
   });
   const result = await runner.run({ taskId: 'task-1', runId: 'run-1', holderId: 'worker-1', expectedTaskRevision: 2, expectedRunRevision: 1, expectedFencingToken: '1', leaseMs: 1000 });
   assert.equal(result.status, 'cancelled'); assert.equal(committed.outcome.status, 'cancelled');
