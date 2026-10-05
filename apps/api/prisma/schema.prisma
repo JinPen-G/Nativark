@@ -663,6 +663,24 @@ model AiTaskRunPlan {
   @@map("ai_task_run_plans")
 }
 
+/// Server-owned, task-scoped action policy used by AIN-04 runtime operations.
+/// It is not a caller/model permission list and has no implicit default row.
+model AiTaskActionPolicy {
+  scopeId            String   @db.VarChar(36)
+  taskId             String   @db.VarChar(36)
+  operation          String   @db.VarChar(64)
+  revision           Int      @db.UnsignedInt
+  requiredPermissions Json
+  expiresAt          DateTime @db.DateTime(3)
+  createdAt          DateTime @default(now()) @db.DateTime(3)
+  updatedAt          DateTime @updatedAt
+  task               AiTask   @relation(fields: [scopeId, taskId], references: [scopeId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_task_action_policies_task_fkey")
+
+  @@id([scopeId, taskId, operation])
+  @@index([scopeId, expiresAt], map: "ai_task_action_policies_expiry_idx")
+  @@map("ai_task_action_policies")
+}
+
 /// Immutable result artifact and measured active segment; not provider usage or money.
 model AiTaskResultArtifact {
   scopeId String @db.VarChar(36)
@@ -5123,6 +5141,7 @@ model AiTask {
   proposals           AiProposal[]
   events              AiTaskEvent[]
   executionBudget     AiTaskExecutionBudget?
+  actionPolicies      AiTaskActionPolicy[]
 
   @@unique([scopeId, id], map: "ai_tasks_scope_id")
   @@unique([scopeId, id, ownerKind], map: "ai_tasks_scope_actor_kind")
