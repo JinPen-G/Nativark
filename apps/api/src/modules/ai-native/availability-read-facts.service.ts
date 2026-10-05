@@ -24,7 +24,11 @@ export class AiAvailabilityReadFactsService {
     if (context.access.locationScope.mode === 'selected' && !context.access.locationScope.locationIds.includes(parsed.data.locationId)) throw new ModelGatewayError('FORBIDDEN');
     const observed = this.clock(); if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError('CONFIG_INVALID');
     const checked = result.safeParse(await this.core.availability(context.scope.tenantId, parsed.data)); if (!checked.success) throw new ModelGatewayError('INVALID_RESPONSE');
-    if (checked.data.locationId !== parsed.data.locationId || checked.data.startAt !== parsed.data.startAt || checked.data.endAt !== parsed.data.endAt) throw new ModelGatewayError('INVALID_RESPONSE');
+    if (checked.data.locationId !== parsed.data.locationId || checked.data.startAt !== parsed.data.startAt || checked.data.endAt !== parsed.data.endAt || checked.data.lines.length !== parsed.data.lines.length) throw new ModelGatewayError('INVALID_RESPONSE');
+    checked.data.lines.forEach((line, index) => {
+      const requested = parsed.data.lines[index];
+      if (line.itemGroupId !== requested.itemGroupId || line.requestedQuantity !== requested.quantity) throw new ModelGatewayError('INVALID_RESPONSE');
+    });
     return { contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: context.requestId, audience: context.audience, scope: context.scope, observedAt: observed.toISOString(), result: checked.data };
     });
   }

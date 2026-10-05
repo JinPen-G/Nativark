@@ -14,3 +14,12 @@ test('selected location scope rejects before Core and projection does not reserv
   let calls = 0; const service = new AiAvailabilityReadFactsService({ availability: async () => { calls++; return output; } }, authority({ ...context, access: { ...context.access, locationScope: { mode: 'selected', locationIds: [] } } }));
   await assert.rejects(() => service.read(input), error => error.code === 'FORBIDDEN'); assert.equal(calls, 0);
 });
+
+test('projection rejects a Core result that is not bound to the requested availability lines', async () => {
+  const mismatched = { ...output, lines: [{ ...output.lines[0], itemGroupId: 'group-other', requestedQuantity: 99 }] };
+  const service = new AiAvailabilityReadFactsService(
+    { availability: async () => mismatched },
+    authority(context)
+  );
+  await assert.rejects(() => service.read(input), error => error.code === 'INVALID_RESPONSE');
+});
