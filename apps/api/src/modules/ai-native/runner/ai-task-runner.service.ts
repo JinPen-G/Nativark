@@ -254,7 +254,9 @@ export class AiTaskRunner {
         if (result.kind === "paused") return await finish({ status: "paused", pause: result.pause, completedSteps, cleanupFailed });
         if (result.kind === "failed") return await finish({ status: "failed", errorCode: result.errorCode, completedSteps, cleanupFailed });
         completedSteps++;
-        if (cleanupUnavailable) return await finish({ status: 'unknown', completedSteps, cleanupFailed });
+        // Cleanup uncertainty is local operational uncertainty. With all
+        // steps successful, the existing FSM cannot claim unresolved effects.
+        if (cleanupUnavailable) return { status: 'unknown', completedSteps, cleanupFailed };
       }
       return await finish({ status: "succeeded", completedSteps, cleanupFailed });
     } catch (error) {

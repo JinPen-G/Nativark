@@ -149,7 +149,7 @@ test('resource-backed cleanup failure preserves the durable successful step and 
   assert.equal((await h.run()).status, 'unknown');
   assert.deepEqual(h.state.stepCommits, ['start', 'succeed']);
   assert.equal(records, 1); assert.equal(h.state.effects, 1);
-  assert.equal(h.state.taskCommits[0].status, 'unknown');
+  assert.equal(h.state.taskCommits.length, 0, 'all-success steps cannot fabricate an external-pending task event');
 });
 
 test('durable failed replay settles only original resources and never transitions or executes again', async () => {

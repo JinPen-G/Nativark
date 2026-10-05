@@ -48,10 +48,17 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
 
   private async held(db: Pick<PrismaClient, 'aiTask' | 'aiRun'>, lease: AiTaskRunnerLease, before: Awaited<ReturnType<PrismaTaskRunEvidenceRepository['access']>>, locked = false) {
     const current = await this.access(lease);
-    if (current.bindingKey !== before.bindingKey || current.scopeId !== before.scopeId
-      || !await db.aiTask.findFirst({ where: { AND: [current.taskWhere, { scopeId: current.scopeId }] }, select: { id: true } })
-      || !await db.aiRun.findFirst({ where: { scopeId: current.scopeId, taskId: lease.taskId, id: lease.runId, leaseOwnerId: lease.holderId,
-        fencingToken: new Prisma.Decimal(lease.fencingToken), revision: lease.revision, status: { in: ['QUEUED', 'RUNNING'] }, leaseExpiresAt: { gt: this.wall() } }, select: { id: true } })) throw denied();
+    if (current.bindingKey !== before.bindingKey || current.scopeId !== before.scopeId) throw denied();
+    const task = await db.aiTask.findFirst({ where: { AND: [current.taskWhere, { scopeId: current.scopeId }] }, select: { id: true, scopeId: true } });
+    const run = await db.aiRun.findFirst({ where: { scopeId: current.scopeId, taskId: lease.taskId, id: lease.runId, leaseOwnerId: lease.holderId,
+      fencingToken: new Prisma.Decimal(lease.fencingToken), revision: lease.revision, status: { in: ['QUEUED', 'RUNNING'] }, leaseExpiresAt: { gt: this.wall() } },
+      select: { id: true, scopeId: true, taskId: true, leaseOwnerId: true, fencingToken: true, revision: true, status: true, leaseExpiresAt: true } });
+    // A collation match is not an exact logical identity/lease. Never accept
+    // corrupt readback merely because the query and later CAS matched a row.
+    if (!task || task.id !== lease.taskId || task.scopeId !== current.scopeId || !run || run.id !== lease.runId
+      || run.scopeId !== current.scopeId || run.taskId !== lease.taskId || run.leaseOwnerId !== lease.holderId
+      || run.fencingToken.toFixed(0) !== lease.fencingToken || run.revision !== lease.revision
+      || !['QUEUED', 'RUNNING'].includes(run.status) || !run.leaseExpiresAt || run.leaseExpiresAt <= this.wall()) throw denied();
     if (locked && (await db.aiRun.updateMany({ where: { scopeId: current.scopeId, taskId: lease.taskId, id: lease.runId,
       leaseOwnerId: lease.holderId, fencingToken: new Prisma.Decimal(lease.fencingToken), revision: lease.revision,
       status: { in: ['QUEUED', 'RUNNING'] }, leaseExpiresAt: { gt: this.wall() } }, data: { revision: lease.revision } })).count !== 1) throw denied();
