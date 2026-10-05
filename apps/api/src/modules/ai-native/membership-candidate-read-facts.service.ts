@@ -5,7 +5,7 @@ import type { AiBusinessReadAuthority } from './business-read-route.authority';
 
 const limitSchema = z.object({ limit: z.number().int().min(1).max(50) }).strict();
 const candidateSchema = z.object({
-  customerId: z.string().min(1).max(191), name: z.string().min(1).max(191), phoneMasked: z.string().max(64),
+  customerId: z.string().min(1).max(191), name: z.string().min(1).max(191), phoneMasked: z.string().max(64).refine(value => value === '' || value.includes('*')),
   membershipStatus: z.enum(['pending_activation', 'active', 'suspended', 'risk_restricted', 'exited', 'closed'])
 }).strict();
 
@@ -43,6 +43,8 @@ export class AiMembershipCandidateReadFactsService {
     if (!Array.isArray(rows) || rows.length > input.data.limit) throw new ModelGatewayError('INVALID_RESPONSE');
     const parsed = rows.map(row => candidateSchema.safeParse(row));
     if (parsed.some(item => !item.success)) throw new ModelGatewayError('INVALID_RESPONSE');
+    const customerIds = parsed.map(item => item.data!.customerId);
+    if (new Set(customerIds).size !== customerIds.length) throw new ModelGatewayError('INVALID_RESPONSE');
     const observed = this.clock(); if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError('CONFIG_INVALID');
     return {
       contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: context.requestId, audience: context.audience,

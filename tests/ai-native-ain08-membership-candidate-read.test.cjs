@@ -25,3 +25,10 @@ test('membership candidate projection rejects an unbounded or malformed membersh
   const malformed = new AiMembershipCandidateReadFactsService({ listPersonalOptions: async () => [{ ...row, membershipStatus: 'unknown' }] }, authority(context));
   await assert.rejects(() => malformed.read({ limit: 10 }), error => error.code === 'INVALID_RESPONSE');
 });
+
+test('membership candidate projection rejects clear contact data and duplicate candidates', async () => {
+  const clearPhone = new AiMembershipCandidateReadFactsService({ listPersonalOptions: async () => [{ ...row, phoneMasked: '13800000000' }] }, authority(context));
+  await assert.rejects(() => clearPhone.read({ limit: 10 }), error => error.code === 'INVALID_RESPONSE');
+  const duplicate = new AiMembershipCandidateReadFactsService({ listPersonalOptions: async () => [row, { ...row, name: 'Customer A copy' }] }, authority(context));
+  await assert.rejects(() => duplicate.read({ limit: 10 }), error => error.code === 'INVALID_RESPONSE');
+});
