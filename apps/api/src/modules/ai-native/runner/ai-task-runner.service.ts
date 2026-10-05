@@ -152,6 +152,23 @@ export class AiTaskRunner {
           }
           completedSteps++; continue;
         }
+        if (registered.replayed && registered.existingStatus === 'failed' && this.deps.resources) {
+          // A failed business receipt can still have unsettled resource charges.
+          // Read and settle original evidence, never emit a failed->failed event.
+          if (!this.deps.resources.recover || !this.deps.effects.readInterrupted || !registered.resultRef) return { status: 'unavailable', completedSteps, cleanupFailed };
+          let ticket: AiTaskRunnerResourceTicket | undefined;
+          try {
+            ticket = structuredClone(await this.callBounded(() => this.deps.resources!.recover!(structuredClone(ref), structuredClone(lease)), plan.limits.maxStepMs, 'resource_recover'));
+            const result = boundedResult(structuredClone(await this.callBounded(signal => this.deps.effects.readInterrupted!(
+              structuredClone(stepPlan), signal, structuredClone(lease)), plan.limits.maxStepMs, 'receipt_read')), plan.limits.maxOutputBytes - outputBytes);
+            if (result.kind !== 'failed' || result.resultRef !== registered.resultRef) throw new AiTaskRunnerError('AI_RESULT_UNKNOWN');
+            await this.callBounded(() => this.deps.resources!.record(ticket!, structuredClone(ref), structuredClone(lease), true), plan.limits.maxStepMs, 'resource_reconcile');
+            return await finish({ status: 'failed', errorCode: result.errorCode, completedSteps, cleanupFailed });
+          } catch {
+            if (ticket) await this.callBounded(() => this.deps.resources!.markUnknown(ticket!, structuredClone(lease)), plan.limits.maxStepMs, 'resource_unknown').catch(() => {});
+            return { status: 'unknown', completedSteps, cleanupFailed };
+          }
+        }
         const reconcile = recovery && (stepPlan.operation === "external_unknown" || (registered.replayed && ['unknown', 'running'].includes(registered.existingStatus ?? '')));
         if (cancelling && !(recovery && registered.replayed && ['unknown', 'running'].includes(registered.existingStatus ?? ''))) return { status: 'cancel_requested', completedSteps, cleanupFailed };
         if (registered.replayed && registered.existingStatus === "unknown" && !reconcile) return await finish({ status: "unknown", completedSteps, cleanupFailed });
@@ -204,9 +221,12 @@ export class AiTaskRunner {
             }
           }
         }
-        if (!await this.cleanupStep(stepPlan, plan.limits.maxStepMs)) {
+        const cleanupUnavailable = !await this.cleanupStep(stepPlan, plan.limits.maxStepMs);
+        if (cleanupUnavailable) {
           cleanupFailed++;
-          result = reconcile || stepPlan.operation !== "readonly"
+          // Preserve a durable observed outcome: cleanup is a distinct failure,
+          // not permission to contradict its receipt or accounting evidence.
+          if (!this.deps.resources) result = reconcile || stepPlan.operation !== "readonly"
             ? { kind: "unknown", resultRef: result.resultRef ?? null, outputBytes: result.outputBytes }
             : { kind: "failed", errorCode: "AI_STORAGE_UNAVAILABLE", resultRef: result.resultRef ?? null, outputBytes: result.outputBytes };
         }
@@ -234,6 +254,7 @@ export class AiTaskRunner {
         if (result.kind === "paused") return await finish({ status: "paused", pause: result.pause, completedSteps, cleanupFailed });
         if (result.kind === "failed") return await finish({ status: "failed", errorCode: result.errorCode, completedSteps, cleanupFailed });
         completedSteps++;
+        if (cleanupUnavailable) return await finish({ status: 'unknown', completedSteps, cleanupFailed });
       }
       return await finish({ status: "succeeded", completedSteps, cleanupFailed });
     } catch (error) {

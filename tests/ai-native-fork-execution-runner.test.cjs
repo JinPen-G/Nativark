@@ -142,4 +142,35 @@ test('a still-unknown waiting task is neither mutated unknown-to-unknown nor res
   assert.equal((await h.run()).status, 'unknown'); assert.equal(h.state.taskCommits.length, 0); assert.deepEqual(h.state.stepCommits, []);
 });
 
+test('resource-backed cleanup failure preserves the durable successful step and stops new work', async () => {
+  const h = setup({ throwCleanup: true }); let records = 0;
+  h.deps.resources = { open: async () => {}, reserve: async () => ({ chargeIds: ['s', 'a', 'o'] }),
+    record: async () => { records++; }, markUnknown: async () => {} };
+  assert.equal((await h.run()).status, 'unknown');
+  assert.deepEqual(h.state.stepCommits, ['start', 'succeed']);
+  assert.equal(records, 1); assert.equal(h.state.effects, 1);
+  assert.equal(h.state.taskCommits[0].status, 'unknown');
+});
+
+test('durable failed replay settles only original resources and never transitions or executes again', async () => {
+  const h = setup({ replayed: 'failed', recovery: true }); const original = h.deps.steps.register; let records = 0;
+  h.deps.steps.register = async (...args) => ({ ...await original(...args), resultRef: 'failure-1' });
+  h.deps.resources = { open: async () => {}, recover: async () => ({ chargeIds: ['s', 'a', 'o'] }),
+    reserve: async () => assert.fail('cannot reserve after durable failure'),
+    record: async (_ticket, _ref, _lease, reconcile) => { assert.equal(reconcile, true); records++; }, markUnknown: async () => {} };
+  h.deps.effects.readInterrupted = async () => ({ kind: 'failed', errorCode: 'AI_BUSINESS_REJECTED', resultRef: 'failure-1', outputBytes: 1 });
+  assert.equal((await h.run()).status, 'failed'); assert.equal(records, 1);
+  assert.deepEqual(h.state.stepCommits, []); assert.equal(h.state.effects, 0); assert.equal(h.state.reconciles, 0);
+});
+
+for (const gap of ['wrong_receipt', 'settlement_failed']) test(`failed replay keeps pending resources for ${gap}`, async () => {
+  const h = setup({ replayed: 'failed', recovery: true }); const original = h.deps.steps.register; let unknown = 0, records = 0;
+  h.deps.steps.register = async (...args) => ({ ...await original(...args), resultRef: 'failure-1' });
+  h.deps.resources = { open: async () => {}, recover: async () => ({ chargeIds: ['s', 'a', 'o'] }), reserve: async () => assert.fail('fresh reserve'),
+    record: async () => { records++; throw Error('ack lost'); }, markUnknown: async () => { unknown++; } };
+  h.deps.effects.readInterrupted = async () => ({ kind: 'failed', errorCode: 'AI_BUSINESS_REJECTED', resultRef: gap === 'wrong_receipt' ? 'other-call' : 'failure-1', outputBytes: 1 });
+  assert.equal((await h.run()).status, 'unknown'); assert.equal(records, gap === 'wrong_receipt' ? 0 : 1); assert.equal(unknown, 1);
+  assert.deepEqual(h.state.stepCommits, []); assert.equal(h.state.effects, 0); assert.equal(h.state.taskCommits.length, 0);
+});
+
 module.exports = { setup, input };
