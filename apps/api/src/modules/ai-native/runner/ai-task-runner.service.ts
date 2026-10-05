@@ -144,10 +144,16 @@ export class AiTaskRunner {
         if (reconcile && !this.deps.effects.reconcile) return { status: "unavailable", completedSteps, cleanupFailed };
         let resourceTicket: AiTaskRunnerResourceTicket | undefined;
         if (this.deps.resources) {
-          // Recovery cannot create a fresh resource ticket for an unknown effect.
-          // Its original persisted charges require an explicit recovery source.
-          if (reconcile) return { status: 'unavailable', completedSteps, cleanupFailed };
-          resourceTicket = structuredClone(await this.callBounded(() => this.deps.resources!.reserve(structuredClone(ref), structuredClone(lease)), plan.limits.maxStepMs, 'resource_reserve'));
+          // Recovery reads original charges and never reserves a fresh allowance.
+          if (reconcile && !this.deps.resources.recover) return { status: 'unavailable', completedSteps, cleanupFailed };
+          try {
+            resourceTicket = structuredClone(await this.callBounded(() => reconcile
+              ? this.deps.resources!.recover!(structuredClone(ref), structuredClone(lease))
+              : this.deps.resources!.reserve(structuredClone(ref), structuredClone(lease)), plan.limits.maxStepMs, 'resource_reserve'));
+          } catch (error) {
+            if (reconcile) return { status: 'unavailable', completedSteps, cleanupFailed };
+            throw error;
+          }
           activeResourceTicket = resourceTicket;
         }
         if (!reconcile) advance(await this.deps.steps.start(ref, structuredClone(lease)), ref);
@@ -173,13 +179,14 @@ export class AiTaskRunner {
             : { kind: "failed", errorCode: "AI_STORAGE_UNAVAILABLE", resultRef: result.resultRef ?? null, outputBytes: result.outputBytes };
         }
         if (reconcile && registered.replayed && registered.existingStatus === 'unknown' && result.kind === 'unknown') {
+          if (resourceTicket && this.deps.resources) await this.callBounded(() => this.deps.resources!.markUnknown(resourceTicket!, structuredClone(lease)), plan.limits.maxStepMs, 'resource_unknown');
           return await finish({ status: 'unknown', completedSteps, cleanupFailed });
         }
         advance(await this.persistResult(ref, structuredClone(lease), result), ref);
         if (resourceTicket && this.deps.resources) {
           try {
             if (result.kind === 'unknown') await this.callBounded(() => this.deps.resources!.markUnknown(resourceTicket!, structuredClone(lease)), plan.limits.maxStepMs, 'resource_unknown');
-            else await this.callBounded(() => this.deps.resources!.record(resourceTicket!, structuredClone(ref), structuredClone(lease), false), plan.limits.maxStepMs, 'resource_record');
+            else await this.callBounded(() => this.deps.resources!.record(resourceTicket!, structuredClone(ref), structuredClone(lease), reconcile), plan.limits.maxStepMs, 'resource_record');
           } catch {
             await this.callBounded(() => this.deps.resources!.markUnknown(resourceTicket!, structuredClone(lease)), plan.limits.maxStepMs, 'resource_unknown').catch(() => {});
             // A durable step success is not a successfully accounted task.

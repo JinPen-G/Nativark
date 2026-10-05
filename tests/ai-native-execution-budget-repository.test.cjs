@@ -9,6 +9,7 @@ const { PrismaTaskExecutionScopeAuthority } = require('../apps/api/src/modules/a
 const { AiTaskRepository } = require('../apps/api/src/modules/ai-native/ai-task.repository');
 const { PersistentTaskRunnerResourceGate } = require('../apps/api/src/modules/ai-native/runner/persistent-task-runner-resource-gate');
 const { createPersistentAiTaskRunner } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner.module');
+const { PrismaTaskResourceRecoverySource } = require('../apps/api/src/modules/ai-native/runner/prisma-task-resource-recovery.source');
 const apiRequire = require('node:module').createRequire(require('node:path').resolve(__dirname, '../apps/api/package.json'));
 const { AI_CONTRACT_DRAFT_VERSION } = apiRequire('@rental-os/shared');
 
@@ -52,6 +53,7 @@ function delegates(state) {
       return row ? clone(row) : null;
     },
     findFirst: async ({ where }) => { const row = state[name].find(item => matches(item, where)); return row ? clone(row) : null; },
+    findMany: async ({ where, take }) => state[name].filter(item => matches(item, where)).slice(0, take).map(clone),
     create: async ({ data }) => { const row = { ...clone(data), revision: data.revision ?? 1 }; state[name].push(row); return clone(row); },
     updateMany: async ({ where, data }) => {
       const row = state[name].find(item => matches(item, where)); if (!row) return { count: 0 };
@@ -245,6 +247,10 @@ function runnerHarness(options = {}) {
       return ticket.chargeIds.map(chargeId => ({ taskId: held.taskId, lease: held, chargeId, evidenceRef: `fact-${chargeId}` }));
     }
   };
+  if (options.recoverySource) {
+    const recoverySource = new PrismaTaskResourceRecoverySource(h.db, h.scopeSource, () => now);
+    source.recoverTicket = recoverySource.recoverTicket.bind(recoverySource);
+  }
   h.evidence.read = async input => {
     const row = h.state.aiTaskExecutionCharge.find(row => row.chargeId === input.chargeId);
     return { scopeId: row.scopeId, taskId: row.taskId, runId: row.runId, chargeId: row.chargeId, requestFingerprint: row.requestFingerprint, resource: row.resource.toLowerCase(), actualAmount: measured[row.resource.toLowerCase()], evidenceHash: 'b'.repeat(64), evidenceRef: input.evidenceRef, gatewayInvocationId: null, dispatchToken: null };
@@ -254,7 +260,7 @@ function runnerHarness(options = {}) {
   const runner = createPersistentAiTaskRunner({
     resources: gate,
     leases: { readMetadata: async () => ({ taskId: 'task-1', status: 'running', revision: taskRevision, cancelRequestedAt: null }), claimRun: async () => currentLease(), claimRecoveryRun: async () => ({ ...currentLease(), purpose: 'recovery_only' }), releaseRun: async () => { trace.push('release'); return { released: true, revision: h.state.aiRun[0].revision + 1 }; } },
-    steps: { register: async () => ({ stepId: 'step-1', runId: 'run-1', sequence: 1, stepRevision: 1, taskRevision, replayed: false, existingStatus: 'pending' }), start: async () => { if (options.startFailure) throw new Error('synthetic_start_failure'); return commit(); }, succeed: async () => { trace.push('durable_result'); return commit(); }, fail: commit, pause: commit, unknown: async () => { trace.push('durable_unknown'); return commit(); } },
+    steps: { register: async () => ({ stepId: 'step-1', runId: 'run-1', sequence: 1, stepRevision: h.state.aiStep[0].revision ?? 1, taskRevision, replayed: h.state.aiStep[0].status === 'UNKNOWN', existingStatus: h.state.aiStep[0].status === 'UNKNOWN' ? 'unknown' : 'pending' }), start: async () => { if (options.startFailure) throw new Error('synthetic_start_failure'); h.state.aiStep[0].status = 'RUNNING'; return commit(); }, succeed: async () => { trace.push('durable_result'); h.state.aiStep[0].status = 'SUCCEEDED'; return commit(); }, fail: commit, pause: commit, unknown: async () => { trace.push('durable_unknown'); h.state.aiStep[0].status = 'UNKNOWN'; return commit(); } },
     plan: { resolve: async () => ({ taskId: 'task-1', runId: 'run-1', taskRevision, steps: [{ registrationRef: 'registration-1', operation: options.unknown ? 'external_unknown' : 'readonly', toolCode: 'orders.read', toolVersion: '1' }], limits: { maxSteps: 2, maxCalls: 2, maxTotalMs: 1000, maxStepMs: 100, maxOutputBytes: 100, maxConcurrent: 1 } }) },
     effects: { execute: async () => { trace.push('effect'); return { kind: options.unknown ? 'unknown' : 'succeeded', resultRef: 'result-1', outputBytes: 12 }; }, reconcile: async () => { trace.push('reconcile'); return { kind: 'succeeded', resultRef: 'result-1', outputBytes: 12 }; } }
   });
@@ -306,4 +312,25 @@ test('step start failure keeps reserved resources unknown without running the ef
   assert.equal(h.trace.includes('effect'), false);
   assert.ok(h.state.aiTaskExecutionCharge.every(row => row.status === 'UNKNOWN'));
   assert.equal(h.state.aiTaskExecutionBudget[0].reservedOutputBytes, 50n);
+});
+
+test('recovery reads original durable charges, reconciles and never allocates a new allowance', async () => {
+  const h = runnerHarness({ unknown: true, recoverySource: true });
+  Object.assign(h.state.aiStep[0], { toolCode: 'orders.read', toolVersion: '1', revision: 1 });
+  assert.equal((await h.runner.run(h.input)).status, 'unknown');
+  const ids = h.state.aiTaskExecutionCharge.map(row => row.chargeId);
+  assert.equal((await h.runner.run({ ...h.input, recovery: true })).status, 'succeeded');
+  assert.deepEqual(h.state.aiTaskExecutionCharge.map(row => row.chargeId), ids);
+  assert.equal(h.trace.filter(event => event === 'effect').length, 1);
+  assert.equal(h.trace.filter(event => event === 'reconcile').length, 1);
+  assert.equal(h.state.aiTaskExecutionBudget[0].consumedSteps, 1n);
+  assert.equal(h.state.aiTaskExecutionBudget[0].reservedSteps, 0n);
+});
+
+test('recovery rejects incomplete durable charges', async () => {
+  const h = runnerHarness({ unknown: true, recoverySource: true });
+  Object.assign(h.state.aiStep[0], { toolCode: 'orders.read', toolVersion: '1', revision: 1 });
+  await h.runner.run(h.input); h.state.aiTaskExecutionCharge.pop();
+  assert.equal((await h.runner.run({ ...h.input, recovery: true })).status, 'unavailable');
+  assert.equal(h.trace.includes('reconcile'), false);
 });

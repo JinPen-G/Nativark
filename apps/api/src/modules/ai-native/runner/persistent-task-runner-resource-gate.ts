@@ -9,6 +9,7 @@ import type { AiTaskRunnerLease, AiTaskRunnerResourcePort, AiTaskRunnerResourceT
 export interface AiTaskRunnerResourceEvidenceSource {
   charges(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<{ modelCall: boolean; requests: readonly AiTaskExecutionChargeRequest[] }>;
   settlements(ticket: AiTaskRunnerResourceTicket, step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<readonly AiTaskExecutionSettlementRequest[]>;
+  recoverTicket?(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerResourceTicket>;
 }
 
 export class PersistentTaskRunnerResourceGate implements AiTaskRunnerResourcePort {
@@ -65,6 +66,16 @@ export class PersistentTaskRunnerResourceGate implements AiTaskRunnerResourcePor
         || ref.lease.revision !== lease.revision) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
     }
     for (const ref of refs) await (reconcile ? this.budget.reconcile(ref) : this.budget.record(ref));
+  }
+
+  async recover(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease) {
+    if (typeof this.source.recoverTicket !== 'function') throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
+    step = structuredClone(step); lease = structuredClone(lease);
+    await this.budget.load(lease.taskId, lease);
+    const ticket = structuredClone(await this.source.recoverTicket(step, lease));
+    if (!ticket || !Array.isArray(ticket.chargeIds) || ticket.chargeIds.length < 3 || ticket.chargeIds.length > 4
+      || new Set(ticket.chargeIds).size !== ticket.chargeIds.length || ticket.chargeIds.some(id => typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(id))) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
+    return ticket;
   }
 
   async markUnknown(ticket: AiTaskRunnerResourceTicket, lease: AiTaskRunnerLease) {
