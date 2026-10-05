@@ -85,6 +85,32 @@ test('running crash replay reconciles with the exact current lease, never re-dis
   assert.equal(h.state.reconciles, 1); assert.equal(h.state.effects, 0); assert.equal(h.state.starts, 0);
 });
 
+test('persistent effect interruption cannot manufacture a failed step with a null result receipt', async () => {
+  const h = setup({ operation: 'readonly', throwEffect: true }); let unknown = 0;
+  h.deps.resources = { open: async () => {}, reserve: async () => ({ chargeIds: ['original-charge'] }),
+    record: async () => { throw Error('no measurement'); }, markUnknown: async () => { unknown++; } };
+  h.deps.effects.readInterrupted = async () => ({ kind: 'unknown', resultRef: 'persisted-start-receipt', outputBytes: 0 });
+  h.deps.steps.fail = async () => { assert.fail('no observed failure receipt, cannot publish failed'); };
+  const originalUnknown = h.deps.steps.unknown;
+  h.deps.steps.unknown = async (ref, held, receipt) => { assert.equal(receipt, 'persisted-start-receipt'); return originalUnknown(ref, held); };
+  assert.equal((await h.run()).status, 'unknown'); assert.ok(unknown > 0);
+  assert.equal(h.state.effects, 1);
+});
+
+test('runner waits for deferred model resources after start and cannot execute a pending ticket', async () => {
+  for (const missing of [false, true]) {
+    const h = setup(); const trace = [];
+    h.deps.resources = { open: async () => {}, reserve: async () => { trace.push('basic'); return { chargeIds: ['s', 'a', 'o'], modelPending: true }; },
+      record: async () => {}, markUnknown: async () => {} };
+    if (!missing) h.deps.resources.beforeExecute = async (ticket, ref, held) => {
+      assert.equal(h.state.starts, 1); assert.equal(h.state.effects, 0); assert.equal(held.revision, h.state.runRevision);
+      trace.push('call'); return { chargeIds: [...ticket.chargeIds, 'c'] };
+    };
+    assert.equal((await h.run()).status, missing ? 'unavailable' : 'succeeded');
+    assert.equal(h.state.effects, missing ? 0 : 1); assert.deepEqual(trace, missing ? ['basic'] : ['basic', 'call']);
+  }
+});
+
 test('persistent composition rejects missing current-authority, plan or effect dependencies at assembly', () => {
   const { composePersistentTaskRunner } = require('../apps/api/src/modules/ai-native/runner/persistent-task-runner.composition');
   assert.throws(() => composePersistentTaskRunner({}), /AI_RESOURCE_UNAVAILABLE/);

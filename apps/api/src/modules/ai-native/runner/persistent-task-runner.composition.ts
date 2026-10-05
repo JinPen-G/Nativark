@@ -8,7 +8,7 @@ import type { AiTaskRunnerClock, AiTaskRunnerOutcomePort } from './ai-task-runne
 import { PrismaTaskExecutionScopeAuthority } from './prisma-task-execution-scope.authority';
 import { PrismaTaskExecutionBudgetRepository } from './prisma-task-execution-budget.repository';
 import { PrismaTaskRunEvidenceRepository, type AiTaskPlanEvidenceAuthority } from './prisma-task-run-evidence.repository';
-import { PrismaTaskRunnerResourceSource, type AiTaskToolResourceCatalog } from './prisma-task-runner-resource.source';
+import { PrismaTaskRunnerResourceSource, type AiTaskToolResourceCatalog, type AiTaskModelInvocationPreparation } from './prisma-task-runner-resource.source';
 import { PersistentTaskRunnerResourceGate } from './persistent-task-runner-resource-gate';
 import { PrismaTaskMeasuredEffects, type AiTaskRegisteredExecutor } from './prisma-task-measured-effects';
 
@@ -24,6 +24,7 @@ export interface PersistentTaskRunnerComposition {
   planAuthority: AiTaskPlanEvidenceAuthority;
   toolCatalog: AiTaskToolResourceCatalog;
   executors: AiTaskRegisteredExecutor;
+  invocations?: AiTaskModelInvocationPreparation;
   wall?: () => Date;
   monotonic?: () => number;
   clock?: AiTaskRunnerClock;
@@ -50,7 +51,7 @@ export function composePersistentTaskRunner(input: PersistentTaskRunnerCompositi
   const scopes = new PrismaTaskExecutionScopeAuthority(input.tasks, input.db);
   const evidence = new PrismaTaskRunEvidenceRepository(input.db, scopes, input.planAuthority, input.wall, input.monotonic);
   const accounting = new PrismaTaskExecutionBudgetRepository(input.db, scopes, input.policy, evidence, input.wall);
-  const source = new PrismaTaskRunnerResourceSource(input.db, scopes, evidence, input.toolCatalog, input.wall);
+  const source = new PrismaTaskRunnerResourceSource(input.db, scopes, evidence, input.toolCatalog, input.wall, input.invocations);
   const resources = new PersistentTaskRunnerResourceGate(accounting, source);
   const effects = new PrismaTaskMeasuredEffects(input.db, input.tasks, evidence, input.executors);
   const ports = createAiTaskRunnerRepositoryPorts(input);

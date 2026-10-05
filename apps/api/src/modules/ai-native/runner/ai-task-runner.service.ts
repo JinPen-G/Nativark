@@ -172,6 +172,11 @@ export class AiTaskRunner {
           activeResourceTicket = resourceTicket;
         }
         if (!reconcile) advance(await this.deps.steps.start(ref, structuredClone(lease)), ref);
+        if (!reconcile && resourceTicket && this.deps.resources?.beforeExecute) {
+          resourceTicket = structuredClone(await this.callBounded(() => this.deps.resources!.beforeExecute!(resourceTicket!, structuredClone(ref), structuredClone(lease)), plan.limits.maxStepMs, 'model_resource_reserve'));
+          activeResourceTicket = resourceTicket;
+        }
+        if (resourceTicket?.modelPending) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
         calls++;
         let result: AiTaskRunnerEffectResult;
         try {
@@ -186,6 +191,18 @@ export class AiTaskRunner {
           result = reconcile || stepPlan.operation !== "readonly"
             ? { kind: "unknown", resultRef: null, outputBytes: 0 }
             : { kind: "failed", errorCode: error instanceof AiTaskRunnerError ? error.code : "AI_RESOURCE_UNAVAILABLE", resultRef: null, outputBytes: 0 };
+          if (this.deps.resources) {
+            // A local exception is not a durable failure receipt. Read only
+            // already-persisted evidence; never repeat the effect to obtain it.
+            result = { kind: 'unknown', resultRef: null, outputBytes: 0 };
+            if (this.deps.effects.readInterrupted) {
+              try {
+                result = boundedResult(structuredClone(await this.callBounded(signal => this.deps.effects.readInterrupted!(
+                  structuredClone(stepPlan), signal, structuredClone(lease)), plan.limits.maxStepMs, 'receipt_read')), plan.limits.maxOutputBytes - outputBytes);
+                outputBytes += result.outputBytes;
+              } catch { /* unknown occupancy survives missing/revoked evidence */ }
+            }
+          }
         }
         if (!await this.cleanupStep(stepPlan, plan.limits.maxStepMs)) {
           cleanupFailed++;
@@ -195,6 +212,10 @@ export class AiTaskRunner {
         }
         if (reconcile && registered.replayed && registered.existingStatus === 'unknown' && result.kind === 'unknown') {
           if (resourceTicket && this.deps.resources) await this.callBounded(() => this.deps.resources!.markUnknown(resourceTicket!, structuredClone(lease)), plan.limits.maxStepMs, 'resource_unknown');
+          return await finish({ status: 'unknown', completedSteps, cleanupFailed });
+        }
+        if (this.deps.resources && !result.resultRef && result.kind !== 'paused') {
+          if (resourceTicket) await this.callBounded(() => this.deps.resources!.markUnknown(resourceTicket!, structuredClone(lease)), plan.limits.maxStepMs, 'resource_unknown');
           return await finish({ status: 'unknown', completedSteps, cleanupFailed });
         }
         advance(await this.persistResult(ref, structuredClone(lease), result), ref);

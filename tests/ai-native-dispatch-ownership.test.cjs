@@ -84,6 +84,9 @@ function gatewaySetup() {
     transport: { invoke: async () => { events.push('transport'); return { text: 'done', usage: { inputTokens: 1, outputTokens: 2 } }; },
       stream: async function* () { events.push('transport'); yield { kind: 'result', result: { text: 'done', usage: { inputTokens: 1, outputTokens: 2 } } }; } }
   };
+  // Explicit lifecycle-spy adapter only. The real dispatch repository above
+  // still owns CAS; production cannot fall back to the legacy usage port.
+  require('./fixtures/ai-native/unified-budget.cjs')(ports);
   const gateway = new UnifiedAiGatewayService(ports, 10000);
   const context = { tenantId: scope.tenantId, workspaceId: scope.workspaceId, actorId: 'actor-1' };
   const request = { callId: 'call-1', model: 'synthetic', messages: [{ role: 'user', content: 'hello' }], maxOutputTokens: 5 };

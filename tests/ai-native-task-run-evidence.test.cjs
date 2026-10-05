@@ -187,12 +187,45 @@ test('policy changes during tool execution cannot produce a completed artifact o
   assert.equal(h.state.aiTaskResultArtifact.some(row => row.completeMeasurement), false);
   assert.equal(h.state.aiTaskExecutionCharge.every(row => row.status === 'RESERVED'), true);
 });
+
+test('actual resource source defers model-call binding until durable start and never executes a supplier', async () => {
+  const h = harness(); await h.make().savePlan(plan, lease); h.state.aiTask[0].status = 'RUNNING'; h.state.aiStep[0].status = 'PENDING';
+  let registrations = 0;
+  const prepare = { prepare: async (ref, held) => {
+    assert.equal(h.state.aiStep[0].status, 'RUNNING'); registrations++;
+    h.state.aiGatewayInvocation.push({ id: 'invocation-a', scopeId: 'scope-a', taskId: 'task-a', runId: 'run-a', stepId: 'step-a',
+      actionId: 'action-a', stepFingerprint: 'a'.repeat(64), leaseOwnerId: held.holderId, fencingToken: held.fencingToken, expiresAt: new Date(held.expiresAt) });
+    return { invocationId: 'invocation-a' };
+  } };
+  const catalog = { resolve: async () => ({ modelCall: true }) };
+  const source = new PrismaTaskRunnerResourceSource(h.db, h.scopes, h.make(), catalog, () => now, prepare);
+  const gate = new PersistentTaskRunnerResourceGate(h.budget, source);
+  await gate.open(lease, false);
+  const ref = { plan: plan.steps[0], registered: { stepId: 'step-a', runId: 'run-a', sequence: 1, stepRevision: 1, taskRevision: 1, replayed: false, existingStatus: 'pending' } };
+  const pending = await gate.reserve(ref, lease);
+  assert.equal(pending.modelPending, true); assert.equal(registrations, 0); assert.equal(pending.chargeIds.length, 3);
+  h.state.aiStep[0].status = 'RUNNING'; h.state.aiStep[0].revision = 2; ref.registered.stepRevision = 2;
+  const complete = await gate.beforeExecute(pending, ref, lease);
+  assert.equal(complete.modelPending, undefined); assert.equal(complete.chargeIds.length, 4); assert.equal(registrations, 1);
+  assert.equal(h.state.aiTaskExecutionCharge.find(c => c.resource === 'CALLS').gatewayInvocationId, 'invocation-a');
+});
+
+test('missing invocation input preparation denies model resource planning, not a silent non-model fallback', async () => {
+  const h = harness(); await h.make().savePlan(plan, lease); h.state.aiTask[0].status = 'RUNNING'; h.state.aiStep[0].status = 'PENDING';
+  const source = new PrismaTaskRunnerResourceSource(h.db, h.scopes, h.make(), { resolve: async () => ({ modelCall: true }) }, () => now);
+  const ref = { plan: plan.steps[0], registered: { stepId: 'step-a', stepRevision: 1 } };
+  await assert.rejects(source.charges(ref, lease)); assert.equal(h.state.aiTaskExecutionCharge.length, 0);
+});
 test('appended plan/result schema validates offline and has scoped compound foreign keys', () => {
   const schema = fs.readFileSync(path.join(__dirname, '../apps/api/prisma/schema.prisma'), 'utf8');
   const before = require('node:child_process').execFileSync('git', ['show', '77d05769:apps/api/prisma/schema.prisma'], { encoding: 'utf8' });
   const result = offlinePrismaSchema(schema, before); assert.equal(result.violations, '');
   assert.match(result.diff, /CREATE TABLE `ai_task_run_plans`/); assert.match(result.diff, /CREATE TABLE `ai_task_result_artifacts`/);
   assert.doesNotMatch(result.diff, /DROP TABLE/);
+  const sql = fs.readFileSync(path.join(__dirname, '../apps/api/prisma/migrations/20261006010000_ai_task_plan_result_evidence/migration.sql'), 'utf8');
+  for (const name of ['ai_task_run_plans_run_fkey', 'ai_task_result_artifacts_step_fkey', 'ai_result_artifact_step_generation_key']) {
+    assert.ok(result.diff.includes('`' + name + '`')); assert.ok(sql.includes('`' + name + '`'));
+  }
   const models = Prisma.dmmf.datamodel.models;
   assert.deepEqual(models.find(m => m.name === 'AiTaskRunPlan').primaryKey.fields, ['scopeId', 'taskId', 'runId']);
   assert.deepEqual(models.find(m => m.name === 'AiTaskResultArtifact').fields.find(f => f.name === 'step').relationFromFields, ['scopeId', 'taskId', 'stepId']);

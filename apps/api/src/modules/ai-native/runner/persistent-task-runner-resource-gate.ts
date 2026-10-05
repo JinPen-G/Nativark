@@ -7,7 +7,8 @@ import type { AiTaskRunnerLease, AiTaskRunnerResourcePort, AiTaskRunnerResourceT
  * No default implementation fabricates a plan, charge ID or usage evidence.
  */
 export interface AiTaskRunnerResourceEvidenceSource {
-  charges(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<{ modelCall: boolean; requests: readonly AiTaskExecutionChargeRequest[] }>;
+  charges(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<{ modelCall: boolean; deferredModelCall?: true; requests: readonly AiTaskExecutionChargeRequest[] }>;
+  modelCharge?(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskExecutionChargeRequest>;
   settlements(ticket: AiTaskRunnerResourceTicket, step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<readonly AiTaskExecutionSettlementRequest[]>;
   recoverTicket?(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerResourceTicket>;
 }
@@ -29,7 +30,8 @@ export class PersistentTaskRunnerResourceGate implements AiTaskRunnerResourcePor
   async reserve(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease) {
     step = structuredClone(step); lease = structuredClone(lease);
     const plan = structuredClone(await this.source.charges(step, lease));
-    const required = plan?.modelCall === true ? ['steps', 'active_ms', 'output_bytes', 'calls'] : ['steps', 'active_ms', 'output_bytes'];
+    if (plan.deferredModelCall && (plan.modelCall !== true || typeof this.source.modelCharge !== 'function')) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
+    const required = plan?.modelCall === true && !plan.deferredModelCall ? ['steps', 'active_ms', 'output_bytes', 'calls'] : ['steps', 'active_ms', 'output_bytes'];
     if (typeof plan?.modelCall !== 'boolean' || !Array.isArray(plan.requests) || plan.requests.length !== required.length
       || new Set(plan.requests.map(request => request.resource)).size !== required.length
       || new Set(plan.requests.map(request => request.chargeId)).size !== required.length) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
@@ -53,7 +55,24 @@ export class PersistentTaskRunnerResourceGate implements AiTaskRunnerResourcePor
       await this.markUnknown({ chargeIds }, lease).catch(() => {});
       throw error;
     }
-    return { chargeIds };
+    return { chargeIds, ...(plan.deferredModelCall ? { modelPending: true as const } : {}) };
+  }
+
+  async beforeExecute(ticket: AiTaskRunnerResourceTicket, step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease) {
+    ticket = structuredClone(ticket); step = structuredClone(step); lease = structuredClone(lease);
+    if (!ticket.modelPending) return ticket;
+    if (!this.source.modelCharge || ticket.chargeIds.length !== 3) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
+    const request = structuredClone(await this.source.modelCharge(step, lease));
+    if (request.resource !== 'calls' || request.amount !== 1n || request.taskId !== lease.taskId
+      || request.lease.taskId !== lease.taskId || request.lease.runId !== lease.runId || request.lease.holderId !== lease.holderId
+      || request.lease.revision !== lease.revision || request.lease.fencingToken !== lease.fencingToken
+      || request.target.kind !== 'step' || request.target.stepId !== step.registered.stepId || !request.target.gatewayInvocationId
+      || ticket.chargeIds.includes(request.chargeId)) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
+    const complete = { chargeIds: [...ticket.chargeIds, request.chargeId] };
+    try {
+      if ((await this.budget.reserve(request)).replayed) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
+    } catch (error) { await this.markUnknown(complete, lease).catch(() => {}); throw error; }
+    return complete;
   }
 
   async record(ticket: AiTaskRunnerResourceTicket, step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, reconcile: boolean) {

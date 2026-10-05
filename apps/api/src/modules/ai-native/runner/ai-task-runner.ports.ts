@@ -116,6 +116,9 @@ export interface AiTaskRunnerPlanPort {
 export interface AiTaskRunnerEffectPort {
   execute(step: AiTaskRunnerStepPlan, signal: AbortSignal, lease?: AiTaskRunnerLease): Promise<AiTaskRunnerEffectResult>;
   reconcile?(step: AiTaskRunnerStepPlan, signal: AbortSignal, lease?: AiTaskRunnerLease): Promise<AiTaskRunnerEffectResult>;
+  /** Persistence-only receipt read after interruption. Must never invoke the
+   * effect or query a provider; absence keeps the interrupted step unresolved. */
+  readInterrupted?(step: AiTaskRunnerStepPlan, signal: AbortSignal, lease: AiTaskRunnerLease): Promise<AiTaskRunnerEffectResult>;
   cleanup?(step: AiTaskRunnerStepPlan): Promise<void>;
 }
 
@@ -152,10 +155,13 @@ export interface AiTaskRunnerDependencies {
   resources?: AiTaskRunnerResourcePort;
 }
 
-export interface AiTaskRunnerResourceTicket { chargeIds: readonly string[] }
+export interface AiTaskRunnerResourceTicket { chargeIds: readonly string[]; modelPending?: true }
 export interface AiTaskRunnerResourcePort {
   open(lease: AiTaskRunnerLease, recovery: boolean): Promise<void>;
   reserve(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerResourceTicket>;
+  /** Bind/reserve model-call resources only after the durable step start,
+   * before any effect. This registers an association, never dispatches. */
+  beforeExecute?(ticket: AiTaskRunnerResourceTicket, step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerResourceTicket>;
   record(ticket: AiTaskRunnerResourceTicket, step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, reconcile: boolean): Promise<void>;
   markUnknown(ticket: AiTaskRunnerResourceTicket, lease: AiTaskRunnerLease): Promise<void>;
   recover?(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerResourceTicket>;

@@ -76,7 +76,13 @@ test('legacy invoke and stream propagate all required features including text', 
   const { UnifiedAiGatewayService } = require('../apps/api/src/modules/ai-native/unified-ai-gateway.service');
   for (const mode of ['invoke','stream']) {
     let received;
-    const gateway = new UnifiedAiGatewayService({ routing: { resolve: async (_context, required) => { received = required; throw Error('stop after routing input'); } } });
+    const unreachable = async () => { assert.fail('routing refusal must prevent accounting and transport'); };
+    const gateway = new UnifiedAiGatewayService({
+      routing: { resolve: async (_context, required) => { received = required; throw Error('stop after routing input'); }, assertCurrent: unreachable },
+      budget: { reserve: unreachable, dispatch: unreachable, settle: unreachable, abandon: unreachable },
+      admission: { admit: unreachable, transition: unreachable }, dispatch: { claim: unreachable, finish: unreachable },
+      audit: { append: unreachable }, transport: { invoke: unreachable, stream: unreachable }
+    });
     const args = [{ tenantId: 't', workspaceId: 'w', actorId: 'a' }, { callId: 'c', model: 'm', messages: [{ role: 'user', content: 'hello' }], maxOutputTokens: 10, features: ['tools','structuredOutput'] }];
     const operation = mode === 'invoke' ? gateway.invoke(...args) : gateway.stream(...args).next();
     await assert.rejects(operation);

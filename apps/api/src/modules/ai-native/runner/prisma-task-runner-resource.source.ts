@@ -12,6 +12,10 @@ export interface AiTaskToolResourceCatalog {
   /** Closed server registry; absence is unavailable, not a non-model default. */
   resolve(toolCode: string, toolVersion: string): Promise<{ modelCall: boolean } | null>;
 }
+export interface AiTaskModelInvocationPreparation {
+  /** Registers the server-owned invocation after step start; never sends it. */
+  prepare(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<{ invocationId: string }>;
+}
 const fail = () => new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
 const uuid = (hash: string) => `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
 
@@ -22,7 +26,8 @@ export class PrismaTaskRunnerResourceSource implements AiTaskRunnerResourceEvide
   private readonly recovery: PrismaTaskResourceRecoverySource;
   constructor(private readonly db: Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskExecutionCharge' | 'aiGatewayInvocation'>,
     private readonly scopes: AiTaskExecutionScopeSource, private readonly plans: Pick<PrismaTaskRunEvidenceRepository, 'resolve'>,
-    private readonly catalog: AiTaskToolResourceCatalog, private readonly clock: () => Date = () => new Date()) {
+    private readonly catalog: AiTaskToolResourceCatalog, private readonly clock: () => Date = () => new Date(),
+    private readonly invocations?: AiTaskModelInvocationPreparation) {
     if (typeof plans?.resolve !== 'function' || typeof catalog?.resolve !== 'function') throw fail();
     this.recovery = new PrismaTaskResourceRecoverySource(db, scopes, clock);
   }
@@ -42,18 +47,33 @@ export class PrismaTaskRunnerResourceSource implements AiTaskRunnerResourceEvide
     if (!stored) throw fail();
     const descriptor = structuredClone(await this.catalog.resolve(planned.toolCode, planned.toolVersion));
     if (!descriptor || typeof descriptor.modelCall !== 'boolean') throw fail();
-    const invocation = descriptor.modelCall ? await this.db.aiGatewayInvocation.findFirst({ where: { scopeId: access.scopeId, taskId: lease.taskId,
-      runId: lease.runId, stepId: stored.id, actionId: stored.actionId, stepFingerprint: stored.requestFingerprint,
-      leaseOwnerId: lease.holderId, fencingToken: lease.fencingToken, expiresAt: { gt: this.clock() } } }) : null;
-    if (descriptor.modelCall && !invocation) throw fail();
+    if (descriptor.modelCall && typeof this.invocations?.prepare !== 'function') throw fail();
     const current = await this.scopes.resolve(lease.taskId, lease, 'write');
     if (access.bindingKey !== current.bindingKey || access.scopeId !== current.scopeId) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
-    const resources: AiTaskExecutionResource[] = descriptor.modelCall ? ['steps', 'active_ms', 'output_bytes', 'calls'] : ['steps', 'active_ms', 'output_bytes'];
-    return { modelCall: descriptor.modelCall, requests: resources.map(resource => ({ taskId: lease.taskId, lease: structuredClone(lease), resource,
+    const resources: AiTaskExecutionResource[] = ['steps', 'active_ms', 'output_bytes'];
+    return { modelCall: descriptor.modelCall, ...(descriptor.modelCall ? { deferredModelCall: true as const } : {}), requests: resources.map(resource => ({ taskId: lease.taskId, lease: structuredClone(lease), resource,
       chargeId: uuid(requestFingerprint({ scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId, stepId: stored.id, actionId: stored.actionId, fingerprint: stored.requestFingerprint, resource })),
       amount: resource === 'active_ms' ? BigInt(plan.limits.maxStepMs) : resource === 'output_bytes' ? BigInt(plan.limits.maxOutputBytes) : 1n,
-      target: { kind: 'step' as const, stepId: stored.id, actionId: stored.actionId, stepFingerprint: stored.requestFingerprint,
-        ...(invocation ? { gatewayInvocationId: invocation.id } : {}) } })) };
+      target: { kind: 'step' as const, stepId: stored.id, actionId: stored.actionId, stepFingerprint: stored.requestFingerprint } })) };
+  }
+
+  async modelCharge(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease) {
+    step = structuredClone(step); lease = structuredClone(lease);
+    if (!this.invocations) throw fail();
+    const access = structuredClone(await this.scopes.resolve(lease.taskId, lease, 'write'));
+    const stored = await this.db.aiStep.findFirst({ where: { scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId,
+      id: step.registered.stepId, revision: step.registered.stepRevision, status: 'RUNNING', toolCode: step.plan.toolCode, toolVersion: step.plan.toolVersion } });
+    if (!stored || (await this.catalog.resolve(step.plan.toolCode, step.plan.toolVersion))?.modelCall !== true) throw fail();
+    const prepared = structuredClone(await this.invocations.prepare(step, lease));
+    const invocation = await this.db.aiGatewayInvocation.findFirst({ where: { id: prepared.invocationId, scopeId: access.scopeId, taskId: lease.taskId,
+      runId: lease.runId, stepId: stored.id, actionId: stored.actionId, stepFingerprint: stored.requestFingerprint,
+      leaseOwnerId: lease.holderId, fencingToken: lease.fencingToken, expiresAt: { gt: this.clock() } } });
+    const current = await this.scopes.resolve(lease.taskId, lease, 'write');
+    if (!invocation || access.bindingKey !== current.bindingKey || access.scopeId !== current.scopeId) throw fail();
+    return { taskId: lease.taskId, lease: structuredClone(lease), resource: 'calls' as const, amount: 1n,
+      chargeId: uuid(requestFingerprint({ scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId, stepId: stored.id,
+        actionId: stored.actionId, fingerprint: stored.requestFingerprint, resource: 'calls' })),
+      target: { kind: 'step' as const, stepId: stored.id, actionId: stored.actionId, stepFingerprint: stored.requestFingerprint, gatewayInvocationId: invocation.id } };
   }
 
   async settlements(ticket: AiTaskRunnerResourceTicket, step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease) {

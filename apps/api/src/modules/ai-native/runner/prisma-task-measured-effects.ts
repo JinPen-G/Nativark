@@ -54,4 +54,7 @@ export class PrismaTaskMeasuredEffects implements AiTaskRunnerEffectPort {
     const binding = await this.step(plan, lease);
     return this.evidence.recoverResult(binding.lease, binding.step.id);
   }
+  readInterrupted(plan: AiTaskRunnerStepPlan, signal: AbortSignal, lease: AiTaskRunnerLease) {
+    return this.reconcile(plan, signal, lease);
+  }
 }

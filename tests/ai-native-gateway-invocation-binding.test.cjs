@@ -84,6 +84,35 @@ test('real binding source registers one existing task step and survives service 
   const adapter = new BudgetGatewayAdapter({ reserve: async command => { received = command; return { id: 'budget-1', association: command.association, callId: command.callId, sceneCode: command.sceneCode }; } }, h.source());
   assert.equal(await adapter.reserve(narrow, request), 'budget-1'); assert.equal(received.association.stepId, 'step-1');
 });
+
+test('runner invocation preparation uses the real binding repository and refuses replay as fresh readiness', async () => {
+  const { PrismaTaskGatewayInvocationPreparation } = require('../apps/api/src/modules/ai-native/runner/prisma-task-gateway-invocation.preparation');
+  const h = harness(); const ref = { registered: { stepId: 'step-1' } };
+  const held = { taskId: 'task-1', runId: 'run-1', holderId: 'worker-1', revision: 7, fencingToken: '2', expiresAt: new Date(now.getTime() + 60_000).toISOString() };
+  const adapter = new PrismaTaskGatewayInvocationPreparation(h.source(), { resolve: async () => h.input() });
+  assert.equal((await adapter.prepare(ref, held)).invocationId, 'invocation-1');
+  await assert.rejects(adapter.prepare(ref, held), error => error.code === 'AI_RESULT_UNKNOWN');
+  assert.equal(h.state.creates, 1); assert.equal(h.state.rows.aiBudgetReservation.length, 0);
+});
+
+test('runner invocation preparation cannot repair stale holder/configuration with invented associations', async () => {
+  const { PrismaTaskGatewayInvocationPreparation } = require('../apps/api/src/modules/ai-native/runner/prisma-task-gateway-invocation.preparation');
+  for (const mode of ['holder', 'step', 'config', 'expiry', 'lost-commit']) {
+    const h = harness(); const ref = { registered: { stepId: 'step-1' } };
+    const held = { taskId: 'task-1', runId: 'run-1', holderId: 'worker-1', revision: 7, fencingToken: '2', expiresAt: new Date(now.getTime() + 60_000).toISOString() };
+    const source = { resolve: async () => { const value = h.input();
+      if (mode === 'holder') value.lease.holderId = 'another';
+      if (mode === 'step') value.stepId = 'another';
+      if (mode === 'config') value.configuration.configRevision++;
+      if (mode === 'expiry') value.expiresAt = new Date(now.getTime() + 120_000);
+      return value;
+    } };
+    if (mode === 'lost-commit') h.state.commitFailure = 'ack';
+    await assert.rejects(new PrismaTaskGatewayInvocationPreparation(h.source(), source).prepare(ref, held));
+    assert.equal(h.state.rows.aiBudgetReservation.length, 0);
+    assert.equal(h.state.rows.aiGatewayInvocation.length, mode === 'lost-commit' ? 1 : 0);
+  }
+});
 for (const [name, mutate] of Object.entries({
   owner: h => h.state.rows.aiTask[0].ownerId = 'other',
   scope: h => h.state.rows.aiStep[0].scopeId = 'other',
