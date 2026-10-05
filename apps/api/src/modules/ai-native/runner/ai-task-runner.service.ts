@@ -3,7 +3,7 @@ import {
   type AiTaskRunnerInput, type AiTaskRunnerLease, type AiTaskRunnerLimits,
   type AiTaskRunnerOutcome, type AiTaskRunnerPlan, type AiTaskRunnerStepPlan,
   type AiTaskRunnerStepCommit, type AiTaskRunnerStepRef, type AiTaskRunnerTaskOutcome,
-  type AiTaskRunnerOutcomePort
+  type AiTaskRunnerOutcomePort, type AiTaskRunnerResourceTicket
 } from "./ai-task-runner.ports";
 
 export class AiTaskRunnerError extends Error {
@@ -69,6 +69,8 @@ export class AiTaskRunner {
       || typeof deps.steps.succeed !== "function" || typeof deps.steps.fail !== "function"
       || typeof deps.steps.pause !== "function" || typeof deps.steps.unknown !== "function"
       || typeof deps.plan.resolve !== "function" || typeof deps.effects.execute !== "function"
+      || (deps.resources !== undefined && (typeof deps.resources.open !== 'function' || typeof deps.resources.reserve !== 'function'
+        || typeof deps.resources.record !== 'function' || typeof deps.resources.markUnknown !== 'function'))
       || (deps.taskOutcome !== undefined && typeof deps.taskOutcome.commit !== "function")) throw new AiTaskRunnerError("AI_RESOURCE_UNAVAILABLE");
     this.clock = deps.clock ?? defaultClock;
   }
@@ -81,6 +83,7 @@ export class AiTaskRunner {
     let lease = structuredClone(recovery ? await this.deps.leases.claimRecoveryRun(claimInput) : await this.deps.leases.claimRun(claimInput));
     let taskRevision = initial.revision;
     let completedSteps = 0, cleanupFailed = 0, calls = 0, outputBytes = 0;
+    let activeResourceTicket: AiTaskRunnerResourceTicket | undefined;
     let outcomeAttempted = false;
     const advance = (commit: AiTaskRunnerStepCommit, ref?: AiTaskRunnerStepRef) => {
       if (!commit || !finiteInteger(commit.taskRevision, taskRevision, 4294967295)
@@ -112,6 +115,7 @@ export class AiTaskRunner {
       return committed.outcome;
     };
     try {
+      if (this.deps.resources) await this.callBounded(() => this.deps.resources!.open(structuredClone(lease), recovery), 5000, 'resource_open');
       const plan = validatePlan(structuredClone(await this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), recovery)), input);
       const startedAt = this.clock.now();
       const checkCancel = async () => {
@@ -138,6 +142,14 @@ export class AiTaskRunner {
         if (registered.replayed && registered.existingStatus === "unknown" && !reconcile) return await finish({ status: "unknown", completedSteps, cleanupFailed });
         if (registered.replayed && !(reconcile && registered.existingStatus === "unknown")) return { status: "unavailable", completedSteps, cleanupFailed };
         if (reconcile && !this.deps.effects.reconcile) return { status: "unavailable", completedSteps, cleanupFailed };
+        let resourceTicket: AiTaskRunnerResourceTicket | undefined;
+        if (this.deps.resources) {
+          // Recovery cannot create a fresh resource ticket for an unknown effect.
+          // Its original persisted charges require an explicit recovery source.
+          if (reconcile) return { status: 'unavailable', completedSteps, cleanupFailed };
+          resourceTicket = structuredClone(await this.callBounded(() => this.deps.resources!.reserve(structuredClone(ref), structuredClone(lease)), plan.limits.maxStepMs, 'resource_reserve'));
+          activeResourceTicket = resourceTicket;
+        }
         if (!reconcile) advance(await this.deps.steps.start(ref, structuredClone(lease)), ref);
         calls++;
         let result: AiTaskRunnerEffectResult;
@@ -164,6 +176,17 @@ export class AiTaskRunner {
           return await finish({ status: 'unknown', completedSteps, cleanupFailed });
         }
         advance(await this.persistResult(ref, structuredClone(lease), result), ref);
+        if (resourceTicket && this.deps.resources) {
+          try {
+            if (result.kind === 'unknown') await this.callBounded(() => this.deps.resources!.markUnknown(resourceTicket!, structuredClone(lease)), plan.limits.maxStepMs, 'resource_unknown');
+            else await this.callBounded(() => this.deps.resources!.record(resourceTicket!, structuredClone(ref), structuredClone(lease), false), plan.limits.maxStepMs, 'resource_record');
+          } catch {
+            await this.callBounded(() => this.deps.resources!.markUnknown(resourceTicket!, structuredClone(lease)), plan.limits.maxStepMs, 'resource_unknown').catch(() => {});
+            // A durable step success is not a successfully accounted task.
+            return { status: 'unknown', completedSteps, cleanupFailed };
+          }
+          activeResourceTicket = undefined;
+        }
         if (result.kind === "unknown") return await finish({ status: "unknown", completedSteps, cleanupFailed });
         if (result.kind === "paused") return await finish({ status: "paused", pause: result.pause, completedSteps, cleanupFailed });
         if (result.kind === "failed") return await finish({ status: "failed", errorCode: result.errorCode, completedSteps, cleanupFailed });
@@ -171,6 +194,9 @@ export class AiTaskRunner {
       }
       return await finish({ status: "succeeded", completedSteps, cleanupFailed });
     } catch (error) {
+      if (activeResourceTicket && this.deps.resources) {
+        await this.callBounded(() => this.deps.resources!.markUnknown(activeResourceTicket!, structuredClone(lease)), 5000, 'resource_unknown').catch(() => {});
+      }
       if (error instanceof AiTaskRunnerError && !outcomeAttempted && (error.code === "AI_RESULT_UNKNOWN" || error.code === "AI_RUN_LIMIT")) {
         if (!this.deps.taskOutcome) throw error;
         return await finish({ status: "failed", completedSteps, cleanupFailed, errorCode: error.code });

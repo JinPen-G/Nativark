@@ -148,6 +148,16 @@ export interface AiTaskRunnerDependencies {
   effects: AiTaskRunnerEffectPort;
   taskOutcome?: AiTaskRunnerOutcomePort;
   clock?: AiTaskRunnerClock;
+  /** Required by the persistent composition; absent only for legacy isolated runner consumers. */
+  resources?: AiTaskRunnerResourcePort;
+}
+
+export interface AiTaskRunnerResourceTicket { chargeIds: readonly string[] }
+export interface AiTaskRunnerResourcePort {
+  open(lease: AiTaskRunnerLease, recovery: boolean): Promise<void>;
+  reserve(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerResourceTicket>;
+  record(ticket: AiTaskRunnerResourceTicket, step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, reconcile: boolean): Promise<void>;
+  markUnknown(ticket: AiTaskRunnerResourceTicket, lease: AiTaskRunnerLease): Promise<void>;
 }
 
 export interface AiTaskRunnerInput extends AiTaskRunnerClaimInput {
