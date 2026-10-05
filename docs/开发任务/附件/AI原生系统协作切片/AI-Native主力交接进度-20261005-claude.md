@@ -162,3 +162,44 @@
 - 未知结果/超时/撤权必须区分。已经完成的计量不得因结果发布被拒而倒退成unknown；已派发失败则不能自动释放重试。
 - 私钥和模型输出都不进入公开错误；能力profile指纹只做绑定，不能当签名或live证据。
 - 用户要求核心整项交付，不要只完成一个校验器就报“底座完成”；正式结项始终按AIN任务定义与证据。
+
+## 10. Codex追加交接（2026-10-05）
+
+本节是接任后新增的真实代码修复，不改变原正式验收分母，也不把局部回归通过写成 AIN-08/AIN-11 或专项完成。
+
+当前主线：`D:/工作文件/rental-OS/.claude/worktrees/claude-ai-native-foundation`；分支：`ai/ai-native-contracts-s01-20261002`；当前交接点：`cd4336ec`。历史未跟踪 output 资源仍保留，未纳入提交；没有新增数据库、服务、端口或外部调用。
+
+### 已完成提交
+
+- `147c94b0`：可用性只读投影绑定请求行。返回地点/时间之外，还必须逐行匹配数量和 `itemGroupId`，并拒绝返回行数不一致；新增错商品/错需求量回归。
+- `b148ede0`：目录只读投影拒绝重复 `id` 或 `code`，避免不唯一 Core 返回被包装成目录事实；新增行为回归。
+- `53622ec5`：会员候选投影拒绝重复 `customerId`，并拒绝未带 `*` 掩码标记的非空电话字段；不选择客户、不改变预订资格。
+- `cd4336ec`：预算 Gateway 适配器在异步绑定解析前快照 context/request，阻止 await 期间 actor/callId 被篡改；workspace 消费适配器拒绝 platform/tenant owner scope 错绑。新增 reserve、dispatch、settle、release、unknown、reconcile 的等待竞态和消费层级负例。
+
+### 实际验证
+
+- 相关只读投影回归：11/11 通过，退出 0。
+- C01～C03预算与Gateway适配定向回归：31/31 通过，退出 0。
+- `npm run lint --workspace apps/api`：退出 0。
+- `git diff --check`：通过。
+- 以上均为离线函数/仓储替身证据，使用端口 1 的无效 DATABASE_URL 和网络/环境读取护栏；未连接真实 MySQL、HTTP、模型、支付或浏览器。
+
+### 仍需主开发继续
+
+- C01～C03预算子系统尚未接入主线 Gateway 的单一生命周期；不能形成双账。必须从可信 task/run/step/action/priceVersion 关联源补齐预算关联，不能用 requestId 复制填充。
+- 平台/租户消费主体、真实订阅权益、报价、dispatch/usage evidence 仍需正式适配；缺依赖必须 fail closed。
+- AIN-05 live 能力验真、ProviderProfile/config 统一 revision、显式模块/真实调用入口仍未生产装配。
+- AIN-06 task-level waiting/cancelled/人工接管与 AIN-07 审批消费/Core 幂等仍未完成。
+- 真实 MySQL 锁竞争、迁移、HTTP/供应商、浏览器/真机、灰度验收均未运行。
+
+## 11. 可直接转发给 Claude 的接手提示词
+
+你接手 Rental OS AI Native 主力开发。请在唯一主线树 `D:/工作文件/rental-OS/.claude/worktrees/claude-ai-native-foundation`、分支 `ai/ai-native-contracts-s01-20261002` 从交接点 `cd4336ec` 继续；不要使用旧 Codex 树写入，不要 reset/drop，不要覆盖未跟踪 output 资源。
+
+先读取本文件第10节、主需求、主开发任务和中央实现记录，核对当前 HEAD/status 与并行写入者。保留 `147c94b0`、`b148ede0`、`53622ec5`、`cd4336ec` 的代码和测试；不要重复这些切片，也不要把它们当正式 AIN 验收。
+
+严格按原任务依赖推进：先把 AIN-03/04 基础与 AIN-05 配置、能力、授权装配补成可验证闭环，再把 AIN-11 C01～C03预算接入主线 Gateway 的同一调用生命周期，随后补 AIN-06 task-level 恢复/暂停/取消/人工接管，之后才推进 AIN-07 审批消费与 Core 业务幂等。不要先做外围 UI，不要保留 Gateway 旧 usage 与新预算双账。
+
+AIN-11 下一步重点：复用 `apps/api/src/modules/ai-native/budget/` 和 `BudgetGatewayAdapter`，实现可信 task/run/step/action/priceVersion/evidence 关联适配；明确 reserve、dispatch token、settle、release、unknown、reconcile 的唯一账本边界。平台/租户/场景策略、权益、报价、授权、配置 revision、usage evidence 缺任何正式来源均拒绝，不用测试桩恒定成功替代。预算 owner scope 与 workspace consumer scope 不可混淆。
+
+验证只使用离线护栏和隔离生成：禁止读 `.env`、启服务、真实 DB/HTTP/模型/支付、安装依赖、写共享生成物、合 main、推送或生产启用。每次先红测再修复，记录真实退出码、失败与未验项；离线替身不能宣称 MySQL 并发、真实供应商或生产授权通过。完成完整调用链后再提交，并在交接记录中列出 SHA、文件、接线合同和剩余阻塞。正式验收仍按原 28 项，不能因局部测试改变完成率。
