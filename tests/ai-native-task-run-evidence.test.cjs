@@ -13,6 +13,17 @@ const fs = require('node:fs'), path = require('node:path');
 const now = new Date('2026-10-06T12:00:00Z'), lease = { taskId: 'task-a', runId: 'run-a', holderId: 'worker-a', revision: 1, fencingToken: '1', expiresAt: '2026-10-06T12:01:00Z' };
 const plan = { taskId: 'task-a', runId: 'run-a', taskRevision: 1, steps: [{ registrationRef: 'registration-a', operation: 'readonly', toolCode: 'rental.order.explain', toolVersion: '1' }],
   limits: { maxSteps: 3, maxCalls: 3, maxTotalMs: 1000, maxStepMs: 100, maxOutputBytes: 1000, maxConcurrent: 1 } };
+for (const [name, change] of [
+  ['duplicate resource', charges => { charges[1].resource = charges[0].resource; }],
+  ['missing active measurement', charges => { charges[1].resource = 'CALLS'; charges[1].gatewayInvocationId = 'invocation-a'; }],
+  ['unbound calls', charges => { charges.push({ ...charges[0], chargeId: 'charge-calls', resource: 'CALLS', gatewayInvocationId: null }); }]
+]) test(`durable recovery rejects ${name} instead of publishing a terminal result`, async () => {
+  const h = harness(); await h.reserve();
+  await h.make().capture(lease, 'step-a', new AbortController().signal, async () => ({ kind: 'succeeded', payload: { synthetic: true } }));
+  change(h.state.aiTaskExecutionCharge);
+  await assert.rejects(h.make().recoverResult(lease, 'step-a'), e => e.code === 'AI_ACCESS_DENIED');
+});
+
 function clone(value) {
   if (value instanceof Prisma.Decimal) return value.toFixed(0);
   if (value instanceof Date) return new Date(value);
@@ -168,6 +179,26 @@ test('real measured effects carry the exact lease, persist tool output and recov
   assert.deepEqual(await effects.reconcile(plan.steps[0], new AbortController().signal, lease), result);
   await assert.rejects(effects.execute(plan.steps[0], new AbortController().signal, lease));
   assert.equal(calls, 1);
+});
+
+test('registered executor cannot be replaced while the real evidence boundary awaits policy', async () => {
+  const h = harness(), scope = { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'workspace-a' };
+  await h.reserve();
+  const actionId = `ai-action-${requestFingerprint({ version: 'ai-step-registration-1', scope, taskId: 'task-a', registrationRef: plan.steps[0].registrationRef })}`;
+  h.state.aiStep[0].actionId = actionId;
+  h.state.aiTaskExecutionCharge.forEach(c => { c.actionId = actionId; });
+  let original = 0, replacement = 0;
+  const tool = { operation: 'readonly', execute: async () => { original++; return { kind: 'succeeded', payload: { synthetic: true } }; } };
+  const authorize = h.authority.authorize;
+  h.authority.authorize = async (...args) => {
+    tool.execute = async () => { replacement++; return { kind: 'succeeded', payload: { synthetic: 'replaced' } }; };
+    return authorize(...args);
+  };
+  const effects = new PrismaTaskMeasuredEffects(h.db,
+    { resolveAccess: async () => ({ scope, where: { id: 'task-a', ownerId: 'user-a' } }) }, h.make(), { resolve: async () => tool });
+  await effects.execute(plan.steps[0], new AbortController().signal, lease);
+  assert.equal(original, 1); assert.equal(replacement, 0);
+  assert.deepEqual(h.state.aiTaskResultArtifact[0].payload, { synthetic: true });
 });
 
 test('incomplete recovery returns only a persisted unknown receipt; missing evidence fails closed', async () => {

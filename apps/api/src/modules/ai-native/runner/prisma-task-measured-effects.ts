@@ -45,7 +45,10 @@ export class PrismaTaskMeasuredEffects implements AiTaskRunnerEffectPort {
     if (!inputRef) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
     const tool = await this.tools.resolve(binding.plan.toolCode, binding.plan.toolVersion);
     if (!tool || tool.operation !== binding.plan.operation || typeof tool.execute !== 'function') throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
-    return this.evidence.capture(binding.lease, binding.step.id, signal, () => tool.execute({ taskId: binding.lease.taskId,
+    // Capture the validated registered method before persistence/policy awaits.
+    // A shared registry object's later mutation must not swap the executable.
+    const execute = tool.execute.bind(tool);
+    return this.evidence.capture(binding.lease, binding.step.id, signal, () => execute({ taskId: binding.lease.taskId,
       runId: binding.lease.runId, stepId: binding.step.id, actionId: binding.step.actionId, inputRef,
       fingerprint: binding.step.requestFingerprint, lease: structuredClone(binding.lease) }, signal));
   }

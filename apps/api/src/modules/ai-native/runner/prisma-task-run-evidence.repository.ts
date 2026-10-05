@@ -247,8 +247,15 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
       || (step.resultRef !== null && step.resultRef !== row.id)) throw denied();
     const charges = await this.db.aiTaskExecutionCharge.findMany({ where: { scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId, stepId,
       actionId: row.actionId, stepFingerprint: row.stepFingerprint }, take: 5 });
-    if (charges.length < 3 || charges.length > 4 || charges.some(charge => charge.leaseOwnerId !== row.leaseOwnerId
-      || charge.fencingToken.toFixed(0) !== row.fencingToken.toFixed(0))) throw denied();
+    if (charges.length < 3 || charges.length > 4
+      || new Set(charges.map(charge => charge.resource)).size !== charges.length
+      || !['STEPS', 'ACTIVE_MS', 'OUTPUT_BYTES'].every(resource => charges.some(charge => charge.resource === resource))
+      || charges.some(charge => charge.scopeId !== access.scopeId || charge.taskId !== lease.taskId
+        || charge.runId !== lease.runId || charge.stepId !== stepId || charge.actionId !== row.actionId
+        || charge.stepFingerprint !== row.stepFingerprint || charge.leaseOwnerId !== row.leaseOwnerId
+        || charge.fencingToken.toFixed(0) !== row.fencingToken.toFixed(0)
+        || !['RESERVED', 'RECORDED', 'UNKNOWN'].includes(charge.status)
+        || (charge.resource === 'CALLS' && !charge.gatewayInvocationId))) throw denied();
     await this.held(this.db, lease, access);
     if (row.outcome === 'FAILED') {
       if (!/^[A-Z][A-Z0-9_]{0,127}$/u.test(row.errorCode ?? '')) throw unavailable();
