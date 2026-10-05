@@ -427,3 +427,11 @@ HANDOFF-ID / 原任务与CLAIM-ID：
 - 本轮自动化：交接定向113/113；预算绑定修复先22项1通过/21失败，追加变更前拒绝用例亦先红，修后相关54/54；调用关联初轮20/21、修复最终授权等待过期窗口；最终绑定/资源模型/public Gateway/dispatch组合132/132。资源模型4项包含在132项中，不重复相加。API类型通过，隔离client生成共享产物未变，Prisma validate/datamodel diff通过；真实数据库/HTTP/模型/生产未执行。
 - 独立模型审阅一次HTTP503失败，未取得审查结论，不重复派审；实际自查及离线自动化与独立Review区分。完整专项回归尚待本轮构建后执行，不用旧1939或交接1825冒充最新全量。
 - 新权限动作read_step_terminal/takeover_run与正式plan/input/result证据source仍需主线真实装配；未知动作拒绝，不把读权限映射为接管权限。调用关联的priceVersion只做绑定，不自证已批准价格或AI权益。继续AIN-03/04/05/11单账接线，正式验收0/28不变。
+
+### AIN-IMPL-004：主线调用关联、资源合同与正式订阅读取
+
+- `b1ec0421`已提交调用关联/预算配置与证据绑定，以及fork请求的任务资源模型/端口；19文件仅包含本会话认领内容，历史output及新测试日志均未纳入提交。接口答复已由用户转发路径交付，未直接跨会话发消息。
+- 该固定提交在两端产物重建后完成全量AI Native离线回归：2040/2040，fail/cancelled/skipped/todo均0，退出0。重建复用既有B14离线入口，125文件＋8工程检查全部133/133通过；两个计数不相加、不冒充整项验收。直接组合NODE_OPTIONS命令被worktree检查器拒绝，未关闭保护；改用已有受护栏的离线入口成功构建，类型检查直接node预加载护栏运行tsc。
+- 后续新增`budget/prisma-subscription-budget-reader.ts`及`createPersistedBudgetSubsystem`：实际调用SubscriptionService.readCategoryCommercialContext，在只读Serializable事务内读取正式服务期/目录/特批，返回最少feature可用性与修订，缺AI目录、未配置订阅、未发布/到期拒绝；不将PRO当作AI权益，不读套餐年费作模型价格。跨期/排期边界在异步读取后复核，受品类限制的权益在缺少正式映射时拒绝，不能扩大为全局AI授权。
+- 新组合测试直接驱动真实SubscriptionService、Reader、BudgetAuthority和预算组合工厂，底层Prisma为明确替身；新增13项连同预算绑定与既有SaaS回归56/56，退出0；API类型与diff check通过。新13项未包含在上述b1ec0421的2040项中，不能借旧全量冒充新全量。
+- 仍待主线：正式动作授权/plan/result来源、批准的模型计价和上下文上界、单一Gateway预算生命周期、可信派发与用量回执、live能力验真；正式任务权限与到期后的历史/核对权限仍需按动作装配。新reader/工厂不是AppModule生产注册，不构成商业开放或整项AIN-11验收；真实DB/供应商/浏览器未运行，独立Review无本轮成功结论。

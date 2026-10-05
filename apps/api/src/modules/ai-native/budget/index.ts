@@ -1,6 +1,7 @@
 export { BudgetService } from './budget.service';
 export { PrismaBudgetRepository } from './prisma-budget.repository';
-export { createBudgetSubsystem } from './budget.module';
+export { createBudgetSubsystem, createPersistedBudgetSubsystem } from './budget.module';
+export { PrismaSubscriptionBudgetReader } from './prisma-subscription-budget-reader';
 export { BudgetError } from './budget.ports';
 export * from './budget-dependency-adapters';
 export * from './budget-gateway-contract';
