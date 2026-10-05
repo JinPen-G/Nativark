@@ -6,6 +6,8 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { AiTaskExecutionBudgetError, type AiTaskExecutionEvidenceSource, type AiTaskExecutionSettlementRequest } from '../task-execution-budget.ports';
 import type { AiTaskExecutionScopeSource } from './prisma-task-execution-budget.repository';
 import type { AiTaskRunnerLease, AiTaskRunnerPlan, AiTaskRunnerTaskMetadata, AiTaskRunnerEffectResult } from './ai-task-runner.ports';
+import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
+import { isGatewayConfig } from '../gateway-contract-validation';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const planSchema = z.object({ taskId: id.max(36), runId: id.max(36), taskRevision: z.number().int().min(1).max(4294967294),
@@ -32,7 +34,8 @@ const conflict = () => new AiTaskExecutionBudgetError('AI_REVISION_CONFLICT');
 export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceSource {
   constructor(private readonly db: Db, private readonly scopes: AiTaskExecutionScopeSource,
     private readonly planAuthority: AiTaskPlanEvidenceAuthority, private readonly wall: () => Date = () => new Date(),
-    private readonly monotonic: () => number = () => performance.now()) {
+    private readonly monotonic: () => number = () => performance.now(),
+    private readonly financialEvidence?: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>) {
     if (typeof db?.$transaction !== 'function' || typeof db?.aiTaskRunPlan?.findUnique !== 'function'
       || typeof db?.aiTaskResultArtifact?.create !== 'function' || typeof scopes?.resolve !== 'function' || typeof planAuthority?.authorize !== 'function') throw unavailable();
   }
@@ -141,6 +144,8 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     if (charges.length < 3 || charges.length > 4 || !['STEPS', 'ACTIVE_MS', 'OUTPUT_BYTES'].every(resource => charges.some(c => c.resource === resource))
       || charges.some(c => c.status !== 'RESERVED' || c.leaseOwnerId !== lease.holderId || c.fencingToken.toFixed(0) !== lease.fencingToken)
       || new Set(charges.map(c => c.resource)).size !== charges.length) throw unavailable();
+    if (charges.some(c => c.resource === 'CALLS' || c.gatewayInvocationId)
+      && typeof this.financialEvidence?.readDispatch !== 'function') throw unavailable();
     const prior = await this.db.aiTaskResultArtifact.findUnique({ where: { scopeId_taskId_runId_stepId_fencingToken: {
       scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId, stepId, fencingToken: new Prisma.Decimal(lease.fencingToken) } } });
     if (prior) throw new AiTaskExecutionBudgetError('AI_RESULT_UNKNOWN');
@@ -206,6 +211,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     if (!step) throw unavailable();
     let dispatchToken: string | null = null;
     if (charge.gatewayInvocationId) {
+      if (typeof this.financialEvidence?.readDispatch !== 'function') throw unavailable();
       const invocation = await this.db.aiGatewayInvocation.findFirst({ where: { id: charge.gatewayInvocationId, scopeId: access.scopeId,
         taskId: input.taskId, runId: lease.runId, stepId: artifact.stepId, actionId: artifact.actionId, stepFingerprint: artifact.stepFingerprint } });
       const receipt = await this.db.aiGatewayAccountingReceipt.findFirst({ where: { scopeId: access.scopeId, taskId: input.taskId, invocationId: charge.gatewayInvocationId } });
@@ -213,6 +219,26 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
       const admission = await this.db.aiInvocationAdmission.findFirst({ where: { id: receipt.admissionId, tenantId: receipt.tenantId, workspaceId: receipt.workspaceId,
         callId: invocation.callId, actorId: invocation.actorId, requestHash: receipt.requestHash, dispatchId: receipt.dispatchToken, revokedAt: null } });
       if (!admission || !receipt.dispatchToken || !['dispatching', 'completed', 'unknown'].includes(admission.status)) throw denied();
+      // Consume the same authorized persistent accounting facts as the monetary
+      // budget. Do not create a second ledger or infer dispatch from a local flag.
+      const financial = structuredClone(await this.financialEvidence.readDispatch(receipt.reservationId));
+      if (!isGatewayConfig(invocation.configuration) || receipt.state !== 'dispatched'
+        || receipt.scopeId !== access.scopeId || receipt.taskId !== input.taskId || receipt.invocationId !== invocation.id
+        || invocation.id !== charge.gatewayInvocationId || invocation.scopeId !== access.scopeId
+        || invocation.taskId !== input.taskId || invocation.runId !== lease.runId || invocation.stepId !== artifact.stepId
+        || invocation.actionId !== artifact.actionId || invocation.stepFingerprint !== artifact.stepFingerprint
+        || admission.id !== receipt.admissionId || admission.actorId !== invocation.actorId || admission.callId !== invocation.callId
+        || admission.profileId !== invocation.configuration.configId || admission.dispatchId !== receipt.dispatchToken
+        || admission.requestHash !== receipt.requestHash || admission.tenantId !== receipt.tenantId || admission.workspaceId !== receipt.workspaceId
+        || financial.state !== 'dispatched' || financial.dispatchToken !== receipt.dispatchToken
+        || financial.reservationId !== receipt.reservationId || financial.requestId !== invocation.callId
+        || financial.callId !== invocation.callId || financial.actorId !== invocation.actorId
+        || financial.scopeKey !== `WORKSPACE:${access.scopeId}` || financial.runId !== lease.runId
+        || financial.stepId !== artifact.stepId || financial.actionId !== artifact.actionId
+        || financial.sceneCode !== invocation.sceneCode || financial.priceVersion !== invocation.priceVersion
+        || financial.configRevision !== invocation.configuration.configRevision
+        || financial.configurationHash !== invocation.configurationHash
+        || requestFingerprint(invocation.configuration) !== invocation.configurationHash) throw denied();
       dispatchToken = receipt.dispatchToken;
     } else if (charge.resource === 'CALLS') throw denied();
     const actualAmount = charge.resource === 'ACTIVE_MS' ? artifact.activeMs : charge.resource === 'OUTPUT_BYTES' ? artifact.outputBytes : 1n;

@@ -11,6 +11,7 @@ import { PrismaTaskRunEvidenceRepository, type AiTaskPlanEvidenceAuthority } fro
 import { PrismaTaskRunnerResourceSource, type AiTaskToolResourceCatalog, type AiTaskModelInvocationPreparation } from './prisma-task-runner-resource.source';
 import { PersistentTaskRunnerResourceGate } from './persistent-task-runner-resource-gate';
 import { PrismaTaskMeasuredEffects, type AiTaskRegisteredExecutor } from './prisma-task-measured-effects';
+import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
 
 export interface PersistentTaskRunnerComposition {
   db: PrismaClient;
@@ -25,6 +26,9 @@ export interface PersistentTaskRunnerComposition {
   toolCatalog: AiTaskToolResourceCatalog;
   executors: AiTaskRegisteredExecutor;
   invocations?: AiTaskModelInvocationPreparation;
+  /** Same persistent financial evidence source used by the single-ledger Gateway.
+   * Required to meter model calls; its absence never enables a local fallback. */
+  financialEvidence?: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>;
   wall?: () => Date;
   monotonic?: () => number;
   clock?: AiTaskRunnerClock;
@@ -48,8 +52,9 @@ export function composePersistentTaskRunner(input: PersistentTaskRunnerCompositi
   requires(input?.transitions, ['transition']); requires(input?.commands, ['register', 'transition']);
   requires(input?.taskOutcome, ['commit']); requires(input?.policy, ['resolve']);
   requires(input?.planAuthority, ['authorize']); requires(input?.toolCatalog, ['resolve']); requires(input?.executors, ['resolve']);
+  if (input.invocations) requires(input.financialEvidence, ['readDispatch']);
   const scopes = new PrismaTaskExecutionScopeAuthority(input.tasks, input.db);
-  const evidence = new PrismaTaskRunEvidenceRepository(input.db, scopes, input.planAuthority, input.wall, input.monotonic);
+  const evidence = new PrismaTaskRunEvidenceRepository(input.db, scopes, input.planAuthority, input.wall, input.monotonic, input.financialEvidence);
   const accounting = new PrismaTaskExecutionBudgetRepository(input.db, scopes, input.policy, evidence, input.wall);
   const source = new PrismaTaskRunnerResourceSource(input.db, scopes, evidence, input.toolCatalog, input.wall, input.invocations);
   const resources = new PersistentTaskRunnerResourceGate(accounting, source);

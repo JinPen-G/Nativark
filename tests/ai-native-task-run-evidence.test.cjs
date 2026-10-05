@@ -7,6 +7,7 @@ const { PrismaTaskExecutionBudgetRepository } = require('../apps/api/src/modules
 const { PrismaTaskRunnerResourceSource } = require('../apps/api/src/modules/ai-native/runner/prisma-task-runner-resource.source');
 const { PersistentTaskRunnerResourceGate } = require('../apps/api/src/modules/ai-native/runner/persistent-task-runner-resource-gate');
 const { PrismaTaskMeasuredEffects } = require('../apps/api/src/modules/ai-native/runner/prisma-task-measured-effects');
+const { PrismaGatewayAccountingFacts } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-accounting-facts');
 const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
 const { offlinePrismaSchema } = require('./fixtures/ai-native/prisma-offline.cjs');
 const fs = require('node:fs'), path = require('node:path');
@@ -45,12 +46,12 @@ function harness() {
     aiRun: [{ id: 'run-a', scopeId: 'scope-a', taskId: 'task-a', leaseOwnerId: 'worker-a', fencingToken: '1', revision: 1, status: 'RUNNING', leaseExpiresAt: new Date(lease.expiresAt) }],
     aiStep: [{ id: 'step-a', scopeId: 'scope-a', taskId: 'task-a', runId: 'run-a', status: 'RUNNING', resultRef: null, revision: 1,
       toolCode: 'rental.order.explain', toolVersion: '1', inputRef: 'input-a', actionId: 'action-a', requestFingerprint: 'a'.repeat(64) }],
-    aiTaskRunPlan: [], aiTaskResultArtifact: [], aiTaskExecutionBudget: [], aiGatewayInvocation: [], aiGatewayAccountingReceipt: [], aiInvocationAdmission: [], aiTaskExecutionCharge: [] };
+    aiTaskRunPlan: [], aiTaskResultArtifact: [], aiTaskExecutionBudget: [], aiGatewayInvocation: [], aiGatewayAccountingReceipt: [], aiInvocationAdmission: [], aiBudgetReservation: [], aiTaskExecutionCharge: [] };
   const control = { revoked: false, failArtifact: false, loseReply: false, tick: 10, planHash: 'b'.repeat(64) };
   const hydrate = row => row ? { ...clone(row), ...('fencingToken' in row ? { fencingToken: new Prisma.Decimal(row.fencingToken) } : {}) } : null;
   const delegates = data => Object.fromEntries(Object.keys(data).map(name => [name, {
     findFirst: async ({ where }) => hydrate(data[name].find(row => match(row, where))),
-    findUnique: async ({ where }) => hydrate(data[name].find(row => match(row, Object.values(where)[0]))),
+    findUnique: async ({ where }) => hydrate(data[name].find(row => match(row, typeof Object.values(where)[0] === 'object' ? Object.values(where)[0] : where))),
     findMany: async ({ where, take }) => data[name].filter(row => match(row, where)).slice(0, take).map(hydrate),
     upsert: async ({ where, create }) => { let row = data[name].find(row => match(row, Object.values(where)[0]));
       if (!row) { row = { reservedSteps: 0n, consumedSteps: 0n, reservedCalls: 0n, consumedCalls: 0n, reservedActiveMs: 0n, consumedActiveMs: 0n,
@@ -71,7 +72,7 @@ function harness() {
   }); tail = work.catch(() => {}); return work; };
   const scopes = { resolve: async () => { if (control.revoked) throw Error('revoked'); return { scopeId: 'scope-a', bindingKey: 'owner-user-a', taskWhere: { id: 'task-a', ownerId: 'user-a' } }; } };
   const authority = { authorize: async () => ({ authorityHash: control.planHash, policyVersion: 'policy-a', expiresAt: '2026-10-06T12:01:00Z' }) };
-  const make = () => new PrismaTaskRunEvidenceRepository(db, scopes, authority, () => now, () => control.tick);
+  const make = financialEvidence => new PrismaTaskRunEvidenceRepository(db, scopes, authority, () => now, () => control.tick, financialEvidence);
   const budget = new PrismaTaskExecutionBudgetRepository(db, scopes, { resolve: async () => ({ version: 'policy-a', fingerprint: 'c'.repeat(64), limits: { steps: 3n, calls: 3n, active_ms: 1000n, output_bytes: 1000n } }) }, make(), () => now);
   async function reserve() {
     await make().savePlan(plan, lease);
@@ -81,6 +82,62 @@ function harness() {
   }
   return { state, control, db, scopes, authority, make, budget, reserve };
 }
+
+async function modelReceipt() {
+  const h = harness(); await h.reserve();
+  const config = { configId: 'profile-a', configRevision: 1, credentialRef: 'vault-a', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'model-a', serviceMode: 'tenant_managed', tenantId: 'tenant-a', configurationScope: { kind: 'tenant', tenantId: 'tenant-a' } };
+  const association = { requestId: 'call-a', runId: 'run-a', stepId: 'step-a', actionId: 'action-a', idempotencyKey: 'call-a', priceVersion: 'price-a', scope: { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'workspace-a' }, config };
+  h.state.aiTaskExecutionCharge.push({ ...h.state.aiTaskExecutionCharge[0], chargeId: 'charge-calls', resource: 'CALLS', gatewayInvocationId: 'invocation-a' });
+  const result = await h.make({ readDispatch: async () => assert.fail('capture only checks the supplied dependency, not dispatch') }).capture(lease, 'step-a', new AbortController().signal, async () => ({ kind: 'succeeded', payload: { synthetic: true } }));
+  h.state.aiStep[0].status = 'SUCCEEDED'; h.state.aiStep[0].resultRef = result.resultRef;
+  h.state.aiGatewayInvocation.push({ id: 'invocation-a', scopeId: 'scope-a', taskId: 'task-a', actorId: 'user-a', callId: 'call-a', runId: 'run-a', stepId: 'step-a', actionId: 'action-a', stepFingerprint: 'a'.repeat(64), sceneCode: 'scene-a', priceVersion: 'price-a', configuration: config, configurationHash: requestFingerprint(config) });
+  h.state.aiGatewayAccountingReceipt.push({ id: 'receipt-a', scopeId: 'scope-a', scopeKind: 'WORKSPACE', taskId: 'task-a', invocationId: 'invocation-a', reservationId: 'reservation-a', admissionId: 'admission-a', tenantId: 'tenant-a', workspaceId: 'workspace-a', dispatchToken: 'dispatch-a', requestHash: 'b'.repeat(64), state: 'dispatched' });
+  h.state.aiInvocationAdmission.push({ id: 'admission-a', tenantId: 'tenant-a', workspaceId: 'workspace-a', actorId: 'user-a', callId: 'call-a', requestHash: 'b'.repeat(64), dispatchId: 'dispatch-a', profileId: 'profile-a', status: 'completed', revokedAt: null });
+  h.state.aiBudgetReservation.push({ id: 'reservation-a', scopeId: 'scope-a', scopeKind: 'WORKSPACE', tenantId: 'tenant-a', workspaceId: 'workspace-a', actorId: 'user-a', callId: 'call-a', requestId: 'call-a', idempotencyKey: 'call-a', runId: 'run-a', stepId: 'step-a', actionId: 'action-a', sceneCode: 'scene-a', priceVersion: 'price-a', configRevision: 1, configurationHash: requestFingerprint(config) });
+  h.facts = new PrismaGatewayAccountingFacts(h.db, {
+    resolveForReserve: async () => assert.fail('resource read must not reserve money'),
+    resolveForReservation: async () => ({ actorId: 'user-a', association, sceneCode: 'scene-a', expiresAt: new Date(lease.expiresAt) })
+  }, { resolveCurrent: async () => ({ context: { actor: { kind: 'user', userId: 'user-a' }, scope: association.scope } }) }, {
+    quantity: async () => assert.fail('task calls do not price or settle money')
+  }, () => now);
+  h.read = source => h.make(source).read({ taskId: 'task-a', lease, chargeId: 'charge-calls', evidenceRef: `${result.resultRef}:calls` }, false);
+  return h;
+}
+
+test('model task-resource evidence is unavailable without the single-ledger evidence source', async () => {
+  const h = await modelReceipt();
+  await assert.rejects(h.read(), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+});
+
+test('missing financial evidence denies a model executor before the started marker or external effect', async () => {
+  const h = harness(); await h.reserve();
+  h.state.aiTaskExecutionCharge.push({ ...h.state.aiTaskExecutionCharge[0], chargeId: 'charge-calls', resource: 'CALLS', gatewayInvocationId: 'invocation-a' });
+  let executed = 0;
+  await assert.rejects(h.make().capture(lease, 'step-a', new AbortController().signal, async () => {
+    executed++; return { kind: 'succeeded', payload: {} };
+  }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  assert.equal(executed, 0); assert.equal(h.state.aiTaskResultArtifact.length, 0);
+});
+
+test('actual task evidence consumes actual single-ledger dispatch facts without monetary writes', async () => {
+  const h = await modelReceipt(), evidence = await h.read(h.facts);
+  assert.equal(evidence.actualAmount, 1n); assert.equal(evidence.dispatchToken, 'dispatch-a');
+  assert.equal(evidence.gatewayInvocationId, 'invocation-a');
+  assert.equal(h.state.aiBudgetReservation.length, 1);
+});
+for (const [field, value] of [['actorId', 'other'], ['sceneCode', 'other'], ['priceVersion', 'other'],
+  ['runId', 'other'], ['stepId', 'other'], ['actionId', 'other'], ['configRevision', 2], ['configurationHash', 'c'.repeat(64)]]) {
+  test(`actual financial/task composition refuses altered reservation ${field}`, async () => {
+    const h = await modelReceipt(); h.state.aiBudgetReservation[0][field] = value;
+    await assert.rejects(h.read(h.facts));
+  });
+}
+test('reserved or cancelled financial receipt cannot prove a model call occurred', async () => {
+  for (const state of ['reserved', 'cancelled']) {
+    const h = await modelReceipt(); h.state.aiGatewayAccountingReceipt[0].state = state;
+    await assert.rejects(h.read(h.facts));
+  }
+});
 test('immutable persisted plan survives recreation and refuses changed limits or policy', async () => {
   const h = harness(); assert.equal((await h.make().savePlan(plan, lease)).replayed, false);
   assert.equal((await h.make().savePlan(plan, lease)).replayed, true);
