@@ -21,6 +21,7 @@ function matches(value, where) {
     if (key === "OR") return rule.some(branch => matches(value, branch));
     if (key === "is") return matches(value, rule);
     if (key === "in") return rule.includes(value);
+    if (key === "some") return Array.isArray(value) && value.some(row => matches(row, rule));
     if (key === "not") return !matches(value, rule);
     if (key === "gt") return value != null && value > rule;
     if (key === "lte") return value != null && value <= rule;
@@ -77,6 +78,22 @@ for (const status of ["QUEUED", "RUNNING", "SUCCEEDED", "PARTIALLY_SUCCEEDED", "
   const { state, repository } = setup(status);
   await assert.rejects(repository.claimRecoveryRun(command), code("AI_REVISION_CONFLICT"));
   assert.equal(state.run.revision, 4); assert.equal(state.calls.length, 2);
+});
+
+test('running crash recovery requires an original persisted plan and started step, and only fences the run', async () => {
+  const { state, repository } = setup('RUNNING');
+  state.task.runs = [{ id: command.runId, executionPlan: { taskId: command.taskId, runId: command.runId }, steps: [{ status: 'RUNNING' }] }];
+  const before = structuredClone(state.task);
+  assert.equal((await repository.claimRecoveryRun(command)).purpose, 'recovery_only');
+  assert.deepEqual(state.task, before); assert.equal(state.run.fencingToken, 9007199254740994n);
+  for (const patch of [
+    { id: 'another-run', executionPlan: { taskId: command.taskId, runId: command.runId }, steps: [{ status: 'RUNNING' }] },
+    { id: command.runId, executionPlan: null, steps: [{ status: 'RUNNING' }] },
+    { id: command.runId, executionPlan: { taskId: command.taskId, runId: command.runId }, steps: [{ status: 'PENDING' }] }
+  ]) {
+    const other = setup('RUNNING'); other.state.task.runs = [patch];
+    await assert.rejects(other.repository.claimRecoveryRun(command), code('AI_REVISION_CONFLICT'));
+  }
 });
 
 for (const status of ["WAITING_INPUT", "WAITING_CONFIRMATION", "WAITING_EXTERNAL", "CANCEL_REQUESTED"]) test(`ordinary execution claim still refuses ${status}`, async () => {

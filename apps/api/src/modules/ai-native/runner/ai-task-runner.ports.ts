@@ -114,8 +114,8 @@ export interface AiTaskRunnerPlanPort {
 
 /** Gateway/Tool adapters live outside this module. No provider SDK or URL is accepted here. */
 export interface AiTaskRunnerEffectPort {
-  execute(step: AiTaskRunnerStepPlan, signal: AbortSignal): Promise<AiTaskRunnerEffectResult>;
-  reconcile?(step: AiTaskRunnerStepPlan, signal: AbortSignal): Promise<AiTaskRunnerEffectResult>;
+  execute(step: AiTaskRunnerStepPlan, signal: AbortSignal, lease?: AiTaskRunnerLease): Promise<AiTaskRunnerEffectResult>;
+  reconcile?(step: AiTaskRunnerStepPlan, signal: AbortSignal, lease?: AiTaskRunnerLease): Promise<AiTaskRunnerEffectResult>;
   cleanup?(step: AiTaskRunnerStepPlan): Promise<void>;
 }
 

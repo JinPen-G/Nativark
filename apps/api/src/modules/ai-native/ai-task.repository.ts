@@ -132,6 +132,13 @@ export class AiTaskRepository {
     const taskState: Prisma.AiTaskWhereInput = operation === "claim_run"
       ? { status: { in: [...runnable] }, cancelRequestedAt: null }
       : { OR: [
+        // Crash before aggregate waiting-state publication: recovery may fence
+        // only the original planned run with durable started/terminal work.
+        // This grants no new execution and does not resume or mutate the task.
+        { status: 'RUNNING', cancelRequestedAt: null, runs: { some: { id: input.runId,
+          executionPlan: { is: { taskId: input.taskId, runId: input.runId } },
+          steps: { some: { status: { in: ['RUNNING', 'UNKNOWN', 'SUCCEEDED', 'FAILED'] } } }
+        } } },
         { status: { in: ["WAITING_INPUT", "WAITING_CONFIRMATION", "WAITING_EXTERNAL"] }, cancelRequestedAt: null },
         { status: "CANCEL_REQUESTED", cancelRequestedAt: { not: null } }
       ] };

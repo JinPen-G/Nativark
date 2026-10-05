@@ -152,10 +152,10 @@ export class AiTaskRunner {
           }
           completedSteps++; continue;
         }
-        const reconcile = recovery && (stepPlan.operation === "external_unknown" || (registered.replayed && registered.existingStatus === "unknown"));
-        if (cancelling && !(registered.replayed && registered.existingStatus === 'unknown')) return { status: 'cancel_requested', completedSteps, cleanupFailed };
+        const reconcile = recovery && (stepPlan.operation === "external_unknown" || (registered.replayed && ['unknown', 'running'].includes(registered.existingStatus ?? '')));
+        if (cancelling && !(recovery && registered.replayed && ['unknown', 'running'].includes(registered.existingStatus ?? ''))) return { status: 'cancel_requested', completedSteps, cleanupFailed };
         if (registered.replayed && registered.existingStatus === "unknown" && !reconcile) return await finish({ status: "unknown", completedSteps, cleanupFailed });
-        if (registered.replayed && !(reconcile && registered.existingStatus === "unknown")) return { status: "unavailable", completedSteps, cleanupFailed };
+        if (registered.replayed && !(reconcile && ['unknown', 'running'].includes(registered.existingStatus ?? ''))) return { status: "unavailable", completedSteps, cleanupFailed };
         if (reconcile && !this.deps.effects.reconcile) return { status: "unavailable", completedSteps, cleanupFailed };
         let resourceTicket: AiTaskRunnerResourceTicket | undefined;
         if (this.deps.resources) {
@@ -177,8 +177,8 @@ export class AiTaskRunner {
         try {
           const remaining = Math.max(1, plan.limits.maxTotalMs - (this.clock.now() - startedAt));
           const raw = await this.callBounded(signal => reconcile
-            ? this.deps.effects.reconcile!(structuredClone(stepPlan), signal)
-            : this.deps.effects.execute(structuredClone(stepPlan), signal), Math.min(plan.limits.maxStepMs, remaining), reconcile ? "reconcile" : "execute");
+            ? this.deps.effects.reconcile!(structuredClone(stepPlan), signal, structuredClone(lease))
+            : this.deps.effects.execute(structuredClone(stepPlan), signal, structuredClone(lease)), Math.min(plan.limits.maxStepMs, remaining), reconcile ? "reconcile" : "execute");
           result = boundedResult(structuredClone(raw), plan.limits.maxOutputBytes - outputBytes);
           outputBytes += result.outputBytes;
         } catch (error) {

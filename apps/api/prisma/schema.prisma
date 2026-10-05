@@ -649,6 +649,46 @@ model AiTaskExecutionCharge {
 }
 
 /// Durable policy row locked by budget reservation transactions.
+/// Immutable server-authorized execution plan. No automatic plans for old runs.
+model AiTaskRunPlan {
+  scopeId String @db.VarChar(36)
+  taskId String @db.VarChar(36)
+  runId String @db.VarChar(36)
+  planHash String @db.Char(64)
+  authorityHash String @db.Char(64)
+  policyVersion String @db.VarChar(64)
+  payload Json
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  run AiRun @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
+  @@id([scopeId, taskId, runId])
+  @@map("ai_task_run_plans")
+}
+
+/// Immutable result artifact and measured active segment; not provider usage or money.
+model AiTaskResultArtifact {
+  scopeId String @db.VarChar(36)
+  taskId String @db.VarChar(36)
+  id String @db.VarChar(36)
+  runId String @db.VarChar(36)
+  stepId String @db.VarChar(36)
+  actionId String @db.VarChar(191)
+  stepFingerprint String @db.Char(64)
+  leaseOwnerId String @db.VarChar(191)
+  fencingToken Decimal @db.Decimal(20, 0)
+  outcome AiStepStatus
+  errorCode String? @db.VarChar(128)
+  payload Json
+  contentHash String @db.Char(64)
+  outputBytes BigInt @db.UnsignedBigInt
+  activeMs BigInt @db.UnsignedBigInt
+  completeMeasurement Boolean @default(false)
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  step AiStep @relation(fields: [scopeId, taskId, stepId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
+  @@id([scopeId, taskId, id])
+  @@unique([scopeId, taskId, runId, stepId, fencingToken], map: "ai_result_artifact_step_generation_key")
+  @@map("ai_task_result_artifacts")
+}
+
 model AiBudgetPolicy {
   id              String   @id @default(uuid()) @db.VarChar(36)
   scopeId         String   @db.VarChar(36)
@@ -5120,6 +5160,7 @@ model AiRun {
   steps             AiStep[]
   gatewayInvocations AiGatewayInvocation[]
   executionCharges   AiTaskExecutionCharge[]
+  executionPlan      AiTaskRunPlan?
 
   @@unique([scopeId, taskId, id], map: "ai_runs_scope_task_id")
   @@unique([scopeId, taskId, sequence], map: "ai_runs_sequence")
@@ -5151,6 +5192,7 @@ model AiStep {
   proposalActions     AiProposalAction[]
   gatewayInvocations  AiGatewayInvocation[]
   executionCharges    AiTaskExecutionCharge[]
+  resultArtifacts     AiTaskResultArtifact[]
 
   @@unique([scopeId, taskId, id], map: "ai_steps_scope_task_id")
   @@unique([scopeId, taskId, actionId], map: "ai_steps_action")

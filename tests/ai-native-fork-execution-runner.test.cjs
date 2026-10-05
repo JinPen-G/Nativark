@@ -73,6 +73,24 @@ test('persisted unknown replay reaches reconciliation without starting or execut
   assert.equal(h.state.effects, 0); assert.equal(h.state.starts, 0);
 });
 
+test('running crash replay reconciles with the exact current lease, never re-dispatches', async () => {
+  const h = setup({ operation: 'readonly', replayed: 'running', recovery: true });
+  h.deps.effects.reconcile = async (_plan, signal, held) => {
+    assert.equal(signal.aborted, false);
+    assert.equal(held.holderId, input.holderId); assert.equal(held.runId, input.runId);
+    assert.equal(held.revision, h.state.runRevision); assert.equal(held.fencingToken, h.state.fence);
+    h.state.reconciles++; return { kind: 'succeeded', resultRef: 'fact-1', outputBytes: 3 };
+  };
+  assert.equal((await h.run()).status, 'succeeded');
+  assert.equal(h.state.reconciles, 1); assert.equal(h.state.effects, 0); assert.equal(h.state.starts, 0);
+});
+
+test('persistent composition rejects missing current-authority, plan or effect dependencies at assembly', () => {
+  const { composePersistentTaskRunner } = require('../apps/api/src/modules/ai-native/runner/persistent-task-runner.composition');
+  assert.throws(() => composePersistentTaskRunner({}), /AI_RESOURCE_UNAVAILABLE/);
+  assert.throws(() => composePersistentTaskRunner({ db: { $transaction() {} }, tasks: {} }), /AI_RESOURCE_UNAVAILABLE/);
+});
+
 test('reconcile failure keeps unknown and commits the task waiting outcome', async () => {
   const h = setup({ operation: 'external_unknown', replayed: 'unknown', recovery: true, throwReconcile: true });
   assert.equal((await h.run()).status, 'unknown'); assert.equal(h.state.taskCommits[0].status, 'unknown'); assert.equal(h.state.effects, 0);

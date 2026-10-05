@@ -1,0 +1,199 @@
+'use strict';
+const test = require('node:test'), assert = require('node:assert/strict');
+require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
+const { Prisma } = require('../apps/api/node_modules/@prisma/client');
+const { PrismaTaskRunEvidenceRepository } = require('../apps/api/src/modules/ai-native/runner/prisma-task-run-evidence.repository');
+const { PrismaTaskExecutionBudgetRepository } = require('../apps/api/src/modules/ai-native/runner/prisma-task-execution-budget.repository');
+const { PrismaTaskRunnerResourceSource } = require('../apps/api/src/modules/ai-native/runner/prisma-task-runner-resource.source');
+const { PersistentTaskRunnerResourceGate } = require('../apps/api/src/modules/ai-native/runner/persistent-task-runner-resource-gate');
+const { PrismaTaskMeasuredEffects } = require('../apps/api/src/modules/ai-native/runner/prisma-task-measured-effects');
+const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+const { offlinePrismaSchema } = require('./fixtures/ai-native/prisma-offline.cjs');
+const fs = require('node:fs'), path = require('node:path');
+const now = new Date('2026-10-06T12:00:00Z'), lease = { taskId: 'task-a', runId: 'run-a', holderId: 'worker-a', revision: 1, fencingToken: '1', expiresAt: '2026-10-06T12:01:00Z' };
+const plan = { taskId: 'task-a', runId: 'run-a', taskRevision: 1, steps: [{ registrationRef: 'registration-a', operation: 'readonly', toolCode: 'rental.order.explain', toolVersion: '1' }],
+  limits: { maxSteps: 3, maxCalls: 3, maxTotalMs: 1000, maxStepMs: 100, maxOutputBytes: 1000, maxConcurrent: 1 } };
+function clone(value) {
+  if (value instanceof Prisma.Decimal) return value.toFixed(0);
+  if (value instanceof Date) return new Date(value);
+  if (Array.isArray(value)) return value.map(clone);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, clone(v)]));
+  return value;
+}
+function match(row, where) {
+  return Object.entries(where).every(([k, v]) => {
+    if (k === 'AND') return v.every(w => match(row, w));
+    if (k === 'fencingToken') return String(row[k]) === String(v);
+    if (v && typeof v === 'object' && 'in' in v) return v.in.includes(row[k]);
+    if (v && typeof v === 'object' && 'gt' in v) return row[k] > v.gt;
+    return row[k] === v;
+  });
+}
+function harness() {
+  const state = { aiTask: [{ id: 'task-a', scopeId: 'scope-a', ownerId: 'user-a', revision: 1, cancelRequestedAt: null }],
+    aiRun: [{ id: 'run-a', scopeId: 'scope-a', taskId: 'task-a', leaseOwnerId: 'worker-a', fencingToken: '1', revision: 1, status: 'RUNNING', leaseExpiresAt: new Date(lease.expiresAt) }],
+    aiStep: [{ id: 'step-a', scopeId: 'scope-a', taskId: 'task-a', runId: 'run-a', status: 'RUNNING', resultRef: null, revision: 1,
+      toolCode: 'rental.order.explain', toolVersion: '1', inputRef: 'input-a', actionId: 'action-a', requestFingerprint: 'a'.repeat(64) }],
+    aiTaskRunPlan: [], aiTaskResultArtifact: [], aiTaskExecutionBudget: [], aiGatewayInvocation: [], aiGatewayAccountingReceipt: [], aiInvocationAdmission: [], aiTaskExecutionCharge: [] };
+  const control = { revoked: false, failArtifact: false, loseReply: false, tick: 10, planHash: 'b'.repeat(64) };
+  const hydrate = row => row ? { ...clone(row), ...('fencingToken' in row ? { fencingToken: new Prisma.Decimal(row.fencingToken) } : {}) } : null;
+  const delegates = data => Object.fromEntries(Object.keys(data).map(name => [name, {
+    findFirst: async ({ where }) => hydrate(data[name].find(row => match(row, where))),
+    findUnique: async ({ where }) => hydrate(data[name].find(row => match(row, Object.values(where)[0]))),
+    findMany: async ({ where, take }) => data[name].filter(row => match(row, where)).slice(0, take).map(hydrate),
+    upsert: async ({ where, create }) => { let row = data[name].find(row => match(row, Object.values(where)[0]));
+      if (!row) { row = { reservedSteps: 0n, consumedSteps: 0n, reservedCalls: 0n, consumedCalls: 0n, reservedActiveMs: 0n, consumedActiveMs: 0n,
+        reservedOutputBytes: 0n, consumedOutputBytes: 0n, revision: 1, ...clone(create) }; data[name].push(row); } return hydrate(row); },
+    create: async ({ data: value }) => {
+      if (name === 'aiTaskResultArtifact' && control.failArtifact) throw Error('write failed');
+      if (name === 'aiTaskResultArtifact' && data[name].some(row => ['scopeId', 'taskId', 'runId', 'stepId', 'fencingToken'].every(k => String(row[k]) === String(value[k])))) throw Error('unique generation');
+      if (name === 'aiTaskRunPlan' && data[name].length) throw Error('unique plan');
+      const stored = { revision: 1, ...clone(value) }; data[name].push(stored); return hydrate(stored);
+    },
+    updateMany: async ({ where, data: changes }) => { const row = data[name].find(row => match(row, where)); if (!row) return { count: 0 };
+      for (const [k, v] of Object.entries(changes)) { if (v && typeof v === 'object' && 'increment' in v) row[k] += v.increment;
+        else if (v && typeof v === 'object' && 'decrement' in v) row[k] -= v.decrement; else row[k] = clone(v); } return { count: 1 }; }
+  }]));
+  const db = delegates(state); let tail = Promise.resolve();
+  db.$transaction = cb => { const work = tail.then(async () => { const draft = clone(state), result = await cb({ ...delegates(draft), $queryRaw: async () => [] });
+    Object.assign(state, draft); if (control.loseReply) { control.loseReply = false; throw Error('lost commit reply'); } return result;
+  }); tail = work.catch(() => {}); return work; };
+  const scopes = { resolve: async () => { if (control.revoked) throw Error('revoked'); return { scopeId: 'scope-a', bindingKey: 'owner-user-a', taskWhere: { id: 'task-a', ownerId: 'user-a' } }; } };
+  const authority = { authorize: async () => ({ authorityHash: control.planHash, policyVersion: 'policy-a', expiresAt: '2026-10-06T12:01:00Z' }) };
+  const make = () => new PrismaTaskRunEvidenceRepository(db, scopes, authority, () => now, () => control.tick);
+  const budget = new PrismaTaskExecutionBudgetRepository(db, scopes, { resolve: async () => ({ version: 'policy-a', fingerprint: 'c'.repeat(64), limits: { steps: 3n, calls: 3n, active_ms: 1000n, output_bytes: 1000n } }) }, make(), () => now);
+  async function reserve() {
+    await make().savePlan(plan, lease);
+    await budget.initialize('task-a', lease);
+    for (const resource of ['steps', 'active_ms', 'output_bytes']) await budget.reserve({ taskId: 'task-a', lease, chargeId: `charge-${resource}`, resource,
+      amount: resource === 'steps' ? 1n : 100n, target: { kind: 'step', stepId: 'step-a', actionId: 'action-a', stepFingerprint: 'a'.repeat(64) } });
+  }
+  return { state, control, db, scopes, authority, make, budget, reserve };
+}
+test('immutable persisted plan survives recreation and refuses changed limits or policy', async () => {
+  const h = harness(); assert.equal((await h.make().savePlan(plan, lease)).replayed, false);
+  assert.equal((await h.make().savePlan(plan, lease)).replayed, true);
+  const loaded = await h.make().resolve({ taskId: 'task-a', status: 'running', revision: 2, cancelRequestedAt: null }, lease, true);
+  assert.equal(loaded.taskRevision, 2); assert.deepEqual(loaded.steps, plan.steps);
+  await assert.rejects(h.make().savePlan({ ...plan, limits: { ...plan.limits, maxStepMs: 99 } }, lease));
+  h.control.planHash = 'd'.repeat(64); await assert.rejects(h.make().resolve({ taskId: 'task-a', revision: 2 }, lease, true));
+});
+test('actual captured artifact meters UTF8 bytes and server time through the real resource repository', async () => {
+  const h = harness(); await h.reserve(); const payload = { answer: '合成事实' };
+  const result = await h.make().capture(lease, 'step-a', new AbortController().signal, async () => { h.control.tick = 22; return { kind: 'succeeded', payload }; });
+  assert.equal(result.outputBytes, Buffer.byteLength(JSON.stringify(payload))); h.state.aiStep[0].status = 'SUCCEEDED'; h.state.aiStep[0].resultRef = result.resultRef;
+  for (const resource of ['steps', 'active_ms', 'output_bytes']) await h.budget.record({ taskId: 'task-a', lease, chargeId: `charge-${resource}`, evidenceRef: `${result.resultRef}:${resource}` });
+  const snapshot = await h.budget.load('task-a', lease);
+  assert.equal(snapshot.consumed.steps, 1n); assert.equal(snapshot.consumed.active_ms, 12n); assert.equal(snapshot.consumed.output_bytes, BigInt(result.outputBytes));
+  assert.equal(h.state.aiTaskResultArtifact.length, 1);
+});
+test('capture rejects duplicate generation before a second effect, including concurrent calls', async () => {
+  const h = harness(); await h.reserve(); let effects = 0, release;
+  const wait = new Promise(resolve => { release = resolve; });
+  const execute = async () => { effects++; await wait; return { kind: 'succeeded', payload: { synthetic: true } }; };
+  const first = h.make().capture(lease, 'step-a', new AbortController().signal, execute);
+  const second = h.make().capture(lease, 'step-a', new AbortController().signal, execute);
+  // Flush awaited dependency reads without a real sleep.
+  for (let i = 0; i < 30; i++) await Promise.resolve();
+  release(); await Promise.allSettled([first, second]); assert.equal(effects, 1);
+});
+test('unknown artifact cannot settle; tampering, cross-step reference and missing durable result are refused', async () => {
+  for (const mode of ['unknown', 'tampered', 'other-step', 'not-linked']) {
+    const h = harness(); await h.reserve(); const result = await h.make().capture(lease, 'step-a', new AbortController().signal, async () => ({ kind: mode === 'unknown' ? 'unknown' : 'succeeded', payload: { synthetic: true } }));
+    h.state.aiStep[0].resultRef = result.resultRef; h.state.aiStep[0].status = mode === 'unknown' ? 'UNKNOWN' : 'SUCCEEDED';
+    if (mode === 'tampered') h.state.aiTaskResultArtifact[0].payload = { secret: 'different' };
+    if (mode === 'other-step') h.state.aiTaskResultArtifact[0].stepId = 'step-b';
+    if (mode === 'not-linked') h.state.aiStep[0].resultRef = null;
+    await assert.rejects(h.budget.reconcile({ taskId: 'task-a', lease, chargeId: 'charge-steps', evidenceRef: `${result.resultRef}:steps` }));
+    assert.equal((await h.budget.load('task-a', lease)).reserved.steps, 1n);
+  }
+});
+test('revocation and old fencing after the effect cannot persist a late artifact', async () => {
+  for (const mode of ['revoke', 'fence']) {
+    const h = harness(); await h.reserve(); await assert.rejects(h.make().capture(lease, 'step-a', new AbortController().signal, async () => {
+      if (mode === 'revoke') h.control.revoked = true; else h.state.aiRun[0].fencingToken = '2'; return { kind: 'succeeded', payload: { synthetic: true } };
+    })); assert.equal(h.state.aiTaskResultArtifact.filter(a => a.completeMeasurement).length, 0);
+  }
+});
+test('missing policy, no reservations and preabort cannot invoke a tool', async () => {
+  const h = harness(); assert.throws(() => new PrismaTaskRunEvidenceRepository(h.db, h.scopes, {}));
+  let effects = 0; await assert.rejects(h.make().capture(lease, 'step-a', new AbortController().signal, async () => { effects++; return { kind: 'succeeded', payload: {} }; }));
+  await h.reserve(); const controller = new AbortController(); controller.abort();
+  await assert.rejects(h.make().capture(lease, 'step-a', controller.signal, async () => { effects++; return { kind: 'succeeded', payload: {} }; })); assert.equal(effects, 0);
+});
+
+test('actual persisted plan/resource source/capture/settlement chain has no fabricated charge or evidence refs', async () => {
+  const h = harness(); await h.make().savePlan(plan, lease); h.state.aiTask[0].status = 'RUNNING'; h.state.aiStep[0].status = 'PENDING';
+  const source = new PrismaTaskRunnerResourceSource(h.db, h.scopes, h.make(), { resolve: async () => ({ modelCall: false }) }, () => now);
+  const gate = new PersistentTaskRunnerResourceGate(h.budget, source);
+  await gate.open(lease, false);
+  const ref = { plan: plan.steps[0], registered: { stepId: 'step-a', runId: 'run-a', sequence: 1, stepRevision: 1, taskRevision: 1, replayed: false, existingStatus: 'pending' } };
+  const ticket = await gate.reserve(ref, lease); assert.equal(ticket.chargeIds.length, 3);
+  h.state.aiStep[0].status = 'RUNNING';
+  const result = await h.make().capture(lease, 'step-a', new AbortController().signal, async () => { h.control.tick = 20; return { kind: 'succeeded', payload: { synthetic: true } }; });
+  h.state.aiStep[0].status = 'SUCCEEDED'; h.state.aiStep[0].resultRef = result.resultRef;
+  await gate.record(ticket, ref, lease, false);
+  assert.equal((await h.budget.load('task-a', lease)).consumed.active_ms, 10n);
+  assert.equal(h.state.aiTaskExecutionCharge.every(c => c.status === 'RECORDED'), true);
+});
+test('lost start-marker commit reply leaves incomplete evidence without calling or retrying the tool', async () => {
+  const h = harness(); await h.reserve(); h.control.loseReply = true; let calls = 0;
+  const execute = async () => { calls++; return { kind: 'succeeded', payload: {} }; };
+  await assert.rejects(h.make().capture(lease, 'step-a', new AbortController().signal, execute));
+  await assert.rejects(h.make().capture(lease, 'step-a', new AbortController().signal, execute));
+  assert.equal(calls, 0); assert.equal(h.state.aiTaskResultArtifact.length, 1);
+  assert.equal((await h.make().recoverResult(lease, 'step-a')).kind, 'unknown');
+});
+test('recovery reads an artifact committed before the step result and does not repeat the effect', async () => {
+  const h = harness(); await h.reserve(); let calls = 0;
+  const result = await h.make().capture(lease, 'step-a', new AbortController().signal, async () => { calls++; return { kind: 'succeeded', payload: { synthetic: true } }; });
+  h.state.aiStep[0].status = 'UNKNOWN'; const recovered = await h.make().recoverResult(lease, 'step-a');
+  assert.equal(recovered.resultRef, result.resultRef); assert.equal(recovered.kind, 'succeeded'); assert.equal(calls, 1);
+});
+
+test('real measured effects carry the exact lease, persist tool output and recover without calling the executor', async () => {
+  const h = harness(), scope = { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'workspace-a' };
+  await h.reserve();
+  const actionId = `ai-action-${requestFingerprint({ version: 'ai-step-registration-1', scope, taskId: 'task-a', registrationRef: plan.steps[0].registrationRef })}`;
+  h.state.aiStep[0].actionId = actionId;
+  h.state.aiTaskExecutionCharge.forEach(c => { c.actionId = actionId; });
+  let calls = 0;
+  const tasks = { resolveAccess: async () => ({ scope, where: { id: 'task-a', ownerId: 'user-a' } }) };
+  const effects = new PrismaTaskMeasuredEffects(h.db, tasks, h.make(), { resolve: async () => ({ operation: 'readonly', execute: async input => {
+    calls++; assert.deepEqual(input.lease, lease); assert.equal(input.inputRef, 'input-a');
+    h.control.tick = 25; return { kind: 'succeeded', payload: { synthetic: true } };
+  } }) });
+  await assert.rejects(effects.execute(plan.steps[0], new AbortController().signal));
+  const result = await effects.execute(plan.steps[0], new AbortController().signal, lease);
+  assert.deepEqual(await effects.reconcile(plan.steps[0], new AbortController().signal, lease), result);
+  await assert.rejects(effects.execute(plan.steps[0], new AbortController().signal, lease));
+  assert.equal(calls, 1);
+});
+
+test('incomplete recovery returns only a persisted unknown receipt; missing evidence fails closed', async () => {
+  const h = harness(); await h.reserve();
+  await assert.rejects(h.make().recoverResult(lease, 'step-a'));
+  await assert.rejects(h.make().capture(lease, 'step-a', new AbortController().signal, async () => { throw Error('crash'); }));
+  const result = await h.make().recoverResult(lease, 'step-a');
+  assert.equal(result.kind, 'unknown'); assert.equal(result.resultRef, h.state.aiTaskResultArtifact[0].id);
+  assert.equal(h.state.aiTaskExecutionCharge.every(c => c.status === 'RESERVED'), true);
+});
+
+test('policy changes during tool execution cannot produce a completed artifact or settle resources', async () => {
+  const h = harness(); await h.make().savePlan(plan, lease); await h.reserve();
+  await assert.rejects(h.make().capture(lease, 'step-a', new AbortController().signal, async () => {
+    h.control.planHash = 'e'.repeat(64); return { kind: 'succeeded', payload: { synthetic: true } };
+  }));
+  assert.equal(h.state.aiTaskResultArtifact.some(row => row.completeMeasurement), false);
+  assert.equal(h.state.aiTaskExecutionCharge.every(row => row.status === 'RESERVED'), true);
+});
+test('appended plan/result schema validates offline and has scoped compound foreign keys', () => {
+  const schema = fs.readFileSync(path.join(__dirname, '../apps/api/prisma/schema.prisma'), 'utf8');
+  const before = require('node:child_process').execFileSync('git', ['show', '77d05769:apps/api/prisma/schema.prisma'], { encoding: 'utf8' });
+  const result = offlinePrismaSchema(schema, before); assert.equal(result.violations, '');
+  assert.match(result.diff, /CREATE TABLE `ai_task_run_plans`/); assert.match(result.diff, /CREATE TABLE `ai_task_result_artifacts`/);
+  assert.doesNotMatch(result.diff, /DROP TABLE/);
+  const models = Prisma.dmmf.datamodel.models;
+  assert.deepEqual(models.find(m => m.name === 'AiTaskRunPlan').primaryKey.fields, ['scopeId', 'taskId', 'runId']);
+  assert.deepEqual(models.find(m => m.name === 'AiTaskResultArtifact').fields.find(f => f.name === 'step').relationFromFields, ['scopeId', 'taskId', 'stepId']);
+});
