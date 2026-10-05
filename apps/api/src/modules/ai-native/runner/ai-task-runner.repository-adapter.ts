@@ -2,7 +2,7 @@ import type { AiTaskRunnerDependencies, AiTaskRunnerLease, AiTaskRunnerPlanPort,
 import type { AiTaskRepository } from "../ai-task.repository";
 import type { AiStepRegistrationCommand, AiStepRegistrationRepository } from "../ai-step-registration.repository";
 import type { AiStepTransitionCommand, AiStepTransitionRepository } from "../ai-step-transition.repository";
-import { AI_TASK_STATUSES_DRAFT, type AiTaskStatusDraft } from "@rental-os/shared";
+import { AI_TASK_STATUSES_DRAFT, AI_TASK_DRAFT_VERSION, type AiTaskStatusDraft, type AiTaskEventDraft, type AiStepStatusDraft } from "@rental-os/shared";
 
 /**
  * The only runner-to-persistence wiring point. The command factory belongs to the
@@ -22,7 +22,14 @@ export interface AiTaskRunnerRepositoryAdapters {
   commands: AiTaskRunnerRepositoryCommandFactory;
 }
 
-function committed(value: { runRevision: number; event: { taskRevision: number } }, previous: AiTaskRunnerLease): AiTaskRunnerStepCommit {
+function committed(value: { runRevision: number; event: AiTaskEventDraft }, previous: AiTaskRunnerLease,
+  ref: AiTaskRunnerStepRef, expectedStatus?: AiStepStatusDraft): AiTaskRunnerStepCommit {
+  const event = value?.event;
+  if (!event || event.contractVersion !== AI_TASK_DRAFT_VERSION || event.type !== 'step.changed'
+    || event.taskId !== previous.taskId || event.data.runId !== previous.runId || ref.registered.runId !== previous.runId
+    || event.data.stepId !== ref.registered.stepId || event.taskRevision !== ref.registered.taskRevision + 1
+    || event.data.stepRevision !== ref.registered.stepRevision + 1 || value.runRevision !== previous.revision + 1
+    || (expectedStatus && event.data.status !== expectedStatus)) throw new Error('AI_STORAGE_UNAVAILABLE');
   return { lease: { ...previous, revision: value.runRevision }, taskRevision: value.event.taskRevision };
 }
 
@@ -32,6 +39,15 @@ function committed(value: { runRevision: number; event: { taskRevision: number }
  */
 export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerRepositoryAdapters): Pick<AiTaskRunnerDependencies, "leases" | "steps"> {
   const commands = adapters.commands;
+  const transition = async (kind: Parameters<AiTaskRunnerRepositoryCommandFactory['transition']>[0],
+    ref: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, resultRef: string | null, errorCode?: string,
+    pause?: 'input' | 'confirmation' | 'external') => {
+    ref = structuredClone(ref); lease = structuredClone(lease);
+    const command = structuredClone(commands.transition(kind, structuredClone(ref), structuredClone(lease), resultRef, errorCode, pause));
+    const result = await adapters.transitions.transition(command);
+    const status = kind === 'start' ? 'running' : kind === 'succeed' ? 'succeeded' : kind === 'fail' ? 'failed' : kind === 'unknown' ? 'unknown' : undefined;
+    return committed(result, lease, ref, status);
+  };
   const steps: AiTaskRunnerStepPort = {
     async register(plan, lease) {
       const command = structuredClone(commands.register(structuredClone(plan), structuredClone(lease)));
@@ -45,19 +61,19 @@ export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerReposito
         existingStatus: result.replayed ? replay?.status ?? null : "pending", ...(replay ? { resultRef: replay.resultRef } : {}) };
     },
     async start(step, lease) {
-      return committed(await adapters.transitions.transition(commands.transition("start", step, lease, null)), lease);
+      return transition('start', step, lease, null);
     },
     async succeed(step, lease, resultRef) {
-      return committed(await adapters.transitions.transition(commands.transition("succeed", step, lease, resultRef)), lease);
+      return transition('succeed', step, lease, resultRef);
     },
     async fail(step, lease, errorCode, resultRef) {
-      return committed(await adapters.transitions.transition(commands.transition("fail", step, lease, resultRef, errorCode)), lease);
+      return transition('fail', step, lease, resultRef, errorCode);
     },
     async pause(step, lease, pause, resultRef) {
-      return committed(await adapters.transitions.transition(commands.transition("pause", step, lease, resultRef, undefined, pause)), lease);
+      return transition('pause', step, lease, resultRef, undefined, pause);
     },
     async unknown(step, lease, resultRef) {
-      return committed(await adapters.transitions.transition(commands.transition("unknown", step, lease, resultRef)), lease);
+      return transition('unknown', step, lease, resultRef);
     }
   };
   return {
