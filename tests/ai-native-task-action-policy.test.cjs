@@ -1,7 +1,8 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
-const { PrismaTaskActionPolicySource } = require('../apps/api/src/modules/ai-native/prisma-task-action-policy.source');
+const { PrismaTaskActionPolicySource, composePrismaTaskCurrentActionAuthority } = require('../apps/api/src/modules/ai-native/prisma-task-action-policy.source');
+const { AiTaskCurrentActionAuthority } = require('../apps/api/src/modules/ai-native/task-current-action.authority');
 
 const now = new Date('2026-10-06T10:00:00.000Z');
 const context = { contractVersion: 'ain-c03-draft-2', requestId: 'request-a', authorizedAt: now.toISOString(), audience: 'operator',
@@ -49,4 +50,16 @@ test('unknown operation is rejected before storage access', async () => {
   const h = setup();
   await assert.rejects(h.source.resolve('task-a', 'invented_action', context), error => error.code === 'AI_ACCESS_DENIED');
   assert.equal(h.calls.length, 0);
+});
+
+test('composition helper wires the persisted policy source without registering a provider', () => {
+  const h = setup();
+  const authority = composePrismaTaskCurrentActionAuthority({
+    auth: { resolveAccessContext: async () => { throw new Error('not invoked'); } },
+    credentials: { current: async () => ({ authorization: 'synthetic', requestId: 'request-a', audience: 'operator' }) },
+    db: h.db,
+    scopes: { resolveCurrent: async () => ({ context, scope: { id: 'scope-a', kind: 'WORKSPACE', tenantId: 'tenant-a', workspaceId: 'workspace-a' } }) },
+    clock: () => now
+  });
+  assert.ok(authority instanceof AiTaskCurrentActionAuthority);
 });
