@@ -38,7 +38,7 @@ test('unbound configuration is rejected before any budget mutation', async () =>
   assert.equal(writes, 0);
 });
 function evidence(extra = {}) {
-  return { reservationId: 'budget-1', requestId: 'request-1', runId: 'run-1', stepId: 'step-1', actionId: 'action-1', callId: 'call-1', actorId: 'actor-1', scopeKey: 'WORKSPACE:scope-1', configRevision: 3, configurationHash: requestFingerprint(config), priceVersion: 'price-1', dispatchToken: 'dispatch-1', ...extra };
+  return { reservationId: 'budget-1', requestId: 'request-1', runId: 'run-1', stepId: 'step-1', actionId: 'action-1', callId: 'call-1', actorId: 'actor-1', scopeKey: 'WORKSPACE:scope-1', sceneCode: 'rental.order.explain', configRevision: 3, configurationHash: requestFingerprint(config), priceVersion: 'price-1', dispatchToken: 'dispatch-1', ...extra };
 }
 const usage = extra => evidence({ quantity: { unit: 'tokens', value: 4 }, inputTokens: 1, outputTokens: 3, evidenceHash: 'a'.repeat(64), ...extra });
 for (const [name, changes] of Object.entries({ missing_token: { dispatchToken: '' }, different_token: { dispatchToken: 'dispatch-2' }, different_configuration: { configurationHash: 'b'.repeat(64) }, missing_configuration: { configurationHash: undefined } })) {
@@ -49,6 +49,10 @@ for (const [name, changes] of Object.entries({ missing_token: { dispatchToken: '
 }
 test('dispatch evidence rejects unknown enum instead of permitting settlement', async () => {
   const adapter = new PersistedBudgetEvidenceAdapter({ readDispatch: async () => evidence({ state: 'complete-ish' }), readUsage: async () => usage() });
+  await assert.rejects(adapter.dispatch(record()));
+});
+test('dispatch evidence rejects a different scene on the same reservation binding', async () => {
+  const adapter = new PersistedBudgetEvidenceAdapter({ readDispatch: async () => evidence({ state: 'dispatched', sceneCode: 'rental.order.quote' }), readUsage: async () => usage() });
   await assert.rejects(adapter.dispatch(record()));
 });
 test('usage evidence is rechecked against the dispatch owner after asynchronous read', async () => {

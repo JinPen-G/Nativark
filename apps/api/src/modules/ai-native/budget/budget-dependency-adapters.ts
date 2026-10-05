@@ -63,7 +63,7 @@ export class ServerBudgetAuthorityAdapter implements BudgetAuthority {
 
 export interface BudgetEvidenceBinding {
   reservationId: string; requestId: string; runId: string; stepId: string; actionId: string; callId: string;
-  actorId: string; scopeKey: string; configRevision: number; configurationHash: string; priceVersion: string;
+  actorId: string; scopeKey: string; sceneCode: string; configRevision: number; configurationHash: string; priceVersion: string;
 }
 export interface PersistedBudgetEvidenceSource {
   readDispatch(reservationId: string): Promise<BudgetEvidenceBinding & { state: 'not_dispatched' | 'dispatched' | 'unknown'; dispatchToken: string | null }>;
@@ -71,7 +71,7 @@ export interface PersistedBudgetEvidenceSource {
 }
 function verify(record: Readonly<BudgetRecord>, row: BudgetEvidenceBinding) {
   if (!row || row.reservationId !== record.id || row.callId !== record.callId || row.actorId !== record.actorId
-    || row.scopeKey !== `${record.scopeKind}:${record.scopeId}` || row.requestId !== record.association.requestId
+    || row.scopeKey !== `${record.scopeKind}:${record.scopeId}` || row.sceneCode !== record.sceneCode || row.requestId !== record.association.requestId
     || row.runId !== record.association.runId || row.stepId !== record.association.stepId || row.actionId !== record.association.actionId
     || row.configRevision !== record.association.config.configRevision || row.priceVersion !== record.association.priceVersion
     || row.configurationHash !== requestFingerprint(record.association.config)) throw new BudgetError('FORBIDDEN');

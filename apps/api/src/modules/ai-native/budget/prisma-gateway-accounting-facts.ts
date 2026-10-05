@@ -160,7 +160,7 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
   private evidenceBinding(rows: Awaited<ReturnType<PrismaGatewayAccountingFacts['rows']>>): BudgetEvidenceBinding {
     const { receipt, invocation, reservation } = rows;
     return { reservationId: receipt.reservationId, requestId: invocation.callId, runId: invocation.runId, stepId: invocation.stepId, actionId: invocation.actionId,
-      callId: invocation.callId, actorId: invocation.actorId, scopeKey: `${reservation.scopeKind}:${reservation.scopeId}`, configRevision: reservation.configRevision,
+      callId: invocation.callId, actorId: invocation.actorId, scopeKey: `${reservation.scopeKind}:${reservation.scopeId}`, sceneCode: reservation.sceneCode, configRevision: reservation.configRevision,
       configurationHash: invocation.configurationHash, priceVersion: invocation.priceVersion };
   }
   private evidenceFingerprint(rows: Awaited<ReturnType<PrismaGatewayAccountingFacts['rows']>>) {

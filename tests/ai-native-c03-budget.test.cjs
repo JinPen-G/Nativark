@@ -23,7 +23,7 @@ test('quantity validation matches Prisma widths before a write', () => {
 
 test('evidence cannot authorize another actor even when call and scope match', async () => {
   const record = { id: 'reservation', callId: 'call', actorId: 'actor', scopeId: 'workspace', scopeKind: 'WORKSPACE', association };
-  const adapter = new PersistedBudgetEvidenceAdapter({ readDispatch: async () => ({ reservationId: 'reservation', requestId: association.requestId, runId: association.runId, stepId: association.stepId, actionId: association.actionId, callId: 'call', actorId: 'intruder', scopeKey: 'WORKSPACE:workspace', configRevision: association.config.configRevision, priceVersion: association.priceVersion, dispatchToken: 'dispatch', state: 'dispatched' }), readUsage: async () => { throw Error('not used'); } });
+  const adapter = new PersistedBudgetEvidenceAdapter({ readDispatch: async () => ({ reservationId: 'reservation', requestId: association.requestId, runId: association.runId, stepId: association.stepId, actionId: association.actionId, callId: 'call', actorId: 'intruder', scopeKey: 'WORKSPACE:workspace', sceneCode: 'scene', configRevision: association.config.configRevision, priceVersion: association.priceVersion, dispatchToken: 'dispatch', state: 'dispatched' }), readUsage: async () => { throw Error('not used'); } });
   await assert.rejects(() => adapter.dispatch(record), error => error.code === 'FORBIDDEN');
 });
 
