@@ -260,7 +260,7 @@ function runnerHarness(options = {}) {
   const runner = createPersistentAiTaskRunner({
     resources: gate,
     leases: { readMetadata: async () => ({ taskId: 'task-1', status: 'running', revision: taskRevision, cancelRequestedAt: null }), claimRun: async () => currentLease(), claimRecoveryRun: async () => ({ ...currentLease(), purpose: 'recovery_only' }), releaseRun: async () => { trace.push('release'); return { released: true, revision: h.state.aiRun[0].revision + 1 }; } },
-    steps: { register: async () => ({ stepId: 'step-1', runId: 'run-1', sequence: 1, stepRevision: h.state.aiStep[0].revision ?? 1, taskRevision, replayed: h.state.aiStep[0].status === 'UNKNOWN', existingStatus: h.state.aiStep[0].status === 'UNKNOWN' ? 'unknown' : 'pending' }), start: async () => { if (options.startFailure) throw new Error('synthetic_start_failure'); h.state.aiStep[0].status = 'RUNNING'; return commit(); }, succeed: async () => { trace.push('durable_result'); h.state.aiStep[0].status = 'SUCCEEDED'; return commit(); }, fail: commit, pause: commit, unknown: async () => { trace.push('durable_unknown'); h.state.aiStep[0].status = 'UNKNOWN'; return commit(); } },
+    steps: { register: async () => ({ stepId: 'step-1', runId: 'run-1', sequence: 1, stepRevision: h.state.aiStep[0].revision ?? 1, taskRevision, replayed: ['UNKNOWN', 'SUCCEEDED'].includes(h.state.aiStep[0].status), existingStatus: h.state.aiStep[0].status?.toLowerCase() ?? 'pending' }), start: async () => { if (options.startFailure) throw new Error('synthetic_start_failure'); h.state.aiStep[0].status = 'RUNNING'; return commit(); }, succeed: async () => { trace.push('durable_result'); h.state.aiStep[0].status = 'SUCCEEDED'; return commit(); }, fail: commit, pause: commit, unknown: async () => { trace.push('durable_unknown'); h.state.aiStep[0].status = 'UNKNOWN'; return commit(); } },
     plan: { resolve: async () => ({ taskId: 'task-1', runId: 'run-1', taskRevision, steps: [{ registrationRef: 'registration-1', operation: options.unknown ? 'external_unknown' : 'readonly', toolCode: 'orders.read', toolVersion: '1' }], limits: { maxSteps: 2, maxCalls: 2, maxTotalMs: 1000, maxStepMs: 100, maxOutputBytes: 100, maxConcurrent: 1 } }) },
     effects: { execute: async () => { trace.push('effect'); return { kind: options.unknown ? 'unknown' : 'succeeded', resultRef: 'result-1', outputBytes: 12 }; }, reconcile: async () => { trace.push('reconcile'); return { kind: 'succeeded', resultRef: 'result-1', outputBytes: 12 }; } }
   });
@@ -333,4 +333,20 @@ test('recovery rejects incomplete durable charges', async () => {
   await h.runner.run(h.input); h.state.aiTaskExecutionCharge.pop();
   assert.equal((await h.runner.run({ ...h.input, recovery: true })).status, 'unavailable');
   assert.equal(h.trace.includes('reconcile'), false);
+});
+
+test('replayed durable success cannot skip unresolved resource accounting during recovery', async () => {
+  const options = { evidenceMissing: true, recoverySource: true };
+  const h = runnerHarness(options);
+  Object.assign(h.state.aiStep[0], { toolCode: 'orders.read', toolVersion: '1', revision: 1 });
+  assert.equal((await h.runner.run(h.input)).status, 'unknown');
+  assert.equal(h.state.aiStep[0].status, 'SUCCEEDED');
+  assert.equal((await h.runner.run({ ...h.input, recovery: true })).status, 'unknown');
+  assert.equal(h.state.aiTaskExecutionBudget[0].reservedSteps, 1n);
+  options.evidenceMissing = false;
+  assert.equal((await h.runner.run({ ...h.input, recovery: true })).status, 'succeeded');
+  assert.equal(h.trace.filter(event => event === 'effect').length, 1);
+  assert.equal(h.trace.includes('reconcile'), false);
+  assert.equal(h.state.aiTaskExecutionBudget[0].consumedSteps, 1n);
+  assert.equal(h.state.aiTaskExecutionBudget[0].reservedSteps, 0n);
 });

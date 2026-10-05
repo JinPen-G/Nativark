@@ -136,7 +136,22 @@ export class AiTaskRunner {
         if (registered.runRevision != null) lease = { ...lease, revision: registered.runRevision };
         const ref: AiTaskRunnerStepRef = { plan: stepPlan, registered };
         if (registered.runId !== lease.runId) return { status: "unavailable", completedSteps, cleanupFailed };
-        if (registered.replayed && registered.existingStatus === "succeeded") { completedSteps++; continue; }
+        if (registered.replayed && registered.existingStatus === "succeeded") {
+          // A durable business result is not proof that its resource accounting
+          // committed. Recover and reconcile original receipts, never re-execute.
+          if (this.deps.resources) {
+            if (!this.deps.resources.recover) return { status: 'unavailable', completedSteps, cleanupFailed };
+            let ticket: AiTaskRunnerResourceTicket | undefined;
+            try {
+              ticket = structuredClone(await this.callBounded(() => this.deps.resources!.recover!(structuredClone(ref), structuredClone(lease)), plan.limits.maxStepMs, 'resource_recover'));
+              await this.callBounded(() => this.deps.resources!.record(ticket!, structuredClone(ref), structuredClone(lease), true), plan.limits.maxStepMs, 'resource_reconcile');
+            } catch {
+              if (ticket) await this.callBounded(() => this.deps.resources!.markUnknown(ticket!, structuredClone(lease)), plan.limits.maxStepMs, 'resource_unknown').catch(() => {});
+              return { status: 'unknown', completedSteps, cleanupFailed };
+            }
+          }
+          completedSteps++; continue;
+        }
         const reconcile = recovery && (stepPlan.operation === "external_unknown" || (registered.replayed && registered.existingStatus === "unknown"));
         if (cancelling && !(registered.replayed && registered.existingStatus === 'unknown')) return { status: 'cancel_requested', completedSteps, cleanupFailed };
         if (registered.replayed && registered.existingStatus === "unknown" && !reconcile) return await finish({ status: "unknown", completedSteps, cleanupFailed });

@@ -27,12 +27,13 @@ function harness() {
     revision: 1, contractVersion: AI_TASK_DRAFT_VERSION, status: 'RUNNING' },
     run: { id: 'run-a', scopeId: 'scope-a', taskId: 'task-a', actorKind: 'USER', actorId: 'user-a', revision: 1, fencingToken: '1', status: 'RUNNING',
       leaseOwnerId: 'worker-a', leaseExpiresAt: new Date(now.getTime() + 60000) }, logs: [] };
-  const control = { failAudit: false, loseReply: false, revoked: false, resolveCount: 0, revokeAt: 0, locks: [] };
+  const control = { failAudit: false, loseReply: false, revoked: false, resolveCount: 0, revokeAt: 0, staleSnapshot: false, locks: [] };
   const authority = { resolve: async (_, operation) => { assert.ok(['takeover_run', 'release_run'].includes(operation));
     if (++control.resolveCount === control.revokeAt) control.revoked = true;
     if (control.revoked) throw new Error('revoked'); return structuredClone(context); } };
   function delegates(draft) {
-    return { aiTask: { findFirst: async ({ where }) => matches(draft.task, where) ? structuredClone(draft.task) : null },
+    return { aiTask: { findFirst: async ({ where }) => matches(draft.task, where) ? structuredClone(draft.task) : null,
+      updateMany: async ({ where, data }) => { if (control.staleSnapshot || !matches(draft.task, where)) return { count: 0 }; Object.assign(draft.task, data); return { count: 1 }; } },
       aiRun: { updateMany: async ({ where, data }) => {
         const run = { ...draft.run, task: draft.task }; if (!matches(run, where)) return { count: 0 };
         for (const [key, value] of Object.entries(data)) {
@@ -87,4 +88,10 @@ test('missing authority, overflow and same holder fail before writes', async () 
   for (const altered of [{ ...input, expectedFencingToken: '99999999999999999999' }, { ...input, holderId: 'worker-a' }, { ...input, leaseMs: 120001 }])
     await assert.rejects(h.make().takeover(altered), e => e.code === 'AI_INVALID_INPUT');
   assert.equal(h.state.logs.length, 0);
+});
+
+test('a stale post-lock SELECT cannot bypass the current task revision CAS', async () => {
+  const h = harness(); h.control.staleSnapshot = true;
+  await assert.rejects(h.make().takeover(input), e => e.code === 'AI_REVISION_CONFLICT');
+  assert.equal(h.state.run.fencingToken, '1'); assert.equal(h.state.logs.length, 0);
 });

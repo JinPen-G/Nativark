@@ -39,6 +39,14 @@ export class PrismaTaskTakeoverRepository {
           status: { in: ['RUNNING', 'WAITING_INPUT', 'WAITING_CONFIRMATION', 'WAITING_EXTERNAL', 'CANCEL_REQUESTED'] }
         }, select: { id: true } });
         if (!task) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        // A plain post-lock SELECT may still use an older REPEATABLE READ
+        // snapshot. A conditional no-op UPDATE verifies the current row without
+        // inventing a public task revision/event for a lease-only mutation.
+        const lockedTask = await tx.aiTask.updateMany({ where: { ...initial.where, scopeId: found.scopeId,
+          revision: input.expectedTaskRevision, contractVersion: AI_TASK_DRAFT_VERSION,
+          status: { in: ['RUNNING', 'WAITING_INPUT', 'WAITING_CONFIRMATION', 'WAITING_EXTERNAL', 'CANCEL_REQUESTED'] }
+        }, data: { revision: input.expectedTaskRevision } });
+        if (lockedTask.count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
         const current = await this.access.resolveAccess(input.taskId, 'takeover_run');
         if (current.bindingKey !== initial.bindingKey
           || !await tx.aiTask.findFirst({ where: { ...current.where, scopeId: found.scopeId }, select: { id: true } })) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
