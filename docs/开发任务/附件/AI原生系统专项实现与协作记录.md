@@ -407,6 +407,8 @@ HANDOFF-ID / 原任务与CLAIM-ID：
 
 ### AIN-IMPL-003：接任后的持久化集成修复
 
+- AIN-11/F04：[预算接入边界等待竞态修复](AI原生系统协作切片/AIN-11-F04-20261005-codex.md)：actor/request 等待期间变更及消费 scope 错绑先红（3失败）后绿，六文件预算回归31/31，API类型退出0；尚未接通 Gateway 单账生命周期，不改变原正式验收状态。
+
 - AIN-06/F01修订传递等四项集成修复提交 `751ac7e3`，全量1856项离线回归通过；不是任务级恢复闭环验收。
 - AIN-03/F02：[Profile真实Prisma类型与原子CAS返回](AI原生系统协作切片/AIN-03-F02-20261005-codex.md)，修复前3项红测，修复后Gateway/Profile/能力相关285项通过，API类型检查退出0；没有真库锁证据或生产注册。
 - AIN-03/S02、04/S02、05/S03：[租户配置持久化与BYOK接线](AI原生系统协作切片/AIN-03-S02-20261005-codex.md)：新增版本化配置模型/追加迁移、实际Prisma CAS adapter、复用当前AuthService/Guard的动作适配及已有BYOK resolver接线；修复平台mode下保存保留配置后假失败。最终完整离线1883项通过，API类型/构建、隔离schema validate/diff通过；旧B06迁移检查器本次独立退出1，其解析局限和670项历史issues单列，未隐藏。旧配置仍待受权转换、平台凭据和Profile统一revision/预算单账仍未接齐，原正式验收0/28不变。

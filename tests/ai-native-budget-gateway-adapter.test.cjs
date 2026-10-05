@@ -65,3 +65,56 @@ test('settlement requires an evidence reference; raw provider usage is not a bud
   const call = h.calls.find(row => row[0] === 'settle');
   assert.deepEqual(call.slice(1), ['reservation-1', association, 'event-1', 'persisted-usage-evidence']);
 });
+
+test('mutable caller identity cannot authorize a different actor while the binding source waits', async () => {
+  const h = harness();
+  let resolve;
+  const waiting = new Promise(done => { resolve = done; });
+  h.source.resolveForReservation = () => waiting;
+  const caller = { ...context };
+  const pending = h.adapter.dispatch(caller, 'reservation-1', 'event-1');
+  caller.actorId = 'actor-forged';
+  resolve({ ...structuredClone(binding), actorId: 'actor-forged' });
+  await assert.rejects(pending, error => error.code === 'FORBIDDEN');
+  assert.equal(h.calls.filter(row => row[0] === 'dispatch').length, 0);
+});
+
+test('reserve binds the initial request even if the caller changes it during resolution', async () => {
+  const h = harness();
+  let resolve;
+  h.source.resolveForReserve = () => new Promise(done => { resolve = done; });
+  const request = { callId: 'call-1', model: 'model-1', maxOutputTokens: 20 };
+  const pending = h.adapter.reserve({ ...context }, request);
+  request.callId = 'call-other';
+  resolve(structuredClone(binding));
+  assert.equal(await pending, 'reservation-1');
+  assert.equal(h.calls.find(row => row[0] === 'reserve')[1].callId, 'call-1');
+});
+
+test('workspace Gateway consumers cannot bind reservations to platform consumption', async () => {
+  const h = harness();
+  h.source.resolveForReservation = async () => ({ ...structuredClone(binding), association: { ...association, scope: { kind: 'platform' } } });
+  await assert.rejects(() => h.adapter.dispatch(context, 'reservation-1', 'event-1'), error => error.code === 'FORBIDDEN');
+  assert.equal(h.calls.filter(row => row[0] === 'dispatch').length, 0);
+});
+
+for (const method of ['settle', 'release', 'markUnknown', 'reconcile']) {
+  test(`${method} isolates identity changes during persistent binding lookup`, async () => {
+    const h = harness();
+    let resolve;
+    h.source.resolveForReservation = () => new Promise(done => { resolve = done; });
+    const caller = { ...context };
+    const pending = h.adapter[method](caller, 'reservation-1', 'event-1', method === 'markUnknown' ? 'provider_timeout' : 'evidence-1');
+    caller.actorId = 'actor-forged';
+    resolve({ ...structuredClone(binding), actorId: 'actor-forged' });
+    await assert.rejects(pending, error => error.code === 'FORBIDDEN');
+    assert.equal(h.calls.filter(row => row[0] === (method === 'markUnknown' ? 'unknown' : method)).length, 0);
+  });
+}
+
+test('tenant owner is not the workspace consumer even when tenant IDs match', async () => {
+  const h = harness();
+  h.source.resolveForReservation = async () => ({ ...structuredClone(binding), association: { ...association, scope: { kind: 'tenant', tenantId: context.tenantId } } });
+  await assert.rejects(() => h.adapter.release(context, 'reservation-1', 'event-1'), error => error.code === 'FORBIDDEN');
+  assert.equal(h.calls.filter(row => row[0] === 'release').length, 0);
+});

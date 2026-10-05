@@ -37,9 +37,11 @@ function assertBinding(context: Readonly<GatewayContext>, binding: Readonly<Budg
   if (!binding || binding.actorId !== context.actorId || !(binding.expiresAt instanceof Date)
     || !Number.isFinite(binding.expiresAt.getTime()) || !binding.association || !binding.association.scope) throw new BudgetError('FORBIDDEN');
   const scope = binding.association.scope;
-  const validScope = scope.kind === 'platform'
-    || (scope.kind === 'tenant' && scope.tenantId === context.tenantId)
-    || (scope.kind === 'workspace' && scope.tenantId === context.tenantId && scope.workspaceId === context.workspaceId);
+  // This internal GatewayContext describes a workspace consumer, not the
+  // owner of its provider profile. Platform-managed AI must still charge the
+  // workspace consumer; platform/tenant jobs need a separately typed port.
+  const validScope = scope.kind === 'workspace'
+    && scope.tenantId === context.tenantId && scope.workspaceId === context.workspaceId;
   if (!validScope || !binding.sceneCode || binding.association.idempotencyKey === '') throw new BudgetError('FORBIDDEN');
 }
 
@@ -56,6 +58,8 @@ export class BudgetGatewayAdapter implements BudgetGatewayLifecycle {
   }
 
   async reserve(context: Readonly<GatewayContext>, request: Readonly<{ callId: string; model: string; maxOutputTokens: number }>) {
+    context = structuredClone(context);
+    request = structuredClone(request);
     const binding = structuredClone(await this.source.resolveForReserve(structuredClone(context), structuredClone(request)));
     assertBinding(context, binding);
     if (binding.association.idempotencyKey !== request.callId) throw new BudgetError('FORBIDDEN');
@@ -70,6 +74,7 @@ export class BudgetGatewayAdapter implements BudgetGatewayLifecycle {
   }
 
   private async binding(context: Readonly<GatewayContext>, reservationId: string) {
+    context = structuredClone(context);
     const binding = structuredClone(await this.source.resolveForReservation(structuredClone(context), reservationId));
     assertBinding(context, binding);
     return binding;
