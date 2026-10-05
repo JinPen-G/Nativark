@@ -8,6 +8,7 @@ const { PrismaTaskRunnerResourceSource } = require('../apps/api/src/modules/ai-n
 const { PersistentTaskRunnerResourceGate } = require('../apps/api/src/modules/ai-native/runner/persistent-task-runner-resource-gate');
 const { PrismaTaskMeasuredEffects } = require('../apps/api/src/modules/ai-native/runner/prisma-task-measured-effects');
 const { PrismaGatewayAccountingFacts } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-accounting-facts');
+const { PersistedPlanResourcePolicySource } = require('../apps/api/src/modules/ai-native/runner/persisted-plan-resource-policy.source');
 const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
 const { offlinePrismaSchema } = require('./fixtures/ai-native/prisma-offline.cjs');
 const fs = require('node:fs'), path = require('node:path');
@@ -145,6 +146,36 @@ test('immutable persisted plan survives recreation and refuses changed limits or
   assert.equal(loaded.taskRevision, 2); assert.deepEqual(loaded.steps, plan.steps);
   await assert.rejects(h.make().savePlan({ ...plan, limits: { ...plan.limits, maxStepMs: 99 } }, lease));
   h.control.planHash = 'd'.repeat(64); await assert.rejects(h.make().resolve({ taskId: 'task-a', revision: 2 }, lease, true));
+});
+
+test('actual persisted authorized plan supplies stable cumulative resource ceilings across revisions and restart', async () => {
+  const h = harness(); await h.make().savePlan(plan, lease);
+  let revision = 1;
+  const tasks = { readMetadata: async () => ({ taskId: 'task-a', revision, status: 'running', cancelRequestedAt: null }) };
+  const source = () => new PersistedPlanResourcePolicySource(tasks, h.make());
+  const initial = await source().resolve('task-a', lease);
+  assert.deepEqual(initial.limits, { steps: 3n, calls: 3n, active_ms: 1000n, output_bytes: 1000n });
+  revision = 2;
+  assert.deepEqual(await source().resolve('task-a', lease), initial);
+  const repository = new PrismaTaskExecutionBudgetRepository(h.db, h.scopes, source(), h.make(), () => now);
+  await repository.initialize('task-a', lease);
+  const request = { taskId: 'task-a', lease, chargeId: 'saved-plan-charge', resource: 'steps', amount: 1n,
+    target: { kind: 'step', stepId: 'step-a', actionId: 'action-a', stepFingerprint: 'a'.repeat(64) } };
+  await repository.reserve(request);
+  const restored = new PrismaTaskExecutionBudgetRepository(h.db, h.scopes, source(), h.make(), () => now);
+  assert.equal((await restored.load('task-a', lease)).reserved.steps, 1n);
+  h.control.planHash = 'e'.repeat(64);
+  await assert.rejects(source().resolve('task-a', lease));
+  assert.equal(h.state.aiTaskExecutionBudget[0].reservedSteps, 1n);
+});
+
+test('saved-plan policy cannot manufacture limits for missing plans or foreign task metadata', async () => {
+  const h = harness();
+  const tasks = { readMetadata: async () => ({ taskId: 'task-a', revision: 1, status: 'running', cancelRequestedAt: null }) };
+  await assert.rejects(new PersistedPlanResourcePolicySource(tasks, h.make()).resolve('task-a', lease));
+  await h.make().savePlan(plan, lease);
+  tasks.readMetadata = async () => ({ taskId: 'other', revision: 1, status: 'running', cancelRequestedAt: null });
+  await assert.rejects(new PersistedPlanResourcePolicySource(tasks, h.make()).resolve('task-a', lease), e => e.code === 'AI_ACCESS_DENIED');
 });
 test('actual captured artifact meters UTF8 bytes and server time through the real resource repository', async () => {
   const h = harness(); await h.reserve(); const payload = { answer: '合成事实' };

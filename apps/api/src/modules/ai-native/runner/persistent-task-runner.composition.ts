@@ -12,6 +12,7 @@ import { PrismaTaskRunnerResourceSource, type AiTaskToolResourceCatalog, type Ai
 import { PersistentTaskRunnerResourceGate } from './persistent-task-runner-resource-gate';
 import { PrismaTaskMeasuredEffects, type AiTaskRegisteredExecutor } from './prisma-task-measured-effects';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
+import { PersistedPlanResourcePolicySource } from './persisted-plan-resource-policy.source';
 
 export interface PersistentTaskRunnerComposition {
   db: PrismaClient;
@@ -21,7 +22,9 @@ export interface PersistentTaskRunnerComposition {
   transitions: AiTaskRunnerRepositoryAdapters['transitions'];
   commands: AiTaskRunnerRepositoryAdapters['commands'];
   taskOutcome: AiTaskRunnerOutcomePort;
-  policy: AiTaskExecutionPolicySource;
+  /** Optional stricter server policy. Otherwise use the authorized durable plan;
+   * absence of a saved plan/current plan authority still denies initialization. */
+  policy?: AiTaskExecutionPolicySource;
   planAuthority: AiTaskPlanEvidenceAuthority;
   toolCatalog: AiTaskToolResourceCatalog;
   executors: AiTaskRegisteredExecutor;
@@ -50,12 +53,13 @@ export function composePersistentTaskRunner(input: PersistentTaskRunnerCompositi
   requires(input?.tasks, ['resolveAccess', 'readMetadata', 'claimRun', 'claimRecoveryRun', 'releaseRun']);
   requires(input?.registrations, ['register']); requires(input?.replays, ['readReplay']);
   requires(input?.transitions, ['transition']); requires(input?.commands, ['register', 'transition']);
-  requires(input?.taskOutcome, ['commit']); requires(input?.policy, ['resolve']);
+  requires(input?.taskOutcome, ['commit']); if (input.policy) requires(input.policy, ['resolve']);
   requires(input?.planAuthority, ['authorize']); requires(input?.toolCatalog, ['resolve']); requires(input?.executors, ['resolve']);
   if (input.invocations) requires(input.financialEvidence, ['readDispatch']);
   const scopes = new PrismaTaskExecutionScopeAuthority(input.tasks, input.db);
   const evidence = new PrismaTaskRunEvidenceRepository(input.db, scopes, input.planAuthority, input.wall, input.monotonic, input.financialEvidence);
-  const accounting = new PrismaTaskExecutionBudgetRepository(input.db, scopes, input.policy, evidence, input.wall);
+  const policy = input.policy ?? new PersistedPlanResourcePolicySource(input.tasks, evidence);
+  const accounting = new PrismaTaskExecutionBudgetRepository(input.db, scopes, policy, evidence, input.wall);
   const source = new PrismaTaskRunnerResourceSource(input.db, scopes, evidence, input.toolCatalog, input.wall, input.invocations);
   const resources = new PersistentTaskRunnerResourceGate(accounting, source);
   const effects = new PrismaTaskMeasuredEffects(input.db, input.tasks, evidence, input.executors);
