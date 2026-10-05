@@ -46,10 +46,10 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
       || typeof scopes?.resolveCurrent !== 'function' || typeof pricing?.quantity !== 'function') throw new BudgetError('UNAVAILABLE');
   }
   private async current(reservationId: string) {
-    const resolved = await this.scopes.resolveCurrent();
+    const resolved = structuredClone(await this.scopes.resolveCurrent());
     if (resolved.context.actor.kind !== 'user' || resolved.context.scope.kind !== 'workspace') throw new BudgetError('FORBIDDEN');
     const context = { actorId: resolved.context.actor.userId, tenantId: resolved.context.scope.tenantId, workspaceId: resolved.context.scope.workspaceId };
-    return { context, binding: await this.bindings.resolveForReservation(context, reservationId) };
+    return { context, binding: structuredClone(await this.bindings.resolveForReservation(structuredClone(context), reservationId)) };
   }
   private async admission(db: Reader, call: GatewayAccountingCall, active: boolean) {
     const b = call.binding;
@@ -163,28 +163,43 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
       callId: invocation.callId, actorId: invocation.actorId, scopeKey: `${reservation.scopeKind}:${reservation.scopeId}`, configRevision: reservation.configRevision,
       configurationHash: invocation.configurationHash, priceVersion: invocation.priceVersion };
   }
+  private evidenceFingerprint(rows: Awaited<ReturnType<PrismaGatewayAccountingFacts['rows']>>) {
+    const { receipt, invocation, admission } = rows;
+    return requestFingerprint({ binding: this.evidenceBinding(rows), receiptId: receipt.id,
+      invocationId: receipt.invocationId, admissionId: receipt.admissionId, state: receipt.state,
+      dispatchToken: receipt.dispatchToken, requestHash: receipt.requestHash, usageHash: receipt.usageHash,
+      inputTokens: receipt.inputTokens?.toString() ?? null, outputTokens: receipt.outputTokens?.toString() ?? null,
+      intentHash: invocation.intentHash, model: invocation.configuration, maxOutputTokens: invocation.maxOutputTokens,
+      actorId: admission.actorId, profileId: admission.profileId });
+  }
+  private async revalidateCurrent(reservationId: string, initial: Awaited<ReturnType<PrismaGatewayAccountingFacts['current']>>) {
+    const current = await this.current(reservationId);
+    if (requestFingerprint({ context: current.context, binding: current.binding })
+      !== requestFingerprint({ context: initial.context, binding: initial.binding })) throw new BudgetError('FORBIDDEN');
+  }
   async readDispatch(reservationId: string) {
-    await this.current(reservationId);
+    const initial = await this.current(reservationId);
     const rows = await this.rows(this.db, reservationId);
+    await this.revalidateCurrent(reservationId, initial);
     const state = rows.receipt.state === 'cancelled' ? 'not_dispatched' : rows.receipt.state === 'dispatched' ? 'dispatched' : 'unknown';
     return { ...this.evidenceBinding(rows), state, dispatchToken: state === 'not_dispatched' ? null : rows.receipt.dispatchToken } as const;
   }
   async readUsage(reservationId: string, evidenceRef: string, _reconcile: boolean) {
-    const { binding } = await this.current(reservationId);
+    const initial = await this.current(reservationId), { binding } = initial;
     const rows = await this.rows(this.db, reservationId), receipt = rows.receipt;
     if (receipt.id !== evidenceRef || receipt.state !== 'dispatched' || receipt.inputTokens === null || receipt.outputTokens === null || !receipt.usageHash) throw new BudgetError('PENDING_RECONCILIATION');
     const usage = usageSchema.parse({ inputTokens: Number(receipt.inputTokens), outputTokens: Number(receipt.outputTokens) });
     if (this.usageHash(receipt, usage) !== receipt.usageHash) throw new BudgetError('FORBIDDEN');
     const record = await new PrismaBudgetRepository(this.db).get(reservationId, binding.association);
     if (!record) throw new BudgetError('FORBIDDEN');
-    const quantity = structuredClone(await this.pricing.quantity(record, usage));
+    const quantity = structuredClone(await this.pricing.quantity(structuredClone(record), structuredClone(usage)));
     quantityAtoms(quantity);
     if (!sameUnit(record.reserved, quantity)) throw new BudgetError('FORBIDDEN');
     if (quantity.unit === 'tokens' && BigInt(quantity.value) !== receipt.inputTokens + receipt.outputTokens) throw new BudgetError('FORBIDDEN');
     if (quantity.unit === 'calls' && quantity.value !== 1) throw new BudgetError('FORBIDDEN');
     const current = await this.rows(this.db, reservationId);
-    if (current.receipt.usageHash !== receipt.usageHash || current.receipt.dispatchToken !== receipt.dispatchToken) throw new BudgetError('PENDING_RECONCILIATION');
-    await this.current(reservationId);
+    if (this.evidenceFingerprint(current) !== this.evidenceFingerprint(rows)) throw new BudgetError('PENDING_RECONCILIATION');
+    await this.revalidateCurrent(reservationId, initial);
     return { ...this.evidenceBinding(rows), ...usage, quantity, dispatchToken: receipt.dispatchToken,
       evidenceHash: requestFingerprint({ usageHash: receipt.usageHash, priceVersion: record.association.priceVersion, quantity }) };
   }
