@@ -17,6 +17,7 @@ export interface AiTaskRunnerRepositoryCommandFactory {
 export interface AiTaskRunnerRepositoryAdapters {
   tasks: Pick<AiTaskRepository, "readMetadata" | "claimRun" | "claimRecoveryRun" | "releaseRun">;
   registrations: Pick<AiStepRegistrationRepository, "register">;
+  replays?: Pick<AiStepRegistrationRepository, "readReplay">;
   transitions: Pick<AiStepTransitionRepository, "transition">;
   commands: AiTaskRunnerRepositoryCommandFactory;
 }
@@ -33,9 +34,15 @@ export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerReposito
   const commands = adapters.commands;
   const steps: AiTaskRunnerStepPort = {
     async register(plan, lease) {
-      const result = await adapters.registrations.register(commands.register(plan, lease));
+      const command = structuredClone(commands.register(structuredClone(plan), structuredClone(lease)));
+      const result = await adapters.registrations.register(command);
+      const replay = result.replayed && adapters.replays
+        ? await adapters.replays.readReplay({ ...command, stepId: result.stepId, expectedStepRevision: result.stepRevision }) : null;
+      if (replay && (replay.stepId !== result.stepId || replay.runId !== result.runId || replay.sequence !== result.sequence
+        || replay.stepRevision !== result.stepRevision)) throw new Error("AI_STORAGE_UNAVAILABLE");
       return { stepId: result.stepId, runId: result.runId, sequence: result.sequence, stepRevision: result.stepRevision,
-        taskRevision: result.taskRevision, runRevision: result.runRevision, replayed: result.replayed, existingStatus: result.replayed ? null : "pending" };
+        taskRevision: replay?.taskRevision ?? result.taskRevision, runRevision: result.runRevision, replayed: result.replayed,
+        existingStatus: result.replayed ? replay?.status ?? null : "pending", ...(replay ? { resultRef: replay.resultRef } : {}) };
     },
     async start(step, lease) {
       return committed(await adapters.transitions.transition(commands.transition("start", step, lease, null)), lease);

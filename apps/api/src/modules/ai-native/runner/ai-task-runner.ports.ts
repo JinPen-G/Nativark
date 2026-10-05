@@ -65,6 +65,7 @@ export interface AiTaskRunnerRegisteredStep {
   runRevision?: number | null;
   replayed: boolean;
   existingStatus: AiStepStatusDraft | null;
+  resultRef?: string | null;
 }
 
 export interface AiTaskRunnerStepCommit {
@@ -131,7 +132,7 @@ export interface AiTaskRunnerOutcomePort {
     taskRevision: number;
     lease: AiTaskRunnerLease;
     outcome: AiTaskRunnerTaskOutcome;
-  }): Promise<{ taskRevision: number; lease: AiTaskRunnerLease }>;
+  }): Promise<{ taskRevision: number; lease: AiTaskRunnerLease; outcomeStatus?: 'succeeded' | 'partially_succeeded' | 'cancelled' }>;
 }
 
 export interface AiTaskRunnerClock {
@@ -154,5 +155,5 @@ export interface AiTaskRunnerInput extends AiTaskRunnerClaimInput {
 }
 
 export type AiTaskRunnerOutcome =
-  | { status: "succeeded" | "paused" | "cancel_requested" | "cancelled" | "unknown" | "unavailable"; completedSteps: number; cleanupFailed: number }
+  | { status: "succeeded" | "partially_succeeded" | "paused" | "cancel_requested" | "cancelled" | "unknown" | "unavailable"; completedSteps: number; cleanupFailed: number }
   | { status: "failed"; completedSteps: number; cleanupFailed: number; errorCode: string };

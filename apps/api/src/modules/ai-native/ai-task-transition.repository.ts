@@ -40,10 +40,15 @@ export class AiTaskTransitionRepository {
     this.access = new AiTaskRepository(db, authority, clock);
   }
 
-  async transition(value: unknown) {
+  transition(value: unknown) { return this.transitionState(value, false); }
+
+  settleCancellation(value: unknown) { return this.transitionState(value, true); }
+
+  private async transitionState(value: unknown, settleCancellation: boolean) {
     const parsed = commandSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
     const input = parsed.data;
+    if (settleCancellation && (input.to !== 'cancelled' || input.reason !== 'cancel_settled')) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const initial = await this.access.resolveAccess(input.taskId, "transition_task");
     try {
       return await this.db.$transaction(async tx => {
@@ -74,6 +79,12 @@ export class AiTaskTransitionRepository {
             outcome: { status: row.status.toLowerCase() as AiStepStatusDraft, effect: row.effect.toLowerCase() as AiStepStateDraft["outcome"]["effect"] }
           }))
         };
+        if (settleCancellation) {
+          if (task.status !== 'CANCEL_REQUESTED') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+          if (rows.some(row => row.effect === 'COMMITTED')) {
+            input.to = rows.every(row => row.status === 'SUCCEEDED') ? 'succeeded' : 'partially_succeeded';
+          }
+        }
         const request: AiTaskTransitionRequestDraft = {
           contractVersion: AI_TASK_DRAFT_VERSION, taskId: task.id, expectedRevision: task.revision,
           to: input.to, reason: input.reason, occurredAt,
