@@ -2,6 +2,8 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const { setup, command, clone } = require('./fixtures/ai-native/step-registration.cjs');
 const { createAiTaskRunnerRepositoryPorts } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner.repository-adapter');
+const { AiTaskTransitionRepository } = require('../apps/api/src/modules/ai-native/ai-task-transition.repository');
+const { createAiTaskRunnerOutcomePort } = require('../apps/api/src/modules/ai-native/runner/ai-task-runner-outcome-adapter');
 
 for (const [name, mutate] of [
   ['task', result => { result.event.taskId = 'other-task'; }],
@@ -28,4 +30,24 @@ for (const [name, mutate] of [
   await assert.rejects(ports.steps.start({ plan, registered }, { ...lease, revision: registered.runRevision }), /AI_STORAGE_UNAVAILABLE/);
   assert.equal(writes, 1); assert.equal(h.state.steps[0].status, 'RUNNING');
   // A rejected acknowledgement is not proof of rollback or permission to resend.
+});
+
+for (const [name, mutate] of [
+  ['task', result => { result.event.taskId = 'other-task'; }],
+  ['version', result => { result.event.contractVersion = 'unknown'; }],
+  ['event type', result => { result.event.type = 'step.changed'; }],
+  ['status', result => { result.event.data.to = 'waiting_input'; }],
+  ['reason', result => { result.event.data.reason = 'resume'; }],
+  ['run revision', result => { result.runRevision++; }]
+]) test(`aggregate outcome refuses mismatched ${name} after an actual committed task transition`, async () => {
+  const h = setup(); await h.run();
+  Object.assign(h.state.steps[0], { status: 'SUCCEEDED', effect: 'COMMITTED' });
+  const repository = new AiTaskTransitionRepository(h.db, { resolve: async () => clone(h.state.grant.context) }, () => new Date(h.state.clock));
+  let calls = 0;
+  const port = createAiTaskRunnerOutcomePort({ commands: { transition: input => clone(input) },
+    transitions: { transition: async input => { calls++; const result = await repository.transition(input); mutate(result); return result; } } });
+  await assert.rejects(port.commit({ taskId: command.taskId, taskRevision: h.state.task.revision,
+    lease: { taskId: command.taskId, ...command.lease, revision: h.state.run.revision, expiresAt: h.state.run.leaseExpiresAt.toISOString() },
+    outcome: { status: 'succeeded', completedSteps: 1, cleanupFailed: 0 } }), /AI_STORAGE_UNAVAILABLE/);
+  assert.equal(calls, 1); assert.equal(h.state.task.status, 'SUCCEEDED');
 });

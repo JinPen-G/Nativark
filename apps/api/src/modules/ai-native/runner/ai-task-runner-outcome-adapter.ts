@@ -1,6 +1,7 @@
 import type { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import type { AiTaskRepository } from '../ai-task.repository';
 import type { AiTaskRunnerOutcomePort, AiTaskRunnerTaskOutcome } from './ai-task-runner.ports';
+import { AI_TASK_DRAFT_VERSION, type AiTaskEventDraft } from '@rental-os/shared';
 
 export interface AiTaskRunnerOutcomeCommandFactory {
   transition(input: Readonly<{
@@ -46,7 +47,8 @@ export function createAiTaskRunnerOutcomePort(adapters: AiTaskRunnerOutcomeAdapt
           const resumed = await adapters.transitions.transition(adapters.commands.transition({ taskId: input.taskId,
             expectedRevision: input.taskRevision, to: 'running', reason: 'resume', lease: { runId: input.lease.runId,
               holderId: input.lease.holderId, revision: input.lease.revision, fencingToken: input.lease.fencingToken } }));
-          if (!resumed.event || resumed.event.taskRevision !== input.taskRevision + 1 || resumed.runRevision !== input.lease.revision + 1) throw new Error('AI_STORAGE_UNAVAILABLE');
+          if (!matchesAcknowledgement(resumed, input.taskId, input.taskRevision, input.lease.revision, ['running'], 'resume')
+            || resumed.runRevision === null) throw new Error('AI_STORAGE_UNAVAILABLE');
           input.taskRevision = resumed.event.taskRevision;
           input.lease.revision = resumed.runRevision;
         }
@@ -58,11 +60,22 @@ export function createAiTaskRunnerOutcomePort(adapters: AiTaskRunnerOutcomeAdapt
         ? await adapters.transitions.settleCancellation(command) : await adapters.transitions.transition(command);
       const runRevision = result?.runRevision;
       const nextRunRevision = typeof runRevision === 'number' ? runRevision : null;
-      if (!result || !result.event || result.event.taskRevision !== input.taskRevision + 1
-        || nextRunRevision === null || !Number.isSafeInteger(nextRunRevision) || nextRunRevision <= input.lease.revision) throw new Error('AI_STORAGE_UNAVAILABLE');
+      // Cancellation settlement may truthfully report committed/partial work;
+      // ordinary completion must not accept a different task/state acknowledgement.
+      const allowed = input.outcome.status === 'cancelled' ? ['cancelled', 'succeeded', 'partially_succeeded'] : [next.to];
+      if (!matchesAcknowledgement(result, input.taskId, input.taskRevision, input.lease.revision, allowed, next.reason)
+        || nextRunRevision === null) throw new Error('AI_STORAGE_UNAVAILABLE');
       const status = result.event.type === 'task.transition' ? result.event.data.to : undefined;
       const outcomeStatus = status === 'succeeded' || status === 'partially_succeeded' || status === 'cancelled' ? status : undefined;
       return { taskRevision: result.event.taskRevision, lease: { ...input.lease, revision: nextRunRevision }, ...(outcomeStatus ? { outcomeStatus } : {}) };
     }
   };
+}
+
+function matchesAcknowledgement(result: { event: AiTaskEventDraft; runRevision: number | null } | undefined,
+  taskId: string, taskRevision: number, runRevision: number, allowed: readonly string[], reason: string) {
+  const event = result?.event;
+  return event?.contractVersion === AI_TASK_DRAFT_VERSION && event.taskId === taskId && event.type === 'task.transition'
+    && event.taskRevision === taskRevision + 1 && result?.runRevision === runRevision + 1
+    && allowed.includes(event.data.to) && event.data.reason === reason;
 }

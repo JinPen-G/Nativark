@@ -8,7 +8,9 @@ function harness() {
   const calls = [];
   const adapters = {
     commands: { transition: input => { calls.push(['command', input]); return { ...input, taskId: input.taskId, expectedRevision: input.expectedRevision }; } },
-    transitions: { transition: async command => { calls.push(['transition', command]); return { event: { taskRevision: command.expectedRevision + 1 }, runRevision: 5 }; } }
+    transitions: { transition: async command => { calls.push(['transition', command]); return {
+      event: { contractVersion: 'ain-c04-draft-1', type: 'task.transition', taskId: command.taskId,
+        taskRevision: command.expectedRevision + 1, data: { to: command.to, reason: command.reason } }, runRevision: 5 }; } }
   };
   return { calls, port: createAiTaskRunnerOutcomePort(adapters) };
 }
