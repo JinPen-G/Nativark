@@ -73,6 +73,7 @@ export interface AiTaskExecutionChargeEvidence {
   resource: AiTaskExecutionResource;
   actualAmount: bigint;
   evidenceHash: string;
+  evidenceRef: string;
   dispatchToken: string | null;
   gatewayInvocationId: string | null;
 }
