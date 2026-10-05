@@ -24,3 +24,8 @@ test('catalog projection rejects a Core row bound to another tenant', async () =
   const service = new AiCatalogReadFactsService({ listItemGroups: async () => [{ ...row, tenantId: 'tenant-other' }] }, authority(context));
   await assert.rejects(() => service.read({ limit: 2 }), error => error.code === 'INVALID_RESPONSE');
 });
+
+test('catalog projection rejects duplicate identity rows from the Core read', async () => {
+  const service = new AiCatalogReadFactsService({ listItemGroups: async () => [row, { ...row, code: 'camera-duplicate' }] }, authority(context));
+  await assert.rejects(() => service.read({ limit: 10 }), error => error.code === 'INVALID_RESPONSE');
+});
