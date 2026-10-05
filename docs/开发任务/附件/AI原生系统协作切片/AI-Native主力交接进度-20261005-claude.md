@@ -203,3 +203,31 @@
 AIN-11 下一步重点：复用 `apps/api/src/modules/ai-native/budget/` 和 `BudgetGatewayAdapter`，实现可信 task/run/step/action/priceVersion/evidence 关联适配；明确 reserve、dispatch token、settle、release、unknown、reconcile 的唯一账本边界。平台/租户/场景策略、权益、报价、授权、配置 revision、usage evidence 缺任何正式来源均拒绝，不用测试桩恒定成功替代。预算 owner scope 与 workspace consumer scope 不可混淆。
 
 验证只使用离线护栏和隔离生成：禁止读 `.env`、启服务、真实 DB/HTTP/模型/支付、安装依赖、写共享生成物、合 main、推送或生产启用。每次先红测再修复，记录真实退出码、失败与未验项；离线替身不能宣称 MySQL 并发、真实供应商或生产授权通过。完成完整调用链后再提交，并在交接记录中列出 SHA、文件、接线合同和剩余阻塞。正式验收仍按原 28 项，不能因局部测试改变完成率。
+
+## 12. 接任后完整工作量核对（2026-10-05）
+
+此前第10节只列了最近四个代码修复，不足以代表接任后的完整主线工作。以交接点 `ca601baf` 为分界，当前 HEAD `84a6b2fc` 之间可追溯 **47 个提交**，`git diff --stat ca601baf..HEAD` 为约 **109 个文件、6102 行新增、45 行删除**。这47个提交包含两类：一部分是接任时把旧Codex树 C01～C04/B16 交付历史整合进主线，另一部分是接任后继续完成的主线修复；不能把47个提交都误报为本轮从零实现，也不能把它们折算为47项AIN正式验收。
+
+### 完整提交分组
+
+| 范围 | 提交（短 SHA） | 实际内容 |
+|---|---|---|
+| B16整合保留 | `c135d1f0`、`781b2ba9`、`8b6dafa2` | readiness diagnostics、治理差异展示及B16交付证据；属于外围配套，不能替代核心验收 |
+| C01～C03 / AIN-11预算 | `4c0be676`、`fa400a6b`、`fdc39623`、`c2f500c6`、`f71e8025`、`60dbb037`、`bd37a879`、`b5b2ebb2`、`fb0c96f0`、`30fc7b1e`、`8803abb1`、`e5d1bf09`、`11b4469a`、`2c4892fc`、`87b2cb07`、`4a77bbda` | 持久预算schema/事务adapter、策略交集、actor绑定、token列宽与金额精度、unknown/replay/应答不明、Gateway预算边界及交接证据；真实MySQL并发和主Gateway单账接线仍未验 |
+| C04 / AIN-06运行器 | `7128c0d6`、`aaa33cc4`、`751ac7e3`、`cfc56929`、`265014cb`、`08d0d42d`、`02dd35b3` | 持久任务运行器、任务结果转换、部分成功、状态迁移和取消结果持久化；task级恢复/人工接管/完整并行能力仍未收口 |
+| AIN-03/04/05基础 | `ca2c3530`、`b83cfe16`、`eefac34c`、`865316bc`、`b3588890`、`192b7f21`、`09764326` | 真实Prisma类型CAS、租户BYOK、平台vault、默认Profile事务、能力白名单、平台配置授权、能力证据仓储；live验真、公共正式接线和生产装配仍未验 |
+| AIN-07审批边界 | `82e132ad`、`8ee52bc2`、`a3c7d805` | 持久审批消费边界、不可变提案版本、审批决策CAS；不等于Core业务写入和审批全链路完成 |
+| AIN-08受权只读事实 | `760ec466`、`e2ef605c`、`f9a9454c`、`618b800b`、`c34aff1b`、`1018cffa`、`147c94b0`、`b148ede0`、`53622ec5` | 目录、可用性、会员候选投影；绑定既有Core只读方法、真实AuthService/ApiAuthGuard路由语义、ALS身份和迟到撤权复核，并补齐行绑定、租户归属、唯一性和脱敏校验 |
+| 接任后预算适配修复 | `cd4336ec` | await期间actor/request篡改隔离；workspace消费scope禁止伪造platform/tenant owner scope |
+| 本次交接记录 | `84a6b2fc` | 将上述最近修复及主线剩余缺口交给Claude；不含代码功能变更 |
+
+### 接任后已经实际执行的验证
+
+- AIN-08只读事实与真实 Guard 路径：最近投影回归 11/11 通过；此前真实 `AuthService`/`ApiAuthGuard` 离线组合回归包含在主线记录中。
+- C01～C03预算及Gateway适配：最近定向回归 31/31 通过；覆盖预算service、Prisma预算仓储替身、金额/Token边界、unknown/replay、绑定证据和等待竞态。
+- API TypeScript 检查退出码 0；相关 `git diff --check` 通过。
+- 更早的主线整合回归、配置/能力/运行器/审批回归结果保留在各提交记录和第4～6节；本次没有把旧结果重新冒充成最新全量回归。
+
+### 不能从上述工作推导出的结论
+
+这47个提交和6102行代码不能推导出“AIN专项完成”“28项正式验收通过”或“已生产可用”。当前仍明确未完成：真实MySQL锁/迁移执行、主线Gateway预算单账接线、可信订阅/报价/usage/dispatch证据、live模型能力验真、AIN-06 task级恢复接管、AIN-07 Core业务幂等写入、真实HTTP/供应商、浏览器/微信宿主/真机和生产灰度。正式验收仍按原口径处理，不修改完成率。
