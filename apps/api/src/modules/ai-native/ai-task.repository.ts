@@ -37,7 +37,7 @@ export class AiTaskRepositoryError extends Error {
 }
 
 /** Bound by the application to the real request/job credential, never supplied by a model. */
-export type AiTaskRepositoryOperation = "read_metadata" | "read_events" | "claim_run" | "claim_recovery_run" | "release_run" | "transition_task";
+export type AiTaskRepositoryOperation = "read_metadata" | "read_events" | "claim_run" | "claim_recovery_run" | "release_run" | "transition_task" | "read_step_terminal" | "takeover_run";
 export interface AiTaskRepositoryAuthority {
   resolve(taskId: string, operation: AiTaskRepositoryOperation): Promise<AiExecutionContext>;
 }
