@@ -10,7 +10,7 @@ pricingUnit 改为消费已有 RENTAL_PRICING_UNIT_CODES，修正 AI 枚举遗�
 
 node --test tests/ai-native-lane-a-quote-boundaries.test.cjs 红测：1 pass / 7 fail / 0 skip，退出1。三项确认生产缺陷（过期时点、可变请求指纹、费用行额外字段透传）；另外四项错误地强选了尚未配置费率的 calendar_day，人工 Core 先拒绝。这是合成输入错误，不是四个额外生产缺陷。改用每品类正式配置中的费率单位，另加 calendar_day 枚举消费独立验证。
 
-绿测 node --test --test-concurrency=2 tests/ai-native-lane-a-quote-boundaries.test.cjs tests/ai-native-ain09-quote-preview.test.cjs：17 pass / 0 fail / 0 skip，退出0。
+绿测 node --test --test-concurrency=2 tests/ai-native-lane-a-quote-boundaries.test.cjs tests/ai-native-ain09-quote-preview.test.cjs：17 pass / 0 fail / 0 skip，退出0。后续边界红测又补出并修复报价保存依据不完整、非法时区、价格版本半绑定等问题；本轮与候选准备一起复验为 38/38 pass、0 fail、0 skip，退出0。
 
 四品类测试实际执行 RentalCoreService 初始化与 RentalBusinessService.createQuote，两次同输入分别走人工 Core 和 AI bridge，逐项比较租金、应付、应收、费用分项、时区；仅配置/事实仓储吸收替身。固定带 +08:00 起止，真实计价没有复制算法。此部分注入的 quote authority 只是显式生命周期测试端口，**不算真实报价 Guard 或权益验收**。
 

@@ -24,6 +24,16 @@ export const aiQuotePreviewInputSchema = z.object({
 });
 
 export type AiQuotePreviewInput = z.input<typeof aiQuotePreviewInputSchema>;
+const savedQuoteBasisSchema = z.object({
+  id, quoteNo: z.string().trim().min(1).max(191),
+  currency: z.string().regex(/^[A-Z]{3}$/u).optional(),
+  pricingPlanVersion: z.string().trim().min(1).max(191), ruleVersion: z.string().trim().min(1).max(191),
+  priceVersionId: id.optional(), priceVersion: z.string().trim().min(1).max(191).optional(),
+  calendarVersion: z.string().max(4096).optional(), createdAt: timestamp, expiresAt: timestamp,
+  pricingContext: z.object({ timeZone: z.string().min(1).max(100).refine(value => {
+    try { new Intl.DateTimeFormat('en', { timeZone: value }).format(0); return true; } catch { return false; }
+  }).optional() }).optional()
+}).refine(value => Boolean(value.priceVersionId) === Boolean(value.priceVersion));
 const chargeLineSchema = z.object({
   code: z.string().min(1).max(191), name: z.string().min(1).max(500),
   type: z.enum(['rental', 'calendar_adjustment', 'fulfillment', 'preauthorization', 'discount', 'coupon', 'service', 'deposit', 'cancellation', 'overdue', 'damage', 'extension', 'early_return_refund', 'order_change']),
@@ -85,10 +95,11 @@ export class AiQuotePreviewService {
         const quote = await this.core.createQuote(context.scope.tenantId, business, structuredClone(parsed.data) as RentalQuoteRequest);
         const observed = this.clock(); if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError("CONFIG_INVALID");
         const chargeLines = z.array(chargeLineSchema).max(100).safeParse(quote?.chargeLines);
+        const savedBasis = savedQuoteBasisSchema.safeParse(quote);
         if (quote?.tenantId !== context.scope.tenantId || !Array.isArray(quote?.request?.lines) || quote.request.lines.length !== parsed.data.lines.length
           || requestFingerprint(quote.request) !== expectedRequest
           || !this.hasSafeAmounts(quote)
-          || !chargeLines.success) throw new ModelGatewayError("INVALID_RESPONSE");
+          || !chargeLines.success || !savedBasis.success) throw new ModelGatewayError("INVALID_RESPONSE");
         const expiresAt = new Date(quote.expiresAt); if (!Number.isFinite(expiresAt.getTime())) throw new ModelGatewayError("INVALID_RESPONSE");
         if (expiresAt.getTime() <= observed.getTime()) return this.failure(context, "expired", "报价生成后已失效");
         return { contractVersion: "ain-09-quote-preview-draft-1", requestId: context.requestId, observedAt: observed.toISOString(), scope: context.scope, status: "quoted", quote: {

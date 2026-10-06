@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isDeepStrictEqual } from 'node:util';
 import { RENTAL_CATEGORY_DEFINITIONS, RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES } from '@rental-os/shared';
 import type { AiCatalogReadFactsService } from '../catalog-read-facts.service';
 import type { AiMembershipCandidateReadFactsService } from '../membership-candidate-read-facts.service';
@@ -95,6 +96,8 @@ export class AiQuoteCandidatePreparationService {
       || currentCatalog.audience !== catalog.audience || currentMembers.audience !== members.audience
       || JSON.stringify(currentCatalog.items) !== JSON.stringify(catalog.items)
       || JSON.stringify(currentMembers.candidates) !== JSON.stringify(members.candidates)) throw new ModelGatewayError('FORBIDDEN');
+    const currentContext = structuredClone(await this.contexts.current(scope));
+    if (!isDeepStrictEqual(currentContext, context)) throw new ModelGatewayError('CONFIG_INVALID');
     if (ambiguous.length) return { status: 'ambiguous' as const, ambiguousFields: ambiguous, missingFields, customerCandidates };
     if (missingFields.length) return { status: 'missing_input' as const, missingFields };
     const request = aiQuotePreviewInputSchema.safeParse({ customerType: input.customerType, customerId: input.customerId,
