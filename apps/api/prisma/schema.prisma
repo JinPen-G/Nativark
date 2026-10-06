@@ -991,15 +991,37 @@ model AiStructuredMemory {
   subjectType    String   @db.VarChar(32)
   subjectId      String   @db.VarChar(191)
   scopeRevision  Int      @db.UnsignedInt
+  revision       Int      @default(1) @db.UnsignedInt
+  ownerKind      String   @db.VarChar(32)
+  ownerId        String   @db.VarChar(191)
+  aclRevision    Int      @default(1) @db.UnsignedInt
   content        Json
   contentHash    String   @db.VarChar(128)
   status         String   @db.VarChar(32)
+  confirmationRecordId String? @db.VarChar(36)
+  deletedAt      DateTime?
+  state          Json?
   expiresAt      DateTime?
   createdAt      DateTime @default(now()) @db.DateTime(3)
   updatedAt      DateTime @updatedAt
 
   @@index([tenantId, workspaceId, subjectType, subjectId, status], map: "ai_memory_subject_scope_idx")
   @@map("ai_structured_memories")
+}
+
+/// Immutable operation receipt for structured-memory CAS/replay.
+model AiMemoryOperation {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  memoryId    String   @db.VarChar(191)
+  tenantId    String   @db.VarChar(191)
+  workspaceId String   @db.VarChar(191)
+  operationId String   @db.VarChar(128)
+  fingerprint String   @db.VarChar(128)
+  createdAt   DateTime @default(now()) @db.DateTime(3)
+
+  @@unique([tenantId, workspaceId, memoryId, operationId], map: "ai_memory_operations_scope_key")
+  @@index([memoryId, createdAt], map: "ai_memory_operations_memory_idx")
+  @@map("ai_memory_operations")
 }
 
 model AiHumanConfirmation {
@@ -1015,6 +1037,7 @@ model AiHumanConfirmation {
   expiresAt      DateTime?
   createdAt      DateTime @default(now()) @db.DateTime(3)
   updatedAt      DateTime @updatedAt
+  state          Json?
 
   @@unique([tenantId, idempotencyKey], map: "ai_human_confirmation_tenant_key")
   @@index([tenantId, workspaceId, subjectId, status], map: "ai_human_confirmation_subject_idx")
