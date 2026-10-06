@@ -15,11 +15,16 @@ export class KnowledgeDocumentService {
   }
 
   async load(context: AiExecutionContext, documentId: string, action: KnowledgeAction): Promise<KnowledgeRecord> {
-    await authorize(this.ports.authorization, context, { action, scope: context.scope });
-    const record = await this.ports.repository.read(context.scope, documentId);
-    assertRecord(record, context.scope, documentId);
-    await authorize(this.ports.authorization, context, { action, scope: context.scope, document: record.document });
-    return record;
+    const contextHash = fingerprint(context);
+    const stableContext = structuredClone(context);
+    await authorize(this.ports.authorization, stableContext, { action, scope: stableContext.scope });
+    if (fingerprint(context) !== contextHash) throw new KnowledgeError('unavailable');
+    const record = await this.ports.repository.read(stableContext.scope, documentId);
+    assertRecord(record, stableContext.scope, documentId);
+    if (fingerprint(context) !== contextHash) throw new KnowledgeError('unavailable');
+    await authorize(this.ports.authorization, stableContext, { action, scope: stableContext.scope, document: record.document });
+    if (fingerprint(context) !== contextHash) throw new KnowledgeError('unavailable');
+    return structuredClone(record);
   }
 
   async replay(context: AiExecutionContext, record: KnowledgeRecord, operationId: string, hash: string): Promise<boolean> {
