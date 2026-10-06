@@ -40,6 +40,14 @@ export interface AiStepTransitionGrant {
 export interface AiStepTransitionAuthority {
   resolve(command: Readonly<AiStepTransitionCommand>): Promise<AiStepTransitionGrant>;
 }
+/** The transaction callback finished, but COMMIT acknowledgement was not
+ * reliable. The durable step/event may exist; never replay the business effect. */
+export class AiStepTransitionResultUnknownError extends Error {
+  readonly code = 'AI_RESULT_UNKNOWN' as const;
+  readonly retryable = false;
+  readonly nextAction = 'reconcile' as const;
+  constructor() { super('AI_RESULT_UNKNOWN'); }
+}
 const grantSchema = z.object({
   context: z.unknown(), transitionAllowed: z.literal(true), authorizationKey: id, taskId: id,
   evidenceId: id, evidenceRevision: revision, expiresAt: z.string().datetime({ offset: true }),
@@ -108,6 +116,7 @@ export class AiStepTransitionRepository {
     const parsed = commandSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
     const input = parsed.data, initial = await this.resolve(input);
+    let callbackCompleted = false;
     try {
       return await this.db.$transaction(async tx => {
         const task = await tx.aiTask.findFirst({ where: initial.access.where, select: taskSelect });
@@ -170,10 +179,12 @@ export class AiStepTransitionRepository {
           payload: { data: event.data, initiator: { kind: "worker", id: lease.holderId, actorKind: current.access.actorKind, actorId: current.access.actorId },
             evidence: { id: current.grant.evidenceId, revision: current.grant.evidenceRevision, digest: current.digest } }
         }, select: { cursor: true } });
+        callbackCompleted = true;
         return { event, runRevision: lease.revision + 1 };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw error;
+      if (callbackCompleted) throw new AiStepTransitionResultUnknownError();
       throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
     }
   }

@@ -100,7 +100,7 @@ export interface AiTaskRunnerLeasePort {
  * It receives already-authorized evidence and never manufactures a state transition.
  */
 export interface AiTaskRunnerStepPort {
-  register(plan: AiTaskRunnerStepPlan, lease: AiTaskRunnerLease): Promise<AiTaskRunnerRegisteredStep>;
+  register(plan: AiTaskRunnerStepPlan, lease: AiTaskRunnerLease, existingOnly?: boolean): Promise<AiTaskRunnerRegisteredStep>;
   start(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerStepCommit>;
   succeed(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, resultRef: string | null): Promise<AiTaskRunnerStepCommit>;
   fail(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, errorCode: string, resultRef: string | null): Promise<AiTaskRunnerStepCommit>;

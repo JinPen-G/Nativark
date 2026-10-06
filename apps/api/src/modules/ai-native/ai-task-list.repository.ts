@@ -26,6 +26,8 @@ type ListDb = Pick<PrismaClient, 'aiTask'>;
 export interface AiTaskListAuthority {
   /** Resolve a fresh server identity for the list action; caller scope is not authority. */
   resolveList(input: { status?: string; sceneCode?: string }): Promise<AiExecutionContext>;
+  /** A composition may require the existing per-task metadata action policy as well. */
+  authorizeMetadata?(taskId: string): Promise<AiExecutionContext>;
 }
 
 export interface AiTaskMetadataPage {
@@ -68,6 +70,14 @@ export class AiTaskListRepository {
     let rows: Array<Prisma.AiTaskGetPayload<{ select: typeof taskSelect }>>;
     try { rows = await this.db.aiTask.findMany({ where, select: taskSelect, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take: input.limit + 1 }); }
     catch { throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE'); }
+    if (!Array.isArray(rows) || rows.length > input.limit + 1) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+    if (this.authority.authorizeMetadata) {
+      for (const row of rows) {
+        const permitted = structuredClone(await this.authority.authorizeMetadata(row.id));
+        const check = aiTaskAccessFromContext(permitted, row.id, this.clock());
+        if (check.bindingKey !== access.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      }
+    }
     // Sequential current-permission checks do not constitute atomic authorization.
     let current: AiExecutionContext;
     try { current = structuredClone(await this.authority.resolveList({ status: input.status, sceneCode: input.sceneCode })); }

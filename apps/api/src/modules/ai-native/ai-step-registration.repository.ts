@@ -65,7 +65,7 @@ export class AiStepRegistrationRepository {
     } catch { throw denied(); }
   }
 
-  async register(value: unknown) {
+  async register(value: unknown, existingOnly = false) {
     const parsed = commandSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
     const input = parsed.data, initial = await this.resolve(input);
@@ -87,6 +87,7 @@ export class AiStepRegistrationRepository {
           return { stepId: existing.id, runId: existing.runId, sequence: existing.sequence, stepRevision: existing.revision,
             taskRevision: task.revision, replayed: true as const, event: null, runRevision: null };
         }
+        if (existingOnly) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         if (!["QUEUED", "RUNNING"].includes(task.status) || task.cancelRequestedAt !== null) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
         if (task.revision !== input.expectedTaskRevision || task.eventCursor < 0n || task.eventCursor >= 18446744073709551615n) throw conflict();
         const locked = await tx.aiTask.updateMany({

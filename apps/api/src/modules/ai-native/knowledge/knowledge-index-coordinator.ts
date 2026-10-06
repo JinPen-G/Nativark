@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { AiExecutionContext } from '@rental-os/shared';
 import type { KnowledgeIndexJob, KnowledgeIndexPort, KnowledgeRecord } from './knowledge.ports';
 import { KnowledgeDocumentService } from './knowledge-document.service';
-import { KnowledgeError, requiredPort } from './knowledge-errors';
+import { KnowledgeCommitUnknownError, KnowledgeError, requiredPort } from './knowledge-errors';
 import { authorize, fingerprint, mutationInput, parse, queueIndex } from './knowledge-validation';
 
 export class KnowledgeIndexCoordinator {
@@ -22,7 +22,13 @@ export class KnowledgeIndexCoordinator {
     if (job.status !== 'pending') return before;
     if (job.kind === 'upsert' && (before.document.publication === 'deleted' || before.document.parsing !== 'parsed' || before.document.documentVersion !== job.documentVersion || before.document.aclRevision !== job.aclRevision)) throw new KnowledgeError('conflict');
     let status: 'completed' | 'failed' = 'completed';
-    try { await this.index.apply(context, { scope: context.scope, documentId, job: structuredClone(job) }); } catch { status = 'failed'; }
+    try { await this.index.apply(context, { scope: context.scope, documentId, job: structuredClone(job) }); }
+    catch (error) {
+      // A persisted readiness receipt may already exist. Do not overwrite an
+      // uncertain commit with a definite failure; reconcile this same job.
+      if (error instanceof KnowledgeCommitUnknownError) throw error;
+      status = 'failed';
+    }
     return this.complete(context, documentId, job, status);
   }
   async complete(context: AiExecutionContext, documentId: string, job: KnowledgeIndexJob, status: 'completed' | 'failed'): Promise<KnowledgeRecord> {

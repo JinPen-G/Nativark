@@ -444,3 +444,71 @@ HANDOFF-ID / 原任务与CLAIM-ID：
 - 第一辅助（AIN-07 审批事务组合根）：原 `ai-native-fork-execution` / `ai/ai-native-fork-execution-20261005`，固定0229de59；独占 `approval-execution/**`、`prisma-approval-consumption.repository.ts`、新approved-order-composition测试/fixtures和独立Fork-AIN07记录。真实Guard/DTO/ALS、审批消费与Core原事务组合；其他Core/公共文件改动需协调确认，缺正式来源拒绝。固定交付d33cd651已在主线暂存合入并复验：初始68/68，异常脱敏/已提交读取待核对红测5项失败后修复，最终73/73及扩大307/307、API类型/diff check通过；详见Claude主线记录，合并提交以Git历史为准。限定组合不等于正式policy/输入来源或真实环境已经接通。
 - 第二辅助（AIN-06 输入等待与恢复闭环）：独立 `ai-native-fork-recovery` / `ai/ai-native-fork-recovery-20261006`，固定0229de59；独占 `runner/**`（排除主线prisma-task-gateway-invocation.preparation.ts）、task-input/**、ai-task.repository/ai-task-transition.repository/ai-step-transition.repository/ai-step-registration.repository及直接回归和独立Fork-AIN06记录。主线公共测试task-input-contracts/schema除外。schema/shared变更由主线提供固定644cb541，不跟随移动HEAD。已回报59699872/9d2b2be6等切片，未由主线复验，不据作者测试结项。
 - 两辅助不编辑对方文件或主树，不修改Codex临时记录及三份主文档；主线不双写辅助的在途范围。收到交付后主线核验固定提交、离线组合与失败边界，再合入专项分支；不合main、不push、不部署，既有output不清理/覆盖/提交。
+
+### AIN-HANDOFF-005：接回353d0260与第二批核心链路分工（2026-10-06）
+
+- 负责人确认Codex本轮停止写入；主线实查HEAD353d0260、原专项分支、无MERGE_HEAD，保留任务列表正式装配三个未提交文件及全部output。Codex本轮3cd0459e～353d0260为辅助实现；不同阶段96/249/22/30项证据不得相加称为最新全量。主线已独立复跑列表/组合/当前动作35/35、exit0，尚待补充风险验证及收口记录。
+- 负责人新增要求：给原两个辅助会话各发连续核心批次、在原树开发，不新建树或接管主树。两边先核验本树状态并接收固定353d0260作为依赖，不跟随移动HEAD；保留所有原提交和未提交成果。若本会话权限/用户范围仍需确认，如实报告，不绕过。
+- 恢复线第二批：原ai-native-fork-recovery与原分支，负责runner执行点强制当前执行授权、持久化运行器显式组合及暂停/恢复/接管/累计资源的组合验证。唯一写入runner/**（仍排除prisma-task-gateway-invocation.preparation.ts）、task-input/**和上述已认领任务/步骤仓储及直接测试，独立记录Fork-AIN06-第二批核心闭环-20261006.md；不改task-authorization.composition/公共Auth/预算/Gateway/schema/shared。
+- 审批线第二批：原ai-native-fork-execution与原分支，负责ApprovedOrderPolicyAuthority的真实任务授权适配、批准input/preview持久来源及Core单动作提交/核对整链；唯一写入approval-execution/**、ai-proposal-repository.ts、prisma-approval-consumption.repository.ts与直接测试，独立记录Fork-AIN07-第二批持久来源-20261006.md。新增快照模型/迁移必须先向主线提交精确公共需求，由主线落地；不得将当前quote或请求body冒充既有批准快照。
+- 主线保留未提交task-list装配、AIN-04/05和知识/记忆仓储、全部公共schema/shared/鉴权/中央记录及最终整合；不双写上述辅助范围。本批只是派工，不计交付或整项验收。原AIN依赖、正式0/28及离线环境边界不变。审批辅助受原会话范围限制未执行本次主树任务列表只读复核，不记为Review通过或无发现。
+
+### AIN-IMPL-005：主线接收任务列表与修复知识持久化未知结果
+
+- 遗留任务列表正式Auth/逐项metadata政策装配已接收并提交d111a1c8，主线扩大62/62、API类型通过；不是专项全量。
+- AIN-10两个仓储改用本树实际Prisma类型，修复普通数据库异常冒充conflict和读错误泄漏；写入结果不明返回result_unknown/reconcile，确认失败与真实CAS保持拒绝。22项红测10失败后修复，扩大到实际知识/记忆服务与仓储119/119、API类型、diff check通过；本树Prisma生成器核验为noop。完整命令及不确定性边界见[主线记录](AI原生系统协作切片/Claude主线恢复与整合-20261006.md)。JSON读回、记忆owner/确认关系、解析chunk落盘和真实模块装配继续推进，不宣称AIN-10完成。
+- 第二批两辅助均已收到负责人授权：恢复线接收固定353d0260，审批线在原会话得到确认后ff至353d0260并开始policy/持久来源；主线为审批提供公共快照模型。没有变更正式0/28，没有真实数据库/供应商或生产验收。
+- AIN-10解析实际落盘：主线确认正式create→parse返回parsed却未写chunks，及文档版本标识可复用；先红17项3失败后修复。仓储将解析chunks与当前版本/head CAS/操作收据同事务保存，禁止覆盖已有chunks或复用历史标识；相关实际生命周期、解析、知识/记忆仓储69/69、API类型/diff check通过。JSON状态/owner收据/确认关系和真实来源仍在推进，详见主线记录，不计整项完成。
+- AIN-07公共前置be086a28：主线新增AiApprovedOrderSnapshot复合FK/唯一约束及追加迁移，公开Core既有assertOrderMatchesQuote方法供准备阶段复用（只改可见性，不改业务算法）。先红6项5失败后6/6，既有审批组合扩大79/79、API类型与diff check通过。离线schema差异与迁移一致；隔离生成首次在安装后的junction清理被护栏拦截exit1，保留自身现场，后续已安装client指纹核验noop exit0，不冒称清理成功。详情与剩余清理责任见主线记录；该前置不等于辅助新实现已整合。
+
+### AIN-HANDOFF-006：负责人授权接回两条辅助线（2026-10-06）
+
+- 负责人明确要求Codex接回审批/恢复线并继续未完成部分。本轮唯一写入主线树和原专项分支；两个fork只读，固定接收，不竞争其活动树，不清理output，不合main/push/启用。
+- 审批7ab43777/397f3885分别接入4f15103a/c5ad2810；恢复7c6e4cbb/4404fa76/e43fba95分别接入6b910025/219bc74e/d58222b7。已有公共补丁和第一批同源历史不重复接入。
+- 首轮主线组合870/870、exit0，API类型通过。继续修复审批准备/输入等待COMMIT应答不明以及清理覆盖unknown，先红后修，不删失败断言。完整过程、命令和最新冻结结果见[接回审批与恢复线记录](AI原生系统协作切片/Codex接回审批与恢复线-20261006.md)。来源作者回归不冒充本轮主线验证。
+- 输入生产、正式plan/registration/result/有限字段来源及工具装配仍有真实代码缺口，缺依赖unavailable；不把合并完成写成AIN06/07结项或“仅剩环境”。原依赖顺序、M1和28项验收口径不变，未执行真实MySQL/HTTP/供应商/浏览器/设备或生产验收。
+
+### AIN-IMPL-006：只读步骤持久证据装配（2026-10-06）
+
+- 负责人要求接续主线核心，源码起点c17ad9e7；Codex只写原主线树，未改fork/main。新增真实Prisma task/run/step/plan/artifact/charge证据适配与显式正式授权组合，复用原状态机/CAS/事件事务；四个既有只读工具为适配上界，不改变工具成熟度或生产启用。
+- 红测确认写工具伪装readonly可被接受，以及步骤COMMIT应答不明被错误归为storage。现分别拒绝伪装写工具、保留unknown/reconcile不可重试；旧回滚和不重复执行断言保留。最终关联362/362、exit0，API类型/diff check通过，无skip/todo，不是全专项验收。
+- 计划政策、不可变输入、有限字段生产、实际工具executor和写/未知结果证据仍待补齐。仅实际服务＋数据库事务替身和正式Auth离线组合；未执行真实DB/HTTP/供应商/设备。详情见[持久步骤证据装配记录](AI原生系统协作切片/AIN-06-持久步骤证据装配-20261006-codex.md)，待独立复核，M1及正式0/28口径不变。
+
+### AIN-IMPL-007：正式计划读源、不可变输入与目录执行链（2026-10-06）
+
+- 从7eaa03f4接续，追加默认关闭的scope/scene/version政策与同task/run不可变输入模型/迁移；使用实际隔离生成Prisma类型、原Auth/订阅/动作政策、固定锁序及登记/CAS/结果仓储，不seed授权。
+- 显式composePersistedCatalogTaskRunner把实际政策、输入、登记、执行前step/action/fingerprint/fence校验、Guard/ALS、原Core目录读投影、结果和累计资源计量串联。仅既有catalog只读工具，不替代Gateway、不另扣财务账、不启生产模块。
+- 记录并修复事务内嵌套权益检查等待、提交应答不明、原端口空expiry误校验及授权时间刷新导致输入误变更。最终关联396/396、fail/cancel/skip/todo均0、exit0；API类型、离线schema validate/diff、diff check通过。隔离生成guardViolations0/sharedArtifactsUnchanged:true，旧生成锁改名保全，不删除历史资源。
+- 受权政策管理/配置写入、其他工具及模型执行、正式业务澄清来源、审批建单原输入、unknown/旧代次恢复证据仍待推进；缺依赖unavailable。作者离线行为＋事务替身证据，不是MySQL/HTTP/模型/设备验收，待独立复核，正式0/28与M1不变。详见[正式计划与不可变输入记录](AI原生系统协作切片/AIN-06-正式计划与不可变输入-20261006-codex.md)。
+
+### AIN-IMPL-008：workspace场景政策受权管理（2026-10-06）
+
+- 从82e3bbc8接续，新增真实Prisma政策repository，复用AuthService/Scope解析与既有AI配置管理Guard权限system:params:manage；scope由服务器当前身份解析，scene由服务端组合选定，请求不能注入scope/scene/tools。
+- 未配置默认关闭；按canonical scope→政策固定锁序、expectedRevision CAS及事务内当前授权复验。仅既有catalog只读工具/资源上限，不seed、不授予权益或派发。提交应答不明unknown/reconcile不可重试。
+- 实际受权管理→不可变输入→计划证明组合验证，停用政策拒绝旧证明。最终关联53/53、fail/cancel/skip/todo均0，exit0；API类型/diff check exit0。DB事务替身，真库/HTTP/供应商/设备未验；与上轮396项不相加。
+- 真实配置页面/HTTP/生产注册、统一配置审计、全局政策管理与其他工具仍待接，不把该子集当完整治理或AIN-06结项。详见[政策受权管理记录](AI原生系统协作切片/AIN-06-场景政策受权管理-20261006-codex.md)，待独立复核，M1/0-of-28不变。
+
+### AIN-IMPL-011：持久可用性只读执行链（2026-10-07）
+
+Codex临时续接主线，基线ca7b15af。复用真实Core输入schema、政策管理/CAS、不可变输入、计划/登记、Guard/ALS、事实服务、结果与累计资源，增量接通availability，未新增库存算法、预占/建单或生产注册。服务器构造选择单个既有只读工具，默认catalog；caller/model不得选择工具，缺来源拒绝。
+
+最终组合与既有计划/政策/证据回归73/73、exit0，API严格类型/diff exit0；扩大的事实服务结果见切片。数据库/Core执行为替身，不等于真库/模型/HTTP验收。AIN08由滞后Pending更正为In Progress，不计整项完成，M1未放行/0-of-28不变。详情及按原任务核对的M1缺口见[持久可用性执行链](AI原生系统协作切片/AIN-06-08-持久可用性执行链-20261007-codex.md)。
+
+### AIN-IMPL-010：原始建单输入持久读取（2026-10-06）
+
+Codex临时顶替主线，基线7c7e4794。新增真实Prisma事务读取adapter，复用当前任务/执行授权、已登记步骤inputRef与原fingerprint、Core DTO及原准备服务。没有生产建单输入发布器或write-plan授权，缺来源仍unavailable，不创建审批/订单或启用生产。
+
+行为组160/160、exit0；API类型/diff exit0。全关联组164项163通过/1项既有schema diff检查失败、exit1，原断言保留。作者复核非独立Review，数据库执行为离线替身，不代表真实MySQL/模型/生产验收，不改变原任务完成率。详见[原始建单输入持久读取](AI原生系统协作切片/AIN-07-原始建单输入持久读取-20261006-codex.md)。
+
+### AIN-IMPL-009：只读中断与跨代次结果恢复（2026-10-06）
+
+- 从64f8c2fa续作，真实目录运行器红测确认只读中断被送入原FSM禁止的NONE→POSSIBLE迁移。现保留RUNNING步骤和未完成收据、资源unknown，经原任务事务持久waiting_external；未变更共享状态机、不制造业务副作用。
+- 接回既有recovery_only租约注解，实际授权/fence/expiry校验保留，输入生产不接受恢复租约。旧代次完整只读结果经同task/run/step/action/fingerprint/hash/charge验证，在当前授权lease下完成状态与计量；不把旧收据改成新worker事实，不重复调用Core。
+- 完整结果落库后步骤事务失败、换worker恢复、未完成收据保持unknown，以及future fence/篡改/跨scope charge/撤权/政策变化均有实际链证据。最终扩大394/394、fail/cancel/skip/todo均0、exit0，API类型/diff check exit0；不是专项全量，不与前轮计数相加。
+- 模型/业务写入unknown证据、政策到期后合法历史核对、生产装配仍未完；DB事务替身非MySQL锁/宕机验收。详见[只读中断与跨代次恢复记录](AI原生系统协作切片/AIN-06-只读中断与跨代次恢复-20261006-codex.md)，待独立复核，M1/正式0-of-28不变。
+
+### AIN-IMPL-012：知识持久候选选择装配（2026-10-07）
+
+从06c5cd1a接续，新增真实Prisma类型的workspace有界元数据候选adapter，逐文档调用必需的当前授权端口，复读revision并拒绝身份/配置变化；原Retrieval/Source执行正文、版本、撤回及缓存复验。原持久组合在selection省略时使用此adapter，不猜ACL字符串语义、不授予默认权限、不启生产。
+
+红测6/6失败exit1→实现后通过；扩大知识回归130/130exit0；自查补未索引状态语义后最终关联23/23exit0，API严格类型/diff各exit0，无skip/todo。授权与数据库执行为明确替身，正式ACL/权益/附件/确认来源仍待接；tenant/platform无回退，超过100候选unavailable，词法非向量。详情见[持久候选选择装配](AI原生系统协作切片/AIN-10-持久候选选择装配-20261007-codex.md)。作者完成待独立复核，M1与0/28不变；不称主线全量或真环境通过。
