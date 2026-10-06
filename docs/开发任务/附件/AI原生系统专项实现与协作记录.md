@@ -488,6 +488,12 @@ HANDOFF-ID / 原任务与CLAIM-ID：
 - 实际受权管理→不可变输入→计划证明组合验证，停用政策拒绝旧证明。最终关联53/53、fail/cancel/skip/todo均0，exit0；API类型/diff check exit0。DB事务替身，真库/HTTP/供应商/设备未验；与上轮396项不相加。
 - 真实配置页面/HTTP/生产注册、统一配置审计、全局政策管理与其他工具仍待接，不把该子集当完整治理或AIN-06结项。详见[政策受权管理记录](AI原生系统协作切片/AIN-06-场景政策受权管理-20261006-codex.md)，待独立复核，M1/0-of-28不变。
 
+### AIN-IMPL-011：持久可用性只读执行链（2026-10-07）
+
+Codex临时续接主线，基线ca7b15af。复用真实Core输入schema、政策管理/CAS、不可变输入、计划/登记、Guard/ALS、事实服务、结果与累计资源，增量接通availability，未新增库存算法、预占/建单或生产注册。服务器构造选择单个既有只读工具，默认catalog；caller/model不得选择工具，缺来源拒绝。
+
+最终组合与既有计划/政策/证据回归73/73、exit0，API严格类型/diff exit0；扩大的事实服务结果见切片。数据库/Core执行为替身，不等于真库/模型/HTTP验收。AIN08由滞后Pending更正为In Progress，不计整项完成，M1未放行/0-of-28不变。详情及按原任务核对的M1缺口见[持久可用性执行链](AI原生系统协作切片/AIN-06-08-持久可用性执行链-20261007-codex.md)。
+
 ### AIN-IMPL-010：原始建单输入持久读取（2026-10-06）
 
 Codex临时顶替主线，基线7c7e4794。新增真实Prisma事务读取adapter，复用当前任务/执行授权、已登记步骤inputRef与原fingerprint、Core DTO及原准备服务。没有生产建单输入发布器或write-plan授权，缺来源仍unavailable，不创建审批/订单或启用生产。

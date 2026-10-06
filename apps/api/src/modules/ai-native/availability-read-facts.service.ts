@@ -5,7 +5,7 @@ import { ModelGatewayError } from './model-gateway.ports';
 import type { AiBusinessReadAuthority } from './business-read-route.authority';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
-const request: z.ZodType<RentalAvailabilityRequest> = z.object({ locationId: id, startAt: z.string().datetime({ offset: true }), endAt: z.string().datetime({ offset: true }), lines: z.array(z.object({ itemGroupId: id, quantity: z.number().int().positive().max(100000) }).strict()).min(1).max(100) }).strict();
+export const aiAvailabilityReadInputSchema: z.ZodType<RentalAvailabilityRequest> = z.object({ locationId: id, startAt: z.string().datetime({ offset: true }), endAt: z.string().datetime({ offset: true }), lines: z.array(z.object({ itemGroupId: id, quantity: z.number().int().positive().max(100000) }).strict()).min(1).max(100) }).strict();
 const resultLine = z.object({ itemGroupId: id, itemGroupCode: id, itemGroupName: z.string().min(1).max(191), inventoryMode: z.nativeEnum(RentalInventoryMode), requestedQuantity: z.number().int().nonnegative(), availableQuantity: z.number().int().nonnegative(), available: z.boolean(), reasons: z.array(z.string().max(191)).max(20) }).strict();
 const result = z.object({ available: z.boolean(), locationId: id, startAt: z.string().datetime({ offset: true }), endAt: z.string().datetime({ offset: true }), lines: z.array(resultLine).max(100) }).strict();
 
@@ -18,7 +18,7 @@ export class AiAvailabilityReadFactsService {
     if (typeof core?.availability !== 'function' || typeof authority?.withRead !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   }
   async read(value: unknown): Promise<AiAvailabilityReadProjection> {
-    const parsed = request.safeParse(value); if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+    const parsed = aiAvailabilityReadInputSchema.safeParse(value); if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
     return this.authority.withRead('availability', parsed.data, async context => {
     if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user' || (context.audience !== 'operator' && context.audience !== 'staff') || !('access' in context)) throw new ModelGatewayError('FORBIDDEN');
     if (context.access.locationScope.mode === 'selected' && !context.access.locationScope.locationIds.includes(parsed.data.locationId)) throw new ModelGatewayError('FORBIDDEN');

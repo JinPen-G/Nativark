@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { AI_TOOL_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { aiCatalogReadInputSchema } from '../catalog-read-facts.service';
+import { aiAvailabilityReadInputSchema } from '../availability-read-facts.service';
 import { aiTaskAccessFromContext, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import type { AiStepRegistrationAuthority, AiStepRegistrationCommand } from '../ai-step-registration.repository';
 import type { AiTaskExecutionAuthorization } from './prisma-task-measured-effects';
@@ -20,7 +21,9 @@ const leaseSchema = z.object({ taskId: id.max(36), runId: id.max(36), holderId: 
   purpose: z.literal('recovery_only').optional() }).strict();
 const publishSchema = z.object({ taskId: id.max(36), registrationRef: id, expectedTaskRevision: rev,
   lease: leaseSchema, input: aiCatalogReadInputSchema }).strict();
-const toolsSchema = z.array(z.object({ code: z.literal('rental.catalog.search'), version: z.literal(AI_TOOL_DRAFT_VERSION) }).strict()).min(1).max(1);
+const availabilityPublishSchema = publishSchema.extend({ input: aiAvailabilityReadInputSchema });
+export type PersistedReadonlyTool = 'rental.catalog.search' | 'rental.availability.check';
+const toolsSchema = z.array(z.object({ code: z.enum(['rental.catalog.search', 'rental.availability.check']), version: z.literal(AI_TOOL_DRAFT_VERSION) }).strict()).min(1).max(1);
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const conflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
@@ -32,17 +35,19 @@ export class AiTaskPlanInputResultUnknownError extends Error {
   constructor() { super('AI_RESULT_UNKNOWN'); }
 }
 
-/** Actual scene-policy and immutable-input source for the existing catalog reader.
+/** Actual scene-policy and immutable-input source for two existing Core readers.
+ * Tool selection is server-side construction, never a request/model parameter.
  * No policy writer, implicit seed, model-selected tools or dispatch. A service-
  * owned policy row is required; action policies/entitlements remain mandatory.
  * Other inputs, writes and clarification contracts are intentionally unavailable.
  */
 export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, AiStepRegistrationAuthority {
   constructor(private readonly db: Db, private readonly authorization: AiTaskRepositoryAuthority,
-    private readonly execution: AiTaskExecutionAuthorization, private readonly wall: () => Date = () => new Date()) {
+    private readonly execution: AiTaskExecutionAuthorization, private readonly wall: () => Date = () => new Date(),
+    private readonly toolCode: PersistedReadonlyTool = 'rental.catalog.search') {
     if (typeof db?.$transaction !== 'function' || typeof db.aiTaskPlanPolicy?.findFirst !== 'function'
       || typeof db.aiTaskActionInput?.create !== 'function' || typeof authorization?.resolve !== 'function'
-      || typeof execution?.authorize !== 'function') throw unavailable();
+      || typeof execution?.authorize !== 'function' || !['rental.catalog.search', 'rental.availability.check'].includes(toolCode)) throw unavailable();
   }
 
   private async access(taskId: string, operation: 'read_metadata' | 'transition_task', db: Pick<Db, 'aiTask' | 'aiTaskPlanPolicy'> = this.db) {
@@ -56,6 +61,7 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     if (!row || Object.entries(key).some(([k, v]) => row[k as keyof typeof row] !== v) || !rev.safeParse(row.revision).success
       || row.enabled !== true || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime()) || row.expiresAt <= this.wall()) throw unavailable();
     const tools = toolsSchema.parse(structuredClone(row.allowedTools));
+    if (tools[0].code !== this.toolCode) throw unavailable();
     const limits = aiTaskRunnerLimitsSchema.parse(structuredClone(row.limits));
     if (limits.maxStepMs > limits.maxTotalMs) throw unavailable();
     const policy = { ...key, revision: row.revision, enabled: row.enabled, tools, limits, expiresAt: row.expiresAt.toISOString() };
@@ -73,16 +79,27 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
 
   private input(row: Prisma.AiTaskActionInputGetPayload<{}> | null, key: { scopeId: string; taskId: string; runId: string; registrationRef?: string }) {
     if (!row || Object.entries(key).some(([k, v]) => row[k as keyof typeof row] !== v)
-      || !id.max(36).safeParse(row.id).success || row.toolCode !== 'rental.catalog.search' || row.toolVersion !== AI_TOOL_DRAFT_VERSION
+      || !id.max(36).safeParse(row.id).success || row.toolCode !== this.toolCode || row.toolVersion !== AI_TOOL_DRAFT_VERSION
       || !(row.expiresAt instanceof Date) || row.expiresAt <= this.wall()) throw unavailable();
-    const payload = aiCatalogReadInputSchema.parse(structuredClone(row.payload));
+    const payload = this.toolCode === 'rental.catalog.search' ? aiCatalogReadInputSchema.parse(structuredClone(row.payload))
+      : aiAvailabilityReadInputSchema.parse(structuredClone(row.payload));
     if (requestFingerprint(payload) !== row.fingerprint) throw denied();
     return { id: row.id, registrationRef: row.registrationRef, toolCode: row.toolCode, toolVersion: row.toolVersion,
       payload, fingerprint: row.fingerprint, policyRevision: row.policyRevision, expiresAt: row.expiresAt.toISOString() };
   }
 
   async publishCatalogInput(value: unknown) {
-    const parsed = publishSchema.safeParse(value);
+    if (this.toolCode !== 'rental.catalog.search') throw unavailable();
+    return this.publish(value);
+  }
+
+  async publishAvailabilityInput(value: unknown) {
+    if (this.toolCode !== 'rental.availability.check') throw unavailable();
+    return this.publish(value);
+  }
+
+  private async publish(value: unknown) {
+    const parsed = (this.toolCode === 'rental.catalog.search' ? publishSchema : availabilityPublishSchema).safeParse(value);
     if (!parsed.success || parsed.data.lease.purpose === 'recovery_only') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const command = parsed.data;
     const executeContext = structuredClone(await this.execution.authorize(command.taskId));
@@ -118,8 +135,8 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
         const changed = await tx.aiTask.updateMany({ where: { ...current.access.where, revision: command.expectedTaskRevision,
           status: 'RUNNING', cancelRequestedAt: null }, data: { revision: command.expectedTaskRevision } });
         if (changed.count !== 1) throw conflict();
-        const row = await tx.aiTaskActionInput.create({ data: { ...key, id: randomUUID(), toolCode: 'rental.catalog.search',
-          toolVersion: AI_TOOL_DRAFT_VERSION, payload: command.input, fingerprint, policyRevision: current.policy.revision,
+        const row = await tx.aiTaskActionInput.create({ data: { ...key, id: randomUUID(), toolCode: this.toolCode,
+          toolVersion: AI_TOOL_DRAFT_VERSION, payload: JSON.parse(JSON.stringify(command.input)), fingerprint, policyRevision: current.policy.revision,
           expiresAt: new Date(current.policy.expiresAt) } });
         const final = await this.access(command.taskId, 'transition_task', tx);
         if (final.access.bindingKey !== before.access.bindingKey || final.policyHash !== before.policyHash) throw denied();
@@ -193,10 +210,22 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     return { context: current.context, registrationAllowed: true as const,
       authorizationKey: `persisted-input-${requestFingerprint({ plan: row.planHash, proof: proof.authorityHash, input })}`,
       taskId: command.taskId, registrationRef: command.registrationRef, expiresAt: proof.expiresAt,
-      toolCode: 'rental.catalog.search' as const, toolVersion: AI_TOOL_DRAFT_VERSION, inputRef: input.id, requestFingerprint: input.fingerprint };
+      toolCode: this.toolCode, toolVersion: AI_TOOL_DRAFT_VERSION, inputRef: input.id, requestFingerprint: input.fingerprint };
   }
 
   async readCatalogInput(binding: { taskId: string; runId: string; inputRef: string; fingerprint: string }) {
+    if (this.toolCode !== 'rental.catalog.search') throw unavailable();
+    const stored = await this.readStoredInput(binding);
+    return { ...stored, input: aiCatalogReadInputSchema.parse(stored.input) };
+  }
+
+  async readAvailabilityInput(binding: { taskId: string; runId: string; inputRef: string; fingerprint: string }) {
+    if (this.toolCode !== 'rental.availability.check') throw unavailable();
+    const stored = await this.readStoredInput(binding);
+    return { ...stored, input: aiAvailabilityReadInputSchema.parse(stored.input) };
+  }
+
+  private async readStoredInput(binding: { taskId: string; runId: string; inputRef: string; fingerprint: string }) {
     binding = structuredClone(binding);
     const before = await this.access(binding.taskId, 'transition_task');
     const key = { scopeId: before.task.scopeId, taskId: binding.taskId, runId: binding.runId };
@@ -210,7 +239,7 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
   async readForExecution(presented: { taskId: string; runId: string; stepId: string; actionId: string;
     inputRef: string; fingerprint: string; lease: AiTaskRunnerLease }) {
     const binding = structuredClone(presented);
-    const stored = await this.readCatalogInput(binding);
+    const stored = await this.readStoredInput(binding);
     const current = await this.access(binding.taskId, 'transition_task');
     if (identity(current.context) !== identity(stored.context) || binding.runId !== binding.lease.runId
       || binding.taskId !== binding.lease.taskId) throw denied();
@@ -222,8 +251,8 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     if (!step || step.id !== binding.stepId || step.scopeId !== current.task.scopeId || step.taskId !== binding.taskId
       || step.runId !== binding.runId || step.actionId !== binding.actionId || binding.actionId !== actionId
       || step.status !== 'RUNNING' || step.inputRef !== binding.inputRef || step.requestFingerprint !== binding.fingerprint
-      || step.toolCode !== 'rental.catalog.search' || step.toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
-    const again = await this.readCatalogInput(binding);
+      || step.toolCode !== this.toolCode || step.toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
+    const again = await this.readStoredInput(binding);
     if (identity(again.context) !== identity(stored.context) || again.registrationRef !== stored.registrationRef
       || requestFingerprint(again.input) !== requestFingerprint(stored.input)) throw denied();
     await this.held(binding.lease, current);
