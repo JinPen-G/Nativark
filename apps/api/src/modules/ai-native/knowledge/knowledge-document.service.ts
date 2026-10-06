@@ -15,11 +15,16 @@ export class KnowledgeDocumentService {
   }
 
   async load(context: AiExecutionContext, documentId: string, action: KnowledgeAction): Promise<KnowledgeRecord> {
-    await authorize(this.ports.authorization, context, { action, scope: context.scope });
-    const record = await this.ports.repository.read(context.scope, documentId);
-    assertRecord(record, context.scope, documentId);
-    await authorize(this.ports.authorization, context, { action, scope: context.scope, document: record.document });
-    return record;
+    const contextHash = fingerprint(context);
+    const stableContext = structuredClone(context);
+    await authorize(this.ports.authorization, stableContext, { action, scope: stableContext.scope });
+    if (fingerprint(context) !== contextHash) throw new KnowledgeError('unavailable');
+    const record = await this.ports.repository.read(stableContext.scope, documentId);
+    assertRecord(record, stableContext.scope, documentId);
+    if (fingerprint(context) !== contextHash) throw new KnowledgeError('unavailable');
+    await authorize(this.ports.authorization, stableContext, { action, scope: stableContext.scope, document: record.document });
+    if (fingerprint(context) !== contextHash) throw new KnowledgeError('unavailable');
+    return structuredClone(record);
   }
 
   async replay(context: AiExecutionContext, record: KnowledgeRecord, operationId: string, hash: string): Promise<boolean> {
@@ -78,6 +83,7 @@ export class KnowledgeDocumentService {
     try {
       await authorize(this.ports.authorization, context, { action: 'read_body', scope: context.scope, document: pending.document, attachmentId: pending.document.attachmentId });
       const file = await this.ports.files.read(context, pending.document, 262144);
+      if (!file || typeof file.mediaType !== 'string' || !(file.bytes instanceof Uint8Array)) throw new KnowledgeError('invalid_text');
       if (file.bytes.byteLength > 262144) throw new KnowledgeError('limit_exceeded');
       chunks = this.ports.parser.parse(pending.document, file);
       validateChunks(pending.document, chunks);
