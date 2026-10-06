@@ -9,7 +9,7 @@ const record = { document, revision: 1 };
 const chunk = { draftVersion: 'ain-c06-draft-1', documentId: 'doc-a', documentVersion: 'v1', chunkId: 'chunk-a', scope, aclRevision: 1, locator: { kind: 'section', sectionId: 'section-a', paragraph: 1 }, text: 'untrusted synthetic text', trust: 'untrusted_data' };
 const clone = value => structuredClone(value);
 function dbFactory() {
-  const state = { documents: new Map(), versions: new Map(), chunks: new Map(), operations: new Map(), failOperation: false, casCount: 1, admissionError: null, responseError: null, operationError: null, readError: null };
+  const state = { documents: new Map(), versions: new Map(), chunks: new Map(), operations: new Map(), failOperation: false, failOperationIds: [], casCount: 1, admissionError: null, responseError: null, operationError: null, readError: null };
   const delegates = () => ({
     aiKnowledgeDocument: {
       findFirst: async ({ where, include }) => { if (state.readError) throw state.readError; const row = [...state.documents.values()].find(v => v.id === where.id && v.tenantId === where.tenantId && v.workspaceId === where.workspaceId); if (!row) return null; const out = clone(row); if (include?.versions) out.versions = [...state.versions.values()].filter(v => v.documentId === row.id).sort((a, b) => b.version - a.version).slice(0, include.versions.take ?? 100); return out; },
@@ -18,13 +18,13 @@ function dbFactory() {
       updateMany: async ({ where, data }) => { const row = state.documents.get(where.id); if (state.casCount !== 1) return { count: state.casCount }; if (!row || row.revision !== where.revision || row.tenantId !== where.tenantId || row.workspaceId !== where.workspaceId) return { count: 0 }; Object.assign(row, clone(data)); return { count: 1 }; }
     },
     aiKnowledgeVersion: {
-      findFirst: async ({ where, orderBy }) => [...state.versions.values()].filter(v => v.documentId === where.documentId).sort((a, b) => orderBy?.version === 'desc' ? b.version - a.version : a.version - b.version)[0] ?? null,
+      findFirst: async ({ where, orderBy }) => [...state.versions.values()].filter(v => v.documentId === where.documentId && (where.contentHash === undefined || where.contentHash === v.contentHash)).sort((a, b) => orderBy?.version === 'desc' ? b.version - a.version : a.version - b.version)[0] ?? null,
       create: async ({ data }) => { const row = { id: data.id, documentId: data.documentId, version: data.version, status: data.status, contentHash: data.contentHash }; state.versions.set(row.id, row); for (const c of data.chunks?.create ?? []) state.chunks.set(c.id, { ...clone(c), versionId: row.id }); return clone(row); }
     },
-    aiKnowledgeChunk: { findFirst: async () => null, create: async ({ data }) => { state.chunks.set(data.id, clone(data)); return clone(data); } },
+    aiKnowledgeChunk: { findFirst: async ({ where }) => [...state.chunks.values()].find(value => value.versionId === where.versionId) ?? null, create: async ({ data }) => { state.chunks.set(data.id, clone(data)); return clone(data); } },
     aiKnowledgeOperation: {
       findFirst: async ({ where }) => { if (state.readError) throw state.readError; return [...state.operations.values()].find(v => v.tenantId === where.tenantId && v.workspaceId === where.workspaceId && v.documentId === where.documentId && v.operationId === where.operationId) ?? null; },
-      create: async ({ data }) => { if (state.operationError) throw state.operationError; if (state.failOperation) throw new Error('commit failed'); const row = clone(data); state.operations.set(row.id, row); return row; }
+      create: async ({ data }) => { if (state.operationError) throw state.operationError; if (state.failOperation || state.failOperationIds.includes(data.operationId)) throw new Error('commit failed'); const row = clone(data); state.operations.set(row.id, row); return row; }
     }
   });
   return { state, ...delegates(), async $transaction(callback) {
@@ -72,7 +72,7 @@ test('lost database CAS does not write a version or operation receipt', async ()
   const db = dbFactory(), repo = new PrismaKnowledgeRepository(db);
   await repo.commit({ scope, documentId: 'doc-a', expectedRevision: 0, operation: { id: 'op-a', fingerprint: 'hash-a' }, next: record, newVersion: true });
   db.state.casCount = 0;
-  await assert.rejects(repo.commit({ scope, documentId: 'doc-a', expectedRevision: 1, operation: { id: 'op-b', fingerprint: 'hash-b' }, next: { ...record, revision: 2 }, newVersion: true }), e => e.code === 'conflict');
+  await assert.rejects(repo.commit({ scope, documentId: 'doc-a', expectedRevision: 1, operation: { id: 'op-b', fingerprint: 'hash-b' }, next: { ...record, revision: 2, document: { ...document, documentVersion: 'v2' } }, newVersion: true }), e => e.code === 'conflict');
   assert.equal(db.state.documents.get('doc-a').revision, 1); assert.equal(db.state.operations.size, 1); assert.equal(db.state.versions.size, 1);
 });
 
@@ -125,6 +125,53 @@ test('actual document service preserves unknown and replays a committed create w
   db.state.responseError = null;
   assert.equal((await service.create(context, input)).document.publication, 'draft');
   assert.equal(db.state.documents.size, 1); assert.equal(db.state.versions.size, 1); assert.equal(db.state.operations.size, 1);
+});
+async function parsedDocument(db = dbFactory()) {
+  const { KnowledgeDocumentService } = require('../apps/api/src/modules/ai-native/knowledge/knowledge-document.service');
+  const { KnowledgeTextParser } = require('../apps/api/src/modules/ai-native/knowledge/knowledge-text-parser');
+  const repo = new PrismaKnowledgeRepository(db), context = { scope, actor: { kind: 'user', userId: document.owner.actorId }, audience: 'operator' };
+  const service = new KnowledgeDocumentService({ repository: repo, clock: { now: () => Date.parse('2026-10-06T00:00:00Z') },
+    authorization: { authorize: async () => ({ scope, actor: document.owner, audience: 'operator', accessKey: 'synthetic-grant' }) },
+    files: { read: async () => ({ mediaType: 'text/plain', bytes: Buffer.from('First section.\n\nSecond section.') }) }, parser: new KnowledgeTextParser() });
+  await service.create(context, { documentId: document.documentId, documentVersion: document.documentVersion, attachmentId: document.attachmentId, title: document.title, validFrom: document.validFrom, operationId: 'create-a' });
+  return { db, repo, service, context, input: { documentId: document.documentId, expectedRevision: 1, operationId: 'parse-a' } };
+}
+test('real create then parse persists chunks on the existing immutable document version and replays once', async () => {
+  const h = await parsedDocument(), result = await h.service.parseDocument(h.context, h.input);
+  assert.equal(result.document.parsing, 'parsed'); assert.equal(result.revision, 3);
+  assert.equal(h.db.state.versions.size, 1); assert.equal(h.db.state.chunks.size, 2);
+  const stored = [...h.db.state.chunks.values()].sort((a, b) => a.chunkIndex - b.chunkIndex);
+  assert.deepEqual(stored.map(row => row.text), ['First section.', 'Second section.']);
+  for (const row of stored) {
+    assert.equal(row.versionId, [...h.db.state.versions.values()][0].id);
+    assert.equal(row.state.documentVersion, 'v1'); assert.equal(row.state.trust, 'untrusted_data');
+  }
+  const receipts = h.db.state.operations.size;
+  await h.service.parseDocument(h.context, h.input);
+  assert.equal(h.db.state.chunks.size, 2); assert.equal(h.db.state.operations.size, receipts);
+  await assert.rejects(h.repo.commit({ scope, documentId: 'doc-a', expectedRevision: 3, next: { ...result, revision: 4 }, chunks: [chunk], newVersion: false, operation: { id: 'replace-chunks', fingerprint: 'other-hash' } }), e => e.code === 'conflict');
+  assert.equal(h.db.state.chunks.size, 2); assert.equal(h.db.state.documents.get('doc-a').revision, 3);
+});
+test('parse-result receipt failure rolls back chunks and never reports a parsed head', async () => {
+  const h = await parsedDocument(); h.db.state.failOperationIds = ['parse-a:parse-result'];
+  await assert.rejects(h.service.parseDocument(h.context, h.input), unknown);
+  assert.equal(h.db.state.chunks.size, 0); assert.equal(h.db.state.versions.size, 1);
+  assert.equal(h.db.state.documents.get('doc-a').state.document.parsing, 'pending');
+  assert.equal(h.db.state.documents.get('doc-a').revision, 2);
+  assert.equal(await h.repo.operation(scope, 'doc-a', 'parse-a:parse-result'), null);
+});
+test('published document-version identifiers cannot be reused for different immutable content', async () => {
+  const db = dbFactory(), repo = new PrismaKnowledgeRepository(db);
+  await repo.commit(command());
+  const next = { ...record, revision: 2, document: { ...document, documentVersion: 'v2' } };
+  await repo.commit({ ...command(), expectedRevision: 1, next, chunks: [{ ...chunk, documentVersion: 'v2' }], operation: { id: 'v2', fingerprint: 'v2-hash' } });
+  await assert.rejects(repo.commit({ ...command(), expectedRevision: 2, next: { ...record, revision: 3 }, operation: { id: 'reuse-v1', fingerprint: 'new-hash' } }), e => e.code === 'conflict');
+  assert.equal(db.state.versions.size, 2); assert.equal(db.state.documents.get('doc-a').revision, 2);
+});
+test('chunks cannot be acknowledged without their matching document version', async () => {
+  const db = dbFactory(), repo = new PrismaKnowledgeRepository(db);
+  await assert.rejects(repo.commit({ ...command(), newVersion: false }), e => e.code === 'conflict');
+  assert.equal(db.state.documents.size, 0); assert.equal(db.state.operations.size, 0); assert.equal(db.state.chunks.size, 0);
 });
 test('knowledge read errors expose no database details', async () => {
   const db = dbFactory(), repo = new PrismaKnowledgeRepository(db); db.state.readError = new Error('private db secret');

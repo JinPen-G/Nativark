@@ -3,7 +3,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import type { AiExecutionScope, AiKnowledgeChunkDraft } from '@rental-os/shared';
 import type { KnowledgeOperation, KnowledgeRecord, KnowledgeRepositoryPort } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, unavailable } from './knowledge-errors';
-import { sameScope, scopeSchema } from './knowledge-validation';
+import { sameScope, scopeSchema, validateChunks } from './knowledge-validation';
 
 export type KnowledgePrismaClient = Pick<PrismaClient, '$transaction' | 'aiKnowledgeDocument' | 'aiKnowledgeVersion' | 'aiKnowledgeChunk' | 'aiKnowledgeOperation'>;
 
@@ -52,6 +52,10 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
     input = structuredClone(input);
     const value = workspace(input.scope);
     if (input.next.document.documentId !== input.documentId || !sameScope(input.next.document.scope, input.scope)) throw new KnowledgeError('conflict');
+    if (input.chunks !== undefined) {
+      validateChunks(input.next.document, input.chunks);
+      if (input.next.document.parsing !== 'parsed') throw new KnowledgeError('invalid_input');
+    }
     let writeAttempted = false, callbackCompleted = false;
     try {
       return await this.db.$transaction(async transaction => {
@@ -60,6 +64,7 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
         const existing = await transaction.aiKnowledgeDocument.findFirst({ where: columns(input.scope, input.documentId), include: { versions: { orderBy: { version: 'desc' }, take: 1 } } });
         const currentRevision = existing?.revision ?? 0;
         if (!Number.isSafeInteger(currentRevision) || currentRevision !== input.expectedRevision || input.next.revision !== currentRevision + 1) return 'conflict';
+        if (input.newVersion && await transaction.aiKnowledgeVersion.findFirst({ where: { documentId: input.documentId, contentHash: input.next.document.documentVersion }, select: { id: true } })) throw new KnowledgeError('conflict');
         const now = this.clock();
         if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw new KnowledgeError('unavailable');
         const documentData = { tenantId: value.tenantId, workspaceId: value.workspaceId, title: input.next.document.title,
@@ -71,10 +76,15 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
           const changed = await transaction.aiKnowledgeDocument.updateMany({ where: { ...columns(input.scope, input.documentId), revision: input.expectedRevision }, data: documentData });
           if (changed.count !== 1) throw new KnowledgeError('conflict');
         }
+        const chunks = (input.chunks ?? []).map((chunk, index) => ({ id: randomUUID(), chunkIndex: index, text: chunk.text, tokenCount: chunk.text.length, state: json(chunk) }));
         if (input.newVersion) {
           const nextVersion = (existing?.versions[0]?.version ?? 0) + 1;
-          const chunks = input.chunks ?? [];
-          await transaction.aiKnowledgeVersion.create({ data: { id: randomUUID(), documentId: input.documentId, version: nextVersion, status: input.next.document.publication, contentHash: input.next.document.documentVersion, chunks: { create: chunks.map((chunk, index) => ({ id: randomUUID(), chunkIndex: index, text: chunk.text, tokenCount: chunk.text.length, state: json(chunk) })) } } });
+          await transaction.aiKnowledgeVersion.create({ data: { id: randomUUID(), documentId: input.documentId, version: nextVersion, status: input.next.document.publication, contentHash: input.next.document.documentVersion, chunks: { create: chunks } } });
+        } else if (input.chunks !== undefined) {
+          const version = existing?.versions[0];
+          if (!version || version.documentId !== input.documentId || version.contentHash !== input.next.document.documentVersion
+            || await transaction.aiKnowledgeChunk.findFirst({ where: { versionId: version.id }, select: { id: true } })) throw new KnowledgeError('conflict');
+          for (const chunk of chunks) await transaction.aiKnowledgeChunk.create({ data: { ...chunk, versionId: version.id } });
         }
         await transaction.aiKnowledgeOperation.create({ data: { id: randomUUID(), documentId: input.documentId, tenantId: value.tenantId, workspaceId: value.workspaceId, operationId: input.operation.id, fingerprint: input.operation.fingerprint, ...(input.operation.failure ? { failure: input.operation.failure } : {}) } });
         callbackCompleted = true;
