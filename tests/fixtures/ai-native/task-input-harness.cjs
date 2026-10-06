@@ -62,13 +62,14 @@ async function taskInputHarness(extraTables = {}, constraints = {}) {
       lease: { runId: l.runId, holderId: l.holderId, revision: l.revision, fencingToken: l.fencingToken } }) };
   const planAuthority = { authorize: async () => { context(); return { authorityHash: 'a'.repeat(64), policyVersion: 'synthetic-policy', expiresAt: '2026-10-07T12:00:00Z' }; } };
   const executions = [];
-  const make = inputs => composePersistentTaskRunner({ db, tasks, registrations, replays: registrations, transitions, commands,
+  const configuration = inputs => ({ db, tasks, registrations, replays: registrations, transitions, commands,
     taskOutcome: createAiTaskRunnerOutcomePort({ transitions: aggregate, commands: { transition: c => c }, tasks }),
     planAuthority, toolCatalog: { resolve: async () => ({ modelCall: false }) }, inputs,
     executors: { resolve: async () => ({ operation: 'readonly', execute: async (binding, signal) => {
       executions.push(binding.inputRef); trace.push(`execute:${binding.inputRef}`); control.tick += 10;
       return control.execute ? control.execute(binding, signal) : { kind: 'succeeded', payload: { synthetic: true, phase: binding.inputRef } };
     } }) }, wall: () => new Date(control.now), monotonic: () => control.tick });
+  const make = inputs => composePersistentTaskRunner(configuration(inputs));
   const held = () => ({ taskId: 'task-a', runId: 'run-a', holderId: state.aiRun[0].leaseOwnerId, revision: state.aiRun[0].revision,
     fencingToken: state.aiRun[0].fencingToken.toFixed(0), expiresAt: state.aiRun[0].leaseExpiresAt?.toISOString() ?? '' });
   await make().evidence.savePlan(plan, held());
@@ -76,6 +77,6 @@ async function taskInputHarness(extraTables = {}, constraints = {}) {
   const claim = () => ({ taskId: 'task-a', runId: 'run-a', holderId: 'worker-a', expectedTaskRevision: state.aiTask[0].revision,
     expectedRunRevision: state.aiRun[0].revision, expectedFencingToken: state.aiRun[0].fencingToken.toFixed(0), leaseMs: 100000 });
   return { ...stored, control, storeControl: stored.control, tasks, taskAuthority, planAuthority, registrations, transitions, aggregate,
-    plan, inputFor, executions, make, claim, held, context, clone };
+    plan, inputFor, executions, make, configuration, claim, held, context, clone };
 }
 module.exports = { taskInputHarness };

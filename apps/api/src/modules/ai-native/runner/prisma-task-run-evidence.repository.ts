@@ -16,6 +16,7 @@ const planSchema = z.object({ taskId: id.max(36), runId: id.max(36), taskRevisio
     maxTotalMs: z.number().int().min(1).max(86400000), maxStepMs: z.number().int().min(1).max(86400000), maxOutputBytes: z.number().int().min(1).max(16777216) }).strict()
 }).strict().refine(p => p.steps.length <= p.limits.maxSteps && p.steps.length <= p.limits.maxCalls && p.limits.maxStepMs <= p.limits.maxTotalMs
   && new Set(p.steps.map(s => s.registrationRef)).size === p.steps.length);
+export { planSchema as aiTaskRunPlanSchema };
 const proofSchema = z.object({ authorityHash: z.string().regex(/^[a-f0-9]{64}$/u), policyVersion: id.max(64), expiresAt: z.string().datetime({ offset: true }) }).strict();
 export interface AiTaskPlanEvidenceAuthority {
   /** Server-owned action/limits/configuration policy. A model cannot attest its own plan. */
