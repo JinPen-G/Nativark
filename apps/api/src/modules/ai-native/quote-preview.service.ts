@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { RENTAL_FULFILLMENT_MODES, type AiExecutionContext, type RentalQuoteRequest, type RentalQuoteSnapshotV1 } from "@rental-os/shared";
+import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES, type AiExecutionContext, type RentalQuoteRequest, type RentalQuoteSnapshotV1 } from "@rental-os/shared";
 import type { RentalBusinessService, BusinessContext } from "../rental-core/rental-business.service";
 import { ModelGatewayError } from "./model-gateway.ports";
 import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
@@ -8,11 +8,11 @@ const id = z.string().trim().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*
 const timestamp = z.string().datetime({ offset: true });
 const line = z.object({
   pricingGroupId: id.optional(), itemGroupId: id.optional(), quantity: z.number().int().positive().max(10000),
-  pricingUnit: z.enum(["hour", "day", "day_24h", "night", "shift", "week", "month", "package", "usage"]).optional(),
+  pricingUnit: z.enum(RENTAL_PRICING_UNIT_CODES).optional(),
   usageQuantity: z.number().finite().nonnegative().max(1_000_000).optional(), note: z.string().trim().max(500).optional()
 }).strict().refine(value => Boolean(value.pricingGroupId || value.itemGroupId), { message: "商品或定价分组必填", path: ["itemGroupId"] });
 const service = z.object({ serviceId: id, quantity: z.number().int().positive().max(10000), scheduledStartAt: timestamp.optional(), scheduledEndAt: timestamp.optional(), serviceLocationId: id.optional() }).strict();
-const request = z.object({
+export const aiQuotePreviewInputSchema = z.object({
   customerType: z.enum(["personal", "corporate"]), customerId: id.optional(),
   fulfillmentMode: z.enum(RENTAL_FULFILLMENT_MODES), fulfillmentLocationId: id, returnLocationId: id.optional(),
   deliveryAddressId: id.optional(), startAt: timestamp, endAt: timestamp, pricingPlanId: id.optional(), discountPlanId: id.optional(),
@@ -23,7 +23,13 @@ const request = z.object({
   if (value.customerType === "corporate" && !value.customerId) context.addIssue({ code: "custom", message: "企业客户必须提供客户标识", path: ["customerId"] });
 });
 
-export type AiQuotePreviewInput = z.input<typeof request>;
+export type AiQuotePreviewInput = z.input<typeof aiQuotePreviewInputSchema>;
+const chargeLineSchema = z.object({
+  code: z.string().min(1).max(191), name: z.string().min(1).max(500),
+  type: z.enum(['rental', 'calendar_adjustment', 'fulfillment', 'preauthorization', 'discount', 'coupon', 'service', 'deposit', 'cancellation', 'overdue', 'damage', 'extension', 'early_return_refund', 'order_change']),
+  amount: z.number().finite().min(-Number.MAX_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
+  sourceId: z.string().max(191).optional(), sourceVersion: z.string().max(191).optional(), detail: z.string().max(2000).optional()
+});
 export type AiQuotePreviewFailure = "missing_input" | "ambiguous" | "out_of_stock" | "qualification_required" | "expired" | "unavailable";
 export type AiQuotePreviewResult = {
   contractVersion: "ain-09-quote-preview-draft-1";
@@ -66,27 +72,27 @@ export class AiQuotePreviewService {
   }
 
   async preview(value: unknown): Promise<AiQuotePreviewResult> {
-    const parsed = request.safeParse(value);
+    const parsed = aiQuotePreviewInputSchema.safeParse(value);
     if (!parsed.success) {
       const fields = [...new Set(parsed.error.issues.map(issue => issue.path.join(".")).filter(Boolean))];
       return { contractVersion: "ain-09-quote-preview-draft-1", requestId: "unavailable", observedAt: this.now(), scope: { kind: "workspace", tenantId: "unavailable", workspaceId: "unavailable" }, status: "missing_input", missingFields: fields.length ? fields : ["request"], message: "报价输入不完整或格式不受支持" };
     }
-    return this.authority.withQuote(parsed.data as RentalQuoteRequest, async context => {
+    const expectedRequest = requestFingerprint(parsed.data);
+    return this.authority.withQuote(structuredClone(parsed.data) as RentalQuoteRequest, async context => {
       if (context.scope.kind !== "workspace" || context.actor.kind !== "user" || (context.audience !== "operator" && context.audience !== "staff")) throw new ModelGatewayError("FORBIDDEN");
-      const observed = this.clock(); if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError("CONFIG_INVALID");
       try {
         const business = await this.contexts.current(context.scope);
-        const quote = await this.core.createQuote(context.scope.tenantId, business, parsed.data as RentalQuoteRequest);
-        if (quote.tenantId !== context.scope.tenantId || quote.request.lines.length !== parsed.data.lines.length
-          || requestFingerprint(quote.request) !== requestFingerprint(parsed.data)
+        const quote = await this.core.createQuote(context.scope.tenantId, business, structuredClone(parsed.data) as RentalQuoteRequest);
+        const observed = this.clock(); if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError("CONFIG_INVALID");
+        const chargeLines = z.array(chargeLineSchema).max(100).safeParse(quote?.chargeLines);
+        if (quote?.tenantId !== context.scope.tenantId || !Array.isArray(quote?.request?.lines) || quote.request.lines.length !== parsed.data.lines.length
+          || requestFingerprint(quote.request) !== expectedRequest
           || !this.hasSafeAmounts(quote)
-          || !Array.isArray(quote.chargeLines) || quote.chargeLines.length > 100
-          || quote.chargeLines.some(line => !line || typeof line.code !== "string" || typeof line.name !== "string"
-            || !Number.isFinite(line.amount) || Math.abs(line.amount) > Number.MAX_SAFE_INTEGER)) throw new ModelGatewayError("INVALID_RESPONSE");
+          || !chargeLines.success) throw new ModelGatewayError("INVALID_RESPONSE");
         const expiresAt = new Date(quote.expiresAt); if (!Number.isFinite(expiresAt.getTime())) throw new ModelGatewayError("INVALID_RESPONSE");
         if (expiresAt.getTime() <= observed.getTime()) return this.failure(context, "expired", "报价生成后已失效");
         return { contractVersion: "ain-09-quote-preview-draft-1", requestId: context.requestId, observedAt: observed.toISOString(), scope: context.scope, status: "quoted", quote: {
-          id: quote.id, quoteNo: quote.quoteNo, currency: quote.currency, chargeLines: structuredClone(quote.chargeLines),
+          id: quote.id, quoteNo: quote.quoteNo, currency: quote.currency, chargeLines: chargeLines.data,
           rentalAmount: quote.rentalAmount, discountAmount: quote.discountAmount, couponAmount: quote.couponAmount, serviceAmount: quote.serviceAmount,
           fulfillmentAmount: quote.fulfillmentAmount, depositAmount: quote.depositAmount, preAuthAmount: quote.preAuthAmount, payableAmount: quote.payableAmount, receivableAmount: quote.receivableAmount,
           pricingPlanVersion: quote.pricingPlanVersion, priceVersionId: quote.priceVersionId, priceVersion: quote.priceVersion, ruleVersion: quote.ruleVersion, calendarVersion: quote.calendarVersion,
