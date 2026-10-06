@@ -72,6 +72,9 @@ function typecheck(emit = false) {
   const ts = require('typescript');
   const options = { strict: true, noEmit: !emit, skipLibCheck: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, moduleResolution: ts.ModuleResolutionKind.Node10, esModuleInterop: true, experimentalDecorators: true, outDir: path.join(root, 'apps/api/dist/knowledge-isolated') };
   const files = fs.readdirSync(dir).filter(f => f.endsWith('.ts')).map(f => path.join(dir, f));
+  // Check this checkout's contracts/client, not linked root dependency artifacts.
+  options.baseUrl = root;
+  options.paths = { '@rental-os/shared': ['packages/shared/src/index.ts'], '@prisma/client': ['apps/api/node_modules/@prisma/client/index.d.ts'] };
   const program = ts.createProgram(files, options);
   const diagnostics = ts.getPreEmitDiagnostics(program).map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n'));
   assert.deepEqual(diagnostics, []);

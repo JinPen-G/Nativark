@@ -53,10 +53,13 @@ export class KnowledgeSourceService {
       await this.readChunk(context, source, 'resolve_source');
       const before = await this.documents.load(context, source.documentId, 'download');
       if (!visible(before.document, this.documents.ports.clock.now()) || before.document.documentVersion !== source.documentVersion || before.document.aclRevision !== source.aclRevision) unavailable();
+      const grant = await authorize(this.documents.ports.authorization, context, { action: 'download', scope: context.scope, document: before.document });
       const reference = await this.content.downloadReference(context, before.document);
       if (!reference || reference.attachmentId !== before.document.attachmentId || reference.documentVersion !== source.documentVersion) unavailable();
       const after = await this.documents.load(context, source.documentId, 'download');
       if (before.revision !== after.revision || !visible(after.document, this.documents.ports.clock.now())) unavailable();
+      const currentGrant = await authorize(this.documents.ports.authorization, context, { action: 'download', scope: context.scope, document: after.document });
+      if (fingerprint(grant) !== fingerprint(currentGrant)) unavailable();
       return { attachmentId: reference.attachmentId, documentVersion: reference.documentVersion };
     } catch { return unavailable(); }
   }
