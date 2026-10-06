@@ -4,9 +4,9 @@ import type { KnowledgeOperation, MemoryConfirmation, MemoryConfirmationPort, Me
 import { KnowledgeError } from './knowledge-errors';
 import { sameScope, scopeSchema } from './knowledge-validation';
 
-type Delegate = { findFirst(args: unknown): Promise<unknown>; create(args: unknown): Promise<unknown>; update(args: unknown): Promise<unknown> };
+type Delegate = { findFirst(args: unknown): Promise<unknown>; create(args: unknown): Promise<unknown>; update(args: unknown): Promise<unknown>; updateMany(args: unknown): Promise<{ count: number }> };
 type MemoryTransaction = { aiStructuredMemory: Delegate; aiMemoryOperation: Delegate; aiHumanConfirmation: Delegate };
-export interface MemoryPrismaClient extends MemoryTransaction { $transaction<T>(callback: (transaction: MemoryTransaction) => Promise<T>): Promise<T>; }
+export interface MemoryPrismaClient extends MemoryTransaction { $transaction<T>(callback: (transaction: MemoryTransaction) => Promise<T>, options?: { isolationLevel: 'Serializable'; maxWait: number; timeout: number }): Promise<T>; }
 const workspace = (scope: AiExecutionScope) => { const result = scopeSchema.safeParse(scope); if (!result.success || result.data.kind !== 'workspace') throw new KnowledgeError('unavailable'); return result.data; };
 const json = (value: unknown) => structuredClone(value);
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -37,6 +37,7 @@ export class PrismaStructuredMemoryRepository implements MemoryRepositoryPort, M
   }
 
   async commit(input: { scope: AiExecutionScope; owner: AiKnowledgeOwnerDraft; memoryId: string; expectedRevision: number; next: AiMemoryDraft; operation: KnowledgeOperation; confirmation?: MemoryConfirmation }): Promise<'committed' | 'conflict'> {
+    input = structuredClone(input);
     const value = workspace(input.scope), now = this.clock();
     if (!(now instanceof Date) || !Number.isFinite(now.getTime()) || input.next.memoryId !== input.memoryId || !sameScope(input.next.scope, input.scope) || input.next.owner.actorKind !== input.owner.actorKind || input.next.owner.actorId !== input.owner.actorId) throw new KnowledgeError('conflict');
     try {
@@ -46,6 +47,16 @@ export class PrismaStructuredMemoryRepository implements MemoryRepositoryPort, M
         const existing = await transaction.aiStructuredMemory.findFirst({ where: { id: input.memoryId, tenantId: value.tenantId, workspaceId: value.workspaceId, ownerKind: input.owner.actorKind, ownerId: input.owner.actorId } });
         const currentRevision = existing ? Number((existing as { revision?: unknown }).revision) : 0;
         if (!Number.isSafeInteger(currentRevision) || currentRevision !== input.expectedRevision || input.next.revision !== currentRevision + 1) return 'conflict';
+        if (input.next.status === 'confirmed') {
+          const proof = input.confirmation;
+          if (!proof || proof.id !== input.next.confirmationRecordId || proof.status !== 'confirmed'
+            || proof.memoryId !== input.memoryId || proof.revision !== currentRevision || proof.aclRevision !== input.next.aclRevision
+            || !sameScope(proof.scope, input.scope) || hash(proof.owner) !== hash(input.owner)
+            || hash(proof.preference) !== hash(input.next.preference) || proof.memoryExpiresAt !== input.next.expiresAt
+            || !Number.isFinite(Date.parse(proof.expiresAt)) || Date.parse(proof.expiresAt) <= this.clock().getTime()) throw new KnowledgeError('conflict');
+          const confirmation = await transaction.aiHumanConfirmation.findFirst({ where: { id: proof.id, tenantId: value.tenantId, workspaceId: value.workspaceId } });
+          if (!confirmation || hash((confirmation as { state?: unknown }).state) !== hash(proof)) throw new KnowledgeError('conflict');
+        }
         const preference = input.next.status === 'deleted' ? {} : input.next.preference;
         const data = { tenantId: value.tenantId, workspaceId: value.workspaceId, subjectType: input.owner.actorKind, subjectId: input.owner.actorId,
           scopeRevision: input.next.revision, revision: input.next.revision, ownerKind: input.owner.actorKind, ownerId: input.owner.actorId,
@@ -53,10 +64,14 @@ export class PrismaStructuredMemoryRepository implements MemoryRepositoryPort, M
           ...(input.next.status === 'confirmed' ? { confirmationRecordId: input.next.confirmationRecordId } : { confirmationRecordId: null }),
           ...(input.next.status === 'deleted' ? { deletedAt: new Date(input.next.deletedAt) } : { deletedAt: null }), expiresAt: new Date(input.next.expiresAt), state: json(input.next) };
         if (!existing) await transaction.aiStructuredMemory.create({ data: { id: input.memoryId, ...data } });
-        else await transaction.aiStructuredMemory.update({ where: { id: input.memoryId }, data });
+        else {
+          const changed = await transaction.aiStructuredMemory.updateMany({ where: { id: input.memoryId, tenantId: value.tenantId,
+            workspaceId: value.workspaceId, ownerKind: input.owner.actorKind, ownerId: input.owner.actorId, revision: input.expectedRevision }, data });
+          if (changed.count !== 1) throw new KnowledgeError('conflict');
+        }
         await transaction.aiMemoryOperation.create({ data: { id: randomUUID(), memoryId: input.memoryId, tenantId: value.tenantId, workspaceId: value.workspaceId, operationId: input.operation.id, fingerprint: input.operation.fingerprint } });
         return 'committed';
-      });
+      }, { isolationLevel: 'Serializable', maxWait: 2500, timeout: 5000 });
     } catch (error) { if (error instanceof KnowledgeError) throw error; return 'conflict'; }
   }
 

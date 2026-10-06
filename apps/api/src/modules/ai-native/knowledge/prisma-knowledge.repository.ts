@@ -9,6 +9,7 @@ type Delegate = {
   findUnique?(args: unknown): Promise<unknown>;
   create(args: unknown): Promise<unknown>;
   update(args: unknown): Promise<unknown>;
+  updateMany(args: unknown): Promise<{ count: number }>;
 };
 type KnowledgeTransaction = {
   aiKnowledgeDocument: Delegate;
@@ -17,7 +18,7 @@ type KnowledgeTransaction = {
   aiKnowledgeOperation: Delegate;
 };
 export interface KnowledgePrismaClient extends KnowledgeTransaction {
-  $transaction<T>(callback: (transaction: KnowledgeTransaction) => Promise<T>): Promise<T>;
+  $transaction<T>(callback: (transaction: KnowledgeTransaction) => Promise<T>, options?: { isolationLevel: 'Serializable'; maxWait: number; timeout: number }): Promise<T>;
 }
 
 const workspace = (scope: AiExecutionScope) => {
@@ -70,6 +71,7 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
     scope: AiExecutionScope; documentId: string; expectedRevision: number;
     operation: KnowledgeOperation; next: KnowledgeRecord; chunks?: AiKnowledgeChunkDraft[]; newVersion: boolean;
   }): Promise<'committed' | 'conflict'> {
+    input = structuredClone(input);
     const value = workspace(input.scope);
     if (input.next.document.documentId !== input.documentId || !sameScope(input.next.document.scope, input.scope)) throw new KnowledgeError('conflict');
     try {
@@ -85,7 +87,10 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
           status: input.next.document.publication, revision: input.next.revision, withdrawnAt: input.next.document.publication === 'withdrawn' ? now : null,
           state: json(input.next) };
         if (!existing) await transaction.aiKnowledgeDocument.create({ data: { id: input.documentId, ...documentData } });
-        else await transaction.aiKnowledgeDocument.update({ where: { id: input.documentId }, data: documentData });
+        else {
+          const changed = await transaction.aiKnowledgeDocument.updateMany({ where: { ...columns(input.scope, input.documentId), revision: input.expectedRevision }, data: documentData });
+          if (changed.count !== 1) throw new KnowledgeError('conflict');
+        }
         if (input.newVersion) {
           const latest = existing as { versions?: Array<{ version?: unknown }> } | null;
           const nextVersion = Number(latest?.versions?.[0]?.version ?? 0) + 1;
@@ -94,7 +99,7 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
         }
         await transaction.aiKnowledgeOperation.create({ data: { id: randomUUID(), documentId: input.documentId, tenantId: value.tenantId, workspaceId: value.workspaceId, operationId: input.operation.id, fingerprint: input.operation.fingerprint, ...(input.operation.failure ? { failure: input.operation.failure } : {}) } });
         return 'committed';
-      });
+      }, { isolationLevel: 'Serializable', maxWait: 2500, timeout: 5000 });
     } catch (error) {
       if (error instanceof KnowledgeError) throw error;
       return 'conflict';

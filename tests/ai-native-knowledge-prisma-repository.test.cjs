@@ -2,19 +2,20 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
 require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
-const { PrismaKnowledgeRepository } = require('../apps/api/src/modules/ai-native/knowledge/prisma-knowledge.repository');
+const { PrismaKnowledgeRepository } = require('./fixtures/ai-native/knowledge-repository-baseline.cjs').load('apps/api/src/modules/ai-native/knowledge/prisma-knowledge.repository.ts', () => require('../apps/api/src/modules/ai-native/knowledge/prisma-knowledge.repository'));
 const scope = { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'space-a' };
 const document = { draftVersion: 'ain-c06-draft-1', documentId: 'doc-a', documentVersion: 'v1', attachmentId: 'attachment-a', owner: { actorKind: 'user', actorId: 'user-a' }, scope, aclRevision: 1, title: 'Synthetic SOP', publication: 'draft', parsing: 'parsed', indexing: 'not_indexed', validFrom: '2026-10-01T00:00:00.000Z' };
 const record = { document, revision: 1 };
 const chunk = { draftVersion: 'ain-c06-draft-1', documentId: 'doc-a', documentVersion: 'v1', chunkId: 'chunk-a', scope, aclRevision: 1, locator: { kind: 'section', sectionId: 'section-a', paragraph: 1 }, text: 'untrusted synthetic text', trust: 'untrusted_data' };
 const clone = value => structuredClone(value);
 function dbFactory() {
-  const state = { documents: new Map(), versions: new Map(), chunks: new Map(), operations: new Map(), failOperation: false };
+  const state = { documents: new Map(), versions: new Map(), chunks: new Map(), operations: new Map(), failOperation: false, casCount: 1 };
   const delegates = () => ({
     aiKnowledgeDocument: {
       findFirst: async ({ where, include }) => { const row = [...state.documents.values()].find(v => v.id === where.id && v.tenantId === where.tenantId && v.workspaceId === where.workspaceId); if (!row) return null; const out = clone(row); if (include?.versions) out.versions = [...state.versions.values()].filter(v => v.documentId === row.id).sort((a, b) => b.version - a.version).slice(0, include.versions.take ?? 100); return out; },
       create: async ({ data }) => { const row = { ...clone(data) }; state.documents.set(row.id, row); return clone(row); },
-      update: async ({ where, data }) => { const row = state.documents.get(where.id); if (!row) throw new Error('missing'); Object.assign(row, clone(data)); return clone(row); }
+      update: async ({ where, data }) => { const row = state.documents.get(where.id); if (!row) throw new Error('missing'); Object.assign(row, clone(data)); return clone(row); },
+      updateMany: async ({ where, data }) => { const row = state.documents.get(where.id); if (state.casCount !== 1) return { count: state.casCount }; if (!row || row.revision !== where.revision || row.tenantId !== where.tenantId || row.workspaceId !== where.workspaceId) return { count: 0 }; Object.assign(row, clone(data)); return { count: 1 }; }
     },
     aiKnowledgeVersion: {
       findFirst: async ({ where, orderBy }) => [...state.versions.values()].filter(v => v.documentId === where.documentId).sort((a, b) => orderBy?.version === 'desc' ? b.version - a.version : a.version - b.version)[0] ?? null,
@@ -56,4 +57,12 @@ test('cross-workspace reads do not return a scoped record', async () => {
   const db = dbFactory(), repo = new PrismaKnowledgeRepository(db);
   await repo.commit({ scope, documentId: 'doc-a', expectedRevision: 0, operation: { id: 'op-a', fingerprint: 'hash-a' }, next: record, newVersion: true });
   assert.equal(await repo.read({ ...scope, workspaceId: 'space-other' }, 'doc-a'), null);
+});
+
+test('lost database CAS does not write a version or operation receipt', async () => {
+  const db = dbFactory(), repo = new PrismaKnowledgeRepository(db);
+  await repo.commit({ scope, documentId: 'doc-a', expectedRevision: 0, operation: { id: 'op-a', fingerprint: 'hash-a' }, next: record, newVersion: true });
+  db.state.casCount = 0;
+  await assert.rejects(repo.commit({ scope, documentId: 'doc-a', expectedRevision: 1, operation: { id: 'op-b', fingerprint: 'hash-b' }, next: { ...record, revision: 2 }, newVersion: true }), e => e.code === 'conflict');
+  assert.equal(db.state.documents.get('doc-a').revision, 1); assert.equal(db.state.operations.size, 1); assert.equal(db.state.versions.size, 1);
 });
