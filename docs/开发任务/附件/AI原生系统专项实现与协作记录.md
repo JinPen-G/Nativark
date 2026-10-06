@@ -506,3 +506,9 @@ Codex临时顶替主线，基线7c7e4794。新增真实Prisma事务读取adapter
 - 接回既有recovery_only租约注解，实际授权/fence/expiry校验保留，输入生产不接受恢复租约。旧代次完整只读结果经同task/run/step/action/fingerprint/hash/charge验证，在当前授权lease下完成状态与计量；不把旧收据改成新worker事实，不重复调用Core。
 - 完整结果落库后步骤事务失败、换worker恢复、未完成收据保持unknown，以及future fence/篡改/跨scope charge/撤权/政策变化均有实际链证据。最终扩大394/394、fail/cancel/skip/todo均0、exit0，API类型/diff check exit0；不是专项全量，不与前轮计数相加。
 - 模型/业务写入unknown证据、政策到期后合法历史核对、生产装配仍未完；DB事务替身非MySQL锁/宕机验收。详见[只读中断与跨代次恢复记录](AI原生系统协作切片/AIN-06-只读中断与跨代次恢复-20261006-codex.md)，待独立复核，M1/正式0-of-28不变。
+
+### AIN-IMPL-012：知识持久候选选择装配（2026-10-07）
+
+从06c5cd1a接续，新增真实Prisma类型的workspace有界元数据候选adapter，逐文档调用必需的当前授权端口，复读revision并拒绝身份/配置变化；原Retrieval/Source执行正文、版本、撤回及缓存复验。原持久组合在selection省略时使用此adapter，不猜ACL字符串语义、不授予默认权限、不启生产。
+
+红测6/6失败exit1→实现后通过；扩大知识回归130/130exit0；自查补未索引状态语义后最终关联23/23exit0，API严格类型/diff各exit0，无skip/todo。授权与数据库执行为明确替身，正式ACL/权益/附件/确认来源仍待接；tenant/platform无回退，超过100候选unavailable，词法非向量。详情见[持久候选选择装配](AI原生系统协作切片/AIN-10-持久候选选择装配-20261007-codex.md)。作者完成待独立复核，M1与0/28不变；不称主线全量或真环境通过。
