@@ -6,7 +6,8 @@ import type { AiBusinessReadAuthority } from './business-read-route.authority';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const item = z.object({ id, tenantId: id, categoryCode: z.string().min(1).max(64), code: id, name: z.string().min(1).max(191), status: z.enum(['enabled', 'disabled']), unit: z.string().min(1).max(32) }).strict();
-const input = z.object({ limit: z.number().int().min(1).max(100) }).strict();
+export const aiCatalogReadInputSchema = z.object({ limit: z.number().int().min(1).max(100) }).strict();
+const input = aiCatalogReadInputSchema;
 
 export type AiCatalogReadAuthority = AiBusinessReadAuthority;
 export interface AiCatalogReadProjection { contractVersion: typeof AI_CONTRACT_DRAFT_VERSION; requestId: string; audience: AiExecutionContext['audience']; scope: AiExecutionContext['scope']; observedAt: string; items: Array<{ id: string; code: string; name: string; categoryCode: string; status: 'enabled' | 'disabled'; unit: string }>; }

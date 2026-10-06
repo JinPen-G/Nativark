@@ -44,7 +44,7 @@ export interface KnowledgeRecord {
 export interface KnowledgeRepositoryPort {
   read(scope: AiExecutionScope, documentId: string): Promise<KnowledgeRecord | null>;
   operation(scope: AiExecutionScope, documentId: string, operationId: string): Promise<KnowledgeOperation | null>;
-  /** Atomically CAS head, persist operation and immutable version/chunks; unique(scope,id,version) and unique(scope,id,operation). Retain history, never physically delete. */
+  /** Atomic CAS with immutable receipt; result_unknown requires receipt reconciliation, never a fresh operation. */
   commit(input: {
     scope: AiExecutionScope; documentId: string; expectedRevision: number;
     operation: KnowledgeOperation; next: KnowledgeRecord; chunks?: AiKnowledgeChunkDraft[];
@@ -90,7 +90,7 @@ export interface MemoryConfirmationPort {
 export interface MemoryRepositoryPort {
   read(scope: AiExecutionScope, owner: AiKnowledgeOwnerDraft, memoryId: string): Promise<AiMemoryDraft | null>;
   operation(scope: AiExecutionScope, owner: AiKnowledgeOwnerDraft, memoryId: string, operationId: string): Promise<KnowledgeOperation | null>;
-  /** Atomically CAS and retain the receipt. A supplied confirmation must still match the server record and be unrevoked at commit. */
+  /** CAS and confirmation recheck share a transaction; result_unknown requires reconciling the original receipt. */
   commit(input: { scope: AiExecutionScope; owner: AiKnowledgeOwnerDraft; memoryId: string; expectedRevision: number; next: AiMemoryDraft; operation: KnowledgeOperation; confirmation?: MemoryConfirmation }): Promise<'committed' | 'conflict'>;
 }
 export interface StructuredMemoryPorts {

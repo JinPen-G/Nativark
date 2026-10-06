@@ -46,7 +46,7 @@ export class AiApprovedOrderRouteAuthority implements AiApprovedOrderAuthority {
     return structuredClone(dto);
   }
 
-  private async authorized<T>(input: AiApprovedOrderInput, binding: ApprovedOrderBinding,
+  private async authorized<T>(input: Pick<AiApprovedOrderInput, 'context' | 'businessIdempotencyKey' | 'actionFingerprint'>, binding: ApprovedOrderBinding,
     action: 'execute' | 'replay', consume: (context: AiExecutionContext, body: CreateRentalOrderRequest, userName: string) => Promise<T>) {
     input = structuredClone(input); binding = structuredClone(binding);
     if (!['execute', 'replay'].includes(action) || !isAiStepExecutionContext(input.context)
@@ -78,6 +78,25 @@ export class AiApprovedOrderRouteAuthority implements AiApprovedOrderAuthority {
       if (!isAiStepExecutionContext(context) || identityHash(context) !== identityHash(input.context)) throw denied();
       return consume(structuredClone(context), body, user.displayName);
     });
+  }
+
+  async withOrderPreparation<T>(context: AiExecutionContext, request: CreateRentalOrderRequest,
+    prepare: (context: AiExecutionContext, body: CreateRentalOrderRequest) => Promise<T>) {
+    try {
+      if (context.scope.kind !== 'workspace' || typeof prepare !== 'function') throw denied();
+      const fingerprint = requestFingerprint(request), key = `ai-order-prepare:${fingerprint}`;
+      const binding = { tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId,
+        idempotencyKey: key, requestFingerprint: fingerprint, request: structuredClone(request) };
+      const input = { context: structuredClone(context), businessIdempotencyKey: key, actionFingerprint: fingerprint };
+      return await this.authorized(input, binding, 'execute', async (current, body) => {
+        const result = await prepare(current, body);
+        await this.authorized(input, binding, 'execute', async () => undefined);
+        return result;
+      });
+    } catch (error) {
+      if (error instanceof AiTaskRepositoryError) throw new AiTaskRepositoryError(error.code);
+      throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    }
   }
 
   async resolve(input: AiApprovedOrderInput, binding: ApprovedOrderBinding, action: 'execute' | 'replay', _tx?: Prisma.TransactionClient) {

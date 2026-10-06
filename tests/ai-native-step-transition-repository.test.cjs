@@ -90,7 +90,9 @@ for (const [label, mutate, expected] of [
 
 for (const kind of ['task.lock', 'step.read', 'run.lock', 'run.recheck', 'step.update', 'event.create', 'commit']) test(`failure at ${kind} rolls back the transaction double and never auto-retries`, async () => {
   const f = h.setup(), before = snapshot(f); f.state.fail = kind;
-  await assert.rejects(f.run(), h.code('AI_STORAGE_UNAVAILABLE'));
+  await assert.rejects(f.run(), kind === 'commit'
+    ? error => error.code === 'AI_RESULT_UNKNOWN' && error.retryable === false && error.nextAction === 'reconcile'
+    : h.code('AI_STORAGE_UNAVAILABLE'));
   assert.deepEqual(snapshot(f), before); assert.equal(f.state.rollbacks, 1);
   assert.equal(f.state.calls.filter(c => c.kind === 'transaction').length, 1);
 });
@@ -102,7 +104,8 @@ for (const kind of ['task.lock', 'run.lock', 'run.recheck', 'step.update']) test
 
 test('commit acknowledgement loss can retain a write but never reports success or repeats it', async () => {
   const f = h.setup(); f.state.fail = 'commit_ack';
-  await assert.rejects(f.run(), h.code('AI_STORAGE_UNAVAILABLE'));
+  await assert.rejects(f.run(), error => error.code === 'AI_RESULT_UNKNOWN'
+    && error.retryable === false && error.nextAction === 'reconcile');
   assert.equal(f.state.step.revision, 3); assert.equal(f.state.events.length, 1);
   assert.equal(f.state.calls.filter(c => c.kind === 'transaction').length, 1);
 });

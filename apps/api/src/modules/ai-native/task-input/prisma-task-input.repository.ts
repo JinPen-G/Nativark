@@ -12,6 +12,7 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { aiTaskRunPlanSchema, type AiTaskPlanEvidenceAuthority } from '../runner/prisma-task-run-evidence.repository';
 import type { AiTaskRunnerInputPort, AiTaskRunnerLease, AiTaskRunnerStepRef } from '../runner/ai-task-runner.ports';
 import type { AiTaskInputBinding, AiTaskInputContext, AiTaskInputReader, AiTaskInputSource } from './task-input.ports';
+import { AiTaskInputResultUnknownError } from './task-input.errors';
 
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskResultArtifact' | 'aiTaskInputRequest' | 'aiTaskInputReceipt'>;
 type Tx = Prisma.TransactionClient;
@@ -49,10 +50,20 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
       || before && access.bindingKey !== before.bindingKey) throw denied();
     return access;
   }
-  private async transaction<T>(work: (tx: Tx) => Promise<T>): Promise<T> {
-    try { return await this.db.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 }); }
-    catch (error) { if (error instanceof AiTaskRepositoryError) throw error; throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE'); }
+  private async transaction<T>(work: (tx: Tx) => Promise<T>, mayWrite = false): Promise<T> {
+    let callbackCompleted = false;
+    try { return await this.db.$transaction(async tx => {
+      const result = await work(tx);
+      callbackCompleted = true;
+      return result;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 }); }
+    catch (error) {
+      if (error instanceof AiTaskRepositoryError) throw error;
+      if (mayWrite && callbackCompleted) throw new AiTaskInputResultUnknownError();
+      throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+    }
   }
+  private writeTransaction<T>(work: (tx: Tx) => Promise<T>) { return this.transaction(work, true); }
   private async task(tx: Tx, taskId: string, access: Access) {
     await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_tasks WHERE id = ${taskId} FOR UPDATE`);
     const task = await tx.aiTask.findFirst({ where: access.where, include: { scope: true } });
@@ -136,7 +147,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
   async afterSucceeded(ref: AiTaskRunnerStepRef, lease: AiTaskRunnerLease) {
     ref = structuredClone(ref); lease = structuredClone(lease);
     const before = await this.access(lease.taskId, 'request_input');
-    return this.transaction(async tx => {
+    return this.writeTransaction(async tx => {
       const task = await this.task(tx, lease.taskId, before), run = await this.run(tx, task.id, task.scopeId, lease.runId, before);
       this.held(run, lease);
       if (task.status !== 'RUNNING' || task.cancelRequestedAt !== null || task.revision !== ref.registered.taskRevision) throw conflict();
@@ -227,7 +238,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     const submission = structuredClone(value);
     if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const before = await this.access(submission.taskId, 'read_metadata');
-    return this.transaction(async tx => {
+    return this.writeTransaction(async tx => {
       const task = await this.task(tx, submission.taskId, before);
       const request = await tx.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: { scopeId: task.scopeId, taskId: task.id, id: submission.requestId } } });
       if (!request || request.id !== submission.requestId) throw unavailable();

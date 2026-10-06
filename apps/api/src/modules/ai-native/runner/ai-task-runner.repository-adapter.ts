@@ -10,7 +10,7 @@ import { AI_TASK_STATUSES_DRAFT, AI_TASK_DRAFT_VERSION, type AiTaskStatusDraft, 
  * revisions, while the existing repositories re-authorize and CAS at commit time.
  */
 export interface AiTaskRunnerRepositoryCommandFactory {
-  register(plan: AiTaskRunnerStepPlan, lease: AiTaskRunnerLease): AiStepRegistrationCommand;
+  register(plan: AiTaskRunnerStepPlan, lease: AiTaskRunnerLease): AiStepRegistrationCommand | Promise<AiStepRegistrationCommand>;
   transition(kind: "start" | "succeed" | "fail" | "pause" | "unknown", step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, resultRef: string | null, errorCode?: string, pause?: "input" | "confirmation" | "external"): AiStepTransitionCommand;
 }
 
@@ -50,7 +50,7 @@ export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerReposito
   };
   const steps: AiTaskRunnerStepPort = {
     async register(plan, lease, existingOnly = false) {
-      const command = structuredClone(commands.register(structuredClone(plan), structuredClone(lease)));
+      const command = structuredClone(await commands.register(structuredClone(plan), structuredClone(lease)));
       const result = await adapters.registrations.register(command, existingOnly);
       const replay = result.replayed && adapters.replays
         ? await adapters.replays.readReplay({ ...command, stepId: result.stepId, expectedStepRevision: result.stepRevision }) : null;

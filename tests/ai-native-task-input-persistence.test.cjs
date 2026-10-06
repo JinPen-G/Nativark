@@ -90,11 +90,33 @@ test('receipt/event failure rolls the input transaction back, COMMIT reply loss 
   h.storeControl.beforeWrite = async name => { if (name === 'aiTaskEvent') throw Error('synthetic event failure'); };
   await assert.rejects(h.submit(), e => e.code === 'AI_STORAGE_UNAVAILABLE'); assert.deepEqual(h.state, before);
   h.storeControl.beforeWrite = null; h.storeControl.loseReply = true;
-  await assert.rejects(h.submit(), e => e.code === 'AI_STORAGE_UNAVAILABLE');
+  await assert.rejects(h.submit(), e => e.code === 'AI_RESULT_UNKNOWN' && e.nextAction === 'reconcile' && e.retryable === false);
   assert.equal(h.state.aiTaskInputReceipt.length, 1); assert.equal(h.state.aiTask[0].status, 'RUNNING');
   const count = h.state.aiTaskEvent.length;
   assert.equal((await h.submit()).replayed, true); assert.equal(h.state.aiTaskEvent.length, count);
   assert.deepEqual(h.executions, ['input-clarify']);
+});
+
+test('lost waiting COMMIT reports unknown while retaining the completed step and original input request', async () => {
+  const h = await setup();
+  h.storeControl.beforeWrite = async name => { if (name === 'aiTaskInputRequest') h.storeControl.loseReply = true; };
+  await assert.rejects(h.run(), e => e.code === 'AI_RESULT_UNKNOWN' && e.nextAction === 'reconcile' && !e.retryable);
+  assert.equal(h.state.aiTaskInputRequest.length, 1);
+  assert.equal(h.state.aiTask[0].status, 'WAITING_INPUT');
+  assert.equal(h.state.aiStep[0].status, 'SUCCEEDED');
+  assert.deepEqual(h.executions, ['input-clarify']);
+  h.storeControl.beforeWrite = null;
+  assert.equal((await h.run()).status, 'paused');
+  assert.equal(h.state.aiTaskInputRequest.length, 1);
+  assert.deepEqual(h.executions, ['input-clarify']);
+});
+
+test('read-only pending query acknowledgement loss does not claim an unknown business write', async () => {
+  const h = await setup(); await h.run();
+  const before = h.clone(h.state);
+  h.storeControl.loseReply = true;
+  await assert.rejects(h.inputs().readPending('task-a'), e => e.code === 'AI_STORAGE_UNAVAILABLE');
+  assert.deepEqual(h.state, before);
 });
 
 test('two answers consume once; altered replay is refused', async () => {

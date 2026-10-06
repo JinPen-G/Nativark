@@ -2,5 +2,6 @@
 export class AiApprovedOrderResultUnknownError extends Error {
   readonly code = 'AI_RESULT_UNKNOWN';
   readonly nextAction = 'reconcile';
+  readonly retryable = false;
   constructor() { super('AI_RESULT_UNKNOWN'); }
 }

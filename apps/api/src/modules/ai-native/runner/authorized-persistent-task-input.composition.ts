@@ -7,6 +7,7 @@ import { composePersistentTaskInputRunner } from '../task-input/persistent-task-
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import type { PersistentTaskRunnerComposition } from './persistent-task-runner.composition';
 import { createAiTaskRunnerOutcomePort } from './ai-task-runner-outcome-adapter';
+import { PrismaTaskStepEvidenceAuthority } from './prisma-task-step-evidence.authority';
 
 export interface AuthorizedPersistentTaskInputComposition extends Omit<PersistentTaskRunnerComposition,
   'tasks' | 'executionAuthorization' | 'registrations' | 'replays' | 'transitions' | 'taskOutcome' | 'inputs'> {
@@ -29,4 +30,17 @@ export function composeAuthorizedPersistentTaskInputRunner(input: AuthorizedPers
   const composed = composePersistentTaskInputRunner({ ...input, tasks: authorization.tasks,
     executionAuthorization: authorization.execution, registrations, replays: registrations, transitions, taskOutcome });
   return Object.freeze({ ...composed, authorization, registrations, transitions, taskTransitions });
+}
+
+/** Explicit read-only subset. Uses current persisted action authorization and
+ * measured plan/result rows instead of caller-supplied transition outcomes.
+ * Registration input, plan policy and executors remain mandatory dependencies.
+ * Core writes and unknown reconciliation need their own existing evidence ports.
+ */
+export function composeAuthorizedReadonlyPersistentTaskInputRunner(
+  input: Omit<AuthorizedPersistentTaskInputComposition, 'transitionAuthority'>,
+) {
+  const authorization = composePersistedTaskAuthorization({ ...input.authorization, db: input.db, clock: input.wall });
+  const transitionAuthority = new PrismaTaskStepEvidenceAuthority(input.db, authorization.authority, input.planAuthority, input.wall);
+  return composeAuthorizedPersistentTaskInputRunner({ ...input, transitionAuthority });
 }

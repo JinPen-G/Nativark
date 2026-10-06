@@ -88,6 +88,7 @@ export class AiTaskRunner {
     let completedSteps = 0, cleanupFailed = 0, calls = 0, outputBytes = 0;
     let activeResourceTicket: AiTaskRunnerResourceTicket | undefined;
     let outcomeAttempted = false;
+    let primaryUnknown: Error | undefined;
     const advance = (commit: AiTaskRunnerStepCommit, ref?: AiTaskRunnerStepRef) => {
       if (!commit || !finiteInteger(commit.taskRevision, taskRevision, 4294967295)
         || !commit.lease || commit.lease.taskId !== lease.taskId || commit.lease.runId !== lease.runId
@@ -250,6 +251,17 @@ export class AiTaskRunner {
           if (resourceTicket && this.deps.resources) await this.callBounded(() => this.deps.resources!.markUnknown(resourceTicket!, structuredClone(lease)), plan.limits.maxStepMs, 'resource_unknown');
           return await finish({ status: 'unknown', completedSteps, cleanupFailed });
         }
+        if (this.deps.resources && stepPlan.operation === 'readonly' && result.kind === 'unknown') {
+          // The existing step FSM does not allow NONE -> POSSIBLE. An
+          // interrupted read is not evidence of an external business effect.
+          // Keep its durable RUNNING step/start receipt and occupancy; only the
+          // task enters WAITING_EXTERNAL. Recovery may read evidence, not repeat
+          // the tool or manufacture a committed/failed step to release resources.
+          if (resourceTicket) await this.callBounded(() => this.deps.resources!.markUnknown(resourceTicket!,
+            structuredClone(lease)), plan.limits.maxStepMs, 'resource_unknown');
+          activeResourceTicket = undefined;
+          return await finish({ status: 'unknown', completedSteps, cleanupFailed });
+        }
         if (this.deps.resources && !result.resultRef && result.kind !== 'paused') {
           if (resourceTicket) await this.callBounded(() => this.deps.resources!.markUnknown(resourceTicket!, structuredClone(lease)), plan.limits.maxStepMs, 'resource_unknown');
           return await finish({ status: 'unknown', completedSteps, cleanupFailed });
@@ -278,6 +290,9 @@ export class AiTaskRunner {
       }
       return await finish({ status: "succeeded", completedSteps, cleanupFailed });
     } catch (error) {
+      // Cleanup must not turn an ambiguous persisted write into a plain
+      // storage failure. The original request still requires reconciliation.
+      if (error instanceof Error && 'code' in error && error.code === 'AI_RESULT_UNKNOWN') primaryUnknown = error;
       if (activeResourceTicket && this.deps.resources) {
         await this.callBounded(() => this.deps.resources!.markUnknown(activeResourceTicket!, structuredClone(lease)), 5000, 'resource_unknown').catch(() => {});
       }
@@ -289,9 +304,12 @@ export class AiTaskRunner {
       throw error;
     } finally {
       try {
-        await this.deps.leases.releaseRun({ taskId: lease.taskId, runId: lease.runId, holderId: lease.holderId,
-          expectedTaskRevision: taskRevision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken });
-      } catch { throw new AiTaskRunnerError("AI_STORAGE_UNAVAILABLE", "lease release acknowledgement is uncertain"); }
+        await this.callBounded(() => this.deps.leases.releaseRun({ taskId: lease.taskId, runId: lease.runId, holderId: lease.holderId,
+          expectedTaskRevision: taskRevision, expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken }), 5000, 'release_run');
+      } catch {
+        if (primaryUnknown) throw primaryUnknown;
+        throw new AiTaskRunnerError("AI_STORAGE_UNAVAILABLE", "lease release acknowledgement is uncertain");
+      }
     }
   }
 
@@ -324,6 +342,7 @@ export class AiTaskRunner {
       let settled = false;
       const timer = this.clock.setTimeout(() => {
         settled = true;
+        this.clock.clearTimeout(timer);
         controller.abort();
         reject(new AiTaskRunnerError(phase === "reconcile" ? "AI_RESULT_UNKNOWN" : "AI_RUN_LIMIT", `${phase} deadline exceeded`));
       }, limitMs);

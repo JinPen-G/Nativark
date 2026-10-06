@@ -665,6 +665,44 @@ model AiTaskRunPlan {
   @@map("ai_task_run_plans")
 }
 
+/// Server-owned scene policy. No implicit policy, no enabled seed or model-selected limits.
+model AiTaskPlanPolicy {
+  scopeId String @db.VarChar(36)
+  sceneCode String @db.VarChar(64)
+  sceneVersion String @db.VarChar(64)
+  revision Int @db.UnsignedInt
+  enabled Boolean @default(false)
+  allowedTools Json
+  limits Json
+  expiresAt DateTime @db.DateTime(3)
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  updatedAt DateTime @updatedAt
+  scope AiScope @relation(fields: [scopeId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "ai_task_plan_policies_scope_fkey")
+  @@id([scopeId, sceneCode, sceneVersion])
+  @@index([scopeId, expiresAt], map: "ai_task_plan_policies_expiry_idx")
+  @@map("ai_task_plan_policies")
+}
+
+/// Minimal normalized read input, immutable after publication. No credentials or raw prompts.
+model AiTaskActionInput {
+  scopeId String @db.VarChar(36)
+  taskId String @db.VarChar(36)
+  runId String @db.VarChar(36)
+  id String @db.VarChar(36)
+  registrationRef String @db.VarChar(191)
+  toolCode String @db.VarChar(64)
+  toolVersion String @db.VarChar(64)
+  payload Json
+  fingerprint String @db.Char(64)
+  policyRevision Int @db.UnsignedInt
+  expiresAt DateTime @db.DateTime(3)
+  createdAt DateTime @default(now()) @db.DateTime(3)
+  run AiRun @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_task_action_inputs_run_fkey")
+  @@id([scopeId, taskId, runId, registrationRef])
+  @@unique([scopeId, taskId, id], map: "ai_task_action_inputs_id_key")
+  @@map("ai_task_action_inputs")
+}
+
 /// Server-owned, task-scoped action policy used by AIN-04 runtime operations.
 /// It is not a caller/model permission list and has no implicit default row.
 model AiTaskActionPolicy {
@@ -5216,6 +5254,7 @@ model AiScope {
   tasks       AiTask[]
   profiles    AiProviderProfile[]
   budgetPolicies AiBudgetPolicy[]
+  taskPlanPolicies AiTaskPlanPolicy[]
   createdAt   DateTime           @default(now()) @db.DateTime(3)
 
   @@unique([id, kind], map: "ai_scopes_id_kind")
@@ -5299,6 +5338,7 @@ model AiRun {
   gatewayInvocations AiGatewayInvocation[]
   executionCharges   AiTaskExecutionCharge[]
   executionPlan      AiTaskRunPlan?
+  actionInputs       AiTaskActionInput[]
 
   @@unique([scopeId, taskId, id], map: "ai_runs_scope_task_id")
   @@unique([scopeId, taskId, sequence], map: "ai_runs_sequence")
@@ -5392,11 +5432,41 @@ model AiProposalAction {
   proposalVersion    AiProposalVersion       @relation(fields: [scopeId, taskId, proposalId, proposalRevision], references: [scopeId, taskId, proposalId, revision], onDelete: Restrict, onUpdate: Restrict)
   step               AiStep                  @relation(fields: [scopeId, taskId, actionId, requestFingerprint], references: [scopeId, taskId, actionId, requestFingerprint], onDelete: Restrict, onUpdate: Restrict)
   consumptions       AiApprovalConsumption[]
+  snapshots          AiApprovedOrderSnapshot[]
 
   @@id([scopeId, proposalId, proposalRevision, actionId])
   @@unique([scopeId, taskId, proposalId, proposalRevision, actionId, requestFingerprint], map: "ai_proposal_actions_binding")
   @@unique([scopeId, proposalId, proposalRevision, sequence], map: "ai_proposal_actions_sequence")
   @@map("ai_proposal_actions")
+}
+
+enum AiApprovedOrderSnapshotKind {
+  INPUT   @map("input")
+  PREVIEW @map("preview")
+}
+
+/// Immutable bodies referenced by a proposal action; storage never grants approval.
+model AiApprovedOrderSnapshot {
+  scopeId           String                      @db.VarChar(36)
+  taskId            String                      @db.VarChar(36)
+  proposalId        String                      @db.VarChar(36)
+  proposalRevision  Int                         @db.UnsignedInt
+  actionId          String                      @db.VarChar(191)
+  actionFingerprint String                      @db.Char(64)
+  kind              AiApprovedOrderSnapshotKind
+  recordId          String                      @db.VarChar(191)
+  revision          Int                         @db.UnsignedInt
+  contentHash       String                      @db.Char(64)
+  payload           Json
+  actorKind         AiActorKind
+  actorId           String                      @db.VarChar(191)
+  audience          AiAudience
+  createdAt         DateTime                    @default(now()) @db.DateTime(3)
+  action            AiProposalAction            @relation(fields: [scopeId, taskId, proposalId, proposalRevision, actionId, actionFingerprint], references: [scopeId, taskId, proposalId, proposalRevision, actionId, requestFingerprint], onDelete: Restrict, onUpdate: Restrict, map: "ai_approved_order_snapshots_action_fkey")
+
+  @@id([scopeId, recordId, revision])
+  @@unique([scopeId, taskId, proposalId, proposalRevision, actionId, kind], map: "ai_approved_order_snapshots_action_kind")
+  @@map("ai_approved_order_snapshots")
 }
 
 /// Immutable approval decision. Revocation is checked through proposal head/current authority.

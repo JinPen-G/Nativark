@@ -20,7 +20,7 @@ const project = (row: { scopeId: string; taskId: string; id: string; stateRevisi
 export class AiProposalRepository {
   constructor(private readonly db: Db) {}
 
-  async createPending(input: AiProposalCreateInput): Promise<AiProposalHead> {
+  async createPending(input: AiProposalCreateInput, transaction?: Prisma.TransactionClient): Promise<AiProposalHead> {
     const payloadHash = fingerprintAiProposalDraft(input.payload);
     const ids = input.payload.actions.map(action => action.actionId);
     if (!input.scopeId || !input.taskId || input.payload.proposalId.length === 0 || new Set(ids).size !== ids.length
@@ -28,7 +28,7 @@ export class AiProposalRepository {
       throw new AiProposalRepositoryError('INVALID');
     }
     try {
-      return await this.db.$transaction(async (tx: Tx) => {
+      const write = async (tx: Tx) => {
         const existing = await tx.aiProposal.findFirst({ where: { scopeId: input.scopeId, taskId: input.taskId, id: input.payload.proposalId }, select: headSelect });
         if (existing) {
           const same = existing.currentRevision === null && existing.status === 'PENDING_CONFIRMATION'
@@ -47,7 +47,9 @@ export class AiProposalRepository {
         const created = await tx.aiProposal.findFirst({ where: { scopeId: input.scopeId, taskId: input.taskId, id: input.payload.proposalId }, select: headSelect });
         if (!created) throw new AiProposalRepositoryError('UNAVAILABLE');
         return project(created);
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      };
+      return transaction ? await write(transaction) : await this.db.$transaction(write,
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
       if (error instanceof AiProposalRepositoryError) throw error;
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new AiProposalRepositoryError('CONFLICT');
