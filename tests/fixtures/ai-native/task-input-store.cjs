@@ -51,7 +51,14 @@ function createTaskInputStore(initial, constraints = {}) {
     if (name === 'aiTask') out.runs = data.aiRun.filter(r => r.taskId === row.id).map(r => related(r, 'aiRun', data));
     return out;
   }
-  const hydrate = row => row ? clone(row) : null;
+  const hydrate = (row, select) => {
+    if (!row) return null;
+    if (!select) return clone(row);
+    return Object.fromEntries(Object.entries(select).filter(([, rule]) => rule).map(([key, rule]) => [key,
+      rule === true ? clone(row[key]) : Array.isArray(row[key])
+        ? row[key].filter(child => matches(child, rule.where ?? {})).map(child => hydrate(child, rule.select))
+        : hydrate(row[key], rule.select)]));
+  };
   function delegates(data) {
     const all = {};
     for (const name of Object.keys(data)) {
@@ -66,17 +73,17 @@ function createTaskInputStore(initial, constraints = {}) {
         rows().push(row); return hydrate(row);
       };
       all[name] = {
-        findFirst: async args => { trace.push(`${name}.read`); if (control.beforeRead) await control.beforeRead(name, args, data); return hydrate(selected(args.where ?? {})[0]); },
+        findFirst: async args => { trace.push(`${name}.read`); if (control.beforeRead) await control.beforeRead(name, args, data); return hydrate(selected(args.where ?? {})[0], args.select); },
         findUnique: async args => { trace.push(`${name}.read`); if (control.beforeRead) await control.beforeRead(name, args, data);
           const where = Object.keys(args.where).length === 1 && Object.keys(args.where)[0].includes('_') ? Object.values(args.where)[0] : args.where;
-          return hydrate(selected(where)[0]); },
+          return hydrate(selected(where)[0], args.select); },
         findMany: async args => { trace.push(`${name}.readMany`); if (control.beforeRead) await control.beforeRead(name, args, data);
           let found = selected(args.where ?? {});
           for (const order of [...(Array.isArray(args.orderBy) ? args.orderBy : args.orderBy ? [args.orderBy] : [])].reverse()) {
             const [field, direction] = Object.entries(order)[0];
             found = found.sort((a, b) => (a[field] > b[field] ? 1 : a[field] < b[field] ? -1 : 0) * (direction === 'desc' ? -1 : 1));
           }
-          return found.slice(0, args.take).map(hydrate); },
+          return found.slice(0, args.take).map(row => hydrate(row, args.select)); },
         create: async args => { trace.push(`${name}.create`); if (control.beforeWrite) await control.beforeWrite(name, args, data); return insert(args.data); },
         updateMany: async args => { trace.push(`${name}.update`); if (control.beforeWrite) await control.beforeWrite(name, args, data);
           const found = selected(args.where);
