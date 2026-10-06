@@ -5392,11 +5392,41 @@ model AiProposalAction {
   proposalVersion    AiProposalVersion       @relation(fields: [scopeId, taskId, proposalId, proposalRevision], references: [scopeId, taskId, proposalId, revision], onDelete: Restrict, onUpdate: Restrict)
   step               AiStep                  @relation(fields: [scopeId, taskId, actionId, requestFingerprint], references: [scopeId, taskId, actionId, requestFingerprint], onDelete: Restrict, onUpdate: Restrict)
   consumptions       AiApprovalConsumption[]
+  snapshots          AiApprovedOrderSnapshot[]
 
   @@id([scopeId, proposalId, proposalRevision, actionId])
   @@unique([scopeId, taskId, proposalId, proposalRevision, actionId, requestFingerprint], map: "ai_proposal_actions_binding")
   @@unique([scopeId, proposalId, proposalRevision, sequence], map: "ai_proposal_actions_sequence")
   @@map("ai_proposal_actions")
+}
+
+enum AiApprovedOrderSnapshotKind {
+  INPUT   @map("input")
+  PREVIEW @map("preview")
+}
+
+/// Immutable bodies referenced by a proposal action; storage never grants approval.
+model AiApprovedOrderSnapshot {
+  scopeId           String                      @db.VarChar(36)
+  taskId            String                      @db.VarChar(36)
+  proposalId        String                      @db.VarChar(36)
+  proposalRevision  Int                         @db.UnsignedInt
+  actionId          String                      @db.VarChar(191)
+  actionFingerprint String                      @db.Char(64)
+  kind              AiApprovedOrderSnapshotKind
+  recordId          String                      @db.VarChar(191)
+  revision          Int                         @db.UnsignedInt
+  contentHash       String                      @db.Char(64)
+  payload           Json
+  actorKind         AiActorKind
+  actorId           String                      @db.VarChar(191)
+  audience          AiAudience
+  createdAt         DateTime                    @default(now()) @db.DateTime(3)
+  action            AiProposalAction            @relation(fields: [scopeId, taskId, proposalId, proposalRevision, actionId, actionFingerprint], references: [scopeId, taskId, proposalId, proposalRevision, actionId, requestFingerprint], onDelete: Restrict, onUpdate: Restrict, map: "ai_approved_order_snapshots_action_fkey")
+
+  @@id([scopeId, recordId, revision])
+  @@unique([scopeId, taskId, proposalId, proposalRevision, actionId, kind], map: "ai_approved_order_snapshots_action_kind")
+  @@map("ai_approved_order_snapshots")
 }
 
 /// Immutable approval decision. Revocation is checked through proposal head/current authority.
