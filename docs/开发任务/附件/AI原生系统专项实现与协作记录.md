@@ -435,3 +435,12 @@ HANDOFF-ID / 原任务与CLAIM-ID：
 - 后续新增`budget/prisma-subscription-budget-reader.ts`及`createPersistedBudgetSubsystem`：实际调用SubscriptionService.readCategoryCommercialContext，在只读Serializable事务内读取正式服务期/目录/特批，返回最少feature可用性与修订，缺AI目录、未配置订阅、未发布/到期拒绝；不将PRO当作AI权益，不读套餐年费作模型价格。跨期/排期边界在异步读取后复核，受品类限制的权益在缺少正式映射时拒绝，不能扩大为全局AI授权。
 - 新组合测试直接驱动真实SubscriptionService、Reader、BudgetAuthority和预算组合工厂，底层Prisma为明确替身；新增13项连同预算绑定与既有SaaS回归56/56，退出0；API类型与diff check通过。新13项未包含在上述b1ec0421的2040项中，不能借旧全量冒充新全量。
 - 仍待主线：正式动作授权/plan/result来源、批准的模型计价和上下文上界、单一Gateway预算生命周期、可信派发与用量回执、live能力验真；正式任务权限与到期后的历史/核对权限仍需按动作装配。新reader/工厂不是AppModule生产注册，不构成商业开放或整项AIN-11验收；真实DB/供应商/浏览器未运行，独立Review无本轮成功结论。
+
+### AIN-HANDOFF-004：Claude复核临时辅助成果与两线并行（2026-10-06）
+
+- 负责人确认Claude恢复主力与整合，Codex临时成果固定接收点0229de59；本文只追加当前归属，不将历史切片改成整项完成。主线独立复验2271/2271 exit0，随后策略写入撤权修复e9f02746定向33/33、API类型通过；新输入公共合同644cb541相关87/87、shared/API类型、隔离Prisma generate/validate/diff通过。各次快照/失败及未验详见[Claude主线恢复与整合记录](AI原生系统协作切片/Claude主线恢复与整合-20261006.md)。
+- Codex临时顶替记录仅保留其原记录；Claude曾追加的两段已迁入自己的记录，不再混写。原任务仍按原依赖和验收口径推进，不改0/28完成率；离线证据不是MySQL、供应商、HTTP/设备或生产验收。
+- 主Claude唯一主树/分支不变；独占AIN-04/05、Gateway/预算/模型配置、schema迁移/shared/OpenAPI/公共Auth、主文档与最终整合。此归属更新4.2早期未认领栏，不授权生产启用或业务旁路。
+- 第一辅助（AIN-07 审批事务组合根）：原 `ai-native-fork-execution` / `ai/ai-native-fork-execution-20261005`，固定0229de59；独占 `approval-execution/**`、`prisma-approval-consumption.repository.ts`、新approved-order-composition测试/fixtures和独立Fork-AIN07记录。真实Guard/DTO/ALS、审批消费与Core原事务组合；其他Core/公共文件改动需协调确认，缺正式来源拒绝。当前进展为作者报告，尚未主线整合复验。
+- 第二辅助（AIN-06 输入等待与恢复闭环）：独立 `ai-native-fork-recovery` / `ai/ai-native-fork-recovery-20261006`，固定0229de59；独占 `runner/**`（排除主线prisma-task-gateway-invocation.preparation.ts）、task-input/**、ai-task.repository/ai-task-transition.repository/ai-step-transition.repository/ai-step-registration.repository及直接回归和独立Fork-AIN06记录。主线公共测试task-input-contracts/schema除外。schema/shared变更由主线提供固定644cb541，不跟随移动HEAD。已回报59699872/9d2b2be6等切片，未由主线复验，不据作者测试结项。
+- 两辅助不编辑对方文件或主树，不修改Codex临时记录及三份主文档；主线不双写辅助的在途范围。收到交付后主线核验固定提交、离线组合与失败边界，再合入专项分支；不合main、不push、不部署，既有output不清理/覆盖/提交。
