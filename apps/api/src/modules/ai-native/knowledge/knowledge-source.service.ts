@@ -31,7 +31,13 @@ export class KnowledgeSourceService {
       if (fingerprint(grant) !== fingerprint(currentGrant)) unavailable();
       if (cacheKey && !cached) this.cache?.put(cacheKey, chunk);
       return chunk;
-    } catch { return unavailable(); }
+    } catch {
+      // A denied/revoked read must not retain the old body in this process cache.
+      // Invalidation is scoped to the current server context and document; it
+      // does not act as a cross-tenant cache or authorization mechanism.
+      try { if (source?.kind === 'document') this.cache?.invalidate(context.scope, source.documentId); } catch { /* fail closed below */ }
+      return unavailable();
+    }
   }
 
   async resolve(context: AiExecutionContext, source: AiKnowledgeSourceDraft): Promise<AiKnowledgeSourceDraft> {
