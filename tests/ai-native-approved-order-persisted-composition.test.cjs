@@ -191,3 +191,33 @@ test('revocation after preparation commit suppresses publication without deletin
   assert.equal(h.state.records.aiApproval.length, 0); h.state.session = true;
   await root.prepare(h.prepareCommand); assert.equal(h.state.records.aiApprovedOrderSnapshot.length, 2);
 });
+
+test('preparation COMMIT response loss reports unknown and exact replay reads the committed pending evidence', async () => {
+  const h = await harness(), root = h.compose(); let lost = false;
+  h.state.afterTransactionCommit = () => {
+    if (!lost && h.state.records.aiApprovedOrderSnapshot.length === 2) {
+      lost = true; throw Error('synthetic preparation COMMIT acknowledgement lost');
+    }
+  };
+  await assert.rejects(root.prepare(h.prepareCommand), e => e.code === 'AI_RESULT_UNKNOWN');
+  assert.equal(lost, true);
+  assert.equal(h.state.records.aiProposalVersion.length, 1);
+  assert.equal(h.state.records.aiApprovedOrderSnapshot.length, 2);
+  assert.equal(h.state.records.aiApproval.length, 0);
+  assert.equal(h.state.records.rentalOrder.length, 0);
+  const recovered = await root.prepare(h.prepareCommand);
+  assert.equal(recovered.reviewedPayloadHash, h.state.records.aiProposalVersion[0].payloadHash);
+  assert.equal(h.state.records.aiApprovedOrderSnapshot.length, 2);
+});
+
+test('preparation unknown never permits a different proposal payload to overwrite committed evidence', async () => {
+  const h = await harness(), root = h.compose(); let lost = false;
+  h.state.afterTransactionCommit = () => {
+    if (!lost && h.state.records.aiApprovedOrderSnapshot.length === 2) { lost = true; throw Error('synthetic lost acknowledgement'); }
+  };
+  await assert.rejects(root.prepare(h.prepareCommand), e => e.code === 'AI_RESULT_UNKNOWN');
+  const before = structuredClone(h.state.records.aiApprovedOrderSnapshot);
+  await assert.rejects(root.prepare({ ...h.prepareCommand, expiresAt: '2027-01-01T00:00:00.000Z' }), rejected);
+  assert.deepEqual(h.state.records.aiApprovedOrderSnapshot, before);
+  assert.equal(h.state.records.aiApproval.length, 0);
+});

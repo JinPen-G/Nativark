@@ -11,6 +11,7 @@ import { AiApprovedOrderRouteAuthority } from './approved-order-route.authority'
 import type { PersistedApprovedOrderPolicyAuthority } from './persisted-approved-order-policy.authority';
 import { approvedOrderPreviewSchema, approvedOrderSnapshotJson, type PrismaApprovedOrderSnapshotSource } from './prisma-approved-order-snapshot.source';
 import { approvedOrderCommandSchema, deniedOrder, orderContextHash } from './prisma-approved-order.source';
+import { AiApprovedOrderResultUnknownError } from './approved-order.errors';
 
 const commandSchema = approvedOrderCommandSchema.omit({ approvalId: true, reviewedPayloadHash: true })
   .extend({ expiresAt: z.string().datetime({ offset: true }) }).strict();
@@ -102,10 +103,14 @@ export class ApprovedOrderPreparationService {
   }
 
   async prepare(value: unknown) {
+    let transactionSubmitted = false;
     try {
       const parsed = commandSchema.safeParse(value);
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const command = structuredClone(parsed.data), original = await this.policy.authorizePreparation(command.taskId);
+      // Once the transaction is submitted, a driver error cannot prove rollback.
+      // Reconcile the same immutable proposal; never imply approval or dispatch.
+      transactionSubmitted = true;
       const saved = await this.d.db.$transaction(async tx => {
         const current = await this.policy.authorizePreparation(command.taskId, tx);
         if (current.scopeId !== original.scopeId || orderContextHash(current.context) !== orderContextHash(original.context)) throw deniedOrder();
@@ -132,6 +137,7 @@ export class ApprovedOrderPreparationService {
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw new AiTaskRepositoryError(error.code);
       if (error instanceof AiProposalRepositoryError && error.code === 'CONFLICT') throw conflict();
+      if (transactionSubmitted) throw new AiApprovedOrderResultUnknownError();
       throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
     }
   }
