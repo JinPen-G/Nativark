@@ -12,7 +12,7 @@ const operations = ['read_metadata', 'read_events', 'claim_run', 'claim_recovery
   'read_step_terminal', 'takeover_run', 'request_input', 'submit_input', 'resume_input'];
 
 // Real AuthService, SubscriptionService and authorization composition; database, registry and tool facts are synthetic.
-async function authorizedRunnerHarness() {
+async function authorizedRunnerHarness(extraTables = {}) {
   const scene = 'synthetic-clarification';
   const scopes = [{ id: 'scope-platform', ...aiPersistenceScopeColumns({ kind: 'platform' }) },
     { id: 'scope-tenant', ...aiPersistenceScopeColumns({ kind: 'tenant', tenantId: 'tenant-a' }) },
@@ -29,7 +29,7 @@ async function authorizedRunnerHarness() {
       startAt: new Date('2026-01-01'), endAt: new Date('2027-01-01'), serviceTimeZone: 'UTC', billingAnniversary: new Date('2026-01-01') }, subscriptionSegments: [] }],
     subscriptionFeatureCatalog: [{ code: 'ai.native.use', name: 'Synthetic AI catalog feature', module: 'ai', categories: [], currentOwnership: 'PRO',
       defaultOwnership: 'PRO', releaseStatus: 'RELEASED', valueText: null, externalFeeNote: null }],
-    tenantFeatureGrant: [], aiTaskInputRequest: [], aiTaskInputReceipt: []
+    tenantFeatureGrant: [], aiTaskInputRequest: [], aiTaskInputReceipt: [], ...extraTables
   }, { aiTaskInputRequest: [['scopeId', 'taskId', 'id'], ['scopeId', 'taskId', 'runId', 'stepId', 'planHash']],
     aiTaskInputReceipt: [['scopeId', 'taskId', 'requestId'], ['scopeId', 'taskId', 'submissionKey']] });
   const identity = { user: user({ id: 'user-a' }), session: true, membership: true, workspace: 'workspace-a' };

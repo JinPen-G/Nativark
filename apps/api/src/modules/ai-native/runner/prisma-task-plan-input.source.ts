@@ -1,0 +1,231 @@
+import { randomUUID } from 'node:crypto';
+import { Prisma, type PrismaClient } from '@prisma/client';
+import { z } from 'zod';
+import { AI_TOOL_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { aiCatalogReadInputSchema } from '../catalog-read-facts.service';
+import { aiTaskAccessFromContext, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
+import type { AiStepRegistrationAuthority, AiStepRegistrationCommand } from '../ai-step-registration.repository';
+import type { AiTaskExecutionAuthorization } from './prisma-task-measured-effects';
+import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema, type AiTaskPlanEvidenceAuthority } from './prisma-task-run-evidence.repository';
+import type { AiTaskRunnerLease, AiTaskRunnerPlan } from './ai-task-runner.ports';
+
+type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiRun' | 'aiTaskPlanPolicy' | 'aiTaskActionInput' | 'aiTaskRunPlan' | 'aiStep'>;
+const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+const rev = z.number().int().min(1).max(4294967294);
+const leaseSchema = z.object({ taskId: id.max(36), runId: id.max(36), holderId: id, revision: rev,
+  // The existing resource-policy port intentionally presents an empty expiry.
+  // It is never authorization; held() reads and checks the actual run expiry.
+  fencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u), expiresAt: z.string().max(40) }).strict();
+const publishSchema = z.object({ taskId: id.max(36), registrationRef: id, expectedTaskRevision: rev,
+  lease: leaseSchema, input: aiCatalogReadInputSchema }).strict();
+const toolsSchema = z.array(z.object({ code: z.literal('rental.catalog.search'), version: z.literal(AI_TOOL_DRAFT_VERSION) }).strict()).min(1).max(1);
+const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
+const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+const conflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+const identity = ({ requestId: _id, authorizedAt: _at, ...context }: AiExecutionContext) => requestFingerprint(context);
+export class AiTaskPlanInputResultUnknownError extends Error {
+  readonly code = 'AI_RESULT_UNKNOWN' as const;
+  readonly retryable = false;
+  readonly nextAction = 'reconcile' as const;
+  constructor() { super('AI_RESULT_UNKNOWN'); }
+}
+
+/** Actual scene-policy and immutable-input source for the existing catalog reader.
+ * No policy writer, implicit seed, model-selected tools or dispatch. A service-
+ * owned policy row is required; action policies/entitlements remain mandatory.
+ * Other inputs, writes and clarification contracts are intentionally unavailable.
+ */
+export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, AiStepRegistrationAuthority {
+  constructor(private readonly db: Db, private readonly authorization: AiTaskRepositoryAuthority,
+    private readonly execution: AiTaskExecutionAuthorization, private readonly wall: () => Date = () => new Date()) {
+    if (typeof db?.$transaction !== 'function' || typeof db.aiTaskPlanPolicy?.findFirst !== 'function'
+      || typeof db.aiTaskActionInput?.create !== 'function' || typeof authorization?.resolve !== 'function'
+      || typeof execution?.authorize !== 'function') throw unavailable();
+  }
+
+  private async access(taskId: string, operation: 'read_metadata' | 'transition_task', db: Pick<Db, 'aiTask' | 'aiTaskPlanPolicy'> = this.db) {
+    const context = structuredClone(await this.authorization.resolve(taskId, operation));
+    const access = aiTaskAccessFromContext(context, taskId, this.wall());
+    const task = await db.aiTask.findFirst({ where: access.where });
+    if (!task || task.id !== taskId || task.ownerKind !== access.actorKind || task.ownerId !== access.actorId
+      || task.audience !== access.audience || task.archivedAt !== null) throw denied();
+    const key = { scopeId: task.scopeId, sceneCode: task.sceneCode, sceneVersion: task.sceneVersion };
+    const row = await db.aiTaskPlanPolicy.findFirst({ where: key });
+    if (!row || Object.entries(key).some(([k, v]) => row[k as keyof typeof row] !== v) || !rev.safeParse(row.revision).success
+      || row.enabled !== true || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime()) || row.expiresAt <= this.wall()) throw unavailable();
+    const tools = toolsSchema.parse(structuredClone(row.allowedTools));
+    const limits = aiTaskRunnerLimitsSchema.parse(structuredClone(row.limits));
+    if (limits.maxStepMs > limits.maxTotalMs) throw unavailable();
+    const policy = { ...key, revision: row.revision, enabled: row.enabled, tools, limits, expiresAt: row.expiresAt.toISOString() };
+    return { context, access, task, policy, policyHash: requestFingerprint(policy) };
+  }
+
+  private async held(lease: AiTaskRunnerLease, current: Awaited<ReturnType<PrismaTaskPlanInputSource['access']>>, db: Pick<Db, 'aiRun'> = this.db) {
+    if (lease.taskId !== current.task.id) throw denied();
+    const run = await db.aiRun.findFirst({ where: { scopeId: current.task.scopeId, taskId: current.task.id, id: lease.runId } });
+    if (!run || run.id !== lease.runId || run.scopeId !== current.task.scopeId || run.taskId !== current.task.id
+      || run.actorKind !== current.access.actorKind || run.actorId !== current.access.actorId || run.leaseOwnerId !== lease.holderId
+      || run.fencingToken.toFixed(0) !== lease.fencingToken || run.revision !== lease.revision
+      || !run.leaseExpiresAt || run.leaseExpiresAt <= this.wall() || !['QUEUED', 'RUNNING'].includes(run.status)) throw denied();
+  }
+
+  private input(row: Prisma.AiTaskActionInputGetPayload<{}> | null, key: { scopeId: string; taskId: string; runId: string; registrationRef?: string }) {
+    if (!row || Object.entries(key).some(([k, v]) => row[k as keyof typeof row] !== v)
+      || !id.max(36).safeParse(row.id).success || row.toolCode !== 'rental.catalog.search' || row.toolVersion !== AI_TOOL_DRAFT_VERSION
+      || !(row.expiresAt instanceof Date) || row.expiresAt <= this.wall()) throw unavailable();
+    const payload = aiCatalogReadInputSchema.parse(structuredClone(row.payload));
+    if (requestFingerprint(payload) !== row.fingerprint) throw denied();
+    return { id: row.id, registrationRef: row.registrationRef, toolCode: row.toolCode, toolVersion: row.toolVersion,
+      payload, fingerprint: row.fingerprint, policyRevision: row.policyRevision, expiresAt: row.expiresAt.toISOString() };
+  }
+
+  async publishCatalogInput(value: unknown) {
+    const parsed = publishSchema.safeParse(value);
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const command = parsed.data;
+    const executeContext = structuredClone(await this.execution.authorize(command.taskId));
+    const before = await this.access(command.taskId, 'transition_task');
+    if (identity(before.context) !== identity(executeContext) || before.task.status !== 'RUNNING'
+      || before.task.cancelRequestedAt !== null || before.task.revision !== command.expectedTaskRevision) throw denied();
+    await this.held(command.lease, before);
+    const fingerprint = requestFingerprint(command.input);
+    const key = { scopeId: before.task.scopeId, taskId: before.task.id, runId: command.lease.runId, registrationRef: command.registrationRef };
+    let callbackCompleted = false;
+    try {
+      const result = await this.db.$transaction(async tx => {
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_tasks WHERE scopeId = ${key.scopeId} AND id = ${key.taskId} FOR UPDATE`);
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_runs WHERE scopeId = ${key.scopeId} AND taskId = ${key.taskId} AND id = ${key.runId} FOR UPDATE`);
+        await tx.$queryRaw(Prisma.sql`SELECT revision FROM ai_task_plan_policies WHERE scopeId = ${key.scopeId} AND sceneCode = ${before.task.sceneCode} AND sceneVersion = ${before.task.sceneVersion} FOR UPDATE`);
+        const current = await this.access(command.taskId, 'transition_task', tx);
+        if (current.access.bindingKey !== before.access.bindingKey || current.policyHash !== before.policyHash
+          || current.task.status !== 'RUNNING' || current.task.cancelRequestedAt !== null
+          || current.task.revision !== command.expectedTaskRevision) throw conflict();
+        await this.held(command.lease, current, tx);
+        const existing = await tx.aiTaskActionInput.findFirst({ where: key });
+        if (existing) {
+          const stored = this.input(existing, key);
+          if (stored.fingerprint !== fingerprint || stored.policyRevision !== current.policy.revision) throw conflict();
+          callbackCompleted = true;
+          return { id: stored.id, replayed: true };
+        }
+        // Once a plan exists its input set is closed. No late action injection.
+        if (await tx.aiTaskRunPlan.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, runId: key.runId } })) throw conflict();
+        const published = await tx.aiTaskActionInput.findMany({ where: { scopeId: key.scopeId, taskId: key.taskId, runId: key.runId },
+          take: Math.min(current.policy.limits.maxSteps, current.policy.limits.maxCalls) + 1 });
+        if (published.length >= Math.min(current.policy.limits.maxSteps, current.policy.limits.maxCalls)) throw unavailable();
+        const changed = await tx.aiTask.updateMany({ where: { ...current.access.where, revision: command.expectedTaskRevision,
+          status: 'RUNNING', cancelRequestedAt: null }, data: { revision: command.expectedTaskRevision } });
+        if (changed.count !== 1) throw conflict();
+        const row = await tx.aiTaskActionInput.create({ data: { ...key, id: randomUUID(), toolCode: 'rental.catalog.search',
+          toolVersion: AI_TOOL_DRAFT_VERSION, payload: command.input, fingerprint, policyRevision: current.policy.revision,
+          expiresAt: new Date(current.policy.expiresAt) } });
+        const final = await this.access(command.taskId, 'transition_task', tx);
+        if (final.access.bindingKey !== before.access.bindingKey || final.policyHash !== before.policyHash) throw denied();
+        await this.held(command.lease, final, tx);
+        callbackCompleted = true;
+        return { id: this.input(row, key).id, replayed: false };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      // Execution authorization includes its own entitlement/gate transaction.
+      // Do not nest it under task/run locks. Publication is metadata only;
+      // failing the fresh post-commit gate suppresses the result, not the row.
+      const reauthorized = structuredClone(await this.execution.authorize(command.taskId));
+      if (identity(reauthorized) !== identity(executeContext)) throw denied();
+      const after = await this.access(command.taskId, 'transition_task');
+      if (identity(after.context) !== identity(before.context) || after.policyHash !== before.policyHash) throw denied();
+      return result;
+    } catch (error) {
+      if (error instanceof AiTaskRepositoryError) throw error;
+      if (callbackCompleted) throw new AiTaskPlanInputResultUnknownError();
+      throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+    }
+  }
+
+  async authorize(raw: Readonly<AiTaskRunnerPlan>, presented: Readonly<AiTaskRunnerLease>) {
+    const plan = aiTaskRunPlanSchema.parse(structuredClone(raw)), lease = leaseSchema.parse(structuredClone(presented));
+    if (plan.taskId !== lease.taskId || plan.runId !== lease.runId || plan.steps.length === 0) throw denied();
+    const before = await this.access(plan.taskId, 'read_metadata');
+    await this.held(lease, before);
+    for (const [name, ceiling] of Object.entries(before.policy.limits)) {
+      if (plan.limits[name as keyof typeof plan.limits] > ceiling) throw unavailable();
+    }
+    const inputs = [];
+    for (const step of plan.steps) {
+      if (step.operation !== 'readonly' || !before.policy.tools.some(t => t.code === step.toolCode && t.version === step.toolVersion)) throw unavailable();
+      const key = { scopeId: before.task.scopeId, taskId: plan.taskId, runId: plan.runId, registrationRef: step.registrationRef };
+      const input = this.input(await this.db.aiTaskActionInput.findFirst({ where: key }), key);
+      if (input.toolCode !== step.toolCode || input.toolVersion !== step.toolVersion || input.policyRevision !== before.policy.revision) throw denied();
+      inputs.push(input);
+    }
+    const current = await this.access(plan.taskId, 'read_metadata');
+    if (current.access.bindingKey !== before.access.bindingKey || current.policyHash !== before.policyHash) throw denied();
+    await this.held(lease, current);
+    for (const input of inputs) {
+      const key = { scopeId: before.task.scopeId, taskId: plan.taskId, runId: plan.runId, registrationRef: input.registrationRef };
+      const again = this.input(await this.db.aiTaskActionInput.findFirst({ where: key }), key);
+      if (requestFingerprint(again) !== requestFingerprint(input)) throw denied();
+    }
+    return { authorityHash: requestFingerprint({ version: 'persisted-plan-input-1', scopeId: before.task.scopeId,
+      taskId: plan.taskId, runId: plan.runId, scene: before.task.sceneCode, policy: before.policyHash,
+      identity: identity(current.context), steps: plan.steps, limits: plan.limits, inputs }),
+      policyVersion: `scene-policy-${before.policy.revision}`,
+      expiresAt: new Date(Math.min(Date.parse(before.policy.expiresAt), ...inputs.map(i => Date.parse(i.expiresAt)))).toISOString() };
+  }
+
+  async resolve(raw: Readonly<AiStepRegistrationCommand>) {
+    const command = structuredClone(raw), before = await this.access(command.taskId, 'transition_task');
+    const key = { scopeId: before.task.scopeId, taskId: command.taskId, runId: command.lease.runId };
+    const run = await this.db.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: key.runId } });
+    if (!run?.leaseExpiresAt) throw denied();
+    const lease = { taskId: key.taskId, ...command.lease, expiresAt: run.leaseExpiresAt.toISOString() };
+    const row = await this.db.aiTaskRunPlan.findFirst({ where: key });
+    if (!row || row.scopeId !== key.scopeId || row.taskId !== key.taskId || row.runId !== key.runId) throw unavailable();
+    const plan = aiTaskRunPlanSchema.parse(structuredClone(row.payload));
+    if (requestFingerprint(plan) !== row.planHash) throw denied();
+    const proof = await this.authorize(plan, lease);
+    if (proof.authorityHash !== row.authorityHash || proof.policyVersion !== row.policyVersion
+      || !plan.steps.some(p => p.registrationRef === command.registrationRef)) throw denied();
+    const inputKey = { ...key, registrationRef: command.registrationRef };
+    const input = this.input(await this.db.aiTaskActionInput.findFirst({ where: inputKey }), inputKey);
+    const current = await this.access(command.taskId, 'transition_task');
+    if (current.access.bindingKey !== before.access.bindingKey || current.policyHash !== before.policyHash) throw denied();
+    return { context: current.context, registrationAllowed: true as const,
+      authorizationKey: `persisted-input-${requestFingerprint({ plan: row.planHash, proof: proof.authorityHash, input })}`,
+      taskId: command.taskId, registrationRef: command.registrationRef, expiresAt: proof.expiresAt,
+      toolCode: 'rental.catalog.search' as const, toolVersion: AI_TOOL_DRAFT_VERSION, inputRef: input.id, requestFingerprint: input.fingerprint };
+  }
+
+  async readCatalogInput(binding: { taskId: string; runId: string; inputRef: string; fingerprint: string }) {
+    binding = structuredClone(binding);
+    const before = await this.access(binding.taskId, 'transition_task');
+    const key = { scopeId: before.task.scopeId, taskId: binding.taskId, runId: binding.runId };
+    const input = this.input(await this.db.aiTaskActionInput.findFirst({ where: { ...key, id: binding.inputRef } }), key);
+    if (input.id !== binding.inputRef || input.fingerprint !== binding.fingerprint || input.policyRevision !== before.policy.revision) throw denied();
+    const current = await this.access(binding.taskId, 'transition_task');
+    if (current.access.bindingKey !== before.access.bindingKey || current.policyHash !== before.policyHash) throw denied();
+    return { context: current.context, input: input.payload, registrationRef: input.registrationRef };
+  }
+
+  async readForExecution(presented: { taskId: string; runId: string; stepId: string; actionId: string;
+    inputRef: string; fingerprint: string; lease: AiTaskRunnerLease }) {
+    const binding = structuredClone(presented);
+    const stored = await this.readCatalogInput(binding);
+    const current = await this.access(binding.taskId, 'transition_task');
+    if (identity(current.context) !== identity(stored.context) || binding.runId !== binding.lease.runId
+      || binding.taskId !== binding.lease.taskId) throw denied();
+    await this.held(binding.lease, current);
+    const actionId = `ai-action-${requestFingerprint({ version: 'ai-step-registration-1', scope: current.access.scope,
+      taskId: binding.taskId, registrationRef: stored.registrationRef })}`;
+    const step = await this.db.aiStep.findFirst({ where: { scopeId: current.task.scopeId, taskId: binding.taskId,
+      runId: binding.runId, id: binding.stepId, actionId } });
+    if (!step || step.id !== binding.stepId || step.scopeId !== current.task.scopeId || step.taskId !== binding.taskId
+      || step.runId !== binding.runId || step.actionId !== binding.actionId || binding.actionId !== actionId
+      || step.status !== 'RUNNING' || step.inputRef !== binding.inputRef || step.requestFingerprint !== binding.fingerprint
+      || step.toolCode !== 'rental.catalog.search' || step.toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
+    const again = await this.readCatalogInput(binding);
+    if (identity(again.context) !== identity(stored.context) || again.registrationRef !== stored.registrationRef
+      || requestFingerprint(again.input) !== requestFingerprint(stored.input)) throw denied();
+    await this.held(binding.lease, current);
+    return again;
+  }
+}
