@@ -69,6 +69,8 @@ test("external timeout is persisted as unknown and is never retried", async () =
 
 test("recovery reconciles an unknown external step and never calls execute", async () => {
   const h = harness({ steps: [step("network", "external_unknown")], effects: { execute: async () => { throw new Error("must not dispatch"); }, reconcile: async () => ({ kind: "succeeded", resultRef: "observed", outputBytes: 2 }) } });
+  h.registered.set('network', { stepId: 'id-network', runId: 'run-1', sequence: 1, stepRevision: 2,
+    taskRevision: 3, replayed: true, existingStatus: 'unknown', resultRef: 'original-unknown' });
   assert.deepEqual(await h.runner.run({ ...input, recovery: true }), { status: "succeeded", completedSteps: 1, cleanupFailed: 0 });
   assert.deepEqual(h.calls.filter(value => Array.isArray(value)).map(value => value[0]), ["register", "succeed"]);
   assert.equal(h.effectCalls.length, 0);
@@ -76,6 +78,8 @@ test("recovery reconciles an unknown external step and never calls execute", asy
 
 test("missing reconcile capability and invalid limits fail closed", async () => {
   const unavailable = harness({ steps: [step("network", "external_unknown")], recovery: true });
+  unavailable.registered.set('network', { stepId: 'id-network', runId: 'run-1', sequence: 1, stepRevision: 2,
+    taskRevision: 3, replayed: true, existingStatus: 'unknown', resultRef: 'original-unknown' });
   assert.deepEqual(await unavailable.runner.run({ ...input, recovery: true }), { status: "unavailable", completedSteps: 0, cleanupFailed: 0 });
   const bad = harness({ steps: [step("s1")] });
   bad.runner.deps.plan = { resolve: async () => ({ taskId: "task-1", runId: "run-1", taskRevision: 3, steps: [step("s1")], limits: { ...limits, maxConcurrent: 2 } }) };

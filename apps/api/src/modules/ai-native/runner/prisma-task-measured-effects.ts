@@ -28,12 +28,12 @@ export interface AiTaskRegisteredExecutor {
 export class PrismaTaskMeasuredEffects implements AiTaskRunnerEffectPort {
   constructor(private readonly db: Pick<PrismaClient, 'aiTask' | 'aiStep'>,
     private readonly tasks: Pick<AiTaskRepository, 'resolveAccess'>,
-    private readonly evidence: Pick<PrismaTaskRunEvidenceRepository, 'capture' | 'recoverResult'>,
+    private readonly evidence: Pick<PrismaTaskRunEvidenceRepository, 'capture' | 'recoverResult' | 'assertExecutable'>,
     private readonly tools: AiTaskRegisteredExecutor,
     private readonly executionAuthorization: AiTaskExecutionAuthorization,
     private readonly inputs?: AiTaskInputReader, private readonly wall: () => Date = () => new Date()) {
     if (typeof tasks?.resolveAccess !== 'function' || typeof evidence?.capture !== 'function'
-      || typeof evidence?.recoverResult !== 'function' || typeof tools?.resolve !== 'function'
+      || typeof evidence?.recoverResult !== 'function' || typeof evidence?.assertExecutable !== 'function' || typeof tools?.resolve !== 'function'
       || typeof executionAuthorization?.authorize !== 'function') throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
   }
   private async step(plan: AiTaskRunnerStepPlan, lease?: AiTaskRunnerLease) {
@@ -63,6 +63,7 @@ export class PrismaTaskMeasuredEffects implements AiTaskRunnerEffectPort {
       const context = structuredClone(await this.executionAuthorization.authorize(binding.lease.taskId));
       const current = aiTaskAccessFromContext(context, binding.lease.taskId, this.wall());
       if (current.bindingKey !== binding.access.bindingKey) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
+      await this.evidence.assertExecutable(binding.lease);
       if (signal.aborted) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
       return execute({ taskId: binding.lease.taskId, runId: binding.lease.runId, stepId: binding.step.id,
         actionId: binding.step.actionId, inputRef, fingerprint: binding.step.requestFingerprint,

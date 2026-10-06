@@ -85,6 +85,15 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     }
   }
 
+  async assertExecutable(lease: AiTaskRunnerLease) {
+    lease = structuredClone(lease);
+    const access = await this.access(lease);
+    const task = await this.db.aiTask.findFirst({ where: { AND: [access.taskWhere, { scopeId: access.scopeId, status: 'RUNNING', cancelRequestedAt: null }] },
+      select: { id: true, scopeId: true, status: true, cancelRequestedAt: true } });
+    if (!task || task.id !== lease.taskId || task.scopeId !== access.scopeId || task.status !== 'RUNNING' || task.cancelRequestedAt !== null) throw denied();
+    await this.held(this.db, lease, access);
+  }
+
   async savePlan(value: AiTaskRunnerPlan, lease: AiTaskRunnerLease) {
     const plan = planSchema.parse(structuredClone(value)); lease = structuredClone(lease);
     if (plan.taskId !== lease.taskId || plan.runId !== lease.runId) throw denied();
