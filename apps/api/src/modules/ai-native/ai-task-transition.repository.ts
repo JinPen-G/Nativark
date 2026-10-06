@@ -54,6 +54,8 @@ export class AiTaskTransitionRepository {
       return await this.db.$transaction(async tx => {
         const task = await tx.aiTask.findFirst({ where: initial.where, select: taskSelect });
         if (!task) throw new AiTaskRepositoryError("AI_RESOURCE_UNAVAILABLE");
+        // Input consumption and resume must share the dedicated receipt transaction.
+        if (task.status === 'WAITING_INPUT' && input.to === 'running') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         if (task.contractVersion !== AI_TASK_DRAFT_VERSION || !AI_TASK_STATUSES_DRAFT.some(status => status === task.status.toLowerCase())) {
           throw new AiTaskRepositoryError("AI_INVALID_INPUT");
         }
