@@ -44,9 +44,25 @@ function harness(result, clock) {
   return { runner, input };
 }
 
-test('runner strips recovery flag and carries registration CAS into start and release', async () => {
+test('new execution strips an explicit false recovery flag and carries registration CAS into start and release', async () => {
   const h = harness(async () => ({ kind: 'succeeded', resultRef: 'result-1', outputBytes: 1 }));
-  assert.equal((await h.runner.run({ ...h.input, recovery: true })).status, 'succeeded');
+  assert.equal((await h.runner.run({ ...h.input, recovery: false })).status, 'succeeded');
+});
+
+test('recovery strips its flag but cannot start a newly registered step from a legacy adapter', async () => {
+  const h = harness(async () => assert.fail('recovery must not execute'));
+  assert.equal((await h.runner.run({ ...h.input, recovery: true })).status, 'unavailable');
+});
+
+test('actual recovery registration refuses missing original steps without any registration CAS', async () => {
+  const h = setup(), before = clone(h.state);
+  const lease = { taskId: command.taskId, ...command.lease, expiresAt: h.state.run.leaseExpiresAt.toISOString() };
+  const ports = createAiTaskRunnerRepositoryPorts({ tasks: {}, registrations: h.repository, transitions: {},
+    commands: { register: () => clone(command), transition: () => assert.fail('recovery must not start') } });
+  await assert.rejects(ports.steps.register({ registrationRef: command.registrationRef, operation: 'readonly',
+    toolCode: 'rental.order.explain', toolVersion: 'draft-1' }, lease, true), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  for (const key of ['task', 'run', 'steps', 'events', 'ids', 'commits']) assert.deepEqual(h.state[key], before[key], key);
+  assert.equal(h.state.calls.some(call => /(?:update|create|cas)/i.test(call.kind)), false);
 });
 
 test('persisted failed result is not reported as a successful run', async () => {

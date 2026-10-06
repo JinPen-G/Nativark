@@ -49,9 +49,9 @@ export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerReposito
     return committed(result, lease, ref, status);
   };
   const steps: AiTaskRunnerStepPort = {
-    async register(plan, lease) {
+    async register(plan, lease, existingOnly = false) {
       const command = structuredClone(commands.register(structuredClone(plan), structuredClone(lease)));
-      const result = await adapters.registrations.register(command);
+      const result = await adapters.registrations.register(command, existingOnly);
       const replay = result.replayed && adapters.replays
         ? await adapters.replays.readReplay({ ...command, stepId: result.stepId, expectedStepRevision: result.stepRevision }) : null;
       if (replay && (replay.stepId !== result.stepId || replay.runId !== result.runId || replay.sequence !== result.sequence

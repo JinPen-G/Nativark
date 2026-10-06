@@ -50,7 +50,7 @@ function match(row, where) {
   });
 }
 function harness() {
-  const state = { aiTask: [{ id: 'task-a', scopeId: 'scope-a', ownerId: 'user-a', revision: 1, cancelRequestedAt: null }],
+  const state = { aiTask: [{ id: 'task-a', scopeId: 'scope-a', ownerId: 'user-a', status: 'RUNNING', revision: 1, cancelRequestedAt: null }],
     aiRun: [{ id: 'run-a', scopeId: 'scope-a', taskId: 'task-a', leaseOwnerId: 'worker-a', fencingToken: '1', revision: 1, status: 'RUNNING', leaseExpiresAt: new Date(lease.expiresAt) }],
     aiStep: [{ id: 'step-a', scopeId: 'scope-a', taskId: 'task-a', runId: 'run-a', status: 'RUNNING', resultRef: null, revision: 1,
       toolCode: 'rental.order.explain', toolVersion: '1', inputRef: 'input-a', actionId: 'action-a', requestFingerprint: 'a'.repeat(64) }],

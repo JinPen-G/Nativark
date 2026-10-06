@@ -143,7 +143,7 @@ export class AiTaskRunner {
         if (this.clock.now() - startedAt >= plan.limits.maxTotalMs || calls >= plan.limits.maxCalls) throw new AiTaskRunnerError("AI_RUN_LIMIT");
         const cancelling = await checkCancel();
         if (cancelling && !recovery) return this.deps.taskOutcome ? await finish({ status: "cancelled", completedSteps, cleanupFailed }) : { status: "cancel_requested", completedSteps, cleanupFailed };
-        const registered = structuredClone(await this.deps.steps.register(structuredClone(stepPlan), structuredClone(lease)));
+        const registered = structuredClone(await this.deps.steps.register(structuredClone(stepPlan), structuredClone(lease), recovery));
         taskRevision = registered.taskRevision;
         if (registered.runRevision != null) lease = { ...lease, revision: registered.runRevision };
         const ref: AiTaskRunnerStepRef = { plan: stepPlan, registered };
@@ -188,6 +188,7 @@ export class AiTaskRunner {
         if (registered.replayed && registered.existingStatus === "unknown" && !reconcile) return await finish({ status: "unknown", completedSteps, cleanupFailed });
         const unstarted = registered.replayed && registered.existingStatus === 'pending' && !registered.resultRef && !recovery && !!this.deps.resources;
         if (registered.replayed && !unstarted && !(reconcile && ['unknown', 'running'].includes(registered.existingStatus ?? ''))) return { status: "unavailable", completedSteps, cleanupFailed };
+        if (recovery && (!registered.replayed || !reconcile)) return { status: 'unavailable', completedSteps, cleanupFailed };
         if (reconcile && !this.deps.effects.reconcile) return { status: "unavailable", completedSteps, cleanupFailed };
         let resourceTicket: AiTaskRunnerResourceTicket | undefined;
         if (this.deps.resources) {
