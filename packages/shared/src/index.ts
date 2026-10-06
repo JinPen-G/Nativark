@@ -21,6 +21,8 @@ export * from "./client-rich-text";
 export * from "./category-governance";
 export * from "./ai-native";
 export * from "./ai-task-draft";
+export * from "./ai-task-input-draft";
+export { AI_TASK_INPUT_DRAFT_SCHEMAS } from "./ai-task-input-draft-schemas";
 export * from "./ai-gateway-draft";
 export * from "./ai-knowledge-draft";
 export * from "./ai-usage-draft";

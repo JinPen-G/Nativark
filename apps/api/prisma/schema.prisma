@@ -659,7 +659,9 @@ model AiTaskRunPlan {
   payload Json
   createdAt DateTime @default(now()) @db.DateTime(3)
   run AiRun @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_task_run_plans_run_fkey")
+  inputRequests AiTaskInputRequest[]
   @@id([scopeId, taskId, runId])
+  @@unique([scopeId, taskId, runId, planHash], map: "ai_task_run_plans_hash_key")
   @@map("ai_task_run_plans")
 }
 
@@ -701,9 +703,80 @@ model AiTaskResultArtifact {
   completeMeasurement Boolean @default(false)
   createdAt DateTime @default(now()) @db.DateTime(3)
   step AiStep @relation(fields: [scopeId, taskId, stepId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_task_result_artifacts_step_fkey")
+  inputRequests AiTaskInputRequest[]
   @@id([scopeId, taskId, id])
+  @@unique([scopeId, taskId, runId, stepId, id], map: "ai_task_result_artifacts_input_basis_key")
   @@unique([scopeId, taskId, runId, stepId, fencingToken], map: "ai_result_artifact_step_generation_key")
   @@map("ai_task_result_artifacts")
+}
+
+enum AiTaskInputRequestStatus {
+  PENDING  @map("pending")
+  CONSUMED @map("consumed")
+}
+
+/// Scoped clarification request. A completed read-only step is its basis, not approval.
+model AiTaskInputRequest {
+  scopeId             String @db.VarChar(36)
+  taskId              String @db.VarChar(36)
+  id                  String @db.VarChar(36)
+  runId               String @db.VarChar(36)
+  stepId              String @db.VarChar(36)
+  planHash            String @db.Char(64)
+  planRevision        Int @db.UnsignedInt
+  inputRef            String @db.VarChar(191)
+  inputHash           String @db.Char(64)
+  contractCode        String @db.VarChar(64)
+  contractVersion     String @db.VarChar(64)
+  contractHash        String @db.Char(64)
+  requestHash         String @db.Char(64)
+  /// AiTaskInputFieldDraft[] from a verified server registry; never arbitrary tool input.
+  allowedFields       Json
+  basisResultRef      String @db.VarChar(36)
+  createdBy           String @db.VarChar(191)
+  leaseOwnerId        String @db.VarChar(191)
+  fencingToken        Decimal @db.Decimal(20, 0)
+  waitingTaskRevision Int @db.UnsignedInt
+  status              AiTaskInputRequestStatus @default(PENDING)
+  revision            Int @default(1) @db.UnsignedInt
+  expiresAt           DateTime @db.DateTime(3)
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  plan                AiTaskRunPlan @relation(fields: [scopeId, taskId, runId, planHash], references: [scopeId, taskId, runId, planHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_task_input_requests_plan_fkey")
+  basis               AiTaskResultArtifact @relation(fields: [scopeId, taskId, runId, stepId, basisResultRef], references: [scopeId, taskId, runId, stepId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_task_input_requests_basis_fkey")
+  receipt             AiTaskInputReceipt?
+
+  @@id([scopeId, taskId, id])
+  @@unique([scopeId, taskId, id, planHash], map: "ai_task_input_requests_plan_key")
+  @@unique([scopeId, taskId, runId, stepId, planHash], map: "ai_task_input_requests_pause_key")
+  @@index([scopeId, taskId, status, expiresAt], map: "ai_task_input_requests_pending_idx")
+  @@map("ai_task_input_requests")
+}
+
+/// Immutable clarification content; a receipt is not approval or dispatch permission.
+model AiTaskInputReceipt {
+  scopeId              String @db.VarChar(36)
+  taskId               String @db.VarChar(36)
+  id                   String @db.VarChar(36)
+  requestId            String @db.VarChar(36)
+  planHash             String @db.Char(64)
+  submissionKey        String @db.VarChar(191)
+  answerHash           String @db.Char(64)
+  /// AiTaskInputAnswerDraft[] checked against the original registered contract.
+  answers              Json
+  actorKind            AiActorKind
+  actorId              String @db.VarChar(191)
+  audience             AiAudience
+  createdAt            DateTime @default(now()) @db.DateTime(3)
+  /// Written once by the same transaction that resumes the waiting task.
+  consumedAt           DateTime? @db.DateTime(3)
+  consumedTaskRevision Int? @db.UnsignedInt
+  request              AiTaskInputRequest @relation(fields: [scopeId, taskId, requestId, planHash], references: [scopeId, taskId, id, planHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_task_input_receipts_request_fkey")
+
+  @@id([scopeId, taskId, id])
+  @@unique([scopeId, taskId, requestId], map: "ai_task_input_receipts_request_key")
+  @@unique([scopeId, taskId, requestId, planHash], map: "ai_task_input_receipts_request_plan_key")
+  @@unique([scopeId, taskId, submissionKey], map: "ai_task_input_receipts_submission_key")
+  @@map("ai_task_input_receipts")
 }
 
 /// Durable policy row locked by budget reservation transactions.

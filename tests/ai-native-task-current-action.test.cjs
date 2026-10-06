@@ -21,7 +21,7 @@ function setup(audience = 'operator') {
   return { state, actions, authority: new AiTaskCurrentActionAuthority(auth, credentials, policies, () => now), now };
 }
 
-for (const audience of ['operator', 'staff']) for (const action of ['read_step_terminal', 'takeover_run']) test(`actual AuthService verifies ${audience}/${action} using a versioned injected policy`, async () => {
+for (const audience of ['operator', 'staff']) for (const action of ['read_step_terminal', 'takeover_run', 'request_input', 'submit_input', 'resume_input']) test(`actual AuthService verifies ${audience}/${action} using a versioned injected policy`, async () => {
   const h = setup(audience); const context = await h.authority.resolve('task-a', action);
   assert.equal(context.scope.workspaceId, 'workspace-a'); assert.equal(context.actor.userId, 'operator-a'); assert.equal(context.audience, audience);
   assert.deepEqual(h.actions, [action, action]);
