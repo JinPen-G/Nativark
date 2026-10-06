@@ -11,23 +11,34 @@ export class KnowledgeSourceService {
   }
 
   async readChunk(context: AiExecutionContext, source: Extract<AiKnowledgeSourceDraft, { kind: 'document' }>, action: 'snippet' | 'resolve_source' = 'snippet'): Promise<AiKnowledgeChunkDraft> {
+    const contextHash = fingerprint(context);
+    const stableContext = structuredClone(context);
+    const stableContextHash = fingerprint(stableContext);
     try {
       source = parse(documentSourceSchema, source);
-      if (!sameScope(context.scope, source.scope)) unavailable();
-      const before = await this.documents.load(context, source.documentId, action);
+      const assertStableContext = () => {
+        if (fingerprint(context) !== contextHash || fingerprint(stableContext) !== stableContextHash) unavailable();
+      };
+      if (!sameScope(stableContext.scope, source.scope)) unavailable();
+      const before = await this.documents.load(stableContext, source.documentId, action);
+      assertStableContext();
       const d = before.document;
       if (!visible(d, this.documents.ports.clock.now()) || d.documentVersion !== source.documentVersion || d.aclRevision !== source.aclRevision) unavailable();
-      const grant = await authorize(this.documents.ports.authorization, context, { action: 'read_body', scope: context.scope, document: d });
+      const grant = await authorize(this.documents.ports.authorization, structuredClone(stableContext), { action: 'read_body', scope: structuredClone(stableContext.scope), document: structuredClone(d) });
+      assertStableContext();
       const cacheKey = this.cache?.key(grant, source, before.revision);
       const cached = cacheKey ? this.cache?.get(cacheKey) : undefined;
-      const returned = cached ?? await this.content.chunk(context, structuredClone(source), 2000);
+      const returned = cached ?? await this.content.chunk(structuredClone(stableContext), structuredClone(source), 2000);
+      assertStableContext();
       const chunk = returned ? structuredClone(returned) : null;
       if (!chunk || chunk.chunkId !== source.chunkId) unavailable();
       validateChunks(d, [chunk]);
       if (fingerprint(chunk.locator) !== fingerprint(source.locator)) unavailable();
-      const after = await this.documents.load(context, source.documentId, action);
+      const after = await this.documents.load(stableContext, source.documentId, action);
+      assertStableContext();
       if (before.revision !== after.revision || !visible(after.document, this.documents.ports.clock.now())) unavailable();
-      const currentGrant = await authorize(this.documents.ports.authorization, context, { action: 'read_body', scope: context.scope, document: after.document });
+      const currentGrant = await authorize(this.documents.ports.authorization, structuredClone(stableContext), { action: 'read_body', scope: structuredClone(stableContext.scope), document: structuredClone(after.document) });
+      assertStableContext();
       if (fingerprint(grant) !== fingerprint(currentGrant)) unavailable();
       if (cacheKey && !cached) this.cache?.put(cacheKey, chunk);
       return chunk;
@@ -35,7 +46,7 @@ export class KnowledgeSourceService {
       // A denied/revoked read must not retain the old body in this process cache.
       // Invalidation is scoped to the current server context and document; it
       // does not act as a cross-tenant cache or authorization mechanism.
-      try { if (source?.kind === 'document') this.cache?.invalidate(context.scope, source.documentId); } catch { /* fail closed below */ }
+      try { if (source?.kind === 'document') this.cache?.invalidate(structuredClone(stableContext.scope), source.documentId); } catch { /* fail closed below */ }
       return unavailable();
     }
   }
