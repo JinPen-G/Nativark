@@ -1,7 +1,7 @@
 import { AI_KNOWLEDGE_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
 import type { KnowledgeDocumentPorts, KnowledgeRecord, KnowledgeAction } from './knowledge.ports';
 import { KnowledgeError, requiredPort } from './knowledge-errors';
-import { assertRecord, authorize, draftInput, fingerprint, mutationInput, parse, validateChunks, queueIndex } from './knowledge-validation';
+import { assertRecord, authorize, draftInput, fingerprint, mutationInput, operationFingerprint, parse, validateChunks, queueIndex } from './knowledge-validation';
 
 export class KnowledgeDocumentService {
   constructor(readonly ports: KnowledgeDocumentPorts) {
@@ -53,7 +53,7 @@ export class KnowledgeDocumentService {
   async create(context: AiExecutionContext, value: unknown): Promise<KnowledgeRecord> {
     const input = parse(draftInput, value);
     const grant = await authorize(this.ports.authorization, context, { action: 'create', scope: context.scope, attachmentId: input.attachmentId });
-    const hash = fingerprint(['create', input]);
+    const hash = operationFingerprint(context, ['create', input]);
     const existing = await this.ports.repository.read(context.scope, input.documentId);
     if (existing) {
       const record = await this.load(context, input.documentId, 'create');
@@ -70,7 +70,7 @@ export class KnowledgeDocumentService {
   async newVersion(context: AiExecutionContext, expectedRevision: number, value: unknown): Promise<KnowledgeRecord> {
     const input = parse(draftInput, value);
     parse(mutationInput, { documentId: input.documentId, expectedRevision, operationId: input.operationId });
-    const before = await this.load(context, input.documentId, 'revise'), hash = fingerprint(['revise', expectedRevision, input]);
+    const before = await this.load(context, input.documentId, 'revise'), hash = operationFingerprint(context, ['revise', expectedRevision, input]);
     if (await this.replay(context, before, input.operationId, hash)) return before;
     if (before.revision !== expectedRevision || before.document.publication === 'deleted' || before.document.documentVersion === input.documentVersion) throw new KnowledgeError('conflict');
     await authorize(this.ports.authorization, context, { action: 'revise', scope: context.scope, document: before.document, attachmentId: input.attachmentId });
@@ -88,7 +88,7 @@ export class KnowledgeDocumentService {
     };
     const input = parse(mutationInput, value), before = await this.load(stableContext, input.documentId, 'parse');
     assertStableContext();
-    const hash = fingerprint(['parse', input]);
+    const hash = operationFingerprint(stableContext, ['parse', input]);
     if (await this.replay(stableContext, before, input.operationId, hash)) return before;
     assertStableContext();
     if (before.revision !== input.expectedRevision || before.document.publication !== 'draft' || before.document.parsing === 'parsed' || before.parseOperationId) throw new KnowledgeError('conflict');

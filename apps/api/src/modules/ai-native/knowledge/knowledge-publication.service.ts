@@ -2,7 +2,7 @@ import type { AiExecutionContext } from '@rental-os/shared';
 import type { KnowledgeRecord } from './knowledge.ports';
 import { KnowledgeDocumentService } from './knowledge-document.service';
 import { KnowledgeError } from './knowledge-errors';
-import { fingerprint, mutationInput, parse, queueIndex } from './knowledge-validation';
+import { mutationInput, operationFingerprint, parse, queueIndex } from './knowledge-validation';
 
 export class KnowledgePublicationService {
   constructor(private readonly documents: KnowledgeDocumentService) {}
@@ -12,7 +12,7 @@ export class KnowledgePublicationService {
 
   private async change(context: AiExecutionContext, value: unknown, action: 'publish' | 'withdraw' | 'delete'): Promise<KnowledgeRecord> {
     const input = parse(mutationInput, value);
-    const before = await this.documents.load(context, input.documentId, action), hash = fingerprint([action, input]);
+    const before = await this.documents.load(context, input.documentId, action), hash = operationFingerprint(context, [action, input]);
     if (await this.documents.replay(context, before, input.operationId, hash)) return before;
     if (before.revision !== input.expectedRevision || before.document.publication === 'deleted') throw new KnowledgeError('conflict');
     const d = before.document, now = this.documents.ports.clock.now();
