@@ -5,7 +5,7 @@ import { AiTaskRepositoryError, type AiTaskRepositoryAuthority, type AiTaskRepos
 import type { AiStepReplayAuthority } from './ai-step-registration.repository';
 import { isAiStepExecutionContext } from './task-contract-validation';
 
-const operations = ['read_metadata', 'read_events', 'claim_run', 'claim_recovery_run', 'release_run', 'transition_task', 'read_step_terminal', 'takeover_run'] as const;
+const operations = ['read_metadata', 'read_events', 'claim_run', 'claim_recovery_run', 'release_run', 'transition_task', 'read_step_terminal', 'takeover_run', 'request_input', 'submit_input', 'resume_input'] as const;
 export interface AiTaskCredentialSource {
   current(): Promise<{ authorization: string; requestId: string; audience: 'operator' | 'staff' }>;
 }
