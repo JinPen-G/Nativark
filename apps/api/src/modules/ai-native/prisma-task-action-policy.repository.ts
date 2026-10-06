@@ -68,7 +68,14 @@ export class PrismaTaskActionPolicyRepository {
     const strip = (value: AiExecutionContext) => { const { requestId: _, authorizedAt: __, ...identity } = value; return identity; };
     if (requestFingerprint(strip(granted)) !== requestFingerprint(strip(current.context))) throw error('AI_ACCESS_DENIED');
     if (current.scope.kind !== 'WORKSPACE' && current.scope.kind !== 'TENANT' && current.scope.kind !== 'PLATFORM') throw error('AI_ACCESS_DENIED');
-    return { context: current.context, scopeId: current.scope.id };
+    return { context: current.context, scopeId: current.scope.id,
+      bindingKey: requestFingerprint({ scopeId: current.scope.id, identity: strip(current.context) }) };
+  }
+
+  private async recheck(taskId: string, bindingKey: string) {
+    // Sequential authorization recheck, not an atomic lock on the Auth service.
+    // A failure here rolls back the staged policy write with the transaction.
+    if ((await this.access(taskId)).bindingKey !== bindingKey) throw error('AI_ACCESS_DENIED');
   }
 
   private validate(value: AiTaskActionPolicyMutation) {
@@ -97,7 +104,7 @@ export class PrismaTaskActionPolicyRepository {
     try {
       return await this.db.$transaction(async (tx: Tx) => {
         const task = await tx.aiTask.findFirst({ where: { scopeId: access.scopeId, id: next.taskId, archivedAt: null }, select: { id: true } });
-        if (!task) throw error('AI_RESOURCE_UNAVAILABLE');
+        if (!task || task.id !== next.taskId) throw error('AI_RESOURCE_UNAVAILABLE');
         const where = { scopeId_taskId_operation: { scopeId: access.scopeId, taskId: next.taskId, operation: next.operation } };
         const current = await tx.aiTaskActionPolicy.findUnique({ where, select: { taskId: true, operation: true, revision: true, requiredPermissions: true, expiresAt: true } });
         if (expectedRevision === null ? current !== null : current?.revision !== expectedRevision) throw error('AI_REVISION_CONFLICT');
@@ -112,7 +119,10 @@ export class PrismaTaskActionPolicyRepository {
           row = await tx.aiTaskActionPolicy.create({ data: { scopeId: access.scopeId, taskId: next.taskId, operation: next.operation, revision, requiredPermissions: next.requiredPermissions, expiresAt: next.expiresAt }, select: { taskId: true, operation: true, revision: true, requiredPermissions: true, expiresAt: true } });
         }
         if (!row) throw error('AI_STORAGE_UNAVAILABLE');
-        return this.project(row);
+        const result = this.project(row);
+        await this.recheck(next.taskId, access.bindingKey);
+        this.validate(next);
+        return result;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (cause) {
       if (cause instanceof AiTaskRepositoryError) throw cause;
@@ -129,12 +139,14 @@ export class PrismaTaskActionPolicyRepository {
     try {
       return await this.db.$transaction(async (tx: Tx) => {
         const task = await tx.aiTask.findFirst({ where: { scopeId: access.scopeId, id: taskId, archivedAt: null }, select: { id: true } });
-        if (!task) throw error('AI_RESOURCE_UNAVAILABLE');
+        if (!task || task.id !== taskId) throw error('AI_RESOURCE_UNAVAILABLE');
         const changed = await tx.aiTaskActionPolicy.updateMany({ where: { scopeId: access.scopeId, taskId, operation, revision: expectedRevision }, data: { revision: expectedRevision + 1, expiresAt: now } });
         if (changed.count !== 1) throw error('AI_REVISION_CONFLICT');
         const row = await tx.aiTaskActionPolicy.findUnique({ where: { scopeId_taskId_operation: { scopeId: access.scopeId, taskId, operation } }, select: { taskId: true, operation: true, revision: true, requiredPermissions: true, expiresAt: true } });
         if (!row) throw error('AI_STORAGE_UNAVAILABLE');
-        return this.project(row);
+        const result = this.project(row);
+        await this.recheck(taskId, access.bindingKey);
+        return result;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (cause) {
       if (cause instanceof AiTaskRepositoryError) throw cause;
