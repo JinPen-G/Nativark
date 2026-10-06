@@ -458,3 +458,4 @@ HANDOFF-ID / 原任务与CLAIM-ID：
 - 遗留任务列表正式Auth/逐项metadata政策装配已接收并提交d111a1c8，主线扩大62/62、API类型通过；不是专项全量。
 - AIN-10两个仓储改用本树实际Prisma类型，修复普通数据库异常冒充conflict和读错误泄漏；写入结果不明返回result_unknown/reconcile，确认失败与真实CAS保持拒绝。22项红测10失败后修复，扩大到实际知识/记忆服务与仓储119/119、API类型、diff check通过；本树Prisma生成器核验为noop。完整命令及不确定性边界见[主线记录](AI原生系统协作切片/Claude主线恢复与整合-20261006.md)。JSON读回、记忆owner/确认关系、解析chunk落盘和真实模块装配继续推进，不宣称AIN-10完成。
 - 第二批两辅助均已收到负责人授权：恢复线接收固定353d0260，审批线在原会话得到确认后ff至353d0260并开始policy/持久来源；主线为审批提供公共快照模型。没有变更正式0/28，没有真实数据库/供应商或生产验收。
+- AIN-07公共前置be086a28：主线新增AiApprovedOrderSnapshot复合FK/唯一约束及追加迁移，公开Core既有assertOrderMatchesQuote方法供准备阶段复用（只改可见性，不改业务算法）。先红6项5失败后6/6，既有审批组合扩大79/79、API类型与diff check通过。离线schema差异与迁移一致；隔离生成首次在安装后的junction清理被护栏拦截exit1，保留自身现场，后续已安装client指纹核验noop exit0，不冒称清理成功。详情与剩余清理责任见主线记录；该前置不等于辅助新实现已整合。
