@@ -24,7 +24,7 @@ const uuid = (hash: string) => `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash
  */
 export class PrismaTaskRunnerResourceSource implements AiTaskRunnerResourceEvidenceSource {
   private readonly recovery: PrismaTaskResourceRecoverySource;
-  constructor(private readonly db: Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskExecutionCharge' | 'aiGatewayInvocation'>,
+  constructor(private readonly db: Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskExecutionCharge' | 'aiTaskExecutionBudget' | 'aiGatewayInvocation'>,
     private readonly scopes: AiTaskExecutionScopeSource, private readonly plans: Pick<PrismaTaskRunEvidenceRepository, 'resolve'>,
     private readonly catalog: AiTaskToolResourceCatalog, private readonly clock: () => Date = () => new Date(),
     private readonly invocations?: AiTaskModelInvocationPreparation) {
@@ -48,12 +48,17 @@ export class PrismaTaskRunnerResourceSource implements AiTaskRunnerResourceEvide
     const descriptor = structuredClone(await this.catalog.resolve(planned.toolCode, planned.toolVersion));
     if (!descriptor || typeof descriptor.modelCall !== 'boolean') throw fail();
     if (descriptor.modelCall && typeof this.invocations?.prepare !== 'function') throw fail();
+    const budget = await this.db.aiTaskExecutionBudget.findUnique({ where: { scopeId_taskId: { scopeId: access.scopeId, taskId: lease.taskId } } });
+    if (!budget || budget.scopeId !== access.scopeId || budget.taskId !== lease.taskId
+      || budget.consumedOutputBytes < 0n || budget.reservedOutputBytes < 0n) throw fail();
+    const outputAllowance = BigInt(plan.limits.maxOutputBytes) - budget.consumedOutputBytes - budget.reservedOutputBytes;
+    if (outputAllowance <= 0n) throw new AiTaskExecutionBudgetError('AI_RUN_LIMIT');
     const current = await this.scopes.resolve(lease.taskId, lease, 'write');
     if (access.bindingKey !== current.bindingKey || access.scopeId !== current.scopeId) throw new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
     const resources: AiTaskExecutionResource[] = ['steps', 'active_ms', 'output_bytes'];
     return { modelCall: descriptor.modelCall, ...(descriptor.modelCall ? { deferredModelCall: true as const } : {}), requests: resources.map(resource => ({ taskId: lease.taskId, lease: structuredClone(lease), resource,
       chargeId: uuid(requestFingerprint({ scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId, stepId: stored.id, actionId: stored.actionId, fingerprint: stored.requestFingerprint, resource })),
-      amount: resource === 'active_ms' ? BigInt(plan.limits.maxStepMs) : resource === 'output_bytes' ? BigInt(plan.limits.maxOutputBytes) : 1n,
+      amount: resource === 'active_ms' ? BigInt(plan.limits.maxStepMs) : resource === 'output_bytes' ? outputAllowance : 1n,
       target: { kind: 'step' as const, stepId: stored.id, actionId: stored.actionId, stepFingerprint: stored.requestFingerprint } })) };
   }
 
