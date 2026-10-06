@@ -64,3 +64,12 @@ test('own and empty selected scope remain current Guard restrictions, not caller
   const h = setup(); h.state.user.dataScope = 'own'; h.state.user.locationScope = { mode: 'selected', locationIds: [] };
   await assert.rejects(h.authority.withOrderWrite(h.input, h.binding, async () => assert.fail('not authorized')), e => e.code === 'AI_ACCESS_DENIED');
 });
+
+test('callback failure stays uncertain without exposing internal error details', async () => {
+  const h = setup(); let attempts = 0;
+  await assert.rejects(h.authority.withOrderWrite(h.input, h.binding, async () => {
+    attempts++; throw new Error('private-callback-detail');
+  }), error => error.code === 'AI_RESULT_UNKNOWN' && error.nextAction === 'reconcile'
+    && !String(error.stack).includes('private-callback-detail'));
+  assert.equal(attempts, 1);
+});
