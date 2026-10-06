@@ -22,6 +22,8 @@ function matches(value, rule) {
     if (key === 'is') return matches(value, child);
     if (key === 'in') return child.includes(value);
     if (key === 'gt') return value > child;
+    if (key === 'lte') return value <= child;
+    if (key.includes('_') && value?.[key] === undefined) return matches(value, child);
     if (key === 'not') return !matches(value, child);
     return value != null && matches(value[key], child);
   });
@@ -29,6 +31,7 @@ function matches(value, rule) {
 function project(row, select) {
   if (!row) return null;
   if (!select) return structuredClone(row);
+  if (Array.isArray(row)) return row.map(value => project(value, select));
   return Object.fromEntries(Object.entries(select).map(([key, shape]) => [key, shape === true ? structuredClone(row[key]) : project(row[key], shape.select)]));
 }
 
@@ -79,6 +82,8 @@ async function approvedOrderHarness() {
     };
     for (const model of Object.keys(state.records)) db[model] = {
       findFirst: async (args = {}) => { await before(model, 'findFirst', args); return project(rows(model).map(row => materialize(model, row)).find(row => matches(row, args.where)), args.select); },
+      findUnique: async (args = {}) => { await before(model, 'findUnique', args); return project(rows(model).map(row => materialize(model, row)).find(row => matches(row, args.where)), args.select); },
+      findMany: async (args = {}) => { await before(model, 'findMany', args); return rows(model).filter(row => matches(row, args.where)).map(row => project(row, args.select)); },
       create: async args => {
         await before(model, 'create', args);
         const row = { ...structuredClone(args.data) };
@@ -170,6 +175,6 @@ async function approvedOrderHarness() {
   const dependencies = { db, core, confirmation, quoteFacts, snapshots, policy, guard: new ApiAuthGuard(auth, undefined, undefined, undefined, {}),
     credentials, toolVersion: '1', clock: () => new Date(Math.max(Date.now(), state.clock.getTime())) };
   state.trace.length = 0;
-  return { dependencies, state, command, context, body, payload, action };
+  return { dependencies, state, command, context, body, payload, action, auth, client };
 }
 module.exports = { approvedOrderHarness };
