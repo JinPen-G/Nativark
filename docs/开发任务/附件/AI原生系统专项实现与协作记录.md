@@ -480,3 +480,10 @@ HANDOFF-ID / 原任务与CLAIM-ID：
 - 显式composePersistedCatalogTaskRunner把实际政策、输入、登记、执行前step/action/fingerprint/fence校验、Guard/ALS、原Core目录读投影、结果和累计资源计量串联。仅既有catalog只读工具，不替代Gateway、不另扣财务账、不启生产模块。
 - 记录并修复事务内嵌套权益检查等待、提交应答不明、原端口空expiry误校验及授权时间刷新导致输入误变更。最终关联396/396、fail/cancel/skip/todo均0、exit0；API类型、离线schema validate/diff、diff check通过。隔离生成guardViolations0/sharedArtifactsUnchanged:true，旧生成锁改名保全，不删除历史资源。
 - 受权政策管理/配置写入、其他工具及模型执行、正式业务澄清来源、审批建单原输入、unknown/旧代次恢复证据仍待推进；缺依赖unavailable。作者离线行为＋事务替身证据，不是MySQL/HTTP/模型/设备验收，待独立复核，正式0/28与M1不变。详见[正式计划与不可变输入记录](AI原生系统协作切片/AIN-06-正式计划与不可变输入-20261006-codex.md)。
+
+### AIN-IMPL-008：workspace场景政策受权管理（2026-10-06）
+
+- 从82e3bbc8接续，新增真实Prisma政策repository，复用AuthService/Scope解析与既有AI配置管理Guard权限system:params:manage；scope由服务器当前身份解析，scene由服务端组合选定，请求不能注入scope/scene/tools。
+- 未配置默认关闭；按canonical scope→政策固定锁序、expectedRevision CAS及事务内当前授权复验。仅既有catalog只读工具/资源上限，不seed、不授予权益或派发。提交应答不明unknown/reconcile不可重试。
+- 实际受权管理→不可变输入→计划证明组合验证，停用政策拒绝旧证明。最终关联53/53、fail/cancel/skip/todo均0，exit0；API类型/diff check exit0。DB事务替身，真库/HTTP/供应商/设备未验；与上轮396项不相加。
+- 真实配置页面/HTTP/生产注册、统一配置审计、全局政策管理与其他工具仍待接，不把该子集当完整治理或AIN-06结项。详见[政策受权管理记录](AI原生系统协作切片/AIN-06-场景政策受权管理-20261006-codex.md)，待独立复核，M1/0-of-28不变。
