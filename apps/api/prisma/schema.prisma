@@ -902,8 +902,12 @@ model AiKnowledgeDocument {
   createdAt   DateTime @default(now()) @db.DateTime(3)
   updatedAt   DateTime @updatedAt
   withdrawnAt DateTime?
+  /// Immutable AI document draft metadata (owner, version, ACL and lifecycle states).
+  /// Relational scope/status columns remain queryable; this is not model-controlled input.
+  state       Json?
   versions    AiKnowledgeVersion[]
   acl         AiKnowledgeAcl[]
+  operations  AiKnowledgeOperation[]
 
   @@index([tenantId, workspaceId, status], map: "ai_knowledge_documents_scope_status_idx")
   @@map("ai_knowledge_documents")
@@ -930,10 +934,29 @@ model AiKnowledgeChunk {
   chunkIndex Int      @db.UnsignedInt
   text       String   @db.Text
   tokenCount Int      @db.UnsignedInt
+  state      Json?
   version    AiKnowledgeVersion @relation(fields: [versionId], references: [id], onDelete: Cascade, onUpdate: Restrict)
 
   @@unique([versionId, chunkIndex], map: "ai_knowledge_chunks_version_index_key")
   @@map("ai_knowledge_chunks")
+}
+
+/// Immutable operation receipt for knowledge CAS/replay. It is scoped by the
+/// document and never doubles as an authorization grant or index lease.
+model AiKnowledgeOperation {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  documentId  String   @db.VarChar(36)
+  tenantId    String   @db.VarChar(191)
+  workspaceId String   @db.VarChar(191)
+  operationId String   @db.VarChar(128)
+  fingerprint String  @db.VarChar(128)
+  failure     String?  @db.VarChar(32)
+  createdAt   DateTime @default(now()) @db.DateTime(3)
+  document    AiKnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([tenantId, workspaceId, documentId, operationId], map: "ai_knowledge_operations_scope_key")
+  @@index([documentId, createdAt], map: "ai_knowledge_operations_document_idx")
+  @@map("ai_knowledge_operations")
 }
 
 model AiKnowledgeAcl {
@@ -968,15 +991,37 @@ model AiStructuredMemory {
   subjectType    String   @db.VarChar(32)
   subjectId      String   @db.VarChar(191)
   scopeRevision  Int      @db.UnsignedInt
+  revision       Int      @default(1) @db.UnsignedInt
+  ownerKind      String   @db.VarChar(32)
+  ownerId        String   @db.VarChar(191)
+  aclRevision    Int      @default(1) @db.UnsignedInt
   content        Json
   contentHash    String   @db.VarChar(128)
   status         String   @db.VarChar(32)
+  confirmationRecordId String? @db.VarChar(36)
+  deletedAt      DateTime?
+  state          Json?
   expiresAt      DateTime?
   createdAt      DateTime @default(now()) @db.DateTime(3)
   updatedAt      DateTime @updatedAt
 
   @@index([tenantId, workspaceId, subjectType, subjectId, status], map: "ai_memory_subject_scope_idx")
   @@map("ai_structured_memories")
+}
+
+/// Immutable operation receipt for structured-memory CAS/replay.
+model AiMemoryOperation {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  memoryId    String   @db.VarChar(191)
+  tenantId    String   @db.VarChar(191)
+  workspaceId String   @db.VarChar(191)
+  operationId String   @db.VarChar(128)
+  fingerprint String   @db.VarChar(128)
+  createdAt   DateTime @default(now()) @db.DateTime(3)
+
+  @@unique([tenantId, workspaceId, memoryId, operationId], map: "ai_memory_operations_scope_key")
+  @@index([memoryId, createdAt], map: "ai_memory_operations_memory_idx")
+  @@map("ai_memory_operations")
 }
 
 model AiHumanConfirmation {
@@ -992,6 +1037,7 @@ model AiHumanConfirmation {
   expiresAt      DateTime?
   createdAt      DateTime @default(now()) @db.DateTime(3)
   updatedAt      DateTime @updatedAt
+  state          Json?
 
   @@unique([tenantId, idempotencyKey], map: "ai_human_confirmation_tenant_key")
   @@index([tenantId, workspaceId, subjectId, status], map: "ai_human_confirmation_subject_idx")

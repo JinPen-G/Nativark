@@ -11,6 +11,11 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiOrderRouteCredentialSource } from '../order-route-context.authority';
 import { isAiStepExecutionContext } from '../task-contract-validation';
 import type { AiApprovedOrderAuthority, AiApprovedOrderInput } from './approved-order.ports';
+import { AiApprovedOrderResultUnknownError } from './approved-order.errors';
+
+class OrderWriteFailure {
+  constructor(readonly cause: unknown) {}
+}
 
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const identityHash = (context: AiExecutionContext) => {
@@ -89,11 +94,20 @@ export class AiApprovedOrderRouteAuthority implements AiApprovedOrderAuthority {
     if (typeof write !== 'function') throw denied();
     try {
       return await this.authorized(input, binding, 'execute', async (context, body, userName) => {
-        const value = await write(context, body, userName);
+        let value: T;
+        try { value = await write(context, body, userName); }
+        catch (error) { throw new OrderWriteFailure(error); }
         const current = await this.resolve(input, binding, 'replay');
         if (identityHash(current) !== identityHash(context)) throw denied();
         return value;
       });
-    } catch (error) { if (error instanceof AiTaskRepositoryError) throw error; throw denied(); }
+    } catch (error) {
+      if (error instanceof OrderWriteFailure) {
+        if (error.cause instanceof AiTaskRepositoryError) throw new AiTaskRepositoryError(error.cause.code);
+        throw new AiApprovedOrderResultUnknownError();
+      }
+      if (error instanceof AiTaskRepositoryError) throw new AiTaskRepositoryError(error.code);
+      throw denied();
+    }
   }
 }

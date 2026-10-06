@@ -36,3 +36,13 @@ test('expired Core quote is not presented as a usable quote', async () => {
   const result = await service.preview(input);
   assert.equal(result.status, 'expired'); assert.equal(result.quote, undefined);
 });
+
+test('a Core quote for a different request is not returned as the current quote', async () => {
+  const service = new AiQuotePreviewService({ createQuote: async () => ({ ...quote(), request: { ...input, endAt: '2026-10-12T09:00:00+08:00' } }) }, { current: async () => business }, authority, () => new Date('2026-10-05T01:30:00.000Z'));
+  await assert.rejects(() => service.preview(input), error => error.code === 'INVALID_RESPONSE');
+});
+
+for (const field of ['rentalAmount', 'payableAmount', 'receivableAmount']) test(`invalid Core ${field} cannot enter the quote projection`, async () => {
+  const service = new AiQuotePreviewService({ createQuote: async () => ({ ...quote(), [field]: Number.NaN }) }, { current: async () => business }, authority, () => new Date('2026-10-05T01:30:00.000Z'));
+  await assert.rejects(() => service.preview(input), error => error.code === 'INVALID_RESPONSE');
+});

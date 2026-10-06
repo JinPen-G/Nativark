@@ -1,9 +1,9 @@
 import type { AuthService } from '../auth/auth.service';
-import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
+import type { AiExecutionContext } from '@rental-os/shared';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError, type AiTaskRepositoryAuthority, type AiTaskRepositoryOperation } from './ai-task.repository';
 import type { AiStepReplayAuthority } from './ai-step-registration.repository';
-import { isAiStepExecutionContext } from './task-contract-validation';
+import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';
 
 const operations = ['read_metadata', 'read_events', 'claim_run', 'claim_recovery_run', 'release_run', 'transition_task', 'read_step_terminal', 'takeover_run', 'request_input', 'submit_input', 'resume_input'] as const;
 export interface AiTaskCredentialSource {
@@ -23,28 +23,16 @@ export interface AiTaskActionPolicySource {
  * credentials. Those audiences need their own current-identity adapters.
  */
 export class AiTaskCurrentActionAuthority implements AiTaskRepositoryAuthority {
-  constructor(private readonly auth: Pick<AuthService, 'resolveAccessContext'>,
-    private readonly credentials: AiTaskCredentialSource, private readonly policies: AiTaskActionPolicySource,
+  private readonly identities: AiTaskCurrentIdentityAuthority;
+  constructor(auth: Pick<AuthService, 'resolveAccessContext'>,
+    credentials: AiTaskCredentialSource, private readonly policies: AiTaskActionPolicySource,
     private readonly clock: () => Date = () => new Date()) {
     if (typeof auth?.resolveAccessContext !== 'function' || typeof credentials?.current !== 'function' || typeof policies?.resolve !== 'function') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    this.identities = new AiTaskCurrentIdentityAuthority(auth, credentials, clock);
   }
 
   private async identity() {
-    const credential = structuredClone(await this.credentials.current());
-    if (!credential || !['operator', 'staff'].includes(credential.audience) || typeof credential.authorization !== 'string'
-      || credential.authorization.length < 1 || credential.authorization.length > 8192 || typeof credential.requestId !== 'string') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    const access = await this.auth.resolveAccessContext(credential.authorization, { audience: credential.audience });
-    const now = this.clock();
-    if (!access?.user.isActive || access.user.isSaasAdmin || !access.workspaceValid || !access.workspaceId
-      || access.user.id !== access.tenantUser.id || access.user.tenantId !== access.tenantUser.tenantId
-      || !Array.isArray(access.user.permissions) || !(now instanceof Date) || !Number.isFinite(now.getTime())) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    const candidate = {
-      contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: credential.requestId, authorizedAt: now.toISOString(), audience: credential.audience,
-      actor: { kind: 'user', userId: access.user.id }, scope: { kind: 'workspace', tenantId: access.user.tenantId, workspaceId: access.workspaceId },
-      access: { permissions: [...access.user.permissions], dataScope: access.user.dataScope, locationScope: structuredClone(access.user.locationScope) }
-    };
-    if (!isAiStepExecutionContext(candidate)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    const context = structuredClone(candidate);
+    const context = await this.identities.resolve();
     const { requestId: _request, authorizedAt: _time, ...binding } = context;
     return { context, fingerprint: requestFingerprint(binding) };
   }
