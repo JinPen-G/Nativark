@@ -444,3 +444,11 @@ HANDOFF-ID / 原任务与CLAIM-ID：
 - 第一辅助（AIN-07 审批事务组合根）：原 `ai-native-fork-execution` / `ai/ai-native-fork-execution-20261005`，固定0229de59；独占 `approval-execution/**`、`prisma-approval-consumption.repository.ts`、新approved-order-composition测试/fixtures和独立Fork-AIN07记录。真实Guard/DTO/ALS、审批消费与Core原事务组合；其他Core/公共文件改动需协调确认，缺正式来源拒绝。固定交付d33cd651已在主线暂存合入并复验：初始68/68，异常脱敏/已提交读取待核对红测5项失败后修复，最终73/73及扩大307/307、API类型/diff check通过；详见Claude主线记录，合并提交以Git历史为准。限定组合不等于正式policy/输入来源或真实环境已经接通。
 - 第二辅助（AIN-06 输入等待与恢复闭环）：独立 `ai-native-fork-recovery` / `ai/ai-native-fork-recovery-20261006`，固定0229de59；独占 `runner/**`（排除主线prisma-task-gateway-invocation.preparation.ts）、task-input/**、ai-task.repository/ai-task-transition.repository/ai-step-transition.repository/ai-step-registration.repository及直接回归和独立Fork-AIN06记录。主线公共测试task-input-contracts/schema除外。schema/shared变更由主线提供固定644cb541，不跟随移动HEAD。已回报59699872/9d2b2be6等切片，未由主线复验，不据作者测试结项。
 - 两辅助不编辑对方文件或主树，不修改Codex临时记录及三份主文档；主线不双写辅助的在途范围。收到交付后主线核验固定提交、离线组合与失败边界，再合入专项分支；不合main、不push、不部署，既有output不清理/覆盖/提交。
+
+### AIN-HANDOFF-005：接回353d0260与第二批核心链路分工（2026-10-06）
+
+- 负责人确认Codex本轮停止写入；主线实查HEAD353d0260、原专项分支、无MERGE_HEAD，保留任务列表正式装配三个未提交文件及全部output。Codex本轮3cd0459e～353d0260为辅助实现；不同阶段96/249/22/30项证据不得相加称为最新全量。主线已独立复跑列表/组合/当前动作35/35、exit0，尚待补充风险验证及收口记录。
+- 负责人新增要求：给原两个辅助会话各发连续核心批次、在原树开发，不新建树或接管主树。两边先核验本树状态并接收固定353d0260作为依赖，不跟随移动HEAD；保留所有原提交和未提交成果。若本会话权限/用户范围仍需确认，如实报告，不绕过。
+- 恢复线第二批：原ai-native-fork-recovery与原分支，负责runner执行点强制当前执行授权、持久化运行器显式组合及暂停/恢复/接管/累计资源的组合验证。唯一写入runner/**（仍排除prisma-task-gateway-invocation.preparation.ts）、task-input/**和上述已认领任务/步骤仓储及直接测试，独立记录Fork-AIN06-第二批核心闭环-20261006.md；不改task-authorization.composition/公共Auth/预算/Gateway/schema/shared。
+- 审批线第二批：原ai-native-fork-execution与原分支，负责ApprovedOrderPolicyAuthority的真实任务授权适配、批准input/preview持久来源及Core单动作提交/核对整链；唯一写入approval-execution/**、ai-proposal-repository.ts、prisma-approval-consumption.repository.ts与直接测试，独立记录Fork-AIN07-第二批持久来源-20261006.md。新增快照模型/迁移必须先向主线提交精确公共需求，由主线落地；不得将当前quote或请求body冒充既有批准快照。
+- 主线保留未提交task-list装配、AIN-04/05和知识/记忆仓储、全部公共schema/shared/鉴权/中央记录及最终整合；不双写上述辅助范围。本批只是派工，不计交付或整项验收。原AIN依赖、正式0/28及离线环境边界不变。审批辅助受原会话范围限制未执行本次主树任务列表只读复核，不记为Review通过或无发现。
