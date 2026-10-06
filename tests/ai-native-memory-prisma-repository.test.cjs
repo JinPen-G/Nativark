@@ -7,21 +7,30 @@ const scope = { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'space-a' 
 const memory = { draftVersion: 'ain-c06-draft-1', memoryId: 'memory-a', revision: 1, owner, scope, aclRevision: 1, expiresAt: '2026-12-01T00:00:00.000Z', status: 'proposed', preference: { kind: 'locale', value: 'zh-CN' } };
 const clone = value => structuredClone(value);
 function dbFactory() {
-  const state = { memories: new Map(), operations: new Map(), confirmations: new Map(), failOperation: false, casCount: 1 };
+  const state = { memories: new Map(), operations: new Map(), confirmations: new Map(), failOperation: false, casCount: 1, admissionError: null, responseError: null, operationError: null, readError: null };
   const delegates = () => ({
     aiStructuredMemory: {
-      findFirst: async ({ where }) => [...state.memories.values()].find(v => v.id === where.id && v.tenantId === where.tenantId && v.workspaceId === where.workspaceId && v.ownerKind === where.ownerKind && v.ownerId === where.ownerId) ?? null,
+      findFirst: async ({ where }) => { if (state.readError) throw state.readError; return [...state.memories.values()].find(v => v.id === where.id && v.tenantId === where.tenantId && v.workspaceId === where.workspaceId && v.ownerKind === where.ownerKind && v.ownerId === where.ownerId) ?? null; },
       create: async ({ data }) => { const row = { ...clone(data) }; state.memories.set(row.id, row); return row; },
       update: async ({ where, data }) => { const row = state.memories.get(where.id); if (!row) throw new Error('missing'); Object.assign(row, clone(data)); return row; },
       updateMany: async ({ where, data }) => { const row = state.memories.get(where.id); if (state.casCount !== 1) return { count: state.casCount }; if (!row || Object.entries(where).some(([key, value]) => row[key] !== value)) return { count: 0 }; Object.assign(row, clone(data)); return { count: 1 }; }
     },
     aiMemoryOperation: {
-      findFirst: async ({ where }) => [...state.operations.values()].find(v => v.tenantId === where.tenantId && v.workspaceId === where.workspaceId && v.memoryId === where.memoryId && v.operationId === where.operationId) ?? null,
-      create: async ({ data }) => { if (state.failOperation) throw new Error('commit failed'); const row = clone(data); state.operations.set(row.id, row); return row; }
+      findFirst: async ({ where }) => { if (state.readError) throw state.readError; return [...state.operations.values()].find(v => v.tenantId === where.tenantId && v.workspaceId === where.workspaceId && v.memoryId === where.memoryId && v.operationId === where.operationId) ?? null; },
+      create: async ({ data }) => { if (state.operationError) throw state.operationError; if (state.failOperation) throw new Error('commit failed'); const row = clone(data); state.operations.set(row.id, row); return row; }
     },
-    aiHumanConfirmation: { findFirst: async ({ where }) => { const row = state.confirmations.get(where.id); return row && row.tenantId === where.tenantId && row.workspaceId === where.workspaceId ? row : null; }, create: async ({ data }) => { const row = clone(data); state.confirmations.set(row.id, row); return row; }, update: async () => { throw new Error('not used'); } }
+    aiHumanConfirmation: { findFirst: async ({ where }) => { if (state.readError) throw state.readError; const row = state.confirmations.get(where.id); return row && row.tenantId === where.tenantId && row.workspaceId === where.workspaceId ? row : null; }, create: async ({ data }) => { const row = clone(data); state.confirmations.set(row.id, row); return row; }, update: async () => { throw new Error('not used'); } }
   });
-  return { state, ...delegates(), async $transaction(callback) { const snapshot = { memories: new Map(state.memories), operations: new Map(state.operations) }; try { return await callback(delegates()); } catch (error) { state.memories = snapshot.memories; state.operations = snapshot.operations; throw error; } } };
+  return { state, ...delegates(), async $transaction(callback) {
+    if (state.admissionError) throw state.admissionError;
+    const original = { memories: state.memories, operations: state.operations };
+    state.memories = clone(original.memories); state.operations = clone(original.operations);
+    let result;
+    try { result = await callback(delegates()); }
+    catch (error) { Object.assign(state, original); throw error; }
+    if (state.responseError) throw state.responseError;
+    return result;
+  } };
 }
 
 test('memory adapter persists owner/revision state and idempotent operation receipt', async () => {
@@ -62,4 +71,61 @@ test('confirmation is read by scoped server record and missing state is unavaila
   db.state.confirmations.set('confirmation-b', { id: 'confirmation-b', tenantId: 'tenant-a', workspaceId: 'space-a', state: null });
   await assert.rejects(() => repo.read(context, 'confirmation-b'), error => error.code === 'unavailable');
   assert.equal(await repo.read({ ...context, scope: { ...scope, workspaceId: 'other' } }, 'confirmation-a'), null);
+});
+
+const command = () => ({ scope, owner, memoryId: 'memory-a', expectedRevision: 0, next: memory, operation: { id: 'op-a', fingerprint: 'hash-a' } });
+const unknown = error => error.code === 'result_unknown' && error.nextAction === 'reconcile' && error.message === 'result_unknown' && !error.cause;
+test('memory COMMIT response loss preserves facts and reconciles the original receipt', async () => {
+  const db = dbFactory(), repo = new PrismaStructuredMemoryRepository(db);
+  db.state.responseError = new Error('private database response lost');
+  await assert.rejects(repo.commit(command()), unknown);
+  assert.equal(db.state.memories.size, 1); assert.equal(db.state.operations.size, 1);
+  db.state.responseError = null;
+  assert.deepEqual(await repo.operation(scope, owner, 'memory-a', 'op-a'), command().operation);
+  assert.equal(await repo.commit(command()), 'committed');
+  assert.equal(db.state.memories.get('memory-a').revision, 1); assert.equal(db.state.operations.size, 1);
+});
+test('memory transaction admission failure is unavailable, not a revision conflict', async () => {
+  const db = dbFactory(), repo = new PrismaStructuredMemoryRepository(db); db.state.admissionError = new Error('private admission failure');
+  await assert.rejects(repo.commit(command()), e => e.code === 'unavailable' && e.message === 'unavailable' && !e.cause);
+  assert.equal(db.state.memories.size, 0); assert.equal(db.state.operations.size, 0);
+});
+for (const code of ['P2002', 'P2034']) test(`memory explicit ${code} rollback stays conflict`, async () => {
+  const { Prisma } = require('../apps/api/node_modules/@prisma/client');
+  const db = dbFactory(), repo = new PrismaStructuredMemoryRepository(db);
+  db.state.operationError = new Prisma.PrismaClientKnownRequestError('private rollback', { code, clientVersion: '5.22.0' });
+  assert.equal(await repo.commit(command()), 'conflict');
+  assert.equal(db.state.memories.size, 0); assert.equal(db.state.operations.size, 0);
+});
+test('memory failed update restores the prior revision in the transaction double', async () => {
+  const db = dbFactory(), repo = new PrismaStructuredMemoryRepository(db);
+  await repo.commit(command()); db.state.failOperation = true;
+  await assert.rejects(repo.commit({ ...command(), expectedRevision: 1, next: { ...memory, revision: 2 }, operation: { id: 'op-b', fingerprint: 'hash-b' } }), unknown);
+  assert.equal(db.state.memories.get('memory-a').revision, 1); assert.equal(db.state.operations.size, 1);
+});
+test('memory COMMIT failure after the callback cannot become a retryable conflict', async () => {
+  const { Prisma } = require('../apps/api/node_modules/@prisma/client');
+  const db = dbFactory(), repo = new PrismaStructuredMemoryRepository(db);
+  db.state.responseError = new Prisma.PrismaClientKnownRequestError('late response', { code: 'P2002', clientVersion: '5.22.0' });
+  await assert.rejects(repo.commit(command()), unknown);
+  assert.equal(db.state.memories.size, 1); assert.equal(db.state.operations.size, 1);
+});
+test('memory and confirmation read errors expose no database details', async () => {
+  const db = dbFactory(), repo = new PrismaStructuredMemoryRepository(db); db.state.readError = new Error('private db secret');
+  for (const read of [() => repo.read(scope, owner, 'memory-a'), () => repo.operation(scope, owner, 'memory-a', 'op-a'), () => repo.read({ scope }, 'proof-a')]) {
+    await assert.rejects(read(), e => e.code === 'unavailable' && e.message === 'unavailable' && !e.cause);
+  }
+});
+test('actual memory service propagates uncertainty and replays the same operation without another write', async () => {
+  const { StructuredMemoryService } = require('../apps/api/src/modules/ai-native/knowledge/structured-memory.service');
+  const db = dbFactory(), repo = new PrismaStructuredMemoryRepository(db);
+  const context = { scope, actor: { kind: 'user', userId: owner.actorId }, audience: 'operator' };
+  const service = new StructuredMemoryService({ repository: repo, confirmations: repo, clock: { now: () => Date.parse('2026-10-06T00:00:00Z') },
+    authorization: { authorize: async () => ({ scope, actor: owner, audience: 'operator', accessKey: 'synthetic-grant' }) } });
+  const input = { memoryId: 'memory-a', operationId: 'propose-a', expiresAt: memory.expiresAt, preference: memory.preference };
+  db.state.responseError = new Error('private COMMIT response lost');
+  await assert.rejects(service.propose(context, input), unknown);
+  db.state.responseError = null;
+  assert.equal((await service.propose(context, input)).status, 'proposed');
+  assert.equal(db.state.memories.size, 1); assert.equal(db.state.operations.size, 1);
 });

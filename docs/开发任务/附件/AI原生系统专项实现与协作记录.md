@@ -452,3 +452,9 @@ HANDOFF-ID / 原任务与CLAIM-ID：
 - 恢复线第二批：原ai-native-fork-recovery与原分支，负责runner执行点强制当前执行授权、持久化运行器显式组合及暂停/恢复/接管/累计资源的组合验证。唯一写入runner/**（仍排除prisma-task-gateway-invocation.preparation.ts）、task-input/**和上述已认领任务/步骤仓储及直接测试，独立记录Fork-AIN06-第二批核心闭环-20261006.md；不改task-authorization.composition/公共Auth/预算/Gateway/schema/shared。
 - 审批线第二批：原ai-native-fork-execution与原分支，负责ApprovedOrderPolicyAuthority的真实任务授权适配、批准input/preview持久来源及Core单动作提交/核对整链；唯一写入approval-execution/**、ai-proposal-repository.ts、prisma-approval-consumption.repository.ts与直接测试，独立记录Fork-AIN07-第二批持久来源-20261006.md。新增快照模型/迁移必须先向主线提交精确公共需求，由主线落地；不得将当前quote或请求body冒充既有批准快照。
 - 主线保留未提交task-list装配、AIN-04/05和知识/记忆仓储、全部公共schema/shared/鉴权/中央记录及最终整合；不双写上述辅助范围。本批只是派工，不计交付或整项验收。原AIN依赖、正式0/28及离线环境边界不变。审批辅助受原会话范围限制未执行本次主树任务列表只读复核，不记为Review通过或无发现。
+
+### AIN-IMPL-005：主线接收任务列表与修复知识持久化未知结果
+
+- 遗留任务列表正式Auth/逐项metadata政策装配已接收并提交d111a1c8，主线扩大62/62、API类型通过；不是专项全量。
+- AIN-10两个仓储改用本树实际Prisma类型，修复普通数据库异常冒充conflict和读错误泄漏；写入结果不明返回result_unknown/reconcile，确认失败与真实CAS保持拒绝。22项红测10失败后修复，扩大到实际知识/记忆服务与仓储119/119、API类型、diff check通过；本树Prisma生成器核验为noop。完整命令及不确定性边界见[主线记录](AI原生系统协作切片/Claude主线恢复与整合-20261006.md)。JSON读回、记忆owner/确认关系、解析chunk落盘和真实模块装配继续推进，不宣称AIN-10完成。
+- 第二批两辅助均已收到负责人授权：恢复线接收固定353d0260，审批线在原会话得到确认后ff至353d0260并开始policy/持久来源；主线为审批提供公共快照模型。没有变更正式0/28，没有真实数据库/供应商或生产验收。
