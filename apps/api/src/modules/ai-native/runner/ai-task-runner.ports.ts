@@ -144,12 +144,17 @@ export interface AiTaskRunnerClock {
   clearTimeout(handle: unknown): void;
 }
 
+export interface AiTaskRunnerInputPort {
+  afterSucceeded(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease): Promise<AiTaskRunnerStepCommit | null>;
+}
+
 export interface AiTaskRunnerDependencies {
   leases: AiTaskRunnerLeasePort;
   steps: AiTaskRunnerStepPort;
   plan: AiTaskRunnerPlanPort;
   effects: AiTaskRunnerEffectPort;
   taskOutcome?: AiTaskRunnerOutcomePort;
+  inputs?: AiTaskRunnerInputPort;
   clock?: AiTaskRunnerClock;
   /** Required by the persistent composition; absent only for legacy isolated runner consumers. */
   resources?: AiTaskRunnerResourcePort;

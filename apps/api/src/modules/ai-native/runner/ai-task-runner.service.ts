@@ -71,6 +71,7 @@ export class AiTaskRunner {
       || typeof deps.plan.resolve !== "function" || typeof deps.effects.execute !== "function"
       || (deps.resources !== undefined && (typeof deps.resources.open !== 'function' || typeof deps.resources.reserve !== 'function'
         || typeof deps.resources.record !== 'function' || typeof deps.resources.markUnknown !== 'function'))
+      || (deps.inputs !== undefined && typeof deps.inputs.afterSucceeded !== 'function')
       || (deps.taskOutcome !== undefined && typeof deps.taskOutcome.commit !== "function")) throw new AiTaskRunnerError("AI_RESOURCE_UNAVAILABLE");
     this.clock = deps.clock ?? defaultClock;
   }
@@ -80,6 +81,8 @@ export class AiTaskRunner {
     const recovery = input.recovery === true;
     const { recovery: _recovery, ...claimInput } = input;
     const initial = structuredClone(await this.deps.leases.readMetadata(input.taskId));
+    if (initial.taskId !== input.taskId) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
+    if (initial.status === 'waiting_input') return { status: 'paused', completedSteps: 0, cleanupFailed: 0 };
     let lease = structuredClone(recovery ? await this.deps.leases.claimRecoveryRun(claimInput) : await this.deps.leases.claimRun(claimInput));
     let taskRevision = initial.revision;
     let completedSteps = 0, cleanupFailed = 0, calls = 0, outputBytes = 0;
@@ -124,6 +127,15 @@ export class AiTaskRunner {
         taskRevision = current.revision;
         return true;
       };
+      const pauseForInput = async (ref: AiTaskRunnerStepRef) => {
+        if (!this.deps.inputs || await checkCancel()) return false;
+        const current = { ...structuredClone(ref), registered: { ...ref.registered, taskRevision, runRevision: lease.revision } };
+        const committed = structuredClone(await this.callBounded(() => this.deps.inputs!.afterSucceeded(current, structuredClone(lease)), plan.limits.maxStepMs, 'input_wait'));
+        if (!committed) return false;
+        if (committed.taskRevision !== taskRevision + 1 || committed.lease?.revision !== lease.revision + 1) throw new AiTaskRunnerError('AI_STORAGE_UNAVAILABLE');
+        advance(committed);
+        return true;
+      };
       if (plan.steps.length === 0 && await checkCancel()) {
         return this.deps.taskOutcome ? await finish({ status: "cancelled", completedSteps, cleanupFailed }) : { status: "cancel_requested", completedSteps, cleanupFailed };
       }
@@ -150,7 +162,9 @@ export class AiTaskRunner {
               return { status: 'unknown', completedSteps, cleanupFailed };
             }
           }
-          completedSteps++; continue;
+          completedSteps++;
+          if (await pauseForInput(ref)) return { status: 'paused', completedSteps, cleanupFailed };
+          continue;
         }
         if (registered.replayed && registered.existingStatus === 'failed' && this.deps.resources) {
           // A failed business receipt can still have unsettled resource charges.
@@ -172,7 +186,8 @@ export class AiTaskRunner {
         const reconcile = recovery && (stepPlan.operation === "external_unknown" || (registered.replayed && ['unknown', 'running'].includes(registered.existingStatus ?? '')));
         if (cancelling && !(recovery && registered.replayed && ['unknown', 'running'].includes(registered.existingStatus ?? ''))) return { status: 'cancel_requested', completedSteps, cleanupFailed };
         if (registered.replayed && registered.existingStatus === "unknown" && !reconcile) return await finish({ status: "unknown", completedSteps, cleanupFailed });
-        if (registered.replayed && !(reconcile && ['unknown', 'running'].includes(registered.existingStatus ?? ''))) return { status: "unavailable", completedSteps, cleanupFailed };
+        const unstarted = registered.replayed && registered.existingStatus === 'pending' && !registered.resultRef && !recovery && !!this.deps.resources;
+        if (registered.replayed && !unstarted && !(reconcile && ['unknown', 'running'].includes(registered.existingStatus ?? ''))) return { status: "unavailable", completedSteps, cleanupFailed };
         if (reconcile && !this.deps.effects.reconcile) return { status: "unavailable", completedSteps, cleanupFailed };
         let resourceTicket: AiTaskRunnerResourceTicket | undefined;
         if (this.deps.resources) {
@@ -238,6 +253,7 @@ export class AiTaskRunner {
           if (resourceTicket) await this.callBounded(() => this.deps.resources!.markUnknown(resourceTicket!, structuredClone(lease)), plan.limits.maxStepMs, 'resource_unknown');
           return await finish({ status: 'unknown', completedSteps, cleanupFailed });
         }
+        if (this.deps.inputs && result.kind === 'paused' && result.pause === 'input') throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
         advance(await this.persistResult(ref, structuredClone(lease), result), ref);
         if (resourceTicket && this.deps.resources) {
           try {
@@ -257,6 +273,7 @@ export class AiTaskRunner {
         // Cleanup uncertainty is local operational uncertainty. With all
         // steps successful, the existing FSM cannot claim unresolved effects.
         if (cleanupUnavailable) return { status: 'unknown', completedSteps, cleanupFailed };
+        if (await pauseForInput(ref)) return { status: 'paused', completedSteps, cleanupFailed };
       }
       return await finish({ status: "succeeded", completedSteps, cleanupFailed });
     } catch (error) {
