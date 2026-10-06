@@ -487,3 +487,10 @@ HANDOFF-ID / 原任务与CLAIM-ID：
 - 未配置默认关闭；按canonical scope→政策固定锁序、expectedRevision CAS及事务内当前授权复验。仅既有catalog只读工具/资源上限，不seed、不授予权益或派发。提交应答不明unknown/reconcile不可重试。
 - 实际受权管理→不可变输入→计划证明组合验证，停用政策拒绝旧证明。最终关联53/53、fail/cancel/skip/todo均0，exit0；API类型/diff check exit0。DB事务替身，真库/HTTP/供应商/设备未验；与上轮396项不相加。
 - 真实配置页面/HTTP/生产注册、统一配置审计、全局政策管理与其他工具仍待接，不把该子集当完整治理或AIN-06结项。详见[政策受权管理记录](AI原生系统协作切片/AIN-06-场景政策受权管理-20261006-codex.md)，待独立复核，M1/0-of-28不变。
+
+### AIN-IMPL-009：只读中断与跨代次结果恢复（2026-10-06）
+
+- 从64f8c2fa续作，真实目录运行器红测确认只读中断被送入原FSM禁止的NONE→POSSIBLE迁移。现保留RUNNING步骤和未完成收据、资源unknown，经原任务事务持久waiting_external；未变更共享状态机、不制造业务副作用。
+- 接回既有recovery_only租约注解，实际授权/fence/expiry校验保留，输入生产不接受恢复租约。旧代次完整只读结果经同task/run/step/action/fingerprint/hash/charge验证，在当前授权lease下完成状态与计量；不把旧收据改成新worker事实，不重复调用Core。
+- 完整结果落库后步骤事务失败、换worker恢复、未完成收据保持unknown，以及future fence/篡改/跨scope charge/撤权/政策变化均有实际链证据。最终扩大394/394、fail/cancel/skip/todo均0、exit0，API类型/diff check exit0；不是专项全量，不与前轮计数相加。
+- 模型/业务写入unknown证据、政策到期后合法历史核对、生产装配仍未完；DB事务替身非MySQL锁/宕机验收。详见[只读中断与跨代次恢复记录](AI原生系统协作切片/AIN-06-只读中断与跨代次恢复-20261006-codex.md)，待独立复核，M1/正式0-of-28不变。

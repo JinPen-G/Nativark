@@ -251,6 +251,17 @@ export class AiTaskRunner {
           if (resourceTicket && this.deps.resources) await this.callBounded(() => this.deps.resources!.markUnknown(resourceTicket!, structuredClone(lease)), plan.limits.maxStepMs, 'resource_unknown');
           return await finish({ status: 'unknown', completedSteps, cleanupFailed });
         }
+        if (this.deps.resources && stepPlan.operation === 'readonly' && result.kind === 'unknown') {
+          // The existing step FSM does not allow NONE -> POSSIBLE. An
+          // interrupted read is not evidence of an external business effect.
+          // Keep its durable RUNNING step/start receipt and occupancy; only the
+          // task enters WAITING_EXTERNAL. Recovery may read evidence, not repeat
+          // the tool or manufacture a committed/failed step to release resources.
+          if (resourceTicket) await this.callBounded(() => this.deps.resources!.markUnknown(resourceTicket!,
+            structuredClone(lease)), plan.limits.maxStepMs, 'resource_unknown');
+          activeResourceTicket = undefined;
+          return await finish({ status: 'unknown', completedSteps, cleanupFailed });
+        }
         if (this.deps.resources && !result.resultRef && result.kind !== 'paused') {
           if (resourceTicket) await this.callBounded(() => this.deps.resources!.markUnknown(resourceTicket!, structuredClone(lease)), plan.limits.maxStepMs, 'resource_unknown');
           return await finish({ status: 'unknown', completedSteps, cleanupFailed });

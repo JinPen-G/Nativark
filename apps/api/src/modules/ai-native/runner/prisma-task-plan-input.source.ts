@@ -16,7 +16,8 @@ const rev = z.number().int().min(1).max(4294967294);
 const leaseSchema = z.object({ taskId: id.max(36), runId: id.max(36), holderId: id, revision: rev,
   // The existing resource-policy port intentionally presents an empty expiry.
   // It is never authorization; held() reads and checks the actual run expiry.
-  fencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u), expiresAt: z.string().max(40) }).strict();
+  fencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u), expiresAt: z.string().max(40),
+  purpose: z.literal('recovery_only').optional() }).strict();
 const publishSchema = z.object({ taskId: id.max(36), registrationRef: id, expectedTaskRevision: rev,
   lease: leaseSchema, input: aiCatalogReadInputSchema }).strict();
 const toolsSchema = z.array(z.object({ code: z.literal('rental.catalog.search'), version: z.literal(AI_TOOL_DRAFT_VERSION) }).strict()).min(1).max(1);
@@ -82,7 +83,7 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
 
   async publishCatalogInput(value: unknown) {
     const parsed = publishSchema.safeParse(value);
-    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    if (!parsed.success || parsed.data.lease.purpose === 'recovery_only') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const command = parsed.data;
     const executeContext = structuredClone(await this.execution.authorize(command.taskId));
     const before = await this.access(command.taskId, 'transition_task');

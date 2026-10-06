@@ -16,7 +16,9 @@ const identity = ({ authorizedAt: _at, requestId: _id, ...context }: AiExecution
 
 /** Evidence adapter, not a state machine or execution grant. Only registered
  * read-only steps can start/finish here. Writes require Core/approval evidence;
- * unknown reconciliation is deliberately unavailable through this adapter.
+ * Complete read results from an older generation may finish the same RUNNING
+ * step under a newly authorized lease. Incomplete/unknown reconciliation and
+ * business writes remain unavailable through this adapter.
  * The transition repository retains task/run locks, revision CAS and events.
  */
 export class PrismaTaskStepEvidenceAuthority implements AiStepTransitionAuthority {
@@ -34,7 +36,7 @@ export class PrismaTaskStepEvidenceAuthority implements AiStepTransitionAuthorit
     const access = aiTaskAccessFromContext(context, command.taskId, this.wall());
     const task = await this.db.aiTask.findFirst({ where: access.where });
     if (!task || task.id !== command.taskId || task.ownerKind !== access.actorKind || task.ownerId !== access.actorId
-      || task.audience !== access.audience || !['RUNNING', 'CANCEL_REQUESTED'].includes(task.status)) throw denied();
+      || task.audience !== access.audience || !['RUNNING', 'WAITING_EXTERNAL', 'CANCEL_REQUESTED'].includes(task.status)) throw denied();
     const key = { scopeId: task.scopeId, taskId: task.id, runId: command.lease.runId };
     const run = await this.db.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: key.runId } });
     if (!run || run.scopeId !== key.scopeId || run.taskId !== key.taskId || run.id !== key.runId
@@ -69,11 +71,17 @@ export class PrismaTaskStepEvidenceAuthority implements AiStepTransitionAuthorit
       const artifact = await this.db.aiTaskResultArtifact.findFirst({ where: { ...key, stepId: step.id, id: command.evidenceId } });
       if (!artifact || artifact.id !== command.evidenceId || artifact.scopeId !== key.scopeId || artifact.taskId !== key.taskId
         || artifact.runId !== key.runId || artifact.stepId !== step.id || artifact.actionId !== step.actionId
-        || artifact.stepFingerprint !== step.requestFingerprint || artifact.leaseOwnerId !== run.leaseOwnerId
-        || artifact.fencingToken.toFixed(0) !== run.fencingToken.toFixed(0) || !artifact.completeMeasurement
+        || artifact.stepFingerprint !== step.requestFingerprint || !artifact.completeMeasurement
         || !['SUCCEEDED', 'FAILED'].includes(artifact.outcome)
         || (artifact.outcome === 'SUCCEEDED' && artifact.errorCode !== null)
         || (artifact.outcome === 'FAILED' && (!AI_ERROR_CODES.includes(artifact.errorCode as AiErrorCode) || artifact.errorCode === 'AI_RESULT_UNKNOWN'))) throw unavailable();
+      const artifactFence = artifact.fencingToken.toFixed(0), currentFence = run.fencingToken.toFixed(0);
+      // Reading an immutable complete result does not regrant execution to its
+      // old worker. The transition transaction still CASes only the current
+      // lease. Same-fence/another-holder and future generations are corruption.
+      if (!/^[1-9][0-9]{0,19}$/u.test(artifactFence) || typeof artifact.leaseOwnerId !== 'string' || !artifact.leaseOwnerId.length
+        || BigInt(artifactFence) > BigInt(currentFence)
+        || (artifactFence === currentFence && artifact.leaseOwnerId !== run.leaseOwnerId)) throw denied();
       const bytes = Buffer.byteLength(JSON.stringify(artifact.payload), 'utf8');
       if (requestFingerprint(artifact.payload) !== artifact.contentHash || BigInt(bytes) !== artifact.outputBytes
         || bytes > plan.limits.maxOutputBytes || artifact.activeMs < 0n || artifact.activeMs > BigInt(plan.limits.maxStepMs)) throw denied();

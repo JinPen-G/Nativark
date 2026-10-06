@@ -148,3 +148,54 @@ test('fresh authorization timestamps do not change the immutable input or execut
   assert.equal((await h.root.runner.run(h.claim())).status, 'succeeded');
   assert.equal(h.calls.length, 1);
 });
+test('interrupted actual readonly Core leaves a durable waiting task and unknown occupancy without invalid step transition', async () => {
+  const h = await composed();
+  h.control.onRead = () => { throw new Error('synthetic interrupted Core read'); };
+  const result = await h.root.runner.run(h.claim());
+  assert.equal(result.status, 'unknown');
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.state.aiStep[0].status, 'RUNNING');
+  assert.equal(h.state.aiTask[0].status, 'WAITING_EXTERNAL');
+  assert.equal(h.state.aiTaskResultArtifact[0].completeMeasurement, false);
+  assert.ok(h.state.aiTaskExecutionCharge.every(c => c.status === 'UNKNOWN'));
+  assert.equal(h.state.aiTaskResultArtifact.filter(a => a.outcome === 'SUCCEEDED').length, 0);
+  assert.equal((await h.root.runner.run({ ...h.claim(), holderId: 'recovery-worker', recovery: true })).status, 'unknown');
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.state.aiTask[0].status, 'WAITING_EXTERNAL');
+});
+async function completedReadBeforeStepCommit() {
+  const h = await composed(); let failed = false;
+  h.storeControl.beforeWrite = async (name, args) => {
+    if (name === 'aiStep' && args.data.status === 'SUCCEEDED' && !failed) {
+      failed = true; throw new Error('synthetic step transaction failure after durable result');
+    }
+  };
+  await assert.rejects(h.root.runner.run(h.claim()));
+  assert.equal(h.state.aiTaskResultArtifact[0].completeMeasurement, true);
+  return h;
+}
+test('new worker recovers an actual completed read artifact after step transaction failure without calling Core twice', async () => {
+  const h = await completedReadBeforeStepCommit();
+  const originalFence = h.state.aiTaskResultArtifact[0].fencingToken.toFixed(0);
+  const recovered = await h.root.runner.run({ ...h.claim(), holderId: 'recovery-worker', recovery: true });
+  assert.equal(recovered.status, 'succeeded');
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.state.aiTaskResultArtifact.length, 1);
+  assert.equal(h.state.aiTaskResultArtifact[0].fencingToken.toFixed(0), originalFence);
+  assert.equal(h.state.aiStep[0].status, 'SUCCEEDED');
+  assert.equal(h.state.aiTask[0].status, 'SUCCEEDED');
+  assert.ok(h.state.aiTaskExecutionCharge.every(c => c.status === 'RECORDED'));
+});
+for (const [name, mutate] of [
+  ['future artifact fence', h => { h.state.aiTaskResultArtifact[0].fencingToken = new (require('../apps/api/node_modules/@prisma/client').Prisma.Decimal)(999); }],
+  ['artifact content tamper', h => { h.state.aiTaskResultArtifact[0].payload = { forged: true }; }],
+  ['charge from other scope', h => { h.state.aiTaskExecutionCharge[0].scopeId = 'foreign'; }],
+  ['withdrawn membership', h => { h.identity.membership = false; }],
+  ['changed policy revision', h => { h.state.aiTaskPlanPolicy[0].revision++; }],
+]) test(`cross-generation readonly recovery refuses ${name} without new Core call`, async () => {
+  const h = await completedReadBeforeStepCommit(); mutate(h);
+  await Promise.allSettled([h.root.runner.run({ ...h.claim(), holderId: 'recovery-worker', recovery: true })]);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.state.aiStep[0].status, 'RUNNING');
+  assert.notEqual(h.state.aiTask[0].status, 'SUCCEEDED');
+});
