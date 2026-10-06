@@ -488,6 +488,12 @@ HANDOFF-ID / 原任务与CLAIM-ID：
 - 实际受权管理→不可变输入→计划证明组合验证，停用政策拒绝旧证明。最终关联53/53、fail/cancel/skip/todo均0，exit0；API类型/diff check exit0。DB事务替身，真库/HTTP/供应商/设备未验；与上轮396项不相加。
 - 真实配置页面/HTTP/生产注册、统一配置审计、全局政策管理与其他工具仍待接，不把该子集当完整治理或AIN-06结项。详见[政策受权管理记录](AI原生系统协作切片/AIN-06-场景政策受权管理-20261006-codex.md)，待独立复核，M1/0-of-28不变。
 
+### AIN-IMPL-010：原始建单输入持久读取（2026-10-06）
+
+Codex临时顶替主线，基线7c7e4794。新增真实Prisma事务读取adapter，复用当前任务/执行授权、已登记步骤inputRef与原fingerprint、Core DTO及原准备服务。没有生产建单输入发布器或write-plan授权，缺来源仍unavailable，不创建审批/订单或启用生产。
+
+行为组160/160、exit0；API类型/diff exit0。全关联组164项163通过/1项既有schema diff检查失败、exit1，原断言保留。作者复核非独立Review，数据库执行为离线替身，不代表真实MySQL/模型/生产验收，不改变原任务完成率。详见[原始建单输入持久读取](AI原生系统协作切片/AIN-07-原始建单输入持久读取-20261006-codex.md)。
+
 ### AIN-IMPL-009：只读中断与跨代次结果恢复（2026-10-06）
 
 - 从64f8c2fa续作，真实目录运行器红测确认只读中断被送入原FSM禁止的NONE→POSSIBLE迁移。现保留RUNNING步骤和未完成收据、资源unknown，经原任务事务持久waiting_external；未变更共享状态机、不制造业务副作用。
