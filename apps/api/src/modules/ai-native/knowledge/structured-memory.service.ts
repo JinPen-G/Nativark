@@ -26,8 +26,14 @@ export class StructuredMemoryService {
       parse(scopeSchema, context.scope);
       const owner = actor(context);
       if (memory && (!sameScope(memory.scope, context.scope) || fingerprint(memory.owner) !== fingerprint(owner))) unavailable();
-      const grant = await this.ports.authorization.authorize(context, { action, scope: context.scope, owner, memory });
-      if (!grant || !sameScope(grant.scope, context.scope) || fingerprint(grant.actor) !== fingerprint(owner) || grant.audience !== context.audience || !grant.accessKey) unavailable();
+      const contextHash = fingerprint(context), memoryHash = memory ? fingerprint(memory) : undefined;
+      const stableContext = structuredClone(context);
+      const request = structuredClone({ action, scope: context.scope, owner, memory });
+      const requestHash = fingerprint(request);
+      const answer = await this.ports.authorization.authorize(stableContext, request);
+      if (fingerprint(context) !== contextHash || fingerprint(stableContext) !== contextHash || fingerprint(request) !== requestHash || (memory && fingerprint(memory) !== memoryHash)) unavailable();
+      const grant = answer ? structuredClone(answer) : null;
+      if (!grant || !sameScope(grant.scope, stableContext.scope) || fingerprint(grant.actor) !== fingerprint(owner) || grant.audience !== stableContext.audience || typeof grant.accessKey !== 'string' || !grant.accessKey || grant.accessKey.length > 256) unavailable();
       return grant;
     } catch { return unavailable(); }
   }
@@ -56,7 +62,9 @@ export class StructuredMemoryService {
     if (memory.status === 'confirmed') await this.confirmation(context, memory, memory.confirmationRecordId, memory.revision - 1);
     const after = await this.load(context, memoryId, 'read');
     if (fingerprint(after) !== fingerprint(memory)) unavailable();
-    return memory;
+    // The final storage read may wait while the human confirmation is revoked.
+    if (after.status === 'confirmed') await this.confirmation(context, after, after.confirmationRecordId, after.revision - 1);
+    return structuredClone(after);
   }
 
   async propose(context: AiExecutionContext, value: unknown): Promise<AiMemoryDraft> {
