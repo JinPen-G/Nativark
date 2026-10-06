@@ -40,7 +40,11 @@ function createTaskInputStore(initial, constraints = {}) {
     if (!row) return row;
     const out = clone(row);
     if (name === 'aiRun') {
-      out.task = data.aiTask.find(t => t.id === row.taskId);
+      const task = data.aiTask.find(t => t.id === row.taskId);
+      out.task = task ? { ...clone(task), runs: data.aiRun.filter(r => r.taskId === task.id).map(r => ({
+        ...clone(r), steps: data.aiStep.filter(s => s.runId === r.id),
+        executionPlan: data.aiTaskRunPlan.find(p => p.runId === r.id) ?? null
+      })) } : null;
       out.steps = data.aiStep.filter(s => s.runId === row.id);
       out.executionPlan = data.aiTaskRunPlan.find(p => p.runId === row.id) ?? null;
     }

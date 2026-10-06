@@ -7,6 +7,13 @@ const { PrismaTaskExecutionBudgetRepository } = require('../apps/api/src/modules
 const { PrismaTaskRunnerResourceSource } = require('../apps/api/src/modules/ai-native/runner/prisma-task-runner-resource.source');
 const { PersistentTaskRunnerResourceGate } = require('../apps/api/src/modules/ai-native/runner/persistent-task-runner-resource-gate');
 const { PrismaTaskMeasuredEffects } = require('../apps/api/src/modules/ai-native/runner/prisma-task-measured-effects');
+const { aiTaskAccessFromContext } = require('../apps/api/src/modules/ai-native/ai-task.repository');
+const { AI_CONTRACT_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
+const syntheticExecutionContext = { contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: 'synthetic-evidence-test',
+  authorizedAt: '2026-10-06T12:00:00Z', audience: 'operator', actor: { kind: 'user', userId: 'user-a' },
+  scope: { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'workspace-a' },
+  access: { permissions: ['rental-os:order:view'], dataScope: 'all', locationScope: { mode: 'all', locationIds: [] } } };
+const syntheticExecutionAuthorization = { authorize: async () => structuredClone(syntheticExecutionContext) };
 const { PrismaGatewayAccountingFacts } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-accounting-facts');
 const { PersistedPlanResourcePolicySource } = require('../apps/api/src/modules/ai-native/runner/persisted-plan-resource-policy.source');
 const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
@@ -257,11 +264,11 @@ test('real measured effects carry the exact lease, persist tool output and recov
   h.state.aiStep[0].actionId = actionId;
   h.state.aiTaskExecutionCharge.forEach(c => { c.actionId = actionId; });
   let calls = 0;
-  const tasks = { resolveAccess: async () => ({ scope, where: { id: 'task-a', ownerId: 'user-a' } }) };
+  const tasks = { resolveAccess: async () => ({ ...aiTaskAccessFromContext(syntheticExecutionContext, 'task-a', now), scope, where: { id: 'task-a', ownerId: 'user-a' } }) };
   const effects = new PrismaTaskMeasuredEffects(h.db, tasks, h.make(), { resolve: async () => ({ operation: 'readonly', execute: async input => {
     calls++; assert.deepEqual(input.lease, lease); assert.equal(input.inputRef, 'input-a');
     h.control.tick = 25; return { kind: 'succeeded', payload: { synthetic: true } };
-  } }) });
+  } }) }, syntheticExecutionAuthorization, undefined, () => now);
   await assert.rejects(effects.execute(plan.steps[0], new AbortController().signal));
   const result = await effects.execute(plan.steps[0], new AbortController().signal, lease);
   assert.deepEqual(await effects.reconcile(plan.steps[0], new AbortController().signal, lease), result);
@@ -283,7 +290,7 @@ test('registered executor cannot be replaced while the real evidence boundary aw
     return authorize(...args);
   };
   const effects = new PrismaTaskMeasuredEffects(h.db,
-    { resolveAccess: async () => ({ scope, where: { id: 'task-a', ownerId: 'user-a' } }) }, h.make(), { resolve: async () => tool });
+    { resolveAccess: async () => ({ ...aiTaskAccessFromContext(syntheticExecutionContext, 'task-a', now), scope, where: { id: 'task-a', ownerId: 'user-a' } }) }, h.make(), { resolve: async () => tool }, syntheticExecutionAuthorization, undefined, () => now);
   await effects.execute(plan.steps[0], new AbortController().signal, lease);
   assert.equal(original, 1); assert.equal(replacement, 0);
   assert.deepEqual(h.state.aiTaskResultArtifact[0].payload, { synthetic: true });
