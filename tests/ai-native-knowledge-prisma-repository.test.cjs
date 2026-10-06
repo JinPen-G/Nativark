@@ -173,6 +173,25 @@ test('chunks cannot be acknowledged without their matching document version', as
   await assert.rejects(repo.commit({ ...command(), newVersion: false }), e => e.code === 'conflict');
   assert.equal(db.state.documents.size, 0); assert.equal(db.state.operations.size, 0); assert.equal(db.state.chunks.size, 0);
 });
+for (const [name, change] of Object.entries({
+  'state revision': row => row.state.revision++, 'row revision': row => row.revision++,
+  'row publication': row => row.status = 'published', 'title': row => row.title = 'different title',
+  'parsing state': row => row.state.document.parsing = 'success', 'missing owner': row => delete row.state.document.owner,
+  'control field': row => row.state.document.permissions = ['all'], 'failure payload': row => row.state.failure = 'private stack trace',
+  'invalid expiry': row => row.state.document.validUntil = 'invalid-date',
+  'index generation': row => row.state.indexJob = { operationId: 'index-a', documentVersion: 'v1', aclRevision: 1, generation: 2, kind: 'upsert', status: 'pending' }
+})) test(`knowledge storage rejects inconsistent ${name}`, async () => {
+  const db = dbFactory(), repo = new PrismaKnowledgeRepository(db); await repo.commit(command());
+  change(db.state.documents.get('doc-a'));
+  await assert.rejects(repo.read(scope, 'doc-a'), e => e.code === 'unavailable');
+});
+test('knowledge receipts reject unknown failure fields and mismatched scope results', async () => {
+  const db = dbFactory(), repo = new PrismaKnowledgeRepository(db); await repo.commit(command());
+  const receipt = [...db.state.operations.values()][0]; receipt.failure = 'private database details';
+  await assert.rejects(repo.operation(scope, 'doc-a', 'op-a'), e => e.code === 'unavailable');
+  delete receipt.failure; db.aiKnowledgeOperation.findFirst = async () => ({ ...receipt, workspaceId: 'other-space' });
+  await assert.rejects(repo.operation(scope, 'doc-a', 'op-a'), e => e.code === 'unavailable');
+});
 test('knowledge read errors expose no database details', async () => {
   const db = dbFactory(), repo = new PrismaKnowledgeRepository(db); db.state.readError = new Error('private db secret');
   for (const read of [() => repo.read(scope, 'doc-a'), () => repo.operation(scope, 'doc-a', 'op-a')]) {

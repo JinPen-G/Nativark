@@ -3,7 +3,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import type { AiExecutionScope, AiKnowledgeChunkDraft } from '@rental-os/shared';
 import type { KnowledgeOperation, KnowledgeRecord, KnowledgeRepositoryPort } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, unavailable } from './knowledge-errors';
-import { sameScope, scopeSchema, validateChunks } from './knowledge-validation';
+import { knowledgeFailureSchema, knowledgeRecordSchema, parse, parsePersisted, sameScope, scopeSchema, validateChunks } from './knowledge-validation';
 
 export type KnowledgePrismaClient = Pick<PrismaClient, '$transaction' | 'aiKnowledgeDocument' | 'aiKnowledgeVersion' | 'aiKnowledgeChunk' | 'aiKnowledgeOperation'>;
 
@@ -30,10 +30,11 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
     const where = columns(scope, documentId);
     const row = await this.db.aiKnowledgeDocument.findFirst({ where }).catch(() => unavailable());
     if (!row) return null;
-    if (typeof row.state !== 'object' || row.state === null) throw new KnowledgeError('unavailable');
-    const record = structuredClone(row.state) as unknown as KnowledgeRecord;
-    if (!record.document || record.document.documentId !== documentId || !sameScope(record.document.scope, scope)
-      || row.tenantId !== where.tenantId || row.workspaceId !== where.workspaceId || row.id !== documentId) throw new KnowledgeError('unavailable');
+    const record = parsePersisted(knowledgeRecordSchema, row.state);
+    if (record.document.documentId !== documentId || !sameScope(record.document.scope, scope)
+      || row.tenantId !== where.tenantId || row.workspaceId !== where.workspaceId || row.id !== documentId
+      || row.revision !== record.revision || row.status !== record.document.publication || row.title !== record.document.title
+      || (row.status === 'withdrawn' ? !(row.withdrawnAt instanceof Date) || !Number.isFinite(row.withdrawnAt.getTime()) : row.withdrawnAt !== null)) throw new KnowledgeError('unavailable');
     return record;
   }
 
@@ -41,8 +42,14 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
     const value = workspace(scope);
     const row = await this.db.aiKnowledgeOperation.findFirst({ where: { tenantId: value.tenantId, workspaceId: value.workspaceId, documentId, operationId } }).catch(() => unavailable());
     if (!row) return null;
-    if (row.operationId !== operationId || typeof row.fingerprint !== 'string') throw new KnowledgeError('unavailable');
-    return { id: operationId, fingerprint: row.fingerprint, ...(typeof row.failure === 'string' ? { failure: row.failure as KnowledgeOperation['failure'] } : {}) };
+    return this.receipt(row, value, documentId, operationId);
+  }
+
+  private receipt(row: Prisma.AiKnowledgeOperationGetPayload<{}>, scope: ReturnType<typeof workspace>, documentId: string, operationId: string): KnowledgeOperation {
+    if (row.tenantId !== scope.tenantId || row.workspaceId !== scope.workspaceId || row.documentId !== documentId || row.operationId !== operationId
+      || typeof row.fingerprint !== 'string' || row.fingerprint.length < 1 || row.fingerprint.length > 128) throw new KnowledgeError('unavailable');
+    const failure = row.failure == null ? undefined : parsePersisted(knowledgeFailureSchema, row.failure);
+    return { id: operationId, fingerprint: row.fingerprint, ...(failure ? { failure } : {}) };
   }
 
   async commit(input: {
@@ -50,6 +57,7 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
     operation: KnowledgeOperation; next: KnowledgeRecord; chunks?: AiKnowledgeChunkDraft[]; newVersion: boolean;
   }): Promise<'committed' | 'conflict'> {
     input = structuredClone(input);
+    input.next = parse(knowledgeRecordSchema, input.next);
     const value = workspace(input.scope);
     if (input.next.document.documentId !== input.documentId || !sameScope(input.next.document.scope, input.scope)) throw new KnowledgeError('conflict');
     if (input.chunks !== undefined) {
@@ -60,7 +68,7 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
     try {
       return await this.db.$transaction(async transaction => {
         const operation = await transaction.aiKnowledgeOperation.findFirst({ where: { tenantId: value.tenantId, workspaceId: value.workspaceId, documentId: input.documentId, operationId: input.operation.id } });
-        if (operation) return operation.fingerprint === input.operation.fingerprint ? 'committed' : 'conflict';
+        if (operation) return this.receipt(operation, value, input.documentId, input.operation.id).fingerprint === input.operation.fingerprint ? 'committed' : 'conflict';
         const existing = await transaction.aiKnowledgeDocument.findFirst({ where: columns(input.scope, input.documentId), include: { versions: { orderBy: { version: 'desc' }, take: 1 } } });
         const currentRevision = existing?.revision ?? 0;
         if (!Number.isSafeInteger(currentRevision) || currentRevision !== input.expectedRevision || input.next.revision !== currentRevision + 1) return 'conflict';

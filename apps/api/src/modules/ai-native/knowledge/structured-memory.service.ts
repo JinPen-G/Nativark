@@ -2,13 +2,8 @@ import { z } from 'zod';
 import { AI_KNOWLEDGE_DRAFT_VERSION, type AiExecutionContext, type AiMemoryDraft, type AiMemoryChangeDraft } from '@rental-os/shared';
 import type { MemoryAction, MemoryConfirmation, StructuredMemoryPorts } from './knowledge.ports';
 import { KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
-import { actor, fingerprint, id, parse, sameScope, scopeSchema } from './knowledge-validation';
+import { actor, confirmationSchema, fingerprint, id, parse, preferenceSchema, sameScope, scopeSchema } from './knowledge-validation';
 
-const preferenceSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('locale'), value: z.enum(['zh-CN', 'en-US']) }).strict(),
-  z.object({ kind: z.literal('fulfillment_location'), locationId: id }).strict(),
-  z.object({ kind: z.literal('display_density'), value: z.enum(['comfortable', 'compact']) }).strict(),
-]);
 const revisionSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER - 1);
 const timeSchema = z.string().datetime({ offset: true });
 const base = { draftVersion: z.literal(AI_KNOWLEDGE_DRAFT_VERSION), memoryId: id, expectedRevision: revisionSchema };
@@ -19,8 +14,6 @@ const changeSchema: z.ZodType<AiMemoryChangeDraft> = z.discriminatedUnion('opera
   z.object({ ...base, operation: z.literal('delete') }).strict(),
 ]);
 const proposalSchema = z.object({ memoryId: id, operationId: id, expiresAt: timeSchema, preference: preferenceSchema }).strict();
-const ownerSchema = z.object({ actorKind: z.enum(['user', 'saas_admin', 'customer', 'automation']), actorId: id }).strict();
-const confirmationSchema = z.object({ id, memoryId: id, revision: revisionSchema, aclRevision: revisionSchema, owner: ownerSchema, scope: scopeSchema, audience: z.enum(['operator', 'staff', 'client', 'automation']), preference: preferenceSchema, memoryExpiresAt: timeSchema, status: z.enum(['confirmed', 'revoked']), issuedAt: timeSchema, expiresAt: timeSchema }).strict();
 
 export class StructuredMemoryService {
   constructor(private readonly ports: StructuredMemoryPorts) {

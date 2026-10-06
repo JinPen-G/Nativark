@@ -6,6 +6,11 @@ const { PrismaStructuredMemoryRepository } = require('./fixtures/ai-native/knowl
 const scope = { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'space-a' }, owner = { actorKind: 'user', actorId: 'user-a' };
 const memory = { draftVersion: 'ain-c06-draft-1', memoryId: 'memory-a', revision: 1, owner, scope, aclRevision: 1, expiresAt: '2026-12-01T00:00:00.000Z', status: 'proposed', preference: { kind: 'locale', value: 'zh-CN' } };
 const clone = value => structuredClone(value);
+const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+const confirmationRow = proof => ({ id: proof.id, tenantId: proof.scope.tenantId, workspaceId: proof.scope.workspaceId,
+  subjectId: proof.memoryId, proposalRevision: proof.revision, status: proof.status, confirmedBy: proof.owner.actorId, expiresAt: new Date(proof.expiresAt),
+  proposalHash: requestFingerprint(['structured-memory-confirmation-v1', { memoryId: proof.memoryId, revision: proof.revision, aclRevision: proof.aclRevision,
+    owner: proof.owner, scope: proof.scope, audience: proof.audience, preference: proof.preference, memoryExpiresAt: proof.memoryExpiresAt, issuedAt: proof.issuedAt, expiresAt: proof.expiresAt }]), state: clone(proof) });
 function dbFactory() {
   const state = { memories: new Map(), operations: new Map(), confirmations: new Map(), failOperation: false, casCount: 1, admissionError: null, responseError: null, operationError: null, readError: null };
   const delegates = () => ({
@@ -56,16 +61,16 @@ test('confirmed state requires the matching current server confirmation inside t
   const confirmation = { id: 'proof-a', memoryId: 'memory-a', revision: 1, aclRevision: 1, owner, scope, audience: 'operator', preference: memory.preference, memoryExpiresAt: memory.expiresAt, status: 'confirmed', issuedAt: '2026-10-05T00:00:00Z', expiresAt: '2026-11-01T00:00:00Z' };
   const input = { scope, owner, memoryId: 'memory-a', expectedRevision: 1, next: { ...memory, revision: 2, status: 'confirmed', confirmationRecordId: 'proof-a' }, operation: { id: 'op-confirm', fingerprint: 'hash-confirm' }, confirmation };
   await assert.rejects(repo.commit(input), e => e.code === 'conflict');
-  db.state.confirmations.set('proof-a', { id: 'proof-a', tenantId: scope.tenantId, workspaceId: scope.workspaceId, state: { ...confirmation, status: 'revoked' } });
+  db.state.confirmations.set('proof-a', confirmationRow({ ...confirmation, status: 'revoked' }));
   await assert.rejects(repo.commit(input), e => e.code === 'conflict');
   assert.equal(db.state.memories.get('memory-a').revision, 1);
-  db.state.confirmations.get('proof-a').state = confirmation;
+  db.state.confirmations.set('proof-a', confirmationRow(confirmation));
   assert.equal(await repo.commit(input), 'committed');
 });
 
 test('confirmation is read by scoped server record and missing state is unavailable', async () => {
   const db = dbFactory(), repo = new PrismaStructuredMemoryRepository(db);
-  db.state.confirmations.set('confirmation-a', { id: 'confirmation-a', tenantId: 'tenant-a', workspaceId: 'space-a', state: { id: 'confirmation-a', memoryId: 'memory-a', revision: 1, aclRevision: 1, owner, scope, audience: 'operator', preference: memory.preference, memoryExpiresAt: memory.expiresAt, status: 'confirmed', issuedAt: '2026-10-06T00:00:00.000Z', expiresAt: '2026-11-01T00:00:00.000Z' } });
+  db.state.confirmations.set('confirmation-a', confirmationRow({ id: 'confirmation-a', memoryId: 'memory-a', revision: 1, aclRevision: 1, owner, scope, audience: 'operator', preference: memory.preference, memoryExpiresAt: memory.expiresAt, status: 'confirmed', issuedAt: '2026-10-06T00:00:00.000Z', expiresAt: '2026-11-01T00:00:00.000Z' }));
   const context = { actor: { kind: 'user', userId: 'user-a' }, audience: 'operator', scope, contractVersion: 'test', requestId: 'req-a', authorizedAt: '2026-10-06T00:00:00.000Z' };
   assert.equal((await repo.read(context, 'confirmation-a')).status, 'confirmed');
   db.state.confirmations.set('confirmation-b', { id: 'confirmation-b', tenantId: 'tenant-a', workspaceId: 'space-a', state: null });
@@ -115,6 +120,56 @@ test('memory and confirmation read errors expose no database details', async () 
   for (const read of [() => repo.read(scope, owner, 'memory-a'), () => repo.operation(scope, owner, 'memory-a', 'op-a'), () => repo.read({ scope }, 'proof-a')]) {
     await assert.rejects(read(), e => e.code === 'unavailable' && e.message === 'unavailable' && !e.cause);
   }
+});
+test('memory receipts are invisible to a different owner and cannot acknowledge their writes', async () => {
+  const db = dbFactory(), repo = new PrismaStructuredMemoryRepository(db); await repo.commit(command());
+  const other = { ...owner, actorId: 'other-user' };
+  assert.equal(await repo.operation(scope, other, 'memory-a', 'op-a'), null);
+  await assert.rejects(repo.commit({ ...command(), owner: other, next: { ...memory, owner: other } }), e => e.code === 'conflict');
+  assert.equal(db.state.memories.get('memory-a').ownerId, owner.actorId); assert.equal(db.state.operations.size, 1);
+});
+for (const [name, change] of Object.entries({
+  'state revision': row => row.state.revision++, 'row revision': row => row.revision++,
+  'unknown state status': row => row.state.status = 'active', 'row status': row => row.status = 'deleted',
+  'ACL revision': row => row.aclRevision++, 'subject identity': row => row.subjectId = 'other-user',
+  'content': row => row.content = { kind: 'locale', value: 'en-US' }, 'content hash': row => row.contentHash = 'other-hash',
+  'expiry': row => row.expiresAt = new Date('2027-01-01'), 'control field': row => row.state.permissions = ['all'],
+  'incomplete confirmation': row => row.state.status = 'confirmed', 'missing owner': row => delete row.state.owner
+})) test(`memory storage rejects inconsistent ${name}`, async () => {
+  const db = dbFactory(), repo = new PrismaStructuredMemoryRepository(db); await repo.commit(command());
+  change(db.state.memories.get('memory-a'));
+  await assert.rejects(repo.read(scope, owner, 'memory-a'), e => e.code === 'unavailable');
+});
+const proof = () => ({ id: 'proof-a', memoryId: 'memory-a', revision: 1, aclRevision: 1, owner, scope, audience: 'operator', preference: memory.preference, memoryExpiresAt: memory.expiresAt, status: 'confirmed', issuedAt: '2026-10-06T00:00:00Z', expiresAt: '2026-11-01T00:00:00Z' });
+const confirmationContext = { scope, actor: { kind: 'user', userId: owner.actorId }, audience: 'operator' };
+for (const [name, change] of Object.entries({
+  'revoked row': row => row.status = 'revoked', 'wrong subject': row => row.subjectId = 'other-memory',
+  'wrong revision': row => row.proposalRevision++, 'different confirmer': row => row.confirmedBy = 'other-user',
+  'wrong hash': row => row.proposalHash = 'other-hash', 'different expiry': row => row.expiresAt = new Date('2027-01-01'),
+  'state preference': row => row.state.preference.value = 'en-US', 'state field': row => row.state.admin = true,
+  'incomplete row': row => delete row.proposalHash
+})) test(`confirmation JSON cannot override ${name}`, async () => {
+  const db = dbFactory(), repo = new PrismaStructuredMemoryRepository(db); const row = confirmationRow(proof()); change(row); db.state.confirmations.set('proof-a', row);
+  await assert.rejects(repo.read(confirmationContext, 'proof-a'), e => e.code === 'unavailable');
+});
+test('memory confirmation cannot cross the current actor or audience', async () => {
+  const db = dbFactory(), repo = new PrismaStructuredMemoryRepository(db); db.state.confirmations.set('proof-a', confirmationRow(proof()));
+  for (const context of [{ ...confirmationContext, audience: 'staff' }, { ...confirmationContext, actor: { kind: 'user', userId: 'other-user' } }]) {
+    await assert.rejects(repo.read(context, 'proof-a'), e => e.code === 'unavailable');
+  }
+});
+test('revoked confirmation columns cannot confirm memory through stale JSON in the transaction', async () => {
+  const db = dbFactory(), repo = new PrismaStructuredMemoryRepository(db, () => new Date('2026-10-06T01:00:00Z')); await repo.commit(command());
+  db.state.confirmations.set('proof-a', { ...confirmationRow(proof()), status: 'revoked' });
+  await assert.rejects(repo.commit({ ...command(), expectedRevision: 1, next: { ...memory, revision: 2, status: 'confirmed', confirmationRecordId: 'proof-a' }, confirmation: proof(), operation: { id: 'confirm-a', fingerprint: 'confirm-hash' } }), e => ['unavailable', 'conflict'].includes(e.code));
+  assert.equal(db.state.memories.get('memory-a').revision, 1); assert.equal(db.state.operations.size, 1);
+});
+test('JSON key reordering does not invalidate a correctly bound confirmation', async () => {
+  const reorder = value => Array.isArray(value) ? value.map(reorder) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).reverse().map(([key, item]) => [key, reorder(item)])) : value;
+  const db = dbFactory(), repo = new PrismaStructuredMemoryRepository(db, () => new Date('2026-10-06T01:00:00Z')); await repo.commit(command());
+  const row = confirmationRow(proof()); row.state = reorder(row.state); db.state.confirmations.set('proof-a', row);
+  assert.equal((await repo.read(confirmationContext, 'proof-a')).id, 'proof-a');
+  assert.equal(await repo.commit({ ...command(), expectedRevision: 1, next: { ...memory, revision: 2, status: 'confirmed', confirmationRecordId: 'proof-a' }, confirmation: proof(), operation: { id: 'confirm-a', fingerprint: 'confirm-hash' } }), 'committed');
 });
 test('actual memory service propagates uncertainty and replays the same operation without another write', async () => {
   const { StructuredMemoryService } = require('../apps/api/src/modules/ai-native/knowledge/structured-memory.service');

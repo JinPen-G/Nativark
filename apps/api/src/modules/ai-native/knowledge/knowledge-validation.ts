@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { AI_KNOWLEDGE_DRAFT_VERSION, type AiExecutionContext, type AiExecutionScope, type AiKnowledgeChunkDraft, type AiKnowledgeDocumentDraft } from '@rental-os/shared';
-import type { KnowledgeAuthorizationPort, KnowledgeAuthorizationRequest, KnowledgeGrant, KnowledgeRecord } from './knowledge.ports';
+import { AI_KNOWLEDGE_DRAFT_VERSION, type AiExecutionContext, type AiExecutionScope, type AiKnowledgeChunkDraft, type AiKnowledgeDocumentDraft, type AiMemoryDraft } from '@rental-os/shared';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import type { KnowledgeAuthorizationPort, KnowledgeAuthorizationRequest, KnowledgeGrant, KnowledgeRecord, MemoryConfirmation } from './knowledge.ports';
 import { KnowledgeError, unavailable } from './knowledge-errors';
 
 export const id = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/);
@@ -62,4 +63,47 @@ export function validateChunks(document: AiKnowledgeDocumentDraft, chunks: AiKno
     ids.add(c.chunkId); chars += c.text.length;
   }
   if (chars > 200000) throw new KnowledgeError('limit_exceeded');
+}
+
+const persistedRevision = z.number().int().min(1).max(4294967294);
+const ownerSchema = z.object({ actorKind: z.enum(['user', 'saas_admin', 'customer', 'automation']), actorId: id }).strict();
+export const preferenceSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('locale'), value: z.enum(['zh-CN', 'en-US']) }).strict(),
+  z.object({ kind: z.literal('fulfillment_location'), locationId: id }).strict(),
+  z.object({ kind: z.literal('display_density'), value: z.enum(['comfortable', 'compact']) }).strict(),
+]);
+export const confirmationSchema: z.ZodType<MemoryConfirmation> = z.object({
+  id, memoryId: id, revision: persistedRevision, aclRevision: persistedRevision, owner: ownerSchema, scope: scopeSchema,
+  audience: z.enum(['operator', 'staff', 'client', 'automation']), preference: preferenceSchema, memoryExpiresAt: time,
+  status: z.enum(['confirmed', 'revoked']), issuedAt: time, expiresAt: time
+}).strict();
+const memoryBase = { draftVersion: z.literal(AI_KNOWLEDGE_DRAFT_VERSION), memoryId: id, revision: persistedRevision, owner: ownerSchema,
+  scope: scopeSchema, aclRevision: persistedRevision, expiresAt: time };
+export const memoryDraftSchema: z.ZodType<AiMemoryDraft> = z.discriminatedUnion('status', [
+  z.object({ ...memoryBase, status: z.literal('proposed'), preference: preferenceSchema }).strict(),
+  z.object({ ...memoryBase, status: z.literal('confirmed'), preference: preferenceSchema, confirmationRecordId: id }).strict(),
+  z.object({ ...memoryBase, status: z.literal('deleted'), deletedAt: time }).strict()
+]);
+const documentSchema = z.object({
+  draftVersion: z.literal(AI_KNOWLEDGE_DRAFT_VERSION), documentId: id, documentVersion: id, attachmentId: id, owner: ownerSchema,
+  scope: scopeSchema, aclRevision: persistedRevision, title: z.string().min(1).max(256),
+  publication: z.enum(['draft', 'published', 'withdrawn', 'deleted']), parsing: z.enum(['pending', 'parsed', 'failed', 'rejected']),
+  indexing: z.enum(['not_indexed', 'indexing', 'indexed', 'failed']), validFrom: time, validUntil: time.optional()
+}).strict().refine(value => !value.validUntil || Date.parse(value.validUntil) > Date.parse(value.validFrom));
+export const knowledgeFailureSchema = z.enum(['parse_failed', 'unsupported', 'invalid_text', 'empty_text', 'limit_exceeded', 'index_failed']);
+export const knowledgeRecordSchema: z.ZodType<KnowledgeRecord> = z.object({
+  document: documentSchema, revision: persistedRevision, parseOperationId: id.optional(), failure: knowledgeFailureSchema.optional(),
+  indexJob: z.object({ operationId: z.string().min(1).max(191), documentVersion: id, aclRevision: persistedRevision,
+    generation: persistedRevision, kind: z.enum(['upsert', 'remove']), status: z.enum(['pending', 'completed', 'failed']) }).strict().optional()
+}).strict().refine(value => !value.indexJob || value.indexJob.documentVersion === value.document.documentVersion
+  && value.indexJob.aclRevision === value.document.aclRevision && value.indexJob.generation <= value.revision);
+export function parsePersisted<T>(schema: z.ZodType<T>, value: unknown): T {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) return unavailable();
+  return parsed.data;
+}
+export function memoryConfirmationHash(proof: MemoryConfirmation): string {
+  return requestFingerprint(['structured-memory-confirmation-v1', { memoryId: proof.memoryId, revision: proof.revision, aclRevision: proof.aclRevision,
+    owner: proof.owner, scope: proof.scope, audience: proof.audience, preference: proof.preference, memoryExpiresAt: proof.memoryExpiresAt,
+    issuedAt: proof.issuedAt, expiresAt: proof.expiresAt }]);
 }
