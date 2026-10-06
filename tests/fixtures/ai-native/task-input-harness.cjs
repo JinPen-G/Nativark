@@ -44,7 +44,7 @@ async function taskInputHarness(extraTables = {}, constraints = {}) {
   const stepState = row => ({ stepId: row.id, runId: row.runId, sequence: row.sequence, revision: row.revision, toolCode: row.toolCode,
     toolVersion: row.toolVersion, actionId: row.actionId, requestFingerprint: row.requestFingerprint,
     outcome: row.status === 'UNKNOWN' ? structuredClone(unknownOutcome) : { status: row.status.toLowerCase(), effect: row.effect.toLowerCase(), ...(row.status === 'SUCCEEDED' ? { facts: [] } : {}) } });
-  const transitions = new AiStepTransitionRepository(db, { resolve: async c => {
+  const transitionAuthority = { resolve: async c => {
     const row = state.aiStep.find(s => s.id === c.stepId); assert.ok(row);
     const previous = stepState(row), artifact = state.aiTaskResultArtifact.find(a => a.id === c.evidenceId);
     const next = c.reason === 'start' ? { ...previous, revision: previous.revision + 1, outcome: { status: 'running', effect: 'none' } }
@@ -53,7 +53,8 @@ async function taskInputHarness(extraTables = {}, constraints = {}) {
     return { context: context(), transitionAllowed: true, authorizationKey: 'synthetic-transition', taskId: c.taskId,
       evidenceId: c.evidenceId, evidenceRevision: 1, expiresAt: '2026-10-07T12:00:00Z', reason: c.reason,
       previous, next, previousResultRef: row.resultRef, resultRef: c.reason === 'start' ? null : c.evidenceId };
-  } }, () => new Date(control.now));
+  } };
+  const transitions = new AiStepTransitionRepository(db, transitionAuthority, () => new Date(control.now));
   const aggregate = new AiTaskTransitionRepository(db, taskAuthority, () => new Date(control.now));
   const commands = { register: (p, l) => ({ taskId: l.taskId, registrationRef: p.registrationRef, expectedTaskRevision: state.aiTask[0].revision,
     lease: { runId: l.runId, holderId: l.holderId, revision: l.revision, fencingToken: l.fencingToken } }),
@@ -78,6 +79,6 @@ async function taskInputHarness(extraTables = {}, constraints = {}) {
   const claim = () => ({ taskId: 'task-a', runId: 'run-a', holderId: 'worker-a', expectedTaskRevision: state.aiTask[0].revision,
     expectedRunRevision: state.aiRun[0].revision, expectedFencingToken: state.aiRun[0].fencingToken.toFixed(0), leaseMs: 100000 });
   return { ...stored, control, storeControl: stored.control, tasks, taskAuthority, planAuthority, registrations, transitions, aggregate,
-    plan, inputFor, executions, make, configuration, claim, held, context, clone };
+    registrationAuthority, transitionAuthority, plan, inputFor, executions, make, configuration, claim, held, context, clone };
 }
 module.exports = { taskInputHarness };
