@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AI_ERROR_CODES } from '@rental-os/shared';
 import { id, scopeSchema } from '../knowledge/knowledge-validation';
 
 // Offline artifact format only, not a permission grant or production audit writer.
@@ -8,8 +9,9 @@ const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const refs = z.array(id).max(64).refine(items => new Set(items).size === items.length);
 const resultSchema = z.object({
   status: z.enum(['succeeded', 'failed', 'unknown', 'denied', 'unavailable']),
-  code: z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/),
-}).strict().refine(value => value.code !== 'AI_RESULT_UNKNOWN' || value.status === 'unknown');
+  code: z.enum(['OK', ...AI_ERROR_CODES]),
+}).strict().refine(value => (value.code === 'OK') === (value.status === 'succeeded'))
+  .refine(value => value.code !== 'AI_RESULT_UNKNOWN' || value.status === 'unknown');
 const auditSchema = z.object({
   version: z.literal(1), requestId: id, scope: scopeSchema,
   inputHash: hash, authorityHash: hash, planIds: refs, toolIds: refs,
@@ -22,7 +24,7 @@ export function evaluationAudit(value: unknown) {
 
 const outcomeSchema = z.object({
   id,
-  evidence: z.enum(['offline_service', 'transport_simulation', 'contract_static']),
+  evidence: z.enum(['offline_service', 'transport_simulation', 'contract_static', 'render_ssr']),
   status: z.enum(['pass', 'fail', 'unavailable']),
 }).strict();
 const outcomesSchema = z.array(outcomeSchema).max(1000)

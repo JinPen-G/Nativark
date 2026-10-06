@@ -26,3 +26,8 @@ test('evidence report keeps deterministic pass separate from uncollected languag
   assert.throws(() => evaluationSummary([{ id: 'case-1', evidence: 'live', status: 'pass' }]));
   assert.throws(() => evaluationSummary([{ id: 'case-1', evidence: 'offline_service', status: 'pass', modelScore: 1 }]));
 });
+test('audit result codes use the existing closed public code list, not an arbitrary text channel', () => {
+  const { evaluationAudit } = load();
+  assert.throws(() => evaluationAudit({ ...input(), result: { status: 'failed', code: 'SYNTHETIC_SECRET_FRAGMENT' } }));
+  assert.throws(() => evaluationAudit({ ...input(), result: { status: 'succeeded', code: 'AI_ACCESS_DENIED' } }));
+});
