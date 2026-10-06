@@ -6,6 +6,7 @@ import type { RentalOrderConfirmationService } from '../../rental-core/rental-or
 import type { RentalBusinessFactStore } from '../../rental-core/rental-business-fact.repository';
 import type { AiOrderRouteCredentialSource } from '../order-route-context.authority';
 import type { AiApprovedOrderInput } from './approved-order.ports';
+import type { PersistedApprovedOrderPolicyDependencies } from './persisted-approved-order-policy.authority';
 
 export interface ApprovedOrderCommand {
   taskId: string;
@@ -30,14 +31,27 @@ export interface ApprovedOrderSnapshot<T> extends AiProposalSnapshotRefDraft {
   payload: T;
 }
 
+export type ApprovedOrderPreview = Pick<RentalQuoteSnapshotV1, 'id' | 'tenantId' | 'expiresAt' | 'consumedAt' | 'consumedOrderId'>;
+
 export interface ApprovedOrderSnapshotSource {
   read(request: {
     context: AiExecutionContext; scopeId: string; taskId: string; proposalId: string; proposalRevision: number;
     action: AiProposalActionDraft;
   }, tx?: Prisma.TransactionClient): Promise<{
     input: ApprovedOrderSnapshot<CreateRentalOrderRequest>;
-    preview: ApprovedOrderSnapshot<RentalQuoteSnapshotV1>;
+    preview: ApprovedOrderSnapshot<ApprovedOrderPreview>;
   }>;
+}
+
+export interface ApprovedOrderOriginalInputSource {
+  read(reference: { context: AiExecutionContext; scopeId: string; taskId: string; actionId: string; runId: string },
+    tx: Prisma.TransactionClient): Promise<CreateRentalOrderRequest | null>;
+}
+
+export interface PersistedApprovedOrderDependencies extends Omit<ApprovedOrderCompositionDependencies, 'db' | 'policy' | 'snapshots'>,
+  PersistedApprovedOrderPolicyDependencies {
+  inputSource: ApprovedOrderOriginalInputSource;
+  confirmation: Pick<RentalOrderConfirmationService, 'createApprovedOrder' | 'assertOrderMatchesQuote'>;
 }
 
 export type ApprovedOrderDb = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiProposal' | 'aiProposalVersion' | 'aiProposalAction' | 'aiApproval' | 'aiApprovalConsumption'>;

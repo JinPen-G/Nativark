@@ -86,6 +86,21 @@ export class PersistedApprovedOrderPolicyAuthority implements ApprovedOrderPolic
     }
   }
 
+  async authorizeRead(taskId: string, tx?: Prisma.TransactionClient) {
+    try {
+      approvedOrderCommandSchema.shape.taskId.parse(taskId);
+      const first = await this.authorization.authority.resolve(taskId, 'read_metadata');
+      const task = await this.task(first, taskId, tx);
+      const current = await this.authorization.authority.resolve(taskId, 'read_metadata');
+      const latest = await this.task(current, taskId, tx);
+      if (orderContextHash(first) !== orderContextHash(current) || requestFingerprint(task) !== requestFingerprint(latest)) throw deniedOrder();
+      return { context: structuredClone(current), scopeId: latest.scopeId };
+    } catch (error) {
+      if (error instanceof AiTaskRepositoryError) throw new AiTaskRepositoryError(error.code);
+      throw unavailable();
+    }
+  }
+
   async authorizePreparation(taskId: string, tx?: Prisma.TransactionClient) {
     try {
       approvedOrderCommandSchema.shape.taskId.parse(taskId);

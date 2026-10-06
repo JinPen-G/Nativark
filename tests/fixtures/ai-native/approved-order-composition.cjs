@@ -88,6 +88,13 @@ async function approvedOrderHarness() {
         await before(model, 'create', args);
         const row = { ...structuredClone(args.data) };
         if (model === 'aiApprovalConsumption') assert.equal(rows(model).some(r => r.scopeId === row.scopeId && r.taskId === row.taskId && r.actionId === row.actionId), false);
+        if (model === 'aiApprovedOrderSnapshot') {
+          assert.ok(rows('aiProposalAction').some(a => a.scopeId === row.scopeId && a.taskId === row.taskId && a.proposalId === row.proposalId
+            && a.proposalRevision === row.proposalRevision && a.actionId === row.actionId && a.requestFingerprint === row.actionFingerprint));
+          assert.equal(rows(model).some(r => (r.scopeId === row.scopeId && r.recordId === row.recordId && r.revision === row.revision)
+            || (r.scopeId === row.scopeId && r.taskId === row.taskId && r.proposalId === row.proposalId && r.proposalRevision === row.proposalRevision
+              && r.actionId === row.actionId && r.kind === row.kind)), false);
+        }
         if (model === 'rentalOrderIdempotencyRecord') { row.id = 'idempotency-a'; row.status = 'succeeded'; }
         rows(model).push(row); return project(materialize(model, row), args.select);
       },
@@ -118,6 +125,7 @@ async function approvedOrderHarness() {
       const wroteOrder = records.rentalOrder.length > state.records.rentalOrder.length;
       state.records = records;
       committed = true;
+      if (state.afterTransactionCommit) await state.afterTransactionCommit();
       if (wroteOrder) state.commits++;
       if (wroteOrder && state.afterCommit) await state.afterCommit();
       if (wroteOrder && state.ackLost) throw Error('synthetic COMMIT applied, response lost');
