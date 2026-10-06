@@ -83,6 +83,7 @@ export class KnowledgeDocumentService {
     try {
       await authorize(this.ports.authorization, context, { action: 'read_body', scope: context.scope, document: pending.document, attachmentId: pending.document.attachmentId });
       const file = await this.ports.files.read(context, pending.document, 262144);
+      if (!file || typeof file.mediaType !== 'string' || !(file.bytes instanceof Uint8Array)) throw new KnowledgeError('invalid_text');
       if (file.bytes.byteLength > 262144) throw new KnowledgeError('limit_exceeded');
       chunks = this.ports.parser.parse(pending.document, file);
       validateChunks(pending.document, chunks);
