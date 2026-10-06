@@ -12,6 +12,10 @@ import type { AiOrderRouteCredentialSource } from '../order-route-context.author
 import { isAiStepExecutionContext } from '../task-contract-validation';
 import type { AiApprovedOrderAuthority, AiApprovedOrderInput } from './approved-order.ports';
 
+class OrderWriteFailure {
+  constructor(readonly cause: unknown) {}
+}
+
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const identityHash = (context: AiExecutionContext) => {
   const { authorizedAt: _time, requestId: _request, ...binding } = context;
@@ -89,11 +93,15 @@ export class AiApprovedOrderRouteAuthority implements AiApprovedOrderAuthority {
     if (typeof write !== 'function') throw denied();
     try {
       return await this.authorized(input, binding, 'execute', async (context, body, userName) => {
-        const value = await write(context, body, userName);
+        const value = await write(context, body, userName).catch(error => { throw new OrderWriteFailure(error); });
         const current = await this.resolve(input, binding, 'replay');
         if (identityHash(current) !== identityHash(context)) throw denied();
         return value;
       });
-    } catch (error) { if (error instanceof AiTaskRepositoryError) throw error; throw denied(); }
+    } catch (error) {
+      if (error instanceof OrderWriteFailure) throw error.cause;
+      if (error instanceof AiTaskRepositoryError) throw error;
+      throw denied();
+    }
   }
 }
