@@ -35,6 +35,15 @@ export interface BudgetGatewayLifecycle {
 }
 
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+const boundedIdentifier = (value: unknown): value is string => typeof value === 'string'
+  && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value);
+
+function assertReserveRequest(request: Readonly<GatewayBudgetReserveRequest>) {
+  if (!request || !boundedIdentifier(request.callId) || !boundedIdentifier(request.model)
+    || !Number.isInteger(request.maxOutputTokens) || request.maxOutputTokens < 1 || request.maxOutputTokens > 32768) {
+    throw new BudgetError('INVALID');
+  }
+}
 
 function assertBinding(context: Readonly<GatewayContext>, binding: Readonly<BudgetGatewayInvocationBinding>) {
   if (!binding || binding.actorId !== context.actorId || !(binding.expiresAt instanceof Date)
@@ -63,6 +72,7 @@ export class BudgetGatewayAdapter implements BudgetGatewayLifecycle {
   async reserve(context: Readonly<GatewayContext>, request: Readonly<GatewayBudgetReserveRequest>) {
     context = structuredClone(context);
     request = structuredClone(request);
+    assertReserveRequest(request);
     const binding = structuredClone(await this.source.resolveForReserve(structuredClone(context), structuredClone(request)));
     assertBinding(context, binding);
     if (binding.association.idempotencyKey !== request.callId) throw new BudgetError('FORBIDDEN');

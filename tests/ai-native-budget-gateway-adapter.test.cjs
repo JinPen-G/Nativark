@@ -37,6 +37,20 @@ test('reserve uses trusted full association and never clones requestId into run/
   assert.notEqual(command.association.runId, command.association.requestId);
 });
 
+for (const [name, request] of Object.entries({
+  empty_call: { callId: '', model: 'model-1', maxOutputTokens: 20 },
+  malformed_call: { callId: 'call/forbidden', model: 'model-1', maxOutputTokens: 20 },
+  empty_model: { callId: 'call-1', model: '', maxOutputTokens: 20 },
+  malformed_model: { callId: 'call-1', model: 'model with spaces', maxOutputTokens: 20 },
+  zero_output: { callId: 'call-1', model: 'model-1', maxOutputTokens: 0 },
+  oversized_output: { callId: 'call-1', model: 'model-1', maxOutputTokens: 32769 },
+  fractional_output: { callId: 'call-1', model: 'model-1', maxOutputTokens: 1.5 }
+})) test(`reserve rejects ${name} before resolving durable binding`, async () => {
+  const h = harness();
+  await assert.rejects(() => h.adapter.reserve(context, request), error => error instanceof BudgetError && error.code === 'INVALID');
+  assert.equal(h.calls.some(row => row[0] === 'resolveReserve' || row[0] === 'reserve'), false);
+});
+
 test('every post-reserve mutation re-resolves persistent binding instead of using process memory', async () => {
   const h = harness();
   await h.adapter.dispatch(context, 'reservation-1', 'dispatch:event-1');
