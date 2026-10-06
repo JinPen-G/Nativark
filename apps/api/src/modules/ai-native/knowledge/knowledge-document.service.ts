@@ -35,11 +35,19 @@ export class KnowledgeDocumentService {
   }
 
   async save(context: AiExecutionContext, action: KnowledgeAction, before: KnowledgeRecord, next: KnowledgeRecord, operationId: string, hash: string, newVersion = false): Promise<KnowledgeRecord> {
-    await authorize(this.ports.authorization, context, { action, scope: context.scope, document: before.document });
-    const result = await this.ports.repository.commit({ scope: context.scope, documentId: next.document.documentId, expectedRevision: before.revision, operation: { id: operationId, fingerprint: hash, ...(next.failure ? { failure: next.failure } : {}) }, next, newVersion });
+    const contextHash = fingerprint(context);
+    const stableContext = structuredClone(context);
+    const stableContextHash = fingerprint(stableContext);
+    const assertStableContext = () => {
+      if (fingerprint(context) !== contextHash || fingerprint(stableContext) !== stableContextHash) throw new KnowledgeError('unavailable');
+    };
+    await authorize(this.ports.authorization, structuredClone(stableContext), { action, scope: structuredClone(stableContext.scope), document: structuredClone(before.document) });
+    assertStableContext();
+    const result = await this.ports.repository.commit({ scope: structuredClone(stableContext.scope), documentId: next.document.documentId, expectedRevision: before.revision, operation: { id: operationId, fingerprint: hash, ...(next.failure ? { failure: next.failure } : {}) }, next: structuredClone(next), newVersion });
+    assertStableContext();
     if (result !== 'committed') throw new KnowledgeError('conflict');
-    this.ports.cache?.invalidate(context.scope, next.document.documentId);
-    return this.load(context, next.document.documentId, action);
+    this.ports.cache?.invalidate(structuredClone(stableContext.scope), next.document.documentId);
+    return this.load(stableContext, next.document.documentId, action);
   }
 
   async create(context: AiExecutionContext, value: unknown): Promise<KnowledgeRecord> {
