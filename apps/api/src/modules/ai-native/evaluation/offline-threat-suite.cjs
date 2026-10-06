@@ -17,6 +17,7 @@ const definitions = [
   ['forged-approval', 'ain07-approval-consumption', 'offline_service'],
   ['budget-transaction', 'c03-budget', 'offline_service'],
   ['budget-unknown-replay', 'c01-budget', 'offline_service'],
+  ['financial-last-unit-race', 'lane-b-financial-race', 'offline_service'],
   ['resource-last-unit-race', 'execution-budget-repository', 'offline_service'],
   ['recovery-authority', 'task-authorized-recovery', 'offline_service'],
   ['unverified-capability', 'capability-evidence-boundaries', 'offline_service'],

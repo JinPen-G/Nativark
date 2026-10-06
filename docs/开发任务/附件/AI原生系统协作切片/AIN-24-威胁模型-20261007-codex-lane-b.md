@@ -26,7 +26,8 @@
 | 配置 revision 过期/await期间篡改 | TenantModelConfigService；config-boundaries | 实际配置服务与合成CAS/加密依赖；非配置HTTP链 |
 | 未验证能力/mock冒live | ProviderCapabilityService；capability-evidence-boundaries | 实际证据失效/必需能力拒绝；未做live探测 |
 | 审批伪造/重放/主体与关联替换 | AiApprovalConsumptionService；ain07-approval-consumption | 实际消费服务，业务写入/仓储为明确替身；不证明Core事务和真实审批HTTP |
-| 财务预算修订竞态、金额边界、unknown重放 | PrismaBudgetRepository / BudgetService；c03-budget / c01-budget | 实际仓储/服务、事务替身；本集尚不证明财务预算最后额度多请求争抢及MySQL行锁 |
+| 财务预算修订竞态、金额边界、unknown重放 | PrismaBudgetRepository / BudgetService；c03-budget / c01-budget | 实际仓储/服务、事务替身；不证明MySQL行锁 |
+| 财务预算最后额度、部分写入回滚、跨租户策略 | BudgetService + PrismaBudgetRepository；lane-b-financial-race | 实际预算算法/仓储，锁与回滚由数据库执行替身模拟；最后额度只测单层策略，三层/多数据库进程尚未验 |
 | 跨恢复资源最后单位争抢 | PrismaTaskExecutionBudgetRepository；execution-budget-repository | 实际adapter、序列化事务替身；资源预算不扣币，不能替代上一行财务争抢证据 |
 | 恢复提权/撤权/旧holder接管 | 正式授权运行器组合 / PrismaTaskTakeoverRepository；task-authorized-recovery | 实际组合与持久事务替身；不证明真库崩溃恢复 |
 | XSS/危险链接/超长模型文本 | 管理端真实 ModelText；lane-b-render-security | 实际React SSR转义及上限；不是DOM点击、浏览器CSP或微信真机验收 |
@@ -41,7 +42,7 @@
 ## 仍需主线/后续授权
 
 - 当前正式 ACL/确认/内容生产来源，跨进程撤销传播、真正文件下载端点与知识授权一致性。
-- 财务预算最后额度并发竞争的实际 service+Prisma adapter 故障用例及真库锁行为。资源竞争证据不能冒充财务竞争；本树不跨范围修预算。
+- 财务预算三层交集/多进程最后额度竞争和真库锁行为；单层最后额度已由LB05实际service+Prisma adapter离线用例覆盖。资源竞争证据不能冒充财务竞争；本树不跨范围修预算。
 - 审批消费与Core同事务/COMMIT应答丢失组合、平台Vault真实隔离、恢复租约真库故障、真实能力探测。
 - 真实模型指令服从/语言质量、真实网络、DB、HTTP、浏览器、微信宿主/设备和生产灰度全部未验。
 
