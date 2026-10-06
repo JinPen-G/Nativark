@@ -1,0 +1,34 @@
+import type { AuthService } from '../auth/auth.service';
+import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
+import { AiTaskRepositoryError } from './ai-task.repository';
+import type { AiTaskCredentialSource } from './task-current-action.authority';
+import { isAiStepExecutionContext } from './task-contract-validation';
+
+/** Current workspace identity only; this grants neither task access nor permission to execute. */
+export class AiTaskCurrentIdentityAuthority {
+  constructor(private readonly auth: Pick<AuthService, 'resolveAccessContext'>,
+    private readonly credentials: AiTaskCredentialSource,
+    private readonly clock: () => Date = () => new Date()) {
+    if (typeof auth?.resolveAccessContext !== 'function' || typeof credentials?.current !== 'function') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  }
+
+  async resolve(): Promise<AiExecutionContext> {
+    try {
+      const credential = structuredClone(await this.credentials.current());
+      if (!credential || !['operator', 'staff'].includes(credential.audience) || typeof credential.authorization !== 'string'
+        || credential.authorization.length < 1 || credential.authorization.length > 8192 || typeof credential.requestId !== 'string') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const access = await this.auth.resolveAccessContext(credential.authorization, { audience: credential.audience });
+      const now = this.clock();
+      if (!access?.user.isActive || access.user.isSaasAdmin || !access.workspaceValid || !access.workspaceId
+        || access.user.id !== access.tenantUser.id || access.user.tenantId !== access.tenantUser.tenantId
+        || !Array.isArray(access.user.permissions) || !(now instanceof Date) || !Number.isFinite(now.getTime())) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const candidate = {
+        contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: credential.requestId, authorizedAt: now.toISOString(), audience: credential.audience,
+        actor: { kind: 'user', userId: access.user.id }, scope: { kind: 'workspace', tenantId: access.user.tenantId, workspaceId: access.workspaceId },
+        access: { permissions: [...access.user.permissions], dataScope: access.user.dataScope, locationScope: structuredClone(access.user.locationScope) }
+      };
+      if (!isAiStepExecutionContext(candidate)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return structuredClone(candidate);
+    } catch { throw new AiTaskRepositoryError('AI_ACCESS_DENIED'); }
+  }
+}
