@@ -72,28 +72,42 @@ export class KnowledgeDocumentService {
   }
 
   async parseDocument(context: AiExecutionContext, value: unknown): Promise<KnowledgeRecord> {
-    const input = parse(mutationInput, value), before = await this.load(context, input.documentId, 'parse');
+    const callerContextHash = fingerprint(context);
+    const stableContext = structuredClone(context);
+    const stableContextHash = fingerprint(stableContext);
+    const assertStableContext = () => {
+      if (fingerprint(context) !== callerContextHash || fingerprint(stableContext) !== stableContextHash) throw new KnowledgeError('unavailable');
+    };
+    const input = parse(mutationInput, value), before = await this.load(stableContext, input.documentId, 'parse');
+    assertStableContext();
     const hash = fingerprint(['parse', input]);
-    if (await this.replay(context, before, input.operationId, hash)) return before;
+    if (await this.replay(stableContext, before, input.operationId, hash)) return before;
+    assertStableContext();
     if (before.revision !== input.expectedRevision || before.document.publication !== 'draft' || before.document.parsing === 'parsed' || before.parseOperationId) throw new KnowledgeError('conflict');
-    const pending: KnowledgeRecord = { indexJob: before.indexJob, document: { ...before.document, parsing: 'pending', indexing: 'not_indexed' }, revision: before.revision + 1, parseOperationId: input.operationId };
-    await this.save(context, 'parse', before, pending, input.operationId, hash);
+    const pending: KnowledgeRecord = { indexJob: before.indexJob && structuredClone(before.indexJob), document: { ...structuredClone(before.document), parsing: 'pending', indexing: 'not_indexed' }, revision: before.revision + 1, parseOperationId: input.operationId };
+    await this.save(stableContext, 'parse', before, pending, input.operationId, hash);
+    assertStableContext();
     let chunks;
     let failure: KnowledgeRecord['failure'];
     try {
-      await authorize(this.ports.authorization, context, { action: 'read_body', scope: context.scope, document: pending.document, attachmentId: pending.document.attachmentId });
-      const file = await this.ports.files.read(context, pending.document, 262144);
+      await authorize(this.ports.authorization, structuredClone(stableContext), { action: 'read_body', scope: structuredClone(stableContext.scope), document: structuredClone(pending.document), attachmentId: pending.document.attachmentId });
+      assertStableContext();
+      const file = await this.ports.files.read(structuredClone(stableContext), structuredClone(pending.document), 262144);
+      assertStableContext();
       if (!file || typeof file.mediaType !== 'string' || !(file.bytes instanceof Uint8Array)) throw new KnowledgeError('invalid_text');
       if (file.bytes.byteLength > 262144) throw new KnowledgeError('limit_exceeded');
-      chunks = this.ports.parser.parse(pending.document, file);
+      chunks = this.ports.parser.parse(structuredClone(pending.document), structuredClone(file));
       validateChunks(pending.document, chunks);
     } catch (error) {
+      if (error instanceof KnowledgeError && error.code === 'unavailable') throw error;
       failure = error instanceof KnowledgeError && ['unsupported', 'invalid_text', 'empty_text', 'limit_exceeded'].includes(error.code) ? error.code as KnowledgeRecord['failure'] : 'parse_failed';
     }
-    await authorize(this.ports.authorization, context, { action: 'parse', scope: context.scope, document: pending.document });
+    await authorize(this.ports.authorization, structuredClone(stableContext), { action: 'parse', scope: structuredClone(stableContext.scope), document: structuredClone(pending.document) });
+    assertStableContext();
     const next: KnowledgeRecord = { indexJob: pending.indexJob, revision: pending.revision + 1, document: { ...pending.document, parsing: failure ? (failure === 'parse_failed' ? 'failed' : 'rejected') : 'parsed' }, ...(failure ? { failure } : {}) };
-    const result = await this.ports.repository.commit({ scope: context.scope, documentId: input.documentId, expectedRevision: pending.revision, operation: { id: `${input.operationId}:parse-result`, fingerprint: fingerprint(['parse-result', hash, failure ?? 'parsed']), ...(failure ? { failure } : {}) }, next, ...(failure ? {} : { chunks }), newVersion: false });
+    const result = await this.ports.repository.commit({ scope: structuredClone(stableContext.scope), documentId: input.documentId, expectedRevision: pending.revision, operation: { id: `${input.operationId}:parse-result`, fingerprint: fingerprint(['parse-result', hash, failure ?? 'parsed']), ...(failure ? { failure } : {}) }, next: structuredClone(next), ...(failure ? {} : { chunks: structuredClone(chunks) }), newVersion: false });
+    assertStableContext();
     if (result !== 'committed') throw new KnowledgeError('conflict');
-    return this.load(context, input.documentId, 'parse');
+    return this.load(stableContext, input.documentId, 'parse');
   }
 }
