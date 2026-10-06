@@ -902,8 +902,12 @@ model AiKnowledgeDocument {
   createdAt   DateTime @default(now()) @db.DateTime(3)
   updatedAt   DateTime @updatedAt
   withdrawnAt DateTime?
+  /// Immutable AI document draft metadata (owner, version, ACL and lifecycle states).
+  /// Relational scope/status columns remain queryable; this is not model-controlled input.
+  state       Json?
   versions    AiKnowledgeVersion[]
   acl         AiKnowledgeAcl[]
+  operations  AiKnowledgeOperation[]
 
   @@index([tenantId, workspaceId, status], map: "ai_knowledge_documents_scope_status_idx")
   @@map("ai_knowledge_documents")
@@ -930,10 +934,29 @@ model AiKnowledgeChunk {
   chunkIndex Int      @db.UnsignedInt
   text       String   @db.Text
   tokenCount Int      @db.UnsignedInt
+  state      Json?
   version    AiKnowledgeVersion @relation(fields: [versionId], references: [id], onDelete: Cascade, onUpdate: Restrict)
 
   @@unique([versionId, chunkIndex], map: "ai_knowledge_chunks_version_index_key")
   @@map("ai_knowledge_chunks")
+}
+
+/// Immutable operation receipt for knowledge CAS/replay. It is scoped by the
+/// document and never doubles as an authorization grant or index lease.
+model AiKnowledgeOperation {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  documentId  String   @db.VarChar(36)
+  tenantId    String   @db.VarChar(191)
+  workspaceId String   @db.VarChar(191)
+  operationId String   @db.VarChar(128)
+  fingerprint String  @db.VarChar(128)
+  failure     String?  @db.VarChar(32)
+  createdAt   DateTime @default(now()) @db.DateTime(3)
+  document    AiKnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([tenantId, workspaceId, documentId, operationId], map: "ai_knowledge_operations_scope_key")
+  @@index([documentId, createdAt], map: "ai_knowledge_operations_document_idx")
+  @@map("ai_knowledge_operations")
 }
 
 model AiKnowledgeAcl {
