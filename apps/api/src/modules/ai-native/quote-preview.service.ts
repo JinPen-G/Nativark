@@ -2,6 +2,7 @@ import { z } from "zod";
 import { RENTAL_FULFILLMENT_MODES, type AiExecutionContext, type RentalQuoteRequest, type RentalQuoteSnapshotV1 } from "@rental-os/shared";
 import type { RentalBusinessService, BusinessContext } from "../rental-core/rental-business.service";
 import { ModelGatewayError } from "./model-gateway.ports";
+import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
 
 const id = z.string().trim().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const timestamp = z.string().datetime({ offset: true });
@@ -76,7 +77,12 @@ export class AiQuotePreviewService {
       try {
         const business = await this.contexts.current(context.scope);
         const quote = await this.core.createQuote(context.scope.tenantId, business, parsed.data as RentalQuoteRequest);
-        if (quote.tenantId !== context.scope.tenantId || quote.request.lines.length !== parsed.data.lines.length) throw new ModelGatewayError("INVALID_RESPONSE");
+        if (quote.tenantId !== context.scope.tenantId || quote.request.lines.length !== parsed.data.lines.length
+          || requestFingerprint(quote.request) !== requestFingerprint(parsed.data)
+          || !this.hasSafeAmounts(quote)
+          || !Array.isArray(quote.chargeLines) || quote.chargeLines.length > 100
+          || quote.chargeLines.some(line => !line || typeof line.code !== "string" || typeof line.name !== "string"
+            || !Number.isFinite(line.amount) || Math.abs(line.amount) > Number.MAX_SAFE_INTEGER)) throw new ModelGatewayError("INVALID_RESPONSE");
         const expiresAt = new Date(quote.expiresAt); if (!Number.isFinite(expiresAt.getTime())) throw new ModelGatewayError("INVALID_RESPONSE");
         if (expiresAt.getTime() <= observed.getTime()) return this.failure(context, "expired", "报价生成后已失效");
         return { contractVersion: "ain-09-quote-preview-draft-1", requestId: context.requestId, observedAt: observed.toISOString(), scope: context.scope, status: "quoted", quote: {
@@ -103,6 +109,11 @@ export class AiQuotePreviewService {
     if (/过期|有效期|失效/u.test(message)) return "expired";
     if (/选择|歧义|多个|必须/u.test(message)) return "ambiguous";
     return "unavailable";
+  }
+  private hasSafeAmounts(quote: RentalQuoteSnapshotV1): boolean {
+    return [quote.rentalAmount, quote.discountAmount, quote.couponAmount, quote.serviceAmount,
+      quote.fulfillmentAmount, quote.depositAmount, quote.preAuthAmount, quote.payableAmount, quote.receivableAmount]
+      .every(value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER);
   }
   private now() { const value = this.clock(); return value instanceof Date && Number.isFinite(value.getTime()) ? value.toISOString() : new Date(0).toISOString(); }
 }
