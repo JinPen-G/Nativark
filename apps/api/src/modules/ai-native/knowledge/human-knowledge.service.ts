@@ -7,9 +7,11 @@ import { KnowledgeCurrentSession } from './knowledge-current-session';
 import { KnowledgeDocumentService } from './knowledge-document.service';
 import { KnowledgePublicationService } from './knowledge-publication.service';
 import { KnowledgeTextParser } from './knowledge-text-parser';
+import { KnowledgeSourceService } from './knowledge-source.service';
+import { PrismaKnowledgeReadAdapter } from './prisma-knowledge-read.adapter';
 import { PrismaKnowledgeRepository } from './prisma-knowledge.repository';
 import { KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
-import { fingerprint, id, parse, visible } from './knowledge-validation';
+import { draftInput, fingerprint, id, parse, visible } from './knowledge-validation';
 
 export type HumanKnowledgeDependencies = {
   db: ConstructorParameters<typeof PrismaKnowledgeRepository>[0];
@@ -60,6 +62,54 @@ export class HumanKnowledgeService {
   create(value: unknown) { return this.invoke(context => this.documents.create(context, value)); }
   read(documentId: string) { return this.invoke(context => this.documents.read(context, parse(id, documentId))); }
   parserCapabilities() { return KnowledgeTextParser.capabilities(); }
+  prepareCreate(value: unknown) {
+    const input = parse(draftInput, value);
+    return this.session.run(async context => {
+      const grant = await this.authorization.authorize(context, { action: 'create', scope: context.scope,
+        attachmentId: input.attachmentId });
+      if (!grant || !this.ports.files) return unavailable();
+      return { documentId: input.documentId, documentVersion: input.documentVersion, attachmentId: input.attachmentId,
+        scope: structuredClone(grant.scope), owner: structuredClone(grant.actor), format: KnowledgeTextParser.capabilities().mediaTypes,
+        status: 'ready_to_create' as const, nextStep: 'create' as const,
+        semantics: 'attachment_reference_and_metadata_only' as const };
+    });
+  }
+  parseReadiness(documentId: string) {
+    parse(id, documentId);
+    return this.session.run(async context => {
+      const record = await this.documents.read(context, documentId), d = record.document;
+      const grant = await this.authorization.authorize(context, { action: 'parse', scope: context.scope, document: d,
+        attachmentId: d.attachmentId });
+      const body = await this.authorization.authorize(context, { action: 'read_body', scope: context.scope, document: d,
+        attachmentId: d.attachmentId });
+      const ready = Boolean(grant && body && this.ports.files && d.publication === 'draft' && d.parsing !== 'parsed'
+        && !record.parseOperationId && d.documentVersion && d.attachmentId);
+      return { ...knowledgeManagementView(record), ready, format: KnowledgeTextParser.capabilities().mediaTypes,
+        limits: KnowledgeTextParser.capabilities(), nextStep: ready ? 'parse' as const
+          : record.parseOperationId ? 'reconcile' as const : 'unavailable' as const,
+        checkSemantics: 'can_start_only_not_parsed_result' as const };
+    });
+  }
+  preview(documentId: string, limit = 3) {
+    parse(id, documentId);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new KnowledgeError('invalid_input');
+    return this.session.run(async context => {
+      const record = await this.documents.read(context, documentId), d = record.document;
+      if (d.parsing !== 'parsed' || d.publication === 'deleted') return { status: 'unavailable' as const, sources: [] };
+      const reads = new PrismaKnowledgeReadAdapter(this.ports.db, this.repository, this.authorization, this.ports.clock);
+      const chunks = await reads.previewChunks(context, d, limit);
+      if (!Array.isArray(chunks)) return unavailable();
+      const items = [];
+      for (const chunk of chunks) {
+        const ref = { kind: 'document' as const, documentId: chunk.documentId, documentVersion: chunk.documentVersion,
+          chunkId: chunk.chunkId, scope: chunk.scope, aclRevision: chunk.aclRevision, locator: chunk.locator };
+        items.push({ source: ref, snippet: chunk.text, contentFingerprint: fingerprint(chunk.text), trust: chunk.trust });
+      }
+      return { status: 'ready' as const, documentVersion: d.documentVersion, aclRevision: d.aclRevision,
+        truncated: chunks.length === limit, sources: items,
+        semantics: 'preview_not_approval_or_search_readiness' as const };
+    });
+  }
   versionStatus(documentId: string) {
     parse(id, documentId);
     return this.session.run(async context => {
@@ -118,6 +168,13 @@ export class HumanKnowledgeService {
         // A receipt alone does not prove parse/index/business completion.
         document: knowledgeManagementView(after) };
     });
+  }
+
+  operationStatus(documentId: string, operationId: string) {
+    return this.operation(documentId, operationId).then(result => ({ ...result,
+      documentState: { publication: result.document.publication, parsing: result.document.parsing,
+        indexing: result.document.indexing, indexJob: result.document.indexJob ?? null },
+      completionSemantics: 'receipt_and_head_are_separate_facts' as const }));
   }
 
   list(value: unknown) {

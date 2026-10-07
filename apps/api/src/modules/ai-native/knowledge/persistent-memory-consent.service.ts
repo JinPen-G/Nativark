@@ -187,6 +187,17 @@ export class PersistentMemoryConsentService {
     coverage: 'bounded_window' as const, pagination: 'unavailable' as const, semantics: 'preference_not_authority' as const };
   }
 
+  /** Selection is explicit: an absent/empty kind list is not permission to
+   * inject every preference into a model input. */
+  async selectPreferences(value: unknown) {
+    const input = parse(z.object({ kinds: z.array(z.enum(['locale', 'fulfillment_location', 'display_density'])).min(1).max(3),
+      limit: z.number().int().min(1).max(10) }).strict(), value);
+    const listed = await this.confirmedPreferences({ limit: 50 });
+    const items = listed.items.filter(item => input.kinds.includes(item.preference.kind)).slice(0, input.limit);
+    return { items, requestedKinds: input.kinds, truncated: items.length < listed.items.filter(item => input.kinds.includes(item.preference.kind)).length,
+      semantics: 'explicit_preference_selection_not_authority' as const };
+  }
+
   /** Editing invalidates the old consent; deletion uses the existing tombstone.
    * The human facade has no arbitrary confirmationId consumption shortcut.
    */
