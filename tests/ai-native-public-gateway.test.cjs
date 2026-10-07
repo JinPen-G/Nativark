@@ -116,3 +116,73 @@ test('unknown scenes and missing wiring do not activate a gateway', async () => 
   assert.throws(() => PublicAiGatewayModule.register({ ...f.runtime, ports: {} }, scenes));
   assert.equal(PublicAiGatewayModule.register(f.runtime, scenes).exports[0], PublicAiGatewayService);
 });
+
+async function runPublic(f, mode, signal, value = intent()) {
+  if (mode === 'invoke') return f.service.invoke(f.context, value, signal);
+  const out = [];
+  for await (const event of f.service.stream(f.context, value, signal)) { assert.equal(isGatewayEvent(event), true); out.push(event); }
+  return out.at(-1)?.result;
+}
+for (const serviceMode of ['platform_managed', 'tenant_managed']) for (const mode of ['invoke', 'stream']) {
+  test(`${serviceMode}/${mode}: already cancelled owner cannot admit or reserve`, async () => {
+    const f = setup(serviceMode), controller = new AbortController(); controller.abort(Error('private cancellation reason'));
+    await assert.rejects(runPublic(f, mode, controller.signal), error => error.code === 'CANCELLED' && !error.message.includes('private'));
+    assert.deepEqual(f.events, []);
+  });
+  test(`${serviceMode}/${mode}: owner cancellation reaches the dispatched transport and retains unknown`, async () => {
+    const f = setup(serviceMode), controller = new AbortController(); let abortedAtDispatch = false;
+    const cancel = signal => {
+      f.events.push('transport'); controller.abort(Error('private cancellation reason')); abortedAtDispatch = signal.aborted;
+    };
+    f.ports.transport.invoke = async (_context, _request, _route, signal) => { cancel(signal); return f.state.result; };
+    f.ports.transport.stream = async function* (_context, _request, _route, signal) {
+      cancel(signal); yield { kind: 'text_delta', delta: 'late text' }; yield { kind: 'result', result: f.state.result };
+    };
+    const result = await runPublic(f, mode, controller.signal);
+    assert.equal(abortedAtDispatch, true);
+    assert.equal(result.status, 'unknown'); assert.equal(result.error.retryable, false); assert.equal(result.error.nextAction, 'reconcile');
+    assert.equal(JSON.stringify(result).includes('private'), false);
+    assert.equal(f.events.filter(event => event === 'reserve').length, 1);
+    assert.equal(f.events.filter(event => event === 'transport').length, 1);
+    assert.ok(f.events.includes('unknown-usage')); assert.ok(f.events.includes('unknown'));
+    assert.equal(f.events.includes('settle'), false); assert.equal(f.events.includes('completed'), false);
+    assert.equal(require('node:events').getEventListeners(controller.signal, 'abort').length, 0);
+  });
+}
+for (const mode of ['invoke', 'stream']) {
+  test(`${mode}: cancellation during reserve never dispatches the transport`, async () => {
+    const f = setup(), controller = new AbortController(), reserve = f.ports.budget.reserve;
+    f.ports.budget.reserve = async call => { const result = await reserve(call); controller.abort(); return result; };
+    const result = await runPublic(f, mode, controller.signal);
+    assert.equal(result.status, 'failed'); assert.equal(result.error.code, 'cancelled');
+    assert.equal(f.events.includes('transport'), false); assert.equal(f.events.includes('settle'), false);
+    assert.ok(f.events.includes('unknown-usage')); assert.ok(f.events.includes('cancelled'));
+  });
+  test(`${mode}: cancellation after revocation cannot disclose a result envelope`, async () => {
+    const f = setup(), controller = new AbortController();
+    const revoke = () => { f.state.active = false; controller.abort(); };
+    f.ports.transport.invoke = async () => { revoke(); return f.state.result; };
+    f.ports.transport.stream = async function* () { revoke(); yield { kind: 'result', result: f.state.result }; };
+    await assert.rejects(runPublic(f, mode, controller.signal), error => error.code === 'FORBIDDEN');
+    assert.equal(f.events.includes('settle'), false); assert.equal(f.events.includes('completed'), false);
+  });
+}
+test('cancelling one public invocation cannot cancel a concurrent invocation', async () => {
+  const f = setup(), controller = new AbortController(); let release, entered;
+  const ready = new Promise(resolve => { entered = resolve; });
+  f.ports.transport.invoke = async (_context, request, _route, signal) => {
+    if (request.callId === 'request-1') { entered(); await new Promise(resolve => { release = resolve; }); }
+    return { text: signal.aborted ? 'late' : request.callId, usage: { inputTokens: 1, outputTokens: 2 } };
+  };
+  const first = f.service.invoke(f.context, intent(), controller.signal); await ready;
+  controller.abort(); release();
+  const second = await f.service.invoke(f.context, { ...intent(), requestId: 'request-2' });
+  assert.equal((await first).status, 'unknown'); assert.equal(second.status, 'completed'); assert.equal(second.text, 'request-2');
+});
+test('successful public call detaches its owner cancellation listener', async () => {
+  const f = setup(), controller = new AbortController();
+  assert.equal((await f.service.invoke(f.context, intent(), controller.signal)).status, 'completed');
+  assert.equal(require('node:events').getEventListeners(controller.signal, 'abort').length, 0);
+  const events = [...f.events]; controller.abort(); await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(f.events, events);
+});
