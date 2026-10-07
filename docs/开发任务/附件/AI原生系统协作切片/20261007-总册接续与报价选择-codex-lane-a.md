@@ -41,3 +41,9 @@ Runtime替换只消费原引用、指纹与租约，不改变本片选择事实/
 - `git diff --check`：在删除临时红测后重跑，预期仅保留行尾提示；本片提交前必须以实际退出码为准。
 
 曾临时尝试用扩大的合成夹具直接驱动 held-lease→模型输入，但因缺少可信预算/动作策略/权限关联而被真实授权门拒绝；已删除该临时测试，不把替身补表当作生产接通证据。CA03 的生产组合代码已完成静态类型验证，真实模型/数据库/运行器组合仍未验，不能称 CA03 或 AIN06/15 完成。下一步继续核对 CA04 订单解释消费入口和 CA06 业务差异准备，缺正式结果/审批端口保持 unavailable。
+
+## CA08：客户身份隔离的只读宿主装配（本次）
+
+新增 `apps/api/src/modules/ai-native/client-scene.composition.ts`。该叶子只接现有 `ClientApiService` 和由 `ClientAuthService`/客户端路由创建的 `AiClientSessionSource`：游客只能读取已发布渠道 bootstrap/catalog；登录客户只通过当前会话读取白名单目录、可用性、本人订单、本人订单详情和企业身份候选。每次成员操作重新取得会话，拒绝缺失/非 active/非 personal-or-corporate 上下文；订单归属和发布过滤仍由现有 ClientApiService 复核。
+
+适配器不接受模型传入 tenant/workspace/customer/token，不复用 operator/staff 工具，不注册路由，不执行报价、支付、取消或业务写操作。当前仅完成可被未来客户宿主显式导入的实际组合，真实客户端 HTTP 接入与匿名登录迁移仍未接通；不把该组合称为 AIN-21/22 完成。
