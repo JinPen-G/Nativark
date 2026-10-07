@@ -4,7 +4,12 @@ import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext, type BookingMemberO
 import { ModelGatewayError } from './model-gateway.ports';
 import type { AiBusinessReadAuthority } from './business-read-route.authority';
 
-export const aiMembershipCandidateReadInputSchema = z.object({ limit: z.number().int().min(1).max(50) }).strict();
+export const aiMembershipCandidateReadInputSchema = z.object({
+  limit: z.number().int().min(1).max(50),
+  customerId: z.string().min(1).max(191).optional(),
+  name: z.string().trim().min(1).max(191).optional(),
+  cursor: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).optional()
+}).strict();
 const candidateSchema = z.object({
   customerId: z.string().min(1).max(191), name: z.string().min(1).max(191), phoneMasked: z.string().max(64).refine(value => value === '' || (!/\s/u.test(value) && /^[0-9]{0,3}\*{3,}[0-9]{0,4}$/u.test(value))),
   membershipStatus: z.enum(['pending_activation', 'active', 'suspended', 'risk_restricted', 'exited', 'closed'])
@@ -23,6 +28,8 @@ export interface AiMembershipCandidateReadProjection {
   audience: 'operator' | 'staff';
   scope: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>;
   observedAt: string;
+  truncated: boolean;
+  nextCursor?: string;
   candidates: Array<Pick<BookingMemberOption, 'customerId' | 'name' | 'phoneMasked' | 'membershipStatus'>>;
 }
 
@@ -45,14 +52,19 @@ export class AiMembershipCandidateReadFactsService {
     if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user' || (context.audience !== 'operator' && context.audience !== 'staff')
       || !access?.permissions.includes('rental-os:order:create')) throw new ModelGatewayError('FORBIDDEN');
     const workspace = context.scope;
-    let rows: readonly BookingMemberOption[], truncated = false;
+    let rows: readonly BookingMemberOption[], truncated = false, nextCursor: string | undefined;
+    if (!this.memberships.listPersonalOptionsPage && (input.data.customerId || input.data.name || input.data.cursor)) {
+      throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+    }
     try {
       if (typeof this.memberships.listPersonalOptionsPage === 'function') {
-        const page = await this.memberships.listPersonalOptionsPage(workspace.tenantId, { limit: input.data.limit });
-        rows = page.rows; truncated = page.truncated;
+        const page = await this.memberships.listPersonalOptionsPage(workspace.tenantId, input.data);
+        rows = page.rows; truncated = page.truncated; nextCursor = page.nextCursor;
       } else rows = await this.memberships.listPersonalOptions(workspace.tenantId);
     } catch { throw new ModelGatewayError('PROVIDER_UNAVAILABLE'); }
-    if (!Array.isArray(rows) || (!truncated && rows.length > input.data.limit)) throw new ModelGatewayError('INVALID_RESPONSE');
+    if (!Array.isArray(rows) || rows.length > input.data.limit || typeof truncated !== 'boolean') throw new ModelGatewayError('INVALID_RESPONSE');
+    if (nextCursor !== undefined && (!truncated || !z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).safeParse(nextCursor).success)) throw new ModelGatewayError('INVALID_RESPONSE');
+    if (input.data.customerId && rows.some(row => row.customerId !== input.data.customerId)) throw new ModelGatewayError('INVALID_RESPONSE');
     const parsed = rows.map(row => candidateSchema.safeParse(row));
     if (parsed.some(item => !item.success)) throw new ModelGatewayError('INVALID_RESPONSE');
     const customerIds = parsed.map(item => item.data!.customerId);
@@ -60,7 +72,7 @@ export class AiMembershipCandidateReadFactsService {
     const observed = this.clock(); if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError('CONFIG_INVALID');
     return {
       contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: context.requestId, audience: context.audience,
-      scope: workspace, observedAt: observed.toISOString(), candidates: parsed.map(item => item.data!), truncated
+      scope: workspace, observedAt: observed.toISOString(), candidates: parsed.map(item => item.data!), truncated, ...(nextCursor ? { nextCursor } : {})
     };
     });
   }

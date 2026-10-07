@@ -68,7 +68,8 @@ export class AiQuoteCandidatePreparationService {
     const input = parsed.data;
     if (input.customerType === 'corporate') return { status: 'qualification_required' as const, reason: 'enterprise_identity_reader_unavailable' as const,
       clarifications: [{ field: 'customerId', reason: 'trusted_enterprise_qualification_required', action: 'use_original_qualification_flow', candidates: [] }] };
-    const catalog = await this.readers.catalog.read({ limit: 100 }, expectedContext), members = await this.readers.members.read({ limit: 50 }, expectedContext);
+    const memberQuery = { limit: 50, ...(input.customerId ? { customerId: input.customerId } : input.customerName ? { name: input.customerName } : {}) };
+    const catalog = await this.readers.catalog.read({ limit: 100 }, expectedContext), members = await this.readers.members.read(memberQuery, expectedContext);
     if (catalog.scope.kind !== 'workspace' || JSON.stringify(catalog.scope) !== JSON.stringify(members.scope)
       || catalog.audience !== members.audience) throw new ModelGatewayError('FORBIDDEN');
     const scope = structuredClone(catalog.scope), context = structuredClone(await this.contexts.current(scope));
@@ -126,7 +127,7 @@ export class AiQuoteCandidatePreparationService {
       reason: 'explicit_time_with_offset_required', action: 'supply_absolute_time', candidates: [] });
     // Re-read existing protected projections after config awaits. This is a
     // sequential read consistency check, NOT atomic authorization or dispatch.
-    const currentCatalog = await this.readers.catalog.read({ limit: 100 }, expectedContext), currentMembers = await this.readers.members.read({ limit: 50 }, expectedContext);
+    const currentCatalog = await this.readers.catalog.read({ limit: 100 }, expectedContext), currentMembers = await this.readers.members.read(memberQuery, expectedContext);
     if (JSON.stringify(currentCatalog.scope) !== JSON.stringify(scope) || JSON.stringify(currentMembers.scope) !== JSON.stringify(scope)
       || currentCatalog.audience !== catalog.audience || currentMembers.audience !== members.audience
       || JSON.stringify(currentCatalog.items) !== JSON.stringify(catalog.items)

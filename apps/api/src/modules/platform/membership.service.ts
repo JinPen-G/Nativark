@@ -463,9 +463,9 @@ export class MembershipService {
    * remains unchanged for existing callers; this method never scans the full
    * member table and does not expose totals. */
   async listPersonalOptionsPage(tenantId: string, input: { limit: number; cursor?: string; name?: string; customerId?: string }) {
-    const limit = Number.isInteger(input?.limit) ? Math.min(50, Math.max(1, input.limit)) : 0;
+    const limit = Number.isInteger(input?.limit) && input.limit >= 1 && input.limit <= 50 ? input.limit : 0;
     if (!limit || (input.cursor && !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(input.cursor))) throw new BadRequestException("会员候选分页参数无效");
-    const whereScope = await this.personalBookingOptionScope(tenantId);
+    const whereScope = await this.personalBookingOptionScope(tenantId, 200, input.customerId);
     const rows = await this.prisma.customerProfile.findMany({
       where: { tenantId, customerType: "personal", mergedIntoCustomerId: null,
         ...(input.customerId ? { id: input.customerId } : {}),
@@ -481,7 +481,7 @@ export class MembershipService {
       nextCursor: rows.length > limit ? page[page.length - 1]?.id : undefined, truncated: rows.length > limit };
   }
 
-  private async personalBookingOptionScope(tenantId: string): Promise<Prisma.CustomerProfileWhereInput | undefined> {
+  private async personalBookingOptionScope(tenantId: string, maximumCustomers?: number, customerId?: string): Promise<Prisma.CustomerProfileWhereInput | undefined> {
     const scope = getRequestDataScope();
     const locationIds = getRequestLocationIds();
     if ((!scope || scope === "all") && locationIds === undefined) return undefined;
@@ -511,12 +511,19 @@ export class MembershipService {
       where: {
         tenantId,
         workspaceId,
-        customerId: { not: null },
+        customerId: customerId ?? { not: null },
         ...(orderScope.length ? { AND: orderScope } : {})
       },
       select: { customerId: true },
-      distinct: ["customerId"]
+      distinct: ["customerId"],
+      ...(maximumCustomers === undefined ? {} : { take: maximumCustomers + 1, orderBy: { customerId: "asc" as const } })
     });
+    // Do not turn a partial visibility expansion into a complete candidate set.
+    // The legacy caller retains its existing semantics; the bounded endpoint
+    // refuses large expansions until a relational/paged visibility source exists.
+    if (maximumCustomers !== undefined && orders.length > maximumCustomers) {
+      throw new BadRequestException("会员候选授权范围过大，请使用受权精确查询入口");
+    }
     const visibleIds = new Set(orders.flatMap((row) => row.customerId ? [row.customerId] : []));
     const alternatives: Prisma.CustomerProfileWhereInput[] = [];
     if (visibleIds.size) alternatives.push({ id: { in: [...visibleIds] } });

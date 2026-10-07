@@ -18,7 +18,8 @@ async function setup(){
  const core=new RentalCoreService(config,stores.createAbsorbingFactStore());await core.onApplicationBootstrap();
  const bc={profile:core.getProfile('tenant_001'),category:RENTAL_CATEGORY_DEFINITIONS.find(x=>x.code==='camera'),settings:core.getBusinessSettings('tenant_001'),groups:core.listItemGroups('tenant_001'),locations:core.listLocations('tenant_001'),operators:core.listOperators('tenant_001'),couponTemplates:[]};
  const customers=[{id:'customer-a',name:'Synthetic same name',phoneMasked:'138****0000',membership:{status:'active'}},{id:'customer-b',name:'Synthetic same name',phoneMasked:'139****0000',membership:{status:'active'}}];
- const memberships=new MembershipService({customerProfile:{findMany:async()=>structuredClone(customers)}},{});
+ const memberships=new MembershipService({customerProfile:{findMany:async q=>structuredClone(customers.filter(row =>
+   (!q.where.id || row.id === q.where.id) && (!q.where.name || row.name.includes(q.where.name.contains))).slice(0,q.take))}},{});
  const authority=new AiBusinessReadRouteAuthority(new ApiAuthGuard(h.authorization.auth,undefined,undefined,undefined,{}),h.authorization.credentials,()=>new Date('2026-10-07T16:30:00Z'));
  const readers={catalog:new AiCatalogReadFactsService(core,authority),members:new AiMembershipCandidateReadFactsService(memberships,authority)};
  const contexts={current:async()=>bc},clock=()=>new Date('2026-10-07T16:30:00Z');
@@ -45,6 +46,9 @@ test('actionable clarification to explicit resource IDs rereads original readers
  assert.ok(partial.clarifications.some(row=>row.field==='customerId'&&row.candidates.length===2));
  assert.ok(partial.clarifications.some(row=>row.field==='start'&&row.action==='supply_absolute_time'));
  const selected={...h.candidate,items:[{itemGroupId:h.bc.groups[0].id,quantity:1,productName:'untrusted ignored name'}],locationId:h.bc.locations[0].id,locationName:'untrusted ignored location',selectionRevision:partial.selectionRevision};
+ const narrowed=await h.service.prepare(selected);assert.equal(narrowed.status,'missing_input');
+ assert.equal(narrowed.clarifications[0].action,'reread_and_reconfirm');
+ selected.selectionRevision=narrowed.selectionRevision;
  const out=await h.service.prepare(selected);assert.equal(out.status,'needs_confirmation');assert.equal(out.request.lines[0].itemGroupId,h.bc.groups[0].id);
  h.bc.settings.configVersion='new-server-config';
  const stale=await h.service.prepare(selected);assert.equal(stale.status,'missing_input');assert.equal(stale.request,undefined);assert.equal(stale.clarifications[0].action,'reread_and_reconfirm');
