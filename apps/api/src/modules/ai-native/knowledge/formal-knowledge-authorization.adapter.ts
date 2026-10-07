@@ -60,8 +60,7 @@ export class FormalKnowledgeAuthorizationAdapter implements KnowledgeAuthorizati
         || policy.requiredPermissions.length > 64 || policy.requiredPermissions.some(permission => !validPermission(permission))
         || new Set(policy.requiredPermissions).size !== policy.requiredPermissions.length) return null;
       if (!('access' in current) || policy.requiredPermissions.some(permission => !current.access.permissions.includes(permission))) return null;
-      if (resource && Object.entries(resource).some(([key, value]) => value !== undefined
-        && fingerprint((policy.resource as Record<string, unknown> | undefined)?.[key] ?? null) !== fingerprint(value))) return null;
+      if (resource && fingerprint(policy.resource) !== fingerprint(resource)) return null;
       const before = fingerprint(current);
       const rechecked = structuredClone(await this.identities.resolve());
       const latest = structuredClone(await this.policies.resolve(rechecked, policyRequest, resource));
@@ -100,12 +99,10 @@ export class FormalMemoryAuthorizationAdapter implements MemoryAuthorizationPort
         || !Array.isArray(policy.requiredPermissions) || policy.requiredPermissions.length < 1
         || policy.requiredPermissions.some(permission => !validPermission(permission))
         || !('access' in current) || policy.requiredPermissions.some(permission => !current.access.permissions.includes(permission))) return null;
-      // Policy repositories deserialize owner into a fresh object. Bind its
-      // content, not JS reference identity; foreign/extra owner fields still fail.
-      if (resource && Object.entries(resource).some(([key, value]) => value !== undefined
-        && fingerprint((policy.resource as Record<string, unknown> | undefined)?.[key] ?? null) !== fingerprint(value))) return null;
+      if (resource && fingerprint(policy.resource) !== fingerprint(resource)) return null;
       const latestContext = await this.identities.resolve(), latest = structuredClone(await this.policies.resolve(latestContext, request));
-      if (fingerprint(latestContext) !== fingerprint(current) || fingerprint(latest) !== fingerprint(policy)) return null;
+      if (fingerprint(latestContext) !== fingerprint(current) || fingerprint(latest) !== fingerprint(policy)
+        || Date.parse(policy.expiresAt) <= this.clock().getTime()) return null;
       return { scope: structuredClone(current.scope), actor: structuredClone(actor(current)) as never, audience: current.audience, accessKey: policy.grantKey };
     } catch { return null; }
   }

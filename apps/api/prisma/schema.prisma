@@ -724,6 +724,27 @@ model AiTaskActionPolicy {
 }
 
 /// Immutable result artifact and measured active segment; not provider usage or money.
+/// Server-provisioned exact principal/resource action grants. No seeded defaults.
+model AiKnowledgeActionPolicy {
+  tenantId String @db.VarChar(128)
+  workspaceId String @db.VarChar(128)
+  actorKind String @db.VarChar(32)
+  actorId String @db.VarChar(128)
+  audience String @db.VarChar(32)
+  domain String @db.VarChar(16)
+  action String @db.VarChar(32)
+  resourceKey String @db.Char(64)
+  revision Int @db.UnsignedInt
+  enabled Boolean @default(false)
+  requiredPermissions Json
+  resource Json
+  expiresAt DateTime @db.DateTime(3)
+  updatedAt DateTime @updatedAt @db.DateTime(3)
+
+  @@id([tenantId, workspaceId, actorKind, actorId, audience, domain, action, resourceKey])
+  @@map("ai_knowledge_action_policies")
+}
+
 model AiTaskResultArtifact {
   scopeId String @db.VarChar(36)
   taskId String @db.VarChar(36)
