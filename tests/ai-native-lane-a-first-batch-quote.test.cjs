@@ -46,3 +46,11 @@ test('quote comparison reports Core changes without recomputing money or reusing
   assert.equal(comparison.approvalReuse, 'forbidden_new_quote_requires_new_confirmation');
   assert.equal(comparison.coreAmounts.arithmetic, 'not_recomputed_by_ai_layer');
 });
+
+test('risk recheck does not infer resolution from an aggregate report', async () => {
+  const h = await setup();
+  const result = await h.tools.riskRecheck({ riskId: 'risk-1', from: '2026-11-01T00:00:00+08:00', to: '2026-11-02T00:00:00+08:00' });
+  assert.equal(result.status, 'unavailable');
+  assert.equal(result.aggregateReadCannotProveResolution, true);
+  assert.equal(result.sideEffects, 'not_attempted');
+});

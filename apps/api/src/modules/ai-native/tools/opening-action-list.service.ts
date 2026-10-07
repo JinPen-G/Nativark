@@ -98,6 +98,21 @@ export class AiOpeningActionListService {
       meaning: 'current_readiness_only_not_external_verification_or_publication' as const };
   }
 
+  /** The report port currently exposes an aggregate, not a stable risk
+   * resource lookup. Do not infer resolution from a missing list row; keep the
+   * requested item unavailable until the mainline exposes an authorized,
+   * scope-bound risk-id reader. */
+  async recheckRisk(value: unknown) {
+    const parsed = z.object({ riskId: z.string().min(1).max(191), from: z.string().datetime({ offset: true }),
+      to: z.string().datetime({ offset: true }), locationId: z.string().min(1).max(191).optional() }).strict().safeParse(value);
+    if (!parsed.success || Date.parse(parsed.data.to) <= Date.parse(parsed.data.from)) throw new ModelGatewayError('INVALID_REQUEST');
+    return { status: 'unavailable' as const, riskId: parsed.data.riskId,
+      nextAction: 'reconcile' as const, retryable: false as const,
+      reason: 'authorized_single_risk_reader_not_exposed_by_report_port' as const,
+      aggregateReadCannotProveResolution: true as const, query: { from: parsed.data.from, to: parsed.data.to,
+        locationId: parsed.data.locationId }, sideEffects: 'not_attempted' as const };
+  }
+
   /** Ordinary display terminology only, already present in the formal
    * SaveTenantRentalProfileRequest. No category/capability/key mutation. */
   async prepareDifference(value: unknown) {
