@@ -5241,6 +5241,42 @@ enum AiApprovalConsumptionStatus {
   FAILED_NO_EFFECT @map("failed_no_effect")
 }
 
+enum AiTaskOriginalRequestStatus {
+  STORED  @map("stored")
+  REVOKED @map("revoked")
+}
+
+/// Creation input is immutable; expiry/revocation never deletes the task or business receipt.
+model AiTaskOriginalRequest {
+  id                       String @id @default(uuid()) @db.VarChar(36)
+  scopeId                  String @db.VarChar(36)
+  audience                 AiAudience
+  ownerKind                AiActorKind
+  ownerId                  String @db.VarChar(191)
+  contractVersion          String @db.VarChar(64)
+  sceneCode                String @db.VarChar(64)
+  sceneVersion             String @db.VarChar(64)
+  requestKey               String @db.VarChar(128)
+  revision                 Int @db.UnsignedInt
+  payload                  Json
+  contentHash              String @db.Char(64)
+  authorizationBindingHash String @db.Char(64)
+  policyRevision           Int @db.UnsignedInt
+  policyHash               String @db.Char(64)
+  previousRequestId        String? @db.VarChar(36)
+  status                   AiTaskOriginalRequestStatus @default(STORED)
+  expiresAt                DateTime @db.DateTime(3)
+  createdAt                DateTime @default(now()) @db.DateTime(3)
+  scope                    AiScope @relation(fields: [scopeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  previous                 AiTaskOriginalRequest? @relation("OriginalRequestVersions", fields: [scopeId, previousRequestId], references: [scopeId, id], onDelete: Restrict, onUpdate: Restrict)
+  reissues                 AiTaskOriginalRequest[] @relation("OriginalRequestVersions")
+
+  @@unique([scopeId, id], map: "ai_original_requests_scope_id")
+  @@unique([scopeId, audience, ownerKind, ownerId, requestKey], map: "ai_original_requests_request_key")
+  @@index([scopeId, audience, ownerKind, ownerId, createdAt], map: "ai_original_requests_owner")
+  @@map("ai_task_original_requests")
+}
+
 /// Explicit scope root; nulls are only legal in the branches enforced by the migration.
 model AiScope {
   id          String             @id @default(uuid()) @db.VarChar(36)
@@ -5255,6 +5291,7 @@ model AiScope {
   profiles    AiProviderProfile[]
   budgetPolicies AiBudgetPolicy[]
   taskPlanPolicies AiTaskPlanPolicy[]
+  originalRequests AiTaskOriginalRequest[]
   createdAt   DateTime           @default(now()) @db.DateTime(3)
 
   @@unique([id, kind], map: "ai_scopes_id_kind")
