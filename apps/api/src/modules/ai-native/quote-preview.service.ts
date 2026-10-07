@@ -60,6 +60,11 @@ export type AiQuotePreviewResult = {
     depositAmount: number; preAuthAmount: number; payableAmount: number; receivableAmount: number;
     pricingPlanVersion: string; priceVersionId?: string; priceVersion?: string; ruleVersion: string; calendarVersion?: string;
     expiresAt: string; createdAt: string; timeZone?: string; reservation: "not_reserved";
+    period: { startAt: string; endAt: string };
+    lineUnits: Array<{ itemGroupId?: string; pricingUnit?: RentalQuoteRequest['lines'][number]['pricingUnit']; quantity: number; usageQuantity?: number }>;
+    promotionEvidence: Array<{ code: string; sourceId?: string; sourceVersion?: string }>;
+    promotionVersionCoverage: 'charge_line_references_only';
+    roundingEvidence: 'not_projected';
   };
 };
 
@@ -155,7 +160,13 @@ export class AiQuotePreviewService {
           rentalAmount: quote.rentalAmount, discountAmount: quote.discountAmount, couponAmount: quote.couponAmount, serviceAmount: quote.serviceAmount,
           fulfillmentAmount: quote.fulfillmentAmount, depositAmount: quote.depositAmount, preAuthAmount: quote.preAuthAmount, payableAmount: quote.payableAmount, receivableAmount: quote.receivableAmount,
           pricingPlanVersion: quote.pricingPlanVersion, priceVersionId: quote.priceVersionId, priceVersion: quote.priceVersion, ruleVersion: quote.ruleVersion, calendarVersion: quote.calendarVersion,
-          expiresAt: quote.expiresAt, createdAt: quote.createdAt, timeZone: quote.pricingContext?.timeZone, reservation: "not_reserved"
+          expiresAt: quote.expiresAt, createdAt: quote.createdAt, timeZone: quote.pricingContext?.timeZone, reservation: "not_reserved",
+          period: { startAt: quote.request.startAt, endAt: quote.request.endAt },
+          lineUnits: quote.request.lines.map(row => ({ itemGroupId: row.itemGroupId, pricingUnit: row.pricingUnit,
+            quantity: row.quantity, usageQuantity: row.usageQuantity })),
+          promotionEvidence: chargeLines.data.filter(row => row.type === 'discount' || row.type === 'coupon')
+            .map(row => ({ code: row.code, sourceId: row.sourceId, sourceVersion: row.sourceVersion })),
+          promotionVersionCoverage: 'charge_line_references_only', roundingEvidence: 'not_projected'
         } };
       } catch (error) {
         if (error instanceof ModelGatewayError) throw error;

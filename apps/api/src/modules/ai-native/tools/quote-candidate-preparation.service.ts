@@ -10,10 +10,13 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 
 const name = z.string().trim().min(1).max(191);
 const id = name.regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+export const AI_QUOTE_CANDIDATE_LIMITS = Object.freeze({ lines: 50, quantity: 10000, usageQuantity: 1000000 });
 export const aiQuoteCandidateInputSchema = z.object({
   customerType: z.enum(['personal', 'corporate']), customerId: name.optional(), customerName: name.optional(),
-  items: z.array(z.object({ productName: name.optional(), itemGroupId: id.optional(), quantity: z.number().int().min(1).max(10000),
-    pricingUnit: z.enum(RENTAL_PRICING_UNIT_CODES).optional() }).strict()).min(1).max(50).optional(),
+  items: z.array(z.object({ productName: name.optional(), itemGroupId: id.optional(), quantity: z.number().int().min(1).max(AI_QUOTE_CANDIDATE_LIMITS.quantity),
+    pricingUnit: z.enum(RENTAL_PRICING_UNIT_CODES).optional(),
+    usageQuantity: z.number().finite().nonnegative().max(AI_QUOTE_CANDIDATE_LIMITS.usageQuantity).optional()
+  }).strict()).min(1).max(AI_QUOTE_CANDIDATE_LIMITS.lines).optional(),
   start: z.string().min(1).max(80).optional(), end: z.string().min(1).max(80).optional(),
   fulfillmentMode: z.enum(RENTAL_FULFILLMENT_MODES).optional(), locationName: name.optional(), returnLocationName: name.optional(),
   locationId: id.optional(), returnLocationId: id.optional(), selectionRevision: z.string().regex(/^[a-f0-9]{64}$/u).optional()
@@ -84,9 +87,15 @@ export class AiQuoteCandidatePreparationService {
       if (matches.length !== 1) (matches.length ? ambiguous : missingFields).push(`items.${index}`);
       if (matches.length !== 1) choose(`items.${index}`, matches.length ? 'ambiguous_product' : 'product_not_resolved',
         (matches.length ? matches : catalog.items.filter(row => row.status === 'enabled')).map(row => ({ id: row.id, label: row.name })));
-      if (item.pricingUnit && !context.settings.pricing.enabledUnits.includes(item.pricingUnit)) missingFields.push(`items.${index}.pricingUnit`);
+      if (item.pricingUnit && (!context.settings.pricing.enabledUnits.includes(item.pricingUnit)
+        || !context.category.businessModel.pricingUnits.includes(item.pricingUnit))) missingFields.push(`items.${index}.pricingUnit`);
+      if (item.pricingUnit === 'usage' && item.usageQuantity === undefined) {
+        missingFields.push(`items.${index}.usageQuantity`);
+        clarifications.push({ field: `items.${index}.usageQuantity`, reason: 'usage_quantity_required', action: 'supply_explicit_usage_quantity', candidates: [] });
+      }
       return { itemGroupId: matches.length === 1 ? matches[0].id : undefined, quantity: item.quantity,
-        ...(item.pricingUnit ? { pricingUnit: item.pricingUnit } : {}) };
+        ...(item.pricingUnit ? { pricingUnit: item.pricingUnit } : {}),
+        ...(item.usageQuantity !== undefined ? { usageQuantity: item.usageQuantity } : {}) };
     });
     const customerCandidates = members.candidates.filter(row => input.customerId ? row.customerId === input.customerId : !input.customerName || row.name === input.customerName);
     // A name, even a currently unique one, does not constitute a user selection.
@@ -102,7 +111,8 @@ export class AiQuoteCandidatePreparationService {
     };
     const fulfillmentLocationId = location(input.locationName, input.locationId, 'location'),
       returnLocationId = input.returnLocationName || input.returnLocationId ? location(input.returnLocationName, input.returnLocationId, 'returnLocation') : undefined;
-    if (!input.fulfillmentMode || !context.settings.fulfillment.enabledModes.includes(input.fulfillmentMode)) {
+    if (!input.fulfillmentMode || !context.settings.fulfillment.enabledModes.includes(input.fulfillmentMode)
+      || !context.category.businessModel.fulfillmentModes.includes(input.fulfillmentMode)) {
       missingFields.push('fulfillmentMode'); choose('fulfillmentMode', 'server_supported_mode_required', context.settings.fulfillment.enabledModes.map(mode => ({ id: mode, label: mode })));
     }
     const now = this.clock(), timeZone = context.settings.calendar.timeZone;

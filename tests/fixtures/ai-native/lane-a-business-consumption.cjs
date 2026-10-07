@@ -7,12 +7,12 @@ const { MembershipService } = require('../../../apps/api/src/modules/platform/me
 const { RentalWorkspaceReportRepository } = require('../../../apps/api/src/modules/rental-core/rental-workspace-report.repository');
 const { composeAiAuthorizedBusinessTools } = require('../../../apps/api/src/modules/ai-native/tools/business-tools.composition');
 const stores = require('../../helpers/absorbing-config-store.cjs');
-exports.setup = async () => {
+exports.setup = async (categoryCode = 'camera') => {
   const h = await authorizedRunnerHarness();
   h.identity.user.tenantId = 'tenant_001';
   h.identity.user.permissions.push('rental-core:catalog:view', 'rental-os:order:create', 'rental-os:report:view');
   const config = stores.createAbsorbingConfigStore();
-  config.listWorkspaces = async () => [{ id: 'workspace-a', tenantId: 'tenant_001', categoryCode: 'camera', isDefault: true }];
+  config.listWorkspaces = async () => [{ id: 'workspace-a', tenantId: 'tenant_001', categoryCode, isDefault: true }];
   const facts = stores.createAbsorbingFactStore();
   const core = new RentalCoreService(config, facts); await core.onApplicationBootstrap();
   const business = new RentalBusinessService(stores.createAbsorbingBusinessConfigStore(), stores.createAbsorbingBusinessFactStore(), config);

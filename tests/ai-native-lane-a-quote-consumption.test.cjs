@@ -20,6 +20,9 @@ test('actual quote scenario seals clarified facts and exposes only saved Core qu
   assert.equal(quote.confirmationReview.source.resourceId, quote.quote.id);
   assert.equal(quote.confirmationReview.expiresAt, quote.quote.expiresAt);
   assert.equal(quote.confirmationReview.orderApproval, 'not_granted');
+  assert.deepEqual(quote.quote.period, { startAt: content.payload.facts.request.startAt, endAt: content.payload.facts.request.endAt });
+  assert.equal(quote.quote.lineUnits[0].quantity, 1);
+  assert.equal(quote.quote.promotionVersionCoverage, 'charge_line_references_only');
   assert.equal(quote.confirmationReview.changes.amounts, 'unknown_previous_trusted_quote_not_loaded');
 });
 test('insufficient availability and permission loss do not save another quote or return stale model input', async () => {

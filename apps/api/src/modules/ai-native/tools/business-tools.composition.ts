@@ -60,7 +60,8 @@ export function composeAiAuthorizedBusinessTools(input: {
   const opening = new AiOpeningReadFactsService(input.business, context, diagnostics, input.clock);
   const quote = composeAiGuardedQuoteTools({ core: input.core, business: input.business, routes,
     readers: { catalog: reads.catalog, members: reads.membershipCandidates }, clock: input.clock });
-  const quotePreparation = new AiQuoteBusinessPreparationService(quote.candidates, reads.availability, routes);
+  const quotePreparation = new AiQuoteBusinessPreparationService(quote.candidates, reads.availability, routes,
+    { contexts: context, catalog: reads.catalog });
   const nextSteps = (serverOrderId: string) => new AiOrderNextStepsService(
     new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock), explanation(serverOrderId));
   const risks = new AiRiskReadFactsService(input.reports, {
