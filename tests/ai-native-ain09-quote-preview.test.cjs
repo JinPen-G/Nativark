@@ -13,7 +13,7 @@ const authority = { withQuote: async (value, consume) => { assert.deepEqual(valu
 
 test('quote preview calls the formal Core pricing entry and exposes snapshot evidence without reserving inventory', async () => {
   let calls = 0;
-  const service = new AiQuotePreviewService({ createQuote: async (tenantId, receivedContext, receivedInput) => { calls++; assert.equal(tenantId, scope.tenantId); assert.equal(receivedContext, business); assert.deepEqual(receivedInput, input); return quote(); } }, { current: async receivedScope => { assert.deepEqual(receivedScope, scope); return business; } }, authority, () => new Date('2026-10-05T01:30:00.000Z'));
+  const service = new AiQuotePreviewService({ createQuote: async (tenantId, receivedContext, receivedInput) => { calls++; assert.equal(tenantId, scope.tenantId); assert.deepEqual(receivedContext, business); assert.deepEqual(receivedInput, input); return quote(); } }, { current: async receivedScope => { assert.deepEqual(receivedScope, scope); return business; } }, authority, () => new Date('2026-10-05T01:30:00.000Z'));
   const result = await service.preview(input);
   assert.equal(result.status, 'quoted'); assert.equal(result.quote.reservation, 'not_reserved'); assert.equal(result.quote.priceVersionId, 'price-v3'); assert.equal(result.quote.timeZone, 'Asia/Shanghai'); assert.equal(calls, 1);
 });

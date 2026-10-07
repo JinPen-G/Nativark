@@ -6,6 +6,8 @@ import { requestFingerprint } from '../rental-core/rental-idempotency.repository
 import type { AiOrderRouteCredentialSource } from './order-route-context.authority';
 import { isAiStepExecutionContext } from './task-contract-validation';
 import { ModelGatewayError } from './model-gateway.ports';
+import { aiQuotePreviewInputSchema } from './quote-preview.service';
+import type { RentalQuoteRequest } from '@rental-os/shared';
 
 export type AiBusinessReadKind = 'catalog' | 'availability' | 'membership_candidates' | 'opening' | 'risk' | 'quote_context';
 export interface AiBusinessReadAuthority {
@@ -17,7 +19,8 @@ const routes = {
   membership_candidates: { method: 'GET', path: '/rental/v1/booking-members' },
   opening: { method: 'GET', path: '/rental/v1/tenant-readiness' },
   risk: { method: 'GET', path: '/rental/v1/reports/operations' },
-  quote_context: { method: 'GET', path: '/rental/v1/business-settings' }
+  quote_context: { method: 'GET', path: '/rental/v1/business-settings' },
+  quote: { method: 'POST', path: '/rental/v1/quotes' }
 } as const;
 
 /** Closed route bridge. The actual business read runs inside the Guard's ALS
@@ -32,6 +35,28 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
   }
 
   async withRead<T>(kind: AiBusinessReadKind, input: unknown, read: (context: AiExecutionContext) => Promise<T>): Promise<T> {
+    if ((kind as string) === 'quote') throw new ModelGatewayError('INVALID_REQUEST');
+    return this.withRoute(kind, input, read);
+  }
+
+  /** R1 persisted quote, explicitly separate from read tools. The bridge does
+   * not grant approval, dispatch ownership, or permission to create an order. */
+  async withQuote<T>(input: RentalQuoteRequest, consume: (context: AiExecutionContext) => Promise<T>): Promise<T> {
+    const parsed = aiQuotePreviewInputSchema.safeParse(input);
+    if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+    // Original Guard uses locationId for quote scope; never accept a second,
+    // caller-selected location or silently drop return/service locations.
+    return this.withRoute('quote', { ...parsed.data, locationId: parsed.data.fulfillmentLocationId }, async context => {
+      if (!('access' in context)) throw new ModelGatewayError('FORBIDDEN');
+      const locations = [parsed.data.fulfillmentLocationId, parsed.data.returnLocationId,
+        ...(parsed.data.services?.map(row => row.serviceLocationId) ?? [])].filter((id): id is string => Boolean(id));
+      if (context.access.locationScope?.mode === 'selected'
+        && locations.some(id => !context.access.locationScope!.locationIds.includes(id))) throw new ModelGatewayError('FORBIDDEN');
+      return consume(context);
+    });
+  }
+
+  private async withRoute<T>(kind: keyof typeof routes, input: unknown, read: (context: AiExecutionContext) => Promise<T>): Promise<T> {
     if (!Object.prototype.hasOwnProperty.call(routes, kind) || typeof read !== 'function') throw new ModelGatewayError('INVALID_REQUEST');
     const body = structuredClone(input);
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ModelGatewayError('INVALID_REQUEST');

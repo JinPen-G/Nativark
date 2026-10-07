@@ -76,7 +76,8 @@ export class AiQuotePreviewService {
     private readonly core: Pick<RentalBusinessService, "createQuote">,
     private readonly contexts: AiQuoteCoreContextSource,
     private readonly authority: AiQuotePreviewAuthority,
-    private readonly clock: () => Date = () => new Date()
+    private readonly clock: () => Date = () => new Date(),
+    private readonly resolver?: Pick<import('../rental-core/rental-core.service').RentalCoreService, 'resolvePricingGroupQuoteRequest'>
   ) {
     if (typeof core?.createQuote !== "function" || typeof contexts?.current !== "function" || typeof authority?.withQuote !== "function") throw new ModelGatewayError("CONFIG_INVALID");
   }
@@ -87,12 +88,42 @@ export class AiQuotePreviewService {
       const fields = [...new Set(parsed.error.issues.map(issue => issue.path.join(".")).filter(Boolean))];
       return { contractVersion: "ain-09-quote-preview-draft-1", requestId: "unavailable", observedAt: this.now(), scope: { kind: "workspace", tenantId: "unavailable", workspaceId: "unavailable" }, status: "missing_input", missingFields: fields.length ? fields : ["request"], message: "报价输入不完整或格式不受支持" };
     }
-    const expectedRequest = requestFingerprint(parsed.data);
-    return this.authority.withQuote(structuredClone(parsed.data) as RentalQuoteRequest, async context => {
+    return this.authority.withQuote(structuredClone(parsed.data) as RentalQuoteRequest, async suppliedContext => {
+      const context = structuredClone(suppliedContext);
       if (context.scope.kind !== "workspace" || context.actor.kind !== "user" || (context.audience !== "operator" && context.audience !== "staff")) throw new ModelGatewayError("FORBIDDEN");
+      const scope = context.scope;
       try {
-        const business = await this.contexts.current(context.scope);
-        const quote = await this.core.createQuote(context.scope.tenantId, business, structuredClone(parsed.data) as RentalQuoteRequest);
+        const binding = (value: AiExecutionContext) => {
+          const { authorizedAt: _time, requestId: _request, ...identity } = value;
+          return requestFingerprint(identity);
+        };
+        const business = structuredClone(await this.contexts.current(structuredClone(scope)));
+        const formalRequest = this.resolver
+          ? structuredClone(await this.resolver.resolvePricingGroupQuoteRequest(scope.tenantId, structuredClone(parsed.data) as RentalQuoteRequest))
+          : structuredClone(parsed.data) as RentalQuoteRequest;
+        // Only the existing Core resolver may add selection metadata. It must
+        // not change quantities, dates, customer, discounts, or selected IDs.
+        if (!Array.isArray(formalRequest?.lines) || formalRequest.lines.length !== parsed.data.lines.length) throw new ModelGatewayError('INVALID_RESPONSE');
+        const comparable = { ...formalRequest, lines: formalRequest.lines.map((resolved, index) => {
+          const { reservationPrecision: _precision, pricingGroupMemberItemGroupIds: _members,
+            pricingGroupCode: _code, pricingGroupName: _name, ...candidate } = resolved;
+          if (!id.safeParse(resolved.itemGroupId).success) throw new ModelGatewayError('INVALID_RESPONSE');
+          if (!parsed.data.lines[index].itemGroupId) delete candidate.itemGroupId;
+          return candidate;
+        }) };
+        if (requestFingerprint(comparable) !== requestFingerprint(parsed.data)) throw new ModelGatewayError('INVALID_RESPONSE');
+        const expectedRequest = requestFingerprint(formalRequest);
+        const quote = await this.authority.withQuote(structuredClone(parsed.data) as RentalQuoteRequest, async current => {
+          if (binding(current) !== binding(context)) throw new ModelGatewayError('FORBIDDEN');
+          const latest = structuredClone(await this.contexts.current(structuredClone(scope)));
+          if (requestFingerprint(business) !== requestFingerprint(latest)) throw new ModelGatewayError('CONFIG_INVALID');
+          // The last awaited source may itself wait for category/config data.
+          // Recheck the original quote permission immediately before R1 work.
+          return this.authority.withQuote(structuredClone(parsed.data) as RentalQuoteRequest, async final => {
+            if (binding(final) !== binding(context)) throw new ModelGatewayError('FORBIDDEN');
+            return this.core.createQuote(scope.tenantId, latest, structuredClone(formalRequest));
+          });
+        });
         const observed = this.clock(); if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError("CONFIG_INVALID");
         const chargeLines = z.array(chargeLineSchema).max(100).safeParse(quote?.chargeLines);
         const savedBasis = savedQuoteBasisSchema.safeParse(quote);
