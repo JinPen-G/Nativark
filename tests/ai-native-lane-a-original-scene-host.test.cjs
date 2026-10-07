@@ -119,3 +119,41 @@ test('persisted order model result is bound to its original input and current au
   h.b.h.identity.session = false;
   await assert.rejects(reader.read(command), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
 });
+
+test('client scene authenticates through actual client Guard/Auth and rechecks after the business read', async () => {
+  const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
+  const { ClientAuthService } = require('../apps/api/src/modules/client/client-auth.service');
+  const { ClientApiService } = require('../apps/api/src/modules/client/client-api.service');
+  const { getRequestIdentity } = require('../apps/api/src/common/request-identity');
+  const { composeAiClientScenes, createAiGuardedClientSession } = require('../apps/api/src/modules/ai-native/client-scene.composition');
+  let revoked = false, revokeDuringRead = false, authorization, reads = 0;
+  const session = { id: 'session-client', expiresAt: new Date('2027-01-01'), tenant: { code: 'tenant', status: 'ACTIVE' },
+    customer: { customerType: 'personal', name: 'Synthetic', phone: 'synthetic' },
+    workspace: { tenantId: 'tenant-client', status: 'ACTIVE', code: 'camera', name: 'Synthetic', categoryCode: 'camera' } };
+  const auth = Object.assign(Object.create(ClientAuthService.prototype), { secret: () => 'synthetic-offline-secret-not-production', prisma: {
+    clientAuthSession: { findFirst: async () => revoked ? null : structuredClone(session), updateMany: async () => ({ count: 1 }) },
+    customerAccount: { findFirst: async () => ({ status: 'active', customer: { status: 'active' } }) },
+    customerMembership: { findFirst: async () => ({ status: 'active' }) }
+  } });
+  const token = auth.sign({ typ: 'client', sub: 'person-client', tid: 'tenant-client', sid: session.id,
+    wid: 'workspace-client', iat: 1, exp: Math.floor(new Date('2027-01-01').getTime() / 1000) });
+  authorization = `Bearer ${token}`;
+  const guard = new ApiAuthGuard({ resolveAccessContext: async () => { throw Error('operator auth forbidden'); } }, undefined,
+    auth, { assertAllowed: async () => {} });
+  const client = Object.assign(Object.create(ClientApiService.prototype), { core: { getOrder: async (tenantId, id) => {
+    reads++; assert.equal(tenantId, 'tenant-client'); assert.equal(getRequestIdentity().workspaceId, 'workspace-client');
+    if (revokeDuringRead) revoked = true;
+    return { id, tenantId, customerId: id === 'other-order' ? 'another-customer' : 'person-client',
+      status: 'reserved', lines: [], chargeLines: [], allocations: [], internalNote: 'never expose' };
+  } } });
+  const source = createAiGuardedClientSession(guard, { current: async () => ({ authorization, ip: '127.0.0.1' }) });
+  const app = composeAiClientScenes({ client, session: source });
+  assert.equal(reads, 0);
+  const result = await app.member.order('own-order'); assert.equal(result.id, 'own-order'); assert.equal(result.internalNote, undefined);
+  await assert.rejects(app.member.orders({ page: 1, tenantId: 'forged' }), e => e.getStatus?.() === 400);
+  await assert.rejects(app.member.order('other-order'), e => e.getStatus?.() === 404);
+  authorization = 'Bearer operator-token';
+  await assert.rejects(app.member.order('own-order')); authorization = `Bearer ${token}`;
+  revokeDuringRead = true;
+  await assert.rejects(app.member.order('own-order'), e => e.getStatus?.() === 401);
+});

@@ -79,3 +79,15 @@ Runtime替换只消费原引用、指纹与租约，不改变本片选择事实/
 API命令（同preload）：`node -e "process.argv=[process.execPath,'tsc','-p','apps/api/tsconfig.json','--rootDir','.','--noEmit','--incremental','false'];require('typescript/lib/tsc')"`，退出0。固定无效DATABASE_URL；审计路径本树output/scene-result-smoke.log、output/scene-result-types.log；不提交output。
 
 已按负责人授权向主线对话报告CA06/CA07正式配置/资料提案和执行端口缺口；主线确认由其核查和交付固定接口，本线维持prepared_not_submitted/unavailable。不改审批合同、不复用order.commit批准资料。下一步核对CA05选定报价到原受控审批/Core接法。未验MySQL、真实HTTP/模型/支付、浏览器/设备、生产；本片不代表AIN13或CA队列整项验收。
+
+## CA08 接续：真实客户端Guard身份生产者（20261008）
+
+`createAiGuardedClientSession(guard,credentials)`不再仅有current接口：实际调用原ApiAuthGuard的client路由分支，由原ClientAuthService解析令牌/读取当前会话，由Guard执行现有客户端限流与经营政策并写入ALS。服务端request host只提供authorization/ip；业务输入不能提供身份、scope或路径。目录、可用性、我的订单、订单详情、企业候选分别映射现有ClientApiController的固定路由，读后再次走同一Guard并核对客户端上下文。缺clientAuth/限流等原Guard依赖依然拒绝。
+
+`composeAiClientScenes.member`接回该实际生产者；旧显式session注入兼容路径也新增读后复核及独立ALS，避免读取等待期间切会话后仍返回旧内容。订单/可用性参数进入await前固定；可用性和分页复用原ClientAvailabilityRequestDto/ClientMyOrdersQueryDto+ValidationPipe，不另造公开schema。`AiBusinessScenesModule.registerAuthenticatedClient({client,guard,credentials})`为显式生产组合入口，不注册AppModule或HTTP；原guest路径仍仅暴露原公开投影，不宣称已完成公开HTTP限流装配。
+
+仅复用原host测试文件加一个快检，命令：`node --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs --test --test-name-pattern='client scene' tests/ai-native-lane-a-original-scene-host.test.cjs`。实际ClientAuthService.sign/parse/authenticate、ApiAuthGuard、ClientApiService.getOrder/本人校验/投影被驱动，DB与限流为明确离线替身，secret为测试内合成来源，不读取.env。1 pass/0 fail/0 skip/0 todo，退出0。验证默认装配无读取、本人读取、不回传内部备注、跨客户404、运营令牌拒绝、await期间撤销会话401、分页伪造tenant字段400。
+
+API类型命令同上一节，audit为本树output/client-guard-types.log，退出0；`git diff --check`退出0。非真库/真实HTTP/生产会话验证，没有客户模型派发、客户任务持久化或企业资格业务写入，不能称CA08整项完成。
+
+CA05当前已复用受控prepare/submit/reconcile，但本树缺总册07人类readProposal/decide/readReceipt及正式审阅组合的固定交付；已直接发给主线索取固定SHA/入口。绝不手写APPROVED行来假装正常全链。CA06/07继续等待主线正式合同，未新增审批旁路。后续接续先检查主线固定回复，再消费原审批与06宿主；不修改它们的实现。

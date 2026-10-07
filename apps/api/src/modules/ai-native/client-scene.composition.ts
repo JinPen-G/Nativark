@@ -1,6 +1,13 @@
 import type { ClientApiService } from '../client/client-api.service';
 import type { ClientRequestContext } from '../client/client-auth.service';
 import type { ClientMyOrdersQuery } from '@rental-os/shared';
+import type { ApiAuthGuard } from '../../common/api-auth.guard';
+import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
+import { getRequestIdentity, runWithRequestIdentity } from '../../common/request-identity';
+import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { z } from 'zod';
+import { ValidationPipe } from '@nestjs/common';
+import { ClientAvailabilityRequestDto, ClientMyOrdersQueryDto } from '../client/client-request.dto';
 
 /**
  * CA08 read-only client boundary.
@@ -17,6 +24,57 @@ import type { ClientMyOrdersQuery } from '@rental-os/shared';
  */
 export interface AiClientSessionSource {
   current(): Promise<ClientRequestContext>;
+  withRead?<T>(operation: ClientReadOperation, value: unknown, read: (context: ClientRequestContext) => Promise<T>): Promise<T>;
+}
+
+type ClientReadOperation = 'catalog' | 'availability' | 'orders' | 'order' | 'corporateIdentities';
+
+/** Request-bound production adapter: credentials are supplied by the server
+ * request host, never by model/tool parameters. The existing Guard resolves
+ * ClientAuthService and its rate/tenant policies; this creates no client token.
+ */
+export function createAiGuardedClientSession(guard: Pick<ApiAuthGuard, 'canActivate'>,
+  credentials: { current(): Promise<{ authorization: string; ip?: string }> }): AiClientSessionSource {
+  if (typeof guard?.canActivate !== 'function' || typeof credentials?.current !== 'function') throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
+  const authorize = async <T>(method: string, path: string, value: unknown, consume: (context: ClientRequestContext) => Promise<T>) => {
+    const credential = structuredClone(await credentials.current());
+    if (typeof credential?.authorization !== 'string' || credential.authorization.length > 8192) throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
+    return runWithRequestIdentity({}, async () => {
+      const request: { method: string; url: string; originalUrl: string; headers: { authorization: string };
+        ip?: string; query: unknown; body: unknown; client?: ClientRequestContext } = {
+        method, url: `/api/client/v1/${path}`, originalUrl: `/api/client/v1/${path}`,
+        headers: { authorization: credential.authorization }, ip: credential.ip,
+        query: method === 'GET' ? structuredClone(value) : {}, body: method === 'POST' ? structuredClone(value) : {}
+      };
+      if (await guard.canActivate(new ExecutionContextHost([request])) !== true || !request.client) throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
+      const context = assertClientContext(request.client), identity = getRequestIdentity();
+      if (!identity || identity.tenantId !== context.tenantId || identity.workspaceId !== context.workspaceId
+        || identity.userId !== context.customerId || identity.isSaasAdmin !== false || identity.staffApi === true) throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
+      return consume(context);
+    });
+  };
+  return Object.freeze({
+    current: () => authorize('GET', 'auth/me', {}, async context => context),
+    withRead: async <T>(operation: ClientReadOperation, value: unknown, read: (context: ClientRequestContext) => Promise<T>) => {
+      const routes = { catalog: 'catalog', availability: 'availability', orders: 'my/orders',
+        order: 'orders', corporateIdentities: 'membership/corporates' } as const;
+      if (!Object.prototype.hasOwnProperty.call(routes, operation)) throw new Error('AI_CLIENT_CAPABILITY_UNAVAILABLE');
+      let path: string = routes[operation];
+      if (operation === 'order') {
+        const parsed = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).safeParse(value);
+        if (!parsed.success) throw new Error('AI_CLIENT_INVALID_INPUT');
+        path += `/${parsed.data}`;
+      }
+      const method = operation === 'availability' ? 'POST' : 'GET';
+      return authorize(method, path, operation === 'order' ? {} : value, async before => {
+        const result = await read(before);
+        await authorize(method, path, operation === 'order' ? {} : value, async after => {
+          if (requestFingerprint(before) !== requestFingerprint(after)) throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
+        });
+        return result;
+      });
+    }
+  });
 }
 
 type ClientReadPort = Pick<ClientApiService,
@@ -38,6 +96,7 @@ export function composeAiClientScenes(input: {
   client: ClientReadPort;
   session?: AiClientSessionSource;
 }) {
+  const validation = new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true });
   const required: ReadonlyArray<keyof ClientReadPort> = ['channelBootstrap', 'publicCatalog', 'catalog',
     'availability', 'myOrders', 'getOrder', 'corporateIdentities'];
   if (!input?.client || required.some(method => typeof input.client[method] !== 'function')) {
@@ -49,6 +108,17 @@ export function composeAiClientScenes(input: {
     if (!input.session) throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
     return input.session.current().then(assertClientContext);
   };
+  const memberRead = async <T>(operation: ClientReadOperation, value: unknown, read: (context: ClientRequestContext) => Promise<T>) => {
+    const command = structuredClone(value);
+    if (input.session?.withRead) return input.session.withRead(operation, command, read);
+    const before = await member();
+    return runWithRequestIdentity({ tenantId: before.tenantId, workspaceId: before.workspaceId,
+      userId: before.customerId, isSaasAdmin: false }, async () => {
+      const result = await read(before), after = await member();
+      if (requestFingerprint(before) !== requestFingerprint(after)) throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
+      return result;
+    });
+  };
   return Object.freeze({
     guest: Object.freeze({
       bootstrap: (tenantCode: string, channel: 'wechat_miniprogram' | 'app' | 'web' = 'wechat_miniprogram', appId?: string) =>
@@ -56,12 +126,21 @@ export function composeAiClientScenes(input: {
       catalog: (tenantCode: string, serviceCode: string) => input.client.publicCatalog(tenantCode, serviceCode)
     }),
     member: Object.freeze({
-      catalog: async () => input.client.catalog(await member()),
-      availability: async (value: { locationId: string; startAt: string; endAt: string; lines: Array<{ itemGroupId: string; quantity: number }> }) =>
-        input.client.availability(await member(), structuredClone(value)),
-      orders: async (query: ClientMyOrdersQuery = {}) => input.client.myOrders(await member(), structuredClone(query)),
-      order: async (orderId: string) => input.client.getOrder(await member(), orderId),
-      corporateIdentities: async () => input.client.corporateIdentities(await member())
+      catalog: async () => memberRead('catalog', {}, context => input.client.catalog(context)),
+      availability: async (value: { locationId: string; startAt: string; endAt: string; lines: Array<{ itemGroupId: string; quantity: number }> }) => {
+        const frozen: ClientAvailabilityRequestDto = await validation.transform(structuredClone(value), {
+          type: 'body', metatype: ClientAvailabilityRequestDto
+        });
+        return memberRead('availability', frozen, context => input.client.availability(context, frozen));
+      },
+      orders: async (query: ClientMyOrdersQuery = {}) => {
+        const frozen: ClientMyOrdersQueryDto = await validation.transform(structuredClone(query), {
+          type: 'query', metatype: ClientMyOrdersQueryDto
+        });
+        return memberRead('orders', frozen, context => input.client.myOrders(context, frozen));
+      },
+      order: async (orderId: string) => memberRead('order', orderId, context => input.client.getOrder(context, orderId)),
+      corporateIdentities: async () => memberRead('corporateIdentities', {}, context => input.client.corporateIdentities(context))
     }),
     boundary: Object.freeze({
       audience: 'client' as const,
@@ -72,4 +151,3 @@ export function composeAiClientScenes(input: {
     })
   });
 }
-
