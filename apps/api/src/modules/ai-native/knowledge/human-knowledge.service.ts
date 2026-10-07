@@ -59,6 +59,24 @@ export class HumanKnowledgeService {
   }
   create(value: unknown) { return this.invoke(context => this.documents.create(context, value)); }
   read(documentId: string) { return this.invoke(context => this.documents.read(context, parse(id, documentId))); }
+  parserCapabilities() { return KnowledgeTextParser.capabilities(); }
+  versionStatus(documentId: string) {
+    parse(id, documentId);
+    return this.session.run(async context => {
+      const head = await this.documents.read(context, documentId), d = head.document;
+      const now = this.ports.clock.now();
+      if (!Number.isFinite(now)) return unavailable();
+      const effective = Date.parse(d.validFrom) <= now && (!d.validUntil || Date.parse(d.validUntil) > now);
+      return { ...knowledgeManagementView(head), currentVersion: d.documentVersion,
+        pendingParseVersion: d.parsing === 'pending' ? d.documentVersion : null,
+        indexedPublishedVersion: effective && d.publication === 'published' && d.parsing === 'parsed' && d.indexing === 'indexed'
+          ? d.documentVersion : null,
+        readinessSemantics: 'persistent_state_not_search_permission' as const,
+        historicalVersions: 'unavailable' as const,
+        parseRecovery: head.parseOperationId ? 'reconcile_original_operation' as const
+          : head.failure ? 'revise_new_version' as const : 'none' as const };
+    });
+  }
   detail(documentId: string) {
     parse(id, documentId);
     return this.session.run(async context => {

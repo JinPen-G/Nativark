@@ -72,6 +72,9 @@ export class KnowledgeDocumentService {
     parse(mutationInput, { documentId: input.documentId, expectedRevision, operationId: input.operationId });
     const before = await this.load(context, input.documentId, 'revise'), hash = operationFingerprint(context, ['revise', expectedRevision, input]);
     if (await this.replay(context, before, input.operationId, hash)) return before;
+    // A pending parse receipt may have committed while its reply was lost.
+    // Do not erase that unresolved boundary by admitting a replacement version.
+    if (before.parseOperationId) throw new KnowledgeCommitUnknownError();
     if (before.revision !== expectedRevision || before.document.publication === 'deleted' || before.document.documentVersion === input.documentVersion) throw new KnowledgeError('conflict');
     await authorize(this.ports.authorization, context, { action: 'revise', scope: context.scope, document: before.document, attachmentId: input.attachmentId });
     const { validUntil: oldExpiry, ...previous } = before.document;
