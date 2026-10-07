@@ -144,6 +144,28 @@ export class HumanKnowledgeService {
           : head.failure ? 'revise_new_version' as const : 'none' as const };
     });
   }
+  versions(documentId: string, limit = 20) {
+    parse(id, documentId);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new KnowledgeError('invalid_input');
+    return this.session.run(async context => {
+      const head = await this.documents.read(context, documentId);
+      const metadata = await this.authorization.authorize(context, { action: 'read_metadata', scope: context.scope, document: head.document });
+      if (!metadata) return unavailable();
+      const rows = await this.repository.versions(context.scope, documentId, limit);
+      const items = [];
+      for (const row of rows) {
+        const grant = await this.authorization.authorize(context, { action: 'read_metadata', scope: context.scope,
+          document: { ...head.document, documentVersion: row.contentHash } });
+        // A partial version list would leak that a hidden historical version
+        // exists. Refuse the whole list when any version cannot be authorized.
+        if (!grant) return unavailable();
+        items.push({ version: row.version, contentHash: row.contentHash, status: row.status, chunkCount: row.chunks.length });
+      }
+      return { documentId, currentVersion: head.document.documentVersion, items,
+        truncated: items.length === limit, body: 'unavailable' as const,
+        semantics: 'bounded_authorized_version_metadata_only' as const };
+    });
+  }
   compareVersions(documentId: string, leftVersion: string, rightVersion: string, maxChanges = 20) {
     parse(id, documentId); parse(id, leftVersion); parse(id, rightVersion);
     if (!Number.isInteger(maxChanges) || maxChanges < 1 || maxChanges > 20) throw new KnowledgeError('invalid_input');
