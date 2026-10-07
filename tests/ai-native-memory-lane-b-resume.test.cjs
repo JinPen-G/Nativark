@@ -14,6 +14,7 @@ test('same operation recovers both consent and memory COMMIT reply loss without 
   await assert.rejects(api.confirm(input), { code: 'result_unknown' });
   db.responseError = null;
   assert.equal((await api.confirmationStatus(input)).status, 'confirmation_saved');
+  assert.equal((await api.confirmationRecovery(input)).nextStep, 'resume_same_operation');
   const proofId = [...db.state.confirmations.keys()][0];
   const transaction = db.$transaction;
   db.$transaction = async callback => {

@@ -9,7 +9,7 @@ import { PrismaStructuredMemoryRepository, type MemoryPrismaClient } from './pri
 import { StructuredMemoryService } from './structured-memory.service';
 import type { KnowledgeClock, MemoryAuthorizationPort, MemoryConfirmation } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
-import { actor, fingerprint, id, memoryConfirmationHash, operationFingerprint, parse, sameScope } from './knowledge-validation';
+import { actor, fingerprint, id, memoryConfirmationHash, operationFingerprint, parse, preferenceSchema, sameScope } from './knowledge-validation';
 
 const inputSchema = z.object({ memoryId: id, expectedRevision: z.number().int().min(1).max(4294967293),
   operationId: id.max(110), expiresAt: z.string().datetime({ offset: true }) }).strict();
@@ -60,6 +60,68 @@ export class PersistentMemoryConsentService {
 
   async read(memoryId: string): Promise<AiMemoryDraft> {
     return this.memory.read(await this.current(), parse(id, memoryId));
+  }
+
+  /** Management metadata remains readable with the formal read action even
+   * when revoked consent correctly prevents preference reuse. No preference
+   * body is returned by this status endpoint.
+   */
+  async state(memoryId: string) {
+    parse(id, memoryId);
+    const context = await this.current(), owner = actor(context);
+    await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner });
+    const before = await this.repository.read(context.scope, owner, memoryId);
+    if (!before) return unavailable();
+    await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner, memory: before });
+    const proof = before.status === 'confirmed' ? await this.repository.read(context, before.confirmationRecordId) : null;
+    const bound = proof && before.status === 'confirmed' && proof.memoryId === memoryId
+      && proof.revision === before.revision - 1 && proof.aclRevision === before.aclRevision
+      && fingerprint(proof.preference) === fingerprint(before.preference) && proof.memoryExpiresAt === before.expiresAt;
+    const now = this.ports.clock.now();
+    if (!Number.isFinite(now)) return unavailable();
+    const consent = before.status !== 'confirmed' ? 'not_confirmed' as const : !bound ? 'invalidated' as const
+      : proof.status === 'revoked' ? 'revoked' as const
+        : Date.parse(proof.expiresAt) <= now || Date.parse(proof.issuedAt) > now ? 'expired' as const : 'confirmed' as const;
+    const after = await this.repository.read(context.scope, owner, memoryId);
+    const latestProof = before.status === 'confirmed' ? await this.repository.read(context, before.confirmationRecordId) : null;
+    if (fingerprint(before) !== fingerprint(after) || fingerprint(proof) !== fingerprint(latestProof)) throw new KnowledgeError('conflict');
+    await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner, memory: before });
+    return { memoryId, revision: before.revision, aclRevision: before.aclRevision,
+      storageStatus: before.status, consentStatus: consent, expiresAt: before.expiresAt,
+      usable: before.status === 'confirmed' && consent === 'confirmed' && Date.parse(before.expiresAt) > now,
+      semantics: 'preference_not_authority' as const };
+  }
+
+  async changeStatus(operationId: string, value: unknown) {
+    parse(id, operationId);
+    const base = { draftVersion: z.literal(AI_KNOWLEDGE_DRAFT_VERSION), memoryId: id,
+      expectedRevision: z.number().int().min(1).max(4294967293) };
+    const input = parse(z.discriminatedUnion('operation', [
+      z.object({ ...base, operation: z.literal('modify'), preference: preferenceSchema }).strict(),
+      z.object({ ...base, operation: z.literal('delete') }).strict(),
+    ]), value);
+    const context = await this.current(), owner = actor(context);
+    await this.authorizeRequest(context, { action: input.operation, scope: context.scope, owner });
+    const before = await this.repository.read(context.scope, owner, input.memoryId);
+    if (!before) return unavailable();
+    await this.authorizeRequest(context, { action: input.operation, scope: context.scope, owner, memory: before });
+    const receipt = await this.repository.operation(context.scope, owner, input.memoryId, operationId);
+    if (receipt && receipt.fingerprint !== operationFingerprint(context, ['change', input])) throw new KnowledgeError('conflict');
+    const after = await this.repository.read(context.scope, owner, input.memoryId);
+    if (fingerprint(before) !== fingerprint(after)) throw new KnowledgeError('conflict');
+    await this.authorizeRequest(context, { action: input.operation, scope: context.scope, owner, memory: before });
+    return { memoryId: input.memoryId, operationId, revision: before.revision,
+      status: receipt ? before.revision === input.expectedRevision + 1 ? 'committed_current' as const : 'committed_superseded' as const
+        : 'not_recorded' as const,
+      // Absence of a receipt never authorizes a blind retry after an unknown commit.
+      nextStep: receipt ? 'read_current' as const : 'reconcile_original_operation' as const };
+  }
+
+  async confirmationRecovery(value: unknown) {
+    const result = await this.confirmationStatus(value);
+    const nextStep = { not_created: 'explicit_human_confirm', confirmation_saved: 'resume_same_operation',
+      confirmed: 'read_current', invalidated: 'review_current_preference', unknown: 'reconcile_same_operation' } as const;
+    return { ...result, nextStep: nextStep[result.status] };
   }
 
   async propose(value: unknown): Promise<AiMemoryDraft> {

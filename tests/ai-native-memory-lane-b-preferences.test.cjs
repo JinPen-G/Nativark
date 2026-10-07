@@ -17,6 +17,14 @@ test('confirmed preference enumeration checks each current consent and audience,
   assert.deepEqual(list.items.map(v => v.memoryId), ['memory-a']);
   assert.equal(list.semantics, 'preference_not_authority');
   await api.revoke({ memoryId: 'memory-a', expectedRevision: 2 });
+  const state = await api.state('memory-a');
+  assert.equal(state.storageStatus, 'confirmed'); assert.equal(state.consentStatus, 'revoked');
+  assert.equal(state.usable, false); assert.equal(state.preference, undefined);
+  const deletion = { draftVersion: 'ain-c06-draft-1', memoryId: 'memory-a', expectedRevision: 2, operation: 'delete' };
+  await api.change('delete-a', deletion);
+  assert.equal((await api.state('memory-a')).storageStatus, 'deleted');
+  assert.equal((await api.changeStatus('delete-a', deletion)).status, 'committed_current');
+  await assert.rejects(api.changeStatus('delete-a', { ...deletion, expectedRevision: 1 }), { code: 'conflict' });
   assert.deepEqual((await api.confirmedPreferences({ limit: 10 })).items, []);
   flags.active = false;
   await assert.rejects(api.confirmedPreferences({ limit: 10 }), { code: 'unavailable' });
