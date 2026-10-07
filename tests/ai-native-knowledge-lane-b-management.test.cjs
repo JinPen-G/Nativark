@@ -1,0 +1,32 @@
+'use strict';
+const test = require('node:test'), assert = require('node:assert/strict');
+const { fixture, h } = require('./fixtures/ai-native/lane-b-functional.cjs');
+const { HumanKnowledgeService } = h.load('human-knowledge.service');
+test.after(() => assert.deepEqual(h.attempts, []));
+test('current-human facade drives persistent metadata/parse/revise/delete and bounded authorized listing', async () => {
+  const { ports, flags, f } = fixture(), api = new HumanKnowledgeService(ports);
+  const created = await api.create(h.draft());
+  assert.equal(created.parsing, 'pending'); assert.equal(created.publication, 'draft');
+  const parsed = await api.parse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-1' });
+  assert.equal(parsed.parsing, 'parsed'); assert.equal(parsed.nextStep, 'index');
+  await assert.rejects(api.publish({ documentId: 'doc-1', expectedRevision: 3, operationId: 'publish-1' }), { code: 'not_ready' });
+  await api.create(h.draft({ documentId: 'doc-2', operationId: 'create-2' }));
+  f.rule = (_ctx, req) => req.document?.documentId !== 'doc-2';
+  const listed = await api.list({ limit: 10 });
+  assert.deepEqual(listed.items.map(row => row.documentId), ['doc-1']);
+  assert.equal(listed.items[0].attachmentId, undefined); assert.equal(listed.pagination, 'unavailable');
+  assert.equal((await api.operation('doc-1', 'parse-1')).receipt, 'recorded');
+  await api.revise(3, h.draft({ documentVersion: 'v2', operationId: 'revise-1' }));
+  assert.equal((await api.read('doc-1')).documentVersion, 'v2');
+  await api.delete({ documentId: 'doc-1', expectedRevision: 4, operationId: 'delete-1' });
+  assert.equal((await api.read('doc-1')).publication, 'deleted');
+  flags.active = false;
+  await assert.rejects(api.read('doc-1'), { code: 'unavailable' });
+});
+test('missing byte source does not disable metadata or create a fake parsing admission', async () => {
+  const { ports } = fixture(), api = new HumanKnowledgeService({ ...ports, files: undefined });
+  await api.create(h.draft());
+  await assert.rejects(async () => api.parse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-1' }), { code: 'unavailable' });
+  assert.equal((await api.read('doc-1')).revision, 1);
+  assert.equal((await api.operation('doc-1', 'parse-1')).receipt, 'not_recorded');
+});
