@@ -3,6 +3,29 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const { fixture, h } = require('./fixtures/ai-native/lane-b-functional.cjs');
 const { PersistentMemoryConsentService } = h.load('persistent-memory-consent.service');
 test.after(() => assert.deepEqual(h.attempts, []));
+
+test('confirmation detail suppresses stale consent or identity after final memory read', async () => {
+  for (const change of ['identity', 'consent']) {
+    const { ports, flags, db } = fixture(), api = new PersistentMemoryConsentService(ports);
+    const expiresAt = new Date(h.now + 3600000).toISOString();
+    await api.propose({ memoryId: 'detail-memory', operationId: 'detail-propose', expiresAt,
+      preference: { kind: 'locale', value: 'zh-CN' } });
+    await api.confirm({ memoryId: 'detail-memory', expectedRevision: 1, operationId: 'detail-confirm', expiresAt });
+    assert.equal((await api.confirmationDetail('detail-memory')).status, 'confirmed');
+    const read = db.aiStructuredMemory.findFirst; let reads = 0;
+    db.aiStructuredMemory.findFirst = async args => {
+      const row = await read(args);
+      if (++reads === 2) {
+        if (change === 'identity') flags.active = false;
+        else for (const proof of db.state.confirmations.values()) {
+          proof.status = 'revoked'; proof.state.status = 'revoked';
+        }
+      }
+      return row;
+    };
+    await assert.rejects(api.confirmationDetail('detail-memory'));
+  }
+});
 test('confirmed preference enumeration checks each current consent and audience, excludes proposals/revocations', async () => {
   const { ports, flags } = fixture(), api = new PersistentMemoryConsentService(ports);
   const expiresAt = new Date(h.now + 3600000).toISOString();

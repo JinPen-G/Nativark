@@ -107,6 +107,12 @@ export class PersistentMemoryConsentService {
       || proof.memoryExpiresAt !== memory.expiresAt) return unavailable();
     const after = await this.repository.read(context.scope, owner, memoryId);
     if (!after || fingerprint(after) !== fingerprint(memory)) throw new KnowledgeError('conflict');
+    // Revoking consent does not increment the memory revision. Re-read the
+    // durable proof itself, then recheck the current human/resource permission
+    // after both storage waits before exposing the historical consent value.
+    const latestProof = await this.repository.read(context, memory.confirmationRecordId);
+    if (!latestProof || fingerprint(latestProof) !== fingerprint(proof)) throw new KnowledgeError('conflict');
+    await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner, memory: after });
     return { memoryId, confirmationRecordId: proof.id, preference: structuredClone(proof.preference),
       revision: proof.revision, aclRevision: proof.aclRevision, scope: structuredClone(proof.scope),
       audience: proof.audience, confirmedAt: proof.issuedAt, expiresAt: proof.expiresAt,
