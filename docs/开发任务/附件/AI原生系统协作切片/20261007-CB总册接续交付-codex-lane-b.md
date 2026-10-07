@@ -54,3 +54,8 @@ Node preload为本树`prisma-offline-preload.cjs`和`lane-b-local-runtime.cjs`�
 业务授权、Prisma草稿/确认/原operation和来源引用不依赖LangGraph checkpoint或Provider消息类型；将来Runtime仅替换驱动，Provider仅在唯一Gateway适配。不得替换账本/确认/业务幂等。回退新宿主装配不撤销已提交检查或确认；仍凭原Core/Memory收据读回。不安装框架/SDK、不改线上开关。
 
 剩余均需上述正式跨线政策/存储/媒体/原事务或消费合同，不以继续新增孤立wrapper、影子表或报告当作闭环。移交时请提供固定依赖提交与唯一写入者范围；不追活动HEAD。本线合法功能交付不是整个CB队列或AIN验收完成。
+# 接续：底层预览及来源枚举撤权竞态
+
+实际复现 `PrismaKnowledgeReadAdapter.previewChunks/listSources` 等待 chunk 查询期间发生撤权/撤回仍返回旧结果。现已在底层返回前复读持久 head，并比较当前授权 grant；预览初始状态已 withdrawn 时也拒绝，合法 parsed draft 预览仍保留。未修改主线政策/组合/Gateway/结果读端。
+
+在原 `ai-native-knowledge-persistent-content.test.cjs` 增加一项含四种组合的受控回调负例，无新测试脚本。红测 0 pass / 1 fail、退出 1；修复后用 `--test-name-pattern` 定向运行本项和原来源读取、scope绑定、撤权场景，4 pass / 0 fail / 0 skip / 0 todo，退出 0。名称过滤为限定验证范围，不是全文件或全量验收。使用既有本树 local runtime + offline preload、固定无效 DATABASE_URL、本树 audit/TEMP；ts-node 类型检查启用。真实 MySQL/FileStorage/多实例仍未验。读后复核不是跨资源原子授权，正式动作政策仍需主线提供。

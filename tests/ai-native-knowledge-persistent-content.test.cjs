@@ -64,6 +64,23 @@ test('revocation and head change during body read suppress late results', async 
     await assert.rejects(s.adapter.chunk(context, s.source, 2000), e => e.code === 'unavailable');
   }
 });
+
+test('preview and reference enumeration recheck withdrawal and permission after chunk waits', async () => {
+  for (const method of ['previewChunks', 'listSources']) {
+    for (const change of ['revoke', 'withdraw']) {
+      const s = await setup(), before = await s.repo.read(scope, 'doc-a');
+      s.db.afterRead = () => {
+        if (change === 'revoke') s.state.revoked = true;
+        else {
+          const row = s.db.state.documents.get('doc-a');
+          row.status = 'withdrawn'; row.withdrawnAt = new Date(now());
+          row.state.document.publication = 'withdrawn'; row.revision = row.state.revision = 2;
+        }
+      };
+      await assert.rejects(s.adapter[method](context, before.document, 1), { code: 'unavailable' });
+    }
+  }
+});
 test('corrupt body columns, unknown JSON and duplicate chunk IDs fail closed', async () => {
   for (const change of [row => { row.text = 'different'; }, row => { row.state.secret = 'untrusted-extra'; }, row => { row.state.documentVersion = 'v-other'; }, row => { row.state.trust = 'trusted'; }]) {
     const s = await setup(); change([...s.db.state.chunks.values()][0]);

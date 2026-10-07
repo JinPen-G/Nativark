@@ -85,8 +85,11 @@ export class PrismaKnowledgeReadAdapter implements KnowledgeContentPort, Knowled
       if (!sameScope(context.scope, document.scope)) return unavailable();
       const record = await this.head(document.scope, document.documentId);
       if (fingerprint(record.document) !== fingerprint(document)) return unavailable();
-      await authorize(this.authorization, context, { action: 'read_body', scope: context.scope, document });
+      const grant = await authorize(this.authorization, context, { action: 'read_body', scope: context.scope, document });
       const chunks = await this.rows(document, undefined, false);
+      const after = await this.head(document.scope, document.documentId);
+      const current = await authorize(this.authorization, context, { action: 'read_body', scope: context.scope, document: after.document });
+      if (fingerprint(record) !== fingerprint(after) || fingerprint(grant) !== fingerprint(current)) return unavailable();
       const refs = chunks.slice(0, limit).map(chunk => ({ kind: 'document' as const, documentId: chunk.documentId,
         documentVersion: chunk.documentVersion, chunkId: chunk.chunkId, scope: chunk.scope,
         aclRevision: chunk.aclRevision, locator: chunk.locator }));
@@ -100,9 +103,14 @@ export class PrismaKnowledgeReadAdapter implements KnowledgeContentPort, Knowled
     try {
       if (!Number.isInteger(limit) || limit < 1 || limit > 10 || !sameScope(context.scope, document.scope)) return unavailable();
       const record = await this.repository.read(document.scope, document.documentId);
-      if (!record || fingerprint(record.document) !== fingerprint(document) || document.parsing !== 'parsed' || document.publication === 'deleted') return unavailable();
-      await authorize(this.authorization, context, { action: 'read_body', scope: context.scope, document });
+      if (!record || fingerprint(record.document) !== fingerprint(document) || document.parsing !== 'parsed'
+        || document.publication === 'deleted' || document.publication === 'withdrawn') return unavailable();
+      const grant = await authorize(this.authorization, context, { action: 'read_body', scope: context.scope, document });
       const chunks = await this.rows(document, undefined, false);
+      const after = await this.repository.read(document.scope, document.documentId);
+      if (!after || fingerprint(record) !== fingerprint(after)) return unavailable();
+      const current = await authorize(this.authorization, context, { action: 'read_body', scope: context.scope, document: after.document });
+      if (fingerprint(grant) !== fingerprint(current)) return unavailable();
       return { chunks: chunks.slice(0, limit), truncated: chunks.length > limit };
     } catch { return unavailable(); }
   }
