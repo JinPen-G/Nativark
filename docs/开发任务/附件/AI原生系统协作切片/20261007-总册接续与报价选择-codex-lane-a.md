@@ -53,3 +53,9 @@ Runtime替换只消费原引用、指纹与租约，不改变本片选择事实/
 修复 `AiOrderExplanationPreparationService.validateGenerated`：金额或支付来源被拒绝/未加载时，事实对象只有 coverage、没有 `value`，校验器现在保持 unavailable，不再对缺失值执行 `Object.entries` 或把缺失金额当作零。已有可用来源仍按订单/支付记录 ID 和精确字段值校验；文本始终标记为未验证且不得执行。
 
 定向验证：API 隔离 TypeScript 检查退出码 0，`git diff --check` 退出码 0。未接真实模型结果读取、浏览器或生产支付；CA04 的真实模型→结果读回仍受 R/P 的结果端口约束。
+
+## CA09：任务中心只读场景聚合（本次）
+
+新增 `task-center-scene.composition.ts`，组合已有有界任务列表、原请求 `readHistorical`、任务收据和恢复读者。它输出原请求版本/scope/audience、任务元数据、恢复下一步和结果可用性声明；所有读取继续走原仓储授权与逐次复核，不创建新 run、不重连、不批准、不执行。`resultAvailable` 只表示存在受权结果引用，不把任务元数据当结果正文。
+
+定向验证：API 隔离 TypeScript 检查退出码 0，`git diff --check` 退出码 0。R/P 的正式 result/approval DTO 尚未在本线提供，真实结果正文、事件 cursor 与公开任务 HTTP 仍保持 unavailable；没有把 CA09 适配器宣称为完整任务中心。
