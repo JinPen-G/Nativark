@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { assertAiReadContextBinding } from './tools/read-context-binding';
 import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext, type BookingMemberOption } from '@rental-os/shared';
 import { ModelGatewayError } from './model-gateway.ports';
 import type { AiBusinessReadAuthority } from './business-read-route.authority';
@@ -31,9 +32,10 @@ export class AiMembershipCandidateReadFactsService {
     if (typeof memberships?.listPersonalOptions !== 'function' || typeof authority?.withRead !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   }
 
-  async read(value: unknown): Promise<AiMembershipCandidateReadProjection> {
+  async read(value: unknown, expectedContext?: AiExecutionContext): Promise<AiMembershipCandidateReadProjection> {
     const input = aiMembershipCandidateReadInputSchema.safeParse(value); if (!input.success) throw new ModelGatewayError('INVALID_REQUEST');
     return this.authority.withRead('membership_candidates', input.data, async context => {
+    assertAiReadContextBinding(context, expectedContext);
     const access = 'access' in context ? context.access : undefined;
     if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user' || (context.audience !== 'operator' && context.audience !== 'staff')
       || !access?.permissions.includes('rental-os:order:create')) throw new ModelGatewayError('FORBIDDEN');
