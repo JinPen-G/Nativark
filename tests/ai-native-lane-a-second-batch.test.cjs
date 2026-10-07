@@ -13,8 +13,19 @@ async function orderTools() {
 
 test('order citations reopen through current authority and refresh compares only server version', async () => {
   const h = await orderTools(), service = h.tools.orderExplanationPreparation('order-a');
-  const opened = await service.reopenCitation({ question: 'status', resourceType: 'order', resourceId: 'order-a', field: 'order' });
+  const material = await service.prepare({ question: 'status' });
+  const citation = { question: 'status', resourceType: 'order', resourceId: 'order-a', field: 'order',
+    scope: material.payload.scope, version: material.payload.orderVersion };
+  const opened = await service.reopenCitation(citation);
   assert.equal(opened.status, 'available');
+  await assert.rejects(() => service.reopenCitation({ ...citation, scope: { ...citation.scope, workspaceId: 'other' } }), e => e.code === 'AI_ACCESS_DENIED');
+  const stale = await service.reopenCitation({ ...citation, version: 'older-order-version' });
+  assert.equal(stale.status, 'stale'); assert.equal(stale.value, undefined);
+  const period = await service.reopenCitation({ ...citation, field: 'rental_period' });
+  assert.equal(period.status, 'available'); assert.equal(period.value.source.field, 'rental_period');
+  h.order.state.session = false;
+  await assert.rejects(() => service.reopenCitation(citation), e => e.code === 'AI_ACCESS_DENIED');
+  h.order.state.session = true;
   const refreshed = await service.refresh({ question: 'status', previousOrderVersion: '2026-10-09T00:00:00Z' });
   assert.equal(refreshed.comparison.status, 'compared');
   assert.equal(refreshed.comparison.eventTimeline, 'not_created');

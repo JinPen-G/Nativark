@@ -54,19 +54,31 @@ export class AiOrderExplanationPreparationService {
   async reopenCitation(value: unknown) {
     const parsed = z.object({ question: z.enum(['status', 'fees', 'payments', 'next_steps']),
       resourceType: z.literal('order'), resourceId: z.string().min(1).max(191),
+      scope: z.object({ kind: z.literal('workspace'), tenantId: z.string().min(1).max(191), workspaceId: z.string().min(1).max(191) }).strict(),
+      version: z.string().min(1).max(191),
       field: z.enum(['order', 'amounts', 'saved_basis', 'payment_records', 'rental_period']) }).strict().safeParse(value);
     if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
-    const current = await this.prepare({ question: parsed.data.question });
-    if (current.payload.orderId !== parsed.data.resourceId) throw new ModelGatewayError('FORBIDDEN');
-    const factRecord = current.payload.facts as Record<string, { source?: { field?: string } } | undefined>;
-    const candidates = [factRecord.order, factRecord.amounts, factRecord.history,
-      factRecord.payments, factRecord.fulfillment].filter(Boolean) as Array<{ source?: { field?: string } }>;
-    const source = candidates.find(row => row.source?.field === parsed.data.field);
-    return source ? { status: 'available' as const, scope: current.payload.scope, orderId: current.payload.orderId,
-      field: parsed.data.field, value: structuredClone(source), observedAt: current.payload.observedAt,
-      reauthorization: 'current_order_authority_rechecked' as const }
-      : { status: 'missing' as const, scope: current.payload.scope, orderId: current.payload.orderId,
-        field: parsed.data.field, reason: 'historical_or_optional_source_not_loaded' as const };
+    const reference = parsed.data;
+    return this.authority.withOrderRead(async (context, orderId) => {
+      if (orderId !== reference.resourceId || requestFingerprint(context.scope) !== requestFingerprint(reference.scope)) {
+        throw new ModelGatewayError('FORBIDDEN');
+      }
+      // The reference selects a closed fact source, never a URL/table/tool.
+      // Loading history or finance is independent of the displayed question.
+      const current = await this.facts.read(context, { history: reference.field === 'saved_basis', payments: reference.field === 'payment_records' });
+      if (current.orderId !== orderId || requestFingerprint(current.scope) !== requestFingerprint(reference.scope)) throw new ModelGatewayError('FORBIDDEN');
+      if (current.orderVersion !== reference.version) return { status: 'stale' as const,
+        field: reference.field, reason: 'order_version_changed_reread_material' as const };
+      const sources = { order: current.order, amounts: current.amounts, saved_basis: current.history,
+        payment_records: current.payments, rental_period: current.fulfillment };
+      const source = sources[reference.field];
+      return 'source' in source ? { status: 'available' as const, scope: current.scope, orderId,
+        field: reference.field, value: structuredClone(source), observedAt: current.observedAt,
+        freshness: 'current_observation_not_historical_payment_snapshot' as const,
+        reauthorization: 'current_order_authority_rechecked' as const }
+        : { status: 'missing' as const, scope: current.scope, orderId,
+          field: reference.field, reason: 'historical_or_optional_source_not_loaded' as const };
+    });
   }
 
   /** Re-read facts for a repeated question and compare only stable versions. */
