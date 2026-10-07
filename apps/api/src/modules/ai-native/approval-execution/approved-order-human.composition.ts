@@ -17,6 +17,10 @@ const referenceSchema = z.object({ contractVersion: z.literal(AI_PROPOSAL_DRAFT_
   proposalRevision: z.number().int().min(1).max(4294967294), reviewedPayloadHash: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
 const decisionSchema = referenceSchema.extend({ decision: z.enum(['approve', 'reject']) }).strict() satisfies z.ZodType<AiProposalDecisionRequestDraft>;
 type Reference = Omit<AiProposalDecisionRequestDraft, 'decision'>;
+const money = z.number().finite().nonnegative();
+const quoteReviewSchema = z.object({ currency: z.string().min(1).max(16), expiresAt: z.string().datetime({ offset: true }),
+  rentalAmount: money, discountAmount: money, couponAmount: money, serviceAmount: money, fulfillmentAmount: money,
+  depositAmount: money, preAuthAmount: money, payableAmount: money, receivableAmount: money });
 const conflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 export class AiApprovalDecisionResultUnknownError extends Error {
@@ -76,7 +80,9 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
       same(first, await load(taskId, reference));
       const proposal: AiProposalRecordDraft = { payload: first.payload, payloadHash: reference.reviewedPayloadHash,
         status: first.head.status.toLowerCase() as AiProposalRecordDraft['status'] };
-      return { proposal, facts: first.facts, generatedText: null };
+      const { currency, expiresAt: quoteExpiresAt, ...quoteAmounts } = quoteReviewSchema.parse(first.facts.preview.payload);
+      return { proposal, facts: first.facts, deterministic: { target: first.payload.actions[0].target,
+        quoteAmounts, currency, quoteExpiresAt, decisionExpiresAt: first.payload.expiresAt }, generatedText: null };
     });
   };
   const readReceipt = async (taskId: string, value: AiProposalDecisionRequestDraft) => {
