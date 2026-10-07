@@ -589,6 +589,43 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     return result;
   }
 
+  /**
+   * Internal, knowledge-only bounded read. This never returns a URL and
+   * requires the existing FileAsset business binding before opening storage.
+   * local_mock has no durable byte source and therefore fails closed.
+   */
+  async readKnowledgeBytes(tenantId: string, fileAssetId: string, owner: FileBusinessOwner, maxBytes: number) {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_FILE_BYTES) throw new BadRequestException("知识正文读取上限无效");
+    const asset = await this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, status: "active" } });
+    if (!asset || !owner || !this.matchesOwner(asset, owner)) throw new NotFoundException("知识附件不存在或不属于当前文档");
+    await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
+    if (asset.storageProvider === "local_mock") throw new ServiceUnavailableException("知识附件没有可读取的持久文件存储");
+    const config = await this.integrations.runtimeConfig("file", tenantId, asset.storageProvider as never, { requireLiveTest: false });
+    if (!config) throw new ServiceUnavailableException("文件平台已停用，无法读取知识附件");
+    const signed = this.presign(config, "GET", asset.storageKey, asset.mimeType, new Date(Date.now() + 60 * 1000));
+    const response = await fetchWithTimeout(signed.url, { method: "GET", headers: signed.headers });
+    if (!response.ok || !response.body) throw new ServiceUnavailableException("知识附件读取失败");
+    const expectedType = asset.mimeType.split(";", 1)[0].trim().toLowerCase();
+    const actualType = String(response.headers.get("content-type") ?? "").split(";", 1)[0].trim().toLowerCase();
+    if (!actualType || actualType !== expectedType) { await response.body.cancel().catch(() => undefined); throw new BadRequestException("知识附件媒体类型不匹配"); }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = []; let total = 0;
+    try {
+      for (;;) {
+        const next = await reader.read();
+        if (next.done) break;
+        const chunk = next.value instanceof Uint8Array ? next.value : new Uint8Array(next.value);
+        total += chunk.byteLength;
+        if (total > maxBytes) throw new BadRequestException("知识正文超过有界读取上限");
+        chunks.push(chunk);
+      }
+      return { mediaType: expectedType, bytes: Buffer.concat(chunks.map(chunk => Buffer.from(chunk))) };
+    } finally {
+      await reader.cancel().catch(() => undefined);
+      reader.releaseLock();
+    }
+  }
+
   private matchesOwner(asset: { businessType: string; businessId: string | null; uploadScene: string }, owner: FileBusinessOwner) {
     return (!owner.businessType || asset.businessType === owner.businessType)
       && (!owner.businessId || asset.businessId === owner.businessId)
