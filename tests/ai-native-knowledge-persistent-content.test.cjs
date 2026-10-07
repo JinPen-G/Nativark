@@ -101,7 +101,11 @@ test('search returns references only, respects finite limits and does not promot
 async function persistedSetup() {
   const s = await setup();
   const deps = { db: s.db, authorization: s.authorization, memoryAuthorization: s.authorization,
-    files: s.docs.ports.files, clock: { now },
+    files: { ...s.docs.ports.files, assertBound: async (current, binding) => {
+      // Synthetic lifecycle fixture only, not a production FileStorage source.
+      assert.deepEqual(current.scope, scope);
+      assert.deepEqual(binding, { attachmentId: 'attachment-b', documentId: 'doc-b', workspaceId: scope.workspaceId });
+    } }, clock: { now },
     selection: { select: async () => ({ grant: await s.authorization.authorize(context, { action: 'search', scope }), documents: [{ documentId: 'doc-b', documentVersion: 'v1', aclRevision: 1 }] }) },
     gateway: { invoke: async () => { throw new Error('must not dispatch'); }, stream: async function* () { throw new Error('must not dispatch'); } },
     cache: { maxEntries: 10, maxBytes: 20000, ttlMs: 1000 }, policy: { sceneCode: 'knowledge', maxOutputTokens: 100 } };
