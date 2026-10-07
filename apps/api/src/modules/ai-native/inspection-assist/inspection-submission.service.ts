@@ -28,9 +28,10 @@ export class InspectionSubmissionService {
     const input = parseInspectionInput(operation.extend({ actionId: inspectionId, handoverSignatureFileAssetId: inspectionId.optional() }).strict(), value);
     const target = targetOf(input);
     return this.authority.withAction(target, 'submit', async scope => {
-      const fingerprint = requestFingerprint({ kind: 'inspection.prepare', scope, input });
+      const fingerprint = requestFingerprint({ kind: allowReviewOnly ? 'inspection.prepareReview' : 'inspection.prepare', scope, input });
+      const mode = allowReviewOnly ? 'manual_review_only' as const : 'original_single' as const;
       const receipt = await this.repository.receipt(scope, input.operationId, fingerprint);
-      if (receipt.status === 'found') return { ...receipt.result, businessValidation: 'required_at_original_inspection_entry' as const };
+      if (receipt.status === 'found') return { ...receipt.result, mode, businessValidation: 'required_at_original_inspection_entry' as const };
       if (receipt.status === 'unavailable') throw new InspectionAssistError('STORAGE_UNAVAILABLE');
       const row = await this.row(scope, input.draftId, target);
       if (!['draft_saved', 'prepared'].includes(row.status) || row.expiresAt.getTime() <= Date.now()) throw new InspectionAssistError('RECONCILIATION_REQUIRED');
@@ -38,19 +39,19 @@ export class InspectionSubmissionService {
       const detail = await this.drafts.read({ ...target, draftId: row.id });
       const binding = await this.templates.read(target);
       if (binding.bindingFingerprint !== row.bindingFingerprint) throw new InspectionAssistError('BINDING_CHANGED');
-      await this.singleAllocation(scope, target);
+      if (!allowReviewOnly) await this.singleAllocation(scope, target);
       const values = Object.fromEntries(Object.entries(detail.state.fields).map(([code, field]) => [code, field.value]));
       const materials = await this.manual.prepare({ ...target, bindingFingerprint: row.bindingFingerprint, results: values });
       if (materials.missingFields.length || materials.unavailableEvidenceFields.length) throw new InspectionAssistError('INVALID_INPUT');
       const evidenceHash = detail.state.evidence.length ? await this.evidence.fingerprint(target, detail.state.evidence) : requestFingerprint([]);
       if (evidenceHash !== row.evidenceFingerprint) throw new InspectionAssistError('BINDING_CHANGED');
-      if (scope.audience === 'staff' && !input.handoverSignatureFileAssetId) throw new InspectionAssistError('INVALID_INPUT');
+      if (!allowReviewOnly && scope.audience === 'staff' && !input.handoverSignatureFileAssetId) throw new InspectionAssistError('INVALID_INPUT');
       const body: AiInspectionSubmissionMaterial['body'] = { templateId: target.templateId,
         results: Object.fromEntries(Object.entries(materials.results).map(([code, value]) => [code,
           binding.template.fields.find(field => field.code === code)?.type === 'photo' ? [String(value)] : value])),
         attachments: [...new Set([...detail.state.evidence.map(ref => ref.attachmentId), ...(input.handoverSignatureFileAssetId ? [input.handoverSignatureFileAssetId] : [])])],
         ...(input.handoverSignatureFileAssetId ? { handoverSignatureFileAssetId: input.handoverSignatureFileAssetId } : {}) };
-      const material: AiInspectionSubmissionMaterial = { actionId: input.actionId,
+      const material: AiInspectionSubmissionMaterial = { mode, actionId: input.actionId,
         requestHash: requestFingerprint({ orderId: target.orderId, ...body, returnItems: [], exceptions: [] }), body };
       const state = { ...detail.state, reviewRequired: false, submission: material };
       const after = await this.templates.read(target);
@@ -59,7 +60,7 @@ export class InspectionSubmissionService {
         this.sameScope(scope, current);
         const result = await this.repository.change(scope, row.id, { operationId: input.operationId, fingerprint, expectedRevision: row.revision },
           row.bindingFingerprint, { state: JSON.parse(JSON.stringify(state)), status: 'prepared', submissionActionId: input.actionId });
-        return { ...result, businessValidation: 'required_at_original_inspection_entry' as const };
+        return { ...result, mode, businessValidation: 'required_at_original_inspection_entry' as const };
       });
     });
   }
@@ -78,6 +79,9 @@ export class InspectionSubmissionService {
       const detail = await this.drafts.read({ ...target, draftId: row.id });
       if (detail.state.reviewRequired) throw new InspectionAssistError('BINDING_CHANGED');
       const material = parseInspectionInput(inspectionSubmissionMaterialSchema, detail.state.submission);
+      // Per-allocation materials are not an order-wide business command.
+      // They must be handled through the original human aggregate workflow.
+      if (material.mode === 'manual_review_only') throw new InspectionAssistError('CAPABILITY_UNSUPPORTED');
       if (material.actionId !== row.submissionActionId) throw new InspectionAssistError('BINDING_CHANGED');
       await this.singleAllocation(scope, target);
       const binding = await this.templates.read(target);
