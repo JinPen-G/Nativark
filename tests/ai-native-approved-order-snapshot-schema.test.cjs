@@ -28,10 +28,11 @@ test('snapshot migration only adds storage and never seeds approvals or historic
   assert.match(sql, /ON DELETE RESTRICT ON UPDATE RESTRICT/);
   assert.doesNotMatch(sql, /DROP TABLE|DROP COLUMN|DELETE FROM|INSERT INTO|UPDATE `|CASCADE/i);
 });
-test('snapshot migration matches the validated schema delta from fixed 570b3faf', () => {
+test('snapshot migration matches the validated schema delta from fixed 570b3faf to its introducing be086a28', () => {
   model();
-  const before = execFileSync('git', ['show', '570b3faf:apps/api/prisma/schema.prisma'], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 });
-  const result = offlinePrismaSchema(fs.readFileSync(path.join(root, 'apps/api/prisma/schema.prisma'), 'utf8'), before);
+  const show = rev => execFileSync('git', ['show', `${rev}:apps/api/prisma/schema.prisma`], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 });
+  // Later migrations add unrelated tables; pin both ends so this checks only the snapshot delta.
+  const result = offlinePrismaSchema(show('be086a28'), show('570b3faf'));
   assert.equal(result.violations, '');
   const normalize = sql => sql.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
   assert.equal(normalize(fs.readFileSync(migration, 'utf8')), normalize(result.diff));
