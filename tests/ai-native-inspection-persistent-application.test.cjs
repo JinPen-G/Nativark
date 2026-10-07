@@ -50,3 +50,19 @@ test('resource and frozen-template changes keep history marked for review',async
     edits:[{fieldCode:'mileage',decision:'manual',value:3}]}),{code:'BINDING_CHANGED'});
   assert.equal(f.state.drafts.values().next().value.assetId,'asset-a');
 });
+
+test('draft list bounds its database query to the exact authorized inspection target',async()=>{
+  const f=fixture(),created=await create(f);
+  const own=f.state.drafts.get(created.result.draftId);
+  f.state.drafts.set('other-allocation',{...structuredClone(own),id:'other-allocation',allocationId:'allocation-other'});
+  f.state.drafts.set('other-stage',{...structuredClone(own),id:'other-stage',stage:'pickup'});
+  f.state.drafts.set('other-template',{...structuredClone(own),id:'other-template',templateId:'template-other'});
+  const original=f.db.aiInspectionDraft.findMany;
+  let query;
+  f.db.aiInspectionDraft.findMany=async args=>{query=structuredClone(args);return original(args);};
+  const rows=await f.services.drafts.list({...target,limit:10});
+  assert.deepEqual(rows.map(row=>row.id),[created.result.draftId]);
+  for(const [key,value] of Object.entries(target))assert.equal(query.where[key],value);
+  assert.equal(query.take,10);
+  assert.equal(query.select.state,undefined);
+});
