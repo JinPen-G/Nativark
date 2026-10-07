@@ -13,7 +13,9 @@ const inputSchema = inspectionTargetSchema.extend({ templateId: inspectionId,
 /** Human-entered materials only. No save, model invocation or business submission.
  * Missing field/attachment evidence stays explicit; no local approval credential. */
 export class InspectionManualPreparationService {
-  constructor(private readonly templates: InspectionTemplateService) {}
+  constructor(private readonly templates: InspectionTemplateService, private readonly evidence?: {
+    verifyPhoto(binding: Awaited<ReturnType<InspectionTemplateService['read']>>, attachmentId: string): Promise<boolean>;
+  }) {}
 
   async prepare(value: unknown) {
     const input = parseInspectionInput(inputSchema, value);
@@ -30,9 +32,13 @@ export class InspectionManualPreparationService {
         if (definition.required) missing.push(definition.code);
         continue;
       }
-      // A file ID is not evidence. Until the authoritative attachment binding
-      // producer is available, never pass photo fields as verified facts.
-      if (definition.type === 'photo') { unavailable.push(definition.code); continue; }
+      if (definition.type === 'photo') {
+        if (!this.evidence) { unavailable.push(definition.code); continue; }
+        if (typeof value !== 'string' || !inspectionId.safeParse(value).success
+          || !await this.evidence.verifyPhoto(before, value)) throw new InspectionAssistError('INVALID_INPUT');
+        results[definition.code] = value;
+        continue;
+      }
       results[definition.code] = this.validate(definition, value);
     }
     const after = await this.templates.read(target);

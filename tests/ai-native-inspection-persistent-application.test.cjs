@@ -1,0 +1,52 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict');
+const { fixture,target }=require('./fixtures/ai-native/inspection-persistent.cjs');
+require('../apps/api/src/modules/files/staff-uploads.controller');
+async function create(f, results={mileage:0}, evidence=[]) {
+  const binding=await f.services.templates.read(target);
+  const input={...target,operationId:'create-a',bindingFingerprint:binding.bindingFingerprint,results,evidence};
+  return {input,result:await f.services.drafts.create(input)};
+}
+test('manual draft uses actual Auth Guard and Prisma repository, without model',async()=>{
+  const f=fixture(),created=await create(f);
+  assert.equal(created.result.status,'draft_saved');assert.equal(f.state.drafts.size,1);
+  assert.deepEqual(await f.services.drafts.create(created.input),created.result);
+  const detail=await f.services.drafts.read({...target,draftId:created.result.draftId});
+  assert.equal(detail.state.fields.mileage.value,0);assert.equal(detail.inspectionId,null);
+  await f.services.drafts.edit({...target,draftId:detail.draftId,expectedRevision:1,operationId:'edit-a',bindingFingerprint:detail.bindingFingerprint,
+    edits:[{fieldCode:'mileage',decision:'manual',value:12}]});
+  assert.equal((await f.services.drafts.read({...target,draftId:detail.draftId})).state.fields.mileage.value,12);
+  await assert.rejects(f.services.drafts.edit({...target,draftId:detail.draftId,expectedRevision:1,operationId:'edit-b',bindingFingerprint:detail.bindingFingerprint,
+    edits:[{fieldCode:'mileage',decision:'manual',value:13}]}),{code:'REVISION_CONFLICT'});
+});
+test('GET permission never authorizes writes and late logout withholds draft body',async()=>{
+  const f=fixture(),created=await create(f);f.state.user.permissions=['rental-os:order:view'];
+  await assert.rejects(f.services.drafts.create({...created.input,operationId:'readonly'}),{code:'ACCESS_DENIED'});
+  assert.equal((await f.services.drafts.read({...target,draftId:created.result.draftId})).revision,1);
+  f.state.onDbRead=name=>{if(name==='drafts')f.state.active=false;};
+  await assert.rejects(f.services.drafts.read({...target,draftId:created.result.draftId}),{code:'ACCESS_DENIED'});
+});
+test('bound completed upload is manual evidence but is not model input proof',async()=>{
+  const f=fixture();const ref=await f.services.evidence.bind({...target,attachmentId:'file-a'});
+  assert.equal(ref.attachmentRevision,1);assert.deepEqual(await f.services.evidence.bind({...target,attachmentId:'file-a'}),ref);
+  const created=await create(f,{mileage:42,photo:'file-a'},[ref]);
+  assert.equal((await f.services.drafts.read({...target,draftId:created.result.draftId})).state.fields.photo.value,'file-a');
+  const binding=await f.services.templates.read(target);
+  await assert.rejects(f.services.evidence.verify(binding,{...ref,kind:'image',region:{x:0,y:0,width:1,height:1}}),{code:'STORAGE_UNAVAILABLE'});
+  f.state.assets.get('file-a').updatedAt=new Date('2026-10-07T01:00:00Z');
+  assert.equal((await f.services.drafts.read({...target,draftId:created.result.draftId})).state.reviewRequired,true);
+});
+test('legacy unbound upload, foreign asset and client scope cannot create trusted drafts',async()=>{
+  const f=fixture();await assert.rejects(create(f,{mileage:42,photo:'file-a'},[{attachmentId:'file-a',attachmentRevision:1}]),{code:'INVALID_INPUT'});
+  f.state.assets.get('file-a').uploadedBy='foreign';
+  await assert.rejects(f.services.evidence.bind({...target,attachmentId:'file-a'}),{code:'STORAGE_UNAVAILABLE'});
+  const binding=await f.services.templates.read(target);
+  await assert.rejects(f.services.drafts.create({...target,operationId:'bad',bindingFingerprint:binding.bindingFingerprint,results:{},evidence:[],ownerId:'foreign'}),{code:'INVALID_INPUT'});
+});
+test('resource and frozen-template changes keep history marked for review',async()=>{
+  const f=fixture(),created=await create(f);f.order.allocations[0].assetId='asset-new';
+  assert.equal((await f.services.drafts.read({...target,draftId:created.result.draftId})).state.reviewRequired,true);
+  await assert.rejects(f.services.drafts.edit({...target,draftId:created.result.draftId,expectedRevision:1,operationId:'changed',bindingFingerprint:created.input.bindingFingerprint,
+    edits:[{fieldCode:'mileage',decision:'manual',value:3}]}),{code:'BINDING_CHANGED'});
+  assert.equal(f.state.drafts.values().next().value.assetId,'asset-a');
+});
