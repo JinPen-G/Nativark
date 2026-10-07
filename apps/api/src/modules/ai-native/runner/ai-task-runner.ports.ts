@@ -20,6 +20,10 @@ export interface AiTaskRunnerLease {
   expiresAt: string;
 }
 
+export interface AiTaskRunnerRecoveryLease extends AiTaskRunnerLease {
+  purpose: 'recovery_only';
+}
+
 export interface AiTaskRunnerTaskMetadata {
   taskId: string;
   status: AiTaskStatusDraft;
@@ -88,6 +92,7 @@ export interface AiTaskRunnerLeasePort {
   readMetadata(taskId: string): Promise<AiTaskRunnerTaskMetadata>;
   claimRun(input: AiTaskRunnerClaimInput): Promise<AiTaskRunnerLease>;
   claimRecoveryRun(input: AiTaskRunnerClaimInput): Promise<AiTaskRunnerLease & { purpose: "recovery_only" }>;
+  assertRecoveryRun?(lease: AiTaskRunnerRecoveryLease): Promise<void>;
   releaseRun(input: Omit<AiTaskRunnerClaimInput, "leaseMs" | "expectedTaskRevision" | "expectedRunRevision" | "expectedFencingToken"> & {
     expectedTaskRevision: number;
     expectedRunRevision: number;

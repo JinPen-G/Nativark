@@ -15,7 +15,7 @@ export interface AiTaskRunnerRepositoryCommandFactory {
 }
 
 export interface AiTaskRunnerRepositoryAdapters {
-  tasks: Pick<AiTaskRepository, "readMetadata" | "claimRun" | "claimRecoveryRun" | "releaseRun">;
+  tasks: Pick<AiTaskRepository, "readMetadata" | "claimRun" | "claimRecoveryRun" | "releaseRun"> & Partial<Pick<AiTaskRepository, 'assertRecoveryRun'>>;
   registrations: Pick<AiStepRegistrationRepository, "register">;
   replays?: Pick<AiStepRegistrationRepository, "readReplay">;
   transitions: Pick<AiStepTransitionRepository, "transition">;
@@ -85,6 +85,7 @@ export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerReposito
       },
       claimRun: input => adapters.tasks.claimRun(input),
       claimRecoveryRun: input => adapters.tasks.claimRecoveryRun(input),
+      ...(typeof adapters.tasks.assertRecoveryRun === 'function' ? { assertRecoveryRun: (lease: Parameters<AiTaskRepository['assertRecoveryRun']>[0]) => adapters.tasks.assertRecoveryRun!(lease) } : {}),
       releaseRun: input => adapters.tasks.releaseRun(input)
     },
     steps

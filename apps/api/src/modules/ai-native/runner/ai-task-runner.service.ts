@@ -3,7 +3,8 @@ import {
   type AiTaskRunnerInput, type AiTaskRunnerLease, type AiTaskRunnerLimits,
   type AiTaskRunnerOutcome, type AiTaskRunnerPlan, type AiTaskRunnerStepPlan,
   type AiTaskRunnerStepCommit, type AiTaskRunnerStepRef, type AiTaskRunnerTaskOutcome,
-  type AiTaskRunnerOutcomePort, type AiTaskRunnerResourceTicket
+  type AiTaskRunnerOutcomePort, type AiTaskRunnerResourceTicket,
+  type AiTaskRunnerRecoveryLease, type AiTaskRunnerTaskMetadata
 } from "./ai-task-runner.ports";
 
 export class AiTaskRunnerError extends Error {
@@ -32,7 +33,7 @@ function validateLimits(value: AiTaskRunnerLimits): AiTaskRunnerLimits {
   return value;
 }
 
-function validatePlan(plan: AiTaskRunnerPlan, input: AiTaskRunnerInput): AiTaskRunnerPlan {
+function validatePlan(plan: AiTaskRunnerPlan, input: Pick<AiTaskRunnerInput, 'taskId' | 'runId'>): AiTaskRunnerPlan {
   if (!plan || plan.taskId !== input.taskId || plan.runId !== input.runId || !Array.isArray(plan.steps)) {
     throw new AiTaskRunnerError("AI_RESOURCE_UNAVAILABLE", "authorized task plan is unavailable");
   }
@@ -86,7 +87,22 @@ export class AiTaskRunner {
     if (initial.taskId !== input.taskId) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
     if (signal?.aborted) return { status: 'unavailable', completedSteps: 0, cleanupFailed: 0 };
     if (initial.status === 'waiting_input') return { status: 'paused', completedSteps: 0, cleanupFailed: 0 };
-    let lease = structuredClone(recovery ? await this.deps.leases.claimRecoveryRun(claimInput) : await this.deps.leases.claimRun(claimInput));
+    const lease = structuredClone(recovery ? await this.deps.leases.claimRecoveryRun(claimInput) : await this.deps.leases.claimRun(claimInput));
+    return this.runHeld(input, recovery, initial, lease, signal);
+  }
+
+  async recover(lease: AiTaskRunnerRecoveryLease, signal?: AbortSignal): Promise<AiTaskRunnerOutcome> {
+    if (!this.deps.resources || typeof this.deps.leases.assertRecoveryRun !== 'function' || lease?.purpose !== 'recovery_only') {
+      throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
+    }
+    lease = structuredClone(lease);
+    const initial = structuredClone(await this.deps.leases.readMetadata(lease.taskId));
+    if (initial.taskId !== lease.taskId) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
+    return this.runHeld({ taskId: lease.taskId, runId: lease.runId }, true, initial, lease, signal, true);
+  }
+
+  private async runHeld(input: Pick<AiTaskRunnerInput, 'taskId' | 'runId'>, recovery: boolean,
+    initial: AiTaskRunnerTaskMetadata, lease: AiTaskRunnerLease, signal?: AbortSignal, adoptedRecovery = false): Promise<AiTaskRunnerOutcome> {
     let taskRevision = initial.revision;
     let completedSteps = 0, cleanupFailed = 0, calls = 0, outputBytes = 0;
     let activeResourceTicket: AiTaskRunnerResourceTicket | undefined;
@@ -123,6 +139,8 @@ export class AiTaskRunner {
     };
     try {
       if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
+      if (adoptedRecovery) await this.deps.leases.assertRecoveryRun!({ ...structuredClone(lease), purpose: 'recovery_only' });
+      if (initial.status === 'waiting_input') return { status: 'paused', completedSteps, cleanupFailed };
       if (this.deps.resources) await this.callBounded(() => this.deps.resources!.open(structuredClone(lease), recovery), 5000, 'resource_open');
       if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
       const plan = validatePlan(structuredClone(await this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), recovery)), input);
