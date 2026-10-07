@@ -1,0 +1,69 @@
+import { z } from 'zod';
+import type { PaymentRuntimeService } from '../../integrations/payment.runtime.service';
+import type { RentalCoreService } from '../../rental-core/rental-core.service';
+import type { AiOrderRouteContextAuthority } from '../order-route-context.authority';
+import type { AiBusinessReadAuthority } from '../business-read-route.authority';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import type { AiExecutionContext } from '@rental-os/shared';
+import { ModelGatewayError } from '../model-gateway.ports';
+
+const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+const amount = z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const currency = z.string().regex(/^[A-Z]{3}$/u);
+const time = z.string().max(40).datetime({ offset: true });
+// Minimal local projections of existing PaymentRuntimeService responses, not
+// new public DTOs. Raw message, checkoutURL, JSAPI, provider IDs never escape.
+const intentSchema = z.object({ intentId: id, instrument: z.enum(['rental', 'deposit', 'preauthorization']),
+  amount, currency, status: z.enum(['pending', 'paid', 'failed', 'funding_failed', 'closed']), expiresAt: time, paidAt: time.optional() });
+const refundSchema = z.object({ refundId: id, paymentIntentId: id, orderId: id, amount, currency,
+  status: z.enum(['pending', 'accepted', 'funding_pending', 'succeeded', 'failed', 'closed']),
+  acceptedAt: time.optional(), succeededAt: time.optional(), fundedAt: time.optional(), createdAt: time, updatedAt: time });
+const binding = (context: AiExecutionContext) => {
+  const { requestId: _, authorizedAt: __, ...value } = context;
+  return requestFingerprint(value);
+};
+
+/** Local reads only: never refresh providers, create payments or issue refunds.
+ * The original order AND finance route Guards are both required. */
+export class AiOrderPaymentFactsService {
+  constructor(private readonly payments: Pick<PaymentRuntimeService, 'listPaymentIntents' | 'listPaymentRefunds'>,
+    private readonly core: Pick<RentalCoreService, 'getOrder'>,
+    private readonly orderAuthority: Pick<AiOrderRouteContextAuthority, 'withOrderRead'>,
+    private readonly routes: AiBusinessReadAuthority, private readonly clock: () => Date = () => new Date()) {
+    for (const [port, name] of [[payments, 'listPaymentIntents'], [payments, 'listPaymentRefunds'], [core, 'getOrder'],
+      [orderAuthority, 'withOrderRead'], [routes, 'withRead']] as const) {
+      if (!port || typeof (port as unknown as Record<string, unknown>)[name] !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+    }
+  }
+  async read() {
+    return this.orderAuthority.withOrderRead(async (owner, orderId) => {
+      if (owner.scope.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
+      const scope = structuredClone(owner.scope), expected = binding(owner);
+      const order = z.object({ id, tenantId: id, currency }).parse(await this.core.getOrder(scope.tenantId, orderId));
+      if (order.id !== orderId || order.tenantId !== scope.tenantId) throw new ModelGatewayError('INVALID_RESPONSE');
+      return this.routes.withRead('payment_intents', { orderId }, async context => {
+        if (binding(context) !== expected) throw new ModelGatewayError('FORBIDDEN');
+        const intents = z.array(intentSchema).max(20).parse(await this.payments.listPaymentIntents(scope.tenantId, scope.workspaceId, orderId));
+        if (new Set(intents.map(row => row.intentId)).size !== intents.length || intents.some(row => row.currency !== order.currency)) throw new ModelGatewayError('INVALID_RESPONSE');
+        const refunds: z.infer<typeof refundSchema>[] = [];
+        for (const intent of intents) {
+          const rows = await this.routes.withRead('payment_refunds', { orderId, intentId: intent.intentId }, async current => {
+            if (binding(current) !== expected) throw new ModelGatewayError('FORBIDDEN');
+            return z.array(refundSchema).max(50).parse(await this.payments.listPaymentRefunds(scope.tenantId, scope.workspaceId, orderId, intent.intentId));
+          });
+          if (rows.some(row => row.orderId !== orderId || row.paymentIntentId !== intent.intentId || row.currency !== order.currency)) throw new ModelGatewayError('INVALID_RESPONSE');
+          refunds.push(...rows);
+          if (refunds.length > 100 || new Set(refunds.map(row => row.refundId)).size !== refunds.length) throw new ModelGatewayError('INVALID_RESPONSE');
+        }
+        const now = this.clock();
+        if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw new ModelGatewayError('CONFIG_INVALID');
+        return { requestId: owner.requestId, audience: owner.audience, scope, orderId, observedAt: now.toISOString(),
+          source: 'persisted_payment_runtime' as const, status: 'available' as const,
+          // `paid` is the recorded payment state, not an inferred order state.
+          // Refund accepted/funding_pending/succeeded remain distinct.
+          intents, refunds, fundingLedger: 'not_loaded' as const,
+          totals: 'not_computed' as const, freshness: 'local_records_not_provider_refresh' as const };
+      });
+    });
+  }
+}

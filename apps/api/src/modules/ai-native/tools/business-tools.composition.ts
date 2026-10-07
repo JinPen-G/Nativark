@@ -14,6 +14,8 @@ import { AiOpeningReadFactsService, AiRiskReadFactsService } from './diagnostic-
 import { AiGuardedQuoteCoreContextSource, composeAiGuardedQuoteTools } from './quote-route.composition';
 import { AiOrderSavedQuoteSource } from './order-saved-quote.source';
 import { ModelGatewayError } from '../model-gateway.ports';
+import type { PaymentRuntimeService } from '../../integrations/payment.runtime.service';
+import { AiOrderPaymentFactsService } from './order-payment-facts.service';
 
 /** Server composition only. Guard and current session come from the application
  * host, never model arguments. No HTTP route, dispatch, entitlement or approval
@@ -27,6 +29,7 @@ export function composeAiAuthorizedBusinessTools(input: {
   memberships: AiMembershipCandidateReadPort;
   business: Pick<RentalBusinessService, 'createQuote' | 'getQuote' | 'tenantReadiness'>;
   reports: Pick<RentalWorkspaceReportRepository, 'getOperationReport'>;
+  payments?: Pick<PaymentRuntimeService, 'listPaymentIntents' | 'listPaymentRefunds'>;
   clock?: () => Date;
 }) {
   for (const [port, method] of [[input?.business, 'getQuote'], [input?.reports, 'getOperationReport']] as const) {
@@ -48,6 +51,11 @@ export function composeAiAuthorizedBusinessTools(input: {
     availability: reads.availability,
     membershipCandidates: reads.membershipCandidates,
     order,
+    orderPayments: (serverOrderId: string) => {
+      if (!input.payments) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+      return new AiOrderPaymentFactsService(input.payments, input.core,
+        new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock), routes, input.clock);
+    },
     opening: new AiOpeningReadFactsService(input.business, context, diagnostics, input.clock),
     risks: new AiRiskReadFactsService(input.reports, {
       category: async scope => (await context.current(scope)).category.code,
