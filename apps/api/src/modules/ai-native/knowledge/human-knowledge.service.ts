@@ -162,7 +162,9 @@ export class HumanKnowledgeService {
         items.push({ version: row.version, contentHash: row.contentHash, status: row.status, chunkCount: row.chunks.length });
       }
       return { documentId, currentVersion: head.document.documentVersion, items,
-        truncated: items.length === limit, body: 'unavailable' as const,
+        // The repository probes limit + 1 and rejects an overflowing window;
+        // a successful response therefore contains the complete bounded set.
+        truncated: false as const, body: 'unavailable' as const,
         semantics: 'bounded_authorized_version_metadata_only' as const };
     });
   }
