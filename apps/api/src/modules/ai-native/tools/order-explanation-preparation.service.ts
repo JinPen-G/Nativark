@@ -107,11 +107,14 @@ export class AiOrderExplanationPreparationService {
       ['order.status', { value: facts.order.value.status, sourceId: current.payload.orderId }],
       ['order.updatedAt', { value: facts.order.value.updatedAt, sourceId: current.payload.orderId }]
     ]);
-    if (facts.amounts) {
+    // Optional/finance-denied sources are explicit coverage objects without a
+    // value. They must remain unavailable, not crash validation or become a
+    // fabricated zero.
+    if (facts.amounts?.coverage === 'partial' && 'value' in facts.amounts) {
       for (const [field, value] of Object.entries(facts.amounts.value)) allowed.set(`amounts.${field}`, { value, sourceId: current.payload.orderId });
       allowed.set('amounts.currency', { value: facts.amounts.currency, sourceId: current.payload.orderId });
     }
-    if (facts.payments?.value) {
+    if (facts.payments?.coverage === 'partial' && 'value' in facts.payments) {
       for (const row of facts.payments.value.intents) {
         allowed.set(`payments.${row.intentId}.status`, { value: row.status, sourceId: row.intentId });
         allowed.set(`payments.${row.intentId}.amount`, { value: row.amount, sourceId: row.intentId });
