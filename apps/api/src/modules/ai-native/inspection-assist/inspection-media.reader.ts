@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { ReadableStreamReadResult } from 'node:stream/web';
 import { InspectionAssistError } from './inspection-assist.validation';
 
 export const INSPECTION_OBJECT_READER = Symbol('INSPECTION_OBJECT_READER');

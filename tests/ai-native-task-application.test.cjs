@@ -14,6 +14,28 @@ async function make(status = 'QUEUED') {
 }
 
 // Production authorization/application/runner/repositories; storage, initial plan/input and tool responses are synthetic.
+test('server held preparation publishes before effects under the one acknowledged lease', async () => {
+  const { h, root } = await make(), plans = h.clone(h.state.aiTaskRunPlan), originalFence = h.state.aiRun[0].fencingToken;
+  h.state.aiTaskRunPlan = []; let calls = 0;
+  const app = root.createApplication(host, async ({ lease, taskRevision, signal }) => {
+    calls++; assert.equal(h.state.aiTask[0].status, 'RUNNING');
+    assert.equal(taskRevision, h.state.aiTask[0].revision);
+    assert.equal(lease.holderId, host.holderId); assert.equal(lease.fencingToken, originalFence.add(1).toFixed(0));
+    assert.equal(signal.aborted, false); assert.deepEqual(h.executions, []);
+    h.state.aiTaskRunPlan = h.clone(plans); // Synthetic plan producer; actual application/runner and lease CAS.
+  });
+  const result = await app.start(query);
+  assert.equal(result.outcome.status, 'succeeded'); assert.equal(calls, 1);
+  assert.equal(h.state.aiRun[0].fencingToken.toFixed(0), originalFence.add(1).toFixed(0));
+});
+
+test('failed held preparation cannot dispatch an effect and releases its lease', async () => {
+  const { h, root } = await make(); h.state.aiTaskRunPlan = [];
+  const app = root.createApplication(host, async () => { throw Error('producer unavailable'); });
+  await assert.rejects(app.start(query));
+  assert.deepEqual(h.executions, []); assert.equal(h.state.aiRun[0].leaseOwnerId, null);
+});
+
 for (const status of ['QUEUED', 'RUNNING']) test(`application starts an existing ${status} task from stored revisions and its server-bound holder`, async () => {
   const { h, root, app } = await make(status), plan = h.clone(h.state.aiTaskRunPlan), originalFence = h.state.aiRun[0].fencingToken;
   const result = await app.start(query);

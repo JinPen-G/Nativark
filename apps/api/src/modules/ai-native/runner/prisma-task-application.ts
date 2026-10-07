@@ -7,7 +7,7 @@ import type { AiTaskRecoverySnapshotSource } from './task-recovery-snapshot.port
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.repository';
 import { aiTaskRunPlanSchema } from './prisma-task-run-evidence.repository';
-import type { AiTaskRunner, AiTaskRunnerError } from './ai-task-runner.service';
+import type { AiTaskRunner, AiTaskRunnerError, AiTaskHeldPreparation } from './ai-task-runner.service';
 import type { AiTaskRunnerOutcome } from './ai-task-runner.ports';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
@@ -28,7 +28,8 @@ export type AiTaskApplicationResumeResult = {
 type Dependencies = {
   db: Pick<PrismaClient, '$transaction'>;
   tasks: Pick<AiTaskRepository, 'resolveAccess'>;
-  runner: Pick<AiTaskRunner, 'run' | 'recover'>;
+  runner: Pick<AiTaskRunner, 'run' | 'recover'> & Partial<Pick<AiTaskRunner, 'runPrepared'>>;
+  prepare?: AiTaskHeldPreparation;
   inputs: Pick<PrismaTaskInputRepository, 'submit' | 'readPending'>;
   recovery: AiTaskRecoverySnapshotSource;
   events: Pick<AiTaskEventRepository, 'readPage'>;
@@ -37,6 +38,7 @@ type Dependencies = {
 
 export class PrismaTaskApplication {
   private readonly host: AiTaskApplicationHost;
+  private readonly prepare?: AiTaskHeldPreparation;
 
   constructor(private readonly deps: Dependencies) {
     const host = hostSchema.safeParse(deps?.host);
@@ -45,6 +47,8 @@ export class PrismaTaskApplication {
       || typeof deps?.inputs?.submit !== 'function' || typeof deps?.inputs?.readPending !== 'function'
       || typeof deps?.recovery?.read !== 'function' || typeof deps?.events?.readPage !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     this.host = host.data;
+    if (deps.prepare !== undefined && (typeof deps.prepare !== 'function' || typeof deps.runner.runPrepared !== 'function')) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    this.prepare = deps.prepare;
   }
 
   inspect(value: unknown) { return this.deps.recovery.read(value); }
@@ -152,13 +156,15 @@ export class PrismaTaskApplication {
         if (run.leaseOwnerId !== null && run.leaseExpiresAt! > before.now) return { kind: 'not_started', reason: 'lease_held' } as const;
         const saved = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key },
           select: { scopeId: true, taskId: true, runId: true, planHash: true, payload: true } });
-        if (!saved) return { kind: 'not_started', reason: 'plan_unavailable' } as const;
+        if (!saved && !this.prepare) return { kind: 'not_started', reason: 'plan_unavailable' } as const;
+        if (saved) {
         const plan = aiTaskRunPlanSchema.parse(saved.payload);
         if (saved.scopeId !== key.scopeId || saved.taskId !== key.taskId || saved.runId !== key.runId
           || plan.taskId !== key.taskId || plan.runId !== key.runId || requestFingerprint(plan) !== saved.planHash) {
           throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
         }
         if (!plan.steps.length) return { kind: 'not_started', reason: 'plan_unavailable' } as const;
+        }
         const fencingToken = run.fencingToken.toFixed(0);
         if (!/^(0|[1-9][0-9]{0,19})$/u.test(fencingToken) || !run.fencingToken.equals(fencingToken)) {
           throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
@@ -175,6 +181,8 @@ export class PrismaTaskApplication {
     if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' };
     if (candidate.kind === 'not_started') return candidate;
     // The read is not a lease: the original runner still claims with current authorization and CAS.
-    return { kind: 'run_outcome', outcome: await this.deps.runner.run(candidate.claim, signal) };
+    return { kind: 'run_outcome', outcome: this.prepare
+      ? await this.deps.runner.runPrepared!(candidate.claim, this.prepare, signal)
+      : await this.deps.runner.run(candidate.claim, signal) };
   }
 }
