@@ -34,6 +34,12 @@ export class KnowledgeDocumentService {
     return true;
   }
 
+  private async assertAttachmentBound(context: AiExecutionContext, documentId: string, attachmentId: string) {
+    if (!this.ports.files.assertBound) return;
+    if (context.scope.kind !== 'workspace') throw new KnowledgeError('unavailable');
+    await this.ports.files.assertBound(context, { attachmentId, documentId, workspaceId: context.scope.workspaceId });
+  }
+
   async save(context: AiExecutionContext, action: KnowledgeAction, before: KnowledgeRecord, next: KnowledgeRecord, operationId: string, hash: string, newVersion = false): Promise<KnowledgeRecord> {
     const contextHash = fingerprint(context);
     const stableContext = structuredClone(context);
@@ -53,6 +59,10 @@ export class KnowledgeDocumentService {
   async create(context: AiExecutionContext, value: unknown): Promise<KnowledgeRecord> {
     const input = parse(draftInput, value);
     const grant = await authorize(this.ports.authorization, context, { action: 'create', scope: context.scope, attachmentId: input.attachmentId });
+    // The create entry itself must enforce the same business-file binding as
+    // prepareCreate. A caller may invoke this service directly, so the
+    // preparation check cannot be the only guard before persistence.
+    await this.assertAttachmentBound(context, input.documentId, input.attachmentId);
     const hash = operationFingerprint(context, ['create', input]);
     const existing = await this.ports.repository.read(context.scope, input.documentId);
     if (existing) {
@@ -77,6 +87,7 @@ export class KnowledgeDocumentService {
     if (before.parseOperationId) throw new KnowledgeCommitUnknownError();
     if (before.revision !== expectedRevision || before.document.publication === 'deleted' || before.document.documentVersion === input.documentVersion) throw new KnowledgeError('conflict');
     await authorize(this.ports.authorization, context, { action: 'revise', scope: context.scope, document: before.document, attachmentId: input.attachmentId });
+    await this.assertAttachmentBound(context, input.documentId, input.attachmentId);
     const { validUntil: oldExpiry, ...previous } = before.document;
     const next: KnowledgeRecord = { revision: before.revision + 1, document: { ...previous, documentVersion: input.documentVersion, attachmentId: input.attachmentId, title: input.title, validFrom: input.validFrom, ...(input.validUntil ? { validUntil: input.validUntil } : {}), publication: 'draft', parsing: 'pending', indexing: 'not_indexed' } };
     return this.save(context, 'revise', before, queueIndex(next, 'remove', `${input.operationId}:index`), input.operationId, hash, true);
