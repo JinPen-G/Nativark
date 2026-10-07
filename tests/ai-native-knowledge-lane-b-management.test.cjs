@@ -15,6 +15,7 @@ test('current-human facade drives persistent metadata/parse/revise/delete and bo
   const listed = await api.list({ limit: 10 });
   assert.deepEqual(listed.items.map(row => row.documentId), ['doc-1']);
   assert.equal(listed.items[0].attachmentId, undefined); assert.equal(listed.pagination, 'unavailable');
+  assert.deepEqual((await api.lookup({ documentId: 'doc-1', limit: 1 })).items.map(row => row.documentId), ['doc-1']);
   assert.equal((await api.operation('doc-1', 'parse-1')).receipt, 'recorded');
   await api.revise(3, h.draft({ documentVersion: 'v2', operationId: 'revise-1' }));
   assert.equal((await api.read('doc-1')).documentVersion, 'v2');

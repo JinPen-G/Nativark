@@ -275,4 +275,25 @@ export class HumanKnowledgeService {
         coverage: 'bounded_window' as const, pagination: 'unavailable' as const };
     });
   }
+
+  /** Explicit human metadata lookup. It is not a full-text search and never
+   * turns an old list item into a read grant; an exact selection is re-read
+   * through the current session and policy. */
+  lookup(value: unknown) {
+    const input = parse(listInput.extend({ documentId: id.optional() }).strict(), value);
+    if (!input.documentId) return this.list(input);
+    return this.session.run(async context => {
+      const record = await this.documents.read(context, input.documentId!);
+      const grant = await this.authorization.authorize(context, { action: 'read_metadata', scope: context.scope, document: record.document });
+      if (!grant) return unavailable();
+      const d = record.document;
+      if ((input.publication && d.publication !== input.publication) || (input.parsing && d.parsing !== input.parsing)
+        || (input.indexing && d.indexing !== input.indexing)) return { items: [], truncated: false,
+          coverage: 'exact_authorized_selection' as const, pagination: 'unavailable' as const };
+      const after = await this.documents.read(context, input.documentId!);
+      if (fingerprint(record) !== fingerprint(after)) throw new KnowledgeError('conflict');
+      return { items: [knowledgeManagementView(after)], truncated: false,
+        coverage: 'exact_authorized_selection' as const, pagination: 'unavailable' as const };
+    });
+  }
 }
