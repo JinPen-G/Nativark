@@ -95,6 +95,23 @@ test('concurrent same submit only dispatches once, lost reply uses original rece
   const recovered=await f.services.submission.reconcile({...target,draftId:input.draftId});
   assert.equal(recovered.inspectionId,'inspection-original');assert.equal(recovered.draftLinked,true);
 });
+
+test('multi-allocation review preserves per-item materials and cannot dispatch an order-wide inspection',async()=>{
+  const f=submissionFixture();
+  f.order.allocations.push({...f.order.allocations[0],id:'allocation-b',assetId:'asset-b'});
+  const d=await draft(f);
+  const input={...target,draftId:d.result.draftId,expectedRevision:1,operationId:'review-a',actionId:'review-action'};
+  const review=await f.services.submission.prepareReview(input);
+  assert.equal(review.mode,'manual_review_only');
+  assert.deepEqual(await f.services.submission.prepareReview(input),review);
+  const detail=await f.services.drafts.read({...target,draftId:d.result.draftId});
+  assert.equal(detail.state.submission.mode,'manual_review_only');
+  assert.equal(detail.state.fields.mileage.value,42);
+  await assert.rejects(f.services.submission.submit({...target,draftId:d.result.draftId,expectedRevision:review.revision,operationId:'submit-review'}),{code:'CAPABILITY_UNSUPPORTED'});
+  assert.equal(f.calls(),0);
+  assert.equal(f.state.drafts.get(d.result.draftId).status,'prepared');
+  await assert.rejects(f.services.submission.prepare({...input,operationId:'prepare-order',expectedRevision:review.revision}),{code:'CAPABILITY_UNSUPPORTED'});
+});
 test('failed draft back-write preserves original submission and recovery never re-submits',async()=>{
   const f=submissionFixture(),input=await prepared(f);f.state.failLink=true;
   const result=await f.services.submission.submit(input);
