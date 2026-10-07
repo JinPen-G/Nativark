@@ -37,7 +37,10 @@ export class KnowledgeDocumentService {
   private async assertAttachmentBound(context: AiExecutionContext, documentId: string, attachmentId: string) {
     if (!this.ports.files.assertBound) return;
     if (context.scope.kind !== 'workspace') throw new KnowledgeError('unavailable');
-    await this.ports.files.assertBound(context, { attachmentId, documentId, workspaceId: context.scope.workspaceId });
+    const workspaceId = context.scope.workspaceId;
+    const contextHash = fingerprint(context), stable = structuredClone(context), stableHash = fingerprint(stable);
+    await this.ports.files.assertBound(stable, { attachmentId, documentId, workspaceId });
+    if (fingerprint(context) !== contextHash || fingerprint(stable) !== stableHash) throw new KnowledgeError('unavailable');
   }
 
   async save(context: AiExecutionContext, action: KnowledgeAction, before: KnowledgeRecord, next: KnowledgeRecord, operationId: string, hash: string, newVersion = false): Promise<KnowledgeRecord> {
