@@ -3,11 +3,15 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiStepRegistrationRepository, type AiStepRegistrationAuthority } from '../ai-step-registration.repository';
 import { AiStepTransitionRepository, type AiStepTransitionAuthority } from '../ai-step-transition.repository';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
+import { AiTaskEventRepository } from '../ai-task-event.repository';
+import { PrismaTaskRecoverySnapshotRepository } from './prisma-task-recovery-snapshot.repository';
 import { composePersistentTaskInputRunner } from '../task-input/persistent-task-input.composition';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import type { PersistentTaskRunnerComposition } from './persistent-task-runner.composition';
 import { createAiTaskRunnerOutcomePort } from './ai-task-runner-outcome-adapter';
 import { PrismaTaskStepEvidenceAuthority } from './prisma-task-step-evidence.authority';
+import { PrismaTaskTakeoverRepository } from './prisma-task-takeover.repository';
+import type { AiTaskRunnerOutcome } from './ai-task-runner.ports';
 
 export interface AuthorizedPersistentTaskInputComposition extends Omit<PersistentTaskRunnerComposition,
   'tasks' | 'executionAuthorization' | 'registrations' | 'replays' | 'transitions' | 'taskOutcome' | 'inputs'> {
@@ -29,7 +33,15 @@ export function composeAuthorizedPersistentTaskInputRunner(input: AuthorizedPers
     commands: { transition: command => command } });
   const composed = composePersistentTaskInputRunner({ ...input, tasks: authorization.tasks,
     executionAuthorization: authorization.execution, registrations, replays: registrations, transitions, taskOutcome });
-  return Object.freeze({ ...composed, authorization, registrations, transitions, taskTransitions });
+  const takeovers = new PrismaTaskTakeoverRepository(input.db, authorization.authority, input.wall);
+  const takeoverAndRecover = async (command: unknown, signal?: AbortSignal): Promise<AiTaskRunnerOutcome> => {
+    if (signal?.aborted) return { status: 'unavailable', completedSteps: 0, cleanupFailed: 0 };
+    const lease = await takeovers.takeover(command);
+    return composed.runner.recover(lease, signal);
+  };
+  const recovery = new PrismaTaskRecoverySnapshotRepository(input.db, authorization.tasks);
+  const events = new AiTaskEventRepository(input.db, authorization.authority, input.wall);
+  return Object.freeze({ ...composed, authorization, registrations, transitions, taskTransitions, takeoverAndRecover, recovery, events });
 }
 
 /** Explicit read-only subset. Uses current persisted action authorization and

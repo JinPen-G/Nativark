@@ -1,0 +1,35 @@
+'use strict';
+const test = require('node:test'), assert = require('node:assert/strict');
+const { fixture, h } = require('./fixtures/ai-native/lane-b-functional.cjs');
+const { HumanKnowledgeModule } = h.load('human-knowledge.module');
+const { HumanKnowledgeService } = h.load('human-knowledge.service');
+const { HumanKnowledgeIndexService } = h.load('human-knowledge-index.service');
+test.after(() => assert.deepEqual(h.attempts, []));
+test('explicit module resumes committed index receipt and withdrawal remove without reviving older generation', async () => {
+  const { ports, db } = fixture();
+  assert.throws(() => HumanKnowledgeModule.register({ ...ports, authorization: undefined }), { code: 'unavailable' });
+  const module = HumanKnowledgeModule.register(ports);
+  const get = key => module.providers.find(provider => provider.provide === key).useValue;
+  const human = get(HumanKnowledgeService), index = get(HumanKnowledgeIndexService);
+  await human.create(h.draft()); await human.parse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-1' });
+  const queued = await index.request({ documentId: 'doc-1', expectedRevision: 3, operationId: 'index-1', kind: 'upsert' });
+  const input = { documentId: 'doc-1', operationId: queued.indexJob.operationId, generation: queued.indexJob.generation };
+  db.responseError = new Error('synthetic index commit answer lost');
+  await assert.rejects(index.resume(input), { code: 'result_unknown' });
+  db.responseError = null;
+  const count = db.state.operations.size;
+  assert.equal((await index.status('doc-1')).receipt, 'recorded');
+  const complete = await index.resume(input);
+  assert.equal(complete.indexJob.status, 'completed');
+  assert.equal(db.state.operations.size, count + 1); // completion receipt only
+  const published = await human.publish({ documentId: 'doc-1', expectedRevision: complete.revision, operationId: 'publish-1' });
+  const withdrawn = await human.withdraw({ documentId: 'doc-1', expectedRevision: published.revision, operationId: 'withdraw-1' });
+  await assert.rejects(index.resume(input), { code: 'conflict' });
+  const batch = await index.resumeBatch({ jobs: [{ documentId: 'doc-1', operationId: withdrawn.indexJob.operationId, generation: withdrawn.indexJob.generation }] });
+  const removed = batch.items[0];
+  assert.equal(removed.indexJob.kind, 'remove'); assert.equal(removed.indexJob.status, 'completed');
+  assert.equal(removed.publication, 'withdrawn'); assert.equal(removed.indexing, 'not_indexed');
+  const detail = await human.detail('doc-1');
+  assert.equal(detail.publication, 'withdrawn'); assert.equal(detail.permissionSemantics, 'current_policy_not_transition_or_future_grant');
+  await assert.rejects(async () => index.resumeBatch({ jobs: [input, input] }), { code: 'invalid_input' });
+});

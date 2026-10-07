@@ -52,6 +52,9 @@ export function queueIndex(record: KnowledgeRecord, kind: 'upsert' | 'remove', o
   return { ...record, indexJob: { operationId, kind, status: 'pending', documentVersion: record.document.documentVersion, aclRevision: record.document.aclRevision, generation: record.revision } };
 }
 export function fingerprint(value: unknown): string { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
+export function operationFingerprint(context: AiExecutionContext, value: unknown): string {
+  return fingerprint(['knowledge-operation-v1', { scope: structuredClone(context.scope), actor: actor(context), audience: context.audience }, value]);
+}
 export function visible(document: AiKnowledgeDocumentDraft, now: number): boolean {
   return document.publication === 'published' && document.parsing === 'parsed' && document.indexing === 'indexed' && Date.parse(document.validFrom) <= now && (!document.validUntil || now < Date.parse(document.validUntil));
 }

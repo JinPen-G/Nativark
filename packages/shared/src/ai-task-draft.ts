@@ -2,7 +2,11 @@
  * AIN-C04 草案：状态、动作身份、租约及事件协议，不是持久化运行器或授权凭据。
  * C01 创建时上下文只用于追溯；恢复/每步执行仍必须重新授权并在数据库提交点做 CAS/fencing。
  */
-import type { AiExecutionContext, AiFactReference, AiToolCode, AiToolError } from "./ai-native";
+import { AI_TOOL_CODES, type AiExecutionContext, type AiFactReference, type AiToolError } from "./ai-native";
+
+export const AI_TEXT_MODEL_STEP_CODE = "ai.model.text" as const;
+export const AI_TASK_STEP_CODES = Object.freeze([...AI_TOOL_CODES, AI_TEXT_MODEL_STEP_CODE] as const);
+export type AiTaskStepCode = typeof AI_TASK_STEP_CODES[number];
 
 export const AI_TASK_DRAFT_VERSION = "ain-c04-draft-1" as const;
 export const AI_TASK_STATUSES_DRAFT = Object.freeze([
@@ -30,7 +34,7 @@ export interface AiStepStateDraft {
   runId: string;
   sequence: number;
   revision: number;
-  toolCode: AiToolCode;
+  toolCode: AiTaskStepCode;
   toolVersion: string;
   actionId: string;
   /** 规范化请求的 SHA-256 小写十六进制；本草案不定义/替代 Core 指纹算法。 */

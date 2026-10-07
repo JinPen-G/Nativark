@@ -92,7 +92,8 @@ export function composeAiApprovedOrder(dependencies: ApprovedOrderCompositionDep
         if (current.committedId !== orderId) throw deniedOrder();
         await participant.replay(original.binding, orderId);
         const order = await d.core.getOrder(original.binding.tenantId, orderId);
-        if (!order || order.id !== orderId || order.tenantId !== original.binding.tenantId
+        if (!order) throw new AiApprovedOrderResultUnknownError();
+        if (order.id !== orderId || order.tenantId !== original.binding.tenantId
           || d.core.resolveWorkspaceId(original.binding.tenantId) !== original.binding.workspaceId) throw deniedOrder();
         const latest = await source.read(command, 'replay');
         same(latest);
