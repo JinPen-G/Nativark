@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { HttpException } from '@nestjs/common';
 import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES, type AiExecutionContext, type RentalQuoteRequest, type RentalQuoteSnapshotV1 } from "@rental-os/shared";
 import type { RentalBusinessService, BusinessContext } from "../rental-core/rental-business.service";
 import { ModelGatewayError } from "./model-gateway.ports";
@@ -113,7 +114,7 @@ export class AiQuotePreviewService {
         }) };
         if (requestFingerprint(comparable) !== requestFingerprint(parsed.data)) throw new ModelGatewayError('INVALID_RESPONSE');
         const expectedRequest = requestFingerprint(formalRequest);
-        const quote = await this.authority.withQuote(structuredClone(parsed.data) as RentalQuoteRequest, async current => {
+        const outcome = await this.authority.withQuote(structuredClone(parsed.data) as RentalQuoteRequest, async current => {
           if (binding(current) !== binding(context)) throw new ModelGatewayError('FORBIDDEN');
           const latest = structuredClone(await this.contexts.current(structuredClone(scope)));
           if (requestFingerprint(business) !== requestFingerprint(latest)) throw new ModelGatewayError('CONFIG_INVALID');
@@ -121,9 +122,20 @@ export class AiQuotePreviewService {
           // Recheck the original quote permission immediately before R1 work.
           return this.authority.withQuote(structuredClone(parsed.data) as RentalQuoteRequest, async final => {
             if (binding(final) !== binding(context)) throw new ModelGatewayError('FORBIDDEN');
-            return this.core.createQuote(scope.tenantId, latest, structuredClone(formalRequest));
+            try {
+              return { kind: 'quote' as const, quote: await this.core.createQuote(scope.tenantId, latest, structuredClone(formalRequest)) };
+            } catch (error) {
+              if (error instanceof ModelGatewayError) throw error;
+              if (error instanceof HttpException && [401, 403].includes(error.getStatus())) throw new ModelGatewayError('FORBIDDEN');
+              // Keep a sanitized Core outcome inside the authorized callback;
+              // the bridge still rechecks identity after failure. Never carry
+              // a raw business exception through its authentication boundary.
+              return { kind: 'failure' as const, status: this.classify(error) };
+            }
           });
         });
+        if (outcome.kind === 'failure') return this.failure(context, outcome.status, 'Core 未能生成报价；请核对输入或转人工处理');
+        const quote = outcome.quote;
         const observed = this.clock(); if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError("CONFIG_INVALID");
         const chargeLines = z.array(chargeLineSchema).max(100).safeParse(quote?.chargeLines);
         const savedBasis = savedQuoteBasisSchema.safeParse(quote);
@@ -152,7 +164,8 @@ export class AiQuotePreviewService {
   }
   private classify(error: unknown): AiQuotePreviewFailure {
     const message = error instanceof Error ? error.message : "";
-    if (/库存|可用|没有启用的承接|缺货/u.test(message)) return "out_of_stock";
+    if ((error instanceof HttpException && error.getStatus() >= 500) || /不可用|数据库|连接|超时/u.test(message)) return 'unavailable';
+    if (/库存|没有启用的承接|缺货/u.test(message)) return "out_of_stock";
     if (/资格|会员|客户/u.test(message)) return "qualification_required";
     if (/过期|有效期|失效/u.test(message)) return "expired";
     if (/选择|歧义|多个|必须/u.test(message)) return "ambiguous";

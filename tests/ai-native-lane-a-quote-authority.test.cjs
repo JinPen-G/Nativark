@@ -89,4 +89,11 @@ for (const categoryCode of ['camera', 'camping', 'vehicle', 'construction']) tes
   assert.equal(ai.quote.payableAmount, manual.payableAmount);
   assert.equal(ai.quote.receivableAmount, manual.receivableAmount);
   assert.deepEqual(ai.quote.chargeLines, manual.chargeLines);
+  const rejected = await tools.preview.preview({ ...prepared.request, fulfillmentLocationId: 'missing-location' });
+  assert.equal(rejected.status, 'unavailable'); assert.equal(rejected.quote, undefined);
+});
+test('dependency unavailability is not classified as inventory shortage', async () => {
+  const h = await setup();
+  const service = new AiQuotePreviewService({ createQuote: async () => { throw Error('依赖服务不可用'); } }, { current: async () => ({}) }, h.authority);
+  assert.equal((await service.preview(input)).status, 'unavailable');
 });

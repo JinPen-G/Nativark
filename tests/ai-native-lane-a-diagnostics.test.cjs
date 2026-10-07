@@ -9,11 +9,9 @@ const {RentalCoreService}=require('../apps/api/src/modules/rental-core/rental-co
 const {RentalBusinessService}=require('../apps/api/src/modules/rental-core/rental-business.service');
 const {RentalWorkspaceReportRepository}=require('../apps/api/src/modules/rental-core/rental-workspace-report.repository');
 const {ApiAuthGuard}=require('../apps/api/src/common/api-auth.guard');
-const {ExecutionContextHost}=require('@nestjs/core/helpers/execution-context-host');
-const {runWithRequestIdentity,getRequestIdentity}=require('../apps/api/src/common/request-identity');
 const {authorizedRunnerHarness}=require('./fixtures/ai-native/task-authorized-runner.cjs');
 const stores=require('./helpers/absorbing-config-store.cjs');
-const {RENTAL_CATEGORY_DEFINITIONS,AI_CONTRACT_DRAFT_VERSION}=require('./fixtures/ai-native/local-shared.cjs');
+const {RENTAL_CATEGORY_DEFINITIONS}=require('./fixtures/ai-native/local-shared.cjs');
 async function setup(){
  const h=await authorizedRunnerHarness();h.identity.user.permissions.push('rental-os:report:view');
  const guard=new ApiAuthGuard(h.authorization.auth,undefined,undefined,undefined,{});
