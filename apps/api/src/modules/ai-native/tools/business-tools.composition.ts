@@ -16,6 +16,7 @@ import { AiOrderSavedQuoteSource } from './order-saved-quote.source';
 import { ModelGatewayError } from '../model-gateway.ports';
 import type { PaymentRuntimeService } from '../../integrations/payment.runtime.service';
 import { AiOrderPaymentFactsService } from './order-payment-facts.service';
+import { AiOrderExplanationFactsService } from './order-explanation-facts.service';
 
 /** Server composition only. Guard and current session come from the application
  * host, never model arguments. No HTTP route, dispatch, entitlement or approval
@@ -51,6 +52,11 @@ export function composeAiAuthorizedBusinessTools(input: {
     availability: reads.availability,
     membershipCandidates: reads.membershipCandidates,
     order,
+    orderExplanation: (serverOrderId: string) => {
+      const authority = new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock);
+      return new AiOrderExplanationFactsService(authority, order(serverOrderId), input.payments
+        ? new AiOrderPaymentFactsService(input.payments, input.core, authority, routes, input.clock) : undefined, input.clock);
+    },
     orderPayments: (serverOrderId: string) => {
       if (!input.payments) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
       return new AiOrderPaymentFactsService(input.payments, input.core,
