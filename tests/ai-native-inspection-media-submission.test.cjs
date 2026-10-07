@@ -4,9 +4,34 @@ const {fixture,target}=require('./fixtures/ai-native/inspection-persistent.cjs')
 const {composeInspectionAssist}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-assist.composition');
 const {readInspectionMedia}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-media.reader');
 const {FileStorageRuntimeService}=require('../apps/api/src/modules/integrations/file-storage.runtime.service');
+const {TenantInspectionObjectReader,s3ObjectReadRequest}=require('../apps/api/src/modules/integrations/inspection-object-reader');
 const {RentalIdempotencyRepository,requestFingerprint}=require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlHAAAAAASUVORK5CYII=','base64');
 function stream(bytes){return new ReadableStream({start(controller){controller.enqueue(bytes);controller.close();}});}
+test('formal S3 object producer reads bound bytes via header auth, denies cross-space and bounds aborted transport',async()=>{
+  const f=fixture(), asset=f.state.assets.get('file-a');
+  Object.assign(asset,{storageProvider:'s3_compatible',sizeBytes:png.length});
+  Object.assign(asset.uploadSession,{provider:'s3_compatible',fileAssetId:asset.id});
+  f.db.rentalOrder={findFirst:async({where})=>where.id==='order-a'&&where.tenantId==='tenant-a'&&where.workspaceId==='workspace-a'?{id:'order-a'}:null};
+  const config={id:'config-a',capability:'file',provider:'s3_compatible',settings:{endpoint:'https://objects.example.test',bucket:'synthetic-bucket',region:'us-east-1',forcePathStyle:true},credentials:{accessKeyId:'synthetic-access',secretAccessKey:'synthetic-secret'}};
+  const at=new Date('2026-10-08T00:00:00Z'), request=s3ObjectReadRequest(config,'object-a',at);
+  assert.equal(new URL(request.url).search,''); assert.match(request.headers.Authorization,/^AWS4-HMAC-SHA256 /);
+  assert.equal(request.headers['x-amz-date'],'20261008T000000Z');
+  assert.throws(()=>s3ObjectReadRequest(config,'../escape',at));
+  let calls=0,startedResolve;const started=new Promise(resolve=>{startedResolve=resolve;});let hang=false;
+  const producer=new TenantInspectionObjectReader(f.db,{runtimeConfig:async()=>structuredClone(config)},async(url,init)=>{
+    calls++;assert.equal(url,request.url);assert.equal(init.redirect,'error');assert.equal(new URL(url).search,'');
+    if(hang){startedResolve();return new Promise(()=>{});}
+    return new Response(png,{headers:{'content-type':'image/png','content-length':String(png.length)}});
+  },async url=>url,()=>at); // Explicit transport/egress mocks: no DNS or connection.
+  const storage=new FileStorageRuntimeService(f.db,{runtimeConfig:async()=>structuredClone(config)},undefined,producer);
+  const actual=await storage.readInspectionBytes('tenant-a','file-a',{businessType:'rental_order',businessId:'order-a',workspaceId:'workspace-a',actorUserId:f.state.user.id,uploadScene:'return-evidence'},png.length,new AbortController().signal);
+  assert.deepEqual(actual.bytes,png);
+  const ref={tenantId:'tenant-a',workspaceId:'workspace-other',fileAssetId:'file-a',provider:'s3_compatible',storageKey:'object-a'};
+  await assert.rejects(producer.open(ref,new AbortController().signal));assert.equal(calls,1);
+  hang=true;const control=new AbortController(), pending=producer.open({...ref,workspaceId:'workspace-a'},control.signal);
+  await started;control.abort();await assert.rejects(pending);assert.equal(calls,2);
+});
 function mediaFixture(){
   const f=fixture();
   f.db.rentalOrder={findFirst:async({where})=>where.id==='order-a'&&where.tenantId==='tenant-a'&&where.workspaceId==='workspace-a'?{id:'order-a'}:null};
