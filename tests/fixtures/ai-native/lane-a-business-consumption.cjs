@@ -13,7 +13,8 @@ exports.setup = async () => {
   h.identity.user.permissions.push('rental-core:catalog:view', 'rental-os:order:create', 'rental-os:report:view');
   const config = stores.createAbsorbingConfigStore();
   config.listWorkspaces = async () => [{ id: 'workspace-a', tenantId: 'tenant_001', categoryCode: 'camera', isDefault: true }];
-  const core = new RentalCoreService(config, stores.createAbsorbingFactStore()); await core.onApplicationBootstrap();
+  const facts = stores.createAbsorbingFactStore();
+  const core = new RentalCoreService(config, facts); await core.onApplicationBootstrap();
   const business = new RentalBusinessService(stores.createAbsorbingBusinessConfigStore(), stores.createAbsorbingBusinessFactStore(), config);
   await business.onApplicationBootstrap();
   const memberships = new MembershipService({ customerProfile: { findMany: async () => [{ id: 'customer-a', name: 'Synthetic customer', phoneMasked: '138****0000', membership: { status: 'active' } }] } }, {});
@@ -23,5 +24,5 @@ exports.setup = async () => {
   const group = core.listItemGroups('tenant_001')[0], location = core.listLocations('tenant_001')[0];
   const candidate = { customerType: 'personal', customerId: 'customer-a', items: [{ productName: group.name, quantity: 1 }],
     start: '2026-11-10T09:00:00+08:00', end: '2026-11-11T09:00:00+08:00', fulfillmentMode: 'store_pickup_return', locationName: location.name };
-  return { h, tools, core, business, candidate, memberships, reports };
+  return { h, tools, core, business, candidate, memberships, reports, facts, group, location };
 };

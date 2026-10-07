@@ -21,6 +21,7 @@ import { AiOrderNextStepsService } from './order-next-steps.service';
 import { AiOpeningActionListService } from './opening-action-list.service';
 import { AiQuoteBusinessPreparationService } from './quote-business-preparation.service';
 import { AiOrderExplanationPreparationService } from './order-explanation-preparation.service';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 
 /** Server composition only. Guard and current session come from the application
  * host, never model arguments. No HTTP route, dispatch, entitlement or approval
@@ -83,6 +84,28 @@ export function composeAiAuthorizedBusinessTools(input: {
     },
     opening, risks,
     openingActions: new AiOpeningActionListService(opening, risks, context, diagnostics),
-    quote: Object.freeze({ ...quote, businessPreparation: quotePreparation })
+    quote: Object.freeze({ ...quote, businessPreparation: quotePreparation,
+      /** Explicit R1 entry; the host owns the human-selection evidence. Core
+       * quote success is not order approval, payment, or stock reservation. */
+      previewBusinessSelection: async (value: unknown) => {
+        const supplied = structuredClone(value);
+        const prepared = await quotePreparation.prepare(supplied);
+        if (prepared.status !== 'ready') return prepared;
+        const result = await quote.previewSelection(supplied);
+        if (result.status !== 'quoted' || !result.quote) return result;
+        return { ...result, confirmationReview: {
+          source: { scope: result.scope, resourceType: 'quote' as const, resourceId: result.quote.id,
+            observedAt: result.observedAt, ruleVersion: result.quote.ruleVersion,
+            pricingPlanVersion: result.quote.pricingPlanVersion, priceVersion: result.quote.priceVersion },
+          inputFingerprint: requestFingerprint(prepared.request), configVersion: prepared.configVersion,
+          selectionRevision: prepared.selectionRevision, expiresAt: result.quote.expiresAt,
+          availabilityObservedAt: prepared.availability.observedAt,
+          validity: 'valid_at_quote_observation_recheck_before_commit' as const,
+          stock: 'observed_not_reserved' as const, previousConfirmation: 'must_not_reuse' as const,
+          changes: { amounts: 'unknown_previous_trusted_quote_not_loaded' as const,
+            availability: 'unknown_previous_observation_not_loaded' as const },
+          orderApproval: 'not_granted' as const } };
+      }
+    })
   });
 }
