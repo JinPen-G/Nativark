@@ -40,3 +40,18 @@ test('missing frozen snapshot never falls back, changed allocation and late revo
   await assert.rejects(d.services.templates.read(input), { code: 'ACCESS_DENIED' });
   await assert.rejects(setup().services.templates.read({ ...input, scope: { tenantId: 'other' } }), { code: 'INVALID_INPUT' });
 });
+
+test('manual materials preserve zero, reject foreign fields/negative usage and stale binding, never submit', async () => {
+  const f = setup(), observed = await f.services.templates.read(input);
+  const request = { ...input, bindingFingerprint: observed.bindingFingerprint, results: { mileage: 0 } };
+  const result = await f.services.manual.prepare(request);
+  assert.equal(result.results.mileage, 0);
+  assert.equal(result.status, 'prepared_not_saved_or_submitted');
+  assert.equal(result.submission, 'unavailable');
+  const missing = await f.services.manual.prepare({ ...request, results: {} });
+  assert.deepEqual(missing.missingFields, ['mileage']);
+  await assert.rejects(f.services.manual.prepare({ ...request, results: { mileage: -1 } }), { code: 'INVALID_INPUT' });
+  await assert.rejects(f.services.manual.prepare({ ...request, results: { chargeAmount: 50 } }), { code: 'INVALID_INPUT' });
+  f.template.version = 'v2';
+  await assert.rejects(f.services.manual.prepare(request), { code: 'BINDING_CHANGED' });
+});
