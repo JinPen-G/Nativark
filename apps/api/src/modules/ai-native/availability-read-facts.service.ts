@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { assertAiReadContextBinding } from './tools/read-context-binding';
 import { AI_CONTRACT_DRAFT_VERSION, RentalInventoryMode, type AiExecutionContext, type RentalAvailabilityResult, type RentalAvailabilityRequest } from '@rental-os/shared';
 import type { RentalCoreService } from '../rental-core/rental-core.service';
 import { ModelGatewayError } from './model-gateway.ports';
@@ -17,9 +18,10 @@ export class AiAvailabilityReadFactsService {
   constructor(private readonly core: Pick<RentalCoreService, 'availability'>, private readonly authority: AiAvailabilityReadAuthority, private readonly clock: () => Date = () => new Date()) {
     if (typeof core?.availability !== 'function' || typeof authority?.withRead !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   }
-  async read(value: unknown): Promise<AiAvailabilityReadProjection> {
+  async read(value: unknown, expectedContext?: AiExecutionContext): Promise<AiAvailabilityReadProjection> {
     const parsed = aiAvailabilityReadInputSchema.safeParse(value); if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
     return this.authority.withRead('availability', parsed.data, async context => {
+    assertAiReadContextBinding(context, expectedContext);
     if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user' || (context.audience !== 'operator' && context.audience !== 'staff') || !('access' in context)) throw new ModelGatewayError('FORBIDDEN');
     if (context.access.locationScope.mode === 'selected' && !context.access.locationScope.locationIds.includes(parsed.data.locationId)) throw new ModelGatewayError('FORBIDDEN');
     const observed = this.clock(); if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError('CONFIG_INVALID');

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { HttpException } from '@nestjs/common';
 import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES, type AiExecutionContext, type RentalQuoteRequest, type RentalQuoteSnapshotV1 } from "@rental-os/shared";
 import type { RentalBusinessService, BusinessContext } from "../rental-core/rental-business.service";
 import { ModelGatewayError } from "./model-gateway.ports";
@@ -49,12 +50,21 @@ export type AiQuotePreviewResult = {
   status: "quoted" | AiQuotePreviewFailure;
   missingFields?: string[];
   message?: string;
+  /** Local effect evidence, not dispatch/approval or inventory ownership. */
+  quotePersistence?: 'saved' | 'unknown';
+  nextAction?: 'reconcile';
+  retryable?: false;
   quote?: {
     id: string; quoteNo: string; currency?: string; chargeLines: RentalQuoteSnapshotV1["chargeLines"];
     rentalAmount: number; discountAmount: number; couponAmount: number; serviceAmount: number; fulfillmentAmount: number;
     depositAmount: number; preAuthAmount: number; payableAmount: number; receivableAmount: number;
     pricingPlanVersion: string; priceVersionId?: string; priceVersion?: string; ruleVersion: string; calendarVersion?: string;
     expiresAt: string; createdAt: string; timeZone?: string; reservation: "not_reserved";
+    period: { startAt: string; endAt: string };
+    lineUnits: Array<{ itemGroupId?: string; pricingUnit?: RentalQuoteRequest['lines'][number]['pricingUnit']; quantity: number; usageQuantity?: number }>;
+    promotionEvidence: Array<{ code: string; sourceId?: string; sourceVersion?: string }>;
+    promotionVersionCoverage: 'charge_line_references_only';
+    roundingEvidence: 'not_projected';
   };
 };
 
@@ -76,23 +86,66 @@ export class AiQuotePreviewService {
     private readonly core: Pick<RentalBusinessService, "createQuote">,
     private readonly contexts: AiQuoteCoreContextSource,
     private readonly authority: AiQuotePreviewAuthority,
-    private readonly clock: () => Date = () => new Date()
+    private readonly clock: () => Date = () => new Date(),
+    private readonly resolver?: Pick<import('../rental-core/rental-core.service').RentalCoreService, 'resolvePricingGroupQuoteRequest'>
   ) {
     if (typeof core?.createQuote !== "function" || typeof contexts?.current !== "function" || typeof authority?.withQuote !== "function") throw new ModelGatewayError("CONFIG_INVALID");
   }
 
-  async preview(value: unknown): Promise<AiQuotePreviewResult> {
+  async preview(value: unknown, expectedConfigurationFingerprint?: string): Promise<AiQuotePreviewResult> {
     const parsed = aiQuotePreviewInputSchema.safeParse(value);
     if (!parsed.success) {
       const fields = [...new Set(parsed.error.issues.map(issue => issue.path.join(".")).filter(Boolean))];
       return { contractVersion: "ain-09-quote-preview-draft-1", requestId: "unavailable", observedAt: this.now(), scope: { kind: "workspace", tenantId: "unavailable", workspaceId: "unavailable" }, status: "missing_input", missingFields: fields.length ? fields : ["request"], message: "报价输入不完整或格式不受支持" };
     }
-    const expectedRequest = requestFingerprint(parsed.data);
-    return this.authority.withQuote(structuredClone(parsed.data) as RentalQuoteRequest, async context => {
+    return this.authority.withQuote(structuredClone(parsed.data) as RentalQuoteRequest, async suppliedContext => {
+      const context = structuredClone(suppliedContext);
       if (context.scope.kind !== "workspace" || context.actor.kind !== "user" || (context.audience !== "operator" && context.audience !== "staff")) throw new ModelGatewayError("FORBIDDEN");
+      const scope = context.scope;
       try {
-        const business = await this.contexts.current(context.scope);
-        const quote = await this.core.createQuote(context.scope.tenantId, business, structuredClone(parsed.data) as RentalQuoteRequest);
+        const binding = (value: AiExecutionContext) => {
+          const { authorizedAt: _time, requestId: _request, ...identity } = value;
+          return requestFingerprint(identity);
+        };
+        const business = structuredClone(await this.contexts.current(structuredClone(scope)));
+        if (expectedConfigurationFingerprint !== undefined && requestFingerprint(business) !== expectedConfigurationFingerprint) throw new ModelGatewayError('CONFIG_INVALID');
+        const formalRequest = this.resolver
+          ? structuredClone(await this.resolver.resolvePricingGroupQuoteRequest(scope.tenantId, structuredClone(parsed.data) as RentalQuoteRequest))
+          : structuredClone(parsed.data) as RentalQuoteRequest;
+        // Only the existing Core resolver may add selection metadata. It must
+        // not change quantities, dates, customer, discounts, or selected IDs.
+        if (!Array.isArray(formalRequest?.lines) || formalRequest.lines.length !== parsed.data.lines.length) throw new ModelGatewayError('INVALID_RESPONSE');
+        const comparable = { ...formalRequest, lines: formalRequest.lines.map((resolved, index) => {
+          const { reservationPrecision: _precision, pricingGroupMemberItemGroupIds: _members,
+            pricingGroupCode: _code, pricingGroupName: _name, ...candidate } = resolved;
+          if (!id.safeParse(resolved.itemGroupId).success) throw new ModelGatewayError('INVALID_RESPONSE');
+          if (!parsed.data.lines[index].itemGroupId) delete candidate.itemGroupId;
+          return candidate;
+        }) };
+        if (requestFingerprint(comparable) !== requestFingerprint(parsed.data)) throw new ModelGatewayError('INVALID_RESPONSE');
+        const expectedRequest = requestFingerprint(formalRequest);
+        const outcome = await this.authority.withQuote(structuredClone(parsed.data) as RentalQuoteRequest, async current => {
+          if (binding(current) !== binding(context)) throw new ModelGatewayError('FORBIDDEN');
+          const latest = structuredClone(await this.contexts.current(structuredClone(scope)));
+          if (requestFingerprint(business) !== requestFingerprint(latest)) throw new ModelGatewayError('CONFIG_INVALID');
+          // The last awaited source may itself wait for category/config data.
+          // Recheck the original quote permission immediately before R1 work.
+          return this.authority.withQuote(structuredClone(parsed.data) as RentalQuoteRequest, async final => {
+            if (binding(final) !== binding(context)) throw new ModelGatewayError('FORBIDDEN');
+            try {
+              return { kind: 'quote' as const, quote: await this.core.createQuote(scope.tenantId, latest, structuredClone(formalRequest)) };
+            } catch (error) {
+              if (error instanceof ModelGatewayError) throw error;
+              if (error instanceof HttpException && [401, 403].includes(error.getStatus())) throw new ModelGatewayError('FORBIDDEN');
+              // Keep a sanitized Core outcome inside the authorized callback;
+              // the bridge still rechecks identity after failure. Never carry
+              // a raw business exception through its authentication boundary.
+              return { kind: 'failure' as const, status: this.classify(error) };
+            }
+          });
+        });
+        if (outcome.kind === 'failure') return { ...this.failure(context, outcome.status, 'Core 未能生成报价；请核对输入或转人工处理'), quotePersistence: 'unknown', nextAction: 'reconcile', retryable: false };
+        const quote = outcome.quote;
         const observed = this.clock(); if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError("CONFIG_INVALID");
         const chargeLines = z.array(chargeLineSchema).max(100).safeParse(quote?.chargeLines);
         const savedBasis = savedQuoteBasisSchema.safeParse(quote);
@@ -101,13 +154,19 @@ export class AiQuotePreviewService {
           || !this.hasSafeAmounts(quote)
           || !chargeLines.success || !savedBasis.success) throw new ModelGatewayError("INVALID_RESPONSE");
         const expiresAt = new Date(quote.expiresAt); if (!Number.isFinite(expiresAt.getTime())) throw new ModelGatewayError("INVALID_RESPONSE");
-        if (expiresAt.getTime() <= observed.getTime()) return this.failure(context, "expired", "报价生成后已失效");
-        return { contractVersion: "ain-09-quote-preview-draft-1", requestId: context.requestId, observedAt: observed.toISOString(), scope: context.scope, status: "quoted", quote: {
+        if (expiresAt.getTime() <= observed.getTime()) return { ...this.failure(context, "expired", "报价生成后已失效"), quotePersistence: 'saved' };
+        return { contractVersion: "ain-09-quote-preview-draft-1", requestId: context.requestId, observedAt: observed.toISOString(), scope: context.scope, status: "quoted", quotePersistence: 'saved', quote: {
           id: quote.id, quoteNo: quote.quoteNo, currency: quote.currency, chargeLines: chargeLines.data,
           rentalAmount: quote.rentalAmount, discountAmount: quote.discountAmount, couponAmount: quote.couponAmount, serviceAmount: quote.serviceAmount,
           fulfillmentAmount: quote.fulfillmentAmount, depositAmount: quote.depositAmount, preAuthAmount: quote.preAuthAmount, payableAmount: quote.payableAmount, receivableAmount: quote.receivableAmount,
           pricingPlanVersion: quote.pricingPlanVersion, priceVersionId: quote.priceVersionId, priceVersion: quote.priceVersion, ruleVersion: quote.ruleVersion, calendarVersion: quote.calendarVersion,
-          expiresAt: quote.expiresAt, createdAt: quote.createdAt, timeZone: quote.pricingContext?.timeZone, reservation: "not_reserved"
+          expiresAt: quote.expiresAt, createdAt: quote.createdAt, timeZone: quote.pricingContext?.timeZone, reservation: "not_reserved",
+          period: { startAt: quote.request.startAt, endAt: quote.request.endAt },
+          lineUnits: quote.request.lines.map(row => ({ itemGroupId: row.itemGroupId, pricingUnit: row.pricingUnit,
+            quantity: row.quantity, usageQuantity: row.usageQuantity })),
+          promotionEvidence: chargeLines.data.filter(row => row.type === 'discount' || row.type === 'coupon')
+            .map(row => ({ code: row.code, sourceId: row.sourceId, sourceVersion: row.sourceVersion })),
+          promotionVersionCoverage: 'charge_line_references_only', roundingEvidence: 'not_projected'
         } };
       } catch (error) {
         if (error instanceof ModelGatewayError) throw error;
@@ -121,7 +180,8 @@ export class AiQuotePreviewService {
   }
   private classify(error: unknown): AiQuotePreviewFailure {
     const message = error instanceof Error ? error.message : "";
-    if (/库存|可用|没有启用的承接|缺货/u.test(message)) return "out_of_stock";
+    if ((error instanceof HttpException && error.getStatus() >= 500) || /不可用|数据库|连接|超时/u.test(message)) return 'unavailable';
+    if (/库存|没有启用的承接|缺货/u.test(message)) return "out_of_stock";
     if (/资格|会员|客户/u.test(message)) return "qualification_required";
     if (/过期|有效期|失效/u.test(message)) return "expired";
     if (/选择|歧义|多个|必须/u.test(message)) return "ambiguous";

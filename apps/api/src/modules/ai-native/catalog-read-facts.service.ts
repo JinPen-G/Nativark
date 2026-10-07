@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { assertAiReadContextBinding } from './tools/read-context-binding';
 import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
 import type { RentalCoreService } from '../rental-core/rental-core.service';
 import { ModelGatewayError } from './model-gateway.ports';
@@ -17,9 +18,10 @@ export class AiCatalogReadFactsService {
   constructor(private readonly core: Pick<RentalCoreService, 'listItemGroups'>, private readonly authority: AiCatalogReadAuthority, private readonly clock: () => Date = () => new Date()) {
     if (!core || typeof core.listItemGroups !== 'function' || typeof authority?.withRead !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   }
-  async read(value: unknown): Promise<AiCatalogReadProjection> {
+  async read(value: unknown, expectedContext?: AiExecutionContext): Promise<AiCatalogReadProjection> {
     const request = input.safeParse(value); if (!request.success) throw new ModelGatewayError('INVALID_REQUEST');
     return this.authority.withRead('catalog', request.data, async context => {
+    assertAiReadContextBinding(context, expectedContext);
     if (context.scope.kind !== 'workspace' || (context.audience !== 'operator' && context.audience !== 'staff') || context.actor.kind !== 'user') throw new ModelGatewayError('FORBIDDEN');
     const workspace = context.scope;
     const rows = await this.core.listItemGroups(workspace.tenantId);

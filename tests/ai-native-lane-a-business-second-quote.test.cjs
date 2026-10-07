@@ -1,0 +1,22 @@
+'use strict';
+const test = require('node:test'), assert = require('node:assert/strict');
+require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
+const { setup } = require('./fixtures/ai-native/lane-a-business-consumption.cjs');
+const { RENTAL_CATEGORY_DEFINITIONS } = require('./fixtures/ai-native/local-shared.cjs');
+for (const code of ['camera', 'camping', 'vehicle', 'construction']) test(`${code}: current definition drives input options and modified parameters require preparation`, async () => {
+  const h = await setup(code), definition = RENTAL_CATEGORY_DEFINITIONS.find(row => row.code === code);
+  const description = await h.tools.quote.businessPreparation.describeInput();
+  assert.equal(description.categoryCode, code);
+  assert.ok(description.pricingUnits.every(unit => definition.businessModel.pricingUnits.includes(unit)));
+  h.candidate.fulfillmentMode = description.fulfillmentModes[0];
+  const first = await h.tools.quote.candidates.prepare(h.candidate);
+  const revised = await h.tools.quote.candidates.prepare({ ...h.candidate, items: [{ productName: h.group.name, quantity: 2 }] });
+  assert.equal(first.status, 'needs_confirmation'); assert.equal(revised.request.lines[0].quantity, 2);
+  assert.notDeepEqual(revised.request, first.request); assert.equal(revised.reservation, 'not_reserved');
+  const alternatives = await h.tools.quote.businessPreparation.alternatives({ candidate: h.candidate, limit: 2 });
+  assert.equal(alternatives.status, 'candidates_only'); assert.ok(alternatives.rows.length <= 2);
+  assert.ok(alternatives.rows.every(row => row.price === 'not_quoted' && row.candidate.id !== h.group.id));
+  assert.equal(alternatives.automaticReplacement, false);
+  h.h.identity.user.permissions = [];
+  await assert.rejects(h.tools.quote.businessPreparation.describeInput());
+});
