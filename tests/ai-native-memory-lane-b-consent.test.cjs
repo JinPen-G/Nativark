@@ -34,16 +34,24 @@ test('server human consent persists a bound confirmation consumed by existing me
 
 test('human facade reads, modifies and deletes through current identity without caller scope', async () => {
   const { PersistentMemoryConsentService } = h.load('persistent-memory-consent.service');
+  const { HumanMemoryModule } = h.load('human-memory.module');
   const db = dbFactory(), f = h.harness();
   let active = true;
   const user = { id: 'user-1', tenantId: 'tenant-1', isActive: true, isSaasAdmin: false, permissions: ['synthetic-memory-policy'], dataScope: 'all', locationScope: { mode: 'all', locationIds: [] } };
-  const consent = new PersistentMemoryConsentService({ db, authorization: f.authorization, clock: f.clock,
+  const ports = { db, authorization: f.authorization, clock: f.clock,
     auth: { resolveAccessContext: async () => ({ user: { ...user, isActive: active }, tenantUser: user, workspaceValid: true, workspaceId: 'space-1' }) },
-    credentials: { current: async () => ({ authorization: 'synthetic-session', requestId: 'request-1', audience: 'operator' }) } });
+    credentials: { current: async () => ({ authorization: 'synthetic-session', requestId: 'request-1', audience: 'operator' }) } };
+  assert.throws(() => HumanMemoryModule.register({ ...ports, authorization: undefined }), { code: 'unavailable' });
+  const consent = HumanMemoryModule.register(ports).providers[0].useValue;
+  assert.ok(consent instanceof PersistentMemoryConsentService);
   const expiry = new Date(h.now + 3600000).toISOString();
   await consent.propose({ memoryId: 'memory-2', operationId: 'propose-2', expiresAt: expiry, preference: { kind: 'locale', value: 'zh-CN' } });
   await consent.confirm({ memoryId: 'memory-2', expectedRevision: 1, operationId: 'consent-2', expiresAt: expiry });
   assert.equal((await consent.read('memory-2')).status, 'confirmed');
+  const revoked = await consent.revoke({ memoryId: 'memory-2', expectedRevision: 2 });
+  assert.equal(revoked.status, 'revoked');
+  assert.equal((await consent.revoke({ memoryId: 'memory-2', expectedRevision: 2 })).id, revoked.id);
+  await assert.rejects(consent.read('memory-2'), { code: 'unavailable' });
   const modified = await consent.change('modify-2', { draftVersion: 'ain-c06-draft-1', memoryId: 'memory-2', expectedRevision: 2, operation: 'modify', preference: { kind: 'locale', value: 'en-US' } });
   assert.equal(modified.status, 'proposed');
   assert.equal(modified.confirmationRecordId, undefined);

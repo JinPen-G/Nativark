@@ -75,6 +75,57 @@ export class PersistentMemoryConsentService {
     return this.memory.change(await this.current(), operationId, value);
   }
 
+  /** Withdraw one's consent using the existing delete action gate. The record
+   * becomes revoked; this is not a claim that the preference has been deleted.
+   */
+  async revoke(value: unknown): Promise<MemoryConfirmation> {
+    const input = parse(z.object({ memoryId: id, expectedRevision: z.number().int().min(2).max(4294967294) }).strict(), value);
+    const context = await this.current();
+    if (context.scope.kind !== 'workspace') return unavailable();
+    const scope = context.scope, owner = actor(context);
+    await this.authorizeRequest(context, { action: 'delete', scope, owner });
+    let attempted = false, callbackCompleted = false;
+    try {
+      return await this.ports.db.$transaction(async tx => {
+        const repository = new PrismaStructuredMemoryRepository({ $transaction: this.ports.db.$transaction.bind(this.ports.db),
+          aiStructuredMemory: tx.aiStructuredMemory, aiMemoryOperation: tx.aiMemoryOperation, aiHumanConfirmation: tx.aiHumanConfirmation },
+        () => new Date(this.ports.clock.now()));
+        const memory = await repository.read(scope, owner, input.memoryId);
+        if (!memory || memory.status !== 'confirmed') return unavailable();
+        if (memory.revision !== input.expectedRevision) throw new KnowledgeError('conflict');
+        await this.authorizeRequest(context, { action: 'delete', scope, owner, memory });
+        const proof = await repository.read(context, memory.confirmationRecordId);
+        if (!proof || proof.memoryId !== memory.memoryId || proof.revision !== memory.revision - 1
+          || proof.aclRevision !== memory.aclRevision || fingerprint(proof.preference) !== fingerprint(memory.preference)
+          || proof.memoryExpiresAt !== memory.expiresAt) return unavailable();
+        if (proof.status === 'revoked') {
+          await this.authorizeRequest(context, { action: 'delete', scope, owner, memory });
+          callbackCompleted = true;
+          return proof;
+        }
+        attempted = true;
+        const lock = await tx.aiStructuredMemory.updateMany({ where: { id: input.memoryId, tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId, ownerKind: owner.actorKind, ownerId: owner.actorId,
+          revision: input.expectedRevision, status: 'confirmed', confirmationRecordId: proof.id }, data: { revision: input.expectedRevision } });
+        if (lock.count !== 1) throw new KnowledgeError('conflict');
+        const revoked: MemoryConfirmation = { ...proof, status: 'revoked' };
+        const changed = await tx.aiHumanConfirmation.updateMany({ where: { id: proof.id, tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId, subjectId: memory.memoryId, proposalRevision: proof.revision,
+          proposalHash: memoryConfirmationHash(proof), confirmedBy: owner.actorId, status: 'confirmed' },
+        data: { status: 'revoked', state: JSON.parse(JSON.stringify(revoked)) as Prisma.InputJsonValue } });
+        if (changed.count !== 1) throw new KnowledgeError('conflict');
+        await this.authorizeRequest(context, { action: 'delete', scope, owner, memory });
+        callbackCompleted = true;
+        return revoked;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+    } catch (error) {
+      if (error instanceof KnowledgeError) throw error;
+      if (!callbackCompleted && error instanceof Prisma.PrismaClientKnownRequestError && ['P2002', 'P2034'].includes(error.code)) throw new KnowledgeError('conflict');
+      if (attempted) throw new KnowledgeCommitUnknownError();
+      return unavailable();
+    }
+  }
+
   async confirm(value: unknown): Promise<AiMemoryDraft> {
     const input = parse(inputSchema, value), context = await this.current();
     await this.authorize(context);
