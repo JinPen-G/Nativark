@@ -87,11 +87,10 @@ export class PrismaKnowledgeReadAdapter implements KnowledgeContentPort, Knowled
       if (fingerprint(record.document) !== fingerprint(document)) return unavailable();
       await authorize(this.authorization, context, { action: 'read_body', scope: context.scope, document });
       const chunks = await this.rows(document, undefined, false);
-      if (chunks.length > limit) return unavailable();
       const refs = chunks.slice(0, limit).map(chunk => ({ kind: 'document' as const, documentId: chunk.documentId,
         documentVersion: chunk.documentVersion, chunkId: chunk.chunkId, scope: chunk.scope,
         aclRevision: chunk.aclRevision, locator: chunk.locator }));
-      return refs;
+      return { refs, truncated: chunks.length > limit };
     } catch { return unavailable(); }
   }
 
@@ -104,8 +103,7 @@ export class PrismaKnowledgeReadAdapter implements KnowledgeContentPort, Knowled
       if (!record || fingerprint(record.document) !== fingerprint(document) || document.parsing !== 'parsed' || document.publication === 'deleted') return unavailable();
       await authorize(this.authorization, context, { action: 'read_body', scope: context.scope, document });
       const chunks = await this.rows(document, undefined, false);
-      if (chunks.length > limit) return unavailable();
-      return chunks.slice(0, limit);
+      return { chunks: chunks.slice(0, limit), truncated: chunks.length > limit };
     } catch { return unavailable(); }
   }
 

@@ -115,15 +115,15 @@ export class HumanKnowledgeService {
       if (d.parsing !== 'parsed' || d.publication === 'deleted') return { status: 'unavailable' as const, sources: [] };
       const reads = new PrismaKnowledgeReadAdapter(this.ports.db, this.repository, this.authorization, this.ports.clock);
       const chunks = await reads.previewChunks(context, d, limit);
-      if (!Array.isArray(chunks)) return unavailable();
+      if (!chunks || !Array.isArray(chunks.chunks)) return unavailable();
       const items = [];
-      for (const chunk of chunks) {
+      for (const chunk of chunks.chunks) {
         const ref = { kind: 'document' as const, documentId: chunk.documentId, documentVersion: chunk.documentVersion,
           chunkId: chunk.chunkId, scope: chunk.scope, aclRevision: chunk.aclRevision, locator: chunk.locator };
         items.push({ source: ref, snippet: chunk.text, contentFingerprint: fingerprint(chunk.text), trust: chunk.trust });
       }
       return { status: 'ready' as const, documentVersion: d.documentVersion, aclRevision: d.aclRevision,
-        truncated: chunks.length === limit, sources: items,
+        truncated: chunks.truncated, sources: items,
         semantics: 'preview_not_approval_or_search_readiness' as const };
     });
   }

@@ -17,6 +17,7 @@ test('create/parse readiness and bounded preview expose current persistent facts
   assert.equal((await api.preview('doc-1', 1)).status, 'ready');
   const preview = await api.preview('doc-1', 1);
   assert.equal(preview.sources.length, 1); assert.equal(preview.sources[0].source.documentVersion, 'v1');
+  assert.equal(preview.truncated, false);
   assert.equal(preview.sources[0].trust, 'untrusted_data'); assert.equal(preview.semantics, 'preview_not_approval_or_search_readiness');
   await api.revise(3, h.draft({ documentVersion: 'v2', operationId: 'revise-1' }));
   const next = await api.parseReadiness('doc-1');
