@@ -138,6 +138,29 @@ export class PersistentMemoryConsentService {
       nextStep: receipt ? 'read_current' as const : 'reconcile_original_operation' as const };
   }
 
+  /** Reconciliation material for an interrupted memory operation. Absence of
+   * a receipt is deliberately reported as unknown, never as proof that the
+   * durable write did not happen. The caller must retry the same operation or
+   * present the current state to a human; this method never creates a record. */
+  async operationRecovery(value: unknown) {
+    const input = parse(z.object({ memoryId: id, operationId: id.max(110), expectedRevision: z.number().int().min(1).max(4294967293),
+      operation: z.enum(['propose', 'modify', 'confirm', 'revoke', 'delete']) }).strict(), value);
+    const context = await this.current(), owner = actor(context);
+    await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner });
+    const before = await this.repository.read(context.scope, owner, input.memoryId);
+    if (!before) return unavailable();
+    await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner, memory: before });
+    const receipt = await this.repository.operation(context.scope, owner, input.memoryId, input.operationId);
+    const after = await this.repository.read(context.scope, owner, input.memoryId);
+    if (!after || fingerprint(before) !== fingerprint(after)) throw new KnowledgeError('conflict');
+    await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner, memory: after });
+    return { memoryId: input.memoryId, operationId: input.operationId, requestedOperation: input.operation,
+      receipt: receipt ? 'recorded' as const : 'unknown' as const,
+      current: { status: after.status, revision: after.revision, expiresAt: after.expiresAt },
+      nextStep: receipt ? 'reconcile_recorded_operation' as const : 'reconcile_same_operation' as const,
+      absenceSemantics: 'no_receipt_is_not_proof_of_non_execution' as const };
+  }
+
   async confirmationRecovery(value: unknown) {
     const result = await this.confirmationStatus(value);
     const nextStep = { not_created: 'explicit_human_confirm', confirmation_saved: 'resume_same_operation',
