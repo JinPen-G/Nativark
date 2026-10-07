@@ -1,6 +1,6 @@
 import { AI_KNOWLEDGE_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
 import type { KnowledgeDocumentPorts, KnowledgeRecord, KnowledgeAction } from './knowledge.ports';
-import { KnowledgeError, requiredPort } from './knowledge-errors';
+import { KnowledgeCommitUnknownError, KnowledgeError, requiredPort } from './knowledge-errors';
 import { assertRecord, authorize, draftInput, fingerprint, mutationInput, operationFingerprint, parse, validateChunks, queueIndex } from './knowledge-validation';
 
 export class KnowledgeDocumentService {
@@ -89,7 +89,13 @@ export class KnowledgeDocumentService {
     const input = parse(mutationInput, value), before = await this.load(stableContext, input.documentId, 'parse');
     assertStableContext();
     const hash = operationFingerprint(stableContext, ['parse', input]);
-    if (await this.replay(stableContext, before, input.operationId, hash)) return before;
+    if (await this.replay(stableContext, before, input.operationId, hash)) {
+      assertStableContext();
+      // The pending operation receipt acknowledges admission only, not parsed
+      // chunks. Never restart parsing or report a completed replay on that basis.
+      if (before.parseOperationId === input.operationId) throw new KnowledgeCommitUnknownError();
+      return before;
+    }
     assertStableContext();
     if (before.revision !== input.expectedRevision || before.document.publication !== 'draft' || before.document.parsing === 'parsed' || before.parseOperationId) throw new KnowledgeError('conflict');
     const pending: KnowledgeRecord = { indexJob: before.indexJob && structuredClone(before.indexJob), document: { ...structuredClone(before.document), parsing: 'pending', indexing: 'not_indexed' }, revision: before.revision + 1, parseOperationId: input.operationId };
