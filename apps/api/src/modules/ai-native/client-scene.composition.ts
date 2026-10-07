@@ -38,8 +38,11 @@ export function composeAiClientScenes(input: {
   client: ClientReadPort;
   session?: AiClientSessionSource;
 }) {
-  if (!input?.client || typeof input.client.channelBootstrap !== 'function'
-    || typeof input.client.publicCatalog !== 'function') throw new Error('AI_CLIENT_CAPABILITY_UNAVAILABLE');
+  const required: ReadonlyArray<keyof ClientReadPort> = ['channelBootstrap', 'publicCatalog', 'catalog',
+    'availability', 'myOrders', 'getOrder', 'corporateIdentities'];
+  if (!input?.client || required.some(method => typeof input.client[method] !== 'function')) {
+    throw new Error('AI_CLIENT_CAPABILITY_UNAVAILABLE');
+  }
   if (input.session) assertContextSource(input.session);
 
   const member = () => {
