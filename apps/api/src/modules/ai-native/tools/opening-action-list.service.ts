@@ -7,6 +7,10 @@ import { ModelGatewayError } from '../model-gateway.ports';
 import { sealBusinessScenario } from './business-scenario-input';
 
 const inputSchema = z.object({ risks: aiRiskReadInputSchema.optional() }).strict();
+const terminologyFields = ['itemLabel', 'itemGroupLabel', 'assetLabel', 'fulfillmentLabel', 'pickupLabel', 'returnLabel'] as const;
+const differenceSchema = z.object({ expectedVersion: z.string().min(1).max(191),
+  changes: z.array(z.object({ field: z.enum(terminologyFields), value: z.string().trim().min(1).max(80) }).strict()).min(1).max(6)
+}).strict();
 // Only section identifiers already returned by tenantReadiness. Not routes,
 // proposal fields or invented checks; unknown new keys stay unclassified.
 const sections: Readonly<Record<string, readonly string[]>> = {
@@ -92,6 +96,38 @@ export class AiOpeningActionListService {
         : 'cannot_determine' as const,
       evidence: section?.evidence, current: section,
       meaning: 'current_readiness_only_not_external_verification_or_publication' as const };
+  }
+
+  /** Ordinary display terminology only, already present in the formal
+   * SaveTenantRentalProfileRequest. No category/capability/key mutation. */
+  async prepareDifference(value: unknown) {
+    const parsed = differenceSchema.safeParse(value);
+    if (!parsed.success || new Set(parsed.data.changes.map(row => row.field)).size !== parsed.data.changes.length) throw new ModelGatewayError('INVALID_REQUEST');
+    const requested = structuredClone(parsed.data);
+    return this.authority.withRead('opening', { limit: 50 }, async context => {
+      if (context.scope.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
+      const before = structuredClone(await this.contexts.current(context.scope));
+      if (before.profile.configVersion !== requested.expectedVersion) throw new ModelGatewayError('CONFIG_INVALID');
+      const changes = requested.changes.map(row => ({ field: `terminology.${row.field}`, before: before.profile.terminology[row.field],
+        after: row.value, source: { scope: context.scope, resourceType: 'tenant_profile' as const,
+          version: before.profile.configVersion, observedAt: context.authorizedAt },
+        impact: 'display_terminology_only_not_business_rules' as const }));
+      if (requestFingerprint(before) !== requestFingerprint(await this.contexts.current(context.scope))) throw new ModelGatewayError('CONFIG_INVALID');
+      return { status: 'candidate_only' as const, scope: context.scope, currentVersion: before.profile.configVersion,
+        changes, persistence: 'not_attempted_no_verified_proposal_port' as const,
+        publication: 'not_attempted' as const, authorization: 'write_requires_original_permissions_and_approval' as const };
+    });
+  }
+
+  async requiredMaterials() {
+    const current = await this.read();
+    return { scope: current.scope, observedAt: current.observedAt, configVersion: current.configVersion,
+      rows: current.sections.filter(row => row.required && row.status !== 'readiness_check_passed').map(row => ({
+        key: row.key, issue: row.issue, status: row.status, evidence: row.evidence, manual: row.manual,
+        fieldsToReview: row.candidate.fieldsToReview,
+        materialDefinition: 'not_loaded_use_original_form' as const,
+        sensitiveValues: 'not_requested_or_returned' as const })),
+      meaning: 'readiness_blockers_not_invented_document_requirements' as const };
   }
 
   async prepare(value: unknown = {}, modelAvailability: 'not_requested' | 'unavailable' = 'not_requested') {

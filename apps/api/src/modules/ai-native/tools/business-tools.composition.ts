@@ -22,6 +22,7 @@ import { AiOpeningActionListService } from './opening-action-list.service';
 import { AiQuoteBusinessPreparationService } from './quote-business-preparation.service';
 import { AiOrderExplanationPreparationService } from './order-explanation-preparation.service';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { AiMemberProfileDifferenceService } from './member-profile-difference.service';
 
 /** Server composition only. Guard and current session come from the application
  * host, never model arguments. No HTTP route, dispatch, entitlement or approval
@@ -72,6 +73,7 @@ export function composeAiAuthorizedBusinessTools(input: {
     catalog: reads.catalog,
     availability: reads.availability,
     membershipCandidates: reads.membershipCandidates,
+    memberProfileDifference: new AiMemberProfileDifferenceService(reads.membershipCandidates, routes),
     order,
     orderExplanation: explanation,
     orderNextSteps: nextSteps,
