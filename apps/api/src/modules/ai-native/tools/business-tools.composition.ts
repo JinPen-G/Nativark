@@ -20,6 +20,7 @@ import { AiOrderExplanationFactsService } from './order-explanation-facts.servic
 import { AiOrderNextStepsService } from './order-next-steps.service';
 import { AiOpeningActionListService } from './opening-action-list.service';
 import { AiQuoteBusinessPreparationService } from './quote-business-preparation.service';
+import { AiOrderExplanationPreparationService } from './order-explanation-preparation.service';
 
 /** Server composition only. Guard and current session come from the application
  * host, never model arguments. No HTTP route, dispatch, entitlement or approval
@@ -59,6 +60,8 @@ export function composeAiAuthorizedBusinessTools(input: {
   const quote = composeAiGuardedQuoteTools({ core: input.core, business: input.business, routes,
     readers: { catalog: reads.catalog, members: reads.membershipCandidates }, clock: input.clock });
   const quotePreparation = new AiQuoteBusinessPreparationService(quote.candidates, reads.availability, routes);
+  const nextSteps = (serverOrderId: string) => new AiOrderNextStepsService(
+    new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock), explanation(serverOrderId));
   const risks = new AiRiskReadFactsService(input.reports, {
     category: async scope => (await context.current(scope)).category.code,
     currency: async scope => (await context.current(scope)).settings.pricing.currency
@@ -69,8 +72,10 @@ export function composeAiAuthorizedBusinessTools(input: {
     membershipCandidates: reads.membershipCandidates,
     order,
     orderExplanation: explanation,
-    orderNextSteps: (serverOrderId: string) => new AiOrderNextStepsService(
-      new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock), explanation(serverOrderId)),
+    orderNextSteps: nextSteps,
+    orderExplanationPreparation: (serverOrderId: string) => new AiOrderExplanationPreparationService(
+      new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock),
+      explanation(serverOrderId), nextSteps(serverOrderId)),
     orderPayments: (serverOrderId: string) => {
       if (!input.payments) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
       return new AiOrderPaymentFactsService(input.payments, input.core,

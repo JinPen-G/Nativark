@@ -3,6 +3,8 @@ import type { AiOrderReadFactsService } from '../order-read-facts.service';
 import type { AiOrderPaymentFactsService } from './order-payment-facts.service';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { ModelGatewayError } from '../model-gateway.ports';
+import type { AiExecutionContext } from '@rental-os/shared';
+import { assertAiReadContextBinding } from './read-context-binding';
 
 /** Structured evidence only, not an explanation generator or a payment ledger.
  * Bound once by the server; optional finance denial exposes no existence/count. */
@@ -12,8 +14,9 @@ export class AiOrderExplanationFactsService {
     private readonly payments?: Pick<AiOrderPaymentFactsService, 'read'>,
     private readonly clock: () => Date = () => new Date()) {}
 
-  async read() {
+  async read(expectedContext?: AiExecutionContext) {
     return this.authority.withOrderRead(async (context, orderId) => {
+      assertAiReadContextBinding(context, expectedContext);
       if (context.scope.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
       const scope = structuredClone(context.scope);
       const principal = (value: typeof context) => {

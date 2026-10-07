@@ -2,15 +2,18 @@ import { AI_TOOL_BASELINE } from '../tool-baseline';
 import type { AiOrderRouteContextAuthority } from '../order-route-context.authority';
 import type { AiOrderExplanationFactsService } from './order-explanation-facts.service';
 import { ModelGatewayError } from '../model-gateway.ports';
+import type { AiExecutionContext } from '@rental-os/shared';
+import { assertAiReadContextBinding } from './read-context-binding';
 
 /** Inventory-backed candidates, NOT Core's allowed-actions query. No inferred
  * transition eligibility or executable callback is returned. */
 export class AiOrderNextStepsService {
   constructor(private readonly authority: Pick<AiOrderRouteContextAuthority, 'withOrderRead'>,
     private readonly facts: Pick<AiOrderExplanationFactsService, 'read'>) {}
-  async read() {
+  async read(expectedContext?: AiExecutionContext) {
     return this.authority.withOrderRead(async (context, orderId) => {
-      const evidence = await this.facts.read();
+      assertAiReadContextBinding(context, expectedContext);
+      const evidence = await this.facts.read(context);
       if (context.scope.kind !== 'workspace' || evidence.orderId !== orderId
         || evidence.scope.workspaceId !== context.scope.workspaceId || evidence.scope.tenantId !== context.scope.tenantId) throw new ModelGatewayError('FORBIDDEN');
       const permissions = 'access' in context ? context.access.permissions : [];

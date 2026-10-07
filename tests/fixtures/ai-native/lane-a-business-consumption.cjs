@@ -23,5 +23,5 @@ exports.setup = async () => {
   const group = core.listItemGroups('tenant_001')[0], location = core.listLocations('tenant_001')[0];
   const candidate = { customerType: 'personal', customerId: 'customer-a', items: [{ productName: group.name, quantity: 1 }],
     start: '2026-11-10T09:00:00+08:00', end: '2026-11-11T09:00:00+08:00', fulfillmentMode: 'store_pickup_return', locationName: location.name };
-  return { h, tools, core, business, candidate };
+  return { h, tools, core, business, candidate, memberships, reports };
 };
