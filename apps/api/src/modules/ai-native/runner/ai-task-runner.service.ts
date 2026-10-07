@@ -293,6 +293,8 @@ export class AiTaskRunner {
           return await finish({ status: 'unknown', completedSteps, cleanupFailed });
         }
         if (this.deps.inputs && result.kind === 'paused' && result.pause === 'input') throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
+        // Cancellation advances the task revision, not the original step or fenced lease used for result CAS.
+        if (await checkCancel()) ref.registered = { ...ref.registered, taskRevision };
         advance(await this.persistResult(ref, structuredClone(lease), result), ref);
         if (resourceTicket && this.deps.resources) {
           try {
