@@ -28,10 +28,10 @@ export class PrismaKnowledgeReadAdapter implements KnowledgeContentPort, Knowled
     requiredPort(authorization, ['authorize']); requiredPort(clock, ['now']);
   }
 
-  private where(document: AiKnowledgeDocumentDraft) {
+  private where(document: AiKnowledgeDocumentDraft, published = true) {
     if (document.scope.kind !== 'workspace') return unavailable();
     return { version: { documentId: document.documentId, contentHash: document.documentVersion,
-      document: { id: document.documentId, tenantId: document.scope.tenantId, workspaceId: document.scope.workspaceId, status: 'published' } } };
+      document: { id: document.documentId, tenantId: document.scope.tenantId, workspaceId: document.scope.workspaceId, ...(published ? { status: 'published' } : {}) } } };
   }
 
   private async head(scope: AiExecutionContext['scope'], documentId: string) {
@@ -41,8 +41,8 @@ export class PrismaKnowledgeReadAdapter implements KnowledgeContentPort, Knowled
     return record;
   }
 
-  private async rows(document: AiKnowledgeDocumentDraft, query?: string) {
-    const rows = await this.db.aiKnowledgeChunk.findMany({ where: { ...this.where(document), ...(query === undefined ? {} : { text: { contains: query } }) },
+  private async rows(document: AiKnowledgeDocumentDraft, query?: string, published = true) {
+    const rows = await this.db.aiKnowledgeChunk.findMany({ where: { ...this.where(document, published), ...(query === undefined ? {} : { text: { contains: query } }) },
       take: 201, orderBy: [{ chunkIndex: 'asc' }, { id: 'asc' }] });
     if (!Array.isArray(rows) || rows.length > 200) return unavailable();
     let chars = 0;
@@ -74,6 +74,36 @@ export class PrismaKnowledgeReadAdapter implements KnowledgeContentPort, Knowled
       const current = await authorize(this.authorization, context, { action: 'read_body', scope: source.scope, document: after.document });
       if (fingerprint(before) !== fingerprint(after) || fingerprint(grant) !== fingerprint(current)) return unavailable();
       return chunk;
+    } catch { return unavailable(); }
+  }
+
+  /** Bounded references for a human preview. The caller must still use chunk()
+   * for each body read, so a reference list never grants body access. */
+  async listSources(context: AiExecutionContext, document: AiKnowledgeDocumentDraft, limit: number) {
+    try {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 20) return unavailable();
+      if (!sameScope(context.scope, document.scope)) return unavailable();
+      const record = await this.head(document.scope, document.documentId);
+      if (fingerprint(record.document) !== fingerprint(document)) return unavailable();
+      await authorize(this.authorization, context, { action: 'read_body', scope: context.scope, document });
+      const chunks = await this.rows(document, undefined, false);
+      const refs = chunks.slice(0, limit).map(chunk => ({ kind: 'document' as const, documentId: chunk.documentId,
+        documentVersion: chunk.documentVersion, chunkId: chunk.chunkId, scope: chunk.scope,
+        aclRevision: chunk.aclRevision, locator: chunk.locator }));
+      return { refs, truncated: chunks.length > limit };
+    } catch { return unavailable(); }
+  }
+
+  /** Parsed draft preview is intentionally separate from searchable chunk().
+   * It still requires current body authorization and the persisted head. */
+  async previewChunks(context: AiExecutionContext, document: AiKnowledgeDocumentDraft, limit: number) {
+    try {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 10 || !sameScope(context.scope, document.scope)) return unavailable();
+      const record = await this.repository.read(document.scope, document.documentId);
+      if (!record || fingerprint(record.document) !== fingerprint(document) || document.parsing !== 'parsed' || document.publication === 'deleted') return unavailable();
+      await authorize(this.authorization, context, { action: 'read_body', scope: context.scope, document });
+      const chunks = await this.rows(document, undefined, false);
+      return { chunks: chunks.slice(0, limit), truncated: chunks.length > limit };
     } catch { return unavailable(); }
   }
 

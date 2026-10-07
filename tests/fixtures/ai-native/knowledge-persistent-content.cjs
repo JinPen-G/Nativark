@@ -17,6 +17,7 @@ exports.dbFactory = function dbFactory() {
   };
   db.aiKnowledgeVersion = {
     async findFirst({ where }) { return clone([...state.versions.values()].find(v => Object.entries(where).every(([k, value]) => v[k] === value)) ?? null); },
+    async findMany({ where, take, include }) { return clone([...state.versions.values()].filter(v => v.documentId === where.documentId).sort((a, b) => a.version - b.version).slice(0, take).map(v => ({ ...v, chunks: include?.chunks ? [...state.chunks.values()].filter(c => c.versionId === v.id).sort((a, b) => a.chunkIndex - b.chunkIndex) : undefined }))); },
     async create({ data }) { const { chunks, ...row } = data; state.versions.set(row.id, clone(row)); for (const chunk of chunks?.create ?? []) state.chunks.set(chunk.id, { ...clone(chunk), versionId: row.id }); return clone(row); }
   };
   db.aiKnowledgeChunk = {

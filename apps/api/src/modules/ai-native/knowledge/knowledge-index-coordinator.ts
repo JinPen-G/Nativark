@@ -3,13 +3,13 @@ import type { AiExecutionContext } from '@rental-os/shared';
 import type { KnowledgeIndexJob, KnowledgeIndexPort, KnowledgeRecord } from './knowledge.ports';
 import { KnowledgeDocumentService } from './knowledge-document.service';
 import { KnowledgeCommitUnknownError, KnowledgeError, requiredPort } from './knowledge-errors';
-import { authorize, fingerprint, mutationInput, parse, queueIndex } from './knowledge-validation';
+import { authorize, fingerprint, mutationInput, operationFingerprint, parse, queueIndex } from './knowledge-validation';
 
 export class KnowledgeIndexCoordinator {
   constructor(private readonly documents: KnowledgeDocumentService, private readonly index: KnowledgeIndexPort) { requiredPort(index, ['apply']); }
   async request(context: AiExecutionContext, value: unknown): Promise<KnowledgeRecord> {
     const input = parse(mutationInput.extend({ kind: z.enum(['upsert', 'remove']) }).strict(), value);
-    const before = await this.documents.load(context, input.documentId, 'index'), hash = fingerprint(['index', input]);
+    const before = await this.documents.load(context, input.documentId, 'index'), hash = operationFingerprint(context, ['index', input]);
     if (await this.documents.replay(context, before, input.operationId, hash)) return before;
     if (before.revision !== input.expectedRevision) throw new KnowledgeError('conflict');
     if (input.kind === 'upsert' && (before.document.publication === 'deleted' || before.document.parsing !== 'parsed')) throw new KnowledgeError('not_ready');
@@ -40,11 +40,11 @@ export class KnowledgeIndexCoordinator {
     }
     const { failure, ...clean } = before;
     const next: KnowledgeRecord = { ...clean, revision: before.revision + 1, indexJob: { ...active, status }, document: { ...before.document, indexing: status === 'failed' ? 'failed' : job.kind === 'upsert' ? 'indexed' : 'not_indexed' }, ...(status === 'failed' ? { failure: 'index_failed' as const } : {}) };
-    return this.documents.save(context, 'index', before, next, `${job.operationId}:index-result`, fingerprint(['index-result', job, status]));
+    return this.documents.save(context, 'index', before, next, `${job.operationId}:index-result`, operationFingerprint(context, ['index-result', job, status]));
   }
   async changeAcl(context: AiExecutionContext, value: unknown): Promise<KnowledgeRecord> {
     const input = parse(mutationInput.extend({ aclRevision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).strict(), value);
-    const before = await this.documents.load(context, input.documentId, 'change_acl'), hash = fingerprint(['acl', input]);
+    const before = await this.documents.load(context, input.documentId, 'change_acl'), hash = operationFingerprint(context, ['acl', input]);
     if (await this.documents.replay(context, before, input.operationId, hash)) return before;
     if (before.revision !== input.expectedRevision || input.aclRevision <= before.document.aclRevision || before.document.publication === 'deleted') throw new KnowledgeError('conflict');
     await authorize(this.documents.ports.authorization, context, { action: 'change_acl', scope: context.scope, document: before.document, aclRevision: input.aclRevision });

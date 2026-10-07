@@ -5,6 +5,11 @@ import type { KnowledgeAuthorizationPort, KnowledgeIndexPort } from './knowledge
 import { KnowledgeCommitUnknownError, KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
 import { authorize, fingerprint, knowledgeRecordSchema, parsePersisted, sameScope, scopeSchema } from './knowledge-validation';
 
+export function relationalIndexReceipt(value: Parameters<KnowledgeIndexPort['apply']>[1]) {
+  return { operationId: `lexical-index-${fingerprint(value.job.operationId)}`,
+    fingerprint: fingerprint(['relational-lexical-v1', value]) };
+}
+
 /** Durable generation receipt for relational lexical retrieval. There is no
  * external/vector index: the head's indexed/version/ACL state gates SQL recall.
  * apply records readiness for the exact queued job; the existing coordinator
@@ -22,8 +27,8 @@ export class PrismaKnowledgeIndexAdapter implements KnowledgeIndexPort {
     context = structuredClone(context); value = structuredClone(value);
     const scope = scopeSchema.safeParse(value.scope);
     if (!scope.success || scope.data.kind !== 'workspace' || !sameScope(context.scope, scope.data)) return unavailable();
-    const selected = scope.data, jobHash = fingerprint(['relational-lexical-v1', value]);
-    const operationId = `lexical-index-${fingerprint(value.job.operationId)}`;
+    const selected = scope.data, expected = relationalIndexReceipt(value), jobHash = expected.fingerprint;
+    const operationId = expected.operationId;
     const receiptWhere = { tenantId: selected.tenantId, workspaceId: selected.workspaceId, documentId: value.documentId, operationId };
     await authorize(this.authorization, context, { action: 'index', scope: value.scope });
     let writeAttempted = false, callbackCompleted = false;

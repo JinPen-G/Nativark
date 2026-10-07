@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { AI_KNOWLEDGE_DRAFT_VERSION, type AiExecutionContext, type AiMemoryDraft, type AiMemoryChangeDraft } from '@rental-os/shared';
 import type { MemoryAction, MemoryConfirmation, StructuredMemoryPorts } from './knowledge.ports';
 import { KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
-import { actor, confirmationSchema, fingerprint, id, parse, preferenceSchema, sameScope, scopeSchema } from './knowledge-validation';
+import { actor, confirmationSchema, fingerprint, id, operationFingerprint, parse, preferenceSchema, sameScope, scopeSchema } from './knowledge-validation';
 
 const revisionSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER - 1);
 const timeSchema = z.string().datetime({ offset: true });
@@ -73,7 +73,7 @@ export class StructuredMemoryService {
     if (context.actor.kind === 'automation') unavailable();
     const expiry = Date.parse(input.expiresAt), now = this.ports.clock.now();
     if (expiry <= now || expiry > now + 90 * 86400000) throw new KnowledgeError('invalid_input');
-    const hash = fingerprint(['propose', input]);
+    const hash = operationFingerprint(context, ['propose', input]);
     const existing = await this.ports.repository.read(context.scope, grant.actor, input.memoryId);
     if (existing) {
       await this.authorize(context, 'propose', existing);
@@ -91,7 +91,7 @@ export class StructuredMemoryService {
   async change(context: AiExecutionContext, operationId: string, value: unknown): Promise<AiMemoryDraft> {
     parse(id, operationId);
     const input = parse(changeSchema, value), before = await this.load(context, input.memoryId, input.operation);
-    const hash = fingerprint(['change', input]);
+    const hash = operationFingerprint(context, ['change', input]);
     const receipt = await this.ports.repository.operation(context.scope, actor(context), input.memoryId, operationId);
     if (receipt) {
       if (receipt.fingerprint !== hash) throw new KnowledgeError('conflict');
