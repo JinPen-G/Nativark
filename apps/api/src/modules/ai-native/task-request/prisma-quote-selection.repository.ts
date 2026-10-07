@@ -119,6 +119,12 @@ export class PrismaQuoteSelectionRepository {
         }
         const latest = await tx.aiTaskQuoteSelection.findFirst({ where: { scopeId: initial.owner.scopeId, taskId: command.taskId, runId: command.runId }, orderBy: { revision: 'desc' } });
         if ((latest?.revision ?? 0) !== command.expectedSelectionRevision) throw conflict();
+        // Once this run has published an order input or frozen its plan, a new
+        // choice requires a new original/run. Never replace material beneath an
+        // existing step/approval. Publication takes the same task row lock.
+        const runKey = { scopeId: initial.owner.scopeId, taskId: command.taskId, runId: command.runId };
+        if (await tx.aiTaskRunPlan.findFirst({ where: runKey })
+          || await tx.aiTaskActionInput.findFirst({ where: { ...runKey, toolCode: 'rental.order.commit' } })) throw conflict();
         const current = await this.authorized(command, true, tx);
         if (current.quoteHash !== initial.quoteHash || current.inputHash !== initial.inputHash || originalIdentityHash(current.context) !== originalIdentityHash(initial.context)
           || current.task.revision !== initial.task.revision || !['queued', 'running', 'waiting_input'].includes(current.task.status)) throw conflict();

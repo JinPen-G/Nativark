@@ -1,6 +1,10 @@
 import type { CreateRentalOrderRequest } from './core';
 
 export const AI_QUOTE_SELECTION_DRAFT_VERSION = 'ain-quote-selection-draft-1' as const;
+/** Opt-in only; registration does not grant identity, approval or execution. */
+export const AI_QUOTE_SELECTION_HTTP_DRAFT = Object.freeze({
+  basePath: 'ai-native/quote-selections', select: '', read: 'read', reconcile: 'reconcile'
+} as const);
 export type AiQuoteSelectedOrderDraft = Pick<CreateRentalOrderRequest,
   'quoteId' | 'customerId' | 'customerName' | 'contactPhone' | 'fulfillmentMode' | 'fulfillmentLocationId' | 'returnLocationId' | 'startAt' | 'endAt' | 'lines'> & {
     customerType: 'personal'; customerId: string; bookingIdentity?: { bookingIdentity: 'personal' };

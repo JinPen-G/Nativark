@@ -9,15 +9,15 @@ const { composeAiOriginalScenes } = require('../../../apps/api/src/modules/ai-na
 const { AI_SCENE_REQUEST_DRAFT_VERSION } = require('../../../packages/shared/src/ai-scene-request-draft');
 const { order } = require('./authorization-baseline.cjs');
 
-exports.setup = async () => {
+exports.setup = async (extraTables = {}) => {
   const b = await businessSetup(), tenantId = 'tenant_001';
   const scope = { id: 'scope-a', ...aiPersistenceScopeColumns({ kind: 'workspace', tenantId, workspaceId: 'workspace-a' }) };
   const tenant = clone(b.h.state.tenant[0]); tenant.id = tenantId; tenant.subscription.tenantId = tenantId;
   const sceneCodes = ['order_explanation', 'opening_diagnosis', 'quote_clarification'];
   const policies = sceneCodes.map(sceneCode => ({ scopeId: scope.id, sceneCode, sceneVersion: '1', revision: 1, enabled: true,
     allowedTools: [], limits: {}, expiresAt: new Date('2027-01-01T00:00:00Z') }));
-  const store = createTaskInputStore({ aiScope: [scope], aiTaskOriginalRequest: [], aiTask: [], aiRun: [], aiStep: [], aiTaskRunPlan: [],
-    aiTaskPlanPolicy: policies, aiTaskActionPolicy: [], aiBudgetPolicy: [], tenant: [tenant], subscriptionFeatureCatalog: clone(b.h.state.subscriptionFeatureCatalog), tenantFeatureGrant: [] },
+  const store = createTaskInputStore({ aiScope: [scope], aiTaskOriginalRequest: [], aiTaskActionInput: [], aiTask: [], aiRun: [], aiStep: [], aiTaskRunPlan: [],
+    aiTaskPlanPolicy: policies, aiTaskActionPolicy: [], aiBudgetPolicy: [], tenant: [tenant], subscriptionFeatureCatalog: clone(b.h.state.subscriptionFeatureCatalog), tenantFeatureGrant: [], ...extraTables },
   { aiTaskOriginalRequest: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'requestKey']], aiTask: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'creationKey']] });
   const decorate = client => {
     const findTask = client.aiTask.findFirst.bind(client.aiTask), findSteps = client.aiStep.findMany.bind(client.aiStep);
