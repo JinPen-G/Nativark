@@ -25,10 +25,10 @@ export class AiOpeningActionListService {
       if (authorized.scope.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
       const scope = structuredClone(authorized.scope);
       const before = structuredClone(await this.contexts.current(scope));
-      const facts = await this.opening.read({ limit: 50 });
+      const facts = await this.opening.read({ limit: 50 }, authorized);
       if (requestFingerprint(facts.scope) !== requestFingerprint(scope)) throw new ModelGatewayError('FORBIDDEN');
       let risk: Awaited<ReturnType<AiRiskReadFactsService['read']>> | undefined;
-      if (input.data.risks) { try { risk = await this.risks.read(input.data.risks); } catch { /* Optional report unavailable without details. */ } }
+      if (input.data.risks) { try { risk = await this.risks.read(input.data.risks, authorized); } catch { /* Optional report unavailable without details. */ } }
       if (risk && requestFingerprint(risk.scope) !== requestFingerprint(scope)) throw new ModelGatewayError('FORBIDDEN');
       const after = await this.contexts.current(scope);
       if (requestFingerprint(before) !== requestFingerprint(after)) throw new ModelGatewayError('CONFIG_INVALID');

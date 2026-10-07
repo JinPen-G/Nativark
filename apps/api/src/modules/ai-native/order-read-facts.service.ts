@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { AI_CONTRACT_DRAFT_VERSION, RentalCoreOrderStatus, AI_ORDER_FACTS_DRAFT_VERSION, RENTAL_PRICING_UNIT_CODES, type AiOrderReadFactsDraft, type AiWorkspaceScope } from '@rental-os/shared';
 import type { RentalCoreService } from '../rental-core/rental-core.service';
 import { AiOrderRouteContextAuthority } from './order-route-context.authority';
+import type { AiExecutionContext } from '@rental-os/shared';
+import { assertAiReadContextBinding } from './tools/read-context-binding';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const time = z.string().max(40).datetime({ offset: true });
@@ -62,8 +64,9 @@ export class AiOrderReadFactsService {
 
   /** Version references and saved inspection requirements only. This does not
    * reconstruct historical prices, return raw rule JSON, or compute fees. */
-  async readHistoricalBasis() {
+  async readHistoricalBasis(expectedContext?: AiExecutionContext) {
     return this.authority.withOrderRead(async (context, orderId) => {
+      assertAiReadContextBinding(context, expectedContext);
       if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user'
         || (context.audience !== 'operator' && context.audience !== 'staff')) throw Error('unsupported read scope');
       const order = historicalProjection.parse(await this.core.getOrder(context.scope.tenantId, orderId));
@@ -113,8 +116,9 @@ export class AiOrderReadFactsService {
       ratesStatus: quote.rateSnapshot ? 'available' as const : 'missing' as const,
       rates: quote.rateSnapshot ?? [], calendarsEvidence: 'not_projected' as const };
   }
-  async read(): Promise<AiOrderReadFactsDraft> {
+  async read(expectedContext?: AiExecutionContext): Promise<AiOrderReadFactsDraft> {
     return this.authority.withOrderRead(async (context, orderId) => {
+      assertAiReadContextBinding(context, expectedContext);
       const audience = context.audience;
       if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user' || (audience !== 'operator' && audience !== 'staff')) throw Error('unsupported read scope');
       const order = projection.parse(await this.core.getOrder(context.scope.tenantId, orderId));

@@ -6,6 +6,7 @@ import type { AiBusinessReadAuthority } from '../business-read-route.authority';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import type { AiExecutionContext } from '@rental-os/shared';
 import { ModelGatewayError } from '../model-gateway.ports';
+import { assertAiReadContextBinding } from './read-context-binding';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const amount = z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -35,8 +36,9 @@ export class AiOrderPaymentFactsService {
       if (!port || typeof (port as unknown as Record<string, unknown>)[name] !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
     }
   }
-  async read() {
+  async read(expectedContext?: AiExecutionContext) {
     return this.orderAuthority.withOrderRead(async (owner, orderId) => {
+      assertAiReadContextBinding(owner, expectedContext);
       if (owner.scope.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
       const scope = structuredClone(owner.scope), expected = binding(owner);
       const order = z.object({ id, tenantId: id, currency }).parse(await this.core.getOrder(scope.tenantId, orderId));

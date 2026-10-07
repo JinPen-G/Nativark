@@ -18,3 +18,8 @@ test('changed order while optional reads await and revoked core access refuse th
   await assert.rejects(service.read());
   h.state.user.permissions = []; await assert.rejects(service.read());
 });
+test('server expected principal cannot be replaced by another user in the same space', async () => {
+  const h = await setup(), expected = await h.authority.resolve();
+  h.state.user.id = 'replacement-user';
+  await assert.rejects(h.reader.read(expected)); assert.equal(h.state.reads.length, 0);
+});

@@ -29,22 +29,22 @@ export class AiOrderExplanationFactsService {
           || (row.audience !== undefined && row.audience !== context.audience)
           || (row.order?.id ?? row.orderId) !== orderId) throw new ModelGatewayError('FORBIDDEN');
       };
-      const current = await this.facts.read(); assertBinding(current);
+      const current = await this.facts.read(context); assertBinding(current);
       await recheck();
       let history: Awaited<ReturnType<AiOrderReadFactsService['readHistoricalBasis']>> | undefined;
-      try { history = await this.facts.readHistoricalBasis(); } catch { /* Uniform optional coverage, no raw exception. */ }
+      try { history = await this.facts.readHistoricalBasis(context); } catch { /* Uniform optional coverage, no raw exception. */ }
       if (history) {
         assertBinding(history);
         if (history.sourceOrderUpdatedAt !== current.order.updatedAt) throw new ModelGatewayError('CONFIG_INVALID');
       }
       await recheck();
       let payment: Awaited<ReturnType<AiOrderPaymentFactsService['read']>> | undefined;
-      if (this.payments) { try { payment = await this.payments.read(); } catch { /* No count/reason/existence on denied finance. */ } }
+      if (this.payments) { try { payment = await this.payments.read(context); } catch { /* No count/reason/existence on denied finance. */ } }
       if (payment) assertBinding(payment);
       await recheck();
       // Re-read the actual minimal order after all optional awaits; outer route
       // bridge revalidates current identity as well. Sequential, not atomic DB snapshot.
-      const latest = await this.facts.read(); assertBinding(latest);
+      const latest = await this.facts.read(context); assertBinding(latest);
       if (requestFingerprint(latest.order) !== requestFingerprint(current.order)) throw new ModelGatewayError('CONFIG_INVALID');
       const now = this.clock();
       if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw new ModelGatewayError('CONFIG_INVALID');

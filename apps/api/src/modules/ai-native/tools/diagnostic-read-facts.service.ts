@@ -3,6 +3,7 @@ import type { AiExecutionContext, RentalCategoryCode, RentalCurrency } from '@re
 import type { RentalBusinessService, BusinessContext } from '../../rental-core/rental-business.service';
 import type { RentalWorkspaceReportRepository } from '../../rental-core/rental-workspace-report.repository';
 import { ModelGatewayError } from '../model-gateway.ports';
+import { assertAiReadContextBinding } from './read-context-binding';
 
 /** Mainline must implement this closed bridge through the ORIGINAL route Guard
  * and ALS, including current-identity revalidation after the awaited read.
@@ -47,10 +48,11 @@ export class AiOpeningReadFactsService {
     private readonly authority: AiDiagnosticReadAuthority, private readonly clock: () => Date = () => new Date()) {
     requireMethod(business, 'tenantReadiness'); requireMethod(context, 'current'); requireMethod(authority, 'withRead');
   }
-  async read(value: unknown) {
+  async read(value: unknown, expectedContext?: AiExecutionContext) {
     const input = aiOpeningReadInputSchema.safeParse(value);
     if (!input.success) throw new ModelGatewayError('INVALID_REQUEST');
     return this.authority.withRead('opening', input.data, async context => {
+      assertAiReadContextBinding(context, expectedContext);
       const scope = workspace(context), businessContext = await this.context.current(scope);
       const parsed = readiness.safeParse(await this.business.tenantReadiness(scope.tenantId, businessContext));
       if (!parsed.success || parsed.data.tenantId !== scope.tenantId || parsed.data.workspaceId !== scope.workspaceId
@@ -71,10 +73,11 @@ export class AiRiskReadFactsService {
     }, private readonly authority: AiDiagnosticReadAuthority, private readonly clock: () => Date = () => new Date()) {
     requireMethod(reports, 'getOperationReport'); requireMethod(settings, 'category'); requireMethod(settings, 'currency'); requireMethod(authority, 'withRead');
   }
-  async read(value: unknown) {
+  async read(value: unknown, expectedContext?: AiExecutionContext) {
     const input = aiRiskReadInputSchema.safeParse(value);
     if (!input.success) throw new ModelGatewayError('INVALID_REQUEST');
     return this.authority.withRead('risk', input.data, async context => {
+      assertAiReadContextBinding(context, expectedContext);
       const scope = workspace(context), category = await this.settings.category(scope), currency = await this.settings.currency(scope);
       const parsed = report.safeParse(await this.reports.getOperationReport(scope.tenantId, scope.workspaceId, category, input.data, currency));
       if (!parsed.success || parsed.data.tenantId !== scope.tenantId || parsed.data.workspaceId !== scope.workspaceId || parsed.data.currency !== currency)
