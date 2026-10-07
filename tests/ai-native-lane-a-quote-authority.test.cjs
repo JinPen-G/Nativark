@@ -44,6 +44,7 @@ test('settings source resolves actual workspace Core context with authorized loc
   const ctx = await source.current(scope);
   assert.equal(ctx.profile.tenantId, 'tenant-a'); assert.equal(ctx.category.code, 'camera');
   await assert.rejects(source.current({ ...scope, workspaceId: 'workspace-b' }));
+  await assert.rejects(source.current({ ...scope, kind: 'tenant' }));
   ctx.settings.calendar.timeZone = 'UTC';
   assert.equal((await source.current(scope)).settings.calendar.timeZone, 'Asia/Shanghai');
 });

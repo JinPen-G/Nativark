@@ -3,6 +3,8 @@ const test=require('node:test'),assert=require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
 require('ts-node').register({transpileOnly:false,compilerOptions:{module:'commonjs',moduleResolution:'node',experimentalDecorators:true,emitDecoratorMetadata:true}});
 const {AiOpeningReadFactsService,AiRiskReadFactsService}=require('../apps/api/src/modules/ai-native/tools/diagnostic-read-facts.service');
+const {AiBusinessReadRouteAuthority}=require('../apps/api/src/modules/ai-native/business-read-route.authority');
+const {AiDiagnosticRouteAuthority}=require('../apps/api/src/modules/ai-native/tools/diagnostic-route.authority');
 const {RentalCoreService}=require('../apps/api/src/modules/rental-core/rental-core.service');
 const {RentalBusinessService}=require('../apps/api/src/modules/rental-core/rental-business.service');
 const {RentalWorkspaceReportRepository}=require('../apps/api/src/modules/rental-core/rental-workspace-report.repository');
@@ -15,17 +17,8 @@ const {RENTAL_CATEGORY_DEFINITIONS,AI_CONTRACT_DRAFT_VERSION}=require('./fixture
 async function setup(){
  const h=await authorizedRunnerHarness();h.identity.user.permissions.push('rental-os:report:view');
  const guard=new ApiAuthGuard(h.authorization.auth,undefined,undefined,undefined,{});
- // Explicit OFFLINE composition of the original Guard, not a production adapter.
- // This executes the real permission route and ALS; only its persistent reads are mocked.
- const authority={withRead:async(kind,input,consume)=>{
-   const authorize=async work=>runWithRequestIdentity({},async()=>{
-    const c=await h.authorization.credentials.current();const path=kind==='opening'?'/api/rental/v1/tenant-readiness':'/api/rental/v1/reports/operations';
-    const req={url:path,originalUrl:path,method:'GET',headers:{authorization:c.authorization},query:structuredClone(input),staffApiRequest:false};
-    assert.equal(await guard.canActivate(new ExecutionContextHost([req])),true);
-    const i=getRequestIdentity();return work({contractVersion:AI_CONTRACT_DRAFT_VERSION,requestId:c.requestId,authorizedAt:new Date(h.control.now).toISOString(),audience:'operator',actor:{kind:'user',userId:req.user.id},scope:{kind:'workspace',tenantId:i.tenantId,workspaceId:i.workspaceId},access:{permissions:req.user.permissions,dataScope:i.dataScope,locationScope:i.locationScope}});
-   });
-   return authorize(async context=>{const before=JSON.stringify(context);const out=await consume(context);await authorize(async current=>{assert.equal(JSON.stringify(current),before);});return out;});
- }};
+ // Actual formal bridge, Guard and ALS; only persistence/config execution is mocked.
+ const authority=new AiDiagnosticRouteAuthority(new AiBusinessReadRouteAuthority(guard,h.authorization.credentials));
  const config=stores.createAbsorbingConfigStore();config.listWorkspaces=async()=>[{id:'workspace-a',tenantId:'tenant-a',categoryCode:'camera',isDefault:true}];
  const core=new RentalCoreService(config,stores.createAbsorbingFactStore());await core.onApplicationBootstrap();
  const bc=stores.createAbsorbingBusinessConfigStore();bc.loadAll=async()=>[{tenantId:'tenant-a',workspaceId:'workspace-a',categoryCode:'camera',hasPersistedConfig:true,pricingPlans:[],discountPlans:[],services:[],calendars:[],ruleVersions:[],notificationTemplates:[]}];

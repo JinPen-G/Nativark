@@ -37,6 +37,7 @@ export class AiGuardedQuoteCoreContextSource implements AiQuoteCoreContextSource
     if (typeof routes?.withRead !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   }
   async current(expected: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>): Promise<BusinessContext> {
+    if (expected?.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
     const scope = structuredClone(expected);
     return this.routes.withRead('quote_context', {}, async context => {
       if (context.scope.kind !== 'workspace' || context.scope.tenantId !== scope.tenantId
