@@ -1,4 +1,4 @@
-import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT, AI_TASK_TRANSITION_REASONS_DRAFT, AI_STEP_TRANSITION_REASONS_DRAFT, AI_TOOL_CODES, AI_ERROR_CODES } from "@rental-os/shared";
+import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT, AI_TASK_TRANSITION_REASONS_DRAFT, AI_STEP_TRANSITION_REASONS_DRAFT, AI_TASK_STEP_CODES, AI_ERROR_CODES } from "@rental-os/shared";
 import type { SchemaObject } from "./openapi-document";
 
 const ref = (name: string): SchemaObject => ({ $ref: `#/components/schemas/${name}` });
@@ -32,7 +32,7 @@ export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     closed({ status: choice("unknown"), effect: choice("possible"), error: unknownError })
   ] },
   AiStepStateDraft: closed({
-    stepId: id(), runId: id(), sequence: revision, revision, toolCode: choice(...AI_TOOL_CODES), toolVersion: id(),
+    stepId: id(), runId: id(), sequence: revision, revision, toolCode: choice(...AI_TASK_STEP_CODES), toolVersion: id(),
     actionId: id(), requestFingerprint: { type: "string", minLength: 64, maxLength: 64, pattern: "^[0-9a-f]{64}$" },
     outcome: ref("AiStepOutcomeDraft")
   }),

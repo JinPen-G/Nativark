@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
-import { AI_TASK_DRAFT_VERSION, AI_TOOL_CODES, type AiExecutionContext, type AiTaskEventDraft } from "@rental-os/shared";
+import { AI_TASK_DRAFT_VERSION, AI_TASK_STEP_CODES, type AiExecutionContext, type AiTaskEventDraft } from "@rental-os/shared";
 import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from "./ai-task.repository";
 import { isAiStepExecutionContext } from "./task-contract-validation";
@@ -21,7 +21,7 @@ export interface AiStepReplayAuthority {
 const grantSchema = z.object({
   context: z.unknown(), registrationAllowed: z.literal(true), authorizationKey: id,
   taskId: id, registrationRef: id, expiresAt: z.string().datetime({ offset: true }),
-  toolCode: z.enum(AI_TOOL_CODES), toolVersion: id, inputRef: id,
+  toolCode: z.enum(AI_TASK_STEP_CODES), toolVersion: id, inputRef: id,
   requestFingerprint: z.string().regex(/^[0-9a-f]{64}$/u)
 }).strict();
 export interface AiStepRegistrationAuthority {
