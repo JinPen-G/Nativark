@@ -135,6 +135,7 @@ export type AiTaskRunnerTaskOutcome =
 /** Task aggregate transition is supplied by the composition root. The runner
  * only reports a durable step outcome; it never implements task transitions. */
 export interface AiTaskRunnerOutcomePort {
+  start?(input: { taskId: string; taskRevision: number; lease: AiTaskRunnerLease }): Promise<AiTaskRunnerStepCommit>;
   commit(input: {
     taskId: string;
     taskRevision: number;
