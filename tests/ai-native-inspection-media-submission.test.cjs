@@ -10,6 +10,17 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
 function stream(bytes){return new ReadableStream({start(controller){controller.enqueue(bytes);controller.close();}});}
 test('formal S3 object producer reads bound bytes via header auth, denies cross-space and bounds aborted transport',async()=>{
   const f=fixture(), asset=f.state.assets.get('file-a');
+  const {InspectionObjectReaderModule}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-object-reader.provider');
+  const {INSPECTION_OBJECT_READER}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-media.reader');
+  const {NestFactory}=require('@nestjs/core');
+  let configReads=0;
+  f.db.rentalOrder={findFirst:async()=>null};
+  assert.throws(()=>InspectionObjectReaderModule.register(f.db,{}),{code:'STORAGE_UNAVAILABLE'});
+  const host=await NestFactory.createApplicationContext(InspectionObjectReaderModule.register(f.db,{runtimeConfig:async()=>{configReads++;return null;}}),{logger:false});
+  try {
+    assert.ok(host.get(INSPECTION_OBJECT_READER) instanceof TenantInspectionObjectReader);
+    assert.equal(configReads,0); // Explicit registration does not open objects or read configuration.
+  } finally { await host.close(); }
   Object.assign(asset,{storageProvider:'s3_compatible',sizeBytes:png.length});
   Object.assign(asset.uploadSession,{provider:'s3_compatible',fileAssetId:asset.id});
   f.db.rentalOrder={findFirst:async({where})=>where.id==='order-a'&&where.tenantId==='tenant-a'&&where.workspaceId==='workspace-a'?{id:'order-a'}:null};
