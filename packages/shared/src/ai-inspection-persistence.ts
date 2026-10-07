@@ -30,6 +30,28 @@ export type AiInspectionDraftState = {
   evidence: AiInspectionEvidenceRef[];
   missingFields: string[];
   reviewRequired: boolean;
+  submission?: AiInspectionSubmissionMaterial;
+  recognitionInputs?: AiInspectionRecognitionInput[];
+};
+
+export type AiInspectionRecognitionInput = {
+  inputId: string;
+  inputFingerprint: string;
+  bindingFingerprint: string;
+  question: string;
+  template: { id: string; version: string; fields: Array<{ code: string; type: string; label: string; required: boolean; options?: string[] }> };
+  media: Array<AiInspectionEvidenceRef & { contentHash: string; mediaType: string; sizeBytes: number; width: number | null; height: number | null; durationMs: number | null }>;
+};
+
+export type AiInspectionSubmissionMaterial = {
+  actionId: string;
+  requestHash: string;
+  body: {
+    templateId: string;
+    results: Record<string, string | number | boolean | string[]>;
+    attachments: string[];
+    handoverSignatureFileAssetId?: string;
+  };
 };
 
 export type AiInspectionDraftCreateRequest = AiInspectionTarget & {
@@ -46,6 +68,22 @@ export type AiInspectionDraftEditRequest = AiInspectionTarget & {
   bindingFingerprint: string;
   edits: Array<{ fieldCode: string; decision: AiInspectionHumanField['decision']; value?: AiInspectionFieldValue; candidateId?: string }>;
 };
+
+export type AiInspectionBindingRequest = AiInspectionTarget & { attachmentId: string };
+export type AiInspectionDraftReadRequest = AiInspectionTarget & { draftId: string };
+export type AiInspectionDraftListRequest = AiInspectionTarget & { after?: string; limit: number };
+export type AiInspectionDraftCandidateRequest = AiInspectionTarget & {
+  draftId: string; operationId: string; expectedRevision: number; bindingFingerprint: string; candidates: AiInspectionCandidateDraft[];
+};
+export type AiInspectionRecognitionRequest = AiInspectionDraftReadRequest & {
+  operationId: string; expectedRevision: number; question: string;
+};
+export type AiInspectionSubmitRequest = AiInspectionDraftReadRequest & { operationId: string; expectedRevision: number };
+export type AiInspectionPrepareSubmissionRequest = AiInspectionSubmitRequest & { actionId: string; handoverSignatureFileAssetId?: string };
+export type AiInspectionOriginalOperationRequest =
+  | { kind: 'create'; request: AiInspectionDraftCreateRequest }
+  | { kind: 'edit'; request: AiInspectionDraftEditRequest }
+  | { kind: 'candidates'; request: AiInspectionDraftCandidateRequest };
 
 export type AiInspectionDraftStatus = 'draft_saved' | 'prepared' | 'submission_unknown' | 'submitted';
 export type AiInspectionOperationResult = {

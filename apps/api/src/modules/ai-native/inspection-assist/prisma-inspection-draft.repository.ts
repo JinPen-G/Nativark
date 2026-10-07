@@ -29,7 +29,7 @@ export class PrismaInspectionDraftRepository {
   }
 
   async change(scope: AiInspectionActorScope, draftId: string, operation: Operation,
-    bindingFingerprint: string, data: Change): Promise<AiInspectionOperationResult> {
+    bindingFingerprint: string, data: Change, committed?: () => void): Promise<AiInspectionOperationResult> {
     const input = structuredClone({ scope, draftId, operation, bindingFingerprint, data });
     this.checkOperation(input.operation);
     if (input.operation.expectedRevision < 1) throw new InspectionAssistError('INVALID_INPUT');
@@ -41,7 +41,13 @@ export class PrismaInspectionDraftRepository {
       if (claimed.count !== 1) throw new InspectionAssistError('REVISION_CONFLICT');
       const row = await tx.aiInspectionDraft.findFirstOrThrow({ where: { id: input.draftId, ...input.scope } });
       return this.record(tx, input.scope, input.operation, row);
-    });
+    }, committed);
+  }
+
+  async claimSubmission(scope: AiInspectionActorScope, draftId: string, operation: Operation, bindingFingerprint: string) {
+    let claimed = false;
+    const result = await this.change(scope, draftId, operation, bindingFingerprint, { status: 'submission_unknown' }, () => { claimed = true; });
+    return { result, claimed };
   }
 
   async read(scope: AiInspectionActorScope, draftId: string) {
@@ -73,12 +79,14 @@ export class PrismaInspectionDraftRepository {
   }
 
   private async write(scope: AiInspectionActorScope, operation: Operation,
-    apply: (tx: Prisma.TransactionClient) => Promise<AiInspectionOperationResult>): Promise<AiInspectionOperationResult> {
+    apply: (tx: Prisma.TransactionClient) => Promise<AiInspectionOperationResult>, committed?: () => void): Promise<AiInspectionOperationResult> {
     const existing = await this.receipt(scope, operation.operationId, operation.fingerprint);
     if (existing.status === 'found') return existing.result;
     if (existing.status === 'unavailable') throw new InspectionAssistError('STORAGE_UNAVAILABLE');
     try {
-      return await this.db.$transaction(apply);
+      const result = await this.db.$transaction(apply);
+      committed?.();
+      return result;
     } catch (error) {
       const recovered = await this.receipt(scope, operation.operationId, operation.fingerprint);
       if (recovered.status === 'found') return recovered.result;

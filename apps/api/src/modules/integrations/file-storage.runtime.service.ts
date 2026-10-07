@@ -1,4 +1,5 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException, OnApplicationBootstrap, OnApplicationShutdown, Optional, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnApplicationShutdown, Optional, ServiceUnavailableException } from "@nestjs/common";
+import { INSPECTION_OBJECT_READER, readInspectionMedia, type InspectionObjectReader } from "../ai-native/inspection-assist/inspection-media.reader";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type {
@@ -100,7 +101,8 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
   constructor(
     private readonly prisma: PrismaService,
     private readonly integrations: TenantIntegrationService,
-    @Optional() private readonly operationLog?: OperationLogService
+    @Optional() private readonly operationLog?: OperationLogService,
+    @Optional() @Inject(INSPECTION_OBJECT_READER) private readonly inspectionObjectReader?: InspectionObjectReader
   ) {}
 
   onApplicationBootstrap() {
@@ -624,6 +626,46 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
       await reader.cancel().catch(() => undefined);
       reader.releaseLock();
     }
+  }
+
+  async readInspectionBytes(tenantId: string, fileAssetId: string, owner: FileBusinessOwner, maxBytes: number, signal: AbortSignal) {
+    if (!owner.workspaceId || !owner.actorUserId || owner.businessType !== 'rental_order' || !owner.businessId
+      || !['pickup-evidence', 'return-evidence'].includes(owner.uploadScene ?? '')
+      || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_FILE_BYTES) throw new BadRequestException('检查证据读取参数无效');
+    if (!this.inspectionObjectReader) throw new ServiceUnavailableException('非URL受控检查存储读取未配置');
+    const asset = await this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, status: 'active', uploadedBy: owner.actorUserId }, include: { uploadSession: true } });
+    if (!asset || !this.matchesOwner(asset, owner) || asset.uploadSession?.status !== 'completed' || !asset.uploadSession.completedAt
+      || asset.uploadSession.tenantId !== tenantId || asset.uploadSession.storageKey !== asset.storageKey) throw new NotFoundException('检查附件不属于当前业务或未完成上传');
+    await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? '', owner.workspaceId);
+    if (asset.storageProvider === 'local_mock' || !await this.integrations.runtimeConfig('file', tenantId, asset.storageProvider as never, { requireLiveTest: false })) {
+      throw new ServiceUnavailableException('检查附件没有可用的持久存储配置');
+    }
+    const controller = new AbortController(), abort = () => controller.abort();
+    signal.addEventListener('abort', abort, { once: true });
+    const timeout = setTimeout(abort, 8000);
+    try {
+      if (signal.aborted) controller.abort();
+      if (controller.signal.aborted) throw new ServiceUnavailableException('检查读取已取消');
+      let rejectOpening: () => void = () => undefined;
+      const aborted = new Promise<never>((_resolve, reject) => {
+        rejectOpening = () => reject(new ServiceUnavailableException('检查读取已取消'));
+        controller.signal.addEventListener('abort', rejectOpening, { once: true });
+      });
+      const opening = this.inspectionObjectReader.open({ tenantId, workspaceId: owner.workspaceId, fileAssetId,
+        provider: asset.storageProvider, storageKey: asset.storageKey }, controller.signal).then(async stream => {
+        if (controller.signal.aborted) { await stream.cancel().catch(() => undefined); throw new ServiceUnavailableException('检查读取已取消'); }
+        return stream;
+      });
+      let stream: ReadableStream<Uint8Array>;
+      try { stream = await Promise.race([opening, aborted]); }
+      finally { controller.signal.removeEventListener('abort', rejectOpening); }
+      const result = await readInspectionMedia(stream, maxBytes, controller.signal);
+      if (result.mediaType !== asset.mimeType.split(';', 1)[0].trim().toLowerCase()) throw new BadRequestException('检查附件实际格式与登记类型不同');
+      const after = await this.prisma.fileAsset.findFirst({ where: { id: asset.id, tenantId, status: 'active', updatedAt: asset.updatedAt, uploadedBy: owner.actorUserId } });
+      if (!after || after.storageKey !== asset.storageKey) throw new ConflictException('读取期间附件已变化');
+      if (controller.signal.aborted) throw new ServiceUnavailableException('检查读取已取消');
+      return result;
+    } finally { clearTimeout(timeout); signal.removeEventListener('abort', abort); }
   }
 
   /** Metadata-only binding check used before a knowledge document is created. */

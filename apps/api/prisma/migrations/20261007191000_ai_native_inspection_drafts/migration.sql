@@ -23,6 +23,7 @@ CREATE TABLE `ai_inspection_drafts` (
   `updatedAt` DATETIME(3) NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE INDEX `ai_inspection_draft_scope_key` (`id`, `tenantId`, `workspaceId`),
+  UNIQUE INDEX `ai_inspection_draft_action_key` (`tenantId`, `workspaceId`, `submissionActionId`),
   INDEX `ai_inspection_draft_list_idx` (`tenantId`, `workspaceId`, `ownerId`, `audience`, `id`),
   CONSTRAINT `ai_inspection_drafts_workspace_fk` FOREIGN KEY (`tenantId`, `workspaceId`) REFERENCES `business_workspaces` (`tenantId`, `id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `ai_inspection_drafts_revision_check` CHECK (`revision` BETWEEN 1 AND 1000),

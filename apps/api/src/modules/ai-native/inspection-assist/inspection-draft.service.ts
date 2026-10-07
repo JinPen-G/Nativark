@@ -19,9 +19,16 @@ const changeSchema = targetSchema.extend({ draftId: inspectionId, operationId: i
   expectedRevision: z.number().int().min(1).max(999), bindingFingerprint: hash }).strict();
 const editSchema = changeSchema.extend({ edits: z.array(z.object({ fieldCode: inspectionId,
   decision: z.enum(['manual', 'accepted', 'modified', 'rejected']), value: scalar.optional(), candidateId: inspectionId.optional() }).strict()).min(1).max(100) }).strict();
+export const inspectionSubmissionMaterialSchema = z.object({ actionId: inspectionId, requestHash: hash,
+  body: z.object({ templateId: inspectionId, results: z.record(inspectionId, z.union([z.string().max(2000), z.number().finite(), z.boolean(), z.array(inspectionId).max(100)])),
+    attachments: z.array(inspectionId).max(101), handoverSignatureFileAssetId: inspectionId.optional() }).strict() }).strict();
+export const inspectionRecognitionInputSchema = z.object({ inputId: inspectionId, inputFingerprint: hash, bindingFingerprint: hash, question: z.string().min(1).max(4000),
+  template: z.object({ id: inspectionId, version: inspectionId, fields: z.array(z.object({ code: inspectionId, type: z.string(), label: z.string(), required: z.boolean(), options: z.array(z.string()).optional() }).strict()).max(100) }).strict(),
+  media: z.array(evidenceRef.extend({ contentHash: hash, mediaType: z.string(), sizeBytes: z.number().int().positive(), width: z.number().int().positive().nullable(),
+    height: z.number().int().positive().nullable(), durationMs: z.number().int().nonnegative().nullable() }).strict()).max(8) }).strict();
 const stateSchema = z.object({ version: z.literal(1), fields: z.record(inspectionId, z.object({ value: scalar,
   decision: z.enum(['manual', 'accepted', 'modified', 'rejected']), candidateId: inspectionId.optional(), actorId: inspectionId }).strict()),
-  candidates: z.array(z.unknown()).max(100), evidence: z.array(evidenceRef).max(100), missingFields: z.array(inspectionId).max(100), reviewRequired: z.boolean() }).strict();
+  candidates: z.array(z.unknown()).max(100), evidence: z.array(evidenceRef).max(100), missingFields: z.array(inspectionId).max(100), reviewRequired: z.boolean(), submission: inspectionSubmissionMaterialSchema.optional(), recognitionInputs: z.array(inspectionRecognitionInputSchema).max(8).optional() }).strict();
 export interface InspectionDraftEvidence {
   fingerprint(target: AiInspectionTarget, refs: Array<z.infer<typeof evidenceRef>>): Promise<string>;
 }
@@ -69,6 +76,7 @@ export class InspectionDraftService {
       const binding = await this.binding(target, scope, input.bindingFingerprint);
       if (row.bindingFingerprint !== input.bindingFingerprint) throw new InspectionAssistError('BINDING_CHANGED');
       const state = this.state(row.state);
+      delete state.submission;
       for (const edit of input.edits) {
         const candidate = edit.candidateId ? state.candidates.find(item => item.candidateId === edit.candidateId && item.fieldCode === edit.fieldCode) : undefined;
         if (edit.decision !== 'manual' && !candidate || edit.decision === 'manual' && edit.candidateId) throw new InspectionAssistError('INVALID_INPUT');
@@ -119,6 +127,7 @@ export class InspectionDraftService {
       if (snapshot.some(candidate => state.candidates.some(old => old.candidateId === candidate.candidateId))) throw new InspectionAssistError('REVISION_CONFLICT');
       if (state.candidates.length + snapshot.length > 100) throw new InspectionAssistError('INVALID_INPUT');
       state.candidates.push(...consumed.candidates);
+      delete state.submission;
       state.reviewRequired = true;
       await this.binding(target, scope, input.bindingFingerprint);
       return this.authority.withAction(target, 'write', current => {
@@ -153,6 +162,21 @@ export class InspectionDraftService {
     return this.authority.withAction(target, 'read', async scope => {
       await this.templates.read(target);
       return this.repository.list(scope, target.orderId, input.after, input.limit);
+    });
+  }
+
+  async reconcileOperation(value: unknown) {
+    const input = parseInspectionInput(z.object({ kind: z.enum(['create', 'edit', 'candidates']), request: z.unknown() }).strict(), value);
+    const request = input.kind === 'create' ? parseInspectionInput(createSchema, input.request)
+      : input.kind === 'edit' ? parseInspectionInput(editSchema, input.request)
+      : parseInspectionInput(changeSchema.extend({ candidates: z.array(z.unknown()).max(100) }).strict(), input.request);
+    if ('candidates' in request) request.candidates = snapshotInspectionCandidates(request.candidates);
+    const target = targetOf(request);
+    return this.authority.withAction(target, 'read', async scope => {
+      const fingerprint = requestFingerprint({ kind: `inspection.draft.${input.kind}`, scope, input: request });
+      const result = await this.repository.receipt(scope, request.operationId, fingerprint);
+      if (result.status === 'found') await this.load(scope, result.result.draftId, target);
+      return result;
     });
   }
 
