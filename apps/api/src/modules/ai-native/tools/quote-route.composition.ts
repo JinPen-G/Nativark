@@ -68,8 +68,23 @@ export function composeAiGuardedQuoteTools(input: {
   if (typeof input?.core?.resolvePricingGroupQuoteRequest !== 'function' || typeof input?.business?.createQuote !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   const context = new AiGuardedQuoteCoreContextSource(input.core, input.routes);
   const authority = new AiQuoteRouteAuthority(input.routes);
+  const candidates = new AiQuoteCandidatePreparationService(input.readers, context, input.clock);
+  const preview = new AiQuotePreviewService(input.business, context, authority, input.clock, input.core);
   return Object.freeze({
-    candidates: new AiQuoteCandidatePreparationService(input.readers, context, input.clock),
-    preview: new AiQuotePreviewService(input.business, context, authority, input.clock, input.core)
+    candidates, preview,
+    /** Host calls after explicit candidate selection. Revision is consistency
+     * evidence only, never approval to create an order. Re-resolve every ID and
+     * bind the current server context to the original guarded Core quote. */
+    previewSelection: async (value: unknown) => {
+      const supplied = structuredClone(value);
+      const prepared = await candidates.prepare(supplied);
+      if (prepared.status !== 'needs_confirmation') return prepared;
+      const revision = supplied && typeof supplied === 'object' && !Array.isArray(supplied)
+        ? (supplied as Record<string, unknown>).selectionRevision : undefined;
+      if (revision !== prepared.selectionRevision) return { status: 'missing_input' as const, missingFields: ['selectionRevision'],
+        selectionRevision: prepared.selectionRevision, clarifications: [{ field: 'selectionRevision', reason: 'explicit_confirmation_required',
+          action: 'review_and_confirm_current_candidates', candidates: [] }] };
+      return preview.preview(prepared.request, prepared.configurationFingerprint);
+    }
   });
 }

@@ -52,6 +52,8 @@ export type AiQuotePreviewResult = {
   message?: string;
   /** Local effect evidence, not dispatch/approval or inventory ownership. */
   quotePersistence?: 'saved' | 'unknown';
+  nextAction?: 'reconcile';
+  retryable?: false;
   quote?: {
     id: string; quoteNo: string; currency?: string; chargeLines: RentalQuoteSnapshotV1["chargeLines"];
     rentalAmount: number; discountAmount: number; couponAmount: number; serviceAmount: number; fulfillmentAmount: number;
@@ -85,7 +87,7 @@ export class AiQuotePreviewService {
     if (typeof core?.createQuote !== "function" || typeof contexts?.current !== "function" || typeof authority?.withQuote !== "function") throw new ModelGatewayError("CONFIG_INVALID");
   }
 
-  async preview(value: unknown): Promise<AiQuotePreviewResult> {
+  async preview(value: unknown, expectedConfigurationFingerprint?: string): Promise<AiQuotePreviewResult> {
     const parsed = aiQuotePreviewInputSchema.safeParse(value);
     if (!parsed.success) {
       const fields = [...new Set(parsed.error.issues.map(issue => issue.path.join(".")).filter(Boolean))];
@@ -101,6 +103,7 @@ export class AiQuotePreviewService {
           return requestFingerprint(identity);
         };
         const business = structuredClone(await this.contexts.current(structuredClone(scope)));
+        if (expectedConfigurationFingerprint !== undefined && requestFingerprint(business) !== expectedConfigurationFingerprint) throw new ModelGatewayError('CONFIG_INVALID');
         const formalRequest = this.resolver
           ? structuredClone(await this.resolver.resolvePricingGroupQuoteRequest(scope.tenantId, structuredClone(parsed.data) as RentalQuoteRequest))
           : structuredClone(parsed.data) as RentalQuoteRequest;
@@ -136,7 +139,7 @@ export class AiQuotePreviewService {
             }
           });
         });
-        if (outcome.kind === 'failure') return { ...this.failure(context, outcome.status, 'Core 未能生成报价；请核对输入或转人工处理'), quotePersistence: 'unknown' };
+        if (outcome.kind === 'failure') return { ...this.failure(context, outcome.status, 'Core 未能生成报价；请核对输入或转人工处理'), quotePersistence: 'unknown', nextAction: 'reconcile', retryable: false };
         const quote = outcome.quote;
         const observed = this.clock(); if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError("CONFIG_INVALID");
         const chargeLines = z.array(chargeLineSchema).max(100).safeParse(quote?.chargeLines);

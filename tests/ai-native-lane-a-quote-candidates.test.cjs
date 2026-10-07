@@ -39,3 +39,18 @@ test('context change while fetching server settings cannot reuse earlier custome
 test('a lone name still requires an explicit human selection',async()=>{const h=await setup();h.customers.pop();delete h.candidate.customerId;h.candidate.customerName='Synthetic same name';const out=await h.service.prepare(h.candidate);assert.equal(out.status,'missing_input');assert.ok(out.missingFields.includes('customerId'));});
 test('configuration revision changed during protected rereads invalidates prepared parameters',async()=>{const h=await setup();const read=h.readers.members.read.bind(h.readers.members);let calls=0;h.readers.members.read=async value=>{const out=await read(value);if(++calls===2)h.bc.settings.configVersion='changed-revision';return out;};await assert.rejects(h.service.prepare(h.candidate));});
 test('location removed during protected rereads invalidates prepared parameters even without a revision bump',async()=>{const h=await setup();const read=h.readers.members.read.bind(h.readers.members);let calls=0;h.readers.members.read=async value=>{const out=await read(value);if(++calls===2)h.bc.locations=[];return out;};await assert.rejects(h.service.prepare(h.candidate));});
+
+test('actionable clarification to explicit resource IDs rereads original readers and rejects stale configuration',async()=>{
+ const h=await setup(),partial=await h.service.prepare({customerType:'personal',customerName:'Synthetic same name'});
+ assert.ok(partial.clarifications.some(row=>row.field==='customerId'&&row.candidates.length===2));
+ assert.ok(partial.clarifications.some(row=>row.field==='start'&&row.action==='supply_absolute_time'));
+ const selected={...h.candidate,items:[{itemGroupId:h.bc.groups[0].id,quantity:1,productName:'untrusted ignored name'}],locationId:h.bc.locations[0].id,locationName:'untrusted ignored location',selectionRevision:partial.selectionRevision};
+ const out=await h.service.prepare(selected);assert.equal(out.status,'needs_confirmation');assert.equal(out.request.lines[0].itemGroupId,h.bc.groups[0].id);
+ h.bc.settings.configVersion='new-server-config';
+ const stale=await h.service.prepare(selected);assert.equal(stale.status,'missing_input');assert.equal(stale.request,undefined);assert.equal(stale.clarifications[0].action,'reread_and_reconfirm');
+});
+test('forged selected ID cannot be rescued by a valid returned name',async()=>{
+ const h=await setup(),before=await h.service.prepare(h.candidate);
+ const out=await h.service.prepare({...h.candidate,selectionRevision:before.selectionRevision,items:[{itemGroupId:'foreign-product',productName:h.bc.groups[0].name,quantity:1}]});
+ assert.equal(out.status,'missing_input');assert.equal(out.request,undefined);assert.ok(out.missingFields.includes('items.0'));
+});

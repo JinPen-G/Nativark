@@ -28,7 +28,7 @@ test('invalid or model-shaped fields are rejected before authority/Core', async 
 test('Core failures are classified without leaking raw exceptions or claiming success', async () => {
   const service = new AiQuotePreviewService({ createQuote: async () => { throw new Error('当前库存没有可用的承接产品型号'); } }, { current: async () => business }, authority, () => new Date('2026-10-05T01:30:00.000Z'));
   const result = await service.preview(input);
-  assert.equal(result.status, 'out_of_stock'); assert.equal(result.message, 'Core 未能生成报价；请核对输入或转人工处理'); assert.equal(result.quote, undefined); assert.equal(result.quotePersistence, 'unknown');
+  assert.equal(result.status, 'out_of_stock'); assert.equal(result.message, 'Core 未能生成报价；请核对输入或转人工处理'); assert.equal(result.quote, undefined); assert.equal(result.quotePersistence, 'unknown'); assert.equal(result.nextAction, 'reconcile'); assert.equal(result.retryable, false);
 });
 
 test('expired Core quote is not presented as a usable quote', async () => {

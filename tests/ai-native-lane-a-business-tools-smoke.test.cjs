@@ -35,10 +35,12 @@ test('server composition connects actual catalog, diagnostics, candidates and fo
   const risk = await tools.risks.read({ from: '2026-01-01T00:00:00Z', to: '2026-01-02T00:00:00Z' }); assert.equal(risk.profit.status, 'unavailable');
   // Names/locations are sourced from the actual seeded Core, not model enums.
   const group = core.listItemGroups('tenant_001')[0], location = core.listLocations('tenant_001')[0];
-  const prepared = await tools.quote.candidates.prepare({ customerType: 'personal', customerId: 'customer-a', items: [{ productName: group.name, quantity: 1 }],
-    start: '2026-11-10T09:00:00+08:00', end: '2026-11-11T09:00:00+08:00', fulfillmentMode: 'store_pickup_return', locationName: location.name });
+  const candidate = { customerType: 'personal', customerId: 'customer-a', items: [{ productName: group.name, quantity: 1 }],
+    start: '2026-11-10T09:00:00+08:00', end: '2026-11-11T09:00:00+08:00', fulfillmentMode: 'store_pickup_return', locationName: location.name };
+  const prepared = await tools.quote.candidates.prepare(candidate);
   assert.equal(prepared.status, 'needs_confirmation');
-  const quote = await tools.quote.preview.preview(prepared.request); assert.equal(quote.status, 'quoted'); assert.equal(quote.quote.reservation, 'not_reserved'); assert.equal(quote.quotePersistence, 'saved');
+  const unconfirmed = await tools.quote.previewSelection(candidate); assert.equal(unconfirmed.status, 'missing_input'); assert.equal(unconfirmed.quote, undefined);
+  const quote = await tools.quote.previewSelection({ ...candidate, selectionRevision: prepared.selectionRevision }); assert.equal(quote.status, 'quoted'); assert.equal(quote.quote.reservation, 'not_reserved'); assert.equal(quote.quotePersistence, 'saved');
 });
 test('same composition rejects current permission withdrawal instead of using captured context', async () => {
   const { tools, h } = await setup(); h.identity.user.permissions = [];
