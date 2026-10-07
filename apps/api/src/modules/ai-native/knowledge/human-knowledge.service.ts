@@ -59,6 +59,22 @@ export class HumanKnowledgeService {
   }
   create(value: unknown) { return this.invoke(context => this.documents.create(context, value)); }
   read(documentId: string) { return this.invoke(context => this.documents.read(context, parse(id, documentId))); }
+  detail(documentId: string) {
+    parse(id, documentId);
+    return this.session.run(async context => {
+      const before = await this.documents.read(context, documentId);
+      const actions = ['parse', 'publish', 'revise', 'withdraw', 'delete', 'index', 'read_body', 'download'] as const;
+      const permissions: Partial<Record<typeof actions[number], 'authorized' | 'unavailable'>> = {};
+      for (const action of actions) {
+        const grant = await this.authorization.authorize(context, { action, scope: context.scope, document: before.document });
+        permissions[action] = grant && (action !== 'parse' || this.ports.files) ? 'authorized' : 'unavailable';
+      }
+      const after = await this.documents.read(context, documentId);
+      if (fingerprint(before) !== fingerprint(after)) throw new KnowledgeError('conflict');
+      return { ...knowledgeManagementView(after), permissions,
+        permissionSemantics: 'current_policy_not_transition_or_future_grant' as const };
+    });
+  }
   parse(value: unknown) {
     // Do not create a pending admission for a missing trusted byte source.
     if (!this.ports.files) throw new KnowledgeError('unavailable');

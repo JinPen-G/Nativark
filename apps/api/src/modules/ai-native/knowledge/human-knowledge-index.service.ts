@@ -6,6 +6,9 @@ import { PrismaKnowledgeIndexAdapter, relationalIndexReceipt } from './prisma-kn
 import { KnowledgeError } from './knowledge-errors';
 import { fingerprint, id, parse } from './knowledge-validation';
 
+const resumeInput = z.object({ documentId: id, operationId: z.string().min(1).max(191),
+  generation: z.number().int().min(1).max(4294967294) }).strict();
+
 /** Only the existing transactional relational index. An external index is not
  * interchangeable: its unknown submit requires its own authoritative receipt.
  */
@@ -42,9 +45,22 @@ export class HumanKnowledgeIndexService {
     });
   }
   resume(value: unknown) {
-    const input = parse(z.object({ documentId: id, operationId: z.string().min(1).max(191),
-      generation: z.number().int().min(1).max(4294967294) }).strict(), value);
+    const input = parse(resumeInput, value);
+    return this.human.session.run(context => this.resumeCurrent(context, input));
+  }
+  /** Explicit human-selected jobs, not a background queue or automatic retry.
+   * Fail-fast: earlier items may have committed; reconcile each original job.
+   */
+  resumeBatch(value: unknown) {
+    const input = parse(z.object({ jobs: z.array(resumeInput).min(1).max(10) }).strict(), value);
+    if (new Set(input.jobs.map(job => job.documentId)).size !== input.jobs.length) throw new KnowledgeError('invalid_input');
     return this.human.session.run(async context => {
+      const items = [];
+      for (const job of input.jobs) items.push(await this.resumeCurrent(context, job));
+      return { items, semantics: 'independent_operations' as const };
+    });
+  }
+  private async resumeCurrent(context: AiExecutionContext, input: z.infer<typeof resumeInput>) {
       const state = await this.inspect(context, input.documentId), job = state.head.indexJob;
       if (!job) throw new KnowledgeError('not_ready');
       if (job.operationId !== input.operationId || job.generation !== input.generation) throw new KnowledgeError('conflict');
@@ -55,6 +71,5 @@ export class HumanKnowledgeIndexService {
         ? await this.coordinator.complete(context, input.documentId, job, 'completed')
         : await this.coordinator.runPending(context, input.documentId);
       return knowledgeManagementView(after);
-    });
   }
 }

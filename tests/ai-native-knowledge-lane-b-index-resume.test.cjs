@@ -25,7 +25,11 @@ test('explicit module resumes committed index receipt and withdrawal remove with
   const published = await human.publish({ documentId: 'doc-1', expectedRevision: complete.revision, operationId: 'publish-1' });
   const withdrawn = await human.withdraw({ documentId: 'doc-1', expectedRevision: published.revision, operationId: 'withdraw-1' });
   await assert.rejects(index.resume(input), { code: 'conflict' });
-  const removed = await index.resume({ documentId: 'doc-1', operationId: withdrawn.indexJob.operationId, generation: withdrawn.indexJob.generation });
+  const batch = await index.resumeBatch({ jobs: [{ documentId: 'doc-1', operationId: withdrawn.indexJob.operationId, generation: withdrawn.indexJob.generation }] });
+  const removed = batch.items[0];
   assert.equal(removed.indexJob.kind, 'remove'); assert.equal(removed.indexJob.status, 'completed');
   assert.equal(removed.publication, 'withdrawn'); assert.equal(removed.indexing, 'not_indexed');
+  const detail = await human.detail('doc-1');
+  assert.equal(detail.publication, 'withdrawn'); assert.equal(detail.permissionSemantics, 'current_policy_not_transition_or_future_grant');
+  await assert.rejects(async () => index.resumeBatch({ jobs: [input, input] }), { code: 'invalid_input' });
 });
