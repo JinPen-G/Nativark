@@ -9,7 +9,7 @@ const { composeControlledApprovedOrder } = require('../../../apps/api/src/module
 
 // Actual formal publisher/plan/registration, authorization, preparation, approval,
 // Core confirmation and idempotency. Database and Core business facts remain doubles.
-async function controlledApprovedOrderHarness() {
+async function controlledApprovedOrderHarness({ prepare = true } = {}) {
   const h = await persistedApprovedOrderHarness(), { state } = h;
   state.user.permissions.push('system:params:manage');
   state.records.aiTaskActionPolicy.push({ scopeId: 'scope-a', taskId: 'task-a', operation: 'decide_approval', revision: 1,
@@ -66,10 +66,12 @@ async function controlledApprovedOrderHarness() {
       try {
         const result = await callback(client(records, true)), wrote = records.rentalOrder.length > state.records.rentalOrder.length;
         const decided = records.aiApproval.length > state.records.aiApproval.length;
+        const proposed = records.aiProposal.length > state.records.aiProposal.length;
         state.records = records; committed = true;
         if (wrote) state.commits++;
         if (wrote && state.ackLost) throw Error('synthetic COMMIT applied, response lost');
         if (decided && state.decisionAckLost) throw Error('synthetic approval COMMIT applied, response lost');
+        if (proposed && state.proposalAckLost) throw Error('synthetic proposal COMMIT applied, response lost');
         return result;
       } catch (error) { if (!committed) state.rollbacks++; throw error; }
     }));
@@ -94,6 +96,9 @@ async function controlledApprovedOrderHarness() {
   step.status = 'RUNNING';
   const prepareCommand = { taskId, proposalId: 'proposal-a', proposalRevision: 1, actionId: step.actionId,
     expiresAt: h.payload.expiresAt, lease: { ...held, revision: state.records.aiRun[0].revision } };
+  const executorInput = () => ({ taskId, runId: held.runId, stepId: step.id, actionId: step.actionId,
+    inputRef: published.id, fingerprint: step.requestFingerprint, lease: lease() });
+  if (!prepare) return { ...h, root, compose, dependencies, published, registered, executorInput };
   const pending = await root.prepare(prepareCommand);
   assert.equal(state.records.aiApproval.length, 0);
   assert.equal(state.records.rentalOrder.length, 0);
@@ -104,6 +109,6 @@ async function controlledApprovedOrderHarness() {
     const { expiresAt: _, ...command } = prepareCommand;
     return { ...command, reviewedPayloadHash: review.reviewedPayloadHash, approvalId: approval.approvalId };
   };
-  return { ...h, root, compose, dependencies, published, registered, prepareCommand, pending, review, approve };
+  return { ...h, root, compose, dependencies, published, registered, prepareCommand, pending, review, approve, executorInput };
 }
 module.exports = { controlledApprovedOrderHarness };
