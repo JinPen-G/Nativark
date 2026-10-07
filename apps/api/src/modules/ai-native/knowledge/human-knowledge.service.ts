@@ -9,7 +9,7 @@ import { KnowledgePublicationService } from './knowledge-publication.service';
 import { KnowledgeTextParser } from './knowledge-text-parser';
 import { PrismaKnowledgeRepository } from './prisma-knowledge.repository';
 import { KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
-import { fingerprint, id, parse } from './knowledge-validation';
+import { fingerprint, id, parse, visible } from './knowledge-validation';
 
 export type HumanKnowledgeDependencies = {
   db: ConstructorParameters<typeof PrismaKnowledgeRepository>[0];
@@ -66,11 +66,9 @@ export class HumanKnowledgeService {
       const head = await this.documents.read(context, documentId), d = head.document;
       const now = this.ports.clock.now();
       if (!Number.isFinite(now)) return unavailable();
-      const effective = Date.parse(d.validFrom) <= now && (!d.validUntil || Date.parse(d.validUntil) > now);
       return { ...knowledgeManagementView(head), currentVersion: d.documentVersion,
         pendingParseVersion: d.parsing === 'pending' ? d.documentVersion : null,
-        indexedPublishedVersion: effective && d.publication === 'published' && d.parsing === 'parsed' && d.indexing === 'indexed'
-          ? d.documentVersion : null,
+        indexedPublishedVersion: visible(d, now) ? d.documentVersion : null,
         readinessSemantics: 'persistent_state_not_search_permission' as const,
         historicalVersions: 'unavailable' as const,
         parseRecovery: head.parseOperationId ? 'reconcile_original_operation' as const
@@ -89,7 +87,12 @@ export class HumanKnowledgeService {
       }
       const after = await this.documents.read(context, documentId);
       if (fingerprint(before) !== fingerprint(after)) throw new KnowledgeError('conflict');
-      return { ...knowledgeManagementView(after), permissions,
+      const view = knowledgeManagementView(after);
+      const suggestedAction = view.nextStep === 'reconcile' ? 'parse' : view.nextStep === 'parse' ? 'parse'
+        : view.nextStep === 'index' ? 'index' : view.nextStep === 'publish' ? 'publish' : null;
+      return { ...view, permissions,
+        nextStepAuthorization: suggestedAction ? permissions[suggestedAction] : 'unavailable' as const,
+        nextStepSemantics: 'guidance_requires_current_revision_and_original_operation' as const,
         permissionSemantics: 'current_policy_not_transition_or_future_grant' as const };
     });
   }

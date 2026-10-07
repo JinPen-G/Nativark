@@ -7,12 +7,16 @@ import type { MemoryAuthorizationPort } from './knowledge.ports';
 import type { MemoryPrismaClient } from './prisma-memory.repository';
 import { KnowledgeError, unavailable } from './knowledge-errors';
 import { fingerprint, id, parse, preferenceSchema } from './knowledge-validation';
+import { preferenceAmbiguities } from './preference-ambiguities';
 
 const preferenceSection = z.discriminatedUnion('status', [
   z.object({ status: z.literal('not_requested') }).strict(),
   z.object({ status: z.literal('ready'), items: z.array(z.object({ memoryId: id,
     revision: z.number().int().min(1).max(4294967294), aclRevision: z.number().int().min(1).max(4294967294),
     expiresAt: z.string().datetime({ offset: true }), preference: preferenceSchema, confirmationRecordId: id }).strict()).max(10),
+  ambiguities: z.array(z.object({ kind: z.enum(['locale', 'fulfillment_location', 'display_density']),
+    memoryIds: z.array(id).min(2).max(10), nextStep: z.literal('human_selection') }).strict()).max(3),
+  ambiguityCoverage: z.literal('returned_items_only'), businessCompatibility: z.literal('unavailable'),
   truncated: z.boolean(), coverage: z.literal('bounded_window'), pagination: z.literal('unavailable'),
   semantics: z.literal('preference_not_authority') }).strict(),
 ]);
@@ -76,6 +80,7 @@ export class HumanKnowledgeInputService {
       const verified = await this.context.revalidate(knowledge);
       if (Buffer.byteLength(JSON.stringify({ ...verified, preferences }), 'utf8') > 65536) throw new KnowledgeError('limit_exceeded');
       if (preferences.status === 'ready') {
+        if (fingerprint(preferences.ambiguities) !== fingerprint(preferenceAmbiguities(preferences.items))) return unavailable();
         const seen = new Set<string>();
         for (const item of preferences.items) {
           if (seen.has(item.memoryId)) return unavailable();

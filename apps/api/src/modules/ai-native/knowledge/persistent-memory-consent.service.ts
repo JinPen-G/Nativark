@@ -10,6 +10,7 @@ import { StructuredMemoryService } from './structured-memory.service';
 import type { KnowledgeClock, MemoryAuthorizationPort, MemoryConfirmation } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
 import { actor, fingerprint, id, memoryConfirmationHash, operationFingerprint, parse, preferenceSchema, sameScope } from './knowledge-validation';
+import { preferenceAmbiguities } from './preference-ambiguities';
 
 const inputSchema = z.object({ memoryId: id, expectedRevision: z.number().int().min(1).max(4294967293),
   operationId: id.max(110), expiresAt: z.string().datetime({ offset: true }) }).strict();
@@ -129,6 +130,22 @@ export class PersistentMemoryConsentService {
     return this.memory.propose(await this.current(), value);
   }
 
+  async previewChange(value: unknown) {
+    const input = parse(z.object({ memoryId: id, expectedRevision: z.number().int().min(1).max(4294967293),
+      preference: preferenceSchema }).strict(), value);
+    const context = await this.current();
+    const before = await this.memory.read(context, input.memoryId);
+    if (before.status === 'deleted' || before.revision !== input.expectedRevision) throw new KnowledgeError('conflict');
+    await this.authorizeRequest(context, { action: 'modify', scope: context.scope, owner: actor(context), memory: before });
+    const after = await this.memory.read(context, input.memoryId);
+    if (fingerprint(before) !== fingerprint(after)) throw new KnowledgeError('conflict');
+    await this.authorizeRequest(context, { action: 'modify', scope: context.scope, owner: actor(context), memory: after });
+    return { memoryId: before.memoryId, revision: before.revision, expiresAt: before.expiresAt,
+      current: structuredClone(before.preference), candidate: input.preference,
+      changed: fingerprint(before.preference) !== fingerprint(input.preference),
+      nextStep: 'modify_then_explicit_human_confirmation' as const, writePerformed: false as const };
+  }
+
   async confirmedPreferences(value: unknown) {
     const input = parse(z.object({ limit: z.number().int().min(1).max(50) }).strict(), value);
     const context = await this.current();
@@ -162,9 +179,11 @@ export class PersistentMemoryConsentService {
       if (fingerprint(fresh) !== fingerprint(memory)) return unavailable();
     }
     await this.authorizeRequest(context, { action: 'read', scope, owner });
-    return { items: selected.map(memory => ({ memoryId: memory.memoryId, revision: memory.revision,
+    const items = selected.map(memory => ({ memoryId: memory.memoryId, revision: memory.revision,
       aclRevision: memory.aclRevision, expiresAt: memory.expiresAt, preference: memory.preference,
-      confirmationRecordId: memory.confirmationRecordId })), truncated: values.length > input.limit,
+      confirmationRecordId: memory.confirmationRecordId }));
+    return { items, ambiguities: preferenceAmbiguities(items), ambiguityCoverage: 'returned_items_only' as const,
+      businessCompatibility: 'unavailable' as const, truncated: values.length > input.limit,
     coverage: 'bounded_window' as const, pagination: 'unavailable' as const, semantics: 'preference_not_authority' as const };
   }
 

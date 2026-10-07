@@ -24,6 +24,9 @@ test('declared parser capability and rejected input correct through a new immuta
   assert.equal(db.state.versions.size, 2);
   unsupported = false;
   assert.equal((await api.parse({ documentId: 'doc-1', expectedRevision: 4, operationId: 'parse-2' })).parsing, 'parsed');
+  assert.equal((await api.detail('doc-1')).nextStepAuthorization, 'authorized');
+  f.rule = (_context, request) => request.action !== 'index';
+  assert.equal((await api.detail('doc-1')).nextStepAuthorization, 'unavailable');
 });
 test('unknown parsing must be reconciled instead of overwritten by a new version', async () => {
   const { ports } = fixture();
