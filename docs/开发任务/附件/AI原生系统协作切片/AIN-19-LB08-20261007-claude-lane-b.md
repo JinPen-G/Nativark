@@ -1,0 +1,11 @@
+# AIN-19 LB08：固定迁移交付收口
+
+接续61e69ec5，保留原Knowledge WIP/output，未执行迁移。
+
+LB07曾把新索引回写已经固定交付的LB05初始迁移，这种交付方式不保留已发布迁移校验和。本片用新提交恢复20261007191000_ai_native_inspection_drafts/migration.sql为99438903原文；scope+submissionActionId唯一索引移入确认原先不存在的独占追加迁移20261007211000_ai_inspection_submission_index。schema保留该约束，不amend/reset任何提交。
+
+定向静态快检：git hash-object初始迁移与git rev-parse 99438903:对应路径相同；新SQL仅CREATE UNIQUE INDEX，不改业务状态或金额，不连DB。未重跑已通过的业务测试，未冒称已执行MySQL迁移。
+
+固定依赖为LB05→LB06→LB07→LB08；主线须接收完整顺序，初始表迁移之后执行独立索引迁移（执行仍需另行授权）。这取代LB07记录中“未执行时可回写原迁移”的交付说明。
+
+Runtime与Provider独立替换的业务/输入/收据映射沿用LB07；索引保护同一原业务action不被多个草稿同时认领，不改变Gateway、授权或Core算法。下一片继续多allocation/分批的有界逐项人工交接材料，不因媒体Gateway缺口停掉独立人工功能。
