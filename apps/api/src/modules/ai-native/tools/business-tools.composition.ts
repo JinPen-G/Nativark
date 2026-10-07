@@ -92,6 +92,7 @@ export function composeAiAuthorizedBusinessTools(input: {
     openingSectionDifferences: (value: unknown) => new AiOpeningActionListService(opening, risks, context, diagnostics).prepareSections(value),
     riskRecheck: (value: unknown) => new AiOpeningActionListService(opening, risks, context, diagnostics).recheckRisk(value),
     quote: Object.freeze({ ...quote, businessPreparation: quotePreparation,
+      reconciliationAvailability: () => quotePreparation.reconciliationAvailability(),
       /** Explicit R1 entry; the host owns the human-selection evidence. Core
        * quote success is not order approval, payment, or stock reservation. */
       previewBusinessSelection: async (value: unknown) => {
