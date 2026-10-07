@@ -32,6 +32,13 @@ export class InspectionCandidateService {
 
   async consume(value: unknown) {
     const input = parseInspectionInput(requestSchema, value);
+    // Detach every candidate before the first authorization await. z.unknown()
+    // deliberately preserves references and must not carry caller-owned state.
+    const snapshot = input.candidates.map(raw => {
+      if (!isCandidate(raw)) throw new InspectionAssistError('INVALID_INPUT');
+      return structuredClone(raw);
+    });
+    input.candidates = snapshot;
     if (Buffer.byteLength(JSON.stringify(input), 'utf8') > 262144) throw new InspectionAssistError('INVALID_INPUT');
     if (!this.evidence || typeof this.evidence.verify !== 'function') throw new InspectionAssistError('STORAGE_UNAVAILABLE');
     const target = { orderId: input.orderId, allocationId: input.allocationId, stage: input.stage, templateId: input.templateId };
@@ -39,9 +46,8 @@ export class InspectionCandidateService {
     if (before.bindingFingerprint !== input.bindingFingerprint) throw new InspectionAssistError('BINDING_CHANGED');
     const fields = new Map(before.template.fields.map(row => [row.code, row]));
     const ids = new Set<string>(), codes = new Set<string>(), candidates: AiInspectionCandidateDraft[] = [];
-    for (const raw of input.candidates) {
-      if (!isCandidate(raw)) throw new InspectionAssistError('INVALID_INPUT');
-      const candidate = structuredClone(raw), field = fields.get(candidate.fieldCode);
+    for (const candidate of snapshot) {
+      const field = fields.get(candidate.fieldCode);
       if (!field || ids.has(candidate.candidateId) || codes.has(candidate.fieldCode)) throw new InspectionAssistError('INVALID_INPUT');
       ids.add(candidate.candidateId); codes.add(candidate.fieldCode);
       if (candidate.status === 'candidate') {

@@ -46,6 +46,16 @@ test('shared candidate contract is enforced and current evidence required, no mo
   evidence.verify = async () => false;
   await assert.rejects(f.services.candidates.consume(request), { code: 'ACCESS_DENIED' });
 });
+test('candidate input is snapshotted before authorization awaits', async () => {
+  const f = setup('staff', { verify: async () => true });
+  const observed = await f.services.templates.read(input);
+  const candidate = { candidateId: 'candidate-a', fieldCode: 'mileage', status: 'candidate', value: { kind: 'number', value: 42 }, confidence: 0.7,
+    sources: [{ attachmentId: 'file-a', attachmentRevision: 2, kind: 'image', region: { x: 0, y: 0, width: 0.5, height: 0.5 } }] };
+  f.state.onRead = () => { candidate.value.value = 99; };
+  const result = await f.services.candidates.consume({ ...input, bindingFingerprint: observed.bindingFingerprint, candidates: [candidate] });
+  assert.equal(result.candidates[0].value.value, 42);
+});
+
 test('missing frozen snapshot never falls back, changed allocation and late revocation reject', async () => {
   const a = setup(); delete a.order.inspectionTemplateSnapshots;
   await assert.rejects(a.services.templates.read(input));
