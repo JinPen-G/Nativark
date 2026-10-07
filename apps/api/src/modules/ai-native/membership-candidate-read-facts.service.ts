@@ -3,9 +3,9 @@ import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext, type BookingMemberO
 import { ModelGatewayError } from './model-gateway.ports';
 import type { AiBusinessReadAuthority } from './business-read-route.authority';
 
-const limitSchema = z.object({ limit: z.number().int().min(1).max(50) }).strict();
+export const aiMembershipCandidateReadInputSchema = z.object({ limit: z.number().int().min(1).max(50) }).strict();
 const candidateSchema = z.object({
-  customerId: z.string().min(1).max(191), name: z.string().min(1).max(191), phoneMasked: z.string().max(64).refine(value => value === '' || value.includes('*')),
+  customerId: z.string().min(1).max(191), name: z.string().min(1).max(191), phoneMasked: z.string().max(64).refine(value => value === '' || (!/\s/u.test(value) && /^[0-9]{0,3}\*{3,}[0-9]{0,4}$/u.test(value))),
   membershipStatus: z.enum(['pending_activation', 'active', 'suspended', 'risk_restricted', 'exited', 'closed'])
 }).strict();
 
@@ -32,7 +32,7 @@ export class AiMembershipCandidateReadFactsService {
   }
 
   async read(value: unknown): Promise<AiMembershipCandidateReadProjection> {
-    const input = limitSchema.safeParse(value); if (!input.success) throw new ModelGatewayError('INVALID_REQUEST');
+    const input = aiMembershipCandidateReadInputSchema.safeParse(value); if (!input.success) throw new ModelGatewayError('INVALID_REQUEST');
     return this.authority.withRead('membership_candidates', input.data, async context => {
     const access = 'access' in context ? context.access : undefined;
     if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user' || (context.audience !== 'operator' && context.audience !== 'staff')

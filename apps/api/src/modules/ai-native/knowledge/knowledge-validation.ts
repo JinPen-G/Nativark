@@ -38,9 +38,13 @@ export function actor(context: AiExecutionContext) {
 export async function authorize(port: KnowledgeAuthorizationPort, context: AiExecutionContext, request: KnowledgeAuthorizationRequest): Promise<KnowledgeGrant> {
   try {
     parse(scopeSchema, context.scope);
-    const grant = await port.authorize(context, request);
-    const owner = actor(context);
-    if (!grant || !sameScope(context.scope, request.scope) || !sameScope(grant.scope, request.scope) || grant.audience !== context.audience || grant.actor.actorKind !== owner.actorKind || grant.actor.actorId !== owner.actorId || !grant.accessKey || grant.accessKey.length > 256) unavailable();
+    const contextHash = fingerprint(context), requestHash = fingerprint(request);
+    const stableContext = structuredClone(context), stableRequest = structuredClone(request);
+    const answer = await port.authorize(stableContext, stableRequest);
+    if (fingerprint(context) !== contextHash || fingerprint(request) !== requestHash || fingerprint(stableContext) !== contextHash || fingerprint(stableRequest) !== requestHash) unavailable();
+    const grant = answer ? structuredClone(answer) : null;
+    const owner = actor(stableContext);
+    if (!grant || !sameScope(stableContext.scope, stableRequest.scope) || !sameScope(grant.scope, stableRequest.scope) || grant.audience !== stableContext.audience || grant.actor.actorKind !== owner.actorKind || grant.actor.actorId !== owner.actorId || typeof grant.accessKey !== 'string' || !grant.accessKey || grant.accessKey.length > 256) unavailable();
     return grant;
   } catch { return unavailable(); }
 }

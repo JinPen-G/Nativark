@@ -20,7 +20,8 @@ export class KnowledgeSourceService {
       const grant = await authorize(this.documents.ports.authorization, context, { action: 'read_body', scope: context.scope, document: d });
       const cacheKey = this.cache?.key(grant, source, before.revision);
       const cached = cacheKey ? this.cache?.get(cacheKey) : undefined;
-      const chunk = cached ?? await this.content.chunk(context, source, 2000);
+      const returned = cached ?? await this.content.chunk(context, structuredClone(source), 2000);
+      const chunk = returned ? structuredClone(returned) : null;
       if (!chunk || chunk.chunkId !== source.chunkId) unavailable();
       validateChunks(d, [chunk]);
       if (fingerprint(chunk.locator) !== fingerprint(source.locator)) unavailable();
@@ -30,17 +31,26 @@ export class KnowledgeSourceService {
       if (fingerprint(grant) !== fingerprint(currentGrant)) unavailable();
       if (cacheKey && !cached) this.cache?.put(cacheKey, chunk);
       return chunk;
-    } catch { return unavailable(); }
+    } catch {
+      // A denied/revoked read must not retain the old body in this process cache.
+      // Invalidation is scoped to the current server context and document; it
+      // does not act as a cross-tenant cache or authorization mechanism.
+      try { if (source?.kind === 'document') this.cache?.invalidate(context.scope, source.documentId); } catch { /* fail closed below */ }
+      return unavailable();
+    }
   }
 
   async resolve(context: AiExecutionContext, source: AiKnowledgeSourceDraft): Promise<AiKnowledgeSourceDraft> {
     try {
       if (source.kind === 'business_fact') {
         source = { kind: 'business_fact', fact: parse(factSchema, source.fact) };
-        await authorize(this.documents.ports.authorization, context, { action: 'resolve_source', scope: source.fact.scope, fact: source.fact });
-        const fact = await this.content.factReference(context, source.fact);
-        if (!fact || fingerprint(fact) !== fingerprint(source.fact)) unavailable();
-        await authorize(this.documents.ports.authorization, context, { action: 'resolve_source', scope: fact.scope, fact });
+        const expected = fingerprint(source.fact);
+        const grant = await authorize(this.documents.ports.authorization, context, { action: 'resolve_source', scope: source.fact.scope, fact: source.fact });
+        const returned = await this.content.factReference(context, structuredClone(source.fact));
+        const fact = returned ? structuredClone(returned) : null;
+        if (!fact || fingerprint(fact) !== expected) unavailable();
+        const currentGrant = await authorize(this.documents.ports.authorization, context, { action: 'resolve_source', scope: fact.scope, fact });
+        if (fingerprint(grant) !== fingerprint(currentGrant)) unavailable();
         return { kind: 'business_fact', fact };
       }
       const chunk = await this.readChunk(context, source, 'resolve_source');
@@ -53,10 +63,13 @@ export class KnowledgeSourceService {
       await this.readChunk(context, source, 'resolve_source');
       const before = await this.documents.load(context, source.documentId, 'download');
       if (!visible(before.document, this.documents.ports.clock.now()) || before.document.documentVersion !== source.documentVersion || before.document.aclRevision !== source.aclRevision) unavailable();
+      const grant = await authorize(this.documents.ports.authorization, context, { action: 'download', scope: context.scope, document: before.document });
       const reference = await this.content.downloadReference(context, before.document);
       if (!reference || reference.attachmentId !== before.document.attachmentId || reference.documentVersion !== source.documentVersion) unavailable();
       const after = await this.documents.load(context, source.documentId, 'download');
       if (before.revision !== after.revision || !visible(after.document, this.documents.ports.clock.now())) unavailable();
+      const currentGrant = await authorize(this.documents.ports.authorization, context, { action: 'download', scope: context.scope, document: after.document });
+      if (fingerprint(grant) !== fingerprint(currentGrant)) unavailable();
       return { attachmentId: reference.attachmentId, documentVersion: reference.documentVersion };
     } catch { return unavailable(); }
   }
