@@ -50,6 +50,8 @@ export type AiQuotePreviewResult = {
   status: "quoted" | AiQuotePreviewFailure;
   missingFields?: string[];
   message?: string;
+  /** Local effect evidence, not dispatch/approval or inventory ownership. */
+  quotePersistence?: 'saved' | 'unknown';
   quote?: {
     id: string; quoteNo: string; currency?: string; chargeLines: RentalQuoteSnapshotV1["chargeLines"];
     rentalAmount: number; discountAmount: number; couponAmount: number; serviceAmount: number; fulfillmentAmount: number;
@@ -134,7 +136,7 @@ export class AiQuotePreviewService {
             }
           });
         });
-        if (outcome.kind === 'failure') return this.failure(context, outcome.status, 'Core 未能生成报价；请核对输入或转人工处理');
+        if (outcome.kind === 'failure') return { ...this.failure(context, outcome.status, 'Core 未能生成报价；请核对输入或转人工处理'), quotePersistence: 'unknown' };
         const quote = outcome.quote;
         const observed = this.clock(); if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError("CONFIG_INVALID");
         const chargeLines = z.array(chargeLineSchema).max(100).safeParse(quote?.chargeLines);
@@ -144,8 +146,8 @@ export class AiQuotePreviewService {
           || !this.hasSafeAmounts(quote)
           || !chargeLines.success || !savedBasis.success) throw new ModelGatewayError("INVALID_RESPONSE");
         const expiresAt = new Date(quote.expiresAt); if (!Number.isFinite(expiresAt.getTime())) throw new ModelGatewayError("INVALID_RESPONSE");
-        if (expiresAt.getTime() <= observed.getTime()) return this.failure(context, "expired", "报价生成后已失效");
-        return { contractVersion: "ain-09-quote-preview-draft-1", requestId: context.requestId, observedAt: observed.toISOString(), scope: context.scope, status: "quoted", quote: {
+        if (expiresAt.getTime() <= observed.getTime()) return { ...this.failure(context, "expired", "报价生成后已失效"), quotePersistence: 'saved' };
+        return { contractVersion: "ain-09-quote-preview-draft-1", requestId: context.requestId, observedAt: observed.toISOString(), scope: context.scope, status: "quoted", quotePersistence: 'saved', quote: {
           id: quote.id, quoteNo: quote.quoteNo, currency: quote.currency, chargeLines: chargeLines.data,
           rentalAmount: quote.rentalAmount, discountAmount: quote.discountAmount, couponAmount: quote.couponAmount, serviceAmount: quote.serviceAmount,
           fulfillmentAmount: quote.fulfillmentAmount, depositAmount: quote.depositAmount, preAuthAmount: quote.preAuthAmount, payableAmount: quote.payableAmount, receivableAmount: quote.receivableAmount,
