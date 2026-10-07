@@ -309,6 +309,8 @@ model BusinessWorkspace {
   rentalReservations                RentalReservation[]
   rentalInspectionTemplates         RentalInspectionTemplate[]
   rentalInspectionRecords           RentalInspectionRecord[]
+  aiInspectionDrafts                AiInspectionDraft[]
+  aiInspectionEvidenceBindings      AiInspectionEvidenceBinding[]
   rentalFulfillmentOperators        RentalFulfillmentOperator[]
   rentalTenantBusinessSettingss     RentalTenantBusinessSettings[]
   rentalPricingPlans                RentalPricingPlan[]
@@ -928,6 +930,89 @@ model AiBudgetAllocation {
   @@id([reservationId, policyId])
   @@index([policyId], map: "ai_budget_allocation_policy_idx")
   @@map("ai_budget_allocations")
+}
+
+model AiInspectionDraft {
+  id                  String   @id @db.VarChar(36)
+  tenantId            String   @db.VarChar(191)
+  workspaceId         String   @db.VarChar(191)
+  ownerId             String   @db.VarChar(191)
+  audience            String   @db.VarChar(16)
+  orderId             String   @db.VarChar(191)
+  allocationId        String   @db.VarChar(191)
+  assetId             String   @db.VarChar(191)
+  stage               String   @db.VarChar(16)
+  templateId          String   @db.VarChar(191)
+  templateVersion     String   @db.VarChar(128)
+  bindingFingerprint  String   @db.Char(64)
+  evidenceFingerprint String   @db.Char(64)
+  inputFingerprint    String?  @db.Char(64)
+  revision            Int      @default(1) @db.UnsignedInt
+  status              String   @db.VarChar(32)
+  state               Json
+  submissionActionId  String?  @db.VarChar(128)
+  inspectionId        String?  @db.VarChar(191)
+  expiresAt           DateTime @db.DateTime(3)
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  updatedAt           DateTime @updatedAt @db.DateTime(3)
+  workspace           BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_inspection_drafts_workspace_fk")
+  operations          AiInspectionOperation[]
+
+  @@unique([id, tenantId, workspaceId], map: "ai_inspection_draft_scope_key")
+  @@index([tenantId, workspaceId, ownerId, audience, id], map: "ai_inspection_draft_list_idx")
+  @@map("ai_inspection_drafts")
+}
+
+model AiInspectionOperation {
+  id               String   @id @db.VarChar(36)
+  tenantId         String   @db.VarChar(191)
+  workspaceId      String   @db.VarChar(191)
+  ownerId          String   @db.VarChar(191)
+  audience         String   @db.VarChar(16)
+  operationId      String   @db.VarChar(128)
+  fingerprint      String   @db.Char(64)
+  draftId          String   @db.VarChar(36)
+  expectedRevision Int      @db.UnsignedInt
+  resultRevision   Int      @db.UnsignedInt
+  result           Json
+  createdAt        DateTime @default(now()) @db.DateTime(3)
+  draft            AiInspectionDraft @relation(fields: [draftId, tenantId, workspaceId], references: [id, tenantId, workspaceId], onDelete: Restrict, onUpdate: Restrict, map: "ai_inspection_operations_draft_fk")
+
+  @@unique([tenantId, workspaceId, operationId], map: "ai_inspection_operation_scope_key")
+  @@index([draftId, createdAt], map: "ai_inspection_operation_draft_idx")
+  @@map("ai_inspection_operations")
+}
+
+model AiInspectionEvidenceBinding {
+  id                  String   @id @db.VarChar(36)
+  tenantId            String   @db.VarChar(191)
+  workspaceId         String   @db.VarChar(191)
+  ownerId             String   @db.VarChar(191)
+  audience            String   @db.VarChar(16)
+  orderId             String   @db.VarChar(191)
+  allocationId        String   @db.VarChar(191)
+  assetId             String   @db.VarChar(191)
+  stage               String   @db.VarChar(16)
+  templateId          String   @db.VarChar(191)
+  templateVersion     String   @db.VarChar(128)
+  bindingFingerprint  String   @db.Char(64)
+  attachmentId        String   @db.VarChar(191)
+  attachmentRevision  Int      @db.UnsignedInt
+  uploadSessionId     String   @db.VarChar(191)
+  storageFingerprint  String   @db.Char(64)
+  contentHash         String?  @db.Char(64)
+  mediaType           String?  @db.VarChar(64)
+  sizeBytes           Int?     @db.UnsignedInt
+  width               Int?     @db.UnsignedInt
+  height              Int?     @db.UnsignedInt
+  durationMs          Int?     @db.UnsignedInt
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  workspace           BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_inspection_evidence_workspace_fk")
+  attachment          FileAsset @relation(fields: [attachmentId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "ai_inspection_evidence_attachment_fk")
+
+  @@unique([tenantId, workspaceId, attachmentId, attachmentRevision], map: "ai_inspection_evidence_revision_key")
+  @@index([tenantId, workspaceId, orderId, allocationId], map: "ai_inspection_evidence_target_idx")
+  @@map("ai_inspection_evidence_bindings")
 }
 
 model AiKnowledgeDocument {
@@ -2506,6 +2591,7 @@ model FileAsset {
   uploadedBy      String?
   metadata        Json?
   uploadSession   FileUploadSession?
+  aiInspectionBindings AiInspectionEvidenceBinding[]
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
