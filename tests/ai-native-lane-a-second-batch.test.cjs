@@ -37,3 +37,16 @@ test('opening section preparation and member profile submission remain bounded c
   assert.equal(material.status, 'prepared_not_submitted');
   assert.equal(material.approval, 'not_created');
 });
+
+test('multi-section differences stay independently bounded and unavailable sections do not become a transaction', async () => {
+  const h = await businessSetup();
+  const current = await h.tools.openingActions.read();
+  const result = await h.tools.openingSectionDifferences({ sections: [
+    { key: 'workspace_profile', expectedVersion: current.configVersion, changes: [{ field: 'itemLabel', value: 'Updated label' }] },
+    { key: 'pricing_groups_rates', expectedVersion: current.configVersion, changes: [] }
+  ] });
+  assert.equal(result.status, 'section_candidates');
+  assert.equal(result.atomicity, 'independent_section_results_not_transaction');
+  assert.equal(result.rows[0].status, 'prepared');
+  assert.equal(result.rows[1].status, 'unavailable');
+});

@@ -89,6 +89,7 @@ export function composeAiAuthorizedBusinessTools(input: {
     },
     opening, risks,
     openingActions: new AiOpeningActionListService(opening, risks, context, diagnostics),
+    openingSectionDifferences: (value: unknown) => new AiOpeningActionListService(opening, risks, context, diagnostics).prepareSections(value),
     riskRecheck: (value: unknown) => new AiOpeningActionListService(opening, risks, context, diagnostics).recheckRisk(value),
     quote: Object.freeze({ ...quote, businessPreparation: quotePreparation,
       /** Explicit R1 entry; the host owns the human-selection evidence. Core

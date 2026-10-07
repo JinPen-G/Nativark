@@ -158,6 +158,28 @@ export class AiOpeningActionListService {
       source: section.evidence };
   }
 
+  async prepareSections(value: unknown) {
+    const parsed = z.object({ sections: z.array(z.object({ key: z.string().min(1).max(191),
+      expectedVersion: z.string().min(1).max(191), changes: z.array(z.object({ field: z.enum(terminologyFields), value: z.string().trim().min(1).max(80) }).strict()).max(6) }).strict()).min(1).max(6) }).strict().safeParse(value);
+    if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+    const unique = new Set(parsed.data.sections.map(row => row.key));
+    if (unique.size !== parsed.data.sections.length) throw new ModelGatewayError('INVALID_REQUEST');
+    const rows = [];
+    for (const section of parsed.data.sections) {
+      const current = await this.prepareSection({ key: section.key });
+      if (current.status !== 'prepared') { rows.push({ ...current, expectedVersion: section.expectedVersion }); continue; }
+      if (section.key !== 'workspace_profile') {
+        rows.push({ status: 'unavailable' as const, key: section.key, expectedVersion: section.expectedVersion,
+          reason: 'formal_section_field_reader_not_exposed' as const, persistence: 'not_attempted' as const });
+        continue;
+      }
+      const candidate = await this.prepareDifference({ expectedVersion: section.expectedVersion, changes: section.changes });
+      rows.push({ status: 'prepared' as const, key: section.key, expectedVersion: section.expectedVersion, candidate });
+    }
+    return { status: 'section_candidates' as const, rows, atomicity: 'independent_section_results_not_transaction' as const,
+      execution: 'not_attempted' as const };
+  }
+
   async prepare(value: unknown = {}, modelAvailability: 'not_requested' | 'unavailable' = 'not_requested') {
     if (!['not_requested', 'unavailable'].includes(modelAvailability)) throw new ModelGatewayError('INVALID_REQUEST');
     const facts = await this.read(value);
