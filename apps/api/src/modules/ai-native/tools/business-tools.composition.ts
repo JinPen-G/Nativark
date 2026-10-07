@@ -23,6 +23,9 @@ import { AiQuoteBusinessPreparationService } from './quote-business-preparation.
 import { AiOrderExplanationPreparationService } from './order-explanation-preparation.service';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiMemberProfileDifferenceService } from './member-profile-difference.service';
+import { AiBusinessScenePreparationService } from '../scenes/business-scene-preparation.service';
+import { composeAiBusinessOrderApplication } from '../scenes/business-order-application';
+import type { PersistedApprovedOrderDependencies } from '../approval-execution/approved-order-composition.ports';
 
 /** Server composition only. Guard and current session come from the application
  * host, never model arguments. No HTTP route, dispatch, entitlement or approval
@@ -37,6 +40,9 @@ export function composeAiAuthorizedBusinessTools(input: {
   business: Pick<RentalBusinessService, 'createQuote' | 'getQuote' | 'tenantReadiness'>;
   reports: Pick<RentalWorkspaceReportRepository, 'getOperationReport'>;
   payments?: Pick<PaymentRuntimeService, 'listPaymentIntents' | 'listPaymentRefunds'>;
+  /** Explicit AIN-07 dependencies for an EXISTING persisted task/action. No
+   * default original input, policy or approval is supplied by this lane. */
+  approvedOrder?: Omit<PersistedApprovedOrderDependencies, 'guard' | 'credentials'>;
   clock?: () => Date;
 }) {
   for (const [port, method] of [[input?.business, 'getQuote'], [input?.reports, 'getOperationReport']] as const) {
@@ -69,7 +75,19 @@ export function composeAiAuthorizedBusinessTools(input: {
     category: async scope => (await context.current(scope)).category.code,
     currency: async scope => (await context.current(scope)).settings.pricing.currency
   }, diagnostics, input.clock);
+  const openingActions = new AiOpeningActionListService(opening, risks, context, diagnostics);
+  const orderPreparation = (serverOrderId: string) => new AiOrderExplanationPreparationService(
+    new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock),
+    explanation(serverOrderId), nextSteps(serverOrderId));
   return Object.freeze({
+    orderActions: composeAiBusinessOrderApplication(input.approvedOrder ? {
+      ...input.approvedOrder, guard: input.guard, credentials: input.credentials
+    } : undefined),
+    scenes: new AiBusinessScenePreparationService({
+      orderAuthority: orderId => new AiOrderRouteContextAuthority(input.guard, input.credentials, orderId, input.clock),
+      orderMaterial: orderPreparation, openingAuthority: diagnostics, opening: openingActions,
+      quoteAuthority: routes, quote: quotePreparation
+    }),
     catalog: reads.catalog,
     availability: reads.availability,
     membershipCandidates: reads.membershipCandidates,
@@ -78,9 +96,7 @@ export function composeAiAuthorizedBusinessTools(input: {
     order,
     orderExplanation: explanation,
     orderNextSteps: nextSteps,
-    orderExplanationPreparation: (serverOrderId: string) => new AiOrderExplanationPreparationService(
-      new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock),
-      explanation(serverOrderId), nextSteps(serverOrderId)),
+    orderExplanationPreparation: orderPreparation,
     orderManualHandoff: (serverOrderId: string, value: unknown) => nextSteps(serverOrderId).manualHandoff(value),
     orderPayments: (serverOrderId: string) => {
       if (!input.payments) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
@@ -88,7 +104,7 @@ export function composeAiAuthorizedBusinessTools(input: {
         new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock), routes, input.clock);
     },
     opening, risks,
-    openingActions: new AiOpeningActionListService(opening, risks, context, diagnostics),
+    openingActions,
     openingSectionDifferences: (value: unknown) => new AiOpeningActionListService(opening, risks, context, diagnostics).prepareSections(value),
     riskRecheck: (value: unknown) => new AiOpeningActionListService(opening, risks, context, diagnostics).recheckRisk(value),
     quote: Object.freeze({ ...quote, businessPreparation: quotePreparation,
