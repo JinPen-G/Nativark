@@ -155,8 +155,14 @@ export class HumanKnowledgeService {
       const metadata = { documentId, left: { version: left.contentHash, status: left.status },
         right: { version: right.contentHash, status: right.status },
         sameBody: left.contentHash === right.contentHash, currentVersion: head.document.documentVersion };
-      const bodyGrant = await this.authorization.authorize(context, { action: 'read_body', scope: context.scope, document: head.document });
-      if (!bodyGrant) return { ...metadata, body: 'unavailable' as const, changes: [] as const,
+      // A grant for the current head is not proof that either historical
+      // version may be read. Bind both version hashes into separate policy
+      // checks; without historical grants, expose metadata only.
+      const leftGrant = await this.authorization.authorize(context, { action: 'read_body', scope: context.scope,
+        document: { ...head.document, documentVersion: left.contentHash } });
+      const rightGrant = await this.authorization.authorize(context, { action: 'read_body', scope: context.scope,
+        document: { ...head.document, documentVersion: right.contentHash } });
+      if (!leftGrant || !rightGrant) return { ...metadata, body: 'unavailable' as const, changes: [] as const,
         semantics: 'metadata_only_without_historical_body_permission' as const };
       const changes = [];
       const count = Math.max(left.chunks.length, right.chunks.length);
