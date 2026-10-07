@@ -71,15 +71,26 @@ export class KnowledgeSourceService {
 
   async download(context: AiExecutionContext, source: Extract<AiKnowledgeSourceDraft, { kind: 'document' }>): Promise<{ attachmentId: string; documentVersion: string }> {
     try {
+      const caller = context, contextHash = fingerprint(context);
+      context = structuredClone(context);
+      source = parse(documentSourceSchema, source);
+      const check = () => { if (fingerprint(caller) !== contextHash || fingerprint(context) !== contextHash) unavailable(); };
       await this.readChunk(context, source, 'resolve_source');
+      check();
       const before = await this.documents.load(context, source.documentId, 'download');
+      check();
       if (!visible(before.document, this.documents.ports.clock.now()) || before.document.documentVersion !== source.documentVersion || before.document.aclRevision !== source.aclRevision) unavailable();
       const grant = await authorize(this.documents.ports.authorization, context, { action: 'download', scope: context.scope, document: before.document });
-      const reference = await this.content.downloadReference(context, before.document);
+      check();
+      const returned = await this.content.downloadReference(structuredClone(context), structuredClone(before.document));
+      check();
+      const reference = returned ? structuredClone(returned) : null;
       if (!reference || reference.attachmentId !== before.document.attachmentId || reference.documentVersion !== source.documentVersion) unavailable();
       const after = await this.documents.load(context, source.documentId, 'download');
-      if (before.revision !== after.revision || !visible(after.document, this.documents.ports.clock.now())) unavailable();
+      check();
+      if (fingerprint(before) !== fingerprint(after) || !visible(after.document, this.documents.ports.clock.now())) unavailable();
       const currentGrant = await authorize(this.documents.ports.authorization, context, { action: 'download', scope: context.scope, document: after.document });
+      check();
       if (fingerprint(grant) !== fingerprint(currentGrant)) unavailable();
       return { attachmentId: reference.attachmentId, documentVersion: reference.documentVersion };
     } catch { return unavailable(); }
