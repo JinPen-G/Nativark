@@ -8,7 +8,7 @@ export interface AiTaskRunnerOutcomeCommandFactory {
     taskId: string;
     expectedRevision: number;
     to: 'running' | 'succeeded' | 'failed' | 'partially_succeeded' | 'waiting_input' | 'waiting_confirmation' | 'waiting_external' | 'cancelled';
-    reason: 'resume' | 'completed' | 'execution_failed' | 'input_required' | 'confirmation_required' | 'external_pending' | 'cancel_settled';
+    reason: 'start' | 'resume' | 'completed' | 'execution_failed' | 'input_required' | 'confirmation_required' | 'external_pending' | 'cancel_settled';
     lease: Readonly<{ runId: string; holderId: string; revision: number; fencingToken: string }>;
   }>): unknown;
 }
@@ -38,6 +38,15 @@ function target(outcome: AiTaskRunnerTaskOutcome) {
 export function createAiTaskRunnerOutcomePort(adapters: AiTaskRunnerOutcomeAdapters): AiTaskRunnerOutcomePort {
   if (!adapters?.transitions?.transition || !adapters.commands?.transition) throw new Error('AI_RESOURCE_UNAVAILABLE');
   return {
+    async start(input) {
+      input = structuredClone(input);
+      const result = await adapters.transitions.transition(adapters.commands.transition({ taskId: input.taskId,
+        expectedRevision: input.taskRevision, to: 'running', reason: 'start', lease: { runId: input.lease.runId,
+          holderId: input.lease.holderId, revision: input.lease.revision, fencingToken: input.lease.fencingToken } }));
+      if (!matchesAcknowledgement(result, input.taskId, input.taskRevision, input.lease.revision, ['running'], 'start')
+        || result.runRevision === null) throw new Error('AI_STORAGE_UNAVAILABLE');
+      return { taskRevision: result.event.taskRevision, lease: { ...input.lease, revision: result.runRevision } };
+    },
     async commit(input) {
       input = structuredClone(input);
       if (adapters.tasks && (input.outcome.status === 'succeeded' || input.outcome.status === 'failed')) {

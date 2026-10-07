@@ -141,6 +141,14 @@ export class AiTaskRunner {
       if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
       if (adoptedRecovery) await this.deps.leases.assertRecoveryRun!({ ...structuredClone(lease), purpose: 'recovery_only' });
       if (initial.status === 'waiting_input') return { status: 'paused', completedSteps, cleanupFailed };
+      if (!recovery && initial.status === 'queued') {
+        if (!this.deps.taskOutcome?.start) return { status: 'unavailable', completedSteps, cleanupFailed };
+        validatePlan(structuredClone(await this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), false)), input);
+        if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
+        advance(await this.callBounded(() => this.deps.taskOutcome!.start!({ taskId: input.taskId, taskRevision, lease: structuredClone(lease) }), 5000, 'task_start'));
+        initial = { ...initial, status: 'running', revision: taskRevision };
+      }
+      if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
       if (this.deps.resources) await this.callBounded(() => this.deps.resources!.open(structuredClone(lease), recovery), 5000, 'resource_open');
       if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
       const plan = validatePlan(structuredClone(await this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), recovery)), input);
