@@ -78,4 +78,36 @@ export class HumanKnowledgeContextService {
     const input = parse(documentSourceSchema, source);
     return this.human.session.run(context => this.sources.readChunk(context, input, 'resolve_source'));
   }
+
+  /** A resource reference, never a bearer URL or a grant to the file service. */
+  downloadReference(source: unknown) {
+    const input = parse(documentSourceSchema, source);
+    return this.human.session.run(context => this.sources.download(context, input));
+  }
+
+  /** Call immediately before freezing model input. This checks current sources,
+   * not the truth of a caller's query or a permanent permission. Dispatch still
+   * needs its own current authorization and configuration checks.
+   */
+  revalidate(value: unknown) {
+    const entrySchema = z.object({ sourceId: z.string().regex(/^[a-f0-9]{64}$/), source: documentSourceSchema,
+      snippet: z.string().min(1).max(2000), contentFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+      snippetFingerprint: z.string().regex(/^[a-f0-9]{64}$/), truncated: z.boolean(), trust: z.literal('untrusted_data') }).strict();
+    const input = parse(z.object({ requestId: id, queryFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+      observedAt: z.string().datetime(), trust: z.literal('untrusted_data'), purpose: z.literal('context_only'),
+      status: z.enum(['ready', 'partial']), sources: z.array(entrySchema).max(10) }).strict(), value);
+    if (Buffer.byteLength(JSON.stringify(input), 'utf8') > 65536) throw new KnowledgeError('limit_exceeded');
+    return this.human.session.run(async context => {
+      const seen = new Set<string>();
+      for (const entry of input.sources) {
+        if (seen.has(entry.sourceId) || entry.sourceId !== fingerprint(entry.source)) return unavailable();
+        seen.add(entry.sourceId);
+        const fresh = await this.sources.readChunk(context, entry.source, 'resolve_source');
+        if (fingerprint(fresh.text) !== entry.contentFingerprint || fingerprint(entry.snippet) !== entry.snippetFingerprint
+          || clip(fresh.text, entry.snippet.length) !== entry.snippet
+          || entry.truncated !== (fresh.text !== entry.snippet)) return unavailable();
+      }
+      return input;
+    });
+  }
 }

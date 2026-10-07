@@ -24,9 +24,16 @@ test('real lexical recall/source pipeline returns bounded untrusted input and re
   assert.equal(result.sources[0].trust, 'untrusted_data'); assert.equal(result.tools, undefined);
   assert.ok(result.sources[0].snippet.includes('arbitrary tool'));
   assert.ok(Buffer.byteLength(JSON.stringify(result)) <= 4096);
+  assert.deepEqual(await collector.revalidate(result), result);
+  const reference = await collector.downloadReference(result.sources[0].source);
+  assert.deepEqual(Object.keys(reference).sort(), ['attachmentId', 'documentVersion']);
+  const forged = structuredClone(result); forged.sources[0].snippet = 'forged evidence';
+  await assert.rejects(collector.revalidate(forged), { code: 'unavailable' });
   assert.equal((await collector.collect({ ...input, maxSnippetChars: 8 })).status, 'partial');
   await human.withdraw({ documentId: 'doc-1', expectedRevision: 6, operationId: 'withdraw-1' });
   await assert.rejects(collector.open(result.sources[0].source), { code: 'unavailable' });
+  await assert.rejects(collector.revalidate(result), { code: 'unavailable' });
+  await assert.rejects(collector.downloadReference(result.sources[0].source), { code: 'unavailable' });
   assert.equal((await collector.collect(input)).status, 'no_results');
   await assert.rejects(async () => collector.collect({ ...input, scope: h.scope }), { code: 'invalid_input' });
 });
