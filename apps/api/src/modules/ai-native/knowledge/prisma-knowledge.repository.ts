@@ -58,6 +58,12 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
     if (!Array.isArray(rows) || rows.length > limit) throw new KnowledgeError('limit_exceeded');
     const head = await this.read(scope, documentId);
     if (!head || head.document.scope.kind !== 'workspace' || head.document.scope.tenantId !== value.tenantId || head.document.scope.workspaceId !== value.workspaceId) return unavailable();
+    for (const row of rows) {
+      if (!Array.isArray(row.chunks) || row.chunks.length > 200
+        || row.chunks.reduce((total, chunk) => total + (typeof chunk.text === 'string' ? chunk.text.length : Number.MAX_SAFE_INTEGER), 0) > 200000) {
+        throw new KnowledgeError('limit_exceeded');
+      }
+    }
     return rows.map(row => ({ version: row.version, status: row.status, contentHash: row.contentHash,
       chunks: (row.chunks ?? []).map(chunk => ({ id: chunk.id, chunkIndex: chunk.chunkIndex, text: chunk.text, state: chunk.state })) }));
   }
