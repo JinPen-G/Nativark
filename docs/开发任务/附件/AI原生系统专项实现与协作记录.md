@@ -512,3 +512,15 @@ Codex临时顶替主线，基线7c7e4794。新增真实Prisma事务读取adapter
 从06c5cd1a接续，新增真实Prisma类型的workspace有界元数据候选adapter，逐文档调用必需的当前授权端口，复读revision并拒绝身份/配置变化；原Retrieval/Source执行正文、版本、撤回及缓存复验。原持久组合在selection省略时使用此adapter，不猜ACL字符串语义、不授予默认权限、不启生产。
 
 红测6/6失败exit1→实现后通过；扩大知识回归130/130exit0；自查补未索引状态语义后最终关联23/23exit0，API严格类型/diff各exit0，无skip/todo。授权与数据库执行为明确替身，正式ACL/权益/附件/确认来源仍待接；tenant/platform无回退，超过100候选unavailable，词法非向量。详情见[持久候选选择装配](AI原生系统协作切片/AIN-10-持久候选选择装配-20261007-codex.md)。作者完成待独立复核，M1与0/28不变；不称主线全量或真环境通过。
+
+### AIN-IMPL-013：公共Gateway外部取消传递（2026-10-07）
+
+Claude从0aeea679接续原需求，补通PublicAiGatewayService.invoke/stream可选第三参数AbortSignal至已有GatewayDeadline；不另建取消状态机/预算账本，不修改shared/schema或启用生产。红测40项13失败后同组40/40；最终公共/统一Gateway、deadline、出网、单账及原预算repository等14文件297/297，fail/cancel/skip/todo均0、exit0，API及本树shared源码类型检查0诊断、diff check通过。一轮独立只读复核无阻断；首次工具缓存越界写尝试被护栏拦截，最终缓存定向本树且audit未记录事件，历史记录保留。
+
+详见[公共Gateway取消传递](AI原生系统协作切片/AIN-05-公共Gateway取消传递-20261007-claude.md)。公共取消财务端口为spy、预算repository执行为离线事务替身，不是真库/供应商/宿主验收。AIN06继续宿主runner中断；主线下一缺口为正式order.commit原输入发布与策略/step绑定。框架研究已暂缓，原28项及M1门槛不变，不计整项完成。
+
+### AIN-IMPL-014：正式建单输入发布与策略绑定（2026-10-07）
+
+主线从f647199c推进功能优先：composePersistedOrderTaskInput接通原Guard/Core DTO与规范化、受权场景政策、不可变发布、原计划/步骤登记及事务内原输入策略证明；扩展既有source而非另建存储。新authority核对policyRevision/hash、封闭plan、registrationRef/inputRef/fingerprint及当前身份，返回稳定bindingHash，不授予业务执行或跳过审批。Core仅抽取并复用原bookingIdentity规范化逻辑，无新业务算法/schema。
+
+定向冒烟纠正原Guard的兼容权限及错误码预期后5/5、exit0；源码型验378根文件0诊断，不做扩大回归或独立审计。同期固定接收AIN07原输入关联17fdf2b6→f647199c，主线新用例8/8。离线事务/业务夹具不当真库或完整runner/开单验收；批准后execute接线交AIN07，原task创建输入仍有后续。详见[正式建单输入发布与策略绑定](AI原生系统协作切片/AIN-06-07-正式建单输入发布与策略绑定-20261007-claude.md)，原28项及M1门槛不变。
