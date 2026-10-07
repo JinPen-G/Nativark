@@ -17,6 +17,13 @@ for (const name of ['AiInspectionSourceDraft', 'AiInspectionValueDraft', 'AiInsp
 }
 const candidateValidator = ajv.getSchema<AiInspectionCandidateDraft>('urn:rental:inspection:AiInspectionCandidateDraft')!;
 function isCandidate(value: unknown): value is AiInspectionCandidateDraft { return candidateValidator(value) === true; }
+export function snapshotInspectionCandidates(values: unknown[]): AiInspectionCandidateDraft[] {
+  if (values.length > 100 || Buffer.byteLength(JSON.stringify(values), 'utf8') > 240000) throw new InspectionAssistError('INVALID_INPUT');
+  return values.map(raw => {
+    if (!isCandidate(raw)) throw new InspectionAssistError('INVALID_INPUT');
+    return structuredClone(raw);
+  });
+}
 const requestSchema = inspectionTargetSchema.extend({ templateId: inspectionId,
   bindingFingerprint: z.string().regex(/^[a-f0-9]{64}$/), candidates: z.array(z.unknown()).max(100) }).strict();
 type Binding = Awaited<ReturnType<InspectionTemplateService['read']>>;
@@ -34,10 +41,7 @@ export class InspectionCandidateService {
     const input = parseInspectionInput(requestSchema, value);
     // Detach every candidate before the first authorization await. z.unknown()
     // deliberately preserves references and must not carry caller-owned state.
-    const snapshot = input.candidates.map(raw => {
-      if (!isCandidate(raw)) throw new InspectionAssistError('INVALID_INPUT');
-      return structuredClone(raw);
-    });
+    const snapshot = snapshotInspectionCandidates(input.candidates);
     input.candidates = snapshot;
     if (Buffer.byteLength(JSON.stringify(input), 'utf8') > 262144) throw new InspectionAssistError('INVALID_INPUT');
     if (!this.evidence || typeof this.evidence.verify !== 'function') throw new InspectionAssistError('STORAGE_UNAVAILABLE');
