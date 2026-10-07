@@ -41,13 +41,18 @@ export class PrismaKnowledgeReadAdapter implements KnowledgeContentPort, Knowled
     return record;
   }
 
-  private async rows(document: AiKnowledgeDocumentDraft, query?: string, published = true) {
-    const rows = await this.db.aiKnowledgeChunk.findMany({ where: { ...this.where(document, published), ...(query === undefined ? {} : { text: { contains: query } }) },
-      take: 201, orderBy: [{ chunkIndex: 'asc' }, { id: 'asc' }] });
-    if (!Array.isArray(rows) || rows.length > 200) return unavailable();
+  private async rows(document: AiKnowledgeDocumentDraft, query?: string, published = true, chunkId?: string) {
+    // Logical chunk IDs live in persisted state, not the random database row ID.
+    // Keep the scope/version relation and probe for duplicate logical IDs.
+    const rows = await this.db.aiKnowledgeChunk.findMany({ where: { ...this.where(document, published),
+      ...(query === undefined ? {} : { text: { contains: query } }),
+      ...(chunkId === undefined ? {} : { state: { path: '$.chunkId', equals: chunkId } }) },
+      take: chunkId === undefined ? 201 : 2, orderBy: [{ chunkIndex: 'asc' }, { id: 'asc' }] });
+    if (!Array.isArray(rows) || rows.length > (chunkId === undefined ? 200 : 1)) return unavailable();
     let chars = 0;
     const chunks = rows.map(row => {
       const chunk = parsePersisted(chunkSchema, row.state);
+      if (chunkId !== undefined && chunk.chunkId !== chunkId) return unavailable();
       if (row.text !== chunk.text || !Number.isInteger(row.chunkIndex) || row.chunkIndex < 0) return unavailable();
       chars += chunk.text.length;
       return chunk;
@@ -66,7 +71,7 @@ export class PrismaKnowledgeReadAdapter implements KnowledgeContentPort, Knowled
       const before = await this.head(source.scope, source.documentId), d = before.document;
       if (d.documentVersion !== source.documentVersion || d.aclRevision !== source.aclRevision) return unavailable();
       const grant = await authorize(this.authorization, context, { action: 'read_body', scope: source.scope, document: d });
-      const chunks = await this.rows(d);
+      const chunks = await this.rows(d, undefined, true, source.chunkId);
       const chunk = chunks.find(c => c.chunkId === source.chunkId);
       if (!chunk) return null;
       if (chunk.text.length > maxChars || fingerprint(chunk.locator) !== fingerprint(source.locator)) return unavailable();

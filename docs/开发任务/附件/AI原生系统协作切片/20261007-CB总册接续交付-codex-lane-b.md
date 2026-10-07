@@ -1,5 +1,11 @@
 # Codex B 总册接续交付与精确未闭合项
 
+## 单来源正文的数据库侧定向读取
+
+`PrismaKnowledgeReadAdapter.chunk`保留scope/document/version关系限定，按持久JSON中的实际chunkId查询，take=2检测重复逻辑标识；不再为一条来源读回整版正文。数据库随机row.id不是逻辑chunkId，不作混用。读回仍验证JSON、正文列、定位、当前head及当前授权。没有修改schema或公共契约；JSON过滤仍可能扫描该版本，真实MySQL性能和索引优化未验。
+
+复用原persistent-content冒烟和DB替身，无新增测试脚本。先在原正常路径增加查询形状/上限断言，红测0pass/1fail/0skip/0todo，退出1；实现后使用既有local-runtime与offline-preload，定向选择`actual repository|scope, actor|revocation and head|corrupt body|bounded reads|a caller changing`：6pass/0fail/0skip/0todo，退出0，含ts-node实际类型编译。不是全文件或全API类型验收。`git diff --check`退出0。未连接数据库、存储、模型或网络。
+
 依据20261007总册CB-01～12；唯一树codex-ai-native-lane-b，分支ai/codex-ai-native-lane-b-20261007。本记录不更改中央完成率、不宣称任何AIN验收完成。原作者已由负责人确认停写；保留全部继承历史、源码及output。本次未合并移动主线、未改其他树、没有MERGE_HEAD。
 
 ## 已提交的接续功能

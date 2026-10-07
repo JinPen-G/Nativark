@@ -36,6 +36,8 @@ async function setup() {
 test('actual repository -> content -> source and lexical retrieval return immutable scoped evidence', async () => {
   const s = await setup();
   assert.deepEqual(await s.sources.readChunk(context, s.source), s.chunk);
+  assert.deepEqual(s.db.queries[0].where.state, { path: '$.chunkId', equals: 'chunk-a' });
+  assert.equal(s.db.queries[0].take, 2); // One logical source, plus a duplicate probe; never load all bodies.
   const result = await s.retrieval.recall(context, { requestId: 'query-a', query: 'camping', limit: 5 });
   assert.equal(result.status, 'ready'); assert.equal(result.matches[0].excerpt, s.chunk.text);
   assert.equal(result.matches[0].trust, 'untrusted_data');
