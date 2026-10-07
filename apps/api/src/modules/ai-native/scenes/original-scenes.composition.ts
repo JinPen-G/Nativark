@@ -1,6 +1,7 @@
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';
 import { AiOriginalSceneRecoveryService } from './original-scene-recovery.service';
+import { AiOriginalSceneFactsService } from './original-scene-facts.service';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiOrderRouteContextAuthority } from '../order-route-context.authority';
 import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
@@ -40,6 +41,7 @@ export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
     });
   } }, clock);
   const requests = new PrismaOriginalRequestRepository(input.db, authority, clock);
+  const facts = new AiOriginalSceneFactsService(requests, tools);
   const create = async (value: unknown, reissue = false) => {
     const command = parseOriginalRequest(value, reissue);
     const { replayed, ...receipt } = await requests.save(command, reissue);
@@ -56,6 +58,8 @@ export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
   return Object.freeze({ requests, tools, create: (value: unknown) => create(value), reissue: (value: unknown) => create(value, true),
     read: requests.read.bind(requests), reconcile: requests.reconcile.bind(requests), createTask: requests.createTask.bind(requests),
     readTaskReceipt: requests.readTaskReceipt.bind(requests),
+    reopenOrderCitation: facts.reopenOrderCitation.bind(facts), prepareOpeningSections: facts.prepareOpeningSections.bind(facts),
+    reviewQuote: facts.reviewQuote.bind(facts),
     async readRecovery(value: unknown) {
       const authorization = composePersistedTaskAuthorization(input);
       return new AiOriginalSceneRecoveryService(input.db, requests, authorization.tasks).read(value);

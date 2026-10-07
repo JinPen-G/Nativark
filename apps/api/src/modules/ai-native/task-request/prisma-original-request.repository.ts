@@ -84,6 +84,12 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
     const result = await this.load(parsed.data.inputRef);
     return freezeOriginalInput({ receipt: result.receipt, request: result.body });
   }
+  async readHistorical(value: unknown) {
+    const parsed = originalRequestReferenceSchema.safeParse(value);
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const result = await this.load(parsed.data.inputRef, false, true);
+    return freezeOriginalInput({ receipt: result.receipt, request: result.body, context: result.context });
+  }
   async save(value: unknown, isReissue = false) {
     const command = parseOriginalRequest(value, isReissue), body = originalBody(command);
     const previousRef = command.previousInputRef ?? null;

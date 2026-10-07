@@ -66,4 +66,12 @@ Runtime消费者只取得原请求引用/版本/hash、task/run和有限受权�
 
 Runtime仅消费这些稳定引用和受权材料；原RUNNING/租约/plan启动及恢复归AIN06，提案/批准/提交点归AIN07。Provider仍没有新接点，保留唯一Gateway/预算。主线已给模型输入固定 `81db55a77f6c6119b6bce19280d1b02a9437e5d9`，但其publish依赖RUNNING和租约；AIN06正在解决首次queued启动宿主，本线等待其正式入口而不改状态绕过。报价候选尚无独立人类选定报价持久收据接点；已给主线精确依赖，不从候选ID推出人类选择。开业差异仍只到合法候选准备，未有正式发布端口不写配置。
 
+## 第三片：原请求绑定的事实消费
+
+在第二片 `b8f1890a` 后新增 `AiOriginalSceneFactsService`，由原composition提供三个显式内部应用方法（本片不追加HTTP路由）：`reopenOrderCitation`从原请求派生orderId/scope/question，不接外部scope/orderId，复用原版本化citation重开；`prepareOpeningSections`只消费原请求已选分区，复用原prepareSections/版本差异候选，仍不保存或发布配置；`reviewQuote`从原不可变候选重做受权澄清与来源说明，不报价、不保留库存、不把candidate当人类选择。历史来源允许AI停用但仍重验当前会话/资源权限；新候选消费前后复核creation authority。新增 `requests.readHistorical`仅供内部受权来源消费者，未暴露HTTP原context。
+
+一次定向 `node ... --test tests/ai-native-lane-a-original-scene-facts.test.cjs` 3/3、fail/skip/todo为0；同离线前缀/audit本树output/lane-a-original-facts-audit.log；`tsc --rootDir . --noEmit --incremental false`退出0。无真实DB/HTTP/模型。Runtime只看到本系统原引用及有界facts，Provider没有新依赖；旧引用版本不因换引擎而改写，失效引用重新受权读取，不能触发业务重做。
+
+主线随后明确将人类报价选择完整核心包交A继续，不再等AIN07：新增独立AiTaskQuoteSelection与20261007210000_ai_native_quote_selection迁移，真实Core规范化/原报价校验、选择收据和正式publishOrderInput消费；选择仍不等于批准。下一片立即实现，AIN06首次queued宿主仍等待固定交付。
+
 后续继续：opt-in公共模块/严格入口、task material与主线正式模型计划端口、报价的人类选择→既有persisted order消费、开业差异端口、受权结果/恢复映射。主线提供的受控批准执行固定依赖为944bb6a3（主线a8d8492e），本片未合入也未声称已接入；审批目录不归A修改。
