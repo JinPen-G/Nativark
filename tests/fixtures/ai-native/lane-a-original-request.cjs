@@ -17,11 +17,15 @@ exports.setup = async () => {
   const policies = sceneCodes.map(sceneCode => ({ scopeId: scope.id, sceneCode, sceneVersion: '1', revision: 1, enabled: true,
     allowedTools: [], limits: {}, expiresAt: new Date('2027-01-01T00:00:00Z') }));
   const store = createTaskInputStore({ aiScope: [scope], aiTaskOriginalRequest: [], aiTask: [], aiRun: [], aiStep: [], aiTaskRunPlan: [],
-    aiTaskPlanPolicy: policies, tenant: [tenant], subscriptionFeatureCatalog: clone(b.h.state.subscriptionFeatureCatalog), tenantFeatureGrant: [] },
+    aiTaskPlanPolicy: policies, aiTaskActionPolicy: [], aiBudgetPolicy: [], tenant: [tenant], subscriptionFeatureCatalog: clone(b.h.state.subscriptionFeatureCatalog), tenantFeatureGrant: [] },
   { aiTaskOriginalRequest: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'requestKey']], aiTask: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'creationKey']] });
   const decorate = client => {
-    const findTask = client.aiTask.findFirst.bind(client.aiTask);
-    return { ...client, aiTask: { ...client.aiTask, findFirst: async args => {
+    const findTask = client.aiTask.findFirst.bind(client.aiTask), findSteps = client.aiStep.findMany.bind(client.aiStep);
+    return { ...client, aiStep: { ...client.aiStep, findMany: async args => {
+      const { task, ...where } = args.where;
+      if (task && !await findTask({ where: task.is })) return [];
+      return findSteps({ ...args, where });
+    } }, aiTask: { ...client.aiTask, findFirst: async args => {
       const row = await findTask({ ...args, select: undefined });
       if (!row || !args.select?.runs) return row;
       row.runs = await client.aiRun.findMany({ where: { taskId: row.id, sequence: 1 }, take: 1 });

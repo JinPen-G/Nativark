@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { AI_SCENE_REQUEST_DRAFT_VERSION, type AiSceneRequestReceiptDraft, type AiSceneRequestBody } from '../../../../../../packages/shared/src/ai-scene-request-draft';
+import { AI_SCENE_REQUEST_DRAFT_VERSION, type AiSceneTaskReceiptDraft, type AiSceneRequestReceiptDraft, type AiSceneRequestBody } from '../../../../../../packages/shared/src/ai-scene-request-draft';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskCreationRepository, type AiTaskCreationAuthority } from '../ai-task-creation.repository';
@@ -153,7 +153,7 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
     const original = await this.load(parsed.data.inputRef, true);
     return this.tasks.create({ creationKey: keyForTask(original.row.id), sceneCode: original.row.sceneCode, inputRef: original.row.id });
   }
-  async readTaskReceipt(inputRef: string) {
+  async readTaskReceipt(inputRef: string): Promise<AiSceneTaskReceiptDraft> {
     const original = await this.load(inputRef, false, true), access = aiTaskAccessFromContext(original.context, 'original-request', this.clock());
     const row = await this.stored(() => this.db.aiTask.findFirst({ where: { scopeId: original.row.scopeId, scope: { is: access.scope },
       audience: access.audience, ownerKind: access.actorKind, ownerId: access.actorId, creationKey: keyForTask(inputRef) },
@@ -166,7 +166,7 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
       || row.inputHash !== original.row.contentHash || row.sceneCode !== original.row.sceneCode || row.sceneVersion !== original.row.sceneVersion
       || Object.entries(this.owned({ context: original.context, scopeId: original.row.scopeId })).some(([key, value]) => row[key as keyof typeof row] !== value)
       || row.archivedAt !== null || row.runs.length !== 1) throw unavailable();
-    return { state: 'observed' as const, taskId: row.id, runId: row.runs[0].id, status: row.status.toLowerCase(), revision: row.revision,
+    return { state: 'observed' as const, taskId: row.id, runId: row.runs[0].id, status: row.status.toLowerCase() as Lowercase<typeof row.status>, revision: row.revision,
       plan: row.runs[0].executionPlan ? 'stored' as const : 'not_observed' as const, resultAvailable: row.resultRef !== null,
       execution: 'not_inferred_from_metadata' as const };
   }

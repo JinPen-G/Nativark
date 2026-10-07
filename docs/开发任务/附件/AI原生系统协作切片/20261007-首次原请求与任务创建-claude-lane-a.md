@@ -51,4 +51,19 @@ Runtime消费者只取得原请求引用/版本/hash、task/run和有限受权�
 
 本层不含Provider SDK、模型选型、传输、自动重试或计费；Provider替换只在原唯一Gateway/受控传输/单账边界，不影响本层输入/收据语义。两种替换独立，当前均不安装、不迁移。
 
+## 第二片：opt-in宿主、只读恢复与受控批准消费
+
+第一片固定 `f9bab6207b9e27128f3b06dccf76d1ed86aa5dea`。按主线已核验依赖，原样cherry-pick `944bb6a3` 为本树 `0637b923d507a574fdb208298fd99650a9719075`，零冲突；AIN07目录没有本线编辑。
+
+- `AiOriginalScenesModule.register`只装配服务；`registerHttp`显式提供 `AiOriginalScenesController`，没有AppModule接入、HTTP启动、worker或政策种子。服务端credentials来源必须为宿主当前请求，不得绑定跨用户静态token。所有方法仍走真实当前身份与资源授权。
+- 严格POST契约路径集中在 `AI_SCENE_REQUEST_HTTP_DRAFT`：`ai-native/scene-requests` 下create/read/reissue/reconcile/reconcile-reissue/create-task/material/recovery。未知字段拒绝；错误映射到有限code、HTTP状态和retryable:false，不返回原异常文本。HTTP运行尚未授权/验证，只测试直接Controller与真实服务组合。
+- `prepareTaskMaterial`把ref同步快照并在事实前后复核原creation authority，返回原请求收据、有限facts、materialHash与同task/run引用；移除旧准备层“未持久化/未有task”的包装，不把完成的首次创建链误报缺失。仍明确 `requires_host_plan_start / not_called`。
+- `AiOriginalSceneRecoveryService`复用原task read_metadata动作政策、当前资源权与原请求收据，仅从真实AiStep读取最多50项并报告hasMore；携带原run/action/step/status/effect和结果存在性，不输出任意artifact全文、不建立第二恢复循环。UNKNOWN指出reconcile_original_action；取消或AI关闭不抹除已观测结果。顺序读取不能称原子全量快照。
+- 原 `composeAiPersistedOrderScene`改为消费固定 `composeControlledApprovedOrder`，保留既有publish/savePlan/register/prepare/submit/reconcile接口及inputSource读取；执行端同时必须有正式executionInput证明。拒绝外部替换inputSource/executionInput，不把报价选择当批准，未知只核对原action。旧business-order-application源码仍保留。
+- 新 `AiSceneTaskReceiptDraft`、恢复JSON Schema和HTTP目录均在A共享叶子文件；总出口仍交主线单一整合，现在直接叶子引用API文件增为5个（含Controller）。
+
+第二片一次定向验证（同离线前缀，audit为本树output/lane-a-original-scene-host-audit.log）：`node ... --test tests/ai-native-lane-a-original-scene-host.test.cjs tests/ai-native-lane-a-persisted-order-scene.test.cjs tests/ai-native-approved-order-controlled-composition.test.cjs` **11/11、fail/skip/todo为0**。包含真实Auth/Guard/Subscription/批准/Core服务组合；DB、事实、政策和人类批准夹具明确合成，非MySQL或HTTP/模型验证。`tsc --rootDir . --noEmit --incremental false`和`git diff --check`退出0。
+
+Runtime仅消费这些稳定引用和受权材料；原RUNNING/租约/plan启动及恢复归AIN06，提案/批准/提交点归AIN07。Provider仍没有新接点，保留唯一Gateway/预算。主线已给模型输入固定 `81db55a77f6c6119b6bce19280d1b02a9437e5d9`，但其publish依赖RUNNING和租约；AIN06正在解决首次queued启动宿主，本线等待其正式入口而不改状态绕过。报价候选尚无独立人类选定报价持久收据接点；已给主线精确依赖，不从候选ID推出人类选择。开业差异仍只到合法候选准备，未有正式发布端口不写配置。
+
 后续继续：opt-in公共模块/严格入口、task material与主线正式模型计划端口、报价的人类选择→既有persisted order消费、开业差异端口、受权结果/恢复映射。主线提供的受控批准执行固定依赖为944bb6a3（主线a8d8492e），本片未合入也未声称已接入；审批目录不归A修改。

@@ -1,5 +1,7 @@
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
-import type { PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';
+import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';
+import { AiOriginalSceneRecoveryService } from './original-scene-recovery.service';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiOrderRouteContextAuthority } from '../order-route-context.authority';
 import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import { composeAiAuthorizedBusinessTools } from '../tools/business-tools.composition';
@@ -7,7 +9,7 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AI_SCENE_REQUEST_DRAFT_VERSION, type AiSceneRequestBody } from '../../../../../../packages/shared/src/ai-scene-request-draft';
 import { AiCurrentOriginalRequestAuthority, type AiSceneCreationRule } from '../task-request/original-request.authority';
 import { PrismaOriginalRequestRepository } from '../task-request/prisma-original-request.repository';
-import { parseOriginalRequest } from '../task-request/original-request.validation';
+import { freezeOriginalInput, originalRequestReferenceSchema, parseOriginalRequest } from '../task-request/original-request.validation';
 
 type BusinessDependencies = Parameters<typeof composeAiAuthorizedBusinessTools>[0];
 export type AiOriginalSceneDependencies = PersistedTaskAuthorizationDependencies & BusinessDependencies & {
@@ -54,12 +56,21 @@ export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
   return Object.freeze({ requests, tools, create: (value: unknown) => create(value), reissue: (value: unknown) => create(value, true),
     read: requests.read.bind(requests), reconcile: requests.reconcile.bind(requests), createTask: requests.createTask.bind(requests),
     readTaskReceipt: requests.readTaskReceipt.bind(requests),
+    async readRecovery(value: unknown) {
+      const authorization = composePersistedTaskAuthorization(input);
+      return new AiOriginalSceneRecoveryService(input.db, requests, authorization.tasks).read(value);
+    },
     async prepareTaskMaterial(value: unknown) {
-      const original = await requests.read(value);
-      const material = await prepare(original.request, original.receipt.requestKey);
-      await requests.read(value);
-      return { original: original.receipt, material, task: await requests.readTaskReceipt(original.receipt.inputRef),
-        model: 'not_called' as const, plan: 'requires_host_plan_start' as const };
+      const parsed = originalRequestReferenceSchema.safeParse(value);
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const ref = freezeOriginalInput(parsed.data), original = await requests.read(ref);
+      await requests.resolve(original.receipt.sceneCode, ref.inputRef);
+      const prepared = await prepare(original.request, original.receipt.requestKey);
+      await requests.resolve(original.receipt.sceneCode, ref.inputRef);
+      const material = prepared.payload.materials;
+      return freezeOriginalInput({ original: original.receipt, material, materialHash: requestFingerprint(material),
+        trust: 'source_text_is_data_not_instructions' as const, task: await requests.readTaskReceipt(original.receipt.inputRef),
+        model: 'not_called' as const, plan: 'requires_host_plan_start' as const });
     }
   });
 }
