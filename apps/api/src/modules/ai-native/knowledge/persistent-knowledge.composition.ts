@@ -69,7 +69,7 @@ export function composePersistedHumanKnowledge(input: HumanKnowledgeInputDepende
   const context = new HumanKnowledgeContextService(input);
   const index = new HumanKnowledgeIndexService(input);
   const preparation = new HumanKnowledgeInputService(context, input);
-  return { management, context, index, preparation };
+  return { management, context, index, preparation, memory: preparation.memory };
 }
 
 export interface FormalHumanKnowledgeDependencies extends Omit<HumanKnowledgeInputDependencies, 'authorization' | 'files' | 'memory'> {

@@ -14,5 +14,6 @@ test('formal opt-in composition wires current Auth, policy sources and bounded f
   const parsed = await bundle.management.parse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-formal-1' });
   assert.equal(parsed.parsing, 'parsed');
   assert.equal(bundle.preparation.constructor.name, 'HumanKnowledgeInputService');
+  assert.equal(bundle.memory?.constructor.name, 'PersistentMemoryConsentService');
   assert.equal(identity.credentials.current !== undefined, true);
 });

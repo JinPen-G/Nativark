@@ -31,7 +31,7 @@ export type HumanKnowledgeInputDependencies = HumanKnowledgeDependencies & {
  */
 export class HumanKnowledgeInputService {
   private readonly session: KnowledgeCurrentSession;
-  private readonly memory?: PersistentMemoryConsentService;
+  readonly memory?: PersistentMemoryConsentService;
   constructor(private readonly context: HumanKnowledgeContextService, ports: HumanKnowledgeInputDependencies) {
     this.session = new KnowledgeCurrentSession(ports.auth, ports.credentials, ports.clock);
     if (ports.memory !== undefined) this.memory = new PersistentMemoryConsentService({ ...ports,
