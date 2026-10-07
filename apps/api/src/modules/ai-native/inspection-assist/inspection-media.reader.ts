@@ -10,13 +10,27 @@ export interface InspectionObjectReader {
 export async function readInspectionMedia(stream: ReadableStream<Uint8Array>, maxBytes: number, signal: AbortSignal) {
   const reader = stream.getReader(), chunks: Buffer[] = [];
   let sizeBytes = 0;
-  const cancel = () => { void reader.cancel().catch(() => undefined); };
+  let cancelled = false;
+  let rejectRead: ((reason: Error) => void) | undefined;
+  const cancel = () => {
+    rejectRead?.(new InspectionAssistError('RECONCILIATION_REQUIRED'));
+    if (cancelled) return;
+    cancelled = true;
+    // A provider cleanup promise is not a prerequisite for releasing this
+    // request. Attempt it once, observe rejection, but never await forever.
+    try { void reader.cancel().catch(() => undefined); } catch { /* best effort */ }
+  };
   signal.addEventListener('abort', cancel, { once: true });
   try {
     if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 20 * 1024 * 1024) throw new InspectionAssistError('INVALID_INPUT');
     for (;;) {
       if (signal.aborted) throw new InspectionAssistError('RECONCILIATION_REQUIRED');
-      const next = await reader.read();
+      const next = await new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+        rejectRead = reject;
+        reader.read().then(resolve, reject);
+        if (signal.aborted) cancel();
+      });
+      rejectRead = undefined;
       if (signal.aborted) throw new InspectionAssistError('RECONCILIATION_REQUIRED');
       if (next.done) break;
       if (!(next.value instanceof Uint8Array)) throw new InspectionAssistError('INVALID_INPUT');
@@ -28,7 +42,8 @@ export async function readInspectionMedia(stream: ReadableStream<Uint8Array>, ma
     return { bytes, sizeBytes, contentHash: createHash('sha256').update(bytes).digest('hex'), ...metadata };
   } finally {
     signal.removeEventListener('abort', cancel);
-    await reader.cancel().catch(() => undefined);
+    rejectRead = undefined;
+    cancel();
     reader.releaseLock();
   }
 }
