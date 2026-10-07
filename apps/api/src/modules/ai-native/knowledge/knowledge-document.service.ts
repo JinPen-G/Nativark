@@ -124,4 +124,32 @@ export class KnowledgeDocumentService {
     if (result !== 'committed') throw new KnowledgeError('conflict');
     return this.load(stableContext, input.documentId, 'parse');
   }
+
+  /** Read-only reconciliation of this exact operation, not permission to retry
+   * parsing. A pending receipt proves admission only. Later document mutations
+   * must be read separately; they are not the historical parse result.
+   */
+  async reconcileParse(context: AiExecutionContext, value: unknown): Promise<KnowledgeRecord> {
+    const contextHash = fingerprint(context), stable = structuredClone(context);
+    const check = () => {
+      if (fingerprint(context) !== contextHash || fingerprint(stable) !== contextHash) throw new KnowledgeError('unavailable');
+    };
+    const input = parse(mutationInput, value);
+    const before = await this.load(stable, input.documentId, 'parse');
+    check();
+    const hash = operationFingerprint(stable, ['parse', input]);
+    if (!await this.replay(stable, before, input.operationId, hash)) throw new KnowledgeError('not_ready');
+    check();
+    const result = await this.ports.repository.operation(structuredClone(stable.scope), input.documentId, `${input.operationId}:parse-result`);
+    check();
+    const after = await this.load(stable, input.documentId, 'parse');
+    check();
+    if (fingerprint(before) !== fingerprint(after)) throw new KnowledgeError('conflict');
+    if (!result) throw new KnowledgeCommitUnknownError();
+    if (result.fingerprint !== fingerprint(['parse-result', hash, result.failure ?? 'parsed'])) throw new KnowledgeError('conflict');
+    if (after.parseOperationId || after.revision !== input.expectedRevision + 2 || after.document.publication !== 'draft') throw new KnowledgeError('conflict');
+    const expected = result.failure ? result.failure === 'parse_failed' ? 'failed' : 'rejected' : 'parsed';
+    if (after.document.parsing !== expected || after.failure !== result.failure) throw new KnowledgeError('unavailable');
+    return structuredClone(after);
+  }
 }
