@@ -1,0 +1,33 @@
+'use strict';
+const test = require('node:test'), assert = require('node:assert/strict');
+const { fixture, h } = require('./fixtures/ai-native/lane-b-functional.cjs');
+const { PersistentMemoryConsentService } = h.load('persistent-memory-consent.service');
+test.after(() => assert.deepEqual(h.attempts, []));
+test('same operation recovers both consent and memory COMMIT reply loss without a new proof', async () => {
+  const { ports, db } = fixture(), api = new PersistentMemoryConsentService(ports);
+  const expiresAt = new Date(h.now + 3600000).toISOString();
+  await api.propose({ memoryId: 'memory-1', operationId: 'propose-1', expiresAt, preference: { kind: 'locale', value: 'zh-CN' } });
+  const input = { memoryId: 'memory-1', expectedRevision: 1, operationId: 'consent-1', expiresAt };
+  assert.equal((await api.confirmationStatus(input)).status, 'not_created');
+  await assert.rejects(api.resumeConfirmation(input), { code: 'not_ready' });
+  db.responseError = new Error('synthetic COMMIT answer lost');
+  await assert.rejects(api.confirm(input), { code: 'result_unknown' });
+  db.responseError = null;
+  assert.equal((await api.confirmationStatus(input)).status, 'confirmation_saved');
+  const proofId = [...db.state.confirmations.keys()][0];
+  const transaction = db.$transaction;
+  db.$transaction = async callback => {
+    const before = db.state.memoryOperations.size;
+    const result = await transaction(callback);
+    if (db.state.memoryOperations.size > before) throw new Error('synthetic memory COMMIT answer lost');
+    return result;
+  };
+  await assert.rejects(api.resumeConfirmation(input), { code: 'result_unknown' });
+  db.$transaction = transaction;
+  assert.equal((await api.confirmationStatus(input)).status, 'confirmed');
+  assert.equal((await api.resumeConfirmation(input)).status, 'confirmed');
+  assert.deepEqual([...db.state.confirmations.keys()], [proofId]);
+  await api.change('modify-1', { draftVersion: 'ain-c06-draft-1', memoryId: 'memory-1', expectedRevision: 2, operation: 'modify', preference: { kind: 'locale', value: 'en-US' } });
+  assert.equal((await api.confirmationStatus(input)).status, 'invalidated');
+  await assert.rejects(api.resumeConfirmation(input), { code: 'conflict' });
+});

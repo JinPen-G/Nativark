@@ -9,7 +9,7 @@ import { PrismaStructuredMemoryRepository, type MemoryPrismaClient } from './pri
 import { StructuredMemoryService } from './structured-memory.service';
 import type { KnowledgeClock, MemoryAuthorizationPort, MemoryConfirmation } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
-import { actor, fingerprint, id, memoryConfirmationHash, parse, sameScope } from './knowledge-validation';
+import { actor, fingerprint, id, memoryConfirmationHash, operationFingerprint, parse, sameScope } from './knowledge-validation';
 
 const inputSchema = z.object({ memoryId: id, expectedRevision: z.number().int().min(1).max(4294967293),
   operationId: id.max(110), expiresAt: z.string().datetime({ offset: true }) }).strict();
@@ -126,7 +126,67 @@ export class PersistentMemoryConsentService {
     }
   }
 
+  async confirmationStatus(value: unknown) {
+    const input = parse(inputSchema, value), context = await this.current();
+    await this.authorize(context);
+    if (context.scope.kind !== 'workspace') return unavailable();
+    const scope = context.scope, owner = actor(context);
+    try {
+      const memory = await this.repository.read(scope, owner, input.memoryId);
+      if (!memory) return unavailable();
+      await this.authorize(context, memory);
+      const row = await this.ports.db.aiHumanConfirmation.findFirst({ where: { tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId, idempotencyKey: input.operationId } });
+      const base = { memoryId: input.memoryId, operationId: input.operationId };
+      if (memory.status === 'deleted' || Date.parse(memory.expiresAt) <= this.ports.clock.now()) return { ...base, status: 'invalidated' as const };
+      if (!row) {
+        const fresh = await this.repository.read(scope, owner, input.memoryId);
+        await this.authorize(context, fresh ?? undefined);
+        if (!fresh || fingerprint(fresh) !== fingerprint(memory)) return { ...base, status: 'unknown' as const };
+        return { ...base, status: memory.status === 'proposed' && memory.revision === input.expectedRevision ? 'not_created' as const : 'invalidated' as const };
+      }
+      const proof = await this.repository.read(context, row.id);
+      if (!proof || proof.status !== 'confirmed' || proof.memoryId !== input.memoryId || proof.revision !== input.expectedRevision
+        || proof.expiresAt !== input.expiresAt || Date.parse(proof.expiresAt) <= this.ports.clock.now()
+        || proof.aclRevision !== memory.aclRevision || fingerprint(proof.preference) !== fingerprint(memory.preference)
+        || proof.memoryExpiresAt !== memory.expiresAt) return { ...base, status: 'invalidated' as const };
+      const change = { draftVersion: AI_KNOWLEDGE_DRAFT_VERSION, memoryId: input.memoryId, expectedRevision: input.expectedRevision,
+        operation: 'confirm', confirmationRecordId: proof.id };
+      const receipt = await this.repository.operation(scope, owner, input.memoryId, `${input.operationId}_memory`);
+      const fresh = await this.repository.read(scope, owner, input.memoryId);
+      await this.authorize(context, fresh ?? undefined);
+      const currentProof = await this.repository.read(context, proof.id);
+      if (!fresh || fingerprint(fresh) !== fingerprint(memory) || fingerprint(currentProof) !== fingerprint(proof)) return { ...base, status: 'unknown' as const };
+      if (receipt && receipt.fingerprint !== operationFingerprint(context, ['change', change])) throw new KnowledgeError('conflict');
+      if (memory.status === 'confirmed' && memory.revision === input.expectedRevision + 1 && memory.confirmationRecordId === proof.id && receipt)
+        return { ...base, status: 'confirmed' as const, confirmationRecordId: proof.id };
+      if (memory.status === 'proposed' && memory.revision === input.expectedRevision && !receipt)
+        return { ...base, status: 'confirmation_saved' as const, confirmationRecordId: proof.id };
+      return { ...base, status: 'invalidated' as const };
+    } catch (error) {
+      if (error instanceof KnowledgeError) throw error;
+      // A failed read cannot prove the absence of a committed confirmation.
+      return { memoryId: input.memoryId, operationId: input.operationId, status: 'unknown' as const };
+    } finally {
+      await this.authorize(context);
+    }
+  }
+
+  async resumeConfirmation(value: unknown): Promise<AiMemoryDraft> {
+    const input = parse(inputSchema, value), state = await this.confirmationStatus(input);
+    if (state.status === 'unknown') throw new KnowledgeCommitUnknownError();
+    if (state.status === 'not_created') throw new KnowledgeError('not_ready');
+    if (state.status === 'invalidated') throw new KnowledgeError('conflict');
+    // The second lookup is existing-only; a missing proof during the gap cannot
+    // manufacture a new confirmation ID.
+    return this.completeConfirmation(input, true);
+  }
+
   async confirm(value: unknown): Promise<AiMemoryDraft> {
+    return this.completeConfirmation(value, false);
+  }
+
+  private async completeConfirmation(value: unknown, existingOnly: boolean): Promise<AiMemoryDraft> {
     const input = parse(inputSchema, value), context = await this.current();
     await this.authorize(context);
     if (context.scope.kind !== 'workspace') return unavailable();
@@ -157,6 +217,7 @@ export class PersistentMemoryConsentService {
           callbackCompleted = true;
           return old;
         }
+        if (existingOnly) throw new KnowledgeCommitUnknownError();
         if (memory.status !== 'proposed' || memory.revision !== input.expectedRevision || expiry > Date.parse(memory.expiresAt)) throw new KnowledgeError('conflict');
         // Conditional update locks this exact owner/scope/revision while creating
         // consent. It does not confirm or modify the preference itself.
