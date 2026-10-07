@@ -56,6 +56,18 @@ Node preload为本树`prisma-offline-preload.cjs`和`lane-b-local-runtime.cjs`�
 剩余均需上述正式跨线政策/存储/媒体/原事务或消费合同，不以继续新增孤立wrapper、影子表或报告当作闭环。移交时请提供固定依赖提交与唯一写入者范围；不追活动HEAD。本线合法功能交付不是整个CB队列或AIN验收完成。
 # 接续：底层预览及来源枚举撤权竞态
 
+## Memory 确认详情迟到读取
+
+实际复现 `PersistentMemoryConsentService.confirmationDetail` 最后一次 Memory 读等待期间撤销身份或正式同意，仍返回旧 confirmed 证明。修复为复读确认记录并比较原证明，最后再次执行现有当前身份/Memory read 动作授权；不改变撤销与删除语义，不创建新确认。
+
+原 preferences 测试内增加一项两分支负例，无新脚本。红测 1 pass / 1 fail、退出 1；修复后 preferences + consent 两文件 4 pass / 0 fail / 0 skip / 0 todo、退出 0。使用既有本树 runtime/preload/固定离线数据库地址及本树临时路径，ts-node 类型检查启用。仅数据库/Auth替身，未验 MySQL 或真实权限政策配置；读后复核不宣称原子跨资源快照。
+
+## 固定主线依赖接入
+
+接入主线固定 `1faf979674efefb028b108ad045d5bd125796135`，本树对应 `84966d0c`。仅同步该七文件切片，未合并活动主线；两处 formal adapter 冲突逐块采用主线完整资源指纹比较，保留本线所有其他功能和失败断言。schema/追加迁移均来自主线原切片，本线未扩展模型。显式入口 `composePrismaFormalHumanKnowledge` 已可消费持久精确政策，缺行/停用/过期仍拒绝，未提供政策管理生产入口。
+
+隔离 Prisma 生成退出 0，`guardViolations=0`、`sharedArtifactsUnchanged=true`。原 formal-authorization + input-composition 两文件 5 pass / 0 fail / 0 skip / 0 todo，退出 0（实际政策源、实际身份 adapter 与旧知识/记忆组合，外部数据库/Auth为离线替身）。未执行迁移/播种/服务启动，未验 MySQL/正式政策配置/文件存储。主线仍在补首次文档附件业务生命周期，未要求本线自行造正式授权。
+
 实际复现 `PrismaKnowledgeReadAdapter.previewChunks/listSources` 等待 chunk 查询期间发生撤权/撤回仍返回旧结果。现已在底层返回前复读持久 head，并比较当前授权 grant；预览初始状态已 withdrawn 时也拒绝，合法 parsed draft 预览仍保留。未修改主线政策/组合/Gateway/结果读端。
 
 在原 `ai-native-knowledge-persistent-content.test.cjs` 增加一项含四种组合的受控回调负例，无新测试脚本。红测 0 pass / 1 fail、退出 1；修复后用 `--test-name-pattern` 定向运行本项和原来源读取、scope绑定、撤权场景，4 pass / 0 fail / 0 skip / 0 todo，退出 0。名称过滤为限定验证范围，不是全文件或全量验收。使用既有本树 local runtime + offline preload、固定无效 DATABASE_URL、本树 audit/TEMP；ts-node 类型检查启用。真实 MySQL/FileStorage/多实例仍未验。读后复核不是跨资源原子授权，正式动作政策仍需主线提供。
