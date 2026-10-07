@@ -42,6 +42,9 @@ export class InspectionTemplateService {
           if (order.id !== orderId || order.tenantId !== scope.tenantId
             || !Array.isArray(order.inspectionTemplateSnapshots) || order.inspectionTemplateSnapshots.length > 32
             || !Array.isArray(order.allocations) || order.allocations.length > 200) throw new InspectionAssistError('TEMPLATE_UNAVAILABLE');
+          const locations = 'access' in context ? context.access.locationScope : undefined;
+          const stageLocation = input.stage === 'pickup' ? order.fulfillmentLocationId : order.returnLocationId ?? order.fulfillmentLocationId;
+          if (!locations || locations.mode === 'selected' && !locations.locationIds.includes(stageLocation)) throw new InspectionAssistError('ACCESS_DENIED');
           const allocations = order.allocations.filter(row => row.id === input.allocationId && row.orderId === orderId);
           if (allocations.length !== 1 || !allocations[0].assetId
             || !inspectionId.safeParse(allocations[0].assetId).success
