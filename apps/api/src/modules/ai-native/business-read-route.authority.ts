@@ -7,14 +7,17 @@ import type { AiOrderRouteCredentialSource } from './order-route-context.authori
 import { isAiStepExecutionContext } from './task-contract-validation';
 import { ModelGatewayError } from './model-gateway.ports';
 
-export type AiBusinessReadKind = 'catalog' | 'availability' | 'membership_candidates';
+export type AiBusinessReadKind = 'catalog' | 'availability' | 'membership_candidates' | 'opening' | 'risk' | 'quote_context';
 export interface AiBusinessReadAuthority {
   withRead<T>(kind: AiBusinessReadKind, input: unknown, read: (context: AiExecutionContext) => Promise<T>): Promise<T>;
 }
 const routes = {
   catalog: { method: 'GET', path: '/rental/v1/item-groups' },
   availability: { method: 'POST', path: '/rental/v1/availability' },
-  membership_candidates: { method: 'GET', path: '/rental/v1/booking-members' }
+  membership_candidates: { method: 'GET', path: '/rental/v1/booking-members' },
+  opening: { method: 'GET', path: '/rental/v1/tenant-readiness' },
+  risk: { method: 'GET', path: '/rental/v1/reports/operations' },
+  quote_context: { method: 'GET', path: '/rental/v1/business-settings' }
 } as const;
 
 /** Closed route bridge. The actual business read runs inside the Guard's ALS
@@ -29,8 +32,9 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
   }
 
   async withRead<T>(kind: AiBusinessReadKind, input: unknown, read: (context: AiExecutionContext) => Promise<T>): Promise<T> {
-    if (!['catalog', 'availability', 'membership_candidates'].includes(kind) || typeof read !== 'function') throw new ModelGatewayError('INVALID_REQUEST');
+    if (!Object.prototype.hasOwnProperty.call(routes, kind) || typeof read !== 'function') throw new ModelGatewayError('INVALID_REQUEST');
     const body = structuredClone(input);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ModelGatewayError('INVALID_REQUEST');
     const route = routes[kind];
     const authorize = async <R>(consume: (context: AiExecutionContext) => Promise<R>): Promise<R> => {
       const credential = structuredClone(await this.credentials.current());
@@ -41,7 +45,7 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
         const staff = credential.audience === 'staff';
         const request: { url: string; originalUrl: string; method: string; headers: object; query: object; body: unknown; staffApiRequest: boolean; user?: { id: string; tenantId: string; isActive: boolean; isSaasAdmin?: boolean; permissions?: string[] } } = {
           url: `/api${route.path}`, originalUrl: `/api${staff ? route.path.replace('/rental/v1/', '/staff/v1/') : route.path}`,
-          method: route.method, headers: { authorization: credential.authorization }, query: {}, body: structuredClone(body), staffApiRequest: staff
+          method: route.method, headers: { authorization: credential.authorization }, query: route.method === 'GET' ? structuredClone(body) : {}, body: structuredClone(body), staffApiRequest: staff
         };
         if (await this.guard.canActivate(new ExecutionContextHost([request])) !== true) throw new ModelGatewayError('FORBIDDEN');
         const user = request.user, identity = getRequestIdentity(), now = this.clock();
