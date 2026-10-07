@@ -4,6 +4,7 @@ import { AiStepRegistrationRepository, type AiStepRegistrationAuthority } from '
 import { AiStepTransitionRepository, type AiStepTransitionAuthority } from '../ai-step-transition.repository';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import { AiTaskEventRepository } from '../ai-task-event.repository';
+import { AiTaskResultRepository } from './ai-task-result.repository';
 import { PrismaTaskRecoverySnapshotRepository } from './prisma-task-recovery-snapshot.repository';
 import { composePersistentTaskInputRunner } from '../task-input/persistent-task-input.composition';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
@@ -41,7 +42,8 @@ export function composeAuthorizedPersistentTaskInputRunner(input: AuthorizedPers
   };
   const recovery = new PrismaTaskRecoverySnapshotRepository(input.db, authorization.tasks);
   const events = new AiTaskEventRepository(input.db, authorization.authority, input.wall);
-  return Object.freeze({ ...composed, authorization, registrations, transitions, taskTransitions, takeoverAndRecover, recovery, events });
+  const results = new AiTaskResultRepository(input.db, authorization.tasks, input.wall);
+  return Object.freeze({ ...composed, authorization, registrations, transitions, taskTransitions, takeoverAndRecover, recovery, events, results });
 }
 
 /** Explicit read-only subset. Uses current persisted action authorization and
