@@ -28,6 +28,10 @@ test('server composition connects actual catalog, diagnostics, candidates and fo
   const catalog = await tools.catalog.read({ limit: 50 });
   assert.ok(catalog);
   const opening = await tools.opening.read({ limit: 50 }); assert.equal(opening.scope.workspaceId, 'workspace-a');
+  const actions = await tools.openingActions.read({ risks: { from: '2026-01-01T00:00:00Z', to: '2026-01-02T00:00:00Z' } });
+  assert.ok(actions.sections.length > 0); assert.ok(actions.sections.every(row => row.candidate.proposedChanges.length === 0));
+  assert.equal(actions.risks.value.historicalUtilization.status, 'unavailable');
+  assert.equal(actions.sections[0].externalVerification, 'not_loaded');
   const risk = await tools.risks.read({ from: '2026-01-01T00:00:00Z', to: '2026-01-02T00:00:00Z' }); assert.equal(risk.profit.status, 'unavailable');
   // Names/locations are sourced from the actual seeded Core, not model enums.
   const group = core.listItemGroups('tenant_001')[0], location = core.listLocations('tenant_001')[0];
@@ -40,4 +44,5 @@ test('same composition rejects current permission withdrawal instead of using ca
   const { tools, h } = await setup(); h.identity.user.permissions = [];
   await assert.rejects(tools.catalog.read({ limit: 50 }));
   await assert.rejects(tools.opening.read({ limit: 50 }));
+  await assert.rejects(tools.openingActions.read({}));
 });

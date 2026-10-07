@@ -18,6 +18,7 @@ import type { PaymentRuntimeService } from '../../integrations/payment.runtime.s
 import { AiOrderPaymentFactsService } from './order-payment-facts.service';
 import { AiOrderExplanationFactsService } from './order-explanation-facts.service';
 import { AiOrderNextStepsService } from './order-next-steps.service';
+import { AiOpeningActionListService } from './opening-action-list.service';
 
 /** Server composition only. Guard and current session come from the application
  * host, never model arguments. No HTTP route, dispatch, entitlement or approval
@@ -53,6 +54,11 @@ export function composeAiAuthorizedBusinessTools(input: {
   const reads = { catalog: new AiCatalogReadFactsService(input.core, routes, input.clock),
     availability: new AiAvailabilityReadFactsService(input.core, routes, input.clock),
     membershipCandidates: new AiMembershipCandidateReadFactsService(input.memberships, routes, input.clock) };
+  const opening = new AiOpeningReadFactsService(input.business, context, diagnostics, input.clock);
+  const risks = new AiRiskReadFactsService(input.reports, {
+    category: async scope => (await context.current(scope)).category.code,
+    currency: async scope => (await context.current(scope)).settings.pricing.currency
+  }, diagnostics, input.clock);
   return Object.freeze({
     catalog: reads.catalog,
     availability: reads.availability,
@@ -66,11 +72,8 @@ export function composeAiAuthorizedBusinessTools(input: {
       return new AiOrderPaymentFactsService(input.payments, input.core,
         new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock), routes, input.clock);
     },
-    opening: new AiOpeningReadFactsService(input.business, context, diagnostics, input.clock),
-    risks: new AiRiskReadFactsService(input.reports, {
-      category: async scope => (await context.current(scope)).category.code,
-      currency: async scope => (await context.current(scope)).settings.pricing.currency
-    }, diagnostics, input.clock),
+    opening, risks,
+    openingActions: new AiOpeningActionListService(opening, risks, context, diagnostics),
     quote: composeAiGuardedQuoteTools({ core: input.core, business: input.business, routes,
       readers: { catalog: reads.catalog, members: reads.membershipCandidates }, clock: input.clock })
   });
