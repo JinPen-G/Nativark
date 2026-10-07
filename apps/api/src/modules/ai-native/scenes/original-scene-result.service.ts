@@ -17,6 +17,22 @@ const commandSchema = z.object({ original: originalRequestReferenceSchema,
   resultId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
 const envelopeSchema = z.object({ original: z.unknown(), materialHash: z.string().regex(/^[a-f0-9]{64}$/u),
   trust: z.literal('source_text_is_data_not_instructions'), facts: z.unknown() }).strict();
+const sourceSchema = z.object({ resourceType: z.literal('order'), resourceId: z.string().min(1).max(191),
+  scope: z.object({ kind: z.literal('workspace'), tenantId: z.string().min(1).max(191), workspaceId: z.string().min(1).max(191) }).strict(),
+  version: z.string().min(1).max(191), field: z.enum(['order', 'amounts', 'saved_basis', 'payment_records', 'rental_period']),
+  observedAt: z.string().datetime({ offset: true }) }).strict();
+const reopenSchema = commandSchema.extend({ sourceIndex: z.number().int().min(0).max(4) }).strict();
+function orderSources(material: unknown) {
+  const packet = z.object({ payload: z.object({ facts: z.record(z.unknown()) }).passthrough() }).passthrough().parse(material);
+  const sources: z.infer<typeof sourceSchema>[] = [];
+  for (const fact of Object.values(packet.payload.facts)) {
+    if (!fact || typeof fact !== 'object' || Array.isArray(fact) || !('source' in fact)) continue;
+    const source = sourceSchema.parse(fact.source);
+    if (!sources.some(existing => requestFingerprint(existing) === requestFingerprint(source))) sources.push(source);
+  }
+  if (sources.length > 5) throw unavailable();
+  return sources;
+}
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const receiptFingerprint = (value: unknown) => {
@@ -39,6 +55,16 @@ function orderFactsFingerprint(material: unknown) {
     if (!fact || typeof fact !== 'object' || Array.isArray(fact)) continue;
     const source = (fact as Record<string, unknown>).source;
     if (source && typeof source === 'object' && !Array.isArray(source)) delete (source as Record<string, unknown>).observedAt;
+  }
+  // The local payment reader carries its own observation metadata. Its actual
+  // record status, amounts and IDs must still match; request IDs are not facts.
+  const payment = (payload.facts as Record<string, unknown>).payments;
+  if (payment && typeof payment === 'object' && !Array.isArray(payment) && 'value' in payment) {
+    const value = payment.value;
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      delete (value as Record<string, unknown>).requestId;
+      delete (value as Record<string, unknown>).observedAt;
+    }
   }
   return requestFingerprint(payload);
 }
@@ -70,7 +96,8 @@ export class AiOriginalSceneResultService {
       observedAt: result.observedAt, businessExecution: 'not_inferred_from_model_result' as const };
     let output: typeof base & { status: 'available' | 'stale' | 'unknown' | 'failed';
       text: { value: string; trust: 'unverified_model_text_not_execution_evidence' } | null;
-      nextAction: string; automaticRetry?: false; materialHash?: string; callId?: string; facts?: unknown };
+      nextAction: string; automaticRetry?: false; materialHash?: string; callId?: string; facts?: unknown;
+      sources?: z.infer<typeof sourceSchema>[]; citationValidation?: 'supplied_sources_only_text_not_validated' };
     if (result.status !== 'succeeded') {
       output = { ...base, status: result.status, text: null,
         nextAction: result.status === 'unknown' ? 'reconcile' : 'manual_review', automaticRetry: false };
@@ -112,7 +139,8 @@ export class AiOriginalSceneResultService {
         .prepare({ question: original.request.input.question });
       output = orderFactsFingerprint(current) === orderFactsFingerprint(frozen.material)
         ? { ...base, status: 'available', text: { value: frozen.text, trust: 'unverified_model_text_not_execution_evidence' },
-          materialHash: frozen.materialHash, callId: frozen.callId, facts: current, nextAction: 'read_only' }
+          materialHash: frozen.materialHash, callId: frozen.callId, facts: current, sources: orderSources(frozen.material),
+          citationValidation: 'supplied_sources_only_text_not_validated', nextAction: 'read_only' }
         : { ...base, status: 'stale', text: null, nextAction: 'reread_facts', automaticRetry: false };
     }
     const after = await this.scenes.requests.readHistorical(command.original);
@@ -123,5 +151,21 @@ export class AiOriginalSceneResultService {
       || latestTask.state !== 'observed' || latestTask.taskId !== task.taskId || latestTask.runId !== task.runId
       || latestTask.revision !== task.revision) throw denied();
     return freezeOriginalInput(output);
+  }
+
+  async reopenSource(value: unknown) {
+    const parsed = reopenSchema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const { sourceIndex, ...command } = parsed.data;
+    const result = await this.read(command);
+    if (result.status !== 'available' || !result.sources?.[sourceIndex]) throw unavailable();
+    const source = result.sources[sourceIndex];
+    const opened = await this.scenes.reopenOrderCitation({ ...command.original, version: source.version, field: source.field });
+    // Re-check the same artifact and supplied fact set after the source await.
+    // A stale/unknown result must not reopen previously visible information.
+    const after = await this.read(command);
+    if (after.status !== 'available' || after.materialHash !== result.materialHash) throw unavailable();
+    return freezeOriginalInput({ original: result.original, resultId: result.resultId,
+      sourceIndex, reference: source, source: opened.source, execution: 'not_attempted' as const });
   }
 }

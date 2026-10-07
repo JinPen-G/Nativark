@@ -91,3 +91,15 @@ API命令（同preload）：`node -e "process.argv=[process.execPath,'tsc','-p',
 API类型命令同上一节，audit为本树output/client-guard-types.log，退出0；`git diff --check`退出0。非真库/真实HTTP/生产会话验证，没有客户模型派发、客户任务持久化或企业资格业务写入，不能称CA08整项完成。
 
 CA05当前已复用受控prepare/submit/reconcile，但本树缺总册07人类readProposal/decide/readReceipt及正式审阅组合的固定交付；已直接发给主线索取固定SHA/入口。绝不手写APPROVED行来假装正常全链。CA06/07继续等待主线正式合同，未新增审批旁路。后续接续先检查主线固定回复，再消费原审批与06宿主；不修改它们的实现。
+
+## CA04/09 接续：本次模型来源重开与原事件消费
+
+结果读者现在只从实际持久模型输入的事实中提取最多5个受控order来源；返回来源集合不等于证明模型文字正确，明确标记supplied_sources_only_text_not_validated。`reopenModelSource({original,resultId,sourceIndex})`从该结果自己的集合选来源，拒绝额外URL/字段，调用原 `reopenOrderCitation` 受权读取；等待后再次复验同结果/材料，stale或unknown不能继续打开旧内容。模型场景与任务中心均暴露实际入口，没有新增HTTP地址或公共DTO。
+
+`composeAiTaskCenterScene({list,events,scenes,modelResults})`的readEvents接回现有 `AiTaskEventRepository.readPage`，输入只有原请求及已有字符串after/limit；返回原公共page/reset对象，不创建新cursor、不Number转换、不启动run。缺events依赖明确不可用。聚合详情新增最终身份/原请求/任务revision复验，分页非法参数映射AI_INVALID_INPUT而非直接泄露Zod异常。首个正式快照cursor仍由公共任务快照端口提供，本线不自行发明“安全继续”的游标。
+
+支付事实比较仅排除原支付reader自己的requestId/observedAt，记录ID、金额、状态、coverage及业务时间仍精确比较，避免把不同HTTP观察标识当成支付事实变化。
+
+只扩既有组合冒烟，未新建脚本：`node --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs --test --test-name-pattern='persisted order model result' tests/ai-native-lane-a-original-scene-host.test.cjs`：1 pass/0 fail/0 skip/0 todo，退出0。实际驱动原请求/模型结果/业务来源/事件仓储及任务中心；包括仅order来源可打开、来源越界/额外URL拒绝、大cursor原样读回、Number cursor拒绝。事务/记录为离线替身，不声称MySQL或实际模型链验收。
+
+API类型命令同前，audit本树output/source-events-types.log，退出0；diff check0。主线回复CA05固定07前置尚需其核验接回，本线不自行宣布当前主线已有。另已报告CA03：本树runner尚无总册同租约createApplication/prepare-start正式宿主入口，请主线提供06固定前置及后续交付；A保留prepareHeldRun，不复制worker或伪造RUNNING。CA03/05/06/07全链仍未完成。下一步优先消费主线固定依赖；未验真实环境全部保留。

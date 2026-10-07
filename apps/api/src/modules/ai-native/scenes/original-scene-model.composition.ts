@@ -71,7 +71,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       return outcome;
     } };
   } };
-  return Object.freeze({ scenes, readModelResult: results.read.bind(results),
+  return Object.freeze({ scenes, readModelResult: results.read.bind(results), reopenModelSource: results.reopenSource.bind(results),
     runtime: Object.freeze({ authorization: model.authorization, tasks: model.tasks,
       planAuthority: model.planAuthority, plans: model.plans, registrations: model.registrations,
       invocations: model.invocations, executors, toolCatalog: model.toolCatalog }),

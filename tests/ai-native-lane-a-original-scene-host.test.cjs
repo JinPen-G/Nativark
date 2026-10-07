@@ -77,7 +77,7 @@ test('persisted order model result is bound to its original input and current au
   const { taskModelIntent, taskModelIdentity, taskModelFingerprint, TASK_TEXT_MODEL_TOOL } = require('../apps/api/src/modules/ai-native/model-input/task-model-input');
   const { requestFingerprint: hash } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
   const { AI_TOOL_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
-  const h = await setup({ aiTaskResultArtifact: [], aiGatewayInvocation: [] });
+  const h = await setup({ aiTaskResultArtifact: [], aiGatewayInvocation: [], aiTaskEvent: [] });
   const created = await h.app.create(h.command()), task = h.state.aiTask[0], ref = h.ref(created.receipt.inputRef);
   const packet = await h.app.prepareTaskMaterial(ref), original = await h.app.requests.readHistorical(ref);
   const policy = { sceneCode: 'order_explanation', routeScene: 'chat', maxOutputTokens: 64 };
@@ -106,10 +106,26 @@ test('persisted order model result is bound to its original input and current au
   const tasks = composePersistedTaskAuthorization(h.dependencies).tasks;
   const reader = new AiOriginalSceneResultService(h.db, tasks, h.app, policy, h.dependencies.clock);
   const { composeAiTaskCenterScene } = require('../apps/api/src/modules/ai-native/task-center-scene.composition');
-  const center = composeAiTaskCenterScene({ list: { readPage: async () => { throw Error('not used'); } }, scenes: h.app, modelResults: reader });
+  const { AiTaskEventRepository } = require('../apps/api/src/modules/ai-native/ai-task-event.repository');
+  const authorization = composePersistedTaskAuthorization(h.dependencies);
+  h.state.aiTaskActionPolicy.push({ scopeId: task.scopeId, taskId: task.id, operation: 'read_events', revision: 1,
+    requiredPermissions: ['rental-os:order:view'], expiresAt: new Date('2027-01-01') });
+  h.state.aiTask[0].eventCursor = 9007199254740993n;
+  h.state.aiTaskEvent.push({ scopeId: task.scopeId, taskId: task.id, cursor: 9007199254740993n, taskRevision: task.revision,
+    type: 'task.output_ready', payload: { data: { resultId: 'model-result' } }, occurredAt: now });
+  const center = composeAiTaskCenterScene({ list: { readPage: async () => { throw Error('not used'); } }, scenes: h.app, modelResults: reader,
+    events: new AiTaskEventRepository(h.db, authorization.authority, h.dependencies.clock) });
+  const events = await center.readEvents({ original: ref, after: '9007199254740992', limit: 10 });
+  assert.equal(events.nextCursor, '9007199254740993'); assert.equal(events.events[0].data.resultId, 'model-result');
+  await assert.rejects(center.readEvents({ original: ref, after: 9007199254740992, limit: 10 }), e => e.code === 'AI_INVALID_INPUT');
   const command = { original: ref, resultId: 'model-result' };
   const result = await center.readModelResult(command);
   assert.equal(result.status, 'available'); assert.equal(result.text.value, payload.text);
+  assert.deepEqual(result.sources.map(source => source.field), ['order']);
+  const reopened = await center.reopenModelSource({ ...command, sourceIndex: 0 });
+  assert.equal(reopened.reference.resourceId, 'order-a'); assert.equal(reopened.source.status, 'available');
+  await assert.rejects(center.reopenModelSource({ ...command, sourceIndex: 1 }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  await assert.rejects(center.reopenModelSource({ ...command, sourceIndex: 0, url: 'https://invalid.example' }), e => e.code === 'AI_INVALID_INPUT');
   assert.equal(JSON.stringify(result).includes('credential-test'), false);
   h.state.aiGatewayInvocation[0].actionId = 'another-call';
   await assert.rejects(reader.read(command), e => e.code === 'AI_ACCESS_DENIED');

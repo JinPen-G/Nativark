@@ -4,10 +4,14 @@ import type { composeAiOriginalScenes } from './scenes/original-scenes.compositi
 import { originalRequestReferenceSchema, freezeOriginalInput } from './task-request/original-request.validation';
 import { AiTaskRepositoryError } from './ai-task.repository';
 import type { AiOriginalSceneResultService } from './scenes/original-scene-result.service';
+import type { AiTaskEventRepository } from './ai-task-event.repository';
+import { originalIdentityHash } from './task-request/original-request.authority';
 
 type OriginalScenes = ReturnType<typeof composeAiOriginalScenes>;
 const page = z.object({ limit: z.number().int().min(1).max(50).optional(), cursor: z.string().max(512).optional(),
   status: z.string().min(1).max(64).optional(), sceneCode: z.string().min(1).max(191).optional() }).strict();
+const eventRead = z.object({ original: originalRequestReferenceSchema, after: z.string().regex(/^(0|[1-9][0-9]{0,19})$/u),
+  limit: z.number().int().min(1).max(100) }).strict();
 
 /**
  * Read-only task-center consumer. It deliberately does not become a second
@@ -17,7 +21,8 @@ const page = z.object({ limit: z.number().int().min(1).max(50).optional(), curso
  */
 export function composeAiTaskCenterScene(input: {
   list: Pick<AiTaskListRepository, 'readPage'>;
-  modelResults?: Pick<AiOriginalSceneResultService, 'read'>;
+  events?: Pick<AiTaskEventRepository, 'readPage'>;
+  modelResults?: Pick<AiOriginalSceneResultService, 'read'> & Partial<Pick<AiOriginalSceneResultService, 'reopenSource'>>;
   scenes: Pick<OriginalScenes, 'readTaskReceipt' | 'readRecovery'> & {
     requests: Pick<OriginalScenes['requests'], 'readHistorical'>;
   };
@@ -27,10 +32,37 @@ export function composeAiTaskCenterScene(input: {
     || typeof input.scenes.readRecovery !== 'function') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
 
   return Object.freeze({
-    readPage: async (value: unknown = {}) => input.list.readPage(page.parse(value)),
+    readPage: async (value: unknown = {}) => {
+      const parsed = page.safeParse(value);
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return input.list.readPage(parsed.data);
+    },
+    readEvents: async (value: unknown) => {
+      const parsed = eventRead.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      if (typeof input.events?.readPage !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const command = freezeOriginalInput(parsed.data);
+      const before = await input.scenes.requests.readHistorical(command.original);
+      const task = await input.scenes.readTaskReceipt(command.original.inputRef);
+      if (task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const events = await input.events.readPage({ taskId: task.taskId, after: command.after, limit: command.limit });
+      const after = await input.scenes.requests.readHistorical(command.original);
+      const latest = await input.scenes.readTaskReceipt(command.original.inputRef);
+      if (originalIdentityHash(before.context) !== originalIdentityHash(after.context)
+        || before.receipt.contentHash !== after.receipt.contentHash || after.receipt.state === 'revoked'
+        || latest.state !== 'observed' || latest.taskId !== task.taskId || latest.runId !== task.runId
+        || events.taskId !== task.taskId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      // Return the existing formal page/reset contract unchanged. This consumer
+      // never turns a cursor into Number, advances it itself, or starts a run.
+      return events;
+    },
     readModelResult: async (value: unknown) => {
       if (typeof input.modelResults?.read !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       return input.modelResults.read(value);
+    },
+    reopenModelSource: async (value: unknown) => {
+      if (typeof input.modelResults?.reopenSource !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return input.modelResults.reopenSource(value);
     },
     readTask: async (value: unknown) => {
       const ref = originalRequestReferenceSchema.safeParse(value);
@@ -40,6 +72,14 @@ export function composeAiTaskCenterScene(input: {
       const task = await input.scenes.readTaskReceipt(frozen.inputRef);
       const recovery = task.state === 'observed' ? await input.scenes.readRecovery(frozen)
         : { nextAction: 'reconcile_request_or_explicit_create_task' as const, automaticExecution: false as const };
+      const after = await input.scenes.requests.readHistorical(frozen);
+      const latest = await input.scenes.readTaskReceipt(frozen.inputRef);
+      if (originalIdentityHash(original.context) !== originalIdentityHash(after.context)
+        || original.receipt.contentHash !== after.receipt.contentHash || after.receipt.state === 'revoked'
+        || latest.state !== task.state || (latest.state === 'observed' && task.state === 'observed'
+          && (latest.taskId !== task.taskId || latest.runId !== task.runId || latest.revision !== task.revision))) {
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      }
       return freezeOriginalInput({
         original: { receipt: original.receipt, sceneCode: original.request.sceneCode,
           sceneVersion: original.receipt.sceneVersion, inputRef: original.receipt.inputRef,
