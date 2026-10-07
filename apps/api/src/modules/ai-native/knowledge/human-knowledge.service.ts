@@ -90,6 +90,23 @@ export class HumanKnowledgeService {
         checkSemantics: 'can_start_only_not_parsed_result' as const };
     });
   }
+  publishReadiness(documentId: string) {
+    parse(id, documentId);
+    return this.session.run(async context => {
+      const record = await this.documents.read(context, documentId), d = record.document;
+      const grant = await this.authorization.authorize(context, { action: 'publish', scope: context.scope, document: d });
+      const now = this.ports.clock.now();
+      const checks = {
+        authorized: Boolean(grant), parsed: d.parsing === 'parsed', indexed: d.indexing === 'indexed',
+        draftOrWithdrawn: d.publication === 'draft' || d.publication === 'withdrawn',
+        withinValidity: Number.isFinite(now) && Date.parse(d.validFrom) <= now && (!d.validUntil || Date.parse(d.validUntil) > now),
+      };
+      const ready = Object.values(checks).every(Boolean);
+      return { ...knowledgeManagementView(record), ready, checks,
+        nextStep: ready ? 'publish' as const : 'resolve_missing_conditions' as const,
+        semantics: 'observation_not_state_transition' as const };
+    });
+  }
   preview(documentId: string, limit = 3) {
     parse(id, documentId);
     if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new KnowledgeError('invalid_input');
