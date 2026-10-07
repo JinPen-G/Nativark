@@ -44,6 +44,7 @@ export type AiInspectionRecognitionInput = {
 };
 
 export type AiInspectionSubmissionMaterial = {
+  mode?: 'original_single' | 'manual_review_only';
   actionId: string;
   requestHash: string;
   body: {
