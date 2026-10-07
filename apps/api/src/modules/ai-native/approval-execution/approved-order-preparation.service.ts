@@ -44,10 +44,11 @@ export class ApprovedOrderPreparationService {
     const step = await tx.aiStep.findFirst({ where: key });
     if (!step || Object.entries(key).some(([name, value]) => step[name as keyof typeof step] !== value)
       || !/^[a-f0-9]{64}$/u.test(step.requestFingerprint)) throw deniedOrder();
-    if ((await tx.aiStep.updateMany({ where: { ...key, id: step.id, revision: step.revision, requestFingerprint: step.requestFingerprint },
-      data: { revision: step.revision } })).count !== 1) throw conflict();
+    if ((await tx.aiStep.updateMany({ where: { ...key, id: step.id, revision: step.revision,
+      inputRef: step.inputRef, requestFingerprint: step.requestFingerprint }, data: { revision: step.revision } })).count !== 1) throw conflict();
     if (Date.parse(command.expiresAt) <= this.clock().getTime()) throw deniedOrder();
-    return step.requestFingerprint;
+    return { fingerprint: step.requestFingerprint,
+      binding: requestFingerprint({ id: step.id, revision: step.revision, inputRef: step.inputRef, fingerprint: step.requestFingerprint }) };
   }
 
   private async quote(context: AiExecutionContext, body: CreateRentalOrderRequest, tx: Prisma.TransactionClient) {
@@ -114,18 +115,21 @@ export class ApprovedOrderPreparationService {
       const saved = await this.d.db.$transaction(async tx => {
         const current = await this.policy.authorizePreparation(command.taskId, tx);
         if (current.scopeId !== original.scopeId || orderContextHash(current.context) !== orderContextHash(original.context)) throw deniedOrder();
-        const fingerprint = await this.lock(tx, command, current.context, current.scopeId);
-        const input = structuredClone(await this.d.inputSource.read({ context: structuredClone(current.context), scopeId: current.scopeId,
-          taskId: command.taskId, actionId: command.actionId, runId: command.lease.runId }, tx));
-        if (!input || requestFingerprint(input) !== fingerprint) throw deniedOrder();
+        const step = await this.lock(tx, command, current.context, current.scopeId);
+        const reference = { context: structuredClone(current.context), scopeId: current.scopeId,
+          taskId: command.taskId, actionId: command.actionId, runId: command.lease.runId };
+        const input = structuredClone(await this.d.inputSource.read(reference, tx));
+        if (!input || requestFingerprint(input) !== step.fingerprint) throw deniedOrder();
         return this.route.withOrderPreparation(current.context, input, async (context, body) => {
           const quote = await this.quote(context, body, tx);
           if (Date.parse(command.expiresAt) > Date.parse(quote.expiresAt)) throw deniedOrder();
           const result = await this.persist(tx, command, context, current.scopeId, body, quote);
           const latest = await this.policy.authorizePreparation(command.taskId, tx);
           if (latest.scopeId !== current.scopeId || orderContextHash(latest.context) !== orderContextHash(context)
-            || await this.lock(tx, command, latest.context, latest.scopeId) !== fingerprint
             || requestFingerprint(await this.quote(latest.context, body, tx)) !== requestFingerprint(quote)) throw deniedOrder();
+          const latestInput = await this.d.inputSource.read({ ...reference, context: structuredClone(latest.context) }, tx);
+          if (!latestInput || requestFingerprint(latestInput) !== step.fingerprint
+            || (await this.lock(tx, command, latest.context, latest.scopeId)).binding !== step.binding) throw deniedOrder();
           return { result, body: structuredClone(body) };
         });
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });

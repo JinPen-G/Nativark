@@ -57,7 +57,7 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
     }
   }
 
-  private call(value: AiExecutionContext, intent: AiGatewayIntentDraft) {
+  private call(value: AiExecutionContext, intent: AiGatewayIntentDraft, signal?: AbortSignal) {
     if (!isGatewayIntent(intent)) throw new ModelGatewayError('INVALID_REQUEST');
     if (!isAiStepExecutionContext(value) || value.scope.kind !== 'workspace' || value.actor.kind !== 'user'
       || (value.audience !== 'operator' && value.audience !== 'staff')) throw new ModelGatewayError('FORBIDDEN');
@@ -65,7 +65,7 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
     if (!binding) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     const expected = identity(context);
     const narrow: GatewayContext = { tenantId: value.scope.tenantId, workspaceId: value.scope.workspaceId, actorId: value.actor.userId };
-    const life = new GatewayDeadline(this.timeoutMs);
+    const life = new GatewayDeadline(this.timeoutMs, signal);
     let resolution: GatewayRoutingResolution | undefined, actual: AiGatewayConfigReferenceDraft | undefined, dispatched = false;
     const ports = this.runtime.ports;
     const verify = async (route: GatewayRoutingResolution) => {
@@ -127,8 +127,8 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
     return { gateway, narrow, life, current, completed, failed, base, hasRoute: () => actual !== undefined };
   }
 
-  async invoke(context: AiExecutionContext, value: AiGatewayIntentDraft): Promise<AiGatewayResultDraft> {
-    const intent = structuredClone(value), call = this.call(context, intent);
+  async invoke(context: AiExecutionContext, value: AiGatewayIntentDraft, signal?: AbortSignal): Promise<AiGatewayResultDraft> {
+    const intent = structuredClone(value), call = this.call(context, intent, signal);
     try {
       const result = await call.gateway.invokeTextIntent(call.narrow, intent, call.life.controller.signal);
       await call.life.wait(call.current);
@@ -142,8 +142,8 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
     } finally { call.life.close(); }
   }
 
-  async *stream(context: AiExecutionContext, value: AiGatewayIntentDraft): AsyncIterable<AiGatewayStreamEventDraft> {
-    const intent = structuredClone(value), call = this.call(context, intent);
+  async *stream(context: AiExecutionContext, value: AiGatewayIntentDraft, signal?: AbortSignal): AsyncIterable<AiGatewayStreamEventDraft> {
+    const intent = structuredClone(value), call = this.call(context, intent, signal);
     const iterator = call.gateway.streamTextIntent(call.narrow, intent, call.life.controller.signal);
     let sequence = 1, started = false;
     const header = () => ({ draftVersion: VERSION, requestId: intent.requestId, sequence: sequence++ });
