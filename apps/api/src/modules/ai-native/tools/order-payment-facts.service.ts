@@ -27,7 +27,9 @@ const binding = (context: AiExecutionContext) => {
 /** Local reads only: never refresh providers, create payments or issue refunds.
  * The original order AND finance route Guards are both required. */
 export class AiOrderPaymentFactsService {
-  constructor(private readonly payments: Pick<PaymentRuntimeService, 'listPaymentIntents' | 'listPaymentRefunds'>,
+  constructor(private readonly payments: Pick<PaymentRuntimeService, 'listPaymentIntents' | 'listPaymentRefunds'> & {
+    listPaymentIntentsPage?: PaymentRuntimeService['listPaymentIntentsPage']; listPaymentRefundsPage?: PaymentRuntimeService['listPaymentRefundsPage']
+  },
     private readonly core: Pick<RentalCoreService, 'getOrder'>,
     private readonly orderAuthority: Pick<AiOrderRouteContextAuthority, 'withOrderRead'>,
     private readonly routes: AiBusinessReadAuthority, private readonly clock: () => Date = () => new Date()) {
@@ -45,14 +47,22 @@ export class AiOrderPaymentFactsService {
       if (order.id !== orderId || order.tenantId !== scope.tenantId) throw new ModelGatewayError('INVALID_RESPONSE');
       return this.routes.withRead('payment_intents', { orderId }, async context => {
         if (binding(context) !== expected) throw new ModelGatewayError('FORBIDDEN');
-        const intents = z.array(intentSchema).max(20).parse(await this.payments.listPaymentIntents(scope.tenantId, scope.workspaceId, orderId));
+        const intentPage = typeof this.payments.listPaymentIntentsPage === 'function'
+          ? await this.payments.listPaymentIntentsPage(scope.tenantId, scope.workspaceId, orderId, { limit: 20 })
+          : { rows: await this.payments.listPaymentIntents(scope.tenantId, scope.workspaceId, orderId), truncated: false };
+        const intents = z.array(intentSchema).max(20).parse(intentPage.rows);
         if (new Set(intents.map(row => row.intentId)).size !== intents.length || intents.some(row => row.currency !== order.currency)) throw new ModelGatewayError('INVALID_RESPONSE');
         const refunds: z.infer<typeof refundSchema>[] = [];
+        let refundsTruncated = Boolean(intentPage.truncated);
         for (const intent of intents) {
-          const rows = await this.routes.withRead('payment_refunds', { orderId, intentId: intent.intentId }, async current => {
+          const refundPage = await this.routes.withRead('payment_refunds', { orderId, intentId: intent.intentId }, async current => {
             if (binding(current) !== expected) throw new ModelGatewayError('FORBIDDEN');
-            return z.array(refundSchema).max(50).parse(await this.payments.listPaymentRefunds(scope.tenantId, scope.workspaceId, orderId, intent.intentId));
+            return typeof this.payments.listPaymentRefundsPage === 'function'
+              ? await this.payments.listPaymentRefundsPage(scope.tenantId, scope.workspaceId, orderId, intent.intentId, { limit: 50 })
+              : { rows: await this.payments.listPaymentRefunds(scope.tenantId, scope.workspaceId, orderId, intent.intentId), truncated: false };
           });
+          const rows = z.array(refundSchema).max(50).parse(refundPage.rows);
+          refundsTruncated ||= Boolean(refundPage.truncated);
           if (rows.some(row => row.orderId !== orderId || row.paymentIntentId !== intent.intentId || row.currency !== order.currency)) throw new ModelGatewayError('INVALID_RESPONSE');
           refunds.push(...rows);
           if (refunds.length > 100 || new Set(refunds.map(row => row.refundId)).size !== refunds.length) throw new ModelGatewayError('INVALID_RESPONSE');
@@ -64,7 +74,7 @@ export class AiOrderPaymentFactsService {
           // `paid` is the recorded payment state, not an inferred order state.
           // Refund accepted/funding_pending/succeeded remain distinct.
           intents, refunds, fundingLedger: 'not_loaded' as const,
-          totals: 'not_computed' as const, freshness: 'local_records_not_provider_refresh' as const };
+          totals: 'not_computed' as const, truncated: refundsTruncated, freshness: 'local_records_not_provider_refresh' as const };
       });
     });
   }

@@ -459,6 +459,28 @@ export class MembershipService {
     }));
   }
 
+  /** Bounded read for authorized AI/booking callers. The legacy method above
+   * remains unchanged for existing callers; this method never scans the full
+   * member table and does not expose totals. */
+  async listPersonalOptionsPage(tenantId: string, input: { limit: number; cursor?: string; name?: string; customerId?: string }) {
+    const limit = Number.isInteger(input?.limit) ? Math.min(50, Math.max(1, input.limit)) : 0;
+    if (!limit || (input.cursor && !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(input.cursor))) throw new BadRequestException("会员候选分页参数无效");
+    const whereScope = await this.personalBookingOptionScope(tenantId);
+    const rows = await this.prisma.customerProfile.findMany({
+      where: { tenantId, customerType: "personal", mergedIntoCustomerId: null,
+        ...(input.customerId ? { id: input.customerId } : {}),
+        ...(input.name ? { name: { contains: input.name.trim() } } : {}),
+        membership: { is: { status: "active" } }, ...(whereScope ? { AND: [whereScope] } : {}) },
+      select: { id: true, name: true, phoneMasked: true, membership: { select: { status: true } } },
+      ...(input.cursor ? { cursor: { id: input.cursor }, skip: 1 } : {}),
+      take: limit + 1, orderBy: [{ name: "asc" }, { id: "asc" }]
+    });
+    const page = rows.slice(0, limit);
+    return { rows: page.map((row) => ({ customerId: row.id, name: row.name, phoneMasked: row.phoneMasked,
+      membershipStatus: row.membership!.status as BookingMemberOption["membershipStatus"] })),
+      nextCursor: rows.length > limit ? page[page.length - 1]?.id : undefined, truncated: rows.length > limit };
+  }
+
   private async personalBookingOptionScope(tenantId: string): Promise<Prisma.CustomerProfileWhereInput | undefined> {
     const scope = getRequestDataScope();
     const locationIds = getRequestLocationIds();

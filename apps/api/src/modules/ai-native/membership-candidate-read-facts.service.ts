@@ -11,7 +11,12 @@ const candidateSchema = z.object({
 }).strict();
 
 export type AiMembershipCandidateReadAuthority = AiBusinessReadAuthority;
-export interface AiMembershipCandidateReadPort { listPersonalOptions(tenantId: string): Promise<readonly BookingMemberOption[]>; }
+export interface AiMembershipCandidateReadPort {
+  listPersonalOptions(tenantId: string): Promise<readonly BookingMemberOption[]>;
+  listPersonalOptionsPage?(tenantId: string, input: { limit: number; cursor?: string; name?: string; customerId?: string }): Promise<{
+    rows: readonly BookingMemberOption[]; nextCursor?: string; truncated: boolean
+  }>;
+}
 export interface AiMembershipCandidateReadProjection {
   contractVersion: typeof AI_CONTRACT_DRAFT_VERSION;
   requestId: string;
@@ -40,9 +45,14 @@ export class AiMembershipCandidateReadFactsService {
     if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user' || (context.audience !== 'operator' && context.audience !== 'staff')
       || !access?.permissions.includes('rental-os:order:create')) throw new ModelGatewayError('FORBIDDEN');
     const workspace = context.scope;
-    let rows: readonly BookingMemberOption[];
-    try { rows = await this.memberships.listPersonalOptions(workspace.tenantId); } catch { throw new ModelGatewayError('PROVIDER_UNAVAILABLE'); }
-    if (!Array.isArray(rows) || rows.length > input.data.limit) throw new ModelGatewayError('INVALID_RESPONSE');
+    let rows: readonly BookingMemberOption[], truncated = false;
+    try {
+      if (typeof this.memberships.listPersonalOptionsPage === 'function') {
+        const page = await this.memberships.listPersonalOptionsPage(workspace.tenantId, { limit: input.data.limit });
+        rows = page.rows; truncated = page.truncated;
+      } else rows = await this.memberships.listPersonalOptions(workspace.tenantId);
+    } catch { throw new ModelGatewayError('PROVIDER_UNAVAILABLE'); }
+    if (!Array.isArray(rows) || (!truncated && rows.length > input.data.limit)) throw new ModelGatewayError('INVALID_RESPONSE');
     const parsed = rows.map(row => candidateSchema.safeParse(row));
     if (parsed.some(item => !item.success)) throw new ModelGatewayError('INVALID_RESPONSE');
     const customerIds = parsed.map(item => item.data!.customerId);
@@ -50,7 +60,7 @@ export class AiMembershipCandidateReadFactsService {
     const observed = this.clock(); if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError('CONFIG_INVALID');
     return {
       contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: context.requestId, audience: context.audience,
-      scope: workspace, observedAt: observed.toISOString(), candidates: parsed.map(item => item.data!)
+      scope: workspace, observedAt: observed.toISOString(), candidates: parsed.map(item => item.data!), truncated
     };
     });
   }
