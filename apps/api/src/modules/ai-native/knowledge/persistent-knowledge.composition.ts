@@ -7,6 +7,10 @@ import { PrismaKnowledgeReadAdapter } from './prisma-knowledge-read.adapter';
 import { PrismaKnowledgeIndexAdapter } from './prisma-knowledge-index.adapter';
 import { requiredPort } from './knowledge-errors';
 import { PrismaKnowledgeSelectionAdapter } from './prisma-knowledge-selection.adapter';
+import { HumanKnowledgeService } from './human-knowledge.service';
+import { HumanKnowledgeContextService } from './human-knowledge-context.service';
+import { HumanKnowledgeIndexService } from './human-knowledge-index.service';
+import { HumanKnowledgeInputService, type HumanKnowledgeInputDependencies } from './human-knowledge-input.service';
 
 export interface PersistentKnowledgeDependencies {
   db: Pick<PrismaClient, '$transaction' | 'aiKnowledgeDocument' | 'aiKnowledgeVersion' | 'aiKnowledgeChunk' | 'aiKnowledgeOperation' | 'aiStructuredMemory' | 'aiMemoryOperation' | 'aiHumanConfirmation'>;
@@ -50,4 +54,16 @@ export function createPersistedKnowledgePorts(input: PersistentKnowledgeDependen
 
 export function composePersistedKnowledge(input: PersistentKnowledgeDependencies) {
   return composeKnowledgeServices(createPersistedKnowledgePorts(input));
+}
+
+/** Human-session opt-in composition, independent of model dispatch. Missing
+ * files disable parsing, missing memory policy disables preference inclusion.
+ * Knowledge action authorization is mandatory even for metadata operations.
+ */
+export function composePersistedHumanKnowledge(input: HumanKnowledgeInputDependencies) {
+  const management = new HumanKnowledgeService(input);
+  const context = new HumanKnowledgeContextService(input);
+  const index = new HumanKnowledgeIndexService(input);
+  const preparation = new HumanKnowledgeInputService(context, input);
+  return { management, context, index, preparation };
 }

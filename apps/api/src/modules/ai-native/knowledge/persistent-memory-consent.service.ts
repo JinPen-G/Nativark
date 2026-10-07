@@ -81,7 +81,8 @@ export class PersistentMemoryConsentService {
     if (!Number.isFinite(now)) return unavailable();
     const consent = before.status !== 'confirmed' ? 'not_confirmed' as const : !bound ? 'invalidated' as const
       : proof.status === 'revoked' ? 'revoked' as const
-        : Date.parse(proof.expiresAt) <= now || Date.parse(proof.issuedAt) > now ? 'expired' as const : 'confirmed' as const;
+        : Date.parse(proof.expiresAt) > Date.parse(before.expiresAt) ? 'invalidated' as const
+          : Date.parse(proof.expiresAt) <= now || Date.parse(proof.issuedAt) > now ? 'expired' as const : 'confirmed' as const;
     const after = await this.repository.read(context.scope, owner, memoryId);
     const latestProof = before.status === 'confirmed' ? await this.repository.read(context, before.confirmationRecordId) : null;
     if (fingerprint(before) !== fingerprint(after) || fingerprint(proof) !== fingerprint(latestProof)) throw new KnowledgeError('conflict');

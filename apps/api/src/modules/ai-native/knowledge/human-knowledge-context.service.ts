@@ -9,7 +9,7 @@ import { KnowledgeError, unavailable } from './knowledge-errors';
 import { documentSourceSchema, fingerprint, id, parse } from './knowledge-validation';
 
 type Source = Extract<AiKnowledgeSourceDraft, { kind: 'document' }>;
-const inputSchema = z.object({ requestId: id, query: z.string().trim().min(1).max(1000),
+export const knowledgeContextInputSchema = z.object({ requestId: id, query: z.string().trim().min(1).max(1000),
   maxSources: z.number().int().min(1).max(10), maxSnippetChars: z.number().int().min(1).max(2000),
   maxTotalBytes: z.number().int().min(1024).max(65536) }).strict();
 const clip = (text: string, limit: number) => {
@@ -36,7 +36,7 @@ export class HumanKnowledgeContextService {
   }
 
   collect(value: unknown) {
-    const input = parse(inputSchema, value);
+    const input = parse(knowledgeContextInputSchema, value);
     return this.human.session.run(async context => {
       const now = this.human.ports.clock.now();
       if (!Number.isFinite(now)) return unavailable();
