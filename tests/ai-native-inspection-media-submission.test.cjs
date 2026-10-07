@@ -50,6 +50,14 @@ test('bounded actual stream reader hashes bytes, rejects overflow and cancels pe
   const ac=new AbortController(),pending=new ReadableStream({cancel(){cancelled=true;}});
   const reading=readInspectionMedia(pending,100,ac.signal);ac.abort();
   await assert.rejects(reading,{code:'RECONCILIATION_REQUIRED'});assert.equal(pending.locked,false);
+  const stop=new AbortController();let cancelCalls=0;
+  const uncooperative=new ReadableStream({cancel(){cancelCalls++;return new Promise(()=>{});}});
+  const stopped=assert.rejects(readInspectionMedia(uncooperative,100,stop.signal),{code:'RECONCILIATION_REQUIRED'});
+  stop.abort();
+  // An event-loop boundary, not a timed sleep: an uncooperative provider must
+  // not keep this request waiting for its cleanup acknowledgement.
+  await Promise.race([stopped,new Promise((_,reject)=>setImmediate(()=>reject(Error('cleanup blocked request'))))]);
+  assert.equal(cancelCalls,1);assert.equal(uncooperative.locked,false);
 });
 test('storage opening cancellation closes a late stream without exposing bytes',async()=>{
   const f=mediaFixture(),ac=new AbortController();let resolveOpen,startedResolve,cancelled=false;
