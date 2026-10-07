@@ -14,7 +14,9 @@ export class AiOrderExplanationFactsService {
     private readonly payments?: Pick<AiOrderPaymentFactsService, 'read'>,
     private readonly clock: () => Date = () => new Date()) {}
 
-  async read(expectedContext?: AiExecutionContext) {
+  async read(expectedContext?: AiExecutionContext, selection: { history: boolean; payments: boolean } = { history: true, payments: true }) {
+    const selected = structuredClone(selection);
+    if (typeof selected.history !== 'boolean' || typeof selected.payments !== 'boolean') throw new ModelGatewayError('INVALID_REQUEST');
     return this.authority.withOrderRead(async (context, orderId) => {
       assertAiReadContextBinding(context, expectedContext);
       if (context.scope.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
@@ -35,14 +37,14 @@ export class AiOrderExplanationFactsService {
       const current = await this.facts.read(context); assertBinding(current);
       await recheck();
       let history: Awaited<ReturnType<AiOrderReadFactsService['readHistoricalBasis']>> | undefined;
-      try { history = await this.facts.readHistoricalBasis(context); } catch { /* Uniform optional coverage, no raw exception. */ }
+      if (selected.history) { try { history = await this.facts.readHistoricalBasis(context); } catch { /* Uniform optional coverage, no raw exception. */ } }
       if (history) {
         assertBinding(history);
         if (history.sourceOrderUpdatedAt !== current.order.updatedAt) throw new ModelGatewayError('CONFIG_INVALID');
       }
       await recheck();
       let payment: Awaited<ReturnType<AiOrderPaymentFactsService['read']>> | undefined;
-      if (this.payments) { try { payment = await this.payments.read(context); } catch { /* No count/reason/existence on denied finance. */ } }
+      if (selected.payments && this.payments) { try { payment = await this.payments.read(context); } catch { /* No count/reason/existence on denied finance. */ } }
       if (payment) assertBinding(payment);
       await recheck();
       // Re-read the actual minimal order after all optional awaits; outer route
@@ -65,10 +67,10 @@ export class AiOrderExplanationFactsService {
           effectiveEndBasis: current.order.effectiveEndBasis }, source: reference('rental_period'),
           inspectionExecution: 'not_loaded' as const },
         history: history ? { coverage: 'partial' as const, value: history, source: reference('saved_basis') }
-          : { coverage: 'unavailable' as const },
+          : { coverage: selected.history ? 'unavailable' as const : 'not_loaded' as const },
         payments: payment ? { coverage: 'partial' as const, value: payment,
           source: { ...reference('payment_records'), observedAt: payment.observedAt } }
-          : { coverage: 'unavailable' as const },
+          : { coverage: selected.payments ? 'unavailable' as const : 'not_loaded' as const },
         actualReceivedTotal: { coverage: 'not_loaded' as const },
         fundingLedger: { coverage: 'not_loaded' as const }
       };

@@ -13,7 +13,7 @@ export class AiOrderNextStepsService {
   async read(expectedContext?: AiExecutionContext) {
     return this.authority.withOrderRead(async (context, orderId) => {
       assertAiReadContextBinding(context, expectedContext);
-      const evidence = await this.facts.read(context);
+      const evidence = await this.facts.read(context, { history: false, payments: false });
       if (context.scope.kind !== 'workspace' || evidence.orderId !== orderId
         || evidence.scope.workspaceId !== context.scope.workspaceId || evidence.scope.tenantId !== context.scope.tenantId) throw new ModelGatewayError('FORBIDDEN');
       const permissions = 'access' in context ? context.access.permissions : [];
