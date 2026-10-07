@@ -131,12 +131,24 @@ export class PrismaApprovedOrderSource {
       const { consumedAt: _at, consumedOrderId: _order, ...immutableQuote } = quote;
       if (requestFingerprint(immutableQuote) !== action.preview.contentHash) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     }
+    let inputBindingHash: string | null = null;
+    if (operation === 'execute' && d.executionInput) {
+      const authorizeInput = async (client: Prisma.TransactionClient) => {
+        const authorized = await d.executionInput!.readAuthorized({ context: structuredClone(context), ...base,
+          actionId: action.actionId, runId: command.lease.runId }, client);
+        if (requestFingerprint(authorized.body) !== action.input.contentHash
+          || requestFingerprint(authorized.body) !== requestFingerprint(body)) throw deniedOrder();
+        return authorized.bindingHash;
+      };
+      inputBindingHash = tx ? await authorizeInput(tx) : await d.db.$transaction(authorizeInput,
+        { isolationLevel: 'Serializable', maxWait: 2500, timeout: 5000 });
+    }
     const latest = structuredClone(await d.policy.resolve({ ...reference, action: structuredClone(action) }, operation, tx));
     if (!isAiStepExecutionContext(latest) || orderContextHash(context) !== orderContextHash(latest)) throw deniedOrder();
     aiTaskAccessFromContext(latest, command.taskId, now());
     if (operation === 'execute' && (approval.expiresAt <= now() || version.expiresAt <= now())) throw deniedOrder();
     return { input, binding: { tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId,
       idempotencyKey: businessIdempotencyKey, requestFingerprint: input.actionFingerprint, request: body }, committedId,
-      payloadHash: version.payloadHash, previewHash: action.preview.contentHash, operation };
+      payloadHash: version.payloadHash, previewHash: action.preview.contentHash, inputBindingHash, operation };
   }
 }
