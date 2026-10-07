@@ -26,6 +26,7 @@ test('opt-in composition prepares original knowledge package with separately aut
   assert.equal(result.status, 'ready'); assert.equal(result.preferences.items.length, 1);
   assert.deepEqual(await bundle.preparation.revalidate(result), result);
   assert.equal(result.preferences.semantics, 'preference_not_authority');
+  assert.deepEqual(result.sections, { knowledge: 'authorized_sources', preferences: 'optional_confirmed_preferences', businessFacts: 'core_authoritative_only' });
   assert.equal(result.tools, undefined); assert.equal(result.invocationId, undefined);
   const disabled = composePersistedHumanKnowledge(ports);
   await assert.rejects(async () => disabled.preparation.collect(input, { includePreferences: true }), { code: 'unavailable' });

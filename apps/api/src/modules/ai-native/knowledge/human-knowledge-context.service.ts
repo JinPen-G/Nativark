@@ -14,6 +14,8 @@ type Source = Extract<AiKnowledgeSourceDraft, { kind: 'document' }>;
 export const knowledgeContextInputSchema = z.object({ requestId: id, query: z.string().trim().min(1).max(1000),
   maxSources: z.number().int().min(1).max(10), maxSnippetChars: z.number().int().min(1).max(2000),
   maxTotalBytes: z.number().int().min(1024).max(65536) }).strict();
+const sectionSemantics = { knowledge: 'authorized_sources' as const,
+  preferences: 'optional_confirmed_preferences' as const, businessFacts: 'core_authoritative_only' as const };
 const clip = (text: string, limit: number) => {
   let out = text.slice(0, limit);
   if (/[\uD800-\uDBFF]$/.test(out)) out = out.slice(0, -1);
@@ -43,7 +45,7 @@ export class HumanKnowledgeContextService {
       const now = this.human.ports.clock.now();
       if (!Number.isFinite(now)) return unavailable();
       const base = { requestId: input.requestId, observationId: randomUUID(), queryFingerprint: fingerprint(input.query), observedAt: new Date(now).toISOString(),
-        trust: 'untrusted_data' as const, purpose: 'context_only' as const };
+        trust: 'untrusted_data' as const, purpose: 'context_only' as const, sections: sectionSemantics };
       const recall = await this.retrieval.recall(context, { requestId: input.requestId, query: input.query, limit: input.maxSources });
       if (recall.status !== 'ready') return { ...base, status: recall.status, ...('reason' in recall ? { reason: recall.reason } : {}),
         ...('nextAction' in recall ? { nextAction: recall.nextAction } : {}), sources: [] as Entry[] };
@@ -113,7 +115,8 @@ export class HumanKnowledgeContextService {
       snippetFingerprint: z.string().regex(/^[a-f0-9]{64}$/), truncated: z.boolean(), trust: z.literal('untrusted_data') }).strict();
     const input = parse(z.object({ requestId: id, observationId: id.optional(), queryFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
       observedAt: z.string().datetime(), trust: z.literal('untrusted_data'), purpose: z.literal('context_only'),
-      status: z.enum(['ready', 'partial']), sources: z.array(entrySchema).max(10) }).strict(), value);
+      status: z.enum(['ready', 'partial']), sources: z.array(entrySchema).max(10),
+      sections: z.object({ knowledge: z.literal('authorized_sources'), preferences: z.literal('optional_confirmed_preferences'), businessFacts: z.literal('core_authoritative_only') }).strict().optional() }).strict(), value);
     if (Buffer.byteLength(JSON.stringify(input), 'utf8') > 65536) throw new KnowledgeError('limit_exceeded');
     return this.human.session.run(async context => {
       const seen = new Set<string>();
@@ -125,7 +128,7 @@ export class HumanKnowledgeContextService {
           || clip(fresh.text, entry.snippet.length) !== entry.snippet
           || entry.truncated !== (fresh.text !== entry.snippet)) return unavailable();
       }
-      return input;
+      return { ...input, sections: input.sections ?? sectionSemantics };
     });
   }
 }
