@@ -66,6 +66,45 @@ export class PersistentMemoryConsentService {
     return this.memory.propose(await this.current(), value);
   }
 
+  async confirmedPreferences(value: unknown) {
+    const input = parse(z.object({ limit: z.number().int().min(1).max(50) }).strict(), value);
+    const context = await this.current();
+    if (context.scope.kind !== 'workspace') return unavailable();
+    const scope = context.scope, owner = actor(context);
+    await this.authorizeRequest(context, { action: 'read', scope, owner });
+    requiredPort(this.ports.db.aiStructuredMemory, ['findMany']);
+    const rows = await this.ports.db.aiStructuredMemory.findMany({ where: {
+      tenantId: scope.tenantId, workspaceId: scope.workspaceId, subjectType: owner.actorKind, subjectId: owner.actorId,
+      ownerKind: owner.actorKind, ownerId: owner.actorId, status: 'confirmed', expiresAt: { gt: new Date(this.ports.clock.now()) } },
+    select: { id: true, tenantId: true, workspaceId: true, ownerKind: true, ownerId: true }, orderBy: { id: 'asc' }, take: 100 }).catch(() => unavailable());
+    if (!Array.isArray(rows) || rows.length > 100) return unavailable();
+    const values: Array<Extract<AiMemoryDraft, { status: 'confirmed' }>> = [], seen = new Set<string>();
+    for (const row of rows) {
+      if (!id.safeParse(row.id).success || seen.has(row.id) || row.tenantId !== scope.tenantId || row.workspaceId !== scope.workspaceId
+        || row.ownerKind !== owner.actorKind || row.ownerId !== owner.actorId) return unavailable();
+      seen.add(row.id);
+      try {
+        // Existing read rechecks resource permission AND current confirmation;
+        // owner matching and the indexed status column are not sufficient.
+        const memory = await this.memory.read(context, row.id);
+        if (memory.status === 'confirmed') values.push(memory);
+      } catch (error) {
+        if (!(error instanceof KnowledgeError) || error.code !== 'unavailable') throw error;
+        // Another audience, revoked consent or denied item is not exposed.
+      }
+    }
+    const selected = values.slice(0, input.limit);
+    for (const memory of selected) {
+      const fresh = await this.memory.read(context, memory.memoryId);
+      if (fingerprint(fresh) !== fingerprint(memory)) return unavailable();
+    }
+    await this.authorizeRequest(context, { action: 'read', scope, owner });
+    return { items: selected.map(memory => ({ memoryId: memory.memoryId, revision: memory.revision,
+      aclRevision: memory.aclRevision, expiresAt: memory.expiresAt, preference: memory.preference,
+      confirmationRecordId: memory.confirmationRecordId })), truncated: values.length > input.limit,
+    coverage: 'bounded_window' as const, pagination: 'unavailable' as const, semantics: 'preference_not_authority' as const };
+  }
+
   /** Editing invalidates the old consent; deletion uses the existing tombstone.
    * The human facade has no arbitrary confirmationId consumption shortcut.
    */

@@ -1,0 +1,23 @@
+'use strict';
+const test = require('node:test'), assert = require('node:assert/strict');
+const { fixture, h } = require('./fixtures/ai-native/lane-b-functional.cjs');
+const { PersistentMemoryConsentService } = h.load('persistent-memory-consent.service');
+test.after(() => assert.deepEqual(h.attempts, []));
+test('confirmed preference enumeration checks each current consent and audience, excludes proposals/revocations', async () => {
+  const { ports, flags } = fixture(), api = new PersistentMemoryConsentService(ports);
+  const expiresAt = new Date(h.now + 3600000).toISOString();
+  const propose = memoryId => ({ memoryId, operationId: `propose-${memoryId}`, expiresAt, preference: { kind: 'locale', value: 'zh-CN' } });
+  const confirm = memoryId => ({ memoryId, expectedRevision: 1, operationId: `confirm-${memoryId}`, expiresAt });
+  await api.propose(propose('memory-a')); await api.confirm(confirm('memory-a'));
+  await api.propose(propose('memory-b'));
+  const staff = new PersistentMemoryConsentService({ ...ports,
+    credentials: { current: async () => ({ authorization: 'synthetic-staff', requestId: 'request-1', audience: 'staff' }) } });
+  await staff.propose(propose('memory-c')); await staff.confirm(confirm('memory-c'));
+  const list = await api.confirmedPreferences({ limit: 10 });
+  assert.deepEqual(list.items.map(v => v.memoryId), ['memory-a']);
+  assert.equal(list.semantics, 'preference_not_authority');
+  await api.revoke({ memoryId: 'memory-a', expectedRevision: 2 });
+  assert.deepEqual((await api.confirmedPreferences({ limit: 10 })).items, []);
+  flags.active = false;
+  await assert.rejects(api.confirmedPreferences({ limit: 10 }), { code: 'unavailable' });
+});
