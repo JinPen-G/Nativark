@@ -7,6 +7,23 @@ const { HumanKnowledgeModule } = h.load('human-knowledge.module');
 const { HumanKnowledgeInputService } = h.load('human-knowledge-input.service');
 test.after(() => assert.deepEqual(h.attempts, []));
 
+test('missing attachment business binding denies prepare/create/revise before writes', async () => {
+  const { ports, db } = fixture();
+  const binding = ports.files.assertBound;
+  delete ports.files.assertBound;
+  const bundle = composePersistedHumanKnowledge(ports);
+  await assert.rejects(bundle.management.create(h.draft()), { code: 'unavailable' });
+  await assert.rejects(bundle.management.prepareCreate(h.draft()), { code: 'unavailable' });
+  assert.equal(db.state.documents.size, 0);
+  ports.files.assertBound = binding;
+  await bundle.management.create(h.draft());
+  delete ports.files.assertBound;
+  await assert.rejects(bundle.management.revise(1, h.draft({
+    documentVersion: 'v2', attachmentId: 'attachment-2', operationId: 'revise-2',
+  })), { code: 'unavailable' });
+  assert.equal((await bundle.management.read('doc-1')).revision, 1);
+});
+
 test('opt-in composition prepares original knowledge package with separately authorized preferences', async () => {
   const { ports, db } = fixture();
   const deps = { ...ports, memory: { db, authorization: ports.authorization } };

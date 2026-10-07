@@ -54,8 +54,8 @@ export interface KnowledgeRepositoryPort {
 export interface KnowledgeFilePort {
   /** Only authorized attachment references; enforce maxBytes while reading, not after unbounded allocation. */
   read(context: AiExecutionContext, document: AiKnowledgeDocumentDraft, maxBytes: number): Promise<{ mediaType: string; bytes: Uint8Array }>;
-  /** Optional pre-create check. Formal file adapters should verify the active
-   * FileAsset business binding before a document is admitted. */
+  /** Required for prepare/create/newVersion; optional only for read-only
+   * compositions. Verify active FileAsset business binding before admission. */
   assertBound?(context: AiExecutionContext, input: { attachmentId: string; documentId: string; workspaceId: string }): Promise<void>;
 }
 export interface KnowledgeParserPort {
