@@ -10,7 +10,8 @@ import type { PersistedApprovedOrderPolicyAuthority } from './persisted-approved
 import { deniedOrder, orderContextHash } from './prisma-approved-order.source';
 
 export const approvedOrderPreviewSchema = z.object({
-  id: z.string().min(1), tenantId: z.string().min(1), expiresAt: z.string().datetime({ offset: true }),
+  id: z.string().min(1), tenantId: z.string().min(1), pricingPlanVersion: z.string().min(1),
+  expiresAt: z.string().datetime({ offset: true }),
   consumedAt: z.string().datetime({ offset: true }).optional(), consumedOrderId: z.string().min(1).optional()
 }).passthrough();
 

@@ -119,6 +119,7 @@ export class PrismaApprovedOrderSource {
     }
     const body = snapshots.input.payload, preview = snapshots.preview.payload;
     if (!body || !preview || action.target.resourceType !== 'quote' || action.target.resourceId !== body.quoteId
+      || action.target.version !== preview.pricingPlanVersion
       || preview.id !== body.quoteId || preview.tenantId !== context.scope.tenantId
       || preview.consumedAt || preview.consumedOrderId) throw deniedOrder();
     if (body.capabilityExceptions !== undefined) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');

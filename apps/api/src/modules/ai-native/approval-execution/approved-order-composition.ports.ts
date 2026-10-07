@@ -31,7 +31,7 @@ export interface ApprovedOrderSnapshot<T> extends AiProposalSnapshotRefDraft {
   payload: T;
 }
 
-export type ApprovedOrderPreview = Pick<RentalQuoteSnapshotV1, 'id' | 'tenantId' | 'expiresAt' | 'consumedAt' | 'consumedOrderId'>;
+export type ApprovedOrderPreview = Pick<RentalQuoteSnapshotV1, 'id' | 'tenantId' | 'pricingPlanVersion' | 'expiresAt' | 'consumedAt' | 'consumedOrderId'>;
 
 export interface ApprovedOrderSnapshotSource {
   read(request: {
