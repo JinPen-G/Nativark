@@ -3,6 +3,7 @@ import type { AiTaskListRepository } from './ai-task-list.repository';
 import type { composeAiOriginalScenes } from './scenes/original-scenes.composition';
 import { originalRequestReferenceSchema, freezeOriginalInput } from './task-request/original-request.validation';
 import { AiTaskRepositoryError } from './ai-task.repository';
+import type { AiOriginalSceneResultService } from './scenes/original-scene-result.service';
 
 type OriginalScenes = ReturnType<typeof composeAiOriginalScenes>;
 const page = z.object({ limit: z.number().int().min(1).max(50).optional(), cursor: z.string().max(512).optional(),
@@ -11,11 +12,12 @@ const page = z.object({ limit: z.number().int().min(1).max(50).optional(), curso
 /**
  * Read-only task-center consumer. It deliberately does not become a second
  * task facade: listing, original request authorization and recovery remain in
- * their existing repositories. R/P can later be injected as an additional
- * result projection without changing this boundary.
+ * their existing repositories. Model answers use the original-scene result
+ * reader, not metadata, event bodies or caller-provided answers.
  */
 export function composeAiTaskCenterScene(input: {
   list: Pick<AiTaskListRepository, 'readPage'>;
+  modelResults?: Pick<AiOriginalSceneResultService, 'read'>;
   scenes: Pick<OriginalScenes, 'readTaskReceipt' | 'readRecovery'> & {
     requests: Pick<OriginalScenes['requests'], 'readHistorical'>;
   };
@@ -26,6 +28,10 @@ export function composeAiTaskCenterScene(input: {
 
   return Object.freeze({
     readPage: async (value: unknown = {}) => input.list.readPage(page.parse(value)),
+    readModelResult: async (value: unknown) => {
+      if (typeof input.modelResults?.read !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return input.modelResults.read(value);
+    },
     readTask: async (value: unknown) => {
       const ref = originalRequestReferenceSchema.safeParse(value);
       if (!ref.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -48,4 +54,3 @@ export function composeAiTaskCenterScene(input: {
     }
   });
 }
-

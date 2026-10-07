@@ -11,9 +11,13 @@ import { originalIdentityHash } from '../task-request/original-request.authority
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
 import { AI_SCENE_REQUEST_DRAFT_VERSION } from '../../../../../../packages/shared/src/ai-scene-request-draft';
 import { gatewayTextIntentBindingSchema } from '../gateway-intent';
+import { AiOriginalSceneResultService } from './original-scene-result.service';
+import type { PrismaClient } from '@prisma/client';
 
 type ModelDependencies = Parameters<typeof composePersistedTaskModelInput>[0];
-export type AiOriginalSceneModelDependencies = AiOriginalSceneDependencies & ModelDependencies;
+export type AiOriginalSceneModelDependencies = AiOriginalSceneDependencies & ModelDependencies & {
+  db: ModelDependencies['db'] & Pick<PrismaClient, 'aiTaskResultArtifact'>;
+};
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().positive().max(4294967294);
 const heldSchema = z.object({ original: originalRequestReferenceSchema,
@@ -32,6 +36,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
   const gatewayScene = gatewayTextIntentBindingSchema.parse(structuredClone(dependencies.gatewayScene));
   const scenes = composeAiOriginalScenes(dependencies), model = composePersistedTaskModelInput(dependencies);
   const clock = dependencies.clock ?? (() => new Date());
+  const results = new AiOriginalSceneResultService(dependencies.db, model.tasks, scenes, gatewayScene, clock);
   const registration = (inputRef: string) => `scene-model:${inputRef}`;
   const current = async (ref: z.infer<typeof originalRequestReferenceSchema>, taskId: string, runId: string) => {
     const original = await scenes.requests.readHistorical(ref);
@@ -66,7 +71,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       return outcome;
     } };
   } };
-  return Object.freeze({ scenes,
+  return Object.freeze({ scenes, readModelResult: results.read.bind(results),
     runtime: Object.freeze({ authorization: model.authorization, tasks: model.tasks,
       planAuthority: model.planAuthority, plans: model.plans, registrations: model.registrations,
       invocations: model.invocations, executors, toolCatalog: model.toolCatalog }),

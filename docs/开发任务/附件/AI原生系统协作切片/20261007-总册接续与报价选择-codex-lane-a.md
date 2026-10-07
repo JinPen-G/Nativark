@@ -61,3 +61,21 @@ Runtime替换只消费原引用、指纹与租约，不改变本片选择事实/
 `AiBusinessScenesModule.registerClient` 现提供显式 opt-in 注册；仍不注册 AppModule/HTTP。定向验证：API 隔离 TypeScript 检查退出码 0，`git diff --check` 退出码 0。R/P 的正式 result/approval DTO 尚未在本线提供，真实结果正文、事件 cursor 与公开任务 HTTP 仍保持 unavailable；没有把 CA09 适配器宣称为完整任务中心。
 
 另补客户端组合装配检查：缺任一现有只读 client service 方法即在装配时 fail closed，而不是在请求中途抛出未定义方法。该修复同样以隔离 TypeScript 0、diff check 0 验证。
+
+## CA04/CA09 接续：实际持久模型结果消费
+
+固定依赖已接回：主线81f66af1/64dba2cf/827dc0eb，本树对应a8341795/c4003053/732ab29b；未追随主线活动HEAD。
+
+新增 `AiOriginalSceneResultService.read({original,resultId})`，组合主线实际 `AiTaskResultRepository`。订单解释结果按原请求、task/run/step/action、不可变模型输入、身份hash、意图fingerprint、Gateway invocation及配置/价格版本绑定读取。只返回有完整计量的completed文本；unknown/failed不返回正文、不自动重派。订单结果重新调用原受权准备服务，比较实际事实、版本和coverage；变化返回stale，不展示旧答案。仅排除明确的查询观察时间，不排除业务日期/金额/版本。生成文本始终不是业务执行证据，不输出Gateway凭据/供应商配置或原始异常。
+
+实际入口：`composeAiOriginalSceneModel(deps).readModelResult(command)`；任务中心可注入 `modelResults: {read: model.readModelResult}` 后调用 `readModelResult(command)`。缺该读取器返回AI_RESOURCE_UNAVAILABLE。装配需要显式提供已有 `aiTaskResultArtifact` delegate，不自动注册生产模块。订单外的模型场景结果尚未实现此业务事实复核，不冒称全场景完成。
+
+未新增测试脚本，仅在既有 `tests/ai-native-lane-a-original-scene-host.test.cjs` 加一个组合冒烟。先运行4 pass/1 fail，发现把含routeScene的binding传给严格text policy导致CONFIG_INVALID；本片已投影到正式policy字段。最终命令：
+
+`node --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs --test tests/ai-native-lane-a-original-scene-host.test.cjs`
+
+5 pass /0 fail /0 skip /0 todo，退出0。覆盖实际结果仓储与场景/任务中心正常读取、跨调用绑定拒绝、unknown不展示和注销拒绝；数据/事务为离线替身，没有真实模型派发证据。
+
+API命令（同preload）：`node -e "process.argv=[process.execPath,'tsc','-p','apps/api/tsconfig.json','--rootDir','.','--noEmit','--incremental','false'];require('typescript/lib/tsc')"`，退出0。固定无效DATABASE_URL；审计路径本树output/scene-result-smoke.log、output/scene-result-types.log；不提交output。
+
+已按负责人授权向主线对话报告CA06/CA07正式配置/资料提案和执行端口缺口；主线确认由其核查和交付固定接口，本线维持prepared_not_submitted/unavailable。不改审批合同、不复用order.commit批准资料。下一步核对CA05选定报价到原受控审批/Core接法。未验MySQL、真实HTTP/模型/支付、浏览器/设备、生产；本片不代表AIN13或CA队列整项验收。

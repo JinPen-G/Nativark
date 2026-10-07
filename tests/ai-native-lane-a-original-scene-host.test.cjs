@@ -70,3 +70,52 @@ test('empty metadata recovery does not create a task or infer a safe replay', as
   assert.equal(recoveryValid(result), true); assert.equal(result.task.state, 'not_observed');
   assert.equal(result.task.retryable, false); assert.equal(h.state.aiTask.length, 0);
 });
+
+test('persisted order model result is bound to its original input and current authorized facts', async () => {
+  const { AiOriginalSceneResultService } = require('../apps/api/src/modules/ai-native/scenes/original-scene-result.service');
+  const { composePersistedTaskAuthorization } = require('../apps/api/src/modules/ai-native/task-authorization.composition');
+  const { taskModelIntent, taskModelIdentity, taskModelFingerprint, TASK_TEXT_MODEL_TOOL } = require('../apps/api/src/modules/ai-native/model-input/task-model-input');
+  const { requestFingerprint: hash } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const { AI_TOOL_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
+  const h = await setup({ aiTaskResultArtifact: [], aiGatewayInvocation: [] });
+  const created = await h.app.create(h.command()), task = h.state.aiTask[0], ref = h.ref(created.receipt.inputRef);
+  const packet = await h.app.prepareTaskMaterial(ref), original = await h.app.requests.readHistorical(ref);
+  const policy = { sceneCode: 'order_explanation', routeScene: 'chat', maxOutputTokens: 64 };
+  const config = structuredClone(require('./fixtures/ai-native/gateway-contracts.cjs').config);
+  config.tenantId = original.context.scope.tenantId; config.configurationScope.tenantId = config.tenantId;
+  const input = { mode: 'invoke', intent: taskModelIntent(task.id, created.task.runId, `scene-model:${ref.inputRef}`, policy.sceneCode,
+    { maxOutputTokens: 32, messages: [{ role: 'user', content: [{ kind: 'text', text: JSON.stringify({ original: packet.original,
+      materialHash: packet.materialHash, trust: packet.trust, facts: packet.material }) }] }] }),
+    configuration: config, priceVersion: 'price-1', routingHash: 'a'.repeat(64), identityHash: taskModelIdentity(original.context) };
+  const fingerprint = taskModelFingerprint(input, policy), now = new Date(h.b.h.control.now);
+  const payload = { ...structuredClone(require('./fixtures/ai-native/gateway-contracts.cjs').completed),
+    requestId: input.intent.requestId, actual: config, text: 'Synthetic untrusted explanation' };
+  h.state.aiTaskActionPolicy.push({ scopeId: task.scopeId, taskId: task.id, operation: 'read_step_terminal', revision: 1,
+    requiredPermissions: ['rental-os:order:view'], expiresAt: new Date('2027-01-01') });
+  h.state.aiStep.push({ scopeId: task.scopeId, taskId: task.id, runId: created.task.runId, id: 'model-step', actionId: 'model-action',
+    inputRef: 'model-input', requestFingerprint: fingerprint, status: 'SUCCEEDED', resultRef: 'model-result',
+    toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION });
+  h.state.aiTaskActionInput.push({ scopeId: task.scopeId, taskId: task.id, runId: created.task.runId, id: 'model-input',
+    registrationRef: `scene-model:${ref.inputRef}`, toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION, fingerprint, payload: input });
+  h.state.aiGatewayInvocation.push({ scopeId: task.scopeId, taskId: task.id, runId: created.task.runId, stepId: 'model-step', actionId: 'model-action',
+    actorId: task.ownerId, sceneCode: task.sceneCode, callId: input.intent.requestId, mode: 'invoke', stepFingerprint: fingerprint,
+    intentHash: fingerprint, priceVersion: input.priceVersion, configurationHash: hash(config) });
+  h.state.aiTaskResultArtifact.push({ scopeId: task.scopeId, taskId: task.id, runId: created.task.runId, stepId: 'model-step', actionId: 'model-action',
+    id: 'model-result', stepFingerprint: fingerprint, outcome: 'SUCCEEDED', payload, contentHash: hash(payload), errorCode: null,
+    outputBytes: BigInt(Buffer.byteLength(JSON.stringify(payload))), activeMs: 1n, completeMeasurement: true, createdAt: now });
+  const tasks = composePersistedTaskAuthorization(h.dependencies).tasks;
+  const reader = new AiOriginalSceneResultService(h.db, tasks, h.app, policy, h.dependencies.clock);
+  const { composeAiTaskCenterScene } = require('../apps/api/src/modules/ai-native/task-center-scene.composition');
+  const center = composeAiTaskCenterScene({ list: { readPage: async () => { throw Error('not used'); } }, scenes: h.app, modelResults: reader });
+  const command = { original: ref, resultId: 'model-result' };
+  const result = await center.readModelResult(command);
+  assert.equal(result.status, 'available'); assert.equal(result.text.value, payload.text);
+  assert.equal(JSON.stringify(result).includes('credential-test'), false);
+  h.state.aiGatewayInvocation[0].actionId = 'another-call';
+  await assert.rejects(reader.read(command), e => e.code === 'AI_ACCESS_DENIED');
+  h.state.aiGatewayInvocation[0].actionId = 'model-action';
+  h.state.aiTaskResultArtifact[0].outcome = 'UNKNOWN'; h.state.aiStep[0].status = 'UNKNOWN';
+  const unknown = await reader.read(command); assert.equal(unknown.status, 'unknown'); assert.equal(unknown.text, null);
+  h.b.h.identity.session = false;
+  await assert.rejects(reader.read(command), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
+});
