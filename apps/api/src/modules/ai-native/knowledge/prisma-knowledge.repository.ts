@@ -48,7 +48,12 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
   async versions(scope: AiExecutionScope, documentId: string, limit: number) {
     const value = workspace(scope);
     if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new KnowledgeError('invalid_input');
-    const rows = await this.db.aiKnowledgeVersion.findMany({ where: { documentId }, orderBy: { version: 'asc' }, take: limit + 1,
+    // Version rows do not carry tenant/workspace columns themselves. Keep the
+    // scope predicate on the relation so an ID collision or a malformed
+    // delegate cannot enumerate another workspace before the head recheck.
+    const rows = await this.db.aiKnowledgeVersion.findMany({ where: {
+      documentId, document: { tenantId: value.tenantId, workspaceId: value.workspaceId },
+    }, orderBy: { version: 'asc' }, take: limit + 1,
       include: { chunks: { orderBy: [{ chunkIndex: 'asc' }, { id: 'asc' }], take: 201 } } }).catch(() => unavailable());
     if (!Array.isArray(rows) || rows.length > limit) throw new KnowledgeError('limit_exceeded');
     const head = await this.read(scope, documentId);
