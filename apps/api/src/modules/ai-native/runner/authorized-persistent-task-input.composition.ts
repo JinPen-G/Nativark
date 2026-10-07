@@ -12,6 +12,7 @@ import { createAiTaskRunnerOutcomePort } from './ai-task-runner-outcome-adapter'
 import { PrismaTaskStepEvidenceAuthority } from './prisma-task-step-evidence.authority';
 import { PrismaTaskTakeoverRepository } from './prisma-task-takeover.repository';
 import type { AiTaskRunnerOutcome } from './ai-task-runner.ports';
+import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
 
 export interface AuthorizedPersistentTaskInputComposition extends Omit<PersistentTaskRunnerComposition,
   'tasks' | 'executionAuthorization' | 'registrations' | 'replays' | 'transitions' | 'taskOutcome' | 'inputs'> {
@@ -41,7 +42,8 @@ export function composeAuthorizedPersistentTaskInputRunner(input: AuthorizedPers
   };
   const recovery = new PrismaTaskRecoverySnapshotRepository(input.db, authorization.tasks);
   const events = new AiTaskEventRepository(input.db, authorization.authority, input.wall);
-  return Object.freeze({ ...composed, authorization, registrations, transitions, taskTransitions, takeoverAndRecover, recovery, events });
+  const createApplication = (host: AiTaskApplicationHost) => new PrismaTaskApplication({ db: input.db, tasks: authorization.tasks, runner: composed.runner, host });
+  return Object.freeze({ ...composed, authorization, registrations, transitions, taskTransitions, takeoverAndRecover, recovery, events, createApplication });
 }
 
 /** Explicit read-only subset. Uses current persisted action authorization and
