@@ -11,7 +11,7 @@ import { KnowledgeSourceService } from './knowledge-source.service';
 import { PrismaKnowledgeReadAdapter } from './prisma-knowledge-read.adapter';
 import { PrismaKnowledgeRepository } from './prisma-knowledge.repository';
 import { KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
-import { draftInput, fingerprint, id, parse, visible } from './knowledge-validation';
+import { documentSourceSchema, draftInput, fingerprint, id, parse, visible } from './knowledge-validation';
 
 export type HumanKnowledgeDependencies = {
   db: ConstructorParameters<typeof PrismaKnowledgeRepository>[0];
@@ -166,6 +166,26 @@ export class HumanKnowledgeService {
       return { ...metadata, body: 'authorized' as const, changes,
         truncated: changes.length >= maxChanges && count > maxChanges,
         semantics: 'chunk_content_comparison_not_answer_truth' as const };
+    });
+  }
+  referenceStatus(source: unknown) {
+    const input = parse(documentSourceSchema, source);
+    return this.session.run(async context => {
+      if (JSON.stringify(input.scope) !== JSON.stringify(context.scope)) return unavailable();
+      const current = await this.documents.read(context, input.documentId);
+      const metadata = await this.authorization.authorize(context, { action: 'read_metadata', scope: context.scope, document: current.document });
+      if (!metadata) return unavailable();
+      const versionChanged = current.document.documentVersion !== input.documentVersion;
+      const body = !versionChanged && current.document.aclRevision === input.aclRevision
+        ? await this.authorization.authorize(context, { action: 'read_body', scope: context.scope, document: current.document })
+        : null;
+      return { documentId: input.documentId, referencedVersion: input.documentVersion,
+        currentVersion: current.document.documentVersion, versionChanged,
+        currentPublication: current.document.publication, currentParsing: current.document.parsing,
+        currentIndexing: current.document.indexing,
+        readableNow: body ? 'current_version_only' as const : 'unavailable' as const,
+        historicalAccess: 'requires_version_policy' as const,
+        semantics: 'old_reference_is_not_redirected_to_current' as const };
     });
   }
   detail(documentId: string) {
