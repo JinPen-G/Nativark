@@ -92,6 +92,12 @@ API类型命令同上一节，audit为本树output/client-guard-types.log，退�
 
 CA05当前已复用受控prepare/submit/reconcile，但本树缺总册07人类readProposal/decide/readReceipt及正式审阅组合的固定交付；已直接发给主线索取固定SHA/入口。绝不手写APPROVED行来假装正常全链。CA06/07继续等待主线正式合同，未新增审批旁路。后续接续先检查主线固定回复，再消费原审批与06宿主；不修改它们的实现。
 
+## CA06 接续：开业诊断持久模型结果读回（20261008）
+
+同一实际AiOriginalSceneResultService现在支持opening_diagnosis，按原请求/模型输入/invocation/artifact复核，并仅重新读取用户明确选择的开业分区。配置版本、分区检查、覆盖与当前权限变化后旧正文不可用；只有各原投影明确的observedAt观察元数据不参加事实变化比较。不制造开业来源重开接口，sources为空；没有配置提案/批准/写入端口，仍未提交、不执行。
+
+复用现有host测试，未新增脚本。`node --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs --test --test-name-pattern='persisted scene model result' tests/ai-native-lane-a-original-scene-host.test.cjs`退出0，1 pass/0 fail/0 skip/0 todo（同一案例分别驱动订单与开业实际结果读者）。API类型检查同前命令退出0，audit本树output/opening-result-types.log；数据库/模型记录仍为离线替身，未验实际模型、MySQL、HTTP与生产。主线已提供同租约运行器固定前置，提交本片后再同步消费，不在A树维护runner。
+
 ## CA04/09 接续：本次模型来源重开与原事件消费
 
 结果读者现在只从实际持久模型输入的事实中提取最多5个受控order来源；返回来源集合不等于证明模型文字正确，明确标记supplied_sources_only_text_not_validated。`reopenModelSource({original,resultId,sourceIndex})`从该结果自己的集合选来源，拒绝额外URL/字段，调用原 `reopenOrderCitation` 受权读取；等待后再次复验同结果/材料，stale或unknown不能继续打开旧内容。模型场景与任务中心均暴露实际入口，没有新增HTTP地址或公共DTO。

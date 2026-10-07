@@ -71,16 +71,17 @@ test('empty metadata recovery does not create a task or infer a safe replay', as
   assert.equal(result.task.retryable, false); assert.equal(h.state.aiTask.length, 0);
 });
 
-test('persisted order model result is bound to its original input and current authorized facts', async () => {
+test('persisted scene model result is bound to its original input and current authorized facts', async () => {
   const { AiOriginalSceneResultService } = require('../apps/api/src/modules/ai-native/scenes/original-scene-result.service');
   const { composePersistedTaskAuthorization } = require('../apps/api/src/modules/ai-native/task-authorization.composition');
   const { taskModelIntent, taskModelIdentity, taskModelFingerprint, TASK_TEXT_MODEL_TOOL } = require('../apps/api/src/modules/ai-native/model-input/task-model-input');
   const { requestFingerprint: hash } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
   const { AI_TOOL_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
+  for (const sceneCode of ['order_explanation', 'opening_diagnosis']) {
   const h = await setup({ aiTaskResultArtifact: [], aiGatewayInvocation: [], aiTaskEvent: [] });
-  const created = await h.app.create(h.command()), task = h.state.aiTask[0], ref = h.ref(created.receipt.inputRef);
+  const created = await h.app.create(h.command(sceneCode)), task = h.state.aiTask[0], ref = h.ref(created.receipt.inputRef);
   const packet = await h.app.prepareTaskMaterial(ref), original = await h.app.requests.readHistorical(ref);
-  const policy = { sceneCode: 'order_explanation', routeScene: 'chat', maxOutputTokens: 64 };
+  const policy = { sceneCode, routeScene: 'chat', maxOutputTokens: 64 };
   const config = structuredClone(require('./fixtures/ai-native/gateway-contracts.cjs').config);
   config.tenantId = original.context.scope.tenantId; config.configurationScope.tenantId = config.tenantId;
   const input = { mode: 'invoke', intent: taskModelIntent(task.id, created.task.runId, `scene-model:${ref.inputRef}`, policy.sceneCode,
@@ -121,9 +122,17 @@ test('persisted order model result is bound to its original input and current au
   const command = { original: ref, resultId: 'model-result' };
   const result = await center.readModelResult(command);
   assert.equal(result.status, 'available'); assert.equal(result.text.value, payload.text);
+  assert.equal(result.sceneCode, sceneCode);
+  if (sceneCode === 'order_explanation') {
   assert.deepEqual(result.sources.map(source => source.field), ['order']);
   const reopened = await center.reopenModelSource({ ...command, sourceIndex: 0 });
   assert.equal(reopened.reference.resourceId, 'order-a'); assert.equal(reopened.source.status, 'available');
+  } else {
+    assert.deepEqual(result.sources, []);
+    assert.deepEqual(result.facts.sections.map(section => section.key), ['item_groups']);
+    assert.equal(result.facts.configuration.pricing, undefined);
+    await assert.rejects(center.reopenModelSource({ ...command, sourceIndex: 0 }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  }
   await assert.rejects(center.reopenModelSource({ ...command, sourceIndex: 1 }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
   await assert.rejects(center.reopenModelSource({ ...command, sourceIndex: 0, url: 'https://invalid.example' }), e => e.code === 'AI_INVALID_INPUT');
   assert.equal(JSON.stringify(result).includes('credential-test'), false);
@@ -134,6 +143,7 @@ test('persisted order model result is bound to its original input and current au
   const unknown = await reader.read(command); assert.equal(unknown.status, 'unknown'); assert.equal(unknown.text, null);
   h.b.h.identity.session = false;
   await assert.rejects(reader.read(command), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
+  }
 });
 
 test('client scene authenticates through actual client Guard/Auth and rechecks after the business read', async () => {

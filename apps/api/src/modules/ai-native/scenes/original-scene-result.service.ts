@@ -69,7 +69,30 @@ function orderFactsFingerprint(material: unknown) {
   return requestFingerprint(payload);
 }
 
-/** Read-only AIN13 consumer of the mainline artifact reader. No model dispatch,
+function openingFactsFingerprint(material: unknown) {
+  const current = z.object({ scope: z.unknown(), audience: z.string(), configVersion: z.string(),
+    observedAt: z.string(), sections: z.array(z.unknown()).max(9), configuration: z.unknown() })
+    .passthrough().parse(structuredClone(material));
+  const { observedAt: _observation, ...facts } = current;
+  // Strip only the observation metadata of the actual opening projections,
+  // not their configuration versions, coverage or readiness decisions.
+  for (const section of facts.sections) {
+    if (section && typeof section === 'object' && !Array.isArray(section) && 'evidence' in section) {
+      const evidence = section.evidence;
+      if (evidence && typeof evidence === 'object' && !Array.isArray(evidence)) delete (evidence as Record<string, unknown>).observedAt;
+    }
+  }
+  if (!facts.configuration || typeof facts.configuration !== 'object' || Array.isArray(facts.configuration)) throw unavailable();
+  for (const projection of Object.values(facts.configuration)) {
+    if (projection && typeof projection === 'object' && !Array.isArray(projection) && 'source' in projection) {
+      const source = projection.source;
+      if (source && typeof source === 'object' && !Array.isArray(source)) delete (source as Record<string, unknown>).observedAt;
+    }
+  }
+  return requestFingerprint(facts);
+}
+
+/** Read-only scene consumer of the mainline artifact reader. No model dispatch,
  * task transition or approval occurs here. Free text is never business evidence.
  */
 export class AiOriginalSceneResultService {
@@ -86,13 +109,14 @@ export class AiOriginalSceneResultService {
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const command = freezeOriginalInput(parsed.data), original = await this.scenes.requests.readHistorical(command.original);
     if (original.receipt.state === 'revoked') throw denied();
-    if (original.request.sceneCode !== 'order_explanation' || this.policy.sceneCode !== original.request.sceneCode) throw unavailable();
+    if (!['order_explanation', 'opening_diagnosis'].includes(original.request.sceneCode)
+      || this.policy.sceneCode !== original.request.sceneCode) throw unavailable();
     const task = await this.scenes.readTaskReceipt(command.original.inputRef);
     if (task.state !== 'observed') throw unavailable();
     const access = structuredClone(await this.tasks.resolveAccess(task.taskId, 'read_step_terminal'));
     const result = await this.results.read({ taskId: task.taskId, resultId: command.resultId });
     if (result.runId !== task.runId) throw denied();
-    const base = { original: original.receipt, taskId: task.taskId, resultId: result.resultId,
+    const base = { original: original.receipt, sceneCode: original.request.sceneCode, taskId: task.taskId, resultId: result.resultId,
       observedAt: result.observedAt, businessExecution: 'not_inferred_from_model_result' as const };
     let output: typeof base & { status: 'available' | 'stale' | 'unknown' | 'failed';
       text: { value: string; trust: 'unverified_model_text_not_execution_evidence' } | null;
@@ -133,13 +157,18 @@ export class AiOriginalSceneResultService {
           || requestFingerprint(envelope.facts) !== envelope.materialHash) throw denied();
         return { text: gateway.text, material: envelope.facts, materialHash: envelope.materialHash, callId: invocation.callId };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
-      // Re-read through the actual order Guard, including independent finance
-      // visibility. Never expose old finance text after finance is withdrawn.
-      const current = await this.scenes.tools.orderExplanationPreparation(original.request.input.orderId)
-        .prepare({ question: original.request.input.question });
-      output = orderFactsFingerprint(current) === orderFactsFingerprint(frozen.material)
+      // Re-read through the actual scene's authority, including independent
+      // finance visibility or user-selected opening sections. Never reuse an
+      // old diagnosis after configuration/coverage or current permissions change.
+      const isOrder = original.request.sceneCode === 'order_explanation';
+      const current = original.request.sceneCode === 'order_explanation'
+        ? await this.scenes.tools.orderExplanationPreparation(original.request.input.orderId)
+          .prepare({ question: original.request.input.question })
+        : (await this.scenes.prepareTaskMaterial(command.original)).material;
+      const fingerprint = isOrder ? orderFactsFingerprint : openingFactsFingerprint;
+      output = fingerprint(current) === fingerprint(frozen.material)
         ? { ...base, status: 'available', text: { value: frozen.text, trust: 'unverified_model_text_not_execution_evidence' },
-          materialHash: frozen.materialHash, callId: frozen.callId, facts: current, sources: orderSources(frozen.material),
+          materialHash: frozen.materialHash, callId: frozen.callId, facts: current, sources: isOrder ? orderSources(frozen.material) : [],
           citationValidation: 'supplied_sources_only_text_not_validated', nextAction: 'read_only' }
         : { ...base, status: 'stale', text: null, nextAction: 'reread_facts', automaticRetry: false };
     }
@@ -158,7 +187,7 @@ export class AiOriginalSceneResultService {
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const { sourceIndex, ...command } = parsed.data;
     const result = await this.read(command);
-    if (result.status !== 'available' || !result.sources?.[sourceIndex]) throw unavailable();
+    if (result.status !== 'available' || result.sceneCode !== 'order_explanation' || !result.sources?.[sourceIndex]) throw unavailable();
     const source = result.sources[sourceIndex];
     const opened = await this.scenes.reopenOrderCitation({ ...command.original, version: source.version, field: source.field });
     // Re-check the same artifact and supplied fact set after the source await.
