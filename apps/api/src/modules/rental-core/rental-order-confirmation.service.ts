@@ -136,6 +136,10 @@ export class RentalOrderConfirmationService {
     return this.create(tenantId, input, userName, context, idempotencyKey);
   }
 
+  normalizeOrderInput(input: CreateRentalOrderRequest): CreateRentalOrderRequest {
+    return this.memberships && !input.bookingIdentity ? { ...input, bookingIdentity: { bookingIdentity: "personal" } } : input;
+  }
+
   createApprovedOrder(tenantId: string, input: CreateRentalOrderRequest, userName: string, context: BusinessContext,
     idempotencyKey: string, approval: ApprovedOrderTransaction) {
     if (!idempotencyKey || !approval || [approval.authorize, approval.recover, approval.prepare, approval.commit, approval.replay]
@@ -154,7 +158,7 @@ export class RentalOrderConfirmationService {
     approval?: ApprovedOrderTransaction
   ) {
     // 未显式传键时退回 quoteId：报价一次性使用，天然是这次下单的唯一标识。
-    if (this.memberships && !input.bookingIdentity) input = { ...input, bookingIdentity: { bookingIdentity: "personal" } };
+    input = this.normalizeOrderInput(input);
     const key = idempotencyKey?.trim() || `quote:${input.quoteId}`;
     const fingerprint = orderRequestFingerprint(input);
     const approvalBinding: ApprovedOrderBinding | undefined = approval ? {
