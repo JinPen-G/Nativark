@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
 import type { AiKnowledgeSourceDraft } from '@rental-os/shared';
 import { HumanKnowledgeService, type HumanKnowledgeDependencies } from './human-knowledge.service';
 import { KnowledgeRetrievalService } from './knowledge-retrieval.service';
@@ -7,6 +8,7 @@ import { PrismaKnowledgeReadAdapter } from './prisma-knowledge-read.adapter';
 import { PrismaKnowledgeSelectionAdapter } from './prisma-knowledge-selection.adapter';
 import { KnowledgeError, unavailable } from './knowledge-errors';
 import { documentSourceSchema, fingerprint, id, parse } from './knowledge-validation';
+import { KnowledgeCitationSession } from './knowledge-citation-session';
 
 type Source = Extract<AiKnowledgeSourceDraft, { kind: 'document' }>;
 export const knowledgeContextInputSchema = z.object({ requestId: id, query: z.string().trim().min(1).max(1000),
@@ -40,7 +42,7 @@ export class HumanKnowledgeContextService {
     return this.human.session.run(async context => {
       const now = this.human.ports.clock.now();
       if (!Number.isFinite(now)) return unavailable();
-      const base = { requestId: input.requestId, queryFingerprint: fingerprint(input.query), observedAt: new Date(now).toISOString(),
+      const base = { requestId: input.requestId, observationId: randomUUID(), queryFingerprint: fingerprint(input.query), observedAt: new Date(now).toISOString(),
         trust: 'untrusted_data' as const, purpose: 'context_only' as const };
       const recall = await this.retrieval.recall(context, { requestId: input.requestId, query: input.query, limit: input.maxSources });
       if (recall.status !== 'ready') return { ...base, status: recall.status, ...('reason' in recall ? { reason: recall.reason } : {}),
@@ -79,6 +81,22 @@ export class HumanKnowledgeContextService {
     return this.human.session.run(context => this.sources.readChunk(context, input, 'resolve_source'));
   }
 
+  /** Server-only bound consumer. Do not deserialize a model-supplied package
+   * into this handle: its immutable source set comes from actual collect.
+   */
+  async beginCitations(value: unknown): Promise<KnowledgeCitationSession> {
+    const context = await this.human.session.current();
+    const collected = await this.collect(value);
+    await this.human.session.check(context);
+    if (collected.status !== 'ready' && collected.status !== 'partial') throw new KnowledgeError('not_ready');
+    return new KnowledgeCitationSession(collected, {
+      check: () => this.human.session.check(context),
+      verify: snapshot => this.revalidate(snapshot),
+      read: source => this.open(source),
+      recollect: input => this.beginCitations(input),
+    });
+  }
+
   /** A resource reference, never a bearer URL or a grant to the file service. */
   downloadReference(source: unknown) {
     const input = parse(documentSourceSchema, source);
@@ -93,7 +111,7 @@ export class HumanKnowledgeContextService {
     const entrySchema = z.object({ sourceId: z.string().regex(/^[a-f0-9]{64}$/), source: documentSourceSchema,
       snippet: z.string().min(1).max(2000), contentFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
       snippetFingerprint: z.string().regex(/^[a-f0-9]{64}$/), truncated: z.boolean(), trust: z.literal('untrusted_data') }).strict();
-    const input = parse(z.object({ requestId: id, queryFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    const input = parse(z.object({ requestId: id, observationId: id.optional(), queryFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
       observedAt: z.string().datetime(), trust: z.literal('untrusted_data'), purpose: z.literal('context_only'),
       status: z.enum(['ready', 'partial']), sources: z.array(entrySchema).max(10) }).strict(), value);
     if (Buffer.byteLength(JSON.stringify(input), 'utf8') > 65536) throw new KnowledgeError('limit_exceeded');
