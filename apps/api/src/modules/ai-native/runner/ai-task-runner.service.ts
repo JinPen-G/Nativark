@@ -76,12 +76,15 @@ export class AiTaskRunner {
     this.clock = deps.clock ?? defaultClock;
   }
 
-  async run(input: AiTaskRunnerInput): Promise<AiTaskRunnerOutcome> {
+  // Host interruption stops dispatch, not business facts, reconciliation receipts or lease cleanup.
+  async run(input: AiTaskRunnerInput, signal?: AbortSignal): Promise<AiTaskRunnerOutcome> {
+    if (signal?.aborted) return { status: 'unavailable', completedSteps: 0, cleanupFailed: 0 };
     input = structuredClone(input);
     const recovery = input.recovery === true;
     const { recovery: _recovery, ...claimInput } = input;
     const initial = structuredClone(await this.deps.leases.readMetadata(input.taskId));
     if (initial.taskId !== input.taskId) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
+    if (signal?.aborted) return { status: 'unavailable', completedSteps: 0, cleanupFailed: 0 };
     if (initial.status === 'waiting_input') return { status: 'paused', completedSteps: 0, cleanupFailed: 0 };
     let lease = structuredClone(recovery ? await this.deps.leases.claimRecoveryRun(claimInput) : await this.deps.leases.claimRun(claimInput));
     let taskRevision = initial.revision;
@@ -119,7 +122,9 @@ export class AiTaskRunner {
       return committed.outcome;
     };
     try {
+      if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
       if (this.deps.resources) await this.callBounded(() => this.deps.resources!.open(structuredClone(lease), recovery), 5000, 'resource_open');
+      if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
       const plan = validatePlan(structuredClone(await this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), recovery)), input);
       const startedAt = this.clock.now();
       const checkCancel = async () => {
@@ -141,12 +146,15 @@ export class AiTaskRunner {
         return this.deps.taskOutcome ? await finish({ status: "cancelled", completedSteps, cleanupFailed }) : { status: "cancel_requested", completedSteps, cleanupFailed };
       }
       for (const stepPlan of plan.steps) {
+        if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
         if (this.clock.now() - startedAt >= plan.limits.maxTotalMs || calls >= plan.limits.maxCalls) throw new AiTaskRunnerError("AI_RUN_LIMIT");
         const cancelling = await checkCancel();
+        if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
         if (cancelling && !recovery) return this.deps.taskOutcome ? await finish({ status: "cancelled", completedSteps, cleanupFailed }) : { status: "cancel_requested", completedSteps, cleanupFailed };
         const registered = structuredClone(await this.deps.steps.register(structuredClone(stepPlan), structuredClone(lease), recovery));
         taskRevision = registered.taskRevision;
         if (registered.runRevision != null) lease = { ...lease, revision: registered.runRevision };
+        if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
         const ref: AiTaskRunnerStepRef = { plan: stepPlan, registered };
         if (registered.runId !== lease.runId) return { status: "unavailable", completedSteps, cleanupFailed };
         if (registered.replayed && registered.existingStatus === "succeeded") {
@@ -217,7 +225,7 @@ export class AiTaskRunner {
           const remaining = Math.max(1, plan.limits.maxTotalMs - (this.clock.now() - startedAt));
           const raw = await this.callBounded(signal => reconcile
             ? this.deps.effects.reconcile!(structuredClone(stepPlan), signal, structuredClone(lease))
-            : this.deps.effects.execute(structuredClone(stepPlan), signal, structuredClone(lease)), Math.min(plan.limits.maxStepMs, remaining), reconcile ? "reconcile" : "execute");
+            : this.deps.effects.execute(structuredClone(stepPlan), signal, structuredClone(lease)), Math.min(plan.limits.maxStepMs, remaining), reconcile ? "reconcile" : "execute", signal);
           result = boundedResult(structuredClone(raw), plan.limits.maxOutputBytes - outputBytes);
           outputBytes += result.outputBytes;
         } catch (error) {
@@ -336,21 +344,31 @@ export class AiTaskRunner {
     return this.deps.steps.unknown(ref, lease, result.resultRef ?? null);
   }
 
-  private callBounded<T>(operation: (signal: AbortSignal) => Promise<T>, limitMs: number, phase: string): Promise<T> {
+  private callBounded<T>(operation: (signal: AbortSignal) => Promise<T>, limitMs: number, phase: string, signal?: AbortSignal): Promise<T> {
     const controller = new AbortController();
     return new Promise<T>((resolve, reject) => {
       let settled = false;
-      const timer = this.clock.setTimeout(() => {
-        settled = true;
+      const clear = () => {
         this.clock.clearTimeout(timer);
-        controller.abort();
+        signal?.removeEventListener('abort', onAbort);
+      };
+      const onAbort = () => {
+        if (settled) return;
+        settled = true; clear(); controller.abort();
+        reject(new AiTaskRunnerError('AI_RESULT_UNKNOWN', `${phase} interrupted`));
+      };
+      const timer = this.clock.setTimeout(() => {
+        if (settled) return;
+        settled = true; clear(); controller.abort();
         reject(new AiTaskRunnerError(phase === "reconcile" ? "AI_RESULT_UNKNOWN" : "AI_RUN_LIMIT", `${phase} deadline exceeded`));
       }, limitMs);
+      signal?.addEventListener('abort', onAbort, { once: true });
+      if (signal?.aborted) { onAbort(); return; }
       let pending: Promise<T>;
       try { pending = operation(controller.signal); }
-      catch (error) { settled = true; this.clock.clearTimeout(timer); reject(error); return; }
-      pending.then(value => { if (!settled) { settled = true; this.clock.clearTimeout(timer); resolve(value); } }, error => {
-        if (!settled) { settled = true; this.clock.clearTimeout(timer); reject(error); }
+      catch (error) { settled = true; clear(); reject(error); return; }
+      pending.then(value => { if (!settled) { settled = true; clear(); resolve(value); } }, error => {
+        if (!settled) { settled = true; clear(); reject(error); }
       });
     });
   }
