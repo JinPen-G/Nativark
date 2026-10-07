@@ -20,7 +20,8 @@ exports.fixture = () => {
     allocations: [{ id: 'allocation-a', orderId: 'order-a', assetId: 'asset-a', status: 'picked_up' }] };
   const core = { getOrder: async () => { state.reads++; if (state.onRead) state.onRead(); return structuredClone(order); },
     listInspectionTemplates: async (_tenant, _stage, source) => source.inspectionTemplateSnapshots };
-  const match = (row, where) => Object.entries(where).every(([key, value]) => value && typeof value === 'object' ? row[key] > value.gt : row[key] === value);
+  const match = (row, where) => Object.entries(where).every(([key, value]) => value instanceof Date ? row[key] instanceof Date && row[key].getTime() === value.getTime()
+    : value && typeof value === 'object' ? row[key] > value.gt : row[key] === value);
   const delegate = name => ({
     findFirst: async ({ where, orderBy }) => { if (state.onDbRead) state.onDbRead(name); const rows = [...state[name].values()].filter(row => match(row, where));
       if (orderBy?.attachmentRevision) rows.sort((a,b) => b.attachmentRevision-a.attachmentRevision); return structuredClone(rows[0] ?? null); },
@@ -32,7 +33,8 @@ exports.fixture = () => {
         throw new Prisma.PrismaClientKnownRequestError('duplicate',{code:'P2002',clientVersion:'test'});
       const row = { inspectionId: null, contentHash: null, mediaType: null, durationMs: null, createdAt: new Date(), updatedAt: new Date(), ...structuredClone(data) };
       state[name].set(row.id,row); return structuredClone(row); },
-    updateMany: async ({ where, data }) => { const row=[...state[name].values()].find(row=>match(row,where)); if(!row)return {count:0};
+    updateMany: async ({ where, data }) => { if (data.status === 'submitted' && state.failLink) { state.failLink = false; throw Error('link failed'); }
+      const row=[...state[name].values()].find(row=>match(row,where)); if(!row)return {count:0};
       const revision=row.revision; Object.assign(row,structuredClone(data)); if(data.revision?.increment)row.revision=revision+data.revision.increment; return {count:1}; }
   });
   let queue=Promise.resolve();
@@ -43,5 +45,5 @@ exports.fixture = () => {
   state.assets.set('file-a',{id:'file-a',tenantId:'tenant-a',uploadedBy:state.user.id,businessModule:'rental-core',businessType:'rental_order',businessId:'order-a',uploadScene:'return-evidence',status:'active',
     storageProvider:'synthetic-controlled-provider',storageKey:'object-a',mimeType:'image/png',sizeBytes:64,updatedAt:date,
     uploadSession:{id:'upload-a',tenantId:'tenant-a',status:'completed',completedAt:date,storageKey:'object-a'}});
-  return { state, template, order, db, services:composeInspectionAssist({guard,credentials,core,db}) };
+  return { state, template, order, db, ports: { guard, credentials, core, db }, services:composeInspectionAssist({guard,credentials,core,db}) };
 };

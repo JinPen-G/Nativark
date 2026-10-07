@@ -9,6 +9,7 @@ import { InspectionTemplateService } from './inspection-template.service';
 import { InspectionAssistError, inspectionId, inspectionTargetSchema, parseInspectionInput } from './inspection-assist.validation';
 import type { InspectionEvidenceAuthority } from './inspection-candidate.service';
 import type { InspectionDraftEvidence } from './inspection-draft.service';
+import type { FileStorageRuntimeService } from '../../integrations/file-storage.runtime.service';
 
 const bindSchema = inspectionTargetSchema.extend({ templateId: inspectionId, attachmentId: inspectionId }).strict();
 type Binding = Awaited<ReturnType<InspectionTemplateService['read']>>;
@@ -20,7 +21,34 @@ const scopeOf = (binding: Binding): AiInspectionActorScope => {
 const targetOf = (binding: Binding): AiInspectionTarget => ({ orderId: binding.orderId, allocationId: binding.allocationId, stage: binding.stage, templateId: binding.template.id });
 
 export class PrismaInspectionEvidenceAuthority implements InspectionEvidenceAuthority, InspectionDraftEvidence {
-  constructor(private readonly db: Database, private readonly authority: InspectionActionAuthority, private readonly templates: InspectionTemplateService) {}
+  constructor(private readonly db: Database, private readonly authority: InspectionActionAuthority, private readonly templates: InspectionTemplateService,
+    private readonly storage?: Pick<FileStorageRuntimeService, 'readInspectionBytes'>) {}
+
+  async readMedia(value: unknown, signal: AbortSignal, maxBytes = 20 * 1024 * 1024) {
+    const input = parseInspectionInput(bindSchema.extend({ attachmentRevision: z.number().int().positive() }).strict(), value);
+    const target: AiInspectionTarget = { orderId: input.orderId, allocationId: input.allocationId, templateId: input.templateId, stage: input.stage };
+    if (!this.storage) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+    const storage = this.storage;
+    return this.authority.withAction(target, 'bind', async scope => {
+      const binding = await this.templates.read(target);
+      this.assertScope(binding, scope);
+      const row = await this.current(binding, input);
+      const result = await storage.readInspectionBytes(scope.tenantId, row.attachmentId, { workspaceId: scope.workspaceId,
+        actorUserId: scope.ownerId, businessType: 'rental_order', businessId: target.orderId, uploadScene: `${target.stage}-evidence` }, maxBytes, signal);
+      await this.current(binding, input);
+      const after = await this.templates.read(target);
+      if (signal.aborted) throw new InspectionAssistError('RECONCILIATION_REQUIRED');
+      if (after.bindingFingerprint !== binding.bindingFingerprint || row.contentHash && row.contentHash !== result.contentHash) throw new InspectionAssistError('BINDING_CHANGED');
+      const changed = await this.db.aiInspectionEvidenceBinding.updateMany({ where: { id: row.id, ...scope,
+        storageFingerprint: row.storageFingerprint, contentHash: row.contentHash }, data: { contentHash: result.contentHash,
+        mediaType: result.mediaType, sizeBytes: result.sizeBytes, width: result.width, height: result.height, durationMs: result.durationMs } });
+      if (changed.count !== 1) {
+        const current = await this.current(after, input);
+        if (current.contentHash !== result.contentHash) throw new InspectionAssistError('BINDING_CHANGED');
+      }
+      return result;
+    });
+  }
 
   async bind(value: unknown) {
     const input = parseInspectionInput(bindSchema, value);

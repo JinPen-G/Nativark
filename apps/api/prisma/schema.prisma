@@ -980,6 +980,7 @@ model AiInspectionDraft {
   operations          AiInspectionOperation[]
 
   @@unique([id, tenantId, workspaceId], map: "ai_inspection_draft_scope_key")
+  @@unique([tenantId, workspaceId, submissionActionId], map: "ai_inspection_draft_action_key")
   @@index([tenantId, workspaceId, ownerId, audience, id], map: "ai_inspection_draft_list_idx")
   @@map("ai_inspection_drafts")
 }
