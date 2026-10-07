@@ -10,7 +10,8 @@ import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { TenantModelConfigurationAuthority } from '../tenant-model-config.authority';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { aiTaskRunnerLimitsSchema } from './prisma-task-run-evidence.repository';
-import type { PersistedReadonlyTool } from './prisma-task-plan-input.source';
+import type { PersistedTaskInputTool } from './prisma-task-plan-input.source';
+import { TASK_TEXT_MODEL_TOOL } from '../model-input/task-model-input';
 
 const scene = z.object({ code: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u),
   version: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u) }).strict();
@@ -38,11 +39,11 @@ export class PrismaTaskPlanPolicyRepository {
   private readonly selected: z.infer<typeof scene>;
   constructor(private readonly db: Pick<PrismaClient, '$transaction' | 'aiScope' | 'aiTaskPlanPolicy'>,
     input: { auth: Pick<AuthService, 'resolveAccessContext'>; credentials: AiTaskCredentialSource;
-      guard: Pick<ApiAuthGuard, 'canActivate'>; scene: z.infer<typeof scene>; tool?: PersistedReadonlyTool },
+      guard: Pick<ApiAuthGuard, 'canActivate'>; scene: z.infer<typeof scene>; tool?: PersistedTaskInputTool },
     private readonly wall: () => Date = () => new Date()) {
     this.selected = scene.parse(structuredClone(input.scene));
     this.tool = input.tool ?? 'rental.catalog.search';
-    if (!['rental.catalog.search', 'rental.availability.check'].includes(this.tool)) throw unavailable();
+    if (!['rental.catalog.search', 'rental.availability.check', 'rental.order.commit', TASK_TEXT_MODEL_TOOL].includes(this.tool)) throw unavailable();
     if (typeof db?.$transaction !== 'function' || typeof db.aiTaskPlanPolicy?.updateMany !== 'function') throw unavailable();
     const current = new AiTaskCurrentIdentityAuthority(input.auth, input.credentials, wall);
     this.scopes = new AiScopeRepository(db, current, wall);
@@ -68,7 +69,7 @@ export class PrismaTaskPlanPolicyRepository {
       || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime()) || limits.maxStepMs > limits.maxTotalMs) throw unavailable();
     return { revision: row.revision, enabled: row.enabled, limits, expiresAt: row.expiresAt.toISOString() };
   }
-  private readonly tool: PersistedReadonlyTool;
+  private readonly tool: PersistedTaskInputTool;
   private tools() { return [{ code: this.tool, version: AI_TOOL_DRAFT_VERSION }]; }
   async read() {
     const before = await this.access();
