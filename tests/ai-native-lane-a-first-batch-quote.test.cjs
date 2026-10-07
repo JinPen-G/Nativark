@@ -23,6 +23,8 @@ test('formal input provenance distinguishes explicit fields and blocks order han
   assert.equal(sources.status, 'prepared_input_sources');
   assert.equal(sources.humanConfirmation, 'required_before_preview');
   assert.equal(sources.coreNormalization, 'not_yet_called');
+  assert.ok(sources.fields.every(field => field.confirmed === false));
+  assert.ok(sources.fields.every(field => !field.kind.startsWith('explicit_user')));
   const handoff = await h.tools.quote.businessPreparation.commitHandoff();
   assert.equal(handoff.status, 'unavailable');
   assert.equal(handoff.orderApproval, 'not_granted');

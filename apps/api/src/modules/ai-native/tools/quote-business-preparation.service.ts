@@ -116,26 +116,30 @@ export class AiQuoteBusinessPreparationService {
    * labelled as user confirmation; the formal Core resolver remains the only
    * source allowed to normalize the final request. */
   async inputSources(value: unknown) {
-    const result = await this.candidates.prepare(value);
+    const snapshot = structuredClone(value);
+    const result = await this.candidates.prepare(snapshot);
     if (result.status !== 'needs_confirmation') return result;
-    const supplied = value && typeof value === 'object' && !Array.isArray(value)
-      ? value as Record<string, unknown> : {};
-    const source = (field: string, value: unknown, kind: 'explicit_user_input' | 'explicit_user_selection' | 'server_context' | 'core_normalized') => ({
-      field, value: structuredClone(value), kind, confirmed: kind === 'explicit_user_selection' || kind === 'explicit_user_input'
+    const supplied = snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)
+      ? snapshot as Record<string, unknown> : {};
+    // This endpoint receives extracted candidate data, not a persisted human
+    // action receipt. Presence of an ID or a matching name is not provenance.
+    const source = (field: string, value: unknown, suppliedValue: boolean) => ({
+      field, value: structuredClone(value), kind: suppliedValue ? 'supplied_candidate' as const : 'server_resolved_candidate' as const,
+      confirmed: false as const, confirmationEvidence: 'not_loaded' as const
     });
     const fields = [
-      source('customerId', result.request.customerId, supplied.customerId ? 'explicit_user_selection' : 'server_context'),
-      source('items', result.request.lines, supplied.items ? 'explicit_user_selection' : 'server_context'),
-      source('startAt', result.request.startAt, supplied.start ? 'explicit_user_input' : 'server_context'),
-      source('endAt', result.request.endAt, supplied.end ? 'explicit_user_input' : 'server_context'),
-      source('fulfillmentMode', result.request.fulfillmentMode, supplied.fulfillmentMode ? 'explicit_user_input' : 'server_context'),
-      source('fulfillmentLocationId', result.request.fulfillmentLocationId, supplied.locationId ? 'explicit_user_selection' : 'server_context'),
-      source('returnLocationId', result.request.returnLocationId, supplied.returnLocationId ? 'explicit_user_selection' : 'server_context')
+      source('customerId', result.request.customerId, Boolean(supplied.customerId)),
+      source('items', result.request.lines, Boolean(supplied.items)),
+      source('startAt', result.request.startAt, Boolean(supplied.start)),
+      source('endAt', result.request.endAt, Boolean(supplied.end)),
+      source('fulfillmentMode', result.request.fulfillmentMode, Boolean(supplied.fulfillmentMode)),
+      source('fulfillmentLocationId', result.request.fulfillmentLocationId, Boolean(supplied.locationId)),
+      source('returnLocationId', result.request.returnLocationId, Boolean(supplied.returnLocationId))
     ];
-    return { status: 'prepared_input_sources' as const,
+    return sealBusinessScenario('quote_clarification', { status: 'prepared_input_sources' as const,
       request: structuredClone(result.request), selectionRevision: result.selectionRevision,
       inputFingerprint: requestFingerprint(result.request), fields,
-      coreNormalization: 'not_yet_called' as const, humanConfirmation: 'required_before_preview' as const };
+      coreNormalization: 'not_yet_called' as const, humanConfirmation: 'required_before_preview' as const }).payload;
   }
 
   /** Compare two already produced Core quote snapshots without recomputing
