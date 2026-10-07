@@ -27,7 +27,9 @@ exports.setup = async (extraTables = {}) => {
       return findSteps({ ...args, where });
     } }, aiTask: { ...client.aiTask, findFirst: async args => {
       const row = await findTask({ ...args, select: undefined });
-      if (!row || !args.select?.runs) return row;
+      if (!row || !args.select) return row;
+      if (!args.select.runs) return Object.fromEntries(Object.entries(args.select).filter(([, selected]) => selected === true)
+        .map(([field]) => [field, row[field]]));
       row.runs = await client.aiRun.findMany({ where: { taskId: row.id, sequence: 1 }, take: 1 });
       for (const run of row.runs) run.executionPlan = await client.aiTaskRunPlan.findFirst({ where: { taskId: row.id, runId: run.id } });
       return row;
