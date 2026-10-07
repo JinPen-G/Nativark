@@ -626,6 +626,14 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     }
   }
 
+  /** Metadata-only binding check used before a knowledge document is created. */
+  async assertKnowledgeBinding(tenantId: string, fileAssetId: string, owner: FileBusinessOwner) {
+    const asset = await this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, status: "active" } });
+    if (!asset || !this.matchesOwner(asset, owner)) throw new NotFoundException("知识附件不存在或不属于当前文档");
+    await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
+    if (asset.storageProvider === "local_mock" && process.env.NODE_ENV === "production") throw new ServiceUnavailableException("生产环境禁止使用模拟知识附件");
+  }
+
   private matchesOwner(asset: { businessType: string; businessId: string | null; uploadScene: string }, owner: FileBusinessOwner) {
     return (!owner.businessType || asset.businessType === owner.businessType)
       && (!owner.businessId || asset.businessId === owner.businessId)

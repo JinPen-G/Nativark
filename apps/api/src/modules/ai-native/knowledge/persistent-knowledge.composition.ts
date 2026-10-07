@@ -74,7 +74,10 @@ export function composePersistedHumanKnowledge(input: HumanKnowledgeInputDepende
 
 export interface FormalHumanKnowledgeDependencies extends Omit<HumanKnowledgeInputDependencies, 'authorization' | 'files' | 'memory'> {
   knowledgePolicy: FormalKnowledgePolicySource;
-  fileRuntime: Pick<FileStorageRuntimeService, 'readKnowledgeBytes'>;
+  fileRuntime: Pick<
+    FileStorageRuntimeService,
+    'readKnowledgeBytes' | 'assertKnowledgeBinding'
+  >;
   memory?: { db: MemoryPrismaClient; policy: FormalMemoryPolicySource };
 }
 
