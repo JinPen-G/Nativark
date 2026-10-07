@@ -33,22 +33,46 @@ export class PersistentMemoryConsentService {
     this.identities = new AiTaskCurrentIdentityAuthority(ports.auth, ports.credentials, () => new Date(ports.clock.now()));
     this.repository = new PrismaStructuredMemoryRepository(ports.db, () => new Date(ports.clock.now()));
     this.memory = new StructuredMemoryService({ repository: this.repository, confirmations: this.repository,
-      authorization: ports.authorization, clock: ports.clock });
+      authorization: { authorize: (context, request) => this.authorizeRequest(context, request) }, clock: ports.clock });
   }
 
   private async current(): Promise<AiExecutionContext> {
     try { return await this.identities.resolve(); } catch { return unavailable(); }
   }
 
-  private async authorize(context: AiExecutionContext, memory?: AiMemoryDraft): Promise<void> {
+  private async authorizeRequest(context: AiExecutionContext, original: Parameters<MemoryAuthorizationPort['authorize']>[1]) {
     if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace') unavailable();
     const stable = structuredClone(context), key = identityKey(stable);
-    const request = structuredClone({ action: 'confirm' as const, scope: stable.scope, owner: actor(stable), ...(memory ? { memory } : {}) });
+    if (identityKey(await this.current()) !== key || !sameScope(original.scope, stable.scope)
+      || fingerprint(original.owner) !== fingerprint(actor(stable))) unavailable();
+    const request = structuredClone(original);
     const requestHash = fingerprint(request);
     const answer = await this.ports.authorization.authorize(stable, request);
     if (identityKey(stable) !== key || fingerprint(request) !== requestHash || identityKey(await this.current()) !== key) unavailable();
     if (!answer || !sameScope(answer.scope, context.scope) || fingerprint(answer.actor) !== fingerprint(actor(context))
       || answer.audience !== context.audience || typeof answer.accessKey !== 'string' || !answer.accessKey || answer.accessKey.length > 256) unavailable();
+    return structuredClone(answer);
+  }
+
+  private async authorize(context: AiExecutionContext, memory?: AiMemoryDraft): Promise<void> {
+    await this.authorizeRequest(context, { action: 'confirm', scope: context.scope, owner: actor(context), ...(memory ? { memory } : {}) });
+  }
+
+  async read(memoryId: string): Promise<AiMemoryDraft> {
+    return this.memory.read(await this.current(), parse(id, memoryId));
+  }
+
+  async propose(value: unknown): Promise<AiMemoryDraft> {
+    return this.memory.propose(await this.current(), value);
+  }
+
+  /** Editing invalidates the old consent; deletion uses the existing tombstone.
+   * The human facade has no arbitrary confirmationId consumption shortcut.
+   */
+  async change(operationId: string, value: unknown): Promise<AiMemoryDraft> {
+    if (!value || typeof value !== 'object' || !('operation' in value)
+      || !['modify', 'delete'].includes(String(value.operation))) throw new KnowledgeError('invalid_input');
+    return this.memory.change(await this.current(), operationId, value);
   }
 
   async confirm(value: unknown): Promise<AiMemoryDraft> {

@@ -31,3 +31,27 @@ test('server human consent persists a bound confirmation consumed by existing me
   await assert.rejects(consent.confirm(input), { code: 'unavailable' });
   assert.equal((await memory.read(ctx, 'memory-1')).status, 'deleted');
 });
+
+test('human facade reads, modifies and deletes through current identity without caller scope', async () => {
+  const { PersistentMemoryConsentService } = h.load('persistent-memory-consent.service');
+  const db = dbFactory(), f = h.harness();
+  let active = true;
+  const user = { id: 'user-1', tenantId: 'tenant-1', isActive: true, isSaasAdmin: false, permissions: ['synthetic-memory-policy'], dataScope: 'all', locationScope: { mode: 'all', locationIds: [] } };
+  const consent = new PersistentMemoryConsentService({ db, authorization: f.authorization, clock: f.clock,
+    auth: { resolveAccessContext: async () => ({ user: { ...user, isActive: active }, tenantUser: user, workspaceValid: true, workspaceId: 'space-1' }) },
+    credentials: { current: async () => ({ authorization: 'synthetic-session', requestId: 'request-1', audience: 'operator' }) } });
+  const expiry = new Date(h.now + 3600000).toISOString();
+  await consent.propose({ memoryId: 'memory-2', operationId: 'propose-2', expiresAt: expiry, preference: { kind: 'locale', value: 'zh-CN' } });
+  await consent.confirm({ memoryId: 'memory-2', expectedRevision: 1, operationId: 'consent-2', expiresAt: expiry });
+  assert.equal((await consent.read('memory-2')).status, 'confirmed');
+  const modified = await consent.change('modify-2', { draftVersion: 'ain-c06-draft-1', memoryId: 'memory-2', expectedRevision: 2, operation: 'modify', preference: { kind: 'locale', value: 'en-US' } });
+  assert.equal(modified.status, 'proposed');
+  assert.equal(modified.confirmationRecordId, undefined);
+  const original = db.aiStructuredMemory.findFirst;
+  db.aiStructuredMemory.findFirst = async args => { const result = await original(args); active = false; return result; };
+  await assert.rejects(consent.read('memory-2'), { code: 'unavailable' });
+  active = true; db.aiStructuredMemory.findFirst = original;
+  await assert.rejects(consent.change('forged', { operation: 'confirm', confirmationRecordId: 'arbitrary-string' }), { code: 'invalid_input' });
+  await consent.change('delete-2', { draftVersion: 'ain-c06-draft-1', memoryId: 'memory-2', expectedRevision: 3, operation: 'delete' });
+  assert.equal((await consent.read('memory-2')).status, 'deleted');
+});
