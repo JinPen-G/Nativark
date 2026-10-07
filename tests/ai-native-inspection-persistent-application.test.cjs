@@ -7,6 +7,29 @@ async function create(f, results={mileage:0}, evidence=[]) {
   const input={...target,operationId:'create-a',bindingFingerprint:binding.bindingFingerprint,results,evidence};
   return {input,result:await f.services.drafts.create(input)};
 }
+
+test('staff request factory connects real draft lifecycle without shared request credentials',async()=>{
+  const {StaffInspectionRequestFactory,InspectionAssistModule}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-assist.composition');
+  const f=fixture(),credential=await f.ports.credentials.current();
+  const factory=new StaffInspectionRequestFactory(f.ports);
+  const request={headers:{authorization:credential.authorization},requestId:'request-one'};
+  const one=factory.open(request),two=factory.open({headers:{authorization:credential.authorization},requestId:'request-two'});
+  assert.equal(f.state.reads,0);
+  request.headers.authorization='invalid-after-binding';
+  const binding=await one.templates.read(target);
+  const saved=await one.drafts.create({...target,operationId:'request-bound-create',bindingFingerprint:binding.bindingFingerprint,results:{mileage:0},evidence:[]});
+  one.close();one.close();
+  await assert.rejects(one.drafts.read({...target,draftId:saved.draftId}));
+  assert.equal((await two.drafts.read({...target,draftId:saved.draftId})).state.fields.mileage.value,0);
+  f.state.onRead=()=>two.close();
+  await assert.rejects(two.templates.read(target));
+  assert.throws(()=>factory.open({headers:{},requestId:'missing'}),{code:'ACCESS_DENIED'});
+  assert.ok(InspectionAssistModule.register(f.ports).exports.includes(StaffInspectionRequestFactory));
+  const {credentials,...serverPorts}=f.ports;
+  const registration=InspectionAssistModule.registerStaffRequests(serverPorts);
+  assert.equal(registration.providers.length,1);
+  assert.equal(f.state.drafts.size,1);
+});
 test('manual draft uses actual Auth Guard and Prisma repository, without model',async()=>{
   const f=fixture(),created=await create(f);
   assert.equal(created.result.status,'draft_saved');assert.equal(f.state.drafts.size,1);
