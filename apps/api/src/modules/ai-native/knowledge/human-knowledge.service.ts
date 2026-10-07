@@ -67,9 +67,9 @@ export class HumanKnowledgeService {
     return this.session.run(async context => {
       const grant = await this.authorization.authorize(context, { action: 'create', scope: context.scope,
         attachmentId: input.attachmentId });
-      if (!grant || !this.ports.files) return unavailable();
-      if (this.ports.files.assertBound) await this.ports.files.assertBound(context, { attachmentId: input.attachmentId,
-        documentId: input.documentId, workspaceId: context.scope.kind === 'workspace' ? context.scope.workspaceId : '' });
+      if (!grant || typeof this.ports.files?.assertBound !== 'function' || context.scope.kind !== 'workspace') return unavailable();
+      await this.ports.files.assertBound(context, { attachmentId: input.attachmentId,
+        documentId: input.documentId, workspaceId: context.scope.workspaceId });
       return { documentId: input.documentId, documentVersion: input.documentVersion, attachmentId: input.attachmentId,
         scope: structuredClone(grant.scope), owner: structuredClone(grant.actor), format: KnowledgeTextParser.capabilities().mediaTypes,
         status: 'ready_to_create' as const, nextStep: 'create' as const,

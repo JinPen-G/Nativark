@@ -3,6 +3,13 @@ const h = require('./knowledge-service.cjs');
 const { dbFactory } = require('./knowledge-persistent-content.cjs');
 exports.fixture = () => {
   const f = h.harness(), db = dbFactory();
+  // Explicit synthetic business-binding dependency, never a production grant.
+  f.files.assertBound = async (context, input) => {
+    if (context.scope.kind !== 'workspace' || context.scope.tenantId !== 'tenant-1'
+      || context.scope.workspaceId !== input.workspaceId || !input.attachmentId || !input.documentId) {
+      throw new (h.load('knowledge-errors').KnowledgeError)('unavailable');
+    }
+  };
   const flags = { active: true, workspaceId: 'space-1' };
   const user = { id: 'user-1', tenantId: 'tenant-1', isActive: true, isSaasAdmin: false,
     permissions: ['synthetic-policy'], dataScope: 'all', locationScope: { mode: 'all', locationIds: [] } };

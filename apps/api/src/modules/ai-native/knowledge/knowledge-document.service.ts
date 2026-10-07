@@ -35,7 +35,7 @@ export class KnowledgeDocumentService {
   }
 
   private async assertAttachmentBound(context: AiExecutionContext, documentId: string, attachmentId: string) {
-    if (!this.ports.files.assertBound) return;
+    if (typeof this.ports.files.assertBound !== 'function') throw new KnowledgeError('unavailable');
     if (context.scope.kind !== 'workspace') throw new KnowledgeError('unavailable');
     const workspaceId = context.scope.workspaceId;
     const contextHash = fingerprint(context), stable = structuredClone(context), stableHash = fingerprint(stable);
