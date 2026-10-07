@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient, type AiInspectionDraft } from '@prisma/client';
 import { z } from 'zod';
-import type { AiInspectionActorScope, AiInspectionOperationResult, AiInspectionReceiptLookup } from '../../../../../../packages/shared/src/ai-inspection-persistence';
+import type { AiInspectionActorScope, AiInspectionOperationResult, AiInspectionReceiptLookup, AiInspectionTarget } from '../../../../../../packages/shared/src/ai-inspection-persistence';
 import { InspectionAssistError } from './inspection-assist.validation';
 
 const receiptResult = z.object({ draftId: z.string(), revision: z.number().int().positive(),
@@ -54,9 +54,12 @@ export class PrismaInspectionDraftRepository {
     return this.db.aiInspectionDraft.findFirst({ where: { id: draftId, ...scope } });
   }
 
-  async list(scope: AiInspectionActorScope, orderId: string, after: string | undefined, limit: number) {
+  async list(scope: AiInspectionActorScope, orderId: string, after: string | undefined, limit: number,
+    target?: Pick<AiInspectionTarget, 'allocationId' | 'stage' | 'templateId'>) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw new InspectionAssistError('INVALID_INPUT');
-    return this.db.aiInspectionDraft.findMany({ where: { ...scope, orderId, ...(after ? { id: { gt: after } } : {}) },
+    return this.db.aiInspectionDraft.findMany({ where: { ...scope, orderId,
+      ...(target ? { allocationId: target.allocationId, stage: target.stage, templateId: target.templateId } : {}),
+      ...(after ? { id: { gt: after } } : {}) },
       orderBy: { id: 'asc' }, take: limit,
       select: { id: true, revision: true, status: true, orderId: true, allocationId: true, assetId: true,
         stage: true, templateId: true, templateVersion: true, bindingFingerprint: true, updatedAt: true } });

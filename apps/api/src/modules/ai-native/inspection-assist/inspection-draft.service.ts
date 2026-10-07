@@ -161,7 +161,7 @@ export class InspectionDraftService {
     const target = targetOf(input);
     return this.authority.withAction(target, 'read', async scope => {
       await this.templates.read(target);
-      return this.repository.list(scope, target.orderId, input.after, input.limit);
+      return this.repository.list(scope, target.orderId, input.after, input.limit, target);
     });
   }
 
