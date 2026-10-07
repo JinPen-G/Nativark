@@ -7,7 +7,8 @@ import { ModelGatewayError } from '../model-gateway.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 
 const input = z.object({ modelAvailability: z.enum(['not_requested', 'unavailable']).default('not_requested'),
-  question: z.enum(['status', 'fees', 'payments', 'next_steps']).default('status') }).strict();
+  question: z.enum(['status', 'fees', 'payments', 'next_steps']).default('status'),
+  previousOrderVersion: z.string().max(191).optional() }).strict();
 
 export class AiOrderExplanationPreparationService {
   constructor(private readonly authority: Pick<AiOrderRouteContextAuthority, 'withOrderRead'>,
@@ -47,6 +48,38 @@ export class AiOrderExplanationPreparationService {
           execution: 'not_attempted' as const }
       });
     });
+  }
+
+  /** Re-open one server-issued citation through the same order authority. */
+  async reopenCitation(value: unknown) {
+    const parsed = z.object({ question: z.enum(['status', 'fees', 'payments', 'next_steps']),
+      resourceType: z.literal('order'), resourceId: z.string().min(1).max(191),
+      field: z.enum(['order', 'amounts', 'saved_basis', 'payment_records', 'rental_period']) }).strict().safeParse(value);
+    if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+    const current = await this.prepare({ question: parsed.data.question });
+    if (current.payload.orderId !== parsed.data.resourceId) throw new ModelGatewayError('FORBIDDEN');
+    const factRecord = current.payload.facts as Record<string, { source?: { field?: string } } | undefined>;
+    const candidates = [factRecord.order, factRecord.amounts, factRecord.history,
+      factRecord.payments, factRecord.fulfillment].filter(Boolean) as Array<{ source?: { field?: string } }>;
+    const source = candidates.find(row => row.source?.field === parsed.data.field);
+    return source ? { status: 'available' as const, scope: current.payload.scope, orderId: current.payload.orderId,
+      field: parsed.data.field, value: structuredClone(source), observedAt: current.payload.observedAt,
+      reauthorization: 'current_order_authority_rechecked' as const }
+      : { status: 'missing' as const, scope: current.payload.scope, orderId: current.payload.orderId,
+        field: parsed.data.field, reason: 'historical_or_optional_source_not_loaded' as const };
+  }
+
+  /** Re-read facts for a repeated question and compare only stable versions. */
+  async refresh(value: unknown = {}) {
+    const parsed = input.safeParse(value);
+    if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+    const current = await this.prepare(parsed.data);
+    const previous = value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown> : {};
+    const previousVersion = typeof previous.previousOrderVersion === 'string' ? previous.previousOrderVersion : undefined;
+    return { current, comparison: previousVersion === undefined ? { status: 'not_comparable' as const }
+      : { status: 'compared' as const, orderChanged: current.payload.orderVersion !== previousVersion,
+        basis: 'server_order_updated_at_only' as const, eventTimeline: 'not_created' as const } };
   }
 
   /** Verifies exact structured citations only, not natural-language semantics.

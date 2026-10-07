@@ -145,6 +145,19 @@ export class AiOpeningActionListService {
       meaning: 'readiness_blockers_not_invented_document_requirements' as const };
   }
 
+  async prepareSection(value: unknown) {
+    const parsed = z.object({ key: z.string().min(1).max(191) }).strict().safeParse(value);
+    if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+    const current = await this.read();
+    const section = current.sections.find(row => row.key === parsed.data.key);
+    if (!section) return { status: 'unavailable' as const, key: parsed.data.key, reason: 'section_not_in_current_readiness' as const };
+    return { status: 'prepared' as const, key: section.key, scope: current.scope, configVersion: current.configVersion,
+      issue: section.issue, materials: section.candidate.fieldsToReview,
+      sensitive: { values: 'not_returned' as const, action: 'original_manual_flow' as const },
+      persistence: 'not_attempted' as const, publication: 'not_attempted' as const,
+      source: section.evidence };
+  }
+
   async prepare(value: unknown = {}, modelAvailability: 'not_requested' | 'unavailable' = 'not_requested') {
     if (!['not_requested', 'unavailable'].includes(modelAvailability)) throw new ModelGatewayError('INVALID_REQUEST');
     const facts = await this.read(value);

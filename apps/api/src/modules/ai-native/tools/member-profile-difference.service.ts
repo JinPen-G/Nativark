@@ -35,4 +35,13 @@ export class AiMemberProfileDifferenceService {
         writeAuthorization: 'not_granted' as const };
     });
   }
+
+  async submissionMaterial(value: unknown) {
+    const candidate = await this.prepare(value);
+    if (candidate.status !== 'candidate_only') return candidate;
+    return { status: 'prepared_not_submitted' as const, target: { scope: candidate.scope, customerId: candidate.customerId },
+      fields: candidate.changes, sources: candidate.changes.map(row => row.source), objectVersion: candidate.revision,
+      persistence: 'not_attempted_no_formal_profile_proposal_port' as const,
+      approval: 'not_created' as const, businessUpdate: 'not_attempted' as const };
+  }
 }

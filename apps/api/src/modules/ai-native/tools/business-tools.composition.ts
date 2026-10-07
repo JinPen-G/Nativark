@@ -74,12 +74,14 @@ export function composeAiAuthorizedBusinessTools(input: {
     availability: reads.availability,
     membershipCandidates: reads.membershipCandidates,
     memberProfileDifference: new AiMemberProfileDifferenceService(reads.membershipCandidates, routes),
+    memberProfileSubmissionMaterial: (value: unknown) => new AiMemberProfileDifferenceService(reads.membershipCandidates, routes).submissionMaterial(value),
     order,
     orderExplanation: explanation,
     orderNextSteps: nextSteps,
     orderExplanationPreparation: (serverOrderId: string) => new AiOrderExplanationPreparationService(
       new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock),
       explanation(serverOrderId), nextSteps(serverOrderId)),
+    orderManualHandoff: (serverOrderId: string, value: unknown) => nextSteps(serverOrderId).manualHandoff(value),
     orderPayments: (serverOrderId: string) => {
       if (!input.payments) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
       return new AiOrderPaymentFactsService(input.payments, input.core,

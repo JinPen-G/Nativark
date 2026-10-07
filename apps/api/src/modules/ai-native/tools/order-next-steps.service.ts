@@ -33,4 +33,18 @@ export class AiOrderNextStepsService {
         forbiddenAutomation: ['refund', 'funds_disposition', 'exception_confirmation'] as const };
     });
   }
+
+  async manualHandoff(value: unknown, expectedContext?: AiExecutionContext) {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || typeof (value as Record<string, unknown>).code !== 'string') {
+      throw new ModelGatewayError('INVALID_REQUEST');
+    }
+    const result = await this.read(expectedContext);
+    const code = (value as Record<string, unknown>).code as string;
+    const candidate = result.candidates.find(row => row.code === code);
+    if (!candidate) return { status: 'unavailable' as const, reason: 'candidate_not_currently_verified' as const,
+      execution: 'not_attempted' as const };
+    return { status: 'manual_review' as const, candidate: structuredClone(candidate), manual: result.manual,
+      allowedActions: result.allowedActions, execution: 'not_attempted' as const,
+      destinationReauthorization: 'required' as const };
+  }
 }
