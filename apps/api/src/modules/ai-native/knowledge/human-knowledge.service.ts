@@ -278,7 +278,7 @@ export class HumanKnowledgeService {
       const initial = await this.authorization.authorize(context, { action: 'read_metadata', scope });
       if (!initial) return unavailable();
       const rows = await this.ports.db.aiKnowledgeDocument.findMany({ where: { tenantId: scope.tenantId, workspaceId: scope.workspaceId },
-        select: { id: true, tenantId: true, workspaceId: true }, orderBy: { id: 'asc' }, take: 100 });
+        select: { id: true, tenantId: true, workspaceId: true }, orderBy: { id: 'asc' }, take: 101 });
       if (!Array.isArray(rows) || rows.length > 100) return unavailable();
       const visible: KnowledgeRecord[] = [], seen = new Set<string>();
       for (const row of rows) {
