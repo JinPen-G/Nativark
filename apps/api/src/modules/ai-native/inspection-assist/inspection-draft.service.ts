@@ -19,7 +19,7 @@ const changeSchema = targetSchema.extend({ draftId: inspectionId, operationId: i
   expectedRevision: z.number().int().min(1).max(999), bindingFingerprint: hash }).strict();
 const editSchema = changeSchema.extend({ edits: z.array(z.object({ fieldCode: inspectionId,
   decision: z.enum(['manual', 'accepted', 'modified', 'rejected']), value: scalar.optional(), candidateId: inspectionId.optional() }).strict()).min(1).max(100) }).strict();
-export const inspectionSubmissionMaterialSchema = z.object({ actionId: inspectionId, requestHash: hash,
+export const inspectionSubmissionMaterialSchema = z.object({ mode: z.enum(['original_single', 'manual_review_only']).optional(), actionId: inspectionId, requestHash: hash,
   body: z.object({ templateId: inspectionId, results: z.record(inspectionId, z.union([z.string().max(2000), z.number().finite(), z.boolean(), z.array(inspectionId).max(100)])),
     attachments: z.array(inspectionId).max(101), handoverSignatureFileAssetId: inspectionId.optional() }).strict() }).strict();
 export const inspectionRecognitionInputSchema = z.object({ inputId: inspectionId, inputFingerprint: hash, bindingFingerprint: hash, question: z.string().min(1).max(4000),

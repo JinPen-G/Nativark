@@ -21,7 +21,10 @@ export class InspectionSubmissionService {
     private readonly manual: InspectionManualPreparationService, private readonly evidence: PrismaInspectionEvidenceAuthority,
     private readonly core: Pick<RentalCoreService, 'getOrder'>, private readonly original?: OriginalInspectionApplication) {}
 
-  async prepare(value: unknown) {
+  async prepare(value: unknown) { return this.prepareMaterial(value, false); }
+  async prepareReview(value: unknown) { return this.prepareMaterial(value, true); }
+
+  private async prepareMaterial(value: unknown, allowReviewOnly: boolean) {
     const input = parseInspectionInput(operation.extend({ actionId: inspectionId, handoverSignatureFileAssetId: inspectionId.optional() }).strict(), value);
     const target = targetOf(input);
     return this.authority.withAction(target, 'submit', async scope => {
