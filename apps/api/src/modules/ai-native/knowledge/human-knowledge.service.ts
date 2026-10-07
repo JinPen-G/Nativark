@@ -142,6 +142,32 @@ export class HumanKnowledgeService {
           : head.failure ? 'revise_new_version' as const : 'none' as const };
     });
   }
+  compareVersions(documentId: string, leftVersion: string, rightVersion: string, maxChanges = 20) {
+    parse(id, documentId); parse(id, leftVersion); parse(id, rightVersion);
+    if (!Number.isInteger(maxChanges) || maxChanges < 1 || maxChanges > 20) throw new KnowledgeError('invalid_input');
+    return this.session.run(async context => {
+      const head = await this.documents.read(context, documentId);
+      const rows = await this.repository.versions(context.scope, documentId, 20);
+      const left = rows.find(row => row.contentHash === leftVersion), right = rows.find(row => row.contentHash === rightVersion);
+      if (!left || !right) return { status: 'unavailable' as const, reason: 'historical_version_not_available' as const };
+      const metadata = { documentId, left: { version: left.contentHash, status: left.status },
+        right: { version: right.contentHash, status: right.status },
+        sameBody: left.contentHash === right.contentHash, currentVersion: head.document.documentVersion };
+      const bodyGrant = await this.authorization.authorize(context, { action: 'read_body', scope: context.scope, document: head.document });
+      if (!bodyGrant) return { ...metadata, body: 'unavailable' as const, changes: [] as const,
+        semantics: 'metadata_only_without_historical_body_permission' as const };
+      const changes = [];
+      const count = Math.max(left.chunks.length, right.chunks.length);
+      for (let index = 0; index < count && changes.length < maxChanges; index++) {
+        const a = left.chunks[index]?.text ?? null, b = right.chunks[index]?.text ?? null;
+        if (a !== b) changes.push({ chunkIndex: index, left: a, right: b,
+          leftPresent: a !== null, rightPresent: b !== null, clipped: false });
+      }
+      return { ...metadata, body: 'authorized' as const, changes,
+        truncated: changes.length >= maxChanges && count > maxChanges,
+        semantics: 'chunk_content_comparison_not_answer_truth' as const };
+    });
+  }
   detail(documentId: string) {
     parse(id, documentId);
     return this.session.run(async context => {

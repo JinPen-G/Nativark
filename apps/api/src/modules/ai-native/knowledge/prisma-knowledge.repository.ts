@@ -45,6 +45,18 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
     return this.receipt(row, value, documentId, operationId);
   }
 
+  async versions(scope: AiExecutionScope, documentId: string, limit: number) {
+    const value = workspace(scope);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new KnowledgeError('invalid_input');
+    const rows = await this.db.aiKnowledgeVersion.findMany({ where: { documentId }, orderBy: { version: 'asc' }, take: limit + 1,
+      include: { chunks: { orderBy: [{ chunkIndex: 'asc' }, { id: 'asc' }], take: 201 } } }).catch(() => unavailable());
+    if (!Array.isArray(rows) || rows.length > limit) throw new KnowledgeError('limit_exceeded');
+    const head = await this.read(scope, documentId);
+    if (!head || head.document.scope.kind !== 'workspace' || head.document.scope.tenantId !== value.tenantId || head.document.scope.workspaceId !== value.workspaceId) return unavailable();
+    return rows.map(row => ({ version: row.version, status: row.status, contentHash: row.contentHash,
+      chunks: (row.chunks ?? []).map(chunk => ({ id: chunk.id, chunkIndex: chunk.chunkIndex, text: chunk.text, state: chunk.state })) }));
+  }
+
   private receipt(row: Prisma.AiKnowledgeOperationGetPayload<{}>, scope: ReturnType<typeof workspace>, documentId: string, operationId: string): KnowledgeOperation {
     if (row.tenantId !== scope.tenantId || row.workspaceId !== scope.workspaceId || row.documentId !== documentId || row.operationId !== operationId
       || typeof row.fingerprint !== 'string' || row.fingerprint.length < 1 || row.fingerprint.length > 128) throw new KnowledgeError('unavailable');

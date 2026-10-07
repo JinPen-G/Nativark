@@ -94,6 +94,25 @@ export class PersistentMemoryConsentService {
       semantics: 'preference_not_authority' as const };
   }
 
+  async confirmationDetail(memoryId: string) {
+    parse(id, memoryId);
+    const context = await this.current(), owner = actor(context);
+    await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner });
+    const memory = await this.repository.read(context.scope, owner, memoryId);
+    if (!memory || memory.status !== 'confirmed') return unavailable();
+    await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner, memory });
+    const proof = await this.repository.read(context, memory.confirmationRecordId);
+    if (!proof || proof.memoryId !== memoryId || proof.revision !== memory.revision - 1
+      || fingerprint(proof.preference) !== fingerprint(memory.preference) || proof.aclRevision !== memory.aclRevision
+      || proof.memoryExpiresAt !== memory.expiresAt) return unavailable();
+    const after = await this.repository.read(context.scope, owner, memoryId);
+    if (!after || fingerprint(after) !== fingerprint(memory)) throw new KnowledgeError('conflict');
+    return { memoryId, confirmationRecordId: proof.id, preference: structuredClone(proof.preference),
+      revision: proof.revision, aclRevision: proof.aclRevision, scope: structuredClone(proof.scope),
+      audience: proof.audience, confirmedAt: proof.issuedAt, expiresAt: proof.expiresAt,
+      status: proof.status, semantics: 'persistent_confirmation_record_not_current_preference_reconstruction' as const };
+  }
+
   async changeStatus(operationId: string, value: unknown) {
     parse(id, operationId);
     const base = { draftVersion: z.literal(AI_KNOWLEDGE_DRAFT_VERSION), memoryId: id,
