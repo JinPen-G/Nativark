@@ -2,17 +2,18 @@
 const assert = require('node:assert/strict');
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { Prisma } = require('../../../apps/api/node_modules/@prisma/client');
-const { AI_TOOL_DRAFT_VERSION } = require('../../../packages/shared/src/index.ts');
+const { AI_TOOL_DRAFT_VERSION, AI_PROPOSAL_DRAFT_VERSION } = require('../../../packages/shared/src/index.ts');
 const { persistedApprovedOrderHarness } = require('./approved-order-persisted.cjs');
 const { clone, matches } = require('./task-input-store.cjs');
 const { composeControlledApprovedOrder } = require('../../../apps/api/src/modules/ai-native/approval-execution/controlled-approved-order.composition');
-const { PrismaAiApprovalRepository } = require('../../../apps/api/src/modules/ai-native/ai-approval-repository');
 
 // Actual formal publisher/plan/registration, authorization, preparation, approval,
 // Core confirmation and idempotency. Database and Core business facts remain doubles.
 async function controlledApprovedOrderHarness() {
   const h = await persistedApprovedOrderHarness(), { state } = h;
   state.user.permissions.push('system:params:manage');
+  state.records.aiTaskActionPolicy.push({ scopeId: 'scope-a', taskId: 'task-a', operation: 'decide_approval', revision: 1,
+    requiredPermissions: ['rental-os:order:create'], expiresAt: new Date('2099-01-01') });
   for (const table of ['aiStep', 'aiProposal', 'aiProposalVersion', 'aiProposalAction', 'aiApproval', 'aiApprovalConsumption',
     'aiApprovedOrderSnapshot', 'aiTaskActionInput', 'aiTaskPlanPolicy', 'aiTaskRunPlan', 'aiTaskEvent', 'aiTaskResultArtifact']) state.records[table] = [];
   Object.assign(state.records.aiTask[0], { eventCursor: 0n });
@@ -64,9 +65,11 @@ async function controlledApprovedOrderHarness() {
       const records = clone(state.records); let committed = false;
       try {
         const result = await callback(client(records, true)), wrote = records.rentalOrder.length > state.records.rentalOrder.length;
+        const decided = records.aiApproval.length > state.records.aiApproval.length;
         state.records = records; committed = true;
         if (wrote) state.commits++;
         if (wrote && state.ackLost) throw Error('synthetic COMMIT applied, response lost');
+        if (decided && state.decisionAckLost) throw Error('synthetic approval COMMIT applied, response lost');
         return result;
       } catch (error) { if (!committed) state.rollbacks++; throw error; }
     }));
@@ -94,14 +97,13 @@ async function controlledApprovedOrderHarness() {
   const pending = await root.prepare(prepareCommand);
   assert.equal(state.records.aiApproval.length, 0);
   assert.equal(state.records.rentalOrder.length, 0);
+  const review = { contractVersion: AI_PROPOSAL_DRAFT_VERSION, proposalId: 'proposal-a', proposalRevision: 1,
+    reviewedPayloadHash: pending.reviewedPayloadHash };
   const approve = async () => {
-    const approval = await new PrismaAiApprovalRepository(h.dependencies.db, h.dependencies.clock).decide({ scopeId: 'scope-a', taskId,
-      proposalId: 'proposal-a', proposalRevision: 1, payload: state.records.aiProposalVersion[0].payload,
-      reviewedPayloadHash: pending.reviewedPayloadHash, decision: 'approved' },
-    { scopeId: 'scope-a', actorKind: 'user', actorId: 'operator-a', audience: 'operator' });
-    return { ...prepareCommand, expiresAt: undefined, reviewedPayloadHash: pending.reviewedPayloadHash, approvalId: approval.approvalId };
+    const approval = await root.approvals.decide(taskId, { ...review, decision: 'approve' });
+    const { expiresAt: _, ...command } = prepareCommand;
+    return { ...command, reviewedPayloadHash: review.reviewedPayloadHash, approvalId: approval.approvalId };
   };
-  return { ...h, root, compose, dependencies, published, registered, prepareCommand, pending,
-    approve: async () => { const { expiresAt: _, ...command } = await approve(); return command; } };
+  return { ...h, root, compose, dependencies, published, registered, prepareCommand, pending, review, approve };
 }
 module.exports = { controlledApprovedOrderHarness };

@@ -7,6 +7,7 @@ import { composePersistedApprovedOrder } from './persisted-approved-order.compos
 import { PersistedApprovedOrderPolicyAuthority } from './persisted-approved-order-policy.authority';
 import { PrismaApprovedOrderOriginalInputSource } from './prisma-approved-order-original-input.source';
 import { PrismaAuthorizedApprovedOrderInputSource } from './prisma-authorized-approved-order-input.source';
+import { composeApprovedOrderHumanApproval } from './approved-order-human.composition';
 
 export type ControlledApprovedOrderDependencies = Omit<PersistedApprovedOrderDependencies, 'inputSource' | 'executionInput' | 'toolVersion'> & {
   confirmation: PersistedApprovedOrderDependencies['confirmation'] & Pick<RentalOrderConfirmationService, 'normalizeOrderInput'>;
@@ -27,6 +28,7 @@ export function composeControlledApprovedOrder(dependencies: ControlledApprovedO
     const orders = composePersistedApprovedOrder({ ...d, inputSource, executionInput: inputSource });
     return Object.freeze({ tasks: formal.tasks, source: formal.source, policy: formal.policy, plans: formal.plans,
       registrations: formal.registrations, inputAuthority: formal.inputAuthority,
+      approvals: composeApprovedOrderHumanApproval(dependencies),
       prepare: orders.prepare, submit: orders.submit, reconcile: orders.reconcile });
   } catch (error) {
     if (error instanceof AiTaskRepositoryError) throw new AiTaskRepositoryError(error.code);

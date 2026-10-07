@@ -1,0 +1,170 @@
+import { Prisma, type PrismaClient } from '@prisma/client';
+import { z } from 'zod';
+import { AI_PROPOSAL_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiApprovalRecordDraft, type AiProposalDecisionRequestDraft,
+  type AiProposalPayloadDraft, type AiProposalRecordDraft } from '@rental-os/shared';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { AiApprovalService, AiApprovalRepositoryError, PrismaAiApprovalRepository, type AiApprovalRecord } from '../ai-approval-repository';
+import { AiTaskRepositoryError } from '../ai-task.repository';
+import { fingerprintAiProposalDraft } from '../proposal-binding-draft';
+import type { ControlledApprovedOrderDependencies } from './controlled-approved-order.composition';
+import { ApprovedOrderHumanAuthority } from './approved-order-human.authority';
+import { AiApprovedOrderRouteAuthority } from './approved-order-route.authority';
+import { PrismaApprovedOrderSnapshotSource } from './prisma-approved-order-snapshot.source';
+import { deniedOrder, orderContextHash } from './prisma-approved-order.source';
+
+const id = z.string().min(1).max(36).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+const referenceSchema = z.object({ contractVersion: z.literal(AI_PROPOSAL_DRAFT_VERSION), proposalId: id,
+  proposalRevision: z.number().int().min(1).max(4294967294), reviewedPayloadHash: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
+const decisionSchema = referenceSchema.extend({ decision: z.enum(['approve', 'reject']) }).strict() satisfies z.ZodType<AiProposalDecisionRequestDraft>;
+type Reference = Omit<AiProposalDecisionRequestDraft, 'decision'>;
+const conflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+export class AiApprovalDecisionResultUnknownError extends Error {
+  readonly code = 'AI_RESULT_UNKNOWN';
+  readonly retryable = false;
+  readonly nextAction = 'read_decision_receipt';
+  constructor() { super('AI_RESULT_UNKNOWN'); }
+}
+
+export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDependencies) {
+  const human = new ApprovedOrderHumanAuthority(d), clock = d.clock ?? (() => new Date());
+  const snapshots = new PrismaApprovedOrderSnapshotSource(d.db, human.policy);
+  const route = new AiApprovedOrderRouteAuthority(d.guard, d.credentials, clock);
+  const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
+    const result = schema.safeParse(value);
+    if (!result.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return result.data;
+  };
+  const load = async (taskId: string, reference: Reference, tx?: Prisma.TransactionClient) => {
+    const current = await human.policy.authorizeRead(taskId, tx), db = tx ?? d.db;
+    const key = { scopeId: current.scopeId, taskId, proposalId: reference.proposalId };
+    const head = await db.aiProposal.findFirst({ where: { scopeId: key.scopeId, taskId, id: key.proposalId } });
+    const version = await db.aiProposalVersion.findFirst({ where: { ...key, revision: reference.proposalRevision } });
+    if (!head || head.scopeId !== key.scopeId || head.taskId !== taskId || head.id !== key.proposalId
+      || !version || Object.entries(key).some(([k, v]) => version[k as keyof typeof version] !== v)
+      || version.revision !== reference.proposalRevision || version.payloadHash !== reference.reviewedPayloadHash) throw conflict();
+    if (fingerprintAiProposalDraft(version.payload) !== reference.reviewedPayloadHash) throw conflict();
+    const payload = structuredClone(version.payload) as unknown as AiProposalPayloadDraft;
+    if (payload.taskId !== taskId || payload.proposalId !== reference.proposalId || payload.revision !== reference.proposalRevision
+      || payload.audience !== current.context.audience || requestFingerprint(payload.scope) !== requestFingerprint(current.context.scope)
+      || payload.atomicity !== 'single_action' || payload.actions.length !== 1 || payload.actions[0].toolCode !== 'rental.order.commit'
+      || payload.actions[0].toolVersion !== AI_TOOL_DRAFT_VERSION || !(version.expiresAt instanceof Date)
+      || version.expiresAt.getTime() !== Date.parse(payload.expiresAt)) throw conflict();
+    if (!['PENDING_CONFIRMATION', 'CONFIRMED', 'CANCELLED'].includes(head.status)
+      || (head.status === 'PENDING_CONFIRMATION' ? head.currentRevision !== null : head.currentRevision !== reference.proposalRevision)
+      || await db.aiProposalVersion.findFirst({ where: { ...key, revision: { gt: reference.proposalRevision } } })) throw conflict();
+    const facts = await snapshots.read({ ...key, context: current.context, proposalRevision: reference.proposalRevision, action: payload.actions[0] }, tx);
+    if (payload.actions[0].target.resourceType !== 'quote' || payload.actions[0].target.resourceId !== facts.input.payload.quoteId
+      || payload.actions[0].target.version !== facts.preview.payload.pricingPlanVersion) throw conflict();
+    const stable = requestFingerprint({ key, context: orderContextHash(current.context), payload, facts });
+    return { ...current, payload, facts, head, stable };
+  };
+  const publicRecord = (record: AiApprovalRecord, current: Awaited<ReturnType<typeof load>>): AiApprovalRecordDraft => {
+    if (current.context.actor.kind !== 'user') throw deniedOrder();
+    return { contractVersion: AI_PROPOSAL_DRAFT_VERSION, approvalId: record.approvalId, proposalId: record.proposalId,
+      proposalRevision: record.proposalRevision, payloadHash: record.payloadHash, audience: record.audience,
+      scope: current.context.scope, actor: current.context.actor, decision: record.decision,
+      issuedAt: record.issuedAt.toISOString(), expiresAt: record.expiresAt.toISOString() };
+  };
+  const same = (first: Awaited<ReturnType<typeof load>>, next: Awaited<ReturnType<typeof load>>, includeHead = true) => {
+    if (first.stable !== next.stable || (includeHead && requestFingerprint(first.head) !== requestFingerprint(next.head))) throw conflict();
+  };
+  const readProposal = async (taskId: string, value: Reference) => {
+    taskId = parse(id, taskId);
+    const reference = parse(referenceSchema, value), first = await load(taskId, reference);
+    return route.withOrderReview(first.context, first.facts.input.payload, async () => {
+      same(first, await load(taskId, reference));
+      const proposal: AiProposalRecordDraft = { payload: first.payload, payloadHash: reference.reviewedPayloadHash,
+        status: first.head.status.toLowerCase() as AiProposalRecordDraft['status'] };
+      return { proposal, facts: first.facts, generatedText: null };
+    });
+  };
+  const readReceipt = async (taskId: string, value: AiProposalDecisionRequestDraft) => {
+    taskId = parse(id, taskId);
+    const command = parse(decisionSchema, value), { decision, ...reference } = command;
+    const first = await load(taskId, reference);
+    const read = async () => {
+      if (first.context.actor.kind !== 'user') throw deniedOrder();
+      const key = { scopeId: first.scopeId, taskId, proposalId: reference.proposalId, proposalRevision: reference.proposalRevision,
+        actorKind: 'USER' as const, actorId: first.context.actor.userId };
+      const row = await d.db.aiApproval.findFirst({ where: key });
+      if (!row) {
+        if (first.head.status !== 'PENDING_CONFIRMATION') return { kind: 'unknown' as const,
+          retryable: false as const, nextAction: 'read_decision_receipt' as const };
+        return { kind: 'absent' as const, retryable: false as const };
+      }
+      const expected = decision === 'approve' ? 'APPROVED' : 'REJECTED';
+      if (Object.entries(key).some(([k, v]) => row[k as keyof typeof row] !== v)
+        || row.payloadHash !== reference.reviewedPayloadHash || row.decision !== expected
+        || row.audience !== first.context.audience.toUpperCase() || first.head.status !== (decision === 'approve' ? 'CONFIRMED' : 'CANCELLED')
+        || !(row.issuedAt instanceof Date) || !(row.expiresAt instanceof Date) || !Number.isFinite(row.issuedAt.getTime())
+        || row.issuedAt > clock() || row.issuedAt >= row.expiresAt || row.expiresAt.getTime() !== Date.parse(first.payload.expiresAt)) throw conflict();
+      const record: AiApprovalRecord = { ...key, approvalId: row.id, payloadHash: row.payloadHash, actorKind: 'user',
+        audience: first.context.audience as AiApprovalRecord['audience'], decision: decision === 'approve' ? 'approved' : 'rejected',
+        issuedAt: row.issuedAt, expiresAt: row.expiresAt };
+      return { kind: 'recorded' as const, record: publicRecord(record, first) };
+    };
+    return route.withOrderReview(first.context, first.facts.input.payload, async () => {
+      const before = await read();
+      same(first, await load(taskId, reference));
+      const after = await read();
+      if (requestFingerprint(before) !== requestFingerprint(after)) return { kind: 'unknown' as const,
+        retryable: false as const, nextAction: 'read_decision_receipt' as const };
+      return after;
+    });
+  };
+  const decide = async (taskId: string, value: AiProposalDecisionRequestDraft) => {
+    let started = false;
+    try {
+      taskId = parse(id, taskId);
+      const command = parse(decisionSchema, value), { decision, ...reference } = command;
+      const first = await load(taskId, reference), grant = await human.resolve(taskId);
+      if (orderContextHash(first.context) !== orderContextHash(grant.context)) throw deniedOrder();
+      const recheck = async (tx?: Prisma.TransactionClient) => {
+        same(first, await load(taskId, reference, tx), false);
+        const current = await human.resolve(taskId, tx);
+        if (current.bindingHash !== grant.bindingHash || Date.parse(first.payload.expiresAt) <= clock().getTime()) throw deniedOrder();
+      };
+      await recheck();
+      const service = new AiApprovalService({ decide: async (input, principal) => {
+        started = true;
+        return d.db.$transaction(async tx => {
+          await recheck(tx);
+          // Reuse the existing decision/CAS repository inside this authorization-checked transaction.
+          const db = { aiProposal: tx.aiProposal, aiProposalVersion: tx.aiProposalVersion, aiApproval: tx.aiApproval,
+            $transaction: (work: (client: Prisma.TransactionClient) => Promise<AiApprovalRecord>) => work(tx)
+          } as unknown as ConstructorParameters<typeof PrismaAiApprovalRepository>[0];
+          const record = await new PrismaAiApprovalRepository(db, clock).decide(input, principal);
+          await recheck(tx);
+          return record;
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      } }, { authorize: async (context, input) => {
+        if (orderContextHash(context) !== orderContextHash(grant.context) || input.scopeId !== grant.principal.scopeId
+          || input.taskId !== taskId || input.proposalId !== command.proposalId || input.proposalRevision !== command.proposalRevision
+          || input.reviewedPayloadHash !== reference.reviewedPayloadHash || requestFingerprint(input.payload) !== requestFingerprint(first.payload)
+          || input.decision !== (decision === 'approve' ? 'approved' : 'rejected')) throw deniedOrder();
+        await recheck();
+        return grant.principal;
+      } });
+      const outcome = await route.withOrderPreparation(grant.context, first.facts.input.payload, async () => {
+        try {
+          const record = await service.decide({ context: grant.context, scopeId: grant.principal.scopeId, taskId,
+            proposalId: reference.proposalId, proposalRevision: reference.proposalRevision, payload: first.payload,
+            reviewedPayloadHash: reference.reviewedPayloadHash, decision: decision === 'approve' ? 'approved' : 'rejected' });
+          await recheck();
+          return { ok: true as const, record: publicRecord(record, first) };
+        } catch (error) { return { ok: false as const, error }; }
+      });
+      if (!outcome.ok) throw outcome.error;
+      return outcome.record;
+    } catch (error) {
+      if (error instanceof AiTaskRepositoryError) throw error;
+      if (error instanceof AiApprovalRepositoryError && error.code !== 'UNAVAILABLE') {
+        throw new AiTaskRepositoryError(error.code === 'INVALID' ? 'AI_INVALID_INPUT' : error.code === 'CONFLICT' ? 'AI_REVISION_CONFLICT' : 'AI_ACCESS_DENIED');
+      }
+      if (started) throw new AiApprovalDecisionResultUnknownError();
+      throw unavailable();
+    }
+  };
+  return Object.freeze({ readProposal, decide, readReceipt });
+}
