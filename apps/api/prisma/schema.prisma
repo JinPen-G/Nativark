@@ -311,6 +311,7 @@ model BusinessWorkspace {
   rentalInspectionRecords           RentalInspectionRecord[]
   rentalFulfillmentOperators        RentalFulfillmentOperator[]
   rentalTenantBusinessSettingss     RentalTenantBusinessSettings[]
+  approvedSettingsChanges           RentalApprovedSettingsChange[]
   rentalPricingPlans                RentalPricingPlan[]
   rentalDiscountPlans               RentalDiscountPlan[]
   rentalValueAddedServices          RentalValueAddedService[]
@@ -4065,6 +4066,7 @@ model RentalTenantBusinessSettings {
   workspace     BusinessWorkspace  @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   categoryCode  RentalCategoryCode
   configVersion String
+  settingsRevision Int @default(1) @db.UnsignedInt
   /// TenantRentalBusinessSettings 的 pricing/fulfillment/deposit 等嵌套配置块。
   settings      Json
   updatedBy     String
@@ -4072,6 +4074,51 @@ model RentalTenantBusinessSettings {
 
   @@index([tenantId], map: "rental_business_settings_tenant_idx")
   @@map("rental_tenant_business_settings")
+}
+
+model RentalApprovedSettingsChange {
+  id                       String @id @default(uuid()) @db.VarChar(36)
+  tenantId                 String
+  workspaceId              String
+  actorId                  String @db.VarChar(191)
+  changeKey                String @db.VarChar(128)
+  baseRevision             Int @db.UnsignedInt
+  baseSettingsHash         String @db.Char(64)
+  categoryVersionId        String @db.VarChar(191)
+  categoryAdoptionRevision Int
+  beforeNotifications      Json
+  afterNotifications       Json
+  changeHash               String @db.Char(64)
+  expiresAt                DateTime @db.DateTime(3)
+  createdAt                DateTime @default(now()) @db.DateTime(3)
+  workspace BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
+  operations RentalApprovedSettingsOperation[]
+
+  @@unique([workspaceId, actorId, changeKey], map: "approved_settings_change_key")
+  @@unique([tenantId, workspaceId, id, changeHash], map: "approved_settings_change_binding")
+  @@map("rental_approved_settings_changes")
+}
+
+model RentalApprovedSettingsOperation {
+  id             String @id @default(uuid()) @db.VarChar(36)
+  tenantId       String
+  workspaceId    String
+  actorId        String @db.VarChar(191)
+  operationKey   String @db.VarChar(191)
+  commandHash    String @db.Char(64)
+  changeId       String @db.VarChar(36)
+  changeHash     String @db.Char(64)
+  baseRevision   Int @db.UnsignedInt
+  resultRevision Int @db.UnsignedInt
+  resultHash     String @db.Char(64)
+  approvalRef    Json
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+  change RentalApprovedSettingsChange @relation(fields: [tenantId, workspaceId, changeId, changeHash], references: [tenantId, workspaceId, id, changeHash], onDelete: Restrict, onUpdate: Restrict, map: "approved_settings_operation_change_fk")
+
+  @@unique([workspaceId, operationKey], map: "approved_settings_operation_key")
+  @@unique([workspaceId, changeId], map: "approved_settings_change_once")
+  @@index([tenantId, workspaceId, changeId, changeHash], map: "rental_approved_settings_operations_change_binding_idx")
+  @@map("rental_approved_settings_operations")
 }
 
 model RentalPricingPlan {

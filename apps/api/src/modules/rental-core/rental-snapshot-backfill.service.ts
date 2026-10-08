@@ -434,6 +434,7 @@ export class RentalSnapshotBackfillService implements OnModuleInit {
               workspaceId,
               categoryCode: upperEnum(categoryCode, "businessSettings.categoryCode"),
               configVersion: settings.configVersion ?? "0.1.0",
+              settingsRevision: 1,
               settings: json(settings),
               updatedBy: settings.updatedBy ?? "backfill"
             },

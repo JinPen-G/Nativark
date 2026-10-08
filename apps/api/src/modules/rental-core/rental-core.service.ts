@@ -119,6 +119,10 @@ import { redactDeliveryAddressPhone } from "./rental-delivery-address-privacy";
 import { carrierSerializedCapacityConflict, carrierShipmentInventoryMutationBlocked, rentalOrderDueAt, shiftedCarrierDueAt } from "./rental-carrier-shipment";
 import { RentalFundingService } from "./rental-funding.service";
 import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
+import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./category-active-write";
+import { requestFingerprint } from "./rental-idempotency.repository";
+import type { ApprovedSettingsNotifications, NotificationSettingsPreview, VersionedBusinessSettings } from "./approved-settings-change.ports";
+import { settingsNotificationsSchema } from "./approved-settings-change.validation";
 import { RentalCategoryResolver } from "./rental-category-resolver.service";
 import { normalizedRentalAttributeValue, validateRentalCategoryAttributes, reconcileRentalCategoryAttributes } from "./rental-category-attributes";
 import {
@@ -322,6 +326,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
    * 同租户两个空间各有独立的商品组、地点、券模板与检查模板。
    */
   private readonly states = new Map<string, TenantRentalState>();
+  private readonly businessSettingsRevisions = new Map<string, number>();
   /**
    * 「租户 → 默认经营空间」与「经营空间 → 品类」。
    *
@@ -719,8 +724,70 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
   }
 
   async saveBusinessSettings(tenantId: string, input: SaveTenantRentalBusinessSettingsRequest, operator: string) {
+    const { settings, binding } = await this.buildBusinessSettings(tenantId, input, operator);
+    const settingsRevision = await this.configStore.upsertBusinessSettings(settings, operator, undefined, binding);
+    this.publishBusinessSettings(tenantId, { settings, settingsRevision });
+    return settings;
+  }
+
+  async readVersionedBusinessSettings(tenantId: string, tx?: RentalConfigTx) {
+    const current = await this.configStore.readVersionedBusinessSettings(tenantId, tx);
+    if (!current || current.settings.tenantId !== tenantId) throw new ConflictException("经营设置尚未持久化或版本不可用");
+    return current;
+  }
+
+  async previewNotificationSettings(
+    tenantId: string, notifications: ApprovedSettingsNotifications, operator: string, tx: RentalConfigTx
+  ): Promise<NotificationSettingsPreview> {
+    const parsed = settingsNotificationsSchema.safeParse(notifications);
+    if (!parsed.success) throw new BadRequestException("通知变更只能包含合法的系统事件及渠道数组");
+    const current = await this.readVersionedBusinessSettings(tenantId, tx);
+    const intended = { ...current.settings, notifications: parsed.data };
+    const { settings: nextSettings, binding } = await this.buildBusinessSettings(tenantId, intended, operator, tx);
+    const { updatedAt: previousAt, updatedBy: previousBy, ...previousContent } = intended;
+    const { updatedAt: nextAt, updatedBy: nextBy, ...nextContent } = nextSettings;
+    if (!binding || requestFingerprint(previousContent) !== requestFingerprint(nextContent)) {
+      throw new ConflictException("经营设置需要人工更新后才能准备通知变更");
+    }
+    return { ...current, baseSettingsHash: requestFingerprint(current.settings), binding,
+      before: structuredClone(current.settings.notifications), after: structuredClone(parsed.data), nextSettings };
+  }
+
+  async commitNotificationSettings(
+    tenantId: string, notifications: ApprovedSettingsNotifications, operator: string,
+    expected: { baseRevision: number; baseSettingsHash: string; binding: CategoryWriteBinding }, tx: RentalConfigTx
+  ): Promise<VersionedBusinessSettings> {
+    const preview = await this.previewNotificationSettings(tenantId, notifications, operator, tx);
+    if (preview.settingsRevision !== expected.baseRevision || preview.baseSettingsHash !== expected.baseSettingsHash ||
+        requestFingerprint(preview.binding) !== requestFingerprint(expected.binding)) {
+      throw new ConflictException("经营设置或品类绑定已变化，请重新准备");
+    }
+    const settingsRevision = await this.configStore.upsertBusinessSettings(
+      preview.nextSettings, operator, tx, expected.binding, expected.baseRevision
+    );
+    return { settings: preview.nextSettings, settingsRevision };
+  }
+
+  async refreshCommittedBusinessSettings(tenantId: string) {
+    const current = await this.readVersionedBusinessSettings(tenantId);
+    this.publishBusinessSettings(tenantId, current);
+  }
+
+  private publishBusinessSettings(tenantId: string, current: VersionedBusinessSettings) {
+    const workspaceId = this.workspaceOf(tenantId);
+    // A delayed commit acknowledgement must not replace a newer local revision.
+    if (current.settingsRevision < (this.businessSettingsRevisions.get(workspaceId) ?? 0)) return;
+    this.state(tenantId).businessSettings = structuredClone(current.settings);
+    this.businessSettingsRevisions.set(workspaceId, current.settingsRevision);
+  }
+
+  private async buildBusinessSettings(
+    tenantId: string, input: SaveTenantRentalBusinessSettingsRequest, operator: string, tx?: RentalConfigTx
+  ) {
     const state = this.state(tenantId);
-    const { definition, binding } = await this.categoryWriteContext(tenantId, state.profile.categoryCode);
+    const { definition, binding } = tx
+      ? await lockActiveCategoryBinding(tx, tenantId, this.workspaceOf(tenantId), undefined, state.profile.categoryCode)
+      : await this.categoryWriteContext(tenantId, state.profile.categoryCode);
     const pricingUnits = new Set(definition.businessModel.pricingUnits);
     const fulfillmentModes = new Set(definition.businessModel.fulfillmentModes);
     const enabledPaymentMethods = input.payment.enabledMethods?.length ? input.payment.enabledMethods : DEFAULT_RENTAL_PAYMENT_METHODS;
@@ -813,9 +880,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       updatedAt: now(),
       updatedBy: operator
     };
-    await this.configStore.upsertBusinessSettings(nextSettings, operator, undefined, binding);
-    state.businessSettings = nextSettings;
-    return state.businessSettings;
+    return { settings: nextSettings, binding };
   }
 
   listCouponTemplates(tenantId: string) { return this.state(tenantId).couponTemplates; }
