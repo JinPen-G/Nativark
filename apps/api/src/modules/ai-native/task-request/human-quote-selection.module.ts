@@ -1,4 +1,5 @@
 import { Module, type DynamicModule } from '@nestjs/common';
+import type { FormalApprovedOrderReprepareConfiguration } from '../approval-execution/formal-approved-order-reprepare.composition';
 import { PrismaQuoteSelectionRepository, type HumanQuoteSelectionDependencies } from './prisma-quote-selection.repository';
 import { composeHumanQuoteOrder, type HumanQuoteOrderDependencies } from '../scenes/human-quote-order.composition';
 import { AI_HUMAN_QUOTE_SELECTIONS, AI_HUMAN_QUOTE_SELECTION_REQUESTS, AiHumanQuoteSelectionController } from './human-quote-selection.controller';
@@ -25,9 +26,10 @@ export class AiHumanQuoteSelectionModule {
       providers: [{ provide: AI_HUMAN_QUOTE_SELECTION_REQUESTS, useFactory: () => composeRequestBoundQuoteSelections(dependencies, options) }],
       exports: [AI_HUMAN_QUOTE_SELECTION_REQUESTS], controllers: [AiHumanQuoteSelectionController] };
   }
-  static registerRequestBoundApplication(dependencies: RequestBoundQuoteOrderDependencies, options: AiSceneRequestOptions): DynamicModule {
+  static registerRequestBoundApplication(dependencies: RequestBoundQuoteOrderDependencies, options: AiSceneRequestOptions,
+    reprepare?: FormalApprovedOrderReprepareConfiguration): DynamicModule {
     return { module: AiHumanQuoteSelectionModule,
-      providers: [{ provide: AI_HUMAN_QUOTE_ORDER_REQUESTS, useFactory: () => composeRequestBoundHumanQuoteOrder(dependencies, options) }],
+      providers: [{ provide: AI_HUMAN_QUOTE_ORDER_REQUESTS, useFactory: () => composeRequestBoundHumanQuoteOrder(dependencies, options, reprepare) }],
       exports: [AI_HUMAN_QUOTE_ORDER_REQUESTS] };
   }
 }

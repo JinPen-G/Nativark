@@ -18,7 +18,7 @@ exports.selectedOrderHarness = async () => {
   state.user.permissions.push('system:params:manage');
   for (const table of ['aiTask', 'aiRun', 'aiStep', 'aiProposal', 'aiProposalVersion', 'aiProposalAction', 'aiApproval',
     'aiApprovalConsumption', 'aiApprovedOrderSnapshot', 'aiTaskOriginalRequest', 'aiTaskQuoteSelection', 'aiTaskActionInput',
-    'aiTaskPlanPolicy', 'aiTaskRunPlan', 'aiTaskEvent', 'aiTaskResultArtifact', 'aiTaskActionPolicy']) state.records[table] = [];
+    'aiTaskPlanPolicy', 'aiTaskRunPlan', 'aiTaskEvent', 'aiTaskResultArtifact', 'aiTaskActionPolicy', 'aiApprovalReprepare']) state.records[table] = [];
   for (const row of state.records.aiBudgetPolicy) {
     row.sceneCode = 'quote_clarification'; row.settingsJson.sceneCode = 'quote_clarification'; row.settingsJson.allowedScenes = ['quote_clarification'];
   }
@@ -29,11 +29,21 @@ exports.selectedOrderHarness = async () => {
     const rows = name => (records ?? state.records)[name];
     const related = (name, row) => !row ? row : name === 'aiTask' ? { ...row, runs: rows('aiRun').filter(r => r.taskId === row.id)
       .map(run => ({ ...run, executionPlan: rows('aiTaskRunPlan').find(p => p.runId === run.id) ?? null })) }
+      : name === 'aiRun' ? { ...row, task: related('aiTask', rows('aiTask').find(task => task.id === row.taskId)) }
       : name === 'aiProposalAction' ? { ...row, step: rows('aiStep').find(s => s.actionId === row.actionId && s.scopeId === row.scopeId) }
       : name === 'aiProposal' ? { ...row, currentVersion: rows('aiProposalVersion').find(v => v.proposalId === row.id && v.revision === row.currentRevision) ?? null } : row;
     const project = (row, select) => !row ? null : !select ? clone(row) : Array.isArray(row) ? row.map(value => project(value, select))
       : Object.fromEntries(Object.entries(select).filter(([, rule]) => rule).map(([key, rule]) => [key, rule === true ? clone(row[key]) : project(row[key], rule.select)]));
-    const db = { $queryRaw: async () => [], records: records ?? state.records };
+    const db = { records: records ?? state.records,
+      $queryRaw: async query => query.sql.includes('FROM ai_approval_reprepares')
+        ? clone(rows('aiApprovalReprepare').filter(row => row.scopeId === query.values[0] && row.operationKey === query.values[1])) : [],
+      $executeRaw: async query => {
+        assert.ok(query.sql.startsWith('INSERT INTO ai_approval_reprepares'));
+        const columns = query.sql.match(/\(([^)]+)\) VALUES/u)[1].match(/`([^`]+)`/gu).map(key => key.slice(1, -1));
+        const row = Object.fromEntries(columns.map((key, index) => [key, clone(query.values[index])]));
+        assert.equal(rows('aiApprovalReprepare').some(existing => existing.scopeId === row.scopeId && existing.operationKey === row.operationKey), false);
+        rows('aiApprovalReprepare').push(row); return 1;
+      } };
     for (const model of Object.keys(state.records)) db[model] = {
       findFirst: async (args = {}) => project(related(model, rows(model).find(r => matches(related(model, r), args.where ?? {}))), args.select),
       findUnique: async args => {
@@ -48,13 +58,14 @@ exports.selectedOrderHarness = async () => {
       create: async args => {
         const row = { revision: 1, createdAt: h.dependencies.clock(), ...clone(args.data) };
         if (model === 'aiTask') Object.assign(row, { scope: clone(rows('aiScope').find(s => s.id === row.scopeId)), archivedAt: null, cancelRequestedAt: null, resultRef: null });
+        if (model === 'aiRun') Object.assign(row, { leaseOwnerId: null, leaseExpiresAt: null });
         if (model === 'rentalOrderIdempotencyRecord') Object.assign(row, { id: 'idempotency-a', status: 'succeeded' });
         if (model === 'aiApprovalConsumption') assert.equal(rows(model).some(r => r.scopeId === row.scopeId && r.taskId === row.taskId && r.actionId === row.actionId), false);
         rows(model).push(row); return project(related(model, row), args.select);
       },
       updateMany: async args => {
         let count = 0;
-        for (const row of rows(model)) if (matches(row, args.where)) {
+        for (const row of rows(model)) if (matches(related(model, row), args.where)) {
           count++;
           for (const [key, value] of Object.entries(args.data)) row[key] = value && typeof value === 'object' && 'increment' in value
             ? row[key] instanceof Prisma.Decimal ? row[key].add(value.increment) : row[key] + value.increment : clone(value);
@@ -79,7 +90,9 @@ exports.selectedOrderHarness = async () => {
       catch (error) { state.failures.push(error.stack); throw error; }
       const wrote = records.rentalOrder.length > state.records.rentalOrder.length;
       const decided = records.aiApproval.length > state.records.aiApproval.length;
+      const reprepared = records.aiApprovalReprepare.length > state.records.aiApprovalReprepare.length;
       state.records = records;
+      if (reprepared && state.reprepareAckLost) throw Error('synthetic reprepare commit reply lost');
       if (wrote) state.commits++;
       if (wrote && state.ackLost) throw Error('synthetic order commit reply lost');
       if (decided && state.decisionAckLost) throw Error('synthetic approval commit reply lost');
@@ -125,5 +138,56 @@ exports.selectedOrderHarness = async () => {
     expiresAt: new Date(Date.now() + 60000).toISOString(), lease: { ...held, revision: state.records.aiRun[0].revision } };
   const pending = await app.prepareSelectedProposal({ selection, command: prepareCommand });
   const proposal = { contractVersion: AI_PROPOSAL_DRAFT_VERSION, proposalId: prepareCommand.proposalId, proposalRevision: 1, reviewedPayloadHash: pending.proposal.reviewedPayloadHash };
-  return { ...h, app, compose, selection, proposal, prepareCommand, selected, originals };
+  return { ...h, app, compose, selection, proposal, prepareCommand, selected, originals,
+    sceneDependencies: { ...dependencies, originals }, limits };
+};
+
+exports.selectedReprepareHarness = async () => {
+  const h = await exports.selectedOrderHarness(), { state } = h;
+  const { composeFormalApprovedOrderReprepareServices } = require('../../../apps/api/src/modules/ai-native/approval-execution/formal-approved-order-reprepare.composition');
+  Object.assign(h.sceneDependencies.core, {
+    getProfile: () => ({ tenantId: 'tenant-a', categoryCode: 'camera' }),
+    getWorkspaceCategory: async () => ({ code: 'camera', businessModel: { pricingUnits: ['day'], fulfillmentModes: ['store_pickup_return'] } }),
+    getBusinessSettings: () => ({ tenantId: 'tenant-a', calendar: { timeZone: 'UTC' }, pricing: { enabledUnits: ['day'] },
+      fulfillment: { enabledModes: ['store_pickup_return'] }, configVersion: 1 })
+  });
+  const configuration = { holderId: 'worker-a', creationRules: [{ sceneCode: 'quote_clarification', sceneVersion: '1', revision: 1,
+    audiences: ['operator'], requiredPermissions: ['rental-os:order:create'], maxInputAgeMs: 3600000 }],
+    memberships: { listPersonalOptions: async () => [] } };
+  const services = composeFormalApprovedOrderReprepareServices(h.sceneDependencies, configuration);
+  const dependencies = { ...h.sceneDependencies, originals: services.originals,
+    reprepareServices: current => composeFormalApprovedOrderReprepareServices(current, configuration) };
+  const app = composeHumanQuoteOrder(dependencies), formal = composeControlledApprovedOrder(dependencies);
+  const original = await services.originals.save({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, requestKey: 'new-human-material',
+    sceneCode: 'quote_clarification', input: { candidate: { customerType: 'personal' } }, previousInputRef: h.selection.originalInputRef }, true);
+  const task = await services.originals.createTask({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: original.inputRef });
+  for (const taskId of [h.selection.taskId, task.taskId]) {
+    for (const operation of ['read_metadata', 'transition_task', 'claim_run', 'decide_approval', 'reprepare_approval']) {
+      if (!state.records.aiTaskActionPolicy.some(row => row.taskId === taskId && row.operation === operation)) state.records.aiTaskActionPolicy.push({
+        scopeId: 'scope-a', taskId, operation, revision: 1, requiredPermissions: [operation === 'read_metadata' ? 'rental-os:order:view' : 'rental-os:order:create'],
+        expiresAt: new Date('2099-01-01') });
+    }
+  }
+  const body = { ...clone(h.body), quoteId: 'quote-new-material' };
+  state.records.quote.push({ ...clone(state.records.quote[0]), id: body.quoteId, request: clone(body) });
+  const selected = await app.select({ draftVersion: AI_QUOTE_SELECTION_DRAFT_VERSION, originalInputRef: original.inputRef,
+    taskId: task.taskId, runId: task.runId, selectionKey: 'new-human-choice', expectedSelectionRevision: 0, order: body });
+  const selection = { draftVersion: AI_QUOTE_SELECTION_DRAFT_VERSION, originalInputRef: original.inputRef,
+    taskId: task.taskId, runId: task.runId, selectionId: selected.receipt.selectionId, inputHash: selected.receipt.inputHash };
+  const held = await formal.tasks.claimRun({ taskId: task.taskId, runId: task.runId, holderId: configuration.holderId,
+    expectedTaskRevision: 1, expectedRunRevision: 1, expectedFencingToken: '0', leaseMs: 120000 });
+  const run = () => state.records.aiRun.find(row => row.id === task.runId);
+  state.records.aiTask.find(row => row.id === task.taskId).status = 'RUNNING'; run().status = 'RUNNING';
+  const lease = () => ({ ...held, revision: run().revision });
+  const published = await app.publishSelectedInput({ selection, expectedTaskRevision: 1, lease: lease() });
+  const plan = await formal.plans.savePlan({ taskId: task.taskId, runId: task.runId, taskRevision: 1, limits: h.limits,
+    steps: [{ registrationRef: published.registrationRef, operation: 'idempotent', toolCode: 'rental.order.commit', toolVersion: AI_TOOL_DRAFT_VERSION }] }, lease());
+  const { taskId, expiresAt, ...preRegistration } = lease();
+  const registered = await formal.registrations.register({ taskId, registrationRef: published.registrationRef, expectedTaskRevision: 1, lease: preRegistration });
+  const step = state.records.aiStep.find(row => row.id === registered.stepId); step.status = 'RUNNING';
+  const command = { draftVersion: 'ain-approval-application-draft-1', operationKey: 'selected-reprepare', originalTaskId: h.selection.taskId,
+    original: h.proposal, reason: 'rejected', replacement: { taskId, runId: task.runId, stepId: step.id, actionId: step.actionId,
+      inputRef: published.inputRef, fingerprint: selected.receipt.inputHash, originalInputRef: original.inputRef,
+      quoteSelectionRef: selection.selectionId, planHash: plan.planHash } };
+  return { ...h, app, dependencies, configuration, replacementSelection: selection, command };
 };

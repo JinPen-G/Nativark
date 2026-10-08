@@ -173,6 +173,44 @@ test('request-bound quote selection and human decision share only the current re
   await assert.rejects(app.readSelectedDecisionReceipt(request, decision), e => e.code === 'AI_ACCESS_DENIED');
 });
 
+test('selected new human materials reprepare through the formal factory and retain the receipt before a new decision', { timeout: 30000 }, async () => {
+  const { selectedReprepareHarness } = require('./fixtures/ai-native/lane-a-selected-order.cjs');
+  const { AiHumanQuoteSelectionModule } = require('../apps/api/src/modules/ai-native/task-request/human-quote-selection.module');
+  const h = await selectedReprepareHarness();
+  const { credentials, originals, reprepareServices, ...dependencies } = h.dependencies;
+  const options = { enabled: true, audience: 'operator' };
+  const module = AiHumanQuoteSelectionModule.registerRequestBoundApplication(dependencies, options, h.configuration);
+  const app = module.providers[0].useFactory(), request = { headers: { authorization: (await credentials.current()).authorization } };
+  assert.equal(module.controllers, undefined); assert.equal(app.submitSelectedOrder, undefined);
+  assert.throws(() => AiHumanQuoteSelectionModule.registerRequestBoundApplication({ ...dependencies, reprepareServices }, options, h.configuration)
+    .providers[0].useFactory(), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  await app.decideSelectedProposal(request, { selection: h.selection, proposal: { ...h.proposal, decision: 'reject' } });
+  const input = { selection: h.selection, command: h.command };
+  await assert.rejects(h.compose().reprepareSelectedProposal(input), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  await assert.rejects(app.reprepareSelectedProposal(request, { ...input, lease: {} }), e => e.code === 'AI_INVALID_INPUT');
+  await assert.rejects(app.reprepareSelectedProposal({ headers: {} }, input), e => e.code === 'AI_ACCESS_DENIED');
+  h.state.reprepareAckLost = true;
+  await assert.rejects(app.reprepareSelectedProposal(request, input), e => e.code === 'AI_RESULT_UNKNOWN');
+  h.state.reprepareAckLost = false;
+  const result = await app.readSelectedReprepareReceipt(request, input);
+  assert.equal(result.receipt.state, 'prepared', JSON.stringify(h.state.failures));
+  assert.equal(result.order, 'not_created_by_reprepare');
+  assert.deepEqual(result.replacement.selection, h.replacementSelection);
+  assert.equal(result.replacement.review.generatedText, null); assert.equal(result.replacement.review.facts, undefined);
+  assert.equal(result.replacement.review.deterministic.quoteAmounts.payableAmount, 123);
+  assert.equal(h.state.records.aiProposal.find(row => row.id === h.proposal.proposalId).status, 'SUPERSEDED');
+  assert.equal(h.state.records.aiApprovalReprepare.length, 1); assert.equal(h.state.records.aiTaskOriginalRequest.length, 2);
+  assert.equal(h.state.records.aiTaskQuoteSelection.length, 2); assert.equal(h.state.records.rentalOrder.length, 0);
+  assert.deepEqual(await app.reprepareSelectedProposal(request, input), result);
+  const approved = await app.decideSelectedProposal(request, { selection: result.replacement.selection,
+    proposal: { ...result.receipt.proposal, decision: 'approve' } });
+  assert.equal(approved.approval.decision, 'approved'); assert.equal(approved.order, 'not_created_by_decision');
+  assert.equal(h.state.records.aiApproval.length, 2); assert.equal(h.state.records.rentalOrder.length, 0);
+  assert.equal(h.state.records.aiApprovalReprepare.length, 1);
+  h.state.session = false;
+  await assert.rejects(app.readSelectedReprepareReceipt(request, input), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
+});
+
 test('lost selection acknowledgement reconciles exact key and mutated quote cannot prove old input', { timeout: 30000 }, async () => {
   const h = await harness();
   h.control.beforeCommit = async draft => { if (draft.aiTaskQuoteSelection.length && !h.state.aiTaskQuoteSelection.length) h.control.loseReply = true; };
