@@ -451,42 +451,97 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   Object.assign(client.core, { listCategories: () => [{ code: 'camera', name: 'Synthetic' }],
     getBusinessSettings: () => ({ fulfillment: { enabledModes: [] } }) });
   const { composeRequestBoundClientApplication } = require('../apps/api/src/modules/ai-native/scenes/client-request.application');
-  const dependencies = { guard, client, clock: () => now };
+  let materialRows = [], lostReply = false, materialWrites = 0;
+  const materialDb = transactionRows => {
+    const rows = () => transactionRows ?? materialRows;
+    return { ...client.prisma,
+      $queryRaw: async query => {
+        assert.ok(query.sql.includes('FROM ai_client_scene_materials'));
+        const [tenantId, workspaceId, channel, principalHash, reference] = query.values;
+        const field = query.sql.includes('AND operationKey =') ? 'operationKey' : 'id';
+        return structuredClone(rows().filter(row => row.tenantId === tenantId && row.workspaceId === workspaceId
+          && row.channel === channel && row.principalHash === principalHash && row[field] === reference));
+      },
+      $executeRaw: async query => {
+        assert.ok(query.sql.startsWith('INSERT INTO ai_client_scene_materials'));
+        const columns = query.sql.match(/\(([^)]+)\)\s+VALUES/u)[1].split(',').map(value => value.trim());
+        const row = Object.fromEntries(columns.map((key, index) => [key, structuredClone(query.values[index])]));
+        for (const key of ['command', 'material', 'publication']) row[key] = JSON.parse(row[key]);
+        assert.equal(rows().some(current => current.tenantId === row.tenantId && current.workspaceId === row.workspaceId
+          && current.channel === row.channel && current.principalHash === row.principalHash && current.operationKey === row.operationKey), false);
+        rows().push(row); materialWrites++; return 1;
+      } };
+  };
+  const db = materialDb();
+  db.$transaction = async work => {
+    const rows = structuredClone(materialRows), result = await work(materialDb(rows));
+    materialRows = rows;
+    if (lostReply) throw Error('synthetic material COMMIT response lost');
+    return result;
+  };
+  const dependencies = { guard, client, db, clock: () => now };
   const configuration = { enabled: true, tenantCode: 'tenant', serviceCode: 'camera', channel: 'app' };
   const requests = composeRequestBoundClientApplication(dependencies, configuration), request = { headers: { authorization } };
+  let operation = 0;
+  const prepare = (req, command) => requests.prepare(req, { operationKey: `client-operation-${++operation}`, command });
   assert.throws(() => composeRequestBoundClientApplication({ ...dependencies, session: source }, configuration), /AI_CLIENT_CONTEXT_UNAVAILABLE/);
-  const help = await requests.prepare({ headers: {} }, { kind: 'help' });
+  const help = await requests.readPublic({ headers: {} }, { kind: 'help' });
   assert.equal(help.material.intro, 'Public help only'); assert.ok(Object.isFrozen(help.material));
+  assert.equal(help.materialRef, null); assert.equal(materialRows.length, 0);
   rateAllowed = false;
-  await assert.rejects(requests.readSource({ headers: {} }, { materialRef: help.materialRef }), /client policy unavailable/);
+  await assert.rejects(requests.readPublic({ headers: {} }, { kind: 'help' }), /client policy unavailable/);
   rateAllowed = true;
-  assert.equal((await requests.prepare({ headers: {} }, { kind: 'catalog' })).material.workspace.workspaceCode, 'camera');
-  await assert.rejects(requests.prepare({ headers: {} }, { kind: 'profile' }), /AI_CLIENT_CONTEXT_UNAVAILABLE/);
-  await assert.rejects(requests.prepare(request, { kind: 'order', orderId: 'own-order', tenantId: 'forged' }), /AI_CLIENT_INVALID_INPUT/);
-  const own = await requests.prepare(request, { kind: 'order', orderId: 'own-order' });
+  assert.equal((await requests.readPublic({ headers: {} }, { kind: 'catalog' })).material.workspace.workspaceCode, 'camera');
+  await assert.rejects(prepare({ headers: {} }, { kind: 'help' }), /AI_CLIENT_CONTEXT_UNAVAILABLE/);
+  await assert.rejects(prepare({ headers: {} }, { kind: 'profile' }), /AI_CLIENT_CONTEXT_UNAVAILABLE/);
+  await assert.rejects(prepare(request, { kind: 'order', orderId: 'own-order', tenantId: 'forged' }), /AI_CLIENT_INVALID_INPUT/);
+  const own = await prepare(request, { kind: 'order', orderId: 'own-order' });
   assert.equal(own.material.internalNote, undefined);
-  assert.equal((await requests.readSource(request, { materialRef: own.materialRef })).materialHash, own.materialHash);
-  assert.equal((await requests.prepare(request, { kind: 'profile' })).material.internalReview, undefined);
-  const preview = await requests.prepare(request, { kind: 'cancellation_preview', orderId: 'own-order' });
+  assert.equal(own.durability, 'persisted_client_material_not_task_history');
+  const restarted = composeRequestBoundClientApplication(dependencies, configuration);
+  assert.equal((await restarted.readSource(request, { materialRef: own.materialRef })).materialHash, own.materialHash);
+  const originalCommand = { operationKey: own.operationKey, command: { kind: 'order', orderId: 'own-order' } };
+  await assert.rejects(restarted.readOperation({ headers: {} }, originalCommand), /AI_CLIENT_CONTEXT_UNAVAILABLE/);
+  const beforeReplay = materialWrites;
+  assert.equal((await restarted.prepare(request, originalCommand)).replayed, true);
+  assert.equal(materialWrites, beforeReplay);
+  await assert.rejects(restarted.prepare(request, { ...originalCommand, command: { kind: 'profile' } }), e => e.code === 'AI_CLIENT_REVISION_CONFLICT');
+  const missing = await restarted.readOperation(request, { ...originalCommand, operationKey: 'not-observed' });
+  assert.equal(missing.state, 'unknown'); assert.equal(missing.retryable, false);
+  const lostCommand = { ...originalCommand, operationKey: 'client-ack' };
+  lostReply = true;
+  await assert.rejects(restarted.prepare(request, lostCommand), e => e.code === 'AI_CLIENT_RESULT_UNKNOWN' && e.nextAction === 'readOperation');
+  lostReply = false;
+  const afterLost = materialWrites, recovered = await requests.readOperation(request, lostCommand);
+  assert.equal(recovered.state, 'saved'); assert.equal(materialWrites, afterLost);
+  assert.equal((await restarted.readSource(request, { materialRef: recovered.materialRef })).materialHash, recovered.materialHash);
+  const distinctCase = await restarted.prepare(request, { ...lostCommand, operationKey: 'CLIENT-ACK' });
+  assert.notEqual(distinctCase.materialRef, recovered.materialRef);
+  assert.equal(materialRows.some(row => row.principalKind === 'guest'), false);
+  assert.equal(JSON.stringify(materialRows).includes(authorization), false);
+  assert.equal(JSON.stringify(materialRows).includes('session-client'), false);
+  assert.equal((await prepare(request, { kind: 'profile' })).material.internalReview, undefined);
+  const preview = await prepare(request, { kind: 'cancellation_preview', orderId: 'own-order' });
   assert.equal(preview.material.cancellationCharge, 12); assert.equal(preview.material.estimated, true);
   assert.equal(preview.handoff.path, '/api/client/v1/orders/own-order/cancel'); assert.equal(preview.handoff.execution, 'not_attempted');
   assert.equal((await requests.readSource(request, { materialRef: preview.materialRef })).materialHash, preview.materialHash);
-  await assert.rejects(requests.prepare(request, { kind: 'order', orderId: 'other-order' }), e => e.getStatus?.() === 404);
+  await assert.rejects(prepare(request, { kind: 'order', orderId: 'other-order' }), e => e.getStatus?.() === 404);
   session.customer.customerType = 'corporate';
-  assert.equal((await requests.prepare(request, { kind: 'profile' })).material.customerType, 'corporate');
-  await assert.rejects(requests.prepare(request, { kind: 'order', orderId: 'other-order' }), e => e.getStatus?.() === 404);
+  assert.equal((await prepare(request, { kind: 'profile' })).material.customerType, 'corporate');
+  await assert.rejects(prepare(request, { kind: 'order', orderId: 'other-order' }), e => e.getStatus?.() === 404);
   const beforeSwitchRead = reads;
-  await assert.rejects(requests.readSource(request, { materialRef: own.materialRef }), /AI_CLIENT_CONTEXT_UNAVAILABLE/);
+  await assert.rejects(requests.readSource(request, { materialRef: own.materialRef }), /AI_CLIENT_MATERIAL_STALE/);
   assert.equal(reads, beforeSwitchRead); session.customer.customerType = 'personal';
   session.id = 'new-client-session';
   const switchedRequest = { headers: { authorization: `Bearer ${auth.sign({ typ: 'client', sub: 'person-client', tid: 'tenant-client',
     sid: session.id, wid: 'workspace-client', iat: 1, exp: Math.floor(new Date('2027-01-01').getTime() / 1000) })}` } };
-  await assert.rejects(requests.readSource(switchedRequest, { materialRef: own.materialRef }), /AI_CLIENT_CONTEXT_UNAVAILABLE/);
+  await assert.rejects(requests.readSource(switchedRequest, { materialRef: own.materialRef }), /AI_CLIENT_MATERIAL_STALE/);
   session.id = 'session-client';
   published = false;
   await assert.rejects(requests.readSource(request, { materialRef: own.materialRef }), /AI_CLIENT_CONTEXT_UNAVAILABLE/);
-  published = true; now = new Date(now.getTime() + 300001);
+  published = true; const retainedRows = materialRows.length; now = new Date(now.getTime() + 300001);
   await assert.rejects(requests.readSource(request, { materialRef: own.materialRef }), /AI_CLIENT_MATERIAL_STALE/);
+  assert.equal(materialRows.length, retainedRows);
   await assert.rejects(requests.readSource(request, { materialRef: own.materialRef, taskId: 'foreign-history' }), /AI_CLIENT_INVALID_INPUT/);
   for (const feature of ['tasks', 'models', 'events', 'downloads', 'historyMigration']) assert.equal(requests.capabilities[feature], 'unavailable');
   assert.equal(requests.start, undefined); assert.equal(requests.cancelOrder, undefined);
