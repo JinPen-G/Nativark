@@ -1,6 +1,6 @@
 import { Body, Controller, HttpException, Inject, Post } from '@nestjs/common';
 import type { composeAiOriginalScenes } from './original-scenes.composition';
-import { AI_SCENE_REQUEST_HTTP_DRAFT } from '../../../../../../packages/shared/src/ai-scene-request-draft';
+import { AI_SCENE_REQUEST_HTTP_DRAFT } from '@rental-os/shared';
 
 export const AI_ORIGINAL_SCENES = Symbol('AI_ORIGINAL_SCENES');
 type Scenes = ReturnType<typeof composeAiOriginalScenes>;

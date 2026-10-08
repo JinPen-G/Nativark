@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { AI_SCENE_REQUEST_DRAFT_VERSION, type AiSceneTaskReceiptDraft, type AiSceneRequestReceiptDraft, type AiSceneRequestBody } from '../../../../../../packages/shared/src/ai-scene-request-draft';
+import { AI_SCENE_REQUEST_DRAFT_VERSION, type AiSceneTaskReceiptDraft, type AiSceneRequestReceiptDraft, type AiSceneRequestBody } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskCreationRepository, type AiTaskCreationAuthority } from '../ai-task-creation.repository';

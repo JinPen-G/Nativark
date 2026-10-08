@@ -61,6 +61,13 @@ test('selected order goes through human review and decision before Core commit a
   assert.equal(h.state.records.aiApproval.length, 0); assert.equal(h.state.records.rentalOrder.length, 0);
   const displayed = await h.app.readSelectedProposal(review);
   assert.equal(displayed.deterministic.quoteAmounts.payableAmount, 123); assert.equal(displayed.generatedText, null);
+  assert.equal(displayed.draftVersion, 'ain-approval-application-draft-1'); assert.equal(displayed.facts, undefined);
+  const shared = require('./fixtures/ai-native/local-shared.cjs');
+  assert.equal(shared.AI_QUOTE_SELECTION_DRAFT_VERSION, AI_QUOTE_SELECTION_DRAFT_VERSION);
+  const components = require('../apps/api/src/contracts/ai-leaf-components').AI_LEAF_COMPONENT_SCHEMAS;
+  assert.deepEqual(components.AiApprovalApplicationReviewDraft.properties.generatedText, { type: 'string', nullable: true, enum: [null] });
+  const eligibility = { selection: h.selection, request: { draftVersion: displayed.draftVersion, original: h.proposal, intent: 'inspect' } };
+  assert.equal((await h.app.readSelectedReprepareEligibility(eligibility)).state, 'pending');
   await assert.rejects(h.app.readSelectedProposal({ ...review, selection: { ...h.selection, inputHash: 'f'.repeat(64) } }), e => e.code === 'AI_ACCESS_DENIED');
   const decision = { ...review, proposal: { ...h.proposal, decision: 'approve' } };
   await assert.rejects(h.app.decideSelectedProposal({ ...decision, actorId: 'forged' }), e => e.code === 'AI_INVALID_INPUT');
@@ -81,6 +88,8 @@ test('selected order goes through human review and decision before Core commit a
   const result = await h.compose().reconcileSelectedOrder({ selection: h.selection, command });
   assert.equal(result.replayed, true); assert.equal(result.order.id, h.state.records.aiApprovalConsumption[0].resultRef);
   assert.equal(h.state.commits, 1); assert.equal(h.state.records.rentalOrder.length, 1);
+  const closed = await h.app.readSelectedReprepareEligibility(eligibility);
+  assert.equal(closed.state, 'committed'); assert.equal(closed.canRequestReprepare, false);
   h.state.session = false;
   await assert.rejects(h.app.readSelectedDecisionReceipt(decision), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
 });
@@ -90,6 +99,10 @@ test('selected order rejects a human rejection as execution approval', { timeout
   const h = await selectedOrderHarness();
   const rejected = await h.app.decideSelectedProposal({ selection: h.selection, proposal: { ...h.proposal, decision: 'reject' } });
   assert.equal(rejected.approval.decision, 'rejected'); assert.equal(rejected.order, 'not_created_by_decision');
+  const eligibility = await h.app.readSelectedReprepareEligibility({ selection: h.selection,
+    request: { draftVersion: 'ain-approval-application-draft-1', original: h.proposal, intent: 'change_plan' } });
+  assert.equal(eligibility.state, 'rejected'); assert.equal(eligibility.canRequestReprepare, true);
+  assert.equal(eligibility.nextAction, 'provide_new_materials');
   const { expiresAt, ...base } = h.prepareCommand;
   await assert.rejects(h.app.submitSelectedOrder({ selection: h.selection, command: { ...base,
     approvalId: rejected.approval.approvalId, reviewedPayloadHash: h.proposal.reviewedPayloadHash } }));

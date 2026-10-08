@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_SCENE_REQUEST_MAX_BYTES, type AiSceneRequestCreateDraft, type AiSceneRequestBody } from '../../../../../../packages/shared/src/ai-scene-request-draft';
+import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_SCENE_REQUEST_MAX_BYTES, type AiSceneRequestCreateDraft, type AiSceneRequestBody } from '@rental-os/shared';
 import { aiQuoteCandidateInputSchema } from '../tools/quote-candidate-preparation.service';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 

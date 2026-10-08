@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { PrismaClient } from '@prisma/client';
 import type { AiExecutionContext } from '@rental-os/shared';
-import { AI_SCENE_CODES, type AiSceneCode, type AiSceneRequestBody } from '../../../../../../packages/shared/src/ai-scene-request-draft';
+import { AI_SCENE_CODES, type AiSceneCode, type AiSceneRequestBody } from '@rental-os/shared';
 import type { AuthService } from '../../auth/auth.service';
 import type { SubscriptionService } from '../../subscription/subscription.service';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';

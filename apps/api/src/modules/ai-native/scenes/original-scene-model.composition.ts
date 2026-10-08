@@ -9,7 +9,7 @@ import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-ef
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { originalIdentityHash } from '../task-request/original-request.authority';
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
-import { AI_SCENE_REQUEST_DRAFT_VERSION } from '../../../../../../packages/shared/src/ai-scene-request-draft';
+import { AI_SCENE_REQUEST_DRAFT_VERSION } from '@rental-os/shared';
 import { gatewayTextIntentBindingSchema } from '../gateway-intent';
 import { AiOriginalSceneResultService } from './original-scene-result.service';
 import type { PrismaClient } from '@prisma/client';
