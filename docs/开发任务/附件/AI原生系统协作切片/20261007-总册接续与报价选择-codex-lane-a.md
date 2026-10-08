@@ -1,3 +1,25 @@
+## CA08 持久客户材料与原操作收据（20261008）
+
+从b8e5e455续接，主线确认A客户场景、新专用repository及独占追加迁移20261008140000_ai_client_scene_materials。移除旧Map，不并行保留缓存方案。新增PrismaClientSceneMaterialRepository，以既有Prisma参数化$queryRaw/$executeRaw/事务访问ai_client_scene_materials，不需要新增delegate或生成client；scope定位仅取当前tenant/workspace及已发布关系，授权仍由原ClientAuth/Guard、channelBootstrap/ClientApi资源读取完成。
+
+唯一表最小字段：id，tenantId/workspaceId，channel，principalKind(personal/corporate)，principalHash/bindingHash/publicationHash，operationKey/inputHash/materialHash，command/material/publication JSON，revision=1，createdAt/expiresAt。主键id；唯一tenantId+workspaceId+channel+principalHash+operationKey；scope+expiry索引；复合FK到business_workspaces(tenantId,id)，RESTRICT更新/删除。operationKey区分大小写且不修剪/接受空白，SQL为bin collation，参数全部绑定。只追加新迁移文件，不改历史迁移或schema.prisma；主线最终补Prisma模型/联合校验，本树未执行迁移，也不把rawSQL替身验收称真库。
+
+持久prepare改为严格{operationKey,command:{kind,...}}，不替客户临时造key。principalHash取当前真实客户ID/类型/原sessionId与scope/channel/appId的不可逆摘要；不保存Bearer或单独原session明文。bindingHash另绑定本次完整身份和发布投影，material仍只存原ClientApi有界白名单投影（可能含本人customerId/订单号等正式客户字段），不把内部客户/库存/成本/审核源存入。相同key同inputHash读原行并当前重授权；异hash冲突，不更新原行；写入/COMMIT应答不确定报AI_CLIENT_RESULT_UNKNOWN、retryable=false、nextAction=readOperation，不在异常路径重新INSERT。新增readOperation使用原key和command核对：无可观测原行保持unknown，有行也须当前身份/发布/本人资源/输入及正文hash复验；readSource按原id和当前不可逆主体精确查询，校验原冻结行前后未变。
+
+重建应用实例仍从数据库读同一材料/operation。保存、读操作、重开都在同请求ClientAuth/Guard会话内，前后复验scope实际ID、发布空间和客户身份；正文变化、切会话/企业类型、注销、停发布或超出五分钟有效期均不能读旧内容。五分钟只是读取有效期；没有删除/清理器，过期行不当成不存在或自动换key重写。保存后的复验失败也不声称未保存，仍需原operation核对。原进程Map引用不做自动迁移。
+
+匿名边界按主线收紧：没有真实匿名会话生产者，不构造共同guest持久principal或历史归属。新增readPublic仅当前Guard授权的catalog/help，无materialRef，声明persistentOperations=unavailable_anonymous_session_missing；匿名不能prepare/readOperation/readSource。登录客户可主动准备属于自身当前会话的材料，但这不转移旧匿名材料。客户task/model/事件/下载/正式历史迁移继续unavailable，取消仍只给既有人工API入口，未执行订单/支付副作用。
+
+复用原client scene单项，未加测试文件/矩阵/独立审查。实际ClientAuth/Guard/ClientApi及新repository/事务SQL/应用被驱动；DB行、COMMIT回包、Core及底层客户投影为声明替身。新增验证跨实例同id读回、同key重放零新增写、同key异命令冲突、未观测operation不假成功、丢ACK后原key读回且不新增写、操作键大小写区分、无guest行/Bearer/session明文字段、企业/会话/停发布/expiry拒绝且过期不删除。匿名公开读与原会员本人资源测试保留。
+
+相同严格离线环境与本树cache/tmp，配置audit为output/ca-client-persistent.audit及output/ca-client-persistent-types.audit。已核对preload只在拒绝操作时追加记录，本轮两个拒绝审计文件均未生成：
+
+`node --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs --require ./tests/fixtures/ai-native/lane-b-local-runtime.cjs --test --test-name-pattern='client scene authenticates' tests/ai-native-lane-a-original-scene-host.test.cjs`
+
+首轮1pass/0fail/0skip/0todo、退出0；必要API源码noEmit 0diagnostics、diff0。无真实MySQL/DDL/FK/并发锁验收，不生成shared或Prisma产物，不安装/启服务/.env/外联/迁移/推送；旧生成失败的lock/previous/temp/output保全。
+
+Runtime迁移只映射materialRef、operationKey/inputHash、saved/unknown、revision/expiry与readOperation，不得把材料收据当任务成功/执行许可或创建另一套task/run；重建/回退不能丢原operation后换key补跑。Provider SDK仍在唯一Gateway transport边界，客户模型正式授权缺失所以本包不调用；Auth/原ClientApi资源权限/审批/Core/单账均不迁入第三方。回退可停新持久prepare并保留原受权readOperation/readSource；不得删除本表“恢复”Map，不自动迁移匿名或复用旧会话凭据。正式公共叶子需要反映新的显式operationKey和匿名readPublic区分，不能沿用上一片进程引用的耐久性声明。
+
 ## CA08 客户请求材料与同会话来源（20261008）
 
 开工d432b7dd，源码干净、无MERGE_HEAD/CHERRY_PICK_HEAD；主线确认只认领client-scene.composition.ts、新scenes/client-request.application.ts、既有original-scene-host客户用例及本记录。复用composeAiClientScenes/createAiGuardedClientSession与ClientApiService现有投影；原读者仅补profile、publicDocument(help)、previewCancellation及对应Guard路由，不新造Client/Auth/企业鉴权或修改前端。
