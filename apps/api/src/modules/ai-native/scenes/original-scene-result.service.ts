@@ -18,7 +18,7 @@ const commandSchema = z.object({ original: originalRequestReferenceSchema,
   resultId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
 const sourceSchema = z.object({ resourceType: z.literal('order'), resourceId: z.string().min(1).max(191),
   scope: z.object({ kind: z.literal('workspace'), tenantId: z.string().min(1).max(191), workspaceId: z.string().min(1).max(191) }).strict(),
-  version: z.string().min(1).max(191), field: z.enum(['order', 'amounts', 'saved_basis', 'payment_records', 'rental_period']),
+  version: z.string().min(1).max(191), field: z.enum(['order', 'amounts', 'saved_basis', 'payment_records', 'rental_period', 'inspection_records']),
   observedAt: z.string().datetime({ offset: true }) }).strict();
 const reopenSchema = commandSchema.extend({ sourceIndex: z.number().int().min(0).max(4),
   sourceKind: z.enum(['order', 'knowledge']).optional() }).strict();
@@ -65,6 +65,11 @@ function orderFactsFingerprint(material: unknown) {
       delete (value as Record<string, unknown>).requestId;
       delete (value as Record<string, unknown>).observedAt;
     }
+  }
+  const inspections = (payload.facts as Record<string, unknown>).inspections;
+  if (inspections && typeof inspections === 'object' && !Array.isArray(inspections) && 'value' in inspections
+    && inspections.value && typeof inspections.value === 'object' && !Array.isArray(inspections.value)) {
+    delete (inspections.value as Record<string, unknown>).observedAt;
   }
   return requestFingerprint(payload);
 }

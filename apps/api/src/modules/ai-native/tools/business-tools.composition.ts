@@ -26,6 +26,7 @@ import { AiMemberProfileDifferenceService } from './member-profile-difference.se
 import { AiBusinessScenePreparationService } from '../scenes/business-scene-preparation.service';
 import { composeAiBusinessOrderApplication } from '../scenes/business-order-application';
 import type { PersistedApprovedOrderDependencies } from '../approval-execution/approved-order-composition.ports';
+import { AiOrderInspectionFactsService } from './order-inspection-facts.service';
 
 /** Server composition only. Guard and current session come from the application
  * host, never model arguments. No HTTP route, dispatch, entitlement or approval
@@ -35,7 +36,7 @@ export function composeAiAuthorizedBusinessTools(input: {
   credentials: AiOrderRouteCredentialSource;
   core: Pick<RentalCoreService, 'listItemGroups' | 'availability' | 'getOrder' | 'getProfile'
     | 'getWorkspaceCategory' | 'getBusinessSettings' | 'listPricingGroups'
-    | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'resolvePricingGroupQuoteRequest'>;
+    | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'resolvePricingGroupQuoteRequest'> & Partial<Pick<RentalCoreService, 'listInspections'>>;
   memberships: AiMembershipCandidateReadPort;
   business: Pick<RentalBusinessService, 'createQuote' | 'getQuote' | 'tenantReadiness'>;
   reports: Pick<RentalWorkspaceReportRepository, 'getOperationReport'>;
@@ -57,7 +58,10 @@ export function composeAiAuthorizedBusinessTools(input: {
   const explanation = (serverOrderId: string) => {
     const authority = new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock);
     return new AiOrderExplanationFactsService(authority, order(serverOrderId), input.payments
-      ? new AiOrderPaymentFactsService(input.payments, input.core, authority, routes, input.clock) : undefined, input.clock);
+      ? new AiOrderPaymentFactsService(input.payments, input.core, authority, routes, input.clock) : undefined, input.clock,
+      typeof input.core.listInspections === 'function' ? new AiOrderInspectionFactsService({
+        getOrder: input.core.getOrder.bind(input.core), listInspections: input.core.listInspections.bind(input.core)
+      }, new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock, 'inspections'), input.clock) : undefined);
   };
   if (typeof input.core.availability !== 'function' || typeof input.core.getOrder !== 'function'
     || typeof input.memberships?.listPersonalOptions !== 'function') throw new ModelGatewayError('CONFIG_INVALID');

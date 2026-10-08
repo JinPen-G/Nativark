@@ -24,6 +24,6 @@ async function setup(audience = 'operator', tenantId = 'tenant-a') {
     const row = structuredClone(state.order); if (state.afterRead) await state.afterRead(); return row;
   };
   const core = new RentalCoreService(config, facts); await core.onApplicationBootstrap();
-  return { state, core, authority, guard, credentials, reader: new AiOrderReadFactsService(core, authority) };
+  return { state, core, facts, authority, guard, credentials, reader: new AiOrderReadFactsService(core, authority) };
 }
 module.exports = { setup };
