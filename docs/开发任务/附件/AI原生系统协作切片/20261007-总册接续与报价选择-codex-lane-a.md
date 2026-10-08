@@ -1,3 +1,23 @@
+## CA03 临时代班接续：固定模型转换与实际场景运行（20261008）
+
+接手核验HEAD为8de5d833b3385886aff4eb9eb12da2afd9da11d5，源码干净、无MERGE_HEAD/CHERRY_PICK_HEAD；负责人本会话直接授权恢复，主线确认旧Codex停写。沿用现有original-scene-model.composition.createApplication，不新造场景运行器。主线d59ef3d491d0d9ffc493e90d15bca26b9dd35cf0导入为879e2666；缺usage公共修复d035cbaba58f4d0eb8586c4093550560b1bed775导入为85c0953b。
+
+场景应用固定使用model.commands和model.createTransitionAuthority(run.financialEvidence)；run只接受inputSource、必需的原持久financialEvidence及可选时钟，不再依赖宿主自造命令/转换authority。原publisher、plan、step、invocation、Gateway、capture和资源结算均复用原实现，缺正式输入源/财务源在装配时拒绝。
+
+扩展既有host测试并抽出A专属lane-a-original-model.cjs：订单解释、开业诊断、报价澄清逐个从原请求创建的QUEUED task/run开始，经原租约领取/首次激活/输入计划发布/模型执行/结果artifact/四项资源记录，再从真实结果消费者读回；全程不手写RUNNING或模型成功artifact。实际PrismaGatewayAccountingFacts与PrismaGatewayInvocationBindings读取所关联的财务记录。DB、路由/能力/政策数据、admission、财务reserve/settle生命周期和transport是显式离线替身；这不是实际MySQL或完整财务账本写链/真实模型验收。
+
+命令：固定DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline；AI_OFFLINE_WRITE_ROOT为本树；TMP/TEMP/TMPDIR/XDG_CACHE_HOME/npm_config_cache均本树output/lane-a-original-request-tmp；DISABLE_V8_COMPILE_CACHE=1；AI_OFFLINE_AUDIT为本树output/ca03-model-app.audit。
+
+`node --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs --require ./tests/fixtures/ai-native/lane-b-local-runtime.cjs --test --test-name-pattern='original model application' tests/ai-native-lane-a-original-scene-host.test.cjs`
+
+最终2 pass/0 fail/0 skip/0 todo，退出0。其中第一例循环三个场景，不另算三项。缺usage原completed载荷保持不完整UNKNOWN、POSSIBLE、token=null、财务待核对；重查不新派发。AI关闭后的读取/取消不删除已有事实；启动前AbortSignal不领租约、不发布。跨task输入与注销读取拒绝。初次编译报financialEvidence可选类型已改必需；fixture补Prisma字符串Decimal查询等价，未放宽真实查询；原d59缺usage拒绝由主线固定d035修复，未在A维护authority。首两次缓存写到系统临时目录的尝试被preload阻断，审计保留两条write-outside-temp，无外联记录；之后明确设置本树临时目录并关闭v8编译缓存。
+
+API同离线环境及preload，`node -e "process.argv=[process.execPath,'tsc','-p','apps/api/tsconfig.json','--rootDir','.','--noEmit','--incremental','false'];require('typescript/lib/tsc')"`退出0。未生成shared dist、未改schema/执行迁移、未安装/启服务/读.env/真实HTTP、DB、DNS、模型、支付或生产启用。
+
+明确剩余：正常澄清等待仍受原PrismaTaskInputRepository.afterSucceeded只接受readonly且必须有后续pending步骤的约束；当前单步external_unknown模型计划不能伪装成该路径，已报主线/06。不声称正常答案receipt→继续执行已端到端验证；CA05另片消费人类批准/Core，CA06/07仍缺合法配置/资料CAS及原操作收据。
+
+Runtime替换映射：保留original/inputRef、registrationRef、planHash、holder/fence、resultRef与四项资源证据；只替换外层驱动，不搬授权、审批或Core入引擎。Provider SDK替换仅唯一Gateway后的transport/protocol层，场景代码无SDK类型，completed/usage unknown不能改成success或自动重派。回退停止新opt-in装配即可；保留原源码、测试、持久输入及unknown收据，不双跑新旧引擎。
+
 # Codex A 总册接续：人类报价选择
 
 继承 HEAD：69c753084c928e0c48271ccccb62f5c6ac044002（Claude WIP）；原树/原分支，无未完合并。负责人已确认原作者停写。本记录只认领A，不修改主文档、06/07、Gateway或Core。
