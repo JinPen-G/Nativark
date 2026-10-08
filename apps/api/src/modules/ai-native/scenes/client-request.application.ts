@@ -194,7 +194,9 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       if (!parsed.success) return fail('AI_CLIENT_INVALID_INPUT');
       const command = freezeOriginalInput(parsed.data);
       return withBinding(request, true, 'order', async bound => freezeOriginalInput({
-        facts: prepareClientOrderExplanation(await bound.scenes.member.order(command.orderId), command.orderId, command.question),
+        facts: prepareClientOrderExplanation(await bound.scenes.member.order(command.orderId), command.orderId, command.question,
+          command.question === 'fees' && typeof bound.scenes.member.feeItems === 'function'
+            ? await bound.scenes.member.feeItems(command.orderId) : undefined),
         scope: bound.published.scope, publication: bound.published.value, observedAt: clock().toISOString(),
         execution: 'read_only_no_task_start' as const
       }));

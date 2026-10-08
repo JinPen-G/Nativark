@@ -11,7 +11,7 @@ const projection = z.object({ id: text, status: text.optional(), updatedAt: time
 
 /** Only consume the existing client-owned order projection, never Core or
  * operator facts. Missing amounts remain unknown; no payment inference. */
-export function prepareClientOrderExplanation(value: unknown, orderId: string, question: 'status' | 'fees') {
+export function prepareClientOrderExplanation(value: unknown, orderId: string, question: 'status' | 'fees', feeItems?: unknown) {
   const order = projection.parse(value);
   if (order.id !== orderId) throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
   const raw = value as ClientOrderView;
@@ -24,6 +24,12 @@ export function prepareClientOrderExplanation(value: unknown, orderId: string, q
     const parsed = z.number().finite().safeParse(raw[field]);
     return [field, fact(field, parsed.success ? parsed.data : undefined)];
   })) : undefined;
+  const fees = question === 'fees' && feeItems !== undefined
+    ? z.object({ apiVersion: text.optional(), orderId: text, items: z.array(z.object({ inspectionId: text, exceptionIndex: z.number().int().nonnegative(),
+      stage: z.enum(['pickup', 'return']), code: text, description: z.string().max(2000), amount: z.number().finite().nonnegative(),
+      currency: text, responseStatus: z.enum(['pending', 'confirmed', 'disputed']), evidenceCount: z.number().int().nonnegative() }).passthrough()).max(50),
+      pendingCount: z.number().int().nonnegative() }).passthrough().parse(feeItems)
+    : undefined;
   return freezeOriginalInput({ orderId, question,
     status: fact('status', order.status), orderVersion: fact('updatedAt', order.updatedAt),
     ...(amounts ? { amounts, currency: fact('currency', order.currency) } : {}),
@@ -33,6 +39,8 @@ export function prepareClientOrderExplanation(value: unknown, orderId: string, q
       payments: 'not_loaded_no_received_total_inferred' as const,
       refunds: 'not_loaded_no_refund_outcome_inferred' as const,
       allowedActions: 'unavailable_client_allowed_actions_port_missing' as const },
+    ...(fees ? { inspectionFees: { coverage: 'recorded' as const, value: fees, source: source('feeItems') } } :
+      { inspectionFees: { coverage: 'unavailable' as const, reason: 'client_fee_items_port_missing' as const, source: source('feeItems') } }),
     amountSemantics: 'recorded_order_amounts_not_payment_or_refund_evidence' as const,
     model: 'not_requested' as const, businessExecution: 'not_attempted' as const });
 }

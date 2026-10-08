@@ -435,7 +435,12 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     return { id, tenantId, customerId: id === 'other-order' ? 'another-customer' : 'person-client',
       status: 'reserved', quoteId: 'quote-client', currency: 'CNY', payableAmount: 0, rentalAmount: 12,
       lines: [], chargeLines: [], allocations: [], internalNote: 'never expose' };
-  } } });
+  } }, feeItems: async (context, id) => {
+    assert.equal(context.tenantId, 'tenant-client'); assert.equal(id, 'own-order');
+    return { apiVersion: 'client-v1', orderId: id, items: [{ inspectionId: 'inspection-client', exceptionIndex: 0,
+      stage: 'return', code: 'damage', description: '待本人核对', amount: 12, currency: 'CNY',
+      responseStatus: 'pending', evidenceCount: 1 }], pendingCount: 1 };
+  } });
   const source = createAiGuardedClientSession(guard, { current: async () => ({ authorization, ip: '127.0.0.1' }) });
   const app = composeAiClientScenes({ client, session: source });
   assert.equal(reads, 0);
@@ -561,6 +566,9 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   await assert.rejects(prepare(request, { kind: 'order', orderId: 'own-order', tenantId: 'forged' }), /AI_CLIENT_INVALID_INPUT/);
   const own = await prepare(request, { kind: 'order', orderId: 'own-order' });
   assert.equal(own.material.internalNote, undefined);
+  const clientExplanation = await requests.readOrderExplanation(request, { orderId: 'own-order', question: 'fees' });
+  assert.equal(clientExplanation.facts.inspectionFees.value.items[0].amount, 12);
+  assert.equal(clientExplanation.facts.inspectionFees.value.items[0].responseStatus, 'pending');
   const explanation = await requests.readOrderExplanation(request, { orderId: 'own-order', question: 'fees' });
   assert.equal(explanation.facts.amounts.payableAmount.value, 0);
   assert.equal(explanation.facts.amounts.depositAmount.coverage, 'unknown');
