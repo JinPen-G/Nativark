@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
+import { AI_TOOL_DRAFT_VERSION, isAiTaskInputSubmissionDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError, aiTaskAccessFromContext } from '../ai-task.repository';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './original-scenes.composition';
 import { composePersistedTaskModelInput } from '../model-input/persisted-task-model-input.composition';
@@ -130,25 +130,64 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       // Validate/fix the server host now, without claiming or starting work.
       root.createApplication(host);
       const serverHost = Object.freeze(structuredClone(host));
-      return Object.freeze({ async start(value: unknown, signal?: AbortSignal) {
+      const bound = async (value: unknown) => {
         const parsed = originalRequestReferenceSchema.safeParse(structuredClone(value));
         if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
         const reference = freezeOriginalInput(parsed.data);
         const original = await scenes.requests.readHistorical(reference);
         const task = await scenes.readTaskReceipt(reference.inputRef);
-        if (task.state !== 'observed') throw unavailable();
-        await current(reference, task.taskId, task.runId);
-        const app = root.createApplication(serverHost, async ({ lease, taskRevision, signal: preparationSignal }) => {
+        if (task.state !== 'observed' || original.receipt.state === 'revoked'
+          || original.request.sceneCode !== scene.code || original.receipt.sceneVersion !== scene.version) throw unavailable();
+        return { reference, original, task };
+      };
+      const verify = async (before: Awaited<ReturnType<typeof bound>>) => {
+        const after = await bound(before.reference);
+        if (originalIdentityHash(before.original.context) !== originalIdentityHash(after.original.context)
+          || before.original.receipt.contentHash !== after.original.receipt.contentHash
+          || before.task.taskId !== after.task.taskId || before.task.runId !== after.task.runId) throw denied();
+        return after;
+      };
+      const application = (reference: z.infer<typeof originalRequestReferenceSchema>) => root.createApplication(serverHost,
+        async ({ lease, taskRevision, signal: preparationSignal }) => {
           if (preparationSignal?.aborted) throw unavailable();
           await prepareHeldRun({ original: reference, lease, expectedTaskRevision: taskRevision });
           if (preparationSignal?.aborted) throw unavailable();
         });
-        const execution = await app.start({ taskId: task.taskId, runId: task.runId }, signal);
-        const after = await current(reference, task.taskId, task.runId);
-        if (originalIdentityHash(original.context) !== originalIdentityHash(after.original.context)
-          || original.receipt.contentHash !== after.original.receipt.contentHash) throw denied();
+      return Object.freeze({ async start(value: unknown, signal?: AbortSignal) {
+        const before = await bound(value), { reference, task } = before;
+        await current(reference, task.taskId, task.runId);
+        const execution = await application(reference).start({ taskId: task.taskId, runId: task.runId }, signal);
+        const after = await verify(before);
         return freezeOriginalInput({ original: after.original.receipt, taskId: task.taskId, runId: task.runId,
           execution, businessExecution: 'not_inferred_from_model_result' as const });
+      }, async readInput(value: unknown) {
+        const before = await bound(value);
+        const input = await application(before.reference).readInput({ taskId: before.task.taskId });
+        await verify(before);
+        return freezeOriginalInput(input);
+      }, async resume(value: unknown, signal?: AbortSignal) {
+        const parsed = z.object({ original: originalRequestReferenceSchema, submission: z.unknown() }).strict()
+          .safeParse(structuredClone(value));
+        if (!parsed.success || !isAiTaskInputSubmissionDraft(parsed.data.submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const before = await bound(parsed.data.original), submission = parsed.data.submission;
+        if (submission.taskId !== before.task.taskId) throw denied();
+        const receipt = await application(before.reference).resume(submission, signal);
+        await verify(before);
+        return freezeOriginalInput(receipt); // The original app keeps receipt and continuation distinct.
+      }, async reconcile(value: unknown, signal?: AbortSignal) {
+        const before = await bound(value);
+        const result = await application(before.reference).reconcile({ taskId: before.task.taskId, runId: before.task.runId }, signal);
+        await verify(before);
+        return freezeOriginalInput(result); // Original held lease only, never a new claim/re-dispatch.
+      }, async requestCancel(value: unknown) {
+        const parsed = z.object({ original: originalRequestReferenceSchema, expectedRevision: revision }).strict()
+          .safeParse(structuredClone(value));
+        if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const before = await bound(parsed.data.original);
+        const receipt = await root.taskTransitions.transition({ taskId: before.task.taskId,
+          expectedRevision: parsed.data.expectedRevision, to: 'cancel_requested', reason: 'cancel_requested' });
+        await verify(before);
+        return freezeOriginalInput({ receipt, cancellation: 'requested_not_rollback' as const });
       } });
     }
   });

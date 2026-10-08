@@ -181,7 +181,7 @@ test('original model application prepares under the actual claimed lease and sto
   h.state.aiTaskPlanPolicy[0].allowedTools = [{ code: TASK_TEXT_MODEL_TOOL, version: AI_TOOL_DRAFT_VERSION }];
   h.state.aiTaskPlanPolicy[0].limits = limits;
   const created = await h.app.create(h.command()), task = h.state.aiTask[0];
-  for (const operation of ['read_metadata', 'claim_run', 'release_run', 'transition_task', 'read_step_terminal']) {
+  for (const operation of ['read_metadata', 'claim_run', 'claim_recovery_run', 'release_run', 'transition_task', 'read_step_terminal']) {
     h.state.aiTaskActionPolicy.push({ scopeId: task.scopeId, taskId: task.id, operation, revision: 1,
       requiredPermissions: ['rental-os:order:view'], expiresAt: new Date('2027-01-01') });
   }
@@ -215,6 +215,19 @@ test('original model application prepares under the actual claimed lease and sto
   const supplied = JSON.parse(frozen.content.map(part => part.text).join(''));
   assert.equal(supplied.original.inputRef, created.receipt.inputRef); assert.equal(supplied.facts.payload.orderId, 'order-a');
   assert.equal(h.state.aiGatewayInvocation.length, 0); assert.equal(h.state.aiRun[0].leaseOwnerId, null);
+  const reference = h.ref(created.receipt.inputRef), writes = h.state.aiTaskActionInput.length;
+  assert.deepEqual(await app.reconcile(reference), { kind: 'not_started', reason: 'recovery_lease_unavailable' });
+  const { AI_TASK_INPUT_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
+  await assert.rejects(app.resume({ original: reference, submission: { draftVersion: AI_TASK_INPUT_DRAFT_VERSION,
+    taskId: 'another-task', requestId: 'input-request', expectedRevision: 1, submissionKey: 'answer-a',
+    answers: [{ fieldId: 'clarification_text', value: 'Synthetic clarification' }] } }), e => e.code === 'AI_ACCESS_DENIED');
+  h.state.aiTaskPlanPolicy[0].enabled = false;
+  assert.equal(await app.readInput(reference), null); // Reading/cancel remain possible after AI execution is disabled.
+  const cancelled = await app.requestCancel({ original: reference, expectedRevision: h.state.aiTask[0].revision });
+  assert.equal(cancelled.cancellation, 'requested_not_rollback'); assert.equal(h.state.aiTask[0].status, 'CANCEL_REQUESTED');
+  assert.equal(h.state.aiTaskActionInput.length, writes); assert.equal(h.state.aiGatewayInvocation.length, 0);
+  h.b.h.identity.session = false;
+  await assert.rejects(app.readInput(reference), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
 });
 
 test('client scene authenticates through actual client Guard/Auth and rechecks after the business read', async () => {

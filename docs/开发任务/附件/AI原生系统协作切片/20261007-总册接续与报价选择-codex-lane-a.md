@@ -92,6 +92,14 @@ API类型命令同上一节，audit为本树output/client-guard-types.log，退�
 
 CA05当前已复用受控prepare/submit/reconcile，但本树缺总册07人类readProposal/decide/readReceipt及正式审阅组合的固定交付；已直接发给主线索取固定SHA/入口。绝不手写APPROVED行来假装正常全链。CA06/07继续等待主线正式合同，未新增审批旁路。后续接续先检查主线固定回复，再消费原审批与06宿主；不修改它们的实现。
 
+## CA03/09 接续：原应用输入、核对与取消消费（20261008）
+
+上述createApplication返回值新增readInput(originalRef)、resume({original,submission},signal)、reconcile(originalRef,signal)、requestCancel({original,expectedRevision})，分别调用原PrismaTaskApplication和AiTaskTransitionRepository。submission复用正式isAiTaskInputSubmissionDraft，并核对taskId为原请求对应任务；核对只读原holder的有效租约，不新领取、不重派。取消保持原revision CAS/动作权限/事件事务，仅cancel_requested，不伪造已回滚。等待后再核对原请求身份和task/run绑定。读输入/取消仅要求历史请求当前可读，不重新开执行gate；AI关闭仍可人工收口。没有注册HTTP/worker或新状态机。
+
+仅扩既有单个应用冒烟，实际runner和仓储路径延续上节；增加无原持有租约不恢复、跨task补充回答拒绝、AI关闭后readInput返回无待填/取消请求持久化、注销拒绝及零新invocation。首次因合成夹具缺claim_recovery_run动作政策被正确拒绝，补明确测试政策后通过，没有改生产授权。命令 `node --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs --test --test-name-pattern='original model application' tests/ai-native-lane-a-original-scene-host.test.cjs`：1 pass/0 fail/0 skip/0 todo，退出0；API类型同前命令退出0（output/scene-recovery-types.log）；diff0。
+
+合法待填回答的正常继续仍需正式inputSource和模型转换证据；这次只验证跨任务拒绝，不将其称为澄清执行全链。人工takeover正式宿主合同仍归06/主线，不在A新增接管权限。所有真库/模型/HTTP/设备及生产未验边界保留。
+
 ## CA03/05 接续：原请求到同租约实际运行应用（20261008）
 
 已按主线固定指令接回b700c9bd→855f694a、d51bf62a→e2b6db78、33db875c→7ba250a9。composition冲突保留原results并加入createApplication；A树没有inspection-media.reader，按主线指令不接该独立type import，不拉B链。后续实际首次QUEUED运行红测发现aiTask变RUNNING、aiRun仍QUEUED，资源准入拒绝；主线修复bca4576a已接为141c2156，没有在A树私改运行状态。
