@@ -644,6 +644,10 @@ model AiTaskExecutionCharge {
   step                 AiStep? @relation(fields: [scopeId, taskId, stepId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
   gatewayInvocation    AiGatewayInvocation? @relation(fields: [scopeId, taskId, gatewayInvocationId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
 
+  phaseSteps           AiTaskExecutionPhaseStart[] @relation("ExecutionPhaseStepsCharge")
+  phaseActiveMs        AiTaskExecutionPhaseStart[] @relation("ExecutionPhaseActiveCharge")
+  phaseOutputBytes     AiTaskExecutionPhaseStart[] @relation("ExecutionPhaseOutputCharge")
+
   @@id([scopeId, taskId, chargeId])
   @@index([scopeId, taskId, status], map: "ai_task_execution_charges_status_idx")
   @@index([scopeId, taskId, runId], map: "ai_task_execution_charges_run_idx")
@@ -662,6 +666,7 @@ model AiTaskRunPlan {
   createdAt DateTime @default(now()) @db.DateTime(3)
   run AiRun @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_task_run_plans_run_fkey")
   inputRequests AiTaskInputRequest[]
+  executionPhases AiTaskExecutionPhaseStart[]
   @@id([scopeId, taskId, runId])
   @@unique([scopeId, taskId, runId, planHash], map: "ai_task_run_plans_hash_key")
   @@map("ai_task_run_plans")
@@ -700,6 +705,7 @@ model AiTaskActionInput {
   expiresAt DateTime @db.DateTime(3)
   createdAt DateTime @default(now()) @db.DateTime(3)
   run AiRun @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_task_action_inputs_run_fkey")
+  executionPhases AiTaskExecutionPhaseStart[]
   @@id([scopeId, taskId, runId, registrationRef])
   @@unique([scopeId, taskId, id], map: "ai_task_action_inputs_id_key")
   @@map("ai_task_action_inputs")
@@ -765,6 +771,7 @@ model AiTaskResultArtifact {
   createdAt DateTime @default(now()) @db.DateTime(3)
   step AiStep @relation(fields: [scopeId, taskId, stepId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_task_result_artifacts_step_fkey")
   inputRequests AiTaskInputRequest[]
+  executionPhases AiTaskExecutionPhaseStart[]
   @@id([scopeId, taskId, id])
   @@unique([scopeId, taskId, runId, stepId, id], map: "ai_task_result_artifacts_input_basis_key")
   @@unique([scopeId, taskId, runId, stepId, fencingToken], map: "ai_result_artifact_step_generation_key")
@@ -774,6 +781,77 @@ model AiTaskResultArtifact {
 enum AiTaskInputRequestStatus {
   PENDING  @map("pending")
   CONSUMED @map("consumed")
+}
+
+model AiTaskExecutionPhaseStart {
+  scopeId             String @db.VarChar(36)
+  taskId              String @db.VarChar(36)
+  id                  String @db.VarChar(36)
+  runId               String @db.VarChar(36)
+  stepId              String @db.VarChar(36)
+  originalArtifactId  String @db.VarChar(36)
+  inputRef            String @db.VarChar(36)
+  stepsChargeId       String @db.VarChar(36)
+  activeMsChargeId    String @db.VarChar(36)
+  outputBytesChargeId String @db.VarChar(36)
+  actionId            String @db.VarChar(191)
+  leaseOwnerId        String @db.VarChar(191)
+  stepFingerprint     String @db.Char(64)
+  planHash            String @db.Char(64)
+  fencingToken        Decimal @db.Decimal(20, 0)
+  runRevision         Int @db.UnsignedInt
+  stepRevision        Int @db.UnsignedInt
+  sequence            Int @db.UnsignedInt
+  previousReceiptId   String? @db.VarChar(36)
+  decisionRef         String? @db.VarChar(36)
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  run                 AiRun @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_run_fk")
+  step                AiStep @relation(fields: [scopeId, taskId, stepId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_step_fk")
+  originalArtifact    AiTaskResultArtifact @relation(fields: [scopeId, taskId, runId, stepId, originalArtifactId], references: [scopeId, taskId, runId, stepId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_artifact_fk")
+  input               AiTaskActionInput @relation(fields: [scopeId, taskId, inputRef], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_input_fk")
+  plan                AiTaskRunPlan @relation(fields: [scopeId, taskId, runId, planHash], references: [scopeId, taskId, runId, planHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_plan_fk")
+  stepsCharge         AiTaskExecutionCharge @relation("ExecutionPhaseStepsCharge", fields: [scopeId, taskId, stepsChargeId], references: [scopeId, taskId, chargeId], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_steps_charge_fk")
+  activeMsCharge      AiTaskExecutionCharge @relation("ExecutionPhaseActiveCharge", fields: [scopeId, taskId, activeMsChargeId], references: [scopeId, taskId, chargeId], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_active_charge_fk")
+  outputBytesCharge   AiTaskExecutionCharge @relation("ExecutionPhaseOutputCharge", fields: [scopeId, taskId, outputBytesChargeId], references: [scopeId, taskId, chargeId], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_output_charge_fk")
+  previousReceipt     AiTaskExecutionPhaseReceipt? @relation("ExecutionPhaseContinuation", fields: [scopeId, taskId, runId, stepId, previousReceiptId], references: [scopeId, taskId, runId, stepId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_previous_fk")
+  decision            AiApproval? @relation("ExecutionPhaseStartDecision", fields: [scopeId, taskId, decisionRef], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_decision_fk")
+  receipts            AiTaskExecutionPhaseReceipt[] @relation("ExecutionPhaseReceipt")
+
+  @@id([scopeId, taskId, id])
+  @@unique([scopeId, taskId, runId, stepId, id], map: "ai_exec_phase_start_identity_key")
+  @@unique([scopeId, taskId, stepId, sequence], map: "ai_exec_phase_start_sequence_key")
+  @@unique([scopeId, taskId, previousReceiptId], map: "ai_exec_phase_start_previous_key")
+  @@map("ai_task_execution_phase_starts")
+}
+
+model AiTaskExecutionPhaseReceipt {
+  scopeId             String @db.VarChar(36)
+  taskId              String @db.VarChar(36)
+  id                  String @db.VarChar(36)
+  runId               String @db.VarChar(36)
+  stepId              String @db.VarChar(36)
+  phaseId             String @db.VarChar(36)
+  kind                String @db.VarChar(32)
+  errorCode           String? @db.VarChar(128)
+  payload             Json
+  contentHash         String @db.Char(64)
+  activeMs            BigInt @db.UnsignedBigInt
+  outputBytes         BigInt @db.UnsignedBigInt
+  proposalId          String? @db.VarChar(36)
+  proposalRevision    Int? @db.UnsignedInt
+  reviewedPayloadHash String? @db.Char(64)
+  decisionRef         String? @db.VarChar(36)
+  businessResultRef   String? @db.VarChar(191)
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  phase               AiTaskExecutionPhaseStart @relation("ExecutionPhaseReceipt", fields: [scopeId, taskId, runId, stepId, phaseId], references: [scopeId, taskId, runId, stepId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_receipt_start_fk")
+  proposal            AiProposalVersion? @relation(fields: [scopeId, taskId, proposalId, proposalRevision, reviewedPayloadHash], references: [scopeId, taskId, proposalId, revision, payloadHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_receipt_proposal_fk")
+  decision            AiApproval? @relation("ExecutionPhaseReceiptDecision", fields: [scopeId, taskId, decisionRef, proposalId, proposalRevision], references: [scopeId, taskId, id, proposalId, proposalRevision], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_receipt_decision_fk")
+  continuations       AiTaskExecutionPhaseStart[] @relation("ExecutionPhaseContinuation")
+
+  @@id([scopeId, taskId, id])
+  @@unique([scopeId, taskId, phaseId], map: "ai_exec_phase_receipt_phase_key")
+  @@unique([scopeId, taskId, runId, stepId, id], map: "ai_exec_phase_receipt_identity_key")
+  @@map("ai_task_execution_phase_receipts")
 }
 
 /// Scoped clarification request. A completed read-only step is its basis, not approval.
@@ -5519,6 +5597,7 @@ model AiRun {
   executionPlan      AiTaskRunPlan?
   actionInputs       AiTaskActionInput[]
   quoteSelections    AiTaskQuoteSelection[]
+  executionPhases    AiTaskExecutionPhaseStart[]
 
   @@unique([scopeId, taskId, id], map: "ai_runs_scope_task_id")
   @@unique([scopeId, taskId, sequence], map: "ai_runs_sequence")
@@ -5551,6 +5630,7 @@ model AiStep {
   gatewayInvocations  AiGatewayInvocation[]
   executionCharges    AiTaskExecutionCharge[]
   resultArtifacts     AiTaskResultArtifact[]
+  executionPhases     AiTaskExecutionPhaseStart[]
 
   @@unique([scopeId, taskId, id], map: "ai_steps_scope_task_id")
   @@unique([scopeId, taskId, actionId], map: "ai_steps_action")
@@ -5593,6 +5673,7 @@ model AiProposalVersion {
   currentFor   AiProposal[]       @relation("AiProposalCurrent")
   actions      AiProposalAction[]
   approvals    AiApproval[]
+  executionPhaseReceipts AiTaskExecutionPhaseReceipt[]
 
   @@id([scopeId, proposalId, revision])
   @@unique([scopeId, taskId, proposalId, revision], map: "ai_proposal_versions_scope_task")
@@ -5665,7 +5746,10 @@ model AiApproval {
   issuedAt         DateTime                @db.DateTime(3)
   expiresAt        DateTime                @db.DateTime(3)
   consumptions     AiApprovalConsumption[]
+  executionPhaseStarts AiTaskExecutionPhaseStart[] @relation("ExecutionPhaseStartDecision")
+  executionPhaseReceipts AiTaskExecutionPhaseReceipt[] @relation("ExecutionPhaseReceiptDecision")
 
+  @@unique([scopeId, taskId, id], map: "ai_approvals_scope_task_id")
   @@unique([scopeId, taskId, id, proposalId, proposalRevision], map: "ai_approvals_binding")
   @@unique([scopeId, proposalId, proposalRevision, actorKind, actorId], map: "ai_approvals_actor_decision")
   @@map("ai_approvals")

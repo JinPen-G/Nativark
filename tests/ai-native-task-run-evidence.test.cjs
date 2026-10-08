@@ -22,6 +22,39 @@ const fs = require('node:fs'), path = require('node:path');
 const now = new Date('2026-10-06T12:00:00Z'), lease = { taskId: 'task-a', runId: 'run-a', holderId: 'worker-a', revision: 1, fencingToken: '1', expiresAt: '2026-10-06T12:01:00Z' };
 const plan = { taskId: 'task-a', runId: 'run-a', taskRevision: 1, steps: [{ registrationRef: 'registration-a', operation: 'readonly', toolCode: 'rental.order.explain', toolVersion: '1' }],
   limits: { maxSteps: 3, maxCalls: 3, maxTotalMs: 1000, maxStepMs: 100, maxOutputBytes: 1000, maxConcurrent: 1 } };
+test('confirmation phase schema binds original evidence and preserves append-only receipt structure', () => {
+  const root = path.resolve(__dirname, '..');
+  const schema = fs.readFileSync(path.join(root, 'apps/api/prisma/schema.prisma'), 'utf8');
+  const before = schema.replace(/^model AiTaskExecutionPhase(?:Start|Receipt) \{[\s\S]*?^\}\r?\n/gmu, '')
+    .split(/\r?\n/u).filter(line => !/\bAiTaskExecutionPhase(?:Start|Receipt)\b/u.test(line)
+      && !line.includes('"ai_approvals_scope_task_id"')).join('\n');
+  const migration = fs.readFileSync(path.join(root, 'apps/api/prisma/migrations/20261008120000_ai_task_execution_phases/migration.sql'), 'utf8');
+  const result = offlinePrismaSchema(schema, before);
+  assert.equal(result.violations, '');
+  const statements = value => value.replace(/--[^\n]*(?:\n|$)/gu, '').split(';').map(s => s.replace(/\s+/gu, ' ').trim()).filter(Boolean);
+  const generated = statements(result.diff), authored = statements(migration);
+  assert.deepEqual(authored.slice(0, generated.length), generated);
+  assert.equal(generated.filter(s => s.startsWith('CREATE TABLE')).length, 2);
+  assert.ok(authored.every(s => /^(CREATE TABLE|CREATE UNIQUE INDEX|ALTER TABLE .* ADD CONSTRAINT) /u.test(s)));
+  assert.doesNotMatch(result.diff, /ALTER TABLE `(ai_steps|ai_tasks|ai_task_execution_budgets)`/u);
+  assert.match(migration, /FOREIGN KEY \(`scopeId`, `taskId`, `runId`, `stepId`, `previousReceiptId`\) REFERENCES `ai_task_execution_phase_receipts`/u);
+  assert.match(migration, /UNIQUE INDEX `ai_exec_phase_start_previous_key`\(`scopeId`, `taskId`, `previousReceiptId`\)/u);
+  assert.match(migration, /`sequence` = 2 AND `previousReceiptId` IS NOT NULL AND `decisionRef` IS NOT NULL/u);
+  assert.match(migration, /BINARY `kind` IN \('confirmation', 'succeeded', 'failed', 'unknown'\)/u);
+  const models = Prisma.dmmf.datamodel.models;
+  const start = models.find(m => m.name === 'AiTaskExecutionPhaseStart');
+  const receipt = models.find(m => m.name === 'AiTaskExecutionPhaseReceipt');
+  assert.ok(start); assert.ok(receipt);
+  for (const name of ['activeMs', 'outputBytes', 'runId', 'stepId']) {
+    const field = receipt.fields.find(f => f.name === name);
+    assert.equal(field.isRequired, true); assert.equal(field.hasDefaultValue, false);
+  }
+  assert.deepEqual(receipt.fields.find(f => f.name === 'phase').relationFromFields, ['scopeId', 'taskId', 'runId', 'stepId', 'phaseId']);
+  assert.deepEqual(start.fields.find(f => f.name === 'previousReceipt').relationFromFields, ['scopeId', 'taskId', 'runId', 'stepId', 'previousReceiptId']);
+  assert.ok(!receipt.fields.some(f => f.name === 'updatedAt'));
+  assert.ok(!start.fields.some(f => f.name === 'updatedAt' || f.name === 'callsChargeId'));
+});
+
 for (const [name, change] of [
   ['duplicate resource', charges => { charges[1].resource = charges[0].resource; }],
   ['missing active measurement', charges => { charges[1].resource = 'CALLS'; charges[1].gatewayInvocationId = 'invocation-a'; }],
