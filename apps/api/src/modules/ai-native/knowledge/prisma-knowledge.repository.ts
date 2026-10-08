@@ -68,6 +68,46 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
       chunks: (row.chunks ?? []).map(chunk => ({ id: chunk.id, chunkIndex: chunk.chunkIndex, text: chunk.text, state: chunk.state })) }));
   }
 
+  /** Management enumeration never selects historical body/state columns. */
+  async versionMetadata(scope: AiExecutionScope, documentId: string, limit: number) {
+    const value = workspace(scope);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new KnowledgeError('invalid_input');
+    const rows = await this.db.aiKnowledgeVersion.findMany({ where: {
+      documentId, document: { tenantId: value.tenantId, workspaceId: value.workspaceId },
+    }, orderBy: { version: 'asc' }, take: limit + 1,
+      select: { id: true, documentId: true, version: true, status: true, contentHash: true,
+        _count: { select: { chunks: true } } } }).catch(() => unavailable());
+    if (!Array.isArray(rows) || rows.length > limit) throw new KnowledgeError('limit_exceeded');
+    const head = await this.read(scope, documentId);
+    if (!head) return unavailable();
+    const versions = new Set<number>(), hashes = new Set<string>();
+    return rows.map(row => {
+      if (row.documentId !== documentId || !Number.isSafeInteger(row.version) || row.version < 1
+        || versions.has(row.version) || typeof row.contentHash !== 'string' || !row.contentHash.length
+        || row.contentHash.length > 128 || hashes.has(row.contentHash) || typeof row.status !== 'string'
+        || !Number.isSafeInteger(row._count?.chunks) || row._count.chunks < 0) return unavailable();
+      versions.add(row.version); hashes.add(row.contentHash);
+      return { version: row.version, status: row.status, contentHash: row.contentHash, chunkCount: row._count.chunks };
+    });
+  }
+
+  /** Call only after the human service grants the exact historical version. */
+  async versionContent(scope: AiExecutionScope, documentId: string, contentHash: string) {
+    const value = workspace(scope);
+    const rows = await this.db.aiKnowledgeVersion.findMany({ where: { documentId, contentHash,
+      document: { tenantId: value.tenantId, workspaceId: value.workspaceId } }, take: 2,
+      include: { chunks: { orderBy: [{ chunkIndex: 'asc' }, { id: 'asc' }], take: 201 } } }).catch(() => unavailable());
+    if (!Array.isArray(rows) || rows.length !== 1 || !await this.read(scope, documentId)) return unavailable();
+    const row = rows[0];
+    if (row.documentId !== documentId || row.contentHash !== contentHash) return unavailable();
+    if (!Array.isArray(row.chunks) || row.chunks.length > 200 || row.chunks.reduce((total, chunk) =>
+      total + (typeof chunk.text === 'string' ? chunk.text.length : Number.MAX_SAFE_INTEGER), 0) > 200000) {
+      throw new KnowledgeError('limit_exceeded');
+    }
+    return { version: row.version, status: row.status, contentHash: row.contentHash,
+      chunks: row.chunks.map(chunk => ({ id: chunk.id, chunkIndex: chunk.chunkIndex, text: chunk.text, state: chunk.state })) };
+  }
+
   private receipt(row: Prisma.AiKnowledgeOperationGetPayload<{}>, scope: ReturnType<typeof workspace>, documentId: string, operationId: string): KnowledgeOperation {
     if (row.tenantId !== scope.tenantId || row.workspaceId !== scope.workspaceId || row.documentId !== documentId || row.operationId !== operationId
       || typeof row.fingerprint !== 'string' || row.fingerprint.length < 1 || row.fingerprint.length > 128) throw new KnowledgeError('unavailable');

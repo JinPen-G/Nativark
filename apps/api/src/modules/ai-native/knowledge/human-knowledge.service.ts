@@ -151,7 +151,7 @@ export class HumanKnowledgeService {
       const head = await this.documents.read(context, documentId);
       const metadata = await this.authorization.authorize(context, { action: 'read_metadata', scope: context.scope, document: head.document });
       if (!metadata) return unavailable();
-      const rows = await this.repository.versions(context.scope, documentId, limit);
+      const rows = await this.repository.versionMetadata(context.scope, documentId, limit);
       const items = [];
       for (const row of rows) {
         const grant = await this.authorization.authorize(context, { action: 'read_metadata', scope: context.scope,
@@ -159,8 +159,9 @@ export class HumanKnowledgeService {
         // A partial version list would leak that a hidden historical version
         // exists. Refuse the whole list when any version cannot be authorized.
         if (!grant) return unavailable();
-        items.push({ version: row.version, contentHash: row.contentHash, status: row.status, chunkCount: row.chunks.length });
+        items.push({ version: row.version, contentHash: row.contentHash, status: row.status, chunkCount: row.chunkCount });
       }
+      if (fingerprint(await this.documents.read(context, documentId)) !== fingerprint(head)) throw new KnowledgeError('conflict');
       return { documentId, currentVersion: head.document.documentVersion, items,
         // The repository probes limit + 1 and rejects an overflowing window;
         // a successful response therefore contains the complete bounded set.
@@ -173,7 +174,11 @@ export class HumanKnowledgeService {
     if (!Number.isInteger(maxChanges) || maxChanges < 1 || maxChanges > 20) throw new KnowledgeError('invalid_input');
     return this.session.run(async context => {
       const head = await this.documents.read(context, documentId);
-      const rows = await this.repository.versions(context.scope, documentId, 20);
+      const rows = await this.repository.versionMetadata(context.scope, documentId, 20);
+      for (const version of [leftVersion, rightVersion]) {
+        if (!await this.authorization.authorize(context, { action: 'read_metadata', scope: context.scope,
+          document: { ...head.document, documentVersion: version } })) return unavailable();
+      }
       const left = rows.find(row => row.contentHash === leftVersion), right = rows.find(row => row.contentHash === rightVersion);
       if (!left || !right) return { status: 'unavailable' as const, reason: 'historical_version_not_available' as const };
       const metadata = { documentId, left: { version: left.contentHash, status: left.status },
@@ -188,10 +193,20 @@ export class HumanKnowledgeService {
         document: { ...head.document, documentVersion: right.contentHash } });
       if (!leftGrant || !rightGrant) return { ...metadata, body: 'unavailable' as const, changes: [] as const,
         semantics: 'metadata_only_without_historical_body_permission' as const };
+      const leftBody = await this.repository.versionContent(context.scope, documentId, leftVersion);
+      const rightBody = leftVersion === rightVersion ? leftBody : await this.repository.versionContent(context.scope, documentId, rightVersion);
+      if (leftBody.version !== left.version || leftBody.status !== left.status || leftBody.chunks.length !== left.chunkCount
+        || rightBody.version !== right.version || rightBody.status !== right.status || rightBody.chunks.length !== right.chunkCount) return unavailable();
+      if (fingerprint(await this.documents.read(context, documentId)) !== fingerprint(head)) throw new KnowledgeError('conflict');
+      for (const [version, original] of [[leftVersion, leftGrant], [rightVersion, rightGrant]] as const) {
+        const latest = await this.authorization.authorize(context, { action: 'read_body', scope: context.scope,
+          document: { ...head.document, documentVersion: version } });
+        if (!latest || fingerprint(latest) !== fingerprint(original)) return unavailable();
+      }
       const changes = [];
-      const count = Math.max(left.chunks.length, right.chunks.length);
+      const count = Math.max(leftBody.chunks.length, rightBody.chunks.length);
       for (let index = 0; index < count && changes.length < maxChanges; index++) {
-        const a = left.chunks[index]?.text ?? null, b = right.chunks[index]?.text ?? null;
+        const a = leftBody.chunks[index]?.text ?? null, b = rightBody.chunks[index]?.text ?? null;
         if (a !== b) changes.push({ chunkIndex: index, left: a, right: b,
           leftPresent: a !== null, rightPresent: b !== null, clipped: false });
       }
