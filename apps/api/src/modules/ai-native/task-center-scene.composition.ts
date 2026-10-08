@@ -12,6 +12,9 @@ const page = z.object({ limit: z.number().int().min(1).max(50).optional(), curso
   status: z.string().min(1).max(64).optional(), sceneCode: z.string().min(1).max(191).optional() }).strict();
 const eventRead = z.object({ original: originalRequestReferenceSchema, after: z.string().regex(/^(0|[1-9][0-9]{0,19})$/u),
   limit: z.number().int().min(1).max(100) }).strict();
+const taskRead = z.object({ original: originalRequestReferenceSchema, taskId: z.string().min(1).max(191).optional() }).strict();
+const approvalRead = z.object({ original: originalRequestReferenceSchema, taskId: z.string().min(1).max(191).optional(),
+  reference: z.unknown() }).strict();
 
 /**
  * Read-only task-center consumer. It deliberately does not become a second
@@ -23,6 +26,9 @@ export function composeAiTaskCenterScene(input: {
   list: Pick<AiTaskListRepository, 'readPage'>;
   events?: Pick<AiTaskEventRepository, 'readPage'>;
   modelResults?: Pick<AiOriginalSceneResultService, 'read'> & Partial<Pick<AiOriginalSceneResultService, 'reopenSource'>>;
+  input?: { read(value: unknown): Promise<unknown> };
+  selections?: { read(value: unknown): Promise<unknown> };
+  approvals?: { readProposal(taskId: string, value: unknown): Promise<unknown>; readReceipt(taskId: string, value: unknown): Promise<unknown> };
   scenes: Pick<OriginalScenes, 'readTaskReceipt' | 'readRecovery'> & {
     requests: Pick<OriginalScenes['requests'], 'readHistorical'>;
   };
@@ -60,6 +66,41 @@ export function composeAiTaskCenterScene(input: {
       if (typeof input.modelResults?.read !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       return input.modelResults.read(value);
     },
+    readInput: async (value: unknown) => {
+      const parsed = taskRead.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      if (typeof input.input?.read !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const task = await readObservedTask(parsed.data.original, parsed.data.taskId);
+      const result = await input.input.read({ original: parsed.data.original, taskId: task.taskId });
+      return freezeOriginalInput({ taskId: task.taskId, runId: task.runId, input: result,
+        execution: 'read_only_no_start_no_reconnect_side_effect' as const });
+    },
+    readSelection: async (value: unknown) => {
+      const parsed = taskRead.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      if (typeof input.selections?.read !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const task = await readObservedTask(parsed.data.original, parsed.data.taskId);
+      const result = await input.selections.read({ ...parsed.data, taskId: task.taskId });
+      return freezeOriginalInput({ taskId: task.taskId, selection: result });
+    },
+    readApprovalReview: async (value: unknown) => {
+      const parsed = approvalRead.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      if (typeof input.approvals?.readProposal !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const task = await readObservedTask(parsed.data.original, parsed.data.taskId);
+      return freezeOriginalInput({ taskId: task.taskId,
+        review: await input.approvals.readProposal(task.taskId, parsed.data.reference),
+        order: 'not_created_by_read' as const });
+    },
+    readApprovalReceipt: async (value: unknown) => {
+      const parsed = approvalRead.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      if (typeof input.approvals?.readReceipt !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const task = await readObservedTask(parsed.data.original, parsed.data.taskId);
+      return freezeOriginalInput({ taskId: task.taskId,
+        receipt: await input.approvals.readReceipt(task.taskId, parsed.data.reference),
+        order: 'not_created_by_read' as const });
+    },
     reopenModelSource: async (value: unknown) => {
       if (typeof input.modelResults?.reopenSource !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       return input.modelResults.reopenSource(value);
@@ -93,4 +134,19 @@ export function composeAiTaskCenterScene(input: {
       });
     }
   });
+
+  async function readObservedTask(reference: z.infer<typeof originalRequestReferenceSchema>, expectedTaskId?: string) {
+    const original = await input.scenes.requests.readHistorical(reference);
+    const task = await input.scenes.readTaskReceipt(reference.inputRef);
+    const identity = z.object({ taskId: z.string().min(1).max(191), runId: z.string().min(1).max(191), revision: z.number().int().nonnegative() }).safeParse(task);
+    if (task.state !== 'observed' || !identity.success || (expectedTaskId && expectedTaskId !== identity.data.taskId))
+      throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const latest = await input.scenes.readTaskReceipt(reference.inputRef);
+    const after = await input.scenes.requests.readHistorical(reference);
+    if (originalIdentityHash(original.context) !== originalIdentityHash(after.context)
+      || original.receipt.contentHash !== after.receipt.contentHash || after.receipt.state === 'revoked'
+      || latest.state !== 'observed' || latest.taskId !== identity.data.taskId || latest.runId !== identity.data.runId
+      || latest.revision !== identity.data.revision) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    return { taskId: identity.data.taskId, runId: identity.data.runId, revision: identity.data.revision };
+  }
 }
