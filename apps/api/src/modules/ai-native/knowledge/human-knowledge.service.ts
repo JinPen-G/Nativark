@@ -252,7 +252,7 @@ export class HumanKnowledgeService {
       const rows = await this.ports.db.aiKnowledgeDocument.findMany({ where: { tenantId: scope.tenantId, workspaceId: scope.workspaceId },
         select: { id: true, tenantId: true, workspaceId: true }, orderBy: { id: 'asc' }, take: 100 });
       if (!Array.isArray(rows) || rows.length > 100) return unavailable();
-      const visible: KnowledgeRecord[] = [], seen = new Set<string>();
+      const visible: KnowledgeRecord[] = [], seen = new Set<string>(), documentGrants = new Map<string, string>();
       for (const row of rows) {
         if (!id.safeParse(row.id).success || row.tenantId !== scope.tenantId || row.workspaceId !== scope.workspaceId || seen.has(row.id)) return unavailable();
         seen.add(row.id);
@@ -260,7 +260,7 @@ export class HumanKnowledgeService {
         if (!head) return unavailable();
         const allowed = await this.authorization.authorize(context, { action: 'read_metadata', scope, document: head.document });
         if (!allowed) continue;
-        if (fingerprint(allowed) !== fingerprint(initial)) return unavailable();
+        documentGrants.set(row.id, fingerprint(allowed));
         const fresh = await this.documents.read(context, row.id);
         if (fingerprint(head) !== fingerprint(fresh)) throw new KnowledgeError('conflict');
         if ((!input.publication || fresh.document.publication === input.publication)
@@ -270,6 +270,8 @@ export class HumanKnowledgeService {
       for (const head of visible.slice(0, input.limit)) {
         const current = await this.documents.read(context, head.document.documentId);
         if (fingerprint(current) !== fingerprint(head)) throw new KnowledgeError('conflict');
+        const grant = await this.authorization.authorize(context, { action: 'read_metadata', scope, document: current.document });
+        if (!grant || fingerprint(grant) !== documentGrants.get(head.document.documentId)) return unavailable();
       }
       const latest = await this.authorization.authorize(context, { action: 'read_metadata', scope });
       if (!latest || fingerprint(latest) !== fingerprint(initial)) return unavailable();
