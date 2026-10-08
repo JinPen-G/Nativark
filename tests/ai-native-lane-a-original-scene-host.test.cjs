@@ -77,7 +77,7 @@ test('persisted scene model result is bound to its original input and current au
   const { taskModelIntent, taskModelIdentity, taskModelFingerprint, TASK_TEXT_MODEL_TOOL } = require('../apps/api/src/modules/ai-native/model-input/task-model-input');
   const { requestFingerprint: hash } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
   const { AI_TOOL_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
-  for (const sceneCode of ['order_explanation', 'opening_diagnosis']) {
+  for (const sceneCode of ['order_explanation', 'opening_diagnosis', 'quote_clarification']) {
   const h = await setup({ aiTaskResultArtifact: [], aiGatewayInvocation: [], aiTaskEvent: [] });
   const created = await h.app.create(h.command(sceneCode)), task = h.state.aiTask[0], ref = h.ref(created.receipt.inputRef);
   const packet = await h.app.prepareTaskMaterial(ref), original = await h.app.requests.readHistorical(ref);
@@ -129,8 +129,14 @@ test('persisted scene model result is bound to its original input and current au
   assert.equal(reopened.reference.resourceId, 'order-a'); assert.equal(reopened.source.status, 'available');
   } else {
     assert.deepEqual(result.sources, []);
-    assert.deepEqual(result.facts.sections.map(section => section.key), ['item_groups']);
-    assert.equal(result.facts.configuration.pricing, undefined);
+    if (sceneCode === 'opening_diagnosis') {
+      assert.deepEqual(result.facts.sections.map(section => section.key), ['item_groups']);
+      assert.equal(result.facts.configuration.pricing, undefined);
+    } else {
+      assert.equal(result.facts.payload.facts.status, 'missing_input');
+      assert.equal(result.facts.payload.execution, 'not_attempted');
+      assert.ok(result.facts.payload.facts.missingFields.length > 0);
+    }
     await assert.rejects(center.reopenModelSource({ ...command, sourceIndex: 0 }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
   }
   await assert.rejects(center.reopenModelSource({ ...command, sourceIndex: 1 }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
@@ -144,6 +150,71 @@ test('persisted scene model result is bound to its original input and current au
   h.b.h.identity.session = false;
   await assert.rejects(reader.read(command), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
   }
+});
+
+test('original model application prepares under the actual claimed lease and stops at a missing model transition authority', async () => {
+  const { composeAiOriginalSceneModel } = require('../apps/api/src/modules/ai-native/scenes/original-scene-model.composition');
+  const { aiPersistenceScopeColumns } = require('../apps/api/src/modules/ai-native/persistence-scope');
+  const { TASK_TEXT_MODEL_TOOL } = require('../apps/api/src/modules/ai-native/model-input/task-model-input');
+  const { AI_TOOL_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
+  const { AiTaskRepositoryError } = require('../apps/api/src/modules/ai-native/ai-task.repository');
+  const { clone } = require('./fixtures/ai-native/task-input-store.cjs');
+  const tables = Object.fromEntries(['aiTaskResultArtifact', 'aiGatewayInvocation', 'aiTaskExecutionBudget', 'aiTaskExecutionCharge',
+    'aiTaskEvent', 'aiTaskInputRequest', 'aiTaskInputReceipt', 'aiGatewayAccountingReceipt', 'aiInvocationAdmission'].map(key => [key, []]));
+  const h = await setup(tables);
+  const beforeWrite = h.control.beforeWrite;
+  h.control.beforeWrite = async (table, args, data) => {
+    await beforeWrite?.(table, args, data);
+    if (table === 'aiTask') {
+      args.data.cancelRequestedAt ??= null; // Actual database defaults, not an authorization override.
+      args.data.updatedAt ??= h.dependencies.clock();
+    }
+  };
+  for (const [id, scope] of [['scope-platform', { kind: 'platform' }], ['scope-tenant', { kind: 'tenant', tenantId: 'tenant_001' }]]) {
+    h.state.aiScope.push({ id, ...aiPersistenceScopeColumns(scope) });
+  }
+  h.state.aiBudgetPolicy = clone(h.b.h.state.aiBudgetPolicy).map(row => {
+    const next = JSON.parse(JSON.stringify(row).replaceAll('tenant-a', 'tenant_001').replaceAll('synthetic-clarification', 'order_explanation'));
+    return next;
+  });
+  const limits = { ...h.b.h.plan.limits, maxTotalMs: 30000, maxStepMs: 5000 };
+  h.state.aiTaskPlanPolicy[0].allowedTools = [{ code: TASK_TEXT_MODEL_TOOL, version: AI_TOOL_DRAFT_VERSION }];
+  h.state.aiTaskPlanPolicy[0].limits = limits;
+  const created = await h.app.create(h.command()), task = h.state.aiTask[0];
+  for (const operation of ['read_metadata', 'claim_run', 'release_run', 'transition_task', 'read_step_terminal']) {
+    h.state.aiTaskActionPolicy.push({ scopeId: task.scopeId, taskId: task.id, operation, revision: 1,
+      requiredPermissions: ['rental-os:order:view'], expiresAt: new Date('2027-01-01') });
+  }
+  const profile = { id: 'profile-a', scopeId: 'scope-tenant', scopeKind: 'TENANT', configRevision: 1, credentialRef: 'vault-a',
+    protocol: 'openai_chat_completions', provider: 'synthetic', model: 'synthetic-model', serviceMode: 'tenant_managed', enabled: true, disabledAt: null };
+  let model, routeReads = 0, transitionAttempts = 0;
+  const runtime = { evidence: 'mock', verifyEvidence: async () => true, ports: { routing: {
+    resolve: async (_caller, required) => {
+      routeReads++; const context = await model.runtime.authorization.execution.authorize(task.id);
+      return { context, consumerScope: { id: 'scope-a', kind: 'WORKSPACE', tenantId: 'tenant_001', workspaceId: 'workspace-a' },
+        route: { profile, scope: { id: 'scope-tenant', kind: 'TENANT', tenantId: 'tenant_001' }, role: 'DEFAULT',
+          preflight: { allowed: true, required, missing: [], stale: [] } }, selection: { mode: 'tenant_managed', revision: 1 },
+        scene: 'chat', requiredCapabilities: required };
+    }, assertCurrent: async () => {} } } };
+  model = composeAiOriginalSceneModel({ ...h.dependencies, scene: { code: 'order_explanation', version: '1' },
+    gatewayScene: { sceneCode: 'order_explanation', routeScene: 'chat', maxOutputTokens: 64 }, priceVersion: 'price-1', runtime });
+  const base = h.b.h.configuration();
+  assert.throws(() => model.createApplication({ holderId: 'scene-worker', leaseMs: 100000 }, {}), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  const app = model.createApplication({ holderId: 'scene-worker', leaseMs: 100000 }, { commands: {
+    ...base.commands, register: (plan, lease) => ({ ...base.commands.register(plan, lease), expectedTaskRevision: h.state.aiTask[0].revision }) },
+    inputSource: h.b.h.source, transitionAuthority: { resolve: async () => { transitionAttempts++; throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); } },
+    financialEvidence: { readDispatch: async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); } } });
+  assert.equal(routeReads, 0); assert.equal(h.state.aiTaskRunPlan.length, 0);
+  await model.runtime.authorization.authority.resolve(task.id, 'claim_run');
+  await assert.rejects(app.start({ ...h.ref(created.receipt.inputRef), holderId: 'forged' }), e => e.code === 'AI_INVALID_INPUT');
+  await assert.rejects(app.start(h.ref(created.receipt.inputRef)), e => e.code === 'AI_ACCESS_DENIED');
+  assert.equal(transitionAttempts, 1); assert.equal(h.state.aiRun[0].status, 'RUNNING');
+  assert.equal(h.state.aiRun[0].fencingToken.toFixed(0), '1');
+  assert.equal(h.state.aiTaskActionInput.length, 1); assert.equal(h.state.aiTaskRunPlan.length, 1);
+  const frozen = h.state.aiTaskActionInput[0].payload.intent.messages.find(message => message.role === 'user');
+  const supplied = JSON.parse(frozen.content.map(part => part.text).join(''));
+  assert.equal(supplied.original.inputRef, created.receipt.inputRef); assert.equal(supplied.facts.payload.orderId, 'order-a');
+  assert.equal(h.state.aiGatewayInvocation.length, 0); assert.equal(h.state.aiRun[0].leaseOwnerId, null);
 });
 
 test('client scene authenticates through actual client Guard/Auth and rechecks after the business read', async () => {

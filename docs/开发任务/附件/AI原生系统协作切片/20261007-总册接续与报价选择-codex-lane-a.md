@@ -92,6 +92,22 @@ API类型命令同上一节，audit为本树output/client-guard-types.log，退�
 
 CA05当前已复用受控prepare/submit/reconcile，但本树缺总册07人类readProposal/decide/readReceipt及正式审阅组合的固定交付；已直接发给主线索取固定SHA/入口。绝不手写APPROVED行来假装正常全链。CA06/07继续等待主线正式合同，未新增审批旁路。后续接续先检查主线固定回复，再消费原审批与06宿主；不修改它们的实现。
 
+## CA03/05 接续：原请求到同租约实际运行应用（20261008）
+
+已按主线固定指令接回b700c9bd→855f694a、d51bf62a→e2b6db78、33db875c→7ba250a9。composition冲突保留原results并加入createApplication；A树没有inspection-media.reader，按主线指令不接该独立type import，不拉B链。后续实际首次QUEUED运行红测发现aiTask变RUNNING、aiRun仍QUEUED，资源准入拒绝；主线修复bca4576a已接为141c2156，没有在A树私改运行状态。
+
+实际入口 `composeAiOriginalSceneModel(deps).createApplication(serverHost,runDependencies).start(originalReference,signal)`。原app读取当前task/run修订、原runner原子领取一次并启动，再在同一lease/taskRevision下调用实际prepareHeldRun→冻结模型输入→持久计划。每次start绑定自己不可变原请求，调用方不传holder/plan/taskId/prompt/身份。装配不启动、无后台循环；当前场景仍走唯一Gateway，不自建模型执行或财务账本。runDependencies必须显式提供commands/inputSource/transitionAuthority/financialEvidence，不用只读转换器冒充模型转换证据。
+
+复用既有host文件一个快检：原Auth/Guard/原请求仓储/真实task+run QUEUED/实际runner/实际模型publisher与计划仓储被驱动。DB、路由能力与policy为明确合成替身；transitionAuthority及financialEvidence故意不可用，没有用测试恒真authority冒充生产适配。正常准备形成一份input和plan、同fence=1，到步骤转换拒绝，零Gateway invocation且租约释放。正式模型转换证据尚缺，因此不是完整模型执行通过。
+
+`node --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs --test --test-name-pattern='original model application' tests/ai-native-lane-a-original-scene-host.test.cjs`最终1 pass/0 fail/0 skip/0 todo，退出0。红测阶段先暴露替身缺DB默认cancelRequestedAt/updatedAt，补真实默认后暴露上述QUEUED run核心缺陷；没有放宽生产权限。最后缺转换adapter被AiStepTransitionRepository按原语义映射AI_ACCESS_DENIED，断言同时要求确实到达转换器一次及run已RUNNING，防止把前置资源失败误计为正确拒绝。
+
+报价澄清结果已接回同一实际结果消费者，不新建同义reader；按selection/config/input/缺项与可用性事实重新复核，仅忽略原服务明确的观察元数据。没有明确人类选择证明，模型文字不成为选定报价、批准或建单事实。复用原结果快检循环三场景，`--test-name-pattern='persisted scene model result'`1 pass/0 fail/0 skip/0 todo（最近组合命令中该例通过），无新增脚本。API类型同前命令退出0，output/scene-run-types.log；diff0。
+
+主线已收到两项精确阻塞：首次run事务激活已修复；model.text.generate/external_unknown的正式转换authority、运行中possible语义及冻结输入/invocation/artifact/计量会计证据仍由主线补交，本线不扩大readonly白名单。CA05人类审批固定依赖、CA06/07配置资料正式提交合同、CA08客户任务/模型身份政策、CA09公共运输/首个快照cursor仍未齐；全部保留unavailable，不称整包完成。未验MySQL、真实HTTP/模型/支付、浏览器、设备与生产。
+
+Runtime替换只替代现有app外的编排，保留原请求/plan/input/lease/结果及批准提交点；Provider替换仅唯一Gateway内部适配，场景输入无SDK专有类型。可关闭本opt-in装配回退，不删除持久材料、不重发unknown。
+
 ## CA06 接续：开业诊断持久模型结果读回（20261008）
 
 同一实际AiOriginalSceneResultService现在支持opening_diagnosis，按原请求/模型输入/invocation/artifact复核，并仅重新读取用户明确选择的开业分区。配置版本、分区检查、覆盖与当前权限变化后旧正文不可用；只有各原投影明确的observedAt观察元数据不参加事实变化比较。不制造开业来源重开接口，sources为空；没有配置提案/批准/写入端口，仍未提交、不执行。

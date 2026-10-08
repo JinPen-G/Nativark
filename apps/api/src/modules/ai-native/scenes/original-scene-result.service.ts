@@ -92,6 +92,26 @@ function openingFactsFingerprint(material: unknown) {
   return requestFingerprint(facts);
 }
 
+function quoteFactsFingerprint(material: unknown) {
+  const packet = z.object({ payload: z.object({ facts: z.record(z.unknown()) }).passthrough() })
+    .passthrough().parse(structuredClone(material));
+  const facts = packet.payload.facts;
+  delete packet.payload.observedAt;
+  delete facts.observedAt;
+  const availability = facts.availability;
+  if (availability && typeof availability === 'object' && !Array.isArray(availability)) {
+    delete (availability as Record<string, unknown>).observedAt;
+    if ('source' in availability && availability.source && typeof availability.source === 'object' && !Array.isArray(availability.source)) {
+      delete (availability.source as Record<string, unknown>).observedAt;
+    }
+  }
+  const review = facts.review;
+  if (review && typeof review === 'object' && !Array.isArray(review)) delete (review as Record<string, unknown>).availabilityObservedAt;
+  // Selection/config fingerprints, exact inputs, availability result and every
+  // missing field remain binding. No normalization of money or business dates.
+  return requestFingerprint(packet.payload);
+}
+
 /** Read-only scene consumer of the mainline artifact reader. No model dispatch,
  * task transition or approval occurs here. Free text is never business evidence.
  */
@@ -109,7 +129,7 @@ export class AiOriginalSceneResultService {
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const command = freezeOriginalInput(parsed.data), original = await this.scenes.requests.readHistorical(command.original);
     if (original.receipt.state === 'revoked') throw denied();
-    if (!['order_explanation', 'opening_diagnosis'].includes(original.request.sceneCode)
+    if (!['order_explanation', 'opening_diagnosis', 'quote_clarification'].includes(original.request.sceneCode)
       || this.policy.sceneCode !== original.request.sceneCode) throw unavailable();
     const task = await this.scenes.readTaskReceipt(command.original.inputRef);
     if (task.state !== 'observed') throw unavailable();
@@ -165,7 +185,8 @@ export class AiOriginalSceneResultService {
         ? await this.scenes.tools.orderExplanationPreparation(original.request.input.orderId)
           .prepare({ question: original.request.input.question })
         : (await this.scenes.prepareTaskMaterial(command.original)).material;
-      const fingerprint = isOrder ? orderFactsFingerprint : openingFactsFingerprint;
+      const fingerprint = isOrder ? orderFactsFingerprint
+        : original.request.sceneCode === 'opening_diagnosis' ? openingFactsFingerprint : quoteFactsFingerprint;
       output = fingerprint(current) === fingerprint(frozen.material)
         ? { ...base, status: 'available', text: { value: frozen.text, trust: 'unverified_model_text_not_execution_evidence' },
           materialHash: frozen.materialHash, callId: frozen.callId, facts: current, sources: isOrder ? orderSources(frozen.material) : [],

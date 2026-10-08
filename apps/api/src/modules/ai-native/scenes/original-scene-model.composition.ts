@@ -13,11 +13,16 @@ import { AI_SCENE_REQUEST_DRAFT_VERSION } from '../../../../../../packages/share
 import { gatewayTextIntentBindingSchema } from '../gateway-intent';
 import { AiOriginalSceneResultService } from './original-scene-result.service';
 import type { PrismaClient } from '@prisma/client';
+import { composeAuthorizedPersistentTaskInputRunner,
+  type AuthorizedPersistentTaskInputComposition } from '../runner/authorized-persistent-task-input.composition';
+import type { AiTaskApplicationHost } from '../runner/prisma-task-application';
 
 type ModelDependencies = Parameters<typeof composePersistedTaskModelInput>[0];
 export type AiOriginalSceneModelDependencies = AiOriginalSceneDependencies & ModelDependencies & {
   db: ModelDependencies['db'] & Pick<PrismaClient, 'aiTaskResultArtifact'>;
 };
+export type AiOriginalSceneRunDependencies = Pick<AuthorizedPersistentTaskInputComposition,
+  'commands' | 'inputSource' | 'transitionAuthority' | 'financialEvidence' | 'clock' | 'monotonic'>;
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().positive().max(4294967294);
 const heldSchema = z.object({ original: originalRequestReferenceSchema,
@@ -71,11 +76,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       return outcome;
     } };
   } };
-  return Object.freeze({ scenes, readModelResult: results.read.bind(results), reopenModelSource: results.reopenSource.bind(results),
-    runtime: Object.freeze({ authorization: model.authorization, tasks: model.tasks,
-      planAuthority: model.planAuthority, plans: model.plans, registrations: model.registrations,
-      invocations: model.invocations, executors, toolCatalog: model.toolCatalog }),
-    async prepareHeldRun(value: unknown) {
+  const prepareHeldRun = async (value: unknown) => {
       const parsed = heldSchema.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const command = parsed.data, before = await current(command.original, command.lease.taskId, command.lease.runId);
@@ -110,6 +111,45 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         inputRef: published.id, registrationRef, planHash: saved.planHash,
         materialHash: packet.materialHash, messageHash: requestFingerprint(material),
         model: 'not_called' as const, businessExecution: 'not_attempted' as const });
+    };
+  return Object.freeze({ scenes, readModelResult: results.read.bind(results), reopenModelSource: results.reopenSource.bind(results),
+    runtime: Object.freeze({ authorization: model.authorization, tasks: model.tasks,
+      planAuthority: model.planAuthority, plans: model.plans, registrations: model.registrations,
+      invocations: model.invocations, executors, toolCatalog: model.toolCatalog }),
+    prepareHeldRun,
+    /** Server-only assembly. Client input is exclusively the existing original
+     * reference: never a holder, lease, plan, task ID, prompt or configuration.
+     * The original runner alone claims/starts the task and meters execution. */
+    createApplication(host: AiTaskApplicationHost, run: AiOriginalSceneRunDependencies) {
+      const root = composeAuthorizedPersistentTaskInputRunner({ db: dependencies.db,
+        authorization: dependencies, registrationAuthority: model.planAuthority,
+        planAuthority: model.planAuthority, toolCatalog: model.toolCatalog, invocations: model.invocations,
+        executors, wall: clock, commands: run?.commands, inputSource: run?.inputSource,
+        transitionAuthority: run?.transitionAuthority,
+        financialEvidence: run?.financialEvidence, clock: run?.clock, monotonic: run?.monotonic });
+      // Validate/fix the server host now, without claiming or starting work.
+      root.createApplication(host);
+      const serverHost = Object.freeze(structuredClone(host));
+      return Object.freeze({ async start(value: unknown, signal?: AbortSignal) {
+        const parsed = originalRequestReferenceSchema.safeParse(structuredClone(value));
+        if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const reference = freezeOriginalInput(parsed.data);
+        const original = await scenes.requests.readHistorical(reference);
+        const task = await scenes.readTaskReceipt(reference.inputRef);
+        if (task.state !== 'observed') throw unavailable();
+        await current(reference, task.taskId, task.runId);
+        const app = root.createApplication(serverHost, async ({ lease, taskRevision, signal: preparationSignal }) => {
+          if (preparationSignal?.aborted) throw unavailable();
+          await prepareHeldRun({ original: reference, lease, expectedTaskRevision: taskRevision });
+          if (preparationSignal?.aborted) throw unavailable();
+        });
+        const execution = await app.start({ taskId: task.taskId, runId: task.runId }, signal);
+        const after = await current(reference, task.taskId, task.runId);
+        if (originalIdentityHash(original.context) !== originalIdentityHash(after.original.context)
+          || original.receipt.contentHash !== after.original.receipt.contentHash) throw denied();
+        return freezeOriginalInput({ original: after.original.receipt, taskId: task.taskId, runId: task.runId,
+          execution, businessExecution: 'not_inferred_from_model_result' as const });
+      } });
     }
   });
 }
