@@ -177,7 +177,7 @@ export class PrismaAutomationAuthority implements AiTaskCreationAuthority {
       creationKey: current.creationKey, authorityHash: current.authorityHash, inputHash: current.inputHash, inputRevision: 1 };
     if (Object.entries(exact).some(([name, value]) => row[name as keyof typeof row] !== value)
       || row.expiresAt.getTime() !== current.expiresAt.getTime() || requestFingerprint(row.payload) !== current.inputHash
-      || !['prepared', 'creation_unknown', 'linked'].includes(row.status)
+      || row.reviewStatus !== 'open' || !['prepared', 'creation_unknown', 'linked'].includes(row.status)
       || (row.status === 'linked' ? !row.taskId || !row.runId : row.taskId !== null || row.runId !== null)) throw unavailable();
   }
 

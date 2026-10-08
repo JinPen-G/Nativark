@@ -792,6 +792,13 @@ model AiAutomationInput {
   authorityHash         String @db.Char(64)
   expiresAt             DateTime @db.DateTime(3)
   status                String @default("prepared") @db.VarChar(24)
+  reviewRevision        Int @default(1) @db.UnsignedInt
+  reviewStatus          String @default("open") @db.VarChar(16)
+  closeReason           String? @db.VarChar(24)
+  feedbackCode          String? @db.VarChar(24)
+  reviewedAt            DateTime? @db.DateTime(3)
+  humanReviewGrants     AiAutomationReviewGrant[]
+  humanReviewOperations AiAutomationReviewOperation[]
   taskId                String? @db.VarChar(36)
   runId                 String? @db.VarChar(36)
   createdAt             DateTime @default(now()) @db.DateTime(3)
@@ -802,9 +809,74 @@ model AiAutomationInput {
   task                  AiTask? @relation(fields: [scopeId, taskId], references: [scopeId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_automation_input_task_fk")
   run                   AiRun? @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_automation_input_run_fk")
 
+  @@unique([tenantId, workspaceId, scopeId, id, eventId], map: "ai_automation_input_review_target_key")
   @@unique([tenantId, workspaceId, policyId, policyRevision, eventId], map: "ai_automation_input_event_policy_key")
   @@index([tenantId, workspaceId, status, createdAt], map: "ai_automation_input_status_idx")
   @@map("ai_automation_inputs")
+}
+
+model AiAutomationReviewGrant {
+  id                  String @id @db.VarChar(36)
+  tenantId            String @db.VarChar(191)
+  workspaceId         String @db.VarChar(191)
+  scopeId             String @db.VarChar(36)
+  inputId             String @db.VarChar(36)
+  eventId             String @db.VarChar(36)
+  actorKind           String @default("user") @db.VarChar(16)
+  actorId             String @db.VarChar(191)
+  audience            String @db.VarChar(16)
+  action              String @db.VarChar(16)
+  expectedRevision    Int @db.UnsignedInt
+  resourceHash        String @db.Char(64)
+  requiredPermissions Json
+  revision            Int @default(1) @db.UnsignedInt
+  enabled             Boolean @default(false)
+  expiresAt           DateTime @db.DateTime(3)
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  updatedAt           DateTime @updatedAt @db.DateTime(3)
+  input               AiAutomationInput @relation(fields: [tenantId, workspaceId, scopeId, inputId, eventId], references: [tenantId, workspaceId, scopeId, id, eventId], onDelete: Restrict, onUpdate: Restrict, map: "ai_automation_review_grant_input_fk")
+  operations          AiAutomationReviewOperation[]
+
+  @@unique([scopeId, inputId, id], map: "ai_automation_review_grant_scope_key")
+  @@unique([scopeId, actorId, audience, inputId, action, expectedRevision], map: "ai_automation_review_grant_action_key")
+  @@map("ai_automation_review_grants")
+}
+
+model AiAutomationReviewOperation {
+  id                    String @id @db.VarChar(36)
+  tenantId              String @db.VarChar(191)
+  workspaceId           String @db.VarChar(191)
+  scopeId               String @db.VarChar(36)
+  inputId               String @db.VarChar(36)
+  eventId               String @db.VarChar(36)
+  taskId                String? @db.VarChar(36)
+  runId                 String? @db.VarChar(36)
+  actorKind             String @db.VarChar(16)
+  actorId               String @db.VarChar(191)
+  audience              String @db.VarChar(16)
+  action                String @db.VarChar(16)
+  operationKey          String @db.VarChar(128)
+  requestHash           String @db.Char(64)
+  expectedRevision      Int @db.UnsignedInt
+  resultRevision        Int @db.UnsignedInt
+  eventFenceBefore      Int @db.UnsignedInt
+  eventFenceAfter       Int @db.UnsignedInt
+  resultStatus          String @db.VarChar(16)
+  inputStatusAtCommit   String @db.VarChar(24)
+  closeReason           String? @db.VarChar(24)
+  feedbackCode          String? @db.VarChar(24)
+  grantId               String @db.VarChar(36)
+  grantRevision         Int @db.UnsignedInt
+  authorizationHash     String @db.Char(64)
+  createdAt             DateTime @default(now()) @db.DateTime(3)
+  input                 AiAutomationInput @relation(fields: [tenantId, workspaceId, scopeId, inputId, eventId], references: [tenantId, workspaceId, scopeId, id, eventId], onDelete: Restrict, onUpdate: Restrict, map: "ai_automation_review_operation_input_fk")
+  grant                 AiAutomationReviewGrant @relation(fields: [scopeId, inputId, grantId], references: [scopeId, inputId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_automation_review_operation_grant_fk")
+  task                  AiTask? @relation(fields: [scopeId, taskId], references: [scopeId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_automation_review_operation_task_fk")
+  run                   AiRun? @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_automation_review_operation_run_fk")
+
+  @@unique([scopeId, actorId, audience, operationKey], map: "ai_automation_review_operation_key")
+  @@unique([scopeId, inputId, resultRevision], map: "ai_automation_review_operation_revision_key")
+  @@map("ai_automation_review_operations")
 }
 
 model AiBusinessFailureOutbox {
@@ -5536,6 +5608,7 @@ model AiTask {
   executionBudget     AiTaskExecutionBudget?
   actionPolicies      AiTaskActionPolicy[]
   automationInputs    AiAutomationInput[]
+  automationReviewOperations AiAutomationReviewOperation[]
 
   @@unique([scopeId, id], map: "ai_tasks_scope_id")
   @@unique([scopeId, id, ownerKind], map: "ai_tasks_scope_actor_kind")
@@ -5577,6 +5650,7 @@ model AiRun {
   actionInputs       AiTaskActionInput[]
 
   automationInputs  AiAutomationInput[]
+  automationReviewOperations AiAutomationReviewOperation[]
   @@unique([scopeId, taskId, id], map: "ai_runs_scope_task_id")
   @@unique([scopeId, taskId, sequence], map: "ai_runs_sequence")
   @@index([status, leaseExpiresAt], map: "ai_runs_recovery")

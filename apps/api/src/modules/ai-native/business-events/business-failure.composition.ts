@@ -11,6 +11,7 @@ import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { BusinessFailureCandidateService } from './business-failure-candidate.service';
 import { BusinessFailureReadAuthority } from './business-failure-read.authority';
 import { AutomationFailureTasksModule, composeAutomationFailureTasks, type AutomationDependencies } from '../automation/automation.composition';
+import { HumanAutomationReviewService } from '../automation/human-automation-review.service';
 import { BUSINESS_FAILURE_OUTBOX, PrismaBusinessFailureOutbox } from './prisma-business-failure-outbox';
 
 export type BusinessFailureDependencies = {
@@ -25,7 +26,8 @@ export function composeBusinessFailureEvents(input: BusinessFailureDependencies)
   const authority = new BusinessFailureReadAuthority(input.db, input.auth, input.credentials, input.guard, input.core, input.clock);
   return { outbox, notifications: new RentalBusinessFactRepository(input.db, outbox),
     payments: new PaymentRuntimeService(input.db, input.integrations, input.funding, outbox),
-    candidates: new BusinessFailureCandidateService(input.db, authority, input.clock) };
+    candidates: new BusinessFailureCandidateService(input.db, authority, input.clock),
+    reviews: new HumanAutomationReviewService(input.db, authority, input.clock) };
 }
 
 export function composeBusinessFailureAutomation(input: BusinessFailureDependencies & Pick<AutomationDependencies, 'policyId' | 'subscriptions'>) {
@@ -44,7 +46,8 @@ export class BusinessFailureEventsModule {
       { provide: BUSINESS_FAILURE_OUTBOX, useValue: services.outbox },
       { provide: RentalBusinessFactRepository, useValue: services.notifications },
       { provide: PaymentRuntimeService, useValue: services.payments },
-      { provide: BusinessFailureCandidateService, useValue: services.candidates }
-    ], exports: [BUSINESS_FAILURE_OUTBOX, RentalBusinessFactRepository, PaymentRuntimeService, BusinessFailureCandidateService] };
+      { provide: BusinessFailureCandidateService, useValue: services.candidates },
+      { provide: HumanAutomationReviewService, useValue: services.reviews }
+    ], exports: [BUSINESS_FAILURE_OUTBOX, RentalBusinessFactRepository, PaymentRuntimeService, BusinessFailureCandidateService, HumanAutomationReviewService] };
   }
 }
