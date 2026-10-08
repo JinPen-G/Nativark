@@ -12,6 +12,9 @@ const key = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u);
 const reason = z.enum(['resolved', 'dismissed', 'duplicate', 'not_applicable']);
 const feedback = z.enum(['helpful', 'not_helpful', 'incorrect', 'not_applicable']);
 const readInput = z.object({ inputRef: uuid }).strict();
+const eventInput = z.object({ eventId: uuid, limit: z.number().int().min(1).max(10), after: uuid.optional() }).strict();
+const frozenMode = z.object({ version: z.literal('automation-input-1'), trust: z.literal('untrusted_data'),
+  purpose: z.literal('review_only'), mode: z.enum(['shadow', 'manual_confirmation']) }).passthrough();
 const operationInput = readInput.extend({ operationKey: key }).strict();
 const mutation = operationInput.extend({ expectedRevision: revision, expectedEventFence: fence, expectedTaskId: uuid.nullable() }).strict();
 const closeInput = mutation.extend({ reason }).strict();
@@ -53,6 +56,8 @@ export class HumanAutomationReviewService {
       || (row.reviewStatus === 'closed' ? !reason.safeParse(row.closeReason).success : row.closeReason !== null)
       || row.feedbackCode !== null && !feedback.safeParse(row.feedbackCode).success
       || !/^[a-f0-9]{64}$/u.test(row.inputHash) || requestFingerprint(row.payload) !== row.inputHash) throw unavailable();
+    const payload = frozenMode.safeParse(row.payload);
+    if (!payload.success) throw unavailable();
     const expectedScope = aiPersistenceScopeColumns(context.scope);
     const storedScope = await db.aiScope.findFirst({ where: { id: row.scopeId, ...expectedScope } });
     if (!storedScope || storedScope.id !== row.scopeId
@@ -76,7 +81,8 @@ export class HumanAutomationReviewService {
     const resource = { inputRef: row.id, inputHash: row.inputHash, creationKey: row.creationKey, eventId: event.id,
       resourceRevision: event.resourceRevision, deduplicationKey: event.deduplicationKey,
       expectedRevision: row.reviewRevision, eventFence: event.fence, taskId: task?.id ?? null, runId: task?.runs[0].id ?? null };
-    return { row, event, task, person, context, scope, resource, resourceHash: requestFingerprint(resource), principal: principal(context) };
+    return { row, event, task, person, context, scope, inputMode: payload.data.mode,
+      resource, resourceHash: requestFingerprint(resource), principal: principal(context) };
   }
 
   private async withTarget<T>(inputRef: string, execute: (target: Target & { source: FailureSource }) => Promise<T>, db: ReadDb = this.db): Promise<T> {
@@ -141,6 +147,9 @@ export class HumanAutomationReviewService {
   async read(value: unknown) {
     const { inputRef } = parse(readInput, value);
     return this.withTarget(inputRef, async target => ({ inputRef, inputStatus: target.row.status, inputHash: target.row.inputHash,
+      inputMode: target.inputMode, policyReference: { policyId: target.row.policyId, revision: target.row.policyRevision },
+      nextAction: target.row.reviewStatus === 'closed' ? 'read_review_operation' as const
+        : target.row.status === 'creation_unknown' ? 'read_original_creation' as const : 'human_review' as const,
       review: { revision: target.row.reviewRevision, status: target.row.reviewStatus, closeReason: target.row.closeReason, feedbackCode: target.row.feedbackCode },
       event: { eventId: target.event.id, type: target.event.eventType, resourceRevision: target.event.resourceRevision,
         status: target.event.status, fence: target.event.fence, expiresAt: target.event.expiresAt.toISOString() },
@@ -148,6 +157,39 @@ export class HumanAutomationReviewService {
         status: target.task.status.toLowerCase(), revision: target.task.revision, archived: Boolean(target.task.archivedAt) }
         : { state: 'not_observed' as const, taskId: null, runId: null },
       currentSource: target.source, actionResource: target.resource, resourceHash: target.resourceHash, ...readSemantics }));
+  }
+
+  /** Read existing work for a business event, never prepare/create/re-dispatch it.
+   * Historical human review remains readable under current business read
+   * permission even when the original automation policy has since been disabled. */
+  async forEvent(value: unknown) {
+    const input = parse(eventInput, value), { context, scope } = await this.reads.current();
+    const initialPrincipal = principal(context);
+    const event = await this.db.aiBusinessFailureOutbox.findFirst({ where: { id: input.eventId, ...scope } });
+    if (!event || event.id !== input.eventId || event.tenantId !== scope.tenantId || event.workspaceId !== scope.workspaceId) throw unavailable();
+    return this.reads.withEvent(event, async source => {
+      if (principal((await this.reads.current()).context) !== initialPrincipal) throw unavailable();
+      const rows = await this.db.aiAutomationInput.findMany({ where: { ...scope, eventId: input.eventId,
+        ...(input.after ? { id: { gt: input.after } } : {}) }, orderBy: { id: 'asc' }, take: input.limit + 1, select: { id: true } });
+      const items = [];
+      for (const row of rows.slice(0, input.limit)) {
+        const view = await this.read({ inputRef: row.id });
+        if (view.event.eventId !== event.id || view.event.fence !== event.fence) throw conflict();
+        items.push(view);
+      }
+      const latest = await this.db.aiBusinessFailureOutbox.findFirst({ where: { id: input.eventId, ...scope } });
+      if (!latest || requestFingerprint(latest) !== requestFingerprint(event)) throw conflict();
+      if (principal((await this.reads.current()).context) !== initialPrincipal) throw unavailable();
+      const hasMore = rows.length > input.limit;
+      return { event: { eventId: event.id, type: event.eventType, status: event.status, fence: event.fence,
+        resourceRevision: event.resourceRevision }, currentSource: source,
+        originalResource: event.notificationId
+          ? { kind: 'notification' as const, id: event.notificationId, orderId: source.orderId }
+          : { kind: 'refund' as const, id: event.refundId!, orderId: source.orderId, paymentIntentId: source.paymentIntentId },
+        inputs: { state: items.length ? 'observed' as const : 'not_observed' as const, items, hasMore,
+          nextAfter: hasMore ? items[items.length - 1].inputRef : null, coverage: 'bounded_authorized_event_window' as const },
+        nextAction: 'human_business_review' as const, ...readSemantics };
+    });
   }
 
   async operation(value: unknown) {
