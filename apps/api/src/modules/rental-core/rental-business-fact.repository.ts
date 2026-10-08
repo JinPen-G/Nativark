@@ -1,4 +1,5 @@
-import { ConflictException, ForbiddenException, Injectable } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Inject, Injectable, Optional } from "@nestjs/common";
+import { BUSINESS_FAILURE_OUTBOX, type BusinessFailureOutboxParticipant } from "../ai-native/business-events/prisma-business-failure-outbox";
 import { Prisma, type $Enums } from "@prisma/client";
 import { isDeepStrictEqual } from "node:util";
 import type {
@@ -153,7 +154,8 @@ function optionalDate(value: string | null | undefined): Date | null {
 /** RC-01 阶段 4b：Rental Core 业务事实的库侧实现。 */
 @Injectable()
 export class RentalBusinessFactRepository implements RentalBusinessFactStore {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService,
+    @Optional() @Inject(BUSINESS_FAILURE_OUTBOX) private readonly failureEvents?: BusinessFailureOutboxParticipant) {}
 
   async loadAll(): Promise<TenantBusinessFactSnapshot[]> {
     const [workspaces, quotes, coupons, rewards, accounts, referrals, logs] = await Promise.all([
@@ -691,52 +693,56 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     recipientEncrypted?: string,
     recipientFingerprint?: string
   ): Promise<"inserted" | "duplicate"> {
-    const workspaceId = await resolveScopeWorkspaceId(tx ?? this.prisma, log.tenantId);
-    try {
-      await (tx ?? this.prisma).rentalNotificationLog.create({
-        data: {
-          id: log.id,
-          tenantId: log.tenantId,
-          workspaceId,
-          templateId: log.templateId,
-          templateVersion: log.templateVersion,
-          eventCode: log.eventCode,
-          channel: log.channel,
-          recipient: log.recipient,
-          recipientEncrypted: recipientEncrypted ?? null,
-          recipientFingerprint: recipientFingerprint ?? null,
-          renderedTitle: log.renderedTitle,
-          renderedBody: log.renderedBody,
-          variables: log.variables as Prisma.InputJsonValue,
-          status: log.status,
-          provider: log.provider,
-          providerMessageId: log.providerMessageId ?? null,
-          errorMessage: log.errorMessage ?? null,
-          attempts: log.attempts,
-          nextAttemptAt: optionalDate(log.nextAttemptAt),
-          lastAttemptAt: optionalDate(log.lastAttemptAt),
-          maxAttempts: log.maxAttempts ?? 3,
-          businessObjectType: log.businessObjectType ?? null,
-          businessObjectId: log.businessObjectId ?? null,
-          idempotencyKey: log.idempotencyKey ?? null,
-          sentAt: optionalDate(log.sentAt),
-          createdAt: date(log.createdAt)
+    const run = async (client: Prisma.TransactionClient): Promise<"inserted" | "duplicate"> => {
+      const workspaceId = await resolveScopeWorkspaceId(client, log.tenantId);
+      try {
+        await client.rentalNotificationLog.create({
+          data: {
+            id: log.id,
+            tenantId: log.tenantId,
+            workspaceId,
+            templateId: log.templateId,
+            templateVersion: log.templateVersion,
+            eventCode: log.eventCode,
+            channel: log.channel,
+            recipient: log.recipient,
+            recipientEncrypted: recipientEncrypted ?? null,
+            recipientFingerprint: recipientFingerprint ?? null,
+            renderedTitle: log.renderedTitle,
+            renderedBody: log.renderedBody,
+            variables: log.variables as Prisma.InputJsonValue,
+            status: log.status,
+            provider: log.provider,
+            providerMessageId: log.providerMessageId ?? null,
+            errorMessage: log.errorMessage ?? null,
+            attempts: log.attempts,
+            nextAttemptAt: optionalDate(log.nextAttemptAt),
+            lastAttemptAt: optionalDate(log.lastAttemptAt),
+            maxAttempts: log.maxAttempts ?? 3,
+            businessObjectType: log.businessObjectType ?? null,
+            businessObjectId: log.businessObjectId ?? null,
+            idempotencyKey: log.idempotencyKey ?? null,
+            sentAt: optionalDate(log.sentAt),
+            createdAt: date(log.createdAt)
+          }
+        });
+      } catch (error) {
+        // 空间级幂等键撞了：同一业务事件已发过。返回 duplicate 让服务层静默跳过，
+        // 而不是把「不重复通知」当成错误抛出。仅对该唯一键的 P2002 生效，其余照抛。
+        // MySQL 的重复键错误只回滚当前语句、不中止外层事务，因此 tx 路径也安全。
+        if (
+          log.idempotencyKey &&
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === "P2002"
+        ) {
+          return "duplicate";
         }
-      });
-      return "inserted";
-    } catch (error) {
-      // 空间级幂等键撞了：同一业务事件已发过。返回 duplicate 让服务层静默跳过，
-      // 而不是把「不重复通知」当成错误抛出。仅对该唯一键的 P2002 生效，其余照抛。
-      // MySQL 的重复键错误只回滚当前语句、不中止外层事务，因此 tx 路径也安全。
-      if (
-        log.idempotencyKey &&
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2002"
-      ) {
-        return "duplicate";
+        throw error;
       }
-      throw error;
-    }
+      await this.failureEvents?.notification(client, { tenantId: log.tenantId, workspaceId }, log.id);
+      return "inserted";
+    };
+    return tx ? run(tx) : this.failureEvents ? this.prisma.$transaction(run) : run(this.prisma);
   }
 
   /**
@@ -878,7 +884,7 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
         attempts: current.attempts,
         leaseUntil: current.leaseUntil
       },
-      data: { lastAttemptAt: date(at), leaseUntil: date(leaseUntil) }
+      data: { lastAttemptAt: date(at), leaseUntil: date(leaseUntil), revision: { increment: 1 } }
     });
     return result.count === 1;
   }
@@ -893,24 +899,29 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
   }
 
   async updateNotificationDelivery(tenantId: string, id: string, patch: RentalNotificationDeliveryPatch): Promise<RentalNotificationSendLogV1 | undefined> {
-    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
-    const result = await this.prisma.rentalNotificationLog.updateMany({
-      where: { id, tenantId, workspaceId },
-      data: {
-        ...(patch.status !== undefined ? { status: patch.status } : {}),
-        ...(patch.provider !== undefined ? { provider: patch.provider } : {}),
-        ...(patch.providerMessageId !== undefined ? { providerMessageId: patch.providerMessageId } : {}),
-        ...(patch.errorMessage !== undefined ? { errorMessage: patch.errorMessage } : {}),
-        ...(patch.sentAt !== undefined ? { sentAt: optionalDate(patch.sentAt) } : {}),
-        ...(patch.nextAttemptAt !== undefined ? { nextAttemptAt: optionalDate(patch.nextAttemptAt) } : {}),
-        ...(patch.lastAttemptAt !== undefined ? { lastAttemptAt: optionalDate(patch.lastAttemptAt) } : {}),
-        ...(patch.countAttempt ? { attempts: { increment: 1 } } : {}),
-        ...(patch.countAttempt || patch.releaseLease ? { leaseUntil: null } : {})
-      }
-    });
-    if (result.count !== 1) return undefined;
-    const row = await this.prisma.rentalNotificationLog.findFirst({ where: { id, tenantId, workspaceId } });
-    return row ? this.toNotificationLog(row) : undefined;
+    const run = async (tx: Prisma.TransactionClient) => {
+      const workspaceId = await resolveScopeWorkspaceId(tx, tenantId);
+      const result = await tx.rentalNotificationLog.updateMany({
+        where: { id, tenantId, workspaceId },
+        data: {
+          revision: { increment: 1 },
+          ...(patch.status !== undefined ? { status: patch.status } : {}),
+          ...(patch.provider !== undefined ? { provider: patch.provider } : {}),
+          ...(patch.providerMessageId !== undefined ? { providerMessageId: patch.providerMessageId } : {}),
+          ...(patch.errorMessage !== undefined ? { errorMessage: patch.errorMessage } : {}),
+          ...(patch.sentAt !== undefined ? { sentAt: optionalDate(patch.sentAt) } : {}),
+          ...(patch.nextAttemptAt !== undefined ? { nextAttemptAt: optionalDate(patch.nextAttemptAt) } : {}),
+          ...(patch.lastAttemptAt !== undefined ? { lastAttemptAt: optionalDate(patch.lastAttemptAt) } : {}),
+          ...(patch.countAttempt ? { attempts: { increment: 1 } } : {}),
+          ...(patch.countAttempt || patch.releaseLease ? { leaseUntil: null } : {})
+        }
+      });
+      if (result.count !== 1) return undefined;
+      const row = await tx.rentalNotificationLog.findFirst({ where: { id, tenantId, workspaceId } });
+      if (row) await this.failureEvents?.notification(tx, { tenantId, workspaceId }, id);
+      return row ? this.toNotificationLog(row) : undefined;
+    };
+    return this.failureEvents ? this.prisma.$transaction(run) : run(this.prisma);
   }
 
   /* ---------- 行 → 领域对象 ---------- */
