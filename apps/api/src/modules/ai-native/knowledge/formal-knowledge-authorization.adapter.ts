@@ -8,6 +8,7 @@ import { actor, fingerprint, sameScope } from './knowledge-validation';
 export type FormalPolicyResource = {
   documentId?: string; documentVersion?: string; attachmentId?: string; aclRevision?: number;
   memoryId?: string; revision?: number; owner?: { actorKind: string; actorId: string };
+  upload?: { documentId: string; idempotencyKey: string; fileName: string; mimeType: string; sizeBytes: number };
 };
 
 export type FormalActionPolicy = {
@@ -70,7 +71,8 @@ export class FormalKnowledgeAuthorizationAdapter implements KnowledgeAuthorizati
   }
 
   authorize(context: AiExecutionContext, request: KnowledgeAuthorizationRequest) {
-    const resource = request.document ? { documentId: request.document.documentId, documentVersion: request.document.documentVersion,
+    if ((request.action === 'upload') !== Boolean(request.upload) || request.upload && (request.document || request.attachmentId)) return Promise.resolve(null);
+    const resource = request.upload ? { upload: structuredClone(request.upload) } : request.document ? { documentId: request.document.documentId, documentVersion: request.document.documentVersion,
       attachmentId: request.attachmentId ?? request.document.attachmentId, aclRevision: request.document.aclRevision } : request.attachmentId ? { attachmentId: request.attachmentId } : undefined;
     return this.evaluate(context, request.action, request.scope, resource);
   }
