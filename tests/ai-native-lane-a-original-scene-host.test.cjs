@@ -155,6 +155,23 @@ test('persisted scene model result is bound to its original input and current au
     type: 'task.output_ready', payload: { data: { resultId: 'model-result' } }, occurredAt: now });
   const center = composeAiTaskCenterScene({ list: { readPage: async () => { throw Error('not used'); } }, scenes: h.app, modelResults: reader,
     events: new AiTaskEventRepository(h.db, authorization.authority, h.dependencies.clock) });
+  // Exercise the real task-center consumer, with current original/task
+  // repositories intact; only the optional downstream host boundary is fake.
+  await assert.rejects(center.readInput({ original: ref }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  let reviews = 0;
+  const detail = composeAiTaskCenterScene({ list: { readPage: async () => { throw Error('not used'); } }, scenes: h.app,
+    input: { read: async original => { assert.deepEqual(original, ref); return null; } },
+    approvals: { readSelectedProposal: async () => { reviews++; throw Error('must not reach another task'); },
+      readSelectedDecisionReceipt: async () => { throw Error('not used'); } } });
+  assert.equal((await detail.readInput({ original: ref, taskId: task.id })).input, null);
+  const another = { selection: { draftVersion: 'ain-quote-selection-draft-1', originalInputRef: ref.inputRef,
+    selectionId: '00000000-0000-4000-8000-000000000001', taskId: '00000000-0000-4000-8000-000000000002', runId: created.task.runId, inputHash: 'a'.repeat(64) }, proposal: {} };
+  await assert.rejects(detail.readApprovalReview({ original: ref, reference: another }), e => e.code === 'AI_ACCESS_DENIED');
+  assert.equal(reviews, 0);
+  const revoked = composeAiTaskCenterScene({ list: { readPage: async () => { throw Error('not used'); } }, scenes: h.app,
+    input: { read: async () => { h.b.h.identity.session = false; return { stale: 'must not return' }; } } });
+  await assert.rejects(revoked.readInput({ original: ref }), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
+  h.b.h.identity.session = true;
   const events = await center.readEvents({ original: ref, after: '9007199254740992', limit: 10 });
   assert.equal(events.nextCursor, '9007199254740993'); assert.equal(events.events[0].data.resultId, 'model-result');
   await assert.rejects(center.readEvents({ original: ref, after: 9007199254740992, limit: 10 }), e => e.code === 'AI_INVALID_INPUT');

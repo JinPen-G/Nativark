@@ -9,6 +9,7 @@ import { originalIdentityHash } from './task-request/original-request.authority'
 import { AI_QUOTE_SELECTION_DRAFT_VERSION } from '../../../../../packages/shared/src/ai-quote-selection-draft';
 import type { PrismaQuoteSelectionRepository } from './task-request/prisma-quote-selection.repository';
 import type { composeHumanQuoteOrder } from './scenes/human-quote-order.composition';
+import { parseQuoteSelectionProof } from './task-request/quote-selection.validation';
 
 type OriginalScenes = ReturnType<typeof composeAiOriginalScenes>;
 const page = z.object({ limit: z.number().int().min(1).max(50).optional(), cursor: z.string().max(512).optional(),
@@ -99,6 +100,7 @@ export function composeAiTaskCenterScene(input: {
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       if (typeof input.approvals?.readSelectedProposal !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       const task = await readObservedTask(parsed.data.original, parsed.data.taskId);
+      assertSelectedTask(parsed.data.reference, parsed.data.original, task);
       const review = await input.approvals.readSelectedProposal(parsed.data.reference);
       await assertStillCurrent(parsed.data.original, task);
       return freezeOriginalInput({ taskId: task.taskId,
@@ -110,6 +112,7 @@ export function composeAiTaskCenterScene(input: {
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       if (typeof input.approvals?.readSelectedDecisionReceipt !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       const task = await readObservedTask(parsed.data.original, parsed.data.taskId);
+      assertSelectedTask(parsed.data.reference, parsed.data.original, task);
       const receipt = await input.approvals.readSelectedDecisionReceipt(parsed.data.reference);
       await assertStillCurrent(parsed.data.original, task);
       return freezeOriginalInput({ taskId: task.taskId,
@@ -164,10 +167,20 @@ export function composeAiTaskCenterScene(input: {
       || original.receipt.contentHash !== after.receipt.contentHash || after.receipt.state === 'revoked'
       || latest.state !== 'observed' || latest.taskId !== identity.data.taskId || latest.runId !== identity.data.runId
       || latest.revision !== identity.data.revision) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    return { taskId: identity.data.taskId, runId: identity.data.runId, revision: identity.data.revision };
+    return { taskId: identity.data.taskId, runId: identity.data.runId, revision: identity.data.revision,
+      identityHash: originalIdentityHash(after.context), contentHash: after.receipt.contentHash };
   }
-  async function assertStillCurrent(reference: z.infer<typeof originalRequestReferenceSchema>, expected: { taskId: string; runId: string; revision: number }) {
+  async function assertStillCurrent(reference: z.infer<typeof originalRequestReferenceSchema>, expected: Awaited<ReturnType<typeof readObservedTask>>) {
     const latest = await readObservedTask(reference, expected.taskId);
-    if (latest.runId !== expected.runId || latest.revision !== expected.revision) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    if (latest.runId !== expected.runId || latest.revision !== expected.revision
+      || latest.identityHash !== expected.identityHash || latest.contentHash !== expected.contentHash)
+      throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  }
+  function assertSelectedTask(value: unknown, original: z.infer<typeof originalRequestReferenceSchema>, task: { taskId: string; runId: string }) {
+    const nested = z.object({ selection: z.unknown(), proposal: z.unknown() }).strict().safeParse(value);
+    if (!nested.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const selection = parseQuoteSelectionProof(nested.data.selection);
+    if (selection.originalInputRef !== original.inputRef || selection.taskId !== task.taskId || selection.runId !== task.runId)
+      throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
   }
 }
