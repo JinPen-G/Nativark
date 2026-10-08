@@ -9,13 +9,15 @@ const { composeControlledApprovedOrder } = require('../../../apps/api/src/module
 
 // Actual formal publisher/plan/registration, authorization, preparation, approval,
 // Core confirmation and idempotency. Database and Core business facts remain doubles.
-async function controlledApprovedOrderHarness({ prepare = true } = {}) {
+async function controlledApprovedOrderHarness({ prepare = true, initializeOnly = false } = {}) {
   const h = await persistedApprovedOrderHarness(), { state } = h;
   state.user.permissions.push('system:params:manage');
   state.records.aiTaskActionPolicy.push({ scopeId: 'scope-a', taskId: 'task-a', operation: 'decide_approval', revision: 1,
     requiredPermissions: ['rental-os:order:create'], expiresAt: new Date('2099-01-01') });
   for (const table of ['aiStep', 'aiProposal', 'aiProposalVersion', 'aiProposalAction', 'aiApproval', 'aiApprovalConsumption',
-    'aiApprovedOrderSnapshot', 'aiTaskActionInput', 'aiTaskPlanPolicy', 'aiTaskRunPlan', 'aiTaskEvent', 'aiTaskResultArtifact']) state.records[table] = [];
+    'aiApprovedOrderSnapshot', 'aiTaskActionInput', 'aiTaskPlanPolicy', 'aiTaskRunPlan', 'aiTaskEvent', 'aiTaskResultArtifact',
+    'aiTaskExecutionBudget', 'aiTaskExecutionCharge', 'aiTaskExecutionPhaseStart', 'aiTaskExecutionPhaseReceipt',
+    'aiTaskInputRequest', 'aiTaskInputReceipt']) state.records[table] = [];
   Object.assign(state.records.aiTask[0], { eventCursor: 0n });
   state.records.aiRun[0].fencingToken = new Prisma.Decimal('9');
   Object.assign(state.records.quote[0], { chargeLines: [], rateSnapshot: [], calendarSnapshot: [], calendarWarnings: [],
@@ -24,7 +26,8 @@ async function controlledApprovedOrderHarness({ prepare = true } = {}) {
   function client(records, inTransaction) {
     const rows = name => (records ?? state.records)[name];
     const related = (name, row) => name === 'aiProposalAction' ? { ...row, step: rows('aiStep').find(s => s.actionId === row.actionId && s.scopeId === row.scopeId) }
-      : name === 'aiProposal' ? { ...row, currentVersion: rows('aiProposalVersion').find(v => v.proposalId === row.id && v.revision === row.currentRevision) ?? null } : row;
+      : name === 'aiProposal' ? { ...row, currentVersion: rows('aiProposalVersion').find(v => v.proposalId === row.id && v.revision === row.currentRevision) ?? null }
+        : name === 'aiRun' ? { ...row, task: rows('aiTask').find(t => t.id === row.taskId && t.scopeId === row.scopeId) } : row;
     const project = (row, select) => !row ? null : !select ? clone(row) : Array.isArray(row) ? row.map(value => project(value, select)) : Object.fromEntries(Object.entries(select).map(([k, rule]) =>
       [k, rule === true ? clone(row[k]) : project(row[k], rule.select)]));
     const before = async (model, op, args) => {
@@ -41,15 +44,33 @@ async function controlledApprovedOrderHarness({ prepare = true } = {}) {
       findMany: async (args = {}) => { await before(model, 'findMany', args); return rows(model).filter(r => matches(r, args.where ?? {})).slice(0, args.take).map(r => project(related(model, r), args.select)); },
       create: async args => {
         await before(model, 'create', args);
-        const row = { revision: 1, ...clone(args.data) };
+        const row = { ...(model.startsWith('aiTaskExecutionPhase') ? {} : { revision: 1 }), ...clone(args.data) };
+        if (model === 'aiTaskExecutionBudget') for (const prefix of ['reserved', 'consumed']) for (const resource of ['Steps', 'Calls', 'ActiveMs', 'OutputBytes']) row[`${prefix}${resource}`] ??= 0n;
+        if (model === 'aiTaskExecutionCharge') Object.assign(row, { gatewayInvocationId: null, actualAmount: null, evidenceRef: null, outcomeFingerprint: null, ...row });
         if (model === 'rentalOrderIdempotencyRecord') { row.id = 'idempotency-a'; row.status = 'succeeded'; }
-        if (model === 'aiApprovalConsumption') assert.equal(rows(model).some(r => r.scopeId === row.scopeId && r.taskId === row.taskId && r.actionId === row.actionId), false);
+        if (model === 'aiApprovalConsumption') {
+          row.createdAt ??= h.dependencies.clock(); row.updatedAt ??= h.dependencies.clock();
+          assert.equal(rows(model).some(r => r.scopeId === row.scopeId && r.taskId === row.taskId && r.actionId === row.actionId), false);
+        }
         rows(model).push(row); return project(related(model, row), args.select);
+      },
+      upsert: async args => {
+        await before(model, 'upsert', args);
+        const where = Object.keys(args.where).length === 1 && Object.keys(args.where)[0].includes('_') ? Object.values(args.where)[0] : args.where;
+        const row = rows(model).find(r => matches(r, where));
+        if (!row) return db[model].create({ data: args.create, select: args.select });
+        await db[model].updateMany({ where, data: args.update });
+        return project(related(model, row), args.select);
       },
       updateMany: async args => {
         await before(model, 'updateMany', args); let count = 0;
         for (const row of rows(model)) if (matches(related(model, row), args.where)) {
-          count++; for (const [k, v] of Object.entries(args.data)) row[k] = v && typeof v === 'object' && 'increment' in v ? row[k] + v.increment : clone(v);
+          count++; for (const [k, v] of Object.entries(args.data)) {
+            if (v && typeof v === 'object' && 'increment' in v) row[k] = row[k] instanceof Prisma.Decimal ? row[k].add(v.increment) : row[k] + v.increment;
+            else if (v && typeof v === 'object' && 'decrement' in v) row[k] = row[k] instanceof Prisma.Decimal ? row[k].sub(v.decrement) : row[k] - v.decrement;
+            else row[k] = clone(v);
+          }
+          if (model === 'aiApprovalConsumption') row.updatedAt = h.dependencies.clock();
         }
         return { count };
       }
@@ -82,6 +103,13 @@ async function controlledApprovedOrderHarness({ prepare = true } = {}) {
   const compose = () => composeControlledApprovedOrder(dependencies), root = compose();
   const limits = { maxSteps: 4, maxCalls: 4, maxTotalMs: 10000, maxStepMs: 1000, maxOutputBytes: 4096, maxConcurrent: 1 };
   await root.policy.put({ expectedRevision: null, enabled: true, limits, expiresAt: '2099-01-01T00:00:00Z' });
+  if (initializeOnly) {
+    Object.assign(state.records.aiTask[0], { createdAt: dependencies.clock(), updatedAt: dependencies.clock() });
+    for (const operation of ['claim_run', 'claim_recovery_run', 'release_run', 'read_step_terminal', 'read_events']) state.records.aiTaskActionPolicy.push({
+      scopeId: 'scope-a', taskId: 'task-a', operation, revision: 1, expiresAt: new Date('2099-01-01'),
+      requiredPermissions: [operation === 'claim_run' ? 'rental-os:order:create' : 'rental-os:order:view'] });
+    return { ...h, root, compose, dependencies, limits };
+  }
   const lease = () => ({ taskId: 'task-a', runId: 'run-a', holderId: state.records.aiRun[0].leaseOwnerId,
     revision: state.records.aiRun[0].revision, fencingToken: state.records.aiRun[0].fencingToken.toFixed(0), expiresAt: state.records.aiRun[0].leaseExpiresAt.toISOString() });
   const published = await root.source.publishOrderInput({ taskId: 'task-a', registrationRef: 'order-a', expectedTaskRevision: state.records.aiTask[0].revision, lease: lease(), input: h.body });

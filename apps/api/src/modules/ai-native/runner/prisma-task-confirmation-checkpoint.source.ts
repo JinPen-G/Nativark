@@ -46,6 +46,17 @@ export class PrismaTaskConfirmationCheckpointSource implements AiTaskConfirmatio
   }
 
   async read(value: Parameters<AiTaskConfirmationCheckpointSource['read']>[0], tx: Prisma.TransactionClient) {
+    return (await this.readPhase(value, tx, false)).proof;
+  }
+
+  async readDecision(value: Parameters<AiTaskConfirmationCheckpointSource['read']>[0], tx: Prisma.TransactionClient) {
+    const result = await this.readPhase(value, tx, true);
+    if (!result.decision || result.remainingActiveMs <= 0 || result.remainingOutputBytes <= 0) throw unavailable();
+    return { ...result.proof, decisionRef: result.decision.approvalId, decision: result.decision.decision,
+      remainingActiveMs: result.remainingActiveMs, remainingOutputBytes: result.remainingOutputBytes };
+  }
+
+  private async readPhase(value: Parameters<AiTaskConfirmationCheckpointSource['read']>[0], tx: Prisma.TransactionClient, continuation: boolean) {
     const input = inputSchema.parse(structuredClone(value));
     if (input.taskId !== input.lease.taskId || input.runId !== input.lease.runId) throw denied();
     const { scopeId, taskId, runId, stepId } = input, key = { scopeId, taskId, runId, stepId };
@@ -58,11 +69,16 @@ export class PrismaTaskConfirmationCheckpointSource implements AiTaskConfirmatio
     const now = this.clock();
     if (!(now instanceof Date) || !Number.isFinite(now.getTime()) || start.createdAt > receipt.createdAt || receipt.createdAt > now
       || Object.entries(key).some(([k, v]) => start[k as keyof typeof start] !== v || receipt[k as keyof typeof receipt] !== v)
-      || receipt.id !== input.checkpointRef || start.id !== receipt.phaseId || start.leaseOwnerId !== input.lease.holderId
-      || start.fencingToken !== input.lease.fencingToken || start.runRevision !== input.lease.revision
+      || receipt.id !== input.checkpointRef || start.id !== receipt.phaseId
+      || (!continuation && (start.leaseOwnerId !== input.lease.holderId || start.fencingToken !== input.lease.fencingToken || start.runRevision !== input.lease.revision))
+      || (continuation && (BigInt(start.fencingToken) > BigInt(input.lease.fencingToken) || start.runRevision > input.lease.revision
+        || (start.fencingToken === input.lease.fencingToken && start.leaseOwnerId !== input.lease.holderId)))
       || Date.parse(input.lease.expiresAt) <= now.getTime() || requestFingerprint(payload) !== receipt.contentHash
       || BigInt(Buffer.byteLength(JSON.stringify(payload), 'utf8')) !== receipt.outputBytes
-      || requestFingerprint(payload.presentedLease) !== requestFingerprint(input.lease)
+      || payload.presentedLease.taskId !== taskId || payload.presentedLease.runId !== runId
+      || payload.presentedLease.holderId !== start.leaseOwnerId || payload.presentedLease.fencingToken !== start.fencingToken
+      || payload.presentedLease.revision !== start.runRevision
+      || (!continuation && requestFingerprint(payload.presentedLease) !== requestFingerprint(input.lease))
       || requestFingerprint(payload.binding) !== requestFingerprint({ ...key, actionId: start.actionId, inputRef: start.inputRef, fingerprint: start.stepFingerprint })
       || payload.proposal.proposalId !== receipt.proposalId || payload.proposal.proposalRevision !== receipt.proposalRevision
       || payload.proposal.reviewedPayloadHash !== receipt.reviewedPayloadHash) throw denied();
@@ -81,6 +97,7 @@ export class PrismaTaskConfirmationCheckpointSource implements AiTaskConfirmatio
         || c.gatewayInvocationId !== null || c.leaseOwnerId !== start.leaseOwnerId || c.fencingToken.toFixed(0) !== start.fencingToken
         || !(c.resource in expected) || expected[c.resource as keyof typeof expected] !== c.chargeId
         || c.amount < (c.resource === 'ACTIVE_MS' ? receipt.activeMs : c.resource === 'OUTPUT_BYTES' ? receipt.outputBytes : 1n))) throw denied();
+    if (continuation && await phaseReader(tx, 'aiTaskExecutionPhaseStart')({ where: { ...key, previousReceiptId: receipt.id } })) throw denied();
     const saved = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: { scopeId, taskId, runId } } });
     if (!saved || saved.scopeId !== scopeId || saved.taskId !== taskId || saved.runId !== runId || saved.planHash !== start.planHash
       || requestFingerprint(saved.payload) !== saved.planHash) throw denied();
@@ -96,12 +113,15 @@ export class PrismaTaskConfirmationCheckpointSource implements AiTaskConfirmatio
     const authority = await authorize();
     const waiting = await this.waiting.readWaiting({ taskId, runId, stepId, actionId: start.actionId, inputRef: start.inputRef,
       fingerprint: start.stepFingerprint, lease: structuredClone(input.lease) });
-    if (waiting.kind !== 'waiting_reference' || waiting.receipt.kind !== 'absent'
+    if (waiting.kind !== 'waiting_reference' || (continuation ? waiting.receipt.kind !== 'recorded' : waiting.receipt.kind !== 'absent')
       || requestFingerprint(waiting.binding) !== requestFingerprint(payload.binding)
       || requestFingerprint(waiting.proposal) !== requestFingerprint(payload.proposal) || await authorize() !== authority) throw denied();
-    return { ...key, checkpointRef: receipt.id, phaseId: start.id, kind: 'confirmation' as const, actionId: start.actionId,
+    const proof = { ...key, checkpointRef: receipt.id, phaseId: start.id, kind: 'confirmation' as const, actionId: start.actionId,
       inputRef: start.inputRef, stepRevision: start.stepRevision, stepFingerprint: start.stepFingerprint, planHash: start.planHash,
       contentHash: receipt.contentHash, leaseOwnerId: start.leaseOwnerId, fencingToken: start.fencingToken, runRevision: start.runRevision,
       proposalId: receipt.proposalId, proposalRevision: receipt.proposalRevision, reviewedPayloadHash: receipt.reviewedPayloadHash };
+    return { proof, decision: waiting.receipt.kind === 'recorded' ? waiting.receipt.record : null,
+      remainingActiveMs: Math.min(Number(charges.find(c => c.resource === 'ACTIVE_MS')!.amount), plan.limits.maxStepMs) - Number(receipt.activeMs),
+      remainingOutputBytes: Math.min(Number(charges.find(c => c.resource === 'OUTPUT_BYTES')!.amount), plan.limits.maxOutputBytes) - Number(receipt.outputBytes) };
   }
 }

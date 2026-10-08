@@ -16,7 +16,7 @@ import type { AiTaskHeldPreparation } from './ai-task-runner.service';
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
 
 export interface AuthorizedPersistentTaskInputComposition extends Omit<PersistentTaskRunnerComposition,
-  'tasks' | 'executionAuthorization' | 'registrations' | 'replays' | 'transitions' | 'taskOutcome' | 'inputs'> {
+  'tasks' | 'executionAuthorization' | 'registrations' | 'replays' | 'transitions' | 'taskOutcome' | 'inputs' | 'confirmation' | 'orderEvidence'> {
   authorization: Omit<PersistedTaskAuthorizationDependencies, 'db' | 'clock'>;
   registrationAuthority: AiStepRegistrationAuthority;
   transitionAuthority: AiStepTransitionAuthority;

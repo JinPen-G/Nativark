@@ -9,6 +9,7 @@ import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.reposit
 import { aiTaskRunPlanSchema } from './prisma-task-run-evidence.repository';
 import type { AiTaskRunner, AiTaskRunnerError, AiTaskHeldPreparation } from './ai-task-runner.service';
 import type { AiTaskRunnerOutcome } from './ai-task-runner.ports';
+import { taskExecutionPhaseStore } from './task-execution-phase.store';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);
@@ -28,7 +29,7 @@ export type AiTaskApplicationResumeResult = {
 type Dependencies = {
   db: Pick<PrismaClient, '$transaction'>;
   tasks: Pick<AiTaskRepository, 'resolveAccess'>;
-  runner: Pick<AiTaskRunner, 'run' | 'recover'> & Partial<Pick<AiTaskRunner, 'runPrepared'>>;
+  runner: Pick<AiTaskRunner, 'run' | 'recover'> & Partial<Pick<AiTaskRunner, 'runPrepared' | 'continueConfirmation'>>;
   prepare?: AiTaskHeldPreparation;
   inputs: Pick<PrismaTaskInputRepository, 'submit' | 'readPending'>;
   recovery: AiTaskRecoverySnapshotSource;
@@ -129,6 +130,38 @@ export class PrismaTaskApplication {
     if (current.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     if (!lease) return { kind: 'not_started', reason: 'recovery_lease_unavailable' };
     return { kind: 'run_outcome', outcome: await this.deps.runner.recover(lease, signal) };
+  }
+
+  async continueConfirmation(value: unknown, signal?: AbortSignal): Promise<AiTaskApplicationStartResult | { kind: 'not_started'; reason: 'confirmation_lease_unavailable' }> {
+    const parsed = requestSchema.extend({ checkpointRef: id.max(36) }).safeParse(value);
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' };
+    if (typeof this.deps.runner.continueConfirmation !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const input = parsed.data, before = await this.deps.tasks.resolveAccess(input.taskId, 'transition_task');
+    const candidate = await this.deps.db.$transaction(async tx => {
+      const task = await tx.aiTask.findFirst({ where: before.where });
+      if (!task || task.id !== input.taskId || task.contractVersion !== AI_TASK_DRAFT_VERSION) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      if (task.status !== 'WAITING_CONFIRMATION' || task.cancelRequestedAt !== null) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const run = await tx.aiRun.findFirst({ where: { scopeId: task.scopeId, taskId: task.id, id: input.runId } });
+      if (!run || run.id !== input.runId || run.scopeId !== task.scopeId || run.taskId !== task.id) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      if (run.leaseOwnerId !== this.host.holderId || !run.leaseExpiresAt || run.leaseExpiresAt <= before.now) return null;
+      if (run.actorKind !== before.actorKind || run.actorId !== before.actorId || run.status !== 'RUNNING') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const receipt = await taskExecutionPhaseStore(tx).readReceipt({ scopeId: task.scopeId, taskId: task.id, runId: input.runId, id: input.checkpointRef });
+      if (!receipt || receipt.kind !== 'confirmation' || receipt.scopeId !== task.scopeId || receipt.taskId !== task.id
+        || receipt.runId !== input.runId || receipt.id !== input.checkpointRef) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const step = await tx.aiStep.findFirst({ where: { scopeId: task.scopeId, taskId: task.id, runId: input.runId, id: receipt.stepId } });
+      if (!step || step.id !== receipt.stepId || step.scopeId !== task.scopeId || step.taskId !== task.id || step.runId !== input.runId
+        || step.status !== 'RUNNING' || step.effect !== 'POSSIBLE') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const fencingToken = run.fencingToken.toFixed(0);
+      if (!/^[1-9][0-9]{0,19}$/u.test(fencingToken) || !run.fencingToken.equals(fencingToken)) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+      return { taskId: task.id, stepId: step.id, expectedTaskRevision: revision.parse(task.revision),
+        expectedStepRevision: revision.parse(step.revision), checkpointRef: receipt.id,
+        lease: { taskId: task.id, runId: run.id, holderId: this.host.holderId, revision: revision.parse(run.revision), fencingToken, expiresAt: run.leaseExpiresAt.toISOString() } };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
+    const current = await this.deps.tasks.resolveAccess(input.taskId, 'transition_task');
+    if (current.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    if (!candidate) return { kind: 'not_started', reason: 'confirmation_lease_unavailable' };
+    return { kind: 'run_outcome', outcome: await this.deps.runner.continueConfirmation(candidate, signal) };
   }
 
   async start(value: unknown, signal?: AbortSignal): Promise<AiTaskApplicationStartResult> {

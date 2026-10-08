@@ -173,3 +173,43 @@ for (const [name, mutate] of [
   }));
   assert.equal(h.state.records.rentalOrder.length, 0);
 });
+
+test('order host produces two measured phases and settles original charges through explicit approved continuation', async () => {
+  const { composeTaskOrderHost } = require('../apps/api/src/modules/ai-native/runner/order-task-host.composition');
+  const h = await controlledApprovedOrderHarness({ initializeOnly: true });
+  Object.assign(h.state.records.aiTask[0], { status: 'QUEUED' });
+  Object.assign(h.state.records.aiRun[0], { status: 'QUEUED', leaseOwnerId: null, leaseExpiresAt: null });
+  let ticks = 0;
+  const root = composeTaskOrderHost({ ...h.dependencies, host: { holderId: 'order-host', leaseMs: 100000 },
+    task: { taskId: 'task-a', runId: 'run-a', registrationRef: 'order-a', order: h.body, limits: h.limits },
+    monotonic: () => ++ticks });
+  assert.equal(h.state.records.aiStep.length, 0); assert.equal(h.state.records.aiTaskExecutionPhaseStart.length, 0);
+  const result = await root.application.start({ taskId: 'task-a', runId: 'run-a' });
+  assert.equal(result.kind, 'run_outcome'); assert.equal(result.outcome.status, 'paused');
+  const r = h.state.records, receipt = r.aiTaskExecutionPhaseReceipt[0];
+  assert.equal(r.aiTask[0].status, 'WAITING_CONFIRMATION'); assert.equal(r.aiStep[0].status, 'RUNNING');
+  assert.equal(r.aiTaskExecutionPhaseStart.length, 1); assert.equal(r.aiTaskExecutionPhaseReceipt.length, 1);
+  assert.equal(receipt.kind, 'confirmation'); assert.equal(receipt.activeMs, 1n);
+  assert.equal(receipt.outputBytes, BigInt(Buffer.byteLength(JSON.stringify(receipt.payload), 'utf8')));
+  assert.equal(r.aiTaskResultArtifact[0].outcome, 'RUNNING'); assert.equal(r.aiTaskResultArtifact[0].completeMeasurement, false);
+  assert.equal(r.aiTaskExecutionCharge.length, 3); assert.ok(r.aiTaskExecutionCharge.every(c => c.status === 'RESERVED'));
+  assert.equal(r.aiTaskExecutionBudget[0].consumedSteps, 0n); assert.equal(r.aiTaskExecutionBudget[0].reservedSteps, 1n);
+  assert.equal(r.aiApproval.length, 0); assert.equal(r.rentalOrder.length, 0); assert.equal(h.state.prepares, 0);
+  const charges = r.aiTaskExecutionCharge.map(c => ({ id: c.chargeId, fingerprint: c.requestFingerprint, fence: c.fencingToken.toFixed(0) }));
+  assert.equal((await root.application.continueConfirmation({ taskId: 'task-a', runId: 'run-a', checkpointRef: receipt.id })).reason, 'confirmation_lease_unavailable');
+  await root.orders.approvals.decide('task-a', { ...receipt.payload.proposal, decision: 'approve' });
+  const beforeRun = h.state.records.aiRun[0], beforeTask = h.state.records.aiTask[0];
+  await root.authorization.tasks.claimRecoveryRun({ taskId: 'task-a', runId: 'run-a', holderId: 'order-host', leaseMs: 100000,
+    expectedTaskRevision: beforeTask.revision, expectedRunRevision: beforeRun.revision, expectedFencingToken: beforeRun.fencingToken.toFixed(0) });
+  const finished = await root.application.continueConfirmation({ taskId: 'task-a', runId: 'run-a', checkpointRef: receipt.id });
+  assert.equal(finished.kind, 'run_outcome'); assert.equal(finished.outcome.status, 'succeeded');
+  const after = h.state.records, second = after.aiTaskExecutionPhaseReceipt.find(p => p.kind === 'succeeded');
+  assert.equal(after.aiTaskExecutionPhaseStart.length, 2); assert.equal(after.aiTaskExecutionPhaseReceipt.length, 2);
+  assert.equal(after.aiStep.length, 1); assert.equal(after.aiStep[0].resultRef, second.id); assert.equal(after.aiStep[0].effect, 'COMMITTED');
+  assert.equal(after.rentalOrder.length, 1); assert.equal(second.businessResultRef, after.rentalOrder[0].id); assert.equal(h.state.prepares, 1);
+  assert.deepEqual(after.aiTaskExecutionCharge.map(c => ({ id: c.chargeId, fingerprint: c.requestFingerprint, fence: c.fencingToken.toFixed(0) })), charges);
+  assert.ok(after.aiTaskExecutionCharge.every(c => c.status === 'RECORDED'));
+  assert.equal(after.aiTaskExecutionBudget[0].consumedSteps, 1n); assert.equal(after.aiTaskExecutionBudget[0].consumedActiveMs, 2n);
+  assert.equal(after.aiTaskExecutionBudget[0].consumedOutputBytes, receipt.outputBytes + second.outputBytes);
+  assert.equal(after.aiTaskExecutionBudget[0].reservedSteps, 0n); assert.equal(after.aiTask[0].status, 'SUCCEEDED');
+});
