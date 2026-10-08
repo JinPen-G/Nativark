@@ -524,3 +524,9 @@ Claude从0aeea679接续原需求，补通PublicAiGatewayService.invoke/stream可
 主线从f647199c推进功能优先：composePersistedOrderTaskInput接通原Guard/Core DTO与规范化、受权场景政策、不可变发布、原计划/步骤登记及事务内原输入策略证明；扩展既有source而非另建存储。新authority核对policyRevision/hash、封闭plan、registrationRef/inputRef/fingerprint及当前身份，返回稳定bindingHash，不授予业务执行或跳过审批。Core仅抽取并复用原bookingIdentity规范化逻辑，无新业务算法/schema。
 
 定向冒烟纠正原Guard的兼容权限及错误码预期后5/5、exit0；源码型验378根文件0诊断，不做扩大回归或独立审计。同期固定接收AIN07原输入关联17fdf2b6→f647199c，主线新用例8/8。离线事务/业务夹具不当真库或完整runner/开单验收；批准后execute接线交AIN07，原task创建输入仍有后续。详见[正式建单输入发布与策略绑定](AI原生系统协作切片/AIN-06-07-正式建单输入发布与策略绑定-20261007-claude.md)，原28项及M1门槛不变。
+
+### AIN-RESEARCH-001：开源接入与既有成果保留评估（2026-10-07）
+
+Claude按负责人新指令在943c15ea完成有界研究，采用需求v1.3/任务v1.6，不恢复旧派工的通用引擎扩建。核对实际源码、锁定依赖及官方发布包；建议LangGraph.js库级编排、AI SDK v6兼容Provider，保留现有MySQL/Prisma及执行/授权/财务单账。MySQL checkpoint、受控fetch桥、任务原始输入和订单解释接线仍是明确待实现项；没有安装或切换实现。
+
+[研究与保留评估](AI原生系统协作切片/开源接入研究与成果保留评估-20261007-claude.md)列出具体保留/适配/停止扩建/退出文件、候选版本与许可证、恢复失败矩阵、首批任务及阻塞；另按负责人要求给出有评分规则的静态需求证据评估，非原任务正式完成率、工时估算或生产就绪率。未重跑业务、真库/模型/浏览器测试，未作独立安全Review；正式0/28与M1门槛保持不变，未清理或提交历史output。
