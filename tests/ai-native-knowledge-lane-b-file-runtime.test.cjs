@@ -59,10 +59,10 @@ function fileFixture() {
     const key = { tenantId: 'tenant-1', workspaceId, actorKind: 'user', actorId: 'user-1', audience: 'operator', domain: 'knowledge', action, resourceKey: fingerprint(resource) };
     grants.set(JSON.stringify(key), { ...key, resource: clone(resource), revision: 1, enabled: true, expiresAt: new Date(h.now + 3600000), requiredPermissions: ['synthetic-policy'] });
   }
-  function allowUpload(value = input, workspaceId) { const request = knowledgeUploadRequest(value); allow('upload', { upload: { documentId: request.businessId, idempotencyKey: request.idempotencyKey, fileName: request.fileName, mimeType: request.mimeType, sizeBytes: request.sizeBytes } }, workspaceId); }
-  function allowDocument(attachmentId, aclRevision = 1) {
-    const resource = { documentId: 'doc-1', documentVersion: 'v1', attachmentId, aclRevision };
-    for (const action of ['create', 'read_metadata', 'parse', 'read_body', 'index', 'publish', 'search', 'resolve_source', 'snippet', 'withdraw', 'delete']) { allow(action); allow(action, resource); }
+  function allowUpload(value = input, workspaceId, revision) { const request = knowledgeUploadRequest(value, revision); allow('upload', { upload: { documentId: request.businessId, idempotencyKey: request.idempotencyKey, fileName: request.fileName, mimeType: request.mimeType, sizeBytes: request.sizeBytes, ...(revision ? { revision } : {}) } }, workspaceId); }
+  function allowDocument(attachmentId, aclRevision = 1, documentVersion = 'v1') {
+    const resource = { documentId: 'doc-1', documentVersion, attachmentId, aclRevision };
+    for (const action of ['create', 'revise', 'read_metadata', 'parse', 'read_body', 'index', 'publish', 'search', 'resolve_source', 'snippet', 'withdraw', 'delete']) { allow(action); allow(action, resource); }
     allow('create', { attachmentId });
   }
   return { ...f, deps, input, text, state, config, integrations, objectIO, grants, allow, allowUpload, allowDocument,
@@ -138,6 +138,38 @@ test('late body revocation remains pending and exact reconciliation never reads 
   f.flags.active = true; f.state.afterBody = null;
   await assert.rejects(f.api.management.reconcileParse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-late' }), { code: 'result_unknown' });
   assert.equal(f.reads(), 1);
+});
+
+test('revision uploads preserve frozen source identity, reject retargeting and consume the original revise receipt', async t => {
+  const f = fileFixture(), { bound } = await completed(f, t); f.allowDocument(bound.attachmentId);
+  await f.api.management.create(h.draft({ attachmentId: bound.attachmentId }));
+  await f.api.management.parse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-v1' });
+  const revision = { documentVersion: 'v1', expectedRevision: 3, aclRevision: 1, targetVersion: 'v2' };
+  const file = { ...f.input, fileName: 'sop-v2.txt' }, selection = { ...file, expectedRevision: 3, targetVersion: 'v2' };
+  await assert.rejects(f.api.uploads.beginRevision(selection), { code: 'unavailable' });
+  f.allowUpload(file, undefined, revision);
+  const [a, b] = await Promise.all([f.api.uploads.beginRevision(selection), f.api.uploads.beginRevision(selection)]);
+  assert.equal(a.fileAssetId, b.fileAssetId); assert.notEqual(a.fileAssetId, bound.attachmentId); assert.equal(f.db.state.uploads.size, 2);
+  f.allowUpload({ ...file, fileName: 'changed.txt' }, undefined, revision);
+  await assert.rejects(f.api.uploads.beginRevision({ ...selection, fileName: 'changed.txt' }));
+  await assert.rejects(f.api.uploads.complete({ documentId: 'doc-1', sessionId: a.sessionId }));
+  const completion = { documentId: 'doc-1', sessionId: a.sessionId, expectedRevision: 3, targetVersion: 'v2' };
+  const head = f.db.state.documents.get('doc-1'), original = structuredClone(head);
+  head.revision++; head.state.revision++; head.state.document.aclRevision++;
+  await assert.rejects(f.api.uploads.completeRevision(completion), { code: 'unavailable' });
+  f.db.state.documents.set('doc-1', original);
+  f.db.responseError = new Error('revision upload completed but reply lost');
+  await assert.rejects(f.api.uploads.completeRevision(completion), /reply lost/); f.db.responseError = null;
+  const uploaded = await f.api.uploads.completeRevision(completion); assert.equal(uploaded.attachmentId, a.fileAssetId);
+  f.allowDocument(uploaded.attachmentId); f.allowDocument(uploaded.attachmentId, 1, 'v2');
+  const request = h.draft({ documentVersion: 'v2', attachmentId: uploaded.attachmentId, operationId: 'revise-v2' });
+  const revised = await f.api.management.revise(3, request); assert.equal(revised.revision, 4);
+  assert.equal((await f.api.management.revise(3, request)).revision, 4);
+  assert.equal(f.db.state.versions.size, 2);
+  assert.equal((await f.api.management.parse({ documentId: 'doc-1', expectedRevision: 4, operationId: 'parse-v2' })).parsing, 'parsed');
+  assert.equal(f.reads(), 2);
+  await assert.rejects(f.api.management.revise(6, h.draft({ documentVersion: 'v3', attachmentId: uploaded.attachmentId, operationId: 'retarget-v3' })), { code: 'unavailable' });
+  await assert.rejects(f.api.uploads.beginRevision({ ...selection, targetVersion: 'v3' }), { code: 'unavailable' });
 });
 
 test('knowledge byte source bounds overflow and abort without waiting for provider cleanup', async t => {

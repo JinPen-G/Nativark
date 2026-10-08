@@ -34,12 +34,12 @@ export class KnowledgeDocumentService {
     return true;
   }
 
-  private async assertAttachmentBound(context: AiExecutionContext, documentId: string, attachmentId: string) {
+  private async assertAttachmentBound(context: AiExecutionContext, documentId: string, attachmentId: string, selection?: { documentVersion: string; expectedRevision: number }) {
     if (typeof this.ports.files.assertBound !== 'function') throw new KnowledgeError('unavailable');
     if (context.scope.kind !== 'workspace') throw new KnowledgeError('unavailable');
     const workspaceId = context.scope.workspaceId;
     const contextHash = fingerprint(context), stable = structuredClone(context), stableHash = fingerprint(stable);
-    await this.ports.files.assertBound(stable, { attachmentId, documentId, workspaceId });
+    await this.ports.files.assertBound(stable, { attachmentId, documentId, workspaceId, ...selection });
     if (fingerprint(context) !== contextHash || fingerprint(stable) !== stableHash) throw new KnowledgeError('unavailable');
   }
 
@@ -51,6 +51,8 @@ export class KnowledgeDocumentService {
       if (fingerprint(context) !== contextHash || fingerprint(stableContext) !== stableContextHash) throw new KnowledgeError('unavailable');
     };
     await authorize(this.ports.authorization, structuredClone(stableContext), { action, scope: structuredClone(stableContext.scope), document: structuredClone(before.document) });
+    if (action === 'revise') await this.assertAttachmentBound(stableContext, next.document.documentId, next.document.attachmentId,
+      { documentVersion: next.document.documentVersion, expectedRevision: before.revision });
     assertStableContext();
     const result = await this.ports.repository.commit({ scope: structuredClone(stableContext.scope), documentId: next.document.documentId, expectedRevision: before.revision, operation: { id: operationId, fingerprint: hash, ...(next.failure ? { failure: next.failure } : {}) }, next: structuredClone(next), newVersion });
     assertStableContext();
@@ -91,7 +93,7 @@ export class KnowledgeDocumentService {
     if (before.parseOperationId) throw new KnowledgeCommitUnknownError();
     if (before.revision !== expectedRevision || before.document.publication === 'deleted' || before.document.documentVersion === input.documentVersion) throw new KnowledgeError('conflict');
     await authorize(this.ports.authorization, context, { action: 'revise', scope: context.scope, document: before.document, attachmentId: input.attachmentId });
-    await this.assertAttachmentBound(context, input.documentId, input.attachmentId);
+    await this.assertAttachmentBound(context, input.documentId, input.attachmentId, { documentVersion: input.documentVersion, expectedRevision });
     const { validUntil: oldExpiry, ...previous } = before.document;
     const next: KnowledgeRecord = { revision: before.revision + 1, document: { ...previous, documentVersion: input.documentVersion, attachmentId: input.attachmentId, title: input.title, validFrom: input.validFrom, ...(input.validUntil ? { validUntil: input.validUntil } : {}), publication: 'draft', parsing: 'pending', indexing: 'not_indexed' } };
     return this.save(context, 'revise', before, queueIndex(next, 'remove', `${input.operationId}:index`), input.operationId, hash, true);

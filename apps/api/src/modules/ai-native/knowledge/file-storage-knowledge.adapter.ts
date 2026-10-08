@@ -17,11 +17,12 @@ export class FileStorageKnowledgeFileAdapter implements KnowledgeFilePort {
     }, maxBytes);
   }
 
-  async assertBound(context: AiExecutionContext, input: { attachmentId: string; documentId: string; workspaceId: string }) {
+  async assertBound(context: AiExecutionContext, input: { attachmentId: string; documentId: string; workspaceId: string; documentVersion?: string; expectedRevision?: number }) {
     if (context.scope.kind !== 'workspace' || context.scope.workspaceId !== input.workspaceId) return unavailable();
     await this.runtime.assertKnowledgeBinding(context.scope.tenantId, input.attachmentId, {
       businessType: 'ai_knowledge_document', businessId: input.documentId, uploadScene: 'ai-knowledge', workspaceId: input.workspaceId,
       actorUserId: context.actor.kind === 'user' ? context.actor.userId : undefined,
-    });
+    }, input.documentVersion !== undefined && input.expectedRevision !== undefined
+      ? { documentVersion: input.documentVersion, expectedRevision: input.expectedRevision } : undefined);
   }
 }

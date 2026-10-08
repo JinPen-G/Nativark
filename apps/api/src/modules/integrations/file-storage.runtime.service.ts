@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, OnApplicationBootstrap, OnApplicationShutdown, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { INSPECTION_OBJECT_READER, readInspectionMedia, type InspectionObjectReader } from "../ai-native/inspection-assist/inspection-media.reader";
 import { KNOWLEDGE_FILE_ACCESS, type KnowledgeFileAccess } from "../ai-native/knowledge/knowledge-file-access";
+import type { KnowledgeUploadRevision } from "../ai-native/knowledge/knowledge.ports";
+import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type {
@@ -20,6 +22,7 @@ import { createAliyunOssV4Url } from "./aliyun-oss-v4";
 type JsonRecord = Record<string, unknown>;
 
 export interface FileBusinessOwner {
+  knowledgeRevision?: KnowledgeUploadRevision;
   businessType?: string;
   businessId?: string;
   uploadScene?: string;
@@ -233,7 +236,8 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
                 uploadedAt: new Date().toISOString()
               } : {}),
               ...(owner?.workspaceId ? { workspaceId: owner.workspaceId } : {}),
-              ...(input.businessType === 'ai_knowledge_document' ? { knowledgeUploadVersion: 1 } : {}),
+              ...(input.businessType === 'ai_knowledge_document' ? { knowledgeUploadVersion: 1,
+                ...(owner?.knowledgeRevision ? { knowledgeRevision: { ...owner.knowledgeRevision } } : {}) } : {}),
               uploadMode: mode
             } as Prisma.InputJsonValue
           }
@@ -550,6 +554,8 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     } else if (owner) await this.assertBusinessReference(tenantId, asset.businessType, asset.businessId ?? "", owner.workspaceId);
     if (session.status === "completed") {
       if (knowledgeInput && asset.status !== 'active') throw new ConflictException('知识上传结果不可用');
+      if (knowledgeInput) await this.assertKnowledgeBinding(tenantId, asset.id, owner!, owner?.knowledgeRevision ? {
+        documentVersion: owner.knowledgeRevision.targetVersion, expectedRevision: owner.knowledgeRevision.expectedRevision } : undefined);
       return this.assetSummary(asset);
     }
     if (session.status !== "pending_upload") throw new ConflictException("上传会话已失效");
@@ -587,7 +593,8 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     });
     if (knowledgeInput) {
       await this.authorizeKnowledgeUpload(tenantId, knowledgeInput, owner);
-      await this.assertKnowledgeBinding(tenantId, asset.id, owner!);
+      await this.assertKnowledgeBinding(tenantId, asset.id, owner!, owner?.knowledgeRevision ? {
+        documentVersion: owner.knowledgeRevision.targetVersion, expectedRevision: owner.knowledgeRevision.expectedRevision } : undefined);
     }
     return this.assetSummary(updated);
   }
@@ -664,9 +671,9 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     } finally { clearTimeout(timeout); signal.removeEventListener('abort', abort); }
   }
 
-  async assertKnowledgeBinding(tenantId: string, fileAssetId: string, owner: FileBusinessOwner) {
+  async assertKnowledgeBinding(tenantId: string, fileAssetId: string, owner: FileBusinessOwner, target?: { documentVersion: string; expectedRevision: number }) {
     if (!this.knowledgeFiles) throw new ServiceUnavailableException('知识文件绑定权威未配置');
-    return this.knowledgeFiles.assertBound(tenantId, fileAssetId, owner);
+    return this.knowledgeFiles.assertBound(tenantId, fileAssetId, owner, target);
   }
 
   private async authorizeKnowledgeUpload(tenantId: string, input: CreateFileUploadSessionRequest, owner?: FileBusinessOwner) {
@@ -678,7 +685,8 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     const metadata = asset.metadata;
     if (!owner?.actorUserId || !owner.workspaceId || asset.uploadedBy !== owner.actorUserId || asset.storageProvider === 'local_mock'
       || !metadata || typeof metadata !== 'object' || Array.isArray(metadata) || metadata.workspaceId !== owner.workspaceId
-      || metadata.knowledgeUploadVersion !== 1) throw new NotFoundException('知识上传不属于当前主体和空间');
+      || metadata.knowledgeUploadVersion !== 1
+      || requestFingerprint(metadata.knowledgeRevision ?? null) !== requestFingerprint(owner.knowledgeRevision ?? null)) throw new NotFoundException('知识上传不属于当前主体和空间');
   }
 
   private async knowledgeUploadSummary(tenantId: string, input: CreateFileUploadSessionRequest,

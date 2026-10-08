@@ -3,10 +3,13 @@ import type {
   AiKnowledgeOwnerDraft, AiFactReference, AiKnowledgeSourceDraft, AiMemoryDraft, AiPreferenceValueDraft,
 } from '@rental-os/shared';
 
+export interface KnowledgeUploadRevision {
+  documentVersion: string; expectedRevision: number; aclRevision: number; targetVersion: string;
+}
 export type KnowledgeAction = 'upload' | 'create' | 'read_metadata' | 'parse' | 'publish' | 'withdraw' | 'delete' | 'revise' | 'search' | 'read_body' | 'snippet' | 'resolve_source' | 'download' | 'index' | 'change_acl';
 export interface KnowledgeAuthorizationRequest {
   action: KnowledgeAction;
-  upload?: { documentId: string; idempotencyKey: string; fileName: string; mimeType: string; sizeBytes: number };
+  upload?: { documentId: string; idempotencyKey: string; fileName: string; mimeType: string; sizeBytes: number; revision?: KnowledgeUploadRevision };
   scope: AiExecutionScope;
   document?: AiKnowledgeDocumentDraft;
   attachmentId?: string;
@@ -57,7 +60,7 @@ export interface KnowledgeFilePort {
   read(context: AiExecutionContext, document: AiKnowledgeDocumentDraft, maxBytes: number): Promise<{ mediaType: string; bytes: Uint8Array }>;
   /** Required for prepare/create/newVersion; optional only for read-only
    * compositions. Verify active FileAsset business binding before admission. */
-  assertBound?(context: AiExecutionContext, input: { attachmentId: string; documentId: string; workspaceId: string }): Promise<void>;
+  assertBound?(context: AiExecutionContext, input: { attachmentId: string; documentId: string; workspaceId: string; documentVersion?: string; expectedRevision?: number }): Promise<void>;
 }
 export interface KnowledgeParserPort {
   parse(document: AiKnowledgeDocumentDraft, file: { mediaType: string; bytes: Uint8Array }): AiKnowledgeChunkDraft[];

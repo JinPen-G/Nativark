@@ -2,13 +2,13 @@ import type { AuthService } from '../../auth/auth.service';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import type { AiExecutionContext } from '@rental-os/shared';
-import type { KnowledgeAction, KnowledgeAuthorizationPort, KnowledgeAuthorizationRequest, KnowledgeGrant, MemoryAction, MemoryAuthorizationPort } from './knowledge.ports';
+import type { KnowledgeAction, KnowledgeAuthorizationPort, KnowledgeAuthorizationRequest, KnowledgeGrant, MemoryAction, MemoryAuthorizationPort, KnowledgeUploadRevision } from './knowledge.ports';
 import { actor, fingerprint, sameScope } from './knowledge-validation';
 
 export type FormalPolicyResource = {
   documentId?: string; documentVersion?: string; attachmentId?: string; aclRevision?: number;
   memoryId?: string; revision?: number; owner?: { actorKind: string; actorId: string };
-  upload?: { documentId: string; idempotencyKey: string; fileName: string; mimeType: string; sizeBytes: number };
+  upload?: { documentId: string; idempotencyKey: string; fileName: string; mimeType: string; sizeBytes: number; revision?: KnowledgeUploadRevision };
 };
 
 export type FormalActionPolicy = {

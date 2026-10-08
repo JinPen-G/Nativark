@@ -1,5 +1,18 @@
 # Codex B 总册接续交付与精确未闭合项
 
+## 2026-10-08 CB05：版本附件接回原revise
+
+依赖固定 `49fc07841b663370b1b71135d42e5614b95c115b`，主线确认继续同一Knowledge/storage分支认领；本节解除上一片“新版本附件上传未实现”的代码缺口，其他未验边界保留。
+
+- 同一 `uploads` 增加 `beginRevision({documentId,targetVersion,expectedRevision,fileName,mimeType,sizeBytes})` / `completeRevision({documentId,targetVersion,expectedRevision,sessionId})`。当前旧documentVersion/aclRevision由原PrismaKnowledgeRepository读取，不由客户端填充；原head revision、未结束parse、deleted或同版本目标均拒绝。upload精确政策新增 `revision:{documentVersion,expectedRevision,aclRevision,targetVersion}` 绑定，已有版本不复用。
+- `FileBusinessOwner.knowledgeRevision` 只在受权服务端装配中传递，原FileAsset metadata保存同一合法上传意图（不是授权凭据）。版本上传键由docId与targetVersion派生，同租户同版共用原唯一键，同版异文件或跨workspace拒绝；旧首建派生键及“已有文档拒绝首建”保持。原complete事务前后重验source head/ACL，重放读取原completed session；不能换成最新head或假报文档已更新。
+- 文件端口 `assertBound` 增加目标documentVersion/expectedRevision，新附件必须与上传时的source快照、target版本一致。原KnowledgeDocumentService.newVersion在入口和save提交前都复验，随后仍调用原revision CAS、version唯一性及immutable operation；不新建版本提交器。原revision操作重放发生在再次绑定前，不重写已提交版本。正文reader再核对附件目标版本与当前文档相符。
+- 原file-runtime测试增加一项完整版本链：无版本upload政策拒绝→并发同版共用session→同版异文件拒绝→首建complete不能消费版本附件→source头/ACL变化拒绝→完成事务应答丢失按原session恢复→原revise/原receipt重放→新版本解析→附件不可改投第三版，未旧版本重用。最终6pass/0fail/0skip/0todo、退出0；首次运行因TS interface与Prisma JSON结构不兼容编译失败，改为字段结构化复制，未用unknown强转绕过。实际ts-node类型编译启用，diff check0。
+
+命令仍是上一节同一测试文件与两个preload，固定无效DATABASE_URL；本次AI_OFFLINE_AUDIT为本树绝对output/cb05-revisions-audit，TEMP/TMP沿原目录。真DB、S3、HTTP/DNS、模型和迁移均未执行；无schema或共享产物修改。测试串行事务替身不能证明MySQL锁隔离。主线已收到公共policy使用JSON.stringify指纹的JSON键顺序兼容隐患：本片不全局改指纹、重算历史收据或迁移政策。
+
+Runtime继续复用原上传session与Knowledge原operation；切引擎不重新begin/complete或给unknown parse换键。SDK仍只可替换受控对象传输，模型调用/权限/原业务收据不迁移。回退停用显式组合即可，保留已有版本和原上传事实。物理附件删除/保留策略、正式政策置备、分布式失效和真实S3不可变版本仍待后续，不称CB05整项验收。
+
 ## 2026-10-08 CB05：首建上传与非URL正文源（Claude接续）
 
 基线 `bea3d85d8eacf043c6149c6dabc638cb4efdc1ec`，本会话唯一施工树仍是 codex-ai-native-lane-b；主线确认本片独占 FileStorageRuntime 的 Knowledge 分支和新增 knowledge-object-reader。原 inspection reader、其他文件业务、Auth/Guard/Core、根模块、schema/迁移及shared总出口均未改。历史output与原开发建议保留。

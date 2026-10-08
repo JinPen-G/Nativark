@@ -6,12 +6,13 @@ import type { KnowledgeFileAccess } from './knowledge-file-access';
 import type { KnowledgeAuthorizationPort } from './knowledge.ports';
 import { KnowledgeCurrentSession } from './knowledge-current-session';
 import { PrismaKnowledgeRepository, type KnowledgePrismaClient } from './prisma-knowledge.repository';
-import { knowledgeUploadRequest, knowledgeUploadKey } from './human-knowledge-upload.service';
-import { authorize, fingerprint } from './knowledge-validation';
+import { knowledgeUploadRequest, knowledgeUploadKey, knowledgeUploadRevisionSchema } from './human-knowledge-upload.service';
+import { authorize, fingerprint, parse } from './knowledge-validation';
+import type { KnowledgeUploadRevision } from './knowledge.ports';
 import { unavailable } from './knowledge-errors';
 
 export class PrismaKnowledgeFileAccess implements KnowledgeFileAccess {
-  private readonly repository: PrismaKnowledgeRepository;
+  readonly repository: PrismaKnowledgeRepository;
   constructor(private readonly db: KnowledgePrismaClient & Pick<PrismaClient, 'fileAsset'>,
     readonly session: KnowledgeCurrentSession, private readonly authorization: KnowledgeAuthorizationPort,
     private readonly objects: Pick<TenantKnowledgeObjectReader, 'read'>) {
@@ -26,23 +27,35 @@ export class PrismaKnowledgeFileAccess implements KnowledgeFileAccess {
     return { tenantId, workspaceId: context.scope.workspaceId, documentId: owner.businessId, actorUserId: context.actor.userId };
   }
 
+  private async currentRevision(context: AiExecutionContext, documentId: string, revision: KnowledgeUploadRevision) {
+    const current = await this.repository.read(context.scope, documentId);
+    if (!current || current.revision !== revision.expectedRevision || current.document.documentVersion !== revision.documentVersion
+      || current.document.aclRevision !== revision.aclRevision || current.document.publication === 'deleted' || current.parseOperationId
+      || revision.targetVersion === revision.documentVersion) return unavailable();
+    const existing = await this.db.aiKnowledgeVersion.findFirst({ where: { documentId, contentHash: revision.targetVersion } });
+    if (existing) return unavailable();
+    if (fingerprint(current) !== fingerprint(await this.repository.read(context.scope, documentId))) return unavailable();
+  }
+
   async authorizeUpload(tenantId: string, value: CreateFileUploadSessionRequest, owner?: FileBusinessOwner) {
     const input = structuredClone(value), boundOwner = structuredClone(owner);
-    const expected = knowledgeUploadRequest({ documentId: input.businessId, fileName: input.fileName, mimeType: input.mimeType, sizeBytes: input.sizeBytes });
+    const revision = boundOwner?.knowledgeRevision === undefined ? undefined : parse(knowledgeUploadRevisionSchema, boundOwner.knowledgeRevision);
+    const expected = knowledgeUploadRequest({ documentId: input.businessId, fileName: input.fileName, mimeType: input.mimeType, sizeBytes: input.sizeBytes }, revision);
     if (fingerprint(input) !== fingerprint(expected)) return unavailable();
     return this.session.run(async context => {
       const target = this.owner(context, tenantId, boundOwner);
       if (input.businessId !== target.documentId) return unavailable();
       const request = { action: 'upload' as const, scope: context.scope, upload: { documentId: target.documentId,
-        idempotencyKey: input.idempotencyKey, fileName: input.fileName, mimeType: input.mimeType, sizeBytes: input.sizeBytes } };
+        idempotencyKey: input.idempotencyKey, fileName: input.fileName, mimeType: input.mimeType, sizeBytes: input.sizeBytes, ...(revision ? { revision } : {}) } };
       const grant = await authorize(this.authorization, context, request);
-      const occupied = await this.db.aiKnowledgeDocument.findUnique({ where: { id: target.documentId }, select: { id: true } });
-      if (occupied || fingerprint(grant) !== fingerprint(await authorize(this.authorization, context, request))) return unavailable();
+      if (revision) await this.currentRevision(context, target.documentId, revision);
+      else if (await this.db.aiKnowledgeDocument.findUnique({ where: { id: target.documentId }, select: { id: true } })) return unavailable();
+      if (fingerprint(grant) !== fingerprint(await authorize(this.authorization, context, request))) return unavailable();
     });
   }
 
-  async assertBound(tenantId: string, fileAssetId: string, owner: FileBusinessOwner) {
-    const boundOwner = structuredClone(owner);
+  async assertBound(tenantId: string, fileAssetId: string, owner: FileBusinessOwner, selection?: { documentVersion: string; expectedRevision: number }) {
+    const boundOwner = structuredClone(owner), selected = structuredClone(selection);
     return this.session.run(async context => {
       const target = this.owner(context, tenantId, boundOwner);
       const load = () => this.db.fileAsset.findFirst({ where: { id: fileAssetId, tenantId, status: 'active',
@@ -54,7 +67,13 @@ export class PrismaKnowledgeFileAccess implements KnowledgeFileAccess {
         || !metadata || typeof metadata !== 'object' || Array.isArray(metadata) || metadata.workspaceId !== target.workspaceId
         || metadata.knowledgeUploadVersion !== 1 || session?.status !== 'completed' || !session.completedAt
         || session.fileAssetId !== asset.id || session.tenantId !== tenantId || session.provider !== asset.storageProvider
-        || session.storageKey !== asset.storageKey || session.idempotencyKey !== knowledgeUploadKey(target.documentId)) return unavailable();
+        || session.storageKey !== asset.storageKey) return unavailable();
+      const revision = metadata.knowledgeRevision === undefined ? undefined : parse(knowledgeUploadRevisionSchema, metadata.knowledgeRevision);
+      if (session.idempotencyKey !== knowledgeUploadKey(target.documentId, revision?.targetVersion)) return unavailable();
+      if (revision) {
+        if (!selected || selected.documentVersion !== revision.targetVersion || selected.expectedRevision !== revision.expectedRevision) return unavailable();
+        await this.currentRevision(context, target.documentId, revision);
+      } else if (selected && selected.expectedRevision !== 0) return unavailable();
       if (fingerprint(asset) !== fingerprint(await load())) return unavailable();
     });
   }
