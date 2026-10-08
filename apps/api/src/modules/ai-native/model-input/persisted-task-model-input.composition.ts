@@ -12,6 +12,10 @@ import type { PublicGatewayRuntime } from '../public-ai-gateway.service';
 import type { GatewayTextIntentBinding } from '../gateway-intent';
 import { TASK_TEXT_MODEL_TOOL } from './task-model-input';
 import { TaskModelGatewayInputSource } from './task-model-gateway-input.source';
+import { PrismaModelStepEvidenceAuthority } from './prisma-model-step-evidence.authority';
+import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
+import type { AiTaskRunnerRepositoryCommandFactory } from '../runner/ai-task-runner.repository-adapter';
+import { AiTaskRepositoryError } from '../ai-task.repository';
 
 export function composePersistedTaskModelInput(input: PersistedTaskAuthorizationDependencies & {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
@@ -33,8 +37,29 @@ export function composePersistedTaskModelInput(input: PersistedTaskAuthorization
     input.gatewayScene, input.priceVersion, clock);
   const bindings = new PrismaGatewayInvocationBindings(input.db, authorization.scopes, clock);
   const invocations = new PrismaTaskGatewayInvocationPreparation(bindings, inputs);
+  const createTransitionAuthority = (financial: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>) =>
+    new PrismaModelStepEvidenceAuthority(input.db, authorization.authority, source, input.gatewayScene, financial, clock);
+  const commands: AiTaskRunnerRepositoryCommandFactory = {
+    async register(plan, lease) {
+      if (plan.toolCode !== TASK_TEXT_MODEL_TOOL || plan.toolVersion !== AI_TOOL_DRAFT_VERSION || plan.operation !== 'external_unknown') {
+        throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      }
+      const task = await authorization.tasks.readMetadata(lease.taskId);
+      return { taskId: lease.taskId, registrationRef: plan.registrationRef, expectedTaskRevision: task.revision,
+        lease: { runId: lease.runId, holderId: lease.holderId, revision: lease.revision, fencingToken: lease.fencingToken } };
+    },
+    transition(kind, step, lease, resultRef) {
+      if (kind === 'pause' || step.plan.toolCode !== TASK_TEXT_MODEL_TOOL || (kind !== 'start' && !resultRef)) {
+        throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      }
+      return { taskId: lease.taskId, stepId: step.registered.stepId, expectedTaskRevision: step.registered.taskRevision,
+        expectedStepRevision: step.registered.stepRevision, evidenceId: kind === 'start' ? `start-${step.registered.stepId}` : resultRef!,
+        reason: kind === 'start' ? 'start' : kind === 'unknown' ? 'result_unknown' : 'result_observed',
+        lease: { runId: lease.runId, holderId: lease.holderId, revision: lease.revision, fencingToken: lease.fencingToken } };
+    }
+  };
   return Object.freeze({ authorization, tasks: authorization.tasks, policy, planAuthority: source, plans, registrations,
-    publish: inputs.publish.bind(inputs), invocations, executors: inputs.registeredExecutors(),
+    publish: inputs.publish.bind(inputs), invocations, executors: inputs.registeredExecutors(), commands, createTransitionAuthority,
     toolCatalog: { resolve: async (code: string, version: string) => code === TASK_TEXT_MODEL_TOOL && version === AI_TOOL_DRAFT_VERSION
       ? { modelCall: true } : null } });
 }
