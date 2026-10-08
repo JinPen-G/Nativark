@@ -1,12 +1,83 @@
 # Rental OS AI Native 关键长任务总接续册
 
-版本：交接草案 v1.0；日期：2026-10-07。适用执行者：后续接手的 Codex，或负责人指定的 Claude。
+版本：接续总册 v1.1；更新日期：2026-10-08。适用执行者：负责人指定的后续 Codex 或 Claude。
+
+> **最新接手先读第0节，再读原完整任务队列。** 本册持续维护，供主Claude及两个Codex对话额度耗尽后继续施工；旧聊天、旧交接的“待接/未实现”不能覆盖第0节已核验的固定成果。当前记录不是暂停通知，不自动转移仍活动会话的写入权。
 
 > **这是一份统一任务总册，不是把四条线合成一个施工树。A、B、AIN-06、AIN-07必须分别在各自原工作树开发。Codex接管06/07，也必须进入06/07各自的树；不得把它们的实现搬到A/B树开发。** 主线只在自己的树接收固定交付。
 >
 > **任务目标是持续补齐完整的关键功能，不是不断做零散修补。** 一次小修复、一个包装器、一个DTO、一份文档或几条测试，不算本册一个工作包完成。已经交付的实现先复用，沿真实生产者→授权→持久化→执行→收据→读回链补缺口；不要换名称重复实现。
 >
 > **现在自研，同时为以后 LangGraph 等 Agent Runtime 与开源 Provider SDK 独立接入做好准备。** 两条边界独立，当前不安装、不迁移。编排、模型协议与业务授权/审批/Core/唯一Gateway预算单账隔离，随功能留下接口、状态/行为/收据映射、耦合及迁移回退说明。旧源码、测试和原Codex“开发建议”实际保留。
+
+## 0. 2026-10-08最新续作现场：接手必须先读
+
+### 0.1 先保全，再接原功能；不要重新开一轮盘点
+
+- 原AIN-01～28、正式需求v1.4和开发任务v1.7继续有效。负责人最新要求：**功能实现第一，少写测试脚本；复用现有小冒烟通过后立即推进下一功能，必要时才做类型检查，深测集中后补。** 不再默认每片红绿矩阵、全API检查或独立审查；失败只修受影响处。自动固定交付到达先续派实质包，再主线核验，不追活动HEAD、不轮询后台。
+- 主线唯一施工树 `D:/工作文件/rental-OS/.claude/worktrees/claude-ai-native-foundation`，分支 `ai/ai-native-contracts-s01-20261002`。本次文档更新前**源码固定基线**为 `d0326a813fbdf43a65c7a2b61b9cb63632b660e7`；后续文档提交不改变该功能基线。接手读实际HEAD/status/MERGE_HEAD/CHERRY_PICK_HEAD，承接后续新提交，不checkout/reset回此快照。
+- 主线本次源码均已提交，没有在跑的测试/生成任务。原中央记录 `docs/开发任务/附件/AI原生系统专项实现与协作记录.md` 仍是他人既有tracked WIP，blob hash `871abc4541224496bde05500398c533cd0fca1e1`，本轮不编辑/不提交；全部历史output、patch、锁、private client及previous/temp保留。未来接手必须重新核对，不能把本观察当永久“源码干净”。
+- 旧 `20261008-Claude临时代班-三树交接-codex.md` 是此前暂停交接快照；其中A/B待接链、Knowledge首建缺口及缺模型消费等已被后续提交推进。保留历史，但当前施工以本节及下列固定记录为准，不重摘旧整链。
+- 更新总册不等于停工。额度耗尽、会话idle或心跳未响应都不是转交证明；新Codex须由负责人明确接手并确认原写入者/心跳停止。五条线仍分别在原树施工，一会话一树，不在主仓库施工、不把06/07搬到A/B树。
+
+### 0.2 已在主线的新增固定成果：直接复用
+
+以下提交已在上述主线祖先链；不是待接列表。每行证据独立，不把测试数量相加成一次全量验收。
+
+| 主线固定提交 | 已接功能/来源 | 本次主线证据与边界 |
+| --- | --- | --- |
+| `36cadbf9d13c617acb2ffa6db31314025e7a92ba`、`f0ae011bbd03cf36797c895633fb97924ec23513` | PhaseStart/Receipt持久模型；隔离生成器保留受保护junction | phase模型不等于phase1/phase2生产全链；不删除旧锁/链接绕过生成 |
+| `211180df9f5fed5a24f5c78433b87ceac7679101` | Knowledge版本上传、独立资源grant、A请求绑定场景与人类选择入口；接dd6b8ea2/8c3d8b42/54e7cd27/31782693/6f5dbf58 | 三文件20/20；API467入口0诊断。首建上传/有界正文已由前置c2d516c2接入，不能再列作未实现 |
+| `4788ef10d3daafb9b05a224f9bd41d8af1736231` | 07 `c31d919921c7a1229da367c714964d5764a28a4a`重新准备原事务/收据；06 `203fc824c1a9f69af6cecaa25273aa19c47e86ad`确认checkpoint消费 | 56/56，API471入口0诊断，联合schema隔离验证/生成。phase生产和批准后phase2仍未接，不能称R03完成 |
+| `2754cac01f68bbe5fbfca14a818060d3e0d134c2` | A `2db337fd4ff591be6c2627b00c9bb14785e0e34c`冻结知识/confirmed preference的实际场景消费 | 首轮15pass/3fail；仅修附件fixture精确绑定后3/3，不能称一次18/18。API472入口0诊断；生产授权未放宽 |
+| `64e9c6cc4302b578d2b3b0bb9f6140f2f2322d65` | 知识政策数据库resource用isDeepStrictEqual比较，解决JSON对象键序误拒绝 | 原测试3/3；不改resourceKey/grantKey/全局fingerprint，不迁移或双查 |
+| `19397710cd7931050e550e417bf1ed993edc3452` | A `044252be926b27ce4fc5f4dec1e9a2f6dc3d94bf`请求模型宿主；07 `7b6513e66b1e5e6e4b92f62d3fc60d77834bba32`正式原请求/选择/已持有lease工厂 | 既有4项小烟测通过，未全API重跑。工厂只读已持有租约，不claim；决定、Core提交、原收据分别表达 |
+| `8861c1d9ac130e3d11a34e0dd24a0282a70a654b` | B `42626a29d5fea4ca83e9813d05ac1b021ddfd8b7`通知/退款明确失败与原业务事务Outbox、受权有界候选 | 既有CB08单项1/1；联合schema私有client生成通过；未启动worker/automation，仅覆盖两类失败事件 |
+| `d0326a813fbdf43a65c7a2b61b9cb63632b660e7` | A `d432b7ddcf68f0fb5c5deba5ff6b245bb918a9e1`新材料→原重新准备收据→新选择/public review→新人类决定的场景消费 | 既有单项1/1；无schema变化。丢ACK查原操作，不自动approve/submit；启动RUNNING/DB/Core事实仍显式替身 |
+
+详细记录均在本目录：`20261008-Claude知识版本与请求入口整合.md`、`20261008-Claude重新准备与确认检查点整合.md`、`20261008-Claude场景知识消费整合.md`、`20261008-Claude知识政策JSON比较修复.md`、`20261008-Claude请求模型与正式准备工厂整合.md`、`20261008-Claude失败事务事件整合.md`、`20261008-Claude新材料重新准备场景整合.md`。测试日志在主线 `output/claude-main-receive-20261008/`，不能当成真MySQL、真实供应商、HTTP/浏览器/微信/设备或生产验收。
+
+不要反摘等价依赖：A的f0c89712/f961a1fb/e510edd2/647119a9、07的3603c8cd、06的93c5982c；B的 `928d456752571977a0368d058a1348dfd70327ae` 仅接回64e9的知识JSON修复。以上仅给核对线索，遇到未来新差异仍按固定文件/提交核实，不用SHA不同判定功能缺失。
+
+### 0.3 正在施工的四条辅助线：不是已交付，不得双写
+
+原树/分支见第2节，以下是各会话最近报告和总控认领；截止本次更新，**没有尚待接收的已交固定功能SHA**，下面在途包均还没有最终固定交付。
+
+| 线 | 最近固定源码观察/心跳报告 | 已续派的实际功能与阻塞 |
+| --- | --- | --- |
+| Codex A | 已交d432b7dd；最近报告心跳da772047，未收到取消 | R04消费仅因06正式澄清生产接口未交而等待，不做空包装。已转CA08/原AIN-21客户请求应用：现有`client-scene.composition.ts`、新增`scenes/client-request.application.ts`及既有host测试/A记录。复用真实ClientAuthService/ApiAuthGuard/ClientApiService的guest/member读者、渠道发布空间和本人订单/办理材料；逐请求冻结/来源复验。不改Auth/Guard/前端/Gateway。原task/model客户或匿名持久身份和显式会话迁移合同尚缺，不能改kind伪造operator |
+| Codex B | 最近固定928d4567，CB08已主线接；心跳00965714；已确认CB09开工 | 独立automation主体/持久政策→原Outbox冻结输入→唯一原创建器→只读核对。新认领`ai-native/automation`、自有`business-events`组合、`ai-task-creation.repository.ts`仅增加readCreation，以及独占迁移20261008133000。主线不要并发改该创建器 |
+| Claude A/原06 | 固定203fc824已接；心跳c9e09950；后续为WIP | R03真实phase1生产及批准后phase2完整包。已自报phase1从原start/非空plan/真实capture到WAITING_CONFIRMATION单项通过，但主线未接。phase2显式continue只消费服务端已持有原run当前lease，本身不claim；普通run/recover/takeoverAndRecover不能自动submit。后续直接R04真实模型澄清，不放宽原readonly/NONE/pending门；仍尊重其schema禁写 |
+| Claude B/原07 | 最近固定7b6513e6已接；旧ed6ca7e2已取消；其会话报告用户授权新包后恢复e6cd3e7f | AIN-16限定通知设置领域CAS/原操作收据。其会话已报告直接用户授权Core分支及回填一处revision，不用主线消息替代该授权。只允许`notifications.enabledEvents`/`notifications.editableChannels`，不做客户资料/任意JSON patch/payment/pricing/member/发布。范围为原Core businessSettings分支、ConfigStore、领域新文件及回填该表upsert；没有DB触发器 |
+
+辅助报告的心跳ID是session-only历史地址，不应由新Codex复制或默认仍有效。主线最近已知唯一心跳a7fd54e1；接手重新核对原会话是否结束/授权转交，旧调度不得覆盖最新暂停或移交指令。不轮询工作进展。
+
+**在途schema唯一归属（尚未接回，不能当表已经存在）：**
+
+- B：`20261008133000_ai_automation_policy_inputs`。AiAutomationSubject独立scope/authRevision/enabled默认false/expiry/revocation；AiAutomationPolicy的scene/version、allowedEventTypes、revision和disabled/shadow/manual_confirmation，有限日准入/冷却只控制元数据任务准入，绝不复制模型预算账；AiAutomationInput绑定原eventId/resourceRevision/dedupKey、subject/authRevision、policy/revision、inputHash、creationKey及原task/run。准备事务冻结输入；调用原create之前独占写creation_unknown，之后只查原键，未观察到task不能认定失败再重派。`readCreation`不调用create补写；当前政策/平台租户场景停用/原单账限制必须真实复验。
+- 07：`20261008130000_ai_approved_settings_changes`。RentalTenantBusinessSettings新增真正settingsRevision，不改configVersion含义；RentalApprovedSettingsChange冻结白名单before/after、baseRevision/hash、category绑定、actor/expiry；RentalApprovedSettingsOperation记录operationKey/commandHash、change绑定、base/resultRevision、approvalRef。原人工save、领域CAS和原回填upsert统一推进revision，无DB触发器；批准participant与Core写入/消费收据同事务，提交成功后更新缓存，unknown只查原operation。schema合并时只追加自身关系，不覆盖主线phase/reprepare/失败事件模型。
+
+### 0.4 后续Codex接主线的实际队列
+
+按已就绪依赖并行/顺序接收，不因一个包未交就停掉其他可做核心项，也不把以下编号当新AIN任务：
+
+1. 收06的R03完整固定包，核对真实PhaseStart/Receipt生产、等待不结算原RESERVED charges、task/run增revision而step不假终结、批准后显式phase2防重派与原action恢复。当前仅checkpoint消费者存在，不用预置receipt/手写RUNNING充当整链。之后消费06的R04，A只在固定合同到达后接澄清链。
+2. 收B的CB09固定包，逐块合并独占schema/追加迁移和原readCreation。核对独立automation政策、原事件输入和当前授权，不接受人类context改kind；只disabled/shadow/manual_confirmation，不启worker或自动业务写入，unknown不补建第二task。
+3. 收07限定通知设置领域底座后，主线接封闭工具叶子/公共出口及原审批消费合同，A接诊断差异与实际设置结果；先有领域CAS/同事务原收据再开放该写动作，不借order.commit写配置。客户资料、品类发布/采用等仍按原正式业务依赖分别推进。
+4. 收A客户请求应用，核验guest/member/企业/发布空间隔离及来源重读；其只读材料不代表客户任务执行。主线再补原任务/模型的客户持久主体与政策合同，必须兼容现有原创建/授权/单账语义，并避开B当前创建器写入权，不建第二运行器或持久任务体系。
+5. 主线继续AIN-05/19媒体Gateway公共缺口：公共`AiGatewayContentDraft`已有image/audio附件引用，内部`ModelRequest`目前仅字符串文本；将真实受控附件内容/版本/hash与原invocation/config/capability/dispatch/usage收据贯通到唯一Gateway和原协议适配器。B已有`inspection-media.reader.ts`及受控ObjectReader，不在主线重写B草稿/媒体读取，也不能把图片/音频引用拼成文本就称识别完成。数据处理配置/能力未证实则拒绝，媒体与文本不同供应商的审批条件仍保留。
+6. 原CA/CB/R/P剩余完整包、客户端与AIN-24～28集中验收全部保留在下文。当前不做真实供应商/DB/宿主验收、不安装Runtime/SDK、不默认启用生产；完成数量不能按提交或小冒烟代替原28项。
+
+### 0.5 离线环境、替换边界与持续更新
+
+- 当前主线私有Prisma client对应联合schemaHash `f98a3406610997b5427674d2c225ae35e027599b73f59cd91df2b58216e53459`（8861失败事件包后，d032无schema变化）。原隔离生成器报告guardViolations=0/sharedArtifactsUnchanged=true。后续schema变化才按原方案重新生成；不复制任何其他树的client/schema，不清理历史锁/previous/temp。原生成器子进程仍使用固定无效库名rental_os_e2e_offline_schema，不伪称与父进程库名相同。
+- Node沿本树`prisma-offline-preload.cjs`及需要时的`lane-b-local-runtime.cjs`，父进程固定`mysql://offline:offline@127.0.0.1:1/rental_os_offline`、本树绝对AI_OFFLINE_AUDIT/AI_OFFLINE_WRITE_ROOT/TEMP/TMP/cache，禁compile cache。guard只在拒绝时创建/追加audit，无文件不能据此虚构未加载或真实外联验证。
+- Runtime可换原application驱动，映射原task/run/input/phase/lease/fence/unknown；Provider SDK独立替换唯一Gateway transport/protocol，保持原configuration/usage/receipt及单账。业务授权、审批、Core、知识ACL不迁入框架。每次续派与交付重申两条边界和迁移/回退条件；保留原建议及全部源码，不安装迁移、不对同一run双跑。
+- **每批固定接收/续派后更新本节与对应记录。** 固定SHA、作者报告/主线验证、在途范围、下一真正可做包和阻塞要同步；不要只留聊天。保留下文完整队列与历史快照，修正过时“待接”提示，不删原功能需求。文档不代替仓库状态，接手仍先核对最新git与当前写入权。
+
+可交给新Codex的一句启动提示：
+
+> 在负责人指定的原工作树/原分支接续Rental OS AI Native原28项，先读本总册第0节和当前正式需求/开发任务；确认旧作者与心跳已停止并明确转交写入权，核对HEAD/status/MERGE_HEAD/CHERRY_PICK_HEAD，保全WIP/output，复用已接固定成果，不回退不重做。按本线在途完整功能包及真实依赖继续，主线只接固定SHA；功能优先、现有小冒烟后推进。严格离线、不读.env/安装/启服务/外联/共享生成物/push/合main/生产启用，Runtime与Provider SDK独立可替换但暂不接入；交付与续派及时更新本总册，不把未验或缺授权说成完成。
 
 ## 1. 权威依据与如何使用本册
 
@@ -69,7 +140,7 @@
 
 A的人类报价选择包、B的LB07、06的模型宿主与07后续若在接管前又产生固定提交，必须先读新交接记录，把已经完成的部分划入复用范围；不能按本表旧快照重复开发，也不能把其WIP当作已验收。
 
-### 已识别的关键接线缺口
+### 2026-10-07已识别的关键接线缺口（历史；当前状态见第0节）
 
 - **首次启动顺序：** 主线模型publisher需要已有RUNNING任务与合法held lease，06现start预检又需要先有plan；必须在06原树补同租约的受权准备阶段，不能造空plan或手写RUNNING。
 - **模型计量与恢复：** 81db55a7提供依赖，不等于已由真实runner驱动并写完整artifact/累计资源；正式runtime/pricing/financialEvidence不能用测试桩代替。
