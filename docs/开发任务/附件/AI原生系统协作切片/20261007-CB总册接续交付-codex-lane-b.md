@@ -1,5 +1,25 @@
 # Codex B 总册接续交付与精确未闭合项
 
+## 2026-10-08 CB09：持久独立主体到原任务创建与只读核对
+
+基线928d4567；依赖本线42626a29的CB08事实revision/事务Outbox（主线已等价接收8861c1d9），不反摘活动主线。本包归属已确认：仅automation新目录、B自己的business-events组合、原AiTaskCreationRepository新增只读方法、最小schema及独占迁移；没有修改人类token解析、Auth/Guard、runner、审批、A scenes、Gateway或根模块。
+
+- 追加 `20261008133000_ai_automation_policy_inputs`，不修改旧迁移。AiAutomationSubject独立id、workspace归属、authorizationRevision、默认enabled=false、有限原权限/locationScope、expiresAt/revokedAt；AiAutomationPolicy默认disabled，支持shadow/manual_confirmation，绑定subject、scene/version、允许事件类型、有效期及maxTasksPerDay/cooldown。没有默认启用政策、凭人类token换actor或自行授予商业权益。政策配置/审批管理入口仍未提供，需受信任生产置备；缺行拒绝。
+- AiAutomationInput固定原eventId/resourceRevision/dedup、subject/authRevision、policy/revision、scene/version、authorityHash与payload/inputHash、expiry、派生creationKey。unique(scope,policyId,policyRevision,eventId)，creationKey唯一；subject/policy/event均tenant/workspace复合FK，input的scopeId+tenant/workspace关联AiScope，原task/run引用再经scopeId复合FK约束。不写正式检查、Memory、Knowledge或日志正文。
+- `PrismaAutomationAuthority`逐次读取当前启用主体、当前政策与workspace、原通知/退款事实；明确失败且revision/订单关联一致才准入，模拟/成功/未知/过期/关闭事件拒绝。按持久有限权限及locationScope读取最少事实，selected范围保守要求订单出还两据点均可见；无订单通知只支持全空间subject。scope/actor由政策产生，不由event body或调用者传入。当前subject授权revision、policy及source头在prepare、create、readCreation前复验，撤权后原输入失效。
+- 复用原三层AiScope/AiBudgetPolicy settings验证、平台/租户/场景enabled及允许模型交集/调用限额，原AiTaskPlanPolicy版本/有效期/limits，以及PrismaSubscriptionBudgetReader + SubscriptionBudgetEntitlementAdapter的正式权益读源；缺任一依赖拒绝。没有选模型、写模型预算账、预占模型费用或第二计费算法。日计数仅元数据任务准入，UTC窗口、每事件每政策版本只占一次；事务锁policy/subject/原event/原事实并冻结输入，不把Runtime checkpoint当授权。
+- 显式入口 `composeAutomationFailureTasks`、`AutomationFailureTasksModule.register` 与 `composeBusinessFailureAutomation` / `BusinessFailureEventsModule.registerAutomation`。服务 `prepare({eventId})`、`read({inputRef})`、`create({inputRef})`、`reconcile({inputRef})` 只接服务器选定policyId；组合不启动worker、不注册HTTP、不派模型/工具/通知/退款，也不生成确认或批准。任务仍由原AiTaskCreationRepository创建queued task和first run，真实AUTOMATION owner、原input/hash与政策列，不另写创建器。
+- create之前先CAS为creation_unknown；同输入其他调用者只核对，不再次调用create。应答丢失按原creationKey/inputRef读取；成功观测不等于业务执行成功。占位后进程崩溃可能尚未调用create，读不到task报告not_observed/unknown + retryable=false，永不解释成失败后可重派。reconcile不修复关联或做任何写入；原任务若已提交而关联未写，仍读回原task/run。prepare重放读到旧input后若事务应答未知，也保留旧inputRef，不返回新生成的无关引用。
+- 原 `AiTaskCreationRepository.readCreation` 是唯一新增方法，复用grant/fingerprint/result/owner/scope与原key；只有findFirst，既不调用newId、upsert、create，也不换键，前后授权变化拒绝。严格当前源/政策检查意味着已解决或撤权后此automation入口不可继续读旧创建材料；后续人类历史核对须另用正式授权入口，不能借本包绕过撤权。
+
+仅扩展原events文件中的一项CB08/CB09完整链，没有新增测试脚本、矩阵或全仓回归。最终 `--test-name-pattern='CB09' tests/ai-native-events-contracts.test.cjs` 1pass/0fail/0skip/0todo，退出0，ts-node transpileOnly=false；验证缺policy/默认停用拒绝、原退款event冻结、重复准备只计一次、原creator并发一次、提交应答丢失读取原task/run且核对零写、占位后没有task不补发、平台gate停用与subject revision撤销。旧CB08通知/退款原事务断言也在此同项运行。没有实际调用模型、支付或网络。
+
+过程中先出现locationScope闭包缩窄/gates数组的TS类型错误；接着事务替身不能structuredClone Prisma.Decimal，并需明确支持原creator授权复验中的独立订阅只读事务，均修复后该同项通过。最后补旧inputRef未知保留时发现randomUUID模板字符串类型过窄，标明string后再次同项通过；未隐藏失败、未改原creator创建逻辑迎合替身。替身不是MySQL锁/隔离证明。
+
+离线命令沿原两个preload、固定无效DATABASE_URL；audit=`output/cb09-automation-audit`，AI_OFFLINE_WRITE_ROOT=本树，TEMP/TMP=原output/inspection-lb05-tmp。本树隔离Prisma生成退出0，schemaHash=`afed8e6386cc9306ad0e3a0240f1a3af9dca6cdc8ed5e4655c917e3a4f28d304`、guardViolations=0、sharedArtifactsUnchanged=true。未执行迁移、置备生产政策、安装、读.env、启动服务、外联、push或合main。真实MySQL FK/并发/故障、UTC跨日/限额深测、生产政策管理与宿主接入仍未验；未称整个CB09/AIN自动化验收完成。
+
+Runtime仅可驱动上述显式服务；恢复必须保持原event、input、creationKey和unknown，不拥有事实、授权、准入或任务收据。Provider SDK继续只在原Gateway边界；本包零模型调用。回退停用显式模块/政策，保留原input/task/run/event；不清理历史输出、不因切引擎创建新任务。人类关闭/反馈学习、其他事件类型与真正审批/执行消费者仍是后续功能，不能把本包元数据任务称自动执行闭环。
+
 ## 2026-10-08 固定公共依赖接入
 
 仅消费主线 `64e9c6cc4302b578d2b3b0bb9f6140f2f2322d65` 的 `prisma-knowledge-policy.source.ts` 精确生产差异：用isDeepStrictEqual比较row.resource与请求resource，保留resourceKey/grantKey及全局/历史收据指纹。没有复制主线schema或其活动文件。既有formal-authorization小冒烟一次3pass/0fail/0skip/0todo，实际ts-node编译与diff check通过；沿原离线preload，audit为本树output/cb-policy-key-order-audit。未在B重复新增主线键序测试，不冒称真实MySQL验证；这是等价公共依赖，主线不要反向重摘。

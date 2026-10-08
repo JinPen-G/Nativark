@@ -59,6 +59,27 @@ export class AiTaskCreationRepository {
     return { taskId: row.id, runId: row.runs[0].id, status: row.status.toLowerCase(), revision: row.revision, replayed };
   }
 
+  async readCreation(value: unknown) {
+    const parsed = commandSchema.safeParse(value);
+    if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
+    const input = parsed.data;
+    const initial = await this.grant(input.sceneCode, input.inputRef, input.creationKey);
+    const where: Prisma.AiTaskWhereInput = {
+      scope: { is: initial.access.scope }, scopeKind: initial.access.scope.kind,
+      audience: initial.access.audience, ownerKind: initial.access.actorKind, ownerId: initial.access.actorId, creationKey: input.creationKey
+    };
+    let row: TaskRow | null = null, observed = false;
+    try { row = await this.db.aiTask.findFirst({ where, select: selectedTask }); observed = true; }
+    catch { /* A failed read cannot prove that the original creation did not commit. */ }
+    const current = await this.grant(input.sceneCode, input.inputRef, input.creationKey);
+    if (current.access.bindingKey !== initial.access.bindingKey) throw new AiTaskRepositoryError("AI_ACCESS_DENIED");
+    if (current.fingerprint !== initial.fingerprint) throw new AiTaskRepositoryError("AI_REVISION_CONFLICT");
+    if (!observed || !row) return { state: observed ? "not_observed" as const : "unknown" as const,
+      creationKey: input.creationKey, retryable: false as const, nextAction: "reconcile" as const, task: null };
+    return { state: "observed" as const, creationKey: input.creationKey, retryable: false as const,
+      nextAction: "read_original_task" as const, task: this.result(row, input.creationKey, initial.fingerprint, true) };
+  }
+
   async create(value: unknown) {
     const parsed = commandSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");

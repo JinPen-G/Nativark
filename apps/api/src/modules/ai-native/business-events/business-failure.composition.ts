@@ -10,6 +10,7 @@ import type { RentalFundingService } from '../../rental-core/rental-funding.serv
 import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { BusinessFailureCandidateService } from './business-failure-candidate.service';
 import { BusinessFailureReadAuthority } from './business-failure-read.authority';
+import { AutomationFailureTasksModule, composeAutomationFailureTasks, type AutomationDependencies } from '../automation/automation.composition';
 import { BUSINESS_FAILURE_OUTBOX, PrismaBusinessFailureOutbox } from './prisma-business-failure-outbox';
 
 export type BusinessFailureDependencies = {
@@ -27,8 +28,16 @@ export function composeBusinessFailureEvents(input: BusinessFailureDependencies)
     candidates: new BusinessFailureCandidateService(input.db, authority, input.clock) };
 }
 
+export function composeBusinessFailureAutomation(input: BusinessFailureDependencies & Pick<AutomationDependencies, 'policyId' | 'subscriptions'>) {
+  return { ...composeBusinessFailureEvents(input), automation: composeAutomationFailureTasks(input) };
+}
+
 @Module({})
 export class BusinessFailureEventsModule {
+  static registerAutomation(input: BusinessFailureDependencies & Pick<AutomationDependencies, 'policyId' | 'subscriptions'>): DynamicModule {
+    const base = this.register(input);
+    return { ...base, imports: [AutomationFailureTasksModule.register(input)], exports: [...(base.exports ?? []), AutomationFailureTasksModule] };
+  }
   static register(input: BusinessFailureDependencies): DynamicModule {
     const services = composeBusinessFailureEvents(input);
     return { module: BusinessFailureEventsModule, providers: [

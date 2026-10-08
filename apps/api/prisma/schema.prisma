@@ -311,6 +311,7 @@ model BusinessWorkspace {
   rentalInspectionRecords           RentalInspectionRecord[]
   aiInspectionDrafts                AiInspectionDraft[]
   aiBusinessFailureEvents           AiBusinessFailureOutbox[]
+  aiAutomationSubjects              AiAutomationSubject[]
   aiInspectionEvidenceBindings      AiInspectionEvidenceBinding[]
   rentalFulfillmentOperators        RentalFulfillmentOperator[]
   rentalTenantBusinessSettingss     RentalTenantBusinessSettings[]
@@ -724,6 +725,88 @@ model AiTaskActionPolicy {
   @@map("ai_task_action_policies")
 }
 
+model AiAutomationSubject {
+  id                    String @id @db.VarChar(36)
+  tenantId              String @db.VarChar(191)
+  workspaceId           String @db.VarChar(191)
+  authorizationRevision Int @default(1) @db.UnsignedInt
+  enabled               Boolean @default(false)
+  permissions           Json
+  locationScope         Json
+  expiresAt             DateTime @db.DateTime(3)
+  revokedAt             DateTime? @db.DateTime(3)
+  createdAt             DateTime @default(now()) @db.DateTime(3)
+  updatedAt             DateTime @updatedAt @db.DateTime(3)
+  workspace             BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_automation_subject_workspace_fk")
+  policies              AiAutomationPolicy[]
+
+  @@unique([tenantId, workspaceId, id], map: "ai_automation_subject_scope_key")
+  @@map("ai_automation_subjects")
+}
+
+model AiAutomationPolicy {
+  id                String @id @db.VarChar(36)
+  tenantId          String @db.VarChar(191)
+  workspaceId       String @db.VarChar(191)
+  subjectId         String @db.VarChar(36)
+  revision          Int @default(1) @db.UnsignedInt
+  mode              String @default("disabled") @db.VarChar(24)
+  sceneCode         String @db.VarChar(64)
+  sceneVersion      String @db.VarChar(64)
+  allowedEventTypes Json
+  maxTasksPerDay    Int @default(0) @db.UnsignedInt
+  cooldownSeconds  Int @default(60) @db.UnsignedInt
+  counterDay       DateTime? @db.DateTime(3)
+  preparedCount    Int @default(0) @db.UnsignedInt
+  lastPreparedAt   DateTime? @db.DateTime(3)
+  validFrom         DateTime @db.DateTime(3)
+  expiresAt         DateTime @db.DateTime(3)
+  revokedAt         DateTime? @db.DateTime(3)
+  createdAt         DateTime @default(now()) @db.DateTime(3)
+  updatedAt         DateTime @updatedAt @db.DateTime(3)
+  subject           AiAutomationSubject @relation(fields: [tenantId, workspaceId, subjectId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_automation_policy_subject_fk")
+  inputs            AiAutomationInput[]
+
+  @@unique([tenantId, workspaceId, subjectId, id], map: "ai_automation_policy_scope_key")
+  @@map("ai_automation_policies")
+}
+
+model AiAutomationInput {
+  id                    String @id @db.VarChar(36)
+  inputRevision         Int @default(1) @db.UnsignedInt
+  tenantId              String @db.VarChar(191)
+  workspaceId           String @db.VarChar(191)
+  scopeId               String @db.VarChar(36)
+  subjectId             String @db.VarChar(36)
+  authorizationRevision Int @db.UnsignedInt
+  policyId              String @db.VarChar(36)
+  policyRevision        Int @db.UnsignedInt
+  eventId               String @db.VarChar(36)
+  resourceRevision      Int @db.UnsignedInt
+  deduplicationKey      String @db.Char(64)
+  sceneCode             String @db.VarChar(64)
+  sceneVersion          String @db.VarChar(64)
+  creationKey           String @unique(map: "ai_automation_input_creation_key") @db.Char(64)
+  payload               Json
+  inputHash             String @db.Char(64)
+  authorityHash         String @db.Char(64)
+  expiresAt             DateTime @db.DateTime(3)
+  status                String @default("prepared") @db.VarChar(24)
+  taskId                String? @db.VarChar(36)
+  runId                 String? @db.VarChar(36)
+  createdAt             DateTime @default(now()) @db.DateTime(3)
+  updatedAt             DateTime @updatedAt @db.DateTime(3)
+  policy                AiAutomationPolicy @relation(fields: [tenantId, workspaceId, subjectId, policyId], references: [tenantId, workspaceId, subjectId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_automation_input_policy_fk")
+  event                 AiBusinessFailureOutbox @relation(fields: [tenantId, workspaceId, eventId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_automation_input_event_fk")
+  scope                 AiScope @relation(fields: [scopeId, tenantId, workspaceId], references: [id, tenantId, workspaceId], onDelete: Restrict, onUpdate: Restrict, map: "ai_automation_input_scope_fk")
+  task                  AiTask? @relation(fields: [scopeId, taskId], references: [scopeId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_automation_input_task_fk")
+  run                   AiRun? @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_automation_input_run_fk")
+
+  @@unique([tenantId, workspaceId, policyId, policyRevision, eventId], map: "ai_automation_input_event_policy_key")
+  @@index([tenantId, workspaceId, status, createdAt], map: "ai_automation_input_status_idx")
+  @@map("ai_automation_inputs")
+}
+
 model AiBusinessFailureOutbox {
   id               String   @id @db.VarChar(36)
   tenantId         String   @db.VarChar(191)
@@ -752,6 +835,8 @@ model AiBusinessFailureOutbox {
   notification     RentalNotificationLog? @relation("AiFailureNotification", fields: [tenantId, workspaceId, notificationId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_notification_fk")
   refund           RentalPaymentRefund? @relation("AiFailureRefund", fields: [tenantId, workspaceId, refundId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_refund_fk")
 
+  automationInputs AiAutomationInput[]
+  @@unique([tenantId, workspaceId, id], map: "ai_failure_outbox_scope_id_key")
   @@unique([tenantId, workspaceId, deduplicationKey], map: "ai_failure_outbox_dedup_key")
   @@index([tenantId, workspaceId, status, nextAttemptAt], map: "ai_failure_outbox_due_idx")
   @@map("ai_business_failure_outbox")
@@ -5403,8 +5488,10 @@ model AiScope {
   profiles    AiProviderProfile[]
   budgetPolicies AiBudgetPolicy[]
   taskPlanPolicies AiTaskPlanPolicy[]
+  automationInputs AiAutomationInput[]
   createdAt   DateTime           @default(now()) @db.DateTime(3)
 
+  @@unique([id, tenantId, workspaceId], map: "ai_scopes_id_workspace_key")
   @@unique([id, kind], map: "ai_scopes_id_kind")
   @@index([tenantId, workspaceId], map: "ai_scopes_tenant_workspace")
   @@map("ai_scopes")
@@ -5448,6 +5535,7 @@ model AiTask {
   events              AiTaskEvent[]
   executionBudget     AiTaskExecutionBudget?
   actionPolicies      AiTaskActionPolicy[]
+  automationInputs    AiAutomationInput[]
 
   @@unique([scopeId, id], map: "ai_tasks_scope_id")
   @@unique([scopeId, id, ownerKind], map: "ai_tasks_scope_actor_kind")
@@ -5488,6 +5576,7 @@ model AiRun {
   executionPlan      AiTaskRunPlan?
   actionInputs       AiTaskActionInput[]
 
+  automationInputs  AiAutomationInput[]
   @@unique([scopeId, taskId, id], map: "ai_runs_scope_task_id")
   @@unique([scopeId, taskId, sequence], map: "ai_runs_sequence")
   @@index([status, leaseExpiresAt], map: "ai_runs_recovery")
