@@ -104,7 +104,10 @@ export class AiTaskTransitionRepository {
               leaseExpiresAt: { gt: current.now }, actorKind: current.actorKind, actorId: current.actorId,
               status: { in: ["QUEUED", "RUNNING"] }
             },
-            data: { revision: { increment: 1 } }
+            // Activation belongs to this task+run transaction, not claimLease:
+            // merely owning a lease must not start execution. A created run is
+            // QUEUED until its aggregate transition has been authorized.
+            data: { revision: { increment: 1 }, ...(input.to === 'running' ? { status: 'RUNNING' as const } : {}) }
           });
           if (held.count !== 1) throw conflict();
           nextRunRevision = lease.revision + 1;
