@@ -1,3 +1,21 @@
+## CA05 临时代班接续：原选择、人类决定与受控建单（20261008）
+
+前置为既有bdfe989c808712243d226ade4c67375dc4e80563选择包；07正式人类审批df86b688导入cdd2bd02、审阅事实c255c4c4导入033796d9。没有重写原选择仓储、审批器、Core或迁移；07后续请求绑定运输及重新准备资格是独立固定依赖，不冒充本片已经接入HTTP。
+
+现有composeHumanQuoteOrder/registerApplication增加readSelectedProposal、decideSelectedProposal、readSelectedDecisionReceipt、submitSelectedOrder、reconcileSelectedOrder。输入只采用严格选择证明+原proposal引用/decision或原受控command；命令仍为服务器应用内部调用，不对外开放lease。每次审阅/决定/提交绑定原请求对应task/run、持久选择inputHash、quoteId、已登记step/action、quote-selection:<selectionId>原输入及被审阅INPUT快照；不能拿另一同金额提案或普通聊天代替选择。审阅沿用原PREVIEW的确定性金额/期限，generatedText=null；decide只调用原AiApprovalService/CAS，order明确not_created_by_decision。提交和核对完全复用controlled.submit/reconcile及原Core事务/审批消费记录。历史核对使用原选择的当前受权历史读，不因原输入/选择到期或停用执行政策而删除已提交订单。
+
+复用tests/ai-native-lane-a-human-quote-selection.test.cjs，新增A专属lane-a-selected-order.cjs。实际原请求保存/task创建、选择、publisher、plan/step登记、提案准备、人类read/decide/readReceipt、RentalOrderConfirmationService及审批消费/Core提交事务被驱动；没有手写APPROVED、COMMITTED或业务成功收据。租约和步骤RUNNING为显式测试前置；数据库为串行事务替身，Core报价/库存/prepareOrder业务事实为既有替身，因此不是运行worker、四品类真实Core算法或MySQL锁验收。独立CA03另验真实首次QUEUED启动，不把两份夹具拼称完整模型→等待批准worker链。
+
+离线环境同CA03，AI_OFFLINE_AUDIT为本树output/ca05-selected-order.audit；初次命令：
+
+`node --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs --require ./tests/fixtures/ai-native/lane-b-local-runtime.cjs --test tests/ai-native-lane-a-human-quote-selection.test.cjs`
+
+初次2pass/2fail：旧选择用例通过，新夹具误传createTask字符串而非正式引用；修正后发现错从registration回执取actionId，改读原已登记step；再修夹具findFirst在relation展开前过滤，保证原审批消费step.is条件真实生效。未改产品授权检查。拒绝决定负例随后通过；最后仅受影响`--test-name-pattern='selected order goes'`复验1pass/0fail/0skip/0todo，退出0。该例验证审批COMMIT应答丢失后原readReceipt、无订单副作用，Core提交应答丢失后原reconcile、选择到期/AI关闭后保留同一订单、跨hash和注销拒绝。不同执行的通过数不相加为一次4/4。API源码rootDir . noEmit同轮退出0，包含本片生产源；diff check退出0。
+
+Runtime依赖边界：选择/提案/审批/原action与原业务幂等收据不迁入引擎，宿主只编排原引用和租约，readReceipt/reconcile不能自动转成submit。Provider SDK只在唯一Gateway后替换；本片没有SDK类型或模型协议调用，模型文字不授审批。回退停止新方法的宿主装配，不撤销历史人类决定、不删除原选择/订单/unknown，不双跑提交。
+
+尚缺：07/06等待批准executor与实际场景运行计划的完整联接、明确拒绝/到期后的新输入/新run重新准备、公共request-bound运输最终消费。CA06/07普通配置/资料仍无已核验版本CAS及原操作收据，不借order.commit；真实HTTP/DB/模型/支付/四品类算法/设备/生产均未验。本片保持opt-in，没有安装、启服务、读.env、共享生成物写入、推送或合main。
+
 ## CA03 临时代班接续：固定模型转换与实际场景运行（20261008）
 
 接手核验HEAD为8de5d833b3385886aff4eb9eb12da2afd9da11d5，源码干净、无MERGE_HEAD/CHERRY_PICK_HEAD；负责人本会话直接授权恢复，主线确认旧Codex停写。沿用现有original-scene-model.composition.createApplication，不新造场景运行器。主线d59ef3d491d0d9ffc493e90d15bca26b9dd35cf0导入为879e2666；缺usage公共修复d035cbaba58f4d0eb8586c4093550560b1bed775导入为85c0953b。
