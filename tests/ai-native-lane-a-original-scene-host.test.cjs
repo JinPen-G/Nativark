@@ -433,7 +433,8 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     reads++; assert.equal(tenantId, 'tenant-client'); assert.equal(getRequestIdentity().workspaceId, 'workspace-client');
     if (revokeDuringRead) revoked = true;
     return { id, tenantId, customerId: id === 'other-order' ? 'another-customer' : 'person-client',
-      status: 'reserved', quoteId: 'quote-client', currency: 'CNY', lines: [], chargeLines: [], allocations: [], internalNote: 'never expose' };
+      status: 'reserved', quoteId: 'quote-client', currency: 'CNY', payableAmount: 0, rentalAmount: 12,
+      lines: [], chargeLines: [], allocations: [], internalNote: 'never expose' };
   } } });
   const source = createAiGuardedClientSession(guard, { current: async () => ({ authorization, ip: '127.0.0.1' }) });
   const app = composeAiClientScenes({ client, session: source });
@@ -560,6 +561,17 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   await assert.rejects(prepare(request, { kind: 'order', orderId: 'own-order', tenantId: 'forged' }), /AI_CLIENT_INVALID_INPUT/);
   const own = await prepare(request, { kind: 'order', orderId: 'own-order' });
   assert.equal(own.material.internalNote, undefined);
+  const explanation = await requests.readOrderExplanation(request, { orderId: 'own-order', question: 'fees' });
+  assert.equal(explanation.facts.amounts.payableAmount.value, 0);
+  assert.equal(explanation.facts.amounts.depositAmount.coverage, 'unknown');
+  assert.equal(explanation.facts.gaps.payments, 'not_loaded_no_received_total_inferred');
+  assert.equal(explanation.facts.customerName, undefined); assert.equal(explanation.facts.internalNote, undefined);
+  assert.equal((await requests.readOrderExplanation(request, { orderId: 'own-order' })).facts.amounts, undefined);
+  await assert.rejects(requests.readOrderExplanation(request, { orderId: 'other-order' }), e => e.getStatus?.() === 404);
+  await assert.rejects(requests.readOrderExplanation(request, { orderId: 'own-order', question: 'sql' }), /AI_CLIENT_INVALID_INPUT/);
+  revokeDuringRead = true;
+  await assert.rejects(requests.readOrderExplanation(request, { orderId: 'own-order' }), e => e.getStatus?.() === 401);
+  revoked = false; revokeDuringRead = false;
   assert.equal(own.durability, 'persisted_client_material_not_task_history');
   const restarted = composeRequestBoundClientApplication(dependencies, configuration);
   assert.equal((await restarted.readSource(request, { materialRef: own.materialRef })).materialHash, own.materialHash);
@@ -630,9 +642,15 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   taskPolicies[0].allowCreate = 0; taskStore.state.aiBudgetPolicy[0].enabled = false;
   assert.equal((await taskRestart.createTask(request, taskCommand)).task.taskId, created.task.taskId);
   assert.equal((await taskRestart.readTaskCreation(request, taskCommand)).task.runId, created.task.runId);
+  const clientScene = await taskRestart.readTaskScene(request, { ...taskCommand, question: 'fees' });
+  assert.equal(clientScene.task.taskId, created.task.taskId);
+  assert.equal(clientScene.facts.orderId, 'own-order'); assert.equal(clientScene.facts.amounts.payableAmount.value, 0);
+  assert.equal(clientScene.taskOutcome, 'not_inferred_from_order_facts');
+  assert.equal(clientScene.execution, 'read_only_no_task_start');
   assert.equal(countCreates(), beforeDuplicate);
   taskPolicies[0].allowRead = 0;
   await assert.rejects(taskRestart.readTaskCreation(request, taskCommand), e => e.code === 'AI_ACCESS_DENIED');
+  await assert.rejects(taskRestart.readTaskScene(request, taskCommand), e => e.code === 'AI_ACCESS_DENIED');
   taskPolicies[0].allowRead = 1; taskPolicies[0].allowCreate = 1; taskStore.state.aiBudgetPolicy[0].enabled = true;
   await assert.rejects(taskRestart.createTask(request, { ...taskCommand, materialRef: distinctCase.materialRef }), e => e.code === 'AI_REVISION_CONFLICT');
   const taskLost = { ...taskCommand, creationKey: 'task-lost-ack' };
@@ -668,6 +686,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     sid: session.id, wid: 'workspace-client', iat: 1, exp: Math.floor(new Date('2027-01-01').getTime() / 1000) })}` } };
   await assert.rejects(requests.readSource(switchedRequest, { materialRef: own.materialRef }), /AI_CLIENT_MATERIAL_STALE/);
   await assert.rejects(taskRestart.readTaskCreation(switchedRequest, taskCommand), /AI_CLIENT_MATERIAL_STALE/);
+  await assert.rejects(taskRestart.readTaskScene(switchedRequest, taskCommand), /AI_CLIENT_MATERIAL_STALE/);
   assert.equal(countCreates(), afterTaskLost);
   session.id = 'session-client';
   published = false;

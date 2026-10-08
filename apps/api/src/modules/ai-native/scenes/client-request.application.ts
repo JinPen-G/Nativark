@@ -12,6 +12,7 @@ import { PrismaClientSceneMaterialRepository, AiClientMaterialError, type AiClie
 import { clientTaskSceneSchema, type AiClientTaskDependencies } from './client-task.authority';
 import { composeClientMaterialTasks } from './client-task.composition';
 import { AiClientTaskUnknownError, clientTaskCommandSchema } from './prisma-client-task-input.repository';
+import { prepareClientOrderExplanation } from './client-order-explanation';
 
 const id = z.string().trim().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const configurationSchema = z.object({ enabled: z.literal(true), tenantCode: id, serviceCode: id,
@@ -24,6 +25,8 @@ const commandSchema = z.discriminatedUnion('kind', [
 const operationSchema = z.object({ operationKey: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
   command: commandSchema }).strict();
 const sourceSchema = z.object({ materialRef: z.string().uuid() }).strict();
+const explanationSchema = z.object({ orderId: id, question: z.enum(['status', 'fees']).default('status') }).strict();
+const taskSceneSchema = clientTaskCommandSchema.extend({ question: z.enum(['status', 'fees']).default('status') }).strict();
 const bearerSchema = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
 export type AiClientRequestConfiguration = z.infer<typeof configurationSchema>;
 export type AiClientApplicationRequest = { headers: { authorization?: unknown }; ip?: string };
@@ -186,6 +189,44 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   return Object.freeze({
     createTask: (request: AiClientApplicationRequest, value: unknown) => taskOperation(request, value, 'create'),
     readTaskCreation: (request: AiClientApplicationRequest, value: unknown) => taskOperation(request, value, 'readCreation'),
+    async readOrderExplanation(request: AiClientApplicationRequest, value: unknown) {
+      const parsed = explanationSchema.safeParse(structuredClone(value));
+      if (!parsed.success) return fail('AI_CLIENT_INVALID_INPUT');
+      const command = freezeOriginalInput(parsed.data);
+      return withBinding(request, true, 'order', async bound => freezeOriginalInput({
+        facts: prepareClientOrderExplanation(await bound.scenes.member.order(command.orderId), command.orderId, command.question),
+        scope: bound.published.scope, publication: bound.published.value, observedAt: clock().toISOString(),
+        execution: 'read_only_no_task_start' as const
+      }));
+    },
+    async readTaskScene(request: AiClientApplicationRequest, value: unknown) {
+      const parsed = taskSceneSchema.safeParse(structuredClone(value));
+      if (!parsed.success) return fail('AI_CLIENT_INVALID_INPUT');
+      if (!taskDependencies) return fail('AI_CLIENT_CAPABILITY_UNAVAILABLE');
+      const { question, ...command } = freezeOriginalInput(parsed.data);
+      return withBinding(request, true, 'order', async bound => {
+        const identity = bound.identity;
+        if (!identity) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
+        const load = async (materialRef: string) => {
+          const row = await repository.findSource(scopeOf(bound), materialRef);
+          if (!row) return fail('AI_CLIENT_MATERIAL_STALE');
+          await verify(bound, row);
+          await bound.assertCurrent();
+          return { row, identity };
+        };
+        const receipt = await composeClientMaterialTasks(taskDependencies, load, clock).readCreation(command);
+        const { row } = await load(command.materialRef), original = commandSchema.parse(row.command);
+        if (original.kind !== 'order') return fail('AI_CLIENT_CAPABILITY_UNAVAILABLE');
+        const facts = prepareClientOrderExplanation(row.material, original.orderId, question);
+        // Read the same original creation receipt again after business awaits;
+        // never select a latest task or grant operator task access.
+        const latest = await composeClientMaterialTasks(taskDependencies, load, clock).readCreation(command);
+        if (jsonHash(receipt) !== jsonHash(latest)) return fail('AI_CLIENT_MATERIAL_STALE');
+        return freezeOriginalInput({ ...receipt, facts, source: { materialRef: row.id, materialHash: row.materialHash,
+          tenantCode: server.tenantCode, serviceCode: server.serviceCode, channel: server.channel },
+          taskOutcome: 'not_inferred_from_order_facts' as const, execution: 'read_only_no_task_start' as const });
+      });
+    },
     async readPublic(request: AiClientApplicationRequest, value: unknown) {
       const input = commandSchema.safeParse(structuredClone(value));
       if (!input.success || !['catalog', 'help'].includes(input.data.kind)) return fail('AI_CLIENT_INVALID_INPUT');
@@ -237,6 +278,8 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       });
     },
     capabilities: Object.freeze({ materialKinds: ['catalog', 'help', 'profile', 'order', 'cancellation_preview'] as const,
+      orderExplanation: 'current_client_order_projection_only' as const,
+      taskScenes: taskDependencies ? 'original_creation_and_order_facts_only' as const : 'unavailable' as const,
       persistentMaterials: 'authenticated_client_session_only' as const, publicReads: ['catalog', 'help'] as const,
       tasks: taskDependencies ? 'create_and_read_only' as const : 'unavailable' as const, models: 'unavailable' as const, events: 'unavailable' as const,
       downloads: 'unavailable' as const, historyMigration: 'unavailable' as const,
