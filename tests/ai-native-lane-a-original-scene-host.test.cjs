@@ -569,6 +569,10 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const clientExplanation = await requests.readOrderExplanation(request, { orderId: 'own-order', question: 'fees' });
   assert.equal(clientExplanation.facts.inspectionFees.value.items[0].amount, 12);
   assert.equal(clientExplanation.facts.inspectionFees.value.items[0].responseStatus, 'pending');
+  const cancelPreview = await requests.readOrderCancellationPreview(request, { orderId: 'own-order' });
+  assert.equal(cancelPreview.preview.cancellationCharge, 12);
+  assert.equal(cancelPreview.handoff.execution, 'not_attempted');
+  assert.equal(cancelPreview.businessResult, 'not_inferred');
   const explanation = await requests.readOrderExplanation(request, { orderId: 'own-order', question: 'fees' });
   assert.equal(explanation.facts.amounts.payableAmount.value, 0);
   assert.equal(explanation.facts.amounts.depositAmount.coverage, 'unknown');

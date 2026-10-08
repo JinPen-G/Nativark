@@ -201,6 +201,21 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         execution: 'read_only_no_task_start' as const
       }));
     },
+    async readOrderCancellationPreview(request: AiClientApplicationRequest, value: unknown) {
+      const parsed = z.object({ orderId: id }).strict().safeParse(structuredClone(value));
+      if (!parsed.success) return fail('AI_CLIENT_INVALID_INPUT');
+      return withBinding(request, true, 'order', async bound => {
+        if (typeof bound.scenes.member.cancellationPreview !== 'function') return fail('AI_CLIENT_CAPABILITY_UNAVAILABLE');
+        const preview = z.object({ orderId: id, cancellationCharge: z.number().finite().nonnegative(),
+          currency: z.string().min(1).max(32), calculatedAt: z.string().datetime({ offset: true }), estimated: z.literal(true) })
+          .passthrough().parse(await bound.scenes.member.cancellationPreview(parsed.data.orderId));
+        if (preview.orderId !== parsed.data.orderId) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
+        return freezeOriginalInput({ preview, handoff: { method: 'POST' as const,
+          path: `/api/client/v1/orders/${encodeURIComponent(preview.orderId)}/cancel`,
+          requiredBodyFields: ['reason'] as const, confirmation: 'explicit_human_action' as const,
+          execution: 'not_attempted' as const }, businessResult: 'not_inferred' as const });
+      });
+    },
     async readTaskScene(request: AiClientApplicationRequest, value: unknown) {
       const parsed = taskSceneSchema.safeParse(structuredClone(value));
       if (!parsed.success) return fail('AI_CLIENT_INVALID_INPUT');
