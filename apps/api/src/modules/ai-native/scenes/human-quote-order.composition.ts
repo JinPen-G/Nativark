@@ -4,6 +4,7 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { composeControlledApprovedOrder, type ControlledApprovedOrderDependencies } from '../approval-execution/controlled-approved-order.composition';
 import { approvedOrderCommandSchema } from '../approval-execution/prisma-approved-order.source';
+import { approvalApplicationContract } from '../approval-execution/approval-application-contracts';
 import { PrismaQuoteSelectionRepository, type HumanQuoteSelectionDependencies } from '../task-request/prisma-quote-selection.repository';
 import { parseQuoteSelectionProof } from '../task-request/quote-selection.validation';
 import type { AiTaskRunnerLease } from '../runner/ai-task-runner.ports';
@@ -26,12 +27,7 @@ const decisionCommand = z.object({ selection: z.unknown(), proposal: reviewRefer
 const executionCommand = z.object({ selection: z.unknown(), command: approvedOrderCommandSchema }).strict();
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 
-/** Server-only application. A choice is immutable material, NOT approval or a
- * lease. The original runner must acquire/start the run and the original AIN07
- * preparation must verify its running step. No worker or HTTP route is installed.
- * Metadata publication and proposal preparation are separate transactions;
- * post-check failure can leave metadata/pending proposal, never an approved order.
- */
+// Publication and preparation are separate transactions; only explicit submit can create an order.
 export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies) {
   const selections = new PrismaQuoteSelectionRepository(dependencies);
   const controlled = composeControlledApprovedOrder(dependencies);
@@ -74,8 +70,8 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
     async readSelectedProposal(value: unknown) {
       const parsed = reviewCommand.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      const { review } = await selectedReview(parsed.data.selection, parsed.data.proposal);
-      return freezeOriginalInput(review);
+      const { ref } = await selectedReview(parsed.data.selection, parsed.data.proposal);
+      return freezeOriginalInput(await controlled.application.readProposal(ref.taskId, parsed.data.proposal));
     },
     async decideSelectedProposal(value: unknown) {
       const parsed = decisionCommand.safeParse(structuredClone(value));
@@ -83,15 +79,23 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
       const { decision, ...reference } = parsed.data.proposal;
       const { ref } = await selectedReview(parsed.data.selection, reference);
       await selections.readAuthorized(ref);
-      const approval = await controlled.approvals.decide(ref.taskId, { ...reference, decision });
-      return freezeOriginalInput({ approval, order: 'not_created_by_decision' as const });
+      const receipt = await controlled.application.decide(ref.taskId, { ...reference, decision });
+      if (receipt.kind !== 'recorded') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return freezeOriginalInput({ approval: receipt.record, order: 'not_created_by_decision' as const });
     },
     async readSelectedDecisionReceipt(value: unknown) {
       const parsed = decisionCommand.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const { decision, ...reference } = parsed.data.proposal;
       const { ref } = await selectedReview(parsed.data.selection, reference);
-      return freezeOriginalInput(await controlled.approvals.readReceipt(ref.taskId, { ...reference, decision }));
+      return freezeOriginalInput(await controlled.application.readReceipt(ref.taskId, { ...reference, decision }));
+    },
+    async readSelectedReprepareEligibility(value: unknown) {
+      const parsed = z.object({ selection: z.unknown(), request: z.unknown() }).strict().safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const request = approvalApplicationContract('AiApprovalReprepareEligibilityRequestDraft', parsed.data.request);
+      const { ref } = await selectedReview(parsed.data.selection, request.original);
+      return freezeOriginalInput(await controlled.application.readReprepareEligibility(ref.taskId, request));
     },
     submitSelectedOrder: (value: unknown) => orderOperation(value, 'submit'),
     reconcileSelectedOrder: (value: unknown) => orderOperation(value, 'reconcile'),

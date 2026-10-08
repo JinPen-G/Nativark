@@ -1,5 +1,36 @@
 # Codex B 总册接续交付与精确未闭合项
 
+## 2026-10-08 CB06：原人类确认到实际准备包的组合证据
+
+按主线续派，复用全部既有Memory生产服务，没有新增wrapper/确认表/默认授权。原file-runtime完整功能用例现在用同一正式Prisma政策组合实例验证：无Memory政策的propose拒绝→精确owner/逐revision政策→实际propose/confirm/confirmationStatus→preparation.collect(includePreferences=true)/revalidate→原revoke/state读回→旧准备包拒绝→重新收集不含被撤回偏好。scope/base与每个memory revision均为独立持久policy行，不用一个通用grantKey冒充。同一请求的Auth/credentials与Knowledge保持一致；确认仍由原Memory consent事务生成，测试没有手填confirmed状态。
+
+沿同一预加载及固定无效DB执行原file-runtime `--test-name-pattern='first creation'`，本次一次运行1pass/0fail/0skip/0todo，退出0；audit为本树output/cb06-consent-input-audit。DB、身份会话、政策置备、存储仍是显式离线替身，原Prisma政策读取/授权服务/确认事务/收据/输入生产消费均为真实代码；无新增生产修复，不把本片验证当新增功能。源码类型检查随ts-node启用，diff0。A已收到原合同与8c3d8b42依赖，实际模型派发/结果来源读回仍由A独占接线，未在B伪称已执行。
+
+Runtime与Provider边界保持：确认/撤回属于原业务事实，知识/偏好只放独立untrusted_data输入分区，不能改Core事实、工具、预算或批准；Runtime重启/替换不能把旧已撤回准备包重新授权。本片没有模型SDK调用或框架安装。
+
+## 2026-10-08 CB07：精确资源政策的实际消费
+
+基线dd6b8ea2。A确认原prepareHeldRun还未消费Knowledge/Memory，本线已交collect/revalidate真实固定接口及限制，A在自己的冻结/结果/来源入口接续，B未写scenes。
+
+发现原PrismaKnowledgeSelectionAdapter将每文档search grant与scope search grant全等比较；HumanKnowledgeService.list对metadata也有同一错误。正式Prisma政策的grantKey包含各自resource，所以合法文档也被拒绝。修复为scope政策保持自身前后复验，每文档政策与其自身读后grant比较，list保存每文档指纹并在最后返回前再次核对；不把不同资源的独立授权合成同一个grant，不改正式policy源或旧receipt指纹。
+
+在原file-runtime完整生命周期用例中增加实际 `management.list → preparation.collect → preparation.revalidate → 精确来源政策撤销拒绝`。定向命令同前两节，仅追加 `--test-name-pattern='first creation'`，audit改本树output/cb07-policy-consumption-audit；最终1pass/0fail/0skip/0todo，退出0，非全文件或全专项验收。最初0pass/1fail源于原离线list替身捕获事务回滚前的Map，已改为每次读取当前db.state.documents；没有隐藏失败或放宽生产权限。没有单独运行旧生产代码红测，不伪报红绿证据。实际ts-node类型检查及diff check通过。真实MySQL JSON键序/索引、正式policy置备、A模型执行闭环仍未验。
+
+本片接口不变，A应复用主线已经接回的HumanKnowledgeInputService及正式policy组合再加此两文件消费修复；不需为了只读chunks重复摘首建文件链。Runtime驱动与Provider SDK均不获得知识授权裁决权，旧包撤权后拒绝而非替换为新来源；回退本消费修复会恢复拒绝行为，不迁移或重写历史operation。
+
+## 2026-10-08 CB05：版本附件接回原revise
+
+依赖固定 `49fc07841b663370b1b71135d42e5614b95c115b`，主线确认继续同一Knowledge/storage分支认领；本节解除上一片“新版本附件上传未实现”的代码缺口，其他未验边界保留。
+
+- 同一 `uploads` 增加 `beginRevision({documentId,targetVersion,expectedRevision,fileName,mimeType,sizeBytes})` / `completeRevision({documentId,targetVersion,expectedRevision,sessionId})`。当前旧documentVersion/aclRevision由原PrismaKnowledgeRepository读取，不由客户端填充；原head revision、未结束parse、deleted或同版本目标均拒绝。upload精确政策新增 `revision:{documentVersion,expectedRevision,aclRevision,targetVersion}` 绑定，已有版本不复用。
+- `FileBusinessOwner.knowledgeRevision` 只在受权服务端装配中传递，原FileAsset metadata保存同一合法上传意图（不是授权凭据）。版本上传键由docId与targetVersion派生，同租户同版共用原唯一键，同版异文件或跨workspace拒绝；旧首建派生键及“已有文档拒绝首建”保持。原complete事务前后重验source head/ACL，重放读取原completed session；不能换成最新head或假报文档已更新。
+- 文件端口 `assertBound` 增加目标documentVersion/expectedRevision，新附件必须与上传时的source快照、target版本一致。原KnowledgeDocumentService.newVersion在入口和save提交前都复验，随后仍调用原revision CAS、version唯一性及immutable operation；不新建版本提交器。原revision操作重放发生在再次绑定前，不重写已提交版本。正文reader再核对附件目标版本与当前文档相符。
+- 原file-runtime测试增加一项完整版本链：无版本upload政策拒绝→并发同版共用session→同版异文件拒绝→首建complete不能消费版本附件→source头/ACL变化拒绝→完成事务应答丢失按原session恢复→原revise/原receipt重放→新版本解析→附件不可改投第三版，未旧版本重用。最终6pass/0fail/0skip/0todo、退出0；首次运行因TS interface与Prisma JSON结构不兼容编译失败，改为字段结构化复制，未用unknown强转绕过。实际ts-node类型编译启用，diff check0。
+
+命令仍是上一节同一测试文件与两个preload，固定无效DATABASE_URL；本次AI_OFFLINE_AUDIT为本树绝对output/cb05-revisions-audit，TEMP/TMP沿原目录。真DB、S3、HTTP/DNS、模型和迁移均未执行；无schema或共享产物修改。测试串行事务替身不能证明MySQL锁隔离。主线已收到公共policy使用JSON.stringify指纹的JSON键顺序兼容隐患：本片不全局改指纹、重算历史收据或迁移政策。
+
+Runtime继续复用原上传session与Knowledge原operation；切引擎不重新begin/complete或给unknown parse换键。SDK仍只可替换受控对象传输，模型调用/权限/原业务收据不迁移。回退停用显式组合即可，保留已有版本和原上传事实。物理附件删除/保留策略、正式政策置备、分布式失效和真实S3不可变版本仍待后续，不称CB05整项验收。
+
 ## 2026-10-08 CB05：首建上传与非URL正文源（Claude接续）
 
 基线 `bea3d85d8eacf043c6149c6dabc638cb4efdc1ec`，本会话唯一施工树仍是 codex-ai-native-lane-b；主线确认本片独占 FileStorageRuntime 的 Knowledge 分支和新增 knowledge-object-reader。原 inspection reader、其他文件业务、Auth/Guard/Core、根模块、schema/迁移及shared总出口均未改。历史output与原开发建议保留。

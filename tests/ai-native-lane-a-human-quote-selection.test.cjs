@@ -9,9 +9,19 @@ const { AI_QUOTE_SELECTION_DRAFT_VERSION } = require('../packages/shared/src/ai-
 const { AiBusinessReadRouteAuthority } = require('../apps/api/src/modules/ai-native/business-read-route.authority');
 const { AiGuardedQuoteCoreContextSource } = require('../apps/api/src/modules/ai-native/tools/quote-route.composition');
 
-async function harness() {
+async function harness(prepareProposal = false) {
   const h = await setup({ aiTaskQuoteSelection: [], aiApprovedOrderSnapshot: [], aiProposal: [],
-    aiProposalVersion: [], aiProposalAction: [], aiApproval: [], aiApprovalConsumption: [], aiTaskResultArtifact: [] });
+    aiProposalVersion: [], aiProposalAction: [], aiApproval: [], aiApprovalConsumption: [], aiTaskResultArtifact: [], aiTaskEvent: [] });
+  if (prepareProposal) {
+    h.b.h.control.now = Date.now();
+    const policy = h.state.aiTaskPlanPolicy.find(row => row.sceneCode === 'quote_clarification');
+    policy.allowedTools = [{ code: 'rental.order.commit', version: require('./fixtures/ai-native/local-shared.cjs').AI_TOOL_DRAFT_VERSION }];
+    policy.limits = { maxSteps: 4, maxCalls: 4, maxTotalMs: 10000, maxStepMs: 1000, maxOutputBytes: 4096, maxConcurrent: 1 };
+    const { aiPersistenceScopeColumns } = require('../apps/api/src/modules/ai-native/persistence-scope');
+    for (const [id, scope] of [['scope-platform', { kind: 'platform' }], ['scope-tenant', { kind: 'tenant', tenantId: 'tenant_001' }]]) h.state.aiScope.push({ id, ...aiPersistenceScopeColumns(scope) });
+    h.state.aiBudgetPolicy = h.b.h.state.aiBudgetPolicy.map(row => JSON.parse(JSON.stringify(row)
+      .replaceAll('tenant-a', 'tenant_001').replaceAll('synthetic-clarification', 'quote_clarification')));
+  }
   const created = await h.app.create(h.command('quote_clarification', 'quote-original'));
   const candidate = await h.app.tools.quote.candidates.prepare(h.b.candidate);
   const preview = await h.app.tools.quote.previewSelection({ ...h.b.candidate, selectionRevision: candidate.selectionRevision });
@@ -36,7 +46,7 @@ async function harness() {
   const Ajv = require('ajv'), ajv = new Ajv({ strict: true }); require('ajv-formats')(ajv);
   const valid = ajv.compile(require('../packages/shared/src/ai-quote-selection-draft-schemas').AI_QUOTE_SELECTION_DRAFT_SCHEMAS.AiQuoteSelectionCreateDraft);
   assert.equal(valid(command), true, JSON.stringify(valid.errors));
-  return { ...h, selections, command, quote, created, repository: new PrismaQuoteSelectionRepository(dependencies) };
+  return { ...h, selections, command, quote, created, orderDependencies: dependencies, repository: new PrismaQuoteSelectionRepository(dependencies) };
 }
 
 test('current human selection is persisted and replayed, but never creates approval/order', { timeout: 30000 }, async () => {
@@ -61,6 +71,13 @@ test('selected order goes through human review and decision before Core commit a
   assert.equal(h.state.records.aiApproval.length, 0); assert.equal(h.state.records.rentalOrder.length, 0);
   const displayed = await h.app.readSelectedProposal(review);
   assert.equal(displayed.deterministic.quoteAmounts.payableAmount, 123); assert.equal(displayed.generatedText, null);
+  assert.equal(displayed.draftVersion, 'ain-approval-application-draft-1'); assert.equal(displayed.facts, undefined);
+  const shared = require('./fixtures/ai-native/local-shared.cjs');
+  assert.equal(shared.AI_QUOTE_SELECTION_DRAFT_VERSION, AI_QUOTE_SELECTION_DRAFT_VERSION);
+  const components = require('../apps/api/src/contracts/ai-leaf-components').AI_LEAF_COMPONENT_SCHEMAS;
+  assert.deepEqual(components.AiApprovalApplicationReviewDraft.properties.generatedText, { type: 'string', nullable: true, enum: [null] });
+  const eligibility = { selection: h.selection, request: { draftVersion: displayed.draftVersion, original: h.proposal, intent: 'inspect' } };
+  assert.equal((await h.app.readSelectedReprepareEligibility(eligibility)).state, 'pending');
   await assert.rejects(h.app.readSelectedProposal({ ...review, selection: { ...h.selection, inputHash: 'f'.repeat(64) } }), e => e.code === 'AI_ACCESS_DENIED');
   const decision = { ...review, proposal: { ...h.proposal, decision: 'approve' } };
   await assert.rejects(h.app.decideSelectedProposal({ ...decision, actorId: 'forged' }), e => e.code === 'AI_INVALID_INPUT');
@@ -81,6 +98,8 @@ test('selected order goes through human review and decision before Core commit a
   const result = await h.compose().reconcileSelectedOrder({ selection: h.selection, command });
   assert.equal(result.replayed, true); assert.equal(result.order.id, h.state.records.aiApprovalConsumption[0].resultRef);
   assert.equal(h.state.commits, 1); assert.equal(h.state.records.rentalOrder.length, 1);
+  const closed = await h.app.readSelectedReprepareEligibility(eligibility);
+  assert.equal(closed.state, 'committed'); assert.equal(closed.canRequestReprepare, false);
   h.state.session = false;
   await assert.rejects(h.app.readSelectedDecisionReceipt(decision), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
 });
@@ -90,10 +109,68 @@ test('selected order rejects a human rejection as execution approval', { timeout
   const h = await selectedOrderHarness();
   const rejected = await h.app.decideSelectedProposal({ selection: h.selection, proposal: { ...h.proposal, decision: 'reject' } });
   assert.equal(rejected.approval.decision, 'rejected'); assert.equal(rejected.order, 'not_created_by_decision');
+  const eligibility = await h.app.readSelectedReprepareEligibility({ selection: h.selection,
+    request: { draftVersion: 'ain-approval-application-draft-1', original: h.proposal, intent: 'change_plan' } });
+  assert.equal(eligibility.state, 'rejected'); assert.equal(eligibility.canRequestReprepare, true);
+  assert.equal(eligibility.nextAction, 'provide_new_materials');
   const { expiresAt, ...base } = h.prepareCommand;
   await assert.rejects(h.app.submitSelectedOrder({ selection: h.selection, command: { ...base,
     approvalId: rejected.approval.approvalId, reviewedPayloadHash: h.proposal.reviewedPayloadHash } }));
   assert.equal(h.state.records.rentalOrder.length, 0); assert.equal(h.state.records.aiApprovalConsumption.length, 0);
+});
+
+test('request-bound quote selection and human decision share only the current request identity', { timeout: 30000 }, async () => {
+  const h = await harness(true), { credentials, originals, ...dependencies } = h.orderDependencies;
+  const { AiHumanQuoteSelectionModule, AI_HUMAN_QUOTE_ORDER_REQUESTS } = require('../apps/api/src/modules/ai-native/task-request/human-quote-selection.module');
+  const { AiHumanQuoteSelectionController, AI_HUMAN_QUOTE_SELECTION_REQUESTS } = require('../apps/api/src/modules/ai-native/task-request/human-quote-selection.controller');
+  const { AI_TOOL_DRAFT_VERSION, AI_PROPOSAL_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
+  const options = { enabled: true, audience: 'operator' }, request = { headers: { authorization: (await credentials.current()).authorization } };
+  const module = AiHumanQuoteSelectionModule.registerHttp(dependencies, options);
+  assert.deepEqual(module.exports, [AI_HUMAN_QUOTE_SELECTION_REQUESTS]);
+  const controller = new AiHumanQuoteSelectionController(module.providers[0].useFactory());
+  assert.throws(() => AiHumanQuoteSelectionModule.registerHttp(h.orderDependencies, options).providers[0].useFactory(), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  await assert.rejects(controller.select({ headers: {} }, h.command), e => e.getStatus() === 403);
+  const first = await controller.select(request, h.command);
+  assert.equal(first.receipt.approval, 'not_granted'); assert.equal(h.state.aiApproval.length, 0);
+  const selection = { draftVersion: AI_QUOTE_SELECTION_DRAFT_VERSION, originalInputRef: h.command.originalInputRef,
+    taskId: h.command.taskId, runId: h.command.runId, selectionId: first.receipt.selectionId, inputHash: first.receipt.inputHash };
+  assert.equal((await controller.read(request, { draftVersion: selection.draftVersion, originalInputRef: selection.originalInputRef,
+    selectionId: selection.selectionId })).selectionId, selection.selectionId);
+  for (const operation of ['read_metadata', 'transition_task', 'decide_approval']) h.state.aiTaskActionPolicy.push({ scopeId: 'scope-a', taskId: selection.taskId,
+    operation, revision: 1, requiredPermissions: [operation === 'read_metadata' ? 'rental-os:order:view' : 'rental-os:order:create'], expiresAt: new Date('2027-01-01') });
+  // Runner lease and step start are explicit preconditions, not HTTP operations.
+  Object.assign(h.state.aiTask[0], { status: 'RUNNING', cancelRequestedAt: null });
+  Object.assign(h.state.aiRun[0], { status: 'RUNNING', leaseOwnerId: 'worker-a', fencingToken: new (require('../apps/api/node_modules/@prisma/client').Prisma.Decimal)('1'),
+    leaseExpiresAt: new Date(h.dependencies.clock().getTime() + 120000) });
+  const lease = () => ({ taskId: selection.taskId, runId: selection.runId, holderId: 'worker-a', fencingToken: '1',
+    revision: h.state.aiRun[0].revision, expiresAt: h.state.aiRun[0].leaseExpiresAt.toISOString() });
+  const published = await h.selections.publishSelectedInput({ selection, expectedTaskRevision: h.state.aiTask[0].revision, lease: lease() });
+  const formal = require('../apps/api/src/modules/ai-native/approval-execution/controlled-approved-order.composition').composeControlledApprovedOrder(h.orderDependencies);
+  await formal.plans.savePlan({ taskId: selection.taskId, runId: selection.runId, taskRevision: h.state.aiTask[0].revision,
+    limits: h.state.aiTaskPlanPolicy.find(row => row.sceneCode === 'quote_clarification').limits,
+    steps: [{ registrationRef: published.registrationRef, operation: 'idempotent', toolCode: 'rental.order.commit', toolVersion: AI_TOOL_DRAFT_VERSION }] }, lease());
+  const { taskId, expiresAt, ...held } = lease();
+  const registered = await formal.registrations.register({ taskId, registrationRef: published.registrationRef, expectedTaskRevision: h.state.aiTask[0].revision, lease: held });
+  const step = h.state.aiStep.find(row => row.id === registered.stepId); step.status = 'RUNNING';
+  const pending = await h.selections.prepareSelectedProposal({ selection, command: { taskId, proposalId: 'request-bound-proposal', proposalRevision: 1,
+    actionId: step.actionId, expiresAt: new Date(h.dependencies.clock().getTime() + 60000).toISOString(), lease: { ...held, revision: h.state.aiRun[0].revision } } });
+  const humanModule = AiHumanQuoteSelectionModule.registerRequestBoundApplication(dependencies, options);
+  assert.deepEqual(humanModule.exports, [AI_HUMAN_QUOTE_ORDER_REQUESTS]); assert.equal(humanModule.controllers, undefined);
+  const app = humanModule.providers[0].useFactory();
+  assert.equal(app.submitSelectedOrder, undefined); assert.equal(app.publishSelectedInput, undefined);
+  const proposal = { contractVersion: AI_PROPOSAL_DRAFT_VERSION, proposalId: 'request-bound-proposal', proposalRevision: 1,
+    reviewedPayloadHash: pending.proposal.reviewedPayloadHash };
+  const view = await app.readSelectedProposal(request, { selection, proposal });
+  assert.equal(view.facts, undefined); assert.equal(view.generatedText, null);
+  const decision = { selection, proposal: { ...proposal, decision: 'approve' } };
+  await assert.rejects(app.decideSelectedProposal({ headers: {} }, decision), e => e.code === 'AI_ACCESS_DENIED');
+  await assert.rejects(app.decideSelectedProposal(request, { ...decision, lease: held }), e => e.code === 'AI_INVALID_INPUT');
+  const approved = await app.decideSelectedProposal(request, decision);
+  assert.equal(approved.approval.decision, 'approved'); assert.equal(approved.order, 'not_created_by_decision');
+  assert.equal((await app.readSelectedDecisionReceipt(request, decision)).record.approvalId, approved.approval.approvalId);
+  assert.equal(h.state.aiApproval.length, 1);
+  h.b.h.identity.session = false;
+  await assert.rejects(app.readSelectedDecisionReceipt(request, decision), e => e.code === 'AI_ACCESS_DENIED');
 });
 
 test('lost selection acknowledgement reconciles exact key and mutated quote cannot prove old input', { timeout: 30000 }, async () => {

@@ -4,6 +4,6 @@ import type { FileBusinessOwner } from '../../integrations/file-storage.runtime.
 export const KNOWLEDGE_FILE_ACCESS = Symbol('KNOWLEDGE_FILE_ACCESS');
 export interface KnowledgeFileAccess {
   authorizeUpload(tenantId: string, input: CreateFileUploadSessionRequest, owner?: FileBusinessOwner): Promise<void>;
-  assertBound(tenantId: string, fileAssetId: string, owner: FileBusinessOwner): Promise<void>;
+  assertBound(tenantId: string, fileAssetId: string, owner: FileBusinessOwner, target?: { documentVersion: string; expectedRevision: number }): Promise<void>;
   read(tenantId: string, fileAssetId: string, owner: FileBusinessOwner, maxBytes: number, signal?: AbortSignal): Promise<{ mediaType: string; bytes: Uint8Array }>;
 }

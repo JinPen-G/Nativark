@@ -1,12 +1,13 @@
-import { Body, Controller, HttpException, Inject, Post } from '@nestjs/common';
-import type { composeAiOriginalScenes } from './original-scenes.composition';
+import { Body, Controller, HttpException, Inject, Post, Req } from '@nestjs/common';
+import type { composeRequestBoundOriginalScenes, AiSceneHttpRequest } from './request-bound-scenes.application';
 import { AI_SCENE_REQUEST_HTTP_DRAFT } from '@rental-os/shared';
 
 export const AI_ORIGINAL_SCENES = Symbol('AI_ORIGINAL_SCENES');
-type Scenes = ReturnType<typeof composeAiOriginalScenes>;
+export const AI_ORIGINAL_SCENE_REQUESTS = Symbol('AI_ORIGINAL_SCENE_REQUESTS');
+type Scenes = ReturnType<typeof composeRequestBoundOriginalScenes>;
 @Controller(AI_SCENE_REQUEST_HTTP_DRAFT.basePath)
 export class AiOriginalScenesController {
-  constructor(@Inject(AI_ORIGINAL_SCENES) private readonly scenes: Scenes) {}
+  constructor(@Inject(AI_ORIGINAL_SCENE_REQUESTS) private readonly scenes: Scenes) {}
   private async respond<T>(work: () => Promise<T>) {
     try { return await work(); }
     catch (error) {
@@ -18,19 +19,19 @@ export class AiOriginalScenesController {
     }
   }
   @Post()
-  create(@Body() body: unknown) { return this.respond(() => this.scenes.create(body)); }
+  create(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.create(request, body)); }
   @Post('read')
-  read(@Body() body: unknown) { return this.respond(() => this.scenes.read(body)); }
+  read(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.read(request, body)); }
   @Post('reissue')
-  reissue(@Body() body: unknown) { return this.respond(() => this.scenes.reissue(body)); }
+  reissue(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.reissue(request, body)); }
   @Post('reconcile')
-  reconcile(@Body() body: unknown) { return this.respond(() => this.scenes.reconcile(body)); }
+  reconcile(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.reconcile(request, body)); }
   @Post('reconcile-reissue')
-  reconcileReissue(@Body() body: unknown) { return this.respond(() => this.scenes.reconcile(body, true)); }
+  reconcileReissue(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.reconcileReissue(request, body)); }
   @Post('create-task')
-  createTask(@Body() body: unknown) { return this.respond(() => this.scenes.createTask(body)); }
+  createTask(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.createTask(request, body)); }
   @Post('material')
-  material(@Body() body: unknown) { return this.respond(() => this.scenes.prepareTaskMaterial(body)); }
+  material(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.prepareTaskMaterial(request, body)); }
   @Post('recovery')
-  recovery(@Body() body: unknown) { return this.respond(() => this.scenes.readRecovery(body)); }
+  recovery(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.readRecovery(request, body)); }
 }

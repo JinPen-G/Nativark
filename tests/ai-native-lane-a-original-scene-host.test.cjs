@@ -14,15 +14,54 @@ test('opt-in module is inert; strict controller uses current authority without s
   const h = await setup(), before = h.trace.length;
   const noHttp = AiOriginalScenesModule.register(h.dependencies);
   assert.equal(noHttp.controllers, undefined); assert.deepEqual(noHttp.exports, [AI_ORIGINAL_SCENES]);
-  const module = AiOriginalScenesModule.registerHttp(h.dependencies), controller = new AiOriginalScenesController(module.providers[0].useFactory());
+  const { credentials, ...dependencies } = h.dependencies;
+  const request = { headers: { authorization: (await credentials.current()).authorization } };
+  const options = { enabled: true, audience: 'operator' };
+  const module = AiOriginalScenesModule.registerHttp(dependencies, options), controller = new AiOriginalScenesController(module.providers[0].useFactory());
+  assert.throws(() => AiOriginalScenesModule.registerHttp(h.dependencies, options).providers[0].useFactory(), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  assert.throws(() => AiOriginalScenesModule.registerHttp(dependencies, { ...options, enabled: false }).providers[0].useFactory(), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
   assert.equal(h.trace.length, before); assert.deepEqual(module.controllers, [AiOriginalScenesController]);
   for (const method of ['create', 'read', 'reissue', 'reconcile', 'reconcileReissue', 'createTask', 'material', 'recovery']) {
     assert.equal(Reflect.getMetadata('path', AiOriginalScenesController.prototype[method]), AI_SCENE_REQUEST_HTTP_DRAFT[method] || '/');
   }
-  await assert.rejects(controller.create({ ...h.command(), actor: 'forged' }), e => e.getStatus() === 400 && e.getResponse().code === 'AI_INVALID_INPUT');
-  const result = await controller.create(h.command()); assert.equal(result.stage, 'task_metadata_created');
+  await assert.rejects(controller.create(request, { ...h.command(), actor: 'forged' }), e => e.getStatus() === 400 && e.getResponse().code === 'AI_INVALID_INPUT');
+  const result = await controller.create(request, h.command()); assert.equal(result.stage, 'task_metadata_created');
+  await assert.rejects(controller.read({ headers: {} }, h.ref(result.receipt.inputRef)), e => e.getStatus() === 403);
+  const loaded = await controller.read(request, h.ref(result.receipt.inputRef));
+  assert.equal(loaded.receipt.inputRef, result.receipt.inputRef);
   h.b.h.identity.session = false;
-  await assert.rejects(controller.read(h.ref(result.receipt.inputRef)), e => e.getStatus() === 403 && e.getResponse().code === 'AI_ACCESS_DENIED');
+  await assert.rejects(controller.read(request, h.ref(result.receipt.inputRef)), e => e.getStatus() === 403 && e.getResponse().code === 'AI_ACCESS_DENIED');
+});
+
+test('request-bound original scenes snapshot commands and never borrow concurrent or ambient identity', { timeout: 30000 }, async () => {
+  const h = await setup(), { credentials, ...dependencies } = h.dependencies;
+  const { composeRequestBoundOriginalScenes } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');
+  const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
+  const app = composeRequestBoundOriginalScenes(dependencies, { enabled: true, audience: 'operator' });
+  const authorization = (await credentials.current()).authorization;
+  const request = { headers: { authorization } }, command = h.command();
+  let unblock, reached;
+  const paused = new Promise(resolve => { reached = resolve; }), resume = new Promise(resolve => { unblock = resolve; });
+  let intercepted = false;
+  h.control.beforeRead = async table => {
+    if (!intercepted && table === 'aiTaskOriginalRequest') { intercepted = true; reached(); await resume; }
+  };
+  const running = app.create(request, command);
+  await paused;
+  try {
+    request.headers.authorization = 'Bearer replacement'; command.input.orderId = 'another-order';
+    command.requestKey = 'mutated-key';
+    await runWithRequestIdentity({ tenantId: 'tenant_001', workspaceId: 'workspace-a', userId: h.b.h.identity.user.id }, async () => {
+      await assert.rejects(app.create({ headers: {} }, h.command('order_explanation', 'forbidden')), e => e.code === 'AI_ACCESS_DENIED');
+      await assert.rejects(app.create({ headers: { authorization: 'Bearer invalid' } }, h.command()), e => e.code === 'AI_ACCESS_DENIED');
+    });
+  } finally { unblock(); }
+  const created = await running;
+  assert.equal(created.receipt.requestKey, 'original-a');
+  assert.equal(h.state.aiTaskOriginalRequest[0].payload.orderId, 'order-a'); assert.equal(h.state.aiTask.length, 1);
+  const beforeRead = h.control.beforeRead;
+  h.control.beforeRead = async table => { await beforeRead(table); if (table === 'aiTaskOriginalRequest') h.b.h.identity.session = false; };
+  await assert.rejects(app.read({ headers: { authorization } }, h.ref(created.receipt.inputRef)), e => e.code === 'AI_ACCESS_DENIED');
 });
 
 test('material handoff reauthorizes originals and contains facts, not stale unavailable preparation wrappers', async () => {

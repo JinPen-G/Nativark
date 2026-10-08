@@ -25,5 +25,5 @@ export function composeKnowledgeFileApplication(input: KnowledgeFileApplicationD
   const fileRuntime = new FileStorageRuntimeService(input.db, input.integrations, undefined, undefined, access);
   const { integrations: _integrations, objectIO: _objectIO, ...base } = input;
   return { ...composePrismaFormalHumanKnowledge({ ...base, policyDb: input.db, fileRuntime }),
-    uploads: new HumanKnowledgeUploadService(session, fileRuntime) };
+    uploads: new HumanKnowledgeUploadService(session, fileRuntime, access.repository) };
 }

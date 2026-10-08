@@ -50,10 +50,13 @@ export class PrismaKnowledgeSelectionAdapter implements KnowledgeSearchAuthoriza
         if (fingerprint(head) !== before || fingerprint(request.document) !== fingerprint(head.document)) unavailable();
         if (!allowed) continue;
         const checked = await authorize({ authorize: async () => allowed }, snapshot, request);
-        if (fingerprint(checked) !== fingerprint(grant)) unavailable();
+        const documentGrant = fingerprint(checked);
         const fresh = await this.repository.read(scope, row.id);
         current();
         if (!fresh || fingerprint(fresh) !== before) unavailable();
+        const latestDocumentGrant = await authorize(this.authorization, snapshot, request);
+        current();
+        if (fingerprint(latestDocumentGrant) !== documentGrant) unavailable();
         documents.push({ documentId: row.id, documentVersion: fresh.document.documentVersion, aclRevision: fresh.document.aclRevision });
       }
       const latest = await authorize(this.authorization, snapshot, { action: 'search', scope });

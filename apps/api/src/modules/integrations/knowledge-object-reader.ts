@@ -48,6 +48,9 @@ export class TenantKnowledgeObjectReader {
       const state = head.state;
       if (!state || typeof state !== 'object' || Array.isArray(state) || !state.document || typeof state.document !== 'object'
         || Array.isArray(state.document) || state.document.attachmentId !== asset.id) throw unavailable();
+      const revision = metadata.knowledgeRevision;
+      if (revision !== undefined && (!revision || typeof revision !== 'object' || Array.isArray(revision)
+        || revision.targetVersion !== state.document.documentVersion)) throw unavailable();
       const config = structuredClone(await wait(this.integrations.runtimeConfig('file', ref.tenantId, 's3_compatible')));
       if (!config) throw unavailable();
       const request = s3ObjectReadRequest(config, asset.storageKey, this.clock());
