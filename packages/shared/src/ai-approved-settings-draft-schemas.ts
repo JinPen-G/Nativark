@@ -42,5 +42,5 @@ export const AI_APPROVED_SETTINGS_DRAFT_SCHEMAS = {
   AiApprovedSettingsDecisionReceiptDraft: { oneOf: [object({ draftVersion, state: literal('recorded'), approval: ref('AiApprovalRecordDraft') }),
     object({ draftVersion, state: literal('not_observed'), nextAction: literal('read_decision_receipt') })] },
   AiApprovedSettingsErrorDraft: object({ draftVersion, code: { enum: ['AI_INVALID_INPUT', 'AI_ACCESS_DENIED', 'AI_REVISION_CONFLICT', 'AI_RESOURCE_UNAVAILABLE', 'AI_RESULT_UNKNOWN', 'SETTINGS_RESULT_UNKNOWN'] },
-    retryable: literal(false), nextAction: { enum: ['read_preparation_receipt', 'read_decision_receipt', 'read_operation', 'revalidate_or_manual'] } })
+    retryable: literal(false), nextAction: { enum: ['read_preparation_receipt', 'read_decision_receipt', 'read_change_receipt', 'read_operation', 'revalidate_or_manual'] } })
 } as const;

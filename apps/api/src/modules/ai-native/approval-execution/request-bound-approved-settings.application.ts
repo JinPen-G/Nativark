@@ -31,6 +31,9 @@ export function composeRequestBoundApprovedSettingsApplication(dependencies: Omi
     } finally { active = false; }
   };
   return Object.freeze({
+    readCurrent: (request: Request) => call(request, app => app.readCurrent()),
+    prepareChange: (request: Request, value: unknown) => call(request, app => app.prepareChange(value)),
+    readChangeReceipt: (request: Request, value: unknown) => call(request, app => app.readChangeReceipt(value)),
     prepare: (request: Request, value: unknown) => call(request, app => app.prepare(value)),
     readPreparationReceipt: (request: Request, value: unknown) => call(request, app => app.readPreparationReceipt(value)),
     readProposal: (request: Request, value: unknown) => call(request, app => app.readProposal(value)),
