@@ -145,6 +145,31 @@ async function approvedNotificationsSmoke() {
   await assert.rejects(() => app.commitApprovedChange(command), error => error.getStatus?.() === 403);
   assert.equal((await app.readOperation({ operationKey: command.operationKey })).state, "committed");
   assert.equal(rows.operations.length, 1);
+  const { AI_TOOL_CODES } = require('@rental-os/shared');
+  const { AI_APPROVED_SETTINGS_DRAFT_VERSION: draftVersion, AI_APPROVED_SETTINGS_TOOL_CODE } = require('../packages/shared/src/ai-approved-settings-draft.ts');
+  const { settingsContract } = require('../apps/api/dist/modules/ai-native/approval-execution/approved-settings-contracts.js');
+  const { composeRequestBoundApprovedSettingsApplication } = require('../apps/api/dist/modules/ai-native/approval-execution/request-bound-approved-settings.application.js');
+  const unavailable = async () => { throw Error('an unregistered settings tool must not request execution dependencies'); };
+  const dependencies = { db, core, guard, auth: { resolveAccessContext: unavailable }, subscriptions: { readCategoryCommercialContext: unavailable },
+    holderId: 'settings-worker', scene: { code: 'tenant.config.propose', version: '1' } };
+  assert.throws(() => composeRequestBoundApprovedSettingsApplication(dependencies, { enabled: false, audience: 'operator' }));
+  assert.throws(() => composeRequestBoundApprovedSettingsApplication({ ...dependencies, credentials: {} }, { enabled: true, audience: 'operator' }));
+  const api = composeRequestBoundApprovedSettingsApplication(dependencies, { enabled: true, audience: 'operator' });
+  const request = { headers: { authorization: 'Bearer settings-test' } };
+  const preparing = { draftVersion, taskId: 'settings-task', runId: 'settings-run', stepId: 'settings-step', proposalId: 'settings-proposal',
+    proposalRevision: 1, changeId: change.changeId, changeHash: change.changeHash };
+  assert.equal((await api.prepare({ headers: {} }, preparing)).error.code, 'AI_ACCESS_DENIED');
+  assert.equal((await api.prepare(request, { ...preparing, payment: {} })).error.code, 'AI_INVALID_INPUT');
+  settingsContract('AiApprovedSettingsPreparationReceiptDraft', { draftVersion, state: 'not_observed', nextAction: 'read_preparation_receipt' }, true);
+  settingsContract('AiApprovedSettingsOperationResultDraft', { draftVersion, ...result }, true);
+  if (!AI_TOOL_CODES.includes(AI_APPROVED_SETTINGS_TOOL_CODE)) {
+    assert.equal((await api.prepare(request, preparing)).error.code, 'AI_RESOURCE_UNAVAILABLE');
+    const reference = { draftVersion, taskId: preparing.taskId, proposalId: preparing.proposalId, proposalRevision: 1, reviewedPayloadHash: 'a'.repeat(64) };
+    assert.equal((await api.decide(request, { ...reference, decision: 'approve' })).error.code, 'AI_RESOURCE_UNAVAILABLE');
+    assert.equal((await api.commitApprovedChange(request, { ...reference, operationKey: 'new-settings-operation', approvalId: 'new-approval' })).error.code, 'AI_RESOURCE_UNAVAILABLE');
+    assert.equal(rows.operations.length, 1);
+    console.log('approved-settings-application: strict transport/explicit opt-in and unregistered-tool fail-closed passed; no simulated registry or positive AI execution claim');
+  }
   console.log("approved-settings: 真实 Core/仓储/Guard 的通知限定、版本/CAS、同事务 participant、unknown 回读与历史幂等通过；DB/Auth/批准 participant 为替身，不是 MySQL/AI 执行器验收");
 }
 
