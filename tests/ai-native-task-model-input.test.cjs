@@ -54,13 +54,13 @@ async function setup() {
   const command = () => ({ taskId: 'task-a', registrationRef: 'summary-a', expectedTaskRevision: h.state.aiTask[0].revision,
     lease: { ...lease, revision: h.state.aiRun[0].revision }, material: structuredClone(material) });
   const planned = { registrationRef: 'summary-a', operation: 'external_unknown', toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION };
-  const register = async () => {
+  const register = async (syntheticStart = true) => {
     await root.plans.savePlan({ taskId: 'task-a', runId: 'run-a', taskRevision: h.state.aiTask[0].revision, steps: [planned], limits: h.plan.limits }, command().lease);
     const { taskId, expiresAt, ...held } = command().lease;
     const registered = await root.registrations.register({ taskId, registrationRef: 'summary-a', expectedTaskRevision: h.state.aiTask[0].revision, lease: held });
     const step = h.state.aiStep[0];
     // Step start is synthetic here; this test covers publication and the Gateway, not runner transitions or MySQL locks.
-    step.status = 'RUNNING';
+    if (syntheticStart) step.status = 'RUNNING';
     const leaseNow = command().lease;
     return { ref: { plan: planned, registered: { ...registered, stepRevision: step.revision } }, lease: leaseNow,
       binding: { taskId, runId: step.runId, stepId: step.id, actionId: step.actionId, inputRef: step.inputRef,
@@ -68,6 +68,100 @@ async function setup() {
   };
   return { ...h, root, config, control, material, command, register };
 }
+
+for (const terminal of ['unknown', 'succeeded', 'missing_usage']) test(`formal model transition persists ${terminal} using bound evidence, never a second dispatch`, async () => {
+  const expectedStatus = terminal === 'succeeded' ? 'succeeded' : 'unknown';
+  const h = await setup(); await h.root.publish(h.command());
+  const r = await h.register(false);
+  const { AiStepTransitionRepository } = require('../apps/api/src/modules/ai-native/ai-step-transition.repository');
+  assert.throws(() => h.root.createTransitionAuthority(undefined));
+  let financial;
+  const authority = h.root.createTransitionAuthority({ readDispatch: async () => {
+    if (!financial) throw Error('no financial fact'); return structuredClone(financial);
+  } });
+  const transitions = new AiStepTransitionRepository(h.db, authority, h.config.clock);
+  const startCommand = h.root.commands.transition('start', r.ref, r.lease, null);
+  const grant = await authority.resolve(startCommand);
+  const validation = require('../apps/api/src/modules/ai-native/task-contract-validation');
+  assert.equal(validation.isAiStepState(grant.next), true);
+  const started = await transitions.transition(startCommand);
+  assert.equal(h.state.aiStep[0].status, 'RUNNING'); assert.equal(h.state.aiStep[0].effect, 'POSSIBLE');
+  r.lease.revision = started.runRevision; r.ref.registered.taskRevision = started.event.taskRevision;
+  r.ref.registered.stepRevision = started.event.data.stepRevision;
+  const prepared = await h.root.invocations.prepare(r.ref, r.lease), step = h.state.aiStep[0];
+  // Explicit persisted crash fixture, not a replacement transition authority.
+  const artifact = { ...step, id: randomUUID(), stepId: step.id, stepFingerprint: step.requestFingerprint,
+    leaseOwnerId: r.lease.holderId, fencingToken: h.state.aiRun[0].fencingToken,
+    outcome: 'RUNNING', payload: {}, contentHash: require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint({}),
+    outputBytes: 0n, activeMs: 0n, completeMeasurement: false, errorCode: null };
+  h.state.aiTaskResultArtifact.push(artifact);
+  for (const resource of ['STEPS', 'CALLS', 'ACTIVE_MS', 'OUTPUT_BYTES']) h.state.aiTaskExecutionCharge.push({
+    ...artifact, chargeId: randomUUID(), resource, status: 'RESERVED', gatewayInvocationId: resource === 'CALLS' ? prepared.invocationId : null,
+    requestFingerprint: 'a'.repeat(64) });
+  if (terminal === 'succeeded') {
+    const executor = await h.root.executors.resolve(TASK_TEXT_MODEL_TOOL, AI_TOOL_DRAFT_VERSION);
+    const result = await executor.execute({ ...r.binding, lease: r.lease }, new AbortController().signal);
+    assert.equal(result.kind, 'succeeded');
+    Object.assign(artifact, { payload: result.payload, completeMeasurement: true, outcome: 'SUCCEEDED',
+      contentHash: require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint(result.payload),
+      outputBytes: BigInt(Buffer.byteLength(JSON.stringify(result.payload))) });
+    h.state.aiTaskResultArtifact[0] = artifact;
+    const invocation = h.state.aiGatewayInvocation[0], config = h.state.aiTaskActionInput[0].payload.configuration;
+    const receipt = { scopeId: step.scopeId, taskId: step.taskId, invocationId: invocation.id,
+      tenantId: 'tenant-a', workspaceId: 'workspace-a', admissionId: randomUUID(), reservationId: randomUUID(),
+      dispatchToken: 'synthetic-dispatch', requestHash: 'a'.repeat(64), state: 'dispatched' };
+    h.state.aiGatewayAccountingReceipt.push(receipt);
+    h.state.aiInvocationAdmission.push({ id: receipt.admissionId, tenantId: receipt.tenantId, workspaceId: receipt.workspaceId,
+      actorId: invocation.actorId, callId: invocation.callId, profileId: config.configId, requestHash: receipt.requestHash,
+      dispatchId: receipt.dispatchToken, revokedAt: null, status: 'completed' });
+    financial = { state: 'dispatched', dispatchToken: receipt.dispatchToken, reservationId: receipt.reservationId,
+      requestId: invocation.callId, callId: invocation.callId, actorId: invocation.actorId, scopeKey: `WORKSPACE:${step.scopeId}`,
+      runId: step.runId, stepId: step.id, actionId: step.actionId, sceneCode: invocation.sceneCode,
+      priceVersion: invocation.priceVersion, configRevision: config.configRevision, configurationHash: invocation.configurationHash };
+  }
+  if (terminal === 'missing_usage') {
+    h.control.result = { text: 'Summary without provider usage' };
+    const executor = await h.root.executors.resolve(TASK_TEXT_MODEL_TOOL, AI_TOOL_DRAFT_VERSION);
+    const result = await executor.execute({ ...r.binding, lease: r.lease }, new AbortController().signal);
+    assert.equal(result.kind, 'unknown'); assert.equal(result.payload.status, 'completed');
+    assert.equal(result.payload.usage.kind, 'unknown'); assert.equal(h.control.events.includes('settle'), false);
+    Object.assign(artifact, { payload: result.payload, outcome: 'UNKNOWN',
+      contentHash: require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint(result.payload),
+      outputBytes: BigInt(Buffer.byteLength(JSON.stringify(result.payload))) });
+    h.state.aiTaskResultArtifact[0] = artifact;
+    for (const charge of h.state.aiTaskExecutionCharge) charge.status = 'UNKNOWN';
+  }
+  const command = h.root.commands.transition(expectedStatus === 'unknown' ? 'unknown' : 'succeed', r.ref, r.lease, artifact.id);
+  const invocation = h.state.aiGatewayInvocation[0], originalActor = invocation.actorId;
+  invocation.actorId = 'foreign';
+  await assert.rejects(transitions.transition(command)); assert.equal(h.state.aiStep[0].status, 'RUNNING');
+  // Use the authenticated persisted invocation owner, never a caller-selected actor.
+  h.state.aiGatewayInvocation[0].actorId = originalActor;
+  if (terminal === 'missing_usage') {
+    const observed = { ...h.state.aiTaskResultArtifact[0] };
+    const reported = { ...observed.payload, usage: { kind: 'reported', inputTokens: 1, outputTokens: 2 } };
+    assert.equal(require('../apps/api/src/modules/ai-native/gateway-contract-validation').isGatewayResult(reported), true);
+    Object.assign(h.state.aiTaskResultArtifact[0], { payload: reported,
+      contentHash: require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint(reported),
+      outputBytes: BigInt(Buffer.byteLength(JSON.stringify(reported))) });
+    await assert.rejects(authority.resolve(command));
+    h.state.aiTaskResultArtifact[0] = observed;
+    await assert.rejects(authority.resolve(h.root.commands.transition('succeed', r.ref, r.lease, artifact.id)));
+  }
+  await authority.resolve(command);
+  const committed = await transitions.transition(command);
+  assert.equal(committed.event.data.status, expectedStatus);
+  assert.equal(h.state.aiStep[0].effect, expectedStatus === 'unknown' ? 'POSSIBLE' : 'NONE');
+  assert.equal(h.control.sent.length, terminal === 'unknown' ? 0 : 1);
+  if (terminal === 'missing_usage') {
+    assert.equal(h.state.aiTaskResultArtifact[0].payload.status, 'completed');
+    assert.equal(h.state.aiTaskResultArtifact[0].payload.usage.kind, 'unknown');
+    assert.equal(h.state.aiTaskResultArtifact[0].completeMeasurement, false);
+    assert.equal(h.control.events.includes('settle'), false);
+  }
+  await assert.rejects(transitions.transition(command));
+  assert.equal(h.control.sent.length, terminal === 'unknown' ? 0 : 1);
+});
 
 test('current-authorized frozen input produces the original plan, step, invocation and one public Gateway call', async () => {
   const h = await setup();

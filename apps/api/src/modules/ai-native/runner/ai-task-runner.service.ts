@@ -59,6 +59,9 @@ function boundedResult(result: AiTaskRunnerEffectResult, maxOutputBytes: number)
   return result;
 }
 
+/** Server composition callback only, never accepted in a task request DTO. */
+export type AiTaskHeldPreparation = (held: { lease: AiTaskRunnerLease; taskRevision: number; signal?: AbortSignal }) => Promise<void>;
+
 export class AiTaskRunner {
   private readonly clock: AiTaskRunnerClock;
 
@@ -79,6 +82,15 @@ export class AiTaskRunner {
 
   // Host interruption stops dispatch, not business facts, reconciliation receipts or lease cleanup.
   async run(input: AiTaskRunnerInput, signal?: AbortSignal): Promise<AiTaskRunnerOutcome> {
+    return this.runInternal(input, signal);
+  }
+
+  async runPrepared(input: AiTaskRunnerInput, prepare: AiTaskHeldPreparation, signal?: AbortSignal): Promise<AiTaskRunnerOutcome> {
+    if (typeof prepare !== 'function' || input.recovery) throw new AiTaskRunnerError('AI_INVALID_INPUT');
+    return this.runInternal(input, signal, prepare);
+  }
+
+  private async runInternal(input: AiTaskRunnerInput, signal?: AbortSignal, prepare?: AiTaskHeldPreparation): Promise<AiTaskRunnerOutcome> {
     if (signal?.aborted) return { status: 'unavailable', completedSteps: 0, cleanupFailed: 0 };
     input = structuredClone(input);
     const recovery = input.recovery === true;
@@ -88,7 +100,7 @@ export class AiTaskRunner {
     if (signal?.aborted) return { status: 'unavailable', completedSteps: 0, cleanupFailed: 0 };
     if (initial.status === 'waiting_input') return { status: 'paused', completedSteps: 0, cleanupFailed: 0 };
     const lease = structuredClone(recovery ? await this.deps.leases.claimRecoveryRun(claimInput) : await this.deps.leases.claimRun(claimInput));
-    return this.runHeld(input, recovery, initial, lease, signal);
+    return this.runHeld(input, recovery, initial, lease, signal, false, prepare);
   }
 
   async recover(lease: AiTaskRunnerRecoveryLease, signal?: AbortSignal): Promise<AiTaskRunnerOutcome> {
@@ -102,7 +114,7 @@ export class AiTaskRunner {
   }
 
   private async runHeld(input: Pick<AiTaskRunnerInput, 'taskId' | 'runId'>, recovery: boolean,
-    initial: AiTaskRunnerTaskMetadata, lease: AiTaskRunnerLease, signal?: AbortSignal, adoptedRecovery = false): Promise<AiTaskRunnerOutcome> {
+    initial: AiTaskRunnerTaskMetadata, lease: AiTaskRunnerLease, signal?: AbortSignal, adoptedRecovery = false, prepare?: AiTaskHeldPreparation): Promise<AiTaskRunnerOutcome> {
     let taskRevision = initial.revision;
     let completedSteps = 0, cleanupFailed = 0, calls = 0, outputBytes = 0;
     let activeResourceTicket: AiTaskRunnerResourceTicket | undefined;
@@ -143,12 +155,24 @@ export class AiTaskRunner {
       if (initial.status === 'waiting_input') return { status: 'paused', completedSteps, cleanupFailed };
       if (!recovery && initial.status === 'queued') {
         if (!this.deps.taskOutcome?.start) return { status: 'unavailable', completedSteps, cleanupFailed };
-        validatePlan(structuredClone(await this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), false)), input);
+        if (!prepare) validatePlan(structuredClone(await this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), false)), input);
         if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
         advance(await this.callBounded(() => this.deps.taskOutcome!.start!({ taskId: input.taskId, taskRevision, lease: structuredClone(lease) }), 5000, 'task_start'));
         initial = { ...initial, status: 'running', revision: taskRevision };
       }
       if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
+      if (prepare) {
+        const controller = new AbortController(), abort = () => controller.abort();
+        signal?.addEventListener('abort', abort, { once: true });
+        try {
+          if (signal?.aborted) abort();
+          await this.callBounded(() => prepare({ lease: structuredClone(lease), taskRevision, signal: controller.signal }), 5000, 'held_prepare');
+        } finally { controller.abort(); signal?.removeEventListener('abort', abort); }
+        const current = await this.deps.leases.readMetadata(input.taskId);
+        if (current.taskId !== input.taskId || current.revision !== taskRevision || current.status !== 'running'
+          || current.cancelRequestedAt !== null) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
+        if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
+      }
       if (this.deps.resources) await this.callBounded(() => this.deps.resources!.open(structuredClone(lease), recovery), 5000, 'resource_open');
       if (signal?.aborted) return { status: 'unavailable', completedSteps, cleanupFailed };
       const plan = validatePlan(structuredClone(await this.deps.plan.resolve(structuredClone(initial), structuredClone(lease), recovery)), input);
