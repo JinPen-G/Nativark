@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { AiInspectionActorScope, AiInspectionSubmissionMaterial, AiInspectionTarget } from '../../../../../../packages/shared/src/ai-inspection-persistence';
+import type { AiInspectionActorScope, AiInspectionSubmissionMaterial, AiInspectionTarget } from '@rental-os/shared';
 import type { RentalCoreService } from '../../rental-core/rental-core.service';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { InspectionActionAuthority } from './inspection-action.authority';

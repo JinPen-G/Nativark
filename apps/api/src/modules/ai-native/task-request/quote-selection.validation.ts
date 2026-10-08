@@ -1,7 +1,6 @@
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
-import { AI_QUOTE_SELECTION_DRAFT_SCHEMAS } from '../../../../../../packages/shared/src/ai-quote-selection-draft-schemas';
-import type { AiQuoteSelectionCreateDraft, AiQuoteSelectionReadDraft } from '../../../../../../packages/shared/src/ai-quote-selection-draft';
+import { AI_QUOTE_SELECTION_DRAFT_SCHEMAS, type AiQuoteSelectionCreateDraft, type AiQuoteSelectionReadDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { freezeOriginalInput } from './original-request.validation';
 

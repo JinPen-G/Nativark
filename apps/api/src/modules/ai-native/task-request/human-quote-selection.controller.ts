@@ -1,5 +1,5 @@
 import { Body, Controller, HttpException, Inject, Post } from '@nestjs/common';
-import { AI_QUOTE_SELECTION_HTTP_DRAFT } from '../../../../../../packages/shared/src/ai-quote-selection-draft';
+import { AI_QUOTE_SELECTION_HTTP_DRAFT } from '@rental-os/shared';
 import type { PrismaQuoteSelectionRepository } from './prisma-quote-selection.repository';
 
 export const AI_HUMAN_QUOTE_SELECTIONS = Symbol('AI_HUMAN_QUOTE_SELECTIONS');

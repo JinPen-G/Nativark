@@ -1,6 +1,6 @@
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { AiOrderRouteContextAuthority, type AiOrderRouteCredentialSource } from '../order-route-context.authority';
-import type { AiInspectionActorScope, AiInspectionTarget } from '../../../../../../packages/shared/src/ai-inspection-persistence';
+import type { AiInspectionActorScope, AiInspectionTarget } from '@rental-os/shared';
 import { InspectionAssistError } from './inspection-assist.validation';
 
 export class InspectionActionAuthority {

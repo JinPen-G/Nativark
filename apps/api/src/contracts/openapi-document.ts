@@ -9,7 +9,7 @@ export interface SchemaObject {
   type?: string;
   format?: string;
   description?: string;
-  enum?: (string | number | boolean)[];
+  enum?: (string | number | boolean | null)[];
   exclusiveMinimum?: boolean;
   exclusiveMaximum?: boolean;
   not?: SchemaObject;

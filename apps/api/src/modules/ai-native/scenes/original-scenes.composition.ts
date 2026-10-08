@@ -7,7 +7,7 @@ import { AiOrderRouteContextAuthority } from '../order-route-context.authority';
 import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import { composeAiAuthorizedBusinessTools } from '../tools/business-tools.composition';
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import { AI_SCENE_REQUEST_DRAFT_VERSION, type AiSceneRequestBody } from '../../../../../../packages/shared/src/ai-scene-request-draft';
+import { AI_SCENE_REQUEST_DRAFT_VERSION, type AiSceneRequestBody } from '@rental-os/shared';
 import { AiCurrentOriginalRequestAuthority, type AiSceneCreationRule } from '../task-request/original-request.authority';
 import { PrismaOriginalRequestRepository } from '../task-request/prisma-original-request.repository';
 import { freezeOriginalInput, originalRequestReferenceSchema, parseOriginalRequest } from '../task-request/original-request.validation';

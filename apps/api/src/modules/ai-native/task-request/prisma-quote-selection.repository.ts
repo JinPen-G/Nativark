@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import type { CreateRentalOrderRequest, RentalQuoteSnapshotV1 } from '@rental-os/shared';
-import { AI_QUOTE_SELECTION_DRAFT_VERSION, type AiQuoteSelectionCreateDraft, type AiQuoteSelectionReceiptDraft } from '../../../../../../packages/shared/src/ai-quote-selection-draft';
-import { AI_SCENE_REQUEST_DRAFT_VERSION } from '../../../../../../packages/shared/src/ai-scene-request-draft';
+import { AI_QUOTE_SELECTION_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION, type AiQuoteSelectionCreateDraft, type AiQuoteSelectionReceiptDraft } from '@rental-os/shared';
 import type { ControlledApprovedOrderDependencies } from '../approval-execution/controlled-approved-order.composition';
 import { AiApprovedOrderRouteAuthority } from '../approval-execution/approved-order-route.authority';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';

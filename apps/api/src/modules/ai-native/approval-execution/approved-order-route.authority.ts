@@ -47,7 +47,7 @@ export class AiApprovedOrderRouteAuthority implements AiApprovedOrderAuthority {
   }
 
   private async authorized<T>(input: Pick<AiApprovedOrderInput, 'context' | 'businessIdempotencyKey' | 'actionFingerprint'>, binding: ApprovedOrderBinding,
-    action: 'execute' | 'replay', consume: (context: AiExecutionContext, body: CreateRentalOrderRequest, userName: string) => Promise<T>) {
+    action: 'execute' | 'replay', consume: (context: AiExecutionContext, body: CreateRentalOrderRequest, userName: string) => Promise<T>, readOnly = false) {
     input = structuredClone(input); binding = structuredClone(binding);
     if (!['execute', 'replay'].includes(action) || !isAiStepExecutionContext(input.context)
       || input.context.actor.kind !== 'user' || input.context.scope.kind !== 'workspace'
@@ -60,9 +60,11 @@ export class AiApprovedOrderRouteAuthority implements AiApprovedOrderAuthority {
       || typeof credential.requestId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(credential.requestId)) throw denied();
     return runWithRequestIdentity({}, async () => {
       const staff = credential.audience === 'staff';
+      if (readOnly && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(body.quoteId)) throw denied();
+      const path = readOnly ? `/quotes/${body.quoteId}` : '/orders';
       const req: { url: string; originalUrl: string; method: string; headers: object; query: object; body: unknown; staffApiRequest: boolean;
         user?: { id: string; tenantId: string; isActive: boolean; isSaasAdmin?: boolean; displayName: string; permissions: string[] } } = {
-        url: '/api/rental/v1/orders', originalUrl: staff ? '/api/staff/v1/orders' : '/api/rental/v1/orders', method: 'POST',
+        url: `/api/rental/v1${path}`, originalUrl: staff ? `/api/staff/v1${path}` : `/api/rental/v1${path}`, method: readOnly ? 'GET' : 'POST',
         headers: { authorization: credential.authorization }, query: {}, body: structuredClone(body), staffApiRequest: staff
       };
       if (await this.guard.canActivate(new ExecutionContextHost([req])) !== true) throw denied();
@@ -96,6 +98,25 @@ export class AiApprovedOrderRouteAuthority implements AiApprovedOrderAuthority {
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw new AiTaskRepositoryError(error.code);
       throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    }
+  }
+
+  async withOrderReview<T>(context: AiExecutionContext, request: CreateRentalOrderRequest,
+    read: (context: AiExecutionContext) => Promise<T>) {
+    if (context.scope.kind !== 'workspace') throw denied();
+    const fingerprint = requestFingerprint(request), key = `ai-order-review:${fingerprint}`;
+    const binding = { tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId,
+      idempotencyKey: key, requestFingerprint: fingerprint, request: structuredClone(request) };
+    const input = { context: structuredClone(context), businessIdempotencyKey: key, actionFingerprint: fingerprint };
+    try {
+      return await this.authorized(input, binding, 'replay', async current => {
+        const result = await read(current);
+        await this.authorized(input, binding, 'replay', async () => undefined, true);
+        return result;
+      }, true);
+    } catch (error) {
+      if (error instanceof AiTaskRepositoryError) throw error;
+      throw denied();
     }
   }
 

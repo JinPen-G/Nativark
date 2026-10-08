@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Controller, Get, Param, Post, Body, Req, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { PrismaInspectionEvidenceAuthority } from "../ai-native/inspection-assist/prisma-inspection-evidence.authority";
-import type { AiInspectionTarget } from "../../../../../packages/shared/src/ai-inspection-persistence";
+import type { AiInspectionTarget } from "@rental-os/shared";
 import type { SystemUserRow } from "@rental-os/shared";
 import { getRequestWorkspaceId } from "../../common/request-identity";
 import { PrismaService } from "../database/prisma.service";

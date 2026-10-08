@@ -9,7 +9,7 @@ import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-ef
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { originalIdentityHash } from '../task-request/original-request.authority';
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
-import { AI_SCENE_REQUEST_DRAFT_VERSION } from '../../../../../../packages/shared/src/ai-scene-request-draft';
+import { AI_SCENE_REQUEST_DRAFT_VERSION } from '@rental-os/shared';
 import { gatewayTextIntentBindingSchema } from '../gateway-intent';
 import { AiOriginalSceneResultService } from './original-scene-result.service';
 import type { PrismaClient } from '@prisma/client';
@@ -22,7 +22,9 @@ export type AiOriginalSceneModelDependencies = AiOriginalSceneDependencies & Mod
   db: ModelDependencies['db'] & Pick<PrismaClient, 'aiTaskResultArtifact'>;
 };
 export type AiOriginalSceneRunDependencies = Pick<AuthorizedPersistentTaskInputComposition,
-  'commands' | 'inputSource' | 'transitionAuthority' | 'financialEvidence' | 'clock' | 'monotonic'>;
+  'inputSource' | 'clock' | 'monotonic'> & {
+  financialEvidence: NonNullable<AuthorizedPersistentTaskInputComposition['financialEvidence']>;
+};
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().positive().max(4294967294);
 const heldSchema = z.object({ original: originalRequestReferenceSchema,
@@ -124,8 +126,8 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       const root = composeAuthorizedPersistentTaskInputRunner({ db: dependencies.db,
         authorization: dependencies, registrationAuthority: model.planAuthority,
         planAuthority: model.planAuthority, toolCatalog: model.toolCatalog, invocations: model.invocations,
-        executors, wall: clock, commands: run?.commands, inputSource: run?.inputSource,
-        transitionAuthority: run?.transitionAuthority,
+        executors, wall: clock, commands: model.commands, inputSource: run?.inputSource,
+        transitionAuthority: model.createTransitionAuthority(run?.financialEvidence),
         financialEvidence: run?.financialEvidence, clock: run?.clock, monotonic: run?.monotonic });
       // Validate/fix the server host now, without claiming or starting work.
       root.createApplication(host);
