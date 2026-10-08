@@ -11,6 +11,7 @@ async function settingsInputSetup() {
   const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
   const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
   const h = await authorizedRunnerHarness({ aiTaskPlanPolicy: [], aiTaskActionInput: [], rentalApprovedSettingsChange: [],
+    aiProposal: [], aiProposalVersion: [], aiProposalAction: [], aiApproval: [], aiApprovalConsumption: [], rentalApprovedSettingsOperation: [],
     businessWorkspace: [{ id: 'workspace-a', tenantId: 'tenant-a', status: 'ACTIVE', categoryVersionId: 'category-a', categoryAdoptionRevision: 1 }] });
   h.state.aiTaskRunPlan.length = 0;
   h.identity.user.permissions.push('rental-os:rules:manage', 'system:params:manage');
@@ -30,10 +31,11 @@ async function settingsInputSetup() {
     core: { readVersionedBusinessSettings: async () => structuredClone(current) }, holderId: 'worker-a',
     scene: { code: 'synthetic-clarification', version: '1' }, clock: () => new Date(h.control.now) });
   const { composeApprovedSettingsApplication } = require('../apps/api/src/modules/ai-native/approval-execution/approved-settings-application.composition');
-  const app = composeApprovedSettingsApplication({ ...h.authorization, db: h.db,
+  const dependencies = { ...h.authorization, db: h.db,
     guard: new ApiAuthGuard(h.authorization.auth, undefined, undefined, undefined, {}),
     core: { readVersionedBusinessSettings: async () => structuredClone(current) }, holderId: 'worker-a',
-    scene: { code: 'synthetic-clarification', version: '1' }, clock: () => new Date(h.control.now) });
+    scene: { code: 'synthetic-clarification', version: '1' }, clock: () => new Date(h.control.now) };
+  const app = composeApprovedSettingsApplication(dependencies);
   await root.policy.put({ expectedRevision: null, enabled: true, limits: h.plan.limits, expiresAt: '2027-01-01T00:00:00Z' });
   const lease = await root.tasks.claimRun(h.claim());
   const reference = { changeId: 'change-a', changeHash };
@@ -41,8 +43,100 @@ async function settingsInputSetup() {
     expectedTaskRevision: h.state.aiTask[0].revision, lease, input });
   const plan = { ...h.clone(h.plan), taskRevision: h.state.aiTask[0].revision,
     steps: [{ registrationRef: 'settings-a', operation: 'idempotent', toolCode: 'tenant.notifications.commit', toolVersion: AI_TOOL_DRAFT_VERSION }] };
-  return { ...h, root, app, lease, publish, reference, current, plan };
+  return { ...h, root, app, lease, publish, reference, current, plan, dependencies };
 }
+
+test('settings participant accepts the runner POSSIBLE start, not an unstarted or foreign holder step', async () => {
+  const h = await settingsInputSetup();
+  await h.publish(); await h.root.plans.savePlan(h.plan, h.lease);
+  const { taskId, expiresAt, ...lease } = h.lease;
+  const registered = await h.root.registrations.register({ taskId, registrationRef: 'settings-a',
+    expectedTaskRevision: h.state.aiTask[0].revision, lease });
+  const step = h.state.aiStep.find(s => s.id === registered.stepId);
+  // Persisted state emitted by the idempotent start transition. No external action.
+  step.status = 'RUNNING'; step.effect = 'POSSIBLE';
+  const { ApprovedSettingsTaskAuthority } = require('../apps/api/src/modules/ai-native/approval-execution/approved-settings-task.authority');
+  const authority = new ApprovedSettingsTaskAuthority({ ...h.authorization, db: h.db, holderId: 'worker-a',
+    scene: { code: 'synthetic-clarification', version: '1' }, clock: () => new Date(h.control.now) });
+  const held = async () => h.db.$transaction(async tx => authority.heldStep(await authority.resolve(taskId, 'execute', tx),
+    step.id, h.reference, tx, h.lease.runId));
+  assert.equal((await held()).id, step.id);
+  h.state.aiStep[0].effect = 'NONE'; await assert.rejects(held());
+  h.state.aiStep[0].effect = 'POSSIBLE'; h.state.aiRun[0].leaseOwnerId = 'other-worker'; await assert.rejects(held());
+});
+
+async function settingsWaitingSetup() {
+  const h = await settingsInputSetup();
+  const { RENTAL_CATEGORY_DEFINITIONS } = require('@rental-os/shared');
+  // Database row-lock/category facts are offline substitutes; proposal and
+  // decision creation, Guard, current task authorization and executor are real.
+  const transaction = h.db.$transaction;
+  h.db.$transaction = (work, options) => transaction(tx => work({ ...tx,
+    $queryRaw: async () => [{ categoryCode: 'CAMERA', categoryVersionId: 'category-a', categoryAdoptionRevision: 1, status: 'ACTIVE' }],
+    rentalCategoryVersion: { findUnique: async () => ({ categoryCode: 'CAMERA', structureVersion: 1, status: 'published',
+      definition: structuredClone(RENTAL_CATEGORY_DEFINITIONS.find(d => d.code === 'camera')) }) }
+  }), options);
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  h.dependencies.core.previewNotificationSettings = async () => ({ settingsRevision: 1,
+    baseSettingsHash: requestFingerprint(h.current.settings), before: h.current.settings.notifications,
+    binding: { categoryVersionId: 'category-a', adoptionRevision: 1 } });
+  h.state.aiTaskActionPolicy.push({ ...h.state.aiTaskActionPolicy.find(p => p.operation === 'transition_task'),
+    operation: 'decide_approval', requiredPermissions: ['rental-os:rules:manage'] });
+  await h.publish(); await h.root.plans.savePlan(h.plan, h.lease);
+  const { taskId, expiresAt, ...lease } = h.lease;
+  const registered = await h.root.registrations.register({ taskId, registrationRef: 'settings-a',
+    expectedTaskRevision: h.state.aiTask[0].revision, lease });
+  const step = h.state.aiStep.find(s => s.id === registered.stepId);
+  step.status = 'RUNNING'; step.effect = 'POSSIBLE';
+  const { composeApprovedSettingsWaiting } = require('../apps/api/src/modules/ai-native/approval-execution/approved-settings-waiting.executor');
+  const waiting = composeApprovedSettingsWaiting(h.dependencies);
+  const input = { taskId, runId: h.lease.runId, stepId: step.id, actionId: step.actionId,
+    inputRef: step.inputRef, fingerprint: step.requestFingerprint,
+    lease: { ...h.lease, revision: h.state.aiRun[0].revision } };
+  const signal = new AbortController().signal;
+  return { ...h, waiting, input, signal };
+}
+
+test('settings executor prepares the actual proposal, waits for a real decision and never treats absence as commit', async () => {
+  const h = await settingsWaitingSetup(), { waiting, input, signal } = h;
+  const first = await waiting.execute(input, signal);
+  assert.equal(first.kind, 'paused'); assert.equal(first.pause, 'confirmation');
+  assert.equal(h.state.aiProposal.length, 1); assert.equal(h.state.aiApproval.length, 0);
+  assert.equal((await waiting.execute(input, signal)).kind, 'paused');
+  assert.equal(h.state.aiProposal.length, 1);
+  assert.equal((await waiting.reconcile(input)).kind, 'unknown');
+  const observed = await waiting.readWaiting(input);
+  await waiting.application.decide({ ...observed.reference, decision: 'reject' });
+  const rejected = await waiting.execute(input, signal);
+  assert.equal(rejected.kind, 'failed'); assert.equal(rejected.errorCode, 'AI_APPROVAL_REJECTED');
+  assert.equal(h.state.rentalApprovedSettingsOperation.length, 0);
+  h.identity.membership = false;
+  await assert.rejects(waiting.readWaiting(input));
+});
+
+test('settings approved execution consumes the original approval and recovers only the original operation receipt', async () => {
+  const h = await settingsWaitingSetup(), { waiting, input, signal } = h;
+  let writes = 0;
+  // Only Core storage is replaced. Actual application/approval participant
+  // commits and validates its durable consumption in the database transaction.
+  h.dependencies.core.commitNotificationSettings = async (_tenant, notifications) => {
+    writes++; h.current.settingsRevision++; h.current.settings.notifications = structuredClone(notifications);
+    return structuredClone(h.current);
+  };
+  h.dependencies.core.refreshCommittedBusinessSettings = async () => {};
+  assert.equal((await waiting.execute(input, signal)).kind, 'paused');
+  const observed = await waiting.readWaiting(input);
+  await waiting.application.decide({ ...observed.reference, decision: 'approve' });
+  const result = await waiting.execute(input, signal);
+  assert.equal(result.kind, 'succeeded'); assert.equal(writes, 1);
+  assert.equal(h.state.aiApprovalConsumption.length, 1);
+  assert.equal(result.payload.businessResultRef, h.state.aiApprovalConsumption[0].resultRef);
+  const recovered = await waiting.reconcile({ ...input, lease: { ...input.lease, purpose: 'recovery_only' } });
+  assert.equal(recovered.kind, 'succeeded'); assert.equal(writes, 1);
+  assert.equal(recovered.payload.businessResultRef, result.payload.businessResultRef);
+  await assert.rejects(waiting.reconcile({ ...input, actionId: 'foreign-action' }));
+  assert.equal(writes, 1);
+});
 
 test('settings original change produces a policy-bound plan and PENDING step with the original domain hash', async () => {
   const h = await settingsInputSetup();

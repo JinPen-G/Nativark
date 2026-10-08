@@ -98,7 +98,7 @@ export class ApprovedSettingsTaskAuthority {
     if ((await tx.aiTask.updateMany({ where: taskWhere, data: { revision: grant.task.revision } })).count !== 1) throw settingsConflict();
     const step = await tx.aiStep.findFirst({ where: { id: stepId, scopeId: grant.scopeId, taskId: grant.task.id } });
     if (!step || (runId && step.runId !== runId) || step.toolCode !== AI_APPROVED_SETTINGS_TOOL_CODE || step.toolVersion !== AI_TOOL_DRAFT_VERSION ||
-        step.inputRef !== change.changeId || step.requestFingerprint !== change.changeHash || step.status !== 'RUNNING' || step.effect !== 'NONE') throw settingsDenied();
+        step.inputRef !== change.changeId || step.requestFingerprint !== change.changeHash || step.status !== 'RUNNING' || step.effect !== 'POSSIBLE') throw settingsDenied();
     const run = await tx.aiRun.findFirst({ where: { id: step.runId, scopeId: grant.scopeId, taskId: grant.task.id } });
     if (!run || run.status !== 'RUNNING' || run.actorKind !== 'USER' || run.actorId !== grant.actor.actorId ||
         run.leaseOwnerId !== this.d.holderId || !run.leaseExpiresAt || run.leaseExpiresAt <= this.clock() || run.fencingToken.lessThanOrEqualTo(0)) throw settingsDenied();
@@ -106,7 +106,7 @@ export class ApprovedSettingsTaskAuthority {
       leaseOwnerId: this.d.holderId, leaseExpiresAt: { gt: this.clock() }, status: 'RUNNING' as const };
     if ((await tx.aiRun.updateMany({ where: runWhere, data: { revision: run.revision } })).count !== 1 ||
         (await tx.aiStep.updateMany({ where: { id: step.id, scopeId: grant.scopeId, taskId: grant.task.id, revision: step.revision,
-          status: 'RUNNING', effect: 'NONE', inputRef: step.inputRef, requestFingerprint: step.requestFingerprint }, data: { revision: step.revision } })).count !== 1) throw settingsConflict();
+          status: 'RUNNING', effect: 'POSSIBLE', inputRef: step.inputRef, requestFingerprint: step.requestFingerprint }, data: { revision: step.revision } })).count !== 1) throw settingsConflict();
     return step;
   }
 }
