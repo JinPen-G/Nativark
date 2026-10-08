@@ -55,6 +55,47 @@ test('current human selection is persisted and replayed, but never creates appro
   await assert.rejects(h.selections.read(read));
 });
 
+test('selected order goes through human review and decision before Core commit and historical recovery', { timeout: 30000 }, async () => {
+  const { selectedOrderHarness } = require('./fixtures/ai-native/lane-a-selected-order.cjs');
+  const h = await selectedOrderHarness(), review = { selection: h.selection, proposal: h.proposal };
+  assert.equal(h.state.records.aiApproval.length, 0); assert.equal(h.state.records.rentalOrder.length, 0);
+  const displayed = await h.app.readSelectedProposal(review);
+  assert.equal(displayed.deterministic.quoteAmounts.payableAmount, 123); assert.equal(displayed.generatedText, null);
+  await assert.rejects(h.app.readSelectedProposal({ ...review, selection: { ...h.selection, inputHash: 'f'.repeat(64) } }), e => e.code === 'AI_ACCESS_DENIED');
+  const decision = { ...review, proposal: { ...h.proposal, decision: 'approve' } };
+  await assert.rejects(h.app.decideSelectedProposal({ ...decision, actorId: 'forged' }), e => e.code === 'AI_INVALID_INPUT');
+  assert.deepEqual(await h.app.readSelectedDecisionReceipt(decision), { kind: 'absent', retryable: false });
+  h.state.decisionAckLost = true;
+  await assert.rejects(h.app.decideSelectedProposal(decision), e => e.code === 'AI_RESULT_UNKNOWN');
+  h.state.decisionAckLost = false;
+  const approved = await h.compose().readSelectedDecisionReceipt(decision);
+  assert.equal(approved.kind, 'recorded'); assert.equal(approved.record.decision, 'approved');
+  assert.equal(h.state.records.aiApproval.length, 1); assert.equal(h.state.records.rentalOrder.length, 0);
+  const { expiresAt, ...base } = h.prepareCommand;
+  const command = { ...base, approvalId: approved.record.approvalId, reviewedPayloadHash: h.proposal.reviewedPayloadHash };
+  h.state.ackLost = true;
+  await assert.rejects(h.app.submitSelectedOrder({ selection: h.selection, command }), e => e.code === 'AI_RESULT_UNKNOWN');
+  h.state.ackLost = false;
+  assert.equal(h.state.records.rentalOrder.length, 1, JSON.stringify(h.state.failures)); assert.equal(h.state.records.aiApprovalConsumption.length, 1);
+  h.state.clock = new Date(Date.now() + 7200000); h.state.records.aiTaskPlanPolicy[0].enabled = false;
+  const result = await h.compose().reconcileSelectedOrder({ selection: h.selection, command });
+  assert.equal(result.replayed, true); assert.equal(result.order.id, h.state.records.aiApprovalConsumption[0].resultRef);
+  assert.equal(h.state.commits, 1); assert.equal(h.state.records.rentalOrder.length, 1);
+  h.state.session = false;
+  await assert.rejects(h.app.readSelectedDecisionReceipt(decision), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
+});
+
+test('selected order rejects a human rejection as execution approval', { timeout: 30000 }, async () => {
+  const { selectedOrderHarness } = require('./fixtures/ai-native/lane-a-selected-order.cjs');
+  const h = await selectedOrderHarness();
+  const rejected = await h.app.decideSelectedProposal({ selection: h.selection, proposal: { ...h.proposal, decision: 'reject' } });
+  assert.equal(rejected.approval.decision, 'rejected'); assert.equal(rejected.order, 'not_created_by_decision');
+  const { expiresAt, ...base } = h.prepareCommand;
+  await assert.rejects(h.app.submitSelectedOrder({ selection: h.selection, command: { ...base,
+    approvalId: rejected.approval.approvalId, reviewedPayloadHash: h.proposal.reviewedPayloadHash } }));
+  assert.equal(h.state.records.rentalOrder.length, 0); assert.equal(h.state.records.aiApprovalConsumption.length, 0);
+});
+
 test('lost selection acknowledgement reconciles exact key and mutated quote cannot prove old input', { timeout: 30000 }, async () => {
   const h = await harness();
   h.control.beforeCommit = async draft => { if (draft.aiTaskQuoteSelection.length && !h.state.aiTaskQuoteSelection.length) h.control.loseReply = true; };
