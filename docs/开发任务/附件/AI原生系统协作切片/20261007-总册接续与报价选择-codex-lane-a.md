@@ -1,3 +1,25 @@
+## CA03/CB07 原场景知识冻结与来源重授权（20261008）
+
+从请求绑定包6f5dbf58接续，固定知识政策1faf979674efefb028b108ad045d5bd125796135已导入f961a1fb1e6ebdf78ee15aed77597a6b7ef34797。主线确认A只消费场景、B维护knowledge。B固定8c3d8b42e7896bd626387c7c1f80406e224fe7d9仅两个生产文件的grant差异已导入f0c8971296695f6ab93f2b434a777e65e27f3254：scope与document分别复验相同resource，不要求不同资源同grantKey。原补丁因B旧上下文take:101而A为take:100不能直接应用，check未写入；逐hunk移植其8增3删，未导入上传测试链、schema或改动其他B逻辑。
+
+现有composeAiOriginalSceneModel可显式接knowledge基础设施，内部用同一A auth、credentials、clock创建composePrismaFormalHumanKnowledge，而非接受预授权服务。原prepareHeldRun只读原请求和Core准备结果，另外收集有界知识与已确认偏好（4来源、每段1000字符、合计16384 UTF-8字节、4偏好），原材料复验后冻结originalInputRef/contentHash/material。缺政策、无结果、未ready或正文不可用不伪造成空ready。订单查询词取原question，开业取原sections，报价使用quote；这是现有词法检索，不宣称语义召回或完备知识库。Core的facts/materialHash保留独立，知识金额、库存、付款说法不覆盖Core；偏好保持preference_not_authority、人选歧义保持human_selection。
+
+原已登记executor对冻结包复验，并在同调用AsyncLocalStorage作用域内扩展原Gateway routing.assertCurrent：保留原路由检查，再校验当前原请求/task身份及冻结来源。Gateway现有发送前/返回后路由检查均复用此检查，不另造transport、不调用SDK、不改变单账或租约转换。结果读者解析同一持久input/step/invocation，复验知识和确认记录后才展示模型文字；来源重开只接受sourceKind=knowledge及已冻结sources索引，重读原source并复验同一result/knowledge hash，不重新搜索替换材料、不接受URL或任意来源。没有知识包的原输入仍按原Core路径读取；读者未配置知识基础设施时不能展示含知识的旧结果。整个包不建立跨Core/知识事务，后校验拒绝不代表已写输入、财务记录或已发模型被回滚。
+
+扩两份既有A测试。原模型夹具继续实际Auth/Guard、原请求、QUEUED启动、lease、计划/登记、Gateway输入/持久调用证据/捕获/资源记录；新增实际正式政策源与知识/记忆Prisma适配、文档create/parse/index/publish及人工propose/confirm/revoke。数据库、精确政策行、文件字节、路由/admission/财务生命周期/模型transport为显式离线替身，不是实际MySQL锁、文件ACL后端、真实HTTP/模型或生产验收。政策行按具体principal/action/resource预置，不用共享grantKey或万能授权回调。测试覆盖三个场景、Core隔离、真实确认偏好、来源索引/URL拒绝、结果不重搜、source-policy撤销、撤回同意、Gateway最后路由复验撤权后零transport，以及缺search政策零输入/计划/invocation；旧成功与未知用量路径一并定向回归。
+
+环境为本树固定离线preload、无效DATABASE_URL、本树AI_OFFLINE_WRITE_ROOT及TMP/TEMP/TMPDIR/XDG_CACHE_HOME/npm_config_cache，DISABLE_V8_COMPILE_CACHE=1；audit为output/ca-knowledge-smoke.audit。首次命令：
+
+`node --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs --require ./tests/fixtures/ai-native/lane-b-local-runtime.cjs --test --test-name-pattern='scene knowledge|original model application' tests/ai-native-lane-a-original-scene-host.test.cjs`
+
+首次1pass/4fail：新executor错误将含routeScene的binding整体传入严格两字段policy，导致CONFIG_INVALID；修为显式sceneCode/maxOutputTokens投影，未放宽schema。仅四项复验3pass/1fail；剩余测试误把重开正文查询计作搜索，按真实SQL text.contains计数修正；随后暴露夹具遗漏撤回同意所需的显式delete政策，补齐该已确认资源的测试政策，不改产品授权。最终仅`--test-name-pattern='scene knowledge stays'`复验1pass/0fail/0skip/0todo，退出0（内部循环三场景，不另算三项）。不同轮次不合称单次5/5。API用上节source paths/隔离Prisma noEmit校验，最终0 diagnostics，diff check退出0；type/smoke audit均无阻断记录。
+
+隔离生成器早前返回失败：临时共享junction清理被严格preload正确拒绝，output/ca-knowledge-generate.audit保留runtime与@alloc两条write-outside-temp；未放宽护栏或删除锁。只读核验新私有client归属、schema及所有files指纹均一致，含AiKnowledgeActionPolicyDelegate；schemaHash=df8e5334143d0c8202d26064fe7b9f5dd510cfc89ceea2bf39941d4162af0022。此为独立客户端状态证据，不将生成命令失败称成功。主线已交安全清理f0ae011bbd03cf36797c895633fb97924ec23513，本包未导入/重跑；旧lock、previous、temp、output一律保留，未动共享生成物、未执行迁移。
+
+独立只读subagent定向审查了三个场景生产文件、两份测试及必要的知识授权/冻结/路由相邻函数，未发现本批新增代码的可复现凭证借用、扩权、跨原请求、来源替换、Core覆盖或无知识路径回归问题；未扩大到全项目审计，也未运行额外测试。
+
+Runtime独立替换继续保持原inputRef、plan/step/fence、知识快照与当前重授权；只迁编排，不搬知识权限、人工确认、Core和财务事实进引擎。Provider SDK仍仅唯一Gateway后的独立transport/protocol边界；本包无SDK类型，模型文本不能授权执行。停止knowledge装配可阻止新知识调用，但不能绕过含知识旧结果的重授权，不能抹历史或自动重派unknown。正常澄清/等待确认phase仍待06固定消费，实际新方案reprepare工厂归07；A只负责后续场景调用，不重造工厂。
+
 ## CA01/05/09 请求绑定场景入口（20261008）
 
 从317826933f8d3f8144ff9eb8a0dbda9e73e40654接续，源码无WIP/未完成git操作，保留output与唯一心跳da772047。主线确认本批原场景/选择module、controller及新request-bound-scenes.application无其他作者争写。

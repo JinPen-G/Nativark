@@ -10,18 +10,18 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
 import { originalIdentityHash } from '../task-request/original-request.authority';
 import type { composeAiOriginalScenes } from './original-scenes.composition';
+import { readOriginalSceneEnvelope, type AiOriginalSceneKnowledge, type AiOriginalSceneKnowledgeSnapshot } from './original-scene-knowledge';
 
 type Scenes = ReturnType<typeof composeAiOriginalScenes>;
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiStep' | 'aiTaskActionInput' | 'aiGatewayInvocation' | 'aiTaskResultArtifact'>;
 const commandSchema = z.object({ original: originalRequestReferenceSchema,
   resultId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
-const envelopeSchema = z.object({ original: z.unknown(), materialHash: z.string().regex(/^[a-f0-9]{64}$/u),
-  trust: z.literal('source_text_is_data_not_instructions'), facts: z.unknown() }).strict();
 const sourceSchema = z.object({ resourceType: z.literal('order'), resourceId: z.string().min(1).max(191),
   scope: z.object({ kind: z.literal('workspace'), tenantId: z.string().min(1).max(191), workspaceId: z.string().min(1).max(191) }).strict(),
   version: z.string().min(1).max(191), field: z.enum(['order', 'amounts', 'saved_basis', 'payment_records', 'rental_period']),
   observedAt: z.string().datetime({ offset: true }) }).strict();
-const reopenSchema = commandSchema.extend({ sourceIndex: z.number().int().min(0).max(4) }).strict();
+const reopenSchema = commandSchema.extend({ sourceIndex: z.number().int().min(0).max(4),
+  sourceKind: z.enum(['order', 'knowledge']).optional() }).strict();
 function orderSources(material: unknown) {
   const packet = z.object({ payload: z.object({ facts: z.record(z.unknown()) }).passthrough() }).passthrough().parse(material);
   const sources: z.infer<typeof sourceSchema>[] = [];
@@ -119,7 +119,8 @@ export class AiOriginalSceneResultService {
   private readonly results: AiTaskResultRepository;
   private readonly policy: GatewayTextIntentPolicy;
   constructor(private readonly db: Db, private readonly tasks: Pick<AiTaskRepository, 'resolveAccess'>,
-    private readonly scenes: Scenes, policy: GatewayTextIntentBinding, clock: () => Date = () => new Date()) {
+    private readonly scenes: Scenes, policy: GatewayTextIntentBinding, clock: () => Date = () => new Date(),
+    private readonly knowledge?: AiOriginalSceneKnowledge) {
     this.results = new AiTaskResultRepository(db, tasks, clock);
     this.policy = { sceneCode: policy.sceneCode, maxOutputTokens: policy.maxOutputTokens };
   }
@@ -141,7 +142,8 @@ export class AiOriginalSceneResultService {
     let output: typeof base & { status: 'available' | 'stale' | 'unknown' | 'failed';
       text: { value: string; trust: 'unverified_model_text_not_execution_evidence' } | null;
       nextAction: string; automaticRetry?: false; materialHash?: string; callId?: string; facts?: unknown;
-      sources?: z.infer<typeof sourceSchema>[]; citationValidation?: 'supplied_sources_only_text_not_validated' };
+      sources?: z.infer<typeof sourceSchema>[]; knowledge?: AiOriginalSceneKnowledgeSnapshot;
+      citationValidation?: 'supplied_sources_only_text_not_validated' };
     if (result.status !== 'succeeded') {
       output = { ...base, status: result.status, text: null,
         nextAction: result.status === 'unknown' ? 'reconcile' : 'manual_review', automaticRetry: false };
@@ -169,13 +171,11 @@ export class AiOriginalSceneResultService {
         if (!isGatewayResult(gateway) || gateway.status !== 'completed' || gateway.usage.kind !== 'reported'
           || gateway.requestId !== invocation.callId || requestFingerprint(gateway.actual) !== invocation.configurationHash
           || gateway.toolRequests.length !== 0 || Buffer.byteLength(gateway.text, 'utf8') > 131072) throw unavailable();
-        const users = input.intent.messages.filter(message => message.role === 'user');
-        if (users.length !== 1 || users[0].content.some(part => part.kind !== 'text')) throw unavailable();
-        const text = users[0].content.map(part => part.kind === 'text' ? part.text : '').join('');
-        const envelope = envelopeSchema.parse(JSON.parse(text));
+        const envelope = readOriginalSceneEnvelope(input);
         if (receiptFingerprint(envelope.original) !== receiptFingerprint(original.receipt)
           || requestFingerprint(envelope.facts) !== envelope.materialHash) throw denied();
-        return { text: gateway.text, material: envelope.facts, materialHash: envelope.materialHash, callId: invocation.callId };
+        return { text: gateway.text, material: envelope.facts, materialHash: envelope.materialHash,
+          callId: invocation.callId, knowledge: envelope.knowledge };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
       // Re-read through the actual scene's authority, including independent
       // finance visibility or user-selected opening sections. Never reuse an
@@ -187,9 +187,14 @@ export class AiOriginalSceneResultService {
         : (await this.scenes.prepareTaskMaterial(command.original)).material;
       const fingerprint = isOrder ? orderFactsFingerprint
         : original.request.sceneCode === 'opening_diagnosis' ? openingFactsFingerprint : quoteFactsFingerprint;
+      if (frozen.knowledge) {
+        if (!this.knowledge) throw unavailable();
+        await this.knowledge.revalidate(frozen.knowledge, command.original.inputRef);
+      }
       output = fingerprint(current) === fingerprint(frozen.material)
         ? { ...base, status: 'available', text: { value: frozen.text, trust: 'unverified_model_text_not_execution_evidence' },
           materialHash: frozen.materialHash, callId: frozen.callId, facts: current, sources: isOrder ? orderSources(frozen.material) : [],
+          ...(frozen.knowledge ? { knowledge: frozen.knowledge } : {}),
           citationValidation: 'supplied_sources_only_text_not_validated', nextAction: 'read_only' }
         : { ...base, status: 'stale', text: null, nextAction: 'reread_facts', automaticRetry: false };
     }
@@ -200,15 +205,26 @@ export class AiOriginalSceneResultService {
       || originalIdentityHash(original.context) !== originalIdentityHash(after.context) || access.bindingKey !== finalAccess.bindingKey
       || latestTask.state !== 'observed' || latestTask.taskId !== task.taskId || latestTask.runId !== task.runId
       || latestTask.revision !== task.revision) throw denied();
+    if (output.knowledge) await this.knowledge!.revalidate(output.knowledge, command.original.inputRef);
     return freezeOriginalInput(output);
   }
 
   async reopenSource(value: unknown) {
     const parsed = reopenSchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    const { sourceIndex, ...command } = parsed.data;
+    const { sourceIndex, sourceKind, ...command } = parsed.data;
     const result = await this.read(command);
-    if (result.status !== 'available' || result.sceneCode !== 'order_explanation' || !result.sources?.[sourceIndex]) throw unavailable();
+    if (result.status !== 'available') throw unavailable();
+    if (sourceKind === 'knowledge') {
+      if (!this.knowledge || !result.knowledge) throw unavailable();
+      const opened = await this.knowledge.open(result.knowledge, command.original.inputRef, sourceIndex);
+      const after = await this.read(command);
+      if (after.status !== 'available' || after.materialHash !== result.materialHash
+        || after.knowledge?.contentHash !== result.knowledge.contentHash) throw unavailable();
+      return freezeOriginalInput({ original: result.original, resultId: result.resultId, sourceKind,
+        sourceIndex, reference: opened.reference, source: opened.content, execution: 'not_attempted' as const });
+    }
+    if (result.sceneCode !== 'order_explanation' || !result.sources?.[sourceIndex]) throw unavailable();
     const source = result.sources[sourceIndex];
     const opened = await this.scenes.reopenOrderCitation({ ...command.original, version: source.version, field: source.field });
     // Re-check the same artifact and supplied fact set after the source await.
