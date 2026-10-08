@@ -25,7 +25,7 @@ export class ApprovedOrderHumanAuthority {
     this.entitlements = new SubscriptionBudgetEntitlementAdapter(new PrismaSubscriptionBudgetReader(d.db, d.subscriptions, this.clock));
   }
 
-  async resolve(taskId: string, tx?: Prisma.TransactionClient) {
+  async resolve(taskId: string, tx?: Prisma.TransactionClient, operation: 'decide_approval' | 'reprepare_approval' = 'decide_approval') {
     try {
       const current = await this.policy.authorizeRead(taskId, tx), { context, scopeId } = current;
       if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace'
@@ -36,8 +36,9 @@ export class ApprovedOrderHumanAuthority {
         contractVersion: true, revision: true, sceneCode: true, sceneVersion: true, status: true, cancelRequestedAt: true } });
       if (!task || task.contractVersion !== AI_TASK_DRAFT_VERSION || !validRevision(task.revision)
         || task.sceneCode !== this.d.scene.code || task.sceneVersion !== this.d.scene.version
-        || !['RUNNING', 'WAITING_CONFIRMATION'].includes(task.status) || task.cancelRequestedAt !== null) throw deniedOrder();
-      const key = { scopeId, taskId, operation: 'decide_approval' };
+        || !(operation === 'decide_approval' ? ['RUNNING', 'WAITING_CONFIRMATION'] : ['RUNNING', 'WAITING_CONFIRMATION', 'FAILED', 'CANCELLED']).includes(task.status)
+        || (operation === 'decide_approval' && task.cancelRequestedAt !== null)) throw deniedOrder();
+      const key = { scopeId, taskId, operation };
       const policy = await db.aiTaskActionPolicy.findUnique({ where: { scopeId_taskId_operation: key }, select: {
         scopeId: true, taskId: true, operation: true, revision: true, requiredPermissions: true, expiresAt: true } });
       if (!policy || Object.entries(key).some(([k, v]) => policy[k as keyof typeof policy] !== v)

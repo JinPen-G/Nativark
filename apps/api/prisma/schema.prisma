@@ -5339,6 +5339,7 @@ model AiRun {
   executionCharges   AiTaskExecutionCharge[]
   executionPlan      AiTaskRunPlan?
   actionInputs       AiTaskActionInput[]
+  reprepareTargets   AiApprovalReprepare[]
 
   @@unique([scopeId, taskId, id], map: "ai_runs_scope_task_id")
   @@unique([scopeId, taskId, sequence], map: "ai_runs_sequence")
@@ -5368,6 +5369,7 @@ model AiStep {
   createdAt           DateTime           @default(now()) @db.DateTime(3)
   updatedAt           DateTime           @updatedAt @db.DateTime(3)
   proposalActions     AiProposalAction[]
+  reprepareTargets    AiApprovalReprepare[]
   gatewayInvocations  AiGatewayInvocation[]
   executionCharges    AiTaskExecutionCharge[]
   resultArtifacts     AiTaskResultArtifact[]
@@ -5413,6 +5415,8 @@ model AiProposalVersion {
   currentFor   AiProposal[]       @relation("AiProposalCurrent")
   actions      AiProposalAction[]
   approvals    AiApproval[]
+  originalReprepares AiApprovalReprepare[] @relation("AiReprepareOriginal")
+  replacementReprepares AiApprovalReprepare[] @relation("AiReprepareReplacement")
 
   @@id([scopeId, proposalId, revision])
   @@unique([scopeId, taskId, proposalId, revision], map: "ai_proposal_versions_scope_task")
@@ -5433,6 +5437,7 @@ model AiProposalAction {
   step               AiStep                  @relation(fields: [scopeId, taskId, actionId, requestFingerprint], references: [scopeId, taskId, actionId, requestFingerprint], onDelete: Restrict, onUpdate: Restrict)
   consumptions       AiApprovalConsumption[]
   snapshots          AiApprovedOrderSnapshot[]
+  reprepares         AiApprovalReprepare[]
 
   @@id([scopeId, proposalId, proposalRevision, actionId])
   @@unique([scopeId, taskId, proposalId, proposalRevision, actionId, requestFingerprint], map: "ai_proposal_actions_binding")
@@ -5511,6 +5516,44 @@ model AiApprovalConsumption {
   @@id([scopeId, taskId, actionId])
   @@index([scopeId, businessIdempotencyKey], map: "ai_consumptions_business_key")
   @@map("ai_approval_consumptions")
+}
+
+model AiApprovalReprepare {
+  id                     String @id @db.VarChar(36)
+  scopeId                String @db.VarChar(36)
+  operationKey           String @db.VarChar(191)
+  commandHash            String @db.Char(64)
+  actorId                String @db.VarChar(191)
+  audience               AiAudience
+  originalTaskId         String @db.VarChar(36)
+  originalProposalId     String @db.VarChar(36)
+  originalRevision       Int @db.UnsignedInt
+  originalPayloadHash    String @db.Char(64)
+  originalActionId       String @db.VarChar(191)
+  originalFingerprint    String @db.Char(64)
+  replacementTaskId      String @db.VarChar(36)
+  replacementRunId       String @db.VarChar(36)
+  replacementActionId    String @db.VarChar(191)
+  replacementFingerprint String @db.Char(64)
+  replacementInputRef    String @db.VarChar(36)
+  originalInputRef       String @db.VarChar(191)
+  quoteSelectionRef      String @db.VarChar(36)
+  planHash               String @db.Char(64)
+  proofHash              String @db.Char(64)
+  replacementProposalId  String @db.VarChar(36)
+  replacementRevision    Int @db.UnsignedInt
+  replacementPayloadHash String @db.Char(64)
+  createdAt              DateTime @default(now()) @db.DateTime(3)
+  originalVersion AiProposalVersion @relation("AiReprepareOriginal", fields: [scopeId, originalTaskId, originalProposalId, originalRevision, originalPayloadHash], references: [scopeId, taskId, proposalId, revision, payloadHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_reprepares_original_version_fk")
+  originalAction AiProposalAction @relation(fields: [scopeId, originalTaskId, originalProposalId, originalRevision, originalActionId, originalFingerprint], references: [scopeId, taskId, proposalId, proposalRevision, actionId, requestFingerprint], onDelete: Restrict, onUpdate: Restrict, map: "ai_reprepares_original_action_fk")
+  replacementRun AiRun @relation(fields: [scopeId, replacementTaskId, replacementRunId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_reprepares_replacement_run_fk")
+  replacementStep AiStep @relation(fields: [scopeId, replacementTaskId, replacementActionId, replacementFingerprint], references: [scopeId, taskId, actionId, requestFingerprint], onDelete: Restrict, onUpdate: Restrict, map: "ai_reprepares_replacement_step_fk")
+  replacementVersion AiProposalVersion @relation("AiReprepareReplacement", fields: [scopeId, replacementTaskId, replacementProposalId, replacementRevision, replacementPayloadHash], references: [scopeId, taskId, proposalId, revision, payloadHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_reprepares_replacement_version_fk")
+
+  @@unique([scopeId, operationKey], map: "ai_reprepares_operation_key")
+  @@unique([scopeId, originalTaskId, originalProposalId, originalRevision], map: "ai_reprepares_original_key")
+  @@unique([scopeId, replacementTaskId, replacementActionId], map: "ai_reprepares_replacement_key")
+  @@map("ai_approval_reprepares")
 }
 
 /// Append in the task mutation transaction; each task has its own string-serialized cursor.
