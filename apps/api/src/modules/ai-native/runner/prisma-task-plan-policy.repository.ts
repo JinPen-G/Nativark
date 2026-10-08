@@ -43,7 +43,7 @@ export class PrismaTaskPlanPolicyRepository {
     private readonly wall: () => Date = () => new Date()) {
     this.selected = scene.parse(structuredClone(input.scene));
     this.tool = input.tool ?? 'rental.catalog.search';
-    if (!['rental.catalog.search', 'rental.availability.check', 'rental.order.commit', TASK_TEXT_MODEL_TOOL].includes(this.tool)) throw unavailable();
+    if (!['rental.catalog.search', 'rental.availability.check', 'rental.order.commit', 'tenant.notifications.commit', TASK_TEXT_MODEL_TOOL].includes(this.tool)) throw unavailable();
     if (typeof db?.$transaction !== 'function' || typeof db.aiTaskPlanPolicy?.updateMany !== 'function') throw unavailable();
     const current = new AiTaskCurrentIdentityAuthority(input.auth, input.credentials, wall);
     this.scopes = new AiScopeRepository(db, current, wall);

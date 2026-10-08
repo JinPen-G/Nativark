@@ -5,6 +5,101 @@ const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorize
 const { composePersistedTaskAuthorization } = require('../apps/api/src/modules/ai-native/task-authorization.composition');
 const { PrismaTaskPlanInputSource } = require('../apps/api/src/modules/ai-native/runner/prisma-task-plan-input.source');
 const { AI_TOOL_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
+
+async function settingsInputSetup() {
+  const { composePersistedSettingsTaskInput } = require('../apps/api/src/modules/ai-native/settings-task-input.composition');
+  const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const h = await authorizedRunnerHarness({ aiTaskPlanPolicy: [], aiTaskActionInput: [], rentalApprovedSettingsChange: [],
+    businessWorkspace: [{ id: 'workspace-a', tenantId: 'tenant-a', status: 'ACTIVE', categoryVersionId: 'category-a', categoryAdoptionRevision: 1 }] });
+  h.state.aiTaskRunPlan.length = 0;
+  h.identity.user.permissions.push('rental-os:rules:manage', 'system:params:manage');
+  h.state.aiTaskActionPolicy.find(p => p.operation === 'transition_task').requiredPermissions = ['rental-os:rules:manage'];
+  const settings = { tenantId: 'tenant-a', notifications: { enabledEvents: ['order.created'], editableChannels: ['email'] } };
+  const material = { id: 'change-a', tenantId: 'tenant-a', workspaceId: 'workspace-a', actorId: 'user-a', changeKey: 'original-key',
+    baseRevision: 1, baseSettingsHash: requestFingerprint(settings), categoryVersionId: 'category-a', categoryAdoptionRevision: 1,
+    beforeNotifications: settings.notifications, afterNotifications: { enabledEvents: ['order.created'], editableChannels: ['sms'] },
+    expiresAt: '2026-10-07T12:00:00.000Z' };
+  const changeHash = requestFingerprint(material);
+  h.state.rentalApprovedSettingsChange.push({ ...material, changeHash, expiresAt: new Date(material.expiresAt), createdAt: h.control.now });
+  const current = { settingsRevision: 1, settings };
+  // Only persisted facts/Core read and database are doubles. Auth, Guard, plan
+  // source, policy, plan repository and step registration are actual code.
+  const root = composePersistedSettingsTaskInput({ ...h.authorization, db: h.db,
+    guard: new ApiAuthGuard(h.authorization.auth, undefined, undefined, undefined, {}),
+    core: { readVersionedBusinessSettings: async () => structuredClone(current) }, holderId: 'worker-a',
+    scene: { code: 'synthetic-clarification', version: '1' }, clock: () => new Date(h.control.now) });
+  const { composeApprovedSettingsApplication } = require('../apps/api/src/modules/ai-native/approval-execution/approved-settings-application.composition');
+  const app = composeApprovedSettingsApplication({ ...h.authorization, db: h.db,
+    guard: new ApiAuthGuard(h.authorization.auth, undefined, undefined, undefined, {}),
+    core: { readVersionedBusinessSettings: async () => structuredClone(current) }, holderId: 'worker-a',
+    scene: { code: 'synthetic-clarification', version: '1' }, clock: () => new Date(h.control.now) });
+  await root.policy.put({ expectedRevision: null, enabled: true, limits: h.plan.limits, expiresAt: '2027-01-01T00:00:00Z' });
+  const lease = await root.tasks.claimRun(h.claim());
+  const reference = { changeId: 'change-a', changeHash };
+  const publish = (input = reference) => app.publishTaskInput({ taskId: 'task-a', registrationRef: 'settings-a',
+    expectedTaskRevision: h.state.aiTask[0].revision, lease, input });
+  const plan = { ...h.clone(h.plan), taskRevision: h.state.aiTask[0].revision,
+    steps: [{ registrationRef: 'settings-a', operation: 'idempotent', toolCode: 'tenant.notifications.commit', toolVersion: AI_TOOL_DRAFT_VERSION }] };
+  return { ...h, root, app, lease, publish, reference, current, plan };
+}
+
+test('settings original change produces a policy-bound plan and PENDING step with the original domain hash', async () => {
+  const h = await settingsInputSetup();
+  const published = await h.publish();
+  assert.equal((await h.publish()).id, published.id);
+  await h.root.plans.savePlan(h.plan, h.lease);
+  const { taskId, expiresAt, ...lease } = h.lease;
+  const registered = await h.root.registrations.register({ taskId, registrationRef: 'settings-a',
+    expectedTaskRevision: h.state.aiTask[0].revision, lease });
+  const step = h.state.aiStep.find(s => s.id === registered.stepId);
+  assert.equal(step.inputRef, h.reference.changeId);
+  assert.equal(step.requestFingerprint, h.reference.changeHash);
+  assert.equal(step.status, 'PENDING');
+  assert.equal(step.effect, 'NONE');
+  assert.equal(h.state.aiTaskActionInput.length, 1);
+  assert.deepEqual(h.state.aiTaskActionInput[0].payload, h.reference);
+  assert.equal(h.current.settingsRevision, 1);
+  h.state.businessWorkspace[0].categoryAdoptionRevision++;
+  await assert.rejects(h.root.source.authorize(h.plan, { ...h.lease, revision: h.state.aiRun[0].revision }));
+});
+
+test('settings publication rejects foreign owner, changed configuration and withdrawn original write permission', async () => {
+  const h = await settingsInputSetup();
+  h.state.rentalApprovedSettingsChange[0].actorId = 'other-user';
+  await assert.rejects(h.publish());
+  h.state.rentalApprovedSettingsChange[0].actorId = 'user-a';
+  h.current.settingsRevision = 2;
+  await assert.rejects(h.publish());
+  h.current.settingsRevision = 1;
+  h.state.rentalApprovedSettingsChange[0].afterNotifications.editableChannels = ['wechat'];
+  await assert.rejects(h.publish());
+  h.state.rentalApprovedSettingsChange[0].afterNotifications.editableChannels = ['sms'];
+  h.identity.user.permissions = h.identity.user.permissions.filter(p => p !== 'rental-os:rules:manage');
+  await assert.rejects(h.publish());
+  assert.equal(h.state.aiTaskActionInput.length, 0);
+});
+
+test('settings input lost acknowledgement is read by the original task/run/reference without a new write', async () => {
+  const h = await settingsInputSetup();
+  const key = { taskId: 'task-a', runId: 'run-a', registrationRef: 'settings-a' };
+  assert.deepEqual(await h.app.readTaskInputReceipt(key), { state: 'not_observed', nextAction: 'read_task_input' });
+  h.storeControl.beforeCommit = async draft => {
+    if (draft.aiTaskActionInput.length && !h.state.aiTaskActionInput.length) h.storeControl.loseReply = true;
+  };
+  await assert.rejects(h.publish(), e => e.code === 'AI_RESULT_UNKNOWN' && e.nextAction === 'read_task_input' && !e.retryable);
+  const { settingsApplicationError, settingsContract } = require('../apps/api/src/modules/ai-native/approval-execution/approved-settings-contracts');
+  const { AiTaskPlanInputResultUnknownError } = require('../apps/api/src/modules/ai-native/runner/prisma-task-plan-input.source');
+  assert.equal(settingsContract('AiApprovedSettingsErrorDraft', settingsApplicationError(new AiTaskPlanInputResultUnknownError('read_task_input')), true).nextAction, 'read_task_input');
+  const writes = h.trace.filter(v => v.endsWith('.create')).length;
+  const receipt = await h.app.readTaskInputReceipt(key);
+  assert.equal(receipt.state, 'published_not_executed');
+  assert.deepEqual(receipt.input, h.reference);
+  assert.equal(h.state.aiTaskActionInput.length, 1);
+  assert.equal(h.trace.filter(v => v.endsWith('.create')).length, writes);
+  h.identity.membership = false;
+  await assert.rejects(h.app.readTaskInputReceipt(key));
+});
 async function setup() {
   const h = await authorizedRunnerHarness({ aiTaskPlanPolicy: [], aiTaskActionInput: [] });
   h.state.aiTaskRunPlan.length = 0;

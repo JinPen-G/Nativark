@@ -56,5 +56,5 @@ export function settingsApplicationError(error: unknown): AiApprovedSettingsErro
   const next = error instanceof Error && 'nextAction' in error ? error.nextAction : null;
   return { draftVersion: AI_APPROVED_SETTINGS_DRAFT_VERSION, code, retryable: false,
     nextAction: code === 'SETTINGS_RESULT_UNKNOWN' ? 'read_operation' : code === 'AI_RESULT_UNKNOWN'
-      ? next === 'read_decision_receipt' || next === 'read_change_receipt' ? next : 'read_preparation_receipt' : 'revalidate_or_manual' };
+      ? next === 'read_decision_receipt' || next === 'read_change_receipt' || next === 'read_task_input' ? next : 'read_preparation_receipt' : 'revalidate_or_manual' };
 }

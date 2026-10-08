@@ -13,6 +13,7 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import { settingsContract, registeredSettingsTool, ApprovedSettingsApplicationUnknownError } from './approved-settings-contracts';
 import { ApprovedSettingsTaskAuthority, settingsTransactionDb, settingsConflict, settingsDenied, type ApprovedSettingsApplicationDependencies } from './approved-settings-task.authority';
 import { PrismaApprovedSettingsParticipant } from './prisma-approved-settings.participant';
+import { composePersistedSettingsTaskInput } from '../settings-task-input.composition';
 
 export function composeApprovedSettingsApplication(d: ApprovedSettingsApplicationDependencies) {
   const authority = new ApprovedSettingsTaskAuthority(d), participant = new PrismaApprovedSettingsParticipant(authority);
@@ -183,6 +184,8 @@ export function composeApprovedSettingsApplication(d: ApprovedSettingsApplicatio
       return { state: 'prepared_not_approved' as const, change: review };
     });
   };
-  return Object.freeze({ readCurrent, prepareChange, readChangeReceipt,
+  const publishTaskInput = (value: unknown) => composePersistedSettingsTaskInput(d).source.publishSettingsInput(value);
+  const readTaskInputReceipt = (value: unknown) => composePersistedSettingsTaskInput(d).source.readSettingsInputReceipt(value);
+  return Object.freeze({ readCurrent, prepareChange, readChangeReceipt, publishTaskInput, readTaskInputReceipt,
     prepare, readPreparationReceipt, readProposal, decide, readDecisionReceipt, commitApprovedChange, readOperation });
 }

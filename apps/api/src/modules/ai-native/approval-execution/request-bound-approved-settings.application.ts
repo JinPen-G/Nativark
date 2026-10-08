@@ -34,6 +34,8 @@ export function composeRequestBoundApprovedSettingsApplication(dependencies: Omi
     readCurrent: (request: Request) => call(request, app => app.readCurrent()),
     prepareChange: (request: Request, value: unknown) => call(request, app => app.prepareChange(value)),
     readChangeReceipt: (request: Request, value: unknown) => call(request, app => app.readChangeReceipt(value)),
+    publishTaskInput: (request: Request, value: unknown) => call(request, app => app.publishTaskInput(value)),
+    readTaskInputReceipt: (request: Request, value: unknown) => call(request, app => app.readTaskInputReceipt(value)),
     prepare: (request: Request, value: unknown) => call(request, app => app.prepare(value)),
     readPreparationReceipt: (request: Request, value: unknown) => call(request, app => app.readPreparationReceipt(value)),
     readProposal: (request: Request, value: unknown) => call(request, app => app.readProposal(value)),
