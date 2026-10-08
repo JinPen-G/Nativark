@@ -275,7 +275,7 @@ export class AiTaskRunner {
         if (registered.replayed && registered.existingStatus === "unknown" && !reconcile) return await finish({ status: "unknown", completedSteps, cleanupFailed });
         const continuing = continuation !== undefined && !recovery && registered.replayed && registered.existingStatus === 'running'
           && registered.stepId === continuation.stepId && registered.stepRevision === continuation.stepRevision
-          && stepPlan.operation === 'idempotent' && stepPlan.toolCode === 'rental.order.commit';
+          && stepPlan.operation === 'idempotent' && ['rental.order.commit', 'tenant.notifications.commit'].includes(stepPlan.toolCode);
         if (continuation && !continuing) return { status: 'unavailable', completedSteps, cleanupFailed };
         const unstarted = registered.replayed && registered.existingStatus === 'pending' && !registered.resultRef && !recovery && !!this.deps.resources;
         if (registered.replayed && !unstarted && !continuing && !(reconcile && ['unknown', 'running'].includes(registered.existingStatus ?? ''))) return { status: "unavailable", completedSteps, cleanupFailed };

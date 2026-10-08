@@ -1,9 +1,9 @@
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import { AI_TOOL_DRAFT_VERSION, type AiExecutionContext, type AiStepStateDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError, aiTaskAccessFromContext, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import type { AiStepTransitionAuthority, AiStepTransitionCommand, AiStepTransitionGrant } from '../ai-step-transition.repository';
 import { PrismaTaskOrderStartAuthority } from './prisma-task-order-start.authority';
-import type { AiTaskPlanEvidenceAuthority, PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
+import type { AiTaskPlanEvidenceAuthority, PrismaTaskRunEvidenceRepository, AiConfirmationTool } from './prisma-task-run-evidence.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -13,43 +13,48 @@ export class PrismaTaskOrderStepAuthority implements AiStepTransitionAuthority {
   private readonly start: PrismaTaskOrderStartAuthority;
   constructor(private readonly db: PrismaClient, private readonly authorization: AiTaskRepositoryAuthority,
     plans: AiTaskPlanEvidenceAuthority, private readonly results: Pick<PrismaTaskRunEvidenceRepository, 'readOrderPhaseResult'>,
-    private readonly clock: () => Date = () => new Date()) {
-    this.start = new PrismaTaskOrderStartAuthority(db, authorization, plans, clock);
+    private readonly clock: () => Date = () => new Date(),
+    private readonly confirmationTool: AiConfirmationTool = 'rental.order.commit') {
+    this.start = new PrismaTaskOrderStartAuthority(db, authorization, plans, clock, confirmationTool);
   }
-  async resolve(raw: Readonly<AiStepTransitionCommand>): Promise<AiStepTransitionGrant> {
+  async resolve(raw: Readonly<AiStepTransitionCommand>, tx?: Prisma.TransactionClient): Promise<AiStepTransitionGrant> {
     const command = structuredClone(raw);
     if (command.reason === 'start') return this.start.resolve(command);
+    const db = tx ?? this.db;
     if (!['result_observed', 'result_unknown', 'reconciled_committed', 'reconciled_not_committed'].includes(command.reason)) throw unavailable();
     const context = await this.authorization.resolve(command.taskId, 'transition_task');
     const access = aiTaskAccessFromContext(context, command.taskId, this.clock());
-    const task = await this.db.aiTask.findFirst({ where: access.where });
+    const task = await db.aiTask.findFirst({ where: access.where });
     if (!task || task.id !== command.taskId || !['RUNNING', 'WAITING_EXTERNAL', 'CANCEL_REQUESTED'].includes(task.status)) throw denied();
     const key = { scopeId: task.scopeId, taskId: task.id, runId: command.lease.runId };
-    const run = await this.db.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: key.runId } });
-    const step = await this.db.aiStep.findFirst({ where: { ...key, id: command.stepId } });
+    const run = await db.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: key.runId } });
+    const step = await db.aiStep.findFirst({ where: { ...key, id: command.stepId } });
     if (!run || run.id !== key.runId || run.scopeId !== key.scopeId || run.taskId !== key.taskId || run.leaseOwnerId !== command.lease.holderId
       || run.fencingToken.toFixed(0) !== command.lease.fencingToken || run.actorKind !== access.actorKind || run.actorId !== access.actorId
       || !run.leaseExpiresAt || run.leaseExpiresAt <= this.clock() || !['QUEUED', 'RUNNING'].includes(run.status)
       || !step || step.id !== command.stepId || step.scopeId !== key.scopeId || step.taskId !== key.taskId || step.runId !== key.runId
-      || step.revision !== command.expectedStepRevision || step.toolCode !== 'rental.order.commit' || step.toolVersion !== AI_TOOL_DRAFT_VERSION
+      || step.revision !== command.expectedStepRevision || step.toolCode !== this.confirmationTool || step.toolVersion !== AI_TOOL_DRAFT_VERSION
       || !['RUNNING', 'UNKNOWN'].includes(step.status) || step.effect !== 'POSSIBLE'
       || (step.status === 'RUNNING' ? step.resultRef !== null || step.errorCode !== null : step.resultRef === null || step.errorCode !== 'AI_RESULT_UNKNOWN')) throw denied();
-    const lease = { taskId: key.taskId, ...command.lease, expiresAt: run.leaseExpiresAt.toISOString() };
-    const evidence = await this.results.readOrderPhaseResult(lease, step.id, command.evidenceId);
+    // AiStepTransitionRepository has already CAS-locked/incremented this run
+    // inside tx. Read its receipt in that transaction, never a second snapshot
+    // that sees the old run or waits behind its own locks.
+    const lease = { taskId: key.taskId, ...command.lease, revision: command.lease.revision + (tx ? 1 : 0), expiresAt: run.leaseExpiresAt.toISOString() };
+    const evidence = await this.results.readOrderPhaseResult(lease, step.id, command.evidenceId, tx);
     if (evidence.step.id !== step.id || evidence.step.revision !== step.revision || evidence.result.resultRef !== command.evidenceId) throw denied();
     const unknown: AiStepStateDraft['outcome'] = { status: 'unknown', effect: 'possible', error: {
-      code: 'AI_RESULT_UNKNOWN', message: '订单动作结果待核对，不重新派发。', retryable: false, nextAction: 'reconcile', missingFields: [] } };
+      code: 'AI_RESULT_UNKNOWN', message: '业务动作结果待核对，不重新派发。', retryable: false, nextAction: 'reconcile', missingFields: [] } };
     const previous: AiStepStateDraft = { stepId: step.id, runId: step.runId, sequence: step.sequence, revision: step.revision,
-      actionId: step.actionId, requestFingerprint: step.requestFingerprint, toolCode: 'rental.order.commit', toolVersion: step.toolVersion,
+      actionId: step.actionId, requestFingerprint: step.requestFingerprint, toolCode: this.confirmationTool, toolVersion: step.toolVersion,
       outcome: step.status === 'UNKNOWN' ? unknown : { status: 'running', effect: 'possible' } };
     let outcome: AiStepStateDraft['outcome'];
     if (evidence.result.kind === 'succeeded' && evidence.businessResultRef && evidence.observedAt) {
       if (command.reason !== (step.status === 'UNKNOWN' ? 'reconciled_committed' : 'result_observed')) throw denied();
-      outcome = { status: 'succeeded', effect: 'committed', facts: [{ scope: context.scope, resourceType: 'order', resourceId: evidence.businessResultRef,
+      outcome = { status: 'succeeded', effect: 'committed', facts: [{ scope: context.scope, resourceType: this.confirmationTool === 'rental.order.commit' ? 'order' : 'configuration', resourceId: evidence.businessResultRef,
         observedAt: evidence.observedAt, basis: { kind: 'current' } }] };
     } else if (evidence.result.kind === 'failed' && evidence.result.errorCode === 'AI_BUSINESS_REJECTED') {
       if (command.reason !== (step.status === 'UNKNOWN' ? 'reconciled_not_committed' : 'result_observed')) throw denied();
-      outcome = { status: 'failed', effect: 'none', error: { code: 'AI_BUSINESS_REJECTED', message: '原提案已由人工拒绝，未下单。',
+      outcome = { status: 'failed', effect: 'none', error: { code: 'AI_BUSINESS_REJECTED', message: '原提案已由人工拒绝，未提交业务变更。',
         retryable: false, nextAction: 'manual', missingFields: [] } };
     } else {
       if (evidence.result.kind !== 'unknown' || step.status !== 'RUNNING' || command.reason !== 'result_unknown') throw unavailable();

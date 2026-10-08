@@ -69,7 +69,9 @@ function createTaskInputStore(initial, constraints = {}) {
         for (const keys of constraints[name] ?? unique[name] ?? [['scopeId', 'taskId', 'id']]) {
           if (keys.every(k => value[k] !== undefined) && rows().some(row => keys.every(k => String(row[k]) === String(value[k])))) throw Error(`synthetic unique ${name}`);
         }
-        const row = { revision: 1, createdAt: new Date('2026-10-06T12:00:00Z'), ...clone(value) };
+        const row = { ...(!['aiTaskExecutionPhaseStart', 'aiTaskExecutionPhaseReceipt'].includes(name) ? { revision: 1 } : {}),
+          createdAt: new Date('2026-10-06T12:00:00Z'), ...clone(value) };
+        if (name === 'aiApprovalConsumption') row.updatedAt ??= new Date('2026-10-06T12:00:00Z');
         if (name === 'aiTaskExecutionBudget') for (const prefix of ['reserved', 'consumed']) for (const kind of ['Steps', 'Calls', 'ActiveMs', 'OutputBytes']) row[`${prefix}${kind}`] ??= 0n;
         rows().push(row); return hydrate(row);
       };

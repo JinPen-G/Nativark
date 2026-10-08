@@ -12,6 +12,7 @@ import { PrismaTaskPlanPolicyRepository } from './runner/prisma-task-plan-policy
 import { PrismaTaskExecutionScopeAuthority } from './runner/prisma-task-execution-scope.authority';
 import { PrismaTaskRunEvidenceRepository } from './runner/prisma-task-run-evidence.repository';
 import { registeredSettingsTool } from './approval-execution/approved-settings-contracts';
+import type { AiApprovedSettingsOperationReceiptDraft } from '../../../../../packages/shared/src/ai-approved-settings-draft';
 
 /** Publishes references to Core-prepared immutable notification changes. No
  * active settings write, approval decision, worker, timer or production seed.
@@ -20,6 +21,9 @@ export function composePersistedSettingsTaskInput(d: PersistedTaskAuthorizationD
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   core: Pick<RentalCoreService, 'readVersionedBusinessSettings'>;
   scene: { code: string; version: string };
+  /** Only the controlled application may attest the exact already committed
+   * change. This permits receipt completion, not new input publication. */
+  readCommittedChange?: (value: { taskId: string; changeId: string; changeHash: string }) => Promise<AiApprovedSettingsOperationReceiptDraft | null>;
 }) {
   const clock = d.clock ?? (() => new Date());
   const scene = structuredClone(d.scene);
@@ -34,7 +38,7 @@ export function composePersistedSettingsTaskInput(d: PersistedTaskAuthorizationD
     || typeof d.db.businessWorkspace?.findFirst !== 'function') throw unavailable();
 
   const evidence: SettingsInputDependencies = {
-    async verify(context, reference, taskId, tx) {
+    async verify(context, reference, taskId, tx, purpose = 'input') {
       const db: Pick<PrismaClient, 'aiTask' | 'rentalApprovedSettingsChange' | 'businessWorkspace'> = tx ?? d.db;
       return route.withAuthorization('write', async (actor, revalidate) => {
         if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user'
@@ -44,7 +48,8 @@ export function composePersistedSettingsTaskInput(d: PersistedTaskAuthorizationD
           const task = await db.aiTask.findFirst({ where: { id: taskId, ownerKind: 'USER', ownerId: actor.actorId,
             scope: { tenantId: actor.tenantId, workspaceId: actor.workspaceId }, archivedAt: null } });
           if (!task || task.id !== taskId || task.sceneCode !== scene.code || task.sceneVersion !== scene.version
-            || task.status !== 'RUNNING' || task.cancelRequestedAt !== null || task.audience !== context.audience.toUpperCase()) throw denied();
+            || !(purpose === 'plan' ? ['RUNNING', 'WAITING_CONFIRMATION'] : ['RUNNING']).includes(task.status)
+            || task.cancelRequestedAt !== null || task.audience !== context.audience.toUpperCase()) throw denied();
           const change = await db.rentalApprovedSettingsChange.findFirst({ where: { id: reference.changeId, ...actor } });
           if (!change || change.id !== reference.changeId || change.changeHash !== reference.changeHash
             || change.tenantId !== actor.tenantId || change.workspaceId !== actor.workspaceId || change.actorId !== actor.actorId) throw denied();
@@ -61,9 +66,17 @@ export function composePersistedSettingsTaskInput(d: PersistedTaskAuthorizationD
           if (!workspace || workspace.id !== actor.workspaceId || workspace.tenantId !== actor.tenantId
             || workspace.status !== 'ACTIVE' || workspace.categoryVersionId !== change.categoryVersionId
             || workspace.categoryAdoptionRevision !== change.categoryAdoptionRevision
-            || current.settings.tenantId !== actor.tenantId || current.settingsRevision !== change.baseRevision
-            || requestFingerprint(current.settings) !== change.baseSettingsHash
-            || requestFingerprint(current.settings.notifications) !== requestFingerprint(change.beforeNotifications)) throw conflict();
+            || current.settings.tenantId !== actor.tenantId) throw conflict();
+          const unchanged = current.settingsRevision === change.baseRevision && requestFingerprint(current.settings) === change.baseSettingsHash
+            && requestFingerprint(current.settings.notifications) === requestFingerprint(change.beforeNotifications);
+          if (!unchanged) {
+            if (purpose !== 'plan' || !d.readCommittedChange) throw conflict();
+            const committed = await d.readCommittedChange({ taskId, ...reference });
+            if (!committed || committed.changeId !== change.id || committed.changeHash !== change.changeHash
+              || committed.baseRevision !== change.baseRevision || committed.resultRevision !== change.baseRevision + 1
+              || current.settingsRevision !== committed.resultRevision || requestFingerprint(current.settings) !== committed.resultHash
+              || requestFingerprint(current.settings.notifications) !== requestFingerprint(change.afterNotifications)) throw conflict();
+          }
           return { expiresAt: change.expiresAt.toISOString(), hash: requestFingerprint({ task: { scopeId: task.scopeId,
             sceneCode: task.sceneCode, sceneVersion: task.sceneVersion }, material, current, workspace }) };
         };

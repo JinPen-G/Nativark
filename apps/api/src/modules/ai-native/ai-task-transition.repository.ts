@@ -10,6 +10,7 @@ import { requestFingerprint } from "../rental-core/rental-idempotency.repository
 import { fingerprintAiProposalDraft } from "./proposal-binding-draft";
 import { aiPersistenceScopeColumns } from "./persistence-scope";
 import { aiTaskRunPlanSchema } from "./runner/prisma-task-run-evidence.repository";
+import { settingsChangeReferenceSchema } from "../rental-core/approved-settings-change.validation";
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);
@@ -108,14 +109,21 @@ export class AiTaskTransitionRepository {
     if (!step || step.id !== input.stepId || step.scopeId !== scopeId || step.taskId !== input.taskId || step.runId !== input.lease.runId
       || step.actionId !== proof.actionId || step.inputRef !== proof.inputRef || step.requestFingerprint !== proof.stepFingerprint
       || step.revision !== input.expectedStepRevision || step.status !== 'RUNNING' || step.effect !== 'POSSIBLE' || step.resultRef !== null
-      || step.toolCode !== 'rental.order.commit' || step.toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
+      || !['rental.order.commit', 'tenant.notifications.commit'].includes(step.toolCode) || step.toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
     const savedPlan = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: { scopeId, taskId: input.taskId, runId: input.lease.runId } } });
     if (!savedPlan || savedPlan.scopeId !== scopeId || savedPlan.taskId !== input.taskId || savedPlan.runId !== input.lease.runId
       || savedPlan.planHash !== proof.planHash || requestFingerprint(savedPlan.payload) !== proof.planHash) throw denied();
     const plan = aiTaskRunPlanSchema.parse(savedPlan.payload);
-    const original = await tx.aiTaskActionInput.findFirst({ where: { scopeId, taskId: input.taskId, runId: input.lease.runId, id: proof.inputRef } });
-    if (!original || original.id !== proof.inputRef || original.scopeId !== scopeId || original.taskId !== input.taskId || original.runId !== input.lease.runId
-      || original.fingerprint !== proof.stepFingerprint || requestFingerprint(original.payload) !== proof.stepFingerprint
+    const settings = step.toolCode === 'tenant.notifications.commit';
+    const planned = plan.steps.filter(p => p.operation === 'idempotent' && p.toolCode === step.toolCode && p.toolVersion === step.toolVersion);
+    if (settings && planned.length !== 1) throw denied();
+    const original = await tx.aiTaskActionInput.findFirst({ where: { scopeId, taskId: input.taskId, runId: input.lease.runId,
+      ...(settings ? { registrationRef: planned[0].registrationRef } : { id: proof.inputRef }) } });
+    const change = settings ? settingsChangeReferenceSchema.safeParse(original?.payload) : null;
+    if (!original || (!settings && original.id !== proof.inputRef) || original.scopeId !== scopeId || original.taskId !== input.taskId || original.runId !== input.lease.runId
+      || requestFingerprint(original.payload) !== original.fingerprint
+      || (settings ? !change?.success || change.data.changeId !== proof.inputRef || change.data.changeHash !== proof.stepFingerprint
+        : original.fingerprint !== proof.stepFingerprint)
       || original.toolCode !== step.toolCode || original.toolVersion !== step.toolVersion || !(original.expiresAt instanceof Date)
       || original.expiresAt <= this.clock() || plan.taskId !== input.taskId || plan.runId !== input.lease.runId
       || !plan.steps.some(p => p.registrationRef === original.registrationRef && p.operation === 'idempotent'

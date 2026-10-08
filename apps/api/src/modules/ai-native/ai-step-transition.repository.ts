@@ -38,7 +38,7 @@ export interface AiStepTransitionGrant {
   resultRef: string | null;
 }
 export interface AiStepTransitionAuthority {
-  resolve(command: Readonly<AiStepTransitionCommand>): Promise<AiStepTransitionGrant>;
+  resolve(command: Readonly<AiStepTransitionCommand>, tx?: Prisma.TransactionClient): Promise<AiStepTransitionGrant>;
 }
 /** The transaction callback finished, but COMMIT acknowledgement was not
  * reliable. The durable step/event may exist; never replay the business effect. */
@@ -84,9 +84,9 @@ export class AiStepTransitionRepository {
     if (!authority || typeof authority.resolve !== "function") throw denied();
   }
 
-  private async resolve(command: AiStepTransitionCommand) {
+  private async resolve(command: AiStepTransitionCommand, tx?: Prisma.TransactionClient) {
     try {
-      const raw = structuredClone(await this.authority.resolve(structuredClone(command)));
+      const raw = structuredClone(await this.authority.resolve(structuredClone(command), tx));
       const metadata = grantSchema.parse(raw);
       if (!validContext(metadata.context) || !validStep(metadata.previous) || !validStep(metadata.next)) throw denied();
       const grant = raw; // The cloned authority value has passed the closed envelope and C04 schemas.
@@ -148,7 +148,7 @@ export class AiStepTransitionRepository {
           data: { revision: { increment: 1 } }
         });
         if (held.count !== 1) throw conflict();
-        const current = await this.resolve(input);
+        const current = await this.resolve(input, tx);
         if (current.access.bindingKey !== initial.access.bindingKey || current.digest !== initial.digest) throw denied();
         const next = current.grant.next;
         if (next.outcome.status === "running" && (task.status !== "RUNNING" || task.cancelRequestedAt !== null)) throw new AiTaskRepositoryError("AI_INVALID_INPUT");

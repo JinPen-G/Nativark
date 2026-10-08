@@ -37,7 +37,7 @@ export interface SettingsInputDependencies {
   /** Current original Guard and immutable domain evidence, without acquiring
    * category locks after the plan/registration repositories hold task locks. */
   verify(context: AiExecutionContext, reference: { changeId: string; changeHash: string },
-    taskId: string, tx?: Prisma.TransactionClient): Promise<{ expiresAt: string }>;
+    taskId: string, tx?: Prisma.TransactionClient, purpose?: 'input' | 'plan'): Promise<{ expiresAt: string }>;
 }
 type OrderInputDependencies = {
   route: Pick<AiApprovedOrderRouteAuthority, 'withOrderPreparation'>;
@@ -172,10 +172,10 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     return receipt;
   }
 
-  private async verifySettings(context: AiExecutionContext, taskId: string, payload: unknown, tx?: Prisma.TransactionClient) {
+  private async verifySettings(context: AiExecutionContext, taskId: string, payload: unknown, tx?: Prisma.TransactionClient, purpose: 'input' | 'plan' = 'input') {
     if (this.toolCode !== 'tenant.notifications.commit') return undefined;
     try {
-      const proof = await this.settings!.verify(structuredClone(context), settingsChangeReferenceSchema.parse(structuredClone(payload)), taskId, tx);
+      const proof = await this.settings!.verify(structuredClone(context), settingsChangeReferenceSchema.parse(structuredClone(payload)), taskId, tx, purpose);
       if (!z.string().datetime({ offset: true }).safeParse(proof?.expiresAt).success || Date.parse(proof.expiresAt) <= this.wall().getTime()) throw denied();
       return proof.expiresAt;
     } catch (error) {
@@ -289,7 +289,7 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
       if (this.toolCode === 'rental.order.commit') {
         await this.order!.route.withOrderPreparation(before.context, input.payload as CreateRentalOrderRequest, async () => undefined);
       }
-      await this.verifySettings(before.context, plan.taskId, input.payload);
+      await this.verifySettings(before.context, plan.taskId, input.payload, undefined, 'plan');
       inputs.push(input);
     }
     const current = await this.access(plan.taskId, 'read_metadata', db);
@@ -299,7 +299,7 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
       const key = { scopeId: before.task.scopeId, taskId: plan.taskId, runId: plan.runId, registrationRef: input.registrationRef };
       const again = await this.input(await db.aiTaskActionInput.findFirst({ where: key }), key);
       if (requestFingerprint(again) !== requestFingerprint(input)) throw denied();
-      await this.verifySettings(current.context, plan.taskId, again.payload);
+      await this.verifySettings(current.context, plan.taskId, again.payload, undefined, 'plan');
     }
     return { authorityHash: requestFingerprint({ version: 'persisted-plan-input-1', scopeId: before.task.scopeId,
       taskId: plan.taskId, runId: plan.runId, scene: before.task.sceneCode, policy: before.policyHash,

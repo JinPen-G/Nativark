@@ -1,11 +1,12 @@
 import { AI_TOOL_DRAFT_VERSION, AI_PROPOSAL_DRAFT_VERSION } from '@rental-os/shared';
 import { z } from 'zod';
+import type { Prisma } from '@prisma/client';
 import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE } from '../../../../../../packages/shared/src/ai-approved-settings-draft';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-effects';
 import { composeApprovedSettingsApplication } from './approved-settings-application.composition';
-import { ApprovedSettingsTaskAuthority, settingsDenied, type ApprovedSettingsApplicationDependencies } from './approved-settings-task.authority';
+import { ApprovedSettingsTaskAuthority, settingsTransactionDb, settingsDenied, type ApprovedSettingsApplicationDependencies } from './approved-settings-task.authority';
 
 type Executor = NonNullable<Awaited<ReturnType<AiTaskRegisteredExecutor['resolve']>>>;
 type Input = Parameters<Executor['execute']>[0];
@@ -70,7 +71,7 @@ export function composeApprovedSettingsWaiting(d: ApprovedSettingsApplicationDep
       reference: prepared.reference,
       proposal: { contractVersion: AI_PROPOSAL_DRAFT_VERSION, proposalId: prepared.reference.proposalId,
         proposalRevision: prepared.reference.proposalRevision, reviewedPayloadHash: prepared.reference.reviewedPayloadHash },
-      receipt: receipt.state === 'recorded' ? { kind: 'recorded' as const, record: receipt.approval } : { kind: 'absent' as const } };
+      receipt: receipt.state === 'recorded' ? { kind: 'recorded' as const, record: receipt.approval } : { kind: 'absent' as const, retryable: false as const } };
   };
   const material = (waiting: Awaited<ReturnType<typeof readWaiting>>, effectState: string) => ({
     version: 'approved-settings-wait-1', binding: waiting.binding, presentedLease: waiting.lease, effectState,
@@ -117,7 +118,29 @@ export function composeApprovedSettingsWaiting(d: ApprovedSettingsApplicationDep
     }
     return reconcile(input);
   };
-  return Object.freeze({ application: app, execute, readWaiting, reconcile, readInterrupted: reconcile,
+  const readCommittedChange = async (value: { taskId: string; changeId: string; changeHash: string }) => {
+    const command = z.object({ taskId: id.max(36), changeId: id.max(36), changeHash: z.string().regex(/^[a-f0-9]{64}$/u) }).strict().parse(structuredClone(value));
+    const before = await authority.resolve(command.taskId, 'read');
+    const steps = await d.db.aiStep.findMany({ where: { scopeId: before.scopeId, taskId: command.taskId,
+      inputRef: command.changeId, requestFingerprint: command.changeHash, toolCode: AI_APPROVED_SETTINGS_TOOL_CODE,
+      toolVersion: AI_TOOL_DRAFT_VERSION }, take: 2 });
+    if (steps.length !== 1) throw settingsDenied();
+    const step = steps[0];
+    const binding = { scopeId: before.scopeId, taskId: command.taskId, runId: step.runId, stepId: step.id,
+      actionId: step.actionId, inputRef: command.changeId, fingerprint: command.changeHash };
+    const operationKey = `as-operation-${requestFingerprint(binding)}`;
+    const result = await app.readOperation({ draftVersion: AI_APPROVED_SETTINGS_DRAFT_VERSION, operationKey });
+    if ((await authority.resolve(command.taskId, 'read')).bindingHash !== before.bindingHash) throw settingsDenied();
+    if (result.state !== 'committed') return null;
+    if (result.receipt.operationKey !== operationKey || result.receipt.changeId !== command.changeId
+        || result.receipt.changeHash !== command.changeHash) throw settingsDenied();
+    return result.receipt;
+  };
+  const readWaitingInTransaction = (raw: Input, tx?: Prisma.TransactionClient): ReturnType<typeof readWaiting> => tx
+    ? composeApprovedSettingsWaiting({ ...d, db: settingsTransactionDb(d.db, tx) }).readWaiting(raw) : readWaiting(raw);
+  const reconcileInTransaction = (raw: Input, tx?: Prisma.TransactionClient): ReturnType<typeof reconcile> => tx
+    ? composeApprovedSettingsWaiting({ ...d, db: settingsTransactionDb(d.db, tx) }).reconcile(raw) : reconcile(raw);
+  return Object.freeze({ application: app, execute, readWaiting: readWaitingInTransaction, reconcile: reconcileInTransaction, readInterrupted: reconcile, readCommittedChange,
     resolve: async (code: string, version: string) => code === AI_APPROVED_SETTINGS_TOOL_CODE && version === AI_TOOL_DRAFT_VERSION
       ? Object.freeze({ operation: 'idempotent' as const, execute }) : null });
 }
