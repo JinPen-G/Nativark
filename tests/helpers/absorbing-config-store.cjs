@@ -35,7 +35,11 @@ function createAbsorbingConfigStore(extraWorkspaces = []) {
         { id: "ws_tenant_002", tenantId: "tenant_002", categoryCode: "camping", isDefault: true }
       ]),
     upsertProfile: record("profile"),
-    upsertBusinessSettings: record("businessSettings"),
+    readVersionedBusinessSettings: () => Promise.resolve(null),
+    upsertBusinessSettings: async (payload) => {
+      await record("businessSettings")(payload);
+      return writes.filter(write => write.kind === "businessSettings").length;
+    },
     upsertOperator: record("operator"),
     upsertLocation: record("location"),
     upsertItemGroup: record("itemGroup"),

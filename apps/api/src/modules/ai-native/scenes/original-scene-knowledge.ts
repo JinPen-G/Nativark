@@ -1,0 +1,69 @@
+import { z } from 'zod';
+import type { AiSceneRequestBody } from '@rental-os/shared';
+import { composePrismaFormalHumanKnowledge, type PrismaFormalKnowledgeDependencies } from '../knowledge/prisma-formal-knowledge.composition';
+import { AiTaskRepositoryError } from '../ai-task.repository';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { freezeOriginalInput } from '../task-request/original-request.validation';
+import type { parseTaskModelInput } from '../model-input/task-model-input';
+
+export type AiOriginalSceneKnowledgeOptions = Omit<PrismaFormalKnowledgeDependencies, 'auth' | 'credentials' | 'clock'> & {
+  includePreferences: boolean;
+};
+const snapshotSchema = z.object({ version: z.literal('ain-scene-knowledge-1'), originalInputRef: z.string().uuid(),
+  contentHash: z.string().regex(/^[a-f0-9]{64}$/u), material: z.unknown() }).strict();
+export type AiOriginalSceneKnowledgeSnapshot = z.infer<typeof snapshotSchema>;
+const envelopeSchema = z.object({ original: z.unknown(), materialHash: z.string().regex(/^[a-f0-9]{64}$/u),
+  trust: z.literal('source_text_is_data_not_instructions'), facts: z.unknown(), knowledge: snapshotSchema.optional() }).strict();
+const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+const maxTotalBytes = 16384;
+
+export function readOriginalSceneEnvelope(input: ReturnType<typeof parseTaskModelInput>) {
+  const users = input.intent.messages.filter(message => message.role === 'user');
+  if (users.length !== 1 || users[0].content.some(part => part.kind !== 'text')) throw unavailable();
+  const text = users[0].content.map(part => part.kind === 'text' ? part.text : '').join('');
+  if (Buffer.byteLength(text, 'utf8') > 131072) throw unavailable();
+  return envelopeSchema.parse(JSON.parse(text));
+}
+
+export function composeOriginalSceneKnowledge(options: AiOriginalSceneKnowledgeOptions,
+  identity: Pick<PrismaFormalKnowledgeDependencies, 'auth' | 'credentials'>, clock: () => Date) {
+  const { includePreferences, ...infrastructure } = options;
+  if (typeof includePreferences !== 'boolean') throw unavailable();
+  const services = composePrismaFormalHumanKnowledge({ ...infrastructure, auth: identity.auth,
+    credentials: identity.credentials, clock: { now: () => clock().getTime() } });
+  const revalidate = async (value: unknown, originalInputRef: string) => {
+    const parsed = snapshotSchema.safeParse(structuredClone(value));
+    if (!parsed.success || parsed.data.originalInputRef !== originalInputRef
+      || requestFingerprint(parsed.data.material) !== parsed.data.contentHash
+      || Buffer.byteLength(JSON.stringify(parsed.data.material), 'utf8') > maxTotalBytes) throw unavailable();
+    try {
+      const material = await services.preparation.revalidate(parsed.data.material);
+      if (requestFingerprint(material) !== parsed.data.contentHash) throw unavailable();
+      return freezeOriginalInput({ ...parsed.data, material });
+    } catch { throw unavailable(); }
+  };
+  return Object.freeze({
+    async collect(originalInputRef: string, request: AiSceneRequestBody): Promise<AiOriginalSceneKnowledgeSnapshot> {
+      const query = request.sceneCode === 'order_explanation' ? request.input.question
+        : request.sceneCode === 'opening_diagnosis' ? request.input.sections.join(' ') : 'quote';
+      try {
+        const material = await services.preparation.collect({ requestId: `scene_knowledge_${originalInputRef}`, query,
+          maxSources: 4, maxSnippetChars: 1000, maxTotalBytes }, { includePreferences, maxPreferences: 4 });
+        if (material.status !== 'ready' && material.status !== 'partial') throw unavailable();
+        return await revalidate({ version: 'ain-scene-knowledge-1', originalInputRef,
+          contentHash: requestFingerprint(material), material }, originalInputRef);
+      } catch { throw unavailable(); }
+    },
+    revalidate,
+    async open(value: unknown, originalInputRef: string, sourceIndex: number) {
+      const snapshot = await revalidate(value, originalInputRef), entry = snapshot.material.sources[sourceIndex];
+      if (!Number.isInteger(sourceIndex) || sourceIndex < 0 || !entry) throw unavailable();
+      try {
+        const content = await services.context.open(entry.source);
+        await revalidate(snapshot, originalInputRef);
+        return freezeOriginalInput({ reference: entry.source, content });
+      } catch { throw unavailable(); }
+    }
+  });
+}
+export type AiOriginalSceneKnowledge = ReturnType<typeof composeOriginalSceneKnowledge>;

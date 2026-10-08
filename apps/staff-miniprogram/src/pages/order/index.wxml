@@ -1,6 +1,17 @@
 <page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
 <view class="screen screen--order-detail {{hasActions ? 'screen--order-detail--actions' : ''}} {{themeClass}}">
   <nav-bar title="订单详情"></nav-bar>
+  <ai-task-workbench wx:if="{{aiNativeEntryVisible}}" id="ai-native-workbench" tasks="{{aiNativeTasks}}">
+    <view slot="task-card"></view>
+    <view slot="step-timeline"></view>
+    <view slot="clarification"></view>
+    <view slot="proposal-confirm"></view>
+    <view slot="knowledge-sources"></view>
+    <view slot="memory-preferences"></view>
+    <view slot="status-panel"></view>
+    <view slot="inspection-draft"></view>
+    <view slot="order-explanation"></view>
+  </ai-task-workbench>
   <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
   <block wx:else>
     <view class="section order-heading">

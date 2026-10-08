@@ -18,6 +18,7 @@ import { matchableRequestPath } from "./request-path";
 import { isStaffAuthPath, isStaffBusinessRouteAllowed, staffRoutePermissions } from "./staff-api-policy";
 import { PrismaService } from "../modules/database/prisma.service";
 import { enabledOrganizationSubtreeIds, organizationLocationScope } from "./organization-location-scope";
+import { isPlatformAiProviderPath, platformAiProviderPermission, PLATFORM_AI_PROVIDER_PERMISSIONS } from './platform-ai-access-policy';
 
 interface RequestLike {
   method: string;
@@ -164,6 +165,8 @@ function isPublicRoute(path: string) {
 }
 
 export function requiredPermissions(method: string, path: string) {
+  const aiProviderPermission = platformAiProviderPermission(method, path);
+  if (aiProviderPermission) return [aiProviderPermission];
   if (path === "/platform/rental-categories" || path.startsWith("/platform/rental-categories/")) {
     if (path.endsWith("/audits")) return ["system:rental-category:audit"];
     if (path.endsWith("/opening-policy")) return ["system:rental-category:opening"];
@@ -679,6 +682,9 @@ function hasAnyPermission(user: SystemUserRow, permissions: string[]) {
     return true;
   }
   if (user.isSaasAdmin) {
+    if (permissions.some(permission => Object.values(PLATFORM_AI_PROVIDER_PERMISSIONS).some(code => code === permission))) {
+      return permissions.some(permission => user.permissions.includes(permission) || user.permissions.includes('*'));
+    }
     if (permissions.some((permission) => permission.startsWith("system:rental-category:"))) {
       return permissions.some((permission) => user.permissions.includes(permission) || user.permissions.includes("*"));
     }
@@ -816,6 +822,12 @@ export class ApiAuthGuard implements CanActivate {
     if (!user) {
       throw new UnauthorizedException("请先登录");
     }
+    // An explicit wildcard role cannot make a not-yet-defined AI action ready.
+    // Keep the reserved platform-AI namespace closed beyond this exact policy.
+    if ((path === '/platform/ai' || path.startsWith('/platform/ai/'))
+      && !platformAiProviderPermission(request.method, path)) {
+      throw new ForbiddenException('平台 AI 操作尚未提供或不支持该请求方式');
+    }
     if (
       user.isSaasAdmin &&
       ![
@@ -831,6 +843,7 @@ export class ApiAuthGuard implements CanActivate {
       !path.startsWith("/platform/subscriptions") &&
       !path.startsWith("/platform/account-appearance") &&
       !path.startsWith("/platform/rental-categories") &&
+      !isPlatformAiProviderPath(path) &&
       path !== "/platform/demo-requests"
     ) {
       throw new ForbiddenException("SaaS 平台管理员只能访问租户管理能力");
@@ -860,6 +873,9 @@ export class ApiAuthGuard implements CanActivate {
     }
     if (path.startsWith("/platform/rental-categories") && !user.isSaasAdmin) {
       throw new ForbiddenException("仅 SaaS 平台管理员可以治理租赁品类");
+    }
+    if (isPlatformAiProviderPath(path) && !user.isSaasAdmin) {
+      throw new ForbiddenException('仅显式获权的 SaaS 平台管理员可以管理平台 AI 供应商配置');
     }
     if (path === "/platform/demo-requests" && !user.isSaasAdmin) {
       throw new ForbiddenException("仅 SaaS 平台管理员可以查看演示预约");

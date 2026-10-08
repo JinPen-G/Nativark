@@ -267,7 +267,7 @@ test("app.json 声明 28 个页面、4 个 Tab（工作台/订单/扫码/我的�
   assert.equal(app.window.navigationStyle, "custom");
   assert.ok(app.permission && app.permission["scope.camera"] && app.permission["scope.camera"].desc, "扫码需要声明 scope.camera 用途");
   assert.equal(app.requiredPrivateInfos, undefined, "员工端首期不申请位置等隐私接口");
-  const componentTags = ["nav-bar", "ui-icon", "state-view", "money-text", "status-tag", "sheet", "subscription-card"];
+  const componentTags = ["nav-bar", "ui-icon", "state-view", "money-text", "status-tag", "sheet", "subscription-card", "ai-task-workbench"];
   const registeredComponents = new Set();
   for (const route of app.pages) {
     for (const ext of ["ts", "json", "wxml", "wxss"]) assert.ok(read(`${route}.${ext}`).trim(), `${route}.${ext} 缺失或为空`);
@@ -286,7 +286,8 @@ test("app.json 声明 28 个页面、4 个 Tab（工作台/订单/扫码/我的�
     const declared = Object.keys(pageJson.usingComponents ?? {});
     same([...used].sort(), [...declared].sort(), `${route} 使用的组件与 usingComponents 声明不一致`);
     for (const [tag, componentPath] of Object.entries(pageJson.usingComponents ?? {})) {
-      assert.equal(componentPath, `/components/${tag}/index`);
+      const expectedPath = tag === "ai-task-workbench" ? "/components/ai-native/ai-task-workbench/index" : `/components/${tag}/index`;
+      assert.equal(componentPath, expectedPath);
       registeredComponents.add(componentPath);
     }
   }

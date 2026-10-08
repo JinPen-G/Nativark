@@ -1,0 +1,1 @@
+.ai-proposal-confirm { padding: 24rpx; display: flex; flex-direction: column; gap: 18rpx; }.ai-proposal-confirm button { border-radius: 999rpx; background: var(--primary, #2563eb); color: #fff; }.ai-proposal-confirm button[disabled] { opacity: .5; }

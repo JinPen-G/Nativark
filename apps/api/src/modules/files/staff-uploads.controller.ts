@@ -1,4 +1,6 @@
-import { BadRequestException, ForbiddenException, Controller, Get, Param, Post, Body, Req } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Controller, Get, Param, Post, Body, Req, Optional, ServiceUnavailableException } from "@nestjs/common";
+import { PrismaInspectionEvidenceAuthority } from "../ai-native/inspection-assist/prisma-inspection-evidence.authority";
+import type { AiInspectionTarget } from "@rental-os/shared";
 import type { SystemUserRow } from "@rental-os/shared";
 import { getRequestWorkspaceId } from "../../common/request-identity";
 import { PrismaService } from "../database/prisma.service";
@@ -20,7 +22,20 @@ const SCENE_PERMISSION: Record<string, string[]> = {
 
 @Controller("staff/v1/uploads")
 export class StaffUploadsController {
-  constructor(private readonly prisma: PrismaService, private readonly storage: FileStorageRuntimeService) {}
+  constructor(private readonly prisma: PrismaService, private readonly storage: FileStorageRuntimeService,
+    @Optional() private readonly inspectionEvidence?: PrismaInspectionEvidenceAuthority) {}
+
+  @Post(":fileAssetId/inspection-binding")
+  async bindInspectionEvidence(@Req() req: StaffUploadRequest, @Param("fileAssetId") fileAssetId: string, @Body() body: AiInspectionTarget) {
+    const workspaceId = getRequestWorkspaceId();
+    if (!workspaceId) throw new ForbiddenException("缺少已验证的经营空间");
+    if (!this.inspectionEvidence) throw new ServiceUnavailableException("检查草稿证据绑定未启用");
+    const asset = await this.prisma.fileAsset.findFirst({ where: { id: fileAssetId, tenantId: req.user.tenantId, uploadedBy: req.user.id, status: "active" } });
+    if (!asset) throw new ForbiddenException("附件不存在或不属于当前员工");
+    this.assertPermission(req.user, this.scenePermission(asset.uploadScene, asset.businessType));
+    await this.assertOwnerInScope(req, asset.businessType, asset.businessId ?? "", workspaceId, asset.uploadScene, this.metadataRecord(asset.metadata));
+    return this.inspectionEvidence.bind({ ...body, attachmentId: fileAssetId });
+  }
 
   @Post("sessions")
   async createSession(@Req() req: StaffUploadRequest, @Body() body: CreateFileUploadSessionDto) {

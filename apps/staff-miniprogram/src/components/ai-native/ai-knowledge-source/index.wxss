@@ -1,0 +1,1 @@
+.ai-knowledge-source { padding: 24rpx; }.source { padding: 20rpx 0; border-bottom: 1rpx solid var(--border, #e5e7eb); display: flex; flex-direction: column; gap: 8rpx; font-size: 26rpx; }.title { font-weight: 600; font-size: 29rpx; }.source button { margin: 12rpx 0 0; border-radius: 999rpx; color: var(--primary, #2563eb); background: transparent; }

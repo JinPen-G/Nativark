@@ -96,6 +96,47 @@ function main() {
     fs.copyFileSync(file, target);
   }
 
+  // Only legal's audited rich-text parser is bundled, from this checkout's source.
+  // Other shared runtime imports remain prohibited by the artifact gate below.
+  const legalFile = path.join(dist, "pages", "legal", "index.js");
+  const legalSource = fs.readFileSync(legalFile, "utf8");
+  const sharedRequire = /require\(["']@rental-os\/shared["']\)/g;
+  if (sharedRequire.test(legalSource)) {
+    const ts = require(path.join(path.dirname(resolveTsc()), "..", "lib", "typescript.js"));
+    const sourceFile = ts.createSourceFile("legal.js", legalSource, ts.ScriptTarget.Latest, true);
+    const bindings = new Set();
+    function findBindings(node) {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer &&
+          ts.isCallExpression(node.initializer) && node.initializer.expression.getText(sourceFile) === "require" &&
+          node.initializer.arguments.length === 1 && ts.isStringLiteral(node.initializer.arguments[0]) &&
+          node.initializer.arguments[0].text === "@rental-os/shared") bindings.add(node.name.text);
+      ts.forEachChild(node, findBindings);
+    }
+    findBindings(sourceFile);
+    if (bindings.size !== 1) fail("legal shared runtime import is not the approved parser binding");
+    let parserUses = 0;
+    function validateUses(node) {
+      if (ts.isIdentifier(node) && bindings.has(node.text)) {
+        if (ts.isVariableDeclaration(node.parent) && node.parent.name === node) return;
+        if (!ts.isPropertyAccessExpression(node.parent) || node.parent.expression !== node ||
+            node.parent.name.text !== "parseClientRichText") fail("legal shared runtime import uses an unapproved export");
+        parserUses += 1;
+      }
+      ts.forEachChild(node, validateUses);
+    }
+    validateUses(sourceFile);
+    if (parserUses === 0) fail("legal shared parser import is unused");
+    const parserSource = path.resolve(root, "../../packages/shared/src/client-rich-text.ts");
+    runTsc([parserSource, "--target", "ES2019", "--module", "commonjs", "--strict", "--skipLibCheck", "--outDir", path.join(dist, "vendor", "shared-rich-text")]);
+    fs.writeFileSync(legalFile, legalSource.replace(sharedRequire, 'require("../../vendor/shared-rich-text/client-rich-text")'));
+  }
+  // The source-level legal import points at this vendor path too. Compile from
+  // the same canonical implementation even when no legacy shared import remains.
+  if (!fs.existsSync(path.join(dist, "vendor", "shared-rich-text", "client-rich-text.js"))) {
+    const parserSource = path.resolve(root, "../../packages/shared/src/client-rich-text.ts");
+    runTsc([parserSource, "--target", "ES2019", "--module", "commonjs", "--strict", "--skipLibCheck", "--outDir", path.join(dist, "vendor", "shared-rich-text")]);
+  }
+
   // 默认值来自编译后的 config/public.js（即 src/config/public.ts 里的常量）。
   const configFile = path.join(dist, "config", "public.js");
   if (!fs.existsSync(configFile)) fail("缺少编译产物 config/public.js");

@@ -1,0 +1,43 @@
+.ai-native-panel {
+  min-width: 0;
+  color: var(--foreground);
+}
+.ai-native-panel :where(button, input, summary, [tabindex]) {
+  outline-offset: 3px;
+}
+.ai-native-panel :where(button, input, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.ai-native-panel [aria-live],
+.ai-native-panel [role="status"],
+.ai-native-panel [role="alert"] {
+  min-height: 1.5rem;
+}
+@media (max-width: 720px) {
+  .ai-native-panel {
+    width: 100%;
+    overflow-wrap: anywhere;
+  }
+  .ai-native-panel :where(ul, ol) {
+    padding-inline-start: 1.25rem;
+  }
+  .ai-native-panel :where(table) {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .ai-native-panel :where(button) {
+    min-block-size: 44px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-native-panel *,
+  .ai-native-panel *::before,
+  .ai-native-panel *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

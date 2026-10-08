@@ -1,0 +1,4 @@
+'use strict';
+const test = require('node:test'); const assert = require('node:assert/strict'); const tool = require('../scripts/ai-native-b06-error-matrix.cjs');
+test('error matrix reads shared error codes and fixes unknown-result invariant', () => { const codes = tool.readSharedCodes(); assert.ok(codes.includes('AI_RESULT_UNKNOWN')); const result = tool.buildErrorMatrix(codes); assert.deepEqual(result.unknownInvariant, { code: 'AI_RESULT_UNKNOWN', retryable: false, nextAction: 'reconcile' }); assert.deepEqual(result.rows.find(row => row.code === 'AI_RESULT_UNKNOWN'), result.unknownInvariant); });
+test('unknown code is rendered as unrecognized by consumer policy', () => { const result = tool.buildErrorMatrix(['FUTURE_ERROR']); assert.deepEqual(result.rows[0].allowedNextActions, ['none', 'clarify', 'reconfirm', 'reauthorize', 'reconcile', 'retry_later', 'manual']); });

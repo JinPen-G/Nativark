@@ -27,6 +27,7 @@ import { CustomerOperationsService } from "../platform/customer-operations.servi
 import { RentalServiceCapacityService } from "./rental-service-capacity.service";
 import { stampOccurrences } from "./rental-service-occurrence";
 import { MembershipService } from "../platform/membership.service";
+import type { ApprovedOrderBinding, ApprovedOrderTransaction } from "./approved-order-transaction.ports";
 
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -131,24 +132,62 @@ export class RentalOrderConfirmationService {
    * 返回值带 `replayed` 标记：调用方据此跳过下单通知等**外部副作用**。
    * 通知不在事务内，事务回滚撤不回已发出的短信，正确边界是「只在首次真正建单时发」。
    */
-  async createOrder(
+  createOrder(tenantId: string, input: CreateRentalOrderRequest, userName: string, context: BusinessContext, idempotencyKey?: string) {
+    return this.create(tenantId, input, userName, context, idempotencyKey);
+  }
+
+  normalizeOrderInput(input: CreateRentalOrderRequest): CreateRentalOrderRequest {
+    return this.memberships && !input.bookingIdentity ? { ...input, bookingIdentity: { bookingIdentity: "personal" } } : input;
+  }
+
+  createApprovedOrder(tenantId: string, input: CreateRentalOrderRequest, userName: string, context: BusinessContext,
+    idempotencyKey: string, approval: ApprovedOrderTransaction) {
+    if (!idempotencyKey || !approval || [approval.authorize, approval.recover, approval.prepare, approval.commit, approval.replay]
+      .some(method => typeof method !== "function")) throw new BadRequestException("审批执行依赖未就绪");
+    const participant: ApprovedOrderTransaction = { authorize: approval.authorize.bind(approval), recover: approval.recover.bind(approval),
+      prepare: approval.prepare.bind(approval), commit: approval.commit.bind(approval), replay: approval.replay.bind(approval) };
+    return this.create(tenantId, structuredClone(input), userName, structuredClone(context), idempotencyKey, participant);
+  }
+
+  private async create(
     tenantId: string,
     input: CreateRentalOrderRequest,
     userName: string,
     context: BusinessContext,
-    idempotencyKey?: string
+    idempotencyKey?: string,
+    approval?: ApprovedOrderTransaction
   ) {
     // 未显式传键时退回 quoteId：报价一次性使用，天然是这次下单的唯一标识。
-    if (this.memberships && !input.bookingIdentity) input = { ...input, bookingIdentity: { bookingIdentity: "personal" } };
+    input = this.normalizeOrderInput(input);
     const key = idempotencyKey?.trim() || `quote:${input.quoteId}`;
     const fingerprint = orderRequestFingerprint(input);
+    const approvalBinding: ApprovedOrderBinding | undefined = approval ? {
+      tenantId, workspaceId: this.core.resolveWorkspaceId(tenantId), idempotencyKey: key,
+      requestFingerprint: fingerprint, request: structuredClone(input)
+    } : undefined;
+    const verifyReplay = async (order: { id: string; tenantId: string; workspaceId?: string }) => {
+      if (!approval || !approvalBinding) return;
+      if (order.tenantId !== tenantId || order.workspaceId !== approvalBinding.workspaceId) throw new ConflictException("审批结果范围不匹配");
+      await approval.replay(structuredClone(approvalBinding), order.id);
+      await approval.authorize(structuredClone(approvalBinding));
+    };
+    if (approval && approvalBinding) {
+      await approval.authorize(structuredClone(approvalBinding));
+      const committedId = await approval.recover(structuredClone(approvalBinding));
+      if (committedId !== null) {
+        const committed = await this.coreFacts.findOrder(tenantId, committedId);
+        if (!committed) throw new ConflictException("审批业务结果待核对");
+        await verifyReplay(committed);
+        return { order: committed, replayed: true };
+      }
+    }
 
     // 事务外先快速命中，避免重复请求白跑一遍报价校验与库存锁。
     const early = await this.idempotency.find(tenantId, ORDER_CREATE_ACTION, key);
     if (early) {
       assertSameRequest(early, fingerprint);
       const replayed = early.orderId ? await this.coreFacts.findOrder(tenantId, early.orderId) : undefined;
-      if (replayed) return { order: replayed, replayed: true };
+      if (replayed) { await verifyReplay(replayed); return { order: replayed, replayed: true }; }
     }
 
     const workspaceId = this.core.resolveWorkspaceId(tenantId);
@@ -222,6 +261,10 @@ export class RentalOrderConfirmationService {
 
     try {
       await this.prisma.$transaction(async (tx) => {
+        if (approval && approvalBinding) {
+          await approval.authorize(structuredClone(approvalBinding));
+          await approval.prepare(tx, structuredClone(approvalBinding));
+        }
         // 快速预检只改善反馈；这里才是权威判定。它与客户暂停、注销、合并共用
         // customer_profiles 行锁，消除“检查通过后状态才变化”的竞态窗口。
         if (this.customerOperations && input.customerId) {
@@ -351,12 +394,16 @@ export class RentalOrderConfirmationService {
           { tenantId, action: ORDER_CREATE_ACTION, key, requestHash: fingerprint, orderId: order.id, response: { orderId: order.id } },
           tx
         );
+        if (approval && approvalBinding) {
+          await approval.authorize(structuredClone(approvalBinding));
+          await approval.commit(tx, structuredClone(approvalBinding), order.id);
+        }
       }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     } catch (error) {
       // 并发同键：先到者已提交，本次回滚后返回它的结果，而不是报错或重复建单。
       if (error instanceof IdempotentReplay) {
         const replayed = error.orderId ? await this.coreFacts.findOrder(tenantId, error.orderId) : undefined;
-        if (replayed) return { order: replayed, replayed: true };
+        if (replayed) { await verifyReplay(replayed); return { order: replayed, replayed: true }; }
         throw new ConflictException("相同幂等键的请求正在处理，请稍后重试");
       }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -367,7 +414,7 @@ export class RentalOrderConfirmationService {
         // 顺序请求走事务外预检时已有这道校验，并发路径此前漏了。
         assertSameRequest(winner, fingerprint);
         const replayed = winner.orderId ? await this.coreFacts.findOrder(tenantId, winner.orderId) : undefined;
-        if (replayed) return { order: replayed, replayed: true };
+        if (replayed) { await verifyReplay(replayed); return { order: replayed, replayed: true }; }
         throw new ConflictException("相同幂等键的请求正在处理，请稍后重试");
       }
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
@@ -394,17 +441,18 @@ export class RentalOrderConfirmationService {
         if (!winner) throw error;
         assertSameRequest(winner, fingerprint);
         const replayed = winner.orderId ? await this.coreFacts.findOrder(tenantId, winner.orderId) : undefined;
-        if (replayed) return { order: replayed, replayed: true };
+        if (replayed) { await verifyReplay(replayed); return { order: replayed, replayed: true }; }
         throw error;
       }
       throw error;
     }
 
     this.business.applyOrderConfirmationToCache(quote, coupon, order.id, committedAt, context);
+    if (approval && approvalBinding) await approval.authorize(structuredClone(approvalBinding));
     return { order, replayed: false };
   }
 
-  private assertOrderMatchesQuote(input: CreateRentalOrderRequest, quote: RentalQuoteSnapshotV1) {
+  assertOrderMatchesQuote(input: CreateRentalOrderRequest, quote: RentalQuoteSnapshotV1) {
     // 定价分组也是报价事实，不能在确认时换成另一个包含相同型号、但价格或
     // 允许替换范围不同的分组。预约精度仅由服务端报价快照决定，不信任客户端自报。
     const quotedLines = quote.request.lines.map((line) => `${line.pricingGroupId ?? ""}:${line.itemGroupId}:${line.quantity}`).sort();

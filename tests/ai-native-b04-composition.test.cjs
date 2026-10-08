@@ -1,0 +1,6 @@
+'use strict';
+const test = require('node:test'), assert = require('node:assert/strict');
+const React = require('react'), { renderToStaticMarkup } = require('react-dom/server');
+const { ReadOnlyBoard } = require('./fixtures/ai-native/b04-render.cjs').loadFeature('ReadOnlyBoard.tsx');
+test('offline board composes real task, timeline and untrusted text components', () => { const html = renderToStaticMarkup(React.createElement(ReadOnlyBoard, { taskId: 'task-1', tasks: [{ id: 'task-1', scene: 'builder', status: 'running' }], steps: [{ id: 'step-1', taskId: 'task-1', action: 'prepare', status: 'registered' }], modelText: '<script>not executable</script>' })); assert.ok(html.includes('AI 只读工作台')); assert.ok(html.includes('已登记，尚未执行')); assert.ok(html.includes('&lt;script&gt;')); assert.equal(html.includes('<script>'), false); });
+test('board receives no mutation or transport API and keeps unknown scenario visible', () => { const html = renderToStaticMarkup(React.createElement(ReadOnlyBoard, { taskId: 'missing', tasks: [{ id: 'task-1', scene: 'unknown', status: 'future' }], steps: [], modelText: 'unknown result' })); assert.ok(html.includes('暂无步骤')); assert.ok(html.includes('待核对')); assert.equal(html.includes('fetch'), false); });

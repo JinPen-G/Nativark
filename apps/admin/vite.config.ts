@@ -3,9 +3,13 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), "");
+  const offline = mode === "ai-offline";
+  const env = offline ? {} : loadEnv(mode, process.cwd(), "");
 
   return {
+    // Explicit verification mode: never load deployment secrets or replace release artifacts.
+    envDir: offline ? false : undefined,
+    build: offline ? { outDir: "dist-ai-offline" } : undefined,
     plugins: [react()],
     resolve: {
       alias: {

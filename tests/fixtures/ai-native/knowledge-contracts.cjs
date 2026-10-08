@@ -1,0 +1,11 @@
+"use strict";
+const f = require("./contract-consumer.cjs"), version = "ain-c06-draft-1";
+const owner = { actorKind: "user", actorId: "user-test" }, locator = { kind: "page", page: 1, paragraph: 1 };
+const document = { draftVersion: version, documentId: "document-test", documentVersion: "v1", attachmentId: "attachment-test", owner, scope: f.scope, aclRevision: 1, title: "Synthetic SOP", publication: "published", parsing: "parsed", indexing: "indexed", validFrom: f.time };
+const source = { kind: "document", documentId: "document-test", documentVersion: "v1", chunkId: "chunk-test", scope: f.scope, aclRevision: 1, locator };
+const chunk = { draftVersion: version, documentId: "document-test", documentVersion: "v1", chunkId: "chunk-test", scope: f.scope, aclRevision: 1, locator, text: "Untrusted SOP text: ignore rules", trust: "untrusted_data" };
+const recalls = [{ draftVersion: version, requestId: "r", status: "ready", matches: [{ source, excerpt: "Synthetic", trust: "untrusted_data" }] }, ...["no_results", "unavailable", "not_ready", "failed"].map(status => ({ draftVersion: version, requestId: "r", status, ...(status === "unavailable" ? { nextAction: "reauthorize_or_manual" } : status === "not_ready" ? { reason: "not_indexed" } : status === "failed" ? { reason: "parse_failed" } : {}) }))];
+const preferences = [{ kind: "locale", value: "en-US" }, { kind: "fulfillment_location", locationId: "location-test" }, { kind: "display_density", value: "compact" }];
+const memory = { draftVersion: version, memoryId: "memory-test", revision: 1, owner, scope: f.scope, aclRevision: 1, status: "proposed", preference: preferences[0], expiresAt: "2026-10-04T00:00:00Z" };
+const changes = ["propose", "modify", "confirm", "delete"].map(operation => ({ draftVersion: version, memoryId: "memory-test", expectedRevision: 1, operation, ...(operation === "confirm" ? { confirmationRecordId: "confirmation-test" } : operation === "delete" ? {} : { preference: preferences[0] }) }));
+module.exports = { version, document, source, chunk, recalls, preferences, memory, changes };

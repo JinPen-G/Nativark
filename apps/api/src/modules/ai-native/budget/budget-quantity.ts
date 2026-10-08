@@ -1,0 +1,30 @@
+import type { AiUsageQuantityDraft } from '@rental-os/shared';
+import { BudgetError } from './budget.ports';
+
+/** Integer atoms only: money uses micro-units, never Number/float or FX. */
+export function quantityAtoms(quantity: AiUsageQuantityDraft): bigint {
+  if (!quantity || typeof quantity !== 'object') throw new BudgetError('INVALID');
+  if (quantity.unit === 'money') {
+    if (quantity.scale !== 6 || !/^[A-Z]{3}$/.test(quantity.currency) || typeof quantity.amount !== 'string' || !/^(0|[1-9][0-9]{0,17})\.[0-9]{6}$/.test(quantity.amount)) throw new BudgetError('INVALID');
+    return BigInt(quantity.amount.replace('.', ''));
+  }
+  if ((quantity.unit !== 'tokens' && quantity.unit !== 'calls') || !Number.isSafeInteger(quantity.value) || quantity.value < 0) throw new BudgetError('INVALID');
+  const atoms = BigInt(quantity.value);
+  // Prisma maps calls to unsigned INT and tokens to unsigned BIGINT in the
+  // budget tables. Reject before any repository write, never rely on SQL error.
+  if (quantity.unit === 'calls' && atoms > 4294967295n) throw new BudgetError('INVALID');
+  // The shared draft deliberately represents token counts as JS numbers. The
+  // database column is wider, but accepting values outside the safe integer
+  // range would make a successful write impossible to read back faithfully.
+  // Reject before a transaction rather than relying on rounding or a later
+  // Number(bigint) conversion in the Prisma record projection.
+  if (quantity.unit === 'tokens' && atoms > BigInt(Number.MAX_SAFE_INTEGER)) throw new BudgetError('INVALID');
+  return atoms;
+}
+export function sameUnit(left: AiUsageQuantityDraft, right: AiUsageQuantityDraft): boolean {
+  quantityAtoms(left); quantityAtoms(right);
+  return left.unit === right.unit && (left.unit !== 'money' || (right.unit === 'money' && left.currency === right.currency));
+}
+export function assertPositiveQuantity(quantity: AiUsageQuantityDraft): void {
+  if (quantityAtoms(quantity) <= 0n) throw new BudgetError('EXHAUSTED');
+}

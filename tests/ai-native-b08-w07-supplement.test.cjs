@@ -1,0 +1,4 @@
+"use strict";
+const test = require("node:test"); const assert = require("node:assert/strict"); const fs = require("node:fs");
+const roots = ["apps/staff-miniprogram/src/components/ai-native", "apps/miniprogram/src/components/ai-native"];
+test("supplement panels are controlled, revision-scoped and host-event only", () => { for (const root of roots) { const component = fs.readFileSync(`${root}/ai-supplement-input/index.ts`, "utf8"); const controller = fs.readFileSync(`${root}/supplement-controller.ts`, "utf8"); assert.match(component, /inputRevision,taskId/); assert.match(component, /triggerEvent\("submit"/); assert.match(controller, /if \(this\.pending\) return "skipped"/); assert.match(controller, /finally/); assert.doesNotMatch(component + controller, /wx\.request|fetch\s*\(|eval\s*\(/); } });

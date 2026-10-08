@@ -1,0 +1,4 @@
+'use strict';
+const test = require('node:test'); const assert = require('node:assert/strict'); const scanner = require('../scripts/ai-native-b06-fixture-hygiene.cjs');
+test('fixture hygiene detects credential, PII and nondeterministic patterns', () => { const violations = scanner.scanText("const apiKey = 'live-secret'; const phone = '13812345678'; Date.now();", 'bad.cjs'); assert.deepEqual(new Set(violations.map(item => item.code)), new Set(['credential', 'pii_phone', 'nondeterministic_time'])); });
+test('fixture hygiene keeps exceptions explicit and scans the full fixture tree', () => { assert.ok(scanner.EXCEPTIONS.every(item => item.file && item.pattern && item.reason)); const violations = scanner.scanDirectory(require('node:path').resolve(__dirname, 'fixtures/ai-native')); assert.ok(Array.isArray(violations)); });

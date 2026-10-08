@@ -1,0 +1,7 @@
+'use strict';
+const fs = require('node:fs'); const path = require('node:path');
+function inspectSource(source, file) { const interfaces = []; for (const match of source.matchAll(/export\s+interface\s+(\w+Props)\s*\{([\s\S]*?)\n\}/g)) { const props = [...match[2].matchAll(/^\s*(\w+)\??\s*:/gm)].map(item => item[1]); interfaces.push({ name: match[1], props, callbacks: props.filter(prop => /^on[A-Z]/.test(prop)), defaultDisabled: /disabled\s*=\s*false|disabled\s*=\s*true|disabled=\{!/.test(source) }); } return interfaces.map(item => ({ component: file.replace(/\.(tsx|ts)$/, ''), ...item })); }
+function buildPropsReport(root) { const rows = []; for (const name of fs.readdirSync(root)) if (/\.tsx?$/.test(name)) rows.push(...inspectSource(fs.readFileSync(path.join(root, name), 'utf8'), name)); return { tool: 'ai-native-b06-props-report', components: rows.sort((a, b) => a.component.localeCompare(b.component)) }; }
+function toMarkdown(report) { return ['# AI Native 组件 Props 清单', '', '| 组件 | Props 接口 | 回调 | 默认禁用/保护 |', '| --- | --- | --- | --- |', ...report.components.map(row => `| ${row.component} | ${row.name} | ${row.callbacks.join(', ') || '—'} | ${row.defaultDisabled ? '有' : '未发现'} |`), ''].join('\n'); }
+if (require.main === module) { const report = buildPropsReport(path.resolve(process.cwd(), 'apps/admin/src/features/ai-native')); process.stdout.write(JSON.stringify(report, null, 2) + '\n'); process.stdout.write(toMarkdown(report)); }
+module.exports = { inspectSource, buildPropsReport, toMarkdown };

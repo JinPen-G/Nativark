@@ -77,6 +77,16 @@ interface OrderData {
   feeSubmitting: boolean;
   feeError: string;
   feePendingKey: boolean;
+  /** B13: registered for the real page, but remains false until a server capability is delivered. */
+  aiNativeEntryVisible: boolean;
+  aiNativeTasks: unknown[];
+  aiNativePreviewTask: Record<string, unknown> | null;
+  aiNativeSteps: unknown[];
+  aiNativeFields: unknown[];
+  aiNativeProposal: Record<string, unknown> | null;
+  aiNativeSources: unknown[];
+  aiNativeMemories: unknown[];
+  aiNativeOrderProjection: Record<string, unknown> | null;
 }
 
 const CANCEL_REASONS = ["行程变更", "选错了设备或时间", "找到其他方案", "其他原因"];
@@ -129,7 +139,16 @@ Page({
     feeReasons: DISPUTE_REASONS,
     feeSubmitting: false,
     feeError: "",
-    feePendingKey: false
+    feePendingKey: false,
+    aiNativeEntryVisible: false,
+    aiNativeTasks: [],
+    aiNativePreviewTask: null,
+    aiNativeSteps: [],
+    aiNativeFields: [],
+    aiNativeProposal: null,
+    aiNativeSources: [],
+    aiNativeMemories: [],
+    aiNativeOrderProjection: null
   } as OrderData,
 
   orderId: "" as string,
@@ -147,6 +166,16 @@ Page({
 
   onShow() {
     void this.load();
+  },
+
+  // Default-off lifecycle hooks are intentionally cleanup-only. They do not attach a host,
+  // read AI data, or start polling until a server capability is wired in a later release.
+  onHide() {
+    this.selectComponent?.("#ai-native-workbench")?.hostHide?.();
+  },
+
+  onUnload() {
+    this.selectComponent?.("#ai-native-workbench")?.hostLogout?.();
   },
 
   onPullDownRefresh() {

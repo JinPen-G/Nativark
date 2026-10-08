@@ -1,0 +1,3 @@
+"use strict";
+const test = require("node:test"); const assert = require("node:assert/strict"); const quotes = require("./fixtures/ai-native/b07-quotes.cjs");
+test("quote expansion preserves supplied category, currency, timezone and validity without deriving amounts", () => { assert.deepEqual(quotes.map(row => row.category), ["camera", "camping", "vehicle", "construction"]); for (const row of quotes) { assert.match(row.amount, /^synthetic-/); assert.match(row.validFrom, /[+-]\d{2}:\d{2}$/); assert.match(row.validUntil, /[+-]\d{2}:\d{2}$/); assert.ok(row.lines.every(line => /^synthetic-/.test(line.amount))); } });

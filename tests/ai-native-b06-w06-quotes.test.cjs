@@ -1,0 +1,3 @@
+'use strict';
+const test = require('node:test'); const assert = require('node:assert/strict'); const data = require('./fixtures/ai-native/scenarios/quotes.cjs');
+test('quote fixture preserves supplied before/after values and rule versions', () => { assert.equal(data.quote.total, '360.00'); assert.equal(data.snapshotBefore.priceVersion, 'synthetic_price_v1'); assert.equal(data.snapshotAfter.priceVersion, 'synthetic_price_v2'); assert.notEqual(data.snapshotBefore.lines[0].amount, data.snapshotAfter.lines[0].amount); assert.deepEqual(new Set(data.scenarios.map(item => item.expected)), new Set(['success', 'missing_evidence', 'forbidden'])); });

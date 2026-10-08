@@ -1,0 +1,50 @@
+import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
+import { z } from 'zod';
+import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
+import type { ApiAuthGuard } from '../../common/api-auth.guard';
+import { getRequestIdentity, runWithRequestIdentity } from '../../common/request-identity';
+import type { AiOrderRouteCredentialSource } from './order-route-context.authority';
+import type { AiCurrentScopeAuthority } from './ai-scope.repository';
+import type { PlatformConnectionAuthority } from './platform-model-connection';
+import { TenantModelConfigurationAuthority } from './tenant-model-config.authority';
+import { isAiStepExecutionContext } from './task-contract-validation';
+import { ModelGatewayError, type GatewayContext } from './model-gateway.ports';
+
+const profileIdSchema = z.string().regex(/^[A-Za-z0-9][\w.:-]{0,35}$/u);
+const credentialsSchema = z.object({ authorization: z.string().min(1).max(8192), requestId: z.string().min(1).max(191), audience: z.literal('operator') }).strict();
+const userSchema = z.object({ id: z.string().min(1), isActive: z.literal(true), isSaasAdmin: z.literal(true), permissions: z.array(z.string()) });
+
+/** Bound to one server application-selected Profile and credential source.
+ * Platform management has its own actual Guard permission. It never borrows
+ * tenant-management permission or grants cross-tenant content access. */
+export class PlatformModelConfigurationAuthority implements PlatformConnectionAuthority, AiCurrentScopeAuthority {
+  private readonly invocation: TenantModelConfigurationAuthority;
+  constructor(private readonly guard: Pick<ApiAuthGuard, 'canActivate'>,
+    private readonly credentials: AiOrderRouteCredentialSource, private readonly profileId: string,
+    invocation: AiCurrentScopeAuthority, private readonly clock: () => Date = () => new Date()) {
+    if (!profileIdSchema.safeParse(profileId).success || typeof clock !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+    this.invocation = new TenantModelConfigurationAuthority(guard, credentials, invocation);
+  }
+  async manage(profileId: string): Promise<void> {
+    if (profileId !== this.profileId) throw new ModelGatewayError('FORBIDDEN');
+    await this.resolve();
+  }
+  invoke(context: GatewayContext) { return this.invocation.authorize(context, 'invoke'); }
+  async resolve(): Promise<AiExecutionContext> {
+    try {
+      const credential = credentialsSchema.parse(structuredClone(await this.credentials.current()));
+      return await runWithRequestIdentity({}, async () => {
+        const path = `/api/platform/ai/providers/${this.profileId}`;
+        const request = { url: path, originalUrl: path, method: 'PUT', headers: { authorization: credential.authorization }, query: {}, user: undefined as unknown };
+        if (await this.guard.canActivate(new ExecutionContextHost([request])) !== true) throw Error();
+        const user = userSchema.parse(request.user), identity = getRequestIdentity(), now = this.clock();
+        if (!identity?.isSaasAdmin || identity.staffApi || identity.userId !== user.id || !(now instanceof Date) || !Number.isFinite(now.getTime())) throw Error();
+        const context = { contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: credential.requestId, authorizedAt: now.toISOString(),
+          audience: 'operator', actor: { kind: 'saas_admin', userId: user.id }, scope: { kind: 'platform' },
+          permissions: [...user.permissions] };
+        if (!isAiStepExecutionContext(context)) throw Error();
+        return structuredClone(context);
+      });
+    } catch { throw new ModelGatewayError('FORBIDDEN'); }
+  }
+}
