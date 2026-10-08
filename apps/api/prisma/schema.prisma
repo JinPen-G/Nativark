@@ -310,6 +310,7 @@ model BusinessWorkspace {
   rentalInspectionTemplates         RentalInspectionTemplate[]
   rentalInspectionRecords           RentalInspectionRecord[]
   aiInspectionDrafts                AiInspectionDraft[]
+  aiBusinessFailureEvents           AiBusinessFailureOutbox[]
   aiInspectionEvidenceBindings      AiInspectionEvidenceBinding[]
   rentalFulfillmentOperators        RentalFulfillmentOperator[]
   rentalTenantBusinessSettingss     RentalTenantBusinessSettings[]
@@ -727,6 +728,39 @@ model AiTaskActionPolicy {
   @@id([scopeId, taskId, operation])
   @@index([scopeId, expiresAt], map: "ai_task_action_policies_expiry_idx")
   @@map("ai_task_action_policies")
+}
+
+model AiBusinessFailureOutbox {
+  id               String   @id @db.VarChar(36)
+  tenantId         String   @db.VarChar(191)
+  workspaceId      String   @db.VarChar(191)
+  eventType        String   @db.VarChar(32)
+  notificationId   String?  @db.VarChar(191)
+  refundId         String?  @db.VarChar(191)
+  resourceRevision Int      @db.UnsignedInt
+  orderId          String?  @db.VarChar(191)
+  failureCode      String   @db.VarChar(32)
+  traceId          String   @db.VarChar(191)
+  causationId      String   @db.VarChar(191)
+  deduplicationKey String   @db.Char(64)
+  occurredAt       DateTime @db.DateTime(3)
+  expiresAt        DateTime @db.DateTime(3)
+  status           String   @default("pending") @db.VarChar(24)
+  attempts         Int      @default(0) @db.UnsignedInt
+  fence            Int      @default(0) @db.UnsignedInt
+  leaseOwner       String?  @db.VarChar(128)
+  leaseUntil       DateTime? @db.DateTime(3)
+  nextAttemptAt    DateTime @default(now()) @db.DateTime(3)
+  lastErrorCode    String?  @db.VarChar(32)
+  createdAt        DateTime @default(now()) @db.DateTime(3)
+  updatedAt        DateTime @updatedAt @db.DateTime(3)
+  workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_workspace_fk")
+  notification     RentalNotificationLog? @relation("AiFailureNotification", fields: [tenantId, workspaceId, notificationId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_notification_fk")
+  refund           RentalPaymentRefund? @relation("AiFailureRefund", fields: [tenantId, workspaceId, refundId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_refund_fk")
+
+  @@unique([tenantId, workspaceId, deduplicationKey], map: "ai_failure_outbox_dedup_key")
+  @@index([tenantId, workspaceId, status, nextAttemptAt], map: "ai_failure_outbox_due_idx")
+  @@map("ai_business_failure_outbox")
 }
 
 /// Immutable result artifact and measured active segment; not provider usage or money.
@@ -3880,6 +3914,8 @@ model RentalPaymentRefund {
   idempotencyHash  String              @db.Char(64)
   /// pending | accepted | succeeded | funding_pending | failed | closed
   status           String              @default("pending") @db.VarChar(32)
+  revision         Int                 @default(1) @db.UnsignedInt
+  aiFailureEvents  AiBusinessFailureOutbox[] @relation("AiFailureRefund")
   externalRefundId String?             @db.VarChar(191)
   externalStatus   String?             @db.VarChar(40)
   responseJson     Json?
@@ -3892,6 +3928,7 @@ model RentalPaymentRefund {
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
 
+  @@unique([tenantId, workspaceId, id], map: "rental_payment_refunds_scope_id_key")
   @@unique([paymentIntentId, idempotencyHash], map: "rental_payment_refunds_intent_idem_key")
   @@index([tenantId, workspaceId, orderId, status], map: "rental_payment_refunds_order_status_idx")
   @@index([tenantId, provider, status, updatedAt], map: "rental_payment_refunds_provider_status_idx")
@@ -5044,6 +5081,8 @@ model RentalNotificationLog {
   renderedBody         String                     @db.Text
   variables            Json
   status               String                     @default("queued")
+  revision             Int                        @default(1) @db.UnsignedInt
+  aiFailureEvents      AiBusinessFailureOutbox[]  @relation("AiFailureNotification")
   provider             String
   providerMessageId    String?
   errorMessage         String?
@@ -5066,6 +5105,7 @@ model RentalNotificationLog {
   sentAt               DateTime?
   createdAt            DateTime                   @default(now())
 
+  @@unique([tenantId, workspaceId, id], map: "rental_notification_logs_scope_id_key")
   @@unique([workspaceId, idempotencyKey], map: "rental_notification_logs_ws_idempotency_key")
   @@index([tenantId, eventCode, createdAt], map: "rental_notification_logs_tenant_event_created_idx")
   @@index([tenantId, status, createdAt], map: "rental_notification_logs_tenant_status_created_idx")

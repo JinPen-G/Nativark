@@ -1,5 +1,22 @@
 # Codex B 总册接续交付与精确未闭合项
 
+## 2026-10-08 CB08：通知与退款明确失败的事务Outbox
+
+基线54e7cd27；主线已确认原通知仓储、原payment退款事实方法及最小模型/迁移认领。只覆盖本完整子包notification.failed/refund.failed，不把交付资源风险、归还异常、开业缺项或CB09自动化声明已完成。
+
+- 原RentalNotificationLog与RentalPaymentRefund新增UnsignedInt revision，默认1仅表示升级起点、不推断历史。通知insert默认1、claim/update原子递增；退款create默认1、成功/入账/待恢复/accepted/明确失败/未知更新均原子递增。唯一外部历史入口rental-snapshot-backfill.service的upsert(update:{})不改，不回填事件。旧头变化会使失败候选失效，未用attempts或时间戳冒充version。
+- 追加 `20261008123000_ai_business_failure_events`：两原表revision和scope+id唯一索引；AiBusinessFailureOutbox持久最少源引用/revision、固定failureCode、源因果hash、dedup键、发生/到期时间及status/attempts/lease/fence/重试时间。workspace与两原事实均scope复合FK，CHECK限定恰一资源及状态/计数，24小时候选有效期、最多3次处理。无通知正文/收款信息/供应商错误正文入事件。
+- `PrismaBusinessFailureOutbox.notification/refund(tx,scope,id)`只从同一tx重读原事实；notification接受delivery_failed或不再计划重试的failed，排除模拟；refund只failed且无成功/入账事实。pending/accepted/delivery_uncertain/资金待恢复不产生明确失败事件。traceId/causationId明确由原fact身份/版本确定性派生，不冒称原HTTP trace。
+- `RentalBusinessFactRepository`第二参数和`PaymentRuntimeService`第四参数可选BUSINESS_FAILURE_OUTBOX，未注入保持原业务路径且不访问Outbox；显式启用时原事实写入/读回/事件在一个事务，Outbox失败回滚该事务并向原调用链报错，不事后append、不假成功。通知原幂等catch只包create，不吞事件写失败。退款非成功结果CAS绑定原revision，迟到失败不能覆盖已推进的成功事实。不改金额、资金算法、签名、出网或原重试规则。
+- 实际入口 `composeBusinessFailureEvents` / `BusinessFailureEventsModule.register` 返回已接participant的原notifications/payment实例和candidates；宿主需显式使用这些实例/导出token，未注册根模块/worker。候选 `prepare({eventId})`、`read({eventId})`、`preparePending({limit:1..10})` 使用原ApiAuthGuard+独立ALS，通知沿原notification-logs权限及原通知范围函数，退款沿原finance GET并复用Core.getOrder当前范围检查。每次重读源状态/revision和当前身份；候选输出复用AiBusinessEventDraft，taskCreated=false，仅human_review，不等于执行许可。
+- 原子claim/fence、10秒处理租约、有界重试/死信/过期语义已接实际候选消费；应答未知读原event，不换源id。并发同事件只领取一次，成功回执推进revision后旧候选expired。队列候选状态不会发送通知、退款或模型调用。记录开启后的事务失败策略不等同于生产已启用；关模型不触发任何新外部调用。
+
+仅在原 `tests/ai-native-events-contracts.test.cjs` 增一项CB08实际组合小冒烟，未新增脚本或大矩阵。覆盖原通知回滚/明确与未知区分、实际Guard候选/并发单领、成功后旧建议失效、原退款未知/明确失败/成功、撤权与默认未注入；最终1pass/0fail/0skip/0todo退出0。首次0/1在失效读回处误把整行作为scope展开，修为显式tenant/workspace后仅复验同用例。TS编译随transpileOnly:false启用；之后仅整理通知方法缩进，diff check0。
+
+原隔离Prisma生成退出0，guardViolations=0、sharedArtifactsUnchanged=true。冒烟沿原preload+lane-b-local-runtime，固定无效DATABASE_URL，本树绝对output/cb08-events-audit与原TEMP/TMP；`node ... --test --test-name-pattern='CB08' tests/ai-native-events-contracts.test.cjs`。真实AuthService/ApiAuthGuard/原仓储/Payment方法/Outbox/候选组合运行；DB事务、身份存储、Core事实、资金记账外部端口均显式替身，未发HTTP/DB/DNS/模型/支付。未执行迁移，真MySQL FK/锁/故障及3次重试/死信深测、真实回执、宿主接入后补，不冒称已验全部分支。
+
+Runtime可替换驱动，不替换原fact revision、事件id/dedup、claim fence与当前业务授权；checkpoint不能当事件提交/业务成功或任务创建。Provider SDK本片不调用，仍归原Gateway；回退停止显式participant/消费者且保留事实和原event，未知不换键。CB09所需独立automation政策/主体及原task创建端口未在本片伪造，候选材料不是shadow task。
+
 ## 2026-10-08 CB06：原人类确认到实际准备包的组合证据
 
 按主线续派，复用全部既有Memory生产服务，没有新增wrapper/确认表/默认授权。原file-runtime完整功能用例现在用同一正式Prisma政策组合实例验证：无Memory政策的propose拒绝→精确owner/逐revision政策→实际propose/confirm/confirmationStatus→preparation.collect(includePreferences=true)/revalidate→原revoke/state读回→旧准备包拒绝→重新收集不含被撤回偏好。scope/base与每个memory revision均为独立持久policy行，不用一个通用grantKey冒充。同一请求的Auth/credentials与Knowledge保持一致；确认仍由原Memory consent事务生成，测试没有手填confirmed状态。
