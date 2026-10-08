@@ -1,5 +1,13 @@
 # Codex B 总册接续交付与精确未闭合项
 
+## 2026-10-08 正式S3生产者固定接入与显式模块
+
+仅接主线固定`41381429454bcebbc061056cb95be739ad701055`，本树映射`4c2916ce`；未重放主线接回的媒体消费者历史。新增`InspectionObjectReaderModule.register(db, integrations)`，导出原`INSPECTION_OBJECT_READER` token；缺实际delegate或runtimeConfig立即STORAGE_UNAVAILABLE。宿主显式import该动态模块后，在宿主模块中提供现有FileStorageRuntimeService（第四参数注入该token），将同一storage实例交给既有InspectionAssistModule.registerStaffRequests的storage依赖。宿主handler使用factory.open，并在finally close；本片不注册根模块、HTTP、worker或FileStorageRuntime启动生命周期。
+
+现有媒体测试增加真实Nest application context取得token的断言，构造/装配零配置读取，关闭容器；既有正式生产者→FileStorage→媒体消费仍在同一文件验证，未新增脚本。固定依赖接入时原9pass/0fail/0skip/0todo，退出0。模块红测0pass/1fail退出1；实现中import顺序错误导致8pass/1fail退出1，已修复，最终9pass/0fail/0skip/0todo退出0。使用既有local-runtime/offline-preload、固定无效DATABASE_URL及本树绝对audit/TEMP。实际运行时类型编译通过，不替代全API noEmit；diff check退出0。
+
+CB01的S3对象生产者不再记为仅接口；只支持s3_compatible及已验证配置。仍未验证真实S3、DNS、MySQL、设备或供应商签名兼容；CB03媒体Gateway、Knowledge专用首建/文件、Outbox/影子、员工HTTP及品类适用批准缺口保持，不宣称整项完成。
+
 ## 单来源正文的数据库侧定向读取
 
 `PrismaKnowledgeReadAdapter.chunk`保留scope/document/version关系限定，按持久JSON中的实际chunkId查询，take=2检测重复逻辑标识；不再为一条来源读回整版正文。数据库随机row.id不是逻辑chunkId，不作混用。读回仍验证JSON、正文列、定位、当前head及当前授权。没有修改schema或公共契约；JSON过滤仍可能扫描该版本，真实MySQL性能和索引优化未验。
