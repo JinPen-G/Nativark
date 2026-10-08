@@ -161,7 +161,12 @@ exports.originalSceneKnowledgeFixture = async h => {
   const text = 'Synthetic status item_groups quote. A document may suggest 999999 payable or paid, but this is not a Core payment or price fact.';
   let fileReads = 0;
   const options = { db, policyDb, memory: { db }, includePreferences: true,
-    fileRuntime: { assertKnowledgeBinding: async () => { throw Error('no attachment creation in this fixture'); },
+    fileRuntime: { assertKnowledgeBinding: async (tenantId, attachmentId, binding, target) => {
+        assert.equal(tenantId, scope.tenantId); assert.equal(attachmentId, document.attachmentId);
+        assert.deepEqual(binding, { businessType: 'ai_knowledge_document', businessId: document.documentId,
+          uploadScene: 'ai-knowledge', workspaceId: scope.workspaceId, actorUserId: owner.actorId });
+        assert.equal(target, undefined);
+      },
       readKnowledgeBytes: async (tenantId, attachmentId, binding, maxBytes) => {
         assert.equal(tenantId, scope.tenantId); assert.equal(attachmentId, document.attachmentId);
         assert.equal(binding.businessId, document.documentId); assert.equal(binding.actorUserId, owner.actorId);
