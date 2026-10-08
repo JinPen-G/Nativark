@@ -451,31 +451,77 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   Object.assign(client.core, { listCategories: () => [{ code: 'camera', name: 'Synthetic' }],
     getBusinessSettings: () => ({ fulfillment: { enabledModes: [] } }) });
   const { composeRequestBoundClientApplication } = require('../apps/api/src/modules/ai-native/scenes/client-request.application');
-  let materialRows = [], lostReply = false, materialWrites = 0;
-  const materialDb = transactionRows => {
-    const rows = () => transactionRows ?? materialRows;
+  const { createTaskInputStore, clone } = require('./fixtures/ai-native/task-input-store.cjs');
+  const { aiPersistenceScopeColumns } = require('../apps/api/src/modules/ai-native/persistence-scope');
+  const { AsyncLocalStorage } = require('node:async_hooks');
+  const scopes = [{ kind: 'platform' }, { kind: 'tenant', tenantId: 'tenant-client' },
+    { kind: 'workspace', tenantId: 'tenant-client', workspaceId: 'workspace-client' }].map((scope, index) => ({ id: `client-scope-${index}`, ...aiPersistenceScopeColumns(scope) }));
+  const sceneCode = 'client_material', sceneVersion = '1';
+  const settingsFor = scope => ({ draftVersion: 'ain-c07-draft-2', config: { configRevision: 1 },
+    scope: scope.kind === 'PLATFORM' ? { kind: 'platform' } : { kind: 'tenant', tenantId: 'tenant-client' },
+    sceneCode, allowedScenes: [sceneCode], allowedModels: ['synthetic-model'], maxConcurrent: 1, maxCallsPerRun: 1,
+    budget: { state: 'limited', quantity: { unit: 'calls', value: 10 } },
+    gates: Object.fromEntries(['platform', 'tenant', 'scene'].map(kind => [kind, { enabled: true, revision: 1 }])) });
+  const taskStore = createTaskInputStore({ aiScope: scopes, aiTask: [], aiRun: [], aiStep: [], aiTaskRunPlan: [],
+    aiBudgetPolicy: scopes.map(scope => ({ id: `${scope.id}-budget`, scopeId: scope.id, scopeKind: scope.kind, sceneCode,
+      configRevision: 1, enabled: true, settingsJson: settingsFor(scope) })) },
+    { aiTask: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'creationKey']] });
+  taskStore.control.beforeWrite = async (table, args) => {
+    if (table === 'aiTask') Object.assign(args.data, { scope: clone(scopes[2]), archivedAt: null });
+  };
+  let materialRows = [], taskInputs = [], taskPolicies = [], lostReply = false, materialWrites = 0;
+  let lostInputReply = false, lostTaskReply = false, revokeAfterClaim = false, commercialAvailable = true;
+  const materialDb = (transactionRows, transactionInputs) => {
+    const rows = () => transactionRows ?? materialRows, inputs = () => transactionInputs ?? taskInputs;
     return { ...client.prisma,
+      tenant: { ...client.prisma.tenant, findUnique: async () => ({ subscription: { startAt: new Date('2026-01-01'), endAt: new Date('2027-01-01') }, subscriptionSegments: [] }) },
       $queryRaw: async query => {
-        assert.ok(query.sql.includes('FROM ai_client_scene_materials'));
+        if (query.sql.includes('FROM ai_client_task_policies')) {
+          const [tenantId, workspaceId, channel, customerType, sceneCode, sceneVersion] = query.values;
+          return structuredClone(taskPolicies.filter(row => row.tenantId === tenantId && row.workspaceId === workspaceId
+            && row.channel === channel && row.customerType === customerType && row.sceneCode === sceneCode && row.sceneVersion === sceneVersion));
+        }
+        const taskInput = query.sql.includes('FROM ai_client_task_inputs');
+        assert.ok(taskInput || query.sql.includes('FROM ai_client_scene_materials'));
         const [tenantId, workspaceId, channel, principalHash, reference] = query.values;
-        const field = query.sql.includes('AND operationKey =') ? 'operationKey' : 'id';
-        return structuredClone(rows().filter(row => row.tenantId === tenantId && row.workspaceId === workspaceId
+        const field = taskInput ? 'creationKey' : query.sql.includes('AND operationKey =') ? 'operationKey' : 'id';
+        return structuredClone((taskInput ? inputs() : rows()).filter(row => row.tenantId === tenantId && row.workspaceId === workspaceId
           && row.channel === channel && row.principalHash === principalHash && row[field] === reference));
       },
       $executeRaw: async query => {
-        assert.ok(query.sql.startsWith('INSERT INTO ai_client_scene_materials'));
+        const taskInput = query.sql.startsWith('INSERT INTO ai_client_task_inputs');
+        assert.ok(taskInput || query.sql.startsWith('INSERT INTO ai_client_scene_materials'));
         const columns = query.sql.match(/\(([^)]+)\)\s+VALUES/u)[1].split(',').map(value => value.trim());
         const row = Object.fromEntries(columns.map((key, index) => [key, structuredClone(query.values[index])]));
-        for (const key of ['command', 'material', 'publication']) row[key] = JSON.parse(row[key]);
-        assert.equal(rows().some(current => current.tenantId === row.tenantId && current.workspaceId === row.workspaceId
-          && current.channel === row.channel && current.principalHash === row.principalHash && current.operationKey === row.operationKey), false);
-        rows().push(row); materialWrites++; return 1;
+        if (!taskInput) for (const key of ['command', 'material', 'publication']) row[key] = JSON.parse(row[key]);
+        const key = taskInput ? 'creationKey' : 'operationKey', table = taskInput ? inputs() : rows();
+        assert.equal(table.some(current => current.tenantId === row.tenantId && current.workspaceId === row.workspaceId
+          && current.channel === row.channel && current.principalHash === row.principalHash && current[key] === row[key]), false);
+        table.push(row); if (!taskInput) materialWrites++; return 1;
       } };
   };
-  const db = materialDb();
+  const db = { ...taskStore.db, ...materialDb() }, activeTransaction = new AsyncLocalStorage();
+  const taskProjection = client => ({ ...client.aiTask, findFirst: async args => {
+    if (!args.select?.runs) return client.aiTask.findFirst(args);
+    const row = await client.aiTask.findFirst({ ...args, select: undefined });
+    if (!row) return null;
+    row.runs = await client.aiRun.findMany({ where: { taskId: row.id, sequence: 1 }, take: 1 });
+    return row;
+  } });
+  db.aiTask = taskProjection(taskStore.db);
+  const scopeUpsert = async ({ where }) => clone(scopes.find(scope => scope.scopeKey === where.scopeKey));
+  db.aiScope = { ...db.aiScope, upsert: scopeUpsert };
   db.$transaction = async work => {
-    const rows = structuredClone(materialRows), result = await work(materialDb(rows));
-    materialRows = rows;
+    if (activeTransaction.getStore()) return work(activeTransaction.getStore());
+    const rows = structuredClone(materialRows), inputs = structuredClone(taskInputs);
+    const priorInputs = inputs.length, priorTasks = taskStore.state.aiTask.length;
+    const result = await taskStore.db.$transaction(tx => {
+      const current = { ...tx, ...materialDb(rows, inputs), aiTask: taskProjection(tx), aiScope: { ...tx.aiScope, upsert: scopeUpsert } };
+      return activeTransaction.run(current, () => work(current));
+    });
+    materialRows = rows; taskInputs = inputs;
+    if (revokeAfterClaim && inputs.length > priorInputs) taskPolicies[0].allowCreate = false;
+    if ((lostInputReply && inputs.length > priorInputs) || (lostTaskReply && taskStore.state.aiTask.length > priorTasks)) throw Error('synthetic client task COMMIT response lost');
     if (lostReply) throw Error('synthetic material COMMIT response lost');
     return result;
   };
@@ -526,6 +572,74 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.equal(preview.handoff.path, '/api/client/v1/orders/own-order/cancel'); assert.equal(preview.handoff.execution, 'not_attempted');
   assert.equal((await requests.readSource(request, { materialRef: preview.materialRef })).materialHash, preview.materialHash);
   await assert.rejects(prepare(request, { kind: 'order', orderId: 'other-order' }), e => e.getStatus?.() === 404);
+  const subscriptions = { readCategoryCommercialContext: async (tenantId, _tx, _now, features) => {
+    assert.equal(tenantId, 'tenant-client'); assert.deepEqual(features, ['ai.native.use']);
+    return { revision: 1, serviceStatus: 'active', newBusinessAllowed: true,
+      entitlements: [{ code: 'ai.native.use', available: commercialAvailable, categories: [] }] };
+  } };
+  const taskDependencies = { ...dependencies, tasks: { db, subscriptions, sceneCode, sceneVersion } };
+  const clientTasks = composeRequestBoundClientApplication(taskDependencies, configuration);
+  const taskCommand = { creationKey: 'client-create-1', materialRef: own.materialRef };
+  await assert.rejects(clientTasks.createTask({ headers: {} }, taskCommand), /AI_CLIENT_CONTEXT_UNAVAILABLE/);
+  await assert.rejects(clientTasks.createTask(request, { ...taskCommand, sceneCode: 'forged' }), /AI_CLIENT_INVALID_INPUT/);
+  await assert.rejects(clientTasks.createTask(request, taskCommand), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  assert.equal(taskInputs.length, 0); assert.equal(taskStore.state.aiTask.length, 0);
+  taskPolicies.push({ id: 'b77ec266-e3a2-48a4-98be-d5b49222d5b1', tenantId: 'tenant-client', workspaceId: 'workspace-client',
+    channel: 'app', customerType: 'personal', sceneCode, sceneVersion, enabled: 1, allowCreate: 1, allowRead: 1,
+    revision: 1, expiresAt: new Date('2027-01-01') });
+  taskPolicies[0].allowCreate = 0;
+  await assert.rejects(clientTasks.createTask(request, taskCommand), e => e.code === 'AI_ACCESS_DENIED');
+  assert.equal((await clientTasks.readTaskCreation(request, taskCommand)).state, 'unknown');
+  taskPolicies[0].allowCreate = 1;
+  taskStore.state.aiBudgetPolicy[0].enabled = false;
+  await assert.rejects(clientTasks.createTask(request, taskCommand), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  taskStore.state.aiBudgetPolicy[0].enabled = true;
+  taskStore.state.aiBudgetPolicy[2].settingsJson.maxConcurrent = 0;
+  await assert.rejects(clientTasks.createTask(request, taskCommand), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  taskStore.state.aiBudgetPolicy[2].settingsJson.maxConcurrent = 1;
+  commercialAvailable = false;
+  await assert.rejects(clientTasks.createTask(request, taskCommand), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  commercialAvailable = true;
+  assert.equal(taskInputs.length, 0);
+  const created = await clientTasks.createTask(request, taskCommand);
+  assert.equal(created.state, 'observed'); assert.equal(created.task.status, 'queued');
+  assert.equal(taskStore.state.aiTask.length, 1); assert.equal(taskStore.state.aiRun.length, 1);
+  assert.equal(taskStore.state.aiTask[0].ownerKind, 'CUSTOMER'); assert.equal(taskStore.state.aiTask[0].ownerId, 'person-client');
+  assert.equal(taskStore.state.aiTask[0].audience, 'CLIENT'); assert.equal(taskStore.state.aiTask[0].inputRef, taskInputs[0].id);
+  assert.equal(taskStore.state.aiTask[0].inputHash, taskInputs[0].inputHash);
+  assert.equal(taskStore.state.aiRun[0].fencingToken.toFixed(0), '0'); assert.equal(taskInputs[0].dispatchState, 'UNKNOWN');
+  const countCreates = () => taskStore.trace.filter(value => value === 'aiTask.create').length;
+  const taskRestart = composeRequestBoundClientApplication(taskDependencies, configuration), beforeDuplicate = countCreates();
+  taskPolicies[0].allowCreate = 0; taskStore.state.aiBudgetPolicy[0].enabled = false;
+  assert.equal((await taskRestart.createTask(request, taskCommand)).task.taskId, created.task.taskId);
+  assert.equal((await taskRestart.readTaskCreation(request, taskCommand)).task.runId, created.task.runId);
+  assert.equal(countCreates(), beforeDuplicate);
+  taskPolicies[0].allowRead = 0;
+  await assert.rejects(taskRestart.readTaskCreation(request, taskCommand), e => e.code === 'AI_ACCESS_DENIED');
+  taskPolicies[0].allowRead = 1; taskPolicies[0].allowCreate = 1; taskStore.state.aiBudgetPolicy[0].enabled = true;
+  await assert.rejects(taskRestart.createTask(request, { ...taskCommand, materialRef: distinctCase.materialRef }), e => e.code === 'AI_REVISION_CONFLICT');
+  const taskLost = { ...taskCommand, creationKey: 'task-lost-ack' };
+  lostTaskReply = true;
+  await assert.rejects(clientTasks.createTask(request, taskLost), e => e.code === 'AI_CLIENT_TASK_RESULT_UNKNOWN');
+  lostTaskReply = false;
+  const afterTaskLost = countCreates(), taskRecovered = await taskRestart.readTaskCreation(request, taskLost);
+  assert.equal(taskRecovered.state, 'observed'); assert.equal(taskRecovered.task.status, 'queued');
+  assert.equal(countCreates(), afterTaskLost); assert.equal(taskStore.state.aiTask.length, 2);
+  const inputLost = { ...taskCommand, creationKey: 'claim-lost-ack' };
+  lostInputReply = true;
+  await assert.rejects(clientTasks.createTask(request, inputLost), e => e.code === 'AI_CLIENT_TASK_RESULT_UNKNOWN');
+  lostInputReply = false;
+  assert.equal((await taskRestart.createTask(request, inputLost)).state, 'unknown');
+  assert.equal((await taskRestart.readTaskCreation(request, inputLost)).task, null);
+  assert.equal(countCreates(), afterTaskLost);
+  const preDispatchRevoked = { ...taskCommand, creationKey: 'policy-revoked-after-claim' };
+  revokeAfterClaim = true;
+  await assert.rejects(clientTasks.createTask(request, preDispatchRevoked), e => e.code === 'AI_CLIENT_TASK_RESULT_UNKNOWN');
+  revokeAfterClaim = false; taskPolicies[0].allowCreate = 1;
+  assert.equal((await taskRestart.createTask(request, preDispatchRevoked)).state, 'unknown');
+  assert.equal(countCreates(), afterTaskLost); assert.equal(taskStore.state.aiRun.length, 2);
+  assert.equal(JSON.stringify(taskInputs).includes(authorization), false); assert.equal(JSON.stringify(taskInputs).includes('session-client'), false);
+  assert.equal(clientTasks.capabilities.tasks, 'create_and_read_only'); assert.equal(clientTasks.capabilities.models, 'unavailable');
   session.customer.customerType = 'corporate';
   assert.equal((await prepare(request, { kind: 'profile' })).material.customerType, 'corporate');
   await assert.rejects(prepare(request, { kind: 'order', orderId: 'other-order' }), e => e.getStatus?.() === 404);
@@ -536,6 +650,8 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const switchedRequest = { headers: { authorization: `Bearer ${auth.sign({ typ: 'client', sub: 'person-client', tid: 'tenant-client',
     sid: session.id, wid: 'workspace-client', iat: 1, exp: Math.floor(new Date('2027-01-01').getTime() / 1000) })}` } };
   await assert.rejects(requests.readSource(switchedRequest, { materialRef: own.materialRef }), /AI_CLIENT_MATERIAL_STALE/);
+  await assert.rejects(taskRestart.readTaskCreation(switchedRequest, taskCommand), /AI_CLIENT_MATERIAL_STALE/);
+  assert.equal(countCreates(), afterTaskLost);
   session.id = 'session-client';
   published = false;
   await assert.rejects(requests.readSource(request, { materialRef: own.materialRef }), /AI_CLIENT_CONTEXT_UNAVAILABLE/);
