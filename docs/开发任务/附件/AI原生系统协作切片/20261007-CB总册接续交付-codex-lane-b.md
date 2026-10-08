@@ -1,5 +1,13 @@
 # Codex B 总册接续交付与精确未闭合项
 
+## 2026-10-08 CB06：原人类确认到实际准备包的组合证据
+
+按主线续派，复用全部既有Memory生产服务，没有新增wrapper/确认表/默认授权。原file-runtime完整功能用例现在用同一正式Prisma政策组合实例验证：无Memory政策的propose拒绝→精确owner/逐revision政策→实际propose/confirm/confirmationStatus→preparation.collect(includePreferences=true)/revalidate→原revoke/state读回→旧准备包拒绝→重新收集不含被撤回偏好。scope/base与每个memory revision均为独立持久policy行，不用一个通用grantKey冒充。同一请求的Auth/credentials与Knowledge保持一致；确认仍由原Memory consent事务生成，测试没有手填confirmed状态。
+
+沿同一预加载及固定无效DB执行原file-runtime `--test-name-pattern='first creation'`，本次一次运行1pass/0fail/0skip/0todo，退出0；audit为本树output/cb06-consent-input-audit。DB、身份会话、政策置备、存储仍是显式离线替身，原Prisma政策读取/授权服务/确认事务/收据/输入生产消费均为真实代码；无新增生产修复，不把本片验证当新增功能。源码类型检查随ts-node启用，diff0。A已收到原合同与8c3d8b42依赖，实际模型派发/结果来源读回仍由A独占接线，未在B伪称已执行。
+
+Runtime与Provider边界保持：确认/撤回属于原业务事实，知识/偏好只放独立untrusted_data输入分区，不能改Core事实、工具、预算或批准；Runtime重启/替换不能把旧已撤回准备包重新授权。本片没有模型SDK调用或框架安装。
+
 ## 2026-10-08 CB07：精确资源政策的实际消费
 
 基线dd6b8ea2。A确认原prepareHeldRun还未消费Knowledge/Memory，本线已交collect/revalidate真实固定接口及限制，A在自己的冻结/结果/来源入口接续，B未写scenes。

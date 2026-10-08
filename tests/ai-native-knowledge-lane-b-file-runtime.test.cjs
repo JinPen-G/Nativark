@@ -27,7 +27,7 @@ function fileFixture() {
   const f = fixture(), { db } = f, grants = new Map();
   db.state.assets = new Map(); db.state.uploads = new Map();
   const clone = value => structuredClone(value);
-  const match = (row, where) => Object.entries(where).every(([key, value]) => row[key] === value);
+  const match = (row, where) => Object.entries(where).every(([key, value]) => value && typeof value === 'object' && 'gt' in value ? row[key] > value.gt : row[key] === value);
   const delegate = name => ({
     async findFirst({ where, include }) { const row = [...db.state[name].values()].find(row => match(row, where));
       return row ? clone({ ...row, ...(include?.uploadSession ? { uploadSession: [...db.state.uploads.values()].find(session => session.fileAssetId === row.id) ?? null } : {}) }) : null; },
@@ -44,6 +44,8 @@ function fileFixture() {
   db.aiKnowledgeDocument.findUnique = async ({ where }) => clone(db.state.documents.get(where.id) ?? null);
   db.aiKnowledgeDocument.findMany = async ({ where, take, select }) => [...db.state.documents.values()].filter(row => match(row, where))
     .sort((a, b) => a.id.localeCompare(b.id)).slice(0, take).map(row => clone(select ? Object.fromEntries(Object.keys(select).filter(key => select[key]).map(key => [key, row[key]])) : row));
+  db.aiStructuredMemory.findMany = async ({ where, take, select }) => [...db.state.memories.values()].filter(row => match(row, where))
+    .sort((a, b) => a.id.localeCompare(b.id)).slice(0, take).map(row => clone(Object.fromEntries(Object.keys(select).filter(key => select[key]).map(key => [key, row[key]]))));
   db.aiKnowledgeActionPolicy = { findUnique: async ({ where }) => clone(grants.get(JSON.stringify(where.tenantId_workspaceId_actorKind_actorId_audience_domain_action_resourceKey)) ?? null) };
   const transaction = db.$transaction; let queue = Promise.resolve();
   db.$transaction = work => { const result = queue.then(() => transaction(work)); queue = result.catch(() => {}); return result; };
@@ -57,8 +59,8 @@ function fileFixture() {
       return new Response(new ReadableStream({ start(controller) { controller.enqueue(text); if (state.afterBody) state.afterBody(); controller.close(); } }),
         { headers: { 'content-type': 'text/plain', 'content-length': String(text.length) } }); } };
   const deps = { ...f.ports, db, integrations, objectIO };
-  function allow(action, resource = {}, workspaceId = 'space-1') {
-    const key = { tenantId: 'tenant-1', workspaceId, actorKind: 'user', actorId: 'user-1', audience: 'operator', domain: 'knowledge', action, resourceKey: fingerprint(resource) };
+  function allow(action, resource = {}, workspaceId = 'space-1', domain = 'knowledge') {
+    const key = { tenantId: 'tenant-1', workspaceId, actorKind: 'user', actorId: 'user-1', audience: 'operator', domain, action, resourceKey: fingerprint(resource) };
     grants.set(JSON.stringify(key), { ...key, resource: clone(resource), revision: 1, enabled: true, expiresAt: new Date(h.now + 3600000), requiredPermissions: ['synthetic-policy'] });
   }
   function allowUpload(value = input, workspaceId, revision) { const request = knowledgeUploadRequest(value, revision); allow('upload', { upload: { documentId: request.businessId, idempotencyKey: request.idempotencyKey, fileName: request.fileName, mimeType: request.mimeType, sizeBytes: request.sizeBytes, ...(revision ? { revision } : {}) } }, workspaceId); }
@@ -114,6 +116,27 @@ test('first creation uses original upload receipt then real create parse index p
   for (const [key, row] of f.grants) if (row.action === 'resolve_source' && row.resource.documentId) f.grants.delete(key);
   await assert.rejects(f.api.preparation.revalidate(collected), { code: 'unavailable' });
   f.allowDocument(bound.attachmentId);
+  const withMemory = composeKnowledgeFileApplication({ ...f.deps, memory: { db: f.db } });
+  const owner = { actorKind: 'user', actorId: 'user-1' }, memoryId = 'memory-1', expiresAt = new Date(h.now + 3600000).toISOString();
+  const memoryProposal = { memoryId, operationId: 'memory-propose', expiresAt, preference: { kind: 'locale', value: 'zh-CN' } };
+  await assert.rejects(withMemory.memory.propose(memoryProposal), { code: 'unavailable' });
+  for (const action of ['propose', 'read', 'confirm', 'delete']) {
+    f.allow(action, { owner }, 'space-1', 'memory');
+    for (const revision of [1, 2]) f.allow(action, { memoryId, revision, aclRevision: 1, owner }, 'space-1', 'memory');
+  }
+  await withMemory.memory.propose(memoryProposal);
+  const confirmation = { memoryId, expectedRevision: 1, operationId: 'memory-confirm', expiresAt };
+  await withMemory.memory.confirm(confirmation);
+  assert.equal((await withMemory.memory.confirmationStatus(confirmation)).status, 'confirmed');
+  const memoryInput = { requestId: 'memory-input', query: 'Synthetic', maxSources: 2, maxSnippetChars: 1000, maxTotalBytes: 8192 };
+  const remembered = await withMemory.preparation.collect(memoryInput, { includePreferences: true });
+  assert.equal(remembered.preferences.items.length, 1);
+  assert.equal(remembered.preferences.items[0].revision, 2);
+  assert.deepEqual(await withMemory.preparation.revalidate(remembered), remembered);
+  await withMemory.memory.revoke({ memoryId, expectedRevision: 2 });
+  assert.equal((await withMemory.memory.state(memoryId)).consentStatus, 'revoked');
+  await assert.rejects(withMemory.preparation.revalidate(remembered), { code: 'unavailable' });
+  assert.deepEqual((await withMemory.preparation.collect(memoryInput, { includePreferences: true })).preferences.items, []);
   f.allowDocument(bound.attachmentId, 2);
   const withdrawn = await f.api.management.withdraw({ documentId: 'doc-1', expectedRevision: published.revision, operationId: 'withdraw-1' });
   assert.equal(withdrawn.publication, 'withdrawn');
