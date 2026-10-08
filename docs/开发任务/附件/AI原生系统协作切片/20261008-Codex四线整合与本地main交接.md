@@ -43,4 +43,11 @@
 
 本轮 main 合并时出现 shared/src 下未跟踪 .js/.map 产物，未夹带提交或删除；它们不是正式共享生成方案的交付。源码以已提交 .ts 为准，后续运行源测试需避免被未跟踪 JS 遮蔽。
 
-最终 main 合并提交及最终检查由后续交接补充；本记录不预报尚未发生的 merge 或推送。
+## 已执行的本地 main 合并与最终复核
+
+- `04f6d72a`：AI 主线及四条固定交付与 main 的保全提交合并，逐段解决五个文档/测试冲突；订单详情页自动合并后经 Admin 类型及定向回归确认。
+- `9acda19d`：纳入 null-only schema 修复、既有契约测试扩充和本交接记录。该时点 main 已包含 AI 主线 `503a454b`，ancestor 检查 exit0，apps/api 与 packages/shared 对比专项分支无差异。
+- main 最终 API noEmit：502 入口/0诊断/exit0，明确只读使用与已合并 schema 匹配的 foundation 隔离 Prisma 类型，未生成或覆盖 main 共享 client。
+- main `node --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs --test tests/miniprogram-static.test.cjs tests/staff-miniprogram-static.test.cjs`：62pass/0fail/0skip/0todo/0cancelled，exit0，含现有脚本的两端构建验证；这是静态/离线微信宿主替身，不是真微信/真机验收。日志 main `output/codex-main-merge-20261008/client-static.tap`。
+- main 无未解决冲突、MERGE_HEAD 不存在（verify exit1为预期不存在），tracked status 干净，diff check exit0。未跟踪 JS/map/output 继续保留，不称整个工作区零资源。
+- 本次授权只执行整合和本地合并，没有 push、部署、真实迁移/HTTP/DB/模型/支付；原未完成功能与整项验收门槛仍然有效。后续单独文档同步提交不改变上述代码验证结果。
