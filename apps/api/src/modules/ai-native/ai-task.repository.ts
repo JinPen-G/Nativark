@@ -11,6 +11,8 @@ const leaseInput = z.object({
   expectedRunRevision: revision, expectedFencingToken: token, leaseMs: z.number().int().min(1).max(120000)
 }).strict();
 const releaseInput = leaseInput.omit({ leaseMs: true }).extend({ expectedFencingToken: token.refine(value => value !== "0") }).strict();
+const recoveryLeaseInput = z.object({ taskId: id, runId: id, holderId: id, revision,
+  fencingToken: token.refine(value => value !== '0'), expiresAt: z.string().datetime({ offset: true }), purpose: z.literal('recovery_only') }).strict();
 const actorSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("user"), userId: id }).strict(),
   z.object({ kind: z.literal("saas_admin"), userId: id }).strict(),
@@ -120,6 +122,26 @@ export class AiTaskRepository {
   async claimRecoveryRun(value: unknown) {
     const lease = await this.claimLease(value, "claim_recovery_run");
     return { ...lease, purpose: "recovery_only" as const };
+  }
+
+  async assertRecoveryRun(value: unknown) {
+    const parsed = recoveryLeaseInput.safeParse(value);
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const lease = parsed.data, access = await this.resolveAccess(lease.taskId, 'claim_recovery_run');
+    const row = await this.stored(() => this.db.aiRun.findFirst({ where: {
+      id: lease.runId, taskId: lease.taskId, revision: lease.revision, fencingToken: new Prisma.Decimal(lease.fencingToken),
+      leaseOwnerId: lease.holderId, leaseExpiresAt: { gt: access.now }, actorKind: access.actorKind, actorId: access.actorId,
+      status: { in: [...runnable] }, task: { is: { ...access.where, contractVersion: AI_TASK_DRAFT_VERSION,
+        runs: { some: { id: lease.runId, executionPlan: { is: { taskId: lease.taskId, runId: lease.runId } },
+          steps: { some: { status: { in: ['RUNNING', 'UNKNOWN', 'SUCCEEDED', 'FAILED'] } } } } },
+        OR: [{ status: { in: ['RUNNING', 'WAITING_INPUT', 'WAITING_CONFIRMATION', 'WAITING_EXTERNAL'] }, cancelRequestedAt: null },
+          { status: 'CANCEL_REQUESTED', cancelRequestedAt: { not: null } }] } }
+    }, select: { id: true, taskId: true, revision: true, fencingToken: true, leaseOwnerId: true, leaseExpiresAt: true, actorId: true } }));
+    if (!row || row.id !== lease.runId || row.taskId !== lease.taskId || row.revision !== lease.revision
+      || row.fencingToken.toFixed(0) !== lease.fencingToken || row.leaseOwnerId !== lease.holderId || row.actorId !== access.actorId
+      || !row.leaseExpiresAt || row.leaseExpiresAt.getTime() !== Date.parse(lease.expiresAt)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    const current = await this.resolveAccess(lease.taskId, 'claim_recovery_run');
+    if (current.bindingKey !== access.bindingKey || row.leaseExpiresAt <= current.now) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
   }
 
   private async claimLease(value: unknown, operation: "claim_run" | "claim_recovery_run") {

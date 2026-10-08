@@ -1,0 +1,46 @@
+import { z } from 'zod';
+import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
+import { AiTaskRepositoryError } from '../ai-task.repository';
+import type { AiTaskInputSource } from '../task-input/task-input.ports';
+import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
+import { composePersistedTaskModelInput } from '../model-input/persisted-task-model-input.composition';
+import { TASK_TEXT_MODEL_TOOL, taskModelMaterialSchema } from '../model-input/task-model-input';
+import { aiTaskRunnerLimitsSchema } from './prisma-task-run-evidence.repository';
+import { composeAuthorizedPersistentTaskInputRunner } from './authorized-persistent-task-input.composition';
+import type { AiTaskApplicationHost } from './prisma-task-application';
+import type { AiTaskHeldPreparation } from './ai-task-runner.service';
+
+const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+const taskSchema = z.object({ taskId: id.max(36), runId: id.max(36), registrationRef: id,
+  material: taskModelMaterialSchema, limits: aiTaskRunnerLimitsSchema }).strict();
+
+export type TaskModelHostDependencies = Parameters<typeof composePersistedTaskModelInput>[0] & {
+  host: AiTaskApplicationHost;
+  task: z.infer<typeof taskSchema>;
+  inputSource: AiTaskInputSource;
+  financialEvidence: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>;
+  monotonic?: () => number;
+};
+
+export function composeTaskModelHost(input: TaskModelHostDependencies) {
+  if (typeof input?.financialEvidence?.readDispatch !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const task = taskSchema.parse(structuredClone(input.task));
+  const model = composePersistedTaskModelInput(input);
+  const prepare: AiTaskHeldPreparation = async ({ lease, taskRevision, signal }) => {
+    if (lease.taskId !== task.taskId || lease.runId !== task.runId || signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    await model.publish({ taskId: task.taskId, registrationRef: task.registrationRef,
+      expectedTaskRevision: taskRevision, lease, material: structuredClone(task.material) });
+    if (signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    await model.plans.savePlan({ taskId: task.taskId, runId: task.runId, taskRevision,
+      steps: [{ registrationRef: task.registrationRef, toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION, operation: 'external_unknown' }],
+      limits: structuredClone(task.limits) }, lease);
+  };
+  const root = composeAuthorizedPersistentTaskInputRunner({ db: input.db,
+    authorization: { auth: input.auth, credentials: input.credentials, subscriptions: input.subscriptions },
+    registrationAuthority: model.planAuthority, transitionAuthority: model.createTransitionAuthority(input.financialEvidence),
+    planAuthority: model.planAuthority, commands: model.commands, executors: model.executors,
+    invocations: model.invocations, toolCatalog: model.toolCatalog, financialEvidence: input.financialEvidence,
+    inputSource: input.inputSource, wall: input.clock, monotonic: input.monotonic });
+  const application = root.createApplication(input.host, prepare);
+  return Object.freeze({ model, ...root, application });
+}

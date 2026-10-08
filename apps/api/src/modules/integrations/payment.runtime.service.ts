@@ -620,6 +620,19 @@ export class PaymentRuntimeService {
     return rows.map((row) => this.toResponse(row));
   }
 
+  /** Bounded order-level read for AI facts. Legacy listPaymentIntents remains
+   * unchanged for existing callers; this port never returns a total count. */
+  async listPaymentIntentsPage(tenantId: string, workspaceId: string, orderId: string, input: { limit: number; cursor?: string }) {
+    const limit = Number.isInteger(input?.limit) ? Math.min(20, Math.max(1, input.limit)) : 0;
+    if (!limit || (input.cursor && !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(input.cursor))) throw new BadRequestException("支付记录分页参数无效");
+    const rows = await this.prisma.rentalPaymentIntent.findMany({ where: { tenantId, workspaceId, orderId },
+      ...(input.cursor ? { cursor: { id: input.cursor }, skip: 1 } : {}), take: limit + 1,
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    const page = rows.slice(0, limit);
+    return { rows: page.map((row) => this.toResponse(row)), nextCursor: rows.length > limit ? page[page.length - 1]?.id : undefined,
+      truncated: rows.length > limit };
+  }
+
   async listPaymentRefunds(tenantId: string, workspaceId: string, orderId: string, intentId: string) {
     await this.requirePaymentIntent(tenantId, workspaceId, orderId, intentId);
     const rows = await this.prisma.rentalPaymentRefund.findMany({
@@ -627,6 +640,18 @@ export class PaymentRuntimeService {
       orderBy: { createdAt: "asc" }
     });
     return rows.map((row) => this.toRefundResponse(row));
+  }
+
+  async listPaymentRefundsPage(tenantId: string, workspaceId: string, orderId: string, intentId: string, input: { limit: number; cursor?: string }) {
+    const limit = Number.isInteger(input?.limit) ? Math.min(50, Math.max(1, input.limit)) : 0;
+    if (!limit || (input.cursor && !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(input.cursor))) throw new BadRequestException("退款记录分页参数无效");
+    await this.requirePaymentIntent(tenantId, workspaceId, orderId, intentId);
+    const rows = await this.prisma.rentalPaymentRefund.findMany({ where: { tenantId, workspaceId, orderId, paymentIntentId: intentId },
+      ...(input.cursor ? { cursor: { id: input.cursor }, skip: 1 } : {}), take: limit + 1,
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    const page = rows.slice(0, limit);
+    return { rows: page.map((row) => this.toRefundResponse(row)), nextCursor: rows.length > limit ? page[page.length - 1]?.id : undefined,
+      truncated: rows.length > limit };
   }
 
   /**

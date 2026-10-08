@@ -32,17 +32,19 @@ function fingerprints(directory) {
   return result;
 }
 function removeOwnedDirectory(directory) {
+  if (fs.lstatSync(directory).isSymbolicLink()) return false;
+  let retained = false;
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const file = path.join(directory, entry.name);
-    if (entry.isSymbolicLink()) {
-      try { fs.unlinkSync(file); }
-      catch (error) { if (process.platform !== "win32" || !["EPERM", "EISDIR"].includes(error.code)) throw error; fs.rmdirSync(file); }
-    }
-    else if (entry.isDirectory()) removeOwnedDirectory(file);
+    // The unchanged write guard resolves junction targets, so leave links in place.
+    if (entry.isSymbolicLink()) retained = true;
+    else if (entry.isDirectory()) { if (!removeOwnedDirectory(file)) retained = true; }
     else fs.unlinkSync(file);
   }
+  if (retained) return false;
   fs.rmdirSync(directory);
   if (fs.existsSync(directory)) throw new Error("Owned directory cleanup failed");
+  return true;
 }
 function copyClientContents(source, destination, top = true) {
   for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
@@ -76,6 +78,7 @@ function generateLocalAiPrismaClient() {
   const lock = path.join(parent, ".ai-client-generation.lock"), token = crypto.randomUUID();
   const fd = fs.openSync(lock, "wx"); fs.writeFileSync(fd, token); fs.closeSync(fd);
   let temporary, staged, backup;
+  const cleanupRetained = [];
   try {
     temporary = fs.mkdtempSync(path.join(os.tmpdir(), "rental-os-ai-client-"));
     const generated = path.join(temporary, "generated"), audit = path.join(temporary, "audit.log");
@@ -129,15 +132,18 @@ function generateLocalAiPrismaClient() {
     }
     fs.renameSync(staged, target); staged = undefined;
     if (!completeClient(target)) throw new Error("Installed client is incomplete");
-    if (backup) { removeOwnedDirectory(backup); backup = undefined; }
-    return { generated: true, target, schemaHash: sourceHash, guardViolations: 0, sharedArtifactsUnchanged: true };
+    if (backup) { if (!removeOwnedDirectory(backup)) cleanupRetained.push(backup); backup = undefined; }
+    return { generated: true, target, schemaHash: sourceHash, guardViolations: 0, sharedArtifactsUnchanged: true, cleanupRetained };
   } catch (error) {
     if (backup && !fs.existsSync(target)) { fs.renameSync(backup, target); backup = undefined; }
     throw error;
   } finally {
-    if (staged) removeOwnedDirectory(staged);
-    if (temporary) removeOwnedDirectory(temporary);
-    if (fs.existsSync(lock) && fs.readFileSync(lock, "utf8") === token) fs.unlinkSync(lock);
+    try {
+      if (staged && !removeOwnedDirectory(staged)) cleanupRetained.push(staged);
+      if (temporary && !removeOwnedDirectory(temporary)) cleanupRetained.push(temporary);
+    } finally {
+      if (fs.existsSync(lock) && fs.readFileSync(lock, "utf8") === token) fs.unlinkSync(lock);
+    }
   }
 }
 if (require.main === module) {

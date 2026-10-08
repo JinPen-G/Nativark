@@ -1,6 +1,7 @@
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
 /** Internal implementation ports, NOT the centrally maintained AIN-C03 wire contract. */
-export type ModelFeature = "tools" | "structuredOutput" | "streaming";
+export type ModelFeature = "tools" | "structuredOutput" | "streaming" | "image" | "audio";
 export interface GatewayContext { tenantId: string; workspaceId: string; actorId: string; }
 export interface ModelRequest {
   callId: string;
@@ -18,6 +19,52 @@ export const modelRequestSchema = z.object({
   maxOutputTokens: z.number().int().positive().max(32768),
   features: z.array(z.enum(['tools', 'structuredOutput', 'streaming'])).max(3).optional()
 }).strict();
+const mediaReference = {
+  attachmentId: z.string().min(1).max(128).regex(/^[\w.:-]+$/u),
+  attachmentRevision: z.number().int().positive().max(4294967294),
+  contentHash: z.string().regex(/^[a-f0-9]{64}$/u),
+  data: z.string().min(4).max(699052).regex(/^[A-Za-z0-9+/]+={0,2}$/u)
+};
+const protocolContent = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('text'), text: z.string().max(32000) }).strict(),
+  z.object({ kind: z.literal('image'), mediaType: z.enum(['image/png', 'image/jpeg']), ...mediaReference }).strict(),
+  z.object({ kind: z.literal('audio'), mediaType: z.literal('audio/wav'), ...mediaReference }).strict()
+]);
+// Resolved protocol bytes are not a public attachment authorization or a task input.
+export const modelProtocolRequestSchema = modelRequestSchema.extend({
+  messages: z.array(z.object({ role: z.enum(['system', 'user', 'assistant']),
+    content: z.union([z.string().max(32000), z.array(protocolContent).min(1).max(16)]) }).strict()).min(1).max(64),
+  features: z.array(z.enum(['tools', 'structuredOutput', 'streaming', 'image', 'audio'])).max(5).optional()
+}).superRefine((input, ctx) => {
+  let size = 0, mediaCount = 0;
+  for (const message of input.messages) {
+    if (typeof message.content === 'string') size += Buffer.byteLength(message.content);
+    else for (const part of message.content) {
+      size += part.kind === 'text' ? Buffer.byteLength(part.text) : part.data.length;
+      if (part.kind !== 'text') mediaCount++;
+    }
+  }
+  if (mediaCount > 8 || mediaCount > 0 && size > 900000) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Protocol input exceeds its byte limit' });
+    return;
+  }
+  for (const message of input.messages) {
+    if (typeof message.content === 'string') continue;
+    for (const part of message.content) {
+      if (part.kind === 'text') continue;
+      if (message.role !== 'user' || !input.features?.includes(part.kind)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Media requires an explicit user-input capability' });
+        continue;
+      }
+      const bytes = Buffer.from(part.data, 'base64');
+      if (bytes.length > 524288 || bytes.toString('base64') !== part.data
+        || createHash('sha256').update(bytes).digest('hex') !== part.contentHash) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Media content does not match its bounded digest' });
+      }
+    }
+  }
+});
+export type ModelProtocolRequest = z.infer<typeof modelProtocolRequestSchema>;
 export interface ModelUsage { inputTokens: number; outputTokens: number; }
 import type { AiOrderExplainRequestDraft } from '@rental-os/shared';
 export interface AdapterResult { text: string; usage?: ModelUsage; toolRequests?: AiOrderExplainRequestDraft[]; structuredOutput?: unknown; }
@@ -32,9 +79,9 @@ export type AdapterStreamEvent = { kind: "text_delta"; delta: string } | { kind:
 export interface ModelAdapter {
   readonly provider: string;
   readonly features: readonly ModelFeature[];
-  generate(input: Readonly<ModelRequest> & { signal: AbortSignal }, credential: string,
+  generate(input: Readonly<ModelProtocolRequest> & { signal: AbortSignal }, credential: string,
     connection?: Readonly<{ baseUrl: string }>): Promise<AdapterResult>;
-  stream?(input: Readonly<ModelRequest> & { signal: AbortSignal }, credential: string,
+  stream?(input: Readonly<ModelProtocolRequest> & { signal: AbortSignal }, credential: string,
     connection?: Readonly<{ baseUrl: string }>): AsyncIterable<AdapterStreamEvent>;
 }
 export interface GatewayProfile {

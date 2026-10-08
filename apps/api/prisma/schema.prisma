@@ -312,9 +312,12 @@ model BusinessWorkspace {
   aiInspectionDrafts                AiInspectionDraft[]
   aiBusinessFailureEvents           AiBusinessFailureOutbox[]
   aiAutomationSubjects              AiAutomationSubject[]
+  aiClientSceneMaterials            AiClientSceneMaterial[]
+  aiClientTaskPolicies              AiClientTaskPolicy[]
   aiInspectionEvidenceBindings      AiInspectionEvidenceBinding[]
   rentalFulfillmentOperators        RentalFulfillmentOperator[]
   rentalTenantBusinessSettingss     RentalTenantBusinessSettings[]
+  approvedSettingsChanges           RentalApprovedSettingsChange[]
   rentalPricingPlans                RentalPricingPlan[]
   rentalDiscountPlans               RentalDiscountPlan[]
   rentalValueAddedServices          RentalValueAddedService[]
@@ -646,6 +649,10 @@ model AiTaskExecutionCharge {
   step                 AiStep? @relation(fields: [scopeId, taskId, stepId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
   gatewayInvocation    AiGatewayInvocation? @relation(fields: [scopeId, taskId, gatewayInvocationId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
 
+  phaseSteps           AiTaskExecutionPhaseStart[] @relation("ExecutionPhaseStepsCharge")
+  phaseActiveMs        AiTaskExecutionPhaseStart[] @relation("ExecutionPhaseActiveCharge")
+  phaseOutputBytes     AiTaskExecutionPhaseStart[] @relation("ExecutionPhaseOutputCharge")
+
   @@id([scopeId, taskId, chargeId])
   @@index([scopeId, taskId, status], map: "ai_task_execution_charges_status_idx")
   @@index([scopeId, taskId, runId], map: "ai_task_execution_charges_run_idx")
@@ -664,6 +671,7 @@ model AiTaskRunPlan {
   createdAt DateTime @default(now()) @db.DateTime(3)
   run AiRun @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_task_run_plans_run_fkey")
   inputRequests AiTaskInputRequest[]
+  executionPhases AiTaskExecutionPhaseStart[]
   @@id([scopeId, taskId, runId])
   @@unique([scopeId, taskId, runId, planHash], map: "ai_task_run_plans_hash_key")
   @@map("ai_task_run_plans")
@@ -702,6 +710,7 @@ model AiTaskActionInput {
   expiresAt DateTime @db.DateTime(3)
   createdAt DateTime @default(now()) @db.DateTime(3)
   run AiRun @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_task_action_inputs_run_fkey")
+  executionPhases AiTaskExecutionPhaseStart[]
   @@id([scopeId, taskId, runId, registrationRef])
   @@unique([scopeId, taskId, id], map: "ai_task_action_inputs_id_key")
   @@map("ai_task_action_inputs")
@@ -723,6 +732,88 @@ model AiTaskActionPolicy {
   @@id([scopeId, taskId, operation])
   @@index([scopeId, expiresAt], map: "ai_task_action_policies_expiry_idx")
   @@map("ai_task_action_policies")
+}
+
+enum AiClientTaskDispatchState {
+  UNKNOWN
+}
+
+model AiClientSceneMaterial {
+  id              String @id @db.VarChar(36)
+  tenantId        String @db.VarChar(191)
+  workspaceId     String @db.VarChar(191)
+  channel         String @db.VarChar(32)
+  principalKind   String @db.VarChar(16)
+  principalHash   String @db.Char(64)
+  bindingHash     String @db.Char(64)
+  publicationHash String @db.Char(64)
+  operationKey    String @db.VarChar(191)
+  inputHash       String @db.Char(64)
+  materialHash    String @db.Char(64)
+  command         Json
+  material        Json
+  publication     Json
+  revision        Int @default(1) @db.UnsignedInt
+  createdAt       DateTime @db.DateTime(3)
+  expiresAt       DateTime @db.DateTime(3)
+  workspace       BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_client_materials_workspace_fk")
+  taskInputs      AiClientTaskInput[]
+
+  @@unique([tenantId, workspaceId, channel, principalHash, operationKey], map: "ai_client_materials_operation_key")
+  @@unique([id, tenantId, workspaceId, channel, principalKind, principalHash], map: "ai_client_materials_input_binding")
+  @@index([tenantId, workspaceId, expiresAt], map: "ai_client_materials_scope_expiry")
+  @@map("ai_client_scene_materials")
+}
+
+model AiClientTaskPolicy {
+  id           String @id @db.VarChar(36)
+  tenantId     String @db.VarChar(191)
+  workspaceId  String @db.VarChar(191)
+  channel      String @db.VarChar(32)
+  customerType String @db.VarChar(16)
+  sceneCode    String @db.VarChar(128)
+  sceneVersion String @db.VarChar(64)
+  enabled      Boolean @default(false)
+  allowCreate  Boolean @default(false)
+  allowRead    Boolean @default(false)
+  revision     Int @db.UnsignedInt
+  expiresAt    DateTime @db.DateTime(3)
+  workspace    BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_client_task_policy_workspace_fk")
+  inputs       AiClientTaskInput[]
+
+  @@unique([tenantId, workspaceId, channel, customerType, sceneCode, sceneVersion], map: "ai_client_task_policy_scope_scene")
+  @@unique([id, tenantId, workspaceId, channel, customerType, sceneCode, sceneVersion], map: "ai_client_task_policy_binding")
+  @@map("ai_client_task_policies")
+}
+
+model AiClientTaskInput {
+  id                String @id @db.VarChar(36)
+  tenantId          String @db.VarChar(191)
+  workspaceId       String @db.VarChar(191)
+  channel           String @db.VarChar(32)
+  principalKind     String @db.VarChar(16)
+  principalHash     String @db.Char(64)
+  creationKey       String @db.VarChar(128)
+  materialRef       String @db.VarChar(36)
+  materialInputHash String @db.Char(64)
+  materialHash      String @db.Char(64)
+  materialRevision  Int @db.UnsignedInt
+  bindingHash       String @db.Char(64)
+  policyId          String @db.VarChar(36)
+  policyRevision    Int @db.UnsignedInt
+  policyHash        String @db.Char(64)
+  sceneCode         String @db.VarChar(128)
+  sceneVersion      String @db.VarChar(64)
+  inputHash         String @db.Char(64)
+  revision          Int @default(1) @db.UnsignedInt
+  dispatchState     AiClientTaskDispatchState
+  createdAt         DateTime @db.DateTime(3)
+  expiresAt         DateTime @db.DateTime(3)
+  material          AiClientSceneMaterial @relation(fields: [materialRef, tenantId, workspaceId, channel, principalKind, principalHash], references: [id, tenantId, workspaceId, channel, principalKind, principalHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_client_task_input_material_fk")
+  policy            AiClientTaskPolicy @relation(fields: [policyId, tenantId, workspaceId, channel, principalKind, sceneCode, sceneVersion], references: [id, tenantId, workspaceId, channel, customerType, sceneCode, sceneVersion], onDelete: Restrict, onUpdate: Restrict, map: "ai_client_task_input_policy_fk")
+
+  @@unique([tenantId, workspaceId, channel, principalHash, creationKey], map: "ai_client_task_input_creation")
+  @@map("ai_client_task_inputs")
 }
 
 model AiAutomationSubject {
@@ -1050,6 +1141,7 @@ model AiTaskResultArtifact {
   createdAt DateTime @default(now()) @db.DateTime(3)
   step AiStep @relation(fields: [scopeId, taskId, stepId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_task_result_artifacts_step_fkey")
   inputRequests AiTaskInputRequest[]
+  executionPhases AiTaskExecutionPhaseStart[]
   @@id([scopeId, taskId, id])
   @@unique([scopeId, taskId, runId, stepId, id], map: "ai_task_result_artifacts_input_basis_key")
   @@unique([scopeId, taskId, runId, stepId, fencingToken], map: "ai_result_artifact_step_generation_key")
@@ -1059,6 +1151,77 @@ model AiTaskResultArtifact {
 enum AiTaskInputRequestStatus {
   PENDING  @map("pending")
   CONSUMED @map("consumed")
+}
+
+model AiTaskExecutionPhaseStart {
+  scopeId             String @db.VarChar(36)
+  taskId              String @db.VarChar(36)
+  id                  String @db.VarChar(36)
+  runId               String @db.VarChar(36)
+  stepId              String @db.VarChar(36)
+  originalArtifactId  String @db.VarChar(36)
+  inputRef            String @db.VarChar(36)
+  stepsChargeId       String @db.VarChar(36)
+  activeMsChargeId    String @db.VarChar(36)
+  outputBytesChargeId String @db.VarChar(36)
+  actionId            String @db.VarChar(191)
+  leaseOwnerId        String @db.VarChar(191)
+  stepFingerprint     String @db.Char(64)
+  planHash            String @db.Char(64)
+  fencingToken        Decimal @db.Decimal(20, 0)
+  runRevision         Int @db.UnsignedInt
+  stepRevision        Int @db.UnsignedInt
+  sequence            Int @db.UnsignedInt
+  previousReceiptId   String? @db.VarChar(36)
+  decisionRef         String? @db.VarChar(36)
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  run                 AiRun @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_run_fk")
+  step                AiStep @relation(fields: [scopeId, taskId, stepId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_step_fk")
+  originalArtifact    AiTaskResultArtifact @relation(fields: [scopeId, taskId, runId, stepId, originalArtifactId], references: [scopeId, taskId, runId, stepId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_artifact_fk")
+  input               AiTaskActionInput @relation(fields: [scopeId, taskId, inputRef], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_input_fk")
+  plan                AiTaskRunPlan @relation(fields: [scopeId, taskId, runId, planHash], references: [scopeId, taskId, runId, planHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_plan_fk")
+  stepsCharge         AiTaskExecutionCharge @relation("ExecutionPhaseStepsCharge", fields: [scopeId, taskId, stepsChargeId], references: [scopeId, taskId, chargeId], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_steps_charge_fk")
+  activeMsCharge      AiTaskExecutionCharge @relation("ExecutionPhaseActiveCharge", fields: [scopeId, taskId, activeMsChargeId], references: [scopeId, taskId, chargeId], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_active_charge_fk")
+  outputBytesCharge   AiTaskExecutionCharge @relation("ExecutionPhaseOutputCharge", fields: [scopeId, taskId, outputBytesChargeId], references: [scopeId, taskId, chargeId], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_output_charge_fk")
+  previousReceipt     AiTaskExecutionPhaseReceipt? @relation("ExecutionPhaseContinuation", fields: [scopeId, taskId, runId, stepId, previousReceiptId], references: [scopeId, taskId, runId, stepId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_previous_fk")
+  decision            AiApproval? @relation("ExecutionPhaseStartDecision", fields: [scopeId, taskId, decisionRef], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_start_decision_fk")
+  receipts            AiTaskExecutionPhaseReceipt[] @relation("ExecutionPhaseReceipt")
+
+  @@id([scopeId, taskId, id])
+  @@unique([scopeId, taskId, runId, stepId, id], map: "ai_exec_phase_start_identity_key")
+  @@unique([scopeId, taskId, stepId, sequence], map: "ai_exec_phase_start_sequence_key")
+  @@unique([scopeId, taskId, previousReceiptId], map: "ai_exec_phase_start_previous_key")
+  @@map("ai_task_execution_phase_starts")
+}
+
+model AiTaskExecutionPhaseReceipt {
+  scopeId             String @db.VarChar(36)
+  taskId              String @db.VarChar(36)
+  id                  String @db.VarChar(36)
+  runId               String @db.VarChar(36)
+  stepId              String @db.VarChar(36)
+  phaseId             String @db.VarChar(36)
+  kind                String @db.VarChar(32)
+  errorCode           String? @db.VarChar(128)
+  payload             Json
+  contentHash         String @db.Char(64)
+  activeMs            BigInt @db.UnsignedBigInt
+  outputBytes         BigInt @db.UnsignedBigInt
+  proposalId          String? @db.VarChar(36)
+  proposalRevision    Int? @db.UnsignedInt
+  reviewedPayloadHash String? @db.Char(64)
+  decisionRef         String? @db.VarChar(36)
+  businessResultRef   String? @db.VarChar(191)
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  phase               AiTaskExecutionPhaseStart @relation("ExecutionPhaseReceipt", fields: [scopeId, taskId, runId, stepId, phaseId], references: [scopeId, taskId, runId, stepId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_receipt_start_fk")
+  proposal            AiProposalVersion? @relation(fields: [scopeId, taskId, proposalId, proposalRevision, reviewedPayloadHash], references: [scopeId, taskId, proposalId, revision, payloadHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_receipt_proposal_fk")
+  decision            AiApproval? @relation("ExecutionPhaseReceiptDecision", fields: [scopeId, taskId, decisionRef, proposalId, proposalRevision], references: [scopeId, taskId, id, proposalId, proposalRevision], onDelete: Restrict, onUpdate: Restrict, map: "ai_exec_phase_receipt_decision_fk")
+  continuations       AiTaskExecutionPhaseStart[] @relation("ExecutionPhaseContinuation")
+
+  @@id([scopeId, taskId, id])
+  @@unique([scopeId, taskId, phaseId], map: "ai_exec_phase_receipt_phase_key")
+  @@unique([scopeId, taskId, runId, stepId, id], map: "ai_exec_phase_receipt_identity_key")
+  @@map("ai_task_execution_phase_receipts")
 }
 
 /// Scoped clarification request. A completed read-only step is its basis, not approval.
@@ -4461,6 +4624,7 @@ model RentalTenantBusinessSettings {
   workspace     BusinessWorkspace  @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
   categoryCode  RentalCategoryCode
   configVersion String
+  settingsRevision Int @default(1) @db.UnsignedInt
   /// TenantRentalBusinessSettings 的 pricing/fulfillment/deposit 等嵌套配置块。
   settings      Json
   updatedBy     String
@@ -4468,6 +4632,51 @@ model RentalTenantBusinessSettings {
 
   @@index([tenantId], map: "rental_business_settings_tenant_idx")
   @@map("rental_tenant_business_settings")
+}
+
+model RentalApprovedSettingsChange {
+  id                       String @id @default(uuid()) @db.VarChar(36)
+  tenantId                 String
+  workspaceId              String
+  actorId                  String @db.VarChar(191)
+  changeKey                String @db.VarChar(128)
+  baseRevision             Int @db.UnsignedInt
+  baseSettingsHash         String @db.Char(64)
+  categoryVersionId        String @db.VarChar(191)
+  categoryAdoptionRevision Int
+  beforeNotifications      Json
+  afterNotifications       Json
+  changeHash               String @db.Char(64)
+  expiresAt                DateTime @db.DateTime(3)
+  createdAt                DateTime @default(now()) @db.DateTime(3)
+  workspace BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
+  operations RentalApprovedSettingsOperation[]
+
+  @@unique([workspaceId, actorId, changeKey], map: "approved_settings_change_key")
+  @@unique([tenantId, workspaceId, id, changeHash], map: "approved_settings_change_binding")
+  @@map("rental_approved_settings_changes")
+}
+
+model RentalApprovedSettingsOperation {
+  id             String @id @default(uuid()) @db.VarChar(36)
+  tenantId       String
+  workspaceId    String
+  actorId        String @db.VarChar(191)
+  operationKey   String @db.VarChar(191)
+  commandHash    String @db.Char(64)
+  changeId       String @db.VarChar(36)
+  changeHash     String @db.Char(64)
+  baseRevision   Int @db.UnsignedInt
+  resultRevision Int @db.UnsignedInt
+  resultHash     String @db.Char(64)
+  approvalRef    Json
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+  change RentalApprovedSettingsChange @relation(fields: [tenantId, workspaceId, changeId, changeHash], references: [tenantId, workspaceId, id, changeHash], onDelete: Restrict, onUpdate: Restrict, map: "approved_settings_operation_change_fk")
+
+  @@unique([workspaceId, operationKey], map: "approved_settings_operation_key")
+  @@unique([workspaceId, changeId], map: "approved_settings_change_once")
+  @@index([tenantId, workspaceId, changeId, changeHash], map: "rental_approved_settings_operations_change_binding_idx")
+  @@map("rental_approved_settings_operations")
 }
 
 model RentalPricingPlan {
@@ -5640,6 +5849,76 @@ enum AiApprovalConsumptionStatus {
   FAILED_NO_EFFECT @map("failed_no_effect")
 }
 
+enum AiTaskOriginalRequestStatus {
+  STORED  @map("stored")
+  REVOKED @map("revoked")
+}
+
+/// Creation input is immutable; expiry/revocation never deletes the task or business receipt.
+model AiTaskOriginalRequest {
+  id                       String @id @default(uuid()) @db.VarChar(36)
+  scopeId                  String @db.VarChar(36)
+  audience                 AiAudience
+  ownerKind                AiActorKind
+  ownerId                  String @db.VarChar(191)
+  contractVersion          String @db.VarChar(64)
+  sceneCode                String @db.VarChar(64)
+  sceneVersion             String @db.VarChar(64)
+  requestKey               String @db.VarChar(128)
+  revision                 Int @db.UnsignedInt
+  payload                  Json
+  contentHash              String @db.Char(64)
+  authorizationBindingHash String @db.Char(64)
+  policyRevision           Int @db.UnsignedInt
+  policyHash               String @db.Char(64)
+  previousRequestId        String? @db.VarChar(36)
+  status                   AiTaskOriginalRequestStatus @default(STORED)
+  expiresAt                DateTime @db.DateTime(3)
+  createdAt                DateTime @default(now()) @db.DateTime(3)
+  scope                    AiScope @relation(fields: [scopeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  previous                 AiTaskOriginalRequest? @relation("OriginalRequestVersions", fields: [scopeId, previousRequestId], references: [scopeId, id], onDelete: Restrict, onUpdate: Restrict)
+  reissues                 AiTaskOriginalRequest[] @relation("OriginalRequestVersions")
+  quoteSelections          AiTaskQuoteSelection[]
+
+  @@unique([scopeId, id], map: "ai_original_requests_scope_id")
+  @@unique([scopeId, audience, ownerKind, ownerId, requestKey], map: "ai_original_requests_request_key")
+  @@index([scopeId, audience, ownerKind, ownerId, createdAt], map: "ai_original_requests_owner")
+  @@map("ai_task_original_requests")
+}
+
+/// Human quote choice is not approval; payload is immutable after selection.
+model AiTaskQuoteSelection {
+  id                       String @id @default(uuid()) @db.VarChar(36)
+  scopeId                  String @db.VarChar(36)
+  taskId                   String @db.VarChar(36)
+  runId                    String @db.VarChar(36)
+  originalRequestId        String @db.VarChar(36)
+  originalInputHash        String @db.Char(64)
+  audience                 AiAudience
+  ownerKind                AiActorKind
+  ownerId                  String @db.VarChar(191)
+  contractVersion          String @db.VarChar(64)
+  selectionKey             String @db.VarChar(128)
+  revision                 Int @db.UnsignedInt
+  quoteId                  String @db.VarChar(191)
+  quoteHash                String @db.Char(64)
+  quoteBasis               Json
+  payload                  Json
+  inputHash                String @db.Char(64)
+  selectionFingerprint     String @db.Char(64)
+  authorizationBindingHash String @db.Char(64)
+  expiresAt                DateTime @db.DateTime(3)
+  createdAt                DateTime @default(now()) @db.DateTime(3)
+  supersededAt             DateTime? @db.DateTime(3)
+  original                 AiTaskOriginalRequest @relation(fields: [scopeId, originalRequestId], references: [scopeId, id], onDelete: Restrict, onUpdate: Restrict)
+  run                      AiRun @relation(fields: [scopeId, taskId, runId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([scopeId, audience, ownerKind, ownerId, selectionKey], map: "ai_quote_selection_key")
+  @@unique([scopeId, taskId, runId, revision], map: "ai_quote_selection_revision")
+  @@index([scopeId, taskId, runId, supersededAt], map: "ai_quote_selection_active")
+  @@map("ai_task_quote_selections")
+}
+
 /// Explicit scope root; nulls are only legal in the branches enforced by the migration.
 model AiScope {
   id          String             @id @default(uuid()) @db.VarChar(36)
@@ -5654,6 +5933,7 @@ model AiScope {
   profiles    AiProviderProfile[]
   budgetPolicies AiBudgetPolicy[]
   taskPlanPolicies AiTaskPlanPolicy[]
+  originalRequests AiTaskOriginalRequest[]
   automationManagementGrants AiAutomationManagementGrant[]
   automationPolicyPreparations AiAutomationPolicyPreparation[]
   automationPolicyManagementOperations AiAutomationPolicyManagementOperation[]
@@ -5745,6 +6025,9 @@ model AiRun {
   executionCharges   AiTaskExecutionCharge[]
   executionPlan      AiTaskRunPlan?
   actionInputs       AiTaskActionInput[]
+  quoteSelections    AiTaskQuoteSelection[]
+  executionPhases    AiTaskExecutionPhaseStart[]
+  reprepareTargets   AiApprovalReprepare[]
 
   automationInputs  AiAutomationInput[]
   automationReviewOperations AiAutomationReviewOperation[]
@@ -5776,9 +6059,11 @@ model AiStep {
   createdAt           DateTime           @default(now()) @db.DateTime(3)
   updatedAt           DateTime           @updatedAt @db.DateTime(3)
   proposalActions     AiProposalAction[]
+  reprepareTargets    AiApprovalReprepare[]
   gatewayInvocations  AiGatewayInvocation[]
   executionCharges    AiTaskExecutionCharge[]
   resultArtifacts     AiTaskResultArtifact[]
+  executionPhases     AiTaskExecutionPhaseStart[]
 
   @@unique([scopeId, taskId, id], map: "ai_steps_scope_task_id")
   @@unique([scopeId, taskId, actionId], map: "ai_steps_action")
@@ -5821,6 +6106,9 @@ model AiProposalVersion {
   currentFor   AiProposal[]       @relation("AiProposalCurrent")
   actions      AiProposalAction[]
   approvals    AiApproval[]
+  executionPhaseReceipts AiTaskExecutionPhaseReceipt[]
+  originalReprepares AiApprovalReprepare[] @relation("AiReprepareOriginal")
+  replacementReprepares AiApprovalReprepare[] @relation("AiReprepareReplacement")
 
   @@id([scopeId, proposalId, revision])
   @@unique([scopeId, taskId, proposalId, revision], map: "ai_proposal_versions_scope_task")
@@ -5841,6 +6129,7 @@ model AiProposalAction {
   step               AiStep                  @relation(fields: [scopeId, taskId, actionId, requestFingerprint], references: [scopeId, taskId, actionId, requestFingerprint], onDelete: Restrict, onUpdate: Restrict)
   consumptions       AiApprovalConsumption[]
   snapshots          AiApprovedOrderSnapshot[]
+  reprepares         AiApprovalReprepare[]
 
   @@id([scopeId, proposalId, proposalRevision, actionId])
   @@unique([scopeId, taskId, proposalId, proposalRevision, actionId, requestFingerprint], map: "ai_proposal_actions_binding")
@@ -5893,7 +6182,10 @@ model AiApproval {
   issuedAt         DateTime                @db.DateTime(3)
   expiresAt        DateTime                @db.DateTime(3)
   consumptions     AiApprovalConsumption[]
+  executionPhaseStarts AiTaskExecutionPhaseStart[] @relation("ExecutionPhaseStartDecision")
+  executionPhaseReceipts AiTaskExecutionPhaseReceipt[] @relation("ExecutionPhaseReceiptDecision")
 
+  @@unique([scopeId, taskId, id], map: "ai_approvals_scope_task_id")
   @@unique([scopeId, taskId, id, proposalId, proposalRevision], map: "ai_approvals_binding")
   @@unique([scopeId, proposalId, proposalRevision, actorKind, actorId], map: "ai_approvals_actor_decision")
   @@map("ai_approvals")
@@ -5919,6 +6211,44 @@ model AiApprovalConsumption {
   @@id([scopeId, taskId, actionId])
   @@index([scopeId, businessIdempotencyKey], map: "ai_consumptions_business_key")
   @@map("ai_approval_consumptions")
+}
+
+model AiApprovalReprepare {
+  id                     String @id @db.VarChar(36)
+  scopeId                String @db.VarChar(36)
+  operationKey           String @db.VarChar(191)
+  commandHash            String @db.Char(64)
+  actorId                String @db.VarChar(191)
+  audience               AiAudience
+  originalTaskId         String @db.VarChar(36)
+  originalProposalId     String @db.VarChar(36)
+  originalRevision       Int @db.UnsignedInt
+  originalPayloadHash    String @db.Char(64)
+  originalActionId       String @db.VarChar(191)
+  originalFingerprint    String @db.Char(64)
+  replacementTaskId      String @db.VarChar(36)
+  replacementRunId       String @db.VarChar(36)
+  replacementActionId    String @db.VarChar(191)
+  replacementFingerprint String @db.Char(64)
+  replacementInputRef    String @db.VarChar(36)
+  originalInputRef       String @db.VarChar(191)
+  quoteSelectionRef      String @db.VarChar(36)
+  planHash               String @db.Char(64)
+  proofHash              String @db.Char(64)
+  replacementProposalId  String @db.VarChar(36)
+  replacementRevision    Int @db.UnsignedInt
+  replacementPayloadHash String @db.Char(64)
+  createdAt              DateTime @default(now()) @db.DateTime(3)
+  originalVersion AiProposalVersion @relation("AiReprepareOriginal", fields: [scopeId, originalTaskId, originalProposalId, originalRevision, originalPayloadHash], references: [scopeId, taskId, proposalId, revision, payloadHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_reprepares_original_version_fk")
+  originalAction AiProposalAction @relation(fields: [scopeId, originalTaskId, originalProposalId, originalRevision, originalActionId, originalFingerprint], references: [scopeId, taskId, proposalId, proposalRevision, actionId, requestFingerprint], onDelete: Restrict, onUpdate: Restrict, map: "ai_reprepares_original_action_fk")
+  replacementRun AiRun @relation(fields: [scopeId, replacementTaskId, replacementRunId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_reprepares_replacement_run_fk")
+  replacementStep AiStep @relation(fields: [scopeId, replacementTaskId, replacementActionId, replacementFingerprint], references: [scopeId, taskId, actionId, requestFingerprint], onDelete: Restrict, onUpdate: Restrict, map: "ai_reprepares_replacement_step_fk")
+  replacementVersion AiProposalVersion @relation("AiReprepareReplacement", fields: [scopeId, replacementTaskId, replacementProposalId, replacementRevision, replacementPayloadHash], references: [scopeId, taskId, proposalId, revision, payloadHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_reprepares_replacement_version_fk")
+
+  @@unique([scopeId, operationKey], map: "ai_reprepares_operation_key")
+  @@unique([scopeId, originalTaskId, originalProposalId, originalRevision], map: "ai_reprepares_original_key")
+  @@unique([scopeId, replacementTaskId, replacementActionId], map: "ai_reprepares_replacement_key")
+  @@map("ai_approval_reprepares")
 }
 
 /// Append in the task mutation transaction; each task has its own string-serialized cursor.

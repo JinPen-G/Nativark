@@ -7,14 +7,16 @@ const { PrismaKnowledgeActionPolicySource } = h.load('prisma-knowledge-policy.so
 test('persisted action policy source composes with real current-identity adapter and denies absent, revoked and cross-principal grants', async () => {
   const { identity } = fixture();
   const context = await new (h.load('knowledge-current-session').KnowledgeCurrentSession)(identity.auth, identity.credentials, { now: () => h.now }).current();
-  let mode = 'missing';
+  const { fingerprint } = h.load('knowledge-validation');
+  let mode = 'missing', resource = {}, expectedResourceKey = fingerprint({});
   const db = { aiKnowledgeActionPolicy: { findUnique: async ({ where }) => {
     if (mode === 'missing') return null;
     const key = where.tenantId_workspaceId_actorKind_actorId_audience_domain_action_resourceKey;
     assert.equal(key.tenantId, 'tenant-1'); assert.equal(key.workspaceId, 'space-1');
     assert.equal(key.actorId, 'user-1'); assert.equal(key.domain, 'knowledge');
+    assert.equal(key.resourceKey, expectedResourceKey);
     return { ...key, actorId: mode === 'cross-principal' ? 'other-user' : key.actorId,
-      revision: 1, enabled: mode !== 'revoked', resource: {}, requiredPermissions: ['synthetic-policy'],
+      revision: 1, enabled: mode !== 'revoked', resource: structuredClone(resource), requiredPermissions: ['synthetic-policy'],
       expiresAt: new Date(h.now + 60000) };
   } } };
   const policies = new PrismaKnowledgeActionPolicySource(db, () => new Date(h.now));
@@ -24,6 +26,18 @@ test('persisted action policy source composes with real current-identity adapter
   mode = 'enabled'; assert.ok(await adapter.authorize(context, request));
   mode = 'revoked'; assert.equal(await adapter.authorize(context, request), null);
   mode = 'cross-principal'; assert.equal(await adapter.authorize(context, request), null);
+  mode = 'enabled';
+  const upload = { documentId: 'doc-1', idempotencyKey: 'knowledge-upload', fileName: 'sop.txt', mimeType: 'text/plain', sizeBytes: 12 };
+  resource = { upload }; expectedResourceKey = fingerprint(resource);
+  const uploadRequest = { action: 'upload', scope: context.scope, upload };
+  const granted = await adapter.authorize(context, uploadRequest); assert.ok(granted);
+  resource = { upload: Object.fromEntries(Object.entries(upload).reverse()) };
+  assert.notEqual(fingerprint(resource), expectedResourceKey);
+  assert.deepEqual(await adapter.authorize(context, uploadRequest), granted);
+  resource.upload.sizeBytes = 13;
+  assert.equal(await adapter.authorize(context, uploadRequest), null);
+  resource.upload.sizeBytes = '12';
+  assert.equal(await adapter.authorize(context, uploadRequest), null);
 });
 
 test('memory policy binds nested owner by value and expires during current-identity recheck', async () => {

@@ -29,6 +29,43 @@ test("up-to-date generation is an idempotent no-op and does not rewrite the shar
   assert.equal(hash(fs.readFileSync(sharedClient)), before);
 });
 
+test("generator cleanup preserves junctions under the original write guard", () => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "rental-os-ai-cleanup-"));
+  const allowed = path.join(parent, "allowed"), outside = path.join(parent, "outside");
+  fs.mkdirSync(allowed); fs.mkdirSync(outside);
+  const generated = path.join(allowed, "generated"), plain = path.join(allowed, "plain");
+  fs.mkdirSync(generated); fs.mkdirSync(plain);
+  fs.writeFileSync(path.join(generated, "owned.txt"), "generated");
+  fs.writeFileSync(path.join(plain, "owned.txt"), "generated");
+  const sentinel = path.join(outside, "sentinel.txt"), audit = path.join(allowed, "audit.log");
+  fs.writeFileSync(sentinel, "unchanged"); fs.writeFileSync(audit, "");
+  const nested = path.join(generated, "node_modules"); fs.mkdirSync(nested);
+  const link = path.join(nested, "runtime");
+  fs.symlinkSync(outside, link, "junction");
+  try {
+    const script = path.join(root, "scripts/ai-native-generate-local-prisma.cjs");
+    const code = String.raw`const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
+const context={require:require('node:module').createRequire(${JSON.stringify(script)}),module:{exports:{}},__dirname:path.dirname(${JSON.stringify(script)}),process,console};
+vm.runInNewContext(fs.readFileSync(${JSON.stringify(script)},'utf8')+'\n;module.exports.cleanup=removeOwnedDirectory;',context);
+console.log(JSON.stringify({retained:context.module.exports.cleanup(${JSON.stringify(generated)}),removed:context.module.exports.cleanup(${JSON.stringify(plain)})}));`;
+    const result = spawnSync(process.execPath, ["--require", path.join(__dirname, "fixtures/ai-native/prisma-offline-preload.cjs"), "-e", code], {
+      cwd: allowed, env: { ...process.env, AI_OFFLINE_AUDIT: audit, AI_OFFLINE_WRITE_ROOT: allowed,
+        DATABASE_URL: "mysql://offline:offline@127.0.0.1:1/rental_os_offline", NODE_DISABLE_COMPILE_CACHE: "1", DISABLE_V8_COMPILE_CACHE: "1" },
+      encoding: "utf8", timeout: 10000
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), { retained: false, removed: true });
+    assert.equal(fs.lstatSync(link).isSymbolicLink(), true);
+    assert.equal(fs.existsSync(path.join(generated, "owned.txt")), false);
+    assert.equal(fs.existsSync(plain), false);
+    assert.equal(fs.readFileSync(sentinel, "utf8"), "unchanged");
+    assert.equal(fs.readFileSync(audit, "utf8"), "");
+  } finally {
+    if (fs.existsSync(link)) fs.unlinkSync(link);
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
 test("generation guard blocks writes outside its temporary root including symlink destinations", () => {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), "rental-os-ai-write-guard-"));
   const allowed = path.join(parent, "allowed"), outside = path.join(parent, "outside");

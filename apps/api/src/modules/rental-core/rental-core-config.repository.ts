@@ -22,6 +22,7 @@ import { PrismaService } from "../database/prisma.service";
 import { getRequestWorkspaceId } from "../../common/request-identity";
 import { assertScopedWrite, resolveScopeWorkspaceId } from "./workspace-scope";
 import type { RentalUniqueAttributeClaim } from "./rental-core-fact.repository";
+import type { VersionedBusinessSettings } from './approved-settings-change.ports';
 
 /**
  * 单个**经营空间**的全部配置，用于启动预热写穿缓存。
@@ -75,7 +76,8 @@ export interface RentalConfigStore {
   /** 全部启用的经营空间，用于服务层按空间建状态并解析「租户 → 默认空间」。 */
   listWorkspaces(): Promise<Array<{ id: string; tenantId: string; categoryCode: RentalCategoryCode; isDefault: boolean }>>;
   upsertProfile(profile: TenantRentalProfile, tx?: RentalConfigTx): Promise<void>;
-  upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
+  readVersionedBusinessSettings(tenantId: string, tx?: RentalConfigTx): Promise<VersionedBusinessSettings | null>;
+  upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, expectedSettingsRevision?: number): Promise<number>;
   upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx): Promise<void>;
   upsertLocation(location: RentalFulfillmentLocation, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void>;
   upsertItemGroup(group: RentalItemGroup, tx?: RentalConfigTx, uniqueAttributes?: RentalUniqueAttributeClaim[], expectedBinding?: CategoryWriteBinding, allowMediaWrite?: boolean): Promise<void>;
@@ -321,7 +323,19 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     }
   }
 
-  async upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding): Promise<void> {
+  async readVersionedBusinessSettings(tenantId: string, tx?: RentalConfigTx): Promise<VersionedBusinessSettings | null> {
+    const client = this.db(tx), workspaceId = await resolveScopeWorkspaceId(client, tenantId);
+    if (tx) await lockActiveCategoryBinding(tx, tenantId, workspaceId);
+    const row = await client.rentalTenantBusinessSettings.findUnique({ where: { workspaceId } });
+    if (!row) return null;
+    if (row.tenantId !== tenantId || row.workspaceId !== workspaceId || !Number.isSafeInteger(row.settingsRevision)
+      || row.settingsRevision < 1 || !row.settings || typeof row.settings !== 'object' || Array.isArray(row.settings)) throw new ConflictException('经营设置版本不可用');
+    return { settings: structuredClone(row.settings) as unknown as TenantRentalBusinessSettings, settingsRevision: row.settingsRevision };
+  }
+
+  async upsertBusinessSettings(settings: TenantRentalBusinessSettings, updatedBy: string, tx?: RentalConfigTx, expectedBinding?: CategoryWriteBinding, expectedSettingsRevision?: number): Promise<number> {
+    if (expectedSettingsRevision !== undefined && (!Number.isSafeInteger(expectedSettingsRevision)
+      || expectedSettingsRevision < 1 || expectedSettingsRevision >= 4294967295)) throw new BadRequestException('经营设置版本无效');
     const data = {
       categoryCode: upper<$Enums.RentalCategoryCode>(settings.categoryCode),
       configVersion: settings.configVersion,
@@ -335,16 +349,25 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
       if (!settings.pricing.enabledUnits.length || settings.pricing.enabledUnits.some((unit) => !model.pricingUnits.includes(unit)) || !settings.pricing.enabledUnits.includes(settings.pricing.defaultUnit)) throw new BadRequestException("当前经营品类不支持该计价设置");
       if (!settings.fulfillment.enabledModes.length || settings.fulfillment.enabledModes.some((mode) => !model.fulfillmentModes.includes(mode))) throw new BadRequestException("当前经营品类不支持该履约设置");
       if (!model.supportsHolidayPricing && (settings.pricing.holidayPricingEnabled || settings.calendar.holidayPricingEnabled)) throw new BadRequestException("当前经营品类不支持节假日差异定价");
-      // 按经营空间 upsert：按 tenantId 会让同租户第二个空间覆盖第一个空间的业务设置。
-      await client.rentalTenantBusinessSettings.upsert({
+      if (expectedSettingsRevision !== undefined) {
+        const changed = await client.rentalTenantBusinessSettings.updateMany({
+          where: { workspaceId, tenantId: settings.tenantId, settingsRevision: expectedSettingsRevision },
+          data: { ...data, settingsRevision: { increment: 1 } }
+        });
+        if (changed.count !== 1) throw new ConflictException('经营设置版本已变化，请重新准备');
+        return expectedSettingsRevision + 1;
+      }
+      const saved = await client.rentalTenantBusinessSettings.upsert({
         where: { workspaceId },
-        create: { workspaceId, tenantId: settings.tenantId, ...data },
-        update: data
+        create: { workspaceId, tenantId: settings.tenantId, ...data, settingsRevision: 1 },
+        update: { ...data, settingsRevision: { increment: 1 } },
+        select: { settingsRevision: true }
       });
+      return saved.settingsRevision;
     };
     // Scope lookup can happen before waiting for the space lock. READ COMMITTED
     // prevents that lookup from pinning an old MySQL snapshot for later reads.
-    if (tx) await write(tx); else await this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    return tx ? write(tx) : this.prisma.$transaction(write, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
   async upsertOperator(operator: RentalFulfillmentOperator, tx?: RentalConfigTx): Promise<void> {

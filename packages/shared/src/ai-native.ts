@@ -11,7 +11,7 @@ export const AI_TOOL_CODES = Object.freeze([
   "rental.order.explain", "rental.catalog.search", "rental.availability.check",
   "membership.customer.resolve", "rental.quote.preview", "rental.order.propose",
   "rental.order.commit", "rental.change.preview", "tenant.opening.diagnose",
-  "tenant.config.propose", "membership.profile.propose", "inspection.draft.extract",
+  "tenant.config.propose", "tenant.notifications.commit", "membership.profile.propose", "inspection.draft.extract",
   "operations.risks.list", "platform.category.propose"
 ] as const);
 export type AiToolCode = typeof AI_TOOL_CODES[number];

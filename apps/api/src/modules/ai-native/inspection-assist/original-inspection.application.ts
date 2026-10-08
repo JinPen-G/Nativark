@@ -9,7 +9,7 @@ import { getRequestIdentity, runWithRequestIdentity } from '../../../common/requ
 import type { RentalCoreController } from '../../rental-core/rental-core.controller';
 import type { RentalIdempotencyRepository } from '../../rental-core/rental-idempotency.repository';
 import type { AiOrderRouteCredentialSource } from '../order-route-context.authority';
-import type { AiInspectionActorScope, AiInspectionTarget, AiInspectionSubmissionMaterial } from '../../../../../../packages/shared/src/ai-inspection-persistence';
+import type { AiInspectionActorScope, AiInspectionTarget, AiInspectionSubmissionMaterial } from '@rental-os/shared';
 import { InspectionAssistError, inspectionId } from './inspection-assist.validation';
 
 const recorded = z.object({ inspection: z.object({ id: inspectionId, tenantId: inspectionId, orderId: inspectionId,

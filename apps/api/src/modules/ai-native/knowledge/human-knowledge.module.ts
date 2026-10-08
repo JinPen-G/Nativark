@@ -37,4 +37,5 @@ export class HumanKnowledgeModule {
       exports: [HumanKnowledgeService, HumanKnowledgeContextService, HumanKnowledgeIndexService, HumanKnowledgeInputService,
         ...(memory ? [PersistentMemoryConsentService] : []), ...(uploads ? [HumanKnowledgeUploadService] : [])] };
   }
+
 }

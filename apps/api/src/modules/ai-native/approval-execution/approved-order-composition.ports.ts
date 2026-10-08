@@ -31,7 +31,7 @@ export interface ApprovedOrderSnapshot<T> extends AiProposalSnapshotRefDraft {
   payload: T;
 }
 
-export type ApprovedOrderPreview = Pick<RentalQuoteSnapshotV1, 'id' | 'tenantId' | 'expiresAt' | 'consumedAt' | 'consumedOrderId'>;
+export type ApprovedOrderPreview = Pick<RentalQuoteSnapshotV1, 'id' | 'tenantId' | 'pricingPlanVersion' | 'expiresAt' | 'consumedAt' | 'consumedOrderId'>;
 
 export interface ApprovedOrderSnapshotSource {
   read(request: {
@@ -48,6 +48,13 @@ export interface ApprovedOrderOriginalInputSource {
     tx: Prisma.TransactionClient): Promise<CreateRentalOrderRequest | null>;
 }
 
+export interface ApprovedOrderExecutionInputSource extends ApprovedOrderOriginalInputSource {
+  readAuthorized(reference: Parameters<ApprovedOrderOriginalInputSource['read']>[0], tx: Prisma.TransactionClient): Promise<{
+    body: CreateRentalOrderRequest;
+    bindingHash: string;
+  }>;
+}
+
 export interface PersistedApprovedOrderDependencies extends Omit<ApprovedOrderCompositionDependencies, 'db' | 'policy' | 'snapshots'>,
   PersistedApprovedOrderPolicyDependencies {
   inputSource: ApprovedOrderOriginalInputSource;
@@ -61,6 +68,9 @@ export interface ApprovedOrderCompositionDependencies {
   credentials: AiOrderRouteCredentialSource;
   policy: ApprovedOrderPolicyAuthority;
   snapshots: ApprovedOrderSnapshotSource;
+  // Generic low-level compositions may supply their own source. The controlled
+  // persisted entry point always injects the formal input/closed-plan proof.
+  executionInput?: ApprovedOrderExecutionInputSource;
   confirmation: Pick<RentalOrderConfirmationService, 'createApprovedOrder'>;
   core: Pick<RentalCoreService, 'resolveWorkspaceId' | 'getProfile' | 'getWorkspaceCategory' | 'getBusinessSettings' | 'listItemGroups' | 'listPricingGroups' | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'getOrder'>;
   quoteFacts: Pick<RentalBusinessFactStore, 'findQuote'>;

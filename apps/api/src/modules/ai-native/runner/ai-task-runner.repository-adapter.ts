@@ -1,8 +1,8 @@
-import type { AiTaskRunnerDependencies, AiTaskRunnerLease, AiTaskRunnerPlanPort, AiTaskRunnerStepCommit, AiTaskRunnerStepPlan, AiTaskRunnerStepPort, AiTaskRunnerStepRef } from "./ai-task-runner.ports";
+import type { AiTaskRunnerDependencies, AiTaskRunnerLease, AiTaskRunnerPlanPort, AiTaskRunnerStepCommit, AiTaskRunnerStepPlan, AiTaskRunnerStepPort, AiTaskRunnerStepRef, AiTaskRunnerConfirmationContinuation } from "./ai-task-runner.ports";
 import type { AiTaskRepository } from "../ai-task.repository";
 import type { AiStepRegistrationCommand, AiStepRegistrationRepository } from "../ai-step-registration.repository";
 import type { AiStepTransitionCommand, AiStepTransitionRepository } from "../ai-step-transition.repository";
-import { AI_TASK_STATUSES_DRAFT, AI_TASK_DRAFT_VERSION, type AiTaskStatusDraft, type AiTaskEventDraft, type AiStepStatusDraft } from "@rental-os/shared";
+import { AI_TASK_STATUSES_DRAFT, AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiTaskStatusDraft, type AiTaskEventDraft, type AiStepStatusDraft } from "@rental-os/shared";
 
 /**
  * The only runner-to-persistence wiring point. The command factory belongs to the
@@ -14,12 +14,25 @@ export interface AiTaskRunnerRepositoryCommandFactory {
   transition(kind: "start" | "succeed" | "fail" | "pause" | "unknown", step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, resultRef: string | null, errorCode?: string, pause?: "input" | "confirmation" | "external"): AiStepTransitionCommand;
 }
 
+export interface AiTaskRunnerConfirmationCheckpointPort {
+  pause(input: {
+    taskId: string; stepId: string; expectedTaskRevision: number; expectedStepRevision: number;
+    checkpointRef: string; lease: AiTaskRunnerLease;
+  }): Promise<{
+    event: AiTaskEventDraft; runId: string; runRevision: number;
+    stepId: string; stepRevision: number; checkpointRef: string;
+  }>;
+  resume?(input: Parameters<AiTaskRunnerConfirmationCheckpointPort['pause']>[0]): Promise<
+    Awaited<ReturnType<AiTaskRunnerConfirmationCheckpointPort['pause']>> & AiTaskRunnerConfirmationContinuation>;
+}
+
 export interface AiTaskRunnerRepositoryAdapters {
-  tasks: Pick<AiTaskRepository, "readMetadata" | "claimRun" | "claimRecoveryRun" | "releaseRun">;
+  tasks: Pick<AiTaskRepository, "readMetadata" | "claimRun" | "claimRecoveryRun" | "releaseRun"> & Partial<Pick<AiTaskRepository, 'assertRecoveryRun'>>;
   registrations: Pick<AiStepRegistrationRepository, "register">;
   replays?: Pick<AiStepRegistrationRepository, "readReplay">;
   transitions: Pick<AiStepTransitionRepository, "transition">;
   commands: AiTaskRunnerRepositoryCommandFactory;
+  confirmation?: AiTaskRunnerConfirmationCheckpointPort;
 }
 
 function committed(value: { runRevision: number; event: AiTaskEventDraft }, previous: AiTaskRunnerLease,
@@ -37,7 +50,7 @@ function committed(value: { runRevision: number; event: AiTaskEventDraft }, prev
  * Adapts the already-persistent C04 repositories; it does not provide an in-memory
  * fallback, a default authority, a second state machine, or a Gateway implementation.
  */
-export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerRepositoryAdapters): Pick<AiTaskRunnerDependencies, "leases" | "steps"> {
+export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerRepositoryAdapters): Pick<AiTaskRunnerDependencies, "leases" | "steps" | 'confirmation'> {
   const commands = adapters.commands;
   const transition = async (kind: Parameters<AiTaskRunnerRepositoryCommandFactory['transition']>[0],
     ref: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, resultRef: string | null, errorCode?: string,
@@ -70,13 +83,44 @@ export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerReposito
       return transition('fail', step, lease, resultRef, errorCode);
     },
     async pause(step, lease, pause, resultRef) {
-      return transition('pause', step, lease, resultRef, undefined, pause);
+      if (pause !== 'confirmation') return transition('pause', step, lease, resultRef, undefined, pause);
+      const ref = structuredClone(step), held = structuredClone(lease);
+      if (!resultRef || ref.plan.operation !== 'idempotent' || ref.plan.toolCode !== 'rental.order.commit'
+        || ref.plan.toolVersion !== AI_TOOL_DRAFT_VERSION || typeof adapters.confirmation?.pause !== 'function') throw new Error('AI_RESOURCE_UNAVAILABLE');
+      const value = structuredClone(await adapters.confirmation.pause({ taskId: held.taskId, stepId: ref.registered.stepId,
+        expectedTaskRevision: ref.registered.taskRevision, expectedStepRevision: ref.registered.stepRevision,
+        checkpointRef: resultRef, lease: structuredClone(held) }));
+      const event = value?.event;
+      if (!event || event.contractVersion !== AI_TASK_DRAFT_VERSION || event.type !== 'task.transition'
+        || event.taskId !== held.taskId || event.taskRevision !== ref.registered.taskRevision + 1
+        || event.data.from !== 'running' || event.data.to !== 'waiting_confirmation' || event.data.reason !== 'confirmation_required'
+        || value.runId !== held.runId || ref.registered.runId !== held.runId || value.runRevision !== held.revision + 1
+        || value.stepId !== ref.registered.stepId || value.stepRevision !== ref.registered.stepRevision
+        || value.checkpointRef !== resultRef) throw new Error('AI_STORAGE_UNAVAILABLE');
+      return { lease: { ...held, revision: value.runRevision }, taskRevision: event.taskRevision,
+        confirmation: { stepId: value.stepId, stepRevision: value.stepRevision, checkpointRef: value.checkpointRef } };
     },
     async unknown(step, lease, resultRef) {
       return transition('unknown', step, lease, resultRef);
     }
   };
+  const resume = typeof adapters.confirmation?.resume === 'function' ? adapters.confirmation.resume.bind(adapters.confirmation) : null;
   return {
+    confirmation: resume ? { resume: async value => {
+      const input = structuredClone(value), held = input.lease;
+      const result = structuredClone(await resume(structuredClone(input))), event = result?.event;
+      if (!event || event.contractVersion !== AI_TASK_DRAFT_VERSION || event.type !== 'task.transition'
+        || input.taskId !== held.taskId || event.taskId !== input.taskId || event.taskRevision !== input.expectedTaskRevision + 1
+        || event.data.from !== 'waiting_confirmation' || event.data.to !== 'running' || event.data.reason !== 'resume'
+        || result.runId !== held.runId || result.runRevision !== held.revision + 1 || result.stepId !== input.stepId
+        || result.stepRevision !== input.expectedStepRevision || result.checkpointRef !== input.checkpointRef
+        || !['approved', 'rejected'].includes(result.decision) || typeof result.decisionRef !== 'string' || !result.decisionRef
+        || !Number.isSafeInteger(result.remainingActiveMs) || result.remainingActiveMs < 1 || result.remainingActiveMs > 86400000
+        || !Number.isSafeInteger(result.remainingOutputBytes) || result.remainingOutputBytes < 1 || result.remainingOutputBytes > 16777216) throw new Error('AI_STORAGE_UNAVAILABLE');
+      return { lease: { ...held, revision: result.runRevision }, taskRevision: event.taskRevision,
+        continuation: { stepId: result.stepId, stepRevision: result.stepRevision, checkpointRef: result.checkpointRef,
+          decisionRef: result.decisionRef, decision: result.decision, remainingActiveMs: result.remainingActiveMs, remainingOutputBytes: result.remainingOutputBytes } };
+    } } : undefined,
     leases: {
       async readMetadata(taskId) {
         const metadata = await adapters.tasks.readMetadata(taskId);
@@ -85,6 +129,7 @@ export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerReposito
       },
       claimRun: input => adapters.tasks.claimRun(input),
       claimRecoveryRun: input => adapters.tasks.claimRecoveryRun(input),
+      ...(typeof adapters.tasks.assertRecoveryRun === 'function' ? { assertRecoveryRun: (lease: Parameters<AiTaskRepository['assertRecoveryRun']>[0]) => adapters.tasks.assertRecoveryRun!(lease) } : {}),
       releaseRun: input => adapters.tasks.releaseRun(input)
     },
     steps

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import type { AiInspectionSourceDraft } from '@rental-os/shared';
-import type { AiInspectionActorScope, AiInspectionEvidenceRef, AiInspectionTarget } from '../../../../../../packages/shared/src/ai-inspection-persistence';
+import type { AiInspectionActorScope, AiInspectionEvidenceRef, AiInspectionTarget } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { InspectionActionAuthority } from './inspection-action.authority';
 import { InspectionTemplateService } from './inspection-template.service';

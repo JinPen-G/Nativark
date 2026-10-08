@@ -19,7 +19,8 @@ export function composeAiApprovedOrder(dependencies: ApprovedOrderCompositionDep
     || typeof dependencies.guard?.canActivate !== 'function' || typeof dependencies.credentials?.current !== 'function'
     || typeof dependencies.policy?.resolve !== 'function' || typeof dependencies.snapshots?.read !== 'function'
     || typeof dependencies.confirmation?.createApprovedOrder !== 'function' || typeof dependencies.quoteFacts?.findQuote !== 'function'
-    || typeof dependencies.toolVersion !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(dependencies.toolVersion)) throw unavailable();
+    || typeof dependencies.toolVersion !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(dependencies.toolVersion)
+    || (dependencies.executionInput && typeof dependencies.executionInput.readAuthorized !== 'function')) throw unavailable();
   const coreMethods = ['resolveWorkspaceId', 'getProfile', 'getWorkspaceCategory', 'getBusinessSettings', 'listItemGroups',
     'listPricingGroups', 'listCouponTemplates', 'listLocations', 'listOperators', 'getOrder'] as const;
   if (coreMethods.some(method => typeof dependencies.core?.[method] !== 'function')
@@ -34,6 +35,10 @@ export function composeAiApprovedOrder(dependencies: ApprovedOrderCompositionDep
   const d = { ...dependencies, core: methods,
     policy: { resolve: dependencies.policy.resolve.bind(dependencies.policy) },
     snapshots: { read: dependencies.snapshots.read.bind(dependencies.snapshots) },
+    executionInput: dependencies.executionInput ? {
+      read: dependencies.executionInput.read.bind(dependencies.executionInput),
+      readAuthorized: dependencies.executionInput.readAuthorized.bind(dependencies.executionInput)
+    } : undefined,
     guard: { canActivate: dependencies.guard.canActivate.bind(dependencies.guard) },
     credentials: { current: dependencies.credentials.current.bind(dependencies.credentials) },
     quoteFacts: { findQuote: dependencies.quoteFacts.findQuote.bind(dependencies.quoteFacts) } };
@@ -66,7 +71,8 @@ export function composeAiApprovedOrder(dependencies: ApprovedOrderCompositionDep
       const same = (current: typeof original) => {
         if (orderContextHash(current.input.context) !== orderContextHash(original.input.context)
           || requestFingerprint(current.binding) !== requestFingerprint(original.binding)
-          || current.payloadHash !== original.payloadHash || current.previewHash !== original.previewHash) throw deniedOrder();
+          || current.payloadHash !== original.payloadHash || current.previewHash !== original.previewHash
+          || (current.operation === 'execute' && current.inputBindingHash !== original.inputBindingHash)) throw deniedOrder();
       };
       const authority: AiApprovedOrderAuthority = {
         resolve: async (_input, binding, action, tx) => {
@@ -86,7 +92,8 @@ export function composeAiApprovedOrder(dependencies: ApprovedOrderCompositionDep
         if (current.committedId !== orderId) throw deniedOrder();
         await participant.replay(original.binding, orderId);
         const order = await d.core.getOrder(original.binding.tenantId, orderId);
-        if (!order || order.id !== orderId || order.tenantId !== original.binding.tenantId
+        if (!order) throw new AiApprovedOrderResultUnknownError();
+        if (order.id !== orderId || order.tenantId !== original.binding.tenantId
           || d.core.resolveWorkspaceId(original.binding.tenantId) !== original.binding.workspaceId) throw deniedOrder();
         const latest = await source.read(command, 'replay');
         same(latest);

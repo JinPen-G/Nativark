@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { normalizeTenantModelBaseUrl } from "./tenant-model-config.service";
-import { ModelAdapterError, ModelGatewayError, modelRequestSchema, type AdapterResult, type AdapterStreamEvent, type ModelAdapter, type ModelFeature, type ModelRequest } from "./model-gateway.ports";
+import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema, type AdapterResult, type AdapterStreamEvent, type ModelAdapter, type ModelFeature, type ModelProtocolRequest } from "./model-gateway.ports";
 import { MODEL_REQUEST_BYTES } from './model-response-limits';
 import { ChatCompletionsStream } from "./chat-completions-stream";
 import Ajv, { type ValidateFunction } from 'ajv';
@@ -108,16 +108,35 @@ const responseSchema = z.object({
 export class ChatCompletionsAdapter implements ModelAdapter {
   readonly provider = "openai_chat_completions";
   private readonly policy: ChatProtocolPolicy;
-  get features(): readonly ModelFeature[] { return [...(typeof this.transport.postStream === "function" ? ['streaming' as const] : []), ...(this.policy.tools ? ['tools' as const] : []), ...(this.policy.structured ? ['structuredOutput' as const] : [])]; }
-  constructor(private readonly transport: ModelJsonTransport, options: ChatProtocolOptions = {}) { this.policy = new ChatProtocolPolicy(options); }
+  private readonly mediaInput: readonly ('image' | 'audio')[];
+  get features(): readonly ModelFeature[] { return [...this.mediaInput, ...(typeof this.transport.postStream === "function" ? ['streaming' as const] : []), ...(this.policy.tools ? ['tools' as const] : []), ...(this.policy.structured ? ['structuredOutput' as const] : [])]; }
+  constructor(private readonly transport: ModelJsonTransport, options: ChatProtocolOptions & { mediaInput?: readonly ('image' | 'audio')[] } = {}) {
+    if (!options || typeof options !== 'object' || Array.isArray(options)) throw new ModelGatewayError('CONFIG_INVALID');
+    const { mediaInput, ...policy } = options;
+    const parsed = z.array(z.enum(['image', 'audio'])).max(2).refine(values => new Set(values).size === values.length).safeParse(mediaInput ?? []);
+    if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
+    this.mediaInput = Object.freeze(parsed.data);
+    this.policy = new ChatProtocolPolicy(policy);
+  }
 
-  private request(input: Readonly<ModelRequest> & { signal: AbortSignal }) {
+  private request(input: Readonly<ModelProtocolRequest> & { signal: AbortSignal }) {
     if (!input || !input.signal || typeof input.signal.aborted !== 'boolean' || typeof input.signal.addEventListener !== 'function' || typeof input.signal.removeEventListener !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
     // Project only server protocol fields. Later caller mutations cannot replace
     // messages or the cancellation signal; forged top-level tool definitions are ignored.
-    const parsed = modelRequestSchema.safeParse({ callId: input.callId, model: input.model, messages: input.messages, maxOutputTokens: input.maxOutputTokens, features: input.features });
+    const parsed = modelProtocolRequestSchema.safeParse({ callId: input.callId, model: input.model, messages: input.messages, maxOutputTokens: input.maxOutputTokens, features: input.features });
     if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+    if (parsed.data.features?.some(feature => (feature === 'image' || feature === 'audio') && !this.mediaInput.includes(feature))) {
+      throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+    }
     return { ...parsed.data, signal: input.signal };
+  }
+  private messages(input: ModelProtocolRequest) {
+    return input.messages.map(message => ({ role: message.role, content: typeof message.content === 'string' ? message.content
+      : message.content.map(part => {
+        if (part.kind === 'text') return { type: 'text', text: part.text };
+        if (part.kind === 'image') return { type: 'image_url', image_url: { url: `data:${part.mediaType};base64,${part.data}` } };
+        return { type: 'input_audio', input_audio: { data: part.data, format: 'wav' } };
+      }) }));
   }
   private body(value: Record<string, unknown>): string {
     const encoded = JSON.stringify(value);
@@ -125,18 +144,19 @@ export class ChatCompletionsAdapter implements ModelAdapter {
     return encoded;
   }
 
-  async *stream(input: Readonly<ModelRequest> & { signal: AbortSignal }, credential: string,
+  async *stream(input: Readonly<ModelProtocolRequest> & { signal: AbortSignal }, credential: string,
     connection?: Readonly<{ baseUrl: string }>): AsyncIterable<AdapterStreamEvent> {
     if (!this.transport.postStream) throw new ModelGatewayError("CAPABILITY_UNSUPPORTED");
     input = this.request(input);
     if (!connection || typeof credential !== 'string' || !/^[\x21-\x7e]{1,8192}$/.test(credential)) throw new ModelGatewayError("CONFIG_INVALID");
     const features = input.features ?? [], selected = this.policy.selected(features);
+    if (features.includes('audio')) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     const baseUrl = normalizeTenantModelBaseUrl(connection.baseUrl), decoder = new ChatCompletionsStream(credential, 1_048_576, selected);
     let headers = false;
     if (input.signal.aborted) throw new ModelGatewayError("CANCELLED");
     for await (const event of this.transport.postStream({ url: `${baseUrl}/chat/completions`,
       headers: { Authorization: `Bearer ${credential}`, "Content-Type": "application/json" },
-      body: this.body({ model: input.model, messages: input.messages, stream: true, stream_options: { include_usage: true }, max_completion_tokens: input.maxOutputTokens, ...selected.body(features) }),
+      body: this.body({ model: input.model, messages: this.messages(input), stream: true, stream_options: { include_usage: true }, max_completion_tokens: input.maxOutputTokens, ...selected.body(features) }),
       signal: input.signal, maxResponseBytes: 1_048_576, redirects: "error" })) {
       if (input.signal.aborted) throw new ModelGatewayError("CANCELLED");
       if (event.kind === "headers") {
@@ -157,7 +177,7 @@ export class ChatCompletionsAdapter implements ModelAdapter {
     yield { kind: "result", result: decoder.finish() };
   }
 
-  async generate(input: Readonly<ModelRequest> & { signal: AbortSignal }, credential: string,
+  async generate(input: Readonly<ModelProtocolRequest> & { signal: AbortSignal }, credential: string,
     connection?: Readonly<{ baseUrl: string }>): Promise<AdapterResult> {
     input = this.request(input);
     if (!connection || typeof credential !== 'string' || !/^[\x21-\x7e]{1,8192}$/.test(credential)) throw new ModelGatewayError("CONFIG_INVALID");
@@ -168,7 +188,7 @@ export class ChatCompletionsAdapter implements ModelAdapter {
     if (input.signal.aborted) throw new ModelGatewayError("CANCELLED");
     const result = await this.transport.post({ url: `${baseUrl}/chat/completions`,
       headers: { Authorization: `Bearer ${credential}`, "Content-Type": "application/json" },
-      body: this.body({ model: input.model, messages: input.messages, stream: false, max_completion_tokens: input.maxOutputTokens, ...selected.body(features) }),
+      body: this.body({ model: input.model, messages: this.messages(input), stream: false, max_completion_tokens: input.maxOutputTokens, ...selected.body(features) }),
       signal: input.signal, maxResponseBytes: 1_048_576, redirects: "error" });
     // An injected transport may complete after cancellation. Never convert that late
     // response into a protocol success; outer Gateway accounting remains responsible.

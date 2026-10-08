@@ -13,6 +13,42 @@ const validators = f.validatorsFor(schemas, {}), clone = x => structuredClone(x)
 const valid = (name, value) => assert.equal(validators[name](value), true, JSON.stringify(validators[name].errors));
 const invalid = (name, value) => assert.equal(validators[name](value), false, `${name} accepted ${JSON.stringify(value)}`);
 
+test("scene, selection and approval applications publish closed contracts through the shared barrel", () => {
+  const shared = require("../packages/shared/src/index");
+  const { aiLeafToOpenApi30 } = require("../apps/api/src/contracts/ai-leaf-openapi");
+  const leaves = [shared.AI_SCENE_REQUEST_DRAFT_SCHEMAS, shared.AI_QUOTE_SELECTION_DRAFT_SCHEMAS, shared.AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS];
+  for (const leaf of leaves) {
+    assert.ok(leaf);
+    for (const [name, schema] of Object.entries(leaf)) assert.deepEqual(OPENAPI_DOCUMENT.components.schemas[name], aiLeafToOpenApi30(schema, name));
+  }
+  const published = Object.assign({}, ...leaves), dependencies = { ...schemas, ...shared.AI_PROPOSAL_DRAFT_SCHEMAS };
+  f.checkClosed(published, { ...dependencies, ...published });
+  const validators = f.validatorsFor(published, dependencies);
+  const original = { draftVersion: shared.AI_SCENE_REQUEST_DRAFT_VERSION, requestKey: "original-request", sceneCode: "order_explanation", input: { orderId: "order-a", question: "status" } };
+  assert.equal(validators.AiSceneRequestCreateDraft(original), true);
+  assert.equal(validators.AiSceneRequestCreateDraft({ ...original, actor: "forged" }), false);
+  const uuid = "00000000-0000-4000-8000-000000000001";
+  const selection = { draftVersion: shared.AI_QUOTE_SELECTION_DRAFT_VERSION, originalInputRef: uuid, selectionId: uuid,
+    selectionKey: "selected-quote", revision: 1, taskId: uuid, runId: uuid, quoteId: "quote-a", quoteHash: "a".repeat(64),
+    inputHash: "b".repeat(64), expiresAt: f.time, state: "selected_not_approved", approval: "not_granted", order: "not_created_by_selection" };
+  assert.equal(validators.AiQuoteSelectionReceiptDraft(selection), true);
+  assert.equal(validators.AiQuoteSelectionReceiptDraft({ ...selection, approval: "granted" }), false);
+  const unknown = { code: "result_unknown", retryable: false, nextAction: "read_decision_receipt" };
+  assert.equal(validators.AiApprovalApplicationErrorDraft(unknown), true);
+  assert.equal(validators.AiApprovalApplicationErrorDraft({ ...unknown, retryable: true }), false);
+  assert.equal(validators.AiApprovalApplicationErrorDraft({ ...unknown, nextAction: "retry_later" }), false);
+  assert.deepEqual(f.compileConsumer(`import type { AiSceneRequestCreateDraft, AiQuoteSelectionReceiptDraft, AiApprovalApplicationErrorDraft, AiInspectionTarget } from "../packages/shared/src/index";
+const original: AiSceneRequestCreateDraft = ${JSON.stringify(original)};
+const selection: AiQuoteSelectionReceiptDraft = ${JSON.stringify(selection)};
+const unknown: AiApprovalApplicationErrorDraft = ${JSON.stringify(unknown)};
+const target: AiInspectionTarget = { orderId: "order-a", allocationId: "allocation-a", templateId: "template-a", stage: "pickup" };
+// @ts-expect-error human selection cannot grant approval
+const approved: AiQuoteSelectionReceiptDraft = { ...selection, approval: "granted" };
+// @ts-expect-error unknown approval cannot automatically retry
+const retry: AiApprovalApplicationErrorDraft = { ...unknown, retryable: true };
+`), []);
+});
+
 test("consumer preserves the submitted C01/C02 leaf sources in its own worktree", () => {
   // Pin this dependency, not the entire shared OpenAPI aggregator: later C04+ components
   // may be added. The next test still compares paths and every published C01/C02 schema.

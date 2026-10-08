@@ -1,4 +1,9 @@
 import type { AiTaskStatusDraft, AiStepStatusDraft } from "@rental-os/shared";
+import type { Prisma } from '@prisma/client';
+
+export type AiTaskRunnerObservedResult =
+  | { kind: 'succeeded' | 'failed' | 'unknown'; payload: Prisma.InputJsonValue; errorCode?: string }
+  | { kind: 'paused'; pause: 'confirmation'; payload: Prisma.InputJsonValue };
 
 /** C04 runtime input. Revisions and fencing values come from the persisted caller, not a model. */
 export interface AiTaskRunnerClaimInput {
@@ -18,6 +23,10 @@ export interface AiTaskRunnerLease {
   revision: number;
   fencingToken: string;
   expiresAt: string;
+}
+
+export interface AiTaskRunnerRecoveryLease extends AiTaskRunnerLease {
+  purpose: 'recovery_only';
 }
 
 export interface AiTaskRunnerTaskMetadata {
@@ -68,9 +77,33 @@ export interface AiTaskRunnerRegisteredStep {
   resultRef?: string | null;
 }
 
+export interface AiTaskRunnerConfirmationContinuation {
+  checkpointRef: string;
+  stepId: string;
+  stepRevision: number;
+  decisionRef: string;
+  decision: 'approved' | 'rejected';
+  remainingActiveMs: number;
+  remainingOutputBytes: number;
+}
+
+export interface AiTaskRunnerConfirmationRequest {
+  taskId: string;
+  stepId: string;
+  expectedTaskRevision: number;
+  expectedStepRevision: number;
+  checkpointRef: string;
+  lease: AiTaskRunnerLease;
+}
+
+export interface AiTaskRunnerConfirmationPort {
+  resume(input: AiTaskRunnerConfirmationRequest): Promise<AiTaskRunnerStepCommit & { continuation: AiTaskRunnerConfirmationContinuation }>;
+}
+
 export interface AiTaskRunnerStepCommit {
   lease: AiTaskRunnerLease;
   taskRevision: number;
+  confirmation?: { stepId: string; stepRevision: number; checkpointRef: string };
 }
 
 export interface AiTaskRunnerStepRef {
@@ -88,6 +121,7 @@ export interface AiTaskRunnerLeasePort {
   readMetadata(taskId: string): Promise<AiTaskRunnerTaskMetadata>;
   claimRun(input: AiTaskRunnerClaimInput): Promise<AiTaskRunnerLease>;
   claimRecoveryRun(input: AiTaskRunnerClaimInput): Promise<AiTaskRunnerLease & { purpose: "recovery_only" }>;
+  assertRecoveryRun?(lease: AiTaskRunnerRecoveryLease): Promise<void>;
   releaseRun(input: Omit<AiTaskRunnerClaimInput, "leaseMs" | "expectedTaskRevision" | "expectedRunRevision" | "expectedFencingToken"> & {
     expectedTaskRevision: number;
     expectedRunRevision: number;
@@ -115,6 +149,8 @@ export interface AiTaskRunnerPlanPort {
 /** Gateway/Tool adapters live outside this module. No provider SDK or URL is accepted here. */
 export interface AiTaskRunnerEffectPort {
   execute(step: AiTaskRunnerStepPlan, signal: AbortSignal, lease?: AiTaskRunnerLease): Promise<AiTaskRunnerEffectResult>;
+  continueConfirmation?(step: AiTaskRunnerStepPlan, signal: AbortSignal, lease: AiTaskRunnerLease,
+    continuation: AiTaskRunnerConfirmationContinuation): Promise<AiTaskRunnerEffectResult>;
   reconcile?(step: AiTaskRunnerStepPlan, signal: AbortSignal, lease?: AiTaskRunnerLease): Promise<AiTaskRunnerEffectResult>;
   /** Persistence-only receipt read after interruption. Must never invoke the
    * effect or query a provider; absence keeps the interrupted step unresolved. */
@@ -130,6 +166,7 @@ export type AiTaskRunnerTaskOutcome =
 /** Task aggregate transition is supplied by the composition root. The runner
  * only reports a durable step outcome; it never implements task transitions. */
 export interface AiTaskRunnerOutcomePort {
+  start?(input: { taskId: string; taskRevision: number; lease: AiTaskRunnerLease }): Promise<AiTaskRunnerStepCommit>;
   commit(input: {
     taskId: string;
     taskRevision: number;
@@ -155,6 +192,7 @@ export interface AiTaskRunnerDependencies {
   effects: AiTaskRunnerEffectPort;
   taskOutcome?: AiTaskRunnerOutcomePort;
   inputs?: AiTaskRunnerInputPort;
+  confirmation?: AiTaskRunnerConfirmationPort;
   clock?: AiTaskRunnerClock;
   /** Required by the persistent composition; absent only for legacy isolated runner consumers. */
   resources?: AiTaskRunnerResourcePort;

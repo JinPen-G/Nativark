@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient, type AiInspectionDraft } from '@prisma/client';
 import { z } from 'zod';
-import type { AiInspectionActorScope, AiInspectionOperationResult, AiInspectionReceiptLookup, AiInspectionTarget } from '../../../../../../packages/shared/src/ai-inspection-persistence';
+import type { AiInspectionActorScope, AiInspectionOperationResult, AiInspectionReceiptLookup, AiInspectionTarget } from '@rental-os/shared';
 import { InspectionAssistError } from './inspection-assist.validation';
 
 const receiptResult = z.object({ draftId: z.string(), revision: z.number().int().positive(),

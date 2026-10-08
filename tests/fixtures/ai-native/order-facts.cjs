@@ -7,8 +7,8 @@ const { AiOrderReadFactsService } = require('../../../apps/api/src/modules/ai-na
 const { getRequestIdentity } = require('../../../apps/api/src/common/request-identity');
 const stores = require('../../helpers/absorbing-config-store.cjs');
 const samples = require('./authorization-baseline.cjs');
-async function setup(audience = 'operator') {
-  const state = { user: samples.user(), workspace: 'workspace-a', session: true, member: true, order: samples.order(), reads: [], afterRead: null };
+async function setup(audience = 'operator', tenantId = 'tenant-a') {
+  const state = { user: samples.user({ tenantId }), workspace: 'workspace-a', session: true, member: true, order: samples.order({ tenantId }), reads: [], afterRead: null };
   const auth = new AuthService({
     getAuthSession: async () => state.session ? { id: 'session-a', userId: state.user.id, audience, currentWorkspaceId: state.workspace } : undefined,
     findUserById: async () => state.user, findWorkspaceScopedUser: async () => state.member ? state.user : undefined, listUserWorkspaces: async () => []
@@ -16,7 +16,7 @@ async function setup(audience = 'operator') {
   const credentials = { current: async () => ({ requestId: 'facts-request', audience, authorization: `Bearer ${auth.signAccessToken({ sub: state.user.id, tid: state.user.tenantId, sid: 'session-a', aud: audience, exp: Math.floor(Date.now()/1000)+600 })}` }) };
   const guard = new ApiAuthGuard(auth, undefined, undefined, undefined, { rentalOrder: { findFirst: async () => state.order ? { id: state.order.id } : null } });
   const authority = new AiOrderRouteContextAuthority(guard, credentials, 'order-a');
-  const config = stores.createAbsorbingConfigStore(); config.listWorkspaces = async () => [{ id: 'workspace-a', tenantId: 'tenant-a', categoryCode: 'camera', isDefault: true }];
+  const config = stores.createAbsorbingConfigStore(); config.listWorkspaces = async () => [{ id: 'workspace-a', tenantId, categoryCode: 'camera', isDefault: true }];
   const facts = stores.createAbsorbingFactStore();
   facts.findOrder = async (tenant, orderId) => {
     const identity = structuredClone(getRequestIdentity()); state.reads.push({ tenant, orderId, identity });
@@ -24,6 +24,6 @@ async function setup(audience = 'operator') {
     const row = structuredClone(state.order); if (state.afterRead) await state.afterRead(); return row;
   };
   const core = new RentalCoreService(config, facts); await core.onApplicationBootstrap();
-  return { state, core, authority, reader: new AiOrderReadFactsService(core, authority) };
+  return { state, core, authority, guard, credentials, reader: new AiOrderReadFactsService(core, authority) };
 }
 module.exports = { setup };

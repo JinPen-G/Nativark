@@ -11,6 +11,7 @@ function clone(value) {
 function matches(value, where) {
   if (where instanceof Date) return value instanceof Date && value.getTime() === where.getTime();
   if (where instanceof Prisma.Decimal) return value !== undefined && String(value) === String(where);
+  if (value instanceof Prisma.Decimal && (typeof where === 'string' || typeof where === 'number')) return value.equals(where);
   if (where === null || typeof where !== 'object') return value === where;
   return Object.entries(where).every(([key, rule]) => {
     if (key === 'AND') return (Array.isArray(rule) ? rule : [rule]).every(r => matches(value, r));
