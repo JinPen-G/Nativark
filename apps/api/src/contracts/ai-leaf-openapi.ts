@@ -9,6 +9,11 @@ export function aiLeafToOpenApi30(schema: unknown, path = "schema"): SchemaObjec
   const fail = (message: string): never => { throw new TypeError(`${path}: ${message}`); };
   if (!schema || typeof schema !== "object" || Array.isArray(schema)) return fail("expected a schema object");
   const input = schema as Record<string, unknown>;
+  if (input.type === "null") {
+    if (Object.keys(input).length !== 1) return fail("null-only schemas cannot have sibling constraints");
+    // OpenAPI 3.0 needs a concrete nullable type; the enum keeps it null-only.
+    return { type: "string", nullable: true, enum: [null] };
+  }
   const output: SchemaObject = {};
   const scalar = (value: unknown): value is string | number | boolean => typeof value === "string"
     || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value));
