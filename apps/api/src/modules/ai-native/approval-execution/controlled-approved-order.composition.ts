@@ -10,10 +10,13 @@ import { PrismaAuthorizedApprovedOrderInputSource } from './prisma-authorized-ap
 import { composeApprovedOrderHumanApproval } from './approved-order-human.composition';
 import { composeApprovedOrderWaiting } from './approved-order-waiting.executor';
 import { composeApprovedOrderApplication } from './approved-order-application.composition';
+import { composeApprovedOrderReprepare } from './approved-order-reprepare.composition';
+import type { ApprovedOrderReprepareServicesFactory } from './approved-order-reprepare.ports';
 
 export type ControlledApprovedOrderDependencies = Omit<PersistedApprovedOrderDependencies, 'inputSource' | 'executionInput' | 'toolVersion'> & {
   confirmation: PersistedApprovedOrderDependencies['confirmation'] & Pick<RentalOrderConfirmationService, 'normalizeOrderInput'>;
   scene: { code: string; version: string };
+  reprepareServices?: ApprovedOrderReprepareServicesFactory;
 };
 
 /** Explicit assembly only: no policy seeds, automatic approval, runner hosting
@@ -32,7 +35,7 @@ export function composeControlledApprovedOrder(dependencies: ControlledApprovedO
     const waiting = composeApprovedOrderWaiting(dependencies, { ...orders, approvals, source: formal.source });
     return Object.freeze({ tasks: formal.tasks, source: formal.source, policy: formal.policy, plans: formal.plans,
       registrations: formal.registrations, inputAuthority: formal.inputAuthority, approvals, waiting,
-      application: composeApprovedOrderApplication(dependencies, approvals),
+      application: composeApprovedOrderApplication(dependencies, approvals, composeApprovedOrderReprepare(dependencies)),
       prepare: orders.prepare, submit: orders.submit, reconcile: orders.reconcile });
   } catch (error) {
     if (error instanceof AiTaskRepositoryError) throw new AiTaskRepositoryError(error.code);

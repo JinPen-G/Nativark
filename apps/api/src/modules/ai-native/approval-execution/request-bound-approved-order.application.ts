@@ -37,6 +37,8 @@ export function composeRequestBoundApprovedOrderApplication(dependencies: Depend
     readProposal: (request: Request, taskId: string, value: unknown) => call(request, app => app.readProposal(taskId, value)),
     decide: (request: Request, taskId: string, value: unknown) => call(request, app => app.decide(taskId, value)),
     readReceipt: (request: Request, taskId: string, value: unknown) => call(request, app => app.readReceipt(taskId, value)),
-    readReprepareEligibility: (request: Request, taskId: string, value: unknown) => call(request, app => app.readReprepareEligibility(taskId, value))
+    readReprepareEligibility: (request: Request, taskId: string, value: unknown) => call(request, app => app.readReprepareEligibility(taskId, value)),
+    reprepare: (request: Request, taskId: string, value: unknown) => call(request, app => app.reprepare(taskId, value)),
+    readReprepareReceipt: (request: Request, taskId: string, value: unknown) => call(request, app => app.readReprepareReceipt(taskId, value))
   });
 }

@@ -9,13 +9,13 @@ const { composeControlledApprovedOrder } = require('../../../apps/api/src/module
 
 // Actual formal publisher/plan/registration, authorization, preparation, approval,
 // Core confirmation and idempotency. Database and Core business facts remain doubles.
-async function controlledApprovedOrderHarness({ prepare = true } = {}) {
+async function controlledApprovedOrderHarness({ prepare = true, decisionExpiresAt } = {}) {
   const h = await persistedApprovedOrderHarness(), { state } = h;
   state.user.permissions.push('system:params:manage');
   state.records.aiTaskActionPolicy.push({ scopeId: 'scope-a', taskId: 'task-a', operation: 'decide_approval', revision: 1,
     requiredPermissions: ['rental-os:order:create'], expiresAt: new Date('2099-01-01') });
   for (const table of ['aiStep', 'aiProposal', 'aiProposalVersion', 'aiProposalAction', 'aiApproval', 'aiApprovalConsumption',
-    'aiApprovedOrderSnapshot', 'aiTaskActionInput', 'aiTaskPlanPolicy', 'aiTaskRunPlan', 'aiTaskEvent', 'aiTaskResultArtifact']) state.records[table] = [];
+    'aiApprovedOrderSnapshot', 'aiTaskActionInput', 'aiTaskPlanPolicy', 'aiTaskRunPlan', 'aiTaskEvent', 'aiTaskResultArtifact', 'aiApprovalReprepare']) state.records[table] = [];
   Object.assign(state.records.aiTask[0], { eventCursor: 0n });
   state.records.aiRun[0].fencingToken = new Prisma.Decimal('9');
   Object.assign(state.records.quote[0], { chargeLines: [], rateSnapshot: [], calendarSnapshot: [], calendarWarnings: [],
@@ -30,7 +30,26 @@ async function controlledApprovedOrderHarness({ prepare = true } = {}) {
     const before = async (model, op, args) => {
       if (state.onOperation) await state.onOperation({ model, op, args, records: records ?? state.records, inTransaction });
     };
-    const db = { $queryRaw: async () => [] };
+    const db = {
+      $queryRaw: async query => {
+        if (!query.sql.includes('FROM ai_approval_reprepares')) return [];
+        await before('aiApprovalReprepare', 'read', query);
+        const [scopeId, operationKey] = query.values;
+        return clone(rows('aiApprovalReprepare').filter(row => row.scopeId === scopeId && row.operationKey === operationKey));
+      },
+      $executeRaw: async query => {
+        assert.ok(query.sql.startsWith('INSERT INTO ai_approval_reprepares'));
+        await before('aiApprovalReprepare', 'insert', query);
+        const names = query.sql.match(/\((.*?)\) VALUES/s)[1].split(',').map(key => key.trim().replaceAll('`', ''));
+        const row = Object.fromEntries(names.map((name, i) => [name, clone(query.values[i])]));
+        const duplicate = rows('aiApprovalReprepare').some(r => r.scopeId === row.scopeId && (r.operationKey === row.operationKey
+          || r.originalTaskId === row.originalTaskId && r.originalProposalId === row.originalProposalId && r.originalRevision === row.originalRevision
+          || r.replacementTaskId === row.replacementTaskId && r.replacementActionId === row.replacementActionId));
+        if (duplicate) throw Object.assign(Error('synthetic duplicate key'), { code: 'P2002' });
+        rows('aiApprovalReprepare').push(row);
+        return 1;
+      }
+    };
     for (const model of Object.keys(state.records)) db[model] = {
       findFirst: async (args = {}) => { await before(model, 'findFirst', args); return project(rows(model).map(r => related(model, r)).find(r => matches(r, args.where ?? {})), args.select); },
       findUnique: async args => {
@@ -67,11 +86,13 @@ async function controlledApprovedOrderHarness({ prepare = true } = {}) {
         const result = await callback(client(records, true)), wrote = records.rentalOrder.length > state.records.rentalOrder.length;
         const decided = records.aiApproval.length > state.records.aiApproval.length;
         const proposed = records.aiProposal.length > state.records.aiProposal.length;
+        const reprepared = records.aiApprovalReprepare.length > state.records.aiApprovalReprepare.length;
         state.records = records; committed = true;
         if (wrote) state.commits++;
         if (wrote && state.ackLost) throw Error('synthetic COMMIT applied, response lost');
         if (decided && state.decisionAckLost) throw Error('synthetic approval COMMIT applied, response lost');
         if (proposed && state.proposalAckLost) throw Error('synthetic proposal COMMIT applied, response lost');
+        if (reprepared && state.reprepareAckLost) throw Error('synthetic reprepare COMMIT applied, response lost');
         return result;
       } catch (error) { if (!committed) state.rollbacks++; throw error; }
     }));
@@ -95,7 +116,7 @@ async function controlledApprovedOrderHarness({ prepare = true } = {}) {
   // the registered step by fixture mutation; it does not prove a running worker.
   step.status = 'RUNNING';
   const prepareCommand = { taskId, proposalId: 'proposal-a', proposalRevision: 1, actionId: step.actionId,
-    expiresAt: h.payload.expiresAt, lease: { ...held, revision: state.records.aiRun[0].revision } };
+    expiresAt: decisionExpiresAt ?? h.payload.expiresAt, lease: { ...held, revision: state.records.aiRun[0].revision } };
   const executorInput = () => ({ taskId, runId: held.runId, stepId: step.id, actionId: step.actionId,
     inputRef: published.id, fingerprint: step.requestFingerprint, lease: lease() });
   if (!prepare) return { ...h, root, compose, dependencies, published, registered, executorInput };

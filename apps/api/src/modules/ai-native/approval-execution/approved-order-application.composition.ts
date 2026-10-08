@@ -3,8 +3,15 @@ import type { ControlledApprovedOrderDependencies } from './controlled-approved-
 import type { composeApprovedOrderHumanApproval } from './approved-order-human.composition';
 import { approvalApplicationContract } from './approval-application-contracts';
 import { composeApprovedOrderReprepareEligibility } from './approved-order-reprepare-eligibility';
+import { AiTaskRepositoryError } from '../ai-task.repository';
+import type { ApprovedOrderReprepareApplication } from './approved-order-reprepare.ports';
 
-export function composeApprovedOrderApplication(d: ControlledApprovedOrderDependencies, human: ReturnType<typeof composeApprovedOrderHumanApproval>) {
+export function composeApprovedOrderApplication(d: ControlledApprovedOrderDependencies, human: ReturnType<typeof composeApprovedOrderHumanApproval>, reprepares: ApprovedOrderReprepareApplication) {
+  const commandFor = (taskId: string, value: unknown) => {
+    const command = approvalApplicationContract('AiApprovalReprepareCommandDraft', value);
+    if (command.originalTaskId !== taskId) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return command;
+  };
   return Object.freeze({
     readProposal: async (taskId: string, value: unknown) => {
       const reference = approvalApplicationContract('AiApprovalApplicationReferenceDraft', value);
@@ -22,6 +29,8 @@ export function composeApprovedOrderApplication(d: ControlledApprovedOrderDepend
       const command = approvalApplicationContract('AiApprovalApplicationDecisionDraft', value);
       return approvalApplicationContract('AiApprovalApplicationReceiptDraft', await human.readReceipt(taskId, command), true);
     },
-    readReprepareEligibility: composeApprovedOrderReprepareEligibility(d, human)
+    readReprepareEligibility: composeApprovedOrderReprepareEligibility(d, human),
+    reprepare: async (taskId: string, value: unknown) => reprepares.reprepare(commandFor(taskId, value)),
+    readReprepareReceipt: async (taskId: string, value: unknown) => reprepares.readReceipt(commandFor(taskId, value))
   });
 }

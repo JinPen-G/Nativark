@@ -64,8 +64,7 @@ export function composeApprovedOrderReprepareEligibility(d: ControlledApprovedOr
         const committed = bound && consumption.status === 'COMMITTED' && !!consumption.resultRef
           && business?.tenantId === scope.tenantId && business.workspaceId === scope.workspaceId
           && business.action === 'rental.order.create' && business.idempotencyKey === idempotencyKey
-          && business.requestHash === action.input.contentHash && business.status === 'succeeded' && business.orderId === consumption.resultRef
-          && (!step.resultRef || step.resultRef === consumption.resultRef);
+          && business.requestHash === action.input.contentHash && business.status === 'succeeded' && business.orderId === consumption.resultRef;
         return result(committed ? 'committed' : 'unknown');
       }
       if (business || step.effect !== 'NONE' || step.resultRef || step.status === 'UNKNOWN' || step.status === 'SUCCEEDED'

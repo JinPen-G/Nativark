@@ -174,7 +174,7 @@ async function approvedOrderHarness() {
       return structuredClone(state.records.rentalOrder.find(order => order.tenantId === tenantId && order.id === id));
     }
   };
-  const business = { consumeQuote: () => structuredClone(state.records.quote[0]), assertOrderDaysOpenForConfirmation: () => {},
+  const business = { consumeQuote: (_tenant, _context, id) => structuredClone(state.records.quote.find(row => row.id === id)), assertOrderDaysOpenForConfirmation: () => {},
     validateCouponForOrder: () => null, applyOrderConfirmationToCache: () => {} };
   const coreFacts = { findOrder: async (tenantId, id) => structuredClone(state.records.rentalOrder.find(o => o.tenantId === tenantId && o.id === id)),
     saveOrderAggregate: async (order, _lines, tx) => { await tx.rentalOrder.create({ data: order }); } };
