@@ -169,6 +169,13 @@ async function approvedNotificationsSmoke() {
     assert.equal((await api.commitApprovedChange(request, { ...reference, operationKey: 'new-settings-operation', approvalId: 'new-approval' })).error.code, 'AI_RESOURCE_UNAVAILABLE');
     assert.equal(rows.operations.length, 1);
     console.log('approved-settings-application: strict transport/explicit opt-in and unregistered-tool fail-closed passed; no simulated registry or positive AI execution claim');
+  } else {
+    const { registeredSettingsTool } = require('../apps/api/dist/modules/ai-native/approval-execution/approved-settings-contracts.js');
+    assert.equal(registeredSettingsTool(), AI_APPROVED_SETTINGS_TOOL_CODE);
+    user.permissions = ['rental-os:rules:manage'];
+    assert.equal((await api.prepare(request, preparing)).error.code, 'AI_RESOURCE_UNAVAILABLE', '注册不是任务/输入生产授权，缺真实任务依赖仍拒绝');
+    assert.equal(rows.operations.length, 1);
+    console.log('approved-settings-application: fixed registered tool recognized; missing task dependencies remain unavailable, no RUNNING/lease fixture invented');
   }
   console.log("approved-settings: 真实 Core/仓储/Guard 的通知限定、版本/CAS、同事务 participant、unknown 回读与历史幂等通过；DB/Auth/批准 participant 为替身，不是 MySQL/AI 执行器验收");
 }
