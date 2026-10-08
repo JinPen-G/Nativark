@@ -1,5 +1,24 @@
 # Codex B 总册接续交付与精确未闭合项
 
+## 2026-10-08 CB05：首建上传与非URL正文源（Claude接续）
+
+基线 `bea3d85d8eacf043c6149c6dabc638cb4efdc1ec`，本会话唯一施工树仍是 codex-ai-native-lane-b；主线确认本片独占 FileStorageRuntime 的 Knowledge 分支和新增 knowledge-object-reader。原 inspection reader、其他文件业务、Auth/Guard/Core、根模块、schema/迁移及shared总出口均未改。历史output与原开发建议保留。
+
+入口 `composeKnowledgeFileApplication` / `HumanKnowledgeModule.registerFiles` 以实际Auth、当前request-bound credentials、Prisma精确政策、原FileStorage及独立正文producer组成同一管理/index/context/input包，新增 `uploads.begin({documentId,fileName,mimeType,sizeBytes})` 和 `uploads.complete({documentId,sessionId})`。仅支持首建、S3-compatible、UTF-8纯文本/Markdown，最大262144字节。装配不读配置、不启动HTTP/worker/上传清理生命周期；服务端必须为每次请求绑定独立credentials，不能用可变全局会话源。
+
+- 首建不伪造KnowledgeDocument占位行。原FileAsset+FileUploadSession就是上传意图，原tenant+idempotency唯一键是持久冲突边界；键由服务端取 `knowledge.` + SHA256(documentId)，不含workspace，故同租户跨空间同目标冲突。客户端不能提交metadata/owner/scope/任意key。upload正式政策精确绑定当前actor/audience/scope及 `{upload:{documentId,idempotencyKey,fileName,mimeType,sizeBytes}}`；没有政策行不上传。documentId只是待核验选择，不是授权。已有文档（包含其他范围）拒绝首建，不能用本入口替换已有文档附件。
+- 原事务创建pending资产和session，服务端只写原workspace/上传人及 `knowledgeUploadVersion:1` 绑定标记；不在metadata存正文或授权。只有原completeUpload对象存在检查和CAS成功才active/completed。完成前后与create消费前复验当前身份和绑定；其他空间/人、自由metadata、缺存储、未完成上传都拒绝。并发/应答丢失继续使用同一目标派生键，读回原session；待上传重放仅为原session重签PUT，不新建第二上传。过期/失败session不会自动更换键或接管目标，需人工处置。
+- `FileStorageRuntimeService` 第五参数 `KNOWLEDGE_FILE_ACCESS` 是必需Knowledge授权/读源（其他原业务仍用原构造参数）。`PrismaKnowledgeFileAccess` 复验当前Auth/政策/文档，`TenantKnowledgeObjectReader` 独立核验Knowledge文档、业务附件和completed session，仅复用原inspection文件的纯SigV4请求编码，绝不复用rental_order权限。旧readKnowledgeBytes的presign GET已移除；正文走无query header-auth GET、原出网限制、8秒读取边界、逐块大小限制与实际字节hash；不接受URL/路径，不返回存储凭据。配置/资产/文档/当前政策读后复验，取消不等待不合作provider清理。
+- 已接原create→parse→index→publish→preview→withdraw及原parse/operation收据。授权撤销后的读取不返回已缓冲正文，parse admission保持pending/unknown；reconcile不重读对象、不重解析。通用下载URL和物理删除入口拒绝Knowledge资产：受权来源读取走知识服务，文档撤回/删除走原生命周期；物理存储留存/清理政策并未因此实现。
+
+复用 `tests/ai-native-knowledge-lane-b-file-runtime.test.cjs`，没有新增测试脚本。最终5pass/0fail/0skip/0todo，退出0；之前一次类型编译失败（原session key可空，已明确拒绝为空的知识key）、一次4pass/1fail（同步strict输入拒绝的测试断言用错，已修复），没有隐去失败。运行时ts-node为transpileOnly:false，实际新增组合和生产源码类型编译通过，非全API验收；git diff --check退出0。覆盖完整原生命周期、并发同目标、响应丢失原session恢复、不同payload/跨workspace/自由metadata/未完成/无policy/无存储拒绝、撤权后原parse核对、超限和不合作取消。
+
+命令：NODE_ENV=test；DATABASE_URL固定 `mysql://offline:offline@127.0.0.1:1/rental_os_offline`；AI_OFFLINE_AUDIT为本树绝对output/cb05-files-audit；TEMP/TMP为本树绝对output/inspection-lb05-tmp；`node --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs --require ./tests/fixtures/ai-native/lane-b-local-runtime.cjs --test tests/ai-native-knowledge-lane-b-file-runtime.test.cjs`。DB/Auth、集成配置、上传HEAD结果和transport/egress明确替身；真实政策读取/上传事务调用/正文reader/Knowledge仓储及管理组合使用生产实现。未连接真实网络/DB/S3/模型，未安装、读.env、执行迁移或改共享产物；未push/合main/生产启用。
+
+边界：本片解除首建循环和非URL正文代码缺口，不等于整个CB05验收。新版本附件上传、原文件的物理删除/保留策略、可信政策管理/置备入口仍缺。正文实际hash只反映本次读到的字节，不冒称存储不可变versionId或以调用者documentVersion代替实际hash；已解析结果是原持久chunks。真实MySQL竞争/锁、S3签名/存储对象版本与当前授权跨资源原子性、多实例传播仍未验。
+
+Runtime替换只驱动uploads/management/index等稳定服务，原session、Knowledge operation/CAS/generation与正文授权仍由系统持有；checkpoint不能当上传完成或解析收据。Provider SDK不进入知识服务，本片S3对象传输不是模型调用，未来只能替换独立对象IO与签名实现并保留出网/取消/限额；不得借此新增Gateway派发路径。回退停用显式组合，不删除已上传资产/原收据，也不因切换引擎重解析unknown操作。
+
 ## 2026-10-08 正式S3生产者固定接入与显式模块
 
 仅接主线固定`41381429454bcebbc061056cb95be739ad701055`，本树映射`4c2916ce`；未重放主线接回的媒体消费者历史。新增`InspectionObjectReaderModule.register(db, integrations)`，导出原`INSPECTION_OBJECT_READER` token；缺实际delegate或runtimeConfig立即STORAGE_UNAVAILABLE。宿主显式import该动态模块后，在宿主模块中提供现有FileStorageRuntimeService（第四参数注入该token），将同一storage实例交给既有InspectionAssistModule.registerStaffRequests的storage依赖。宿主handler使用factory.open，并在finally close；本片不注册根模块、HTTP、worker或FileStorageRuntime启动生命周期。

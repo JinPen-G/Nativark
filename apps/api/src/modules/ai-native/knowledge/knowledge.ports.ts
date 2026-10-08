@@ -3,9 +3,10 @@ import type {
   AiKnowledgeOwnerDraft, AiFactReference, AiKnowledgeSourceDraft, AiMemoryDraft, AiPreferenceValueDraft,
 } from '@rental-os/shared';
 
-export type KnowledgeAction = 'create' | 'read_metadata' | 'parse' | 'publish' | 'withdraw' | 'delete' | 'revise' | 'search' | 'read_body' | 'snippet' | 'resolve_source' | 'download' | 'index' | 'change_acl';
+export type KnowledgeAction = 'upload' | 'create' | 'read_metadata' | 'parse' | 'publish' | 'withdraw' | 'delete' | 'revise' | 'search' | 'read_body' | 'snippet' | 'resolve_source' | 'download' | 'index' | 'change_acl';
 export interface KnowledgeAuthorizationRequest {
   action: KnowledgeAction;
+  upload?: { documentId: string; idempotencyKey: string; fileName: string; mimeType: string; sizeBytes: number };
   scope: AiExecutionScope;
   document?: AiKnowledgeDocumentDraft;
   attachmentId?: string;
