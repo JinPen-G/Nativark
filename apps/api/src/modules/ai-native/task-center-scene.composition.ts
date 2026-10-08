@@ -34,6 +34,7 @@ export function composeAiTaskCenterScene(input: {
   input?: { read(value: unknown): Promise<unknown> };
   selections?: Pick<PrismaQuoteSelectionRepository, 'read'>;
   approvals?: Pick<ReturnType<typeof composeHumanQuoteOrder>, 'readSelectedProposal' | 'readSelectedDecisionReceipt'>;
+  orders?: Pick<ReturnType<typeof composeHumanQuoteOrder>, 'readSelectedOrderResult'>;
   scenes: Pick<OriginalScenes, 'readTaskReceipt' | 'readRecovery'> & {
     requests: Pick<OriginalScenes['requests'], 'readHistorical'>;
   };
@@ -119,6 +120,19 @@ export function composeAiTaskCenterScene(input: {
         receipt,
         order: 'not_created_by_read' as const });
     },
+    readOrderResult: async (value: unknown) => {
+      const parsed = approvalRead.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      if (typeof input.orders?.readSelectedOrderResult !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const reference = z.object({ selection: z.unknown(), command: z.unknown() }).strict().safeParse(parsed.data.reference);
+      if (!reference.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const task = await readObservedTask(parsed.data.original, parsed.data.taskId);
+      assertSelectedProof(reference.data.selection, parsed.data.original, task);
+      const result = await input.orders.readSelectedOrderResult(reference.data);
+      await assertStillCurrent(parsed.data.original, task);
+      return freezeOriginalInput({ taskId: task.taskId, runId: task.runId, result,
+        execution: 'read_only_no_start_no_reconnect_side_effect' as const });
+    },
     reopenModelSource: async (value: unknown) => {
       if (typeof input.modelResults?.reopenSource !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       return input.modelResults.reopenSource(value);
@@ -179,7 +193,10 @@ export function composeAiTaskCenterScene(input: {
   function assertSelectedTask(value: unknown, original: z.infer<typeof originalRequestReferenceSchema>, task: { taskId: string; runId: string }) {
     const nested = z.object({ selection: z.unknown(), proposal: z.unknown() }).strict().safeParse(value);
     if (!nested.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    const selection = parseQuoteSelectionProof(nested.data.selection);
+    assertSelectedProof(nested.data.selection, original, task);
+  }
+  function assertSelectedProof(value: unknown, original: z.infer<typeof originalRequestReferenceSchema>, task: { taskId: string; runId: string }) {
+    const selection = parseQuoteSelectionProof(value);
     if (selection.originalInputRef !== original.inputRef || selection.taskId !== task.taskId || selection.runId !== task.runId)
       throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
   }

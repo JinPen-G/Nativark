@@ -118,6 +118,16 @@ test('selected order goes through human review and decision before Core commit a
   assert.equal(outcome.payment, 'not_inferred'); assert.equal(outcome.taskOutcome, 'owned_by_runner');
   assert.deepEqual(Object.keys(outcome.order).sort(), ['id', 'quoteId', 'status']);
   assert.equal(h.state.commits, 1);
+  const { composeAiTaskCenterScene } = require('../apps/api/src/modules/ai-native/task-center-scene.composition');
+  const centerDependencies = { list: { readPage: async () => { throw Error('not used'); } },
+    scenes: { requests: h.originals, readTaskReceipt: h.originals.readTaskReceipt.bind(h.originals),
+      readRecovery: async () => { throw Error('not used'); } } };
+  const center = composeAiTaskCenterScene({ ...centerDependencies, orders: h.app });
+  const centerRead = { original: { draftVersion: 'ain-scene-request-draft-1', inputRef: h.selection.originalInputRef }, reference: execution };
+  assert.equal((await center.readOrderResult(centerRead)).result.order.id, outcome.order.id);
+  await assert.rejects(composeAiTaskCenterScene(centerDependencies).readOrderResult(centerRead), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  await assert.rejects(center.readOrderResult({ ...centerRead, reference: { ...execution, selection: { ...h.selection,
+    taskId: 'ffffffff-ffff-4fff-8fff-ffffffffffff' } } }), e => e.code === 'AI_ACCESS_DENIED');
   h.state.resourceAccess = false;
   const uncertain = await requests.readSelectedOrderResult(request, execution);
   assert.equal(uncertain.status, 'unknown'); assert.equal(uncertain.retryable, false); assert.equal(uncertain.order, undefined);

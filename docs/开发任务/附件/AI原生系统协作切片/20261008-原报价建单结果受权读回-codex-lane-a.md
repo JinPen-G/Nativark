@@ -29,3 +29,9 @@ API源码noEmit沿用上一记录的typescript程序：读取原apps/api/tsconfi
 主线消费方法时继续使用原固定selection与approved command，不查最新订单；原runner仍负责submit/任务终态。此方法没有创建新执行链，Runtime未来替换继续保留原引用和收据，Provider仍只归唯一Gateway；当前不安装或迁移。
 
 本片没有把报价自然语言到四品类建单全部标验收，未验证真实MySQL、HTTP、模型、支付、浏览器/微信/设备或生产。通知设置CA06/07等待可安全同步的固定依赖；不借order接口执行通知设置。
+
+## 接回任务中心消费（接续9218de15）
+
+`composeAiTaskCenterScene({...,orders:humanQuoteOrder}).readOrderResult({original,taskId?,reference:{selection,command}})` 接通同一原业务核对结果。外层原请求/task/run与内层选择完整绑定，读前后比较当前身份、原输入指纹及task/run/revision；缺orders端口明确不可用。不把批准receipt当订单、不从事件正文推导业务结果。
+
+扩的是同一原单实际组合用例：真实任务中心→实际human quote app→原AIN07 reconcile→原Core订单读回；只替代未调用的list/recovery边界，不新建假工作台。正常读回原订单、缺能力拒绝、嵌套另一任务拒绝；另在请求绑定应用验证不可确定结果保留unknown且不回order。最终同项1pass/0fail/0skip/0todo，退出0，不与上次相加宣称2项全量；命令与上一节相同，audit改为本树output/ca05-center.audit。API源码noEmit0诊断退出0（output/ca05-center-types.audit），diff check退出0。源码只改本线task-center composition及既有测试，未改公共运输协议或注册HTTP。
