@@ -93,16 +93,38 @@ exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation'
       return clone(execution.result);
     }, stream: async function* () { throw Error('invoke-only fixture'); } }
   };
-  model = composeAiOriginalSceneModel({ ...h.dependencies, scene: { code: sceneCode, version: '1' },
+  const modelDependencies = { ...h.dependencies, scene: { code: sceneCode, version: '1' },
     gatewayScene: { sceneCode, routeScene: 'chat', maxOutputTokens: 64 }, priceVersion: 'price-1',
     ...(supplemental ? { knowledge: supplemental.options } : {}),
-    runtime: { ports, evidence: 'mock', verifyEvidence: async () => true } });
+    runtime: { ports, evidence: 'mock', verifyEvidence: async () => true } };
+  model = composeAiOriginalSceneModel(modelDependencies);
   bindings = new PrismaGatewayInvocationBindings(h.db, model.runtime.authorization.scopes, h.dependencies.clock);
   financial = new PrismaGatewayAccountingFacts(h.db, bindings, model.runtime.authorization.scopes,
     { quantity: async () => { throw Error('pricing not exercised by dispatch evidence'); } }, h.dependencies.clock);
   const run = { inputSource: h.b.h.source, financialEvidence: financial };
   const app = model.createApplication({ holderId: 'scene-worker', leaseMs: 100000 }, run);
-  return { ...h, created, reference, model, run, app, execution, financial, supplemental };
+  return { ...h, created, reference, model, modelDependencies, run, app, execution, financial, supplemental };
+};
+
+exports.requestBoundOriginalModelHarness = async (sceneCode = 'order_explanation', knowledgeSetup) => {
+  const h = await exports.originalModelApplicationHarness(sceneCode, knowledgeSetup);
+  const { AiOriginalScenesModule, AI_ORIGINAL_SCENE_MODEL_REQUESTS } = require('../../../apps/api/src/modules/ai-native/scenes/original-scenes.module');
+  const { composePersistedTaskAuthorization } = require('../../../apps/api/src/modules/ai-native/task-authorization.composition');
+  const { credentials, ...dependencies } = h.modelDependencies, factoryCalls = [];
+  const options = { enabled: true, audience: 'operator', host: { holderId: 'request-worker', leaseMs: 100000 },
+    runServices: input => {
+      factoryCalls.push(input);
+      const authorization = composePersistedTaskAuthorization(input);
+      const bindings = new PrismaGatewayInvocationBindings(input.db, authorization.scopes, input.clock);
+      const financialEvidence = new PrismaGatewayAccountingFacts(input.db, bindings, authorization.scopes,
+        { quantity: async () => { throw Error('pricing not exercised by dispatch evidence'); } }, input.clock);
+      return { inputSource: h.run.inputSource, financialEvidence };
+    } };
+  const module = AiOriginalScenesModule.registerRequestBoundModel(dependencies, options);
+  assert.equal(module.controllers, undefined); assert.deepEqual(module.exports, [AI_ORIGINAL_SCENE_MODEL_REQUESTS]);
+  const requests = module.providers[0].useFactory();
+  return { ...h, requests, requestDependencies: dependencies, options, factoryCalls,
+    request: { headers: { authorization: (await credentials.current()).authorization } } };
 };
 
 exports.originalSceneKnowledgeFixture = async h => {
