@@ -1,6 +1,7 @@
 import { CheckCircleOutlined, PlusOutlined } from "@ant-design/icons";
 import type { SaveClientChannelProfileRequest, SaveMiniProgramChannelRequest, SaveWebsiteChannelProfileRequest } from "@rental-os/shared";
-import { App, Card, Col, Divider, Row, Space, Tag, Typography } from "antd";
+import { Card, Col, Divider, Row, Space, Tag, Typography } from "antd";
+import { App } from "@/components/ui";
 import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, FileUpload, type FileUploadItem } from "@/components/ui";

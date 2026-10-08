@@ -1,4 +1,4 @@
-import { Empty } from "antd";
+import { Empty } from "@/components/ui";
 import type { ReactNode } from "react";
 import { useLocale } from "@/app/locale";
 import { LoadingState } from "./LoadingState";

@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { UnsavedChangesGuard } from "@/components/UnsavedChangesGuard";
-import { App, Card, Collapse, Form, InputNumber, Modal, Space } from "antd";
+import { Card, InputNumber, Space } from "antd";
+import { Form, ActionButton } from "@/components/ui";
+import { Collapse } from "@/components/ui";
+import { App, Modal } from "@/components/ui";
 import { Alert, Button, Input, Select, Switch, Table, Tabs } from "@/components/ui";
 import { CATEGORY_DRAFT_SECTIONS, RENTAL_CATEGORY_ICON_CODES, RENTAL_CAPABILITY_MODULES, RENTAL_FULFILLMENT_MODES, RENTAL_LOCATION_TYPES, RENTAL_PRICING_UNIT_CODES, RentalInventoryMode, type CategoryDraftSection, type CategoryVersionView } from "@rental-os/shared";
 import { useLocale } from "@/app/locale";
@@ -126,7 +129,7 @@ export function CategoryDraftEditor({ code, initial, editable, canPublish, saved
   const guarded = (action: () => void) => hasUnsavedInput ? modal.confirm({ title: t("有未保存的改动，确定放弃吗？"), onOk: action }) : action();
   const canEdit = editable && version.status === "draft" && !busy;
   const save = async () => {
-    if (!reason.trim()) { message.warning(t("请填写变更原因")); return; }
+    if (!reason.trim()) { message.warning(t("请填写变更原因")); throw new Error("Change reason required"); }
     setBusy(true);
     try {
       const next = await categoryGovernanceApi.patch(code, version.id, section, { expectedRevision: version.revision, values, reason });
@@ -134,6 +137,7 @@ export function CategoryDraftEditor({ code, initial, editable, canPublish, saved
     } catch (error) {
       const response = error as { response?: { status?: number; data?: { message?: string } } };
       message.error(response.response?.status === 409 ? t("草稿修订冲突，输入已保留，请重新核对最新版本") : t("保存失败，输入已保留"));
+      throw error;
     } finally { setBusy(false); }
   };
   const publish = async () => {
@@ -173,7 +177,7 @@ export function CategoryDraftEditor({ code, initial, editable, canPublish, saved
     {errors.length > 0 && <Alert type="error" title={t("配置校验未通过")} description={errors.join("；")} />}
     <Space wrap>
       {(editable || canPublish) && version.status === "draft" && <Input aria-label={t("变更原因")} placeholder={t("变更原因")} value={reason} onChange={(event) => setReason(event.target.value)} disabled={busy} maxLength={512} />}
-      {editable && version.status === "draft" && <Button type="primary" disabled={!dirty} loading={busy} onClick={save}>{t("保存当前页签草稿")}</Button>}
+      {editable && version.status === "draft" && <ActionButton label={t("保存当前页签草稿")} disabled={!dirty} pending={busy} onAction={save} />}
       {section === "capabilities" && canPublish && version.status === "draft" && <Button type="primary" disabled={dirty || busy} onClick={publish}>{t("校验并整体发布")}</Button>}
       <Button disabled={dirty || busy} onClick={async () => { setBusy(true); try { const result = await categoryGovernanceApi.validate(code, version.id); setErrors(result.errors); if (result.valid) message.success(t("配置校验通过")); } catch { message.error(t("校验失败，请重试")); } finally { setBusy(false); } }}>{t("校验已保存版本")}</Button>
       <Button disabled={busy} onClick={() => guarded(close)}>{t("关闭")}</Button>

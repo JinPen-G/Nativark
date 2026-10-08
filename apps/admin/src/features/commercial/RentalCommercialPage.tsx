@@ -1,8 +1,10 @@
+import { SaveButton } from "@/components/ui";
 import { EditOutlined, HistoryOutlined, PlusOutlined } from "@ant-design/icons";
 import { RENTAL_PRICING_UNIT_LABELS, formatRentalMoney, rentalCurrencySymbol } from "@rental-os/shared";
 import type { CreateRentalPriceAdjustmentRequest, RentalDiscountPlan, RentalPriceAdjustmentPreviewRow, RentalPricingGroup, RentalPricingPlanV1, RentalServiceCapacity, RentalValueAddedService, SaveRentalDiscountPlanRequest, SaveRentalServiceCapacityRequest, SaveRentalValueAddedServiceRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Col, InputNumber, Modal, Popconfirm, Row, Space, Tag, Typography } from "antd";
+import { Card, Col, InputNumber, Popconfirm, Row, Space, Tag, Typography } from "antd";
+import { App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, DatePicker, Table } from "@/components/ui";
 import { Switch } from "@/components/ui";
@@ -673,9 +675,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
         destroyOnHidden
         onClose={() => setDiscountEditor(null)}
         extra={
-          <Button type="primary" loading={saveDiscount.isPending} onClick={() => discountForm.submit()}>
-            {t("保存新版本")}
-          </Button>
+          <SaveButton  label={t("保存新版本")} form={discountForm} pending={saveDiscount.isPending} onSave={async values => { const operation = saveDiscount.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
         }
       >
         <Form<SaveRentalDiscountPlanRequest> form={discountForm} layout="vertical" onFinish={(values) => saveDiscount.mutate(values)}>
@@ -737,9 +737,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
         destroyOnHidden
         onClose={() => setServiceEditor(null)}
         extra={
-          <Button type="primary" loading={saveService.isPending} onClick={() => serviceForm.submit()}>
-            {t("保存服务")}
-          </Button>
+          <SaveButton  label={t("保存服务")} form={serviceForm} pending={saveService.isPending} onSave={async values => { const operation = saveService.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
         }
       >
         <Form<SaveRentalValueAddedServiceRequest> form={serviceForm} layout="vertical" onFinish={(values) => saveService.mutate(values)}>
@@ -916,7 +914,7 @@ export function RentalCommercialPage({ section }: { section: RentalCommercialSec
         open={Boolean(capacityEditor)}
         confirmLoading={saveCapacity.isPending}
         onCancel={() => setCapacityEditor(null)}
-        onOk={() => capacityForm.submit()}
+        onConfirm={() => capacityForm.validateFields().then((values) => saveCapacity.mutateAsync(values))}
         destroyOnHidden
       >
         <Form form={capacityForm} layout="vertical" onFinish={(values) => saveCapacity.mutate(values)}>

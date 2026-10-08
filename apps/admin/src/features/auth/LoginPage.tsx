@@ -1,5 +1,6 @@
 import { AppleOutlined, GoogleOutlined, WechatOutlined } from "@ant-design/icons";
-import { Modal, Typography } from "antd";
+import { Typography } from "antd";
+import { Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Input } from "@/components/ui";

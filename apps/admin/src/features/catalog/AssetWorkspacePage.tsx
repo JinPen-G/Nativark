@@ -1,7 +1,9 @@
+import { SaveButton } from "@/components/ui";
 import { PlusOutlined } from "@ant-design/icons";
 import { RentalAssetStatus, RentalInventoryMode, type RentalAsset, type RentalAssetStatusHistory, type RentalAttributeDefinition, type RentalStockBalance, type SaveRentalAssetRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Col, InputNumber, Row, Space, Tag } from "antd";
+import { Card, Col, InputNumber, Row, Space, Tag } from "antd";
+import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Switch } from "@/components/ui";
@@ -153,7 +155,7 @@ export function AssetWorkspacePage() {
         </QueryState>
       </Card>
       {activeTab === "stock" && <StockOperationsPanel groups={groups.data ?? []} locations={locations.data ?? []} terminology={profile.data?.terminology} canManage={canManage} />}
-      <Drawer title={editing ? (locale === "en-US" ? `${t("编辑")} ${t(profile.data?.terminology.assetLabel ?? "资产")}` : `${t("编辑")}${t(profile.data?.terminology.assetLabel ?? "资产")}`) : (locale === "en-US" ? `${t("新增")} ${t(profile.data?.terminology.assetLabel ?? "资产")}` : `${t("新增")}${t(profile.data?.terminology.assetLabel ?? "资产")}`)} size={640} open={assetDrawerOpen} destroyOnHidden onClose={() => setAssetDrawerOpen(false)} extra={<Button type="primary" loading={saveAsset.isPending} onClick={() => assetForm.submit()}>{t("保存")}</Button>}>
+      <Drawer title={editing ? (locale === "en-US" ? `${t("编辑")} ${t(profile.data?.terminology.assetLabel ?? "资产")}` : `${t("编辑")}${t(profile.data?.terminology.assetLabel ?? "资产")}`) : (locale === "en-US" ? `${t("新增")} ${t(profile.data?.terminology.assetLabel ?? "资产")}` : `${t("新增")}${t(profile.data?.terminology.assetLabel ?? "资产")}`)} size={640} open={assetDrawerOpen} destroyOnHidden onClose={() => setAssetDrawerOpen(false)} extra={<SaveButton  label={t("保存")} form={assetForm} pending={saveAsset.isPending} onSave={(values) => saveAsset.mutateAsync({ ...values, id: editing?.id })} />}>
         <Form<SaveRentalAssetRequest> form={assetForm} layout="vertical" onFinish={(values) => saveAsset.mutate({ ...values, id: editing?.id })}>
           {selectedItemGroup && <Card size="small" title={locale === "en-US" ? `${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")} ${t("照片")}` : `${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")}${t("照片")}`} style={{ marginBottom: 16 }}>
             {selectedItemGroupCover ? <Space align="start"><ItemGroupPhoto groupId={selectedItemGroup.id} image={selectedItemGroupCover} size={128} /><span className="muted">{selectedItemGroup.name}<br />{locale === "en-US" ? `${t("照片来自")}${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")}${t("主档；该资产的实拍、状态和损伤照片将在具体资产档案中独立维护。")}` : `照片来自${profile.data?.terminology.itemGroupLabel ?? "产品型号"}主档；该资产的实拍、状态和损伤照片将在具体资产档案中独立维护。`}</span></Space> : <Alert type="info" showIcon title={`${t("该")}${t(profile.data?.terminology.itemGroupLabel ?? "产品型号")}${t("尚未上传照片")}`} description={`${t("请先到")}“${t(resolveTenantNavigationLabels(profile.data?.terminology).routes.itemGroups ?? "产品型号管理")}”${t("上传标准展示图。")}`} />}

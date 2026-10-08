@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { isAxiosError } from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, InputNumber, Space, Tag, Timeline } from "antd";
+import { Card, InputNumber, Space, Tag, Timeline } from "antd";
+import { App } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Select } from "@/components/ui";

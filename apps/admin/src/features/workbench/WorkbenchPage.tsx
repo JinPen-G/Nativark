@@ -1,7 +1,8 @@
 import { ArrowRightOutlined, ReloadOutlined } from "@ant-design/icons";
 import { RentalCoreOrderStatus, formatRentalMoney, type RentalAssetStatus, type RentalWorkbenchTodo, type RentalWorkbenchTodoType, type RentalWorkspaceReportFilter } from "@rental-os/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { App, Card, Space, Statistic, Tag, Typography } from "antd";
+import { Card, Space, Statistic, Tag, Typography } from "antd";
+import { App } from "@/components/ui";
 import { Alert, Progress, Table } from "@/components/ui";
 import { ActionButton, Button, Segmented } from "@/components/ui";
 import { useState } from "react";

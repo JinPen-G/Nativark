@@ -1,4 +1,5 @@
-import { App, Card, Space, Typography } from "antd";
+import { Card, Space, Typography } from "antd";
+import { App } from "@/components/ui";
 import { Slider } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Button } from "@/components/ui";

@@ -5,7 +5,8 @@ import type {
   SaveCustomerMembershipPlanRequest,
 } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Col, InputNumber, Row, Space, Tag } from "antd";
+import { Card, Col, InputNumber, Row, Space, Tag } from "antd";
+import { App } from "@/components/ui";
 import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
@@ -125,11 +126,11 @@ export function MembershipPlanPage() {
     setEditorOpen(true);
   };
   const openVersionAction = (action: VersionAction) => { setVersionAction(action); actionForm.resetFields(); };
-  const submitVersionAction = (values: { reason: string }) => {
-    if (!versionAction || !canPublish) return;
+  const submitVersionAction = async (values: { reason: string }) => {
+    if (!versionAction || !canPublish) throw new Error("Membership version action unavailable");
     const input = { planId: versionAction.planId, versionId: versionAction.versionId, reason: values.reason };
-    if (versionAction.kind === "disable") disable.mutate(input);
-    else restore.mutate(input);
+    if (versionAction.kind === "disable") return disable.mutateAsync(input);
+    return restore.mutateAsync(input);
   };
 
   if (!canView) return <Alert type="warning" showIcon title={t("无权查看租户统一会员方案")} description={t("需要租户级会员查看、方案管理或方案发布权限，且数据范围为全部。")} />;
@@ -227,9 +228,9 @@ export function MembershipPlanPage() {
       ]} />
     </Drawer>
     <Drawer title={versionAction?.kind === "disable" ? `${t("停用")} ${versionAction.planName} v${versionAction.version}` : `${t("恢复")} ${versionAction?.planName ?? t("会员方案")} v${versionAction?.version ?? ""}`} size={520} open={Boolean(versionAction)} onClose={() => { setVersionAction(undefined); actionForm.resetFields(); }} destroyOnHidden>
-      <Form form={actionForm} layout="vertical" disabled={!canPublish} onFinish={submitVersionAction}>
+      <Form form={actionForm} layout="vertical" disabled={!canPublish} onFinish={(values) => { void submitVersionAction(values).catch(() => undefined); }}>
         <Form.Item name="reason" label={versionAction?.kind === "disable" ? t("停用原因") : t("恢复原因")} rules={[{ required: true, whitespace: true }]}><Input.TextArea rows={4} /></Form.Item>
-        <Button type="primary" htmlType="submit" disabled={!canPublish} loading={disable.isPending || restore.isPending}>{versionAction?.kind === "disable" ? t("确认停用") : t("生成恢复草稿")}</Button>
+        <SaveButton form={actionForm} disabled={!canPublish} pending={disable.isPending || restore.isPending} label={versionAction?.kind === "disable" ? t("确认停用") : t("生成恢复草稿")} onSave={submitVersionAction} />
       </Form>
     </Drawer>
   </QueryState>;

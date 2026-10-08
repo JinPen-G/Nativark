@@ -1,15 +1,10 @@
 import {
-  BellOutlined,
-  BgColorsOutlined,
   HomeOutlined,
   LayoutOutlined,
-  LogoutOutlined,
-  MenuOutlined,
-  MoreOutlined,
-  TranslationOutlined
+  MenuOutlined
 } from "@ant-design/icons";
-import { App, Avatar, Breadcrumb, Layout } from "antd";
-import { Button, Drawer, Dropdown, Tooltip, SidebarMenu } from "@/components/ui";
+import { Breadcrumb, Layout } from "antd";
+import { Button, Drawer, Tooltip, SidebarMenu } from "@/components/ui";
 import { motion } from "motion/react";
 import type { MenuProps } from "antd";
 import { useQuery } from "@tanstack/react-query";
@@ -21,8 +16,7 @@ import { buildNavigationSections, canAccessRoute } from "@/app/navigation";
 import { ADMIN_BRAND_NAME, ADMIN_DEFAULT_LOGO, ADMIN_DEFAULT_MARK } from "@/app/branding";
 import { useAppearance } from "@/app/theme";
 import { useAuthStore } from "@/features/auth/authStore";
-import { AppearanceSwitcher } from "./AppearanceSwitcher";
-import { LanguageSwitcher } from "./LanguageSwitcher";
+import { AccountMenu } from "./AccountMenu";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { SubscriptionExpiryFloatingCard } from "@/features/subscription/SubscriptionExpiryFloatingCard";
 
@@ -36,9 +30,6 @@ const { Sider, Content } = Layout;
  * 需要时改回 `true` 即可，不必重新实现。
  */
 const SHOW_BREADCRUMB = false;
-
-/** 通知还没有面向运营的数据源，入口先占位；点击如实说明，不做静默无反应的按钮。 */
-const NOTICE_HINT = "通知中心尚未接入";
 
 /**
  * 侧栏 / 抽屉的切换点。
@@ -74,14 +65,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const navRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
   const navigate = useNavigate();
-  const { message } = App.useApp();
   const { t } = useLocale();
   const { mode } = useAppearance();
   const isDesktop = useMinWidth(DESKTOP_MIN_WIDTH);
   const isWideDesktop = useMinWidth(WIDE_DESKTOP_MIN_WIDTH);
   const tenant = useAuthStore((state) => state.tenant);
   const user = useAuthStore((state) => state.user);
-  const logout = useAuthStore((state) => state.logout);
   const hasPermission = useAuthStore((state) => state.hasPermission);
   const hasCapability = useAuthStore((state) => state.hasCapability);
   const hasTenantMembershipPermission = useAuthStore((state) => state.hasTenantMembershipPermission);
@@ -140,8 +129,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     : location.pathname.startsWith("/settings/subscription/") ? "/settings/subscription"
     : location.pathname.startsWith("/platform/subscriptions/") ? "/platform/subscriptions"
     : location.pathname;
-  const accountInitial = (user?.displayName ?? "运营用户").slice(0, 1).toUpperCase();
-  const accountCaption = user?.roleNames?.join(" · ") || user?.organizationName || tenant?.tenantCode || t("运营账号");
   const breadcrumbMenuItems = useMemo(() => current.section?.routes.map((entry) => ({
     key: entry.path,
     label: t(entry.label),
@@ -222,57 +209,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         />
       </motion.div>
 
-      <div className="sider-tools">
-        {collapsed && !inDrawer ? (
-          <div className="sider-preferences">
-            <AppearanceSwitcher iconOnly />
-            <LanguageSwitcher iconOnly />
-          </div>
-        ) : (
-          <div className="sider-preferences">
-            {/* 每行同构：左侧 icon + 文案，右侧分段开关；语言行在主题行下方。 */}
-            <div className="sider-pref-row">
-              <span className="sider-pref-icon" aria-hidden="true"><BgColorsOutlined /></span>
-              <span className="sider-pref-label">{t("主题")}</span>
-              <AppearanceSwitcher />
-            </div>
-            <div className="sider-pref-row">
-              <span className="sider-pref-icon" aria-hidden="true"><TranslationOutlined /></span>
-              <span className="sider-pref-label">{t("语言")}</span>
-              <LanguageSwitcher />
-            </div>
-          </div>
-        )}
-        {/* 通知入口暂时隐藏：数据源尚未接入，先不展示占位按钮。恢复时把下面这块取消注释即可。
-        <Tooltip title={collapsed && !inDrawer ? t("通知") : t(NOTICE_HINT)} placement={collapsed && !inDrawer ? "right" : "top"}>
-          <button className="sider-link" type="button" aria-label={t("通知")} onClick={() => message.info(t(NOTICE_HINT))}>
-            <BellOutlined />
-            {(!collapsed || inDrawer) && <span className="sider-link-label">{t("通知")}</span>}
-          </button>
-        </Tooltip>
-        */}
-      </div>
-
       <div className="sider-account">
-        {/* 必须点击才展开：antd 默认是悬浮触发，鼠标路过账号卡就弹出「退出登录」，太容易误点。 */}
-        <Dropdown
-          trigger={["click"]}
-          placement="topLeft"
-          menu={{ items: [{ key: "logout", icon: <LogoutOutlined />, label: t("退出登录"), onClick: () => { logout(); navigate("/login"); } }] }}
-        >
-          <button className="account-card" type="button">
-            <Avatar size={32} className="account-avatar">{accountInitial}</Avatar>
-            {(!collapsed || inDrawer) && (
-              <>
-                <span className="account-copy">
-                  <b>{user?.displayName ?? t("运营用户")}</b>
-                  <small>{accountCaption}</small>
-                </span>
-                <MoreOutlined className="account-more" />
-              </>
-            )}
-          </button>
-        </Dropdown>
+        <AccountMenu collapsed={collapsed && !inDrawer} />
       </div>
     </div>
   );

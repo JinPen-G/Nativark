@@ -1,3 +1,4 @@
+import { SaveButton } from "@/components/ui";
 import type {
   CustomerProfileAddress,
   CustomerProfileBenefitAccount,
@@ -10,7 +11,8 @@ import type {
 } from "@rental-os/shared";
 import { RENTAL_CATEGORY_DEFINITIONS } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Col, Descriptions, Divider, Empty, Row, Space, Statistic, Tag } from "antd";
+import { Card, Col, Descriptions, Divider, Row, Space, Statistic, Tag } from "antd";
+import { App, Empty } from "@/components/ui";
 import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table, Upload } from "@/components/ui";
@@ -384,7 +386,7 @@ export function CustomerProfileDrawer({ open, customerId, canManage, canView, ca
               </Upload>
             </Form.Item>
             <Form.Item name="reason" label={t("核验说明/原因")} rules={[{ required: true, whitespace: true, max: 500 }]}><Input.TextArea rows={3} maxLength={500} showCount /></Form.Item>
-            <Button type="primary" htmlType="submit" loading={saveIdentityVerification.isPending} disabled={!canManage || identityFiles.some((file) => file.status === "uploading")}>{t("保存核验记录")}</Button>
+            <SaveButton disabled={!canManage || identityFiles.some((file) => file.status === "uploading")} label={t("保存核验记录")} form={identityForm} pending={saveIdentityVerification.isPending} onSave={(values) => saveIdentityVerification.mutateAsync(values)} />
           </Form>
         </Card>}
         <Card size="small" title={t("核验历史")}>
@@ -416,7 +418,7 @@ export function CustomerProfileDrawer({ open, customerId, canManage, canView, ca
       {current && <Tabs destroyOnHidden items={profileTabs} />}
       </QueryState>
     </Drawer>
-    <Drawer title={addressTarget ? t("编辑配送地址") : t("新增配送地址")} size={520} open={addressOpen} destroyOnHidden onClose={() => { setAddressOpen(false); setAddressTarget(undefined); addressForm.resetFields(); }} extra={<Button type="primary" loading={saveAddress.isPending} onClick={() => addressForm.submit()}>{t("保存")}</Button>}>
+    <Drawer title={addressTarget ? t("编辑配送地址") : t("新增配送地址")} size={520} open={addressOpen} destroyOnHidden onClose={() => { setAddressOpen(false); setAddressTarget(undefined); addressForm.resetFields(); }} extra={<SaveButton  label={t("保存")} form={addressForm} pending={saveAddress.isPending} onSave={(values) => saveAddress.mutateAsync(values)} />}>
       <Form form={addressForm} layout="vertical" onFinish={(values) => saveAddress.mutate(values)}>
         <Form.Item name="recipient" label={t("收件人")} rules={[{ required: true }]}><Input /></Form.Item>
         <Form.Item name="phone" label={t("联系电话")} extra={addressTarget ? t("留空表示保留现有电话；不能填写脱敏号码。") : undefined} rules={addressTarget ? [] : [{ required: true }]}><Input /></Form.Item>

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { App, Divider, Space, Tag, Typography } from "antd";
+import { Divider, Space, Tag, Typography } from "antd";
+import { App } from "@/components/ui";
 import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, DatePicker, Table, TimeInput } from "@/components/ui";

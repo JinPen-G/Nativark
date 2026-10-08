@@ -7,7 +7,7 @@ import { Alert } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Select } from "@/components/ui";
-import { Button } from "@/components/ui";
+import { Button, SaveButton } from "@/components/ui";
 import { useEffect } from "react";
 import { useLocale } from "@/app/locale";
 import type { GovernanceTabContext } from "./shared";
@@ -48,7 +48,7 @@ export function CategoryTab({
   onSave,
   saving,
 }: Pick<GovernanceTabContext, "category" | "settings" | "saving"> & {
-  onSave: (values: CategorySettingsFormValues) => void;
+  onSave: (values: CategorySettingsFormValues) => Promise<unknown>;
 }) {
   const { t } = useLocale();
   const [form] = Form.useForm<CategorySettingsFormValues>();
@@ -76,12 +76,10 @@ export function CategoryTab({
   }, [form, settings]);
 
   return (
-    <Form<CategorySettingsFormValues> form={form} layout="vertical" onFinish={onSave}>
+    <Form<CategorySettingsFormValues> form={form} layout="vertical" onFinish={values => { void onSave(values).catch(() => undefined); }}>
       <div className="table-toolbar">
         <Typography.Text type="secondary">{t("只保存本页配置")}</Typography.Text>
-        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => form.submit()}>
-          {t("保存本页")}
-        </Button>
+        <SaveButton label={t("保存本页")} form={form} pending={saving} onSave={onSave} />
       </div>
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <CategoryPreparationEntry />

@@ -1,4 +1,5 @@
-import { App, Card, Descriptions, Empty, Modal, Space, Tag } from "antd";
+import { Card, Descriptions, Space, Tag } from "antd";
+import { App, Empty, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -117,7 +118,7 @@ function RequestHandlingModal({ tenantId, request, status, revision, onClose }: 
     },
     onError: (error) => message.error(subscriptionError(error))
   });
-  return <Modal open title={t(status === SubscriptionRequestStatus.Rejected ? "拒绝申请" : "登记咨询 / 到期不续费结果")} onCancel={onClose} onOk={() => form.submit()} confirmLoading={mutation.isPending}>
+  return <Modal open title={t(status === SubscriptionRequestStatus.Rejected ? "拒绝申请" : "登记咨询 / 到期不续费结果")} onCancel={onClose} onConfirm={() => form.validateFields().then((values) => mutation.mutateAsync(values))} confirmLoading={mutation.isPending}>
     <Alert type="info" message={t("处理原因对租户可见；登记咨询或不续费不改变当前已付费期限，不自动获得基础版授权。")} style={{ marginBottom: 12 }} />
     {mutation.error && <Alert type="error" message={subscriptionError(mutation.error)} style={{ marginBottom: 12 }} />}
     <Form form={form} layout="vertical" onFinish={(values) => mutation.mutate(values)}>

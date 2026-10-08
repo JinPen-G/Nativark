@@ -1,7 +1,9 @@
+import { SaveButton } from "@/components/ui";
 import { SearchOutlined, UploadOutlined } from "@ant-design/icons";
 import type { PaymentStatementBatchSummary, PaymentStatementLineSummary } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Empty, Space, Tag, Typography } from "antd";
+import { Card, Space, Tag, Typography } from "antd";
+import { App, Empty } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table, Upload } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -155,7 +157,7 @@ export function PaymentReconciliationPage() {
         </>}
       </QueryState>
     </Drawer>
-    <Drawer title={reviewTarget?.decision === "query_provider" ? t("标记待向平台核对") : t("确认对账差异")} size={520} open={Boolean(reviewTarget)} onClose={() => setReviewTarget(undefined)} extra={<Button type="primary" loading={reviewLine.isPending} onClick={() => reviewForm.submit()}>{t("保存")}</Button>}>
+    <Drawer title={reviewTarget?.decision === "query_provider" ? t("标记待向平台核对") : t("确认对账差异")} size={520} open={Boolean(reviewTarget)} onClose={() => setReviewTarget(undefined)} extra={<SaveButton  label={t("保存")} form={reviewForm} pending={reviewLine.isPending} onSave={(values) => reviewLine.mutateAsync(values)} />}>
       <Form form={reviewForm} layout="vertical" onFinish={(values) => reviewLine.mutate(values)}>
         <Alert type="warning" showIcon title={t("这里只记录处理结论，不会修改支付、退款或资金事实。")} style={{ marginBottom: 16 }} />
         <Typography.Paragraph>{t("第")} {reviewTarget?.line.rowNumber} {t("行")} · {reviewTarget?.line.merchantOrderNo}</Typography.Paragraph>

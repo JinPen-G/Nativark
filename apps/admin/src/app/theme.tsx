@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { theme, type ThemeConfig } from "antd";
 import { getArcPalette } from "./arcTokens";
@@ -6,6 +6,7 @@ import { ADMIN_FONT_FAMILY, ADMIN_TYPOGRAPHY, applyAdminTypographyTokens, resolv
 import type { ThemeSwitchVariant } from "@/registry/components/theme-switch/theme-switch";
 
 export type AppearanceMode = "default" | "dark" | "compact";
+export type AppearancePreference = AppearanceMode | "system";
 export type AppearanceTransition = Extract<ThemeSwitchVariant, "eclipse" | "rise" | "reveal"> | "legacy-reveal";
 
 /**
@@ -22,15 +23,16 @@ interface AppearanceOrigin {
 
 interface AppearanceContextValue {
   mode: AppearanceMode;
-  setMode: (mode: AppearanceMode, origin?: AppearanceOrigin) => void;
+  preference: AppearancePreference;
+  setMode: (mode: AppearancePreference, origin?: AppearanceOrigin) => void;
 }
 
 const STORAGE_KEY = "rental_admin_appearance";
 const AppearanceContext = createContext<AppearanceContextValue | null>(null);
 
-function readInitialMode(): AppearanceMode {
+function readInitialMode(): AppearancePreference {
   const stored = window.localStorage.getItem(STORAGE_KEY);
-  return stored === "dark" || stored === "compact" || stored === "default" ? stored : "default";
+  return stored === "system" || stored === "dark" || stored === "compact" || stored === "default" ? stored : "default";
 }
 
 /**
@@ -135,11 +137,20 @@ function themeTransitionStyle(transition: AppearanceTransition, next: Appearance
 }
 
 export function AppearanceProvider({ children }: { children: ReactNode }) {
-  const [mode, setModeState] = useState<AppearanceMode>(readInitialMode);
+  const [preference, setModeState] = useState<AppearancePreference>(readInitialMode);
+  const [systemDark, setSystemDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
+  const mode: AppearanceMode = preference === "system" ? (systemDark ? "dark" : "default") : preference;
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-color-scheme: dark)");
+    const sync = () => setSystemDark(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
   const revealTimer = useRef<number>(0);
   const revealing = useRef(false);
 
-  const setMode = useCallback((next: AppearanceMode, origin?: AppearanceOrigin) => {
+  const setMode = useCallback((next: AppearancePreference, origin?: AppearanceOrigin) => {
     const root = document.documentElement;
     const transitionKind = origin?.transition ?? DEFAULT_APPEARANCE_TRANSITION;
 
@@ -169,7 +180,7 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
 
     const revealStyle = document.createElement("style");
     revealStyle.id = THEME_REVEAL_STYLE_ID;
-    revealStyle.textContent = themeTransitionStyle(transitionKind, next, origin);
+    revealStyle.textContent = themeTransitionStyle(transitionKind, next === "system" ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default") : next, origin);
     document.head.appendChild(revealStyle);
 
     /**
@@ -203,10 +214,10 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
     document.documentElement.style.colorScheme = mode === "dark" ? "dark" : "light";
     // 常驻菜单与移动抽屉共用 UIArc 原版背景；深浅色由 foundation token 控制。
     document.documentElement.style.setProperty("--app-sider-bg", "var(--background)");
-    window.localStorage.setItem(STORAGE_KEY, mode);
-  }, [mode]);
+    window.localStorage.setItem(STORAGE_KEY, preference);
+  }, [mode, preference]);
 
-  const value = useMemo(() => ({ mode, setMode }), [mode, setMode]);
+  const value = useMemo(() => ({ mode, preference, setMode }), [mode, preference, setMode]);
 
   useLayoutEffect(() => {
     applyAdminTypographyTokens(document.documentElement);

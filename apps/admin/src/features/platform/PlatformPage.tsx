@@ -1,6 +1,7 @@
 import { DeleteOutlined, EditOutlined, KeyOutlined, PlusOutlined } from "@ant-design/icons";
 import type { OrganizationSummary, SaveOrganizationRequest, SaveSystemRoleRequest, SaveSystemUserRequest, SystemRoleRow, SystemRulesConfig, SystemUserRow } from "@rental-os/shared";
-import { App, Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Switch } from "@/components/ui";

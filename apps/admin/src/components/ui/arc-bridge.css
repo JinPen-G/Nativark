@@ -58,6 +58,12 @@
 .arc-date-field > div:first-child > label:empty { display: none; }
 .arc-date-range { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; }
 .arc-date-range > :first-child { flex: 1 1 auto; min-width: 0; }
+/* UserMenu retains upstream CSS/motion; only integrate with our sidebar/drawer layers. */
+.sider-account > span { width: 100%; justify-content: center; }
+.rental-account-trigger { max-width: 100%; }
+[data-rental-user-menu="panel"], [data-rental-user-menu="sheet"] { z-index: 1101; }
+[data-rental-user-menu="scrim"] { z-index: 1100; }
+[data-rental-user-menu] :is(button,[role="menuitemradio"]):focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .arc-search-field, .arc-select-field { position: relative; min-width: 0; width: 100%; }
 /* The source fields retain their real label for assistive technology without adding a second visual label to filter bars. */
 .arc-search-field [class*="field"] > label,
@@ -236,3 +242,8 @@
 .arc-form-section-heading h3 { margin: 0; font-size: var(--rental-typography-section-title-size, 16px); font-weight: 600; line-height: var(--leading-heading); }
 .arc-form-section-heading p { margin: var(--rental-form-label-gap) 0 0; color: var(--text-muted); font-size: var(--text-sm); }
 .arc-form-section-fields { min-width: 0; }
+[data-rental-dialog-overlay] { z-index: 1099; }
+.rental-arc-modal[data-closable="false"] > [class*="header"] > button { display: none; }
+.arc-modal-footer { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-6); }
+.rental-loading-skeleton { width: min(100%, 28rem); }
+.arc-collapse-extra { flex: 0 0 auto; margin-inline-start: var(--space-3); }

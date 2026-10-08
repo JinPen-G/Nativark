@@ -1,7 +1,8 @@
 import { PlusOutlined } from "@ant-design/icons";
 import type { RentalFulfillmentLocation, RentalFulfillmentOperator, SaveRentalFulfillmentLocationRequest, SaveRentalFulfillmentOperatorRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Col, InputNumber, Row, Space, Tag } from "antd";
+import { Card, Col, InputNumber, Row, Space, Tag } from "antd";
+import { App } from "@/components/ui";
 import { Button, Drawer, Form, Input, SaveButton, SearchField, Select, Table } from "@/components/ui";
 import { useMemo, useState } from "react";
 import { api as platformApi } from "@/api/platform";

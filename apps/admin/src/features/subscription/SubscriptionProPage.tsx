@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Card, Descriptions, Empty, Space, Tag, Typography } from "antd";
+import { Card, Descriptions, Space, Tag, Typography } from "antd";
+import { Empty } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Button } from "@/components/ui";
 import { Select } from "@/components/ui";

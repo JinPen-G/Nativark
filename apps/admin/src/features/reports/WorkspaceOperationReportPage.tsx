@@ -7,7 +7,8 @@ import type {
 } from "@rental-os/shared";
 import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol } from "@rental-os/shared";
 import { useQuery } from "@tanstack/react-query";
-import { App, Card, Col, Descriptions, Row, Space, Statistic, Tag } from "antd";
+import { Card, Col, Descriptions, Row, Space, Statistic, Tag } from "antd";
+import { App } from "@/components/ui";
 import { Alert, DatePicker, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Select } from "@/components/ui";

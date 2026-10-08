@@ -1,4 +1,5 @@
-import { App, InputNumber, Modal } from "antd";
+import { InputNumber } from "antd";
+import { App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Input, Switch } from "@/components/ui";
@@ -56,7 +57,7 @@ export function StandardPriceModal({ open, plan, current, onClose }: { open: boo
 
   return (
     <Modal open={open} title={`${t("设置标准年费")}：${plan ? t(PLAN_LABEL[plan]) : ""}`} okText={t("保存")} confirmLoading={mutation.isPending}
-      okButtonProps={{ disabled: !plan }} onOk={() => form.submit()} onCancel={onClose} destroyOnHidden>
+      okButtonProps={{ disabled: !plan }} onConfirm={() => form.validateFields().then((values) => mutation.mutateAsync(values))} onCancel={onClose} destroyOnHidden>
       <Alert type="info" showIcon style={{ marginBottom: 16 }} message={t("未发布时不展示金额（显示「价格待公布」），不落 0 或虚构价；发布后才对租户显示标准年费。")} />
       <Form<FormValues> form={form} layout="vertical" initialValues={initialValues} onFinish={(values) => mutation.mutate(values)}>
         <Form.Item name="published" label={t("已发布正式价格")} valuePropName="checked"><Switch /></Form.Item>

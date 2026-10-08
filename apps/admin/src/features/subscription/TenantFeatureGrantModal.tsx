@@ -1,4 +1,4 @@
-import { App, Modal } from "antd";
+import { App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -58,7 +58,7 @@ export function TenantFeatureGrantModal({
       okText={t(isRevoke ? "确认撤销" : "确认授权")}
       okButtonProps={{ danger: isRevoke, disabled: !feature }}
       confirmLoading={mutation.isPending}
-      onOk={() => form.submit()}
+      onConfirm={() => form.validateFields().then((values) => mutation.mutateAsync(values))}
       onCancel={onClose}
       destroyOnHidden
     >

@@ -1,4 +1,4 @@
-import { App, Modal } from "antd";
+import { App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -44,7 +44,7 @@ export function FeatureCatalogModal({ open, entry, onClose }: { open: boolean; e
 
   return (
     <Modal open={open} title={editing ? t("编辑功能目录项") : t("新增功能目录项")} okText={t("保存")} confirmLoading={mutation.isPending}
-      onOk={() => form.submit()} onCancel={onClose} destroyOnHidden width={560}>
+      onConfirm={() => form.validateFields().then((values) => mutation.mutateAsync(values))} onCancel={onClose} destroyOnHidden width={560}>
       <Alert type="info" showIcon style={{ marginBottom: 16 }}
         message={t("当前归属选「基础版」即把该 PRO 功能公共下放给基础版；修改归属不会把未交付功能改成已上线，也不得静默停用基础版既有承诺。")} />
       <Form<UpsertFeatureCatalogRequest> form={form} layout="vertical" initialValues={initialValues} onFinish={(values) => mutation.mutate(values)}>

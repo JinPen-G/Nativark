@@ -23,6 +23,8 @@
 
 ## Usage and compatibility
 
+Account menu: `@/components/ui/UserMenu` is an attributed integration derivative of the public MIT UserMenu, reusing its original CSS module, panel/sheet springs, moving highlight, sliding segmented thumb and keyboard handling. Vendor source remains untouched. Only localized chrome and extra preference rows are added. `AccountMenu` places theme (light/dark/system) above language (Chinese/English), both using the original segmented row, and connects real logout and permission-checked settings/subscription routes. Profile remains a visible, explicitly unconnected entry; no fake profile, email, plan, shortcut or presence state is invented. System preference persists separately from its resolved light/dark appearance and follows OS changes. The old sidebar preference controls are no longer rendered; login's appearance control is unchanged. No browser acceptance is claimed.
+
 Authentication fields also expose the original PasswordField, PasswordStrength and PhoneInput adapters. Strength rules mirror the existing eight-character/letter/number/symbol policy rather than the upstream demo policy. The code/recovery preview uses E.164 phone validity and a non-clipping step frame. Only the source shell draws password focus; the inner input does not receive an extra generic outline. Login result messages use the original ToastStack through FeedbackProvider; other AntD message/notification consumers are not silently overridden. Rich inline Alert details use the source component; block/custom-rendered details retain an explicit compatibility fallback to avoid invalid nested paragraphs. Browser acceptance covered the recovery preview, rule meter, mismatch rejection, cleared password state, country selection, 375px sizing and zero API writes.
 
 Existing admin pages use `@/components/ui`, which preserves AntD Form, permissions, disabled/loading state, real async mutations and tenant preferences.
@@ -38,6 +40,8 @@ Do not replace complex table, tree, nullable/string-mode number fields, search/O
 ConfirmAction must receive the actual `mutateAsync` promise. Offer Undo only if a real reverse operation exists. Required forms must not treat an empty numeric input as zero.
 
 Date/time adapters preserve Dayjs values and seconds, null clearing and Form disabled state. Complex disabled-time/custom-panel contracts explicitly retain AntD. TimeInput stores HH:mm strings. Table keeps AntD's business row/selection engine and uses Arc pagination for compatible configurations; custom sorting/filtering/tree pagination retains AntD. Alert/Steps/Progress retain AntD for unsupported complex content or special modes.
+
+日期时间范围规范：取还时间、租赁时间等带时分秒的范围统一使用 `@/components/ui` 的 `DatePicker.RangePicker showTime`，页面只显示一个完整的范围输入控件，日期与时间在弹层内选择，清空使用控件内置入口。不得将范围拆成独立日期、时间、秒输入和外置清空按钮。原版 UIArc DateRangePicker 仅支持整日范围，因此 `showTime` 分支明确使用主题化 AntD 一体式兼容控件；不修改 vendor、不截断已有秒值、不改变 Dayjs 表单/API 契约。纯日期范围仍使用原版 UIArc 组件。回归检查：`node tests/admin-datetime-range.test.cjs`（适配器契约测试，不代表浏览器视觉验收）。
 
 Use FileUpload for new uploads and return the real upload promise; failures must reject. Upload is the existing AntD-contract adapter, not a fake upload timer. Remote previews, custom removal vetoes and incompatible automatic-upload guards retain AntD. Cancelled uploads must not overwrite the persisted asset URL.
 

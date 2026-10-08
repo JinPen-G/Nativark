@@ -1,6 +1,7 @@
 import type { RentalCategoryDefinition, RentalRuleVersion } from "@rental-os/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Space, Typography } from "antd";
+import { Card, Space, Typography } from "antd";
+import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Steps } from "@/components/ui";
 import { Input } from "@/components/ui";

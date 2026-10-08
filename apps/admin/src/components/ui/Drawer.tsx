@@ -35,7 +35,7 @@ export function Drawer(props: DrawerProps) {
       onEscapeKeyDown={event => {
         // An AntD modal lives inside the Radix focus scope. Its Escape must not also
         // dismiss the parent drawer; let the modal handle the same key normally.
-        const modalOpen = Array.from(document.querySelectorAll<HTMLElement>(".ant-modal-wrap"))
+        const modalOpen = Array.from(document.querySelectorAll<HTMLElement>(".ant-modal-wrap, [data-rental-arc-modal][data-state='open']"))
           .some(modal => modal.getClientRects().length > 0 && getComputedStyle(modal).visibility !== "hidden");
         const inlinePopupOpen = document.querySelector("[data-rental-arc-drawer] .arc-date-field [aria-expanded='true'], [data-rental-arc-drawer] .arc-date-range [aria-expanded='true'], [data-rental-arc-drawer] .arc-time-fields [aria-expanded='true'], [data-rental-arc-drawer] .arc-color-field [aria-expanded='true']");
         if (props.keyboard === false || modalOpen || inlinePopupOpen) event.preventDefault();

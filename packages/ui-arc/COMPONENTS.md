@@ -2,7 +2,7 @@
 
 > 由 `node scripts/audit-admin-components.cjs` 只读扫描生成。引用不等于运行验收，也不等于所有兼容分支均已替换。
 
-本地 123 个公开源码条目 / 262 个唯一文件；Pro 101 个仅有目录元数据；源码校验异常 0 个。
+本地 123 个公开源码条目 / 262 个唯一文件；Pro 101 个仅有目录元数据；源码校验异常 2 个（日期范围组件 TSX/CSS 与清单哈希不同，本轮未修改这些 vendor 文件）。
 
 ## 使用入口
 
@@ -13,6 +13,8 @@
 已导出的平台 API：`Button`、`Form`、`FormField`、`FormSection`、`SidebarMenu`、`Dropdown`、`Drawer`、`Tabs`、`Segmented`、`Tooltip`、`Input`、`SearchField`、`Select`、`Checkbox`、`Slider`、`PasswordField`、`PasswordStrength`、`PhoneInput`、`FeedbackProvider`、`useFeedback`、`ConfirmAction`、`Switch`、`ActionButton`、`SaveButton`、`CopyButton`、`Alert`、`Progress`、`Steps`、`Pagination`、`DatePicker`、`ColorPicker`、`RichTextEditor`、`Upload`、`Table`、`TimePicker`、`TimeInput`、`FileUpload`、`FileUploadItem`、`FileUploadProps`。
 
 ## 全量公开源码清单
+
+新增导出 `UserMenu`：复用原版个人菜单的样式、菜单动效和滑动分段开关，支持本地化与额外偏好行。业务账号接入由 `AccountMenu` 负责，主题行在语言行上方。
 
 | 名称 | 接入状态 | 当前引用位置 |
 | --- | --- | --- |
@@ -90,7 +92,7 @@
 | bar-chart | 已下载备用 | — |
 | activity-heatmap | 已下载备用 | — |
 | timeline | 已下载备用 | — |
-| user-menu | 已下载备用 | — |
+| user-menu | 已引用（适配层扩展语言行与本地化，复用原版 CSS/动效） | `components/ui/UserMenu.tsx`；账号接入 `components/AccountMenu.tsx` |
 | stepper | 已引用（可能含兼容分支） | `components/ui/Steps.tsx` |
 | signature-pad | 已下载备用 | — |
 | date-range-picker | 已引用（可能含兼容分支） | `components/ui/DatePicker.tsx` |

@@ -5,7 +5,8 @@ import type {
   TenantIntegrationConfigSummary,
   TenantIntegrationProviderDefinition
 } from "@rental-os/shared";
-import { App, Card, Col, Empty, Row, Space, Tag, Typography } from "antd";
+import { Card, Col, Row, Space, Tag, Typography } from "antd";
+import { App, Empty } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Input, Switch } from "@/components/ui";

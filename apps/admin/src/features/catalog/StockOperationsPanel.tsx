@@ -1,3 +1,4 @@
+import { SaveButton } from "@/components/ui";
 import { HistoryOutlined, PlusOutlined } from "@ant-design/icons";
 import type {
   RentalCategoryTerminology,
@@ -8,7 +9,8 @@ import type {
   RentalStockOperationType
 } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Table } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -118,7 +120,7 @@ export function StockOperationsPanel({
       open={open}
       destroyOnHidden
       onClose={() => setOpen(false)}
-      extra={<Button type="primary" loading={apply.isPending} onClick={() => form.submit()}>{t("保存作业")}</Button>}
+      extra={<SaveButton  label={t("保存作业")} form={form} pending={apply.isPending} onSave={(values) => apply.mutateAsync({ ...values, type: operationType, idempotencyKey: operationKey })} />}
     >
       <Form<RentalStockOperationRequest>
         form={form}
