@@ -1,5 +1,9 @@
 # Codex B 总册接续交付与精确未闭合项
 
+## 2026-10-08 固定公共依赖接入
+
+仅消费主线 `64e9c6cc4302b578d2b3b0bb9f6140f2f2322d65` 的 `prisma-knowledge-policy.source.ts` 精确生产差异：用isDeepStrictEqual比较row.resource与请求resource，保留resourceKey/grantKey及全局/历史收据指纹。没有复制主线schema或其活动文件。既有formal-authorization小冒烟一次3pass/0fail/0skip/0todo，实际ts-node编译与diff check通过；沿原离线preload，audit为本树output/cb-policy-key-order-audit。未在B重复新增主线键序测试，不冒称真实MySQL验证；这是等价公共依赖，主线不要反向重摘。
+
 ## 2026-10-08 CB08：通知与退款明确失败的事务Outbox
 
 基线54e7cd27；主线已确认原通知仓储、原payment退款事实方法及最小模型/迁移认领。只覆盖本完整子包notification.failed/refund.failed，不把交付资源风险、归还异常、开业缺项或CB09自动化声明已完成。
