@@ -54,8 +54,10 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
       || payload.atomicity !== 'single_action' || payload.actions.length !== 1 || payload.actions[0].toolCode !== 'rental.order.commit'
       || payload.actions[0].toolVersion !== AI_TOOL_DRAFT_VERSION || !(version.expiresAt instanceof Date)
       || version.expiresAt.getTime() !== Date.parse(payload.expiresAt)) throw conflict();
-    if (!['PENDING_CONFIRMATION', 'CONFIRMED', 'CANCELLED'].includes(head.status)
-      || (head.status === 'PENDING_CONFIRMATION' ? head.currentRevision !== null : head.currentRevision !== reference.proposalRevision)
+    if (!['PENDING_CONFIRMATION', 'CONFIRMED', 'CANCELLED', 'EXPIRED', 'SUPERSEDED'].includes(head.status)
+      || (head.status === 'PENDING_CONFIRMATION' ? head.currentRevision !== null
+        : ['EXPIRED', 'SUPERSEDED'].includes(head.status) ? head.currentRevision !== null && head.currentRevision !== reference.proposalRevision
+          : head.currentRevision !== reference.proposalRevision)
       || await db.aiProposalVersion.findFirst({ where: { ...key, revision: { gt: reference.proposalRevision } } })) throw conflict();
     const facts = await snapshots.read({ ...key, context: current.context, proposalRevision: reference.proposalRevision, action: payload.actions[0] }, tx);
     if (payload.actions[0].target.resourceType !== 'quote' || payload.actions[0].target.resourceId !== facts.input.payload.quoteId
@@ -102,7 +104,8 @@ export function composeApprovedOrderHumanApproval(d: ControlledApprovedOrderDepe
       const expected = decision === 'approve' ? 'APPROVED' : 'REJECTED';
       if (Object.entries(key).some(([k, v]) => row[k as keyof typeof row] !== v)
         || row.payloadHash !== reference.reviewedPayloadHash || row.decision !== expected
-        || row.audience !== first.context.audience.toUpperCase() || first.head.status !== (decision === 'approve' ? 'CONFIRMED' : 'CANCELLED')
+        || row.audience !== first.context.audience.toUpperCase()
+        || ![(decision === 'approve' ? 'CONFIRMED' : 'CANCELLED'), 'EXPIRED', 'SUPERSEDED'].includes(first.head.status)
         || !(row.issuedAt instanceof Date) || !(row.expiresAt instanceof Date) || !Number.isFinite(row.issuedAt.getTime())
         || row.issuedAt > clock() || row.issuedAt >= row.expiresAt || row.expiresAt.getTime() !== Date.parse(first.payload.expiresAt)) throw conflict();
       const record: AiApprovalRecord = { ...key, approvalId: row.id, payloadHash: row.payloadHash, actorKind: 'user',
