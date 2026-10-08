@@ -59,10 +59,10 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
   const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
   const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
   const { user } = require('./fixtures/ai-native/authorization-baseline.cjs');
-  let now = new Date(), failOutbox = false, active = true, loseTaskCommitReply = false, loseReviewCommitReply = false, writes = 0, taskCreates = 0;
+  let now = new Date(), failOutbox = false, active = true, loseTaskCommitReply = false, loseReviewCommitReply = false, loseManagementCommitReply = false, writes = 0, taskCreates = 0;
   const scope = { tenantId: 'tenant-a', workspaceId: 'workspace-a' };
   const actor = user({ permissions: ['system:integration:manage', 'rental-os:finance:view', 'rental-os:order:view'] });
-  const state = Object.fromEntries(['notifications', 'refunds', 'events', 'subjects', 'policies', 'inputs', 'scopes', 'budgets', 'plans', 'tasks', 'runs', 'reviewGrants', 'reviewOperations'].map(name => [name, new Map()]));
+  const state = Object.fromEntries(['notifications', 'refunds', 'events', 'subjects', 'policies', 'inputs', 'scopes', 'budgets', 'plans', 'tasks', 'runs', 'reviewGrants', 'reviewOperations', 'managementGrants', 'policyPreparations', 'managementOperations'].map(name => [name, new Map()]));
   const clone = value => structuredClone(value);
   const match = (row, where) => Object.entries(where).every(([key, value]) => {
     if (key === 'OR') return value.some(part => match(row, part));
@@ -105,6 +105,8 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
   const db = { rentalNotificationLog: delegate('notifications'), rentalPaymentRefund: delegate('refunds'), aiBusinessFailureOutbox: delegate('events'),
     aiAutomationSubject: delegate('subjects'), aiAutomationPolicy: delegate('policies'), aiAutomationInput: delegate('inputs'),
     aiAutomationReviewGrant: delegate('reviewGrants'), aiAutomationReviewOperation: delegate('reviewOperations'),
+    aiAutomationManagementGrant: delegate('managementGrants'), aiAutomationPolicyPreparation: delegate('policyPreparations'), aiAutomationPolicyManagementOperation: delegate('managementOperations'),
+    rentalFulfillmentLocation: { findMany: async () => [{ id: 'location-a', ...scope }] },
     aiScope: delegate('scopes'), aiBudgetPolicy: delegate('budgets'), aiTaskPlanPolicy: delegate('plans'), aiTask: delegate('tasks'), aiRun: delegate('runs'),
     rentalOrder: { findFirst: async () => ({ id: 'order-a', ...scope, fulfillmentLocationId: 'location-a', returnLocationId: null }) },
     businessWorkspace: { findFirst: async () => ({ id: scope.workspaceId, tenantId: scope.tenantId, status: 'ACTIVE' }) },
@@ -117,6 +119,7 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
         try { result = await callback(db); } catch (error) { lastTransactionError = error.message; Object.assign(state, before); throw error; }
         if (loseTaskCommitReply && state.tasks.size > before.tasks.size) { loseTaskCommitReply = false; throw Error('task commit reply lost'); }
         if (loseReviewCommitReply && state.reviewOperations.size > before.reviewOperations.size) { loseReviewCommitReply = false; throw Error('review commit reply lost'); }
+        if (loseManagementCommitReply && state.managementOperations.size > before.managementOperations.size) { loseManagementCommitReply = false; throw Error('management commit reply lost'); }
         return result;
       })); queue = work.catch(() => {}); return work;
     } };
@@ -261,4 +264,81 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
   const count = state.events.size;
   await run(() => new RentalBusinessFactRepository(db).updateNotificationDelivery(scope.tenantId, 'notice-a', { status: 'failed' })); assert.equal(state.events.size, count);
   assert.equal((await app.candidates.preparePending({ limit: 2 })).workerStarted, false);
+  const management = app.policyManagement;
+  const createPolicy = { operationKey: 'create-managed-policy', subjectId: null, policyId: null, expectedSubjectRevision: null, expectedPolicyRevision: null,
+    subject: { enabled: false, revoked: false, permissions: ['system:integration:manage'], locationScope: { mode: 'all', locationIds: [] }, expiresAt: new Date(now.getTime() + 86400000).toISOString() },
+    policy: { mode: 'disabled', revoked: false, sceneCode: 'failure.review', sceneVersion: '1', allowedEventTypes: ['notification.failed'], maxTasksPerDay: 2,
+      cooldownSeconds: 1, validFrom: new Date(now.getTime() - 1000).toISOString(), expiresAt: new Date(now.getTime() + 3600000).toISOString() } };
+  await assert.rejects(management.preview(createPolicy));
+  actor.permissions.push('system:params:manage');
+  const preview = await management.preview(createPolicy);
+  await assert.rejects(management.prepare(createPolicy), /unavailable/);
+  await assert.rejects(management.preview({ ...createPolicy, subject: { ...createPolicy.subject, enabled: true } }), /invalid_input/);
+  const provisionManagementGrant = (action, resourceHash) => {
+    const id = require('node:crypto').randomUUID();
+    state.managementGrants.set(id, { id, ...scope, scopeId: 'scope-workspace', actorKind: 'user', actorId: actor.id, audience: 'operator', action,
+      resourceHash, requiredPermissions: ['system:params:manage'], revision: 1, enabled: true, expiresAt: new Date(now.getTime() + 3600000) });
+    return id;
+  };
+  provisionManagementGrant('prepare', preview.prepareResourceHash);
+  const disabledDraft = await management.prepare(createPolicy); assert.equal(disabledDraft.state, 'prepared');
+  assert.equal((await management.preparation({ operationKey: createPolicy.operationKey })).preparationId, disabledDraft.preparationId);
+  const commitCommand = draft => ({ preparationId: draft.preparationId, changeHash: draft.changeHash, confirm: 'apply_automation_policy_change' });
+  await assert.rejects(management.commit(commitCommand(disabledDraft)), /unavailable/);
+  provisionManagementGrant('commit', disabledDraft.commitResourceHash);
+  const disabledReceipt = await management.commit(commitCommand(disabledDraft)); assert.equal(disabledReceipt.state, 'observed');
+  const managedSubjectId = disabledReceipt.result.subject.id, managedPolicyId = disabledReceipt.result.policy.id;
+  assert.equal(disabledReceipt.result.subject.enabled, false); assert.equal(disabledReceipt.result.policy.mode, 'disabled');
+  assert.equal(disabledReceipt.result.subject.enabledBy, null);
+  const configured = await management.read({ subjectId: managedSubjectId, policyId: managedPolicyId });
+  assert.equal(configured.state, 'configured'); assert.equal(configured.policy.revision, 1);
+  const enablePolicy = { ...clone(createPolicy), operationKey: 'enable-managed-policy', subjectId: managedSubjectId, policyId: managedPolicyId,
+    expectedSubjectRevision: 1, expectedPolicyRevision: 1, subject: { ...createPolicy.subject, enabled: true }, policy: { ...createPolicy.policy, mode: 'shadow' } };
+  const enablePreview = await management.preview(enablePolicy);
+  await assert.rejects(management.prepare(enablePolicy), /unavailable/);
+  provisionManagementGrant('prepare', enablePreview.prepareResourceHash);
+  const enableDraft = await management.prepare(enablePolicy);
+  const enableGrant = provisionManagementGrant('commit', enableDraft.commitResourceHash);
+  loseManagementCommitReply = true;
+  assert.equal((await management.commit(commitCommand(enableDraft))).state, 'unknown');
+  state.managementGrants.get(enableGrant).enabled = false;
+  const managementRecoveryWrites = writes;
+  const enabledReceipt = await management.operation({ operationKey: enablePolicy.operationKey });
+  assert.equal(enabledReceipt.state, 'observed'); assert.equal(enabledReceipt.result.subject.enabledBy, actor.id);
+  assert.equal(enabledReceipt.result.subject.enabledAt, now.toISOString()); assert.equal(enabledReceipt.result.policy.enabledBy, actor.id);
+  assert.equal((await management.commit(commitCommand(enableDraft))).operationId, enabledReceipt.operationId); assert.equal(writes, managementRecoveryWrites);
+  await assert.rejects(management.prepare({ ...enablePolicy, policy: { ...enablePolicy.policy, maxTasksPerDay: 10 } }), /conflict/);
+  await run(() => app.notifications.updateNotificationDelivery(scope.tenantId, 'notice-a', { status: 'failed', nextAttemptAt: null }));
+  const managedEvent = [...state.events.values()].find(row => row.notificationId === 'notice-a' && row.resourceRevision === state.notifications.get('notice-a').revision);
+  const managedAutomation = composeBusinessFailureAutomation({ db, auth, credentials, guard, core, funding: { recordEvent: async () => {} }, integrations: {},
+    subscriptions, policyId: managedPolicyId, clock: () => now }).automation;
+  const managedInput = await managedAutomation.prepare({ eventId: managedEvent.id }); assert.equal(managedInput.state, 'prepared');
+  const preservedCount = clone({ day: state.policies.get(managedPolicyId).counterDay, count: state.policies.get(managedPolicyId).preparedCount,
+    last: state.policies.get(managedPolicyId).lastPreparedAt }); assert.equal(preservedCount.count, 1);
+  const lowerPolicy = { ...enablePolicy, operationKey: 'lower-managed-limit', expectedSubjectRevision: 2, expectedPolicyRevision: 2,
+    policy: { ...enablePolicy.policy, maxTasksPerDay: 1 } };
+  const lowerPreview = await management.preview(lowerPolicy);
+  await assert.rejects(management.prepare(lowerPolicy), /unavailable/);
+  provisionManagementGrant('prepare', lowerPreview.prepareResourceHash);
+  const lowerDraft = await management.prepare(lowerPolicy); provisionManagementGrant('commit', lowerDraft.commitResourceHash);
+  const lowerReceipt = await management.commit(commitCommand(lowerDraft)); assert.equal(lowerReceipt.state, 'observed');
+  assert.equal(lowerReceipt.result.policy.revision, 3); assert.equal(lowerReceipt.result.subject.authorizationRevision, 2);
+  assert.deepEqual({ day: state.policies.get(managedPolicyId).counterDay, count: state.policies.get(managedPolicyId).preparedCount,
+    last: state.policies.get(managedPolicyId).lastPreparedAt }, preservedCount);
+  const inputCount = state.inputs.size;
+  await assert.rejects(managedAutomation.prepare({ eventId: managedEvent.id }), /unavailable/);
+  assert.equal(state.inputs.size, inputCount); assert.equal(state.policies.get(managedPolicyId).preparedCount, 1);
+  now = new Date(now.getTime() + 7200000);
+  const revokePolicy = { ...lowerPolicy, operationKey: 'revoke-managed-policy', expectedPolicyRevision: 3,
+    subject: { ...lowerPolicy.subject, enabled: false, revoked: true }, policy: { ...lowerPolicy.policy, mode: 'disabled', revoked: true } };
+  const revokePreview = await management.preview(revokePolicy); provisionManagementGrant('prepare', revokePreview.prepareResourceHash);
+  const revokeDraft = await management.prepare(revokePolicy); provisionManagementGrant('commit', revokeDraft.commitResourceHash);
+  const revokedReceipt = await management.commit(commitCommand(revokeDraft)); assert.equal(revokedReceipt.state, 'observed');
+  assert.equal(revokedReceipt.result.subject.revoked, true); assert.equal(revokedReceipt.result.policy.revoked, true);
+  assert.equal(revokedReceipt.result.policy.preparedCount, 1);
+  await assert.rejects(management.preview({ ...revokePolicy, operationKey: 'cannot-unrevoke', expectedSubjectRevision: 3, expectedPolicyRevision: 4,
+    subject: { ...revokePolicy.subject, revoked: false } }), /unavailable/);
+  assert.equal(state.inputs.get(prepared.inputRef).status, 'creation_unknown'); assert.equal(state.inputs.get(second.inputRef).status, 'creation_unknown');
+  assert.equal(taskCreates, 1); assert.equal(state.runs.size, 1);
+  active = false; await assert.rejects(management.operation({ operationKey: enablePolicy.operationKey })); active = true;
 });

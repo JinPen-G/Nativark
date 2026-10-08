@@ -32,7 +32,8 @@ export class AutomationFailureTaskService {
         if (before.event.refundId) await tx.$queryRaw(Prisma.sql`SELECT id FROM rental_payment_refunds WHERE id = ${before.event.refundId} FOR UPDATE`);
         const current = await this.authority.inspect(eventId, tx);
         if (current.materialHash !== before.materialHash) throw new AutomationError('unavailable');
-        const existing = await tx.aiAutomationInput.findFirst({ where: before.key });
+        const existing = await tx.aiAutomationInput.findFirst({ where: {
+          tenantId: before.key.tenantId, workspaceId: before.key.workspaceId, policyId: before.key.policyId, eventId: before.key.eventId } });
         if (existing) { this.authority.verifyInput(existing, before); attemptedRef = existing.id; return existing.id; }
         const policy = await tx.aiAutomationPolicy.findFirst({ where: { id: before.policy.id,
           tenantId: before.key.tenantId, workspaceId: before.key.workspaceId } });
