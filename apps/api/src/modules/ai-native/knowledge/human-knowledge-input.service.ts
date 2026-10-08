@@ -57,6 +57,9 @@ export class HumanKnowledgeInputService {
             || fresh.confirmationRecordId !== item.confirmationRecordId || fresh.expiresAt !== item.expiresAt
             || fingerprint(fresh.preference) !== fingerprint(item.preference)) return unavailable();
         }
+        if (preferences.items.length && (knowledge.status === 'ready' || knowledge.status === 'partial')) {
+          await this.context.revalidate(knowledge);
+        }
       }
       // Preserve the existing knowledge package; an optional, separate section
       // carries only the existing bounded confirmed-preference projection.
@@ -89,6 +92,13 @@ export class HumanKnowledgeInputService {
           if (fresh.status !== 'confirmed' || fresh.revision !== item.revision || fresh.aclRevision !== item.aclRevision
             || fresh.confirmationRecordId !== item.confirmationRecordId || fresh.expiresAt !== item.expiresAt
             || fingerprint(fresh.preference) !== fingerprint(item.preference)) return unavailable();
+        }
+        // Confirmation reads can await storage/authorization. Do not return
+        // knowledge that lost its current ACL while those reads were pending.
+        // This is bounded revalidation, not an atomic cross-resource snapshot.
+        if (preferences.items.length) {
+          const current = await this.context.revalidate(verified);
+          if (fingerprint(current) !== fingerprint(verified)) return unavailable();
         }
       }
       return { ...verified, preferences };
