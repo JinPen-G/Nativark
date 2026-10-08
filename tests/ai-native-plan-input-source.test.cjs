@@ -93,7 +93,8 @@ test('settings input lost acknowledgement is read by the original task/run/refer
   assert.equal(settingsContract('AiApprovedSettingsErrorDraft', settingsApplicationError(new AiTaskPlanInputResultUnknownError('read_task_input')), true).nextAction, 'read_task_input');
   const writes = h.trace.filter(v => v.endsWith('.create')).length;
   const receipt = await h.app.readTaskInputReceipt(key);
-  assert.equal(receipt.state, 'published_not_executed');
+  assert.equal(receipt.state, 'published');
+  assert.equal(receipt.execution, 'not_attested');
   assert.deepEqual(receipt.input, h.reference);
   assert.equal(h.state.aiTaskActionInput.length, 1);
   assert.equal(h.trace.filter(v => v.endsWith('.create')).length, writes);

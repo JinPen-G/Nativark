@@ -154,7 +154,7 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     const read = () => this.db.aiTaskActionInput.findFirst({ where: key });
     const row = await read();
     let receipt: { state: 'not_observed'; nextAction: 'read_task_input' }
-      | { state: 'published_not_executed'; id: string; input: { changeId: string; changeHash: string } };
+      | { state: 'published'; execution: 'not_attested'; id: string; input: { changeId: string; changeHash: string } };
     if (!row) receipt = { state: 'not_observed', nextAction: 'read_task_input' };
     else {
       const stored = await this.input(row, key);
@@ -162,11 +162,13 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
       await this.verifySettings(before.context, command.taskId, stored.payload);
       const latest = await this.input(await read(), key);
       if (requestFingerprint(latest) !== requestFingerprint(stored)) throw denied();
-      receipt = { state: 'published_not_executed', id: stored.id, input: settingsChangeReferenceSchema.parse(stored.payload) };
+      // Publication proves only the input row. It must not attest that a
+      // concurrently running step has or has not performed its business action.
+      receipt = { state: 'published', execution: 'not_attested', id: stored.id, input: settingsChangeReferenceSchema.parse(stored.payload) };
     }
     const after = await this.access(command.taskId, 'read_metadata');
     if (after.access.bindingKey !== before.access.bindingKey || after.policyHash !== before.policyHash) throw denied();
-    if (receipt.state === 'published_not_executed') await this.verifySettings(after.context, command.taskId, receipt.input);
+    if (receipt.state === 'published') await this.verifySettings(after.context, command.taskId, receipt.input);
     return receipt;
   }
 
