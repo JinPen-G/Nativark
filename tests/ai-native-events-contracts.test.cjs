@@ -59,10 +59,10 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
   const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
   const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
   const { user } = require('./fixtures/ai-native/authorization-baseline.cjs');
-  let now = new Date(), failOutbox = false, active = true, loseTaskCommitReply = false, writes = 0, taskCreates = 0;
+  let now = new Date(), failOutbox = false, active = true, loseTaskCommitReply = false, loseReviewCommitReply = false, writes = 0, taskCreates = 0;
   const scope = { tenantId: 'tenant-a', workspaceId: 'workspace-a' };
   const actor = user({ permissions: ['system:integration:manage', 'rental-os:finance:view', 'rental-os:order:view'] });
-  const state = Object.fromEntries(['notifications', 'refunds', 'events', 'subjects', 'policies', 'inputs', 'scopes', 'budgets', 'plans', 'tasks', 'runs'].map(name => [name, new Map()]));
+  const state = Object.fromEntries(['notifications', 'refunds', 'events', 'subjects', 'policies', 'inputs', 'scopes', 'budgets', 'plans', 'tasks', 'runs', 'reviewGrants', 'reviewOperations'].map(name => [name, new Map()]));
   const clone = value => structuredClone(value);
   const match = (row, where) => Object.entries(where).every(([key, value]) => {
     if (key === 'OR') return value.some(part => match(row, part));
@@ -75,7 +75,7 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
     const api = {
       async findFirst({ where, select }) {
         let row = [...state[name].values()].find(row => match(row, where));
-        if (row && name === 'tasks') row = { ...row, runs: [...state.runs.values()].filter(run => run.taskId === row.id && run.sequence === 1).slice(0, 1).map(run => ({ id: run.id })) };
+        if (row && name === 'tasks') row = { ...row, runs: [...state.runs.values()].filter(run => run.taskId === row.id && run.sequence === 1).slice(0, select?.runs?.take ?? 1).map(run => project(run, select?.runs?.select)) };
         return project(row, select);
       },
       async findUnique({ where, select }) { return api.findFirst({ where: where.scopeId_scopeKind_sceneCode ?? where, select }); },
@@ -83,7 +83,9 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
       async findMany({ where, take, select }) { assert.ok(take <= 10); return [...state[name].values()].filter(row => match(row, where)).slice(0, take).map(row => project(row, select)); },
       async create({ data }) { writes++; if (name === 'tasks') taskCreates++;
         const plain = name === 'runs' ? { ...data, fencingToken: data.fencingToken.toString() } : data;
-        const row = { revision: 1, archivedAt: null, nextAttemptAt: null, leaseUntil: null, sentAt: null, ...clone(plain) }; state[name].set(row.id, row); return clone(row); },
+        const row = { revision: 1, createdAt: now, archivedAt: null, nextAttemptAt: null, leaseUntil: null, sentAt: null,
+          ...(name === 'inputs' ? { reviewRevision: 1, reviewStatus: 'open', closeReason: null, feedbackCode: null, reviewedAt: null } : {}),
+          ...clone(plain) }; state[name].set(row.id, row); return clone(row); },
       async updateMany({ where, data }) { writes++; let count = 0; for (const row of state[name].values()) if (match(row, where)) {
         for (const [key, value] of Object.entries(data)) if (value !== undefined) row[key] = value && typeof value === 'object' && 'increment' in value ? row[key] + value.increment : clone(value); count++;
       } return { count }; },
@@ -102,6 +104,7 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
   const transactionContext = new (require('node:async_hooks').AsyncLocalStorage)();
   const db = { rentalNotificationLog: delegate('notifications'), rentalPaymentRefund: delegate('refunds'), aiBusinessFailureOutbox: delegate('events'),
     aiAutomationSubject: delegate('subjects'), aiAutomationPolicy: delegate('policies'), aiAutomationInput: delegate('inputs'),
+    aiAutomationReviewGrant: delegate('reviewGrants'), aiAutomationReviewOperation: delegate('reviewOperations'),
     aiScope: delegate('scopes'), aiBudgetPolicy: delegate('budgets'), aiTaskPlanPolicy: delegate('plans'), aiTask: delegate('tasks'), aiRun: delegate('runs'),
     rentalOrder: { findFirst: async () => ({ id: 'order-a', ...scope, fulfillmentLocationId: 'location-a', returnLocationId: null }) },
     businessWorkspace: { findFirst: async () => ({ id: scope.workspaceId, tenantId: scope.tenantId, status: 'ACTIVE' }) },
@@ -113,6 +116,7 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
         const before = clone(state); let result;
         try { result = await callback(db); } catch (error) { lastTransactionError = error.message; Object.assign(state, before); throw error; }
         if (loseTaskCommitReply && state.tasks.size > before.tasks.size) { loseTaskCommitReply = false; throw Error('task commit reply lost'); }
+        if (loseReviewCommitReply && state.reviewOperations.size > before.reviewOperations.size) { loseReviewCommitReply = false; throw Error('review commit reply lost'); }
         return result;
       })); queue = work.catch(() => {}); return work;
     } };
@@ -202,6 +206,58 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
   active = false; await assert.rejects(app.candidates.read({ eventId: refundEvent.id })); active = true;
   await app.payments.applyProviderRefundOutcome(scope.tenantId, scope.workspaceId, 'order-a', 'refund-a', { status: 'succeeded', responseJson: {} });
   assert.equal((await app.candidates.read({ eventId: refundEvent.id })).status, 'expired');
+  state.policies.get('policy-a').mode = 'disabled';
+  state.policies.get('policy-a').expiresAt = new Date(now.getTime() - 1);
+  const review = await app.reviews.read({ inputRef: prepared.inputRef });
+  assert.equal(review.task.taskId, task.id); assert.equal(review.inputStatus, 'creation_unknown');
+  assert.equal(review.currentSource.failed, false); assert.equal(review.executionPermission, false);
+  const closeCommand = { inputRef: prepared.inputRef, expectedRevision: review.review.revision,
+    expectedEventFence: review.event.fence, expectedTaskId: review.task.taskId, operationKey: 'close-review', reason: 'resolved' };
+  await assert.rejects(app.reviews.close(closeCommand), /unavailable/);
+  assert.equal(state.inputs.get(prepared.inputRef).reviewRevision, 1); assert.equal(state.reviewOperations.size, 0);
+  const provisionReviewGrant = (view, action) => {
+    const id = require('node:crypto').randomUUID();
+    state.reviewGrants.set(id, { id, ...scope, scopeId: 'scope-workspace', inputId: view.inputRef, eventId: view.event.eventId,
+      actorKind: 'user', actorId: actor.id, audience: 'operator', action, expectedRevision: view.review.revision,
+      resourceHash: view.resourceHash, requiredPermissions: ['system:integration:manage'], revision: 1,
+      enabled: true, expiresAt: new Date(now.getTime() + 3600000) });
+    return id;
+  };
+  const closeGrant = provisionReviewGrant(review, 'close');
+  const originalFacts = clone({ notifications: state.notifications, refunds: state.refunds, tasks: state.tasks, runs: state.runs });
+  loseReviewCommitReply = true;
+  const unknownClose = await app.reviews.close(closeCommand);
+  assert.equal(unknownClose.state, 'unknown'); assert.equal(unknownClose.retryable, false);
+  assert.equal(state.reviewOperations.size, 1); assert.equal(state.inputs.get(prepared.inputRef).reviewRevision, 2);
+  assert.equal(state.inputs.get(prepared.inputRef).status, 'creation_unknown'); assert.equal(state.events.get(refundEvent.id).status, 'closed');
+  state.reviewGrants.get(closeGrant).enabled = false;
+  const writesBeforeRecovery = writes;
+  const closeReceipt = await app.reviews.operation({ inputRef: prepared.inputRef, operationKey: closeCommand.operationKey });
+  assert.equal(closeReceipt.state, 'observed'); assert.equal(closeReceipt.status, 'closed'); assert.equal(closeReceipt.taskId, task.id);
+  assert.equal(closeReceipt.inputStatusAtCommit, 'creation_unknown');
+  assert.equal((await app.reviews.close(closeCommand)).operationId, closeReceipt.operationId);
+  await assert.rejects(app.reviews.close({ ...closeCommand, reason: 'dismissed' }), /conflict/);
+  assert.equal(writes, writesBeforeRecovery);
+  const closedView = await app.reviews.read({ inputRef: prepared.inputRef });
+  const feedbackCommand = { inputRef: prepared.inputRef, operationKey: 'review-feedback', expectedRevision: closedView.review.revision,
+    expectedEventFence: closedView.event.fence, expectedTaskId: closedView.task.taskId, code: 'helpful' };
+  await assert.rejects(app.reviews.feedback(feedbackCommand), /unavailable/);
+  provisionReviewGrant(closedView, 'feedback');
+  const feedbackReceipt = await app.reviews.feedback(feedbackCommand);
+  assert.equal(feedbackReceipt.state, 'observed'); assert.equal(feedbackReceipt.revision, 3); assert.equal(feedbackReceipt.status, 'closed');
+  assert.equal((await app.reviews.feedback(feedbackCommand)).operationId, feedbackReceipt.operationId);
+  assert.deepEqual({ notifications: state.notifications, refunds: state.refunds, tasks: state.tasks, runs: state.runs }, originalFacts);
+  const unseen = await app.reviews.read({ inputRef: second.inputRef }); assert.equal(unseen.task.state, 'not_observed');
+  provisionReviewGrant(unseen, 'close');
+  const closedUnseen = await app.reviews.close({ inputRef: second.inputRef, operationKey: 'close-unobserved', expectedRevision: unseen.review.revision,
+    expectedEventFence: unseen.event.fence, expectedTaskId: null, reason: 'dismissed' });
+  assert.equal(closedUnseen.state, 'observed'); assert.equal(closedUnseen.taskId, null); assert.equal(closedUnseen.inputStatusAtCommit, 'creation_unknown');
+  assert.equal(state.inputs.get(second.inputRef).status, 'creation_unknown'); assert.equal(taskCreates, 1);
+  await assert.rejects(automation.create({ inputRef: second.inputRef }), /unavailable/);
+  active = false;
+  await assert.rejects(app.reviews.read({ inputRef: prepared.inputRef }));
+  await assert.rejects(app.reviews.operation({ inputRef: prepared.inputRef, operationKey: closeCommand.operationKey }));
+  active = true;
   const count = state.events.size;
   await run(() => new RentalBusinessFactRepository(db).updateNotificationDelivery(scope.tenantId, 'notice-a', { status: 'failed' })); assert.equal(state.events.size, count);
   assert.equal((await app.candidates.preparePending({ limit: 2 })).workerStarted, false);

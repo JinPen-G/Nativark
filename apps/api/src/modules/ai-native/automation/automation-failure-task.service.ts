@@ -80,7 +80,7 @@ export class AutomationFailureTaskService {
     try {
       const claim = await this.db.aiAutomationInput.updateMany({ where: { id: row.id, tenantId: row.tenantId, workspaceId: row.workspaceId,
         policyId: row.policyId, policyRevision: row.policyRevision, authorityHash: row.authorityHash, inputHash: row.inputHash,
-        status: 'prepared', expiresAt: { gt: this.clock() }, taskId: null, runId: null }, data: { status: 'creation_unknown' } });
+        status: 'prepared', reviewStatus: 'open', expiresAt: { gt: this.clock() }, taskId: null, runId: null }, data: { status: 'creation_unknown' } });
       if (claim.count !== 1) return this.reconcile({ inputRef });
     } catch { return this.reconcile({ inputRef }); }
     try {

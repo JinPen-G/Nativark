@@ -1,5 +1,22 @@
 # Codex B 总册接续交付与精确未闭合项
 
+## 2026-10-08 CB09 / AIN18：人类历史核对、关闭与反馈收据
+
+基线ae43f1e0（主线等价691f32e7已接），本片继续同一B认领。新HumanAutomationReviewService由原composeBusinessFailureEvents/Module.register导出为reviews，也随automation组合导出；不需要automation policy、预算或订阅作为人类凭据，不注册HTTP/worker或改A/06/07。原BusinessFailureReadAuthority实例提供当前Auth/Guard、本人workspace/地点与Core可见性前后复验；源已成功/候选到期可核对历史，原资源缺失、不可见或当前人类撤权则拒绝，不发明永久历史授权。
+
+- `reviews.read({inputRef})` 校对冻结input/event/scope及原task创建键、owner、inputHash、scene/policy版本和first run。返回当前源revision/failed、历史event、独立review状态、observed/not_observed task与精确actionResource/resourceHash。可读失联link后的原task，或尚未观测到task的creation_unknown；不借过期automation actor、不恢复执行许可。
+- 原input仅追加reviewRevision(default1)、reviewStatus(open/closed)、closeReason、feedbackCode、reviewedAt。原payload/inputHash、创建status和task/run状态不变。追加独占迁移 `20261008143000_ai_automation_human_review` 与AiAutomationReviewGrant/AiAutomationReviewOperation，不改旧迁移。grant默认disabled，明确user/audience/当前scope/input/event、close或feedback、expectedRevision、resourceHash、有效期/requiredPermissions；GET可见性与此正式动作grant同时成立才写入，没有从读权推导写权。
+- close输入为 `{inputRef,operationKey,expectedRevision,expectedEventFence,expectedTaskId,reason}`，reason限resolved/dismissed/duplicate/not_applicable；feedback同一base加code(helpful/not_helpful/incorrect/not_applicable)。不收自由正文、scope、actor、审批或任意action。reason与feedback是人的处理标签，不是Core事实判决或模型学习材料。
+- 原Outbox/input锁与CAS、grant前后复验、独立review更新和immutable operation receipt在同一Serializable事务。关闭时只把原AI Outbox设closed并推进fence/清理候选租约，阻止后续候选及自动准入；不是取消原task，更不改通知/退款或清除creation_unknown。在途创建仍可能稍后被观测，不以close回执断言它从未调用或已撤销。反馈只更新review版本/代码，closed保持closed。
+- operation持久原input/event/已观测task/run或null、actor/audience/scope、command hash、expected/result reviewRevision、event fence、grant/hash及结果。unique(scopeId,actorId,audience,operationKey)和(scopeId,inputId,resultRevision)；grant/operation通过input的tenant/workspace/scope/event复合FK，task/run及grant再按scope/input复合约束。记录不是业务操作收据或批准。
+- `reviews.operation({inputRef,operationKey})` 严格只读，未观测/未知返回retryable=false；丢ACK后只查原key。相同命令已有receipt直接核对，异内容同key冲突；此重放和读收据只要求当前人类读权且原actor/audience精确匹配，不要求旧write grant仍启用，也不能产生新写入。并发版本变化可报conflict，随后查原operation；没有自动重试、换键、修复关联或恢复执行。
+
+只在原events同一CB09组合用例增加此实际链，一次1pass/0fail/0skip/0todo退出0，实际ts-node transpileOnly=false、diff check0；未新增测试脚本/矩阵。覆盖已过期/撤销automation后人类读原task与成功源、无独立grant写拒绝、关闭提交丢ACK→原operation只读→旧grant停用仍重放原receipt、异内容拒绝、feedback必须自己的grant、closed保持、未观测task的unknown关闭、人类撤权读拒绝；直接比较原通知/退款/task/run未变。DB、身份存储、Core端口为显式替身，未称真实MySQL锁隔离或多实例验证。
+
+隔离Prisma生成exit0，schemaHash=47ea491ececa0c9da3350da15ee966874d7adf068e99139a1542158718920a0a，guardViolations0/sharedArtifactsUnchanged=true。命令沿原preload+local-runtime、固定无效DATABASE_URL；本树output/cb09-human-review-audit，writeRoot=本树，TEMP/TMP=原inspection-lb05-tmp。未执行迁移/生产置备、读.env、安装、服务、网络/DB/模型/支付、push或合main。正式政策管理/宿主入口与真库FK/并发故障深测仍缺；不以缺UI空等，也不把测试grant当生产配置。
+
+Runtime替换只能驱动读/close/feedback/operation，不拥有人类动作grant、review CAS或收据；checkpoint不能解释为关闭成功或业务撤销。Provider SDK本片无调用，仍只在原Gateway边界。回退停用显式入口，保留原input/event/task/unknown与人类operation；反馈不进入Memory/Knowledge自动学习。唯一心跳00965714保留，未接入尚不完整的媒体单账桥。
+
 ## 2026-10-08 CB09：持久独立主体到原任务创建与只读核对
 
 基线928d4567；依赖本线42626a29的CB08事实revision/事务Outbox（主线已等价接收8861c1d9），不反摘活动主线。本包归属已确认：仅automation新目录、B自己的business-events组合、原AiTaskCreationRepository新增只读方法、最小schema及独占迁移；没有修改人类token解析、Auth/Guard、runner、审批、A scenes、Gateway或根模块。
