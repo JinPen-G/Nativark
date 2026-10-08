@@ -7,7 +7,7 @@ import { createPersistentAiTaskRunner } from './ai-task-runner.module';
 import type { AiTaskRunnerClock, AiTaskRunnerOutcomePort, AiTaskRunnerInputPort } from './ai-task-runner.ports';
 import { PrismaTaskExecutionScopeAuthority } from './prisma-task-execution-scope.authority';
 import { PrismaTaskExecutionBudgetRepository } from './prisma-task-execution-budget.repository';
-import { PrismaTaskRunEvidenceRepository, type AiTaskPlanEvidenceAuthority } from './prisma-task-run-evidence.repository';
+import { PrismaTaskRunEvidenceRepository, type AiTaskPlanEvidenceAuthority, type AiTaskOrderPhaseBusinessEvidence } from './prisma-task-run-evidence.repository';
 import { PrismaTaskRunnerResourceSource, type AiTaskToolResourceCatalog, type AiTaskModelInvocationPreparation } from './prisma-task-runner-resource.source';
 import { PersistentTaskRunnerResourceGate } from './persistent-task-runner-resource-gate';
 import { PrismaTaskMeasuredEffects, type AiTaskRegisteredExecutor, type AiTaskExecutionAuthorization } from './prisma-task-measured-effects';
@@ -22,6 +22,7 @@ export interface PersistentTaskRunnerComposition {
   replays: NonNullable<AiTaskRunnerRepositoryAdapters['replays']>;
   transitions: AiTaskRunnerRepositoryAdapters['transitions'];
   commands: AiTaskRunnerRepositoryAdapters['commands'];
+  confirmation?: AiTaskRunnerRepositoryAdapters['confirmation'];
   taskOutcome: AiTaskRunnerOutcomePort;
   executionAuthorization: AiTaskExecutionAuthorization;
   inputs?: AiTaskRunnerInputPort & AiTaskInputReader;
@@ -35,6 +36,7 @@ export interface PersistentTaskRunnerComposition {
   /** Same persistent financial evidence source used by the single-ledger Gateway.
    * Required to meter model calls; its absence never enables a local fallback. */
   financialEvidence?: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>;
+  orderEvidence?: AiTaskOrderPhaseBusinessEvidence;
   wall?: () => Date;
   monotonic?: () => number;
   clock?: AiTaskRunnerClock;
@@ -62,7 +64,7 @@ export function composePersistentTaskRunner(input: PersistentTaskRunnerCompositi
   requires(input?.planAuthority, ['authorize']); requires(input?.toolCatalog, ['resolve']); requires(input?.executors, ['resolve']);
   if (input.invocations) requires(input.financialEvidence, ['readDispatch']);
   const scopes = new PrismaTaskExecutionScopeAuthority(input.tasks, input.db);
-  const evidence = new PrismaTaskRunEvidenceRepository(input.db, scopes, input.planAuthority, input.wall, input.monotonic, input.financialEvidence);
+  const evidence = new PrismaTaskRunEvidenceRepository(input.db, scopes, input.planAuthority, input.wall, input.monotonic, input.financialEvidence, input.orderEvidence);
   const policy = input.policy ?? new PersistedPlanResourcePolicySource(input.tasks, evidence);
   const accounting = new PrismaTaskExecutionBudgetRepository(input.db, scopes, policy, evidence, input.wall);
   const source = new PrismaTaskRunnerResourceSource(input.db, scopes, evidence, input.toolCatalog, input.wall, input.invocations);

@@ -23,6 +23,7 @@ const identity = ({ authorizedAt: _at, requestId: _id, ...context }: AiExecution
  */
 export class PrismaTaskStepEvidenceAuthority implements AiStepTransitionAuthority {
   protected readonly modelStep: boolean = false;
+  protected get startEffect(): 'none' | 'possible' { return this.modelStep ? 'possible' : 'none'; }
   protected async additionalEvidence(_step: AiStep, _artifact: AiTaskResultArtifact | null,
     _charges: AiTaskExecutionCharge[], _context: AiExecutionContext): Promise<unknown> { return null; }
   protected accepts(step: AiStep, operation: string) {
@@ -71,7 +72,7 @@ export class PrismaTaskStepEvidenceAuthority implements AiStepTransitionAuthorit
     if (step.status !== (command.reason === 'start' ? 'PENDING' : 'RUNNING') || step.resultRef !== null || step.errorCode !== null) throw denied();
     let resultRef: string | null = null;
     let resultBinding: unknown = null;
-    let outcome: AiStepStateDraft['outcome'] = { status: 'running', effect: this.modelStep ? 'possible' : 'none' };
+    let outcome: AiStepStateDraft['outcome'] = { status: 'running', effect: this.startEffect };
     if (command.reason === 'start') {
       if (command.evidenceId !== `start-${step.id}` || task.status !== 'RUNNING' || task.cancelRequestedAt !== null) throw denied();
       resultBinding = await this.additionalEvidence(step, null, [], context);
