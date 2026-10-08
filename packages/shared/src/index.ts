@@ -42,6 +42,8 @@ export * from "./ai-proposal-draft";
 export { AI_PROPOSAL_DRAFT_SCHEMAS } from "./ai-proposal-draft-schemas";
 export * from "./ai-approval-application-draft";
 export { AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS } from "./ai-approval-application-draft-schemas";
+export * from "./ai-approved-settings-draft";
+export { AI_APPROVED_SETTINGS_DRAFT_SCHEMAS } from "./ai-approved-settings-draft-schemas";
 
 export * from "./ai-order-facts-draft";
 export { AI_ORDER_FACTS_DRAFT_SCHEMAS } from "./ai-order-facts-draft-schemas";

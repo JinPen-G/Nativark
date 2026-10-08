@@ -312,6 +312,8 @@ model BusinessWorkspace {
   aiInspectionDrafts                AiInspectionDraft[]
   aiBusinessFailureEvents           AiBusinessFailureOutbox[]
   aiAutomationSubjects              AiAutomationSubject[]
+  aiClientSceneMaterials            AiClientSceneMaterial[]
+  aiClientTaskPolicies              AiClientTaskPolicy[]
   aiInspectionEvidenceBindings      AiInspectionEvidenceBinding[]
   rentalFulfillmentOperators        RentalFulfillmentOperator[]
   rentalTenantBusinessSettingss     RentalTenantBusinessSettings[]
@@ -730,6 +732,88 @@ model AiTaskActionPolicy {
   @@id([scopeId, taskId, operation])
   @@index([scopeId, expiresAt], map: "ai_task_action_policies_expiry_idx")
   @@map("ai_task_action_policies")
+}
+
+enum AiClientTaskDispatchState {
+  UNKNOWN
+}
+
+model AiClientSceneMaterial {
+  id              String @id @db.VarChar(36)
+  tenantId        String @db.VarChar(191)
+  workspaceId     String @db.VarChar(191)
+  channel         String @db.VarChar(32)
+  principalKind   String @db.VarChar(16)
+  principalHash   String @db.Char(64)
+  bindingHash     String @db.Char(64)
+  publicationHash String @db.Char(64)
+  operationKey    String @db.VarChar(191)
+  inputHash       String @db.Char(64)
+  materialHash    String @db.Char(64)
+  command         Json
+  material        Json
+  publication     Json
+  revision        Int @default(1) @db.UnsignedInt
+  createdAt       DateTime @db.DateTime(3)
+  expiresAt       DateTime @db.DateTime(3)
+  workspace       BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_client_materials_workspace_fk")
+  taskInputs      AiClientTaskInput[]
+
+  @@unique([tenantId, workspaceId, channel, principalHash, operationKey], map: "ai_client_materials_operation_key")
+  @@unique([id, tenantId, workspaceId, channel, principalKind, principalHash], map: "ai_client_materials_input_binding")
+  @@index([tenantId, workspaceId, expiresAt], map: "ai_client_materials_scope_expiry")
+  @@map("ai_client_scene_materials")
+}
+
+model AiClientTaskPolicy {
+  id           String @id @db.VarChar(36)
+  tenantId     String @db.VarChar(191)
+  workspaceId  String @db.VarChar(191)
+  channel      String @db.VarChar(32)
+  customerType String @db.VarChar(16)
+  sceneCode    String @db.VarChar(128)
+  sceneVersion String @db.VarChar(64)
+  enabled      Boolean @default(false)
+  allowCreate  Boolean @default(false)
+  allowRead    Boolean @default(false)
+  revision     Int @db.UnsignedInt
+  expiresAt    DateTime @db.DateTime(3)
+  workspace    BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_client_task_policy_workspace_fk")
+  inputs       AiClientTaskInput[]
+
+  @@unique([tenantId, workspaceId, channel, customerType, sceneCode, sceneVersion], map: "ai_client_task_policy_scope_scene")
+  @@unique([id, tenantId, workspaceId, channel, customerType, sceneCode, sceneVersion], map: "ai_client_task_policy_binding")
+  @@map("ai_client_task_policies")
+}
+
+model AiClientTaskInput {
+  id                String @id @db.VarChar(36)
+  tenantId          String @db.VarChar(191)
+  workspaceId       String @db.VarChar(191)
+  channel           String @db.VarChar(32)
+  principalKind     String @db.VarChar(16)
+  principalHash     String @db.Char(64)
+  creationKey       String @db.VarChar(128)
+  materialRef       String @db.VarChar(36)
+  materialInputHash String @db.Char(64)
+  materialHash      String @db.Char(64)
+  materialRevision  Int @db.UnsignedInt
+  bindingHash       String @db.Char(64)
+  policyId          String @db.VarChar(36)
+  policyRevision    Int @db.UnsignedInt
+  policyHash        String @db.Char(64)
+  sceneCode         String @db.VarChar(128)
+  sceneVersion      String @db.VarChar(64)
+  inputHash         String @db.Char(64)
+  revision          Int @default(1) @db.UnsignedInt
+  dispatchState     AiClientTaskDispatchState
+  createdAt         DateTime @db.DateTime(3)
+  expiresAt         DateTime @db.DateTime(3)
+  material          AiClientSceneMaterial @relation(fields: [materialRef, tenantId, workspaceId, channel, principalKind, principalHash], references: [id, tenantId, workspaceId, channel, principalKind, principalHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_client_task_input_material_fk")
+  policy            AiClientTaskPolicy @relation(fields: [policyId, tenantId, workspaceId, channel, principalKind, sceneCode, sceneVersion], references: [id, tenantId, workspaceId, channel, customerType, sceneCode, sceneVersion], onDelete: Restrict, onUpdate: Restrict, map: "ai_client_task_input_policy_fk")
+
+  @@unique([tenantId, workspaceId, channel, principalHash, creationKey], map: "ai_client_task_input_creation")
+  @@map("ai_client_task_inputs")
 }
 
 model AiAutomationSubject {
