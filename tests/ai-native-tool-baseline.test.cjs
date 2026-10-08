@@ -30,8 +30,11 @@ function routeOf(entry) {
 }
 
 test("all planned families are inventoried without enabling any AI tool", () => {
-  assert.equal(AI_TOOL_BASELINE.length, 14);
-  assert.equal(new Set(AI_TOOL_BASELINE.map(row => row.code)).size, 14);
+  assert.equal(AI_TOOL_BASELINE.length, 15);
+  assert.equal(new Set(AI_TOOL_BASELINE.map(row => row.code)).size, 15);
+  const settings = AI_TOOL_BASELINE.find(row => row.code === 'tenant.notifications.commit');
+  assert.equal(settings.risk, 'R2');
+  assert.equal(settings.entry, undefined);
   for (const row of AI_TOOL_BASELINE) {
     assert.equal(row.aiMaturity, "unavailable", row.code);
     assert.equal(row.version, "baseline-1");

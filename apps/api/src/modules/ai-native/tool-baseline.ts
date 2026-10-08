@@ -88,6 +88,11 @@ const rows: Omit<AiToolBaseline, "version" | "aiMaturity">[] = [
     sideEffects: ["Persists an AI proposal; active settings remain unchanged"], blockers: ["AIN-03 proposal persistence", "AIN-14/16 per-section change whitelist"]
   },
   {
+    code: "tenant.notifications.commit", scope: "workspace", risk: "R2", businessMaturity: "implemented",
+    sideEffects: ["Updates only approved notification event/channel arrays and persists the original operation receipt"],
+    blockers: ["AIN-04 current settings action authorization", "AIN-07 exact human approval and atomic consumption", "AIN-16 authorized settings step and explicit host wiring"]
+  },
+  {
     code: "membership.profile.propose", scope: "tenant", risk: "R1", businessMaturity: "not_implemented",
     sideEffects: ["Persists an AI proposal; sensitive identity verification remains human-controlled"], blockers: ["AIN-03 proposal persistence", "AIN-16 profile field whitelist"]
   },
