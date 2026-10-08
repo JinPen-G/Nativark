@@ -1,3 +1,21 @@
+## AIN21 客户持久材料到原任务创建（20261008）
+
+前置547e8c300d6e8c5813e2ef1a1d6d86239edfe70c，按主线续派接通客户专属创建授权/冻结输入/原创建收据。精确消费691f32e7ecb55a8e8ad73ea01c2075e078622661（原B ae43f1e08cc57fd6584704d33a4fbe0430374038）仅ai-task-creation.repository.ts新增readCreation的21行，已比对该文件与固定来源零差异；不带automation/schema，不自行改其余唯一仓储。原aiTaskAccessFromContext本来接受CUSTOMER/CLIENT，未修改human identity、06 runner或Gateway。
+
+新增client-task.authority.ts、prisma-client-task-input.repository.ts、client-task.composition.ts，现有client-request.application通过服务器tasks依赖显式装配（同一db实例、正式subscriptions、固定sceneCode/version）；无任务依赖仍只提供原材料能力。新方法createTask/readTaskCreation只接受{creationKey,materialRef}，不接收taskId/actor/scope/scene/版本/执行参数。每次从当前ClientAuth/Guard与发布空间取得真实客户，再精确查原session绑定材料、复验源/正文/hash/expiry；只构造正式customer actor，不转换为user，不扩大企业同事订单权限。返回当前客户可见的原task/run创建结果和原material来源描述，capabilities.tasks=create_and_read_only，模型/事件/下载/历史迁移仍unavailable，无执行计划/租约/自动办理。
+
+独立持久ai_client_task_policies按tenant/workspace/channel/customerType/scene/version精确匹配，enabled/allowCreate/allowRead、revision及expiresAt必须正式存在；缺失拒绝，不seed。首次创建另读原aiBudgetPolicy平台/租户/工作空间三层门和正式settings限额（原validateBudgetSettings），复用PrismaSubscriptionBudgetReader的ai.native.use商业权益，冻结其政策摘要并在原create授权回调中再次比较。原限额检查不是新账本，不预占/扣费，不声称已有客户模型admission。读取与创建分别查allowRead/allowCreate；原操作读取不要求重新开放create或运行预算门，但仍要求当前客户、来源及独立read政策有效。固定readCreation沿用名为creationAllowed的既有grant字段，仅给只读调用的内部实例使用，不暴露该实例或将read政策接到create。
+
+独占追加20261008153000_ai_client_task_policy：政策表+ai_client_task_inputs。输入表保存唯一id/inputRef、scope/channel/principalKind/principalHash、外部creationKey、materialRef及原材料inputHash/materialHash/revision/bindingHash、policyId/revision/hash、服务器scene/version、inputHash、revision=1、createdAt/expiresAt。唯一(scope/channel/principalHash/creationKey)区分大小写；新迁移给原材料表追加复合唯一索引，并以完整scope/channel/principalKind/principalHash+materialRef复合FK绑定材料，以policyId+scope/channel/customerType/scene/version复合FK绑定政策，全部RESTRICT。旧迁移和schema.prisma不改；主线最终补模型并联合验证，未执行DDL、未生成client。
+
+先以事务持久独占dispatchState=UNKNOWN输入，再由唯一成功占位且确认收到提交结果的当前调用进入原AiTaskCreationRepository.create，内部固定key=client-material:<inputRef>。行永久保存独占意图，不维护第二task/run生命周期；成功/queued/后续状态只取原任务。重复create只readCreation，显式readTaskCreation也不调用create；无原输入或无原task可观测时返回unknown/retryable=false，不冒称没提交。占位丢ACK、原task提交丢ACK、占位后政策变化均不换key补跑；创建后授权/来源复验失败不声称回滚。材料不改写、不迁移、不跨session接管；冻结输入/材料过期均拒绝内容读回，未实现物理删除。
+
+复用原client scene单项，新增场景断言留在同一用例；ClientAuth/Guard/ClientApi、新授权/参数化SQL/input仓储、原AiTaskCreationRepository/create/readCreation与商业权益reader均被驱动。DB/COMMIT、底层ClientApi业务投影、SubscriptionService商业快照为明确替身；沿用task-input-store事务替身，不是MySQL锁/并发或正式商业目录全链验收。验证无政策/匿名/伪造scene/无create/平台停用/工作空间零并发限额/无商业权益不能落占位，正式CUSTOMER/CLIENT原QUEUED task/run，跨应用重复零新增create，create关停后独立read仍可核对，read撤销即拒绝，同key异材料冲突，原task丢ACK只读回，输入占位丢ACK或占位后政策撤销永久只查原key，无Bearer/session明文与跨session接管。
+
+沿用本树严格preload、固定离线DATABASE_URL、cache/tmp，配置audit=output/ca-client-task-creation.audit；命令仍为原client scene单项。首轮1fail：已有任务替身未投影task.runs导致readCreation抛TypeError；只在本用例补既有关联投影，未放松生产仓储。相关单项复验1pass/0fail/0skip/0todo、退出0，ts-node保留transpileOnly=false；未额外扩大全API类型检查、独立review或新建测试脚本。无真实HTTP/DB/模型/支付/存储，无.env/安装/服务/共享生成物/迁移/push/main合并，既有lock/previous/temp/output保全。
+
+Runtime替换只映射原materialRef→不可变inputRef/inputHash→固定creationKey→原创建收据，不重新解释UNKNOWN为可重派，不接管customer session或复制task/run账本。Provider SDK仍仅在唯一Gateway transport边界；客户Gateway执行合同未就绪，本包只创建/读原元数据，不称完整客户Agent。回退停新create但保留按独立read政策读取原收据；不删未知占位来恢复发送，也不重建旧材料。R04正式澄清phase、客户模型执行、非订单域写CAS/operation receipt仍属未解决前置。
+
 ## CA08 持久客户材料与原操作收据（20261008）
 
 从b8e5e455续接，主线确认A客户场景、新专用repository及独占追加迁移20261008140000_ai_client_scene_materials。移除旧Map，不并行保留缓存方案。新增PrismaClientSceneMaterialRepository，以既有Prisma参数化$queryRaw/$executeRaw/事务访问ai_client_scene_materials，不需要新增delegate或生成client；scope定位仅取当前tenant/workspace及已发布关系，授权仍由原ClientAuth/Guard、channelBootstrap/ClientApi资源读取完成。

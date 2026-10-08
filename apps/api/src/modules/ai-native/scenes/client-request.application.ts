@@ -9,6 +9,9 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { PrismaClientSceneMaterialRepository, AiClientMaterialError, type AiClientMaterialDb,
   type AiClientMaterialScope, type AiClientSceneMaterial } from './prisma-client-scene-material.repository';
+import { clientTaskSceneSchema, type AiClientTaskDependencies } from './client-task.authority';
+import { composeClientMaterialTasks } from './client-task.composition';
+import { AiClientTaskUnknownError, clientTaskCommandSchema } from './prisma-client-task-input.repository';
 
 const id = z.string().trim().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const configurationSchema = z.object({ enabled: z.literal(true), tenantCode: id, serviceCode: id,
@@ -28,6 +31,7 @@ export type AiClientRequestDependencies = {
   client: Parameters<typeof composeAiClientScenes>[0]['client'];
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   db: AiClientMaterialDb;
+  tasks?: AiClientTaskDependencies;
   clock?: () => Date;
 };
 type Command = z.infer<typeof commandSchema>;
@@ -40,6 +44,11 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   if (!parsed.success || typeof dependencies.guard?.canActivate !== 'function'
     || 'session' in dependencies || 'credentials' in dependencies) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
   const server = freezeOriginalInput(parsed.data), clock = dependencies.clock ?? (() => new Date());
+  const taskDependencies = dependencies.tasks ? { db: dependencies.tasks.db, subscriptions: dependencies.tasks.subscriptions,
+    ...clientTaskSceneSchema.parse({ sceneCode: dependencies.tasks.sceneCode, sceneVersion: dependencies.tasks.sceneVersion }) } : null;
+  if (taskDependencies && (taskDependencies.db !== dependencies.db || typeof taskDependencies.db.aiTask?.findFirst !== 'function'
+    || typeof taskDependencies.db.aiScope?.findFirst !== 'function' || typeof taskDependencies.db.aiBudgetPolicy?.findUnique !== 'function'
+    || typeof taskDependencies.subscriptions?.readCategoryCommercialContext !== 'function')) return fail('AI_CLIENT_CAPABILITY_UNAVAILABLE');
   const repository = new PrismaClientSceneMaterialRepository(dependencies.db);
   const guest = composeAiClientScenes({ client: dependencies.client }).guest;
   const publication = async () => {
@@ -53,7 +62,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   };
   type Published = Awaited<ReturnType<typeof publication>>;
   type Bound = { published: Published; identity: ClientRequestContext | null; bindingHash: string;
-    scenes: ReturnType<typeof composeAiClientScenes> };
+    scenes: ReturnType<typeof composeAiClientScenes>; assertCurrent(): Promise<void> };
   const withBinding = async <T>(request: AiClientApplicationRequest, member: boolean, kind: string, consume: (bound: Bound) => Promise<T>): Promise<T> => {
     const header = member ? bearerSchema.safeParse(request?.headers?.authorization) : undefined;
     if (member && !header?.success) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
@@ -77,9 +86,13 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           || identity.categoryCode !== before.value.service.categoryCode)) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
         const bindingHash = requestFingerprint({ publication: before, identity, appId: server.appId ?? null });
         const scenes = composeAiClientScenes({ client: dependencies.client, ...(source ? { session: source } : {}) });
-        const result = await consume({ published: before, identity, bindingHash, scenes });
-        const after = await publication(), current = source ? await source.current() : null;
-        if (bindingHash !== requestFingerprint({ publication: after, identity: current, appId: server.appId ?? null })) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
+        const assertCurrent = async () => {
+          if (!active) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
+          const after = await publication(), current = source ? await source.current() : null;
+          if (bindingHash !== requestFingerprint({ publication: after, identity: current, appId: server.appId ?? null })) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
+        };
+        const result = await consume({ published: before, identity, bindingHash, scenes, assertCurrent });
+        await assertCurrent();
         return result;
       });
     } finally { active = false; }
@@ -140,7 +153,39 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     if (!input.success) return fail('AI_CLIENT_INVALID_INPUT');
     return freezeOriginalInput(input.data);
   };
+  const taskOperation = async (request: AiClientApplicationRequest, value: unknown, operation: 'create' | 'readCreation') => {
+    const parsed = clientTaskCommandSchema.safeParse(structuredClone(value));
+    if (!parsed.success) return fail('AI_CLIENT_INVALID_INPUT');
+    if (!taskDependencies) return fail('AI_CLIENT_CAPABILITY_UNAVAILABLE');
+    const command = freezeOriginalInput(parsed.data);
+    let returned = false;
+    try {
+      return await withBinding(request, true, 'order', async bound => {
+        const identity = bound.identity;
+        if (!identity) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
+        const load = async (materialRef: string) => {
+          await bound.assertCurrent();
+          const row = await repository.findSource(scopeOf(bound), materialRef);
+          if (!row) return fail('AI_CLIENT_MATERIAL_STALE');
+          await verify(bound, row);
+          await bound.assertCurrent();
+          return { row, identity };
+        };
+        const tasks = composeClientMaterialTasks(taskDependencies, load, clock);
+        const result = await tasks[operation](command);
+        returned = true;
+        const material = await load(command.materialRef);
+        return freezeOriginalInput({ ...result, source: { materialRef: material.row.id, materialHash: material.row.materialHash,
+          tenantCode: server.tenantCode, serviceCode: server.serviceCode, channel: server.channel } });
+      });
+    } catch (error) {
+      if (returned && operation === 'create') throw new AiClientTaskUnknownError();
+      throw error;
+    }
+  };
   return Object.freeze({
+    createTask: (request: AiClientApplicationRequest, value: unknown) => taskOperation(request, value, 'create'),
+    readTaskCreation: (request: AiClientApplicationRequest, value: unknown) => taskOperation(request, value, 'readCreation'),
     async readPublic(request: AiClientApplicationRequest, value: unknown) {
       const input = commandSchema.safeParse(structuredClone(value));
       if (!input.success || !['catalog', 'help'].includes(input.data.kind)) return fail('AI_CLIENT_INVALID_INPUT');
@@ -193,7 +238,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     },
     capabilities: Object.freeze({ materialKinds: ['catalog', 'help', 'profile', 'order', 'cancellation_preview'] as const,
       persistentMaterials: 'authenticated_client_session_only' as const, publicReads: ['catalog', 'help'] as const,
-      tasks: 'unavailable' as const, models: 'unavailable' as const, events: 'unavailable' as const,
+      tasks: taskDependencies ? 'create_and_read_only' as const : 'unavailable' as const, models: 'unavailable' as const, events: 'unavailable' as const,
       downloads: 'unavailable' as const, historyMigration: 'unavailable' as const,
       excluded: ['operator_tools', 'staff_tools', 'tenant_inventory', 'costs', 'review_notes', 'model_urls'] as const })
   });
