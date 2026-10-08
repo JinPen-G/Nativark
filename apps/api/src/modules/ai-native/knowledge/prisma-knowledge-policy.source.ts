@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { PrismaClient } from '@prisma/client';
 import type { AiExecutionContext } from '@rental-os/shared';
 import type { FormalActionPolicy, FormalKnowledgePolicySource, FormalMemoryPolicySource, FormalPolicyResource } from './formal-knowledge-authorization.adapter';
@@ -33,7 +34,7 @@ export class PrismaKnowledgeActionPolicySource {
     if (!row || Object.entries(key).some(([name, value]) => (row as unknown as Record<string, unknown>)[name] !== value)
       || !row.enabled || !Number.isSafeInteger(row.revision) || row.revision < 1
       || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime())
-      || row.expiresAt.getTime() <= this.clock().getTime() || fingerprint(row.resource) !== fingerprint(resource)
+      || row.expiresAt.getTime() <= this.clock().getTime() || !isDeepStrictEqual(row.resource, resource)
       || !Array.isArray(row.requiredPermissions) || row.requiredPermissions.length < 1 || row.requiredPermissions.length > 64
       || row.requiredPermissions.some(p => typeof p !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9:._-]{0,190}$/u.test(p))
       || new Set(row.requiredPermissions).size !== row.requiredPermissions.length) return null;
