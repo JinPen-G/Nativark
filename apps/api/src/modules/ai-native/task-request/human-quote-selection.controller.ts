@@ -1,8 +1,9 @@
-import { Body, Controller, HttpException, Inject, Post } from '@nestjs/common';
+import { Body, Controller, HttpException, Inject, Post, Req } from '@nestjs/common';
 import { AI_QUOTE_SELECTION_HTTP_DRAFT } from '@rental-os/shared';
-import type { PrismaQuoteSelectionRepository } from './prisma-quote-selection.repository';
+import type { composeRequestBoundQuoteSelections, AiSceneHttpRequest } from '../scenes/request-bound-scenes.application';
 
 export const AI_HUMAN_QUOTE_SELECTIONS = Symbol('AI_HUMAN_QUOTE_SELECTIONS');
+export const AI_HUMAN_QUOTE_SELECTION_REQUESTS = Symbol('AI_HUMAN_QUOTE_SELECTION_REQUESTS');
 
 /** Opt-in transport. Every operation resolves current server identity and the
  * original business Guard inside the repository; no caller scope or authority.
@@ -10,7 +11,7 @@ export const AI_HUMAN_QUOTE_SELECTIONS = Symbol('AI_HUMAN_QUOTE_SELECTIONS');
  */
 @Controller(AI_QUOTE_SELECTION_HTTP_DRAFT.basePath)
 export class AiHumanQuoteSelectionController {
-  constructor(@Inject(AI_HUMAN_QUOTE_SELECTIONS) private readonly selections: PrismaQuoteSelectionRepository) {}
+  constructor(@Inject(AI_HUMAN_QUOTE_SELECTION_REQUESTS) private readonly selections: ReturnType<typeof composeRequestBoundQuoteSelections>) {}
   private async respond<T>(work: () => Promise<T>) {
     try { return await work(); }
     catch (error) {
@@ -25,9 +26,9 @@ export class AiHumanQuoteSelectionController {
     }
   }
   @Post()
-  select(@Body() body: unknown) { return this.respond(() => this.selections.select(body)); }
+  select(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.selections.select(request, body)); }
   @Post('read')
-  read(@Body() body: unknown) { return this.respond(() => this.selections.read(body)); }
+  read(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.selections.read(request, body)); }
   @Post('reconcile')
-  reconcile(@Body() body: unknown) { return this.respond(() => this.selections.reconcile(body)); }
+  reconcile(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.selections.reconcile(request, body)); }
 }

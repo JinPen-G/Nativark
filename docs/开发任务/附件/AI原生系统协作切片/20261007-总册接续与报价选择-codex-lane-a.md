@@ -1,3 +1,21 @@
+## CA01/05/09 请求绑定场景入口（20261008）
+
+从317826933f8d3f8144ff9eb8a0dbda9e73e40654接续，源码无WIP/未完成git操作，保留output与唯一心跳da772047。主线确认本批原场景/选择module、controller及新request-bound-scenes.application无其他作者争写。
+
+新增composeRequestBoundOriginalScenes、composeRequestBoundQuoteSelections、composeRequestBoundHumanQuoteOrder：服务端固定enabled=true及operator/staff audience；仅读取请求headers.authorization，进入await前固定Bearer、requestId与命令克隆。在独立ALS中按本请求凭据装配原Auth/Guard、原请求仓储、选择与原人类审批应用；不接受预绑定credentials/originals，不接受body里的scope/owner/lease，不回退到ambient身份。调用结束使该凭据提供器失效；没有持久令牌、副作用队列或新任务状态机。
+
+两个既有registerHttp现在需要无credentials/originals的正式依赖以及options，controller显式@Req读取请求。raw服务器应用仍保留原register/registerApplication；请求绑定分别用AI_ORIGINAL_SCENE_REQUESTS、AI_HUMAN_QUOTE_SELECTION_REQUESTS和AI_HUMAN_QUOTE_ORDER_REQUESTS，避免Nest容器混用接口。AiHumanQuoteSelectionModule.registerRequestBoundApplication只提供原选择绑定的人类审阅/决定/决定收据/重准备资格，不提供publish、prepare、submit或运行租约。人类决定仍不创建订单，原Core执行只留在服务器/runner应用；未注册AppModule或新增公开审批路由。
+
+扩现有A两份测试，不新建测试脚本：真实Bearer由AuthService签发，实际当前会话、原Guard、独立ALS、原请求/选择持久化与人类AiApprovalService/CAS均被驱动；DB/业务事实仍为明确替身，审批前运行lease/step为显式测试前置。原请求测试包含禁用/ambient装配拒绝、缺header/错误令牌拒绝、并发不能借身份、await前header/body快照、读后撤权；选择/审批测试包含同请求原材料重建、选中不等于批准、私带lease拒绝、真实人类批准与原收据、注销拒绝、无HTTP提交方法。
+
+离线环境沿用上轮：固定无效DATABASE_URL；本树绝对AI_OFFLINE_WRITE_ROOT/audit；TMP/TEMP/TMPDIR/XDG_CACHE_HOME/npm_config_cache均本树output/lane-a-original-request-tmp；DISABLE_V8_COMPILE_CACHE=1。首次命令（audit output/ca-request-bound.audit）：
+
+`node --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs --require ./tests/fixtures/ai-native/lane-b-local-runtime.cjs --test --test-name-pattern='opt-in module|request-bound' tests/ai-native-lane-a-original-scene-host.test.cjs tests/ai-native-lane-a-human-quote-selection.test.cjs`
+
+首次2pass/1fail，失败是新审批前置夹具缺aiTaskEvent delegate导致原注册事务AI_STORAGE_UNAVAILABLE；只给夹具补表，不改任何产品门槛。最终仅受影响`--test-name-pattern='request-bound quote' tests/ai-native-lane-a-human-quote-selection.test.cjs`复验1pass/0fail/0skip/0todo，退出0，不拼称一次3/3。API使用下节相同本树源码paths+隔离Prisma的noEmit程序，output/ca-request-bound-types.audit，API source diagnostics:0、退出0；diff0。未做真实HTTP传输/Nest服务器/MySQL/模型/支付/设备或生产验证，不生成shared dist，不读.env/安装/启服务/外联。
+
+Runtime替换继续只在请求宿主之后的驱动边界，当前Bearer/人类选择/审批/Core权威不迁入引擎；Provider SDK保持唯一Gateway后的独立边界，本片无SDK/协议类型。回退不装配request-bound模块即可保留原服务器应用，不恢复ambient HTTP模式、不撤销已记录决定或重派unknown。正常澄清/等待确认checkpoint及新方案实际重新准备仍依赖06/07固定交付；配置/资料CAS和原收据未齐保持unavailable。
+
 ## CA05/09 临时代班接续：正式审批投影与原操作重准备资格（20261008）
 
 固定导入07前置0a64993e→62ce491b、79f3e02a→c79477b0、359e52d9→90d23a72，没有覆盖07源码。现有选择应用的readSelectedProposal、decideSelectedProposal、readSelectedDecisionReceipt改消费controlled.application的正式JSON-schema校验输出；原facts快照只在内部参与选择/提案绑定，不再作为审阅输出。新增readSelectedReprepareEligibility({selection,request})消费07原资格读者，先核对相同选择、原输入和proposal，再按原批准/消费/业务幂等收据返回pending/rejected/committed等原状态。资格为true仅表示可提供新材料，不创建新run、不新建proposal、不重准备或重派。
