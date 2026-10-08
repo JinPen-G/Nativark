@@ -27,7 +27,7 @@ export interface AiClientSessionSource {
   withRead?<T>(operation: ClientReadOperation, value: unknown, read: (context: ClientRequestContext) => Promise<T>): Promise<T>;
 }
 
-type ClientReadOperation = 'catalog' | 'availability' | 'orders' | 'order' | 'corporateIdentities';
+type ClientReadOperation = 'catalog' | 'availability' | 'orders' | 'order' | 'corporateIdentities' | 'profile' | 'cancellationPreview';
 
 /** Request-bound production adapter: credentials are supplied by the server
  * request host, never by model/tool parameters. The existing Guard resolves
@@ -57,18 +57,19 @@ export function createAiGuardedClientSession(guard: Pick<ApiAuthGuard, 'canActiv
     current: () => authorize('GET', 'auth/me', {}, async context => context),
     withRead: async <T>(operation: ClientReadOperation, value: unknown, read: (context: ClientRequestContext) => Promise<T>) => {
       const routes = { catalog: 'catalog', availability: 'availability', orders: 'my/orders',
-        order: 'orders', corporateIdentities: 'membership/corporates' } as const;
+        order: 'orders', corporateIdentities: 'membership/corporates', profile: 'profile', cancellationPreview: 'orders' } as const;
       if (!Object.prototype.hasOwnProperty.call(routes, operation)) throw new Error('AI_CLIENT_CAPABILITY_UNAVAILABLE');
       let path: string = routes[operation];
-      if (operation === 'order') {
+      const orderRead = operation === 'order' || operation === 'cancellationPreview';
+      if (orderRead) {
         const parsed = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).safeParse(value);
         if (!parsed.success) throw new Error('AI_CLIENT_INVALID_INPUT');
-        path += `/${parsed.data}`;
+        path += `/${parsed.data}${operation === 'cancellationPreview' ? '/cancel/preview' : ''}`;
       }
-      const method = operation === 'availability' ? 'POST' : 'GET';
-      return authorize(method, path, operation === 'order' ? {} : value, async before => {
+      const method = operation === 'availability' || operation === 'cancellationPreview' ? 'POST' : 'GET';
+      return authorize(method, path, orderRead ? {} : value, async before => {
         const result = await read(before);
-        await authorize(method, path, operation === 'order' ? {} : value, async after => {
+        await authorize(method, path, orderRead ? {} : value, async after => {
           if (requestFingerprint(before) !== requestFingerprint(after)) throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
         });
         return result;
@@ -78,7 +79,8 @@ export function createAiGuardedClientSession(guard: Pick<ApiAuthGuard, 'canActiv
 }
 
 type ClientReadPort = Pick<ClientApiService,
-  'channelBootstrap' | 'publicCatalog' | 'catalog' | 'availability' | 'myOrders' | 'getOrder' | 'corporateIdentities'>;
+  'channelBootstrap' | 'publicCatalog' | 'catalog' | 'availability' | 'myOrders' | 'getOrder' | 'corporateIdentities'>
+  & Partial<Pick<ClientApiService, 'profile' | 'previewCancellation' | 'publicDocument'>>;
 
 function assertContextSource(source: AiClientSessionSource) {
   if (!source || typeof source.current !== 'function') throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
@@ -123,9 +125,21 @@ export function composeAiClientScenes(input: {
     guest: Object.freeze({
       bootstrap: (tenantCode: string, channel: 'wechat_miniprogram' | 'app' | 'web' = 'wechat_miniprogram', appId?: string) =>
         input.client.channelBootstrap(tenantCode, channel, appId),
-      catalog: (tenantCode: string, serviceCode: string) => input.client.publicCatalog(tenantCode, serviceCode)
+      catalog: (tenantCode: string, serviceCode: string) => input.client.publicCatalog(tenantCode, serviceCode),
+      help: (tenantCode: string) => {
+        if (typeof input.client.publicDocument !== 'function') throw new Error('AI_CLIENT_CAPABILITY_UNAVAILABLE');
+        return input.client.publicDocument(tenantCode, 'help');
+      }
     }),
     member: Object.freeze({
+      profile: async () => {
+        if (typeof input.client.profile !== 'function') throw new Error('AI_CLIENT_CAPABILITY_UNAVAILABLE');
+        return memberRead('profile', {}, context => input.client.profile!(context));
+      },
+      cancellationPreview: async (orderId: string) => {
+        if (typeof input.client.previewCancellation !== 'function') throw new Error('AI_CLIENT_CAPABILITY_UNAVAILABLE');
+        return memberRead('cancellationPreview', orderId, context => input.client.previewCancellation!(context, orderId));
+      },
       catalog: async () => memberRead('catalog', {}, context => input.client.catalog(context)),
       availability: async (value: { locationId: string; startAt: string; endAt: string; lines: Array<{ itemGroupId: string; quantity: number }> }) => {
         const frozen: ClientAvailabilityRequestDto = await validation.transform(structuredClone(value), {

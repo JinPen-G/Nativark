@@ -1,3 +1,25 @@
+## CA08 客户请求材料与同会话来源（20261008）
+
+开工d432b7dd，源码干净、无MERGE_HEAD/CHERRY_PICK_HEAD；主线确认只认领client-scene.composition.ts、新scenes/client-request.application.ts、既有original-scene-host客户用例及本记录。复用composeAiClientScenes/createAiGuardedClientSession与ClientApiService现有投影；原读者仅补profile、publicDocument(help)、previewCancellation及对应Guard路由，不新造Client/Auth/企业鉴权或修改前端。
+
+composeRequestBoundClientApplication(dependencies,serverConfiguration)只提供prepare(request,command)/readSource(request,{materialRef})。服务器固定enabled/tenantCode/serviceCode/channel/appId，body严格只允许catalog/help/profile/order/cancellation_preview；不接受actor/scope/tenant/发布证明、任务ID或raw办理命令。匿名通过原ApiAuthGuard的公开路径/IP策略后只读已发布目录/帮助；登录路径只接ClientAuthService客户令牌、当前active会员和本人订单规则，不复用operator/staff身份。企业账号仍按原clientOwnsOrder，不因付款企业或同事身份扩大订单范围。
+
+每次读取前后复验正式channelBootstrap中的发布服务和当前客户会话；不返回bootstrap的adminLogin/平台设置，仅保留选中服务的公开字段。冻结ClientApi原客户投影（正文≤65536 UTF-8字节）和本次绑定hash，返回随机materialRef；实例内最多128条，引用有效五分钟、访问时惰性清理或容量淘汰，不声称到点物理删除，不持久化Bearer/session令牌，不冒充原AI任务历史。readSource只能使用实例已签发引用，先比对原客户/企业类型/会话/空间/渠道绑定，再重读同一固定操作并核对正文hash；会话变化、停发布、数据改变、过期或重启丢引用均拒绝，不换源补旧结果。取消预览仅忽略calculatedAt观察时点作比较，金额/币种/estimated状态不忽略；返回仍是原冻结材料，另给verifiedAt。
+
+办理出口仅取消预览成功后给既有POST /api/client/v1/orders/:id/cancel及必填reason，明确显式人工动作、not_attempted；没有cancelOrder/支付/退款/资料写入方法，付款只能原收银台及回调。匿名读只可用已发布空间；本AI门面停发布即不可用，但未修改原客户端售后API的既有可用规则。下载/事件未取得正式客户投影合同，不转发原HTML、任意附件或模型URL，capabilities明确unavailable。
+
+复用原客户单项用例，不加测试文件：实际ClientAuthService签发/解析客户令牌、ApiAuthGuard客户分支与ClientApiService渠道bootstrap/publicDocument/publicCatalog门、profile/getOrder/previewCancellation投影被驱动。DB行、Core订单/目录/取消费事实、个人profileRow/currentWorkspace及buildCatalog底层投影是显式替身；不是完整Core价目或真实DB/HTTP/存储验收。用例覆盖公开帮助/目录、匿名不可读资料、本人订单与字段剔除、企业不得读同事订单、取消估价与真实路由材料、旧引用不跨客户类型/会话/停发布/TTL、taskId注入拒绝、原Guard安全策略未就绪拒绝与原读后注销拒绝。
+
+沿用严格离线环境，audit为output/ca-client-request.audit，命令：
+
+`node --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs --require ./tests/fixtures/ai-native/lane-b-local-runtime.cjs --test --test-name-pattern='client scene authenticates' tests/ai-native-lane-a-original-scene-host.test.cjs`
+
+首次1/1通过；随后核对并补齐匿名原Guard路径（不改Guard）与同用例断言，最终同项1pass/0fail/0skip/0todo、退出0，不累计为两项。必要API源码noEmit 0diagnostics，diff0，type/smoke audit无阻断；未扩审查/矩阵。无schema/shared出口/client生成/迁移/启服务/安装/真实外联；旧output/生成锁/previous/temp全部保留。
+
+精确主线缺口：task-current-identity.authority.ts:18/27仅operator/staff→user；task-request/original-request.authority.ts:28-31/55-56的creationRules/current同样限定该身份；public-ai-gateway.service.ts:62-63禁止客户执行。因此tasks/models/historyMigration保持unavailable，不把customer伪造成user、不按taskId接管匿名历史。实时报价/建单、持久客户端材料/原会话显式迁移、事件/下载的客户端来源合同也未在本包建立；公开目录价目不称实时报价。若主线发布公共叶子，可从本应用的严格Command（五种kind）、materialRef/expire/source/hash/人工handoff及不可用能力声明提取，需先保留instance-local语义，不能直接宣称durable任务合同。
+
+Runtime独立替换只消费本应用的受权冻结材料/人工出口；这128条短期引用是本进程读回能力，不是外部引擎state、长期记忆或授权记录，迁移不可重建另一客户旧引用。Provider SDK边界仍唯一Gateway transport，但当前客户执行未获准所以完全不调用；不能为“可替换”安装SDK或启第二预算账。回退停装本应用并使用原客户端读/办理入口，原Auth/会员关系/订单/支付事实不变；进程引用失效须用户重新读取，不能静默回填为历史成功。R04正式澄清仍外部阻塞，与本客户只读材料包无依赖。
+
 ## CA05/09 新人类材料到正式重新准备（20261008）
 
 开工HEAD为044252be，只有保留output，无MERGE_HEAD/CHERRY_PICK_HEAD；主线确认A场景独占。固定依赖e510edd264c722fa4b7759dbf8a22c87fd18ffcc只接c31d9199八个生产文件与2754cac0附件绑定fixture精确更正；647119a901bd400c0d8e8edbeb10ad264f9ad666只接7b6513e6正式工厂、held-lease源及原request-bound审批三个生产文件。两次索引与固定源比对一致，未搬07测试链、原A blob或schema。主线已有等价前置，不需重摘这两个依赖提交。

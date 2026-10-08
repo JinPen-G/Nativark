@@ -398,7 +398,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const { ClientApiService } = require('../apps/api/src/modules/client/client-api.service');
   const { getRequestIdentity } = require('../apps/api/src/common/request-identity');
   const { composeAiClientScenes, createAiGuardedClientSession } = require('../apps/api/src/modules/ai-native/client-scene.composition');
-  let revoked = false, revokeDuringRead = false, authorization, reads = 0;
+  let revoked = false, revokeDuringRead = false, authorization, reads = 0, rateAllowed = true;
   const session = { id: 'session-client', expiresAt: new Date('2027-01-01'), tenant: { code: 'tenant', status: 'ACTIVE' },
     customer: { customerType: 'personal', name: 'Synthetic', phone: 'synthetic' },
     workspace: { tenantId: 'tenant-client', status: 'ACTIVE', code: 'camera', name: 'Synthetic', categoryCode: 'camera' } };
@@ -411,12 +411,12 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     wid: 'workspace-client', iat: 1, exp: Math.floor(new Date('2027-01-01').getTime() / 1000) });
   authorization = `Bearer ${token}`;
   const guard = new ApiAuthGuard({ resolveAccessContext: async () => { throw Error('operator auth forbidden'); } }, undefined,
-    auth, { assertAllowed: async () => {} });
+    auth, { assertAllowed: async () => { if (!rateAllowed) throw Error('client policy unavailable'); } });
   const client = Object.assign(Object.create(ClientApiService.prototype), { core: { getOrder: async (tenantId, id) => {
     reads++; assert.equal(tenantId, 'tenant-client'); assert.equal(getRequestIdentity().workspaceId, 'workspace-client');
     if (revokeDuringRead) revoked = true;
     return { id, tenantId, customerId: id === 'other-order' ? 'another-customer' : 'person-client',
-      status: 'reserved', lines: [], chargeLines: [], allocations: [], internalNote: 'never expose' };
+      status: 'reserved', quoteId: 'quote-client', currency: 'CNY', lines: [], chargeLines: [], allocations: [], internalNote: 'never expose' };
   } } });
   const source = createAiGuardedClientSession(guard, { current: async () => ({ authorization, ip: '127.0.0.1' }) });
   const app = composeAiClientScenes({ client, session: source });
@@ -428,4 +428,66 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   await assert.rejects(app.member.order('own-order')); authorization = `Bearer ${token}`;
   revokeDuringRead = true;
   await assert.rejects(app.member.order('own-order'), e => e.getStatus?.() === 401);
+  revoked = false; revokeDuringRead = false;
+  let published = true, now = new Date();
+  const workspace = { id: 'workspace-client', code: 'camera', name: 'Synthetic', categoryCode: 'camera', isDefault: true, status: 'ACTIVE' };
+  const channelProfile = () => ({ helpIntro: 'Public help only', helpFaqJson: [{ question: 'How?', answer: 'Ask the merchant.' }],
+    updatedAt: new Date('2026-10-01'), publishedWorkspaces: published ? [{ workspaceId: workspace.id, workspace }] : [] });
+  Object.assign(client, {
+    prisma: { tenant: { findFirst: async ({ where }) => where.code === 'tenant' ? { id: 'tenant-client', code: 'tenant', name: 'Synthetic' } : null },
+      clientChannelProfile: { findUnique: async () => channelProfile() }, tenantAppearanceProfile: { findUnique: async () => null },
+      businessWorkspace: { findMany: async () => [{ id: workspace.id }], findFirst: async ({ where }) => {
+        assert.equal(where.clientChannelPublications.some.enabled, true);
+        return published && where.tenantId === 'tenant-client' && where.code === 'camera' ? workspace : null;
+      } } },
+    tenantIntegrations: { catalog: async () => ({ configs: [] }) },
+    buildCatalog: async (_tenant, tenantCode, current) => ({ tenantCode, workspace: current, items: [] }),
+    profileRow: async context => ({ id: context.customerId, customerType: context.customerType, name: 'Synthetic',
+      phoneMasked: '***', identityVerified: false, account: { status: 'active' }, contacts: [], internalReview: 'never expose' }),
+    currentWorkspace: async () => workspace,
+    context: async () => ({ profile: {}, settings: {} }),
+    business: { getQuote: () => ({ id: 'quote-client' }), calculateCancellationCharge: () => 12 }
+  });
+  Object.assign(client.core, { listCategories: () => [{ code: 'camera', name: 'Synthetic' }],
+    getBusinessSettings: () => ({ fulfillment: { enabledModes: [] } }) });
+  const { composeRequestBoundClientApplication } = require('../apps/api/src/modules/ai-native/scenes/client-request.application');
+  const dependencies = { guard, client, clock: () => now };
+  const configuration = { enabled: true, tenantCode: 'tenant', serviceCode: 'camera', channel: 'app' };
+  const requests = composeRequestBoundClientApplication(dependencies, configuration), request = { headers: { authorization } };
+  assert.throws(() => composeRequestBoundClientApplication({ ...dependencies, session: source }, configuration), /AI_CLIENT_CONTEXT_UNAVAILABLE/);
+  const help = await requests.prepare({ headers: {} }, { kind: 'help' });
+  assert.equal(help.material.intro, 'Public help only'); assert.ok(Object.isFrozen(help.material));
+  rateAllowed = false;
+  await assert.rejects(requests.readSource({ headers: {} }, { materialRef: help.materialRef }), /client policy unavailable/);
+  rateAllowed = true;
+  assert.equal((await requests.prepare({ headers: {} }, { kind: 'catalog' })).material.workspace.workspaceCode, 'camera');
+  await assert.rejects(requests.prepare({ headers: {} }, { kind: 'profile' }), /AI_CLIENT_CONTEXT_UNAVAILABLE/);
+  await assert.rejects(requests.prepare(request, { kind: 'order', orderId: 'own-order', tenantId: 'forged' }), /AI_CLIENT_INVALID_INPUT/);
+  const own = await requests.prepare(request, { kind: 'order', orderId: 'own-order' });
+  assert.equal(own.material.internalNote, undefined);
+  assert.equal((await requests.readSource(request, { materialRef: own.materialRef })).materialHash, own.materialHash);
+  assert.equal((await requests.prepare(request, { kind: 'profile' })).material.internalReview, undefined);
+  const preview = await requests.prepare(request, { kind: 'cancellation_preview', orderId: 'own-order' });
+  assert.equal(preview.material.cancellationCharge, 12); assert.equal(preview.material.estimated, true);
+  assert.equal(preview.handoff.path, '/api/client/v1/orders/own-order/cancel'); assert.equal(preview.handoff.execution, 'not_attempted');
+  assert.equal((await requests.readSource(request, { materialRef: preview.materialRef })).materialHash, preview.materialHash);
+  await assert.rejects(requests.prepare(request, { kind: 'order', orderId: 'other-order' }), e => e.getStatus?.() === 404);
+  session.customer.customerType = 'corporate';
+  assert.equal((await requests.prepare(request, { kind: 'profile' })).material.customerType, 'corporate');
+  await assert.rejects(requests.prepare(request, { kind: 'order', orderId: 'other-order' }), e => e.getStatus?.() === 404);
+  const beforeSwitchRead = reads;
+  await assert.rejects(requests.readSource(request, { materialRef: own.materialRef }), /AI_CLIENT_CONTEXT_UNAVAILABLE/);
+  assert.equal(reads, beforeSwitchRead); session.customer.customerType = 'personal';
+  session.id = 'new-client-session';
+  const switchedRequest = { headers: { authorization: `Bearer ${auth.sign({ typ: 'client', sub: 'person-client', tid: 'tenant-client',
+    sid: session.id, wid: 'workspace-client', iat: 1, exp: Math.floor(new Date('2027-01-01').getTime() / 1000) })}` } };
+  await assert.rejects(requests.readSource(switchedRequest, { materialRef: own.materialRef }), /AI_CLIENT_CONTEXT_UNAVAILABLE/);
+  session.id = 'session-client';
+  published = false;
+  await assert.rejects(requests.readSource(request, { materialRef: own.materialRef }), /AI_CLIENT_CONTEXT_UNAVAILABLE/);
+  published = true; now = new Date(now.getTime() + 300001);
+  await assert.rejects(requests.readSource(request, { materialRef: own.materialRef }), /AI_CLIENT_MATERIAL_STALE/);
+  await assert.rejects(requests.readSource(request, { materialRef: own.materialRef, taskId: 'foreign-history' }), /AI_CLIENT_INVALID_INPUT/);
+  for (const feature of ['tasks', 'models', 'events', 'downloads', 'historyMigration']) assert.equal(requests.capabilities[feature], 'unavailable');
+  assert.equal(requests.start, undefined); assert.equal(requests.cancelOrder, undefined);
 });
