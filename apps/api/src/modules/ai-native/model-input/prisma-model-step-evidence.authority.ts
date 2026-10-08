@@ -58,8 +58,10 @@ export class PrismaModelStepEvidenceAuthority extends PrismaTaskStepEvidenceAuth
     // Unknown may precede financial admission. Preserve it without inventing a
     // no-dispatch fact. Known completion requires same-ledger dispatch evidence.
     if (!artifact.completeMeasurement) {
-      if (artifact.outcome === 'UNKNOWN' && (!isGatewayResult(artifact.payload) || artifact.payload.status !== 'unknown'
-        || artifact.payload.requestId !== invocation.callId || requestFingerprint(artifact.payload.actual) !== invocation.configurationHash)) throw denied();
+      const result = artifact.payload;
+      if (artifact.outcome === 'UNKNOWN' && (!isGatewayResult(result)
+        || (result.status !== 'unknown' && !(result.status === 'completed' && result.usage.kind === 'unknown'))
+        || result.requestId !== invocation.callId || requestFingerprint(result.actual) !== invocation.configurationHash)) throw denied();
       return { inputRef: saved.id, inputHash, invocationId: invocation.id, unresolved: true };
     }
     const result = artifact.payload;

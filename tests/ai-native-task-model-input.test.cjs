@@ -69,7 +69,8 @@ async function setup() {
   return { ...h, root, config, control, material, command, register };
 }
 
-for (const terminal of ['unknown', 'succeeded']) test(`formal model transition persists ${terminal} using bound evidence, never a second dispatch`, async () => {
+for (const terminal of ['unknown', 'succeeded', 'missing_usage']) test(`formal model transition persists ${terminal} using bound evidence, never a second dispatch`, async () => {
+  const expectedStatus = terminal === 'succeeded' ? 'succeeded' : 'unknown';
   const h = await setup(); await h.root.publish(h.command());
   const r = await h.register(false);
   const { AiStepTransitionRepository } = require('../apps/api/src/modules/ai-native/ai-step-transition.repository');
@@ -118,18 +119,48 @@ for (const terminal of ['unknown', 'succeeded']) test(`formal model transition p
       runId: step.runId, stepId: step.id, actionId: step.actionId, sceneCode: invocation.sceneCode,
       priceVersion: invocation.priceVersion, configRevision: config.configRevision, configurationHash: invocation.configurationHash };
   }
-  const command = h.root.commands.transition(terminal === 'unknown' ? 'unknown' : 'succeed', r.ref, r.lease, artifact.id);
+  if (terminal === 'missing_usage') {
+    h.control.result = { text: 'Summary without provider usage' };
+    const executor = await h.root.executors.resolve(TASK_TEXT_MODEL_TOOL, AI_TOOL_DRAFT_VERSION);
+    const result = await executor.execute({ ...r.binding, lease: r.lease }, new AbortController().signal);
+    assert.equal(result.kind, 'unknown'); assert.equal(result.payload.status, 'completed');
+    assert.equal(result.payload.usage.kind, 'unknown'); assert.equal(h.control.events.includes('settle'), false);
+    Object.assign(artifact, { payload: result.payload, outcome: 'UNKNOWN',
+      contentHash: require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint(result.payload),
+      outputBytes: BigInt(Buffer.byteLength(JSON.stringify(result.payload))) });
+    h.state.aiTaskResultArtifact[0] = artifact;
+    for (const charge of h.state.aiTaskExecutionCharge) charge.status = 'UNKNOWN';
+  }
+  const command = h.root.commands.transition(expectedStatus === 'unknown' ? 'unknown' : 'succeed', r.ref, r.lease, artifact.id);
   const invocation = h.state.aiGatewayInvocation[0], originalActor = invocation.actorId;
   invocation.actorId = 'foreign';
   await assert.rejects(transitions.transition(command)); assert.equal(h.state.aiStep[0].status, 'RUNNING');
   // Use the authenticated persisted invocation owner, never a caller-selected actor.
   h.state.aiGatewayInvocation[0].actorId = originalActor;
+  if (terminal === 'missing_usage') {
+    const observed = { ...h.state.aiTaskResultArtifact[0] };
+    const reported = { ...observed.payload, usage: { kind: 'reported', inputTokens: 1, outputTokens: 2 } };
+    assert.equal(require('../apps/api/src/modules/ai-native/gateway-contract-validation').isGatewayResult(reported), true);
+    Object.assign(h.state.aiTaskResultArtifact[0], { payload: reported,
+      contentHash: require('../apps/api/src/modules/rental-core/rental-idempotency.repository').requestFingerprint(reported),
+      outputBytes: BigInt(Buffer.byteLength(JSON.stringify(reported))) });
+    await assert.rejects(authority.resolve(command));
+    h.state.aiTaskResultArtifact[0] = observed;
+    await assert.rejects(authority.resolve(h.root.commands.transition('succeed', r.ref, r.lease, artifact.id)));
+  }
   await authority.resolve(command);
   const committed = await transitions.transition(command);
-  assert.equal(committed.event.data.status, terminal);
-  assert.equal(h.state.aiStep[0].effect, terminal === 'unknown' ? 'POSSIBLE' : 'NONE');
+  assert.equal(committed.event.data.status, expectedStatus);
+  assert.equal(h.state.aiStep[0].effect, expectedStatus === 'unknown' ? 'POSSIBLE' : 'NONE');
   assert.equal(h.control.sent.length, terminal === 'unknown' ? 0 : 1);
+  if (terminal === 'missing_usage') {
+    assert.equal(h.state.aiTaskResultArtifact[0].payload.status, 'completed');
+    assert.equal(h.state.aiTaskResultArtifact[0].payload.usage.kind, 'unknown');
+    assert.equal(h.state.aiTaskResultArtifact[0].completeMeasurement, false);
+    assert.equal(h.control.events.includes('settle'), false);
+  }
   await assert.rejects(transitions.transition(command));
+  assert.equal(h.control.sent.length, terminal === 'unknown' ? 0 : 1);
 });
 
 test('current-authorized frozen input produces the original plan, step, invocation and one public Gateway call', async () => {
