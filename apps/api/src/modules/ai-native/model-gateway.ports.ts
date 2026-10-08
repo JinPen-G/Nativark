@@ -25,17 +25,19 @@ const mediaReference = {
   contentHash: z.string().regex(/^[a-f0-9]{64}$/u),
   data: z.string().min(4).max(699052).regex(/^[A-Za-z0-9+/]+={0,2}$/u)
 };
-const protocolContent = z.discriminatedUnion('kind', [
+export const modelProtocolContentSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('text'), text: z.string().max(32000) }).strict(),
   z.object({ kind: z.literal('image'), mediaType: z.enum(['image/png', 'image/jpeg']), ...mediaReference }).strict(),
   z.object({ kind: z.literal('audio'), mediaType: z.literal('audio/wav'), ...mediaReference }).strict()
 ]);
+export type ModelProtocolContent = z.infer<typeof modelProtocolContentSchema>;
 // Resolved protocol bytes are not a public attachment authorization or a task input.
-export const modelProtocolRequestSchema = modelRequestSchema.extend({
+export const modelProtocolRequestBaseSchema = modelRequestSchema.extend({
   messages: z.array(z.object({ role: z.enum(['system', 'user', 'assistant']),
-    content: z.union([z.string().max(32000), z.array(protocolContent).min(1).max(16)]) }).strict()).min(1).max(64),
+    content: z.union([z.string().max(32000), z.array(modelProtocolContentSchema).min(1).max(16)]) }).strict()).min(1).max(64),
   features: z.array(z.enum(['tools', 'structuredOutput', 'streaming', 'image', 'audio'])).max(5).optional()
-}).superRefine((input, ctx) => {
+});
+export const modelProtocolRequestSchema = modelProtocolRequestBaseSchema.superRefine((input, ctx) => {
   let size = 0, mediaCount = 0;
   for (const message of input.messages) {
     if (typeof message.content === 'string') size += Buffer.byteLength(message.content);

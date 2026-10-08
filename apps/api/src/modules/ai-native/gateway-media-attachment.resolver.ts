@@ -1,0 +1,63 @@
+import { createHash } from 'node:crypto';
+import { ModelGatewayError, type GatewayContext } from './model-gateway.ports';
+import type { GatewayMediaAttachmentResolver } from './gateway-intent';
+
+export interface GatewayMediaAttachmentReference {
+  kind: 'image' | 'audio';
+  attachmentId: string;
+  attachmentRevision: number;
+}
+
+/** The authority must perform the current request-bound identity, tenant/workspace,
+ * object ownership, active revision and media capability checks. A reference from
+ * the Agent is never an authorization grant. */
+export interface GatewayAuthorizedMediaAttachment {
+  attachmentId: string;
+  attachmentRevision: number;
+  mediaType: 'image/png' | 'image/jpeg' | 'audio/wav';
+  sizeBytes: number;
+  contentHash: string;
+  readBinding: unknown;
+}
+
+export interface GatewayMediaAttachmentAuthority {
+  authorize(context: GatewayContext, reference: GatewayMediaAttachmentReference, signal: AbortSignal): Promise<GatewayAuthorizedMediaAttachment | null>;
+}
+
+/** Reads bytes only from a server-created, authority-bound binding. It must not
+ * accept an attachment id, URL, storage key or credential from the Agent. */
+export interface GatewayMediaAttachmentBytesReader {
+  read(binding: GatewayAuthorizedMediaAttachment, signal: AbortSignal): Promise<Uint8Array>;
+}
+
+/** Composition adapter for the public Gateway media port. Storage/ACL policy is
+ * supplied by the host; missing or inconsistent evidence fails closed. */
+export class AuthorizedGatewayMediaAttachmentResolver implements GatewayMediaAttachmentResolver {
+  constructor(
+    private readonly authority: GatewayMediaAttachmentAuthority,
+    private readonly reader: GatewayMediaAttachmentBytesReader,
+    private readonly maxBytes = 524288
+  ) {
+    if (typeof authority?.authorize !== 'function' || typeof reader?.read !== 'function'
+      || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 524288) throw new ModelGatewayError('CONFIG_INVALID');
+  }
+
+  async resolve(context: GatewayContext, reference: GatewayMediaAttachmentReference, signal: AbortSignal) {
+    if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+    let grant: GatewayAuthorizedMediaAttachment | null;
+    try { grant = await this.authority.authorize(structuredClone(context), structuredClone(reference), signal); }
+    catch (error) { if (error instanceof ModelGatewayError) throw error; throw new ModelGatewayError('CAPABILITY_UNSUPPORTED'); }
+    if (!grant || grant.attachmentId !== reference.attachmentId || grant.attachmentRevision !== reference.attachmentRevision
+      || !Number.isSafeInteger(grant.sizeBytes) || grant.sizeBytes < 1 || grant.sizeBytes > this.maxBytes
+      || !/^[a-f0-9]{64}$/u.test(grant.contentHash)) return null;
+    if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+    let bytes: Uint8Array;
+    try { bytes = await this.reader.read(structuredClone(grant), signal); }
+    catch (error) { if (error instanceof ModelGatewayError) throw error; throw new ModelGatewayError('CAPABILITY_UNSUPPORTED'); }
+    if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength !== grant.sizeBytes
+      || createHash('sha256').update(bytes).digest('hex') !== grant.contentHash) return null;
+    return { attachmentId: grant.attachmentId, attachmentRevision: grant.attachmentRevision,
+      mediaType: grant.mediaType, bytes: new Uint8Array(bytes), contentHash: grant.contentHash };
+  }
+}

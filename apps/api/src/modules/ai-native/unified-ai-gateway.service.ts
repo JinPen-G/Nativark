@@ -1,17 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { AiGatewayIntentDraft } from '@rental-os/shared';
-import { gatewayTextIntentBindingSchema, prepareGatewayTextIntent, type GatewayTextIntentBinding } from './gateway-intent';
+import { gatewayTextIntentBindingSchema, prepareGatewayIntent, prepareGatewayTextIntent, type GatewayTextIntentBinding } from './gateway-intent';
 import type { GatewayAccountingCall } from './gateway-accounting.ports';
 import type { AiDispatchBinding } from './invocation-dispatch.service';
 import type { AiProfileCapability, AiProfileScope } from './provider-profile.ports';
 import { GatewayDeadline } from './gateway-deadline';
-import { ModelGatewayError, modelRequestSchema, type GatewayContext, type ModelRequest } from './model-gateway.ports';
+import { ModelGatewayError, modelProtocolRequestSchema, modelRequestSchema, type GatewayContext, type ModelProtocolRequest, type ModelRequest } from './model-gateway.ports';
 import type { UnifiedGatewayPorts, GatewayInvocationResult, GatewayStreamEvent } from './unified-ai-gateway.ports';
 import { gatewayRoutingBinding } from './gateway-routing.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 type UnresolvedRequest = Omit<ModelRequest, 'model'> & { model?: string };
+type UnresolvedProtocolRequest = Omit<ModelProtocolRequest, 'model'> & { model?: string };
 type IntentExecutionBinding = GatewayTextIntentBinding & { intentHash: string };
 const reportedTokens = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const textResultSchema = z.object({
@@ -48,6 +49,22 @@ export class UnifiedAiGatewayService {
     yield* this.streamRequest(context, prepared.request, signal, { ...binding, intentHash: prepared.intentHash });
   }
 
+  async invokeIntent(context: GatewayContext, intent: AiGatewayIntentDraft, signal?: AbortSignal) {
+    if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
+    const binding = this.intentBinding;
+    if (!binding) throw new ModelGatewayError('CONFIG_INVALID');
+    const prepared = await prepareGatewayIntent(intent, { sceneCode: binding.sceneCode, maxOutputTokens: binding.maxOutputTokens }, 'invoke', context, this.ports.media, signal);
+    return this.invokeRequest(context, prepared.request, signal, { ...binding, intentHash: prepared.intentHash });
+  }
+
+  async *streamIntent(context: GatewayContext, intent: AiGatewayIntentDraft, signal?: AbortSignal) {
+    if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
+    const binding = this.intentBinding;
+    if (!binding) throw new ModelGatewayError('CONFIG_INVALID');
+    const prepared = await prepareGatewayIntent(intent, { sceneCode: binding.sceneCode, maxOutputTokens: binding.maxOutputTokens }, 'stream', context, this.ports.media, signal);
+    yield* this.streamRequest(context, prepared.request, signal, { ...binding, intentHash: prepared.intentHash });
+  }
+
   private deadline(signal?: AbortSignal) { return new GatewayDeadline(this.deadlineMs, signal); }
 
   private assertBudget() {
@@ -68,13 +85,15 @@ export class UnifiedAiGatewayService {
     return parsed.data;
   }
 
-  private required(request: UnresolvedRequest, stream = false): AiProfileCapability[] {
+  private required(request: UnresolvedRequest | UnresolvedProtocolRequest, stream = false): AiProfileCapability[] {
     const capabilities: AiProfileCapability[] = ['text'];
     if (stream) capabilities.push('streaming');
     for (const feature of request.features ?? []) {
       if (feature === 'tools') capabilities.push('tools');
       else if (feature === 'structuredOutput') capabilities.push('structured_output');
       else if (feature === 'streaming') capabilities.push('streaming');
+      else if (feature === 'image') capabilities.push('vision');
+      else if (feature === 'audio') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
       else throw new ModelGatewayError('INVALID_REQUEST');
     }
     return [...new Set(capabilities)];
@@ -85,7 +104,7 @@ export class UnifiedAiGatewayService {
     return this.invokeRequest(context, this.input(request), signal);
   }
 
-  private async invokeRequest(context: GatewayContext, request: UnresolvedRequest, signal?: AbortSignal, intentBinding?: IntentExecutionBinding): Promise<GatewayInvocationResult> {
+  private async invokeRequest(context: GatewayContext, request: UnresolvedRequest | UnresolvedProtocolRequest, signal?: AbortSignal, intentBinding?: IntentExecutionBinding): Promise<GatewayInvocationResult> {
     if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
     this.assertBudget();
     request = structuredClone(request); context = structuredClone(context);
@@ -98,7 +117,9 @@ export class UnifiedAiGatewayService {
       const resolution = structuredClone(await life.wait(() => this.ports.routing.resolve(context, this.required(request))));
       if (intentBinding && resolution.scene !== intentBinding.routeScene) throw new ModelGatewayError('CONFIG_INVALID');
       const route = resolution.route; scope = resolution.consumerScope;
-      const transportRequest = this.input({ ...request, model: route.profile.model });
+      const parsedTransportRequest = modelProtocolRequestSchema.safeParse({ ...request, model: route.profile.model });
+      if (!parsedTransportRequest.success) throw new ModelGatewayError('INVALID_REQUEST');
+      const transportRequest = parsedTransportRequest.data;
       request = transportRequest;
       const hash = requestFingerprint({ request, routing: gatewayRoutingBinding(resolution), ...(intentBinding ? { intentBinding } : {}) });
       if (!this.ports.dispatch || typeof this.ports.dispatch.claim !== 'function' || typeof this.ports.dispatch.finish !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
@@ -157,7 +178,7 @@ export class UnifiedAiGatewayService {
     yield* this.streamRequest(context, this.input(request), signal);
   }
 
-  private async *streamRequest(context: GatewayContext, request: UnresolvedRequest, signal?: AbortSignal, intentBinding?: IntentExecutionBinding): AsyncGenerator<GatewayStreamEvent> {
+  private async *streamRequest(context: GatewayContext, request: UnresolvedRequest | UnresolvedProtocolRequest, signal?: AbortSignal, intentBinding?: IntentExecutionBinding): AsyncGenerator<GatewayStreamEvent> {
     if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
     this.assertBudget();
     request = structuredClone(request); context = structuredClone(context);
@@ -173,7 +194,9 @@ export class UnifiedAiGatewayService {
       const resolution = structuredClone(await life.wait(() => this.ports.routing.resolve(context, this.required(request, true))));
       if (intentBinding && resolution.scene !== intentBinding.routeScene) throw new ModelGatewayError('CONFIG_INVALID');
       const route = resolution.route; scope = resolution.consumerScope;
-      const transportRequest = this.input({ ...request, model: route.profile.model });
+      const parsedTransportRequest = modelProtocolRequestSchema.safeParse({ ...request, model: route.profile.model });
+      if (!parsedTransportRequest.success) throw new ModelGatewayError('INVALID_REQUEST');
+      const transportRequest = parsedTransportRequest.data;
       request = transportRequest;
       const hash = requestFingerprint({ request, routing: gatewayRoutingBinding(resolution), ...(intentBinding ? { intentBinding } : {}) });
       if (!this.ports.dispatch || typeof this.ports.dispatch.claim !== 'function' || typeof this.ports.dispatch.finish !== 'function') throw new ModelGatewayError('CONFIG_INVALID');

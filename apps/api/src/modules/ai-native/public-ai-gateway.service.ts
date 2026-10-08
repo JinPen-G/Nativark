@@ -130,7 +130,10 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
   async invoke(context: AiExecutionContext, value: AiGatewayIntentDraft, signal?: AbortSignal): Promise<AiGatewayResultDraft> {
     const intent = structuredClone(value), call = this.call(context, intent, signal);
     try {
-      const result = await call.gateway.invokeTextIntent(call.narrow, intent, call.life.controller.signal);
+      const hasMedia = intent.messages.some(message => message.content.some(part => part.kind !== 'text'));
+      const result = await (hasMedia
+        ? call.gateway.invokeIntent(call.narrow, intent, call.life.controller.signal)
+        : call.gateway.invokeTextIntent(call.narrow, intent, call.life.controller.signal));
       await call.life.wait(call.current);
       return checkedResult(call.completed(result));
     } catch (error) {
@@ -144,7 +147,10 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
 
   async *stream(context: AiExecutionContext, value: AiGatewayIntentDraft, signal?: AbortSignal): AsyncIterable<AiGatewayStreamEventDraft> {
     const intent = structuredClone(value), call = this.call(context, intent, signal);
-    const iterator = call.gateway.streamTextIntent(call.narrow, intent, call.life.controller.signal);
+    const hasMedia = intent.messages.some(message => message.content.some(part => part.kind !== 'text'));
+    const iterator = hasMedia
+      ? call.gateway.streamIntent(call.narrow, intent, call.life.controller.signal)
+      : call.gateway.streamTextIntent(call.narrow, intent, call.life.controller.signal);
     let sequence = 1, started = false;
     const header = () => ({ draftVersion: VERSION, requestId: intent.requestId, sequence: sequence++ });
     try {
