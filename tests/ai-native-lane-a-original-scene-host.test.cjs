@@ -253,6 +253,78 @@ test('original model application retains unknown usage and cancellation without 
   assert.equal(aborted.execution.sent.length, 0);
 });
 
+test('scene knowledge stays separate from Core and reauthorizes frozen sources and human preferences', { timeout: 60000 }, async () => {
+  const { originalModelApplicationHarness, originalSceneKnowledgeFixture } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  for (const sceneCode of ['order_explanation', 'opening_diagnosis', 'quote_clarification']) {
+    const h = await originalModelApplicationHarness(sceneCode, originalSceneKnowledgeFixture), k = h.supplemental;
+    const run = await h.app.start(h.reference);
+    assert.equal(run.execution.outcome.status, 'succeeded'); assert.equal(h.execution.sent.length, 1);
+    const frozen = h.state.aiTaskActionInput[0].payload.intent.messages.find(message => message.role === 'user');
+    const envelope = JSON.parse(frozen.content.map(part => part.text).join(''));
+    assert.equal(envelope.knowledge.originalInputRef, h.reference.inputRef);
+    assert.equal(envelope.materialHash, requestFingerprint(envelope.facts));
+    assert.equal(envelope.knowledge.contentHash, requestFingerprint(envelope.knowledge.material));
+    assert.equal(envelope.knowledge.material.sources[0].snippet, k.text);
+    assert.equal(envelope.knowledge.material.sources[0].trust, 'untrusted_data');
+    assert.equal(envelope.knowledge.material.preferences.items[0].preference.value, 'zh-CN');
+    assert.equal(envelope.knowledge.material.preferences.semantics, 'preference_not_authority');
+    assert.equal(JSON.stringify(envelope.facts).includes('999999'), false);
+    assert.ok(Buffer.byteLength(JSON.stringify(envelope.knowledge.material)) <= 16384);
+    assert.equal(envelope.knowledge.material.sections.businessFacts, 'core_authoritative_only');
+    const searchKeys = new Set(k.policyReads.filter(row => row.domain === 'knowledge' && row.action === 'search').map(row => row.resourceKey));
+    assert.ok(searchKeys.size >= 2, 'scope and document search are distinct persisted grants');
+    const command = { original: h.reference, resultId: h.state.aiTaskResultArtifact[0].id };
+    const read = await h.model.readModelResult(command);
+    assert.equal(read.status, 'available'); assert.deepEqual(read.knowledge, envelope.knowledge);
+    const searchCount = k.db.queries.filter(query => query.where.text?.contains !== undefined).length;
+    assert.ok(searchCount > 0);
+    const opened = await h.model.reopenModelSource({ ...command, sourceKind: 'knowledge', sourceIndex: 0 });
+    assert.equal(opened.source.text, k.text); assert.equal(opened.reference.documentId, k.document.documentId);
+    assert.equal(k.db.queries.filter(query => query.where.text?.contains !== undefined).length, searchCount,
+      'readback must not recollect replacement sources');
+    assert.equal(k.fileReads(), 1, 'source reopen reads stored chunks, never raw storage');
+    await assert.rejects(h.model.reopenModelSource({ ...command, sourceKind: 'knowledge', sourceIndex: 4 }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+    await assert.rejects(h.model.reopenModelSource({ ...command, sourceKind: 'knowledge', sourceIndex: 0, url: 'forged' }), e => e.code === 'AI_INVALID_INPUT');
+    const sourcePolicy = k.policyRows.find(row => row.domain === 'knowledge' && row.action === 'resolve_source' && row.resource.documentId);
+    sourcePolicy.enabled = false;
+    await assert.rejects(h.model.readModelResult(command), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+    await assert.rejects(h.model.reopenModelSource({ ...command, sourceKind: 'knowledge', sourceIndex: 0 }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+    sourcePolicy.enabled = true;
+    await k.bundle.memory.revoke({ memoryId: 'scene-preference', expectedRevision: 2 });
+    await assert.rejects(h.model.readModelResult(command), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+    assert.equal(h.execution.sent.length, 1); assert.equal(h.state.aiTaskResultArtifact.length, 1);
+  }
+});
+
+test('scene knowledge revocation at final Gateway route check prevents transport without false success', { timeout: 30000 }, async () => {
+  const { originalModelApplicationHarness, originalSceneKnowledgeFixture } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const h = await originalModelApplicationHarness('order_explanation', originalSceneKnowledgeFixture);
+  let revoked = false;
+  h.execution.beforeRouteCheck = async () => {
+    if (h.execution.events.includes('dispatch')) {
+      revoked = true;
+      h.supplemental.policyRows.filter(row => row.action === 'resolve_source').forEach(row => { row.enabled = false; });
+    }
+  };
+  const result = await h.app.start(h.reference);
+  assert.equal(revoked, true); assert.equal(h.execution.sent.length, 0);
+  assert.notEqual(result.execution.outcome.status, 'succeeded');
+  assert.equal(h.state.aiTaskActionInput.length, 1); assert.equal(h.state.aiGatewayInvocation.length, 1);
+  assert.ok(h.state.aiTaskResultArtifact.every(row => row.outcome !== 'SUCCEEDED'));
+  const read = await h.model.readModelResult({ original: h.reference, resultId: h.state.aiTaskResultArtifact[0].id });
+  assert.equal(read.text, null);
+});
+
+test('scene knowledge with missing exact policy cannot publish model material or invent empty readiness', { timeout: 30000 }, async () => {
+  const { originalModelApplicationHarness, originalSceneKnowledgeFixture } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const h = await originalModelApplicationHarness('order_explanation', originalSceneKnowledgeFixture);
+  h.supplemental.policyRows.filter(row => row.action === 'search').forEach(row => { row.enabled = false; });
+  await assert.rejects(h.app.start(h.reference), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  assert.equal(h.state.aiTaskActionInput.length, 0); assert.equal(h.state.aiTaskRunPlan.length, 0);
+  assert.equal(h.execution.sent.length, 0); assert.equal(h.state.aiGatewayInvocation.length, 0);
+});
+
 test('client scene authenticates through actual client Guard/Auth and rechecks after the business read', async () => {
   const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
   const { ClientAuthService } = require('../apps/api/src/modules/client/client-auth.service');

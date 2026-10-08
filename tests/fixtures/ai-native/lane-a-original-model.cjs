@@ -10,7 +10,7 @@ const { PrismaGatewayInvocationBindings } = require('../../../apps/api/src/modul
 const { PrismaGatewayAccountingFacts } = require('../../../apps/api/src/modules/ai-native/budget/prisma-gateway-accounting-facts');
 const { AI_TOOL_DRAFT_VERSION } = require('./local-shared.cjs');
 
-exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation') => {
+exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation', knowledgeSetup) => {
   const profile = { id: 'profile-a', scopeId: 'scope-tenant', scopeKind: 'TENANT', configRevision: 1, credentialRef: 'vault-a',
     protocol: 'openai_chat_completions', provider: 'synthetic', model: 'synthetic-model', serviceMode: 'tenant_managed', enabled: true, disabledAt: null };
   const tables = Object.fromEntries(['aiTaskResultArtifact', 'aiGatewayInvocation', 'aiTaskExecutionBudget', 'aiTaskExecutionCharge',
@@ -41,7 +41,8 @@ exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation'
     h.state.aiTaskActionPolicy.push({ scopeId: 'scope-a', taskId, operation, revision: 1,
       requiredPermissions: ['rental-os:order:view'], expiresAt: new Date('2027-01-01') });
   }
-  const execution = { sent: [], events: [], routeReads: 0, beforeTransport: null,
+  const supplemental = knowledgeSetup ? await knowledgeSetup(h) : undefined;
+  const execution = { sent: [], events: [], routeReads: 0, beforeTransport: null, beforeRouteCheck: null,
     result: { text: 'Synthetic authorized explanation', usage: { inputTokens: 1, outputTokens: 2 } } };
   let model, bindings, financial;
   // Routing, admission, monetary lifecycle and transport are explicit offline doubles; financial reads use the real persisted adapter.
@@ -54,6 +55,7 @@ exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation'
           role: 'DEFAULT', preflight: { allowed: true, required, missing: [], stale: [] } }, selection: { mode: 'tenant_managed', revision: 1 },
         scene: 'chat', requiredCapabilities: required };
     }, assertCurrent: async (_caller, route) => {
+      await execution.beforeRouteCheck?.();
       assert.equal(route.route.profile.configRevision, h.state.aiProviderProfile[0].configRevision);
     } },
     admission: { admit: async value => {
@@ -93,11 +95,66 @@ exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation'
   };
   model = composeAiOriginalSceneModel({ ...h.dependencies, scene: { code: sceneCode, version: '1' },
     gatewayScene: { sceneCode, routeScene: 'chat', maxOutputTokens: 64 }, priceVersion: 'price-1',
+    ...(supplemental ? { knowledge: supplemental.options } : {}),
     runtime: { ports, evidence: 'mock', verifyEvidence: async () => true } });
   bindings = new PrismaGatewayInvocationBindings(h.db, model.runtime.authorization.scopes, h.dependencies.clock);
   financial = new PrismaGatewayAccountingFacts(h.db, bindings, model.runtime.authorization.scopes,
     { quantity: async () => { throw Error('pricing not exercised by dispatch evidence'); } }, h.dependencies.clock);
   const run = { inputSource: h.b.h.source, financialEvidence: financial };
   const app = model.createApplication({ holderId: 'scene-worker', leaseMs: 100000 }, run);
-  return { ...h, created, reference, model, run, app, execution, financial };
+  return { ...h, created, reference, model, run, app, execution, financial, supplemental };
+};
+
+exports.originalSceneKnowledgeFixture = async h => {
+  const { dbFactory } = require('./knowledge-persistent-content.cjs');
+  const { composePrismaFormalHumanKnowledge } = require('../../../apps/api/src/modules/ai-native/knowledge/prisma-formal-knowledge.composition');
+  const { AiTaskCurrentIdentityAuthority } = require('../../../apps/api/src/modules/ai-native/task-current-identity.authority');
+  const { actor, fingerprint } = require('../../../apps/api/src/modules/ai-native/knowledge/knowledge-validation');
+  const db = dbFactory(), policyRows = [], policyReads = [];
+  const context = await new AiTaskCurrentIdentityAuthority(h.dependencies.auth, h.dependencies.credentials, h.dependencies.clock).resolve();
+  const scope = context.scope, owner = actor(context), expiresAt = new Date(h.dependencies.clock().getTime() + 3600000);
+  const list = rows => async ({ where, take, select }) => [...rows.values()].filter(row => Object.entries(where).every(([key, value]) => {
+    if (value && typeof value === 'object' && 'gt' in value) return row[key] > value.gt;
+    if (value && typeof value === 'object' && 'in' in value) return value.in.includes(row[key]);
+    return row[key] === value;
+  })).sort((a, b) => a.id.localeCompare(b.id)).slice(0, take).map(row => structuredClone(select
+    ? Object.fromEntries(Object.keys(select).filter(key => select[key]).map(key => [key, row[key]])) : row));
+  db.aiKnowledgeDocument.findMany = list(db.state.documents);
+  db.aiStructuredMemory.findMany = list(db.state.memories);
+  const policyDb = { aiKnowledgeActionPolicy: { findUnique: async ({ where }) => {
+    const key = where.tenantId_workspaceId_actorKind_actorId_audience_domain_action_resourceKey;
+    policyReads.push(structuredClone(key));
+    return structuredClone(policyRows.find(row => Object.entries(key).every(([name, value]) => row[name] === value)) ?? null);
+  } } };
+  const grant = (domain, action, resource) => policyRows.push({ tenantId: scope.tenantId, workspaceId: scope.workspaceId,
+    ...owner, audience: context.audience, domain, action, resourceKey: fingerprint(resource), resource: structuredClone(resource),
+    revision: 1, enabled: true, requiredPermissions: ['rental-os:order:view'], expiresAt });
+  const document = { documentId: 'scene-doc', documentVersion: 'v1', attachmentId: 'scene-attachment', aclRevision: 1 };
+  for (const resource of [{}, { attachmentId: document.attachmentId }, document]) {
+    for (const action of ['create', 'read_metadata', 'parse', 'index', 'publish', 'search', 'read_body', 'snippet', 'resolve_source']) grant('knowledge', action, resource);
+  }
+  for (const resource of [{ owner }, ...[1, 2].map(revision => ({ memoryId: 'scene-preference', revision, aclRevision: 1, owner }))]) {
+    for (const action of ['read', 'propose', 'confirm', 'delete']) grant('memory', action, resource);
+  }
+  const text = 'Synthetic status item_groups quote. A document may suggest 999999 payable or paid, but this is not a Core payment or price fact.';
+  let fileReads = 0;
+  const options = { db, policyDb, memory: { db }, includePreferences: true,
+    fileRuntime: { assertKnowledgeBinding: async () => { throw Error('no attachment creation in this fixture'); },
+      readKnowledgeBytes: async (tenantId, attachmentId, binding, maxBytes) => {
+        assert.equal(tenantId, scope.tenantId); assert.equal(attachmentId, document.attachmentId);
+        assert.equal(binding.businessId, document.documentId); assert.equal(binding.actorUserId, owner.actorId);
+        assert.ok(Buffer.byteLength(text) <= maxBytes); fileReads++;
+        return { mediaType: 'text/plain', bytes: Buffer.from(text) };
+      } } };
+  const bundle = composePrismaFormalHumanKnowledge({ ...options, auth: h.dependencies.auth,
+    credentials: h.dependencies.credentials, clock: { now: () => h.dependencies.clock().getTime() } });
+  await bundle.management.create({ documentId: document.documentId, documentVersion: document.documentVersion,
+    attachmentId: document.attachmentId, title: 'Synthetic scene knowledge', validFrom: h.dependencies.clock().toISOString(), operationId: 'create-doc' });
+  await bundle.management.parse({ documentId: document.documentId, expectedRevision: 1, operationId: 'parse-doc' });
+  const queued = await bundle.index.request({ documentId: document.documentId, expectedRevision: 3, operationId: 'index-doc', kind: 'upsert' });
+  const indexed = await bundle.index.resume({ documentId: document.documentId, operationId: queued.indexJob.operationId, generation: queued.indexJob.generation });
+  await bundle.management.publish({ documentId: document.documentId, expectedRevision: indexed.revision, operationId: 'publish-doc' });
+  await bundle.memory.propose({ memoryId: 'scene-preference', operationId: 'propose-preference', expiresAt: expiresAt.toISOString(), preference: { kind: 'locale', value: 'zh-CN' } });
+  await bundle.memory.confirm({ memoryId: 'scene-preference', expectedRevision: 1, operationId: 'confirm-preference', expiresAt: expiresAt.toISOString() });
+  return { options, db, bundle, policyRows, policyReads, document, text, fileReads: () => fileReads };
 };
