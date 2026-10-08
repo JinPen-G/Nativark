@@ -9,6 +9,7 @@ import { PrismaQuoteSelectionRepository, type HumanQuoteSelectionDependencies } 
 import { parseQuoteSelectionProof } from '../task-request/quote-selection.validation';
 import type { AiTaskRunnerLease } from '../runner/ai-task-runner.ports';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
+import { AiApprovedOrderResultUnknownError } from '../approval-execution/approved-order.errors';
 
 export type HumanQuoteOrderDependencies = ControlledApprovedOrderDependencies &
   Pick<HumanQuoteSelectionDependencies, 'originals'>;
@@ -122,6 +123,23 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
     },
     submitSelectedOrder: (value: unknown) => orderOperation(value, 'submit'),
     reconcileSelectedOrder: (value: unknown) => orderOperation(value, 'reconcile'),
+    /** Read the exact original action only. Never acquire a lease or submit an
+     * order from a human request; the existing AIN-07 reconciler owns evidence. */
+    async readSelectedOrderResult(value: unknown) {
+      try {
+        const result = await orderOperation(value, 'reconcile');
+        return freezeOriginalInput({ status: 'committed' as const, replayed: result.replayed,
+          order: { id: result.order.id, status: result.order.status, quoteId: result.order.quoteId },
+          source: { resourceType: 'order' as const, resourceId: result.order.id },
+          payment: 'not_inferred' as const, fulfillment: 'not_inferred' as const,
+          taskOutcome: 'owned_by_runner' as const });
+      } catch (error) {
+        if (!(error instanceof AiApprovedOrderResultUnknownError)) throw error;
+        return freezeOriginalInput({ status: 'unknown' as const, errorCode: 'AI_RESULT_UNKNOWN' as const,
+          retryable: false as const, nextAction: 'read_selected_order_result' as const,
+          sideEffect: 'may_have_committed' as const });
+      }
+    },
     select: selections.select.bind(selections), read: selections.read.bind(selections),
     reconcile: selections.reconcile.bind(selections),
     /** Internal runner host only. Body and registration key derive from the

@@ -90,6 +90,8 @@ test('selected order goes through human review and decision before Core commit a
   assert.equal(h.state.records.aiApproval.length, 1); assert.equal(h.state.records.rentalOrder.length, 0);
   const { expiresAt, ...base } = h.prepareCommand;
   const command = { ...base, approvalId: approved.record.approvalId, reviewedPayloadHash: h.proposal.reviewedPayloadHash };
+  await assert.rejects(h.app.readSelectedOrderResult({ selection: h.selection, command }));
+  assert.equal(h.state.records.rentalOrder.length, 0);
   h.state.ackLost = true;
   await assert.rejects(h.app.submitSelectedOrder({ selection: h.selection, command }), e => e.code === 'AI_RESULT_UNKNOWN');
   h.state.ackLost = false;
@@ -98,9 +100,34 @@ test('selected order goes through human review and decision before Core commit a
   const result = await h.compose().reconcileSelectedOrder({ selection: h.selection, command });
   assert.equal(result.replayed, true); assert.equal(result.order.id, h.state.records.aiApprovalConsumption[0].resultRef);
   assert.equal(h.state.commits, 1); assert.equal(h.state.records.rentalOrder.length, 1);
+  Object.assign(h.sceneDependencies.core, {
+    getProfile: () => ({ tenantId: 'tenant-a', categoryCode: 'camera' }),
+    getWorkspaceCategory: async () => ({ code: 'camera', businessModel: { pricingUnits: ['day'], fulfillmentModes: ['store_pickup_return'] } }),
+    getBusinessSettings: () => ({ tenantId: 'tenant-a', calendar: { timeZone: 'UTC' }, pricing: { enabledUnits: ['day'] },
+      fulfillment: { enabledModes: ['store_pickup_return'] }, configVersion: 1 })
+  });
+  const { credentials, originals, ...dependencies } = h.sceneDependencies;
+  const requests = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application').composeRequestBoundHumanQuoteOrder(
+    dependencies, { enabled: true, audience: 'operator' }, { holderId: 'worker-a',
+      creationRules: [{ sceneCode: 'quote_clarification', sceneVersion: '1', revision: 1, audiences: ['operator'],
+        requiredPermissions: ['rental-os:order:create'], maxInputAgeMs: 3600000 }], memberships: { listPersonalOptions: async () => [] } });
+  const request = { headers: { authorization: (await credentials.current()).authorization } };
+  assert.equal(requests.submitSelectedOrder, undefined);
+  const execution = { selection: h.selection, command }, outcome = await requests.readSelectedOrderResult(request, execution);
+  assert.equal(outcome.status, 'committed'); assert.equal(outcome.order.id, result.order.id);
+  assert.equal(outcome.payment, 'not_inferred'); assert.equal(outcome.taskOutcome, 'owned_by_runner');
+  assert.deepEqual(Object.keys(outcome.order).sort(), ['id', 'quoteId', 'status']);
+  assert.equal(h.state.commits, 1);
+  h.state.resourceAccess = false;
+  const uncertain = await requests.readSelectedOrderResult(request, execution);
+  assert.equal(uncertain.status, 'unknown'); assert.equal(uncertain.retryable, false); assert.equal(uncertain.order, undefined);
+  h.state.resourceAccess = true;
+  await assert.rejects(requests.readSelectedOrderResult(request, { ...execution, selection: { ...h.selection, taskId: 'ffffffff-ffff-4fff-8fff-ffffffffffff' } }));
+  await assert.rejects(requests.readSelectedOrderResult({ headers: {} }, execution), e => e.code === 'AI_ACCESS_DENIED');
   const closed = await h.app.readSelectedReprepareEligibility(eligibility);
   assert.equal(closed.state, 'committed'); assert.equal(closed.canRequestReprepare, false);
   h.state.session = false;
+  await assert.rejects(requests.readSelectedOrderResult(request, execution), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
   await assert.rejects(h.app.readSelectedDecisionReceipt(decision), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
 });
 
