@@ -1,5 +1,15 @@
 # Codex B 总册接续交付与精确未闭合项
 
+## 2026-10-08 CB07：精确资源政策的实际消费
+
+基线dd6b8ea2。A确认原prepareHeldRun还未消费Knowledge/Memory，本线已交collect/revalidate真实固定接口及限制，A在自己的冻结/结果/来源入口接续，B未写scenes。
+
+发现原PrismaKnowledgeSelectionAdapter将每文档search grant与scope search grant全等比较；HumanKnowledgeService.list对metadata也有同一错误。正式Prisma政策的grantKey包含各自resource，所以合法文档也被拒绝。修复为scope政策保持自身前后复验，每文档政策与其自身读后grant比较，list保存每文档指纹并在最后返回前再次核对；不把不同资源的独立授权合成同一个grant，不改正式policy源或旧receipt指纹。
+
+在原file-runtime完整生命周期用例中增加实际 `management.list → preparation.collect → preparation.revalidate → 精确来源政策撤销拒绝`。定向命令同前两节，仅追加 `--test-name-pattern='first creation'`，audit改本树output/cb07-policy-consumption-audit；最终1pass/0fail/0skip/0todo，退出0，非全文件或全专项验收。最初0pass/1fail源于原离线list替身捕获事务回滚前的Map，已改为每次读取当前db.state.documents；没有隐藏失败或放宽生产权限。没有单独运行旧生产代码红测，不伪报红绿证据。实际ts-node类型检查及diff check通过。真实MySQL JSON键序/索引、正式policy置备、A模型执行闭环仍未验。
+
+本片接口不变，A应复用主线已经接回的HumanKnowledgeInputService及正式policy组合再加此两文件消费修复；不需为了只读chunks重复摘首建文件链。Runtime驱动与Provider SDK均不获得知识授权裁决权，旧包撤权后拒绝而非替换为新来源；回退本消费修复会恢复拒绝行为，不迁移或重写历史operation。
+
 ## 2026-10-08 CB05：版本附件接回原revise
 
 依赖固定 `49fc07841b663370b1b71135d42e5614b95c115b`，主线确认继续同一Knowledge/storage分支认领；本节解除上一片“新版本附件上传未实现”的代码缺口，其他未验边界保留。

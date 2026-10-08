@@ -42,6 +42,8 @@ function fileFixture() {
   });
   db.fileAsset = delegate('assets'); db.fileUploadSession = delegate('uploads');
   db.aiKnowledgeDocument.findUnique = async ({ where }) => clone(db.state.documents.get(where.id) ?? null);
+  db.aiKnowledgeDocument.findMany = async ({ where, take, select }) => [...db.state.documents.values()].filter(row => match(row, where))
+    .sort((a, b) => a.id.localeCompare(b.id)).slice(0, take).map(row => clone(select ? Object.fromEntries(Object.keys(select).filter(key => select[key]).map(key => [key, row[key]])) : row));
   db.aiKnowledgeActionPolicy = { findUnique: async ({ where }) => clone(grants.get(JSON.stringify(where.tenantId_workspaceId_actorKind_actorId_audience_domain_action_resourceKey)) ?? null) };
   const transaction = db.$transaction; let queue = Promise.resolve();
   db.$transaction = work => { const result = queue.then(() => transaction(work)); queue = result.catch(() => {}); return result; };
@@ -105,6 +107,13 @@ test('first creation uses original upload receipt then real create parse index p
   const indexed = await f.api.index.resume({ documentId: 'doc-1', operationId: queued.indexJob.operationId, generation: queued.indexJob.generation });
   const published = await f.api.management.publish({ documentId: 'doc-1', expectedRevision: indexed.revision, operationId: 'publish-1' });
   const preview = await f.api.management.preview('doc-1'); assert.match(preview.sources[0].snippet, /Synthetic SOP/);
+  assert.equal((await f.api.management.list({ limit: 5 })).items.length, 1);
+  const collected = await f.api.preparation.collect({ requestId: 'scenario-input', query: 'Synthetic', maxSources: 3, maxSnippetChars: 1000, maxTotalBytes: 8192 });
+  assert.equal(collected.status, 'ready'); assert.equal(collected.sources.length, 1);
+  assert.equal((await f.api.preparation.revalidate(collected)).sources[0].snippet, f.text.toString());
+  for (const [key, row] of f.grants) if (row.action === 'resolve_source' && row.resource.documentId) f.grants.delete(key);
+  await assert.rejects(f.api.preparation.revalidate(collected), { code: 'unavailable' });
+  f.allowDocument(bound.attachmentId);
   f.allowDocument(bound.attachmentId, 2);
   const withdrawn = await f.api.management.withdraw({ documentId: 'doc-1', expectedRevision: published.revision, operationId: 'withdraw-1' });
   assert.equal(withdrawn.publication, 'withdrawn');
