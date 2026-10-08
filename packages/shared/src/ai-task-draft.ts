@@ -113,6 +113,24 @@ export interface AiTaskEventPageDraft {
   nextCursor: string;
   hasMore: boolean;
 }
+
+/** Owner-authorized read projection and task-local event watermark from one
+ * database snapshot. It is neither execution permission nor a business result.
+ * Read subsequent events strictly after cursor; gaps remain legitimate.
+ */
+export interface AiTaskSnapshotDraft {
+  contractVersion: typeof AI_TASK_DRAFT_VERSION;
+  taskId: string;
+  revision: number;
+  status: AiTaskStatusDraft;
+  sceneCode: string;
+  sceneVersion: string;
+  createdAt: string;
+  updatedAt: string;
+  cancelRequestedAt: string | null;
+  cursor: string;
+  steps: Array<{ stepId: string; runId: string; sequence: number; revision: number; status: AiStepStatusDraft }>;
+}
 export interface AiTaskEventResetDraft {
   contractVersion: typeof AI_TASK_DRAFT_VERSION;
   taskId: string;

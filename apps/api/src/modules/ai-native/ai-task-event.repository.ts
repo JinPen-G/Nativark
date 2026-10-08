@@ -3,7 +3,7 @@ import { z } from "zod";
 import {
   AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT,
   AI_TASK_TRANSITION_REASONS_DRAFT, AI_STEP_TRANSITION_REASONS_DRAFT,
-  type AiTaskEventDraft, type AiTaskEventPageDraft, type AiTaskEventResetDraft
+  type AiTaskEventDraft, type AiTaskEventPageDraft, type AiTaskEventResetDraft, type AiTaskSnapshotDraft
 } from "@rental-os/shared";
 import { AiTaskRepository, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from "./ai-task.repository";
 import { aiPersistenceEventCursor } from "./persistence-scope";
@@ -20,6 +20,18 @@ const dataSchemas = {
   "access.revoked": z.object({ code: z.enum(["AI_ACCESS_DENIED", "AI_SCOPE_CHANGED"]) }).strict()
 };
 const taskSelect = { id: true, scopeId: true, revision: true, contractVersion: true, eventCursor: true } satisfies Prisma.AiTaskSelect;
+const snapshotTaskSelect = { ...taskSelect, status: true, sceneCode: true, sceneVersion: true,
+  createdAt: true, updatedAt: true, cancelRequestedAt: true } satisfies Prisma.AiTaskSelect;
+const snapshotStepSelect = { id: true, taskId: true, scopeId: true, runId: true,
+  sequence: true, revision: true, status: true } satisfies Prisma.AiStepSelect;
+const snapshotSchema = z.object({
+  contractVersion: z.literal(AI_TASK_DRAFT_VERSION), taskId: id, revision, status: z.enum(AI_TASK_STATUSES_DRAFT),
+  sceneCode: id, sceneVersion: id, createdAt: z.string().datetime({ offset: true }),
+  updatedAt: z.string().datetime({ offset: true }), cancelRequestedAt: z.string().datetime({ offset: true }).nullable(),
+  cursor: z.string().refine(value => { try { aiPersistenceEventCursor(value); return true; } catch { return false; } }),
+  steps: z.array(z.object({ stepId: id, runId: id, sequence: revision, revision,
+    status: z.enum(AI_STEP_STATUSES_DRAFT) }).strict()).max(1000)
+}).strict();
 const eventSelect = { scopeId: true, taskId: true, cursor: true, taskRevision: true, type: true, payload: true, occurredAt: true } satisfies Prisma.AiTaskEventSelect;
 type EventRow = Prisma.AiTaskEventGetPayload<{ select: typeof eventSelect }>;
 
@@ -49,6 +61,49 @@ export class AiTaskEventRepository {
     this.access = new AiTaskRepository(db, authority, clock);
   }
   private readonly db: Pick<PrismaClient, "$transaction" | "aiTask" | "aiRun">;
+
+  /** Metadata and timeline share a RepeatableRead watermark. This does not
+   * expose input, output bodies, worker tokens or result/approval evidence.
+   * Reading never claims a run or restarts execution after a reset.
+   */
+  async readSnapshot(value: unknown): Promise<AiTaskSnapshotDraft> {
+    const parsed = z.object({ taskId: id }).strict().safeParse(value);
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const taskId = parsed.data.taskId;
+    const operations = ['read_metadata', 'read_events', 'read_step_terminal'] as const;
+    const initial = structuredClone(await this.access.resolveAccess(taskId, operations[0]));
+    for (const operation of operations.slice(1)) {
+      const access = await this.access.resolveAccess(taskId, operation);
+      if (access.bindingKey !== initial.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    }
+    let snapshot: AiTaskSnapshotDraft;
+    try {
+      snapshot = await this.db.$transaction(async tx => {
+        const task = await tx.aiTask.findFirst({ where: initial.where, select: snapshotTaskSelect });
+        if (!task || task.contractVersion !== AI_TASK_DRAFT_VERSION) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        if (task.id !== taskId || !id.safeParse(task.scopeId).success) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+        const rows = await tx.aiStep.findMany({ where: { scopeId: task.scopeId, taskId }, select: snapshotStepSelect,
+          orderBy: [{ runId: 'asc' }, { sequence: 'asc' }, { id: 'asc' }], take: 1001 });
+        if (rows.length > 1000 || new Set(rows.map(row => row.id)).size !== rows.length
+          || new Set(rows.map(row => JSON.stringify([row.runId, row.sequence]))).size !== rows.length
+          || rows.some(row => row.taskId !== taskId || row.scopeId !== task.scopeId)) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+        return snapshotSchema.parse({ contractVersion: AI_TASK_DRAFT_VERSION, taskId, revision: task.revision,
+          status: task.status.toLowerCase(), sceneCode: task.sceneCode, sceneVersion: task.sceneVersion,
+          createdAt: task.createdAt.toISOString(), updatedAt: task.updatedAt.toISOString(),
+          cancelRequestedAt: task.cancelRequestedAt?.toISOString() ?? null, cursor: task.eventCursor.toString(),
+          steps: rows.map(row => ({ stepId: row.id, runId: row.runId, sequence: row.sequence, revision: row.revision,
+            status: row.status.toLowerCase() })) });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
+    } catch (error) {
+      if (error instanceof AiTaskRepositoryError) throw error;
+      throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+    }
+    for (const operation of operations) {
+      const current = await this.access.resolveAccess(taskId, operation);
+      if (current.bindingKey !== initial.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    }
+    return snapshot;
+  }
 
   async readPage(value: unknown): Promise<AiTaskEventPageDraft | AiTaskEventResetDraft> {
     const parsed = inputSchema.safeParse(value);
