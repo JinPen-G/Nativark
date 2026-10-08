@@ -9,6 +9,8 @@ const query = { taskId: 'task-a', runId: 'run-a' }, host = { holderId: 'applicat
 const noWrites = (h, start) => assert.equal(h.trace.slice(start).some(entry => /\.(create|update|upsert)$/u.test(entry) || entry === 'row.lock'), false);
 async function make(status = 'QUEUED') {
   const h = await authorizedRunnerHarness(); h.state.aiTask[0].status = status;
+  // Real task creation initializes both rows QUEUED, not only the task row.
+  if (status === 'QUEUED') h.state.aiRun[0].status = 'QUEUED';
   const root = composeAuthorizedReadonlyPersistentTaskInputRunner(h.configuration());
   return { h, root, app: root.createApplication(host) };
 }
@@ -19,6 +21,7 @@ test('server held preparation publishes before effects under the one acknowledge
   h.state.aiTaskRunPlan = []; let calls = 0;
   const app = root.createApplication(host, async ({ lease, taskRevision, signal }) => {
     calls++; assert.equal(h.state.aiTask[0].status, 'RUNNING');
+    assert.equal(h.state.aiRun[0].status, 'RUNNING');
     assert.equal(taskRevision, h.state.aiTask[0].revision);
     assert.equal(lease.holderId, host.holderId); assert.equal(lease.fencingToken, originalFence.add(1).toFixed(0));
     assert.equal(signal.aborted, false); assert.deepEqual(h.executions, []);
