@@ -327,6 +327,16 @@ export class AiTaskRunner {
         if (this.deps.inputs && result.kind === 'paused' && result.pause === 'input') throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
         // Cancellation advances the task revision, not the original step or fenced lease used for result CAS.
         if (await checkCancel()) ref.registered = { ...ref.registered, taskRevision };
+        if (this.deps.resources && result.kind === 'paused' && result.pause === 'confirmation') {
+          if (recovery || stepPlan.operation !== 'idempotent' || !result.resultRef) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
+          const commit = structuredClone(await this.persistResult(ref, structuredClone(lease), result));
+          if (commit?.confirmation?.checkpointRef !== result.resultRef || commit.confirmation.stepId !== ref.registered.stepId
+            || commit.confirmation.stepRevision !== ref.registered.stepRevision || commit.taskRevision !== taskRevision + 1) throw new AiTaskRunnerError('AI_STORAGE_UNAVAILABLE');
+          // The checkpoint already committed the task pause; the step and its original charges remain open.
+          advance(commit);
+          activeResourceTicket = undefined;
+          return { status: 'paused', completedSteps, cleanupFailed };
+        }
         advance(await this.persistResult(ref, structuredClone(lease), result), ref);
         if (resourceTicket && this.deps.resources) {
           try {

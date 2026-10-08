@@ -1,11 +1,15 @@
 import { Prisma, type PrismaClient, type AiTaskStatus } from "@prisma/client";
 import { z } from "zod";
 import {
-  AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_TASK_TRANSITION_REASONS_DRAFT,
-  type AiTaskEventDraft, type AiTaskTransitionRequestDraft, type AiStepStatusDraft, type AiStepStateDraft
+  AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, AI_TASK_TRANSITION_REASONS_DRAFT, AI_TOOL_DRAFT_VERSION,
+  type AiTaskEventDraft, type AiTaskTransitionRequestDraft, type AiStepStatusDraft, type AiStepStateDraft, type AiProposalPayloadDraft
 } from "@rental-os/shared";
 import { AiTaskRepository, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from "./ai-task.repository";
-import { evaluateAiTaskTransitionDraft, type AiTaskTransitionStateDraft } from "./task-transition-draft";
+import { evaluateAiTaskTransitionDraft, evaluateAiTaskConfirmationTransitionDraft, type AiTaskTransitionStateDraft } from "./task-transition-draft";
+import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
+import { fingerprintAiProposalDraft } from "./proposal-binding-draft";
+import { aiPersistenceScopeColumns } from "./persistence-scope";
+import { aiTaskRunPlanSchema } from "./runner/prisma-task-run-evidence.repository";
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);
@@ -17,6 +21,21 @@ const commandSchema = z.object({
   taskId: id, expectedRevision: revision,
   to: z.enum(AI_TASK_STATUSES_DRAFT), reason: z.enum(AI_TASK_TRANSITION_REASONS_DRAFT), lease: leaseSchema.optional()
 }).strict().refine(value => value.to === "cancel_requested" ? value.lease === undefined : value.lease !== undefined);
+const confirmationCommandSchema = z.object({ taskId: id.max(36), stepId: id.max(36), expectedTaskRevision: revision,
+  expectedStepRevision: revision, checkpointRef: id.max(36),
+  lease: leaseSchema.extend({ taskId: id.max(36), expiresAt: z.string().datetime({ offset: true }) }).strict()
+}).strict().refine(value => value.taskId === value.lease.taskId);
+const hash = z.string().regex(/^[a-f0-9]{64}$/u);
+const confirmationEvidenceSchema = z.object({ scopeId: id.max(36), taskId: id.max(36), runId: id.max(36), stepId: id.max(36),
+  checkpointRef: id.max(36), phaseId: id.max(36), kind: z.literal('confirmation'), actionId: id, inputRef: id.max(36),
+  stepRevision: revision, stepFingerprint: hash, planHash: hash, contentHash: hash,
+  leaseOwnerId: id, fencingToken: leaseSchema.shape.fencingToken, runRevision: revision,
+  proposalId: id.max(36), proposalRevision: revision, reviewedPayloadHash: hash }).strict();
+export interface AiTaskConfirmationCheckpointSource {
+  read(input: { scopeId: string; taskId: string; runId: string; stepId: string; checkpointRef: string;
+    lease: z.infer<typeof confirmationCommandSchema>['lease'] },
+    tx: Prisma.TransactionClient): Promise<z.infer<typeof confirmationEvidenceSchema>>;
+}
 const taskSelect = {
   id: true, scopeId: true, status: true, revision: true, contractVersion: true,
   eventCursor: true, cancelRequestedAt: true
@@ -35,7 +54,8 @@ export class AiTaskTransitionRepository {
   constructor(
     private readonly db: Pick<PrismaClient, "$transaction" | "aiTask" | "aiRun">,
     authority: AiTaskRepositoryAuthority,
-    private readonly clock: () => Date = () => new Date()
+    private readonly clock: () => Date = () => new Date(),
+    private readonly confirmations?: AiTaskConfirmationCheckpointSource
   ) {
     this.access = new AiTaskRepository(db, authority, clock);
   }
@@ -44,7 +64,72 @@ export class AiTaskTransitionRepository {
 
   settleCancellation(value: unknown) { return this.transitionState(value, true); }
 
-  private async transitionState(value: unknown, settleCancellation: boolean) {
+  async pauseConfirmation(value: unknown) {
+    const parsed = confirmationCommandSchema.safeParse(value);
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    if (typeof this.confirmations?.read !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const input = parsed.data, { taskId: _, expiresAt: __, ...lease } = input.lease;
+    const result = await this.transitionState({ taskId: input.taskId, expectedRevision: input.expectedTaskRevision,
+      to: 'waiting_confirmation', reason: 'confirmation_required', lease }, false, input);
+    if (result.runRevision === null) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+    return { ...result, runRevision: result.runRevision, runId: input.lease.runId,
+      stepId: input.stepId, stepRevision: input.expectedStepRevision, checkpointRef: input.checkpointRef };
+  }
+
+  private async confirmationWitness(tx: Prisma.TransactionClient, input: z.infer<typeof confirmationCommandSchema>,
+    scopeId: string, access: Awaited<ReturnType<AiTaskRepository['resolveAccess']>>) {
+    const key = { scopeId, taskId: input.taskId, runId: input.lease.runId, stepId: input.stepId, checkpointRef: input.checkpointRef };
+    const proof = confirmationEvidenceSchema.parse(structuredClone(await this.confirmations!.read({ ...key, lease: structuredClone(input.lease) }, tx)));
+    const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    if (Object.entries(key).some(([k, v]) => proof[k as keyof typeof proof] !== v)
+      || proof.leaseOwnerId !== input.lease.holderId || proof.fencingToken !== input.lease.fencingToken
+      || proof.runRevision !== input.lease.revision || proof.stepRevision !== input.expectedStepRevision) throw denied();
+    const step = await tx.aiStep.findFirst({ where: { scopeId, taskId: input.taskId, runId: input.lease.runId, id: input.stepId } });
+    if (!step || step.id !== input.stepId || step.scopeId !== scopeId || step.taskId !== input.taskId || step.runId !== input.lease.runId
+      || step.actionId !== proof.actionId || step.inputRef !== proof.inputRef || step.requestFingerprint !== proof.stepFingerprint
+      || step.revision !== input.expectedStepRevision || step.status !== 'RUNNING' || step.effect !== 'POSSIBLE' || step.resultRef !== null
+      || step.toolCode !== 'rental.order.commit' || step.toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
+    const savedPlan = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: { scopeId, taskId: input.taskId, runId: input.lease.runId } } });
+    if (!savedPlan || savedPlan.scopeId !== scopeId || savedPlan.taskId !== input.taskId || savedPlan.runId !== input.lease.runId
+      || savedPlan.planHash !== proof.planHash || requestFingerprint(savedPlan.payload) !== proof.planHash) throw denied();
+    const plan = aiTaskRunPlanSchema.parse(savedPlan.payload);
+    const original = await tx.aiTaskActionInput.findFirst({ where: { scopeId, taskId: input.taskId, runId: input.lease.runId, id: proof.inputRef } });
+    if (!original || original.id !== proof.inputRef || original.scopeId !== scopeId || original.taskId !== input.taskId || original.runId !== input.lease.runId
+      || original.fingerprint !== proof.stepFingerprint || requestFingerprint(original.payload) !== proof.stepFingerprint
+      || original.toolCode !== step.toolCode || original.toolVersion !== step.toolVersion || !(original.expiresAt instanceof Date)
+      || original.expiresAt <= this.clock() || plan.taskId !== input.taskId || plan.runId !== input.lease.runId
+      || !plan.steps.some(p => p.registrationRef === original.registrationRef && p.operation === 'idempotent'
+        && p.toolCode === step.toolCode && p.toolVersion === step.toolVersion)) throw denied();
+    const proposalKey = { scopeId, taskId: input.taskId, proposalId: proof.proposalId };
+    const head = await tx.aiProposal.findFirst({ where: { scopeId, taskId: input.taskId, id: proof.proposalId } });
+    const version = await tx.aiProposalVersion.findFirst({ where: { ...proposalKey, revision: proof.proposalRevision } });
+    const actions = await tx.aiProposalAction.findMany({ where: { scopeId, taskId: input.taskId, actionId: proof.actionId }, take: 2 });
+    const action = actions[0];
+    if (!head || head.id !== proof.proposalId || head.scopeId !== scopeId || head.taskId !== input.taskId
+      || head.status !== 'PENDING_CONFIRMATION' || head.currentRevision !== null || !version
+      || Object.entries(proposalKey).some(([k, v]) => version[k as keyof typeof version] !== v)
+      || version.revision !== proof.proposalRevision || version.payloadHash !== proof.reviewedPayloadHash
+      || fingerprintAiProposalDraft(version.payload) !== proof.reviewedPayloadHash || !(version.expiresAt instanceof Date)
+      || version.expiresAt <= this.clock() || actions.length !== 1 || action.scopeId !== scopeId || action.taskId !== input.taskId
+      || action.proposalId !== proof.proposalId || action.proposalRevision !== proof.proposalRevision
+      || action.actionId !== proof.actionId || action.requestFingerprint !== proof.stepFingerprint
+      || await tx.aiProposalVersion.findFirst({ where: { ...proposalKey, revision: { gt: proof.proposalRevision } } })
+      || await tx.aiApproval.findFirst({ where: { ...proposalKey, proposalRevision: proof.proposalRevision } })) throw denied();
+    const payload = version.payload as unknown as AiProposalPayloadDraft;
+    if (payload.taskId !== input.taskId || payload.proposalId !== proof.proposalId || payload.revision !== proof.proposalRevision
+      || payload.audience.toUpperCase() !== access.audience || requestFingerprint(aiPersistenceScopeColumns(payload.scope)) !== requestFingerprint(access.scope)
+      || payload.atomicity !== 'single_action' || payload.actions.length !== 1 || payload.actions[0].actionId !== proof.actionId
+      || payload.actions[0].toolCode !== step.toolCode || payload.actions[0].toolVersion !== step.toolVersion
+      || payload.actions[0].input.contentHash !== proof.stepFingerprint || Date.parse(payload.expiresAt) !== version.expiresAt.getTime()) throw denied();
+    const run = await tx.aiRun.findFirst({ where: { scopeId, taskId: input.taskId, id: input.lease.runId } });
+    if (!run || run.id !== input.lease.runId || run.scopeId !== scopeId || run.taskId !== input.taskId || run.status !== 'RUNNING'
+      || run.leaseOwnerId !== input.lease.holderId || run.revision !== input.lease.revision || run.fencingToken.toFixed(0) !== input.lease.fencingToken
+      || run.actorKind !== access.actorKind || run.actorId !== access.actorId || !run.leaseExpiresAt
+      || run.leaseExpiresAt.getTime() !== Date.parse(input.lease.expiresAt) || run.leaseExpiresAt <= this.clock()) throw denied();
+    return { proof, binding: requestFingerprint({ proof, head, version, action, original, plan: savedPlan }) };
+  }
+
+  private async transitionState(value: unknown, settleCancellation: boolean, confirmation?: z.infer<typeof confirmationCommandSchema>) {
     const parsed = commandSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
     const input = parsed.data;
@@ -54,6 +139,7 @@ export class AiTaskTransitionRepository {
       return await this.db.$transaction(async tx => {
         const task = await tx.aiTask.findFirst({ where: initial.where, select: taskSelect });
         if (!task) throw new AiTaskRepositoryError("AI_RESOURCE_UNAVAILABLE");
+        if (confirmation && (task.id !== input.taskId || task.status !== 'RUNNING' || task.cancelRequestedAt !== null)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         // Input consumption and resume must share the dedicated receipt transaction.
         if (task.status === 'WAITING_INPUT' && input.to === 'running') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         if (task.contractVersion !== AI_TASK_DRAFT_VERSION || !AI_TASK_STATUSES_DRAFT.some(status => status === task.status.toLowerCase())) {
@@ -69,6 +155,8 @@ export class AiTaskTransitionRepository {
         const rows = await tx.aiStep.findMany({
           where: { scopeId: task.scopeId, taskId: task.id }, select: stepSelect, orderBy: [{ runId: "asc" }, { sequence: "asc" }], take: 1001
         });
+        const checkpoint = confirmation ? await this.confirmationWitness(tx, confirmation, task.scopeId, initial) : null;
+        if (confirmation && checkpoint?.binding !== (await this.confirmationWitness(tx, confirmation, task.scopeId, initial)).binding) throw conflict();
         // Reauthorize after awaited reads/lock acquisition, before any status/event commit.
         const current = await this.access.resolveAccess(input.taskId, "transition_task");
         if (initial.bindingKey !== current.bindingKey) throw new AiTaskRepositoryError("AI_ACCESS_DENIED");
@@ -92,7 +180,10 @@ export class AiTaskTransitionRepository {
           to: input.to, reason: input.reason, occurredAt,
           initiator: input.lease ? { kind: "worker", id: input.lease.holderId } : { kind: current.actorKind === "AUTOMATION" ? "system" : "user", id: current.actorId }
         };
-        const decision = evaluateAiTaskTransitionDraft(state, request);
+        const decision = checkpoint ? evaluateAiTaskConfirmationTransitionDraft(state, request, {
+          stepId: checkpoint.proof.stepId, runId: checkpoint.proof.runId,
+          stepRevision: checkpoint.proof.stepRevision, actionId: checkpoint.proof.actionId
+        }) : evaluateAiTaskTransitionDraft(state, request);
         if (!decision.allowed) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
         let nextRunRevision: number | null = null;
         if (input.lease) {
@@ -130,7 +221,8 @@ export class AiTaskTransitionRepository {
             scopeId: task.scopeId, taskId: task.id, cursor: task.eventCursor + 1n,
             taskRevision: decision.nextRevision, type: event.type, occurredAt: current.now,
             // Internal audit envelope, not the wire payload. A reader must explicitly project event.data.
-            payload: { data: event.data, initiator: { ...request.initiator, actorKind: current.actorKind, actorId: current.actorId } }
+            payload: { data: event.data, initiator: { ...request.initiator, actorKind: current.actorKind, actorId: current.actorId },
+              ...(checkpoint ? { confirmation: { checkpointRef: checkpoint.proof.checkpointRef, phaseId: checkpoint.proof.phaseId } } : {}) }
           },
           select: { cursor: true }
         });

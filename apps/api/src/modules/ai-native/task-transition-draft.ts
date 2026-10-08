@@ -89,6 +89,20 @@ export function evaluateAiTaskTransitionDraft(state: AiTaskTransitionStateDraft,
   return { allowed: true, nextRevision: state.revision + 1 };
 }
 
+export function evaluateAiTaskConfirmationTransitionDraft(state: AiTaskTransitionStateDraft, request: AiTaskTransitionRequestDraft,
+  checkpoint: { stepId: string; runId: string; stepRevision: number; actionId: string }): AiTaskTransitionDecisionDraft {
+  if (!((state.status === 'running' && request.to === 'waiting_confirmation')
+    || (state.status === 'waiting_confirmation' && request.to === 'running'))) return deny('transition_denied');
+  const ordinary = evaluateAiTaskTransitionDraft(state, request);
+  if (ordinary.allowed) return deny('invalid_state');
+  if (ordinary.reason !== 'unresolved_steps') return ordinary;
+  const step = state.steps.find(row => row.stepId === checkpoint.stepId);
+  if (!step || step.runId !== checkpoint.runId || step.revision !== checkpoint.stepRevision || step.actionId !== checkpoint.actionId
+    || step.outcome.status !== 'running' || step.outcome.effect !== 'possible') return deny('invalid_state');
+  if (state.steps.some(row => row.stepId !== step.stepId && ['running', 'unknown'].includes(row.outcome.status))) return deny('unresolved_steps');
+  return { allowed: true, nextRevision: state.revision + 1 };
+}
+
 /** 单个逻辑步骤的重试保留身份与指纹；unknown只能经业务核对变成已提交或确定未提交。 */
 export function evaluateAiStepTransitionDraft(previous: AiStepStateDraft, next: AiStepStateDraft, reason: AiStepTransitionReasonDraft): AiTaskTransitionDecisionDraft {
   if (!validRevision(previous.revision) || previous.revision === Number.MAX_SAFE_INTEGER

@@ -2,7 +2,7 @@ import type { AiTaskRunnerDependencies, AiTaskRunnerLease, AiTaskRunnerPlanPort,
 import type { AiTaskRepository } from "../ai-task.repository";
 import type { AiStepRegistrationCommand, AiStepRegistrationRepository } from "../ai-step-registration.repository";
 import type { AiStepTransitionCommand, AiStepTransitionRepository } from "../ai-step-transition.repository";
-import { AI_TASK_STATUSES_DRAFT, AI_TASK_DRAFT_VERSION, type AiTaskStatusDraft, type AiTaskEventDraft, type AiStepStatusDraft } from "@rental-os/shared";
+import { AI_TASK_STATUSES_DRAFT, AI_TASK_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiTaskStatusDraft, type AiTaskEventDraft, type AiStepStatusDraft } from "@rental-os/shared";
 
 /**
  * The only runner-to-persistence wiring point. The command factory belongs to the
@@ -14,12 +14,23 @@ export interface AiTaskRunnerRepositoryCommandFactory {
   transition(kind: "start" | "succeed" | "fail" | "pause" | "unknown", step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease, resultRef: string | null, errorCode?: string, pause?: "input" | "confirmation" | "external"): AiStepTransitionCommand;
 }
 
+export interface AiTaskRunnerConfirmationCheckpointPort {
+  pause(input: {
+    taskId: string; stepId: string; expectedTaskRevision: number; expectedStepRevision: number;
+    checkpointRef: string; lease: AiTaskRunnerLease;
+  }): Promise<{
+    event: AiTaskEventDraft; runId: string; runRevision: number;
+    stepId: string; stepRevision: number; checkpointRef: string;
+  }>;
+}
+
 export interface AiTaskRunnerRepositoryAdapters {
   tasks: Pick<AiTaskRepository, "readMetadata" | "claimRun" | "claimRecoveryRun" | "releaseRun"> & Partial<Pick<AiTaskRepository, 'assertRecoveryRun'>>;
   registrations: Pick<AiStepRegistrationRepository, "register">;
   replays?: Pick<AiStepRegistrationRepository, "readReplay">;
   transitions: Pick<AiStepTransitionRepository, "transition">;
   commands: AiTaskRunnerRepositoryCommandFactory;
+  confirmation?: AiTaskRunnerConfirmationCheckpointPort;
 }
 
 function committed(value: { runRevision: number; event: AiTaskEventDraft }, previous: AiTaskRunnerLease,
@@ -70,7 +81,22 @@ export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerReposito
       return transition('fail', step, lease, resultRef, errorCode);
     },
     async pause(step, lease, pause, resultRef) {
-      return transition('pause', step, lease, resultRef, undefined, pause);
+      if (pause !== 'confirmation') return transition('pause', step, lease, resultRef, undefined, pause);
+      const ref = structuredClone(step), held = structuredClone(lease);
+      if (!resultRef || ref.plan.operation !== 'idempotent' || ref.plan.toolCode !== 'rental.order.commit'
+        || ref.plan.toolVersion !== AI_TOOL_DRAFT_VERSION || typeof adapters.confirmation?.pause !== 'function') throw new Error('AI_RESOURCE_UNAVAILABLE');
+      const value = structuredClone(await adapters.confirmation.pause({ taskId: held.taskId, stepId: ref.registered.stepId,
+        expectedTaskRevision: ref.registered.taskRevision, expectedStepRevision: ref.registered.stepRevision,
+        checkpointRef: resultRef, lease: structuredClone(held) }));
+      const event = value?.event;
+      if (!event || event.contractVersion !== AI_TASK_DRAFT_VERSION || event.type !== 'task.transition'
+        || event.taskId !== held.taskId || event.taskRevision !== ref.registered.taskRevision + 1
+        || event.data.from !== 'running' || event.data.to !== 'waiting_confirmation' || event.data.reason !== 'confirmation_required'
+        || value.runId !== held.runId || ref.registered.runId !== held.runId || value.runRevision !== held.revision + 1
+        || value.stepId !== ref.registered.stepId || value.stepRevision !== ref.registered.stepRevision
+        || value.checkpointRef !== resultRef) throw new Error('AI_STORAGE_UNAVAILABLE');
+      return { lease: { ...held, revision: value.runRevision }, taskRevision: event.taskRevision,
+        confirmation: { stepId: value.stepId, stepRevision: value.stepRevision, checkpointRef: value.checkpointRef } };
     },
     async unknown(step, lease, resultRef) {
       return transition('unknown', step, lease, resultRef);

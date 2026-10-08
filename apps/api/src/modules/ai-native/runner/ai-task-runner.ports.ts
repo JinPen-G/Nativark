@@ -75,6 +75,7 @@ export interface AiTaskRunnerRegisteredStep {
 export interface AiTaskRunnerStepCommit {
   lease: AiTaskRunnerLease;
   taskRevision: number;
+  confirmation?: { stepId: string; stepRevision: number; checkpointRef: string };
 }
 
 export interface AiTaskRunnerStepRef {
