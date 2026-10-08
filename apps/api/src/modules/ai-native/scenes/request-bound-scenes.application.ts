@@ -8,6 +8,7 @@ import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './ori
 import { composeHumanQuoteOrder, type HumanQuoteOrderDependencies } from './human-quote-order.composition';
 import { composeAiOriginalSceneModel, type AiOriginalSceneModelDependencies, type AiOriginalSceneRunDependencies } from './original-scene-model.composition';
 import type { AiTaskApplicationHost } from '../runner/prisma-task-application';
+import { composeFormalApprovedOrderReprepareServices, type FormalApprovedOrderReprepareConfiguration } from '../approval-execution/formal-approved-order-reprepare.composition';
 
 export type AiSceneHttpRequest = { headers: { authorization?: unknown } };
 export type AiSceneRequestOptions = { enabled: boolean; audience: 'operator' | 'staff' };
@@ -90,13 +91,25 @@ export function composeRequestBoundQuoteSelections(dependencies: RequestBoundQuo
   });
 }
 
-export function composeRequestBoundHumanQuoteOrder(dependencies: RequestBoundQuoteOrderDependencies, options: AiSceneRequestOptions) {
-  const call = bindRequests(dependencies, options, input => composeHumanQuoteOrder({ ...input,
-    originals: composeAiOriginalScenes(input).requests }));
+export function composeRequestBoundHumanQuoteOrder(dependencies: RequestBoundQuoteOrderDependencies, options: AiSceneRequestOptions,
+  reprepare?: FormalApprovedOrderReprepareConfiguration) {
+  if (reprepare && 'reprepareServices' in dependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const configuration = reprepare ? { holderId: reprepare.holderId, creationRules: structuredClone(reprepare.creationRules),
+    memberships: reprepare.memberships } : undefined;
+  const call = bindRequests(dependencies, options, input => {
+    if (configuration) {
+      const factory = (current: Parameters<typeof composeFormalApprovedOrderReprepareServices>[0]) =>
+        composeFormalApprovedOrderReprepareServices(current, configuration);
+      return composeHumanQuoteOrder({ ...input, originals: factory(input).originals, reprepareServices: factory });
+    }
+    return composeHumanQuoteOrder({ ...input, originals: composeAiOriginalScenes(input).requests });
+  });
   return Object.freeze({
     readSelectedProposal: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedProposal(command)),
     decideSelectedProposal: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.decideSelectedProposal(command)),
     readSelectedDecisionReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedDecisionReceipt(command)),
-    readSelectedReprepareEligibility: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedReprepareEligibility(command))
+    readSelectedReprepareEligibility: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedReprepareEligibility(command)),
+    reprepareSelectedProposal: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reprepareSelectedProposal(command)),
+    readSelectedReprepareReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedReprepareReceipt(command))
   });
 }

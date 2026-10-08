@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AI_PROPOSAL_DRAFT_VERSION } from '@rental-os/shared';
+import { AI_PROPOSAL_DRAFT_VERSION, AI_QUOTE_SELECTION_DRAFT_VERSION } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { composeControlledApprovedOrder, type ControlledApprovedOrderDependencies } from '../approval-execution/controlled-approved-order.composition';
@@ -66,7 +66,30 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
     if (command.taskId !== ref.taskId || command.lease.runId !== ref.runId || command.actionId !== review.proposal.payload.actions[0].actionId) throw denied();
     return controlled[operation](command);
   };
+  const reprepareOperation = async (value: unknown, operation: 'reprepare' | 'readReprepareReceipt') => {
+    const parsed = z.object({ selection: z.unknown(), command: z.unknown() }).strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const command = approvalApplicationContract('AiApprovalReprepareCommandDraft', parsed.data.command);
+    const { ref } = await selectedReview(parsed.data.selection, command.original);
+    if (command.originalTaskId !== ref.taskId || command.replacement.taskId === ref.taskId
+      || command.replacement.originalInputRef === ref.originalInputRef) throw denied();
+    const replacementSelection = parseQuoteSelectionProof({ draftVersion: AI_QUOTE_SELECTION_DRAFT_VERSION,
+      originalInputRef: command.replacement.originalInputRef, selectionId: command.replacement.quoteSelectionRef,
+      taskId: command.replacement.taskId, runId: command.replacement.runId, inputHash: command.replacement.fingerprint });
+    const receipt = await controlled.application[operation](ref.taskId, command);
+    let replacement: { selection: ReturnType<typeof parseQuoteSelectionProof>;
+      review: Awaited<ReturnType<typeof controlled.application.readProposal>> } | null = null;
+    if (receipt.state === 'prepared') {
+      await selectedReview(replacementSelection, receipt.proposal);
+      const review = await controlled.application.readProposal(replacementSelection.taskId, receipt.proposal);
+      replacement = { selection: replacementSelection, review };
+    }
+    await selectedReview(ref, command.original);
+    return freezeOriginalInput({ receipt, replacement, order: 'not_created_by_reprepare' as const });
+  };
   return Object.freeze({
+    reprepareSelectedProposal: (value: unknown) => reprepareOperation(value, 'reprepare'),
+    readSelectedReprepareReceipt: (value: unknown) => reprepareOperation(value, 'readReprepareReceipt'),
     async readSelectedProposal(value: unknown) {
       const parsed = reviewCommand.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');

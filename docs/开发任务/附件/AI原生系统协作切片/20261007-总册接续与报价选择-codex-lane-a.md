@@ -1,3 +1,21 @@
+## CA05/09 新人类材料到正式重新准备（20261008）
+
+开工HEAD为044252be，只有保留output，无MERGE_HEAD/CHERRY_PICK_HEAD；主线确认A场景独占。固定依赖e510edd264c722fa4b7759dbf8a22c87fd18ffcc只接c31d9199八个生产文件与2754cac0附件绑定fixture精确更正；647119a901bd400c0d8e8edbeb10ad264f9ad666只接7b6513e6正式工厂、held-lease源及原request-bound审批三个生产文件。两次索引与固定源比对一致，未搬07测试链、原A blob或schema。主线已有等价前置，不需重摘这两个依赖提交。
+
+A新增reprepareSelectedProposal/readSelectedReprepareReceipt：先用既有selectedReview绑定旧选择、提案和持久原输入，严格解析公开AiApprovalReprepareCommandDraft，拒绝旧task/原请求复用为replacement；调用07原reprepare/原收据，不手写SUPERSEDED/审批/订单。仅prepared后以新选择证明重新绑定新proposal，并返回公开review（generatedText=null、无内部facts）和原收据，之后再次核对旧引用；unknown不冒充未提交或自动重试。
+
+composeRequestBoundHumanQuoteOrder及原registerRequestBoundApplication可接第三个服务器配置{holderId,creationRules,memberships}，固定holder/规则副本，通过07 composeFormalApprovedOrderReprepareServices创建同请求originals和事务内selection/只读held lease。配置启用时拒绝另塞reprepareServices；不接受body里的lease/fence，不额外claim，不新增controller或自动注册。未提供正式工厂仍unavailable；再次决定仍调用原decideSelectedProposal，人类决定不自动提交Core。
+
+仅复用既有human-quote-selection测试与lane-a-selected-order夹具加一项功能冒烟：真实原请求save/createTask、重新发材料关系、持久选择、claimRun CAS、原选中input发布/plan/registration、07事务、新公开提案、丢失COMMIT应答后的原readReceipt、同操作重放、再次人工决定。DB、Core报价事实/目录和RUNNING/步骤启动状态为明确替身，非真实worker/MySQL锁验收；原审批/重新准备收据未手写。验证两个原请求/两个选择、一条reprepare收据、旧SUPERSEDED、两个人类决定且零订单，并验证缺工厂/私带lease/缺header/注销拒绝。
+
+严格离线环境同前，audit为output/ca-selected-reprepare.audit，命令：
+
+`node --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs --require ./tests/fixtures/ai-native/lane-b-local-runtime.cjs --test --test-name-pattern='selected new human materials' tests/ai-native-lane-a-human-quote-selection.test.cjs`
+
+首次0pass/1fail：A旧fixture未声明AiRun的leaseOwnerId/leaseExpiresAt=null，也未在关系过滤中展开run.task，真实claimRun CAS正确拒绝。只补DB默认值及关系匹配，再复验同一项1pass/0fail/0skip/0todo、退出0。最终必要API源码noEmit为0diagnostics；diff0，type/smoke audit无阻断，不扩矩阵或再派审查。c31仓储使用既有参数化$queryRaw/$executeRaw，不依赖新增Prisma delegate；本树schema/client仍原版本未同步，表DDL/联合schema验收留在主线，不把离线rawSQL替身称迁移通过。旧生成锁、previous、temp、output保持，无安装/启服务/.env/真实外联/共享生成物写入/迁移/推送。
+
+Runtime映射：保存operationKey、旧task/proposal/hash与新task/run/selection/input/planHash；只有原receipt.state=prepared才进入review_and_decide，unknown指向read_reprepare_receipt而非新key重派。held lease来自07真实只读源，不把外部引擎暂停/确认状态当许可；没有正式持有者则不可用。Provider SDK不参与重新准备事务，仍在唯一Gateway后独立替换，不改变Auth、人工决定、Core和预算单账。回退停止新场景装配，保留原材料/收据/旧SUPERSEDED及新提案，不撤销已记录决定或双跑准备；接口/耦合/单边切换的共通规则见下节。非订单配置/客户资料仍缺领域revision-CAS及operationKey收据，不用order.commit或任意patch替代。
+
 ## CA03/09 模型运行与结果的请求绑定应用（20261008）
 
 从已交2db337fd4ff591be6c2627b00c9bb14785e0e34c继续；主线确认request-bound-scenes.application.ts、original-scenes.module.ts与A测试本轮独占。新增composeRequestBoundOriginalSceneModel和独立AI_ORIGINAL_SCENE_MODEL_REQUESTS/registerRequestBoundModel，只提供请求绑定服务器门面，不注册controller/AppModule或启动worker/HTTP。
