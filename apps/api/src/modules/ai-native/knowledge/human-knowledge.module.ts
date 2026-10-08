@@ -5,7 +5,7 @@ import { HumanKnowledgeIndexService } from './human-knowledge-index.service';
 import { HumanKnowledgeInputService, type HumanKnowledgeInputDependencies } from './human-knowledge-input.service';
 import { composePersistedHumanKnowledge } from './persistent-knowledge.composition';
 import { PersistentMemoryConsentService } from './persistent-memory-consent.service';
-import { composeKnowledgeFileApplication, type KnowledgeFileApplicationDependencies } from './knowledge-file.composition';
+import { composeKnowledgeFileApplication, KNOWLEDGE_SCENE_OPTIONS, type KnowledgeFileApplicationDependencies, type KnowledgeSceneOptionsFactory } from './knowledge-file.composition';
 import { HumanKnowledgeUploadService } from './human-knowledge-upload.service';
 
 @Module({})
@@ -21,15 +21,22 @@ export class HumanKnowledgeModule {
   }
 
   static registerFiles(ports: KnowledgeFileApplicationDependencies): DynamicModule {
-    const { management, context, index, preparation, memory, uploads } = composeKnowledgeFileApplication(ports);
-    return { module: HumanKnowledgeModule, providers: [
+    return this.services(composeKnowledgeFileApplication(ports));
+  }
+
+  private static services({ management, context, index, preparation, memory, uploads, sceneKnowledge }: ReturnType<typeof composePersistedHumanKnowledge> & { uploads?: HumanKnowledgeUploadService; sceneKnowledge?: KnowledgeSceneOptionsFactory }): DynamicModule {
+    const providers = [
       { provide: HumanKnowledgeService, useValue: management },
       { provide: HumanKnowledgeContextService, useValue: context },
       { provide: HumanKnowledgeIndexService, useValue: index },
       { provide: HumanKnowledgeInputService, useValue: preparation },
       ...(memory ? [{ provide: PersistentMemoryConsentService, useValue: memory }] : []),
-      { provide: HumanKnowledgeUploadService, useValue: uploads },
-    ], exports: [HumanKnowledgeService, HumanKnowledgeContextService, HumanKnowledgeIndexService, HumanKnowledgeInputService,
-      ...(memory ? [PersistentMemoryConsentService] : []), HumanKnowledgeUploadService] };
+      ...(uploads ? [{ provide: HumanKnowledgeUploadService, useValue: uploads }] : []),
+      ...(sceneKnowledge ? [{ provide: KNOWLEDGE_SCENE_OPTIONS, useValue: sceneKnowledge }] : []),
+    ];
+    return { module: HumanKnowledgeModule, providers,
+      exports: [HumanKnowledgeService, HumanKnowledgeContextService, HumanKnowledgeIndexService, HumanKnowledgeInputService,
+        ...(memory ? [PersistentMemoryConsentService] : []), ...(uploads ? [HumanKnowledgeUploadService] : []),
+        ...(sceneKnowledge ? [KNOWLEDGE_SCENE_OPTIONS] : [])] };
   }
 }
