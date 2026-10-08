@@ -1,5 +1,26 @@
 # Codex B 总册接续交付与精确未闭合项
 
+## 2026-10-08 暂停交接
+
+负责人经主线要求先收口全部任务、思考接入。唯一续作心跳00965714已取消；不新开包、不自动续派、不安装或迁移LangGraph。当前政策管理包在暂停前已通过定向冒烟，现仅补本交接记录并独立保存，之后本树停止写入。保留全部旧代码、测试、output和unknown；恢复需负责人重新明确授权，不能沿旧心跳继续。以下旧章节“心跳保持”是当时记录，以本节取消状态为准。
+
+## 2026-10-08 AIN18：可信主体/政策管理与不可变管理收据
+
+基线67438629（主线等价668ebdff），沿用AiAutomationSubject/Policy，不重建Runtime。新增独占迁移 `20261008150000_ai_automation_policy_management`：两原模型仅加enabledBy/enabledAudience/enabledAt，旧行null不伪造历史；新增独立ManagementGrant、PolicyPreparation、PolicyManagementOperation，全部scope复合归属，operation再引用原subject/policy。准备与管理operation分别按scope/actor/audience/operationKey唯一，operation还唯一关联preparation。源码仅本线automation/business-events及认领schema/迁移、原events测试和本记录。
+
+- 原显式BusinessFailure组合/Module新增policyManagement（HumanAutomationPolicyManagementService）。read({subjectId,policyId})读取当前配置与计数；preview规范化提案/变更hash；prepare在独立prepare grant下保存不可变准备；review/preparation按原id或key只读；commit必须明确confirm=apply_automation_policy_change、原preparationId/changeHash及独立commit grant；operation({operationKey})只读核对原收据。
+- 复用真实AiTaskCurrentIdentityAuthority与TenantModelConfigurationAuthority的原system-rules Guard，当前operator/user、本人workspace、dataScope=all及当前地点范围，前后复验；不是把GET、policyId或body.permissions当凭据。两管理动作grant默认停用，精确绑定当前人类、scope、变更/源hash，commit再绑定准备id、目标id及有效期。新目标id由服务器生成，提案只能选择同scope已存在目标或创建，不可改挂另一主体。没有自动seed或管理grant自授权接口，缺真实grant拒绝。
+- 新subject必须enabled=false，新policy必须disabled；只有后续明确人类变更才能开启shadow/manual_confirmation，不支持auto_execute。提案权限仅原有限三项且不超当前人类权限，地点不得扩大到当前身份之外且必须本workspace真实据点；scene/version必须在原AiTaskPlanPolicy，事件仅notification.failed/refund.failed。日准入0～10000、冷却1～86400秒、有界有效期；新建/激活subject最多366天，policy不超过subject。准备最多10分钟并受正式grant及新建/激活有效期限制。
+- 正式commit重新锁原preparation、原policy/subject及独立grant，校验源revision/hash与场景定义，配置CAS和immutable operation同事务。只在实际变更时递增subject授权revision/policy revision；启用或活跃配置变更记录当前人类/时间，停用保留历史启用来源，撤销终态不能撤销撤销。过期政策/场景可以受权停用或撤销而无需先延长旧有效期，但仍要求原管理权限、精确新grant和当前scope/场景归属；这不是旧automation授权复活。
+- policy更新不写counterDay/preparedCount/lastPreparedAt，不能编辑清零。原AutomationFailureTaskService在policy锁内按同policy+event跨revision检查旧input；编辑policy不会重新为旧事件生成输入或任务，旧输入保留并需人类历史核对。原task/input/closed/unknown不删除，确认配置不代表任务批准或执行。
+- 首次提交需实际管理grant；原operation已有时核对同scope/本人/原key/变更hash和结果hash，旧grant停用不使其变成新写授权。提交ACK丢失报告unknown/retryable=false，按原operation只读；准备结果未知可按原operationKey查preparation，不自动换键或重写。过期/源变化的准备只读展示expired/stale，不能提交。
+
+复用原events单项，无新脚本/矩阵。最终CB09过滤1pass/0fail/0skip/0todo、退出0，实际ts-node transpileOnly=false；初版、补当前配置读及补过期清理均只复验同项，未扩全仓。覆盖原Guard拒绝、GET不等于prepare grant、prepare不等于commit grant、默认停用、实际启用人时间、丢ACK只读、异内容同键拒绝、降低限额必须新grant、UTC计数不变、跨revision同事件不重放、过期撤销与禁止恢复撤销、原unknown/task保留和当前人类撤权。
+
+隔离Prisma生成exit0，schemaHash=cc2d68989237a78dab70ec60f3025f87c8aab83c26ec48dbd96957625dc99796，guardViolations0/sharedArtifactsUnchanged=true；diff check0。原preload/local-runtime、固定无效DB、本树output/cb09-policy-management-audit/writeRoot及原TEMP/TMP。DB/Auth存储、正式grant置备、Core均显式测试替身；未执行真实迁移/DB/网络/模型/支付、安装、读.env、启动服务、push或合main。
+
+尚未交付正式管理grant的可信置备入口、UI/HTTP宿主与真库FK/并发深测；不能用测试grant补生产缺口。本片没有接尚未完整交付的媒体单账/输入桥。Runtime将来只驱动这些应用方法，不持有授权、配置CAS、计数或收据；Provider SDK仍归唯一Gateway，未引入框架/SDK。暂停后不补上述缺口、不增加验证；重新授权时从本节固定提交、原正式grant依赖与明确写入归属接续。
+
 ## 2026-10-08 CB09 / AIN18：人类历史核对、关闭与反馈收据
 
 基线ae43f1e0（主线等价691f32e7已接），本片继续同一B认领。新HumanAutomationReviewService由原composeBusinessFailureEvents/Module.register导出为reviews，也随automation组合导出；不需要automation policy、预算或订阅作为人类凭据，不注册HTTP/worker或改A/06/07。原BusinessFailureReadAuthority实例提供当前Auth/Guard、本人workspace/地点与Core可见性前后复验；源已成功/候选到期可核对历史，原资源缺失、不可见或当前人类撤权则拒绝，不发明永久历史授权。

@@ -11,6 +11,7 @@ import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { BusinessFailureCandidateService } from './business-failure-candidate.service';
 import { BusinessFailureReadAuthority } from './business-failure-read.authority';
 import { AutomationFailureTasksModule, composeAutomationFailureTasks, type AutomationDependencies } from '../automation/automation.composition';
+import { HumanAutomationPolicyManagementService } from '../automation/human-automation-policy-management.service';
 import { HumanAutomationReviewService } from '../automation/human-automation-review.service';
 import { BUSINESS_FAILURE_OUTBOX, PrismaBusinessFailureOutbox } from './prisma-business-failure-outbox';
 
@@ -27,7 +28,8 @@ export function composeBusinessFailureEvents(input: BusinessFailureDependencies)
   return { outbox, notifications: new RentalBusinessFactRepository(input.db, outbox),
     payments: new PaymentRuntimeService(input.db, input.integrations, input.funding, outbox),
     candidates: new BusinessFailureCandidateService(input.db, authority, input.clock),
-    reviews: new HumanAutomationReviewService(input.db, authority, input.clock) };
+    reviews: new HumanAutomationReviewService(input.db, authority, input.clock),
+    policyManagement: new HumanAutomationPolicyManagementService(input.db, input, input.clock) };
 }
 
 export function composeBusinessFailureAutomation(input: BusinessFailureDependencies & Pick<AutomationDependencies, 'policyId' | 'subscriptions'>) {
@@ -47,7 +49,8 @@ export class BusinessFailureEventsModule {
       { provide: RentalBusinessFactRepository, useValue: services.notifications },
       { provide: PaymentRuntimeService, useValue: services.payments },
       { provide: BusinessFailureCandidateService, useValue: services.candidates },
-      { provide: HumanAutomationReviewService, useValue: services.reviews }
-    ], exports: [BUSINESS_FAILURE_OUTBOX, RentalBusinessFactRepository, PaymentRuntimeService, BusinessFailureCandidateService, HumanAutomationReviewService] };
+      { provide: HumanAutomationReviewService, useValue: services.reviews },
+      { provide: HumanAutomationPolicyManagementService, useValue: services.policyManagement }
+    ], exports: [BUSINESS_FAILURE_OUTBOX, RentalBusinessFactRepository, PaymentRuntimeService, BusinessFailureCandidateService, HumanAutomationReviewService, HumanAutomationPolicyManagementService] };
   }
 }

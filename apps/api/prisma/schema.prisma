@@ -738,6 +738,9 @@ model AiAutomationSubject {
   workspaceId           String @db.VarChar(191)
   authorizationRevision Int @default(1) @db.UnsignedInt
   enabled               Boolean @default(false)
+  enabledBy             String? @db.VarChar(191)
+  enabledAudience       String? @db.VarChar(16)
+  enabledAt             DateTime? @db.DateTime(3)
   permissions           Json
   locationScope         Json
   expiresAt             DateTime @db.DateTime(3)
@@ -746,6 +749,7 @@ model AiAutomationSubject {
   updatedAt             DateTime @updatedAt @db.DateTime(3)
   workspace             BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_automation_subject_workspace_fk")
   policies              AiAutomationPolicy[]
+  managementOperations  AiAutomationPolicyManagementOperation[]
 
   @@unique([tenantId, workspaceId, id], map: "ai_automation_subject_scope_key")
   @@map("ai_automation_subjects")
@@ -758,6 +762,9 @@ model AiAutomationPolicy {
   subjectId         String @db.VarChar(36)
   revision          Int @default(1) @db.UnsignedInt
   mode              String @default("disabled") @db.VarChar(24)
+  enabledBy         String? @db.VarChar(191)
+  enabledAudience   String? @db.VarChar(16)
+  enabledAt         DateTime? @db.DateTime(3)
   sceneCode         String @db.VarChar(64)
   sceneVersion      String @db.VarChar(64)
   allowedEventTypes Json
@@ -773,6 +780,7 @@ model AiAutomationPolicy {
   updatedAt         DateTime @updatedAt @db.DateTime(3)
   subject           AiAutomationSubject @relation(fields: [tenantId, workspaceId, subjectId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_automation_policy_subject_fk")
   inputs            AiAutomationInput[]
+  managementOperations AiAutomationPolicyManagementOperation[]
 
   @@unique([tenantId, workspaceId, subjectId, id], map: "ai_automation_policy_scope_key")
   @@map("ai_automation_policies")
@@ -820,6 +828,92 @@ model AiAutomationInput {
   @@unique([tenantId, workspaceId, policyId, policyRevision, eventId], map: "ai_automation_input_event_policy_key")
   @@index([tenantId, workspaceId, status, createdAt], map: "ai_automation_input_status_idx")
   @@map("ai_automation_inputs")
+}
+
+model AiAutomationManagementGrant {
+  id                  String @id @db.VarChar(36)
+  tenantId            String @db.VarChar(191)
+  workspaceId         String @db.VarChar(191)
+  scopeId             String @db.VarChar(36)
+  actorKind           String @default("user") @db.VarChar(16)
+  actorId             String @db.VarChar(191)
+  audience            String @db.VarChar(16)
+  action              String @db.VarChar(16)
+  resourceHash        String @db.Char(64)
+  requiredPermissions Json
+  revision            Int @default(1) @db.UnsignedInt
+  enabled             Boolean @default(false)
+  expiresAt           DateTime @db.DateTime(3)
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  updatedAt           DateTime @updatedAt @db.DateTime(3)
+  scope               AiScope @relation(fields: [scopeId, tenantId, workspaceId], references: [id, tenantId, workspaceId], onDelete: Restrict, onUpdate: Restrict, map: "ai_auto_management_grant_scope_fk")
+  preparations        AiAutomationPolicyPreparation[]
+  operations          AiAutomationPolicyManagementOperation[]
+
+  @@unique([scopeId, id], map: "ai_auto_management_grant_id_key")
+  @@unique([scopeId, actorId, audience, action, resourceHash], map: "ai_auto_management_grant_resource_key")
+  @@map("ai_automation_management_grants")
+}
+
+model AiAutomationPolicyPreparation {
+  id                      String @id @db.VarChar(36)
+  tenantId                String @db.VarChar(191)
+  workspaceId             String @db.VarChar(191)
+  scopeId                 String @db.VarChar(36)
+  actorKind               String @db.VarChar(16)
+  actorId                 String @db.VarChar(191)
+  audience                String @db.VarChar(16)
+  operationKey            String @db.VarChar(128)
+  subjectId               String @db.VarChar(36)
+  policyId                String @db.VarChar(36)
+  expectedSubjectRevision Int? @db.UnsignedInt
+  expectedPolicyRevision  Int? @db.UnsignedInt
+  commandJson             Json
+  changeHash              String @db.Char(64)
+  sourceHash              String @db.Char(64)
+  commitResourceHash      String @db.Char(64)
+  prepareGrantId          String @db.VarChar(36)
+  prepareGrantRevision    Int @db.UnsignedInt
+  authorizationHash       String @db.Char(64)
+  expiresAt               DateTime @db.DateTime(3)
+  createdAt               DateTime @default(now()) @db.DateTime(3)
+  scope                   AiScope @relation(fields: [scopeId, tenantId, workspaceId], references: [id, tenantId, workspaceId], onDelete: Restrict, onUpdate: Restrict, map: "ai_auto_preparation_scope_fk")
+  grant                   AiAutomationManagementGrant @relation(fields: [scopeId, prepareGrantId], references: [scopeId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_auto_preparation_grant_fk")
+  operation               AiAutomationPolicyManagementOperation?
+
+  @@unique([scopeId, id], map: "ai_auto_preparation_id_key")
+  @@unique([scopeId, actorId, audience, operationKey], map: "ai_auto_preparation_operation_key")
+  @@map("ai_automation_policy_preparations")
+}
+
+model AiAutomationPolicyManagementOperation {
+  id                  String @id @db.VarChar(36)
+  tenantId            String @db.VarChar(191)
+  workspaceId         String @db.VarChar(191)
+  scopeId             String @db.VarChar(36)
+  actorKind           String @db.VarChar(16)
+  actorId             String @db.VarChar(191)
+  audience            String @db.VarChar(16)
+  operationKey        String @db.VarChar(128)
+  preparationId       String @db.VarChar(36)
+  subjectId           String @db.VarChar(36)
+  policyId            String @db.VarChar(36)
+  changeHash          String @db.Char(64)
+  result              Json
+  resultHash          String @db.Char(64)
+  grantId             String @db.VarChar(36)
+  grantRevision       Int @db.UnsignedInt
+  authorizationHash   String @db.Char(64)
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  scope               AiScope @relation(fields: [scopeId, tenantId, workspaceId], references: [id, tenantId, workspaceId], onDelete: Restrict, onUpdate: Restrict, map: "ai_auto_management_operation_scope_fk")
+  preparation         AiAutomationPolicyPreparation @relation(fields: [scopeId, preparationId], references: [scopeId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_auto_management_operation_prep_fk")
+  grant               AiAutomationManagementGrant @relation(fields: [scopeId, grantId], references: [scopeId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_auto_management_operation_grant_fk")
+  subject             AiAutomationSubject @relation(fields: [tenantId, workspaceId, subjectId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_auto_management_operation_subject_fk")
+  policy              AiAutomationPolicy @relation(fields: [tenantId, workspaceId, subjectId, policyId], references: [tenantId, workspaceId, subjectId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_auto_management_operation_policy_fk")
+
+  @@unique([scopeId, preparationId], map: "ai_auto_management_operation_prep_key")
+  @@unique([scopeId, actorId, audience, operationKey], map: "ai_auto_management_operation_key")
+  @@map("ai_automation_policy_management_operations")
 }
 
 model AiAutomationReviewGrant {
@@ -5756,6 +5850,9 @@ model AiScope {
   budgetPolicies AiBudgetPolicy[]
   taskPlanPolicies AiTaskPlanPolicy[]
   originalRequests AiTaskOriginalRequest[]
+  automationManagementGrants AiAutomationManagementGrant[]
+  automationPolicyPreparations AiAutomationPolicyPreparation[]
+  automationPolicyManagementOperations AiAutomationPolicyManagementOperation[]
   automationInputs AiAutomationInput[]
   createdAt   DateTime           @default(now()) @db.DateTime(3)
 
