@@ -1,3 +1,29 @@
+## CA03/09 模型运行与结果的请求绑定应用（20261008）
+
+从已交2db337fd4ff591be6c2627b00c9bb14785e0e34c继续；主线确认request-bound-scenes.application.ts、original-scenes.module.ts与A测试本轮独占。新增composeRequestBoundOriginalSceneModel和独立AI_ORIGINAL_SCENE_MODEL_REQUESTS/registerRequestBoundModel，只提供请求绑定服务器门面，不注册controller/AppModule或启动worker/HTTP。
+
+沿用bindRequests：读取请求Bearer，await前克隆命令/固定requestId，在独立ALS按同一请求凭据构造原composeAiOriginalSceneModel；同步runServices(input)工厂收到同一dependencies及已绑定credentials，用于构造原inputSource/financialEvidence。host在门面装配时克隆冻结，不能从body指定；调用完成即使工厂保存了credentials引用也不能继续取得凭据。门面只委派原start/readInput/resume/reconcile/requestCancel/readModelResult/reopenModelSource，不公开runtime、prepareHeldRun、createApplication或Core提交。原raw registerModel不变，不另claim、建单账或绕过既有plan/step/fence/未知结果规则。
+
+两份既有A测试/夹具增加request-bound模型组合：真实Bearer、Auth/Guard、原请求、原QUEUED应用、知识/人工确认、PrismaGatewayInvocationBindings及按本请求工厂新建的PrismaGatewayAccountingFacts；数据库、知识文件字节、业务事实、路由、admission/财务生命周期、transport和输入源仍为显式替身。正常执行循环订单解释/开业诊断/报价澄清，验证host/body/header快照、执行中的并发ambient/缺header/错令牌拒绝、退出后的凭据失效、一个fence/一调用/四项资源记录、原知识结果与来源重开、跨task恢复拒绝、注销拒绝。第二例验证未知usage保持原收据、取消不回滚、不二次发模型，预abort保持QUEUED且零输入。正常澄清答案/等待确认phase尚无正式生产者，本片不手写其状态、不宣称其完整恢复路径已验。
+
+环境同上轮严格离线：无效DATABASE_URL、本树preload、AI_OFFLINE_WRITE_ROOT及cache/tmp、DISABLE_V8_COMPILE_CACHE=1；audit为output/ca-model-request-bound.audit。命令：
+
+`node --require ./tests/fixtures/ai-native/prisma-offline-preload.cjs --require ./tests/fixtures/ai-native/lane-b-local-runtime.cjs --test --test-name-pattern='request-bound model' tests/ai-native-lane-a-original-scene-host.test.cjs`
+
+首轮2pass/0fail/0skip/0todo，退出0；第一例内部循环三场景不另算项。API沿用本树shared源码paths+现有私有Prisma的noEmit程序，0diagnostics/退出0；diff0；type/smoke audit无阻断记录。不生成client/dist，不改schema、不安装/启服务/外联/迁移/推送/合main，旧生成失败的lock/previous/temp/output保持。主线另报其新B create附件门使旧knowledge fixture的assertKnowledgeBinding占位触发，主线独占修该固定集成fixture后再交SHA；本片未导入B上传链，自己的2/2不冒称主线新门已验。
+
+独立subagent仅做本包新增约束的只读审查（两生产文件局部、既有fixture与两用例，共5次读取），未发现可复现跨请求泄露、租约/提示词注入或未授权副作用；未重审全库或重跑测试。
+
+Runtime替换仅门面后的原驱动边界，当前请求身份、host租约、原收据、财务源及知识重授权不迁入引擎；Provider SDK仍只在唯一Gateway后替换，本门面不接SDK类型。取消/核对不是重派；停装request-bound模型门面不删除历史模型输入或unknown。07正式reprepareServices工厂/06phase到达后再串联相应场景，不在本包另造。
+
+双替换的具体接口/状态映射（当前只准备，不安装框架或迁移）：
+
+- Runtime入口：`composeRequestBoundOriginalSceneModel(dependencies, {enabled,audience,host,runServices})`固定7个请求方法；外部引擎以后只能作为原application的宿主驱动。`start`仍以原inputRef找到原task/run，`resume`仍提交原submission/receipt，`reconcile`仍查询原持有租约，不把它翻译成新claim或retry；`requestCancel`返回requested_not_rollback，不映射成已撤销Core或已退费。
+- Runtime结果：保留`execution.kind=run_outcome|not_started`及原outcome status；unknown不可转换为成功或零用量，`recovery_lease_unavailable`不可转换为重新运行。readModelResult/reopenModelSource继续读取原resultId及绑定的input/step/action/invocation、knowledge hash。正常WAITING_INPUT/WAITING_CONFIRMATION映射须等06正式phase，不用外部框架的暂停状态代替证据。
+- Runtime耦合：host holder/leaseMs、runServices(input)提供的原inputSource与financialEvidence、原数据库仓储/plan/step/fence是明确耦合点；第三方引擎不得拥有另一份task成功账、许可决定或预算账。请求凭据仅当前调用内有效，不持久化给引擎后台重用；后台继续执行须走原可信宿主重新鉴权路径，本包不另发服务令牌。
+- Provider SDK入口：只替换`runtime.ports.transport.invoke/stream`的协议适配，不替换当前请求门面、原routing/admission/dispatch/budget。稳定保留requestId/callId、configId/configRevision/credentialRef、intent/configuration hash和priceVersion；SDK usage须归一为实际reported输入/输出token，缺usage沿用unknown/pending_reconciliation，SDK错误或超时不得触发无原幂等证据的自动补发。
+- 迁移/回退：先以本包两项离线链路确认同一原输入、单个fence/调用、四项资源记录和原结果来源；再在唯一宿主或唯一transport装配点单边切换，禁止新旧Runtime/SDK对同一run双跑。回退仅停止新装配/新派发并恢复旧装配；旧input/selection/approval/Core、财务记录和unknown留存，用原read/reconcile确认，不能删除后重建。真实第三方运行行为和真实SDK协议仍待另行授权验收。
+
 ## CA03/CB07 原场景知识冻结与来源重授权（20261008）
 
 从请求绑定包6f5dbf58接续，固定知识政策1faf979674efefb028b108ad045d5bd125796135已导入f961a1fb1e6ebdf78ee15aed77597a6b7ef34797。主线确认A只消费场景、B维护knowledge。B固定8c3d8b42e7896bd626387c7c1f80406e224fe7d9仅两个生产文件的grant差异已导入f0c8971296695f6ab93f2b434a777e65e27f3254：scope与document分别复验相同resource，不要求不同资源同grantKey。原补丁因B旧上下文take:101而A为take:100不能直接应用，check未写入；逐hunk移植其8增3删，未导入上传测试链、schema或改动其他B逻辑。

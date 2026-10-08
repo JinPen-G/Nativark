@@ -325,6 +325,73 @@ test('scene knowledge with missing exact policy cannot publish model material or
   assert.equal(h.execution.sent.length, 0); assert.equal(h.state.aiGatewayInvocation.length, 0);
 });
 
+test('request-bound model runs original scenes and reads knowledge results without borrowing request identity', { timeout: 60000 }, async () => {
+  const { requestBoundOriginalModelHarness, originalSceneKnowledgeFixture } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const { composeRequestBoundOriginalSceneModel } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');
+  const { AI_TASK_INPUT_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
+  const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
+  for (const sceneCode of ['order_explanation', 'opening_diagnosis', 'quote_clarification']) {
+    const h = await requestBoundOriginalModelHarness(sceneCode, originalSceneKnowledgeFixture), app = h.requests;
+    const request = structuredClone(h.request), reference = structuredClone(h.reference);
+    assert.equal(h.execution.sent.length, 0); assert.equal(h.factoryCalls.length, 0);
+    assert.equal(h.state.aiRun[0].status, 'QUEUED');
+    assert.throws(() => composeRequestBoundOriginalSceneModel(h.modelDependencies, h.options), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+    assert.throws(() => composeRequestBoundOriginalSceneModel(h.requestDependencies, { ...h.options, enabled: false }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+    assert.throws(() => composeRequestBoundOriginalSceneModel(h.requestDependencies, { ...h.options, runServices: h.run }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+    for (const method of ['runtime', 'createApplication', 'prepareHeldRun', 'submitSelectedOrder']) assert.equal(app[method], undefined);
+    await assert.rejects(app.start(h.request, { ...h.reference, lease: {}, prompt: 'forged' }), e => e.code === 'AI_INVALID_INPUT');
+    h.options.host.holderId = 'mutated-after-assembly';
+    h.execution.beforeTransport = async () => {
+      request.headers.authorization = 'Bearer mutated-after-await'; reference.inputRef = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+      await runWithRequestIdentity({ tenantId: 'tenant_001', workspaceId: 'workspace-a', userId: h.b.h.identity.user.id }, async () => {
+        await assert.rejects(app.readInput({ headers: {} }, h.reference), e => e.code === 'AI_ACCESS_DENIED');
+        await assert.rejects(app.readInput({ headers: { authorization: 'Bearer wrong' } }, h.reference), e => e.code === 'AI_ACCESS_DENIED');
+      });
+    };
+    const run = await app.start(request, reference);
+    assert.equal(run.execution.outcome.status, 'succeeded'); assert.equal(run.original.inputRef, h.reference.inputRef);
+    assert.equal(h.state.aiGatewayInvocation[0].leaseOwnerId, 'request-worker');
+    assert.equal(h.state.aiRun[0].fencingToken.toFixed(0), '1'); assert.equal(h.execution.sent.length, 1);
+    assert.equal(h.state.aiGatewayInvocation.length, 1); assert.equal(h.state.aiTaskExecutionCharge.length, 4);
+    for (const input of h.factoryCalls) await assert.rejects(input.credentials.current(), e => e.code === 'AI_ACCESS_DENIED');
+    const resultCommand = { original: h.reference, resultId: h.state.aiTaskResultArtifact[0].id };
+    const result = await app.readModelResult(h.request, resultCommand);
+    assert.equal(result.status, 'available'); assert.equal(result.knowledge.originalInputRef, h.reference.inputRef);
+    const source = await app.reopenModelSource(h.request, { ...resultCommand, sourceKind: 'knowledge', sourceIndex: 0 });
+    assert.equal(source.reference.documentId, h.supplemental.document.documentId);
+    assert.equal(await app.readInput(h.request, h.reference), null);
+    assert.deepEqual(await app.reconcile(h.request, h.reference), { kind: 'not_started', reason: 'recovery_lease_unavailable' });
+    await assert.rejects(app.resume(h.request, { original: h.reference, submission: { draftVersion: AI_TASK_INPUT_DRAFT_VERSION,
+      taskId: 'another-task', requestId: 'input-request', expectedRevision: 1, submissionKey: 'answer-a',
+      answers: [{ fieldId: 'clarification_text', value: 'Synthetic clarification' }] } }), e => e.code === 'AI_ACCESS_DENIED');
+    h.b.h.identity.session = false;
+    await assert.rejects(app.readModelResult(h.request, resultCommand), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
+    await assert.rejects(app.reopenModelSource(h.request, { ...resultCommand, sourceKind: 'knowledge', sourceIndex: 0 }), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
+    assert.equal(h.execution.sent.length, 1);
+  }
+});
+
+test('request-bound model keeps unknown receipts and cancellation distinct from redispatch', { timeout: 30000 }, async () => {
+  const { requestBoundOriginalModelHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const h = await requestBoundOriginalModelHarness(), app = h.requests;
+  delete h.execution.result.usage;
+  const run = await app.start(h.request, h.reference);
+  assert.equal(run.execution.outcome.status, 'unknown'); assert.equal(h.execution.sent.length, 1);
+  const command = { original: h.reference, resultId: h.state.aiTaskResultArtifact[0].id };
+  assert.equal((await app.readModelResult(h.request, command)).text, null);
+  await app.reconcile(h.request, h.reference);
+  h.state.aiTaskPlanPolicy[0].enabled = false;
+  const cancel = await app.requestCancel(h.request, { original: h.reference, expectedRevision: h.state.aiTask[0].revision });
+  assert.equal(cancel.cancellation, 'requested_not_rollback');
+  assert.equal(h.state.aiGatewayAccountingReceipt[0].inputTokens, null);
+  assert.equal(h.state.aiBudgetReservation[0].status, 'pending_reconciliation');
+  assert.equal(h.execution.sent.length, 1); assert.equal(h.state.aiGatewayInvocation.length, 1);
+  const aborted = await requestBoundOriginalModelHarness(), signal = new AbortController(); signal.abort();
+  const stopped = await aborted.requests.start(aborted.request, aborted.reference, signal.signal);
+  assert.deepEqual(stopped.execution, { kind: 'not_started', reason: 'host_aborted' });
+  assert.equal(aborted.state.aiRun[0].status, 'QUEUED'); assert.equal(aborted.state.aiTaskActionInput.length, 0);
+});
+
 test('client scene authenticates through actual client Guard/Auth and rechecks after the business read', async () => {
   const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
   const { ClientAuthService } = require('../apps/api/src/modules/client/client-auth.service');

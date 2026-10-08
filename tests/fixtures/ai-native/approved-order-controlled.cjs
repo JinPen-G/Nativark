@@ -15,7 +15,8 @@ async function controlledApprovedOrderHarness({ prepare = true, decisionExpiresA
   state.records.aiTaskActionPolicy.push({ scopeId: 'scope-a', taskId: 'task-a', operation: 'decide_approval', revision: 1,
     requiredPermissions: ['rental-os:order:create'], expiresAt: new Date('2099-01-01') });
   for (const table of ['aiStep', 'aiProposal', 'aiProposalVersion', 'aiProposalAction', 'aiApproval', 'aiApprovalConsumption',
-    'aiApprovedOrderSnapshot', 'aiTaskActionInput', 'aiTaskPlanPolicy', 'aiTaskRunPlan', 'aiTaskEvent', 'aiTaskResultArtifact', 'aiApprovalReprepare']) state.records[table] = [];
+    'aiApprovedOrderSnapshot', 'aiTaskActionInput', 'aiTaskPlanPolicy', 'aiTaskRunPlan', 'aiTaskEvent', 'aiTaskResultArtifact', 'aiApprovalReprepare',
+    'aiTaskOriginalRequest', 'aiTaskQuoteSelection']) state.records[table] = [];
   Object.assign(state.records.aiTask[0], { eventCursor: 0n });
   state.records.aiRun[0].fencingToken = new Prisma.Decimal('9');
   Object.assign(state.records.quote[0], { chargeLines: [], rateSnapshot: [], calendarSnapshot: [], calendarWarnings: [],
@@ -23,7 +24,10 @@ async function controlledApprovedOrderHarness({ prepare = true, decisionExpiresA
     couponAmount: 0, serviceAmount: 0, fulfillmentAmount: 0, depositAmount: 0, preAuthAmount: 0, receivableAmount: 123 });
   function client(records, inTransaction) {
     const rows = name => (records ?? state.records)[name];
-    const related = (name, row) => name === 'aiProposalAction' ? { ...row, step: rows('aiStep').find(s => s.actionId === row.actionId && s.scopeId === row.scopeId) }
+    const related = (name, row) => name === 'aiTask' ? { ...row, runs: rows('aiRun').filter(run => run.taskId === row.id)
+      .map(run => ({ ...run, executionPlan: rows('aiTaskRunPlan').find(plan => plan.runId === run.id) ?? null })) }
+      : name === 'aiRun' ? { ...row, task: related('aiTask', rows('aiTask').find(task => task.id === row.taskId)) }
+      : name === 'aiProposalAction' ? { ...row, step: rows('aiStep').find(s => s.actionId === row.actionId && s.scopeId === row.scopeId) }
       : name === 'aiProposal' ? { ...row, currentVersion: rows('aiProposalVersion').find(v => v.proposalId === row.id && v.revision === row.currentRevision) ?? null } : row;
     const project = (row, select) => !row ? null : !select ? clone(row) : Array.isArray(row) ? row.map(value => project(value, select)) : Object.fromEntries(Object.entries(select).map(([k, rule]) =>
       [k, rule === true ? clone(row[k]) : project(row[k], rule.select)]));
@@ -61,6 +65,9 @@ async function controlledApprovedOrderHarness({ prepare = true, decisionExpiresA
       create: async args => {
         await before(model, 'create', args);
         const row = { revision: 1, ...clone(args.data) };
+        if (model === 'aiTask') Object.assign(row, { scope: clone(rows('aiScope').find(scope => scope.id === row.scopeId)),
+          archivedAt: null, cancelRequestedAt: null, resultRef: null });
+        if (model === 'aiRun') Object.assign(row, { leaseOwnerId: null, leaseExpiresAt: null });
         if (model === 'rentalOrderIdempotencyRecord') { row.id = 'idempotency-a'; row.status = 'succeeded'; }
         if (model === 'aiApprovalConsumption') assert.equal(rows(model).some(r => r.scopeId === row.scopeId && r.taskId === row.taskId && r.actionId === row.actionId), false);
         rows(model).push(row); return project(related(model, row), args.select);
@@ -68,9 +75,15 @@ async function controlledApprovedOrderHarness({ prepare = true, decisionExpiresA
       updateMany: async args => {
         await before(model, 'updateMany', args); let count = 0;
         for (const row of rows(model)) if (matches(related(model, row), args.where)) {
-          count++; for (const [k, v] of Object.entries(args.data)) row[k] = v && typeof v === 'object' && 'increment' in v ? row[k] + v.increment : clone(v);
+          count++; for (const [k, v] of Object.entries(args.data)) row[k] = v && typeof v === 'object' && 'increment' in v
+            ? row[k] instanceof Prisma.Decimal ? row[k].add(v.increment) : row[k] + v.increment : clone(v);
         }
         return { count };
+      },
+      upsert: async args => {
+        const row = rows(model).find(value => matches(value, args.where));
+        if (!row) throw Error('fixture only permits its declared scopes');
+        return clone(row);
       }
     };
     if (inTransaction) db.records = records;

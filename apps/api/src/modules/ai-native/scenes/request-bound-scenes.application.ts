@@ -6,10 +6,17 @@ import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { PrismaQuoteSelectionRepository, type HumanQuoteSelectionDependencies } from '../task-request/prisma-quote-selection.repository';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './original-scenes.composition';
 import { composeHumanQuoteOrder, type HumanQuoteOrderDependencies } from './human-quote-order.composition';
+import { composeAiOriginalSceneModel, type AiOriginalSceneModelDependencies, type AiOriginalSceneRunDependencies } from './original-scene-model.composition';
+import type { AiTaskApplicationHost } from '../runner/prisma-task-application';
 
 export type AiSceneHttpRequest = { headers: { authorization?: unknown } };
 export type AiSceneRequestOptions = { enabled: boolean; audience: 'operator' | 'staff' };
 export type RequestBoundOriginalSceneDependencies = Omit<AiOriginalSceneDependencies, 'credentials'>;
+export type RequestBoundOriginalSceneModelDependencies = Omit<AiOriginalSceneModelDependencies, 'credentials'>;
+export type AiSceneModelRequestOptions = AiSceneRequestOptions & {
+  host: AiTaskApplicationHost;
+  runServices: (dependencies: AiOriginalSceneModelDependencies) => AiOriginalSceneRunDependencies;
+};
 export type RequestBoundQuoteSelectionDependencies = RequestBoundOriginalSceneDependencies & Omit<HumanQuoteSelectionDependencies, 'credentials' | 'originals'>;
 export type RequestBoundQuoteOrderDependencies = RequestBoundOriginalSceneDependencies & Omit<HumanQuoteOrderDependencies, 'credentials' | 'originals'>;
 const optionsSchema = z.object({ enabled: z.literal(true), audience: z.enum(['operator', 'staff']) }).strict();
@@ -34,6 +41,29 @@ function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequ
       } }), command));
     } finally { active = false; }
   };
+}
+
+export function composeRequestBoundOriginalSceneModel(dependencies: RequestBoundOriginalSceneModelDependencies,
+  options: AiSceneModelRequestOptions) {
+  const { host, runServices, ...requestOptions } = options;
+  if (typeof runServices !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const serverHost = Object.freeze(structuredClone(host));
+  const call = bindRequests(dependencies, requestOptions, input => {
+    const model = composeAiOriginalSceneModel(input);
+    return { model, application: model.createApplication(serverHost, runServices(input)) };
+  });
+  return Object.freeze({
+    start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (app, command) => app.application.start(command, signal)),
+    readInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.readInput(command)),
+    resume: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (app, command) => app.application.resume(command, signal)),
+    reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (app, command) => app.application.reconcile(command, signal)),
+    requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.requestCancel(command)),
+    readModelResult: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.model.readModelResult(command)),
+    reopenModelSource: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.model.reopenModelSource(command))
+  });
 }
 
 export function composeRequestBoundOriginalScenes(dependencies: RequestBoundOriginalSceneDependencies, options: AiSceneRequestOptions) {

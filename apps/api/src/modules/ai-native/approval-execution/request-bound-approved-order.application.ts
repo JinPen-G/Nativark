@@ -4,15 +4,25 @@ import type { AiApprovalApplicationErrorDraft } from '../../../../../../packages
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { approvalApplicationContract, approvalApplicationError } from './approval-application-contracts';
 import { composeControlledApprovedOrder, type ControlledApprovedOrderDependencies } from './controlled-approved-order.composition';
+import { composeFormalApprovedOrderReprepareServices, type FormalApprovedOrderReprepareConfiguration } from './formal-approved-order-reprepare.composition';
 
 type Request = { headers: { authorization?: unknown } };
+type RequestOptions = { enabled: boolean; audience: 'operator' | 'staff' };
 type Dependencies = Omit<ControlledApprovedOrderDependencies, 'credentials'>;
 type Application = ReturnType<typeof composeControlledApprovedOrder>['application'];
 type Result<T> = { ok: true; value: T } | { ok: false; error: AiApprovalApplicationErrorDraft };
 const optionsSchema = z.object({ enabled: z.literal(true), audience: z.enum(['operator', 'staff']) }).strict();
 const authorizationSchema = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
 
-export function composeRequestBoundApprovedOrderApplication(dependencies: Dependencies, options: { enabled: boolean; audience: 'operator' | 'staff' }) {
+export function composeRequestBoundFormalApprovedOrderApplication(dependencies: Omit<Dependencies, 'reprepareServices'>,
+  options: RequestOptions, configuration: FormalApprovedOrderReprepareConfiguration) {
+  if ('reprepareServices' in dependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  return composeRequestBoundApprovedOrderApplication({ ...dependencies,
+    reprepareServices: current => composeFormalApprovedOrderReprepareServices(current, configuration)
+  }, options);
+}
+
+export function composeRequestBoundApprovedOrderApplication(dependencies: Dependencies, options: RequestOptions) {
   const parsed = optionsSchema.safeParse(options);
   if (!parsed.success || 'credentials' in dependencies) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const { audience } = parsed.data;
