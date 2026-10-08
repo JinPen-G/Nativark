@@ -34,7 +34,7 @@ export const AI_APPROVED_SETTINGS_DRAFT_SCHEMAS = {
     diff: object({ 'notifications.enabledEvents': object({ before: stringArray, after: stringArray }),
       'notifications.editableChannels': object({ before: channels, after: channels }) }) }),
   AiApprovedSettingsReviewDraft: object({ draftVersion, proposal: object({ payload: ref('AiApprovedSettingsPayloadDraft'), payloadHash: hash,
-    status: { enum: ['pending_confirmation', 'confirmed', 'superseded', 'cancelled', 'expired'] } }), change: ref('AiApprovedSettingsChangeReviewDraft'), generatedText: literal(null) }),
+    status: { enum: ['pending_confirmation', 'confirmed', 'superseded', 'cancelled', 'expired'] } }), change: ref('AiApprovedSettingsChangeReviewDraft'), generatedText: { type: 'null' } }),
   AiApprovedSettingsOperationReceiptDraft: object({ receiptId: id(36), operationKey: id(), changeId: id(36), changeHash: hash,
     baseRevision: revision, resultRevision: { type: 'integer', minimum: 2, maximum: 4294967295 }, resultHash: hash, committedAt: time }),
   AiApprovedSettingsOperationResultDraft: { oneOf: [object({ draftVersion, state: literal('committed'), receipt: ref('AiApprovedSettingsOperationReceiptDraft'), cacheRefreshed: { type: 'boolean' } }),
