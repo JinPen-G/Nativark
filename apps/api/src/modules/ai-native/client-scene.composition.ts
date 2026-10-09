@@ -27,7 +27,7 @@ export interface AiClientSessionSource {
   withRead?<T>(operation: ClientReadOperation, value: unknown, read: (context: ClientRequestContext) => Promise<T>): Promise<T>;
 }
 
-type ClientReadOperation = 'catalog' | 'availability' | 'orders' | 'order' | 'feeItems' | 'corporateIdentities' | 'profile' | 'cancellationPreview';
+type ClientReadOperation = 'catalog' | 'availability' | 'orders' | 'order' | 'feeItems' | 'corporateIdentities' | 'profile' | 'cancellationPreview' | 'quote' | 'bookingOptions';
 
 /** Request-bound production adapter: credentials are supplied by the server
  * request host, never by model/tool parameters. The existing Guard resolves
@@ -57,10 +57,11 @@ export function createAiGuardedClientSession(guard: Pick<ApiAuthGuard, 'canActiv
     current: () => authorize('GET', 'auth/me', {}, async context => context),
     withRead: async <T>(operation: ClientReadOperation, value: unknown, read: (context: ClientRequestContext) => Promise<T>) => {
       const routes = { catalog: 'catalog', availability: 'availability', orders: 'my/orders',
-        order: 'orders', feeItems: 'orders', corporateIdentities: 'membership/corporates', profile: 'profile', cancellationPreview: 'orders' } as const;
+        order: 'orders', feeItems: 'orders', corporateIdentities: 'membership/corporates', profile: 'profile', cancellationPreview: 'orders',
+        quote: 'quotes', bookingOptions: 'membership/booking-options' } as const;
       if (!Object.prototype.hasOwnProperty.call(routes, operation)) throw new Error('AI_CLIENT_CAPABILITY_UNAVAILABLE');
       let path: string = routes[operation];
-      const orderRead = operation === 'order' || operation === 'cancellationPreview';
+      const orderRead = operation === 'order' || operation === 'cancellationPreview' || operation === 'quote';
       if (orderRead || operation === 'feeItems') {
         const parsed = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).safeParse(value);
         if (!parsed.success) throw new Error('AI_CLIENT_INVALID_INPUT');
@@ -80,7 +81,7 @@ export function createAiGuardedClientSession(guard: Pick<ApiAuthGuard, 'canActiv
 
 type ClientReadPort = Pick<ClientApiService,
   'channelBootstrap' | 'publicCatalog' | 'catalog' | 'availability' | 'myOrders' | 'getOrder' | 'corporateIdentities'>
-  & Partial<Pick<ClientApiService, 'profile' | 'previewCancellation' | 'publicDocument' | 'feeItems'>>;
+  & Partial<Pick<ClientApiService, 'profile' | 'previewCancellation' | 'publicDocument' | 'feeItems' | 'getQuote' | 'bookingOptions'>>;
 
 function assertContextSource(source: AiClientSessionSource) {
   if (!source || typeof source.current !== 'function') throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
@@ -132,6 +133,14 @@ export function composeAiClientScenes(input: {
       }
     }),
     member: Object.freeze({
+      bookingOptions: async () => {
+        if (typeof input.client.bookingOptions !== 'function') throw new Error('AI_CLIENT_CAPABILITY_UNAVAILABLE');
+        return memberRead('bookingOptions', {}, context => input.client.bookingOptions!(context));
+      },
+      quote: async (quoteId: string) => {
+        if (typeof input.client.getQuote !== 'function') throw new Error('AI_CLIENT_CAPABILITY_UNAVAILABLE');
+        return memberRead('quote', quoteId, context => input.client.getQuote!(context, quoteId));
+      },
       profile: async () => {
         if (typeof input.client.profile !== 'function') throw new Error('AI_CLIENT_CAPABILITY_UNAVAILABLE');
         return memberRead('profile', {}, context => input.client.profile!(context));

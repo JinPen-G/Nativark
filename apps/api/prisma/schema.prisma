@@ -758,6 +758,7 @@ model AiClientSceneMaterial {
   expiresAt       DateTime @db.DateTime(3)
   workspace       BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_client_materials_workspace_fk")
   taskInputs      AiClientTaskInput[]
+  bookingDrafts   AiClientBookingDraft[]
 
   @@unique([tenantId, workspaceId, channel, principalHash, operationKey], map: "ai_client_materials_operation_key")
   @@unique([id, tenantId, workspaceId, channel, principalKind, principalHash], map: "ai_client_materials_input_binding")
@@ -814,6 +815,72 @@ model AiClientTaskInput {
 
   @@unique([tenantId, workspaceId, channel, principalHash, creationKey], map: "ai_client_task_input_creation")
   @@map("ai_client_task_inputs")
+}
+
+model AiClientBookingDraft {
+  id                String @id @db.VarChar(36)
+  tenantId          String @db.VarChar(191)
+  workspaceId       String @db.VarChar(191)
+  channel           String @db.VarChar(32)
+  principalKind     String @db.VarChar(16)
+  principalHash     String @db.Char(64)
+  materialRef       String @unique(map: "ai_booking_draft_material_key") @db.VarChar(36)
+  inputHash         String @db.Char(64)
+  bindingHash       String @db.Char(64)
+  policyHash        String @db.Char(64)
+  state             String @db.VarChar(32)
+  revision          Int @db.UnsignedInt
+  selectionRevision Int @db.UnsignedInt
+  selectedAt        DateTime? @db.DateTime(3)
+  createdAt         DateTime @db.DateTime(3)
+  updatedAt         DateTime @db.DateTime(3)
+  expiresAt         DateTime @db.DateTime(3)
+  invalidReason     String? @db.VarChar(191)
+  material          AiClientSceneMaterial @relation(fields: [materialRef, tenantId, workspaceId, channel, principalKind, principalHash], references: [id, tenantId, workspaceId, channel, principalKind, principalHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_booking_draft_material_fk")
+  operations        AiClientBookingDraftOperation[]
+  handoffs          AiClientBookingHandoff[]
+
+  @@unique([id, tenantId, workspaceId, channel, principalKind, principalHash], map: "ai_booking_draft_binding")
+  @@index([tenantId, workspaceId, expiresAt], map: "ai_booking_draft_expiry")
+  @@map("ai_client_booking_drafts")
+}
+
+model AiClientBookingDraftOperation {
+  id             String @id @db.VarChar(36)
+  tenantId       String @db.VarChar(191)
+  workspaceId    String @db.VarChar(191)
+  channel        String @db.VarChar(32)
+  principalKind  String @db.VarChar(16)
+  principalHash  String @db.Char(64)
+  operationKey   String @db.VarChar(191)
+  inputHash      String @db.Char(64)
+  draftId        String @db.VarChar(36)
+  kind           String @db.VarChar(16)
+  resultRevision Int @db.UnsignedInt
+  handoffRef     String? @db.VarChar(36)
+  createdAt      DateTime @db.DateTime(3)
+  draft          AiClientBookingDraft @relation(fields: [draftId, tenantId, workspaceId, channel, principalKind, principalHash], references: [id, tenantId, workspaceId, channel, principalKind, principalHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_booking_operation_draft_fk")
+
+  @@unique([tenantId, workspaceId, channel, principalHash, operationKey], map: "ai_booking_operation_key")
+  @@map("ai_client_booking_draft_operations")
+}
+
+model AiClientBookingHandoff {
+  id                String @id @db.VarChar(36)
+  tenantId          String @db.VarChar(191)
+  workspaceId       String @db.VarChar(191)
+  channel           String @db.VarChar(32)
+  principalKind     String @db.VarChar(16)
+  principalHash     String @db.Char(64)
+  draftId           String @unique(map: "ai_booking_handoff_draft_key") @db.VarChar(36)
+  inputHash         String @db.Char(64)
+  selectionRevision Int @db.UnsignedInt
+  createdAt         DateTime @db.DateTime(3)
+  expiresAt         DateTime @db.DateTime(3)
+  draft             AiClientBookingDraft @relation(fields: [draftId, tenantId, workspaceId, channel, principalKind, principalHash], references: [id, tenantId, workspaceId, channel, principalKind, principalHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_booking_handoff_draft_fk")
+
+  @@index([tenantId, workspaceId, expiresAt], map: "ai_booking_handoff_expiry")
+  @@map("ai_client_booking_handoffs")
 }
 
 model AiAutomationSubject {

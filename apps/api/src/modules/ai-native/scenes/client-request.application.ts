@@ -9,18 +9,25 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { PrismaClientSceneMaterialRepository, AiClientMaterialError, type AiClientMaterialDb,
   type AiClientMaterialScope, type AiClientSceneMaterial } from './prisma-client-scene-material.repository';
-import { clientTaskSceneSchema, type AiClientTaskDependencies } from './client-task.authority';
+import { AiClientTaskAuthority, clientTaskSceneSchema, type AiClientTaskDependencies } from './client-task.authority';
+import { AiClientEntryError, assertEntryAction, clientEntrySurface, entryActionSchema, materialEntryAction, parseEntry } from './client-entry-action';
 import { composeClientMaterialTasks } from './client-task.composition';
 import { AiClientTaskUnknownError, clientTaskCommandSchema } from './prisma-client-task-input.repository';
 import { prepareClientOrderExplanation } from './client-order-explanation';
+import { bookingSelectionSchema, readClientBookingMaterial } from './client-booking-material';
+import { PrismaClientBookingRepository } from './prisma-client-booking.repository';
+import { composeClientBooking } from './client-booking.composition';
+import type { AiBookingMaterial } from '../../../../../../packages/shared/src/ai-booking-draft';
 
 const id = z.string().trim().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const configurationSchema = z.object({ enabled: z.literal(true), tenantCode: id, serviceCode: id,
-  channel: z.enum(['wechat_miniprogram', 'app', 'web']), appId: id.optional() }).strict();
+  channel: z.enum(['wechat_miniprogram', 'app', 'web']), appId: id.optional(),
+  entry: z.object({ enabled: z.literal(true), releaseRevision: id }).strict().optional() }).strict();
 const commandSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('catalog') }).strict(), z.object({ kind: z.literal('help') }).strict(),
   z.object({ kind: z.literal('profile') }).strict(), z.object({ kind: z.literal('order'), orderId: id }).strict(),
-  z.object({ kind: z.literal('cancellation_preview'), orderId: id }).strict()
+  z.object({ kind: z.literal('cancellation_preview'), orderId: id }).strict(),
+  z.object({ kind: z.literal('booking_quote'), selection: bookingSelectionSchema }).strict()
 ]);
 const operationSchema = z.object({ operationKey: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
   command: commandSchema }).strict();
@@ -123,6 +130,11 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       case 'profile': value = await bound.scenes.member.profile(); break;
       case 'order': value = await bound.scenes.member.order(command.orderId); break;
       case 'cancellation_preview': value = await bound.scenes.member.cancellationPreview(command.orderId); break;
+      case 'booking_quote':
+        requireBooking();
+        if (!bound.identity) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
+        value = await readClientBookingMaterial(bound.scenes, bound.identity, command.selection, clock());
+        break;
     }
     const text = JSON.stringify(value);
     if (!text || Buffer.byteLength(text, 'utf8') > maxBytes) return fail('AI_CLIENT_CAPABILITY_UNAVAILABLE');
@@ -134,8 +146,12 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       || row.bindingHash !== bound.bindingHash || row.publicationHash !== requestFingerprint(bound.published.value)
       || row.publicationHash !== requestFingerprint(row.publication) || row.expiresAt <= clock()
       || row.materialHash !== materialHash(parsedCommand.data, row.material)) return fail('AI_CLIENT_MATERIAL_STALE');
+    const entryBefore = parsedCommand.data.kind === 'booking_quote' ? await entryGrant(bound, row) : null;
     const current = await readMaterial(bound, parsedCommand.data);
     if (materialHash(parsedCommand.data, current) !== row.materialHash) return fail('AI_CLIENT_MATERIAL_STALE');
+    if (entryBefore && (await entryGrant(bound, row)).policyFingerprint !== entryBefore.policyFingerprint) {
+      throw new AiClientEntryError('AI_ACCESS_DENIED', 'entry_policy_changed');
+    }
     const latest = await repository.findSource(scopeOf(bound), row.id);
     if (!latest || jsonHash(row) !== jsonHash(latest) || row.expiresAt <= clock()) return fail('AI_CLIENT_MATERIAL_STALE');
     return parsedCommand.data;
@@ -186,7 +202,128 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       throw error;
     }
   };
+  const requireEntry = () => {
+    if (!server.entry || !taskDependencies) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'entry_disabled');
+    return clientEntrySurface(server.channel);
+  };
+  const entryGrant = async (bound: Bound, row: AiClientSceneMaterial) => {
+    requireEntry();
+    if (!taskDependencies || !bound.identity) throw new AiClientEntryError('AI_ACCESS_DENIED', 'client_required');
+    const identity = bound.identity;
+    const authority = new AiClientTaskAuthority(taskDependencies, taskDependencies, async ref => {
+      if (ref !== row.id) throw new AiClientEntryError('AI_ACCESS_DENIED', 'material_binding');
+      await bound.assertCurrent();
+      return { row, identity };
+    }, randomUUID(), clock);
+    const grant = await authority.authorize(row.id, 'create');
+    return { policyFingerprint: requestFingerprint({ policyHash: grant.policyHash, release: server.entry }), expiresAt: grant.policy.expiresAt };
+  };
+  const verifyEntryMaterial = async (bound: Bound, row: AiClientSceneMaterial) => {
+    const key = `entry-invalid:${row.id}`, scope = scopeOf(bound);
+    if (await repository.findOperation(scope, key)) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'action_invalidated', 'reprepare');
+    try {
+      const command = await verify(bound, row), grant = await entryGrant(bound, row);
+      await verify(bound, row);
+      const latest = await entryGrant(bound, row);
+      if (latest.policyFingerprint !== grant.policyFingerprint) throw new AiClientEntryError('AI_ACCESS_DENIED', 'entry_policy_changed');
+      if (await repository.findOperation(scope, key)) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'action_invalidated', 'reprepare');
+      if (row.expiresAt <= clock() || grant.expiresAt <= clock()) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'action_expired', 'reprepare');
+      return { command, grant };
+    } catch (error) {
+      const code = error instanceof Error && 'code' in error ? error.code : null;
+      const status = error instanceof Error && 'getStatus' in error && typeof error.getStatus === 'function' ? error.getStatus() : null;
+      if (code === 'AI_PROPOSAL_STALE' || code === 'AI_ACCESS_DENIED' || code === 'AI_RESOURCE_UNAVAILABLE' || [401, 403, 404].includes(status)
+        || (error instanceof Error && ['AI_CLIENT_MATERIAL_STALE', 'AI_CLIENT_CONTEXT_UNAVAILABLE'].includes(error.message))) {
+        const command = { kind: 'entry_invalid', materialRef: row.id }, material = { reason: 'current_basis_invalid' }, createdAt = clock();
+        await repository.save({ ...row, id: randomUUID(), operationKey: key, command, material,
+          inputHash: requestFingerprint(command), materialHash: requestFingerprint(material), createdAt,
+          expiresAt: new Date(createdAt.getTime() + lifetimeMs) });
+      }
+      throw error;
+    }
+  };
+  const orderAction = async (bound: Bound, materialRef: string) => {
+    const row = await repository.findSource(scopeOf(bound), materialRef);
+    if (!row) throw new AiClientEntryError('AI_ACCESS_DENIED', 'material_unavailable');
+    const { command, grant } = await verifyEntryMaterial(bound, row);
+    if (command.kind !== 'order') throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'action_not_assembled');
+    return materialEntryAction(row, requireEntry(), grant.policyFingerprint, grant.expiresAt, command.orderId, 'OPEN_ORDER');
+  };
+  const bookingRepository = new PrismaClientBookingRepository(dependencies.db, clock);
+  const requireBooking = () => {
+    requireEntry();
+    if (typeof dependencies.client.getQuote !== 'function' || typeof dependencies.client.bookingOptions !== 'function') {
+      throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'booking_reads_not_assembled');
+    }
+  };
+  const loadBookingMaterial = async (bound: Bound, materialRef: string) => {
+    requireBooking();
+    const row = await repository.findSource(scopeOf(bound), materialRef);
+    if (!row) throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_material_unavailable');
+    const { command, grant } = await verifyEntryMaterial(bound, row);
+    if (command.kind !== 'booking_quote') throw new AiClientEntryError('AI_INVALID_INPUT', 'booking_material_required');
+    return { row, material: row.material as AiBookingMaterial, policyFingerprint: grant.policyFingerprint, policyExpiresAt: grant.expiresAt };
+  };
+  const booking = (bound: Bound) => composeClientBooking({ repository: bookingRepository, scope: scopeOf(bound),
+    bindingHash: bound.bindingHash, surface: requireEntry(), clock, assertCurrent: bound.assertCurrent,
+    loadMaterial: ref => loadBookingMaterial(bound, ref) });
+  const bookingOperation = async <T>(request: AiClientApplicationRequest, value: unknown, writes: boolean,
+    consume: (app: ReturnType<typeof composeClientBooking>, command: unknown) => Promise<T>): Promise<T> => {
+    requireBooking();
+    const frozen = freezeOriginalInput(structuredClone(value));
+    let returned = false;
+    try {
+      return await withBinding(request, true, 'order', async bound => {
+        const result = await consume(booking(bound), frozen);
+        returned = true;
+        return result;
+      });
+    } catch (error) {
+      if (returned && writes) {
+        throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'booking_commit_unacknowledged', 'read_booking_operation');
+      }
+      throw error;
+    }
+  };
   return Object.freeze({
+    createBookingDraft: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, true, (app, command) => app.create(command)),
+    readBookingDraft: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, false, (app, command) => app.read(command)),
+    chooseBookingDraft: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, true, (app, command) => app.choose(command)),
+    handoffBookingDraft: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, true, (app, command) => app.handoff(command)),
+    readBookingHandoff: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, false, (app, command) => app.readHandoff(command)),
+    readBookingOperation: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, false, (app, command) => app.readOperation(command)),
+    async issueAction(request: AiClientApplicationRequest, value: unknown) {
+      requireEntry();
+      const input = parseEntry(z.object({ actionCode: z.enum(['OPEN_ORDER', 'CREATE_BOOKING_DRAFT']), materialRef: z.string().uuid() }).strict(), value);
+      return withBinding(request, true, 'order', async bound => {
+        if (input.actionCode === 'OPEN_ORDER') return orderAction(bound, input.materialRef);
+        const material = await loadBookingMaterial(bound, input.materialRef);
+        return materialEntryAction(material.row, requireEntry(), material.policyFingerprint, material.policyExpiresAt,
+          material.material.selection.quoteId, 'CREATE_BOOKING_DRAFT');
+      });
+    },
+    async readAction(request: AiClientApplicationRequest, value: unknown) {
+      requireEntry();
+      const action = parseEntry(entryActionSchema, value);
+      return withBinding(request, true, 'order', async bound => {
+        if (action.actionCode === 'OPEN_BOOKING') return booking(bound).readAction(action);
+        const material = action.actionCode === 'CREATE_BOOKING_DRAFT' ? await loadBookingMaterial(bound, action.associations.materialRef) : null;
+        const expected = material ? materialEntryAction(material.row, requireEntry(), material.policyFingerprint, material.policyExpiresAt,
+          material.material.selection.quoteId, 'CREATE_BOOKING_DRAFT') : await orderAction(bound, action.associations.materialRef);
+        assertEntryAction(action, expected, clock());
+        return freezeOriginalInput(expected);
+      });
+    },
+    async consumeOrderAction(request: AiClientApplicationRequest, value: unknown) {
+      requireEntry();
+      const action = parseEntry(entryActionSchema, value);
+      return withBinding(request, true, 'order', async bound => {
+        const expected = await orderAction(bound, action.associations.materialRef);
+        assertEntryAction(action, expected, clock());
+        return { actionCode: 'OPEN_ORDER' as const, orderId: expected.resource.id, surface: expected.surface,
+          scope: expected.scope, execution: 'navigation_not_business_submission' as const };
+      });
+    },
     createTask: (request: AiClientApplicationRequest, value: unknown) => taskOperation(request, value, 'create'),
     readTaskCreation: (request: AiClientApplicationRequest, value: unknown) => taskOperation(request, value, 'readCreation'),
     async readOrderExplanation(request: AiClientApplicationRequest, value: unknown) {
@@ -254,6 +391,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     },
     async prepare(request: AiClientApplicationRequest, value: unknown) {
       const input = parseOperation(value), inputHash = requestFingerprint(input.command);
+      if (input.command.kind === 'booking_quote') requireBooking();
       let submitted = false;
       try {
         return await withBinding(request, true, input.command.kind, async bound => {
@@ -263,11 +401,20 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
             return { ...packet(existing, await verify(bound, existing)), replayed: true };
           }
           const material = await readMaterial(bound, input.command), createdAt = clock();
-          submitted = true;
-          const saved = await repository.save({ id: randomUUID(), ...scope, bindingHash: bound.bindingHash,
+          const draftRow: AiClientSceneMaterial = { id: randomUUID(), ...scope, bindingHash: bound.bindingHash,
             publicationHash: requestFingerprint(bound.published.value), operationKey: input.operationKey, inputHash,
             materialHash: materialHash(input.command, material), command: input.command, material,
-            publication: bound.published.value, revision: 1, createdAt, expiresAt: new Date(createdAt.getTime() + lifetimeMs) });
+            publication: bound.published.value, revision: 1, createdAt, expiresAt: new Date(createdAt.getTime() + lifetimeMs) };
+          if (input.command.kind === 'booking_quote') {
+            const facts = material as AiBookingMaterial;
+            const grant = await entryGrant(bound, draftRow);
+            draftRow.expiresAt = new Date(Math.min(draftRow.expiresAt.getTime(), grant.expiresAt.getTime(),
+              Date.parse(facts.quote.expiresAt), Date.parse(facts.selection.startAt)));
+            await bound.assertCurrent();
+          }
+          submitted = true;
+          const saved = await repository.save(draftRow);
+          if (input.command.kind === 'booking_quote') await entryGrant(bound, saved.row);
           return { ...packet(saved.row, await verify(bound, saved.row)), replayed: saved.replayed };
         });
       } catch (error) {
@@ -294,7 +441,14 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         return freezeOriginalInput({ ...packet(row, await verify(bound, row)), verifiedAt: clock().toISOString() });
       });
     },
-    capabilities: Object.freeze({ materialKinds: ['catalog', 'help', 'profile', 'order', 'cancellation_preview'] as const,
+    capabilities: Object.freeze({ entryActions: server.entry && taskDependencies && server.channel !== 'app'
+      ? (typeof dependencies.client.getQuote === 'function' && typeof dependencies.client.bookingOptions === 'function'
+        ? ['OPEN_ORDER', 'CREATE_BOOKING_DRAFT', 'OPEN_BOOKING'] as const : ['OPEN_ORDER'] as const) : [],
+      bookingDrafts: server.entry && taskDependencies && server.channel !== 'app' && typeof dependencies.client.getQuote === 'function'
+        && typeof dependencies.client.bookingOptions === 'function' ? 'existing_quote_same_surface_only' as const : 'unavailable' as const,
+      bookingSubmission: 'unavailable_original_page_acceptance_receipt_missing' as const,
+      crossSurfaceHandoff: 'unavailable' as const,
+      materialKinds: ['catalog', 'help', 'profile', 'order', 'cancellation_preview'] as const,
       orderExplanation: 'current_client_order_projection_only' as const,
       taskScenes: taskDependencies ? 'original_creation_and_order_facts_only' as const : 'unavailable' as const,
       persistentMaterials: 'authenticated_client_session_only' as const, publicReads: ['catalog', 'help'] as const,
