@@ -7,6 +7,45 @@ const { pathToFileURL } = require('node:url');
 
 const modUrl = pathToFileURL(path.join(__dirname, '..', 'apps/tenant-website/src/data/resolveTenant.ts')).href;
 
+test('原预约交接：默认零读取、人工继续复验、上下文/卸载隔离且不创建报价', async () => {
+  const url = pathToFileURL(path.join(__dirname, '..', 'apps/tenant-website/src/features/ai-native/booking-handoff.ts')).href;
+  const { createBookingHandoffConsumer, handoffLocalInput } = await import(url);
+  const value = {
+    contractVersion: 'ain-booking-draft-1', handoffRef: 'synthetic-ref', bookingDraftId: 'synthetic-draft', revision: 1,
+    audience: 'customer', surface: 'tenant_website', scope: { kind: 'workspace', tenantId: 't', workspaceId: 'w' },
+    expiresAt: '2030-01-02T00:00:00Z', actionCode: 'OPEN_BOOKING', submission: 'original_booking_page_required', inventory: 'not_reserved',
+    fields: { quoteId: 'original-quote', timeZone: 'Asia/Shanghai', startAt: '2030-01-03T00:00:00Z', endAt: '2030-01-04T00:00:00Z',
+      fulfillmentMode: 'store_pickup_return', fulfillmentLocationId: 'loc', bookingIdentity: { bookingIdentity: 'personal', enterpriseContractAndPayer: false },
+      lines: [{ itemGroupId: 'p', quantity: 2 }] },
+  };
+  let reads = 0;
+  const host = { enabled: true, capability: { tenantCode: 'tenant', workspaceCode: 'space', customerId: 'customer', tenantId: 't', workspaceId: 'w', releaseRevision: 'r1' },
+    handoffRef: value.handoffRef, readBookingHandoff: async () => { reads++; return structuredClone(value); } };
+  const context = { tenantCode: 'tenant', workspaceCode: 'space', customerId: 'customer', authenticated: true, productId: 'p' };
+  const states = [];
+  const clock = () => Date.parse('2030-01-01T00:00:00Z');
+  const disabled = createBookingHandoffConsumer(null, context, () => {}, clock);
+  await disabled.read(); await disabled.continue(); assert.equal(reads, 0);
+  const consumer = createBookingHandoffConsumer(host, context, s => states.push(s), clock);
+  assert.equal(reads, 0, 'mount/import must not read');
+  assert.equal((await consumer.read()).fields.quoteId, 'original-quote');
+  assert.equal((await consumer.continue()).revision, 1); assert.equal(reads, 2);
+  assert.equal(states.at(-1).status, 'continued');
+  assert.equal(handoffLocalInput(value.fields.startAt, value.fields.timeZone), '2030-01-03T08:00');
+  value.revision = 2;
+  assert.equal(await consumer.continue(), null); assert.equal(states.at(-1).status, 'unavailable');
+  const other = createBookingHandoffConsumer(host, { ...context, workspaceCode: 'other' }, () => {}, clock);
+  const before = reads; await other.read(); assert.equal(reads, before);
+  let resolve;
+  const delayed = createBookingHandoffConsumer({ ...host, readBookingHandoff: () => { reads++; return new Promise(r => { resolve = r; }); } }, context, s => states.push(s), clock);
+  const pending = delayed.read(); assert.equal(await delayed.read(), null, 'single flight');
+  delayed.destroy(); const count = states.length; resolve(value); assert.equal(await pending, null); assert.equal(states.length, count);
+  const failing = createBookingHandoffConsumer({ ...host, readBookingHandoff: () => { throw Error('private detail'); } }, context, s => states.push(s), clock);
+  assert.equal(await failing.read(), null); assert.deepEqual(states.at(-1), { status: 'unavailable', handoff: null });
+  const expired = createBookingHandoffConsumer({ ...host, readBookingHandoff: async () => ({ ...value, expiresAt: '2020-01-01T00:00:00Z' }) }, context, s => states.push(s), clock);
+  assert.equal(await expired.read(), null); assert.equal(states.at(-1).handoff, null);
+});
+
 test('tenantCodeFromHost：只认配置的基础域名的直接子域，保留字/裸域/客户域名返回 null', async () => {
   const { tenantCodeFromHost } = await import(modUrl);
   assert.equal(tenantCodeFromHost('guangying.rentalos.com', 'rentalos.com'), 'guangying');
