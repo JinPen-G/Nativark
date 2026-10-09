@@ -48,11 +48,25 @@ export class AiOriginalSceneFactsService {
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const ref = freezeOriginalInput(parsed.data), original = await this.requests.read(ref);
     if (original.request.sceneCode !== 'quote_clarification') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    await this.requests.resolve(original.request.sceneCode, ref.inputRef);
+    const beforeGrant = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
     const facts = await this.tools.quote.businessPreparation.prepareUnified(original.request.input.candidate);
     const sources = await this.tools.quote.businessPreparation.inputSources(original.request.input.candidate);
-    if ('selectionRevision' in facts && 'selectionRevision' in sources && facts.selectionRevision !== sources.selectionRevision) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-    await this.requests.resolve(original.request.sceneCode, ref.inputRef);
+    // Preparation and provenance are sequential authorized reads. Never join
+    // ready facts with a now-missing selection, or silently replace the request
+    // with different parameters/configuration discovered by the second read.
+    const factBasis = facts as unknown as Record<string, unknown>, sourceBasis = sources as unknown as Record<string, unknown>;
+    if (factBasis.request !== undefined) {
+      if (sourceBasis.status !== 'prepared_input_sources' || factBasis.selectionRevision !== sourceBasis.selectionRevision
+        || requestFingerprint(factBasis.request) !== requestFingerprint(sourceBasis.request)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    } else {
+      const basis = (row: Record<string, unknown>) => ({ status: row.status, selectionRevision: row.selectionRevision,
+        missingFields: row.missingFields, ambiguousFields: row.ambiguousFields });
+      if (requestFingerprint(basis(factBasis)) !== requestFingerprint(basis(sourceBasis))) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    }
+    const after = await this.requests.read(ref);
+    const afterGrant = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
+    if (originalIdentityHash(beforeGrant.context) !== originalIdentityHash(afterGrant.context)
+      || original.receipt.contentHash !== after.receipt.contentHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     return freezeOriginalInput({ original: original.receipt, facts, sources, materialHash: requestFingerprint({ facts, sources }),
       humanSelection: 'not_attested' as const, quotePersistence: 'not_attempted' as const, orderApproval: 'not_granted' as const,
       execution: 'not_attempted' as const });

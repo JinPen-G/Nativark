@@ -33,6 +33,51 @@ test('opt-in module is inert; strict controller uses current authority without s
   await assert.rejects(controller.read(request, h.ref(result.receipt.inputRef)), e => e.getStatus() === 403 && e.getResponse().code === 'AI_ACCESS_DENIED');
 });
 
+test('original quote review consumes revised formal requests without saving a quote or granting confirmation', async () => {
+  const h = await setup(), { credentials, ...dependencies } = h.dependencies;
+  const request = { headers: { authorization: (await credentials.current()).authorization } };
+  const module = AiOriginalScenesModule.registerHttp(dependencies, { enabled: true, audience: 'operator' });
+  const controller = new AiOriginalScenesController(module.providers[0].useFactory());
+  assert.equal(Reflect.getMetadata('path', AiOriginalScenesController.prototype.quoteReview), AI_SCENE_REQUEST_HTTP_DRAFT.quoteReview);
+  let quoteWrites = 0;
+  const createQuote = h.b.business.createQuote.bind(h.b.business);
+  h.b.business.createQuote = (...args) => { quoteWrites++; return createQuote(...args); };
+  const first = await controller.create(request, h.command('quote_clarification'));
+  const read = await controller.quoteReview(request, h.ref(first.receipt.inputRef));
+  assert.equal(read.facts.status, 'missing_input');
+  assert.equal(read.facts.next, 'clarify_input');
+  const candidate = { ...h.b.candidate, locationId: h.b.location.id, items: [{ itemGroupId: h.b.group.id, quantity: 1 }] };
+  const revised = await controller.reissue(request, { ...h.command('quote_clarification', 'quote-revised'),
+    previousInputRef: first.receipt.inputRef, input: { candidate } });
+  const unconfirmed = await controller.quoteReview(request, h.ref(revised.receipt.inputRef));
+  assert.deepEqual(unconfirmed.facts.missingFields, ['selectionRevision'], JSON.stringify(unconfirmed));
+  const confirmedParameters = await controller.reissue(request, { ...h.command('quote_clarification', 'quote-selected-parameters'),
+    previousInputRef: revised.receipt.inputRef,
+    input: { candidate: { ...candidate, selectionRevision: unconfirmed.facts.selectionRevision } } });
+  const unavailable = await controller.quoteReview(request, h.ref(confirmedParameters.receipt.inputRef));
+  assert.equal(unavailable.facts.status, 'unavailable');
+  assert.equal(unavailable.facts.reason, 'current_availability_insufficient');
+  // Supply a database-execution substitute row; availability is still decided
+  // by the real guarded Core reader, not a fake ready preparation response.
+  h.b.facts.listAssets = async () => [{ id: 'synthetic-review-asset', tenantId: 'tenant_001', workspaceId: 'workspace-a',
+    itemGroupId: h.b.group.id, locationId: h.b.location.id, status: 'available' }];
+  const prepared = await controller.quoteReview(request, h.ref(confirmedParameters.receipt.inputRef));
+  assert.equal(prepared.facts.status, 'ready');
+  assert.equal(prepared.sources.status, 'prepared_input_sources');
+  assert.equal(prepared.facts.selectionRevision, prepared.sources.selectionRevision);
+  assert.ok(prepared.sources.fields.every(field => field.confirmed === false));
+  assert.equal(prepared.quotePersistence, 'not_attempted');
+  assert.equal(prepared.humanSelection, 'not_attested');
+  assert.equal(prepared.orderApproval, 'not_granted');
+  assert.equal(quoteWrites, 0);
+  assert.equal((await controller.read(request, h.ref(first.receipt.inputRef))).request.input.candidate.customerId, undefined);
+  assert.equal(confirmedParameters.receipt.previousInputRef, revised.receipt.inputRef);
+  await assert.rejects(controller.quoteReview(request, { ...h.ref(first.receipt.inputRef), candidate: h.b.candidate }), e => e.getStatus() === 400);
+  h.b.h.identity.session = false;
+  await assert.rejects(controller.quoteReview(request, h.ref(confirmedParameters.receipt.inputRef)), e => e.getStatus() === 403);
+  assert.equal(quoteWrites, 0);
+});
+
 test('request-bound original scenes snapshot commands and never borrow concurrent or ambient identity', { timeout: 30000 }, async () => {
   const h = await setup(), { credentials, ...dependencies } = h.dependencies;
   const { composeRequestBoundOriginalScenes } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');

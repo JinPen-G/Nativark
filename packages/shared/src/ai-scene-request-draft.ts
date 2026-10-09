@@ -62,5 +62,5 @@ export interface AiSceneRecoveryStepDraft {
 export const AI_SCENE_REQUEST_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/scene-requests', method: 'POST',
   create: '', read: 'read', reissue: 'reissue', reconcile: 'reconcile', reconcileReissue: 'reconcile-reissue',
-  createTask: 'create-task', material: 'material', recovery: 'recovery'
+  createTask: 'create-task', material: 'material', recovery: 'recovery', quoteReview: 'quote-review'
 } as const);

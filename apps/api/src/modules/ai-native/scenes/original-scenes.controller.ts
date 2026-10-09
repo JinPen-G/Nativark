@@ -34,4 +34,7 @@ export class AiOriginalScenesController {
   material(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.prepareTaskMaterial(request, body)); }
   @Post('recovery')
   recovery(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.readRecovery(request, body)); }
+  /** Read current preparation for the stored original request, never quote creation. */
+  @Post(AI_SCENE_REQUEST_HTTP_DRAFT.quoteReview)
+  quoteReview(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.reviewQuote(request, body)); }
 }
