@@ -439,7 +439,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     assert.equal(context.tenantId, 'tenant-client'); assert.equal(id, 'own-order');
     return { apiVersion: 'client-v1', orderId: id, items: [{ inspectionId: 'inspection-client', exceptionIndex: 0,
       stage: 'return', code: 'damage', description: '待本人核对', amount: 12, currency: 'CNY',
-      responseStatus: 'pending', evidenceCount: 1 }], pendingCount: 1 };
+      responseStatus: 'pending', evidenceCount: 1, internalReview: 'private-review' }], pendingCount: 1, internalNote: 'private-fees' };
   } });
   const source = createAiGuardedClientSession(guard, { current: async () => ({ authorization, ip: '127.0.0.1' }) });
   const app = composeAiClientScenes({ client, session: source });
@@ -569,6 +569,15 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const clientExplanation = await requests.readOrderExplanation(request, { orderId: 'own-order', question: 'fees' });
   assert.equal(clientExplanation.facts.inspectionFees.value.items[0].amount, 12);
   assert.equal(clientExplanation.facts.inspectionFees.value.items[0].responseStatus, 'pending');
+  assert.equal(JSON.stringify(clientExplanation).includes('private-'), false);
+  const originalFees = client.feeItems;
+  client.feeItems = undefined;
+  const missingFees = await requests.readOrderExplanation(request, { orderId: 'own-order', question: 'fees' });
+  assert.equal(missingFees.facts.inspectionFees.coverage, 'unavailable');
+  assert.equal(missingFees.facts.amounts.payableAmount.value, 0);
+  client.feeItems = async (...args) => ({ ...await originalFees(...args), orderId: 'another-order' });
+  await assert.rejects(requests.readOrderExplanation(request, { orderId: 'own-order', question: 'fees' }), /AI_CLIENT_CONTEXT_UNAVAILABLE/);
+  client.feeItems = originalFees;
   const cancelPreview = await requests.readOrderCancellationPreview(request, { orderId: 'own-order' });
   assert.equal(cancelPreview.preview.cancellationCharge, 12);
   assert.equal(cancelPreview.handoff.execution, 'not_attempted');

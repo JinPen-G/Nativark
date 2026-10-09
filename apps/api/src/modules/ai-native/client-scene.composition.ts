@@ -154,10 +154,10 @@ export function composeAiClientScenes(input: {
         return memberRead('orders', frozen, context => input.client.myOrders(context, frozen));
       },
       order: async (orderId: string) => memberRead('order', orderId, context => input.client.getOrder(context, orderId)),
-      feeItems: async (orderId: string) => {
-        if (typeof input.client.feeItems !== 'function') throw new Error('AI_CLIENT_CAPABILITY_UNAVAILABLE');
-        return memberRead('feeItems', orderId, context => input.client.feeItems!(context, orderId));
-      },
+      ...(typeof input.client.feeItems === 'function' ? {
+        feeItems: async (orderId: string) => memberRead('feeItems', orderId,
+          context => input.client.feeItems!(context, orderId))
+      } : {}),
       corporateIdentities: async () => memberRead('corporateIdentities', {}, context => input.client.corporateIdentities(context))
     }),
     boundary: Object.freeze({

@@ -208,7 +208,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         if (typeof bound.scenes.member.cancellationPreview !== 'function') return fail('AI_CLIENT_CAPABILITY_UNAVAILABLE');
         const preview = z.object({ orderId: id, cancellationCharge: z.number().finite().nonnegative(),
           currency: z.string().min(1).max(32), calculatedAt: z.string().datetime({ offset: true }), estimated: z.literal(true) })
-          .passthrough().parse(await bound.scenes.member.cancellationPreview(parsed.data.orderId));
+          .parse(await bound.scenes.member.cancellationPreview(parsed.data.orderId));
         if (preview.orderId !== parsed.data.orderId) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
         return freezeOriginalInput({ preview, handoff: { method: 'POST' as const,
           path: `/api/client/v1/orders/${encodeURIComponent(preview.orderId)}/cancel`,

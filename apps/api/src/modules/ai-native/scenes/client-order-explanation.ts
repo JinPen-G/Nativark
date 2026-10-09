@@ -27,9 +27,10 @@ export function prepareClientOrderExplanation(value: unknown, orderId: string, q
   const fees = question === 'fees' && feeItems !== undefined
     ? z.object({ apiVersion: text.optional(), orderId: text, items: z.array(z.object({ inspectionId: text, exceptionIndex: z.number().int().nonnegative(),
       stage: z.enum(['pickup', 'return']), code: text, description: z.string().max(2000), amount: z.number().finite().nonnegative(),
-      currency: text, responseStatus: z.enum(['pending', 'confirmed', 'disputed']), evidenceCount: z.number().int().nonnegative() }).passthrough()).max(50),
-      pendingCount: z.number().int().nonnegative() }).passthrough().parse(feeItems)
+      currency: text, responseStatus: z.enum(['pending', 'confirmed', 'disputed']), evidenceCount: z.number().int().nonnegative() })).max(50),
+      pendingCount: z.number().int().nonnegative() }).parse(feeItems)
     : undefined;
+  if (fees && fees.orderId !== orderId) throw new Error('AI_CLIENT_CONTEXT_UNAVAILABLE');
   return freezeOriginalInput({ orderId, question,
     status: fact('status', order.status), orderVersion: fact('updatedAt', order.updatedAt),
     ...(amounts ? { amounts, currency: fact('currency', order.currency) } : {}),
