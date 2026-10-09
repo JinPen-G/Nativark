@@ -73,12 +73,13 @@ export function composeApprovedSettingsWaiting(d: ApprovedSettingsApplicationDep
         proposalRevision: prepared.reference.proposalRevision, reviewedPayloadHash: prepared.reference.reviewedPayloadHash },
       receipt: receipt.state === 'recorded' ? { kind: 'recorded' as const, record: receipt.approval } : { kind: 'absent' as const, retryable: false as const } };
   };
-  const material = (waiting: Awaited<ReturnType<typeof readWaiting>>, effectState: string) => ({
-    version: 'approved-settings-wait-1', binding: waiting.binding, presentedLease: waiting.lease, effectState,
-    ...(waiting.kind === 'waiting_reference' ? { proposal: waiting.proposal,
-      ...(waiting.receipt.kind === 'recorded' ? { decisionRef: waiting.receipt.record.approvalId,
-        decision: waiting.receipt.record.decision } : {}) } : {})
-  });
+  const material = (waiting: Awaited<ReturnType<typeof readWaiting>>, effectState: string) => {
+    const { purpose: _purpose, ...presentedLease } = waiting.lease;
+    return { version: 'approved-settings-wait-1', binding: waiting.binding, presentedLease, effectState,
+      ...(waiting.kind === 'waiting_reference' ? { proposal: waiting.proposal,
+        ...(waiting.receipt.kind === 'recorded' ? { decisionRef: waiting.receipt.record.approvalId,
+          decision: waiting.receipt.record.decision } : {}) } : {}) };
+  };
   const reconcile = async (raw: Input): ReturnType<Executor['execute']> => {
     const input = parse(raw), found = await locate(input), waiting = await readWaiting(input);
     // Only an original-key business receipt proves commit. "Not observed" is

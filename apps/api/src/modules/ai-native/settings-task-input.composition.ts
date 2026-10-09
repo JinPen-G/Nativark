@@ -47,9 +47,12 @@ export function composePersistedSettingsTaskInput(d: PersistedTaskAuthorizationD
         const read = async () => {
           const task = await db.aiTask.findFirst({ where: { id: taskId, ownerKind: 'USER', ownerId: actor.actorId,
             scope: { tenantId: actor.tenantId, workspaceId: actor.workspaceId }, archivedAt: null } });
+          // Original-charge recovery reads this proof too; it does not permit new input or execution.
+          const readablePlan = purpose === 'plan' && ['RUNNING', 'WAITING_CONFIRMATION', 'WAITING_EXTERNAL', 'CANCEL_REQUESTED'].includes(task?.status ?? '');
           if (!task || task.id !== taskId || task.sceneCode !== scene.code || task.sceneVersion !== scene.version
-            || !(purpose === 'plan' ? ['RUNNING', 'WAITING_CONFIRMATION'] : ['RUNNING']).includes(task.status)
-            || task.cancelRequestedAt !== null || task.audience !== context.audience.toUpperCase()) throw denied();
+            || !(readablePlan || purpose === 'input' && task.status === 'RUNNING')
+            || (task.cancelRequestedAt !== null && !(readablePlan && task.status === 'CANCEL_REQUESTED'))
+            || task.audience !== context.audience.toUpperCase()) throw denied();
           const change = await db.rentalApprovedSettingsChange.findFirst({ where: { id: reference.changeId, ...actor } });
           if (!change || change.id !== reference.changeId || change.changeHash !== reference.changeHash
             || change.tenantId !== actor.tenantId || change.workspaceId !== actor.workspaceId || change.actorId !== actor.actorId) throw denied();

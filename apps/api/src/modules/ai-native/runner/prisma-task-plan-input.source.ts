@@ -323,7 +323,7 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
       || !plan.steps.some(p => p.registrationRef === command.registrationRef)) throw denied();
     const inputKey = { ...key, registrationRef: command.registrationRef };
     const input = await this.input(await this.db.aiTaskActionInput.findFirst({ where: inputKey }), inputKey);
-    await this.verifySettings(before.context, command.taskId, input.payload);
+    await this.verifySettings(before.context, command.taskId, input.payload, undefined, 'plan');
     const current = await this.access(command.taskId, 'transition_task');
     if (current.access.bindingKey !== before.access.bindingKey || current.policyHash !== before.policyHash) throw denied();
     return { context: current.context, registrationAllowed: true as const,

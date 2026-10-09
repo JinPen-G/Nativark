@@ -6,7 +6,7 @@ const { composePersistedTaskAuthorization } = require('../apps/api/src/modules/a
 const { PrismaTaskPlanInputSource } = require('../apps/api/src/modules/ai-native/runner/prisma-task-plan-input.source');
 const { AI_TOOL_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
 
-async function settingsInputSetup() {
+async function settingsInputSetup({ normal = false } = {}) {
   const { composePersistedSettingsTaskInput } = require('../apps/api/src/modules/ai-native/settings-task-input.composition');
   const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
   const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
@@ -38,7 +38,11 @@ async function settingsInputSetup() {
     scene: { code: 'synthetic-clarification', version: '1' }, clock: () => new Date(h.control.now) };
   const app = composeApprovedSettingsApplication(dependencies);
   await root.policy.put({ expectedRevision: null, enabled: true, limits: h.plan.limits, expiresAt: '2027-01-01T00:00:00Z' });
-  const lease = await root.tasks.claimRun(h.claim());
+  if (normal) {
+    h.state.aiTask[0].status = 'QUEUED';
+    h.state.aiRun[0].status = 'QUEUED';
+  }
+  const lease = normal ? null : await root.tasks.claimRun(h.claim());
   const reference = { changeId: 'change-a', changeHash };
   const publish = (input = reference) => app.publishTaskInput({ taskId: 'task-a', registrationRef: 'settings-a',
     expectedTaskRevision: h.state.aiTask[0].revision, lease, input });
@@ -66,8 +70,8 @@ test('settings participant accepts the runner POSSIBLE start, not an unstarted o
   h.state.aiStep[0].effect = 'POSSIBLE'; h.state.aiRun[0].leaseOwnerId = 'other-worker'; await assert.rejects(held());
 });
 
-async function settingsWaitingSetup() {
-  const h = await settingsInputSetup();
+async function settingsWaitingSetup(options = {}) {
+  const h = await settingsInputSetup(options);
   const { RENTAL_CATEGORY_DEFINITIONS } = require('@rental-os/shared');
   // Database row-lock/category facts are offline substitutes; proposal and
   // decision creation, Guard, current task authorization and executor are real.
@@ -83,6 +87,7 @@ async function settingsWaitingSetup() {
     binding: { categoryVersionId: 'category-a', adoptionRevision: 1 } });
   h.state.aiTaskActionPolicy.push({ ...h.state.aiTaskActionPolicy.find(p => p.operation === 'transition_task'),
     operation: 'decide_approval', requiredPermissions: ['rental-os:rules:manage'] });
+  if (options.normal) return h;
   await h.publish(); await h.root.plans.savePlan(h.plan, h.lease);
   const { taskId, expiresAt, ...lease } = h.lease;
   const registered = await h.root.registrations.register({ taskId, registrationRef: 'settings-a',
@@ -139,26 +144,29 @@ test('settings approved execution consumes the original approval and recovers on
   assert.equal(writes, 1);
 });
 
+async function settingsNormalHostSetup() {
+  const h = await settingsWaitingSetup({ normal: true });
+  const { composeTaskSettingsHost } = require('../apps/api/src/modules/ai-native/runner/settings-task-host.composition');
+  let ticks = 0, timerId = 0;
+  const timers = new Map();
+  const rebuild = () => composeTaskSettingsHost({ ...h.dependencies, host: { holderId: 'worker-a', leaseMs: 100000 },
+    task: { taskId: 'task-a', runId: 'run-a', registrationRef: 'settings-a', change: h.reference, limits: h.plan.limits },
+    monotonic: () => ++ticks,
+    runnerClock: { now: () => ticks, setTimeout: (callback, delayMs) => {
+      const id = ++timerId; timers.set(id, { callback, due: ticks + delayMs }); return id;
+    }, clearTimeout: id => timers.delete(id) } });
+  return { ...h, rebuild, timers };
+}
+
 test('settings normal host starts through the runner and persists an approval checkpoint without business writes', { timeout: 20000 }, async t => {
-  const h = await settingsWaitingSetup();
+  const h = await settingsNormalHostSetup();
   const transaction = h.db.$transaction;
   let open = 0, nested = 0;
   h.db.$transaction = (work, options) => {
     if (open) nested++;
     return transaction(async tx => { open++; try { return await work(tx); } catch (error) { t.diagnostic(error.stack); throw error; } finally { open--; } }, options);
   };
-  for (const table of ['aiStep', 'aiTaskRunPlan', 'aiTaskActionInput']) h.state[table].length = 0;
-  h.state.aiTask[0].status = 'QUEUED';
-  Object.assign(h.state.aiRun[0], { status: 'QUEUED', leaseOwnerId: null, leaseExpiresAt: null });
-  const { composeTaskSettingsHost } = require('../apps/api/src/modules/ai-native/runner/settings-task-host.composition');
-  let ticks = 0, timerId = 0;
-  const timers = new Map();
-  const host = composeTaskSettingsHost({ ...h.dependencies, host: { holderId: 'worker-a', leaseMs: 100000 },
-    task: { taskId: 'task-a', runId: 'run-a', registrationRef: 'settings-a', change: h.reference, limits: h.plan.limits },
-    monotonic: () => ++ticks,
-    runnerClock: { now: () => ticks, setTimeout: (callback, delayMs) => {
-      const id = ++timerId; timers.set(id, { callback, due: ticks + delayMs }); return id;
-    }, clearTimeout: id => timers.delete(id) } });
+  const host = h.rebuild(), timers = h.timers;
   const result = await host.application.start({ taskId: 'task-a', runId: 'run-a' });
   assert.equal(result.kind, 'run_outcome'); assert.equal(result.outcome.status, 'paused', JSON.stringify({ result,
     steps: h.state.aiStep, phases: h.state.aiTaskExecutionPhaseReceipt, trace: h.trace.slice(-20) }, (_key, value) => typeof value === 'bigint' ? value.toString() : value));
@@ -189,6 +197,88 @@ test('settings normal host starts through the runner and persists an approval ch
   assert.ok(h.state.aiTaskExecutionCharge.every(c => c.status === 'RECORDED'));
   assert.equal(nested, 0, 'receipt completion reuses the owning step transaction');
   assert.equal(timers.size, 0);
+});
+
+test('settings normal host cancellation blocks confirmation and preserves unresolved original charges', { timeout: 20000 }, async () => {
+  const h = await settingsNormalHostSetup(), host = h.rebuild(), key = { taskId: 'task-a', runId: 'run-a' };
+  assert.equal((await host.application.start(key)).outcome.status, 'paused');
+  const checkpoint = h.state.aiTaskExecutionPhaseReceipt[0], originalCharges = h.state.aiTaskExecutionCharge.map(c => c.chargeId);
+  await assert.rejects(host.application.requestCancel({ taskId: 'other-task', expectedRevision: h.state.aiTask[0].revision }));
+  const cancelled = await host.application.requestCancel({ taskId: key.taskId, expectedRevision: h.state.aiTask[0].revision });
+  assert.equal(cancelled.cancellation, 'requested_not_rollback');
+  assert.equal(h.state.aiTask[0].status, 'CANCEL_REQUESTED');
+  await assert.rejects(host.application.continueConfirmation({ ...key, checkpointRef: checkpoint.id }));
+  const rebuilt = h.rebuild();
+  await rebuilt.authorization.tasks.claimRecoveryRun(h.claim());
+  const lease = h.held();
+  await assert.rejects(rebuilt.inputs.source.publishSettingsInput({ taskId: key.taskId, registrationRef: 'new-settings',
+    expectedTaskRevision: h.state.aiTask[0].revision, lease, input: h.reference }));
+  assert.equal((await rebuilt.application.reconcile(key)).outcome.status, 'unknown');
+  assert.equal(h.state.aiTask[0].status, 'CANCEL_REQUESTED');
+  assert.equal(h.state.rentalApprovedSettingsOperation.length, 0);
+  assert.equal(h.state.aiApprovalConsumption.length, 0);
+  assert.equal(h.state.aiTaskExecutionPhaseStart.length, 1);
+  assert.deepEqual(h.state.aiTaskExecutionCharge.map(c => c.chargeId), originalCharges);
+  assert.ok(h.state.aiTaskExecutionCharge.every(c => c.status === 'UNKNOWN'));
+  assert.equal(h.state.aiRun[0].leaseOwnerId, null);
+  assert.equal(h.timers.size, 0);
+});
+
+for (const mode of ['missing operation', 'cancelled committed operation']) test(`settings normal host recovers ${mode} without executing again`, { timeout: 20000 }, async () => {
+  const h = await settingsNormalHostSetup(), host = h.rebuild(), key = { taskId: 'task-a', runId: 'run-a' };
+  let calls = 0;
+  h.dependencies.core.commitNotificationSettings = async (_tenant, notifications) => {
+    calls++;
+    if (mode === 'missing operation') throw Error('synthetic Core commit unavailable');
+    h.current.settingsRevision++; h.current.settings.notifications = structuredClone(notifications);
+    return structuredClone(h.current);
+  };
+  h.dependencies.core.refreshCommittedBusinessSettings = async () => {};
+  assert.equal((await host.application.start(key)).outcome.status, 'paused');
+  const originalPlan = h.clone(h.state.aiTaskRunPlan), originalInput = h.clone(h.state.aiTaskActionInput);
+  const originalCharges = h.state.aiTaskExecutionCharge.map(c => c.chargeId);
+  const checkpoint = h.state.aiTaskExecutionPhaseReceipt[0], proposal = checkpoint.payload.proposal;
+  await host.settings.application.decide({ draftVersion: 'ain-approved-settings-draft-1', taskId: key.taskId,
+    proposalId: proposal.proposalId, proposalRevision: proposal.proposalRevision,
+    reviewedPayloadHash: proposal.reviewedPayloadHash, decision: 'approve' });
+  await host.authorization.tasks.claimRecoveryRun(h.claim());
+  if (mode === 'cancelled committed operation') h.storeControl.beforeWrite = async (name, args) => {
+    if (name === 'aiStep' && args.data?.status === 'SUCCEEDED') throw Error('synthetic result bookkeeping unavailable');
+  };
+  const continued = host.application.continueConfirmation({ ...key, checkpointRef: checkpoint.id });
+  if (mode === 'missing operation') {
+    assert.equal((await continued).outcome.status, 'unknown');
+    assert.equal(h.state.aiTask[0].status, 'WAITING_EXTERNAL');
+  } else {
+    await assert.rejects(continued);
+    assert.equal(h.state.rentalApprovedSettingsOperation.length, 1);
+    assert.equal(h.state.aiStep[0].status, 'RUNNING');
+    assert.equal(h.state.aiTaskExecutionPhaseReceipt[1].kind, 'succeeded');
+    h.storeControl.beforeWrite = null;
+    await host.application.requestCancel({ taskId: key.taskId, expectedRevision: h.state.aiTask[0].revision });
+  }
+  assert.equal(calls, 1);
+  const rebuilt = h.rebuild();
+  await rebuilt.authorization.tasks.claimRecoveryRun(h.claim());
+  const lease = h.held();
+  await assert.rejects(rebuilt.inputs.source.publishSettingsInput({ taskId: key.taskId, registrationRef: 'new-settings',
+    expectedTaskRevision: h.state.aiTask[0].revision, lease, input: h.reference }));
+  const result = await rebuilt.application.reconcile(key);
+  assert.equal(result.outcome.status, mode === 'missing operation' ? 'unknown' : 'succeeded', JSON.stringify({ step: h.state.aiStep,
+    charges: h.state.aiTaskExecutionCharge, trace: h.trace.slice(-20) }, (_key, value) => typeof value === 'bigint' ? value.toString() : value));
+  assert.equal(h.state.aiTask[0].status, mode === 'missing operation' ? 'WAITING_EXTERNAL' : 'SUCCEEDED');
+  assert.equal(h.state.rentalApprovedSettingsOperation.length, mode === 'missing operation' ? 0 : 1);
+  assert.equal(h.state.aiApprovalConsumption.length, mode === 'missing operation' ? 0 : 1);
+  assert.equal(calls, 1, 'reconciliation never re-enters Core commit');
+  assert.deepEqual(h.state.aiTaskRunPlan, originalPlan);
+  assert.deepEqual(h.state.aiTaskActionInput, originalInput);
+  assert.deepEqual(h.state.aiTaskExecutionCharge.map(c => c.chargeId), originalCharges);
+  assert.equal(h.state.aiTaskExecutionPhaseStart.length, 2);
+  assert.ok(h.state.aiTaskExecutionCharge.every(c => c.status === (mode === 'missing operation' ? 'UNKNOWN' : 'RECORDED')));
+  assert.equal(h.state.aiRun[0].leaseOwnerId, null);
+  assert.equal(h.timers.size, 0);
+  h.identity.membership = false;
+  await assert.rejects(rebuilt.application.reconcile(key));
 });
 
 test('settings original change produces a policy-bound plan and PENDING step with the original domain hash', async () => {

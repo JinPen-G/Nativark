@@ -86,5 +86,14 @@ export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDepend
     host: input.host, prepare, inputs: { submit: unavailable, readPending: unavailable } });
   return Object.freeze({ settings, inputs, ...root, authorization, registrations, transitions, taskTransitions, recovery, events,
     application: Object.freeze({ start: application.start.bind(application), continueConfirmation: application.continueConfirmation.bind(application),
-      inspect: application.inspect.bind(application), readEvents: application.readEvents.bind(application), reconcile: application.reconcile.bind(application) }) });
+      inspect: application.inspect.bind(application), readEvents: application.readEvents.bind(application), reconcile: application.reconcile.bind(application),
+      async requestCancel(value: unknown) {
+        const parsed = z.object({ taskId: id.max(36), expectedRevision: z.number().int().min(1).max(4294967294) }).strict().safeParse(structuredClone(value));
+        if (!parsed.success || parsed.data.taskId !== task.taskId) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const before = await authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
+        const receipt = await taskTransitions.transition({ ...parsed.data, to: 'cancel_requested', reason: 'cancel_requested' });
+        const after = await authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
+        if (after.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return { receipt, cancellation: 'requested_not_rollback' as const };
+      } }) });
 }
