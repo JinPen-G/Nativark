@@ -177,6 +177,23 @@ test('settings normal host starts through the runner and persists an approval ch
   assert.equal(h.state.aiApproval.length, 0); assert.equal(h.state.rentalApprovedSettingsOperation.length, 0);
   assert.equal(h.state.aiTaskExecutionCharge.length, 3);
   const checkpoint = h.state.aiTaskExecutionPhaseReceipt[0], proposal = checkpoint.payload.proposal;
+  const { composeAiSettingsBusinessConsumer } = require('../apps/api/src/modules/ai-native/scenes/settings-business-consumer.composition');
+  const consumer = composeAiSettingsBusinessConsumer({ ...h.dependencies, settingsHost: host });
+  const preparation = { draftVersion: 'ain-approved-settings-draft-1', taskId: 'task-a', runId: 'run-a', stepId: h.state.aiStep[0].id,
+    proposalId: proposal.proposalId, proposalRevision: proposal.proposalRevision, changeId: h.reference.changeId, changeHash: h.reference.changeHash };
+  const material = await consumer.read({ preparation });
+  assert.equal(material.mode, 'read_only'); assert.equal(material.businessOutcome, 'not_observed');
+  assert.equal(material.currentMatchesChangeBase, true); assert.equal(material.review.change.changeId, h.reference.changeId);
+  assert.equal(material.decision.state, 'not_observed');
+  const handoff = await consumer.humanHandoff({ preparation });
+  assert.equal(handoff.reference.taskId, 'task-a'); assert.equal(handoff.continuation, 'not_invoked_use_original_settings_host');
+  assert.equal(h.state.aiApproval.length, 0); assert.equal(h.state.rentalApprovedSettingsOperation.length, 0);
+  await assert.rejects(consumer.read({ preparation: { ...preparation, taskId: 'other-task' } }));
+  await assert.rejects(composeAiSettingsBusinessConsumer().read({ preparation }));
+  const permissions = [...h.identity.user.permissions];
+  h.identity.user.permissions.length = 0;
+  await assert.rejects(consumer.read({ preparation }), 'revoked current identity cannot receive the old change');
+  h.identity.user.permissions.push(...permissions);
   h.dependencies.core.commitNotificationSettings = async (_tenant, notifications) => {
     h.current.settingsRevision++; h.current.settings.notifications = structuredClone(notifications);
     return structuredClone(h.current);
@@ -197,6 +214,9 @@ test('settings normal host starts through the runner and persists an approval ch
   assert.ok(h.state.aiTaskExecutionCharge.every(c => c.status === 'RECORDED'));
   assert.equal(nested, 0, 'receipt completion reuses the owning step transaction');
   assert.equal(timers.size, 0);
+  const business = await consumer.read({ preparation, operationKey: h.state.rentalApprovedSettingsOperation[0].operationKey });
+  assert.equal(business.businessOutcome, 'committed'); assert.equal(business.currentMatchesChangeBase, false);
+  assert.equal(business.operation.receipt.changeId, preparation.changeId);
 });
 
 test('settings normal host cancellation blocks confirmation and preserves unresolved original charges', { timeout: 20000 }, async () => {

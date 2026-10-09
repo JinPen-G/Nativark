@@ -27,6 +27,7 @@ import { AiBusinessScenePreparationService } from '../scenes/business-scene-prep
 import { composeAiBusinessOrderApplication } from '../scenes/business-order-application';
 import type { PersistedApprovedOrderDependencies } from '../approval-execution/approved-order-composition.ports';
 import { AiOrderInspectionFactsService } from './order-inspection-facts.service';
+import { composeAiSettingsBusinessConsumer, type AiSettingsBusinessDependencies } from '../scenes/settings-business-consumer.composition';
 
 /** Server composition only. Guard and current session come from the application
  * host, never model arguments. No HTTP route, dispatch, entitlement or approval
@@ -44,6 +45,7 @@ export function composeAiAuthorizedBusinessTools(input: {
   /** Explicit AIN-07 dependencies for an EXISTING persisted task/action. No
    * default original input, policy or approval is supplied by this lane. */
   approvedOrder?: Omit<PersistedApprovedOrderDependencies, 'guard' | 'credentials'>;
+  approvedSettings?: Omit<AiSettingsBusinessDependencies, 'guard' | 'credentials'>;
   clock?: () => Date;
 }) {
   for (const [port, method] of [[input?.business, 'getQuote'], [input?.reports, 'getOperationReport']] as const) {
@@ -84,6 +86,9 @@ export function composeAiAuthorizedBusinessTools(input: {
     new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock),
     explanation(serverOrderId), nextSteps(serverOrderId));
   return Object.freeze({
+    settingsActions: composeAiSettingsBusinessConsumer(input.approvedSettings ? {
+      ...input.approvedSettings, guard: input.guard, credentials: input.credentials
+    } : undefined),
     orderActions: composeAiBusinessOrderApplication(input.approvedOrder ? {
       ...input.approvedOrder, guard: input.guard, credentials: input.credentials
     } : undefined),
