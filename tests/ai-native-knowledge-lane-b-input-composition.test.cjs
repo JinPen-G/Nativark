@@ -5,6 +5,7 @@ const { composePersistedHumanKnowledge } = h.load('persistent-knowledge.composit
 const { PersistentMemoryConsentService } = h.load('persistent-memory-consent.service');
 const { HumanKnowledgeModule } = h.load('human-knowledge.module');
 const { HumanKnowledgeInputService } = h.load('human-knowledge-input.service');
+const { HumanKnowledgeConsumptionService } = h.load('human-knowledge-consumption.service');
 test.after(() => assert.deepEqual(h.attempts, []));
 
 test('missing attachment business binding denies prepare/create/revise before writes', async () => {
@@ -41,6 +42,13 @@ test('opt-in composition prepares original knowledge package with separately aut
   const input = { requestId: 'collect-1', query: 'Synthetic', maxSources: 2, maxSnippetChars: 2000, maxTotalBytes: 4096 };
   const result = await bundle.preparation.collect(input, { includePreferences: true });
   assert.equal(result.status, 'ready'); assert.equal(result.preferences.items.length, 1);
+  const documentRead = await bundle.consumption.readDocument({ documentId: 'doc-1', previewLimit: 2 });
+  assert.equal(documentRead.state, 'current_readable');
+  assert.equal(documentRead.body, 'current_readable');
+  assert.equal(documentRead.bounded, true);
+  const memoryRead = await bundle.consumption.readMemory({ memoryId: 'memory-1' });
+  assert.equal(memoryRead.status, 'ready');
+  assert.equal(memoryRead.confirmation.confirmationRecordId, result.preferences.items[0].confirmationRecordId);
   assert.deepEqual(await bundle.preparation.revalidate(result), result);
   assert.equal(result.preferences.semantics, 'preference_not_authority');
   assert.deepEqual(result.sections, { knowledge: 'authorized_sources', preferences: 'optional_confirmed_preferences', businessFacts: 'core_authoritative_only' });
@@ -50,6 +58,8 @@ test('opt-in composition prepares original knowledge package with separately aut
   assert.equal((await disabled.preparation.collect(input)).preferences.status, 'not_requested');
   const module = HumanKnowledgeModule.register(deps);
   assert.ok(module.providers.find(p => p.provide === HumanKnowledgeInputService).useValue);
+  assert.ok(module.providers.find(p => p.provide === HumanKnowledgeConsumptionService).useValue);
+  assert.ok(module.exports.includes(HumanKnowledgeConsumptionService));
   const consent = module.providers.find(p => p.provide === PersistentMemoryConsentService).useValue;
   assert.ok(module.exports.includes(PersistentMemoryConsentService));
   assert.equal(consent, module.providers.find(p => p.provide === HumanKnowledgeInputService).useValue.memory);
@@ -57,7 +67,9 @@ test('opt-in composition prepares original knowledge package with separately aut
   const noMemoryModule = HumanKnowledgeModule.register(ports);
   assert.equal(noMemoryModule.exports.includes(PersistentMemoryConsentService), false);
   assert.equal(noMemoryModule.providers.some(p => p.provide === PersistentMemoryConsentService), false);
-  await memory.revoke({ memoryId: 'memory-1', expectedRevision: 2 });
+  const withdrawn = await bundle.consumption.withdrawMemory({ memoryId: 'memory-1', expectedRevision: 2 });
+  assert.equal(withdrawn.status, 'revoked');
+  assert.equal(withdrawn.semantics, 'consent_withdrawal_not_memory_delete_or_business_rollback');
   await assert.rejects(bundle.preparation.revalidate(result), { code: 'unavailable' });
   assert.deepEqual((await bundle.preparation.collect(input, { includePreferences: true })).preferences.items, []);
   assert.throws(() => composePersistedHumanKnowledge({ ...deps, memory: { db, authorization: undefined } }), { code: 'unavailable' });

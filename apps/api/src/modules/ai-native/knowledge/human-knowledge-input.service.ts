@@ -38,6 +38,10 @@ export class HumanKnowledgeInputService {
       db: ports.memory.db, authorization: ports.memory.authorization });
   }
 
+  /** Re-open a collected source through the same current-session context
+   * checks. This is a consumption helper, not a bearer reference. */
+  openSource(source: unknown) { return this.context.open(source); }
+
   collect(value: unknown, options: unknown = { includePreferences: false }) {
     const input = parse(knowledgeContextInputSchema, value);
     const settings = parse(z.object({ includePreferences: z.boolean(),
