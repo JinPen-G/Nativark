@@ -24,6 +24,15 @@ const observedTask = object({ state: choice('observed'), taskId: uuid, runId: uu
 const recoveryStep = object({ stepId: id(), runId: id(), actionId: id(), revision: integer(1, 4294967294), status: choice(...AI_STEP_STATUSES_DRAFT),
   effect: choice('none', 'possible', 'committed'), resultAvailable: { type: 'boolean' }, nextAction: choice('reconcile_original_action', 'read_authorized_result', 'runner_owned') });
 export const AI_SCENE_REQUEST_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiSceneModelTaskPageDraft: object({ limit: integer(1, 50), cursor: { type: 'string', maxLength: 512 },
+    status: { type: 'string', minLength: 1, maxLength: 64 }, sceneCode: { type: 'string', minLength: 1, maxLength: 191 } }, []),
+  AiSceneModelTaskEventsDraft: object({ original: originalReference,
+    after: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, limit: integer(1, 100) }),
+  AiSceneModelTaskSceneDraft: { oneOf: [
+    object({ kind: choice('original'), taskId: id(), runId: id(), original: originalReference,
+      resultId: id(), review: {}, decision: {}, order: {} }, ['kind', 'taskId', 'runId', 'original']),
+    object({ kind: choice('settings'), taskId: id(), runId: id(), reference: {} })
+  ] },
   AiSceneModelReferenceDraft: originalReference,
   AiSceneModelResumeDraft: object({ original: originalReference, submission: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft }),
   AiSceneModelCancelDraft: object({ original: originalReference, expectedRevision: integer(1, 4294967294) }),

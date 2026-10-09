@@ -511,7 +511,8 @@ test('opt-in model controller executes persisted quote clarification and denies 
   const request = Object.assign(new (require('node:events').EventEmitter)(), h.request, { aborted: false });
   assert.equal(h.trace.length, writes);
   assert.deepEqual(module.controllers, [AiOriginalScenesController, AiOriginalSceneModelController]);
-  for (const method of ['start', 'readInput', 'resume', 'reconcile', 'requestCancel', 'readModelResult', 'reopenModelSource'])
+  for (const method of ['start', 'readInput', 'resume', 'reconcile', 'requestCancel', 'readModelResult', 'reopenModelSource',
+    'readTaskPage', 'readTaskEvents', 'readTaskScene'])
     assert.equal(Reflect.getMetadata('path', AiOriginalSceneModelController.prototype[method]), AI_SCENE_MODEL_HTTP_DRAFT[method]);
   const referenceValid = ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneModelReferenceDraft);
   assert.equal(referenceValid(h.reference), true);
@@ -533,10 +534,25 @@ test('opt-in model controller executes persisted quote clarification and denies 
   const read = await controller.readModelResult(h.request, { original: h.reference, resultId: h.state.aiTaskResultArtifact.at(-1).id });
   assert.equal(read.status, 'available'); assert.equal(read.facts.payload.facts.status, 'missing_input');
   assert.equal(h.execution.sent.length, 2);
+  const aggregateCommand = { kind: 'original', original: h.reference, taskId: h.created.task.taskId,
+    runId: read.runId, resultId: read.resultId };
+  assert.equal(ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneModelTaskSceneDraft)(aggregateCommand), true);
+  const aggregate = await controller.readTaskScene(h.request, aggregateCommand);
+  const page = await controller.readTaskPage(h.request, { limit: 5 });
+  assert.ok(page.items.some(item => item.taskId === h.created.task.taskId));
+  await assert.rejects(controller.readTaskPage(h.request, { limit: 51 }), e => e.getStatus() === 400);
+  assert.equal(aggregate.runId, read.runId);
+  assert.equal(aggregate.originRunId, h.created.task.runId);
+  assert.equal(aggregate.snapshot.availability, 'available');
+  const events = await controller.readTaskEvents(h.request, { original: h.reference, after: '0', limit: 10 });
+  assert.equal(events.taskId, h.created.task.taskId);
+  assert.equal(h.execution.sent.length, 2);
+  await assert.rejects(controller.readTaskScene(h.request, { ...aggregateCommand, runId: 'wrong-run' }), e => e.getStatus() === 403);
   assert.equal((await controller.resume(h.request, { original: h.reference, submission })).continuation.reason, 'receipt_replayed');
   assert.equal(h.execution.sent.length, 2);
   await assert.rejects(controller.readInput({ headers: {} }, h.reference), e => e.getStatus() === 403);
   h.b.h.identity.session = false;
+  await assert.rejects(controller.readTaskScene(h.request, aggregateCommand), e => e.getStatus() === 403);
   await assert.rejects(controller.readModelResult(h.request, { original: h.reference, resultId: read.resultId }), e => e.getStatus() === 403);
   const aborted = await requestBoundOriginalModelHarness();
   const abortedController = new AiOriginalSceneModelController(aborted.requests);

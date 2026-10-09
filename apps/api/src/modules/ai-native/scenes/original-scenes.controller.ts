@@ -59,6 +59,12 @@ export class AiOriginalScenesController {
 export class AiOriginalSceneModelController {
   constructor(@Inject(AI_ORIGINAL_SCENE_MODEL_REQUESTS)
     private readonly model: ReturnType<typeof composeRequestBoundOriginalSceneModel>) {}
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage)
+  readTaskPage(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.model.readTaskPage(request, body)); }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents)
+  readTaskEvents(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.model.readTaskEvents(request, body)); }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene)
+  readTaskScene(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.model.readTaskScene(request, body)); }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.start)
   start(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => withRequestAbort(request, signal => this.model.start(request, body, signal)));

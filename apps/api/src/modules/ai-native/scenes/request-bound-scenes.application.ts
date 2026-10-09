@@ -9,6 +9,8 @@ import { composeHumanQuoteOrder, type HumanQuoteOrderDependencies } from './huma
 import { composeAiOriginalSceneModel, type AiOriginalSceneModelDependencies, type AiOriginalSceneRunDependencies } from './original-scene-model.composition';
 import type { AiTaskApplicationHost } from '../runner/prisma-task-application';
 import { composeFormalApprovedOrderReprepareServices, type FormalApprovedOrderReprepareConfiguration } from '../approval-execution/formal-approved-order-reprepare.composition';
+import { composePersistedTaskCenter } from '../task-center.composition';
+import { composeAiTaskCenterScene } from '../task-center-scene.composition';
 
 export type AiSceneHttpRequest = { headers: { authorization?: unknown } };
 export type AiSceneRequestOptions = { enabled: boolean; audience: 'operator' | 'staff' };
@@ -51,9 +53,17 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
   const serverHost = Object.freeze(structuredClone(host));
   const call = bindRequests(dependencies, requestOptions, input => {
     const model = composeAiOriginalSceneModel(input);
-    return { model, application: model.createApplication(serverHost, runServices(input)) };
+    const application = model.createApplication(serverHost, runServices(input));
+    const persisted = composePersistedTaskCenter(input);
+    const center = composeAiTaskCenterScene({ list: persisted.list, events: persisted.events,
+      scenes: model.scenes, modelResults: { read: model.readModelResult, reopenSource: model.reopenModelSource },
+      input: { read: application.readInput } });
+    return { model, application, center };
   });
   return Object.freeze({
+    readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readPage(command)),
+    readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readEvents(command)),
+    readTaskScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readScene(command)),
     start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, (app, command) => app.application.start(command, signal)),
     readInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.readInput(command)),
