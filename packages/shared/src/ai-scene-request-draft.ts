@@ -64,3 +64,10 @@ export const AI_SCENE_REQUEST_HTTP_DRAFT = Object.freeze({
   create: '', read: 'read', reissue: 'reissue', reconcile: 'reconcile', reconcileReissue: 'reconcile-reissue',
   createTask: 'create-task', material: 'material', recovery: 'recovery', quoteReview: 'quote-review'
 } as const);
+/** Server opt-in only. Bodies reuse original references and the existing input
+ * submission contract; callers never supply leases, prompts or model settings. */
+export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
+  basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/model`, method: 'POST',
+  start: 'start', readInput: 'input', resume: 'resume', reconcile: 'reconcile',
+  requestCancel: 'cancel', readModelResult: 'result', reopenModelSource: 'source'
+} as const);

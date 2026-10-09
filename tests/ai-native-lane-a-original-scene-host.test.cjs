@@ -497,6 +497,54 @@ test('scene knowledge with missing exact policy cannot publish model material or
   assert.equal(h.execution.sent.length, 0); assert.equal(h.state.aiGatewayInvocation.length, 0);
 });
 
+test('opt-in model controller executes persisted quote clarification and denies caller execution metadata', { timeout: 30000 }, async () => {
+  const { requestBoundOriginalModelHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const { AiOriginalSceneModelController } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.controller');
+  const { AI_SCENE_MODEL_HTTP_DRAFT } = require('../packages/shared/src/ai-scene-request-draft');
+  const { AI_TASK_INPUT_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
+  const h = await requestBoundOriginalModelHarness('quote_clarification');
+  const originalFactory = h.options.runServices;
+  const options = { ...h.options, runServices: input => ({ ...originalFactory(input), inputSource: 'original_scene' }) };
+  const writes = h.trace.length, module = AiOriginalScenesModule.registerHttpModel(h.requestDependencies, options);
+  const provider = module.providers.find(p => p.provide === require('../apps/api/src/modules/ai-native/scenes/original-scenes.module').AI_ORIGINAL_SCENE_MODEL_REQUESTS);
+  const controller = new AiOriginalSceneModelController(provider.useFactory());
+  const request = Object.assign(new (require('node:events').EventEmitter)(), h.request, { aborted: false });
+  assert.equal(h.trace.length, writes);
+  assert.deepEqual(module.controllers, [AiOriginalScenesController, AiOriginalSceneModelController]);
+  for (const method of ['start', 'readInput', 'resume', 'reconcile', 'requestCancel', 'readModelResult', 'reopenModelSource'])
+    assert.equal(Reflect.getMetadata('path', AiOriginalSceneModelController.prototype[method]), AI_SCENE_MODEL_HTTP_DRAFT[method]);
+  const referenceValid = ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneModelReferenceDraft);
+  assert.equal(referenceValid(h.reference), true);
+  assert.equal(referenceValid({ ...h.reference, holderId: 'caller-worker' }), false);
+  await assert.rejects(controller.start(request, { ...h.reference, holderId: 'caller-worker' }), e => e.getStatus() === 400);
+  assert.equal(request.listenerCount('aborted'), 0);
+  assert.equal(h.execution.sent.length, 0);
+  const started = await controller.start(request, h.reference);
+  assert.equal(request.listenerCount('aborted'), 0);
+  assert.equal(started.execution.outcome.status, 'paused');
+  const pending = await controller.readInput(h.request, h.reference);
+  const submission = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, taskId: h.created.task.taskId,
+    requestId: pending.requestId, expectedRevision: pending.revision, submissionKey: 'http-quote-clarification',
+    answers: [{ fieldId: 'clarification_text', value: 'Explain the required fields without choosing for me.' }] };
+  assert.equal(ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneModelResumeDraft)({ original: h.reference, submission }), true);
+  const resumed = await controller.resume(request, { original: h.reference, submission });
+  assert.equal(request.listenerCount('aborted'), 0);
+  assert.equal(resumed.continuation.outcome.status, 'succeeded');
+  const read = await controller.readModelResult(h.request, { original: h.reference, resultId: h.state.aiTaskResultArtifact.at(-1).id });
+  assert.equal(read.status, 'available'); assert.equal(read.facts.payload.facts.status, 'missing_input');
+  assert.equal(h.execution.sent.length, 2);
+  assert.equal((await controller.resume(h.request, { original: h.reference, submission })).continuation.reason, 'receipt_replayed');
+  assert.equal(h.execution.sent.length, 2);
+  await assert.rejects(controller.readInput({ headers: {} }, h.reference), e => e.getStatus() === 403);
+  h.b.h.identity.session = false;
+  await assert.rejects(controller.readModelResult(h.request, { original: h.reference, resultId: read.resultId }), e => e.getStatus() === 403);
+  const aborted = await requestBoundOriginalModelHarness();
+  const abortedController = new AiOriginalSceneModelController(aborted.requests);
+  const stopped = await abortedController.start({ ...aborted.request, aborted: true }, aborted.reference);
+  assert.notEqual(stopped.execution.outcome?.status, 'succeeded');
+  assert.equal(aborted.execution.sent.length, 0); assert.equal(aborted.state.aiGatewayInvocation.length, 0);
+});
+
 test('request-bound model runs original scenes and reads knowledge results without borrowing request identity', { timeout: 60000 }, async () => {
   const { requestBoundOriginalModelHarness, originalSceneKnowledgeFixture } = require('./fixtures/ai-native/lane-a-original-model.cjs');
   const { composeRequestBoundOriginalSceneModel } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');
