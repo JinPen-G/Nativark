@@ -33,6 +33,20 @@ export interface GatewayMediaAttachmentBytesReader {
 /** Composition adapter for the public Gateway media port. Storage/ACL policy is
  * supplied by the host; missing or inconsistent evidence fails closed. */
 export class AuthorizedGatewayMediaAttachmentResolver implements GatewayMediaAttachmentResolver {
+  async assertCurrent(context: GatewayContext, references: Parameters<NonNullable<GatewayMediaAttachmentResolver['assertCurrent']>>[1], signal: AbortSignal) {
+    context = structuredClone(context); references = structuredClone(references);
+    if (references.length < 1 || references.length > 8) throw new ModelGatewayError('INVALID_REQUEST');
+    for (const reference of references) {
+      if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+      const current = await this.authority.authorize(structuredClone(context), {
+        kind: reference.kind, attachmentId: reference.attachmentId, attachmentRevision: reference.attachmentRevision
+      }, signal);
+      if (!current || current.attachmentId !== reference.attachmentId || current.attachmentRevision !== reference.attachmentRevision
+        || current.contentHash !== reference.contentHash || current.mediaType !== reference.mediaType
+        || current.sizeBytes < 1 || current.sizeBytes > this.maxBytes) throw new ModelGatewayError('FORBIDDEN');
+    }
+    if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+  }
   constructor(
     private readonly authority: GatewayMediaAttachmentAuthority,
     private readonly reader: GatewayMediaAttachmentBytesReader,

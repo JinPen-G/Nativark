@@ -34,6 +34,11 @@ export interface PreparedGatewayTextIntent {
  * tenant/workspace binding, active-file state and storage authorization. Gateway
  * never accepts bytes, URLs or hashes from the Agent intent. */
 export interface GatewayMediaAttachmentResolver {
+  /** Fresh ACL/revision/hash validation after admission waits and before send.
+   * Optional for compatibility, but media dispatch rejects adapters without it. */
+  assertCurrent?(context: GatewayContext, references: readonly {
+    kind: 'image' | 'audio'; attachmentId: string; attachmentRevision: number; contentHash: string; mediaType: string;
+  }[], signal: AbortSignal): Promise<void>;
   resolve(context: GatewayContext, reference: { kind: 'image' | 'audio'; attachmentId: string; attachmentRevision: number }, signal: AbortSignal): Promise<{
     attachmentId: string; attachmentRevision: number;
     mediaType: 'image/png' | 'image/jpeg' | 'audio/wav';

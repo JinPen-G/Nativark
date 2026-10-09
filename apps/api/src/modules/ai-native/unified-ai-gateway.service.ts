@@ -75,6 +75,19 @@ export class UnifiedAiGatewayService {
 
   private deadline(signal?: AbortSignal) { return new GatewayDeadline(this.deadlineMs, signal); }
 
+  private async assertMediaCurrent(context: GatewayContext, request: UnresolvedRequest | UnresolvedProtocolRequest, signal: AbortSignal) {
+    const references = request.messages.flatMap(message => typeof message.content === 'string' ? []
+      : message.content.filter(part => part.kind !== 'text').map(part => ({ kind: part.kind,
+        attachmentId: part.attachmentId, attachmentRevision: part.attachmentRevision,
+        mediaType: part.mediaType, contentHash: part.contentHash })));
+    if (!references.length) return;
+    const media = this.ports.media;
+    if (typeof media?.assertCurrent !== 'function') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+    try { await media.assertCurrent(structuredClone(context), structuredClone(references), signal); }
+    catch (error) { if (error instanceof ModelGatewayError) throw error; throw new ModelGatewayError('FORBIDDEN'); }
+    if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+  }
+
   private assertBudget() {
     const budget = this.ports.budget;
     if ([budget?.reserve, budget?.dispatch, budget?.settle, budget?.abandon]
@@ -150,8 +163,10 @@ export class UnifiedAiGatewayService {
       })); reservationId = usage.id;
       await life.wait(() => this.ports.audit.append({ callId: request.callId, tenantId: context.tenantId, workspaceId: context.workspaceId, event: 'ai.invoke.admitted', status: 'accepted' }));
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
+      await life.wait(() => this.assertMediaCurrent(context, transportRequest, life.controller.signal));
       await life.wait(() => this.ports.budget.dispatch(structuredClone(call), usage.id));
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
+      await life.wait(() => this.assertMediaCurrent(context, transportRequest, life.controller.signal));
       dispatched = true;
       const rawResult = structuredClone(await life.wait(() => this.ports.transport.invoke(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal)));
       const result = intentBinding ? this.textResult(rawResult) : rawResult;
@@ -227,8 +242,10 @@ export class UnifiedAiGatewayService {
       })); reservationId = usage.id;
       await life.wait(() => this.ports.audit.append({ callId: request.callId, tenantId: context.tenantId, workspaceId: context.workspaceId, event: 'ai.stream.admitted', status: 'accepted' }));
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
+      await life.wait(() => this.assertMediaCurrent(context, transportRequest, life.controller.signal));
       await life.wait(() => this.ports.budget.dispatch(structuredClone(call), usage.id));
       await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
+      await life.wait(() => this.assertMediaCurrent(context, transportRequest, life.controller.signal));
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       dispatched = true;
       let result: GatewayInvocationResult | undefined;

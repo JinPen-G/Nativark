@@ -53,7 +53,22 @@ export class InspectionRecognitionService {
       return { scope, frozen };
     });
     const initial = await load();
-    const media: GatewayMediaAttachmentResolver = { resolve: async (context, reference, signal) => {
+    const media: GatewayMediaAttachmentResolver = { assertCurrent: async (context, references, signal) => {
+      context = structuredClone(context); references = structuredClone(references);
+      const current = await load();
+      if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+      if (context.tenantId !== current.scope.tenantId || context.workspaceId !== current.scope.workspaceId
+        || context.actorId !== current.scope.ownerId || requestFingerprint(current.scope) !== requestFingerprint(initial.scope)
+        || current.frozen.inputFingerprint !== initial.frozen.inputFingerprint) throw new InspectionAssistError('ACCESS_DENIED');
+      if (references.length < 1 || references.length > 8) throw new InspectionAssistError('INVALID_INPUT');
+      for (const ref of references) {
+        const expected = current.frozen.media.find(item => item.attachmentId === ref.attachmentId
+          && item.attachmentRevision === ref.attachmentRevision);
+        if (ref.kind !== 'image' || !expected || expected.contentHash !== ref.contentHash || expected.mediaType !== ref.mediaType) {
+          throw new InspectionAssistError('BINDING_CHANGED');
+        }
+      }
+    }, resolve: async (context, reference, signal) => {
       context = structuredClone(context); reference = structuredClone(reference);
       if (signal.aborted) throw new ModelGatewayError('CANCELLED');
       const before = await load();
