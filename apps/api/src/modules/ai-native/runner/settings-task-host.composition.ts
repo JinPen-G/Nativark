@@ -86,6 +86,7 @@ export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDepend
     host: input.host, prepare, inputs: { submit: unavailable, readPending: unavailable } });
   return Object.freeze({ settings, inputs, ...root, authorization, registrations, transitions, taskTransitions, recovery, events,
     application: Object.freeze({ start: application.start.bind(application), continueConfirmation: application.continueConfirmation.bind(application),
+      readConfirmation: application.readConfirmation.bind(application),
       inspect: application.inspect.bind(application), readEvents: application.readEvents.bind(application), reconcile: application.reconcile.bind(application),
       async requestCancel(value: unknown) {
         const parsed = z.object({ taskId: id.max(36), expectedRevision: z.number().int().min(1).max(4294967294) }).strict().safeParse(structuredClone(value));

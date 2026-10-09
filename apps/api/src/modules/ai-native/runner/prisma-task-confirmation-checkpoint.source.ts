@@ -16,7 +16,7 @@ const bindingSchema = z.object({ scopeId: shortId, taskId: shortId, runId: short
   actionId: id, inputRef: shortId, fingerprint: hash }).strict();
 const proposalSchema = z.object({ contractVersion: z.literal(AI_PROPOSAL_DRAFT_VERSION), proposalId: shortId,
   proposalRevision: revision, reviewedPayloadHash: hash }).strict();
-const waitingPayloadSchema = z.object({ version: z.enum(['approved-order-wait-1', 'approved-settings-wait-1']), binding: bindingSchema,
+export const waitingPayloadSchema = z.object({ version: z.enum(['approved-order-wait-1', 'approved-settings-wait-1']), binding: bindingSchema,
   presentedLease: leaseSchema, effectState: z.literal('awaiting_decision'), proposal: proposalSchema }).strict();
 const startSchema = z.object({ scopeId: shortId, taskId: shortId, id: shortId, runId: shortId, stepId: shortId,
   originalArtifactId: shortId, inputRef: shortId, stepsChargeId: shortId, activeMsChargeId: shortId, outputBytesChargeId: shortId,
