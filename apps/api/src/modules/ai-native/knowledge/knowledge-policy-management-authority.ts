@@ -3,12 +3,14 @@ import { z } from 'zod';
 import type { AiKnowledgeActionPolicy, AiKnowledgePolicyManagementAuthority, PrismaClient } from '@prisma/client';
 import { knowledgeRecordSchema, memoryDraftSchema, sameScope } from './knowledge-validation';
 import { AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION } from '../../../../../../packages/shared/src/ai-knowledge-policy-management-draft';
+import { preparedKnowledgeResourceBasis } from './knowledge-policy-preparation-target';
 import { canonicalPolicyResource, managementActions, managementFingerprint as hash, managementParse as parse,
-  permissions, policyKey, policyKeyHash, policyChange, policySnapshot, preparationFingerprint, originalResourceKey, revision, KnowledgePolicyManagementError } from './knowledge-policy-management.validation';
+  permissions, policyKey, policyKeyHash, policyChange, policySnapshot, preparationFingerprint, originalResourceKey, revision,
+  preparedTargetSpec, preparedUploadResource, authorityFingerprint, KnowledgePolicyManagementError } from './knowledge-policy-management.validation';
 
 export type KnowledgePolicyReadDb = Pick<PrismaClient, 'aiKnowledgeActionPolicy' | 'aiKnowledgePolicyManagementAuthority'
   | 'aiKnowledgePolicyPreparation' | 'aiKnowledgePolicyManagementOperation' | 'businessWorkspace' | 'user' | 'workspaceMember'
-  | 'aiKnowledgeDocument' | 'aiKnowledgeAcl' | 'aiStructuredMemory'>;
+  | 'aiKnowledgeDocument' | 'aiKnowledgeAcl' | 'aiStructuredMemory' | 'aiKnowledgePolicyPreparationTarget' | 'fileAsset' | 'fileUploadSession'>;
 export type ManagementScope = { tenantId: string; workspaceId: string };
 const denied = () => new KnowledgePolicyManagementError('unavailable');
 
@@ -26,8 +28,12 @@ export function validateKnowledgeManagementAuthority(row: AiKnowledgePolicyManag
     || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime())
     || live && (!row.enabled || row.expiresAt <= now)) throw denied();
   if ('owner' in resource && resource.owner?.actorId !== row.targetActorId) throw denied();
-  return { row, key: policyKey(row), resource, required, allowed, operations,
-    authorizationHash: hash({ ...row, createdAt: undefined, updatedAt: undefined, expiresAt: row.expiresAt.toISOString() }) };
+  if (row.preparationTarget != null) {
+    const target = parse(preparedTargetSpec, row.preparationTarget);
+    if (row.domain !== 'knowledge' || !['upload', 'create'].includes(row.action) || Date.parse(target.expiresAt) > row.expiresAt.getTime()
+      || row.action === 'upload' && hash(resource) !== hash(preparedUploadResource(target))) throw denied();
+  } else if (row.domain === 'knowledge' && ['upload', 'create'].includes(row.action)) throw denied();
+  return { row, key: policyKey(row), resource, required, allowed, operations, authorizationHash: authorityFingerprint(row) };
 }
 export type KnowledgeManagementAuthority = ReturnType<typeof validateKnowledgeManagementAuthority>;
 
@@ -38,17 +44,24 @@ export async function knowledgeManagementAuthority(db: KnowledgePolicyReadDb, id
   return validateKnowledgeManagementAuthority(row, now, live);
 }
 
-export async function knowledgePolicyResourceBasis(db: KnowledgePolicyReadDb, authority: KnowledgeManagementAuthority, closing = false) {
-  const { row, resource } = authority, scope = { tenantId: row.tenantId, workspaceId: row.workspaceId };
+export async function knowledgePolicyParticipants(db: KnowledgePolicyReadDb, authority: KnowledgeManagementAuthority, closing = false) {
+  const { row } = authority, scope = { tenantId: row.tenantId, workspaceId: row.workspaceId };
   const workspace = await db.businessWorkspace.findFirst({ where: { id: scope.workspaceId, tenantId: scope.tenantId, status: 'ACTIVE' }, select: { id: true, tenantId: true, status: true } });
   if (!workspace || workspace.id !== scope.workspaceId || workspace.tenantId !== scope.tenantId || workspace.status !== 'ACTIVE') throw denied();
-  if (closing) return { closing: true, key: authority.key };
+  if (closing) return scope;
   for (const actorId of new Set([row.managerId, row.targetActorId])) {
     const user = await db.user.findFirst({ where: { id: actorId, tenantId: scope.tenantId, isActive: true }, select: { id: true, tenantId: true, isActive: true, isSaasAdmin: true } });
     const member = await db.workspaceMember.findFirst({ where: { ...scope, userId: actorId, isActive: true }, select: { tenantId: true, workspaceId: true, userId: true, isActive: true } });
     if (!user || user.id !== actorId || user.tenantId !== scope.tenantId || !user.isActive || user.isSaasAdmin
       || !member || member.userId !== actorId || member.tenantId !== scope.tenantId || member.workspaceId !== scope.workspaceId || !member.isActive) throw denied();
   }
+  return scope;
+}
+
+export async function knowledgePolicyResourceBasis(db: KnowledgePolicyReadDb, authority: KnowledgeManagementAuthority, closing = false, now = new Date()) {
+  const scope = await knowledgePolicyParticipants(db, authority, closing), { row, resource } = authority;
+  if (closing) return { closing: true, key: authority.key };
+  if (row.domain === 'knowledge' && ['upload', 'create'].includes(row.action)) return preparedKnowledgeResourceBasis(db, authority, now);
   if ('documentId' in resource && resource.documentId) {
     const document = await db.aiKnowledgeDocument.findFirst({ where: { ...scope, id: resource.documentId } });
     if (!document || document.id !== resource.documentId || document.tenantId !== scope.tenantId || document.workspaceId !== scope.workspaceId) throw denied();
@@ -106,5 +119,6 @@ export async function managedKnowledgePolicyCurrent(db: KnowledgePolicyReadDb, r
     || result.expiresAt !== row.expiresAt.toISOString() || hash(result.requiredPermissions) !== hash(row.requiredPermissions)
     || hash(command.requiredPermissions) !== hash(result.requiredPermissions) || command.expiresAt !== result.expiresAt
     || result.requiredPermissions.some(p => !authority.allowed.includes(p)) || row.expiresAt > authority.row.expiresAt) throw denied();
-  await knowledgePolicyResourceBasis(db, authority);
+  await knowledgePolicyResourceBasis(db, authority, false, now);
+  return authority;
 }

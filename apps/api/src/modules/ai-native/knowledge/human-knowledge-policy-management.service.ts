@@ -6,9 +6,10 @@ import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import { TenantModelConfigurationAuthority } from '../tenant-model-config.authority';
-import { knowledgeManagementAuthority, knowledgePolicyResourceBasis, type KnowledgePolicyReadDb } from './knowledge-policy-management-authority';
+import { knowledgeManagementAuthority, knowledgePolicyParticipants, knowledgePolicyResourceBasis, type KnowledgePolicyReadDb } from './knowledge-policy-management-authority';
+import { readPreparedKnowledgeTarget, preparedKnowledgeUploadBinding, targetSpecHash } from './knowledge-policy-preparation-target';
 import { KnowledgePolicyManagementError, managementParse as parse, managementFingerprint as hash, managementIdentityHash,
-  policyChange, policySnapshot, policyWhere, policyKeyHash, preparationFingerprint, receiptSelection, commitSelection, type PolicyChange } from './knowledge-policy-management.validation';
+  preparedTargetSpec, preparedUploadResource, managementHash, policyChange, policySnapshot, policyWhere, policyKeyHash, preparationFingerprint, receiptSelection, commitSelection, type PolicyChange } from './knowledge-policy-management.validation';
 import type { AiKnowledgePolicyManagementReceiptDraft, AiKnowledgePolicyManagementUnknownDraft } from '../../../../../../packages/shared/src/ai-knowledge-policy-management-draft';
 
 export type KnowledgePolicyManagementDependencies = {
@@ -54,7 +55,8 @@ export class HumanKnowledgePolicyManagementService {
     const authority = await this.authority(access, command.authorityId, db, live);
     if (!authority.operations.includes(command.action) || command.requiredPermissions.some(p => !access.permissions.includes(p) || !authority.allowed.includes(p))) throw unavailable();
     const closing = command.action === 'disable';
-    const basis = await knowledgePolicyResourceBasis(db, authority, closing);
+    const basis = await knowledgePolicyResourceBasis(db, authority, closing, this.clock());
+    if (!closing && authority.row.preparationTarget != null && Date.parse(command.expiresAt) > Date.parse(parse(preparedTargetSpec, authority.row.preparationTarget).expiresAt)) throw unavailable();
     const row = await db.aiKnowledgeActionPolicy.findUnique({ where: policyWhere(authority.key) });
     if (row && (Object.entries(authority.key).some(([key, value]) => row[key as keyof typeof row] !== value)
       || hash(row.resource) !== hash(authority.resource))) throw unavailable();
@@ -95,6 +97,83 @@ export class HumanKnowledgePolicyManagementService {
   }
   private unknown(command: Pick<PolicyChange, 'operationKey'> & { changeHash?: string }, nextAction: 'read_preparation' | 'read_operation', state: 'unknown' | 'not_observed' = 'unknown'): AiKnowledgePolicyManagementUnknownDraft {
     return { state, operationKey: command.operationKey, changeHash: command.changeHash, retryable: false, nextAction, executionPermission: false };
+  }
+
+  async prepareTarget(value: unknown) {
+    const { authorityId } = parse(z.object({ authorityId: z.string().uuid() }).strict(), value), access = await this.access('manage');
+    const authority = await this.authority(access, authorityId, this.db, true), spec = parse(preparedTargetSpec, authority.row.preparationTarget);
+    if (authority.row.domain !== 'knowledge' || authority.row.action !== 'upload' || !authority.operations.includes('prepare_target')
+      || Date.parse(spec.expiresAt) <= this.clock().getTime() || Date.parse(spec.expiresAt) > this.clock().getTime() + authority.row.maxPolicySeconds * 1000) throw unavailable();
+    await knowledgePolicyParticipants(this.db, authority);
+    const key = { ...access.scope, managerId: access.actorId, operationKey: spec.operationKey };
+    if (await this.db.aiKnowledgePolicyPreparationTarget.findFirst({ where: key })) return this.target({ authorityId, operationKey: spec.operationKey });
+    const specHash = targetSpecHash(authority);
+    try {
+      await this.db.$transaction(async tx => {
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_knowledge_policy_management_authorities WHERE id = ${authorityId} FOR UPDATE`);
+        const fresh = await this.authority(access, authorityId, tx, true);
+        if (fresh.authorizationHash !== authority.authorizationHash) throw conflict();
+        await knowledgePolicyParticipants(tx, fresh);
+        if (await tx.aiKnowledgeDocument.findFirst({ where: { id: spec.upload.documentId }, select: { id: true } })
+          || await tx.fileUploadSession.findFirst({ where: { tenantId: access.scope.tenantId, idempotencyKey: preparedUploadResource(spec).upload.idempotencyKey }, select: { id: true } })) throw conflict();
+        await tx.aiKnowledgePolicyPreparationTarget.create({ data: { id: randomUUID(), ...key,
+          targetActorId: authority.row.targetActorId, targetAudience: authority.row.targetAudience, documentId: spec.upload.documentId,
+          specJson: json(spec), specHash, authorityId, authorityRevision: authority.row.revision, authorizationHash: authority.authorizationHash,
+          revision: 1, status: 'prepared', expiresAt: new Date(spec.expiresAt), uploadSessionId: null, attachmentId: null, bindingHash: null, boundAt: null } });
+        await this.sameAccess(access, 'manage');
+      }, options);
+    } catch (error) {
+      if (error instanceof KnowledgePolicyManagementError) throw error;
+      return { state: 'unknown' as const, operationKey: spec.operationKey, specHash, retryable: false as const, nextAction: 'read_target' as const };
+    }
+    return this.target({ authorityId, operationKey: spec.operationKey });
+  }
+
+  async target(value: unknown) {
+    const input = parse(z.object({ authorityId: z.string().uuid(), operationKey: receiptSelection.shape.operationKey, specHash: managementHash.optional() }).strict(), value), access = await this.access('read');
+    const authority = await this.authority(access, input.authorityId, this.db, true), spec = parse(preparedTargetSpec, authority.row.preparationTarget);
+    if (spec.operationKey !== input.operationKey || input.specHash && input.specHash !== targetSpecHash(authority)) throw conflict();
+    const found = await this.db.aiKnowledgePolicyPreparationTarget.findFirst({ where: { ...access.scope, managerId: access.actorId, operationKey: spec.operationKey } });
+    if (!found) { await this.sameAccess(access, 'read'); return { state: 'not_observed' as const, operationKey: spec.operationKey, retryable: false as const }; }
+    const { row } = await readPreparedKnowledgeTarget(this.db, authority, this.clock());
+    await this.sameAccess(access, 'read');
+    return { state: row.status === 'bound' ? 'bound' as const : 'prepared' as const, targetId: row.id, operationKey: row.operationKey,
+      revision: row.revision, specHash: row.specHash, specification: spec, expiresAt: row.expiresAt.toISOString(),
+      attachmentId: row.attachmentId, uploadSessionId: row.uploadSessionId, executionPermission: false as const };
+  }
+
+  async bindTarget(value: unknown) {
+    const input = parse(z.object({ authorityId: z.string().uuid(), operationKey: receiptSelection.shape.operationKey, sessionId: z.string().min(1).max(128), expectedRevision: z.literal(1), confirm: z.literal('bind_knowledge_upload') }).strict(), value);
+    const access = await this.access('manage'), authority = await this.authority(access, input.authorityId, this.db, true);
+    if (authority.row.domain !== 'knowledge' || authority.row.action !== 'upload' || !authority.operations.includes('bind_target')) throw unavailable();
+    await knowledgePolicyParticipants(this.db, authority);
+    const { row } = await readPreparedKnowledgeTarget(this.db, authority, this.clock());
+    if (row.authorityId !== input.authorityId) throw conflict();
+    if (input.operationKey !== row.operationKey) throw conflict();
+    if (row.status === 'bound') {
+      if (row.uploadSessionId !== input.sessionId) throw conflict();
+      return this.target({ authorityId: input.authorityId, operationKey: row.operationKey });
+    }
+    const binding = await preparedKnowledgeUploadBinding(this.db, row, input.sessionId);
+    try {
+      await this.db.$transaction(async tx => {
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_knowledge_policy_management_authorities WHERE id = ${input.authorityId} FOR UPDATE`);
+        const fresh = await this.authority(access, input.authorityId, tx, true);
+        if (fresh.authorizationHash !== authority.authorizationHash) throw conflict();
+        await knowledgePolicyParticipants(tx, fresh);
+        const current = await readPreparedKnowledgeTarget(tx, fresh, this.clock());
+        if (current.row.revision !== input.expectedRevision || hash(await preparedKnowledgeUploadBinding(tx, current.row, input.sessionId)) !== hash(binding)) throw conflict();
+        const changed = await tx.aiKnowledgePolicyPreparationTarget.updateMany({ where: { id: row.id, ...access.scope, revision: 1, status: 'prepared', specHash: row.specHash },
+          data: { status: 'bound', revision: 2, uploadSessionId: binding.sessionId, attachmentId: binding.attachmentId, bindingHash: binding.bindingHash, boundAt: this.clock() } });
+        if (changed.count !== 1) throw conflict();
+        await readPreparedKnowledgeTarget(tx, fresh, this.clock(), true);
+        await this.sameAccess(access, 'manage');
+      }, options);
+    } catch (error) {
+      if (error instanceof KnowledgePolicyManagementError) throw error;
+      return { state: 'unknown' as const, operationKey: row.operationKey, specHash: row.specHash, retryable: false as const, nextAction: 'read_target' as const };
+    }
+    return this.target({ authorityId: input.authorityId, operationKey: row.operationKey });
   }
 
   async read(value: unknown) {
@@ -217,7 +296,7 @@ export class HumanKnowledgePolicyManagementService {
           policyKeyHash: row.policyKeyHash, resultRevision: outcome.revision, resultJson: json(outcome), resultHash: hash(outcome), changeHash: row.changeHash,
           authorityRevision: row.authorityRevision, authorizationHash: row.authorizationHash } });
         if ((await this.authority(access, row.authorityId, tx, true)).authorizationHash !== row.authorizationHash) throw unavailable();
-        if (hash(await knowledgePolicyResourceBasis(tx, fresh.authority, command.action === 'disable')) !== fresh.basisHash) throw conflict();
+        if (hash(await knowledgePolicyResourceBasis(tx, fresh.authority, command.action === 'disable', this.clock())) !== fresh.basisHash) throw conflict();
         await this.sameAccess(access, 'manage');
         return this.receipt(receipt, row);
       }, options);
