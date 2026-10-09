@@ -493,12 +493,22 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     if (table === 'aiTask') Object.assign(args.data, { scope: clone(scopes[2]), archivedAt: null });
   };
   let materialRows = [], taskInputs = [], taskPolicies = [], lostReply = false, materialWrites = 0;
+  let bookingRows = { ai_client_booking_drafts: [], ai_client_booking_draft_operations: [], ai_client_booking_handoffs: [] };
+  let loseBookingReply = false;
   let lostInputReply = false, lostTaskReply = false, revokeAfterClaim = false, commercialAvailable = true;
-  const materialDb = (transactionRows, transactionInputs) => {
+  const materialDb = (transactionRows, transactionInputs, transactionBookings) => {
     const rows = () => transactionRows ?? materialRows, inputs = () => transactionInputs ?? taskInputs;
+    const bookings = () => transactionBookings ?? bookingRows;
     return { ...client.prisma,
       tenant: { ...client.prisma.tenant, findUnique: async () => ({ subscription: { startAt: new Date('2026-01-01'), endAt: new Date('2027-01-01') }, subscriptionSegments: [] }) },
       $queryRaw: async query => {
+        const bookingTable = query.sql.match(/FROM (ai_client_booking_\w+)\b/u)?.[1];
+        if (bookingTable) {
+          const [tenantId, workspaceId, channel, principalHash, reference] = query.values;
+          const field = query.sql.includes('AND operationKey =') ? 'operationKey' : query.sql.includes('AND materialRef =') ? 'materialRef' : 'id';
+          return structuredClone(bookings()[bookingTable].filter(row => row.tenantId === tenantId && row.workspaceId === workspaceId
+            && row.channel === channel && row.principalHash === principalHash && row[field] === reference));
+        }
         if (query.sql.includes('FROM ai_client_task_policies')) {
           const [tenantId, workspaceId, channel, customerType, sceneCode, sceneVersion] = query.values;
           return structuredClone(taskPolicies.filter(row => row.tenantId === tenantId && row.workspaceId === workspaceId
@@ -512,6 +522,28 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
           && row.channel === channel && row.principalHash === principalHash && row[field] === reference));
       },
       $executeRaw: async query => {
+        const bookingTable = query.sql.match(/(?:INSERT INTO|UPDATE) (ai_client_booking_\w+)\b/u)?.[1];
+        if (bookingTable) {
+          const table = bookings()[bookingTable];
+          if (query.sql.startsWith('INSERT')) {
+            const columns = query.sql.match(/\(([^)]+)\)\s+VALUES/u)[1].split(',').map(value => value.trim());
+            const row = Object.fromEntries(columns.map((key, index) => [key, structuredClone(query.values[index])]));
+            const scopeMatch = other => ['tenantId', 'workspaceId', 'channel', 'principalKind', 'principalHash'].every(key => other[key] === row[key]);
+            const key = bookingTable === 'ai_client_booking_drafts' ? 'materialRef' : bookingTable === 'ai_client_booking_handoffs' ? 'draftId' : 'operationKey';
+            assert.equal(table.some(other => other.id === row.id || (scopeMatch(other) && other[key] === row[key])), false);
+            assert.ok((bookingTable === 'ai_client_booking_drafts' ? rows() : bookings().ai_client_booking_drafts)
+              .some(other => scopeMatch(other) && other.id === (row.materialRef ?? row.draftId)));
+            table.push(row); return 1;
+          }
+          const columns = query.sql.match(/SET ([\s\S]+?)\s+WHERE/u)[1].split(',').map(value => value.trim().split(' ')[0]);
+          const conditions = [...query.sql.split('WHERE')[1].matchAll(/(\w+)\s*(=|>)\s*\?/gu)];
+          const targets = table.filter(row => conditions.every(([_, field, operator], index) => {
+            const value = query.values[columns.length + index];
+            return operator === '=' ? row[field] === value : row[field] > value;
+          }));
+          for (const row of targets) columns.forEach((key, index) => { row[key] = structuredClone(query.values[index]); });
+          return targets.length;
+        }
         const taskInput = query.sql.startsWith('INSERT INTO ai_client_task_inputs');
         assert.ok(taskInput || query.sql.startsWith('INSERT INTO ai_client_scene_materials'));
         const columns = query.sql.match(/\(([^)]+)\)\s+VALUES/u)[1].split(',').map(value => value.trim());
@@ -534,19 +566,26 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   db.aiTask = taskProjection(taskStore.db);
   const scopeUpsert = async ({ where }) => clone(scopes.find(scope => scope.scopeKey === where.scopeKey));
   db.aiScope = { ...db.aiScope, upsert: scopeUpsert };
-  db.$transaction = async work => {
+  let transactionTail = Promise.resolve();
+  db.$transaction = work => {
     if (activeTransaction.getStore()) return work(activeTransaction.getStore());
-    const rows = structuredClone(materialRows), inputs = structuredClone(taskInputs);
-    const priorInputs = inputs.length, priorTasks = taskStore.state.aiTask.length;
-    const result = await taskStore.db.$transaction(tx => {
-      const current = { ...tx, ...materialDb(rows, inputs), aiTask: taskProjection(tx), aiScope: { ...tx.aiScope, upsert: scopeUpsert } };
-      return activeTransaction.run(current, () => work(current));
+    const pending = transactionTail.then(async () => {
+      const rows = structuredClone(materialRows), inputs = structuredClone(taskInputs), bookings = structuredClone(bookingRows);
+      const priorInputs = inputs.length, priorTasks = taskStore.state.aiTask.length;
+      const priorOperations = bookings.ai_client_booking_draft_operations.length;
+      const result = await taskStore.db.$transaction(tx => {
+        const current = { ...tx, ...materialDb(rows, inputs, bookings), aiTask: taskProjection(tx), aiScope: { ...tx.aiScope, upsert: scopeUpsert } };
+        return activeTransaction.run(current, () => work(current));
+      });
+      materialRows = rows; taskInputs = inputs; bookingRows = bookings;
+      if (revokeAfterClaim && inputs.length > priorInputs) taskPolicies[0].allowCreate = false;
+      if ((lostInputReply && inputs.length > priorInputs) || (lostTaskReply && taskStore.state.aiTask.length > priorTasks)) throw Error('synthetic client task COMMIT response lost');
+      if (loseBookingReply && bookings.ai_client_booking_draft_operations.length > priorOperations) throw Error('synthetic booking COMMIT response lost');
+      if (lostReply) throw Error('synthetic material COMMIT response lost');
+      return result;
     });
-    materialRows = rows; taskInputs = inputs;
-    if (revokeAfterClaim && inputs.length > priorInputs) taskPolicies[0].allowCreate = false;
-    if ((lostInputReply && inputs.length > priorInputs) || (lostTaskReply && taskStore.state.aiTask.length > priorTasks)) throw Error('synthetic client task COMMIT response lost');
-    if (lostReply) throw Error('synthetic material COMMIT response lost');
-    return result;
+    transactionTail = pending.catch(() => {});
+    return pending;
   };
   const dependencies = { guard, client, db, clock: () => now };
   const configuration = { enabled: true, tenantCode: 'tenant', serviceCode: 'camera', channel: 'app' };
@@ -659,7 +698,136 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.equal(taskStore.state.aiTask[0].inputHash, taskInputs[0].inputHash);
   assert.equal(taskStore.state.aiRun[0].fencingToken.toFixed(0), '0'); assert.equal(taskInputs[0].dispatchState, 'UNKNOWN');
   const countCreates = () => taskStore.trace.filter(value => value === 'aiTask.create').length;
+  const { AI_ENTRY_ACTION_CONTRACT_VERSION } = require('../packages/shared/src/ai-entry-action-draft');
+  const entryConfig = { ...configuration, channel: 'web', entry: { enabled: true, releaseRevision: 'entry-1' } };
+  client.prisma.websiteChannelProfile = { findUnique: async () => null };
+  taskPolicies.push({ ...taskPolicies[0], channel: 'web', id: '70156b36-e02f-4aba-9f41-54d850bc1bdb' });
+  const entry = composeRequestBoundClientApplication(taskDependencies, entryConfig);
+  const entryMaterial = await entry.prepare(request, { operationKey: 'entry-order', command: { kind: 'order', orderId: 'own-order' } });
+  const issued = await entry.issueAction(request, { actionCode: 'OPEN_ORDER', materialRef: entryMaterial.materialRef });
+  assert.equal(issued.contractVersion, AI_ENTRY_ACTION_CONTRACT_VERSION);
+  assert.equal(issued.surface, 'tenant_website'); assert.equal(issued.audience, 'customer');
+  assert.equal(issued.resource.resourceVersion, entryMaterial.materialHash);
+  const entryRestart = composeRequestBoundClientApplication(taskDependencies, entryConfig);
+  assert.deepEqual(await entryRestart.readAction(request, issued), issued);
+  const beforeActionReplay = materialWrites;
+  assert.equal((await entryRestart.consumeOrderAction(request, issued)).orderId, 'own-order');
+  assert.equal((await entryRestart.consumeOrderAction(request, issued)).execution, 'navigation_not_business_submission');
+  assert.equal(materialWrites, beforeActionReplay); assert.equal(countCreates(), 1);
+  for (const altered of [{ ...issued, url: 'javascript:alert(1)' }, { ...issued, contractVersion: 'unknown' },
+    { ...issued, actionCode: 'OPEN_PAYMENT' }, { ...issued, surface: 'client_miniprogram' },
+    { ...issued, resource: { ...issued.resource, id: 'other-order' } }]) await assert.rejects(entryRestart.readAction(request, altered));
+  await assert.rejects(requests.readAction(request, issued), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  taskStore.state.aiBudgetPolicy[0].enabled = false;
+  await assert.rejects(entry.readAction(request, issued), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  taskStore.state.aiBudgetPolicy[0].enabled = true;
+  taskPolicies[1].revision++;
+  await assert.rejects(entry.readAction(request, issued), e => ['AI_ACCESS_DENIED', 'AI_PROPOSAL_STALE'].includes(e.code));
+  taskPolicies[1].revision--;
+  revokeDuringRead = true; await assert.rejects(entry.readAction(request, issued));
+  revoked = false; revokeDuringRead = false;
   const taskRestart = composeRequestBoundClientApplication(taskDependencies, configuration), beforeDuplicate = countCreates();
+  let bookingAvailable = true, stockObservation = 5, corporateAllowed = true;
+  const bookingSelection = { quoteId: 'quote-client', timeZone: 'Asia/Shanghai',
+    startAt: new Date(now.getTime() + 86400000).toISOString(), endAt: new Date(now.getTime() + 172800000).toISOString(),
+    fulfillmentMode: 'store_pickup_return', fulfillmentLocationId: 'location-client',
+    bookingIdentity: { bookingIdentity: 'personal', enterpriseContractAndPayer: false }, lines: [{ itemGroupId: 'item-client', quantity: 1 }] };
+  let bookingQuote = { id: 'quote-client', tenantId: 'tenant-client', categoryCode: 'camera',
+    request: { ...bookingSelection, customerType: 'personal', customerId: 'person-client' },
+    membershipSnapshot: { bookingIdentity: 'personal', personalCustomerId: 'person-client', enterpriseContractAndPayer: false },
+    pricingContext: { timeZone: 'Asia/Shanghai' }, pricingPlanVersion: 'prices-1', ruleVersion: 'rules-1', currency: 'CNY',
+    payableAmount: 12, depositAmount: 0, preAuthAmount: 0, chargeLines: [{ type: 'rental', amount: 12 }],
+    createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + 600000).toISOString() };
+  client.auth = auth;
+  auth.listPublicWorkspaces = async () => ({ workspaces: [{ ...workspace }] });
+  client.memberships = { listBookingOptions: async () => corporateAllowed ? [{ corporateCustomerId: 'corporate-client',
+    corporateCustomerName: 'Synthetic Corp', corporateMembershipId: 'relation-client' }] : [] };
+  client.buildCatalog = async (_tenant, tenantCode, summary) => ({ tenantCode, workspace: summary, categoryCode: 'camera',
+    timeZone: 'Asia/Shanghai', items: [{ id: 'item-client', code: 'item', name: 'Synthetic Item' }], pricingGroups: [], services: [],
+    locations: [{ id: 'location-client', code: 'loc', name: 'Synthetic Location', status: 'enabled', capabilities: ['pickup', 'return'] }],
+    fulfillment: { enabledModes: ['store_pickup_return'], allowDifferentReturnLocation: false, deliveryDestination: 'customer_address' } });
+  client.business.getQuote = (_tenant, _context, id) => ({ ...structuredClone(bookingQuote), id,
+    request: { ...structuredClone(bookingQuote.request), customerId: id === 'foreign-quote' ? 'someone-else' : 'person-client' } });
+  client.core.availability = async (_tenant, command) => ({ ...command, available: bookingAvailable,
+    lines: command.lines.map(line => ({ itemGroupId: line.itemGroupId, requestedQuantity: line.quantity,
+      available: bookingAvailable, availableQuantity: stockObservation, reasons: [] })) });
+  const bookingApp = composeRequestBoundClientApplication(taskDependencies, entryConfig);
+  const makeBookingAction = async key => {
+    const material = await bookingApp.prepare(request, { operationKey: key, command: { kind: 'booking_quote', selection: bookingSelection } });
+    return bookingApp.issueAction(request, { actionCode: 'CREATE_BOOKING_DRAFT', materialRef: material.materialRef });
+  };
+  for (const selection of [{ ...bookingSelection, startAt: '明天下午' }, { ...bookingSelection, source: 'model_candidate' },
+    { ...bookingSelection, timeZone: 'UTC' }, { ...bookingSelection, quoteId: 'foreign-quote' }]) {
+    await assert.rejects(bookingApp.prepare(request, { operationKey: 'invalid-booking', command: { kind: 'booking_quote', selection } }));
+  }
+  const draftAction = await makeBookingAction('booking-material-1');
+  const createDraft = { operationKey: 'create-draft-1', action: draftAction };
+  const draftCreated = await bookingApp.createBookingDraft(request, createDraft);
+  assert.equal(draftCreated.draft.state, 'draft_created'); assert.equal(draftCreated.draft.action, null);
+  assert.equal(draftCreated.draft.material.quote.depositAmount, 0);
+  assert.equal(draftCreated.draft.material.sources.returnLocationId, 'core_normalized');
+  assert.equal(draftCreated.draft.material.availability, 'available_at_observation_not_reserved');
+  assert.equal((await bookingApp.createBookingDraft(request, createDraft)).draft.bookingDraftId, draftCreated.draft.bookingDraftId);
+  await assert.rejects(bookingApp.createBookingDraft(request, { ...createDraft, operationKey: 'different-key-same-action' }), e => e.code === 'AI_REVISION_CONFLICT');
+  const selectDraft = { bookingDraftId: draftCreated.draft.bookingDraftId, expectedRevision: 1,
+    inputFingerprint: draftCreated.draft.inputFingerprint, operationKey: 'select-draft-1', decision: 'continue_booking' };
+  await assert.rejects(bookingApp.chooseBookingDraft(request, { ...selectDraft, expectedRevision: 2 }), e => e.code === 'AI_REVISION_CONFLICT');
+  const selected = await bookingApp.chooseBookingDraft(request, selectDraft);
+  assert.equal(selected.draft.state, 'user_selected'); assert.equal(selected.draft.selectionRevision, 1);
+  assert.equal(selected.draft.action.actionCode, 'OPEN_BOOKING');
+  assert.equal((await bookingApp.chooseBookingDraft(request, selectDraft)).replayed, true);
+  const handoffCommand = { operationKey: 'handoff-draft-1', action: selected.draft.action };
+  const handed = await bookingApp.handoffBookingDraft(request, handoffCommand);
+  assert.equal(handed.handoff.fields.quoteId, bookingSelection.quoteId);
+  assert.equal(handed.handoff.submission, 'original_booking_page_required');
+  assert.equal(handed.handoff.inventory, 'not_reserved');
+  assert.equal((await bookingApp.readBookingDraft(request, { bookingDraftId: draftCreated.draft.bookingDraftId })).state, 'handed_to_booking_page');
+  assert.equal((await bookingApp.handoffBookingDraft(request, handoffCommand)).handoff.handoffRef, handed.handoff.handoffRef);
+  assert.equal((await bookingApp.readBookingHandoff(request, { handoffRef: handed.handoff.handoffRef })).actionCode, 'OPEN_BOOKING');
+  assert.equal(bookingRows.ai_client_booking_drafts.length, 1); assert.equal(bookingRows.ai_client_booking_handoffs.length, 1);
+  assert.equal(bookingRows.ai_client_booking_draft_operations.length, 3);
+  assert.equal(bookingApp.submitBookingDraft, undefined);
+  await assert.rejects(bookingApp.readBookingHandoff(request, { handoffRef: handed.handoff.handoffRef, submitted: true }));
+  await assert.rejects(bookingApp.readAction(request, { ...selected.draft.action, surface: 'client_miniprogram' }));
+  stockObservation++;
+  await assert.rejects(bookingApp.readBookingHandoff(request, { handoffRef: handed.handoff.handoffRef }));
+  assert.equal(bookingRows.ai_client_booking_drafts[0].state, 'stale'); stockObservation--;
+  await assert.rejects(bookingApp.readBookingDraft(request, { bookingDraftId: draftCreated.draft.bookingDraftId }), e => e.code === 'AI_PROPOSAL_STALE');
+  const lostDraftAction = await makeBookingAction('booking-material-lost');
+  loseBookingReply = true;
+  await assert.rejects(bookingApp.createBookingDraft(request, { action: lostDraftAction, operationKey: 'create-draft-lost' }), e => e.code === 'AI_RESULT_UNKNOWN');
+  loseBookingReply = false;
+  const afterLostBooking = bookingRows.ai_client_booking_drafts.length;
+  const recoveredBooking = await bookingApp.readBookingOperation(request, { operationKey: 'create-draft-lost' });
+  assert.equal(recoveredBooking.state, 'observed'); assert.equal(recoveredBooking.businessSubmission, 'not_attested');
+  assert.equal(bookingRows.ai_client_booking_drafts.length, afterLostBooking);
+  const recoveredDraft = await bookingApp.readBookingDraft(request, { bookingDraftId: recoveredBooking.bookingDraftId });
+  await bookingApp.chooseBookingDraft(request, { bookingDraftId: recoveredDraft.bookingDraftId, expectedRevision: recoveredDraft.revision,
+    inputFingerprint: recoveredDraft.inputFingerprint, operationKey: 'abandon-lost-draft', decision: 'abandon' });
+  await assert.rejects(bookingApp.readBookingDraft(request, { bookingDraftId: recoveredDraft.bookingDraftId }), e => e.code === 'AI_PROPOSAL_STALE');
+  const rejectedAction = await makeBookingAction('rejected-before-draft');
+  bookingAvailable = false;
+  await assert.rejects(bookingApp.readAction(request, rejectedAction));
+  bookingAvailable = true;
+  await assert.rejects(bookingApp.createBookingDraft(request, { action: rejectedAction, operationKey: 'revive-rejected-action' }), e => e.code === 'AI_PROPOSAL_STALE');
+  const repeatedAction = await makeBookingAction('concurrent-booking');
+  const repeatedDrafts = await Promise.all([1, 2].map(() => bookingApp.createBookingDraft(request, { action: repeatedAction, operationKey: 'concurrent-draft' })));
+  assert.equal(repeatedDrafts[0].draft.bookingDraftId, repeatedDrafts[1].draft.bookingDraftId);
+  assert.deepEqual(repeatedDrafts.map(value => value.replayed).sort(), [false, true]);
+  bookingSelection.bookingIdentity = { bookingIdentity: 'enterprise_employee', corporateCustomerId: 'corporate-client', enterpriseContractAndPayer: true };
+  bookingQuote = { ...bookingQuote, request: { ...bookingQuote.request, bookingIdentity: structuredClone(bookingSelection.bookingIdentity) },
+    membershipSnapshot: { ...bookingSelection.bookingIdentity, personalCustomerId: 'person-client', corporateMembershipId: 'relation-client' } };
+  const corporateAction = await makeBookingAction('corporate-booking');
+  const corporateDraft = await bookingApp.createBookingDraft(request, { action: corporateAction, operationKey: 'create-corporate-draft' });
+  corporateAllowed = false;
+  await assert.rejects(bookingApp.readBookingDraft(request, { bookingDraftId: corporateDraft.draft.bookingDraftId }), e => e.code === 'AI_ACCESS_DENIED');
+  corporateAllowed = true;
+  assert.equal(bookingRows.ai_client_booking_drafts.find(row => row.id === corporateDraft.draft.bookingDraftId).state, 'stale');
+  const persistedBooking = JSON.stringify(bookingRows);
+  assert.equal(persistedBooking.includes(authorization), false); assert.equal(persistedBooking.includes('session-client'), false);
+  assert.equal(persistedBooking.includes('submitted'), false);
+  assert.equal(countCreates(), 1);
+
   taskPolicies[0].allowCreate = 0; taskStore.state.aiBudgetPolicy[0].enabled = false;
   assert.equal((await taskRestart.createTask(request, taskCommand)).task.taskId, created.task.taskId);
   assert.equal((await taskRestart.readTaskCreation(request, taskCommand)).task.runId, created.task.runId);
@@ -708,11 +876,15 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   await assert.rejects(requests.readSource(switchedRequest, { materialRef: own.materialRef }), /AI_CLIENT_MATERIAL_STALE/);
   await assert.rejects(taskRestart.readTaskCreation(switchedRequest, taskCommand), /AI_CLIENT_MATERIAL_STALE/);
   await assert.rejects(taskRestart.readTaskScene(switchedRequest, taskCommand), /AI_CLIENT_MATERIAL_STALE/);
+  await assert.rejects(bookingApp.readBookingDraft(switchedRequest, { bookingDraftId: repeatedDrafts[0].draft.bookingDraftId }), e => e.code === 'AI_ACCESS_DENIED');
+  await assert.rejects(bookingApp.readBookingHandoff(switchedRequest, { handoffRef: handed.handoff.handoffRef }), e => e.code === 'AI_ACCESS_DENIED');
   assert.equal(countCreates(), afterTaskLost);
   session.id = 'session-client';
   published = false;
   await assert.rejects(requests.readSource(request, { materialRef: own.materialRef }), /AI_CLIENT_CONTEXT_UNAVAILABLE/);
   published = true; const retainedRows = materialRows.length; now = new Date(now.getTime() + 300001);
+  await assert.rejects(bookingApp.readBookingDraft(request, { bookingDraftId: repeatedDrafts[0].draft.bookingDraftId }), e => e.code === 'AI_PROPOSAL_STALE');
+  assert.equal(bookingRows.ai_client_booking_drafts.find(row => row.id === repeatedDrafts[0].draft.bookingDraftId).state, 'expired');
   await assert.rejects(requests.readSource(request, { materialRef: own.materialRef }), /AI_CLIENT_MATERIAL_STALE/);
   assert.equal(materialRows.length, retainedRows);
   await assert.rejects(requests.readSource(request, { materialRef: own.materialRef, taskId: 'foreign-history' }), /AI_CLIENT_INVALID_INPUT/);
