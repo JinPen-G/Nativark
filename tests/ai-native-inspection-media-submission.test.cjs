@@ -137,6 +137,28 @@ test('actual file runtime and evidence adapter produce bounded immutable recogni
   await assert.rejects(bound.media.resolve(context,{kind:'image',...ref},new AbortController().signal));
   assert.equal(f.calls.length,2);
 });
+test('original inspection frozen media creates a real model runner host without changing inspection fields',async()=>{
+  const f=mediaFixture();f.state.user.id='user-a';f.state.assets.get('file-a').uploadedBy='user-a';
+  const ref=await f.services.evidence.bind({...target,attachmentId:'file-a'});
+  const d=await draft(f,[ref]);
+  const frozen=await f.services.recognition.prepare({...target,draftId:d.result.draftId,expectedRevision:1,operationId:'original-vision',question:'List candidate readings only.'},new AbortController().signal);
+  const detail=await f.services.drafts.read({...target,draftId:d.result.draftId});
+  const {modelHostHarness}=require('./fixtures/ai-native/task-model-host.cjs');
+  const h=await modelHostHarness('image');
+  const {composeInspectionRecognitionTaskHost}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-assist.composition');
+  const {task:originalTask,...dependencies}=h.config;
+  const {material:ignored,...task}=originalTask;
+  const root=await composeInspectionRecognitionTaskHost(f.services.recognition,{...target,draftId:d.result.draftId,inputId:frozen.inputId,expectedRevision:detail.revision},{...dependencies,task});
+  const result=await root.application.start(h.query);
+  assert.equal(result.outcome.status,'succeeded');assert.equal(h.modelControl.sent.length,1);
+  assert.equal(h.state.aiTaskActionInput[0].payload.media[0].contentHash,detail.state.recognitionInputs[0].media[0].contentHash);
+  assert.equal(h.modelControl.sent[0].messages[0].content[1].data,png.toString('base64'));
+  assert.equal(h.state.aiGatewayAccountingReceipt.length,1);assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls,1n);
+  assert.deepEqual((await f.services.drafts.read({...target,draftId:d.result.draftId})).state,detail.state);
+  f.state.active=false;
+  await assert.rejects(composeInspectionRecognitionTaskHost(f.services.recognition,{...target,draftId:d.result.draftId,inputId:frozen.inputId,expectedRevision:detail.revision},{...dependencies,task}));
+});
+
 test('candidate accept, reject and late append preserve human values and original candidate history',async()=>{
   const f=mediaFixture(),ref=await f.services.evidence.bind({...target,attachmentId:'file-a'});
   await f.services.evidence.readMedia({...target,...ref},new AbortController().signal);

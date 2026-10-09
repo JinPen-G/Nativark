@@ -14,6 +14,25 @@ import { InspectionTemplateService } from './inspection-template.service';
 import { InspectionManualPreparationService } from './inspection-manual-preparation.service';
 import { InspectionCandidateService, type InspectionEvidenceAuthority } from './inspection-candidate.service';
 import { InspectionAssistError } from './inspection-assist.validation';
+import { composeTaskModelHost, type TaskModelHostDependencies } from '../runner/model-task-host.composition';
+
+/** Server composition only: material comes from the original authorized frozen
+ * inspection input, never a request-provided prompt/hash or an SDK result. */
+export async function composeInspectionRecognitionTaskHost(recognition: Pick<InspectionRecognitionService, 'gatewayMedia'>,
+  reference: unknown, dependencies: Omit<TaskModelHostDependencies, 'kind' | 'task'> & {
+    task: Omit<TaskModelHostDependencies['task'], 'material'>;
+  }) {
+  if (typeof recognition?.gatewayMedia !== 'function') throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+  const bound = await recognition.gatewayMedia(structuredClone(reference));
+  const text = JSON.stringify({ purpose: 'inspection_candidates_only_not_business_facts',
+    draftId: bound.draftId, draftRevision: bound.draftRevision, inputFingerprint: bound.input.inputFingerprint,
+    question: bound.input.question, template: bound.input.template });
+  return composeTaskModelHost({ ...dependencies, kind: 'image',
+    runtime: { ...dependencies.runtime, ports: { ...dependencies.runtime.ports, media: bound.media } },
+    task: { ...dependencies.task, material: { maxOutputTokens: dependencies.gatewayScene.maxOutputTokens,
+      messages: [{ role: 'user', content: [{ kind: 'text', text }, ...bound.input.media.map(ref => ({ kind: 'image' as const,
+        attachmentId: ref.attachmentId, attachmentRevision: ref.attachmentRevision }))] }] } } });
+}
 
 type Dependencies = ConstructorParameters<typeof InspectionTemplateService>[0] & {
   evidence?: InspectionEvidenceAuthority;
@@ -45,7 +64,12 @@ export class StaffInspectionRequestFactory {
         return { authorization, requestId, audience: 'staff' as const };
       },
     } });
-    return { ...services, close() { authorization = undefined; } };
+    return { ...services,
+      recognitionTaskHost: (reference: unknown, dependencies: Parameters<typeof composeInspectionRecognitionTaskHost>[2]) => {
+        if (!services.recognition || authorization === undefined) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+        return composeInspectionRecognitionTaskHost(services.recognition, reference, dependencies);
+      },
+      close() { authorization = undefined; } };
   }
 }
 
