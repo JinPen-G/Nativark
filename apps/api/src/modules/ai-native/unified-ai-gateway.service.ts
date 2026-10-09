@@ -50,18 +50,26 @@ export class UnifiedAiGatewayService {
   }
 
   async invokeIntent(context: GatewayContext, intent: AiGatewayIntentDraft, signal?: AbortSignal) {
+    context = structuredClone(context); intent = structuredClone(intent);
     if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
     const binding = this.intentBinding;
     if (!binding) throw new ModelGatewayError('CONFIG_INVALID');
-    const prepared = await prepareGatewayIntent(intent, { sceneCode: binding.sceneCode, maxOutputTokens: binding.maxOutputTokens }, 'invoke', context, this.ports.media, signal);
+    const life = this.deadline(signal);
+    let prepared;
+    try { prepared = await life.wait(() => prepareGatewayIntent(intent, { sceneCode: binding.sceneCode, maxOutputTokens: binding.maxOutputTokens }, 'invoke', context, this.ports.media, life.controller.signal)); }
+    finally { life.close(); }
     return this.invokeRequest(context, prepared.request, signal, { ...binding, intentHash: prepared.intentHash });
   }
 
   async *streamIntent(context: GatewayContext, intent: AiGatewayIntentDraft, signal?: AbortSignal) {
+    context = structuredClone(context); intent = structuredClone(intent);
     if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
     const binding = this.intentBinding;
     if (!binding) throw new ModelGatewayError('CONFIG_INVALID');
-    const prepared = await prepareGatewayIntent(intent, { sceneCode: binding.sceneCode, maxOutputTokens: binding.maxOutputTokens }, 'stream', context, this.ports.media, signal);
+    const life = this.deadline(signal);
+    let prepared;
+    try { prepared = await life.wait(() => prepareGatewayIntent(intent, { sceneCode: binding.sceneCode, maxOutputTokens: binding.maxOutputTokens }, 'stream', context, this.ports.media, life.controller.signal)); }
+    finally { life.close(); }
     yield* this.streamRequest(context, prepared.request, signal, { ...binding, intentHash: prepared.intentHash });
   }
 

@@ -63,6 +63,7 @@ export async function prepareGatewayIntent(
   media?: GatewayMediaAttachmentResolver,
   signal: AbortSignal = new AbortController().signal
 ): Promise<PreparedGatewayIntent> {
+  context = structuredClone(context);
   const parsed = intentSchema.safeParse(value), policy = gatewayTextIntentPolicySchema.safeParse(serverPolicy);
   if (!policy.success || (mode !== 'invoke' && mode !== 'stream')) throw new ModelGatewayError('CONFIG_INVALID');
   if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
@@ -73,6 +74,9 @@ export async function prepareGatewayIntent(
   const supported: AiGatewayFeatureDraft[] = mode === 'stream' ? ['text', 'streaming', 'image'] : ['text', 'image'];
   if (input.requiredFeatures.some(item => !supported.includes(item))) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
   if (input.requiredFeatures.includes('audio')) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  if (input.messages.reduce((count, message) => count + message.content.filter(part => part.kind !== 'text').length, 0) > 8) {
+    throw new ModelGatewayError('INVALID_REQUEST');
+  }
   let hasMedia = false;
   const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: ModelProtocolContent[] }> = [];
   for (const message of input.messages) {
@@ -86,6 +90,7 @@ export async function prepareGatewayIntent(
       let resolved: Awaited<ReturnType<GatewayMediaAttachmentResolver['resolve']>>;
       try { resolved = await media.resolve(structuredClone(context), structuredClone(part), signal); }
       catch (error) { if (error instanceof ModelGatewayError) throw error; throw new ModelGatewayError('CAPABILITY_UNSUPPORTED'); }
+      if (signal.aborted) throw new ModelGatewayError('CANCELLED');
       if (!resolved || resolved.attachmentId !== part.attachmentId || resolved.attachmentRevision !== part.attachmentRevision
         || !supportedMediaType(part.kind, resolved.mediaType) || !(resolved.bytes instanceof Uint8Array)
         || resolved.bytes.byteLength < 1 || resolved.bytes.byteLength > 524288 || !/^[a-f0-9]{64}$/u.test(resolved.contentHash)) {
@@ -103,6 +108,7 @@ export async function prepareGatewayIntent(
   const request = modelProtocolRequestBaseSchema.omit({ model: true }).safeParse({ callId: input.requestId, messages,
     maxOutputTokens: input.maxOutputTokens, ...(features.length ? { features } : {}) });
   if (!request.success) throw new ModelGatewayError('INVALID_REQUEST');
+  if (!modelProtocolRequestSchema.safeParse({ ...request.data, model: 'validation-only' }).success) throw new ModelGatewayError('INVALID_REQUEST');
   return { sceneCode: input.sceneCode, intentHash: requestFingerprint({ intent: input, mode }), request: request.data,
     requiredCapabilities: [...(hasMedia ? ['text' as const, 'image' as const] : ['text' as const]), ...(mode === 'stream' ? ['streaming' as const] : [])],
     omittedOptionalFeatures: input.optionalFeatures.filter(item => !supported.includes(item)) };

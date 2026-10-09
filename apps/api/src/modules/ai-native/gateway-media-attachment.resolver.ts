@@ -43,10 +43,12 @@ export class AuthorizedGatewayMediaAttachmentResolver implements GatewayMediaAtt
   }
 
   async resolve(context: GatewayContext, reference: GatewayMediaAttachmentReference, signal: AbortSignal) {
+    context = structuredClone(context); reference = structuredClone(reference);
     if (signal.aborted) throw new ModelGatewayError('CANCELLED');
     let grant: GatewayAuthorizedMediaAttachment | null;
     try { grant = await this.authority.authorize(structuredClone(context), structuredClone(reference), signal); }
     catch (error) { if (error instanceof ModelGatewayError) throw error; throw new ModelGatewayError('CAPABILITY_UNSUPPORTED'); }
+    grant = grant && structuredClone(grant);
     if (!grant || grant.attachmentId !== reference.attachmentId || grant.attachmentRevision !== reference.attachmentRevision
       || !Number.isSafeInteger(grant.sizeBytes) || grant.sizeBytes < 1 || grant.sizeBytes > this.maxBytes
       || !/^[a-f0-9]{64}$/u.test(grant.contentHash)) return null;
@@ -57,6 +59,13 @@ export class AuthorizedGatewayMediaAttachmentResolver implements GatewayMediaAtt
     if (signal.aborted) throw new ModelGatewayError('CANCELLED');
     if (!(bytes instanceof Uint8Array) || bytes.byteLength !== grant.sizeBytes
       || createHash('sha256').update(bytes).digest('hex') !== grant.contentHash) return null;
+    bytes = new Uint8Array(bytes);
+    // Storage may wait while ownership, revision or ACL is revoked. Recheck
+    // the same server binding, never release bytes on the initial grant alone.
+    const current = await this.authority.authorize(structuredClone(context), structuredClone(reference), signal);
+    if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+    if (!current || current.attachmentId !== grant.attachmentId || current.attachmentRevision !== grant.attachmentRevision
+      || current.mediaType !== grant.mediaType || current.sizeBytes !== grant.sizeBytes || current.contentHash !== grant.contentHash) return null;
     return { attachmentId: grant.attachmentId, attachmentRevision: grant.attachmentRevision,
       mediaType: grant.mediaType, bytes: new Uint8Array(bytes), contentHash: grant.contentHash };
   }
