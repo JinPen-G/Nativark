@@ -51,3 +51,4 @@ export * from "./ai-entry-action-draft";
 export * from "./ai-booking-draft";
 export * from "./ai-knowledge-policy-management-draft";
 export { AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS } from "./ai-entry-management-draft-schemas";
+export * from "./ai-entry-http-draft";
