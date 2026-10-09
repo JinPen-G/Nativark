@@ -19,6 +19,14 @@ import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 
 export type RentalBusinessFactTx = Prisma.TransactionClient;
+/** Server-derived opaque hashes, never authorization or a client DTO. The key
+ * must bind current actor/scope and the immutable originating operation. */
+export type RentalQuoteOriginalOperation = Readonly<{ key: string; inputHash: string }>;
+function quoteOriginalOperation(value: RentalQuoteOriginalOperation): RentalQuoteOriginalOperation {
+  if (!value || !/^[a-f0-9]{64}$/u.test(value.key) || !/^[a-f0-9]{64}$/u.test(value.inputHash))
+    throw new ConflictException('报价原操作绑定无效');
+  return Object.freeze({ key: value.key, inputHash: value.inputHash });
+}
 
 export interface RentalNotificationDeliveryRecord {
   log: RentalNotificationSendLogV1;
@@ -77,6 +85,9 @@ export interface RentalBusinessFactStore {
   expireClaimedCoupons(tenantId: string, expiredAt: string): Promise<number>;
   voidClaimedCoupon(tenantId: string, couponId: string, reason: string, voidedAt: string, tx: RentalBusinessFactTx): Promise<boolean>;
   upsertQuote(quote: RentalQuoteSnapshotV1, expectedBinding?: { categoryVersionId: string; adoptionRevision: number }): Promise<void>;
+  saveQuoteForOriginalOperation?(quote: RentalQuoteSnapshotV1, original: RentalQuoteOriginalOperation,
+    expectedBinding?: { categoryVersionId: string; adoptionRevision: number }): Promise<RentalQuoteSnapshotV1>;
+  findQuoteForOriginalOperation?(tenantId: string, original: RentalQuoteOriginalOperation): Promise<RentalQuoteSnapshotV1 | undefined>;
   /**
    * 传入 tx 时必须使用它。领券由幂等执行器包在事务里，若这里另起连接独立提交，
    * 事务回滚撤不回这张券，会留下"幂等表已回滚、客户券已存在"的孤儿。
@@ -193,6 +204,15 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     const row = await client.rentalQuote.findFirst({ where: { id: quoteId, tenantId, workspaceId } });
     return row ? this.toQuote(row) : undefined;
+  }
+
+  async findQuoteForOriginalOperation(tenantId: string, value: RentalQuoteOriginalOperation): Promise<RentalQuoteSnapshotV1 | undefined> {
+    const original = quoteOriginalOperation(value);
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    const row = await this.prisma.rentalQuote.findFirst({ where: { tenantId, workspaceId, originalOperationKey: original.key } });
+    if (!row) return undefined; // Absence is not proof that an in-flight write failed.
+    if (row.originalInputHash !== original.inputHash) throw new ConflictException('报价原操作输入冲突');
+    return this.toQuote(row);
   }
 
   async consumeQuoteIfAvailable(
@@ -440,6 +460,16 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
   }
 
   async upsertQuote(quote: RentalQuoteSnapshotV1, expectedBinding?: { categoryVersionId: string; adoptionRevision: number }): Promise<void> {
+    await this.persistQuote(quote, expectedBinding);
+  }
+
+  async saveQuoteForOriginalOperation(quote: RentalQuoteSnapshotV1, value: RentalQuoteOriginalOperation,
+    expectedBinding?: { categoryVersionId: string; adoptionRevision: number }): Promise<RentalQuoteSnapshotV1> {
+    return this.persistQuote(structuredClone(quote), expectedBinding && { ...expectedBinding }, quoteOriginalOperation(value));
+  }
+
+  private async persistQuote(quote: RentalQuoteSnapshotV1, expectedBinding?: { categoryVersionId: string; adoptionRevision: number },
+    original?: RentalQuoteOriginalOperation): Promise<RentalQuoteSnapshotV1> {
     const data = {
       tenantId: quote.tenantId,
       quoteNo: quote.quoteNo,
@@ -488,9 +518,16 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     };
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, quote.tenantId);
     const persist = async (client: RentalBusinessFactTx) => {
+      if (original) {
+        const recorded = await client.rentalQuote.findFirst({ where: { tenantId: quote.tenantId, workspaceId, originalOperationKey: original.key } });
+        if (recorded) {
+          if (recorded.originalInputHash !== original.inputHash || !isDeepStrictEqual(recorded.request, quote.request))
+            throw new ConflictException('报价原操作输入冲突');
+          return this.toQuote(recorded);
+        }
+      }
       const existing = await client.rentalQuote.findUnique({
-        where: { id: quote.id },
-        select: { tenantId: true, workspaceId: true, categoryVersionId: true, inspectionTemplateSnapshots: true }
+        where: { id: quote.id }
       });
       if (existing && (existing.tenantId !== quote.tenantId || existing.workspaceId !== workspaceId)) {
         throw new ConflictException("报价事实已属于其他租户或经营空间，拒绝覆盖");
@@ -502,27 +539,42 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
         throw new ConflictException("已有报价的检查模板快照不可改写");
       }
       if (existing) {
-        await client.rentalQuote.update({ where: { id: quote.id }, data });
+        if (original) throw new ConflictException('报价ID已存在，不能补造原操作依据');
+        if (existing.originalOperationKey) {
+          // Ordinary consumption may update the original quote's consumption
+          // markers, never replace the evidence covered by its operation key.
+          for (const [field, value] of Object.entries(data)) {
+            if (field === 'consumedAt' || field === 'consumedOrderId') continue;
+            const saved = existing[field as keyof typeof existing];
+            const same = value instanceof Prisma.Decimal ? saved instanceof Prisma.Decimal && value.equals(saved)
+              : isDeepStrictEqual(value === Prisma.DbNull ? null : value, saved);
+            if (!same) throw new ConflictException('原操作报价依据不可改写');
+          }
+          await client.rentalQuote.update({ where: { id: quote.id }, data: {
+            consumedAt: data.consumedAt, consumedOrderId: data.consumedOrderId } });
+        } else await client.rentalQuote.update({ where: { id: quote.id }, data });
       } else {
         await client.rentalQuote.create({
-          data: { workspaceId, id: quote.id, ...data, createdAt: date(quote.createdAt) }
+          data: { workspaceId, id: quote.id, ...data, createdAt: date(quote.createdAt),
+            ...(original ? { originalOperationKey: original.key, originalInputHash: original.inputHash } : {}) }
         });
       }
+      return quote;
     };
-    if (!expectedBinding) return persist(this.prisma);
-    await this.prisma.$transaction(async (tx) => {
+    if (!expectedBinding && !original) return persist(this.prisma);
+    return this.prisma.$transaction(async (tx) => {
       // 与空间版本采用写入竞争同一行锁，防止最后一次校验与报价写入之间穿插升级。
       const rows = await tx.$queryRaw<Array<{ categoryVersionId: string | null; categoryAdoptionRevision: number }>>`
         SELECT categoryVersionId, categoryAdoptionRevision FROM business_workspaces
         WHERE id = ${workspaceId} AND tenantId = ${quote.tenantId} AND status = 'ACTIVE' FOR UPDATE
       `;
       const binding = rows[0];
-      if (!binding || binding.categoryVersionId !== expectedBinding.categoryVersionId ||
+      if (!binding || (expectedBinding && (binding.categoryVersionId !== expectedBinding.categoryVersionId ||
           binding.categoryAdoptionRevision !== expectedBinding.adoptionRevision ||
-          quote.categoryVersionId !== expectedBinding.categoryVersionId) {
+          quote.categoryVersionId !== expectedBinding.categoryVersionId))) {
         throw new ConflictException("品类版本在报价期间已变化，请重新报价");
       }
-      await persist(tx);
+      return persist(tx);
     });
   }
 
