@@ -147,7 +147,10 @@ exports.originalSceneKnowledgeFixture = async h => {
     const key = where.tenantId_workspaceId_actorKind_actorId_audience_domain_action_resourceKey;
     policyReads.push(structuredClone(key));
     return structuredClone(policyRows.find(row => Object.entries(key).every(([name, value]) => row[name] === value)) ?? null);
-  } } };
+  } },
+    // This fixture provisions original server policies, not managed policy operations.
+    aiKnowledgePolicyManagementOperation: { findFirst: async () => null },
+  };
   const grant = (domain, action, resource) => policyRows.push({ tenantId: scope.tenantId, workspaceId: scope.workspaceId,
     ...owner, audience: context.audience, domain, action, resourceKey: fingerprint(resource), resource: structuredClone(resource),
     revision: 1, enabled: true, requiredPermissions: ['rental-os:order:view'], expiresAt });

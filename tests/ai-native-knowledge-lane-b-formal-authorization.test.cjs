@@ -149,6 +149,11 @@ function managementFixture() {
   root.enabled = false; await assert.rejects(f.manage.prepare(f.request, f.command(root))); root.enabled = true;
   await assert.rejects(f.manage.prepare(f.request, { ...f.command(root), requiredPermissions: ['escalated'] }));
   const { prepared, result } = await f.apply(f.command(root));
+  const published = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor(
+    require('../packages/shared/src/ai-entry-management-draft-schemas').AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS, {});
+  assert.equal(published.AiKnowledgePolicyManagementReceiptDraft(result), true,
+    JSON.stringify(published.AiKnowledgePolicyManagementReceiptDraft.errors));
+  assert.equal(published.AiKnowledgePolicyManagementReceiptDraft({ ...result, executionPermission: true }), false);
   const read = { operationKey: prepared.operationKey, changeHash: prepared.changeHash };
   assert.deepEqual(await f.manage.operation(f.request, read), result);
   assert.deepEqual(await f.manage.preparation(f.request, { operationKey: prepared.operationKey }), result);

@@ -764,6 +764,9 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const createDraft = { operationKey: 'create-draft-1', action: draftAction };
   const draftCreated = await bookingApp.createBookingDraft(request, createDraft);
   assert.equal(draftCreated.draft.state, 'draft_created'); assert.equal(draftCreated.draft.action, null);
+  const publication = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor(
+    require('../packages/shared/src/ai-entry-management-draft-schemas').AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS, {});
+  assert.equal(publication.AiBookingDraft(draftCreated.draft), true, JSON.stringify(publication.AiBookingDraft.errors));
   assert.equal(draftCreated.draft.material.quote.depositAmount, 0);
   assert.equal(draftCreated.draft.material.sources.returnLocationId, 'core_normalized');
   assert.equal(draftCreated.draft.material.availability, 'available_at_observation_not_reserved');
@@ -781,6 +784,9 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.equal(handed.handoff.fields.quoteId, bookingSelection.quoteId);
   assert.equal(handed.handoff.submission, 'original_booking_page_required');
   assert.equal(handed.handoff.inventory, 'not_reserved');
+  assert.equal(publication.AiBookingHandoff(handed.handoff), true, JSON.stringify(publication.AiBookingHandoff.errors));
+  assert.equal(publication.AiEntryActionDraft(selected.draft.action), true, JSON.stringify(publication.AiEntryActionDraft.errors));
+  assert.equal(publication.AiBookingHandoff({ ...handed.handoff, url: 'javascript:alert(1)' }), false);
   assert.equal((await bookingApp.readBookingDraft(request, { bookingDraftId: draftCreated.draft.bookingDraftId })).state, 'handed_to_booking_page');
   assert.equal((await bookingApp.handoffBookingDraft(request, handoffCommand)).handoff.handoffRef, handed.handoff.handoffRef);
   assert.equal((await bookingApp.readBookingHandoff(request, { handoffRef: handed.handoff.handoffRef })).actionCode, 'OPEN_BOOKING');
@@ -840,6 +846,8 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     expectedRevision: 1, inputFingerprint: deliveryDraft.draft.inputFingerprint, operationKey: 'delivery-select', decision: 'continue_booking' });
   const deliveryHandoff = await deliveryApp.handoffBookingDraft(request, { action: deliverySelected.draft.action, operationKey: 'delivery-handoff' });
   assert.equal(deliveryHandoff.handoff.fields.deliveryAddressId, address.id);
+  assert.equal(publication.AiBookingDraft(deliveryDraft.draft), true, JSON.stringify(publication.AiBookingDraft.errors));
+  assert.equal(publication.AiBookingHandoff(deliveryHandoff.handoff), true, JSON.stringify(publication.AiBookingHandoff.errors));
   address.revision++;
   await assert.rejects(deliveryApp.readBookingHandoff(request, { handoffRef: deliveryHandoff.handoff.handoffRef }), /AI_CLIENT_MATERIAL_STALE/);
   address.revision--;

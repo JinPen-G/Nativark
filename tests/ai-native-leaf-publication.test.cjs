@@ -12,6 +12,7 @@ const { aiLeafToOpenApi30: convert } = require("../apps/api/src/contracts/ai-lea
 const { OPENAPI_DOCUMENT, API_CONTRACT_OPERATIONS } = require("../apps/api/src/contracts/openapi-document");
 const leaves = [shared.AI_GATEWAY_DRAFT_SCHEMAS, shared.AI_KNOWLEDGE_DRAFT_SCHEMAS, shared.AI_USAGE_DRAFT_SCHEMAS, shared.AI_EVENTS_DRAFT_SCHEMAS, shared.AI_INSPECTION_DRAFT_SCHEMAS, shared.AI_PROPOSAL_DRAFT_SCHEMAS, shared.AI_ORDER_FACTS_DRAFT_SCHEMAS, shared.AI_TASK_INPUT_DRAFT_SCHEMAS, shared.AI_SCENE_REQUEST_DRAFT_SCHEMAS, shared.AI_QUOTE_SELECTION_DRAFT_SCHEMAS, shared.AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS];
 leaves.push(shared.AI_APPROVED_SETTINGS_DRAFT_SCHEMAS);
+leaves.push(shared.AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS);
 const original = Object.assign({}, ...leaves);
 // AJV consumes JSON Schema, not OpenAPI 3.0's boolean exclusive-bound spelling.
 function forAjv(value) {
