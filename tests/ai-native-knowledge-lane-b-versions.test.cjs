@@ -5,18 +5,40 @@ const { HumanKnowledgeService } = h.load('human-knowledge.service');
 const { PersistentMemoryConsentService } = h.load('persistent-memory-consent.service');
 test.after(() => assert.deepEqual(h.attempts, []));
 test('version comparison returns bounded authorized chunk changes and old-reference status', async () => {
-  const { ports, f } = fixture(), api = new HumanKnowledgeService(ports);
+  const { ports, f, db } = fixture(), api = new HumanKnowledgeService(ports);
   await api.create(h.draft()); await api.parse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-1' });
   await api.revise(3, h.draft({ documentVersion: 'v2', operationId: 'revise-1' }));
+  const queries = [], findVersions = db.aiKnowledgeVersion.findMany;
+  db.aiKnowledgeVersion.findMany = async args => { queries.push(args); return findVersions(args); };
+  const listed = await api.versions('doc-1');
+  assert.equal(listed.items[0].chunkCount, 1);
+  assert.equal(queries[0].include, undefined, 'metadata listing must not load chunk bodies');
+  assert.equal(queries[0].select._count.select.chunks, true);
+  queries.length = 0;
   const compared = await api.compareVersions('doc-1', 'v1', 'v2');
   assert.equal(compared.body, 'authorized'); assert.equal(compared.changes.length, 1);
   assert.equal(compared.currentVersion, 'v2');
+  assert.equal(queries.filter(query => query.include?.chunks).length, 2);
+  assert.ok(queries.filter(query => query.include?.chunks).every(query => ['v1', 'v2'].includes(query.where.contentHash)));
   f.rule = (_context, request) => request.action !== 'read_body';
+  queries.length = 0;
   const metadata = await api.compareVersions('doc-1', 'v1', 'v2');
   assert.equal(metadata.body, 'unavailable'); assert.deepEqual(metadata.changes, []);
+  assert.equal(queries.some(query => query.include?.chunks), false);
+  f.rule = (_context, request) => request.action !== 'read_metadata' || request.document?.documentVersion !== 'v1';
+  await assert.rejects(api.compareVersions('doc-1', 'v1', 'v2'), { code: 'unavailable' });
   f.rule = () => true;
   const status = await api.versionStatus('doc-1');
   assert.equal(status.currentVersion, 'v2'); assert.equal(status.historicalVersions, 'unavailable');
+  db.aiKnowledgeVersion.findMany = async args => {
+    const rows = await findVersions(args);
+    if (args.include?.chunks) {
+      const head = db.state.documents.get('doc-1');
+      head.revision++; head.state.revision++;
+    }
+    return rows;
+  };
+  await assert.rejects(api.compareVersions('doc-1', 'v1', 'v2'), { code: 'conflict' });
 });
 
 test('confirmation detail reads the stored proof and rechecks current memory binding', async () => {

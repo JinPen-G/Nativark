@@ -64,6 +64,9 @@ export class KnowledgeDocumentService {
   async create(context: AiExecutionContext, value: unknown): Promise<KnowledgeRecord> {
     const input = parse(draftInput, value);
     const grant = await authorize(this.ports.authorization, context, { action: 'create', scope: context.scope, attachmentId: input.attachmentId });
+    // The create entry itself must enforce the same business-file binding as
+    // prepareCreate. A caller may invoke this service directly, so the
+    // preparation check cannot be the only guard before persistence.
     await this.assertAttachmentBound(context, input.documentId, input.attachmentId);
     const hash = operationFingerprint(context, ['create', input]);
     const existing = await this.ports.repository.read(context.scope, input.documentId);

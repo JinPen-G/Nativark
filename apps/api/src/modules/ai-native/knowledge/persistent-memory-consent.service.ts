@@ -204,7 +204,7 @@ export class PersistentMemoryConsentService {
     const rows = await this.ports.db.aiStructuredMemory.findMany({ where: {
       tenantId: scope.tenantId, workspaceId: scope.workspaceId, subjectType: owner.actorKind, subjectId: owner.actorId,
       ownerKind: owner.actorKind, ownerId: owner.actorId, status: 'confirmed', expiresAt: { gt: new Date(this.ports.clock.now()) } },
-    select: { id: true, tenantId: true, workspaceId: true, ownerKind: true, ownerId: true }, orderBy: { id: 'asc' }, take: 100 }).catch(() => unavailable());
+      select: { id: true, tenantId: true, workspaceId: true, ownerKind: true, ownerId: true }, orderBy: { id: 'asc' }, take: 101 }).catch(() => unavailable());
     if (!Array.isArray(rows) || rows.length > 100) return unavailable();
     const values: Array<Extract<AiMemoryDraft, { status: 'confirmed' }>> = [], seen = new Set<string>();
     for (const row of rows) {

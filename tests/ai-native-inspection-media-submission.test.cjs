@@ -132,6 +132,42 @@ test('candidate accept, reject and late append preserve human values and origina
   assert.equal(detail.state.fields.mileage.value,null);assert.equal(detail.state.fields.mileage.decision,'rejected');assert.equal(detail.state.candidates.length,2);
   assert.equal((await f.services.drafts.reconcileOperation({kind:'create',request:d.request})).result.revision,1);
 });
+
+test('human attachment replacement invalidates frozen input and submission without erasing human corrections',async()=>{
+  const f=mediaFixture(),ref=await f.services.evidence.bind({...target,attachmentId:'file-a'});
+  const d=await draft(f,[ref]);
+  const common={...target,draftId:d.result.draftId,bindingFingerprint:d.request.bindingFingerprint};
+  await f.services.recognition.prepare({...target,draftId:d.result.draftId,expectedRevision:1,operationId:'input-old',question:'Read mileage'},new AbortController().signal);
+  const c={candidateId:'candidate-old',fieldCode:'mileage',status:'candidate',value:{kind:'number',value:43},confidence:0.8,
+    sources:[{...ref,kind:'image',region:{x:0,y:0,width:1,height:1}}]};
+  await f.services.drafts.saveCandidates({...common,expectedRevision:2,operationId:'save-old',candidates:[c]});
+  await f.services.drafts.edit({...common,expectedRevision:3,operationId:'accept-old',edits:[{fieldCode:'mileage',decision:'accepted',candidateId:c.candidateId}]});
+  await assert.rejects(f.services.drafts.replaceEvidence({...common,expectedRevision:4,operationId:'remove-blocked',evidence:[]}),{code:'BINDING_CHANGED'});
+  await f.services.drafts.edit({...common,expectedRevision:4,operationId:'human-correct',edits:[{fieldCode:'mileage',decision:'manual',value:44}]});
+  await f.services.submission.prepareReview({...target,draftId:d.result.draftId,expectedRevision:5,operationId:'prepare-old',actionId:'old-action'});
+  const request={...common,expectedRevision:6,operationId:'remove-evidence',evidence:[]};
+  const transaction=f.db.$transaction;let lostReply=true;
+  f.db.$transaction=async callback=>{const result=await transaction(callback);if(lostReply){lostReply=false;throw Error('synthetic commit reply lost');}return result;};
+  const removed=await f.services.drafts.replaceEvidence(request);
+  assert.equal(removed.revision,7);
+  assert.deepEqual(await f.services.drafts.replaceEvidence(request),removed);
+  assert.equal((await f.services.drafts.reconcileOperation({kind:'evidence',request})).result.revision,7);
+  const detail=await f.services.drafts.read({...target,draftId:d.result.draftId});
+  assert.equal(detail.status,'draft_saved');assert.equal(detail.state.fields.mileage.value,44);
+  assert.equal(detail.state.candidates.length,1);assert.deepEqual(detail.state.evidence,[]);
+  assert.equal(detail.state.submission,undefined);assert.equal(detail.state.recognitionInputs,undefined);
+  assert.equal(f.state.drafts.get(d.result.draftId).inputFingerprint,null);
+  assert.equal(f.state.drafts.get(d.result.draftId).submissionActionId,null);
+  await assert.rejects(f.services.drafts.replaceEvidence({...request,evidence:[ref]}),{code:'REVISION_CONFLICT'});
+  await assert.rejects(f.services.drafts.edit({...common,expectedRevision:7,operationId:'reuse-old-candidate',edits:[{fieldCode:'mileage',decision:'accepted',candidateId:c.candidateId}]}),{code:'BINDING_CHANGED'});
+  await assert.rejects(f.services.drafts.edit({...common,expectedRevision:7,operationId:'modify-old-candidate',edits:[{fieldCode:'mileage',decision:'modified',candidateId:c.candidateId,value:45}]}),{code:'BINDING_CHANGED'});
+  await assert.rejects(f.services.drafts.saveCandidates({...common,expectedRevision:6,operationId:'late-candidate',candidates:[{...c,candidateId:'late'}]}),{code:'REVISION_CONFLICT'});
+  await assert.rejects(f.services.drafts.replaceEvidence({...request,expectedRevision:7,operationId:'foreign',evidence:[{attachmentId:'foreign',attachmentRevision:1}]}),{code:'BINDING_CHANGED'});
+  const added=await f.services.drafts.replaceEvidence({...request,expectedRevision:7,operationId:'reattach',evidence:[ref]});
+  assert.equal(added.revision,8);
+  f.state.active=false;
+  await assert.rejects(f.services.drafts.replaceEvidence({...request,expectedRevision:8,operationId:'revoked'}),{code:'ACCESS_DENIED'});
+});
 test('concurrent same submit only dispatches once, lost reply uses original receipt',async()=>{
   const f=submissionFixture('lost'),input=await prepared(f);
   const results=await Promise.allSettled([f.services.submission.submit(input),f.services.submission.submit(input)]);

@@ -151,6 +151,21 @@ test('first creation uses original upload receipt then real create parse index p
   assert.ok(Object.isFrozen(frozen));
   const modelIds = Object.keys(frozen).filter(key => /invocation|dispatch|token/i.test(key));
   assert.deepEqual(modelIds, []);
+  // Frozen materials are still subject to current recall permission, not only
+  // independent body/source-opening permission retained by the same person.
+  const searchGrants=[...f.grants].filter(([,row])=>row.action==='search');
+  for(const [key,row] of searchGrants)if(!row.resource.documentId)f.grants.delete(key);
+  await assert.rejects(scene.revalidate(frozen,originalInputRef),{code:'AI_RESOURCE_UNAVAILABLE'});
+  for(const [key,row] of searchGrants)f.grants.set(key,row);
+  for(const [key,row] of searchGrants)if(row.resource.documentId)f.grants.delete(key);
+  await assert.rejects(scene.revalidate(frozen,originalInputRef),{code:'AI_RESOURCE_UNAVAILABLE'});
+  for(const [key,row] of searchGrants)f.grants.set(key,row);
+  assert.deepEqual(await scene.revalidate(frozen,originalInputRef),frozen);
+  const memoryRead=f.db.aiStructuredMemory.findFirst;let revokeDuringPreferenceRead=true;
+  f.db.aiStructuredMemory.findFirst=async args=>{const row=await memoryRead(args);
+    if(revokeDuringPreferenceRead){revokeDuringPreferenceRead=false;for(const [key] of searchGrants)f.grants.delete(key);}return row;};
+  try{await assert.rejects(scene.revalidate(frozen,originalInputRef),{code:'AI_RESOURCE_UNAVAILABLE'});}
+  finally{f.db.aiStructuredMemory.findFirst=memoryRead;for(const [key,row] of searchGrants)f.grants.set(key,row);}
   for (const [key, row] of f.grants) if (row.action === 'resolve_source' && row.resource.documentId) f.grants.delete(key);
   await assert.rejects(scene.revalidate(frozen, originalInputRef), { code: 'AI_RESOURCE_UNAVAILABLE' });
   f.allowDocument(bound.attachmentId);

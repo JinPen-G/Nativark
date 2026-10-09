@@ -50,6 +50,13 @@ test('opt-in composition prepares original knowledge package with separately aut
   assert.equal((await disabled.preparation.collect(input)).preferences.status, 'not_requested');
   const module = HumanKnowledgeModule.register(deps);
   assert.ok(module.providers.find(p => p.provide === HumanKnowledgeInputService).useValue);
+  const consent = module.providers.find(p => p.provide === PersistentMemoryConsentService).useValue;
+  assert.ok(module.exports.includes(PersistentMemoryConsentService));
+  assert.equal(consent, module.providers.find(p => p.provide === HumanKnowledgeInputService).useValue.memory);
+  assert.equal((await consent.read('memory-1')).status, 'confirmed');
+  const noMemoryModule = HumanKnowledgeModule.register(ports);
+  assert.equal(noMemoryModule.exports.includes(PersistentMemoryConsentService), false);
+  assert.equal(noMemoryModule.providers.some(p => p.provide === PersistentMemoryConsentService), false);
   await memory.revoke({ memoryId: 'memory-1', expectedRevision: 2 });
   await assert.rejects(bundle.preparation.revalidate(result), { code: 'unavailable' });
   assert.deepEqual((await bundle.preparation.collect(input, { includePreferences: true })).preferences.items, []);

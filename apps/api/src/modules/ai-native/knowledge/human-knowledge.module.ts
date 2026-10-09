@@ -3,7 +3,7 @@ import { HumanKnowledgeService } from './human-knowledge.service';
 import { HumanKnowledgeContextService } from './human-knowledge-context.service';
 import { HumanKnowledgeIndexService } from './human-knowledge-index.service';
 import { HumanKnowledgeInputService, type HumanKnowledgeInputDependencies } from './human-knowledge-input.service';
-import { composePersistedHumanKnowledge } from './persistent-knowledge.composition';
+import { composePersistedHumanKnowledge, composeFormalPersistedHumanKnowledge, type FormalHumanKnowledgeDependencies } from './persistent-knowledge.composition';
 import { PersistentMemoryConsentService } from './persistent-memory-consent.service';
 import { composeKnowledgeFileApplication, KNOWLEDGE_SCENE_OPTIONS, type KnowledgeFileApplicationDependencies, type KnowledgeSceneOptionsFactory } from './knowledge-file.composition';
 import { HumanKnowledgeUploadService } from './human-knowledge-upload.service';
@@ -11,13 +11,13 @@ import { HumanKnowledgeUploadService } from './human-knowledge-upload.service';
 @Module({})
 export class HumanKnowledgeModule {
   static register(ports: HumanKnowledgeInputDependencies): DynamicModule {
-    const { management, context, index, preparation } = composePersistedHumanKnowledge(ports);
-    return { module: HumanKnowledgeModule, providers: [
-      { provide: HumanKnowledgeService, useValue: management },
-      { provide: HumanKnowledgeContextService, useValue: context },
-      { provide: HumanKnowledgeIndexService, useValue: index },
-      { provide: HumanKnowledgeInputService, useValue: preparation },
-    ], exports: [HumanKnowledgeService, HumanKnowledgeContextService, HumanKnowledgeIndexService, HumanKnowledgeInputService] };
+    return this.services(composePersistedHumanKnowledge(ports));
+  }
+
+  /** Explicit AuthService + server-owned policy/file assembly. It does not
+   * manufacture those policies, register HTTP, or grant an owner all actions. */
+  static registerFormal(ports: FormalHumanKnowledgeDependencies): DynamicModule {
+    return this.services(composeFormalPersistedHumanKnowledge(ports));
   }
 
   static registerFiles(ports: KnowledgeFileApplicationDependencies): DynamicModule {
@@ -39,4 +39,5 @@ export class HumanKnowledgeModule {
         ...(memory ? [PersistentMemoryConsentService] : []), ...(uploads ? [HumanKnowledgeUploadService] : []),
         ...(sceneKnowledge ? [KNOWLEDGE_SCENE_OPTIONS] : [])] };
   }
+
 }

@@ -80,7 +80,8 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
       },
       async findUnique({ where, select }) { return api.findFirst({ where: where.scopeId_scopeKind_sceneCode ?? where, select }); },
       async findFirstOrThrow(args) { const row = await api.findFirst(args); if (!row) throw Error('missing'); return row; },
-      async findMany({ where, take, select }) { assert.ok(take <= 10); return [...state[name].values()].filter(row => match(row, where)).slice(0, take).map(row => project(row, select)); },
+      async findMany({ where, take, select, orderBy }) { assert.ok(take <= 11); const rows=[...state[name].values()].filter(row => match(row, where));
+        if(orderBy?.id==='asc')rows.sort((a,b)=>a.id.localeCompare(b.id));return rows.slice(0, take).map(row => project(row, select)); },
       async create({ data }) { writes++; if (name === 'tasks') taskCreates++;
         const plain = name === 'runs' ? { ...data, fencingToken: data.fencingToken.toString() } : data;
         const row = { revision: 1, createdAt: now, archivedAt: null, nextAttemptAt: null, leaseUntil: null, sentAt: null,
@@ -149,6 +150,11 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
   const refundEvent = [...state.events.values()].find(row => row.refundId === 'refund-a');
   const refundCandidate = await app.candidates.prepare({ eventId: refundEvent.id }); yes('AiBusinessEventDraft', refundCandidate.material.event);
   assert.ok(!JSON.stringify(refundCandidate).includes('private-provider-detail'));
+  const beforeInputWrites=writes;
+  const manualEvent=await app.reviews.forEvent({eventId:refundEvent.id,limit:2});
+  assert.equal(manualEvent.inputs.state,'not_observed');assert.deepEqual(manualEvent.inputs.items,[]);
+  assert.equal(manualEvent.originalResource.kind,'refund');assert.equal(manualEvent.originalResource.id,'refund-a');
+  assert.equal(manualEvent.executionPermission,false);assert.equal(writes,beforeInputWrites);
   const subscriptions = { readCategoryCommercialContext: async () => ({ revision: 1, serviceStatus: 'active', newBusinessAllowed: true,
     entitlements: [{ code: 'ai.native.use', available: true, categories: [] }] }) };
   const automation = composeBusinessFailureAutomation({ db, auth, credentials, guard, core, funding: { recordEvent: async () => {} }, integrations: {},
@@ -194,6 +200,11 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
   const receipt = await automation.reconcile({ inputRef: prepared.inputRef }); assert.equal(receipt.task.taskId, task.id);
   assert.equal(receipt.retryable, false); assert.equal(receipt.dispatchRequested, false); assert.equal(receipt.inputStatus, 'creation_unknown');
   assert.equal((await automation.create({ inputRef: prepared.inputRef })).task.taskId, task.id); assert.equal(writes, readOnlyWrites); assert.equal(taskCreates, 1);
+  const eventView=await app.reviews.forEvent({eventId:refundEvent.id,limit:1});
+  assert.equal(eventView.inputs.items[0].inputRef,prepared.inputRef);
+  assert.equal(eventView.inputs.items[0].inputMode,'shadow');assert.equal(eventView.inputs.items[0].task.taskId,task.id);
+  assert.equal(eventView.inputs.items[0].nextAction,'read_original_creation');assert.equal(eventView.inputs.hasMore,false);
+  assert.equal(writes,readOnlyWrites);
   state.budgets.get('scope-platform').enabled = false;
   await assert.rejects(automation.reconcile({ inputRef: prepared.inputRef }), /unavailable|AI_ACCESS_DENIED/);
   state.budgets.get('scope-platform').enabled = true;
@@ -242,6 +253,9 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
   await assert.rejects(app.reviews.close({ ...closeCommand, reason: 'dismissed' }), /conflict/);
   assert.equal(writes, writesBeforeRecovery);
   const closedView = await app.reviews.read({ inputRef: prepared.inputRef });
+  const historicalEvent=await app.reviews.forEvent({eventId:refundEvent.id,limit:2});
+  assert.equal(historicalEvent.inputs.items[0].review.status,'closed');assert.equal(historicalEvent.currentSource.failed,false);
+  assert.equal(historicalEvent.inputs.items[0].nextAction,'read_review_operation');
   const feedbackCommand = { inputRef: prepared.inputRef, operationKey: 'review-feedback', expectedRevision: closedView.review.revision,
     expectedEventFence: closedView.event.fence, expectedTaskId: closedView.task.taskId, code: 'helpful' };
   await assert.rejects(app.reviews.feedback(feedbackCommand), /unavailable/);
@@ -260,6 +274,7 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
   active = false;
   await assert.rejects(app.reviews.read({ inputRef: prepared.inputRef }));
   await assert.rejects(app.reviews.operation({ inputRef: prepared.inputRef, operationKey: closeCommand.operationKey }));
+  await assert.rejects(app.reviews.forEvent({eventId:refundEvent.id,limit:2}));
   active = true;
   const count = state.events.size;
   await run(() => new RentalBusinessFactRepository(db).updateNotificationDelivery(scope.tenantId, 'notice-a', { status: 'failed' })); assert.equal(state.events.size, count);
@@ -293,7 +308,7 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
   const configured = await management.read({ subjectId: managedSubjectId, policyId: managedPolicyId });
   assert.equal(configured.state, 'configured'); assert.equal(configured.policy.revision, 1);
   const enablePolicy = { ...clone(createPolicy), operationKey: 'enable-managed-policy', subjectId: managedSubjectId, policyId: managedPolicyId,
-    expectedSubjectRevision: 1, expectedPolicyRevision: 1, subject: { ...createPolicy.subject, enabled: true }, policy: { ...createPolicy.policy, mode: 'shadow' } };
+    expectedSubjectRevision: 1, expectedPolicyRevision: 1, subject: { ...createPolicy.subject, enabled: true }, policy: { ...createPolicy.policy, mode: 'manual_confirmation' } };
   const enablePreview = await management.preview(enablePolicy);
   await assert.rejects(management.prepare(enablePolicy), /unavailable/);
   provisionManagementGrant('prepare', enablePreview.prepareResourceHash);
@@ -313,6 +328,10 @@ test('CB08/CB09 real failures produce authorized candidates and original automat
   const managedAutomation = composeBusinessFailureAutomation({ db, auth, credentials, guard, core, funding: { recordEvent: async () => {} }, integrations: {},
     subscriptions, policyId: managedPolicyId, clock: () => now }).automation;
   const managedInput = await managedAutomation.prepare({ eventId: managedEvent.id }); assert.equal(managedInput.state, 'prepared');
+  const managedView=await app.reviews.forEvent({eventId:managedEvent.id,limit:1});
+  assert.equal(managedView.inputs.items[0].inputRef,managedInput.inputRef);assert.equal(managedView.inputs.items[0].task.state,'not_observed');
+  assert.equal(managedView.inputs.items[0].inputMode,'manual_confirmation');assert.equal(managedView.executionPermission,false);
+  assert.equal(managedView.inputs.items[0].nextAction,'human_review');
   const preservedCount = clone({ day: state.policies.get(managedPolicyId).counterDay, count: state.policies.get(managedPolicyId).preparedCount,
     last: state.policies.get(managedPolicyId).lastPreparedAt }); assert.equal(preservedCount.count, 1);
   const lowerPolicy = { ...enablePolicy, operationKey: 'lower-managed-limit', expectedSubjectRevision: 2, expectedPolicyRevision: 2,
