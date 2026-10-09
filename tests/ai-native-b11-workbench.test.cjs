@@ -99,6 +99,69 @@ test('staff inspection host consumes original draft, edits, evidence and submiss
   await instance.hostShow(); assert.equal(instance.data.phase, 'unavailable'); instance.detach();
 });
 
+test('staff preparation reconciliation keeps exact commands unknown until a receipt and current draft are read', async () => {
+  const { StaffInspectionHostBinding } = load('apps/staff-miniprogram/src/components/ai-native/inspection-host.ts');
+  for (const kind of ['prepareReview', 'prepare']) {
+    let view, original, writes = 0, submits = 0, failRead = false;
+    const target = { orderId: 'order-1', allocationId: 'allocation-1', templateId: 'template-1', stage: 'return' };
+    const template = { id: target.templateId, version: 'v1', stage: 'return', fields: [] };
+    const detail = { draftId: 'draft-1', revision: 1, status: 'draft_saved', target, templateVersion: 'v1', bindingFingerprint: 'binding',
+      state: { fields: {}, candidates: [], evidence: [], missingFields: [], reviewRequired: false } };
+    let result = { status: 'absent', execution: 'not_attested' };
+    const lookups = [];
+    const host = { context: { tenantId: 'tenant-1', workspaceId: 'space-1', ownerId: 'staff-1', audience: 'staff' },
+      target, draftId: 'draft-1', serverEnabled: true, current: () => true, actionId: 'original-action', handoverSignatureFileAssetId: 'signature-1',
+      operationId: (action, revision) => `${action}-${revision}`,
+      templates: { read: async () => ({ bindingFingerprint: 'binding', template }) },
+      drafts: { read: async () => { if (failRead) throw Error('read unavailable'); return structuredClone(detail); } },
+      submission: { prepare: async request => prepare(request), prepareReview: async request => prepare(request),
+        submit: async () => { submits++; return { status: 'submitted' }; },
+        reconcilePreparation: async command => { lookups.push(structuredClone(command)); return result; } } };
+    function prepare(request) {
+      writes++; original = structuredClone(request); detail.status = 'prepared'; detail.revision++;
+      detail.state.submission = { mode: kind === 'prepare' ? 'original_single' : 'manual_review_only', actionId: request.actionId };
+      request.operationId = 'callback-mutated-command'; // Host objects must not mutate our private recovery command.
+      throw Error('committed but reply lost');
+    }
+    const binding = new StaffInspectionHostBinding(next => { view = next; });
+    binding.attachHost(host); await binding.show();
+    if (kind === 'prepare') await binding.submit(true); else await binding.prepareReview();
+    assert.equal(view.phase, 'unknown'); assert.equal(view.canReconcile, true);
+    binding.hide(); assert.equal(view.phase, 'unavailable'); await binding.show();
+    assert.equal(view.phase, 'unknown'); assert.equal(writes, 1);
+    await binding.reconcile(); assert.equal(view.phase, 'unknown'); assert.equal(view.canSubmit, false);
+    assert.deepEqual(lookups[0], { kind, request: original });
+    result = { status: 'unavailable', execution: 'not_attested' }; await binding.reconcile(); assert.equal(view.phase, 'unknown');
+    result = { status: 'found', execution: 'not_attested', mode: detail.state.submission.mode,
+      result: { draftId: detail.draftId, revision: detail.revision, status: 'prepared', inspectionId: null } };
+    failRead = true; await binding.reconcile(); assert.equal(view.phase, 'unknown'); assert.equal(view.canSubmit, false);
+    failRead = false; await binding.reconcile(); assert.equal(view.phase, 'prepared');
+    assert.equal(writes, 1); assert.equal(submits, 0); // A receipt cannot authorize automatic submission.
+    binding.detachHost();
+
+    detail.status = 'draft_saved'; detail.state.submission = undefined;
+    const late = deferred(); host.submission.reconcilePreparation = () => late.promise;
+    binding.attachHost(host); await binding.show(); await binding.prepareReview();
+    const reading = binding.reconcile(); binding.detachHost(); late.resolve(result); await reading;
+    assert.equal(view.phase, 'unavailable'); assert.equal(view.items.length, 0); assert.equal(submits, 0);
+
+    delete host.submission.reconcilePreparation;
+    let contextCurrent = true; host.current = () => contextCurrent;
+    const component = mount(load('apps/staff-miniprogram/src/components/ai-native/ai-inspection-assist/index.ts'));
+    let childDetached = 0;
+    component.selectComponent = () => ({ detachHost: () => { childDetached++; } });
+    component.attachHost(host); await component.hostShow(); await component.onReview();
+    assert.equal(component.data.phase, 'unknown'); assert.equal(component.data.canReconcile, false);
+    const writesBefore = writes; await component.onReconcile(); assert.equal(writes, writesBefore);
+    assert.equal(Object.hasOwn(component.data, 'uncertain'), false);
+    const detachedBefore = childDetached;
+    contextCurrent = false; await component.hostShow(); assert.equal(component.data.phase, 'unavailable');
+    assert.equal(childDetached, detachedBefore + 1);
+    contextCurrent = true; await component.hostShow(); assert.equal(component.data.phase, 'unavailable');
+    assert.equal(writes, writesBefore); component.detach();
+  }
+});
+
 for (const app of ['miniprogram', 'staff-miniprogram']) {
   test(app + ' workbench binds host only through instance methods and isolates late detail', async () => {
     const definition = load('apps/' + app + '/src/components/ai-native/ai-task-workbench/index.ts');

@@ -4,7 +4,10 @@ const dialogs = new WeakSet<object>();
 Component({
   data: emptyInspectionView(),
   lifetimes: {
-    created() { bindings.set(this, new StaffInspectionHostBinding(view => this.setData(view))); },
+    created() {
+      bindings.set(this, new StaffInspectionHostBinding(view => this.setData(view),
+        () => this.selectComponent("#workbench")?.detachHost?.()));
+    },
     detached() { bindings.get(this)?.detachHost(); bindings.delete(this); },
   },
   methods: {

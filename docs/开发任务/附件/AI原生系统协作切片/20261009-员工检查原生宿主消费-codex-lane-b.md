@@ -31,3 +31,15 @@ Runtime/Provider 替换独立：本宿主只依赖既有业务端口和 shared �
 沿原 B11 一个已有用例补真实 Component 事件及实际绑定控制器路径，没有新增测试脚本。初次红测 5 pass / 1 fail / 0 skip / 0 todo、exit1（缺 onCandidateDecision）；实现后 6 pass / 0 fail / 0 skip / 0 todo、exit0。覆盖采用／拒绝／旧修订／未知候选／只读与原卸载隔离；服务端调用是明确端口替身，不冒称真实 HTTP 或模型候选生产。命令仍为 `node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs --test tests/ai-native-b11-workbench.test.cjs`。
 
 员工 TypeScript noEmit exit0；既有完整 `node apps/staff-miniprogram/scripts/build.cjs` exit0、28页，并在最新源码上复验同一6项 exit0。构建前 realpath 验证 dist 在本树，preload 由 NODE_OPTIONS 传播，固定无效 DB、本树 audit/TEMP/writeRoot。未启服务/访问localhost，构建地址仅静态公开配置；未读.env或写共享生成物。`git diff --check` exit0。正式 HTTP/server gate、prepare原操作核对和主线视觉输入依赖仍未完成，本片没有绕过；未验真实微信宿主、设备、文件、数据库或生产。
+
+## 接续：准备操作原键核对的宿主消费
+
+固定依赖 `77c78a466ccaafdca2b3736b793d0645467cc3fb` 已在B树无冲突FF接入，保留c1ee/1fb1两笔成果和全部旧output。主线新增的服务器 `InspectionSubmissionService.reconcilePreparation` 由宿主显式注入；本片仅改原inspection-host、assist组件、原B11测试及本记录，不改服务器/HTTP/Core/Gateway/shared/上传。上一节“prepare原操作核对缺口”由这个固定服务器入口和本次消费推进，不代表正式HTTP已接通。
+
+新增可选宿主方法 `submission.reconcilePreparation({kind:'prepare'|'prepareReview',request:原完整AiInspectionPrepareSubmissionRequest})`。原kind、operationId、expectedRevision、actionId、签名附件及目标均留在实例私有命令副本，回调修改入参不会改写这份核对材料；不算客户端fingerprint、不放data/properties/detail/storage、不调用prepare或Core。收据表达 `execution:not_attested`，found仅证明原prepared事实，不是审批/检查已执行。缺处理器禁用，absent/unavailable继续unknown并禁止盲重试。found后重新读取当前受权草稿与模板/证据，核对draftId、原准备修订、mode与当前版本；读失败或不一致保留unknown，再核对同一原键。解除unknown不自动submit，后续仍需人类明确动作。
+
+普通hide仅清展示、活动代次和detail/template引用，同实例同host的原unknown命令私有保留；show验证上下文并重新读取，只能显式核对，无自动重派。正式当前上下文无效／查询不出当前身份时直接解绑本地host及内部Workbench，清原命令和敏感显示；恢复旧标识也不会复活旧宿主。detach/logout/换host同样全清，不宣称取消远端写入；若需重入处理未知操作，正式宿主必须持有原命令，不得重新造操作键。
+
+一次新增原B11用例驱动实际控制器和原生Component，端口/数据库/微信为明确替身。初始红测6 pass / 1 fail / 0 skip / 0 todo、exit1；实现后7 pass / 0 fail / 0 skip / 0 todo、exit0，最后自查改动后同范围7/7 exit0。覆盖prepare与prepareReview丢应答、完整命令只读核对、回调篡改参数隔离、absent/unavailable、found后读失败、成功重读后不自动提交、hide/show、迟到核对、缺处理器、上下文失效与内部Workbench解绑。未扩矩阵、未新增测试脚本。
+
+实际命令 `node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs --test tests/ai-native-b11-workbench.test.cjs`。`node apps/staff-miniprogram/scripts/build.cjs --check` exit0；最终同原命令完整build exit0，28页。采用主线77c78的本树output私有shared声明方案，不写共享dist或node_modules；固定无效DATABASE_URL、本树AI_OFFLINE_AUDIT/TEMP/TMP/writeRoot，NODE_OPTIONS传播离线preload，dist已realpath归属检查。`git diff --check` exit0。正式员工HTTP/server gate仍缺、真实存储/MySQL/模型/微信/设备未验；主线视觉输入新增不代表本组件已有识别入口，本片未接识别调用或调整AIN完成率。
