@@ -105,6 +105,32 @@ function managementFixture(fileApplication = false) {
   return { ...f, deps, db, state, flags, actor, auth, request, manage, service, authority, command, apply, enable, text };
 }
 
+test('HTTP policy consumer uses current auth, exact targets and safe root refusal without default registration', async () => {
+  const { KnowledgePolicyManagementController } = h.load('knowledge-policy-management.controller');
+  const { KnowledgePolicyManagementHttpModule } = h.load('knowledge-policy-management-http.module');
+  const f = managementFixture(), controller = new KnowledgePolicyManagementController(f.manage);
+  const request = { headers: { authorization: f.request.authorization }, requestId: 'caller-request' };
+  const spec = { version: 'knowledge-prepared-target-1', operationKey: 'http-target',
+    upload: { documentId: 'http-doc', fileName: 'http.txt', mimeType: 'text/plain', sizeBytes: 12 },
+    document: { documentVersion: 'http-v1', operationId: 'http-create', title: 'Synthetic HTTP document', validFrom: new Date(f.flags.now).toISOString() },
+    expiresAt: new Date(f.flags.now + 3600000).toISOString() };
+  const root = f.authority('upload', h.load('knowledge-policy-management.validation').preparedUploadResource(spec), 'knowledge',
+    { preparationTarget: spec, allowedOperations: ['prepare_target','bind_target'] });
+  const prepared = await controller.prepareTarget(request, { authorityId: root.id });
+  assert.equal(prepared.state, 'prepared');
+  assert.equal((await controller.read(request, { authorityId: root.id })).state, 'not_configured');
+  assert.equal((await controller.target(request, { authorityId: root.id, operationKey: spec.operationKey })).targetId, prepared.targetId);
+  await assert.rejects(controller.prepareTarget(request, { authorityId: randomUUID() }), error => {
+    assert.deepEqual(error.getResponse(), { code: 'AI_RESOURCE_UNAVAILABLE', retryable: false }); return error.getStatus() === 503;
+  });
+  await assert.rejects(controller.prepareTarget(request, { authorityId: root.id, actor: 'self-authorized' }), error => error.getResponse().code === 'AI_INVALID_INPUT');
+  f.flags.active = false;
+  await assert.rejects(controller.target(request, { authorityId: root.id, operationKey: spec.operationKey }), error => error.getResponse().code === 'AI_RESOURCE_UNAVAILABLE');
+  assert.deepEqual(KnowledgePolicyManagementHttpModule.registerHttp({ enabled: false }).controllers, []);
+  assert.throws(() => KnowledgePolicyManagementHttpModule.registerHttp({ enabled: true }), { code: 'unavailable' });
+  assert.equal(KnowledgePolicyManagementHttpModule.registerHttp({ enabled: true, application: f.manage }).controllers[0], KnowledgePolicyManagementController);
+});
+
 test('prepared first document produces exact upload and create policies then uses the original file lifecycle', async t => {
   const f = managementFixture(true), { preparedUploadResource } = h.load('knowledge-policy-management.validation');
   const { FileStorageRuntimeService } = require('../apps/api/src/modules/integrations/file-storage.runtime.service');
