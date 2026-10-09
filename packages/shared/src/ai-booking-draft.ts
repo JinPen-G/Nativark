@@ -15,6 +15,7 @@ export interface AiBookingSelection {
   fulfillmentMode: RentalFulfillmentMode;
   fulfillmentLocationId: string;
   returnLocationId?: string;
+  deliveryAddressId?: string;
   bookingIdentity: { bookingIdentity: 'personal' | 'enterprise_employee'; corporateCustomerId?: string; enterpriseContractAndPayer: boolean };
   lines: Array<{ itemGroupId: string; quantity: number }>;
   services?: Array<{ serviceId: string; quantity: number; scheduledStartAt?: string; scheduledEndAt?: string; serviceLocationId?: string }>;
@@ -37,9 +38,20 @@ export interface AiBookingQuoteFacts {
   createdAt: string;
 }
 
+export interface AiBookingAddressEvidence {
+  addressId: string;
+  observedRevision: number;
+  observedUpdatedAt: string;
+  quoteAddressRevision: null;
+  snapshotFingerprint: string;
+  serviceAreaFingerprint: string;
+  source: 'current_client_saved_address';
+}
+
 export interface AiBookingMaterial {
   selection: AiBookingSelection;
-  sources: Record<keyof AiBookingSelection, AiBookingInputSource>;
+  sources: Record<Exclude<keyof AiBookingSelection, 'deliveryAddressId'>, AiBookingInputSource> & { deliveryAddressId?: AiBookingInputSource };
+  deliveryAddress?: AiBookingAddressEvidence;
   quote: AiBookingQuoteFacts;
   catalogVersion: string;
   availabilityVersion: string;

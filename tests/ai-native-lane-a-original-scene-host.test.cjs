@@ -752,9 +752,9 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     lines: command.lines.map(line => ({ itemGroupId: line.itemGroupId, requestedQuantity: line.quantity,
       available: bookingAvailable, availableQuantity: stockObservation, reasons: [] })) });
   const bookingApp = composeRequestBoundClientApplication(taskDependencies, entryConfig);
-  const makeBookingAction = async key => {
-    const material = await bookingApp.prepare(request, { operationKey: key, command: { kind: 'booking_quote', selection: bookingSelection } });
-    return bookingApp.issueAction(request, { actionCode: 'CREATE_BOOKING_DRAFT', materialRef: material.materialRef });
+  const makeBookingAction = async (key, application = bookingApp, selection = bookingSelection) => {
+    const material = await application.prepare(request, { operationKey: key, command: { kind: 'booking_quote', selection } });
+    return application.issueAction(request, { actionCode: 'CREATE_BOOKING_DRAFT', materialRef: material.materialRef });
   };
   for (const selection of [{ ...bookingSelection, startAt: '明天下午' }, { ...bookingSelection, source: 'model_candidate' },
     { ...bookingSelection, timeZone: 'UTC' }, { ...bookingSelection, quoteId: 'foreign-quote' }]) {
@@ -814,6 +814,37 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const repeatedDrafts = await Promise.all([1, 2].map(() => bookingApp.createBookingDraft(request, { action: repeatedAction, operationKey: 'concurrent-draft' })));
   assert.equal(repeatedDrafts[0].draft.bookingDraftId, repeatedDrafts[1].draft.bookingDraftId);
   assert.deepEqual(repeatedDrafts.map(value => value.replayed).sort(), [false, true]);
+  const pickupQuote = structuredClone(bookingQuote), pickupCatalog = client.buildCatalog;
+  let address = { id: 'address-client', tenantId: 'tenant-client', customerId: 'person-client', status: 'active',
+    revision: 1, updatedAt: new Date(now), recipient: 'Synthetic Recipient', phone: '13800000000', phoneMasked: '138****0000',
+    countryCode: 'CN', province: 'Synthetic Province', city: 'Synthetic City', detail: 'Synthetic Street',
+    district: null, postalCode: null, latitude: null, longitude: null, deliveryServiceAreaDecision: { allowed: true } };
+  const addressPort = { list: async () => ({ items: [{ ...structuredClone(address), updatedAt: address.updatedAt.toISOString() }] }),
+    requireOwnAddress: async () => structuredClone(address) };
+  client.buildCatalog = async (...args) => {
+    const catalog = await pickupCatalog(...args);
+    catalog.fulfillment.enabledModes.push('delivery'); catalog.locations[0].capabilities.push('delivery'); return catalog;
+  };
+  const deliverySelection = { ...bookingSelection, fulfillmentMode: 'delivery', deliveryAddressId: address.id };
+  bookingQuote = { ...pickupQuote, request: { ...pickupQuote.request, fulfillmentMode: 'delivery', deliveryAddressId: address.id },
+    deliveryAddressSnapshot: { addressId: address.id, recipient: address.recipient, phone: address.phone,
+      phoneMasked: address.phoneMasked, countryCode: address.countryCode, province: address.province, city: address.city, detail: address.detail } };
+  await assert.rejects(makeBookingAction('address-no-port', bookingApp, deliverySelection), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  const deliveryApp = composeRequestBoundClientApplication({ ...taskDependencies, addresses: addressPort }, entryConfig);
+  const deliveryAction = await makeBookingAction('delivery-material', deliveryApp, deliverySelection);
+  const deliveryDraft = await deliveryApp.createBookingDraft(request, { action: deliveryAction, operationKey: 'delivery-create' });
+  assert.equal(deliveryDraft.draft.material.selection.deliveryAddressId, address.id);
+  assert.equal(deliveryDraft.draft.material.deliveryAddress.observedRevision, 1);
+  assert.equal(JSON.stringify(deliveryDraft).includes(address.phone), false);
+  const deliverySelected = await deliveryApp.chooseBookingDraft(request, { bookingDraftId: deliveryDraft.draft.bookingDraftId,
+    expectedRevision: 1, inputFingerprint: deliveryDraft.draft.inputFingerprint, operationKey: 'delivery-select', decision: 'continue_booking' });
+  const deliveryHandoff = await deliveryApp.handoffBookingDraft(request, { action: deliverySelected.draft.action, operationKey: 'delivery-handoff' });
+  assert.equal(deliveryHandoff.handoff.fields.deliveryAddressId, address.id);
+  address.revision++;
+  await assert.rejects(deliveryApp.readBookingHandoff(request, { handoffRef: deliveryHandoff.handoff.handoffRef }), /AI_CLIENT_MATERIAL_STALE/);
+  address.revision--;
+  await assert.rejects(deliveryApp.readBookingDraft(request, { bookingDraftId: deliveryDraft.draft.bookingDraftId }), e => e.code === 'AI_PROPOSAL_STALE');
+  bookingQuote = pickupQuote; client.buildCatalog = pickupCatalog;
   bookingSelection.bookingIdentity = { bookingIdentity: 'enterprise_employee', corporateCustomerId: 'corporate-client', enterpriseContractAndPayer: true };
   bookingQuote = { ...bookingQuote, request: { ...bookingQuote.request, bookingIdentity: structuredClone(bookingSelection.bookingIdentity) },
     membershipSnapshot: { ...bookingSelection.bookingIdentity, personalCustomerId: 'person-client', corporateMembershipId: 'relation-client' } };
