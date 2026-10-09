@@ -32,6 +32,7 @@ function runtime(handler) {
   const payments = [];
   const modals = [];
   let modalAnswer = false;
+  let page;
   const wx = {
     getStorageSync: (key) => storage.get(key),
     setStorageSync: (key, value) => storage.set(key, JSON.parse(JSON.stringify(value))),
@@ -64,7 +65,7 @@ function runtime(handler) {
   const context = vm.createContext({
     wx, Promise, Date, Math, Map, Set, Number, String, Object, Array, Error, JSON, Intl, Symbol, Reflect, Boolean, RegExp,
     Uint8Array, ArrayBuffer, encodeURIComponent, decodeURIComponent, setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask,
-    getCurrentPages: () => [], Page: () => {}, Component: () => {}, App: () => {}, console
+    getCurrentPages: () => [], Page: value => { page = value; }, Behavior: value => value, Component: () => {}, App: () => {}, console
   });
   function load(relative) {
     let absolute = path.resolve(src, relative);
@@ -84,7 +85,7 @@ function runtime(handler) {
   // 配置：所有网络用例都需要“已配置”的公开配置。
   const config = load("config/public");
   Object.assign(config.PUBLIC_CONFIG, { apiOrigin: "https://merchant.example.invalid", tenantCode: "merchant", appId: "wx0000000000000000", allowLocalApi: false });
-  return { load, wx, storage, calls, navigations, payments, modals, setModalAnswer: (value) => { modalAnswer = value; } };
+  return { load, wx, storage, calls, navigations, payments, modals, get page() { return page; }, setModalAnswer: (value) => { modalAnswer = value; } };
 }
 
 const sessionResponse = (accessToken = "access-one", refreshToken = "refresh-one") => ({
@@ -97,6 +98,48 @@ const sessionResponse = (accessToken = "access-one", refreshToken = "refresh-one
 });
 const ok = (req, data, header = {}) => req.success({ statusCode: 200, data: { data, requestId: "request-one" }, header });
 const status = (req, statusCode, message = "error") => req.success({ statusCode, data: { statusCode, message }, header: {} });
+
+test("AI原checkout交接：实例host、人工复读原报价、默认关闭与hide/登录隔离", async () => {
+  const handoff = {
+    contractVersion: "ain-booking-draft-1", handoffRef: "synthetic-handoff", bookingDraftId: "synthetic-draft", revision: 1,
+    audience: "customer", surface: "client_miniprogram", scope: { kind: "workspace", tenantId: "t", workspaceId: "w" },
+    expiresAt: "2035-01-02T00:00:00Z", actionCode: "OPEN_BOOKING", submission: "original_booking_page_required", inventory: "not_reserved",
+    fields: { quoteId: "original-quote", timeZone: "Asia/Shanghai", startAt: "2035-01-03T00:00:00Z", endAt: "2035-01-04T00:00:00Z",
+      fulfillmentMode: "store_pickup_return", fulfillmentLocationId: "loc", bookingIdentity: { bookingIdentity: "personal", enterpriseContractAndPayer: false },
+      lines: [{ itemGroupId: "item", quantity: 2 }] }
+  };
+  const quote = { id: "original-quote", tenantId: "t", expiresAt: "2035-01-02T00:00:00Z", currency: "CNY", payableAmount: 12, depositAmount: 0, preAuthAmount: 0,
+    request: { ...handoff.fields, customerId: "customer-one", customerType: "personal" } };
+  const r = runtime(req => { assert.equal(req.method, "GET"); assert.ok(req.url.endsWith("/quotes/original-quote")); ok(req, quote); });
+  const session = r.load("core/session"); session.saveSession(sessionResponse(), "camera", "login");
+  r.load("pages/checkout/index");
+  const page = { ...r.page, data: JSON.parse(JSON.stringify(r.page.data)), setData(update) { Object.assign(this.data, update); this.writes++; }, writes: 0 };
+  page.onLoad(); page.onShow(); page.onHide();
+  assert.equal(r.calls.length, 0); assert.equal(page.data.aiEnabled, false);
+  let reads = 0;
+  const host = { enabled: true, handoffRef: handoff.handoffRef,
+    capability: { tenantCode: "merchant", serviceCode: "camera", customerId: "customer-one", tenantId: "t", workspaceId: "w", releaseRevision: "r1" },
+    readBookingHandoff: async () => { reads++; return JSON.parse(JSON.stringify(handoff)); } };
+  page.attachHost(host); page.onShow(); assert.equal(reads, 0); assert.equal(r.calls.length, 0);
+  await page.onReadBookingHandoff(); assert.equal(page.data.aiStatus, "available"); assert.equal(r.calls.length, 0);
+  await page.onContinueBookingHandoff(); assert.equal(page.data.aiStatus, "continued"); assert.equal(page.data.payable, 12);
+  assert.equal(page.data.deposit, 0); assert.equal(page.data.aiQuoteId, "original-quote"); assert.equal(reads, 2);
+  await page.requestQuote(); await page.onSubmit(); await page.submit(false); assert.equal(r.calls.length, 1, "no requote or createOrder");
+  assert.equal(r.load("core/cart").getCart(), undefined, "AI selection must not persist into manual cart");
+  assert.equal(JSON.stringify(page.data).includes("readBookingHandoff"), false);
+  session.saveSession(sessionResponse("changed", "changed-refresh"), "camping", "switch");
+  assert.equal(page.data.aiReference, ""); assert.equal(page.aiHost, undefined);
+  session.saveSession(sessionResponse(), "camera", "switch");
+  let resolve;
+  page.attachHost({ ...host, readBookingHandoff: () => { reads++; return new Promise(r => { resolve = r; }); } });
+  const late = page.onReadBookingHandoff(); const before = reads;
+  await page.onReadBookingHandoff(); assert.equal(reads, before, "single flight");
+  page.onHide(); const writes = page.writes; resolve(handoff); await late; assert.equal(page.writes, writes);
+  page.onShow(); assert.equal(page.data.aiReference, ""); assert.equal(reads, before, "show never auto-reads");
+  page.attachHost({ ...host, readBookingHandoff: () => { throw Error("private failure"); } });
+  await page.onReadBookingHandoff(); assert.equal(page.data.aiStatus, "unavailable");
+  page.onUnload(); const unloadedWrites = page.writes; await page.onReadBookingHandoff(); assert.equal(page.writes, unloadedWrites);
+});
 
 /* ---------------- 工程结构（AC-18） ---------------- */
 

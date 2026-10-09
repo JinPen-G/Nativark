@@ -12,7 +12,9 @@ import { chargeLabel } from "../../core/labels";
 import { formatMoney, startingPriceParts } from "../../core/money";
 import { blockedState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
 import { jsapiEnabled, offlineMethods } from "../../core/payment";
-import { contextVersion, currentServiceCode, currentSession, membershipStatus } from "../../core/session";
+import { contextVersion, currentServiceCode, currentSession, membershipStatus, sessionEvents } from "../../core/session";
+import { PUBLIC_CONFIG } from "../../config/public";
+import { createCustomerBookingConsumer, type CustomerBookingHost, type CustomerHandoffView } from "../../components/ai-native/booking-handoff";
 import { cachedMerchant } from "../../core/merchant";
 import { formatBusinessDate, formatBusinessTime, splitInstant, todayInZone, zoneLabel, zonedToInstant } from "../../core/time";
 import { themeBehavior } from "../../core/theme-behavior";
@@ -49,6 +51,14 @@ interface CouponRow {
 }
 
 interface CheckoutData {
+  aiEnabled: boolean;
+  aiStatus: CustomerHandoffView["status"];
+  aiReference: string;
+  aiRevision: number;
+  aiExpiresAt: string;
+  aiQuoteId: string;
+  aiLocationId: string;
+  aiSelection: { itemGroupId: string; quantity: number }[];
   view: ViewState;
   cart?: CartState;
   quote?: RentalQuoteSnapshotV1;
@@ -122,6 +132,14 @@ const DEFAULT_ZONE = "Asia/Shanghai";
 Page({
   behaviors: [themeBehavior],
   data: {
+    aiEnabled: false,
+    aiStatus: "disabled",
+    aiReference: "",
+    aiRevision: 0,
+    aiExpiresAt: "",
+    aiQuoteId: "",
+    aiLocationId: "",
+    aiSelection: [],
     view: loadingState(),
     merchantName: "",
     serviceName: "",
@@ -192,21 +210,93 @@ Page({
   allLocations: [] as ClientCatalogLocation[],
   ticker: undefined as number | undefined,
   requestVersion: 0,
+  // Functions/hosts are instance-owned only, never setData, storage or event detail.
+  aiHost: undefined as CustomerBookingHost | undefined,
+  aiConsumer: undefined as ReturnType<typeof createCustomerBookingConsumer> | undefined,
+  aiMode: false,
+  aiVisible: false,
+  aiDisposed: false,
+  aiUnsubscribe: undefined as (() => void) | undefined,
+
+  attachHost(host: CustomerBookingHost) {
+    if (this.aiDisposed) return;
+    if (!host || host.enabled !== true) { if (this.aiMode) this.detachHost(); return; }
+    this.aiConsumer?.destroy();
+    this.aiHost = host ? { ...host, capability: { ...host.capability } } : undefined;
+    this.aiMode = host?.enabled === true;
+    this.requestVersion++;
+    this.stopTicker();
+    this.clearBookingHandoff();
+    if (this.aiMode && this.aiVisible) this.bindBookingHandoff();
+  },
+
+  detachHost() {
+    if (this.aiDisposed) return;
+    this.aiConsumer?.destroy(); this.aiConsumer = undefined; this.aiHost = undefined;
+    this.aiMode = false; this.requestVersion++; this.clearBookingHandoff();
+  },
+
+  clearBookingHandoff() {
+    this.setData({ aiEnabled: this.aiMode, aiStatus: this.aiMode ? "unavailable" : "disabled", aiReference: "", aiRevision: 0,
+      aiExpiresAt: "", aiQuoteId: "", aiLocationId: "", aiSelection: [], quote: undefined, charges: [], benefits: [], cart: undefined,
+      lines: [], payable: 0, deposit: 0, preAuth: 0, currency: "", agreed: false, startText: "", endText: "",
+      locked: this.aiMode, view: this.aiMode ? readyState() : loadingState() });
+  },
+
+  bindBookingHandoff() {
+    this.aiConsumer?.destroy();
+    if (!this.aiHost) return;
+    this.aiConsumer = createCustomerBookingConsumer(this.aiHost, () => ({ tenantCode: PUBLIC_CONFIG.tenantCode,
+      serviceCode: currentServiceCode(), customerId: currentSession()?.customer.customerId ?? "", version: contextVersion() }),
+    fetchQuote, view => { if (this.aiVisible) this.applyBookingHandoff(view); }, serverNow);
+    this.setData({ aiEnabled: true, aiStatus: "idle", view: readyState() });
+  },
+
+  applyBookingHandoff(view: CustomerHandoffView) {
+    const h = view.handoff, quote = view.quote;
+    const start = h && view.status === "continued" ? splitInstant(h.fields.startAt, h.fields.timeZone) : undefined;
+    const end = h && view.status === "continued" ? splitInstant(h.fields.endAt, h.fields.timeZone) : undefined;
+    this.setData({ aiStatus: view.status, aiReference: h?.handoffRef ?? "", aiRevision: h?.revision ?? 0,
+      aiExpiresAt: h?.expiresAt ?? "", aiQuoteId: h?.fields.quoteId ?? "", aiSelection: h?.fields.lines ?? [],
+      startText: h?.fields.startAt ?? "", endText: h?.fields.endAt ?? "", timeZone: h?.fields.timeZone ?? DEFAULT_ZONE,
+      startDate: start?.date ?? "", startTime: start?.time ?? "", endDate: end?.date ?? "", endTime: end?.time ?? "",
+      aiLocationId: h?.fields.fulfillmentLocationId ?? "", store: undefined,
+      returnLabel: h?.fields.returnLocationId ?? "与领取地点相同", addressLabel: h?.fields.deliveryAddressId ?? "",
+      method: h?.fields.fulfillmentMode === "delivery" ? "delivery" : "pickup",
+      currency: quote?.currency ?? "", payable: quote?.payableAmount ?? 0, deposit: quote?.depositAmount ?? 0,
+      preAuth: quote?.preAuthAmount ?? 0, quote: undefined, locked: true });
+  },
+
+  onReadBookingHandoff() { return this.aiVisible && this.aiMode ? this.aiConsumer?.read() : undefined; },
+  onContinueBookingHandoff() { return this.aiVisible && this.aiMode ? this.aiConsumer?.continue() : undefined; },
 
   onLoad() {
+    this.aiUnsubscribe?.();
+    this.aiUnsubscribe = sessionEvents.on(() => {
+      if (!this.aiMode) return;
+      this.aiConsumer?.destroy(); this.aiConsumer = undefined; this.aiHost = undefined;
+      this.requestVersion++; this.stopTicker(); this.clearBookingHandoff();
+    });
     if (!requireSignIn(ROUTES.checkout)) return;
   },
 
   onShow() {
+    this.aiVisible = true;
+    if (this.aiMode) { this.clearBookingHandoff(); this.bindBookingHandoff(); return; }
     void this.prepare();
     this.startTicker();
   },
 
   onHide() {
+    this.aiVisible = false; this.aiConsumer?.destroy(); this.aiConsumer = undefined;
+    if (this.aiMode) this.clearBookingHandoff();
     this.stopTicker();
   },
 
   onUnload() {
+    this.aiDisposed = true;
+    this.aiVisible = false; this.aiConsumer?.destroy(); this.aiConsumer = undefined; this.aiHost = undefined;
+    this.aiUnsubscribe?.(); this.aiUnsubscribe = undefined;
     this.stopTicker();
   },
 
@@ -230,6 +320,7 @@ Page({
 
   /* ---------- 准备：清单、目录、能力 ---------- */
   async prepare() {
+    if (this.aiMode) return;
     const cart = getCart();
     if (!cart || cart.lines.length === 0) {
       this.setData({ view: blockedState("还没有选择设备", "从设备详情点“立即预约”把设备加入本次租赁。", "去选设备", "none") });
@@ -257,6 +348,7 @@ Page({
       this.setData({ view: loadingState(), locked: true, cart });
       try {
         const [catalog, quote] = await Promise.all([loadCatalog(cart.serviceCode, false), fetchQuote(cart.submission.quoteId)]);
+        if (this.aiMode || !this.aiVisible) return;
         this.catalog = catalog;
         this.applyCatalog(catalog, catalog.timeZone || zoneOf(cart.serviceCode) || DEFAULT_ZONE);
         this.syncFromCart(getCart());
@@ -271,7 +363,7 @@ Page({
     if (!this.catalog) this.setData({ view: loadingState() });
     try {
       const [catalog] = await Promise.all([loadCatalog(cart.serviceCode, false), this.loadCoupons(), this.loadPaymentCapabilities()]);
-      if (contextVersion() !== version) return;
+      if (this.aiMode || !this.aiVisible || contextVersion() !== version) return;
       this.catalog = catalog;
       const timeZone = catalog.timeZone || zoneOf(cart.serviceCode) || DEFAULT_ZONE;
       rememberZone(cart.serviceCode, timeZone);
@@ -284,6 +376,7 @@ Page({
       }
       await this.requestQuote();
     } catch (error) {
+      if (this.aiMode || !this.aiVisible) return;
       if (isApiError(error, "STALE_CONTEXT")) return;
       this.setData({ view: errorState(error, "回首页") });
     }
@@ -685,6 +778,7 @@ Page({
   },
 
   async requestQuote() {
+    if (this.aiMode) return;
     const cart = getCart();
     if (!cart || cart.submission) return;
     const missing = cartMissing(cart);
@@ -773,6 +867,7 @@ Page({
 
   /* ---------- 提交 ---------- */
   async onSubmit() {
+    if (this.aiMode) return;
     if (this.data.submitting) return;
     if (this.data.paymentBlocked) {
       this.setData({ formError: this.data.paymentNote });
@@ -796,6 +891,7 @@ Page({
 
   /** replay=true 表示恢复一次结果未知的提交：同键同报价重放。 */
   async submit(replay: boolean) {
+    if (this.aiMode) return;
     const cart = getCart();
     if (!cart) return;
     let submission;

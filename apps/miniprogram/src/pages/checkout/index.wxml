@@ -2,7 +2,32 @@
 <view class="screen {{themeClass}}">
   <nav-bar title="确认订单"></nav-bar>
 
-  <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" secondaryText="{{view.secondaryText}}" bind:action="onViewAction" bind:secondary="onViewSecondary"></state-view>
+  <view wx:if="{{aiEnabled}}" class="section">
+    <view class="card">
+      <view class="subtitle">原预约材料交接</view>
+      <view class="notice mt-16">尚未提交预约，资源未预占。人工继续将复验原材料，不重新创建报价。</view>
+      <view wx:if="{{aiStatus === 'unavailable' || aiStatus === 'disabled'}}" class="muted mt-16">材料不可用、已失效或无法映射，请回原人工入口。</view>
+      <view wx:if="{{aiReference}}" class="mt-16" style="overflow-wrap:anywhere;word-break:break-all;">
+        <view>原引用：{{aiReference}}</view><view>修订：{{aiRevision}}</view>
+        <view>有效期：{{aiExpiresAt}}</view><view>原报价：{{aiQuoteId}}</view>
+        <view>原起止：{{startText}} / {{endText}}</view><view>时区：{{timeZone}}</view>
+      </view>
+      <button wx:if="{{aiStatus !== 'continued'}}" class="btn btn--primary btn--block mt-16" bindtap="onReadBookingHandoff" disabled="{{aiStatus === 'loading'}}" loading="{{aiStatus === 'loading'}}">读取原材料</button>
+      <button wx:if="{{aiStatus === 'available'}}" class="btn btn--primary btn--block mt-16" bindtap="onContinueBookingHandoff">人工继续：复验原报价</button>
+      <block wx:if="{{aiStatus === 'continued'}}">
+        <view class="line" wx:for="{{aiSelection}}" wx:key="itemGroupId"><view style="overflow-wrap:anywhere;word-break:break-all;">商品引用：{{item.itemGroupId}}</view><view>数量：{{item.quantity}}</view></view>
+        <view>履约：{{method === 'delivery' ? '配送' : '自取'}}；地点引用：{{aiLocationId}}</view>
+        <view>归还地点：{{returnLabel}}</view><view wx:if="{{addressLabel}}">本人地址引用：{{addressLabel}}</view>
+        <view>原应付：<money-text amount="{{payable}}" currency="{{currency}}"></money-text></view>
+        <view>押金：<money-text amount="{{deposit}}" currency="{{currency}}"></money-text></view>
+        <view>预授权：<money-text amount="{{preAuth}}" currency="{{currency}}"></money-text></view>
+        <view class="muted mt-16">原操作受理关联未接通；材料只读，修改需求须重新准备。</view>
+        <button class="btn btn--primary btn--block mt-16" disabled>提交不可用</button>
+      </block>
+    </view>
+  </view>
+
+  <state-view wx:elif="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" secondaryText="{{view.secondaryText}}" bind:action="onViewAction" bind:secondary="onViewSecondary"></state-view>
 
   <block wx:elif="{{cart}}">
     <view wx:if="{{locked}}" class="section">
