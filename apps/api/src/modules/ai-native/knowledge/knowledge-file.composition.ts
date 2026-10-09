@@ -36,7 +36,7 @@ export function composeKnowledgeFileApplication(input: KnowledgeFileApplicationD
   const sceneKnowledge: KnowledgeSceneOptionsFactory = includePreferences => {
     if (typeof includePreferences !== 'boolean') throw new KnowledgeError('invalid_input');
     if (includePreferences && !base.memory) throw new KnowledgeError('unavailable');
-    const { auth: _auth, credentials: _credentials, clock: _clock, ...infrastructure } = base;
+    const { auth: _auth, credentials: _credentials, clock: _clock, policyManagement: _management, ...infrastructure } = base;
     return { ...infrastructure, policyDb: input.db, fileRuntime, includePreferences };
   };
   return { ...composePrismaFormalHumanKnowledge({ ...base, policyDb: input.db, fileRuntime }),
