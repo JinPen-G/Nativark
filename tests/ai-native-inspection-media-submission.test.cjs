@@ -49,7 +49,7 @@ function mediaFixture(){
   const calls=[];
   const storage=new FileStorageRuntimeService(f.db,{runtimeConfig:async()=>({provider:'synthetic-controlled-provider'})},undefined,
     {open:async(ref,signal)=>{assert.equal(signal.aborted,false);calls.push(structuredClone(ref));return stream(png);}});
-  f.services=composeInspectionAssist({...f.ports,storage});return {...f,calls};
+  f.services=composeInspectionAssist({...f.ports,storage});return {...f,calls,storage};
 }
 async function draft(f,evidence=[]){
   const binding=await f.services.templates.read(target);
@@ -139,12 +139,22 @@ test('actual file runtime and evidence adapter produce bounded immutable recogni
 });
 test('original inspection frozen media creates a real model runner host without changing inspection fields',async()=>{
   const f=mediaFixture();f.state.user.id='user-a';f.state.assets.get('file-a').uploadedBy='user-a';
+  await assert.rejects(f.services.recognitionResults.read({...target,draftId:'not-read',inputId:'not-read',expectedRevision:1,
+    taskId:'task-a',resultId:'result-a'}),{code:'STORAGE_UNAVAILABLE'});
+  const {modelHostHarness}=require('./fixtures/ai-native/task-model-host.cjs');
+  const h=await modelHostHarness('image');h.identity.user.permissions.push('rental-os:order:return');
+  const {ApiAuthGuard}=require('../apps/api/src/common/api-auth.guard');
+  f.services=composeInspectionAssist({...f.ports,storage:f.storage,credentials:h.config.credentials,
+    guard:new ApiAuthGuard(h.config.auth,undefined,undefined,undefined,{rentalOrder:f.db.rentalOrder}),
+    recognitionResults:{db:h.db,auth:h.config.auth,subscriptions:h.config.subscriptions,clock:h.config.clock,
+      financialEvidence:h.financial,policy:{kind:'image',sceneCode:h.config.gatewayScene.sceneCode,maxOutputTokens:h.config.gatewayScene.maxOutputTokens}}});
   const ref=await f.services.evidence.bind({...target,attachmentId:'file-a'});
+  const candidate={candidateId:'vision-original',fieldCode:'mileage',status:'candidate',value:{kind:'number',value:43},confidence:0.8,
+    sources:[{...ref,kind:'image',region:{x:0,y:0,width:1,height:1}}]};
+  h.modelControl.result.text=JSON.stringify([candidate]);
   const d=await draft(f,[ref]);
   const frozen=await f.services.recognition.prepare({...target,draftId:d.result.draftId,expectedRevision:1,operationId:'original-vision',question:'List candidate readings only.'},new AbortController().signal);
   const detail=await f.services.drafts.read({...target,draftId:d.result.draftId});
-  const {modelHostHarness}=require('./fixtures/ai-native/task-model-host.cjs');
-  const h=await modelHostHarness('image');
   const {composeInspectionRecognitionTaskHost}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-assist.composition');
   const {task:originalTask,...dependencies}=h.config;
   const {material:ignored,...task}=originalTask;
@@ -155,7 +165,40 @@ test('original inspection frozen media creates a real model runner host without 
   assert.equal(h.modelControl.sent[0].messages[0].content[1].data,png.toString('base64'));
   assert.equal(h.state.aiGatewayAccountingReceipt.length,1);assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls,1n);
   assert.deepEqual((await f.services.drafts.read({...target,draftId:d.result.draftId})).state,detail.state);
-  f.state.active=false;
+  const reference={...target,draftId:d.result.draftId,inputId:frozen.inputId,expectedRevision:detail.revision,
+    taskId:h.query.taskId,resultId:h.state.aiTaskResultArtifact[0].id};
+  const storedInput=h.state.aiTaskActionInput[0].payload, originalInvocation=h.state.aiGatewayInvocation[0];
+  for(const [key,expected] of Object.entries({taskId:h.query.taskId,runId:h.query.runId,stepId:h.state.aiStep[0].id,
+    actionId:h.state.aiStep[0].actionId,actorId:'user-a',callId:storedInput.intent.requestId,stepFingerprint:h.state.aiStep[0].requestFingerprint,
+    intentHash:h.state.aiStep[0].requestFingerprint,mode:storedInput.mode,sceneCode:storedInput.intent.sceneCode,
+    priceVersion:storedInput.priceVersion,configurationHash:requestFingerprint(storedInput.configuration)})){
+    assert.equal(originalInvocation[key],expected,key);
+  }
+  assert.equal((await f.services.recognitionResults.read(reference)).status,'available');
+  assert.deepEqual((await f.services.recognitionResults.read(reference)).candidates,[candidate]);
+  await assert.rejects(f.services.recognitionResults.read({...reference,payload:[candidate]}),{code:'INVALID_INPUT'});
+  const originalStep=h.state.aiGatewayInvocation[0].stepId;
+  h.state.aiGatewayInvocation[0].stepId='another-step';await assert.rejects(f.services.recognitionResults.read(reference));
+  h.state.aiGatewayInvocation[0].stepId=originalStep;
+  h.state.aiTaskResultArtifact[0].completeMeasurement=false;
+  const unknown=await f.services.recognitionResults.read(reference);
+  assert.equal(unknown.status,'unknown');assert.deepEqual(unknown.candidates,[]);
+  await assert.rejects(f.services.recognitionResults.save({...reference,operationId:'save-unknown'}));
+  h.state.aiTaskResultArtifact[0].completeMeasurement=true;
+  h.state.aiTaskResultArtifact[0].outcome='FAILED';h.state.aiStep.find(s=>s.id===reference.stepId||s.resultRef===reference.resultId).status='FAILED';
+  const failed=await f.services.recognitionResults.read(reference);
+  assert.equal(failed.status,'failed');assert.deepEqual(failed.candidates,[]);
+  h.state.aiTaskResultArtifact[0].outcome='SUCCEEDED';h.state.aiStep.find(s=>s.resultRef===reference.resultId).status='SUCCEEDED';
+  const save={...reference,operationId:'save-original-vision'};
+  const saved=await f.services.recognitionResults.save(save);
+  assert.equal(saved.result.revision,3);
+  assert.deepEqual(await f.services.recognitionResults.save(save),saved);
+  assert.equal((await f.services.recognitionResults.reconcileSave(save)).status,'found');
+  const after=await f.services.drafts.read({...target,draftId:d.result.draftId});
+  assert.equal(after.state.fields.mileage.value,42);assert.deepEqual(after.state.candidates,[candidate]);
+  assert.equal(h.modelControl.sent.length,1);
+  await assert.rejects(f.services.recognitionResults.save({...save,operationId:'new-key-old-revision'}));
+  h.identity.membership=false;
   await assert.rejects(composeInspectionRecognitionTaskHost(f.services.recognition,{...target,draftId:d.result.draftId,inputId:frozen.inputId,expectedRevision:detail.revision},{...dependencies,task}));
 });
 
