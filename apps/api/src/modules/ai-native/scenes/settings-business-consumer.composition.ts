@@ -39,6 +39,17 @@ export function composeAiSettingsBusinessConsumer(dependencies?: AiSettingsBusin
       || review.proposal.payload.taskId !== command.taskId || review.proposal.payload.proposalId !== command.proposalId
       || review.proposal.payload.revision !== command.proposalRevision)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     const decision = preparation.state === 'prepared' ? await app.readDecisionReceipt(preparation.reference) : null;
+    // Discover the durable wait through the original server reader, never a
+    // caller checkpoint or step.resultRef. This reference attests no execution.
+    const waiting = snapshot.task.status === 'waiting_confirmation' && preparation.state === 'prepared';
+    const checkpointReader = dependencies.settingsHost.application.readConfirmation;
+    const confirmation = waiting && typeof checkpointReader === 'function'
+      ? await checkpointReader({ taskId: command.taskId, runId: command.runId, stepId: command.stepId }) : null;
+    if (confirmation && (confirmation.taskId !== command.taskId || confirmation.runId !== command.runId
+      || confirmation.stepId !== command.stepId || confirmation.taskRevision !== snapshot.task.revision
+      || confirmation.proposal.proposalId !== command.proposalId || confirmation.proposal.proposalRevision !== command.proposalRevision
+      || preparation.state !== 'prepared' || confirmation.proposal.reviewedPayloadHash !== preparation.reference.reviewedPayloadHash
+      || confirmation.execution !== 'not_attested')) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     const operation = parsed.data.operationKey ? await app.readOperation({ draftVersion: AI_APPROVED_SETTINGS_DRAFT_VERSION,
       operationKey: parsed.data.operationKey }) : null;
     if (operation?.state === 'committed' && (operation.receipt.changeId !== command.changeId || operation.receipt.changeHash !== command.changeHash
@@ -58,7 +69,9 @@ export function composeAiSettingsBusinessConsumer(dependencies?: AiSettingsBusin
     const latest = await dependencies.settingsHost.application.inspect({ taskId: command.taskId, runId: command.runId });
     if (after.bindingHash !== before.bindingHash || requestFingerprint(latest) !== requestFingerprint(snapshot)
       || requestFingerprint(await app.readCurrent()) !== requestFingerprint(current)
-      || (preparation.state === 'prepared' && requestFingerprint(await app.readProposal(preparation.reference)) !== requestFingerprint(review))) {
+      || (preparation.state === 'prepared' && requestFingerprint(await app.readProposal(preparation.reference)) !== requestFingerprint(review))
+      || (confirmation && requestFingerprint(await checkpointReader({ taskId: command.taskId, runId: command.runId,
+        stepId: command.stepId })) !== requestFingerprint(confirmation))) {
       throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
     }
     if ((await authority.resolve(command.taskId, 'read')).bindingHash !== before.bindingHash) {
@@ -70,7 +83,7 @@ export function composeAiSettingsBusinessConsumer(dependencies?: AiSettingsBusin
         inputRef: step.inputRef, fingerprint: step.fingerprint, resultRef: step.resultRef },
       current, change: review?.change ?? null,
       currentMatchesChangeBase: review ? current.settingsRevision === review.change.baseRevision : null,
-      preparation, review, decision, operation,
+      preparation, review, decision, operation, confirmation,
       businessOutcome: operation?.state === 'committed' ? 'committed' as const : step.status === 'unknown' ? 'unknown' as const : 'not_observed' as const,
       retryable: false as const, originalOperation: parsed.data.operationKey ? 'original_key_read' as const : 'unavailable_original_key_required' as const });
   };
@@ -89,8 +102,11 @@ export function composeAiSettingsBusinessConsumer(dependencies?: AiSettingsBusin
       const result = await read(value);
       return { mode: 'human_handoff_only' as const, task: result.task, run: result.run, step: result.step,
         reference: result.preparation.state === 'prepared' ? result.preparation.reference : null, decision: result.decision,
+        confirmation: result.confirmation,
         continuation: 'not_invoked_use_original_settings_host' as const,
-        missing: result.preparation.state === 'prepared' ? ['current_server_checkpoint_reference'] : ['original_preparation_receipt'],
+        missing: result.preparation.state !== 'prepared' ? ['original_preparation_receipt']
+          : result.confirmation ? [] : ['current_server_wait_unavailable'],
+        execution: 'not_attested' as const,
         operation: result.operation, businessOutcome: result.businessOutcome, retryable: false as const };
     }
   });

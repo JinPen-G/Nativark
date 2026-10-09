@@ -10,6 +10,8 @@ import { AI_QUOTE_SELECTION_DRAFT_VERSION } from '../../../../../packages/shared
 import type { PrismaQuoteSelectionRepository } from './task-request/prisma-quote-selection.repository';
 import type { composeHumanQuoteOrder } from './scenes/human-quote-order.composition';
 import { parseQuoteSelectionProof } from './task-request/quote-selection.validation';
+import type { composeAiSettingsBusinessConsumer } from './scenes/settings-business-consumer.composition';
+import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 type OriginalScenes = ReturnType<typeof composeAiOriginalScenes>;
 const page = z.object({ limit: z.number().int().min(1).max(50).optional(), cursor: z.string().max(512).optional(),
@@ -20,6 +22,12 @@ const taskRead = z.object({ original: originalRequestReferenceSchema, taskId: z.
 const approvalRead = z.object({ original: originalRequestReferenceSchema, taskId: z.string().min(1).max(191).optional(),
   reference: z.unknown() }).strict();
 const selectionRead = taskRead.extend({ selectionId: z.string().min(1).max(191) }).strict();
+const sceneId = z.string().min(1).max(191);
+const aggregateRead = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('original'), taskId: sceneId, runId: sceneId, original: originalRequestReferenceSchema,
+    resultId: sceneId.optional(), review: z.unknown().optional(), decision: z.unknown().optional(), order: z.unknown().optional() }).strict(),
+  z.object({ kind: z.literal('settings'), taskId: sceneId, runId: sceneId, reference: z.unknown() }).strict()
+]);
 
 /**
  * Read-only task-center consumer. It deliberately does not become a second
@@ -29,7 +37,8 @@ const selectionRead = taskRead.extend({ selectionId: z.string().min(1).max(191) 
  */
 export function composeAiTaskCenterScene(input: {
   list: Pick<AiTaskListRepository, 'readPage'>;
-  events?: Pick<AiTaskEventRepository, 'readPage'>;
+  events?: Pick<AiTaskEventRepository, 'readPage'> & Partial<Pick<AiTaskEventRepository, 'readSnapshot'>>;
+  settings?: Pick<ReturnType<typeof composeAiSettingsBusinessConsumer>, 'read'>;
   modelResults?: Pick<AiOriginalSceneResultService, 'read'> & Partial<Pick<AiOriginalSceneResultService, 'reopenSource'>>;
   input?: { read(value: unknown): Promise<unknown> };
   selections?: Pick<PrismaQuoteSelectionRepository, 'read'>;
@@ -43,7 +52,7 @@ export function composeAiTaskCenterScene(input: {
     || typeof input.scenes.requests?.readHistorical !== 'function' || typeof input.scenes.readTaskReceipt !== 'function'
     || typeof input.scenes.readRecovery !== 'function') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
 
-  return Object.freeze({
+  const readers = Object.freeze({
     readPage: async (value: unknown = {}) => {
       const parsed = page.safeParse(value);
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -167,6 +176,66 @@ export function composeAiTaskCenterScene(input: {
       });
     }
   });
+
+  return Object.freeze({ ...readers,
+    /** Bounded aggregation of the existing readers, not a new execution facade.
+     * Snapshot cursor covers only its original metadata/timeline transaction;
+     * the separately authorized business reads are NOT an atomic snapshot. */
+    async readScene(value: unknown) {
+      const parsed = aggregateRead.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const command = freezeOriginalInput(parsed.data);
+      if (command.kind === 'settings') {
+        if (typeof input.settings?.read !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const preparation = z.object({ preparation: z.object({ taskId: sceneId, runId: sceneId }).passthrough() }).passthrough().safeParse(command.reference);
+        if (!preparation.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        if (preparation.data.preparation.taskId !== command.taskId || preparation.data.preparation.runId !== command.runId)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const first = await input.settings.read(command.reference);
+        if (!('task' in first)) return freezeOriginalInput({ kind: command.kind, taskId: command.taskId, runId: command.runId,
+          business: first, snapshot: { availability: 'unavailable' as const },
+          consistency: 'independent_authorized_reads' as const, execution: 'read_only_no_start_no_reconnect_side_effect' as const });
+        const snapshot = await readSnapshot(command.taskId, first.task.revision);
+        const latest = await input.settings.read(command.reference);
+        if (!('task' in latest)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        const { observedAt: _firstObservation, ...firstEvidence } = first;
+        const { observedAt: _latestObservation, ...latestEvidence } = latest;
+        if (requestFingerprint(latestEvidence) !== requestFingerprint(firstEvidence)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        return freezeOriginalInput({ kind: command.kind, taskId: command.taskId, runId: command.runId, snapshot,
+          originalInput: { inputRef: first.step.inputRef, fingerprint: first.step.fingerprint, change: first.change },
+          business: first, submission: 'not_attested_by_approval' as const,
+          consistency: 'independent_authorized_reads' as const, execution: 'read_only_no_start_no_reconnect_side_effect' as const });
+      }
+      const current = await readObservedTask(command.original, command.taskId);
+      if (current.runId !== command.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const task = await readers.readTask(command.original);
+      const snapshot = await readSnapshot(current.taskId, current.revision);
+      const original = await input.scenes.requests.readHistorical(command.original);
+      const originalInput = { receipt: original.receipt, request: original.request };
+      const pendingInput = typeof input.input?.read === 'function'
+        ? await readers.readInput({ original: command.original, taskId: current.taskId }) : { availability: 'unavailable' as const };
+      const model = command.resultId ? await readers.readModelResult({ original: command.original, resultId: command.resultId })
+        : { availability: 'not_requested' as const };
+      const review = command.review !== undefined ? await readers.readApprovalReview({ original: command.original, taskId: current.taskId, reference: command.review })
+        : { availability: 'not_requested' as const };
+      const decision = command.decision !== undefined ? await readers.readApprovalReceipt({ original: command.original, taskId: current.taskId, reference: command.decision })
+        : { availability: 'not_requested' as const };
+      const business = command.order !== undefined ? await readers.readOrderResult({ original: command.original, taskId: current.taskId, reference: command.order })
+        : { availability: 'not_requested' as const };
+      await assertStillCurrent(command.original, current);
+      return freezeOriginalInput({ kind: command.kind, taskId: current.taskId, runId: current.runId, task, snapshot,
+        originalInput, pendingInput, model, review, decision, business, submission: 'not_attested_by_approval' as const,
+        consistency: 'independent_authorized_reads' as const, execution: 'read_only_no_start_no_reconnect_side_effect' as const });
+    }
+  });
+
+  async function readSnapshot(taskId: string, revision: number) {
+    if (typeof input.events?.readSnapshot !== 'function') return { availability: 'unavailable' as const };
+    const snapshot = await input.events.readSnapshot({ taskId });
+    if (snapshot.taskId !== taskId || snapshot.revision !== revision)
+      throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    return { availability: 'available' as const, value: snapshot };
+  }
 
   async function readObservedTask(reference: z.infer<typeof originalRequestReferenceSchema>, expectedTaskId?: string) {
     const original = await input.scenes.requests.readHistorical(reference);
