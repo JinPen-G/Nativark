@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AI_TEXT_MODEL_STEP_CODE, type AiExecutionContext, type AiGatewayConfigReferenceDraft, type AiGatewayIntentDraft } from '@rental-os/shared';
+import { AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL_STEP_CODE, type AiExecutionContext, type AiGatewayConfigReferenceDraft, type AiGatewayIntentDraft } from '@rental-os/shared';
 import { isGatewayConfig, isGatewayIntent } from '../gateway-contract-validation';
 import { prepareGatewayTextIntent, type GatewayTextIntentPolicy } from '../gateway-intent';
 import type { GatewayRoutingResolution } from '../gateway-routing.service';
@@ -7,6 +7,9 @@ import { ModelGatewayError } from '../model-gateway.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 
 export const TASK_TEXT_MODEL_TOOL = AI_TEXT_MODEL_STEP_CODE;
+export const TASK_IMAGE_MODEL_TOOL = AI_IMAGE_MODEL_STEP_CODE;
+export const isTaskModelTool = (value: string) => value === TASK_TEXT_MODEL_TOOL || value === TASK_IMAGE_MODEL_TOOL;
+export type TaskModelPolicy = GatewayTextIntentPolicy & { kind?: 'image' };
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 export const taskModelMaterialSchema = z.object({
   messages: z.array(z.object({ role: z.enum(['system', 'user', 'assistant']),
@@ -14,32 +17,65 @@ export const taskModelMaterialSchema = z.object({
   }).strict()).min(1).max(64),
   maxOutputTokens: z.number().int().min(1).max(32768)
 }).strict();
+const mediaReference = z.object({ kind: z.literal('image'), attachmentId: z.string().min(1).max(128).regex(/^[\w.:-]+$/u),
+  attachmentRevision: z.number().int().min(1).max(4294967294) }).strict();
+export const taskImageMaterialSchema = taskModelMaterialSchema.extend({
+  messages: z.array(z.object({ role: z.enum(['system', 'user', 'assistant']),
+    content: z.array(z.union([z.object({ kind: z.literal('text'), text: z.string().max(32000) }).strict(), mediaReference])).min(1).max(16)
+  }).strict()).min(1).max(64)
+}).strict();
+export const taskModelMediaSchema = z.array(mediaReference.extend({ mediaType: z.enum(['image/png', 'image/jpeg']), contentHash: hash,
+  sizeBytes: z.number().int().min(1).max(524288) }).strict()).min(1).max(8);
 const storedSchema = z.object({ mode: z.literal('invoke'), intent: z.unknown(), configuration: z.unknown(),
-  priceVersion: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u), routingHash: hash, identityHash: hash }).strict();
+  priceVersion: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u), routingHash: hash, identityHash: hash,
+  media: taskModelMediaSchema.optional() }).strict();
 
 export function taskModelIdentity({ requestId: _, authorizedAt: __, ...context }: AiExecutionContext) {
   return requestFingerprint(context);
 }
 
-export function parseTaskModelInput(value: unknown, policy: GatewayTextIntentPolicy) {
+export function parseTaskModelInput(value: unknown, policy: TaskModelPolicy) {
   const parsed = storedSchema.parse(structuredClone(value));
   if (!isGatewayIntent(parsed.intent) || !isGatewayConfig(parsed.configuration)) throw new ModelGatewayError('INVALID_REQUEST');
   const input = { ...parsed, intent: parsed.intent, configuration: parsed.configuration };
-  prepareGatewayTextIntent(input.intent, policy, input.mode);
+  if (policy.kind === 'image') {
+    taskImageMaterialSchema.parse({ messages: input.intent.messages, maxOutputTokens: input.intent.maxOutputTokens });
+    if (input.intent.sceneCode !== policy.sceneCode || input.intent.maxOutputTokens > policy.maxOutputTokens
+      || requestFingerprint(input.intent.requiredFeatures) !== requestFingerprint(['text', 'image']) || input.intent.optionalFeatures.length
+      || !input.media) throw new ModelGatewayError('INVALID_REQUEST');
+    const refs = input.intent.messages.flatMap(message => message.content.filter(part => part.kind !== 'text'));
+    if (refs.length !== input.media.length || refs.some((ref, index) => ref.kind !== 'image'
+      || ref.attachmentId !== input.media![index].attachmentId || ref.attachmentRevision !== input.media![index].attachmentRevision)
+      || input.intent.messages.some(message => message.role !== 'user' && message.content.some(part => part.kind !== 'text'))) {
+      throw new ModelGatewayError('INVALID_REQUEST');
+    }
+  } else {
+    if (input.media) throw new ModelGatewayError('INVALID_REQUEST');
+    prepareGatewayTextIntent(input.intent, policy, input.mode);
+  }
   if (Buffer.byteLength(JSON.stringify(input), 'utf8') > 262144) throw new ModelGatewayError('INVALID_REQUEST');
   return input;
 }
 export type TaskModelInput = ReturnType<typeof parseTaskModelInput>;
 
-export function taskModelFingerprint(input: TaskModelInput, policy: GatewayTextIntentPolicy) {
+export function taskModelFingerprint(input: TaskModelInput, policy: TaskModelPolicy) {
+  if (policy.kind === 'image') {
+    input = parseTaskModelInput(input, policy);
+    let index = 0;
+    const media = input.intent.messages.map(message => ({ role: message.role,
+      media: message.content.filter(part => part.kind !== 'text').map(() => {
+        const { sizeBytes: _, ...reference } = input.media![index++]; return reference;
+      }) }));
+    return requestFingerprint({ intent: input.intent, mode: input.mode, media });
+  }
   return prepareGatewayTextIntent(input.intent, { sceneCode: policy.sceneCode, maxOutputTokens: policy.maxOutputTokens }, input.mode).intentHash;
 }
 
 export function taskModelIntent(taskId: string, runId: string, registrationRef: string, sceneCode: string,
-  material: z.infer<typeof taskModelMaterialSchema>): AiGatewayIntentDraft {
+  material: z.infer<typeof taskImageMaterialSchema>, kind?: 'image'): AiGatewayIntentDraft {
   return { draftVersion: 'ain-c03-draft-2',
     requestId: `model-${requestFingerprint({ taskId, runId, registrationRef })}`, sceneCode,
-    messages: material.messages, maxOutputTokens: material.maxOutputTokens, requiredFeatures: ['text'], optionalFeatures: [] };
+    messages: material.messages, maxOutputTokens: material.maxOutputTokens, requiredFeatures: kind === 'image' ? ['text', 'image'] : ['text'], optionalFeatures: [] };
 }
 
 export function taskModelConfiguration(route: GatewayRoutingResolution): AiGatewayConfigReferenceDraft {

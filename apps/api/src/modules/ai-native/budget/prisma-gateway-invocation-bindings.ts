@@ -4,13 +4,15 @@ import { z } from 'zod';
 import type { AiScopeRepository } from '../ai-scope.repository';
 import { isGatewayConfig, isGatewayIntent } from '../gateway-contract-validation';
 import { prepareGatewayTextIntent } from '../gateway-intent';
+import { TASK_IMAGE_MODEL_TOOL, parseTaskModelInput, taskModelFingerprint, taskModelIdentity } from '../model-input/task-model-input';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import type { GatewayContext } from '../model-gateway.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { BudgetError } from './budget.ports';
 import type { BudgetGatewayBindingSource, BudgetGatewayInvocationBinding, GatewayBudgetReserveRequest } from './budget-gateway-adapter';
 
-type Db = Pick<PrismaClient, '$transaction' | 'aiGatewayInvocation' | 'aiBudgetReservation' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiScope' | 'aiProviderProfile'>;
+type Db = Pick<PrismaClient, '$transaction' | 'aiGatewayInvocation' | 'aiBudgetReservation' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiScope' | 'aiProviderProfile'>
+  & Partial<Pick<PrismaClient, 'aiTaskActionInput'>>;
 type Reader = Omit<Db, '$transaction'>;
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/).min(1);
 const registration = z.object({ stepId: id.max(36), mode: z.enum(['invoke', 'stream']),
@@ -84,14 +86,32 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
       || !('tenantId' in parsed.data.configuration)) throw new BudgetError('INVALID');
     const input = { ...parsed.data, intent: parsed.data.intent, configuration: parsed.data.configuration };
     if (input.expiresAt <= this.now() || BigInt(input.lease.fencingToken) > 18446744073709551615n) throw new BudgetError('INVALID');
-    const prepared = prepareGatewayTextIntent(input.intent, { sceneCode: input.intent.sceneCode, maxOutputTokens: input.intent.maxOutputTokens }, input.mode);
+    const hasMedia = input.intent.messages.some(message => message.content.some(part => part.kind !== 'text'));
     const principal = await this.current();
     try {
       return await this.db.$transaction(async tx => {
         const step = await tx.aiStep.findFirst({ where: { id: input.stepId, scopeId: principal.scope.id, runId: input.lease.runId } });
         if (!step) throw new BudgetError('FORBIDDEN');
+        let intentHash: string;
+        if (hasMedia) {
+          if (step.toolCode !== TASK_IMAGE_MODEL_TOOL || !step.inputRef || input.mode !== 'invoke'
+            || typeof tx.aiTaskActionInput?.findFirst !== 'function') throw new BudgetError('FORBIDDEN');
+          const saved = await tx.aiTaskActionInput.findFirst({ where: { id: step.inputRef, scopeId: step.scopeId,
+            taskId: step.taskId, runId: step.runId, toolCode: TASK_IMAGE_MODEL_TOOL, fingerprint: step.requestFingerprint } });
+          if (!saved || saved.expiresAt <= this.now()) throw new BudgetError('FORBIDDEN');
+          const policy = { sceneCode: input.intent.sceneCode, maxOutputTokens: input.intent.maxOutputTokens, kind: 'image' as const };
+          const frozen = parseTaskModelInput(saved.payload, policy);
+          if (frozen.identityHash !== taskModelIdentity(principal.context)
+            || requestFingerprint(frozen.intent) !== requestFingerprint(input.intent)
+            || requestFingerprint(frozen.configuration) !== requestFingerprint(input.configuration)
+            || frozen.priceVersion !== input.priceVersion) throw new BudgetError('FORBIDDEN');
+          intentHash = taskModelFingerprint(frozen, policy);
+        } else {
+          intentHash = prepareGatewayTextIntent(input.intent, { sceneCode: input.intent.sceneCode,
+            maxOutputTokens: input.intent.maxOutputTokens }, input.mode).intentHash;
+        }
         const candidate = { scopeId: principal.scope.id, taskId: step.taskId, runId: step.runId, stepId: step.id, actionId: step.actionId,
-          actorId: principal.actorId, stepFingerprint: step.requestFingerprint, intentHash: prepared.intentHash, sceneCode: input.intent.sceneCode,
+          actorId: principal.actorId, stepFingerprint: step.requestFingerprint, intentHash, sceneCode: input.intent.sceneCode,
           leaseOwnerId: input.lease.holderId, fencingToken: new Prisma.Decimal(input.lease.fencingToken), expiresAt: input.expiresAt };
         const active = await this.active(tx, candidate, principal.context.audience);
         if (input.expiresAt > active.run.leaseExpiresAt!) throw new BudgetError('INVALID');
