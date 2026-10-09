@@ -66,7 +66,7 @@ export class HumanKnowledgeService {
     const input = parse(draftInput, value);
     return this.session.run(async context => {
       const grant = await this.authorization.authorize(context, { action: 'create', scope: context.scope,
-        attachmentId: input.attachmentId });
+        attachmentId: input.attachmentId, creation: input });
       if (!grant || typeof this.ports.files?.assertBound !== 'function' || context.scope.kind !== 'workspace') return unavailable();
       await this.ports.files.assertBound(context, { attachmentId: input.attachmentId,
         documentId: input.documentId, workspaceId: context.scope.workspaceId });

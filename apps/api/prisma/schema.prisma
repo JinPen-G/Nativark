@@ -1204,6 +1204,7 @@ model AiKnowledgePolicyManagementAuthority {
   action              String @db.VarChar(32)
   resourceKey         String @db.Char(64)
   resource            Json
+  preparationTarget   Json?
   requiredPermissions Json
   allowedPermissions  Json
   allowedOperations   Json
@@ -1212,10 +1213,39 @@ model AiKnowledgePolicyManagementAuthority {
   createdAt           DateTime @default(now()) @db.DateTime(3)
   updatedAt           DateTime @updatedAt @db.DateTime(3)
   preparations        AiKnowledgePolicyPreparation[]
+  preparationTargets  AiKnowledgePolicyPreparationTarget[]
   workspace           BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_kp_authority_workspace_fk")
 
   @@unique([tenantId, workspaceId, id], map: "ai_kp_authority_scope_key")
   @@map("ai_knowledge_policy_management_authorities")
+}
+
+model AiKnowledgePolicyPreparationTarget {
+  id                    String @id @db.VarChar(36)
+  tenantId              String @db.VarChar(128)
+  workspaceId           String @db.VarChar(128)
+  managerId             String @db.VarChar(128)
+  targetActorId         String @db.VarChar(128)
+  targetAudience        String @db.VarChar(32)
+  operationKey          String @db.VarChar(128)
+  documentId            String @unique(map: "ai_kp_target_document_key") @db.VarChar(128)
+  specJson              Json
+  specHash              String @db.Char(64)
+  authorityId           String @db.VarChar(36)
+  authorityRevision     Int @db.UnsignedInt
+  authorizationHash     String @db.Char(64)
+  revision              Int @default(1) @db.UnsignedInt
+  status                String @default("prepared") @db.VarChar(16)
+  expiresAt             DateTime @db.DateTime(3)
+  uploadSessionId       String? @unique(map: "ai_kp_target_session_key") @db.VarChar(191)
+  attachmentId          String? @unique(map: "ai_kp_target_attachment_key") @db.VarChar(191)
+  bindingHash           String? @db.Char(64)
+  createdAt             DateTime @default(now()) @db.DateTime(3)
+  boundAt               DateTime? @db.DateTime(3)
+  authority             AiKnowledgePolicyManagementAuthority @relation(fields: [tenantId, workspaceId, authorityId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_kp_target_authority_fk")
+
+  @@unique([tenantId, workspaceId, managerId, operationKey], map: "ai_kp_target_operation_key")
+  @@map("ai_knowledge_policy_preparation_targets")
 }
 
 model AiKnowledgePolicyPreparation {

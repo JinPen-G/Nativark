@@ -1,4 +1,14 @@
 export const AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION = 'knowledge-policy-management-1' as const;
+export type AiKnowledgePreparationTargetSpecDraft = {
+  version: 'knowledge-prepared-target-1';
+  operationKey: string;
+  upload: { documentId: string; fileName: string; mimeType: 'text/plain' | 'text/markdown'; sizeBytes: number };
+  document: { documentVersion: string; operationId: string; title: string; validFrom: string; validUntil?: string };
+  expiresAt: string;
+};
+export type AiKnowledgeTargetSelectionDraft = { authorityId: string };
+export type AiKnowledgeTargetReadDraft = { authorityId: string; operationKey: string; specHash?: string };
+export type AiKnowledgeTargetBindDraft = { authorityId: string; operationKey: string; sessionId: string; expectedRevision: 1; confirm: 'bind_knowledge_upload' };
 
 export type AiKnowledgePolicyManagementAction = 'create_disabled' | 'update_disabled' | 'enable' | 'disable';
 export type AiKnowledgePolicyChangeDraft = {

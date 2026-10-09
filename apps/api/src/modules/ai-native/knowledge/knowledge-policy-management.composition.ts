@@ -15,6 +15,9 @@ export function createKnowledgePolicyManagementFactory(input: KnowledgePolicyMan
       credentials: { current: async () => structuredClone(credential) } }, input.clock);
   };
   return {
+    prepareTarget: (request: unknown, value: unknown) => service(request).prepareTarget(value),
+    target: (request: unknown, value: unknown) => service(request).target(value),
+    bindTarget: (request: unknown, value: unknown) => service(request).bindTarget(value),
     read: (request: unknown, value: unknown) => service(request).read(value),
     prepare: (request: unknown, value: unknown) => service(request).prepare(value),
     preparation: (request: unknown, value: unknown) => service(request).preparation(value),

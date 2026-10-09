@@ -7,29 +7,34 @@ const { randomUUID } = require('node:crypto');
 const { KNOWLEDGE_POLICY_MANAGEMENT } = h.load('knowledge-policy-management.composition');
 const { AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION: managementVersion } = require('../packages/shared/src/ai-knowledge-policy-management-draft');
 
-function managementFixture() {
+function managementFixture(fileApplication = false) {
   const f = fixture(), { db } = f, { state } = db, clone = value => structuredClone(value);
   const { AuthService } = require('../apps/api/src/modules/auth/auth.service');
   const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
   const { user } = require('./fixtures/ai-native/authorization-baseline.cjs');
   const actor = user({ id: 'user-1', tenantId: 'tenant-1', permissions: ['system:params:manage', 'synthetic-policy'] });
-  const flags = { active: true, now: h.now, lostCommit: false, lostPrepare: false, rejectCommit: false, lostClaim: false, writes: 0 };
+  const flags = { active: true, now: fileApplication ? Date.now() : h.now, lostCommit: false, lostPrepare: false, rejectCommit: false, lostClaim: false, loseTargetReply: false, writes: 0 };
   const auth = new AuthService({ getAuthSession: async () => flags.active ? { id: 'policy-session', userId: actor.id, audience: 'operator', currentWorkspaceId: 'space-1' } : undefined,
     findUserById: async () => actor, findWorkspaceScopedUser: async () => actor, listUserWorkspaces: async () => [] },
     { get: key => key === 'AUTH_TOKEN_SECRET' ? 'synthetic-policy-test-secret' : undefined });
   const request = { audience: 'operator', requestId: 'policy-request', authorization: `Bearer ${auth.signAccessToken({ sub: actor.id, tid: actor.tenantId, sid: 'policy-session', aud: 'operator', exp: Math.floor(Date.now() / 1000) + 600 })}` };
   const credentials = { current: async () => clone(request) }, guard = new ApiAuthGuard(auth);
-  for (const name of ['policyAuthorities', 'policyPreparations', 'policyOperations', 'actionPolicies']) state[name] = new Map();
+  for (const name of ['policyAuthorities', 'policyPreparations', 'policyOperations', 'actionPolicies', 'policyTargets', 'assets', 'uploads']) state[name] = new Map();
   const match = (row, where) => Object.entries(where).every(([key, value]) => value instanceof Date ? row[key]?.getTime() === value.getTime() : row[key] === value);
   const delegate = name => {
     const api = {
-      async findFirst({ where, orderBy }) { const rows = [...state[name].values()].filter(row => match(row, where));
-        if (orderBy?.resultRevision === 'desc') rows.sort((a, b) => b.resultRevision - a.resultRevision); return clone(rows[0] ?? null); },
+      async findFirst({ where, orderBy, include }) { const rows = [...state[name].values()].filter(row => match(row, where));
+        if (orderBy?.resultRevision === 'desc') rows.sort((a, b) => b.resultRevision - a.resultRevision);
+        const row = clone(rows[0] ?? null);
+        if (row && include?.uploadSession) row.uploadSession = clone([...state.uploads.values()].find(session => session.fileAssetId === row.id) ?? null);
+        return row; },
+      async findUniqueOrThrow({ where }) { const row = await api.findFirst({ where }); if (!row) throw Error('missing'); return row; },
       async findUnique({ where }) { return api.findFirst({ where: where.tenantId_workspaceId_actorKind_actorId_audience_domain_action_resourceKey ?? where }); },
       async create({ data }) {
         const plain = { ...data, beforeJson: data.beforeJson === require('../apps/api/node_modules/@prisma/client').Prisma.JsonNull ? null : data.beforeJson };
         const key = name === 'actionPolicies' ? JSON.stringify([data.tenantId,data.workspaceId,data.actorKind,data.actorId,data.audience,data.domain,data.action,data.resourceKey]) : data.id;
         if (state[name].has(key)) throw Error('duplicate');
+        if (name === 'policyTargets' && [...state[name].values()].some(row => row.documentId === data.documentId || row.operationKey === data.operationKey && row.managerId === data.managerId)) throw Error('duplicate target');
         if (name === 'policyPreparations' && [...state[name].values()].some(row => row.operationKey === data.operationKey && row.actorId === data.actorId)) throw Error('duplicate operation');
         const row = { createdAt: new Date(flags.now), updatedAt: new Date(flags.now), ...clone(plain) };
         flags.writes++; state[name].set(key, row); return clone(row);
@@ -46,6 +51,8 @@ function managementFixture() {
   };
   db.aiKnowledgeActionPolicy = delegate('actionPolicies'); db.aiKnowledgePolicyManagementAuthority = delegate('policyAuthorities');
   db.aiKnowledgePolicyPreparation = delegate('policyPreparations'); db.aiKnowledgePolicyManagementOperation = delegate('policyOperations');
+  db.aiKnowledgePolicyPreparationTarget = delegate('policyTargets'); db.fileAsset = delegate('assets'); db.fileUploadSession = delegate('uploads');
+  db.aiKnowledgeDocument.findUnique = ({ where }) => db.aiKnowledgeDocument.findFirst({ where });
   db.businessWorkspace = { findFirst: async () => ({ id: 'space-1', tenantId: 'tenant-1', status: 'ACTIVE' }) };
   db.user = { findFirst: async ({ where }) => where.id === actor.id ? clone(actor) : null };
   db.workspaceMember = { findFirst: async ({ where }) => ({ ...where, isActive: flags.active }) };
@@ -59,6 +66,7 @@ function managementFixture() {
         if (flags.rejectCommit && state.policyOperations.size > oldOps) { flags.rejectCommit = false; throw Error('commit not observed'); }
         return result;
       });
+      if (flags.loseTargetReply) { flags.loseTargetReply = false; throw Error('target reply lost'); }
       if (flags.lostCommit && state.policyOperations.size > oldOps) { flags.lostCommit = false; throw Error('commit reply lost'); }
       if (flags.lostPrepare && state.policyPreparations.size > oldPrep) { flags.lostPrepare = false; throw Error('prepare reply lost'); }
       return result;
@@ -66,7 +74,15 @@ function managementFixture() {
   };
   const deps = { db, policyDb: db, auth, credentials, clock: { now: () => flags.now }, memory: { db },
     policyManagement: { enabled: true, guard }, fileRuntime: { assertKnowledgeBinding: async () => { throw Error('no file binding'); }, readKnowledgeBytes: async () => { throw Error('no file read'); } } };
-  const module = h.load('human-knowledge.module').HumanKnowledgeModule.registerFormal(deps);
+  const text = Buffer.from('Synthetic first document with trusted policy production.');
+  if (fileApplication) {
+    const config = { id: 'file-config', capability: 'file', provider: 's3_compatible', settings: { endpoint: 'https://objects.example.test', bucket: 'synthetic-bucket', region: 'us-east-1', forcePathStyle: true },
+      credentials: { accessKeyId: 'synthetic-access', secretAccessKey: 'synthetic-secret' } };
+    deps.integrations = { runtimeConfig: async () => clone(config), assertEnabledInTransaction: async () => {} };
+    deps.objectIO = { egress: async url => url, transport: async () => new Response(text, { headers: { 'content-type': 'text/plain', 'content-length': String(text.length) } }) };
+  }
+  const module = fileApplication ? h.load('human-knowledge.module').HumanKnowledgeModule.registerFiles(deps)
+    : h.load('human-knowledge.module').HumanKnowledgeModule.registerFormal(deps);
   const manage = module.providers.find(p => p.provide === KNOWLEDGE_POLICY_MANAGEMENT).useValue;
   const service = Type => module.providers.find(p => p.provide === Type).useValue;
   function authority(action, resource = {}, domain = 'knowledge', overrides = {}) {
@@ -74,20 +90,97 @@ function managementFixture() {
       basisRef: 'explicit-offline-admin-delegation', basisVersion: managementVersion, targetActorId: actor.id, targetAudience: 'operator', domain, action,
       resource: clone(resource), resourceKey: h.load('knowledge-validation').fingerprint(resource), requiredPermissions: ['system:params:manage'],
       allowedPermissions: ['synthetic-policy'], allowedOperations: ['create_disabled','update_disabled','enable','disable'], maxPolicySeconds: 86400,
-      expiresAt: new Date(h.now + 86400000), ...overrides };
+      expiresAt: new Date(flags.now + 86400000), ...overrides };
     state.policyAuthorities.set(row.id, row); return row;
   }
   let sequence = 0;
   const command = (root, action = 'create_disabled', expectedRevision = 0) => ({ version: managementVersion, authorityId: root.id,
-    operationKey: `policy-${++sequence}`, expectedRevision, action, requiredPermissions: ['synthetic-policy'], expiresAt: new Date(h.now + 3600000).toISOString() });
+    operationKey: `policy-${++sequence}`, expectedRevision, action, requiredPermissions: ['synthetic-policy'], expiresAt: new Date(flags.now + 3600000).toISOString() });
   async function apply(value) { const prepared = await manage.prepare(request, value); assert.equal(prepared.state, 'prepared');
     const result = await manage.commit(request, { preparationId: prepared.preparationId, changeHash: prepared.changeHash, confirm: 'apply_knowledge_policy_change' });
     assert.equal(result.state, 'observed'); return { prepared, result }; }
   async function enable(root) { const created = await apply(command(root)); assert.equal(created.result.result.enabled, false);
     assert.equal([...state.actionPolicies.values()].filter(row => row.resourceKey === root.resourceKey && row.action === root.action && row.domain === root.domain)[0].enabled, false);
     return apply(command(root, 'enable', 1)); }
-  return { ...f, deps, db, state, flags, actor, auth, request, manage, service, authority, command, apply, enable };
+  return { ...f, deps, db, state, flags, actor, auth, request, manage, service, authority, command, apply, enable, text };
 }
+
+test('prepared first document produces exact upload and create policies then uses the original file lifecycle', async t => {
+  const f = managementFixture(true), { preparedUploadResource } = h.load('knowledge-policy-management.validation');
+  const { FileStorageRuntimeService } = require('../apps/api/src/modules/integrations/file-storage.runtime.service');
+  const old = FileStorageRuntimeService.prototype.objectExists;
+  FileStorageRuntimeService.prototype.objectExists = async function (_config, key, mime, size) {
+    assert.ok([...f.state.assets.values()].some(row => row.storageKey === key)); assert.equal(mime, 'text/plain'); assert.equal(size, f.text.length); return true;
+  };
+  t.after(() => { FileStorageRuntimeService.prototype.objectExists = old; });
+  const spec = { version: 'knowledge-prepared-target-1', operationKey: 'first-target',
+    upload: { documentId: 'first-doc', fileName: 'first.txt', mimeType: 'text/plain', sizeBytes: f.text.length },
+    document: { documentVersion: 'first-v1', operationId: 'first-create', title: 'First real document', validFrom: new Date(f.flags.now).toISOString() },
+    expiresAt: new Date(f.flags.now + 7200000).toISOString() };
+  const root = f.authority('upload', preparedUploadResource(spec), 'knowledge', { preparationTarget: spec,
+    allowedOperations: ['prepare_target','bind_target','create_disabled','update_disabled','enable','disable'] });
+  const uploads = f.service(h.load('human-knowledge-upload.service').HumanKnowledgeUploadService);
+  const documents = f.service(h.load('human-knowledge.service').HumanKnowledgeService);
+  await assert.rejects(f.manage.prepare(f.request, f.command(root)));
+  await assert.rejects(f.manage.prepareTarget(f.request, { authorityId: root.id, targetActorId: 'other' }), { code: 'invalid_input' });
+  const target = await f.manage.prepareTarget(f.request, { authorityId: root.id });
+  assert.equal(target.state, 'prepared'); assert.equal(f.state.documents.size, 0); assert.equal(f.state.actionPolicies.size, 0);
+  assert.equal((await f.manage.prepareTarget(f.request, { authorityId: root.id })).targetId, target.targetId);
+  const dormant = await f.apply(f.command(root)); assert.equal(dormant.result.result.enabled, false);
+  await assert.rejects(uploads.begin(spec.upload)); assert.equal(f.state.assets.size, 0);
+  await f.apply(f.command(root, 'enable', 1));
+  await assert.rejects(uploads.begin({ ...spec.upload, sizeBytes: spec.upload.sizeBytes + 1 }));
+  const started = await uploads.begin(spec.upload); assert.equal(f.state.uploads.size, 1); assert.equal(f.state.assets.size, 1);
+  const docResource = { documentId: spec.upload.documentId, documentVersion: spec.document.documentVersion, attachmentId: started.fileAssetId, aclRevision: 1 };
+  const createRoot = f.authority('create', docResource, 'knowledge', { preparationTarget: spec });
+  await assert.rejects(f.manage.prepare(f.request, f.command(createRoot)));
+  const binding = { authorityId: root.id, operationKey: spec.operationKey, sessionId: started.sessionId, expectedRevision: 1, confirm: 'bind_knowledge_upload' };
+  await assert.rejects(f.manage.bindTarget(f.request, binding)); assert.equal([...f.state.policyTargets.values()][0].revision, 1);
+  const completed = await uploads.complete({ documentId: spec.upload.documentId, sessionId: started.sessionId });
+  assert.equal(completed.attachmentId, started.fileAssetId);
+  const asset = f.state.assets.get(completed.attachmentId), originalWorkspace = asset.metadata.workspaceId;
+  asset.metadata.workspaceId = 'foreign-space'; await assert.rejects(f.manage.bindTarget(f.request, binding)); asset.metadata.workspaceId = originalWorkspace;
+  f.flags.loseTargetReply = true;
+  assert.equal((await f.manage.bindTarget(f.request, binding)).state, 'unknown');
+  const writes = f.flags.writes, bound = await f.manage.target(f.request, { authorityId: root.id, operationKey: spec.operationKey });
+  assert.equal(bound.state, 'bound'); assert.equal(bound.attachmentId, completed.attachmentId);
+  assert.equal((await f.manage.bindTarget(f.request, binding)).state, 'bound'); assert.equal(f.flags.writes, writes);
+  await assert.rejects(f.manage.bindTarget(f.request, { ...binding, operationKey: 'other-target' }), { code: 'conflict' });
+  assert.equal(f.flags.writes, writes);
+  await assert.rejects(f.manage.bindTarget(f.request, { ...binding, sessionId: 'replacement-session' }));
+  const badExisting = f.authority('publish', docResource);
+  await assert.rejects(f.manage.prepare(f.request, f.command(badExisting))); assert.equal(f.state.documents.size, 0);
+  await f.enable(createRoot);
+  await f.enable(f.authority('create', { attachmentId: completed.attachmentId }, 'knowledge', { preparationTarget: spec }));
+  await f.enable(f.authority('create', {}, 'knowledge', { preparationTarget: spec }));
+  const draft = { documentId: spec.upload.documentId, ...spec.document, attachmentId: completed.attachmentId };
+  await assert.rejects(documents.create({ ...draft, documentVersion: 'unlimited-next' }));
+  await assert.rejects(documents.create({ ...draft, operationId: 'replacement-key' }));
+  await assert.rejects(documents.create({ ...draft, title: 'different-reviewed-content' }));
+  assert.equal(f.state.documents.size, 0);
+  assert.equal((await documents.prepareCreate(draft)).status, 'ready_to_create');
+  assert.equal((await documents.create(draft)).revision, 1);
+  assert.equal((await documents.create(draft)).revision, 1); assert.equal(f.state.documents.size, 1);
+  await assert.rejects(uploads.begin(spec.upload));
+  const roots = [];
+  for (const action of ['read_metadata','parse','read_body','index','publish','search','resolve_source','snippet']) for (const resource of [{}, docResource]) {
+    const next = f.authority(action, resource); roots.push(next); await f.enable(next);
+  }
+  const parsed = await documents.parse({ documentId: spec.upload.documentId, expectedRevision: 1, operationId: 'first-parse' }); assert.equal(parsed.parsing, 'parsed');
+  const indexing = f.service(h.load('human-knowledge-index.service').HumanKnowledgeIndexService);
+  const queued = await indexing.request({ documentId: spec.upload.documentId, expectedRevision: parsed.revision, operationId: 'first-index', kind: 'upsert' });
+  const indexed = await indexing.resume({ documentId: spec.upload.documentId, operationId: queued.indexJob.operationId, generation: queued.indexJob.generation });
+  assert.equal((await documents.publish({ documentId: spec.upload.documentId, expectedRevision: indexed.revision, operationId: 'first-publish' })).publication, 'published');
+  assert.equal((await documents.read(spec.upload.documentId)).publication, 'published');
+  const inputs = f.service(h.load('human-knowledge-input.service').HumanKnowledgeInputService);
+  const material = await inputs.collect({ requestId: 'first-consumer', query: 'Synthetic', maxSources: 3, maxSnippetChars: 1000, maxTotalBytes: 8192 });
+  assert.equal(material.status, 'ready'); assert.equal(material.sources.length, 1);
+  await f.apply(f.command(roots.find(row => row.action === 'search' && row.resource.documentId), 'disable', 2));
+  await assert.rejects(inputs.revalidate(material));
+  root.enabled = false; await assert.rejects(documents.create(draft)); root.enabled = true;
+  f.flags.now += 7200001; await assert.rejects(documents.create(draft));
+  assert.deepEqual(h.attempts, []);
+});
 
  test('managed exact policies drive original knowledge publish and memory confirmation with live revocation', async () => {
   const f = managementFixture(), { HumanKnowledgeService } = h.load('human-knowledge.service');
