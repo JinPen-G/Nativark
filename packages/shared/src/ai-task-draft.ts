@@ -5,7 +5,8 @@
 import { AI_TOOL_CODES, type AiExecutionContext, type AiFactReference, type AiToolError } from "./ai-native";
 
 export const AI_TEXT_MODEL_STEP_CODE = "ai.model.text" as const;
-export const AI_TASK_STEP_CODES = Object.freeze([...AI_TOOL_CODES, AI_TEXT_MODEL_STEP_CODE] as const);
+export const AI_IMAGE_MODEL_STEP_CODE = "ai.model.image" as const;
+export const AI_TASK_STEP_CODES = Object.freeze([...AI_TOOL_CODES, AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL_STEP_CODE] as const);
 export type AiTaskStepCode = typeof AI_TASK_STEP_CODES[number];
 
 export const AI_TASK_DRAFT_VERSION = "ain-c04-draft-1" as const;

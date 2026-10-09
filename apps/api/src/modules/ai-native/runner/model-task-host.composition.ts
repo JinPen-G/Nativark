@@ -4,7 +4,7 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
 import { composePersistedTaskModelInput } from '../model-input/persisted-task-model-input.composition';
-import { TASK_TEXT_MODEL_TOOL, taskModelMaterialSchema, parseTaskModelInput, taskModelFingerprint } from '../model-input/task-model-input';
+import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, taskModelMaterialSchema, taskImageMaterialSchema, parseTaskModelInput, taskModelFingerprint } from '../model-input/task-model-input';
 import { isGatewayResult } from '../gateway-contract-validation';
 import { aiTaskRunnerLimitsSchema } from './prisma-task-run-evidence.repository';
 import { composeAuthorizedPersistentTaskInputRunner } from './authorized-persistent-task-input.composition';
@@ -17,7 +17,7 @@ const taskSchema = z.object({ taskId: id.max(36), runId: id.max(36), registratio
 
 export type TaskModelHostDependencies = Parameters<typeof composePersistedTaskModelInput>[0] & {
   host: AiTaskApplicationHost;
-  task: z.infer<typeof taskSchema>;
+  task: Omit<z.infer<typeof taskSchema>, 'material'> & { material: z.infer<typeof taskImageMaterialSchema> };
   inputSource: AiTaskInputSource;
   financialEvidence: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>;
   monotonic?: () => number;
@@ -25,12 +25,16 @@ export type TaskModelHostDependencies = Parameters<typeof composePersistedTaskMo
 
 export function composeTaskModelHost(input: TaskModelHostDependencies) {
   if (typeof input?.financialEvidence?.readDispatch !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-  const task = taskSchema.parse(structuredClone(input.task));
+  const task = (input.kind === 'image' ? taskSchema.extend({ material: taskImageMaterialSchema }) : taskSchema).parse(structuredClone(input.task));
+  const tool = input.kind === 'image' ? TASK_IMAGE_MODEL_TOOL : TASK_TEXT_MODEL_TOOL;
   const model = composePersistedTaskModelInput(input);
   const prepare: AiTaskHeldPreparation = async ({ lease, taskRevision, signal }) => {
     if (lease.taskId !== task.taskId || signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     let { registrationRef, material, limits } = task;
     if (lease.runId !== task.runId) {
+      // Image continuations need their own current attachment and resource binding;
+      // do not reuse the text-only continuation producer as a dispatch grant.
+      if (input.kind === 'image') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       const continuation = await root.inputs.readContinuation(lease);
       const policy = { sceneCode: input.gatewayScene.sceneCode, maxOutputTokens: input.gatewayScene.maxOutputTokens };
       const previous = parseTaskModelInput(continuation.input, policy), result = continuation.result;
@@ -48,7 +52,7 @@ export function composeTaskModelHost(input: TaskModelHostDependencies) {
       expectedTaskRevision: taskRevision, lease, material: structuredClone(material) });
     if (signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     await model.plans.savePlan({ taskId: task.taskId, runId: lease.runId, taskRevision,
-      steps: [{ registrationRef, toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION, operation: 'external_unknown' }],
+      steps: [{ registrationRef, toolCode: tool, toolVersion: AI_TOOL_DRAFT_VERSION, operation: 'external_unknown' }],
       limits: structuredClone(limits) }, lease);
   };
   const root = composeAuthorizedPersistentTaskInputRunner({ db: input.db,

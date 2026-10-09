@@ -3,10 +3,9 @@ import { AI_TOOL_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/share
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
-import type { GatewayTextIntentPolicy } from '../gateway-intent';
 import type { AiTaskPlanEvidenceAuthority } from '../runner/prisma-task-run-evidence.repository';
 import { PrismaTaskStepEvidenceAuthority } from '../runner/prisma-task-step-evidence.authority';
-import { TASK_TEXT_MODEL_TOOL, parseTaskModelInput, taskModelFingerprint, taskModelIdentity } from './task-model-input';
+import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, parseTaskModelInput, taskModelFingerprint, taskModelIdentity, type TaskModelPolicy } from './task-model-input';
 import { isGatewayResult } from '../gateway-contract-validation';
 
 type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskResultArtifact'
@@ -18,18 +17,19 @@ const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
  * retries a provider or reconciles an unknown result into success. */
 export class PrismaModelStepEvidenceAuthority extends PrismaTaskStepEvidenceAuthority {
   protected override readonly modelStep = true;
-  private readonly policy: GatewayTextIntentPolicy;
+  private readonly policy: TaskModelPolicy;
   constructor(private readonly modelDb: Db, authority: AiTaskRepositoryAuthority, plans: AiTaskPlanEvidenceAuthority,
-    policy: GatewayTextIntentPolicy, private readonly financial: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>,
+    policy: TaskModelPolicy, private readonly financial: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>,
     private readonly clock: () => Date = () => new Date()) {
     super(modelDb, authority, plans, clock);
     if (typeof financial?.readDispatch !== 'function'
       || !['aiTaskActionInput', 'aiGatewayInvocation', 'aiGatewayAccountingReceipt', 'aiInvocationAdmission']
         .every(name => typeof (modelDb[name as keyof Db] as { findFirst?: unknown })?.findFirst === 'function')) throw unavailable();
-    this.policy = { sceneCode: policy.sceneCode, maxOutputTokens: policy.maxOutputTokens };
+    this.policy = { sceneCode: policy.sceneCode, maxOutputTokens: policy.maxOutputTokens, ...(policy.kind === 'image' ? { kind: 'image' as const } : {}) };
   }
   protected override accepts(step: AiStep, operation: string) {
-    return step.toolCode === TASK_TEXT_MODEL_TOOL && step.toolVersion === AI_TOOL_DRAFT_VERSION && operation === 'external_unknown';
+    return step.toolCode === (this.policy.kind === 'image' ? TASK_IMAGE_MODEL_TOOL : TASK_TEXT_MODEL_TOOL)
+      && step.toolVersion === AI_TOOL_DRAFT_VERSION && operation === 'external_unknown';
   }
   protected override async additionalEvidence(step: AiStep, artifact: AiTaskResultArtifact | null,
     charges: AiTaskExecutionCharge[], context: AiExecutionContext) {

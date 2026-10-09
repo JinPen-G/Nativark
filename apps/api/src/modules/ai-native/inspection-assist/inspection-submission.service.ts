@@ -13,6 +13,7 @@ import { InspectionAssistError, inspectionId, inspectionTargetSchema, parseInspe
 
 const base = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId }).strict();
 const operation = base.extend({ operationId: inspectionId, expectedRevision: z.number().int().min(1).max(997) }).strict();
+const preparation = operation.extend({ actionId: inspectionId, handoverSignatureFileAssetId: inspectionId.optional() }).strict();
 const targetOf = (input: AiInspectionTarget): AiInspectionTarget => ({ orderId: input.orderId, allocationId: input.allocationId, templateId: input.templateId, stage: input.stage });
 
 export class InspectionSubmissionService {
@@ -24,8 +25,28 @@ export class InspectionSubmissionService {
   async prepare(value: unknown) { return this.prepareMaterial(value, false); }
   async prepareReview(value: unknown) { return this.prepareMaterial(value, true); }
 
+  /** Read only the receipt of the exact original preparation command. Absence
+   * is not proof that a lost/in-flight transaction did not commit. */
+  async reconcilePreparation(value: unknown) {
+    const command = parseInspectionInput(z.object({ kind: z.enum(['prepare', 'prepareReview']), request: preparation }).strict(), value);
+    const input = command.request, target = targetOf(input);
+    return this.authority.withAction(target, 'submit', async scope => {
+      await this.row(scope, input.draftId, target);
+      const fingerprint = requestFingerprint({ kind: command.kind === 'prepareReview' ? 'inspection.prepareReview' : 'inspection.prepare', scope, input });
+      const receipt = await this.repository.receipt(scope, input.operationId, fingerprint);
+      return this.authority.withAction(target, 'submit', async current => {
+        this.sameScope(scope, current);
+        await this.row(current, input.draftId, target);
+        if (receipt.status !== 'found') return { ...receipt, execution: 'not_attested' as const };
+        if (receipt.result.draftId !== input.draftId || receipt.result.status !== 'prepared') throw new InspectionAssistError('BINDING_CHANGED');
+        return { ...receipt, mode: command.kind === 'prepareReview' ? 'manual_review_only' as const : 'original_single' as const,
+          execution: 'not_attested' as const, businessValidation: 'required_at_original_inspection_entry' as const };
+      });
+    });
+  }
+
   private async prepareMaterial(value: unknown, allowReviewOnly: boolean) {
-    const input = parseInspectionInput(operation.extend({ actionId: inspectionId, handoverSignatureFileAssetId: inspectionId.optional() }).strict(), value);
+    const input = parseInspectionInput(preparation, value);
     const target = targetOf(input);
     return this.authority.withAction(target, 'submit', async scope => {
       const fingerprint = requestFingerprint({ kind: allowReviewOnly ? 'inspection.prepareReview' : 'inspection.prepare', scope, input });

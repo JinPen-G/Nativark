@@ -11,7 +11,7 @@ import { TenantModelConfigurationAuthority } from '../tenant-model-config.author
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { aiTaskRunnerLimitsSchema } from './prisma-task-run-evidence.repository';
 import type { PersistedTaskInputTool } from './prisma-task-plan-input.source';
-import { TASK_TEXT_MODEL_TOOL } from '../model-input/task-model-input';
+import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL } from '../model-input/task-model-input';
 
 const scene = z.object({ code: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u),
   version: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u) }).strict();
@@ -43,7 +43,7 @@ export class PrismaTaskPlanPolicyRepository {
     private readonly wall: () => Date = () => new Date()) {
     this.selected = scene.parse(structuredClone(input.scene));
     this.tool = input.tool ?? 'rental.catalog.search';
-    if (!['rental.catalog.search', 'rental.availability.check', 'rental.order.commit', 'tenant.notifications.commit', TASK_TEXT_MODEL_TOOL].includes(this.tool)) throw unavailable();
+    if (!['rental.catalog.search', 'rental.availability.check', 'rental.order.commit', 'tenant.notifications.commit', TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL].includes(this.tool)) throw unavailable();
     if (typeof db?.$transaction !== 'function' || typeof db.aiTaskPlanPolicy?.updateMany !== 'function') throw unavailable();
     const current = new AiTaskCurrentIdentityAuthority(input.auth, input.credentials, wall);
     this.scopes = new AiScopeRepository(db, current, wall);

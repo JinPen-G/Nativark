@@ -204,6 +204,17 @@ test('multi-allocation review preserves per-item materials and cannot dispatch a
   const review=await f.services.submission.prepareReview(input);
   assert.equal(review.mode,'manual_review_only');
   assert.deepEqual(await f.services.submission.prepareReview(input),review);
+  const snapshot=structuredClone(f.state.drafts.get(d.result.draftId));
+  const receipt=await f.services.submission.reconcilePreparation({kind:'prepareReview',request:input});
+  assert.equal(receipt.status,'found');assert.equal(receipt.result.revision,review.revision);
+  assert.equal(receipt.execution,'not_attested');assert.equal(receipt.mode,'manual_review_only');
+  assert.deepEqual(f.state.drafts.get(d.result.draftId),snapshot);
+  assert.equal((await f.services.submission.reconcilePreparation({kind:'prepareReview',request:{...input,operationId:'missing-command'}})).status,'absent');
+  await assert.rejects(f.services.submission.reconcilePreparation({kind:'prepare',request:input}),{code:'REVISION_CONFLICT'});
+  await assert.rejects(f.services.submission.reconcilePreparation({kind:'prepareReview',request:{...input,actionId:'another-action'}}),{code:'REVISION_CONFLICT'});
+  f.state.active=false;
+  await assert.rejects(f.services.submission.reconcilePreparation({kind:'prepareReview',request:input}));
+  f.state.active=true;
   const detail=await f.services.drafts.read({...target,draftId:d.result.draftId});
   assert.equal(detail.state.submission.mode,'manual_review_only');
   assert.equal(detail.state.fields.mileage.value,42);

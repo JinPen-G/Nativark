@@ -48,7 +48,12 @@ function resolveTsc() {
   return path.join(path.dirname(packageJson), "bin", "tsc");
 }
 
+let privateTypeConfig;
 function runTsc(args) {
+  if (args[0] === '-p' && args[1] === 'tsconfig.json') {
+    privateTypeConfig ??= require('../../../scripts/miniprogram-shared-types.cjs').prepareMiniprogramSharedTypes(root);
+    args = ['-p', privateTypeConfig, ...args.slice(2)];
+  }
   const result = spawnSync(process.execPath, [resolveTsc(), ...args], { cwd: root, stdio: "inherit" });
   if (result.status !== 0) fail("TypeScript 编译失败");
 }

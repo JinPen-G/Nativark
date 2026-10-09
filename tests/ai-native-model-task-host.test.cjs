@@ -4,6 +4,27 @@ require('ts-node').register({ transpileOnly: false, compilerOptions: { module: '
 const { modelHostHarness } = require('./fixtures/ai-native/task-model-host.cjs');
 const { composeTaskModelHost } = require('../apps/api/src/modules/ai-native/runner/model-task-host.composition');
 
+test('image model host executes the original queued task with one invocation, original accounting and resource charges', async () => {
+  const h = await modelHostHarness('image');
+  const result = await h.root.application.start(h.query);
+  assert.equal(result.kind, 'run_outcome');
+  assert.equal(result.outcome.status, 'succeeded', JSON.stringify(result));
+  assert.equal(h.state.aiStep[0].toolCode, 'ai.model.image');
+  assert.equal(h.state.aiTaskActionInput.length, 1);
+  assert.equal(h.state.aiGatewayInvocation.length, 1);
+  assert.equal(h.modelControl.sent.length, 1);
+  assert.equal(h.state.aiGatewayInvocation[0].intentHash, h.state.aiTaskActionInput[0].fingerprint);
+  assert.equal(h.state.aiGatewayAccountingReceipt.length, 1);
+  assert.equal(h.state.aiBudgetReservation.length, 1);
+  assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, 1n);
+  assert.equal(h.state.aiTaskExecutionCharge.length, 4);
+  assert.ok(h.state.aiTaskExecutionCharge.every(c => c.status === 'RECORDED'));
+  const revoked = await modelHostHarness('image'); revoked.modelControl.mediaActive = false;
+  await assert.rejects(revoked.root.application.start(revoked.query), error => error.code === 'CAPABILITY_UNSUPPORTED');
+  assert.equal(revoked.state.aiGatewayInvocation.length, 0);
+  assert.equal(revoked.modelControl.sent.length, 0);
+});
+
 test('model host starts queued task and run, publishes under one lease, then settles the original invocation and four resources', async () => {
   const h = await modelHostHarness(), originalFence = h.state.aiRun[0].fencingToken, start = h.trace.length;
   h.config.task.material.messages[0].content[0].text = 'late caller mutation';

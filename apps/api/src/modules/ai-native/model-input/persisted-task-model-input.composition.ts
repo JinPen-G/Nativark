@@ -10,7 +10,7 @@ import { PrismaTaskGatewayInvocationPreparation } from '../runner/prisma-task-ga
 import { PrismaGatewayInvocationBindings } from '../budget/prisma-gateway-invocation-bindings';
 import type { PublicGatewayRuntime } from '../public-ai-gateway.service';
 import type { GatewayTextIntentBinding } from '../gateway-intent';
-import { TASK_TEXT_MODEL_TOOL } from './task-model-input';
+import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL } from './task-model-input';
 import { TaskModelGatewayInputSource } from './task-model-gateway-input.source';
 import { PrismaModelStepEvidenceAuthority } from './prisma-model-step-evidence.authority';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
@@ -23,25 +23,30 @@ export function composePersistedTaskModelInput(input: PersistedTaskAuthorization
   gatewayScene: GatewayTextIntentBinding;
   priceVersion: string;
   runtime: PublicGatewayRuntime;
+  /** Server-selected tool policy; never an Agent-controlled feature switch. */
+  kind?: 'image';
 }) {
   if (input.scene.code !== input.gatewayScene.sceneCode) throw new Error('Model scene binding mismatch');
   const clock = input.clock ?? (() => new Date());
+  const tool = input.kind === 'image' ? TASK_IMAGE_MODEL_TOOL : TASK_TEXT_MODEL_TOOL;
+  const modelPolicy = { sceneCode: input.gatewayScene.sceneCode, maxOutputTokens: input.gatewayScene.maxOutputTokens,
+    ...(input.kind === 'image' ? { kind: 'image' as const } : {}) };
   const authorization = composePersistedTaskAuthorization(input);
-  const policy = new PrismaTaskPlanPolicyRepository(input.db, { ...input, tool: TASK_TEXT_MODEL_TOOL }, clock);
+  const policy = new PrismaTaskPlanPolicyRepository(input.db, { ...input, tool }, clock);
   const source = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, clock,
-    TASK_TEXT_MODEL_TOOL, undefined, { sceneCode: input.gatewayScene.sceneCode, maxOutputTokens: input.gatewayScene.maxOutputTokens });
+    tool, undefined, modelPolicy);
   const scopes = new PrismaTaskExecutionScopeAuthority(authorization.tasks, input.db);
   const plans = new PrismaTaskRunEvidenceRepository(input.db, scopes, source, clock);
   const registrations = new AiStepRegistrationRepository(input.db, source, clock);
   const inputs = new TaskModelGatewayInputSource(input.db, source, authorization.execution, input.runtime,
-    input.gatewayScene, input.priceVersion, clock);
+    input.gatewayScene, input.priceVersion, clock, input.kind);
   const bindings = new PrismaGatewayInvocationBindings(input.db, authorization.scopes, clock);
   const invocations = new PrismaTaskGatewayInvocationPreparation(bindings, inputs);
   const createTransitionAuthority = (financial: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>) =>
-    new PrismaModelStepEvidenceAuthority(input.db, authorization.authority, source, input.gatewayScene, financial, clock);
+    new PrismaModelStepEvidenceAuthority(input.db, authorization.authority, source, modelPolicy, financial, clock);
   const commands: AiTaskRunnerRepositoryCommandFactory = {
     async register(plan, lease) {
-      if (plan.toolCode !== TASK_TEXT_MODEL_TOOL || plan.toolVersion !== AI_TOOL_DRAFT_VERSION || plan.operation !== 'external_unknown') {
+      if (plan.toolCode !== tool || plan.toolVersion !== AI_TOOL_DRAFT_VERSION || plan.operation !== 'external_unknown') {
         throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       }
       const task = await authorization.tasks.readMetadata(lease.taskId);
@@ -49,7 +54,7 @@ export function composePersistedTaskModelInput(input: PersistedTaskAuthorization
         lease: { runId: lease.runId, holderId: lease.holderId, revision: lease.revision, fencingToken: lease.fencingToken } };
     },
     transition(kind, step, lease, resultRef) {
-      if (kind === 'pause' || step.plan.toolCode !== TASK_TEXT_MODEL_TOOL || (kind !== 'start' && !resultRef)) {
+      if (kind === 'pause' || step.plan.toolCode !== tool || (kind !== 'start' && !resultRef)) {
         throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       }
       return { taskId: lease.taskId, stepId: step.registered.stepId, expectedTaskRevision: step.registered.taskRevision,
@@ -60,6 +65,6 @@ export function composePersistedTaskModelInput(input: PersistedTaskAuthorization
   };
   return Object.freeze({ authorization, tasks: authorization.tasks, policy, planAuthority: source, plans, registrations,
     publish: inputs.publish.bind(inputs), invocations, executors: inputs.registeredExecutors(), commands, createTransitionAuthority,
-    toolCatalog: { resolve: async (code: string, version: string) => code === TASK_TEXT_MODEL_TOOL && version === AI_TOOL_DRAFT_VERSION
+    toolCatalog: { resolve: async (code: string, version: string) => code === tool && version === AI_TOOL_DRAFT_VERSION
       ? { modelCall: true } : null } });
 }
