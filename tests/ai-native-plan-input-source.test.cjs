@@ -193,6 +193,11 @@ test('settings normal host starts through the runner and persists an approval ch
   assert.equal(material.decision.state, 'not_observed');
   const handoff = await consumer.humanHandoff({ preparation });
   assert.equal(handoff.reference.taskId, 'task-a'); assert.equal(handoff.continuation, 'not_invoked_use_original_settings_host');
+  assert.equal(handoff.confirmation.checkpointRef, checkpoint.id);
+  assert.equal(handoff.confirmation.taskRevision, h.state.aiTask[0].revision);
+  assert.equal(handoff.confirmation.proposal.reviewedPayloadHash, proposal.reviewedPayloadHash);
+  assert.equal(handoff.execution, 'not_attested'); assert.deepEqual(handoff.missing, []);
+  await assert.rejects(consumer.humanHandoff({ preparation, checkpointRef: 'caller-checkpoint' }));
   assert.equal(h.state.aiApproval.length, 0); assert.equal(h.state.rentalApprovedSettingsOperation.length, 0);
   await assert.rejects(consumer.read({ preparation: { ...preparation, taskId: 'other-task' } }));
   await assert.rejects(composeAiSettingsBusinessConsumer().read({ preparation }));
@@ -224,6 +229,7 @@ test('settings normal host starts through the runner and persists an approval ch
   const business = await consumer.read({ preparation, operationKey: h.state.rentalApprovedSettingsOperation[0].operationKey });
   assert.equal(business.businessOutcome, 'committed'); assert.equal(business.currentMatchesChangeBase, false);
   assert.equal(business.operation.receipt.changeId, preparation.changeId);
+  assert.equal(business.confirmation, null, 'committed task must not re-offer its old wait');
   await assert.rejects(host.application.readConfirmation(checkpointRequest), 'terminal tasks cannot expose a live waiting checkpoint');
 });
 
