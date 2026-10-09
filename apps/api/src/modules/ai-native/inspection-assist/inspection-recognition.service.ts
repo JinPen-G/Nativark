@@ -7,6 +7,8 @@ import { InspectionTemplateService } from './inspection-template.service';
 import { PrismaInspectionDraftRepository } from './prisma-inspection-draft.repository';
 import { PrismaInspectionEvidenceAuthority } from './prisma-inspection-evidence.authority';
 import { InspectionAssistError, inspectionId, inspectionTargetSchema, parseInspectionInput } from './inspection-assist.validation';
+import type { GatewayMediaAttachmentResolver } from '../gateway-intent';
+import { ModelGatewayError } from '../model-gateway.ports';
 
 const schema = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId, operationId: inspectionId,
   expectedRevision: z.number().int().min(1).max(999), question: z.string().trim().min(1).max(4000) }).strict();
@@ -15,6 +17,72 @@ export class InspectionRecognitionService {
   constructor(private readonly repository: PrismaInspectionDraftRepository, private readonly drafts: InspectionDraftService,
     private readonly authority: InspectionActionAuthority, private readonly templates: InspectionTemplateService,
     private readonly evidence: PrismaInspectionEvidenceAuthority) {}
+
+  /** Server-only adapter for the existing Gateway. The returned function stays
+   * in request memory, never a DTO, dispatch grant or persisted credential. */
+  async gatewayMedia(value: unknown) {
+    const input = parseInspectionInput(inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId,
+      inputId: inspectionId, expectedRevision: z.number().int().min(1).max(999) }).strict(), value);
+    const target: AiInspectionTarget = { orderId: input.orderId, allocationId: input.allocationId,
+      templateId: input.templateId, stage: input.stage };
+    const load = () => this.authority.withAction(target, 'bind', async scope => {
+      const row = await this.repository.read(scope, input.draftId);
+      if (!row || row.orderId !== target.orderId || row.allocationId !== target.allocationId
+        || row.templateId !== target.templateId || row.stage !== target.stage) throw new InspectionAssistError('ACCESS_DENIED');
+      if (row.revision !== input.expectedRevision || !['draft_saved', 'prepared'].includes(row.status)
+        || row.expiresAt.getTime() <= Date.now()) throw new InspectionAssistError('REVISION_CONFLICT');
+      const detail = await this.drafts.read({ ...target, draftId: input.draftId });
+      const matches = detail.state.recognitionInputs?.filter(item => item.inputId === input.inputId) ?? [];
+      if (matches.length !== 1 || detail.revision !== row.revision) throw new InspectionAssistError('BINDING_CHANGED');
+      const frozen = structuredClone(matches[0]);
+      const { inputFingerprint, ...payload } = frozen;
+      const binding = await this.templates.read(target);
+      if (requestFingerprint(payload) !== inputFingerprint || frozen.bindingFingerprint !== row.bindingFingerprint
+        || binding.bindingFingerprint !== row.bindingFingerprint || binding.template.id !== frozen.template.id
+        || binding.template.version !== frozen.template.version || !frozen.media.length || frozen.media.length > 8
+        || frozen.media.some(ref => !detail.state.evidence.some(current => current.attachmentId === ref.attachmentId
+          && current.attachmentRevision === ref.attachmentRevision))
+        || await this.evidence.fingerprint(target, detail.state.evidence) !== row.evidenceFingerprint) {
+        throw new InspectionAssistError('BINDING_CHANGED');
+      }
+      const current = await this.repository.read(scope, input.draftId);
+      if (!current || current.revision !== row.revision || current.status !== row.status
+        || current.expiresAt.getTime() <= Date.now() || requestFingerprint(current.state) !== requestFingerprint(row.state)) {
+        throw new InspectionAssistError('BINDING_CHANGED');
+      }
+      return { scope, frozen };
+    });
+    const initial = await load();
+    const media: GatewayMediaAttachmentResolver = { resolve: async (context, reference, signal) => {
+      context = structuredClone(context); reference = structuredClone(reference);
+      if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+      const before = await load();
+      const scope = before.scope;
+      if (context.tenantId !== scope.tenantId || context.workspaceId !== scope.workspaceId || context.actorId !== scope.ownerId
+        || requestFingerprint(scope) !== requestFingerprint(initial.scope)) throw new InspectionAssistError('ACCESS_DENIED');
+      if (before.frozen.inputFingerprint !== initial.frozen.inputFingerprint) throw new InspectionAssistError('BINDING_CHANGED');
+      const selected = before.frozen.media.filter(item => item.attachmentId === reference.attachmentId
+        && item.attachmentRevision === reference.attachmentRevision);
+      if (reference.kind !== 'image' || selected.length !== 1
+        || !['image/png', 'image/jpeg'].includes(selected[0].mediaType) || selected[0].sizeBytes > 524288) {
+        throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+      }
+      const expected = selected[0];
+      const resolved = await this.evidence.readMedia({ ...target, attachmentId: expected.attachmentId,
+        attachmentRevision: expected.attachmentRevision }, signal, 524288);
+      const after = await load();
+      if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+      if (requestFingerprint(after.scope) !== requestFingerprint(scope)
+        || after.frozen.inputFingerprint !== before.frozen.inputFingerprint
+        || resolved.contentHash !== expected.contentHash || resolved.sizeBytes !== expected.sizeBytes
+        || resolved.mediaType !== expected.mediaType || (resolved.mediaType !== 'image/png' && resolved.mediaType !== 'image/jpeg')) {
+        throw new InspectionAssistError('BINDING_CHANGED');
+      }
+      return { attachmentId: expected.attachmentId, attachmentRevision: expected.attachmentRevision,
+        mediaType: resolved.mediaType, bytes: new Uint8Array(resolved.bytes), contentHash: resolved.contentHash };
+    } };
+    return { draftId: input.draftId, draftRevision: input.expectedRevision, input: structuredClone(initial.frozen), media };
+  }
 
   async prepare(value: unknown, signal: AbortSignal) {
     const input = parseInspectionInput(schema, value);

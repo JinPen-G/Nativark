@@ -109,7 +109,14 @@ export async function prepareGatewayIntent(
     maxOutputTokens: input.maxOutputTokens, ...(features.length ? { features } : {}) });
   if (!request.success) throw new ModelGatewayError('INVALID_REQUEST');
   if (!modelProtocolRequestSchema.safeParse({ ...request.data, model: 'validation-only' }).success) throw new ModelGatewayError('INVALID_REQUEST');
-  return { sceneCode: input.sceneCode, intentHash: requestFingerprint({ intent: input, mode }), request: request.data,
+  // Bind the bytes actually authorized and resolved, not just an attachment id.
+  // Text-only identities remain unchanged for existing persisted invocations.
+  const mediaBinding = hasMedia ? messages.map(message => ({ role: message.role,
+    media: message.content.filter(part => part.kind !== 'text').map(part => ({ kind: part.kind,
+      attachmentId: part.attachmentId, attachmentRevision: part.attachmentRevision,
+      mediaType: part.mediaType, contentHash: part.contentHash })) })) : undefined;
+  return { sceneCode: input.sceneCode, intentHash: requestFingerprint({ intent: input, mode,
+    ...(mediaBinding ? { media: mediaBinding } : {}) }), request: request.data,
     requiredCapabilities: [...(hasMedia ? ['text' as const, 'image' as const] : ['text' as const]), ...(mode === 'stream' ? ['streaming' as const] : [])],
     omittedOptionalFeatures: input.optionalFeatures.filter(item => !supported.includes(item)) };
 }

@@ -116,6 +116,26 @@ test('actual file runtime and evidence adapter produce bounded immutable recogni
   const frozen=detail.state.recognitionInputs[0];assert.equal(frozen.question,input.question);assert.equal(frozen.media[0].width,1);
   assert.equal(frozen.inputFingerprint.length,64);assert.ok(!JSON.stringify(frozen).includes('object-a'));assert.ok(!JSON.stringify(frozen).includes(png.toString('base64')));
   assert.deepEqual(await f.services.recognition.prepare(input,new AbortController().signal),result);assert.equal(f.calls.length,1);
+  const mediaInput={...target,draftId:d.result.draftId,inputId:result.inputId,expectedRevision:detail.revision};
+  const bound=await f.services.recognition.gatewayMedia(mediaInput);
+  assert.equal(bound.input.inputFingerprint,frozen.inputFingerprint);
+  const {prepareGatewayIntent}=require('../apps/api/src/modules/ai-native/gateway-intent');
+  const context={tenantId:'tenant-a',workspaceId:'workspace-a',actorId:f.state.user.id};
+  const intent={draftVersion:'ain-c03-draft-2',requestId:'media-original',sceneCode:'inspection.recognize',
+    messages:[{role:'user',content:[{kind:'text',text:frozen.question},{kind:'image',...ref}]}],
+    requiredFeatures:['text','image'],optionalFeatures:[],maxOutputTokens:100};
+  const prepared=await prepareGatewayIntent(intent,{sceneCode:intent.sceneCode,maxOutputTokens:100},'invoke',context,bound.media);
+  assert.equal(prepared.request.messages[0].content[1].contentHash,frozen.media[0].contentHash);
+  assert.notEqual(prepared.intentHash,requestFingerprint({intent,mode:'invoke'})); // Evidence digest is part of the invocation identity.
+  assert.equal(prepared.request.messages[0].content[1].data,png.toString('base64'));assert.equal(f.calls.length,2);
+  await assert.rejects(bound.media.resolve({...context,workspaceId:'other'}, {kind:'image',...ref},new AbortController().signal));
+  assert.equal(f.calls.length,2);
+  f.state.active=false;
+  await assert.rejects(bound.media.resolve(context,{kind:'image',...ref},new AbortController().signal));
+  assert.equal(f.calls.length,2);
+  f.state.active=true;f.state.drafts.get(d.result.draftId).revision++;
+  await assert.rejects(bound.media.resolve(context,{kind:'image',...ref},new AbortController().signal));
+  assert.equal(f.calls.length,2);
 });
 test('candidate accept, reject and late append preserve human values and original candidate history',async()=>{
   const f=mediaFixture(),ref=await f.services.evidence.bind({...target,attachmentId:'file-a'});
