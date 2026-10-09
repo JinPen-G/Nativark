@@ -117,6 +117,10 @@ test('prepared first document produces exact upload and create policies then use
     upload: { documentId: 'first-doc', fileName: 'first.txt', mimeType: 'text/plain', sizeBytes: f.text.length },
     document: { documentVersion: 'first-v1', operationId: 'first-create', title: 'First real document', validFrom: new Date(f.flags.now).toISOString() },
     expiresAt: new Date(f.flags.now + 7200000).toISOString() };
+  const publication = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor(
+    require('../packages/shared/src/ai-entry-management-draft-schemas').AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS, {});
+  assert.equal(publication.AiKnowledgePreparationTargetSpecDraft(spec), true);
+  assert.equal(publication.AiKnowledgePreparationTargetSpecDraft({ ...spec, upload: { ...spec.upload, storageKey: 'caller-key' } }), false);
   const root = f.authority('upload', preparedUploadResource(spec), 'knowledge', { preparationTarget: spec,
     allowedOperations: ['prepare_target','bind_target','create_disabled','update_disabled','enable','disable'] });
   const uploads = f.service(h.load('human-knowledge-upload.service').HumanKnowledgeUploadService);

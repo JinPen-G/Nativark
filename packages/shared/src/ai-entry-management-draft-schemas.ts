@@ -8,7 +8,7 @@ const uuid = { type: 'string', format: 'uuid' };
 const knowledgeId = { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' };
 const hash = { type: 'string', pattern: '^[a-f0-9]{64}$' };
 const date = { type: 'string', format: 'date-time' };
-const literal = (value: string | boolean) => ({ const: value });
+const literal = (value: string | boolean | number) => ({ const: value });
 const object = (properties: Record<string, unknown>, required = Object.keys(properties)) =>
   ({ type: 'object', properties, required, additionalProperties: false });
 const permissions = { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true,
@@ -43,6 +43,15 @@ const material = object({ selection, sources, deliveryAddress: object({ addressI
 // Publication describes payload shape, not current authorization or permission
 // to navigate/execute. Runtime consumers must still verify the original binding.
 export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
+  AiKnowledgePreparationTargetSpecDraft: object({ version: literal('knowledge-prepared-target-1'), operationKey: knowledgeId,
+    upload: object({ documentId: { ...knowledgeId, maxLength: 36 }, fileName: { type: 'string', minLength: 1, maxLength: 180 },
+      mimeType: { enum: ['text/plain', 'text/markdown'] }, sizeBytes: { type: 'integer', minimum: 1, maximum: 262144 } }),
+    document: object({ documentVersion: knowledgeId, operationId: knowledgeId, title: { type: 'string', minLength: 1, maxLength: 256 },
+      validFrom: date, validUntil: date }, ['documentVersion', 'operationId', 'title', 'validFrom']), expiresAt: date }),
+  AiKnowledgeTargetSelectionDraft: object({ authorityId: uuid }),
+  AiKnowledgeTargetReadDraft: object({ authorityId: uuid, operationKey: knowledgeId, specHash: hash }, ['authorityId', 'operationKey']),
+  AiKnowledgeTargetBindDraft: object({ authorityId: uuid, operationKey: knowledgeId, sessionId: { type: 'string', minLength: 1, maxLength: 128 },
+    expectedRevision: literal(1), confirm: literal('bind_knowledge_upload') }),
   AiBookingSelection: selection,
   AiBookingDraft: object({ contractVersion: literal(AI_BOOKING_DRAFT_CONTRACT_VERSION), bookingDraftId: uuid,
     audience: literal('customer'), surface: { enum: [...AI_CUSTOMER_ENTRY_SURFACES] }, scope,
