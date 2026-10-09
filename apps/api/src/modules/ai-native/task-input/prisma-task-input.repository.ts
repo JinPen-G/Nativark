@@ -35,6 +35,80 @@ function answerDigest(submission: AiTaskInputSubmissionDraft, request: AiTaskInp
   return requestFingerprint({ ...submission, answers: [...submission.answers].sort((a, b) => a.fieldId.localeCompare(b.fieldId)), requestHash: request.requestHash });
 }
 
+/** Read provenance, never a lease or permission to dispatch. The original run
+ * remains the resource origin; every successor must have a consumed, bound
+ * human answer and a completed single-model parent. No "latest run" lookup. */
+export async function readTaskModelRunOrigin(tx: Tx, access: Access,
+  key: { scopeId: string; taskId: string; runId: string; originRunId: string; registrationRef: string }) {
+  let cursor = key.runId, selectedRegistration = key.registrationRef;
+  let continuation: { receiptId: string; inputHash: string; input: Prisma.JsonValue;
+    result: Prisma.JsonValue; answers: AiTaskInputSubmissionDraft['answers'] } | undefined;
+  const seen = new Set<string>();
+  for (let count = 0; count < 1000; count++) {
+    if (seen.has(cursor)) throw denied();
+    seen.add(cursor);
+    const run = await tx.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: cursor } });
+    if (!run || run.id !== cursor || run.scopeId !== key.scopeId || run.taskId !== key.taskId
+      || run.actorKind !== access.actorKind || run.actorId !== access.actorId) throw denied();
+    if (cursor === key.originRunId) {
+      if (run.sequence !== 1 || run.inputReceiptId != null || run.resourceOriginRunId != null) throw denied();
+      return { registrationRef: selectedRegistration, continuation };
+    }
+    if (run.resourceOriginRunId !== key.originRunId || !run.inputReceiptId || run.sequence < 2) throw denied();
+    const receipt = await tx.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_id: {
+      scopeId: key.scopeId, taskId: key.taskId, id: run.inputReceiptId } } });
+    if (!receipt || receipt.id !== run.inputReceiptId || receipt.scopeId !== key.scopeId || receipt.taskId !== key.taskId
+      || receipt.actorKind !== access.actorKind || receipt.actorId !== access.actorId || receipt.audience !== access.audience) throw denied();
+    const request = await tx.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: {
+      scopeId: key.scopeId, taskId: key.taskId, id: receipt.requestId } } });
+    if (!request || request.id !== receipt.requestId || request.scopeId !== key.scopeId || request.taskId !== key.taskId
+      || request.status !== 'CONSUMED' || request.revision !== 2 || request.createdBy !== access.actorId
+      || receipt.planHash !== request.planHash || !receipt.consumedAt || receipt.consumedAt > request.expiresAt
+      || receipt.consumedTaskRevision !== request.waitingTaskRevision + 1 || requestDigest(request) !== request.requestHash) throw denied();
+    const submission = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, taskId: key.taskId, requestId: request.id,
+      expectedRevision: 1, submissionKey: receipt.submissionKey, answers: receipt.answers };
+    const contract = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, code: request.contractCode, version: request.contractVersion, fields: request.allowedFields };
+    if (!isAiTaskInputSubmissionDraft(submission) || !isAiTaskInputContractDraft(contract)
+      || requestFingerprint(contract) !== request.contractHash || !validateAiTaskInputAnswersDraft(contract, submission.answers)
+      || answerDigest(submission, request) !== receipt.answerHash) throw denied();
+    const parent = await tx.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: request.runId } });
+    const savedPlan = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: {
+      scopeId: key.scopeId, taskId: key.taskId, runId: request.runId } } });
+    if (!parent || parent.id !== request.runId || parent.scopeId !== key.scopeId || parent.taskId !== key.taskId
+      || parent.status !== 'SUCCEEDED' || parent.sequence + 1 !== run.sequence || parent.actorId !== access.actorId
+      || parent.actorKind !== access.actorKind || !savedPlan || savedPlan.scopeId !== key.scopeId
+      || savedPlan.taskId !== key.taskId || savedPlan.runId !== parent.id) throw denied();
+    const plan = aiTaskRunPlanSchema.parse(savedPlan.payload), planned = plan.steps[0];
+    const step = await tx.aiStep.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, runId: parent.id, id: request.stepId } });
+    if (plan.taskId !== key.taskId || plan.runId !== parent.id || plan.taskRevision !== request.planRevision
+      || requestFingerprint(plan) !== savedPlan.planHash || savedPlan.planHash !== request.planHash
+      || plan.steps.length !== 1 || planned.toolCode !== AI_TEXT_MODEL_STEP_CODE || planned.operation !== 'external_unknown'
+      || !step || step.id !== request.stepId || step.scopeId !== key.scopeId || step.taskId !== key.taskId || step.runId !== parent.id
+      || step.status !== 'SUCCEEDED' || step.effect !== 'NONE' || step.inputRef !== request.inputRef
+      || step.requestFingerprint !== request.inputHash || step.resultRef !== request.basisResultRef
+      || step.toolCode !== planned.toolCode || step.toolVersion !== planned.toolVersion) throw denied();
+    const input = await tx.aiTaskActionInput.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId,
+      runId: parent.id, id: request.inputRef } });
+    const artifact = await tx.aiTaskResultArtifact.findUnique({ where: { scopeId_taskId_id: {
+      scopeId: key.scopeId, taskId: key.taskId, id: request.basisResultRef } } });
+    if (!input || input.scopeId !== key.scopeId || input.taskId !== key.taskId || input.runId !== parent.id
+      || input.id !== request.inputRef || input.registrationRef !== planned.registrationRef
+      || input.fingerprint !== request.inputHash || input.toolCode !== planned.toolCode || input.toolVersion !== planned.toolVersion
+      || !artifact || artifact.scopeId !== key.scopeId || artifact.taskId !== key.taskId || artifact.runId !== parent.id
+      || artifact.id !== request.basisResultRef || artifact.stepId !== step.id || artifact.actionId !== step.actionId
+      || artifact.stepFingerprint !== request.inputHash || artifact.outcome !== 'SUCCEEDED' || !artifact.completeMeasurement
+      || artifact.contentHash !== requestFingerprint(artifact.payload)
+      || artifact.outputBytes !== BigInt(Buffer.byteLength(JSON.stringify(artifact.payload), 'utf8'))) throw denied();
+    if (cursor === key.runId) {
+      selectedRegistration = `model-followup-${receipt.id}`;
+      continuation = { receiptId: receipt.id, inputHash: input.fingerprint,
+        input: structuredClone(input.payload), result: structuredClone(artifact.payload), answers: structuredClone(submission.answers) };
+    }
+    cursor = parent.id;
+  }
+  throw unavailable();
+}
+
 export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskInputReader {
   constructor(private readonly db: Db, private readonly tasks: Pick<AiTaskRepository, 'resolveAccess'>,
     private readonly plans: AiTaskPlanEvidenceAuthority, private readonly source: AiTaskInputSource,

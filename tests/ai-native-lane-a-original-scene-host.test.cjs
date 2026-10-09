@@ -261,6 +261,53 @@ test('original model application uses the fixed commands and persisted evidence 
   }
 });
 
+test('original scenes continue human clarification on the original task and read successive frozen results', { timeout: 30000 }, async () => {
+  const { originalModelApplicationHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const { AI_TASK_INPUT_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
+  for (const sceneCode of ['order_explanation', 'opening_diagnosis', 'quote_clarification']) {
+    const h = await originalModelApplicationHarness(sceneCode);
+    const contract = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, code: 'scene_clarification', version: '1',
+      fields: [{ fieldId: 'clarification_text', kind: 'text', label: 'Clarification', required: true, maxLength: 100 }] };
+    h.run.inputSource = {
+      resolve: async binding => h.state.aiRun.find(r => r.id === binding.runId).sequence <= 2
+        ? { kind: 'required', contract, inputRef: binding.inputRef, inputHash: binding.inputHash, expiresAt: '2027-01-01T00:00:00Z' }
+        : { kind: 'not_required' },
+      validateAnswers: async binding => ({ disposition: 'context_only', planHash: binding.planHash, inputRef: binding.inputRef, inputHash: binding.inputHash })
+    };
+    const host = () => h.model.createApplication({ holderId: 'scene-worker', leaseMs: 100000 }, h.run);
+    const started = await host().start(h.reference);
+    assert.equal(started.execution.outcome.status, 'paused', JSON.stringify(started));
+    const firstInput = structuredClone(h.state.aiTaskActionInput[0].payload);
+    const budgetFingerprint = h.state.aiTaskExecutionBudget[0].policyFingerprint;
+    for (let turn = 1; turn <= 2; turn++) {
+      const pending = await host().readInput(h.reference);
+      const submission = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, taskId: h.created.task.taskId,
+        requestId: pending.requestId, expectedRevision: pending.revision, submissionKey: `scene-answer-${turn}`,
+        answers: [{ fieldId: 'clarification_text', value: `Explicit answer ${turn}` }] };
+      const resumed = await host().resume({ original: h.reference, submission });
+      assert.equal(resumed.continuation.kind, 'run_outcome', JSON.stringify(resumed));
+      assert.equal(resumed.continuation.outcome.status, turn === 1 ? 'paused' : 'succeeded');
+      assert.equal((await host().resume({ original: h.reference, submission })).continuation.reason, 'receipt_replayed');
+      const artifact = h.state.aiTaskResultArtifact.at(-1);
+      const read = await h.model.readModelResult({ original: h.reference, resultId: artifact.id });
+      assert.equal(read.status, 'available');
+      assert.equal(read.text.value, h.execution.result.text);
+    }
+    assert.equal(h.execution.sent.length, 3);
+    assert.equal(h.state.aiTaskExecutionBudget.length, 1);
+    assert.equal(h.state.aiTaskExecutionBudget[0].policyFingerprint, budgetFingerprint);
+    assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, 3n);
+    assert.deepEqual(h.state.aiTaskActionInput[0].payload, firstInput);
+    assert.match(h.execution.sent.at(-1).messages.at(-1).content, /Explicit answer 2/);
+    const last = h.state.aiRun.at(-1), origin = last.resourceOriginRunId;
+    last.resourceOriginRunId = 'another-task-run';
+    await assert.rejects(h.model.readModelResult({ original: h.reference, resultId: h.state.aiTaskResultArtifact.at(-1).id }), e => e.code === 'AI_ACCESS_DENIED');
+    last.resourceOriginRunId = origin;
+    h.b.h.identity.session = false;
+    await assert.rejects(host().readInput(h.reference), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
+  }
+});
+
 test('original model application retains unknown usage and cancellation without redispatch or invented zero usage', async () => {
   const { originalModelApplicationHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
   const h = await originalModelApplicationHarness();
