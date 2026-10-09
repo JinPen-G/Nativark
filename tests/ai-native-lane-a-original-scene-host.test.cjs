@@ -155,6 +155,23 @@ test('persisted scene model result is bound to its original input and current au
     type: 'task.output_ready', payload: { data: { resultId: 'model-result' } }, occurredAt: now });
   const center = composeAiTaskCenterScene({ list: { readPage: async () => { throw Error('not used'); } }, scenes: h.app, modelResults: reader,
     events: new AiTaskEventRepository(h.db, authorization.authority, h.dependencies.clock) });
+  // Exercise the real task-center consumer, with current original/task
+  // repositories intact; only the optional downstream host boundary is fake.
+  await assert.rejects(center.readInput({ original: ref }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  let reviews = 0;
+  const detail = composeAiTaskCenterScene({ list: { readPage: async () => { throw Error('not used'); } }, scenes: h.app,
+    input: { read: async original => { assert.deepEqual(original, ref); return null; } },
+    approvals: { readSelectedProposal: async () => { reviews++; throw Error('must not reach another task'); },
+      readSelectedDecisionReceipt: async () => { throw Error('not used'); } } });
+  assert.equal((await detail.readInput({ original: ref, taskId: task.id })).input, null);
+  const another = { selection: { draftVersion: 'ain-quote-selection-draft-1', originalInputRef: ref.inputRef,
+    selectionId: '00000000-0000-4000-8000-000000000001', taskId: '00000000-0000-4000-8000-000000000002', runId: created.task.runId, inputHash: 'a'.repeat(64) }, proposal: {} };
+  await assert.rejects(detail.readApprovalReview({ original: ref, reference: another }), e => e.code === 'AI_ACCESS_DENIED');
+  assert.equal(reviews, 0);
+  const revoked = composeAiTaskCenterScene({ list: { readPage: async () => { throw Error('not used'); } }, scenes: h.app,
+    input: { read: async () => { h.b.h.identity.session = false; return { stale: 'must not return' }; } } });
+  await assert.rejects(revoked.readInput({ original: ref }), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
+  h.b.h.identity.session = true;
   const events = await center.readEvents({ original: ref, after: '9007199254740992', limit: 10 });
   assert.equal(events.nextCursor, '9007199254740993'); assert.equal(events.events[0].data.resultId, 'model-result');
   await assert.rejects(center.readEvents({ original: ref, after: 9007199254740992, limit: 10 }), e => e.code === 'AI_INVALID_INPUT');
@@ -416,8 +433,14 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     reads++; assert.equal(tenantId, 'tenant-client'); assert.equal(getRequestIdentity().workspaceId, 'workspace-client');
     if (revokeDuringRead) revoked = true;
     return { id, tenantId, customerId: id === 'other-order' ? 'another-customer' : 'person-client',
-      status: 'reserved', quoteId: 'quote-client', currency: 'CNY', lines: [], chargeLines: [], allocations: [], internalNote: 'never expose' };
-  } } });
+      status: 'reserved', quoteId: 'quote-client', currency: 'CNY', payableAmount: 0, rentalAmount: 12,
+      lines: [], chargeLines: [], allocations: [], internalNote: 'never expose' };
+  } }, feeItems: async (context, id) => {
+    assert.equal(context.tenantId, 'tenant-client'); assert.equal(id, 'own-order');
+    return { apiVersion: 'client-v1', orderId: id, items: [{ inspectionId: 'inspection-client', exceptionIndex: 0,
+      stage: 'return', code: 'damage', description: '待本人核对', amount: 12, currency: 'CNY',
+      responseStatus: 'pending', evidenceCount: 1, internalReview: 'private-review' }], pendingCount: 1, internalNote: 'private-fees' };
+  } });
   const source = createAiGuardedClientSession(guard, { current: async () => ({ authorization, ip: '127.0.0.1' }) });
   const app = composeAiClientScenes({ client, session: source });
   assert.equal(reads, 0);
@@ -543,6 +566,33 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   await assert.rejects(prepare(request, { kind: 'order', orderId: 'own-order', tenantId: 'forged' }), /AI_CLIENT_INVALID_INPUT/);
   const own = await prepare(request, { kind: 'order', orderId: 'own-order' });
   assert.equal(own.material.internalNote, undefined);
+  const clientExplanation = await requests.readOrderExplanation(request, { orderId: 'own-order', question: 'fees' });
+  assert.equal(clientExplanation.facts.inspectionFees.value.items[0].amount, 12);
+  assert.equal(clientExplanation.facts.inspectionFees.value.items[0].responseStatus, 'pending');
+  assert.equal(JSON.stringify(clientExplanation).includes('private-'), false);
+  const originalFees = client.feeItems;
+  client.feeItems = undefined;
+  const missingFees = await requests.readOrderExplanation(request, { orderId: 'own-order', question: 'fees' });
+  assert.equal(missingFees.facts.inspectionFees.coverage, 'unavailable');
+  assert.equal(missingFees.facts.amounts.payableAmount.value, 0);
+  client.feeItems = async (...args) => ({ ...await originalFees(...args), orderId: 'another-order' });
+  await assert.rejects(requests.readOrderExplanation(request, { orderId: 'own-order', question: 'fees' }), /AI_CLIENT_CONTEXT_UNAVAILABLE/);
+  client.feeItems = originalFees;
+  const cancelPreview = await requests.readOrderCancellationPreview(request, { orderId: 'own-order' });
+  assert.equal(cancelPreview.preview.cancellationCharge, 12);
+  assert.equal(cancelPreview.handoff.execution, 'not_attempted');
+  assert.equal(cancelPreview.businessResult, 'not_inferred');
+  const explanation = await requests.readOrderExplanation(request, { orderId: 'own-order', question: 'fees' });
+  assert.equal(explanation.facts.amounts.payableAmount.value, 0);
+  assert.equal(explanation.facts.amounts.depositAmount.coverage, 'unknown');
+  assert.equal(explanation.facts.gaps.payments, 'not_loaded_no_received_total_inferred');
+  assert.equal(explanation.facts.customerName, undefined); assert.equal(explanation.facts.internalNote, undefined);
+  assert.equal((await requests.readOrderExplanation(request, { orderId: 'own-order' })).facts.amounts, undefined);
+  await assert.rejects(requests.readOrderExplanation(request, { orderId: 'other-order' }), e => e.getStatus?.() === 404);
+  await assert.rejects(requests.readOrderExplanation(request, { orderId: 'own-order', question: 'sql' }), /AI_CLIENT_INVALID_INPUT/);
+  revokeDuringRead = true;
+  await assert.rejects(requests.readOrderExplanation(request, { orderId: 'own-order' }), e => e.getStatus?.() === 401);
+  revoked = false; revokeDuringRead = false;
   assert.equal(own.durability, 'persisted_client_material_not_task_history');
   const restarted = composeRequestBoundClientApplication(dependencies, configuration);
   assert.equal((await restarted.readSource(request, { materialRef: own.materialRef })).materialHash, own.materialHash);
@@ -613,9 +663,15 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   taskPolicies[0].allowCreate = 0; taskStore.state.aiBudgetPolicy[0].enabled = false;
   assert.equal((await taskRestart.createTask(request, taskCommand)).task.taskId, created.task.taskId);
   assert.equal((await taskRestart.readTaskCreation(request, taskCommand)).task.runId, created.task.runId);
+  const clientScene = await taskRestart.readTaskScene(request, { ...taskCommand, question: 'fees' });
+  assert.equal(clientScene.task.taskId, created.task.taskId);
+  assert.equal(clientScene.facts.orderId, 'own-order'); assert.equal(clientScene.facts.amounts.payableAmount.value, 0);
+  assert.equal(clientScene.taskOutcome, 'not_inferred_from_order_facts');
+  assert.equal(clientScene.execution, 'read_only_no_task_start');
   assert.equal(countCreates(), beforeDuplicate);
   taskPolicies[0].allowRead = 0;
   await assert.rejects(taskRestart.readTaskCreation(request, taskCommand), e => e.code === 'AI_ACCESS_DENIED');
+  await assert.rejects(taskRestart.readTaskScene(request, taskCommand), e => e.code === 'AI_ACCESS_DENIED');
   taskPolicies[0].allowRead = 1; taskPolicies[0].allowCreate = 1; taskStore.state.aiBudgetPolicy[0].enabled = true;
   await assert.rejects(taskRestart.createTask(request, { ...taskCommand, materialRef: distinctCase.materialRef }), e => e.code === 'AI_REVISION_CONFLICT');
   const taskLost = { ...taskCommand, creationKey: 'task-lost-ack' };
@@ -651,6 +707,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     sid: session.id, wid: 'workspace-client', iat: 1, exp: Math.floor(new Date('2027-01-01').getTime() / 1000) })}` } };
   await assert.rejects(requests.readSource(switchedRequest, { materialRef: own.materialRef }), /AI_CLIENT_MATERIAL_STALE/);
   await assert.rejects(taskRestart.readTaskCreation(switchedRequest, taskCommand), /AI_CLIENT_MATERIAL_STALE/);
+  await assert.rejects(taskRestart.readTaskScene(switchedRequest, taskCommand), /AI_CLIENT_MATERIAL_STALE/);
   assert.equal(countCreates(), afterTaskLost);
   session.id = 'session-client';
   published = false;

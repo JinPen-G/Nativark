@@ -8,7 +8,7 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 
 const fields = ['itemLabel', 'itemGroupLabel', 'assetLabel', 'fulfillmentLabel', 'pickupLabel', 'returnLabel'] as const;
 const citationSchema = originalRequestReferenceSchema.extend({ version: z.string().min(1).max(191),
-  field: z.enum(['order', 'amounts', 'saved_basis', 'payment_records', 'rental_period']) }).strict();
+  field: z.enum(['order', 'amounts', 'saved_basis', 'payment_records', 'rental_period', 'inspection_records']) }).strict();
 const sectionsSchema = originalRequestReferenceSchema.extend({ sections: z.array(z.object({ key: z.string().min(1).max(191),
   expectedVersion: z.string().min(1).max(191), changes: z.array(z.object({ field: z.enum(fields), value: z.string().trim().min(1).max(80) }).strict()).min(1).max(6)
 }).strict()).min(1).max(6).refine(rows => new Set(rows.map(row => row.key)).size === rows.length) }).strict();

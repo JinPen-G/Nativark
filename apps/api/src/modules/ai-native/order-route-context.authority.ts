@@ -24,8 +24,10 @@ export class AiOrderRouteContextAuthority implements AiCurrentScopeAuthority {
   private readonly orderId: string;
   constructor(private readonly guard: Pick<ApiAuthGuard, 'canActivate'>,
     private readonly credentials: AiOrderRouteCredentialSource, orderId: string,
-    private readonly clock: () => Date = () => new Date()) {
+    private readonly clock: () => Date = () => new Date(),
+    private readonly resource: 'order' | 'inspections' = 'order') {
     if (!guard || typeof guard.canActivate !== 'function' || !credentials || typeof credentials.current !== 'function'
+      || !['order', 'inspections'].includes(resource)
       || !id.safeParse(orderId).success || ['expire-pending', 'reconcile-pickup-overdue'].includes(orderId.toLowerCase())) throw new AiScopeResolutionError('AI_ACCESS_DENIED');
     this.orderId = orderId;
   }
@@ -44,9 +46,10 @@ export class AiOrderRouteContextAuthority implements AiCurrentScopeAuthority {
       // A fresh ALS store prevents a prior request's role/scope from authorizing this read.
       return await runWithRequestIdentity({}, async () => {
         const staff = credential.audience === 'staff';
+        const suffix = this.resource === 'inspections' ? '/inspections' : '';
         const request: { url: string; originalUrl: string; method: string; headers: { authorization: string }; query: object; staffApiRequest: boolean; user?: unknown } = {
-          url: `/api/rental/v1/orders/${this.orderId}`,
-          originalUrl: staff ? `/api/staff/v1/orders/${this.orderId}` : `/api/rental/v1/orders/${this.orderId}`,
+          url: `/api/rental/v1/orders/${this.orderId}${suffix}`,
+          originalUrl: staff ? `/api/staff/v1/orders/${this.orderId}${suffix}` : `/api/rental/v1/orders/${this.orderId}${suffix}`,
           method: 'GET', headers: { authorization: credential.authorization }, query: {}, staffApiRequest: staff
         };
         if (await this.guard.canActivate(new ExecutionContextHost([request])) !== true) throw Error();

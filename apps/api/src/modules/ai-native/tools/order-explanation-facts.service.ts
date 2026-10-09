@@ -5,6 +5,7 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { ModelGatewayError } from '../model-gateway.ports';
 import type { AiExecutionContext } from '@rental-os/shared';
 import { assertAiReadContextBinding } from './read-context-binding';
+import type { AiOrderInspectionFactsService } from './order-inspection-facts.service';
 
 /** Structured evidence only, not an explanation generator or a payment ledger.
  * Bound once by the server; optional finance denial exposes no existence/count. */
@@ -12,11 +13,13 @@ export class AiOrderExplanationFactsService {
   constructor(private readonly authority: Pick<AiOrderRouteContextAuthority, 'withOrderRead' | 'resolve'>,
     private readonly facts: Pick<AiOrderReadFactsService, 'read' | 'readHistoricalBasis'>,
     private readonly payments?: Pick<AiOrderPaymentFactsService, 'read'>,
-    private readonly clock: () => Date = () => new Date()) {}
+    private readonly clock: () => Date = () => new Date(),
+    private readonly inspections?: Pick<AiOrderInspectionFactsService, 'read'>) {}
 
-  async read(expectedContext?: AiExecutionContext, selection: { history: boolean; payments: boolean } = { history: true, payments: true }) {
+  async read(expectedContext?: AiExecutionContext, selection: { history: boolean; payments: boolean; inspections?: boolean } = { history: true, payments: true }) {
     const selected = structuredClone(selection);
     if (typeof selected.history !== 'boolean' || typeof selected.payments !== 'boolean') throw new ModelGatewayError('INVALID_REQUEST');
+    if (selected.inspections !== undefined && typeof selected.inspections !== 'boolean') throw new ModelGatewayError('INVALID_REQUEST');
     return this.authority.withOrderRead(async (context, orderId) => {
       assertAiReadContextBinding(context, expectedContext);
       if (context.scope.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
@@ -47,6 +50,13 @@ export class AiOrderExplanationFactsService {
       if (selected.payments && this.payments) { try { payment = await this.payments.read(context); } catch { /* No count/reason/existence on denied finance. */ } }
       if (payment) assertBinding(payment);
       await recheck();
+      let inspections: Awaited<ReturnType<AiOrderInspectionFactsService['read']>> | undefined;
+      if (selected.inspections && this.inspections) inspections = await this.inspections.read(context);
+      if (inspections) {
+        assertBinding(inspections);
+        if (inspections.sourceOrderUpdatedAt !== current.order.updatedAt) throw new ModelGatewayError('CONFIG_INVALID');
+      }
+      await recheck();
       // Re-read the actual minimal order after all optional awaits; outer route
       // bridge revalidates current identity as well. Sequential, not atomic DB snapshot.
       const latest = await this.facts.read(context); assertBinding(latest);
@@ -71,6 +81,9 @@ export class AiOrderExplanationFactsService {
         payments: payment ? { coverage: 'partial' as const, value: payment,
           source: { ...reference('payment_records'), observedAt: payment.observedAt } }
           : { coverage: selected.payments ? 'unavailable' as const : 'not_loaded' as const },
+        inspections: inspections ? { coverage: 'partial' as const, value: inspections,
+          source: { ...reference('inspection_records'), observedAt: inspections.observedAt } }
+          : { coverage: selected.inspections ? 'unavailable' as const : 'not_loaded' as const },
         actualReceivedTotal: { coverage: 'not_loaded' as const },
         fundingLedger: { coverage: 'not_loaded' as const }
       };

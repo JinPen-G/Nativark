@@ -22,6 +22,25 @@ test('actual order consumer produces immutable sourced facts and manual handoff 
   assert.equal(out.payloadFingerprint, requestFingerprint(out.payload));
   assert.ok(Object.isFrozen(out.payload.facts.order.value));
   assert.throws(() => { out.payload.facts.order.value.id = 'other-order'; }, TypeError);
+  let inspectionReads = 0;
+  const inspection = { id: 'inspection-a', tenantId: 'tenant-a', orderId: 'order-a', stage: 'return',
+    templateId: 'template-a', templateCode: 'camera-return', templateVersion: '1', createdAt: '2026-10-07T00:00:00Z',
+    results: { private: 'not projected' }, attachments: ['private-storage-key'], operator: 'private-name',
+    exceptions: [{ code: 'damage', description: 'Recorded candidate', reviewStatus: 'pending', customerResponseStatus: 'disputed', suggestedChargeAmount: 999 }] };
+  h.facts.listInspections = async () => { inspectionReads++; return [structuredClone(inspection)]; };
+  await h.service.prepare({ question: 'status' }); assert.equal(inspectionReads, 0);
+  const fees = await h.service.prepare({ question: 'fees' }), evidence = fees.payload.facts.inspections;
+  assert.equal(evidence.value.records[0].templateVersion, '1');
+  assert.equal(evidence.value.records[0].exceptions[0].customerResponseStatus, 'disputed');
+  assert.equal(JSON.stringify(evidence).includes('private-'), false);
+  assert.equal(evidence.value.records[0].exceptions[0].suggestedChargeAmount, undefined);
+  const { observedAt, ...reference } = evidence.source;
+  const opened = await h.service.reopenCitation({ question: 'fees', ...reference });
+  assert.equal(opened.status, 'available'); assert.equal(inspectionReads, 2);
+  inspection.tenantId = 'other-tenant'; await assert.rejects(h.service.prepare({ question: 'fees' }));
+  inspection.tenantId = 'tenant-a';
+  h.facts.listInspections = async () => { h.state.session = false; return [inspection]; };
+  await assert.rejects(h.service.prepare({ question: 'fees' }));
 });
 test('model-unavailable fallback never hides order revocation or version changes', async () => {
   const h = await setup(); h.state.user.permissions = [];
