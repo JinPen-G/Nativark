@@ -324,6 +324,35 @@ test('original scenes continue human clarification on the original task and read
   }
 });
 
+test('original quote host uses persisted authorized clarification facts instead of an injected successful source', { timeout: 30000 }, async () => {
+  const { originalModelApplicationHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const { AI_TASK_INPUT_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
+  const h = await originalModelApplicationHarness('quote_clarification');
+  const host = () => h.model.createApplication({ holderId: 'scene-worker', leaseMs: 100000 }, { ...h.run, inputSource: 'original_scene' });
+  const started = await host().start(h.reference);
+  assert.equal(started.execution.outcome.status, 'paused', JSON.stringify(started));
+  const pending = await host().readInput(h.reference);
+  assert.equal(pending.contract.code, 'original_quote_context');
+  assert.deepEqual(pending.contract.fields.map(f => f.fieldId), ['clarification_text']);
+  const submission = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, taskId: h.created.task.taskId,
+    requestId: pending.requestId, expectedRevision: pending.revision, submissionKey: 'quote-context-answer',
+    answers: [{ fieldId: 'clarification_text', value: 'Please explain which absolute dates and product I need to select.' }] };
+  h.b.h.identity.session = false;
+  await assert.rejects(host().resume({ original: h.reference, submission }), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
+  assert.equal(h.execution.sent.length, 1);
+  h.b.h.identity.session = true;
+  const resumed = await host().resume({ original: h.reference, submission });
+  assert.equal(resumed.continuation.outcome.status, 'succeeded', JSON.stringify(resumed));
+  assert.equal(h.execution.sent.length, 2);
+  const read = await h.model.readModelResult({ original: h.reference, resultId: h.state.aiTaskResultArtifact.at(-1).id });
+  assert.equal(read.facts.payload.facts.status, 'missing_input');
+  assert.equal(h.state.aiTaskActionInput.length, 2);
+  assert.match(h.execution.sent[1].messages.at(-1).content, /Please explain which absolute dates/);
+  assert.equal(h.state.aiTaskExecutionBudget.length, 1);
+  assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, 2n);
+  assert.equal((await host().resume({ original: h.reference, submission })).continuation.reason, 'receipt_replayed');
+});
+
 test('original model application retains unknown usage and cancellation without redispatch or invented zero usage', async () => {
   const { originalModelApplicationHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
   const h = await originalModelApplicationHarness();

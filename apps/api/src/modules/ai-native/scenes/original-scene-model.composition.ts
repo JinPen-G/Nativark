@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { z } from 'zod';
-import { AI_TOOL_DRAFT_VERSION, isAiTaskInputSubmissionDraft } from '@rental-os/shared';
+import { AI_TOOL_DRAFT_VERSION, AI_TASK_INPUT_DRAFT_VERSION, isAiTaskInputSubmissionDraft, validateAiTaskInputAnswersDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError, aiTaskAccessFromContext } from '../ai-task.repository';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './original-scenes.composition';
 import { composePersistedTaskModelInput } from '../model-input/persisted-task-model-input.composition';
@@ -20,6 +20,7 @@ import type { PrismaClient } from '@prisma/client';
 import { composeAuthorizedPersistentTaskInputRunner,
   type AuthorizedPersistentTaskInputComposition } from '../runner/authorized-persistent-task-input.composition';
 import type { AiTaskApplicationHost } from '../runner/prisma-task-application';
+import type { AiTaskInputSource, AiTaskInputBinding } from '../task-input/task-input.ports';
 
 type ModelDependencies = Parameters<typeof composePersistedTaskModelInput>[0];
 export type AiOriginalSceneModelDependencies = AiOriginalSceneDependencies & ModelDependencies & {
@@ -27,7 +28,9 @@ export type AiOriginalSceneModelDependencies = AiOriginalSceneDependencies & Mod
   knowledge?: AiOriginalSceneKnowledgeOptions;
 };
 export type AiOriginalSceneRunDependencies = Pick<AuthorizedPersistentTaskInputComposition,
-  'inputSource' | 'clock' | 'monotonic'> & {
+  'clock' | 'monotonic'> & {
+  /** Explicit server assembly, not a client switch or default permission. */
+  inputSource: AiTaskInputSource | 'original_scene';
   financialEvidence: NonNullable<AuthorizedPersistentTaskInputComposition['financialEvidence']>;
 };
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
@@ -175,6 +178,74 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         materialHash: packet.materialHash, messageHash: requestFingerprint(material),
         model: 'not_called' as const, businessExecution: 'not_attempted' as const });
     };
+  const readClarificationBasis = async (value: Readonly<AiTaskInputBinding>) => {
+    const binding = structuredClone(value), access = await model.tasks.resolveAccess(binding.taskId, 'read_step_terminal');
+    const task = await dependencies.db.aiTask.findFirst({ where: access.where });
+    if (!task?.inputRef || task.scopeId !== binding.scopeId || binding.toolCode !== TASK_TEXT_MODEL_TOOL
+      || binding.toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
+    const ref = originalRequestReferenceSchema.parse({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: task.inputRef });
+    const before = await current(ref, binding.taskId, binding.runId);
+    const stored = await dependencies.db.$transaction(async tx => {
+      const plan = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: {
+        scopeId: binding.scopeId, taskId: binding.taskId, runId: binding.runId } } });
+      const step = await tx.aiStep.findFirst({ where: { scopeId: binding.scopeId, taskId: binding.taskId,
+        runId: binding.runId, id: binding.stepId } });
+      const input = await tx.aiTaskActionInput.findFirst({ where: { scopeId: binding.scopeId, taskId: binding.taskId,
+        runId: binding.runId, id: binding.inputRef, registrationRef: before.provenance.registrationRef } });
+      const payload = z.object({ taskRevision: revision }).passthrough().safeParse(plan?.payload);
+      if (!plan || plan.planHash !== binding.planHash || requestFingerprint(plan.payload) !== binding.planHash
+        || !payload.success || payload.data.taskRevision !== binding.planRevision
+        || binding.registrationRef !== before.provenance.registrationRef || !step || !input
+        || step.status !== 'SUCCEEDED' || step.resultRef !== binding.basisResultRef || step.inputRef !== binding.inputRef
+        || step.requestFingerprint !== binding.inputHash || step.toolCode !== binding.toolCode
+        || step.toolVersion !== binding.toolVersion || input.fingerprint !== binding.inputHash) throw denied();
+      const parsed = parseTaskModelInput(input.payload, modelPolicy);
+      if (taskModelFingerprint(parsed, modelPolicy) !== binding.inputHash) throw denied();
+      return readOriginalSceneEnvelope(parsed);
+    });
+    // The actual result reader proves invocation, dispatch/usage, original lineage,
+    // source freshness and current Guard/owner access. Unknown is never a question basis.
+    const result = await results.read({ original: ref, resultId: binding.basisResultRef });
+    if (result.status !== 'available' || result.taskId !== binding.taskId || result.runId !== binding.runId) throw unavailable();
+    same(before, await current(ref, binding.taskId, binding.runId));
+    if ((await model.tasks.resolveAccess(binding.taskId, 'read_step_terminal')).bindingKey !== access.bindingKey) throw denied();
+    return { original: before.original, envelope: stored };
+  };
+  const originalInputSource = Object.freeze<AiTaskInputSource>({
+    async resolve(binding: Readonly<AiTaskInputBinding>) {
+      const command = structuredClone(binding), basis = await readClarificationBasis(command);
+      if (basis.original.request.sceneCode !== 'quote_clarification') return { kind: 'not_required' as const };
+      const parsed = z.object({ payload: z.object({ facts: z.object({ status: z.string(),
+        missingFields: z.array(z.string()).max(100).optional(), ambiguousFields: z.array(z.string()).max(100).optional()
+      }).passthrough() }).passthrough() }).passthrough().safeParse(basis.envelope.facts);
+      if (!parsed.success) throw unavailable();
+      const facts = parsed.data.payload.facts;
+      if (!['missing_input', 'ambiguous'].includes(facts.status)) return { kind: 'not_required' as const };
+      if (!(facts.missingFields?.length || facts.ambiguousFields?.length)) throw unavailable();
+      // One context clarification for this immutable business snapshot. It does
+      // not repair missing facts: revised formal parameters still use reissue,
+      // current candidate selection and the original quote/approval interfaces.
+      if (basis.envelope.clarifications?.some(round => round.answers.some(answer => answer.fieldId === 'clarification_text')))
+        return { kind: 'not_required' as const };
+      const fieldLabels: Record<string, string> = { items: '商品及数量', customerId: '客户明确选择', startsAt: '开始时间',
+        endsAt: '结束时间', locationId: '履约地点', returnLocationId: '归还地点', fulfillmentMode: '履约方式',
+        selectionRevision: '当前候选重新确认', request: '正式报价参数' };
+      const missing = [...new Set([...(facts.missingFields ?? []), ...(facts.ambiguousFields ?? [])]
+        .map(field => fieldLabels[field.startsWith('items.') ? 'items' : field] ?? '业务参数'))].join('、').slice(0, 70);
+      return { kind: 'required' as const, inputRef: command.inputRef, inputHash: command.inputHash,
+        expiresAt: basis.original.receipt.expiresAt,
+        contract: { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, code: 'original_quote_context', version: '1',
+          fields: [{ fieldId: 'clarification_text' as const, kind: 'text' as const, required: true, maxLength: 2048,
+            label: `需补充：${missing}。本回答仅作说明，正式参数仍需明确选择和确认。` }] } };
+    },
+    async validateAnswers(binding, contract, answers) {
+      const command = structuredClone(binding), submittedContract = structuredClone(contract), submittedAnswers = structuredClone(answers);
+      const expected = await originalInputSource.resolve(command);
+      if (expected.kind !== 'required' || requestFingerprint(submittedContract) !== requestFingerprint(expected.contract)
+        || !validateAiTaskInputAnswersDraft(expected.contract, submittedAnswers)) throw denied();
+      return { disposition: 'context_only' as const, planHash: command.planHash, inputRef: command.inputRef, inputHash: command.inputHash };
+    }
+  });
   return Object.freeze({ scenes, readModelResult: results.read.bind(results), reopenModelSource: results.reopenSource.bind(results),
     runtime: Object.freeze({ authorization: model.authorization, tasks: model.tasks,
       planAuthority: model.planAuthority, plans: model.plans, registrations: model.registrations,
@@ -187,7 +258,8 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       const root = composeAuthorizedPersistentTaskInputRunner({ db: dependencies.db,
         authorization: dependencies, registrationAuthority: model.planAuthority,
         planAuthority: model.planAuthority, toolCatalog: model.toolCatalog, invocations: model.invocations,
-        executors, wall: clock, commands: model.commands, inputSource: run?.inputSource,
+        executors, wall: clock, commands: model.commands,
+        inputSource: run?.inputSource === 'original_scene' ? originalInputSource : run?.inputSource,
         transitionAuthority: model.createTransitionAuthority(run?.financialEvidence),
         financialEvidence: run?.financialEvidence, clock: run?.clock, monotonic: run?.monotonic });
       // Validate/fix the server host now, without claiming or starting work.
