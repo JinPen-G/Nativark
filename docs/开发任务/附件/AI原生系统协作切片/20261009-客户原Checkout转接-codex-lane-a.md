@@ -35,3 +35,17 @@ DATABASE_URL=mysql://offline:offline@127.0.0.1:1/rental_os_offline，AI_OFFLINE_
 - 服务端能力发布与实际request-bound客户端host transport尚未启用；默认关闭，页面接点不是正式HTTP已接通。
 - handoff→原createOrder关联键/受理收据/同原键查询缺正式合同；继续禁AI材料提交，不自动标submitted。
 - 无真实DB/HTTP/模型/支付/微信开发者工具/设备验证、无生产启用；离线Page替身+静态+源码映射类型不等于AIN-22/专项验收。
+
+## 固定声明修复接回后的原检查（追加，不抹去早期失败）
+
+主线提供固定77c78a466ccaafdca2b3736b793d0645467cc3fb。本树保留4908a549成果后安全merge，合并点62ff3389908a6bbf04826595c93dc5924cb6768c，无冲突。未跟随移动HEAD，不复制主线产物，不修改主线公共脚本。
+
+原脚本现使用本树output/miniprogram-shared-types-*私有声明，由本树shared源码生成，不写共享dist/node_modules；原小程序rootDir和运行时包依赖禁令保留。旧output和本轮私有声明目录均保留。
+
+环境沿用上述离线值，另设置 `NODE_OPTIONS=--require="D:/工作文件/rental-OS/.claude/worktrees/codex-ai-native-lane-a/tests/fixtures/ai-native/prisma-offline-preload.cjs"`，保证脚本子进程也预加载护栏。
+
+- `node apps/miniprogram/scripts/build.cjs --check`：退出码0，原类型检查通过。
+- `node apps/miniprogram/scripts/build.cjs`：退出码0，21页完整本机联调构建。执行前核实本树apps/miniprogram/dist不存在、不是其他树链接；本轮在本树自行生成，未复制他人产物。检查生成checkout与booking-handoff本地JS，正式类型导入已擦除、仅本地相对运行时依赖。
+- `git diff --check`：退出码0。
+
+因此前述“原check与完整build尚阻塞”在固定依赖接回后已解决；早期TS2305/TS6059仍是实际阶段失败。原Booking受理关联和服务器能力/transport未接仍不变，提交禁用。产物仅本地联调，未启动服务、网络、真实DB/模型/支付、微信开发者工具或设备，不可上传、不生产启用。
