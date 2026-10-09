@@ -1,1 +1,1 @@
-{"navigationStyle":"custom","usingComponents":{"nav-bar":"/components/nav-bar/index","state-view":"/components/state-view/index","money-text":"/components/money-text/index"}}
+{"navigationStyle":"custom","usingComponents":{"nav-bar":"/components/nav-bar/index","state-view":"/components/state-view/index","money-text":"/components/money-text/index","ai-inspection-assist":"/components/ai-native/ai-inspection-assist/index"}}

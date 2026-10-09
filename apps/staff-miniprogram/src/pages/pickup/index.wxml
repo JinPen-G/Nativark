@@ -25,4 +25,5 @@
     <view wx:if="{{error}}" class="section small" style="color:var(--danger)">{{error}}</view>
     <view class="bottom-bar"><button class="btn btn--primary btn--block" loading="{{busy}}" disabled="{{busy || uploading}}" bindtap="onSubmit">确认{{pickupLabel}}并交付</button></view>
   </block>
+  <ai-inspection-assist id="ai-inspection-assist" hidden="{{!aiInspectionVisible}}" />
 </view>
