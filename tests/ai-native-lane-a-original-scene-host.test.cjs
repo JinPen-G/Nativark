@@ -752,6 +752,21 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     lines: command.lines.map(line => ({ itemGroupId: line.itemGroupId, requestedQuantity: line.quantity,
       available: bookingAvailable, availableQuantity: stockObservation, reasons: [] })) });
   const bookingApp = composeRequestBoundClientApplication(taskDependencies, entryConfig);
+  const { AiClientEntryModule } = require('../apps/api/src/modules/ai-native/scenes/client-entry.module');
+  const { AiClientEntryController } = require('../apps/api/src/modules/ai-native/scenes/client-entry.controller');
+  const { AI_CLIENT_ENTRY_HTTP_DRAFT } = require('../packages/shared/src/ai-entry-http-draft');
+  assert.deepEqual(Reflect.getMetadata('controllers', AiClientEntryModule) ?? [], []);
+  const entryModule = AiClientEntryModule.registerHttp(taskDependencies, entryConfig);
+  assert.deepEqual(entryModule.controllers, [AiClientEntryController]);
+  assert.throws(() => AiClientEntryModule.registerHttp(dependencies, entryConfig).providers[0].useFactory(), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  assert.throws(() => AiClientEntryModule.registerHttp(taskDependencies, configuration).providers[0].useFactory(), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  const bookingHttp = new AiClientEntryController(entryModule.providers[0].useFactory());
+  for (const method of ['issueAction', 'createBookingDraft', 'chooseBookingDraft', 'readBookingDraft',
+    'handoffBookingDraft', 'readBookingHandoff', 'readBookingOperation']) {
+    assert.equal(Reflect.getMetadata('path', AiClientEntryController.prototype[method]), AI_CLIENT_ENTRY_HTTP_DRAFT[method]);
+  }
+  await assert.rejects(bookingHttp.readBookingOperation({ headers: {} }, { operationKey: 'not-owned' }),
+    e => e.getStatus() === 403 && e.getResponse().code === 'AI_ACCESS_DENIED');
   const makeBookingAction = async (key, application = bookingApp, selection = bookingSelection) => {
     const material = await application.prepare(request, { operationKey: key, command: { kind: 'booking_quote', selection } });
     return application.issueAction(request, { actionCode: 'CREATE_BOOKING_DRAFT', materialRef: material.materialRef });
@@ -761,8 +776,11 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     await assert.rejects(bookingApp.prepare(request, { operationKey: 'invalid-booking', command: { kind: 'booking_quote', selection } }));
   }
   const draftAction = await makeBookingAction('booking-material-1');
+  assert.deepEqual(await bookingHttp.issueAction(request, { actionCode: 'CREATE_BOOKING_DRAFT', materialRef: draftAction.associations.materialRef }), draftAction);
+  await assert.rejects(bookingHttp.issueAction(request, { actionCode: 'CREATE_BOOKING_DRAFT', materialRef: draftAction.associations.materialRef,
+    actor: 'forged', scope: { tenantId: 'foreign' } }), e => e.getStatus() === 400 && e.getResponse().code === 'AI_INVALID_INPUT');
   const createDraft = { operationKey: 'create-draft-1', action: draftAction };
-  const draftCreated = await bookingApp.createBookingDraft(request, createDraft);
+  const draftCreated = await bookingHttp.createBookingDraft(request, createDraft);
   assert.equal(draftCreated.draft.state, 'draft_created'); assert.equal(draftCreated.draft.action, null);
   const publication = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor(
     require('../packages/shared/src/ai-entry-management-draft-schemas').AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS, {});
@@ -775,21 +793,28 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const selectDraft = { bookingDraftId: draftCreated.draft.bookingDraftId, expectedRevision: 1,
     inputFingerprint: draftCreated.draft.inputFingerprint, operationKey: 'select-draft-1', decision: 'continue_booking' };
   await assert.rejects(bookingApp.chooseBookingDraft(request, { ...selectDraft, expectedRevision: 2 }), e => e.code === 'AI_REVISION_CONFLICT');
-  const selected = await bookingApp.chooseBookingDraft(request, selectDraft);
+  const selected = await bookingHttp.chooseBookingDraft(request, selectDraft);
   assert.equal(selected.draft.state, 'user_selected'); assert.equal(selected.draft.selectionRevision, 1);
   assert.equal(selected.draft.action.actionCode, 'OPEN_BOOKING');
   assert.equal((await bookingApp.chooseBookingDraft(request, selectDraft)).replayed, true);
   const handoffCommand = { operationKey: 'handoff-draft-1', action: selected.draft.action };
-  const handed = await bookingApp.handoffBookingDraft(request, handoffCommand);
+  const handed = await bookingHttp.handoffBookingDraft(request, handoffCommand);
   assert.equal(handed.handoff.fields.quoteId, bookingSelection.quoteId);
   assert.equal(handed.handoff.submission, 'original_booking_page_required');
   assert.equal(handed.handoff.inventory, 'not_reserved');
   assert.equal(publication.AiBookingHandoff(handed.handoff), true, JSON.stringify(publication.AiBookingHandoff.errors));
   assert.equal(publication.AiEntryActionDraft(selected.draft.action), true, JSON.stringify(publication.AiEntryActionDraft.errors));
   assert.equal(publication.AiBookingHandoff({ ...handed.handoff, url: 'javascript:alert(1)' }), false);
-  assert.equal((await bookingApp.readBookingDraft(request, { bookingDraftId: draftCreated.draft.bookingDraftId })).state, 'handed_to_booking_page');
+  assert.equal((await bookingHttp.readBookingDraft(request, { bookingDraftId: draftCreated.draft.bookingDraftId })).state, 'handed_to_booking_page');
   assert.equal((await bookingApp.handoffBookingDraft(request, handoffCommand)).handoff.handoffRef, handed.handoff.handoffRef);
-  assert.equal((await bookingApp.readBookingHandoff(request, { handoffRef: handed.handoff.handoffRef })).actionCode, 'OPEN_BOOKING');
+  assert.equal((await bookingHttp.readBookingHandoff(request, { handoffRef: handed.handoff.handoffRef })).actionCode, 'OPEN_BOOKING');
+  await assert.rejects(bookingHttp.readBookingHandoff({ headers: {} }, { handoffRef: handed.handoff.handoffRef }), e => e.getStatus() === 403);
+  const quoteReader = client.business.getQuote;
+  client.business.getQuote = () => { throw Error('synthetic private database credential'); };
+  await assert.rejects(bookingHttp.readBookingHandoff(request, { handoffRef: handed.handoff.handoffRef }),
+    e => e.getStatus() === 503 && e.getResponse().code === 'AI_RESOURCE_UNAVAILABLE'
+      && !JSON.stringify(e.getResponse()).includes('credential'));
+  client.business.getQuote = quoteReader;
   assert.equal(bookingRows.ai_client_booking_drafts.length, 1); assert.equal(bookingRows.ai_client_booking_handoffs.length, 1);
   assert.equal(bookingRows.ai_client_booking_draft_operations.length, 3);
   assert.equal(bookingApp.submitBookingDraft, undefined);
@@ -801,10 +826,12 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   await assert.rejects(bookingApp.readBookingDraft(request, { bookingDraftId: draftCreated.draft.bookingDraftId }), e => e.code === 'AI_PROPOSAL_STALE');
   const lostDraftAction = await makeBookingAction('booking-material-lost');
   loseBookingReply = true;
-  await assert.rejects(bookingApp.createBookingDraft(request, { action: lostDraftAction, operationKey: 'create-draft-lost' }), e => e.code === 'AI_RESULT_UNKNOWN');
+  await assert.rejects(bookingHttp.createBookingDraft(request, { action: lostDraftAction, operationKey: 'create-draft-lost' }),
+    e => e.getStatus() === 409 && e.getResponse().code === 'AI_RESULT_UNKNOWN' && e.getResponse().nextAction === 'read_booking_operation'
+      && !JSON.stringify(e.getResponse()).includes('COMMIT'));
   loseBookingReply = false;
   const afterLostBooking = bookingRows.ai_client_booking_drafts.length;
-  const recoveredBooking = await bookingApp.readBookingOperation(request, { operationKey: 'create-draft-lost' });
+  const recoveredBooking = await bookingHttp.readBookingOperation(request, { operationKey: 'create-draft-lost' });
   assert.equal(recoveredBooking.state, 'observed'); assert.equal(recoveredBooking.businessSubmission, 'not_attested');
   assert.equal(bookingRows.ai_client_booking_drafts.length, afterLostBooking);
   const recoveredDraft = await bookingApp.readBookingDraft(request, { bookingDraftId: recoveredBooking.bookingDraftId });
