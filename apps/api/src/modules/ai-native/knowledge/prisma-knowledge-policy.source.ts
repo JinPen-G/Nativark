@@ -1,19 +1,17 @@
 import { isDeepStrictEqual } from 'node:util';
-import type { PrismaClient } from '@prisma/client';
+import { managedKnowledgePolicyCurrent, type KnowledgePolicyReadDb } from './knowledge-policy-management-authority';
 import type { AiExecutionContext } from '@rental-os/shared';
 import type { FormalActionPolicy, FormalKnowledgePolicySource, FormalMemoryPolicySource, FormalPolicyResource } from './formal-knowledge-authorization.adapter';
 import { actor, fingerprint } from './knowledge-validation';
 
-/** Exact, server-provisioned grants, never inferred from role/subscription. This
- * source is NOT authorization: use the Auth-backed adapters, which re-read it
- * after resolving current identity. No default grant or provisioning endpoint. */
 export class PrismaKnowledgeActionPolicySource {
   readonly knowledge: FormalKnowledgePolicySource;
   readonly memory: FormalMemoryPolicySource;
 
-  constructor(private readonly db: Pick<PrismaClient, 'aiKnowledgeActionPolicy'>,
+  constructor(private readonly db: KnowledgePolicyReadDb,
     private readonly clock: () => Date = () => new Date()) {
-    if (typeof db?.aiKnowledgeActionPolicy?.findUnique !== 'function') throw new Error('Knowledge policy storage unavailable');
+    if (typeof db?.aiKnowledgeActionPolicy?.findUnique !== 'function'
+      || typeof db?.aiKnowledgePolicyManagementOperation?.findFirst !== 'function') throw new Error('Knowledge policy storage unavailable');
     this.knowledge = { resolve: (context, request, resource) => this.read('knowledge', context, request.action, resource) };
     this.memory = { resolve: (context, request) => this.read('memory', context, request.action,
       request.memory ? { memoryId: request.memory.memoryId, revision: request.memory.revision,
@@ -38,6 +36,7 @@ export class PrismaKnowledgeActionPolicySource {
       || !Array.isArray(row.requiredPermissions) || row.requiredPermissions.length < 1 || row.requiredPermissions.length > 64
       || row.requiredPermissions.some(p => typeof p !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9:._-]{0,190}$/u.test(p))
       || new Set(row.requiredPermissions).size !== row.requiredPermissions.length) return null;
+    try { await managedKnowledgePolicyCurrent(this.db, row, this.clock()); } catch { return null; }
     return { action, scope: structuredClone(context.scope), audience: context.audience, actor: principal,
       revision: row.revision, expiresAt: row.expiresAt.toISOString(), requiredPermissions: row.requiredPermissions as string[],
       resource, grantKey: fingerprint({ key, revision: row.revision, expiresAt: row.expiresAt.toISOString(), permissions: row.requiredPermissions }) };

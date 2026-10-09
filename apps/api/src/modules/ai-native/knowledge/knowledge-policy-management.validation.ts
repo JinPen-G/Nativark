@@ -1,0 +1,62 @@
+import { z } from 'zod';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { fingerprint, id } from './knowledge-validation';
+import { AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION, type AiKnowledgePolicyChangeDraft } from '../../../../../../packages/shared/src/ai-knowledge-policy-management-draft';
+
+export class KnowledgePolicyManagementError extends Error {
+  constructor(readonly code: 'invalid_input' | 'unavailable' | 'conflict' | 'trusted_authority_missing') { super(code); }
+}
+export function managementParse<T>(schema: z.ZodType<T>, value: unknown): T {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new KnowledgePolicyManagementError('invalid_input');
+  return parsed.data;
+}
+export const managementHash = z.string().regex(/^[a-f0-9]{64}$/u);
+export const revision = z.number().int().min(1).max(4294967294);
+const permission = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:._-]{0,190}$/u);
+export const permissions = z.array(permission).min(1).max(64).refine(p => new Set(p).size === p.length);
+export const managementActions = z.array(z.enum(['create_disabled', 'update_disabled', 'enable', 'disable'])).min(1).max(4).refine(p => new Set(p).size === p.length);
+export const policyChange: z.ZodType<AiKnowledgePolicyChangeDraft> = z.object({ version: z.literal(AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION), authorityId: z.string().uuid(),
+  operationKey: id, expectedRevision: z.number().int().min(0).max(4294967293), action: z.enum(['create_disabled', 'update_disabled', 'enable', 'disable']),
+  requiredPermissions: permissions, expiresAt: z.string().datetime({ offset: true }).transform(v => new Date(v).toISOString()) }).strict();
+export const receiptSelection = z.object({ operationKey: id, changeHash: managementHash }).strict();
+export const commitSelection = z.object({ preparationId: z.string().uuid(), changeHash: managementHash, confirm: z.literal('apply_knowledge_policy_change') }).strict();
+export const policySnapshot = z.object({ revision, enabled: z.boolean(), requiredPermissions: permissions, expiresAt: z.string().datetime({ offset: true }) }).strict();
+const owner = z.object({ actorKind: z.literal('user'), actorId: id }).strict();
+export const knowledgePolicyActions = z.enum(['read_metadata', 'parse', 'publish', 'withdraw', 'delete', 'revise', 'search', 'read_body', 'snippet', 'resolve_source', 'download', 'index', 'change_acl']);
+export const memoryPolicyActions = z.enum(['read', 'propose', 'modify', 'confirm', 'delete']);
+export const documentResource = z.object({ documentId: id, documentVersion: id, attachmentId: id, aclRevision: revision }).strict();
+export const memoryResource = z.object({ memoryId: id, revision, aclRevision: revision, owner }).strict();
+export const memoryOwnerResource = z.object({ owner }).strict();
+export function canonicalPolicyResource(domain: string, action: string, input: unknown) {
+  if (domain === 'knowledge') {
+    managementParse(knowledgePolicyActions, action);
+    if (z.object({}).strict().safeParse(input).success) return {};
+    const r = managementParse(documentResource, input);
+    return { documentId: r.documentId, documentVersion: r.documentVersion, attachmentId: r.attachmentId, aclRevision: r.aclRevision };
+  }
+  if (domain !== 'memory') throw new KnowledgePolicyManagementError('invalid_input');
+  managementParse(memoryPolicyActions, action);
+  if (memoryOwnerResource.safeParse(input).success) {
+    const r = managementParse(memoryOwnerResource, input);
+    return { owner: { actorKind: r.owner.actorKind, actorId: r.owner.actorId } };
+  }
+  const r = managementParse(memoryResource, input);
+  return { memoryId: r.memoryId, revision: r.revision, aclRevision: r.aclRevision, owner: { actorKind: r.owner.actorKind, actorId: r.owner.actorId } };
+}
+export const policyKey = (row: { tenantId: string; workspaceId: string; targetActorId: string; targetAudience: string; domain: string; action: string; resourceKey: string }) => ({
+  tenantId: row.tenantId, workspaceId: row.workspaceId, actorKind: 'user', actorId: row.targetActorId,
+  audience: row.targetAudience, domain: row.domain, action: row.action, resourceKey: row.resourceKey,
+});
+export const policyWhere = (key: ReturnType<typeof policyKey>) => ({ tenantId_workspaceId_actorKind_actorId_audience_domain_action_resourceKey: key });
+export const policyKeyHash = (key: ReturnType<typeof policyKey>) => requestFingerprint(key);
+export const managementIdentityHash = (c: { actor: unknown; audience: unknown; scope: unknown; access?: unknown }) => requestFingerprint({ actor: c.actor, audience: c.audience, scope: c.scope, access: c.access ?? null });
+export const originalResourceKey = fingerprint;
+export const managementFingerprint = requestFingerprint;
+export const preparationFingerprint = (row: { tenantId: string; workspaceId: string; actorId: string; audience: string; commandJson: unknown;
+  beforeJson: unknown; sourceHash: string; policyKeyHash: string; authorizationHash: string; authorityRevision: number; expiresAt: Date }) => requestFingerprint({
+  version: AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION, scope: { tenantId: row.tenantId, workspaceId: row.workspaceId }, actorId: row.actorId, audience: row.audience,
+  command: row.commandJson, before: row.beforeJson, sourceHash: row.sourceHash, policyKeyHash: row.policyKeyHash,
+  authorizationHash: row.authorizationHash, authorityRevision: row.authorityRevision, expiresAt: row.expiresAt.toISOString(),
+});
+export type PolicyChange = z.infer<typeof policyChange>;

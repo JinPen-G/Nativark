@@ -312,6 +312,7 @@ model BusinessWorkspace {
   aiInspectionDrafts                AiInspectionDraft[]
   aiBusinessFailureEvents           AiBusinessFailureOutbox[]
   aiAutomationSubjects              AiAutomationSubject[]
+  aiKnowledgePolicyAuthorities      AiKnowledgePolicyManagementAuthority[]
   aiClientSceneMaterials            AiClientSceneMaterial[]
   aiClientTaskPolicies              AiClientTaskPolicy[]
   aiInspectionEvidenceBindings      AiInspectionEvidenceBinding[]
@@ -1119,6 +1120,86 @@ model AiKnowledgeActionPolicy {
 
   @@id([tenantId, workspaceId, actorKind, actorId, audience, domain, action, resourceKey])
   @@map("ai_knowledge_action_policies")
+}
+
+model AiKnowledgePolicyManagementAuthority {
+  id                  String @id @db.VarChar(36)
+  tenantId            String @db.VarChar(128)
+  workspaceId         String @db.VarChar(128)
+  managerId           String @db.VarChar(128)
+  revision            Int @db.UnsignedInt
+  enabled             Boolean @default(false)
+  basisRef            String @db.VarChar(128)
+  basisVersion        String @db.VarChar(64)
+  targetActorId       String @db.VarChar(128)
+  targetAudience      String @db.VarChar(32)
+  domain              String @db.VarChar(16)
+  action              String @db.VarChar(32)
+  resourceKey         String @db.Char(64)
+  resource            Json
+  requiredPermissions Json
+  allowedPermissions  Json
+  allowedOperations   Json
+  maxPolicySeconds    Int @db.UnsignedInt
+  expiresAt           DateTime @db.DateTime(3)
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  updatedAt           DateTime @updatedAt @db.DateTime(3)
+  preparations        AiKnowledgePolicyPreparation[]
+  workspace           BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_kp_authority_workspace_fk")
+
+  @@unique([tenantId, workspaceId, id], map: "ai_kp_authority_scope_key")
+  @@map("ai_knowledge_policy_management_authorities")
+}
+
+model AiKnowledgePolicyPreparation {
+  id                  String @id @db.VarChar(36)
+  tenantId            String @db.VarChar(128)
+  workspaceId         String @db.VarChar(128)
+  actorId             String @db.VarChar(128)
+  audience            String @db.VarChar(32)
+  operationKey        String @db.VarChar(128)
+  policyKeyHash       String @db.Char(64)
+  expectedRevision    Int @db.UnsignedInt
+  commandJson         Json
+  beforeJson          Json
+  commitSlot          String? @unique(map: "ai_kp_preparation_commit_slot_key") @db.Char(64)
+  changeHash          String @db.Char(64)
+  sourceHash          String @db.Char(64)
+  authorityId         String @db.VarChar(36)
+  authorityRevision   Int @db.UnsignedInt
+  authorizationHash   String @db.Char(64)
+  expiresAt           DateTime @db.DateTime(3)
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  authority           AiKnowledgePolicyManagementAuthority @relation(fields: [tenantId, workspaceId, authorityId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_kp_preparation_authority_fk")
+  operation           AiKnowledgePolicyManagementOperation?
+
+  @@unique([tenantId, workspaceId, id], map: "ai_kp_preparation_scope_key")
+  @@unique([tenantId, workspaceId, actorId, audience, operationKey], map: "ai_kp_preparation_operation_key")
+  @@map("ai_knowledge_policy_preparations")
+}
+
+model AiKnowledgePolicyManagementOperation {
+  id                  String @id @db.VarChar(36)
+  tenantId            String @db.VarChar(128)
+  workspaceId         String @db.VarChar(128)
+  actorId             String @db.VarChar(128)
+  audience            String @db.VarChar(32)
+  operationKey        String @db.VarChar(128)
+  preparationId       String @db.VarChar(36)
+  policyKeyHash       String @db.Char(64)
+  resultRevision      Int @db.UnsignedInt
+  changeHash          String @db.Char(64)
+  resultJson          Json
+  resultHash          String @db.Char(64)
+  authorityRevision   Int @db.UnsignedInt
+  authorizationHash   String @db.Char(64)
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  preparation         AiKnowledgePolicyPreparation @relation(fields: [tenantId, workspaceId, preparationId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_kp_operation_preparation_fk")
+
+  @@unique([tenantId, workspaceId, preparationId], map: "ai_kp_operation_preparation_key")
+  @@unique([tenantId, workspaceId, actorId, audience, operationKey], map: "ai_kp_operation_original_key")
+  @@unique([policyKeyHash, resultRevision], map: "ai_kp_operation_policy_revision_key")
+  @@map("ai_knowledge_policy_management_operations")
 }
 
 model AiTaskResultArtifact {

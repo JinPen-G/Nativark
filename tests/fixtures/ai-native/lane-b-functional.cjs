@@ -18,6 +18,7 @@ exports.fixture = () => {
   const list = map => async ({ where, take, select }) => [...map.values()].filter(row => matches(row, where))
     .sort((a, b) => a.id < b.id ? -1 : a.id === b.id ? 0 : 1).slice(0, take)
     .map(row => structuredClone(select ? Object.fromEntries(Object.keys(select).filter(k => select[k]).map(k => [k, row[k]])) : row));
+  db.aiKnowledgePolicyManagementOperation = { findFirst: async () => null };
   db.aiKnowledgeDocument.findMany = list(db.state.documents);
   db.aiStructuredMemory.findMany = list(db.state.memories);
   const identity = {

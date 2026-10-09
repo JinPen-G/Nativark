@@ -7,6 +7,8 @@ import { composePersistedHumanKnowledge, composeFormalPersistedHumanKnowledge, t
 import { PersistentMemoryConsentService } from './persistent-memory-consent.service';
 import { composeKnowledgeFileApplication, KNOWLEDGE_SCENE_OPTIONS, type KnowledgeFileApplicationDependencies, type KnowledgeSceneOptionsFactory } from './knowledge-file.composition';
 import { HumanKnowledgeUploadService } from './human-knowledge-upload.service';
+import { composePrismaFormalHumanKnowledge, type PrismaFormalKnowledgeDependencies } from './prisma-formal-knowledge.composition';
+import { KNOWLEDGE_POLICY_MANAGEMENT, type KnowledgePolicyManagementApplication } from './knowledge-policy-management.composition';
 
 @Module({})
 export class HumanKnowledgeModule {
@@ -14,17 +16,15 @@ export class HumanKnowledgeModule {
     return this.services(composePersistedHumanKnowledge(ports));
   }
 
-  /** Explicit AuthService + server-owned policy/file assembly. It does not
-   * manufacture those policies, register HTTP, or grant an owner all actions. */
-  static registerFormal(ports: FormalHumanKnowledgeDependencies): DynamicModule {
-    return this.services(composeFormalPersistedHumanKnowledge(ports));
+  static registerFormal(ports: FormalHumanKnowledgeDependencies | PrismaFormalKnowledgeDependencies): DynamicModule {
+    return this.services('knowledgePolicy' in ports ? composeFormalPersistedHumanKnowledge(ports) : composePrismaFormalHumanKnowledge(ports));
   }
 
   static registerFiles(ports: KnowledgeFileApplicationDependencies): DynamicModule {
     return this.services(composeKnowledgeFileApplication(ports));
   }
 
-  private static services({ management, context, index, preparation, memory, uploads, sceneKnowledge }: ReturnType<typeof composePersistedHumanKnowledge> & { uploads?: HumanKnowledgeUploadService; sceneKnowledge?: KnowledgeSceneOptionsFactory }): DynamicModule {
+  private static services({ management, context, index, preparation, memory, uploads, sceneKnowledge, policyManagement }: ReturnType<typeof composePersistedHumanKnowledge> & { uploads?: HumanKnowledgeUploadService; sceneKnowledge?: KnowledgeSceneOptionsFactory; policyManagement?: KnowledgePolicyManagementApplication }): DynamicModule {
     const providers = [
       { provide: HumanKnowledgeService, useValue: management },
       { provide: HumanKnowledgeContextService, useValue: context },
@@ -33,11 +33,12 @@ export class HumanKnowledgeModule {
       ...(memory ? [{ provide: PersistentMemoryConsentService, useValue: memory }] : []),
       ...(uploads ? [{ provide: HumanKnowledgeUploadService, useValue: uploads }] : []),
       ...(sceneKnowledge ? [{ provide: KNOWLEDGE_SCENE_OPTIONS, useValue: sceneKnowledge }] : []),
+      ...(policyManagement ? [{ provide: KNOWLEDGE_POLICY_MANAGEMENT, useValue: policyManagement }] : []),
     ];
     return { module: HumanKnowledgeModule, providers,
       exports: [HumanKnowledgeService, HumanKnowledgeContextService, HumanKnowledgeIndexService, HumanKnowledgeInputService,
         ...(memory ? [PersistentMemoryConsentService] : []), ...(uploads ? [HumanKnowledgeUploadService] : []),
-        ...(sceneKnowledge ? [KNOWLEDGE_SCENE_OPTIONS] : [])] };
+        ...(sceneKnowledge ? [KNOWLEDGE_SCENE_OPTIONS] : []), ...(policyManagement ? [KNOWLEDGE_POLICY_MANAGEMENT] : [])] };
   }
 
 }
