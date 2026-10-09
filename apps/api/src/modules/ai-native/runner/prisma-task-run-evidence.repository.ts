@@ -48,7 +48,7 @@ export interface AiTaskPlanEvidenceAuthority {
   /** Server-owned action/limits/configuration policy. A model cannot attest its own plan. */
   authorize(plan: Readonly<AiTaskRunnerPlan>, lease: Readonly<AiTaskRunnerLease>): Promise<z.infer<typeof proofSchema>>;
 }
-type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskResultArtifact' | 'aiTaskExecutionCharge' | 'aiGatewayInvocation' | 'aiGatewayAccountingReceipt' | 'aiInvocationAdmission'>;
+type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskInputRequest' | 'aiTaskInputReceipt' | 'aiTaskResultArtifact' | 'aiTaskExecutionCharge' | 'aiGatewayInvocation' | 'aiGatewayAccountingReceipt' | 'aiInvocationAdmission'>;
 type Tx = Prisma.TransactionClient;
 const unavailable = () => new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
@@ -162,6 +162,38 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     if (proof.authorityHash !== row.authorityHash || proof.policyVersion !== row.policyVersion || Date.parse(proof.expiresAt) <= this.wall().getTime()) throw denied();
     await this.held(this.db, lease, access);
     return { ...plan, taskRevision: task.revision };
+  }
+
+  async resourceOrigin(plan: AiTaskRunnerPlan, lease: AiTaskRunnerLease): Promise<AiTaskRunnerPlan> {
+    plan = planSchema.parse(structuredClone(plan)); lease = structuredClone(lease);
+    const access = await this.access(lease); await this.held(this.db, lease, access);
+    const key = { scopeId: access.scopeId, taskId: lease.taskId };
+    const run = await this.db.aiRun.findFirst({ where: { ...key, id: lease.runId } });
+    if (!run || run.id !== lease.runId || run.scopeId !== key.scopeId || run.taskId !== key.taskId
+      || plan.runId !== run.id || plan.taskId !== key.taskId) throw denied();
+    if (run.inputReceiptId == null && run.resourceOriginRunId == null) return plan;
+    if (!run.inputReceiptId || !run.resourceOriginRunId || run.sequence < 2) throw denied();
+    const receipt = await this.db.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_id: { ...key, id: run.inputReceiptId } } });
+    const request = receipt && await this.db.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: { ...key, id: receipt.requestId } } });
+    if (!receipt || receipt.id !== run.inputReceiptId || receipt.scopeId !== key.scopeId || receipt.taskId !== key.taskId
+      || receipt.actorKind !== run.actorKind || receipt.actorId !== run.actorId || !receipt.consumedAt || !receipt.consumedTaskRevision
+      || !request || request.id !== receipt.requestId || request.scopeId !== key.scopeId || request.taskId !== key.taskId
+      || request.status !== 'CONSUMED' || request.planHash !== receipt.planHash || request.waitingTaskRevision + 1 !== receipt.consumedTaskRevision) throw denied();
+    const parent = await this.db.aiRun.findFirst({ where: { ...key, id: request.runId } });
+    const origin = await this.db.aiRun.findFirst({ where: { ...key, id: run.resourceOriginRunId } });
+    if (!parent || parent.id !== request.runId || parent.scopeId !== key.scopeId || parent.taskId !== key.taskId
+      || parent.sequence + 1 !== run.sequence || parent.status !== 'SUCCEEDED'
+      || (parent.resourceOriginRunId ?? parent.id) !== run.resourceOriginRunId
+      || !origin || origin.id !== run.resourceOriginRunId || origin.scopeId !== key.scopeId || origin.taskId !== key.taskId
+      || origin.sequence !== 1 || origin.inputReceiptId != null || origin.resourceOriginRunId != null || origin.status !== 'SUCCEEDED') throw denied();
+    const stored = await this.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: { ...key, runId: origin.id } } });
+    if (!stored || stored.scopeId !== key.scopeId || stored.taskId !== key.taskId || stored.runId !== origin.id
+      || requestFingerprint(stored.payload) !== stored.planHash) throw denied();
+    const original = planSchema.parse(stored.payload);
+    if (original.taskId !== key.taskId || original.runId !== origin.id
+      || Object.entries(original.limits).some(([name, ceiling]) => plan.limits[name as keyof typeof plan.limits] > ceiling)) throw denied();
+    await this.held(this.db, lease, access);
+    return original;
   }
 
   private async currentPlan(db: Pick<PrismaClient, 'aiTaskRunPlan'>, lease: AiTaskRunnerLease, scopeId: string) {

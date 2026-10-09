@@ -90,7 +90,11 @@ export class PrismaTaskApplication {
           || request.scopeId !== key.scopeId || request.taskId !== key.taskId || request.id !== receipt.requestId || request.status !== 'CONSUMED') {
           throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         }
-        return id.parse(request.runId);
+        const successor = await tx.aiRun.findUnique({ where: { scopeId_taskId_inputReceiptId: { ...key, inputReceiptId: saved.id } },
+          select: { id: true, scopeId: true, taskId: true, inputReceiptId: true, actorKind: true, actorId: true } });
+        if (successor && (successor.scopeId !== key.scopeId || successor.taskId !== key.taskId || successor.inputReceiptId !== saved.id
+          || successor.actorKind !== before.actorKind || successor.actorId !== before.actorId)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return id.parse(successor?.id ?? request.runId);
       }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
       await verifyReader();
       continuation = await this.start({ taskId: receipt.taskId, runId }, signal);

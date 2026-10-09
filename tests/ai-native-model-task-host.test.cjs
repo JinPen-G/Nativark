@@ -40,6 +40,102 @@ test('model host starts queued task and run, publishes under one lease, then set
   assert.equal(page.events.filter(e => e.type === 'step.changed' && e.data.status === 'succeeded').length, 1);
 });
 
+async function clarificationHost(turns) {
+  const h = await modelHostHarness();
+  h.config.inputSource = {
+    resolve: async binding => h.state.aiRun.find(r => r.id === binding.runId).sequence <= turns
+      ? { kind: 'required', contract: structuredClone(h.contract), inputRef: binding.inputRef, inputHash: binding.inputHash,
+        expiresAt: '2026-10-07T12:00:00Z' } : { kind: 'not_required' },
+    validateAnswers: async binding => ({ disposition: 'context_only', planHash: binding.planHash, inputRef: binding.inputRef, inputHash: binding.inputHash })
+  };
+  const root = composeTaskModelHost(h.config);
+  const answer = pending => ({ draftVersion: h.contract.draftVersion, taskId: h.query.taskId, requestId: pending.requestId,
+    expectedRevision: pending.revision, submissionKey: `answer-${pending.requestId}`,
+    answers: [{ fieldId: 'clarification_text', value: `Answer for ${pending.requestId}` }] });
+  return { ...h, root, answer };
+}
+
+test('model clarification creates successive frozen runs without resetting the original task budget', { timeout: 20000 }, async () => {
+  const h = await clarificationHost(2);
+  assert.equal((await h.root.application.start(h.query)).outcome.status, 'paused');
+  const originalInput = h.clone(h.state.aiTaskActionInput[0]), originalPlan = h.clone(h.state.aiTaskRunPlan[0]);
+  const policyFingerprint = h.state.aiTaskExecutionBudget[0].policyFingerprint;
+  for (let turn = 1; turn <= 2; turn++) {
+    const pending = await h.root.application.readInput({ taskId: h.query.taskId });
+    const submission = h.answer(pending);
+    const result = await composeTaskModelHost(h.config).application.resume(submission);
+    assert.equal(result.continuation.kind, 'run_outcome', JSON.stringify(result));
+    assert.equal(result.continuation.outcome.status, turn === 1 ? 'paused' : 'succeeded');
+    assert.equal((await h.root.application.resume(submission)).continuation.reason, 'receipt_replayed');
+    assert.equal(h.state.aiRun.length, turn + 1);
+    assert.equal(h.state.aiTaskExecutionBudget.length, 1);
+    assert.equal(h.state.aiTaskExecutionBudget[0].policyFingerprint, policyFingerprint);
+    assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, BigInt(turn + 1));
+    assert.equal(h.state.aiTaskExecutionBudget[0].consumedSteps, BigInt(turn + 1));
+    assert.equal(h.state.aiTaskExecutionBudget[0].consumedActiveMs, BigInt((turn + 1) * 10));
+    assert.equal(h.state.aiRun[turn].resourceOriginRunId, h.query.runId);
+    assert.equal(h.state.aiRun[turn].inputReceiptId, result.receipt.receiptId);
+  }
+  assert.deepEqual(h.state.aiTaskActionInput[0], originalInput);
+  assert.deepEqual(h.state.aiTaskRunPlan[0], originalPlan);
+  assert.equal(h.state.aiTask[0].status, 'SUCCEEDED');
+  assert.equal(h.modelControl.sent.length, 3);
+  assert.equal(new Set(h.modelControl.sent.map(r => r.callId)).size, 3);
+  assert.equal(h.state.aiGatewayInvocation.length, 3);
+  assert.equal(h.state.aiTaskExecutionCharge.length, 12);
+  assert.ok(h.state.aiTaskExecutionCharge.every(c => c.status === 'RECORDED'));
+  assert.ok(h.state.aiRun.every(r => r.leaseOwnerId === null));
+  assert.equal(h.state.aiTaskExecutionBudget[0].consumedOutputBytes, h.state.aiTaskResultArtifact.reduce((n, r) => n + r.outputBytes, 0n));
+  assert.match(h.modelControl.sent[1].messages.at(-1).content, /clarification_answers/);
+  assert.ok(h.modelControl.sent[2].messages.at(-1).content.includes(h.state.aiTaskInputReceipt[1].answers[0].value));
+});
+
+test('model clarification lost answer acknowledgement reads the same successor without redispatch', { timeout: 20000 }, async () => {
+  const h = await clarificationHost(1);
+  assert.equal((await h.root.application.start(h.query)).outcome.status, 'paused');
+  const pending = await h.root.application.readInput({ taskId: h.query.taskId }), submission = h.answer(pending);
+  h.storeControl.beforeCommit = async draft => {
+    if (draft.aiTaskInputReceipt.length && !h.state.aiTaskInputReceipt.length) h.storeControl.loseReply = true;
+  };
+  await assert.rejects(h.root.application.resume(submission), e => e.code === 'AI_RESULT_UNKNOWN');
+  h.storeControl.beforeCommit = null;
+  assert.equal(h.state.aiRun.length, 2);
+  assert.equal(h.state.aiTaskInputReceipt.length, 1);
+  assert.equal(h.modelControl.sent.length, 1);
+  const replay = await h.root.application.resume(submission);
+  assert.equal(replay.continuation.reason, 'receipt_replayed');
+  assert.equal(h.modelControl.sent.length, 1);
+  const successor = h.state.aiRun[1];
+  assert.equal(successor.inputReceiptId, replay.receipt.receiptId);
+  const finished = await composeTaskModelHost(h.config).application.start({ taskId: h.query.taskId, runId: successor.id });
+  assert.equal(finished.outcome.status, 'succeeded');
+  assert.equal(h.modelControl.sent.length, 2);
+  assert.equal(h.state.aiTaskExecutionBudget.length, 1);
+  assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, 2n);
+});
+
+test('model clarification cannot obtain new quota by creating another run', { timeout: 20000 }, async () => {
+  const h = await clarificationHost(4);
+  assert.equal((await h.root.application.start(h.query)).outcome.status, 'paused');
+  const fingerprint = h.state.aiTaskExecutionBudget[0].policyFingerprint;
+  for (let turn = 1; turn <= 4; turn++) {
+    const pending = await h.root.application.readInput({ taskId: h.query.taskId });
+    const result = await h.root.application.resume(h.answer(pending));
+    if (turn < 4) assert.equal(result.continuation.outcome.status, 'paused');
+    else assert.deepEqual(result.continuation, { kind: 'unavailable', errorCode: 'AI_RUN_LIMIT' });
+  }
+  assert.equal(h.modelControl.sent.length, 4);
+  assert.equal(h.state.aiGatewayInvocation.length, 4);
+  assert.equal(h.state.aiTaskExecutionBudget.length, 1);
+  assert.equal(h.state.aiTaskExecutionBudget[0].policyFingerprint, fingerprint);
+  assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, 4n);
+  assert.equal(h.state.aiTaskExecutionBudget[0].consumedSteps, 4n);
+  assert.equal(h.state.aiTaskExecutionBudget[0].maxCalls, 4n);
+  assert.equal(h.state.aiTaskExecutionBudget[0].reservedCalls, 0n);
+  assert.equal(h.state.aiStep.at(-1).status, 'PENDING');
+  assert.ok(h.state.aiRun.every(r => r.leaseOwnerId === null));
+});
+
 test('model host cannot substitute an absent financial reader or price version', async () => {
   const h = await modelHostHarness(), before = h.clone(h.state);
   assert.throws(() => composeTaskModelHost({ ...h.config, financialEvidence: undefined }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');

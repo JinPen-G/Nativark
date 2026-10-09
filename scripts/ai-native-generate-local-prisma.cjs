@@ -105,7 +105,7 @@ function generateLocalAiPrismaClient() {
     for (const key of ["PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "USERPROFILE", "LOCALAPPDATA", "APPDATA"]) if (process.env[key]) env[key] = process.env[key];
     const preload = path.join(root, "tests/fixtures/ai-native/prisma-offline-preload.cjs").replace(/\\/gu, "/");
     const childTemp = path.join(temporary, "tmp"); fs.mkdirSync(childTemp);
-    Object.assign(env, { DATABASE_URL: "mysql://offline:offline@127.0.0.1:1/rental_os_e2e_offline_schema", AI_OFFLINE_AUDIT: audit, AI_OFFLINE_WRITE_ROOT: temporary,
+    Object.assign(env, { DATABASE_URL: "mysql://offline:offline@127.0.0.1:1/rental_os_offline", AI_OFFLINE_AUDIT: audit, AI_OFFLINE_WRITE_ROOT: temporary,
       HOME: temporary, USERPROFILE: temporary, APPDATA: temporary, LOCALAPPDATA: temporary, TEMP: childTemp, TMP: childTemp,
       NODE_OPTIONS: `--require "${preload}"`, CHECKPOINT_DISABLE: "1", PRISMA_HIDE_UPDATE_MESSAGE: "1", PRISMA_DISABLE_TELEMETRY: "1", PRISMA_GENERATE_SKIP_AUTOINSTALL: "1", NO_COLOR: "1" });
     const child = spawnSync(process.execPath, [cli, "generate", "--generator", "client", "--schema", "schema.prisma"], { cwd: temporary, env, encoding: "utf8", timeout: 120000, maxBuffer: 8 * 1024 * 1024 });

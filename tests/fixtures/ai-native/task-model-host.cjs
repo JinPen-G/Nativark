@@ -15,6 +15,7 @@ async function modelHostHarness() {
     serviceMode: 'tenant_managed', enabled: true, disabledAt: null };
   const h = await authorizedRunnerHarness({ aiTaskPlanPolicy: [], aiTaskActionInput: [], aiProviderProfile: [profile], aiBudgetReservation: [] });
   h.state.aiTaskRunPlan = []; h.state.aiTask[0].status = 'QUEUED'; h.state.aiRun[0].status = 'QUEUED';
+  h.state.aiRun[0].sequence = 1;
   h.identity.user.permissions.push('system:params:manage');
   const transaction = h.db.$transaction.bind(h.db);
   h.db.$transaction = callback => transaction(tx => callback({ ...tx,

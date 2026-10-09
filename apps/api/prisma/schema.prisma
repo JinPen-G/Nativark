@@ -1280,6 +1280,7 @@ model AiTaskInputReceipt {
   consumedAt           DateTime? @db.DateTime(3)
   consumedTaskRevision Int? @db.UnsignedInt
   request              AiTaskInputRequest @relation(fields: [scopeId, taskId, requestId, planHash], references: [scopeId, taskId, id, planHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_task_input_receipts_request_fkey")
+  continuationRun      AiRun? @relation("AiRunInputContinuation")
 
   @@id([scopeId, taskId, id])
   @@unique([scopeId, taskId, requestId], map: "ai_task_input_receipts_request_key")
@@ -6028,9 +6029,16 @@ model AiRun {
   quoteSelections    AiTaskQuoteSelection[]
   executionPhases    AiTaskExecutionPhaseStart[]
   reprepareTargets   AiApprovalReprepare[]
+  inputReceiptId     String? @db.VarChar(36)
+  inputReceipt       AiTaskInputReceipt? @relation("AiRunInputContinuation", fields: [scopeId, taskId, inputReceiptId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_runs_input_receipt_fkey")
+  resourceOriginRunId String? @db.VarChar(36)
+  resourceOrigin     AiRun? @relation("AiRunResourceOrigin", fields: [scopeId, taskId, resourceOriginRunId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_runs_resource_origin_fkey")
+  resourceSuccessors AiRun[] @relation("AiRunResourceOrigin")
 
   automationInputs  AiAutomationInput[]
   automationReviewOperations AiAutomationReviewOperation[]
+  @@unique([scopeId, taskId, inputReceiptId], map: "ai_runs_input_receipt_key")
+  @@index([scopeId, taskId, resourceOriginRunId], map: "ai_runs_resource_origin_idx")
   @@unique([scopeId, taskId, id], map: "ai_runs_scope_task_id")
   @@unique([scopeId, taskId, sequence], map: "ai_runs_sequence")
   @@index([status, leaseExpiresAt], map: "ai_runs_recovery")

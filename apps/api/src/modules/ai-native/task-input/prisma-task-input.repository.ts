@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient, type AiTaskInputRequest, type AiTaskInputReceipt } from '@prisma/client';
 import { z } from 'zod';
 import {
-  AI_TASK_DRAFT_VERSION, AI_TASK_INPUT_DRAFT_VERSION, isAiTaskInputContractDraft,
+  AI_TASK_DRAFT_VERSION, AI_TASK_INPUT_DRAFT_VERSION, AI_TEXT_MODEL_STEP_CODE, isAiTaskInputContractDraft,
   isAiTaskInputSubmissionDraft, validateAiTaskInputAnswersDraft,
   type AiTaskInputContractDraft, type AiTaskInputSubmissionDraft, type AiTaskEventDraft
 } from '@rental-os/shared';
@@ -72,11 +72,11 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
       || Object.entries(access.scope).some(([k, v]) => task.scope[k as keyof typeof task.scope] !== v)) throw unavailable();
     return task;
   }
-  private async run(tx: Tx, taskId: string, scopeId: string, runId: string, access: Access) {
+  private async run(tx: Tx, taskId: string, scopeId: string, runId: string, access: Access, completed = false) {
     await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_runs WHERE scopeId = ${scopeId} AND taskId = ${taskId} AND id = ${runId} FOR UPDATE`);
     const run = await tx.aiRun.findFirst({ where: { id: runId, scopeId, taskId } });
     if (!run || run.id !== runId || run.scopeId !== scopeId || run.taskId !== taskId
-      || run.actorId !== access.actorId || run.actorKind !== access.actorKind || !['QUEUED', 'RUNNING'].includes(run.status)
+      || run.actorId !== access.actorId || run.actorKind !== access.actorKind || !['QUEUED', 'RUNNING', ...(completed ? ['SUCCEEDED'] : [])].includes(run.status)
       || run.revision < 1 || run.revision > maxRevision || BigInt(run.fencingToken.toFixed(0)) >= maxFence) throw denied();
     return run;
   }
@@ -165,16 +165,20 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
         return null;
       }
       if (requirement.kind === 'not_required') { await this.access(task.id, 'request_input', before); return null; }
-      if (facts.planned.operation !== 'readonly' || facts.step.effect !== 'NONE' || Date.parse(requirement.expiresAt) <= this.clock().getTime()) throw unavailable();
+      const modelContinuation = facts.planned.operation === 'external_unknown' && facts.planned.toolCode === AI_TEXT_MODEL_STEP_CODE
+        && facts.plan.steps.length === 1;
+      if ((!modelContinuation && facts.planned.operation !== 'readonly') || facts.step.effect !== 'NONE'
+        || Date.parse(requirement.expiresAt) <= this.clock().getTime()) throw unavailable();
       const steps = await tx.aiStep.findMany({ where: { scopeId: task.scopeId, taskId: task.id }, take: 1001 });
       const pending = facts.plan.steps.slice(facts.index + 1).some(p => {
         const action = `ai-action-${requestFingerprint({ version: 'ai-step-registration-1', scope: before.scope, taskId: task.id, registrationRef: p.registrationRef })}`;
         const step = steps.find(s => s.actionId === action); return !step || step.runId === run.id && step.status === 'PENDING';
       });
-      if (!pending) throw unavailable();
+      if (!pending && !modelContinuation) throw unavailable();
       const charges = await tx.aiTaskExecutionCharge.findMany({ where: { scopeId: task.scopeId, taskId: task.id, runId: run.id, stepId: facts.step.id }, take: 5 });
       if (charges.length < 3 || charges.length > 4 || new Set(charges.map(c => c.resource)).size !== charges.length
         || !['STEPS', 'ACTIVE_MS', 'OUTPUT_BYTES'].every(r => charges.some(c => c.resource === r))
+        || modelContinuation && (charges.length !== 4 || !charges.some(c => c.resource === 'CALLS' && c.gatewayInvocationId))
         || charges.some(c => c.status !== 'RECORDED' || c.actionId !== facts.step.actionId || c.stepFingerprint !== facts.step.requestFingerprint
           || c.leaseOwnerId !== facts.artifact.leaseOwnerId || c.fencingToken.toFixed(0) !== facts.artifact.fencingToken.toFixed(0))) throw unavailable();
       this.transition(task, steps, 'waiting_input', 'input_required');
@@ -242,7 +246,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
       const task = await this.task(tx, submission.taskId, before);
       const request = await tx.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: { scopeId: task.scopeId, taskId: task.id, id: submission.requestId } } });
       if (!request || request.id !== submission.requestId) throw unavailable();
-      const run = await this.run(tx, task.id, task.scopeId, request.runId, before);
+      const run = await this.run(tx, task.id, task.scopeId, request.runId, before, true);
       await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_task_input_requests WHERE scopeId = ${task.scopeId} AND taskId = ${task.id} AND id = ${request.id} FOR UPDATE`);
       const facts = await this.facts(tx, task.scopeId, task.id, run.id, request.stepId);
       const contract = this.validateRequest(request, facts.binding, before);
@@ -252,7 +256,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
         await this.access(task.id, 'read_metadata', before);
         return { status: 'input_received' as const, taskId: task.id, requestId: request.id, receiptId: receipt.id, taskRevision: receipt.consumedTaskRevision!, replayed: true };
       }
-      if (task.status !== 'WAITING_INPUT' || task.cancelRequestedAt !== null || task.revision !== request.waitingTaskRevision
+      if (task.status !== 'WAITING_INPUT' || run.status !== 'RUNNING' || task.cancelRequestedAt !== null || task.revision !== request.waitingTaskRevision
         || request.status !== 'PENDING' || request.revision !== 1 || submission.expectedRevision !== request.revision
         || request.expiresAt <= this.clock() || run.fencingToken.toFixed(0) !== request.fencingToken.toFixed(0)
         || !(run.leaseOwnerId === null && run.leaseExpiresAt === null || run.leaseOwnerId !== null && run.leaseExpiresAt !== null && run.leaseExpiresAt <= this.clock())) throw conflict();
@@ -262,13 +266,22 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
       if (requirement.kind !== 'required' || requestFingerprint(requirement.contract) !== request.contractHash) throw denied();
       await this.validateAnswers(facts.binding, contract, submission.answers);
       const steps = await tx.aiStep.findMany({ where: { scopeId: task.scopeId, taskId: task.id }, take: 1001 });
+      const modelContinuation = facts.planned.operation === 'external_unknown' && facts.planned.toolCode === AI_TEXT_MODEL_STEP_CODE
+        && facts.plan.steps.length === 1;
+      if (modelContinuation) {
+        const runs = await tx.aiRun.findMany({ where: { scopeId: task.scopeId, taskId: task.id }, take: 1001 });
+        if (!Number.isSafeInteger(run.sequence) || run.sequence < 1 || run.sequence >= 1000 || runs.length !== run.sequence
+          || runs.some(r => r.id !== run.id && r.status !== 'SUCCEEDED')
+          || steps.length !== run.sequence || steps.some(s => s.status !== 'SUCCEEDED' || s.effect !== 'NONE' || s.toolCode !== AI_TEXT_MODEL_STEP_CODE)) throw unavailable();
+      }
       this.transition(task, steps, 'running', 'resume');
       await this.access(task.id, 'submit_input', before);
       const current = await this.access(task.id, 'resume_input', before);
       if (request.expiresAt <= this.clock()) throw conflict();
       if ((await tx.aiRun.updateMany({ where: { id: run.id, taskId: task.id, scopeId: task.scopeId, revision: run.revision, fencingToken: run.fencingToken,
         leaseOwnerId: run.leaseOwnerId, leaseExpiresAt: run.leaseExpiresAt, status: run.status, actorId: current.actorId, actorKind: current.actorKind },
-        data: { revision: { increment: 1 }, fencingToken: { increment: new Prisma.Decimal(1) }, leaseOwnerId: null, leaseExpiresAt: null } })).count !== 1) throw conflict();
+        data: { revision: { increment: 1 }, fencingToken: { increment: new Prisma.Decimal(1) }, leaseOwnerId: null, leaseExpiresAt: null,
+          ...(modelContinuation ? { status: 'SUCCEEDED', endedAt: this.clock() } : {}) } })).count !== 1) throw conflict();
       const receiptId = randomUUID();
       await tx.aiTaskInputReceipt.create({ data: { scopeId: task.scopeId, taskId: task.id, id: receiptId, requestId: request.id, planHash: request.planHash,
         submissionKey: submission.submissionKey, answerHash: answerDigest(submission, request), answers: structuredClone(submission.answers) as unknown as Prisma.InputJsonValue,
@@ -276,8 +289,51 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
       if ((await tx.aiTaskInputRequest.updateMany({ where: { scopeId: task.scopeId, taskId: task.id, id: request.id, revision: request.revision,
         status: 'PENDING', requestHash: request.requestHash, fencingToken: request.fencingToken, expiresAt: { gt: this.clock() } },
         data: { status: 'CONSUMED', revision: { increment: 1 } } })).count !== 1) throw conflict();
+      if (modelContinuation) {
+        const originId = run.resourceOriginRunId ?? run.id;
+        const origin = await tx.aiRun.findFirst({ where: { scopeId: task.scopeId, taskId: task.id, id: originId, sequence: 1 } });
+        if (!origin || origin.id !== originId || origin.scopeId !== task.scopeId || origin.taskId !== task.id
+          || origin.inputReceiptId != null || origin.resourceOriginRunId != null
+          || (run.sequence > 1 && (!run.inputReceiptId || !run.resourceOriginRunId))) throw denied();
+        await tx.aiRun.create({ data: { id: randomUUID(), scopeId: task.scopeId, taskId: task.id,
+          actorKind: current.actorKind, actorId: current.actorId, authorizedAt: current.authorizedAt,
+          sequence: run.sequence + 1, status: 'RUNNING', revision: 1, fencingToken: new Prisma.Decimal(0),
+          leaseOwnerId: null, leaseExpiresAt: null, inputReceiptId: receiptId, resourceOriginRunId: originId } });
+      }
       await this.publish(tx, task, current, 'running', 'resume', { requestId: request.id, receiptId });
       return { status: 'input_received' as const, taskId: task.id, requestId: request.id, receiptId, taskRevision: task.revision + 1, replayed: false };
+    });
+  }
+
+  async readContinuation(lease: AiTaskRunnerLease) {
+    lease = structuredClone(lease);
+    const before = await this.access(lease.taskId, 'read_metadata');
+    return this.transaction(async tx => {
+      const task = await this.task(tx, lease.taskId, before), run = await this.run(tx, task.id, task.scopeId, lease.runId, before);
+      this.held(run, lease);
+      if (task.status !== 'RUNNING' || task.cancelRequestedAt !== null || !run.inputReceiptId || !run.resourceOriginRunId) throw denied();
+      const saved = await tx.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_id: { scopeId: task.scopeId, taskId: task.id, id: run.inputReceiptId } } });
+      if (!saved || saved.id !== run.inputReceiptId) throw unavailable();
+      const request = await tx.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: { scopeId: task.scopeId, taskId: task.id, id: saved.requestId } } });
+      if (!request || request.expiresAt <= this.clock()) throw unavailable();
+      const parent = await this.run(tx, task.id, task.scopeId, request.runId, before, true);
+      if (parent.status !== 'SUCCEEDED' || parent.sequence + 1 !== run.sequence
+        || (parent.resourceOriginRunId ?? parent.id) !== run.resourceOriginRunId) throw denied();
+      const facts = await this.facts(tx, task.scopeId, task.id, parent.id, request.stepId);
+      if (facts.plan.steps.length !== 1 || facts.planned.toolCode !== AI_TEXT_MODEL_STEP_CODE
+        || facts.planned.operation !== 'external_unknown' || facts.step.effect !== 'NONE') throw denied();
+      const contract = this.validateRequest(request, facts.binding, before), receipt = this.receipt(request, saved, before);
+      const answers = receipt.answers as unknown as AiTaskInputSubmissionDraft['answers'];
+      await this.validateAnswers(facts.binding, contract, answers);
+      const input = await tx.aiTaskActionInput.findFirst({ where: { scopeId: task.scopeId, taskId: task.id, runId: parent.id, id: facts.binding.inputRef } });
+      if (!input || input.id !== facts.binding.inputRef || input.scopeId !== task.scopeId || input.taskId !== task.id || input.runId !== parent.id
+        || input.fingerprint !== facts.binding.inputHash || input.registrationRef !== facts.binding.registrationRef
+        || input.toolCode !== facts.planned.toolCode || input.toolVersion !== facts.planned.toolVersion) throw denied();
+      await this.access(task.id, 'read_metadata', before);
+      this.held(await this.run(tx, task.id, task.scopeId, run.id, before), lease);
+      return { resourceOriginRunId: run.resourceOriginRunId, receiptId: receipt.id, registrationRef: `model-followup-${receipt.id}`,
+        input: structuredClone(input.payload), inputHash: input.fingerprint, result: structuredClone(facts.artifact.payload),
+        answers: structuredClone(answers), limits: structuredClone(facts.plan.limits) };
     });
   }
 
