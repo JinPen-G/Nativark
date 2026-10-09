@@ -39,6 +39,7 @@ export type AiClientRequestConfiguration = z.infer<typeof configurationSchema>;
 export type AiClientApplicationRequest = { headers: { authorization?: unknown }; ip?: string };
 export type AiClientRequestDependencies = {
   client: Parameters<typeof composeAiClientScenes>[0]['client'];
+  addresses?: Parameters<typeof composeAiClientScenes>[0]['addresses'];
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   db: AiClientMaterialDb;
   tasks?: AiClientTaskDependencies;
@@ -95,7 +96,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           || identity.tenantCode !== server.tenantCode || identity.workspaceCode !== server.serviceCode
           || identity.categoryCode !== before.value.service.categoryCode)) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
         const bindingHash = requestFingerprint({ publication: before, identity, appId: server.appId ?? null });
-        const scenes = composeAiClientScenes({ client: dependencies.client, ...(source ? { session: source } : {}) });
+        const scenes = composeAiClientScenes({ client: dependencies.client, addresses: dependencies.addresses, ...(source ? { session: source } : {}) });
         const assertCurrent = async () => {
           if (!active) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
           const after = await publication(), current = source ? await source.current() : null;
@@ -446,6 +447,9 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         ? ['OPEN_ORDER', 'CREATE_BOOKING_DRAFT', 'OPEN_BOOKING'] as const : ['OPEN_ORDER'] as const) : [],
       bookingDrafts: server.entry && taskDependencies && server.channel !== 'app' && typeof dependencies.client.getQuote === 'function'
         && typeof dependencies.client.bookingOptions === 'function' ? 'existing_quote_same_surface_only' as const : 'unavailable' as const,
+      savedDeliveryAddresses: server.entry && taskDependencies && server.channel !== 'app'
+        && typeof dependencies.addresses?.list === 'function' && typeof dependencies.addresses.requireOwnAddress === 'function'
+        ? 'current_saved_address_snapshot_only' as const : 'unavailable' as const,
       bookingSubmission: 'unavailable_original_page_acceptance_receipt_missing' as const,
       crossSurfaceHandoff: 'unavailable' as const,
       materialKinds: ['catalog', 'help', 'profile', 'order', 'cancellation_preview'] as const,

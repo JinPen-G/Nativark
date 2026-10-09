@@ -11,6 +11,7 @@ const serviceSchema = z.object({ serviceId: entryId, quantity: z.number().int().
 export const bookingSelectionSchema: z.ZodType<AiBookingSelection> = z.object({
   quoteId: entryId, timeZone: z.string().min(1).max(100), startAt: entryDate, endAt: entryDate,
   fulfillmentMode: z.enum(RENTAL_FULFILLMENT_MODES), fulfillmentLocationId: entryId, returnLocationId: entryId.optional(),
+  deliveryAddressId: entryId.optional(),
   bookingIdentity: z.object({ bookingIdentity: z.enum(['personal', 'enterprise_employee']), corporateCustomerId: entryId.optional(),
     enterpriseContractAndPayer: z.boolean() }).strict(),
   lines: z.array(z.object({ itemGroupId: entryId, quantity: z.number().int().min(1).max(999) }).strict()).min(1).max(20),
@@ -47,8 +48,18 @@ export async function readClientBookingMaterial(scenes: ReturnType<typeof compos
   if (!entryDate.safeParse(quote.createdAt).success || !entryId.safeParse(quote.pricingPlanVersion).success
     || !entryId.safeParse(quote.ruleVersion).success || !/^[A-Z]{3}$/u.test(quote.currency ?? '')) return unavailable('quote_basis_missing');
   if (quote.pricingContext?.timeZone && quote.pricingContext.timeZone !== catalog.timeZone) return stale('quote_time_zone_changed');
-  if (quote.request.deliveryAddressId || quote.request.deliveryAddressDraft || quote.deliveryAddressSnapshot) return unavailable('current_delivery_address_recheck_missing');
+  if (quote.request.deliveryAddressDraft) return unavailable('one_time_delivery_address_recheck_missing');
   if (quote.request.services?.length || selection.services?.length) return unavailable('current_service_capacity_recheck_missing');
+  const needsAddress = ['delivery', 'onsite_delivery'].includes(quote.request.fulfillmentMode)
+    && catalog.fulfillment.deliveryDestination === 'customer_address';
+  let deliveryAddress: AiBookingMaterial['deliveryAddress'];
+  if (needsAddress) {
+    const addressId = quote.request.deliveryAddressId, snapshot = quote.deliveryAddressSnapshot;
+    if (!addressId || !snapshot || snapshot.addressId !== addressId || selection.deliveryAddressId !== addressId) return stale('quote_address_selection_mismatch');
+    deliveryAddress = await scenes.member.savedDeliveryAddress(addressId, snapshot);
+  } else if (quote.request.deliveryAddressId || quote.deliveryAddressSnapshot || selection.deliveryAddressId) {
+    return stale('address_not_applicable_to_fulfillment');
+  }
   const membership = quote.membershipSnapshot;
   if (!membership || membership.personalCustomerId !== identity.customerId) return unavailable('quote_membership_basis_missing');
   const actualIdentity = { bookingIdentity: membership.bookingIdentity,
@@ -102,8 +113,9 @@ export async function readClientBookingMaterial(scenes: ReturnType<typeof compos
   const result: AiBookingMaterial = { selection: confirmed, sources: {
     quoteId: 'user_explicit', timeZone: 'user_explicit', startAt: 'user_explicit', endAt: 'user_explicit',
     fulfillmentMode: 'user_explicit', fulfillmentLocationId: 'user_explicit', lines: 'user_explicit', bookingIdentity: 'user_explicit',
-    returnLocationId: selection.returnLocationId ? 'user_explicit' : 'core_normalized', services: selection.services ? 'user_explicit' : 'core_normalized'
-  }, quote: quoteFacts, catalogVersion: hashJson({ items, locations, timeZone: catalog.timeZone, fulfillment: catalog.fulfillment }),
+    returnLocationId: selection.returnLocationId ? 'user_explicit' : 'core_normalized', services: selection.services ? 'user_explicit' : 'core_normalized',
+    ...(selection.deliveryAddressId ? { deliveryAddressId: 'user_explicit' as const } : {})
+  }, ...(deliveryAddress ? { deliveryAddress } : {}), quote: quoteFacts, catalogVersion: hashJson({ items, locations, timeZone: catalog.timeZone, fulfillment: catalog.fulfillment }),
     availabilityVersion: hashJson(availability), identityVersion: hashJson(matching[0]), availability: 'available_at_observation_not_reserved' };
   if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 32768) return unavailable('booking_material_too_large');
   return result;
