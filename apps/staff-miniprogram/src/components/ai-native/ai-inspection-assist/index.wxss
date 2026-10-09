@@ -1,0 +1,3 @@
+.inspection-assist { padding: 24rpx; overflow-wrap: anywhere; word-break: break-word; }
+.inspection-assist text { display: block; margin-bottom: 16rpx; }
+.inspection-assist button { min-height: 88rpx; margin-top: 16rpx; white-space: normal; }

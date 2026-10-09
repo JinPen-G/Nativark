@@ -1,0 +1,38 @@
+import { StaffInspectionHostBinding, emptyInspectionView, type StaffInspectionHost } from "../inspection-host";
+const bindings = new WeakMap<object, StaffInspectionHostBinding>();
+const dialogs = new WeakSet<object>();
+Component({
+  data: emptyInspectionView(),
+  lifetimes: {
+    created() { bindings.set(this, new StaffInspectionHostBinding(view => this.setData(view))); },
+    detached() { bindings.get(this)?.detachHost(); bindings.delete(this); },
+  },
+  methods: {
+    attachHost(host: StaffInspectionHost) {
+      this.detachHost(); bindings.get(this)?.attachHost(host);
+      if (host.taskHost && host.serverEnabled === true) this.selectComponent("#workbench")?.attachHost?.(host.taskHost);
+    },
+    detachHost() { bindings.get(this)?.detachHost(); this.selectComponent("#workbench")?.detachHost?.(); },
+    async hostShow() { await bindings.get(this)?.show(); if (this.data.phase !== "unavailable") this.selectComponent("#workbench")?.hostShow?.(true); },
+    hostHide() { bindings.get(this)?.hide(); this.selectComponent("#workbench")?.hostHide?.(); },
+    hostLogout() { this.detachHost(); },
+    async onRead() { await bindings.get(this)?.read(); },
+    async onEdit(event: WechatMiniprogram.CustomEvent) { await bindings.get(this)?.edit(event.detail?.key, event.detail?.humanValue); },
+    async onRemove(event: WechatMiniprogram.TouchEvent) { await bindings.get(this)?.removeEvidence(String(event.currentTarget.dataset.id ?? "")); },
+    async onReview() { await bindings.get(this)?.prepareReview(); },
+    async onReconcile() { await bindings.get(this)?.reconcile(); },
+    async onSubmit() {
+      if (!this.data.canSubmit || this.data.pending || dialogs.has(this)) return;
+      // No automatic submission: the system dialog is an explicit human action.
+      const binding = bindings.get(this);
+      const generation = binding?.generation();
+      const revision = binding?.revision();
+      dialogs.add(this);
+      try {
+        const confirmed = await new Promise<boolean>(resolve => wx.showModal({ title: "提交原检查入口", content: "请核实全部字段和签名。草稿不判责、不计算费用；服务端仍须验证。", success: result => resolve(result.confirm), fail: () => resolve(false) }));
+        if (bindings.get(this) === binding && generation !== undefined) await binding?.submit(confirmed, generation, revision);
+      } catch { if (bindings.get(this) === binding && generation === binding?.generation()) this.setData({ error: "提交入口不可用，请使用原人工流程" }); }
+      finally { dialogs.delete(this); }
+    },
+  },
+});

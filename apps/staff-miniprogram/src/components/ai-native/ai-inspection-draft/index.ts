@@ -3,6 +3,7 @@ import { boundedText } from "../display-format";
 const detachedViews = new WeakSet<object>();
 function inspectionValue(value: unknown): string {
   if (value === null || value === undefined) return "缺失";
+  if (typeof value === "boolean") return value ? "是" : "否";
   if (typeof value === "number") return Number.isFinite(value) && (!Number.isInteger(value) || Number.isSafeInteger(value)) ? String(value) : "非法值";
   if (typeof value === "bigint") { const exact = value.toString(); return exact.length <= 4000 ? exact : "非法值"; }
   if (typeof value === "string") return boundedText(value);
