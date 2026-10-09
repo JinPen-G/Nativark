@@ -17,6 +17,7 @@ import type {
 } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
 import { resolveScopeWorkspaceId } from "./workspace-scope";
+import { requestFingerprint } from './rental-idempotency.repository';
 
 export type RentalBusinessFactTx = Prisma.TransactionClient;
 /** Server-derived opaque hashes, never authorization or a client DTO. The key
@@ -88,6 +89,7 @@ export interface RentalBusinessFactStore {
   saveQuoteForOriginalOperation?(quote: RentalQuoteSnapshotV1, original: RentalQuoteOriginalOperation,
     expectedBinding?: { categoryVersionId: string; adoptionRevision: number }): Promise<RentalQuoteSnapshotV1>;
   findQuoteForOriginalOperation?(tenantId: string, original: RentalQuoteOriginalOperation): Promise<RentalQuoteSnapshotV1 | undefined>;
+  findQuoteForOriginalReference?(tenantId: string, key: string): Promise<RentalQuoteSnapshotV1 | undefined>;
   /**
    * 传入 tx 时必须使用它。领券由幂等执行器包在事务里，若这里另起连接独立提交，
    * 事务回滚撤不回这张券，会留下"幂等表已回滚、客户券已存在"的孤儿。
@@ -213,6 +215,19 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     if (!row) return undefined; // Absence is not proof that an in-flight write failed.
     if (row.originalInputHash !== original.inputHash) throw new ConflictException('报价原操作输入冲突');
     return this.toQuote(row);
+  }
+
+  /** Historical observation: the input binding comes from the immutable row,
+   * not a request re-normalized using today's configuration. Server-only key. */
+  async findQuoteForOriginalReference(tenantId: string, key: string): Promise<RentalQuoteSnapshotV1 | undefined> {
+    if (typeof key !== 'string' || !/^[a-f0-9]{64}$/u.test(key)) throw new ConflictException('报价原操作引用无效');
+    const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    const row = await this.prisma.rentalQuote.findFirst({ where: { tenantId, workspaceId, originalOperationKey: key } });
+    if (!row) return undefined;
+    const quote = this.toQuote(row);
+    if (row.originalOperationKey !== key || row.tenantId !== tenantId || row.workspaceId !== workspaceId
+      || row.originalInputHash !== requestFingerprint(quote.request)) throw new ConflictException('报价原操作持久依据无效');
+    return quote;
   }
 
   async consumeQuoteIfAvailable(

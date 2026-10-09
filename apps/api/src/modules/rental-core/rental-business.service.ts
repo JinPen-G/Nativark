@@ -4746,6 +4746,12 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return this.factStore.findQuoteForOriginalOperation(tenantId, Object.freeze({ key: proof?.key, inputHash: proof?.inputHash }));
   }
 
+  /** Observation only; never recomputes prices, revives expiry or creates a row. */
+  async readQuoteForOriginalReference(tenantId: string, key: string) {
+    if (!this.factStore.findQuoteForOriginalReference) throw new ServiceUnavailableException('报价历史原操作读取不可用');
+    return this.factStore.findQuoteForOriginalReference(tenantId, key);
+  }
+
   async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest, preResolvedDeliveryAddress?: RentalDeliveryAddressSnapshot,
     original?: RentalQuoteOriginalOperation) {
     if (original) {

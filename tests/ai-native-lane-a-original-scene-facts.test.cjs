@@ -75,6 +75,27 @@ test('explicit original quote confirmation uses actual Core storage and receipt 
   assert.equal(recovered.orderApproval, 'not_granted'); assert.equal(recovered.result.quote.reservation, 'not_reserved');
   assert.equal(h.state.rentalQuote.length, 1);
   await assert.rejects(h.app.confirmQuote({ ...command, confirmQuote: true, inputFingerprint: 'a'.repeat(64) }), e => e.code === 'AI_REVISION_CONFLICT');
+  const savedBasis = structuredClone(recovered.result.quote);
+  // Change present-day configuration and expire the original AI request. The
+  // observation still uses the saved Core row, never current settings/price.
+  h.b.core.getProfile('tenant_001').configVersion = 'changed-after-quote';
+  h.state.aiTaskPlanPolicy.find(row => row.sceneCode === 'quote_clarification').enabled = false;
+  h.state.aiTaskOriginalRequest.find(row => row.id === ref.inputRef).expiresAt = new Date('2020-01-01T00:00:00Z');
+  const historical = await h.app.readQuoteReceipt(ref);
+  assert.deepEqual(historical.result.quote, savedBasis);
+  assert.equal(historical.original.state, 'expired');
+  assert.equal(historical.selection, 'historical_not_current_confirmation');
+  assert.equal(h.state.rentalQuote.length, 1);
+  await assert.rejects(h.app.confirmQuote({ ...command, confirmQuote: true }));
+  h.state.rentalQuote[0].expiresAt = new Date('2020-01-01T00:00:00Z');
+  const expired = await h.app.readQuoteReceipt(ref);
+  assert.equal(expired.result.status, 'expired'); assert.equal(expired.result.quote.id, savedBasis.id);
+  assert.equal(expired.result.quote.payableAmount, savedBasis.payableAmount);
+  assert.equal(h.state.rentalQuote.length, 1);
+  const row = h.state.rentalQuote[0], savedHash = row.originalInputHash;
+  row.originalInputHash = '0'.repeat(64);
+  await assert.rejects(h.app.readQuoteReceipt(ref));
+  row.originalInputHash = savedHash;
   h.b.h.identity.session = false;
   await assert.rejects(h.app.readQuoteReceipt(command), e => e.code === 'AI_ACCESS_DENIED');
   assert.equal(h.state.rentalQuote.length, 1);

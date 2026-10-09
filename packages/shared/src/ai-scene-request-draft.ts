@@ -35,10 +35,14 @@ export interface AiSceneRequestReadDraft {
 /** Confirms only the displayed Core quote parameters, not order creation or
  * approval. Hashes bind the current authorized preparation, not authority. */
 export interface AiSceneQuoteReceiptReadDraft extends AiSceneRequestReadDraft {
-  selectionRevision: string;
-  inputFingerprint: string;
+  /** Optional legacy display hints; historical lookup uses the server-owned
+   * original reference, not today's candidates or these caller values. */
+  selectionRevision?: string;
+  inputFingerprint?: string;
 }
 export interface AiSceneQuoteConfirmDraft extends AiSceneQuoteReceiptReadDraft {
+  selectionRevision: string;
+  inputFingerprint: string;
   confirmQuote: true;
 }
 export interface AiSceneRequestReceiptDraft {

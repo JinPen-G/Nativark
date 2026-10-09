@@ -4,6 +4,7 @@ import type { BusinessContext } from '../../rental-core/rental-business.service'
 import type { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import type { AiQuoteCoreContextSource, AiQuotePreviewAuthority } from '../quote-preview.service';
 import { ModelGatewayError } from '../model-gateway.ports';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiQuotePreviewService } from '../quote-preview.service';
 import type { RentalBusinessService } from '../../rental-core/rental-business.service';
 import { AiQuoteCandidatePreparationService } from './quote-candidate-preparation.service';
@@ -60,7 +61,7 @@ export class AiGuardedQuoteCoreContextSource implements AiQuoteCoreContextSource
  * authorized task path. No runner/approval/dispatch is installed here. */
 export function composeAiGuardedQuoteTools(input: {
   core: ContextCore & Pick<RentalCoreService, 'resolvePricingGroupQuoteRequest'>;
-  business: Pick<RentalBusinessService, 'createQuote'> & Partial<Pick<RentalBusinessService, 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation'>>;
+  business: Pick<RentalBusinessService, 'createQuote'> & Partial<Pick<RentalBusinessService, 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>;
   routes: AiBusinessReadRouteAuthority;
   readers: { catalog: Pick<AiCatalogReadFactsService, 'read'>; members: Pick<AiMembershipCandidateReadFactsService, 'read'> };
   clock?: () => Date;
@@ -72,6 +73,11 @@ export function composeAiGuardedQuoteTools(input: {
   const preview = new AiQuotePreviewService(input.business, context, authority, input.clock, input.core);
   return Object.freeze({
     candidates, preview,
+    recoverOriginal: (reference: string, expectedIdentityHash: string) => input.routes.withRead('quote_context', {}, async context => {
+      const { requestId: _request, authorizedAt: _at, ...identity } = context;
+      if (requestFingerprint(identity) !== expectedIdentityHash) throw new ModelGatewayError('FORBIDDEN');
+      return preview.recoverOriginal(reference, context);
+    }),
     /** Host calls after explicit candidate selection. Revision is consistency
      * evidence only, never approval to create an order. Re-resolve every ID and
      * bind the current server context to the original guarded Core quote. */

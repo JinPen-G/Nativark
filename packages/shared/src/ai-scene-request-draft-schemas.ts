@@ -27,7 +27,7 @@ export const AI_SCENE_REQUEST_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> =
   AiSceneQuoteConfirmDraft: object({ draftVersion: base.draftVersion, inputRef: uuid,
     selectionRevision: hash, inputFingerprint: hash, confirmQuote: { type: 'boolean', const: true } }),
   AiSceneQuoteReceiptReadDraft: object({ draftVersion: base.draftVersion, inputRef: uuid,
-    selectionRevision: hash, inputFingerprint: hash }),
+    selectionRevision: hash, inputFingerprint: hash }, ['draftVersion', 'inputRef']),
   AiSceneModelTaskPageDraft: object({ limit: integer(1, 50), cursor: { type: 'string', maxLength: 512 },
     status: { type: 'string', minLength: 1, maxLength: 64 }, sceneCode: { type: 'string', minLength: 1, maxLength: 191 } }, []),
   AiSceneModelTaskEventsDraft: object({ original: originalReference,

@@ -80,14 +80,31 @@ export class AiOriginalSceneFactsService {
   /** Explicit authenticated host action after displaying the current prepared
    * parameters. This confirms only an R1 quote request, never order approval.
    * The caller cannot supply a price, actor, scope or Core operation key. */
-  confirmQuote(value: unknown) { return this.originalQuote(value, false); }
+  confirmQuote(value: unknown) { return this.originalQuote(value); }
 
   /** Exact original-operation observation only; a missing row stays unknown.
    * No create, latest-quote lookup or replacement operation is attempted. */
-  readQuoteReceipt(value: unknown) { return this.originalQuote(value, true); }
+  async readQuoteReceipt(value: unknown) {
+    const parsed = originalRequestReferenceSchema.extend({
+      selectionRevision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+      inputFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional()
+    }).strict().safeParse(value);
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const ref = freezeOriginalInput({ draftVersion: parsed.data.draftVersion, inputRef: parsed.data.inputRef });
+    const original = await this.requests.readHistorical(ref);
+    if (original.request.sceneCode !== 'quote_clarification') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const result = await this.tools.quote.recoverOriginal(`${ref.inputRef}:${original.receipt.contentHash}`,
+      originalIdentityHash(original.context));
+    const after = await this.requests.readHistorical(ref);
+    if (originalIdentityHash(original.context) !== originalIdentityHash(after.context)
+      || original.receipt.contentHash !== after.receipt.contentHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    return freezeOriginalInput({ original: original.receipt, result, observation: 'original_operation_only' as const,
+      selection: 'historical_not_current_confirmation' as const,
+      orderApproval: 'not_granted' as const, inventoryReservation: 'not_attempted' as const });
+  }
 
-  private async originalQuote(value: unknown, readOnly: boolean) {
-    const parsed = (readOnly ? quoteConfirmation.omit({ confirmQuote: true }) : quoteConfirmation).safeParse(value);
+  private async originalQuote(value: unknown) {
+    const parsed = quoteConfirmation.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const command = freezeOriginalInput(parsed.data), ref = { draftVersion: command.draftVersion, inputRef: command.inputRef };
     const original = await this.requests.read(ref);
@@ -104,13 +121,13 @@ export class AiOriginalSceneFactsService {
     const result = await this.tools.quote.preview.previewOriginal(selected.request, {
       reference: `${ref.inputRef}:${original.receipt.contentHash}`,
       expectedIdentityHash: originalIdentityHash(grant.context)
-    }, selected.configurationFingerprint, readOnly);
+    }, selected.configurationFingerprint);
     const final = await this.requests.read(ref);
     const after = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
     if (originalIdentityHash(grant.context) !== originalIdentityHash(after.context)
       || final.receipt.contentHash !== original.receipt.contentHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     return freezeOriginalInput({ original: original.receipt, result,
-      observation: readOnly ? 'original_operation_only' as const : 'explicit_quote_request' as const,
+      observation: 'explicit_quote_request' as const,
       orderApproval: 'not_granted' as const, inventoryReservation: 'not_attempted' as const });
   }
 }

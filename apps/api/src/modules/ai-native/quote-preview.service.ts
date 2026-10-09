@@ -7,6 +7,13 @@ import { requestFingerprint } from "../rental-core/rental-idempotency.repository
 
 const id = z.string().trim().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const timestamp = z.string().datetime({ offset: true });
+const quoteIdentityHash = (value: AiExecutionContext) => {
+  const { authorizedAt: _time, requestId: _request, ...identity } = value;
+  return requestFingerprint(identity);
+};
+const originalQuoteKey = (context: AiExecutionContext, reference: string) => requestFingerprint({
+  contract: 'original-scene-quote-1', reference, scope: context.scope, actor: context.actor, audience: context.audience
+});
 const line = z.object({
   pricingGroupId: id.optional(), itemGroupId: id.optional(), quantity: z.number().int().positive().max(10000),
   pricingUnit: z.enum(RENTAL_PRICING_UNIT_CODES).optional(),
@@ -83,7 +90,7 @@ export interface AiQuoteCoreContextSource {
  */
 export class AiQuotePreviewService {
   constructor(
-    private readonly core: Pick<RentalBusinessService, "createQuote"> & Partial<Pick<RentalBusinessService, 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation'>>,
+    private readonly core: Pick<RentalBusinessService, "createQuote"> & Partial<Pick<RentalBusinessService, 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>,
     private readonly contexts: AiQuoteCoreContextSource,
     private readonly authority: AiQuotePreviewAuthority,
     private readonly clock: () => Date = () => new Date(),
@@ -106,6 +113,36 @@ export class AiQuotePreviewService {
       || typeof this.core.createQuoteForOriginalOperation !== 'function'
       || typeof this.core.readQuoteForOriginalOperation !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
     return this.execute(value, expectedConfigurationFingerprint, { ...binding, readOnly });
+  }
+
+  /** Called inside the guarded read composition with a currently authorized
+   * original owner. No current pricing/candidate resolution is a historical
+   * basis; the stored parameters themselves undergo the original quote Guard. */
+  async recoverOriginal(reference: string, suppliedContext: AiExecutionContext): Promise<AiQuotePreviewResult> {
+    const context = structuredClone(suppliedContext);
+    if (!reference || reference.length > 512 || context.scope.kind !== 'workspace' || context.actor.kind !== 'user'
+      || !['operator', 'staff'].includes(context.audience)) throw new ModelGatewayError('FORBIDDEN');
+    if (typeof this.core.readQuoteForOriginalReference !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+    const tenantId = context.scope.tenantId, key = originalQuoteKey(context, reference);
+    const stored = await this.core.readQuoteForOriginalReference(tenantId, key);
+    if (!stored) return { ...this.failure(context, 'unavailable', '原报价尚未观察到；不得据此重报'),
+      quotePersistence: 'unknown', nextAction: 'reconcile', retryable: false };
+    const guardInput = structuredClone(stored.request);
+    guardInput.lines = guardInput.lines.map(row => {
+      const { reservationPrecision: _precision, pricingGroupMemberItemGroupIds: _members,
+        pricingGroupCode: _code, pricingGroupName: _name, ...input } = row;
+      return input;
+    });
+    return this.authority.withQuote(guardInput, async current => {
+      if (quoteIdentityHash(current) !== quoteIdentityHash(context)) throw new ModelGatewayError('FORBIDDEN');
+      const again = await this.core.readQuoteForOriginalReference!(tenantId, key);
+      const immutable = (quote: RentalQuoteSnapshotV1) => {
+        const { consumedAt: _at, consumedOrderId: _order, ...basis } = quote;
+        return requestFingerprint(basis);
+      };
+      if (!again || immutable(again) !== immutable(stored)) throw new ModelGatewayError('INVALID_RESPONSE');
+      return this.project(context, again, requestFingerprint(stored.request), stored.request.lines.length, true);
+    });
   }
 
   private async execute(value: unknown, expectedConfigurationFingerprint?: string,
@@ -152,8 +189,7 @@ export class AiQuotePreviewService {
             if (binding(final) !== binding(context)) throw new ModelGatewayError('FORBIDDEN');
             try {
               const operation = original ? {
-                key: requestFingerprint({ contract: 'original-scene-quote-1', reference: original.reference,
-                  scope, actor: context.actor, audience: context.audience }), inputHash: expectedRequest
+                key: originalQuoteKey(context, original.reference), inputHash: expectedRequest
               } : undefined;
               const quote = operation
                 ? original!.readOnly
@@ -173,34 +209,39 @@ export class AiQuotePreviewService {
           });
         });
         if (outcome.kind === 'failure') return { ...this.failure(context, outcome.status, 'Core 未能生成报价；请核对输入或转人工处理'), quotePersistence: 'unknown', nextAction: 'reconcile', retryable: false };
-        const quote = outcome.quote;
-        const observed = this.clock(); if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError("CONFIG_INVALID");
-        const chargeLines = z.array(chargeLineSchema).max(100).safeParse(quote?.chargeLines);
-        const savedBasis = savedQuoteBasisSchema.safeParse(quote);
-        if (quote?.tenantId !== context.scope.tenantId || !Array.isArray(quote?.request?.lines) || quote.request.lines.length !== parsed.data.lines.length
-          || requestFingerprint(quote.request) !== expectedRequest
-          || !this.hasSafeAmounts(quote)
-          || !chargeLines.success || !savedBasis.success) throw new ModelGatewayError("INVALID_RESPONSE");
-        const expiresAt = new Date(quote.expiresAt); if (!Number.isFinite(expiresAt.getTime())) throw new ModelGatewayError("INVALID_RESPONSE");
-        if (expiresAt.getTime() <= observed.getTime()) return { ...this.failure(context, "expired", "报价生成后已失效"), quotePersistence: 'saved' };
-        return { contractVersion: "ain-09-quote-preview-draft-1", requestId: context.requestId, observedAt: observed.toISOString(), scope: context.scope, status: "quoted", quotePersistence: 'saved', quote: {
-          id: quote.id, quoteNo: quote.quoteNo, currency: quote.currency, chargeLines: chargeLines.data,
-          rentalAmount: quote.rentalAmount, discountAmount: quote.discountAmount, couponAmount: quote.couponAmount, serviceAmount: quote.serviceAmount,
-          fulfillmentAmount: quote.fulfillmentAmount, depositAmount: quote.depositAmount, preAuthAmount: quote.preAuthAmount, payableAmount: quote.payableAmount, receivableAmount: quote.receivableAmount,
-          pricingPlanVersion: quote.pricingPlanVersion, priceVersionId: quote.priceVersionId, priceVersion: quote.priceVersion, ruleVersion: quote.ruleVersion, calendarVersion: quote.calendarVersion,
-          expiresAt: quote.expiresAt, createdAt: quote.createdAt, timeZone: quote.pricingContext?.timeZone, reservation: "not_reserved",
-          period: { startAt: quote.request.startAt, endAt: quote.request.endAt },
-          lineUnits: quote.request.lines.map(row => ({ itemGroupId: row.itemGroupId, pricingUnit: row.pricingUnit,
-            quantity: row.quantity, usageQuantity: row.usageQuantity })),
-          promotionEvidence: chargeLines.data.filter(row => row.type === 'discount' || row.type === 'coupon')
-            .map(row => ({ code: row.code, sourceId: row.sourceId, sourceVersion: row.sourceVersion })),
-          promotionVersionCoverage: 'charge_line_references_only', roundingEvidence: 'not_projected'
-        } };
+        return this.project(context, outcome.quote, expectedRequest, parsed.data.lines.length);
       } catch (error) {
         if (error instanceof ModelGatewayError) throw error;
         return this.failure(context, this.classify(error), "Core 未能生成报价；请核对输入或转人工处理");
       }
     });
+  }
+
+  private project(context: AiExecutionContext, quote: RentalQuoteSnapshotV1, expectedRequest: string,
+    expectedLines: number, historical = false): AiQuotePreviewResult {
+    if (context.scope.kind !== 'workspace') throw new ModelGatewayError('FORBIDDEN');
+    const observed = this.clock(); if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError("CONFIG_INVALID");
+    const chargeLines = z.array(chargeLineSchema).max(100).safeParse(quote?.chargeLines);
+    const savedBasis = savedQuoteBasisSchema.safeParse(quote);
+    if (quote?.tenantId !== context.scope.tenantId || !Array.isArray(quote?.request?.lines) || quote.request.lines.length !== expectedLines
+      || requestFingerprint(quote.request) !== expectedRequest
+      || !this.hasSafeAmounts(quote)
+      || !chargeLines.success || !savedBasis.success) throw new ModelGatewayError("INVALID_RESPONSE");
+    const expiresAt = new Date(quote.expiresAt); if (!Number.isFinite(expiresAt.getTime())) throw new ModelGatewayError("INVALID_RESPONSE");
+    if (!historical && expiresAt.getTime() <= observed.getTime()) return { ...this.failure(context, "expired", "报价生成后已失效"), quotePersistence: 'saved' };
+    return { contractVersion: "ain-09-quote-preview-draft-1", requestId: context.requestId, observedAt: observed.toISOString(), scope: context.scope, status: expiresAt.getTime() <= observed.getTime() ? "expired" : "quoted", quotePersistence: 'saved', quote: {
+      id: quote.id, quoteNo: quote.quoteNo, currency: quote.currency, chargeLines: chargeLines.data,
+      rentalAmount: quote.rentalAmount, discountAmount: quote.discountAmount, couponAmount: quote.couponAmount, serviceAmount: quote.serviceAmount,
+      fulfillmentAmount: quote.fulfillmentAmount, depositAmount: quote.depositAmount, preAuthAmount: quote.preAuthAmount, payableAmount: quote.payableAmount, receivableAmount: quote.receivableAmount,
+      pricingPlanVersion: quote.pricingPlanVersion, priceVersionId: quote.priceVersionId, priceVersion: quote.priceVersion, ruleVersion: quote.ruleVersion, calendarVersion: quote.calendarVersion,
+      expiresAt: quote.expiresAt, createdAt: quote.createdAt, timeZone: quote.pricingContext?.timeZone, reservation: "not_reserved",
+      period: { startAt: quote.request.startAt, endAt: quote.request.endAt },
+      lineUnits: quote.request.lines.map(row => ({ itemGroupId: row.itemGroupId, pricingUnit: row.pricingUnit,
+        quantity: row.quantity, usageQuantity: row.usageQuantity })),
+      promotionEvidence: chargeLines.data.filter(row => row.type === 'discount' || row.type === 'coupon')
+        .map(row => ({ code: row.code, sourceId: row.sourceId, sourceVersion: row.sourceVersion })),
+      promotionVersionCoverage: 'charge_line_references_only', roundingEvidence: 'not_projected'
+    } };
   }
 
   private failure(context: AiExecutionContext, status: AiQuotePreviewFailure, message: string): AiQuotePreviewResult {
