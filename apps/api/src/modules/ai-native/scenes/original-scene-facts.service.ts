@@ -12,6 +12,11 @@ const citationSchema = originalRequestReferenceSchema.extend({ version: z.string
 const sectionsSchema = originalRequestReferenceSchema.extend({ sections: z.array(z.object({ key: z.string().min(1).max(191),
   expectedVersion: z.string().min(1).max(191), changes: z.array(z.object({ field: z.enum(fields), value: z.string().trim().min(1).max(80) }).strict()).min(1).max(6)
 }).strict()).min(1).max(6).refine(rows => new Set(rows.map(row => row.key)).size === rows.length) }).strict();
+const quoteConfirmation = originalRequestReferenceSchema.extend({
+  selectionRevision: z.string().regex(/^[a-f0-9]{64}$/),
+  inputFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  confirmQuote: z.literal(true)
+}).strict();
 
 export class AiOriginalSceneFactsService {
   constructor(private readonly requests: PrismaOriginalRequestRepository, private readonly tools: ReturnType<typeof composeAiAuthorizedBusinessTools>) {}
@@ -70,5 +75,42 @@ export class AiOriginalSceneFactsService {
     return freezeOriginalInput({ original: original.receipt, facts, sources, materialHash: requestFingerprint({ facts, sources }),
       humanSelection: 'not_attested' as const, quotePersistence: 'not_attempted' as const, orderApproval: 'not_granted' as const,
       execution: 'not_attempted' as const });
+  }
+
+  /** Explicit authenticated host action after displaying the current prepared
+   * parameters. This confirms only an R1 quote request, never order approval.
+   * The caller cannot supply a price, actor, scope or Core operation key. */
+  confirmQuote(value: unknown) { return this.originalQuote(value, false); }
+
+  /** Exact original-operation observation only; a missing row stays unknown.
+   * No create, latest-quote lookup or replacement operation is attempted. */
+  readQuoteReceipt(value: unknown) { return this.originalQuote(value, true); }
+
+  private async originalQuote(value: unknown, readOnly: boolean) {
+    const parsed = (readOnly ? quoteConfirmation.omit({ confirmQuote: true }) : quoteConfirmation).safeParse(value);
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const command = freezeOriginalInput(parsed.data), ref = { draftVersion: command.draftVersion, inputRef: command.inputRef };
+    const original = await this.requests.read(ref);
+    if (original.request.sceneCode !== 'quote_clarification') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const before = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
+    const selected = await this.tools.quote.candidates.prepare(original.request.input.candidate);
+    if (selected.status !== 'needs_confirmation') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    if (selected.selectionRevision !== command.selectionRevision
+      || requestFingerprint(selected.request) !== command.inputFingerprint) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    const again = await this.requests.read(ref);
+    const grant = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
+    if (originalIdentityHash(before.context) !== originalIdentityHash(grant.context)
+      || original.receipt.contentHash !== again.receipt.contentHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const result = await this.tools.quote.preview.previewOriginal(selected.request, {
+      reference: `${ref.inputRef}:${original.receipt.contentHash}`,
+      expectedIdentityHash: originalIdentityHash(grant.context)
+    }, selected.configurationFingerprint, readOnly);
+    const final = await this.requests.read(ref);
+    const after = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
+    if (originalIdentityHash(grant.context) !== originalIdentityHash(after.context)
+      || final.receipt.contentHash !== original.receipt.contentHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    return freezeOriginalInput({ original: original.receipt, result,
+      observation: readOnly ? 'original_operation_only' as const : 'explicit_quote_request' as const,
+      orderApproval: 'not_granted' as const, inventoryReservation: 'not_attempted' as const });
   }
 }

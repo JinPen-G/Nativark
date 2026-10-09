@@ -10,7 +10,10 @@ type Scenes = ReturnType<typeof composeRequestBoundOriginalScenes>;
 async function respondAiScene<T>(work: () => Promise<T>) {
   try { return await work(); }
   catch (error) {
-    const code = error instanceof Error && 'code' in error ? error.code : 'AI_STORAGE_UNAVAILABLE';
+    const rawCode = error instanceof Error && 'code' in error ? error.code : 'AI_STORAGE_UNAVAILABLE';
+    const gatewayCodes: Record<string, string> = { FORBIDDEN: 'AI_ACCESS_DENIED', INVALID_REQUEST: 'AI_INVALID_INPUT',
+      CONFIG_INVALID: 'AI_RESOURCE_UNAVAILABLE', CAPABILITY_UNSUPPORTED: 'AI_RESOURCE_UNAVAILABLE', INVALID_RESPONSE: 'AI_RESOURCE_UNAVAILABLE' };
+    const code = typeof rawCode === 'string' && Object.prototype.hasOwnProperty.call(gatewayCodes, rawCode) ? gatewayCodes[rawCode] : rawCode;
     const statuses: Record<string, number> = { AI_INVALID_INPUT: 400, AI_ACCESS_DENIED: 403, AI_SCOPE_CHANGED: 403,
       AI_RESOURCE_UNAVAILABLE: 404, AI_REVISION_CONFLICT: 409, AI_STORAGE_UNAVAILABLE: 503, AI_RESULT_UNKNOWN: 409 };
     const known = typeof code === 'string' && Object.prototype.hasOwnProperty.call(statuses, code) ? code : 'AI_STORAGE_UNAVAILABLE';
@@ -51,6 +54,10 @@ export class AiOriginalScenesController {
   /** Read current preparation for the stored original request, never quote creation. */
   @Post(AI_SCENE_REQUEST_HTTP_DRAFT.quoteReview)
   quoteReview(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.reviewQuote(request, body)); }
+  @Post(AI_SCENE_REQUEST_HTTP_DRAFT.quoteConfirm)
+  quoteConfirm(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.confirmQuote(request, body)); }
+  @Post(AI_SCENE_REQUEST_HTTP_DRAFT.quoteReceipt)
+  quoteReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.readQuoteReceipt(request, body)); }
 }
 
 /** No root-module registration. The server must provide the actual authorized

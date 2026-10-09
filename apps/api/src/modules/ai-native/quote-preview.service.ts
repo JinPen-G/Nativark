@@ -83,7 +83,7 @@ export interface AiQuoteCoreContextSource {
  */
 export class AiQuotePreviewService {
   constructor(
-    private readonly core: Pick<RentalBusinessService, "createQuote">,
+    private readonly core: Pick<RentalBusinessService, "createQuote"> & Partial<Pick<RentalBusinessService, 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation'>>,
     private readonly contexts: AiQuoteCoreContextSource,
     private readonly authority: AiQuotePreviewAuthority,
     private readonly clock: () => Date = () => new Date(),
@@ -93,6 +93,23 @@ export class AiQuotePreviewService {
   }
 
   async preview(value: unknown, expectedConfigurationFingerprint?: string): Promise<AiQuotePreviewResult> {
+    return this.execute(value, expectedConfigurationFingerprint);
+  }
+
+  /** Internal original-request consumer only. The reference and identity come
+   * from the authorized immutable repository, never model parameters. Read-only
+   * recovery cannot fall through to quote creation when no row is observed. */
+  async previewOriginal(value: unknown, original: Readonly<{ reference: string; expectedIdentityHash: string }>,
+    expectedConfigurationFingerprint?: string, readOnly = false): Promise<AiQuotePreviewResult> {
+    const binding = structuredClone(original);
+    if (!binding.reference || binding.reference.length > 512 || !/^[a-f0-9]{64}$/.test(binding.expectedIdentityHash)
+      || typeof this.core.createQuoteForOriginalOperation !== 'function'
+      || typeof this.core.readQuoteForOriginalOperation !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+    return this.execute(value, expectedConfigurationFingerprint, { ...binding, readOnly });
+  }
+
+  private async execute(value: unknown, expectedConfigurationFingerprint?: string,
+    original?: Readonly<{ reference: string; expectedIdentityHash: string; readOnly: boolean }>): Promise<AiQuotePreviewResult> {
     const parsed = aiQuotePreviewInputSchema.safeParse(value);
     if (!parsed.success) {
       const fields = [...new Set(parsed.error.issues.map(issue => issue.path.join(".")).filter(Boolean))];
@@ -107,6 +124,7 @@ export class AiQuotePreviewService {
           const { authorizedAt: _time, requestId: _request, ...identity } = value;
           return requestFingerprint(identity);
         };
+        if (original && binding(context) !== original.expectedIdentityHash) throw new ModelGatewayError('FORBIDDEN');
         const business = structuredClone(await this.contexts.current(structuredClone(scope)));
         if (expectedConfigurationFingerprint !== undefined && requestFingerprint(business) !== expectedConfigurationFingerprint) throw new ModelGatewayError('CONFIG_INVALID');
         const formalRequest = this.resolver
@@ -133,7 +151,17 @@ export class AiQuotePreviewService {
           return this.authority.withQuote(structuredClone(parsed.data) as RentalQuoteRequest, async final => {
             if (binding(final) !== binding(context)) throw new ModelGatewayError('FORBIDDEN');
             try {
-              return { kind: 'quote' as const, quote: await this.core.createQuote(scope.tenantId, latest, structuredClone(formalRequest)) };
+              const operation = original ? {
+                key: requestFingerprint({ contract: 'original-scene-quote-1', reference: original.reference,
+                  scope, actor: context.actor, audience: context.audience }), inputHash: expectedRequest
+              } : undefined;
+              const quote = operation
+                ? original!.readOnly
+                  ? await this.core.readQuoteForOriginalOperation!(scope.tenantId, operation)
+                  : await this.core.createQuoteForOriginalOperation!(scope.tenantId, latest, structuredClone(formalRequest), operation)
+                : await this.core.createQuote(scope.tenantId, latest, structuredClone(formalRequest));
+              if (!quote) return { kind: 'failure' as const, status: 'unavailable' as const };
+              return { kind: 'quote' as const, quote };
             } catch (error) {
               if (error instanceof ModelGatewayError) throw error;
               if (error instanceof HttpException && [401, 403].includes(error.getStatus())) throw new ModelGatewayError('FORBIDDEN');

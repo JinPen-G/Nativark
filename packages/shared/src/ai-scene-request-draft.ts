@@ -32,6 +32,15 @@ export interface AiSceneRequestReadDraft {
   draftVersion: typeof AI_SCENE_REQUEST_DRAFT_VERSION;
   inputRef: string;
 }
+/** Confirms only the displayed Core quote parameters, not order creation or
+ * approval. Hashes bind the current authorized preparation, not authority. */
+export interface AiSceneQuoteReceiptReadDraft extends AiSceneRequestReadDraft {
+  selectionRevision: string;
+  inputFingerprint: string;
+}
+export interface AiSceneQuoteConfirmDraft extends AiSceneQuoteReceiptReadDraft {
+  confirmQuote: true;
+}
 export interface AiSceneRequestReceiptDraft {
   draftVersion: typeof AI_SCENE_REQUEST_DRAFT_VERSION;
   inputRef: string;
@@ -62,7 +71,8 @@ export interface AiSceneRecoveryStepDraft {
 export const AI_SCENE_REQUEST_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/scene-requests', method: 'POST',
   create: '', read: 'read', reissue: 'reissue', reconcile: 'reconcile', reconcileReissue: 'reconcile-reissue',
-  createTask: 'create-task', material: 'material', recovery: 'recovery', quoteReview: 'quote-review'
+  createTask: 'create-task', material: 'material', recovery: 'recovery', quoteReview: 'quote-review',
+  quoteConfirm: 'quote-confirm', quoteReceipt: 'quote-receipt'
 } as const);
 /** Server opt-in only. Bodies reuse original references and the existing input
  * submission contract; callers never supply leases, prompts or model settings. */

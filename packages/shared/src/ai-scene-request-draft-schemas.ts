@@ -24,6 +24,10 @@ const observedTask = object({ state: choice('observed'), taskId: uuid, runId: uu
 const recoveryStep = object({ stepId: id(), runId: id(), actionId: id(), revision: integer(1, 4294967294), status: choice(...AI_STEP_STATUSES_DRAFT),
   effect: choice('none', 'possible', 'committed'), resultAvailable: { type: 'boolean' }, nextAction: choice('reconcile_original_action', 'read_authorized_result', 'runner_owned') });
 export const AI_SCENE_REQUEST_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiSceneQuoteConfirmDraft: object({ draftVersion: base.draftVersion, inputRef: uuid,
+    selectionRevision: hash, inputFingerprint: hash, confirmQuote: { type: 'boolean', const: true } }),
+  AiSceneQuoteReceiptReadDraft: object({ draftVersion: base.draftVersion, inputRef: uuid,
+    selectionRevision: hash, inputFingerprint: hash }),
   AiSceneModelTaskPageDraft: object({ limit: integer(1, 50), cursor: { type: 'string', maxLength: 512 },
     status: { type: 'string', minLength: 1, maxLength: 64 }, sceneCode: { type: 'string', minLength: 1, maxLength: 191 } }, []),
   AiSceneModelTaskEventsDraft: object({ original: originalReference,

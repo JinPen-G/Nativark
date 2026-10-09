@@ -39,6 +39,8 @@ test('original quote review consumes revised formal requests without saving a qu
   const module = AiOriginalScenesModule.registerHttp(dependencies, { enabled: true, audience: 'operator' });
   const controller = new AiOriginalScenesController(module.providers[0].useFactory());
   assert.equal(Reflect.getMetadata('path', AiOriginalScenesController.prototype.quoteReview), AI_SCENE_REQUEST_HTTP_DRAFT.quoteReview);
+  assert.equal(Reflect.getMetadata('path', AiOriginalScenesController.prototype.quoteConfirm), AI_SCENE_REQUEST_HTTP_DRAFT.quoteConfirm);
+  assert.equal(Reflect.getMetadata('path', AiOriginalScenesController.prototype.quoteReceipt), AI_SCENE_REQUEST_HTTP_DRAFT.quoteReceipt);
   let quoteWrites = 0;
   const createQuote = h.b.business.createQuote.bind(h.b.business);
   h.b.business.createQuote = (...args) => { quoteWrites++; return createQuote(...args); };
@@ -70,6 +72,11 @@ test('original quote review consumes revised formal requests without saving a qu
   assert.equal(prepared.humanSelection, 'not_attested');
   assert.equal(prepared.orderApproval, 'not_granted');
   assert.equal(quoteWrites, 0);
+  const confirmation = { ...h.ref(confirmedParameters.receipt.inputRef), selectionRevision: prepared.facts.selectionRevision,
+    inputFingerprint: prepared.sources.inputFingerprint, confirmQuote: true };
+  assert.equal(ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneQuoteConfirmDraft)(confirmation), true);
+  await assert.rejects(controller.quoteConfirm(request, { ...confirmation, confirmQuote: false }), e => e.getStatus() === 400);
+  await assert.rejects(controller.quoteReceipt({ headers: {} }, { ...confirmation, confirmQuote: undefined }), e => e.getStatus() === 403);
   assert.equal((await controller.read(request, h.ref(first.receipt.inputRef))).request.input.candidate.customerId, undefined);
   assert.equal(confirmedParameters.receipt.previousInputRef, revised.receipt.inputRef);
   await assert.rejects(controller.quoteReview(request, { ...h.ref(first.receipt.inputRef), candidate: h.b.candidate }), e => e.getStatus() === 400);
