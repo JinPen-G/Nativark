@@ -35,7 +35,7 @@ export interface StaffInspectionHost {
     reconcile?: (request: AiInspectionTarget & { draftId: string }) => Promise<{ status: string }>;
   };
 }
-export const emptyInspectionView = () => ({ phase: "unavailable", pending: false, error: "", items: [] as unknown[],
+export const emptyInspectionView = () => ({ phase: "unavailable", pending: false, error: "", revision: 0, items: [] as unknown[],
   missing: [] as string[], evidence: [] as AiInspectionEvidenceRef[], editable: false, canRemove: false, canReview: false, canSubmit: false, canReconcile: false });
 
 /** No timers, storage, network, token or shared state. Old epochs cannot update this view. */
@@ -65,10 +65,16 @@ export class StaffInspectionHostBinding {
     const view = emptyInspectionView(), d = this.detail, host = this.host;
     view.phase = phase; view.error = error; view.pending = this.pending;
     if (d && this.template) {
+      view.revision = d.revision;
       view.items = this.template.fields.slice(0, 64).map(field => {
-        const candidate = d.state.candidates.find(item => item.fieldCode === field.code);
+        const matches = d.state.candidates.filter(item => item.fieldCode === field.code);
+        const candidate = matches.length === 1 ? matches[0] : undefined;
         return { key: field.code, label: boundedText(field.label, 200),
           candidate: candidate?.status === "candidate" ? (candidate.value.kind === "photo" ? candidate.value.attachmentId : candidate.value.value) : null,
+          candidateId: candidate?.candidateId ?? "",
+          candidateActionable: candidate?.status === "candidate" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(candidate.candidateId)
+            && candidate.sources.every(source => d.state.evidence.some(ref => ref.attachmentId === source.attachmentId && ref.attachmentRevision === source.attachmentRevision)),
+          decision: d.state.fields[field.code]?.decision ?? "",
           humanValue: d.state.fields[field.code]?.value ?? null,
           sourceLabel: candidate?.sources.map(source => `${source.attachmentId}@${source.attachmentRevision}`).join(", ").slice(0, 200) ?? "来源不可用" };
       });
@@ -113,9 +119,10 @@ export class StaffInspectionHostBinding {
   }
   private loadedPhase() { return this.detail ? (this.uncertain ? "unknown" : this.detail.status) : "read_failed"; }
   private base(kind: Parameters<StaffInspectionHost["operationId"]>[0]) {
-    const host = this.host!, detail = this.detail!;
+    const host = this.host!, detail = this.detail!, epoch = this.epoch, revision = detail.revision;
     const operationId = host.operationId(kind, detail.revision);
     if (typeof operationId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(operationId)) throw new Error("operation");
+    if (!this.active(epoch) || this.host !== host || this.detail !== detail || detail.revision !== revision) throw new Error("context changed");
     return { ...host.target, draftId: detail.draftId, expectedRevision: detail.revision, operationId };
   }
   private async action(kind: "edit" | "evidence" | "submission" | "prepare", request: unknown, run: () => Promise<unknown>) {
@@ -138,6 +145,24 @@ export class StaffInspectionHostBinding {
     if (field.type === "select" && !field.options?.includes(text)) return;
     const request = { ...this.base("edit"), bindingFingerprint: this.detail.bindingFingerprint, edits: [{ fieldCode, decision: "manual" as const, value }] };
     await this.action("edit", request, () => this.host!.drafts.edit!(request));
+  }
+  /** An explicit human choice of the exact current candidate, never a supplied final value. */
+  async decideCandidate(fieldCode: string, candidateId: string, decision: "accepted" | "rejected", revision: number) {
+    if (!this.active() || this.pending || this.uncertain || !this.detail || !this.host?.drafts.edit
+      || this.detail.revision !== revision || !["draft_saved", "prepared"].includes(this.detail.status)
+      || !["accepted", "rejected"].includes(decision) || !this.template?.fields.some(field => field.code === fieldCode)) return;
+    const host = this.host, epoch = this.epoch;
+    const matches = this.detail.state.candidates.filter(item => item.fieldCode === fieldCode);
+    const candidate = matches.length === 1 ? matches[0] : undefined;
+    if (!candidate || candidate.candidateId !== candidateId || candidate.status !== "candidate"
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(candidateId)) return;
+    if (decision === "accepted" && !candidate.sources.every(source => this.detail!.state.evidence.some(ref =>
+      ref.attachmentId === source.attachmentId && ref.attachmentRevision === source.attachmentRevision))) return;
+    try {
+      const request: AiInspectionDraftEditRequest = { ...this.base("edit"), bindingFingerprint: this.detail.bindingFingerprint,
+        edits: [{ fieldCode, candidateId, decision }] };
+      await this.action("edit", request, () => host.drafts.edit!(request));
+    } catch { if (this.active(epoch)) this.view(this.loadedPhase(), "候选操作不可用，请保留人工填单"); }
   }
   async removeEvidence(attachmentId: string) {
     if (!this.active() || this.pending || this.uncertain || !this.detail || !["draft_saved", "prepared"].includes(this.detail.status) || !this.host?.drafts.replaceEvidence) return;

@@ -50,14 +50,40 @@ test('staff inspection host consumes original draft, edits, evidence and submiss
     evidence: { fingerprint: async () => { calls.push('evidence'); return 'trusted-evidence'; } },
     templates: { read: async () => { calls.push('template'); return { bindingFingerprint: 'binding', template }; } },
     drafts: { read: async () => { calls.push('read'); return structuredClone(detail); },
-      edit: async request => { calls.push(request); detail.state.fields.reading.value = request.edits[0].value; detail.revision++; },
+      edit: async request => { calls.push(request); const edit = request.edits[0];
+        const candidate = detail.state.candidates.find(row => row.candidateId === edit.candidateId);
+        detail.state.fields.reading = { value: edit.decision === 'accepted' ? candidate.value.value : edit.decision === 'rejected' ? null : edit.value,
+          decision: edit.decision, candidateId: edit.candidateId, actorId: 'staff-1' }; detail.revision++; },
       replaceEvidence: async request => { calls.push(request); detail.state.evidence = request.evidence; detail.revision++; } },
     submission: { prepareReview: async request => { calls.push(request); detail.status = 'prepared'; detail.revision++; detail.state.submission = { mode: 'manual_review_only' }; },
       prepare: async request => { calls.push(request); detail.status = 'prepared'; detail.revision++; detail.state.submission = { mode: 'original_single' }; },
       submit: async request => { calls.push(request); detail.status = 'submission_unknown'; detail.revision++; return { status: detail.status }; },
       reconcile: async () => { calls.push('reconcile'); detail.status = 'submitted'; return { status: 'submitted' }; } } };
   binding.attachHost(host); await binding.show(); assert.equal(calls.length, 0); assert.equal(view.phase, 'unavailable');
-  host.serverEnabled = true; binding.attachHost(host); await binding.show(); await binding.edit('reading', '7'); assert.equal(detail.state.fields.reading.value, 7);
+  host.serverEnabled = true;
+  detail.state.candidates = [{ candidateId: 'candidate-1', fieldCode: 'reading', status: 'candidate',
+    value: { kind: 'number', value: 9 }, sources: [{ attachmentId: 'file-1', attachmentRevision: 1 }] }];
+  binding.attachHost(host); await binding.show();
+  const candidateDefinition = load('apps/staff-miniprogram/src/components/ai-native/ai-inspection-draft/index.ts');
+  const candidateComponent = mount(candidateDefinition, { items: view.items, readonly: false, candidateActions: true, revision: detail.revision });
+  const oldRevision = detail.revision;
+  candidateComponent.onCandidateDecision({ currentTarget: { dataset: { key: 'reading', candidate: 'candidate-1', decision: 'accepted', revision: oldRevision } } });
+  const decision = candidateComponent.events.at(-1);
+  assert.equal(decision.name, 'candidatedecision');
+  await binding.decideCandidate(decision.detail.key, decision.detail.candidateId, decision.detail.decision, decision.detail.revision);
+  assert.equal(detail.state.fields.reading.value, 9); assert.equal(detail.state.fields.reading.decision, 'accepted');
+  const acceptedRequest = calls.find(call => call?.edits?.[0].decision === 'accepted');
+  assert.equal(acceptedRequest.expectedRevision, oldRevision); assert.equal(Object.hasOwn(acceptedRequest.edits[0], 'value'), false);
+  const writesBeforeStale = calls.filter(call => call?.edits).length;
+  await binding.decideCandidate('reading', 'candidate-1', 'rejected', oldRevision);
+  await binding.decideCandidate('reading', 'foreign-candidate', 'accepted', detail.revision);
+  assert.equal(calls.filter(call => call?.edits).length, writesBeforeStale);
+  await binding.edit('reading', '7'); assert.equal(detail.state.fields.reading.value, 7);
+  await binding.decideCandidate('reading', 'candidate-1', 'rejected', detail.revision);
+  assert.equal(detail.state.fields.reading.value, null); assert.equal(detail.state.fields.reading.decision, 'rejected');
+  candidateComponent.update({ readonly: true }); const eventCount = candidateComponent.events.length;
+  candidateComponent.onCandidateDecision({ currentTarget: { dataset: { key: 'reading', candidate: 'candidate-1', decision: 'accepted', revision: oldRevision } } });
+  assert.equal(candidateComponent.events.length, eventCount); candidateComponent.detach();
   await binding.removeEvidence('file-1'); assert.equal(detail.state.evidence.length, 0);
   await binding.prepareReview(); assert.equal(detail.state.submission.mode, 'manual_review_only');
   await binding.submit(true); assert.equal(view.phase, 'unknown');

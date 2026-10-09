@@ -21,3 +21,13 @@
 测试命令：`node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs --test tests/ai-native-b11-workbench.test.cjs`。固定无效 DATABASE_URL；本树绝对 AI_OFFLINE_AUDIT/TEMP/TMP；完整构建 NODE_OPTIONS 预载护栏传播子进程、AI_OFFLINE_WRITE_ROOT 限本树。没有 .env/网络/数据库/真实文件/模型/支付/微信宿主或设备验收。类型/构建不等于上线，HTTP 未接通。
 
 Runtime/Provider 替换独立：本宿主只依赖既有业务端口和 shared 类型，不依赖 checkpoint/节点/SDK、不另建 Gateway/预算账本。后续可信服务接入须逐次原授权并使用唯一 Gateway。
+
+## 接续：原候选的明确采用／拒绝
+
+基线 `c1ee113d28a3552aa48cb9906587dc5449713f8c`。原服务器 `InspectionDraftService.edit` 已支持 accepted/rejected，本片只接员工消费：`ai-inspection-draft` 的 `candidatedecision` → `ai-inspection-assist.onCandidate` → `StaffInspectionHostBinding.decideCandidate` → 原 `host.drafts.edit`。不增加服务器协议或识别调用。
+
+按钮绑定原 fieldCode/candidateId/当前 revision；同字段多候选无法唯一确定时禁用。采用不传客户端最终值，由原服务器读取自己的候选并重新验证证据；拒绝不传伪造值。只读／pending／原操作 unknown／旧修订／未知候选不发写；附件已移除的旧来源不允许采用。人工选择结果单独展示“人工采用／人工拒绝”，不等于正式检查事实、判责、收费或提交成功。原 edit 响应不明沿现有 reconcileOperation 核对，未新增自动重试或新操作键。操作键回调发生上下文更换时不进入写路径。函数仍只实例内存；候选选择新增属性默认关闭，不给普通 Workbench 自动开放写入口。
+
+沿原 B11 一个已有用例补真实 Component 事件及实际绑定控制器路径，没有新增测试脚本。初次红测 5 pass / 1 fail / 0 skip / 0 todo、exit1（缺 onCandidateDecision）；实现后 6 pass / 0 fail / 0 skip / 0 todo、exit0。覆盖采用／拒绝／旧修订／未知候选／只读与原卸载隔离；服务端调用是明确端口替身，不冒称真实 HTTP 或模型候选生产。命令仍为 `node -r ./tests/fixtures/ai-native/prisma-offline-preload.cjs --test tests/ai-native-b11-workbench.test.cjs`。
+
+员工 TypeScript noEmit exit0；既有完整 `node apps/staff-miniprogram/scripts/build.cjs` exit0、28页，并在最新源码上复验同一6项 exit0。构建前 realpath 验证 dist 在本树，preload 由 NODE_OPTIONS 传播，固定无效 DB、本树 audit/TEMP/writeRoot。未启服务/访问localhost，构建地址仅静态公开配置；未读.env或写共享生成物。`git diff --check` exit0。正式 HTTP/server gate、prepare原操作核对和主线视觉输入依赖仍未完成，本片没有绕过；未验真实微信宿主、设备、文件、数据库或生产。

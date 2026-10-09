@@ -18,6 +18,9 @@ Component({
     hostLogout() { this.detachHost(); },
     async onRead() { await bindings.get(this)?.read(); },
     async onEdit(event: WechatMiniprogram.CustomEvent) { await bindings.get(this)?.edit(event.detail?.key, event.detail?.humanValue); },
+    async onCandidate(event: WechatMiniprogram.CustomEvent) {
+      await bindings.get(this)?.decideCandidate(event.detail?.key, event.detail?.candidateId, event.detail?.decision, event.detail?.revision);
+    },
     async onRemove(event: WechatMiniprogram.TouchEvent) { await bindings.get(this)?.removeEvidence(String(event.currentTarget.dataset.id ?? "")); },
     async onReview() { await bindings.get(this)?.prepareReview(); },
     async onReconcile() { await bindings.get(this)?.reconcile(); },

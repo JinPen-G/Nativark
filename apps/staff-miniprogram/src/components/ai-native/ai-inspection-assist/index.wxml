@@ -1,6 +1,6 @@
 <view class="inspection-assist" aria-label="检查辅助草稿">
   <text role="status">{{phase}} · 草稿不代表检查完成</text><text wx:if="{{error}}" role="alert">{{error}}</text>
-  <ai-task-workbench id="workbench"><ai-inspection-draft slot="inspection-draft" items="{{items}}" missing="{{missing}}" readonly="{{!editable}}" bind:draftchange="onEdit" /></ai-task-workbench>
+  <ai-task-workbench id="workbench"><ai-inspection-draft slot="inspection-draft" items="{{items}}" missing="{{missing}}" readonly="{{!editable}}" candidate-actions="{{editable}}" revision="{{revision}}" bind:draftchange="onEdit" bind:candidatedecision="onCandidate" /></ai-task-workbench>
   <view wx:for="{{evidence}}" wx:key="attachmentId"><text>{{item.attachmentId}} @ {{item.attachmentRevision}}</text><button disabled="{{!canRemove || pending}}" data-id="{{item.attachmentId}}" bindtap="onRemove">从草稿移除附件</button></view>
   <button disabled="{{pending || phase === 'unavailable'}}" bindtap="onRead">重读原稿</button>
   <button disabled="{{!canReview}}" bindtap="onReview">准备人工审阅材料</button>
