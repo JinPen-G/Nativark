@@ -8,6 +8,7 @@ import { sessionApi } from '../data/authClient';
 import { rentalDays } from '../data/siteRepository';
 import { toIsoDateTime } from '../data/datetime';
 import type { Product } from '../types';
+import type { AiBookingHandoff } from '../../../../packages/shared/src/ai-booking-draft';
 
 interface QuoteView {
   id: string;
@@ -16,9 +17,30 @@ interface QuoteView {
 }
 
 /** 真实租户 + 已登录：走后端 可用性 → 报价 → 下单。金额与库存全部以服务端为准。 */
-export function RemoteBooking({ product, startDate, endDate, quantity, fulfillment, preferredLocationId }: {
+interface RemoteBookingProps {
   product: Product; startDate: string; endDate: string; quantity: number; fulfillment: 'pickup' | 'delivery'; preferredLocationId?: string;
-}) {
+  handoff?: AiBookingHandoff;
+}
+
+export function RemoteBooking(props: RemoteBookingProps) {
+  // Never mount the automatic quote/create-order lifecycle for an original handoff.
+  return props.handoff ? <OriginalHandoffBooking handoff={props.handoff} /> : <ManualRemoteBooking {...props} />;
+}
+
+function OriginalHandoffBooking({ handoff }: { handoff: AiBookingHandoff }) {
+  const { language } = useSite();
+  const en = language === 'en';
+  return <section className="booking-card booking-total">
+    <h2>{en ? 'Original booking material' : '原预约材料'}</h2>
+    <p style={{ overflowWrap: 'anywhere' }}>{en ? 'Quote reference' : '报价引用'}：{handoff.fields.quoteId}</p>
+    <p>{en ? 'Amount unavailable in this handoff; no recalculation.' : '交接未提供金额，不重算、不覆盖原报价。'}</p>
+    <p>{en ? 'Not submitted / not reserved' : '尚未提交 / 资源未预占'}</p>
+    <p role="status">{en ? 'Original operation acceptance is not connected. Continue through the original manual entry.' : '原操作受理关联尚未接通，请通过原人工入口办理。'}</p>
+    <button type="button" className="button button-dark button-block" disabled>{en ? 'Submission unavailable' : '提交不可用'}</button>
+  </section>;
+}
+
+function ManualRemoteBooking({ product, startDate, endDate, quantity, fulfillment, preferredLocationId }: RemoteBookingProps) {
   const { href, t, language } = useSite();
   const { currentWorkspace, switchWorkspace } = useAuth();
   const toast = useToast();
