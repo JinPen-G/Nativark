@@ -198,6 +198,17 @@ test('settings normal host starts through the runner and persists an approval ch
   assert.equal(handoff.confirmation.proposal.reviewedPayloadHash, proposal.reviewedPayloadHash);
   assert.equal(handoff.execution, 'not_attested'); assert.deepEqual(handoff.missing, []);
   await assert.rejects(consumer.humanHandoff({ preparation, checkpointRef: 'caller-checkpoint' }));
+  const { composeAiTaskCenterScene } = require('../apps/api/src/modules/ai-native/task-center-scene.composition');
+  const { AiTaskEventRepository } = require('../apps/api/src/modules/ai-native/ai-task-event.repository');
+  const settingsCenter = composeAiTaskCenterScene({ settings: consumer,
+    events: new AiTaskEventRepository(h.db, host.authorization.authority, h.dependencies.clock),
+    list: { readPage: async () => { throw Error('not used'); } }, scenes: {
+      requests: { readHistorical: async () => { throw Error('settings uses original settings input'); } },
+      readTaskReceipt: async () => { throw Error('not used'); }, readRecovery: async () => { throw Error('not used'); } } });
+  const aggregatedSettings = await settingsCenter.readScene({ kind: 'settings', taskId: 'task-a', runId: 'run-a', reference: { preparation } });
+  assert.equal(aggregatedSettings.business.confirmation.checkpointRef, checkpoint.id);
+  assert.equal(aggregatedSettings.snapshot.availability, 'available'); assert.equal(aggregatedSettings.business.businessOutcome, 'not_observed');
+  await assert.rejects(settingsCenter.readScene({ kind: 'settings', taskId: 'other-task', runId: 'run-a', reference: { preparation } }));
   assert.equal(h.state.aiApproval.length, 0); assert.equal(h.state.rentalApprovedSettingsOperation.length, 0);
   await assert.rejects(consumer.read({ preparation: { ...preparation, taskId: 'other-task' } }));
   await assert.rejects(composeAiSettingsBusinessConsumer().read({ preparation }));

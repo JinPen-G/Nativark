@@ -232,6 +232,23 @@ test('original model application uses the fixed commands and persisted evidence 
     assert.equal(supplied.original.inputRef, h.reference.inputRef);
     const read = await h.model.readModelResult({ original: h.reference, resultId: h.state.aiTaskResultArtifact[0].id });
     assert.equal(read.status, 'available'); assert.equal(read.text.value, h.execution.result.text);
+    const { composeAiTaskCenterScene } = require('../apps/api/src/modules/ai-native/task-center-scene.composition');
+    const { composeAiOriginalScenes } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.composition');
+    const { AiTaskEventRepository } = require('../apps/api/src/modules/ai-native/ai-task-event.repository');
+    const center = composeAiTaskCenterScene({ list: { readPage: async () => { throw Error('not used'); } },
+      scenes: composeAiOriginalScenes(h.dependencies), input: { read: value => h.app.readInput(value) },
+      modelResults: { read: value => h.model.readModelResult(value) },
+      events: new AiTaskEventRepository(h.db, h.model.runtime.authorization.authority, h.dependencies.clock) });
+    const aggregateRequest = { kind: 'original', original: h.reference, taskId: h.state.aiTask[0].id,
+      runId: h.state.aiRun[0].id, resultId: h.state.aiTaskResultArtifact[0].id };
+    const aggregate = await center.readScene(aggregateRequest);
+    assert.equal(aggregate.model.status, 'available'); assert.equal(aggregate.snapshot.availability, 'available');
+    assert.equal(aggregate.originalInput.receipt.inputRef, h.reference.inputRef);
+    assert.equal(aggregate.originalInput.request.sceneCode, sceneCode);
+    assert.equal(typeof aggregate.snapshot.value.cursor, 'string'); assert.equal(aggregate.snapshot.value.taskId, aggregateRequest.taskId);
+    assert.equal(aggregate.submission, 'not_attested_by_approval'); assert.equal(aggregate.business.availability, 'not_requested');
+    assert.equal(aggregate.consistency, 'independent_authorized_reads'); assert.equal(h.execution.sent.length, 1);
+    await assert.rejects(center.readScene({ ...aggregateRequest, runId: 'another-run' }), e => e.code === 'AI_ACCESS_DENIED');
     assert.deepEqual(await h.app.reconcile(h.reference), { kind: 'not_started', reason: 'recovery_lease_unavailable' });
     assert.equal(h.execution.sent.length, 1);
     const { AI_TASK_INPUT_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
@@ -239,6 +256,7 @@ test('original model application uses the fixed commands and persisted evidence 
       taskId: 'another-task', requestId: 'input-request', expectedRevision: 1, submissionKey: 'answer-a',
       answers: [{ fieldId: 'clarification_text', value: 'Synthetic clarification' }] } }), e => e.code === 'AI_ACCESS_DENIED');
     h.b.h.identity.session = false;
+    await assert.rejects(center.readScene(aggregateRequest), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
     await assert.rejects(h.app.readInput(h.reference), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
   }
 });
