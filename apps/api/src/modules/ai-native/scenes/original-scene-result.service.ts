@@ -148,7 +148,8 @@ export class AiOriginalSceneResultService {
       return readTaskModelRunOrigin(tx, access, { scopeId: row.scopeId, taskId: row.id, runId: result.runId,
         originRunId: task.runId, registrationRef: `scene-model:${command.original.inputRef}` });
     });
-    const base = { original: original.receipt, sceneCode: original.request.sceneCode, taskId: task.taskId, resultId: result.resultId,
+    const base = { original: original.receipt, sceneCode: original.request.sceneCode, taskId: task.taskId,
+      runId: result.runId, resultId: result.resultId,
       observedAt: result.observedAt, businessExecution: 'not_inferred_from_model_result' as const };
     let output: typeof base & { status: 'available' | 'stale' | 'unknown' | 'failed';
       text: { value: string; trust: 'unverified_model_text_not_execution_evidence' } | null;

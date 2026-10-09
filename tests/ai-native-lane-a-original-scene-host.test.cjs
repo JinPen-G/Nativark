@@ -292,6 +292,22 @@ test('original scenes continue human clarification on the original task and read
       const read = await h.model.readModelResult({ original: h.reference, resultId: artifact.id });
       assert.equal(read.status, 'available');
       assert.equal(read.text.value, h.execution.result.text);
+      const { composeAiTaskCenterScene } = require('../apps/api/src/modules/ai-native/task-center-scene.composition');
+      const { composeAiOriginalScenes } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.composition');
+      const { AiTaskEventRepository } = require('../apps/api/src/modules/ai-native/ai-task-event.repository');
+      const center = composeAiTaskCenterScene({ list: { readPage: async () => { throw Error('not used'); } },
+        scenes: composeAiOriginalScenes(h.dependencies), input: { read: value => host().readInput(value) },
+        modelResults: { read: value => h.model.readModelResult(value) },
+        events: new AiTaskEventRepository(h.db, h.model.runtime.authorization.authority, h.dependencies.clock) });
+      const request = { kind: 'original', original: h.reference, taskId: artifact.taskId, runId: artifact.runId, resultId: artifact.id };
+      const count = h.execution.sent.length, aggregate = await center.readScene(request);
+      assert.equal(aggregate.runId, artifact.runId);
+      assert.equal(aggregate.originRunId, h.created.task.runId);
+      assert.equal(aggregate.model.runId, artifact.runId);
+      assert.equal(typeof aggregate.snapshot.value.cursor, 'string');
+      assert.equal(h.execution.sent.length, count);
+      await assert.rejects(center.readScene({ ...request, runId: h.created.task.runId }), e => e.code === 'AI_ACCESS_DENIED');
+      await assert.rejects(center.readScene({ ...request, resultId: undefined }), e => e.code === 'AI_ACCESS_DENIED');
     }
     assert.equal(h.execution.sent.length, 3);
     assert.equal(h.state.aiTaskExecutionBudget.length, 1);
