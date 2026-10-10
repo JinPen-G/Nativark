@@ -59,6 +59,9 @@ test('current human selection is persisted and replayed, but never creates appro
   assert.equal((await h.selections.read(read)).inputHash, first.receipt.inputHash);
   const proof = { ...read, taskId: h.command.taskId, runId: h.command.runId, inputHash: first.receipt.inputHash };
   assert.equal((await h.repository.readAuthorized(proof)).quoteId, h.quote.id);
+  const selectedOrder = h.selections.selectedOrderSource(proof);
+  assert.deepEqual(await selectedOrder.read(), h.command.order);
+  assert.equal(selectedOrder.taskId, proof.taskId); assert.equal(selectedOrder.runId, proof.runId);
   await assert.rejects(h.selections.publishSelectedInput({ selection: proof, input: h.command.order }), e => e.code === 'AI_INVALID_INPUT');
   await assert.rejects(h.selections.select({ ...h.command, order: { ...h.command.order, customerName: 'Another choice' } }));
   h.b.h.identity.session = false;

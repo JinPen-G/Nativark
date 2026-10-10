@@ -20,10 +20,14 @@ import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repo
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const taskSchema = z.object({ taskId: id.max(36), runId: id.max(36), registrationRef: id,
-  order: z.record(z.unknown()), limits: aiTaskRunnerLimitsSchema }).strict();
+  order: z.record(z.unknown()).optional(), limits: aiTaskRunnerLimitsSchema }).strict();
 export type TaskOrderHostDependencies = ControlledApprovedOrderDependencies & {
   host: AiTaskApplicationHost;
   task: z.infer<typeof taskSchema>;
+  /** Optional server-owned selector for a persisted human choice. The
+   * caller never supplies the order body; the selector is evaluated only
+   * after the runner has acquired its real lease. */
+  selectedOrder?: { taskId: string; runId: string; read: () => Promise<unknown> };
   monotonic?: () => number;
 };
 
@@ -48,8 +52,13 @@ export function composeTaskOrderHost(input: TaskOrderHostDependencies) {
   };
   const prepare: AiTaskHeldPreparation = async ({ lease, taskRevision, signal }) => {
     if (lease.taskId !== task.taskId || lease.runId !== task.runId || signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    if (input.selectedOrder && (input.selectedOrder.taskId !== task.taskId || input.selectedOrder.runId !== task.runId)) {
+      throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    }
+    const order = input.selectedOrder ? await input.selectedOrder.read() : task.order;
+    if (!order || typeof order !== 'object' || Array.isArray(order)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     await orders.source.publishOrderInput({ taskId: task.taskId, registrationRef: task.registrationRef,
-      expectedTaskRevision: taskRevision, lease, input: structuredClone(task.order) });
+      expectedTaskRevision: taskRevision, lease, input: structuredClone(order) });
     if (signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     await orders.plans.savePlan({ taskId: task.taskId, runId: task.runId, taskRevision,
       steps: [{ registrationRef: task.registrationRef, operation: 'idempotent', toolCode: 'rental.order.commit', toolVersion: AI_TOOL_DRAFT_VERSION }],

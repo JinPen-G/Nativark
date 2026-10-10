@@ -159,6 +159,20 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
         inputHash: proof.inputHash, selectionId: proof.selectionId,
         approval: 'not_granted' as const, order: 'not_created' as const });
     },
+    /** Server-owned runner adapter. It exposes only a re-authorized selected
+     * order body to the existing order host; it never accepts a caller body
+     * and does not publish, approve or submit anything by itself. */
+    selectedOrderSource(value: unknown) {
+      const proof = parseQuoteSelectionProof(value);
+      return Object.freeze({
+        taskId: proof.taskId,
+        runId: proof.runId,
+        read: async () => {
+          const current = await selections.readAuthorized(proof);
+          return structuredClone(current.body);
+        }
+      });
+    },
     /** Caller supplies only the existing preparation command, never snapshots
      * or permission. The actual running step must point to this selected input. */
     async prepareSelectedProposal(value: unknown) {
