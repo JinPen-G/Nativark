@@ -6,6 +6,70 @@ const { RentalOrderConfirmationService } = require('../apps/api/src/modules/rent
 const input = { fulfillmentMode: 'pickup', fulfillmentLocationId: 'location-a', returnLocationId: 'location-b', startAt: '2026-10-10T00:00:00Z', endAt: '2026-10-11T00:00:00Z', customerType: 'personal', customerId: 'customer-a', bookingIdentity: { bookingIdentity: 'personal' }, lines: [{ itemGroupId: 'item-a', pricingGroupId: 'price-a', quantity: 2 }] };
 const quote = { request: structuredClone(input) };
 
+test('Core original quote storage keeps exact scoped operation through replay and a lost commit reply', { timeout: 30000 }, async () => {
+  const b = await require('./fixtures/ai-native/lane-a-business-consumption.cjs').setup();
+  const { createTaskInputStore } = require('./fixtures/ai-native/task-input-store.cjs');
+  const { RentalBusinessFactRepository } = require('../apps/api/src/modules/rental-core/rental-business-fact.repository');
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
+  const store = createTaskInputStore({ rentalQuote: [], businessWorkspace: [{ id: 'workspace-a', tenantId: 'tenant_001', status: 'ACTIVE' }] });
+  store.db.rentalQuote.update = async ({ where, data }) => {
+    await store.db.rentalQuote.updateMany({ where, data });
+    return store.db.rentalQuote.findFirst({ where });
+  };
+  const transaction = store.db.$transaction;
+  const { Prisma } = require('../apps/api/node_modules/@prisma/client');
+  store.db.$transaction = work => transaction(tx => work({ ...tx,
+    rentalQuote: { ...tx.rentalQuote, create: args => tx.rentalQuote.create({ ...args,
+      data: Object.fromEntries(Object.entries(args.data).map(([k, v]) => [k, v === Prisma.DbNull ? null : v])) }) },
+    $queryRaw: async () => [{ categoryVersionId: null, categoryAdoptionRevision: 0 }] }));
+  const repository = new RentalBusinessFactRepository(store.db);
+  // Only the storage transport is replaced. Price calculation and Core quote
+  // persistence methods are product code; this is not a MySQL lock test.
+  b.business.factStore = repository;
+  const prepared = await b.tools.quote.candidates.prepare(b.candidate);
+  const formal = structuredClone(prepared.request);
+  const context = { profile: b.core.getProfile('tenant_001'), category: await b.core.getWorkspaceCategory('tenant_001'),
+    settings: b.core.getBusinessSettings('tenant_001'), groups: b.core.listItemGroups('tenant_001'),
+    pricingGroups: b.core.listPricingGroups('tenant_001'), couponTemplates: b.core.listCouponTemplates('tenant_001'),
+    locations: b.core.listLocations('tenant_001'), operators: b.core.listOperators('tenant_001') };
+  const original = { key: requestFingerprint({ tenant: 'tenant_001', workspace: 'workspace-a', actor: 'synthetic-user', operation: 'original-quote' }),
+    inputHash: requestFingerprint(formal) };
+  await runWithRequestIdentity({ tenantId: 'tenant_001', workspaceId: 'workspace-a' }, async () => {
+    store.control.loseReply = true;
+    await assert.rejects(b.business.createQuoteForOriginalOperation('tenant_001', context, formal, original), /lost COMMIT reply/);
+    assert.equal(store.state.rentalQuote.length, 1);
+    const restarted = new RentalBusinessFactRepository(store.db);
+    const recovered = await restarted.findQuoteForOriginalOperation('tenant_001', original);
+    assert.equal(recovered.id, store.state.rentalQuote[0].id);
+    const replay = await b.business.createQuoteForOriginalOperation('tenant_001', context, formal, original);
+    assert.equal(replay.id, recovered.id); assert.equal(store.state.rentalQuote.length, 1);
+    assert.equal(b.business.getQuote('tenant_001', context, replay.id).id, replay.id);
+    assert.equal(replay.payableAmount, recovered.payableAmount);
+    await assert.rejects(restarted.findQuoteForOriginalOperation('tenant_001', { ...original, inputHash: 'b'.repeat(64) }), e => e.getStatus() === 409);
+    await assert.rejects(b.business.createQuoteForOriginalOperation('tenant_001', context,
+      { ...formal, lines: [{ ...formal.lines[0], quantity: 2 }] }, original), e => e.getStatus() === 409);
+    await assert.rejects(restarted.findQuoteForOriginalOperation('other-tenant', original), e => e.getStatus() === 403);
+    assert.equal(await restarted.findQuoteForOriginalOperation('tenant_001', { ...original, key: 'a'.repeat(64) }), undefined);
+    assert.equal(store.state.rentalQuote.length, 1);
+    await repository.upsertQuote({ ...recovered, consumedAt: '2026-11-01T00:00:00Z', consumedOrderId: 'original-order' });
+    assert.equal((await restarted.findQuoteForOriginalOperation('tenant_001', original)).consumedOrderId, 'original-order');
+    await assert.rejects(repository.upsertQuote({ ...recovered, payableAmount: recovered.payableAmount + 1 }), e => e.getStatus() === 409);
+    const next = { ...original, key: 'c'.repeat(64) };
+    const first = { ...recovered, id: 'quote-race-a', quoteNo: 'quote-race-a' };
+    const second = { ...recovered, id: 'quote-race-b', quoteNo: 'quote-race-b' };
+    const winners = await Promise.all([repository.saveQuoteForOriginalOperation(first, next),
+      restarted.saveQuoteForOriginalOperation(second, next)]);
+    assert.equal(winners[0].id, winners[1].id); assert.equal(store.state.rentalQuote.length, 2);
+    store.control.beforeCommit = () => { throw Error('synthetic quote write rollback'); };
+    const rollback = { ...original, key: 'd'.repeat(64) };
+    await assert.rejects(repository.saveQuoteForOriginalOperation({ ...first, id: 'rollback-quote' }, rollback), /rollback/);
+    store.control.beforeCommit = undefined;
+    assert.equal(await restarted.findQuoteForOriginalOperation('tenant_001', rollback), undefined);
+    assert.equal(store.state.rentalQuote.length, 2);
+  });
+});
+
 test('approved snapshot preparation can consume the existing Core validator as a public typed port', () => {
   assert.doesNotThrow(() => compiler.compile(`import { RentalOrderConfirmationService } from '../apps/api/src/modules/rental-core/rental-order-confirmation.service';
     const validate = RentalOrderConfirmationService.prototype.assertOrderMatchesQuote;

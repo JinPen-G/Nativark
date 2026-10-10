@@ -5401,6 +5401,9 @@ model RentalNotificationTemplate {
 // 需求要求的不可变时点快照保留 JSON（需求 4.7）。
 
 model RentalQuote {
+  /// 可选服务器原操作绑定；存量无证据不回填，不向客户端报价DTO透传。
+  originalOperationKey           String? @db.VarChar(64)
+  originalInputHash              String? @db.VarChar(64)
   /// 报价实际采用的品类版本，不回填无法证明的存量。
   categoryVersionId             String?                        @db.VarChar(191)
   categoryVersion               RentalCategoryVersion?         @relation(fields: [categoryCode, categoryVersionId], references: [categoryCode, id], onDelete: Restrict)
@@ -5487,6 +5490,7 @@ model RentalQuote {
   createdAt                     DateTime           @default(now())
 
   @@unique([workspaceId, quoteNo], map: "rental_quotes_tenant_quote_no_key")
+  @@unique([tenantId, workspaceId, originalOperationKey], map: "rental_quotes_original_operation_key")
   @@index([tenantId, expiresAt, consumedAt], map: "rental_quotes_tenant_expires_consumed_idx")
   @@index([consumedOrderId])
   @@map("rental_quotes")

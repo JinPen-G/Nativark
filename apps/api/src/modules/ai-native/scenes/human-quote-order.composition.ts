@@ -8,11 +8,17 @@ import { approvalApplicationContract } from '../approval-execution/approval-appl
 import { PrismaQuoteSelectionRepository, type HumanQuoteSelectionDependencies } from '../task-request/prisma-quote-selection.repository';
 import { parseQuoteSelectionProof } from '../task-request/quote-selection.validation';
 import type { AiTaskRunnerLease } from '../runner/ai-task-runner.ports';
+import { composeTaskOrderHost, type TaskOrderHostDependencies } from '../runner/order-task-host.composition';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { AiApprovedOrderResultUnknownError } from '../approval-execution/approved-order.errors';
 
 export type HumanQuoteOrderDependencies = ControlledApprovedOrderDependencies &
   Pick<HumanQuoteSelectionDependencies, 'originals'>;
+export type SelectedQuoteTaskHostDependencies = HumanQuoteOrderDependencies & {
+  host: TaskOrderHostDependencies['host'];
+  task: Omit<TaskOrderHostDependencies['task'], 'order'> & { selection: unknown };
+  monotonic?: () => number;
+};
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);
 const publication = z.object({ selection: z.unknown(), expectedTaskRevision: revision,
@@ -159,6 +165,20 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
         inputHash: proof.inputHash, selectionId: proof.selectionId,
         approval: 'not_granted' as const, order: 'not_created' as const });
     },
+    /** Server-owned runner adapter. It exposes only a re-authorized selected
+     * order body to the existing order host; it never accepts a caller body
+     * and does not publish, approve or submit anything by itself. */
+    selectedOrderSource(value: unknown) {
+      const proof = parseQuoteSelectionProof(value);
+      return Object.freeze({
+        taskId: proof.taskId,
+        runId: proof.runId,
+        read: async () => {
+          const current = await selections.readAuthorized(proof);
+          return structuredClone(current.body);
+        }
+      });
+    },
     /** Caller supplies only the existing preparation command, never snapshots
      * or permission. The actual running step must point to this selected input. */
     async prepareSelectedProposal(value: unknown) {
@@ -182,4 +202,14 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
         selectionId: proof.selectionId, inputHash: proof.inputHash, order: 'not_created' as const });
     }
   });
+}
+
+/** Build the existing persistent order runner from a durable human selection.
+ * This is a server composition helper only: the selected proof is checked by
+ * the existing selection repository, while lease/fencing, approval, budget
+ * and Core execution remain owned by the existing runner host. */
+export function composeSelectedQuoteTaskHost(input: SelectedQuoteTaskHostDependencies) {
+  const { selection, ...task } = input.task;
+  const selected = composeHumanQuoteOrder(input).selectedOrderSource(selection);
+  return composeTaskOrderHost({ ...input, task, selectedOrder: selected });
 }

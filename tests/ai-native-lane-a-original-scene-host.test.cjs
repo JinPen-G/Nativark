@@ -33,6 +33,58 @@ test('opt-in module is inert; strict controller uses current authority without s
   await assert.rejects(controller.read(request, h.ref(result.receipt.inputRef)), e => e.getStatus() === 403 && e.getResponse().code === 'AI_ACCESS_DENIED');
 });
 
+test('original quote review consumes revised formal requests without saving a quote or granting confirmation', async () => {
+  const h = await setup(), { credentials, ...dependencies } = h.dependencies;
+  const request = { headers: { authorization: (await credentials.current()).authorization } };
+  const module = AiOriginalScenesModule.registerHttp(dependencies, { enabled: true, audience: 'operator' });
+  const controller = new AiOriginalScenesController(module.providers[0].useFactory());
+  assert.equal(Reflect.getMetadata('path', AiOriginalScenesController.prototype.quoteReview), AI_SCENE_REQUEST_HTTP_DRAFT.quoteReview);
+  assert.equal(Reflect.getMetadata('path', AiOriginalScenesController.prototype.quoteConfirm), AI_SCENE_REQUEST_HTTP_DRAFT.quoteConfirm);
+  assert.equal(Reflect.getMetadata('path', AiOriginalScenesController.prototype.quoteReceipt), AI_SCENE_REQUEST_HTTP_DRAFT.quoteReceipt);
+  let quoteWrites = 0;
+  const createQuote = h.b.business.createQuote.bind(h.b.business);
+  h.b.business.createQuote = (...args) => { quoteWrites++; return createQuote(...args); };
+  const first = await controller.create(request, h.command('quote_clarification'));
+  const read = await controller.quoteReview(request, h.ref(first.receipt.inputRef));
+  assert.equal(read.facts.status, 'missing_input');
+  assert.equal(read.facts.next, 'clarify_input');
+  const candidate = { ...h.b.candidate, locationId: h.b.location.id, items: [{ itemGroupId: h.b.group.id, quantity: 1 }] };
+  const revised = await controller.reissue(request, { ...h.command('quote_clarification', 'quote-revised'),
+    previousInputRef: first.receipt.inputRef, input: { candidate } });
+  const unconfirmed = await controller.quoteReview(request, h.ref(revised.receipt.inputRef));
+  assert.deepEqual(unconfirmed.facts.missingFields, ['selectionRevision'], JSON.stringify(unconfirmed));
+  const confirmedParameters = await controller.reissue(request, { ...h.command('quote_clarification', 'quote-selected-parameters'),
+    previousInputRef: revised.receipt.inputRef,
+    input: { candidate: { ...candidate, selectionRevision: unconfirmed.facts.selectionRevision } } });
+  const unavailable = await controller.quoteReview(request, h.ref(confirmedParameters.receipt.inputRef));
+  assert.equal(unavailable.facts.status, 'unavailable');
+  assert.equal(unavailable.facts.reason, 'current_availability_insufficient');
+  // Supply a database-execution substitute row; availability is still decided
+  // by the real guarded Core reader, not a fake ready preparation response.
+  h.b.facts.listAssets = async () => [{ id: 'synthetic-review-asset', tenantId: 'tenant_001', workspaceId: 'workspace-a',
+    itemGroupId: h.b.group.id, locationId: h.b.location.id, status: 'available' }];
+  const prepared = await controller.quoteReview(request, h.ref(confirmedParameters.receipt.inputRef));
+  assert.equal(prepared.facts.status, 'ready');
+  assert.equal(prepared.sources.status, 'prepared_input_sources');
+  assert.equal(prepared.facts.selectionRevision, prepared.sources.selectionRevision);
+  assert.ok(prepared.sources.fields.every(field => field.confirmed === false));
+  assert.equal(prepared.quotePersistence, 'not_attempted');
+  assert.equal(prepared.humanSelection, 'not_attested');
+  assert.equal(prepared.orderApproval, 'not_granted');
+  assert.equal(quoteWrites, 0);
+  const confirmation = { ...h.ref(confirmedParameters.receipt.inputRef), selectionRevision: prepared.facts.selectionRevision,
+    inputFingerprint: prepared.sources.inputFingerprint, confirmQuote: true };
+  assert.equal(ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneQuoteConfirmDraft)(confirmation), true);
+  await assert.rejects(controller.quoteConfirm(request, { ...confirmation, confirmQuote: false }), e => e.getStatus() === 400);
+  await assert.rejects(controller.quoteReceipt({ headers: {} }, { ...confirmation, confirmQuote: undefined }), e => e.getStatus() === 403);
+  assert.equal((await controller.read(request, h.ref(first.receipt.inputRef))).request.input.candidate.customerId, undefined);
+  assert.equal(confirmedParameters.receipt.previousInputRef, revised.receipt.inputRef);
+  await assert.rejects(controller.quoteReview(request, { ...h.ref(first.receipt.inputRef), candidate: h.b.candidate }), e => e.getStatus() === 400);
+  h.b.h.identity.session = false;
+  await assert.rejects(controller.quoteReview(request, h.ref(confirmedParameters.receipt.inputRef)), e => e.getStatus() === 403);
+  assert.equal(quoteWrites, 0);
+});
+
 test('request-bound original scenes snapshot commands and never borrow concurrent or ambient identity', { timeout: 30000 }, async () => {
   const h = await setup(), { credentials, ...dependencies } = h.dependencies;
   const { composeRequestBoundOriginalScenes } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');
@@ -261,6 +313,98 @@ test('original model application uses the fixed commands and persisted evidence 
   }
 });
 
+test('original scenes continue human clarification on the original task and read successive frozen results', { timeout: 30000 }, async () => {
+  const { originalModelApplicationHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const { AI_TASK_INPUT_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
+  for (const sceneCode of ['order_explanation', 'opening_diagnosis', 'quote_clarification']) {
+    const h = await originalModelApplicationHarness(sceneCode);
+    const contract = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, code: 'scene_clarification', version: '1',
+      fields: [{ fieldId: 'clarification_text', kind: 'text', label: 'Clarification', required: true, maxLength: 100 }] };
+    h.run.inputSource = {
+      resolve: async binding => h.state.aiRun.find(r => r.id === binding.runId).sequence <= 2
+        ? { kind: 'required', contract, inputRef: binding.inputRef, inputHash: binding.inputHash, expiresAt: '2027-01-01T00:00:00Z' }
+        : { kind: 'not_required' },
+      validateAnswers: async binding => ({ disposition: 'context_only', planHash: binding.planHash, inputRef: binding.inputRef, inputHash: binding.inputHash })
+    };
+    const host = () => h.model.createApplication({ holderId: 'scene-worker', leaseMs: 100000 }, h.run);
+    const started = await host().start(h.reference);
+    assert.equal(started.execution.outcome.status, 'paused', JSON.stringify(started));
+    const firstInput = structuredClone(h.state.aiTaskActionInput[0].payload);
+    const budgetFingerprint = h.state.aiTaskExecutionBudget[0].policyFingerprint;
+    for (let turn = 1; turn <= 2; turn++) {
+      const pending = await host().readInput(h.reference);
+      const submission = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, taskId: h.created.task.taskId,
+        requestId: pending.requestId, expectedRevision: pending.revision, submissionKey: `scene-answer-${turn}`,
+        answers: [{ fieldId: 'clarification_text', value: `Explicit answer ${turn}` }] };
+      const resumed = await host().resume({ original: h.reference, submission });
+      assert.equal(resumed.continuation.kind, 'run_outcome', JSON.stringify(resumed));
+      assert.equal(resumed.continuation.outcome.status, turn === 1 ? 'paused' : 'succeeded');
+      assert.equal((await host().resume({ original: h.reference, submission })).continuation.reason, 'receipt_replayed');
+      const artifact = h.state.aiTaskResultArtifact.at(-1);
+      const read = await h.model.readModelResult({ original: h.reference, resultId: artifact.id });
+      assert.equal(read.status, 'available');
+      assert.equal(read.text.value, h.execution.result.text);
+      const { composeAiTaskCenterScene } = require('../apps/api/src/modules/ai-native/task-center-scene.composition');
+      const { composeAiOriginalScenes } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.composition');
+      const { AiTaskEventRepository } = require('../apps/api/src/modules/ai-native/ai-task-event.repository');
+      const center = composeAiTaskCenterScene({ list: { readPage: async () => { throw Error('not used'); } },
+        scenes: composeAiOriginalScenes(h.dependencies), input: { read: value => host().readInput(value) },
+        modelResults: { read: value => h.model.readModelResult(value) },
+        events: new AiTaskEventRepository(h.db, h.model.runtime.authorization.authority, h.dependencies.clock) });
+      const request = { kind: 'original', original: h.reference, taskId: artifact.taskId, runId: artifact.runId, resultId: artifact.id };
+      const count = h.execution.sent.length, aggregate = await center.readScene(request);
+      assert.equal(aggregate.runId, artifact.runId);
+      assert.equal(aggregate.originRunId, h.created.task.runId);
+      assert.equal(aggregate.model.runId, artifact.runId);
+      assert.equal(typeof aggregate.snapshot.value.cursor, 'string');
+      assert.equal(h.execution.sent.length, count);
+      await assert.rejects(center.readScene({ ...request, runId: h.created.task.runId }), e => e.code === 'AI_ACCESS_DENIED');
+      await assert.rejects(center.readScene({ ...request, resultId: undefined }), e => e.code === 'AI_ACCESS_DENIED');
+    }
+    assert.equal(h.execution.sent.length, 3);
+    assert.equal(h.state.aiTaskExecutionBudget.length, 1);
+    assert.equal(h.state.aiTaskExecutionBudget[0].policyFingerprint, budgetFingerprint);
+    assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, 3n);
+    assert.deepEqual(h.state.aiTaskActionInput[0].payload, firstInput);
+    assert.match(h.execution.sent.at(-1).messages.at(-1).content, /Explicit answer 2/);
+    const last = h.state.aiRun.at(-1), origin = last.resourceOriginRunId;
+    last.resourceOriginRunId = 'another-task-run';
+    await assert.rejects(h.model.readModelResult({ original: h.reference, resultId: h.state.aiTaskResultArtifact.at(-1).id }), e => e.code === 'AI_ACCESS_DENIED');
+    last.resourceOriginRunId = origin;
+    h.b.h.identity.session = false;
+    await assert.rejects(host().readInput(h.reference), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
+  }
+});
+
+test('original quote host uses persisted authorized clarification facts instead of an injected successful source', { timeout: 30000 }, async () => {
+  const { originalModelApplicationHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const { AI_TASK_INPUT_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
+  const h = await originalModelApplicationHarness('quote_clarification');
+  const host = () => h.model.createApplication({ holderId: 'scene-worker', leaseMs: 100000 }, { ...h.run, inputSource: 'original_scene' });
+  const started = await host().start(h.reference);
+  assert.equal(started.execution.outcome.status, 'paused', JSON.stringify(started));
+  const pending = await host().readInput(h.reference);
+  assert.equal(pending.contract.code, 'original_quote_context');
+  assert.deepEqual(pending.contract.fields.map(f => f.fieldId), ['clarification_text']);
+  const submission = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, taskId: h.created.task.taskId,
+    requestId: pending.requestId, expectedRevision: pending.revision, submissionKey: 'quote-context-answer',
+    answers: [{ fieldId: 'clarification_text', value: 'Please explain which absolute dates and product I need to select.' }] };
+  h.b.h.identity.session = false;
+  await assert.rejects(host().resume({ original: h.reference, submission }), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
+  assert.equal(h.execution.sent.length, 1);
+  h.b.h.identity.session = true;
+  const resumed = await host().resume({ original: h.reference, submission });
+  assert.equal(resumed.continuation.outcome.status, 'succeeded', JSON.stringify(resumed));
+  assert.equal(h.execution.sent.length, 2);
+  const read = await h.model.readModelResult({ original: h.reference, resultId: h.state.aiTaskResultArtifact.at(-1).id });
+  assert.equal(read.facts.payload.facts.status, 'missing_input');
+  assert.equal(h.state.aiTaskActionInput.length, 2);
+  assert.match(h.execution.sent[1].messages.at(-1).content, /Please explain which absolute dates/);
+  assert.equal(h.state.aiTaskExecutionBudget.length, 1);
+  assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, 2n);
+  assert.equal((await host().resume({ original: h.reference, submission })).continuation.reason, 'receipt_replayed');
+});
+
 test('original model application retains unknown usage and cancellation without redispatch or invented zero usage', async () => {
   const { originalModelApplicationHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
   const h = await originalModelApplicationHarness();
@@ -358,6 +502,70 @@ test('scene knowledge with missing exact policy cannot publish model material or
   await assert.rejects(h.app.start(h.reference), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
   assert.equal(h.state.aiTaskActionInput.length, 0); assert.equal(h.state.aiTaskRunPlan.length, 0);
   assert.equal(h.execution.sent.length, 0); assert.equal(h.state.aiGatewayInvocation.length, 0);
+});
+
+test('opt-in model controller executes persisted quote clarification and denies caller execution metadata', { timeout: 30000 }, async () => {
+  const { requestBoundOriginalModelHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const { AiOriginalSceneModelController } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.controller');
+  const { AI_SCENE_MODEL_HTTP_DRAFT } = require('../packages/shared/src/ai-scene-request-draft');
+  const { AI_TASK_INPUT_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
+  const h = await requestBoundOriginalModelHarness('quote_clarification');
+  const originalFactory = h.options.runServices;
+  const options = { ...h.options, runServices: input => ({ ...originalFactory(input), inputSource: 'original_scene' }) };
+  const writes = h.trace.length, module = AiOriginalScenesModule.registerHttpModel(h.requestDependencies, options);
+  const provider = module.providers.find(p => p.provide === require('../apps/api/src/modules/ai-native/scenes/original-scenes.module').AI_ORIGINAL_SCENE_MODEL_REQUESTS);
+  const controller = new AiOriginalSceneModelController(provider.useFactory());
+  const request = Object.assign(new (require('node:events').EventEmitter)(), h.request, { aborted: false });
+  assert.equal(h.trace.length, writes);
+  assert.deepEqual(module.controllers, [AiOriginalScenesController, AiOriginalSceneModelController]);
+  for (const method of ['start', 'readInput', 'resume', 'reconcile', 'requestCancel', 'readModelResult', 'reopenModelSource',
+    'readTaskPage', 'readTaskEvents', 'readTaskScene'])
+    assert.equal(Reflect.getMetadata('path', AiOriginalSceneModelController.prototype[method]), AI_SCENE_MODEL_HTTP_DRAFT[method]);
+  const referenceValid = ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneModelReferenceDraft);
+  assert.equal(referenceValid(h.reference), true);
+  assert.equal(referenceValid({ ...h.reference, holderId: 'caller-worker' }), false);
+  await assert.rejects(controller.start(request, { ...h.reference, holderId: 'caller-worker' }), e => e.getStatus() === 400);
+  assert.equal(request.listenerCount('aborted'), 0);
+  assert.equal(h.execution.sent.length, 0);
+  const started = await controller.start(request, h.reference);
+  assert.equal(request.listenerCount('aborted'), 0);
+  assert.equal(started.execution.outcome.status, 'paused');
+  const pending = await controller.readInput(h.request, h.reference);
+  const submission = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, taskId: h.created.task.taskId,
+    requestId: pending.requestId, expectedRevision: pending.revision, submissionKey: 'http-quote-clarification',
+    answers: [{ fieldId: 'clarification_text', value: 'Explain the required fields without choosing for me.' }] };
+  assert.equal(ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneModelResumeDraft)({ original: h.reference, submission }), true);
+  const resumed = await controller.resume(request, { original: h.reference, submission });
+  assert.equal(request.listenerCount('aborted'), 0);
+  assert.equal(resumed.continuation.outcome.status, 'succeeded');
+  const read = await controller.readModelResult(h.request, { original: h.reference, resultId: h.state.aiTaskResultArtifact.at(-1).id });
+  assert.equal(read.status, 'available'); assert.equal(read.facts.payload.facts.status, 'missing_input');
+  assert.equal(h.execution.sent.length, 2);
+  const aggregateCommand = { kind: 'original', original: h.reference, taskId: h.created.task.taskId,
+    runId: read.runId, resultId: read.resultId };
+  assert.equal(ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneModelTaskSceneDraft)(aggregateCommand), true);
+  const aggregate = await controller.readTaskScene(h.request, aggregateCommand);
+  const page = await controller.readTaskPage(h.request, { limit: 5 });
+  assert.ok(page.items.some(item => item.taskId === h.created.task.taskId));
+  await assert.rejects(controller.readTaskPage(h.request, { limit: 51 }), e => e.getStatus() === 400);
+  assert.equal(aggregate.runId, read.runId);
+  assert.equal(aggregate.originRunId, h.created.task.runId);
+  assert.equal(aggregate.snapshot.availability, 'available');
+  const events = await controller.readTaskEvents(h.request, { original: h.reference, after: '0', limit: 10 });
+  assert.equal(events.taskId, h.created.task.taskId);
+  assert.equal(h.execution.sent.length, 2);
+  await assert.rejects(controller.readTaskScene(h.request, { ...aggregateCommand, runId: 'wrong-run' }), e => e.getStatus() === 403);
+  assert.equal((await controller.resume(h.request, { original: h.reference, submission })).continuation.reason, 'receipt_replayed');
+  assert.equal(h.execution.sent.length, 2);
+  await assert.rejects(controller.readInput({ headers: {} }, h.reference), e => e.getStatus() === 403);
+  h.b.h.identity.session = false;
+  await assert.rejects(controller.readTaskScene(h.request, aggregateCommand), e => e.getStatus() === 403);
+  await assert.rejects(controller.readModelResult(h.request, { original: h.reference, resultId: read.resultId }), e => e.getStatus() === 403);
+  const aborted = await requestBoundOriginalModelHarness();
+  const abortedController = new AiOriginalSceneModelController(aborted.requests);
+  const stopped = await abortedController.start({ ...aborted.request, aborted: true }, aborted.reference);
+  assert.notEqual(stopped.execution.outcome?.status, 'succeeded');
+  assert.equal(aborted.execution.sent.length, 0); assert.equal(aborted.state.aiGatewayInvocation.length, 0);
 });
 
 test('request-bound model runs original scenes and reads knowledge results without borrowing request identity', { timeout: 60000 }, async () => {

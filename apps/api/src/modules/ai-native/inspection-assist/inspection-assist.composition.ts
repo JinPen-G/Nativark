@@ -6,6 +6,10 @@ import { PrismaInspectionEvidenceAuthority } from './prisma-inspection-evidence.
 import { InspectionDraftService } from './inspection-draft.service';
 import { InspectionSubmissionService } from './inspection-submission.service';
 import { InspectionRecognitionService } from './inspection-recognition.service';
+import { InspectionRecognitionResultService } from './inspection-recognition-result.service';
+import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';
+import type { TaskModelPolicy } from '../model-input/task-model-input';
+import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
 import { OriginalInspectionApplication } from './original-inspection.application';
 import type { FileStorageRuntimeService } from '../../integrations/file-storage.runtime.service';
 import type { RentalCoreController } from '../../rental-core/rental-core.controller';
@@ -35,6 +39,11 @@ export async function composeInspectionRecognitionTaskHost(recognition: Pick<Ins
 }
 
 type Dependencies = ConstructorParameters<typeof InspectionTemplateService>[0] & {
+  /** Server-only dependencies; credentials are bound by THIS request factory,
+   * never independently supplied by an external result caller. */
+  recognitionResults?: Omit<PersistedTaskAuthorizationDependencies, 'credentials'> & {
+    policy: TaskModelPolicy; financialEvidence: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>;
+  };
   evidence?: InspectionEvidenceAuthority;
   storage?: Pick<FileStorageRuntimeService, 'readInspectionBytes'>;
   originalInspection?: { controller: Pick<RentalCoreController, 'createInspection'>; receipts: Pick<RentalIdempotencyRepository, 'find'> };
@@ -85,7 +94,11 @@ export function composeInspectionAssist(dependencies: Dependencies) {
     dependencies.originalInspection.controller, dependencies.originalInspection.receipts) : undefined;
   const submission = repository && drafts && evidence ? new InspectionSubmissionService(repository, drafts, authority, templates, manual, evidence, dependencies.core, original) : undefined;
   const recognition = repository && drafts && evidence ? new InspectionRecognitionService(repository, drafts, authority, templates, evidence) : undefined;
-  return { templates, manual, candidates, drafts, evidence, submission, recognition };
+  const resultSource = dependencies.recognitionResults;
+  const resultAuthorization = resultSource ? composePersistedTaskAuthorization({ ...resultSource, credentials: dependencies.credentials }) : undefined;
+  const recognitionResults = new InspectionRecognitionResultService(authority, recognition, candidates, drafts,
+    resultSource && resultAuthorization ? { ...resultSource, tasks: resultAuthorization.tasks, authority: resultAuthorization.authority } : undefined);
+  return { templates, manual, candidates, drafts, evidence, submission, recognition, recognitionResults };
 }
 
 /** No Controller/AppModule/worker registration. Original business pages remain available. */
@@ -106,11 +119,12 @@ export class InspectionAssistModule {
       { provide: StaffInspectionRequestFactory, useValue: new StaffInspectionRequestFactory(dependencies) },
       { provide: InspectionManualPreparationService, useValue: services.manual },
       { provide: InspectionCandidateService, useValue: services.candidates },
+      { provide: InspectionRecognitionResultService, useValue: services.recognitionResults },
       ...(services.drafts ? [{ provide: InspectionDraftService, useValue: services.drafts }] : []),
       ...(services.evidence ? [{ provide: PrismaInspectionEvidenceAuthority, useValue: services.evidence }] : []),
       ...(services.submission ? [{ provide: InspectionSubmissionService, useValue: services.submission }] : []),
       ...(services.recognition ? [{ provide: InspectionRecognitionService, useValue: services.recognition }] : [])],
-      exports: [StaffInspectionRequestFactory, InspectionTemplateService, InspectionManualPreparationService, InspectionCandidateService,
+      exports: [StaffInspectionRequestFactory, InspectionTemplateService, InspectionManualPreparationService, InspectionCandidateService, InspectionRecognitionResultService,
         ...(services.drafts ? [InspectionDraftService] : []), ...(services.evidence ? [PrismaInspectionEvidenceAuthority] : []),
         ...(services.submission ? [InspectionSubmissionService] : []), ...(services.recognition ? [InspectionRecognitionService] : [])] };
   }

@@ -207,7 +207,9 @@ export function composeAiTaskCenterScene(input: {
           consistency: 'independent_authorized_reads' as const, execution: 'read_only_no_start_no_reconnect_side_effect' as const });
       }
       const current = await readObservedTask(command.original, command.taskId);
-      if (current.runId !== command.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      // A successor run is accepted only through the existing result reader's
+      // consumed-input provenance. A snapshot's run ID alone is not a grant.
+      if (current.runId !== command.runId && !command.resultId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       const task = await readers.readTask(command.original);
       const snapshot = await readSnapshot(current.taskId, current.revision);
       const original = await input.scenes.requests.readHistorical(command.original);
@@ -216,6 +218,8 @@ export function composeAiTaskCenterScene(input: {
         ? await readers.readInput({ original: command.original, taskId: current.taskId }) : { availability: 'unavailable' as const };
       const model = command.resultId ? await readers.readModelResult({ original: command.original, resultId: command.resultId })
         : { availability: 'not_requested' as const };
+      if (command.resultId && (!('runId' in model) || model.runId !== command.runId
+        || model.taskId !== current.taskId)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       const review = command.review !== undefined ? await readers.readApprovalReview({ original: command.original, taskId: current.taskId, reference: command.review })
         : { availability: 'not_requested' as const };
       const decision = command.decision !== undefined ? await readers.readApprovalReceipt({ original: command.original, taskId: current.taskId, reference: command.decision })
@@ -223,7 +227,8 @@ export function composeAiTaskCenterScene(input: {
       const business = command.order !== undefined ? await readers.readOrderResult({ original: command.original, taskId: current.taskId, reference: command.order })
         : { availability: 'not_requested' as const };
       await assertStillCurrent(command.original, current);
-      return freezeOriginalInput({ kind: command.kind, taskId: current.taskId, runId: current.runId, task, snapshot,
+      return freezeOriginalInput({ kind: command.kind, taskId: current.taskId, runId: command.runId,
+        originRunId: current.runId, task, snapshot,
         originalInput, pendingInput, model, review, decision, business, submission: 'not_attested_by_approval' as const,
         consistency: 'independent_authorized_reads' as const, execution: 'read_only_no_start_no_reconnect_side_effect' as const });
     }
