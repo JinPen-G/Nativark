@@ -70,7 +70,7 @@ export function composeClientBooking(input: {
     inputFingerprint: value.row.inputHash, materialRef: value.row.materialRef, material: value.material,
     createdAt: value.row.createdAt.toISOString(), expiresAt: value.row.expiresAt.toISOString(), execution: 'not_submitted', action: openAction(value)
   });
-  const readHandoff = async (ref: string): Promise<AiBookingHandoff> => {
+  const readHandoffMaterial = async (ref: string) => {
     const handoff = await repo.handoff(input.scope, ref);
     if (!handoff) throw new AiClientEntryError('AI_ACCESS_DENIED', 'handoff_unavailable');
     if (handoff.expiresAt <= input.clock()) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'handoff_expired', 'reprepare');
@@ -80,12 +80,15 @@ export function composeClientBooking(input: {
     const latest = await repo.handoff(input.scope, ref);
     if (hashJson(handoff) !== hashJson(latest) || handoff.expiresAt <= input.clock()) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'handoff_expired', 'reprepare');
     await input.assertCurrent();
-    return freezeOriginalInput({ contractVersion: AI_BOOKING_DRAFT_CONTRACT_VERSION, handoffRef: handoff.id, bookingDraftId: value.row.id,
+    const result: AiBookingHandoff = { contractVersion: AI_BOOKING_DRAFT_CONTRACT_VERSION, handoffRef: handoff.id, bookingDraftId: value.row.id,
       revision: value.row.revision, audience: 'customer', surface: input.surface,
       scope: { kind: 'workspace', tenantId: input.scope.tenantId, workspaceId: input.scope.workspaceId },
       expiresAt: handoff.expiresAt.toISOString(), fields: value.material.selection,
-      actionCode: 'OPEN_BOOKING', submission: 'original_booking_page_required', inventory: 'not_reserved' });
+      actionCode: 'OPEN_BOOKING', submission: 'original_booking_page_required', inventory: 'not_reserved' };
+    return { handoff: result, value };
   };
+  const readHandoff = async (ref: string): Promise<AiBookingHandoff> =>
+    freezeOriginalInput((await readHandoffMaterial(ref)).handoff);
   return Object.freeze({
     async create(value: unknown) {
       const { action, operationKey } = parseEntry(actionCommandSchema, value);
@@ -143,6 +146,21 @@ export function composeClientBooking(input: {
     async readHandoff(value: unknown) {
       const ref = parseEntry(z.object({ handoffRef: z.string().uuid() }).strict(), value);
       return readHandoff(ref.handoffRef);
+    },
+    /** Internal consumer result, not a new HTTP/shared DTO. Both views come
+     * from the same authorized verification; callers must not join two reads
+     * or treat a draft operation receipt as acceptance by the booking system. */
+    async readPreparation(value: unknown) {
+      const ref = parseEntry(z.object({ handoffRef: z.string().uuid() }).strict(), value);
+      const current = await readHandoffMaterial(ref.handoffRef);
+      return freezeOriginalInput({
+        handoff: current.handoff,
+        draft: view(current.value),
+        observedAt: input.clock().toISOString(),
+        submission: 'unavailable_original_page_acceptance_receipt_missing' as const,
+        inventory: 'not_reserved' as const,
+        approval: 'not_granted' as const,
+      });
     },
     async readOperation(value: unknown) {
       const { operationKey } = parseEntry(z.object({ operationKey: entryId }).strict(), value);

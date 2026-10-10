@@ -292,6 +292,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     chooseBookingDraft: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, true, (app, command) => app.choose(command)),
     handoffBookingDraft: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, true, (app, command) => app.handoff(command)),
     readBookingHandoff: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, false, (app, command) => app.readHandoff(command)),
+    readBookingPreparation: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, false, (app, command) => app.readPreparation(command)),
     readBookingOperation: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, false, (app, command) => app.readOperation(command)),
     async issueAction(request: AiClientApplicationRequest, value: unknown) {
       requireEntry();

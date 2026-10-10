@@ -1034,6 +1034,18 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.equal((await bookingHttp.readBookingDraft(request, { bookingDraftId: draftCreated.draft.bookingDraftId })).state, 'handed_to_booking_page');
   assert.equal((await bookingApp.handoffBookingDraft(request, handoffCommand)).handoff.handoffRef, handed.handoff.handoffRef);
   assert.equal((await bookingHttp.readBookingHandoff(request, { handoffRef: handed.handoff.handoffRef })).actionCode, 'OPEN_BOOKING');
+  const preparation = await bookingApp.readBookingPreparation(request, { handoffRef: handed.handoff.handoffRef });
+  assert.deepEqual(preparation.handoff, handed.handoff);
+  assert.equal(preparation.draft.material.quote.quoteId, preparation.handoff.fields.quoteId);
+  assert.equal(preparation.draft.inputFingerprint, selected.draft.inputFingerprint);
+  assert.equal(preparation.draft.selectionRevision, selected.draft.selectionRevision);
+  assert.equal(preparation.draft.action.actionCode, 'OPEN_BOOKING');
+  assert.equal(preparation.submission, 'unavailable_original_page_acceptance_receipt_missing');
+  assert.equal(preparation.approval, 'not_granted');
+  assert.equal(preparation.inventory, 'not_reserved');
+  assert.ok(Object.isFrozen(preparation.draft.material.selection.lines));
+  await assert.rejects(bookingApp.readBookingPreparation({ headers: {} }, { handoffRef: handed.handoff.handoffRef }));
+  await assert.rejects(bookingApp.readBookingPreparation(request, { handoffRef: handed.handoff.handoffRef, submitted: true }));
   await assert.rejects(bookingHttp.readBookingHandoff({ headers: {} }, { handoffRef: handed.handoff.handoffRef }), e => e.getStatus() === 403);
   const quoteReader = client.business.getQuote;
   client.business.getQuote = () => { throw Error('synthetic private database credential'); };
@@ -1047,6 +1059,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   await assert.rejects(bookingApp.readBookingHandoff(request, { handoffRef: handed.handoff.handoffRef, submitted: true }));
   await assert.rejects(bookingApp.readAction(request, { ...selected.draft.action, surface: 'client_miniprogram' }));
   stockObservation++;
+  await assert.rejects(bookingApp.readBookingPreparation(request, { handoffRef: handed.handoff.handoffRef }));
   await assert.rejects(bookingApp.readBookingHandoff(request, { handoffRef: handed.handoff.handoffRef }));
   assert.equal(bookingRows.ai_client_booking_drafts[0].state, 'stale'); stockObservation--;
   await assert.rejects(bookingApp.readBookingDraft(request, { bookingDraftId: draftCreated.draft.bookingDraftId }), e => e.code === 'AI_PROPOSAL_STALE');
