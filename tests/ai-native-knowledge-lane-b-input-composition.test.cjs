@@ -74,3 +74,66 @@ test('opt-in composition prepares original knowledge package with separately aut
   assert.deepEqual((await bundle.preparation.collect(input, { includePreferences: true })).preferences.items, []);
   assert.throws(() => composePersistedHumanKnowledge({ ...deps, memory: { db, authorization: undefined } }), { code: 'unavailable' });
 });
+
+test('consumption binds observations across waits and recovers the exact memory deletion', async () => {
+  const { ports, db, flags } = fixture();
+  const bundle = composePersistedHumanKnowledge({ ...ports, memory: { db, authorization: ports.authorization } });
+  await bundle.management.create(h.draft());
+  await bundle.management.parse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-1' });
+  const detail = bundle.management.detail.bind(bundle.management);
+  let once = true;
+  bundle.management.detail = async id => {
+    const result = await detail(id);
+    if (once) {
+      once = false;
+      await bundle.management.revise(result.revision, h.draft({ documentVersion: 'v2', operationId: 'revise-2' }));
+    }
+    return result;
+  };
+  await assert.rejects(bundle.consumption.readDocument({ documentId: 'doc-1' }), { code: 'conflict' });
+  bundle.management.detail = detail;
+  const revised = await detail('doc-1');
+  const parsed = await bundle.management.parse({ documentId: 'doc-1', expectedRevision: revised.revision, operationId: 'parse-2' });
+  const queued = await bundle.index.request({ documentId: 'doc-1', expectedRevision: parsed.revision, operationId: 'index-2', kind: 'upsert' });
+  const indexed = await bundle.index.resume({ documentId: 'doc-1', operationId: queued.indexJob.operationId, generation: queued.indexJob.generation });
+  const current = await bundle.management.publish({ documentId: 'doc-1', expectedRevision: indexed.revision, operationId: 'publish-2' });
+  await bundle.management.withdraw({ documentId: 'doc-1', expectedRevision: current.revision, operationId: 'withdraw-1' });
+  const withdrawn = await bundle.consumption.readDocument({ documentId: 'doc-1' });
+  assert.equal(withdrawn.state, 'withdrawn_or_deleted');
+  assert.deepEqual(withdrawn.preview.sources, []);
+  assert.equal(withdrawn.metadata.indexJob.status, 'pending');
+
+  const expiresAt = new Date(h.now + 3600000).toISOString();
+  await bundle.memory.propose({ memoryId: 'memory-1', operationId: 'propose-1', expiresAt,
+    preference: { kind: 'locale', value: 'zh-CN' } });
+  await bundle.memory.confirm({ memoryId: 'memory-1', expectedRevision: 1, operationId: 'confirm-1', expiresAt });
+  const proof = bundle.memory.confirmationDetail.bind(bundle.memory);
+  bundle.memory.confirmationDetail = async id => {
+    const result = await proof(id);
+    await bundle.memory.revoke({ memoryId: id, expectedRevision: 2 });
+    return result;
+  };
+  await assert.rejects(bundle.consumption.readMemory({ memoryId: 'memory-1' }), { code: 'unavailable' });
+  bundle.memory.confirmationDetail = proof;
+  assert.equal((await bundle.consumption.readMemory({ memoryId: 'memory-1' })).status, 'revoked');
+
+  const deletion = { draftVersion: 'ain-c06-draft-1', memoryId: 'memory-1', expectedRevision: 2, operation: 'delete' };
+  const transaction = db.$transaction;
+  db.$transaction = async (...args) => {
+    const before = db.state.memories.get('memory-1').status;
+    const result = await transaction(...args);
+    if (before !== 'deleted' && db.state.memories.get('memory-1').status === 'deleted') throw new Error('synthetic committed response lost');
+    return result;
+  };
+  await assert.rejects(bundle.consumption.changeMemory('delete-1', deletion), { code: 'result_unknown' });
+  db.$transaction = transaction;
+  const recovered = await bundle.consumption.recoverMemoryChange('delete-1', deletion);
+  assert.equal(recovered.status, 'committed_current');
+  assert.equal((await bundle.consumption.changeMemory('delete-1', deletion)).status, 'deleted');
+  const count = db.state.memoryOperations.size;
+  await assert.rejects(bundle.consumption.recoverMemoryChange('delete-1', { ...deletion, expectedRevision: 1 }), { code: 'conflict' });
+  assert.equal(db.state.memoryOperations.size, count);
+  flags.workspaceId = 'another-space';
+  await assert.rejects(bundle.consumption.readDocument({ documentId: 'doc-1' }), { code: 'unavailable' });
+  await assert.rejects(bundle.consumption.recoverMemoryChange('delete-1', deletion), { code: 'unavailable' });
+});
