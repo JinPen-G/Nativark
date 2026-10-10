@@ -86,7 +86,7 @@ export class AiOpeningActionListService {
   /** Re-evaluate an existing readiness key using current protected sources.
    * A vanished check is unknown, not proof the reported problem was fixed. */
   async recheck(value: unknown) {
-    const parsed = z.object({ key: z.string().min(1).max(191) }).strict().safeParse(value);
+    const parsed = z.object({ key: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict().safeParse(value);
     if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
     const current = await this.read();
     const section = current.sections.find(row => row.key === parsed.data.key);
@@ -156,6 +156,39 @@ export class AiOpeningActionListService {
       sensitive: { values: 'not_returned' as const, action: 'original_manual_flow' as const },
       persistence: 'not_attempted' as const, publication: 'not_attempted' as const,
       source: section.evidence };
+  }
+
+  /** Read one explicitly selected readiness partition. The projection is
+   * bounded and sanitized; it is not a writable configuration object. */
+  async readSection(value: unknown) {
+    const parsed = z.object({ key: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict().safeParse(value);
+    if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+    const current = await this.read();
+    const section = current.sections.find(row => row.key === parsed.data.key);
+    if (!section) return { status: 'unavailable' as const, key: parsed.data.key,
+      reason: 'section_not_in_current_readiness' as const, persistence: 'not_attempted' as const };
+    const safeCurrent = (() => {
+      switch (section.key) {
+        case 'item_groups': return current.configuration.products;
+        case 'pricing_groups_rates': return current.configuration.pricing;
+        case 'fulfillment_network': return current.configuration.fulfillment;
+        case 'workspace_profile': return { configVersion: current.configVersion, fields: section.candidate.fieldsToReview };
+        default: return { fields: section.candidate.fieldsToReview };
+      }
+    })();
+    const status = section.status === 'readiness_check_passed' ? 'ready_for_human_review' as const
+      : section.status === 'source_unavailable' ? 'capability_unavailable' as const
+      : section.status === 'missing_configuration' ? 'missing_configuration' as const
+      : section.status === 'readiness_unsatisfied' ? 'check_failed' as const
+      : 'awaiting_external_evidence' as const;
+    return { status, key: section.key, current: safeCurrent, issue: section.issue,
+      required: section.required, impact: section.impact, evidence: section.evidence,
+      materials: section.candidate.fieldsToReview, manual: section.manual,
+      candidate: { status: 'candidate_only' as const, currentVersion: section.candidate.currentVersion,
+        fieldsToReview: section.candidate.fieldsToReview, proposedChanges: [],
+        persistence: 'unavailable_no_formal_draft_port' as const },
+      externalVerification: section.externalVerification, persistence: 'not_attempted' as const,
+      publication: 'not_attempted' as const };
   }
 
   async prepareSections(value: unknown) {

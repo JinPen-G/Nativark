@@ -114,6 +114,7 @@ export function composeAiAuthorizedBusinessTools(input: {
     },
     opening, risks,
     openingActions,
+    openingSection: (value: unknown) => new AiOpeningActionListService(opening, risks, context, diagnostics).readSection(value),
     openingSectionDifferences: (value: unknown) => new AiOpeningActionListService(opening, risks, context, diagnostics).prepareSections(value),
     riskRecheck: (value: unknown) => new AiOpeningActionListService(opening, risks, context, diagnostics).recheckRisk(value),
     quote: Object.freeze({ ...quote, businessPreparation: quotePreparation,
