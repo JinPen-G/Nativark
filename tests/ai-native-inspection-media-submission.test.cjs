@@ -76,6 +76,31 @@ async function prepared(f){
   return {...target,draftId:result.draftId,expectedRevision:result.revision,operationId:'submit-a'};
 }
 
+test('employee review consumes original receipt without submitting or back-writing the draft',async()=>{
+  const {StaffInspectionRequestFactory}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-assist.composition');
+  const f=submissionFixture('lost'),input=await prepared(f);
+  const submitted=await f.services.submission.submit(input);
+  assert.equal(submitted.status,'submitted');
+  const credential=await f.ports.credentials.current();
+  const controller={createInspection:async()=>assert.fail('read must not dispatch')};
+  const host=new StaffInspectionRequestFactory({...f.ports,originalInspection:{controller,receipts:new RentalIdempotencyRepository(f.db)}})
+    .open({headers:{authorization:credential.authorization},requestId:'employee-receipt'});
+  const query={...target,draftId:input.draftId},before=structuredClone(f.state.drafts.get(input.draftId)),operationCount=f.state.operations.size;
+  const observed=await host.readCurrentReview(query,true);
+  assert.equal(observed.receipt.status,'submitted');assert.equal(observed.receipt.inspectionId,'inspection-original');
+  assert.equal(observed.review.next,'read_original_inspection');assert.equal(observed.businessActionRequested,false);
+  assert.deepEqual(f.state.drafts.get(input.draftId),before);assert.equal(f.state.operations.size,operationCount);assert.equal(f.calls(),1);
+  f.state.user.permissions=['rental-os:order:view'];
+  assert.equal((await host.readCurrentReview(query)).receipt.status,'not_requested');
+  await assert.rejects(host.readCurrentReview(query,true),{code:'ACCESS_DENIED'});
+  host.close();await assert.rejects(host.readCurrentReview(query),{code:'ACCESS_DENIED'});
+  const missing=submissionFixture('absent'),unknown=await prepared(missing);
+  assert.equal((await missing.services.submission.submit(unknown)).status,'submission_unknown');
+  const snapshot=structuredClone(missing.state.drafts.get(unknown.draftId));
+  assert.equal((await missing.services.submission.readReceipt({...target,draftId:unknown.draftId})).status,'not_observed');
+  assert.deepEqual(missing.state.drafts.get(unknown.draftId),snapshot);assert.equal(missing.calls(),1);
+});
+
 test('bounded actual stream reader hashes bytes, rejects overflow and cancels pending reads',async()=>{
   const result=await readInspectionMedia(stream(png),1000,new AbortController().signal);
   assert.equal(result.mediaType,'image/png');assert.equal(result.width,1);assert.equal(result.height,1);assert.equal(result.contentHash.length,64);

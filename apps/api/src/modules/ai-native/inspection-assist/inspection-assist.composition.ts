@@ -18,6 +18,7 @@ import { InspectionTemplateService } from './inspection-template.service';
 import { InspectionManualPreparationService } from './inspection-manual-preparation.service';
 import { InspectionCandidateService, type InspectionEvidenceAuthority } from './inspection-candidate.service';
 import { InspectionAssistError } from './inspection-assist.validation';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { composeTaskModelHost, type TaskModelHostDependencies } from '../runner/model-task-host.composition';
 
 /** Server composition only: material comes from the original authorized frozen
@@ -75,6 +76,20 @@ export class StaffInspectionRequestFactory {
     };
     const services = composeInspectionAssist({ ...this.dependencies, credentials });
     return { ...services,
+      /** Actual employee consumption entry. Receipt lookup is explicit and
+       * retains its existing stronger action permission; never silently
+       * downgrade a denied receipt request into a successful draft read. */
+      readCurrentReview: async (value: unknown, includeReceipt = false) => {
+        if (typeof includeReceipt !== 'boolean') throw new InspectionAssistError('INVALID_INPUT');
+        if (!services.drafts) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+        const review = await services.drafts.readReview(value);
+        if (!includeReceipt) return { review, receipt: { status: 'not_requested' as const }, businessActionRequested: false as const };
+        if (!services.submission) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+        const receipt = await services.submission.readReceipt({ ...review.target, draftId: review.draftId });
+        const current = await services.drafts.readReview(value);
+        if (requestFingerprint(current) !== requestFingerprint(review)) throw new InspectionAssistError('REVISION_CONFLICT');
+        return { review, receipt, businessActionRequested: false as const };
+      },
       recognitionTaskHost: (reference: unknown, dependencies: Parameters<typeof composeInspectionRecognitionTaskHost>[2]) => {
         if (!services.recognition || authorization === undefined) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
         // The task host must use the same request session as media/draft reads.

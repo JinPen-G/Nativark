@@ -133,6 +133,39 @@ export class InspectionSubmissionService {
     });
   }
 
+  /** Observe the original receipt only. Unlike reconcile(), this never writes
+   * a draft link, reserves a new action or dispatches an inspection. Keep the
+   * existing submission authorization until a formal narrower receipt policy
+   * is provided; metadata read permission alone does not grant this lookup. */
+  async readReceipt(value: unknown) {
+    const input = parseInspectionInput(base, value), target = targetOf(input);
+    return this.authority.withAction(target, 'submit', async scope => {
+      const before = await this.row(scope, input.draftId, target);
+      const state = z.object({ submission: inspectionSubmissionMaterialSchema.optional() }).safeParse(before.state);
+      if (!state.success) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+      const material = state.data.submission;
+      if (!material) {
+        if (before.status !== 'draft_saved') throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+        return { status: 'not_prepared' as const, draftId: before.id, revision: before.revision, retryable: false as const };
+      }
+      if (material.actionId !== before.submissionActionId) throw new InspectionAssistError('BINDING_CHANGED');
+      const receipt = material.mode === 'manual_review_only' || !this.original
+        ? { status: 'unavailable' as const }
+        : await this.original.reconcile(scope, target, before.templateVersion, material);
+      const after = await this.row(scope, input.draftId, target);
+      if (requestFingerprint(after) !== requestFingerprint(before)) throw new InspectionAssistError('REVISION_CONFLICT');
+      if (receipt.status === 'submitted' && before.inspectionId && receipt.inspectionId !== before.inspectionId) {
+        throw new InspectionAssistError('BINDING_CHANGED');
+      }
+      return { status: receipt.status === 'absent' ? 'not_observed' as const : receipt.status,
+        draftId: before.id, revision: before.revision,
+        actionId: material.actionId, requestHash: material.requestHash,
+        ...(receipt.status === 'submitted' ? { inspectionId: receipt.inspectionId } : {}),
+        draftLinked: receipt.status === 'submitted' && before.status === 'submitted' && before.inspectionId === receipt.inspectionId,
+        retryable: false as const, semantics: 'original_receipt_observation_not_submission_or_draft_link' as const };
+    });
+  }
+
   private async finish(scope: AiInspectionActorScope, target: AiInspectionTarget, row: { id: string; revision: number; bindingFingerprint: string },
     material: AiInspectionSubmissionMaterial, receipt: InspectionSubmissionReceipt) {
     if (receipt.status !== 'submitted') return { status: 'submission_unknown' as const, draftId: row.id,
