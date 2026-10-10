@@ -67,16 +67,21 @@ export class StaffInspectionRequestFactory {
     // Snapshot scalars, never retain the mutable incoming request or share a
     // credential source between requests. close() erases our token reference.
     let authorization: string | undefined = token;
-    const services = composeInspectionAssist({ ...this.dependencies, credentials: {
+    const credentials = {
       async current() {
         if (authorization === undefined) throw new InspectionAssistError('ACCESS_DENIED');
         return { authorization, requestId, audience: 'staff' as const };
       },
-    } });
+    };
+    const services = composeInspectionAssist({ ...this.dependencies, credentials });
     return { ...services,
       recognitionTaskHost: (reference: unknown, dependencies: Parameters<typeof composeInspectionRecognitionTaskHost>[2]) => {
         if (!services.recognition || authorization === undefined) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
-        return composeInspectionRecognitionTaskHost(services.recognition, reference, dependencies);
+        // The task host must use the same request session as media/draft reads.
+        // A second supplied credential source cannot swap the invocation actor.
+        return composeInspectionRecognitionTaskHost(services.recognition, reference, {
+          ...dependencies, credentials,
+        });
       },
       close() { authorization = undefined; } };
   }
