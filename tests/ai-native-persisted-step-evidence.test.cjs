@@ -82,6 +82,54 @@ for (const [label, mutate] of [
   assert.equal(h.state.aiTaskEvent.length, count);
 });
 
+test('probe crash marker converges to unknown without inventing a Gateway result or financial release', async () => {
+  const { PrismaTextProbeStepEvidenceAuthority } = require('../apps/api/src/modules/ai-native/prisma-text-probe-step-evidence.authority');
+  const { TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE, textProbeIntent, textProbeConfiguration } = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const { AI_TOOL_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
+  const h = await completed(), step = h.state.aiStep[0], plan = h.state.aiTaskRunPlan[0];
+  const command = { operationId: 'crashed-probe', profileKey: 'default', profileFingerprint: 'a'.repeat(64) };
+  step.toolCode = TEXT_CAPABILITY_PROBE_TOOL; step.toolVersion = AI_TOOL_DRAFT_VERSION;
+  step.inputRef = 'probe-original'; step.requestFingerprint = requestFingerprint(command); step.effect = 'POSSIBLE';
+  Object.assign(plan.payload.steps[0], { operation: 'external_unknown', toolCode: step.toolCode, toolVersion: step.toolVersion });
+  plan.planHash = requestFingerprint(plan.payload);
+  Object.assign(h.artifact, { payload: {}, contentHash: requestFingerprint({}), outputBytes: 0n, activeMs: 0n,
+    completeMeasurement: false, outcome: 'RUNNING', errorCode: null, stepFingerprint: step.requestFingerprint });
+  const charges = h.state.aiTaskExecutionCharge;
+  for (const charge of charges) charge.stepFingerprint = step.requestFingerprint;
+  charges.push({ ...h.clone(charges[0]), id: 'probe-call', chargeId: 'probe-call', resource: 'CALLS',
+    gatewayInvocationId: 'invocation', status: 'UNKNOWN', amount: 1n });
+  const scope = h.control.context.scope;
+  const configuration = textProbeConfiguration({ id: 'profile', scopeId: 'platform', scopeKind: 'PLATFORM',
+    serviceMode: 'platform_managed', configRevision: 1, credentialRef: 'vault:profile', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'model' }, scope.tenantId);
+  const input = { id: step.inputRef, scopeId: step.scopeId, taskId: step.taskId, runId: step.runId,
+    toolCode: step.toolCode, toolVersion: step.toolVersion, payload: command, fingerprint: step.requestFingerprint,
+    expiresAt: new Date(h.control.now.getTime() + 10000) };
+  const invocation = { id: 'invocation', scopeId: step.scopeId, taskId: step.taskId, runId: step.runId, stepId: step.id,
+    actionId: step.actionId, stepFingerprint: step.requestFingerprint, actorId: h.control.context.actor.userId,
+    callId: textProbeIntent(command.operationId, step.scopeId).intent.requestId,
+    intentHash: textProbeIntent(command.operationId, step.scopeId).intentHash, sceneCode: TEXT_PROBE_SCENE,
+    mode: 'invoke', maxOutputTokens: 32, priceVersion: 'price', configuration, configurationHash: requestFingerprint(configuration),
+    leaseOwnerId: h.artifact.leaseOwnerId, fencingToken: h.artifact.fencingToken };
+  const db = { ...h.db, aiTaskActionInput: { findFirst: async () => h.clone(input) },
+    aiGatewayInvocation: { findFirst: async () => h.clone(invocation) },
+    aiGatewayAccountingReceipt: { findFirst: async () => assert.fail('unknown must not invent financial evidence') },
+    aiInvocationAdmission: { findFirst: async () => assert.fail('unknown must not claim dispatch') } };
+  const authority = new PrismaTextProbeStepEvidenceAuthority(db, h.taskAuthority, h.planAuthority,
+    { readDispatch: async () => assert.fail('unknown cannot release or settle') }, 'price', () => new Date(h.control.now));
+  const transition = { ...h.command, reason: 'result_unknown' };
+  const transitions = new AiStepTransitionRepository(h.db, authority, () => new Date(h.control.now));
+  const originalCall = invocation.callId, events = h.state.aiTaskEvent.length;
+  invocation.callId = 'another-call'; await assert.rejects(transitions.transition(transition)); invocation.callId = originalCall;
+  const originalScope = input.scopeId;
+  input.scopeId = 'another-scope'; await assert.rejects(transitions.transition(transition)); input.scopeId = originalScope;
+  assert.equal(h.state.aiTaskEvent.length, events); assert.equal(step.status, 'RUNNING');
+  const result = await transitions.transition(transition);
+  assert.equal(result.event.data.status, 'unknown');
+  assert.equal(h.state.aiStep[0].status, 'UNKNOWN');
+  assert.equal(h.state.aiTaskResultArtifact[0].outcome, 'RUNNING');
+  assert.equal(charges.find(c => c.resource === 'CALLS').status, 'UNKNOWN');
+});
+
 test('identity changed during evidence read is rejected before any event', async () => {
   const h = await completed();
   h.storeControl.beforeRead = async name => {

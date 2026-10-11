@@ -35,8 +35,10 @@ export class PrismaTextProbeStepEvidenceAuthority extends PrismaTaskStepEvidence
     if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace' || !step.inputRef) throw denied();
     const key = { scopeId: step.scopeId, taskId: step.taskId, runId: step.runId };
     const saved = await this.probeDb.aiTaskActionInput.findFirst({ where: { ...key, id: step.inputRef } });
-    if (!saved || saved.id !== step.inputRef || saved.toolCode !== TEXT_CAPABILITY_PROBE_TOOL
-      || saved.toolVersion !== AI_TOOL_DRAFT_VERSION || saved.fingerprint !== step.requestFingerprint || saved.expiresAt <= this.clock()) throw denied();
+    if (!saved || saved.id !== step.inputRef || saved.scopeId !== key.scopeId || saved.taskId !== key.taskId || saved.runId !== key.runId
+      || saved.toolCode !== TEXT_CAPABILITY_PROBE_TOOL || saved.toolVersion !== AI_TOOL_DRAFT_VERSION
+      || saved.fingerprint !== step.requestFingerprint || !(saved.expiresAt instanceof Date)
+      || !Number.isFinite(saved.expiresAt.getTime()) || saved.expiresAt <= this.clock()) throw denied();
     const command = textProbeCommandSchema.parse(saved.payload);
     const prepared = textProbeIntent(command.operationId, step.scopeId);
     if (requestFingerprint(command) !== step.requestFingerprint) throw denied();
@@ -53,12 +55,17 @@ export class PrismaTextProbeStepEvidenceAuthority extends PrismaTaskStepEvidence
       || !isGatewayConfig(invocation.configuration) || requestFingerprint(invocation.configuration) !== invocation.configurationHash
       || invocation.leaseOwnerId !== artifact.leaseOwnerId || invocation.fencingToken.toFixed(0) !== artifact.fencingToken.toFixed(0)) throw denied();
     const result = artifact.payload;
-    if (!isGatewayResult(result) || result.requestId !== invocation.callId
-      || requestFingerprint(result.actual) !== invocation.configurationHash) throw denied();
     if (!artifact.completeMeasurement) {
-      if (artifact.outcome === 'UNKNOWN' && result.status !== 'unknown' && !(result.status === 'completed' && result.usage.kind === 'unknown')) throw denied();
+      // The original persisted start marker has no provider response. Base
+      // evidence verifies its empty payload, zero measurement and held charges;
+      // retain uncertainty, never invent a result or permission to dispatch.
+      if (artifact.outcome === 'UNKNOWN' && (!isGatewayResult(result) || result.requestId !== invocation.callId
+        || requestFingerprint(result.actual) !== invocation.configurationHash
+        || (result.status !== 'unknown' && !(result.status === 'completed' && result.usage.kind === 'unknown')))) throw denied();
       return { inputRef: saved.id, inputHash: saved.fingerprint, invocationId: invocation.id, unresolved: true };
     }
+    if (!isGatewayResult(result) || result.requestId !== invocation.callId
+      || requestFingerprint(result.actual) !== invocation.configurationHash) throw denied();
     if (artifact.outcome === 'SUCCEEDED' && (result.status !== 'completed' || result.usage.kind !== 'reported')) throw denied();
     if (artifact.outcome === 'FAILED' && result.status !== 'failed') throw denied();
     const receipt = await this.probeDb.aiGatewayAccountingReceipt.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, invocationId: invocation.id } });
