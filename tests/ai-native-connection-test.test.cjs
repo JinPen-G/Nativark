@@ -92,6 +92,44 @@ test('versioned text challenge and unregistered probe cannot grant dispatch or l
   assert.equal(sent, 0);
 });
 
+test('current probe host derives identity and rejects changed authority after waiting', async () => {
+  const { TextCapabilityProbeApplication } = require('../apps/api/src/modules/ai-native/text-capability-probe.application');
+  const app = Object.create(TextCapabilityProbeApplication.prototype);
+  let actor = 'actor-a', change = false;
+  app.input = { scopes: { resolveCurrent: async () => ({ scope: { id: 'scope', kind: 'WORKSPACE', tenantId: 'tenant-a', workspaceId: 'space-a' },
+    context: { actor: { kind: 'user', userId: actor }, audience: 'operator', scope: { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'space-a' } } }) } };
+  app.prepare = async (actual, command) => { assert.deepEqual(actual, context); assert.equal(command.operationId, 'probe');
+    if (change) actor = 'another-user'; return { status: 'prepared' }; };
+  const command = { operationId: 'probe', profileKey: 'default', profileFingerprint: 'a'.repeat(64) };
+  assert.equal((await app.prepareCurrent(command)).status, 'prepared');
+  change = true;
+  await assert.rejects(app.prepareCurrent(command), e => e.code === 'FORBIDDEN');
+});
+
+test('probe validates execution before occupying operation key and never redispatches original registration', async () => {
+  const { TextCapabilityProbeApplication } = require('../apps/api/src/modules/ai-native/text-capability-probe.application');
+  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+  const command = { operationId: 'original-probe', profileKey: profile.profileKey, profileFingerprint: capabilityProfileFingerprint(profile) };
+  const execution = { stepId: 'step', lease: { runId: 'run', holderId: 'holder', fencingToken: '1' }, priceVersion: 'price-1', expiresAt: new Date('2026-10-12T00:00:00Z') };
+  // Exercise the real application's orchestration with boundary ports replaced;
+  // no provider or database is contacted and no live provenance is asserted.
+  for (const scenario of ['invalid', 'original_registration', 'original_receipt']) {
+    let writes = 0, registrations = 0;
+    const app = Object.create(TextCapabilityProbeApplication.prototype);
+    app.authority = () => ({ resolve: async () => ({ consumerScope: { id: 'scope' }, route: { profile } }) });
+    app.receipts = { find: async () => scenario === 'original_receipt' ? { id: 'receipt' } : null,
+      begin: async () => { writes++; assert.fail('must not create a receipt on rejected/replayed execution'); } };
+    app.accounting = { bindings: { register: async () => { registrations++;
+      if (scenario === 'invalid') throw Object.assign(new Error('denied'), { code: 'FORBIDDEN' });
+      return { id: 'invocation', replayed: true }; } } };
+    app.collect = async () => ({ status: 'unverified', reason: 'original_receipt_pending' });
+    if (scenario === 'invalid') await assert.rejects(app.run(context, command, execution), e => e.code === 'FORBIDDEN');
+    else assert.equal((await app.run(context, command, execution)).status, 'unverified');
+    assert.equal(writes, 0);
+    assert.equal(registrations, scenario === 'original_receipt' ? 0 : 1);
+  }
+});
+
 test('persisted text verifier consumes original settlement and rejects mock, missing or changed receipts', async () => {
   const { PrismaTextCapabilityReceiptRepository } = require('../apps/api/src/modules/ai-native/prisma-text-capability-receipt.repository');
   const { ProviderCapabilityService } = require('../apps/api/src/modules/ai-native/provider-capability.service');

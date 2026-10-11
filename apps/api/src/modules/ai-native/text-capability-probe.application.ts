@@ -60,6 +60,46 @@ export class TextCapabilityProbeApplication {
     return new TextCapabilityProbeAuthority({ management: this.input.management, scopes: this.input.scopes,
       configuration: this.input.configuration, profiles: this.profiles, bindings: this.accounting.bindings }, context, command);
   }
+  /** Request hosts do not supply actor/tenant/workspace fields. The same real
+   * scope authority used by budget resolves them afresh for every operation. */
+  private async currentRequest() {
+    const resolved = structuredClone(await this.input.scopes.resolveCurrent());
+    const { context, scope } = resolved;
+    if (context.actor.kind !== 'user' || !['operator', 'staff'].includes(context.audience)
+      || context.scope.kind !== 'workspace' || scope.kind !== 'WORKSPACE'
+      || context.scope.tenantId !== scope.tenantId || context.scope.workspaceId !== scope.workspaceId) {
+      throw new ModelGatewayError('FORBIDDEN');
+    }
+    const { requestId: _, authorizedAt: __, ...identity } = context;
+    return { context: probeContextSchema.parse({ tenantId: scope.tenantId, workspaceId: scope.workspaceId,
+      actorId: context.actor.userId }), binding: requestFingerprint({ identity, scope }) };
+  }
+  private async forCurrentRequest<T>(operation: (context: GatewayContext) => Promise<T>): Promise<T> {
+    const before = await this.currentRequest();
+    const result = await operation(before.context);
+    if ((await this.currentRequest()).binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');
+    return result;
+  }
+  prepareCurrent(command: TextProbeCommand) {
+    const snapshot = textProbeCommandSchema.parse(structuredClone(command));
+    return this.forCurrentRequest(context => this.prepare(context, snapshot));
+  }
+  reconcileCurrent(command: TextProbeCommand) {
+    const snapshot = textProbeCommandSchema.parse(structuredClone(command));
+    return this.forCurrentRequest(context => this.reconcile(context, snapshot));
+  }
+  preflightCurrent(command: TextProbeCommand) {
+    const snapshot = textProbeCommandSchema.parse(structuredClone(command));
+    return this.forCurrentRequest(context => this.preflight(context, snapshot));
+  }
+  /** Server-only held-step entry. Execution comes from the original runner;
+   * it must never be deserialized from an HTTP request body. Registration below
+   * checks persisted ownership, fencing, expiry and the exact frozen intent. */
+  runHeldCurrent(command: TextProbeCommand,
+    execution: Pick<RegisterGatewayInvocation, 'stepId' | 'lease' | 'priceVersion' | 'expiresAt'>, signal?: AbortSignal) {
+    const snapshot = textProbeCommandSchema.parse(structuredClone(command)), held = structuredClone(execution);
+    return this.forCurrentRequest(context => this.run(context, snapshot, held, signal));
+  }
   async prepare(value: GatewayContext, commandValue: TextProbeCommand) {
     const context = probeContextSchema.parse(structuredClone(value)), command = textProbeCommandSchema.parse(structuredClone(commandValue));
     const authority = this.authority(context, command), resolution = await authority.resolve(context, ['text']);
@@ -101,9 +141,18 @@ export class TextCapabilityProbeApplication {
       profileFingerprint: command.profileFingerprint, methodVersion: TEXT_PROBE_METHOD, callId: prepared.intent.requestId,
       intentHash: prepared.intentHash, challengeHash: prepared.challengeHash, configuration,
       configurationHash: requestFingerprint(configuration), stepId: execution.stepId, runId: execution.lease.runId });
+    // An original receipt is observational only, never permission to dispatch
+    // again. In particular, a retry must not need a still-active old lease.
+    const existing = await this.receipts.find(resolution.consumerScope.id, command.operationId);
+    if (existing) return this.collect(context, command);
+    // Validate and persist the real task/step/lease association before reserving
+    // the probe operation key. A rejected execution must not poison that key.
+    const registered = await this.accounting.bindings.register({ ...execution, intent: prepared.intent, configuration, mode: 'invoke' });
+    // Registration may have committed before its response (or the probe receipt)
+    // was lost. Re-reading that association cannot reacquire dispatch permission.
+    if (registered.replayed) return this.collect(context, command);
     const started = await this.receipts.begin(descriptor);
     if (!started.created) return this.collect(context, command);
-    await this.accounting.bindings.register({ ...execution, intent: prepared.intent, configuration, mode: 'invoke' });
     await authority.assertCurrent(context, resolution);
     const tenant = new TenantModelConnectionResolver(this.input.configuration);
     const transport = new RoutedModelTransport({ tenant, platform: tenant }, [this.adapter], authority);
