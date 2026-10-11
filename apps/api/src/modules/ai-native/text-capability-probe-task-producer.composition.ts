@@ -56,7 +56,7 @@ export function composeTextCapabilityProbeTaskProducer(input: TextCapabilityProb
       const parsed = originalSchema.safeParse(structuredClone(first));
       const current = originalSchema.safeParse(structuredClone(second));
       if (!parsed.success || !current.success || parsed.data.inputRef !== parsedRef.data || current.data.inputRef !== parsedRef.data) throw denied();
-      if (requestFingerprint(parsed.data) !== requestFingerprint(current.data)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      if (stableBinding(parsed.data) !== stableBinding(current.data)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
       return parsed.data;
     }
   };
@@ -92,4 +92,11 @@ export function composeTextCapabilityProbeTaskProducer(input: TextCapabilityProb
     },
     creation
   });
+}
+
+function stableBinding(value: OriginalProbe) {
+  const context = value.context;
+  if (!context || typeof context !== 'object' || Array.isArray(context)) throw denied();
+  const { requestId: _requestId, authorizedAt: _authorizedAt, ...identity } = context as Record<string, unknown>;
+  return requestFingerprint({ ...value, context: identity });
 }
