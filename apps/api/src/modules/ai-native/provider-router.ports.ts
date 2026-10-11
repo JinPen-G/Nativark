@@ -14,6 +14,7 @@ export interface ProviderRouteDecision {
   scope: AiProfileScope;
   role: AiProviderProfileRole;
   preflight: CapabilityPreflight;
+  probe?: { purpose: 'capability_text_probe'; operationId: string; profileFingerprint: string; intentHash: string };
 }
 export interface ProviderRouterPorts {
   profiles: ProviderProfileRepository;

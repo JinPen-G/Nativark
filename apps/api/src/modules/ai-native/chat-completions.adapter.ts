@@ -7,6 +7,7 @@ import Ajv, { type ValidateFunction } from 'ajv';
 import { AI_CONTRACT_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import { AI_NATIVE_COMPONENT_SCHEMAS } from '../../contracts/ai-native-schemas';
 import type { ModelResponsePolicy, ProtocolToolCall } from './model-gateway.ports';
+import { modelEgressEvidence } from './model-egress.transport';
 
 export interface ChatProtocolOptions {
   /** Supplied by trusted server registration; only the existing C02 input is supported. */
@@ -107,6 +108,7 @@ const responseSchema = z.object({
 /** OpenAI-compatible Chat Completions protocol. No fixed supplier or model. */
 export class ChatCompletionsAdapter implements ModelAdapter {
   readonly provider = "openai_chat_completions";
+  get evidenceMode(): 'live' | 'mock' { return modelEgressEvidence(this.transport); }
   private readonly policy: ChatProtocolPolicy;
   private readonly mediaInput: readonly ('image' | 'audio')[];
   get features(): readonly ModelFeature[] { return [...this.mediaInput, ...(typeof this.transport.postStream === "function" ? ['streaming' as const] : []), ...(this.policy.tools ? ['tools' as const] : []), ...(this.policy.structured ? ['structuredOutput' as const] : [])]; }

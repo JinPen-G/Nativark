@@ -5,6 +5,20 @@ import type { ModelJsonTransport } from "./chat-completions.adapter";
 import { ModelGatewayError } from "./model-gateway.ports";
 import { modelEgressUrl, publicModelAddress } from "./model-egress-policy";
 import { MODEL_HEADER_BYTES, MODEL_REQUEST_BYTES, modelByteLimit, ModelResponseBuffer, ModelResponseStreamValidator } from "./model-response-limits";
+const nativeTransports = new WeakSet<object>();
+export function modelEgressEvidence(transport: ModelJsonTransport): 'live' | 'mock' {
+  return nativeTransports.has(transport) ? 'live' : 'mock';
+}
+export function createNativeModelEgressTransport() {
+  const transport = new ModelEgressTransport({
+    resolve: hostname => import('node:dns/promises').then(dns => dns.lookup(hostname, { all: true, verbatim: true })),
+    request: (options, response) => require('node:https').request(options, response),
+    now: Date.now, setTimer: (callback, delay) => setTimeout(callback, delay),
+    clearTimer: timer => clearTimeout(timer as ReturnType<typeof setTimeout>)
+  });
+  nativeTransports.add(transport);
+  return Object.freeze(transport);
+}
 export interface ModelEgressDependencies {
   resolve(hostname: string): Promise<Array<{ address: string; family: number }>>;
   request(options: RequestOptions, response: (response: IncomingMessage) => void): ClientRequest;
