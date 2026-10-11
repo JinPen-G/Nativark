@@ -7,8 +7,6 @@ import { composeAuthorizedPersistentTaskInputRunner } from './runner/authorized-
 import { PrismaTaskPlanInputSource } from './runner/prisma-task-plan-input.source';
 import { PrismaTaskRunEvidenceRepository } from './runner/prisma-task-run-evidence.repository';
 import { PrismaTaskExecutionScopeAuthority } from './runner/prisma-task-execution-scope.authority';
-import { PrismaTaskGatewayInvocationPreparation } from './runner/prisma-task-gateway-invocation.preparation';
-import { PrismaGatewayInvocationBindings } from './budget/prisma-gateway-invocation-bindings';
 import { PrismaTextProbeStepEvidenceAuthority } from './prisma-text-probe-step-evidence.authority';
 import { textProbeCommandSchema, TEXT_CAPABILITY_PROBE_TOOL, type TextProbeCommand } from './text-capability-probe';
 import type { TextCapabilityProbeApplication } from './text-capability-probe.application';
@@ -22,6 +20,7 @@ import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from './runner/ai-task-ru
 import type { ApiAuthGuard } from '../../common/api-auth.guard';
 import { composeAuthorizedTextProbeTaskProducer } from './prisma-text-probe-original-request.repository';
 import { composeTaskActionPolicyManagement } from './task-action-policy-management.composition';
+import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -35,7 +34,7 @@ export type TextCapabilityProbeTaskComposition = Omit<PersistedTaskAuthorization
   db: PrismaClient;
   host: AiTaskApplicationHost;
   task: TextProbeTask;
-  probe: Pick<TextCapabilityProbeApplication, 'prepare' | 'runHeldCurrent'>;
+  probe: Pick<TextCapabilityProbeApplication, 'prepare' | 'runHeldCurrent' | 'prepareHeldInvocationCurrent'>;
   financialEvidence: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>;
   clock?: () => Date;
   monotonic?: () => number;
@@ -68,7 +67,6 @@ function createRoot(input: TextCapabilityProbeTaskComposition, task: TextProbeTa
   const source = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, clock, TEXT_CAPABILITY_PROBE_TOOL);
   const scopes = new PrismaTaskExecutionScopeAuthority(authorization.tasks, input.db);
   const plans = new PrismaTaskRunEvidenceRepository(input.db, scopes, source, clock);
-  const bindings = new PrismaGatewayInvocationBindings(input.db, authorization.scopes, clock);
   const gatewayInput = {
     async resolve(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease) {
       const access = await authorization.tasks.resolveAccess(lease.taskId, 'transition_task');
@@ -84,10 +82,25 @@ function createRoot(input: TextCapabilityProbeTaskComposition, task: TextProbeTa
         textProbeCommandSchema.parse(stored.input));
       return { stepId: row.id, mode: 'invoke' as const, lease: { runId: lease.runId, holderId: lease.holderId, fencingToken: lease.fencingToken },
         intent: prepared.intent, configuration: prepared.configuration, priceVersion: task.priceVersion,
-        expiresAt: new Date(stored.expiresAt) };
+        expiresAt: new Date(Math.min(Date.parse(stored.expiresAt), Date.parse(lease.expiresAt))) };
     }
   };
-  const invocations = new PrismaTaskGatewayInvocationPreparation(bindings, gatewayInput);
+  // One planned model step, one first-registration handoff. Never a module
+  // singleton or recoverable dispatch permission. Recovery uses stored facts.
+  let pending: { stepId: string; leaseHash: string;
+    prepared: Awaited<ReturnType<TextCapabilityProbeApplication['prepareHeldInvocationCurrent']>> } | undefined;
+  const invocations = { async prepare(step: AiTaskRunnerStepRef, lease: AiTaskRunnerLease) {
+    if (pending || typeof input.probe.prepareHeldInvocationCurrent !== 'function') throw unavailable();
+    const registration = await gatewayInput.resolve(step, lease);
+    if (registration.stepId !== step.registered.stepId || registration.lease.runId !== lease.runId
+      || registration.lease.holderId !== lease.holderId || registration.lease.fencingToken !== lease.fencingToken
+      || registration.expiresAt.getTime() > Date.parse(lease.expiresAt)) throw denied();
+    const prepared = await input.probe.prepareHeldInvocationCurrent(structuredClone(task.command), {
+      stepId: registration.stepId, lease: registration.lease, priceVersion: registration.priceVersion, expiresAt: registration.expiresAt,
+    });
+    pending = { stepId: registration.stepId, leaseHash: requestFingerprint(lease), prepared };
+    return { invocationId: prepared.invocationId };
+  } };
   const transition = new PrismaTextProbeStepEvidenceAuthority(input.db, authorization.authority, source,
     input.financialEvidence, task.priceVersion, clock);
   const commands: AiTaskRunnerRepositoryCommandFactory = {
@@ -110,8 +123,11 @@ function createRoot(input: TextCapabilityProbeTaskComposition, task: TextProbeTa
       if (code !== TEXT_CAPABILITY_PROBE_TOOL || version !== AI_TOOL_DRAFT_VERSION) return null;
       return { operation: 'external_unknown' as const, async execute(binding, signal) {
         const stored = await source.readForExecution(binding);
-        const result = await input.probe.runHeldCurrent(textProbeCommandSchema.parse(stored.input),
-          { stepId: binding.stepId, lease: binding.lease, priceVersion: task.priceVersion, expiresAt: new Date(stored.expiresAt) }, signal);
+        const owned = pending;
+        if (!owned || owned.stepId !== binding.stepId || owned.leaseHash !== requestFingerprint(binding.lease)
+          || requestFingerprint(textProbeCommandSchema.parse(stored.input)) !== requestFingerprint(task.command)) throw denied();
+        pending = undefined;
+        const result = await owned.prepared.execute(signal);
         return { kind: 'succeeded' as const, payload: JSON.parse(JSON.stringify(result)) };
       } };
     }
@@ -137,7 +153,7 @@ function requireAuthorization(input: TextCapabilityProbeTaskComposition, clock: 
  * This is not an HTTP registration or permission to bypass task action policy. */
 export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProbeTaskComposition, 'task' | 'probe'> & {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
-  probe: Pick<TextCapabilityProbeApplication, 'prepare' | 'prepareCurrent' | 'runHeldCurrent' | 'reconcileCurrent'>;
+  probe: Pick<TextCapabilityProbeApplication, 'prepare' | 'prepareCurrent' | 'runHeldCurrent' | 'reconcileCurrent' | 'prepareHeldInvocationCurrent'>;
   sceneVersion: string; priceVersion: string;
 }) {
   const producer = composeAuthorizedTextProbeTaskProducer(input.db, {

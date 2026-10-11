@@ -25,7 +25,8 @@ import type { PersistedBudgetEvidenceSource } from './budget/budget-dependency-a
 
 export type TextCapabilityProbeDependencies = Omit<Parameters<typeof createPersistedGatewayBudget>[0], 'scopes' | 'db'> & {
   db: Parameters<typeof createPersistedGatewayBudget>[0]['db'] & TextProbeReceiptDb
-    & ConstructorParameters<typeof PrismaProviderCapabilityEvidenceRepository>[0];
+    & ConstructorParameters<typeof PrismaProviderCapabilityEvidenceRepository>[0]
+    & Pick<import('@prisma/client').PrismaClient, 'aiTaskExecutionCharge'>;
   scopes: Pick<AiScopeRepository, 'resolveCurrent' | 'resolveRoutingScopes'>;
   management: Pick<TenantModelConfigurationAuthority, 'authorize'>;
   configuration: Pick<TenantModelConfigService, 'selectionForInvocation' | 'profile' | 'credential'>;
@@ -114,6 +115,27 @@ export class TextCapabilityProbeApplication {
     const snapshot = textProbeCommandSchema.parse(structuredClone(command)), held = structuredClone(execution);
     return this.forCurrentRequest(context => this.run(context, snapshot, held, signal));
   }
+  /** First registration ownership stays in this request-local closure, never a
+   * serialized task field/dispatch permit. Lost registration replies or worker
+   * restarts cannot reconstruct it by reading the invocation. Gateway admission
+   * and financial/task resource gates still own actual dispatch authorization. */
+  async prepareHeldInvocationCurrent(commandValue: TextProbeCommand,
+    executionValue: Pick<RegisterGatewayInvocation, 'stepId' | 'lease' | 'priceVersion' | 'expiresAt'>) {
+    const command = textProbeCommandSchema.parse(structuredClone(commandValue)), execution = structuredClone(executionValue);
+    const owner = await this.currentRequest();
+    const prepared = await this.prepare(owner.context, command);
+    const registered = structuredClone(await this.accounting.bindings.register({ ...execution,
+      intent: prepared.intent, configuration: prepared.configuration, mode: 'invoke' }));
+    if (registered.replayed) throw new ModelGatewayError('ACCOUNTING_PENDING');
+    if ((await this.currentRequest()).binding !== owner.binding) throw new ModelGatewayError('FORBIDDEN');
+    let used = false;
+    return Object.freeze({ invocationId: registered.id, execute: async (signal?: AbortSignal) => {
+      if (used) throw new ModelGatewayError('ACCOUNTING_PENDING');
+      used = true; // consume before the first await, including failed execution
+      if ((await this.currentRequest()).binding !== owner.binding) throw new ModelGatewayError('FORBIDDEN');
+      return this.forCurrentRequest(context => this.#runRegistered(context, command, execution, signal, registered.id));
+    } });
+  }
   async prepare(value: GatewayContext, commandValue: TextProbeCommand) {
     const context = probeContextSchema.parse(structuredClone(value)), command = textProbeCommandSchema.parse(structuredClone(commandValue));
     const authority = this.authority(context, command), resolution = await authority.resolve(context, ['text']);
@@ -146,6 +168,11 @@ export class TextCapabilityProbeApplication {
   }
   async run(value: GatewayContext, commandValue: TextProbeCommand,
     execution: Pick<RegisterGatewayInvocation, 'stepId' | 'lease' | 'priceVersion' | 'expiresAt'>, signal?: AbortSignal) {
+    return this.#runRegistered(value, commandValue, execution, signal);
+  }
+  async #runRegistered(value: GatewayContext, commandValue: TextProbeCommand,
+    execution: Pick<RegisterGatewayInvocation, 'stepId' | 'lease' | 'priceVersion' | 'expiresAt'>,
+    signal?: AbortSignal, ownedInvocationId?: string) {
     const context = probeContextSchema.parse(structuredClone(value)), command = textProbeCommandSchema.parse(structuredClone(commandValue));
     execution = structuredClone(execution);
     if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
@@ -163,10 +190,19 @@ export class TextCapabilityProbeApplication {
     this.requirePlatformConnection(profile.serviceMode);
     // Validate and persist the real task/step/lease association before reserving
     // the probe operation key. A rejected execution must not poison that key.
-    const registered = await this.accounting.bindings.register({ ...execution, intent: prepared.intent, configuration, mode: 'invoke' });
+    const registered = ownedInvocationId ? { id: ownedInvocationId, replayed: false }
+      : await this.accounting.bindings.register({ ...execution, intent: prepared.intent, configuration, mode: 'invoke' });
     // Registration may have committed before its response (or the probe receipt)
     // was lost. Re-reading that association cannot reacquire dispatch permission.
     if (registered.replayed) return this.collect(context, command);
+    // Registration alone is not a runner resource admission. Require the
+    // already reserved original model-call charge, under this exact holder.
+    const charges = await this.input.db.aiTaskExecutionCharge.findMany({ where: {
+      scopeId: descriptor.scopeId, runId: execution.lease.runId, stepId: execution.stepId,
+      gatewayInvocationId: registered.id, resource: 'CALLS', status: 'RESERVED', amount: 1n,
+      leaseOwnerId: execution.lease.holderId, fencingToken: execution.lease.fencingToken,
+    }, take: 2 });
+    if (charges.length !== 1) throw new ModelGatewayError('BUDGET_UNAVAILABLE');
     const started = await this.receipts.begin(descriptor);
     if (!started.created) return this.collect(context, command);
     await authority.assertCurrent(context, resolution);

@@ -92,9 +92,24 @@ test('versioned text challenge and unregistered probe cannot grant dispatch or l
   assert.equal(sent, 0);
 });
 
+// Construct the real application (including private one-shot execution state).
+// Unreplaced external/database ports fail closed, rather than fake success.
+function probeApplicationWithBoundaryPorts() {
+  const { TextCapabilityProbeApplication } = require('../apps/api/src/modules/ai-native/text-capability-probe.application');
+  const unavailable = async () => { throw Error('unexpected offline boundary'); };
+  const delegate = { findFirst: unavailable, findUnique: unavailable, findMany: unavailable,
+    create: unavailable, updateMany: unavailable, upsert: unavailable };
+  const db = { $transaction: unavailable, $queryRaw: unavailable, aiScope: delegate, aiProviderProfile: delegate,
+    aiProviderCapabilityEvidence: delegate, aiTaskExecutionCharge: delegate };
+  return new TextCapabilityProbeApplication({ db, scopes: { resolveCurrent: unavailable, resolveRoutingScopes: unavailable },
+    management: { authorize: unavailable }, configuration: { selectionForInvocation: unavailable, profile: unavailable, credential: unavailable },
+    authorization: { resolveContext: unavailable, authorize: unavailable }, subscriptions: { readCategoryCommercialContext: unavailable },
+    pricing: { quote: unavailable, quantity: unavailable }, audit: { append: unavailable }, protocol: { post: unavailable } });
+}
+
 test('current probe host derives identity and rejects changed authority after waiting', async () => {
   const { TextCapabilityProbeApplication } = require('../apps/api/src/modules/ai-native/text-capability-probe.application');
-  const app = Object.create(TextCapabilityProbeApplication.prototype);
+  const app = probeApplicationWithBoundaryPorts();
   let actor = 'actor-a', change = false;
   app.input = { scopes: { resolveCurrent: async () => ({ scope: { id: 'scope', kind: 'WORKSPACE', tenantId: 'tenant-a', workspaceId: 'space-a' },
     context: { actor: { kind: 'user', userId: actor }, audience: 'operator', scope: { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'space-a' } } }) } };
@@ -140,7 +155,7 @@ test('probe validates execution before occupying operation key and never redispa
   // no provider or database is contacted and no live provenance is asserted.
   for (const scenario of ['invalid', 'original_registration', 'original_receipt']) {
     let writes = 0, registrations = 0;
-    const app = Object.create(TextCapabilityProbeApplication.prototype);
+    const app = probeApplicationWithBoundaryPorts();
     app.authority = () => ({ resolve: async () => ({ consumerScope: { id: 'scope' }, route: { profile } }) });
     app.receipts = { find: async () => scenario === 'original_receipt' ? { id: 'receipt' } : null,
       begin: async () => { writes++; assert.fail('must not create a receipt on rejected/replayed execution'); } };
@@ -160,7 +175,7 @@ test('platform probe requires its explicit vault resolver before preparation or 
   const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
   const selected = { ...profile, scopeKind: 'PLATFORM', scopeId: 'platform-a', serviceMode: 'platform_managed' };
   const command = { operationId: 'platform-operation', profileKey: selected.profileKey, profileFingerprint: capabilityProfileFingerprint(selected) };
-  const app = Object.create(TextCapabilityProbeApplication.prototype);
+  const app = probeApplicationWithBoundaryPorts();
   app.input = { configuration: { selectionForInvocation: async () => { throw Error('BYOK must not be read'); },
     profile: async () => { throw Error('BYOK must not be read'); }, credential: async () => { throw Error('BYOK must not be read'); } } };
   app.authority = () => ({ resolve: async () => ({ consumerScope: { id: 'workspace-scope' }, route: { profile: selected } }) });
@@ -175,6 +190,33 @@ test('platform probe requires its explicit vault resolver before preparation or 
   assert.equal((await app.run(context, command, { stepId: 'step', lease: { runId: 'run' }, priceVersion: 'price', expiresAt: new Date() })).reason, 'original_receipt_pending');
   app.input.platformConnection = { resolve: async () => { throw Error('preparation must not decrypt credentials'); } };
   assert.equal((await app.prepare(context, command)).configuration.serviceMode, 'platform_managed');
+});
+
+test('runner-owned probe registration reaches the original receipt once without a second registration', async () => {
+  const { TextCapabilityProbeApplication } = require('../apps/api/src/modules/ai-native/text-capability-probe.application');
+  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+  const app = probeApplicationWithBoundaryPorts();
+  app.input = { db: { aiTaskExecutionCharge: { findMany: async ({ where }) => {
+    assert.equal(where.gatewayInvocationId, 'invocation'); assert.equal(where.resource, 'CALLS');
+    assert.equal(where.leaseOwnerId, 'holder'); assert.equal(where.fencingToken, '1'); return [{ id: 'original-call-charge' }];
+  } } }, scopes: { resolveCurrent: async () => ({ scope: { id: 'workspace-scope', kind: 'WORKSPACE',
+    tenantId: context.tenantId, workspaceId: context.workspaceId }, context: { actor: { kind: 'user', userId: context.actorId },
+    audience: 'operator', scope: { kind: 'workspace', tenantId: context.tenantId, workspaceId: context.workspaceId } } }) } };
+  app.authority = () => ({ resolve: async () => ({ consumerScope: { id: 'workspace-scope' }, route: { profile } }) });
+  let registrations = 0, starts = 0;
+  app.accounting = { bindings: { register: async () => ({ id: 'invocation', replayed: ++registrations > 1 }) } };
+  app.receipts = { find: async () => null, begin: async () => { starts++; throw Object.assign(Error('stop before dispatch'), { code: 'OFFLINE_BOUNDARY' }); } };
+  const command = { operationId: 'owned-probe', profileKey: profile.profileKey, profileFingerprint: capabilityProfileFingerprint(profile) };
+  const held = { stepId: 'step', lease: { runId: 'run', holderId: 'holder', fencingToken: '1' },
+    priceVersion: 'price', expiresAt: new Date('2026-10-12T00:00:00Z') };
+  const prepared = await app.prepareHeldInvocationCurrent(command, held);
+  assert.equal(prepared.invocationId, 'invocation');
+  assert.equal(registrations, 1); assert.equal(starts, 0);
+  await assert.rejects(prepared.execute(), { code: 'OFFLINE_BOUNDARY' });
+  assert.equal(starts, 1); assert.equal(registrations, 1);
+  await assert.rejects(prepared.execute(), { code: 'ACCOUNTING_PENDING' });
+  await assert.rejects(app.prepareHeldInvocationCurrent(command, held), { code: 'ACCOUNTING_PENDING' });
+  assert.equal(starts, 1); assert.equal(registrations, 2);
 });
 
 test('persisted text verifier consumes original settlement and rejects mock, missing or changed receipts', async () => {
