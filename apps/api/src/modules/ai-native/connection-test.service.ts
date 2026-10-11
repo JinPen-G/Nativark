@@ -41,7 +41,7 @@ export class AiConnectionTestService {
       try {
         // This port has no media/embedding/reasoning challenge or typed result.
         // Do not spend a plain text invocation as if it exercised these modes.
-        if (['vision', 'audio', 'embedding', 'reasoning'].includes(capability)) throw new ModelGatewayError('CONFIG_INVALID');
+        if (['streaming', 'vision', 'audio', 'embedding', 'reasoning'].includes(capability)) throw new ModelGatewayError('CONFIG_INVALID');
         const result = await this.gateway.invoke(structuredClone(boundContext), { callId: `connection-test:${boundProfile.id}:${boundProfile.configRevision}:${capability}`, model: boundProfile.model, messages: [{ role: 'user', content: 'connection test' }], maxOutputTokens: 8, features: featureFor(capability) });
         if (!result || typeof result.text !== 'string') throw new ModelGatewayError('INVALID_RESPONSE');
         // A plain text response cannot prove a typed capability. Keep the
@@ -51,7 +51,7 @@ export class AiConnectionTestService {
           throw new ModelGatewayError('INVALID_RESPONSE');
         }
         if (capability === 'structured_output'
-          && !Object.prototype.hasOwnProperty.call(result, 'structuredOutput')) {
+          && (!Object.prototype.hasOwnProperty.call(result, 'structuredOutput') || result.structuredOutput === undefined)) {
           throw new ModelGatewayError('INVALID_RESPONSE');
         }
       } catch (error) {

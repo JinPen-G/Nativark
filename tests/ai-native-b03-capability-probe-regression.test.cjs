@@ -16,7 +16,8 @@ test('probe records one bounded evidence row per capability and does not send cr
   assert.deepEqual(result.map(row => row.capability), ['text', 'tools']);
   assert.equal(records.length, 2);
   assert.equal(records.every(row => row.source === 'connection_test'), true);
-  assert.equal(records.every(row => row.details?.result === 'synthetic_probe_only'), true);
+  assert.equal(records[0].details?.result, 'synthetic_probe_only');
+  assert.equal(records[1].details?.errorCode, 'INVALID_RESPONSE');
   assert.equal(JSON.stringify(requests).includes('vault:synthetic'), false);
 });
 
@@ -24,7 +25,7 @@ test('unsupported and transport failure remain distinguishable and never become 
   const records = [];
   const service = new AiConnectionTestService({ invoke: async (_context, request) => request.features?.[0] === 'tools' ? Promise.reject(new ModelGatewayError('CAPABILITY_UNSUPPORTED')) : Promise.reject(new Error('offline transport')) }, { record: async input => { records.push(input); return input; } });
   const result = await service.run(context, profile, ['tools', 'streaming']);
-  assert.deepEqual(result.map(row => [row.capability, row.status]), [['tools', 'unsupported'], ['streaming', 'unverified']]);
+  assert.deepEqual(result.map(row => [row.capability, row.status, row.errorCode]), [['tools', 'unverified', 'CAPABILITY_UNSUPPORTED'], ['streaming', 'unverified', 'CONFIG_INVALID']]);
   assert.equal(records.some(row => row.status === 'supported'), false);
 });
 
