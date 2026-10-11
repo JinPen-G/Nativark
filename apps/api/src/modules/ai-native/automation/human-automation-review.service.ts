@@ -185,7 +185,9 @@ export class HumanAutomationReviewService {
         resourceRevision: event.resourceRevision }, currentSource: source,
         originalResource: event.notificationId
           ? { kind: 'notification' as const, id: event.notificationId, orderId: source.orderId }
-          : { kind: 'refund' as const, id: event.refundId!, orderId: source.orderId, paymentIntentId: source.paymentIntentId },
+          : event.inspectionId
+            ? { kind: 'inspection' as const, id: event.inspectionId, exceptionId: event.exceptionId, orderId: source.orderId }
+            : { kind: 'refund' as const, id: event.refundId!, orderId: source.orderId, paymentIntentId: source.paymentIntentId },
         inputs: { state: items.length ? 'observed' as const : 'not_observed' as const, items, hasMore,
           nextAfter: hasMore ? items[items.length - 1].inputRef : null, coverage: 'bounded_authorized_event_window' as const },
         nextAction: 'human_business_review' as const, ...readSemantics };

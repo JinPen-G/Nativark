@@ -37,6 +37,7 @@ import {
   type RentalWorkOrderStatus
 } from "@rental-os/shared";
 import { PrismaService } from "../database/prisma.service";
+import { PrismaBusinessFailureOutbox } from '../ai-native/business-events/prisma-business-failure-outbox';
 import { resolveScopeWorkspaceId } from "./workspace-scope";
 import { validateActiveCategoryWrite, type CategoryWriteBinding } from "./category-active-write";
 import { bufferedRentalPeriod } from "./rental-occupancy";
@@ -2301,7 +2302,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
   }
 
   async insertInspection(record: RentalInspectionRecord, tx?: RentalFactTx): Promise<void> {
-    const workspaceId = await resolveScopeWorkspaceId(tx ?? this.prisma, record.tenantId);
+    if (!tx) return this.prisma.$transaction(client => this.insertInspection(record, client));
+    const workspaceId = await resolveScopeWorkspaceId(tx, record.tenantId);
     await (tx ?? this.prisma).rentalInspectionRecord.create({
       data: {
         id: record.id,
@@ -2329,6 +2331,7 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
         createdAt: new Date(record.createdAt)
       }
     });
+    await new PrismaBusinessFailureOutbox().inspection(tx, { tenantId: record.tenantId, workspaceId }, record.id);
   }
 
   async correctInspectionUsage(
@@ -2339,7 +2342,8 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
     operator: string,
     tx?: RentalFactTx
   ): Promise<RentalInspectionRecord> {
-    const client = tx ?? this.prisma;
+    if (!tx) return this.prisma.$transaction(client => this.correctInspectionUsage(tenantId, orderId, inspectionId, input, operator, client));
+    const client = tx;
     const workspaceId = await resolveScopeWorkspaceId(client, tenantId);
     const row = await client.rentalInspectionRecord.findFirst({ where: { id: inspectionId, tenantId, workspaceId, orderId } });
     if (!row) throw new NotFoundException("检查记录不存在或不属于当前订单");
@@ -2389,9 +2393,10 @@ export class RentalCoreFactRepository implements RentalCoreFactStore {
       usageCorrections: [...(meta.usageCorrections ?? []), correction]
     };
     const updated = await client.rentalInspectionRecord.update({
-      where: { id: inspectionId },
-      data: { results: results as Prisma.InputJsonValue }
+      where: { id: inspectionId, tenantId, workspaceId, orderId, revision: row.revision },
+      data: { results: results as Prisma.InputJsonValue, revision: { increment: 1 } }
     });
+    await new PrismaBusinessFailureOutbox().inspection(client, { tenantId, workspaceId }, inspectionId);
     return this.toInspectionRecord(updated);
   }
 
