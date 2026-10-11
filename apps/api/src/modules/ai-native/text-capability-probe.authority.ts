@@ -31,17 +31,19 @@ export class TextCapabilityProbeAuthority {
     await d.management.authorize(context, 'manage');
     await d.management.authorize(context, 'invoke');
     const selection = await d.configuration.selectionForInvocation(context);
-    if (selection.mode !== 'tenant_managed') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
-    const resolved = await d.scopes.resolveRoutingScopes('tenant_managed');
+    const resolved = await d.scopes.resolveRoutingScopes(selection.mode);
     const c = resolved.context, scope = resolved.configurationScope;
     if (c.audience !== 'operator' || c.actor.kind !== 'user' || c.actor.userId !== context.actorId
       || c.scope.kind !== 'workspace' || c.scope.tenantId !== context.tenantId || c.scope.workspaceId !== context.workspaceId
       || resolved.consumerScope.kind !== 'WORKSPACE' || resolved.consumerScope.tenantId !== context.tenantId
-      || resolved.consumerScope.workspaceId !== context.workspaceId || scope.kind !== 'TENANT' || scope.tenantId !== context.tenantId) {
+      || resolved.consumerScope.workspaceId !== context.workspaceId
+      || (selection.mode === 'tenant_managed'
+        ? scope.kind !== 'TENANT' || scope.tenantId !== context.tenantId
+        : scope.kind !== 'PLATFORM' || scope.tenantId !== undefined)) {
       throw new ModelGatewayError('FORBIDDEN');
     }
     const profile = await d.profiles.get(scope, this.command.profileKey);
-    if (!profile || !profile.enabled || profile.disabledAt || profile.serviceMode !== 'tenant_managed'
+    if (!profile || !profile.enabled || profile.disabledAt || profile.serviceMode !== selection.mode
       || profile.scopeId !== scope.id || profile.scopeKind !== scope.kind || profile.configRevision !== selection.revision
       || !profile.allowedCapabilities.includes('text') || capabilityProfileFingerprint(profile) !== this.command.profileFingerprint) {
       throw new ModelGatewayError('CONFIG_INVALID');

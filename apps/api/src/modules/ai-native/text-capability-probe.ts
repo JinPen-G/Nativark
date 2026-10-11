@@ -45,12 +45,15 @@ export function textProbeIntent(operationId: string, scopeId: string): { intent:
   return { intent, expected, intentHash: prepared.intentHash, challengeHash: requestFingerprint(intent.messages) };
 }
 export function textProbeConfiguration(profile: AiProviderProfileRecord, tenantId: string): AiGatewayConfigReferenceDraft {
-  return { configId: profile.id, configRevision: profile.configRevision, credentialRef: profile.credentialRef,
-    protocol: profile.protocol, provider: profile.provider, model: profile.model, tenantId,
-    serviceMode: 'tenant_managed', configurationScope: { kind: 'tenant', tenantId } };
+  const base = { configId: profile.id, configRevision: profile.configRevision, credentialRef: profile.credentialRef,
+    protocol: profile.protocol, provider: profile.provider, model: profile.model, tenantId };
+  return profile.serviceMode === 'platform_managed'
+    ? { ...base, serviceMode: 'platform_managed', configurationScope: { kind: 'platform' } }
+    : { ...base, serviceMode: 'tenant_managed', configurationScope: { kind: 'tenant', tenantId } };
 }
 export function matchesProbeProfile(descriptor: TextProbeDescriptor, profile: AiProviderProfileRecord) {
-  return profile.serviceMode === 'tenant_managed' && profile.scopeKind === 'TENANT'
+  const expectedScopeKind = profile.serviceMode === 'platform_managed' ? 'PLATFORM' : 'TENANT';
+  return profile.scopeKind === expectedScopeKind
     && profile.enabled && !profile.disabledAt && profile.allowedCapabilities.includes('text')
     && descriptor.profileId === profile.id && descriptor.profileFingerprint === capabilityProfileFingerprint(profile)
     && descriptor.command.profileFingerprint === descriptor.profileFingerprint

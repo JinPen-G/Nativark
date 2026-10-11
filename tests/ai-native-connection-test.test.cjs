@@ -106,6 +106,29 @@ test('current probe host derives identity and rejects changed authority after wa
   await assert.rejects(app.prepareCurrent(command), e => e.code === 'FORBIDDEN');
 });
 
+test('text capability probe resolves the platform-managed profile without tenant fallback', async () => {
+  const { TextCapabilityProbeAuthority } = require('../apps/api/src/modules/ai-native/text-capability-probe.authority');
+  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+  const platformProfile = { ...profile, id: 'platform-profile', scopeId: 'platform-a', scopeKind: 'PLATFORM',
+    serviceMode: 'platform_managed' };
+  const command = { operationId: 'platform-probe', profileKey: 'default', profileFingerprint: capabilityProfileFingerprint(platformProfile) };
+  const executionContext = { actor: { kind: 'user', userId: context.actorId }, audience: 'operator',
+    scope: { kind: 'workspace', tenantId: context.tenantId, workspaceId: context.workspaceId }, requestId: 'request', authorizedAt: '2026-10-11T12:00:00.000Z' };
+  const authority = new TextCapabilityProbeAuthority({
+    management: { authorize: async () => undefined },
+    configuration: { selectionForInvocation: async () => ({ mode: 'platform_managed', revision: 4 }) },
+    scopes: { resolveRoutingScopes: async mode => { assert.equal(mode, 'platform_managed'); return {
+      context: executionContext, consumerScope: { id: 'workspace-scope', kind: 'WORKSPACE', tenantId: context.tenantId, workspaceId: context.workspaceId },
+      configurationScope: { id: 'platform-a', kind: 'PLATFORM' }
+    }; } },
+    profiles: { get: async (scope, key) => { assert.deepEqual(scope, { id: 'platform-a', kind: 'PLATFORM' }); assert.equal(key, 'default'); return platformProfile; } },
+    bindings: { resolveForReserve: async () => { throw new Error('not reached during resolve'); } }
+  }, context, command);
+  const resolved = await authority.resolve(context, ['text']);
+  assert.equal(resolved.selection.mode, 'platform_managed');
+  assert.equal(resolved.route.profile.serviceMode, 'platform_managed');
+});
+
 test('probe validates execution before occupying operation key and never redispatches original registration', async () => {
   const { TextCapabilityProbeApplication } = require('../apps/api/src/modules/ai-native/text-capability-probe.application');
   const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
