@@ -143,6 +143,74 @@ test('probe task cancellation uses current policy and CAS without calling the mo
   assert.equal(calls, 0);
 });
 
+test('authorized original probe executes through persisted runner and one financial ledger', async () => {
+  const { composeAuthorizedPersistedTextProbeWorkflow } = require('../apps/api/src/modules/ai-native/text-capability-probe.composition');
+  const { PrismaTaskPlanPolicyRepository } = require('../apps/api/src/modules/ai-native/runner/prisma-task-plan-policy.repository');
+  const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
+  const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
+  const { SecretBox } = require('../apps/api/src/common/secret-box');
+  const { tenantModelCredentialReference } = require('../apps/api/src/modules/ai-native/tenant-model-config.service');
+  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+  const { TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE } = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const h = await authorizedRunnerHarness({ aiProviderProfile: [], aiPlatformModelConnection: [], aiTenantModelConfiguration: [],
+    systemParameterSet: [], aiTaskOriginalRequest: [], aiTaskPlanPolicy: [], aiTaskActionInput: [], aiProviderCapabilityEvidence: [],
+    aiBudgetReservation: [], aiBudgetAllocation: [], aiBudgetLedgerEntry: [], aiTextCapabilityReceipt: [] });
+  h.control.now = new Date();
+  h.identity.user.permissions.push('system:params:manage');
+  h.db.aiPlatformModelConnection.update = async () => assert.fail('no platform config mutation');
+  const secrets = new SecretBox({ get: key => key === 'INTEGRATION_ENCRYPTION_KEY' ? 'offline-probe-encryption-key' : undefined });
+  const settings = { enabled: true, protocol: 'openai_chat_completions', baseUrl: 'https://offline.example/v1',
+    model: 'synthetic-model', timeoutMs: 30000, maxConcurrent: 1, maxOutputTokens: 32 };
+  h.state.aiTenantModelConfiguration.push({ tenantId: 'tenant-a', revision: 1, mode: 'tenant_managed', settings,
+    credentialsEncrypted: secrets.encrypt({ apiKey: 'offline-probe-secret', tenantId: 'tenant-a',
+      protocol: settings.protocol, baseUrl: settings.baseUrl, model: settings.model }) });
+  const profile = { id: 'tenant-profile', scopeId: 'scope-tenant', scopeKind: 'TENANT', profileKey: 'default', role: 'DEFAULT',
+    serviceMode: 'tenant_managed', protocol: settings.protocol, provider: settings.protocol, model: settings.model,
+    credentialRef: tenantModelCredentialReference('tenant-a', 1), configRevision: 1, enabled: true, disabledAt: null, allowedCapabilities: ['text'] };
+  h.state.aiProviderProfile.push(profile);
+  for (const policy of h.state.aiBudgetPolicy) {
+    policy.sceneCode = TEXT_PROBE_SCENE; policy.unitKind = 'calls'; policy.settingsJson.sceneCode = TEXT_PROBE_SCENE;
+    policy.settingsJson.allowedScenes = [TEXT_PROBE_SCENE];
+  }
+  const guard = new ApiAuthGuard(h.authorization.auth);
+  const clock = () => new Date(h.control.now);
+  const policy = new PrismaTaskPlanPolicyRepository(h.db, { ...h.authorization, guard,
+    scene: { code: TEXT_PROBE_SCENE, version: '1' }, tool: TEXT_CAPABILITY_PROBE_TOOL }, clock);
+  await policy.put({ expectedRevision: null, enabled: true, limits: h.plan.limits, expiresAt: '2027-01-01T00:00:00Z' });
+  let sends = 0;
+  const root = composeAuthorizedPersistedTextProbeWorkflow({ ...h.authorization, db: h.db, guard, secrets,
+    platformProfileId: 'platform-default', pricing: { mode: 'persisted_calls', priceVersion: 'price' },
+    audit: { append: async () => {} }, protocol: { post: async () => { sends++;
+      return { status: 200, body: JSON.stringify({ choices: [{ message: { content: 'offline reply' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 2 } }) }; } },
+    host: { holderId: 'probe-host', leaseMs: 100000 }, sceneVersion: '1', priceVersion: 'price', clock, monotonic: () => h.control.tick });
+  const original = await root.workflow.publishOriginal({ requestKey: 'probe-complete', command: {
+    operationId: 'probe-complete', profileKey: profile.profileKey, profileFingerprint: capabilityProfileFingerprint(profile) } });
+  const key = { creationKey: 'probe-task-complete', inputRef: original.inputRef };
+  const created = await root.workflow.createTask(key);
+  for (const operation of ['read_metadata', 'read_events', 'claim_run', 'claim_recovery_run', 'release_run', 'transition_task', 'read_step_terminal', 'request_input']) {
+    await root.workflow.taskPolicies.put({ taskId: created.taskId, operation, requiredPermissions: ['rental-os:order:view'],
+      expiresAt: new Date('2027-01-01T00:00:00Z') }, null);
+  }
+  const result = await root.workflow.startOriginal(key);
+  assert.equal(result.kind, 'run_outcome'); assert.equal(result.outcome.status, 'succeeded', JSON.stringify({ sends,
+    steps: h.state.aiStep.map(row => ({ status: row.status, errorCode: row.errorCode })),
+    artifacts: h.state.aiTaskResultArtifact.map(row => ({ outcome: row.outcome, errorCode: row.errorCode,
+      status: row.payload?.status, error: row.payload?.error?.code })),
+    reservations: h.state.aiBudgetReservation.map(row => ({ status: row.status, dispatchState: row.dispatchState })),
+    admissions: h.state.aiInvocationAdmission.map(row => ({ status: row.status })),
+    trace: h.trace?.slice(-15) }));
+  assert.equal(sends, 1); assert.equal(h.state.aiGatewayInvocation.length, 1);
+  assert.equal(h.state.aiBudgetReservation.length, 1); assert.equal(h.state.aiBudgetReservation[0].status, 'settled');
+  assert.equal(h.state.aiBudgetLedgerEntry.filter(row => row.kind === 'settle').length, 1);
+  assert.equal(h.state.aiTaskResultArtifact.length, 1); assert.equal(h.state.aiTaskResultArtifact[0].payload.status, 'completed');
+  assert.equal(h.state.aiStep[0].status, 'SUCCEEDED');
+  const receipt = await root.workflow.readCapabilityReceipt(key);
+  assert.equal(receipt.status, 'unverified'); // synthetic IO never certifies a real provider
+  await assert.rejects(() => root.workflow.startOriginal(key), error => error.code === 'AI_ACCESS_DENIED');
+  assert.equal(sends, 1); // terminal task cannot reacquire claim_run permission
+});
+
 test('authorized probe root is inert, binds its own financial evidence and refuses unconfigured original requests', async () => {
   const { composeAuthorizedPersistedTextProbeWorkflow } = require('../apps/api/src/modules/ai-native/text-capability-probe.composition');
   const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
