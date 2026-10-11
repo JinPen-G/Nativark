@@ -9,7 +9,10 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { PrismaClientSceneMaterialRepository, AiClientMaterialError, type AiClientMaterialDb,
   type AiClientMaterialScope, type AiClientSceneMaterial } from './prisma-client-scene-material.repository';
-import { AiClientTaskAuthority, clientTaskSceneSchema, type AiClientTaskDependencies } from './client-task.authority';
+import { AiClientPolicyAuthority, AiClientTaskAuthority, clientTaskSceneSchema, type AiClientTaskDependencies } from './client-task.authority';
+import { AiTaskRepositoryError } from '../ai-task.repository';
+import { AI_CLIENT_HOST_CAPABILITIES_VERSION, aiClientHostCapabilitiesRequestSchema, aiClientHostCapabilitiesSchema,
+  type AiClientHostCapabilities } from '../../../../../../packages/shared/src/ai-client-entry-draft-schemas';
 import { AiClientEntryError, assertEntryAction, clientEntrySurface, entryActionSchema, materialEntryAction, parseEntry } from './client-entry-action';
 import { composeClientMaterialTasks } from './client-task.composition';
 import { AiClientTaskUnknownError, clientTaskCommandSchema } from './prisma-client-task-input.repository';
@@ -287,6 +290,50 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     }
   };
   return Object.freeze({
+    async readHostCapabilities(request: AiClientApplicationRequest, value: unknown): Promise<AiClientHostCapabilities> {
+      parseEntry(aiClientHostCapabilitiesRequestSchema, structuredClone(value));
+      const surface = requireEntry(), observedAt = clock();
+      if (!taskDependencies || !server.entry) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'entry_disabled');
+      const releaseRevision = server.entry.releaseRevision;
+      const authority = new AiClientPolicyAuthority(taskDependencies, taskDependencies, randomUUID(), clock);
+      return withBinding(request, true, 'order', async bound => {
+        if (!bound.identity) throw new AiClientEntryError('AI_ACCESS_DENIED', 'client_required');
+        const identity = bound.identity, subject = { ...scopeOf(bound), identity };
+        const readGrant = async () => {
+          try { return await authority.authorize(subject, 'capabilities'); }
+          catch (error) {
+            const code = error instanceof AiTaskRepositoryError && error.code === 'AI_ACCESS_DENIED'
+              ? 'AI_ACCESS_DENIED' : 'AI_RESOURCE_UNAVAILABLE';
+            throw new AiClientEntryError(code, 'host_policy_unavailable');
+          }
+        };
+        const grant = await readGrant();
+        await bound.assertCurrent();
+        const latest = await readGrant();
+        if (grant.policyHash !== latest.policyHash || latest.policy.expiresAt <= clock()) {
+          throw new AiClientEntryError('AI_ACCESS_DENIED', 'host_policy_changed');
+        }
+        const entryActions: AiClientHostCapabilities['capabilities']['entryActions'] = [];
+        if (latest.policy.allowCreate && typeof dependencies.client.getOrder === 'function') entryActions.push('OPEN_ORDER');
+        const bookingDrafts = latest.policy.allowCreate && identity.customerType === 'personal'
+          && typeof dependencies.client.getQuote === 'function' && typeof dependencies.client.bookingOptions === 'function';
+        if (bookingDrafts) entryActions.push('CREATE_BOOKING_DRAFT', 'OPEN_BOOKING');
+        const result = aiClientHostCapabilitiesSchema.parse({
+          contractVersion: AI_CLIENT_HOST_CAPABILITIES_VERSION, enabled: entryActions.length > 0, audience: 'customer', surface,
+          channel: server.channel, customerId: identity.customerId, customerType: identity.customerType,
+          tenantCode: server.tenantCode, serviceCode: server.serviceCode,
+          scope: { kind: 'workspace', tenantId: subject.tenantId, workspaceId: subject.workspaceId },
+          policy: { revision: latest.policy.revision, allowRead: latest.policy.allowRead, allowCreate: latest.policy.allowCreate },
+          releaseRevision, observedAt: observedAt.toISOString(),
+          expiresAt: new Date(Math.min(observedAt.getTime() + lifetimeMs, latest.policy.expiresAt.getTime())).toISOString(),
+          capabilities: { entryActions, bookingDrafts, savedDeliveryAddresses: bookingDrafts
+            && typeof dependencies.addresses?.list === 'function' && typeof dependencies.addresses.requireOwnAddress === 'function' },
+          authorization: 'observation_only_recheck_each_action'
+        });
+        if (Date.parse(result.expiresAt) <= clock().getTime()) throw new AiClientEntryError('AI_ACCESS_DENIED', 'host_observation_expired');
+        return freezeOriginalInput(result);
+      });
+    },
     createBookingDraft: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, true, (app, command) => app.create(command)),
     readBookingDraft: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, false, (app, command) => app.read(command)),
     chooseBookingDraft: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, true, (app, command) => app.choose(command)),

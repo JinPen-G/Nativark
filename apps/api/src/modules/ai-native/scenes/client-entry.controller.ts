@@ -6,7 +6,7 @@ import type { AiClientApplicationRequest, composeRequestBoundClientApplication }
 
 export const AI_CLIENT_ENTRY_APPLICATION = Symbol('AI_CLIENT_ENTRY_APPLICATION');
 type Application = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
-  'issueAction' | 'createBookingDraft' | 'chooseBookingDraft' | 'readBookingDraft' |
+  'readHostCapabilities' | 'issueAction' | 'createBookingDraft' | 'chooseBookingDraft' | 'readBookingDraft' |
   'handoffBookingDraft' | 'readBookingHandoff' | 'readBookingOperation'>;
 
 @Controller(AI_CLIENT_ENTRY_HTTP_DRAFT.basePath)
@@ -37,6 +37,10 @@ export class AiClientEntryController {
     }
   }
 
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readHostCapabilities)
+  readHostCapabilities(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(() => this.application.readHostCapabilities(request, body));
+  }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.issueAction)
   issueAction(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.issueAction(request, body));

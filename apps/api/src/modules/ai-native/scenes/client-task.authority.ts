@@ -8,7 +8,7 @@ import { PrismaSubscriptionBudgetReader } from '../budget/prisma-subscription-bu
 import { validateBudgetSettings } from '../budget/budget-settings';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { AiTaskRepositoryError } from '../ai-task.repository';
-import type { AiClientMaterialDb, AiClientSceneMaterial } from './prisma-client-scene-material.repository';
+import type { AiClientMaterialDb, AiClientMaterialScope, AiClientSceneMaterial } from './prisma-client-scene-material.repository';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 export const clientTaskSceneSchema = z.object({ sceneCode: id.max(128), sceneVersion: id.max(64) }).strict();
@@ -27,27 +27,30 @@ const policySchema = z.object({ id: z.string().uuid(), tenantId: id, workspaceId
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 
-export class AiClientTaskAuthority {
+type ClientPolicySubject = Pick<AiClientMaterialScope, 'tenantId' | 'workspaceId' | 'channel' | 'principalKind'>
+  & { identity: ClientRequestContext };
+
+export class AiClientPolicyAuthority {
   private readonly entitlements: PrismaSubscriptionBudgetReader;
   constructor(private readonly dependencies: AiClientTaskDependencies, private readonly scene: AiClientTaskScene,
-    private readonly loadMaterial: (materialRef: string) => Promise<AiAuthorizedClientMaterial>,
     private readonly requestId: string, private readonly clock: () => Date) {
     this.entitlements = new PrismaSubscriptionBudgetReader(dependencies.db, dependencies.subscriptions, clock);
   }
-  private async policy(material: AiAuthorizedClientMaterial, operation: 'create' | 'read') {
-    const { row, identity } = material;
+  async policy(subject: ClientPolicySubject, operation: 'create' | 'read' | 'capabilities') {
+    const { identity } = subject;
     let rows: unknown[];
     try {
       rows = await this.dependencies.db.$queryRaw<unknown[]>(Prisma.sql`SELECT * FROM ai_client_task_policies
-        WHERE tenantId = ${row.tenantId} AND workspaceId = ${row.workspaceId} AND channel = ${row.channel}
-        AND customerType = ${row.principalKind} AND sceneCode = ${this.scene.sceneCode} AND sceneVersion = ${this.scene.sceneVersion} LIMIT 1`);
+        WHERE tenantId = ${subject.tenantId} AND workspaceId = ${subject.workspaceId} AND channel = ${subject.channel}
+        AND customerType = ${subject.principalKind} AND sceneCode = ${this.scene.sceneCode} AND sceneVersion = ${this.scene.sceneVersion} LIMIT 1`);
     } catch { throw unavailable(); }
     const parsed = policySchema.safeParse(Array.isArray(rows) && rows.length === 1 ? rows[0] : null);
     if (!parsed.success) throw unavailable();
     const policy = parsed.data;
-    if (identity.tenantId !== row.tenantId || identity.workspaceId !== row.workspaceId || identity.customerType !== row.principalKind
-      || policy.tenantId !== row.tenantId || policy.workspaceId !== row.workspaceId || policy.channel !== row.channel
-      || policy.customerType !== row.principalKind || policy.sceneCode !== this.scene.sceneCode || policy.sceneVersion !== this.scene.sceneVersion
+    if (identity.tenantId !== subject.tenantId || identity.workspaceId !== subject.workspaceId || identity.customerType !== subject.principalKind
+      || identity.membershipStatus !== 'active' || !identity.sessionId || !identity.customerId
+      || policy.tenantId !== subject.tenantId || policy.workspaceId !== subject.workspaceId || policy.channel !== subject.channel
+      || policy.customerType !== subject.principalKind || policy.sceneCode !== this.scene.sceneCode || policy.sceneVersion !== this.scene.sceneVersion
       || !policy.enabled || !(operation === 'create' ? policy.allowCreate : policy.allowRead) || policy.expiresAt <= this.clock()) throw denied();
     return policy;
   }
@@ -75,21 +78,39 @@ export class AiClientTaskAuthority {
       return gates;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
   }
-  async authorize(materialRef: string, operation: 'create' | 'read') {
-    const material = await this.loadMaterial(materialRef), policy = await this.policy(material, operation);
+  async authorize(subject: ClientPolicySubject, operation: 'create' | 'read' | 'capabilities') {
+    const policy = await this.policy(subject, operation);
     const context: AiExecutionContext = { contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: this.requestId,
-      authorizedAt: this.clock().toISOString(), audience: 'client', actor: { kind: 'customer', customerId: material.identity.customerId },
-      scope: { kind: 'workspace', tenantId: material.row.tenantId, workspaceId: material.row.workspaceId } };
+      authorizedAt: this.clock().toISOString(), audience: 'client', actor: { kind: 'customer', customerId: subject.identity.customerId },
+      scope: { kind: 'workspace', tenantId: subject.tenantId, workspaceId: subject.workspaceId } };
     let policyHash: string | null = null;
-    if (operation === 'create') {
-      const gates = await this.gates(context), entitlement = await this.entitlements.read(material.row.tenantId, 'ai.native.use');
+    if (operation !== 'read') {
+      const gates = await this.gates(context), entitlement = await this.entitlements.read(subject.tenantId, 'ai.native.use');
       if (entitlement.entitlements.length !== 1 || entitlement.entitlements[0].code !== 'ai.native.use' || !entitlement.entitlements[0].available) throw unavailable();
       policyHash = requestFingerprint({ policy: { ...policy, expiresAt: policy.expiresAt.toISOString() }, gates, entitlement });
     }
-    const current = await this.loadMaterial(materialRef), latest = await this.policy(current, operation);
-    if (requestFingerprint({ ...policy, expiresAt: policy.expiresAt.toISOString() }) !== requestFingerprint({ ...latest, expiresAt: latest.expiresAt.toISOString() })
+    const latest = await this.policy(subject, operation);
+    if (requestFingerprint({ ...policy, expiresAt: policy.expiresAt.toISOString() })
+      !== requestFingerprint({ ...latest, expiresAt: latest.expiresAt.toISOString() })) throw denied();
+    return { context, policy, policyHash };
+  }
+}
+
+export class AiClientTaskAuthority {
+  private readonly authority: AiClientPolicyAuthority;
+  constructor(dependencies: AiClientTaskDependencies, scene: AiClientTaskScene,
+    private readonly loadMaterial: (materialRef: string) => Promise<AiAuthorizedClientMaterial>,
+    requestId: string, clock: () => Date) {
+    this.authority = new AiClientPolicyAuthority(dependencies, scene, requestId, clock);
+  }
+  async authorize(materialRef: string, operation: 'create' | 'read') {
+    const material = await this.loadMaterial(materialRef);
+    const grant = await this.authority.authorize({ ...material.row, identity: material.identity }, operation);
+    const current = await this.loadMaterial(materialRef);
+    const latest = await this.authority.policy({ ...current.row, identity: current.identity }, operation);
+    if (requestFingerprint({ ...grant.policy, expiresAt: grant.policy.expiresAt.toISOString() }) !== requestFingerprint({ ...latest, expiresAt: latest.expiresAt.toISOString() })
       || current.row.bindingHash !== material.row.bindingHash || current.row.materialHash !== material.row.materialHash
       || current.identity.customerId !== material.identity.customerId || current.identity.sessionId !== material.identity.sessionId) throw denied();
-    return { context, material: current.row, policy, policyHash };
+    return { ...grant, material: current.row };
   }
 }

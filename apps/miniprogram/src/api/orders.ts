@@ -12,6 +12,16 @@ import type {
   RentalOrderExtensionPreview
 } from "@rental-os/shared";
 import { request } from "../core/http";
+import type { AiBookingHandoff } from "@rental-os/shared";
+import type { AiClientHostCapabilities } from "@rental-os/shared";
+
+export function readBookingHostCapabilities(): Promise<AiClientHostCapabilities> {
+  return request("/ai-native/entry/host-capabilities/read", { method: "POST", data: {}, replayAfterRefresh: false });
+}
+
+export function readBookingHandoff(handoffRef: string): Promise<AiBookingHandoff> {
+  return request("/ai-native/entry/booking-handoffs/read", { method: "POST", data: { handoffRef }, replayAfterRefresh: false });
+}
 
 export interface CreateOrderResult {
   order: ClientOrderView;

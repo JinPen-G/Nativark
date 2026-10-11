@@ -52,3 +52,4 @@ export * from "./ai-booking-draft";
 export * from "./ai-knowledge-policy-management-draft";
 export { AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS } from "./ai-entry-management-draft-schemas";
 export * from "./ai-entry-http-draft";
+export type { AiClientHostCapabilities } from './ai-client-entry-draft-schemas';

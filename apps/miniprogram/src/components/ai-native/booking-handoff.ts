@@ -6,6 +6,8 @@ export interface CustomerBookingHost {
   handoffRef: string;
   capability: { tenantCode: string; serviceCode: string; customerId: string; tenantId: string; workspaceId: string; releaseRevision: string };
   readBookingHandoff(input: { handoffRef: string }): Promise<AiBookingHandoff>;
+  isCurrent?(): boolean;
+  dispose?(): void;
 }
 export interface BookingClientContext { tenantCode: string; serviceCode: string; customerId: string; version: number }
 export interface CustomerHandoffView {
@@ -25,7 +27,7 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
   const eligible = () => bound.enabled === true && typeof bound.readBookingHandoff === "function"
     && identity.customerId && identity.customerId === bound.capability.customerId
     && identity.serviceCode === bound.capability.serviceCode && identity.tenantCode === bound.capability.tenantCode
-    && bound.capability.releaseRevision && bound.capability.tenantId && bound.capability.workspaceId;
+    && bound.capability.releaseRevision && bound.capability.tenantId && bound.capability.workspaceId && (bound.isCurrent?.() ?? true);
   const emit = (next: CustomerHandoffView) => { view = next; if (active && sameContext()) publish(next); };
   const validate = (input: AiBookingHandoff): AiBookingHandoff => {
     const value = JSON.parse(JSON.stringify(input)) as AiBookingHandoff;
@@ -65,12 +67,12 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
     emit({ status: "loading", handoff: null, quote: null });
     try {
       const handoff = validate(await bound.readBookingHandoff({ handoffRef: bound.handoffRef }));
-      if (!active || epoch !== generation || !sameContext()) return;
+      if (!active || epoch !== generation || !sameContext() || !(bound.isCurrent?.() ?? true)) return;
       if (continuing && (!before || JSON.stringify(before) !== JSON.stringify(handoff))) throw Error("changed");
       let quote: RentalQuoteSnapshotV1 | null = null;
       if (continuing) {
         quote = JSON.parse(JSON.stringify(await readQuote(handoff.fields.quoteId))) as RentalQuoteSnapshotV1;
-        if (!active || epoch !== generation || !sameContext()) return;
+        if (!active || epoch !== generation || !sameContext() || !(bound.isCurrent?.() ?? true)) return;
         const q = quote.request, f = handoff.fields;
         if (quote.id !== f.quoteId || quote.tenantId !== bound.capability.tenantId || q.customerId !== identity.customerId
           || q.customerType !== "personal" || q.bookingIdentity?.bookingIdentity === "enterprise_employee"
@@ -89,5 +91,5 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
     finally { if (epoch === generation) pending = false; }
   };
   return { read: () => read(false), continue: () => read(true),
-    destroy() { active = false; generation++; pending = false; view = { status: "disabled", handoff: null, quote: null }; } };
+    destroy() { active = false; generation++; pending = false; bound.dispose?.(); view = { status: "disabled", handoff: null, quote: null }; } };
 }

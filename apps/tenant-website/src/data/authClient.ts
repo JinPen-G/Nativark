@@ -2,6 +2,7 @@
 // 令牌按租户隔离存储（每个租户官网是独立品牌，会话不跨租户），并在 401 时用 refresh token 自动续期一次。
 
 import { API_BASE } from './apiClient';
+import type { AiBookingHandoff, AiClientHostCapabilities } from '@rental-os/shared';
 
 const CLIENT_V1 = `${API_BASE}/api/client/v1`;
 
@@ -112,6 +113,17 @@ interface AuthBridge {
 
 let bridge: AuthBridge | null = null;
 
+export function captureBookingHostSession() {
+  const owner = bridge, session = owner?.getSession();
+  const customerId = session?.customer?.customerId, workspaceCode = session?.workspace?.workspaceCode;
+  if (!owner || !session?.accessToken || typeof customerId !== 'string' || !customerId
+    || session.customer.customerType !== 'personal' || !workspaceCode) return null;
+  const token = session.accessToken;
+  return { customerId, workspaceCode, current: () => bridge === owner && owner.getSession() === session
+    && session.accessToken === token && session.customer.customerId === customerId
+    && session.customer.customerType === 'personal' && session.workspace?.workspaceCode === workspaceCode };
+}
+
 export function configureAuthBridge(next: AuthBridge | null): void {
   bridge = next;
 }
@@ -153,6 +165,12 @@ async function authedJson<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 /** 需要登录的接口。金额、库存、可用性均以服务端为准；前端不自行拼算最终价。 */
 export const sessionApi = {
+  async readBookingHostCapabilities(): Promise<AiClientHostCapabilities> {
+    return parse(await authedFetch('/ai-native/entry/host-capabilities/read', { method: 'POST', body: '{}' }, false));
+  },
+  async readBookingHandoff(handoffRef: string): Promise<AiBookingHandoff> {
+    return parse(await authedFetch('/ai-native/entry/booking-handoffs/read', { method: 'POST', body: JSON.stringify({ handoffRef }) }, false));
+  },
   me() { return authedJson<Record<string, unknown>>('/auth/me'); },
   switchWorkspace(workspaceCode: string) {
     return authedJson<ClientSession>('/auth/switch-workspace', { method: 'POST', body: JSON.stringify({ workspaceCode }) });

@@ -1,6 +1,7 @@
 /** Explicit opt-in transport locations; publication never enables production routes. */
 export const AI_CLIENT_ENTRY_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/client-entry', method: 'POST',
+  readHostCapabilities: 'host-capabilities/read',
   issueAction: 'action', createBookingDraft: 'booking-drafts/create',
   chooseBookingDraft: 'booking-drafts/choose', readBookingDraft: 'booking-drafts/read',
   handoffBookingDraft: 'booking-drafts/handoff', readBookingHandoff: 'booking-handoffs/read',

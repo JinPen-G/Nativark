@@ -987,10 +987,61 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.throws(() => AiClientEntryModule.registerHttp(dependencies, entryConfig).providers[0].useFactory(), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
   assert.throws(() => AiClientEntryModule.registerHttp(taskDependencies, configuration).providers[0].useFactory(), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
   const bookingHttp = new AiClientEntryController(entryModule.providers[0].useFactory());
-  for (const method of ['issueAction', 'createBookingDraft', 'chooseBookingDraft', 'readBookingDraft',
+  for (const method of ['readHostCapabilities', 'issueAction', 'createBookingDraft', 'chooseBookingDraft', 'readBookingDraft',
     'handoffBookingDraft', 'readBookingHandoff', 'readBookingOperation']) {
     assert.equal(Reflect.getMetadata('path', AiClientEntryController.prototype[method]), AI_CLIENT_ENTRY_HTTP_DRAFT[method]);
   }
+  const { aiClientHostCapabilitiesSchema } = require('../packages/shared/src/ai-client-entry-draft-schemas');
+  const hostWrites = materialWrites, hostTasks = countCreates();
+  const host = await bookingHttp.readHostCapabilities(request, {});
+  assert.equal(aiClientHostCapabilitiesSchema.safeParse(host).success, true);
+  assert.equal(host.enabled, true); assert.equal(host.surface, 'tenant_website');
+  assert.equal(host.customerId, 'person-client'); assert.equal(host.scope.workspaceId, 'workspace-client');
+  assert.equal(host.policy.revision, taskPolicies[1].revision); assert.equal(host.releaseRevision, 'entry-1');
+  assert.ok(Date.parse(host.expiresAt) <= taskPolicies[1].expiresAt.getTime());
+  assert.deepEqual(host.capabilities.entryActions, ['OPEN_ORDER', 'CREATE_BOOKING_DRAFT', 'OPEN_BOOKING']);
+  assert.equal(host.capabilities.savedDeliveryAddresses, false);
+  assert.equal(host.authorization, 'observation_only_recheck_each_action');
+  assert.equal(host.sessionId, undefined); assert.equal(host.phone, undefined);
+  await assert.rejects(bookingHttp.readHostCapabilities(request, { materialRef: own.materialRef, enabled: true }), e => e.getStatus() === 400);
+  await assert.rejects(bookingHttp.readHostCapabilities({ headers: {} }, {}), e => e.getStatus() === 403);
+  await assert.rejects(requests.readHostCapabilities(request, {}), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  for (const key of ['enabled', 'allowRead']) {
+    taskPolicies[1][key] = 0;
+    await assert.rejects(bookingHttp.readHostCapabilities(request, {}), e => e.getStatus() === 403);
+    taskPolicies[1][key] = 1;
+  }
+  taskPolicies[1].allowCreate = 0;
+  const readOnlyHost = await bookingHttp.readHostCapabilities(request, {});
+  assert.equal(readOnlyHost.enabled, false); assert.deepEqual(readOnlyHost.capabilities.entryActions, []);
+  taskPolicies[1].allowCreate = 1;
+  const policyExpiry = taskPolicies[1].expiresAt; taskPolicies[1].expiresAt = new Date(now);
+  await assert.rejects(bookingHttp.readHostCapabilities(request, {}), e => e.getStatus() === 403);
+  taskPolicies[1].expiresAt = policyExpiry;
+  const ownGetQuote = client.getQuote; client.getQuote = undefined;
+  assert.deepEqual((await bookingHttp.readHostCapabilities(request, {})).capabilities.entryActions, ['OPEN_ORDER']);
+  client.getQuote = ownGetQuote;
+  taskStore.state.aiBudgetPolicy[1].enabled = false;
+  await assert.rejects(bookingHttp.readHostCapabilities(request, {}), e => e.getStatus() === 503);
+  taskStore.state.aiBudgetPolicy[1].enabled = true;
+  commercialAvailable = false;
+  await assert.rejects(bookingHttp.readHostCapabilities(request, {}), e => e.getStatus() === 503);
+  commercialAvailable = true;
+  const commercialRead = subscriptions.readCategoryCommercialContext;
+  subscriptions.readCategoryCommercialContext = async (...args) => {
+    const value = await commercialRead(...args); taskPolicies[1].revision++; return value;
+  };
+  await assert.rejects(bookingHttp.readHostCapabilities(request, {}), e => e.getStatus() === 403);
+  taskPolicies[1].revision = host.policy.revision;
+  subscriptions.readCategoryCommercialContext = async (...args) => {
+    const value = await commercialRead(...args); revoked = true; return value;
+  };
+  await assert.rejects(bookingHttp.readHostCapabilities(request, {}), e => e.getStatus() === 403);
+  revoked = false; subscriptions.readCategoryCommercialContext = commercialRead;
+  published = false;
+  await assert.rejects(bookingHttp.readHostCapabilities(request, {}), e => e.getStatus() === 403);
+  published = true;
+  assert.equal(materialWrites, hostWrites); assert.equal(countCreates(), hostTasks);
   await assert.rejects(bookingHttp.readBookingOperation({ headers: {} }, { operationKey: 'not-owned' }),
     e => e.getStatus() === 403 && e.getResponse().code === 'AI_ACCESS_DENIED');
   const makeBookingAction = async (key, application = bookingApp, selection = bookingSelection) => {
