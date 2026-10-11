@@ -5,8 +5,10 @@ import { AI_TASK_DRAFT_VERSION, AI_TASK_STEP_CODES, type AiExecutionContext, typ
 import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from "./ai-task.repository";
 import { isAiStepExecutionContext } from "./task-contract-validation";
+import { TEXT_CAPABILITY_PROBE_TOOL } from "./text-capability-probe";
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+const stepCode = z.union([z.enum(AI_TASK_STEP_CODES), z.literal(TEXT_CAPABILITY_PROBE_TOOL)]);
 const revision = z.number().int().min(1).max(4294967294);
 const commandSchema = z.object({
   taskId: id, registrationRef: id, expectedTaskRevision: revision,
@@ -21,7 +23,7 @@ export interface AiStepReplayAuthority {
 const grantSchema = z.object({
   context: z.unknown(), registrationAllowed: z.literal(true), authorizationKey: id,
   taskId: id, registrationRef: id, expiresAt: z.string().datetime({ offset: true }),
-  toolCode: z.enum(AI_TASK_STEP_CODES), toolVersion: id, inputRef: id,
+  toolCode: stepCode, toolVersion: id, inputRef: id,
   requestFingerprint: z.string().regex(/^[0-9a-f]{64}$/u)
 }).strict();
 export interface AiStepRegistrationAuthority {

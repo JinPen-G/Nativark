@@ -8,6 +8,9 @@ import { requestFingerprint } from '../rental-core/rental-idempotency.repository
 
 export const TEXT_PROBE_METHOD = 'text-echo-1';
 export const TEXT_PROBE_SCENE = 'ai.capability.text';
+/** Mirrored by the shared source contract; local literal keeps the isolated
+ * runtime usable before a shared client regeneration. */
+export const TEXT_CAPABILITY_PROBE_TOOL = 'ai.capability.text.probe' as const;
 export const TEXT_PROBE_TTL_MS = 3_600_000;
 const id = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 export const probeDigest = z.string().regex(/^[0-9a-f]{64}$/u);
