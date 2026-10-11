@@ -170,6 +170,9 @@ export class UnifiedAiGatewayService {
       dispatched = true;
       const rawResult = structuredClone(await life.wait(() => this.ports.transport.invoke(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal)));
       const result = intentBinding ? this.textResult(rawResult) : rawResult;
+      if (this.ports.observation) {
+        await life.wait(() => this.ports.observation!.record(structuredClone({ call, reservationId: usage.id, route, result })));
+      }
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       const reported = result.usage;
       if (reported) { await life.wait(() => this.ports.budget.settle(structuredClone(call), usage.id, `invoke:${request.callId}`, reported)); accounted = true; }

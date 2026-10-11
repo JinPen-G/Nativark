@@ -410,12 +410,30 @@ model AiProviderProfile {
   disabledAt         DateTime?
   scope              AiScope                @relation(fields: [scopeId, scopeKind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict)
   capabilityEvidence  AiProviderCapabilityEvidence[]
+  textProbeReceipts    AiTextCapabilityReceipt[]
   platformConnection  AiPlatformModelConnection?
 
   @@unique([scopeId, scopeKind, profileKey], map: "ai_provider_profiles_scope_key")
   @@unique([scopeId, scopeKind, role], map: "ai_provider_profiles_scope_role")
   @@index([scopeKind, serviceMode, enabled], map: "ai_provider_profiles_route_idx")
   @@map("ai_provider_profiles")
+}
+
+model AiTextCapabilityReceipt {
+  id              String   @id @default(uuid()) @db.VarChar(36)
+  scopeId         String   @db.VarChar(36)
+  profileId       String   @db.VarChar(36)
+  operationId     String   @db.VarChar(128)
+  descriptor      Json
+  descriptorHash  String   @db.Char(64)
+  observation     Json?
+  observationHash String?  @db.Char(64)
+  createdAt       DateTime @default(now()) @db.DateTime(3)
+  profile         AiProviderProfile @relation(fields: [profileId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "ai_text_capability_profile_fk")
+
+  @@unique([scopeId, operationId], map: "ai_text_capability_scope_operation_key")
+  @@index([profileId], map: "ai_text_capability_profile_idx")
+  @@map("ai_text_capability_receipts")
 }
 
 /// Server-only platform vault. Profile revision and this row are committed together.
