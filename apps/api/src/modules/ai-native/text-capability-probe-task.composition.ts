@@ -14,11 +14,9 @@ import { textProbeCommandSchema, TEXT_CAPABILITY_PROBE_TOOL, type TextProbeComma
 import type { TextCapabilityProbeApplication } from './text-capability-probe.application';
 import type { PersistedBudgetEvidenceSource } from './budget/budget-dependency-adapters';
 import type { AiTaskApplicationHost } from './runner/prisma-task-application';
-import type { AiTaskHeldPreparation } from './runner/ai-task-runner.service';
 import type { AiTaskRunnerRepositoryCommandFactory } from './runner/ai-task-runner.repository-adapter';
 import type { AiTaskInputSource } from './task-input/task-input.ports';
 import type { AiTaskRegisteredExecutor } from './runner/prisma-task-measured-effects';
-import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { aiTaskRunnerLimitsSchema } from './runner/prisma-task-run-evidence.repository';
 import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from './runner/ai-task-runner.ports';
 
@@ -76,7 +74,11 @@ function createRoot(input: TextCapabilityProbeTaskComposition, task: TextProbeTa
       if (!row || !row.inputRef) throw denied();
       const stored = await source.readForExecution({ taskId: lease.taskId, runId: lease.runId, stepId: row.id,
         actionId: row.actionId, inputRef: row.inputRef, fingerprint: row.requestFingerprint, lease });
-      const prepared = await input.probe.prepare(stored.context as never, textProbeCommandSchema.parse(stored.input));
+      const context = stored.context;
+      if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user') throw denied();
+      const prepared = await input.probe.prepare({ tenantId: context.scope.tenantId,
+        workspaceId: context.scope.workspaceId, actorId: context.actor.userId },
+        textProbeCommandSchema.parse(stored.input));
       return { stepId: row.id, mode: 'invoke' as const, lease: { runId: lease.runId, holderId: lease.holderId, fencingToken: lease.fencingToken },
         intent: prepared.intent, configuration: prepared.configuration, priceVersion: task.priceVersion,
         expiresAt: new Date(stored.expiresAt) };
