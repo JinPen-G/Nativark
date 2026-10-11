@@ -1,7 +1,7 @@
 import type { ModelJsonTransport } from './chat-completions.adapter';
 import { ChatCompletionsAdapter } from './chat-completions.adapter';
 import { createNativeModelEgressTransport } from './model-egress.transport';
-import { RoutedModelTransport, TenantModelConnectionResolver } from './routed-model-transport';
+import { RoutedModelTransport, TenantModelConnectionResolver, type GatewayConnectionResolver } from './routed-model-transport';
 import { UnifiedAiGatewayService } from './unified-ai-gateway.service';
 import { PrismaAdmissionRepository } from './invocation-admission.repository';
 import { InvocationAdmissionService } from './invocation-admission.service';
@@ -30,6 +30,9 @@ export type TextCapabilityProbeDependencies = Omit<Parameters<typeof createPersi
   configuration: Pick<TenantModelConfigService, 'selectionForInvocation' | 'profile' | 'credential'>;
   audit: UnifiedGatewayAudit;
   protocol?: ModelJsonTransport;
+  /** Existing authorized platform Vault connection, never a tenant fallback.
+   * E.g. createAuthorizedPlatformModelConfiguration(...).invocation. */
+  platformConnection?: GatewayConnectionResolver;
 };
 export class TextCapabilityProbeApplication {
   private readonly profiles;
@@ -59,6 +62,11 @@ export class TextCapabilityProbeApplication {
   private authority(context: GatewayContext, command: TextProbeCommand) {
     return new TextCapabilityProbeAuthority({ management: this.input.management, scopes: this.input.scopes,
       configuration: this.input.configuration, profiles: this.profiles, bindings: this.accounting.bindings }, context, command);
+  }
+  private requirePlatformConnection(mode: string) {
+    if (mode === 'platform_managed' && typeof this.input.platformConnection?.resolve !== 'function') {
+      throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE');
+    }
   }
   /** Request hosts do not supply actor/tenant/workspace fields. The same real
    * scope authority used by budget resolves them afresh for every operation. */
@@ -103,6 +111,7 @@ export class TextCapabilityProbeApplication {
   async prepare(value: GatewayContext, commandValue: TextProbeCommand) {
     const context = probeContextSchema.parse(structuredClone(value)), command = textProbeCommandSchema.parse(structuredClone(commandValue));
     const authority = this.authority(context, command), resolution = await authority.resolve(context, ['text']);
+    this.requirePlatformConnection(resolution.route.profile.serviceMode);
     const prepared = textProbeIntent(command.operationId, resolution.consumerScope.id);
     return { ...prepared, configuration: textProbeConfiguration(resolution.route.profile, context.tenantId) };
   }
@@ -145,6 +154,7 @@ export class TextCapabilityProbeApplication {
     // again. In particular, a retry must not need a still-active old lease.
     const existing = await this.receipts.find(resolution.consumerScope.id, command.operationId);
     if (existing) return this.collect(context, command);
+    this.requirePlatformConnection(profile.serviceMode);
     // Validate and persist the real task/step/lease association before reserving
     // the probe operation key. A rejected execution must not poison that key.
     const registered = await this.accounting.bindings.register({ ...execution, intent: prepared.intent, configuration, mode: 'invoke' });
@@ -155,7 +165,8 @@ export class TextCapabilityProbeApplication {
     if (!started.created) return this.collect(context, command);
     await authority.assertCurrent(context, resolution);
     const tenant = new TenantModelConnectionResolver(this.input.configuration);
-    const transport = new RoutedModelTransport({ tenant, platform: tenant }, [this.adapter], authority);
+    const platform = this.input.platformConnection ?? { resolve: async () => { throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE'); } };
+    const transport = new RoutedModelTransport({ tenant, platform }, [this.adapter], authority);
     const gateway = new UnifiedAiGatewayService({ routing: authority, admission: this.admission, dispatch: this.dispatch,
       budget: this.accounting.budget, transport, audit: this.input.audit,
       observation: { record: observation => this.receipts.observe(started.receipt.id, observation,

@@ -1,5 +1,5 @@
 'use strict';
-const test = require('node:test'), assert = require('node:assert/strict'); require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test); require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
+const test = require('node:test'), assert = require('node:assert/strict'); require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test); require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { AiConnectionTestService } = require('../apps/api/src/modules/ai-native/connection-test.service'); const profile = { id: 'profile-test', scopeId: 'tenant-a', scopeKind: 'TENANT', profileKey: 'default', role: 'DEFAULT', serviceMode: 'tenant_managed', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'model', credentialRef: 'vault:test', configRevision: 4, enabled: true, allowedCapabilities: ['text', 'tools'], disabledAt: null }, context = { tenantId: 'tenant-a', workspaceId: 'space-a', actorId: 'actor-a' };
 test('text-only connection probe cannot certify capability or live evidence', async () => { const calls = [], records = []; const service = new AiConnectionTestService({ invoke: async (_c, request) => { calls.push(request); return { text: 'synthetic success' }; } }, { record: async input => { records.push(input); return input; } }); const result = await service.run(context, profile, ['text', 'tools', 'text']); assert.deepEqual(result.map(row => row.status), ['unverified', 'unverified']); assert.equal(result[1].errorCode, 'INVALID_RESPONSE'); assert.equal(calls.length, 2); assert.deepEqual(calls[1].features, ['tools']); assert.equal(records.every(row => row.source === 'connection_test'), true); });
 test('local capability preflight rejection remains unverified without a provider dispatch', async () => {
@@ -153,6 +153,28 @@ test('probe validates execution before occupying operation key and never redispa
     assert.equal(writes, 0);
     assert.equal(registrations, scenario === 'original_receipt' ? 0 : 1);
   }
+});
+
+test('platform probe requires its explicit vault resolver before preparation or new invocation writes', async () => {
+  const { TextCapabilityProbeApplication } = require('../apps/api/src/modules/ai-native/text-capability-probe.application');
+  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+  const selected = { ...profile, scopeKind: 'PLATFORM', scopeId: 'platform-a', serviceMode: 'platform_managed' };
+  const command = { operationId: 'platform-operation', profileKey: selected.profileKey, profileFingerprint: capabilityProfileFingerprint(selected) };
+  const app = Object.create(TextCapabilityProbeApplication.prototype);
+  app.input = { configuration: { selectionForInvocation: async () => { throw Error('BYOK must not be read'); },
+    profile: async () => { throw Error('BYOK must not be read'); }, credential: async () => { throw Error('BYOK must not be read'); } } };
+  app.authority = () => ({ resolve: async () => ({ consumerScope: { id: 'workspace-scope' }, route: { profile: selected } }) });
+  let writes = 0, original = false;
+  app.receipts = { find: async () => original ? { id: 'original-receipt' } : null, begin: async () => { writes++; throw Error('unexpected write'); } };
+  app.accounting = { bindings: { register: async () => { writes++; throw Error('unexpected write'); } } };
+  app.collect = async () => ({ status: 'unverified', reason: 'original_receipt_pending' });
+  await assert.rejects(app.prepare(context, command), { code: 'CREDENTIAL_UNAVAILABLE' });
+  await assert.rejects(app.run(context, command, { stepId: 'step', lease: { runId: 'run' }, priceVersion: 'price', expiresAt: new Date() }), { code: 'CREDENTIAL_UNAVAILABLE' });
+  assert.equal(writes, 0);
+  original = true;
+  assert.equal((await app.run(context, command, { stepId: 'step', lease: { runId: 'run' }, priceVersion: 'price', expiresAt: new Date() })).reason, 'original_receipt_pending');
+  app.input.platformConnection = { resolve: async () => { throw Error('preparation must not decrypt credentials'); } };
+  assert.equal((await app.prepare(context, command)).configuration.serviceMode, 'platform_managed');
 });
 
 test('persisted text verifier consumes original settlement and rejects mock, missing or changed receipts', async () => {
