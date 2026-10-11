@@ -109,6 +109,7 @@ test('current probe host derives identity and rejects changed authority after wa
 test('text capability probe resolves the platform-managed profile without tenant fallback', async () => {
   const { TextCapabilityProbeAuthority } = require('../apps/api/src/modules/ai-native/text-capability-probe.authority');
   const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+  const { textProbeConfiguration } = require('../apps/api/src/modules/ai-native/text-capability-probe');
   const platformProfile = { ...profile, id: 'platform-profile', scopeId: 'platform-a', scopeKind: 'PLATFORM',
     serviceMode: 'platform_managed' };
   const command = { operationId: 'platform-probe', profileKey: 'default', profileFingerprint: capabilityProfileFingerprint(platformProfile) };
@@ -127,6 +128,7 @@ test('text capability probe resolves the platform-managed profile without tenant
   const resolved = await authority.resolve(context, ['text']);
   assert.equal(resolved.selection.mode, 'platform_managed');
   assert.equal(resolved.route.profile.serviceMode, 'platform_managed');
+  assert.deepEqual(textProbeConfiguration(platformProfile, context.tenantId).configurationScope, { kind: 'platform' });
 });
 
 test('probe validates execution before occupying operation key and never redispatches original registration', async () => {
