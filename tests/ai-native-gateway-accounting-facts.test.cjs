@@ -1,7 +1,8 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
+require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
+require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
 const { PrismaGatewayAccountingFacts } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-accounting-facts');
 const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
 
@@ -9,6 +10,40 @@ const time = new Date('2026-10-05T12:00:00Z');
 const config = { configId: 'profile', configRevision: 1, credentialRef: 'vault', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'model', serviceMode: 'tenant_managed', tenantId: 'tenant', configurationScope: { kind: 'tenant', tenantId: 'tenant' } };
 const association = { requestId: 'call', runId: 'run', stepId: 'step', actionId: 'action', idempotencyKey: 'call', priceVersion: 'price', scope: { kind: 'workspace', tenantId: 'tenant', workspaceId: 'workspace' }, config };
 const call = { context: { actorId: 'actor', tenantId: 'tenant', workspaceId: 'workspace' }, binding: { id: 'admission', actorId: 'actor', callId: 'call', requestHash: 'a'.repeat(64), profileId: 'profile', dispatchId: 'dispatch', scope: { id: 'scope', kind: 'WORKSPACE', tenantId: 'tenant', workspaceId: 'workspace' } }, request: { callId: 'call', model: 'model', maxOutputTokens: 32, intentHash: 'b'.repeat(64) }, expiresAt: new Date(time.getTime() + 60000) };
+
+test('real task budget authority binds the persisted invocation and rejects forged scope or revoked actor', async () => {
+  const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
+  const { PrismaTaskBudgetAuthorizationSource } = require('../apps/api/src/modules/ai-native/budget/prisma-task-budget-authorization.source');
+  const { Prisma } = require('../apps/api/node_modules/@prisma/client');
+  const configuration = { ...config, tenantId: 'tenant-a', model: 'synthetic-model', configurationScope: { kind: 'tenant', tenantId: 'tenant-a' } };
+  const scope = { kind: 'workspace', tenantId: 'tenant-a', workspaceId: 'workspace-a' };
+  const assoc = { ...association, runId: 'run-a', stepId: 'step-a', actionId: 'action-a', scope, config: configuration };
+  const invocation = { id: 'invocation-a', scopeId: 'scope-a', taskId: 'task-a', actorId: 'user-a', callId: 'call',
+    runId: 'run-a', stepId: 'step-a', actionId: 'action-a', sceneCode: 'synthetic-clarification', priceVersion: 'price',
+    configuration, configurationHash: requestFingerprint(configuration), intentHash: 'b'.repeat(64), stepFingerprint: 'b'.repeat(64),
+    maxOutputTokens: 32, leaseOwnerId: 'bootstrap', fencingToken: new Prisma.Decimal(1), expiresAt: new Date('2026-10-06T12:01:00Z'), registrationHash: 'c'.repeat(64) };
+  const h = await authorizedRunnerHarness({ aiGatewayInvocation: [invocation], aiBudgetReservation: [],
+    aiProviderProfile: [{ id: 'profile', scopeId: 'scope-tenant', scopeKind: 'TENANT', enabled: true, disabledAt: null,
+      configRevision: 1, credentialRef: 'vault', protocol: configuration.protocol, provider: configuration.provider,
+      model: configuration.model, serviceMode: 'tenant_managed' }],
+    aiStep: [{ id: 'step-a', scopeId: 'scope-a', taskId: 'task-a', runId: 'run-a', status: 'RUNNING', actionId: 'action-a', requestFingerprint: 'b'.repeat(64) }] });
+  let managementChecks = 0;
+  await h.tasks.claimRun(h.claim());
+  h.state.aiGatewayInvocation[0].leaseOwnerId = h.state.aiRun[0].leaseOwnerId;
+  h.state.aiGatewayInvocation[0].fencingToken = h.state.aiRun[0].fencingToken;
+  const source = new PrismaTaskBudgetAuthorizationSource({ ...h.authorization, db: h.db,
+    guard: { canActivate: async () => { managementChecks++; return false; } }, clock: () => h.control.now });
+  const current = await source.resolveContext();
+  const grant = await source.authorize('reserve', current, { association: assoc });
+  assert.match(grant.authorizationKey, /^task-budget:[a-f0-9]{64}$/u);
+  assert.equal(managementChecks, 0); // business step authorization, not config management bypass
+  await assert.rejects(source.authorize('reserve', current, { association: { ...assoc, scope: { ...scope, workspaceId: 'other' } } }), { code: 'FORBIDDEN' });
+  await assert.rejects(source.authorize('settings_write', current, { policy: { scopeKind: 'WORKSPACE', scopeId: 'scope-a', sceneCode: 'synthetic-clarification' } }), { code: 'FORBIDDEN' });
+  assert.equal(managementChecks, 1);
+  h.identity.session = false;
+  await assert.rejects(source.authorize('reserve', current, { association: assoc }));
+  assert.equal(h.state.aiBudgetReservation.length, 0); // authorization does not reserve or dispatch
+});
 
 function harness() {
   const state = { revoked: false, writes: 0, fail: null, onRead: null, pricing: null, rows: {
