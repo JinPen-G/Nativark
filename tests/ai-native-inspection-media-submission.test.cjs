@@ -150,6 +150,31 @@ async function prepared(f){
   return {...target,draftId:result.draftId,expectedRevision:result.revision,operationId:'submit-a'};
 }
 
+test('employee review consumes original receipt without submitting or back-writing the draft',async()=>{
+  const {StaffInspectionRequestFactory}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-assist.composition');
+  const f=submissionFixture('lost'),input=await prepared(f);
+  const submitted=await f.services.submission.submit(input);
+  assert.equal(submitted.status,'submitted');
+  const credential=await f.ports.credentials.current();
+  const controller={createInspection:async()=>assert.fail('read must not dispatch')};
+  const host=new StaffInspectionRequestFactory({...f.ports,originalInspection:{controller,receipts:new RentalIdempotencyRepository(f.db)}})
+    .open({headers:{authorization:credential.authorization},requestId:'employee-receipt'});
+  const query={...target,draftId:input.draftId},before=structuredClone(f.state.drafts.get(input.draftId)),operationCount=f.state.operations.size;
+  const observed=await host.readCurrentReview(query,true);
+  assert.equal(observed.receipt.status,'submitted');assert.equal(observed.receipt.inspectionId,'inspection-original');
+  assert.equal(observed.review.next,'read_original_inspection');assert.equal(observed.businessActionRequested,false);
+  assert.deepEqual(f.state.drafts.get(input.draftId),before);assert.equal(f.state.operations.size,operationCount);assert.equal(f.calls(),1);
+  f.state.user.permissions=['rental-os:order:view'];
+  assert.equal((await host.readCurrentReview(query)).receipt.status,'not_requested');
+  await assert.rejects(host.readCurrentReview(query,true),{code:'ACCESS_DENIED'});
+  host.close();await assert.rejects(host.readCurrentReview(query),{code:'ACCESS_DENIED'});
+  const missing=submissionFixture('absent'),unknown=await prepared(missing);
+  assert.equal((await missing.services.submission.submit(unknown)).status,'submission_unknown');
+  const snapshot=structuredClone(missing.state.drafts.get(unknown.draftId));
+  assert.equal((await missing.services.submission.readReceipt({...target,draftId:unknown.draftId})).status,'not_observed');
+  assert.deepEqual(missing.state.drafts.get(unknown.draftId),snapshot);assert.equal(missing.calls(),1);
+});
+
 test('bounded actual stream reader hashes bytes, rejects overflow and cancels pending reads',async()=>{
   const result=await readInspectionMedia(stream(png),1000,new AbortController().signal);
   assert.equal(result.mediaType,'image/png');assert.equal(result.width,1);assert.equal(result.height,1);assert.equal(result.contentHash.length,64);
@@ -419,6 +444,31 @@ for(const mediaKind of ['image','audio']) test(`original inspection frozen ${med
   await assert.rejects(composeInspectionRecognitionTaskHost(f.services.recognition,{...target,draftId:d.result.draftId,inputId:frozen.inputId,expectedRevision:detail.revision},{...dependencies,task}));
 });
 
+test('staff recognition host forwards only its request-bound credentials and closes the source',async()=>{
+  const f=mediaFixture(),credential=await f.ports.credentials.current();
+  const {StaffInspectionRequestFactory}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-assist.composition');
+  const host=new StaffInspectionRequestFactory({...f.ports,storage:f.storage})
+    .open({headers:{authorization:credential.authorization},requestId:'bound-media-request'});
+  f.services=host;
+  const ref=await host.evidence.bind({...target,attachmentId:'file-a'}),d=await draft(f,[ref]);
+  const frozen=await host.recognition.prepare({...target,draftId:d.result.draftId,expectedRevision:1,operationId:'bound-recognition',question:'Read candidate mileage.'},new AbortController().signal);
+  const reference={...target,draftId:d.result.draftId,inputId:frozen.inputId,expectedRevision:2};
+  const bridge=require('../apps/api/src/modules/ai-native/runner/model-task-host.composition');
+  const original=bridge.composeTaskModelHost;let captured;
+  // Observe only the runner composition boundary, not a fake recognition result.
+  // Actual Guard, template, bytes, frozen input and gatewayMedia execute above.
+  bridge.composeTaskModelHost=value=>{captured=value;return {compositionObserved:true};};
+  try {
+    const result=await host.recognitionTaskHost(reference,{credentials:{current:async()=>{throw Error('foreign session');}},
+      gatewayScene:{maxOutputTokens:32},runtime:{ports:{}},task:{taskId:'task-a'}});
+    assert.equal(result.compositionObserved,true);
+    const current=await captured.credentials.current();
+    assert.equal(current.authorization,credential.authorization);assert.equal(current.audience,'staff');assert.equal(current.requestId,'bound-media-request');
+    host.close();await assert.rejects(captured.credentials.current(),{code:'ACCESS_DENIED'});
+    assert.throws(()=>host.recognitionTaskHost(reference,{}),{code:'STORAGE_UNAVAILABLE'});
+  } finally {bridge.composeTaskModelHost=original;host.close();}
+});
+
 test('candidate accept, reject and late append preserve human values and original candidate history',async()=>{
   const f=mediaFixture(),ref=await f.services.evidence.bind({...target,attachmentId:'file-a'});
   await f.services.evidence.readMedia({...target,...ref},new AbortController().signal);
@@ -428,10 +478,17 @@ test('candidate accept, reject and late append preserve human values and origina
   await f.services.drafts.saveCandidates({...common,operationId:'candidate-op',expectedRevision:1,candidates:[c]});
   await f.services.drafts.edit({...common,operationId:'accept',expectedRevision:2,edits:[{fieldCode:'mileage',decision:'accepted',candidateId:c.candidateId}]});
   assert.equal((await f.services.drafts.read({...target,draftId:d.result.draftId})).state.fields.mileage.value,43);
+  const acceptedReview=await f.services.drafts.readReview({...target,draftId:d.result.draftId});
+  assert.equal(acceptedReview.fields.find(field=>field.fieldCode==='mileage').human.decision,'accepted');
+  assert.deepEqual(acceptedReview.fields.find(field=>field.fieldCode==='mileage').selectedSource,c.sources);
   await f.services.drafts.edit({...common,operationId:'reject',expectedRevision:3,edits:[{fieldCode:'mileage',decision:'rejected',candidateId:c.candidateId}]});
   await f.services.drafts.saveCandidates({...common,operationId:'late',expectedRevision:4,candidates:[{...c,candidateId:'candidate-late',value:{kind:'number',value:99}}]});
   const detail=await f.services.drafts.read({...target,draftId:d.result.draftId});
   assert.equal(detail.state.fields.mileage.value,null);assert.equal(detail.state.fields.mileage.decision,'rejected');assert.equal(detail.state.candidates.length,2);
+  const rejectedReview=await f.services.drafts.readReview({...target,draftId:d.result.draftId});
+  assert.equal(rejectedReview.fields.find(field=>field.fieldCode==='mileage').human.value,null);
+  assert.equal(rejectedReview.fields.find(field=>field.fieldCode==='mileage').candidates.length,2);
+  assert.equal(rejectedReview.fields.find(field=>field.fieldCode==='mileage').reviewRequired,true);
   assert.equal((await f.services.drafts.reconcileOperation({kind:'create',request:d.request})).result.revision,1);
 });
 

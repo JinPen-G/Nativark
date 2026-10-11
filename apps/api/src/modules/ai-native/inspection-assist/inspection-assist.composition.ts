@@ -89,16 +89,13 @@ export class StaffInspectionRequestFactory {
     // Snapshot scalars, never retain the mutable incoming request or share a
     // credential source between requests. close() erases our token reference.
     let authorization: string | undefined = token;
-    const services = composeInspectionAssist({ ...this.dependencies, credentials: {
+    const credentials = {
       async current() {
         if (authorization === undefined) throw new InspectionAssistError('ACCESS_DENIED');
         return { authorization, requestId, audience: 'staff' as const };
       },
-    } });
-    const credentials = { async current() {
-      if (authorization === undefined) throw new InspectionAssistError('ACCESS_DENIED');
-      return { authorization, requestId, audience: 'staff' as const };
-    } };
+    };
+    const services = composeInspectionAssist({ ...this.dependencies, credentials });
     const authority = new InspectionActionAuthority(this.dependencies.guard, credentials);
     return { ...services,
       readHost: async (value: unknown): Promise<AiStaffInspectionHostProjection> => {
@@ -124,9 +121,27 @@ export class StaffInspectionRequestFactory {
               && typeof this.dependencies.originalInspection?.receipts?.find === 'function' },
           observedAt: new Date().toISOString(), execution: 'not_attested' };
       },
+      /** Actual employee consumption entry. Receipt lookup is explicit and
+       * retains its existing stronger action permission; never silently
+       * downgrade a denied receipt request into a successful draft read. */
+      readCurrentReview: async (value: unknown, includeReceipt = false) => {
+        if (typeof includeReceipt !== 'boolean') throw new InspectionAssistError('INVALID_INPUT');
+        if (!services.drafts) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+        const review = await services.drafts.readReview(value);
+        if (!includeReceipt) return { review, receipt: { status: 'not_requested' as const }, businessActionRequested: false as const };
+        if (!services.submission) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+        const receipt = await services.submission.readReceipt({ ...review.target, draftId: review.draftId });
+        const current = await services.drafts.readReview(value);
+        if (requestFingerprint(current) !== requestFingerprint(review)) throw new InspectionAssistError('REVISION_CONFLICT');
+        return { review, receipt, businessActionRequested: false as const };
+      },
       recognitionTaskHost: (reference: unknown, dependencies: Parameters<typeof composeInspectionRecognitionTaskHost>[2]) => {
         if (!services.recognition || authorization === undefined) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
-        return composeInspectionRecognitionTaskHost(services.recognition, reference, dependencies);
+        // The task host must use the same request session as media/draft reads.
+        // A second supplied credential source cannot swap the invocation actor.
+        return composeInspectionRecognitionTaskHost(services.recognition, reference, {
+          ...dependencies, credentials,
+        });
       },
       close() { authorization = undefined; } };
   }

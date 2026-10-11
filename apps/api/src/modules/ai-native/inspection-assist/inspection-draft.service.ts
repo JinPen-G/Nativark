@@ -211,6 +211,56 @@ export class InspectionDraftService {
     });
   }
 
+  /** Human review material from the persisted draft and original frozen
+   * template. No candidate is automatically adopted and no Core field is
+   * written. Read and revalidate again after the template wait so a concurrent
+   * human edit cannot be returned with an old revision or source association. */
+  async readReview(value: unknown) {
+    const input = parseInspectionInput(targetSchema.extend({ draftId: inspectionId }).strict(), value);
+    const target = targetOf(input);
+    return this.authority.withAction(target, 'read', async () => {
+      const before = await this.read(input);
+      let template: Awaited<ReturnType<InspectionTemplateService['read']>> | undefined;
+      try {
+        template = await this.templates.read(target);
+      } catch (error) {
+        if (!(error instanceof InspectionAssistError) || !['BINDING_CHANGED', 'TEMPLATE_UNAVAILABLE'].includes(error.code)) throw error;
+      }
+      const current = await this.read(input);
+      if (requestFingerprint(before) !== requestFingerprint(current)) throw new InspectionAssistError('REVISION_CONFLICT');
+      const bindingCurrent = template?.bindingFingerprint === current.bindingFingerprint;
+      const definitions = bindingCurrent ? template!.template.fields : [];
+      const codes = [...new Set([...definitions.map(field => field.code), ...Object.keys(current.state.fields),
+        ...current.state.candidates.map(candidate => candidate.fieldCode)])];
+      if (codes.length > 100) throw new InspectionAssistError('INVALID_INPUT');
+      const fields = codes.map(code => {
+        const definition = definitions.find(field => field.code === code);
+        const human = current.state.fields[code];
+        const candidates = current.state.candidates.filter(candidate => candidate.fieldCode === code);
+        const chosen = human?.candidateId ? candidates.find(candidate => candidate.candidateId === human.candidateId) : undefined;
+        if (human?.candidateId && !chosen) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+        return { fieldCode: code, ...(definition ? { label: definition.label, type: definition.type,
+          required: definition.required, ...(definition.unit ? { unit: definition.unit } : {}) } : {}),
+          human: human ? structuredClone(human) : null,
+          candidates: structuredClone(candidates),
+          selectedSource: chosen ? structuredClone(chosen.sources) : [],
+          missing: current.state.missingFields.includes(code),
+          reviewRequired: current.state.reviewRequired || !bindingCurrent || candidates.some(candidate => candidate.candidateId !== human?.candidateId),
+        };
+      });
+      return { draftId: current.draftId, revision: current.revision, target: current.target,
+        assetId: current.assetId, templateVersion: current.templateVersion, bindingFingerprint: current.bindingFingerprint,
+        status: current.status, inspectionId: current.inspectionId,
+        binding: bindingCurrent ? 'current' as const : 'changed' as const,
+        fields, evidence: structuredClone(current.state.evidence),
+        reviewRequired: current.state.reviewRequired || !bindingCurrent,
+        next: current.status === 'submitted' ? 'read_original_inspection' as const
+          : current.status === 'submission_unknown' ? 'reconcile_original_submission' as const
+          : !bindingCurrent ? 'review_changed_resource' as const : 'human_review' as const,
+        semantics: 'persisted_human_draft_and_untrusted_candidates_not_core_facts' as const };
+    });
+  }
+
   async reconcileOperation(value: unknown) {
     const input = parseInspectionInput(z.object({ kind: z.enum(['create', 'edit', 'candidates', 'evidence']), request: z.unknown() }).strict(), value);
     const request = input.kind === 'create' ? parseInspectionInput(createSchema, input.request)

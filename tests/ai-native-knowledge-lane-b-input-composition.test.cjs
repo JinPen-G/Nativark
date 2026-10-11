@@ -138,9 +138,31 @@ test('consumption binds observations across waits and recovers the exact memory 
   await assert.rejects(bundle.consumption.recoverMemoryChange('delete-1', deletion), { code: 'unavailable' });
 });
 
-test('read-only HTTP uses request-local credentials and current exact policies without enabling default routes', async () => {
+test('read-only HTTP uses request-local credentials and current exact policies without enabling default routes', async t => {
   const { HumanKnowledgeConsumptionRequestFactory } = h.load('human-knowledge-consumption.composition');
   const { HumanKnowledgeConsumptionController } = h.load('human-knowledge-consumption.controller');
+  const { AI_KNOWLEDGE_CONSUMPTION_HTTP_SCHEMAS: schemas } = require('../packages/shared/src/ai-knowledge-consumption-http-draft');
+  const { aiLeafToOpenApi30 } = require('../apps/api/src/contracts/ai-leaf-openapi');
+  const Ajv = require('ajv'), ajv = new Ajv({ strict: true, allErrors: true });
+  require('ajv-formats')(ajv);
+  const validators = Object.fromEntries(Object.entries(schemas).map(([name, schema]) => {
+    assert.doesNotThrow(() => aiLeafToOpenApi30(schema, name));
+    return [name, ajv.compile(schema)];
+  }));
+  const valid = (name, value) => {
+    assert.equal(validators[name](value), true, `${name}: ${ajv.errorsText(validators[name].errors)}`);
+    return value;
+  };
+  const readDocument = HumanKnowledgeConsumptionService.prototype.readDocument;
+  t.mock.method(HumanKnowledgeConsumptionService.prototype, 'readDocument', async function(value) {
+    const result = await readDocument.call(this, value);
+    result.internalOnly = 'not-public'; result.metadata.internalOnly = 'not-public';
+    if (result.preview.status === 'ready' && result.preview.sources.length) {
+      result.preview.sources[0].source.locator.internalOnly = 'not-public';
+      result.preview.sources[0].source.scope.internalOnly = 'not-public';
+    }
+    return result;
+  });
   const { fingerprint } = h.load('knowledge-validation');
   const { getRequestIdentity, runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
   const { f, ports, db, identity } = fixture();
@@ -189,22 +211,36 @@ test('read-only HTTP uses request-local credentials and current exact policies w
   let last;
   const open = requests.open.bind(requests);
   requests.open = value => { last = open(value); return last; };
-  const invalid = error => error.getStatus() === 400 && error.getResponse().code === 'AI_INVALID_INPUT';
-  const denied = error => error.getStatus() === 503 && error.getResponse().code === 'AI_RESOURCE_UNAVAILABLE';
-  const draft = await controller.readDocument(request, { documentId: 'doc-1' });
+  const invalid = error => {
+    valid('AiKnowledgeConsumptionHttpErrorDraft', error.getResponse());
+    return error.getStatus() === 400 && error.getResponse().code === 'AI_INVALID_INPUT';
+  };
+  const denied = error => {
+    valid('AiKnowledgeConsumptionHttpErrorDraft', error.getResponse());
+    return error.getStatus() === 503 && error.getResponse().code === 'AI_RESOURCE_UNAVAILABLE';
+  };
+  valid('AiKnowledgeDocumentReadRequestDraft', { documentId: 'doc-1' });
+  valid('AiKnowledgeMemoryReadRequestDraft', { memoryId: 'memory-1' });
+  valid('AiKnowledgePreferencesReadRequestDraft', { limit: 1 });
+  const draft = valid('AiKnowledgeDocumentReadResponseDraft', await controller.readDocument(request, { documentId: 'doc-1' }));
   assert.equal(draft.metadata.publication, 'draft'); assert.equal(draft.body, 'current_readable');
+  assert.equal(draft.metadata.permissions, undefined);
+  assert.equal(validators.AiKnowledgeDocumentReadResponseDraft({ ...draft, metadata: { ...draft.metadata, internalOnly: 'forbidden' } }), false);
+  assert.equal(validators.AiKnowledgeConsumptionHttpErrorDraft({ code: 'AI_RESOURCE_UNAVAILABLE', retryable: false, body: 'forbidden' }), false);
   await assert.rejects(last.readDocument({ documentId: 'doc-1' }), { code: 'unavailable' });
   await assert.rejects(controller.readDocument(request, { documentId: 'doc-1', actor: 'user-1' }), invalid);
   await assert.rejects(last.readDocument({ documentId: 'doc-1' }), { code: 'unavailable' });
   await assert.rejects(controller.readPreferences(request, { limit: 11 }), invalid);
   await assert.rejects(controller.readMemory({ headers: { authorization: 'Bearer client' } }, { memoryId: 'memory-1' }), denied);
-  assert.equal((await controller.readMemory(request, { memoryId: 'memory-1' })).status, 'ready');
-  assert.equal((await controller.readPreferences(request, { limit: 1 })).items[0].memoryId, 'memory-1');
+  assert.equal(valid('AiKnowledgeMemoryReadResponseDraft', await controller.readMemory(request, { memoryId: 'memory-1' })).status, 'ready');
+  assert.equal(valid('AiKnowledgePreferencesReadResponseDraft', await controller.readPreferences(request, { limit: 1 })).items[0].memoryId, 'memory-1');
   const queued = await bundle.index.request({ documentId: 'doc-1', expectedRevision: 3, operationId: 'index-1', kind: 'upsert' });
   const indexed = await bundle.index.resume({ documentId: 'doc-1', operationId: queued.indexJob.operationId, generation: queued.indexJob.generation });
   const published = await bundle.management.publish({ documentId: 'doc-1', expectedRevision: indexed.revision, operationId: 'publish-1' });
   const { scope, ...source } = draft.preview.sources[0].source;
-  assert.equal((await controller.openSource(request, source)).text, draft.preview.sources[0].snippet);
+  valid('AiKnowledgeSourceReadRequestDraft', source);
+  assert.equal(validators.AiKnowledgeSourceReadRequestDraft({ ...source, scope }), false);
+  assert.equal(valid('AiKnowledgeSourceReadResponseDraft', await controller.openSource(request, source)).text, draft.preview.sources[0].snippet);
   await assert.rejects(controller.openSource(request, { ...source, scope }), invalid);
   const parent = { tenantId: 'parent-scope' };
   await runWithRequestIdentity(parent, async () => {
@@ -220,16 +256,19 @@ test('read-only HTTP uses request-local credentials and current exact policies w
   const before = structuredClone({ documents: db.state.documents, memories: db.state.memories });
   const bodyPolicies = [...policies.values()].filter(row => row.domain === 'knowledge' && row.action === 'read_body');
   for (const row of bodyPolicies) row.enabled = false;
-  assert.deepEqual((await controller.readDocument(request, { documentId: 'doc-1' })).preview.sources, []);
+  assert.deepEqual(valid('AiKnowledgeDocumentReadResponseDraft', await controller.readDocument(request, { documentId: 'doc-1' })).preview.sources, []);
   for (const row of bodyPolicies) row.enabled = true;
   assert.deepEqual({ documents: db.state.documents, memories: db.state.memories }, before);
   await bundle.management.withdraw({ documentId: 'doc-1', expectedRevision: published.revision, operationId: 'withdraw-1' });
-  assert.equal((await controller.readDocument(request, { documentId: 'doc-1' })).state, 'withdrawn_or_deleted');
+  const withdrawn = valid('AiKnowledgeDocumentReadResponseDraft', await controller.readDocument(request, { documentId: 'doc-1' }));
+  assert.equal(withdrawn.state, 'withdrawn_or_deleted');
+  assert.equal(validators.AiKnowledgeDocumentReadResponseDraft({ ...withdrawn, preview: draft.preview }), false);
   await assert.rejects(controller.openSource(request, source), denied);
   await bundle.memory.revoke({ memoryId: 'memory-1', expectedRevision: 2 });
-  const revoked = await controller.readMemory(request, { memoryId: 'memory-1' });
+  const revoked = valid('AiKnowledgeMemoryReadResponseDraft', await controller.readMemory(request, { memoryId: 'memory-1' }));
   assert.equal(revoked.status, 'revoked'); assert.equal(revoked.memory.preference, undefined);
-  assert.deepEqual((await controller.readPreferences(request, { limit: 1 })).items, []);
+  assert.equal(validators.AiKnowledgeMemoryReadResponseDraft({ ...revoked, memory: { ...revoked.memory, preference: memory.preference } }), false);
+  assert.deepEqual(valid('AiKnowledgePreferencesReadResponseDraft', await controller.readPreferences(request, { limit: 1 })).items, []);
   f.now = h.now + 7200000;
   await assert.rejects(controller.readDocument(request, { documentId: 'doc-1' }), denied);
 });
