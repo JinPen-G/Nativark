@@ -63,7 +63,7 @@ function originalProbeHarness() {
     policy: { read: async () => ({ state: 'configured', revision: policy.revision, enabled: policy.enabled, limits: structuredClone(limits), expiresAt: policy.expiresAt.toISOString() }) },
     probe: { prepareCurrent: async command => ({ intent: structuredClone(command), configRevision: state.config }) },
     sceneVersion: 'v1', priceVersion: 'server-price-1' };
-  return { state, policy, make: () => new PrismaTextProbeOriginalRequestRepository(db, input, () => now),
+  return { state, policy, db, input, now, ctx, make: () => new PrismaTextProbeOriginalRequestRepository(db, input, () => now),
     command: { requestKey: 'original-probe-1', command: { operationId: 'probe-1', profileKey: 'default', profileFingerprint: 'a'.repeat(64) } } };
 }
 
@@ -92,4 +92,29 @@ test('probe original commit response loss is recoverable only by original key; r
   h.state.denied = true;
   await assert.rejects(repo.read(recovered.inputRef));
   assert.equal(h.state.rows.length, 1);
+});
+
+test('persisted probe workflow cannot create or dispatch from a missing original and uses the configuration Guard', async () => {
+  const { composePersistedTextProbeWorkflow } = require('../apps/api/src/modules/ai-native/text-capability-probe-task.composition');
+  const h = originalProbeHarness();
+  let writes = 0, dispatches = 0, guards = 0;
+  const failWrite = async () => { writes++; throw Error('unexpected write'); };
+  h.db.aiTask = { create: failWrite, findFirst: async () => null };
+  h.db.aiScope = { findFirst: async ({ where }) => ({ id: 'scope-1', ...where }) };
+  h.db.aiTaskPlanPolicy.updateMany = failWrite;
+  const user = { id: h.ctx.actor.userId, tenantId: h.ctx.scope.tenantId, isActive: true, isSaasAdmin: false,
+    permissions: h.ctx.access.permissions, dataScope: h.ctx.access.dataScope, locationScope: h.ctx.access.locationScope };
+  const workflow = composePersistedTextProbeWorkflow({ db: h.db, auth: { resolveAccessContext: async () => ({ user, tenantUser: user,
+    workspaceValid: true, workspaceId: h.ctx.scope.workspaceId }) }, credentials: { current: async () => ({
+      authorization: 'Bearer offline-only', requestId: 'probe-request', audience: 'operator' }) },
+    guard: { canActivate: async () => { guards++; return false; } },
+    probe: { ...h.input.probe, prepare: async () => { throw Error('unexpected prepare'); },
+      runHeldCurrent: async () => { dispatches++; throw Error('unexpected dispatch'); }, reconcileCurrent: async () => { throw Error('unexpected receipt'); } },
+    host: { holderId: 'probe-host', leaseMs: 1000 }, sceneVersion: 'v1', priceVersion: 'server-price-1', clock: () => h.now });
+  assert.equal(writes, 0); assert.equal(dispatches, 0); // composition itself is inert
+  // Existing task creation deliberately maps an unresolvable input authority
+  // to access denied, rather than revealing whether an input exists.
+  await assert.rejects(workflow.startOriginal({ creationKey: 'original-task', inputRef: 'missing-original' }), { code: 'AI_ACCESS_DENIED' });
+  await assert.rejects(workflow.publishOriginal(h.command), { code: 'AI_ACCESS_DENIED' });
+  assert.equal(guards, 1); assert.equal(writes, 0); assert.equal(dispatches, 0); assert.equal(h.state.rows.length, 0);
 });

@@ -19,6 +19,8 @@ import type { AiTaskInputSource } from './task-input/task-input.ports';
 import type { AiTaskRegisteredExecutor } from './runner/prisma-task-measured-effects';
 import { aiTaskRunnerLimitsSchema } from './runner/prisma-task-run-evidence.repository';
 import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from './runner/ai-task-runner.ports';
+import type { ApiAuthGuard } from '../../common/api-auth.guard';
+import { composeAuthorizedTextProbeTaskProducer } from './prisma-text-probe-original-request.repository';
 
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -126,4 +128,57 @@ function createRoot(input: TextCapabilityProbeTaskComposition, task: TextProbeTa
 function requireAuthorization(input: TextCapabilityProbeTaskComposition, clock: () => Date) {
   return composePersistedTaskAuthorization({ db: input.db, auth: input.auth, credentials: input.credentials,
     subscriptions: input.subscriptions, clock });
+}
+
+/** Server workflow from immutable original request to the existing runner.
+ * Starting/reconciling NEVER creates a replacement task or operation. Publish,
+ * create, start and receipt read remain separately observable commit points.
+ * This is not an HTTP registration or permission to bypass task action policy. */
+export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProbeTaskComposition, 'task' | 'probe'> & {
+  guard: Pick<ApiAuthGuard, 'canActivate'>;
+  probe: Pick<TextCapabilityProbeApplication, 'prepare' | 'prepareCurrent' | 'runHeldCurrent' | 'reconcileCurrent'>;
+  sceneVersion: string; priceVersion: string;
+}) {
+  const producer = composeAuthorizedTextProbeTaskProducer(input.db, {
+    auth: input.auth, credentials: input.credentials, guard: input.guard, probe: input.probe,
+    sceneVersion: input.sceneVersion, priceVersion: input.priceVersion, clock: input.clock,
+  });
+  const originalTask = async (value: unknown) => {
+    const found = await producer.readCreation(structuredClone(value));
+    if (!found.task) throw unavailable();
+    const saved = found.task;
+    const task = { taskId: saved.taskId, runId: saved.runId, registrationRef: saved.registrationRef,
+      command: saved.command, priceVersion: saved.priceVersion, limits: saved.limits };
+    const root = composeTextCapabilityProbeTask({ ...input, task });
+    // Reauthorize the exact persisted task before returning a runner/receipt
+    // consumer. Merely finding the original creation key grants no run lease.
+    await root.authorization.tasks.readMetadata(task.taskId);
+    return { task, root };
+  };
+  return Object.freeze({
+    publishOriginal: (value: unknown) => producer.originals.publish(value),
+    readOriginal: (requestKey: string) => producer.originals.readOriginal(requestKey),
+    createTask: (value: unknown) => producer.create(value),
+    readCreation: (value: unknown) => producer.readCreation(value),
+    async startOriginal(value: unknown, signal?: AbortSignal) {
+      const { task, root } = await originalTask(value);
+      return root.application.start({ taskId: task.taskId, runId: task.runId }, signal);
+    },
+    async inspectOriginal(value: unknown) {
+      const { task, root } = await originalTask(value);
+      return root.application.inspect({ taskId: task.taskId, runId: task.runId });
+    },
+    async reconcileOriginal(value: unknown, signal?: AbortSignal) {
+      const { task, root } = await originalTask(value);
+      return root.application.reconcile({ taskId: task.taskId, runId: task.runId }, signal);
+    },
+    async readCapabilityReceipt(value: unknown) {
+      const { task, root } = await originalTask(value);
+      const result = await input.probe.reconcileCurrent(structuredClone(task.command));
+      await root.authorization.tasks.readMetadata(task.taskId);
+      // The original capability receipt, not a runner success flag, determines
+      // verified/unverified status. Re-reading it cannot dispatch a probe.
+      return result;
+    },
+  });
 }

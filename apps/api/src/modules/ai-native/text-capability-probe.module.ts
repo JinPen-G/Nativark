@@ -2,8 +2,10 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { ProviderCapabilityService } from './provider-capability.service';
 import { TextCapabilityProbeApplication, type TextCapabilityProbeDependencies } from './text-capability-probe.application';
 import { composeAuthorizedTextProbeTaskProducer } from './prisma-text-probe-original-request.repository';
+import { composePersistedTextProbeWorkflow } from './text-capability-probe-task.composition';
 
 export const TEXT_CAPABILITY_PROBE_TASK_PRODUCER = Symbol('TEXT_CAPABILITY_PROBE_TASK_PRODUCER');
+export const TEXT_CAPABILITY_PROBE_WORKFLOW = Symbol('TEXT_CAPABILITY_PROBE_WORKFLOW');
 
 /** Explicit server composition. Import/register creates no HTTP route, timer,
  * probe or provider call. The host supplies current authority and held execution
@@ -35,5 +37,15 @@ export class TextCapabilityProbeModule {
         sceneVersion: producer.sceneVersion, priceVersion: producer.priceVersion, clock: producer.clock,
       }),
     }], exports: [...(registered.exports ?? []), TEXT_CAPABILITY_PROBE_TASK_PRODUCER] };
+  }
+
+  static registerWorkflow(dependencies: TextCapabilityProbeDependencies,
+    workflow: Omit<Parameters<typeof composePersistedTextProbeWorkflow>[0], 'probe'>): DynamicModule {
+    if (!Object.is(workflow.db, dependencies.db)) throw new Error('TEXT_PROBE_DATABASE_MISMATCH');
+    const registered = this.register(dependencies);
+    return { ...registered, providers: [...(registered.providers ?? []), {
+      provide: TEXT_CAPABILITY_PROBE_WORKFLOW, inject: [TextCapabilityProbeApplication],
+      useFactory: (probe: TextCapabilityProbeApplication) => composePersistedTextProbeWorkflow({ ...workflow, probe }),
+    }], exports: [...(registered.exports ?? []), TEXT_CAPABILITY_PROBE_WORKFLOW] };
   }
 }
