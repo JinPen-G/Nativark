@@ -10,6 +10,8 @@ export interface CustomerBookingHost {
   acceptBookingSubmission?(input: { handoffRef: string }): Promise<AiBookingSubmissionAcceptance>;
   submitAcceptedBooking?(input: AiBookingSubmissionDecision): Promise<AiBookingSubmissionReceipt>;
   readBookingSubmission?(input: { acceptanceRef: string }): Promise<AiBookingSubmissionReceipt>;
+  isCurrent?(): boolean;
+  dispose?(): void;
 }
 export interface BookingClientContext { tenantCode: string; serviceCode: string; customerId: string; version: number }
 export interface CustomerHandoffView {
@@ -35,7 +37,7 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
   const eligible = () => bound.enabled === true && typeof bound.readBookingHandoff === "function"
     && identity.customerId && identity.customerId === bound.capability.customerId
     && identity.serviceCode === bound.capability.serviceCode && identity.tenantCode === bound.capability.tenantCode
-    && bound.capability.releaseRevision && bound.capability.tenantId && bound.capability.workspaceId;
+    && bound.capability.releaseRevision && bound.capability.tenantId && bound.capability.workspaceId && (bound.isCurrent?.() ?? true);
   const submissionAvailable = () => eligible() && [bound.acceptBookingSubmission, bound.submitAcceptedBooking, bound.readBookingSubmission]
     .every(method => typeof method === "function");
   const emit = (next: CustomerHandoffView) => { view = { ...next, submissionAvailable: Boolean(submissionAvailable()) };
@@ -99,12 +101,12 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
     emit({ status: "loading", handoff: null, quote: null });
     try {
       const handoff = validate(await bound.readBookingHandoff({ handoffRef: bound.handoffRef }));
-      if (!active || epoch !== generation || !sameContext()) return;
+      if (!active || epoch !== generation || !sameContext() || !(bound.isCurrent?.() ?? true)) return;
       if (continuing && (!before || JSON.stringify(before) !== JSON.stringify(handoff))) throw Error("changed");
       let quote: RentalQuoteSnapshotV1 | null = null;
       if (continuing) {
         quote = JSON.parse(JSON.stringify(await readQuote(handoff.fields.quoteId))) as RentalQuoteSnapshotV1;
-        if (!active || epoch !== generation || !sameContext()) return;
+        if (!active || epoch !== generation || !sameContext() || !(bound.isCurrent?.() ?? true)) return;
         const q = quote.request, f = handoff.fields;
         if (quote.id !== f.quoteId || quote.tenantId !== bound.capability.tenantId || q.customerId !== identity.customerId
           || q.customerType !== "personal" || q.bookingIdentity?.bookingIdentity === "enterprise_employee"
@@ -154,5 +156,5 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
   return { read: () => read(false), continue: () => read(true), accept: () => action("accept"),
     submit: () => action("submit"), reconcile: () => action("reconcile"),
     snapshotAcceptance: () => acceptance ? JSON.parse(JSON.stringify(acceptance)) as AiBookingSubmissionAcceptance : undefined,
-    destroy() { active = false; generation++; pending = false; view = { status: "disabled", handoff: null, quote: null }; } };
+    destroy() { active = false; generation++; pending = false; bound.dispose?.(); view = { status: "disabled", handoff: null, quote: null }; } };
 }

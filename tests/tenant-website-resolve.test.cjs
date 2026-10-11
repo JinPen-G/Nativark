@@ -81,6 +81,62 @@ test('原预约交接：默认零读取、人工继续复验、上下文/卸载�
   assert.equal(quoteFacts.payableAmount, 12); assert.equal(quoteFacts.depositAmount, 0); assert.equal(quoteFacts.internalReview, undefined);
   assert.equal(await readOriginalBookingQuote(value, 'other', async () => originalQuote, clock), null);
   assert.equal(await readOriginalBookingQuote(value, 'customer', async () => ({ ...originalQuote, expiresAt: '2000-01-01T00:00:00Z' }), clock), null);
+  {
+
+  const fs = require('node:fs'), vm = require('node:vm'), ts = require('typescript');
+  const capability = { contractVersion: 'ain-client-host-capabilities-1', enabled: true, audience: 'customer',
+    surface: 'tenant_website', channel: 'web', customerId: 'customer', customerType: 'personal',
+    tenantCode: 'tenant', serviceCode: 'space', scope: { kind: 'workspace', tenantId: 't', workspaceId: 'w' },
+    policy: { revision: 1, allowRead: true, allowCreate: true }, releaseRevision: 'r1',
+    observedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60000).toISOString(),
+    capabilities: { entryActions: ['CREATE_BOOKING_DRAFT', 'OPEN_BOOKING'], bookingDrafts: true, savedDeliveryAddresses: false },
+    authorization: 'observation_only_recheck_each_action' };
+  const events = new Map(), document = { hidden: false, addEventListener: (key, fn) => events.set(key, fn), removeEventListener: key => events.delete(key) };
+  const calls = []; let hold = false, finish;
+  const response = data => ({ ok: true, status: 200, json: async () => ({ data: structuredClone(data) }) });
+  const fetch = async (address, init) => {
+    calls.push(address); assert.equal(init.method, 'POST'); assert.equal(init.headers.get('Authorization'), 'Bearer synthetic-session');
+    if (address === '/api/client/v1/ai-native/entry/host-capabilities/read') {
+      assert.equal(init.body, '{}'); if (hold) return new Promise(resolve => { finish = () => resolve(response(capability)); });
+      return response(capability);
+    }
+    assert.equal(address, '/api/client/v1/ai-native/entry/booking-handoffs/read');
+    assert.deepEqual(JSON.parse(init.body), { handoffRef: value.handoffRef }); return response(value);
+  };
+  const load = (file, imports) => {
+    const code = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../apps/tenant-website/src', file), 'utf8'),
+      { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS } }).outputText;
+    const module = { exports: {} };
+    vm.runInNewContext(code, { module, exports: module.exports, require: name => {
+      assert.ok(Object.hasOwn(imports, name), `Unexpected dependency ${name}`); return imports[name];
+    }, fetch, Headers, document, Date });
+    return module.exports;
+  };
+  const auth = load('data/authClient.ts', { './apiClient': { API_BASE: '' } });
+  let session = { accessToken: 'synthetic-session', customer: { customerId: 'customer', customerType: 'personal' }, workspace: { workspaceCode: 'space' } };
+  auth.configureAuthBridge({ getSession: () => session, setSession: next => { session = next; } });
+  const { createBookingHandoffHostFactory: factory } = load('features/ai-native/booking-host.factory.ts', { '../../data/authClient': auth });
+  const publication = { tenantCode: 'tenant', serviceCode: 'space', scope: capability.scope, releaseRevision: 'r1' };
+  assert.equal(await factory().openFromUser(value.handoffRef), null); assert.equal(calls.length, 0);
+  const owner = factory(publication); assert.equal(calls.length, 0);
+  const trusted = await owner.openFromUser(value.handoffRef); assert.ok(trusted?.enabled);
+  assert.equal(trusted.capability.workspaceCode, 'space'); assert.equal(trusted.submitAcceptedBooking, undefined);
+  assert.equal(JSON.stringify(trusted).includes('synthetic-session'), false);
+  assert.equal((await trusted.readBookingHandoff({ handoffRef: value.handoffRef })).handoffRef, value.handoffRef);
+  assert.equal(calls.length, 4, 'explicit action rechecks capabilities before and after the handoff read');
+  capability.policy.revision++;
+  await assert.rejects(trusted.readBookingHandoff({ handoffRef: value.handoffRef })); assert.equal(trusted.enabled, false);
+  capability.policy.revision--; assert.equal(await owner.openFromUser(value.handoffRef), null);
+  const logoutHost = await factory(publication).openFromUser(value.handoffRef), prior = session;
+  session = null; assert.equal(logoutHost.enabled, false); session = prior; assert.equal(logoutHost.enabled, false);
+  hold = true;
+  const hidden = factory(publication), pendingOpen = hidden.openFromUser(value.handoffRef);
+  document.hidden = true; events.get('visibilitychange')(); finish(); assert.equal(await pendingOpen, null);
+  document.hidden = false; hold = false; assert.equal(await hidden.openFromUser(value.handoffRef), null);
+  capability.enabled = false; assert.equal(await factory(publication).openFromUser(value.handoffRef), null); capability.enabled = true;
+  capability.expiresAt = '2020-01-01T00:00:00Z'; assert.equal(await factory(publication).openFromUser(value.handoffRef), null);
+
+  }
 });
 
 test('tenantCodeFromHost：只认配置的基础域名的直接子域，保留字/裸域/客户域名返回 null', async () => {

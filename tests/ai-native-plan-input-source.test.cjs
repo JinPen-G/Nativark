@@ -221,6 +221,9 @@ test('settings normal host starts through the runner and persists an approval ch
   assert.equal(material.mode, 'read_only'); assert.equal(material.businessOutcome, 'not_observed');
   assert.equal(material.currentMatchesChangeBase, true); assert.equal(material.review.change.changeId, h.reference.changeId);
   assert.equal(material.decision.state, 'not_observed');
+  assert.equal(material.inputPublication, 'published_reference');
+  assert.equal(material.execution, 'not_attested');
+  assert.equal(material.workflowStatus, 'waiting_confirmation');
   const handoff = await consumer.humanHandoff({ preparation });
   assert.equal(handoff.reference.taskId, 'task-a'); assert.equal(handoff.continuation, 'not_invoked_use_original_settings_host');
   assert.equal(handoff.confirmation.checkpointRef, checkpoint.id);
@@ -271,6 +274,10 @@ test('settings normal host starts through the runner and persists an approval ch
   assert.equal(h.state.aiRun[0].leaseOwnerId, null, 'no decision must not claim an execution lease');
   await controller.decideSettingsProposal(request, { draftVersion: 'ain-approved-settings-draft-1', taskId: 'task-a',
     proposalId: proposal.proposalId, proposalRevision: proposal.proposalRevision, reviewedPayloadHash: proposal.reviewedPayloadHash, decision: 'approve' });
+  const approvedObservation = await consumer.read({ preparation });
+  assert.equal(approvedObservation.decision.state, 'recorded');
+  assert.equal(approvedObservation.businessOutcome, 'not_observed');
+  assert.equal(approvedObservation.execution, 'not_attested');
   const decision = await controller.readSettingsDecision(request, { draftVersion: 'ain-approved-settings-draft-1', taskId: 'task-a',
     proposalId: proposal.proposalId, proposalRevision: proposal.proposalRevision, reviewedPayloadHash: proposal.reviewedPayloadHash });
   assert.equal(decision.state, 'recorded');
@@ -300,6 +307,10 @@ test('settings normal host starts through the runner and persists an approval ch
   assert.equal(terminal.operation.receipt.operationKey, business.operation.receipt.operationKey);
   assert.deepEqual(h.clone(h.state), afterCommitState, 'terminal reconciliation must not claim or restart the run');
   assert.equal(modelHost.factoryCalls.length, 0); assert.equal(modelHost.execution.sent.length, 0);
+  const terminalObservation = await consumer.read({ preparation });
+  assert.equal(terminalWithoutReceipt.workflowStatus, 'succeeded');
+  assert.equal(terminalWithoutReceipt.businessOutcome, 'committed');
+  assert.equal(terminalWithoutReceipt.execution, 'not_attested');
   await assert.rejects(host.application.readConfirmation(checkpointRequest), 'terminal tasks cannot expose a live waiting checkpoint');
 });
 

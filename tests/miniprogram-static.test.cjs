@@ -179,6 +179,49 @@ test("AI原checkout交接：实例host、人工复读原报价、默认关闭与
   page.attachHost({ ...host, readBookingHandoff: () => { throw Error("private failure"); } });
   await page.onReadBookingHandoff(); assert.equal(page.data.aiStatus, "unavailable");
   page.onUnload(); const unloadedWrites = page.writes; await page.onReadBookingHandoff(); assert.equal(page.writes, unloadedWrites);
+
+  const capability = { contractVersion: "ain-client-host-capabilities-1", enabled: true, audience: "customer",
+    surface: "client_miniprogram", channel: "wechat_miniprogram", customerId: "customer-one", customerType: "personal",
+    tenantCode: "merchant", serviceCode: "camera", scope: { kind: "workspace", tenantId: "t", workspaceId: "w" },
+    policy: { revision: 1, allowRead: true, allowCreate: true }, releaseRevision: "r1",
+    observedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60000).toISOString(),
+    capabilities: { entryActions: ["CREATE_BOOKING_DRAFT", "OPEN_BOOKING"], bookingDrafts: true, savedDeliveryAddresses: false },
+    authorization: "observation_only_recheck_each_action" };
+  let pendingCapability, holdCapability = false;
+  const factoryRuntime = runtime(req => {
+    assert.equal(req.method, "POST"); assert.equal(req.header.Authorization, "Bearer access-one");
+    if (req.url.endsWith("/api/client/v1/ai-native/entry/host-capabilities/read")) {
+      same(req.data, {}); if (holdCapability) pendingCapability = req; else ok(req, plain(capability));
+    } else {
+      assert.ok(req.url.endsWith("/api/client/v1/ai-native/entry/booking-handoffs/read"));
+      same(req.data, { handoffRef: handoff.handoffRef }); ok(req, handoff);
+    }
+  });
+  const factorySession = factoryRuntime.load("core/session"); factorySession.saveSession(sessionResponse(), "camera", "login");
+  const { createCustomerBookingHostFactory: factory } = factoryRuntime.load("components/ai-native/booking-host.factory.ts");
+  const publication = { tenantCode: "merchant", serviceCode: "camera", scope: capability.scope, releaseRevision: "r1" };
+  const inert = factory(); assert.equal(await inert.openFromUser(handoff.handoffRef), null); assert.equal(factoryRuntime.calls.length, 0);
+  const owner = factory(publication); assert.equal(factoryRuntime.calls.length, 0);
+  const trusted = await owner.openFromUser(handoff.handoffRef); assert.ok(trusted?.enabled);
+  assert.equal(trusted.submitAcceptedBooking, undefined); assert.equal(JSON.stringify(trusted).includes("access-one"), false);
+  same(await trusted.readBookingHandoff({ handoffRef: handoff.handoffRef }), handoff);
+  assert.equal(factoryRuntime.calls.length, 4, "one initial read, then capability/handoff/capability for an explicit action");
+  capability.policy.revision++;
+  await assert.rejects(trusted.readBookingHandoff({ handoffRef: handoff.handoffRef })); assert.equal(trusted.enabled, false);
+  capability.policy.revision--;
+  assert.equal(await owner.openFromUser(handoff.handoffRef), null, "invalidated host never revives");
+  capability.enabled = false; assert.equal(await factory(publication).openFromUser(handoff.handoffRef), null); capability.enabled = true;
+  const logoutHost = await factory(publication).openFromUser(handoff.handoffRef);
+  factorySession.clearSession("logout"); assert.equal(logoutHost.enabled, false);
+  factorySession.saveSession(sessionResponse(), "camera", "login"); assert.equal(logoutHost.enabled, false);
+  holdCapability = true;
+  const hidden = factory(publication), opening = hidden.openFromUser(handoff.handoffRef);
+  await new Promise(resolve => setImmediate(resolve)); hidden.hide(); ok(pendingCapability, capability);
+  assert.equal(await opening, null, "late capability cannot enable a hidden owner");
+  holdCapability = false;
+  const expiry = capability.expiresAt; capability.expiresAt = "2020-01-01T00:00:00Z";
+  assert.equal(await factory(publication).openFromUser(handoff.handoffRef), null); capability.expiresAt = expiry;
+  capability.surface = "tenant_website"; assert.equal(await factory(publication).openFromUser(handoff.handoffRef), null);
 });
 
 /* ---------------- 工程结构（AC-18） ---------------- */

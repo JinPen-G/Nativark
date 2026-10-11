@@ -74,6 +74,7 @@ export function composeAiSettingsBusinessConsumer(dependencies?: AiSettingsBusin
     if (after.bindingHash !== before.bindingHash || requestFingerprint(latest) !== requestFingerprint(snapshot)
       || requestFingerprint(await app.readCurrent()) !== requestFingerprint(current)
       || (preparation.state === 'prepared' && requestFingerprint(await app.readProposal(preparation.reference)) !== requestFingerprint(review))
+      || (preparation.state === 'prepared' && requestFingerprint(await app.readDecisionReceipt(preparation.reference)) !== requestFingerprint(decision))
       || (confirmation && requestFingerprint(await checkpointReader({ taskId: command.taskId, runId: command.runId,
         stepId: command.stepId })) !== requestFingerprint(confirmation))) {
       throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
@@ -88,24 +89,32 @@ export function composeAiSettingsBusinessConsumer(dependencies?: AiSettingsBusin
       current, change: review?.change ?? null,
       currentMatchesChangeBase: review ? current.settingsRevision === review.change.baseRevision : null,
       preparation, review, decision, operation, confirmation,
+      inputPublication: 'published_reference' as const,
+      execution: 'not_attested' as const,
+      workflowStatus: snapshot.task.status,
+      cancellation: snapshot.task.status === 'cancel_requested' ? 'requested_not_rollback' as const : 'not_requested' as const,
       businessOutcome: operation?.state === 'committed' ? 'committed' as const : step.status === 'unknown' ? 'unknown' as const : 'not_observed' as const,
       retryable: false as const, originalOperation: parsed.data.operationKey ? 'original_key_read' as const
         : original ? 'persisted_original_binding_read' as const : 'original_result_not_observed' as const });
   };
-  return Object.freeze({ availability: dependencies?.settingsHost ? 'available_for_original_settings_task' as const : 'unavailable' as const,
-    async read(value: unknown) {
-      try { return await read(value); }
-      catch (error) {
-        if (error instanceof ApprovedSettingsResultUnknownError) {
-          return { mode: 'read_only' as const, businessOutcome: 'unknown' as const, retryable: false as const, nextAction: 'read_operation' as const };
-        }
-        if (!(error instanceof ApprovedSettingsApplicationUnknownError)) throw error;
-        return { mode: 'read_only' as const, businessOutcome: 'unknown' as const, retryable: false as const, nextAction: error.nextAction };
+  const readSafely = async (value: unknown) => {
+    try { return await read(value); }
+    catch (error) {
+      if (error instanceof ApprovedSettingsResultUnknownError) {
+        return { mode: 'read_only' as const, businessOutcome: 'unknown' as const, retryable: false as const, nextAction: 'read_operation' as const };
       }
-    },
+      if (!(error instanceof ApprovedSettingsApplicationUnknownError)) throw error;
+      return { mode: 'read_only' as const, businessOutcome: 'unknown' as const, retryable: false as const, nextAction: error.nextAction };
+    }
+  };
+  return Object.freeze({ availability: dependencies?.settingsHost ? 'available_for_original_settings_task' as const : 'unavailable' as const,
+    read: readSafely,
     async humanHandoff(value: unknown) {
-      const result = await read(value);
+      const result = await readSafely(value);
+      if (!('task' in result)) return { ...result, mode: 'human_handoff_only' as const,
+        execution: 'not_attested' as const, continuation: 'not_invoked_use_original_settings_host' as const };
       return { mode: 'human_handoff_only' as const, task: result.task, run: result.run, step: result.step,
+        inputPublication: result.inputPublication, workflowStatus: result.workflowStatus, cancellation: result.cancellation,
         reference: result.preparation.state === 'prepared' ? result.preparation.reference : null, decision: result.decision,
         confirmation: result.confirmation,
         continuation: 'not_invoked_use_original_settings_host' as const,

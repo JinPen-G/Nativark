@@ -35,6 +35,8 @@ export interface BookingHandoffHost {
   acceptBookingSubmission?: (input: { handoffRef: string }) => Promise<AiBookingSubmissionAcceptance>;
   submitAcceptedBooking?: (input: AiBookingSubmissionDecision) => Promise<AiBookingSubmissionReceipt>;
   readBookingSubmission?: (input: { acceptanceRef: string }) => Promise<AiBookingSubmissionReceipt>;
+  isCurrent?(): boolean;
+  dispose?(): void;
 }
 export interface BookingPageContext { tenantCode: string | null; workspaceCode?: string; customerId?: string; authenticated: boolean; productId: string }
 export type BookingHandoffState = { status: 'disabled' | 'loading' | 'available' | 'continued' | 'unavailable'
@@ -55,7 +57,7 @@ export function createBookingHandoffConsumer(host: BookingHandoffHost | null, co
   const enabled = () => Boolean(host?.enabled === true && typeof host.readBookingHandoff === 'function'
     && context.authenticated && context.tenantCode === host.capability?.tenantCode
     && context.workspaceCode === host.capability?.workspaceCode && context.customerId === host.capability?.customerId
-    && host.capability?.releaseRevision && host.capability?.tenantId && host.capability?.workspaceId && host.handoffRef);
+    && host.capability?.releaseRevision && host.capability?.tenantId && host.capability?.workspaceId && host.handoffRef && (host.isCurrent?.() ?? true));
   const validate = (value: AiBookingHandoff): AiBookingHandoff => {
     const ref = (input: unknown) => typeof input === 'string' && input.length > 0 && input.length <= 512;
     if (!host || !value || JSON.stringify(value).length > 32768 || value.contractVersion !== 'ain-booking-draft-1'
@@ -101,7 +103,7 @@ export function createBookingHandoffConsumer(host: BookingHandoffHost | null, co
     emit({ status: 'loading', handoff: null });
     try {
       const result = validate(structuredClone(await host!.readBookingHandoff({ handoffRef: host!.handoffRef })));
-      if (destroyed || epoch !== generation) return null;
+      if (destroyed || epoch !== generation || !(host?.isCurrent?.() ?? true)) return null;
       if (continuing && (!before || JSON.stringify(before) !== JSON.stringify(result))) throw Error('changed');
       emit({ status: continuing ? 'continued' : 'available', handoff: result });
       return result;
@@ -137,7 +139,7 @@ export function createBookingHandoffConsumer(host: BookingHandoffHost | null, co
     const epoch = ++generation; pending = true;
     if (kind === 'reconcile') attempted = true;
     emit({ ...state, status: kind === 'accept' ? 'accepting' : kind === 'submit' ? 'submitting' : 'checking', receipt: null });
-    const current = () => !destroyed && !paused && epoch === generation;
+    const current = () => !destroyed && !paused && epoch === generation && (host?.isCurrent?.() ?? true);
     try {
       if (kind === 'accept' || !acceptance) {
         const original = accept(await host!.acceptBookingSubmission!({ handoffRef: host!.handoffRef }));
@@ -160,8 +162,8 @@ export function createBookingHandoffConsumer(host: BookingHandoffHost | null, co
     pause() { generation++; pending = false; paused = true; emit({ status: attempted ? 'pending_reconcile' : 'disabled', handoff: null }); },
     resume() { paused = false; },
     mount() { generation++; destroyed = false; paused = false; pending = false; state = { status: 'disabled', handoff: null }; },
-    invalidate() { generation++; pending = false; emit({ status: 'unavailable', handoff: null }); },
-    destroy() { generation++; destroyed = true; pending = false; state = { status: 'disabled', handoff: null }; } };
+    invalidate() { generation++; pending = false; host?.dispose?.(); emit({ status: 'unavailable', handoff: null }); },
+    destroy() { generation++; destroyed = true; pending = false; host?.dispose?.(); state = { status: 'disabled', handoff: null }; } };
 }
 
 export function handoffLocalInput(value: string, timeZone: string): string {
