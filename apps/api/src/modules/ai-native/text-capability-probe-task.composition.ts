@@ -21,6 +21,7 @@ import { aiTaskRunnerLimitsSchema } from './runner/prisma-task-run-evidence.repo
 import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from './runner/ai-task-runner.ports';
 import type { ApiAuthGuard } from '../../common/api-auth.guard';
 import { composeAuthorizedTextProbeTaskProducer } from './prisma-text-probe-original-request.repository';
+import { composeTaskActionPolicyManagement } from './task-action-policy-management.composition';
 
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
@@ -143,6 +144,8 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
     auth: input.auth, credentials: input.credentials, guard: input.guard, probe: input.probe,
     sceneVersion: input.sceneVersion, priceVersion: input.priceVersion, clock: input.clock,
   });
+  const taskPolicies = composeTaskActionPolicyManagement({ db: input.db, auth: input.auth,
+    credentials: input.credentials, guard: input.guard, clock: input.clock });
   const originalTask = async (value: unknown) => {
     const found = await producer.readCreation(structuredClone(value));
     if (!found.task) throw unavailable();
@@ -156,6 +159,8 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
     return { task, root };
   };
   return Object.freeze({
+    // Server management capability, never a model tool or automatic seed.
+    taskPolicies,
     publishOriginal: (value: unknown) => producer.originals.publish(value),
     readOriginal: (requestKey: string) => producer.originals.readOriginal(requestKey),
     createTask: (value: unknown) => producer.create(value),

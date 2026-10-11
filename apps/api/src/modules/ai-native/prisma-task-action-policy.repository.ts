@@ -38,6 +38,13 @@ type Tx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
 const error = (code: ConstructorParameters<typeof AiTaskRepositoryError>[0]) => new AiTaskRepositoryError(code);
 
+export class AiTaskActionPolicyResultUnknownError extends Error {
+  readonly code = 'AI_RESULT_UNKNOWN';
+  readonly retryable = false;
+  readonly nextAction = 'reconcile';
+  constructor() { super('AI_RESULT_UNKNOWN'); }
+}
+
 /**
  * Server-side writer for the persisted task action policy.
  *
@@ -97,6 +104,28 @@ export class PrismaTaskActionPolicyRepository {
       requiredPermissions: [...row.requiredPermissions] as string[], expiresAt: row.expiresAt.toISOString() };
   }
 
+  /** Original-key read for configuration/CAS recovery, including an expired
+   * policy. Expired rows are not execution grants; the action consumer still
+   * refuses them. A failed read never proves that a prior write did not commit. */
+  async read(taskId: string, operation: AiTaskRepositoryOperation) {
+    if (!operations.includes(operation)) throw error('AI_INVALID_INPUT');
+    const access = await this.access(taskId);
+    let row;
+    try {
+      const task = await this.db.aiTask.findFirst({ where: { scopeId: access.scopeId, id: taskId, archivedAt: null }, select: { id: true } });
+      if (!task || task.id !== taskId) throw error('AI_RESOURCE_UNAVAILABLE');
+      row = await this.db.aiTaskActionPolicy.findUnique({ where: { scopeId_taskId_operation: { scopeId: access.scopeId, taskId, operation } },
+        select: { taskId: true, operation: true, revision: true, requiredPermissions: true, expiresAt: true } });
+    } catch (cause) {
+      if (cause instanceof AiTaskRepositoryError) throw cause;
+      throw error('AI_STORAGE_UNAVAILABLE');
+    }
+    await this.recheck(taskId, access.bindingKey);
+    if (!row) return { state: 'not_observed' as const, retryable: false as const, nextAction: 'reconcile' as const };
+    if (row.taskId !== taskId || row.operation !== operation) throw error('AI_STORAGE_UNAVAILABLE');
+    return { state: 'observed' as const, policy: this.project(row), retryable: false as const, nextAction: 'read_original_policy' as const };
+  }
+
   async put(value: AiTaskActionPolicyMutation, expectedRevision: number | null): Promise<AiTaskActionPolicyMutationResult> {
     const next = this.validate(value);
     if (expectedRevision !== null && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || expectedRevision > maxRevision)) throw error('AI_INVALID_INPUT');
@@ -127,7 +156,7 @@ export class PrismaTaskActionPolicyRepository {
     } catch (cause) {
       if (cause instanceof AiTaskRepositoryError) throw cause;
       if (cause instanceof Prisma.PrismaClientKnownRequestError && cause.code === 'P2002') throw error('AI_REVISION_CONFLICT');
-      throw error('AI_STORAGE_UNAVAILABLE');
+      throw new AiTaskActionPolicyResultUnknownError();
     }
   }
 
@@ -150,7 +179,7 @@ export class PrismaTaskActionPolicyRepository {
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (cause) {
       if (cause instanceof AiTaskRepositoryError) throw cause;
-      throw error('AI_STORAGE_UNAVAILABLE');
+      throw new AiTaskActionPolicyResultUnknownError();
     }
   }
 }
