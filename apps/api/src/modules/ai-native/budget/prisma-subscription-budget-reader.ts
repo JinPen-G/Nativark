@@ -34,7 +34,9 @@ export class PrismaSubscriptionBudgetReader implements SubscriptionBudgetEntitle
         const validUntil = dates.length ? Math.min(...dates.map(date => date.getTime())) : now.getTime();
         const active = context.serviceStatus === 'active' || context.serviceStatus === 'expiring';
         return { revision: context.revision, available: active && context.newBusinessAllowed === true && entries[0].available === true, validUntil };
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+      // Read-only coherent entitlement snapshot, also called from financial
+      // transaction revalidation. It is not a subscription write/lock grant.
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
       if (snapshot.available && this.now().getTime() >= snapshot.validUntil) throw new BudgetError('UNAVAILABLE');
       return { revision: snapshot.revision, entitlements: [{ code: featureCode, available: snapshot.available }] };
     } catch (error) {

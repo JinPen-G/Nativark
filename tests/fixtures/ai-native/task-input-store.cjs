@@ -30,7 +30,10 @@ const unique = {
   aiTaskRunPlan: [['scopeId', 'taskId', 'runId']],
   aiTaskResultArtifact: [['scopeId', 'taskId', 'id'], ['scopeId', 'taskId', 'runId', 'stepId', 'fencingToken']],
   aiTaskExecutionBudget: [['scopeId', 'taskId']], aiTaskExecutionCharge: [['scopeId', 'taskId', 'chargeId']],
-  aiTaskEvent: [['scopeId', 'taskId', 'cursor']]
+  aiTaskEvent: [['scopeId', 'taskId', 'cursor']],
+  aiBudgetReservation: [['scopeId', 'scopeKind', 'idempotencyKey']],
+  aiBudgetAllocation: [['policyId', 'reservationId']], aiBudgetLedgerEntry: [['reservationId', 'eventKey']],
+  aiGatewayAccountingReceipt: [['invocationId'], ['reservationId'], ['admissionId']]
 };
 
 // Serialized Prisma-shaped transaction double with rollback and lost COMMIT replies; not MySQL.
@@ -50,6 +53,7 @@ function createTaskInputStore(initial, constraints = {}) {
       out.executionPlan = data.aiTaskRunPlan.find(p => p.runId === row.id) ?? null;
     }
     if (name === 'aiTask') out.runs = data.aiRun.filter(r => r.taskId === row.id).map(r => related(r, 'aiRun', data));
+    if (name === 'aiBudgetAllocation') out.reservation = clone(data.aiBudgetReservation.find(reservation => reservation.id === row.reservationId) ?? null);
     if (name === 'aiProposal') out.currentVersion = (data.aiProposalVersion ?? []).find(version =>
       version.scopeId === row.scopeId && version.taskId === row.taskId && version.proposalId === row.id && version.revision === row.currentRevision) ?? null;
     if (name === 'aiProposalAction') out.step = data.aiStep.find(step =>
@@ -81,6 +85,14 @@ function createTaskInputStore(initial, constraints = {}) {
           row.status ??= 'succeeded';
         }
         if (name === 'aiApprovalConsumption') row.updatedAt ??= new Date('2026-10-06T12:00:00Z');
+        if (name === 'aiBudgetReservation') {
+          row.updatedAt ??= new Date('2026-10-06T12:00:00Z');
+          for (const field of ['reservedTokens', 'reservedCalls', 'reservedMoney', 'moneyCurrency', 'actualTokens', 'actualCalls', 'actualMoney', 'unknownReason']) row[field] ??= null;
+        }
+        if (name === 'aiGatewayAccountingReceipt') {
+          row.id ??= require('node:crypto').randomUUID(); row.updatedAt ??= new Date('2026-10-06T12:00:00Z');
+          for (const field of ['inputTokens', 'outputTokens', 'usageHash']) row[field] ??= null;
+        }
         if (name === 'aiTaskExecutionBudget') for (const prefix of ['reserved', 'consumed']) for (const kind of ['Steps', 'Calls', 'ActiveMs', 'OutputBytes']) row[`${prefix}${kind}`] ??= 0n;
         rows().push(row); return hydrate(row);
       };
@@ -96,14 +108,19 @@ function createTaskInputStore(initial, constraints = {}) {
             const [field, direction] = Object.entries(order)[0];
             found = found.sort((a, b) => (a[field] > b[field] ? 1 : a[field] < b[field] ? -1 : 0) * (direction === 'desc' ? -1 : 1));
           }
-          return found.slice(0, args.take).map(row => hydrate(row, args.select)); },
+          return found.slice(0, args.take).map(row => hydrate(name === 'aiBudgetAllocation' ? related(row, name, data) : row, args.select)); },
         create: async args => { trace.push(`${name}.create`); if (control.beforeWrite) await control.beforeWrite(name, args, data); return insert(args.data); },
+        createMany: async args => { trace.push(`${name}.createMany`); if (control.beforeWrite) await control.beforeWrite(name, args, data);
+          for (const row of args.data) insert(row); return { count: args.data.length }; },
         updateMany: async args => { trace.push(`${name}.update`); if (control.beforeWrite) await control.beforeWrite(name, args, data);
           const found = selected(args.where);
           for (const row of found) for (const [k, v] of Object.entries(args.data)) {
             if (v && typeof v === 'object' && 'increment' in v) row[k] = row[k] instanceof Prisma.Decimal ? row[k].add(v.increment) : row[k] + v.increment;
             else if (v && typeof v === 'object' && 'decrement' in v) row[k] -= v.decrement;
             else row[k] = clone(v);
+          }
+          if (['aiBudgetReservation', 'aiGatewayAccountingReceipt'].includes(name)) for (const row of found) {
+            row.updatedAt = new Date(row.updatedAt.getTime() + 1);
           }
           return { count: found.length }; },
         upsert: async args => { trace.push(`${name}.upsert`); if (control.beforeWrite) await control.beforeWrite(name, args, data);
@@ -114,7 +131,18 @@ function createTaskInputStore(initial, constraints = {}) {
   }
   let tail = Promise.resolve();
   const db = delegates(state);
-  db.$transaction = callback => {
+  db.$transaction = (callback, options) => {
+    // Independent non-locking authorization snapshots may run while a write
+    // transaction holds policy locks. Never publish this snapshot or permit
+    // writes; this models read visibility, not MySQL lock behavior.
+    if (options?.isolationLevel === 'RepeatableRead') {
+      const readers = delegates(clone(state));
+      for (const delegate of Object.values(readers)) for (const method of ['create', 'createMany', 'updateMany', 'upsert']) {
+        delegate[method] = async () => { throw Error('read-only authorization snapshot cannot write'); };
+      }
+      trace.push('transaction.readSnapshot');
+      return Promise.resolve().then(() => callback(readers));
+    }
     const work = tail.then(async () => {
       const draft = clone(state); trace.push('transaction.begin');
       try {

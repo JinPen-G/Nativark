@@ -11,7 +11,7 @@ const config = { configId: 'profile', configRevision: 1, credentialRef: 'vault',
 const association = { requestId: 'call', runId: 'run', stepId: 'step', actionId: 'action', idempotencyKey: 'call', priceVersion: 'price', scope: { kind: 'workspace', tenantId: 'tenant', workspaceId: 'workspace' }, config };
 const call = { context: { actorId: 'actor', tenantId: 'tenant', workspaceId: 'workspace' }, binding: { id: 'admission', actorId: 'actor', callId: 'call', requestHash: 'a'.repeat(64), profileId: 'profile', dispatchId: 'dispatch', scope: { id: 'scope', kind: 'WORKSPACE', tenantId: 'tenant', workspaceId: 'workspace' } }, request: { callId: 'call', model: 'model', maxOutputTokens: 32, intentHash: 'b'.repeat(64) }, expiresAt: new Date(time.getTime() + 60000) };
 
-test('real task budget authority binds the persisted invocation and rejects forged scope or revoked actor', async () => {
+test('real task budget authority binds the persisted invocation and rejects forged scope or revoked actor', { timeout: 15000 }, async () => {
   const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
   const { PrismaTaskBudgetAuthorizationSource } = require('../apps/api/src/modules/ai-native/budget/prisma-task-budget-authorization.source');
   const { Prisma } = require('../apps/api/node_modules/@prisma/client');
@@ -22,7 +22,7 @@ test('real task budget authority binds the persisted invocation and rejects forg
     runId: 'run-a', stepId: 'step-a', actionId: 'action-a', sceneCode: 'synthetic-clarification', priceVersion: 'price',
     configuration, configurationHash: requestFingerprint(configuration), intentHash: 'b'.repeat(64), stepFingerprint: 'b'.repeat(64),
     maxOutputTokens: 32, leaseOwnerId: 'bootstrap', fencingToken: new Prisma.Decimal(1), expiresAt: new Date('2026-10-06T12:01:00Z'), registrationHash: 'c'.repeat(64) };
-  const h = await authorizedRunnerHarness({ aiGatewayInvocation: [invocation], aiBudgetReservation: [],
+  const h = await authorizedRunnerHarness({ aiGatewayInvocation: [invocation], aiBudgetReservation: [], aiBudgetAllocation: [], aiBudgetLedgerEntry: [],
     aiProviderProfile: [{ id: 'profile', scopeId: 'scope-tenant', scopeKind: 'TENANT', enabled: true, disabledAt: null,
       configRevision: 1, credentialRef: 'vault', protocol: configuration.protocol, provider: configuration.provider,
       model: configuration.model, serviceMode: 'tenant_managed' }],
@@ -50,12 +50,31 @@ test('real task budget authority binds the persisted invocation and rejects forg
   h.state.aiBudgetPolicy[0].unitKind = 'money';
   await assert.rejects(pricing.quote(command, authorized), { code: 'UNAVAILABLE' });
   h.state.aiBudgetPolicy[0].unitKind = 'calls';
-  h.state.aiBudgetReservation.push({ id: 'original-reservation', scopeId: 'scope-a', scopeKind: 'WORKSPACE', actorId: 'user-a',
-    callId: 'call', requestId: 'call', runId: 'run-a', stepId: 'step-a', actionId: 'action-a', idempotencyKey: 'call',
-    sceneCode: 'synthetic-clarification', priceVersion: 'price', configRevision: 1, configurationHash: requestFingerprint(configuration),
-    tenantId: 'tenant-a', workspaceId: 'workspace-a', unitKind: 'calls', reservedCalls: 1, dispatchState: 'dispatched' });
-  const record = { id: 'original-reservation', actorId: 'user-a', callId: 'call', association: assoc,
-    reserved: { unit: 'calls', value: 1 }, dispatched: true };
+  const { createAuthorizedPersistedGatewayBudget } = require('../apps/api/src/modules/ai-native/budget/gateway-budget.composition');
+  const root = createAuthorizedPersistedGatewayBudget({ ...h.authorization, db: h.db, pricing,
+    guard: { canActivate: async () => false }, clock: () => h.control.now });
+  const accountingCall = { context: { actorId: 'user-a', tenantId: 'tenant-a', workspaceId: 'workspace-a' },
+    binding: { id: 'admission-a', actorId: 'user-a', callId: 'call', requestHash: 'a'.repeat(64), profileId: 'profile',
+      dispatchId: 'dispatch-a', scope: { id: 'scope-a', kind: 'WORKSPACE', tenantId: 'tenant-a', workspaceId: 'workspace-a' } },
+    request: { callId: 'call', model: configuration.model, maxOutputTokens: 32, intentHash: 'b'.repeat(64) }, expiresAt: invocation.expiresAt };
+  h.state.aiInvocationAdmission.push({ ...accountingCall.binding, ...accountingCall.context,
+    status: 'admitted', revokedAt: null, completedAt: null, expiresAt: invocation.expiresAt });
+  const reserved = await root.budget.reserve(accountingCall);
+  assert.equal(h.state.aiBudgetReservation.length, 1);
+  assert.equal(h.state.aiBudgetAllocation.length, 3);
+  await root.budget.dispatch(accountingCall, reserved.id);
+  await root.budget.settle(accountingCall, reserved.id, 'provider-event', { inputTokens: 2, outputTokens: 3 });
+  await root.budget.settle(accountingCall, reserved.id, 'provider-event', { inputTokens: 2, outputTokens: 3 });
+  assert.equal(h.state.aiBudgetReservation[0].status, 'settled');
+  assert.equal(h.state.aiBudgetReservation[0].actualCalls, 1);
+  assert.equal(h.state.aiBudgetLedgerEntry.filter(entry => entry.kind === 'settle').length, 1);
+  const allocations = await h.db.aiBudgetAllocation.findMany({ where: { reservationId: reserved.id },
+    select: { reservation: { select: { status: true, actualCalls: true } } } });
+  assert.equal(allocations.length, 3);
+  assert.ok(allocations.every(row => row.reservation.status === 'settled' && row.reservation.actualCalls === 1));
+  const { PrismaBudgetRepository } = require('../apps/api/src/modules/ai-native/budget/prisma-budget.repository');
+  const record = await new PrismaBudgetRepository(h.db).get(reserved.id, assoc);
+  assert.equal(record.dispatched, true); // completed consumption is still an original dispatched fact, not permission to dispatch again
   assert.deepEqual(await pricing.quantity(record, { inputTokens: 2, outputTokens: 3 }), { unit: 'calls', value: 1 });
   await assert.rejects(pricing.quantity(record, { inputTokens: NaN, outputTokens: 3 }), { code: 'UNAVAILABLE' });
   h.state.aiBudgetReservation[0].unitKind = 'money';
@@ -66,7 +85,7 @@ test('real task budget authority binds the persisted invocation and rejects forg
   assert.equal(managementChecks, 1);
   h.identity.session = false;
   await assert.rejects(source.authorize('reserve', current, { association: assoc }));
-  assert.equal(h.state.aiBudgetReservation.length, 1); // only the explicit stored evidence fixture, no authority/pricing writes
+  assert.equal(h.state.aiBudgetReservation.length, 1); // one original service reservation, no duplicate settlement/account
 });
 
 function harness() {

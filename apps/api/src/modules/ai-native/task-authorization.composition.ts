@@ -73,7 +73,11 @@ export function composePersistedTaskAuthorization(input: PersistedTaskAuthorizat
         results.push({ key, id: row.id, revision: row.configRevision, settings });
       }
       return results;
-    }, { isolationLevel: 'Serializable', maxWait: 2500, timeout: 5000 });
+    // Pure authorization snapshot: Serializable SELECTs acquire shared locks
+    // and can block behind the caller's budget transaction's own FOR UPDATE.
+    // A separate consistent non-locking read is not an atomic budget grant:
+    // the caller must still validate its locked current policies.
+    }, { isolationLevel: 'RepeatableRead', maxWait: 2500, timeout: 5000 });
   };
 
   const snapshot = async (taskId: string, operation: 'claim_run' | 'transition_task') => {
