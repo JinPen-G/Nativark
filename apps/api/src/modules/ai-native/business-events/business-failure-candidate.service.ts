@@ -116,6 +116,12 @@ export class BusinessFailureCandidateService {
       scope: { kind: 'workspace' as const, tenantId: row.tenantId, workspaceId: row.workspaceId },
       occurredAt: row.occurredAt.toISOString(), traceId: row.traceId, causationId: row.causationId,
       deduplicationKey: row.deduplicationKey, causalDepth: 1 };
+    if (row.eventType === 'inspection.return_exception' && row.inspectionId && row.exceptionId && row.orderId
+      && !row.notificationId && !row.refundId && row.failureCode === 'review_pending') {
+      return { ...base, type: 'inspection.return_exception', resource: { kind: 'inspection', id: row.inspectionId, version: row.resourceRevision },
+        payload: { orderId: row.orderId, exceptionId: row.exceptionId } };
+    }
+    if (row.inspectionId || row.exceptionId) throw new BusinessFailureError('unavailable');
     if (row.eventType === 'notification.failed' && row.notificationId && !row.refundId && row.failureCode === 'delivery_failed') {
       return { ...base, type: 'notification.failed', resource: { kind: 'notification', id: row.notificationId, version: row.resourceRevision }, payload: { failureCode: 'delivery_failed' } };
     }

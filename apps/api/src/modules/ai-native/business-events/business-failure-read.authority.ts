@@ -9,11 +9,12 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { BusinessFailureError } from './prisma-business-failure-outbox';
+import { returnExceptionSource } from './return-exception-source';
 
-export type FailureSource = { revision: number; failed: boolean; orderId: string | null; paymentIntentId?: string };
+export type FailureSource = { revision: number; failed: boolean; orderId: string | null; paymentIntentId?: string; sourceHash?: string };
 export class BusinessFailureReadAuthority {
   private readonly identities: AiTaskCurrentIdentityAuthority;
-  constructor(private readonly db: Pick<PrismaClient, 'rentalNotificationLog' | 'rentalPaymentRefund'>,
+  constructor(private readonly db: Pick<PrismaClient, 'rentalNotificationLog' | 'rentalPaymentRefund' | 'rentalInspectionRecord'>,
     auth: Pick<AuthService, 'resolveAccessContext'>, private readonly credentials: AiTaskCredentialSource,
     private readonly guard: Pick<ApiAuthGuard, 'canActivate'>, private readonly core: Pick<RentalCoreService, 'getOrder'>,
     clock: () => Date = () => new Date()) {
@@ -32,6 +33,7 @@ export class BusinessFailureReadAuthority {
       if (event.tenantId !== current.scope.tenantId || event.workspaceId !== current.scope.workspaceId) throw new BusinessFailureError('unavailable');
       const source = await this.source(event);
       const path = event.notificationId ? '/rental/v1/notification-logs'
+        : event.inspectionId ? `/rental/v1/orders/${encodeURIComponent(source.orderId!)}/inspections`
         : `/rental/v1/orders/${encodeURIComponent(source.orderId!)}/payment-intents/${encodeURIComponent(source.paymentIntentId!)}/refunds`;
       const credentials = structuredClone(await this.credentials.current());
       if (!credentials || credentials.audience !== context.audience || typeof credentials.authorization !== 'string') throw new BusinessFailureError('unavailable');
@@ -50,7 +52,7 @@ export class BusinessFailureReadAuthority {
             if (!source.orderId || !canResolveNotificationOrderScope(getRequestDataScope(), getRequestLocationIds())) throw new BusinessFailureError('unavailable');
             await this.core.getOrder(event.tenantId, source.orderId);
           }
-          if (event.refundId) await this.core.getOrder(event.tenantId, source.orderId!);
+          if (event.refundId || event.inspectionId) await this.core.getOrder(event.tenantId, source.orderId!);
         } catch { throw new BusinessFailureError('unavailable'); }
         const principal = requestFingerprint({ actor: context.actor, audience: context.audience, scope: context.scope,
           access: 'access' in context ? context.access : null });
@@ -68,6 +70,16 @@ export class BusinessFailureReadAuthority {
 
   private async source(event: AiBusinessFailureOutbox): Promise<FailureSource> {
     const scope = { tenantId: event.tenantId, workspaceId: event.workspaceId };
+    if (event.eventType === 'inspection.return_exception' && event.inspectionId && event.exceptionId && event.orderId
+      && !event.notificationId && !event.refundId && event.failureCode === 'review_pending') {
+      const row = await this.db.rentalInspectionRecord.findFirst({ where: { id: event.inspectionId, ...scope, orderId: event.orderId } });
+      if (!row || row.id !== event.inspectionId || row.tenantId !== scope.tenantId || row.workspaceId !== scope.workspaceId
+        || row.orderId !== event.orderId) throw new BusinessFailureError('unavailable');
+      const source = returnExceptionSource(row, event.exceptionId);
+      if (!source) throw new BusinessFailureError('unavailable');
+      return source;
+    }
+    if (event.inspectionId || event.exceptionId) throw new BusinessFailureError('unavailable');
     if (event.eventType === 'notification.failed' && event.notificationId && !event.refundId) {
       const row = await this.db.rentalNotificationLog.findFirst({ where: { id: event.notificationId, ...scope }, select: {
         id: true, revision: true, status: true, provider: true, nextAttemptAt: true, businessObjectType: true, businessObjectId: true } });

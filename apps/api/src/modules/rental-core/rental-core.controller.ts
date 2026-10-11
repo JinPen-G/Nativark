@@ -1,6 +1,7 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Optional, Param, Patch, Post, Put, Query, Req, Res, UploadedFile, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { Prisma } from "@prisma/client";
+import { PrismaBusinessFailureOutbox } from '../ai-native/business-events/prisma-business-failure-outbox';
 import {
   RentalCoreOrderStatus,
   type RentalOrderChangePreview,
@@ -2689,7 +2690,9 @@ export class RentalCoreController {
           reviewedBy: req.user.displayName,
           reviewedAt: new Date().toISOString()
         });
-        await tx.rentalInspectionRecord.update({ where: { id: inspectionId }, data: { exceptions: exceptions as Prisma.InputJsonValue } });
+        await tx.rentalInspectionRecord.update({ where: { id: inspectionId, tenantId, workspaceId, orderId: id, revision: row.revision },
+          data: { exceptions: exceptions as Prisma.InputJsonValue, revision: { increment: 1 } } });
+        await new PrismaBusinessFailureOutbox().inspection(tx, { tenantId, workspaceId }, inspectionId);
         return { order: approved.order, inspectionId, exceptionIndex, exception };
       },
       replay: async () => {
@@ -2753,7 +2756,9 @@ export class RentalCoreController {
           customerRespondedAt: respondedAt,
           customerResponseHistory: history
         });
-        await tx.rentalInspectionRecord.update({ where: { id: inspectionId }, data: { exceptions: exceptions as Prisma.InputJsonValue } });
+        await tx.rentalInspectionRecord.update({ where: { id: inspectionId, tenantId, workspaceId, orderId: id, revision: row.revision },
+          data: { exceptions: exceptions as Prisma.InputJsonValue, revision: { increment: 1 } } });
+        await new PrismaBusinessFailureOutbox().inspection(tx, { tenantId, workspaceId }, inspectionId);
         return { order, inspectionId, exceptionIndex, exception };
       },
       replay: async () => {
@@ -2838,7 +2843,9 @@ export class RentalCoreController {
         delete exception.customerResponseReason;
         delete exception.customerRespondedBy;
         delete exception.customerRespondedAt;
-        await tx.rentalInspectionRecord.update({ where: { id: inspectionId }, data: { exceptions: exceptions as Prisma.InputJsonValue } });
+        await tx.rentalInspectionRecord.update({ where: { id: inspectionId, tenantId, workspaceId, orderId: id, revision: row.revision },
+          data: { exceptions: exceptions as Prisma.InputJsonValue, revision: { increment: 1 } } });
+        await new PrismaBusinessFailureOutbox().inspection(tx, { tenantId, workspaceId }, inspectionId);
         return { order: adjusted.order, inspectionId, exceptionIndex, exception };
       },
       replay: async () => {

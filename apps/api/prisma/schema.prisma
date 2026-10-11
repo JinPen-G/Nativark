@@ -1139,6 +1139,8 @@ model AiBusinessFailureOutbox {
   eventType        String   @db.VarChar(32)
   notificationId   String?  @db.VarChar(191)
   refundId         String?  @db.VarChar(191)
+  inspectionId     String?  @db.VarChar(191)
+  exceptionId      String?  @db.VarChar(191)
   resourceRevision Int      @db.UnsignedInt
   orderId          String?  @db.VarChar(191)
   failureCode      String   @db.VarChar(32)
@@ -1159,11 +1161,13 @@ model AiBusinessFailureOutbox {
   workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_workspace_fk")
   notification     RentalNotificationLog? @relation("AiFailureNotification", fields: [tenantId, workspaceId, notificationId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_notification_fk")
   refund           RentalPaymentRefund? @relation("AiFailureRefund", fields: [tenantId, workspaceId, refundId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_refund_fk")
+  inspection       RentalInspectionRecord? @relation("AiFailureInspection", fields: [tenantId, workspaceId, inspectionId, orderId], references: [tenantId, workspaceId, id, orderId], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_inspection_fk")
 
   automationInputs AiAutomationInput[]
   @@unique([tenantId, workspaceId, id], map: "ai_failure_outbox_scope_id_key")
   @@unique([tenantId, workspaceId, deduplicationKey], map: "ai_failure_outbox_dedup_key")
   @@index([tenantId, workspaceId, status, nextAttemptAt], map: "ai_failure_outbox_due_idx")
+  @@index([tenantId, workspaceId, inspectionId, exceptionId], map: "ai_failure_outbox_inspection_idx")
   @@map("ai_business_failure_outbox")
 }
 
@@ -4757,7 +4761,11 @@ model RentalInspectionRecord {
   attachments       Json
   operator          String
   createdAt         DateTime                 @default(now())
+  revision          Int                      @default(1) @db.UnsignedInt
+  updatedAt         DateTime                 @default(now()) @updatedAt @db.DateTime(3)
+  failureEvents     AiBusinessFailureOutbox[] @relation("AiFailureInspection")
 
+  @@unique([tenantId, workspaceId, id, orderId], map: "rental_inspection_event_source_key")
   @@index([tenantId, orderId, stage])
   @@map("rental_inspection_records")
 }

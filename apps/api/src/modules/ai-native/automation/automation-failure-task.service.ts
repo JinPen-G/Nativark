@@ -27,6 +27,7 @@ export class AutomationFailureTaskService {
       storedId = await this.db.$transaction(async tx => {
         await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_automation_policies WHERE id = ${before.policy.id} FOR UPDATE`);
         await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_automation_subjects WHERE id = ${before.subject.id} FOR UPDATE`);
+        if (before.event.inspectionId) await tx.$queryRaw(Prisma.sql`SELECT id FROM rental_inspection_records WHERE id = ${before.event.inspectionId} AND tenantId = ${before.key.tenantId} AND workspaceId = ${before.key.workspaceId} FOR UPDATE`);
         await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_business_failure_outbox WHERE id = ${eventId} FOR UPDATE`);
         if (before.event.notificationId) await tx.$queryRaw(Prisma.sql`SELECT id FROM rental_notification_logs WHERE id = ${before.event.notificationId} FOR UPDATE`);
         if (before.event.refundId) await tx.$queryRaw(Prisma.sql`SELECT id FROM rental_payment_refunds WHERE id = ${before.event.refundId} FOR UPDATE`);
@@ -35,6 +36,14 @@ export class AutomationFailureTaskService {
         const existing = await tx.aiAutomationInput.findFirst({ where: {
           tenantId: before.key.tenantId, workspaceId: before.key.workspaceId, policyId: before.key.policyId, eventId: before.key.eventId } });
         if (existing) { this.authority.verifyInput(existing, before); attemptedRef = existing.id; return existing.id; }
+        if (before.event.inspectionId && before.event.exceptionId) {
+          const sourceKey = { tenantId: before.key.tenantId, workspaceId: before.key.workspaceId,
+            inspectionId: before.event.inspectionId, exceptionId: before.event.exceptionId };
+          const consumed = await tx.aiAutomationInput.findFirst({ where: {
+            tenantId: before.key.tenantId, workspaceId: before.key.workspaceId, event: sourceKey } });
+          const closed = await tx.aiBusinessFailureOutbox.findFirst({ where: { ...sourceKey, status: 'closed' } });
+          if (consumed || closed) throw new AutomationError('unavailable');
+        }
         const policy = await tx.aiAutomationPolicy.findFirst({ where: { id: before.policy.id,
           tenantId: before.key.tenantId, workspaceId: before.key.workspaceId } });
         const now = this.clock(), day = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));

@@ -1,3 +1,4 @@
+import { PrismaBusinessFailureOutbox } from '../ai-native/business-events/prisma-business-failure-outbox';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import {
   CLIENT_API_VERSION,
@@ -1208,7 +1209,9 @@ export class ClientApiService {
         const history = Array.isArray(exception.customerResponseHistory) ? (exception.customerResponseHistory as Array<Record<string, unknown>>) : [];
         history.push({ decision: input.decision, reason, operator, respondedAt });
         Object.assign(exception, { customerResponseStatus: input.decision, customerResponseReason: reason, customerRespondedBy: operator, customerRespondedAt: respondedAt, customerResponseHistory: history });
-        await tx.rentalInspectionRecord.update({ where: { id: inspectionId }, data: { exceptions: exceptions as Prisma.InputJsonValue } });
+        await tx.rentalInspectionRecord.update({ where: { id: inspectionId, tenantId: context.tenantId, workspaceId: context.workspaceId, orderId, revision: row.revision },
+          data: { exceptions: exceptions as Prisma.InputJsonValue, revision: { increment: 1 } } });
+        await new PrismaBusinessFailureOutbox().inspection(tx, { tenantId: context.tenantId, workspaceId: context.workspaceId }, inspectionId);
         return { inspectionId, exceptionIndex };
       },
       replay: async () => {
