@@ -25,6 +25,8 @@ import { requestFingerprint } from '../rental-core/rental-idempotency.repository
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+const cancellationSchema = z.object({ expectedRevision: z.number().int().min(1).max(4294967294) }).strict();
+const originalCancellationSchema = cancellationSchema.extend({ creationKey: id.max(128), inputRef: id }).strict();
 
 const taskSchema = z.object({ taskId: id.max(36), runId: id.max(36), registrationRef: id,
   command: textProbeCommandSchema, priceVersion: id.max(64), limits: aiTaskRunnerLimitsSchema }).strict();
@@ -59,7 +61,17 @@ export function composeTextCapabilityProbeTask(input: TextCapabilityProbeTaskCom
       steps: [{ registrationRef: task.registrationRef, operation: 'external_unknown',
         toolCode: TEXT_CAPABILITY_PROBE_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION }], limits: structuredClone(task.limits) }, lease);
   });
-  return Object.freeze({ ...root, application });
+  return Object.freeze({ ...root, application,
+    // Request only: no fabricated cancelled outcome, refund or replacement run.
+    // Current task action policy, owner/scope and revision are checked by the
+    // existing transition repository, and the original runner converges later.
+    requestCancellation(value: unknown) {
+      const parsed = cancellationSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return root.taskTransitions.transition({ taskId: task.taskId, expectedRevision: parsed.data.expectedRevision,
+        to: 'cancel_requested', reason: 'cancel_requested' });
+    },
+  });
 }
 
 function createRoot(input: TextCapabilityProbeTaskComposition, task: TextProbeTask, clock: () => Date) {
@@ -188,6 +200,13 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
     async inspectOriginal(value: unknown) {
       const { task, root } = await originalTask(value);
       return root.application.inspect({ taskId: task.taskId, runId: task.runId });
+    },
+    async requestCancellationOriginal(value: unknown) {
+      const parsed = originalCancellationSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const { creationKey, inputRef, expectedRevision } = parsed.data;
+      const { root } = await originalTask({ creationKey, inputRef });
+      return root.requestCancellation({ expectedRevision });
     },
     async reconcileOriginal(value: unknown, signal?: AbortSignal) {
       const { task, root } = await originalTask(value);

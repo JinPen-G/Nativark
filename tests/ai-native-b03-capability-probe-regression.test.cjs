@@ -115,8 +115,32 @@ test('persisted probe workflow cannot create or dispatch from a missing original
   // Existing task creation deliberately maps an unresolvable input authority
   // to access denied, rather than revealing whether an input exists.
   await assert.rejects(workflow.startOriginal({ creationKey: 'original-task', inputRef: 'missing-original' }), { code: 'AI_ACCESS_DENIED' });
+  await assert.rejects(workflow.requestCancellationOriginal({ creationKey: 'original-task', inputRef: 'missing-original', expectedRevision: 1 }), { code: 'AI_ACCESS_DENIED' });
   await assert.rejects(workflow.publishOriginal(h.command), { code: 'AI_ACCESS_DENIED' });
   assert.equal(guards, 1); assert.equal(writes, 0); assert.equal(dispatches, 0); assert.equal(h.state.rows.length, 0);
+});
+
+test('probe task cancellation uses current policy and CAS without calling the model or releasing accounting', async () => {
+  const { composeTextCapabilityProbeTask } = require('../apps/api/src/modules/ai-native/text-capability-probe-task.composition');
+  const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
+  const h = await authorizedRunnerHarness({ aiTaskPlanPolicy: [], aiTaskActionInput: [] });
+  let calls = 0;
+  const forbidden = async () => { calls++; throw Error('cancellation cannot execute or settle'); };
+  const root = composeTextCapabilityProbeTask({ ...h.authorization, db: h.db,
+    task: { taskId: 'task-a', runId: 'run-a', registrationRef: 'probe-input', priceVersion: 'price',
+      command: { operationId: 'probe-a', profileKey: 'default', profileFingerprint: 'a'.repeat(64) }, limits: h.plan.limits },
+    probe: { prepare: forbidden, runHeldCurrent: forbidden, prepareHeldInvocationCurrent: forbidden },
+    financialEvidence: { readDispatch: forbidden }, host: { holderId: 'probe-host', leaseMs: 1000 }, clock: () => h.control.now });
+  const revision = h.state.aiTask[0].revision;
+  await assert.rejects(root.requestCancellation({ expectedRevision: revision + 1 }), { code: 'AI_REVISION_CONFLICT' });
+  const result = await root.requestCancellation({ expectedRevision: revision });
+  assert.equal(result.event.data.to, 'cancel_requested');
+  assert.equal(h.state.aiTask[0].status, 'CANCEL_REQUESTED');
+  assert.notEqual(h.state.aiTask[0].status, 'CANCELLED');
+  assert.equal(calls, 0);
+  h.identity.session = false;
+  await assert.rejects(root.requestCancellation({ expectedRevision: h.state.aiTask[0].revision }));
+  assert.equal(calls, 0);
 });
 
 test('authorized probe root is inert, binds its own financial evidence and refuses unconfigured original requests', async () => {
