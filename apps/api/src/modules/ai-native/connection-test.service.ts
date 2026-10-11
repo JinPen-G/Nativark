@@ -5,7 +5,15 @@ import { ModelGatewayError, type GatewayContext, type ModelRequest } from './mod
 import type { AiProfileCapability, AiProviderProfileRecord } from './provider-profile.ports';
 import type { ProviderCapabilityService } from './provider-capability.service';
 
-export interface GatewayConnectionProbe { invoke(context: GatewayContext, request: ModelRequest): Promise<{ text: string; usage?: unknown }>; }
+export interface GatewayConnectionProbe {
+  invoke(context: GatewayContext, request: ModelRequest): Promise<{
+    text: string;
+    usage?: unknown;
+    /** Typed channels are intentionally optional: missing channels are a failed challenge, not text evidence. */
+    toolRequests?: unknown[];
+    structuredOutput?: unknown;
+  }>;
+}
 export interface ConnectionTestResult { capability: AiProfileCapability; status: 'supported' | 'unsupported' | 'unverified'; errorCode?: string; evidenceHash: string; }
 const featureFor = (capability: AiProfileCapability): ModelRequest['features'] => capability === 'streaming' ? ['streaming'] : capability === 'tools' ? ['tools'] : capability === 'structured_output' ? ['structuredOutput'] : undefined;
 /** Controlled probe: no provider SDK or secret is accepted here; Gateway owns routing/credentials/admission. */
@@ -36,6 +44,16 @@ export class AiConnectionTestService {
         if (['vision', 'audio', 'embedding', 'reasoning'].includes(capability)) throw new ModelGatewayError('CONFIG_INVALID');
         const result = await this.gateway.invoke(structuredClone(boundContext), { callId: `connection-test:${boundProfile.id}:${boundProfile.configRevision}:${capability}`, model: boundProfile.model, messages: [{ role: 'user', content: 'connection test' }], maxOutputTokens: 8, features: featureFor(capability) });
         if (!result || typeof result.text !== 'string') throw new ModelGatewayError('INVALID_RESPONSE');
+        // A plain text response cannot prove a typed capability. Keep the
+        // result unverified, but preserve the concrete adapter failure so a
+        // missing protocol mapping is visible to configuration owners.
+        if (capability === 'tools' && !Array.isArray(result.toolRequests)) {
+          throw new ModelGatewayError('INVALID_RESPONSE');
+        }
+        if (capability === 'structured_output'
+          && !Object.prototype.hasOwnProperty.call(result, 'structuredOutput')) {
+          throw new ModelGatewayError('INVALID_RESPONSE');
+        }
       } catch (error) {
         errorCode = error instanceof ModelGatewayError ? error.code : 'PROVIDER_FAILED';
       }
