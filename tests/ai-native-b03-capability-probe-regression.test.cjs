@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 require('./fixtures/ai-native/contract-consumer.cjs').blockNetwork(test);
-require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node' } });
+require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { AiConnectionTestService } = require('../apps/api/src/modules/ai-native/connection-test.service');
 const { ModelGatewayError } = require('../apps/api/src/modules/ai-native/model-gateway.ports');
 
@@ -36,4 +36,60 @@ test('configuration revision is part of the evidence identity and changed probes
   await service.run(context, { ...profile, configRevision: 8 }, ['text']);
   assert.notEqual(records[0].evidenceHash, records[1].evidenceHash);
   assert.deepEqual(records.map(row => row.profile.configRevision), [7, 8]);
+});
+
+// Database transactions and authorization/configuration ports are offline
+// substitutes; the immutable request repository itself is production code.
+function originalProbeHarness() {
+  const { PrismaTextProbeOriginalRequestRepository } = require('../apps/api/src/modules/ai-native/prisma-text-probe-original-request.repository');
+  const { AI_TOOL_DRAFT_VERSION } = require('@rental-os/shared');
+  const consumer = require('./fixtures/ai-native/contract-consumer.cjs');
+  const now = new Date('2026-10-11T00:00:00Z');
+  const ctx = structuredClone(consumer.contexts[0]); ctx.authorizedAt = now.toISOString();
+  const state = { rows: [], denied: false, lost: false, config: 1 };
+  const limits = { maxSteps: 1, maxCalls: 1, maxConcurrent: 1, maxTotalMs: 5000, maxStepMs: 5000, maxOutputBytes: 1024 };
+  const policy = { scopeId: 'scope-1', sceneCode: 'ai.capability.text', sceneVersion: 'v1', revision: 1, enabled: true,
+    limits, allowedTools: [{ code: 'ai.capability.text.probe', version: AI_TOOL_DRAFT_VERSION }], expiresAt: new Date(now.getTime() + 60000) };
+  const match = (row, where) => Object.entries(where).every(([key, value]) => row[key] === value);
+  const delegate = rows => ({ findFirst: async ({ where }) => structuredClone(rows.find(row => match(row, where)) ?? null),
+    create: async ({ data }) => { rows.push(structuredClone(data)); return structuredClone(data); } });
+  const db = { aiTaskOriginalRequest: { findFirst: async args => delegate(state.rows).findFirst(args) },
+    aiTaskPlanPolicy: { findFirst: async ({ where }) => match(policy, where) ? structuredClone(policy) : null },
+    $transaction: async callback => { const rows = structuredClone(state.rows);
+      const result = await callback({ $queryRaw: async () => [], aiTaskPlanPolicy: db.aiTaskPlanPolicy, aiTaskOriginalRequest: delegate(rows) });
+      state.rows = rows; if (state.lost) { state.lost = false; throw Error('commit response lost'); } return result; } };
+  const input = { scopes: { resolveCurrent: async () => { if (state.denied) throw Error('revoked'); return { context: structuredClone(ctx),
+    scope: { id: 'scope-1', kind: 'WORKSPACE', tenantId: ctx.scope.tenantId, workspaceId: ctx.scope.workspaceId } }; } },
+    policy: { read: async () => ({ state: 'configured', revision: policy.revision, enabled: policy.enabled, limits: structuredClone(limits), expiresAt: policy.expiresAt.toISOString() }) },
+    probe: { prepareCurrent: async command => ({ intent: structuredClone(command), configRevision: state.config }) },
+    sceneVersion: 'v1', priceVersion: 'server-price-1' };
+  return { state, policy, make: () => new PrismaTextProbeOriginalRequestRepository(db, input, () => now),
+    command: { requestKey: 'original-probe-1', command: { operationId: 'probe-1', profileKey: 'default', profileFingerprint: 'a'.repeat(64) } } };
+}
+
+test('persisted probe original survives reconstruction, binds same-key payload and rechecks policy/configuration', async () => {
+  const h = originalProbeHarness(), repo = h.make(), receipt = await repo.publish(h.command);
+  assert.equal(receipt.replayed, false);
+  const original = await h.make().read(receipt.inputRef);
+  assert.deepEqual(original.command, h.command.command);
+  assert.equal(original.priceVersion, 'server-price-1');
+  assert.equal((await repo.publish(h.command)).inputRef, receipt.inputRef);
+  assert.equal(h.state.rows.length, 1);
+  await assert.rejects(repo.publish({ ...h.command, command: { ...h.command.command, operationId: 'other-probe' } }), { code: 'AI_REVISION_CONFLICT' });
+  h.state.config++;
+  await assert.rejects(repo.read(receipt.inputRef), { code: 'AI_REVISION_CONFLICT' });
+  h.state.config--; h.policy.enabled = false;
+  await assert.rejects(repo.read(receipt.inputRef), { code: 'AI_RESOURCE_UNAVAILABLE' });
+});
+
+test('probe original commit response loss is recoverable only by original key; revocation returns no stored input', async () => {
+  const h = originalProbeHarness(), repo = h.make(); h.state.lost = true;
+  await assert.rejects(repo.publish(h.command), { code: 'AI_RESULT_UNKNOWN', retryable: false });
+  assert.equal(h.state.rows.length, 1);
+  const recovered = await h.make().readOriginal(h.command.requestKey);
+  assert.equal(recovered.state, 'stored');
+  assert.equal((await repo.read(recovered.inputRef)).command.operationId, 'probe-1');
+  h.state.denied = true;
+  await assert.rejects(repo.read(recovered.inputRef));
+  assert.equal(h.state.rows.length, 1);
 });
