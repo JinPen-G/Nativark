@@ -10,6 +10,9 @@ import { composeKnowledgeFileApplication, KNOWLEDGE_SCENE_OPTIONS, type Knowledg
 import { HumanKnowledgeUploadService } from './human-knowledge-upload.service';
 import { composePrismaFormalHumanKnowledge, type PrismaFormalKnowledgeDependencies } from './prisma-formal-knowledge.composition';
 import { KNOWLEDGE_POLICY_MANAGEMENT, type KnowledgePolicyManagementApplication } from './knowledge-policy-management.composition';
+import { HumanKnowledgeConsumptionRequestFactory, type HumanKnowledgeConsumptionDependencies } from './human-knowledge-consumption.composition';
+import { HumanKnowledgeConsumptionController } from './human-knowledge-consumption.controller';
+import { unavailable } from './knowledge-errors';
 
 @Module({})
 export class HumanKnowledgeModule {
@@ -19,6 +22,14 @@ export class HumanKnowledgeModule {
 
   static registerFormal(ports: FormalHumanKnowledgeDependencies | PrismaFormalKnowledgeDependencies): DynamicModule {
     return this.services('knowledgePolicy' in ports ? composeFormalPersistedHumanKnowledge(ports) : composePrismaFormalHumanKnowledge(ports));
+  }
+
+  static registerConsumptionHttp(options: { enabled?: boolean; dependencies?: HumanKnowledgeConsumptionDependencies } = {}): DynamicModule {
+    if (options.enabled !== true) return { module: HumanKnowledgeModule, controllers: [], providers: [] };
+    if (!options.dependencies) return unavailable();
+    const requests = new HumanKnowledgeConsumptionRequestFactory(options.dependencies);
+    return { module: HumanKnowledgeModule, controllers: [HumanKnowledgeConsumptionController],
+      providers: [{ provide: HumanKnowledgeConsumptionRequestFactory, useValue: requests }] };
   }
 
   static registerFiles(ports: KnowledgeFileApplicationDependencies): DynamicModule {
