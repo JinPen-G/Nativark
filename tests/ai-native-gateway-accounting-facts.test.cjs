@@ -36,13 +36,37 @@ test('real task budget authority binds the persisted invocation and rejects forg
   const current = await source.resolveContext();
   const grant = await source.authorize('reserve', current, { association: assoc });
   assert.match(grant.authorizationKey, /^task-budget:[a-f0-9]{64}$/u);
+  const { PrismaGatewayCallPricing } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-call-pricing');
+  for (const policy of h.state.aiBudgetPolicy) policy.unitKind = 'calls';
+  const pricing = new PrismaGatewayCallPricing(h.db, source.scopes, 'price', () => h.control.now);
+  const command = { association: assoc, callId: 'call', sceneCode: 'synthetic-clarification', expiresAt: invocation.expiresAt };
+  const authorized = { ...grant, context: current, entitled: true };
+  const quote = await pricing.quote(command, authorized);
+  assert.deepEqual(quote.quantity, { unit: 'calls', value: 1 });
+  assert.deepEqual(quote.policies.map(policy => policy.scopeKind), ['PLATFORM', 'TENANT', 'WORKSPACE']);
+  const laterGrant = { ...authorized, expiresAt: new Date(authorized.expiresAt.getTime() + 1000) };
+  assert.deepEqual(await pricing.quote(command, laterGrant), quote); // grant lifetime is not a new billing operation
+  await assert.rejects(pricing.quote({ ...command, association: { ...assoc, priceVersion: 'other' } }, authorized), { code: 'FORBIDDEN' });
+  h.state.aiBudgetPolicy[0].unitKind = 'money';
+  await assert.rejects(pricing.quote(command, authorized), { code: 'UNAVAILABLE' });
+  h.state.aiBudgetPolicy[0].unitKind = 'calls';
+  h.state.aiBudgetReservation.push({ id: 'original-reservation', scopeId: 'scope-a', scopeKind: 'WORKSPACE', actorId: 'user-a',
+    callId: 'call', requestId: 'call', runId: 'run-a', stepId: 'step-a', actionId: 'action-a', idempotencyKey: 'call',
+    sceneCode: 'synthetic-clarification', priceVersion: 'price', configRevision: 1, configurationHash: requestFingerprint(configuration),
+    tenantId: 'tenant-a', workspaceId: 'workspace-a', unitKind: 'calls', reservedCalls: 1, dispatchState: 'dispatched' });
+  const record = { id: 'original-reservation', actorId: 'user-a', callId: 'call', association: assoc,
+    reserved: { unit: 'calls', value: 1 }, dispatched: true };
+  assert.deepEqual(await pricing.quantity(record, { inputTokens: 2, outputTokens: 3 }), { unit: 'calls', value: 1 });
+  await assert.rejects(pricing.quantity(record, { inputTokens: NaN, outputTokens: 3 }), { code: 'UNAVAILABLE' });
+  h.state.aiBudgetReservation[0].unitKind = 'money';
+  await assert.rejects(pricing.quantity(record, { inputTokens: 2, outputTokens: 3 }), { code: 'FORBIDDEN' });
   assert.equal(managementChecks, 0); // business step authorization, not config management bypass
   await assert.rejects(source.authorize('reserve', current, { association: { ...assoc, scope: { ...scope, workspaceId: 'other' } } }), { code: 'FORBIDDEN' });
   await assert.rejects(source.authorize('settings_write', current, { policy: { scopeKind: 'WORKSPACE', scopeId: 'scope-a', sceneCode: 'synthetic-clarification' } }), { code: 'FORBIDDEN' });
   assert.equal(managementChecks, 1);
   h.identity.session = false;
   await assert.rejects(source.authorize('reserve', current, { association: assoc }));
-  assert.equal(h.state.aiBudgetReservation.length, 0); // authorization does not reserve or dispatch
+  assert.equal(h.state.aiBudgetReservation.length, 1); // only the explicit stored evidence fixture, no authority/pricing writes
 });
 
 function harness() {
