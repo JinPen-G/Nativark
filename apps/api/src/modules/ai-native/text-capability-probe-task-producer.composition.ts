@@ -4,7 +4,7 @@ import type { AiExecutionContext } from '@rental-os/shared';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError, type AiTaskRepository } from './ai-task.repository';
 import { AiTaskCreationRepository, type AiTaskCreationAuthority } from './ai-task-creation.repository';
-import { textProbeCommandSchema, TEXT_CAPABILITY_PROBE_TOOL, type TextProbeCommand } from './text-capability-probe';
+import { textProbeCommandSchema, TEXT_CAPABILITY_PROBE_TOOL } from './text-capability-probe';
 import { aiTaskRunnerLimitsSchema } from './runner/prisma-task-run-evidence.repository';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
@@ -51,11 +51,12 @@ export function composeTextCapabilityProbeTaskProducer(input: TextCapabilityProb
     async read(ref: string) {
       const parsedRef = inputRef.safeParse(ref);
       if (!parsedRef.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      let value: unknown;
-      try { value = await input.source.read(parsedRef.data); } catch { throw unavailable(); }
-      const parsed = originalSchema.safeParse(structuredClone(value));
-      if (!parsed.success || parsed.data.inputRef !== parsedRef.data
-        || requestFingerprint(parsed.data.command) !== requestFingerprint(await readCommand(input.source, parsedRef.data))) throw denied();
+      let first: unknown, second: unknown;
+      try { first = await input.source.read(parsedRef.data); second = await input.source.read(parsedRef.data); } catch { throw unavailable(); }
+      const parsed = originalSchema.safeParse(structuredClone(first));
+      const current = originalSchema.safeParse(structuredClone(second));
+      if (!parsed.success || !current.success || parsed.data.inputRef !== parsedRef.data || current.data.inputRef !== parsedRef.data) throw denied();
+      if (requestFingerprint(parsed.data) !== requestFingerprint(current.data)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
       return parsed.data;
     }
   };
@@ -91,12 +92,4 @@ export function composeTextCapabilityProbeTaskProducer(input: TextCapabilityProb
     },
     creation
   });
-}
-
-async function readCommand(source: TextCapabilityProbeOriginalInputSource, ref: string) {
-  let value: unknown;
-  try { value = await source.read(ref); } catch { throw unavailable(); }
-  const parsed = originalSchema.safeParse(structuredClone(value));
-  if (!parsed.success || parsed.data.inputRef !== ref) throw denied();
-  return parsed.data.command as TextProbeCommand;
 }
