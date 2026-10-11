@@ -22,7 +22,7 @@ export function createPersistedGatewayBudget(input: {
   const facts = new PrismaGatewayAccountingFacts(input.db, bindings, input.scopes, input.pricing, input.clock);
   const service = createPersistedBudgetSubsystem({ db: input.db, subscriptions: input.subscriptions, authorization: input.authorization,
     quotes: input.pricing, evidence: new PersistedBudgetEvidenceAdapter(facts), clock: input.clock });
-  return { bindings, budget: new PersistentGatewayBudget(new BudgetGatewayAdapter(service, bindings), facts) };
+  return { bindings, facts, budget: new PersistentGatewayBudget(new BudgetGatewayAdapter(service, bindings), facts) };
 }
 
 /** Workspace-user server assembly with real current task/configuration

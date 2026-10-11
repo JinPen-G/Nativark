@@ -118,3 +118,30 @@ test('persisted probe workflow cannot create or dispatch from a missing original
   await assert.rejects(workflow.publishOriginal(h.command), { code: 'AI_ACCESS_DENIED' });
   assert.equal(guards, 1); assert.equal(writes, 0); assert.equal(dispatches, 0); assert.equal(h.state.rows.length, 0);
 });
+
+test('authorized probe root is inert, binds its own financial evidence and refuses unconfigured original requests', async () => {
+  const { composeAuthorizedPersistedTextProbeWorkflow } = require('../apps/api/src/modules/ai-native/text-capability-probe.composition');
+  const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
+  const h = await authorizedRunnerHarness({ aiProviderProfile: [], aiPlatformModelConnection: [],
+    aiTenantModelConfiguration: [], systemParameterSet: [], aiTaskOriginalRequest: [], aiTaskPlanPolicy: [],
+    aiProviderCapabilityEvidence: [], aiBudgetReservation: [], aiBudgetAllocation: [], aiBudgetLedgerEntry: [] });
+  // Existing store only implements updateMany. Platform configuration needs
+  // Prisma update too; no operation in this scenario may ever invoke it.
+  h.db.aiPlatformModelConnection.update = async () => { throw Error('unexpected platform configuration write'); };
+  h.db.aiProviderCapabilityEvidence.upsert = async () => { throw Error('unexpected capability evidence write'); };
+  let guards = 0, decrypts = 0, transports = 0, prices = 0;
+  const root = composeAuthorizedPersistedTextProbeWorkflow({ ...h.authorization, db: h.db,
+    guard: { canActivate: async () => { guards++; return false; } },
+    secrets: { encrypt: () => { throw Error('not requested'); }, decrypt: () => { decrypts++; throw Error('not requested'); } },
+    platformProfileId: 'platform-default', pricing: { quote: async () => { prices++; throw Error('not configured'); },
+      quantity: async () => { throw Error('no usage'); } },
+    audit: { append: async () => { throw Error('no execution'); } },
+    protocol: { post: async () => { transports++; throw Error('network forbidden'); } },
+    host: { holderId: 'probe-host', leaseMs: 1000 }, sceneVersion: 'v1', priceVersion: 'server-price', clock: () => h.control.now });
+  assert.equal(guards, 0); assert.equal(decrypts, 0); assert.equal(transports, 0); assert.equal(prices, 0);
+  assert.equal(root.application.financialEvidence.readDispatch instanceof Function, true);
+  await assert.rejects(root.workflow.publishOriginal({ requestKey: 'probe-original', command: {
+    operationId: 'probe-operation', profileKey: 'default', profileFingerprint: 'a'.repeat(64) } }));
+  assert.equal(h.state.aiTaskOriginalRequest.length, 0);
+  assert.equal(decrypts, 0); assert.equal(transports, 0); assert.equal(prices, 0);
+});

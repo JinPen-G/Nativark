@@ -21,6 +21,7 @@ import { createPersistedTextCapabilityEvidence, PrismaTextCapabilityReceiptRepos
 import { matchesProbeProfile, probeContextSchema, textProbeCommandSchema, textProbeConfiguration, textProbeDescriptorSchema,
   textProbeEvidenceHash, textProbeIntent, TEXT_PROBE_METHOD, TEXT_PROBE_SCENE, type TextProbeCommand } from './text-capability-probe';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import type { PersistedBudgetEvidenceSource } from './budget/budget-dependency-adapters';
 
 export type TextCapabilityProbeDependencies = Omit<Parameters<typeof createPersistedGatewayBudget>[0], 'scopes' | 'db'> & {
   db: Parameters<typeof createPersistedGatewayBudget>[0]['db'] & TextProbeReceiptDb
@@ -39,6 +40,9 @@ export class TextCapabilityProbeApplication {
   private readonly receipts;
   /** Same persisted evidence consumer for the ordinary authorized Gateway. */
   readonly capabilities: ProviderCapabilityService;
+  /** Read-only evidence from the SAME accounting facts as this Gateway ledger.
+   * Runner consumers cannot substitute a different success/dispatch source. */
+  readonly financialEvidence: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>;
   private readonly accounting;
   private readonly admission;
   private readonly dispatch;
@@ -54,6 +58,8 @@ export class TextCapabilityProbeApplication {
     this.receipts = new PrismaTextCapabilityReceiptRepository(input.db, input.clock);
     this.capabilities = createPersistedTextCapabilityEvidence(input.db, input.clock);
     this.accounting = createPersistedGatewayBudget(input);
+    this.financialEvidence = Object.freeze({ readDispatch: (reservationId: string) =>
+      this.accounting.facts.readDispatch(reservationId) });
     const admissions = new PrismaAdmissionRepository(input.db);
     this.admission = new InvocationAdmissionService(admissions, input.clock);
     this.dispatch = new InvocationDispatchService(admissions);

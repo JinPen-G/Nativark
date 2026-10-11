@@ -3,15 +3,28 @@ import { ProviderCapabilityService } from './provider-capability.service';
 import { TextCapabilityProbeApplication, type TextCapabilityProbeDependencies } from './text-capability-probe.application';
 import { composeAuthorizedTextProbeTaskProducer } from './prisma-text-probe-original-request.repository';
 import { composePersistedTextProbeWorkflow } from './text-capability-probe-task.composition';
+import { composeAuthorizedPersistedTextProbeWorkflow, type AuthorizedTextProbeWorkflowDependencies } from './text-capability-probe.composition';
 
 export const TEXT_CAPABILITY_PROBE_TASK_PRODUCER = Symbol('TEXT_CAPABILITY_PROBE_TASK_PRODUCER');
 export const TEXT_CAPABILITY_PROBE_WORKFLOW = Symbol('TEXT_CAPABILITY_PROBE_WORKFLOW');
+const AUTHORIZED_TEXT_PROBE_ROOT = Symbol('AUTHORIZED_TEXT_PROBE_ROOT');
 
 /** Explicit server composition. Import/register creates no HTTP route, timer,
  * probe or provider call. The host supplies current authority and held execution
  * evidence; the original Gateway still owns admission and the single ledger. */
 @Module({})
 export class TextCapabilityProbeModule {
+  /** Preferred real server root. One application/ledger/evidence instance;
+   * explicit registration alone never publishes or starts a probe task. */
+  static registerAuthorizedWorkflow(dependencies: AuthorizedTextProbeWorkflowDependencies): DynamicModule {
+    type Root = ReturnType<typeof composeAuthorizedPersistedTextProbeWorkflow>;
+    return { module: TextCapabilityProbeModule, providers: [
+      { provide: AUTHORIZED_TEXT_PROBE_ROOT, useFactory: () => composeAuthorizedPersistedTextProbeWorkflow(dependencies) },
+      { provide: TextCapabilityProbeApplication, inject: [AUTHORIZED_TEXT_PROBE_ROOT], useFactory: (root: Root) => root.application },
+      { provide: TEXT_CAPABILITY_PROBE_WORKFLOW, inject: [AUTHORIZED_TEXT_PROBE_ROOT], useFactory: (root: Root) => root.workflow },
+      { provide: ProviderCapabilityService, inject: [AUTHORIZED_TEXT_PROBE_ROOT], useFactory: (root: Root) => root.application.capabilities },
+    ], exports: [TextCapabilityProbeApplication, TEXT_CAPABILITY_PROBE_WORKFLOW, ProviderCapabilityService] };
+  }
   static register(dependencies: TextCapabilityProbeDependencies): DynamicModule {
     return { module: TextCapabilityProbeModule, providers: [
       { provide: TextCapabilityProbeApplication, useFactory: () => new TextCapabilityProbeApplication(dependencies) },
