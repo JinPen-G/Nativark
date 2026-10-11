@@ -140,7 +140,10 @@ function createRoot(input: TextCapabilityProbeTaskComposition, task: TextProbeTa
           || requestFingerprint(textProbeCommandSchema.parse(stored.input)) !== requestFingerprint(task.command)) throw denied();
         pending = undefined;
         const result = await owned.prepared.execute(signal);
-        return { kind: 'succeeded' as const, payload: JSON.parse(JSON.stringify(result)) };
+        const payload = JSON.parse(JSON.stringify(result));
+        if (result.status === 'completed' && result.usage.kind === 'reported') return { kind: 'succeeded' as const, payload };
+        if (result.status === 'failed') return { kind: 'failed' as const, payload, errorCode: 'AI_RESOURCE_UNAVAILABLE' as const };
+        return { kind: 'unknown' as const, payload };
       } };
     }
   };

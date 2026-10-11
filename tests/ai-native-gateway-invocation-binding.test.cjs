@@ -38,12 +38,13 @@ function harness() {
       aiTask: [{ id: 'task-1', scopeId: 'scope-1', scopeKind: 'WORKSPACE', ownerId: 'actor-1', ownerKind: 'USER', audience: 'OPERATOR', status: 'RUNNING', revision: 5, sceneCode: intent.sceneCode, archivedAt: null, cancelRequestedAt: null }],
       aiRun: [{ id: 'run-1', taskId: 'task-1', scopeId: 'scope-1', actorId: 'actor-1', actorKind: 'USER', status: 'RUNNING', revision: 7, leaseOwnerId: 'worker-1', leaseExpiresAt: new Date(now.getTime() + 60_000), fencingToken: new Prisma.Decimal(2) }],
       aiStep: [{ id: 'step-1', taskId: 'task-1', runId: 'run-1', scopeId: 'scope-1', actionId: 'action-1', requestFingerprint: intentHash, status: 'RUNNING', revision: 9 }],
-      aiGatewayInvocation: [], aiBudgetReservation: []
+      aiGatewayInvocation: [], aiBudgetReservation: [], aiTaskActionInput: []
     }
   };
   function delegates(rows) {
     return Object.fromEntries(Object.keys(rows).map(name => [name, {
       findFirst: async ({ where }) => { state.readHook?.(name); return copy(rows[name].find(row => matches(row, where)) ?? null); },
+      findMany: async ({ where }) => copy(rows[name].filter(row => matches(row, where))),
       findUnique: async ({ where }) => copy(rows[name].find(row => matches(row, where.scopeId_callId ?? where)) ?? null),
       updateMany: async ({ where, data }) => { const selected = rows[name].filter(row => matches(row, where)); selected.forEach(row => Object.assign(row, copy(data))); return { count: selected.length }; },
       create: async ({ data }) => {
@@ -52,7 +53,7 @@ function harness() {
       }
     }]));
   }
-  const db = Object.fromEntries(Object.keys(state.rows).map(name => [name, Object.fromEntries(['findFirst', 'findUnique', 'updateMany', 'create'].map(method => [method, args => delegates(state.rows)[name][method](args)]))]));
+  const db = Object.fromEntries(Object.keys(state.rows).map(name => [name, Object.fromEntries(['findFirst', 'findMany', 'findUnique', 'updateMany', 'create'].map(method => [method, args => delegates(state.rows)[name][method](args)]))]));
   let queue = Promise.resolve();
   db.$transaction = operation => {
     const pending = queue.then(async () => {
@@ -71,6 +72,30 @@ function harness() {
   };
   return { state, source, input, budget };
 }
+
+test('text probe binds frozen command separately from its generated challenge intent', async () => {
+  const { textProbeIntent, TEXT_CAPABILITY_PROBE_TOOL } = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+  const { AI_TOOL_DRAFT_VERSION } = require('@rental-os/shared');
+  const h = harness();
+  Object.assign(h.state.rows.aiProviderProfile[0], { profileKey: 'default', role: 'DEFAULT', allowedCapabilities: ['text'] });
+  const command = { operationId: 'probe-operation', profileKey: 'default',
+    profileFingerprint: capabilityProfileFingerprint(h.state.rows.aiProviderProfile[0]) };
+  const prepared = textProbeIntent(command.operationId, 'scope-1');
+  h.state.rows.aiTask[0].sceneCode = prepared.intent.sceneCode;
+  Object.assign(h.state.rows.aiStep[0], { toolCode: TEXT_CAPABILITY_PROBE_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION, inputRef: 'probe-input', requestFingerprint: requestFingerprint(command) });
+  h.state.rows.aiTaskActionInput.push({ id: 'probe-input', scopeId: 'scope-1', taskId: 'task-1', runId: 'run-1',
+    toolCode: TEXT_CAPABILITY_PROBE_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION, payload: command, fingerprint: requestFingerprint(command), expiresAt: new Date(now.getTime() + 60000) });
+  const input = { ...h.input(), intent: prepared.intent };
+  assert.equal((await h.source().register(input)).replayed, false);
+  assert.notEqual(h.state.rows.aiGatewayInvocation[0].stepFingerprint, h.state.rows.aiGatewayInvocation[0].intentHash);
+  assert.equal((await h.source().resolveForReserve(narrow, { callId: prepared.intent.requestId, model: config.model,
+    maxOutputTokens: 32, intentHash: prepared.intentHash })).association.stepId, 'step-1');
+  h.state.rows.aiTaskActionInput[0].payload.operationId = 'different-probe';
+  await assert.rejects(h.source().resolveForReserve(narrow, { callId: prepared.intent.requestId, model: config.model,
+    maxOutputTokens: 32, intentHash: prepared.intentHash }));
+  assert.equal(h.state.creates, 1);
+});
 
 test('real binding source registers one existing task step and survives service recreation', async () => {
   const h = harness();

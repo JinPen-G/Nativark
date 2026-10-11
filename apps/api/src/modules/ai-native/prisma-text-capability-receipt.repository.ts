@@ -75,7 +75,7 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
       || accounting.tenantId !== d.context.tenantId || accounting.workspaceId !== d.context.workspaceId
       || accounting.dispatchToken !== o.dispatchId || accounting.requestHash !== o.requestHash || accounting.state !== 'dispatched'
       || invocation.scopeId !== d.scopeId || invocation.taskId !== accounting.taskId || invocation.actorId !== d.context.actorId
-      || invocation.callId !== d.callId || invocation.intentHash !== d.intentHash || invocation.stepFingerprint !== d.intentHash
+      || invocation.callId !== d.callId || invocation.intentHash !== d.intentHash || invocation.stepFingerprint !== requestFingerprint(d.command)
       || invocation.runId !== d.runId || invocation.stepId !== d.stepId || invocation.mode !== 'invoke'
       || invocation.sceneCode !== 'ai.capability.text' || invocation.maxOutputTokens !== 32
       || invocation.configurationHash !== d.configurationHash || requestFingerprint(invocation.configuration) !== d.configurationHash

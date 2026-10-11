@@ -2,7 +2,8 @@ import type { ModelJsonTransport } from './chat-completions.adapter';
 import { ChatCompletionsAdapter } from './chat-completions.adapter';
 import { createNativeModelEgressTransport } from './model-egress.transport';
 import { RoutedModelTransport, TenantModelConnectionResolver, type GatewayConnectionResolver } from './routed-model-transport';
-import { UnifiedAiGatewayService } from './unified-ai-gateway.service';
+import { PublicAiGatewayService } from './public-ai-gateway.service';
+import type { AiGatewayResultDraft } from '@rental-os/shared';
 import { PrismaAdmissionRepository } from './invocation-admission.repository';
 import { InvocationAdmissionService } from './invocation-admission.service';
 import { InvocationDispatchService } from './invocation-dispatch.service';
@@ -133,7 +134,11 @@ export class TextCapabilityProbeApplication {
       if (used) throw new ModelGatewayError('ACCOUNTING_PENDING');
       used = true; // consume before the first await, including failed execution
       if ((await this.currentRequest()).binding !== owner.binding) throw new ModelGatewayError('FORBIDDEN');
-      return this.forCurrentRequest(context => this.#runRegistered(context, command, execution, signal, registered.id));
+      let result: AiGatewayResultDraft | undefined;
+      await this.forCurrentRequest(context => this.#runRegistered(context, command, execution, signal, registered.id,
+        observed => { result = structuredClone(observed); }));
+      if (!result) throw new ModelGatewayError('ACCOUNTING_PENDING');
+      return result;
     } });
   }
   async prepare(value: GatewayContext, commandValue: TextProbeCommand) {
@@ -172,7 +177,7 @@ export class TextCapabilityProbeApplication {
   }
   async #runRegistered(value: GatewayContext, commandValue: TextProbeCommand,
     execution: Pick<RegisterGatewayInvocation, 'stepId' | 'lease' | 'priceVersion' | 'expiresAt'>,
-    signal?: AbortSignal, ownedInvocationId?: string) {
+    signal?: AbortSignal, ownedInvocationId?: string, observedResult?: (result: AiGatewayResultDraft) => void) {
     const context = probeContextSchema.parse(structuredClone(value)), command = textProbeCommandSchema.parse(structuredClone(commandValue));
     execution = structuredClone(execution);
     if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
@@ -209,12 +214,21 @@ export class TextCapabilityProbeApplication {
     const tenant = new TenantModelConnectionResolver(this.input.configuration);
     const platform = this.input.platformConnection ?? { resolve: async () => { throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE'); } };
     const transport = new RoutedModelTransport({ tenant, platform }, [this.adapter], authority);
-    const gateway = new UnifiedAiGatewayService({ routing: authority, admission: this.admission, dispatch: this.dispatch,
+    const gateway = new PublicAiGatewayService({ ports: { routing: authority, admission: this.admission, dispatch: this.dispatch,
       budget: this.accounting.budget, transport, audit: this.input.audit,
       observation: { record: observation => this.receipts.observe(started.receipt.id, observation,
         this.adapter.evidenceMode === 'live' ? 'node_https' : 'mock') }
-    }, 30000, { sceneCode: TEXT_PROBE_SCENE, routeScene: 'chat', maxOutputTokens: 32 });
-    try { await gateway.invokeTextIntent(context, prepared.intent, signal); }
+    }, evidence: this.adapter.evidenceMode, verifyEvidence: async (route, mode) => {
+      await authority.assertCurrent(context, route);
+      const proof = route.route.probe;
+      return mode === this.adapter.evidenceMode && proof?.purpose === 'capability_text_probe'
+        && proof.operationId === command.operationId && proof.profileFingerprint === command.profileFingerprint
+        && proof.intentHash === prepared.intentHash;
+    } }, [{ sceneCode: TEXT_PROBE_SCENE, routeScene: 'chat', maxOutputTokens: 32 }], 30000);
+    try {
+      const result = await gateway.invoke(resolution.context, prepared.intent, signal);
+      observedResult?.(result);
+    }
     catch (error) {
       if (signal?.aborted || error instanceof ModelGatewayError && error.code === 'FORBIDDEN') throw error;
       await authority.assertCurrent(context, resolution);

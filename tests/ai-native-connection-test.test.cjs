@@ -219,6 +219,62 @@ test('runner-owned probe registration reaches the original receipt once without 
   assert.equal(starts, 1); assert.equal(registrations, 2);
 });
 
+test('owned probe returns the real public Gateway envelope, not the capability summary', async () => {
+  const { ChatCompletionsAdapter } = require('../apps/api/src/modules/ai-native/chat-completions.adapter');
+  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+  const { textProbeIntent } = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const { isGatewayResult } = require('../apps/api/src/modules/ai-native/gateway-contract-validation');
+  // Actual application/Public/Unified/transport/adapter; only DB, authorization,
+  // accounting lifecycle and protocol IO are explicit offline boundary ports.
+  for (const scenario of ['reported', 'missing_usage', 'lost_response']) {
+    const app = probeApplicationWithBoundaryPorts(), events = [];
+    const selected = { ...profile, scopeKind: 'PLATFORM', scopeId: 'platform-a', serviceMode: 'platform_managed' };
+    const command = { operationId: `envelope-${scenario}`, profileKey: selected.profileKey,
+      profileFingerprint: capabilityProfileFingerprint(selected) };
+    const current = structuredClone(require('./fixtures/ai-native/contract-consumer.cjs').contexts[0]);
+    current.actor = { kind: 'user', userId: context.actorId }; current.audience = 'operator';
+    current.scope = { kind: 'workspace', tenantId: context.tenantId, workspaceId: context.workspaceId };
+    const scope = { id: 'workspace-scope', kind: 'WORKSPACE', tenantId: context.tenantId, workspaceId: context.workspaceId };
+    const preparedIntent = textProbeIntent(command.operationId, scope.id);
+    const resolution = { context: current, consumerScope: scope, selection: { mode: selected.serviceMode, revision: selected.configRevision },
+      scene: 'chat', requiredCapabilities: ['text'], route: { profile: selected, scope: { id: 'platform-a', kind: 'PLATFORM' }, role: 'DEFAULT',
+        preflight: { allowed: false, required: ['text'], missing: ['text'], stale: [] }, probe: { purpose: 'capability_text_probe',
+          operationId: command.operationId, profileFingerprint: command.profileFingerprint, intentHash: preparedIntent.intentHash } } };
+    app.input = { db: { aiTaskExecutionCharge: { findMany: async () => [{ id: 'reserved-call' }] } },
+      scopes: { resolveCurrent: async () => ({ context: current, scope }) },
+      configuration: { selectionForInvocation: async () => assert.fail('no tenant fallback'), profile: async () => null, credential: async () => null },
+      platformConnection: { resolve: async () => ({ profileFingerprint: command.profileFingerprint, baseUrl: 'https://offline.example/v1',
+        credential: 'synthetic-secret', maxOutputTokens: 32 }) }, audit: { append: async () => {} } };
+    app.authority = () => ({ resolve: async () => structuredClone(resolution), assertCurrent: async () => {},
+      authorizeDispatch: async (_context, request) => { assert.equal(request.callId, preparedIntent.intent.requestId); } });
+    app.accounting = { bindings: { register: async () => { events.push('register'); return { id: 'invocation', replayed: false }; } },
+      budget: { reserve: async () => { events.push('reserve'); return { id: 'reservation' }; }, dispatch: async () => { events.push('dispatch'); },
+        settle: async () => { events.push('settle'); }, abandon: async () => { events.push('unknown'); } } };
+    app.admission = { admit: async () => ({ id: 'admission' }) };
+    app.dispatch = { claim: async () => { events.push('claim'); }, finish: async (_binding, state) => { events.push(state); } };
+    app.receipts = { find: async () => null, begin: async () => ({ created: true, receipt: { id: 'receipt' } }),
+      observe: async (_id, _observation, mode) => { assert.equal(mode, 'mock'); events.push('observe'); } };
+    app.collect = async () => ({ capability: 'text', status: 'unverified', receiptId: 'receipt' });
+    app.adapter = new ChatCompletionsAdapter({ post: async () => {
+      events.push('protocol'); if (scenario === 'lost_response') throw Error('offline lost response');
+      return { status: 200, body: JSON.stringify({ choices: [{ message: { content: 'bounded mock reply' }, finish_reason: 'stop' }],
+        ...(scenario === 'reported' ? { usage: { prompt_tokens: 1, completion_tokens: 2 } } : {}) }) };
+    } });
+    const held = await app.prepareHeldInvocationCurrent(command, { stepId: 'step', lease: { runId: 'run', holderId: 'holder', fencingToken: '1' },
+      priceVersion: 'price', expiresAt: new Date('2026-10-13T00:00:00Z') });
+    const result = await held.execute();
+    assert.equal(isGatewayResult(result), true); assert.equal(result.requestId, preparedIntent.intent.requestId);
+    assert.equal(result.actual.configId, selected.id); assert.equal(result.evidence, 'mock');
+    assert.equal(result.status, scenario === 'lost_response' ? 'unknown' : 'completed');
+    assert.equal(result.usage.kind, scenario === 'reported' ? 'reported' : 'unknown');
+    assert.equal(events.filter(event => event === 'register').length, 1);
+    assert.equal(events.filter(event => event === 'protocol').length, 1);
+    assert.equal(events.includes('settle'), scenario === 'reported');
+    await assert.rejects(held.execute(), { code: 'ACCOUNTING_PENDING' });
+    assert.equal(events.filter(event => event === 'protocol').length, 1);
+  }
+});
+
 test('persisted text verifier consumes original settlement and rejects mock, missing or changed receipts', async () => {
   const { PrismaTextCapabilityReceiptRepository } = require('../apps/api/src/modules/ai-native/prisma-text-capability-receipt.repository');
   const { ProviderCapabilityService } = require('../apps/api/src/modules/ai-native/provider-capability.service');
@@ -238,7 +294,7 @@ test('persisted text verifier consumes original settlement and rejects mock, mis
   const common = { scopeId: descriptor.scopeId, taskId: 'task', actorId: context.actorId, callId: descriptor.callId,
     runId: descriptor.runId, stepId: descriptor.stepId, actionId: 'action', sceneCode: 'ai.capability.text', priceVersion: 'price' };
   const rows = {
-    aiGatewayInvocation: { ...common, id: 'invocation', intentHash: descriptor.intentHash, stepFingerprint: descriptor.intentHash,
+    aiGatewayInvocation: { ...common, id: 'invocation', intentHash: descriptor.intentHash, stepFingerprint: requestFingerprint(descriptor.command),
       mode: 'invoke', maxOutputTokens: 32, configuration, configurationHash: descriptor.configurationHash },
     aiInvocationAdmission: { id: 'admission', ...context, callId: descriptor.callId, requestHash: observation.requestHash,
       profileId: profile.id, dispatchId: 'dispatch', revokedAt: null, status: 'completed', completedAt: now },
