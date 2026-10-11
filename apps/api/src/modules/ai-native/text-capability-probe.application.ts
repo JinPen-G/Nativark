@@ -17,7 +17,7 @@ import type { AiScopeRepository } from './ai-scope.repository';
 import type { UnifiedGatewayAudit } from './unified-ai-gateway.ports';
 import { ModelGatewayError, type GatewayContext } from './model-gateway.ports';
 import { TextCapabilityProbeAuthority } from './text-capability-probe.authority';
-import { PrismaTextCapabilityReceiptRepository, type TextProbeReceiptDb } from './prisma-text-capability-receipt.repository';
+import { createPersistedTextCapabilityEvidence, PrismaTextCapabilityReceiptRepository, type TextProbeReceiptDb } from './prisma-text-capability-receipt.repository';
 import { matchesProbeProfile, probeContextSchema, textProbeCommandSchema, textProbeConfiguration, textProbeDescriptorSchema,
   textProbeEvidenceHash, textProbeIntent, TEXT_PROBE_METHOD, TEXT_PROBE_SCENE, type TextProbeCommand } from './text-capability-probe';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
@@ -34,17 +34,22 @@ export type TextCapabilityProbeDependencies = Omit<Parameters<typeof createPersi
 export class TextCapabilityProbeApplication {
   private readonly profiles;
   private readonly receipts;
-  private readonly capabilities;
+  /** Same persisted evidence consumer for the ordinary authorized Gateway. */
+  readonly capabilities: ProviderCapabilityService;
   private readonly accounting;
   private readonly admission;
   private readonly dispatch;
   private readonly adapter;
   constructor(private readonly input: TextCapabilityProbeDependencies) {
+    if (!input || [input.management?.authorize, input.scopes?.resolveCurrent, input.scopes?.resolveRoutingScopes,
+      input.configuration?.selectionForInvocation, input.configuration?.profile, input.configuration?.credential,
+      input.authorization?.resolveContext, input.authorization?.authorize, input.subscriptions?.readCategoryCommercialContext,
+      input.pricing?.quote, input.pricing?.quantity, input.audit?.append].some(method => typeof method !== 'function')) {
+      throw new ModelGatewayError('CONFIG_INVALID');
+    }
     this.profiles = new PrismaProviderProfileRepository(input.db);
     this.receipts = new PrismaTextCapabilityReceiptRepository(input.db, input.clock);
-    this.capabilities = new ProviderCapabilityService(new PrismaProviderCapabilityEvidenceRepository(input.db), {
-      liveEvidenceVerifier: this.receipts
-    }, input.clock);
+    this.capabilities = createPersistedTextCapabilityEvidence(input.db, input.clock);
     this.accounting = createPersistedGatewayBudget(input);
     const admissions = new PrismaAdmissionRepository(input.db);
     this.admission = new InvocationAdmissionService(admissions, input.clock);
@@ -119,6 +124,8 @@ export class TextCapabilityProbeApplication {
     return this.collect(probeContextSchema.parse(structuredClone(context)), textProbeCommandSchema.parse(structuredClone(command)));
   }
   async preflight(context: GatewayContext, command: TextProbeCommand) {
+    context = probeContextSchema.parse(structuredClone(context));
+    command = textProbeCommandSchema.parse(structuredClone(command));
     const authority = this.authority(context, command), current = await authority.resolve(context, ['text']);
     const result = await this.capabilities.preflight(current.route.profile, ['text']);
     await authority.assertCurrent(context, current);

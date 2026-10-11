@@ -70,6 +70,11 @@ test('versioned text challenge and unregistered probe cannot grant dispatch or l
   const { prepareGatewayTextIntent } = require('../apps/api/src/modules/ai-native/gateway-intent');
   const { TextCapabilityProbeApplication } = require('../apps/api/src/modules/ai-native/text-capability-probe.application');
   assert.equal(typeof TextCapabilityProbeApplication, 'function');
+  const { TextCapabilityProbeModule } = require('../apps/api/src/modules/ai-native/text-capability-probe.module');
+  assert.deepEqual(Reflect.getMetadata('controllers', TextCapabilityProbeModule) ?? [], []);
+  const inert = TextCapabilityProbeModule.register({});
+  assert.equal(inert.controllers, undefined);
+  assert.throws(() => inert.providers[0].useFactory(), error => error.code === 'CONFIG_INVALID');
   const prepared = textProbeIntent('probe-operation', 'probe-scope');
   assert.deepEqual(textProbeIntent('probe-operation', 'probe-scope'), prepared);
   assert.notEqual(textProbeIntent('probe-operation', 'another-scope').intent.requestId, prepared.intent.requestId);
@@ -134,10 +139,15 @@ test('persisted text verifier consumes original settlement and rejects mock, mis
   observation.transport = 'node_https'; stored.observationHash = requestFingerprint(observation);
   assert.equal(await verifier.verify(input()), true);
   let evidenceRows = [];
-  const capabilities = new ProviderCapabilityService({ list: async () => evidenceRows, upsert: async value => {
-    const row = { ...value, id: 'evidence', profileId: profile.id, scope: { id: profile.scopeId, kind: profile.scopeKind }, observedRevision: profile.configRevision };
-    evidenceRows = [row]; return row;
-  } }, { liveEvidenceVerifier: verifier }, () => now);
+  db.aiProviderProfile = { updateMany: async ({ where }) => ({ count: where.id === profile.id && where.configRevision === profile.configRevision ? 1 : 0 }),
+    findFirst: async () => structuredClone(profile) };
+  db.aiProviderCapabilityEvidence = { findMany: async ({ take }) => {
+    assert.equal(take, 9); return structuredClone(evidenceRows);
+  }, findUnique: async () => evidenceRows[0] ?? null, upsert: async ({ create }) => {
+    evidenceRows = [structuredClone(create)]; return structuredClone(create);
+  } };
+  const { createPersistedTextCapabilityEvidence } = require('../apps/api/src/modules/ai-native/prisma-text-capability-receipt.repository');
+  const capabilities = createPersistedTextCapabilityEvidence(db, () => now);
   assert.equal((await capabilities.record(input())).status, 'supported');
   assert.equal((await capabilities.preflight(profile, ['text'])).allowed, true);
   ledger = [];

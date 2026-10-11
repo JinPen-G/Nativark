@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { ModelGatewayError } from './model-gateway.ports';
+import { PrismaProviderCapabilityEvidenceRepository } from './provider-capability.repository';
+import { ProviderCapabilityService } from './provider-capability.service';
 import type { GatewayInvocationObservation } from './unified-ai-gateway.ports';
 import type { AiLiveCapabilityEvidenceVerifier } from './capability-verification';
 import type { RecordCapabilityEvidenceInput } from './provider-capability.ports';
@@ -147,4 +149,12 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000
     });
   }
+}
+
+/** Shared by the probe producer and normal Gateway routing. Reading this
+ * service never dispatches a probe; non-text evidence remains fail-closed. */
+export function createPersistedTextCapabilityEvidence(db: TextProbeReceiptDb
+  & ConstructorParameters<typeof PrismaProviderCapabilityEvidenceRepository>[0], clock: () => Date = () => new Date()) {
+  return new ProviderCapabilityService(new PrismaProviderCapabilityEvidenceRepository(db),
+    { liveEvidenceVerifier: new PrismaTextCapabilityReceiptRepository(db, clock) }, clock);
 }
