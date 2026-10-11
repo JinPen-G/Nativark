@@ -64,10 +64,12 @@ export class KnowledgeDocumentService {
   async create(context: AiExecutionContext, value: unknown): Promise<KnowledgeRecord> {
     const input = parse(draftInput, value);
     const grant = await authorize(this.ports.authorization, context, { action: 'create', scope: context.scope, attachmentId: input.attachmentId, creation: input });
-    // The create entry itself must enforce the same business-file binding as
-    // prepareCreate. A caller may invoke this service directly, so the
-    // preparation check cannot be the only guard before persistence.
-    await this.assertAttachmentBound(context, input.documentId, input.attachmentId);
+    // A missing byte/file source must not disable lawful metadata creation.
+    // When an attachment authority is supplied, direct create still enforces
+    // the same binding as prepareCreate; parsing remains unavailable without it.
+    if (typeof this.ports.files?.assertBound === 'function') {
+      await this.assertAttachmentBound(context, input.documentId, input.attachmentId);
+    }
     const hash = operationFingerprint(context, ['create', input]);
     const existing = await this.ports.repository.read(context.scope, input.documentId);
     if (existing) {
@@ -77,7 +79,9 @@ export class KnowledgeDocumentService {
     }
     const document = { draftVersion: AI_KNOWLEDGE_DRAFT_VERSION, documentId: input.documentId, documentVersion: input.documentVersion, attachmentId: input.attachmentId, owner: grant.actor, scope: grant.scope, aclRevision: 1, title: input.title, publication: 'draft' as const, parsing: 'pending' as const, indexing: 'not_indexed' as const, validFrom: input.validFrom, ...(input.validUntil ? { validUntil: input.validUntil } : {}) };
     await authorize(this.ports.authorization, context, { action: 'create', scope: context.scope, document, attachmentId: input.attachmentId, creation: input });
-    await this.assertAttachmentBound(context, input.documentId, input.attachmentId);
+    if (typeof this.ports.files?.assertBound === 'function') {
+      await this.assertAttachmentBound(context, input.documentId, input.attachmentId);
+    }
     await authorize(this.ports.authorization, context, { action: 'create', scope: context.scope, document, attachmentId: input.attachmentId, creation: input });
     const result = await this.ports.repository.commit({ scope: context.scope, documentId: input.documentId, expectedRevision: 0, operation: { id: input.operationId, fingerprint: hash }, next: { document, revision: 1 }, newVersion: true });
     if (result !== 'committed') throw new KnowledgeError('conflict');
