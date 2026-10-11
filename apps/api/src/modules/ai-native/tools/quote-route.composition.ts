@@ -61,9 +61,10 @@ export class AiGuardedQuoteCoreContextSource implements AiQuoteCoreContextSource
  * authorized task path. No runner/approval/dispatch is installed here. */
 export function composeAiGuardedQuoteTools(input: {
   core: ContextCore & Pick<RentalCoreService, 'resolvePricingGroupQuoteRequest'>;
-  business: Pick<RentalBusinessService, 'createQuote'> & Partial<Pick<RentalBusinessService, 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>;
+  business: Pick<RentalBusinessService, 'createQuote'> & Partial<Pick<RentalBusinessService, 'normalizeQuoteInput' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>;
   routes: AiBusinessReadRouteAuthority;
-  readers: { catalog: Pick<AiCatalogReadFactsService, 'read'>; members: Pick<AiMembershipCandidateReadFactsService, 'read'> };
+  readers: { catalog: Pick<AiCatalogReadFactsService, 'read'>; members: Pick<AiMembershipCandidateReadFactsService, 'read'>
+    & Partial<Pick<AiMembershipCandidateReadFactsService, 'readBookingOptions'>> };
   clock?: () => Date;
 }) {
   if (typeof input?.core?.resolvePricingGroupQuoteRequest !== 'function' || typeof input?.business?.createQuote !== 'function') throw new ModelGatewayError('CONFIG_INVALID');

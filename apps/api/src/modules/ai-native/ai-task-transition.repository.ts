@@ -47,6 +47,11 @@ const taskSelect = {
 const stepSelect = { id: true, runId: true, sequence: true, revision: true, actionId: true, status: true, effect: true } satisfies Prisma.AiStepSelect;
 const maxCursor = 18446744073709551615n;
 const conflict = () => new AiTaskRepositoryError("AI_REVISION_CONFLICT");
+export class AiTaskTransitionResultUnknownError extends Error {
+  readonly code = 'AI_RESULT_UNKNOWN';
+  readonly retryable = false;
+  constructor() { super('AI_RESULT_UNKNOWN'); }
+}
 
 /**
  * Internal mutation path, deliberately not registered in a controller/worker.
@@ -67,6 +72,14 @@ export class AiTaskTransitionRepository {
   transition(value: unknown) { return this.transitionState(value, false); }
 
   settleCancellation(value: unknown) { return this.transitionState(value, true); }
+
+  /** Server-only paused-input witness. No holder is minted, and the witness
+   * must lock/close the original released run inside this same transaction. */
+  settleInputCancellation(value: unknown, witness: (tx: Prisma.TransactionClient,
+    task: { id: string; scopeId: string; revision: number }) => Promise<void>) {
+    if (typeof witness !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    return this.transitionState(value, true, undefined, witness);
+  }
 
   async pauseConfirmation(value: unknown) {
     const parsed = confirmationCommandSchema.safeParse(value);
@@ -169,12 +182,15 @@ export class AiTaskTransitionRepository {
       binding: requestFingerprint({ proof, head, version, action, original, plan: savedPlan, approval }) };
   }
 
-  private async transitionState(value: unknown, settleCancellation: boolean, confirmation?: z.infer<typeof confirmationCommandSchema> & { resume: boolean }) {
-    const parsed = commandSchema.safeParse(value);
+  private async transitionState(value: unknown, settleCancellation: boolean, confirmation?: z.infer<typeof confirmationCommandSchema> & { resume: boolean },
+    inputWitness?: (tx: Prisma.TransactionClient, task: { id: string; scopeId: string; revision: number }) => Promise<void>) {
+    const parsed = (inputWitness ? z.object({ taskId: id, expectedRevision: revision,
+      to: z.literal('cancelled'), reason: z.literal('cancel_settled'), lease: z.undefined().optional() }).strict() : commandSchema).safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
     const input = parsed.data;
     if (settleCancellation && (input.to !== 'cancelled' || input.reason !== 'cancel_settled')) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const initial = await this.access.resolveAccess(input.taskId, "transition_task");
+    let callbackCompleted = false;
     try {
       return await this.db.$transaction(async tx => {
         const task = await tx.aiTask.findFirst({ where: initial.where, select: taskSelect });
@@ -196,6 +212,10 @@ export class AiTaskTransitionRepository {
         const rows = await tx.aiStep.findMany({
           where: { scopeId: task.scopeId, taskId: task.id }, select: stepSelect, orderBy: [{ runId: "asc" }, { sequence: "asc" }], take: 1001
         });
+        if (inputWitness) {
+          if (task.status !== 'CANCEL_REQUESTED' || !task.cancelRequestedAt) throw conflict();
+          await inputWitness(tx, { id: task.id, scopeId: task.scopeId, revision: task.revision });
+        }
         const checkpoint = confirmation ? await this.confirmationWitness(tx, confirmation, task.scopeId, initial) : null;
         if (confirmation && checkpoint?.binding !== (await this.confirmationWitness(tx, confirmation, task.scopeId, initial)).binding) throw conflict();
         if (confirmation?.resume) {
@@ -219,6 +239,13 @@ export class AiTaskTransitionRepository {
             outcome: { status: row.status.toLowerCase() as AiStepStatusDraft, effect: row.effect.toLowerCase() as AiStepStateDraft["outcome"]["effect"] }
           }))
         };
+        // Runner counters describe this run, while task completion covers all
+        // persistent runs. A failed successor cannot erase completed ancestors.
+        if (!settleCancellation && input.to === 'failed' && input.reason === 'execution_failed'
+          && rows.some(row => row.status === 'SUCCEEDED') && !rows.every(row => row.status === 'SUCCEEDED')) {
+          input.to = 'partially_succeeded';
+          input.reason = 'completed';
+        }
         if (settleCancellation) {
           if (task.status !== 'CANCEL_REQUESTED') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
           if (rows.some(row => row.effect === 'COMMITTED')) {
@@ -282,6 +309,7 @@ export class AiTaskTransitionRepository {
           select: { cursor: true }
         });
         // This value becomes observable only after Prisma resolves the transaction commit.
+        callbackCompleted = true;
         return { event, runRevision: nextRunRevision,
           ...(checkpoint?.decision ? { continuation: { checkpointRef: checkpoint.proof.checkpointRef,
             decisionRef: checkpoint.decision.decisionRef, decision: checkpoint.decision.decision,
@@ -289,6 +317,7 @@ export class AiTaskTransitionRepository {
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw error;
+      if (inputWitness && callbackCompleted) throw new AiTaskTransitionResultUnknownError();
       // Includes an ambiguous connection loss at commit: do not automatically retry the mutation.
       throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
     }

@@ -1,11 +1,13 @@
 import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { AI_TOOL_DRAFT_VERSION, type AiInspectionActorScope } from '@rental-os/shared';
+import { AI_TOOL_DRAFT_VERSION, AI_TASK_INPUT_DRAFT_VERSION, validateAiTaskInputAnswersDraft, type AiInspectionActorScope } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import type { AiTaskRepository, AiTaskRepositoryAuthority } from '../ai-task.repository';
 import { AiTaskResultRepository, type AiTaskResultProjection } from '../runner/ai-task-result.repository';
-import { parseTaskModelInput, taskModelFingerprint, taskModelIdentity, TASK_IMAGE_MODEL_TOOL, type TaskModelPolicy } from '../model-input/task-model-input';
+import { parseTaskModelInput, taskModelFingerprint, taskModelIdentity, continueTaskModelMaterial, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, type TaskModelPolicy, type TaskModelInput } from '../model-input/task-model-input';
+import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
+import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import { isGatewayResult } from '../gateway-contract-validation';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
 import { InspectionActionAuthority } from './inspection-action.authority';
@@ -39,7 +41,7 @@ export class InspectionRecognitionResultService {
   constructor(private readonly authority: InspectionActionAuthority, private readonly recognition?: InspectionRecognitionService,
     private readonly candidates?: InspectionCandidateService, private readonly drafts?: InspectionDraftService, source?: Source) {
     if (source) {
-      if (source.policy?.kind !== 'image' || typeof source.financialEvidence?.readDispatch !== 'function') {
+      if (!['image', 'audio'].includes(source.policy?.kind ?? '') || typeof source.financialEvidence?.readDispatch !== 'function') {
         throw new InspectionAssistError('STORAGE_UNAVAILABLE');
       }
       this.source = { ...source, policy: { ...source.policy } };
@@ -47,9 +49,58 @@ export class InspectionRecognitionResultService {
     }
   }
 
+  private get modelTool() { return this.source?.policy.kind === 'audio' ? TASK_AUDIO_MODEL_TOOL : TASK_IMAGE_MODEL_TOOL; }
+
   async read(value: unknown) {
     const input = parseInspectionInput(referenceSchema, value);
     return (await this.collect(input, false)).projection;
+  }
+
+  /** Server-bound frozen input -> current persisted candidate evidence -> human
+   * clarification. Caller/model text never supplies a question contract or a
+   * new attachment. Answers remain context, not corrections or submission. */
+  inputSource(value: unknown): AiTaskInputSource {
+    const reference = referenceSchema.omit({ taskId: true, resultId: true }).parse(structuredClone(value));
+    const resolve: AiTaskInputSource['resolve'] = async presented => {
+      const binding = structuredClone(presented), source = this.source;
+      if (!source || binding.toolCode !== this.modelTool || binding.toolVersion !== AI_TOOL_DRAFT_VERSION) throw changed();
+      const projection = await this.read({ ...reference, taskId: binding.taskId, resultId: binding.basisResultRef });
+      if (projection.status !== 'available' || projection.runId !== binding.runId || projection.stepId !== binding.stepId) {
+        throw new InspectionAssistError('RECONCILIATION_REQUIRED');
+      }
+      const before = await source.tasks.resolveAccess(binding.taskId, 'read_step_terminal');
+      const task = await source.db.aiTask.findFirst({ where: before.where });
+      if (!task || task.id !== binding.taskId || task.scopeId !== binding.scopeId
+        || task.inputRef !== reference.inputId || task.sceneCode !== source.policy.sceneCode) throw changed();
+      const run = await source.db.aiRun.findFirst({ where: { scopeId: binding.scopeId, taskId: binding.taskId, id: binding.runId } });
+      const policy = await source.db.aiTaskPlanPolicy.findFirst({ where: {
+        scopeId: binding.scopeId, sceneCode: task.sceneCode, sceneVersion: task.sceneVersion
+      } });
+      if (!run || run.scopeId !== binding.scopeId || run.taskId !== binding.taskId || run.id !== binding.runId
+        || run.actorId !== before.actorId || run.actorKind !== before.actorKind
+        || !Number.isSafeInteger(run.sequence) || run.sequence < 1
+        || !policy || policy.scopeId !== binding.scopeId || policy.sceneCode !== source.policy.sceneCode
+        || policy.sceneVersion !== task.sceneVersion
+        || !policy.enabled || !(policy.expiresAt instanceof Date)
+        || !Number.isFinite(policy.expiresAt.getTime())
+        || policy.expiresAt <= (source.clock?.() ?? new Date())
+        || requestFingerprint(policy.allowedTools) !== requestFingerprint([{ code: this.modelTool, version: AI_TOOL_DRAFT_VERSION }])) throw changed();
+      const ceilings = z.object({ maxCalls: z.number().int().positive() }).passthrough().parse(policy.limits);
+      const after = await source.tasks.resolveAccess(binding.taskId, 'read_step_terminal');
+      if (before.bindingKey !== after.bindingKey) throw new InspectionAssistError('ACCESS_DENIED');
+      const unclear = projection.candidates.filter(candidate => candidate.status === 'missing' || candidate.status === 'blurred');
+      if (!unclear.length || run.sequence >= Math.min(ceilings.maxCalls, 31)) return { kind: 'not_required' };
+      return { kind: 'required', inputRef: binding.inputRef, inputHash: binding.inputHash, expiresAt: policy.expiresAt.toISOString(),
+        contract: { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, code: 'inspection_context', version: '1',
+          fields: [{ fieldId: 'clarification_text', kind: 'text', required: true, maxLength: 2048,
+            label: `请说明原检查材料中不明确的字段：${[...new Set(unclear.map(candidate => candidate.fieldCode))].join('、').slice(0, 55)}；仍需人工核对。` }] } };
+    };
+    return Object.freeze<AiTaskInputSource>({ resolve, validateAnswers: async (binding, contract, answers) => {
+      const expected = await resolve(structuredClone(binding));
+      if (expected.kind !== 'required' || requestFingerprint(contract) !== requestFingerprint(expected.contract)
+        || !validateAiTaskInputAnswersDraft(expected.contract, answers)) throw new InspectionAssistError('ACCESS_DENIED');
+      return { disposition: 'context_only' as const, planHash: binding.planHash, inputRef: binding.inputRef, inputHash: binding.inputHash };
+    } });
   }
 
   /** Explicit human/host action. Original operation/revision and original draft
@@ -103,10 +154,17 @@ export class InspectionRecognitionResultService {
       const expectedText = JSON.stringify({ purpose: 'inspection_candidates_only_not_business_facts', draftId: bound.draftId,
         draftRevision: input.expectedRevision, inputFingerprint: bound.input.inputFingerprint,
         question: bound.input.question, template: bound.input.template });
-      const messages = [{ role: 'user', content: [{ kind: 'text', text: expectedText }, ...bound.input.media.map(ref =>
-        ({ kind: 'image', attachmentId: ref.attachmentId, attachmentRevision: ref.attachmentRevision }))] }];
-      const media = bound.input.media.map(ref => ({ kind: 'image', attachmentId: ref.attachmentId, attachmentRevision: ref.attachmentRevision,
+      let messages: TaskModelInput['intent']['messages'] = [{ role: 'user', content: [{ kind: 'text', text: expectedText }, ...bound.input.media.map(ref =>
+        ({ kind: source.policy.kind!, attachmentId: ref.attachmentId, attachmentRevision: ref.attachmentRevision }))] }];
+      const media = bound.input.media.map(ref => ({ kind: source.policy.kind, attachmentId: ref.attachmentId, attachmentRevision: ref.attachmentRevision,
         mediaType: ref.mediaType, contentHash: ref.contentHash, sizeBytes: ref.sizeBytes }));
+      for (const round of persisted.history) {
+        const parent = parseTaskModelInput(round.input, source.policy);
+        if (taskModelFingerprint(parent, source.policy) !== round.inputHash || parent.identityHash !== taskModelIdentity(initial)
+          || requestFingerprint(parent.intent.messages) !== requestFingerprint(messages)
+          || requestFingerprint(parent.media) !== requestFingerprint(media)) throw changed();
+        messages = continueTaskModelMaterial(parent, round.result, round.answers, source.policy).messages;
+      }
       if (requestFingerprint(persisted.input.intent.messages) !== requestFingerprint(messages)
         || requestFingerprint(persisted.input.media) !== requestFingerprint(media)) throw changed();
       let values: ReturnType<typeof snapshotInspectionCandidates> = [];
@@ -121,9 +179,10 @@ export class InspectionRecognitionResultService {
         try { decoded = JSON.parse(payload.text); } catch { throw new InspectionAssistError('INVALID_INPUT'); }
         if (!Array.isArray(decoded)) throw new InspectionAssistError('INVALID_INPUT');
         values = snapshotInspectionCandidates(decoded);
-        if (values.some(candidate => candidate.sources.some(ref => ref.kind !== 'image'
+        if (values.some(candidate => candidate.sources.some(ref => ref.kind !== source.policy.kind
           || !bound.input.media.some(original => original.attachmentId === ref.attachmentId
-            && original.attachmentRevision === ref.attachmentRevision)))) throw changed();
+            && original.attachmentRevision === ref.attachmentRevision
+            && (ref.kind !== 'audio' || original.durationMs !== null && ref.span.endMs <= original.durationMs))))) throw changed();
         values = (await this.candidates!.consume({ ...target, bindingFingerprint: bound.input.bindingFingerprint, candidates: values })).candidates;
         await this.verifyDispatch(persisted, scope, payload.usage);
         status = 'available';
@@ -145,7 +204,7 @@ export class InspectionRecognitionResultService {
       return { currentRevision: detail.revision, bindingFingerprint: bound.input.bindingFingerprint,
         projection: { status, ...input, candidates: values, resultHash: result.contentHash, inputFingerprint: bound.input.inputFingerprint,
           runId: result.runId, stepId: result.stepId, observedAt: result.observedAt, trust: 'untrusted_candidate' as const,
-          recognitionEvidence: status === 'available' ? 'persisted_image_step' as const : 'not_confirmed' as const,
+          recognitionEvidence: status === 'available' ? (source.policy.kind === 'audio' ? 'persisted_audio_step' as const : 'persisted_image_step' as const) : 'not_confirmed' as const,
           nextAction: status === 'available' ? 'human_review' as const : 'reconcile_or_manual_review' as const,
           automaticRetry: false as const, persistence: 'not_saved' as const, execution: 'not_attempted' as const } };
     });
@@ -170,7 +229,7 @@ export class InspectionRecognitionResultService {
       const key = { scopeId: task.scopeId, taskId: task.id, runId: result.runId };
       const step = await tx.aiStep.findFirst({ where: { ...key, id: result.stepId } });
       if (!step || step.scopeId !== key.scopeId || step.taskId !== key.taskId || step.runId !== key.runId || step.id !== result.stepId
-        || step.actionId !== result.actionId || step.resultRef !== result.resultId || step.toolCode !== TASK_IMAGE_MODEL_TOOL
+        || step.actionId !== result.actionId || step.resultRef !== result.resultId || step.toolCode !== this.modelTool
         || step.toolVersion !== AI_TOOL_DRAFT_VERSION || !step.inputRef) throw changed();
       const saved = await tx.aiTaskActionInput.findFirst({ where: { ...key, id: step.inputRef } });
       if (!saved || saved.id !== step.inputRef || saved.scopeId !== key.scopeId || saved.taskId !== key.taskId || saved.runId !== key.runId
@@ -189,7 +248,12 @@ export class InspectionRecognitionResultService {
         || artifact.runId !== key.runId || artifact.stepId !== step.id || artifact.actionId !== step.actionId
         || artifact.contentHash !== result.contentHash || artifact.stepFingerprint !== step.requestFingerprint
         || artifact.leaseOwnerId !== invocation.leaseOwnerId || !artifact.fencingToken.equals(invocation.fencingToken)) throw changed();
-      return { input, invocation };
+      const run = await tx.aiRun.findFirst({ where: { scopeId: task.scopeId, taskId: task.id, id: result.runId } });
+      if (!run || run.id !== result.runId || run.scopeId !== task.scopeId || run.taskId !== task.id) throw changed();
+      const lineage = await readTaskModelRunOrigin(tx, access, { scopeId: task.scopeId, taskId: task.id,
+        runId: run.id, originRunId: run.resourceOriginRunId ?? run.id, registrationRef: saved.registrationRef, includeHistory: true });
+      if (lineage.registrationRef !== saved.registrationRef) throw changed();
+      return { input, invocation, history: lineage.history };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
   }
 

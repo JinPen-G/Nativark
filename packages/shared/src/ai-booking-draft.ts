@@ -91,3 +91,28 @@ export interface AiBookingHandoff {
   submission: 'original_booking_page_required';
   inventory: 'not_reserved';
 }
+
+/** Original booking page acceptance, not approval or proof of business execution. */
+export interface AiBookingSubmissionAcceptance {
+  acceptanceRef: string;
+  handoffRef: string;
+  bookingDraftId: string;
+  selectionRevision: number;
+  inputFingerprint: string;
+  quoteId: string;
+  operationKey: string;
+  execution: 'not_attested';
+}
+
+export interface AiBookingSubmissionDecision {
+  acceptanceRef: string;
+  decision: 'submit_original_booking';
+}
+
+/** Only the original Core receipt may attest observed order creation. */
+export type AiBookingSubmissionReceipt = {
+  operationKey: string;
+  retryable: false;
+  payment: 'not_inferred';
+  fulfillment: 'not_inferred';
+} & ({ state: 'observed'; orderId: string } | { state: 'unknown' | 'not_observed'; orderId: null });

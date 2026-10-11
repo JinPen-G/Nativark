@@ -4,8 +4,8 @@ import type { AiProviderProfileRole } from './provider-profile.ports';
 import type { ProviderRouteDecision, ProviderRouteRequest, ProviderRouterPorts, AiRouteScene } from './provider-router.ports';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
-const capability = z.enum(['text', 'streaming', 'tools', 'structured_output', 'vision', 'embedding', 'reasoning']);
-const capabilities = z.array(capability).max(7).refine(items => new Set(items).size === items.length);
+const capability = z.enum(['text', 'streaming', 'tools', 'structured_output', 'vision', 'audio', 'embedding', 'reasoning']);
+const capabilities = z.array(capability).max(8).refine(items => new Set(items).size === items.length);
 const platform = z.object({ id: id.max(36), kind: z.literal('PLATFORM') }).strict();
 const scopeSchema = z.discriminatedUnion('kind', [platform,
   z.object({ id: id.max(36), kind: z.literal('TENANT'), tenantId: id }).strict(),

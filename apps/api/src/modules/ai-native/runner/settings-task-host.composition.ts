@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
+import { Prisma } from '@prisma/client';
+import { AI_TOOL_DRAFT_VERSION, AI_TASK_TERMINAL_STATUSES_DRAFT } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { composeApprovedSettingsWaiting } from '../approval-execution/approved-settings-waiting.executor';
 import type { ApprovedSettingsApplicationDependencies } from '../approval-execution/approved-settings-task.authority';
@@ -20,21 +21,24 @@ import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task
 import type { AiTaskHeldPreparation } from './ai-task-runner.service';
 import type { AiTaskRunnerClock } from './ai-task-runner.ports';
 import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repository-adapter';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 
 const tool = 'tenant.notifications.commit' as const;
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const taskSchema = z.object({ taskId: id.max(36), runId: id.max(36), registrationRef: id,
   change: z.object({ changeId: id.max(36), changeHash: z.string().regex(/^[a-f0-9]{64}$/u) }).strict(),
   limits: aiTaskRunnerLimitsSchema }).strict();
+export type AiSettingsTask = z.infer<typeof taskSchema>;
 
 /** Explicit normal-run settings assembly. It shares the durable runner,
  * resource ledger and confirmation checkpoint machinery with order execution;
  * the selected tool and receipt version are server-owned, never model inputs. */
 export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDependencies & {
-  host: AiTaskApplicationHost; task: z.infer<typeof taskSchema>; monotonic?: () => number; runnerClock?: AiTaskRunnerClock;
+  host: AiTaskApplicationHost; task: AiSettingsTask; monotonic?: () => number; runnerClock?: AiTaskRunnerClock;
 }) {
   const task = taskSchema.parse(structuredClone(input.task));
-  if (input.host.holderId !== input.holderId) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  const host = Object.freeze(structuredClone(input.host));
+  if (host.holderId !== input.holderId) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
   const settings = composeApprovedSettingsWaiting(input);
   const inputs = composePersistedSettingsTaskInput({ ...input, readCommittedChange: settings.readCommittedChange });
   const authorization = composePersistedTaskAuthorization(input);
@@ -83,18 +87,103 @@ export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDepend
   const events = new AiTaskEventRepository(input.db, authorization.authority, input.clock);
   const unavailable = async () => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
   const application = new PrismaTaskApplication({ db: input.db, tasks: authorization.tasks, runner: root.runner, recovery, events,
-    host: input.host, prepare, inputs: { submit: unavailable, readPending: unavailable } });
+    host, prepare, inputs: { submit: unavailable, readPending: unavailable } });
+  const recoverOriginal = async (value: unknown, confirmation: boolean, signal?: AbortSignal) => {
+    const keySchema = z.object({ taskId: id.max(36), runId: id.max(36) }).strict();
+    const parsed = (confirmation ? keySchema.extend({ checkpointRef: id.max(36) }).strict() : keySchema).safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const command = parsed.data;
+    if (command.taskId !== task.taskId || command.runId !== task.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const before = structuredClone(await authorization.tasks.resolveAccess(task.taskId, confirmation ? 'claim_recovery_run' : 'read_metadata'));
+    const stored = await input.db.aiTask.findFirst({ where: before.where });
+    const run = stored && await input.db.aiRun.findFirst({ where: { id: task.runId, taskId: task.taskId, scopeId: stored.scopeId } });
+    if (!stored || !run || run.actorKind !== before.actorKind || run.actorId !== before.actorId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    // Terminal recovery is observation, not reacquisition. A committed Core
+    // receipt remains a fact even if the aggregate ultimately failed/cancelled.
+    // Missing receipts never attest rollback or authorize another execution.
+    if (!confirmation && AI_TASK_TERMINAL_STATUSES_DRAFT.some(status => status === stored.status.toLowerCase())) {
+      const key = { taskId: task.taskId, runId: task.runId };
+      const snapshot = await application.inspect(key);
+      const receipt = await settings.readCommittedChange({ taskId: task.taskId, ...task.change });
+      const latest = await application.inspect(key);
+      const after = await authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
+      if (after.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      if (requestFingerprint(snapshot) !== requestFingerprint(latest)
+        || snapshot.task.revision !== stored.revision || snapshot.run.revision !== run.revision) {
+        throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      }
+      return { mode: 'read_only' as const, snapshot,
+        operation: receipt ? { state: 'committed' as const, receipt } : null,
+        businessOutcome: receipt ? 'committed' as const
+          : snapshot.steps.some(step => step.status === 'unknown' || step.effect === 'possible' || step.effect === 'committed')
+            ? 'unknown' as const : 'not_observed' as const,
+        retryable: false as const, execution: 'original_result_read_no_restart' as const };
+    }
+    if (confirmation && 'checkpointRef' in command && typeof command.checkpointRef === 'string') {
+      const receipt = await input.db.aiTaskExecutionPhaseReceipt.findFirst({ where: { scopeId: stored.scopeId,
+        taskId: task.taskId, runId: task.runId, id: command.checkpointRef, kind: 'confirmation' } });
+      if (!receipt) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const checkpoint = await application.readConfirmation({ taskId: task.taskId, runId: task.runId, stepId: receipt.stepId });
+      if (checkpoint.checkpointRef !== command.checkpointRef) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      const decision = await settings.application.readDecisionReceipt({ draftVersion: 'ain-approved-settings-draft-1',
+        taskId: task.taskId, proposalId: checkpoint.proposal.proposalId, proposalRevision: checkpoint.proposal.proposalRevision,
+        reviewedPayloadHash: checkpoint.proposal.reviewedPayloadHash });
+      if (decision.state !== 'recorded') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    }
+    const current = await authorization.tasks.resolveAccess(task.taskId, 'claim_recovery_run');
+    if (before.bindingKey !== current.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    if (signal?.aborted) return { kind: 'not_started', reason: 'host_aborted' } as const;
+    // Claim acknowledgement is required. A lost response never grants a lease
+    // by rereading it; original-key recovery remains a separate request.
+    const lease = await authorization.tasks.claimRecoveryRun({ taskId: task.taskId, runId: task.runId,
+      holderId: host.holderId, leaseMs: host.leaseMs, expectedTaskRevision: stored.revision,
+      expectedRunRevision: run.revision, expectedFencingToken: run.fencingToken.toFixed(0) });
+    try {
+      if ((await authorization.tasks.resolveAccess(task.taskId, 'claim_recovery_run')).bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return confirmation && 'checkpointRef' in command && typeof command.checkpointRef === 'string'
+        ? await application.continueConfirmation({ taskId: task.taskId, runId: task.runId, checkpointRef: command.checkpointRef }, signal)
+        : await application.reconcile({ taskId: task.taskId, runId: task.runId }, signal);
+    } finally {
+      const held = await input.db.aiRun.findFirst({ where: { id: task.runId, taskId: task.taskId, scopeId: stored.scopeId,
+        leaseOwnerId: host.holderId, revision: lease.revision, fencingToken: new Prisma.Decimal(lease.fencingToken) } });
+      if (held) {
+        const latest = await authorization.tasks.readMetadata(task.taskId);
+        await authorization.tasks.releaseRun({ taskId: task.taskId, runId: task.runId, holderId: host.holderId,
+          expectedTaskRevision: latest.revision, expectedRunRevision: lease.revision, fencingToken: lease.fencingToken });
+      }
+    }
+  };
+  const requestCancel = async (value: unknown) => {
+    const parsed = z.object({ taskId: id.max(36), expectedRevision: z.number().int().min(1).max(4294967294) }).strict().safeParse(structuredClone(value));
+    if (!parsed.success || parsed.data.taskId !== task.taskId) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const before = structuredClone(await authorization.tasks.resolveAccess(task.taskId, 'read_metadata'));
+    const receipt = await taskTransitions.transition({ ...parsed.data, to: 'cancel_requested', reason: 'cancel_requested' });
+    const after = await authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
+    if (after.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    return { receipt, cancellation: 'requested_not_rollback' as const };
+  };
+  const requestCancelOriginal = async (value: unknown) => {
+    // Persist the authorized intent first. Only an acknowledged request may
+    // attempt original-run reconciliation; no new step or external dispatch.
+    const initial = structuredClone(await authorization.tasks.resolveAccess(task.taskId, 'read_metadata'));
+    const result = await requestCancel(value);
+    let reconciliation;
+    try { reconciliation = await recoverOriginal({ taskId: task.taskId, runId: task.runId }, false); }
+    catch (error) {
+      if (!(error instanceof AiTaskRepositoryError) || error.code === 'AI_ACCESS_DENIED' || error.code === 'AI_INVALID_INPUT') throw error;
+      reconciliation = { kind: 'unavailable' as const, errorCode: error.code,
+        nextAction: 'read_original_task' as const, retryable: false as const };
+    }
+    if ((await authorization.tasks.resolveAccess(task.taskId, 'read_metadata')).bindingKey !== initial.bindingKey) {
+      throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    }
+    return { ...result, reconciliation };
+  };
   return Object.freeze({ settings, inputs, ...root, authorization, registrations, transitions, taskTransitions, recovery, events,
     application: Object.freeze({ start: application.start.bind(application), continueConfirmation: application.continueConfirmation.bind(application),
       readConfirmation: application.readConfirmation.bind(application),
       inspect: application.inspect.bind(application), readEvents: application.readEvents.bind(application), reconcile: application.reconcile.bind(application),
-      async requestCancel(value: unknown) {
-        const parsed = z.object({ taskId: id.max(36), expectedRevision: z.number().int().min(1).max(4294967294) }).strict().safeParse(structuredClone(value));
-        if (!parsed.success || parsed.data.taskId !== task.taskId) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-        const before = await authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
-        const receipt = await taskTransitions.transition({ ...parsed.data, to: 'cancel_requested', reason: 'cancel_requested' });
-        const after = await authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
-        if (after.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-        return { receipt, cancellation: 'requested_not_rollback' as const };
-      } }) });
+      continueOriginalConfirmation: (value: unknown, signal?: AbortSignal) => recoverOriginal(value, true, signal),
+      reconcileOriginal: (value: unknown, signal?: AbortSignal) => recoverOriginal(value, false, signal),
+      requestCancel, requestCancelOriginal }) });
 }

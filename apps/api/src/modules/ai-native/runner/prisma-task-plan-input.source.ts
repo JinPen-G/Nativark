@@ -9,7 +9,7 @@ import type { AiApprovedOrderRouteAuthority } from '../approval-execution/approv
 import type { ApprovedOrderInputAuthority, ApprovedOrderInputReference } from '../order-task-input.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { gatewayTextIntentPolicySchema } from '../gateway-intent';
-import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, isTaskModelTool, parseTaskModelInput, taskModelFingerprint, type TaskModelPolicy } from '../model-input/task-model-input';
+import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, isTaskModelTool, parseTaskModelInput, taskModelFingerprint, type TaskModelPolicy } from '../model-input/task-model-input';
 import { aiCatalogReadInputSchema } from '../catalog-read-facts.service';
 import { aiAvailabilityReadInputSchema } from '../availability-read-facts.service';
 import { aiTaskAccessFromContext, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
@@ -32,7 +32,7 @@ const publishSchema = z.object({ taskId: id.max(36), registrationRef: id, expect
 const availabilityPublishSchema = publishSchema.extend({ input: aiAvailabilityReadInputSchema });
 const orderPublishSchema = publishSchema.extend({ input: z.unknown() });
 export type PersistedReadonlyTool = 'rental.catalog.search' | 'rental.availability.check';
-export type PersistedTaskInputTool = PersistedReadonlyTool | 'rental.order.commit' | 'tenant.notifications.commit' | typeof TASK_TEXT_MODEL_TOOL | typeof TASK_IMAGE_MODEL_TOOL;
+export type PersistedTaskInputTool = PersistedReadonlyTool | 'rental.order.commit' | 'tenant.notifications.commit' | typeof TASK_TEXT_MODEL_TOOL | typeof TASK_IMAGE_MODEL_TOOL | typeof TASK_AUDIO_MODEL_TOOL;
 export interface SettingsInputDependencies {
   /** Current original Guard and immutable domain evidence, without acquiring
    * category locks after the plan/registration repositories hold task locks. */
@@ -43,7 +43,8 @@ type OrderInputDependencies = {
   route: Pick<AiApprovedOrderRouteAuthority, 'withOrderPreparation'>;
   confirmation: Pick<RentalOrderConfirmationService, 'normalizeOrderInput'>;
 };
-const toolsSchema = z.array(z.object({ code: z.enum(['rental.catalog.search', 'rental.availability.check', 'rental.order.commit', 'tenant.notifications.commit', TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL]), version: z.literal(AI_TOOL_DRAFT_VERSION) }).strict()).min(1).max(1);
+export const aiPersistedPlanToolsSchema = z.array(z.object({ code: z.enum(['rental.catalog.search', 'rental.availability.check', 'rental.order.commit', 'tenant.notifications.commit', TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL]), version: z.literal(AI_TOOL_DRAFT_VERSION) }).strict()).min(1).max(6)
+  .refine(tools => new Set(tools.map(tool => tool.code)).size === tools.length);
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const conflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
@@ -62,14 +63,14 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     private readonly modelPolicy?: TaskModelPolicy, private readonly settings?: SettingsInputDependencies) {
     if (typeof db?.$transaction !== 'function' || typeof db.aiTaskPlanPolicy?.findFirst !== 'function'
       || typeof db.aiTaskActionInput?.create !== 'function' || typeof authorization?.resolve !== 'function'
-      || typeof execution?.authorize !== 'function' || !['rental.catalog.search', 'rental.availability.check', 'rental.order.commit', 'tenant.notifications.commit', TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL].includes(toolCode)
+      || typeof execution?.authorize !== 'function' || !['rental.catalog.search', 'rental.availability.check', 'rental.order.commit', 'tenant.notifications.commit', TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL].includes(toolCode)
       || (toolCode === 'rental.order.commit' && (typeof order?.route?.withOrderPreparation !== 'function'
         || typeof order?.confirmation?.normalizeOrderInput !== 'function'))
       || (isTaskModelTool(toolCode) && !gatewayTextIntentPolicySchema.safeParse(modelPolicy && { sceneCode: modelPolicy.sceneCode, maxOutputTokens: modelPolicy.maxOutputTokens }).success)
-      || (isTaskModelTool(toolCode) && (toolCode === TASK_IMAGE_MODEL_TOOL) !== (modelPolicy?.kind === 'image'))
+      || (isTaskModelTool(toolCode) && ((toolCode === TASK_IMAGE_MODEL_TOOL ? 'image' : toolCode === TASK_AUDIO_MODEL_TOOL ? 'audio' : undefined) !== modelPolicy?.kind))
       || (toolCode === 'tenant.notifications.commit' && typeof settings?.verify !== 'function')) throw unavailable();
     if (modelPolicy) this.modelPolicy = { ...gatewayTextIntentPolicySchema.parse({ sceneCode: modelPolicy.sceneCode,
-      maxOutputTokens: modelPolicy.maxOutputTokens }), ...(modelPolicy.kind === 'image' ? { kind: 'image' as const } : {}) };
+      maxOutputTokens: modelPolicy.maxOutputTokens }), ...(modelPolicy.kind ? { kind: modelPolicy.kind } : {}) };
   }
 
   private fingerprint(payload: unknown) {
@@ -99,8 +100,10 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     const row = await db.aiTaskPlanPolicy.findFirst({ where: key });
     if (!row || Object.entries(key).some(([k, v]) => row[k as keyof typeof row] !== v) || !rev.safeParse(row.revision).success
       || row.enabled !== true || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime()) || row.expiresAt <= this.wall()) throw unavailable();
-    const tools = toolsSchema.parse(structuredClone(row.allowedTools));
-    if (tools[0].code !== this.toolCode) throw unavailable();
+    const parsedTools = aiPersistedPlanToolsSchema.safeParse(structuredClone(row.allowedTools));
+    if (!parsedTools.success) throw unavailable();
+    const tools = parsedTools.data;
+    if (!tools.some(tool => tool.code === this.toolCode)) throw unavailable();
     const limits = aiTaskRunnerLimitsSchema.parse(structuredClone(row.limits));
     if (limits.maxStepMs > limits.maxTotalMs) throw unavailable();
     const policy = { ...key, revision: row.revision, enabled: row.enabled, tools, limits, expiresAt: row.expiresAt.toISOString() };
@@ -229,6 +232,8 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
           || current.task.status !== 'RUNNING' || current.task.cancelRequestedAt !== null
           || current.task.revision !== command.expectedTaskRevision) throw conflict();
         await this.held(command.lease, current, tx);
+        if (isTaskModelTool(this.toolCode) && await tx.aiTaskQuoteSelection.findFirst({ where: {
+          scopeId: key.scopeId, taskId: key.taskId, runId: key.runId, supersededAt: null } })) throw conflict();
         const settingsExpiry = await this.verifySettings(current.context, command.taskId, payload, tx);
         const existing = await tx.aiTaskActionInput.findFirst({ where: key });
         if (existing) {

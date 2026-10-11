@@ -13,6 +13,15 @@ import { ModelGatewayError } from '../model-gateway.ports';
 const schema = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId, operationId: inspectionId,
   expectedRevision: z.number().int().min(1).max(999), question: z.string().trim().min(1).max(4000) }).strict();
 
+/** Derive the step kind only from original server-frozen media, not HTTP input. */
+export function inspectionRecognitionMediaKind(input: AiInspectionRecognitionInput): 'image' | 'audio' {
+  if (!input.media.length || input.media.length > 8) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  if (input.media.every(ref => ref.mediaType === 'audio/wav' && Number.isSafeInteger(ref.durationMs)
+    && ref.durationMs! > 0)) return 'audio';
+  if (input.media.every(ref => ['image/png', 'image/jpeg'].includes(ref.mediaType))) return 'image';
+  throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+}
+
 export class InspectionRecognitionService {
   constructor(private readonly repository: PrismaInspectionDraftRepository, private readonly drafts: InspectionDraftService,
     private readonly authority: InspectionActionAuthority, private readonly templates: InspectionTemplateService,
@@ -53,6 +62,7 @@ export class InspectionRecognitionService {
       return { scope, frozen };
     });
     const initial = await load();
+    const kind = inspectionRecognitionMediaKind(initial.frozen);
     const media: GatewayMediaAttachmentResolver = { assertCurrent: async (context, references, signal) => {
       context = structuredClone(context); references = structuredClone(references);
       const current = await load();
@@ -64,7 +74,7 @@ export class InspectionRecognitionService {
       for (const ref of references) {
         const expected = current.frozen.media.find(item => item.attachmentId === ref.attachmentId
           && item.attachmentRevision === ref.attachmentRevision);
-        if (ref.kind !== 'image' || !expected || expected.contentHash !== ref.contentHash || expected.mediaType !== ref.mediaType) {
+        if (ref.kind !== kind || !expected || expected.contentHash !== ref.contentHash || expected.mediaType !== ref.mediaType) {
           throw new InspectionAssistError('BINDING_CHANGED');
         }
       }
@@ -78,8 +88,8 @@ export class InspectionRecognitionService {
       if (before.frozen.inputFingerprint !== initial.frozen.inputFingerprint) throw new InspectionAssistError('BINDING_CHANGED');
       const selected = before.frozen.media.filter(item => item.attachmentId === reference.attachmentId
         && item.attachmentRevision === reference.attachmentRevision);
-      if (reference.kind !== 'image' || selected.length !== 1
-        || !['image/png', 'image/jpeg'].includes(selected[0].mediaType) || selected[0].sizeBytes > 524288) {
+      if (reference.kind !== kind || selected.length !== 1
+        || inspectionRecognitionMediaKind(before.frozen) !== kind || selected[0].sizeBytes > 524288) {
         throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
       }
       const expected = selected[0];
@@ -90,13 +100,29 @@ export class InspectionRecognitionService {
       if (requestFingerprint(after.scope) !== requestFingerprint(scope)
         || after.frozen.inputFingerprint !== before.frozen.inputFingerprint
         || resolved.contentHash !== expected.contentHash || resolved.sizeBytes !== expected.sizeBytes
-        || resolved.mediaType !== expected.mediaType || (resolved.mediaType !== 'image/png' && resolved.mediaType !== 'image/jpeg')) {
+        || resolved.mediaType !== expected.mediaType || resolved.durationMs !== expected.durationMs
+        || (resolved.mediaType !== 'image/png' && resolved.mediaType !== 'image/jpeg' && resolved.mediaType !== 'audio/wav')) {
         throw new InspectionAssistError('BINDING_CHANGED');
       }
       return { attachmentId: expected.attachmentId, attachmentRevision: expected.attachmentRevision,
         mediaType: resolved.mediaType, bytes: new Uint8Array(resolved.bytes), contentHash: resolved.contentHash };
     } };
     return { draftId: input.draftId, draftRevision: input.expectedRevision, input: structuredClone(initial.frozen), media };
+  }
+
+  /** Original preparation receipt only. No attachment byte read, input write,
+   * task creation or model dispatch, including when a receipt is absent. */
+  async readPreparation(value: unknown) {
+    const input = parseInspectionInput(schema, value);
+    const target = { orderId: input.orderId, allocationId: input.allocationId, templateId: input.templateId, stage: input.stage };
+    return this.authority.withAction(target, 'bind', async scope => {
+      await this.drafts.read({ ...target, draftId: input.draftId });
+      const fingerprint = requestFingerprint({ kind: 'inspection.input', scope, input });
+      const receipt = await this.repository.receipt(scope, input.operationId, fingerprint);
+      if (receipt.status === 'found' && receipt.result.draftId !== input.draftId) throw new InspectionAssistError('BINDING_CHANGED');
+      return { ...receipt, inputId: `inspection.input:${requestFingerprint({ scope, operationId: input.operationId })}`,
+        execution: 'not_attested' as const, retryable: false as const };
+    });
   }
 
   async prepare(value: unknown, signal: AbortSignal) {

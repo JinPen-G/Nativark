@@ -457,6 +457,16 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     let result: AiTaskRunnerEffectResult = { kind: 'unknown', resultRef: last?.id ?? snapshot.artifact.id,
       outputBytes: snapshot.measurement ? Number(snapshot.measurement.outputBytes) : 0 };
     let businessResultRef: string | null = null, observedAt: string | null = null;
+    if (snapshot.measurement && last?.kind === 'confirmation' && !snapshot.consumption
+      && snapshot.task.cancelRequestedAt !== null && ['CANCEL_REQUESTED', 'CANCELLED'].includes(snapshot.task.status)) {
+      // Preserve the immutable confirmation receipt. Only the original business
+      // adapter may attest that no approval/submission phase ever followed it.
+      const business = await this.orderEvidence.reconcile({ taskId: lease.taskId, runId: lease.runId, stepId,
+        actionId: snapshot.step.actionId, inputRef: snapshot.step.inputRef!, fingerprint: snapshot.step.requestFingerprint,
+        lease: structuredClone(lease) }, transaction);
+      if (business.kind === 'failed' && business.errorCode === 'AI_CANCELLED')
+        result = { kind: 'failed', resultRef: last.id, errorCode: 'AI_CANCELLED', outputBytes: Number(snapshot.measurement.outputBytes) };
+    }
     if (snapshot.measurement && last && last.kind !== 'confirmation') {
       const binding = { taskId: lease.taskId, runId: lease.runId, stepId, actionId: snapshot.step.actionId, inputRef: snapshot.step.inputRef!,
         fingerprint: snapshot.step.requestFingerprint, lease: structuredClone(lease) };

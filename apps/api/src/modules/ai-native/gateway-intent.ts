@@ -49,7 +49,7 @@ export interface PreparedGatewayIntent {
   sceneCode: string;
   intentHash: string;
   request: Omit<z.infer<typeof modelProtocolRequestSchema>, 'model'>;
-  requiredCapabilities: Array<'text' | 'streaming' | 'image'>;
+  requiredCapabilities: Array<'text' | 'streaming' | 'image' | 'audio'>;
   omittedOptionalFeatures: AiGatewayFeatureDraft[];
 }
 
@@ -76,9 +76,8 @@ export async function prepareGatewayIntent(
   const input = parsed.data;
   if (input.sceneCode !== policy.data.sceneCode) throw new ModelGatewayError('FORBIDDEN');
   if (input.maxOutputTokens > policy.data.maxOutputTokens) throw new ModelGatewayError('INVALID_REQUEST');
-  const supported: AiGatewayFeatureDraft[] = mode === 'stream' ? ['text', 'streaming', 'image'] : ['text', 'image'];
+  const supported: AiGatewayFeatureDraft[] = mode === 'stream' ? ['text', 'streaming', 'image'] : ['text', 'image', 'audio'];
   if (input.requiredFeatures.some(item => !supported.includes(item))) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
-  if (input.requiredFeatures.includes('audio')) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
   if (input.messages.reduce((count, message) => count + message.content.filter(part => part.kind !== 'text').length, 0) > 8) {
     throw new ModelGatewayError('INVALID_REQUEST');
   }
@@ -89,8 +88,8 @@ export async function prepareGatewayIntent(
     for (const part of message.content) {
       if (part.kind === 'text') { content.push({ kind: 'text', text: part.text }); continue; }
       hasMedia = true;
-      if (message.role !== 'user' || !input.requiredFeatures.includes(part.kind)) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
-      if (part.kind === 'audio' || !media) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+      if (message.role !== 'user' || !supported.includes(part.kind) || !input.requiredFeatures.includes(part.kind)) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+      if (!media) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
       if (signal.aborted) throw new ModelGatewayError('CANCELLED');
       let resolved: Awaited<ReturnType<GatewayMediaAttachmentResolver['resolve']>>;
       try { resolved = await media.resolve(structuredClone(context), structuredClone(part), signal); }
@@ -103,13 +102,23 @@ export async function prepareGatewayIntent(
       }
       const bytes = new Uint8Array(resolved.bytes), hash = createHash('sha256').update(bytes).digest('hex');
       if (hash !== resolved.contentHash) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
-      content.push({ kind: 'image', mediaType: resolved.mediaType as 'image/png' | 'image/jpeg', attachmentId: resolved.attachmentId,
-        attachmentRevision: resolved.attachmentRevision, contentHash: hash, data: Buffer.from(bytes).toString('base64') });
+      if (part.kind === 'image') {
+        if (resolved.mediaType !== 'image/png' && resolved.mediaType !== 'image/jpeg') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+        content.push({ kind: 'image', mediaType: resolved.mediaType, attachmentId: resolved.attachmentId,
+          attachmentRevision: resolved.attachmentRevision, contentHash: hash, data: Buffer.from(bytes).toString('base64') });
+      } else {
+        if (resolved.mediaType !== 'audio/wav') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+        content.push({ kind: 'audio', mediaType: resolved.mediaType, attachmentId: resolved.attachmentId,
+          attachmentRevision: resolved.attachmentRevision, contentHash: hash, data: Buffer.from(bytes).toString('base64') });
+      }
     }
     messages.push({ role: message.role, content });
   }
   if (hasMedia && !input.requiredFeatures.some(item => mediaKinds.has(item))) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
-  const features = [...(hasMedia ? ['image' as const] : []), ...(mode === 'stream' ? ['streaming' as const] : [])];
+  const mediaFeature = messages.some(message => typeof message.content !== 'string' && message.content.some(part => part.kind === 'audio')) ? 'audio' as const : hasMedia ? 'image' as const : undefined;
+  if (input.requiredFeatures.includes('audio') && mediaFeature !== 'audio') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  if (input.requiredFeatures.includes('image') && mediaFeature !== 'image') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  const features = [...(mediaFeature ? [mediaFeature] : []), ...(mode === 'stream' ? ['streaming' as const] : [])];
   const request = modelProtocolRequestBaseSchema.omit({ model: true }).safeParse({ callId: input.requestId, messages,
     maxOutputTokens: input.maxOutputTokens, ...(features.length ? { features } : {}) });
   if (!request.success) throw new ModelGatewayError('INVALID_REQUEST');
@@ -122,7 +131,7 @@ export async function prepareGatewayIntent(
       mediaType: part.mediaType, contentHash: part.contentHash })) })) : undefined;
   return { sceneCode: input.sceneCode, intentHash: requestFingerprint({ intent: input, mode,
     ...(mediaBinding ? { media: mediaBinding } : {}) }), request: request.data,
-    requiredCapabilities: [...(hasMedia ? ['text' as const, 'image' as const] : ['text' as const]), ...(mode === 'stream' ? ['streaming' as const] : [])],
+    requiredCapabilities: [...(hasMedia ? ['text' as const, ...(mediaFeature === 'audio' ? ['audio' as const] : ['image' as const])] : ['text' as const]), ...(mode === 'stream' ? ['streaming' as const] : [])],
     omittedOptionalFeatures: input.optionalFeatures.filter(item => !supported.includes(item)) };
 }
 

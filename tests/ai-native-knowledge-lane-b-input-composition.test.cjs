@@ -74,3 +74,162 @@ test('opt-in composition prepares original knowledge package with separately aut
   assert.deepEqual((await bundle.preparation.collect(input, { includePreferences: true })).preferences.items, []);
   assert.throws(() => composePersistedHumanKnowledge({ ...deps, memory: { db, authorization: undefined } }), { code: 'unavailable' });
 });
+
+test('consumption binds observations across waits and recovers the exact memory deletion', async () => {
+  const { ports, db, flags } = fixture();
+  const bundle = composePersistedHumanKnowledge({ ...ports, memory: { db, authorization: ports.authorization } });
+  await bundle.management.create(h.draft());
+  await bundle.management.parse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-1' });
+  const detail = bundle.management.detail.bind(bundle.management);
+  let once = true;
+  bundle.management.detail = async id => {
+    const result = await detail(id);
+    if (once) {
+      once = false;
+      await bundle.management.revise(result.revision, h.draft({ documentVersion: 'v2', operationId: 'revise-2' }));
+    }
+    return result;
+  };
+  await assert.rejects(bundle.consumption.readDocument({ documentId: 'doc-1' }), { code: 'conflict' });
+  bundle.management.detail = detail;
+  const revised = await detail('doc-1');
+  const parsed = await bundle.management.parse({ documentId: 'doc-1', expectedRevision: revised.revision, operationId: 'parse-2' });
+  const queued = await bundle.index.request({ documentId: 'doc-1', expectedRevision: parsed.revision, operationId: 'index-2', kind: 'upsert' });
+  const indexed = await bundle.index.resume({ documentId: 'doc-1', operationId: queued.indexJob.operationId, generation: queued.indexJob.generation });
+  const current = await bundle.management.publish({ documentId: 'doc-1', expectedRevision: indexed.revision, operationId: 'publish-2' });
+  await bundle.management.withdraw({ documentId: 'doc-1', expectedRevision: current.revision, operationId: 'withdraw-1' });
+  const withdrawn = await bundle.consumption.readDocument({ documentId: 'doc-1' });
+  assert.equal(withdrawn.state, 'withdrawn_or_deleted');
+  assert.deepEqual(withdrawn.preview.sources, []);
+  assert.equal(withdrawn.metadata.indexJob.status, 'pending');
+
+  const expiresAt = new Date(h.now + 3600000).toISOString();
+  await bundle.memory.propose({ memoryId: 'memory-1', operationId: 'propose-1', expiresAt,
+    preference: { kind: 'locale', value: 'zh-CN' } });
+  await bundle.memory.confirm({ memoryId: 'memory-1', expectedRevision: 1, operationId: 'confirm-1', expiresAt });
+  const proof = bundle.memory.confirmationDetail.bind(bundle.memory);
+  bundle.memory.confirmationDetail = async id => {
+    const result = await proof(id);
+    await bundle.memory.revoke({ memoryId: id, expectedRevision: 2 });
+    return result;
+  };
+  await assert.rejects(bundle.consumption.readMemory({ memoryId: 'memory-1' }), { code: 'unavailable' });
+  bundle.memory.confirmationDetail = proof;
+  assert.equal((await bundle.consumption.readMemory({ memoryId: 'memory-1' })).status, 'revoked');
+
+  const deletion = { draftVersion: 'ain-c06-draft-1', memoryId: 'memory-1', expectedRevision: 2, operation: 'delete' };
+  const transaction = db.$transaction;
+  db.$transaction = async (...args) => {
+    const before = db.state.memories.get('memory-1').status;
+    const result = await transaction(...args);
+    if (before !== 'deleted' && db.state.memories.get('memory-1').status === 'deleted') throw new Error('synthetic committed response lost');
+    return result;
+  };
+  await assert.rejects(bundle.consumption.changeMemory('delete-1', deletion), { code: 'result_unknown' });
+  db.$transaction = transaction;
+  const recovered = await bundle.consumption.recoverMemoryChange('delete-1', deletion);
+  assert.equal(recovered.status, 'committed_current');
+  assert.equal((await bundle.consumption.changeMemory('delete-1', deletion)).status, 'deleted');
+  const count = db.state.memoryOperations.size;
+  await assert.rejects(bundle.consumption.recoverMemoryChange('delete-1', { ...deletion, expectedRevision: 1 }), { code: 'conflict' });
+  assert.equal(db.state.memoryOperations.size, count);
+  flags.workspaceId = 'another-space';
+  await assert.rejects(bundle.consumption.readDocument({ documentId: 'doc-1' }), { code: 'unavailable' });
+  await assert.rejects(bundle.consumption.recoverMemoryChange('delete-1', deletion), { code: 'unavailable' });
+});
+
+test('read-only HTTP uses request-local credentials and current exact policies without enabling default routes', async () => {
+  const { HumanKnowledgeConsumptionRequestFactory } = h.load('human-knowledge-consumption.composition');
+  const { HumanKnowledgeConsumptionController } = h.load('human-knowledge-consumption.controller');
+  const { fingerprint } = h.load('knowledge-validation');
+  const { getRequestIdentity, runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
+  const { f, ports, db, identity } = fixture();
+  const bundle = composePersistedHumanKnowledge({ ...ports, memory: { db, authorization: ports.authorization } });
+  const expiresAt = new Date(h.now + 3600000).toISOString();
+  await bundle.management.create(h.draft({ validUntil: expiresAt }));
+  await bundle.management.parse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-1' });
+  await bundle.memory.propose({ memoryId: 'memory-1', operationId: 'propose-1', expiresAt, preference: { kind: 'locale', value: 'zh-CN' } });
+  await bundle.memory.confirm({ memoryId: 'memory-1', expectedRevision: 1, operationId: 'confirm-1', expiresAt });
+  const memory = await bundle.memory.read('memory-1'), policies = new Map(), stores = new Map();
+  const grant = (domain, action, resource) => {
+    const key = { tenantId: 'tenant-1', workspaceId: 'space-1', actorKind: 'user', actorId: 'user-1', audience: 'operator',
+      domain, action, resourceKey: fingerprint(resource) };
+    policies.set(JSON.stringify(key), { ...key, resource, enabled: true, revision: 1,
+      expiresAt: new Date(h.now + 86400000), requiredPermissions: ['synthetic-policy'] });
+  };
+  const document = { documentId: 'doc-1', documentVersion: 'v1', attachmentId: 'attachment-1', aclRevision: 1 };
+  for (const action of ['read_metadata', 'read_body', 'resolve_source']) {
+    grant('knowledge', action, {}); grant('knowledge', action, document);
+  }
+  grant('memory', 'read', { owner: memory.owner });
+  grant('memory', 'read', { memoryId: memory.memoryId, revision: memory.revision, aclRevision: memory.aclRevision, owner: memory.owner });
+  const dependencies = { db, clock: ports.clock, memory: { db },
+    auth: { resolveAccessContext: async (authorization, options) => {
+      assert.equal(options.audience, 'operator');
+      const store = getRequestIdentity();
+      if (store) { stores.set(authorization, store); assert.equal(store.tenantId, undefined); }
+      await Promise.resolve();
+      if (store) assert.equal(getRequestIdentity(), store);
+      if (!['Bearer reader', 'Bearer other'].includes(authorization)) return undefined;
+      const access = await identity.auth.resolveAccessContext(authorization, options);
+      return authorization === 'Bearer other' ? { ...access, workspaceId: 'other-space' } : access;
+    } },
+    policyDb: { aiKnowledgeActionPolicy: { findUnique: async ({ where }) =>
+      structuredClone(policies.get(JSON.stringify(where.tenantId_workspaceId_actorKind_actorId_audience_domain_action_resourceKey)) ?? null) },
+    aiKnowledgePolicyManagementOperation: { findFirst: async () => null } },
+    fileRuntime: { readKnowledgeBytes: async () => { throw Error('unexpected file read'); }, assertKnowledgeBinding: async () => {} } };
+  assert.deepEqual(HumanKnowledgeModule.registerConsumptionHttp().controllers, []);
+  assert.throws(() => HumanKnowledgeModule.registerConsumptionHttp({ enabled: true }), { code: 'unavailable' });
+  assert.throws(() => HumanKnowledgeModule.registerConsumptionHttp({ enabled: true, dependencies: { ...dependencies, policyDb: undefined } }), { code: 'unavailable' });
+  const module = HumanKnowledgeModule.registerConsumptionHttp({ enabled: true, dependencies });
+  assert.deepEqual(module.controllers, [HumanKnowledgeConsumptionController]);
+  const requests = module.providers.find(p => p.provide === HumanKnowledgeConsumptionRequestFactory).useValue;
+  const controller = new HumanKnowledgeConsumptionController(requests);
+  const request = { headers: { authorization: 'Bearer reader' } };
+  let last;
+  const open = requests.open.bind(requests);
+  requests.open = value => { last = open(value); return last; };
+  const invalid = error => error.getStatus() === 400 && error.getResponse().code === 'AI_INVALID_INPUT';
+  const denied = error => error.getStatus() === 503 && error.getResponse().code === 'AI_RESOURCE_UNAVAILABLE';
+  const draft = await controller.readDocument(request, { documentId: 'doc-1' });
+  assert.equal(draft.metadata.publication, 'draft'); assert.equal(draft.body, 'current_readable');
+  await assert.rejects(last.readDocument({ documentId: 'doc-1' }), { code: 'unavailable' });
+  await assert.rejects(controller.readDocument(request, { documentId: 'doc-1', actor: 'user-1' }), invalid);
+  await assert.rejects(last.readDocument({ documentId: 'doc-1' }), { code: 'unavailable' });
+  await assert.rejects(controller.readPreferences(request, { limit: 11 }), invalid);
+  await assert.rejects(controller.readMemory({ headers: { authorization: 'Bearer client' } }, { memoryId: 'memory-1' }), denied);
+  assert.equal((await controller.readMemory(request, { memoryId: 'memory-1' })).status, 'ready');
+  assert.equal((await controller.readPreferences(request, { limit: 1 })).items[0].memoryId, 'memory-1');
+  const queued = await bundle.index.request({ documentId: 'doc-1', expectedRevision: 3, operationId: 'index-1', kind: 'upsert' });
+  const indexed = await bundle.index.resume({ documentId: 'doc-1', operationId: queued.indexJob.operationId, generation: queued.indexJob.generation });
+  const published = await bundle.management.publish({ documentId: 'doc-1', expectedRevision: indexed.revision, operationId: 'publish-1' });
+  const { scope, ...source } = draft.preview.sources[0].source;
+  assert.equal((await controller.openSource(request, source)).text, draft.preview.sources[0].snippet);
+  await assert.rejects(controller.openSource(request, { ...source, scope }), invalid);
+  const parent = { tenantId: 'parent-scope' };
+  await runWithRequestIdentity(parent, async () => {
+    const own = getRequestIdentity();
+    const [allowed, blocked] = await Promise.allSettled([
+      controller.readDocument(request, { documentId: 'doc-1' }),
+      controller.readDocument({ headers: { authorization: 'Bearer other' } }, { documentId: 'doc-1' }),
+    ]);
+    assert.equal(allowed.status, 'fulfilled'); assert.equal(blocked.status, 'rejected');
+    assert.notEqual(stores.get('Bearer reader'), stores.get('Bearer other'));
+    assert.equal(getRequestIdentity(), own);
+  });
+  const before = structuredClone({ documents: db.state.documents, memories: db.state.memories });
+  const bodyPolicies = [...policies.values()].filter(row => row.domain === 'knowledge' && row.action === 'read_body');
+  for (const row of bodyPolicies) row.enabled = false;
+  assert.deepEqual((await controller.readDocument(request, { documentId: 'doc-1' })).preview.sources, []);
+  for (const row of bodyPolicies) row.enabled = true;
+  assert.deepEqual({ documents: db.state.documents, memories: db.state.memories }, before);
+  await bundle.management.withdraw({ documentId: 'doc-1', expectedRevision: published.revision, operationId: 'withdraw-1' });
+  assert.equal((await controller.readDocument(request, { documentId: 'doc-1' })).state, 'withdrawn_or_deleted');
+  await assert.rejects(controller.openSource(request, source), denied);
+  await bundle.memory.revoke({ memoryId: 'memory-1', expectedRevision: 2 });
+  const revoked = await controller.readMemory(request, { memoryId: 'memory-1' });
+  assert.equal(revoked.status, 'revoked'); assert.equal(revoked.memory.preference, undefined);
+  assert.deepEqual((await controller.readPreferences(request, { limit: 1 })).items, []);
+  f.now = h.now + 7200000;
+  await assert.rejects(controller.readDocument(request, { documentId: 'doc-1' }), denied);
+});

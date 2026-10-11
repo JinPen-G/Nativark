@@ -20,12 +20,23 @@ const line = z.object({
   usageQuantity: z.number().finite().nonnegative().max(1_000_000).optional(), note: z.string().trim().max(500).optional()
 }).strict().refine(value => Boolean(value.pricingGroupId || value.itemGroupId), { message: "商品或定价分组必填", path: ["itemGroupId"] });
 const service = z.object({ serviceId: id, quantity: z.number().int().positive().max(10000), scheduledStartAt: timestamp.optional(), scheduledEndAt: timestamp.optional(), serviceLocationId: id.optional() }).strict();
+/** Identity is a candidate, never evidence of membership, qualification or
+ * human approval. Core resolves the selected current relationship. */
+export const aiQuotePersonalBookingIdentitySchema = z.object({ bookingIdentity: z.literal('personal') }).strict();
+export const aiQuoteBookingIdentitySchema = z.discriminatedUnion('bookingIdentity', [
+  aiQuotePersonalBookingIdentitySchema,
+  z.object({ bookingIdentity: z.literal('enterprise_employee'), corporateCustomerId: id,
+    enterpriseContractAndPayer: z.boolean() }).strict()
+]);
 export const aiQuotePreviewInputSchema = z.object({
   customerType: z.enum(["personal", "corporate"]), customerId: id.optional(),
+  bookingIdentity: aiQuoteBookingIdentitySchema.optional(),
   fulfillmentMode: z.enum(RENTAL_FULFILLMENT_MODES), fulfillmentLocationId: id, returnLocationId: id.optional(),
   deliveryAddressId: id.optional(), startAt: timestamp, endAt: timestamp, pricingPlanId: id.optional(), discountPlanId: id.optional(),
   customerCouponId: id.optional(), lines: z.array(line).min(1).max(100), services: z.array(service).max(100).optional()
 }).strict().superRefine((value, context) => {
+  if (value.bookingIdentity && value.customerType !== 'personal') context.addIssue({ code: 'custom',
+    message: '预约身份必须绑定实际个人使用人', path: ['customerType'] });
   if (new Date(value.startAt).getTime() >= new Date(value.endAt).getTime()) context.addIssue({ code: "custom", message: "结束时间必须晚于开始时间", path: ["endAt"] });
   if (value.customerType === "personal" && !value.customerId) context.addIssue({ code: "custom", message: "个人客户必须提供客户标识", path: ["customerId"] });
   if (value.customerType === "corporate" && !value.customerId) context.addIssue({ code: "custom", message: "企业客户必须提供客户标识", path: ["customerId"] });
@@ -90,7 +101,7 @@ export interface AiQuoteCoreContextSource {
  */
 export class AiQuotePreviewService {
   constructor(
-    private readonly core: Pick<RentalBusinessService, "createQuote"> & Partial<Pick<RentalBusinessService, 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>,
+    private readonly core: Pick<RentalBusinessService, "createQuote"> & Partial<Pick<RentalBusinessService, 'normalizeQuoteInput' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>,
     private readonly contexts: AiQuoteCoreContextSource,
     private readonly authority: AiQuotePreviewAuthority,
     private readonly clock: () => Date = () => new Date(),
@@ -164,7 +175,7 @@ export class AiQuotePreviewService {
         if (original && binding(context) !== original.expectedIdentityHash) throw new ModelGatewayError('FORBIDDEN');
         const business = structuredClone(await this.contexts.current(structuredClone(scope)));
         if (expectedConfigurationFingerprint !== undefined && requestFingerprint(business) !== expectedConfigurationFingerprint) throw new ModelGatewayError('CONFIG_INVALID');
-        const formalRequest = this.resolver
+        let formalRequest = this.resolver
           ? structuredClone(await this.resolver.resolvePricingGroupQuoteRequest(scope.tenantId, structuredClone(parsed.data) as RentalQuoteRequest))
           : structuredClone(parsed.data) as RentalQuoteRequest;
         // Only the existing Core resolver may add selection metadata. It must
@@ -178,6 +189,9 @@ export class AiQuotePreviewService {
           return candidate;
         }) };
         if (requestFingerprint(comparable) !== requestFingerprint(parsed.data)) throw new ModelGatewayError('INVALID_RESPONSE');
+        // Fingerprint the request that the original Core producer will persist,
+        // including its own defaults; never synthesize identity in the AI layer.
+        if (this.core.normalizeQuoteInput) formalRequest = structuredClone(this.core.normalizeQuoteInput(formalRequest));
         const expectedRequest = requestFingerprint(formalRequest);
         const outcome = await this.authority.withQuote(structuredClone(parsed.data) as RentalQuoteRequest, async current => {
           if (binding(current) !== binding(context)) throw new ModelGatewayError('FORBIDDEN');

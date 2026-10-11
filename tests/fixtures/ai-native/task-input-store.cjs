@@ -35,7 +35,7 @@ const unique = {
 
 // Serialized Prisma-shaped transaction double with rollback and lost COMMIT replies; not MySQL.
 function createTaskInputStore(initial, constraints = {}) {
-  const state = clone(initial), trace = [];
+  const state = clone({ aiTaskQuoteSelection: [], ...initial }), trace = [];
   const control = { beforeRead: null, beforeWrite: null, beforeCommit: null, loseReply: false };
   function related(row, name, data) {
     if (!row) return row;
@@ -50,6 +50,10 @@ function createTaskInputStore(initial, constraints = {}) {
       out.executionPlan = data.aiTaskRunPlan.find(p => p.runId === row.id) ?? null;
     }
     if (name === 'aiTask') out.runs = data.aiRun.filter(r => r.taskId === row.id).map(r => related(r, 'aiRun', data));
+    if (name === 'aiProposal') out.currentVersion = (data.aiProposalVersion ?? []).find(version =>
+      version.scopeId === row.scopeId && version.taskId === row.taskId && version.proposalId === row.id && version.revision === row.currentRevision) ?? null;
+    if (name === 'aiProposalAction') out.step = data.aiStep.find(step =>
+      step.scopeId === row.scopeId && step.taskId === row.taskId && step.actionId === row.actionId) ?? null;
     return out;
   }
   const hydrate = (row, select) => {
@@ -71,12 +75,18 @@ function createTaskInputStore(initial, constraints = {}) {
         }
         const row = { ...(!['aiTaskExecutionPhaseStart', 'aiTaskExecutionPhaseReceipt'].includes(name) ? { revision: 1 } : {}),
           createdAt: new Date('2026-10-06T12:00:00Z'), ...clone(value) };
+        // Prisma schema defaults, applied only when the real service inserts its receipt.
+        if (name === 'rentalOrderIdempotencyRecord') {
+          row.id ??= require('node:crypto').randomUUID();
+          row.status ??= 'succeeded';
+        }
         if (name === 'aiApprovalConsumption') row.updatedAt ??= new Date('2026-10-06T12:00:00Z');
         if (name === 'aiTaskExecutionBudget') for (const prefix of ['reserved', 'consumed']) for (const kind of ['Steps', 'Calls', 'ActiveMs', 'OutputBytes']) row[`${prefix}${kind}`] ??= 0n;
         rows().push(row); return hydrate(row);
       };
       all[name] = {
-        findFirst: async args => { trace.push(`${name}.read`); if (control.beforeRead) await control.beforeRead(name, args, data); return hydrate(selected(args.where ?? {})[0], args.select); },
+        findFirst: async args => { trace.push(`${name}.read`); if (control.beforeRead) await control.beforeRead(name, args, data);
+          const row=selected(args.where ?? {})[0]; return hydrate(row && args.select ? related(row,name,data) : row, args.select); },
         findUnique: async args => { trace.push(`${name}.read`); if (control.beforeRead) await control.beforeRead(name, args, data);
           const where = Object.keys(args.where).length === 1 && Object.keys(args.where)[0].includes('_') ? Object.values(args.where)[0] : args.where;
           return hydrate(selected(where)[0], args.select); },

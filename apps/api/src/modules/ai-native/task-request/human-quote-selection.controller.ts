@@ -1,10 +1,64 @@
+import type { IncomingMessage } from 'node:http';
 import { Body, Controller, HttpException, Inject, Post, Req } from '@nestjs/common';
-import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT } from '@rental-os/shared';
-import type { composeRequestBoundQuoteSelections, composeRequestBoundHumanQuoteOrder, AiSceneHttpRequest } from '../scenes/request-bound-scenes.application';
+import { AI_QUOTE_SELECTION_HTTP_DRAFT, AI_HUMAN_QUOTE_ORDER_HTTP_DRAFT, AI_SELECTED_QUOTE_TASK_HTTP_DRAFT } from '@rental-os/shared';
+import type { composeRequestBoundQuoteSelections, composeRequestBoundHumanQuoteOrder, composeRequestBoundSelectedQuoteTask, AiSceneHttpRequest } from '../scenes/request-bound-scenes.application';
 
 export const AI_HUMAN_QUOTE_SELECTIONS = Symbol('AI_HUMAN_QUOTE_SELECTIONS');
 export const AI_HUMAN_QUOTE_SELECTION_REQUESTS = Symbol('AI_HUMAN_QUOTE_SELECTION_REQUESTS');
 export const AI_HUMAN_QUOTE_ORDER_REQUESTS = Symbol('AI_HUMAN_QUOTE_ORDER_REQUESTS');
+export const AI_SELECTED_QUOTE_TASK_REQUESTS = Symbol('AI_SELECTED_QUOTE_TASK_REQUESTS');
+
+type QuoteTaskHttpRequest = AiSceneHttpRequest & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
+async function runQuoteTask<T>(request: QuoteTaskHttpRequest, work: (signal: AbortSignal) => Promise<T>) {
+  const controller = new AbortController(), abort = () => controller.abort();
+  const listens = typeof request?.once === 'function' && typeof request?.removeListener === 'function';
+  if (request?.aborted) abort();
+  else if (listens) request.once!('aborted', abort);
+  try { return await work(controller.signal); }
+  finally { if (listens) request.removeListener!('aborted', abort); }
+}
+
+@Controller(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.basePath)
+export class AiSelectedQuoteTaskController {
+  constructor(@Inject(AI_SELECTED_QUOTE_TASK_REQUESTS) private readonly tasks: ReturnType<typeof composeRequestBoundSelectedQuoteTask>) {}
+  @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.readTaskPage)
+  readTaskPage(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => this.tasks.readTaskPage(request, body));
+  }
+  @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.readTaskEvents)
+  readTaskEvents(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => this.tasks.readTaskEvents(request, body));
+  }
+  @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.start)
+  start(@Req() request: QuoteTaskHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => runQuoteTask(request, signal => this.tasks.start(request, body, signal)));
+  }
+  @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.readConfirmation)
+  readConfirmation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => this.tasks.readConfirmation(request, body));
+  }
+  @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.continueConfirmation)
+  continueConfirmation(@Req() request: QuoteTaskHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => runQuoteTask(request, signal => this.tasks.continueConfirmation(request, body, signal)));
+  }
+  @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.reconcile)
+  reconcile(@Req() request: QuoteTaskHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => runQuoteTask(request, signal => this.tasks.reconcile(request, body, signal)));
+  }
+  @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.readScene)
+  readScene(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => this.tasks.readScene(request, body));
+  }
+  @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.readResult)
+  readResult(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => this.tasks.readResult(request, body));
+  }
+  @Post(AI_SELECTED_QUOTE_TASK_HTTP_DRAFT.requestCancel)
+  requestCancel(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondHumanQuote(() => this.tasks.requestCancel(request, body));
+  }
+}
+
 
 async function respondHumanQuote<T>(work: () => Promise<T>, unknownAction = 'reconcile') {
   try { return await work(); }

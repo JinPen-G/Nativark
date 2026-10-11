@@ -82,7 +82,13 @@ export const AI_SCENE_REQUEST_HTTP_DRAFT = Object.freeze({
  * submission contract; callers never supply leases, prompts or model settings. */
 export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
   basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/model`, method: 'POST',
-  start: 'start', readInput: 'input', resume: 'resume', reconcile: 'reconcile',
+  start: 'start', readInput: 'input', refreshInput: 'input/refresh', resume: 'resume', reconcile: 'reconcile',
+  readAnswer: 'input/receipt', continueAnswer: 'input/continue',
+  readQuotePreparation: 'input/quote-preparation',
+  confirmClarifiedQuote: 'input/quote-confirm', readClarifiedQuoteReceipt: 'input/quote-receipt',
   requestCancel: 'cancel', readModelResult: 'result', reopenModelSource: 'source',
-  readTaskPage: 'tasks', readTaskEvents: 'events', readTaskScene: 'scene'
+  readTaskPage: 'tasks', readTaskEvents: 'events', readTaskScene: 'scene',
+  startSettingsTask: 'settings/start', readSettingsConfirmation: 'settings/confirmation',
+  decideSettingsProposal: 'settings/decision', readSettingsDecision: 'settings/decision-receipt', continueSettingsConfirmation: 'settings/continue',
+  reconcileSettingsTask: 'settings/reconcile', cancelSettingsTask: 'settings/cancel'
 } as const);

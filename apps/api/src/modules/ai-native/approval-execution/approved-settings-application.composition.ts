@@ -179,7 +179,7 @@ export function composeApprovedSettingsApplication(d: ApprovedSettingsApplicatio
       if (!change) return { state: 'not_observed' as const, nextAction: 'read_change_receipt' as const };
       if (change.workspaceId !== actor.workspaceId || change.tenantId !== actor.tenantId
         || change.actorId !== actor.actorId || change.changeKey !== changeKey) throw settingsDenied();
-      const review = await domain().readAuthorizedChange({ changeId: change.id, changeHash: change.changeHash });
+      const review = await domain().readHistoricalChange({ changeId: change.id, changeHash: change.changeHash });
       await revalidate();
       return { state: 'prepared_not_approved' as const, change: review };
     });

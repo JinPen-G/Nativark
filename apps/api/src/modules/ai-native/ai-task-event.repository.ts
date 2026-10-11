@@ -17,6 +17,8 @@ const dataSchemas = {
   "step.registered": z.object({ stepId: id, runId: id, sequence: revision, stepRevision: z.literal(1) }).strict(),
   "step.changed": z.object({ stepId: id, runId: id, stepRevision: revision, status: z.enum(AI_STEP_STATUSES_DRAFT), reason: z.enum(AI_STEP_TRANSITION_REASONS_DRAFT) }).strict(),
   "task.output_ready": z.object({ resultId: id }).strict(),
+  "task.input_refreshed": z.object({ requestId: id, previousRevision: revision, revision }).strict()
+    .refine(data => data.revision === data.previousRevision + 1),
   "access.revoked": z.object({ code: z.enum(["AI_ACCESS_DENIED", "AI_SCOPE_CHANGED"]) }).strict()
 };
 const taskSelect = { id: true, scopeId: true, revision: true, contractVersion: true, eventCursor: true } satisfies Prisma.AiTaskSelect;
@@ -48,6 +50,7 @@ function wireEvent(row: EventRow): AiTaskEventDraft {
     case "step.registered": return { ...base, type: row.type, data: dataSchemas[row.type].parse(envelope.data.data) };
     case "step.changed": return { ...base, type: row.type, data: dataSchemas[row.type].parse(envelope.data.data) };
     case "task.output_ready": return { ...base, type: row.type, data: dataSchemas[row.type].parse(envelope.data.data) };
+    case "task.input_refreshed": return { ...base, type: row.type, data: dataSchemas[row.type].parse(envelope.data.data) };
     case "access.revoked": return { ...base, type: row.type, data: dataSchemas[row.type].parse(envelope.data.data) };
     default: throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
   }

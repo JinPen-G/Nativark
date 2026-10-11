@@ -31,11 +31,15 @@ export function readOriginalSceneEnvelope(input: ReturnType<typeof parseTaskMode
 /** Preserve the exact frozen fact envelope. Human answers are separate data,
  * never replacement facts, a quote selection, or approval. */
 export function continueOriginalSceneMaterial(previous: ReturnType<typeof parseTaskModelInput>,
-  continuation: { receiptId: string; inputHash: string; result: { text: string }; answers: unknown }) {
+  continuation: { receiptId: string; inputHash: string; result: { text: string }; answers: unknown },
+  refreshed?: Pick<ReturnType<typeof readOriginalSceneEnvelope>, 'original' | 'materialHash' | 'trust' | 'facts' | 'knowledge'>) {
   const envelope = readOriginalSceneEnvelope(previous);
-  const next = envelopeSchema.parse({ ...envelope, clarifications: [...(envelope.clarifications ?? []),
+  if (refreshed && (requestFingerprint(refreshed.original) !== requestFingerprint(envelope.original)
+    || requestFingerprint(refreshed.facts) !== refreshed.materialHash)) throw unavailable();
+  const next = envelopeSchema.parse({ ...envelope, ...(refreshed ?? {}), clarifications: [...(envelope.clarifications ?? [])
+    .map(row => refreshed ? { ...row, response: '' } : row),
     { receiptId: continuation.receiptId, inputHash: continuation.inputHash,
-      response: continuation.result.text, answers: structuredClone(continuation.answers) }] });
+      response: refreshed ? '' : continuation.result.text, answers: structuredClone(continuation.answers) }] });
   const text = JSON.stringify(next);
   if (Buffer.byteLength(text, 'utf8') > 131072) throw unavailable();
   const content: Array<{ kind: 'text'; text: string }> = [];

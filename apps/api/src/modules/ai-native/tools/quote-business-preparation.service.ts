@@ -30,7 +30,7 @@ export class AiQuoteBusinessPreparationService {
         limits: AI_QUOTE_CANDIDATE_LIMITS,
         required: ['customer_explicit_selection', 'items_quantity', 'absolute_period_or_supported_relative_time', 'fulfillment_location'],
         capabilities: [...current.profile.capabilities],
-        enterpriseIdentity: 'qualification_required_no_authorized_adapter' as const,
+        enterpriseIdentity: 'explicit_selection_requires_current_authorized_relationship_and_Core_qualification' as const,
         rounding: 'Core_quote_snapshot_only_not_recomputed' as const };
       if (requestFingerprint(current) !== requestFingerprint(await this.sources.contexts.current(context.scope))) throw new ModelGatewayError('CONFIG_INVALID');
       return result;
@@ -129,6 +129,8 @@ export class AiQuoteBusinessPreparationService {
     });
     const fields = [
       source('customerId', result.request.customerId, Boolean(supplied.customerId)),
+      ...(result.request.bookingIdentity ? [source('bookingIdentity', result.request.bookingIdentity,
+        supplied.bookingIdentity !== undefined)] : []),
       source('items', result.request.lines, Boolean(supplied.items)),
       source('startAt', result.request.startAt, Boolean(supplied.start)),
       source('endAt', result.request.endAt, Boolean(supplied.end)),

@@ -12,11 +12,11 @@ const {MembershipService}=require('../apps/api/src/modules/platform/membership.s
 const {authorizedRunnerHarness}=require('./fixtures/ai-native/task-authorized-runner.cjs');
 const {RENTAL_CATEGORY_DEFINITIONS}=require('./fixtures/ai-native/local-shared.cjs');
 const stores=require('./helpers/absorbing-config-store.cjs');
-async function setup(){
+async function setup(categoryCode='camera'){
  const h=await authorizedRunnerHarness();h.identity.user.tenantId='tenant_001';h.identity.user.permissions.push('rental-core:catalog:view','rental-os:order:create');
- const config=stores.createAbsorbingConfigStore();config.listWorkspaces=async()=>[{id:'workspace-a',tenantId:'tenant_001',categoryCode:'camera',isDefault:true}];
+ const config=stores.createAbsorbingConfigStore();config.listWorkspaces=async()=>[{id:'workspace-a',tenantId:'tenant_001',categoryCode,isDefault:true}];
  const core=new RentalCoreService(config,stores.createAbsorbingFactStore());await core.onApplicationBootstrap();
- const bc={profile:core.getProfile('tenant_001'),category:RENTAL_CATEGORY_DEFINITIONS.find(x=>x.code==='camera'),settings:core.getBusinessSettings('tenant_001'),groups:core.listItemGroups('tenant_001'),locations:core.listLocations('tenant_001'),operators:core.listOperators('tenant_001'),couponTemplates:[]};
+ const bc={profile:core.getProfile('tenant_001'),category:RENTAL_CATEGORY_DEFINITIONS.find(x=>x.code===categoryCode),settings:core.getBusinessSettings('tenant_001'),groups:core.listItemGroups('tenant_001'),locations:core.listLocations('tenant_001'),operators:core.listOperators('tenant_001'),couponTemplates:[]};
  const customers=[{id:'customer-a',name:'Synthetic same name',phoneMasked:'138****0000',membership:{status:'active'}},{id:'customer-b',name:'Synthetic same name',phoneMasked:'139****0000',membership:{status:'active'}}];
  const memberships=new MembershipService({customerProfile:{findMany:async q=>structuredClone(customers.filter(row =>
    (!q.where.id || row.id === q.where.id) && (!q.where.name || row.name.includes(q.where.name.contains))).slice(0,q.take))}},{});
@@ -28,6 +28,16 @@ async function setup(){
  return {...h,bc,readers,contexts,clock,service,candidate,customers};
 }
 test('server resolves finite extracted candidates through real Guard/catalog/member readers without quoting',async()=>{const h=await setup(),out=await h.service.prepare(h.candidate);assert.equal(out.status,'needs_confirmation');assert.equal(out.request.lines[0].itemGroupId,h.bc.groups[0].id);assert.equal(out.request.startAt,'2026-10-09T01:00:00.000Z');assert.equal(out.request.endAt,'2026-10-10T01:00:00.000Z');assert.equal(out.request.customerId,'customer-a');assert.equal(out.timeZone,'Asia/Shanghai');assert.equal(out.reservation,'not_reserved');});
+test('explicit personal booking identity survives authorized candidate preparation without a default',async()=>{
+ const h=await setup();
+ const ordinary=await h.service.prepare(h.candidate);
+ assert.equal(ordinary.status,'needs_confirmation');assert.equal(ordinary.request.bookingIdentity,undefined);
+ const explicit=await h.service.prepare({...h.candidate,bookingIdentity:{bookingIdentity:'personal'}});
+ assert.equal(explicit.status,'needs_confirmation');assert.deepEqual(explicit.request.bookingIdentity,{bookingIdentity:'personal'});
+ assert.equal((await h.service.prepare({...h.candidate,bookingIdentity:{bookingIdentity:'enterprise_employee',corporateCustomerId:'enterprise-a'}})).status,'missing_input');
+ h.identity.user.permissions=['rental-core:catalog:view'];
+ await assert.rejects(h.service.prepare({...h.candidate,bookingIdentity:{bookingIdentity:'personal'}}));
+});
 test('same-name customers stay ambiguous without an explicit selection',async()=>{const h=await setup();delete h.candidate.customerId;h.candidate.customerName='Synthetic same name';const out=await h.service.prepare(h.candidate);assert.equal(out.status,'ambiguous');assert.equal(out.request,undefined);assert.equal(out.customerCandidates.length,2);});
 test('unknown products and locations remain missing, never auto-selected',async()=>{const h=await setup();h.candidate.items[0].productName='not a product';h.candidate.locationName='unknown location';const out=await h.service.prepare(h.candidate);assert.equal(out.status,'missing_input');assert.ok(out.missingFields.includes('items.0'));assert.ok(out.missingFields.includes('location'));});
 test('candidate cannot override prices, identity, or server time zone',async()=>{const h=await setup();for(const patch of [{amount:0},{tenantId:'tenant-b'},{timeZone:'Pacific/Honolulu'},{actor:{kind:'saas_admin'}}])assert.equal((await h.service.prepare({...h.candidate,...patch})).status,'missing_input');});
@@ -42,7 +52,12 @@ test('configuration revision changed during protected rereads invalidates prepar
 test('location removed during protected rereads invalidates prepared parameters even without a revision bump',async()=>{const h=await setup();const read=h.readers.members.read.bind(h.readers.members);let calls=0;h.readers.members.read=async value=>{const out=await read(value);if(++calls===2)h.bc.locations=[];return out;};await assert.rejects(h.service.prepare(h.candidate));});
 
 test('actionable clarification to explicit resource IDs rereads original readers and rejects stale configuration',async()=>{
- const h=await setup(),partial=await h.service.prepare({customerType:'personal',customerName:'Synthetic same name'});
+ const h=await setup();
+ const allowedMode=h.bc.settings.fulfillment.enabledModes[0];
+ assert.ok(h.bc.settings.fulfillment.enabledModes.length>1);
+ h.bc.category={...h.bc.category,businessModel:{...h.bc.category.businessModel,fulfillmentModes:[allowedMode]}};
+ const partial=await h.service.prepare({customerType:'personal',customerName:'Synthetic same name'});
+ assert.deepEqual(partial.clarifications.find(row=>row.field==='fulfillmentMode').candidates.map(row=>row.id),[allowedMode]);
  assert.ok(partial.clarifications.some(row=>row.field==='customerId'&&row.candidates.length===2));
  assert.ok(partial.clarifications.some(row=>row.field==='start'&&row.action==='supply_absolute_time'));
  const selected={...h.candidate,items:[{itemGroupId:h.bc.groups[0].id,quantity:1,productName:'untrusted ignored name'}],locationId:h.bc.locations[0].id,locationName:'untrusted ignored location',selectionRevision:partial.selectionRevision};
@@ -52,6 +67,26 @@ test('actionable clarification to explicit resource IDs rereads original readers
  const out=await h.service.prepare(selected);assert.equal(out.status,'needs_confirmation');assert.equal(out.request.lines[0].itemGroupId,h.bc.groups[0].id);
  h.bc.settings.configVersion='new-server-config';
  const stale=await h.service.prepare(selected);assert.equal(stale.status,'missing_input');assert.equal(stale.request,undefined);assert.equal(stale.clarifications[0].action,'reread_and_reconfirm');
+ const {originalQuoteAnswerContract,applyOriginalQuoteAnswers}=require('../apps/api/src/modules/ai-native/scenes/original-quote-input');
+ const contract=originalQuoteAnswerContract(selected,stale,'Review the changed server configuration');
+ assert.equal(contract.code,'original_quote_parameters');
+ assert.ok(contract.fields.some(field=>field.fieldId==='item_selection'&&field.kind==='choice'));
+ const answers=contract.fields.filter(field=>field.required).map(field=>({fieldId:field.fieldId,value:field.options[0].value}));
+ const confirmed=applyOriginalQuoteAnswers(selected,[{contract,answers}]);
+ assert.notEqual(confirmed.selectionRevision,selected.selectionRevision);
+ assert.equal(selected.selectionRevision,narrowed.selectionRevision);
+ assert.equal((await h.service.prepare(confirmed)).status,'needs_confirmation');
+ const usage=await setup('construction');
+ const input={...usage.candidate,items:[{...usage.candidate.items[0],pricingUnit:'usage'}]};
+ const needsUsage=await usage.service.prepare(input);
+ assert.ok(needsUsage.missingFields.includes('items.0.usageQuantity'));
+ const usageContract=originalQuoteAnswerContract(input,needsUsage,'Supply actual planned usage, not a price');
+ assert.ok(usageContract.fields.some(field=>field.fieldId==='usage_quantity'));
+ const usageAnswers=usageContract.fields.filter(field=>field.required).map(field=>({fieldId:field.fieldId,value:field.fieldId==='usage_quantity'?'1.5':field.options[0].value}));
+ const supplied=applyOriginalQuoteAnswers(input,[{contract:usageContract,answers:usageAnswers}]);
+ assert.equal((await usage.service.prepare(supplied)).request.lines[0].usageQuantity,1.5);
+ assert.equal(input.items[0].usageQuantity,undefined);
+ for(const value of ['-1','NaN','1e3','1000001','0.10000000000000000001'])assert.throws(()=>applyOriginalQuoteAnswers(input,[{contract:usageContract,answers:usageAnswers.map(answer=>answer.fieldId==='usage_quantity'?{...answer,value}:answer)}]));
 });
 test('forged selected ID cannot be rescued by a valid returned name',async()=>{
  const h=await setup(),before=await h.service.prepare(h.candidate);

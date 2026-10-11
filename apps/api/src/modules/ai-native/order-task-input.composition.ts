@@ -10,7 +10,7 @@ import { PersistedApprovedOrderPolicyAuthority } from './approval-execution/pers
 import { PrismaApprovedOrderOriginalInputSource } from './approval-execution/prisma-approved-order-original-input.source';
 import type { ApprovedOrderOriginalInputSource } from './approval-execution/approved-order-composition.ports';
 import { orderContextHash } from './approval-execution/prisma-approved-order.source';
-import { PrismaTaskPlanInputSource } from './runner/prisma-task-plan-input.source';
+import { PrismaTaskPlanInputSource, type PersistedTaskInputTool } from './runner/prisma-task-plan-input.source';
 import { PrismaTaskPlanPolicyRepository } from './runner/prisma-task-plan-policy.repository';
 import { PrismaTaskExecutionScopeAuthority } from './runner/prisma-task-execution-scope.authority';
 import { PrismaTaskRunEvidenceRepository } from './runner/prisma-task-run-evidence.repository';
@@ -19,13 +19,14 @@ export function composePersistedOrderTaskInput(input: PersistedTaskAuthorization
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   confirmation: Pick<RentalOrderConfirmationService, 'normalizeOrderInput'>;
   scene: { code: string; version: string };
+  planTools?: readonly PersistedTaskInputTool[];
 }) {
   const clock = input.clock ?? (() => new Date());
   const authorization = composePersistedTaskAuthorization(input);
   const route = new AiApprovedOrderRouteAuthority(input.guard, input.credentials, clock);
   const source = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, clock,
     'rental.order.commit', { route, confirmation: input.confirmation });
-  const policy = new PrismaTaskPlanPolicyRepository(input.db, { ...input, tool: 'rental.order.commit' }, clock);
+  const policy = new PrismaTaskPlanPolicyRepository(input.db, { ...input, tool: 'rental.order.commit', tools: input.planTools }, clock);
   const scopes = new PrismaTaskExecutionScopeAuthority(authorization.tasks, input.db);
   const plans = new PrismaTaskRunEvidenceRepository(input.db, scopes, source, clock);
   const registrations = new AiStepRegistrationRepository(input.db, source, clock);

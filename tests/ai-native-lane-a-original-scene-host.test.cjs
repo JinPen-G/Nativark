@@ -383,12 +383,27 @@ test('original quote host uses persisted authorized clarification facts instead 
   const host = () => h.model.createApplication({ holderId: 'scene-worker', leaseMs: 100000 }, { ...h.run, inputSource: 'original_scene' });
   const started = await host().start(h.reference);
   assert.equal(started.execution.outcome.status, 'paused', JSON.stringify(started));
-  const pending = await host().readInput(h.reference);
-  assert.equal(pending.contract.code, 'original_quote_context');
-  assert.deepEqual(pending.contract.fields.map(f => f.fieldId), ['clarification_text']);
+  let pending = await host().readInput(h.reference);
+  assert.equal(pending.contract.code, 'original_quote_parameters');
+  assert.ok(pending.contract.fields.some(f=>f.fieldId==='starts_at'));
+  const fulfillment = pending.contract.fields.find(field => field.fieldId === 'fulfillment_selection');
+  assert.ok(fulfillment, 'server-supported fulfillment modes must be offered as persisted choices');
+  assert.ok(fulfillment.options.some(option => option.value === 'store_pickup_return'));
+  const originalQuestion = structuredClone(pending), savedBudget = require('./fixtures/ai-native/task-input-store.cjs').clone(h.state.aiTaskExecutionBudget);
+  const originalModelFingerprint = h.state.aiTaskActionInput[0].fingerprint;
+  const settings = h.b.core.state('tenant_001').businessSettings;
+  settings.configVersion = `${settings.configVersion}-changed`;
+  await assert.rejects(host().readInput(h.reference));
+  pending = await host().refreshInput({ original: h.reference, requestId: pending.requestId, expectedRevision: pending.revision });
+  assert.equal(pending.revision, originalQuestion.revision + 1);
+  assert.notEqual(pending.contract.version, originalQuestion.contract.version);
+  assert.equal(h.state.aiRun.length, 1); assert.equal(h.execution.sent.length, 1);
+  assert.deepEqual(h.state.aiTaskExecutionBudget, savedBudget);
   const submission = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, taskId: h.created.task.taskId,
     requestId: pending.requestId, expectedRevision: pending.revision, submissionKey: 'quote-context-answer',
-    answers: [{ fieldId: 'clarification_text', value: 'Please explain which absolute dates and product I need to select.' }] };
+    answers: pending.contract.fields.map(field=>({fieldId:field.fieldId,value:field.kind==='choice'?field.options[0].value
+      :field.kind==='integer'?2:field.fieldId==='starts_at'?'2027-02-01T00:00:00.000Z'
+      :field.fieldId==='ends_at'?'2027-02-02T00:00:00.000Z':'Please explain which absolute dates and product I need to select.'})) };
   h.b.h.identity.session = false;
   await assert.rejects(host().resume({ original: h.reference, submission }), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
   assert.equal(h.execution.sent.length, 1);
@@ -399,10 +414,16 @@ test('original quote host uses persisted authorized clarification facts instead 
   const read = await h.model.readModelResult({ original: h.reference, resultId: h.state.aiTaskResultArtifact.at(-1).id });
   assert.equal(read.facts.payload.facts.status, 'missing_input');
   assert.equal(h.state.aiTaskActionInput.length, 2);
+  assert.equal(h.state.aiTaskActionInput[0].fingerprint, originalModelFingerprint);
+  assert.equal(JSON.parse(h.execution.sent[1].messages.at(-1).content).facts.payload.facts.selectionRevision, pending.contract.version);
+  assert.doesNotMatch(h.execution.sent[1].messages.at(-1).content, /Synthetic authorized explanation/);
   assert.match(h.execution.sent[1].messages.at(-1).content, /Please explain which absolute dates/);
   assert.equal(h.state.aiTaskExecutionBudget.length, 1);
   assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, 2n);
   assert.equal((await host().resume({ original: h.reference, submission })).continuation.reason, 'receipt_replayed');
+  const prepared = await host().readQuotePreparation({ original: h.reference, submission });
+  assert.equal(prepared.candidate.fulfillmentMode, 'store_pickup_return');
+  assert.ok(!prepared.preparation.missingFields?.includes('fulfillmentMode'));
 });
 
 test('original model application retains unknown usage and cancellation without redispatch or invented zero usage', async () => {
@@ -424,6 +445,43 @@ test('original model application retains unknown usage and cancellation without 
   const cancelled = await h.app.requestCancel({ original: h.reference, expectedRevision: h.state.aiTask[0].revision });
   assert.equal(cancelled.cancellation, 'requested_not_rollback'); assert.equal(h.state.aiTask[0].status, 'CANCEL_REQUESTED');
   assert.equal(h.execution.sent.length, 1); assert.equal(h.state.aiTaskActionInput.length, 1);
+
+  const waiting = await originalModelApplicationHarness('quote_clarification');
+  const waitingHost = waiting.model.createApplication({ holderId: 'scene-worker', leaseMs: 100000 }, { ...waiting.run, inputSource: 'original_scene' });
+  assert.equal((await waitingHost.start(waiting.reference)).execution.outcome.status, 'paused');
+  assert.equal(waiting.state.aiRun[0].leaseOwnerId, null);
+  const retainedCharges = require('./fixtures/ai-native/task-input-store.cjs').clone(waiting.state.aiTaskExecutionCharge);
+  await waitingHost.requestCancel({ original: waiting.reference, expectedRevision: waiting.state.aiTask[0].revision });
+  assert.equal(waiting.state.aiTask[0].status, 'CANCELLED', 'proved released input wait must converge without a fresh lease');
+  assert.equal(waiting.state.aiRun[0].status, 'CANCELLED');
+  assert.deepEqual(waiting.state.aiTaskExecutionCharge, retainedCharges);
+  assert.equal(await waitingHost.readInput(waiting.reference), null);
+  await waitingHost.reconcile(waiting.reference);
+  assert.equal(waiting.execution.sent.length, 1);
+  assert.equal(waiting.state.aiRun.length, 1);
+
+  const unreleased = await originalModelApplicationHarness('quote_clarification');
+  const unreleasedHost = unreleased.model.createApplication({ holderId: 'scene-worker', leaseMs: 100000 }, { ...unreleased.run, inputSource: 'original_scene' });
+  assert.equal((await unreleasedHost.start(unreleased.reference)).execution.outcome.status, 'paused');
+  const run = unreleased.state.aiRun[0];
+  run.leaseOwnerId = 'expired-worker'; run.leaseExpiresAt = new Date(0);
+  await unreleasedHost.requestCancel({ original: unreleased.reference, expectedRevision: unreleased.state.aiTask[0].revision });
+  assert.equal(unreleased.state.aiTask[0].status, 'CANCEL_REQUESTED', 'expiry alone is not a released wait');
+  assert.equal(run.status, 'RUNNING');
+  // Database double exposes the already persisted release, then loses only
+  // the final commit response. It never substitutes the runner or transition.
+  unreleased.state.aiRun[0].leaseOwnerId = null; unreleased.state.aiRun[0].leaseExpiresAt = null;
+  const priorWrite = unreleased.control.beforeWrite;
+  unreleased.control.beforeWrite = async (table, args, data) => {
+    await priorWrite?.(table, args, data);
+    if (table === 'aiTaskEvent' && args.data?.payload?.data?.to === 'cancelled') unreleased.control.loseReply = true;
+  };
+  await assert.rejects(() => unreleasedHost.reconcile(unreleased.reference), error => error.code === 'AI_RESULT_UNKNOWN');
+  unreleased.control.beforeWrite = priorWrite; unreleased.control.loseReply = false;
+  assert.equal(unreleased.state.aiTask[0].status, 'CANCELLED');
+  await unreleasedHost.reconcile(unreleased.reference);
+  assert.equal(unreleased.execution.sent.length, 1);
+  assert.equal(unreleased.state.aiTaskExecutionCharge.length, 4);
 
   const aborted = await originalModelApplicationHarness(), signal = new AbortController(); signal.abort();
   const stopped = await aborted.app.start(aborted.reference, signal.signal);
@@ -509,7 +567,14 @@ test('opt-in model controller executes persisted quote clarification and denies 
   const { AiOriginalSceneModelController } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.controller');
   const { AI_SCENE_MODEL_HTTP_DRAFT } = require('../packages/shared/src/ai-scene-request-draft');
   const { AI_TASK_INPUT_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
-  const h = await requestBoundOriginalModelHarness('quote_clarification');
+  const h = await requestBoundOriginalModelHarness('quote_clarification',undefined,{customerType:'personal',
+    customerId:'customer-a',bookingIdentity:{bookingIdentity:'enterprise_employee'},fulfillmentMode:'store_pickup_return'}, async b=>{
+    b.membershipRows.corporateCustomers=[{id:'company-a',tenantId:'tenant_001',customerType:'corporate',name:'Synthetic enterprise'}];
+    b.membershipRows.corporateLinks=[{tenantId:'tenant_001',customerId:'company-a',status:'active'}];
+    b.membershipRows.bookingOptions=[{id:'relationship-a',tenantId:'tenant_001',personalCustomerId:'customer-a',
+      corporateCustomerId:'company-a',corporateCustomer:{name:'Synthetic enterprise'},role:'employee',status:'active',
+      effectiveFrom:new Date('2020-01-01T00:00:00Z'),effectiveTo:null}];
+  });
   const originalFactory = h.options.runServices;
   const options = { ...h.options, runServices: input => ({ ...originalFactory(input), inputSource: 'original_scene' }) };
   const writes = h.trace.length, module = AiOriginalScenesModule.registerHttpModel(h.requestDependencies, options);
@@ -518,7 +583,7 @@ test('opt-in model controller executes persisted quote clarification and denies 
   const request = Object.assign(new (require('node:events').EventEmitter)(), h.request, { aborted: false });
   assert.equal(h.trace.length, writes);
   assert.deepEqual(module.controllers, [AiOriginalScenesController, AiOriginalSceneModelController]);
-  for (const method of ['start', 'readInput', 'resume', 'reconcile', 'requestCancel', 'readModelResult', 'reopenModelSource',
+  for (const method of ['start', 'readInput', 'refreshInput', 'resume', 'readAnswer', 'continueAnswer', 'readQuotePreparation', 'confirmClarifiedQuote', 'readClarifiedQuoteReceipt', 'reconcile', 'requestCancel', 'readModelResult', 'reopenModelSource',
     'readTaskPage', 'readTaskEvents', 'readTaskScene'])
     assert.equal(Reflect.getMetadata('path', AiOriginalSceneModelController.prototype[method]), AI_SCENE_MODEL_HTTP_DRAFT[method]);
   const referenceValid = ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneModelReferenceDraft);
@@ -530,14 +595,112 @@ test('opt-in model controller executes persisted quote clarification and denies 
   const started = await controller.start(request, h.reference);
   assert.equal(request.listenerCount('aborted'), 0);
   assert.equal(started.execution.outcome.status, 'paused');
-  const pending = await controller.readInput(h.request, h.reference);
+  let pending = await controller.readInput(h.request, h.reference);
+  assert.ok(pending.contract.fields.some(field=>field.fieldId==='enterprise_selection'));
+  assert.ok(pending.contract.fields.some(field=>field.fieldId==='enterprise_payer_selection'));
+  const refresh = { original: h.reference, requestId: pending.requestId, expectedRevision: pending.revision };
+  const refreshValid = ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneModelInputRefreshDraft);
+  assert.equal(refreshValid(refresh), true); assert.equal(refreshValid({ ...refresh, actorId: 'other' }), false);
+  await assert.rejects(controller.refreshInput({ headers: {} }, refresh), e => e.getStatus() === 403);
+  await assert.rejects(controller.refreshInput(h.request, { ...refresh, actorId: 'other' }), e => e.getStatus() === 400);
+  const currentSettings = h.b.core.state('tenant_001').businessSettings;
+  currentSettings.configVersion = `${currentSettings.configVersion}-http-refreshed`;
+  const originalWrite = h.control.beforeWrite;
+  h.control.beforeWrite = async (...args) => {
+    await originalWrite?.(...args);
+    if (args[0] === 'aiTaskEvent' && args[1].data.type === 'task.input_refreshed') h.control.loseReply = true;
+  };
+  await assert.rejects(controller.refreshInput(h.request, refresh), e => e.getStatus() === 409
+    && e.getResponse().code === 'AI_RESULT_UNKNOWN' && e.getResponse().nextAction === 'read_input' && !e.getResponse().retryable);
+  h.control.beforeWrite = originalWrite;
+  assert.equal(h.execution.sent.length, 1); assert.equal(h.state.aiRun.length, 1);
+  pending = await controller.readInput(h.request, h.reference);
+  assert.equal(pending.revision, refresh.expectedRevision + 1);
+  await assert.rejects(controller.refreshInput(h.request, refresh), e => e.getStatus() === 409 && e.getResponse().code === 'AI_REVISION_CONFLICT');
+  assert.equal((await controller.refreshInput(h.request, { ...refresh, expectedRevision: pending.revision })).revision, pending.revision);
   const submission = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, taskId: h.created.task.taskId,
     requestId: pending.requestId, expectedRevision: pending.revision, submissionKey: 'http-quote-clarification',
-    answers: [{ fieldId: 'clarification_text', value: 'Explain the required fields without choosing for me.' }] };
+    answers: pending.contract.fields.map(field=>({fieldId:field.fieldId,value:field.kind==='choice'?field.options[0].value
+      :field.kind==='integer'?2:field.fieldId==='starts_at'?'2027-02-01T00:00:00.000Z'
+      :field.fieldId==='ends_at'?'2027-02-02T00:00:00.000Z':'Explain the required fields without choosing for me.'})) };
   assert.equal(ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneModelResumeDraft)({ original: h.reference, submission }), true);
+  const offeredChoice=pending.contract.fields.find(field=>field.kind==='choice');
+  assert.ok(offeredChoice);
+  await assert.rejects(controller.resume(request,{original:h.reference,submission:{...submission,
+    answers:submission.answers.map(answer=>answer.fieldId===offeredChoice.fieldId?{...answer,value:'not-authorized-candidate'}:answer)}}),e=>e.getStatus()===400&&e.getResponse().code==='AI_INVALID_INPUT');
+  assert.equal(h.execution.sent.length,1);
+  assert.deepEqual(await controller.readAnswer(h.request,{original:h.reference,submission}),{state:'not_observed',retryable:false});
+  request.aborted=true;
   const resumed = await controller.resume(request, { original: h.reference, submission });
   assert.equal(request.listenerCount('aborted'), 0);
-  assert.equal(resumed.continuation.outcome.status, 'succeeded');
+  assert.equal(resumed.continuation.reason,'host_aborted');
+  assert.equal(h.execution.sent.length,1);
+  const received=await controller.readAnswer(h.request,{original:h.reference,submission});
+  assert.equal(received.state,'observed');assert.equal(received.receiptId,resumed.receipt.receiptId);
+  assert.equal(h.execution.sent.length,1);
+  assert.deepEqual(await controller.readAnswer(h.request,{original:h.reference,submission}),received);
+  const insufficient=await controller.readQuotePreparation(h.request,{original:h.reference,submission});
+  assert.equal(insufficient.preparation.status,'unavailable');
+  // Only database rows are substituted: availability and quote pricing remain real services.
+  h.b.facts.listAssets=async()=>[1,2].map(index=>({id:'clarified-asset-'+index,
+    tenantId:'tenant_001',workspaceId:'workspace-a',itemGroupId:h.b.group.id,
+    locationId:h.b.location.id,status:'available'}));
+  const storedQuotes=[];
+  h.b.businessFacts.findQuoteForOriginalOperation=async(tenantId,proof)=>{
+    const row=storedQuotes.find(row=>row.quote.tenantId===tenantId&&row.key===proof.key);
+    if(row&&row.inputHash!==proof.inputHash)throw new (require('@nestjs/common').ConflictException)('Original input conflict');
+    return row&&structuredClone(row.quote);
+  };
+  h.b.businessFacts.findQuoteForOriginalReference=async(tenantId,key)=>{
+    const row=storedQuotes.find(row=>row.quote.tenantId===tenantId&&row.key===key);
+    return row&&structuredClone(row.quote);
+  };
+  h.b.businessFacts.saveQuoteForOriginalOperation=async(quote,proof)=>{
+    const previous=await h.b.businessFacts.findQuoteForOriginalOperation(quote.tenantId,proof);
+    if(previous)return previous;
+    storedQuotes.push({...proof,quote:structuredClone(quote)});return structuredClone(quote);
+  };
+  const prepared=await controller.readQuotePreparation(h.request,{original:h.reference,submission});
+  assert.equal(prepared.candidate.start,'2027-02-01T00:00:00.000Z');
+  assert.equal(prepared.candidate.items[0].quantity,2);
+  assert.deepEqual(prepared.candidate.bookingIdentity,{bookingIdentity:'enterprise_employee',
+    corporateCustomerId:'company-a',enterpriseContractAndPayer:false});
+  assert.equal(prepared.quotation,'not_attempted');assert.equal(prepared.orderApproval,'not_granted');
+  assert.equal(prepared.receipt.receiptId,received.receiptId);
+  assert.equal(prepared.preparation.status,'ready',JSON.stringify(prepared));
+  const confirmation={original:h.reference,submission,selectionRevision:prepared.preparation.selectionRevision,
+    inputFingerprint:prepared.formalInputFingerprint,confirmQuote:true};
+  assert.equal(ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneModelQuoteConfirmDraft)(confirmation),true);
+  await assert.rejects(controller.confirmClarifiedQuote(h.request,{...confirmation,confirmQuote:false}),e=>e.getStatus()===400);
+  await assert.rejects(controller.confirmClarifiedQuote(h.request,{...confirmation,inputFingerprint:'0'.repeat(64)}),e=>e.getStatus()===409);
+  const absent=await controller.readClarifiedQuoteReceipt(h.request,{original:h.reference,submission});
+  assert.equal(absent.result.quotePersistence,'unknown');
+  const saveOriginal=h.b.businessFacts.saveQuoteForOriginalOperation;
+  h.b.businessFacts.saveQuoteForOriginalOperation=async(...args)=>{
+    await saveOriginal(...args);
+    throw new Error('Synthetic commit acknowledgement lost');
+  };
+  const uncertain=await controller.confirmClarifiedQuote(h.request,confirmation);
+  assert.equal(uncertain.result.quotePersistence,'unknown');
+  assert.equal(storedQuotes.length,1);
+  const recovered=await controller.readClarifiedQuoteReceipt(h.request,{original:h.reference,submission});
+  assert.equal(recovered.result.status,'quoted');assert.equal(storedQuotes.length,1);
+  h.b.businessFacts.saveQuoteForOriginalOperation=saveOriginal;
+  const quoted=await controller.confirmClarifiedQuote(h.request,confirmation);
+  assert.equal(quoted.result.status,'quoted',JSON.stringify(quoted));assert.equal(quoted.orderApproval,'not_granted');
+  const sameQuote=await controller.readClarifiedQuoteReceipt(h.request,{original:h.reference,submission});
+  assert.equal(sameQuote.result.quote.id,quoted.result.quote.id);
+  assert.equal((await controller.confirmClarifiedQuote(h.request,confirmation)).result.quote.id,quoted.result.quote.id);
+  assert.equal(storedQuotes.length,1);
+  assert.equal(h.execution.sent.length,1);
+  await assert.rejects(controller.readAnswer(h.request,{original:h.reference,submission:{...submission,taskId:'wrong-task'}}),e=>e.getStatus()===403);
+  request.aborted=false;
+  const continued=await controller.continueAnswer(request,{original:h.reference,submission});
+  assert.equal(continued.execution.outcome.status,'succeeded');
+  assert.equal(continued.receipt.runId,received.runId);
+  assert.equal(request.listenerCount('aborted'),0);
+  assert.equal(h.state.aiTaskExecutionBudget.length,1);assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls,2n);
+  await assert.rejects(controller.continueAnswer(request,{original:h.reference,submission}),e=>e.getStatus()===403);
   const read = await controller.readModelResult(h.request, { original: h.reference, resultId: h.state.aiTaskResultArtifact.at(-1).id });
   assert.equal(read.status, 'available'); assert.equal(read.facts.payload.facts.status, 'missing_input');
   assert.equal(h.execution.sent.length, 2);
@@ -987,10 +1150,65 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.throws(() => AiClientEntryModule.registerHttp(dependencies, entryConfig).providers[0].useFactory(), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
   assert.throws(() => AiClientEntryModule.registerHttp(taskDependencies, configuration).providers[0].useFactory(), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
   const bookingHttp = new AiClientEntryController(entryModule.providers[0].useFactory());
-  for (const method of ['issueAction', 'createBookingDraft', 'chooseBookingDraft', 'readBookingDraft',
-    'handoffBookingDraft', 'readBookingHandoff', 'readBookingOperation']) {
+  for (const method of ['readHostCapabilities', 'issueAction', 'createBookingDraft', 'chooseBookingDraft', 'readBookingDraft',
+    'handoffBookingDraft', 'readBookingHandoff', 'readBookingOperation',
+    'acceptBookingSubmission', 'submitAcceptedBooking', 'readBookingSubmission']) {
     assert.equal(Reflect.getMetadata('path', AiClientEntryController.prototype[method]), AI_CLIENT_ENTRY_HTTP_DRAFT[method]);
   }
+  const { aiClientHostCapabilitiesSchema } = require('../packages/shared/src/ai-client-entry-draft-schemas');
+  const hostWrites = materialWrites, hostTasks = countCreates();
+  const host = await bookingHttp.readHostCapabilities(request, {});
+  assert.equal(aiClientHostCapabilitiesSchema.safeParse(host).success, true);
+  const { AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS } = require('../packages/shared/src/ai-entry-management-draft-schemas');
+  assert.equal(ajv.compile(AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS.AiClientHostCapabilities)(host), true);
+  assert.ok(require('../apps/api/src/contracts/ai-leaf-components').AI_LEAF_COMPONENT_SCHEMAS.AiClientHostCapabilities);
+  assert.equal(host.enabled, true); assert.equal(host.surface, 'tenant_website');
+  assert.equal(host.customerId, 'person-client'); assert.equal(host.scope.workspaceId, 'workspace-client');
+  assert.equal(host.policy.revision, taskPolicies[1].revision); assert.equal(host.releaseRevision, 'entry-1');
+  assert.ok(Date.parse(host.expiresAt) <= taskPolicies[1].expiresAt.getTime());
+  assert.deepEqual(host.capabilities.entryActions, ['OPEN_ORDER', 'CREATE_BOOKING_DRAFT', 'OPEN_BOOKING']);
+  assert.equal(host.capabilities.savedDeliveryAddresses, false);
+  assert.equal(host.authorization, 'observation_only_recheck_each_action');
+  assert.equal(host.sessionId, undefined); assert.equal(host.phone, undefined);
+  await assert.rejects(bookingHttp.readHostCapabilities(request, { materialRef: own.materialRef, enabled: true }), e => e.getStatus() === 400);
+  await assert.rejects(bookingHttp.readHostCapabilities({ headers: {} }, {}), e => e.getStatus() === 403);
+  await assert.rejects(requests.readHostCapabilities(request, {}), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  for (const key of ['enabled', 'allowRead']) {
+    taskPolicies[1][key] = 0;
+    await assert.rejects(bookingHttp.readHostCapabilities(request, {}), e => e.getStatus() === 403);
+    taskPolicies[1][key] = 1;
+  }
+  taskPolicies[1].allowCreate = 0;
+  const readOnlyHost = await bookingHttp.readHostCapabilities(request, {});
+  assert.equal(readOnlyHost.enabled, false); assert.deepEqual(readOnlyHost.capabilities.entryActions, []);
+  taskPolicies[1].allowCreate = 1;
+  const policyExpiry = taskPolicies[1].expiresAt; taskPolicies[1].expiresAt = new Date(now);
+  await assert.rejects(bookingHttp.readHostCapabilities(request, {}), e => e.getStatus() === 403);
+  taskPolicies[1].expiresAt = policyExpiry;
+  const ownGetQuote = client.getQuote; client.getQuote = undefined;
+  assert.deepEqual((await bookingHttp.readHostCapabilities(request, {})).capabilities.entryActions, ['OPEN_ORDER']);
+  client.getQuote = ownGetQuote;
+  taskStore.state.aiBudgetPolicy[1].enabled = false;
+  await assert.rejects(bookingHttp.readHostCapabilities(request, {}), e => e.getStatus() === 503);
+  taskStore.state.aiBudgetPolicy[1].enabled = true;
+  commercialAvailable = false;
+  await assert.rejects(bookingHttp.readHostCapabilities(request, {}), e => e.getStatus() === 503);
+  commercialAvailable = true;
+  const commercialRead = subscriptions.readCategoryCommercialContext;
+  subscriptions.readCategoryCommercialContext = async (...args) => {
+    const value = await commercialRead(...args); taskPolicies[1].revision++; return value;
+  };
+  await assert.rejects(bookingHttp.readHostCapabilities(request, {}), e => e.getStatus() === 403);
+  taskPolicies[1].revision = host.policy.revision;
+  subscriptions.readCategoryCommercialContext = async (...args) => {
+    const value = await commercialRead(...args); revoked = true; return value;
+  };
+  await assert.rejects(bookingHttp.readHostCapabilities(request, {}), e => e.getStatus() === 403);
+  revoked = false; subscriptions.readCategoryCommercialContext = commercialRead;
+  published = false;
+  await assert.rejects(bookingHttp.readHostCapabilities(request, {}), e => e.getStatus() === 403);
+  published = true;
+  assert.equal(materialWrites, hostWrites); assert.equal(countCreates(), hostTasks);
   await assert.rejects(bookingHttp.readBookingOperation({ headers: {} }, { operationKey: 'not-owned' }),
     e => e.getStatus() === 403 && e.getResponse().code === 'AI_ACCESS_DENIED');
   const makeBookingAction = async (key, application = bookingApp, selection = bookingSelection) => {
@@ -1046,6 +1264,72 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.equal(bookingApp.submitBookingDraft, undefined);
   await assert.rejects(bookingApp.readBookingHandoff(request, { handoffRef: handed.handoff.handoffRef, submitted: true }));
   await assert.rejects(bookingApp.readAction(request, { ...selected.draft.action, surface: 'client_miniprogram' }));
+  // Exercise the real client adapter and original Core receipt reader. Only the
+  // Core write/storage boundary is substituted; no live order is created.
+  const { RentalOrderConfirmationService } = require('../apps/api/src/modules/rental-core/rental-order-confirmation.service');
+  const originalReceipts = new Map(); let originalWrites = 0;
+  const originalOrderReader = client.core.getOrder;
+  const originalOrders = Object.assign(Object.create(RentalOrderConfirmationService.prototype), {
+    idempotency: { find: async (tenant, action, key) => {
+      assert.equal(tenant, 'tenant-client'); assert.equal(action, 'rental.order.create');
+      assert.equal(getRequestIdentity().workspaceId, 'workspace-client');
+      return originalReceipts.get(key);
+    } },
+    coreFacts: { findOrder: async (tenant, id) => originalOrderReader(tenant, id) },
+    createOrder: async (tenant, input, actor, _business, key) => {
+      assert.equal(actor, 'client:person-client'); assert.equal(input.customerId, 'person-client');
+      originalWrites++;
+      originalReceipts.set(key, { requestHash: originalOrders.fingerprintOrderRequest(input), orderId: 'own-order' });
+      throw Error('synthetic original Core committed; reply lost');
+    }
+  });
+  client.orders = originalOrders;
+  const submissionApp = composeRequestBoundClientApplication({ ...taskDependencies, bookingSubmission: client }, entryConfig);
+  const submissionModule = AiClientEntryModule.registerHttp({ ...taskDependencies, bookingSubmission: client }, entryConfig);
+  const submissionHttp = new AiClientEntryController(submissionModule.providers[0].useFactory());
+  const { ExecutionContextHost } = require('@nestjs/core/helpers/execution-context-host');
+  const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
+  const callSubmissionHttp = (method, body, headers = request.headers) => runWithRequestIdentity({}, async () => {
+    const url = `/api/${AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath}/${AI_CLIENT_ENTRY_HTTP_DRAFT[method]}`;
+    const originalRequest = { method: 'POST', url, originalUrl: url, headers, body, query: {} };
+    assert.equal(await guard.canActivate(new ExecutionContextHost([originalRequest])), true);
+    assert.equal(originalRequest.client.customerId, 'person-client');
+    return submissionHttp[method](originalRequest, body);
+  });
+  await assert.rejects(bookingApp.acceptBookingSubmission(request, { handoffRef: handed.handoff.handoffRef }),
+    e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  const accepted = await callSubmissionHttp('acceptBookingSubmission', { handoffRef: handed.handoff.handoffRef });
+  assert.equal(publication.AiBookingSubmissionAcceptance(accepted), true, JSON.stringify(publication.AiBookingSubmissionAcceptance.errors));
+  assert.equal(accepted.execution, 'not_attested'); assert.equal(originalWrites, 0);
+  assert.equal((await submissionApp.acceptBookingSubmission(request, { handoffRef: handed.handoff.handoffRef })).acceptanceRef, accepted.acceptanceRef);
+  await assert.rejects(callSubmissionHttp('submitAcceptedBooking', { acceptanceRef: accepted.acceptanceRef }),
+    e => e.getStatus() === 400 && e.getResponse().code === 'AI_INVALID_INPUT');
+  const explicitSubmit = { acceptanceRef: accepted.acceptanceRef, decision: 'submit_original_booking' };
+  const submitted = await callSubmissionHttp('submitAcceptedBooking', explicitSubmit);
+  assert.equal(publication.AiBookingSubmissionReceipt(submitted), true, JSON.stringify(publication.AiBookingSubmissionReceipt.errors));
+  assert.equal(publication.AiBookingSubmissionReceipt({ ...submitted, orderId: null }), false);
+  assert.equal(publication.AiBookingSubmissionDecision({ ...explicitSubmit, scope: 'forged' }), false);
+  const { AI_LEAF_COMPONENT_SCHEMAS } = require('../apps/api/src/contracts/ai-leaf-components');
+  assert.ok(AI_LEAF_COMPONENT_SCHEMAS.AiBookingSubmissionReceipt);
+  assert.equal(submitted.state, 'observed'); assert.equal(submitted.orderId, 'own-order');
+  assert.equal(submitted.payment, 'not_inferred'); assert.equal(originalWrites, 1);
+  client.business.getQuote = () => { throw Error('quote consumed; current/latest quote must not be substituted'); };
+  const submissionRestart = composeRequestBoundClientApplication({ ...taskDependencies, bookingSubmission: client }, entryConfig);
+  assert.equal((await submissionRestart.submitAcceptedBooking(request, explicitSubmit)).state, 'observed');
+  assert.equal(originalWrites, 1);
+  const originalReceipt = originalReceipts.get(accepted.operationKey);
+  originalReceipts.set(accepted.operationKey, { ...originalReceipt, requestHash: 'another-request' });
+  await assert.rejects(callSubmissionHttp('readBookingSubmission', { acceptanceRef: accepted.acceptanceRef }),
+    e => e.getStatus() === 409 && e.getResponse().code === 'AI_REVISION_CONFLICT'
+      && !JSON.stringify(e.getResponse()).includes('载荷'));
+  await assert.rejects(submissionRestart.readBookingSubmission(request, { acceptanceRef: accepted.acceptanceRef }));
+  originalReceipts.delete(accepted.operationKey);
+  const absentReceipt = await submissionRestart.submitAcceptedBooking(request, explicitSubmit);
+  assert.equal(absentReceipt.state, 'not_observed'); assert.equal(absentReceipt.retryable, false);
+  assert.equal(originalWrites, 1);
+  await assert.rejects(submissionRestart.readBookingSubmission({ headers: {} }, { acceptanceRef: accepted.acceptanceRef }));
+  await assert.rejects(callSubmissionHttp('readBookingSubmission', { acceptanceRef: accepted.acceptanceRef }, {}));
+  client.business.getQuote = quoteReader;
   stockObservation++;
   await assert.rejects(bookingApp.readBookingHandoff(request, { handoffRef: handed.handoff.handoffRef }));
   assert.equal(bookingRows.ai_client_booking_drafts[0].state, 'stale'); stockObservation--;

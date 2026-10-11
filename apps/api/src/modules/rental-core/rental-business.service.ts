@@ -4724,6 +4724,15 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
 
   /** Internal server port. The originating authority derives the opaque key;
    * current original route/Guard checks remain mandatory at the caller. */
+  /** Exposes the SAME server-owned defaults used by the manual quote path.
+   * Normalization does not establish membership or enterprise eligibility;
+   * createQuote still resolves those facts from MembershipService. */
+  normalizeQuoteInput(value: RentalQuoteRequest): RentalQuoteRequest {
+    const input = structuredClone(value);
+    return this.memberships && !input.bookingIdentity
+      ? { ...input, bookingIdentity: { bookingIdentity: 'personal' } } : input;
+  }
+
   async createQuoteForOriginalOperation(tenantId: string, context: BusinessContext, value: RentalQuoteRequest,
     proof: RentalQuoteOriginalOperation): Promise<RentalQuoteSnapshotV1> {
     const input = structuredClone(value), currentContext = structuredClone(context),
@@ -4774,7 +4783,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       categoryVersionId = resolved.categoryVersionId;
       categoryAdoptionRevision = resolved.adoptionRevision;
     }
-    if (this.memberships && !input.bookingIdentity) input = { ...input, bookingIdentity: { bookingIdentity: "personal" } };
+    input = this.normalizeQuoteInput(input);
     const state = this.state(tenantId, context);
     // 新空间的默认价格是懒加载配置：首个报价不能先因为版本表为空而失败，
     // 再等一个无关的保存动作来触发持久化。MySQL 路径在报价前补落计划与首版，

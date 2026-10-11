@@ -2,6 +2,8 @@ import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_SCENE_CODES } from './ai-scene-reque
 import { AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT } from './ai-task-draft';
 import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES } from './core';
 import { AI_TASK_INPUT_DRAFT_SCHEMAS } from './ai-task-input-draft-schemas';
+import { AI_QUOTE_SELECTION_DRAFT_SCHEMAS } from './ai-quote-selection-draft-schemas';
+import { AI_APPROVED_SETTINGS_DRAFT_SCHEMAS } from './ai-approved-settings-draft-schemas';
 import { leafClosed as object, leafEnum as choice, leafId as id, leafText as text, leafInt as integer, leafList as list, leafTime, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 
 const uuid = { type: 'string', format: 'uuid' };
@@ -24,6 +26,12 @@ const observedTask = object({ state: choice('observed'), taskId: uuid, runId: uu
 const recoveryStep = object({ stepId: id(), runId: id(), actionId: id(), revision: integer(1, 4294967294), status: choice(...AI_STEP_STATUSES_DRAFT),
   effect: choice('none', 'possible', 'committed'), resultAvailable: { type: 'boolean' }, nextAction: choice('reconcile_original_action', 'read_authorized_result', 'runner_owned') });
 export const AI_SCENE_REQUEST_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiSceneSettingsTaskDraft: object({ taskId: id(), runId: id() }),
+  AiSceneSettingsConfirmationReadDraft: object({ taskId: id(), runId: id(), stepId: id() }),
+  AiSceneSettingsContinueDraft: object({ taskId: id(), runId: id(), checkpointRef: id() }),
+  AiSceneSettingsCancelDraft: object({ taskId: id(), expectedRevision: integer(1, 4294967294) }),
+  AiSceneSettingsDecisionDraft: AI_APPROVED_SETTINGS_DRAFT_SCHEMAS.AiApprovedSettingsDecisionDraft as AiLeafSchemaDraft,
+  AiSceneSettingsDecisionReadDraft: AI_APPROVED_SETTINGS_DRAFT_SCHEMAS.AiApprovedSettingsReferenceDraft as AiLeafSchemaDraft,
   AiSceneQuoteConfirmDraft: object({ draftVersion: base.draftVersion, inputRef: uuid,
     selectionRevision: hash, inputFingerprint: hash, confirmQuote: { type: 'boolean', const: true } }),
   AiSceneQuoteReceiptReadDraft: object({ draftVersion: base.draftVersion, inputRef: uuid,
@@ -34,11 +42,14 @@ export const AI_SCENE_REQUEST_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> =
     after: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, limit: integer(1, 100) }),
   AiSceneModelTaskSceneDraft: { oneOf: [
     object({ kind: choice('original'), taskId: id(), runId: id(), original: originalReference,
-      resultId: id(), review: {}, decision: {}, order: {} }, ['kind', 'taskId', 'runId', 'original']),
+      resultId: id(), review: {}, decision: {}, order: AI_QUOTE_SELECTION_DRAFT_SCHEMAS.AiSelectedQuoteTaskRequestDraft }, ['kind', 'taskId', 'runId', 'original']),
     object({ kind: choice('settings'), taskId: id(), runId: id(), reference: {} })
   ] },
   AiSceneModelReferenceDraft: originalReference,
+  AiSceneModelInputRefreshDraft: object({ original: originalReference, requestId: id(), expectedRevision: integer(1, 4294967293) }),
   AiSceneModelResumeDraft: object({ original: originalReference, submission: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft }),
+  AiSceneModelQuoteConfirmDraft: object({ original: originalReference, submission: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft,
+    selectionRevision: hash, inputFingerprint: hash, confirmQuote: { type: 'boolean', const: true } }),
   AiSceneModelCancelDraft: object({ original: originalReference, expectedRevision: integer(1, 4294967294) }),
   AiSceneModelResultReadDraft: object({ original: originalReference, resultId: id() }),
   AiSceneModelSourceReadDraft: object({ original: originalReference, resultId: id(), sourceIndex: integer(0, 4),

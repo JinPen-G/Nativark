@@ -1,4 +1,8 @@
 import type {
+  AiBookingHandoff,
+  AiBookingSubmissionAcceptance,
+  AiBookingSubmissionDecision,
+  AiBookingSubmissionReceipt,
   ClientCancellationPreview,
   ClientFeeItemsResponse,
   ClientFeeResponseRequest,
@@ -27,6 +31,23 @@ export interface ExtensionResult {
 /** 报价转订单；幂等键由调用方持久化并在结果未知时同键重放。 */
 export async function createOrder(quoteId: string, idempotencyKey: string): Promise<CreateOrderResult> {
   return request<CreateOrderResult>("/orders", { method: "POST", data: { quoteId }, idempotencyKey });
+}
+
+/** Explicit AI page host ports. Exporting these never enables or binds a host.
+ * Routes are the authenticated alias published by AI_CLIENT_ENTRY_HTTP_DRAFT. */
+export function readBookingHandoff(input: { handoffRef: string }): Promise<AiBookingHandoff> {
+  return request<AiBookingHandoff>("/ai-native/entry/booking-handoffs/read", { method: "POST", data: input });
+}
+export function acceptBookingSubmission(input: { handoffRef: string }): Promise<AiBookingSubmissionAcceptance> {
+  return request<AiBookingSubmissionAcceptance>("/ai-native/entry/booking-submissions/accept", { method: "POST", data: input });
+}
+export function submitAcceptedBooking(input: AiBookingSubmissionDecision): Promise<AiBookingSubmissionReceipt> {
+  // A 401 may be a late current-identity recheck. Never let refresh resend a write.
+  return request<AiBookingSubmissionReceipt>("/ai-native/entry/booking-submissions/submit",
+    { method: "POST", data: input, replayAfterRefresh: false });
+}
+export function readBookingSubmission(input: { acceptanceRef: string }): Promise<AiBookingSubmissionReceipt> {
+  return request<AiBookingSubmissionReceipt>("/ai-native/entry/booking-submissions/read", { method: "POST", data: input });
 }
 
 /** 统一本人订单索引：本租户各服务的本人订单，只读，不含他人订单。 */

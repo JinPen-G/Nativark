@@ -9,6 +9,7 @@ import { rentalDays } from '../data/siteRepository';
 import { toIsoDateTime } from '../data/datetime';
 import type { Product } from '../types';
 import type { AiBookingHandoff } from '../../../../packages/shared/src/ai-booking-draft';
+import { readOriginalBookingQuote, type OriginalBookingQuoteFacts } from '../features/ai-native/booking-handoff';
 
 interface QuoteView {
   id: string;
@@ -29,14 +30,32 @@ export function RemoteBooking(props: RemoteBookingProps) {
 
 function OriginalHandoffBooking({ handoff }: { handoff: AiBookingHandoff }) {
   const { language } = useSite();
+  const { session, currentWorkspace } = useAuth();
+  const quoteOwner = useMemo(() => ({}), [handoff, session, currentWorkspace?.workspaceCode]);
+  const [quoteRead, setQuoteRead] = useState<{ owner: object; facts: OriginalBookingQuoteFacts | null } | null>(null);
+  const originalQuote = quoteRead?.owner === quoteOwner ? quoteRead.facts : null;
+  useEffect(() => {
+    let disposed = false;
+    setQuoteRead(null);
+    // Read only after the user's explicit continue. Never create/recalculate a quote.
+    void readOriginalBookingQuote(handoff, session?.customer.id, sessionApi.getQuote).then(quote => {
+      if (disposed) return;
+      setQuoteRead({ owner: quoteOwner, facts: quote });
+    }).catch(() => { if (!disposed) setQuoteRead(null); });
+    return () => { disposed = true; };
+  }, [handoff, session, quoteOwner]);
   const en = language === 'en';
   return <section className="booking-card booking-total">
     <h2>{en ? 'Original booking material' : '原预约材料'}</h2>
     <p style={{ overflowWrap: 'anywhere' }}>{en ? 'Quote reference' : '报价引用'}：{handoff.fields.quoteId}</p>
-    <p>{en ? 'Amount unavailable in this handoff; no recalculation.' : '交接未提供金额，不重算、不覆盖原报价。'}</p>
+    {originalQuote ? <dl>
+      <dt>{en ? 'Original payable' : '原应付'}</dt><dd>{originalQuote.payableAmount} {originalQuote.currency}</dd>
+      <dt>{en ? 'Deposit' : '押金'}</dt><dd>{originalQuote.depositAmount} {originalQuote.currency}</dd>
+      <dt>{en ? 'Preauthorization' : '预授权'}</dt><dd>{originalQuote.preAuthAmount} {originalQuote.currency}</dd>
+      <dt>{en ? 'Original rules / pricing version' : '原规则 / 计价版本'}</dt><dd>{originalQuote.ruleVersion} / {originalQuote.pricingPlanVersion}</dd>
+    </dl> : <p>{en ? 'Original amounts are not loaded or unavailable; no recalculation.' : '原金额未加载或不可用，不重算、不覆盖原报价。'}</p>}
     <p>{en ? 'Not submitted / not reserved' : '尚未提交 / 资源未预占'}</p>
-    <p role="status">{en ? 'Original operation acceptance is not connected. Continue through the original manual entry.' : '原操作受理关联尚未接通，请通过原人工入口办理。'}</p>
-    <button type="button" className="button button-dark button-block" disabled>{en ? 'Submission unavailable' : '提交不可用'}</button>
+    <p role="status">{en ? 'Use the explicit acceptance and submission controls above when the server host provides them. No new quote is created here.' : '宿主提供正式能力时，使用上方受理与明确提交入口；这里不创建新报价。'}</p>
   </section>;
 }
 

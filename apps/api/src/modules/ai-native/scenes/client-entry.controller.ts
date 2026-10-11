@@ -6,14 +6,15 @@ import type { AiClientApplicationRequest, composeRequestBoundClientApplication }
 
 export const AI_CLIENT_ENTRY_APPLICATION = Symbol('AI_CLIENT_ENTRY_APPLICATION');
 type Application = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
-  'issueAction' | 'createBookingDraft' | 'chooseBookingDraft' | 'readBookingDraft' |
-  'handoffBookingDraft' | 'readBookingHandoff' | 'readBookingOperation'>;
+  'readHostCapabilities' | 'issueAction' | 'createBookingDraft' | 'chooseBookingDraft' | 'readBookingDraft' |
+  'handoffBookingDraft' | 'readBookingHandoff' | 'readBookingOperation' |
+  'acceptBookingSubmission' | 'submitAcceptedBooking' | 'readBookingSubmission'>;
 
-@Controller(AI_CLIENT_ENTRY_HTTP_DRAFT.basePath)
+@Controller([AI_CLIENT_ENTRY_HTTP_DRAFT.basePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath])
 export class AiClientEntryController {
   constructor(@Inject(AI_CLIENT_ENTRY_APPLICATION) private readonly application: Application) {}
 
-  private async respond<T>(work: () => Promise<T>): Promise<T> {
+  private async respond<T>(work: () => Promise<T>, unknownAction = 'read_booking_operation'): Promise<T> {
     try { return await work(); }
     catch (error) {
       const aliases: Record<string, string> = {
@@ -30,13 +31,18 @@ export class AiClientEntryController {
       else if (error instanceof HttpException) {
         if (error.getStatus() === 400) code = 'AI_INVALID_INPUT';
         else if ([401, 403, 404].includes(error.getStatus())) code = 'AI_ACCESS_DENIED';
+        else if (error.getStatus() === 409) code = 'AI_REVISION_CONFLICT';
       }
       if (!Object.prototype.hasOwnProperty.call(statuses, code)) code = 'AI_RESOURCE_UNAVAILABLE';
       throw new HttpException({ code, retryable: false,
-        ...(code === 'AI_RESULT_UNKNOWN' ? { nextAction: 'read_booking_operation' } : {}) }, statuses[code]);
+        ...(code === 'AI_RESULT_UNKNOWN' ? { nextAction: unknownAction } : {}) }, statuses[code]);
     }
   }
 
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readHostCapabilities)
+  readHostCapabilities(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(() => this.application.readHostCapabilities(request, body));
+  }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.issueAction)
   issueAction(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.issueAction(request, body));
@@ -64,5 +70,19 @@ export class AiClientEntryController {
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingOperation)
   readBookingOperation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.readBookingOperation(request, body));
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.acceptBookingSubmission)
+  acceptBookingSubmission(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    // Same handoff re-read can recover an acceptance; it does not submit an order.
+    return this.respond(() => this.application.acceptBookingSubmission(request, body), 'accept_booking_submission');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.submitAcceptedBooking)
+  submitAcceptedBooking(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(() => this.application.submitAcceptedBooking(request, body), 'read_booking_submission');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingSubmission)
+  readBookingSubmission(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(() => this.application.readBookingSubmission(request, body), 'read_booking_submission');
   }
 }

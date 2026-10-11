@@ -1,12 +1,13 @@
 import { AI_TOOL_DRAFT_VERSION, AI_PROPOSAL_DRAFT_VERSION } from '@rental-os/shared';
 import { z } from 'zod';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE } from '../../../../../../packages/shared/src/ai-approved-settings-draft';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-effects';
 import { composeApprovedSettingsApplication } from './approved-settings-application.composition';
 import { ApprovedSettingsTaskAuthority, settingsTransactionDb, settingsDenied, type ApprovedSettingsApplicationDependencies } from './approved-settings-task.authority';
+import { taskExecutionPhaseStore } from '../runner/task-execution-phase.store';
 
 type Executor = NonNullable<Awaited<ReturnType<AiTaskRegisteredExecutor['resolve']>>>;
 type Input = Parameters<Executor['execute']>[0];
@@ -80,12 +81,58 @@ export function composeApprovedSettingsWaiting(d: ApprovedSettingsApplicationDep
         ...(waiting.receipt.kind === 'recorded' ? { decisionRef: waiting.receipt.record.approvalId,
           decision: waiting.receipt.record.decision } : {}) } : {}) };
   };
-  const reconcile = async (raw: Input): ReturnType<Executor['execute']> => {
+  const reconcile = async (raw: Input, transaction?: Prisma.TransactionClient): ReturnType<Executor['execute']> => {
     const input = parse(raw), found = await locate(input), waiting = await readWaiting(input);
     // Only an original-key business receipt proves commit. "Not observed" is
     // not permission to retry, including after expiry or a lost COMMIT reply.
     const result = await app.readOperation({ draftVersion: AI_APPROVED_SETTINGS_DRAFT_VERSION, operationKey: found.operationKey });
-    if (result.state !== 'committed') return { kind: 'unknown', payload: material(waiting, 'unresolved') };
+    if (result.state !== 'committed') {
+      if (waiting.kind === 'waiting_reference' && waiting.receipt.kind === 'absent') {
+        const key = { scopeId: found.binding.scopeId, taskId: input.taskId, runId: input.runId, stepId: input.stepId };
+        const witness = async (tx: Prisma.TransactionClient) => {
+          await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_tasks WHERE scopeId = ${key.scopeId} AND id = ${key.taskId} FOR UPDATE`);
+          await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_runs WHERE scopeId = ${key.scopeId} AND taskId = ${key.taskId} AND id = ${key.runId} FOR UPDATE`);
+          const task = await tx.aiTask.findFirst({ where: { id: key.taskId, scopeId: key.scopeId,
+            ownerKind: 'USER', ownerId: found.grant.actor.actorId, status: { in: ['CANCEL_REQUESTED', 'CANCELLED'] }, cancelRequestedAt: { not: null } } });
+          const run = await tx.aiRun.findFirst({ where: { id: key.runId, scopeId: key.scopeId, taskId: key.taskId,
+            actorKind: 'USER', actorId: found.grant.actor.actorId, leaseOwnerId: input.lease.holderId,
+            revision: input.lease.revision, fencingToken: new Prisma.Decimal(input.lease.fencingToken),
+            leaseExpiresAt: { gt: authority.clock() } } });
+          const step = await tx.aiStep.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, runId: key.runId,
+            id: key.stepId, actionId: input.actionId,
+            inputRef: input.inputRef, requestFingerprint: input.fingerprint,
+            status: { in: ['RUNNING', 'UNKNOWN', 'FAILED'] }, effect: { in: ['NONE', 'POSSIBLE'] } } });
+          if (!task || !run || !step || step.status === 'FAILED' && (step.errorCode !== 'AI_BUSINESS_REJECTED' || step.effect !== 'NONE')) return false;
+          const phases = taskExecutionPhaseStore(tx), starts = await phases.readStarts(key), receipts = await phases.readReceipts(key);
+          if (starts.length !== 1 || receipts.length !== 1) return false;
+          const start = starts[0], receipt = receipts[0];
+          const plan = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: {
+            scopeId: key.scopeId, taskId: key.taskId, runId: key.runId } } });
+          const payload = z.object({ version: z.literal('approved-settings-wait-1'), binding: z.unknown(),
+            effectState: z.literal('awaiting_decision') }).passthrough().safeParse(receipt.payload);
+          if (start.sequence !== 1 || start.actionId !== input.actionId || start.inputRef !== input.inputRef
+            || start.stepFingerprint !== input.fingerprint || !plan || plan.planHash !== start.planHash
+            || requestFingerprint(plan.payload) !== start.planHash || receipt.phaseId !== start.id || receipt.kind !== 'confirmation'
+            || requestFingerprint(receipt.payload) !== receipt.contentHash || receipt.proposalId !== waiting.proposal.proposalId
+            || receipt.proposalRevision !== waiting.proposal.proposalRevision || receipt.reviewedPayloadHash !== waiting.proposal.reviewedPayloadHash
+            || !payload.success || requestFingerprint(payload.data.binding) !== requestFingerprint(waiting.binding)) return false;
+          const approval = await tx.aiApproval.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId,
+            proposalId: waiting.proposal.proposalId, proposalRevision: waiting.proposal.proposalRevision } });
+          const consumption = await tx.aiApprovalConsumption.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, actionId: input.actionId } });
+          const operation = await tx.rentalApprovedSettingsOperation.findFirst({ where: { operationKey: found.operationKey } });
+          return !approval && !consumption && !operation;
+        };
+        const notSubmitted = transaction ? await witness(transaction) : await d.db.$transaction(witness,
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+        if (notSubmitted) {
+          const latest = await readWaiting(input);
+          if (latest.kind !== 'waiting_reference' || latest.receipt.kind !== 'absent'
+            || requestFingerprint(latest.binding) !== requestFingerprint(waiting.binding)) throw settingsDenied();
+          return { kind: 'failed', errorCode: 'AI_CANCELLED', payload: material(waiting, 'cancelled_before_business_submission') };
+        }
+      }
+      return { kind: 'unknown', payload: material(waiting, 'unresolved') };
+    }
     if (waiting.kind !== 'waiting_reference' || waiting.receipt.kind !== 'recorded' || waiting.receipt.record.decision !== 'approved'
         || result.receipt.changeId !== input.inputRef || result.receipt.changeHash !== input.fingerprint
         || result.receipt.operationKey !== found.operationKey) throw settingsDenied();

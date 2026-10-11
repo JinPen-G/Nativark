@@ -1162,7 +1162,13 @@ export class MembershipService {
     return action === "submit" ? "订单提交" : action === "pickup" ? "领取" : "续租";
   }
 
-  async listBookingOptions(tenantId: string, workspaceId: string, personalCustomerId: string): Promise<CustomerMembershipBookingOption[]> {
+  async listBookingOptions(tenantId: string, workspaceId: string, personalCustomerId: string,
+    page?: { limit: number; cursor?: string }): Promise<CustomerMembershipBookingOption[]> {
+    page = page === undefined ? undefined : structuredClone(page);
+    if (page && (!Number.isSafeInteger(page.limit) || page.limit < 1 || page.limit > 50
+      || page.cursor !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(page.cursor))) {
+      throw new BadRequestException("预约身份分页参数无效");
+    }
     await this.requireWorkspace(tenantId, workspaceId);
     await this.assertPersonalBookingCustomerVisible(tenantId, workspaceId, personalCustomerId);
     await this.requireCustomer(tenantId, personalCustomerId, "personal");
@@ -1171,10 +1177,13 @@ export class MembershipService {
     const rows = await this.prisma.customerCorporateMembership.findMany({
       where: {
         tenantId, personalCustomerId, status: "active", effectiveFrom: { lte: now },
+        ...(page?.cursor ? { id: { lt: page.cursor } } : {}),
         OR: [{ effectiveTo: null }, { effectiveTo: { gte: now } }],
         corporateCustomer: { tenantId, customerType: "corporate", mergedIntoCustomerId: null, membership: { is: { status: "active" } } }
       },
-      include: { corporateCustomer: { select: { name: true } } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }]
+      include: { corporateCustomer: { select: { name: true } } },
+      orderBy: page ? [{ id: "desc" }] : [{ createdAt: "desc" }, { id: "desc" }],
+      ...(page ? { take: page.limit + 1 } : {})
     });
     return rows.map((row) => ({
       corporateCustomerId: row.corporateCustomerId,
@@ -1183,6 +1192,17 @@ export class MembershipService {
       role: row.role as CustomerMembershipBookingOption["role"],
       effectiveTo: row.effectiveTo?.toISOString()
     }));
+  }
+
+  /** Same visible member and current corporate relationship facts as the
+   * manual booking endpoint, with a database bound and stable ID cursor. */
+  async listBookingOptionsPage(tenantId: string, workspaceId: string, personalCustomerId: string,
+    input: { limit: number; cursor?: string }) {
+    const page = structuredClone(input);
+    const options = await this.listBookingOptions(tenantId, workspaceId, personalCustomerId, page);
+    const truncated = options.length > page.limit;
+    const rows = options.slice(0, page.limit);
+    return { rows, truncated, ...(truncated && rows.length ? { nextCursor: rows[rows.length - 1].corporateMembershipId } : {}) };
   }
 
   private normalizeBenefitScope(scope: unknown): NonNullable<CustomerMembershipBenefit["scope"]> {

@@ -1,4 +1,4 @@
-import type { ClientCatalogLocation, ClientCatalogResponse, ClientCreateQuoteRequest, ClientDeliveryAddressView, RentalCustomerCoupon, RentalFulfillmentMode, RentalQuoteSnapshotV1 } from "@rental-os/shared";
+import type { AiBookingSubmissionAcceptance, ClientCatalogLocation, ClientCatalogResponse, ClientCreateQuoteRequest, ClientDeliveryAddressView, RentalCustomerCoupon, RentalFulfillmentMode, RentalQuoteSnapshotV1 } from "@rental-os/shared";
 import { listAddresses } from "../../api/addresses";
 import { createQuote, fetchCoupons, fetchQuote } from "../../api/catalog";
 import { createOrder } from "../../api/orders";
@@ -59,6 +59,9 @@ interface CheckoutData {
   aiQuoteId: string;
   aiLocationId: string;
   aiSelection: { itemGroupId: string; quantity: number }[];
+  aiSubmissionAvailable: boolean;
+  aiOrderId: string;
+  aiReceiptStatus: string;
   view: ViewState;
   cart?: CartState;
   quote?: RentalQuoteSnapshotV1;
@@ -140,6 +143,9 @@ Page({
     aiQuoteId: "",
     aiLocationId: "",
     aiSelection: [],
+    aiSubmissionAvailable: false,
+    aiOrderId: "",
+    aiReceiptStatus: "none",
     view: loadingState(),
     merchantName: "",
     serviceName: "",
@@ -213,6 +219,7 @@ Page({
   // Functions/hosts are instance-owned only, never setData, storage or event detail.
   aiHost: undefined as CustomerBookingHost | undefined,
   aiConsumer: undefined as ReturnType<typeof createCustomerBookingConsumer> | undefined,
+  aiAcceptance: undefined as AiBookingSubmissionAcceptance | undefined,
   aiMode: false,
   aiVisible: false,
   aiDisposed: false,
@@ -222,6 +229,7 @@ Page({
     if (this.aiDisposed) return;
     if (!host || host.enabled !== true) { if (this.aiMode) this.detachHost(); return; }
     this.aiConsumer?.destroy();
+    this.aiAcceptance = undefined;
     this.aiHost = host ? { ...host, capability: { ...host.capability } } : undefined;
     this.aiMode = host?.enabled === true;
     this.requestVersion++;
@@ -233,11 +241,13 @@ Page({
   detachHost() {
     if (this.aiDisposed) return;
     this.aiConsumer?.destroy(); this.aiConsumer = undefined; this.aiHost = undefined;
+    this.aiAcceptance = undefined;
     this.aiMode = false; this.requestVersion++; this.clearBookingHandoff();
   },
 
   clearBookingHandoff() {
     this.setData({ aiEnabled: this.aiMode, aiStatus: this.aiMode ? "unavailable" : "disabled", aiReference: "", aiRevision: 0,
+      aiSubmissionAvailable: false, aiOrderId: "", aiReceiptStatus: "none",
       aiExpiresAt: "", aiQuoteId: "", aiLocationId: "", aiSelection: [], quote: undefined, charges: [], benefits: [], cart: undefined,
       lines: [], payable: 0, deposit: 0, preAuth: 0, currency: "", agreed: false, startText: "", endText: "",
       locked: this.aiMode, view: this.aiMode ? readyState() : loadingState() });
@@ -248,8 +258,10 @@ Page({
     if (!this.aiHost) return;
     this.aiConsumer = createCustomerBookingConsumer(this.aiHost, () => ({ tenantCode: PUBLIC_CONFIG.tenantCode,
       serviceCode: currentServiceCode(), customerId: currentSession()?.customer.customerId ?? "", version: contextVersion() }),
-    fetchQuote, view => { if (this.aiVisible) this.applyBookingHandoff(view); }, serverNow);
-    this.setData({ aiEnabled: true, aiStatus: "idle", view: readyState() });
+    fetchQuote, view => { if (this.aiVisible) this.applyBookingHandoff(view); }, serverNow, this.aiAcceptance);
+    this.setData({ aiEnabled: true, aiStatus: this.aiAcceptance ? "pending_reconcile" : "idle",
+      aiSubmissionAvailable: [this.aiHost.acceptBookingSubmission, this.aiHost.submitAcceptedBooking, this.aiHost.readBookingSubmission]
+        .every(method => typeof method === "function"), view: readyState() });
   },
 
   applyBookingHandoff(view: CustomerHandoffView) {
@@ -257,6 +269,8 @@ Page({
     const start = h && view.status === "continued" ? splitInstant(h.fields.startAt, h.fields.timeZone) : undefined;
     const end = h && view.status === "continued" ? splitInstant(h.fields.endAt, h.fields.timeZone) : undefined;
     this.setData({ aiStatus: view.status, aiReference: h?.handoffRef ?? "", aiRevision: h?.revision ?? 0,
+      aiSubmissionAvailable: view.submissionAvailable === true, aiOrderId: view.receipt?.state === "observed" ? view.receipt.orderId : "",
+      aiReceiptStatus: view.receipt?.state ?? "none", ruleVersion: quote?.ruleVersion ?? "",
       aiExpiresAt: h?.expiresAt ?? "", aiQuoteId: h?.fields.quoteId ?? "", aiSelection: h?.fields.lines ?? [],
       startText: h?.fields.startAt ?? "", endText: h?.fields.endAt ?? "", timeZone: h?.fields.timeZone ?? DEFAULT_ZONE,
       startDate: start?.date ?? "", startTime: start?.time ?? "", endDate: end?.date ?? "", endTime: end?.time ?? "",
@@ -269,12 +283,30 @@ Page({
 
   onReadBookingHandoff() { return this.aiVisible && this.aiMode ? this.aiConsumer?.read() : undefined; },
   onContinueBookingHandoff() { return this.aiVisible && this.aiMode ? this.aiConsumer?.continue() : undefined; },
+  async onAcceptBookingSubmission() {
+    if (!this.aiVisible || !this.aiMode || !this.data.agreed) {
+      if (this.aiVisible && this.aiMode) this.setData({ formError: "请先阅读并同意原租赁规则" });
+      return;
+    }
+    await this.aiConsumer?.accept();
+    if (this.aiVisible && !this.aiDisposed) this.aiAcceptance = this.aiConsumer?.snapshotAcceptance();
+  },
+  onSubmitAcceptedBooking() {
+    return this.aiVisible && this.aiMode && this.data.agreed ? this.aiConsumer?.submit() : undefined;
+  },
+  onReadBookingSubmission() { return this.aiVisible && this.aiMode ? this.aiConsumer?.reconcile() : undefined; },
+  onOpenAiOrder() {
+    if (this.aiVisible && this.aiMode && this.data.aiStatus === "order_observed" && this.data.aiOrderId) {
+      navigate(buildUrl(ROUTES.order, { id: this.data.aiOrderId }));
+    }
+  },
 
   onLoad() {
     this.aiUnsubscribe?.();
     this.aiUnsubscribe = sessionEvents.on(() => {
       if (!this.aiMode) return;
       this.aiConsumer?.destroy(); this.aiConsumer = undefined; this.aiHost = undefined;
+      this.aiAcceptance = undefined;
       this.requestVersion++; this.stopTicker(); this.clearBookingHandoff();
     });
     if (!requireSignIn(ROUTES.checkout)) return;
@@ -288,6 +320,7 @@ Page({
   },
 
   onHide() {
+    this.aiAcceptance = this.aiConsumer?.snapshotAcceptance() ?? this.aiAcceptance;
     this.aiVisible = false; this.aiConsumer?.destroy(); this.aiConsumer = undefined;
     if (this.aiMode) this.clearBookingHandoff();
     this.stopTicker();
@@ -296,6 +329,7 @@ Page({
   onUnload() {
     this.aiDisposed = true;
     this.aiVisible = false; this.aiConsumer?.destroy(); this.aiConsumer = undefined; this.aiHost = undefined;
+    this.aiAcceptance = undefined;
     this.aiUnsubscribe?.(); this.aiUnsubscribe = undefined;
     this.stopTicker();
   },

@@ -9,8 +9,8 @@ const { composeAiOriginalScenes } = require('../../../apps/api/src/modules/ai-na
 const { AI_SCENE_REQUEST_DRAFT_VERSION } = require('../../../packages/shared/src/ai-scene-request-draft');
 const { order } = require('./authorization-baseline.cjs');
 
-exports.setup = async (extraTables = {}) => {
-  const b = await businessSetup(), tenantId = 'tenant_001';
+exports.setup = async (extraTables = {}, withMembership = false) => {
+  const b = await businessSetup('camera', withMembership), tenantId = 'tenant_001';
   const scope = { id: 'scope-a', ...aiPersistenceScopeColumns({ kind: 'workspace', tenantId, workspaceId: 'workspace-a' }) };
   const tenant = clone(b.h.state.tenant[0]); tenant.id = tenantId; tenant.subscription.tenantId = tenantId;
   const sceneCodes = ['order_explanation', 'opening_diagnosis', 'quote_clarification'];

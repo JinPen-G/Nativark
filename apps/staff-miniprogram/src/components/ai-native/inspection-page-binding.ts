@@ -1,5 +1,6 @@
 import { currentSession, contextVersion, sessionEvents } from "../../core/session";
 import type { StaffInspectionHost } from "./inspection-host";
+import { createStaffInspectionTransportHost } from './inspection-transport';
 
 interface InspectionPage {
   data: { id: string };
@@ -8,10 +9,33 @@ interface InspectionPage {
   selectComponent(selector: string): WechatMiniprogram.Component.TrivialInstance | null;
 }
 const subscriptions = new WeakMap<object, () => void>();
+const remoteLoads = new WeakMap<object, object>();
 export function clearInspectionPage(page: InspectionPage) {
+  remoteLoads.delete(page);
   subscriptions.get(page)?.(); subscriptions.delete(page);
   page.selectComponent("#ai-inspection-assist")?.detachHost?.();
   page.setData({ aiInspectionVisible: false });
+}
+export function hideInspectionPage(page: InspectionPage) {
+  remoteLoads.delete(page);
+  page.selectComponent('#ai-inspection-assist')?.hostHide?.();
+}
+/** Explicit application invocation only. Never enabled by an onLoad query,
+ * import, show, storage flag or a model-generated object. */
+export async function attachRemoteInspectionPage(page: InspectionPage, reference: { allocationId: string; draftId: string },
+  stage: 'pickup' | 'return', signatureFileAssetId?: string) {
+  clearInspectionPage(page);
+  const ticket = {}, orderId = page.data.id, templateId = page.template?.id, version = contextVersion();
+  if (!templateId || !orderId) return false;
+  remoteLoads.set(page, ticket);
+  try {
+    const host = await createStaffInspectionTransportHost({ orderId, templateId, stage,
+      allocationId: reference.allocationId, draftId: reference.draftId }, signatureFileAssetId);
+    if (remoteLoads.get(page) !== ticket || contextVersion() !== version || page.data.id !== orderId || page.template?.id !== templateId) return false;
+    attachInspectionPage(page, host, stage);
+    return true;
+  } catch { return false; /* Ordinary manual page remains available. */ }
+  finally { if (remoteLoads.get(page) === ticket) remoteLoads.delete(page); }
 }
 /** Future trusted host injection only; no URL/storage switch or invented HTTP endpoint. */
 export function attachInspectionPage(page: InspectionPage, host: StaffInspectionHost, stage: "pickup" | "return") {

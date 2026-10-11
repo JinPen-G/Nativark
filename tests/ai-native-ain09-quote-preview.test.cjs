@@ -18,6 +18,18 @@ test('quote preview calls the formal Core pricing entry and exposes snapshot evi
   assert.equal(result.status, 'quoted'); assert.equal(result.quote.reservation, 'not_reserved'); assert.equal(result.quote.priceVersionId, 'price-v3'); assert.equal(result.quote.timeZone, 'Asia/Shanghai'); assert.equal(calls, 1);
 });
 
+test('explicit personal booking identity reaches Core unchanged, without inferred enterprise rights', async () => {
+  const request={...input,bookingIdentity:{bookingIdentity:'personal'}};let calls=0;
+  const service=new AiQuotePreviewService({createQuote:async(_tenant,_business,received)=>{
+    calls++;assert.deepEqual(received,request);return {...quote(),request:structuredClone(received)};
+  }},{current:async()=>business},{withQuote:async(received,consume)=>{
+    assert.deepEqual(received,request);return consume(context);
+  }},()=>new Date('2026-10-05T01:30:00.000Z'));
+  assert.equal((await service.preview(request)).status,'quoted');assert.equal(calls,1);
+  assert.equal((await service.preview({...request,bookingIdentity:{bookingIdentity:'enterprise_employee',corporateCustomerId:'other'}})).status,'missing_input');
+  assert.equal(calls,1);
+});
+
 test('invalid or model-shaped fields are rejected before authority/Core', async () => {
   let calls = 0;
   const service = new AiQuotePreviewService({ createQuote: async () => { calls++; throw new Error('must not call'); } }, { current: async () => business }, { withQuote: async () => { calls++; throw new Error('must not authorize'); } }, () => new Date('2026-10-05T01:30:00.000Z'));

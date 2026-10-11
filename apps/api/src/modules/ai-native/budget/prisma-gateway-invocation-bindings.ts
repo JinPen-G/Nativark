@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { AiScopeRepository } from '../ai-scope.repository';
 import { isGatewayConfig, isGatewayIntent } from '../gateway-contract-validation';
 import { prepareGatewayTextIntent } from '../gateway-intent';
-import { TASK_IMAGE_MODEL_TOOL, parseTaskModelInput, taskModelFingerprint, taskModelIdentity } from '../model-input/task-model-input';
+import { TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, parseTaskModelInput, taskModelFingerprint, taskModelIdentity } from '../model-input/task-model-input';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import type { GatewayContext } from '../model-gateway.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -94,12 +94,14 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
         if (!step) throw new BudgetError('FORBIDDEN');
         let intentHash: string;
         if (hasMedia) {
-          if (step.toolCode !== TASK_IMAGE_MODEL_TOOL || !step.inputRef || input.mode !== 'invoke'
+          if (![TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL].includes(step.toolCode as typeof TASK_IMAGE_MODEL_TOOL | typeof TASK_AUDIO_MODEL_TOOL) || !step.inputRef || input.mode !== 'invoke'
             || typeof tx.aiTaskActionInput?.findFirst !== 'function') throw new BudgetError('FORBIDDEN');
+          const mediaTool = step.toolCode === TASK_AUDIO_MODEL_TOOL ? TASK_AUDIO_MODEL_TOOL : TASK_IMAGE_MODEL_TOOL;
           const saved = await tx.aiTaskActionInput.findFirst({ where: { id: step.inputRef, scopeId: step.scopeId,
-            taskId: step.taskId, runId: step.runId, toolCode: TASK_IMAGE_MODEL_TOOL, fingerprint: step.requestFingerprint } });
+            taskId: step.taskId, runId: step.runId, toolCode: mediaTool, fingerprint: step.requestFingerprint } });
           if (!saved || saved.expiresAt <= this.now()) throw new BudgetError('FORBIDDEN');
-          const policy = { sceneCode: input.intent.sceneCode, maxOutputTokens: input.intent.maxOutputTokens, kind: 'image' as const };
+          const policy = { sceneCode: input.intent.sceneCode, maxOutputTokens: input.intent.maxOutputTokens,
+            kind: mediaTool === TASK_AUDIO_MODEL_TOOL ? 'audio' as const : 'image' as const };
           const frozen = parseTaskModelInput(saved.payload, policy);
           if (frozen.identityHash !== taskModelIdentity(principal.context)
             || requestFingerprint(frozen.intent) !== requestFingerprint(input.intent)

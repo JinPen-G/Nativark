@@ -10,8 +10,8 @@ import type { AiTaskGatewayInputSource } from '../runner/prisma-task-gateway-inv
 import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from '../runner/ai-task-runner.ports';
 import type { PrismaTaskPlanInputSource } from '../runner/prisma-task-plan-input.source';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
-import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, taskModelConfiguration, taskModelIdentity, taskModelIntent,
-  taskModelMaterialSchema, taskImageMaterialSchema, taskModelFingerprint, type TaskModelInput } from './task-model-input';
+import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, taskModelConfiguration, taskModelIdentity, taskModelIntent,
+  taskModelMaterialSchema, taskImageMaterialSchema, taskAudioMaterialSchema, taskModelMediaSchema, taskModelFingerprint, type TaskModelInput, type TaskModelKind } from './task-model-input';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);
@@ -30,31 +30,33 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
   constructor(private readonly db: Pick<PrismaClient, 'aiTask' | 'aiStep' | 'aiGatewayInvocation'>,
     private readonly inputs: PrismaTaskPlanInputSource, private readonly execution: AiTaskExecutionAuthorization,
     runtime: PublicGatewayRuntime, scene: GatewayTextIntentBinding, priceVersion: string,
-    private readonly clock: () => Date = () => new Date(), private readonly kind?: 'image') {
+  private readonly clock: () => Date = () => new Date(), private readonly kind?: TaskModelKind) {
     this.scene = gatewayTextIntentBindingSchema.parse(structuredClone(scene));
     this.priceVersion = id.max(64).parse(priceVersion);
     if (typeof inputs?.publishModelInput !== 'function' || typeof inputs?.readModelForExecution !== 'function'
       || typeof execution?.authorize !== 'function' || typeof runtime?.ports?.routing?.resolve !== 'function'
       || typeof runtime?.ports?.routing?.assertCurrent !== 'function' || typeof runtime?.verifyEvidence !== 'function'
-      || (kind === 'image' && (scene.routeScene !== 'vision' || typeof runtime.ports.media?.resolve !== 'function'
+      || (kind && (scene.routeScene !== 'vision' || typeof runtime.ports.media?.resolve !== 'function'
         || typeof runtime.ports.media?.assertCurrent !== 'function'))) throw unavailable();
     this.runtime = { ...runtime, ports: { ...runtime.ports, routing: {
       resolve: runtime.ports.routing.resolve.bind(runtime.ports.routing),
       assertCurrent: runtime.ports.routing.assertCurrent.bind(runtime.ports.routing)
     } }, verifyEvidence: runtime.verifyEvidence.bind(runtime) };
   }
-  private get tool() { return this.kind === 'image' ? TASK_IMAGE_MODEL_TOOL : TASK_TEXT_MODEL_TOOL; }
-  private get policy() { return { ...this.scene, ...(this.kind === 'image' ? { kind: 'image' as const } : {}) }; }
+  private get tool() { return this.kind === 'image' ? TASK_IMAGE_MODEL_TOOL : this.kind === 'audio' ? TASK_AUDIO_MODEL_TOOL : TASK_TEXT_MODEL_TOOL; }
+  private get policy() { return { ...this.scene, ...(this.kind ? { kind: this.kind } : {}) }; }
   private async media(context: AiExecutionContext, intent: TaskModelInput['intent'], signal = new AbortController().signal) {
     const prepared = await prepareGatewayIntent(intent, { sceneCode: this.scene.sceneCode, maxOutputTokens: this.scene.maxOutputTokens },
       'invoke', this.narrow(context), this.runtime.ports.media, signal);
     return { hash: prepared.intentHash, references: prepared.request.messages.flatMap(message => typeof message.content === 'string' ? []
-      : message.content.filter(part => part.kind !== 'text').map(part => ({ kind: 'image' as const, attachmentId: part.attachmentId,
-        attachmentRevision: part.attachmentRevision, mediaType: part.mediaType as 'image/png' | 'image/jpeg',
-        contentHash: part.contentHash, sizeBytes: Buffer.from(part.data, 'base64').length }))) };
+      : message.content.filter(part => part.kind !== 'text').map(part => part.kind === 'image'
+        ? { kind: 'image' as const, attachmentId: part.attachmentId, attachmentRevision: part.attachmentRevision,
+          mediaType: part.mediaType, contentHash: part.contentHash, sizeBytes: Buffer.from(part.data, 'base64').length }
+        : { kind: 'audio' as const, attachmentId: part.attachmentId, attachmentRevision: part.attachmentRevision,
+          mediaType: part.mediaType, contentHash: part.contentHash, sizeBytes: Buffer.from(part.data, 'base64').length })) };
   }
   private async verifyMedia(context: AiExecutionContext, input: TaskModelInput, signal?: AbortSignal) {
-    if (this.kind !== 'image') return;
+    if (!this.kind) return;
     const current = await this.media(context, input.intent, signal);
     if (current.hash !== taskModelFingerprint(input, this.policy) || requestFingerprint(current.references) !== requestFingerprint(input.media)) throw denied();
   }
@@ -65,13 +67,13 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
     return { tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, actorId: context.actor.userId };
   }
   private async route(context: AiExecutionContext) {
-    const route = structuredClone(await this.runtime.ports.routing.resolve(this.narrow(context), this.kind === 'image' ? ['text', 'vision'] : ['text']));
+    const route = structuredClone(await this.runtime.ports.routing.resolve(this.narrow(context), this.kind ? ['text', this.kind === 'image' ? 'vision' : 'audio'] : ['text']));
     await this.verifyRoute(context, route);
     return route;
   }
   private async verifyRoute(context: AiExecutionContext, route: GatewayRoutingResolution) {
     if (taskModelIdentity(route.context) !== taskModelIdentity(context) || route.scene !== this.scene.routeScene
-      || requestFingerprint(route.requiredCapabilities) !== requestFingerprint(this.kind === 'image' ? ['text', 'vision'] : ['text'])
+      || requestFingerprint(route.requiredCapabilities) !== requestFingerprint(this.kind ? ['text', this.kind === 'image' ? 'vision' : 'audio'] : ['text'])
       || await this.runtime.verifyEvidence(structuredClone(route), this.runtime.evidence) !== true) throw denied();
     taskModelConfiguration(route);
   }
@@ -81,7 +83,9 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
   }
 
   async publish(value: unknown) {
-    const parsed = (this.kind === 'image' ? publishSchema.extend({ material: taskImageMaterialSchema }) : publishSchema).safeParse(structuredClone(value));
+    const parsed = (this.kind === 'image' ? publishSchema.extend({ material: taskImageMaterialSchema,
+      expectedMedia: taskModelMediaSchema.optional() }) : this.kind === 'audio' ? publishSchema.extend({ material: taskAudioMaterialSchema,
+      expectedMedia: taskModelMediaSchema.optional() }) : publishSchema).safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const command = parsed.data;
     const context = structuredClone(await this.execution.authorize(command.taskId));
@@ -90,7 +94,9 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
       intent: taskModelIntent(command.taskId, command.lease.runId, command.registrationRef, this.scene.sceneCode, command.material, this.kind),
       configuration: taskModelConfiguration(route), priceVersion: this.priceVersion,
       routingHash: gatewayRoutingBinding(route), identityHash: taskModelIdentity(context) };
-    if (this.kind === 'image') input.media = (await this.media(context, input.intent)).references;
+    if (this.kind) input.media = (await this.media(context, input.intent)).references;
+    if ('expectedMedia' in command && command.expectedMedia
+      && requestFingerprint(command.expectedMedia) !== requestFingerprint(input.media)) throw denied();
     taskModelFingerprint(input, this.policy);
     await this.runtime.ports.routing.assertCurrent(this.narrow(context), route);
     const result = await this.inputs.publishModelInput({ taskId: command.taskId, registrationRef: command.registrationRef,
@@ -145,7 +151,7 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
     const ports = this.runtime.ports;
     await this.verifyMedia(context, input, signal);
     const originalMedia = ports.media;
-    const frozenMedia = this.kind === 'image' && originalMedia ? {
+    const frozenMedia = this.kind && originalMedia ? {
       resolve: async (...args: Parameters<typeof originalMedia.resolve>) => {
         const result = await originalMedia.resolve(...args);
         const expected = input.media?.find(item => item.attachmentId === args[1].attachmentId && item.attachmentRevision === args[1].attachmentRevision);

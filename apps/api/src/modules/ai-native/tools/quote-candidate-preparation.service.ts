@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { RENTAL_CATEGORY_DEFINITIONS, RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES } from '@rental-os/shared';
 import type { AiCatalogReadFactsService } from '../catalog-read-facts.service';
 import type { AiMembershipCandidateReadFactsService } from '../membership-candidate-read-facts.service';
-import { aiQuotePreviewInputSchema, type AiQuoteCoreContextSource } from '../quote-preview.service';
+import { aiQuotePreviewInputSchema, aiQuotePersonalBookingIdentitySchema, type AiQuoteCoreContextSource } from '../quote-preview.service';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 
@@ -13,6 +13,11 @@ const id = name.regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 export const AI_QUOTE_CANDIDATE_LIMITS = Object.freeze({ lines: 50, quantity: 10000, usageQuantity: 1000000 });
 export const aiQuoteCandidateInputSchema = z.object({
   customerType: z.enum(['personal', 'corporate']), customerId: name.optional(), customerName: name.optional(),
+  // Candidate intent may be incomplete. Only the formal preview schema accepts
+  // a complete identity; absence never implies personal booking or payer choice.
+  bookingIdentity: z.discriminatedUnion('bookingIdentity', [aiQuotePersonalBookingIdentitySchema,
+    z.object({ bookingIdentity: z.literal('enterprise_employee'), corporateCustomerId: id.optional(),
+      enterpriseContractAndPayer: z.boolean().optional() }).strict()]).optional(),
   items: z.array(z.object({ productName: name.optional(), itemGroupId: id.optional(), quantity: z.number().int().min(1).max(AI_QUOTE_CANDIDATE_LIMITS.quantity),
     pricingUnit: z.enum(RENTAL_PRICING_UNIT_CODES).optional(),
     usageQuantity: z.number().finite().nonnegative().max(AI_QUOTE_CANDIDATE_LIMITS.usageQuantity).optional()
@@ -53,7 +58,7 @@ function resolveInstant(text: string, timeZone: string, now: Date): string | und
 export class AiQuoteCandidatePreparationService {
   constructor(private readonly readers: {
     catalog: Pick<AiCatalogReadFactsService, 'read'>;
-    members: Pick<AiMembershipCandidateReadFactsService, 'read'>;
+    members: Pick<AiMembershipCandidateReadFactsService, 'read'> & Partial<Pick<AiMembershipCandidateReadFactsService, 'readBookingOptions'>>;
   }, private readonly contexts: AiQuoteCoreContextSource, private readonly clock: () => Date = () => new Date()) {
     if (typeof readers?.catalog?.read !== 'function' || typeof readers?.members?.read !== 'function'
       || typeof contexts?.current !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
@@ -70,6 +75,17 @@ export class AiQuoteCandidatePreparationService {
       clarifications: [{ field: 'customerId', reason: 'trusted_enterprise_qualification_required', action: 'use_original_qualification_flow', candidates: [] }] };
     const memberQuery = { limit: 50, ...(input.customerId ? { customerId: input.customerId } : input.customerName ? { name: input.customerName } : {}) };
     const catalog = await this.readers.catalog.read({ limit: 100 }, expectedContext), members = await this.readers.members.read(memberQuery, expectedContext);
+    const enterprise = input.bookingIdentity?.bookingIdentity === 'enterprise_employee' ? input.bookingIdentity : undefined;
+    if (enterprise && typeof this.readers.members.readBookingOptions !== 'function') {
+      return { status: 'qualification_required' as const, reason: 'enterprise_identity_reader_unavailable' as const,
+        clarifications: [{ field: 'bookingIdentity', reason: 'current_enterprise_relationship_required',
+          action: 'use_original_qualification_flow', candidates: [] }] };
+    }
+    // Select the personal user first. Do not query an arbitrary enterprise or
+    // manufacture qualification while the personal user is still unresolved.
+    const bookingOptions = enterprise && input.customerId ? await this.readers.members.readBookingOptions!({ customerId: input.customerId, limit: 50 }, expectedContext) : undefined;
+    if (bookingOptions && (JSON.stringify(bookingOptions.scope) !== JSON.stringify(members.scope)
+      || bookingOptions.audience !== members.audience)) throw new ModelGatewayError('FORBIDDEN');
     if (catalog.scope.kind !== 'workspace' || JSON.stringify(catalog.scope) !== JSON.stringify(members.scope)
       || catalog.audience !== members.audience) throw new ModelGatewayError('FORBIDDEN');
     const scope = structuredClone(catalog.scope), context = structuredClone(await this.contexts.current(scope));
@@ -82,6 +98,18 @@ export class AiQuoteCandidatePreparationService {
     const choose = (field: string, reason: string, rows: Array<{ id: string; label: string; phoneMasked?: string }>) => {
       clarifications.push({ field, reason, action: 'select_authorized_id', candidates: rows.slice(0, 10), truncated: rows.length > 10 });
     };
+    if (enterprise && bookingOptions && !bookingOptions.options.some(row => row.corporateCustomerId === enterprise.corporateCustomerId)) {
+      missingFields.push('bookingIdentity.corporateCustomerId');
+      choose('bookingIdentity.corporateCustomerId', 'current_authorized_enterprise_choice_required',
+        bookingOptions.options.map(row => ({ id: row.corporateCustomerId, label: row.corporateCustomerName })));
+    }
+    if (enterprise && enterprise.enterpriseContractAndPayer === undefined) {
+      missingFields.push('bookingIdentity.enterpriseContractAndPayer');
+      choose('bookingIdentity.enterpriseContractAndPayer', 'explicit_contract_and_payer_choice_required', [
+        { id: 'personal_payer', label: '个人签约与付款，使用当前企业员工权益' },
+        { id: 'enterprise_payer', label: '申请由所选企业签约与付款（仍须原资格与审批）' }
+      ]);
+    }
     if (!input.items) { missingFields.push('items'); choose('items', 'product_and_quantity_required', catalog.items.filter(row => row.status === 'enabled').map(row => ({ id: row.id, label: row.name }))); }
     const lines = (input.items ?? []).map((item, index) => {
       const matches = catalog.items.filter(row => row.status === 'enabled' && (item.itemGroupId ? row.id === item.itemGroupId : row.name === item.productName));
@@ -112,9 +140,9 @@ export class AiQuoteCandidatePreparationService {
     };
     const fulfillmentLocationId = location(input.locationName, input.locationId, 'location'),
       returnLocationId = input.returnLocationName || input.returnLocationId ? location(input.returnLocationName, input.returnLocationId, 'returnLocation') : undefined;
-    if (!input.fulfillmentMode || !context.settings.fulfillment.enabledModes.includes(input.fulfillmentMode)
-      || !context.category.businessModel.fulfillmentModes.includes(input.fulfillmentMode)) {
-      missingFields.push('fulfillmentMode'); choose('fulfillmentMode', 'server_supported_mode_required', context.settings.fulfillment.enabledModes.map(mode => ({ id: mode, label: mode })));
+    const fulfillmentModes = context.settings.fulfillment.enabledModes.filter(mode => context.category.businessModel.fulfillmentModes.includes(mode));
+    if (!input.fulfillmentMode || !fulfillmentModes.includes(input.fulfillmentMode)) {
+      missingFields.push('fulfillmentMode'); choose('fulfillmentMode', 'server_supported_mode_required', fulfillmentModes.map(mode => ({ id: mode, label: mode })));
     }
     const now = this.clock(), timeZone = context.settings.calendar.timeZone;
     if (!(now instanceof Date) || !Number.isFinite(now.getTime()) || !timeZone) throw new ModelGatewayError('CONFIG_INVALID');
@@ -134,14 +162,44 @@ export class AiQuoteCandidatePreparationService {
       || JSON.stringify(currentMembers.candidates) !== JSON.stringify(members.candidates)) throw new ModelGatewayError('FORBIDDEN');
     const currentContext = structuredClone(await this.contexts.current(scope));
     if (!isDeepStrictEqual(currentContext, context)) throw new ModelGatewayError('CONFIG_INVALID');
-    const selectionRevision = requestFingerprint({ scope, context, items: catalog.items, members: members.candidates });
-    const hasExplicitResourceSelection = Boolean(input.locationId || input.returnLocationId || input.items?.some(item => item.itemGroupId));
-    if ((hasExplicitResourceSelection && !input.selectionRevision) || (input.selectionRevision && input.selectionRevision !== selectionRevision)) return { status: 'missing_input' as const,
-      missingFields: ['selectionRevision'], selectionRevision, clarifications: [{ field: 'selectionRevision',
-        reason: 'configuration_or_candidates_changed', action: 'reread_and_reconfirm', candidates: [] }] };
+    if (bookingOptions) {
+      const current = await this.readers.members.readBookingOptions!({ customerId: input.customerId!, limit: 50 }, expectedContext);
+      if (JSON.stringify(current.scope) !== JSON.stringify(scope) || current.audience !== members.audience
+        || !isDeepStrictEqual(current.options, bookingOptions.options) || current.truncated !== bookingOptions.truncated
+        || current.nextCursor !== bookingOptions.nextCursor) throw new ModelGatewayError('FORBIDDEN');
+    }
+    const selectionRevision = requestFingerprint({ scope, context, items: catalog.items, members: members.candidates,
+      ...(bookingOptions ? { bookingOptions: bookingOptions.options, truncated: bookingOptions.truncated, nextCursor: bookingOptions.nextCursor } : {}) });
+    const hasExplicitResourceSelection = Boolean(enterprise || input.locationId || input.returnLocationId || input.items?.some(item => item.itemGroupId));
+    if ((hasExplicitResourceSelection && !input.selectionRevision) || (input.selectionRevision && input.selectionRevision !== selectionRevision)) {
+      // Offer current authorized choices again, rather than advancing the old
+      // revision or leaving the persisted clarification with only free text.
+      const reconfirm = (field: string, rows: Array<{ id: string; label: string }>) => {
+        if (rows.length && !clarifications.some(row => row.field === field)) choose(field, 'current_selection_requires_reconfirmation', rows);
+      };
+      for (const [index, line] of lines.entries()) {
+        const item = catalog.items.find(row => row.status === 'enabled' && row.id === line.itemGroupId);
+        if (item) reconfirm(`items.${index}`, [{ id: item.id, label: item.name }]);
+      }
+      reconfirm('customerId', customerCandidates.map(row => ({ id: row.customerId, label: row.name })));
+      if (bookingOptions) reconfirm('bookingIdentity.corporateCustomerId', bookingOptions.options.map(row => ({ id: row.corporateCustomerId, label: row.corporateCustomerName })));
+      if (enterprise) reconfirm('bookingIdentity.enterpriseContractAndPayer', [
+        { id: 'personal_payer', label: '个人签约与付款，使用当前企业员工权益' },
+        { id: 'enterprise_payer', label: '申请由所选企业签约与付款（仍须原资格与审批）' }
+      ]);
+      for (const [field, selectedId] of [['location', fulfillmentLocationId], ['returnLocation', returnLocationId]] as const) {
+        const row = context.locations.find(location => location.status === 'enabled' && location.id === selectedId);
+        if (row) reconfirm(field, [{ id: row.id, label: row.name }]);
+      }
+      return { status: 'missing_input' as const, missingFields: ['selectionRevision', ...missingFields],
+        ...(ambiguous.length ? { ambiguousFields: ambiguous } : {}), selectionRevision,
+        clarifications: [{ field: 'selectionRevision', reason: 'configuration_or_candidates_changed',
+          action: 'reread_and_reconfirm', candidates: [] }, ...clarifications] };
+    }
     if (ambiguous.length) return { status: 'ambiguous' as const, ambiguousFields: ambiguous, missingFields, customerCandidates, clarifications, selectionRevision };
     if (missingFields.length) return { status: 'missing_input' as const, missingFields, clarifications, selectionRevision };
     const request = aiQuotePreviewInputSchema.safeParse({ customerType: input.customerType, customerId: input.customerId,
+      ...(input.bookingIdentity ? { bookingIdentity: input.bookingIdentity } : {}),
       lines, startAt, endAt, fulfillmentMode: input.fulfillmentMode, fulfillmentLocationId, ...(returnLocationId ? { returnLocationId } : {}) });
     if (!request.success) return { status: 'missing_input' as const, missingFields: ['request'] };
     return { status: 'needs_confirmation' as const, request: request.data, timeZone, observedAt: now.toISOString(), selectionRevision,

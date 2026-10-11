@@ -114,7 +114,7 @@ export class UnifiedAiGatewayService {
       else if (feature === 'structuredOutput') capabilities.push('structured_output');
       else if (feature === 'streaming') capabilities.push('streaming');
       else if (feature === 'image') capabilities.push('vision');
-      else if (feature === 'audio') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+      else if (feature === 'audio') capabilities.push('audio');
       else throw new ModelGatewayError('INVALID_REQUEST');
     }
     return [...new Set(capabilities)];

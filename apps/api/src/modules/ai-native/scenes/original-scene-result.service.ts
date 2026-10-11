@@ -98,7 +98,7 @@ function openingFactsFingerprint(material: unknown) {
   return requestFingerprint(facts);
 }
 
-function quoteFactsFingerprint(material: unknown) {
+export function quoteFactsFingerprint(material: unknown) {
   const packet = z.object({ payload: z.object({ facts: z.record(z.unknown()) }).passthrough() })
     .passthrough().parse(structuredClone(material));
   const facts = packet.payload.facts;
@@ -190,7 +190,7 @@ export class AiOriginalSceneResultService {
           if (taskModelFingerprint(previous, this.policy) !== continuation.inputHash || !isGatewayResult(priorResult)
             || priorResult.status !== 'completed' || priorResult.usage.kind !== 'reported' || priorResult.requestId !== previous.intent.requestId
             || requestFingerprint(input.intent.messages) !== requestFingerprint(continueOriginalSceneMaterial(previous,
-              { ...continuation, result: priorResult }).messages)) throw denied();
+              { ...continuation, result: priorResult }, continuation.questionRevision > 1 ? envelope : undefined).messages)) throw denied();
         }
         if (receiptFingerprint(envelope.original) !== receiptFingerprint(original.receipt)
           || requestFingerprint(envelope.facts) !== envelope.materialHash) throw denied();

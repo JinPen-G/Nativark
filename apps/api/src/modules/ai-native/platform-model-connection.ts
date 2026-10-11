@@ -17,7 +17,7 @@ const saveSchema = z.object({
   protocol: z.literal('openai_chat_completions'), model: z.string().min(1).max(256).regex(/^[\w./:-]+$/u),
   baseUrl: z.string().min(1).max(2048), enabled: z.boolean(),
   maxOutputTokens: z.number().int().min(1).max(32768),
-  allowedCapabilities: z.array(capabilityNameSchema).max(7).refine(items => new Set(items).size === items.length).optional(),
+  allowedCapabilities: z.array(capabilityNameSchema).max(8).refine(items => new Set(items).size === items.length).optional(),
   secretChange: z.discriminatedUnion('operation', [
     z.object({ operation: z.literal('retain') }).strict(),
     z.object({ operation: z.literal('replace'), apiKey: z.string().regex(/^[\x21-\x7e]{1,8192}$/u) }).strict(),

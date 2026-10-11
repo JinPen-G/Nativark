@@ -7,7 +7,7 @@ export const AI_ORIGINAL_SCENES = Symbol('AI_ORIGINAL_SCENES');
 export const AI_ORIGINAL_SCENE_REQUESTS = Symbol('AI_ORIGINAL_SCENE_REQUESTS');
 export const AI_ORIGINAL_SCENE_MODEL_REQUESTS = Symbol('AI_ORIGINAL_SCENE_MODEL_REQUESTS');
 type Scenes = ReturnType<typeof composeRequestBoundOriginalScenes>;
-async function respondAiScene<T>(work: () => Promise<T>) {
+async function respondAiScene<T>(work: () => Promise<T>, unknownAction = 'reconcile') {
   try { return await work(); }
   catch (error) {
     const rawCode = error instanceof Error && 'code' in error ? error.code : 'AI_STORAGE_UNAVAILABLE';
@@ -17,7 +17,7 @@ async function respondAiScene<T>(work: () => Promise<T>) {
     const statuses: Record<string, number> = { AI_INVALID_INPUT: 400, AI_ACCESS_DENIED: 403, AI_SCOPE_CHANGED: 403,
       AI_RESOURCE_UNAVAILABLE: 404, AI_REVISION_CONFLICT: 409, AI_STORAGE_UNAVAILABLE: 503, AI_RESULT_UNKNOWN: 409 };
     const known = typeof code === 'string' && Object.prototype.hasOwnProperty.call(statuses, code) ? code : 'AI_STORAGE_UNAVAILABLE';
-    throw new HttpException({ code: known, retryable: false, ...(known === 'AI_RESULT_UNKNOWN' ? { nextAction: 'reconcile' } : {}) }, statuses[known]);
+    throw new HttpException({ code: known, retryable: false, ...(known === 'AI_RESULT_UNKNOWN' ? { nextAction: unknownAction } : {}) }, statuses[known]);
   }
 }
 type SceneRunHttpRequest = AiSceneHttpRequest & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
@@ -66,6 +66,36 @@ export class AiOriginalScenesController {
 export class AiOriginalSceneModelController {
   constructor(@Inject(AI_ORIGINAL_SCENE_MODEL_REQUESTS)
     private readonly model: ReturnType<typeof composeRequestBoundOriginalSceneModel>) {}
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.startSettingsTask)
+  startSettingsTask(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.startSettingsTask(request, body, signal)));
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readSettingsConfirmation)
+  readSettingsConfirmation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.readSettingsConfirmation(request, body));
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.decideSettingsProposal)
+  decideSettingsProposal(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.decideSettingsProposal(request, body), 'read_decision_receipt');
+  }
+  // Unknown decision acknowledgement is reread by its original proposal reference,
+  // never by creating a replacement approval or restarting execution.
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readSettingsDecision)
+  readSettingsDecision(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.readSettingsDecision(request, body), 'read_decision_receipt');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.continueSettingsConfirmation)
+  continueSettingsConfirmation(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.continueSettingsConfirmation(request, body, signal)));
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.reconcileSettingsTask)
+  reconcileSettingsTask(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.reconcileSettingsTask(request, body, signal)));
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.cancelSettingsTask)
+  cancelSettingsTask(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.cancelSettingsTask(request, body));
+  }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage)
   readTaskPage(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.model.readTaskPage(request, body)); }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents)
@@ -78,9 +108,35 @@ export class AiOriginalSceneModelController {
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readInput)
   readInput(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.model.readInput(request, body)); }
+  /** Refresh only the waiting question. An unknown COMMIT is read back through
+   * input, never resume/reconcile execution or resubmit a stale refresh. */
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.refreshInput)
+  refreshInput(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.refreshInput(request, body), 'read_input');
+  }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.resume)
   resume(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.model.resume(request, body, signal)));
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.resume(request, body, signal)), 'read_answer');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readAnswer)
+  readAnswer(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.readAnswer(request, body), 'read_answer');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.continueAnswer)
+  continueAnswer(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.continueAnswer(request, body, signal)), 'read_answer');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readQuotePreparation)
+  readQuotePreparation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.readQuotePreparation(request, body), 'read_answer');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.confirmClarifiedQuote)
+  confirmClarifiedQuote(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.confirmClarifiedQuote(request, body), 'read_clarified_quote_receipt');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readClarifiedQuoteReceipt)
+  readClarifiedQuoteReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.readClarifiedQuoteReceipt(request, body), 'read_clarified_quote_receipt');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.reconcile)
   reconcile(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {

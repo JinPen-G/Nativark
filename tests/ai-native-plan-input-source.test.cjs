@@ -51,6 +51,21 @@ async function settingsInputSetup({ normal = false } = {}) {
   return { ...h, root, app, lease, publish, reference, current, plan, dependencies };
 }
 
+test('original settings change receipt remains readable after expiry and config change, without execution authority', async () => {
+  const h = await settingsInputSetup({ normal: true });
+  h.control.now = new Date('2026-10-08T12:00:00Z');
+  h.current.settingsRevision = 9;
+  h.current.settings.notifications = { enabledEvents: [], editableChannels: ['email'] };
+  const before = h.clone(h.state);
+  const receipt = await h.app.readChangeReceipt({ changeKey: 'original-key' });
+  assert.equal(receipt.state, 'prepared_not_approved');
+  assert.equal(receipt.change.changeHash, h.reference.changeHash);
+  assert.equal(receipt.change.baseRevision, 1);
+  assert.deepEqual(receipt.change.diff['notifications.editableChannels'], { before: ['email'], after: ['sms'] });
+  assert.deepEqual(h.clone(h.state), before);
+  h.identity.user.permissions.length = 0;
+  await assert.rejects(h.app.readChangeReceipt({ changeKey: 'original-key' }));
+});
 test('settings participant accepts the runner POSSIBLE start, not an unstarted or foreign holder step', async () => {
   const h = await settingsInputSetup();
   await h.publish(); await h.root.plans.savePlan(h.plan, h.lease);
@@ -167,7 +182,22 @@ test('settings normal host starts through the runner and persists an approval ch
     return transaction(async tx => { open++; try { return await work(tx); } catch (error) { t.diagnostic(error.stack); throw error; } finally { open--; } }, options);
   };
   const host = h.rebuild(), timers = h.timers;
-  const result = await host.application.start({ taskId: 'task-a', runId: 'run-a' });
+  const { requestBoundOriginalModelHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const modelHost = await requestBoundOriginalModelHarness('quote_clarification');
+  const sharedCore = Object.assign(Object.create(modelHost.requestDependencies.core), h.dependencies.core);
+  const modelDependencies = { ...modelHost.requestDependencies, db: h.db, auth: h.dependencies.auth,
+    guard: h.dependencies.guard, core: sharedCore, subscriptions: h.dependencies.subscriptions, clock: h.dependencies.clock };
+  const { credentials: _settingsCredentials, ...settingsDependencies } = h.dependencies;
+  const modelOptions = { ...modelHost.options, settingsTask: { dependencies: { ...settingsDependencies, core: sharedCore },
+    configuration: { host: { holderId: 'worker-a', leaseMs: 100000 }, task: {
+      taskId: 'task-a', runId: 'run-a', registrationRef: 'settings-a', change: h.reference, limits: h.plan.limits } } } };
+  const { AiOriginalScenesModule, AI_ORIGINAL_SCENE_MODEL_REQUESTS } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.module');
+  const module = AiOriginalScenesModule.registerHttpModel(modelDependencies, modelOptions);
+  const requests = module.providers.find(p => p.provide === AI_ORIGINAL_SCENE_MODEL_REQUESTS).useFactory();
+  const { AiOriginalSceneModelController } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.controller');
+  const controller = new AiOriginalSceneModelController(requests);
+  const request = { headers: { authorization: (await _settingsCredentials.current()).authorization } };
+  const result = await controller.startSettingsTask(request, { taskId: 'task-a', runId: 'run-a' });
   assert.equal(result.kind, 'run_outcome'); assert.equal(result.outcome.status, 'paused', JSON.stringify({ result,
     steps: h.state.aiStep, phases: h.state.aiTaskExecutionPhaseReceipt, trace: h.trace.slice(-20) }, (_key, value) => typeof value === 'bigint' ? value.toString() : value));
   assert.equal(h.state.aiTask[0].status, 'WAITING_CONFIRMATION');
@@ -208,6 +238,17 @@ test('settings normal host starts through the runner and persists an approval ch
   const aggregatedSettings = await settingsCenter.readScene({ kind: 'settings', taskId: 'task-a', runId: 'run-a', reference: { preparation } });
   assert.equal(aggregatedSettings.business.confirmation.checkpointRef, checkpoint.id);
   assert.equal(aggregatedSettings.snapshot.availability, 'available'); assert.equal(aggregatedSettings.business.businessOutcome, 'not_observed');
+  const stateBeforeRead = h.clone(h.state);
+  const fromRequest = await requests.readTaskScene(request, { kind: 'settings', taskId: 'task-a', runId: 'run-a', reference: { preparation } });
+  assert.equal(fromRequest.business.confirmation.checkpointRef, checkpoint.id);
+  assert.equal(fromRequest.business.businessOutcome, 'not_observed');
+  assert.equal(modelHost.factoryCalls.length, 0); assert.equal(modelHost.execution.sent.length, 0);
+  assert.deepEqual(h.clone(h.state), stateBeforeRead);
+  await assert.rejects(requests.readTaskScene({ headers: {} }, { kind: 'settings', taskId: 'task-a', runId: 'run-a', reference: { preparation } }));
+  const { composeRequestBoundOriginalSceneModel } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');
+  assert.throws(() => composeRequestBoundOriginalSceneModel(modelDependencies, { ...modelOptions,
+    settingsTask: { ...modelOptions.settingsTask, dependencies: { ...settingsDependencies, db: modelHost.requestDependencies.db } } }),
+    e => e.code === 'AI_RESOURCE_UNAVAILABLE');
   await assert.rejects(settingsCenter.readScene({ kind: 'settings', taskId: 'other-task', runId: 'run-a', reference: { preparation } }));
   assert.equal(h.state.aiApproval.length, 0); assert.equal(h.state.rentalApprovedSettingsOperation.length, 0);
   await assert.rejects(consumer.read({ preparation: { ...preparation, taskId: 'other-task' } }));
@@ -222,12 +263,19 @@ test('settings normal host starts through the runner and persists an approval ch
     return structuredClone(h.current);
   };
   h.dependencies.core.refreshCommittedBusinessSettings = async () => {};
-  await host.settings.application.decide({ draftVersion: 'ain-approved-settings-draft-1', taskId: 'task-a',
+  sharedCore.commitNotificationSettings = h.dependencies.core.commitNotificationSettings;
+  sharedCore.refreshCommittedBusinessSettings = h.dependencies.core.refreshCommittedBusinessSettings;
+  await assert.rejects(requests.continueSettingsConfirmation(request, { taskId: 'task-a', runId: 'foreign-run', checkpointRef: checkpoint.id }), e => e.code === 'AI_ACCESS_DENIED');
+  await assert.rejects(requests.continueSettingsConfirmation(request, { taskId: 'task-a', runId: 'run-a', checkpointRef: checkpoint.id, holderId: 'caller-worker' }), e => e.code === 'AI_INVALID_INPUT');
+  await assert.rejects(requests.continueSettingsConfirmation(request, { taskId: 'task-a', runId: 'run-a', checkpointRef: checkpoint.id }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  assert.equal(h.state.aiRun[0].leaseOwnerId, null, 'no decision must not claim an execution lease');
+  await controller.decideSettingsProposal(request, { draftVersion: 'ain-approved-settings-draft-1', taskId: 'task-a',
     proposalId: proposal.proposalId, proposalRevision: proposal.proposalRevision, reviewedPayloadHash: proposal.reviewedPayloadHash, decision: 'approve' });
-  const run = h.state.aiRun[0];
-  await host.authorization.tasks.claimRecoveryRun({ taskId: 'task-a', runId: 'run-a', holderId: 'worker-a', leaseMs: 100000,
-    expectedTaskRevision: h.state.aiTask[0].revision, expectedRunRevision: run.revision, expectedFencingToken: run.fencingToken.toFixed(0) });
-  const finished = await host.application.continueConfirmation({ taskId: 'task-a', runId: 'run-a', checkpointRef: checkpoint.id });
+  const decision = await controller.readSettingsDecision(request, { draftVersion: 'ain-approved-settings-draft-1', taskId: 'task-a',
+    proposalId: proposal.proposalId, proposalRevision: proposal.proposalRevision, reviewedPayloadHash: proposal.reviewedPayloadHash });
+  assert.equal(decision.state, 'recorded');
+  const finished = await controller.continueSettingsConfirmation(request, { taskId: 'task-a', runId: 'run-a', checkpointRef: checkpoint.id });
+  assert.equal(modelHost.factoryCalls.length, 0); assert.equal(modelHost.execution.sent.length, 0);
   assert.equal(finished.kind, 'run_outcome'); assert.equal(finished.outcome.status, 'succeeded', JSON.stringify({ finished,
     phases: h.state.aiTaskExecutionPhaseReceipt, operations: h.state.rentalApprovedSettingsOperation, trace: h.trace.slice(-12) },
     (_key, value) => typeof value === 'bigint' ? value.toString() : value));
@@ -241,32 +289,43 @@ test('settings normal host starts through the runner and persists an approval ch
   assert.equal(business.businessOutcome, 'committed'); assert.equal(business.currentMatchesChangeBase, false);
   assert.equal(business.operation.receipt.changeId, preparation.changeId);
   assert.equal(business.confirmation, null, 'committed task must not re-offer its old wait');
+  const afterCommitState = h.clone(h.state);
+  const recoveredScene = await controller.readTaskScene(request, { kind: 'settings', taskId: 'task-a', runId: 'run-a', reference: { preparation } });
+  assert.equal(recoveredScene.business.businessOutcome, 'committed', 'reconnection discovers the original receipt without a caller operation key');
+  assert.equal(recoveredScene.business.operation.receipt.operationKey, business.operation.receipt.operationKey);
+  assert.deepEqual(h.clone(h.state), afterCommitState, 'receipt discovery is read-only');
+  const terminal = await controller.reconcileSettingsTask(request, { taskId: 'task-a', runId: 'run-a' });
+  assert.equal(terminal.mode, 'read_only');
+  assert.equal(terminal.businessOutcome, 'committed');
+  assert.equal(terminal.operation.receipt.operationKey, business.operation.receipt.operationKey);
+  assert.deepEqual(h.clone(h.state), afterCommitState, 'terminal reconciliation must not claim or restart the run');
+  assert.equal(modelHost.factoryCalls.length, 0); assert.equal(modelHost.execution.sent.length, 0);
   await assert.rejects(host.application.readConfirmation(checkpointRequest), 'terminal tasks cannot expose a live waiting checkpoint');
 });
 
-test('settings normal host cancellation blocks confirmation and preserves unresolved original charges', { timeout: 20000 }, async () => {
+test('settings normal host cancellation blocks confirmation and preserves original charges under required evidence', { timeout: 20000 }, async () => {
+  for (const witnessPresent of [true, false]) {
   const h = await settingsNormalHostSetup(), host = h.rebuild(), key = { taskId: 'task-a', runId: 'run-a' };
   assert.equal((await host.application.start(key)).outcome.status, 'paused');
   const checkpoint = h.state.aiTaskExecutionPhaseReceipt[0], originalCharges = h.state.aiTaskExecutionCharge.map(c => c.chargeId);
   await assert.rejects(host.application.requestCancel({ taskId: 'other-task', expectedRevision: h.state.aiTask[0].revision }));
-  const cancelled = await host.application.requestCancel({ taskId: key.taskId, expectedRevision: h.state.aiTask[0].revision });
+  if (!witnessPresent) h.state.aiTaskExecutionPhaseReceipt.splice(0);
+  const cancelled = await host.application.requestCancelOriginal({ taskId: key.taskId, expectedRevision: h.state.aiTask[0].revision });
   assert.equal(cancelled.cancellation, 'requested_not_rollback');
-  assert.equal(h.state.aiTask[0].status, 'CANCEL_REQUESTED');
+  assert.equal(cancelled.reconciliation.outcome.status, witnessPresent ? 'cancelled' : 'unknown');
   await assert.rejects(host.application.continueConfirmation({ ...key, checkpointRef: checkpoint.id }));
-  const rebuilt = h.rebuild();
-  await rebuilt.authorization.tasks.claimRecoveryRun(h.claim());
-  const lease = h.held();
+  const rebuilt = h.rebuild(), lease = checkpoint.payload.presentedLease;
   await assert.rejects(rebuilt.inputs.source.publishSettingsInput({ taskId: key.taskId, registrationRef: 'new-settings',
     expectedTaskRevision: h.state.aiTask[0].revision, lease, input: h.reference }));
-  assert.equal((await rebuilt.application.reconcile(key)).outcome.status, 'unknown');
-  assert.equal(h.state.aiTask[0].status, 'CANCEL_REQUESTED');
+  assert.equal(h.state.aiTask[0].status, witnessPresent ? 'CANCELLED' : 'CANCEL_REQUESTED');
   assert.equal(h.state.rentalApprovedSettingsOperation.length, 0);
   assert.equal(h.state.aiApprovalConsumption.length, 0);
   assert.equal(h.state.aiTaskExecutionPhaseStart.length, 1);
   assert.deepEqual(h.state.aiTaskExecutionCharge.map(c => c.chargeId), originalCharges);
-  assert.ok(h.state.aiTaskExecutionCharge.every(c => c.status === 'UNKNOWN'));
+  assert.ok(h.state.aiTaskExecutionCharge.every(c => c.status === (witnessPresent ? 'RECORDED' : 'UNKNOWN')));
   assert.equal(h.state.aiRun[0].leaseOwnerId, null);
   assert.equal(h.timers.size, 0);
+  }
 });
 
 for (const mode of ['missing operation', 'cancelled committed operation']) test(`settings normal host recovers ${mode} without executing again`, { timeout: 20000 }, async () => {

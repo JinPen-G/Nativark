@@ -2,6 +2,7 @@ import { AI_ENTRY_ACTION_CONTRACT_VERSION, AI_CUSTOMER_ENTRY_SURFACES } from './
 import { AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION } from './ai-knowledge-policy-management-draft';
 import { AI_BOOKING_DRAFT_CONTRACT_VERSION, AI_BOOKING_DRAFT_STATES, AI_BOOKING_INPUT_SOURCES } from './ai-booking-draft';
 import { RENTAL_FULFILLMENT_MODES } from './core';
+import { AI_CLIENT_HOST_CAPABILITIES_VERSION } from './ai-client-entry-draft-schemas';
 
 const id = { type: 'string', minLength: 1, maxLength: 191, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' };
 const uuid = { type: 'string', format: 'uuid' };
@@ -43,6 +44,17 @@ const material = object({ selection, sources, deliveryAddress: object({ addressI
 // Publication describes payload shape, not current authorization or permission
 // to navigate/execute. Runtime consumers must still verify the original binding.
 export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
+  AiClientHostCapabilitiesRequest: object({}),
+  AiClientHostCapabilities: object({ contractVersion: literal(AI_CLIENT_HOST_CAPABILITIES_VERSION),
+    enabled: { type: 'boolean' }, audience: literal('customer'), surface: { enum: [...AI_CUSTOMER_ENTRY_SURFACES] },
+    channel: { enum: ['wechat_miniprogram', 'web'] }, customerId: id, customerType: { enum: ['personal', 'corporate'] },
+    tenantCode: id, serviceCode: id, scope,
+    policy: object({ revision: { type: 'integer', minimum: 1, maximum: 4294967294 }, allowRead: literal(true), allowCreate: { type: 'boolean' } }),
+    releaseRevision: id, observedAt: date, expiresAt: date,
+    capabilities: object({ entryActions: { type: 'array', maxItems: 3, uniqueItems: true,
+      items: { enum: ['OPEN_ORDER', 'CREATE_BOOKING_DRAFT', 'OPEN_BOOKING'] } },
+      bookingDrafts: { type: 'boolean' }, savedDeliveryAddresses: { type: 'boolean' } }),
+    authorization: literal('observation_only_recheck_each_action') }),
   AiKnowledgePreparationTargetSpecDraft: object({ version: literal('knowledge-prepared-target-1'), operationKey: knowledgeId,
     upload: object({ documentId: { ...knowledgeId, maxLength: 36 }, fileName: { type: 'string', minLength: 1, maxLength: 180 },
       mimeType: { enum: ['text/plain', 'text/markdown'] }, sizeBytes: { type: 'integer', minimum: 1, maximum: 262144 } }),
@@ -53,6 +65,17 @@ export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
   AiKnowledgeTargetBindDraft: object({ authorityId: uuid, operationKey: knowledgeId, sessionId: { type: 'string', minLength: 1, maxLength: 128 },
     expectedRevision: literal(1), confirm: literal('bind_knowledge_upload') }),
   AiBookingSelection: selection,
+  AiBookingSubmissionAcceptanceRequest: object({ handoffRef: uuid, contactPhone: { type: 'string', maxLength: 32 } }, ['handoffRef']),
+  AiBookingSubmissionSelection: object({ acceptanceRef: uuid }),
+  AiBookingSubmissionDecision: object({ acceptanceRef: uuid, decision: literal('submit_original_booking') }),
+  AiBookingSubmissionAcceptance: object({ acceptanceRef: uuid, handoffRef: uuid, bookingDraftId: uuid,
+    selectionRevision: literal(1), inputFingerprint: hash, quoteId: id, operationKey: id, execution: literal('not_attested') }),
+  AiBookingSubmissionReceipt: { oneOf: [
+    object({ state: literal('observed'), orderId: id, operationKey: id, retryable: literal(false),
+      payment: literal('not_inferred'), fulfillment: literal('not_inferred') }),
+    object({ state: { enum: ['unknown', 'not_observed'] }, orderId: { type: 'null' }, operationKey: id, retryable: literal(false),
+      payment: literal('not_inferred'), fulfillment: literal('not_inferred') })
+  ] },
   AiBookingDraft: object({ contractVersion: literal(AI_BOOKING_DRAFT_CONTRACT_VERSION), bookingDraftId: uuid,
     audience: literal('customer'), surface: { enum: [...AI_CUSTOMER_ENTRY_SURFACES] }, scope,
     state: { enum: [...AI_BOOKING_DRAFT_STATES] }, revision: { type: 'integer', minimum: 1 },

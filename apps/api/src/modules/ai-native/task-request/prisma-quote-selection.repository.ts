@@ -11,6 +11,7 @@ import { PrismaOriginalRequestRepository, AiOriginalRequestResultUnknownError } 
 import { originalIdentityHash } from './original-request.authority';
 import { freezeOriginalInput } from './original-request.validation';
 import { parseQuoteSelection, parseQuoteSelectionRead, parseQuoteSelectionProof } from './quote-selection.validation';
+import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
 
 type Row = Prisma.AiTaskQuoteSelectionGetPayload<{}>;
 export type HumanQuoteSelectionDependencies = Pick<ControlledApprovedOrderDependencies,
@@ -36,7 +37,7 @@ export class PrismaQuoteSelectionRepository {
     if (original.request.sceneCode !== 'quote_clarification' || current.actor.kind !== 'user' || current.scope.kind !== 'workspace'
       || originalIdentityHash(original.context) !== originalIdentityHash(current)) throw denied();
     const task = await this.d.originals.readTaskReceipt(inputRef);
-    if (task.state !== 'observed' || (taskId && task.taskId !== taskId) || (runId && task.runId !== runId)) throw unavailable();
+    if (task.state !== 'observed' || (taskId && task.taskId !== taskId)) throw unavailable();
     if (active) {
       await this.d.originals.resolve(original.request.sceneCode, inputRef);
       if (!['queued', 'running', 'waiting_input', 'waiting_confirmation'].includes(task.status)) throw denied();
@@ -44,7 +45,19 @@ export class PrismaQuoteSelectionRepository {
     const access = aiTaskAccessFromContext(current, task.taskId, this.clock());
     const storedTask = await this.d.db.aiTask.findFirst({ where: { ...access.where, id: task.taskId }, select: { scopeId: true, inputRef: true } });
     if (!storedTask || storedTask.inputRef !== inputRef) throw denied();
-    return { context: current, original: original.receipt, task,
+    if (runId && task.runId !== runId) {
+      // A persisted human answer may hand an unplanned successor to the order
+      // host. It cannot mutate the completed model parent or invent ancestry.
+      await this.d.db.$transaction(async tx => {
+        await readTaskModelRunOrigin(tx, access, { scopeId: storedTask.scopeId, taskId: task.taskId,
+          runId, originRunId: task.runId, registrationRef: `scene-model:${inputRef}` });
+        const successor = await tx.aiRun.findFirst({ where: { scopeId: storedTask.scopeId, taskId: task.taskId, id: runId } });
+        if (!successor || successor.actorKind !== access.actorKind || successor.actorId !== access.actorId) throw denied();
+        if (active && (successor.status !== 'RUNNING' || await tx.aiRun.findFirst({ where: {
+          scopeId: storedTask.scopeId, taskId: task.taskId, sequence: { gt: successor.sequence } } }))) throw denied();
+      });
+    }
+    return { context: current, original: original.receipt, task: { ...task, runId: runId ?? task.runId },
       owner: { scopeId: storedTask.scopeId, audience: access.audience, ownerKind: access.actorKind, ownerId: access.actorId } };
   }
   private quoteHash(quote: RentalQuoteSnapshotV1) {
@@ -123,7 +136,7 @@ export class PrismaQuoteSelectionRepository {
         // existing step/approval. Publication takes the same task row lock.
         const runKey = { scopeId: initial.owner.scopeId, taskId: command.taskId, runId: command.runId };
         if (await tx.aiTaskRunPlan.findFirst({ where: runKey })
-          || await tx.aiTaskActionInput.findFirst({ where: { ...runKey, toolCode: 'rental.order.commit' } })) throw conflict();
+          || await tx.aiTaskActionInput.findFirst({ where: runKey })) throw conflict();
         const current = await this.authorized(command, true, tx);
         if (current.quoteHash !== initial.quoteHash || current.inputHash !== initial.inputHash || originalIdentityHash(current.context) !== originalIdentityHash(initial.context)
           || current.task.revision !== initial.task.revision || !['queued', 'running', 'waiting_input'].includes(current.task.status)) throw conflict();

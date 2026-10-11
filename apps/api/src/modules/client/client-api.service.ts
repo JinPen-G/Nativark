@@ -1019,7 +1019,7 @@ export class ClientApiService {
     return this.business.claimCoupon(context.tenantId, (await this.context(context.tenantId)), templateId, context.customerId);
   }
 
-  async createOrder(context: ClientRequestContext, input: ClientCreateOrderRequest, requestContext?: ClientOrderRequestContext) {
+  private async prepareClientOrder(context: ClientRequestContext, input: ClientCreateOrderRequest) {
     this.requireActiveMembership(context);
     // 即使客户在取消发布前拿到报价，也不能在关闭渠道后新建订单。
     await this.currentWorkspace(context);
@@ -1044,6 +1044,39 @@ export class ClientApiService {
       endAt: quote.request.endAt,
       lines
     };
+    return { business, orderInput };
+  }
+
+  /** Explicit server adapter for the original booking page. No quote is consumed
+   * and no stock is reserved; the caller must still obtain an explicit submission. */
+  async prepareOrderSubmission(context: ClientRequestContext, input: ClientCreateOrderRequest) {
+    context = structuredClone(context);
+    const snapshot = structuredClone(input);
+    const { orderInput } = await this.prepareClientOrder(context, snapshot);
+    return { tenantId: context.tenantId, workspaceId: context.workspaceId, customerId: context.customerId,
+      request: structuredClone(orderInput), requestHash: this.orders.fingerprintOrderRequest(orderInput),
+      execution: 'not_submitted' as const, inventory: 'not_reserved' as const };
+  }
+
+  /** Accepted request comes from server persistence, not an AI response or HTTP
+   * hash. The original key is read only; absence does not authorize resubmission. */
+  async readOrderSubmission(context: ClientRequestContext, accepted: {
+    tenantId: string; workspaceId: string; customerId: string; request: CreateRentalOrderRequest;
+  }, operationKey: string) {
+    context = structuredClone(context);
+    const original = structuredClone(accepted);
+    await this.currentWorkspace(context);
+    if (original.tenantId !== context.tenantId || original.workspaceId !== context.workspaceId
+      || original.customerId !== context.customerId || original.request.customerId !== context.customerId
+      || original.request.customerType !== 'personal') throw new NotFoundException("原下单操作不存在");
+    const result = await this.orders.readOrderCreation(context.tenantId, original.request, operationKey);
+    if (result.state !== 'observed' || !result.orderId) return result;
+    await this.assertClientOrder(context, result.orderId);
+    return { ...result, payment: 'not_inferred' as const, fulfillment: 'not_inferred' as const };
+  }
+
+  async createOrder(context: ClientRequestContext, input: ClientCreateOrderRequest, requestContext?: ClientOrderRequestContext) {
+    const { business, orderInput } = await this.prepareClientOrder(context, structuredClone(input));
     // 收货地址在报价阶段已由核心解析并固化进报价/订单快照；下单直接消费报价即可，无需再查客户端旁表。
     const created = await this.orders.createOrder(context.tenantId, orderInput, `client:${context.customerId}`, business, idempotencyKeyOf(requestContext));
     const order = await this.assertClientOrder(context, created.order.id);

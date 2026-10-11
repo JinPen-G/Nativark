@@ -3,7 +3,7 @@ import { HumanKnowledgeService } from './human-knowledge.service';
 import { HumanKnowledgeInputService } from './human-knowledge-input.service';
 import type { KnowledgeClock } from './knowledge.ports';
 import { KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
-import { id, parse } from './knowledge-validation';
+import { fingerprint, id, parse } from './knowledge-validation';
 
 const documentInput = z.object({
   documentId: id,
@@ -34,8 +34,22 @@ export class HumanKnowledgeConsumptionService {
   /** Read current metadata and a separately re-authorized bounded preview. */
   async readDocument(value: unknown) {
     const input = parse(documentInput, value);
+    return this.management.session.run(async context => {
     const detail = await this.management.detail(input.documentId);
-    const preview = await this.management.preview(input.documentId, input.previewLimit ?? 3);
+    const closed = detail.publication === 'withdrawn' || detail.publication === 'deleted';
+    const preview = closed || detail.parsing !== 'parsed' || detail.permissions.read_body !== 'authorized'
+      ? { status: 'unavailable' as const, sources: [] }
+      : await this.management.preview(input.documentId, input.previewLimit ?? 3);
+    const latest = await this.management.detail(input.documentId);
+    if (fingerprint(latest) !== fingerprint(detail)) throw new KnowledgeError('conflict');
+    if (preview.status === 'ready' && (preview.documentVersion !== detail.documentVersion
+      || preview.aclRevision !== detail.aclRevision)) throw new KnowledgeError('conflict');
+    // Revalidate the body action after the metadata waits as well. The old
+    // preview remains an observation; never substitute newly fetched content.
+    if (preview.status === 'ready') {
+      const current = await this.management.preview(input.documentId, input.previewLimit ?? 3);
+      if (fingerprint(current) !== fingerprint(preview)) throw new KnowledgeError('conflict');
+    }
     const now = this.clock.now();
     if (!Number.isFinite(now)) return unavailable();
 
@@ -51,11 +65,13 @@ export class HumanKnowledgeConsumptionService {
       metadata: detail,
       body,
       preview,
+      scope: structuredClone(context.scope), audience: context.audience,
       observedAt: new Date(now).toISOString(),
       bounded: true as const,
       truncated: preview.status === 'ready' ? preview.truncated : false,
       semantics: 'current_policy_rechecked_metadata_and_preview_not_business_fact' as const,
     };
+    });
   }
 
   /**
@@ -75,6 +91,7 @@ export class HumanKnowledgeConsumptionService {
     const { memoryId } = parse(memoryInput, value);
     const memory = this.preparation.memory;
     if (!memory) return unavailable();
+    return this.management.session.run(async context => {
     const state = await memory.state(memoryId);
     if (!state.usable) {
       return {
@@ -87,9 +104,17 @@ export class HumanKnowledgeConsumptionService {
     const current = await memory.read(memoryId);
     if (current.status !== 'confirmed') return unavailable();
     const proof = await memory.confirmationDetail(memoryId);
-    if (proof.status !== 'confirmed') return unavailable();
+    if (proof.status !== 'confirmed' || proof.confirmationRecordId !== current.confirmationRecordId
+      || proof.revision + 1 !== current.revision || proof.aclRevision !== current.aclRevision
+      || fingerprint(proof.preference) !== fingerprint(current.preference)
+      || fingerprint(proof.scope) !== fingerprint(current.scope) || proof.audience !== context.audience) return unavailable();
+    const latest = await memory.read(memoryId);
+    if (fingerprint(latest) !== fingerprint(current)) throw new KnowledgeError('conflict');
+    const observedAt = this.clock.now();
+    if (!Number.isFinite(observedAt) || Date.parse(proof.expiresAt) <= observedAt) return unavailable();
     return {
       status: 'ready' as const,
+      observedAt: new Date(observedAt).toISOString(), scope: structuredClone(context.scope), audience: context.audience,
       memory: {
         memoryId: current.memoryId, revision: current.revision, aclRevision: current.aclRevision,
         expiresAt: current.expiresAt, preference: structuredClone(current.preference),
@@ -102,6 +127,7 @@ export class HumanKnowledgeConsumptionService {
       },
       semantics: 'current_confirmed_preference_not_business_authority' as const,
     };
+    });
   }
 
   /** Bounded current preference selection; no implicit "all preferences" mode. */
@@ -135,6 +161,13 @@ export class HumanKnowledgeConsumptionService {
   recoverMemoryOperation(value: unknown) {
     if (!this.preparation.memory) throw new KnowledgeError('unavailable');
     return this.preparation.memory.operationRecovery(value);
+  }
+
+  /** Mutation recovery verifies the original payload fingerprint as well as
+   * owner/scope and revision. A generic receipt lookup cannot establish this. */
+  recoverMemoryChange(operationId: string, value: unknown) {
+    if (!this.preparation.memory) return unavailable();
+    return this.preparation.memory.changeStatus(operationId, value);
   }
 
   /** The existing bounded knowledge + optional confirmed-preferences package. */

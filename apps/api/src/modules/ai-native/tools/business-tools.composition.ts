@@ -39,7 +39,7 @@ export function composeAiAuthorizedBusinessTools(input: {
     | 'getWorkspaceCategory' | 'getBusinessSettings' | 'listPricingGroups'
     | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'resolvePricingGroupQuoteRequest'> & Partial<Pick<RentalCoreService, 'listInspections'>>;
   memberships: AiMembershipCandidateReadPort;
-  business: Pick<RentalBusinessService, 'createQuote' | 'getQuote' | 'tenantReadiness'> & Partial<Pick<RentalBusinessService, 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>;
+  business: Pick<RentalBusinessService, 'createQuote' | 'getQuote' | 'tenantReadiness'> & Partial<Pick<RentalBusinessService, 'normalizeQuoteInput' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>;
   reports: Pick<RentalWorkspaceReportRepository, 'getOperationReport'>;
   payments?: Pick<PaymentRuntimeService, 'listPaymentIntents' | 'listPaymentRefunds'>;
   /** Explicit AIN-07 dependencies for an EXISTING persisted task/action. No
@@ -118,6 +118,7 @@ export function composeAiAuthorizedBusinessTools(input: {
     openingSectionDifferences: (value: unknown) => new AiOpeningActionListService(opening, risks, context, diagnostics).prepareSections(value),
     riskRecheck: (value: unknown) => new AiOpeningActionListService(opening, risks, context, diagnostics).recheckRisk(value),
     quote: Object.freeze({ ...quote, businessPreparation: quotePreparation,
+      bookingIdentityOptions: (value: unknown) => reads.membershipCandidates.readBookingOptions(value),
       reconciliationAvailability: () => quotePreparation.reconciliationAvailability(),
       /** Explicit R1 entry; the host owns the human-selection evidence. Core
        * quote success is not order approval, payment, or stock reservation. */

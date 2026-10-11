@@ -1,3 +1,8 @@
+import { AI_STAFF_INSPECTION_HTTP_DRAFT, AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT } from '@rental-os/shared';
+const { basePath: inspectionTaskBase, method: inspectionTaskMethod, ...inspectionTaskOperations } = AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT;
+const inspectionTaskPaths = new Set(Object.values(inspectionTaskOperations).map(operation => `/${inspectionTaskBase}/${operation}`));
+const inspectionAssistPaths = new Set(Object.values(AI_STAFF_INSPECTION_HTTP_DRAFT.operations)
+  .map(operation => `/${AI_STAFF_INSPECTION_HTTP_DRAFT.basePath}/${operation}`));
 const STAFF_AUTH_PATHS = new Set([
   "/staff/v1/auth/login",
   "/staff/v1/auth/refresh",
@@ -16,6 +21,10 @@ export function isStaffAuthPath(path: string) {
 export function isStaffBusinessRouteAllowed(method: string, path: string) {
   const verb = method.toUpperCase();
   if (path.startsWith("/staff/v1/auth/")) return isStaffAuthPath(path);
+  if (inspectionAssistPaths.has(path)) return verb === "POST";
+  // Exact opt-in AI recognition task routes. Original order/attachment/action
+  // authorities still recheck ownership, location and the current stage.
+  if (inspectionTaskPaths.has(path)) return verb === inspectionTaskMethod;
   if (path === "/staff/v1/uploads/sessions" && verb === "POST") return true;
   if (/^\/staff\/v1\/uploads\/sessions\/[^/]+\/complete$/u.test(path) && verb === "POST") return true;
   if (/^\/staff\/v1\/uploads\/[^/]+\/download-url$/u.test(path) && verb === "GET") return true;
@@ -69,6 +78,11 @@ export function isStaffBusinessRouteAllowed(method: string, path: string) {
 }
 
 export function staffRoutePermissions(method: string, path: string, body?: unknown) {
+  if (method.toUpperCase() === 'POST' && inspectionAssistPaths.has(path)) return ['rental-os:order:view'];
+  if (method.toUpperCase() === inspectionTaskMethod && inspectionTaskPaths.has(path)) {
+    // Entry permission only, not model execution or inspection submission.
+    return ["rental-os:order:view"];
+  }
   if (/^\/rental\/v1\/orders\/[^/]+\/internal-notes$/u.test(path)) return method.toUpperCase() === "GET" ? ["rental-os:order:view"] : ["rental-os:order:operate"];
   if (/^\/rental\/v1\/orders\/[^/]+\/operation-lock$/u.test(path) && method.toUpperCase() === "POST") {
     const action = body && typeof body === "object" ? String((body as { action?: unknown }).action ?? "") : "";

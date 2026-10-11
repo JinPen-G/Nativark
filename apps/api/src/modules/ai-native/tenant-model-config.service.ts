@@ -169,7 +169,7 @@ export class TenantModelConfigService {
    * Only the atomic config/Profile adapter can implement this operation. */
   async setAllowedCapabilities(context: GatewayContext, value: unknown) {
     const parsed = z.object({ expectedRevision: z.number().int().min(1).max(4294967294),
-      allowedCapabilities: z.array(capabilityNameSchema).max(7).refine(items => new Set(items).size === items.length)
+      allowedCapabilities: z.array(capabilityNameSchema).max(8).refine(items => new Set(items).size === items.length)
     }).strict().safeParse(this.snapshot(value));
     if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
     context = await this.authorize(context, 'manage');

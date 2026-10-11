@@ -48,13 +48,22 @@ export class PrismaTaskOrderStepAuthority implements AiStepTransitionAuthority {
       actionId: step.actionId, requestFingerprint: step.requestFingerprint, toolCode: this.confirmationTool, toolVersion: step.toolVersion,
       outcome: step.status === 'UNKNOWN' ? unknown : { status: 'running', effect: 'possible' } };
     let outcome: AiStepStateDraft['outcome'];
-    if (evidence.result.kind === 'succeeded' && evidence.businessResultRef && evidence.observedAt) {
+    const reported = evidence.receipts.find(receipt => receipt.phaseId === evidence.starts[evidence.starts.length - 1]?.id);
+    // Later Core visibility does not invalidate the durable unknown observation being recorded.
+    if (command.reason === 'result_unknown' && step.status === 'RUNNING'
+      && reported?.id === command.evidenceId && reported.kind === 'unknown' && evidence.result.kind === 'succeeded') {
+      outcome = unknown;
+    } else if (evidence.result.kind === 'succeeded' && evidence.businessResultRef && evidence.observedAt) {
       if (command.reason !== (step.status === 'UNKNOWN' ? 'reconciled_committed' : 'result_observed')) throw denied();
       outcome = { status: 'succeeded', effect: 'committed', facts: [{ scope: context.scope, resourceType: this.confirmationTool === 'rental.order.commit' ? 'order' : 'configuration', resourceId: evidence.businessResultRef,
         observedAt: evidence.observedAt, basis: { kind: 'current' } }] };
-    } else if (evidence.result.kind === 'failed' && evidence.result.errorCode === 'AI_BUSINESS_REJECTED') {
+    } else if (evidence.result.kind === 'failed' && ['AI_BUSINESS_REJECTED', 'AI_CANCELLED'].includes(evidence.result.errorCode)) {
       if (command.reason !== (step.status === 'UNKNOWN' ? 'reconciled_not_committed' : 'result_observed')) throw denied();
-      outcome = { status: 'failed', effect: 'none', error: { code: 'AI_BUSINESS_REJECTED', message: '原提案已由人工拒绝，未提交业务变更。',
+      const cancelled = evidence.result.errorCode === 'AI_CANCELLED';
+      if (cancelled && (task.status !== 'CANCEL_REQUESTED' || task.cancelRequestedAt === null || evidence.consumption
+        || evidence.starts.length !== 1 || reported?.kind !== 'confirmation')) throw denied();
+      outcome = { status: 'failed', effect: 'none', error: { code: 'AI_BUSINESS_REJECTED',
+        message: cancelled ? '原任务已请求取消，原确认阶段证明尚未提交业务变更。' : '原提案已由人工拒绝，未提交业务变更。',
         retryable: false, nextAction: 'manual', missingFields: [] } };
     } else {
       if (evidence.result.kind !== 'unknown' || step.status !== 'RUNNING' || command.reason !== 'result_unknown') throw unavailable();

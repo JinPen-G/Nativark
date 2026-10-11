@@ -13,7 +13,8 @@ import { createAiTaskRunnerOutcomePort } from './ai-task-runner-outcome-adapter'
 import { PrismaTaskOrderStepAuthority } from './prisma-task-order-step.authority';
 import { PrismaTaskExecutionScopeAuthority } from './prisma-task-execution-scope.authority';
 import { PrismaTaskConfirmationCheckpointSource } from './prisma-task-confirmation-checkpoint.source';
-import { aiTaskRunnerLimitsSchema, PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
+import { aiTaskRunnerLimitsSchema, aiTaskRunPlanSchema, PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
 import type { AiTaskHeldPreparation } from './ai-task-runner.service';
 import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repository-adapter';
@@ -59,6 +60,22 @@ export function composeTaskOrderHost(input: TaskOrderHostDependencies) {
     if (!order || typeof order !== 'object' || Array.isArray(order)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     await orders.source.publishOrderInput({ taskId: task.taskId, registrationRef: task.registrationRef,
       expectedTaskRevision: taskRevision, lease, input: structuredClone(order) });
+    if (input.selectedOrder) {
+      if (requestFingerprint(await input.selectedOrder.read()) !== requestFingerprint(order)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const access = await authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
+      const owner = await input.db.aiTask.findFirst({ where: access.where });
+      if (!owner) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const saved = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: {
+        scopeId: owner.scopeId, taskId: task.taskId, runId: task.runId } } });
+      if (saved) {
+        const plan = aiTaskRunPlanSchema.parse(saved.payload);
+        if (plan.taskId !== task.taskId || plan.runId !== task.runId || requestFingerprint(plan) !== saved.planHash
+          || plan.steps.length !== 1 || plan.steps[0].registrationRef !== task.registrationRef
+          || plan.steps[0].toolCode !== 'rental.order.commit' || plan.steps[0].toolVersion !== AI_TOOL_DRAFT_VERSION
+          || plan.steps[0].operation !== 'idempotent') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return;
+      }
+    }
     if (signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     await orders.plans.savePlan({ taskId: task.taskId, runId: task.runId, taskRevision,
       steps: [{ registrationRef: task.registrationRef, operation: 'idempotent', toolCode: 'rental.order.commit', toolVersion: AI_TOOL_DRAFT_VERSION }],

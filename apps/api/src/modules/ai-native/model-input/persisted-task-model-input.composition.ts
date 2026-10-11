@@ -2,7 +2,7 @@ import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';
 import { AiStepRegistrationRepository } from '../ai-step-registration.repository';
-import { PrismaTaskPlanInputSource } from '../runner/prisma-task-plan-input.source';
+import { PrismaTaskPlanInputSource, type PersistedTaskInputTool } from '../runner/prisma-task-plan-input.source';
 import { PrismaTaskPlanPolicyRepository } from '../runner/prisma-task-plan-policy.repository';
 import { PrismaTaskExecutionScopeAuthority } from '../runner/prisma-task-execution-scope.authority';
 import { PrismaTaskRunEvidenceRepository } from '../runner/prisma-task-run-evidence.repository';
@@ -10,7 +10,7 @@ import { PrismaTaskGatewayInvocationPreparation } from '../runner/prisma-task-ga
 import { PrismaGatewayInvocationBindings } from '../budget/prisma-gateway-invocation-bindings';
 import type { PublicGatewayRuntime } from '../public-ai-gateway.service';
 import type { GatewayTextIntentBinding } from '../gateway-intent';
-import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL } from './task-model-input';
+import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, type TaskModelKind } from './task-model-input';
 import { TaskModelGatewayInputSource } from './task-model-gateway-input.source';
 import { PrismaModelStepEvidenceAuthority } from './prisma-model-step-evidence.authority';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
@@ -24,15 +24,17 @@ export function composePersistedTaskModelInput(input: PersistedTaskAuthorization
   priceVersion: string;
   runtime: PublicGatewayRuntime;
   /** Server-selected tool policy; never an Agent-controlled feature switch. */
-  kind?: 'image';
+  kind?: TaskModelKind;
+  /** Explicit server scene assembly; policy management still requires its Guard and CAS. */
+  planTools?: readonly PersistedTaskInputTool[];
 }) {
   if (input.scene.code !== input.gatewayScene.sceneCode) throw new Error('Model scene binding mismatch');
   const clock = input.clock ?? (() => new Date());
-  const tool = input.kind === 'image' ? TASK_IMAGE_MODEL_TOOL : TASK_TEXT_MODEL_TOOL;
+  const tool = input.kind === 'image' ? TASK_IMAGE_MODEL_TOOL : input.kind === 'audio' ? TASK_AUDIO_MODEL_TOOL : TASK_TEXT_MODEL_TOOL;
   const modelPolicy = { sceneCode: input.gatewayScene.sceneCode, maxOutputTokens: input.gatewayScene.maxOutputTokens,
-    ...(input.kind === 'image' ? { kind: 'image' as const } : {}) };
+    ...(input.kind ? { kind: input.kind } : {}) };
   const authorization = composePersistedTaskAuthorization(input);
-  const policy = new PrismaTaskPlanPolicyRepository(input.db, { ...input, tool }, clock);
+  const policy = new PrismaTaskPlanPolicyRepository(input.db, { ...input, tool, tools: input.planTools }, clock);
   const source = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, clock,
     tool, undefined, modelPolicy);
   const scopes = new PrismaTaskExecutionScopeAuthority(authorization.tasks, input.db);

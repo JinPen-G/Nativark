@@ -13,12 +13,14 @@ const { AI_SCENE_REQUEST_DRAFT_VERSION } = require('../../../packages/shared/src
 const { AI_QUOTE_SELECTION_DRAFT_VERSION } = require('../../../packages/shared/src/ai-quote-selection-draft');
 const { AI_TOOL_DRAFT_VERSION, AI_PROPOSAL_DRAFT_VERSION } = require('./local-shared.cjs');
 
-exports.selectedOrderHarness = async () => {
+exports.selectedOrderHarness = async ({ initializeOnly = false } = {}) => {
   const h = await persistedApprovedOrderHarness(), { state } = h;
   state.user.permissions.push('system:params:manage');
   for (const table of ['aiTask', 'aiRun', 'aiStep', 'aiProposal', 'aiProposalVersion', 'aiProposalAction', 'aiApproval',
     'aiApprovalConsumption', 'aiApprovedOrderSnapshot', 'aiTaskOriginalRequest', 'aiTaskQuoteSelection', 'aiTaskActionInput',
-    'aiTaskPlanPolicy', 'aiTaskRunPlan', 'aiTaskEvent', 'aiTaskResultArtifact', 'aiTaskActionPolicy', 'aiApprovalReprepare']) state.records[table] = [];
+    'aiTaskPlanPolicy', 'aiTaskRunPlan', 'aiTaskEvent', 'aiTaskResultArtifact', 'aiTaskActionPolicy', 'aiApprovalReprepare',
+    'aiTaskExecutionBudget', 'aiTaskExecutionCharge', 'aiTaskExecutionPhaseStart', 'aiTaskExecutionPhaseReceipt',
+    'aiTaskInputRequest', 'aiTaskInputReceipt']) state.records[table] = [];
   for (const row of state.records.aiBudgetPolicy) {
     row.sceneCode = 'quote_clarification'; row.settingsJson.sceneCode = 'quote_clarification'; row.settingsJson.allowedScenes = ['quote_clarification'];
   }
@@ -28,7 +30,8 @@ exports.selectedOrderHarness = async () => {
   function client(records) {
     const rows = name => (records ?? state.records)[name];
     const related = (name, row) => !row ? row : name === 'aiTask' ? { ...row, runs: rows('aiRun').filter(r => r.taskId === row.id)
-      .map(run => ({ ...run, executionPlan: rows('aiTaskRunPlan').find(p => p.runId === run.id) ?? null })) }
+      .map(run => ({ ...run, steps: rows('aiStep').filter(step => step.runId === run.id),
+        executionPlan: rows('aiTaskRunPlan').find(p => p.runId === run.id) ?? null })) }
       : name === 'aiRun' ? { ...row, task: related('aiTask', rows('aiTask').find(task => task.id === row.taskId)) }
       : name === 'aiProposalAction' ? { ...row, step: rows('aiStep').find(s => s.actionId === row.actionId && s.scopeId === row.scopeId) }
       : name === 'aiProposal' ? { ...row, currentVersion: rows('aiProposalVersion').find(v => v.proposalId === row.id && v.revision === row.currentRevision) ?? null } : row;
@@ -56,9 +59,11 @@ exports.selectedOrderHarness = async () => {
         return found.slice(0, args.take).map(r => project(related(model, r), args.select));
       },
       create: async args => {
-        const row = { revision: 1, createdAt: h.dependencies.clock(), ...clone(args.data) };
+        const row = { ...(model.startsWith('aiTaskExecutionPhase') ? {} : { revision: 1, createdAt: h.dependencies.clock(), updatedAt: h.dependencies.clock() }), ...clone(args.data) };
         if (model === 'aiTask') Object.assign(row, { scope: clone(rows('aiScope').find(s => s.id === row.scopeId)), archivedAt: null, cancelRequestedAt: null, resultRef: null });
         if (model === 'aiRun') Object.assign(row, { leaseOwnerId: null, leaseExpiresAt: null });
+        if (model === 'aiTaskExecutionBudget') for (const prefix of ['reserved', 'consumed']) for (const resource of ['Steps', 'Calls', 'ActiveMs', 'OutputBytes']) row[`${prefix}${resource}`] ??= 0n;
+        if (model === 'aiTaskExecutionCharge') Object.assign(row, { gatewayInvocationId: null, actualAmount: null, evidenceRef: null, outcomeFingerprint: null, ...row });
         if (model === 'rentalOrderIdempotencyRecord') Object.assign(row, { id: 'idempotency-a', status: 'succeeded' });
         if (model === 'aiApprovalConsumption') assert.equal(rows(model).some(r => r.scopeId === row.scopeId && r.taskId === row.taskId && r.actionId === row.actionId), false);
         rows(model).push(row); return project(related(model, row), args.select);
@@ -67,14 +72,20 @@ exports.selectedOrderHarness = async () => {
         let count = 0;
         for (const row of rows(model)) if (matches(related(model, row), args.where)) {
           count++;
-          for (const [key, value] of Object.entries(args.data)) row[key] = value && typeof value === 'object' && 'increment' in value
-            ? row[key] instanceof Prisma.Decimal ? row[key].add(value.increment) : row[key] + value.increment : clone(value);
+          for (const [key, value] of Object.entries(args.data)) {
+            if (value && typeof value === 'object' && 'increment' in value) row[key] = row[key] instanceof Prisma.Decimal ? row[key].add(value.increment) : row[key] + value.increment;
+            else if (value && typeof value === 'object' && 'decrement' in value) row[key] = row[key] instanceof Prisma.Decimal ? row[key].sub(value.decrement) : row[key] - value.decrement;
+            else row[key] = clone(value);
+          }
         }
         return { count };
       },
       upsert: async args => {
-        const row = rows(model).find(r => matches(r, args.where));
-        if (!row) throw Error('fixture has only the declared scopes'); return clone(row);
+        const where = Object.keys(args.where).length === 1 && Object.keys(args.where)[0].includes('_') ? Object.values(args.where)[0] : args.where;
+        const row = rows(model).find(r => matches(r, where));
+        if (!row) return db[model].create({ data: args.create, select: args.select });
+        await db[model].updateMany({ where, data: args.update });
+        return project(related(model, row), args.select);
       }
     };
     return db;
@@ -122,6 +133,12 @@ exports.selectedOrderHarness = async () => {
     taskId: task.taskId, runId: task.runId, selectionKey: 'human-choice', expectedSelectionRevision: 0, order: h.body });
   const selection = { draftVersion: AI_QUOTE_SELECTION_DRAFT_VERSION, originalInputRef: original.inputRef,
     taskId: task.taskId, runId: task.runId, selectionId: selected.receipt.selectionId, inputHash: selected.receipt.inputHash };
+  if (initializeOnly) {
+    for (const operation of ['claim_run', 'claim_recovery_run', 'release_run', 'read_step_terminal', 'read_events']) state.records.aiTaskActionPolicy.push({
+      scopeId: 'scope-a', taskId: task.taskId, operation, revision: 1, expiresAt: new Date('2099-01-01'),
+      requiredPermissions: ['rental-os:order:create'] });
+    return { ...h, app, compose, selection, selected, originals, sceneDependencies: { ...dependencies, originals }, limits };
+  }
   // Lease and step-start are explicit runner preconditions; no approval or order is fabricated for this application test.
   Object.assign(state.records.aiTask[0], { status: 'RUNNING' });
   Object.assign(state.records.aiRun[0], { status: 'RUNNING', leaseOwnerId: 'worker-a', fencingToken: new Prisma.Decimal('1'), leaseExpiresAt: new Date(Date.now() + 120000) });

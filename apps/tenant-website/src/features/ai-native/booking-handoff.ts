@@ -1,13 +1,45 @@
-import type { AiBookingHandoff } from '../../../../../packages/shared/src/ai-booking-draft';
+import type { AiBookingHandoff, AiBookingSubmissionAcceptance, AiBookingSubmissionDecision, AiBookingSubmissionReceipt } from '../../../../../packages/shared/src/ai-booking-draft';
+import type { RentalQuoteSnapshotV1 } from '../../../../../packages/shared/src';
+
+export type OriginalBookingQuoteFacts = Pick<RentalQuoteSnapshotV1,
+  'payableAmount' | 'depositAmount' | 'preAuthAmount' | 'currency' | 'ruleVersion' | 'pricingPlanVersion'>;
+
+/** Original GET quote only, returning a minimal display whitelist, not a new quote. */
+export async function readOriginalBookingQuote(handoff: AiBookingHandoff, customerId: unknown,
+  read: (quoteId: string) => Promise<unknown>, clock: () => number = Date.now): Promise<OriginalBookingQuoteFacts | null> {
+  const source = structuredClone(handoff);
+  try {
+    const quote = structuredClone(await read(source.fields.quoteId)) as RentalQuoteSnapshotV1;
+    const fields = source.fields, request = quote.request;
+    if (!customerId || JSON.stringify(quote).length > 65536 || quote.id !== fields.quoteId || quote.tenantId !== source.scope.tenantId || !request
+      || request.customerId !== customerId || request.customerType !== 'personal' || request.bookingIdentity?.bookingIdentity === 'enterprise_employee'
+      || request.startAt !== fields.startAt || request.endAt !== fields.endAt
+      || request.fulfillmentMode !== fields.fulfillmentMode || request.fulfillmentLocationId !== fields.fulfillmentLocationId
+      || request.returnLocationId !== fields.returnLocationId || request.deliveryAddressId !== fields.deliveryAddressId
+      || JSON.stringify(request.lines.map(line => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }))) !== JSON.stringify(fields.lines)
+      || !Number.isFinite(Date.parse(quote.expiresAt)) || Date.parse(quote.expiresAt) <= clock()
+      || ![quote.payableAmount, quote.depositAmount, quote.preAuthAmount].every(amount => Number.isFinite(amount) && amount >= 0)
+      || typeof quote.currency !== 'string' || !/^[A-Z]{3}$/u.test(quote.currency)) return null;
+    const version = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(value);
+    if (!version(quote.ruleVersion) || !version(quote.pricingPlanVersion)) return null;
+    return { payableAmount: quote.payableAmount, depositAmount: quote.depositAmount, preAuthAmount: quote.preAuthAmount,
+      currency: quote.currency, ruleVersion: quote.ruleVersion, pricingPlanVersion: quote.pricingPlanVersion };
+  } catch { return null; }
+}
 
 export interface BookingHandoffHost {
   enabled: boolean;
   capability: { tenantCode: string; workspaceCode: string; customerId: string; tenantId: string; workspaceId: string; releaseRevision: string };
   handoffRef: string;
   readBookingHandoff: (input: { handoffRef: string }) => Promise<AiBookingHandoff>;
+  acceptBookingSubmission?: (input: { handoffRef: string }) => Promise<AiBookingSubmissionAcceptance>;
+  submitAcceptedBooking?: (input: AiBookingSubmissionDecision) => Promise<AiBookingSubmissionReceipt>;
+  readBookingSubmission?: (input: { acceptanceRef: string }) => Promise<AiBookingSubmissionReceipt>;
 }
 export interface BookingPageContext { tenantCode: string | null; workspaceCode?: string; customerId?: string; authenticated: boolean; productId: string }
-export type BookingHandoffState = { status: 'disabled' | 'loading' | 'available' | 'continued' | 'unavailable'; handoff: AiBookingHandoff | null };
+export type BookingHandoffState = { status: 'disabled' | 'loading' | 'available' | 'continued' | 'unavailable'
+  | 'accepting' | 'accepted' | 'submitting' | 'checking' | 'pending_reconcile' | 'order_observed';
+  handoff: AiBookingHandoff | null; receipt?: AiBookingSubmissionReceipt | null };
 
 /** Instance-owned consumer. The host must bind the port to the current request;
  * page context is isolation input, never a server authorization credential. */
@@ -17,6 +49,7 @@ export function createBookingHandoffConsumer(host: BookingHandoffHost | null, co
   host = host ? { ...host, capability: { ...host.capability } } : null;
   context = { ...context };
   let generation = 0, destroyed = false, pending = false;
+  let paused = false, attempted = false, acceptance: AiBookingSubmissionAcceptance | undefined;
   let state: BookingHandoffState = { status: 'disabled', handoff: null };
   const emit = (next: BookingHandoffState) => { state = next; if (!destroyed) publish(next); };
   const enabled = () => Boolean(host?.enabled === true && typeof host.readBookingHandoff === 'function'
@@ -61,7 +94,8 @@ export function createBookingHandoffConsumer(host: BookingHandoffHost | null, co
         lines: [{ itemGroupId: fields.lines[0].itemGroupId, quantity: fields.lines[0].quantity }] } };
   };
   const read = async (continuing: boolean) => {
-    if (destroyed || pending) return null;
+    if (destroyed || paused || pending) return null;
+    if (attempted) { emit({ status: 'pending_reconcile', handoff: null }); return null; }
     if (!enabled()) { emit({ status: 'disabled', handoff: null }); return null; }
     const before = state.handoff, epoch = ++generation; pending = true;
     emit({ status: 'loading', handoff: null });
@@ -74,8 +108,58 @@ export function createBookingHandoffConsumer(host: BookingHandoffHost | null, co
     } catch { if (!destroyed && epoch === generation) emit({ status: 'unavailable', handoff: null }); return null; }
     finally { if (epoch === generation) pending = false; }
   };
-  return { read: () => read(false), continue: () => read(true),
-    mount() { generation++; destroyed = false; pending = false; state = { status: 'disabled', handoff: null }; },
+  const submissionsAvailable = () => enabled() && [host?.acceptBookingSubmission, host?.submitAcceptedBooking, host?.readBookingSubmission]
+    .every(method => typeof method === 'function');
+  const accept = (value: AiBookingSubmissionAcceptance) => {
+    const copy = structuredClone(value);
+    if (!host || !copy || JSON.stringify(copy).length > 4096 || copy.execution !== 'not_attested'
+      || copy.handoffRef !== host.handoffRef || copy.selectionRevision !== 1
+      || !/^[a-f0-9-]{36}$/iu.test(copy.acceptanceRef) || !/^[a-f0-9]{64}$/u.test(copy.inputFingerprint)
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(copy.operationKey)
+      || (state.handoff && (copy.bookingDraftId !== state.handoff.bookingDraftId || copy.quoteId !== state.handoff.fields.quoteId))) throw Error('acceptance_unavailable');
+    return { acceptanceRef: copy.acceptanceRef, handoffRef: copy.handoffRef, bookingDraftId: copy.bookingDraftId,
+      selectionRevision: copy.selectionRevision, inputFingerprint: copy.inputFingerprint, quoteId: copy.quoteId,
+      operationKey: copy.operationKey, execution: 'not_attested' as const };
+  };
+  const result = (value: AiBookingSubmissionReceipt): AiBookingSubmissionReceipt => {
+    const copy = structuredClone(value);
+    if (!acceptance || copy.operationKey !== acceptance.operationKey || copy.retryable !== false
+      || copy.payment !== 'not_inferred' || copy.fulfillment !== 'not_inferred'
+      || !['observed', 'unknown', 'not_observed'].includes(copy.state)
+      || (copy.state === 'observed' ? typeof copy.orderId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(copy.orderId) : copy.orderId !== null)) throw Error('receipt_unavailable');
+    return { state: copy.state, orderId: copy.orderId, operationKey: copy.operationKey, retryable: false,
+      payment: 'not_inferred', fulfillment: 'not_inferred' } as AiBookingSubmissionReceipt;
+  };
+  const action = async (kind: 'accept' | 'submit' | 'reconcile') => {
+    if (destroyed || paused || pending || !submissionsAvailable()) return;
+    if ((kind === 'accept' && (attempted || state.status !== 'continued'))
+      || (kind === 'submit' && (attempted || !acceptance || state.status !== 'accepted'))) return;
+    const epoch = ++generation; pending = true;
+    if (kind === 'reconcile') attempted = true;
+    emit({ ...state, status: kind === 'accept' ? 'accepting' : kind === 'submit' ? 'submitting' : 'checking', receipt: null });
+    const current = () => !destroyed && !paused && epoch === generation;
+    try {
+      if (kind === 'accept' || !acceptance) {
+        const original = accept(await host!.acceptBookingSubmission!({ handoffRef: host!.handoffRef }));
+        if (!current()) return;
+        acceptance = original;
+      }
+      if (!current()) return;
+      if (kind === 'accept') { emit({ ...state, status: 'accepted' }); return; }
+      const original = acceptance!;
+      if (kind === 'submit') attempted = true;
+      const receipt = result(kind === 'submit'
+        ? await host!.submitAcceptedBooking!({ acceptanceRef: original.acceptanceRef, decision: 'submit_original_booking' })
+        : await host!.readBookingSubmission!({ acceptanceRef: original.acceptanceRef }));
+      if (current()) emit({ ...state, status: receipt.state === 'observed' ? 'order_observed' : 'pending_reconcile', receipt });
+    } catch { if (current()) emit({ status: kind === 'accept' ? 'unavailable' : 'pending_reconcile', handoff: null, receipt: null }); }
+    finally { if (epoch === generation) pending = false; }
+  };
+  return { read: () => read(false), continue: () => read(true), submissionsAvailable,
+    accept: () => action('accept'), submit: () => action('submit'), reconcile: () => action('reconcile'),
+    pause() { generation++; pending = false; paused = true; emit({ status: attempted ? 'pending_reconcile' : 'disabled', handoff: null }); },
+    resume() { paused = false; },
+    mount() { generation++; destroyed = false; paused = false; pending = false; state = { status: 'disabled', handoff: null }; },
     invalidate() { generation++; pending = false; emit({ status: 'unavailable', handoff: null }); },
     destroy() { generation++; destroyed = true; pending = false; state = { status: 'disabled', handoff: null }; } };
 }

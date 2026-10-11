@@ -8,7 +8,7 @@ import type { AiTaskEventRepository } from './ai-task-event.repository';
 import { originalIdentityHash } from './task-request/original-request.authority';
 import { AI_QUOTE_SELECTION_DRAFT_VERSION } from '../../../../../packages/shared/src/ai-quote-selection-draft';
 import type { PrismaQuoteSelectionRepository } from './task-request/prisma-quote-selection.repository';
-import type { composeHumanQuoteOrder } from './scenes/human-quote-order.composition';
+import type { composeHumanQuoteOrder, composeSelectedQuoteTaskApplication } from './scenes/human-quote-order.composition';
 import { parseQuoteSelectionProof } from './task-request/quote-selection.validation';
 import type { composeAiSettingsBusinessConsumer } from './scenes/settings-business-consumer.composition';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
@@ -43,7 +43,7 @@ export function composeAiTaskCenterScene(input: {
   input?: { read(value: unknown): Promise<unknown> };
   selections?: Pick<PrismaQuoteSelectionRepository, 'read'>;
   approvals?: Pick<ReturnType<typeof composeHumanQuoteOrder>, 'readSelectedProposal' | 'readSelectedDecisionReceipt'>;
-  orders?: Pick<ReturnType<typeof composeHumanQuoteOrder>, 'readSelectedOrderResult'>;
+  orders?: Pick<ReturnType<typeof composeSelectedQuoteTaskApplication>, 'readResult'>;
   scenes: Pick<OriginalScenes, 'readTaskReceipt' | 'readRecovery'> & {
     requests: Pick<OriginalScenes['requests'], 'readHistorical'>;
   };
@@ -101,7 +101,8 @@ export function composeAiTaskCenterScene(input: {
       const result = await input.selections.read({ draftVersion: AI_QUOTE_SELECTION_DRAFT_VERSION,
         originalInputRef: parsed.data.original.inputRef, selectionId: parsed.data.selectionId });
       const selection = z.object({ taskId: z.string().min(1).max(191), runId: z.string().min(1).max(191) }).passthrough().parse(result);
-      if (selection.taskId !== task.taskId || selection.runId !== task.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      if (selection.taskId !== task.taskId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      // The formal selection reader validates consumed-input ancestry and current access.
       await assertStillCurrent(parsed.data.original, task);
       return freezeOriginalInput({ taskId: task.taskId, selection });
     },
@@ -110,7 +111,7 @@ export function composeAiTaskCenterScene(input: {
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       if (typeof input.approvals?.readSelectedProposal !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       const task = await readObservedTask(parsed.data.original, parsed.data.taskId);
-      assertSelectedTask(parsed.data.reference, parsed.data.original, task);
+      await assertSelectedTask(parsed.data.reference, parsed.data.original, task);
       const review = await input.approvals.readSelectedProposal(parsed.data.reference);
       await assertStillCurrent(parsed.data.original, task);
       return freezeOriginalInput({ taskId: task.taskId,
@@ -122,7 +123,7 @@ export function composeAiTaskCenterScene(input: {
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       if (typeof input.approvals?.readSelectedDecisionReceipt !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       const task = await readObservedTask(parsed.data.original, parsed.data.taskId);
-      assertSelectedTask(parsed.data.reference, parsed.data.original, task);
+      await assertSelectedTask(parsed.data.reference, parsed.data.original, task);
       const receipt = await input.approvals.readSelectedDecisionReceipt(parsed.data.reference);
       await assertStillCurrent(parsed.data.original, task);
       return freezeOriginalInput({ taskId: task.taskId,
@@ -132,14 +133,14 @@ export function composeAiTaskCenterScene(input: {
     readOrderResult: async (value: unknown) => {
       const parsed = approvalRead.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      if (typeof input.orders?.readSelectedOrderResult !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-      const reference = z.object({ selection: z.unknown(), command: z.unknown() }).strict().safeParse(parsed.data.reference);
+      if (typeof input.orders?.readResult !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const reference = z.object({ selection: z.unknown() }).strict().safeParse(parsed.data.reference);
       if (!reference.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const task = await readObservedTask(parsed.data.original, parsed.data.taskId);
-      assertSelectedProof(reference.data.selection, parsed.data.original, task);
-      const result = await input.orders.readSelectedOrderResult(reference.data);
+      const selected = await assertSelectedProof(reference.data.selection, parsed.data.original, task);
+      const result = await input.orders.readResult(reference.data);
       await assertStillCurrent(parsed.data.original, task);
-      return freezeOriginalInput({ taskId: task.taskId, runId: task.runId, result,
+      return freezeOriginalInput({ taskId: task.taskId, runId: selected.runId, result,
         execution: 'read_only_no_start_no_reconnect_side_effect' as const });
     },
     reopenModelSource: async (value: unknown) => {
@@ -207,14 +208,27 @@ export function composeAiTaskCenterScene(input: {
           consistency: 'independent_authorized_reads' as const, execution: 'read_only_no_start_no_reconnect_side_effect' as const });
       }
       const current = await readObservedTask(command.original, command.taskId);
-      // A successor run is accepted only through the existing result reader's
-      // consumed-input provenance. A snapshot's run ID alone is not a grant.
-      if (current.runId !== command.runId && !command.resultId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      // Successors require consumed-input provenance from the formal model-result
+      // or selection reader. A snapshot's run ID alone is never a grant.
+      const businessReferences = [command.review, command.decision, command.order].filter(value => value !== undefined);
+      if (current.runId !== command.runId && !command.resultId && !businessReferences.length)
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      // Every requested business reference must describe this aggregate's run,
+      // including when the caller names the root run alongside successor data.
+      for (const value of businessReferences) {
+        const nested = z.object({ selection: z.unknown() }).passthrough().safeParse(value);
+        if (!nested.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const selected = await assertSelectedProof(nested.data.selection, command.original, current);
+        if (selected.runId !== command.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      }
       const task = await readers.readTask(command.original);
       const snapshot = await readSnapshot(current.taskId, current.revision);
       const original = await input.scenes.requests.readHistorical(command.original);
       const originalInput = { receipt: original.receipt, request: original.request };
-      const pendingInput = typeof input.input?.read === 'function'
+      // Explicit business reads must not force this run through the model-only
+      // clarification reader. It has a different frozen plan/input provenance.
+      const businessOnly = !command.resultId && (command.review !== undefined || command.decision !== undefined || command.order !== undefined);
+      const pendingInput = businessOnly ? { availability: 'not_requested' as const } : typeof input.input?.read === 'function'
         ? await readers.readInput({ original: command.original, taskId: current.taskId }) : { availability: 'unavailable' as const };
       const model = command.resultId ? await readers.readModelResult({ original: command.original, resultId: command.resultId })
         : { availability: 'not_requested' as const };
@@ -264,14 +278,22 @@ export function composeAiTaskCenterScene(input: {
       || latest.identityHash !== expected.identityHash || latest.contentHash !== expected.contentHash)
       throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
   }
-  function assertSelectedTask(value: unknown, original: z.infer<typeof originalRequestReferenceSchema>, task: { taskId: string; runId: string }) {
+  async function assertSelectedTask(value: unknown, original: z.infer<typeof originalRequestReferenceSchema>, task: { taskId: string; runId: string }) {
     const nested = z.object({ selection: z.unknown(), proposal: z.unknown() }).strict().safeParse(value);
     if (!nested.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-    assertSelectedProof(nested.data.selection, original, task);
+    return assertSelectedProof(nested.data.selection, original, task);
   }
-  function assertSelectedProof(value: unknown, original: z.infer<typeof originalRequestReferenceSchema>, task: { taskId: string; runId: string }) {
+  async function assertSelectedProof(value: unknown, original: z.infer<typeof originalRequestReferenceSchema>, task: { taskId: string; runId: string }) {
     const selection = parseQuoteSelectionProof(value);
-    if (selection.originalInputRef !== original.inputRef || selection.taskId !== task.taskId || selection.runId !== task.runId)
+    if (selection.originalInputRef !== original.inputRef || selection.taskId !== task.taskId)
       throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    if (selection.runId !== task.runId) {
+      if (typeof input.selections?.read !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const current = await input.selections.read({ draftVersion: selection.draftVersion,
+        originalInputRef: selection.originalInputRef, selectionId: selection.selectionId });
+      if (current.taskId !== selection.taskId || current.runId !== selection.runId || current.inputHash !== selection.inputHash)
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    }
+    return selection;
   }
 }

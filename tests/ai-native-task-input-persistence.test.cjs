@@ -16,7 +16,7 @@ async function setup() {
   h.control.invalidAnswers = false;
   h.source = {
     resolve: async b => b.registrationRef === 'clarify'
-      ? { kind: 'required', contract: structuredClone(contract), inputRef: b.inputRef, inputHash: b.inputHash, expiresAt: '2026-10-06T18:00:00Z' }
+      ? { kind: 'required', contract: structuredClone(h.control.contract ?? contract), inputRef: b.inputRef, inputHash: b.inputHash, expiresAt: '2026-10-06T18:00:00Z' }
       : { kind: 'not_required' },
     validateAnswers: async b => ({ disposition: h.control.invalidAnswers ? 'plan_changed' : 'context_only', planHash: b.planHash, inputRef: b.inputRef, inputHash: b.inputHash })
   };
@@ -56,6 +56,45 @@ test('production runner persists input wait, releases, consumes one receipt, and
   assert.equal(h.state.aiTaskExecutionBudget[0].consumedSteps, 2n);
   assert.equal(h.state.aiTaskExecutionBudget[0].consumedActiveMs, 20n);
   assert.equal(h.state.aiTaskInputReceipt.length, 1);
+});
+
+test('pending question refresh archives the old contract without restarting or resetting resources', async () => {
+  const h = await setup(); await h.run();
+  const prior = h.clone(h.state.aiTaskInputRequest[0]), budget = h.clone(h.state.aiTaskExecutionBudget);
+  const plan = h.clone(h.state.aiTaskRunPlan), runs = h.clone(h.state.aiRun);
+  h.control.contract = { ...structuredClone(contract), version: '2', fields: [
+    { ...contract.fields[0], label: 'Current configuration requires a new answer' }
+  ] };
+  await assert.rejects(h.inputs().readPending('task-a'));
+  const command = { taskId: 'task-a', requestId: prior.id, expectedRevision: prior.revision };
+  const beforeRefresh = h.clone(h.state);
+  h.storeControl.beforeWrite = async name => { if (name === 'aiTaskEvent') throw Error('synthetic archive failure'); };
+  await assert.rejects(h.inputs().refreshPending(command), e => e.code === 'AI_STORAGE_UNAVAILABLE');
+  assert.deepEqual(h.state, beforeRefresh);
+  h.storeControl.beforeWrite = null;
+  const refreshed = await h.inputs().refreshPending(command);
+  assert.equal(refreshed.revision, 2); assert.equal(refreshed.contract.version, '2');
+  assert.equal(h.state.aiTask[0].status, 'WAITING_INPUT');
+  assert.deepEqual(h.state.aiTaskExecutionBudget, budget); assert.deepEqual(h.state.aiTaskRunPlan, plan);
+  assert.deepEqual(h.state.aiRun, runs); assert.deepEqual(h.executions, ['input-clarify']);
+  const event = h.state.aiTaskEvent.at(-1);
+  assert.equal(event.type, 'task.input_refreshed');
+  assert.equal(event.payload.previousRequest.contractHash, prior.contractHash);
+  assert.equal(event.payload.previousRequest.revision, 1);
+  const archivedEvents = h.state.aiTaskEvent;
+  h.state.aiTaskEvent = archivedEvents.filter(row => row.type !== 'task.input_refreshed');
+  await assert.rejects(h.inputs().readPending('task-a'), e => e.code === 'AI_ACCESS_DENIED');
+  h.state.aiTaskEvent = archivedEvents;
+  await assert.rejects(h.submit(), e => e.code === 'AI_REVISION_CONFLICT');
+  await assert.rejects(h.inputs().refreshPending(command), e => e.code === 'AI_REVISION_CONFLICT');
+  assert.equal((await h.inputs().readPending('task-a')).revision, 2);
+  const events = h.state.aiTaskEvent.length;
+  assert.equal((await h.inputs().refreshPending({ ...command, expectedRevision: 2 })).revision, 2);
+  assert.equal(h.state.aiTaskEvent.length, events);
+  const answer = await h.submit({ expectedRevision: 2 });
+  assert.equal(answer.status, 'input_received');
+  assert.equal((await h.submit({ expectedRevision: 2 })).receiptId, answer.receiptId);
+  assert.deepEqual(h.state.aiTaskExecutionBudget, budget);
 });
 
 for (const [name, patch] of [

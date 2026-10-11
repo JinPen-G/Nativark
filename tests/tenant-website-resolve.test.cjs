@@ -9,7 +9,7 @@ const modUrl = pathToFileURL(path.join(__dirname, '..', 'apps/tenant-website/src
 
 test('原预约交接：默认零读取、人工继续复验、上下文/卸载隔离且不创建报价', async () => {
   const url = pathToFileURL(path.join(__dirname, '..', 'apps/tenant-website/src/features/ai-native/booking-handoff.ts')).href;
-  const { createBookingHandoffConsumer, handoffLocalInput } = await import(url);
+  const { createBookingHandoffConsumer, handoffLocalInput, readOriginalBookingQuote } = await import(url);
   const value = {
     contractVersion: 'ain-booking-draft-1', handoffRef: 'synthetic-ref', bookingDraftId: 'synthetic-draft', revision: 1,
     audience: 'customer', surface: 'tenant_website', scope: { kind: 'workspace', tenantId: 't', workspaceId: 'w' },
@@ -44,6 +44,43 @@ test('原预约交接：默认零读取、人工继续复验、上下文/卸载�
   assert.equal(await failing.read(), null); assert.deepEqual(states.at(-1), { status: 'unavailable', handoff: null });
   const expired = createBookingHandoffConsumer({ ...host, readBookingHandoff: async () => ({ ...value, expiresAt: '2020-01-01T00:00:00Z' }) }, context, s => states.push(s), clock);
   assert.equal(await expired.read(), null); assert.equal(states.at(-1).handoff, null);
+  value.revision = 1;
+  const accepted = { acceptanceRef: '11111111-1111-4111-8111-111111111111', handoffRef: value.handoffRef,
+    bookingDraftId: value.bookingDraftId, selectionRevision: 1, inputFingerprint: 'a'.repeat(64), quoteId: value.fields.quoteId,
+    operationKey: 'booking-order:original', execution: 'not_attested' };
+  const receipt = { state: 'observed', orderId: 'original-order', operationKey: accepted.operationKey,
+    retryable: false, payment: 'not_inferred', fulfillment: 'not_inferred' };
+  let submits = 0, receipts = 0, finish;
+  const submitting = createBookingHandoffConsumer({ ...host,
+    acceptBookingSubmission: async () => accepted,
+    submitAcceptedBooking: input => {
+      submits++; assert.equal(input.decision, 'submit_original_booking'); assert.equal(input.acceptanceRef, accepted.acceptanceRef);
+      return new Promise(resolve => { finish = resolve; });
+    }, readBookingSubmission: async input => { receipts++; assert.equal(input.acceptanceRef, accepted.acceptanceRef); return receipt; }
+  }, context, s => states.push(s), clock);
+  await submitting.submit(); assert.equal(submits, 0, 'selection is not explicit submission');
+  await submitting.read(); await submitting.continue(); await submitting.accept(); assert.equal(states.at(-1).status, 'accepted');
+  const sent = submitting.submit(); await submitting.submit(); assert.equal(submits, 1);
+  submitting.pause(); const pausedCount = states.length; finish(receipt); await sent;
+  assert.equal(states.length, pausedCount, 'hidden late result cannot restore old content');
+  submitting.resume(); await submitting.reconcile(); assert.equal(receipts, 1); assert.equal(states.at(-1).status, 'order_observed');
+  await submitting.submit(); assert.equal(submits, 1, 'original receipt recovery never resends');
+  submitting.destroy(); const destroyedCount = states.length; await submitting.reconcile(); assert.equal(states.length, destroyedCount);
+  const absent = createBookingHandoffConsumer({ ...host, acceptBookingSubmission: async () => accepted,
+    submitAcceptedBooking: async () => { throw Error('private detail'); },
+    readBookingSubmission: async () => ({ ...receipt, state: 'not_observed', orderId: null })
+  }, context, s => states.push(s), clock);
+  await absent.read(); await absent.continue(); await absent.accept(); await absent.submit();
+  assert.equal(states.at(-1).status, 'pending_reconcile'); assert.equal(states.at(-1).handoff, null);
+  await absent.reconcile(); assert.equal(states.at(-1).status, 'pending_reconcile'); assert.equal(states.at(-1).receipt.retryable, false);
+  const originalQuote = { id: value.fields.quoteId, tenantId: 't', expiresAt: value.expiresAt,
+    request: { ...value.fields, customerId: 'customer', customerType: 'personal' },
+    payableAmount: 12, depositAmount: 0, preAuthAmount: 0, currency: 'CNY', ruleVersion: 'rules-1', pricingPlanVersion: 'prices-1',
+    internalReview: 'never forwarded' };
+  const quoteFacts = await readOriginalBookingQuote(value, 'customer', async id => { assert.equal(id, originalQuote.id); return originalQuote; }, clock);
+  assert.equal(quoteFacts.payableAmount, 12); assert.equal(quoteFacts.depositAmount, 0); assert.equal(quoteFacts.internalReview, undefined);
+  assert.equal(await readOriginalBookingQuote(value, 'other', async () => originalQuote, clock), null);
+  assert.equal(await readOriginalBookingQuote(value, 'customer', async () => ({ ...originalQuote, expiresAt: '2000-01-01T00:00:00Z' }), clock), null);
 });
 
 test('tenantCodeFromHost：只认配置的基础域名的直接子域，保留字/裸域/客户域名返回 null', async () => {

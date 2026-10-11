@@ -50,16 +50,20 @@ export function composeAiSettingsBusinessConsumer(dependencies?: AiSettingsBusin
       || confirmation.proposal.proposalId !== command.proposalId || confirmation.proposal.proposalRevision !== command.proposalRevision
       || preparation.state !== 'prepared' || confirmation.proposal.reviewedPayloadHash !== preparation.reference.reviewedPayloadHash
       || confirmation.execution !== 'not_attested')) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    // Reconnection need not know an execution key. Resolve it only from the
+    // original persisted task/step binding, never from latest workspace changes.
+    const original = preparation.state === 'prepared'
+      ? await dependencies.settingsHost.settings.readCommittedChange({ taskId: command.taskId,
+        changeId: command.changeId, changeHash: command.changeHash }) : null;
     const operation = parsed.data.operationKey ? await app.readOperation({ draftVersion: AI_APPROVED_SETTINGS_DRAFT_VERSION,
-      operationKey: parsed.data.operationKey }) : null;
+      operationKey: parsed.data.operationKey }) : original
+      ? { draftVersion: AI_APPROVED_SETTINGS_DRAFT_VERSION, state: 'committed' as const, receipt: original } : null;
     if (operation?.state === 'committed' && (operation.receipt.changeId !== command.changeId || operation.receipt.changeHash !== command.changeHash
-      || operation.receipt.operationKey !== parsed.data.operationKey || !review || operation.receipt.baseRevision !== review.change.baseRevision
+      || (parsed.data.operationKey && operation.receipt.operationKey !== parsed.data.operationKey) || !review || operation.receipt.baseRevision !== review.change.baseRevision
       || decision?.state !== 'recorded' || decision.approval.decision !== 'approved')) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     if (operation?.state === 'committed') {
       // Let the original executor resolve the operation from THIS persisted
       // task/step binding. A same-change receipt from another task is not proof.
-      const original = await dependencies.settingsHost.settings.readCommittedChange({ taskId: command.taskId,
-        changeId: command.changeId, changeHash: command.changeHash });
       if (!original || requestFingerprint(original) !== requestFingerprint(operation.receipt)) {
         throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       }
@@ -85,7 +89,8 @@ export function composeAiSettingsBusinessConsumer(dependencies?: AiSettingsBusin
       currentMatchesChangeBase: review ? current.settingsRevision === review.change.baseRevision : null,
       preparation, review, decision, operation, confirmation,
       businessOutcome: operation?.state === 'committed' ? 'committed' as const : step.status === 'unknown' ? 'unknown' as const : 'not_observed' as const,
-      retryable: false as const, originalOperation: parsed.data.operationKey ? 'original_key_read' as const : 'unavailable_original_key_required' as const });
+      retryable: false as const, originalOperation: parsed.data.operationKey ? 'original_key_read' as const
+        : original ? 'persisted_original_binding_read' as const : 'original_result_not_observed' as const });
   };
   return Object.freeze({ availability: dependencies?.settingsHost ? 'available_for_original_settings_task' as const : 'unavailable' as const,
     async read(value: unknown) {

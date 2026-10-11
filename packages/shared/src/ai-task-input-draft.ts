@@ -2,16 +2,16 @@
 export const AI_TASK_INPUT_DRAFT_VERSION = "ain-c04-input-draft-1" as const;
 export type AiTaskInputOperation = "request_input" | "submit_input" | "resume_input";
 export const AI_TASK_INPUT_FIELD_IDS_DRAFT = Object.freeze([
-  "customer_selection", "item_selection", "pickup_location", "return_location",
-  "quantity", "starts_at", "ends_at", "clarification_text"
+  "customer_selection", "item_selection", "pickup_location", "return_location", "fulfillment_selection", "enterprise_selection", "enterprise_payer_selection",
+  "quantity", "usage_quantity", "starts_at", "ends_at", "clarification_text"
 ] as const);
 export type AiTaskInputFieldIdDraft = typeof AI_TASK_INPUT_FIELD_IDS_DRAFT[number];
-type ChoiceId = "customer_selection" | "item_selection" | "pickup_location" | "return_location";
+type ChoiceId = "customer_selection" | "item_selection" | "pickup_location" | "return_location" | "fulfillment_selection" | "enterprise_selection" | "enterprise_payer_selection";
 interface FieldBase { required: boolean; label: string }
 export type AiTaskInputFieldDraft = FieldBase & (
   | { fieldId: ChoiceId; kind: "choice"; options: { value: string; label: string }[] }
   | { fieldId: "quantity"; kind: "integer"; minimum: number; maximum: number }
-  | { fieldId: "starts_at" | "ends_at" | "clarification_text"; kind: "text"; maxLength: number }
+  | { fieldId: "starts_at" | "ends_at" | "usage_quantity" | "clarification_text"; kind: "text"; maxLength: number }
 );
 export interface AiTaskInputContractDraft {
   draftVersion: typeof AI_TASK_INPUT_DRAFT_VERSION;
@@ -45,13 +45,13 @@ export function isAiTaskInputContractDraft(value: unknown): value is AiTaskInput
   return value.fields.every(field => {
     if (!object(field) || !fieldId(field.fieldId) || seen.has(field.fieldId) || typeof field.required !== "boolean" || !text(field.label, 160)) return false;
     seen.add(field.fieldId);
-    if (field.kind === "choice") return ["customer_selection", "item_selection", "pickup_location", "return_location"].includes(field.fieldId)
+    if (field.kind === "choice") return ["customer_selection", "item_selection", "pickup_location", "return_location", "fulfillment_selection", "enterprise_selection", "enterprise_payer_selection"].includes(field.fieldId)
       && closed(field, ["fieldId", "kind", "required", "label", "options"]) && Array.isArray(field.options) && field.options.length > 0 && field.options.length <= 50
       && field.options.every(option => object(option) && closed(option, ["value", "label"]) && id(option.value) && text(option.label, 160))
       && new Set(field.options.map(option => option.value)).size === field.options.length;
     if (field.kind === "integer") return field.fieldId === "quantity" && closed(field, ["fieldId", "kind", "required", "label", "minimum", "maximum"])
       && int(field.minimum, 1, 1000000) && int(field.maximum, field.minimum, 1000000);
-    return field.kind === "text" && ["starts_at", "ends_at", "clarification_text"].includes(field.fieldId)
+    return field.kind === "text" && ["starts_at", "ends_at", "usage_quantity", "clarification_text"].includes(field.fieldId)
       && closed(field, ["fieldId", "kind", "required", "label", "maxLength"]) && int(field.maxLength, 1, 2048);
   });
 }
@@ -64,6 +64,14 @@ export function isAiTaskInputSubmissionDraft(value: unknown): value is AiTaskInp
     && value.answers.every(answer => object(answer) && closed(answer, ["fieldId", "value"]) && fieldId(answer.fieldId)
       && (text(answer.value, 2048) || int(answer.value, 1, 1000000)))
     && new Set(value.answers.map(answer => answer.fieldId)).size === value.answers.length;
+}
+
+/** Canonical input for Core's existing numeric usage DTO, never money. Reject
+ * unrepresentable precision rather than silently round a human's answer. */
+export function parseAiTaskUsageQuantityDraft(value: unknown): number | null {
+  if (typeof value !== 'string' || value.length > 32 || !/^(0|[1-9][0-9]*)(\.[0-9]+)?$/u.test(value)) return null;
+  const quantity = Number(value);
+  return Number.isFinite(quantity) && quantity >= 0 && quantity <= 1000000 && String(quantity) === value ? quantity : null;
 }
 
 /** Shape/range validation only. No resource ownership, plan change, approval or entitlement is granted. */
@@ -79,6 +87,7 @@ export function validateAiTaskInputAnswersDraft(contract: unknown, answers: unkn
     else if (field.kind === "integer") { if (!int(answer.value, field.minimum, field.maximum)) return false; }
     else {
       if (!text(answer.value, field.maxLength)) return false;
+      if (field.fieldId === "usage_quantity" && parseAiTaskUsageQuantityDraft(answer.value) === null) return false;
       // Canonical UTC instants only in v1; timezone/natural-language interpretation belongs to Core input preparation.
       if ((field.fieldId === "starts_at" || field.fieldId === "ends_at") && (!Number.isFinite(Date.parse(answer.value)) || new Date(answer.value).toISOString() !== answer.value)) return false;
     }

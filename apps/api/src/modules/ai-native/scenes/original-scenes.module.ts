@@ -15,7 +15,12 @@ export class AiOriginalScenesModule {
    * current request independently; there is no detached worker or shared actor. */
   static registerHttpModel(dependencies: RequestBoundOriginalSceneModelDependencies, options: AiSceneModelRequestOptions): DynamicModule {
     const { enabled, audience } = options;
-    const modelOptions = { enabled, audience, host: structuredClone(options.host), runServices: options.runServices };
+    const modelOptions = { enabled, audience, host: structuredClone(options.host), runServices: options.runServices,
+      ...(options.quoteTask ? { quoteTask: { dependencies: { ...options.quoteTask.dependencies }, configuration: {
+        ...options.quoteTask.configuration, host: structuredClone(options.quoteTask.configuration.host),
+        limits: structuredClone(options.quoteTask.configuration.limits) } } } : {}),
+      ...(options.settingsTask ? { settingsTask: { dependencies: { ...options.settingsTask.dependencies }, configuration: {
+        host: structuredClone(options.settingsTask.configuration.host), task: structuredClone(options.settingsTask.configuration.task) } } } : {}) };
     return { module: AiOriginalScenesModule,
       providers: [
         { provide: AI_ORIGINAL_SCENE_REQUESTS, useFactory: () => composeRequestBoundOriginalScenes(dependencies, { enabled, audience }) },

@@ -6,7 +6,8 @@ import { AI_TOOL_CODES, type AiExecutionContext, type AiFactReference, type AiTo
 
 export const AI_TEXT_MODEL_STEP_CODE = "ai.model.text" as const;
 export const AI_IMAGE_MODEL_STEP_CODE = "ai.model.image" as const;
-export const AI_TASK_STEP_CODES = Object.freeze([...AI_TOOL_CODES, AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL_STEP_CODE] as const);
+export const AI_AUDIO_MODEL_STEP_CODE = "ai.model.audio" as const;
+export const AI_TASK_STEP_CODES = Object.freeze([...AI_TOOL_CODES, AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL_STEP_CODE, AI_AUDIO_MODEL_STEP_CODE] as const);
 export type AiTaskStepCode = typeof AI_TASK_STEP_CODES[number];
 
 export const AI_TASK_DRAFT_VERSION = "ain-c04-draft-1" as const;
@@ -103,6 +104,8 @@ export type AiTaskEventDraft = AiTaskEventBaseDraft & (
   | { type: "step.registered"; data: { stepId: string; runId: string; sequence: number; stepRevision: 1 } }
   | { type: "step.changed"; data: { stepId: string; runId: string; stepRevision: number; status: AiStepStatusDraft; reason: AiStepTransitionReasonDraft } }
   | { type: "task.output_ready"; data: { resultId: string } }
+  /** Same waiting task, new server question revision; consumers must reread input. */
+  | { type: "task.input_refreshed"; data: { requestId: string; previousRevision: number; revision: number } }
   | { type: "access.revoked"; data: { code: "AI_ACCESS_DENIED" | "AI_SCOPE_CHANGED" } }
 );
 

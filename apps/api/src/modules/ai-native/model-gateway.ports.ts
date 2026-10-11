@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
+import { inspectPcmWav } from './pcm-wav';
 /** Internal implementation ports, NOT the centrally maintained AIN-C03 wire contract. */
 export type ModelFeature = "tools" | "structuredOutput" | "streaming" | "image" | "audio";
 export interface GatewayContext { tenantId: string; workspaceId: string; actorId: string; }
@@ -62,6 +63,9 @@ export const modelProtocolRequestSchema = modelProtocolRequestBaseSchema.superRe
       if (bytes.length > 524288 || bytes.toString('base64') !== part.data
         || createHash('sha256').update(bytes).digest('hex') !== part.contentHash) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Media content does not match its bounded digest' });
+      }
+      if (part.kind === 'audio' && !inspectPcmWav(bytes)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Audio must be a complete bounded PCM WAV' });
       }
     }
   }

@@ -12,7 +12,7 @@ import { requestFingerprint } from '../rental-core/rental-idempotency.repository
 const id = z.string().min(1).max(128).regex(/^[\w.:-]+$/u);
 const contextSchema = z.object({ tenantId: id, workspaceId: id, actorId: id }).strict();
 const sceneSchema = z.enum(['chat', 'builder', 'vision', 'knowledge', 'reasoning']);
-const requiredSchema = z.array(capabilityNameSchema).min(1).max(7).refine(values => new Set(values).size === values.length);
+const requiredSchema = z.array(capabilityNameSchema).min(1).max(8).refine(values => new Set(values).size === values.length);
 const selectionSchema = z.object({ mode: z.enum(['platform_managed', 'tenant_managed']), revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER - 1) }).strict();
 export interface GatewayRoutingResolution {
   context: AiExecutionContext;

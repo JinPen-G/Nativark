@@ -61,8 +61,8 @@ test('model host starts queued task and run, publishes under one lease, then set
   assert.equal(page.events.filter(e => e.type === 'step.changed' && e.data.status === 'succeeded').length, 1);
 });
 
-async function clarificationHost(turns) {
-  const h = await modelHostHarness();
+async function clarificationHost(turns, kind) {
+  const h = await modelHostHarness(kind);
   h.config.inputSource = {
     resolve: async binding => h.state.aiRun.find(r => r.id === binding.runId).sequence <= turns
       ? { kind: 'required', contract: structuredClone(h.contract), inputRef: binding.inputRef, inputHash: binding.inputHash,
@@ -75,6 +75,43 @@ async function clarificationHost(turns) {
     answers: [{ fieldId: 'clarification_text', value: `Answer for ${pending.requestId}` }] });
   return { ...h, root, answer };
 }
+
+test('image clarification resumes through current media authority and the original cumulative budget', { timeout: 20000 }, async () => {
+  const h = await clarificationHost(2, 'image');
+  assert.equal((await h.root.application.start(h.query)).outcome.status, 'paused');
+  const original = h.clone(h.state.aiTaskActionInput[0]);
+  const fingerprint = h.state.aiTaskExecutionBudget[0].policyFingerprint;
+  for (let turn = 1; turn <= 2; turn++) {
+    const pending = await h.root.application.readInput({ taskId: h.query.taskId });
+    const submission = h.answer(pending);
+    const result = await composeTaskModelHost(h.config).application.resume(submission);
+    assert.equal(result.continuation.kind, 'run_outcome', JSON.stringify(result));
+    assert.equal(result.continuation.outcome.status, turn === 1 ? 'paused' : 'succeeded');
+    assert.equal((await h.root.application.resume(submission)).continuation.reason, 'receipt_replayed');
+    assert.equal(h.state.aiTaskExecutionBudget.length, 1);
+    assert.equal(h.state.aiTaskExecutionBudget[0].policyFingerprint, fingerprint);
+    assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, BigInt(turn + 1));
+    assert.equal(h.state.aiRun[turn].resourceOriginRunId, h.query.runId);
+    const stored = h.state.aiTaskActionInput.at(-1).payload;
+    assert.equal(stored.intent.requiredFeatures.includes('image'), true);
+    assert.deepEqual(stored.media, original.payload.media);
+    assert.equal(stored.intent.messages.at(-1).content[0].text.includes(submission.answers[0].value), true);
+  }
+  assert.deepEqual(h.state.aiTaskActionInput[0], original);
+  assert.equal(h.modelControl.sent.length, 3);
+  assert.equal(new Set(h.state.aiGatewayInvocation.map(row => row.callId)).size, 3);
+  assert.equal(h.state.aiGatewayAccountingReceipt.length, 3);
+
+  const revoked = await clarificationHost(1, 'image');
+  assert.equal((await revoked.root.application.start(revoked.query)).outcome.status, 'paused');
+  const pending = await revoked.root.application.readInput({ taskId: revoked.query.taskId });
+  revoked.modelControl.mediaActive = false;
+  const rejected = await revoked.root.application.resume(revoked.answer(pending));
+  assert.equal(rejected.continuation.kind, 'unavailable');
+  assert.equal(revoked.modelControl.sent.length, 1);
+  assert.equal(revoked.state.aiGatewayInvocation.length, 1);
+  assert.equal(revoked.state.aiTaskExecutionBudget[0].consumedCalls, 1n);
+});
 
 test('model clarification creates successive frozen runs without resetting the original task budget', { timeout: 20000 }, async () => {
   const h = await clarificationHost(2);

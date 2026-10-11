@@ -11,7 +11,7 @@ import { themeBehavior } from "../../core/theme-behavior";
 import { formatBusinessRange } from "../../core/time";
 import { ROUTES, buildUrl, confirmDialog, relaunch, toast } from "../../core/ui";
 import { uploadStaffImage } from "../../api/uploads";
-import { attachInspectionPage, clearInspectionPage } from "../../components/ai-native/inspection-page-binding";
+import { attachInspectionPage, attachRemoteInspectionPage, hideInspectionPage, clearInspectionPage } from "../../components/ai-native/inspection-page-binding";
 import type { StaffInspectionHost } from "../../components/ai-native/inspection-host";
 
 /** 逐设备卡：一台可归还资源一张卡，卡内是本次归还的选择/数量与**逐台**勾选的 boolean 验收项。 */
@@ -29,7 +29,10 @@ Page({
   signatureContext: undefined as WechatMiniprogram.CanvasContext | undefined,
   signatureDrawing: false,
   attachInspectionHost(host: StaffInspectionHost) { attachInspectionPage(this, host, "return"); },
-  onHide() { this.selectComponent("#ai-inspection-assist")?.hostHide?.(); },
+  attachRemoteInspectionHost(reference: { allocationId: string; draftId: string }) {
+    return attachRemoteInspectionPage(this, reference, 'return', this.data.signatureFileAssetId || undefined);
+  },
+  onHide() { hideInspectionPage(this); },
   onUnload() { clearInspectionPage(this); },
   onLoad(query: Record<string, string>) { const width = Math.max(240, wx.getSystemInfoSync().windowWidth - 48); this.setData({ id: query.id ?? "", signatureWidth: width }); },
   onShow() { if (!isSignedIn()) { clearInspectionPage(this); relaunch(ROUTES.login); return; } void this.selectComponent("#ai-inspection-assist")?.hostShow?.(); if (!this.order) void this.load(); },

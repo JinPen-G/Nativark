@@ -127,6 +127,46 @@ test("AI原checkout交接：实例host、人工复读原报价、默认关闭与
   await page.requestQuote(); await page.onSubmit(); await page.submit(false); assert.equal(r.calls.length, 1, "no requote or createOrder");
   assert.equal(r.load("core/cart").getCart(), undefined, "AI selection must not persist into manual cart");
   assert.equal(JSON.stringify(page.data).includes("readBookingHandoff"), false);
+  const acceptance = { acceptanceRef: "11111111-1111-4111-8111-111111111111", handoffRef: handoff.handoffRef,
+    bookingDraftId: handoff.bookingDraftId, selectionRevision: 1, inputFingerprint: "a".repeat(64), quoteId: quote.id,
+    operationKey: "booking-order:original", execution: "not_attested" };
+  let acceptedCalls = 0, submittedCalls = 0, receiptCalls = 0, finishSubmit;
+  const receipt = { state: "observed", orderId: "original-order", operationKey: acceptance.operationKey,
+    retryable: false, payment: "not_inferred", fulfillment: "not_inferred" };
+  const submissionHost = { ...host, acceptBookingSubmission: async input => {
+    acceptedCalls++; assert.equal(input.handoffRef, handoff.handoffRef); return acceptance;
+  }, submitAcceptedBooking: input => {
+    submittedCalls++; assert.equal(input.decision, "submit_original_booking");
+    assert.equal(input.acceptanceRef, acceptance.acceptanceRef);
+    return new Promise(resolve => { finishSubmit = resolve; });
+  }, readBookingSubmission: async input => { receiptCalls++; assert.equal(input.acceptanceRef, acceptance.acceptanceRef); return receipt; } };
+  page.attachHost(submissionHost); await page.onReadBookingHandoff(); await page.onContinueBookingHandoff();
+  await page.onAcceptBookingSubmission(); assert.equal(acceptedCalls, 0, "explicit rules confirmation required");
+  page.onAgreeChange({ detail: { value: ["agree"] } });
+  await page.onAcceptBookingSubmission(); assert.equal(acceptedCalls, 1); assert.equal(page.data.aiStatus, "accepted");
+  assert.equal(JSON.stringify(page.data).includes(acceptance.operationKey), false, "accepted operation stays private");
+  const pendingSubmit = page.onSubmitAcceptedBooking(); await page.onSubmitAcceptedBooking();
+  assert.equal(submittedCalls, 1, "single flight, not business idempotency");
+  page.onHide(); const hiddenWrites = page.writes;
+  finishSubmit(receipt); await pendingSubmit; assert.equal(page.writes, hiddenWrites);
+  page.onShow(); assert.equal(page.data.aiStatus, "pending_reconcile");
+  await page.onReadBookingSubmission(); assert.equal(receiptCalls, 1); assert.equal(page.data.aiStatus, "order_observed");
+  await page.onSubmitAcceptedBooking(); assert.equal(submittedCalls, 1, "recovery never resends");
+  page.onOpenAiOrder(); assert.ok(r.navigations.some(value => JSON.stringify(value).includes("original-order")));
+  page.attachHost({ ...submissionHost, submitAcceptedBooking: async () => { submittedCalls++; throw Error("private transport detail"); } });
+  await page.onReadBookingHandoff(); await page.onContinueBookingHandoff(); page.onAgreeChange({ detail: { value: ["agree"] } });
+  await page.onAcceptBookingSubmission(); await page.onSubmitAcceptedBooking();
+  assert.equal(page.data.aiStatus, "pending_reconcile"); assert.equal(JSON.stringify(page.data).includes("private transport"), false);
+  await page.onSubmitAcceptedBooking(); assert.equal(submittedCalls, 2);
+  const transport = runtime(req => { assert.equal(req.method, "POST");
+    assert.ok(req.url.includes("/api/client/v1/ai-native/entry/booking-submissions/"));
+    ok(req, req.url.endsWith("/accept") ? acceptance : receipt); });
+  transport.load("core/session").saveSession(sessionResponse(), "camera", "login");
+  const originalBookingApi = transport.load("api/orders");
+  await originalBookingApi.acceptBookingSubmission({ handoffRef: handoff.handoffRef });
+  await originalBookingApi.submitAcceptedBooking({ acceptanceRef: acceptance.acceptanceRef, decision: "submit_original_booking" });
+  await originalBookingApi.readBookingSubmission({ acceptanceRef: acceptance.acceptanceRef });
+  assert.equal(transport.calls.length, 3, "real transport functions, offline wx boundary only");
   session.saveSession(sessionResponse("changed", "changed-refresh"), "camping", "switch");
   assert.equal(page.data.aiReference, ""); assert.equal(page.aiHost, undefined);
   session.saveSession(sessionResponse(), "camera", "switch");

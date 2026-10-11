@@ -89,6 +89,33 @@ function gateway(binding = { ...policy, routeScene: 'chat' }) {
   });
   return { events, requests, hashes, context, ports, service: new UnifiedAiGatewayService(ports, 10000, binding) };
 }
+test('authorized WAV invoke enters the same routing and single accounting lifecycle', async () => {
+  const f = gateway(), input = intent(), bytes = Buffer.from('bounded WAV fixture');
+  const contentHash = require('node:crypto').createHash('sha256').update(bytes).digest('hex');
+  input.requiredFeatures = ['text', 'audio'];
+  input.messages[0].content.push({ kind: 'audio', attachmentId: 'audio-1', attachmentRevision: 2 });
+  f.ports.media = { resolve: async (_context, ref) => ({ ...ref, mediaType: 'audio/wav', contentHash, bytes }),
+    assertCurrent: async (context, refs) => {
+      assert.deepEqual(context, f.context);
+      assert.deepEqual(refs, [{ kind: 'audio', attachmentId: 'audio-1', attachmentRevision: 2, mediaType: 'audio/wav', contentHash }]);
+    } };
+  const resolve = f.ports.routing.resolve;
+  f.ports.routing.resolve = async (context, capabilities) => {
+    assert.deepEqual(capabilities, ['text', 'audio']); return resolve(context, capabilities);
+  };
+  assert.equal((await f.service.invokeIntent(f.context, input)).text, 'done');
+  assert.equal(f.requests[0].messages[0].content[2].contentHash, contentHash);
+  assert.deepEqual(f.events, ['route','admit','reserve','audit','settle','completed']);
+  const bad = gateway(); bad.ports.media = { resolve: async (_context, ref) => ({ ...ref,
+    mediaType: 'audio/wav', contentHash: '0'.repeat(64), bytes }) };
+  await assert.rejects(bad.service.invokeIntent(bad.context, input), e => e.code === 'CAPABILITY_UNSUPPORTED');
+  assert.deepEqual(bad.events, []);
+  let streamReads = 0;
+  const {prepareGatewayIntent} = require('../apps/api/src/modules/ai-native/gateway-intent');
+  await assert.rejects(prepareGatewayIntent(input, policy, 'stream', f.context, {resolve: async()=>{streamReads++;}}),
+    e=>e.code==='CAPABILITY_UNSUPPORTED');
+  assert.equal(streamReads,0); // No supported audio streaming adapter: reject before bytes or dispatch.
+});
 for (const mode of ['invoke', 'stream']) test(`${mode} text intent enters existing dispatch and accounting lifecycle without model input`, async () => {
   const f = gateway(), input = intent();
   if (mode === 'invoke') assert.equal((await f.service.invokeTextIntent(f.context, input)).text, 'done');

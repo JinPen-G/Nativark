@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient, type AiTaskInputRequest, type AiTaskInputReceipt } from '@prisma/client';
 import { z } from 'zod';
 import {
-  AI_TASK_DRAFT_VERSION, AI_TASK_INPUT_DRAFT_VERSION, AI_TEXT_MODEL_STEP_CODE, isAiTaskInputContractDraft,
+  AI_TASK_DRAFT_VERSION, AI_TASK_INPUT_DRAFT_VERSION, AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL_STEP_CODE, AI_AUDIO_MODEL_STEP_CODE, isAiTaskInputContractDraft,
   isAiTaskInputSubmissionDraft, validateAiTaskInputAnswersDraft,
   type AiTaskInputContractDraft, type AiTaskInputSubmissionDraft, type AiTaskEventDraft
 } from '@rental-os/shared';
@@ -22,6 +22,7 @@ const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const conflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
 const maxRevision = 4294967294, maxFence = 99999999999999999999n, maxCursor = 18446744073709551615n;
+const continuableModel = (tool: string) => tool === AI_TEXT_MODEL_STEP_CODE || tool === AI_IMAGE_MODEL_STEP_CODE || tool === AI_AUDIO_MODEL_STEP_CODE;
 
 function requestDigest(row: Omit<AiTaskInputRequest, 'requestHash' | 'createdAt' | 'status' | 'revision'>) {
   return requestFingerprint({ draftVersion: AI_TASK_INPUT_DRAFT_VERSION, scopeId: row.scopeId, taskId: row.taskId, id: row.id,
@@ -35,14 +36,43 @@ function answerDigest(submission: AiTaskInputSubmissionDraft, request: AiTaskInp
   return requestFingerprint({ ...submission, answers: [...submission.answers].sort((a, b) => a.fieldId.localeCompare(b.fieldId)), requestHash: request.requestHash });
 }
 
+/** A higher question revision is valid only with its transaction's immutable
+ * archive chain. Never accept a caller/database revision bump on its own. */
+async function verifyQuestionHistory(tx: Tx, request: AiTaskInputRequest) {
+  let row = request, version = request.revision - (request.status === 'CONSUMED' ? 1 : 0);
+  if (!Number.isInteger(version) || version < 1 || version > 32) throw denied();
+  while (version > 1) {
+    const event = await tx.aiTaskEvent.findFirst({ where: { scopeId: row.scopeId, taskId: row.taskId,
+      taskRevision: row.waitingTaskRevision, type: 'task.input_refreshed' } });
+    const parsed = z.object({ data: z.object({ requestId: id, previousRevision: z.number().int(), revision: z.number().int() }),
+      previousRequest: z.record(z.unknown()), nextRequestHash: z.string() }).safeParse(event?.payload);
+    if (!parsed.success || parsed.data.data.requestId !== request.id || parsed.data.data.revision !== version
+      || parsed.data.data.previousRevision !== version - 1 || parsed.data.nextRequestHash !== row.requestHash) throw denied();
+    const raw = parsed.data.previousRequest;
+    const previous = { ...raw, fencingToken: new Prisma.Decimal(String(raw.fencingToken)),
+      createdAt: new Date(String(raw.createdAt)), expiresAt: new Date(String(raw.expiresAt)) } as unknown as AiTaskInputRequest;
+    if (previous.id !== row.id || previous.scopeId !== row.scopeId || previous.taskId !== row.taskId
+      || previous.runId !== row.runId || previous.stepId !== row.stepId || previous.planHash !== row.planHash
+      || previous.planRevision !== row.planRevision || previous.inputRef !== row.inputRef || previous.inputHash !== row.inputHash
+      || previous.basisResultRef !== row.basisResultRef || previous.createdBy !== row.createdBy
+      || previous.leaseOwnerId !== row.leaseOwnerId || previous.fencingToken.toFixed(0) !== row.fencingToken.toFixed(0)
+      || previous.waitingTaskRevision + 1 !== row.waitingTaskRevision || previous.status !== 'PENDING'
+      || previous.revision !== version - 1 || previous.expiresAt < row.expiresAt
+      || requestDigest(previous) !== previous.requestHash) throw denied();
+    row = previous; version--;
+  }
+}
+
 /** Read provenance, never a lease or permission to dispatch. The original run
  * remains the resource origin; every successor must have a consumed, bound
  * human answer and a completed single-model parent. No "latest run" lookup. */
 export async function readTaskModelRunOrigin(tx: Tx, access: Access,
-  key: { scopeId: string; taskId: string; runId: string; originRunId: string; registrationRef: string }) {
+  key: { scopeId: string; taskId: string; runId: string; originRunId: string; registrationRef: string; includeHistory?: boolean }) {
   let cursor = key.runId, selectedRegistration = key.registrationRef;
   let continuation: { receiptId: string; inputHash: string; input: Prisma.JsonValue;
-    result: Prisma.JsonValue; answers: AiTaskInputSubmissionDraft['answers'] } | undefined;
+    result: Prisma.JsonValue; answers: AiTaskInputSubmissionDraft['answers']; contract: AiTaskInputContractDraft; questionRevision: number } | undefined;
+  let lineageTool: string | undefined;
+  const history: NonNullable<typeof continuation>[] = [];
   const seen = new Set<string>();
   for (let count = 0; count < 1000; count++) {
     if (seen.has(cursor)) throw denied();
@@ -52,7 +82,7 @@ export async function readTaskModelRunOrigin(tx: Tx, access: Access,
       || run.actorKind !== access.actorKind || run.actorId !== access.actorId) throw denied();
     if (cursor === key.originRunId) {
       if (run.sequence !== 1 || run.inputReceiptId != null || run.resourceOriginRunId != null) throw denied();
-      return { registrationRef: selectedRegistration, continuation };
+      return { registrationRef: selectedRegistration, continuation, history: history.reverse() };
     }
     if (run.resourceOriginRunId !== key.originRunId || !run.inputReceiptId || run.sequence < 2) throw denied();
     const receipt = await tx.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_id: {
@@ -62,11 +92,12 @@ export async function readTaskModelRunOrigin(tx: Tx, access: Access,
     const request = await tx.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: {
       scopeId: key.scopeId, taskId: key.taskId, id: receipt.requestId } } });
     if (!request || request.id !== receipt.requestId || request.scopeId !== key.scopeId || request.taskId !== key.taskId
-      || request.status !== 'CONSUMED' || request.revision !== 2 || request.createdBy !== access.actorId
+      || request.status !== 'CONSUMED' || request.revision < 2 || request.revision > maxRevision || request.createdBy !== access.actorId
       || receipt.planHash !== request.planHash || !receipt.consumedAt || receipt.consumedAt > request.expiresAt
       || receipt.consumedTaskRevision !== request.waitingTaskRevision + 1 || requestDigest(request) !== request.requestHash) throw denied();
+    await verifyQuestionHistory(tx, request);
     const submission = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, taskId: key.taskId, requestId: request.id,
-      expectedRevision: 1, submissionKey: receipt.submissionKey, answers: receipt.answers };
+      expectedRevision: request.revision - 1, submissionKey: receipt.submissionKey, answers: receipt.answers };
     const contract = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, code: request.contractCode, version: request.contractVersion, fields: request.allowedFields };
     if (!isAiTaskInputSubmissionDraft(submission) || !isAiTaskInputContractDraft(contract)
       || requestFingerprint(contract) !== request.contractHash || !validateAiTaskInputAnswersDraft(contract, submission.answers)
@@ -79,10 +110,12 @@ export async function readTaskModelRunOrigin(tx: Tx, access: Access,
       || parent.actorKind !== access.actorKind || !savedPlan || savedPlan.scopeId !== key.scopeId
       || savedPlan.taskId !== key.taskId || savedPlan.runId !== parent.id) throw denied();
     const plan = aiTaskRunPlanSchema.parse(savedPlan.payload), planned = plan.steps[0];
+    if (lineageTool !== undefined && planned.toolCode !== lineageTool) throw denied();
+    lineageTool = planned.toolCode;
     const step = await tx.aiStep.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, runId: parent.id, id: request.stepId } });
     if (plan.taskId !== key.taskId || plan.runId !== parent.id || plan.taskRevision !== request.planRevision
       || requestFingerprint(plan) !== savedPlan.planHash || savedPlan.planHash !== request.planHash
-      || plan.steps.length !== 1 || planned.toolCode !== AI_TEXT_MODEL_STEP_CODE || planned.operation !== 'external_unknown'
+      || plan.steps.length !== 1 || !continuableModel(planned.toolCode) || planned.operation !== 'external_unknown'
       || !step || step.id !== request.stepId || step.scopeId !== key.scopeId || step.taskId !== key.taskId || step.runId !== parent.id
       || step.status !== 'SUCCEEDED' || step.effect !== 'NONE' || step.inputRef !== request.inputRef
       || step.requestFingerprint !== request.inputHash || step.resultRef !== request.basisResultRef
@@ -102,7 +135,12 @@ export async function readTaskModelRunOrigin(tx: Tx, access: Access,
     if (cursor === key.runId) {
       selectedRegistration = `model-followup-${receipt.id}`;
       continuation = { receiptId: receipt.id, inputHash: input.fingerprint,
-        input: structuredClone(input.payload), result: structuredClone(artifact.payload), answers: structuredClone(submission.answers) };
+        input: structuredClone(input.payload), result: structuredClone(artifact.payload), answers: structuredClone(submission.answers), contract: structuredClone(contract), questionRevision: request.revision - 1 };
+    }
+    if (key.includeHistory) {
+      if (history.length >= 31) throw unavailable();
+      history.push({ receiptId: receipt.id, inputHash: input.fingerprint,
+        input: structuredClone(input.payload), result: structuredClone(artifact.payload), answers: structuredClone(submission.answers), contract: structuredClone(contract), questionRevision: request.revision - 1 });
     }
     cursor = parent.id;
   }
@@ -210,7 +248,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
   private receipt(request: AiTaskInputRequest, receipt: AiTaskInputReceipt | null, access: Access, submission?: AiTaskInputSubmissionDraft) {
     const original: AiTaskInputSubmissionDraft = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, taskId: request.taskId, requestId: request.id,
       expectedRevision: request.revision - 1, submissionKey: receipt?.submissionKey ?? '', answers: receipt?.answers as unknown as AiTaskInputSubmissionDraft['answers'] };
-    if (!receipt || request.status !== 'CONSUMED' || request.revision !== 2 || receipt.scopeId !== request.scopeId || receipt.taskId !== request.taskId
+    if (!receipt || request.status !== 'CONSUMED' || request.revision < 2 || receipt.scopeId !== request.scopeId || receipt.taskId !== request.taskId
       || receipt.requestId !== request.id || receipt.planHash !== request.planHash || receipt.actorKind !== access.actorKind || receipt.actorId !== access.actorId
       || receipt.audience !== access.audience || !receipt.consumedAt || receipt.consumedAt > request.expiresAt
       || receipt.consumedTaskRevision !== request.waitingTaskRevision + 1 || !isAiTaskInputSubmissionDraft(original)
@@ -232,6 +270,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
       const requirement = await this.requirement(facts.binding);
       if (prior) {
         const contract = this.validateRequest(prior, facts.binding, before);
+        await verifyQuestionHistory(tx, prior);
         const receipt = this.receipt(prior, await tx.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_requestId: { scopeId: task.scopeId, taskId: task.id, requestId: prior.id } } }), before);
         if (requirement.kind !== 'required' || requestFingerprint(requirement.contract) !== prior.contractHash) throw denied();
         await this.validateAnswers(facts.binding, contract, receipt.answers as unknown as AiTaskInputSubmissionDraft['answers']);
@@ -239,7 +278,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
         return null;
       }
       if (requirement.kind === 'not_required') { await this.access(task.id, 'request_input', before); return null; }
-      const modelContinuation = facts.planned.operation === 'external_unknown' && facts.planned.toolCode === AI_TEXT_MODEL_STEP_CODE
+      const modelContinuation = facts.planned.operation === 'external_unknown' && continuableModel(facts.planned.toolCode)
         && facts.plan.steps.length === 1;
       if ((!modelContinuation && facts.planned.operation !== 'readonly') || facts.step.effect !== 'NONE'
         || Date.parse(requirement.expiresAt) <= this.clock().getTime()) throw unavailable();
@@ -294,6 +333,50 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
         initiator: { kind: holder ? 'worker' : 'user', id: holder ?? access.actorId, actorKind: access.actorKind, actorId: access.actorId } } } });
   }
 
+  /** Called only while the aggregate cancellation transaction owns the task
+   * lock. A released, fully measured model wait is proof; lease expiry is not. */
+  async closeCancelledInputWait(tx: Tx, key: { id: string; scopeId: string; revision: number }) {
+    const before = await this.access(key.id, 'transition_task');
+    const task = await this.task(tx, key.id, before);
+    // The enclosing aggregate CAS already reserved its next revision.
+    if (task.scopeId !== key.scopeId || task.status !== 'CANCEL_REQUESTED' || !task.cancelRequestedAt
+      || task.revision !== key.revision + 1) throw conflict();
+    const requests = await tx.aiTaskInputRequest.findMany({ where: { scopeId: key.scopeId, taskId: key.id,
+      waitingTaskRevision: key.revision - 1, status: 'PENDING' }, take: 2 });
+    if (requests.length !== 1) throw unavailable();
+    const request = requests[0], run = await this.run(tx, key.id, key.scopeId, request.runId, before);
+    if (run.status !== 'RUNNING' || run.leaseOwnerId !== null || run.leaseExpiresAt !== null
+      || run.fencingToken.toFixed(0) !== request.fencingToken.toFixed(0)) throw unavailable();
+    const facts = await this.facts(tx, key.scopeId, key.id, run.id, request.stepId);
+    this.validateRequest(request, facts.binding, before);
+    await verifyQuestionHistory(tx, request);
+    if (facts.plan.steps.length !== 1 || !continuableModel(facts.planned.toolCode)
+      || facts.planned.operation !== 'external_unknown' || facts.step.effect !== 'NONE') throw unavailable();
+    const receipt = await tx.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_requestId: {
+      scopeId: key.scopeId, taskId: key.id, requestId: request.id } } });
+    const runs = await tx.aiRun.findMany({ where: { scopeId: key.scopeId, taskId: key.id }, take: 1001 });
+    const steps = await tx.aiStep.findMany({ where: { scopeId: key.scopeId, taskId: key.id }, take: 1001 });
+    if (receipt || runs.length !== run.sequence || runs.length > 1000 || steps.length !== run.sequence
+      || runs.some(row => row.id !== run.id && row.status !== 'SUCCEEDED')
+      || steps.some(row => row.status !== 'SUCCEEDED' || row.effect !== 'NONE' || row.toolCode !== facts.planned.toolCode)) throw unavailable();
+    const charges = await tx.aiTaskExecutionCharge.findMany({ where: { scopeId: key.scopeId,
+      taskId: key.id, runId: run.id, stepId: facts.step.id }, take: 5 });
+    if (charges.length !== 4 || new Set(charges.map(row => row.resource)).size !== 4
+      || !['STEPS', 'CALLS', 'ACTIVE_MS', 'OUTPUT_BYTES'].every(resource => charges.some(row => row.resource === resource))
+      || charges.some(row => row.status !== 'RECORDED' || row.actionId !== facts.step.actionId
+        || row.stepFingerprint !== facts.step.requestFingerprint || row.leaseOwnerId !== facts.artifact.leaseOwnerId
+        || row.fencingToken.toFixed(0) !== facts.artifact.fencingToken.toFixed(0))
+      || !charges.some(row => row.resource === 'CALLS' && row.gatewayInvocationId)) throw unavailable();
+    const current = await this.access(key.id, 'transition_task', before);
+    if ((await tx.aiRun.updateMany({ where: { id: run.id, taskId: key.id, scopeId: key.scopeId,
+      revision: run.revision, fencingToken: run.fencingToken, status: 'RUNNING',
+      leaseOwnerId: null, leaseExpiresAt: null, actorKind: current.actorKind, actorId: current.actorId },
+      data: { status: 'CANCELLED', endedAt: this.clock(), revision: { increment: 1 },
+        fencingToken: { increment: new Prisma.Decimal(1) } } })).count !== 1) throw conflict();
+    // Keep the pending question as historical evidence; terminal task state
+    // prevents consumption. No resource or financial charge is released.
+  }
+
   async readPending(taskId: string) {
     const before = await this.access(taskId, 'read_metadata');
     return this.transaction(async tx => {
@@ -304,11 +387,110 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
       const request = requests[0], run = await this.run(tx, taskId, task.scopeId, request.runId, before);
       const facts = await this.facts(tx, task.scopeId, taskId, run.id, request.stepId);
       const contract = this.validateRequest(request, facts.binding, before);
+      await verifyQuestionHistory(tx, request);
       const requirement = await this.requirement(facts.binding);
       if (requirement.kind !== 'required' || requestFingerprint(requirement.contract) !== request.contractHash) throw unavailable();
       if (run.fencingToken.toFixed(0) !== request.fencingToken.toFixed(0) || request.expiresAt <= this.clock()) throw unavailable();
       await this.access(taskId, 'read_metadata', before);
       return { requestId: request.id, revision: request.revision, expiresAt: request.expiresAt.toISOString(), contract };
+    });
+  }
+
+  /** Explicit server-question refresh, never a resume, new plan or dispatch.
+   * The immutable audit event retains the complete previous request. Public
+   * events expose revisions only, not old choices or sensitive source content. */
+  async refreshPending(value: unknown) {
+    const command = z.object({ taskId: id, requestId: id,
+      expectedRevision: z.number().int().positive().max(maxRevision - 1) }).strict().safeParse(structuredClone(value));
+    if (!command.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const input = command.data, before = await this.access(input.taskId, 'request_input');
+    return this.writeTransaction(async tx => {
+      const task = await this.task(tx, input.taskId, before);
+      const request = await tx.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: {
+        scopeId: task.scopeId, taskId: task.id, id: input.requestId } } });
+      if (!request) throw unavailable();
+      const run = await this.run(tx, task.id, task.scopeId, request.runId, before);
+      const facts = await this.facts(tx, task.scopeId, task.id, run.id, request.stepId);
+      this.validateRequest(request, facts.binding, before);
+      await verifyQuestionHistory(tx, request);
+      if (task.status !== 'WAITING_INPUT' || task.cancelRequestedAt !== null || run.status !== 'RUNNING'
+        || task.revision !== request.waitingTaskRevision || request.status !== 'PENDING'
+        || request.revision !== input.expectedRevision || task.revision >= maxRevision || task.eventCursor >= maxCursor
+        || run.fencingToken.toFixed(0) !== request.fencingToken.toFixed(0)
+        || !(run.leaseOwnerId === null && run.leaseExpiresAt === null
+          || run.leaseOwnerId !== null && run.leaseExpiresAt !== null && run.leaseExpiresAt <= this.clock())) throw conflict();
+      if (await tx.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_requestId: {
+        scopeId: task.scopeId, taskId: task.id, requestId: request.id } } })) throw conflict();
+      // Refresh cannot extend the original request lifetime or rescue an expired operation.
+      const requirement = await this.requirement(facts.binding);
+      if (requirement.kind !== 'required' || request.expiresAt <= this.clock()
+        || Date.parse(requirement.expiresAt) <= this.clock().getTime()) throw unavailable();
+      const contractHash = requestFingerprint(requirement.contract);
+      if (contractHash === request.contractHash) {
+        await this.access(task.id, 'request_input', before);
+        return { requestId: request.id, revision: request.revision, expiresAt: request.expiresAt.toISOString(), contract: requirement.contract };
+      }
+      const next = { ...request, contractCode: requirement.contract.code, contractVersion: requirement.contract.version,
+        contractHash, allowedFields: structuredClone(requirement.contract.fields) as unknown as Prisma.JsonValue,
+        waitingTaskRevision: task.revision + 1, revision: request.revision + 1,
+        expiresAt: new Date(Math.min(request.expiresAt.getTime(), Date.parse(requirement.expiresAt))) };
+      if (next.revision > 32) throw unavailable();
+      const again = await this.requirement(facts.binding);
+      if (requestFingerprint(again) !== requestFingerprint(requirement)) throw denied();
+      const current = await this.access(task.id, 'request_input', before);
+      if (next.expiresAt <= this.clock()) throw conflict();
+      if ((await tx.aiTaskInputRequest.updateMany({ where: { scopeId: task.scopeId, taskId: task.id,
+        id: request.id, status: 'PENDING', revision: request.revision, requestHash: request.requestHash,
+        waitingTaskRevision: task.revision, fencingToken: run.fencingToken }, data: {
+          contractCode: next.contractCode, contractVersion: next.contractVersion, contractHash,
+          allowedFields: next.allowedFields as Prisma.InputJsonValue, expiresAt: next.expiresAt,
+          waitingTaskRevision: next.waitingTaskRevision, revision: next.revision, requestHash: requestDigest(next)
+        } })).count !== 1) throw conflict();
+      if ((await tx.aiTask.updateMany({ where: { ...current.where, scopeId: task.scopeId,
+        status: 'WAITING_INPUT', revision: task.revision, eventCursor: task.eventCursor, cancelRequestedAt: null },
+        data: { revision: { increment: 1 }, eventCursor: { increment: 1n } } })).count !== 1) throw conflict();
+      await tx.aiTaskEvent.create({ data: { scopeId: task.scopeId, taskId: task.id,
+        cursor: task.eventCursor + 1n, taskRevision: task.revision + 1, type: 'task.input_refreshed', occurredAt: this.clock(),
+        payload: { data: { requestId: request.id, previousRevision: request.revision, revision: next.revision },
+          previousRequest: { ...request, fencingToken: request.fencingToken.toFixed(0),
+            createdAt: request.createdAt.toISOString(), expiresAt: request.expiresAt.toISOString() },
+          nextRequestHash: requestDigest(next), initiator: { kind: 'user', id: current.actorId } } } });
+      return { requestId: request.id, revision: next.revision, expiresAt: next.expiresAt.toISOString(), contract: requirement.contract };
+    });
+  }
+
+  /** Exact original answer receipt, never submit/retry or latest-run selection. */
+  async readSubmission(value: unknown) {
+    const submission = structuredClone(value);
+    if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const before = await this.access(submission.taskId, 'read_metadata');
+    return this.transaction(async tx => {
+      const task = await this.task(tx, submission.taskId, before);
+      const request = await tx.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: {
+        scopeId: task.scopeId, taskId: task.id, id: submission.requestId } } });
+      if (!request || request.id !== submission.requestId) throw unavailable();
+      const parent = await this.run(tx, task.id, task.scopeId, request.runId, before, true);
+      const facts = await this.facts(tx, task.scopeId, task.id, parent.id, request.stepId);
+      this.validateRequest(request, facts.binding, before);
+      await verifyQuestionHistory(tx, request);
+      const stored = await tx.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_submissionKey: {
+        scopeId: task.scopeId, taskId: task.id, submissionKey: submission.submissionKey } } });
+      if (!stored) {
+        await this.access(task.id, 'read_metadata', before);
+        return { state: 'not_observed' as const, retryable: false as const };
+      }
+      const receipt = this.receipt(request, stored, before, submission);
+      const successor = await tx.aiRun.findUnique({ where: { scopeId_taskId_inputReceiptId: {
+        scopeId: task.scopeId, taskId: task.id, inputReceiptId: receipt.id } } });
+      if (successor && (successor.scopeId !== task.scopeId || successor.taskId !== task.id
+        || successor.inputReceiptId !== receipt.id || successor.actorKind !== before.actorKind || successor.actorId !== before.actorId
+        || successor.sequence !== parent.sequence + 1 || parent.status !== 'SUCCEEDED'
+        || successor.resourceOriginRunId !== (parent.resourceOriginRunId ?? parent.id))) throw denied();
+      if (facts.plan.steps.length === 1 && continuableModel(facts.planned.toolCode) && !successor) throw unavailable();
+      await this.access(task.id, 'read_metadata', before);
+      return { state: 'observed' as const, retryable: false as const, taskId: task.id, requestId: request.id,
+        receiptId: receipt.id, taskRevision: receipt.consumedTaskRevision!, runId: successor?.id ?? parent.id,
+        execution: 'not_inferred_from_receipt' as const };
     });
   }
 
@@ -324,6 +506,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
       await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_task_input_requests WHERE scopeId = ${task.scopeId} AND taskId = ${task.id} AND id = ${request.id} FOR UPDATE`);
       const facts = await this.facts(tx, task.scopeId, task.id, run.id, request.stepId);
       const contract = this.validateRequest(request, facts.binding, before);
+      await verifyQuestionHistory(tx, request);
       const existing = await tx.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_submissionKey: { scopeId: task.scopeId, taskId: task.id, submissionKey: submission.submissionKey } } });
       if (existing) {
         const receipt = this.receipt(request, existing, before, submission);
@@ -331,7 +514,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
         return { status: 'input_received' as const, taskId: task.id, requestId: request.id, receiptId: receipt.id, taskRevision: receipt.consumedTaskRevision!, replayed: true };
       }
       if (task.status !== 'WAITING_INPUT' || run.status !== 'RUNNING' || task.cancelRequestedAt !== null || task.revision !== request.waitingTaskRevision
-        || request.status !== 'PENDING' || request.revision !== 1 || submission.expectedRevision !== request.revision
+        || request.status !== 'PENDING' || request.revision >= maxRevision || submission.expectedRevision !== request.revision
         || request.expiresAt <= this.clock() || run.fencingToken.toFixed(0) !== request.fencingToken.toFixed(0)
         || !(run.leaseOwnerId === null && run.leaseExpiresAt === null || run.leaseOwnerId !== null && run.leaseExpiresAt !== null && run.leaseExpiresAt <= this.clock())) throw conflict();
       await this.access(task.id, 'submit_input', before);
@@ -340,13 +523,13 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
       if (requirement.kind !== 'required' || requestFingerprint(requirement.contract) !== request.contractHash) throw denied();
       await this.validateAnswers(facts.binding, contract, submission.answers);
       const steps = await tx.aiStep.findMany({ where: { scopeId: task.scopeId, taskId: task.id }, take: 1001 });
-      const modelContinuation = facts.planned.operation === 'external_unknown' && facts.planned.toolCode === AI_TEXT_MODEL_STEP_CODE
+      const modelContinuation = facts.planned.operation === 'external_unknown' && continuableModel(facts.planned.toolCode)
         && facts.plan.steps.length === 1;
       if (modelContinuation) {
         const runs = await tx.aiRun.findMany({ where: { scopeId: task.scopeId, taskId: task.id }, take: 1001 });
         if (!Number.isSafeInteger(run.sequence) || run.sequence < 1 || run.sequence >= 1000 || runs.length !== run.sequence
           || runs.some(r => r.id !== run.id && r.status !== 'SUCCEEDED')
-          || steps.length !== run.sequence || steps.some(s => s.status !== 'SUCCEEDED' || s.effect !== 'NONE' || s.toolCode !== AI_TEXT_MODEL_STEP_CODE)) throw unavailable();
+          || steps.length !== run.sequence || steps.some(s => s.status !== 'SUCCEEDED' || s.effect !== 'NONE' || s.toolCode !== facts.planned.toolCode)) throw unavailable();
       }
       this.transition(task, steps, 'running', 'resume');
       await this.access(task.id, 'submit_input', before);
@@ -394,9 +577,10 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
       if (parent.status !== 'SUCCEEDED' || parent.sequence + 1 !== run.sequence
         || (parent.resourceOriginRunId ?? parent.id) !== run.resourceOriginRunId) throw denied();
       const facts = await this.facts(tx, task.scopeId, task.id, parent.id, request.stepId);
-      if (facts.plan.steps.length !== 1 || facts.planned.toolCode !== AI_TEXT_MODEL_STEP_CODE
+      if (facts.plan.steps.length !== 1 || !continuableModel(facts.planned.toolCode)
         || facts.planned.operation !== 'external_unknown' || facts.step.effect !== 'NONE') throw denied();
       const contract = this.validateRequest(request, facts.binding, before), receipt = this.receipt(request, saved, before);
+      await verifyQuestionHistory(tx, request);
       const answers = receipt.answers as unknown as AiTaskInputSubmissionDraft['answers'];
       await this.validateAnswers(facts.binding, contract, answers);
       const input = await tx.aiTaskActionInput.findFirst({ where: { scopeId: task.scopeId, taskId: task.id, runId: parent.id, id: facts.binding.inputRef } });
@@ -407,7 +591,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
       this.held(await this.run(tx, task.id, task.scopeId, run.id, before), lease);
       return { resourceOriginRunId: run.resourceOriginRunId, receiptId: receipt.id, registrationRef: `model-followup-${receipt.id}`,
         input: structuredClone(input.payload), inputHash: input.fingerprint, result: structuredClone(facts.artifact.payload),
-        answers: structuredClone(answers), limits: structuredClone(facts.plan.limits) };
+        answers: structuredClone(answers), questionRevision: request.revision - 1, limits: structuredClone(facts.plan.limits) };
     });
   }
 
@@ -428,6 +612,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
         if (currentIndex < 0) throw denied();
         if (currentIndex <= facts.index) continue;
         const contract = this.validateRequest(request, facts.binding, before);
+        await verifyQuestionHistory(tx, request);
         const receipt = this.receipt(request, await tx.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_requestId: { scopeId: task.scopeId, taskId: task.id, requestId: request.id } } }), before);
         await this.validateAnswers(facts.binding, contract, receipt.answers as unknown as AiTaskInputSubmissionDraft['answers']);
         results.push({ requestId: request.id, receiptId: receipt.id, answers: structuredClone(receipt.answers) as unknown as AiTaskInputSubmissionDraft['answers'] });
