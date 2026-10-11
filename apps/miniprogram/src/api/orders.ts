@@ -16,14 +16,15 @@ import type {
   RentalOrderExtensionPreview
 } from "@rental-os/shared";
 import { request } from "../core/http";
-import type { AiBookingHandoff } from "@rental-os/shared";
 import type { AiClientHostCapabilities } from "@rental-os/shared";
 
 export function readBookingHostCapabilities(): Promise<AiClientHostCapabilities> {
   return request("/ai-native/entry/host-capabilities/read", { method: "POST", data: {}, replayAfterRefresh: false });
 }
 
-export function readBookingHandoff(handoffRef: string): Promise<AiBookingHandoff> {
+/** Both explicit page consumers and capability-bound factories use this same read. */
+export function readBookingHandoff(input: string | { handoffRef: string }): Promise<AiBookingHandoff> {
+  const handoffRef = typeof input === "string" ? input : input.handoffRef;
   return request("/ai-native/entry/booking-handoffs/read", { method: "POST", data: { handoffRef }, replayAfterRefresh: false });
 }
 
@@ -45,9 +46,6 @@ export async function createOrder(quoteId: string, idempotencyKey: string): Prom
 
 /** Explicit AI page host ports. Exporting these never enables or binds a host.
  * Routes are the authenticated alias published by AI_CLIENT_ENTRY_HTTP_DRAFT. */
-export function readBookingHandoff(input: { handoffRef: string }): Promise<AiBookingHandoff> {
-  return request<AiBookingHandoff>("/ai-native/entry/booking-handoffs/read", { method: "POST", data: input });
-}
 export function acceptBookingSubmission(input: { handoffRef: string }): Promise<AiBookingSubmissionAcceptance> {
   return request<AiBookingSubmissionAcceptance>("/ai-native/entry/booking-submissions/accept", { method: "POST", data: input });
 }

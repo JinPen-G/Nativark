@@ -308,9 +308,9 @@ test('settings normal host starts through the runner and persists an approval ch
   assert.deepEqual(h.clone(h.state), afterCommitState, 'terminal reconciliation must not claim or restart the run');
   assert.equal(modelHost.factoryCalls.length, 0); assert.equal(modelHost.execution.sent.length, 0);
   const terminalObservation = await consumer.read({ preparation });
-  assert.equal(terminalWithoutReceipt.workflowStatus, 'succeeded');
-  assert.equal(terminalWithoutReceipt.businessOutcome, 'committed');
-  assert.equal(terminalWithoutReceipt.execution, 'not_attested');
+  assert.equal(terminalObservation.workflowStatus, 'succeeded');
+  assert.equal(terminalObservation.businessOutcome, 'committed');
+  assert.equal(terminalObservation.execution, 'not_attested');
   await assert.rejects(host.application.readConfirmation(checkpointRequest), 'terminal tasks cannot expose a live waiting checkpoint');
 });
 

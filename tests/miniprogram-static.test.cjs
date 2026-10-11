@@ -158,6 +158,19 @@ test("AI原checkout交接：实例host、人工复读原报价、默认关闭与
   await page.onAcceptBookingSubmission(); await page.onSubmitAcceptedBooking();
   assert.equal(page.data.aiStatus, "pending_reconcile"); assert.equal(JSON.stringify(page.data).includes("private transport"), false);
   await page.onSubmitAcceptedBooking(); assert.equal(submittedCalls, 2);
+  let hostCurrent = true, finishAcceptance;
+  const lateStates = [];
+  const { createCustomerBookingConsumer } = r.load("components/ai-native/booking-handoff");
+  const lateConsumer = createCustomerBookingConsumer({ ...submissionHost, isCurrent: () => hostCurrent,
+    acceptBookingSubmission: () => new Promise(resolve => { finishAcceptance = resolve; }) },
+    () => ({ tenantCode: "merchant", serviceCode: "camera", customerId: "customer-one", version: 1 }),
+    async () => quote, view => lateStates.push(view));
+  await lateConsumer.read(); await lateConsumer.continue();
+  const waitingAcceptance = lateConsumer.accept(), lateCount = lateStates.length;
+  hostCurrent = false; finishAcceptance(acceptance); await waitingAcceptance;
+  assert.equal(lateStates.length, lateCount, "expired host cannot publish late accepted input");
+  assert.equal(lateConsumer.snapshotAcceptance(), undefined);
+  lateConsumer.destroy();
   const transport = runtime(req => { assert.equal(req.method, "POST");
     assert.ok(req.url.includes("/api/client/v1/ai-native/entry/booking-submissions/"));
     ok(req, req.url.endsWith("/accept") ? acceptance : receipt); });

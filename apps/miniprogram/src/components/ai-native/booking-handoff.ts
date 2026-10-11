@@ -131,7 +131,7 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
     const epoch = ++generation; pending = true;
     if (kind === "reconcile") attempted = true;
     emit({ ...view, status: kind === "accept" ? "accepting" : kind === "submit" ? "submitting" : "checking", receipt: null });
-    const valid = () => active && generation === epoch && sameContext();
+    const valid = () => active && generation === epoch && sameContext() && (bound.isCurrent?.() ?? true);
     try {
       if (kind === "accept" || !acceptance) {
         const accepted = validateAcceptance(await bound.acceptBookingSubmission!({ handoffRef: bound.handoffRef }));

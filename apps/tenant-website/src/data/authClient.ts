@@ -170,7 +170,8 @@ export const sessionApi = {
   async readBookingHostCapabilities(): Promise<AiClientHostCapabilities> {
     return parse(await authedFetch('/ai-native/entry/host-capabilities/read', { method: 'POST', body: '{}' }, false));
   },
-  async readBookingHandoff(handoffRef: string): Promise<AiBookingHandoff> {
+  async readBookingHandoff(input: string | { handoffRef: string }): Promise<AiBookingHandoff> {
+    const handoffRef = typeof input === 'string' ? input : input.handoffRef;
     return parse(await authedFetch('/ai-native/entry/booking-handoffs/read', { method: 'POST', body: JSON.stringify({ handoffRef }) }, false));
   },
   me() { return authedJson<Record<string, unknown>>('/auth/me'); },
@@ -182,9 +183,6 @@ export const sessionApi = {
   availability(payload: unknown) { return authedJson<Record<string, unknown>>('/availability', { method: 'POST', body: JSON.stringify(payload) }); },
   createQuote(payload: unknown) { return authedJson<Record<string, unknown>>('/quotes', { method: 'POST', body: JSON.stringify(payload) }); },
   getQuote(id: string) { return authedJson<Record<string, unknown>>(`/quotes/${encodeURIComponent(id)}`); },
-  readBookingHandoff(input: { handoffRef: string }) {
-    return authedJson<AiBookingHandoff>('/ai-native/entry/booking-handoffs/read', { method: 'POST', body: JSON.stringify(input) });
-  },
   acceptBookingSubmission(input: { handoffRef: string }) {
     return authedJson<AiBookingSubmissionAcceptance>('/ai-native/entry/booking-submissions/accept', { method: 'POST', body: JSON.stringify(input) });
   },
