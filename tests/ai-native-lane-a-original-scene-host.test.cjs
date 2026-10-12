@@ -775,6 +775,13 @@ test('request-bound model runs original scenes and reads knowledge results witho
     const request = structuredClone(h.request), reference = structuredClone(h.reference);
     assert.equal(h.execution.sent.length, 0); assert.equal(h.factoryCalls.length, 0);
     assert.equal(h.state.aiRun[0].status, 'QUEUED');
+    const cursor = h.state.aiTask[0].eventCursor;
+    h.state.aiTask[0].eventCursor = 9007199254740993n;
+    const snapshot = await app.readTaskSnapshot(request, reference);
+    assert.equal(snapshot.taskId, h.created.task.taskId); assert.equal(snapshot.cursor, '9007199254740993');
+    assert.equal(snapshot.status, 'queued');
+    h.state.aiTask[0].eventCursor = cursor;
+    await assert.rejects(app.readTaskSnapshot(request, { ...reference, taskId: h.created.task.taskId }), e => e.code === 'AI_INVALID_INPUT');
     const recovery = await app.readRecovery(request, reference);
     assert.equal(recovery.automaticExecution, false);
     if (sceneCode === 'opening_diagnosis') {
@@ -826,6 +833,7 @@ test('request-bound model runs original scenes and reads knowledge results witho
       taskId: 'another-task', requestId: 'input-request', expectedRevision: 1, submissionKey: 'answer-a',
       answers: [{ fieldId: 'clarification_text', value: 'Synthetic clarification' }] } }), e => e.code === 'AI_ACCESS_DENIED');
     h.b.h.identity.session = false;
+    await assert.rejects(app.readTaskSnapshot(h.request, h.reference), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
     await assert.rejects(app.readModelResult(h.request, resultCommand), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
     await assert.rejects(app.reopenModelSource(h.request, { ...resultCommand, sourceKind: 'knowledge', sourceIndex: 0 }), e => ['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(e.code));
     assert.equal(h.execution.sent.length, 1);

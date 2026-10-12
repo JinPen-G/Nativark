@@ -130,6 +130,10 @@ test('selected quote task HTTP uses normal runner and current human decision wit
       inputRef: h.selection.originalInputRef };
     const events = await task.readTaskEvents(request, { original, after: '0', limit: 20 });
     assert.equal(events.taskId, h.selection.taskId);
+    const snapshot = await requests.readTaskSnapshot(request, original);
+    assert.equal(snapshot.taskId, h.selection.taskId); assert.equal(snapshot.status, 'waiting_confirmation');
+    assert.equal(typeof snapshot.cursor, 'string');
+    await assert.rejects(requests.readTaskSnapshot(request, { ...original, runId: h.selection.runId }), e => e.code === 'AI_INVALID_INPUT');
     const sceneRequest = { kind: 'original', original, taskId: h.selection.taskId,
       runId: h.selection.runId, review: { selection: h.selection, proposal: wait.proposal }, order: command };
     const sceneValid = ajv.compile(require('../packages/shared/src/ai-scene-request-draft-schemas').AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneModelTaskSceneDraft);
