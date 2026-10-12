@@ -159,6 +159,15 @@ for (const fail of ['write', 'commit', 'ack']) test(`actual accounting transacti
 test('dispatch evidence rechecks authorization after repository reads', async () => {
   const h = harness(); h.state.onRead = () => { h.state.revoked = true; };
   await assert.rejects(h.source().readDispatch('reservation'));
+  const changed = harness(); let queued = false;
+  changed.state.onRead = name => {
+    if (name === 'aiInvocationAdmission' && !queued) {
+      queued = true;
+      queueMicrotask(() => { changed.state.rows.aiGatewayAccountingReceipt.state = 'cancelled'; });
+    }
+  };
+  await assert.rejects(changed.source().readDispatch('reservation'), e => e.code === 'PENDING_RECONCILIATION');
+  assert.equal(changed.state.writes, 0, 'changed evidence is observed, never corrected by a read');
 });
 test('usage pricing cannot mutate the stored association used in returned evidence', async () => {
   const h = harness(); await h.source().recordUsage(call, 'reservation', { inputTokens: 1, outputTokens: 2 });

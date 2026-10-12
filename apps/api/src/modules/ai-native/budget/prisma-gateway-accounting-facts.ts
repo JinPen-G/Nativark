@@ -173,7 +173,10 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
       dispatchToken: receipt.dispatchToken, requestHash: receipt.requestHash, usageHash: receipt.usageHash,
       inputTokens: receipt.inputTokens?.toString() ?? null, outputTokens: receipt.outputTokens?.toString() ?? null,
       intentHash: invocation.intentHash, model: invocation.configuration, maxOutputTokens: invocation.maxOutputTokens,
-      actorId: admission.actorId, profileId: admission.profileId });
+      actorId: admission.actorId, profileId: admission.profileId,
+      admissionStatus: admission.status ?? null, admissionRevokedAt: admission.revokedAt?.toISOString() ?? null,
+      admissionCompletedAt: admission.completedAt?.toISOString() ?? null,
+      reservationStatus: rows.reservation.status, reservationDispatchState: rows.reservation.dispatchState });
   }
   private async revalidateCurrent(reservationId: string, initial: Awaited<ReturnType<PrismaGatewayAccountingFacts['current']>>) {
     const current = await this.current(reservationId);
@@ -183,9 +186,17 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
   async readDispatch(reservationId: string) {
     const initial = await this.current(reservationId);
     const rows = await this.rows(this.db, reservationId);
-    await this.revalidateCurrent(reservationId, initial);
     const state = rows.receipt.state === 'cancelled' ? 'not_dispatched' : rows.receipt.state === 'dispatched' ? 'dispatched' : 'unknown';
-    return { ...this.evidenceBinding(rows), state, dispatchToken: state === 'not_dispatched' ? null : rows.receipt.dispatchToken } as const;
+    // Capture primitive facts before the next await. Current authorization is
+    // necessary but cannot attest that an earlier accounting snapshot is fresh.
+    const evidence = { ...this.evidenceBinding(rows), state,
+      dispatchToken: state === 'not_dispatched' ? null : rows.receipt.dispatchToken } as const;
+    const fingerprint = this.evidenceFingerprint(rows);
+    await this.revalidateCurrent(reservationId, initial);
+    const current = await this.rows(this.db, reservationId);
+    if (fingerprint !== this.evidenceFingerprint(current)) throw new BudgetError('PENDING_RECONCILIATION');
+    await this.revalidateCurrent(reservationId, initial);
+    return evidence;
   }
   async readUsage(reservationId: string, evidenceRef: string, _reconcile: boolean) {
     const initial = await this.current(reservationId), { binding } = initial;
