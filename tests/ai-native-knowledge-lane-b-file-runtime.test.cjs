@@ -80,6 +80,10 @@ test('memory management request uses persisted human consent and fails closed wi
   const { HumanMemoryManagementController } = h.load('human-memory-management.controller');
   assert.deepEqual(HumanKnowledgeModule.registerMemoryManagementHttp().controllers, []);
   const deps = { db: f.db, auth: f.identity.auth, clock: f.ports.clock };
+  const serverModule = HumanKnowledgeModule.registerMemoryManagementRequests({ enabled: true, dependencies: deps });
+  assert.deepEqual(serverModule.controllers, []); assert.ok(serverModule.exports.includes(HumanMemoryManagementRequestFactory));
+  assert.deepEqual(HumanKnowledgeModule.registerMemoryManagementRequests().providers, []);
+  assert.throws(() => HumanKnowledgeModule.registerMemoryManagementRequests({ enabled: true }), { code: 'unavailable' });
   const controller = new HumanMemoryManagementController(new HumanMemoryManagementRequestFactory(deps));
   const request = { headers: { authorization: 'Bearer synthetic-session' } };
   const { requiredPermissions } = require('../apps/api/src/common/api-auth.guard');
@@ -132,8 +136,19 @@ test('memory management request uses persisted human consent and fails closed wi
   assert.equal((await controller.resumeConfirmation(request, original)).memory.revision, 2);
   assert.equal((await controller.state(request, { memoryId })).usable, true);
   assert.deepEqual((await controller.read(request, { memoryId })).memory.preference, { kind: 'locale', value: 'zh-CN' });
+  const consumer = serverModule.providers.find(row => row.provide === HumanMemoryManagementRequestFactory).useValue.open(request);
+  const selected = await consumer.selectPreferences({ kinds: ['locale'], limit: 3 });
+  assert.equal(selected.items.length, 1); assert.equal(selected.scope.workspaceId, 'space-1');
+  assert.equal(selected.owner.actorId, 'user-1'); assert.equal(selected.audience, 'operator');
+  assert.deepEqual(await consumer.revalidatePreferences(selected), selected);
+  assert.equal((await consumer.confirmationDetail({ memoryId })).confirmationRecordId, selected.items[0].confirmationRecordId);
+  await assert.rejects(consumer.revalidatePreferences({ ...selected, scope: { ...selected.scope, workspaceId: 'other-space' } }));
+  await assert.rejects(consumer.revalidatePreferences({ ...selected, items: [{ ...selected.items[0], preference: { kind: 'locale', value: 'en-US' } }] }));
   const revoked = await controller.revoke(request, { confirmation: 'revoke_memory_consent', command: { memoryId, expectedRevision: 2 } });
   assert.equal(revoked.semantics, 'consent_revoked_not_memory_deleted');
+  await assert.rejects(consumer.revalidatePreferences(selected));
+  assert.deepEqual((await consumer.selectPreferences({ kinds: ['locale'], limit: 3 })).items, []);
+  consumer.close(); await assert.rejects(consumer.selectPreferences({ kinds: ['locale'], limit: 3 }));
   const state = await controller.state(request, { memoryId });
   assert.equal(state.usable, false); assert.equal(state.consentStatus, 'revoked');
   assert.equal('preference' in state, false);
@@ -191,6 +206,13 @@ test('management request uploads use the original file policy and close request 
 
 test('first creation uses original upload receipt then real create parse index publish withdraw lifecycle', async t => {
   const f = fileFixture();
+  const { HumanKnowledgeManagementRequestFactory } = h.load('human-knowledge-management.composition');
+  assert.deepEqual(HumanKnowledgeModule.registerManagementRequests().providers, []);
+  assert.throws(() => HumanKnowledgeModule.registerManagementRequests({ enabled: true }), { code: 'unavailable' });
+  const serverModule = HumanKnowledgeModule.registerManagementRequests({ enabled: true, dependencies: f.deps });
+  assert.deepEqual(serverModule.controllers, []); assert.ok(serverModule.exports.includes(HumanKnowledgeManagementRequestFactory));
+  const lifecycle = serverModule.providers.find(row => row.provide === HumanKnowledgeManagementRequestFactory).useValue
+    .open({ headers: { authorization: 'Bearer synthetic-session' } });
   const module = HumanKnowledgeModule.registerFiles(f.deps);
   assert.ok(module.exports.includes(HumanKnowledgeUploadService)); assert.equal(f.reads(), 0);
   assert.ok(module.exports.includes(KNOWLEDGE_SCENE_OPTIONS));
@@ -216,8 +238,10 @@ test('first creation uses original upload receipt then real create parse index p
   assert.equal(f.reads(), 1);
   assert.equal((await f.api.management.reconcileParse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-1' })).parsing, 'parsed');
   assert.equal(f.reads(), 1);
-  const queued = await f.api.index.request({ documentId: 'doc-1', expectedRevision: 3, operationId: 'index-1', kind: 'upsert' });
-  const indexed = await f.api.index.resume({ documentId: 'doc-1', operationId: queued.indexJob.operationId, generation: queued.indexJob.generation });
+  assert.equal((await lifecycle.indexStatus({ documentId: 'doc-1' })).receipt, 'not_queued');
+  const queued = await lifecycle.requestIndex({ documentId: 'doc-1', expectedRevision: 3, operationId: 'index-1', kind: 'upsert' });
+  const indexed = await lifecycle.resumeIndex({ documentId: 'doc-1', operationId: queued.indexJob.operationId, generation: queued.indexJob.generation });
+  assert.equal((await lifecycle.indexStatus({ documentId: 'doc-1' })).receipt, 'recorded');
   const published = await f.api.management.publish({ documentId: 'doc-1', expectedRevision: indexed.revision, operationId: 'publish-1' });
   const preview = await f.api.management.preview('doc-1'); assert.match(preview.sources[0].snippet, /Synthetic SOP/);
   assert.equal((await f.api.management.list({ limit: 5 })).items.length, 1);
@@ -279,11 +303,20 @@ test('first creation uses original upload receipt then real create parse index p
   await assert.rejects(scene.revalidate(frozen, originalInputRef), { code: 'AI_RESOURCE_UNAVAILABLE' });
   assert.deepEqual((await withMemory.preparation.collect(memoryInput, { includePreferences: true })).preferences.items, []);
   f.allowDocument(bound.attachmentId, 2);
-  const withdrawn = await f.api.management.withdraw({ documentId: 'doc-1', expectedRevision: published.revision, operationId: 'withdraw-1' });
+  const withdrawn = (await lifecycle.withdraw({ confirmation: 'withdraw', command: { documentId: 'doc-1', expectedRevision: published.revision, operationId: 'withdraw-1' } })).document;
   assert.equal(withdrawn.publication, 'withdrawn');
   await assert.rejects(scene.revalidate(frozen, originalInputRef), { code: 'AI_RESOURCE_UNAVAILABLE' });
   await assert.rejects(f.api.management.preview('doc-1'), { code: 'unavailable' });
   assert.equal((await f.api.management.operation('doc-1', 'withdraw-1')).receipt, 'recorded');
+  await assert.rejects(lifecycle.resumeIndex({ documentId: 'doc-1', operationId: queued.indexJob.operationId, generation: queued.indexJob.generation }), { code: 'conflict' });
+  const removing = await lifecycle.indexStatus({ documentId: 'doc-1' });
+  assert.equal(removing.document.indexJob.kind, 'remove');
+  const removed = await lifecycle.resumeIndex({ documentId: 'doc-1', operationId: removing.document.indexJob.operationId, generation: removing.document.indexJob.generation });
+  assert.equal(removed.publication, 'withdrawn'); assert.equal(removed.indexing, 'not_indexed');
+  f.allowDocument(bound.attachmentId, 3);
+  const deleted = await lifecycle.delete({ confirmation: 'delete', command: { documentId: 'doc-1', expectedRevision: removed.revision, operationId: 'delete-1' } });
+  assert.equal(deleted.document.publication, 'deleted'); assert.equal(deleted.document.physicalIndexDeletion, 'not_verified');
+  lifecycle.close(); await assert.rejects(lifecycle.indexStatus({ documentId: 'doc-1' }), { code: 'unavailable' });
 });
 
 test('first upload denies changed payload, cross-workspace occupation, free metadata and missing storage', async () => {

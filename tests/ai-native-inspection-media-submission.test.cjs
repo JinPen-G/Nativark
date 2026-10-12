@@ -441,12 +441,21 @@ for(const mediaKind of ['image','audio']) test(`original inspection frozen ${med
   await assert.rejects(f.services.recognitionResults.read(successorReference));
   h.state.aiTaskInputReceipt[0].answers=originalAnswers;
   const save={...successorReference,operationId:'save-original-vision'};
-  const saved=await f.services.recognitionResults.save(save);
+  const savedReview=await f.services.saveRecognitionReview(save),saved=savedReview.receipt;
   assert.equal(saved.result.revision,3);
+  assert.equal(savedReview.savedRevisionMatchesCurrent,true);assert.equal(savedReview.adoption,'not_attempted');
+  assert.equal(savedReview.review.fields.find(field=>field.fieldCode==='mileage').human.value,42);
   assert.deepEqual(await f.services.recognitionResults.save(save),saved);
   assert.equal((await f.services.recognitionResults.reconcileSave(save)).status,'found');
   const after=await f.services.drafts.read({...target,draftId:d.result.draftId});
   assert.equal(after.state.fields.mileage.value,42);assert.deepEqual(after.state.candidates,[candidate]);
+  await f.services.drafts.edit({...target,draftId:d.result.draftId,operationId:'human-adopt-original',expectedRevision:after.revision,
+    bindingFingerprint:after.bindingFingerprint,edits:[{fieldCode:'mileage',candidateId:candidate.candidateId,decision:'accepted'}]});
+  const adopted=await f.services.readRecognitionSaveReview(save);
+  assert.equal(adopted.receipt.status,'found');assert.equal(adopted.savedRevisionMatchesCurrent,false);
+  assert.equal(adopted.businessActionRequested,false);
+  assert.equal(adopted.review.fields.find(field=>field.fieldCode==='mileage').human.value,43);
+  assert.equal(adopted.review.fields.find(field=>field.fieldCode==='mileage').human.decision,'accepted');
   await assert.rejects(f.services.readRecognitionReview(successorReference),{code:'REVISION_CONFLICT'});
   assert.equal(h.modelControl.sent.length,2);
   await assert.rejects(f.services.recognitionResults.save({...save,operationId:'new-key-old-revision'}));
