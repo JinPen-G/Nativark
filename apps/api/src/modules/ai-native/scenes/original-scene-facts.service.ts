@@ -20,6 +20,24 @@ const quoteConfirmation = originalRequestReferenceSchema.extend({
 
 export class AiOriginalSceneFactsService {
   constructor(private readonly requests: PrismaOriginalRequestRepository, private readonly tools: ReturnType<typeof composeAiAuthorizedBusinessTools>) {}
+  async readOpeningSection(value: unknown) {
+    const parsed = originalRequestReferenceSchema.extend({
+      key: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u)
+    }).strict().safeParse(value);
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const command = freezeOriginalInput(parsed.data), ref = { draftVersion: command.draftVersion, inputRef: command.inputRef };
+    const original = await this.requests.read(ref);
+    if (original.request.sceneCode !== 'opening_diagnosis') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    if (!original.request.input.sections.includes(command.key)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const before = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
+    const section = freezeOriginalInput(structuredClone(await this.tools.openingSection({ key: command.key })));
+    const after = await this.requests.read(ref);
+    const grant = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
+    if (originalIdentityHash(before.context) !== originalIdentityHash(grant.context)
+      || original.receipt.contentHash !== after.receipt.contentHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    return freezeOriginalInput({ original: original.receipt, section, execution: 'not_attempted' as const,
+      proposalPersistence: 'unavailable_no_formal_section_proposal_port' as const });
+  }
   async reopenOrderCitation(value: unknown) {
     const parsed = citationSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');

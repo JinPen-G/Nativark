@@ -47,6 +47,9 @@ test('request-bound business consumers reopen original citations and prepare onl
   await assert.rejects(app.reopenOrderCitation(request, { ...citation, scope: { kind: 'platform' } }), e => e.code === 'AI_INVALID_INPUT');
   const opening = await app.create(request, h.command('opening_diagnosis', 'opening-consumer'));
   const material = await app.prepareTaskMaterial(request, h.ref(opening.receipt.inputRef));
+  const section = await app.readOpeningSection(request, { ...h.ref(opening.receipt.inputRef), key: 'item_groups' });
+  assert.equal(section.section.key, 'item_groups'); assert.equal(section.execution, 'not_attempted');
+  await assert.rejects(app.readOpeningSection(request, { ...h.ref(opening.receipt.inputRef), key: 'workspace_profile' }), e => e.code === 'AI_ACCESS_DENIED');
   const command = { ...h.ref(opening.receipt.inputRef), sections: [{ key: 'item_groups',
     expectedVersion: material.material.configVersion, changes: [{ field: 'itemLabel', value: '合成器材' }] }] };
   const prepared = await app.prepareOpeningSections(request, command);
@@ -772,6 +775,27 @@ test('request-bound model runs original scenes and reads knowledge results witho
     const request = structuredClone(h.request), reference = structuredClone(h.reference);
     assert.equal(h.execution.sent.length, 0); assert.equal(h.factoryCalls.length, 0);
     assert.equal(h.state.aiRun[0].status, 'QUEUED');
+    const recovery = await app.readRecovery(request, reference);
+    assert.equal(recovery.automaticExecution, false);
+    if (sceneCode === 'opening_diagnosis') {
+      const section = await app.readOpeningSection(request, { ...reference, key: 'item_groups' });
+      assert.equal(section.section.key, 'item_groups');
+    }
+    if (sceneCode === 'quote_clarification') {
+      const review = await app.reviewQuote(request, reference);
+      assert.equal(review.quotePersistence, 'not_attempted');
+      await assert.rejects(app.readQuoteReceipt(request, reference), e => e.code === 'FORBIDDEN');
+      // The Core method is real; only the missing exact-operation database
+      // lookup is supplied. No quote/result or permission is fabricated.
+      h.b.businessFacts.findQuoteForOriginalReference = async (tenantId, key) => {
+        assert.equal(tenantId, 'tenant_001'); assert.match(key, /^[a-f0-9]{64}$/u); return null;
+      };
+      const receipt = await app.readQuoteReceipt(request, reference);
+      assert.equal(receipt.observation, 'original_operation_only');
+      assert.equal(receipt.result.quotePersistence, 'unknown');
+    }
+    assert.equal(h.factoryCalls.length, 0, 'business reads must not construct run dependencies');
+    assert.equal(h.execution.sent.length, 0, 'recovery/receipt reads never call the model');
     assert.throws(() => composeRequestBoundOriginalSceneModel(h.modelDependencies, h.options), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
     assert.throws(() => composeRequestBoundOriginalSceneModel(h.requestDependencies, { ...h.options, enabled: false }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
     assert.throws(() => composeRequestBoundOriginalSceneModel(h.requestDependencies, { ...h.options, runServices: h.run }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
