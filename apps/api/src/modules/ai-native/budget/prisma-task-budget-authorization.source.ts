@@ -25,7 +25,10 @@ export class PrismaTaskBudgetAuthorizationSource implements BudgetAuthorizationS
   private readonly bindings;
   private readonly clock: () => Date;
   readonly scopes;
-  constructor(private readonly input: PersistedTaskAuthorizationDependencies & { guard: Pick<ApiAuthGuard, 'canActivate'> }) {
+  private readonly originalTaskId?: string;
+  constructor(private readonly input: PersistedTaskAuthorizationDependencies & { guard: Pick<ApiAuthGuard, 'canActivate'>; taskId?: string }) {
+    if (input.taskId !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(input.taskId)) throw new BudgetError('FORBIDDEN');
+    this.originalTaskId = input.taskId;
     this.clock = input.clock ?? (() => new Date());
     this.authorization = composePersistedTaskAuthorization(input);
     this.scopes = this.authorization.scopes;
@@ -60,7 +63,8 @@ export class PrismaTaskBudgetAuthorizationSource implements BudgetAuthorizationS
         || requestFingerprint(association.scope) !== requestFingerprint(context.scope)) throw new BudgetError('FORBIDDEN');
       const row = await this.input.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: {
         scopeId: before.scope.id, callId: association.requestId } } });
-      if (!row || row.scopeId !== before.scope.id || row.actorId !== gatewayContext.actorId || !isGatewayConfig(row.configuration)) throw new BudgetError('FORBIDDEN');
+      if (!row || (this.originalTaskId !== undefined && row.taskId !== this.originalTaskId)
+        || row.scopeId !== before.scope.id || row.actorId !== gatewayContext.actorId || !isGatewayConfig(row.configuration)) throw new BudgetError('FORBIDDEN');
       const dispatching = action === 'reserve' || action === 'dispatch';
       const binding = dispatching ? await this.bindings.resolveForReserve(gatewayContext, {
         callId: row.callId, model: row.configuration.model, maxOutputTokens: row.maxOutputTokens, intentHash: row.intentHash,

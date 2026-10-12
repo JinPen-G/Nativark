@@ -4,6 +4,48 @@ require('ts-node').register({ transpileOnly: false, compilerOptions: { module: '
 const { modelHostHarness } = require('./fixtures/ai-native/task-model-host.cjs');
 const { composeTaskModelHost } = require('../apps/api/src/modules/ai-native/runner/model-task-host.composition');
 
+test('formal call task host assembles the original runner and persistent ledger without a default live configuration', async () => {
+  const { composePersistedTaskCallGateway, composePersistedCallTaskModelHost } = require('../apps/api/src/modules/ai-native/task-model-gateway.composition');
+  const { createTaskInputStore } = require('./fixtures/ai-native/task-input-store.cjs');
+  const h = await modelHostHarness();
+  // Database delegates only, not a substitute Gateway/authority/budget. The
+  // missing configuration is deliberate: no default profile or live evidence.
+  const records = createTaskInputStore({ aiTenantModelConfiguration: [], systemParameterSet: [], aiPlatformModelConnection: [], aiProviderCapabilityEvidence: [] });
+  for (const table of ['aiTenantModelConfiguration', 'systemParameterSet', 'aiPlatformModelConnection', 'aiProviderCapabilityEvidence']) h.db[table] = records.db[table];
+  // Platform management is not exercised; its write delegate cannot fake a save.
+  h.db.aiPlatformModelConnection.update = async () => { throw Error('unexpected platform write'); };
+  let secrets = 0, sends = 0;
+  const gateway = { secrets: { encrypt: () => { secrets++; throw Error('unexpected encryption'); },
+    decrypt: () => { secrets++; throw Error('unexpected decryption'); } },
+    platformProfileId: 'platform-profile-a', routeScene: 'chat', callPriceVersion: 'synthetic-calls-1',
+    adapters: [{ provider: 'openai_chat_completions', features: ['text'],
+      generate: async () => { sends++; throw Error('unexpected transport'); } }], audit: { append: async () => {} } };
+  const dependencies = { ...h.authorization, db: h.db, clock: h.config.clock, guard: h.config.guard, taskId: 'task-a', ...gateway };
+  const begin = h.trace.length;
+  const assembled = composePersistedTaskCallGateway(dependencies);
+  assert.equal(assembled.runtime.evidence, 'live');
+  assert.equal(typeof assembled.financialEvidence.readDispatch, 'function');
+  assert.deepEqual(h.trace.slice(begin), []);
+  await assert.rejects(assembled.runtime.ports.routing.resolve({ tenantId: 'tenant-a', workspaceId: 'workspace-a', actorId: 'user-a' }, ['text']),
+    error => ['AI_REVISION_CONFLICT', 'FORBIDDEN', 'AI_RESOURCE_UNAVAILABLE'].includes(error.code));
+  const { runtime, priceVersion, financialEvidence, ...config } = h.config;
+  const root = composePersistedCallTaskModelHost({ ...config, gateway });
+  await assert.rejects(root.application.start(h.query), error => error.code === 'PROVIDER_UNAVAILABLE');
+  assert.equal(sends, 0); assert.equal(secrets, 0);
+  assert.equal(h.state.aiGatewayInvocation.length, 0);
+  assert.equal(h.state.aiBudgetReservation.length, 0);
+  assert.equal(h.state.aiGatewayAccountingReceipt.length, 0);
+  assert.throws(() => composePersistedCallTaskModelHost({ ...config, gateway: { ...gateway, routeScene: 'reasoning' } }),
+    error => error.code === 'CONFIG_INVALID');
+  const { PrismaTaskBudgetAuthorizationSource } = require('../apps/api/src/modules/ai-native/budget/prisma-task-budget-authorization.source');
+  const bound = new PrismaTaskBudgetAuthorizationSource(dependencies);
+  const context = await bound.resolveContext();
+  dependencies.taskId = 'task-b';
+  h.state.aiGatewayInvocation.push({ scopeId: 'scope-a', callId: 'other-call', taskId: 'task-b', actorId: 'user-a' });
+  await assert.rejects(bound.authorize('reserve', context, { association: { requestId: 'other-call', scope: context.scope } }),
+    error => error.code === 'FORBIDDEN');
+});
+
 test('image model host executes the original queued task with one invocation, original accounting and resource charges', async () => {
   const h = await modelHostHarness('image');
   const result = await h.root.application.start(h.query);
