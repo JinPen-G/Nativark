@@ -20,6 +20,23 @@ import { HumanMemoryManagementController } from './human-memory-management.contr
 
 @Module({})
 export class HumanKnowledgeModule {
+  /** Server-only opt-in. No HTTP route, startup work or ambient credentials. */
+  static registerManagementRequests(options: { enabled?: boolean; dependencies?: HumanKnowledgeManagementDependencies } = {}): DynamicModule {
+    if (options.enabled !== true) return { module: HumanKnowledgeModule, controllers: [], providers: [], exports: [] };
+    if (!options.dependencies) return unavailable();
+    return { module: HumanKnowledgeModule, controllers: [],
+      providers: [{ provide: HumanKnowledgeManagementRequestFactory, useValue: new HumanKnowledgeManagementRequestFactory(options.dependencies) }],
+      exports: [HumanKnowledgeManagementRequestFactory] };
+  }
+
+  static registerMemoryManagementRequests(options: { enabled?: boolean; dependencies?: HumanMemoryManagementDependencies } = {}): DynamicModule {
+    if (options.enabled !== true) return { module: HumanKnowledgeModule, controllers: [], providers: [], exports: [] };
+    if (!options.dependencies) return unavailable();
+    return { module: HumanKnowledgeModule, controllers: [],
+      providers: [{ provide: HumanMemoryManagementRequestFactory, useValue: new HumanMemoryManagementRequestFactory(options.dependencies) }],
+      exports: [HumanMemoryManagementRequestFactory] };
+  }
+
   static registerMemoryManagementHttp(options: { enabled?: boolean; dependencies?: HumanMemoryManagementDependencies } = {}): DynamicModule {
     if (options.enabled !== true) return { module: HumanKnowledgeModule, controllers: [], providers: [] };
     if (!options.dependencies) return unavailable();

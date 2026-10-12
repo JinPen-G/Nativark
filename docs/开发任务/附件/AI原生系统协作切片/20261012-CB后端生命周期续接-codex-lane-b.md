@@ -37,3 +37,30 @@ API compiler API noEmit：原严格选项，内存 rootDir/baseUrl 本树，shar
 命令：`node -r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs --test --test-name-pattern='original inspection frozen' tests/ai-native-inspection-media-submission.test.cjs`：2 pass / 0 fail / 0 cancelled / 0 skip / 0 todo、exit 0。原 image/audio runner/持久结果/财务证据/来源验证→保存→当前审阅→显式人工采用→同原保存收据读回，人工采用为 43，保存前后人工值 42 未被识别自动覆盖；采用后旧保存修订标 false，不新派发，原未知/撤权/附件变化拒绝仍验证。Positive 使用既有 operator 测试身份与事务/模型替身，不冒称正式 staff 执行政策或真实图像语音能力验收。
 
 源码 noEmit 根 inspection-assist.composition.ts：1090 files、0 diagnostics、exit 0，diff check exit 0。原 partial-safe 公共结果/正式 staff 新任务动作政策仍缺；unknown 不暴露候选，不私改 runner、公共政策、Gateway、预算或 Core。新增联读失败可能发生在保存已提交后，继续原 operationId 核对，不认为失败等于未写入或换键重新保存。未改任何 UI。
+
+## 第四片：默认关闭的服务器显式 DI 出口
+
+原 HumanKnowledgeModule 新增 `registerManagementRequests` 与 `registerMemoryManagementRequests`；两者默认空 provider/controller/export，显式 enabled=true 仍需完整原依赖。仅导出原 request factory，无 HTTP/worker/AppModule 注册，不创建活跃凭据会话、读存储或索引。每次由服务端调用 `factory.open({headers})`，原逐动作授权和 request.close 保持不变，宿主 finally 关闭；启用模块不是提供管理/文档/记忆许可。
+
+只改 human-knowledge.module.ts 和同一原 file-runtime 测试，用模块实际 provider 获取 request factory，继续原正常链及拒绝链。定向原两项 `--test-name-pattern='first creation uses original upload receipt|memory management request uses persisted'`：2 pass / 0 fail / 0 cancelled / 0 skip / 0 todo、exit 0。noEmit 根 human-knowledge.module.ts：848 files、0 diagnostics、exit 0，diff check exit 0。不是全仓或整项验收，不累加各阶段计数。
+
+## 完整包接入与剩余边界
+
+提交依赖顺序：`b0c36a920f44bb5bab67afc2389c6bf14caa01a0` → `ac348553ccf314f9c6f2ddb124c8b265e4870c2d` → `1cdcadc9739338a7bc7f4dd593d11cdfc743ce21` → `157b75430fca4481cf8e76aaee5a22038cd30936` → 本记录最后 DI 出口提交（实际 SHA 由 Git 与对话交接提供）。不是重导 CB14 或旧 WIP；原 output/stash/ref 保留。
+
+服务器使用：
+
+- 知识 root 提供原 AuthService、db/policyDb、clock、TenantIntegrationService 与真实受控文件读取；显式模块提供 HumanKnowledgeManagementRequestFactory；每个请求 open/close，create/revise/parse/publish/withdraw/delete/operationStatus 原方法不变，新增原索引 status/request/resume 可由服务器应用显式调用。HTTP 索引路由/合同未提供，不新增公共权限码；管理政策和当前文件归属缺失拒绝。
+- 模型输入继续原 `knowledge-file.composition.sceneKnowledge(includePreferences)` 交 `original-scene-model.composition`，实际材料由原 preparation collect/revalidate 和原 publisher 冻结。主体、版本、正文指纹、来源集合与确认偏好仍在原链验证。本包没有改 scenes/publisher，也没有新生产 frozen 输入/Invocation；完整正式模型派发与财务成功链不在本次证据范围。
+- 记忆 root 提供原 db/Auth/clock/正式持久动作政策，服务器 module 提供 HumanMemoryManagementRequestFactory；显式 kinds 选择、保存本次材料，真正使用前 `revalidatePreferences`，变化重新收集，不静默换值。原确认/修改/撤销/删除/原操作恢复仍原方法，原确认详情单独读，不将历史收据当当前有效值。
+- 员工 `StaffInspectionRequestFactory.open` 与显式 InspectionAssist 组合提供新保存/审阅联读；原 HTTP result-save/result-save-receipt 保持原载荷消费。采用/修改仍原 drafts.edit，准备/业务提交仍原 submission，读取原业务收据仍纯 readReceipt。
+
+准确待主线事项：
+
+1. 原 staff 新图像/音频任务需置备同一主体、scope、scene/step 的 `read_step_terminal`/执行等正式动作政策；本包不自动发布政策。具体入口为 task-authorization.composition 与 composeInspectionRecognitionTaskHost 所需依赖。
+2. `runner/ai-task-result.repository.ts` 的 AiTaskResultProjection 仅 succeeded/failed/unknown；缺 partial-safe 持久可读内容/完整性合同，unknown 不能保存或展示截断候选，本线不扩公共状态。
+3. 多 allocation 原准备只允许 manual_review_only；原 OriginalInspectionApplication/Controller/Guard/Core/receipt 与签名/模板/资源条件必须真实提供，不以候选或保存收据授予 order-wide 提交。
+4. 知识 HTTP 索引映射尚未有 shared/Guard 白名单合同，仅服务器 DI 已接。原正式管理根、知识/记忆动作政策、知识附件业务绑定、受控 file runtime 均为必需依赖，没配置不回退 owner 全权。已有实现不表示真实对象存储/ACL 部署已验。
+5. 关系索引任务接续与单进程缓存/当前 head 拒绝不等于外部分布式物理删除完成；逻辑墓碑仍保留 physicalIndexDeletion=not_verified。没有新增队列/调度或留存清理政策。
+
+本包合法源码接线已交，未接公共合同与真实环境按以上逐项保留，不宣称 AIN10/19/20/24 或 M1 完成。没有改三端 UI/主文档/中央记录/身份内核/共享 schema/迁移/Gateway/预算/审批/Core，无生产启用。

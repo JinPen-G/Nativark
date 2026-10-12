@@ -80,6 +80,10 @@ test('memory management request uses persisted human consent and fails closed wi
   const { HumanMemoryManagementController } = h.load('human-memory-management.controller');
   assert.deepEqual(HumanKnowledgeModule.registerMemoryManagementHttp().controllers, []);
   const deps = { db: f.db, auth: f.identity.auth, clock: f.ports.clock };
+  const serverModule = HumanKnowledgeModule.registerMemoryManagementRequests({ enabled: true, dependencies: deps });
+  assert.deepEqual(serverModule.controllers, []); assert.ok(serverModule.exports.includes(HumanMemoryManagementRequestFactory));
+  assert.deepEqual(HumanKnowledgeModule.registerMemoryManagementRequests().providers, []);
+  assert.throws(() => HumanKnowledgeModule.registerMemoryManagementRequests({ enabled: true }), { code: 'unavailable' });
   const controller = new HumanMemoryManagementController(new HumanMemoryManagementRequestFactory(deps));
   const request = { headers: { authorization: 'Bearer synthetic-session' } };
   const { requiredPermissions } = require('../apps/api/src/common/api-auth.guard');
@@ -132,7 +136,7 @@ test('memory management request uses persisted human consent and fails closed wi
   assert.equal((await controller.resumeConfirmation(request, original)).memory.revision, 2);
   assert.equal((await controller.state(request, { memoryId })).usable, true);
   assert.deepEqual((await controller.read(request, { memoryId })).memory.preference, { kind: 'locale', value: 'zh-CN' });
-  const consumer = new HumanMemoryManagementRequestFactory(deps).open(request);
+  const consumer = serverModule.providers.find(row => row.provide === HumanMemoryManagementRequestFactory).useValue.open(request);
   const selected = await consumer.selectPreferences({ kinds: ['locale'], limit: 3 });
   assert.equal(selected.items.length, 1); assert.equal(selected.scope.workspaceId, 'space-1');
   assert.equal(selected.owner.actorId, 'user-1'); assert.equal(selected.audience, 'operator');
@@ -203,7 +207,12 @@ test('management request uploads use the original file policy and close request 
 test('first creation uses original upload receipt then real create parse index publish withdraw lifecycle', async t => {
   const f = fileFixture();
   const { HumanKnowledgeManagementRequestFactory } = h.load('human-knowledge-management.composition');
-  const lifecycle = new HumanKnowledgeManagementRequestFactory(f.deps).open({ headers: { authorization: 'Bearer synthetic-session' } });
+  assert.deepEqual(HumanKnowledgeModule.registerManagementRequests().providers, []);
+  assert.throws(() => HumanKnowledgeModule.registerManagementRequests({ enabled: true }), { code: 'unavailable' });
+  const serverModule = HumanKnowledgeModule.registerManagementRequests({ enabled: true, dependencies: f.deps });
+  assert.deepEqual(serverModule.controllers, []); assert.ok(serverModule.exports.includes(HumanKnowledgeManagementRequestFactory));
+  const lifecycle = serverModule.providers.find(row => row.provide === HumanKnowledgeManagementRequestFactory).useValue
+    .open({ headers: { authorization: 'Bearer synthetic-session' } });
   const module = HumanKnowledgeModule.registerFiles(f.deps);
   assert.ok(module.exports.includes(HumanKnowledgeUploadService)); assert.equal(f.reads(), 0);
   assert.ok(module.exports.includes(KNOWLEDGE_SCENE_OPTIONS));
