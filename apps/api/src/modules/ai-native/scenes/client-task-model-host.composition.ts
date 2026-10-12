@@ -56,6 +56,11 @@ export async function composeClientOriginalTaskInputReader(input: Pick<Dependenc
       const result = await inputs.readSubmission({ ...structuredClone(value), taskId });
       await authorization.authority.resolve(taskId, 'read_metadata');
       return result;
+    },
+    async settleInputCancellation() {
+      // This path uses the original stored result/question/recorded charges as
+      // a witness. It does not resolve a model or acquire execution permission.
+      return authorization.cancellation.settleReleasedInputWait(input.db, plans, input.inputSource);
     }
   });
 }

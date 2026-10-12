@@ -11,6 +11,7 @@ import { AiClientTaskAuthority, clientTaskSceneSchema, type AiAuthorizedClientMa
 import { composeClientMaterialTasks } from './client-task.composition';
 import { clientTaskCommandSchema, PrismaClientTaskInputRepository } from './prisma-client-task-input.repository';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
+import { PrismaTaskInputRepository } from '../task-input/prisma-task-input.repository';
 
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 type ClientTaskOperation = 'read' | 'claim' | 'execute' | 'transition' | 'accounting' | 'request_input' | 'submit_input' | 'resume_input' | 'cancel';
@@ -91,7 +92,35 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
   return Object.freeze({ scopes, authority: actions, tasks: new AiTaskRepository(dependencies.db, actions, clock),
     /** Narrow cancellation consumer, not a general transition/execute grant.
      * Only the fixed cancel_requested command can reach this private writer. */
-    cancellation: Object.freeze({ async request(value: unknown) {
+    cancellation: Object.freeze({
+      /** Server-only convergence of an already requested, proved released input
+       * wait. No execute/transition capability is exported to the caller. */
+      async settleReleasedInputWait(db: ConstructorParameters<typeof PrismaTaskInputRepository>[0],
+        plans: ConstructorParameters<typeof PrismaTaskInputRepository>[2],
+        source: ConstructorParameters<typeof PrismaTaskInputRepository>[3]) {
+        if (!Object.is(db, dependencies.db)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const before = await readGrant(null, 'cancel');
+        const cancellationAuthority: AiTaskRepositoryAuthority = { resolve: (taskId, operation) => {
+          if (taskId !== before.taskId) return Promise.reject(denied());
+          if (operation === 'transition_task') return authorize(taskId, 'cancel');
+          if (operation === 'read_metadata') return authorize(taskId, 'read');
+          return Promise.reject(denied());
+        } };
+        const scopedTasks = new AiTaskRepository(dependencies.db, cancellationAuthority, clock);
+        const access = await scopedTasks.resolveAccess(before.taskId, 'read_metadata');
+        const task = await dependencies.db.aiTask.findFirst({ where: access.where,
+          select: { id: true, revision: true, status: true } });
+        if (!task || task.id !== before.taskId) throw denied();
+        if (task.status !== 'CANCEL_REQUESTED') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const inputs = new PrismaTaskInputRepository(db, scopedTasks, plans, source, clock);
+        const receipt = await new AiTaskTransitionRepository(dependencies.db, cancellationAuthority, clock)
+          .settleInputCancellation({ taskId: before.taskId, expectedRevision: task.revision,
+            to: 'cancelled', reason: 'cancel_settled' }, (tx, key) => inputs.closeCancelledInputWait(tx, key));
+        const after = await readGrant(before.taskId, 'read');
+        if (identityHash(before.context) !== identityHash(after.context)) throw denied();
+        return freezeOriginalInput({ receipt, cancellation: 'released_input_wait_settled' as const,
+          externalRollback: 'not_claimed' as const, retryable: false as const });
+      }, async request(value: unknown) {
       const parsed = z.object({ expectedRevision: z.number().int().min(1).max(4294967294) }).strict()
         .safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');

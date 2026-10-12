@@ -1841,6 +1841,10 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.equal('receipt' in cancelReceipt, false); assert.equal('runRevision' in cancelReceipt, false);
   assert.equal(taskStore.state.aiTask.find(row => row.id === created.task.taskId).status, 'CANCEL_REQUESTED');
   assert.equal((await resultApp.readOriginalTaskExecution(request, taskCommand, { db })).task.status, 'cancel_requested');
+  const beforeMissingWaitProof = clone(taskStore.state);
+  await assert.rejects(resultApp.reconcileOriginalTaskInputCancellation(request, taskCommand, readSource),
+    e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  assert.deepEqual(taskStore.state, beforeMissingWaitProof, 'no released measured wait means no cancellation convergence');
   assert.equal(countCreates(), cancelCreates);
   await assert.rejects(resultApp.requestOriginalTaskCancellation(request, cancelCommand), e => e.code === 'AI_REVISION_CONFLICT');
   await assert.rejects(cancellationHttp.requestTaskCancellation(request, cancelCommand), e => e.getStatus?.() === 409);

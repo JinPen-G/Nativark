@@ -433,7 +433,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   };
   const readOriginalTaskInput = async (request: AiClientApplicationRequest, value: unknown,
     source: Pick<Parameters<typeof composeClientOriginalTaskInputReader>[0], 'db' | 'inputSource' | 'gatewayScene'>,
-    answers?: Omit<AiTaskInputSubmissionDraft, 'taskId'>) => {
+    answers?: Omit<AiTaskInputSubmissionDraft, 'taskId'>, settleCancellation = false) => {
     requireEntry();
     if (!taskDependencies || source?.db !== dependencies.db) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_input_dependencies_missing');
     const command = parseEntry(clientTaskCommandSchema, structuredClone(value));
@@ -448,12 +448,19 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       };
       const reader = await composeClientOriginalTaskInputReader({ ...source,
         clientScene: taskDependencies, subscriptions: taskDependencies.subscriptions, loadMaterial, clock }, command);
-      const result = answers ? await reader.readSubmission(answers) : await reader.readPending();
+      const result = settleCancellation ? await reader.settleInputCancellation()
+        : answers ? await reader.readSubmission(answers) : await reader.readPending();
       await bound.assertCurrent();
       return result;
     });
   };
   return Object.freeze({
+    /** Server-only, original released-input witness; not a generic cancellation
+     * finalizer and never a model/provider or budget-dependent operation. */
+    reconcileOriginalTaskInputCancellation(request: AiClientApplicationRequest, value: unknown,
+      source: Pick<Parameters<typeof composeClientOriginalTaskInputReader>[0], 'db' | 'inputSource' | 'gatewayScene'>) {
+      return readOriginalTaskInput(request, value, source, undefined, true);
+    },
     /** Original customer cancellation request only. No caller task/run/holder,
      * provider, approval, budget release or claim of external rollback. */
     async requestOriginalTaskCancellation(request: AiClientApplicationRequest, value: unknown) {
