@@ -6,12 +6,19 @@ import { knowledgeManagementView } from './human-knowledge.service';
 import { requiredPort, unavailable } from './knowledge-errors';
 import { draftInput, id, mutationInput, parse } from './knowledge-validation';
 import type { FileUploadSessionSummary } from '@rental-os/shared';
+import type { HumanKnowledgeIndexService } from './human-knowledge-index.service';
 
 export type HumanKnowledgeManagementDependencies = Omit<KnowledgeFileApplicationDependencies, 'credentials' | 'policyManagement' | 'memory'>;
 export type HumanKnowledgeManagementHttpRequest = { headers: { authorization?: unknown } };
 export type HumanKnowledgeManagementRequest = {
   [K in keyof AiKnowledgeManagementHttpResponsesDraft]: (value: unknown) => Promise<AiKnowledgeManagementHttpResponsesDraft[K]>;
-} & { close(): void };
+} & {
+  /** Server application only; no new HTTP contract or worker registration. */
+  indexStatus(value: unknown): Promise<Awaited<ReturnType<HumanKnowledgeIndexService['status']>>>;
+  requestIndex(value: unknown): ReturnType<HumanKnowledgeIndexService['request']>;
+  resumeIndex(value: unknown): ReturnType<HumanKnowledgeIndexService['resume']>;
+  close(): void;
+};
 
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
 const createInput = z.object({ confirmation: z.literal('create'), command: draftInput }).strict();
@@ -57,7 +64,7 @@ export class HumanKnowledgeManagementRequestFactory {
     } };
     const { db, auth, clock, integrations, objectIO } = this.dependencies;
     // File access carries a session too; never reuse a runtime bound to another request.
-    const { management, uploads } = composeKnowledgeFileApplication({ db, auth, clock, integrations, objectIO, credentials });
+    const { management, uploads, index } = composeKnowledgeFileApplication({ db, auth, clock, integrations, objectIO, credentials });
     const uploadSession = (result: FileUploadSessionSummary & { documentId: string }) => ({
       sessionId: result.sessionId, fileAssetId: result.fileAssetId, provider: result.provider,
       mode: result.mode, status: result.status, expiresAt: result.expiresAt,
@@ -73,6 +80,9 @@ export class HumanKnowledgeManagementRequestFactory {
       return response(command.operationId, await management[action](command));
     };
     return {
+      indexStatus: value => index.status(parse(z.object({ documentId: id }).strict(), value).documentId),
+      requestIndex: value => index.request(value),
+      resumeIndex: value => index.resume(value),
       observeUpload: value => uploads.observe(value),
       observeRevisionUpload: value => uploads.observeRevision(value),
       beginUpload: async value => {
