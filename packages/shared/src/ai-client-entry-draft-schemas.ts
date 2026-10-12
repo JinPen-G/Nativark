@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AI_CUSTOMER_ENTRY_SURFACES } from './ai-entry-action-draft';
 import { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
+import { AI_TASK_INPUT_DRAFT_VERSION, isAiTaskInputContractDraft, type AiTaskInputContractDraft } from './ai-task-input-draft';
 
 export const AI_CLIENT_HOST_CAPABILITIES_VERSION = 'ain-client-host-capabilities-1' as const;
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
@@ -26,6 +27,17 @@ export const aiClientTaskInputCancellationReceiptSchema = aiClientTaskCancelRece
   externalRollback: z.literal('not_claimed')
 }).strict();
 export type AiClientTaskInputCancellationReceipt = z.infer<typeof aiClientTaskInputCancellationReceiptSchema>;
+/** The original input contract remains authoritative; no parallel field DSL. */
+export const aiClientTaskInputReadResponseSchema = z.discriminatedUnion('state', [
+  z.object({ contractVersion: z.literal(AI_TASK_INPUT_DRAFT_VERSION), state: z.literal('pending'),
+    question: z.object({ requestId: id.max(36), revision: z.number().int().min(1).max(4294967294),
+      expiresAt: z.string().datetime({ offset: true }),
+      contract: z.custom<AiTaskInputContractDraft>(isAiTaskInputContractDraft) }).strict(),
+    execution: z.literal('not_authorized_by_observation') }).strict(),
+  z.object({ contractVersion: z.literal(AI_TASK_INPUT_DRAFT_VERSION), state: z.literal('not_pending'),
+    question: z.null(), execution: z.literal('not_authorized_by_observation') }).strict()
+]);
+export type AiClientTaskInputReadResponse = z.infer<typeof aiClientTaskInputReadResponseSchema>;
 export const aiClientTaskEventsReadRequestSchema = aiClientTaskReadRequestSchema.extend({
   after: z.string().regex(/^(0|[1-9][0-9]{0,19})$/u), limit: z.number().int().min(1).max(100)
 }).strict();

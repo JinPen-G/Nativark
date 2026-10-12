@@ -1429,7 +1429,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const bookingHttp = new AiClientEntryController(entryModule.providers[0].useFactory());
   for (const method of ['readHostCapabilities', 'issueAction', 'createBookingDraft', 'chooseBookingDraft', 'readBookingDraft',
     'handoffBookingDraft', 'readBookingHandoff', 'readBookingOperation',
-    'acceptBookingSubmission', 'submitAcceptedBooking', 'readBookingSubmission', 'requestTaskCancellation', 'reconcileTaskInputCancellation']) {
+    'acceptBookingSubmission', 'submitAcceptedBooking', 'readBookingSubmission', 'requestTaskCancellation', 'reconcileTaskInputCancellation', 'readTaskInput']) {
     assert.equal(Reflect.getMetadata('path', AiClientEntryController.prototype[method]), AI_CLIENT_ENTRY_HTTP_DRAFT[method]);
   }
   const { aiClientHostCapabilitiesSchema } = require('../packages/shared/src/ai-client-entry-draft-schemas');
@@ -1742,6 +1742,14 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const resultApp = composeRequestBoundClientApplication({ ...taskDependencies, taskInputs: readSource },
     { ...configuration, entry: { enabled: true, releaseRevision: 'result-read-1' } });
   const executionBefore = clone(taskStore.state);
+  const inputHttp = new AiClientEntryController(resultApp);
+  assert.equal(await resultApp.readOriginalTaskModelInput(request, taskCommand), null);
+  const noPending = await inputHttp.readTaskInput(request, taskCommand);
+  const { aiClientTaskInputReadResponseSchema } = require('../packages/shared/src/ai-client-entry-draft-schemas');
+  assert.equal(aiClientTaskInputReadResponseSchema.safeParse(noPending).success, true);
+  assert.equal(noPending.state, 'not_pending'); assert.equal(noPending.question, null);
+  assert.equal(noPending.execution, 'not_authorized_by_observation');
+  assert.deepEqual(taskStore.state, executionBefore);
   const execution = await resultApp.readOriginalTaskExecution(request, taskCommand, { db });
   assert.equal(execution.task.taskId, created.task.taskId);
   assert.equal(execution.run.runId, created.task.runId);
@@ -1842,8 +1850,11 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.equal(taskStore.state.aiTask.find(row => row.id === created.task.taskId).status, 'CANCEL_REQUESTED');
   assert.equal((await resultApp.readOriginalTaskExecution(request, taskCommand, { db })).task.status, 'cancel_requested');
   const beforeMissingWaitProof = clone(taskStore.state);
+  const beforeMissingWaitTrace = taskStore.trace.length;
   await assert.rejects(cancellationHttp.reconcileTaskInputCancellation(request, taskCommand),
     e => e.getStatus?.() === 503 && e.getResponse().retryable === false);
+  assert.equal(taskStore.trace.slice(beforeMissingWaitTrace).includes('aiTaskInputRequest.readMany'), true,
+    'the original persisted wait witness must actually be reached, not a dependency serialization failure');
   await assert.rejects(resultApp.reconcileOriginalTaskInputCancellation(request, { ...taskCommand, taskId: created.task.taskId }),
     e => { assert.equal(e.code, 'AI_INVALID_INPUT', `${e.name}:${e.message}:${e.reason}`); return true; });
   await assert.rejects(cancellationHttp.reconcileTaskInputCancellation(request, { ...taskCommand, taskId: created.task.taskId }),

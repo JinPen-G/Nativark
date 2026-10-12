@@ -10,6 +10,8 @@ export const AI_CLIENT_ENTRY_HTTP_DRAFT = Object.freeze({
   requestTaskCancellation: 'tasks/cancel/request',
   /** Converge only a proved released input wait, never arbitrary active work. */
   reconcileTaskInputCancellation: 'tasks/cancel/input-wait/reconcile',
+  /** Reads the original clarification, never starts or resumes a run. */
+  readTaskInput: 'tasks/input/read',
   readOrderExplanation: 'orders/explanation/read', readSource: 'sources/read',
   issueAction: 'action', createBookingDraft: 'booking-drafts/create',
   chooseBookingDraft: 'booking-drafts/choose', readBookingDraft: 'booking-drafts/read',

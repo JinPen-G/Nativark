@@ -425,7 +425,8 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         const financialEvidence = configured?.financialEvidence ?? model.financialEvidence;
         if (!runtime || !priceVersion || !financialEvidence) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_model_dependencies_missing');
         const host = await composeClientOriginalTaskModelHost({ ...model, runtime, priceVersion, financialEvidence,
-          subscriptions: taskDependencies.subscriptions, clientScene: taskDependencies,
+          subscriptions: taskDependencies.subscriptions, clientScene: {
+            sceneCode: taskDependencies.sceneCode, sceneVersion: taskDependencies.sceneVersion },
           loadMaterial, guard: dependencies.guard, clock }, command, control ?? (answers ? 'resume' : 'start'));
         const result = control === 'recover' ? await host.recover(signal)
           : control === 'reconcile' ? await host.reconcile(signal)
@@ -452,23 +453,20 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         return { row, identity: structuredClone(bound.identity) };
       };
       const reader = await composeClientOriginalTaskInputReader({ ...source,
-        clientScene: taskDependencies, subscriptions: taskDependencies.subscriptions, loadMaterial, clock }, command);
+        clientScene: { sceneCode: taskDependencies.sceneCode, sceneVersion: taskDependencies.sceneVersion },
+        subscriptions: taskDependencies.subscriptions, loadMaterial, clock }, command);
       const result = await consume(reader);
       await bound.assertCurrent();
       return result;
     });
   };
-  const readOriginalTaskInput = (request: AiClientApplicationRequest, value: unknown,
-    source: Pick<Parameters<typeof composeClientOriginalTaskInputReader>[0], 'db' | 'inputSource' | 'gatewayScene'>,
-    answers?: Omit<AiTaskInputSubmissionDraft, 'taskId'>) =>
-    withOriginalTaskInput(request, value, source, async reader => answers ? await reader.readSubmission(answers) : await reader.readPending());
-  const cancellationInputSource = dependencies.taskInputs && {
+  const configuredTaskInputSource = dependencies.taskInputs && {
     ...dependencies.taskInputs, gatewayScene: structuredClone(dependencies.taskInputs.gatewayScene) };
   return Object.freeze({
     /** Server-only, original released-input witness; not a generic cancellation
      * finalizer and never a model/provider or budget-dependent operation. */
     reconcileOriginalTaskInputCancellation(request: AiClientApplicationRequest, value: unknown,
-      source = cancellationInputSource) {
+      source = configuredTaskInputSource) {
       if (!source) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_input_dependencies_missing');
       return withOriginalTaskInput(request, value, source, reader => reader.settleInputCancellation());
     },
@@ -667,8 +665,9 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     },
     /** Server-injected source; read-only, no provider/model capability needed. */
     readOriginalTaskModelInput(request: AiClientApplicationRequest, value: unknown,
-      source: Pick<Parameters<typeof composeClientOriginalTaskInputReader>[0], 'db' | 'inputSource' | 'gatewayScene'>) {
-      return readOriginalTaskInput(request, value, source);
+      source = configuredTaskInputSource) {
+      if (!source) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_input_dependencies_missing');
+      return withOriginalTaskInput(request, value, source, reader => reader.readPending());
     },
     async readOriginalTaskModelInputReceipt(request: AiClientApplicationRequest, value: unknown, answerValue: unknown,
       source: Pick<Parameters<typeof composeClientOriginalTaskInputReader>[0], 'db' | 'inputSource' | 'gatewayScene'>) {
@@ -677,7 +676,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       const submission = { ...parsed.data, taskId: 'validation-only' };
       if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const { taskId: _taskId, ...answers } = submission;
-      return readOriginalTaskInput(request, value, source, answers);
+      return withOriginalTaskInput(request, value, source, reader => reader.readSubmission(answers));
     },
     async readHostCapabilities(request: AiClientApplicationRequest, value: unknown): Promise<AiClientHostCapabilities> {
       parseEntry(aiClientHostCapabilitiesRequestSchema, structuredClone(value));

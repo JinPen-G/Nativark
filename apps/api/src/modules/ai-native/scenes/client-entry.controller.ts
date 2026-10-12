@@ -1,6 +1,6 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientTaskCancelReceiptSchema,
-  aiClientTaskInputCancellationReceiptSchema } from '@rental-os/shared';
+  aiClientTaskInputCancellationReceiptSchema, aiClientTaskInputReadResponseSchema, AI_TASK_INPUT_DRAFT_VERSION } from '@rental-os/shared';
 import { z } from 'zod';
 import { AiClientEntryError } from './client-entry-action';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -12,7 +12,8 @@ type Application = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
   'readHostCapabilities' | 'issueAction' | 'createBookingDraft' | 'chooseBookingDraft' | 'readBookingDraft' |
   'handoffBookingDraft' | 'readBookingHandoff' | 'readBookingOperation' |
   'acceptBookingSubmission' | 'submitAcceptedBooking' | 'readBookingSubmission' | 'readTaskSnapshot' | 'readTaskEvents' |
-  'readOrderExplanation' | 'readSource' | 'requestOriginalTaskCancellation' | 'reconcileOriginalTaskInputCancellation'>;
+  'readOrderExplanation' | 'readSource' | 'requestOriginalTaskCancellation' | 'reconcileOriginalTaskInputCancellation' |
+  'readOriginalTaskModelInput'>;
 
 @Controller([AI_CLIENT_ENTRY_HTTP_DRAFT.basePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath])
 export class AiClientEntryController {
@@ -52,6 +53,18 @@ export class AiClientEntryController {
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskEvents) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTaskEvents(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.readTaskEvents(request, body));
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskInput) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTaskInput(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(async () => {
+      const question = await this.application.readOriginalTaskModelInput(request, body);
+      const response = aiClientTaskInputReadResponseSchema.safeParse({ contractVersion: AI_TASK_INPUT_DRAFT_VERSION,
+        state: question === null ? 'not_pending' : 'pending', question,
+        execution: 'not_authorized_by_observation' });
+      if (!response.success || Buffer.byteLength(JSON.stringify(response.data), 'utf8') > 65536)
+        throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return response.data;
+    }, 'read_original_task');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.requestTaskCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   requestTaskCancellation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
