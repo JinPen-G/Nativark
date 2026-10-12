@@ -1,5 +1,6 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
-import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientTaskCancelReceiptSchema } from '@rental-os/shared';
+import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientTaskCancelReceiptSchema,
+  aiClientTaskInputCancellationReceiptSchema } from '@rental-os/shared';
 import { z } from 'zod';
 import { AiClientEntryError } from './client-entry-action';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -11,7 +12,7 @@ type Application = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
   'readHostCapabilities' | 'issueAction' | 'createBookingDraft' | 'chooseBookingDraft' | 'readBookingDraft' |
   'handoffBookingDraft' | 'readBookingHandoff' | 'readBookingOperation' |
   'acceptBookingSubmission' | 'submitAcceptedBooking' | 'readBookingSubmission' | 'readTaskSnapshot' | 'readTaskEvents' |
-  'readOrderExplanation' | 'readSource' | 'requestOriginalTaskCancellation'>;
+  'readOrderExplanation' | 'readSource' | 'requestOriginalTaskCancellation' | 'reconcileOriginalTaskInputCancellation'>;
 
 @Controller([AI_CLIENT_ENTRY_HTTP_DRAFT.basePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath])
 export class AiClientEntryController {
@@ -72,6 +73,20 @@ export class AiClientEntryController {
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderExplanation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readOrderExplanation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.readOrderExplanation(request, body));
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.reconcileTaskInputCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  reconcileTaskInputCancellation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(async () => {
+      const result = await this.application.reconcileOriginalTaskInputCancellation(request, body);
+      const event = result.receipt.event;
+      if (event.data.to !== 'cancelled') throw new AiTaskTransitionResultUnknownError();
+      const receipt = aiClientTaskInputCancellationReceiptSchema.safeParse({ contractVersion: event.contractVersion,
+        taskId: event.taskId, taskRevision: event.taskRevision, cursor: event.cursor, observedAt: event.occurredAt,
+        status: 'cancelled', cancellation: result.cancellation, externalRollback: result.externalRollback,
+        retryable: false, nextAction: 'read_original_task' });
+      if (!receipt.success) throw new AiTaskTransitionResultUnknownError();
+      return receipt.data;
+    }, 'read_original_task');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readSource) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readSource(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {

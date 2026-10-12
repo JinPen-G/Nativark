@@ -65,6 +65,9 @@ export type AiClientRequestDependencies = {
   db: AiClientMaterialDb;
   tasks?: AiClientTaskDependencies;
   clock?: () => Date;
+  /** Explicit same-database server input source for cancellation observation;
+   * never accepted as a customer body or used to start a model. */
+  taskInputs?: Pick<Parameters<typeof composeClientOriginalTaskInputReader>[0], 'db' | 'inputSource' | 'gatewayScene'>;
   /** Original booking page only, explicit server assembly. Same ClientApiService
    * singleton as the read projection; never an Agent-selected executor. */
   bookingSubmission?: Pick<ClientApiService, 'prepareOrderSubmission' | 'readOrderSubmission' | 'createOrder'>;
@@ -431,10 +434,12 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         return result;
       });
   };
-  const readOriginalTaskInput = async (request: AiClientApplicationRequest, value: unknown,
+  const withOriginalTaskInput = async <T>(request: AiClientApplicationRequest, value: unknown,
     source: Pick<Parameters<typeof composeClientOriginalTaskInputReader>[0], 'db' | 'inputSource' | 'gatewayScene'>,
-    answers?: Omit<AiTaskInputSubmissionDraft, 'taskId'>, settleCancellation = false) => {
-    requireEntry();
+    consume: (reader: Awaited<ReturnType<typeof composeClientOriginalTaskInputReader>>) => Promise<T>) => {
+    // Original task observation/convergence does not need a booking navigation
+    // surface. The server entry gate, current policy and Guard still apply.
+    if (!server.entry || !taskDependencies) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'entry_disabled');
     if (!taskDependencies || source?.db !== dependencies.db) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_input_dependencies_missing');
     const command = parseEntry(clientTaskCommandSchema, structuredClone(value));
     return withBinding(structuredClone(request), true, 'order', async bound => {
@@ -448,18 +453,24 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       };
       const reader = await composeClientOriginalTaskInputReader({ ...source,
         clientScene: taskDependencies, subscriptions: taskDependencies.subscriptions, loadMaterial, clock }, command);
-      const result = settleCancellation ? await reader.settleInputCancellation()
-        : answers ? await reader.readSubmission(answers) : await reader.readPending();
+      const result = await consume(reader);
       await bound.assertCurrent();
       return result;
     });
   };
+  const readOriginalTaskInput = (request: AiClientApplicationRequest, value: unknown,
+    source: Pick<Parameters<typeof composeClientOriginalTaskInputReader>[0], 'db' | 'inputSource' | 'gatewayScene'>,
+    answers?: Omit<AiTaskInputSubmissionDraft, 'taskId'>) =>
+    withOriginalTaskInput(request, value, source, async reader => answers ? await reader.readSubmission(answers) : await reader.readPending());
+  const cancellationInputSource = dependencies.taskInputs && {
+    ...dependencies.taskInputs, gatewayScene: structuredClone(dependencies.taskInputs.gatewayScene) };
   return Object.freeze({
     /** Server-only, original released-input witness; not a generic cancellation
      * finalizer and never a model/provider or budget-dependent operation. */
     reconcileOriginalTaskInputCancellation(request: AiClientApplicationRequest, value: unknown,
-      source: Pick<Parameters<typeof composeClientOriginalTaskInputReader>[0], 'db' | 'inputSource' | 'gatewayScene'>) {
-      return readOriginalTaskInput(request, value, source, undefined, true);
+      source = cancellationInputSource) {
+      if (!source) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_input_dependencies_missing');
+      return withOriginalTaskInput(request, value, source, reader => reader.settleInputCancellation());
     },
     /** Original customer cancellation request only. No caller task/run/holder,
      * provider, approval, budget release or claim of external rollback. */

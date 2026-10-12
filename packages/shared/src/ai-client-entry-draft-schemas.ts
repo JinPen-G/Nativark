@@ -20,6 +20,12 @@ export const aiClientTaskCancelReceiptSchema = z.object({
 }).strict();
 export type AiClientTaskCancelRequest = z.infer<typeof aiClientTaskCancelRequestSchema>;
 export type AiClientTaskCancelReceipt = z.infer<typeof aiClientTaskCancelReceiptSchema>;
+/** Only the original released-input witness can produce this observation. */
+export const aiClientTaskInputCancellationReceiptSchema = aiClientTaskCancelReceiptSchema.extend({
+  status: z.literal('cancelled'), cancellation: z.literal('released_input_wait_settled'),
+  externalRollback: z.literal('not_claimed')
+}).strict();
+export type AiClientTaskInputCancellationReceipt = z.infer<typeof aiClientTaskInputCancellationReceiptSchema>;
 export const aiClientTaskEventsReadRequestSchema = aiClientTaskReadRequestSchema.extend({
   after: z.string().regex(/^(0|[1-9][0-9]{0,19})$/u), limit: z.number().int().min(1).max(100)
 }).strict();

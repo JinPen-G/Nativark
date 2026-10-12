@@ -8,6 +8,8 @@ export const AI_CLIENT_ENTRY_HTTP_DRAFT = Object.freeze({
   readTaskSnapshot: 'tasks/snapshot/read', readTaskEvents: 'tasks/events/read',
   /** Request only; observe the original snapshot after success or unknown. */
   requestTaskCancellation: 'tasks/cancel/request',
+  /** Converge only a proved released input wait, never arbitrary active work. */
+  reconcileTaskInputCancellation: 'tasks/cancel/input-wait/reconcile',
   readOrderExplanation: 'orders/explanation/read', readSource: 'sources/read',
   issueAction: 'action', createBookingDraft: 'booking-drafts/create',
   chooseBookingDraft: 'booking-drafts/choose', readBookingDraft: 'booking-drafts/read',

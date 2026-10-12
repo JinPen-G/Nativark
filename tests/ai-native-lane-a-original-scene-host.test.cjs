@@ -1429,7 +1429,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const bookingHttp = new AiClientEntryController(entryModule.providers[0].useFactory());
   for (const method of ['readHostCapabilities', 'issueAction', 'createBookingDraft', 'chooseBookingDraft', 'readBookingDraft',
     'handoffBookingDraft', 'readBookingHandoff', 'readBookingOperation',
-    'acceptBookingSubmission', 'submitAcceptedBooking', 'readBookingSubmission', 'requestTaskCancellation']) {
+    'acceptBookingSubmission', 'submitAcceptedBooking', 'readBookingSubmission', 'requestTaskCancellation', 'reconcileTaskInputCancellation']) {
     assert.equal(Reflect.getMetadata('path', AiClientEntryController.prototype[method]), AI_CLIENT_ENTRY_HTTP_DRAFT[method]);
   }
   const { aiClientHostCapabilitiesSchema } = require('../packages/shared/src/ai-client-entry-draft-schemas');
@@ -1739,7 +1739,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.deepEqual(page.events, []); assert.equal(page.nextCursor, '0');
   // Explicit server result reader reuses the actual repository and original
   // client Guard/material authority. No provider or execution capability needed.
-  const resultApp = composeRequestBoundClientApplication(taskDependencies,
+  const resultApp = composeRequestBoundClientApplication({ ...taskDependencies, taskInputs: readSource },
     { ...configuration, entry: { enabled: true, releaseRevision: 'result-read-1' } });
   const executionBefore = clone(taskStore.state);
   const execution = await resultApp.readOriginalTaskExecution(request, taskCommand, { db });
@@ -1842,8 +1842,12 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.equal(taskStore.state.aiTask.find(row => row.id === created.task.taskId).status, 'CANCEL_REQUESTED');
   assert.equal((await resultApp.readOriginalTaskExecution(request, taskCommand, { db })).task.status, 'cancel_requested');
   const beforeMissingWaitProof = clone(taskStore.state);
-  await assert.rejects(resultApp.reconcileOriginalTaskInputCancellation(request, taskCommand, readSource),
-    e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  await assert.rejects(cancellationHttp.reconcileTaskInputCancellation(request, taskCommand),
+    e => e.getStatus?.() === 503 && e.getResponse().retryable === false);
+  await assert.rejects(resultApp.reconcileOriginalTaskInputCancellation(request, { ...taskCommand, taskId: created.task.taskId }),
+    e => { assert.equal(e.code, 'AI_INVALID_INPUT', `${e.name}:${e.message}:${e.reason}`); return true; });
+  await assert.rejects(cancellationHttp.reconcileTaskInputCancellation(request, { ...taskCommand, taskId: created.task.taskId }),
+    e => { assert.equal(e.getStatus?.(), 400, JSON.stringify(e.getResponse?.())); return true; });
   assert.deepEqual(taskStore.state, beforeMissingWaitProof, 'no released measured wait means no cancellation convergence');
   assert.equal(countCreates(), cancelCreates);
   await assert.rejects(resultApp.requestOriginalTaskCancellation(request, cancelCommand), e => e.code === 'AI_REVISION_CONFLICT');
