@@ -17,6 +17,8 @@ export const AI_CLIENT_ENTRY_HTTP_DRAFT = Object.freeze({
   /** Requires explicit persisted server model dependencies and current policy. */
   startTaskModel: 'tasks/model/start', recoverTaskModel: 'tasks/model/recover',
   reconcileTaskModel: 'tasks/model/reconcile', continueTaskInput: 'tasks/input/continue',
+  /** Current owner/original lineage result discovery; never model execution. */
+  readTaskModelResult: 'tasks/model/result/read',
   readOrderExplanation: 'orders/explanation/read', readSource: 'sources/read',
   issueAction: 'action', createBookingDraft: 'booking-drafts/create',
   chooseBookingDraft: 'booking-drafts/choose', readBookingDraft: 'booking-drafts/read',

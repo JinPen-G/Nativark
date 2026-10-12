@@ -53,6 +53,19 @@ export const aiClientTaskModelControlResponseSchema = z.object({
   ]), businessExecution: z.literal('not_inferred_from_model_result'),
   retryable: z.literal(false), nextAction: z.literal('read_original_task')
 }).strict();
+export const aiClientTaskModelResultReadResponseSchema = z.object({
+  contractVersion: z.literal(AI_TASK_DRAFT_VERSION), taskId: id.max(36),
+  taskRevision: z.number().int().min(1).max(4294967295),
+  state: z.enum(['observed', 'not_observed']),
+  result: z.object({ resultId: id.max(36), status: z.enum(['succeeded', 'failed', 'unknown']),
+    observedAt: z.string().datetime({ offset: true }), text: z.string().max(32768).nullable() }).strict().nullable(),
+  authority: z.literal('generated_text_not_business_fact'), businessExecution: z.literal('not_inferred_from_model_result'),
+  retryable: z.literal(false), nextAction: z.literal('read_original_task')
+}).strict().superRefine((value, context) => {
+  if ((value.state === 'observed') !== (value.result !== null)
+    || (value.result && (value.result.status === 'succeeded') !== (value.result.text !== null)))
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Inconsistent model result observation' });
+});
 export const aiClientTaskInputSubmissionRequestSchema = aiClientTaskReadRequestSchema.extend({
   submission: z.custom<Omit<AiTaskInputSubmissionDraft, 'taskId'>>(value => !!value && typeof value === 'object'
     && !Array.isArray(value) && !Object.prototype.hasOwnProperty.call(value, 'taskId')

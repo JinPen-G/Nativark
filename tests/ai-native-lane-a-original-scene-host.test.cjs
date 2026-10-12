@@ -1430,7 +1430,8 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   for (const method of ['readHostCapabilities', 'issueAction', 'createBookingDraft', 'chooseBookingDraft', 'readBookingDraft',
     'handoffBookingDraft', 'readBookingHandoff', 'readBookingOperation',
     'acceptBookingSubmission', 'submitAcceptedBooking', 'readBookingSubmission', 'requestTaskCancellation', 'reconcileTaskInputCancellation',
-    'readTaskInput', 'submitTaskInput', 'readTaskInputReceipt', 'startTaskModel', 'recoverTaskModel', 'reconcileTaskModel', 'continueTaskInput']) {
+    'readTaskInput', 'submitTaskInput', 'readTaskInputReceipt', 'startTaskModel', 'recoverTaskModel', 'reconcileTaskModel', 'continueTaskInput',
+    'readTaskModelResult']) {
     assert.equal(Reflect.getMetadata('path', AiClientEntryController.prototype[method]), AI_CLIENT_ENTRY_HTTP_DRAFT[method]);
   }
   const { aiClientHostCapabilitiesSchema } = require('../packages/shared/src/ai-client-entry-draft-schemas');
@@ -1744,6 +1745,16 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     { ...configuration, entry: { enabled: true, releaseRevision: 'result-read-1' } });
   const executionBefore = clone(taskStore.state);
   const inputHttp = new AiClientEntryController(resultApp);
+  const modelObservation = await inputHttp.readTaskModelResult(request, taskCommand);
+  const { aiClientTaskModelResultReadResponseSchema } = require('../packages/shared/src/ai-client-entry-draft-schemas');
+  assert.equal(aiClientTaskModelResultReadResponseSchema.safeParse(modelObservation).success, true);
+  assert.equal(modelObservation.state, 'not_observed'); assert.equal(modelObservation.result, null);
+  assert.equal(modelObservation.authority, 'generated_text_not_business_fact');
+  taskStore.control.beforeRead = async table => { if (table === 'aiRun') revoked = true; };
+  await assert.rejects(inputHttp.readTaskModelResult(request, taskCommand), e => e.getStatus?.() === 403);
+  taskStore.control.beforeRead = null; revoked = false;
+  await assert.rejects(inputHttp.readTaskModelResult(request, { ...taskCommand, resultId: 'caller-selected-result' }),
+    e => e.getStatus?.() === 400);
   assert.equal(await resultApp.readOriginalTaskModelInput(request, taskCommand), null);
   const noPending = await inputHttp.readTaskInput(request, taskCommand);
   const beforeUnavailableModel = clone(taskStore.state);
