@@ -27,3 +27,13 @@ API compiler API noEmit：原严格选项，内存 rootDir/baseUrl 本树，shar
 定向 `node -r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs --test --test-name-pattern='memory management request uses persisted' tests/ai-native-knowledge-lane-b-file-runtime.test.cjs`：1 pass / 0 fail / 0 cancelled / 0 skip / 0 todo，exit 0。原 factory/controller→正式持久政策 adapter→consent/仓储，验证选择、原确认详情、同材料复验、跨空间/内容篡改拒绝、撤销后旧选择拒绝/新列表为空、关闭请求拒绝，继续原 modify/delete/原操作核对链。事务与 Auth/文件为离线替身，不冒称真实授权部署或存储通过。
 
 同原严格 compiler API noEmit，根 human-memory-management.composition.ts：772 files、0 diagnostics、exit 0；diff check exit 0，无生成物。未修改 human-knowledge-input/context 或场景 publisher，无新模型调用/执行/确认生产捷径。环境约束同第一片。
+
+## 第三片：原识别保存收据与当前人工审阅的后端消费
+
+改 inspection-assist.composition.ts / staff-inspection-assist.controller.ts 与原 inspection-media-submission 两个 image/audio 场景。`saveRecognitionReview` 仅调用原 recognitionResults.save，再联读原保存收据与当前 drafts.readReview；`readRecognitionSaveReview` 是纯原键读取，不保存候选、不重新识别、不提交检查。原操作收据与当前头经过两次读回指纹比较、当前 bind/来源/版本政策复验。`savedRevisionMatchesCurrent` 明示旧收据是否与当前头同修订，人工 edit 后 false，不复活旧字段。
+
+真实员工 Controller 现有 result-save / result-save-receipt 接上述方法但仍返回原 receipt 载荷，未扩 HTTP/shared。服务组合和 StaffInspectionRequestFactory 继承显式联读入口。保存候选和采用值分开；后续必须原人工 drafts.edit，检查办理仍原 submission prepare/submit/receipt，未新造一键办理或自动采用。
+
+命令：`node -r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs --test --test-name-pattern='original inspection frozen' tests/ai-native-inspection-media-submission.test.cjs`：2 pass / 0 fail / 0 cancelled / 0 skip / 0 todo、exit 0。原 image/audio runner/持久结果/财务证据/来源验证→保存→当前审阅→显式人工采用→同原保存收据读回，人工采用为 43，保存前后人工值 42 未被识别自动覆盖；采用后旧保存修订标 false，不新派发，原未知/撤权/附件变化拒绝仍验证。Positive 使用既有 operator 测试身份与事务/模型替身，不冒称正式 staff 执行政策或真实图像语音能力验收。
+
+源码 noEmit 根 inspection-assist.composition.ts：1090 files、0 diagnostics、exit 0，diff check exit 0。原 partial-safe 公共结果/正式 staff 新任务动作政策仍缺；unknown 不暴露候选，不私改 runner、公共政策、Gateway、预算或 Core。新增联读失败可能发生在保存已提交后，继续原 operationId 核对，不认为失败等于未写入或换键重新保存。未改任何 UI。

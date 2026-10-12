@@ -215,7 +215,38 @@ export function composeInspectionAssist(dependencies: Dependencies) {
         businessActionRequested: false as const, automaticRetry: false as const };
     });
   };
-  return { templates, manual, candidates, drafts, evidence, submission, recognition, recognitionResults, readRecognitionReview };
+  /** Read the original candidate-save receipt and the CURRENT human draft.
+   * A saved receipt does not adopt a value and cannot revive an older revision. */
+  const readRecognitionSaveReview = async (value: unknown) => {
+    if (!drafts) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+    const reference = structuredClone(value);
+    const receipt = await recognitionResults.reconcileSave(reference);
+    const input = z.record(z.unknown()).parse(reference);
+    const target = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId }).parse(
+      Object.fromEntries(['orderId', 'allocationId', 'stage', 'templateId', 'draftId'].map(key => [key, input[key]])));
+    return authority.withAction(target, 'bind', async () => {
+      const review = await drafts.readReview(target);
+      const currentReceipt = await recognitionResults.reconcileSave(reference);
+      if (requestFingerprint(currentReceipt) !== requestFingerprint(receipt)) throw new InspectionAssistError('REVISION_CONFLICT');
+      const currentReview = await drafts.readReview(target);
+      if (requestFingerprint(currentReview) !== requestFingerprint(review)) throw new InspectionAssistError('REVISION_CONFLICT');
+      if (review.binding !== 'current') throw new InspectionAssistError('BINDING_CHANGED');
+      return { receipt, review,
+        savedRevisionMatchesCurrent: receipt.status === 'found' && receipt.result.draftId === review.draftId && receipt.result.revision === review.revision,
+        adoption: 'not_attempted' as const, businessActionRequested: false as const, automaticRetry: false as const };
+    });
+  };
+  const saveRecognitionReview = async (value: unknown) => {
+    const reference = structuredClone(value);
+    const saved = await recognitionResults.save(reference);
+    const observation = await readRecognitionSaveReview(reference);
+    if (observation.receipt.status !== 'found' || requestFingerprint(observation.receipt.result) !== requestFingerprint(saved.result)) {
+      throw new InspectionAssistError('RECONCILIATION_REQUIRED');
+    }
+    return { ...observation, receipt: saved };
+  };
+  return { templates, manual, candidates, drafts, evidence, submission, recognition, recognitionResults, readRecognitionReview,
+    readRecognitionSaveReview, saveRecognitionReview };
 }
 
 /** No Controller/AppModule/worker registration. Original business pages remain available. */

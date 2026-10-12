@@ -46,8 +46,8 @@ export class StaffInspectionAssistController {
           // Preserve the existing wire projection while checking that the
           // original result still belongs to the current human-review draft.
           case 'result-read': return (await services.readRecognitionReview(input)).recognition;
-          case 'result-save': return services.recognitionResults.save(input);
-          case 'result-save-receipt': return services.recognitionResults.reconcileSave(input);
+          case 'result-save': return (await services.saveRecognitionReview(input)).receipt;
+          case 'result-save-receipt': return (await services.readRecognitionSaveReview(input)).receipt;
           case 'submission-review': return services.submission ? services.submission.prepareReview(input) : absent();
           case 'submission-prepare': return services.submission ? services.submission.prepare(input) : absent();
           case 'submission-preparation': return services.submission ? services.submission.reconcilePreparation(input) : absent();
