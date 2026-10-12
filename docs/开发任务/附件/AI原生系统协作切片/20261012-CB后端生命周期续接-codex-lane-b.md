@@ -17,3 +17,13 @@ API compiler API noEmit：原严格选项，内存 rootDir/baseUrl 本树，shar
 所有 Node 使用原 prisma-offline-preload、固定无效 DATABASE_URL，write-root/audit/TEMP/TMP 位于本树绝对路径，禁 compile cache。数据库、文件对象传输/上传成功证据为明确替身，不是真实存储/MySQL/HTTP/模型验收。未读 .env、安装、启服务、迁移、推送或生产启用。正式政策未置备仍拒绝；关系索引不是分布式外部索引清除。
 
 下一片：当前人类记忆管理到明确选择与消费前复验；复用原 consent/receipt/head，随后补员工原结果与人工办理实际消费。每片只暂存明确文件，旧成果不回灌。
+
+## 第二片：当前人类明确选择偏好与消费前检查
+
+改 `persistent-memory-consent.service.ts`、`human-memory-management.composition.ts`，仅扩同一原 file-runtime 测试的人类记忆用例。服务器请求实例现接 `selectPreferences({kinds,limit})`、`revalidatePreferences(原选择)`、`confirmationDetail({memoryId})`，不新增 HTTP 或共享合同。复用原正式政策与确认仓储，所选数据绑定当次 owner/audience/workspace、原记忆 revision/ACL/确认 ID/具体值/期限；消费时重新读取同值，撤销/改变后拒绝而不替换为最新值。
+
+原 selectPreferences 仍有界查询/确认读取；保留 requestedKinds，新增明确 scope/owner/audience 和 limit，以及 returned-items-only 歧义。只选明确 kinds，不默认带所有偏好，重复 kind/ID 或篡改范围/内容拒绝。冲突偏好仍需人类选择，不决定业务资格/价格/地点授权。选取前后当前身份及每项原动作授权复核；这是有界复验，非多资源事务或永久授权，主线真正冻结/派发仍复核。
+
+定向 `node -r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs --test --test-name-pattern='memory management request uses persisted' tests/ai-native-knowledge-lane-b-file-runtime.test.cjs`：1 pass / 0 fail / 0 cancelled / 0 skip / 0 todo，exit 0。原 factory/controller→正式持久政策 adapter→consent/仓储，验证选择、原确认详情、同材料复验、跨空间/内容篡改拒绝、撤销后旧选择拒绝/新列表为空、关闭请求拒绝，继续原 modify/delete/原操作核对链。事务与 Auth/文件为离线替身，不冒称真实授权部署或存储通过。
+
+同原严格 compiler API noEmit，根 human-memory-management.composition.ts：772 files、0 diagnostics、exit 0；diff check exit 0，无生成物。未修改 human-knowledge-input/context 或场景 publisher，无新模型调用/执行/确认生产捷径。环境约束同第一片。

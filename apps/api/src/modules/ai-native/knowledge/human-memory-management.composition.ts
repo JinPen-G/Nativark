@@ -15,7 +15,13 @@ import { requiredPort, unavailable } from './knowledge-errors';
 export type HumanMemoryManagementDependencies = { db: MemoryPrismaClient & KnowledgePolicyReadDb;
   auth: Pick<AuthService, 'resolveAccessContext'>; clock: KnowledgeClock };
 export type HumanMemoryManagementRequest = { [K in keyof AiMemoryManagementResponsesDraft]:
-  (value: unknown) => Promise<AiMemoryManagementResponsesDraft[K]> } & { close(): void };
+  (value: unknown) => Promise<AiMemoryManagementResponsesDraft[K]> } & {
+    /** Server consumers only; these do not register new public routes. */
+    selectPreferences(value: unknown): ReturnType<PersistentMemoryConsentService['selectPreferences']>;
+    revalidatePreferences(value: unknown): ReturnType<PersistentMemoryConsentService['revalidateSelection']>;
+    confirmationDetail(value: unknown): ReturnType<PersistentMemoryConsentService['confirmationDetail']>;
+    close(): void;
+  };
 const confirmationInput = z.object({ memoryId: id, expectedRevision: z.number().int().min(1).max(4294967293),
   operationId: id.max(110), expiresAt: z.string().datetime({ offset: true }) }).strict();
 const changeInput = z.object({ confirmation: z.literal('change_memory_preference'), operationId: id.max(110),
@@ -50,6 +56,9 @@ export class HumanMemoryManagementRequestFactory {
     const mutation = (value: AiMemoryDraft) => ({ memory: parse(memoryDraftSchema, value),
       semantics: 'human_preference_not_business_approval' as const });
     return {
+      selectPreferences: value => memory.selectPreferences(value),
+      revalidatePreferences: value => memory.revalidateSelection(value),
+      confirmationDetail: value => memory.confirmationDetail(parse(z.object({ memoryId: id }).strict(), value).memoryId),
       list: value => memory.list(value),
       state: async value => memory.state(parse(z.object({ memoryId: id }).strict(), value).memoryId),
       read: async value => mutation(await memory.read(parse(z.object({ memoryId: id }).strict(), value).memoryId)),

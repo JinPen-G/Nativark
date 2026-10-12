@@ -15,6 +15,21 @@ import { preferenceAmbiguities } from './preference-ambiguities';
 const inputSchema = z.object({ memoryId: id, expectedRevision: z.number().int().min(1).max(4294967293),
   operationId: id.max(110), expiresAt: z.string().datetime({ offset: true }) }).strict();
 const identityKey = (context: AiExecutionContext) => fingerprint([context.actor, context.audience, context.scope, 'access' in context ? context.access : null]);
+const preferenceSelectionInput = z.object({ kinds: z.array(z.enum(['locale', 'fulfillment_location', 'display_density'])).min(1).max(3),
+  limit: z.number().int().min(1).max(10) }).strict();
+const selectedPreference = z.object({ memoryId: id, revision: z.number().int().min(2).max(4294967294),
+  aclRevision: z.number().int().min(1).max(4294967294), expiresAt: z.string().datetime({ offset: true }),
+  preference: preferenceSchema, confirmationRecordId: id }).strict();
+const preferenceSelectionSnapshot = preferenceSelectionInput.extend({
+  scope: z.object({ kind: z.literal('workspace'), tenantId: id, workspaceId: id }).strict(),
+  owner: z.object({ actorKind: z.literal('user'), actorId: id }).strict(),
+  audience: z.enum(['operator', 'staff', 'client']), items: z.array(selectedPreference).max(10),
+  truncated: z.boolean(), semantics: z.literal('explicit_preference_selection_not_authority'),
+  requestedKinds: preferenceSelectionInput.shape.kinds,
+  ambiguities: z.array(z.object({ kind: z.enum(['locale', 'fulfillment_location', 'display_density']),
+    memoryIds: z.array(id).min(2).max(10), nextStep: z.literal('human_selection') }).strict()).max(3),
+  ambiguityCoverage: z.literal('returned_items_only'), businessCompatibility: z.literal('unavailable')
+}).strict();
 
 /** Explicit human action, not an AI tool or HTTP endpoint. Reuses the existing
  * identity resolver, consent table, confirmation hash and memory consumer.
@@ -275,12 +290,39 @@ export class PersistentMemoryConsentService {
   /** Selection is explicit: an absent/empty kind list is not permission to
    * inject every preference into a model input. */
   async selectPreferences(value: unknown) {
-    const input = parse(z.object({ kinds: z.array(z.enum(['locale', 'fulfillment_location', 'display_density'])).min(1).max(3),
-      limit: z.number().int().min(1).max(10) }).strict(), value);
+    const input = parse(preferenceSelectionInput, value);
+    if (new Set(input.kinds).size !== input.kinds.length) throw new KnowledgeError('invalid_input');
+    const context = await this.current();
     const listed = await this.confirmedPreferences({ limit: 50 });
     const items = listed.items.filter(item => input.kinds.includes(item.preference.kind)).slice(0, input.limit);
-    return { items, requestedKinds: input.kinds, truncated: items.length < listed.items.filter(item => input.kinds.includes(item.preference.kind)).length,
-      semantics: 'explicit_preference_selection_not_authority' as const };
+    if (identityKey(await this.current()) !== identityKey(context) || context.scope.kind !== 'workspace') return unavailable();
+    const selection = { ...input, requestedKinds: input.kinds, scope: structuredClone(context.scope), owner: actor(context), audience: context.audience,
+      items, truncated: listed.truncated || items.length < listed.items.filter(item => input.kinds.includes(item.preference.kind)).length,
+      semantics: 'explicit_preference_selection_not_authority' as const, ambiguities: preferenceAmbiguities(items),
+      ambiguityCoverage: 'returned_items_only' as const, businessCompatibility: 'unavailable' as const };
+    return this.revalidateSelection(selection);
+  }
+
+  /** Same observed values only. A revoked/changed preference is not silently
+   * replaced with its latest value; this is input material, never a grant. */
+  async revalidateSelection(value: unknown) {
+    const selection = parse(preferenceSelectionSnapshot, value), context = await this.current(), owner = actor(context);
+    if (!sameScope(context.scope, selection.scope) || fingerprint(owner) !== fingerprint(selection.owner)
+      || context.audience !== selection.audience || selection.items.length > selection.limit
+      || fingerprint(selection.requestedKinds) !== fingerprint(selection.kinds)
+      || fingerprint(selection.ambiguities) !== fingerprint(preferenceAmbiguities(selection.items))
+      || new Set(selection.kinds).size !== selection.kinds.length
+      || new Set(selection.items.map(item => item.memoryId)).size !== selection.items.length) return unavailable();
+    await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner });
+    for (const item of selection.items) {
+      if (!selection.kinds.includes(item.preference.kind)) return unavailable();
+      const fresh = await this.memory.read(context, item.memoryId);
+      if (fresh.status !== 'confirmed' || fresh.revision !== item.revision || fresh.aclRevision !== item.aclRevision
+        || fresh.confirmationRecordId !== item.confirmationRecordId || fresh.expiresAt !== item.expiresAt
+        || fingerprint(fresh.preference) !== fingerprint(item.preference)) return unavailable();
+    }
+    await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner });
+    return selection;
   }
 
   /** Editing invalidates the old consent; deletion uses the existing tombstone.
