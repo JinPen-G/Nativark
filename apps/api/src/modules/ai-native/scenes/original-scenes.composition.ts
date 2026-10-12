@@ -58,6 +58,7 @@ export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
   return Object.freeze({ requests, tools, create: (value: unknown) => create(value), reissue: (value: unknown) => create(value, true),
     read: requests.read.bind(requests), reconcile: requests.reconcile.bind(requests), createTask: requests.createTask.bind(requests),
     readTaskReceipt: requests.readTaskReceipt.bind(requests),
+    readOpeningSection: facts.readOpeningSection.bind(facts),
     reopenOrderCitation: facts.reopenOrderCitation.bind(facts), prepareOpeningSections: facts.prepareOpeningSections.bind(facts),
     reviewQuote: facts.reviewQuote.bind(facts),
     confirmQuote: facts.confirmQuote.bind(facts), readQuoteReceipt: facts.readQuoteReceipt.bind(facts),

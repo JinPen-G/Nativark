@@ -16,6 +16,8 @@ import { AiOriginalSceneRecoveryService } from './original-scene-recovery.servic
 import { composeTaskSettingsHost, type AiSettingsTask } from '../runner/settings-task-host.composition';
 import { composeAiSettingsBusinessConsumer } from './settings-business-consumer.composition';
 import type { ApprovedSettingsApplicationDependencies } from '../approval-execution/approved-settings-task.authority';
+import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
+import { originalIdentityHash } from '../task-request/original-request.authority';
 
 export type AiSceneHttpRequest = { headers: { authorization?: unknown } };
 export type AiSceneRequestOptions = { enabled: boolean; audience: 'operator' | 'staff' };
@@ -34,6 +36,28 @@ export type RequestBoundQuoteSelectionDependencies = RequestBoundOriginalSceneDe
 export type RequestBoundQuoteOrderDependencies = RequestBoundOriginalSceneDependencies & Omit<HumanQuoteOrderDependencies, 'credentials' | 'originals'>;
 const optionsSchema = z.object({ enabled: z.literal(true), audience: z.enum(['operator', 'staff']) }).strict();
 const bearerSchema = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
+
+/** Resolve the existing snapshot only from an authorized original reference.
+ * This is not a run claim or business receipt. Keep its persisted cursor intact. */
+async function readOriginalTaskSnapshot(scenes: Pick<ReturnType<typeof composeAiOriginalScenes>, 'requests' | 'readTaskReceipt'>,
+  events: ReturnType<typeof composePersistedTaskCenter>['events'], value: unknown) {
+  const parsed = originalRequestReferenceSchema.safeParse(structuredClone(value));
+  if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  const reference = freezeOriginalInput(parsed.data);
+  const original = await scenes.requests.readHistorical(reference);
+  const task = await scenes.readTaskReceipt(reference.inputRef);
+  if (task.state !== 'observed' || original.receipt.state === 'revoked') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const snapshot = structuredClone(await events.readSnapshot({ taskId: task.taskId }));
+  const after = await scenes.requests.readHistorical(reference);
+  const latest = await scenes.readTaskReceipt(reference.inputRef);
+  if (after.receipt.state === 'revoked' || originalIdentityHash(original.context) !== originalIdentityHash(after.context)
+    || original.receipt.contentHash !== after.receipt.contentHash || latest.state !== 'observed'
+    || latest.taskId !== task.taskId || latest.runId !== task.runId || latest.revision !== task.revision
+    || snapshot.taskId !== task.taskId || snapshot.revision !== task.revision) {
+    throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  }
+  return freezeOriginalInput(snapshot);
+}
 
 function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequestOptions,
   compose: (input: D & { credentials: AiTaskCredentialSource }) => A) {
@@ -100,7 +124,8 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
         || 'runId' in value && value.runId !== settingsBusiness.configuration.task.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       return settingsHost;
     };
-    return { model, get application() { return modelApplication(); }, center, requireSettings };
+    return { model, get application() { return modelApplication(); }, center, requireSettings,
+      readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot(model.scenes, persisted.events, value) };
   });
   return Object.freeze({
     startSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
@@ -118,8 +143,21 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
     cancelSettingsTask: (request: AiSceneHttpRequest, value: unknown) =>
       call(request, value, (app, command) => app.requireSettings(command).application.requestCancelOriginal(command)),
     readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readPage(command)),
+    readTaskSnapshot: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskSnapshot(command)),
     readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readEvents(command)),
     readTaskScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readScene(command)),
+    reopenOrderCitation: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (app, command) => app.model.scenes.reopenOrderCitation(command)),
+    prepareOpeningSections: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (app, command) => app.model.scenes.prepareOpeningSections(command)),
+    readOpeningSection: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (app, command) => app.model.scenes.readOpeningSection(command)),
+    readRecovery: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (app, command) => app.model.scenes.readRecovery(command)),
+    reviewQuote: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (app, command) => app.model.scenes.reviewQuote(command)),
+    readQuoteReceipt: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (app, command) => app.model.scenes.readQuoteReceipt(command)),
     start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, (app, command) => app.application.start(command, signal)),
     readInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.readInput(command)),
@@ -157,6 +195,9 @@ export function composeRequestBoundOriginalScenes(dependencies: RequestBoundOrig
     reconcileReissue: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reconcile(command, true)),
     createTask: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.createTask(command)),
     prepareTaskMaterial: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.prepareTaskMaterial(command)),
+    reopenOrderCitation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reopenOrderCitation(command)),
+    prepareOpeningSections: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.prepareOpeningSections(command)),
+    readOpeningSection: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readOpeningSection(command)),
     reviewQuote: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reviewQuote(command)),
     confirmQuote: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.confirmQuote(command)),
     readQuoteReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readQuoteReceipt(command)),
@@ -186,10 +227,13 @@ export function composeRequestBoundSelectedQuoteTask(dependencies: RequestBoundQ
     const center = composeAiTaskCenterScene({ list: persisted.list, events: persisted.events, ...business, scenes: { requests: originals,
         readTaskReceipt: originals.readTaskReceipt.bind(originals), readRecovery: recovery.read.bind(recovery) } });
     return Object.freeze({ ...tasks, readScene: center.readScene,
+      readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot({ requests: originals,
+        readTaskReceipt: originals.readTaskReceipt.bind(originals) }, persisted.events, value),
       readTaskPage: center.readPage, readTaskEvents: center.readEvents });
   });
   return Object.freeze({
     readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskPage(command)),
+    readTaskSnapshot: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskSnapshot(command)),
     readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskEvents(command)),
     readScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readScene(command)),
     start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.start(command, signal)),
