@@ -91,6 +91,17 @@ test('corrupt body columns, unknown JSON and duplicate chunk IDs fail closed', a
   const s = await setup(), row = [...s.db.state.chunks.values()][0]; s.db.state.chunks.set('duplicate', { ...structuredClone(row), id: 'duplicate', chunkIndex: 1 });
   await assert.rejects(s.adapter.chunk(context, s.source, 2000), e => e.code === 'unavailable');
 });
+test('historical version body refuses mismatched persisted text, scope and version', async () => {
+  for (const change of [row => { row.text = 'foreign historical text'; },
+    row => { row.state.scope.workspaceId = 'foreign-space'; },
+    row => { row.state.documentVersion = 'foreign-version'; },
+    row => { row.state.secret = 'undeclared'; }]) {
+    const s = await setup();
+    assert.equal((await s.repo.versionContent(scope, 'doc-a', 'v1')).chunks[0].text, s.chunk.text);
+    change([...s.db.state.chunks.values()][0]);
+    await assert.rejects(s.repo.versionContent(scope, 'doc-a', 'v1'), { code: 'unavailable' });
+  }
+});
 test('search returns references only, respects finite limits and does not promote business facts', async () => {
   const s = await setup(), grant = await s.authorization.authorize(context, { action: 'search', scope });
   const result = await s.adapter.search({ grant, documents: [{ documentId: 'doc-a', documentVersion: 'v1', aclRevision: 1 }], query: 'camping', limit: 5 });

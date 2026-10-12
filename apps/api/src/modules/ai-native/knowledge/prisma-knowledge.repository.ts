@@ -3,7 +3,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import type { AiExecutionScope, AiKnowledgeChunkDraft } from '@rental-os/shared';
 import type { KnowledgeOperation, KnowledgeRecord, KnowledgeRepositoryPort } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, unavailable } from './knowledge-errors';
-import { knowledgeFailureSchema, knowledgeRecordSchema, parse, parsePersisted, sameScope, scopeSchema, validateChunks } from './knowledge-validation';
+import { knowledgeFailureSchema, knowledgeRecordSchema, parse, parsePersisted, sameScope, scopeSchema, validateChunks, persistedKnowledgeChunkSchema } from './knowledge-validation';
 
 export type KnowledgePrismaClient = Pick<PrismaClient, '$transaction' | 'aiKnowledgeDocument' | 'aiKnowledgeVersion' | 'aiKnowledgeChunk' | 'aiKnowledgeOperation'>;
 
@@ -99,10 +99,21 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
       include: { chunks: { orderBy: [{ chunkIndex: 'asc' }, { id: 'asc' }], take: 201 } } }).catch(() => unavailable());
     if (!Array.isArray(rows) || rows.length !== 1 || !await this.read(scope, documentId)) return unavailable();
     const row = rows[0];
-    if (row.documentId !== documentId || row.contentHash !== contentHash) return unavailable();
+    if (row.documentId !== documentId || row.contentHash !== contentHash
+      || !Number.isSafeInteger(row.version) || row.version < 1) return unavailable();
     if (!Array.isArray(row.chunks) || row.chunks.length > 200 || row.chunks.reduce((total, chunk) =>
       total + (typeof chunk.text === 'string' ? chunk.text.length : Number.MAX_SAFE_INTEGER), 0) > 200000) {
       throw new KnowledgeError('limit_exceeded');
+    }
+    const logicalIds = new Set<string>();
+    for (let index = 0; index < row.chunks.length; index++) {
+      const chunk = row.chunks[index], body = parsePersisted(persistedKnowledgeChunkSchema, chunk.state);
+      // Historical ACL revisions may differ from the head. Keep the original
+      // body revision, but never borrow another document, version or workspace.
+      if (chunk.versionId !== row.id || chunk.chunkIndex !== index || chunk.text !== body.text
+        || body.documentId !== documentId || body.documentVersion !== contentHash
+        || !sameScope(body.scope, scope) || logicalIds.has(body.chunkId)) return unavailable();
+      logicalIds.add(body.chunkId);
     }
     return { version: row.version, status: row.status, contentHash: row.contentHash,
       chunks: row.chunks.map(chunk => ({ id: chunk.id, chunkIndex: chunk.chunkIndex, text: chunk.text, state: chunk.state })) };

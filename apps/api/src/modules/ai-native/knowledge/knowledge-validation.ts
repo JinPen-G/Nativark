@@ -72,6 +72,11 @@ export function validateChunks(document: AiKnowledgeDocumentDraft, chunks: AiKno
   if (chars > 200000) throw new KnowledgeError('limit_exceeded');
 }
 
+/** Shared persisted-body contract for current and historical content readers. */
+export const persistedKnowledgeChunkSchema: z.ZodType<AiKnowledgeChunkDraft> = documentSourceSchema.omit({ kind: true }).extend({
+  draftVersion: z.literal(AI_KNOWLEDGE_DRAFT_VERSION), text: z.string().min(1).max(2000), trust: z.literal('untrusted_data')
+}).strict();
+
 const persistedRevision = z.number().int().min(1).max(4294967294);
 const ownerSchema = z.object({ actorKind: z.enum(['user', 'saas_admin', 'customer', 'automation']), actorId: id }).strict();
 export const preferenceSchema = z.discriminatedUnion('kind', [
