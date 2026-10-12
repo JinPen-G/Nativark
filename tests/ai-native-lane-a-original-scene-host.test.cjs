@@ -33,6 +33,33 @@ test('opt-in module is inert; strict controller uses current authority without s
   await assert.rejects(controller.read(request, h.ref(result.receipt.inputRef)), e => e.getStatus() === 403 && e.getResponse().code === 'AI_ACCESS_DENIED');
 });
 
+test('request-bound business consumers reopen original citations and prepare only selected opening sections', async () => {
+  const h = await setup(), { credentials, ...dependencies } = h.dependencies;
+  const { composeRequestBoundOriginalScenes } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');
+  const app = composeRequestBoundOriginalScenes(dependencies, { enabled: true, audience: 'operator' });
+  const request = { headers: { authorization: (await credentials.current()).authorization } };
+  const created = await app.create(request, h.command());
+  const ref = h.ref(created.receipt.inputRef), packet = await app.prepareTaskMaterial(request, ref);
+  const citation = { ...ref, version: packet.material.payload.orderVersion, field: 'order' };
+  const opened = await app.reopenOrderCitation(request, citation);
+  assert.equal(opened.source.status, 'available'); assert.equal(opened.execution, 'not_attempted');
+  assert.equal(opened.source.orderId, 'order-a');
+  await assert.rejects(app.reopenOrderCitation(request, { ...citation, scope: { kind: 'platform' } }), e => e.code === 'AI_INVALID_INPUT');
+  const opening = await app.create(request, h.command('opening_diagnosis', 'opening-consumer'));
+  const material = await app.prepareTaskMaterial(request, h.ref(opening.receipt.inputRef));
+  const command = { ...h.ref(opening.receipt.inputRef), sections: [{ key: 'item_groups',
+    expectedVersion: material.material.configVersion, changes: [{ field: 'itemLabel', value: '合成器材' }] }] };
+  const prepared = await app.prepareOpeningSections(request, command);
+  assert.equal(prepared.publication, 'not_attempted');
+  assert.equal(prepared.proposalPersistence, 'unavailable_no_formal_section_proposal_port');
+  assert.ok(Object.isFrozen(prepared));
+  await assert.rejects(app.prepareOpeningSections(request, { ...command, sections: [{ ...command.sections[0], key: 'payment' }] }), e => e.code === 'AI_ACCESS_DENIED');
+  h.b.h.identity.session = false;
+  await assert.rejects(app.reopenOrderCitation(request, citation), e => e.code === 'AI_ACCESS_DENIED');
+  assert.equal(h.state.aiRun.length, 2, 'only initial metadata runs, reads do not execute');
+  assert.equal(h.state.aiStep.length, 0, 'business consumers never start a model step');
+});
+
 test('original quote review consumes revised formal requests without saving a quote or granting confirmation', async () => {
   const h = await setup(), { credentials, ...dependencies } = h.dependencies;
   const request = { headers: { authorization: (await credentials.current()).authorization } };

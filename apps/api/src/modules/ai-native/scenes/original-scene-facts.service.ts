@@ -31,7 +31,8 @@ export class AiOriginalSceneFactsService {
       scope: original.context.scope, version: command.version, field: command.field
     });
     const after = await this.requests.readHistorical(ref);
-    if (originalIdentityHash(original.context) !== originalIdentityHash(after.context)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    if (originalIdentityHash(original.context) !== originalIdentityHash(after.context)
+      || original.receipt.contentHash !== after.receipt.contentHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     return freezeOriginalInput({ original: original.receipt, source: result, execution: 'not_attempted' as const });
   }
   async prepareOpeningSections(value: unknown) {
@@ -42,10 +43,14 @@ export class AiOriginalSceneFactsService {
     if (original.request.sceneCode !== 'opening_diagnosis') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const selected = new Set(original.request.input.sections);
     if (command.sections.some(section => !selected.has(section.key))) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    await this.requests.resolve(original.request.sceneCode, ref.inputRef);
+    const before = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
     const result = await this.tools.openingSectionDifferences({ sections: command.sections });
-    await this.requests.resolve(original.request.sceneCode, ref.inputRef);
-    return freezeOriginalInput({ original: original.receipt, sections: result, publication: 'not_attempted' as const,
+    const snapshot = freezeOriginalInput(result);
+    const after = await this.requests.read(ref);
+    const grant = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
+    if (originalIdentityHash(before.context) !== originalIdentityHash(grant.context)
+      || original.receipt.contentHash !== after.receipt.contentHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    return freezeOriginalInput({ original: original.receipt, sections: snapshot, publication: 'not_attempted' as const,
       proposalPersistence: 'unavailable_no_formal_section_proposal_port' as const });
   }
   async reviewQuote(value: unknown) {
