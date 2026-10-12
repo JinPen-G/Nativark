@@ -859,6 +859,31 @@ test('request-bound model keeps unknown receipts and cancellation distinct from 
   const stopped = await aborted.requests.start(aborted.request, aborted.reference, signal.signal);
   assert.deepEqual(stopped.execution, { kind: 'not_started', reason: 'host_aborted' });
   assert.equal(aborted.state.aiRun[0].status, 'QUEUED'); assert.equal(aborted.state.aiTaskActionInput.length, 0);
+  // Formal production assembly must not need the fixture's successful runtime
+  // or financial ports. An aborted original action stays entirely inert.
+  const { composeRequestBoundPersistedOriginalSceneModel } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');
+  const { runtime, priceVersion, ...formalDependencies } = aborted.requestDependencies;
+  const gateway = { routeScene: 'chat', platformProfileId: 'platform-profile', callPriceVersion: 'calls-v1',
+    secrets: { encrypt() { throw new Error('must not encrypt'); }, decrypt() { throw new Error('must not decrypt'); } },
+    adapters: [{ provider: 'openai_chat_completions', features: ['text'], async generate() { throw new Error('must not dispatch'); } }],
+    audit: { async append() { throw new Error('must not call Gateway'); } } };
+  const formalOptions = { enabled: true, audience: 'operator', host: aborted.options.host };
+  const { createTaskInputStore } = require('./fixtures/ai-native/task-input-store.cjs');
+  const records = createTaskInputStore({ aiTenantModelConfiguration: [], systemParameterSet: [], aiPlatformModelConnection: [], aiProviderCapabilityEvidence: [] });
+  for (const table of ['aiTenantModelConfiguration', 'systemParameterSet', 'aiPlatformModelConnection', 'aiProviderCapabilityEvidence']) aborted.db[table] = records.db[table];
+  aborted.db.aiProviderProfile ??= { async findFirst() { return null; }, async updateMany() { throw new Error('must not write profile'); } };
+  aborted.db.aiProviderProfile.create ??= async () => { throw new Error('must not create profile'); };
+  aborted.db.aiPlatformModelConnection ??= { async findUnique() { return null; },
+    async create() { throw new Error('must not create connection'); }, async update() { throw new Error('must not update connection'); } };
+  aborted.db.aiPlatformModelConnection.update = async () => { throw new Error('must not update connection'); };
+  assert.throws(() => composeRequestBoundPersistedOriginalSceneModel({ ...formalDependencies, gateway, runtime }, formalOptions),
+    e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  const formal = composeRequestBoundPersistedOriginalSceneModel({ ...formalDependencies, gateway }, formalOptions);
+  await assert.rejects(formal.start(aborted.request, { ...aborted.reference, taskId: aborted.created.task.taskId }),
+    e => e.code === 'AI_INVALID_INPUT');
+  const formalStopped = await formal.start(aborted.request, aborted.reference, signal.signal);
+  assert.deepEqual(formalStopped.execution, { kind: 'not_started', reason: 'host_aborted' });
+  assert.equal(aborted.state.aiTaskActionInput.length, 0); assert.equal(aborted.state.aiGatewayInvocation.length, 0);
 });
 
 test('client scene authenticates through actual client Guard/Auth and rechecks after the business read', async () => {
