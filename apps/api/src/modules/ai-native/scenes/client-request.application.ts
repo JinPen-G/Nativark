@@ -18,7 +18,7 @@ import { AiClientEntryError, assertEntryAction, clientEntrySurface, entryActionS
 import { composeClientMaterialTasks, clientTaskEventsCommandSchema } from './client-task.composition';
 import { composePersistedClientTaskAuthorization } from './client-task-execution.composition';
 import { composeClientOriginalTaskModelHost, composeClientOriginalTaskInputReader } from './client-task-model-host.composition';
-import { composeClientTaskModelConfiguration, type ClientCallGatewayDependencies } from './client-task-model-configuration.composition';
+import { composeClientTaskModelConfiguration, type ClientCallGatewayDependencies, type ClientPersistedCallGatewayDependencies } from './client-task-model-configuration.composition';
 import type { SecretBox } from '../../../common/secret-box';
 import type { PublicGatewayRuntime } from '../public-ai-gateway.service';
 import { isAiTaskInputSubmissionDraft, type AiTaskInputSubmissionDraft } from '@rental-os/shared';
@@ -26,7 +26,7 @@ type ClientModelServerDependencies = Omit<Parameters<typeof composeClientOrigina
   'subscriptions' | 'clientScene' | 'loadMaterial' | 'guard' | 'clock' | 'runtime' | 'priceVersion' | 'financialEvidence'> & (
     { runtime: PublicGatewayRuntime; priceVersion: string;
       financialEvidence: Parameters<typeof composeClientOriginalTaskModelHost>[0]['financialEvidence']; gateway?: never }
-    | { gateway: ClientCallGatewayDependencies & { secrets: SecretBox };
+    | { gateway: (ClientCallGatewayDependencies | ClientPersistedCallGatewayDependencies) & { secrets: SecretBox };
       runtime?: never; priceVersion?: never; financialEvidence?: never });
 import { AiClientTaskUnknownError, clientTaskCommandSchema } from './prisma-client-task-input.repository';
 import { prepareClientOrderExplanation } from './client-order-explanation';
@@ -406,8 +406,13 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           await bound.assertCurrent();
           return { row, identity: structuredClone(bound.identity) };
         };
-        const configured = gatewayServer ? (await composeClientTaskModelConfiguration({ ...taskDependencies,
-          db: gatewayServer.db, secrets: gatewayServer.secrets, loadMaterial, clock }, command)).createCallGateway(gatewayServer) : null;
+        const configuration = gatewayServer ? await composeClientTaskModelConfiguration({ ...taskDependencies,
+          db: gatewayServer.db, secrets: gatewayServer.secrets, loadMaterial, clock }, command) : null;
+        const configured = gatewayServer && configuration
+          ? 'platformConnection' in gatewayServer
+            ? configuration.createCallGateway(gatewayServer)
+            : configuration.createPersistedCallGateway(gatewayServer)
+          : null;
         const runtime = configured?.runtime ?? model.runtime, priceVersion = configured?.callPriceVersion ?? model.priceVersion;
         const financialEvidence = configured?.financialEvidence ?? model.financialEvidence;
         if (!runtime || !priceVersion || !financialEvidence) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_model_dependencies_missing');

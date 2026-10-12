@@ -1193,6 +1193,12 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     assert.throws(() => customerConfiguration.createCallGateway({ ...gatewayServer, db: {} }), e => e.code === 'CONFIG_INVALID');
     const beforeGatewayWrites = taskStore.trace.length;
     const configured = customerConfiguration.createCallGateway(gatewayServer);
+    customerConfigDb.aiPlatformModelConnection = { findUnique: async () => null };
+    const { platformConnection: _externalConnection, ...persistedServer } = gatewayServer;
+    const persistedGateway = customerConfiguration.createPersistedCallGateway(persistedServer);
+    assert.equal(persistedGateway.runtime.ports.budget.constructor.name, 'PersistentGatewayBudget');
+    await assert.rejects(persistedGateway.runtime.ports.routing.resolve(customerConfigContext, ['text']),
+      e => e.code === 'CAPABILITY_UNSUPPORTED');
     assert.equal(configured.runtime.evidence, 'live');
     assert.equal(configured.callPriceVersion, 'customer-original-calls-1');
     assert.equal(configured.runtime.ports.budget.constructor.name, 'PersistentGatewayBudget');

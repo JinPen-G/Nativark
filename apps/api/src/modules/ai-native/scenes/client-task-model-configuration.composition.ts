@@ -23,6 +23,7 @@ import type { ModelAdapter } from '../model-gateway.ports';
 import type { PublicGatewayRuntime } from '../public-ai-gateway.service';
 import type { UnifiedGatewayAudit } from '../unified-ai-gateway.ports';
 import type { AiRouteScene } from '../provider-router.ports';
+import { PrismaPlatformModelConnection } from '../platform-model-connection';
 
 export type ClientCallGatewayDependencies = {
   db: PrismaClient;
@@ -33,6 +34,8 @@ export type ClientCallGatewayDependencies = {
   platformConnection: GatewayConnectionResolver;
   audit: UnifiedGatewayAudit;
 };
+/** Formal platform Vault producer; no caller-provided connection or grant. */
+export type ClientPersistedCallGatewayDependencies = Omit<ClientCallGatewayDependencies, 'platformConnection'>;
 
 /** Server-only invocation configuration for one original customer task. The
  * loader is the existing authenticated material source; caller scope is not an
@@ -72,12 +75,11 @@ export async function composeClientTaskModelConfiguration(input: AiClientTaskDep
     }
   });
   const connection = createScopeBoundTenantModelConnection(configuration, scopes);
-  return Object.freeze({ configuration, scopes, connection,
+  const createCallGateway = (server: ClientCallGatewayDependencies) => {
     /** Same original task, original encrypted configuration and one persistent
      * ledger. Only explicit server adapters; no default provider or HTTP client.
      * Live capabilities must already have the original verified probe receipt.
      * Building this object does not read a model, reserve, claim or invoke. */
-    createCallGateway(server: ClientCallGatewayDependencies) {
       if (!server || server.db !== dependencies.db || typeof server.audit?.append !== 'function'
         || typeof server.platformConnection?.resolve !== 'function' || !Array.isArray(server.adapters)
         || !server.adapters.length) throw new ModelGatewayError('CONFIG_INVALID');
@@ -112,6 +114,22 @@ export async function composeClientTaskModelConfiguration(input: AiClientTaskDep
       };
       return Object.freeze({ runtime, callPriceVersion,
         financialEvidence: Object.freeze({ readDispatch: accounting.facts.readDispatch.bind(accounting.facts) }) });
+  };
+  return Object.freeze({ configuration, scopes, connection, createCallGateway,
+    createPersistedCallGateway(server: ClientPersistedCallGatewayDependencies) {
+      if (!server || server.db !== dependencies.db) throw new ModelGatewayError('CONFIG_INVALID');
+      const platformConnection = new PrismaPlatformModelConnection(server.db, scopes, {
+        // Customer tasks never manage or save platform configuration.
+        manage: async () => { throw new ModelGatewayError('FORBIDDEN'); },
+        invoke: async value => {
+          const expected = structuredClone(value);
+          const principal = gatewayBudgetPrincipal(await authorization.execution.authorize(taskId));
+          if (principal.actorKind !== 'CUSTOMER' || principal.actorId !== expected.actorId
+            || principal.tenantId !== expected.tenantId || principal.workspaceId !== expected.workspaceId)
+            throw new ModelGatewayError('FORBIDDEN');
+        }
+      }, secrets);
+      return createCallGateway({ ...server, platformConnection });
     }
   });
 }

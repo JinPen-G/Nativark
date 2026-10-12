@@ -108,6 +108,28 @@ test('platform vault persists ciphertext and reconstructs actual resolver withou
   assert.equal(connection.maxOutputTokens, 100);
 });
 
+test('platform vault accepts a valid current client execution identity without granting management', async () => {
+  const h = await configured();
+  const { taskInputHarness } = require('./fixtures/ai-native/task-input-harness.cjs');
+  const original = await taskInputHarness();
+  const customer = clone(original.control.context);
+  customer.actor = { kind: 'customer', customerId: context.actorId }; customer.audience = 'client';
+  customer.scope = { kind: 'workspace', tenantId: context.tenantId, workspaceId: context.workspaceId };
+  delete customer.access;
+  h.scopes.resolveRoutingScopes = async () => ({ context: clone(customer), configurationScope: { id: profile.scopeId, kind: 'PLATFORM' } });
+  const selected = clone(h.state.profile);
+  assert.equal((await h.service().resolve(context, selected)).credential, input.secretChange.apiKey);
+  // Customer identity cannot borrow the management branch, even if the test
+  // authority's management function permits: the resolver enforces platform admin.
+  await assert.rejects(h.service().save({ ...input, expectedRevision: selected.configRevision }), rejects('FORBIDDEN'));
+  customer.audience = 'operator';
+  await assert.rejects(h.service().resolve(context, selected), rejects('FORBIDDEN'));
+  customer.audience = 'client';
+  const beforeRevoke = h.state.invokeCalls;
+  h.state.beforeInvoke = count => { if (count === beforeRevoke + 2) h.state.invocation = false; };
+  await assert.rejects(h.service().resolve(context, selected), rejects('FORBIDDEN'));
+});
+
 test('missing vault, wrong owner, tenant mode and disabled profile fail closed', async () => {
   const h = await configured(), selected = clone(h.state.profile);
   h.state.row = null;

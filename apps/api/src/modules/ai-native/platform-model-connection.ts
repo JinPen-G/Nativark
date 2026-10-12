@@ -9,6 +9,7 @@ import type { GatewayConnectionResolver } from './routed-model-transport';
 import { capabilityNameSchema, capabilityProfileFingerprint } from './capability-verification';
 import { normalizeTenantModelBaseUrl } from './tenant-model-config.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { isAiStepExecutionContext } from './task-contract-validation';
 
 const id = z.string().min(1).max(36).regex(/^[\w.:-]+$/u);
 const revision = z.number().int().min(1).max(4294967295);
@@ -137,9 +138,13 @@ export class PrismaPlatformModelConnection implements GatewayConnectionResolver 
     const current = async () => {
       try { await this.authority.invoke(structuredClone(context)); } catch { throw new ModelGatewayError('FORBIDDEN'); }
       const owner = await this.currentOwner(), actor = owner.context.actor, scope = owner.context.scope;
-      // Existing transport context supports workspace users only. Platform jobs,
-      // clients and automation remain refused until their public boundary exists.
-      if (actor.kind !== 'user' || actor.userId !== context.actorId || scope.kind !== 'workspace'
+      // Customer invocation is only possible with the formal client execution
+      // context and a separately supplied current task authority. It confers no
+      // platform management permission; automation/platform jobs stay refused.
+      const actorId = actor.kind === 'user' ? actor.userId
+        : actor.kind === 'customer' && owner.context.audience === 'client' && isAiStepExecutionContext(owner.context)
+          ? actor.customerId : null;
+      if (!actorId || actorId !== context.actorId || scope.kind !== 'workspace'
         || scope.tenantId !== context.tenantId || scope.workspaceId !== context.workspaceId
         || owner.configurationScope.kind !== 'PLATFORM' || owner.configurationScope.id !== profile.scopeId) throw new ModelGatewayError('FORBIDDEN');
       const { authorizedAt: _, requestId: __, ...identity } = owner.context;
