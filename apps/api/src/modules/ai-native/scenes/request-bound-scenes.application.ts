@@ -148,6 +148,8 @@ export function composeRequestBoundPersistedOriginalSceneModel(
       call(request, value, (app, command) => app.continueAnswer(command, signal)),
     reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, (app, command) => app.reconcile(command, signal)),
+    recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (app, command) => app.recover(command, signal)),
     requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.requestCancel(command))
   });
 }
@@ -244,6 +246,8 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
       call(request, value, (app, command) => app.application.continueAnswer(command, signal)),
     reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, (app, command) => app.application.reconcile(command, signal)),
+    recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (app, command) => app.application.recover(command, signal)),
     requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.requestCancel(command)),
     readModelResult: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.model.readModelResult(command)),
     reopenModelSource: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.model.reopenModelSource(command))

@@ -849,6 +849,13 @@ test('request-bound model keeps unknown receipts and cancellation distinct from 
   const command = { original: h.reference, resultId: h.state.aiTaskResultArtifact[0].id };
   assert.equal((await app.readModelResult(h.request, command)).text, null);
   await app.reconcile(h.request, h.reference);
+  const { composeRequestBoundOriginalSceneModel } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');
+  const rebuilt = composeRequestBoundOriginalSceneModel(h.requestDependencies,
+    { ...h.options, host: { ...h.options.host, holderId: 'rebuilt-original-worker' } });
+  const originalInvocation = h.state.aiGatewayInvocation[0].id;
+  const recovered = await rebuilt.recover(h.request, h.reference);
+  assert.equal(recovered.kind, 'run_outcome'); assert.equal(recovered.outcome.status, 'unknown');
+  assert.equal(h.state.aiGatewayInvocation[0].id, originalInvocation); assert.equal(h.execution.sent.length, 1);
   h.state.aiTaskPlanPolicy[0].enabled = false;
   const cancel = await app.requestCancel(h.request, { original: h.reference, expectedRevision: h.state.aiTask[0].revision });
   assert.equal(cancel.cancellation, 'requested_not_rollback');

@@ -332,6 +332,23 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
           await prepareHeldRun({ original: reference, lease, expectedTaskRevision: taskRevision }, root.inputs.readContinuation.bind(root.inputs));
           if (preparationSignal?.aborted) throw unavailable();
         });
+      const originalRun = async (before: Awaited<ReturnType<typeof bound>>) => {
+        const access = await model.tasks.resolveAccess(before.task.taskId, 'read_metadata');
+        const runId = await dependencies.db.$transaction(async tx => {
+          const task = await tx.aiTask.findFirst({ where: access.where });
+          if (!task || task.inputRef !== before.reference.inputRef) throw denied();
+          const active = await tx.aiRun.findMany({ where: { scopeId: task.scopeId, taskId: task.id,
+            actorKind: access.actorKind, actorId: access.actorId, status: { in: ['QUEUED', 'RUNNING'] } }, take: 2 });
+          if (active.length > 1) throw unavailable();
+          const runId = active[0]?.id ?? before.task.runId;
+          await readTaskModelRunOrigin(tx, access, { scopeId: task.scopeId, taskId: task.id, runId,
+            originRunId: before.task.runId, registrationRef: registration(before.reference.inputRef) });
+          return runId;
+        });
+        await current(before.reference, before.task.taskId, runId);
+        await verify(before);
+        return runId;
+      };
       const answer = async (value: unknown) => {
         const parsed = z.object({ original: originalRequestReferenceSchema, submission: z.unknown() }).strict()
           .safeParse(structuredClone(value));
@@ -447,22 +464,29 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         const before = await bound(value);
         const cancellation = await settleInputCancellation(before);
         if (cancellation) return freezeOriginalInput({ kind: 'cancellation_settled' as const, receipt: cancellation });
-        const access = await model.tasks.resolveAccess(before.task.taskId, 'read_metadata');
-        const runId = await dependencies.db.$transaction(async tx => {
-          const task = await tx.aiTask.findFirst({ where: access.where });
-          if (!task || task.inputRef !== before.reference.inputRef) throw denied();
-          const active = await tx.aiRun.findMany({ where: { scopeId: task.scopeId, taskId: task.id,
-            actorKind: access.actorKind, actorId: access.actorId, status: { in: ['QUEUED', 'RUNNING'] } }, take: 2 });
-          if (active.length > 1) throw unavailable();
-          const runId = active[0]?.id ?? before.task.runId;
-          await readTaskModelRunOrigin(tx, access, { scopeId: task.scopeId, taskId: task.id, runId,
-            originRunId: before.task.runId, registrationRef: registration(before.reference.inputRef) });
-          return runId;
-        });
-        await current(before.reference, before.task.taskId, runId);
+        const runId = await originalRun(before);
         const result = await application(before.reference).reconcile({ taskId: before.task.taskId, runId }, signal);
         await verify(before);
         return freezeOriginalInput(result); // Original held lease only, never a new claim/re-dispatch.
+      }, async recover(value: unknown, signal?: AbortSignal) {
+        const before = await bound(value);
+        if (signal?.aborted) return freezeOriginalInput({ kind: 'not_started' as const, reason: 'host_aborted' as const });
+        const runId = await originalRun(before), reader = application(before.reference);
+        const snapshot = await reader.inspect({ taskId: before.task.taskId, runId });
+        if (!snapshot.plan || !['running', 'waiting_input', 'waiting_confirmation', 'waiting_external', 'cancel_requested'].includes(snapshot.task.status)) {
+          return freezeOriginalInput({ kind: 'not_started' as const, reason: 'task_not_runnable' as const });
+        }
+        await verify(before);
+        // Reclaim only this persisted original/successor. The existing CAS and
+        // fencing gate owns current authority, old leases and recovery facts.
+        // Recovery never publishes a replacement input/plan or resets usage.
+        const lease = await model.tasks.claimRecoveryRun({ taskId: before.task.taskId, runId,
+          holderId: serverHost.holderId, leaseMs: serverHost.leaseMs,
+          expectedTaskRevision: snapshot.task.revision, expectedRunRevision: snapshot.run.revision,
+          expectedFencingToken: snapshot.run.fencingToken });
+        const outcome = await root.runner.recover(lease, signal);
+        await verify(before);
+        return freezeOriginalInput({ kind: 'run_outcome' as const, outcome });
       }, async requestCancel(value: unknown) {
         const parsed = z.object({ original: originalRequestReferenceSchema, expectedRevision: revision }).strict()
           .safeParse(structuredClone(value));
