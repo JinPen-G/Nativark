@@ -993,6 +993,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     budget: { state: 'limited', quantity: { unit: 'calls', value: 10 } },
     gates: Object.fromEntries(['platform', 'tenant', 'scene'].map(kind => [kind, { enabled: true, revision: 1 }])) });
   const taskStore = createTaskInputStore({ aiScope: scopes, aiTask: [], aiRun: [], aiStep: [], aiTaskResultArtifact: [], aiTaskRunPlan: [], aiTaskEvent: [],
+    aiTaskExecutionCharge: [], aiTaskExecutionBudget: [],
     aiTaskInputRequest: [], aiTaskInputReceipt: [], aiTaskActionInput: [], aiTaskPlanPolicy: [],
     aiBudgetPolicy: scopes.map(scope => ({ id: `${scope.id}-budget`, scopeId: scope.id, scopeKind: scope.kind, sceneCode,
       configRevision: 1, enabled: true, settingsJson: settingsFor(scope) })) },
@@ -1740,6 +1741,18 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   // client Guard/material authority. No provider or execution capability needed.
   const resultApp = composeRequestBoundClientApplication(taskDependencies,
     { ...configuration, entry: { enabled: true, releaseRevision: 'result-read-1' } });
+  const executionBefore = clone(taskStore.state);
+  const execution = await resultApp.readOriginalTaskExecution(request, taskCommand, { db });
+  assert.equal(execution.task.taskId, created.task.taskId);
+  assert.equal(execution.run.runId, created.task.runId);
+  assert.deepEqual(execution.steps, []);
+  assert.equal(execution.resources, null);
+  assert.deepEqual(taskStore.state, executionBefore);
+  await assert.rejects(resultApp.readOriginalTaskExecution(request, { ...taskCommand, runId: created.task.runId }, { db }),
+    e => e.code === 'AI_INVALID_INPUT');
+  taskStore.control.beforeRead = async table => { if (table === 'aiTaskRunPlan') revoked = true; };
+  await assert.rejects(resultApp.readOriginalTaskExecution(request, taskCommand, { db }), e => e.code === 'AI_ACCESS_DENIED');
+  taskStore.control.beforeRead = null; revoked = false;
   const resultCommand = { ...taskCommand, resultId: 'client-result' };
   await assert.rejects(resultApp.readOriginalTaskResult(request, resultCommand, { db }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
   const payload = { explanation: 'Persisted model output, not a booking receipt' };

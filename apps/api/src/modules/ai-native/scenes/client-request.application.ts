@@ -13,6 +13,8 @@ import { PrismaClientSceneMaterialRepository, AiClientMaterialError, type AiClie
 import { AiClientPolicyAuthority, AiClientTaskAuthority, clientTaskSceneSchema, type AiClientTaskDependencies } from './client-task.authority';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskResultRepository } from '../runner/ai-task-result.repository';
+import { PrismaTaskRecoverySnapshotRepository } from '../runner/prisma-task-recovery-snapshot.repository';
+import { readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
 import { AI_CLIENT_HOST_CAPABILITIES_VERSION, aiClientHostCapabilitiesRequestSchema, aiClientHostCapabilitiesSchema,
   type AiClientHostCapabilities } from '../../../../../../packages/shared/src/ai-client-entry-draft-schemas';
 import { AiClientEntryError, assertEntryAction, clientEntrySurface, entryActionSchema, materialEntryAction, parseEntry } from './client-entry-action';
@@ -448,6 +450,56 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     });
   };
   return Object.freeze({
+    /** Server-only original execution read. No provider, lease, cancellation,
+     * retry or financial authority is acquired by observing these facts. */
+    async readOriginalTaskExecution(request: AiClientApplicationRequest, value: unknown,
+      source: { db: ConstructorParameters<typeof PrismaTaskRecoverySnapshotRepository>[0] }) {
+      if (!server.entry) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'entry_disabled');
+      const db = source?.db;
+      if (!taskDependencies || !Object.is(db, dependencies.db))
+        throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_execution_dependencies_missing');
+      const command = parseEntry(clientTaskCommandSchema, structuredClone(value));
+      return withBinding(structuredClone(request), true, 'order', async bound => {
+        const loadMaterial = async (materialRef: string) => {
+          await bound.assertCurrent();
+          const row = await repository.findSource(scopeOf(bound), materialRef);
+          if (!row || !bound.identity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          await verify(bound, row);
+          await bound.assertCurrent();
+          return { row, identity: structuredClone(bound.identity) };
+        };
+        const authorized = composePersistedClientTaskAuthorization(taskDependencies, command, loadMaterial, clock);
+        const original = await composeClientMaterialTasks(taskDependencies, loadMaterial, clock).readCreation(command);
+        if (!original.task) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const before = await authorized.execution.readGrant(original.task.taskId, 'read');
+        const access = await authorized.tasks.resolveAccess(before.taskId, 'read_step_terminal');
+        // Choose only the latest persisted run belonging to this original owner.
+        // A resumed run needs the existing consumed-input lineage proof, not a
+        // caller-selected run or a latest task/quote from another operation.
+        const selected = await db.$transaction(async tx => {
+          const task = await tx.aiTask.findFirst({ where: access.where });
+          if (!task || task.inputRef !== original.inputRef) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          const runs = await tx.aiRun.findMany({ where: { scopeId: task.scopeId, taskId: task.id,
+            actorKind: access.actorKind, actorId: access.actorId }, orderBy: { sequence: 'desc' }, take: 2 });
+          const run = runs[0];
+          if (!run || (runs[1] && run.sequence === runs[1].sequence)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          await readTaskModelRunOrigin(tx, access, { scopeId: task.scopeId, taskId: task.id,
+            runId: run.id, originRunId: original.task!.runId, registrationRef: `client-model:${original.inputRef}` });
+          return { runId: run.id, runRevision: run.revision, taskRevision: task.revision };
+        }, { maxWait: 2500, timeout: 5000 }).catch(error => {
+          if (error instanceof AiTaskRepositoryError) throw error;
+          throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+        });
+        const snapshot = await new PrismaTaskRecoverySnapshotRepository(db, authorized.tasks)
+          .read({ taskId: before.taskId, runId: selected.runId });
+        const current = await authorized.execution.readGrant(before.taskId, 'read');
+        if (before.proof !== current.proof || snapshot.task.revision !== selected.taskRevision
+          || snapshot.run.revision !== selected.runRevision) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        await bound.assertCurrent();
+        if (Buffer.byteLength(JSON.stringify(snapshot), 'utf8') > maxBytes) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return freezeOriginalInput(snapshot);
+      });
+    },
     /** Original-command result consumption, not model execution or a business
      * receipt. The server supplies the same repository; callers cannot choose
      * a task/run or provide a payload. No Gateway/lease/budget is constructed. */
