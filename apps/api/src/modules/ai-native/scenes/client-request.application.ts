@@ -12,6 +12,7 @@ import { PrismaClientSceneMaterialRepository, AiClientMaterialError, type AiClie
   type AiClientMaterialScope, type AiClientSceneMaterial } from './prisma-client-scene-material.repository';
 import { AiClientPolicyAuthority, AiClientTaskAuthority, clientTaskSceneSchema, type AiClientTaskDependencies } from './client-task.authority';
 import { AiTaskRepositoryError } from '../ai-task.repository';
+import { AiTaskResultRepository } from '../runner/ai-task-result.repository';
 import { AI_CLIENT_HOST_CAPABILITIES_VERSION, aiClientHostCapabilitiesRequestSchema, aiClientHostCapabilitiesSchema,
   type AiClientHostCapabilities } from '../../../../../../packages/shared/src/ai-client-entry-draft-schemas';
 import { AiClientEntryError, assertEntryAction, clientEntrySurface, entryActionSchema, materialEntryAction, parseEntry } from './client-entry-action';
@@ -447,6 +448,41 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     });
   };
   return Object.freeze({
+    /** Original-command result consumption, not model execution or a business
+     * receipt. The server supplies the same repository; callers cannot choose
+     * a task/run or provide a payload. No Gateway/lease/budget is constructed. */
+    async readOriginalTaskResult(request: AiClientApplicationRequest, value: unknown,
+      source: { db: ConstructorParameters<typeof AiTaskResultRepository>[0] }) {
+      // A result read has no navigation Action. Do not require an assembled
+      // booking-page surface, but retain explicit server opt-in and read policy.
+      if (!server.entry) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'entry_disabled');
+      const resultDb = source?.db;
+      if (!taskDependencies || !Object.is(resultDb, dependencies.db)) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_result_dependencies_missing');
+      const command = parseEntry(clientTaskCommandSchema.extend({ resultId: id }).strict(), structuredClone(value));
+      const { resultId, ...original } = command;
+      return withBinding(structuredClone(request), true, 'order', async bound => {
+        const loadMaterial = async (materialRef: string) => {
+          await bound.assertCurrent();
+          const row = await repository.findSource(scopeOf(bound), materialRef);
+          if (!row || !bound.identity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          await verify(bound, row);
+          await bound.assertCurrent();
+          return { row, identity: structuredClone(bound.identity) };
+        };
+        const authorized = composePersistedClientTaskAuthorization(taskDependencies, original, loadMaterial, clock);
+        const receipt = await composeClientMaterialTasks(taskDependencies, loadMaterial, clock).readCreation(original);
+        if (!receipt.task) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const before = await authorized.execution.readGrant(receipt.task.taskId, 'read');
+        const result = await new AiTaskResultRepository(resultDb, authorized.tasks, clock).read({ taskId: before.taskId, resultId });
+        // Recheck material, publication, current identity and original task after
+        // the result transaction. Changed input/policy/task cannot return old data.
+        const current = await authorized.execution.readGrant(before.taskId, 'read');
+        if (before.proof !== current.proof) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        await bound.assertCurrent();
+        if (Buffer.byteLength(JSON.stringify(result), 'utf8') > maxBytes) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return freezeOriginalInput(result);
+      });
+    },
     /** Explicit human booking-page request, not an AI Tool or approval bypass. */
     async acceptBookingSubmission(request: AiClientApplicationRequest, value: unknown) {
       request = structuredClone(request);

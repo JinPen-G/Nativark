@@ -937,7 +937,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     sceneCode, allowedScenes: [sceneCode], allowedModels: ['synthetic-model'], maxConcurrent: 1, maxCallsPerRun: 1,
     budget: { state: 'limited', quantity: { unit: 'calls', value: 10 } },
     gates: Object.fromEntries(['platform', 'tenant', 'scene'].map(kind => [kind, { enabled: true, revision: 1 }])) });
-  const taskStore = createTaskInputStore({ aiScope: scopes, aiTask: [], aiRun: [], aiStep: [], aiTaskRunPlan: [], aiTaskEvent: [],
+  const taskStore = createTaskInputStore({ aiScope: scopes, aiTask: [], aiRun: [], aiStep: [], aiTaskResultArtifact: [], aiTaskRunPlan: [], aiTaskEvent: [],
     aiTaskInputRequest: [], aiTaskInputReceipt: [], aiTaskActionInput: [], aiTaskPlanPolicy: [],
     aiBudgetPolicy: scopes.map(scope => ({ id: `${scope.id}-budget`, scopeId: scope.id, scopeKind: scope.kind, sceneCode,
       configRevision: 1, enabled: true, settingsJson: settingsFor(scope) })) },
@@ -1681,6 +1681,41 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.equal(snapshot.cursor, '0'); assert.deepEqual(snapshot.steps, []);
   const page = await taskReaderController.readTaskEvents(request, { ...taskCommand, after: snapshot.cursor, limit: 10 });
   assert.deepEqual(page.events, []); assert.equal(page.nextCursor, '0');
+  // Explicit server result reader reuses the actual repository and original
+  // client Guard/material authority. No provider or execution capability needed.
+  const resultApp = composeRequestBoundClientApplication(taskDependencies,
+    { ...configuration, entry: { enabled: true, releaseRevision: 'result-read-1' } });
+  const resultCommand = { ...taskCommand, resultId: 'client-result' };
+  await assert.rejects(resultApp.readOriginalTaskResult(request, resultCommand, { db }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  const payload = { explanation: 'Persisted model output, not a booking receipt' };
+  const { requestFingerprint: resultHash } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const fingerprint = resultHash(payload), stepFingerprint = resultHash({ input: 'original-customer-input' });
+  const originalTask = taskStore.state.aiTask.find(row => row.id === created.task.taskId);
+  taskStore.state.aiStep.push({ id: 'client-result-step', scopeId: originalTask.scopeId, taskId: originalTask.id,
+    runId: created.task.runId, actionId: 'client-result-action', requestFingerprint: stepFingerprint,
+    resultRef: 'client-result', status: 'SUCCEEDED' });
+  taskStore.state.aiTaskResultArtifact.push({ id: 'client-result', scopeId: originalTask.scopeId, taskId: originalTask.id,
+    runId: created.task.runId, stepId: 'client-result-step', actionId: 'client-result-action', stepFingerprint,
+    outcome: 'SUCCEEDED', errorCode: null, payload, contentHash: fingerprint,
+    outputBytes: BigInt(Buffer.byteLength(JSON.stringify(payload))), activeMs: 1n, completeMeasurement: true, createdAt: now });
+  const beforeResult = clone(taskStore.state), resultTraceStart = taskStore.trace.length;
+  const persistedResult = await resultApp.readOriginalTaskResult(request, resultCommand, { db });
+  assert.equal(persistedResult.status, 'succeeded'); assert.deepEqual(persistedResult.payload, payload);
+  assert.equal(persistedResult.taskId, created.task.taskId);
+  assert.deepEqual(taskStore.state, beforeResult);
+  assert.deepEqual(taskStore.trace.slice(resultTraceStart).filter(event =>
+    /\.(create|createMany|update|upsert)$|^row\.lock$/u.test(event)), []);
+  taskStore.state.aiTaskResultArtifact[0].outcome = 'UNKNOWN';
+  assert.equal((await resultApp.readOriginalTaskResult(request, resultCommand, { db })).payload, null);
+  assert.equal((await resultApp.readOriginalTaskResult(request, resultCommand, { db })).status, 'unknown');
+  taskStore.state.aiTaskResultArtifact[0].taskId = 'another-customer-task';
+  await assert.rejects(resultApp.readOriginalTaskResult(request, resultCommand, { db }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  taskStore.state.aiTaskResultArtifact[0].taskId = originalTask.id;
+  await assert.rejects(resultApp.readOriginalTaskResult(request, { ...resultCommand, taskId: originalTask.id }, { db }), e => e.code === 'AI_INVALID_INPUT');
+  taskStore.control.beforeRead = async table => { if (table === 'aiTaskResultArtifact') revoked = true; };
+  await assert.rejects(resultApp.readOriginalTaskResult(request, resultCommand, { db }), e => e.code === 'AI_ACCESS_DENIED');
+  taskStore.control.beforeRead = null; revoked = false;
+  taskStore.state.aiStep.pop(); taskStore.state.aiTaskResultArtifact.pop();
   // The actual persisted watermark is a decimal string, never a Number or an invented cursor.
   taskStore.state.aiTask.find(row => row.id === created.task.taskId).eventCursor = 9007199254740993n;
   const precise = await taskRestart.readTaskSnapshot(request, taskCommand);
