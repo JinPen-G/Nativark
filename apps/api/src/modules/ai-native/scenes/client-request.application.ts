@@ -32,6 +32,11 @@ type ClientModelServerDependencies = Omit<Parameters<typeof composeClientOrigina
       financialEvidence: Parameters<typeof composeClientOriginalTaskModelHost>[0]['financialEvidence']; gateway?: never }
     | { gateway: (ClientCallGatewayDependencies | ClientPersistedCallGatewayDependencies) & { secrets: SecretBox };
       runtime?: never; priceVersion?: never; financialEvidence?: never });
+type PersistedClientModelServerDependencies = Omit<Parameters<typeof composeClientOriginalTaskModelHost>[0],
+  'subscriptions' | 'clientScene' | 'loadMaterial' | 'guard' | 'clock' | 'runtime' | 'priceVersion' | 'financialEvidence'> & {
+    gateway: ClientPersistedCallGatewayDependencies & { secrets: SecretBox };
+    runtime?: never; priceVersion?: never; financialEvidence?: never;
+  };
 import { AiClientTaskUnknownError, clientTaskCommandSchema } from './prisma-client-task-input.repository';
 import { prepareClientOrderExplanation } from './client-order-explanation';
 import { bookingSelectionSchema, readClientBookingMaterial } from './client-booking-material';
@@ -68,6 +73,9 @@ export type AiClientRequestDependencies = {
   /** Explicit same-database server input source for cancellation observation;
    * never accepted as a customer body or used to start a model. */
   taskInputs?: Pick<Parameters<typeof composeClientOriginalTaskInputReader>[0], 'db' | 'inputSource' | 'gatewayScene'>;
+  /** Public controls use ONLY this explicit persistent Vault/BYOK/single-ledger
+   * server root, never a supplied runtime or customer request configuration. */
+  taskModel?: PersistedClientModelServerDependencies;
   /** Original booking page only, explicit server assembly. Same ClientApiService
    * singleton as the read projection; never an Agent-selected executor. */
   bookingSubmission?: Pick<ClientApiService, 'prepareOrderSubmission' | 'readOrderSubmission' | 'createOrder'>;
@@ -463,6 +471,15 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   };
   const configuredTaskInputSource = dependencies.taskInputs && {
     ...dependencies.taskInputs, gatewayScene: structuredClone(dependencies.taskInputs.gatewayScene) };
+  const configuredModel = (): PersistedClientModelServerDependencies => {
+    const model = dependencies.taskModel;
+    if (!model || model.db !== dependencies.db || model.gateway?.db !== dependencies.db
+      || ('kind' in model && model.kind !== undefined)
+      || ['runtime', 'priceVersion', 'financialEvidence'].some(key => Object.prototype.hasOwnProperty.call(model, key))
+      || Object.prototype.hasOwnProperty.call(model.gateway, 'platformConnection'))
+      throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_persisted_model_dependencies_missing');
+    return model;
+  };
   return Object.freeze({
     /** Server-only, original released-input witness; not a generic cancellation
      * finalizer and never a model/provider or budget-dependent operation. */
@@ -649,11 +666,11 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     },
     /** Internal server consumer only. Runtime/pricing/plan/host configuration is
      * injected by the application, never accepted in a customer HTTP body. */
-    startOriginalTaskModel(request: AiClientApplicationRequest, value: unknown, model: ClientModelServerDependencies,
+    startOriginalTaskModel(request: AiClientApplicationRequest, value: unknown, model: ClientModelServerDependencies = configuredModel(),
       signal?: AbortSignal) { return runOriginalTaskModel(request, value, model, signal); },
-    recoverOriginalTaskModel(request: AiClientApplicationRequest, value: unknown, model: ClientModelServerDependencies,
+    recoverOriginalTaskModel(request: AiClientApplicationRequest, value: unknown, model: ClientModelServerDependencies = configuredModel(),
       signal?: AbortSignal) { return runOriginalTaskModel(request, value, model, signal, undefined, 'recover'); },
-    reconcileOriginalTaskModel(request: AiClientApplicationRequest, value: unknown, model: ClientModelServerDependencies,
+    reconcileOriginalTaskModel(request: AiClientApplicationRequest, value: unknown, model: ClientModelServerDependencies = configuredModel(),
       signal?: AbortSignal) { return runOriginalTaskModel(request, value, model, signal, undefined, 'reconcile'); },
     async resumeOriginalTaskModel(request: AiClientApplicationRequest, value: unknown, answerValue: unknown,
       model: ClientModelServerDependencies, signal?: AbortSignal) {
@@ -681,7 +698,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     /** Explicit server execution dependencies, exact original answer receipt;
      * never resubmit, select a caller run or automatically start after submit. */
     continueOriginalTaskModelInput(request: AiClientApplicationRequest, value: unknown,
-      model: ClientModelServerDependencies, signal?: AbortSignal) {
+      model: ClientModelServerDependencies = configuredModel(), signal?: AbortSignal) {
       const { submission, ...command } = parseEntry(aiClientTaskInputSubmissionRequestSchema, structuredClone(value));
       return runOriginalTaskModel(request, command, model, signal, submission, 'continue');
     },

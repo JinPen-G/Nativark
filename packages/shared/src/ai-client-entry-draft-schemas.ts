@@ -39,6 +39,20 @@ export const aiClientTaskInputReadResponseSchema = z.discriminatedUnion('state',
     question: z.null(), execution: z.literal('not_authorized_by_observation') }).strict()
 ]);
 export type AiClientTaskInputReadResponse = z.infer<typeof aiClientTaskInputReadResponseSchema>;
+/** Model execution observation is never a Core/approval result. */
+export const aiClientTaskModelControlResponseSchema = z.object({
+  contractVersion: z.literal(AI_TASK_DRAFT_VERSION),
+  execution: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('not_started'), reason: z.enum(['host_aborted', 'plan_unavailable',
+      'task_not_runnable', 'lease_held', 'recovery_lease_unavailable']) }).strict(),
+    z.object({ kind: z.literal('run_outcome'), outcome: z.object({
+      status: z.enum(['succeeded', 'partially_succeeded', 'paused', 'cancel_requested', 'cancelled', 'unknown', 'unavailable', 'failed']),
+      completedSteps: z.number().int().min(0).max(4294967295),
+      cleanupFailed: z.number().int().min(0).max(4294967295)
+    }).strict() }).strict()
+  ]), businessExecution: z.literal('not_inferred_from_model_result'),
+  retryable: z.literal(false), nextAction: z.literal('read_original_task')
+}).strict();
 export const aiClientTaskInputSubmissionRequestSchema = aiClientTaskReadRequestSchema.extend({
   submission: z.custom<Omit<AiTaskInputSubmissionDraft, 'taskId'>>(value => !!value && typeof value === 'object'
     && !Array.isArray(value) && !Object.prototype.hasOwnProperty.call(value, 'taskId')

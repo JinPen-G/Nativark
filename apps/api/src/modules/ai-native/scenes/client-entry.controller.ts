@@ -2,12 +2,13 @@ import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } 
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientTaskCancelReceiptSchema,
   aiClientTaskInputCancellationReceiptSchema, aiClientTaskInputReadResponseSchema, AI_TASK_INPUT_DRAFT_VERSION,
   aiClientTaskInputSubmissionRequestSchema, aiClientTaskInputSubmissionReceiptSchema,
-  aiClientTaskInputReceiptReadResponseSchema } from '@rental-os/shared';
+  aiClientTaskInputReceiptReadResponseSchema, aiClientTaskModelControlResponseSchema, AI_TASK_DRAFT_VERSION } from '@rental-os/shared';
 import { z } from 'zod';
 import { AiClientEntryError } from './client-entry-action';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskTransitionResultUnknownError } from '../ai-task-transition.repository';
 import { AiTaskInputResultUnknownError } from '../task-input/task-input.errors';
+import { withRequestAbort, type AiRequestAbortSource } from './request-abort';
 import type { AiClientApplicationRequest, composeRequestBoundClientApplication } from './client-request.application';
 
 export const AI_CLIENT_ENTRY_APPLICATION = Symbol('AI_CLIENT_ENTRY_APPLICATION');
@@ -16,7 +17,9 @@ type Application = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
   'handoffBookingDraft' | 'readBookingHandoff' | 'readBookingOperation' |
   'acceptBookingSubmission' | 'submitAcceptedBooking' | 'readBookingSubmission' | 'readTaskSnapshot' | 'readTaskEvents' |
   'readOrderExplanation' | 'readSource' | 'requestOriginalTaskCancellation' | 'reconcileOriginalTaskInputCancellation' |
-  'readOriginalTaskModelInput' | 'submitOriginalTaskModelInput' | 'readOriginalTaskModelInputReceipt'>;
+  'readOriginalTaskModelInput' | 'submitOriginalTaskModelInput' | 'readOriginalTaskModelInputReceipt' |
+  'startOriginalTaskModel' | 'recoverOriginalTaskModel' | 'reconcileOriginalTaskModel' | 'continueOriginalTaskModelInput'>;
+type ClientModelHttpRequest = AiClientApplicationRequest & AiRequestAbortSource;
 
 @Controller([AI_CLIENT_ENTRY_HTTP_DRAFT.basePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath])
 export class AiClientEntryController {
@@ -47,6 +50,42 @@ export class AiClientEntryController {
       throw new HttpException({ code, retryable: false,
         ...(code === 'AI_RESULT_UNKNOWN' ? { nextAction: unknownAction } : {}) }, statuses[code]);
     }
+  }
+  private modelObservation(value: unknown) {
+    const wrapped = value && typeof value === 'object' && 'execution' in value ? value.execution : value;
+    const execution = wrapped && typeof wrapped === 'object' && 'kind' in wrapped && wrapped.kind === 'run_outcome'
+      && 'outcome' in wrapped && wrapped.outcome && typeof wrapped.outcome === 'object'
+      ? { kind: wrapped.kind, outcome: {
+        status: 'status' in wrapped.outcome ? wrapped.outcome.status : undefined,
+        completedSteps: 'completedSteps' in wrapped.outcome ? wrapped.outcome.completedSteps : undefined,
+        cleanupFailed: 'cleanupFailed' in wrapped.outcome ? wrapped.outcome.cleanupFailed : undefined } }
+      : wrapped && typeof wrapped === 'object' && 'kind' in wrapped && wrapped.kind === 'not_started'
+        ? { kind: wrapped.kind, reason: 'reason' in wrapped ? wrapped.reason : undefined } : null;
+    const response = aiClientTaskModelControlResponseSchema.safeParse({ contractVersion: AI_TASK_DRAFT_VERSION,
+      execution, businessExecution: 'not_inferred_from_model_result', retryable: false, nextAction: 'read_original_task' });
+    // A malformed post-execution observation does not prove no invocation.
+    if (!response.success) throw new AiClientEntryError('AI_RESULT_UNKNOWN', 'client_model_observation_unknown');
+    return response.data;
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.startTaskModel) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  startTaskModel(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
+    return this.respond(() => withRequestAbort(request, async signal =>
+      this.modelObservation(await this.application.startOriginalTaskModel(request, body, undefined, signal))), 'read_original_task');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.recoverTaskModel) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  recoverTaskModel(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
+    return this.respond(() => withRequestAbort(request, async signal =>
+      this.modelObservation(await this.application.recoverOriginalTaskModel(request, body, undefined, signal))), 'read_original_task');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.reconcileTaskModel) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  reconcileTaskModel(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
+    return this.respond(() => withRequestAbort(request, async signal =>
+      this.modelObservation(await this.application.reconcileOriginalTaskModel(request, body, undefined, signal))), 'read_original_task');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.continueTaskInput) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  continueTaskInput(@Req() request: ClientModelHttpRequest, @Body() body: unknown) {
+    return this.respond(() => withRequestAbort(request, async signal =>
+      this.modelObservation(await this.application.continueOriginalTaskModelInput(request, body, undefined, signal))), 'read_original_task');
   }
 
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskSnapshot) @HttpCode(200) @Header('Cache-Control', 'no-store')

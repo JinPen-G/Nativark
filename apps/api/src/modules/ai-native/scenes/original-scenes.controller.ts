@@ -1,5 +1,6 @@
 import { Body, Controller, HttpException, Inject, Post, Req } from '@nestjs/common';
 import type { IncomingMessage } from 'node:http';
+import { withRequestAbort } from './request-abort';
 import type { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneModel,
   composeRequestBoundPersistedOriginalSceneModel, AiSceneHttpRequest } from './request-bound-scenes.application';
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT } from '@rental-os/shared';
@@ -23,16 +24,6 @@ async function respondAiScene<T>(work: () => Promise<T>, unknownAction = 'reconc
   }
 }
 type SceneRunHttpRequest = AiSceneHttpRequest & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
-async function withRequestAbort<T>(request: SceneRunHttpRequest, work: (signal: AbortSignal) => Promise<T>) {
-  const controller = new AbortController(), abort = () => controller.abort();
-  const listens = typeof request?.once === 'function' && typeof request?.removeListener === 'function';
-  // IncomingMessage.close can mean a normally completed request body, not a
-  // cancellation. Only aborted is forwarded. This never proves remote rollback.
-  if (request?.aborted) abort();
-  else if (listens) request.once!('aborted', abort);
-  try { return await work(controller.signal); }
-  finally { if (listens) request.removeListener!('aborted', abort); }
-}
 @Controller(AI_SCENE_REQUEST_HTTP_DRAFT.basePath)
 export class AiOriginalScenesController {
   constructor(@Inject(AI_ORIGINAL_SCENE_REQUESTS) private readonly scenes: Scenes) {}

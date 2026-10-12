@@ -1430,7 +1430,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   for (const method of ['readHostCapabilities', 'issueAction', 'createBookingDraft', 'chooseBookingDraft', 'readBookingDraft',
     'handoffBookingDraft', 'readBookingHandoff', 'readBookingOperation',
     'acceptBookingSubmission', 'submitAcceptedBooking', 'readBookingSubmission', 'requestTaskCancellation', 'reconcileTaskInputCancellation',
-    'readTaskInput', 'submitTaskInput', 'readTaskInputReceipt']) {
+    'readTaskInput', 'submitTaskInput', 'readTaskInputReceipt', 'startTaskModel', 'recoverTaskModel', 'reconcileTaskModel', 'continueTaskInput']) {
     assert.equal(Reflect.getMetadata('path', AiClientEntryController.prototype[method]), AI_CLIENT_ENTRY_HTTP_DRAFT[method]);
   }
   const { aiClientHostCapabilitiesSchema } = require('../packages/shared/src/ai-client-entry-draft-schemas');
@@ -1746,6 +1746,10 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const inputHttp = new AiClientEntryController(resultApp);
   assert.equal(await resultApp.readOriginalTaskModelInput(request, taskCommand), null);
   const noPending = await inputHttp.readTaskInput(request, taskCommand);
+  const beforeUnavailableModel = clone(taskStore.state);
+  await assert.rejects(inputHttp.startTaskModel(request, taskCommand), e => e.getStatus?.() === 503);
+  await assert.rejects(inputHttp.recoverTaskModel(request, taskCommand), e => e.getStatus?.() === 503);
+  assert.deepEqual(taskStore.state, beforeUnavailableModel, 'absent persistent server model root cannot claim or dispatch');
   const { aiClientTaskInputReadResponseSchema } = require('../packages/shared/src/ai-client-entry-draft-schemas');
   assert.equal(aiClientTaskInputReadResponseSchema.safeParse(noPending).success, true);
   assert.equal(noPending.state, 'not_pending'); assert.equal(noPending.question, null);

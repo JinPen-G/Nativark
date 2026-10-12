@@ -14,6 +14,9 @@ export const AI_CLIENT_ENTRY_HTTP_DRAFT = Object.freeze({
   readTaskInput: 'tasks/input/read',
   /** Same-key submission/receipt observation; neither route invokes a model. */
   submitTaskInput: 'tasks/input/submit', readTaskInputReceipt: 'tasks/input/receipt/read',
+  /** Requires explicit persisted server model dependencies and current policy. */
+  startTaskModel: 'tasks/model/start', recoverTaskModel: 'tasks/model/recover',
+  reconcileTaskModel: 'tasks/model/reconcile', continueTaskInput: 'tasks/input/continue',
   readOrderExplanation: 'orders/explanation/read', readSource: 'sources/read',
   issueAction: 'action', createBookingDraft: 'booking-drafts/create',
   chooseBookingDraft: 'booking-drafts/choose', readBookingDraft: 'booking-drafts/read',
