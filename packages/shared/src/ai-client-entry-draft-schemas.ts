@@ -1,10 +1,25 @@
 import { z } from 'zod';
 import { AI_CUSTOMER_ENTRY_SURFACES } from './ai-entry-action-draft';
+import { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
 
 export const AI_CLIENT_HOST_CAPABILITIES_VERSION = 'ain-client-host-capabilities-1' as const;
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 /** Reads bind the original creation/material reference; no caller task, owner or scope. */
 export const aiClientTaskReadRequestSchema = z.object({ creationKey: id.max(128), materialRef: z.string().uuid() }).strict();
+/** Cancellation is a distinct current-policy action, never execution authority. */
+export const aiClientTaskCancelRequestSchema = aiClientTaskReadRequestSchema.extend({
+  expectedRevision: z.number().int().min(1).max(4294967294)
+}).strict();
+export const aiClientTaskCancelReceiptSchema = z.object({
+  contractVersion: z.literal(AI_TASK_DRAFT_VERSION), taskId: id.max(36),
+  taskRevision: z.number().int().min(1).max(4294967295),
+  cursor: z.string().regex(/^[1-9][0-9]{0,19}$/u).refine(value => BigInt(value) <= 18446744073709551615n),
+  observedAt: z.string().datetime({ offset: true }),
+  status: z.literal('cancel_requested'), cancellation: z.literal('requested_not_rollback'),
+  retryable: z.literal(false), nextAction: z.literal('read_original_task')
+}).strict();
+export type AiClientTaskCancelRequest = z.infer<typeof aiClientTaskCancelRequestSchema>;
+export type AiClientTaskCancelReceipt = z.infer<typeof aiClientTaskCancelReceiptSchema>;
 export const aiClientTaskEventsReadRequestSchema = aiClientTaskReadRequestSchema.extend({
   after: z.string().regex(/^(0|[1-9][0-9]{0,19})$/u), limit: z.number().int().min(1).max(100)
 }).strict();

@@ -317,7 +317,10 @@ export class AiTaskTransitionRepository {
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw error;
-      if (inputWitness && callbackCompleted) throw new AiTaskTransitionResultUnknownError();
+      // Any completed mutation callback may have committed before the reply
+      // was lost, not only an input-witness cancellation. Never label this as
+      // a definitely-uncommitted storage failure or automatically replay it.
+      if (callbackCompleted) throw new AiTaskTransitionResultUnknownError();
       // Includes an ambiguous connection loss at commit: do not automatically retry the mutation.
       throw new AiTaskRepositoryError("AI_STORAGE_UNAVAILABLE");
     }

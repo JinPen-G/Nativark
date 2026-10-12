@@ -1429,7 +1429,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const bookingHttp = new AiClientEntryController(entryModule.providers[0].useFactory());
   for (const method of ['readHostCapabilities', 'issueAction', 'createBookingDraft', 'chooseBookingDraft', 'readBookingDraft',
     'handoffBookingDraft', 'readBookingHandoff', 'readBookingOperation',
-    'acceptBookingSubmission', 'submitAcceptedBooking', 'readBookingSubmission']) {
+    'acceptBookingSubmission', 'submitAcceptedBooking', 'readBookingSubmission', 'requestTaskCancellation']) {
     assert.equal(Reflect.getMetadata('path', AiClientEntryController.prototype[method]), AI_CLIENT_ENTRY_HTTP_DRAFT[method]);
   }
   const { aiClientHostCapabilitiesSchema } = require('../packages/shared/src/ai-client-entry-draft-schemas');
@@ -1827,16 +1827,36 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.equal(clientTasks.capabilities.tasks, 'create_and_read_only'); assert.equal(clientTasks.capabilities.models, 'unavailable');
   const cancelCommand = { ...taskCommand, expectedRevision: taskStore.state.aiTask.find(row => row.id === created.task.taskId).revision };
   await assert.rejects(resultApp.requestOriginalTaskCancellation(request, cancelCommand), e => e.code === 'AI_ACCESS_DENIED');
+  const cancellationHttp = new AiClientEntryController(resultApp);
+  await assert.rejects(cancellationHttp.requestTaskCancellation(request, cancelCommand), e => e.getStatus?.() === 403);
   taskPolicies[0].allowCancel = 1; taskPolicies[0].allowExecute = 0;
   const priorBudgetEnabled = taskStore.state.aiBudgetPolicy[0].enabled;
   taskStore.state.aiBudgetPolicy[0].enabled = false;
   const cancelCreates = countCreates();
-  const cancelReceipt = await resultApp.requestOriginalTaskCancellation(request, cancelCommand);
+  const cancelReceipt = await cancellationHttp.requestTaskCancellation(request, cancelCommand);
   assert.equal(cancelReceipt.cancellation, 'requested_not_rollback'); assert.equal(cancelReceipt.retryable, false);
+  const { aiClientTaskCancelReceiptSchema } = require('../packages/shared/src/ai-client-entry-draft-schemas');
+  assert.equal(aiClientTaskCancelReceiptSchema.safeParse(cancelReceipt).success, true);
+  assert.equal(cancelReceipt.status, 'cancel_requested'); assert.equal(cancelReceipt.taskId, created.task.taskId);
+  assert.equal('receipt' in cancelReceipt, false); assert.equal('runRevision' in cancelReceipt, false);
   assert.equal(taskStore.state.aiTask.find(row => row.id === created.task.taskId).status, 'CANCEL_REQUESTED');
   assert.equal((await resultApp.readOriginalTaskExecution(request, taskCommand, { db })).task.status, 'cancel_requested');
   assert.equal(countCreates(), cancelCreates);
   await assert.rejects(resultApp.requestOriginalTaskCancellation(request, cancelCommand), e => e.code === 'AI_REVISION_CONFLICT');
+  await assert.rejects(cancellationHttp.requestTaskCancellation(request, cancelCommand), e => e.getStatus?.() === 409);
+  const lostCancelTask = taskStore.state.aiTask.find(row => row.id === taskRecovered.task.taskId);
+  const lostCancelCommand = { ...taskLost, expectedRevision: lostCancelTask.revision };
+  taskStore.control.beforeCommit = async draft => {
+    if (draft.aiTask.find(row => row.id === lostCancelTask.id)?.status === 'CANCEL_REQUESTED'
+      && taskStore.state.aiTask.find(row => row.id === lostCancelTask.id)?.status !== 'CANCEL_REQUESTED')
+      taskStore.control.loseReply = true;
+  };
+  await assert.rejects(cancellationHttp.requestTaskCancellation(request, lostCancelCommand), e =>
+    e.getStatus?.() === 409 && e.getResponse().code === 'AI_RESULT_UNKNOWN'
+    && e.getResponse().retryable === false && e.getResponse().nextAction === 'read_original_task');
+  taskStore.control.beforeCommit = null;
+  assert.equal((await cancellationHttp.readTaskSnapshot(request, taskLost)).status, 'cancel_requested');
+  assert.equal(countCreates(), cancelCreates);
   taskStore.state.aiBudgetPolicy[0].enabled = priorBudgetEnabled;
   taskPolicies[0].allowExecute = 1; taskPolicies[0].allowCancel = 0;
   session.customer.customerType = 'corporate';

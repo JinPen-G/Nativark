@@ -6,6 +6,8 @@ export const AI_CLIENT_ENTRY_HTTP_DRAFT = Object.freeze({
   readHostCapabilities: 'host-capabilities/read',
   /** Original task command only; neither endpoint starts or resumes execution. */
   readTaskSnapshot: 'tasks/snapshot/read', readTaskEvents: 'tasks/events/read',
+  /** Request only; observe the original snapshot after success or unknown. */
+  requestTaskCancellation: 'tasks/cancel/request',
   readOrderExplanation: 'orders/explanation/read', readSource: 'sources/read',
   issueAction: 'action', createBookingDraft: 'booking-drafts/create',
   chooseBookingDraft: 'booking-drafts/choose', readBookingDraft: 'booking-drafts/read',

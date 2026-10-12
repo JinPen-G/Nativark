@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { aiClientOrderExplanationReadRequestSchema, aiClientSourceReadRequestSchema } from '@rental-os/shared';
+import { aiClientOrderExplanationReadRequestSchema, aiClientSourceReadRequestSchema,
+  aiClientTaskCancelRequestSchema } from '@rental-os/shared';
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '../../../common/request-identity';
@@ -458,8 +459,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     async requestOriginalTaskCancellation(request: AiClientApplicationRequest, value: unknown) {
       if (!server.entry) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'entry_disabled');
       if (!taskDependencies) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_task_dependencies_missing');
-      const parsed = parseEntry(clientTaskCommandSchema.extend({
-        expectedRevision: z.number().int().min(1).max(4294967294) }).strict(), structuredClone(value));
+      const parsed = parseEntry(aiClientTaskCancelRequestSchema, structuredClone(value));
       const { expectedRevision, ...original } = parsed;
       return withBinding(structuredClone(request), true, 'order', async bound => {
         const loadMaterial = async (materialRef: string) => {

@@ -1,8 +1,9 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
-import { AI_CLIENT_ENTRY_HTTP_DRAFT } from '@rental-os/shared';
+import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientTaskCancelReceiptSchema } from '@rental-os/shared';
 import { z } from 'zod';
 import { AiClientEntryError } from './client-entry-action';
 import { AiTaskRepositoryError } from '../ai-task.repository';
+import { AiTaskTransitionResultUnknownError } from '../ai-task-transition.repository';
 import type { AiClientApplicationRequest, composeRequestBoundClientApplication } from './client-request.application';
 
 export const AI_CLIENT_ENTRY_APPLICATION = Symbol('AI_CLIENT_ENTRY_APPLICATION');
@@ -10,7 +11,7 @@ type Application = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
   'readHostCapabilities' | 'issueAction' | 'createBookingDraft' | 'chooseBookingDraft' | 'readBookingDraft' |
   'handoffBookingDraft' | 'readBookingHandoff' | 'readBookingOperation' |
   'acceptBookingSubmission' | 'submitAcceptedBooking' | 'readBookingSubmission' | 'readTaskSnapshot' | 'readTaskEvents' |
-  'readOrderExplanation' | 'readSource'>;
+  'readOrderExplanation' | 'readSource' | 'requestOriginalTaskCancellation'>;
 
 @Controller([AI_CLIENT_ENTRY_HTTP_DRAFT.basePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath])
 export class AiClientEntryController {
@@ -28,6 +29,7 @@ export class AiClientEntryController {
         AI_RESOURCE_UNAVAILABLE: 503, AI_PROPOSAL_STALE: 409, AI_REVISION_CONFLICT: 409, AI_RESULT_UNKNOWN: 409 };
       let code = 'AI_RESOURCE_UNAVAILABLE';
       if (error instanceof z.ZodError) code = 'AI_INVALID_INPUT';
+      else if (error instanceof AiTaskTransitionResultUnknownError) code = 'AI_RESULT_UNKNOWN';
       else if (error instanceof AiClientEntryError) code = error.code;
       else if (error instanceof AiTaskRepositoryError) code = error.code === 'AI_STORAGE_UNAVAILABLE' ? 'AI_RESOURCE_UNAVAILABLE' : error.code;
       else if (error instanceof Error && aliases[error.message]) code = aliases[error.message];
@@ -49,6 +51,23 @@ export class AiClientEntryController {
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskEvents) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readTaskEvents(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.readTaskEvents(request, body));
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.requestTaskCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  requestTaskCancellation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(async () => {
+      const result = await this.application.requestOriginalTaskCancellation(request, body);
+      const event = result.receipt.event;
+      // Whitelist the public observation; no lease, holder, run revision,
+      // financial evidence or internal transition payload escapes this route.
+      const receipt = aiClientTaskCancelReceiptSchema.safeParse({ contractVersion: event.contractVersion,
+        taskId: event.taskId, taskRevision: event.taskRevision, cursor: event.cursor,
+        observedAt: event.occurredAt, status: 'cancel_requested', cancellation: result.cancellation,
+        retryable: result.retryable, nextAction: result.nextAction });
+      // The write may already have committed. A malformed server observation
+      // is not an invalid client request and cannot justify reissuing the action.
+      if (!receipt.success) throw new AiTaskTransitionResultUnknownError();
+      return receipt.data;
+    }, 'read_original_task');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderExplanation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readOrderExplanation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
