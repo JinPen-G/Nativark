@@ -256,6 +256,18 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       const expected = await originalInputSource.resolve(command);
       if (expected.kind !== 'required' || requestFingerprint(submittedContract) !== requestFingerprint(expected.contract)
         || !validateAiTaskInputAnswersDraft(expected.contract, submittedAnswers)) throw denied();
+      if (submittedContract.code === 'original_quote_parameters') {
+        const basis = await readClarificationBasis(command);
+        if (basis.original.request.sceneCode !== 'quote_clarification') throw unavailable();
+        // The same deterministic consumer used by successor preparation validates
+        // human parameters. It does not quote, approve or create an order here.
+        applyOriginalQuoteAnswers(basis.original.request.input.candidate,
+          [...basis.history, { contract: submittedContract, answers: submittedAnswers }]);
+        return { disposition: 'business_parameters' as const, planHash: command.planHash,
+          inputRef: command.inputRef, inputHash: command.inputHash,
+          contractHash: requestFingerprint(submittedContract), answersHash: requestFingerprint(submittedAnswers),
+          bindingHash: requestFingerprint(command) };
+      }
       return { disposition: 'context_only' as const, planHash: command.planHash, inputRef: command.inputRef, inputHash: command.inputHash };
     }
   });

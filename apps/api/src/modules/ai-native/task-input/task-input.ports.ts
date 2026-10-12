@@ -26,9 +26,14 @@ export type AiTaskInputRequirement = { kind: 'not_required' } | {
 
 export interface AiTaskInputSource {
   resolve(binding: Readonly<AiTaskInputBinding>): Promise<AiTaskInputRequirement>;
-  validateAnswers(binding: Readonly<AiTaskInputBinding>, contract: AiTaskInputContractDraft, answers: readonly AiTaskInputAnswerDraft[]): Promise<{
-    disposition: 'context_only'; planHash: string; inputRef: string; inputHash: string;
-  }>;
+  validateAnswers(binding: Readonly<AiTaskInputBinding>, contract: AiTaskInputContractDraft, answers: readonly AiTaskInputAnswerDraft[]): Promise<
+    { disposition: 'context_only'; planHash: string; inputRef: string; inputHash: string } |
+    { disposition: 'business_parameters'; planHash: string; inputRef: string; inputHash: string;
+      /** Hashes of the server contract, exact answers and full task/run/step basis.
+       * Parameters are human input, NOT Core facts, approval or dispatch authority.
+       * Existing request/answer receipts persist these materials and revisions. */
+      contractHash: string; answersHash: string; bindingHash: string }
+  >;
 }
 
 export interface AiTaskInputContext {

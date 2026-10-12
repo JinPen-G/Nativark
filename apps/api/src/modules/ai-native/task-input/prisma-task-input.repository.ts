@@ -241,7 +241,10 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
   private async validateAnswers(binding: AiTaskInputBinding, contract: AiTaskInputContractDraft, answers: AiTaskInputSubmissionDraft['answers']) {
     if (!validateAiTaskInputAnswersDraft(contract, answers)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const proof = structuredClone(await this.source.validateAnswers(structuredClone(binding), structuredClone(contract), structuredClone(answers)));
-    if (proof?.disposition !== 'context_only' || proof.planHash !== binding.planHash || proof.inputRef !== binding.inputRef || proof.inputHash !== binding.inputHash) throw unavailable();
+    if (!proof || !['context_only', 'business_parameters'].includes(proof.disposition)
+      || proof.planHash !== binding.planHash || proof.inputRef !== binding.inputRef || proof.inputHash !== binding.inputHash) throw unavailable();
+    if (proof.disposition === 'business_parameters' && (proof.contractHash !== requestFingerprint(contract)
+      || proof.answersHash !== requestFingerprint(answers) || proof.bindingHash !== requestFingerprint(binding))) throw denied();
     const current = await this.requirement(binding);
     if (current.kind !== 'required' || requestFingerprint(current.contract) !== requestFingerprint(contract)) throw denied();
   }

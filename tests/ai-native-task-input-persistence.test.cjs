@@ -28,6 +28,23 @@ async function setup() {
   return h;
 }
 
+test('parameter proof binds exact answers and task basis before durable consumption', async () => {
+  const h = await setup(); await h.run();
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  h.source.validateAnswers = async (binding, contract, answers) => ({ disposition: 'business_parameters',
+    planHash: binding.planHash, inputRef: binding.inputRef, inputHash: binding.inputHash,
+    contractHash: requestFingerprint(contract), answersHash: '0'.repeat(64), bindingHash: requestFingerprint(binding) });
+  await assert.rejects(() => h.submit(), { code: 'AI_ACCESS_DENIED' });
+  assert.equal(h.state.aiTaskInputReceipt.length, 0);
+  h.source.validateAnswers = async (binding, contract, answers) => ({ disposition: 'business_parameters',
+    planHash: binding.planHash, inputRef: binding.inputRef, inputHash: binding.inputHash,
+    contractHash: requestFingerprint(contract), answersHash: requestFingerprint(answers), bindingHash: requestFingerprint(binding) });
+  const receipt = await h.submit();
+  assert.equal(receipt.status, 'input_received');
+  assert.equal(h.state.aiTaskInputReceipt.length, 1);
+  assert.equal((await h.submit()).receiptId, receipt.receiptId);
+});
+
 test('production runner persists input wait, releases, consumes one receipt, and continues original remaining step', async () => {
   const h = await setup(), plan = h.clone(h.state.aiTaskRunPlan);
   assert.equal((await h.run()).status, 'paused');
