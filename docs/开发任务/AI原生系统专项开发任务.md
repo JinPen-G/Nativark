@@ -1,6 +1,6 @@
 # Rental OS AI Native 系统专项开发任务
 
-> **2026-10-13最新源码 `d7067ef541d5fb9e89eb346dc6bc7a98a072aa42`：** 客户 `reconcileOriginalTaskInputCancellation` 已复用原已释放/完整计量等待证明，不需新Gateway或预算准入，不授通用transition。客户缺证明拒绝与原等待内核各1项冒烟退出0，619源码复验零诊断；客户完整正向/公开核对HTTP及全部取消窗口未验。55/112＝49.1%、ENTRY35/72＝48.6%、正式验收0/28不变；下方旧描述按快照日期读取。
+> **2026-10-13最新源码 `06da1b78e6e961aba5ee0006df9a2754d75c4974`：** 客户 `reconcileOriginalTaskInputCancellation` 已接显式HTTP/共享最少收据，服务器显式taskInputs复用原已释放/完整计量证明，不需新Gateway或预算准入，不授通用transition；纯任务控制与Booking导航独立。客户原用例最终1/1、619源码零诊断，类型/导航首轮失败已修并记录。客户完整正向/多端宿主及全部取消窗口未验。55/112＝49.1%、ENTRY35/72＝48.6%、正式验收0/28不变；下方旧描述按快照日期读取。
 
 > **2026-10-13最新固定源码：`8ffaba2a467b6c421db3af0df40e9890a5f09ea8`。** 客户原取消已接显式HTTP/共享请求与最少响应，提交丢ACK保持409/AI_RESULT_UNKNOWN/retryable=false/读原任务；未启AppModule或真实服务。原用例1/1与619源码零诊断属于离线证据，取消收敛/完整财务/公开恢复和多端宿主仍待补；不据此提高任何完整任务门槛，55/112＝49.1%、ENTRY35/72＝48.6%、正式验收0/28不变。
 
