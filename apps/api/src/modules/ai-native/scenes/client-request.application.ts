@@ -389,7 +389,8 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       payment: 'not_inferred' as const, fulfillment: 'not_inferred' as const });
   };
   const runOriginalTaskModel = async (request: AiClientApplicationRequest, value: unknown,
-    model: ClientModelServerDependencies, signal?: AbortSignal, answers?: Omit<AiTaskInputSubmissionDraft, 'taskId'>) => {
+    model: ClientModelServerDependencies, signal?: AbortSignal, answers?: Omit<AiTaskInputSubmissionDraft, 'taskId'>,
+    control?: 'recover' | 'reconcile') => {
       requireEntry();
       if (!taskDependencies || model?.db !== dependencies.db) {
         throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_model_dependencies_missing');
@@ -421,8 +422,10 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         if (!runtime || !priceVersion || !financialEvidence) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_model_dependencies_missing');
         const host = await composeClientOriginalTaskModelHost({ ...model, runtime, priceVersion, financialEvidence,
           subscriptions: taskDependencies.subscriptions, clientScene: taskDependencies,
-          loadMaterial, guard: dependencies.guard, clock }, command, answers ? 'resume' : 'start');
-        const result = answers ? await host.resume(answers, signal) : await host.start(signal);
+          loadMaterial, guard: dependencies.guard, clock }, command, control ?? (answers ? 'resume' : 'start'));
+        const result = control === 'recover' ? await host.recover(signal)
+          : control === 'reconcile' ? await host.reconcile(signal)
+          : answers ? await host.resume(answers, signal) : await host.start(signal);
         await bound.assertCurrent();
         return result;
       });
@@ -631,6 +634,10 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
      * injected by the application, never accepted in a customer HTTP body. */
     startOriginalTaskModel(request: AiClientApplicationRequest, value: unknown, model: ClientModelServerDependencies,
       signal?: AbortSignal) { return runOriginalTaskModel(request, value, model, signal); },
+    recoverOriginalTaskModel(request: AiClientApplicationRequest, value: unknown, model: ClientModelServerDependencies,
+      signal?: AbortSignal) { return runOriginalTaskModel(request, value, model, signal, undefined, 'recover'); },
+    reconcileOriginalTaskModel(request: AiClientApplicationRequest, value: unknown, model: ClientModelServerDependencies,
+      signal?: AbortSignal) { return runOriginalTaskModel(request, value, model, signal, undefined, 'reconcile'); },
     async resumeOriginalTaskModel(request: AiClientApplicationRequest, value: unknown, answerValue: unknown,
       model: ClientModelServerDependencies, signal?: AbortSignal) {
       const parsed = z.record(z.unknown()).safeParse(structuredClone(answerValue));

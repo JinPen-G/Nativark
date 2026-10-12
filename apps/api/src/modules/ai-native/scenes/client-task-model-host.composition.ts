@@ -66,8 +66,8 @@ export async function composeClientOriginalTaskInputReader(input: Pick<Dependenc
  * order/settings writes, approval bypass, provider SDK or production registration.
  */
 export async function composeClientOriginalTaskModelHost(input: Dependencies, value: unknown,
-  purpose: 'start' | 'resume' = 'start') {
-  if (purpose !== 'start' && purpose !== 'resume') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  purpose: 'start' | 'resume' | 'recover' | 'reconcile' = 'start') {
+  if (!['start', 'resume', 'recover', 'reconcile'].includes(purpose)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
   input = { ...input, clientScene: structuredClone(input.clientScene), gatewayScene: structuredClone(input.gatewayScene),
     limits: structuredClone(input.limits), host: structuredClone(input.host) };
   const command = clientTaskCommandSchema.parse(structuredClone(value));
@@ -78,7 +78,8 @@ export async function composeClientOriginalTaskModelHost(input: Dependencies, va
   const receipt = await composeClientMaterialTasks(clientDependencies, input.loadMaterial, clock).readCreation(command);
   if (!receipt.task) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const taskId = receipt.task.taskId;
-  const action = purpose === 'resume' ? 'resume_input' : 'claim_run';
+  const action = purpose === 'resume' ? 'resume_input'
+    : purpose === 'start' ? 'claim_run' : 'claim_recovery_run';
   const context = await authorization.authority.resolve(taskId, action);
   const canonical = await authorization.scopes.resolveCurrent();
   const policyKey = { scopeId: canonical.scope.id, sceneCode: clientDependencies.sceneCode,
@@ -127,8 +128,16 @@ export async function composeClientOriginalTaskModelHost(input: Dependencies, va
   if (canonical.scope.id !== current.scope.id || requestFingerprint(plan) !== requestFingerprint(latestPlan)
     || requestFingerprint(before) !== requestFingerprint(after)) throw denied();
   return Object.freeze({ ...host, originalTask: { taskId, runId: receipt.task.runId },
-    /** Start uses the original IDs only. Recovery remains original read/receipt,
-     * never a freshly created task or a new provider after unknown. */
+    /** Start uses the original IDs only. Recovery follows only proved original
+     * successor runs, never a new task, input or provider call after unknown. */
+    recover: (signal?: AbortSignal) => {
+      if (purpose !== 'recover') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return host.recoverOriginal(signal);
+    },
+    reconcile: (signal?: AbortSignal) => {
+      if (purpose !== 'reconcile') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return host.reconcileOriginal(signal);
+    },
     start: (signal?: AbortSignal) => {
       if (purpose !== 'start') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       return host.application.start({ taskId, runId: receipt.task!.runId }, signal);

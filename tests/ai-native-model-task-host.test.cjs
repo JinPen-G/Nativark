@@ -183,6 +183,10 @@ test('model clarification creates successive frozen runs without resetting the o
   assert.deepEqual(h.state.aiTaskActionInput[0], originalInput);
   assert.deepEqual(h.state.aiTaskRunPlan[0], originalPlan);
   assert.equal(h.state.aiTask[0].status, 'SUCCEEDED');
+  const rebuilt = composeTaskModelHost(h.config), beforeRead = h.clone(h.state);
+  assert.equal((await rebuilt.readOriginalRecovery()).run.runId, h.state.aiRun[2].id);
+  assert.equal((await rebuilt.recoverOriginal()).reason, 'task_not_runnable');
+  assert.deepEqual(h.state, beforeRead);
   assert.equal(h.modelControl.sent.length, 3);
   assert.equal(new Set(h.modelControl.sent.map(r => r.callId)).size, 3);
   assert.equal(h.state.aiGatewayInvocation.length, 3);
