@@ -856,6 +856,23 @@ test('request-bound model keeps unknown receipts and cancellation distinct from 
   const recovered = await rebuilt.recover(h.request, h.reference);
   assert.equal(recovered.kind, 'run_outcome'); assert.equal(recovered.outcome.status, 'unknown');
   assert.equal(h.state.aiGatewayInvocation[0].id, originalInvocation); assert.equal(h.execution.sent.length, 1);
+  const snapshot = await rebuilt.readExecution(h.request, h.reference);
+  const takeover = { original: h.reference, expectedTaskRevision: snapshot.task.revision,
+    expectedRunRevision: snapshot.run.revision, expectedFencingToken: snapshot.run.fencingToken };
+  await assert.rejects(rebuilt.takeover(h.request, { ...takeover, holderId: 'injected-worker' }), e => e.code === 'AI_INVALID_INPUT');
+  await assert.rejects(rebuilt.takeover(h.request, takeover), e => e.code === 'AI_ACCESS_DENIED');
+  // Simulated interrupted worker remains held; the policy is an explicit
+  // persisted server decision, never a default granted by the new entrypoint.
+  const policy = h.state.aiTaskActionPolicy.find(row => row.operation === 'claim_recovery_run');
+  h.state.aiTaskActionPolicy.push({ ...structuredClone(policy), operation: 'takeover_run' });
+  h.state.operationLog = [];
+  h.state.aiRun[0].leaseOwnerId = 'interrupted-original-worker';
+  h.state.aiRun[0].leaseExpiresAt = new Date(h.dependencies.clock().getTime() + 10000);
+  const taken = await rebuilt.takeover(h.request, takeover);
+  assert.equal(taken.takeover, 'same_owner_recovery_only'); assert.equal(taken.outcome.status, 'unknown');
+  assert.equal(h.state.aiRun[0].fencingToken.toFixed(0), (BigInt(snapshot.run.fencingToken) + 1n).toString());
+  assert.equal(h.execution.sent.length, 1); assert.equal(h.state.aiGatewayInvocation[0].id, originalInvocation);
+  assert.equal(h.state.operationLog.length, 1);
   h.state.aiTaskPlanPolicy[0].enabled = false;
   const cancel = await app.requestCancel(h.request, { original: h.reference, expectedRevision: h.state.aiTask[0].revision });
   assert.equal(cancel.cancellation, 'requested_not_rollback');

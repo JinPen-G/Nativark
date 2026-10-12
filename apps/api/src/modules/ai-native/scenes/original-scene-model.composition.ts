@@ -487,6 +487,41 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         const outcome = await root.runner.recover(lease, signal);
         await verify(before);
         return freezeOriginalInput({ kind: 'run_outcome' as const, outcome });
+      }, async readExecution(value: unknown) {
+        const before = await bound(value), runId = await originalRun(before);
+        const snapshot = await application(before.reference).inspect({ taskId: before.task.taskId, runId });
+        await verify(before);
+        return freezeOriginalInput(snapshot);
+      }, async takeover(value: unknown, signal?: AbortSignal) {
+        const parsed = z.object({ original: originalRequestReferenceSchema, expectedTaskRevision: revision,
+          expectedRunRevision: revision, expectedFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict()
+          .safeParse(structuredClone(value));
+        if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const before = await bound(parsed.data.original);
+        if (signal?.aborted) return freezeOriginalInput({ kind: 'not_started' as const, reason: 'host_aborted' as const });
+        const runId = await originalRun(before), snapshot = await application(before.reference).inspect({ taskId: before.task.taskId, runId });
+        if (!snapshot.plan || snapshot.task.revision !== parsed.data.expectedTaskRevision
+          || snapshot.run.revision !== parsed.data.expectedRunRevision || snapshot.run.fencingToken !== parsed.data.expectedFencingToken) {
+          throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        }
+        const access = await model.tasks.resolveAccess(before.task.taskId, 'takeover_run');
+        const task = await dependencies.db.aiTask.findFirst({ where: access.where, select: { id: true, scopeId: true, inputRef: true } });
+        if (!task || task.inputRef !== before.reference.inputRef) throw denied();
+        const run = await dependencies.db.aiRun.findFirst({ where: { scopeId: task.scopeId, taskId: task.id, id: runId,
+          actorKind: access.actorKind, actorId: access.actorId }, select: { revision: true, fencingToken: true, leaseOwnerId: true } });
+        if (!run?.leaseOwnerId || run.leaseOwnerId === serverHost.holderId || run.revision !== snapshot.run.revision
+          || !run.fencingToken.equals(snapshot.run.fencingToken)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        await verify(before);
+        // Human permission comes from the current action policy, not a claimed
+        // administrator role. Previous/new holders are server-owned. Takeover
+        // atomically fences the old worker and recovers original facts only.
+        const outcome = await root.takeoverAndRecover({ taskId: before.task.taskId, runId,
+          previousHolderId: run.leaseOwnerId, holderId: serverHost.holderId,
+          expectedTaskRevision: snapshot.task.revision, expectedRunRevision: snapshot.run.revision,
+          expectedFencingToken: snapshot.run.fencingToken, leaseMs: serverHost.leaseMs }, signal);
+        await verify(before);
+        return freezeOriginalInput({ kind: 'run_outcome' as const, outcome, takeover: 'same_owner_recovery_only' as const,
+          businessExecution: 'not_inferred_from_model_result' as const });
       }, async requestCancel(value: unknown) {
         const parsed = z.object({ original: originalRequestReferenceSchema, expectedRevision: revision }).strict()
           .safeParse(structuredClone(value));
