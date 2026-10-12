@@ -23,6 +23,13 @@ test('invalid paging or caller identity fields never query storage', async () =>
   const h = setup(); for (const input of [{ limit: 0 }, { limit: 51 }, { cursor: 'garbage' }, { tenantId: 'foreign' }, { status: 'made_up' }]) await assert.rejects(h.repository.readPage(input), e => e.code === 'AI_INVALID_INPUT');
   assert.equal(h.state.queries.length, 0);
 });
+test('cursor is bound to its filters and rejects malformed dates before storage', async () => {
+  const h = setup(), page = await h.repository.readPage({ limit: 1, status: 'running', sceneCode: 'order-explain' });
+  await assert.rejects(h.repository.readPage({ limit: 1, status: 'failed', sceneCode: 'order-explain', cursor: page.nextCursor }), e => e.code === 'AI_INVALID_INPUT');
+  const payload = Buffer.from(JSON.stringify({ id: 'task-b', updatedAt: 'not-a-date' }), 'utf8').toString('base64url');
+  await assert.rejects(h.repository.readPage({ cursor: payload }), e => e.code === 'AI_INVALID_INPUT');
+  assert.equal(h.state.queries.length, 1);
+});
 test('revocation during database read discards the page', async () => {
   const h = setup(); h.state.duringRead = async () => { h.state.revoked = true; };
   await assert.rejects(h.repository.readPage({}), e => e.code === 'AI_ACCESS_DENIED');
