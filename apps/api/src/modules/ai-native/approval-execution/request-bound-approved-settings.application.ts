@@ -4,7 +4,7 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import { composeApprovedSettingsApplication } from './approved-settings-application.composition';
 import type { ApprovedSettingsApplicationDependencies } from './approved-settings-task.authority';
 import { settingsApplicationError, settingsContract } from './approved-settings-contracts';
-import type { AiApprovedSettingsErrorDraft } from '../../../../../../packages/shared/src/ai-approved-settings-draft';
+import type { AiApprovedSettingsErrorDraft } from '@rental-os/shared';
 
 type Request = { headers: { authorization?: unknown } };
 type Result<T> = { ok: true; value: T } | { ok: false; error: AiApprovedSettingsErrorDraft };

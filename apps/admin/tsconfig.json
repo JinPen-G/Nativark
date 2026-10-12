@@ -20,6 +20,7 @@
       "@/lib/motion-tokens": ["../../packages/ui-arc/vendor/lib/motion-tokens.ts"],
       "@/lib/media": ["../../packages/ui-arc/vendor/lib/media.ts"],
       "@/lib/use-copy-feedback": ["../../packages/ui-arc/vendor/lib/use-copy-feedback.ts"],
+      "@/lib/use-today": ["../../packages/ui-arc/vendor/lib/use-today.ts"],
       "@/*": ["./src/*"],
       "@rental-os/shared": ["../../packages/shared/src/index.ts"]
     }

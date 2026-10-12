@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
-import type { AiApprovalReprepareCommandDraft } from '../../../../../../packages/shared/src/ai-approval-application-draft';
+import type { AiApprovalReprepareCommandDraft } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { composePersistedOrderTaskInput } from '../order-task-input.composition';

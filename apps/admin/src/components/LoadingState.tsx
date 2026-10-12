@@ -12,7 +12,7 @@ export function LoadingState({ label }: { label?: string }) {
   return (
     <div className="rental-loading-state" role="status" aria-live="polite">
       <Skeleton lines={3} label={label ?? t("加载中")} className="rental-loading-skeleton" />
-      <span>{label ?? t("加载中")}</span>
+      <span className="rental-loading-label">{label ?? t("加载中")}</span>
     </div>
   );
 }

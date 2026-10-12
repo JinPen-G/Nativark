@@ -68,8 +68,9 @@ export function AuthCodePreview({ mode, tenantCode = "", tenantLocked, onTenantC
     <div className="login-preview-viewport"><AnimatePresence initial={false} mode="wait" custom={custom}>
       <motion.div key={stage} custom={custom} variants={stepMotion} initial="enter" animate="center" exit="exit" onAnimationComplete={() => {
         const preview = document.querySelector(".login-code-preview");
-        if (stage === "done") preview?.querySelector<HTMLElement>(".login-preview-result")?.focus();
-        else preview?.querySelector<HTMLInputElement>("input:not([disabled]):not([type='hidden'])")?.focus();
+        // Keep keyboard focus without moving the login scroller mid-transition.
+        if (stage === "done") preview?.querySelector<HTMLElement>(".login-preview-result")?.focus({ preventScroll: true });
+        else preview?.querySelector<HTMLInputElement>("input:not([disabled]):not([type='hidden'])")?.focus({ preventScroll: true });
       }}>
         {stage === "done" ? <div className="login-preview-result" role="status" tabIndex={-1}>
           <Check className={styles.success} aria-hidden="true" />

@@ -3,12 +3,12 @@ import { z } from 'zod';
 import { HttpException } from '@nestjs/common';
 import { AI_TOOL_CODES, AI_PROPOSAL_DRAFT_SCHEMAS } from '@rental-os/shared';
 import { AI_NATIVE_COMPONENT_SCHEMAS } from '../../../contracts/ai-native-schemas';
-import { AI_APPROVED_SETTINGS_DRAFT_SCHEMAS } from '../../../../../../packages/shared/src/ai-approved-settings-draft-schemas';
+import { AI_APPROVED_SETTINGS_DRAFT_SCHEMAS } from '@rental-os/shared';
 import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE, type AiApprovedSettingsPrepareDraft,
   type AiApprovedSettingsReferenceDraft, type AiApprovedSettingsDecisionDraft, type AiApprovedSettingsCommitDraft,
   type AiApprovedSettingsReadOperationDraft, type AiApprovedSettingsPayloadDraft, type AiApprovedSettingsReviewDraft,
   type AiApprovedSettingsChangeReviewDraft, type AiApprovedSettingsOperationReceiptDraft, type AiApprovedSettingsOperationResultDraft,
-  type AiApprovedSettingsDecisionReceiptDraft, type AiApprovedSettingsPreparationReceiptDraft, type AiApprovedSettingsErrorDraft } from '../../../../../../packages/shared/src/ai-approved-settings-draft';
+  type AiApprovedSettingsDecisionReceiptDraft, type AiApprovedSettingsPreparationReceiptDraft, type AiApprovedSettingsErrorDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 
 type Contracts = {

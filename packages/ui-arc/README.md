@@ -5,7 +5,7 @@
 - Official source: https://uiarc.dev/r/registry.json
 - Catalog: https://uiarc.dev/r/catalog.json
 - License: https://uiarc.dev/license (free source: MIT, copyright 2026 Elia Kuratli).
-- Snapshot: 122 public components/blocks plus foundation, 262 unique source files (2026-10-01 registry reconciliation).
+- Snapshot: 122 public components/blocks plus foundation, 263 unique source files (2026-10-08 date-range source reconciliation).
 - `manifest.json` records registry entries, dependencies and source hashes.
 - 101 Pro entries are catalog metadata only, not downloaded, installed or imitated. Their source requires an appropriate license.
 - The upstream agent skill is not installed as project instructions.
@@ -15,7 +15,7 @@
 - `vendor/registry/foundation.css`: original light/dark, eight accent palettes, chart colors, dimensions, shadows, CSS timing/easing.
 - `vendor/registry/motion-tokens.ts`: original durations, springs, easing, stagger and blur presets.
 - `vendor/registry/components`, `vendor/registry/blocks`: original React/CSS-module source, including currently unused components.
-- Admin aliases `@/registry/*` and `@/lib/motion-tokens` resolve here. Import individual modules, never a barrel of the entire library.
+- Admin aliases `@/registry/*`, `@/lib/motion-tokens` and `@/lib/use-today` resolve here. Import individual modules, never a barrel of the entire library.
 - Unused components are reserved source, not added to the production bundle or automatically given all optional dependencies.
 - Full import/source inventory: [COMPONENTS.md](./COMPONENTS.md). Re-scan with `node scripts/audit-admin-components.cjs` (stdout only); `--json` exposes remaining direct Ant imports and hash mismatches. Downloaded/referenced source is not runtime acceptance.
 
@@ -56,6 +56,8 @@ The rich editor presents the upstream editing surface alongside Markdown/HTML ou
 2026-10-01 form integration: `@/components/ui/Form` retains Ant Form's store, validation, dependencies, dynamic lists, disabled context, static APIs and ref behavior while applying a shared field presentation via `Form`, `Form.Item` and optional `FormSection`. Labels, required marks, helper/error spacing and section spacing use named admin CSS tokens. Compatible plain UIArc Inputs receive the current Ant validation error through their original animated alert row; controls with richer/unsupported contracts retain Ant's own validation feedback. All existing admin Form imports route through the adapter entry. This is a presentation-layer change: no API payload or validation rule was changed.
 
 Original component motion and CSS stay in vendor, unchanged. Integration overrides belong to `apps/admin/src/components/ui/arc-bridge.css`.
+
+2026-10-08 source reconciliation: the date-range picker TSX/CSS were the only two files differing from the recorded normalized hashes. Re-synced the official public registry response and its new `lib/use-today.ts` dependency, restoring upstream month layout/presence rather than keeping a locally rewritten animation. Only installation import paths are mapped to vendor aliases; source and normalized local hashes are recorded separately. All 263 reserved files pass the inventory hash check. Localized/integration derivatives Accordion, Dialog, RadioGroup, ToastStack, UserMenu and Dropdown were also compared for motion constants, Motion attributes and animate calls without finding motion changes. This is source/static evidence, not browser acceptance.
 
 The default palette is UIArc neutral; tenant color overrides remain authoritative. Existing tenant radius values are preserved. If no legacy or explicit tenant value exists, defaults are button/input 18px and panel 26px. Button sounds still use the existing global interaction system.
 
