@@ -130,7 +130,18 @@ test('image clarification resumes through current media authority and the origin
   for (let turn = 1; turn <= 2; turn++) {
     const pending = await h.root.application.readInput({ taskId: h.query.taskId });
     const submission = h.answer(pending);
-    const result = await composeTaskModelHost(h.config).application.resume(submission);
+    let result;
+    if (turn === 1) {
+      const sentBefore = h.modelControl.sent.length;
+      await h.root.inputs.submit(submission);
+      assert.equal(h.modelControl.sent.length, sentBefore, 'persisting an answer does not dispatch a model');
+      const { taskId: _task, ...answer } = submission;
+      const continued = await composeTaskModelHost(h.config).continueOriginalInput(answer);
+      result = { continuation: continued.execution };
+      const sentAfter = h.modelControl.sent.length;
+      assert.equal((await composeTaskModelHost(h.config).continueOriginalInput(answer)).execution.reason, 'task_not_runnable');
+      assert.equal(h.modelControl.sent.length, sentAfter, 'repeated continuation cannot replay the model');
+    } else result = await composeTaskModelHost(h.config).application.resume(submission);
     assert.equal(result.continuation.kind, 'run_outcome', JSON.stringify(result));
     assert.equal(result.continuation.outcome.status, turn === 1 ? 'paused' : 'succeeded');
     assert.equal((await h.root.application.resume(submission)).continuation.reason, 'receipt_replayed');

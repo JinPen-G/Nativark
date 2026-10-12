@@ -1429,7 +1429,8 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   const bookingHttp = new AiClientEntryController(entryModule.providers[0].useFactory());
   for (const method of ['readHostCapabilities', 'issueAction', 'createBookingDraft', 'chooseBookingDraft', 'readBookingDraft',
     'handoffBookingDraft', 'readBookingHandoff', 'readBookingOperation',
-    'acceptBookingSubmission', 'submitAcceptedBooking', 'readBookingSubmission', 'requestTaskCancellation', 'reconcileTaskInputCancellation', 'readTaskInput']) {
+    'acceptBookingSubmission', 'submitAcceptedBooking', 'readBookingSubmission', 'requestTaskCancellation', 'reconcileTaskInputCancellation',
+    'readTaskInput', 'submitTaskInput', 'readTaskInputReceipt']) {
     assert.equal(Reflect.getMetadata('path', AiClientEntryController.prototype[method]), AI_CLIENT_ENTRY_HTTP_DRAFT[method]);
   }
   const { aiClientHostCapabilitiesSchema } = require('../packages/shared/src/ai-client-entry-draft-schemas');
@@ -1749,6 +1750,15 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.equal(aiClientTaskInputReadResponseSchema.safeParse(noPending).success, true);
   assert.equal(noPending.state, 'not_pending'); assert.equal(noPending.question, null);
   assert.equal(noPending.execution, 'not_authorized_by_observation');
+  const answerCommand = { ...taskCommand, submission: { draftVersion: AI_TASK_INPUT_DRAFT_VERSION,
+    requestId: 'missing-client-question', expectedRevision: 1, submissionKey: 'client-answer-1',
+    answers: [{ fieldId: 'clarification_text', value: 'explicit answer' }] } };
+  await assert.rejects(inputHttp.submitTaskInput(request, { ...answerCommand,
+    submission: { ...answerCommand.submission, taskId: created.task.taskId } }), e => e.getStatus?.() === 400);
+  const missingAnswerTrace = taskStore.trace.length;
+  await assert.rejects(inputHttp.submitTaskInput(request, answerCommand), e => e.getStatus?.() === 503);
+  assert.equal(taskStore.trace.slice(missingAnswerTrace).includes('aiTaskInputRequest.read'), true);
+  await assert.rejects(inputHttp.readTaskInputReceipt(request, answerCommand), e => e.getStatus?.() === 503);
   assert.deepEqual(taskStore.state, executionBefore);
   const execution = await resultApp.readOriginalTaskExecution(request, taskCommand, { db });
   assert.equal(execution.task.taskId, created.task.taskId);

@@ -61,6 +61,16 @@ export async function composeClientOriginalTaskInputReader(input: Pick<Dependenc
       // This path uses the original stored result/question/recorded charges as
       // a witness. It does not resolve a model or acquire execution permission.
       return authorization.cancellation.settleReleasedInputWait(input.db, plans, input.inputSource);
+    },
+    async submit(value: Omit<AiTaskInputSubmissionDraft, 'taskId'>) {
+      if (!value || Object.prototype.hasOwnProperty.call(value, 'taskId')) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const submission = { ...structuredClone(value), taskId };
+      if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      // The original atomic consumer may persist a legal successor run, but
+      // this entry never claims a lease or starts that run's model invocation.
+      const result = await inputs.submit(submission);
+      await authorization.authority.resolve(taskId, 'read_metadata');
+      return result;
     }
   });
 }
@@ -71,8 +81,8 @@ export async function composeClientOriginalTaskInputReader(input: Pick<Dependenc
  * order/settings writes, approval bypass, provider SDK or production registration.
  */
 export async function composeClientOriginalTaskModelHost(input: Dependencies, value: unknown,
-  purpose: 'start' | 'resume' | 'recover' | 'reconcile' = 'start') {
-  if (!['start', 'resume', 'recover', 'reconcile'].includes(purpose)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  purpose: 'start' | 'resume' | 'recover' | 'reconcile' | 'continue' = 'start') {
+  if (!['start', 'resume', 'recover', 'reconcile', 'continue'].includes(purpose)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
   input = { ...input, clientScene: structuredClone(input.clientScene), gatewayScene: structuredClone(input.gatewayScene),
     limits: structuredClone(input.limits), host: structuredClone(input.host) };
   const command = clientTaskCommandSchema.parse(structuredClone(value));
@@ -84,7 +94,7 @@ export async function composeClientOriginalTaskModelHost(input: Dependencies, va
   if (!receipt.task) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const taskId = receipt.task.taskId;
   const action = purpose === 'resume' ? 'resume_input'
-    : purpose === 'start' ? 'claim_run' : 'claim_recovery_run';
+    : purpose === 'start' || purpose === 'continue' ? 'claim_run' : 'claim_recovery_run';
   const context = await authorization.authority.resolve(taskId, action);
   const canonical = await authorization.scopes.resolveCurrent();
   const policyKey = { scopeId: canonical.scope.id, sceneCode: clientDependencies.sceneCode,
@@ -133,6 +143,10 @@ export async function composeClientOriginalTaskModelHost(input: Dependencies, va
   if (canonical.scope.id !== current.scope.id || requestFingerprint(plan) !== requestFingerprint(latestPlan)
     || requestFingerprint(before) !== requestFingerprint(after)) throw denied();
   return Object.freeze({ ...host, originalTask: { taskId, runId: receipt.task.runId },
+    continueSubmittedInput: (value: Omit<AiTaskInputSubmissionDraft, 'taskId'>, signal?: AbortSignal) => {
+      if (purpose !== 'continue') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return host.continueOriginalInput(value, signal);
+    },
     /** Start uses the original IDs only. Recovery follows only proved original
      * successor runs, never a new task, input or provider call after unknown. */
     recover: (signal?: AbortSignal) => {

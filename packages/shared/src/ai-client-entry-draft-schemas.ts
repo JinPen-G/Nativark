@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { AI_CUSTOMER_ENTRY_SURFACES } from './ai-entry-action-draft';
 import { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
-import { AI_TASK_INPUT_DRAFT_VERSION, isAiTaskInputContractDraft, type AiTaskInputContractDraft } from './ai-task-input-draft';
+import { AI_TASK_INPUT_DRAFT_VERSION, isAiTaskInputContractDraft, isAiTaskInputSubmissionDraft,
+  type AiTaskInputContractDraft, type AiTaskInputSubmissionDraft } from './ai-task-input-draft';
 
 export const AI_CLIENT_HOST_CAPABILITIES_VERSION = 'ain-client-host-capabilities-1' as const;
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
@@ -38,6 +39,22 @@ export const aiClientTaskInputReadResponseSchema = z.discriminatedUnion('state',
     question: z.null(), execution: z.literal('not_authorized_by_observation') }).strict()
 ]);
 export type AiClientTaskInputReadResponse = z.infer<typeof aiClientTaskInputReadResponseSchema>;
+export const aiClientTaskInputSubmissionRequestSchema = aiClientTaskReadRequestSchema.extend({
+  submission: z.custom<Omit<AiTaskInputSubmissionDraft, 'taskId'>>(value => !!value && typeof value === 'object'
+    && !Array.isArray(value) && !Object.prototype.hasOwnProperty.call(value, 'taskId')
+    && isAiTaskInputSubmissionDraft({ ...value, taskId: 'validation-only' }))
+}).strict();
+const clientInputReceipt = z.object({ taskId: id.max(36), requestId: id.max(36), receiptId: id.max(36),
+  taskRevision: z.number().int().min(1).max(4294967295) }).strict();
+export const aiClientTaskInputSubmissionReceiptSchema = clientInputReceipt.extend({
+  contractVersion: z.literal(AI_TASK_INPUT_DRAFT_VERSION), status: z.literal('input_received'), replayed: z.boolean(),
+  execution: z.literal('not_inferred_from_receipt') }).strict();
+export const aiClientTaskInputReceiptReadResponseSchema = z.discriminatedUnion('state', [
+  z.object({ contractVersion: z.literal(AI_TASK_INPUT_DRAFT_VERSION), state: z.literal('observed'),
+    receipt: clientInputReceipt, execution: z.literal('not_inferred_from_receipt') }).strict(),
+  z.object({ contractVersion: z.literal(AI_TASK_INPUT_DRAFT_VERSION), state: z.literal('not_observed'),
+    receipt: z.null(), execution: z.literal('not_inferred_from_receipt') }).strict()
+]);
 export const aiClientTaskEventsReadRequestSchema = aiClientTaskReadRequestSchema.extend({
   after: z.string().regex(/^(0|[1-9][0-9]{0,19})$/u), limit: z.number().int().min(1).max(100)
 }).strict();

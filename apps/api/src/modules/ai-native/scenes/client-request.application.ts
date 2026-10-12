@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { aiClientOrderExplanationReadRequestSchema, aiClientSourceReadRequestSchema,
-  aiClientTaskCancelRequestSchema } from '@rental-os/shared';
+  aiClientTaskCancelRequestSchema, aiClientTaskInputSubmissionRequestSchema } from '@rental-os/shared';
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '../../../common/request-identity';
@@ -394,7 +394,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   };
   const runOriginalTaskModel = async (request: AiClientApplicationRequest, value: unknown,
     model: ClientModelServerDependencies, signal?: AbortSignal, answers?: Omit<AiTaskInputSubmissionDraft, 'taskId'>,
-    control?: 'recover' | 'reconcile') => {
+    control?: 'recover' | 'reconcile' | 'continue') => {
       requireEntry();
       if (!taskDependencies || model?.db !== dependencies.db) {
         throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_model_dependencies_missing');
@@ -430,6 +430,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           loadMaterial, guard: dependencies.guard, clock }, command, control ?? (answers ? 'resume' : 'start'));
         const result = control === 'recover' ? await host.recover(signal)
           : control === 'reconcile' ? await host.reconcile(signal)
+          : control === 'continue' && answers ? await host.continueSubmittedInput(answers, signal)
           : answers ? await host.resume(answers, signal) : await host.start(signal);
         await bound.assertCurrent();
         return result;
@@ -669,8 +670,24 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       if (!source) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_input_dependencies_missing');
       return withOriginalTaskInput(request, value, source, reader => reader.readPending());
     },
+    /** Original submit/resume-input policies apply atomically. Persisting an
+     * answer/successor does not claim its lease, invoke AI or approve business. */
+    submitOriginalTaskModelInput(request: AiClientApplicationRequest, value: unknown,
+      source = configuredTaskInputSource) {
+      if (!source) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_input_dependencies_missing');
+      const { submission, ...command } = parseEntry(aiClientTaskInputSubmissionRequestSchema, structuredClone(value));
+      return withOriginalTaskInput(request, command, source, reader => reader.submit(submission));
+    },
+    /** Explicit server execution dependencies, exact original answer receipt;
+     * never resubmit, select a caller run or automatically start after submit. */
+    continueOriginalTaskModelInput(request: AiClientApplicationRequest, value: unknown,
+      model: ClientModelServerDependencies, signal?: AbortSignal) {
+      const { submission, ...command } = parseEntry(aiClientTaskInputSubmissionRequestSchema, structuredClone(value));
+      return runOriginalTaskModel(request, command, model, signal, submission, 'continue');
+    },
     async readOriginalTaskModelInputReceipt(request: AiClientApplicationRequest, value: unknown, answerValue: unknown,
-      source: Pick<Parameters<typeof composeClientOriginalTaskInputReader>[0], 'db' | 'inputSource' | 'gatewayScene'>) {
+      source = configuredTaskInputSource) {
+      if (!source) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_input_dependencies_missing');
       const parsed = z.record(z.unknown()).safeParse(structuredClone(answerValue));
       if (!parsed.success || Object.prototype.hasOwnProperty.call(parsed.data, 'taskId')) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const submission = { ...parsed.data, taskId: 'validation-only' };

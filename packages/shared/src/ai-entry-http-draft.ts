@@ -12,6 +12,8 @@ export const AI_CLIENT_ENTRY_HTTP_DRAFT = Object.freeze({
   reconcileTaskInputCancellation: 'tasks/cancel/input-wait/reconcile',
   /** Reads the original clarification, never starts or resumes a run. */
   readTaskInput: 'tasks/input/read',
+  /** Same-key submission/receipt observation; neither route invokes a model. */
+  submitTaskInput: 'tasks/input/submit', readTaskInputReceipt: 'tasks/input/receipt/read',
   readOrderExplanation: 'orders/explanation/read', readSource: 'sources/read',
   issueAction: 'action', createBookingDraft: 'booking-drafts/create',
   chooseBookingDraft: 'booking-drafts/choose', readBookingDraft: 'booking-drafts/read',

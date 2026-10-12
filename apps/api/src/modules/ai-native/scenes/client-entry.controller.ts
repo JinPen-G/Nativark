@@ -1,10 +1,13 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientTaskCancelReceiptSchema,
-  aiClientTaskInputCancellationReceiptSchema, aiClientTaskInputReadResponseSchema, AI_TASK_INPUT_DRAFT_VERSION } from '@rental-os/shared';
+  aiClientTaskInputCancellationReceiptSchema, aiClientTaskInputReadResponseSchema, AI_TASK_INPUT_DRAFT_VERSION,
+  aiClientTaskInputSubmissionRequestSchema, aiClientTaskInputSubmissionReceiptSchema,
+  aiClientTaskInputReceiptReadResponseSchema } from '@rental-os/shared';
 import { z } from 'zod';
 import { AiClientEntryError } from './client-entry-action';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiTaskTransitionResultUnknownError } from '../ai-task-transition.repository';
+import { AiTaskInputResultUnknownError } from '../task-input/task-input.errors';
 import type { AiClientApplicationRequest, composeRequestBoundClientApplication } from './client-request.application';
 
 export const AI_CLIENT_ENTRY_APPLICATION = Symbol('AI_CLIENT_ENTRY_APPLICATION');
@@ -13,7 +16,7 @@ type Application = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
   'handoffBookingDraft' | 'readBookingHandoff' | 'readBookingOperation' |
   'acceptBookingSubmission' | 'submitAcceptedBooking' | 'readBookingSubmission' | 'readTaskSnapshot' | 'readTaskEvents' |
   'readOrderExplanation' | 'readSource' | 'requestOriginalTaskCancellation' | 'reconcileOriginalTaskInputCancellation' |
-  'readOriginalTaskModelInput'>;
+  'readOriginalTaskModelInput' | 'submitOriginalTaskModelInput' | 'readOriginalTaskModelInputReceipt'>;
 
 @Controller([AI_CLIENT_ENTRY_HTTP_DRAFT.basePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath])
 export class AiClientEntryController {
@@ -31,7 +34,7 @@ export class AiClientEntryController {
         AI_RESOURCE_UNAVAILABLE: 503, AI_PROPOSAL_STALE: 409, AI_REVISION_CONFLICT: 409, AI_RESULT_UNKNOWN: 409 };
       let code = 'AI_RESOURCE_UNAVAILABLE';
       if (error instanceof z.ZodError) code = 'AI_INVALID_INPUT';
-      else if (error instanceof AiTaskTransitionResultUnknownError) code = 'AI_RESULT_UNKNOWN';
+      else if (error instanceof AiTaskTransitionResultUnknownError || error instanceof AiTaskInputResultUnknownError) code = 'AI_RESULT_UNKNOWN';
       else if (error instanceof AiClientEntryError) code = error.code;
       else if (error instanceof AiTaskRepositoryError) code = error.code === 'AI_STORAGE_UNAVAILABLE' ? 'AI_RESOURCE_UNAVAILABLE' : error.code;
       else if (error instanceof Error && aliases[error.message]) code = aliases[error.message];
@@ -77,11 +80,37 @@ export class AiClientEntryController {
         taskId: event.taskId, taskRevision: event.taskRevision, cursor: event.cursor,
         observedAt: event.occurredAt, status: 'cancel_requested', cancellation: result.cancellation,
         retryable: result.retryable, nextAction: result.nextAction });
-      // The write may already have committed. A malformed server observation
-      // is not an invalid client request and cannot justify reissuing the action.
+      // A write may already have committed; malformed server observations
+      // cannot be reported as invalid client input or permission to reissue.
       if (!receipt.success) throw new AiTaskTransitionResultUnknownError();
       return receipt.data;
     }, 'read_original_task');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.submitTaskInput) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  submitTaskInput(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(async () => {
+      const result = await this.application.submitOriginalTaskModelInput(request, body);
+      const receipt = aiClientTaskInputSubmissionReceiptSchema.safeParse({ status: result.status,
+        taskId: result.taskId, requestId: result.requestId, receiptId: result.receiptId,
+        taskRevision: result.taskRevision, replayed: result.replayed,
+        contractVersion: AI_TASK_INPUT_DRAFT_VERSION, execution: 'not_inferred_from_receipt' });
+      if (!receipt.success) throw new AiTaskInputResultUnknownError();
+      return receipt.data;
+    }, 'read_original_task_input_receipt');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskInputReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTaskInputReceipt(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(async () => {
+      const parsed = aiClientTaskInputSubmissionRequestSchema.parse(body);
+      const { submission, ...command } = parsed;
+      const result = await this.application.readOriginalTaskModelInputReceipt(request, command, submission);
+      const receipt = result.state === 'observed' ? { taskId: result.taskId, requestId: result.requestId,
+        receiptId: result.receiptId, taskRevision: result.taskRevision } : null;
+      const response = aiClientTaskInputReceiptReadResponseSchema.safeParse({ state: result.state, receipt,
+        contractVersion: AI_TASK_INPUT_DRAFT_VERSION, execution: 'not_inferred_from_receipt' });
+      if (!response.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return response.data;
+    }, 'read_original_task_input_receipt');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderExplanation) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readOrderExplanation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
+import { AI_TOOL_DRAFT_VERSION, isAiTaskInputSubmissionDraft, type AiTaskInputSubmissionDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
@@ -100,6 +100,22 @@ export function composeTaskModelHostWithModel<T extends ReturnType<typeof compos
     return { request, snapshot };
   };
   const recoveryHost = Object.freeze(structuredClone(input.host));
+  const continueOriginalInput = async (value: Omit<AiTaskInputSubmissionDraft, 'taskId'>, signal?: AbortSignal) => {
+    if (!value || Object.prototype.hasOwnProperty.call(value, 'taskId')) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const submission = { ...structuredClone(value), taskId: task.taskId };
+    if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const receipt = await root.inputs.readSubmission(submission);
+    if (receipt.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const { request, snapshot } = await originalSnapshot();
+    if (receipt.runId !== request.runId) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    if (signal?.aborted || snapshot.task.status !== 'running') return { receipt,
+      execution: { kind: 'not_started' as const, reason: signal?.aborted ? 'host_aborted' as const : 'task_not_runnable' as const } };
+    // Only a proved, still-unprepared successor can consume the original held
+    // preparation. Existing steps/plans are original work, never a new publish.
+    const execution = snapshot.plan || snapshot.steps.length
+      ? await application.reconcile(request, signal) : await application.start(request, signal);
+    return { receipt, execution };
+  };
   const recoverOriginal = async (signal?: AbortSignal) => {
     if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
     const { request, snapshot } = await originalSnapshot();
@@ -135,6 +151,7 @@ export function composeTaskModelHostWithModel<T extends ReturnType<typeof compos
   return Object.freeze({ model, ...root, application,
     requestCancelOriginal,
     recoverOriginal,
+    continueOriginalInput,
     // Inspection is observation only, including after a process rebuild.
     // Reconciliation uses the existing application's held-lease gate; a new
     // holder receives recovery_lease_unavailable, not new dispatch permission.
