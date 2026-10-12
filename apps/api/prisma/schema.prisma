@@ -797,6 +797,9 @@ model AiClientTaskPolicy {
   allowCreate  Boolean @default(false)
   allowRead    Boolean @default(false)
   allowExecute Boolean @default(false)
+  allowRequestInput Boolean @default(false)
+  allowSubmitInput Boolean @default(false)
+  allowResumeInput Boolean @default(false)
   revision     Int @db.UnsignedInt
   expiresAt    DateTime @db.DateTime(3)
   workspace    BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_client_task_policy_workspace_fk")

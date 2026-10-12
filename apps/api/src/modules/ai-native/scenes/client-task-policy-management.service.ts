@@ -16,11 +16,15 @@ const keySchema = z.object({ channel: z.enum(['wechat_miniprogram', 'web', 'app'
   customerType: z.enum(['personal', 'corporate']) }).strict();
 const changeSchema = keySchema.extend({ operationKey: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
   expectedRevision: z.number().int().min(0).max(4294967293), enabled: z.boolean(), allowCreate: z.boolean(),
-  allowRead: z.boolean(), allowExecute: z.boolean(), expiresAt: z.string().datetime({ offset: true }) }).strict();
+  allowRead: z.boolean(), allowExecute: z.boolean(), allowRequestInput: z.boolean().optional(),
+  allowSubmitInput: z.boolean().optional(), allowResumeInput: z.boolean().optional(),
+  expiresAt: z.string().datetime({ offset: true }) }).strict();
 const observationSchema = keySchema.extend({ operationKey: changeSchema.shape.operationKey }).strict();
 const snapshotSchema = keySchema.extend({ id: z.string().uuid(), tenantId: z.string(), workspaceId: z.string(),
   sceneCode: z.string(), sceneVersion: z.string(), enabled: z.boolean(), allowCreate: z.boolean(), allowRead: z.boolean(),
-  allowExecute: z.boolean(), revision: z.number().int().min(1).max(4294967294), expiresAt: z.string().datetime({ offset: true }) }).strict();
+  allowExecute: z.boolean(), allowRequestInput: z.boolean().optional().default(false),
+  allowSubmitInput: z.boolean().optional().default(false), allowResumeInput: z.boolean().optional().default(false),
+  revision: z.number().int().min(1).max(4294967294), expiresAt: z.string().datetime({ offset: true }) }).strict();
 const auditSchema = z.object({ version: z.literal('client-task-policy-management-1'), operationKey: changeSchema.shape.operationKey,
   commandHash: z.string().regex(/^[a-f0-9]{64}$/u), actorId: z.string(), before: snapshotSchema.nullable(),
   result: snapshotSchema, recordedAt: z.string().datetime({ offset: true }) }).strict();
@@ -78,6 +82,7 @@ export class HumanClientTaskPolicyManagementService {
     return parse(snapshotSchema, { id: row.id, tenantId: row.tenantId, workspaceId: row.workspaceId,
       channel: row.channel, customerType: row.customerType, sceneCode: row.sceneCode, sceneVersion: row.sceneVersion,
       enabled: row.enabled, allowCreate: row.allowCreate, allowRead: row.allowRead, allowExecute: row.allowExecute,
+      allowRequestInput: row.allowRequestInput, allowSubmitInput: row.allowSubmitInput, allowResumeInput: row.allowResumeInput,
       revision: row.revision, expiresAt: row.expiresAt.toISOString() });
   }
   private receiptId(manager: Manager, key: z.infer<typeof keySchema>, operationKey: string) {
@@ -140,9 +145,13 @@ export class HumanClientTaskPolicyManagementService {
         const before = previous ? this.snapshot(previous) : null;
         const result = parse(snapshotSchema, { id: previous?.id ?? randomUUID(), ...policyKey, enabled: input.enabled,
           allowCreate: input.allowCreate, allowRead: input.allowRead, allowExecute: input.allowExecute,
+          allowRequestInput: input.allowRequestInput ?? false, allowSubmitInput: input.allowSubmitInput ?? false,
+          allowResumeInput: input.allowResumeInput ?? false,
           revision: input.expectedRevision + 1, expiresAt: expiresAt.toISOString() });
         const data = { enabled: result.enabled, allowCreate: result.allowCreate, allowRead: result.allowRead,
-          allowExecute: result.allowExecute, revision: result.revision, expiresAt };
+          allowExecute: result.allowExecute, allowRequestInput: result.allowRequestInput,
+          allowSubmitInput: result.allowSubmitInput, allowResumeInput: result.allowResumeInput,
+          revision: result.revision, expiresAt };
         await this.recheck(manager);
         if (!previous) await tx.aiClientTaskPolicy.create({ data: { id: result.id, ...policyKey, ...data } });
         else {

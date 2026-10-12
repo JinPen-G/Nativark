@@ -24,9 +24,22 @@ const policySchema = z.object({ id: z.string().uuid(), tenantId: id, workspaceId
   channel: z.enum(['wechat_miniprogram', 'app', 'web']), customerType: z.enum(['personal', 'corporate']),
   sceneCode: id.max(128), sceneVersion: id.max(64), enabled: sqlBoolean, allowCreate: sqlBoolean, allowRead: sqlBoolean,
   allowExecute: sqlBoolean.optional().default(false),
+  allowRequestInput: sqlBoolean.optional().default(false), allowSubmitInput: sqlBoolean.optional().default(false),
+  allowResumeInput: sqlBoolean.optional().default(false),
   revision: z.number().int().min(1).max(4294967294), expiresAt: z.date() }).strict();
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+type ClientPolicyOperation = 'create' | 'read' | 'capabilities' | 'execute' | 'request_input' | 'submit_input' | 'resume_input';
+const permits = (policy: z.infer<typeof policySchema>, operation: ClientPolicyOperation) => {
+  switch (operation) {
+    case 'create': return policy.allowCreate;
+    case 'execute': return policy.allowExecute;
+    case 'request_input': return policy.allowRequestInput;
+    case 'submit_input': return policy.allowSubmitInput;
+    case 'resume_input': return policy.allowResumeInput;
+    case 'read': case 'capabilities': return policy.allowRead;
+  }
+};
 
 type ClientPolicySubject = Pick<AiClientMaterialScope, 'tenantId' | 'workspaceId' | 'channel' | 'principalKind'>
   & { identity: ClientRequestContext };
@@ -37,7 +50,7 @@ export class AiClientPolicyAuthority {
     private readonly requestId: string, private readonly clock: () => Date) {
     this.entitlements = new PrismaSubscriptionBudgetReader(dependencies.db, dependencies.subscriptions, clock);
   }
-  async policy(subject: ClientPolicySubject, operation: 'create' | 'read' | 'capabilities' | 'execute') {
+  async policy(subject: ClientPolicySubject, operation: ClientPolicyOperation) {
     subject = structuredClone(subject);
     const { identity } = subject;
     let rows: unknown[];
@@ -53,7 +66,7 @@ export class AiClientPolicyAuthority {
       || identity.membershipStatus !== 'active' || !identity.sessionId || !identity.customerId
       || policy.tenantId !== subject.tenantId || policy.workspaceId !== subject.workspaceId || policy.channel !== subject.channel
       || policy.customerType !== subject.principalKind || policy.sceneCode !== this.scene.sceneCode || policy.sceneVersion !== this.scene.sceneVersion
-      || !policy.enabled || !(operation === 'create' ? policy.allowCreate : operation === 'execute' ? policy.allowExecute : policy.allowRead)
+      || !policy.enabled || !permits(policy, operation)
       || policy.expiresAt <= this.clock()) throw denied();
     return policy;
   }
@@ -83,7 +96,7 @@ export class AiClientPolicyAuthority {
     // reads must not wait on the caller's budget transaction's own policy locks.
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
   }
-  async authorize(subject: ClientPolicySubject, operation: 'create' | 'read' | 'capabilities' | 'execute') {
+  async authorize(subject: ClientPolicySubject, operation: ClientPolicyOperation) {
     subject = structuredClone(subject);
     const policy = await this.policy(subject, operation);
     const context: AiExecutionContext = { contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: this.requestId,
@@ -109,7 +122,7 @@ export class AiClientTaskAuthority {
     requestId: string, clock: () => Date) {
     this.authority = new AiClientPolicyAuthority(dependencies, scene, requestId, clock);
   }
-  async authorize(materialRef: string, operation: 'create' | 'read' | 'execute') {
+  async authorize(materialRef: string, operation: Exclude<ClientPolicyOperation, 'capabilities'>) {
     const material = structuredClone(await this.loadMaterial(materialRef));
     const grant = await this.authority.authorize({ ...material.row, identity: material.identity }, operation);
     const current = structuredClone(await this.loadMaterial(materialRef));

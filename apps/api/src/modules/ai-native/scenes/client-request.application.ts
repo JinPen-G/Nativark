@@ -17,10 +17,17 @@ import { AI_CLIENT_HOST_CAPABILITIES_VERSION, aiClientHostCapabilitiesRequestSch
 import { AiClientEntryError, assertEntryAction, clientEntrySurface, entryActionSchema, materialEntryAction, parseEntry } from './client-entry-action';
 import { composeClientMaterialTasks, clientTaskEventsCommandSchema } from './client-task.composition';
 import { composePersistedClientTaskAuthorization } from './client-task-execution.composition';
-import { composeClientOriginalTaskModelHost } from './client-task-model-host.composition';
+import { composeClientOriginalTaskModelHost, composeClientOriginalTaskInputReader } from './client-task-model-host.composition';
 import { composeClientTaskModelConfiguration, type ClientCallGatewayDependencies } from './client-task-model-configuration.composition';
 import type { SecretBox } from '../../../common/secret-box';
 import type { PublicGatewayRuntime } from '../public-ai-gateway.service';
+import { isAiTaskInputSubmissionDraft, type AiTaskInputSubmissionDraft } from '@rental-os/shared';
+type ClientModelServerDependencies = Omit<Parameters<typeof composeClientOriginalTaskModelHost>[0],
+  'subscriptions' | 'clientScene' | 'loadMaterial' | 'guard' | 'clock' | 'runtime' | 'priceVersion' | 'financialEvidence'> & (
+    { runtime: PublicGatewayRuntime; priceVersion: string;
+      financialEvidence: Parameters<typeof composeClientOriginalTaskModelHost>[0]['financialEvidence']; gateway?: never }
+    | { gateway: ClientCallGatewayDependencies & { secrets: SecretBox };
+      runtime?: never; priceVersion?: never; financialEvidence?: never });
 import { AiClientTaskUnknownError, clientTaskCommandSchema } from './prisma-client-task-input.repository';
 import { prepareClientOrderExplanation } from './client-order-explanation';
 import { bookingSelectionSchema, readClientBookingMaterial } from './client-booking-material';
@@ -378,6 +385,62 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     return freezeOriginalInput({ ...receipt, operationKey: material.operationKey, retryable: false as const,
       payment: 'not_inferred' as const, fulfillment: 'not_inferred' as const });
   };
+  const runOriginalTaskModel = async (request: AiClientApplicationRequest, value: unknown,
+    model: ClientModelServerDependencies, signal?: AbortSignal, answers?: Omit<AiTaskInputSubmissionDraft, 'taskId'>) => {
+      requireEntry();
+      if (!taskDependencies || model?.db !== dependencies.db) {
+        throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_model_dependencies_missing');
+      }
+      const gatewayServer = model.gateway ? { ...model.gateway, adapters: [...model.gateway.adapters] } : null;
+      if (gatewayServer && (gatewayServer.db !== dependencies.db
+        || gatewayServer.routeScene !== model.gatewayScene.routeScene)) {
+        throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_model_dependencies_mismatch');
+      }
+      const command = parseEntry(clientTaskCommandSchema, structuredClone(value));
+      return withBinding(request, true, 'order', async bound => {
+        const loadMaterial = async (materialRef: string) => {
+          await bound.assertCurrent();
+          const row = await repository.findSource(scopeOf(bound), materialRef);
+          if (!row || !bound.identity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          await verify(bound, row);
+          await bound.assertCurrent();
+          return { row, identity: structuredClone(bound.identity) };
+        };
+        const configured = gatewayServer ? (await composeClientTaskModelConfiguration({ ...taskDependencies,
+          db: gatewayServer.db, secrets: gatewayServer.secrets, loadMaterial, clock }, command)).createCallGateway(gatewayServer) : null;
+        const runtime = configured?.runtime ?? model.runtime, priceVersion = configured?.callPriceVersion ?? model.priceVersion;
+        const financialEvidence = configured?.financialEvidence ?? model.financialEvidence;
+        if (!runtime || !priceVersion || !financialEvidence) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_model_dependencies_missing');
+        const host = await composeClientOriginalTaskModelHost({ ...model, runtime, priceVersion, financialEvidence,
+          subscriptions: taskDependencies.subscriptions, clientScene: taskDependencies,
+          loadMaterial, guard: dependencies.guard, clock }, command, answers ? 'resume' : 'start');
+        const result = answers ? await host.resume(answers, signal) : await host.start(signal);
+        await bound.assertCurrent();
+        return result;
+      });
+  };
+  const readOriginalTaskInput = async (request: AiClientApplicationRequest, value: unknown,
+    source: Pick<Parameters<typeof composeClientOriginalTaskInputReader>[0], 'db' | 'inputSource' | 'gatewayScene'>,
+    answers?: Omit<AiTaskInputSubmissionDraft, 'taskId'>) => {
+    requireEntry();
+    if (!taskDependencies || source?.db !== dependencies.db) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_input_dependencies_missing');
+    const command = parseEntry(clientTaskCommandSchema, structuredClone(value));
+    return withBinding(structuredClone(request), true, 'order', async bound => {
+      const loadMaterial = async (materialRef: string) => {
+        await bound.assertCurrent();
+        const row = await repository.findSource(scopeOf(bound), materialRef);
+        if (!row || !bound.identity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        await verify(bound, row);
+        await bound.assertCurrent();
+        return { row, identity: structuredClone(bound.identity) };
+      };
+      const reader = await composeClientOriginalTaskInputReader({ ...source,
+        clientScene: taskDependencies, subscriptions: taskDependencies.subscriptions, loadMaterial, clock }, command);
+      const result = answers ? await reader.readSubmission(answers) : await reader.readPending();
+      await bound.assertCurrent();
+      return result;
+    });
+  };
   return Object.freeze({
     /** Explicit human booking-page request, not an AI Tool or approval bypass. */
     async acceptBookingSubmission(request: AiClientApplicationRequest, value: unknown) {
@@ -450,45 +513,30 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     },
     /** Internal server consumer only. Runtime/pricing/plan/host configuration is
      * injected by the application, never accepted in a customer HTTP body. */
-    async startOriginalTaskModel(request: AiClientApplicationRequest, value: unknown,
-      model: Omit<Parameters<typeof composeClientOriginalTaskModelHost>[0],
-        'subscriptions' | 'clientScene' | 'loadMaterial' | 'guard' | 'clock' | 'runtime' | 'priceVersion' | 'financialEvidence'> & (
-          { runtime: PublicGatewayRuntime; priceVersion: string;
-            financialEvidence: Parameters<typeof composeClientOriginalTaskModelHost>[0]['financialEvidence']; gateway?: never }
-          | { gateway: ClientCallGatewayDependencies & { secrets: SecretBox };
-            runtime?: never; priceVersion?: never; financialEvidence?: never }),
-      signal?: AbortSignal) {
-      requireEntry();
-      if (!taskDependencies || model?.db !== dependencies.db) {
-        throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_model_dependencies_missing');
-      }
-      const gatewayServer = model.gateway ? { ...model.gateway, adapters: [...model.gateway.adapters] } : null;
-      if (gatewayServer && (gatewayServer.db !== dependencies.db
-        || gatewayServer.routeScene !== model.gatewayScene.routeScene)) {
-        throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_model_dependencies_mismatch');
-      }
-      const command = parseEntry(clientTaskCommandSchema, structuredClone(value));
-      return withBinding(request, true, 'order', async bound => {
-        const loadMaterial = async (materialRef: string) => {
-          await bound.assertCurrent();
-          const row = await repository.findSource(scopeOf(bound), materialRef);
-          if (!row || !bound.identity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-          await verify(bound, row);
-          await bound.assertCurrent();
-          return { row, identity: structuredClone(bound.identity) };
-        };
-        const configured = gatewayServer ? (await composeClientTaskModelConfiguration({ ...taskDependencies,
-          db: gatewayServer.db, secrets: gatewayServer.secrets, loadMaterial, clock }, command)).createCallGateway(gatewayServer) : null;
-        const runtime = configured?.runtime ?? model.runtime, priceVersion = configured?.callPriceVersion ?? model.priceVersion;
-        const financialEvidence = configured?.financialEvidence ?? model.financialEvidence;
-        if (!runtime || !priceVersion || !financialEvidence) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_model_dependencies_missing');
-        const host = await composeClientOriginalTaskModelHost({ ...model, runtime, priceVersion, financialEvidence,
-          subscriptions: taskDependencies.subscriptions, clientScene: taskDependencies,
-          loadMaterial, guard: dependencies.guard, clock }, command);
-        const result = await host.start(signal);
-        await bound.assertCurrent();
-        return result;
-      });
+    startOriginalTaskModel(request: AiClientApplicationRequest, value: unknown, model: ClientModelServerDependencies,
+      signal?: AbortSignal) { return runOriginalTaskModel(request, value, model, signal); },
+    async resumeOriginalTaskModel(request: AiClientApplicationRequest, value: unknown, answerValue: unknown,
+      model: ClientModelServerDependencies, signal?: AbortSignal) {
+      const parsed = z.record(z.unknown()).safeParse(structuredClone(answerValue));
+      if (!parsed.success || Object.prototype.hasOwnProperty.call(parsed.data, 'taskId')) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const submission = { ...parsed.data, taskId: 'validation-only' };
+      if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const { taskId: _taskId, ...answers } = submission;
+      return runOriginalTaskModel(request, value, model, signal, answers);
+    },
+    /** Server-injected source; read-only, no provider/model capability needed. */
+    readOriginalTaskModelInput(request: AiClientApplicationRequest, value: unknown,
+      source: Pick<Parameters<typeof composeClientOriginalTaskInputReader>[0], 'db' | 'inputSource' | 'gatewayScene'>) {
+      return readOriginalTaskInput(request, value, source);
+    },
+    async readOriginalTaskModelInputReceipt(request: AiClientApplicationRequest, value: unknown, answerValue: unknown,
+      source: Pick<Parameters<typeof composeClientOriginalTaskInputReader>[0], 'db' | 'inputSource' | 'gatewayScene'>) {
+      const parsed = z.record(z.unknown()).safeParse(structuredClone(answerValue));
+      if (!parsed.success || Object.prototype.hasOwnProperty.call(parsed.data, 'taskId')) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const submission = { ...parsed.data, taskId: 'validation-only' };
+      if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const { taskId: _taskId, ...answers } = submission;
+      return readOriginalTaskInput(request, value, source, answers);
     },
     async readHostCapabilities(request: AiClientApplicationRequest, value: unknown): Promise<AiClientHostCapabilities> {
       parseEntry(aiClientHostCapabilitiesRequestSchema, structuredClone(value));

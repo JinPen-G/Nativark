@@ -45,6 +45,41 @@ test('parameter proof binds exact answers and task basis before durable consumpt
   assert.equal((await h.submit()).receiptId, receipt.receiptId);
 });
 
+test('customer original clarification consumes one bound receipt and never reads another owner', async () => {
+  const h = await setup();
+  h.control.context.actor = { kind: 'customer', customerId: 'user-a' };
+  h.control.context.audience = 'client';
+  delete h.control.context.access; // Customer context has no operator permission payload.
+  h.state.aiTask[0].ownerKind = 'CUSTOMER'; h.state.aiTask[0].audience = 'CLIENT';
+  h.state.aiRun[0].actorKind = 'CUSTOMER';
+  assert.equal((await h.run()).status, 'paused');
+  const pending = await h.inputs().readPending('task-a');
+  assert.equal(pending.requestId, h.state.aiTaskInputRequest[0].id);
+  const budget = h.clone(h.state.aiTaskExecutionBudget);
+  const submission = { draftVersion: AI_TASK_INPUT_DRAFT_VERSION, taskId: 'task-a', requestId: pending.requestId,
+    expectedRevision: pending.revision, submissionKey: 'customer-answer',
+    answers: [{ fieldId: 'clarification_text', value: 'Explain the existing order only' }] };
+  assert.equal((await h.inputs().readSubmission(submission)).state, 'not_observed');
+  h.storeControl.loseReply = true;
+  await assert.rejects(h.inputs().submit(submission), e => e.code === 'AI_RESULT_UNKNOWN' && e.retryable === false);
+  const receipt = h.state.aiTaskInputReceipt[0];
+  const beforeRead = h.clone(h.state);
+  const observed = await h.inputs().readSubmission(submission);
+  assert.equal(observed.receiptId, receipt.id);
+  assert.equal(observed.execution, 'not_inferred_from_receipt');
+  assert.equal(observed.retryable, false);
+  assert.deepEqual(h.state, beforeRead);
+  assert.deepEqual(h.state.aiTaskExecutionBudget, budget);
+  assert.equal(h.state.aiTaskInputReceipt[0].actorKind, 'CUSTOMER');
+  assert.equal(h.state.aiTaskInputReceipt[0].audience, 'CLIENT');
+  h.control.context.actor.customerId = 'other-customer';
+  // Owner-filtered absence deliberately does not reveal another customer's task.
+  await assert.rejects(h.inputs().readSubmission(submission), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  h.control.context.actor.customerId = 'user-a'; h.control.context.audience = 'staff';
+  await assert.rejects(h.inputs().readSubmission(submission), e => e.code === 'AI_ACCESS_DENIED');
+  assert.deepEqual(h.state, beforeRead);
+});
+
 test('production runner persists input wait, releases, consumes one receipt, and continues original remaining step', async () => {
   const h = await setup(), plan = h.clone(h.state.aiTaskRunPlan);
   assert.equal((await h.run()).status, 'paused');

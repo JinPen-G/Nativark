@@ -125,6 +125,7 @@ test('customer task policy management uses original Guard, scoped CAS and atomic
   const created = await service.change(input);
   assert.equal(created.state, 'observed'); assert.equal(created.execution, 'not_attested');
   assert.equal(rows[0].allowExecute, true); assert.equal(rows[0].tenantId, 'tenant-a'); assert.equal(rows[0].workspaceId, 'workspace-a');
+  assert.equal(rows[0].allowRequestInput, false); assert.equal(rows[0].allowSubmitInput, false); assert.equal(rows[0].allowResumeInput, false);
   assert.equal(logs[0].userId, 'operator-a'); assert.equal(logs[0].detail.result.id, rows[0].id);
   assert.equal((await service.change(input)).result.revision, 1); assert.equal(logs.length, 1);
   await assert.rejects(service.change({ ...input, allowExecute: false }), e => e.code === 'AI_REVISION_CONFLICT');
@@ -139,9 +140,18 @@ test('customer task policy management uses original Guard, scoped CAS and atomic
   assert.equal((await service.change({ ...input, operationKey: 'atomic-failure', expectedRevision: 2 })).state, 'unknown');
   assert.equal(rows[0].revision, 2); assert.equal(logs.length, 2);
   assert.equal((await service.operation({ ...key, operationKey: 'atomic-failure' })).state, 'not_observed');
+  failAudit = false;
+  const inputPolicy = { ...input, operationKey: 'input-actions-only', expectedRevision: 2, allowExecute: false,
+    allowRequestInput: true, allowSubmitInput: true, allowResumeInput: true };
+  const configuredInputs = await service.change(inputPolicy);
+  assert.equal(configuredInputs.result.allowExecute, false); assert.equal(configuredInputs.result.allowSubmitInput, true);
+  assert.equal(rows[0].allowResumeInput, true); assert.equal(logs.length, 3);
+  // Legacy payloads retain their original audit hash, not a hash augmented by
+  // newly defaulted flags, and never inherit the newly enabled input actions.
+  assert.equal((await service.change(input)).result.allowSubmitInput, false);
   h.state.user.permissions = [];
   await assert.rejects(planApplication.readModelPlan(await h.credentials.current()), e => e.code === 'AI_ACCESS_DENIED');
   await assert.rejects(service.read(key), e => e.code === 'AI_ACCESS_DENIED');
   await assert.rejects(service.operation({ ...key, operationKey: input.operationKey }), e => e.code === 'AI_ACCESS_DENIED');
-  assert.equal(logs.length, 2);
+  assert.equal(logs.length, 3);
 });

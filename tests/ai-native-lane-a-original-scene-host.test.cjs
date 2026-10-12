@@ -879,6 +879,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     budget: { state: 'limited', quantity: { unit: 'calls', value: 10 } },
     gates: Object.fromEntries(['platform', 'tenant', 'scene'].map(kind => [kind, { enabled: true, revision: 1 }])) });
   const taskStore = createTaskInputStore({ aiScope: scopes, aiTask: [], aiRun: [], aiStep: [], aiTaskRunPlan: [], aiTaskEvent: [],
+    aiTaskInputRequest: [], aiTaskInputReceipt: [], aiTaskActionInput: [], aiTaskPlanPolicy: [],
     aiBudgetPolicy: scopes.map(scope => ({ id: `${scope.id}-budget`, scopeId: scope.id, scopeKind: scope.kind, sceneCode,
       configRevision: 1, enabled: true, settingsJson: settingsFor(scope) })) },
     { aiTask: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'creationKey']] });
@@ -889,12 +890,13 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   let bookingRows = { ai_client_booking_drafts: [], ai_client_booking_draft_operations: [], ai_client_booking_handoffs: [] };
   let loseBookingReply = false;
   let lostInputReply = false, lostTaskReply = false, revokeAfterClaim = false, commercialAvailable = true;
-  const materialDb = (transactionRows, transactionInputs, transactionBookings) => {
+  const materialDb = (transactionRows, transactionInputs, transactionBookings, taskQuery = taskStore.db.$queryRaw) => {
     const rows = () => transactionRows ?? materialRows, inputs = () => transactionInputs ?? taskInputs;
     const bookings = () => transactionBookings ?? bookingRows;
     return { ...client.prisma,
       tenant: { ...client.prisma.tenant, findUnique: async () => ({ subscription: { startAt: new Date('2026-01-01'), endAt: new Date('2027-01-01') }, subscriptionSegments: [] }) },
       $queryRaw: async query => {
+        if (/FROM ai_(tasks|runs|task_input_requests)\b/u.test(query.sql)) return taskQuery(query);
         const bookingTable = query.sql.match(/FROM (ai_client_booking_\w+)\b/u)?.[1];
         if (bookingTable) {
           const [tenantId, workspaceId, channel, principalHash, reference] = query.values;
@@ -967,7 +969,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
       const priorInputs = inputs.length, priorTasks = taskStore.state.aiTask.length;
       const priorOperations = bookings.ai_client_booking_draft_operations.length;
       const result = await taskStore.db.$transaction(tx => {
-        const current = { ...tx, ...materialDb(rows, inputs, bookings), aiTask: taskProjection(tx), aiScope: { ...tx.aiScope, upsert: scopeUpsert } };
+        const current = { ...tx, ...materialDb(rows, inputs, bookings, tx.$queryRaw), aiTask: taskProjection(tx), aiScope: { ...tx.aiScope, upsert: scopeUpsert } };
         return activeTransaction.run(current, () => work(current));
       });
       materialRows = rows; taskInputs = inputs; bookingRows = bookings;
@@ -1181,6 +1183,43 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
       expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken })).released, true);
     taskPolicies[0].allowExecute = 1;
   })(executionAuthorization);
+  const originalStatus = taskStore.state.aiTask[0].status;
+  taskStore.state.aiTask[0].status = 'RUNNING';
+  await assert.rejects(executionAuthorization.authority.resolve(created.task.taskId, 'request_input'), e => e.code === 'AI_ACCESS_DENIED');
+  taskStore.state.aiTask[0].status = 'WAITING_INPUT';
+  for (const operation of ['submit_input', 'resume_input'])
+    await assert.rejects(executionAuthorization.authority.resolve(created.task.taskId, operation), e => e.code === 'AI_ACCESS_DENIED');
+  taskPolicies[0].allowSubmitInput = 1;
+  assert.equal((await executionAuthorization.authority.resolve(created.task.taskId, 'submit_input')).actor.customerId, 'person-client');
+  await assert.rejects(executionAuthorization.authority.resolve(created.task.taskId, 'resume_input'), e => e.code === 'AI_ACCESS_DENIED');
+  taskPolicies[0].allowResumeInput = 1; taskPolicies[0].allowExecute = 0;
+  assert.equal((await executionAuthorization.authority.resolve(created.task.taskId, 'resume_input')).actor.kind, 'customer');
+  await assert.rejects(executionAuthorization.execution.authorize(created.task.taskId), e => e.code === 'AI_ACCESS_DENIED');
+  await assert.rejects(executionAuthorization.authority.resolve('another-task', 'submit_input'), e => e.code === 'AI_ACCESS_DENIED');
+  taskStore.state.aiTask[0].cancelRequestedAt = now;
+  await assert.rejects(executionAuthorization.authority.resolve(created.task.taskId, 'resume_input'), e => e.code === 'AI_ACCESS_DENIED');
+  taskStore.state.aiTask[0].cancelRequestedAt = null; taskStore.state.aiTask[0].status = originalStatus;
+  taskPolicies[0].allowExecute = 1;
+  delete taskPolicies[0].allowSubmitInput; delete taskPolicies[0].allowResumeInput;
+  const { AI_TASK_INPUT_DRAFT_VERSION } = require('../packages/shared/src');
+  await assert.rejects(clientTasks.resumeOriginalTaskModel(request, taskCommand, {
+    draftVersion: AI_TASK_INPUT_DRAFT_VERSION, taskId: created.task.taskId, requestId: 'question', expectedRevision: 1,
+    submissionKey: 'answer', answers: [{ fieldId: 'clarification_text', value: 'answer' }] }, {}), e => e.code === 'AI_INVALID_INPUT');
+  const readSource = { db, gatewayScene: { sceneCode, routeScene: 'chat', maxOutputTokens: 32 },
+    inputSource: { resolve: async () => { throw Error('no question should be read for a queued task'); },
+      validateAnswers: async () => { throw Error('read never validates/submits answers'); } } };
+  const priorInputReadState = clone(taskStore.state), beforeInputReadWrites = taskStore.trace.length;
+  await assert.rejects(clientTasks.readOriginalTaskModelInput(request, taskCommand, readSource), e => e.reason === 'entry_disabled');
+  const { composeClientOriginalTaskInputReader } = require('../apps/api/src/modules/ai-native/scenes/client-task-model-host.composition');
+  const inputReader = await composeClientOriginalTaskInputReader({ ...readSource, subscriptions,
+    clientScene: { sceneCode, sceneVersion }, loadMaterial: loadExecutionMaterial, clock: () => now }, taskCommand);
+  assert.equal(await inputReader.readPending(), null);
+  assert.deepEqual(taskStore.state, priorInputReadState);
+  assert.equal(taskStore.trace.slice(beforeInputReadWrites).some(item => /\.create|\.update/.test(item)), false);
+  await assert.rejects(clientTasks.readOriginalTaskModelInput(request, taskCommand, { ...readSource, db: {} }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  await assert.rejects(clientTasks.readOriginalTaskModelInputReceipt(request, taskCommand, {
+    draftVersion: AI_TASK_INPUT_DRAFT_VERSION, taskId: 'forged-task', requestId: 'question', expectedRevision: 1,
+    submissionKey: 'answer', answers: [{ fieldId: 'clarification_text', value: 'answer' }] }, readSource), e => e.code === 'AI_INVALID_INPUT');
   // An enabled customer gate alone cannot supply a model plan or its limits.
   // These failures occur before model publication, lease claim or transport.
   const { composeClientOriginalTaskModelHost: composeClientModel } = require('../apps/api/src/modules/ai-native/scenes/client-task-model-host.composition');

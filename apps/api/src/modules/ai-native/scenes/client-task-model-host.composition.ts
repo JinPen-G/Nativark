@@ -11,6 +11,9 @@ import type { AiAuthorizedClientMaterial, AiClientTaskDependencies } from './cli
 import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import { aiPersistedPlanToolsSchema } from '../runner/prisma-task-plan-input.source';
 import { TASK_TEXT_MODEL_TOOL } from '../model-input/task-model-input';
+import { isAiTaskInputSubmissionDraft, type AiTaskInputSubmissionDraft } from '@rental-os/shared';
+import { PrismaTaskInputRepository } from '../task-input/prisma-task-input.repository';
+import { PrismaTaskPlanInputSource } from '../runner/prisma-task-plan-input.source';
 
 type Dependencies = Omit<TaskModelHostDependencies, 'auth' | 'credentials' | 'task' | 'scene' | 'planTools' | 'kind'> & {
   db: PrismaClient;
@@ -24,12 +27,47 @@ type Dependencies = Omit<TaskModelHostDependencies, 'auth' | 'credentials' | 'ta
 };
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 
+/** Original input reads need neither a provider nor dispatch/financial ports.
+ * The question source remains a trusted scene dependency; missing it fails
+ * closed. An observed answer receipt never authorizes continuation/retry. */
+export async function composeClientOriginalTaskInputReader(input: Pick<Dependencies,
+  'db' | 'clientScene' | 'loadMaterial' | 'subscriptions' | 'inputSource' | 'gatewayScene' | 'clock'>, value: unknown) {
+  const command = clientTaskCommandSchema.parse(structuredClone(value));
+  const scene = structuredClone(input.clientScene), gatewayScene = structuredClone(input.gatewayScene);
+  if (scene.sceneCode !== gatewayScene.sceneCode) throw denied();
+  const clock = input.clock ?? (() => new Date());
+  const dependencies = { db: input.db, subscriptions: input.subscriptions, ...scene };
+  const authorization = composePersistedClientTaskAuthorization(dependencies, command, input.loadMaterial, clock);
+  const original = await composeClientMaterialTasks(dependencies, input.loadMaterial, clock).readCreation(command);
+  if (!original.task) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const taskId = original.task.taskId;
+  await authorization.authority.resolve(taskId, 'read_metadata');
+  const plans = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, clock,
+    TASK_TEXT_MODEL_TOOL, undefined, { sceneCode: gatewayScene.sceneCode, maxOutputTokens: gatewayScene.maxOutputTokens });
+  const inputs = new PrismaTaskInputRepository(input.db, authorization.tasks, plans, input.inputSource, clock);
+  return Object.freeze({
+    async readPending() {
+      const result = await inputs.readPending(taskId);
+      await authorization.authority.resolve(taskId, 'read_metadata');
+      return result;
+    },
+    async readSubmission(value: Omit<AiTaskInputSubmissionDraft, 'taskId'>) {
+      if (!value || Object.prototype.hasOwnProperty.call(value, 'taskId')) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const result = await inputs.readSubmission({ ...structuredClone(value), taskId });
+      await authorization.authority.resolve(taskId, 'read_metadata');
+      return result;
+    }
+  });
+}
+
 /** Original customer material -> the SAME frozen-model source, runner, resource
  * accounting and single-ledger Gateway. No arbitrary messages, task IDs, tools,
  * identities or prices may come from the request. Text explanation only; no
  * order/settings writes, approval bypass, provider SDK or production registration.
  */
-export async function composeClientOriginalTaskModelHost(input: Dependencies, value: unknown) {
+export async function composeClientOriginalTaskModelHost(input: Dependencies, value: unknown,
+  purpose: 'start' | 'resume' = 'start') {
+  if (purpose !== 'start' && purpose !== 'resume') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
   input = { ...input, clientScene: structuredClone(input.clientScene), gatewayScene: structuredClone(input.gatewayScene),
     limits: structuredClone(input.limits), host: structuredClone(input.host) };
   const command = clientTaskCommandSchema.parse(structuredClone(value));
@@ -40,7 +78,8 @@ export async function composeClientOriginalTaskModelHost(input: Dependencies, va
   const receipt = await composeClientMaterialTasks(clientDependencies, input.loadMaterial, clock).readCreation(command);
   if (!receipt.task) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const taskId = receipt.task.taskId;
-  const context = await authorization.authority.resolve(taskId, 'claim_run');
+  const action = purpose === 'resume' ? 'resume_input' : 'claim_run';
+  const context = await authorization.authority.resolve(taskId, action);
   const canonical = await authorization.scopes.resolveCurrent();
   const policyKey = { scopeId: canonical.scope.id, sceneCode: clientDependencies.sceneCode,
     sceneVersion: clientDependencies.sceneVersion };
@@ -82,7 +121,7 @@ export async function composeClientOriginalTaskModelHost(input: Dependencies, va
     limits: structuredClone(limits)
   } }, model);
   const after = structuredClone(await input.loadMaterial(command.materialRef));
-  await authorization.authority.resolve(taskId, 'claim_run');
+  await authorization.authority.resolve(taskId, action);
   const latestPlan = await readPlan();
   const current = await authorization.scopes.resolveCurrent();
   if (canonical.scope.id !== current.scope.id || requestFingerprint(plan) !== requestFingerprint(latestPlan)
@@ -90,5 +129,17 @@ export async function composeClientOriginalTaskModelHost(input: Dependencies, va
   return Object.freeze({ ...host, originalTask: { taskId, runId: receipt.task.runId },
     /** Start uses the original IDs only. Recovery remains original read/receipt,
      * never a freshly created task or a new provider after unknown. */
-    start: (signal?: AbortSignal) => host.application.start({ taskId, runId: receipt.task!.runId }, signal) });
+    start: (signal?: AbortSignal) => {
+      if (purpose !== 'start') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return host.application.start({ taskId, runId: receipt.task!.runId }, signal);
+    },
+    resume: (value: Omit<AiTaskInputSubmissionDraft, 'taskId'>, signal?: AbortSignal) => {
+      if (purpose !== 'resume' || !value || Object.prototype.hasOwnProperty.call(value, 'taskId')) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const submission = { ...structuredClone(value), taskId };
+      if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      // Original repository validates the question, revision, answers and run,
+      // atomically consumes the input, and reuses cumulative resources. No
+      // caller-specified task/run or fresh model request is created here.
+      return host.application.resume(submission, signal);
+    } });
 }

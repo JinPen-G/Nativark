@@ -11,6 +11,7 @@ import { composeClientMaterialTasks } from './client-task.composition';
 import { clientTaskCommandSchema, PrismaClientTaskInputRepository } from './prisma-client-task-input.repository';
 
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
+type ClientTaskOperation = 'read' | 'claim' | 'execute' | 'transition' | 'accounting' | 'request_input' | 'submit_input' | 'resume_input';
 const identityHash = (context: AiExecutionContext) => {
   const { requestId: _request, authorizedAt: _at, ...identity } = context;
   return requestFingerprint(identity);
@@ -30,8 +31,9 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
   const creation = composeClientMaterialTasks(dependencies, loadMaterial, clock);
   const inputs = new PrismaClientTaskInputRepository(dependencies.db);
 
-  const snapshot = async (taskId: string | null, operation: 'read' | 'claim' | 'execute' | 'transition' | 'accounting') => {
-    const grant = await authority.authorize(command.materialRef, operation === 'read' ? 'read' : 'execute');
+  const snapshot = async (taskId: string | null, operation: ClientTaskOperation) => {
+    const grant = await authority.authorize(command.materialRef, operation === 'read' ? 'read'
+      : operation === 'request_input' || operation === 'submit_input' || operation === 'resume_input' ? operation : 'execute');
     const receipt = await creation.readCreation(command);
     if (!receipt.task || (taskId !== null && receipt.task.taskId !== taskId)) throw denied();
     const id = receipt.task.taskId;
@@ -58,23 +60,26 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
     // queued run or converging cancellation is not permission for a new effect.
     if (operation === 'transition' && !['QUEUED', 'RUNNING', 'WAITING_INPUT', 'WAITING_CONFIRMATION',
       'WAITING_EXTERNAL', 'CANCEL_REQUESTED'].includes(task.status)) throw denied();
+    if (['request_input', 'submit_input', 'resume_input'].includes(operation) && (task.cancelRequestedAt !== null
+      || (operation === 'request_input' ? !['RUNNING', 'WAITING_INPUT'].includes(task.status) : task.status !== 'WAITING_INPUT'))) throw denied();
     return { context: grant.context, taskId: id, expiresAt: new Date(Math.min(grant.policy.expiresAt.getTime(), input.expiresAt.getTime())),
       proof: requestFingerprint({ identity: identityHash(grant.context),
       task, inputHash: input.inputHash, policy: grant.policy, gates: grant.policyHash }) };
   };
-  const readGrant = async (taskId: string | null, operation: 'read' | 'claim' | 'execute' | 'transition' | 'accounting') => {
+  const readGrant = async (taskId: string | null, operation: ClientTaskOperation) => {
     const first = await snapshot(taskId, operation), current = await snapshot(first.taskId, operation);
     if (first.proof !== current.proof || identityHash(first.context) !== identityHash(current.context)) throw denied();
     return structuredClone(current);
   };
-  const authorize = async (taskId: string | null, operation: 'read' | 'claim' | 'execute' | 'transition' | 'accounting') =>
+  const authorize = async (taskId: string | null, operation: ClientTaskOperation) =>
     (await readGrant(taskId, operation)).context;
   const actions: AiTaskRepositoryAuthority = {
     resolve: (taskId, operation) => {
       if (['read_metadata', 'read_events', 'read_step_terminal', 'claim_recovery_run', 'release_run'].includes(operation)) return authorize(taskId, 'read');
       if (operation === 'claim_run') return authorize(taskId, 'claim');
       if (operation === 'transition_task') return authorize(taskId, 'transition');
-      // Clarification resume/takeover require their own formal client policies.
+      if (operation === 'request_input' || operation === 'submit_input' || operation === 'resume_input') return authorize(taskId, operation);
+      // Takeover is not granted by an input/execute policy.
       return Promise.reject(denied());
     }
   };

@@ -54,9 +54,9 @@ export async function composeClientTaskModelConfiguration(input: AiClientTaskDep
   const receipt = await composeClientMaterialTasks(dependencies, loader, clock).readCreation(command);
   if (!receipt.task) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
   const taskId = receipt.task.taskId;
-  // Startup may still be queued. Constructing this inert composition does not
-  // resolve a model, decrypt a credential or permit invocation before RUNNING.
-  await authorization.authority.resolve(taskId, 'claim_run');
+  // A queued/paused task can build an inert assembly for startup/input handling.
+  // This neither reads a model/credential nor permits invocation before RUNNING.
+  await authorization.authority.resolve(taskId, 'read_metadata');
   const scopes = new AiScopeRepository(dependencies.db, {
     resolve: () => authorization.execution.authorize(taskId)
   }, clock);

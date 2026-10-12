@@ -158,7 +158,9 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
 
   private async access(taskId: string, operation: AiTaskRepositoryOperation, before?: Access) {
     const access = await this.tasks.resolveAccess(taskId, operation);
-    if (access.actorKind !== 'USER' || !['OPERATOR', 'STAFF'].includes(access.audience)
+    const supportedActor = access.actorKind === 'USER' && ['OPERATOR', 'STAFF'].includes(access.audience)
+      || access.actorKind === 'CUSTOMER' && access.audience === 'CLIENT';
+    if (!supportedActor
       || before && access.bindingKey !== before.bindingKey) throw denied();
     return access;
   }
