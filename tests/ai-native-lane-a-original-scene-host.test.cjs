@@ -1181,6 +1181,29 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
       expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken })).released, true);
     taskPolicies[0].allowExecute = 1;
   })(executionAuthorization);
+  // An enabled customer gate alone cannot supply a model plan or its limits.
+  // These failures occur before model publication, lease claim or transport.
+  const { composeClientOriginalTaskModelHost: composeClientModel } = require('../apps/api/src/modules/ai-native/scenes/client-task-model-host.composition');
+  let planRow = null, planReads = 0;
+  const planDb = { ...db, aiTaskPlanPolicy: { findFirst: async ({ where }) => {
+    planReads++; assert.equal(where.scopeId, scopes[2].id); assert.equal(where.sceneCode, sceneCode);
+    return clone(planRow);
+  } } };
+  const modelInput = { db: planDb, subscriptions, clientScene: { sceneCode, sceneVersion },
+    loadMaterial: loadExecutionMaterial, systemPrompt: 'Explain original authorized facts only.', clock: () => now,
+    gatewayScene: { sceneCode, routeScene: 'chat', maxOutputTokens: 32 }, host: { holderId: 'client-model-worker', leaseMs: 1000 } };
+  const beforeModelWrites = taskStore.trace.length;
+  await assert.rejects(composeClientModel(modelInput, taskCommand), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  assert.equal(planReads, 1);
+  const planLimits = { maxSteps: 2, maxCalls: 2, maxConcurrent: 1, maxTotalMs: 2000, maxStepMs: 1000, maxOutputBytes: 2048 };
+  planRow = { scopeId: scopes[2].id, sceneCode, sceneVersion, revision: 1, enabled: false, limits: planLimits,
+    allowedTools: [{ code: require('../apps/api/src/modules/ai-native/model-input/task-model-input').TASK_TEXT_MODEL_TOOL,
+      version: require('../packages/shared/src').AI_TOOL_DRAFT_VERSION }], expiresAt: new Date(now.getTime() + 60000) };
+  await assert.rejects(composeClientModel(modelInput, taskCommand), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  planRow.enabled = true;
+  await assert.rejects(composeClientModel({ ...modelInput, limits: { ...planLimits, maxCalls: 3 } }, taskCommand),
+    e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  assert.equal(taskStore.trace.slice(beforeModelWrites).some(value => /\.create|\.update/.test(value)), false);
   const { AI_ENTRY_ACTION_CONTRACT_VERSION } = require('../packages/shared/src/ai-entry-action-draft');
   const entryConfig = { ...configuration, channel: 'web', entry: { enabled: true, releaseRevision: 'entry-1' } };
   client.prisma.websiteChannelProfile = { findUnique: async () => null };

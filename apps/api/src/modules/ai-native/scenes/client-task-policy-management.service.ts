@@ -8,6 +8,9 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiOrderRouteCredentialSource } from '../order-route-context.authority';
 import { clientTaskSceneSchema, type AiClientTaskScene } from './client-task.authority';
+import type { AuthService } from '../../auth/auth.service';
+import { PrismaTaskPlanPolicyRepository } from '../runner/prisma-task-plan-policy.repository';
+import { TASK_TEXT_MODEL_TOOL } from '../model-input/task-model-input';
 
 const keySchema = z.object({ channel: z.enum(['wechat_miniprogram', 'web', 'app']),
   customerType: z.enum(['personal', 'corporate']) }).strict();
@@ -174,21 +177,43 @@ export class HumanClientTaskPolicyManagementService {
 export function createClientTaskPolicyManagementApplication(input: {
   db: Db; guard: Pick<ApiAuthGuard, 'canActivate'>; scene: AiClientTaskScene;
   enabled?: boolean; clock?: () => Date;
+  /** The existing workspace plan-policy producer, with actual current Auth.
+   * Management is separate from the customer execution gate and model budget. */
+  modelPlan?: { db: ConstructorParameters<typeof PrismaTaskPlanPolicyRepository>[0];
+    auth: Pick<AuthService, 'resolveAccessContext'> };
 }) {
   const scene = Object.freeze(parse(clientTaskSceneSchema, input.scene)), enabled = input.enabled === true;
+  const modelPlan = input.modelPlan ? { db: input.modelPlan.db, auth: input.modelPlan.auth } : undefined;
   const credentialSchema = z.object({ authorization: z.string().min(1).max(8192),
     requestId: z.string().min(1).max(191), audience: z.literal('operator') }).strict();
-  const call = async <T>(request: unknown, consume: (service: HumanClientTaskPolicyManagementService) => Promise<T>) => {
+  const call = async <T>(request: unknown, consume: (service: HumanClientTaskPolicyManagementService,
+    credentials: AiOrderRouteCredentialSource) => Promise<T>) => {
     if (!enabled) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     let credential: z.infer<typeof credentialSchema> | undefined = parse(credentialSchema, request);
-    const service = new HumanClientTaskPolicyManagementService(input.db, input.guard, { current: async () => {
+    const credentials: AiOrderRouteCredentialSource = { current: async () => {
       if (!credential) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       return structuredClone(credential);
-    } }, scene, input.clock);
-    try { return await consume(service); }
+    } };
+    const service = new HumanClientTaskPolicyManagementService(input.db, input.guard, credentials, scene, input.clock);
+    try { return await consume(service, credentials); }
     finally { credential = undefined; }
   };
+  const plan = (credentials: AiOrderRouteCredentialSource) => {
+    if (!modelPlan || !Object.is(modelPlan.db, input.db) || typeof modelPlan.auth?.resolveAccessContext !== 'function')
+      throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    return new PrismaTaskPlanPolicyRepository(modelPlan.db, { auth: modelPlan.auth, credentials, guard: input.guard,
+      scene: { code: scene.sceneCode, version: scene.sceneVersion }, tool: TASK_TEXT_MODEL_TOOL }, input.clock);
+  };
   return Object.freeze({
+    // No caller-controlled scope/scene/tool or automatic plan enablement. A plan
+    // update neither grants customer execution nor validates a provider/budget.
+    readModelPlan: (request: unknown) => call(request, async (_service, credentials) => ({
+      ...await plan(credentials).read(), execution: 'not_attested' as const })),
+    changeModelPlan: (request: unknown, value: unknown) => {
+      const command = structuredClone(value);
+      return call(request, async (_service, credentials) => ({ ...await plan(credentials).put(command),
+        execution: 'not_attested' as const }));
+    },
     read: (request: unknown, value: unknown) => call(request, service => service.read(structuredClone(value))),
     change: (request: unknown, value: unknown) => call(request, service => service.change(structuredClone(value))),
     operation: (request: unknown, value: unknown) => call(request, service => service.operation(structuredClone(value)))
