@@ -11,7 +11,7 @@ const input = { taskId: "task-1", after: "0", limit: 1 };
 function setup() {
   const state = {
     task: { id: "task-1", scopeId: "scope-1", revision: 3, contractVersion: "ain-c04-draft-1", eventCursor: 2n },
-    rows: [event(), event(2n, 3)], context: structuredClone(h.contexts[0]), calls: [], denyAt: 0, changeAt: 0, fail: null
+    rows: [event(), event(2n, 3)], steps: [], context: structuredClone(h.contexts[0]), calls: [], denyAt: 0, changeAt: 0, fail: null
   };
   let resolutions = 0;
   const authority = { resolve: async (taskId, operation) => {
@@ -24,7 +24,8 @@ function setup() {
     state.calls.push({ kind: "transaction", options });
     const result = await callback({
       aiTask: { findFirst: async args => { state.calls.push({ kind: "task.read", args }); return state.task; } },
-      aiTaskEvent: { findMany: async args => { state.calls.push({ kind: "events.read", args }); if (state.fail === "events") throw Error("SQL or raw private error"); return state.rows; } }
+      aiTaskEvent: { findMany: async args => { state.calls.push({ kind: "events.read", args }); if (state.fail === "events") throw Error("SQL or raw private error"); return state.rows; } },
+      aiStep: { findMany: async args => { state.calls.push({ kind: "steps.read", args }); return state.steps; } }
     });
     state.calls.push({ kind: "read.finished" });
     return result;
@@ -33,6 +34,48 @@ function setup() {
 }
 const code = expected => error => error instanceof AiTaskRepositoryError && error.code === expected && error.message === expected;
 const get = (state, kind) => state.calls.find(call => call.kind === kind);
+
+function snapshotSetup() {
+  const value = setup();
+  Object.assign(value.state.task, { status: 'RUNNING', sceneCode: 'order_explanation', sceneVersion: '1',
+    createdAt: now, updatedAt: now, cancelRequestedAt: null, eventCursor: 9007199254740995n });
+  value.state.steps = [{ id: 'step-1', taskId: 'task-1', scopeId: 'scope-1', runId: 'run-1',
+    sequence: 1, revision: 2, status: 'UNKNOWN', privateInput: 'must-not-return' }];
+  return value;
+}
+
+test('task snapshot pairs durable state with exact event watermark without execution', async () => {
+  const { state, repository } = snapshotSetup();
+  const snapshot = await repository.readSnapshot({ taskId: 'task-1' });
+  assert.equal(snapshot.cursor, '9007199254740995');
+  assert.equal(snapshot.status, 'running');
+  assert.deepEqual(snapshot.steps, [{ stepId: 'step-1', runId: 'run-1', sequence: 1, revision: 2, status: 'unknown' }]);
+  assert.equal(JSON.stringify(snapshot).includes('must-not-return'), false);
+  assert.equal(state.calls.filter(c => c.kind === 'transaction').length, 1);
+  assert.deepEqual(get(state, 'steps.read').args.where, { scopeId: 'scope-1', taskId: 'task-1' });
+  assert.equal(get(state, 'steps.read').args.take, 1001);
+  assert.deepEqual(state.calls.filter(c => c.kind === 'authorize').map(c => c.operation),
+    ['read_metadata', 'read_events', 'read_step_terminal', 'read_metadata', 'read_events', 'read_step_terminal']);
+  state.rows = [];
+  assert.deepEqual(await repository.readPage({ taskId: 'task-1', after: snapshot.cursor, limit: 1 }),
+    { contractVersion: 'ain-c04-draft-1', taskId: 'task-1', events: [], nextCursor: snapshot.cursor, hasMore: false });
+});
+
+test('task snapshot withholds revoked, unsupported, unbounded or corrupt projections', async () => {
+  for (const patch of [s => { s.denyAt = 4; }, s => { s.changeAt = 5; }]) {
+    const { state, repository } = snapshotSetup(); patch(state);
+    await assert.rejects(repository.readSnapshot({ taskId: 'task-1' }), code('AI_ACCESS_DENIED'));
+  }
+  for (const patch of [s => { s.task.eventCursor = 18446744073709551616n; },
+    s => { s.steps[0].taskId = 'other-task'; }, s => { s.steps[0].status = 'UNRECOGNIZED'; },
+    s => { s.steps = Array(1001).fill(s.steps[0]); }]) {
+    const { state, repository } = snapshotSetup(); patch(state);
+    await assert.rejects(repository.readSnapshot({ taskId: 'task-1' }), code('AI_STORAGE_UNAVAILABLE'));
+  }
+  const { state, repository } = snapshotSetup(); state.task.contractVersion = 'old';
+  await assert.rejects(repository.readSnapshot({ taskId: 'task-1' }), code('AI_RESOURCE_UNAVAILABLE'));
+  assert.equal(state.calls.some(c => c.kind === 'steps.read'), false);
+});
 
 test("event page uses current scope/owner and a fixed task-local high-water cursor", async () => {
   const { state, repository } = setup();

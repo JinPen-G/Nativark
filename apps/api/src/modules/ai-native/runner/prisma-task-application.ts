@@ -10,6 +10,7 @@ import { aiTaskRunPlanSchema } from './prisma-task-run-evidence.repository';
 import type { AiTaskRunner, AiTaskRunnerError, AiTaskHeldPreparation } from './ai-task-runner.service';
 import type { AiTaskRunnerOutcome } from './ai-task-runner.ports';
 import { taskExecutionPhaseStore } from './task-execution-phase.store';
+import { waitingPayloadSchema } from './prisma-task-confirmation-checkpoint.source';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);
@@ -56,6 +57,53 @@ export class PrismaTaskApplication {
 
   readEvents(value: unknown) { return this.deps.events.readPage(value); }
 
+  /** Read-only discovery of the original durable wait. This grants neither a
+   * lease nor approval; continuation still validates the full original proof. */
+  async readConfirmation(value: unknown) {
+    const parsed = requestSchema.extend({ stepId: id.max(36) }).safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const input = parsed.data;
+    const before = structuredClone(await this.deps.tasks.resolveAccess(input.taskId, 'read_step_terminal'));
+    const result = await this.deps.db.$transaction(async tx => {
+      const task = await tx.aiTask.findFirst({ where: before.where });
+      if (!task || task.id !== input.taskId || task.contractVersion !== AI_TASK_DRAFT_VERSION
+        || task.status !== 'WAITING_CONFIRMATION' || task.cancelRequestedAt !== null) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const key = { scopeId: task.scopeId, taskId: task.id, runId: input.runId, stepId: input.stepId };
+      const run = await tx.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: key.runId } });
+      const step = await tx.aiStep.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, runId: key.runId, id: key.stepId } });
+      if (!run || run.id !== key.runId || run.scopeId !== key.scopeId || run.taskId !== key.taskId
+        || run.actorKind !== before.actorKind || run.actorId !== before.actorId || run.status !== 'RUNNING'
+        || !step || step.id !== key.stepId || step.scopeId !== key.scopeId || step.taskId !== key.taskId || step.runId !== key.runId
+        || step.status !== 'RUNNING' || step.effect !== 'POSSIBLE') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const store = taskExecutionPhaseStore(tx);
+      const receipts = await store.readReceipts(key);
+      if (receipts.length !== 1 || receipts[0].kind !== 'confirmation') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const receipt = receipts[0], payload = waitingPayloadSchema.parse(receipt.payload);
+      const phase = await store.readStart({ ...key, id: receipt.phaseId });
+      if (!phase || phase.sequence !== 1 || phase.scopeId !== key.scopeId || phase.taskId !== key.taskId
+        || phase.runId !== key.runId || phase.stepId !== key.stepId || phase.id !== receipt.phaseId
+        || receipt.scopeId !== key.scopeId || receipt.taskId !== key.taskId || receipt.runId !== key.runId || receipt.stepId !== key.stepId
+        || payload.binding.scopeId !== key.scopeId || payload.binding.taskId !== key.taskId || payload.binding.runId !== key.runId
+        || payload.binding.stepId !== key.stepId || payload.binding.inputRef !== step.inputRef || payload.binding.inputRef !== phase.inputRef
+        || payload.binding.actionId !== phase.actionId || payload.binding.fingerprint !== phase.stepFingerprint
+        || payload.proposal.proposalId !== receipt.proposalId || payload.proposal.proposalRevision !== receipt.proposalRevision
+        || payload.proposal.reviewedPayloadHash !== receipt.reviewedPayloadHash
+        || requestFingerprint(receipt.payload) !== receipt.contentHash
+        || BigInt(Buffer.byteLength(JSON.stringify(receipt.payload), 'utf8')) !== receipt.outputBytes) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return { ...input, taskRevision: revision.parse(task.revision), checkpointRef: receipt.id,
+        proposal: structuredClone(payload.proposal), execution: 'not_attested' as const };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
+    const after = await this.deps.tasks.resolveAccess(input.taskId, 'read_step_terminal');
+    if (after.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const current = await this.deps.db.$transaction(tx => tx.aiTask.findFirst({ where: after.where,
+      select: { id: true, revision: true, status: true, cancelRequestedAt: true } }));
+    if (!current || current.id !== input.taskId || current.revision !== result.taskRevision
+      || current.status !== 'WAITING_CONFIRMATION' || current.cancelRequestedAt !== null) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    const final = await this.deps.tasks.resolveAccess(input.taskId, 'read_step_terminal');
+    if (final.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    return result;
+  }
+
   readInput(value: unknown) {
     const parsed = requestSchema.pick({ taskId: true }).safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -90,7 +138,11 @@ export class PrismaTaskApplication {
           || request.scopeId !== key.scopeId || request.taskId !== key.taskId || request.id !== receipt.requestId || request.status !== 'CONSUMED') {
           throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         }
-        return id.parse(request.runId);
+        const successor = await tx.aiRun.findUnique({ where: { scopeId_taskId_inputReceiptId: { ...key, inputReceiptId: saved.id } },
+          select: { id: true, scopeId: true, taskId: true, inputReceiptId: true, actorKind: true, actorId: true } });
+        if (successor && (successor.scopeId !== key.scopeId || successor.taskId !== key.taskId || successor.inputReceiptId !== saved.id
+          || successor.actorKind !== before.actorKind || successor.actorId !== before.actorId)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return id.parse(successor?.id ?? request.runId);
       }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
       await verifyReader();
       continuation = await this.start({ taskId: receipt.taskId, runId }, signal);

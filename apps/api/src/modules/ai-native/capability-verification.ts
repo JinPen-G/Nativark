@@ -3,7 +3,7 @@ import type { AiProviderProfileRecord } from './provider-profile.ports';
 import type { RecordCapabilityEvidenceInput } from './provider-capability.ports';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
-export const capabilityNameSchema = z.enum(['text', 'streaming', 'tools', 'structured_output', 'vision', 'embedding', 'reasoning']);
+export const capabilityNameSchema = z.enum(['text', 'streaming', 'tools', 'structured_output', 'vision', 'audio', 'embedding', 'reasoning']);
 export const capabilityVerificationSchema = z.object({
   evidence: z.enum(['mock', 'live']), methodVersion: z.string().min(1).max(128), capability: capabilityNameSchema,
   profileFingerprint: z.string().regex(/^[0-9a-f]{64}$/u)

@@ -13,6 +13,8 @@ import { themeBehavior } from "../../core/theme-behavior";
 import { formatBusinessRange } from "../../core/time";
 import { ROUTES, buildUrl, confirmDialog, relaunch, toast } from "../../core/ui";
 import { uploadStaffImage } from "../../api/uploads";
+import { attachInspectionPage, attachRemoteInspectionPage, hideInspectionPage, clearInspectionPage } from "../../components/ai-native/inspection-page-binding";
+import type { StaffInspectionHost, InspectionRecognitionReference } from "../../components/ai-native/inspection-host";
 
 /** 逐设备分组：每台参与本次交接的资源一张卡，卡内只放**逐台**勾选的 boolean 检查项。 */
 interface DeviceGroup { allocationId: string; itemGroupId: string; title: string; identifier: string; imagePath: string; fields: InspectionFieldRow[]; }
@@ -30,8 +32,14 @@ Page({
   boolCodes: [] as string[],
   signatureContext: undefined as WechatMiniprogram.CanvasContext | undefined,
   signatureDrawing: false,
+  attachInspectionHost(host: StaffInspectionHost) { attachInspectionPage(this, host, "pickup"); },
+  attachRemoteInspectionHost(reference: { allocationId: string; draftId: string }, recognitionReference?: InspectionRecognitionReference) {
+    return attachRemoteInspectionPage(this, reference, 'pickup', this.data.signatureFileAssetId || undefined, recognitionReference);
+  },
+  onHide() { hideInspectionPage(this); },
+  onUnload() { clearInspectionPage(this); },
   onLoad(query: Record<string, string>) { const width = Math.max(240, wx.getSystemInfoSync().windowWidth - 48); this.setData({ id: query.id ?? "", signatureWidth: width }); },
-  onShow() { if (!isSignedIn()) { relaunch(ROUTES.login); return; } if (!this.order) void this.load(); },
+  onShow() { if (!isSignedIn()) { clearInspectionPage(this); relaunch(ROUTES.login); return; } void this.selectComponent("#ai-inspection-assist")?.hostShow?.(); if (!this.order) void this.load(); },
   async load() {
     if (!this.data.id) { this.setData({ view: blockedState("缺少订单编号", "请从订单详情重新进入") }); return; }
     this.setData({ view: loadingState() });

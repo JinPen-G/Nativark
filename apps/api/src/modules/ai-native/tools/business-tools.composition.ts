@@ -26,6 +26,8 @@ import { AiMemberProfileDifferenceService } from './member-profile-difference.se
 import { AiBusinessScenePreparationService } from '../scenes/business-scene-preparation.service';
 import { composeAiBusinessOrderApplication } from '../scenes/business-order-application';
 import type { PersistedApprovedOrderDependencies } from '../approval-execution/approved-order-composition.ports';
+import { AiOrderInspectionFactsService } from './order-inspection-facts.service';
+import { composeAiSettingsBusinessConsumer, type AiSettingsBusinessDependencies } from '../scenes/settings-business-consumer.composition';
 
 /** Server composition only. Guard and current session come from the application
  * host, never model arguments. No HTTP route, dispatch, entitlement or approval
@@ -35,14 +37,15 @@ export function composeAiAuthorizedBusinessTools(input: {
   credentials: AiOrderRouteCredentialSource;
   core: Pick<RentalCoreService, 'listItemGroups' | 'availability' | 'getOrder' | 'getProfile'
     | 'getWorkspaceCategory' | 'getBusinessSettings' | 'listPricingGroups'
-    | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'resolvePricingGroupQuoteRequest'>;
+    | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'resolvePricingGroupQuoteRequest'> & Partial<Pick<RentalCoreService, 'listInspections'>>;
   memberships: AiMembershipCandidateReadPort;
-  business: Pick<RentalBusinessService, 'createQuote' | 'getQuote' | 'tenantReadiness'>;
+  business: Pick<RentalBusinessService, 'createQuote' | 'getQuote' | 'tenantReadiness'> & Partial<Pick<RentalBusinessService, 'normalizeQuoteInput' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>;
   reports: Pick<RentalWorkspaceReportRepository, 'getOperationReport'>;
   payments?: Pick<PaymentRuntimeService, 'listPaymentIntents' | 'listPaymentRefunds'>;
   /** Explicit AIN-07 dependencies for an EXISTING persisted task/action. No
    * default original input, policy or approval is supplied by this lane. */
   approvedOrder?: Omit<PersistedApprovedOrderDependencies, 'guard' | 'credentials'>;
+  approvedSettings?: Omit<AiSettingsBusinessDependencies, 'guard' | 'credentials'>;
   clock?: () => Date;
 }) {
   for (const [port, method] of [[input?.business, 'getQuote'], [input?.reports, 'getOperationReport']] as const) {
@@ -57,7 +60,10 @@ export function composeAiAuthorizedBusinessTools(input: {
   const explanation = (serverOrderId: string) => {
     const authority = new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock);
     return new AiOrderExplanationFactsService(authority, order(serverOrderId), input.payments
-      ? new AiOrderPaymentFactsService(input.payments, input.core, authority, routes, input.clock) : undefined, input.clock);
+      ? new AiOrderPaymentFactsService(input.payments, input.core, authority, routes, input.clock) : undefined, input.clock,
+      typeof input.core.listInspections === 'function' ? new AiOrderInspectionFactsService({
+        getOrder: input.core.getOrder.bind(input.core), listInspections: input.core.listInspections.bind(input.core)
+      }, new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock, 'inspections'), input.clock) : undefined);
   };
   if (typeof input.core.availability !== 'function' || typeof input.core.getOrder !== 'function'
     || typeof input.memberships?.listPersonalOptions !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
@@ -80,6 +86,9 @@ export function composeAiAuthorizedBusinessTools(input: {
     new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock),
     explanation(serverOrderId), nextSteps(serverOrderId));
   return Object.freeze({
+    settingsActions: composeAiSettingsBusinessConsumer(input.approvedSettings ? {
+      ...input.approvedSettings, guard: input.guard, credentials: input.credentials
+    } : undefined),
     orderActions: composeAiBusinessOrderApplication(input.approvedOrder ? {
       ...input.approvedOrder, guard: input.guard, credentials: input.credentials
     } : undefined),
@@ -105,9 +114,11 @@ export function composeAiAuthorizedBusinessTools(input: {
     },
     opening, risks,
     openingActions,
+    openingSection: (value: unknown) => new AiOpeningActionListService(opening, risks, context, diagnostics).readSection(value),
     openingSectionDifferences: (value: unknown) => new AiOpeningActionListService(opening, risks, context, diagnostics).prepareSections(value),
     riskRecheck: (value: unknown) => new AiOpeningActionListService(opening, risks, context, diagnostics).recheckRisk(value),
     quote: Object.freeze({ ...quote, businessPreparation: quotePreparation,
+      bookingIdentityOptions: (value: unknown) => reads.membershipCandidates.readBookingOptions(value),
       reconciliationAvailability: () => quotePreparation.reconciliationAvailability(),
       /** Explicit R1 entry; the host owns the human-selection evidence. Core
        * quote success is not order approval, payment, or stock reservation. */

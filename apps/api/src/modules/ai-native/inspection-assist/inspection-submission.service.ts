@@ -13,6 +13,7 @@ import { InspectionAssistError, inspectionId, inspectionTargetSchema, parseInspe
 
 const base = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId }).strict();
 const operation = base.extend({ operationId: inspectionId, expectedRevision: z.number().int().min(1).max(997) }).strict();
+const preparation = operation.extend({ actionId: inspectionId, handoverSignatureFileAssetId: inspectionId.optional() }).strict();
 const targetOf = (input: AiInspectionTarget): AiInspectionTarget => ({ orderId: input.orderId, allocationId: input.allocationId, templateId: input.templateId, stage: input.stage });
 
 export class InspectionSubmissionService {
@@ -24,8 +25,28 @@ export class InspectionSubmissionService {
   async prepare(value: unknown) { return this.prepareMaterial(value, false); }
   async prepareReview(value: unknown) { return this.prepareMaterial(value, true); }
 
+  /** Read only the receipt of the exact original preparation command. Absence
+   * is not proof that a lost/in-flight transaction did not commit. */
+  async reconcilePreparation(value: unknown) {
+    const command = parseInspectionInput(z.object({ kind: z.enum(['prepare', 'prepareReview']), request: preparation }).strict(), value);
+    const input = command.request, target = targetOf(input);
+    return this.authority.withAction(target, 'submit', async scope => {
+      await this.row(scope, input.draftId, target);
+      const fingerprint = requestFingerprint({ kind: command.kind === 'prepareReview' ? 'inspection.prepareReview' : 'inspection.prepare', scope, input });
+      const receipt = await this.repository.receipt(scope, input.operationId, fingerprint);
+      return this.authority.withAction(target, 'submit', async current => {
+        this.sameScope(scope, current);
+        await this.row(current, input.draftId, target);
+        if (receipt.status !== 'found') return { ...receipt, execution: 'not_attested' as const };
+        if (receipt.result.draftId !== input.draftId || receipt.result.status !== 'prepared') throw new InspectionAssistError('BINDING_CHANGED');
+        return { ...receipt, mode: command.kind === 'prepareReview' ? 'manual_review_only' as const : 'original_single' as const,
+          execution: 'not_attested' as const, businessValidation: 'required_at_original_inspection_entry' as const };
+      });
+    });
+  }
+
   private async prepareMaterial(value: unknown, allowReviewOnly: boolean) {
-    const input = parseInspectionInput(operation.extend({ actionId: inspectionId, handoverSignatureFileAssetId: inspectionId.optional() }).strict(), value);
+    const input = parseInspectionInput(preparation, value);
     const target = targetOf(input);
     return this.authority.withAction(target, 'submit', async scope => {
       const fingerprint = requestFingerprint({ kind: allowReviewOnly ? 'inspection.prepareReview' : 'inspection.prepare', scope, input });
@@ -86,6 +107,13 @@ export class InspectionSubmissionService {
       await this.singleAllocation(scope, target);
       const binding = await this.templates.read(target);
       if (binding.bindingFingerprint !== row.bindingFingerprint) throw new InspectionAssistError('BINDING_CHANGED');
+      // The original evidence/template read predates allocation and template
+      // waits. Do not claim the business action from a stale human draft.
+      const latest = await this.drafts.read({ ...target, draftId: row.id });
+      if (latest.revision !== row.revision) throw new InspectionAssistError('REVISION_CONFLICT');
+      if (latest.state.reviewRequired || requestFingerprint(latest.state) !== requestFingerprint(detail.state)) {
+        throw new InspectionAssistError('BINDING_CHANGED');
+      }
       const claim = await this.authority.withAction(target, 'submit', current => {
         this.sameScope(scope, current);
         return this.repository.claimSubmission(scope, row.id, { operationId: input.operationId, fingerprint, expectedRevision: row.revision }, row.bindingFingerprint);
@@ -109,6 +137,39 @@ export class InspectionSubmissionService {
       const state = z.object({ submission: inspectionSubmissionMaterialSchema }).parse(row.state);
       const receipt = await original.reconcile(scope, target, row.templateVersion, state.submission);
       return this.finish(scope, target, row, state.submission, receipt);
+    });
+  }
+
+  /** Observe the original receipt only. Unlike reconcile(), this never writes
+   * a draft link, reserves a new action or dispatches an inspection. Keep the
+   * existing submission authorization until a formal narrower receipt policy
+   * is provided; metadata read permission alone does not grant this lookup. */
+  async readReceipt(value: unknown) {
+    const input = parseInspectionInput(base, value), target = targetOf(input);
+    return this.authority.withAction(target, 'submit', async scope => {
+      const before = await this.row(scope, input.draftId, target);
+      const state = z.object({ submission: inspectionSubmissionMaterialSchema.optional() }).safeParse(before.state);
+      if (!state.success) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+      const material = state.data.submission;
+      if (!material) {
+        if (before.status !== 'draft_saved') throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+        return { status: 'not_prepared' as const, draftId: before.id, revision: before.revision, retryable: false as const };
+      }
+      if (material.actionId !== before.submissionActionId) throw new InspectionAssistError('BINDING_CHANGED');
+      const receipt = material.mode === 'manual_review_only' || !this.original
+        ? { status: 'unavailable' as const }
+        : await this.original.reconcile(scope, target, before.templateVersion, material);
+      const after = await this.row(scope, input.draftId, target);
+      if (requestFingerprint(after) !== requestFingerprint(before)) throw new InspectionAssistError('REVISION_CONFLICT');
+      if (receipt.status === 'submitted' && before.inspectionId && receipt.inspectionId !== before.inspectionId) {
+        throw new InspectionAssistError('BINDING_CHANGED');
+      }
+      return { status: receipt.status === 'absent' ? 'not_observed' as const : receipt.status,
+        draftId: before.id, revision: before.revision,
+        actionId: material.actionId, requestHash: material.requestHash,
+        ...(receipt.status === 'submitted' ? { inspectionId: receipt.inspectionId } : {}),
+        draftLinked: receipt.status === 'submitted' && before.status === 'submitted' && before.inspectionId === receipt.inspectionId,
+        retryable: false as const, semantics: 'original_receipt_observation_not_submission_or_draft_link' as const };
     });
   }
 

@@ -2,10 +2,11 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const { fixture, h } = require('./fixtures/ai-native/lane-b-functional.cjs');
 const { FileStorageKnowledgeFileAdapter } = h.load('file-storage-knowledge.adapter');
-const { composeKnowledgeFileApplication } = h.load('knowledge-file.composition');
+const { composeKnowledgeFileApplication, KNOWLEDGE_SCENE_OPTIONS } = h.load('knowledge-file.composition');
 const { HumanKnowledgeModule } = h.load('human-knowledge.module');
 const { HumanKnowledgeUploadService, knowledgeUploadRequest } = h.load('human-knowledge-upload.service');
 const { fingerprint } = h.load('knowledge-validation');
+const { composeOriginalSceneKnowledge } = require('../apps/api/src/modules/ai-native/scenes/original-scene-knowledge');
 const { FileStorageRuntimeService } = require('../apps/api/src/modules/integrations/file-storage.runtime.service');
 const { TenantKnowledgeObjectReader } = require('../apps/api/src/modules/integrations/knowledge-object-reader');
 const { Prisma } = require('../apps/api/node_modules/@prisma/client');
@@ -73,6 +74,104 @@ function fileFixture() {
     api: composeKnowledgeFileApplication(deps), reads: () => reads };
 }
 
+test('memory management request uses persisted human consent and fails closed without current policy', async () => {
+  const f = fileFixture();
+  const { HumanMemoryManagementRequestFactory } = h.load('human-memory-management.composition');
+  const { HumanMemoryManagementController } = h.load('human-memory-management.controller');
+  assert.deepEqual(HumanKnowledgeModule.registerMemoryManagementHttp().controllers, []);
+  const deps = { db: f.db, auth: f.identity.auth, clock: f.ports.clock };
+  const serverModule = HumanKnowledgeModule.registerMemoryManagementRequests({ enabled: true, dependencies: deps });
+  assert.deepEqual(serverModule.controllers, []); assert.ok(serverModule.exports.includes(HumanMemoryManagementRequestFactory));
+  assert.deepEqual(HumanKnowledgeModule.registerMemoryManagementRequests().providers, []);
+  assert.throws(() => HumanKnowledgeModule.registerMemoryManagementRequests({ enabled: true }), { code: 'unavailable' });
+  const controller = new HumanMemoryManagementController(new HumanMemoryManagementRequestFactory(deps));
+  const request = { headers: { authorization: 'Bearer synthetic-session' } };
+  const { requiredPermissions } = require('../apps/api/src/common/api-auth.guard');
+  assert.deepEqual(requiredPermissions('POST', '/ai-native/memory-management/consent/revoke'), ['system:params:manage']);
+  const { AI_LEAF_COMPONENT_SCHEMAS } = require('../apps/api/src/contracts/ai-leaf-components');
+  assert.equal(AI_LEAF_COMPONENT_SCHEMAS.AiMemoryManagementConfirmRequestDraft.additionalProperties, false);
+  const memoryId = 'memory-http', owner = { actorKind: 'user', actorId: 'user-1' };
+  const expiresAt = new Date(h.now + 3600000).toISOString();
+  const command = { memoryId, operationId: 'propose-http', expiresAt, preference: { kind: 'locale', value: 'zh-CN' } };
+  await assert.rejects(controller.propose(request, { confirmation: 'propose_memory_preference', command }), e => e.getResponse().code === 'AI_RESOURCE_UNAVAILABLE');
+  assert.equal(f.db.state.memories.size, 0);
+  for (const action of ['propose', 'read', 'confirm', 'modify', 'delete']) {
+    f.allow(action, { owner }, undefined, 'memory');
+    for (const revision of [1, 2, 3, 4]) f.allow(action, { memoryId, revision, aclRevision: 1, owner }, undefined, 'memory');
+  }
+  await assert.rejects(controller.propose(request, { confirmation: 'propose_memory_preference', command: { ...command, owner } }), e => e.getResponse().code === 'AI_INVALID_INPUT');
+  const proposed = await controller.propose(request, { confirmation: 'propose_memory_preference', command });
+  assert.equal(proposed.memory.status, 'proposed');
+  const page = await controller.list(request, { limit: 1 });
+  assert.equal(page.items.length, 1);
+  assert.equal(page.items[0].memoryId, memoryId);
+  assert.equal(page.items[0].consentStatus, 'not_confirmed');
+  assert.equal('preference' in page.items[0], false);
+  assert.equal(page.nextAfter, null);
+  assert.deepEqual((await controller.list(request, { limit: 1, after: memoryId })).items, []);
+  await assert.rejects(controller.list(request, { limit: 31 }), e => e.getResponse().code === 'AI_INVALID_INPUT');
+  await assert.rejects(controller.list(request, { limit: 1, owner }), e => e.getResponse().code === 'AI_INVALID_INPUT');
+  const secondId = 'memory-zz';
+  f.allow('propose', { memoryId: secondId, revision: 1, aclRevision: 1, owner }, undefined, 'memory');
+  f.allow('read', { memoryId: secondId, revision: 1, aclRevision: 1, owner }, undefined, 'memory');
+  await controller.propose(request, { confirmation: 'propose_memory_preference', command: { ...command, memoryId: secondId, operationId: 'propose-second' } });
+  const boundedRead = f.db.aiStructuredMemory.findMany;
+  f.db.aiStructuredMemory.findMany = async args => {
+    assert.equal(args.take, 2); assert.deepEqual(args.orderBy, { id: 'asc' });
+    assert.equal(args.where.ownerId, 'user-1'); assert.equal(args.where.workspaceId, 'space-1');
+    assert.equal('content' in args.select, false); assert.equal('state' in args.select, false);
+    return boundedRead(args);
+  };
+  const firstPage = await controller.list(request, { limit: 1 });
+  assert.equal(firstPage.nextAfter, memoryId);
+  assert.equal((await controller.list(request, { limit: 1, after: memoryId })).items[0].memoryId, secondId);
+  f.db.aiStructuredMemory.findMany = async args => { const rows = await boundedRead(args); f.flags.active = false; return rows; };
+  await assert.rejects(controller.list(request, { limit: 1 }), e => e.getResponse().code === 'AI_RESOURCE_UNAVAILABLE');
+  f.flags.active = true; f.db.aiStructuredMemory.findMany = boundedRead;
+  const confirmed = await controller.confirm(request, { confirmation: 'confirm_memory_preference', command: { memoryId, expectedRevision: 1, operationId: 'confirm-http', expiresAt } });
+  assert.equal(confirmed.memory.status, 'confirmed');
+  assert.equal(confirmed.semantics, 'human_preference_not_business_approval');
+  const original = { memoryId, expectedRevision: 1, operationId: 'confirm-http', expiresAt };
+  assert.equal((await controller.confirmation(request, original)).status, 'confirmed');
+  assert.equal((await controller.resumeConfirmation(request, original)).memory.revision, 2);
+  assert.equal((await controller.state(request, { memoryId })).usable, true);
+  assert.deepEqual((await controller.read(request, { memoryId })).memory.preference, { kind: 'locale', value: 'zh-CN' });
+  const consumer = serverModule.providers.find(row => row.provide === HumanMemoryManagementRequestFactory).useValue.open(request);
+  const selected = await consumer.selectPreferences({ kinds: ['locale'], limit: 3 });
+  assert.equal(selected.items.length, 1); assert.equal(selected.scope.workspaceId, 'space-1');
+  assert.equal(selected.owner.actorId, 'user-1'); assert.equal(selected.audience, 'operator');
+  assert.deepEqual(await consumer.revalidatePreferences(selected), selected);
+  assert.equal((await consumer.confirmationDetail({ memoryId })).confirmationRecordId, selected.items[0].confirmationRecordId);
+  await assert.rejects(consumer.revalidatePreferences({ ...selected, scope: { ...selected.scope, workspaceId: 'other-space' } }));
+  await assert.rejects(consumer.revalidatePreferences({ ...selected, items: [{ ...selected.items[0], preference: { kind: 'locale', value: 'en-US' } }] }));
+  const revoked = await controller.revoke(request, { confirmation: 'revoke_memory_consent', command: { memoryId, expectedRevision: 2 } });
+  assert.equal(revoked.semantics, 'consent_revoked_not_memory_deleted');
+  await assert.rejects(consumer.revalidatePreferences(selected));
+  assert.deepEqual((await consumer.selectPreferences({ kinds: ['locale'], limit: 3 })).items, []);
+  consumer.close(); await assert.rejects(consumer.selectPreferences({ kinds: ['locale'], limit: 3 }));
+  const state = await controller.state(request, { memoryId });
+  assert.equal(state.usable, false); assert.equal(state.consentStatus, 'revoked');
+  assert.equal('preference' in state, false);
+  assert.equal((await controller.list(request, { limit: 1 })).items[0].consentStatus, 'revoked');
+  await assert.rejects(controller.read(request, { memoryId }), e => e.getResponse().code === 'AI_RESOURCE_UNAVAILABLE');
+  const commandChange = { draftVersion: 'ain-c06-draft-1', memoryId, expectedRevision: 2, operation: 'modify', preference: { kind: 'locale', value: 'en-US' } };
+  await controller.change(request, { confirmation: 'change_memory_preference', operationId: 'modify-http', command: commandChange });
+  const observed = await controller.changeStatus(request, { operationId: 'modify-http', command: commandChange });
+  assert.equal(observed.status, 'committed_current');
+  await assert.rejects(controller.changeStatus(request, { operationId: 'modify-http', command: { ...commandChange, preference: { kind: 'locale', value: 'zh-CN' } } }), e => e.getResponse().code === 'AI_REVISION_CONFLICT');
+  const keyed = await controller.operation(request, { memoryId, operationId: 'modify-http', expectedRevision: 1, operation: 'delete' });
+  assert.equal(keyed.binding, 'key_only_not_command_attestation');
+  assert.equal(keyed.receipt, 'recorded'); // Observing a key does not attest the caller's alleged delete.
+  assert.equal((await controller.state(request, { memoryId })).usable, false);
+  await controller.change(request, { confirmation: 'change_memory_preference', operationId: 'delete-http', command: { draftVersion: 'ain-c06-draft-1', memoryId, expectedRevision: 3, operation: 'delete' } });
+  assert.equal((await controller.read(request, { memoryId })).memory.status, 'deleted');
+  const scoped = new HumanMemoryManagementRequestFactory(deps).open(request); scoped.close();
+  await assert.rejects(scoped.state({ memoryId }), { code: 'unavailable' });
+  f.flags.active = false;
+  await assert.rejects(controller.list(request, { limit: 1 }), e => e.getResponse().code === 'AI_RESOURCE_UNAVAILABLE');
+  await assert.rejects(controller.state(request, { memoryId }), e => e.getResponse().code === 'AI_RESOURCE_UNAVAILABLE');
+});
+
 async function completed(f, t) {
   const old = FileStorageRuntimeService.prototype.objectExists;
   FileStorageRuntimeService.prototype.objectExists = async function (_config, key, mime, size) {
@@ -84,10 +183,44 @@ async function completed(f, t) {
   return { upload, bound: await f.api.uploads.complete({ documentId: 'doc-1', sessionId: upload.sessionId }) };
 }
 
+test('management request uploads use the original file policy and close request credentials', async t => {
+  const f = fileFixture();
+  const { HumanKnowledgeManagementRequestFactory } = h.load('human-knowledge-management.composition');
+  const { HumanKnowledgeManagementController } = h.load('human-knowledge-management.controller');
+  const { requiredPermissions } = require('../apps/api/src/common/api-auth.guard');
+  const { AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT: paths } = require('../packages/shared/src/ai-knowledge-management-http-draft');
+  const factory = new HumanKnowledgeManagementRequestFactory(f.deps), controller = new HumanKnowledgeManagementController(factory);
+  const request = { headers: { authorization: 'Bearer synthetic-session' } };
+  assert.deepEqual(requiredPermissions('POST', `/${paths.basePath}/${paths.beginRevisionUpload}`), ['system:params:manage']);
+  await assert.rejects(controller.beginUpload(request, f.input));
+  assert.equal(f.db.state.uploads.size, 0);
+  f.allowUpload();
+  const result = await controller.beginUpload(request, f.input);
+  assert.equal(result.semantics, 'upload_intent_not_document');
+  assert.equal(f.db.state.documents.size, 0); assert.equal(f.db.state.uploads.size, 1);
+  const scoped = factory.open(request); scoped.close();
+  await assert.rejects(scoped.beginUpload(f.input));
+  await assert.rejects(controller.beginRevisionUpload(request, { ...f.input, expectedRevision: 1, targetVersion: 'v2' }));
+  assert.equal(f.db.state.uploads.size, 1);
+});
+
 test('first creation uses original upload receipt then real create parse index publish withdraw lifecycle', async t => {
   const f = fileFixture();
+  const { HumanKnowledgeManagementRequestFactory } = h.load('human-knowledge-management.composition');
+  assert.deepEqual(HumanKnowledgeModule.registerManagementRequests().providers, []);
+  assert.throws(() => HumanKnowledgeModule.registerManagementRequests({ enabled: true }), { code: 'unavailable' });
+  const serverModule = HumanKnowledgeModule.registerManagementRequests({ enabled: true, dependencies: f.deps });
+  assert.deepEqual(serverModule.controllers, []); assert.ok(serverModule.exports.includes(HumanKnowledgeManagementRequestFactory));
+  const lifecycle = serverModule.providers.find(row => row.provide === HumanKnowledgeManagementRequestFactory).useValue
+    .open({ headers: { authorization: 'Bearer synthetic-session' } });
   const module = HumanKnowledgeModule.registerFiles(f.deps);
   assert.ok(module.exports.includes(HumanKnowledgeUploadService)); assert.equal(f.reads(), 0);
+  assert.ok(module.exports.includes(KNOWLEDGE_SCENE_OPTIONS));
+  const options = module.providers.find(row => row.provide === KNOWLEDGE_SCENE_OPTIONS).useValue;
+  assert.equal(options(false).includePreferences, false);
+  assert.throws(() => options(true), { code: 'unavailable' });
+  assert.throws(() => options('true'), { code: 'invalid_input' });
+  assert.equal(f.reads(), 0);
   await assert.rejects(f.api.uploads.begin(f.input), { code: 'unavailable' }); assert.equal(f.db.state.uploads.size, 0);
   f.allowUpload();
   const [a, b] = await Promise.all([f.api.uploads.begin(f.input), f.api.uploads.begin(f.input)]);
@@ -105,8 +238,10 @@ test('first creation uses original upload receipt then real create parse index p
   assert.equal(f.reads(), 1);
   assert.equal((await f.api.management.reconcileParse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-1' })).parsing, 'parsed');
   assert.equal(f.reads(), 1);
-  const queued = await f.api.index.request({ documentId: 'doc-1', expectedRevision: 3, operationId: 'index-1', kind: 'upsert' });
-  const indexed = await f.api.index.resume({ documentId: 'doc-1', operationId: queued.indexJob.operationId, generation: queued.indexJob.generation });
+  assert.equal((await lifecycle.indexStatus({ documentId: 'doc-1' })).receipt, 'not_queued');
+  const queued = await lifecycle.requestIndex({ documentId: 'doc-1', expectedRevision: 3, operationId: 'index-1', kind: 'upsert' });
+  const indexed = await lifecycle.resumeIndex({ documentId: 'doc-1', operationId: queued.indexJob.operationId, generation: queued.indexJob.generation });
+  assert.equal((await lifecycle.indexStatus({ documentId: 'doc-1' })).receipt, 'recorded');
   const published = await f.api.management.publish({ documentId: 'doc-1', expectedRevision: indexed.revision, operationId: 'publish-1' });
   const preview = await f.api.management.preview('doc-1'); assert.match(preview.sources[0].snippet, /Synthetic SOP/);
   assert.equal((await f.api.management.list({ limit: 5 })).items.length, 1);
@@ -133,15 +268,55 @@ test('first creation uses original upload receipt then real create parse index p
   assert.equal(remembered.preferences.items.length, 1);
   assert.equal(remembered.preferences.items[0].revision, 2);
   assert.deepEqual(await withMemory.preparation.revalidate(remembered), remembered);
+  // Use the existing scene input consumer, not a second knowledge envelope.
+  const sceneOptions = withMemory.sceneKnowledge(true);
+  const scene = composeOriginalSceneKnowledge(sceneOptions, f.identity, () => new Date(h.now));
+  const originalInputRef = '00000000-0000-4000-8000-000000000001';
+  const frozen = await scene.collect(originalInputRef, { sceneCode: 'order_explanation', input: { question: 'Synthetic' } });
+  assert.equal(frozen.version, 'ain-scene-knowledge-1');
+  assert.equal(frozen.material.preferences.items[0].memoryId, memoryId);
+  assert.equal(frozen.material.sources[0].snippet, f.text.toString());
+  assert.ok(Object.isFrozen(frozen));
+  const modelIds = Object.keys(frozen).filter(key => /invocation|dispatch|token/i.test(key));
+  assert.deepEqual(modelIds, []);
+  // Frozen materials are still subject to current recall permission, not only
+  // independent body/source-opening permission retained by the same person.
+  const searchGrants=[...f.grants].filter(([,row])=>row.action==='search');
+  for(const [key,row] of searchGrants)if(!row.resource.documentId)f.grants.delete(key);
+  await assert.rejects(scene.revalidate(frozen,originalInputRef),{code:'AI_RESOURCE_UNAVAILABLE'});
+  for(const [key,row] of searchGrants)f.grants.set(key,row);
+  for(const [key,row] of searchGrants)if(row.resource.documentId)f.grants.delete(key);
+  await assert.rejects(scene.revalidate(frozen,originalInputRef),{code:'AI_RESOURCE_UNAVAILABLE'});
+  for(const [key,row] of searchGrants)f.grants.set(key,row);
+  assert.deepEqual(await scene.revalidate(frozen,originalInputRef),frozen);
+  const memoryRead=f.db.aiStructuredMemory.findFirst;let revokeDuringPreferenceRead=true;
+  f.db.aiStructuredMemory.findFirst=async args=>{const row=await memoryRead(args);
+    if(revokeDuringPreferenceRead){revokeDuringPreferenceRead=false;for(const [key] of searchGrants)f.grants.delete(key);}return row;};
+  try{await assert.rejects(scene.revalidate(frozen,originalInputRef),{code:'AI_RESOURCE_UNAVAILABLE'});}
+  finally{f.db.aiStructuredMemory.findFirst=memoryRead;for(const [key,row] of searchGrants)f.grants.set(key,row);}
+  for (const [key, row] of f.grants) if (row.action === 'resolve_source' && row.resource.documentId) f.grants.delete(key);
+  await assert.rejects(scene.revalidate(frozen, originalInputRef), { code: 'AI_RESOURCE_UNAVAILABLE' });
+  f.allowDocument(bound.attachmentId);
   await withMemory.memory.revoke({ memoryId, expectedRevision: 2 });
   assert.equal((await withMemory.memory.state(memoryId)).consentStatus, 'revoked');
   await assert.rejects(withMemory.preparation.revalidate(remembered), { code: 'unavailable' });
+  await assert.rejects(scene.revalidate(frozen, originalInputRef), { code: 'AI_RESOURCE_UNAVAILABLE' });
   assert.deepEqual((await withMemory.preparation.collect(memoryInput, { includePreferences: true })).preferences.items, []);
   f.allowDocument(bound.attachmentId, 2);
-  const withdrawn = await f.api.management.withdraw({ documentId: 'doc-1', expectedRevision: published.revision, operationId: 'withdraw-1' });
+  const withdrawn = (await lifecycle.withdraw({ confirmation: 'withdraw', command: { documentId: 'doc-1', expectedRevision: published.revision, operationId: 'withdraw-1' } })).document;
   assert.equal(withdrawn.publication, 'withdrawn');
+  await assert.rejects(scene.revalidate(frozen, originalInputRef), { code: 'AI_RESOURCE_UNAVAILABLE' });
   await assert.rejects(f.api.management.preview('doc-1'), { code: 'unavailable' });
   assert.equal((await f.api.management.operation('doc-1', 'withdraw-1')).receipt, 'recorded');
+  await assert.rejects(lifecycle.resumeIndex({ documentId: 'doc-1', operationId: queued.indexJob.operationId, generation: queued.indexJob.generation }), { code: 'conflict' });
+  const removing = await lifecycle.indexStatus({ documentId: 'doc-1' });
+  assert.equal(removing.document.indexJob.kind, 'remove');
+  const removed = await lifecycle.resumeIndex({ documentId: 'doc-1', operationId: removing.document.indexJob.operationId, generation: removing.document.indexJob.generation });
+  assert.equal(removed.publication, 'withdrawn'); assert.equal(removed.indexing, 'not_indexed');
+  f.allowDocument(bound.attachmentId, 3);
+  const deleted = await lifecycle.delete({ confirmation: 'delete', command: { documentId: 'doc-1', expectedRevision: removed.revision, operationId: 'delete-1' } });
+  assert.equal(deleted.document.publication, 'deleted'); assert.equal(deleted.document.physicalIndexDeletion, 'not_verified');
+  lifecycle.close(); await assert.rejects(lifecycle.indexStatus({ documentId: 'doc-1' }), { code: 'unavailable' });
 });
 
 test('first upload denies changed payload, cross-workspace occupation, free metadata and missing storage', async () => {
@@ -174,13 +349,18 @@ test('late body revocation remains pending and exact reconciliation never reads 
 
 test('revision uploads preserve frozen source identity, reject retargeting and consume the original revise receipt', async t => {
   const f = fileFixture(), { bound } = await completed(f, t); f.allowDocument(bound.attachmentId);
+  const { HumanKnowledgeManagementRequestFactory } = h.load('human-knowledge-management.composition');
+  const { HumanKnowledgeManagementController } = h.load('human-knowledge-management.controller');
+  const http = new HumanKnowledgeManagementController(new HumanKnowledgeManagementRequestFactory(f.deps));
+  const requestHeader = { headers: { authorization: 'Bearer synthetic-session' } };
   await f.api.management.create(h.draft({ attachmentId: bound.attachmentId }));
   await f.api.management.parse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-v1' });
   const revision = { documentVersion: 'v1', expectedRevision: 3, aclRevision: 1, targetVersion: 'v2' };
   const file = { ...f.input, fileName: 'sop-v2.txt' }, selection = { ...file, expectedRevision: 3, targetVersion: 'v2' };
   await assert.rejects(f.api.uploads.beginRevision(selection), { code: 'unavailable' });
   f.allowUpload(file, undefined, revision);
-  const [a, b] = await Promise.all([f.api.uploads.beginRevision(selection), f.api.uploads.beginRevision(selection)]);
+  const [a, b] = await Promise.all([http.beginRevisionUpload(requestHeader, selection), f.api.uploads.beginRevision(selection)]);
+  assert.equal(a.semantics, 'upload_intent_not_revision_commit');
   assert.equal(a.fileAssetId, b.fileAssetId); assert.notEqual(a.fileAssetId, bound.attachmentId); assert.equal(f.db.state.uploads.size, 2);
   f.allowUpload({ ...file, fileName: 'changed.txt' }, undefined, revision);
   await assert.rejects(f.api.uploads.beginRevision({ ...selection, fileName: 'changed.txt' }));
@@ -192,7 +372,22 @@ test('revision uploads preserve frozen source identity, reject retargeting and c
   f.db.state.documents.set('doc-1', original);
   f.db.responseError = new Error('revision upload completed but reply lost');
   await assert.rejects(f.api.uploads.completeRevision(completion), /reply lost/); f.db.responseError = null;
-  const uploaded = await f.api.uploads.completeRevision(completion); assert.equal(uploaded.attachmentId, a.fileAssetId);
+  const transaction = f.db.$transaction, objectExists = FileStorageRuntimeService.prototype.objectExists;
+  f.db.$transaction = async () => { throw Error('observation must not write'); };
+  FileStorageRuntimeService.prototype.objectExists = async () => { throw Error('observation must not access storage'); };
+  try {
+    const observed = await http.observeRevisionUpload(requestHeader, completion);
+    const schemas = require('../packages/shared/src/ai-knowledge-management-http-draft').AI_KNOWLEDGE_MANAGEMENT_HTTP_SCHEMAS;
+    const validate = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor(schemas, {}).AiKnowledgeManagementObserveUploadResponseDraft;
+    assert.equal(validate(observed), true, JSON.stringify(validate.errors));
+    assert.equal(observed.status, 'completed'); assert.equal(observed.fileAssetId, a.fileAssetId);
+    assert.equal(observed.semantics, 'observed_upload_not_document_commit');
+    assert.equal('uploadUrl' in observed, false); assert.equal('uploadHeaders' in observed, false);
+    assert.equal((await f.api.management.versionStatus('doc-1')).currentVersion, 'v1');
+    await assert.rejects(http.observeRevisionUpload(requestHeader, { ...completion, targetVersion: 'v3' }));
+  } finally { f.db.$transaction = transaction; FileStorageRuntimeService.prototype.objectExists = objectExists; }
+  const uploaded = await http.completeRevisionUpload(requestHeader, completion); assert.equal(uploaded.attachmentId, a.fileAssetId);
+  assert.equal(uploaded.semantics, 'uploaded_not_revised_or_published');
   f.allowDocument(uploaded.attachmentId); f.allowDocument(uploaded.attachmentId, 1, 'v2');
   const request = h.draft({ documentVersion: 'v2', attachmentId: uploaded.attachmentId, operationId: 'revise-v2' });
   const revised = await f.api.management.revise(3, request); assert.equal(revised.revision, 4);

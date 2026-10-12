@@ -32,7 +32,7 @@ export class PrismaTenantModelProfileRepository implements Repository {
   }
 
   async setAllowedCapabilities(caller: GatewayContext, expectedRevision: number, value: readonly AiProfileCapability[]) {
-    const parsed = contextSchema.safeParse(caller), capabilities = z.array(capabilityNameSchema).max(7)
+    const parsed = contextSchema.safeParse(caller), capabilities = z.array(capabilityNameSchema).max(8)
       .refine(items => new Set(items).size === items.length).safeParse(value);
     if (!parsed.success || !capabilities.success || !Number.isInteger(expectedRevision)
       || expectedRevision < 1 || expectedRevision >= 4294967295) throw new ModelGatewayError('CONFIG_INVALID');

@@ -71,8 +71,11 @@ export function createAiTaskRunnerOutcomePort(adapters: AiTaskRunnerOutcomeAdapt
       const nextRunRevision = typeof runRevision === 'number' ? runRevision : null;
       // Cancellation settlement may truthfully report committed/partial work;
       // ordinary completion must not accept a different task/state acknowledgement.
-      const allowed = input.outcome.status === 'cancelled' ? ['cancelled', 'succeeded', 'partially_succeeded'] : [next.to];
-      if (!matchesAcknowledgement(result, input.taskId, input.taskRevision, input.lease.revision, allowed, next.reason)
+      const allowed = input.outcome.status === 'cancelled' ? ['cancelled', 'succeeded', 'partially_succeeded']
+        : input.outcome.status === 'failed' ? [next.to, 'partially_succeeded'] : [next.to];
+      const persistedPartial = input.outcome.status === 'failed' && result?.event.type === 'task.transition'
+        && result.event.data.to === 'partially_succeeded';
+      if (!matchesAcknowledgement(result, input.taskId, input.taskRevision, input.lease.revision, allowed, persistedPartial ? 'completed' : next.reason)
         || nextRunRevision === null) throw new Error('AI_STORAGE_UNAVAILABLE');
       const status = result.event.type === 'task.transition' ? result.event.data.to : undefined;
       const outcomeStatus = status === 'succeeded' || status === 'partially_succeeded' || status === 'cancelled' ? status : undefined;

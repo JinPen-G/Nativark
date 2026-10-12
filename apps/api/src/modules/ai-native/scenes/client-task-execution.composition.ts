@@ -1,0 +1,91 @@
+import { randomUUID } from 'node:crypto';
+import { AI_TASK_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { AiScopeRepository } from '../ai-scope.repository';
+import { AiTaskRepository, AiTaskRepositoryError, aiTaskAccessFromContext,
+  type AiTaskRepositoryAuthority } from '../ai-task.repository';
+import { freezeOriginalInput } from '../task-request/original-request.validation';
+import { AiClientTaskAuthority, clientTaskSceneSchema, type AiAuthorizedClientMaterial,
+  type AiClientTaskDependencies } from './client-task.authority';
+import { composeClientMaterialTasks } from './client-task.composition';
+import { clientTaskCommandSchema, PrismaClientTaskInputRepository } from './prisma-client-task-input.repository';
+
+const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
+type ClientTaskOperation = 'read' | 'claim' | 'execute' | 'transition' | 'accounting' | 'request_input' | 'submit_input' | 'resume_input';
+const identityHash = (context: AiExecutionContext) => {
+  const { requestId: _request, authorizedAt: _at, ...identity } = context;
+  return requestFingerprint(identity);
+};
+
+/** Request-bound CUSTOMER authority for the existing repositories/runner. The
+ * material loader must be the original Guard/ALS/publication-aware server loader,
+ * not a caller-provided context. No registration, plan, invocation or dispatch is
+ * created here; every tool still requires its own authorization and financial gate.
+ */
+export function composePersistedClientTaskAuthorization(dependencies: AiClientTaskDependencies,
+  value: unknown, loadMaterial: (materialRef: string) => Promise<AiAuthorizedClientMaterial>,
+  clock: () => Date = () => new Date()) {
+  const command = freezeOriginalInput(clientTaskCommandSchema.parse(structuredClone(value)));
+  const scene = clientTaskSceneSchema.parse({ sceneCode: dependencies.sceneCode, sceneVersion: dependencies.sceneVersion });
+  const authority = new AiClientTaskAuthority(dependencies, scene, loadMaterial, randomUUID(), clock);
+  const creation = composeClientMaterialTasks(dependencies, loadMaterial, clock);
+  const inputs = new PrismaClientTaskInputRepository(dependencies.db);
+
+  const snapshot = async (taskId: string | null, operation: ClientTaskOperation) => {
+    const grant = await authority.authorize(command.materialRef, operation === 'read' ? 'read'
+      : operation === 'request_input' || operation === 'submit_input' || operation === 'resume_input' ? operation : 'execute');
+    const receipt = await creation.readCreation(command);
+    if (!receipt.task || (taskId !== null && receipt.task.taskId !== taskId)) throw denied();
+    const id = receipt.task.taskId;
+    const input = await inputs.findCreation(grant.material, command.creationKey);
+    if (!input || input.id !== receipt.inputRef || input.inputHash !== receipt.inputHash
+      || input.sceneCode !== scene.sceneCode || input.sceneVersion !== scene.sceneVersion
+      || input.policyId !== grant.policy.id || (operation !== 'read' && input.policyRevision !== grant.policy.revision)) throw denied();
+    const access = aiTaskAccessFromContext(grant.context, id, clock());
+    const task = await dependencies.db.aiTask.findFirst({ where: access.where, select: {
+      id: true, scopeId: true, scopeKind: true, scope: true, audience: true, ownerKind: true, ownerId: true,
+      contractVersion: true, revision: true, sceneCode: true, sceneVersion: true, status: true,
+      archivedAt: true, cancelRequestedAt: true, inputRef: true, inputRevision: true, inputHash: true
+    } });
+    if (!task || task.id !== id || task.ownerKind !== 'CUSTOMER' || task.ownerId !== access.actorId
+      || task.audience !== 'CLIENT' || task.scopeKind !== access.scope.kind
+      || !task.scope || Object.entries(access.scope).some(([key, expected]) => task.scope[key as keyof typeof task.scope] !== expected)
+      || task.contractVersion !== AI_TASK_DRAFT_VERSION || task.archivedAt !== null
+      || task.sceneCode !== scene.sceneCode || task.sceneVersion !== scene.sceneVersion
+      || task.inputRef !== input.id || task.inputHash !== input.inputHash || task.inputRevision !== input.revision
+      || !Number.isSafeInteger(task.revision) || task.revision < 1 || task.revision > 4294967294) throw denied();
+    if ((operation === 'claim' || operation === 'execute') && (task.cancelRequestedAt !== null
+      || !(operation === 'claim' ? ['QUEUED', 'RUNNING'] : ['RUNNING']).includes(task.status))) throw denied();
+    // The repository proves the legal transition and holder/fence. Starting a
+    // queued run or converging cancellation is not permission for a new effect.
+    if (operation === 'transition' && !['QUEUED', 'RUNNING', 'WAITING_INPUT', 'WAITING_CONFIRMATION',
+      'WAITING_EXTERNAL', 'CANCEL_REQUESTED'].includes(task.status)) throw denied();
+    if (['request_input', 'submit_input', 'resume_input'].includes(operation) && (task.cancelRequestedAt !== null
+      || (operation === 'request_input' ? !['RUNNING', 'WAITING_INPUT'].includes(task.status) : task.status !== 'WAITING_INPUT'))) throw denied();
+    return { context: grant.context, taskId: id, expiresAt: new Date(Math.min(grant.policy.expiresAt.getTime(), input.expiresAt.getTime())),
+      proof: requestFingerprint({ identity: identityHash(grant.context),
+      task, inputHash: input.inputHash, policy: grant.policy, gates: grant.policyHash }) };
+  };
+  const readGrant = async (taskId: string | null, operation: ClientTaskOperation) => {
+    const first = await snapshot(taskId, operation), current = await snapshot(first.taskId, operation);
+    if (first.proof !== current.proof || identityHash(first.context) !== identityHash(current.context)) throw denied();
+    return structuredClone(current);
+  };
+  const authorize = async (taskId: string | null, operation: ClientTaskOperation) =>
+    (await readGrant(taskId, operation)).context;
+  const actions: AiTaskRepositoryAuthority = {
+    resolve: (taskId, operation) => {
+      if (['read_metadata', 'read_events', 'read_step_terminal', 'claim_recovery_run', 'release_run'].includes(operation)) return authorize(taskId, 'read');
+      if (operation === 'claim_run') return authorize(taskId, 'claim');
+      if (operation === 'transition_task') return authorize(taskId, 'transition');
+      if (operation === 'request_input' || operation === 'submit_input' || operation === 'resume_input') return authorize(taskId, operation);
+      // Takeover is not granted by an input/execute policy.
+      return Promise.reject(denied());
+    }
+  };
+  const scopes = new AiScopeRepository(dependencies.db, { resolve: () => authorize(null, 'read') }, clock);
+  return Object.freeze({ scopes, authority: actions, tasks: new AiTaskRepository(dependencies.db, actions, clock),
+    execution: Object.freeze({ authorize: (taskId: string) => authorize(taskId, 'execute'),
+      authorizeAccounting: (taskId: string) => authorize(taskId, 'accounting'),
+      readGrant: (taskId: string, operation: 'read' | 'execute' | 'accounting') => readGrant(taskId, operation) }) });
+}

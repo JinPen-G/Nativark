@@ -9,12 +9,13 @@ const { PrismaGatewayInvocationBindings } = require('../../../apps/api/src/modul
 const { PrismaGatewayAccountingFacts } = require('../../../apps/api/src/modules/ai-native/budget/prisma-gateway-accounting-facts');
 const { requestFingerprint } = require('../../../apps/api/src/modules/rental-core/rental-idempotency.repository');
 
-async function modelHostHarness() {
+async function modelHostHarness(kind) {
   const profile = { id: 'profile-a', scopeId: 'scope-tenant', scopeKind: 'TENANT', configRevision: 1,
     credentialRef: 'vault-a', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'synthetic-model',
     serviceMode: 'tenant_managed', enabled: true, disabledAt: null };
   const h = await authorizedRunnerHarness({ aiTaskPlanPolicy: [], aiTaskActionInput: [], aiProviderProfile: [profile], aiBudgetReservation: [] });
   h.state.aiTaskRunPlan = []; h.state.aiTask[0].status = 'QUEUED'; h.state.aiRun[0].status = 'QUEUED';
+  h.state.aiRun[0].sequence = 1;
   h.identity.user.permissions.push('system:params:manage');
   const transaction = h.db.$transaction.bind(h.db);
   h.db.$transaction = callback => transaction(tx => callback({ ...tx,
@@ -38,7 +39,7 @@ async function modelHostHarness() {
       return { context, consumerScope: { id: 'scope-a', kind: 'WORKSPACE', tenantId: 'tenant-a', workspaceId: 'workspace-a' },
         route: { profile: structuredClone(h.state.aiProviderProfile[0]), scope: { id: 'scope-tenant', kind: 'TENANT', tenantId: 'tenant-a' },
           role: 'DEFAULT', preflight: { allowed: true, required, missing: [], stale: [] } },
-        selection: { mode: 'tenant_managed', revision: 1 }, scene: 'chat', requiredCapabilities: required };
+        selection: { mode: 'tenant_managed', revision: 1 }, scene: kind ? 'vision' : 'chat', requiredCapabilities: required };
     }, assertCurrent: async (_caller, route) => {
       if (route.route.profile.configRevision !== h.state.aiProviderProfile[0].configRevision) throw Error('synthetic stale route');
     } },
@@ -83,12 +84,31 @@ async function modelHostHarness() {
       return structuredClone(control.result);
     }, stream: async function* () { throw Error('invoke-only host'); } }
   };
+  if (kind) {
+    const { AuthorizedGatewayMediaAttachmentResolver } = require('../../../apps/api/src/modules/ai-native/gateway-media-attachment.resolver');
+    const bytes = kind === 'audio' ? Buffer.alloc(1644) : Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a4aQAAAAASUVORK5CYII=', 'base64');
+    if (kind === 'audio') {
+      bytes.write('RIFF');bytes.writeUInt32LE(bytes.length-8,4);bytes.write('WAVEfmt ',8);bytes.writeUInt32LE(16,16);
+      bytes.writeUInt16LE(1,20);bytes.writeUInt16LE(1,22);bytes.writeUInt32LE(8000,24);bytes.writeUInt32LE(16000,28);
+      bytes.writeUInt16LE(2,32);bytes.writeUInt16LE(16,34);bytes.write('data',36);bytes.writeUInt32LE(1600,40);
+    }
+    const contentHash = require('node:crypto').createHash('sha256').update(bytes).digest('hex');
+    control.mediaActive = true;
+    ports.media = new AuthorizedGatewayMediaAttachmentResolver({ authorize: async (context, ref) =>
+      control.mediaActive && context.tenantId === 'tenant-a' && context.workspaceId === 'workspace-a'
+        && ref.attachmentId === 'file-a' && ref.attachmentRevision === 1 ? {
+        attachmentId: 'file-a', attachmentRevision: 1, mediaType: kind === 'audio' ? 'audio/wav' : 'image/png', sizeBytes: bytes.length,
+        contentHash, readBinding: 'synthetic-original-file' } : null
+    }, { read: async () => new Uint8Array(bytes) });
+  }
   const task = { taskId: 'task-a', runId: 'run-a', registrationRef: 'summary-a', material: {
     messages: [{ role: 'user', content: [{ kind: 'text', text: 'Explain authorized facts.' }] }], maxOutputTokens: 32 },
     limits: { ...h.plan.limits, maxTotalMs: 60000, maxStepMs: 10000 } };
+  if (kind) task.material.messages[0].content.push({ kind, attachmentId: 'file-a', attachmentRevision: 1 });
   const config = { ...h.authorization, db: h.db, clock,
     guard: new ApiAuthGuard(h.authorization.auth, undefined, undefined, undefined, {}),
-    scene: { code: 'synthetic-clarification', version: '1' }, gatewayScene: { sceneCode: 'synthetic-clarification', routeScene: 'chat', maxOutputTokens: 64 },
+    ...(kind ? { kind } : {}),
+    scene: { code: 'synthetic-clarification', version: '1' }, gatewayScene: { sceneCode: 'synthetic-clarification', routeScene: kind ? 'vision' : 'chat', maxOutputTokens: 64 },
     priceVersion: 'synthetic-price-1', runtime: { ports, evidence: 'mock', verifyEvidence: async () => control.verified },
     task, host: { holderId: 'model-host', leaseMs: 100000 }, inputSource: h.source, financialEvidence: financial, monotonic: () => h.control.tick };
   root = composeTaskModelHost(config);

@@ -1,0 +1,271 @@
+import { randomUUID } from 'node:crypto';
+import { Module, type DynamicModule } from '@nestjs/common';
+import { z } from 'zod';
+import { AI_TOOL_DRAFT_VERSION, isAiTaskInputSubmissionDraft } from '@rental-os/shared';
+import { runWithRequestIdentity } from '../../../common/request-identity';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { AiTaskCreationRepository } from '../ai-task-creation.repository';
+import { AiTaskRepositoryError } from '../ai-task.repository';
+import { AiScopeRepository } from '../ai-scope.repository';
+import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
+import type { AiTaskCredentialSource } from '../task-current-action.authority';
+import { PrismaSubscriptionBudgetReader } from '../budget/prisma-subscription-budget-reader';
+import { TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, type TaskModelKind } from '../model-input/task-model-input';
+import { inspectionRecognitionMediaKind } from './inspection-recognition.service';
+import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
+import type { TaskModelHostDependencies } from '../runner/model-task-host.composition';
+import { originalIdentityHash } from '../task-request/original-request.authority';
+import { InspectionActionAuthority } from './inspection-action.authority';
+import { StaffInspectionRequestFactory } from './inspection-assist.composition';
+import { inspectionTargetSchema, inspectionId } from './inspection-assist.validation';
+import { INSPECTION_RECOGNITION_TASKS, InspectionRecognitionTaskController } from './inspection-recognition-task.controller';
+
+const referenceSchema = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId,
+  inputId: inspectionId, expectedRevision: z.number().int().min(1).max(999) }).strict();
+type Reference = z.infer<typeof referenceSchema>;
+type Model = Omit<TaskModelHostDependencies, 'credentials' | 'kind' | 'task' | 'inputSource'>;
+export type InspectionRecognitionTaskDependencies = {
+  inspection: ConstructorParameters<typeof StaffInspectionRequestFactory>[0];
+  model: Model;
+  limits: TaskModelHostDependencies['task']['limits'];
+  /** Explicit server gate, not an HTTP property or an installation default. */
+  enabled: boolean;
+  /** Explicit server scene choice; never accepted from the request. */
+  mediaKind?: TaskModelKind;
+  /** Optional separate server audio scene; same identity/DB, no new HTTP route. */
+  audioModel?: Model;
+};
+type Request = { headers: { authorization?: unknown } };
+const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
+const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+
+/** Original frozen inspection input -> persisted task metadata -> ORIGINAL model
+ * runner. No inspection submission, policy seed, provider SDK or second ledger.
+ * A configured plan policy permits creation only; persisted task-action policy,
+ * current Gateway capabilities and financial admission still gate execution. */
+export class InspectionRecognitionTaskApplication {
+  private readonly server: InspectionRecognitionTaskDependencies;
+  constructor(dependencies: InspectionRecognitionTaskDependencies) {
+    if ('credentials' in dependencies.model || 'credentials' in dependencies.inspection
+      || dependencies.model.db !== dependencies.inspection.db
+      || dependencies.model.guard !== dependencies.inspection.guard
+      || typeof dependencies.model.auth?.resolveAccessContext !== 'function'
+      || dependencies.model.scene.code !== dependencies.model.gatewayScene.sceneCode) throw unavailable();
+    const limits = aiTaskRunnerLimitsSchema.parse(structuredClone(dependencies.limits));
+    if (limits.maxStepMs > limits.maxTotalMs) throw unavailable();
+    if (dependencies.mediaKind !== undefined && !['image', 'audio'].includes(dependencies.mediaKind)) throw unavailable();
+    if (dependencies.audioModel) {
+      const audio = dependencies.audioModel;
+      if (dependencies.mediaKind === 'audio' || 'credentials' in audio || audio.db !== dependencies.model.db
+        || audio.guard !== dependencies.model.guard || audio.auth !== dependencies.model.auth
+        || audio.scene.code !== audio.gatewayScene.sceneCode || audio.scene.code === dependencies.model.scene.code
+        || audio.gatewayScene.routeScene !== 'vision') throw unavailable();
+    }
+    this.server = { ...dependencies, inspection: { ...dependencies.inspection, recognitionResults: {
+      db: dependencies.model.db, auth: dependencies.model.auth, subscriptions: dependencies.model.subscriptions,
+      clock: dependencies.model.clock, financialEvidence: dependencies.model.financialEvidence,
+      policy: { kind: dependencies.mediaKind ?? 'image', sceneCode: dependencies.model.gatewayScene.sceneCode,
+        maxOutputTokens: dependencies.model.gatewayScene.maxOutputTokens } },
+      audioRecognitionResults: dependencies.audioModel ? {
+        db: dependencies.audioModel.db, auth: dependencies.audioModel.auth, subscriptions: dependencies.audioModel.subscriptions,
+        clock: dependencies.audioModel.clock, financialEvidence: dependencies.audioModel.financialEvidence,
+        policy: { kind: 'audio', sceneCode: dependencies.audioModel.gatewayScene.sceneCode,
+          maxOutputTokens: dependencies.audioModel.gatewayScene.maxOutputTokens } } : undefined },
+      model: { ...dependencies.model, host: structuredClone(dependencies.model.host),
+        scene: structuredClone(dependencies.model.scene), gatewayScene: structuredClone(dependencies.model.gatewayScene) },
+      ...(dependencies.audioModel ? { audioModel: { ...dependencies.audioModel,
+        host: structuredClone(dependencies.audioModel.host), scene: structuredClone(dependencies.audioModel.scene),
+        gatewayScene: structuredClone(dependencies.audioModel.gatewayScene) } } : {}), limits };
+  }
+
+  private async request<T>(request: Request, value: unknown,
+    consume: (bound: ReturnType<InspectionRecognitionTaskApplication['bind']>, reference: Reference) => Promise<T>) {
+    if (!this.server.enabled) throw unavailable();
+    const header = z.string().min(1).max(8192).safeParse(request?.headers?.authorization);
+    const parsed = referenceSchema.safeParse(structuredClone(value));
+    if (!header.success) throw denied();
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const requestId = randomUUID();
+    let active = true;
+    const credentials: AiTaskCredentialSource = { current: async () => {
+      if (!active) throw denied();
+      return { authorization: header.data, requestId, audience: 'staff' };
+    } };
+    const inspection = new StaffInspectionRequestFactory(this.server.inspection).open({
+      headers: { authorization: header.data }, requestId });
+    let audioInspection: typeof inspection | undefined;
+    try {
+      return await runWithRequestIdentity({}, async () => {
+        if (this.server.audioModel) {
+          if (!inspection.recognition) throw unavailable();
+          const frozen = await inspection.recognition.gatewayMedia(parsed.data);
+          if (inspectionRecognitionMediaKind(frozen.input) === 'audio') {
+            const model = this.server.audioModel;
+            audioInspection = new StaffInspectionRequestFactory({ ...this.server.inspection,
+              audioRecognitionResults: undefined,
+              recognitionResults: { db: model.db, auth: model.auth, subscriptions: model.subscriptions,
+                clock: model.clock, financialEvidence: model.financialEvidence,
+                policy: { kind: 'audio', sceneCode: model.gatewayScene.sceneCode,
+                  maxOutputTokens: model.gatewayScene.maxOutputTokens } } }).open({
+              headers: { authorization: header.data }, requestId });
+            return consume(this.bind(credentials, audioInspection, parsed.data, model, 'audio'), parsed.data);
+          }
+        }
+        return consume(this.bind(credentials, inspection, parsed.data), parsed.data);
+      });
+    } finally { active = false; audioInspection?.close(); inspection.close(); }
+  }
+
+  private bind(credentials: AiTaskCredentialSource,
+    inspection: ReturnType<StaffInspectionRequestFactory['open']>, reference: Reference,
+    model: Model = this.server.model, expectedKind: TaskModelKind = this.server.mediaKind ?? 'image') {
+    const { limits } = this.server, clock = model.clock ?? (() => new Date());
+    const scopes = new AiScopeRepository(model.db, new AiTaskCurrentIdentityAuthority(model.auth, credentials, clock), clock);
+    const resource = new InspectionActionAuthority(model.guard, credentials);
+    const entitlements = new PrismaSubscriptionBudgetReader(model.db, model.subscriptions, clock);
+    const resolve = async () => {
+      const before = await scopes.resolveCurrent(), context = before.context;
+      if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user' || context.audience !== 'staff') throw denied();
+      const workspace = context.scope;
+      if (!inspection.recognition) throw unavailable();
+      const media = await inspection.recognition.gatewayMedia(reference);
+      const kind = inspectionRecognitionMediaKind(media.input);
+      if (kind !== expectedKind) throw unavailable();
+      const tool = kind === 'audio' ? TASK_AUDIO_MODEL_TOOL : TASK_IMAGE_MODEL_TOOL;
+      await resource.withAction({ orderId: reference.orderId, allocationId: reference.allocationId,
+        templateId: reference.templateId, stage: reference.stage }, 'bind', async scope => {
+        if (scope.tenantId !== workspace.tenantId || scope.workspaceId !== workspace.workspaceId
+          || context.actor.kind !== 'user' || scope.ownerId !== context.actor.userId || scope.audience !== context.audience) throw denied();
+      });
+      const key = { scopeId: before.scope.id, sceneCode: model.scene.code, sceneVersion: model.scene.version };
+      const row = structuredClone(await model.db.aiTaskPlanPolicy.findFirst({ where: key }));
+      if (!row || row.scopeId !== key.scopeId || row.sceneCode !== key.sceneCode || row.sceneVersion !== key.sceneVersion
+        || !row.enabled || !Number.isInteger(row.revision) || row.revision < 1
+        || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime()) || row.expiresAt <= clock()
+        || requestFingerprint(row.allowedTools) !== requestFingerprint([{ code: tool, version: AI_TOOL_DRAFT_VERSION }])) throw unavailable();
+      const permitted = aiTaskRunnerLimitsSchema.parse(structuredClone(row.limits));
+      if (permitted.maxStepMs > permitted.maxTotalMs
+        || (Object.keys(limits) as (keyof typeof limits)[]).some(key => limits[key] > permitted[key])) throw unavailable();
+      const entitlement = await entitlements.read(context.scope.tenantId, 'ai.native.use');
+      if (entitlement.entitlements.length !== 1 || !entitlement.entitlements[0].available) throw unavailable();
+      const after = await scopes.resolveCurrent();
+      if (after.scope.id !== before.scope.id || originalIdentityHash(after.context) !== originalIdentityHash(context)) throw denied();
+      return { context: after.context, inputHash: requestFingerprint({ version: 'inspection-task-original-1', reference,
+        frozen: media.input, scene: model.scene, policy: { revision: row.revision, allowedTools: row.allowedTools,
+          limits: row.limits, expiresAt: row.expiresAt.toISOString() }, entitlement, limits,
+        gatewayScene: model.gatewayScene, priceVersion: model.priceVersion }),
+        creationKey: `inspection:${requestFingerprint({ scope: context.scope, actor: context.actor,
+          audience: context.audience, draftId: reference.draftId, inputId: reference.inputId })}` };
+    };
+    const creation = new AiTaskCreationRepository(model.db, { resolve: async (sceneCode, inputRef) => {
+      if (sceneCode !== model.scene.code || inputRef !== reference.inputId) throw denied();
+      const current = await resolve();
+      return { context: current.context, creationAllowed: true, sceneCode, sceneVersion: model.scene.version,
+        inputRef, inputRevision: reference.expectedRevision, inputHash: current.inputHash };
+    } }, clock);
+    const command = async () => ({ creationKey: (await resolve()).creationKey, sceneCode: model.scene.code, inputRef: reference.inputId });
+    const existing = async () => {
+      const receipt = await creation.readCreation(await command());
+      if (receipt.state !== 'observed' || !receipt.task) throw unavailable();
+      const root = await inspection.recognitionTaskHost(reference, { ...model, credentials,
+        inputSource: inspection.recognitionResults.inputSource(reference),
+        task: { taskId: receipt.task.taskId, runId: receipt.task.runId,
+          registrationRef: `inspection-model:${requestFingerprint({ inputId: reference.inputId })}`, limits } });
+      return { root, query: { taskId: receipt.task.taskId, runId: receipt.task.runId } };
+    };
+    return { creation, command, existing };
+  }
+
+  create(request: Request, reference: unknown) {
+    return this.request(request, reference, async bound => {
+      const command = await bound.command();
+      return { task: await bound.creation.create(command), execution: 'not_attested' as const,
+        purpose: 'inspection_candidates_only' as const };
+    });
+  }
+  readCreation(request: Request, reference: unknown) {
+    return this.request(request, reference, async bound => ({ ...await bound.creation.readCreation(await bound.command()),
+      execution: 'not_attested' as const }));
+  }
+  start(request: Request, reference: unknown, signal?: AbortSignal) {
+    return this.request(request, reference, async bound => {
+      const { root, query } = await bound.existing();
+      return root.application.start(query, signal);
+    });
+  }
+  reconcile(request: Request, reference: unknown, signal?: AbortSignal) {
+    return this.request(request, reference, async bound => {
+      const { root, query } = await bound.existing();
+      return root.application.reconcile(query, signal);
+    });
+  }
+  readInput(request: Request, reference: unknown) {
+    return this.request(request, reference, async bound => {
+      const { root, query } = await bound.existing();
+      return root.application.readInput({ taskId: query.taskId });
+    });
+  }
+  resume(request: Request, reference: unknown, value: unknown, signal?: AbortSignal) {
+    const submission = structuredClone(value);
+    if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return this.request(request, reference, async bound => {
+      const { root, query } = await bound.existing();
+      if (submission.taskId !== query.taskId) throw denied();
+      const result = await root.application.resume(submission, signal);
+      await bound.creation.readCreation(await bound.command());
+      return result;
+    });
+  }
+  readAnswer(request: Request, reference: unknown, value: unknown) {
+    const submission = structuredClone(value);
+    if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return this.request(request, reference, async bound => {
+      const { root, query } = await bound.existing();
+      if (submission.taskId !== query.taskId) throw denied();
+      return root.inputs.readSubmission(submission);
+    });
+  }
+  continueAnswer(request: Request, reference: unknown, value: unknown, signal?: AbortSignal) {
+    const submission = structuredClone(value);
+    if (!isAiTaskInputSubmissionDraft(submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return this.request(request, reference, async bound => {
+      const { root, query } = await bound.existing();
+      if (submission.taskId !== query.taskId) throw denied();
+      const receipt = await root.inputs.readSubmission(submission);
+      if (receipt.state !== 'observed') return { receipt, continuation: 'unavailable' as const };
+      const result = await root.application.start({ taskId: query.taskId, runId: receipt.runId }, signal);
+      await bound.creation.readCreation(await bound.command());
+      return { receipt, result };
+    });
+  }
+  requestCancel(request: Request, reference: unknown, expectedRevision: number) {
+    if (!z.number().int().min(1).max(4294967294).safeParse(expectedRevision).success) {
+      throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    }
+    return this.request(request, reference, async bound => {
+      const { root, query } = await bound.existing();
+      const receipt = await root.taskTransitions.transition({ taskId: query.taskId, expectedRevision,
+        to: 'cancel_requested', reason: 'cancel_requested' });
+      // A reply does not attest provider cancellation, inspection submission or rollback.
+      await bound.creation.readCreation(await bound.command());
+      return { receipt, cancellation: 'requested_not_rollback' as const };
+    });
+  }
+}
+
+/** Explicit DI only. No HTTP, root module, polling loop or default enablement. */
+@Module({})
+export class InspectionRecognitionTaskModule {
+  /** Explicit server DI, never imported by the production root automatically. */
+  static registerHttp(dependencies: InspectionRecognitionTaskDependencies): DynamicModule {
+    if (dependencies.enabled !== true) throw unavailable();
+    return { module: InspectionRecognitionTaskModule, controllers: [InspectionRecognitionTaskController],
+      providers: [{ provide: INSPECTION_RECOGNITION_TASKS, useValue: new InspectionRecognitionTaskApplication(dependencies) }],
+      exports: [INSPECTION_RECOGNITION_TASKS] };
+  }
+  static register(dependencies: InspectionRecognitionTaskDependencies): DynamicModule {
+    return { module: InspectionRecognitionTaskModule,
+      providers: [{ provide: InspectionRecognitionTaskApplication, useValue: new InspectionRecognitionTaskApplication(dependencies) }],
+      exports: [InspectionRecognitionTaskApplication] };
+  }
+}

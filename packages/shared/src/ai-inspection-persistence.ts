@@ -1,4 +1,5 @@
 import type { AiInspectionCandidateDraft } from './ai-inspection-draft';
+import type { AiTaskInputSubmissionDraft } from './ai-task-input-draft';
 
 export type AiInspectionActorScope = {
   tenantId: string;
@@ -79,6 +80,28 @@ export type AiInspectionDraftCandidateRequest = AiInspectionTarget & {
 export type AiInspectionRecognitionRequest = AiInspectionDraftReadRequest & {
   operationId: string; expectedRevision: number; question: string;
 };
+/** Reference to an already authorized/frozen image input. Caller IDs are not
+ * identity, permission, model material or a runner lease. */
+export type AiInspectionRecognitionTaskReference = AiInspectionDraftReadRequest & {
+  templateId: string; inputId: string; expectedRevision: number;
+};
+export type AiInspectionRecognitionTaskCancelRequest = {
+  reference: AiInspectionRecognitionTaskReference; expectedRevision: number;
+};
+export type AiInspectionRecognitionTaskResumeRequest = {
+  reference: AiInspectionRecognitionTaskReference; submission: AiTaskInputSubmissionDraft;
+};
+/** Current server projection for an explicitly registered original staff host.
+ * Availability is not permission to bypass per-operation Guard/Core validation. */
+export interface AiStaffInspectionHostProjection {
+  serverEnabled: true;
+  context: AiInspectionActorScope & { audience: 'staff' };
+  target: AiInspectionTarget;
+  draftId: string; revision: number; templateVersion: string; bindingFingerprint: string; actionId: string;
+  capabilities: { edit: boolean; evidence: boolean; review: boolean; submit: boolean };
+  observedAt: string;
+  execution: 'not_attested';
+}
 export type AiInspectionSubmitRequest = AiInspectionDraftReadRequest & { operationId: string; expectedRevision: number };
 export type AiInspectionPrepareSubmissionRequest = AiInspectionSubmitRequest & { actionId: string; handoverSignatureFileAssetId?: string };
 export type AiInspectionOriginalOperationRequest =

@@ -14,7 +14,7 @@ function offlinePrismaSchema(schema, before) {
     const env = {};
     for (const key of ["PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "USERPROFILE", "LOCALAPPDATA", "APPDATA"]) if (process.env[key]) env[key] = process.env[key];
     Object.assign(env, {
-      DATABASE_URL: "mysql://offline:offline@127.0.0.1:1/rental_os_e2e_offline_schema",
+      DATABASE_URL: "mysql://offline:offline@127.0.0.1:1/rental_os_offline",
       AI_OFFLINE_AUDIT: auditFile, CHECKPOINT_DISABLE: "1", PRISMA_HIDE_UPDATE_MESSAGE: "1",
       PRISMA_DISABLE_TELEMETRY: "1", NO_COLOR: "1"
     });

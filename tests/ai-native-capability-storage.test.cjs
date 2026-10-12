@@ -5,7 +5,7 @@ require('ts-node').register({ transpileOnly: false, compilerOptions: { module: '
 const { Prisma } = require('../apps/api/node_modules/@prisma/client');
 const { PrismaProviderCapabilityEvidenceRepository } = require('../apps/api/src/modules/ai-native/provider-capability.repository');
 const { ProviderCapabilityService } = require('../apps/api/src/modules/ai-native/provider-capability.service');
-const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+const { capabilityProfileFingerprint, capabilityNameSchema } = require('../apps/api/src/modules/ai-native/capability-verification');
 const profile = { id: 'synthetic-profile', scopeId: 'synthetic-tenant', scopeKind: 'TENANT', profileKey: 'default', role: 'DEFAULT',
   serviceMode: 'tenant_managed', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'synthetic/model', credentialRef: 'synthetic-vault',
   configRevision: 2, enabled: true, disabledAt: null, allowedCapabilities: ['text'] };
@@ -42,6 +42,19 @@ function harness() {
   } };
   return { state, db, repository: () => new PrismaProviderCapabilityEvidenceRepository(db) };
 }
+test('all declared capabilities including audio round-trip without granting unverified support', async () => {
+  const h = harness(), current = { ...profile, allowedCapabilities: [...capabilityNameSchema.options] };
+  h.state.profile = clone(current);
+  const repository = h.repository();
+  for (const capability of current.allowedCapabilities) await repository.upsert({ ...input, profile: current, capability });
+  assert.deepEqual((await repository.list(current)).map(row => row.capability).sort(), [...current.allowedCapabilities].sort());
+  const service = new ProviderCapabilityService(repository, {}, () => new Date('2026-10-05T00:00:30Z'));
+  const preflight = await service.preflight(current, current.allowedCapabilities);
+  assert.equal(preflight.allowed, false);
+  assert.deepEqual([...preflight.missing].sort(), [...current.allowedCapabilities].sort());
+  h.state.rows.push(clone(h.state.rows[0]));
+  await assert.rejects(repository.list(current));
+});
 test('older evidence cannot overwrite a newer revision or a newer probe on the current revision', async () => {
   const h = harness(); await h.repository().upsert(input);
   await assert.rejects(h.repository().upsert({ ...input, profile: { ...profile, configRevision: 1 } }));

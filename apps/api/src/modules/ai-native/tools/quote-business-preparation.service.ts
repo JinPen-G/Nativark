@@ -28,9 +28,11 @@ export class AiQuoteBusinessPreparationService {
         fulfillmentModes: category.fulfillmentModes.filter(mode => current.settings.fulfillment.enabledModes.includes(mode)),
         deliveryDestination: category.deliveryDestination, timeZone: current.settings.calendar.timeZone,
         limits: AI_QUOTE_CANDIDATE_LIMITS,
-        required: ['customer_explicit_selection', 'items_quantity', 'absolute_period_or_supported_relative_time', 'fulfillment_location'],
+        required: ['customer_explicit_selection', 'items_quantity', 'explicit_supported_pricing_unit', 'absolute_period_or_supported_relative_time', 'fulfillment_location'],
         capabilities: [...current.profile.capabilities],
-        enterpriseIdentity: 'qualification_required_no_authorized_adapter' as const,
+        enterpriseIdentity: 'explicit_selection_requires_current_authorized_relationship_and_Core_qualification' as const,
+        enterprisePayer: 'unavailable_current_independent_payer_authority_required' as const,
+        deliveryAddress: 'current_customer_choice_and_Core_snapshot_required' as const,
         rounding: 'Core_quote_snapshot_only_not_recomputed' as const };
       if (requestFingerprint(current) !== requestFingerprint(await this.sources.contexts.current(context.scope))) throw new ModelGatewayError('CONFIG_INVALID');
       return result;
@@ -129,12 +131,15 @@ export class AiQuoteBusinessPreparationService {
     });
     const fields = [
       source('customerId', result.request.customerId, Boolean(supplied.customerId)),
+      ...(result.request.bookingIdentity ? [source('bookingIdentity', result.request.bookingIdentity,
+        supplied.bookingIdentity !== undefined)] : []),
       source('items', result.request.lines, Boolean(supplied.items)),
       source('startAt', result.request.startAt, Boolean(supplied.start)),
       source('endAt', result.request.endAt, Boolean(supplied.end)),
       source('fulfillmentMode', result.request.fulfillmentMode, Boolean(supplied.fulfillmentMode)),
       source('fulfillmentLocationId', result.request.fulfillmentLocationId, Boolean(supplied.locationId)),
-      source('returnLocationId', result.request.returnLocationId, Boolean(supplied.returnLocationId))
+      source('returnLocationId', result.request.returnLocationId, Boolean(supplied.returnLocationId)),
+      ...(result.request.deliveryAddressId ? [source('deliveryAddressId', result.request.deliveryAddressId, Boolean(supplied.deliveryAddressId))] : [])
     ];
     return sealBusinessScenario('quote_clarification', { status: 'prepared_input_sources' as const,
       request: structuredClone(result.request), selectionRevision: result.selectionRevision,

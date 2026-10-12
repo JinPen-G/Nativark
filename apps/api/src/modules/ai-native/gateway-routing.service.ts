@@ -12,7 +12,7 @@ import { requestFingerprint } from '../rental-core/rental-idempotency.repository
 const id = z.string().min(1).max(128).regex(/^[\w.:-]+$/u);
 const contextSchema = z.object({ tenantId: id, workspaceId: id, actorId: id }).strict();
 const sceneSchema = z.enum(['chat', 'builder', 'vision', 'knowledge', 'reasoning']);
-const requiredSchema = z.array(capabilityNameSchema).min(1).max(7).refine(values => new Set(values).size === values.length);
+const requiredSchema = z.array(capabilityNameSchema).min(1).max(8).refine(values => new Set(values).size === values.length);
 const selectionSchema = z.object({ mode: z.enum(['platform_managed', 'tenant_managed']), revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER - 1) }).strict();
 export interface GatewayRoutingResolution {
   context: AiExecutionContext;
@@ -30,7 +30,8 @@ export function gatewayRoutingBinding(value: GatewayRoutingResolution) {
   return requestFingerprint({ ...value, context: identity(value.context) });
 }
 
-// Workspace/user bridge only; other identities need their own current configuration authority.
+// Workspace/user bridge for operator, staff and the explicitly bounded client
+// audience; automation and non-user identities still require another authority.
 export class AiGatewayRoutingService {
   constructor(
     private readonly scopes: Pick<AiScopeRepository, 'resolveCurrent' | 'resolveRoutingScopes'>,
@@ -45,8 +46,12 @@ export class AiGatewayRoutingService {
   }
 
   private match(expected: GatewayContext, current: AiExecutionContext) {
-    if ((current.audience !== 'operator' && current.audience !== 'staff') || current.actor.kind !== 'user'
-      || current.scope.kind !== 'workspace' || current.actor.userId !== expected.actorId
+    const actorId = current.actor.kind === 'customer' ? current.actor.customerId
+      : 'userId' in current.actor ? current.actor.userId : undefined;
+    if (!['operator', 'staff', 'client'].includes(current.audience)
+      || (current.audience === 'client' ? current.actor.kind !== 'customer' : current.actor.kind !== 'user')
+      || current.scope.kind !== 'workspace'
+      || actorId !== expected.actorId
       || current.scope.tenantId !== expected.tenantId || current.scope.workspaceId !== expected.workspaceId) throw new ModelGatewayError('FORBIDDEN');
   }
 

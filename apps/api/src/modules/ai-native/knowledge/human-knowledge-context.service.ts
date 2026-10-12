@@ -7,7 +7,7 @@ import { KnowledgeSourceService } from './knowledge-source.service';
 import { PrismaKnowledgeReadAdapter } from './prisma-knowledge-read.adapter';
 import { PrismaKnowledgeSelectionAdapter } from './prisma-knowledge-selection.adapter';
 import { KnowledgeError, unavailable } from './knowledge-errors';
-import { documentSourceSchema, fingerprint, id, parse } from './knowledge-validation';
+import { authorize, documentSourceSchema, fingerprint, id, parse } from './knowledge-validation';
 import { KnowledgeCitationSession } from './knowledge-citation-session';
 
 type Source = Extract<AiKnowledgeSourceDraft, { kind: 'document' }>;
@@ -119,15 +119,24 @@ export class HumanKnowledgeContextService {
       sections: z.object({ knowledge: z.literal('authorized_sources'), preferences: z.literal('optional_confirmed_preferences'), businessFacts: z.literal('core_authoritative_only') }).strict().optional() }).strict(), value);
     if (Buffer.byteLength(JSON.stringify(input), 'utf8') > 65536) throw new KnowledgeError('limit_exceeded');
     return this.human.session.run(async context => {
+      // This is reuse of a recalled context, not just opening a known source.
+      // A retained read_body/resolve_source grant must not bypass revoked
+      // search permission at input publication or the dispatch-time callback.
+      const grant = await authorize(this.human.authorization, context, { action: 'search', scope: context.scope });
       const seen = new Set<string>();
       for (const entry of input.sources) {
         if (seen.has(entry.sourceId) || entry.sourceId !== fingerprint(entry.source)) return unavailable();
         seen.add(entry.sourceId);
+        const before = await this.human.documents.load(context, entry.source.documentId, 'search');
         const fresh = await this.sources.readChunk(context, entry.source, 'resolve_source');
         if (fingerprint(fresh.text) !== entry.contentFingerprint || fingerprint(entry.snippet) !== entry.snippetFingerprint
           || clip(fresh.text, entry.snippet.length) !== entry.snippet
           || entry.truncated !== (fresh.text !== entry.snippet)) return unavailable();
+        const after = await this.human.documents.load(context, entry.source.documentId, 'search');
+        if (fingerprint(before) !== fingerprint(after)) return unavailable();
       }
+      const current = await authorize(this.human.authorization, context, { action: 'search', scope: context.scope });
+      if (fingerprint(current) !== fingerprint(grant)) return unavailable();
       return { ...input, sections: input.sections ?? sectionSemantics };
     });
   }

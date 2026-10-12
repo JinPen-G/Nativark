@@ -6,6 +6,7 @@ import { TenantModelConfigService, type TenantModelConfigPorts } from './tenant-
 import type { AiScopeRepository } from './ai-scope.repository';
 import { TenantModelConnectionResolver, type GatewayConnectionResolver } from './routed-model-transport';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { gatewayBudgetPrincipal } from './budget/gateway-budget-principal';
 
 /** Explicit server composition only. No AppModule registration, credential default
  * or actor inferred from caller-supplied tenant/workspace IDs. The authority must
@@ -34,9 +35,11 @@ export function createScopeBoundTenantModelConnection(configuration: TenantModel
     if (!profile?.enabled || profile.disabledAt) throw new ModelGatewayError('CONFIG_INVALID');
     const current = async () => {
       const resolved = structuredClone(await scopes.resolveRoutingScopes('tenant_managed'));
-      const actor = resolved.context.actor, scope = resolved.context.scope;
-      if (actor.kind !== 'user' || actor.userId !== context.actorId || scope.kind !== 'workspace'
-        || scope.tenantId !== context.tenantId || scope.workspaceId !== context.workspaceId
+      let principal: ReturnType<typeof gatewayBudgetPrincipal>;
+      try { principal = gatewayBudgetPrincipal(resolved.context); }
+      catch { throw new ModelGatewayError('FORBIDDEN'); }
+      if (principal.actorId !== context.actorId
+        || principal.tenantId !== context.tenantId || principal.workspaceId !== context.workspaceId
         || resolved.configurationScope.kind !== 'TENANT' || resolved.configurationScope.id !== profile.scopeId
         || resolved.configurationScope.tenantId !== context.tenantId) throw new ModelGatewayError('FORBIDDEN');
       const { authorizedAt: _, requestId: __, ...identity } = resolved.context;

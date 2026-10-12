@@ -27,7 +27,7 @@ async function approvedNotificationsSmoke() {
   const { createAbsorbingConfigStore, createAbsorbingFactStore } = require("./helpers/absorbing-config-store.cjs");
   const category = structuredClone(RENTAL_CATEGORY_DEFINITIONS.find(row => row.code === "camera"));
   const workspace = { id: "ws", tenantId: "t", categoryCode: "CAMERA", categoryVersionId: "v2", categoryAdoptionRevision: 2, status: "ACTIVE" };
-  let rows = { changes: [], operations: [], consumptions: [], settings: null }, ackLost = false, approved = false, failConsume = false, failReplay = false, casMiss = false;
+  let rows = { changes: [], operations: [], consumptions: [], settings: null }, ackLost = false, ackLostPreparation = false, approved = false, failConsume = false, failReplay = false, casMiss = false;
   let time = new Date("2026-10-08T00:00:00.000Z");
   const user = { id: "admin", tenantId: "t", isActive: true, isSaasAdmin: false, isPlatformAdmin: false, dataScope: "all", permissions: ["rental-os:rules:manage"] };
   const local = (data, transactional) => {
@@ -69,7 +69,9 @@ async function approvedNotificationsSmoke() {
     assert.equal(options.isolationLevel, "ReadCommitted");
     const draft = structuredClone(rows), result = await work(local(draft, true));
     const committedOperation = draft.operations.length > rows.operations.length;
+    const committedPreparation = draft.changes.length > rows.changes.length;
     rows = draft;
+    if (ackLostPreparation && committedPreparation) throw Error('synthetic lost preparation acknowledgement');
     if (ackLost && committedOperation) throw Error("synthetic lost commit acknowledgement");
     return result;
   } : local(rows, false)[key] });
@@ -151,11 +153,36 @@ async function approvedNotificationsSmoke() {
   const { composeRequestBoundApprovedSettingsApplication } = require('../apps/api/dist/modules/ai-native/approval-execution/request-bound-approved-settings.application.js');
   const unavailable = async () => { throw Error('an unregistered settings tool must not request execution dependencies'); };
   const dependencies = { db, core, guard, auth: { resolveAccessContext: unavailable }, subscriptions: { readCategoryCommercialContext: unavailable },
-    holderId: 'settings-worker', scene: { code: 'tenant.config.propose', version: '1' } };
+    holderId: 'settings-worker', scene: { code: 'tenant.config.propose', version: '1' }, clock: () => time };
   assert.throws(() => composeRequestBoundApprovedSettingsApplication(dependencies, { enabled: false, audience: 'operator' }));
   assert.throws(() => composeRequestBoundApprovedSettingsApplication({ ...dependencies, credentials: {} }, { enabled: true, audience: 'operator' }));
   const api = composeRequestBoundApprovedSettingsApplication(dependencies, { enabled: true, audience: 'operator' });
   const request = { headers: { authorization: 'Bearer settings-test' } };
+  assert.equal((await api.readCurrent({ headers: {} })).error.code, 'AI_ACCESS_DENIED');
+  assert.equal((await api.readCurrent(request)).value.settingsRevision, 3);
+  const proposedChange = { changeKey: 'request-bound-notification', baseRevision: 3,
+    notifications: { enabledEvents: ['order.confirmed'], editableChannels: ['sms'] }, expiresAt: '2026-10-11T00:00:00.000Z' };
+  assert.equal((await api.prepareChange(request, proposedChange)).error.code, 'AI_ACCESS_DENIED');
+  user.permissions = ['rental-os:rules:manage'];
+  assert.equal((await api.prepareChange(request, { ...proposedChange, payment: {} })).error.code, 'AI_INVALID_INPUT');
+  ackLostPreparation = true;
+  const unknownPreparation = await api.prepareChange(request, proposedChange);
+  assert.equal(unknownPreparation.error.code, 'AI_RESULT_UNKNOWN');
+  assert.equal(unknownPreparation.error.nextAction, 'read_change_receipt');
+  ackLostPreparation = false;
+  const recovered = await api.readChangeReceipt(request, { changeKey: proposedChange.changeKey });
+  assert.equal(recovered.value.state, 'prepared_not_approved');
+  assert.equal(recovered.value.change.baseRevision, 3);
+  const changeCount = rows.changes.length;
+  assert.deepEqual((await api.prepareChange(request, proposedChange)).value, recovered.value.change);
+  assert.equal(rows.changes.length, changeCount);
+  assert.equal(rows.operations.length, 1);
+  assert.equal(rows.settings.settingsRevision, 3, '准备变更不得保存活动设置或消耗批准');
+  assert.equal((await api.readChangeReceipt(request, { changeKey: 'absent' })).value.state, 'not_observed');
+  assert.equal((await api.readChangeReceipt(request, { changeKey: proposedChange.changeKey, tenantId: 'other' })).error.code, 'AI_INVALID_INPUT');
+  user.isActive = false;
+  assert.equal((await api.readChangeReceipt(request, { changeKey: proposedChange.changeKey })).error.code, 'AI_ACCESS_DENIED');
+  user.isActive = true;
   const preparing = { draftVersion, taskId: 'settings-task', runId: 'settings-run', stepId: 'settings-step', proposalId: 'settings-proposal',
     proposalRevision: 1, changeId: change.changeId, changeHash: change.changeHash };
   assert.equal((await api.prepare({ headers: {} }, preparing)).error.code, 'AI_ACCESS_DENIED');

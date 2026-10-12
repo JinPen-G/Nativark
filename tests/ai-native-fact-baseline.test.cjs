@@ -149,14 +149,14 @@ test("KNOWN GAP: account dependency failure propagates, not a falsely ready or s
   await assert.rejects(() => h.business.tenantReadiness(input.TENANT_ID, h.context), /synthetic account dependency outage/u);
 });
 
-test("legacy AI connection success is explicitly mock and makes no model request", () => {
+test("legacy AI connection entry is fail-closed until the real Gateway probe is assembled", () => {
   const platform = new PlatformService({ get: () => "memory" }, undefined);
   const result = platform.testAiConnection("S02 synthetic operator");
-  assert.equal(result.status, "成功");
-  assert.match(result.message, /未调用真实外部模型/u);
+  assert.equal(result.status, "失败");
+  assert.match(result.message, /未装配服务端 AI Gateway 能力探测/u);
   const log = platform.systemRulesConfig.aiModel.logs[0];
-  assert.equal(JSON.parse(log.responsePayload).status, "mock_success");
-  assert.match(log.promptText, /不连接真实模型服务/u);
+  assert.equal(JSON.parse(log.responsePayload).status, "unavailable");
+  assert.match(log.promptText, /未装配 AI Gateway 能力探测/u);
   assert.equal(externalAttempts.length, 0);
 });
 

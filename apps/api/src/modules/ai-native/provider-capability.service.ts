@@ -10,7 +10,7 @@ const profileShape = z.object({
   id, scopeId: id, scopeKind: z.enum(['PLATFORM', 'TENANT', 'WORKSPACE']), profileKey: id, protocol: id, provider: id,
   model: z.string().min(1).max(256), credentialRef: id, configRevision: z.number().int().min(1).max(4294967295),
   role: z.enum(['DEFAULT', 'REASONING', 'VISION', 'EMBEDDING']), serviceMode: z.enum(['platform_managed', 'tenant_managed']),
-  enabled: z.boolean(), disabledAt: z.date().nullable(), allowedCapabilities: z.array(capabilityNameSchema).max(7)
+  enabled: z.boolean(), disabledAt: z.date().nullable(), allowedCapabilities: z.array(capabilityNameSchema).max(8)
 }).strict();
 const evidenceFields = {
   capability: capabilityNameSchema, status: z.enum(['supported', 'unsupported', 'unverified']),
@@ -91,7 +91,7 @@ export class ProviderCapabilityService {
 
   async preflight(value: AiProviderProfileRecord, requested: readonly AiProfileCapability[]): Promise<CapabilityPreflight> {
     const profile = this.profile(value);
-    const parsed = z.array(capabilityNameSchema).min(1).max(7).safeParse(requested);
+    const parsed = z.array(capabilityNameSchema).min(1).max(8).safeParse(requested);
     if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
     const required = [...new Set(parsed.data)];
     let rows;

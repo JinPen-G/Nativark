@@ -89,3 +89,32 @@ test('draft list bounds its database query to the exact authorized inspection ta
   assert.equal(query.take,10);
   assert.equal(query.select.state,undefined);
 });
+
+test('human review connects current persisted corrections, revision changes and request closure',async()=>{
+  const {StaffInspectionRequestFactory}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-assist.composition');
+  const f=fixture(),credentials=await f.ports.credentials.current();
+  const host=new StaffInspectionRequestFactory(f.ports).open({headers:{authorization:credentials.authorization},requestId:'human-review'});
+  const binding=await host.templates.read(target);
+  const saved=await host.drafts.create({...target,operationId:'review-create',bindingFingerprint:binding.bindingFingerprint,results:{mileage:0},evidence:[]});
+  const request={...target,draftId:saved.draftId};
+  const first=await host.drafts.readReview(request);
+  assert.equal(first.fields.find(field=>field.fieldCode==='mileage').human.value,0);
+  assert.equal(first.fields.find(field=>field.fieldCode==='mileage').label,f.template.fields.find(field=>field.code==='mileage').label);
+  assert.equal(first.next,'human_review');assert.equal(first.inspectionId,null);
+  const edit={...request,operationId:'review-edit',expectedRevision:1,bindingFingerprint:binding.bindingFingerprint,
+    edits:[{fieldCode:'mileage',decision:'manual',value:12}]};
+  const original=host.templates.read.bind(host.templates);let change=true;
+  host.templates.read=async value=>{const result=await original(value);if(change){change=false;await host.drafts.edit(edit);}return result;};
+  await assert.rejects(host.drafts.readReview(request),{code:'REVISION_CONFLICT'});
+  host.templates.read=original;
+  const changed=await host.drafts.readReview(request);
+  assert.equal(changed.revision,2);assert.equal(changed.fields.find(field=>field.fieldCode==='mileage').human.value,12);
+  const recovery=await host.drafts.reconcileOperation({kind:'edit',request:edit});
+  assert.equal(recovery.status,'found');assert.equal(recovery.result.revision,2);
+  f.order.allocations[0].assetId='different-asset';
+  const stale=await host.drafts.readReview(request);
+  assert.equal(stale.binding,'changed');assert.equal(stale.reviewRequired,true);assert.equal(stale.next,'review_changed_resource');
+  assert.equal(stale.fields.find(field=>field.fieldCode==='mileage').label,undefined);
+  assert.equal(stale.fields.find(field=>field.fieldCode==='mileage').human.value,12); // history, not current asset facts
+  host.close();await assert.rejects(host.drafts.readReview(request),{code:'ACCESS_DENIED'});
+});

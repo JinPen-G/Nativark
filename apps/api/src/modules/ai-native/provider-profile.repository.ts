@@ -11,7 +11,7 @@ const profileRowSchema = z.object({
   protocol: z.string().min(1).max(64), provider: z.string().min(1).max(128), model: z.string().min(1).max(256),
   credentialRef: z.string().min(1).max(191), configRevision: z.number().int().min(1).max(4294967295),
   enabled: z.boolean(), disabledAt: z.date().nullable(),
-  allowedCapabilities: z.array(capabilityNameSchema).max(7).refine(values => new Set(values).size === values.length)
+  allowedCapabilities: z.array(capabilityNameSchema).max(8).refine(values => new Set(values).size === values.length)
 });
 const keyWhere = (scope: AiProfileScope, profileKey?: string) => ({
   scopeId: scope.id, scopeKind: scope.kind, ...(profileKey === undefined ? {} : { profileKey })

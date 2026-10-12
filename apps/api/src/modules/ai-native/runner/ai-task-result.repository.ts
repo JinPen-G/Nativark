@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { AI_TASK_DRAFT_VERSION, AI_STEP_STATUSES_DRAFT } from '@rental-os/shared';
+import { AI_TASK_DRAFT_VERSION } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.repository';
 
@@ -76,7 +76,7 @@ export class AiTaskResultRepository {
           || typeof artifact.completeMeasurement !== 'boolean') throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
         const status = artifact.outcome.toLowerCase();
         if (!terminal.safeParse(status).success && status !== 'running') throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
-        if (status === 'running' || !artifact.completeMeasurement) {
+        if (status === 'running' || status === 'unknown' || !artifact.completeMeasurement) {
           return {
             contractVersion: AI_TASK_DRAFT_VERSION, taskId: task.id, resultId: artifact.id, runId: artifact.runId,
             stepId: artifact.stepId, actionId: artifact.actionId, status: 'unknown', errorCode: null, payload: null,
@@ -85,7 +85,8 @@ export class AiTaskResultRepository {
           };
         }
         const parsedStatus = terminal.safeParse(status);
-        if (!parsedStatus.success || step.status !== artifact.outcome) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+        if (!parsedStatus.success || step.status !== artifact.outcome || step.resultRef !== artifact.id)
+          throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
         const encoded = JSON.stringify(artifact.payload);
         if (typeof encoded !== 'string' || BigInt(Buffer.byteLength(encoded, 'utf8')) !== artifact.outputBytes) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
         return {

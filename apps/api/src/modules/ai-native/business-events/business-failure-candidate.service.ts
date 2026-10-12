@@ -4,6 +4,7 @@ import type { AiBusinessFailureOutbox, PrismaClient } from '@prisma/client';
 import { AI_EVENTS_DRAFT_VERSION, type AiBusinessEventDraft } from '@rental-os/shared';
 import { BusinessFailureReadAuthority, type FailureSource } from './business-failure-read.authority';
 import { BusinessFailureError, type FailureScope } from './prisma-business-failure-outbox';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 
 const inputSchema = z.object({ eventId: z.string().min(1).max(36).regex(/^[a-f0-9-]+$/i) }).strict();
 const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
@@ -59,14 +60,25 @@ export class BusinessFailureCandidateService {
 
   async preparePending(value: unknown) {
     const input = parse(z.object({ limit: z.number().int().min(1).max(10) }).strict(), value);
-    const { scope } = await this.authority.current(), now = this.clock();
+    const binding = ({ context, scope }: Awaited<ReturnType<BusinessFailureReadAuthority['current']>>) =>
+      requestFingerprint({ scope, actor: context.actor, audience: context.audience, contextScope: context.scope,
+        access: 'access' in context ? context.access : null });
+    const initial = await this.authority.current(), { scope } = initial, principal = binding(initial), now = this.clock();
+    const assertCurrent = async () => {
+      if (binding(await this.authority.current()) !== principal) throw new BusinessFailureError('unavailable');
+    };
     const rows = await this.db.aiBusinessFailureOutbox.findMany({ where: { ...scope,
       OR: [{ status: { in: ['pending', 'retry_scheduled'] }, nextAttemptAt: { lte: now } }, { status: 'claimed', leaseUntil: { lte: now } }] },
       orderBy: [{ nextAttemptAt: 'asc' }, { id: 'asc' }], take: input.limit, select: { id: true } });
+    await assertCurrent();
+    for (const row of rows) {
+      await this.prepare({ eventId: row.id });
+      await assertCurrent();
+    }
     const items = [];
     for (const row of rows) {
-      try { items.push(await this.prepare({ eventId: row.id })); }
-      catch (error) { if (!(error instanceof BusinessFailureError)) throw error; }
+      items.push(await this.read({ eventId: row.id }));
+      await assertCurrent();
     }
     return { items, coverage: 'bounded_authorized_window' as const, workerStarted: false as const };
   }
@@ -116,6 +128,12 @@ export class BusinessFailureCandidateService {
       scope: { kind: 'workspace' as const, tenantId: row.tenantId, workspaceId: row.workspaceId },
       occurredAt: row.occurredAt.toISOString(), traceId: row.traceId, causationId: row.causationId,
       deduplicationKey: row.deduplicationKey, causalDepth: 1 };
+    if (row.eventType === 'inspection.return_exception' && row.inspectionId && row.exceptionId && row.orderId
+      && !row.notificationId && !row.refundId && row.failureCode === 'review_pending') {
+      return { ...base, type: 'inspection.return_exception', resource: { kind: 'inspection', id: row.inspectionId, version: row.resourceRevision },
+        payload: { orderId: row.orderId, exceptionId: row.exceptionId } };
+    }
+    if (row.inspectionId || row.exceptionId) throw new BusinessFailureError('unavailable');
     if (row.eventType === 'notification.failed' && row.notificationId && !row.refundId && row.failureCode === 'delivery_failed') {
       return { ...base, type: 'notification.failed', resource: { kind: 'notification', id: row.notificationId, version: row.resourceRevision }, payload: { failureCode: 'delivery_failed' } };
     }

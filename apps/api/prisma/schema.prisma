@@ -312,6 +312,7 @@ model BusinessWorkspace {
   aiInspectionDrafts                AiInspectionDraft[]
   aiBusinessFailureEvents           AiBusinessFailureOutbox[]
   aiAutomationSubjects              AiAutomationSubject[]
+  aiKnowledgePolicyAuthorities      AiKnowledgePolicyManagementAuthority[]
   aiClientSceneMaterials            AiClientSceneMaterial[]
   aiClientTaskPolicies              AiClientTaskPolicy[]
   aiInspectionEvidenceBindings      AiInspectionEvidenceBinding[]
@@ -409,12 +410,30 @@ model AiProviderProfile {
   disabledAt         DateTime?
   scope              AiScope                @relation(fields: [scopeId, scopeKind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict)
   capabilityEvidence  AiProviderCapabilityEvidence[]
+  textProbeReceipts    AiTextCapabilityReceipt[]
   platformConnection  AiPlatformModelConnection?
 
   @@unique([scopeId, scopeKind, profileKey], map: "ai_provider_profiles_scope_key")
   @@unique([scopeId, scopeKind, role], map: "ai_provider_profiles_scope_role")
   @@index([scopeKind, serviceMode, enabled], map: "ai_provider_profiles_route_idx")
   @@map("ai_provider_profiles")
+}
+
+model AiTextCapabilityReceipt {
+  id              String   @id @default(uuid()) @db.VarChar(36)
+  scopeId         String   @db.VarChar(36)
+  profileId       String   @db.VarChar(36)
+  operationId     String   @db.VarChar(128)
+  descriptor      Json
+  descriptorHash  String   @db.Char(64)
+  observation     Json?
+  observationHash String?  @db.Char(64)
+  createdAt       DateTime @default(now()) @db.DateTime(3)
+  profile         AiProviderProfile @relation(fields: [profileId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "ai_text_capability_profile_fk")
+
+  @@unique([scopeId, operationId], map: "ai_text_capability_scope_operation_key")
+  @@index([profileId], map: "ai_text_capability_profile_idx")
+  @@map("ai_text_capability_receipts")
 }
 
 /// Server-only platform vault. Profile revision and this row are committed together.
@@ -758,6 +777,7 @@ model AiClientSceneMaterial {
   expiresAt       DateTime @db.DateTime(3)
   workspace       BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_client_materials_workspace_fk")
   taskInputs      AiClientTaskInput[]
+  bookingDrafts   AiClientBookingDraft[]
 
   @@unique([tenantId, workspaceId, channel, principalHash, operationKey], map: "ai_client_materials_operation_key")
   @@unique([id, tenantId, workspaceId, channel, principalKind, principalHash], map: "ai_client_materials_input_binding")
@@ -776,6 +796,10 @@ model AiClientTaskPolicy {
   enabled      Boolean @default(false)
   allowCreate  Boolean @default(false)
   allowRead    Boolean @default(false)
+  allowExecute Boolean @default(false)
+  allowRequestInput Boolean @default(false)
+  allowSubmitInput Boolean @default(false)
+  allowResumeInput Boolean @default(false)
   revision     Int @db.UnsignedInt
   expiresAt    DateTime @db.DateTime(3)
   workspace    BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_client_task_policy_workspace_fk")
@@ -814,6 +838,72 @@ model AiClientTaskInput {
 
   @@unique([tenantId, workspaceId, channel, principalHash, creationKey], map: "ai_client_task_input_creation")
   @@map("ai_client_task_inputs")
+}
+
+model AiClientBookingDraft {
+  id                String @id @db.VarChar(36)
+  tenantId          String @db.VarChar(191)
+  workspaceId       String @db.VarChar(191)
+  channel           String @db.VarChar(32)
+  principalKind     String @db.VarChar(16)
+  principalHash     String @db.Char(64)
+  materialRef       String @unique(map: "ai_booking_draft_material_key") @db.VarChar(36)
+  inputHash         String @db.Char(64)
+  bindingHash       String @db.Char(64)
+  policyHash        String @db.Char(64)
+  state             String @db.VarChar(32)
+  revision          Int @db.UnsignedInt
+  selectionRevision Int @db.UnsignedInt
+  selectedAt        DateTime? @db.DateTime(3)
+  createdAt         DateTime @db.DateTime(3)
+  updatedAt         DateTime @db.DateTime(3)
+  expiresAt         DateTime @db.DateTime(3)
+  invalidReason     String? @db.VarChar(191)
+  material          AiClientSceneMaterial @relation(fields: [materialRef, tenantId, workspaceId, channel, principalKind, principalHash], references: [id, tenantId, workspaceId, channel, principalKind, principalHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_booking_draft_material_fk")
+  operations        AiClientBookingDraftOperation[]
+  handoffs          AiClientBookingHandoff[]
+
+  @@unique([id, tenantId, workspaceId, channel, principalKind, principalHash], map: "ai_booking_draft_binding")
+  @@index([tenantId, workspaceId, expiresAt], map: "ai_booking_draft_expiry")
+  @@map("ai_client_booking_drafts")
+}
+
+model AiClientBookingDraftOperation {
+  id             String @id @db.VarChar(36)
+  tenantId       String @db.VarChar(191)
+  workspaceId    String @db.VarChar(191)
+  channel        String @db.VarChar(32)
+  principalKind  String @db.VarChar(16)
+  principalHash  String @db.Char(64)
+  operationKey   String @db.VarChar(191)
+  inputHash      String @db.Char(64)
+  draftId        String @db.VarChar(36)
+  kind           String @db.VarChar(16)
+  resultRevision Int @db.UnsignedInt
+  handoffRef     String? @db.VarChar(36)
+  createdAt      DateTime @db.DateTime(3)
+  draft          AiClientBookingDraft @relation(fields: [draftId, tenantId, workspaceId, channel, principalKind, principalHash], references: [id, tenantId, workspaceId, channel, principalKind, principalHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_booking_operation_draft_fk")
+
+  @@unique([tenantId, workspaceId, channel, principalHash, operationKey], map: "ai_booking_operation_key")
+  @@map("ai_client_booking_draft_operations")
+}
+
+model AiClientBookingHandoff {
+  id                String @id @db.VarChar(36)
+  tenantId          String @db.VarChar(191)
+  workspaceId       String @db.VarChar(191)
+  channel           String @db.VarChar(32)
+  principalKind     String @db.VarChar(16)
+  principalHash     String @db.Char(64)
+  draftId           String @unique(map: "ai_booking_handoff_draft_key") @db.VarChar(36)
+  inputHash         String @db.Char(64)
+  selectionRevision Int @db.UnsignedInt
+  createdAt         DateTime @db.DateTime(3)
+  expiresAt         DateTime @db.DateTime(3)
+  draft             AiClientBookingDraft @relation(fields: [draftId, tenantId, workspaceId, channel, principalKind, principalHash], references: [id, tenantId, workspaceId, channel, principalKind, principalHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_booking_handoff_draft_fk")
+
+  @@index([tenantId, workspaceId, expiresAt], map: "ai_booking_handoff_expiry")
+  @@map("ai_client_booking_handoffs")
 }
 
 model AiAutomationSubject {
@@ -1071,6 +1161,8 @@ model AiBusinessFailureOutbox {
   eventType        String   @db.VarChar(32)
   notificationId   String?  @db.VarChar(191)
   refundId         String?  @db.VarChar(191)
+  inspectionId     String?  @db.VarChar(191)
+  exceptionId      String?  @db.VarChar(191)
   resourceRevision Int      @db.UnsignedInt
   orderId          String?  @db.VarChar(191)
   failureCode      String   @db.VarChar(32)
@@ -1091,11 +1183,13 @@ model AiBusinessFailureOutbox {
   workspace        BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_workspace_fk")
   notification     RentalNotificationLog? @relation("AiFailureNotification", fields: [tenantId, workspaceId, notificationId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_notification_fk")
   refund           RentalPaymentRefund? @relation("AiFailureRefund", fields: [tenantId, workspaceId, refundId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_refund_fk")
+  inspection       RentalInspectionRecord? @relation("AiFailureInspection", fields: [tenantId, workspaceId, inspectionId, orderId], references: [tenantId, workspaceId, id, orderId], onDelete: Restrict, onUpdate: Restrict, map: "ai_failure_outbox_inspection_fk")
 
   automationInputs AiAutomationInput[]
   @@unique([tenantId, workspaceId, id], map: "ai_failure_outbox_scope_id_key")
   @@unique([tenantId, workspaceId, deduplicationKey], map: "ai_failure_outbox_dedup_key")
   @@index([tenantId, workspaceId, status, nextAttemptAt], map: "ai_failure_outbox_due_idx")
+  @@index([tenantId, workspaceId, inspectionId, exceptionId], map: "ai_failure_outbox_inspection_idx")
   @@map("ai_business_failure_outbox")
 }
 
@@ -1119,6 +1213,116 @@ model AiKnowledgeActionPolicy {
 
   @@id([tenantId, workspaceId, actorKind, actorId, audience, domain, action, resourceKey])
   @@map("ai_knowledge_action_policies")
+}
+
+model AiKnowledgePolicyManagementAuthority {
+  id                  String @id @db.VarChar(36)
+  tenantId            String @db.VarChar(128)
+  workspaceId         String @db.VarChar(128)
+  managerId           String @db.VarChar(128)
+  revision            Int @db.UnsignedInt
+  enabled             Boolean @default(false)
+  basisRef            String @db.VarChar(128)
+  basisVersion        String @db.VarChar(64)
+  targetActorId       String @db.VarChar(128)
+  targetAudience      String @db.VarChar(32)
+  domain              String @db.VarChar(16)
+  action              String @db.VarChar(32)
+  resourceKey         String @db.Char(64)
+  resource            Json
+  preparationTarget   Json?
+  requiredPermissions Json
+  allowedPermissions  Json
+  allowedOperations   Json
+  maxPolicySeconds    Int @db.UnsignedInt
+  expiresAt           DateTime @db.DateTime(3)
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  updatedAt           DateTime @updatedAt @db.DateTime(3)
+  preparations        AiKnowledgePolicyPreparation[]
+  preparationTargets  AiKnowledgePolicyPreparationTarget[]
+  workspace           BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_kp_authority_workspace_fk")
+
+  @@unique([tenantId, workspaceId, id], map: "ai_kp_authority_scope_key")
+  @@map("ai_knowledge_policy_management_authorities")
+}
+
+model AiKnowledgePolicyPreparationTarget {
+  id                    String @id @db.VarChar(36)
+  tenantId              String @db.VarChar(128)
+  workspaceId           String @db.VarChar(128)
+  managerId             String @db.VarChar(128)
+  targetActorId         String @db.VarChar(128)
+  targetAudience        String @db.VarChar(32)
+  operationKey          String @db.VarChar(128)
+  documentId            String @unique(map: "ai_kp_target_document_key") @db.VarChar(128)
+  specJson              Json
+  specHash              String @db.Char(64)
+  authorityId           String @db.VarChar(36)
+  authorityRevision     Int @db.UnsignedInt
+  authorizationHash     String @db.Char(64)
+  revision              Int @default(1) @db.UnsignedInt
+  status                String @default("prepared") @db.VarChar(16)
+  expiresAt             DateTime @db.DateTime(3)
+  uploadSessionId       String? @unique(map: "ai_kp_target_session_key") @db.VarChar(191)
+  attachmentId          String? @unique(map: "ai_kp_target_attachment_key") @db.VarChar(191)
+  bindingHash           String? @db.Char(64)
+  createdAt             DateTime @default(now()) @db.DateTime(3)
+  boundAt               DateTime? @db.DateTime(3)
+  authority             AiKnowledgePolicyManagementAuthority @relation(fields: [tenantId, workspaceId, authorityId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_kp_target_authority_fk")
+
+  @@unique([tenantId, workspaceId, managerId, operationKey], map: "ai_kp_target_operation_key")
+  @@map("ai_knowledge_policy_preparation_targets")
+}
+
+model AiKnowledgePolicyPreparation {
+  id                  String @id @db.VarChar(36)
+  tenantId            String @db.VarChar(128)
+  workspaceId         String @db.VarChar(128)
+  actorId             String @db.VarChar(128)
+  audience            String @db.VarChar(32)
+  operationKey        String @db.VarChar(128)
+  policyKeyHash       String @db.Char(64)
+  expectedRevision    Int @db.UnsignedInt
+  commandJson         Json
+  beforeJson          Json
+  commitSlot          String? @unique(map: "ai_kp_preparation_commit_slot_key") @db.Char(64)
+  changeHash          String @db.Char(64)
+  sourceHash          String @db.Char(64)
+  authorityId         String @db.VarChar(36)
+  authorityRevision   Int @db.UnsignedInt
+  authorizationHash   String @db.Char(64)
+  expiresAt           DateTime @db.DateTime(3)
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  authority           AiKnowledgePolicyManagementAuthority @relation(fields: [tenantId, workspaceId, authorityId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_kp_preparation_authority_fk")
+  operation           AiKnowledgePolicyManagementOperation?
+
+  @@unique([tenantId, workspaceId, id], map: "ai_kp_preparation_scope_key")
+  @@unique([tenantId, workspaceId, actorId, audience, operationKey], map: "ai_kp_preparation_operation_key")
+  @@map("ai_knowledge_policy_preparations")
+}
+
+model AiKnowledgePolicyManagementOperation {
+  id                  String @id @db.VarChar(36)
+  tenantId            String @db.VarChar(128)
+  workspaceId         String @db.VarChar(128)
+  actorId             String @db.VarChar(128)
+  audience            String @db.VarChar(32)
+  operationKey        String @db.VarChar(128)
+  preparationId       String @db.VarChar(36)
+  policyKeyHash       String @db.Char(64)
+  resultRevision      Int @db.UnsignedInt
+  changeHash          String @db.Char(64)
+  resultJson          Json
+  resultHash          String @db.Char(64)
+  authorityRevision   Int @db.UnsignedInt
+  authorizationHash   String @db.Char(64)
+  createdAt           DateTime @default(now()) @db.DateTime(3)
+  preparation         AiKnowledgePolicyPreparation @relation(fields: [tenantId, workspaceId, preparationId], references: [tenantId, workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_kp_operation_preparation_fk")
+
+  @@unique([tenantId, workspaceId, preparationId], map: "ai_kp_operation_preparation_key")
+  @@unique([tenantId, workspaceId, actorId, audience, operationKey], map: "ai_kp_operation_original_key")
+  @@unique([policyKeyHash, resultRevision], map: "ai_kp_operation_policy_revision_key")
+  @@map("ai_knowledge_policy_management_operations")
 }
 
 model AiTaskResultArtifact {
@@ -1280,6 +1484,7 @@ model AiTaskInputReceipt {
   consumedAt           DateTime? @db.DateTime(3)
   consumedTaskRevision Int? @db.UnsignedInt
   request              AiTaskInputRequest @relation(fields: [scopeId, taskId, requestId, planHash], references: [scopeId, taskId, id, planHash], onDelete: Restrict, onUpdate: Restrict, map: "ai_task_input_receipts_request_fkey")
+  continuationRun      AiRun? @relation("AiRunInputContinuation")
 
   @@id([scopeId, taskId, id])
   @@unique([scopeId, taskId, requestId], map: "ai_task_input_receipts_request_key")
@@ -4578,7 +4783,11 @@ model RentalInspectionRecord {
   attachments       Json
   operator          String
   createdAt         DateTime                 @default(now())
+  revision          Int                      @default(1) @db.UnsignedInt
+  updatedAt         DateTime                 @default(now()) @updatedAt @db.DateTime(3)
+  failureEvents     AiBusinessFailureOutbox[] @relation("AiFailureInspection")
 
+  @@unique([tenantId, workspaceId, id, orderId], map: "rental_inspection_event_source_key")
   @@index([tenantId, orderId, stage])
   @@map("rental_inspection_records")
 }
@@ -5222,6 +5431,9 @@ model RentalNotificationTemplate {
 // 需求要求的不可变时点快照保留 JSON（需求 4.7）。
 
 model RentalQuote {
+  /// 可选服务器原操作绑定；存量无证据不回填，不向客户端报价DTO透传。
+  originalOperationKey           String? @db.VarChar(64)
+  originalInputHash              String? @db.VarChar(64)
   /// 报价实际采用的品类版本，不回填无法证明的存量。
   categoryVersionId             String?                        @db.VarChar(191)
   categoryVersion               RentalCategoryVersion?         @relation(fields: [categoryCode, categoryVersionId], references: [categoryCode, id], onDelete: Restrict)
@@ -5308,6 +5520,7 @@ model RentalQuote {
   createdAt                     DateTime           @default(now())
 
   @@unique([workspaceId, quoteNo], map: "rental_quotes_tenant_quote_no_key")
+  @@unique([tenantId, workspaceId, originalOperationKey], map: "rental_quotes_original_operation_key")
   @@index([tenantId, expiresAt, consumedAt], map: "rental_quotes_tenant_expires_consumed_idx")
   @@index([consumedOrderId])
   @@map("rental_quotes")
@@ -6028,9 +6241,16 @@ model AiRun {
   quoteSelections    AiTaskQuoteSelection[]
   executionPhases    AiTaskExecutionPhaseStart[]
   reprepareTargets   AiApprovalReprepare[]
+  inputReceiptId     String? @db.VarChar(36)
+  inputReceipt       AiTaskInputReceipt? @relation("AiRunInputContinuation", fields: [scopeId, taskId, inputReceiptId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_runs_input_receipt_fkey")
+  resourceOriginRunId String? @db.VarChar(36)
+  resourceOrigin     AiRun? @relation("AiRunResourceOrigin", fields: [scopeId, taskId, resourceOriginRunId], references: [scopeId, taskId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_runs_resource_origin_fkey")
+  resourceSuccessors AiRun[] @relation("AiRunResourceOrigin")
 
   automationInputs  AiAutomationInput[]
   automationReviewOperations AiAutomationReviewOperation[]
+  @@unique([scopeId, taskId, inputReceiptId], map: "ai_runs_input_receipt_key")
+  @@index([scopeId, taskId, resourceOriginRunId], map: "ai_runs_resource_origin_idx")
   @@unique([scopeId, taskId, id], map: "ai_runs_scope_task_id")
   @@unique([scopeId, taskId, sequence], map: "ai_runs_sequence")
   @@index([status, leaseExpiresAt], map: "ai_runs_recovery")

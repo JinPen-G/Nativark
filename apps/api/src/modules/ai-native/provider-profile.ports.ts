@@ -3,7 +3,7 @@
 export type AiScopeKind = 'PLATFORM' | 'TENANT' | 'WORKSPACE';
 export type AiProviderProfileRole = 'DEFAULT' | 'REASONING' | 'VISION' | 'EMBEDDING';
 export type AiProfileServiceMode = 'platform_managed' | 'tenant_managed';
-export type AiProfileCapability = 'text' | 'streaming' | 'tools' | 'structured_output' | 'vision' | 'embedding' | 'reasoning';
+export type AiProfileCapability = 'text' | 'streaming' | 'tools' | 'structured_output' | 'vision' | 'audio' | 'embedding' | 'reasoning';
 export interface AiProfileScope { id: string; kind: AiScopeKind; tenantId?: string; workspaceId?: string; }
 export interface AiProviderProfileRecord {
   id: string; scopeId: string; scopeKind: AiScopeKind; profileKey: string; role: AiProviderProfileRole;

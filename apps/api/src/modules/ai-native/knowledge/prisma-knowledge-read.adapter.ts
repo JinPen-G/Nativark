@@ -3,13 +3,11 @@ import { z } from 'zod';
 import { AI_KNOWLEDGE_DRAFT_VERSION, type AiExecutionContext, type AiKnowledgeChunkDraft, type AiKnowledgeDocumentDraft, type AiKnowledgeSourceDraft, type AiFactReference } from '@rental-os/shared';
 import type { KnowledgeAuthorizationPort, KnowledgeClock, KnowledgeContentPort, KnowledgeRepositoryPort, KnowledgeSearchPort } from './knowledge.ports';
 import { requiredPort, unavailable } from './knowledge-errors';
-import { authorize, documentSourceSchema, fingerprint, id, parse, parsePersisted, sameScope, scopeSchema, validateChunks, visible } from './knowledge-validation';
+import { authorize, documentSourceSchema, fingerprint, id, parse, parsePersisted, sameScope, scopeSchema, validateChunks, visible, persistedKnowledgeChunkSchema } from './knowledge-validation';
 
 type Source = Extract<AiKnowledgeSourceDraft, { kind: 'document' }>;
 type ReadDb = Pick<PrismaClient, 'aiKnowledgeChunk'>;
-const chunkSchema: z.ZodType<AiKnowledgeChunkDraft> = documentSourceSchema.omit({ kind: true }).extend({
-  draftVersion: z.literal(AI_KNOWLEDGE_DRAFT_VERSION), text: z.string().min(1).max(2000), trust: z.literal('untrusted_data')
-}).strict();
+const chunkSchema = persistedKnowledgeChunkSchema;
 const searchSchema = z.object({
   grant: z.object({ scope: scopeSchema, actor: z.object({ actorKind: z.enum(['user', 'saas_admin', 'customer', 'automation']), actorId: id }).strict(),
     audience: z.enum(['operator', 'staff', 'client', 'automation']), accessKey: z.string().min(1).max(256) }).strict(),

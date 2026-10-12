@@ -28,6 +28,8 @@ export interface SchemaObject {
   uniqueItems?: boolean;
   oneOf?: SchemaObject[];
   properties?: Record<string, SchemaObject>;
+  minProperties?: number;
+  maxProperties?: number;
   required?: string[];
   additionalProperties?: boolean | SchemaObject;
   nullable?: boolean;

@@ -13,17 +13,22 @@ import { createAiTaskRunnerOutcomePort } from './ai-task-runner-outcome-adapter'
 import { PrismaTaskOrderStepAuthority } from './prisma-task-order-step.authority';
 import { PrismaTaskExecutionScopeAuthority } from './prisma-task-execution-scope.authority';
 import { PrismaTaskConfirmationCheckpointSource } from './prisma-task-confirmation-checkpoint.source';
-import { aiTaskRunnerLimitsSchema, PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
+import { aiTaskRunnerLimitsSchema, aiTaskRunPlanSchema, PrismaTaskRunEvidenceRepository } from './prisma-task-run-evidence.repository';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { PrismaTaskApplication, type AiTaskApplicationHost } from './prisma-task-application';
 import type { AiTaskHeldPreparation } from './ai-task-runner.service';
 import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repository-adapter';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const taskSchema = z.object({ taskId: id.max(36), runId: id.max(36), registrationRef: id,
-  order: z.record(z.unknown()), limits: aiTaskRunnerLimitsSchema }).strict();
+  order: z.record(z.unknown()).optional(), limits: aiTaskRunnerLimitsSchema }).strict();
 export type TaskOrderHostDependencies = ControlledApprovedOrderDependencies & {
   host: AiTaskApplicationHost;
   task: z.infer<typeof taskSchema>;
+  /** Optional server-owned selector for a persisted human choice. The
+   * caller never supplies the order body; the selector is evaluated only
+   * after the runner has acquired its real lease. */
+  selectedOrder?: { taskId: string; runId: string; read: () => Promise<unknown> };
   monotonic?: () => number;
 };
 
@@ -48,8 +53,29 @@ export function composeTaskOrderHost(input: TaskOrderHostDependencies) {
   };
   const prepare: AiTaskHeldPreparation = async ({ lease, taskRevision, signal }) => {
     if (lease.taskId !== task.taskId || lease.runId !== task.runId || signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    if (input.selectedOrder && (input.selectedOrder.taskId !== task.taskId || input.selectedOrder.runId !== task.runId)) {
+      throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    }
+    const order = input.selectedOrder ? await input.selectedOrder.read() : task.order;
+    if (!order || typeof order !== 'object' || Array.isArray(order)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     await orders.source.publishOrderInput({ taskId: task.taskId, registrationRef: task.registrationRef,
-      expectedTaskRevision: taskRevision, lease, input: structuredClone(task.order) });
+      expectedTaskRevision: taskRevision, lease, input: structuredClone(order) });
+    if (input.selectedOrder) {
+      if (requestFingerprint(await input.selectedOrder.read()) !== requestFingerprint(order)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const access = await authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
+      const owner = await input.db.aiTask.findFirst({ where: access.where });
+      if (!owner) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const saved = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: {
+        scopeId: owner.scopeId, taskId: task.taskId, runId: task.runId } } });
+      if (saved) {
+        const plan = aiTaskRunPlanSchema.parse(saved.payload);
+        if (plan.taskId !== task.taskId || plan.runId !== task.runId || requestFingerprint(plan) !== saved.planHash
+          || plan.steps.length !== 1 || plan.steps[0].registrationRef !== task.registrationRef
+          || plan.steps[0].toolCode !== 'rental.order.commit' || plan.steps[0].toolVersion !== AI_TOOL_DRAFT_VERSION
+          || plan.steps[0].operation !== 'idempotent') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return;
+      }
+    }
     if (signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     await orders.plans.savePlan({ taskId: task.taskId, runId: task.runId, taskRevision,
       steps: [{ registrationRef: task.registrationRef, operation: 'idempotent', toolCode: 'rental.order.commit', toolVersion: AI_TOOL_DRAFT_VERSION }],
@@ -80,5 +106,6 @@ export function composeTaskOrderHost(input: TaskOrderHostDependencies) {
     recovery, events, host: input.host, prepare, inputs: { submit: unavailableInput, readPending: unavailableInput } });
   return Object.freeze({ orders, ...root, authorization, registrations, transitions, taskTransitions, recovery, events,
     application: Object.freeze({ start: application.start.bind(application), continueConfirmation: application.continueConfirmation.bind(application),
+      readConfirmation: application.readConfirmation.bind(application),
       inspect: application.inspect.bind(application), readEvents: application.readEvents.bind(application), reconcile: application.reconcile.bind(application) }) });
 }

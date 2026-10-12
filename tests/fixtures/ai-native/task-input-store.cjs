@@ -30,19 +30,24 @@ const unique = {
   aiTaskRunPlan: [['scopeId', 'taskId', 'runId']],
   aiTaskResultArtifact: [['scopeId', 'taskId', 'id'], ['scopeId', 'taskId', 'runId', 'stepId', 'fencingToken']],
   aiTaskExecutionBudget: [['scopeId', 'taskId']], aiTaskExecutionCharge: [['scopeId', 'taskId', 'chargeId']],
-  aiTaskEvent: [['scopeId', 'taskId', 'cursor']]
+  aiTaskEvent: [['scopeId', 'taskId', 'cursor']],
+  aiBudgetReservation: [['scopeId', 'scopeKind', 'idempotencyKey']],
+  aiBudgetAllocation: [['policyId', 'reservationId']], aiBudgetLedgerEntry: [['reservationId', 'eventKey']],
+  aiGatewayAccountingReceipt: [['invocationId'], ['reservationId'], ['admissionId']]
 };
 
 // Serialized Prisma-shaped transaction double with rollback and lost COMMIT replies; not MySQL.
 function createTaskInputStore(initial, constraints = {}) {
-  const state = clone(initial), trace = [];
+  const state = clone({ aiTaskQuoteSelection: [], ...initial }), trace = [];
   const control = { beforeRead: null, beforeWrite: null, beforeCommit: null, loseReply: false };
   function related(row, name, data) {
     if (!row) return row;
     const out = clone(row);
+    if (name === 'aiTask' && data.aiScope) out.scope = clone(data.aiScope.find(scope => scope.id === row.scopeId) ?? row.scope);
     if (name === 'aiRun') {
       const task = data.aiTask.find(t => t.id === row.taskId);
-      out.task = task ? { ...clone(task), runs: data.aiRun.filter(r => r.taskId === task.id).map(r => ({
+      out.task = task ? { ...clone(task), scope: clone(data.aiScope?.find(scope => scope.id === task.scopeId) ?? task.scope),
+        runs: data.aiRun.filter(r => r.taskId === task.id).map(r => ({
         ...clone(r), steps: data.aiStep.filter(s => s.runId === r.id),
         executionPlan: data.aiTaskRunPlan.find(p => p.runId === r.id) ?? null
       })) } : null;
@@ -50,6 +55,11 @@ function createTaskInputStore(initial, constraints = {}) {
       out.executionPlan = data.aiTaskRunPlan.find(p => p.runId === row.id) ?? null;
     }
     if (name === 'aiTask') out.runs = data.aiRun.filter(r => r.taskId === row.id).map(r => related(r, 'aiRun', data));
+    if (name === 'aiBudgetAllocation') out.reservation = clone(data.aiBudgetReservation.find(reservation => reservation.id === row.reservationId) ?? null);
+    if (name === 'aiProposal') out.currentVersion = (data.aiProposalVersion ?? []).find(version =>
+      version.scopeId === row.scopeId && version.taskId === row.taskId && version.proposalId === row.id && version.revision === row.currentRevision) ?? null;
+    if (name === 'aiProposalAction') out.step = data.aiStep.find(step =>
+      step.scopeId === row.scopeId && step.taskId === row.taskId && step.actionId === row.actionId) ?? null;
     return out;
   }
   const hydrate = (row, select) => {
@@ -69,12 +79,34 @@ function createTaskInputStore(initial, constraints = {}) {
         for (const keys of constraints[name] ?? unique[name] ?? [['scopeId', 'taskId', 'id']]) {
           if (keys.every(k => value[k] !== undefined) && rows().some(row => keys.every(k => String(row[k]) === String(value[k])))) throw Error(`synthetic unique ${name}`);
         }
-        const row = { revision: 1, createdAt: new Date('2026-10-06T12:00:00Z'), ...clone(value) };
+        const row = { ...(!['aiTaskExecutionPhaseStart', 'aiTaskExecutionPhaseReceipt'].includes(name) ? { revision: 1 } : {}),
+          createdAt: new Date('2026-10-06T12:00:00Z'), ...clone(value) };
+        // Prisma schema defaults, applied only when the real service inserts its receipt.
+        if (name === 'rentalOrderIdempotencyRecord') {
+          row.id ??= require('node:crypto').randomUUID();
+          row.status ??= 'succeeded';
+        }
+        if (name === 'aiApprovalConsumption') row.updatedAt ??= new Date('2026-10-06T12:00:00Z');
+        if (name === 'aiTask') { row.archivedAt ??= null; row.cancelRequestedAt ??= null; row.updatedAt ??= row.createdAt; }
+        if (name === 'aiGatewayInvocation') row.id ??= require('node:crypto').randomUUID();
+        if (name === 'aiInvocationAdmission') {
+          row.admittedAt ??= row.createdAt; row.updatedAt ??= row.createdAt;
+          for (const field of ['dispatchId', 'unknownReason', 'revokedAt', 'completedAt']) row[field] ??= null;
+        }
+        if (name === 'aiBudgetReservation') {
+          row.updatedAt ??= new Date('2026-10-06T12:00:00Z');
+          for (const field of ['reservedTokens', 'reservedCalls', 'reservedMoney', 'moneyCurrency', 'actualTokens', 'actualCalls', 'actualMoney', 'unknownReason']) row[field] ??= null;
+        }
+        if (name === 'aiGatewayAccountingReceipt') {
+          row.id ??= require('node:crypto').randomUUID(); row.updatedAt ??= new Date('2026-10-06T12:00:00Z');
+          for (const field of ['inputTokens', 'outputTokens', 'usageHash']) row[field] ??= null;
+        }
         if (name === 'aiTaskExecutionBudget') for (const prefix of ['reserved', 'consumed']) for (const kind of ['Steps', 'Calls', 'ActiveMs', 'OutputBytes']) row[`${prefix}${kind}`] ??= 0n;
         rows().push(row); return hydrate(row);
       };
       all[name] = {
-        findFirst: async args => { trace.push(`${name}.read`); if (control.beforeRead) await control.beforeRead(name, args, data); return hydrate(selected(args.where ?? {})[0], args.select); },
+        findFirst: async args => { trace.push(`${name}.read`); if (control.beforeRead) await control.beforeRead(name, args, data);
+          const row=selected(args.where ?? {})[0]; return hydrate(row && (args.select || args.include) ? related(row,name,data) : row, args.select); },
         findUnique: async args => { trace.push(`${name}.read`); if (control.beforeRead) await control.beforeRead(name, args, data);
           const where = Object.keys(args.where).length === 1 && Object.keys(args.where)[0].includes('_') ? Object.values(args.where)[0] : args.where;
           return hydrate(selected(where)[0], args.select); },
@@ -84,8 +116,10 @@ function createTaskInputStore(initial, constraints = {}) {
             const [field, direction] = Object.entries(order)[0];
             found = found.sort((a, b) => (a[field] > b[field] ? 1 : a[field] < b[field] ? -1 : 0) * (direction === 'desc' ? -1 : 1));
           }
-          return found.slice(0, args.take).map(row => hydrate(row, args.select)); },
-        create: async args => { trace.push(`${name}.create`); if (control.beforeWrite) await control.beforeWrite(name, args, data); return insert(args.data); },
+          return found.slice(0, args.take).map(row => hydrate(name === 'aiBudgetAllocation' ? related(row, name, data) : row, args.select)); },
+        create: async args => { trace.push(`${name}.create`); if (control.beforeWrite) await control.beforeWrite(name, args, data); return hydrate(insert(args.data), args.select); },
+        createMany: async args => { trace.push(`${name}.createMany`); if (control.beforeWrite) await control.beforeWrite(name, args, data);
+          for (const row of args.data) insert(row); return { count: args.data.length }; },
         updateMany: async args => { trace.push(`${name}.update`); if (control.beforeWrite) await control.beforeWrite(name, args, data);
           const found = selected(args.where);
           for (const row of found) for (const [k, v] of Object.entries(args.data)) {
@@ -93,20 +127,67 @@ function createTaskInputStore(initial, constraints = {}) {
             else if (v && typeof v === 'object' && 'decrement' in v) row[k] -= v.decrement;
             else row[k] = clone(v);
           }
+          if (['aiBudgetReservation', 'aiGatewayAccountingReceipt'].includes(name)) for (const row of found) {
+            row.updatedAt = new Date(row.updatedAt.getTime() + 1);
+          }
           return { count: found.length }; },
         upsert: async args => { trace.push(`${name}.upsert`); if (control.beforeWrite) await control.beforeWrite(name, args, data);
-          const where = Object.values(args.where)[0], prior = selected(where)[0]; return prior ? hydrate(prior) : insert(args.create); }
+          const first = Object.values(args.where)[0], where = first && typeof first === 'object' ? first : args.where;
+          const prior = selected(where)[0]; return prior ? hydrate(prior, args.select) : insert(args.create); }
       };
     }
     return all;
   }
   let tail = Promise.resolve();
   const db = delegates(state);
-  db.$transaction = callback => {
+  // Only the existing receipt repository's parameterized SQL is simulated.
+  // No challenge, ownership, financial or capability decisions live here.
+  function raw(data, readOnly = false) {
+    return {
+      $queryRaw: async sql => {
+        const text = sql.sql ?? '', values = sql.values ?? [];
+        if (!text.includes('ai_text_capability_receipts')) { trace.push('row.lock'); return []; }
+        if (!Array.isArray(data.aiTextCapabilityReceipt)) throw Error('receipt table not configured');
+        const rows = data.aiTextCapabilityReceipt.filter(row => text.includes('WHERE scopeId')
+          ? row.scopeId === values[0] && row.operationId === values[1] : row.id === values[0]);
+        return clone(rows);
+      },
+      $executeRaw: async sql => {
+        if (readOnly) throw Error('read-only snapshot cannot write receipts');
+        const text = sql.sql ?? '', values = sql.values ?? [], rows = data.aiTextCapabilityReceipt;
+        if (!text.includes('ai_text_capability_receipts') || !Array.isArray(rows)) throw Error('unsupported offline SQL');
+        if (text.startsWith('INSERT')) {
+          const [id, scopeId, profileId, operationId, descriptor, descriptorHash] = values;
+          if (rows.some(row => row.id === id || row.scopeId === scopeId && row.operationId === operationId)) throw Error('receipt unique');
+          rows.push({ id, scopeId, profileId, operationId, descriptor, descriptorHash, observation: null, observationHash: null }); return 1;
+        }
+        if (text.startsWith('UPDATE')) {
+          const [observation, observationHash, id, descriptorHash] = values;
+          const found = rows.filter(row => row.id === id && row.descriptorHash === descriptorHash && row.observationHash === null);
+          for (const row of found) Object.assign(row, { observation, observationHash });
+          return found.length;
+        }
+        throw Error('unsupported receipt SQL');
+      }
+    };
+  }
+  Object.assign(db, raw(state));
+  db.$transaction = (callback, options) => {
+    // Independent non-locking authorization snapshots may run while a write
+    // transaction holds policy locks. Never publish this snapshot or permit
+    // writes; this models read visibility, not MySQL lock behavior.
+    if (options?.isolationLevel === 'RepeatableRead') {
+      const readers = delegates(clone(state));
+      for (const delegate of Object.values(readers)) for (const method of ['create', 'createMany', 'updateMany', 'upsert']) {
+        delegate[method] = async () => { throw Error('read-only authorization snapshot cannot write'); };
+      }
+      trace.push('transaction.readSnapshot');
+      return Promise.resolve().then(() => callback({ ...readers, ...raw(clone(state), true) }));
+    }
     const work = tail.then(async () => {
       const draft = clone(state); trace.push('transaction.begin');
       try {
-        const result = await callback({ ...delegates(draft), $queryRaw: async () => { trace.push('row.lock'); return []; } });
+        const result = await callback({ ...delegates(draft), ...raw(draft) });
         if (control.beforeCommit) await control.beforeCommit(draft);
         Object.assign(state, draft); trace.push('transaction.commit');
         if (control.loseReply) { control.loseReply = false; throw Error('synthetic lost COMMIT reply'); }

@@ -31,7 +31,7 @@ export function parse<T>(schema: z.ZodType<T>, input: unknown): T {
 }
 export function scopeKey(scope: AiExecutionScope): string { return JSON.stringify(parse(scopeSchema, scope)); }
 export function sameScope(a: AiExecutionScope, b: AiExecutionScope): boolean { return scopeKey(a) === scopeKey(b); }
-export function actor(context: AiExecutionContext) {
+export function actor(context: Pick<AiExecutionContext, 'actor'>) {
   const a = context.actor;
   return { actorKind: a.kind, actorId: a.kind === 'customer' ? a.customerId : a.kind === 'automation' ? a.subjectId : a.userId };
 }
@@ -52,7 +52,7 @@ export function queueIndex(record: KnowledgeRecord, kind: 'upsert' | 'remove', o
   return { ...record, indexJob: { operationId, kind, status: 'pending', documentVersion: record.document.documentVersion, aclRevision: record.document.aclRevision, generation: record.revision } };
 }
 export function fingerprint(value: unknown): string { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
-export function operationFingerprint(context: AiExecutionContext, value: unknown): string {
+export function operationFingerprint(context: Pick<AiExecutionContext, 'scope' | 'actor' | 'audience'>, value: unknown): string {
   return fingerprint(['knowledge-operation-v1', { scope: structuredClone(context.scope), actor: actor(context), audience: context.audience }, value]);
 }
 export function visible(document: AiKnowledgeDocumentDraft, now: number): boolean {
@@ -71,6 +71,11 @@ export function validateChunks(document: AiKnowledgeDocumentDraft, chunks: AiKno
   }
   if (chars > 200000) throw new KnowledgeError('limit_exceeded');
 }
+
+/** Shared persisted-body contract for current and historical content readers. */
+export const persistedKnowledgeChunkSchema: z.ZodType<AiKnowledgeChunkDraft> = documentSourceSchema.omit({ kind: true }).extend({
+  draftVersion: z.literal(AI_KNOWLEDGE_DRAFT_VERSION), text: z.string().min(1).max(2000), trust: z.literal('untrusted_data')
+}).strict();
 
 const persistedRevision = z.number().int().min(1).max(4294967294);
 const ownerSchema = z.object({ actorKind: z.enum(['user', 'saas_admin', 'customer', 'automation']), actorId: id }).strict();

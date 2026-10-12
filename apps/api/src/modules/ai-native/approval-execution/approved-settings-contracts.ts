@@ -46,7 +46,7 @@ export function registeredSettingsTool() {
 export class ApprovedSettingsApplicationUnknownError extends Error {
   readonly code = 'AI_RESULT_UNKNOWN';
   readonly retryable = false;
-  constructor(readonly nextAction: 'read_preparation_receipt' | 'read_decision_receipt') { super('AI_RESULT_UNKNOWN'); }
+  constructor(readonly nextAction: 'read_preparation_receipt' | 'read_decision_receipt' | 'read_change_receipt') { super('AI_RESULT_UNKNOWN'); }
 }
 export function settingsApplicationError(error: unknown): AiApprovedSettingsErrorDraft {
   const raw = error instanceof Error && 'code' in error ? error.code : null;
@@ -56,5 +56,5 @@ export function settingsApplicationError(error: unknown): AiApprovedSettingsErro
   const next = error instanceof Error && 'nextAction' in error ? error.nextAction : null;
   return { draftVersion: AI_APPROVED_SETTINGS_DRAFT_VERSION, code, retryable: false,
     nextAction: code === 'SETTINGS_RESULT_UNKNOWN' ? 'read_operation' : code === 'AI_RESULT_UNKNOWN'
-      ? next === 'read_decision_receipt' ? next : 'read_preparation_receipt' : 'revalidate_or_manual' };
+      ? next === 'read_decision_receipt' || next === 'read_change_receipt' || next === 'read_task_input' ? next : 'read_preparation_receipt' : 'revalidate_or_manual' };
 }

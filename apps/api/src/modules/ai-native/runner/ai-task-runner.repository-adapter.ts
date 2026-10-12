@@ -85,7 +85,7 @@ export function createAiTaskRunnerRepositoryPorts(adapters: AiTaskRunnerReposito
     async pause(step, lease, pause, resultRef) {
       if (pause !== 'confirmation') return transition('pause', step, lease, resultRef, undefined, pause);
       const ref = structuredClone(step), held = structuredClone(lease);
-      if (!resultRef || ref.plan.operation !== 'idempotent' || ref.plan.toolCode !== 'rental.order.commit'
+      if (!resultRef || ref.plan.operation !== 'idempotent' || !['rental.order.commit', 'tenant.notifications.commit'].includes(ref.plan.toolCode)
         || ref.plan.toolVersion !== AI_TOOL_DRAFT_VERSION || typeof adapters.confirmation?.pause !== 'function') throw new Error('AI_RESOURCE_UNAVAILABLE');
       const value = structuredClone(await adapters.confirmation.pause({ taskId: held.taskId, stepId: ref.registered.stepId,
         expectedTaskRevision: ref.registered.taskRevision, expectedStepRevision: ref.registered.stepRevision,

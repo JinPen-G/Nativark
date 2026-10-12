@@ -11,7 +11,12 @@ import type { AiTaskRunnerLease, AiTaskRunnerPlan, AiTaskRunnerTaskMetadata, AiT
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
 import { isGatewayConfig } from '../gateway-contract-validation';
 import type { composeControlledApprovedOrder } from '../approval-execution/controlled-approved-order.composition';
-export type AiTaskOrderPhaseBusinessEvidence = Pick<ReturnType<typeof composeControlledApprovedOrder>['waiting'], 'readWaiting' | 'reconcile'>;
+type OrderBusiness = ReturnType<typeof composeControlledApprovedOrder>['waiting'];
+export type AiTaskOrderPhaseBusinessEvidence = {
+  readWaiting(input: Parameters<OrderBusiness['readWaiting']>[0], tx?: Prisma.TransactionClient): ReturnType<OrderBusiness['readWaiting']>;
+  reconcile(input: Parameters<OrderBusiness['reconcile']>[0], tx?: Prisma.TransactionClient): ReturnType<OrderBusiness['reconcile']>;
+};
+export type AiConfirmationTool = 'rental.order.commit' | 'tenant.notifications.commit';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -21,7 +26,7 @@ const confirmationContinuationSchema = z.object({ checkpointRef: id.max(36), ste
 const resumedConfirmationSchema = z.object({ data: z.object({ from: z.literal('waiting_confirmation'), to: z.literal('running'), reason: z.literal('resume') }).strict(),
   confirmation: confirmationContinuationSchema.extend({ phaseId: id.max(36), contentHash: hash, runId: id.max(36),
     runRevision: z.number().int().positive().max(4294967294), holderId: id, fencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict() }).passthrough();
-const orderPhasePayloadSchema = z.object({ version: z.literal('approved-order-wait-1'),
+const orderPhasePayloadSchema = z.object({ version: z.enum(['approved-order-wait-1', 'approved-settings-wait-1']),
   binding: z.object({ scopeId: id.max(36), taskId: id.max(36), runId: id.max(36), stepId: id.max(36), actionId: id, inputRef: id.max(36), fingerprint: hash }).strict(),
   presentedLease: z.object({ taskId: id.max(36), runId: id.max(36), holderId: id, revision: z.number().int().positive().max(4294967294),
     fencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u), expiresAt: z.string().datetime({ offset: true }) }).strict(),
@@ -43,7 +48,7 @@ export interface AiTaskPlanEvidenceAuthority {
   /** Server-owned action/limits/configuration policy. A model cannot attest its own plan. */
   authorize(plan: Readonly<AiTaskRunnerPlan>, lease: Readonly<AiTaskRunnerLease>): Promise<z.infer<typeof proofSchema>>;
 }
-type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskResultArtifact' | 'aiTaskExecutionCharge' | 'aiGatewayInvocation' | 'aiGatewayAccountingReceipt' | 'aiInvocationAdmission'>;
+type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskInputRequest' | 'aiTaskInputReceipt' | 'aiTaskResultArtifact' | 'aiTaskExecutionCharge' | 'aiGatewayInvocation' | 'aiGatewayAccountingReceipt' | 'aiInvocationAdmission'>;
 type Tx = Prisma.TransactionClient;
 const unavailable = () => new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
 const denied = () => new AiTaskExecutionBudgetError('AI_ACCESS_DENIED');
@@ -58,10 +63,18 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     private readonly planAuthority: AiTaskPlanEvidenceAuthority, private readonly wall: () => Date = () => new Date(),
     private readonly monotonic: () => number = () => performance.now(),
     private readonly financialEvidence?: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>,
-    private readonly orderEvidence?: AiTaskOrderPhaseBusinessEvidence) {
+    private readonly orderEvidence?: AiTaskOrderPhaseBusinessEvidence,
+    private readonly confirmationTool: AiConfirmationTool = 'rental.order.commit') {
     if (typeof db?.$transaction !== 'function' || typeof db?.aiTaskRunPlan?.findUnique !== 'function'
       || typeof db?.aiTaskResultArtifact?.create !== 'function' || typeof scopes?.resolve !== 'function' || typeof planAuthority?.authorize !== 'function'
+      || !['rental.order.commit', 'tenant.notifications.commit'].includes(confirmationTool)
       || (orderEvidence && (typeof orderEvidence.readWaiting !== 'function' || typeof orderEvidence.reconcile !== 'function'))) throw unavailable();
+  }
+
+  private phasePayload(value: unknown) {
+    const parsed = orderPhasePayloadSchema.parse(value);
+    if (parsed.version !== (this.confirmationTool === 'rental.order.commit' ? 'approved-order-wait-1' : 'approved-settings-wait-1')) throw denied();
+    return parsed;
   }
 
   private async access(lease: AiTaskRunnerLease) {
@@ -151,6 +164,38 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     return { ...plan, taskRevision: task.revision };
   }
 
+  async resourceOrigin(plan: AiTaskRunnerPlan, lease: AiTaskRunnerLease): Promise<AiTaskRunnerPlan> {
+    plan = planSchema.parse(structuredClone(plan)); lease = structuredClone(lease);
+    const access = await this.access(lease); await this.held(this.db, lease, access);
+    const key = { scopeId: access.scopeId, taskId: lease.taskId };
+    const run = await this.db.aiRun.findFirst({ where: { ...key, id: lease.runId } });
+    if (!run || run.id !== lease.runId || run.scopeId !== key.scopeId || run.taskId !== key.taskId
+      || plan.runId !== run.id || plan.taskId !== key.taskId) throw denied();
+    if (run.inputReceiptId == null && run.resourceOriginRunId == null) return plan;
+    if (!run.inputReceiptId || !run.resourceOriginRunId || run.sequence < 2) throw denied();
+    const receipt = await this.db.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_id: { ...key, id: run.inputReceiptId } } });
+    const request = receipt && await this.db.aiTaskInputRequest.findUnique({ where: { scopeId_taskId_id: { ...key, id: receipt.requestId } } });
+    if (!receipt || receipt.id !== run.inputReceiptId || receipt.scopeId !== key.scopeId || receipt.taskId !== key.taskId
+      || receipt.actorKind !== run.actorKind || receipt.actorId !== run.actorId || !receipt.consumedAt || !receipt.consumedTaskRevision
+      || !request || request.id !== receipt.requestId || request.scopeId !== key.scopeId || request.taskId !== key.taskId
+      || request.status !== 'CONSUMED' || request.planHash !== receipt.planHash || request.waitingTaskRevision + 1 !== receipt.consumedTaskRevision) throw denied();
+    const parent = await this.db.aiRun.findFirst({ where: { ...key, id: request.runId } });
+    const origin = await this.db.aiRun.findFirst({ where: { ...key, id: run.resourceOriginRunId } });
+    if (!parent || parent.id !== request.runId || parent.scopeId !== key.scopeId || parent.taskId !== key.taskId
+      || parent.sequence + 1 !== run.sequence || parent.status !== 'SUCCEEDED'
+      || (parent.resourceOriginRunId ?? parent.id) !== run.resourceOriginRunId
+      || !origin || origin.id !== run.resourceOriginRunId || origin.scopeId !== key.scopeId || origin.taskId !== key.taskId
+      || origin.sequence !== 1 || origin.inputReceiptId != null || origin.resourceOriginRunId != null || origin.status !== 'SUCCEEDED') throw denied();
+    const stored = await this.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: { ...key, runId: origin.id } } });
+    if (!stored || stored.scopeId !== key.scopeId || stored.taskId !== key.taskId || stored.runId !== origin.id
+      || requestFingerprint(stored.payload) !== stored.planHash) throw denied();
+    const original = planSchema.parse(stored.payload);
+    if (original.taskId !== key.taskId || original.runId !== origin.id
+      || Object.entries(original.limits).some(([name, ceiling]) => plan.limits[name as keyof typeof plan.limits] > ceiling)) throw denied();
+    await this.held(this.db, lease, access);
+    return original;
+  }
+
   private async currentPlan(db: Pick<PrismaClient, 'aiTaskRunPlan'>, lease: AiTaskRunnerLease, scopeId: string) {
     const row = await db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: { scopeId, taskId: lease.taskId, runId: lease.runId } } });
     if (!row) throw unavailable();
@@ -209,7 +254,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     const access = await this.access(lease); await this.held(this.db, lease, access);
     const step = await this.db.aiStep.findFirst({ where: { scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId, id: stepId, status: 'RUNNING', resultRef: null } });
     if (!step) throw denied();
-    if (phase !== undefined && ((!continuing && phase !== 'confirmation') || step.toolCode !== 'rental.order.commit'
+    if (phase !== undefined && ((!continuing && phase !== 'confirmation') || step.toolCode !== this.confirmationTool
       || step.toolVersion !== AI_TOOL_DRAFT_VERSION || step.effect !== 'POSSIBLE' || !step.inputRef)) throw denied();
     const charges = await this.db.aiTaskExecutionCharge.findMany({ where: { scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId, stepId,
       actionId: step.actionId, stepFingerprint: step.requestFingerprint }, take: 5 });
@@ -247,7 +292,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
         : c.resource === 'ACTIVE_MS' ? basis.first.activeMsChargeId : basis.first.outputBytesChargeId))
         || continuing.remainingActiveMs > Math.min(plan.limits.maxStepMs, Number(lockedCharges.find(c => c.resource === 'ACTIVE_MS')!.amount)) - Number(basis.receipt.activeMs)
         || continuing.remainingOutputBytes > Math.min(plan.limits.maxOutputBytes, Number(lockedCharges.find(c => c.resource === 'OUTPUT_BYTES')!.amount)) - Number(basis.receipt.outputBytes))) throw denied();
-      if (phases && (current.inputRef !== step.inputRef || current.toolCode !== 'rental.order.commit'
+      if (phases && (current.inputRef !== step.inputRef || current.toolCode !== this.confirmationTool
         || current.toolVersion !== AI_TOOL_DRAFT_VERSION || current.effect !== 'POSSIBLE')) throw denied();
       if (!basis) await tx.aiTaskResultArtifact.create({ data: { scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId, stepId, id: ref,
         actionId: step.actionId, stepFingerprint: step.requestFingerprint, leaseOwnerId: lease.holderId, fencingToken: new Prisma.Decimal(lease.fencingToken),
@@ -273,7 +318,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     if (outputBytes > 16777216) throw new AiTaskExecutionBudgetError('AI_RUN_LIMIT');
     const activeMs = BigInt(Math.ceil(elapsed));
     if (firstPhase) {
-      const payload = orderPhasePayloadSchema.parse(result.payload);
+      const payload = this.phasePayload(result.payload);
       if (requestFingerprint(payload.binding) !== requestFingerprint({ scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId,
         stepId, actionId: step.actionId, inputRef: step.inputRef, fingerprint: step.requestFingerprint })
         || requestFingerprint(payload.presentedLease) !== requestFingerprint(lease)
@@ -335,17 +380,17 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
       : { kind: result.kind, resultRef: ref, outputBytes };
   }
 
-  async readOrderPhaseResult(lease: AiTaskRunnerLease, stepId: string, reference?: string) {
+  async readOrderPhaseResult(lease: AiTaskRunnerLease, stepId: string, reference?: string, transaction?: Prisma.TransactionClient) {
     if (!this.orderEvidence) throw unavailable();
     lease = structuredClone(lease); const access = await this.access(lease);
-    await this.held(this.db, lease, access);
-    const snapshot = await this.db.$transaction(async tx => {
+    await this.held(transaction ?? this.db, lease, access);
+    const readSnapshot = async (tx: Prisma.TransactionClient) => {
       const key = { scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId, stepId };
       const task = await tx.aiTask.findFirst({ where: { AND: [access.taskWhere, { scopeId: access.scopeId }] } });
       const step = await tx.aiStep.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, runId: key.runId, id: stepId } });
       const saved = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: { scopeId: key.scopeId, taskId: key.taskId, runId: key.runId } } });
       if (!task || task.id !== lease.taskId || task.scopeId !== access.scopeId || !step || step.id !== stepId || step.scopeId !== key.scopeId
-        || step.taskId !== key.taskId || step.runId !== key.runId || step.toolCode !== 'rental.order.commit' || step.toolVersion !== AI_TOOL_DRAFT_VERSION || !step.inputRef
+        || step.taskId !== key.taskId || step.runId !== key.runId || step.toolCode !== this.confirmationTool || step.toolVersion !== AI_TOOL_DRAFT_VERSION || !step.inputRef
         || !saved || saved.scopeId !== key.scopeId || saved.taskId !== key.taskId || saved.runId !== key.runId || requestFingerprint(saved.payload) !== saved.planHash) throw denied();
       const plan = planSchema.parse(saved.payload);
       if (plan.taskId !== key.taskId || plan.runId !== key.runId) throw denied();
@@ -377,7 +422,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
       }
       if (new Set(receipts.map(r => r.phaseId)).size !== receipts.length) throw denied();
       for (const receipt of receipts) {
-        const start = starts.find(s => s.id === receipt.phaseId), payload = orderPhasePayloadSchema.parse(receipt.payload);
+        const start = starts.find(s => s.id === receipt.phaseId), payload = this.phasePayload(receipt.payload);
         if (!start || Object.entries(key).some(([k, v]) => receipt[k as keyof typeof receipt] !== v)
           || receipt.createdAt < start.createdAt || receipt.createdAt > this.wall() || requestFingerprint(receipt.payload) !== receipt.contentHash
           || BigInt(Buffer.byteLength(JSON.stringify(receipt.payload), 'utf8')) !== receipt.outputBytes
@@ -404,18 +449,30 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
         || run.leaseExpiresAt <= this.wall() || (lease.expiresAt && Date.parse(lease.expiresAt) !== run.leaseExpiresAt.getTime())) throw denied();
       const consumption = await tx.aiApprovalConsumption.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, actionId: step.actionId } });
       return { key, task, run, step, plan, planHash: saved.planHash, artifact, starts, receipts, charges, measurement, consumption };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
+    };
+    const snapshot = transaction ? await readSnapshot(transaction) : await this.db.$transaction(readSnapshot,
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
     lease = { ...lease, expiresAt: snapshot.run.leaseExpiresAt!.toISOString() };
     const last = snapshot.receipts.find(r => r.phaseId === snapshot.starts[snapshot.starts.length - 1].id);
     let result: AiTaskRunnerEffectResult = { kind: 'unknown', resultRef: last?.id ?? snapshot.artifact.id,
       outputBytes: snapshot.measurement ? Number(snapshot.measurement.outputBytes) : 0 };
     let businessResultRef: string | null = null, observedAt: string | null = null;
+    if (snapshot.measurement && last?.kind === 'confirmation' && !snapshot.consumption
+      && snapshot.task.cancelRequestedAt !== null && ['CANCEL_REQUESTED', 'CANCELLED'].includes(snapshot.task.status)) {
+      // Preserve the immutable confirmation receipt. Only the original business
+      // adapter may attest that no approval/submission phase ever followed it.
+      const business = await this.orderEvidence.reconcile({ taskId: lease.taskId, runId: lease.runId, stepId,
+        actionId: snapshot.step.actionId, inputRef: snapshot.step.inputRef!, fingerprint: snapshot.step.requestFingerprint,
+        lease: structuredClone(lease) }, transaction);
+      if (business.kind === 'failed' && business.errorCode === 'AI_CANCELLED')
+        result = { kind: 'failed', resultRef: last.id, errorCode: 'AI_CANCELLED', outputBytes: Number(snapshot.measurement.outputBytes) };
+    }
     if (snapshot.measurement && last && last.kind !== 'confirmation') {
       const binding = { taskId: lease.taskId, runId: lease.runId, stepId, actionId: snapshot.step.actionId, inputRef: snapshot.step.inputRef!,
         fingerprint: snapshot.step.requestFingerprint, lease: structuredClone(lease) };
-      const business = await this.orderEvidence.reconcile(binding);
+      const business = await this.orderEvidence.reconcile(binding, transaction);
       if (business.kind === 'succeeded') {
-        const payload = orderPhasePayloadSchema.parse(business.payload), consumption = snapshot.consumption;
+        const payload = this.phasePayload(business.payload), consumption = snapshot.consumption;
         if (!payload.businessResultRef || payload.effectState !== 'committed' || !consumption || consumption.status !== 'COMMITTED'
           || consumption.scopeId !== snapshot.key.scopeId || consumption.taskId !== lease.taskId || consumption.actionId !== snapshot.step.actionId
           || consumption.actionFingerprint !== snapshot.step.requestFingerprint || consumption.approvalId !== payload.decisionRef
@@ -425,7 +482,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
         businessResultRef = consumption.resultRef; observedAt = consumption.updatedAt.toISOString();
         result = { kind: 'succeeded', resultRef: last.id, outputBytes: Number(snapshot.measurement.outputBytes) };
       } else if (last.kind === 'failed' && last.errorCode === 'AI_APPROVAL_REJECTED' && !snapshot.consumption) {
-        const waiting = await this.orderEvidence.readWaiting(binding);
+        const waiting = await this.orderEvidence.readWaiting(binding, transaction);
         if (waiting.kind === 'waiting_reference' && waiting.receipt.kind === 'recorded' && waiting.receipt.record.decision === 'rejected'
           && waiting.receipt.record.approvalId === last.decisionRef && waiting.proposal.proposalId === last.proposalId
           && waiting.proposal.proposalRevision === last.proposalRevision && waiting.proposal.reviewedPayloadHash === last.reviewedPayloadHash) {
@@ -433,7 +490,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
         }
       }
     }
-    await this.held(this.db, lease, access);
+    await this.held(transaction ?? this.db, lease, access);
     const evidenceKey = requestFingerprint({ planHash: snapshot.planHash, artifactId: snapshot.artifact.id,
       phases: snapshot.starts.map(s => ({ id: s.id, sequence: s.sequence, previousReceiptId: s.previousReceiptId, decisionRef: s.decisionRef, fence: s.fencingToken })),
       receipts: snapshot.receipts.map(r => ({ id: r.id, hash: r.contentHash, activeMs: r.activeMs.toString(), outputBytes: r.outputBytes.toString() })).sort((a, b) => a.id.localeCompare(b.id)),
@@ -451,7 +508,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     const charge = await this.db.aiTaskExecutionCharge.findUnique({ where: { scopeId_taskId_chargeId: { scopeId: access.scopeId, taskId: input.taskId, chargeId: input.chargeId } } });
     if (this.orderEvidence && charge?.stepId) {
       const step = await this.db.aiStep.findFirst({ where: { scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId, id: charge.stepId } });
-      if (step?.toolCode === 'rental.order.commit') {
+      if (step?.toolCode === this.confirmationTool) {
         if (input.taskId !== lease.taskId) throw denied();
         const facts = await this.readOrderPhaseResult(lease, step.id, parts[0]), currentCharge = facts.charges.find(c => c.chargeId === input.chargeId);
         if (!currentCharge || !facts.measurement || !['succeeded', 'failed'].includes(facts.result.kind)
@@ -524,7 +581,7 @@ export class PrismaTaskRunEvidenceRepository implements AiTaskExecutionEvidenceS
     if (!this.orderEvidence) await this.currentPlan(this.db, lease, access.scopeId);
     const step = await this.db.aiStep.findFirst({ where: { scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId, id: stepId } });
     if (!step) throw unavailable();
-    if (this.orderEvidence && step.toolCode === 'rental.order.commit') return (await this.readOrderPhaseResult(lease, stepId)).result;
+    if (this.orderEvidence && step.toolCode === this.confirmationTool) return (await this.readOrderPhaseResult(lease, stepId)).result;
     if (this.orderEvidence) await this.currentPlan(this.db, lease, access.scopeId);
     const rows = await this.db.aiTaskResultArtifact.findMany({ where: { scopeId: access.scopeId, taskId: lease.taskId, runId: lease.runId, stepId,
       actionId: step.actionId, stepFingerprint: step.requestFingerprint }, take: 2 });

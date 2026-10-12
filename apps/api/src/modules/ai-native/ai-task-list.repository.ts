@@ -5,7 +5,8 @@ import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.reposi
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 const taskId = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
-const cursorPayload = z.object({ id: taskId, updatedAt: z.string().datetime({ offset: true }) }).strict();
+const statusSchema = z.enum(['queued', 'running', 'waiting_input', 'waiting_confirmation', 'waiting_external', 'cancel_requested', 'cancelled', 'succeeded', 'partially_succeeded', 'failed', 'unknown']);
+const cursorPayload = z.object({ id: taskId, updatedAt: z.string().datetime({ offset: true }), status: statusSchema.optional(), sceneCode: taskId.optional() }).strict();
 const cursorSchema = z.string().max(512).refine(value => {
   try { return cursorPayload.safeParse(JSON.parse(Buffer.from(value, 'base64url').toString('utf8'))).success; }
   catch { return false; }
@@ -13,7 +14,7 @@ const cursorSchema = z.string().max(512).refine(value => {
 const inputSchema = z.object({
   limit: z.number().int().min(1).max(50).default(20),
   cursor: cursorSchema.optional(),
-  status: z.enum(['queued', 'running', 'waiting_input', 'waiting_confirmation', 'waiting_external', 'cancel_requested', 'cancelled', 'succeeded', 'partially_succeeded', 'failed', 'unknown']).optional(),
+  status: statusSchema.optional(),
   sceneCode: taskId.optional()
 }).strict();
 
@@ -35,8 +36,8 @@ export interface AiTaskMetadataPage {
   nextCursor: string | null;
 }
 
-function encodeCursor(updatedAt: Date, id: string) {
-  return Buffer.from(JSON.stringify({ updatedAt: updatedAt.toISOString(), id }), 'utf8').toString('base64url');
+function encodeCursor(updatedAt: Date, id: string, filters: Pick<z.infer<typeof inputSchema>, 'status' | 'sceneCode'>) {
+  return Buffer.from(JSON.stringify({ updatedAt: updatedAt.toISOString(), id, ...filters }), 'utf8').toString('base64url');
 }
 
 /** Read-only AIN-12 task-center adapter; it is not an HTTP route or action executor. */
@@ -53,7 +54,10 @@ export class AiTaskListRepository {
     if (input.cursor) {
       try {
         const decoded = JSON.parse(Buffer.from(input.cursor, 'base64url').toString('utf8')) as { updatedAt: string; id: string };
-        cursor = { updatedAt: new Date(decoded.updatedAt), id: decoded.id };
+        const parsedCursor = cursorPayload.parse(decoded);
+        const updatedAt = new Date(parsedCursor.updatedAt);
+        if (!Number.isFinite(updatedAt.getTime()) || parsedCursor.status !== input.status || parsedCursor.sceneCode !== input.sceneCode) throw new Error('cursor_scope_changed');
+        cursor = { updatedAt, id: parsedCursor.id };
       } catch { throw new AiTaskRepositoryError('AI_INVALID_INPUT'); }
     }
     let context: AiExecutionContext;
@@ -93,6 +97,7 @@ export class AiTaskListRepository {
     const items = page.map(row => ({ taskId: row.id, status: row.status.toLowerCase(), revision: row.revision,
       sceneCode: row.sceneCode, sceneVersion: row.sceneVersion, createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(), cancelRequestedAt: row.cancelRequestedAt?.toISOString() ?? null }));
-    return { items, nextCursor: rows.length > input.limit && page.length ? encodeCursor(page[page.length - 1].updatedAt, page[page.length - 1].id) : null };
+    return { items, nextCursor: rows.length > input.limit && page.length ? encodeCursor(page[page.length - 1].updatedAt, page[page.length - 1].id,
+      { status: input.status, sceneCode: input.sceneCode }) : null };
   }
 }

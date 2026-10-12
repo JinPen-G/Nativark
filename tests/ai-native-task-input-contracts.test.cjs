@@ -26,6 +26,24 @@ test('closed clarification schemas and semantic validators accept the same bound
   assert.equal(validators.AiTaskInputSubmissionDraft(submission()), true);
   assert.equal(api.isAiTaskInputSubmissionDraft(submission()), true);
   assert.equal(api.validateAiTaskInputAnswersDraft(contract(), answers()), true);
+  const offered = contract();
+  offered.fields.push({ fieldId: 'fulfillment_selection', kind: 'choice', required: true,
+    label: 'Current server fulfillment mode', options: [{ value: 'store_pickup_return', label: 'Store pickup and return' }] });
+  const selected = [...answers(), { fieldId: 'fulfillment_selection', value: 'store_pickup_return' }];
+  assert.equal(validators.AiTaskInputContractDraft(offered), true);
+  assert.equal(api.isAiTaskInputContractDraft(offered), true);
+  assert.equal(api.validateAiTaskInputAnswersDraft(offered, selected), true);
+  assert.equal(api.validateAiTaskInputAnswersDraft(offered,
+    [...answers(), { fieldId: 'fulfillment_selection', value: 'delivery' }]), false);
+  const { AI_LEAF_COMPONENT_SCHEMAS } = require('../apps/api/src/contracts/ai-leaf-components');
+  assert.ok(AI_LEAF_COMPONENT_SCHEMAS.AiSceneModelInputRefreshDraft);
+  const usage = { draftVersion: version, code: 'original_quote_parameters', version: '1', fields: [
+    { fieldId: 'usage_quantity', kind: 'text', required: true, label: 'Explicit planned usage', maxLength: 32 }
+  ] };
+  assert.equal(validators.AiTaskInputContractDraft(usage), true);
+  assert.equal(api.isAiTaskInputContractDraft(usage), true);
+  for (const value of ['0', '1.5', '1000000']) assert.equal(api.validateAiTaskInputAnswersDraft(usage, [{ fieldId: 'usage_quantity', value }]), true);
+  for (const value of ['-1', 'NaN', '1e3', '1000001', '0.10000000000000000001']) assert.equal(api.validateAiTaskInputAnswersDraft(usage, [{ fieldId: 'usage_quantity', value }]), false);
 });
 for (const key of ['actor', 'scope', 'tenantId', 'workspaceId', 'toolCode', 'amount', 'plan', 'confirmed', 'approvalId']) test(`clarification refuses authority/control field ${key}`, () => {
   const input = { ...submission(), [key]: 'forged' };

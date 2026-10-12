@@ -14,10 +14,11 @@ import { cachedMerchant } from "../../core/merchant";
 import { formatMoney } from "../../core/money";
 import { blockedState, errorState, handleCommonViewAction, loadingState, readyState, type ViewState } from "../../core/page";
 import { presentOrder, type OrderPresentation } from "../../core/status";
-import { currentServiceCode, isSignedIn } from "../../core/session";
+import { currentServiceCode, isSignedIn, sessionEvents } from "../../core/session";
 import { formatBusinessDateTime, zoneLabel } from "../../core/time";
 import { ROUTES, buildUrl, callPhone, navigate, requireSignIn, toast } from "../../core/ui";
 import { zoneOf, ensureCurrentZone } from "../../core/zones";
+import { customerOrderFacts } from "../../components/ai-native/customer-order-facts";
 
 /**
  * P08 订单详情 + P09 取消面板 + 取还指引（需求 §9.3、§10.1、§10.3）。
@@ -87,6 +88,7 @@ interface OrderData {
   aiNativeSources: unknown[];
   aiNativeMemories: unknown[];
   aiNativeOrderProjection: Record<string, unknown> | null;
+  aiOrderFactsExpanded: boolean;
 }
 
 const CANCEL_REASONS = ["行程变更", "选错了设备或时间", "找到其他方案", "其他原因"];
@@ -148,7 +150,8 @@ Page({
     aiNativeProposal: null,
     aiNativeSources: [],
     aiNativeMemories: [],
-    aiNativeOrderProjection: null
+    aiNativeOrderProjection: null,
+    aiOrderFactsExpanded: false
   } as OrderData,
 
   orderId: "" as string,
@@ -156,8 +159,18 @@ Page({
   loadVersion: 0,
   feeInspectionId: "" as string,
   feeExceptionIndex: 0 as number,
+  aiOrderFactsActive: false,
+  aiFactsUnsubscribe: undefined as (() => void) | undefined,
 
   onLoad(options: Record<string, string | undefined>) {
+    this.aiFactsUnsubscribe?.();
+    this.aiFactsUnsubscribe = sessionEvents.on(event => {
+      if (event.type === "refreshed") return;
+      this.loadVersion++;
+      this.setData({ aiNativeOrderProjection: null, aiOrderFactsExpanded: false });
+    });
+    this.aiOrderFactsActive = true;
+    this.setData({ aiNativeOrderProjection: null, aiOrderFactsExpanded: false });
     this.orderId = options.id ?? "";
     this.serviceCode = options.service ?? "";
     this.setData({ servicePhone: cachedMerchant()?.servicePhone ?? "" });
@@ -165,34 +178,51 @@ Page({
   },
 
   onShow() {
+    this.aiOrderFactsActive = true;
+    this.setData({ aiNativeOrderProjection: null, aiOrderFactsExpanded: false });
     void this.load();
   },
 
   // Default-off lifecycle hooks are intentionally cleanup-only. They do not attach a host,
   // read AI data, or start polling until a server capability is wired in a later release.
   onHide() {
+    this.aiOrderFactsActive = false; this.loadVersion++;
+    this.setData({ aiNativeOrderProjection: null, aiOrderFactsExpanded: false });
     this.selectComponent?.("#ai-native-workbench")?.hostHide?.();
   },
 
   onUnload() {
+    this.aiFactsUnsubscribe?.(); this.aiFactsUnsubscribe = undefined;
+    this.aiOrderFactsActive = false; this.loadVersion++;
     this.selectComponent?.("#ai-native-workbench")?.hostLogout?.();
+  },
+
+  onToggleOrderFacts() {
+    if (this.aiOrderFactsActive && this.data.view.status === "ready" && this.data.aiNativeOrderProjection) {
+      this.setData({ aiOrderFactsExpanded: !this.data.aiOrderFactsExpanded });
+    }
   },
 
   onPullDownRefresh() {
     this.load().finally(() => wx.stopPullDownRefresh());
   },
 
-  async load() {
+  async load(): Promise<void> {
     if (!this.orderId || !isSignedIn()) return;
     const token = ++this.loadVersion;
     try {
       // 深链接/历史进入：订单属于其他服务时先经服务端切换（保护未提交清单）。
       if (this.serviceCode && currentServiceCode() !== this.serviceCode) {
         const ok = await ensureServiceForOrder(this.serviceCode);
+        if (!this.aiOrderFactsActive) return;
         if (!ok) {
+          if (token !== this.loadVersion) return;
           this.setData({ view: blockedState("已保留当前租赁", "查看该订单需要切换到它所属的服务。", "回订单列表", "none") });
           return;
         }
+        if (currentServiceCode() !== this.serviceCode) return;
+        // The switch invalidated the old load; bind a fresh read to the new session.
+        return this.load();
       }
       const service = this.serviceCode || currentServiceCode();
       const [order, funding, fulfillment, extensions, fees, catalog] = await Promise.all([
@@ -280,6 +310,7 @@ Page({
     });
     this.setData({
       view: readyState(),
+      aiNativeOrderProjection: this.aiOrderFactsActive ? customerOrderFacts(order, this.orderId) : null,
       order,
       funding,
       fulfillment,

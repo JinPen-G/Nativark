@@ -47,12 +47,13 @@ export class FormalKnowledgeAuthorizationAdapter implements KnowledgeAuthorizati
   }
 
   private async evaluate(context: AiExecutionContext, action: KnowledgeAction | MemoryAction,
-    requestScope: AiExecutionContext['scope'], resource?: FormalPolicyResource): Promise<KnowledgeGrant | null> {
+    requestScope: AiExecutionContext['scope'], resource?: FormalPolicyResource,
+    binding: Pick<KnowledgeAuthorizationRequest, 'creation' | 'lifecycle' | 'receiptOperationId'> = {}): Promise<KnowledgeGrant | null> {
     try {
       const current = await this.identities.resolve();
       if (fingerprint(current) !== fingerprint(context) || !sameScope(current.scope, requestScope)
         || current.actor.kind === 'automation' || current.actor.kind === 'customer' && action !== 'read') return null;
-      const policyRequest = { action, scope: structuredClone(requestScope) } as KnowledgeAuthorizationRequest;
+      const policyRequest = { action, scope: structuredClone(requestScope), ...structuredClone(binding) } as KnowledgeAuthorizationRequest;
       const policy = structuredClone(await this.policies.resolve(structuredClone(current), policyRequest, resource));
       if (!policy || policy.action !== action || !sameScope(policy.scope, current.scope) || policy.audience !== current.audience
         || fingerprint(policy.actor) !== fingerprint(actor(current)) || !Number.isSafeInteger(policy.revision) || policy.revision < 1
@@ -74,7 +75,13 @@ export class FormalKnowledgeAuthorizationAdapter implements KnowledgeAuthorizati
     if ((request.action === 'upload') !== Boolean(request.upload) || request.upload && (request.document || request.attachmentId)) return Promise.resolve(null);
     const resource = request.upload ? { upload: structuredClone(request.upload) } : request.document ? { documentId: request.document.documentId, documentVersion: request.document.documentVersion,
       attachmentId: request.attachmentId ?? request.document.attachmentId, aclRevision: request.document.aclRevision } : request.attachmentId ? { attachmentId: request.attachmentId } : undefined;
-    return this.evaluate(context, request.action, request.scope, resource);
+    if (request.creation && request.action !== 'create') return Promise.resolve(null);
+    if (request.lifecycle && request.lifecycle.action !== request.action
+      || request.receiptOperationId !== undefined && (request.action !== 'read_metadata' || request.lifecycle)) return Promise.resolve(null);
+    return this.evaluate(context, request.action, request.scope, resource, {
+      ...(request.creation ? { creation: request.creation } : {}), ...(request.lifecycle ? { lifecycle: request.lifecycle } : {}),
+      ...(request.receiptOperationId !== undefined ? { receiptOperationId: request.receiptOperationId } : {}),
+    });
   }
 }
 

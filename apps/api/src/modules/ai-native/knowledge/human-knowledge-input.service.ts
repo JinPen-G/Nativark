@@ -38,6 +38,10 @@ export class HumanKnowledgeInputService {
       db: ports.memory.db, authorization: ports.memory.authorization });
   }
 
+  /** Re-open a collected source through the same current-session context
+   * checks. This is a consumption helper, not a bearer reference. */
+  openSource(source: unknown) { return this.context.open(source); }
+
   collect(value: unknown, options: unknown = { includePreferences: false }) {
     const input = parse(knowledgeContextInputSchema, value);
     const settings = parse(z.object({ includePreferences: z.boolean(),
@@ -56,6 +60,9 @@ export class HumanKnowledgeInputService {
           if (fresh.status !== 'confirmed' || fresh.revision !== item.revision || fresh.aclRevision !== item.aclRevision
             || fresh.confirmationRecordId !== item.confirmationRecordId || fresh.expiresAt !== item.expiresAt
             || fingerprint(fresh.preference) !== fingerprint(item.preference)) return unavailable();
+        }
+        if (preferences.items.length && (knowledge.status === 'ready' || knowledge.status === 'partial')) {
+          await this.context.revalidate(knowledge);
         }
       }
       // Preserve the existing knowledge package; an optional, separate section
@@ -89,6 +96,13 @@ export class HumanKnowledgeInputService {
           if (fresh.status !== 'confirmed' || fresh.revision !== item.revision || fresh.aclRevision !== item.aclRevision
             || fresh.confirmationRecordId !== item.confirmationRecordId || fresh.expiresAt !== item.expiresAt
             || fingerprint(fresh.preference) !== fingerprint(item.preference)) return unavailable();
+        }
+        // Confirmation reads can await storage/authorization. Do not return
+        // knowledge that lost its current ACL while those reads were pending.
+        // This is bounded revalidation, not an atomic cross-resource snapshot.
+        if (preferences.items.length) {
+          const current = await this.context.revalidate(verified);
+          if (fingerprint(current) !== fingerprint(verified)) return unavailable();
         }
       }
       return { ...verified, preferences };

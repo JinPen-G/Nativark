@@ -7,7 +7,8 @@ import {
   UnauthorizedException
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { RentalCategoryCode, type RentalCapability, type SystemUserRow } from "@rental-os/shared";
+import { AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, RentalCategoryCode,
+  type RentalCapability, type SystemUserRow } from "@rental-os/shared";
 import { AuthService } from "../modules/auth/auth.service";
 import { ClientAuthService } from "../modules/client/client-auth.service";
 import { ClientApiRateLimitService } from "../modules/client/client-api-rate-limit.service";
@@ -15,7 +16,7 @@ import { WorkspaceCapabilityService } from "../modules/rental-core/workspace-cap
 import { SubscriptionService } from "../modules/subscription/subscription.service";
 import { enterRequestIdentity } from "./request-identity";
 import { matchableRequestPath } from "./request-path";
-import { isStaffAuthPath, isStaffBusinessRouteAllowed, staffRoutePermissions } from "./staff-api-policy";
+import { isStaffAuthPath, isStaffBusinessRouteAllowed, staffRoutePermissions, isHumanAutomationRoute } from "./staff-api-policy";
 import { PrismaService } from "../modules/database/prisma.service";
 import { enabledOrganizationSubtreeIds, organizationLocationScope } from "./organization-location-scope";
 import { isPlatformAiProviderPath, platformAiProviderPermission, PLATFORM_AI_PROVIDER_PERMISSIONS } from './platform-ai-access-policy';
@@ -164,7 +165,20 @@ function isPublicRoute(path: string) {
   return PUBLIC_ROUTES.has(path) || PUBLIC_ROUTE_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 }
 
+const aiManagementRoutes = new Set([AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT]
+  .flatMap(({ basePath, method, ...operations }) => Object.values(operations).map(operation => `${method} /${basePath}/${operation}`)));
+
 export function requiredPermissions(method: string, path: string) {
+  if (aiManagementRoutes.has(`${method.toUpperCase()} ${path}`)) return ['system:params:manage'];
+  if (method.toUpperCase() === 'POST'
+    && /^\/ai-native\/automation\/operator\/policies\/(?:read|preview|prepare|preparation|review|operation|commit)$/u.test(path)) {
+    return ['system:params:manage'];
+  }
+  if (isHumanAutomationRoute(method, path, 'staff')) return ['rental-os:order:view'];
+  if (isHumanAutomationRoute(method, path, 'operator')) {
+    // Entry permission does not replace each event's original read authority or review grant.
+    return ['rental-os:order:view', 'system:integration:manage', 'rental-os:finance:view', 'rental-os:finance:reconcile'];
+  }
   const aiProviderPermission = platformAiProviderPermission(method, path);
   if (aiProviderPermission) return [aiProviderPermission];
   if (path === "/platform/rental-categories" || path.startsWith("/platform/rental-categories/")) {
@@ -720,7 +734,8 @@ export class ApiAuthGuard implements CanActivate {
     // 而本文件全是字符串前缀与正则判定。两者语义不一致时，变体路径会落到
     // requiredPermissions 末尾的 `return []` 并被当作"无需权限"放行。详见 request-path.ts。
     const path = matchableRequestPath(request.url);
-    const staffApiRequest = Boolean(request.staffApiRequest || /^\/api\/staff\/v1(?:\/|\?|$)/iu.test(request.originalUrl ?? ""));
+    const staffApiRequest = Boolean(request.staffApiRequest || /^\/api\/staff\/v1(?:\/|\?|$)/iu.test(request.originalUrl ?? "")
+      || isHumanAutomationRoute(request.method, path, 'staff'));
     if (staffApiRequest && !isStaffBusinessRouteAllowed(request.method, path)) {
       throw new ForbiddenException("该接口未向员工小程序开放");
     }

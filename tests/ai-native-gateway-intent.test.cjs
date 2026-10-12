@@ -7,6 +7,41 @@ const { UnifiedAiGatewayService } = require('../apps/api/src/modules/ai-native/u
 const policy = { sceneCode: 'order.explain', maxOutputTokens: 128 };
 const intent = () => ({ draftVersion: 'ain-c03-draft-2', requestId: 'request-1', sceneCode: 'order.explain', messages: [{ role: 'user', content: [{ kind: 'text', text: 'first' }, { kind: 'text', text: ' second' }] }], requiredFeatures: ['text'], optionalFeatures: [], maxOutputTokens: 64 });
 const reject = (code, body) => assert.throws(body, e => e.code === code);
+
+test('media resolver revalidates authorization after storage and snapshots caller context', async () => {
+  const { AuthorizedGatewayMediaAttachmentResolver } = require('../apps/api/src/modules/ai-native/gateway-media-attachment.resolver');
+  const bytes = Buffer.from('bounded image'), contentHash = require('node:crypto').createHash('sha256').update(bytes).digest('hex');
+  const context = { tenantId: 'tenant-1', workspaceId: 'workspace-1', actorId: 'actor-1' };
+  const reference = { kind: 'image', attachmentId: 'attachment-1', attachmentRevision: 1 };
+  let allowed = true, reads = 0, checks = 0;
+  const resolver = new AuthorizedGatewayMediaAttachmentResolver({ authorize: async (c, r) => {
+    checks++; assert.equal(c.workspaceId, 'workspace-1'); assert.equal(r.attachmentRevision, 1);
+    return allowed ? { ...reference, kind: undefined, mediaType: 'image/png', sizeBytes: bytes.length, contentHash, readBinding: { version: 1 } } : null;
+  } }, { read: async () => { reads++; context.workspaceId = 'other'; reference.attachmentRevision = 2; allowed = false; return bytes; } });
+  assert.equal(await resolver.resolve(context, reference, new AbortController().signal), null);
+  assert.equal(checks, 2); assert.equal(reads, 1);
+});
+
+test('media count rejects before attachment reads and cancellation prevents late content', async () => {
+  const { prepareGatewayIntent } = require('../apps/api/src/modules/ai-native/gateway-intent');
+  const input = intent(); input.requiredFeatures.push('image');
+  input.messages[0].content = Array.from({ length: 9 }, (_, i) => ({ kind: 'image', attachmentId: `image-${i}`, attachmentRevision: 1 }));
+  let reads = 0;
+  await assert.rejects(prepareGatewayIntent(input, policy, 'invoke', {}, { resolve: async () => { reads++; return null; } }), e => e.code === 'INVALID_REQUEST');
+  assert.equal(reads, 0);
+  input.messages[0].content.length = 1;
+  const controller = new AbortController();
+  await assert.rejects(prepareGatewayIntent(input, policy, 'invoke', {}, { resolve: async () => { controller.abort(); return null; } }, controller.signal), e => e.code === 'CANCELLED');
+});
+
+test('uncooperative media resolution is bounded without routing or dispatch', async () => {
+  const h = gateway(), input = intent(); input.requiredFeatures.push('image');
+  input.messages[0].content.push({ kind: 'image', attachmentId: 'image-1', attachmentRevision: 1 });
+  h.ports.media = { resolve: async () => new Promise(() => {}) };
+  const service = new UnifiedAiGatewayService(h.ports, 20, { ...policy, routeScene: 'chat' });
+  await assert.rejects(service.invokeIntent(h.context, input), e => e.code === 'TIMEOUT');
+  assert.deepEqual(h.events, []);
+});
 test('text normalization preserves order without adding a provider, model or address', () => {
   const input = intent(), out = prepare(input, policy, 'invoke');
   assert.deepEqual(out.request, { callId: 'request-1', messages: [{ role: 'user', content: 'first second' }], maxOutputTokens: 64 });
@@ -54,6 +89,33 @@ function gateway(binding = { ...policy, routeScene: 'chat' }) {
   });
   return { events, requests, hashes, context, ports, service: new UnifiedAiGatewayService(ports, 10000, binding) };
 }
+test('authorized WAV invoke enters the same routing and single accounting lifecycle', async () => {
+  const f = gateway(), input = intent(), bytes = Buffer.from('bounded WAV fixture');
+  const contentHash = require('node:crypto').createHash('sha256').update(bytes).digest('hex');
+  input.requiredFeatures = ['text', 'audio'];
+  input.messages[0].content.push({ kind: 'audio', attachmentId: 'audio-1', attachmentRevision: 2 });
+  f.ports.media = { resolve: async (_context, ref) => ({ ...ref, mediaType: 'audio/wav', contentHash, bytes }),
+    assertCurrent: async (context, refs) => {
+      assert.deepEqual(context, f.context);
+      assert.deepEqual(refs, [{ kind: 'audio', attachmentId: 'audio-1', attachmentRevision: 2, mediaType: 'audio/wav', contentHash }]);
+    } };
+  const resolve = f.ports.routing.resolve;
+  f.ports.routing.resolve = async (context, capabilities) => {
+    assert.deepEqual(capabilities, ['text', 'audio']); return resolve(context, capabilities);
+  };
+  assert.equal((await f.service.invokeIntent(f.context, input)).text, 'done');
+  assert.equal(f.requests[0].messages[0].content[2].contentHash, contentHash);
+  assert.deepEqual(f.events, ['route','admit','reserve','audit','settle','completed']);
+  const bad = gateway(); bad.ports.media = { resolve: async (_context, ref) => ({ ...ref,
+    mediaType: 'audio/wav', contentHash: '0'.repeat(64), bytes }) };
+  await assert.rejects(bad.service.invokeIntent(bad.context, input), e => e.code === 'CAPABILITY_UNSUPPORTED');
+  assert.deepEqual(bad.events, []);
+  let streamReads = 0;
+  const {prepareGatewayIntent} = require('../apps/api/src/modules/ai-native/gateway-intent');
+  await assert.rejects(prepareGatewayIntent(input, policy, 'stream', f.context, {resolve: async()=>{streamReads++;}}),
+    e=>e.code==='CAPABILITY_UNSUPPORTED');
+  assert.equal(streamReads,0); // No supported audio streaming adapter: reject before bytes or dispatch.
+});
 for (const mode of ['invoke', 'stream']) test(`${mode} text intent enters existing dispatch and accounting lifecycle without model input`, async () => {
   const f = gateway(), input = intent();
   if (mode === 'invoke') assert.equal((await f.service.invokeTextIntent(f.context, input)).text, 'done');

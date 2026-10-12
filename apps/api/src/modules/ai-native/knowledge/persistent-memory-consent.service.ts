@@ -15,6 +15,21 @@ import { preferenceAmbiguities } from './preference-ambiguities';
 const inputSchema = z.object({ memoryId: id, expectedRevision: z.number().int().min(1).max(4294967293),
   operationId: id.max(110), expiresAt: z.string().datetime({ offset: true }) }).strict();
 const identityKey = (context: AiExecutionContext) => fingerprint([context.actor, context.audience, context.scope, 'access' in context ? context.access : null]);
+const preferenceSelectionInput = z.object({ kinds: z.array(z.enum(['locale', 'fulfillment_location', 'display_density'])).min(1).max(3),
+  limit: z.number().int().min(1).max(10) }).strict();
+const selectedPreference = z.object({ memoryId: id, revision: z.number().int().min(2).max(4294967294),
+  aclRevision: z.number().int().min(1).max(4294967294), expiresAt: z.string().datetime({ offset: true }),
+  preference: preferenceSchema, confirmationRecordId: id }).strict();
+const preferenceSelectionSnapshot = preferenceSelectionInput.extend({
+  scope: z.object({ kind: z.literal('workspace'), tenantId: id, workspaceId: id }).strict(),
+  owner: z.object({ actorKind: z.literal('user'), actorId: id }).strict(),
+  audience: z.enum(['operator', 'staff', 'client']), items: z.array(selectedPreference).max(10),
+  truncated: z.boolean(), semantics: z.literal('explicit_preference_selection_not_authority'),
+  requestedKinds: preferenceSelectionInput.shape.kinds,
+  ambiguities: z.array(z.object({ kind: z.enum(['locale', 'fulfillment_location', 'display_density']),
+    memoryIds: z.array(id).min(2).max(10), nextStep: z.literal('human_selection') }).strict()).max(3),
+  ambiguityCoverage: z.literal('returned_items_only'), businessCompatibility: z.literal('unavailable')
+}).strict();
 
 /** Explicit human action, not an AI tool or HTTP endpoint. Reuses the existing
  * identity resolver, consent table, confirmation hash and memory consumer.
@@ -61,6 +76,41 @@ export class PersistentMemoryConsentService {
 
   async read(memoryId: string): Promise<AiMemoryDraft> {
     return this.memory.read(await this.current(), parse(id, memoryId));
+  }
+
+  /** Bounded owner-only discovery, not preference reuse or an atomic snapshot.
+   * Probe rows receive the same resource checks as displayed rows. */
+  async list(value: unknown) {
+    const input = parse(z.object({ limit: z.number().int().min(1).max(30), after: id.optional() }).strict(), value);
+    const context = await this.current(), owner = actor(context);
+    await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner });
+    if (context.scope.kind !== 'workspace') return unavailable();
+    requiredPort(this.ports.db.aiStructuredMemory, ['findMany']);
+    const rows = await this.ports.db.aiStructuredMemory.findMany({ where: {
+      tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId,
+      ownerKind: owner.actorKind, ownerId: owner.actorId, ...(input.after ? { id: { gt: input.after } } : {}),
+    }, orderBy: { id: 'asc' }, take: input.limit + 1,
+    select: { id: true, tenantId: true, workspaceId: true, ownerKind: true, ownerId: true },
+    }).catch(() => unavailable());
+    if (rows.length > input.limit + 1 || new Set(rows.map(row => row.id)).size !== rows.length) return unavailable();
+    for (const row of rows) {
+      parse(id, row.id);
+      if (row.tenantId !== context.scope.tenantId || row.workspaceId !== context.scope.workspaceId
+        || row.ownerKind !== owner.actorKind || row.ownerId !== owner.actorId) return unavailable();
+    }
+    // Let the database collation define keyset order; never sort an already
+    // limited page with a different JavaScript collation.
+    const observed = [];
+    for (const row of rows) observed.push(await this.state(row.id));
+    // A later row's await must not leave earlier metadata authorized by an old
+    // policy or conceal consent revocation during page assembly.
+    for (const state of observed) {
+      if (fingerprint(await this.state(state.memoryId)) !== fingerprint(state)) throw new KnowledgeError('conflict');
+    }
+    await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner });
+    const items = observed.slice(0, input.limit);
+    return { items, nextAfter: rows.length > input.limit ? items[items.length - 1].memoryId : null,
+      semantics: 'owner_metadata_not_preference_reuse' as const };
   }
 
   /** Management metadata remains readable with the formal read action even
@@ -146,8 +196,9 @@ export class PersistentMemoryConsentService {
 
   /** Reconciliation material for an interrupted memory operation. Absence of
    * a receipt is deliberately reported as unknown, never as proof that the
-   * durable write did not happen. The caller must retry the same operation or
-   * present the current state to a human; this method never creates a record. */
+   * durable write did not happen. This observes a key, NOT the operation payload:
+   * changeStatus/confirmationStatus must verify the original command. Absence
+   * never authorizes blind replay; this method never creates a record. */
   async operationRecovery(value: unknown) {
     const input = parse(z.object({ memoryId: id, operationId: id.max(110), expectedRevision: z.number().int().min(1).max(4294967293),
       operation: z.enum(['propose', 'modify', 'confirm', 'revoke', 'delete']) }).strict(), value);
@@ -162,6 +213,7 @@ export class PersistentMemoryConsentService {
     await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner, memory: after });
     return { memoryId: input.memoryId, operationId: input.operationId, requestedOperation: input.operation,
       receipt: receipt ? 'recorded' as const : 'unknown' as const,
+      binding: 'key_only_not_command_attestation' as const,
       current: { status: after.status, revision: after.revision, expiresAt: after.expiresAt },
       nextStep: receipt ? 'reconcile_recorded_operation' as const : 'reconcile_same_operation' as const,
       absenceSemantics: 'no_receipt_is_not_proof_of_non_execution' as const };
@@ -204,7 +256,7 @@ export class PersistentMemoryConsentService {
     const rows = await this.ports.db.aiStructuredMemory.findMany({ where: {
       tenantId: scope.tenantId, workspaceId: scope.workspaceId, subjectType: owner.actorKind, subjectId: owner.actorId,
       ownerKind: owner.actorKind, ownerId: owner.actorId, status: 'confirmed', expiresAt: { gt: new Date(this.ports.clock.now()) } },
-    select: { id: true, tenantId: true, workspaceId: true, ownerKind: true, ownerId: true }, orderBy: { id: 'asc' }, take: 100 }).catch(() => unavailable());
+      select: { id: true, tenantId: true, workspaceId: true, ownerKind: true, ownerId: true }, orderBy: { id: 'asc' }, take: 101 }).catch(() => unavailable());
     if (!Array.isArray(rows) || rows.length > 100) return unavailable();
     const values: Array<Extract<AiMemoryDraft, { status: 'confirmed' }>> = [], seen = new Set<string>();
     for (const row of rows) {
@@ -238,12 +290,39 @@ export class PersistentMemoryConsentService {
   /** Selection is explicit: an absent/empty kind list is not permission to
    * inject every preference into a model input. */
   async selectPreferences(value: unknown) {
-    const input = parse(z.object({ kinds: z.array(z.enum(['locale', 'fulfillment_location', 'display_density'])).min(1).max(3),
-      limit: z.number().int().min(1).max(10) }).strict(), value);
+    const input = parse(preferenceSelectionInput, value);
+    if (new Set(input.kinds).size !== input.kinds.length) throw new KnowledgeError('invalid_input');
+    const context = await this.current();
     const listed = await this.confirmedPreferences({ limit: 50 });
     const items = listed.items.filter(item => input.kinds.includes(item.preference.kind)).slice(0, input.limit);
-    return { items, requestedKinds: input.kinds, truncated: items.length < listed.items.filter(item => input.kinds.includes(item.preference.kind)).length,
-      semantics: 'explicit_preference_selection_not_authority' as const };
+    if (identityKey(await this.current()) !== identityKey(context) || context.scope.kind !== 'workspace') return unavailable();
+    const selection = { ...input, requestedKinds: input.kinds, scope: structuredClone(context.scope), owner: actor(context), audience: context.audience,
+      items, truncated: listed.truncated || items.length < listed.items.filter(item => input.kinds.includes(item.preference.kind)).length,
+      semantics: 'explicit_preference_selection_not_authority' as const, ambiguities: preferenceAmbiguities(items),
+      ambiguityCoverage: 'returned_items_only' as const, businessCompatibility: 'unavailable' as const };
+    return this.revalidateSelection(selection);
+  }
+
+  /** Same observed values only. A revoked/changed preference is not silently
+   * replaced with its latest value; this is input material, never a grant. */
+  async revalidateSelection(value: unknown) {
+    const selection = parse(preferenceSelectionSnapshot, value), context = await this.current(), owner = actor(context);
+    if (!sameScope(context.scope, selection.scope) || fingerprint(owner) !== fingerprint(selection.owner)
+      || context.audience !== selection.audience || selection.items.length > selection.limit
+      || fingerprint(selection.requestedKinds) !== fingerprint(selection.kinds)
+      || fingerprint(selection.ambiguities) !== fingerprint(preferenceAmbiguities(selection.items))
+      || new Set(selection.kinds).size !== selection.kinds.length
+      || new Set(selection.items.map(item => item.memoryId)).size !== selection.items.length) return unavailable();
+    await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner });
+    for (const item of selection.items) {
+      if (!selection.kinds.includes(item.preference.kind)) return unavailable();
+      const fresh = await this.memory.read(context, item.memoryId);
+      if (fresh.status !== 'confirmed' || fresh.revision !== item.revision || fresh.aclRevision !== item.aclRevision
+        || fresh.confirmationRecordId !== item.confirmationRecordId || fresh.expiresAt !== item.expiresAt
+        || fingerprint(fresh.preference) !== fingerprint(item.preference)) return unavailable();
+    }
+    await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner });
+    return selection;
   }
 
   /** Editing invalidates the old consent; deletion uses the existing tombstone.

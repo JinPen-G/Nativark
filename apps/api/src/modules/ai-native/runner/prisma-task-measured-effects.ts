@@ -63,7 +63,7 @@ export class PrismaTaskMeasuredEffects implements AiTaskRunnerEffectPort {
     // A shared registry object's later mutation must not swap the executable.
     const execute = tool.execute.bind(tool), phase = tool.phase;
     if (phase !== undefined && (phase !== 'confirmation' || binding.plan.operation !== 'idempotent'
-      || binding.plan.toolCode !== 'rental.order.commit')) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
+      || !['rental.order.commit', 'tenant.notifications.commit'].includes(binding.plan.toolCode))) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
     if (continuation && (phase !== 'confirmation' || continuation.stepId !== binding.step.id
       || continuation.stepRevision !== binding.step.revision)) throw new AiTaskExecutionBudgetError('AI_RESOURCE_UNAVAILABLE');
     return this.evidence.capture(binding.lease, binding.step.id, signal, async () => {

@@ -8,6 +8,24 @@ const { ModelGatewayError } = require('../apps/api/src/modules/ai-native/model-g
 const { isGatewayResult, isGatewayEvent } = require('../apps/api/src/modules/ai-native/gateway-contract-validation');
 const intent = () => ({ draftVersion: 'ain-c03-draft-2', requestId: 'request-1', sceneCode: 'order.explain', messages: [{ role: 'user', content: [{ kind: 'text', text: 'explain' }] }], requiredFeatures: ['text'], optionalFeatures: [], maxOutputTokens: 10 });
 const scenes = [{ sceneCode: 'order.explain', routeScene: 'chat', maxOutputTokens: 100 }];
+test('public media rechecks current attachment after reservation before dispatch', async () => {
+  const {createHash}=require('node:crypto');
+  const {AuthorizedGatewayMediaAttachmentResolver}=require('../apps/api/src/modules/ai-native/gateway-media-attachment.resolver');
+  for(const revoked of [false,true]) {
+    const f=setup(),bytes=Buffer.from('bounded-synthetic-image'),hash=createHash('sha256').update(bytes).digest('hex');
+    let active=true,checks=0;
+    f.ports.media=new AuthorizedGatewayMediaAttachmentResolver({authorize:async(_context,ref)=>{
+      checks++;return active?{...ref,mediaType:'image/png',sizeBytes:bytes.length,contentHash:hash,readBinding:{}}:null;
+    }},{read:async()=>bytes});
+    const reserve=f.ports.budget.reserve;
+    f.ports.budget.reserve=async(...args)=>{const result=await reserve(...args);if(revoked)active=false;return result;};
+    const service=new PublicAiGatewayService({...f.runtime,ports:f.ports},scenes);
+    const input=intent();input.requiredFeatures.push('image');input.messages[0].content.push({kind:'image',attachmentId:'file-a',attachmentRevision:1});
+    const result=await service.invoke(f.context,input);
+    assert.equal(result.status,revoked?'failed':'completed');
+    assert.equal(f.events.includes('transport'),!revoked);assert.ok(checks>=3);
+  }
+});
 function setup(mode = 'platform_managed', timeout = 10000) {
   const context = structuredClone(base.contexts[0]), events = [];
   const scope = { id: 'consumer', kind: 'WORKSPACE', tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId };
@@ -33,6 +51,13 @@ for (const mode of ['platform_managed', 'tenant_managed']) test(`${mode}: public
   assert.equal(result.actual.configId, 'profile-1'); assert.equal(result.actual.serviceMode, mode);
   assert.equal(result.actual.configurationScope.kind, mode === 'platform_managed' ? 'platform' : 'tenant');
   assert.equal(result.requestId, 'request-1'); assert.deepEqual(result.usage, { kind: 'reported', inputTokens: 1, outputTokens: 2 });
+});
+test('client audience uses the same guarded Gateway and budget lifecycle', async () => {
+  const f = setup(); f.context.audience = 'client'; f.context.actor = { kind: 'customer', customerId: 'customer-1' }; delete f.context.access;
+  const result = await f.service.invoke(f.context, intent());
+  assert.equal(result.status, 'completed');
+  assert.equal(result.actual.configurationScope.kind, 'platform');
+  assert.ok(f.events.includes('reserve')); assert.ok(f.events.includes('settle'));
 });
 test('public stream emits started, delta and terminal with positive consecutive sequences', async () => {
   const f = setup(), out = []; for await (const event of f.service.stream(f.context, intent())) { assert.equal(isGatewayEvent(event), true); out.push(event); }

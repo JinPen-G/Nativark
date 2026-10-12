@@ -32,6 +32,19 @@ export interface AiSceneRequestReadDraft {
   draftVersion: typeof AI_SCENE_REQUEST_DRAFT_VERSION;
   inputRef: string;
 }
+/** Confirms only the displayed Core quote parameters, not order creation or
+ * approval. Hashes bind the current authorized preparation, not authority. */
+export interface AiSceneQuoteReceiptReadDraft extends AiSceneRequestReadDraft {
+  /** Optional legacy display hints; historical lookup uses the server-owned
+   * original reference, not today's candidates or these caller values. */
+  selectionRevision?: string;
+  inputFingerprint?: string;
+}
+export interface AiSceneQuoteConfirmDraft extends AiSceneQuoteReceiptReadDraft {
+  selectionRevision: string;
+  inputFingerprint: string;
+  confirmQuote: true;
+}
 export interface AiSceneRequestReceiptDraft {
   draftVersion: typeof AI_SCENE_REQUEST_DRAFT_VERSION;
   inputRef: string;
@@ -62,5 +75,20 @@ export interface AiSceneRecoveryStepDraft {
 export const AI_SCENE_REQUEST_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/scene-requests', method: 'POST',
   create: '', read: 'read', reissue: 'reissue', reconcile: 'reconcile', reconcileReissue: 'reconcile-reissue',
-  createTask: 'create-task', material: 'material', recovery: 'recovery'
+  createTask: 'create-task', material: 'material', recovery: 'recovery', quoteReview: 'quote-review',
+  quoteConfirm: 'quote-confirm', quoteReceipt: 'quote-receipt'
+} as const);
+/** Server opt-in only. Bodies reuse original references and the existing input
+ * submission contract; callers never supply leases, prompts or model settings. */
+export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
+  basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/model`, method: 'POST',
+  start: 'start', readInput: 'input', refreshInput: 'input/refresh', resume: 'resume', reconcile: 'reconcile',
+  readAnswer: 'input/receipt', continueAnswer: 'input/continue',
+  readQuotePreparation: 'input/quote-preparation',
+  confirmClarifiedQuote: 'input/quote-confirm', readClarifiedQuoteReceipt: 'input/quote-receipt',
+  requestCancel: 'cancel', readModelResult: 'result', reopenModelSource: 'source',
+  readTaskPage: 'tasks', readTaskEvents: 'events', readTaskScene: 'scene',
+  startSettingsTask: 'settings/start', readSettingsConfirmation: 'settings/confirmation',
+  decideSettingsProposal: 'settings/decision', readSettingsDecision: 'settings/decision-receipt', continueSettingsConfirmation: 'settings/continue',
+  reconcileSettingsTask: 'settings/reconcile', cancelSettingsTask: 'settings/cancel'
 } as const);

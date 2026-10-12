@@ -8,6 +8,8 @@ import { validateBudgetSettings } from '../budget/budget-settings';
 import type { SubscriptionBudgetEntitlementAdapter } from '../budget/budget-dependency-adapters';
 import type { AiTaskCreationAuthority } from '../ai-task-creation.repository';
 import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
+import { returnExceptionSource } from '../business-events/return-exception-source';
+import type { BusinessFailureReadAuthority } from '../business-events/business-failure-read.authority';
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u);
 const revision = z.number().int().min(1).max(4294967294);
@@ -21,19 +23,20 @@ const subjectSchema = z.object({ id: id.max(36), tenantId: id, workspaceId: id, 
   enabled: z.literal(true), permissions, locationScope, expiresAt: z.date(), revokedAt: z.null() });
 const policySchema = z.object({ id: id.max(36), tenantId: id, workspaceId: id, subjectId: id.max(36), revision,
   mode: z.enum(['shadow', 'manual_confirmation']), sceneCode: id.max(64), sceneVersion: id.max(64),
-  allowedEventTypes: z.array(z.enum(['notification.failed', 'refund.failed'])).min(1).max(2).refine(values => new Set(values).size === values.length),
+  allowedEventTypes: z.array(z.enum(['notification.failed', 'refund.failed', 'inspection.return_exception'])).min(1).max(3).refine(values => new Set(values).size === values.length),
   maxTasksPerDay: z.number().int().min(1).max(10000), cooldownSeconds: z.number().int().min(1).max(86400),
   validFrom: z.date(), expiresAt: z.date(), revokedAt: z.null() });
 const eventSchema = z.object({ id: z.string().uuid(), tenantId: id, workspaceId: id,
-  eventType: z.enum(['notification.failed', 'refund.failed']), notificationId: id.nullable(), refundId: id.nullable(),
-  resourceRevision: revision, orderId: id.nullable(), failureCode: z.enum(['delivery_failed', 'provider_failed']),
+  eventType: z.enum(['notification.failed', 'refund.failed', 'inspection.return_exception']), notificationId: id.nullable(), refundId: id.nullable(),
+  inspectionId: id.nullish(), exceptionId: id.nullish(),
+  resourceRevision: revision, orderId: id.nullable(), failureCode: z.enum(['delivery_failed', 'provider_failed', 'review_pending']),
   traceId: id, causationId: id, deduplicationKey: z.string().regex(/^[a-f0-9]{64}$/u),
   occurredAt: z.date(), expiresAt: z.date(), status: z.enum(['pending', 'claimed', 'retry_scheduled', 'ready']) });
 const toolsSchema = z.array(z.object({ code: z.string().refine(value => AI_TOOL_CODES.some(code => code === value)),
   version: z.literal(AI_TOOL_DRAFT_VERSION) }).strict()).min(1).max(30)
   .refine(values => new Set(values.map(value => value.code)).size === values.length);
 export type AutomationReadDb = Pick<PrismaClient, 'aiAutomationSubject' | 'aiAutomationPolicy' | 'aiAutomationInput'
-  | 'aiBusinessFailureOutbox' | 'businessWorkspace' | 'rentalNotificationLog' | 'rentalPaymentRefund' | 'rentalOrder'
+  | 'aiBusinessFailureOutbox' | 'businessWorkspace' | 'rentalNotificationLog' | 'rentalPaymentRefund' | 'rentalOrder' | 'rentalInspectionRecord'
   | 'aiScope' | 'aiBudgetPolicy' | 'aiTaskPlanPolicy'>;
 
 export class AutomationError extends Error {
@@ -51,14 +54,16 @@ export type AutomationSnapshot = Awaited<ReturnType<PrismaAutomationAuthority['s
 export class PrismaAutomationAuthority implements AiTaskCreationAuthority {
   private readonly policyId: string;
   constructor(private readonly db: AutomationReadDb, policyId: string,
-    private readonly entitlements: SubscriptionBudgetEntitlementAdapter, private readonly clock: () => Date = () => new Date()) {
+    private readonly entitlements: SubscriptionBudgetEntitlementAdapter, private readonly clock: () => Date = () => new Date(),
+    private readonly humanReads?: BusinessFailureReadAuthority) {
     this.policyId = parse(id.max(36), policyId);
   }
 
   async inspect(eventId: string, db: AutomationReadDb = this.db) {
-    const now = this.clock();
+    const now = this.clock(), human = await this.humanReads?.current();
     const policy = parse(policySchema, await db.aiAutomationPolicy.findUnique({ where: { id: this.policyId } }));
     const scope = { tenantId: policy.tenantId, workspaceId: policy.workspaceId };
+    if (human && (human.scope.tenantId !== scope.tenantId || human.scope.workspaceId !== scope.workspaceId)) throw unavailable();
     if (policy.id !== this.policyId || policy.validFrom > now || policy.expiresAt <= now) throw unavailable();
     const subject = parse(subjectSchema, await db.aiAutomationSubject.findFirst({ where: { id: policy.subjectId, ...scope } }));
     if (subject.id !== policy.subjectId || subject.tenantId !== scope.tenantId || subject.workspaceId !== scope.workspaceId
@@ -66,10 +71,18 @@ export class PrismaAutomationAuthority implements AiTaskCreationAuthority {
     const workspace = await db.businessWorkspace.findFirst({ where: { tenantId: scope.tenantId, id: scope.workspaceId, status: 'ACTIVE' },
       select: { id: true, tenantId: true, status: true } });
     if (!workspace || workspace.tenantId !== scope.tenantId || workspace.id !== scope.workspaceId || workspace.status !== 'ACTIVE') throw unavailable();
-    const event = parse(eventSchema, await db.aiBusinessFailureOutbox.findFirst({ where: { id: eventId, ...scope } }));
+    const eventRow = await db.aiBusinessFailureOutbox.findFirst({ where: { id: eventId, ...scope } });
+    const event = parse(eventSchema, eventRow);
     if (event.id !== eventId || event.tenantId !== scope.tenantId || event.workspaceId !== scope.workspaceId
       || event.occurredAt > now || event.expiresAt <= now || !policy.allowedEventTypes.includes(event.eventType)) throw unavailable();
-    let sourceRevision: number, orderId: string | null;
+    // The HTTP consumer needs BOTH the human's original resource read and the
+    // existing automation policy below. Read access never becomes a grant.
+    if (this.humanReads) {
+      if (!eventRow || event.status !== 'ready') throw unavailable();
+      await this.humanReads.withEvent(eventRow, async () => undefined);
+    }
+    let sourceRevision: number, orderId: string | null, sourceHash: string | undefined;
+    if (event.eventType !== 'inspection.return_exception' && (event.inspectionId || event.exceptionId)) throw unavailable();
     if (event.eventType === 'notification.failed') {
       if (!event.notificationId || event.refundId || event.failureCode !== 'delivery_failed'
         || !subject.permissions.includes('system:integration:manage')) throw unavailable();
@@ -80,7 +93,7 @@ export class PrismaAutomationAuthority implements AiTaskCreationAuthority {
         || ['mock', 'local_mock', 'simulation'].includes(row.provider)) throw unavailable();
       sourceRevision = row.revision;
       orderId = row.businessObjectType === 'order' ? row.businessObjectId : null;
-    } else {
+    } else if (event.eventType === 'refund.failed') {
       if (!event.refundId || event.notificationId || event.failureCode !== 'provider_failed'
         || !subject.permissions.includes('rental-os:finance:view')) throw unavailable();
       const row = await db.rentalPaymentRefund.findFirst({ where: { id: event.refundId, ...scope }, select: {
@@ -89,6 +102,17 @@ export class PrismaAutomationAuthority implements AiTaskCreationAuthority {
         || row.status !== 'failed' || row.succeededAt || row.fundedAt || ['mock', 'local_mock', 'simulation'].includes(row.provider)) throw unavailable();
       sourceRevision = row.revision;
       orderId = row.orderId;
+    } else {
+      if (!event.inspectionId || !event.exceptionId || !event.orderId || event.notificationId || event.refundId
+        || event.failureCode !== 'review_pending' || !subject.permissions.includes('rental-os:order:view')) throw unavailable();
+      const row = await db.rentalInspectionRecord.findFirst({ where: { id: event.inspectionId, ...scope, orderId: event.orderId } });
+      if (!row || row.id !== event.inspectionId || row.tenantId !== scope.tenantId || row.workspaceId !== scope.workspaceId
+        || row.orderId !== event.orderId) throw unavailable();
+      const source = returnExceptionSource(row, event.exceptionId);
+      if (!source?.failed) throw unavailable();
+      sourceRevision = source.revision;
+      orderId = source.orderId;
+      sourceHash = source.sourceHash;
     }
     if (sourceRevision !== event.resourceRevision || orderId !== event.orderId) throw unavailable();
     let orderLocations: string[] = [];
@@ -141,10 +165,12 @@ export class PrismaAutomationAuthority implements AiTaskCreationAuthority {
       occurredAt: event.occurredAt.toISOString(), traceId: event.traceId, causationId: event.causationId, deduplicationKey: event.deduplicationKey, causalDepth: 1 };
     const material = event.eventType === 'notification.failed'
       ? { ...eventBase, type: event.eventType, resource: { kind: 'notification', id: event.notificationId!, version: event.resourceRevision }, payload: { failureCode: 'delivery_failed' } }
-      : { ...eventBase, type: event.eventType, resource: { kind: 'refund', id: event.refundId!, version: event.resourceRevision }, payload: { orderId: orderId!, failureCode: 'provider_failed' } };
+      : event.eventType === 'refund.failed'
+        ? { ...eventBase, type: event.eventType, resource: { kind: 'refund', id: event.refundId!, version: event.resourceRevision }, payload: { orderId: orderId!, failureCode: 'provider_failed' } }
+        : { ...eventBase, type: event.eventType, resource: { kind: 'inspection', id: event.inspectionId!, version: event.resourceRevision }, payload: { orderId: orderId!, exceptionId: event.exceptionId! } };
     const policyEvidence = { ...policy, validFrom: policy.validFrom.toISOString(), expiresAt: policy.expiresAt.toISOString() };
     const subjectEvidence = { ...subject, expiresAt: subject.expiresAt.toISOString() };
-    const materialHash = requestFingerprint({ subject: subjectEvidence, policy: policyEvidence, event: material, expiresAt: expiresAt.toISOString(), orderLocations,
+    const materialHash = requestFingerprint({ subject: subjectEvidence, policy: policyEvidence, event: material, ...(sourceHash ? { sourceHash } : {}), expiresAt: expiresAt.toISOString(), orderLocations,
       scopeId, gates, plan: { ...planKey, revision: plan.revision, limits, tools, expiresAt: plan.expiresAt.toISOString() } });
     const key = { ...scope, policyId: policy.id, policyRevision: policy.revision, eventId: event.id };
     return { policy, subject, event, context, scopeId, expiresAt, key, materialHash,
@@ -183,11 +209,13 @@ export class PrismaAutomationAuthority implements AiTaskCreationAuthority {
 
   async input(inputRef: string) {
     if (!z.string().uuid().safeParse(inputRef).success) throw new AutomationError('invalid_input');
-    const row = await this.db.aiAutomationInput.findFirst({ where: { id: inputRef, policyId: this.policyId } });
+    const human = await this.humanReads?.current();
+    const inputKey = { id: inputRef, policyId: this.policyId, ...(human ? human.scope : {}) };
+    const row = await this.db.aiAutomationInput.findFirst({ where: inputKey });
     if (!row || row.id !== inputRef) throw unavailable();
     const current = await this.snapshot(row.eventId);
     this.verifyInput(row, current);
-    const again = await this.db.aiAutomationInput.findFirst({ where: { id: inputRef, policyId: this.policyId } });
+    const again = await this.db.aiAutomationInput.findFirst({ where: inputKey });
     if (!again || again.id !== inputRef) throw unavailable();
     const latest = await this.snapshot(again.eventId);
     if (latest.authorityHash !== current.authorityHash) throw unavailable();

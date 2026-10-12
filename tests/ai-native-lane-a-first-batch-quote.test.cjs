@@ -3,6 +3,78 @@ const test = require('node:test'), assert = require('node:assert/strict');
 require('ts-node').register({ transpileOnly: false, compilerOptions: { module: 'commonjs', moduleResolution: 'node', experimentalDecorators: true, emitDecoratorMetadata: true } });
 const { setup } = require('./fixtures/ai-native/lane-a-business-consumption.cjs');
 
+test('enterprise booking options use the original guarded member and bounded relationship query without selecting', async () => {
+  const h = await setup();
+  h.membershipRows.bookingOptions = ['relation-c','relation-b','relation-a'].map(id=>({
+    id, corporateCustomerId:`company-${id}`, corporateCustomer:{name:`Company ${id}`}, role:'employee', effectiveTo:null,
+    privateData:'must-not-project'
+  }));
+  const first = await h.tools.quote.bookingIdentityOptions({customerId:'customer-a',limit:2});
+  assert.equal(first.options.length,2);assert.equal(first.truncated,true);assert.equal(first.nextCursor,'relation-b');
+  assert.equal(first.qualification,'not_evaluated');assert.equal(first.execution,'not_attempted');
+  assert.equal(first.options[0].privateData,undefined);
+  assert.deepEqual(h.membershipRows.bookingQueries[0].where.tenantId,'tenant_001');
+  assert.equal(h.membershipRows.bookingQueries[0].where.personalCustomerId,'customer-a');
+  assert.equal(h.membershipRows.bookingQueries[0].where.status,'active');
+  assert.equal(h.membershipRows.bookingQueries[0].take,3);
+  assert.deepEqual(h.membershipRows.bookingQueries[0].orderBy,[{id:'desc'}]);
+  const next = await h.tools.quote.bookingIdentityOptions({customerId:'customer-a',limit:2,cursor:first.nextCursor});
+  assert.deepEqual(next.options.map(row=>row.corporateMembershipId),['relation-a']);
+  assert.equal(next.truncated,false);assert.equal(next.nextCursor,undefined);
+  assert.equal(h.businessFacts.writes.length,0);
+  await assert.rejects(h.tools.quote.bookingIdentityOptions({customerId:'customer-a',limit:2,workspaceId:'other'}));
+  const count = h.membershipRows.bookingQueries.length;
+  h.h.identity.user.permissions=[];
+  await assert.rejects(h.tools.quote.bookingIdentityOptions({customerId:'customer-a',limit:2}));
+  assert.equal(h.membershipRows.bookingQueries.length,count);
+});
+test('enterprise identity uses current authorized options and real Core membership resolution without granting approval', async () => {
+  const h=await setup('camera',true), corporateId='company-a';
+  h.membershipRows.corporateCustomers=[{id:corporateId,tenantId:'tenant_001',customerType:'corporate',name:'Synthetic enterprise'}];
+  h.membershipRows.corporateLinks=[{tenantId:'tenant_001',customerId:corporateId,status:'active'}];
+  h.membershipRows.bookingOptions=[{id:'relationship-a',tenantId:'tenant_001',personalCustomerId:'customer-a',
+    corporateCustomerId:corporateId,corporateCustomer:{name:'Synthetic enterprise'},role:'employee',status:'active',
+    effectiveFrom:new Date('2020-01-01T00:00:00Z'),effectiveTo:null}];
+  // Enterprise intent is not a selected company or a payer decision.
+  const candidate={...h.candidate,bookingIdentity:{bookingIdentity:'enterprise_employee'}};
+  const withoutCustomer={...candidate};delete withoutCustomer.customerId;
+  const customerFirst=await h.tools.quote.candidates.prepare(withoutCustomer);
+  assert.equal(customerFirst.status,'missing_input');
+  assert.ok(customerFirst.clarifications.some(row=>row.field==='customerId'&&row.candidates.some(option=>option.id==='customer-a')));
+  const first=await h.tools.quote.candidates.prepare(candidate);
+  assert.equal(first.status,'missing_input');assert.ok(first.missingFields.includes('selectionRevision'));
+  const {originalQuoteAnswerContract,applyOriginalQuoteAnswers}=require('../apps/api/src/modules/ai-native/scenes/original-quote-input');
+  const contract=originalQuoteAnswerContract(candidate,first,'补充预约资料');
+  assert.ok(contract.fields.some(row=>row.fieldId==='enterprise_selection'));
+  assert.ok(contract.fields.some(row=>row.fieldId==='enterprise_payer_selection'));
+  const answers=contract.fields.filter(row=>row.kind==='choice').map(row=>({fieldId:row.fieldId,value:row.options[0].value}));
+  const selected=applyOriginalQuoteAnswers(candidate,[{contract,answers}]);
+  const selectedIdentity={bookingIdentity:'enterprise_employee',corporateCustomerId:corporateId,enterpriseContractAndPayer:false};
+  assert.deepEqual(selected.bookingIdentity,selectedIdentity);
+  await assert.rejects(async()=>applyOriginalQuoteAnswers(candidate,[{contract,answers:answers.map(row=>row.fieldId==='enterprise_selection'?{...row,value:'unoffered-company'}:row)}]));
+  const prepared=await h.tools.quote.candidates.prepare(selected);
+  assert.equal(prepared.status,'needs_confirmation');assert.deepEqual(prepared.request.bookingIdentity,selectedIdentity);
+  let resolved=0;const original=h.memberships.resolveBookingIdentity.bind(h.memberships);
+  h.memberships.resolveBookingIdentity=async(...args)=>{const snapshot=await original(...args);resolved++;
+    assert.equal(snapshot.corporateMembershipId,'relationship-a');assert.equal(snapshot.personalCustomerId,'customer-a');
+    assert.equal(snapshot.enterpriseContractAndPayer,false);return snapshot;};
+  const preview=await h.tools.quote.previewSelection(selected);
+  assert.equal(preview.status,'quoted');assert.equal(preview.quote.reservation,'not_reserved');assert.equal(resolved,1);
+  // Core persistence is allowed for quotes, never inventory ownership or approval.
+  assert.equal(h.businessFacts.writes.some(row=>/order|reservation/i.test(row.kind)),false);
+  const corporatePayer={...selected,bookingIdentity:{...selectedIdentity,enterpriseContractAndPayer:true}};
+  const unsupported=await h.tools.quote.candidates.prepare(corporatePayer);
+  assert.equal(unsupported.status,'unavailable');assert.equal(unsupported.reason,'enterprise_payer_authority_unavailable');
+  await assert.rejects(h.tools.quote.preview.preview({...prepared.request,bookingIdentity:corporatePayer.bookingIdentity}),e=>e.code==='CAPABILITY_UNSUPPORTED');
+  assert.equal(resolved,1,'unsupported payer never reaches Core or silently becomes personal payer');
+  const unknown=await h.tools.quote.candidates.prepare({...selected,bookingIdentity:{...candidate.bookingIdentity,corporateCustomerId:'other'}});
+  assert.equal(unknown.status,'missing_input');assert.ok(unknown.missingFields.includes('bookingIdentity.corporateCustomerId'));
+  h.membershipRows.bookingOptions=[];
+  const withdrawn=await h.tools.quote.candidates.prepare(selected);
+  assert.equal(withdrawn.status,'missing_input');assert.ok(withdrawn.missingFields.includes('selectionRevision'));
+  assert.equal(resolved,1);
+  h.h.identity.user.permissions=[];await assert.rejects(h.tools.quote.candidates.prepare(selected));
+});
 test('unified quote preparation returns the next host step without side effects', async () => {
   const h = await setup();
   h.facts.listAssets = async () => [{ id: 'synthetic-asset', tenantId: 'tenant_001', workspaceId: 'workspace-a', itemGroupId: h.group.id, locationId: h.location.id, status: 'available' }];
@@ -25,13 +97,33 @@ test('formal input provenance distinguishes explicit fields and blocks order han
   assert.equal(sources.coreNormalization, 'not_yet_called');
   assert.ok(sources.fields.every(field => field.confirmed === false));
   assert.ok(sources.fields.every(field => !field.kind.startsWith('explicit_user')));
+  assert.equal(sources.fields.some(field => field.field === 'bookingIdentity'), false);
+  const identified = await h.tools.quote.businessPreparation.inputSources({ ...h.candidate,
+    selectionRevision: first.selectionRevision, bookingIdentity: { bookingIdentity: 'personal' } });
+  const identitySource = identified.fields.find(field => field.field === 'bookingIdentity');
+  assert.deepEqual(identitySource.value, { bookingIdentity: 'personal' });
+  assert.equal(identitySource.kind, 'supplied_candidate');
+  assert.equal(identitySource.confirmed, false);
+  assert.notEqual(identified.inputFingerprint, sources.inputFingerprint);
   const handoff = await h.tools.quote.businessPreparation.commitHandoff();
   assert.equal(handoff.status, 'unavailable');
   assert.equal(handoff.orderApproval, 'not_granted');
 });
 
 test('quote comparison reports Core changes without recomputing money or reusing approval', async () => {
-  const h = await setup();
+  const h = await setup('camera', true);
+  h.candidate.bookingIdentity = { bookingIdentity: 'personal' };
+  const resolveIdentity = h.memberships.resolveBookingIdentity.bind(h.memberships);
+  let resolvedIdentities = 0;
+  h.memberships.resolveBookingIdentity = async (...args) => {
+    assert.deepEqual(args.slice(0, 3), ['tenant_001', 'workspace-a', 'customer-a']);
+    assert.deepEqual(args[3], { bookingIdentity: 'personal' });
+    const result = await resolveIdentity(...args);
+    assert.equal(result.bookingIdentity, 'personal');
+    assert.equal(result.personalCustomerId, 'customer-a');
+    resolvedIdentities++;
+    return result;
+  };
   h.facts.listAssets = async () => [{ id: 'synthetic-asset', tenantId: 'tenant_001', workspaceId: 'workspace-a', itemGroupId: h.group.id, locationId: h.location.id, status: 'available' }];
   h.facts.listStockBalances = async () => [{ itemGroupId: h.group.id, locationId: h.location.id, onHandQuantity: 3, maintenanceQuantity: 0 }];
   const first = await h.tools.quote.candidates.prepare(h.candidate);
@@ -43,6 +135,7 @@ test('quote comparison reports Core changes without recomputing money or reusing
   assert.equal(second.status, 'needs_confirmation');
   const b = await h.tools.quote.previewSelection({ ...changed, selectionRevision: second.selectionRevision });
   assert.equal(b.status, 'quoted');
+  assert.equal(resolvedIdentities, 2);
   const comparison = h.tools.quote.businessPreparation.compareQuotes(a.quote, b.quote);
   assert.equal(comparison.inputChanges.period, true);
   assert.equal(comparison.approvalReuse, 'forbidden_new_quote_requires_new_confirmation');

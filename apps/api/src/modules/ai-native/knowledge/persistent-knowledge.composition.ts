@@ -11,6 +11,7 @@ import { HumanKnowledgeService } from './human-knowledge.service';
 import { HumanKnowledgeContextService } from './human-knowledge-context.service';
 import { HumanKnowledgeIndexService } from './human-knowledge-index.service';
 import { HumanKnowledgeInputService, type HumanKnowledgeInputDependencies } from './human-knowledge-input.service';
+import { HumanKnowledgeConsumptionService } from './human-knowledge-consumption.service';
 import { FormalKnowledgeAuthorizationAdapter, FormalMemoryAuthorizationAdapter, type FormalKnowledgePolicySource, type FormalMemoryPolicySource } from './formal-knowledge-authorization.adapter';
 import type { FileStorageRuntimeService } from '../../integrations/file-storage.runtime.service';
 import { FileStorageKnowledgeFileAdapter } from './file-storage-knowledge.adapter';
@@ -69,7 +70,8 @@ export function composePersistedHumanKnowledge(input: HumanKnowledgeInputDepende
   const context = new HumanKnowledgeContextService(input);
   const index = new HumanKnowledgeIndexService(input);
   const preparation = new HumanKnowledgeInputService(context, input);
-  return { management, context, index, preparation, memory: preparation.memory };
+  const consumption = new HumanKnowledgeConsumptionService(management, preparation, input.clock);
+  return { management, context, index, preparation, consumption, memory: preparation.memory };
 }
 
 export interface FormalHumanKnowledgeDependencies extends Omit<HumanKnowledgeInputDependencies, 'authorization' | 'files' | 'memory'> {

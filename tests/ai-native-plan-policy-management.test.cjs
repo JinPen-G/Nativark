@@ -23,6 +23,12 @@ test('actual Auth/Guard manages a default-disabled policy with CAS and reconstru
   const rebuilt = new PrismaTaskPlanPolicyRepository(h.db, h.input, () => new Date(h.control.now));
   assert.equal((await rebuilt.read()).revision, 2);
   await assert.rejects(h.repo.put({ ...h.command, expectedRevision: 1 }), e => e.code === 'AI_REVISION_CONFLICT');
+  const configured={...h.input,tools:['rental.catalog.search','ai.model.text','rental.order.commit']};
+  const multi=new PrismaTaskPlanPolicyRepository(h.db,configured,()=>new Date(h.control.now));
+  assert.equal((await multi.put({...h.command,expectedRevision:2})).revision,3);
+  assert.deepEqual(h.state.aiTaskPlanPolicy[0].allowedTools.map(tool=>tool.code),configured.tools);
+  assert.equal((await new PrismaTaskPlanPolicyRepository(h.db,configured,()=>new Date(h.control.now)).read()).revision,3);
+  assert.throws(()=>new PrismaTaskPlanPolicyRepository(h.db,{...h.input,tools:['rental.catalog.search','rental.catalog.search']}),e=>e.code==='AI_RESOURCE_UNAVAILABLE');
 });
 test('concurrent first writers and stale updates cannot overwrite a winning policy', async () => {
   const h = await setup();

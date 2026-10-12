@@ -5,6 +5,471 @@ const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorize
 const { composePersistedTaskAuthorization } = require('../apps/api/src/modules/ai-native/task-authorization.composition');
 const { PrismaTaskPlanInputSource } = require('../apps/api/src/modules/ai-native/runner/prisma-task-plan-input.source');
 const { AI_TOOL_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
+
+async function settingsInputSetup({ normal = false } = {}) {
+  const { composePersistedSettingsTaskInput } = require('../apps/api/src/modules/ai-native/settings-task-input.composition');
+  const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  const h = await authorizedRunnerHarness({ aiTaskPlanPolicy: [], aiTaskActionInput: [], rentalApprovedSettingsChange: [],
+    aiProposal: [], aiProposalVersion: [], aiProposalAction: [], aiApproval: [], aiApprovalConsumption: [], rentalApprovedSettingsOperation: [],
+    aiTaskExecutionPhaseStart: [], aiTaskExecutionPhaseReceipt: [],
+    businessWorkspace: [{ id: 'workspace-a', tenantId: 'tenant-a', status: 'ACTIVE', categoryVersionId: 'category-a', categoryAdoptionRevision: 1 }] });
+  h.state.aiTaskRunPlan.length = 0;
+  h.identity.user.permissions.push('rental-os:rules:manage', 'system:params:manage');
+  h.state.aiTaskActionPolicy.find(p => p.operation === 'transition_task').requiredPermissions = ['rental-os:rules:manage'];
+  const settings = { tenantId: 'tenant-a', notifications: { enabledEvents: ['order.created'], editableChannels: ['email'] } };
+  const material = { id: 'change-a', tenantId: 'tenant-a', workspaceId: 'workspace-a', actorId: 'user-a', changeKey: 'original-key',
+    baseRevision: 1, baseSettingsHash: requestFingerprint(settings), categoryVersionId: 'category-a', categoryAdoptionRevision: 1,
+    beforeNotifications: settings.notifications, afterNotifications: { enabledEvents: ['order.created'], editableChannels: ['sms'] },
+    expiresAt: '2026-10-07T12:00:00.000Z' };
+  const changeHash = requestFingerprint(material);
+  h.state.rentalApprovedSettingsChange.push({ ...material, changeHash, expiresAt: new Date(material.expiresAt), createdAt: h.control.now });
+  const current = { settingsRevision: 1, settings };
+  // Only persisted facts/Core read and database are doubles. Auth, Guard, plan
+  // source, policy, plan repository and step registration are actual code.
+  const root = composePersistedSettingsTaskInput({ ...h.authorization, db: h.db,
+    guard: new ApiAuthGuard(h.authorization.auth, undefined, undefined, undefined, {}),
+    core: { readVersionedBusinessSettings: async () => structuredClone(current) }, holderId: 'worker-a',
+    scene: { code: 'synthetic-clarification', version: '1' }, clock: () => new Date(h.control.now) });
+  const { composeApprovedSettingsApplication } = require('../apps/api/src/modules/ai-native/approval-execution/approved-settings-application.composition');
+  const dependencies = { ...h.authorization, db: h.db,
+    guard: new ApiAuthGuard(h.authorization.auth, undefined, undefined, undefined, {}),
+    core: { readVersionedBusinessSettings: async () => structuredClone(current) }, holderId: 'worker-a',
+    scene: { code: 'synthetic-clarification', version: '1' }, clock: () => new Date(h.control.now) };
+  const app = composeApprovedSettingsApplication(dependencies);
+  await root.policy.put({ expectedRevision: null, enabled: true, limits: h.plan.limits, expiresAt: '2027-01-01T00:00:00Z' });
+  if (normal) {
+    h.state.aiTask[0].status = 'QUEUED';
+    h.state.aiRun[0].status = 'QUEUED';
+  }
+  const lease = normal ? null : await root.tasks.claimRun(h.claim());
+  const reference = { changeId: 'change-a', changeHash };
+  const publish = (input = reference) => app.publishTaskInput({ taskId: 'task-a', registrationRef: 'settings-a',
+    expectedTaskRevision: h.state.aiTask[0].revision, lease, input });
+  const plan = { ...h.clone(h.plan), taskRevision: h.state.aiTask[0].revision,
+    steps: [{ registrationRef: 'settings-a', operation: 'idempotent', toolCode: 'tenant.notifications.commit', toolVersion: AI_TOOL_DRAFT_VERSION }] };
+  return { ...h, root, app, lease, publish, reference, current, plan, dependencies };
+}
+
+test('original settings change receipt remains readable after expiry and config change, without execution authority', async () => {
+  const h = await settingsInputSetup({ normal: true });
+  h.control.now = new Date('2026-10-08T12:00:00Z');
+  h.current.settingsRevision = 9;
+  h.current.settings.notifications = { enabledEvents: [], editableChannels: ['email'] };
+  const before = h.clone(h.state);
+  const receipt = await h.app.readChangeReceipt({ changeKey: 'original-key' });
+  assert.equal(receipt.state, 'prepared_not_approved');
+  assert.equal(receipt.change.changeHash, h.reference.changeHash);
+  assert.equal(receipt.change.baseRevision, 1);
+  assert.deepEqual(receipt.change.diff['notifications.editableChannels'], { before: ['email'], after: ['sms'] });
+  assert.deepEqual(h.clone(h.state), before);
+  h.identity.user.permissions.length = 0;
+  await assert.rejects(h.app.readChangeReceipt({ changeKey: 'original-key' }));
+});
+test('settings participant accepts the runner POSSIBLE start, not an unstarted or foreign holder step', async () => {
+  const h = await settingsInputSetup();
+  await h.publish(); await h.root.plans.savePlan(h.plan, h.lease);
+  const { taskId, expiresAt, ...lease } = h.lease;
+  const registered = await h.root.registrations.register({ taskId, registrationRef: 'settings-a',
+    expectedTaskRevision: h.state.aiTask[0].revision, lease });
+  const step = h.state.aiStep.find(s => s.id === registered.stepId);
+  // Persisted state emitted by the idempotent start transition. No external action.
+  step.status = 'RUNNING'; step.effect = 'POSSIBLE';
+  const { ApprovedSettingsTaskAuthority } = require('../apps/api/src/modules/ai-native/approval-execution/approved-settings-task.authority');
+  const authority = new ApprovedSettingsTaskAuthority({ ...h.authorization, db: h.db, holderId: 'worker-a',
+    scene: { code: 'synthetic-clarification', version: '1' }, clock: () => new Date(h.control.now) });
+  const held = async () => h.db.$transaction(async tx => authority.heldStep(await authority.resolve(taskId, 'execute', tx),
+    step.id, h.reference, tx, h.lease.runId));
+  assert.equal((await held()).id, step.id);
+  h.state.aiStep[0].effect = 'NONE'; await assert.rejects(held());
+  h.state.aiStep[0].effect = 'POSSIBLE'; h.state.aiRun[0].leaseOwnerId = 'other-worker'; await assert.rejects(held());
+});
+
+async function settingsWaitingSetup(options = {}) {
+  const h = await settingsInputSetup(options);
+  const { RENTAL_CATEGORY_DEFINITIONS } = require('@rental-os/shared');
+  // Database row-lock/category facts are offline substitutes; proposal and
+  // decision creation, Guard, current task authorization and executor are real.
+  const transaction = h.db.$transaction;
+  h.db.$transaction = (work, options) => transaction(tx => work({ ...tx,
+    $queryRaw: async () => [{ categoryCode: 'CAMERA', categoryVersionId: 'category-a', categoryAdoptionRevision: 1, status: 'ACTIVE' }],
+    rentalCategoryVersion: { findUnique: async () => ({ categoryCode: 'CAMERA', structureVersion: 1, status: 'published',
+      definition: structuredClone(RENTAL_CATEGORY_DEFINITIONS.find(d => d.code === 'camera')) }) }
+  }), options);
+  const { requestFingerprint } = require('../apps/api/src/modules/rental-core/rental-idempotency.repository');
+  h.dependencies.core.previewNotificationSettings = async () => ({ settingsRevision: 1,
+    baseSettingsHash: requestFingerprint(h.current.settings), before: h.current.settings.notifications,
+    binding: { categoryVersionId: 'category-a', adoptionRevision: 1 } });
+  h.state.aiTaskActionPolicy.push({ ...h.state.aiTaskActionPolicy.find(p => p.operation === 'transition_task'),
+    operation: 'decide_approval', requiredPermissions: ['rental-os:rules:manage'] });
+  if (options.normal) return h;
+  await h.publish(); await h.root.plans.savePlan(h.plan, h.lease);
+  const { taskId, expiresAt, ...lease } = h.lease;
+  const registered = await h.root.registrations.register({ taskId, registrationRef: 'settings-a',
+    expectedTaskRevision: h.state.aiTask[0].revision, lease });
+  const step = h.state.aiStep.find(s => s.id === registered.stepId);
+  step.status = 'RUNNING'; step.effect = 'POSSIBLE';
+  const { composeApprovedSettingsWaiting } = require('../apps/api/src/modules/ai-native/approval-execution/approved-settings-waiting.executor');
+  const waiting = composeApprovedSettingsWaiting(h.dependencies);
+  const input = { taskId, runId: h.lease.runId, stepId: step.id, actionId: step.actionId,
+    inputRef: step.inputRef, fingerprint: step.requestFingerprint,
+    lease: { ...h.lease, revision: h.state.aiRun[0].revision } };
+  const signal = new AbortController().signal;
+  return { ...h, waiting, input, signal };
+}
+
+test('settings executor prepares the actual proposal, waits for a real decision and never treats absence as commit', async () => {
+  const h = await settingsWaitingSetup(), { waiting, input, signal } = h;
+  const first = await waiting.execute(input, signal);
+  assert.equal(first.kind, 'paused'); assert.equal(first.pause, 'confirmation');
+  assert.equal(h.state.aiProposal.length, 1); assert.equal(h.state.aiApproval.length, 0);
+  assert.equal((await waiting.execute(input, signal)).kind, 'paused');
+  assert.equal(h.state.aiProposal.length, 1);
+  assert.equal((await waiting.reconcile(input)).kind, 'unknown');
+  const observed = await waiting.readWaiting(input);
+  await waiting.application.decide({ ...observed.reference, decision: 'reject' });
+  const rejected = await waiting.execute(input, signal);
+  assert.equal(rejected.kind, 'failed'); assert.equal(rejected.errorCode, 'AI_APPROVAL_REJECTED');
+  assert.equal(h.state.rentalApprovedSettingsOperation.length, 0);
+  h.identity.membership = false;
+  await assert.rejects(waiting.readWaiting(input));
+});
+
+test('settings approved execution consumes the original approval and recovers only the original operation receipt', async () => {
+  const h = await settingsWaitingSetup(), { waiting, input, signal } = h;
+  let writes = 0;
+  // Only Core storage is replaced. Actual application/approval participant
+  // commits and validates its durable consumption in the database transaction.
+  h.dependencies.core.commitNotificationSettings = async (_tenant, notifications) => {
+    writes++; h.current.settingsRevision++; h.current.settings.notifications = structuredClone(notifications);
+    return structuredClone(h.current);
+  };
+  h.dependencies.core.refreshCommittedBusinessSettings = async () => {};
+  assert.equal((await waiting.execute(input, signal)).kind, 'paused');
+  const observed = await waiting.readWaiting(input);
+  await waiting.application.decide({ ...observed.reference, decision: 'approve' });
+  const result = await waiting.execute(input, signal);
+  assert.equal(result.kind, 'succeeded'); assert.equal(writes, 1);
+  assert.equal(h.state.aiApprovalConsumption.length, 1);
+  assert.equal(result.payload.businessResultRef, h.state.aiApprovalConsumption[0].resultRef);
+  const recovered = await waiting.reconcile({ ...input, lease: { ...input.lease, purpose: 'recovery_only' } });
+  assert.equal(recovered.kind, 'succeeded'); assert.equal(writes, 1);
+  assert.equal(recovered.payload.businessResultRef, result.payload.businessResultRef);
+  await assert.rejects(waiting.reconcile({ ...input, actionId: 'foreign-action' }));
+  assert.equal(writes, 1);
+});
+
+async function settingsNormalHostSetup() {
+  const h = await settingsWaitingSetup({ normal: true });
+  const { composeTaskSettingsHost } = require('../apps/api/src/modules/ai-native/runner/settings-task-host.composition');
+  let ticks = 0, timerId = 0;
+  const timers = new Map();
+  const rebuild = () => composeTaskSettingsHost({ ...h.dependencies, host: { holderId: 'worker-a', leaseMs: 100000 },
+    task: { taskId: 'task-a', runId: 'run-a', registrationRef: 'settings-a', change: h.reference, limits: h.plan.limits },
+    monotonic: () => ++ticks,
+    runnerClock: { now: () => ticks, setTimeout: (callback, delayMs) => {
+      const id = ++timerId; timers.set(id, { callback, due: ticks + delayMs }); return id;
+    }, clearTimeout: id => timers.delete(id) } });
+  return { ...h, rebuild, timers };
+}
+
+test('settings normal host starts through the runner and persists an approval checkpoint without business writes', { timeout: 20000 }, async t => {
+  const h = await settingsNormalHostSetup();
+  const transaction = h.db.$transaction;
+  let open = 0, nested = 0;
+  h.db.$transaction = (work, options) => {
+    if (open) nested++;
+    return transaction(async tx => { open++; try { return await work(tx); } catch (error) { t.diagnostic(error.stack); throw error; } finally { open--; } }, options);
+  };
+  const host = h.rebuild(), timers = h.timers;
+  const { requestBoundOriginalModelHarness } = require('./fixtures/ai-native/lane-a-original-model.cjs');
+  const modelHost = await requestBoundOriginalModelHarness('quote_clarification');
+  const sharedCore = Object.assign(Object.create(modelHost.requestDependencies.core), h.dependencies.core);
+  const modelDependencies = { ...modelHost.requestDependencies, db: h.db, auth: h.dependencies.auth,
+    guard: h.dependencies.guard, core: sharedCore, subscriptions: h.dependencies.subscriptions, clock: h.dependencies.clock };
+  const { credentials: _settingsCredentials, ...settingsDependencies } = h.dependencies;
+  const modelOptions = { ...modelHost.options, settingsTask: { dependencies: { ...settingsDependencies, core: sharedCore },
+    configuration: { host: { holderId: 'worker-a', leaseMs: 100000 }, task: {
+      taskId: 'task-a', runId: 'run-a', registrationRef: 'settings-a', change: h.reference, limits: h.plan.limits } } } };
+  const { AiOriginalScenesModule, AI_ORIGINAL_SCENE_MODEL_REQUESTS } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.module');
+  const module = AiOriginalScenesModule.registerHttpModel(modelDependencies, modelOptions);
+  const requests = module.providers.find(p => p.provide === AI_ORIGINAL_SCENE_MODEL_REQUESTS).useFactory();
+  const { AiOriginalSceneModelController } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.controller');
+  const controller = new AiOriginalSceneModelController(requests);
+  const request = { headers: { authorization: (await _settingsCredentials.current()).authorization } };
+  const result = await controller.startSettingsTask(request, { taskId: 'task-a', runId: 'run-a' });
+  assert.equal(result.kind, 'run_outcome'); assert.equal(result.outcome.status, 'paused', JSON.stringify({ result,
+    steps: h.state.aiStep, phases: h.state.aiTaskExecutionPhaseReceipt, trace: h.trace.slice(-20) }, (_key, value) => typeof value === 'bigint' ? value.toString() : value));
+  assert.equal(h.state.aiTask[0].status, 'WAITING_CONFIRMATION');
+  assert.equal(h.state.aiStep[0].status, 'RUNNING'); assert.equal(h.state.aiStep[0].effect, 'POSSIBLE');
+  assert.equal(h.state.aiTaskExecutionPhaseReceipt.length, 1);
+  assert.equal(h.state.aiTaskExecutionPhaseReceipt[0].payload.version, 'approved-settings-wait-1');
+  assert.equal(h.state.aiApproval.length, 0); assert.equal(h.state.rentalApprovedSettingsOperation.length, 0);
+  assert.equal(h.state.aiTaskExecutionCharge.length, 3);
+  const checkpoint = h.state.aiTaskExecutionPhaseReceipt[0], proposal = checkpoint.payload.proposal;
+  const checkpointRequest = { taskId: 'task-a', runId: 'run-a', stepId: h.state.aiStep[0].id };
+  const publishedCheckpoint = await host.application.readConfirmation(checkpointRequest);
+  assert.equal(publishedCheckpoint.checkpointRef, checkpoint.id);
+  assert.equal(publishedCheckpoint.execution, 'not_attested');
+  assert.equal(h.state.aiApproval.length, 0);
+  await assert.rejects(host.application.readConfirmation({ ...checkpointRequest, stepId: 'other-step' }));
+  const { composeAiSettingsBusinessConsumer } = require('../apps/api/src/modules/ai-native/scenes/settings-business-consumer.composition');
+  const consumer = composeAiSettingsBusinessConsumer({ ...h.dependencies, settingsHost: host });
+  const preparation = { draftVersion: 'ain-approved-settings-draft-1', taskId: 'task-a', runId: 'run-a', stepId: h.state.aiStep[0].id,
+    proposalId: proposal.proposalId, proposalRevision: proposal.proposalRevision, changeId: h.reference.changeId, changeHash: h.reference.changeHash };
+  const material = await consumer.read({ preparation });
+  assert.equal(material.mode, 'read_only'); assert.equal(material.businessOutcome, 'not_observed');
+  assert.equal(material.currentMatchesChangeBase, true); assert.equal(material.review.change.changeId, h.reference.changeId);
+  assert.equal(material.decision.state, 'not_observed');
+  assert.equal(material.inputPublication, 'published_reference');
+  assert.equal(material.execution, 'not_attested');
+  assert.equal(material.workflowStatus, 'waiting_confirmation');
+  const handoff = await consumer.humanHandoff({ preparation });
+  assert.equal(handoff.reference.taskId, 'task-a'); assert.equal(handoff.continuation, 'not_invoked_use_original_settings_host');
+  assert.equal(handoff.confirmation.checkpointRef, checkpoint.id);
+  assert.equal(handoff.confirmation.taskRevision, h.state.aiTask[0].revision);
+  assert.equal(handoff.confirmation.proposal.reviewedPayloadHash, proposal.reviewedPayloadHash);
+  assert.equal(handoff.execution, 'not_attested'); assert.deepEqual(handoff.missing, []);
+  await assert.rejects(consumer.humanHandoff({ preparation, checkpointRef: 'caller-checkpoint' }));
+  const { composeAiTaskCenterScene } = require('../apps/api/src/modules/ai-native/task-center-scene.composition');
+  const { AiTaskEventRepository } = require('../apps/api/src/modules/ai-native/ai-task-event.repository');
+  const settingsCenter = composeAiTaskCenterScene({ settings: consumer,
+    events: new AiTaskEventRepository(h.db, host.authorization.authority, h.dependencies.clock),
+    list: { readPage: async () => { throw Error('not used'); } }, scenes: {
+      requests: { readHistorical: async () => { throw Error('settings uses original settings input'); } },
+      readTaskReceipt: async () => { throw Error('not used'); }, readRecovery: async () => { throw Error('not used'); } } });
+  const aggregatedSettings = await settingsCenter.readScene({ kind: 'settings', taskId: 'task-a', runId: 'run-a', reference: { preparation } });
+  assert.equal(aggregatedSettings.business.confirmation.checkpointRef, checkpoint.id);
+  assert.equal(aggregatedSettings.snapshot.availability, 'available'); assert.equal(aggregatedSettings.business.businessOutcome, 'not_observed');
+  const stateBeforeRead = h.clone(h.state);
+  const fromRequest = await requests.readTaskScene(request, { kind: 'settings', taskId: 'task-a', runId: 'run-a', reference: { preparation } });
+  assert.equal(fromRequest.business.confirmation.checkpointRef, checkpoint.id);
+  assert.equal(fromRequest.business.businessOutcome, 'not_observed');
+  assert.equal(modelHost.factoryCalls.length, 0); assert.equal(modelHost.execution.sent.length, 0);
+  assert.deepEqual(h.clone(h.state), stateBeforeRead);
+  await assert.rejects(requests.readTaskScene({ headers: {} }, { kind: 'settings', taskId: 'task-a', runId: 'run-a', reference: { preparation } }));
+  const { composeRequestBoundOriginalSceneModel } = require('../apps/api/src/modules/ai-native/scenes/request-bound-scenes.application');
+  assert.throws(() => composeRequestBoundOriginalSceneModel(modelDependencies, { ...modelOptions,
+    settingsTask: { ...modelOptions.settingsTask, dependencies: { ...settingsDependencies, db: modelHost.requestDependencies.db } } }),
+    e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  await assert.rejects(settingsCenter.readScene({ kind: 'settings', taskId: 'other-task', runId: 'run-a', reference: { preparation } }));
+  assert.equal(h.state.aiApproval.length, 0); assert.equal(h.state.rentalApprovedSettingsOperation.length, 0);
+  await assert.rejects(consumer.read({ preparation: { ...preparation, taskId: 'other-task' } }));
+  await assert.rejects(composeAiSettingsBusinessConsumer().read({ preparation }));
+  const permissions = [...h.identity.user.permissions];
+  h.identity.user.permissions.length = 0;
+  await assert.rejects(host.application.readConfirmation(checkpointRequest));
+  await assert.rejects(consumer.read({ preparation }), 'revoked current identity cannot receive the old change');
+  h.identity.user.permissions.push(...permissions);
+  h.dependencies.core.commitNotificationSettings = async (_tenant, notifications) => {
+    h.current.settingsRevision++; h.current.settings.notifications = structuredClone(notifications);
+    return structuredClone(h.current);
+  };
+  h.dependencies.core.refreshCommittedBusinessSettings = async () => {};
+  sharedCore.commitNotificationSettings = h.dependencies.core.commitNotificationSettings;
+  sharedCore.refreshCommittedBusinessSettings = h.dependencies.core.refreshCommittedBusinessSettings;
+  await assert.rejects(requests.continueSettingsConfirmation(request, { taskId: 'task-a', runId: 'foreign-run', checkpointRef: checkpoint.id }), e => e.code === 'AI_ACCESS_DENIED');
+  await assert.rejects(requests.continueSettingsConfirmation(request, { taskId: 'task-a', runId: 'run-a', checkpointRef: checkpoint.id, holderId: 'caller-worker' }), e => e.code === 'AI_INVALID_INPUT');
+  await assert.rejects(requests.continueSettingsConfirmation(request, { taskId: 'task-a', runId: 'run-a', checkpointRef: checkpoint.id }), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
+  assert.equal(h.state.aiRun[0].leaseOwnerId, null, 'no decision must not claim an execution lease');
+  await controller.decideSettingsProposal(request, { draftVersion: 'ain-approved-settings-draft-1', taskId: 'task-a',
+    proposalId: proposal.proposalId, proposalRevision: proposal.proposalRevision, reviewedPayloadHash: proposal.reviewedPayloadHash, decision: 'approve' });
+  const approvedObservation = await consumer.read({ preparation });
+  assert.equal(approvedObservation.decision.state, 'recorded');
+  assert.equal(approvedObservation.businessOutcome, 'not_observed');
+  assert.equal(approvedObservation.execution, 'not_attested');
+  const decision = await controller.readSettingsDecision(request, { draftVersion: 'ain-approved-settings-draft-1', taskId: 'task-a',
+    proposalId: proposal.proposalId, proposalRevision: proposal.proposalRevision, reviewedPayloadHash: proposal.reviewedPayloadHash });
+  assert.equal(decision.state, 'recorded');
+  const finished = await controller.continueSettingsConfirmation(request, { taskId: 'task-a', runId: 'run-a', checkpointRef: checkpoint.id });
+  assert.equal(modelHost.factoryCalls.length, 0); assert.equal(modelHost.execution.sent.length, 0);
+  assert.equal(finished.kind, 'run_outcome'); assert.equal(finished.outcome.status, 'succeeded', JSON.stringify({ finished,
+    phases: h.state.aiTaskExecutionPhaseReceipt, operations: h.state.rentalApprovedSettingsOperation, trace: h.trace.slice(-12) },
+    (_key, value) => typeof value === 'bigint' ? value.toString() : value));
+  assert.equal(h.state.aiTaskExecutionPhaseReceipt.length, 2);
+  assert.equal(h.state.rentalApprovedSettingsOperation.length, 1); assert.equal(h.state.aiApprovalConsumption.length, 1);
+  assert.equal(h.state.aiStep[0].effect, 'COMMITTED');
+  assert.ok(h.state.aiTaskExecutionCharge.every(c => c.status === 'RECORDED'));
+  assert.equal(nested, 0, 'receipt completion reuses the owning step transaction');
+  assert.equal(timers.size, 0);
+  const business = await consumer.read({ preparation, operationKey: h.state.rentalApprovedSettingsOperation[0].operationKey });
+  assert.equal(business.businessOutcome, 'committed'); assert.equal(business.currentMatchesChangeBase, false);
+  assert.equal(business.operation.receipt.changeId, preparation.changeId);
+  assert.equal(business.confirmation, null, 'committed task must not re-offer its old wait');
+  const afterCommitState = h.clone(h.state);
+  const recoveredScene = await controller.readTaskScene(request, { kind: 'settings', taskId: 'task-a', runId: 'run-a', reference: { preparation } });
+  assert.equal(recoveredScene.business.businessOutcome, 'committed', 'reconnection discovers the original receipt without a caller operation key');
+  assert.equal(recoveredScene.business.operation.receipt.operationKey, business.operation.receipt.operationKey);
+  assert.deepEqual(h.clone(h.state), afterCommitState, 'receipt discovery is read-only');
+  const terminal = await controller.reconcileSettingsTask(request, { taskId: 'task-a', runId: 'run-a' });
+  assert.equal(terminal.mode, 'read_only');
+  assert.equal(terminal.businessOutcome, 'committed');
+  assert.equal(terminal.operation.receipt.operationKey, business.operation.receipt.operationKey);
+  assert.deepEqual(h.clone(h.state), afterCommitState, 'terminal reconciliation must not claim or restart the run');
+  assert.equal(modelHost.factoryCalls.length, 0); assert.equal(modelHost.execution.sent.length, 0);
+  const terminalObservation = await consumer.read({ preparation });
+  assert.equal(terminalObservation.workflowStatus, 'succeeded');
+  assert.equal(terminalObservation.businessOutcome, 'committed');
+  assert.equal(terminalObservation.execution, 'not_attested');
+  await assert.rejects(host.application.readConfirmation(checkpointRequest), 'terminal tasks cannot expose a live waiting checkpoint');
+});
+
+test('settings normal host cancellation blocks confirmation and preserves original charges under required evidence', { timeout: 20000 }, async () => {
+  for (const witnessPresent of [true, false]) {
+  const h = await settingsNormalHostSetup(), host = h.rebuild(), key = { taskId: 'task-a', runId: 'run-a' };
+  assert.equal((await host.application.start(key)).outcome.status, 'paused');
+  const checkpoint = h.state.aiTaskExecutionPhaseReceipt[0], originalCharges = h.state.aiTaskExecutionCharge.map(c => c.chargeId);
+  await assert.rejects(host.application.requestCancel({ taskId: 'other-task', expectedRevision: h.state.aiTask[0].revision }));
+  if (!witnessPresent) h.state.aiTaskExecutionPhaseReceipt.splice(0);
+  const cancelled = await host.application.requestCancelOriginal({ taskId: key.taskId, expectedRevision: h.state.aiTask[0].revision });
+  assert.equal(cancelled.cancellation, 'requested_not_rollback');
+  assert.equal(cancelled.reconciliation.outcome.status, witnessPresent ? 'cancelled' : 'unknown');
+  await assert.rejects(host.application.continueConfirmation({ ...key, checkpointRef: checkpoint.id }));
+  const rebuilt = h.rebuild(), lease = checkpoint.payload.presentedLease;
+  await assert.rejects(rebuilt.inputs.source.publishSettingsInput({ taskId: key.taskId, registrationRef: 'new-settings',
+    expectedTaskRevision: h.state.aiTask[0].revision, lease, input: h.reference }));
+  assert.equal(h.state.aiTask[0].status, witnessPresent ? 'CANCELLED' : 'CANCEL_REQUESTED');
+  assert.equal(h.state.rentalApprovedSettingsOperation.length, 0);
+  assert.equal(h.state.aiApprovalConsumption.length, 0);
+  assert.equal(h.state.aiTaskExecutionPhaseStart.length, 1);
+  assert.deepEqual(h.state.aiTaskExecutionCharge.map(c => c.chargeId), originalCharges);
+  assert.ok(h.state.aiTaskExecutionCharge.every(c => c.status === (witnessPresent ? 'RECORDED' : 'UNKNOWN')));
+  assert.equal(h.state.aiRun[0].leaseOwnerId, null);
+  assert.equal(h.timers.size, 0);
+  }
+});
+
+for (const mode of ['missing operation', 'cancelled committed operation', 'expired committed operation']) test(`settings normal host recovers ${mode} without executing again`, { timeout: 20000 }, async () => {
+  const h = await settingsNormalHostSetup(), host = h.rebuild(), key = { taskId: 'task-a', runId: 'run-a' };
+  let calls = 0;
+  h.dependencies.core.commitNotificationSettings = async (_tenant, notifications) => {
+    calls++;
+    if (mode === 'missing operation') throw Error('synthetic Core commit unavailable');
+    h.current.settingsRevision++; h.current.settings.notifications = structuredClone(notifications);
+    return structuredClone(h.current);
+  };
+  h.dependencies.core.refreshCommittedBusinessSettings = async () => {};
+  assert.equal((await host.application.start(key)).outcome.status, 'paused');
+  const originalPlan = h.clone(h.state.aiTaskRunPlan), originalInput = h.clone(h.state.aiTaskActionInput);
+  const originalCharges = h.state.aiTaskExecutionCharge.map(c => c.chargeId);
+  const checkpoint = h.state.aiTaskExecutionPhaseReceipt[0], proposal = checkpoint.payload.proposal;
+  await host.settings.application.decide({ draftVersion: 'ain-approved-settings-draft-1', taskId: key.taskId,
+    proposalId: proposal.proposalId, proposalRevision: proposal.proposalRevision,
+    reviewedPayloadHash: proposal.reviewedPayloadHash, decision: 'approve' });
+  await host.authorization.tasks.claimRecoveryRun(h.claim());
+  if (mode !== 'missing operation') h.storeControl.beforeWrite = async (name, args) => {
+    if (name === 'aiStep' && args.data?.status === 'SUCCEEDED') throw Error('synthetic result bookkeeping unavailable');
+  };
+  const continued = host.application.continueConfirmation({ ...key, checkpointRef: checkpoint.id });
+  if (mode === 'missing operation') {
+    assert.equal((await continued).outcome.status, 'unknown');
+    assert.equal(h.state.aiTask[0].status, 'WAITING_EXTERNAL');
+  } else {
+    await assert.rejects(continued);
+    assert.equal(h.state.rentalApprovedSettingsOperation.length, 1);
+    assert.equal(h.state.aiStep[0].status, 'RUNNING');
+    assert.equal(h.state.aiTaskExecutionPhaseReceipt[1].kind, 'succeeded');
+    h.storeControl.beforeWrite = null;
+    if (mode === 'cancelled committed operation') {
+      await host.application.requestCancel({ taskId: key.taskId, expectedRevision: h.state.aiTask[0].revision });
+    }
+  }
+  assert.equal(calls, 1);
+  const rebuilt = h.rebuild();
+  if (mode === 'expired committed operation') {
+    h.control.now = new Date('2026-10-08T12:00:00Z');
+    h.current.settingsRevision++;
+    h.current.settings.notifications = { enabledEvents: [], editableChannels: ['email'] };
+    const before = h.clone(h.state);
+    const observed = await rebuilt.application.reconcileOriginal(key);
+    assert.equal(observed.mode, 'read_only'); assert.equal(observed.businessOutcome, 'committed');
+    assert.equal(observed.operation.receipt.changeHash, h.reference.changeHash);
+    assert.equal(observed.operation.receipt.resultRevision, 2);
+    assert.deepEqual(h.clone(h.state), before); assert.equal(calls, 1);
+    assert.equal(h.state.aiStep[0].status, 'RUNNING'); assert.equal(h.timers.size, 0);
+    h.identity.membership = false;
+    await assert.rejects(rebuilt.application.reconcileOriginal(key));
+    return;
+  }
+  await rebuilt.authorization.tasks.claimRecoveryRun(h.claim());
+  const lease = h.held();
+  await assert.rejects(rebuilt.inputs.source.publishSettingsInput({ taskId: key.taskId, registrationRef: 'new-settings',
+    expectedTaskRevision: h.state.aiTask[0].revision, lease, input: h.reference }));
+  const result = await rebuilt.application.reconcile(key);
+  assert.equal(result.outcome.status, mode === 'missing operation' ? 'unknown' : 'succeeded', JSON.stringify({ step: h.state.aiStep,
+    charges: h.state.aiTaskExecutionCharge, trace: h.trace.slice(-20) }, (_key, value) => typeof value === 'bigint' ? value.toString() : value));
+  assert.equal(h.state.aiTask[0].status, mode === 'missing operation' ? 'WAITING_EXTERNAL' : 'SUCCEEDED');
+  assert.equal(h.state.rentalApprovedSettingsOperation.length, mode === 'missing operation' ? 0 : 1);
+  assert.equal(h.state.aiApprovalConsumption.length, mode === 'missing operation' ? 0 : 1);
+  assert.equal(calls, 1, 'reconciliation never re-enters Core commit');
+  assert.deepEqual(h.state.aiTaskRunPlan, originalPlan);
+  assert.deepEqual(h.state.aiTaskActionInput, originalInput);
+  assert.deepEqual(h.state.aiTaskExecutionCharge.map(c => c.chargeId), originalCharges);
+  assert.equal(h.state.aiTaskExecutionPhaseStart.length, 2);
+  assert.ok(h.state.aiTaskExecutionCharge.every(c => c.status === (mode === 'missing operation' ? 'UNKNOWN' : 'RECORDED')));
+  assert.equal(h.state.aiRun[0].leaseOwnerId, null);
+  assert.equal(h.timers.size, 0);
+  h.identity.membership = false;
+  await assert.rejects(rebuilt.application.reconcile(key));
+});
+
+test('settings original change produces a policy-bound plan and PENDING step with the original domain hash', async () => {
+  const h = await settingsInputSetup();
+  const published = await h.publish();
+  assert.equal((await h.publish()).id, published.id);
+  await h.root.plans.savePlan(h.plan, h.lease);
+  const { taskId, expiresAt, ...lease } = h.lease;
+  const registered = await h.root.registrations.register({ taskId, registrationRef: 'settings-a',
+    expectedTaskRevision: h.state.aiTask[0].revision, lease });
+  const step = h.state.aiStep.find(s => s.id === registered.stepId);
+  assert.equal(step.inputRef, h.reference.changeId);
+  assert.equal(step.requestFingerprint, h.reference.changeHash);
+  assert.equal(step.status, 'PENDING');
+  assert.equal(step.effect, 'NONE');
+  assert.equal(h.state.aiTaskActionInput.length, 1);
+  assert.deepEqual(h.state.aiTaskActionInput[0].payload, h.reference);
+  assert.equal(h.current.settingsRevision, 1);
+  h.state.businessWorkspace[0].categoryAdoptionRevision++;
+  await assert.rejects(h.root.source.authorize(h.plan, { ...h.lease, revision: h.state.aiRun[0].revision }));
+});
+
+test('settings publication rejects foreign owner, changed configuration and withdrawn original write permission', async () => {
+  const h = await settingsInputSetup();
+  h.state.rentalApprovedSettingsChange[0].actorId = 'other-user';
+  await assert.rejects(h.publish());
+  h.state.rentalApprovedSettingsChange[0].actorId = 'user-a';
+  h.current.settingsRevision = 2;
+  await assert.rejects(h.publish());
+  h.current.settingsRevision = 1;
+  h.state.rentalApprovedSettingsChange[0].afterNotifications.editableChannels = ['wechat'];
+  await assert.rejects(h.publish());
+  h.state.rentalApprovedSettingsChange[0].afterNotifications.editableChannels = ['sms'];
+  h.identity.user.permissions = h.identity.user.permissions.filter(p => p !== 'rental-os:rules:manage');
+  await assert.rejects(h.publish());
+  assert.equal(h.state.aiTaskActionInput.length, 0);
+});
+
+test('settings input lost acknowledgement is read by the original task/run/reference without a new write', async () => {
+  const h = await settingsInputSetup();
+  const key = { taskId: 'task-a', runId: 'run-a', registrationRef: 'settings-a' };
+  assert.deepEqual(await h.app.readTaskInputReceipt(key), { state: 'not_observed', nextAction: 'read_task_input' });
+  h.storeControl.beforeCommit = async draft => {
+    if (draft.aiTaskActionInput.length && !h.state.aiTaskActionInput.length) h.storeControl.loseReply = true;
+  };
+  await assert.rejects(h.publish(), e => e.code === 'AI_RESULT_UNKNOWN' && e.nextAction === 'read_task_input' && !e.retryable);
+  const { settingsApplicationError, settingsContract } = require('../apps/api/src/modules/ai-native/approval-execution/approved-settings-contracts');
+  const { AiTaskPlanInputResultUnknownError } = require('../apps/api/src/modules/ai-native/runner/prisma-task-plan-input.source');
+  assert.equal(settingsContract('AiApprovedSettingsErrorDraft', settingsApplicationError(new AiTaskPlanInputResultUnknownError('read_task_input')), true).nextAction, 'read_task_input');
+  const writes = h.trace.filter(v => v.endsWith('.create')).length;
+  const receipt = await h.app.readTaskInputReceipt(key);
+  assert.equal(receipt.state, 'published');
+  assert.equal(receipt.execution, 'not_attested');
+  assert.deepEqual(receipt.input, h.reference);
+  assert.equal(h.state.aiTaskActionInput.length, 1);
+  assert.equal(h.trace.filter(v => v.endsWith('.create')).length, writes);
+  h.identity.membership = false;
+  await assert.rejects(h.app.readTaskInputReceipt(key));
+});
 async function setup() {
   const h = await authorizedRunnerHarness({ aiTaskPlanPolicy: [], aiTaskActionInput: [] });
   h.state.aiTaskRunPlan.length = 0;

@@ -2,6 +2,9 @@
 // 令牌按租户隔离存储（每个租户官网是独立品牌，会话不跨租户），并在 401 时用 refresh token 自动续期一次。
 
 import { API_BASE } from './apiClient';
+import type { AiBookingHandoff, AiBookingSubmissionAcceptance, AiBookingSubmissionDecision, AiBookingSubmissionReceipt }
+  from '../../../../packages/shared/src/ai-booking-draft';
+import type { AiClientHostCapabilities } from '@rental-os/shared';
 
 const CLIENT_V1 = `${API_BASE}/api/client/v1`;
 
@@ -112,6 +115,17 @@ interface AuthBridge {
 
 let bridge: AuthBridge | null = null;
 
+export function captureBookingHostSession() {
+  const owner = bridge, session = owner?.getSession();
+  const customerId = session?.customer?.customerId, workspaceCode = session?.workspace?.workspaceCode;
+  if (!owner || !session?.accessToken || typeof customerId !== 'string' || !customerId
+    || session.customer.customerType !== 'personal' || !workspaceCode) return null;
+  const token = session.accessToken;
+  return { customerId, workspaceCode, current: () => bridge === owner && owner.getSession() === session
+    && session.accessToken === token && session.customer.customerId === customerId
+    && session.customer.customerType === 'personal' && session.workspace?.workspaceCode === workspaceCode };
+}
+
 export function configureAuthBridge(next: AuthBridge | null): void {
   bridge = next;
 }
@@ -153,6 +167,13 @@ async function authedJson<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 /** 需要登录的接口。金额、库存、可用性均以服务端为准；前端不自行拼算最终价。 */
 export const sessionApi = {
+  async readBookingHostCapabilities(): Promise<AiClientHostCapabilities> {
+    return parse(await authedFetch('/ai-native/entry/host-capabilities/read', { method: 'POST', body: '{}' }, false));
+  },
+  async readBookingHandoff(input: string | { handoffRef: string }): Promise<AiBookingHandoff> {
+    const handoffRef = typeof input === 'string' ? input : input.handoffRef;
+    return parse(await authedFetch('/ai-native/entry/booking-handoffs/read', { method: 'POST', body: JSON.stringify({ handoffRef }) }, false));
+  },
   me() { return authedJson<Record<string, unknown>>('/auth/me'); },
   switchWorkspace(workspaceCode: string) {
     return authedJson<ClientSession>('/auth/switch-workspace', { method: 'POST', body: JSON.stringify({ workspaceCode }) });
@@ -162,6 +183,17 @@ export const sessionApi = {
   availability(payload: unknown) { return authedJson<Record<string, unknown>>('/availability', { method: 'POST', body: JSON.stringify(payload) }); },
   createQuote(payload: unknown) { return authedJson<Record<string, unknown>>('/quotes', { method: 'POST', body: JSON.stringify(payload) }); },
   getQuote(id: string) { return authedJson<Record<string, unknown>>(`/quotes/${encodeURIComponent(id)}`); },
+  acceptBookingSubmission(input: { handoffRef: string }) {
+    return authedJson<AiBookingSubmissionAcceptance>('/ai-native/entry/booking-submissions/accept', { method: 'POST', body: JSON.stringify(input) });
+  },
+  async submitAcceptedBooking(input: AiBookingSubmissionDecision): Promise<AiBookingSubmissionReceipt> {
+    // Late authorization failures do not prove the original business call was absent.
+    return parse(await authedFetch('/ai-native/entry/booking-submissions/submit',
+      { method: 'POST', body: JSON.stringify(input) }, false)) as Promise<AiBookingSubmissionReceipt>;
+  },
+  readBookingSubmission(input: { acceptanceRef: string }) {
+    return authedJson<AiBookingSubmissionReceipt>('/ai-native/entry/booking-submissions/read', { method: 'POST', body: JSON.stringify(input) });
+  },
   createOrder(payload: unknown, idempotencyKey: string) {
     return authedJson<Record<string, unknown>>('/orders', { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify(payload) });
   },

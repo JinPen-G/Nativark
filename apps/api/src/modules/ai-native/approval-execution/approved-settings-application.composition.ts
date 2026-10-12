@@ -6,12 +6,14 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { lockActiveCategoryBinding } from '../../rental-core/category-active-write';
 import { ApprovedSettingsRouteAuthority } from '../../rental-core/approved-settings-route.authority';
 import { ApprovedSettingsChangeService } from '../../rental-core/approved-settings-change.service';
+import { prepareSettingsChangeSchema } from '../../rental-core/approved-settings-change.validation';
 import { AiProposalRepository, AiProposalRepositoryError } from '../ai-proposal-repository';
 import { AiApprovalService, AiApprovalRepositoryError, PrismaAiApprovalRepository, type AiApprovalRecord } from '../ai-approval-repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { settingsContract, registeredSettingsTool, ApprovedSettingsApplicationUnknownError } from './approved-settings-contracts';
 import { ApprovedSettingsTaskAuthority, settingsTransactionDb, settingsConflict, settingsDenied, type ApprovedSettingsApplicationDependencies } from './approved-settings-task.authority';
 import { PrismaApprovedSettingsParticipant } from './prisma-approved-settings.participant';
+import { composePersistedSettingsTaskInput } from '../settings-task-input.composition';
 
 export function composeApprovedSettingsApplication(d: ApprovedSettingsApplicationDependencies) {
   const authority = new ApprovedSettingsTaskAuthority(d), participant = new PrismaApprovedSettingsParticipant(authority);
@@ -154,5 +156,36 @@ export function composeApprovedSettingsApplication(d: ApprovedSettingsApplicatio
     const result = await domain().readOperation({ operationKey: command.operationKey });
     return settingsContract('AiApprovedSettingsOperationResultDraft', { draftVersion: AI_APPROVED_SETTINGS_DRAFT_VERSION, ...result }, true);
   };
-  return Object.freeze({ prepare, readPreparationReceipt, readProposal, decide, readDecisionReceipt, commitApprovedChange, readOperation });
+  // Preparing a frozen business change is distinct from creating an AI
+  // proposal, deciding approval and committing active settings.
+  const readCurrent = () => domain().readCurrent();
+  const prepareChange = async (value: unknown) => {
+    try { return await domain().prepareChange(structuredClone(value)); }
+    catch (error) {
+      if (error instanceof AiTaskRepositoryError || error instanceof HttpException && error.getStatus() < 500) throw error;
+      // The domain transaction may have committed its immutable change. Never
+      // turn a lost acknowledgement into permission to generate another key.
+      throw new ApprovedSettingsApplicationUnknownError('read_change_receipt');
+    }
+  };
+  const readChangeReceipt = async (value: unknown) => {
+    const parsed = prepareSettingsChangeSchema.pick({ changeKey: true }).safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const changeKey = parsed.data.changeKey;
+    return route.withAuthorization('read', async (actor, revalidate) => {
+      const change = await d.db.rentalApprovedSettingsChange.findUnique({
+        where: { workspaceId_actorId_changeKey: { workspaceId: actor.workspaceId, actorId: actor.actorId, changeKey } }
+      });
+      if (!change) return { state: 'not_observed' as const, nextAction: 'read_change_receipt' as const };
+      if (change.workspaceId !== actor.workspaceId || change.tenantId !== actor.tenantId
+        || change.actorId !== actor.actorId || change.changeKey !== changeKey) throw settingsDenied();
+      const review = await domain().readHistoricalChange({ changeId: change.id, changeHash: change.changeHash });
+      await revalidate();
+      return { state: 'prepared_not_approved' as const, change: review };
+    });
+  };
+  const publishTaskInput = (value: unknown) => composePersistedSettingsTaskInput(d).source.publishSettingsInput(value);
+  const readTaskInputReceipt = (value: unknown) => composePersistedSettingsTaskInput(d).source.readSettingsInputReceipt(value);
+  return Object.freeze({ readCurrent, prepareChange, readChangeReceipt, publishTaskInput, readTaskInputReceipt,
+    prepare, readPreparationReceipt, readProposal, decide, readDecisionReceipt, commitApprovedChange, readOperation });
 }

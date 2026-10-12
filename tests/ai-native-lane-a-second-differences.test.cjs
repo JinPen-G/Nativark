@@ -5,6 +5,11 @@ const { setup } = require('./fixtures/ai-native/lane-a-business-consumption.cjs'
 test('real composition prepares current terminology and member name differences without persisting', async () => {
   const h = await setup();
   const profile = h.core.getProfile('tenant_001');
+  const section = await h.tools.openingSection({ key: 'workspace_profile' });
+  assert.equal(section.status, 'ready_for_human_review');
+  assert.equal(section.persistence, 'not_attempted');
+  assert.deepEqual(section.manual.navigation, 'host_existing_section');
+  await assert.rejects(h.tools.openingSection({ key: '../../secrets' }));
   const out = await h.tools.openingActions.prepareDifference({ expectedVersion: profile.configVersion,
     changes: [{ field: 'itemLabel', value: '合成展示名称' }] });
   assert.equal(out.changes[0].before, profile.terminology.itemLabel); assert.equal(out.changes[0].after, '合成展示名称');

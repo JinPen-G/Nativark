@@ -29,6 +29,11 @@ test('selected authorized fulfillment location is mapped to original Guard field
 test('enterprise qualification is explicitly unavailable, not defaulted to a personal quote', async () => {
   const h = await setup(); let calls = 0;
   await assert.rejects(h.authority.withQuote({ ...input, customerType: 'corporate' }, async () => { calls++; }), e => e.code === 'CAPABILITY_UNSUPPORTED');
+  const enterprise = { ...input, bookingIdentity: { bookingIdentity: 'enterprise_employee', corporateCustomerId: 'company-a', enterpriseContractAndPayer: true } };
+  const pending = h.authority.withQuote(enterprise, async () => { calls++; });
+  enterprise.bookingIdentity.enterpriseContractAndPayer = false;
+  await assert.rejects(pending, e => e.code === 'CAPABILITY_UNSUPPORTED');
+  assert.equal(await h.authority.withQuote(enterprise, async () => 'still_requires_Core_qualification'), 'still_requires_Core_qualification');
   assert.equal(calls, 0);
 });
 test('quote permission revocation suppresses callback result', async () => {
@@ -77,7 +82,8 @@ for (const categoryCode of ['camera', 'camping', 'vehicle', 'construction']) tes
   const tools = composeAiGuardedQuoteTools({ core, business, routes: h.bridge, readers, clock: () => new Date() });
   const source = new AiGuardedQuoteCoreContextSource(core, h.bridge);
   const scope = { kind: 'workspace', tenantId: 'tenant_001', workspaceId: 'workspace-a' }, ctx = await source.current(scope);
-  const prepared = await tools.candidates.prepare({ customerType: 'personal', customerId: 'customer-a', items: [{ productName: ctx.groups[0].name, quantity: 1 }],
+  const rates = await h.bridge.withRead('quote_context', {}, () => business.listSpaceRatesAt('tenant_001', ctx, '2026-11-10T09:00:00+08:00'));
+  const prepared = await tools.candidates.prepare({ customerType: 'personal', customerId: 'customer-a', items: [{ productName: ctx.groups[0].name, quantity: 1, pricingUnit: rates.find(rate => rate.itemGroupId === ctx.groups[0].id).unit }],
     start: '2026-11-10T09:00:00+08:00', end: '2026-11-11T09:00:00+08:00', fulfillmentMode: ctx.settings.fulfillment.enabledModes[0], locationName: ctx.locations[0].name });
   assert.equal(prepared.status, 'needs_confirmation');
   const ai = await tools.preview.preview(prepared.request);
@@ -96,4 +102,42 @@ test('dependency unavailability is not classified as inventory shortage', async 
   const h = await setup();
   const service = new AiQuotePreviewService({ createQuote: async () => { throw Error('依赖服务不可用'); } }, { current: async () => ({}) }, h.authority);
   assert.equal((await service.preview(input)).status, 'unavailable');
+});
+
+test('current delivery choice reaches actual Core quote and changed address cannot silently create another quote', async t => {
+  const previous = process.env.PLATFORM_DATA_SOURCE;
+  process.env.PLATFORM_DATA_SOURCE = 'memory'; // Existing offline Core config store, not a MySQL price assertion.
+  t.after(() => { if (previous === undefined) delete process.env.PLATFORM_DATA_SOURCE; else process.env.PLATFORM_DATA_SOURCE = previous; });
+  const b = await require('./fixtures/ai-native/lane-a-business-consumption.cjs').setup('camera');
+  const row = { id: 'address-a', tenantId: 'tenant_001', customerId: 'customer-a', status: 'active', revision: 1,
+    recipient: 'Synthetic recipient', phone: '13800000000', phoneMasked: '138****0000', countryCode: 'CN',
+    province: 'Synthetic province', city: 'Synthetic city', district: null, detail: 'Synthetic detail', postalCode: null,
+    latitude: null, longitude: null, isDefault: true, updatedAt: new Date('2026-10-07T00:00:00Z') };
+  // Only the persistence boundary is simulated; list/selection/Guard and Core
+  // quote computation and stored delivery snapshot use product implementations.
+  b.business.prisma = { customerDeliveryAddress: {
+    findMany: async ({ where }) => where.tenantId === row.tenantId && where.customerId === row.customerId ? [structuredClone(row)] : [],
+    findFirst: async ({ where }) => where.id === row.id && where.tenantId === row.tenantId && where.customerId === row.customerId ? structuredClone(row) : null
+  } };
+  let writes = 0;
+  const create = b.business.createQuote.bind(b.business);
+  b.business.createQuote = async (...args) => { writes++; return create(...args); };
+  const candidate = { ...b.candidate, fulfillmentMode: 'delivery' };
+  const first = await b.tools.quote.candidates.prepare(candidate);
+  assert.equal(first.status, 'missing_input');
+  assert.deepEqual(first.clarifications.find(c => c.field === 'deliveryAddressId').candidates.map(c => c.id), ['address-a']);
+  const selected = { ...candidate, deliveryAddressId: 'address-a', selectionRevision: first.selectionRevision };
+  const prepared = await b.tools.quote.candidates.prepare(selected);
+  assert.equal(prepared.status, 'needs_confirmation');
+  assert.equal((await b.tools.quote.previewSelection(selected)).status, 'quoted');
+  assert.equal(writes, 1);
+  row.revision++; row.detail = 'Changed detail';
+  await assert.rejects(b.tools.quote.preview.preview(prepared.request, prepared.configurationFingerprint, prepared.addressFingerprint),
+    error => error.code === 'CONFIG_INVALID');
+  assert.equal(writes, 1);
+  await assert.rejects(b.tools.quote.preview.preview(prepared.request, prepared.configurationFingerprint), error => error.code === 'CONFIG_INVALID');
+  assert.equal(writes, 1);
+  const again = await b.tools.quote.previewSelection(selected);
+  assert.equal(again.status, 'missing_input'); assert.equal(again.request, undefined);
+  assert.equal(writes, 1);
 });

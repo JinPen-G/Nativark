@@ -46,6 +46,7 @@ function quoteSnapshotFingerprint(quote: RentalQuoteSnapshotV1) {
   return JSON.stringify(canonicalize({
     categoryCode: quote.categoryCode,
     request: quote.request,
+    deliveryAddressSnapshot: quote.deliveryAddressSnapshot,
     membershipSnapshot: quote.membershipSnapshot,
     membershipBenefitEvaluations: quote.membershipBenefitEvaluations,
     chargeLines: quote.chargeLines,
@@ -138,6 +139,35 @@ export class RentalOrderConfirmationService {
 
   normalizeOrderInput(input: CreateRentalOrderRequest): CreateRentalOrderRequest {
     return this.memberships && !input.bookingIdentity ? { ...input, bookingIdentity: { bookingIdentity: "personal" } } : input;
+  }
+
+  /** Server-only exact original request fingerprint. Shares the same normalization
+   * as create(), so adapters must not copy price/order canonicalization rules. */
+  fingerprintOrderRequest(input: CreateRentalOrderRequest) {
+    return orderRequestFingerprint(this.normalizeOrderInput(structuredClone(input)));
+  }
+
+  /** Read the SAME original business key, never consume a quote or retry a write.
+   * Caller must bind current identity/scope and supply the persisted accepted
+   * request, not a caller-provided hash or a guessed/latest order. */
+  async readOrderCreation(tenantId: string, input: CreateRentalOrderRequest, idempotencyKey: string) {
+    if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim() || idempotencyKey.length > 191) {
+      throw new BadRequestException("缺少原下单操作键");
+    }
+    const request = this.normalizeOrderInput(structuredClone(input));
+    const fingerprint = orderRequestFingerprint(request);
+    const hit = await this.idempotency.find(tenantId, ORDER_CREATE_ACTION, idempotencyKey.trim());
+    if (!hit) return { state: 'not_observed' as const, retryable: false as const, orderId: null };
+    if (hit.requestHash !== fingerprint) throw new ConflictException("原下单操作载荷不一致");
+    const order = hit.orderId ? await this.coreFacts.findOrder(tenantId, hit.orderId) : undefined;
+    if (!order) return { state: 'unknown' as const, retryable: false as const, orderId: null };
+    // Both original repositories resolve current ALS workspace in their queries.
+    // RentalOrder's domain projection deliberately has no workspaceId field.
+    if (order.id !== hit.orderId || order.tenantId !== tenantId
+      || order.quoteId !== request.quoteId || order.customerId !== request.customerId) {
+      throw new ConflictException("原下单结果绑定不一致");
+    }
+    return { state: 'observed' as const, retryable: false as const, orderId: order.id };
   }
 
   createApprovedOrder(tenantId: string, input: CreateRentalOrderRequest, userName: string, context: BusinessContext,

@@ -1,5 +1,7 @@
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';
-import { AiTaskRepositoryError } from '../ai-task.repository';
+import { AiTaskRepository, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
+import type { AiScopeRepository } from '../ai-scope.repository';
+import type { AiTaskExecutionAuthorization } from './prisma-task-measured-effects';
 import { AiStepRegistrationRepository, type AiStepRegistrationAuthority } from '../ai-step-registration.repository';
 import { AiStepTransitionRepository, type AiStepTransitionAuthority } from '../ai-step-transition.repository';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
@@ -24,10 +26,28 @@ export interface AuthorizedPersistentTaskInputComposition extends Omit<Persisten
   inputSource: AiTaskInputSource;
 }
 
+export type CurrentPersistentTaskAuthorization = {
+  scopes: AiScopeRepository; authority: AiTaskRepositoryAuthority;
+  tasks: AiTaskRepository; execution: AiTaskExecutionAuthorization;
+};
+
 export function composeAuthorizedPersistentTaskInputRunner(input: AuthorizedPersistentTaskInputComposition) {
   if (typeof input?.registrationAuthority?.resolve !== 'function' || typeof input?.transitionAuthority?.resolve !== 'function'
     || !input?.authorization) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const authorization = composePersistedTaskAuthorization({ ...input.authorization, db: input.db, clock: input.wall });
+  return composeCurrentAuthorizedPersistentTaskInputRunner(input, authorization);
+}
+
+/** Common assembly for an already server-bound current authority. Neither an
+ * HTTP input nor a synthetic scope may construct this dependency. Customers
+ * reuse the same repositories, resource ledger and execution engine. */
+export function composeCurrentAuthorizedPersistentTaskInputRunner(
+  input: Omit<AuthorizedPersistentTaskInputComposition, 'authorization'>,
+  authorization: CurrentPersistentTaskAuthorization,
+) {
+  if (typeof authorization?.authority?.resolve !== 'function' || typeof authorization.execution?.authorize !== 'function'
+    || typeof input?.registrationAuthority?.resolve !== 'function' || typeof input.transitionAuthority?.resolve !== 'function')
+    throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const registrations = new AiStepRegistrationRepository(input.db, input.registrationAuthority, input.wall, undefined,
     { resolve: command => authorization.authority.resolve(command.taskId, 'read_step_terminal') });
   const transitions = new AiStepTransitionRepository(input.db, input.transitionAuthority, input.wall);

@@ -2,14 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { AI_TOOL_DRAFT_VERSION, type AiExecutionContext, type CreateRentalOrderRequest } from '@rental-os/shared';
-import { ValidationPipe } from '@nestjs/common';
+import { HttpException, ValidationPipe } from '@nestjs/common';
 import { CreateRentalOrderDto } from '../../rental-core/rental-order-request.dto';
 import type { RentalOrderConfirmationService } from '../../rental-core/rental-order-confirmation.service';
 import type { AiApprovedOrderRouteAuthority } from '../approval-execution/approved-order-route.authority';
 import type { ApprovedOrderInputAuthority, ApprovedOrderInputReference } from '../order-task-input.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
-import { gatewayTextIntentPolicySchema, type GatewayTextIntentPolicy } from '../gateway-intent';
-import { TASK_TEXT_MODEL_TOOL, parseTaskModelInput, taskModelFingerprint } from '../model-input/task-model-input';
+import { gatewayTextIntentPolicySchema } from '../gateway-intent';
+import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, isTaskModelTool, parseTaskModelInput, taskModelFingerprint, type TaskModelPolicy } from '../model-input/task-model-input';
 import { aiCatalogReadInputSchema } from '../catalog-read-facts.service';
 import { aiAvailabilityReadInputSchema } from '../availability-read-facts.service';
 import { aiTaskAccessFromContext, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
@@ -17,6 +17,8 @@ import type { AiStepRegistrationAuthority, AiStepRegistrationCommand } from '../
 import type { AiTaskExecutionAuthorization } from './prisma-task-measured-effects';
 import { aiTaskRunPlanSchema, aiTaskRunnerLimitsSchema, type AiTaskPlanEvidenceAuthority } from './prisma-task-run-evidence.repository';
 import type { AiTaskRunnerLease, AiTaskRunnerPlan } from './ai-task-runner.ports';
+import { settingsChangeReferenceSchema } from '../../rental-core/approved-settings-change.validation';
+import { textProbeCommandSchema, TEXT_CAPABILITY_PROBE_TOOL } from '../text-capability-probe';
 
 type Db = Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiRun' | 'aiTaskPlanPolicy' | 'aiTaskActionInput' | 'aiTaskRunPlan' | 'aiStep'>;
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
@@ -31,12 +33,19 @@ const publishSchema = z.object({ taskId: id.max(36), registrationRef: id, expect
 const availabilityPublishSchema = publishSchema.extend({ input: aiAvailabilityReadInputSchema });
 const orderPublishSchema = publishSchema.extend({ input: z.unknown() });
 export type PersistedReadonlyTool = 'rental.catalog.search' | 'rental.availability.check';
-export type PersistedTaskInputTool = PersistedReadonlyTool | 'rental.order.commit' | typeof TASK_TEXT_MODEL_TOOL;
+export type PersistedTaskInputTool = PersistedReadonlyTool | 'rental.order.commit' | 'tenant.notifications.commit' | typeof TASK_TEXT_MODEL_TOOL | typeof TASK_IMAGE_MODEL_TOOL | typeof TASK_AUDIO_MODEL_TOOL | typeof TEXT_CAPABILITY_PROBE_TOOL;
+export interface SettingsInputDependencies {
+  /** Current original Guard and immutable domain evidence, without acquiring
+   * category locks after the plan/registration repositories hold task locks. */
+  verify(context: AiExecutionContext, reference: { changeId: string; changeHash: string },
+    taskId: string, tx?: Prisma.TransactionClient, purpose?: 'input' | 'plan'): Promise<{ expiresAt: string }>;
+}
 type OrderInputDependencies = {
   route: Pick<AiApprovedOrderRouteAuthority, 'withOrderPreparation'>;
   confirmation: Pick<RentalOrderConfirmationService, 'normalizeOrderInput'>;
 };
-const toolsSchema = z.array(z.object({ code: z.enum(['rental.catalog.search', 'rental.availability.check', 'rental.order.commit', TASK_TEXT_MODEL_TOOL]), version: z.literal(AI_TOOL_DRAFT_VERSION) }).strict()).min(1).max(1);
+export const aiPersistedPlanToolsSchema = z.array(z.object({ code: z.enum(['rental.catalog.search', 'rental.availability.check', 'rental.order.commit', 'tenant.notifications.commit', TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, TEXT_CAPABILITY_PROBE_TOOL]), version: z.literal(AI_TOOL_DRAFT_VERSION) }).strict()).min(1).max(8)
+  .refine(tools => new Set(tools.map(tool => tool.code)).size === tools.length);
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const conflict = () => new AiTaskRepositoryError('AI_REVISION_CONFLICT');
@@ -44,8 +53,7 @@ const identity = ({ requestId: _id, authorizedAt: _at, ...context }: AiExecution
 export class AiTaskPlanInputResultUnknownError extends Error {
   readonly code = 'AI_RESULT_UNKNOWN' as const;
   readonly retryable = false;
-  readonly nextAction = 'reconcile' as const;
-  constructor() { super('AI_RESULT_UNKNOWN'); }
+  constructor(readonly nextAction: 'reconcile' | 'read_task_input' = 'reconcile') { super('AI_RESULT_UNKNOWN'); }
 }
 
 export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, AiStepRegistrationAuthority, ApprovedOrderInputAuthority {
@@ -53,25 +61,30 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
   constructor(private readonly db: Db, private readonly authorization: AiTaskRepositoryAuthority,
     private readonly execution: AiTaskExecutionAuthorization, private readonly wall: () => Date = () => new Date(),
     private readonly toolCode: PersistedTaskInputTool = 'rental.catalog.search', private readonly order?: OrderInputDependencies,
-    private readonly modelPolicy?: GatewayTextIntentPolicy) {
+    private readonly modelPolicy?: TaskModelPolicy, private readonly settings?: SettingsInputDependencies) {
     if (typeof db?.$transaction !== 'function' || typeof db.aiTaskPlanPolicy?.findFirst !== 'function'
       || typeof db.aiTaskActionInput?.create !== 'function' || typeof authorization?.resolve !== 'function'
-      || typeof execution?.authorize !== 'function' || !['rental.catalog.search', 'rental.availability.check', 'rental.order.commit', TASK_TEXT_MODEL_TOOL].includes(toolCode)
+      || typeof execution?.authorize !== 'function' || !['rental.catalog.search', 'rental.availability.check', 'rental.order.commit', 'tenant.notifications.commit', TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, TEXT_CAPABILITY_PROBE_TOOL].includes(toolCode)
       || (toolCode === 'rental.order.commit' && (typeof order?.route?.withOrderPreparation !== 'function'
         || typeof order?.confirmation?.normalizeOrderInput !== 'function'))
-      || (toolCode === TASK_TEXT_MODEL_TOOL && !gatewayTextIntentPolicySchema.safeParse(modelPolicy).success)) throw unavailable();
-    if (modelPolicy) this.modelPolicy = gatewayTextIntentPolicySchema.parse(structuredClone(modelPolicy));
+      || (isTaskModelTool(toolCode) && !gatewayTextIntentPolicySchema.safeParse(modelPolicy && { sceneCode: modelPolicy.sceneCode, maxOutputTokens: modelPolicy.maxOutputTokens }).success)
+      || (isTaskModelTool(toolCode) && ((toolCode === TASK_IMAGE_MODEL_TOOL ? 'image' : toolCode === TASK_AUDIO_MODEL_TOOL ? 'audio' : undefined) !== modelPolicy?.kind))
+      || (toolCode === 'tenant.notifications.commit' && typeof settings?.verify !== 'function')) throw unavailable();
+    if (modelPolicy) this.modelPolicy = { ...gatewayTextIntentPolicySchema.parse({ sceneCode: modelPolicy.sceneCode,
+      maxOutputTokens: modelPolicy.maxOutputTokens }), ...(modelPolicy.kind ? { kind: modelPolicy.kind } : {}) };
   }
 
   private fingerprint(payload: unknown) {
-    return this.toolCode === TASK_TEXT_MODEL_TOOL
+    return isTaskModelTool(this.toolCode)
       ? taskModelFingerprint(parseTaskModelInput(payload, this.modelPolicy!), this.modelPolicy!) : requestFingerprint(payload);
   }
 
   private async parseInput(value: unknown) {
     if (this.toolCode === 'rental.catalog.search') return aiCatalogReadInputSchema.parse(structuredClone(value));
     if (this.toolCode === 'rental.availability.check') return aiAvailabilityReadInputSchema.parse(structuredClone(value));
-    if (this.toolCode === TASK_TEXT_MODEL_TOOL) return parseTaskModelInput(value, this.modelPolicy!);
+    if (isTaskModelTool(this.toolCode)) return parseTaskModelInput(value, this.modelPolicy!);
+    if (this.toolCode === 'tenant.notifications.commit') return settingsChangeReferenceSchema.parse(structuredClone(value));
+    if (this.toolCode === TEXT_CAPABILITY_PROBE_TOOL) return textProbeCommandSchema.parse(structuredClone(value));
     try {
       const body: CreateRentalOrderDto = await this.validation.transform(structuredClone(value), { type: 'body', metatype: CreateRentalOrderDto });
       if (!body || body.capabilityExceptions !== undefined || requestFingerprint(body) !== requestFingerprint(value)) throw denied();
@@ -89,8 +102,10 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     const row = await db.aiTaskPlanPolicy.findFirst({ where: key });
     if (!row || Object.entries(key).some(([k, v]) => row[k as keyof typeof row] !== v) || !rev.safeParse(row.revision).success
       || row.enabled !== true || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime()) || row.expiresAt <= this.wall()) throw unavailable();
-    const tools = toolsSchema.parse(structuredClone(row.allowedTools));
-    if (tools[0].code !== this.toolCode) throw unavailable();
+    const parsedTools = aiPersistedPlanToolsSchema.safeParse(structuredClone(row.allowedTools));
+    if (!parsedTools.success) throw unavailable();
+    const tools = parsedTools.data;
+    if (!tools.some(tool => tool.code === this.toolCode)) throw unavailable();
     const limits = aiTaskRunnerLimitsSchema.parse(structuredClone(row.limits));
     if (limits.maxStepMs > limits.maxTotalMs) throw unavailable();
     const policy = { ...key, revision: row.revision, enabled: row.enabled, tools, limits, expiresAt: row.expiresAt.toISOString() };
@@ -127,9 +142,60 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     return this.publish(value);
   }
 
-  async publishModelInput(value: unknown) {
-    if (this.toolCode !== TASK_TEXT_MODEL_TOOL) throw unavailable();
+  async publishProbeInput(value: unknown) {
+    if (this.toolCode !== TEXT_CAPABILITY_PROBE_TOOL) throw unavailable();
     return this.publish(value);
+  }
+
+  async publishModelInput(value: unknown) {
+    if (!isTaskModelTool(this.toolCode)) throw unavailable();
+    return this.publish(value);
+  }
+
+  async publishSettingsInput(value: unknown) {
+    if (this.toolCode !== 'tenant.notifications.commit') throw unavailable();
+    return this.publish(structuredClone(value));
+  }
+
+  async readSettingsInputReceipt(value: unknown) {
+    if (this.toolCode !== 'tenant.notifications.commit') throw unavailable();
+    const parsed = z.object({ taskId: id.max(36), runId: id.max(36), registrationRef: id }).strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const command = parsed.data, before = await this.access(command.taskId, 'read_metadata');
+    const key = { scopeId: before.task.scopeId, ...command };
+    const read = () => this.db.aiTaskActionInput.findFirst({ where: key });
+    const row = await read();
+    let receipt: { state: 'not_observed'; nextAction: 'read_task_input' }
+      | { state: 'published'; execution: 'not_attested'; id: string; input: { changeId: string; changeHash: string } };
+    if (!row) receipt = { state: 'not_observed', nextAction: 'read_task_input' };
+    else {
+      const stored = await this.input(row, key);
+      if (stored.policyRevision !== before.policy.revision) throw conflict();
+      await this.verifySettings(before.context, command.taskId, stored.payload);
+      const latest = await this.input(await read(), key);
+      if (requestFingerprint(latest) !== requestFingerprint(stored)) throw denied();
+      // Publication proves only the input row. It must not attest that a
+      // concurrently running step has or has not performed its business action.
+      receipt = { state: 'published', execution: 'not_attested', id: stored.id, input: settingsChangeReferenceSchema.parse(stored.payload) };
+    }
+    const after = await this.access(command.taskId, 'read_metadata');
+    if (after.access.bindingKey !== before.access.bindingKey || after.policyHash !== before.policyHash) throw denied();
+    if (receipt.state === 'published') await this.verifySettings(after.context, command.taskId, receipt.input);
+    return receipt;
+  }
+
+  private async verifySettings(context: AiExecutionContext, taskId: string, payload: unknown, tx?: Prisma.TransactionClient, purpose: 'input' | 'plan' = 'input') {
+    if (this.toolCode !== 'tenant.notifications.commit') return undefined;
+    try {
+      const proof = await this.settings!.verify(structuredClone(context), settingsChangeReferenceSchema.parse(structuredClone(payload)), taskId, tx, purpose);
+      if (!z.string().datetime({ offset: true }).safeParse(proof?.expiresAt).success || Date.parse(proof.expiresAt) <= this.wall().getTime()) throw denied();
+      return proof.expiresAt;
+    } catch (error) {
+      if (error instanceof AiTaskRepositoryError) throw error;
+      if (error instanceof HttpException && [401, 403].includes(error.getStatus())) throw denied();
+      if (error instanceof HttpException && error.getStatus() === 409) throw conflict();
+      throw unavailable();
+    }
   }
 
   async publishOrderInput(value: unknown) {
@@ -154,11 +220,12 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     const before = await this.access(command.taskId, 'transition_task');
     if (identity(before.context) !== identity(executeContext) || before.task.status !== 'RUNNING'
       || before.task.cancelRequestedAt !== null || before.task.revision !== command.expectedTaskRevision) throw denied();
-    if (this.toolCode === TASK_TEXT_MODEL_TOOL) {
+    if (isTaskModelTool(this.toolCode)) {
       const model = parseTaskModelInput(payload, this.modelPolicy!);
       if (model.identityHash !== identity(executeContext) || model.intent.sceneCode !== before.task.sceneCode) throw denied();
     }
     await this.held(command.lease, before);
+    await this.verifySettings(before.context, command.taskId, payload);
     const fingerprint = this.fingerprint(payload);
     const key = { scopeId: before.task.scopeId, taskId: before.task.id, runId: command.lease.runId, registrationRef: command.registrationRef };
     let callbackCompleted = false;
@@ -172,6 +239,9 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
           || current.task.status !== 'RUNNING' || current.task.cancelRequestedAt !== null
           || current.task.revision !== command.expectedTaskRevision) throw conflict();
         await this.held(command.lease, current, tx);
+        if (isTaskModelTool(this.toolCode) && await tx.aiTaskQuoteSelection.findFirst({ where: {
+          scopeId: key.scopeId, taskId: key.taskId, runId: key.runId, supersededAt: null } })) throw conflict();
+        const settingsExpiry = await this.verifySettings(current.context, command.taskId, payload, tx);
         const existing = await tx.aiTaskActionInput.findFirst({ where: key });
         if (existing) {
           const stored = await this.input(existing, key);
@@ -190,10 +260,11 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
         if (changed.count !== 1) throw conflict();
         const row = await tx.aiTaskActionInput.create({ data: { ...key, id: randomUUID(), toolCode: this.toolCode,
           toolVersion: AI_TOOL_DRAFT_VERSION, payload: JSON.parse(JSON.stringify(payload)), fingerprint, policyRevision: current.policy.revision,
-          expiresAt: new Date(current.policy.expiresAt) } });
+          expiresAt: new Date(Math.min(Date.parse(current.policy.expiresAt), settingsExpiry ? Date.parse(settingsExpiry) : Infinity)) } });
         const final = await this.access(command.taskId, 'transition_task', tx);
         if (final.access.bindingKey !== before.access.bindingKey || final.policyHash !== before.policyHash) throw denied();
         await this.held(command.lease, final, tx);
+        await this.verifySettings(final.context, command.taskId, payload, tx);
         callbackCompleted = true;
         return { id: (await this.input(row, key)).id, replayed: false };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
@@ -204,10 +275,11 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
       if (identity(reauthorized) !== identity(executeContext)) throw denied();
       const after = await this.access(command.taskId, 'transition_task');
       if (identity(after.context) !== identity(before.context) || after.policyHash !== before.policyHash) throw denied();
+      await this.verifySettings(after.context, command.taskId, payload);
       return result;
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw error;
-      if (callbackCompleted) throw new AiTaskPlanInputResultUnknownError();
+      if (callbackCompleted) throw new AiTaskPlanInputResultUnknownError(this.toolCode === 'tenant.notifications.commit' ? 'read_task_input' : 'reconcile');
       throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
     }
   }
@@ -222,8 +294,8 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     }
     const inputs = [];
     for (const step of plan.steps) {
-      if (step.operation !== (this.toolCode === 'rental.order.commit' ? 'idempotent'
-        : this.toolCode === TASK_TEXT_MODEL_TOOL ? 'external_unknown' : 'readonly')
+      if (step.operation !== (this.toolCode === 'rental.order.commit' || this.toolCode === 'tenant.notifications.commit' ? 'idempotent'
+        : isTaskModelTool(this.toolCode) || this.toolCode === TEXT_CAPABILITY_PROBE_TOOL ? 'external_unknown' : 'readonly')
         || !before.policy.tools.some(t => t.code === step.toolCode && t.version === step.toolVersion)) throw unavailable();
       const key = { scopeId: before.task.scopeId, taskId: plan.taskId, runId: plan.runId, registrationRef: step.registrationRef };
       const input = await this.input(await db.aiTaskActionInput.findFirst({ where: key }), key);
@@ -231,6 +303,7 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
       if (this.toolCode === 'rental.order.commit') {
         await this.order!.route.withOrderPreparation(before.context, input.payload as CreateRentalOrderRequest, async () => undefined);
       }
+      await this.verifySettings(before.context, plan.taskId, input.payload, undefined, 'plan');
       inputs.push(input);
     }
     const current = await this.access(plan.taskId, 'read_metadata', db);
@@ -240,6 +313,7 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
       const key = { scopeId: before.task.scopeId, taskId: plan.taskId, runId: plan.runId, registrationRef: input.registrationRef };
       const again = await this.input(await db.aiTaskActionInput.findFirst({ where: key }), key);
       if (requestFingerprint(again) !== requestFingerprint(input)) throw denied();
+      await this.verifySettings(current.context, plan.taskId, again.payload, undefined, 'plan');
     }
     return { authorityHash: requestFingerprint({ version: 'persisted-plan-input-1', scopeId: before.task.scopeId,
       taskId: plan.taskId, runId: plan.runId, scene: before.task.sceneCode, policy: before.policyHash,
@@ -263,12 +337,15 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
       || !plan.steps.some(p => p.registrationRef === command.registrationRef)) throw denied();
     const inputKey = { ...key, registrationRef: command.registrationRef };
     const input = await this.input(await this.db.aiTaskActionInput.findFirst({ where: inputKey }), inputKey);
+    await this.verifySettings(before.context, command.taskId, input.payload, undefined, 'plan');
     const current = await this.access(command.taskId, 'transition_task');
     if (current.access.bindingKey !== before.access.bindingKey || current.policyHash !== before.policyHash) throw denied();
     return { context: current.context, registrationAllowed: true as const,
       authorizationKey: `persisted-input-${requestFingerprint({ plan: row.planHash, proof: proof.authorityHash, input })}`,
       taskId: command.taskId, registrationRef: command.registrationRef, expiresAt: proof.expiresAt,
-      toolCode: this.toolCode, toolVersion: AI_TOOL_DRAFT_VERSION, inputRef: input.id, requestFingerprint: input.fingerprint };
+      toolCode: this.toolCode, toolVersion: AI_TOOL_DRAFT_VERSION,
+      inputRef: this.toolCode === 'tenant.notifications.commit' ? settingsChangeReferenceSchema.parse(input.payload).changeId : input.id,
+      requestFingerprint: this.toolCode === 'tenant.notifications.commit' ? settingsChangeReferenceSchema.parse(input.payload).changeHash : input.fingerprint };
   }
 
   async authorizeOrderInput(presented: Readonly<ApprovedOrderInputReference>, tx: Prisma.TransactionClient) {
@@ -343,7 +420,7 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
   }
 
   async readModelForExecution(binding: Parameters<PrismaTaskPlanInputSource['readForExecution']>[0]) {
-    if (this.toolCode !== TASK_TEXT_MODEL_TOOL) throw unavailable();
+    if (!isTaskModelTool(this.toolCode)) throw unavailable();
     binding = structuredClone(binding);
     const execution = await this.execution.authorize(binding.taskId);
     const stored = await this.readForExecution(binding);
@@ -368,6 +445,9 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
 
   async readForExecution(presented: { taskId: string; runId: string; stepId: string; actionId: string;
     inputRef: string; fingerprint: string; lease: AiTaskRunnerLease }) {
+    // Settings execution consumes its original domain change through the
+    // existing approved participant, not the generic input UUID reader.
+    if (this.toolCode === 'tenant.notifications.commit') throw unavailable();
     const binding = structuredClone(presented);
     const stored = await this.readStoredInput(binding);
     const current = await this.access(binding.taskId, 'transition_task');

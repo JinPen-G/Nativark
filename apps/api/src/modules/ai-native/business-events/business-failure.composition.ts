@@ -14,6 +14,7 @@ import { AutomationFailureTasksModule, composeAutomationFailureTasks, type Autom
 import { HumanAutomationPolicyManagementService } from '../automation/human-automation-policy-management.service';
 import { HumanAutomationReviewService } from '../automation/human-automation-review.service';
 import { BUSINESS_FAILURE_OUTBOX, PrismaBusinessFailureOutbox } from './prisma-business-failure-outbox';
+import { HumanAutomationRequestModule, type HumanAutomationHttpOptions } from '../automation/human-automation-request.module';
 
 export type BusinessFailureDependencies = {
   db: PrismaService; integrations: TenantIntegrationService; funding: RentalFundingService;
@@ -38,6 +39,10 @@ export function composeBusinessFailureAutomation(input: BusinessFailureDependenc
 
 @Module({})
 export class BusinessFailureEventsModule {
+  static registerRequestHttp(options: HumanAutomationHttpOptions = {}): DynamicModule {
+    return { module: BusinessFailureEventsModule, imports: [HumanAutomationRequestModule.register(options)] };
+  }
+
   static registerAutomation(input: BusinessFailureDependencies & Pick<AutomationDependencies, 'policyId' | 'subscriptions'>): DynamicModule {
     const base = this.register(input);
     return { ...base, imports: [AutomationFailureTasksModule.register(input)], exports: [...(base.exports ?? []), AutomationFailureTasksModule] };

@@ -38,12 +38,13 @@ function harness() {
       aiTask: [{ id: 'task-1', scopeId: 'scope-1', scopeKind: 'WORKSPACE', ownerId: 'actor-1', ownerKind: 'USER', audience: 'OPERATOR', status: 'RUNNING', revision: 5, sceneCode: intent.sceneCode, archivedAt: null, cancelRequestedAt: null }],
       aiRun: [{ id: 'run-1', taskId: 'task-1', scopeId: 'scope-1', actorId: 'actor-1', actorKind: 'USER', status: 'RUNNING', revision: 7, leaseOwnerId: 'worker-1', leaseExpiresAt: new Date(now.getTime() + 60_000), fencingToken: new Prisma.Decimal(2) }],
       aiStep: [{ id: 'step-1', taskId: 'task-1', runId: 'run-1', scopeId: 'scope-1', actionId: 'action-1', requestFingerprint: intentHash, status: 'RUNNING', revision: 9 }],
-      aiGatewayInvocation: [], aiBudgetReservation: []
+      aiGatewayInvocation: [], aiBudgetReservation: [], aiTaskActionInput: []
     }
   };
   function delegates(rows) {
     return Object.fromEntries(Object.keys(rows).map(name => [name, {
       findFirst: async ({ where }) => { state.readHook?.(name); return copy(rows[name].find(row => matches(row, where)) ?? null); },
+      findMany: async ({ where }) => copy(rows[name].filter(row => matches(row, where))),
       findUnique: async ({ where }) => copy(rows[name].find(row => matches(row, where.scopeId_callId ?? where)) ?? null),
       updateMany: async ({ where, data }) => { const selected = rows[name].filter(row => matches(row, where)); selected.forEach(row => Object.assign(row, copy(data))); return { count: selected.length }; },
       create: async ({ data }) => {
@@ -52,7 +53,7 @@ function harness() {
       }
     }]));
   }
-  const db = Object.fromEntries(Object.keys(state.rows).map(name => [name, Object.fromEntries(['findFirst', 'findUnique', 'updateMany', 'create'].map(method => [method, args => delegates(state.rows)[name][method](args)]))]));
+  const db = Object.fromEntries(Object.keys(state.rows).map(name => [name, Object.fromEntries(['findFirst', 'findMany', 'findUnique', 'updateMany', 'create'].map(method => [method, args => delegates(state.rows)[name][method](args)]))]));
   let queue = Promise.resolve();
   db.$transaction = operation => {
     const pending = queue.then(async () => {
@@ -69,8 +70,32 @@ function harness() {
     const row = state.rows.aiGatewayInvocation[0];
     state.rows.aiBudgetReservation.push({ id: 'budget-1', scopeId: row.scopeId, scopeKind: 'WORKSPACE', actorId: row.actorId, tenantId: 'tenant-1', workspaceId: 'workspace-1', callId: row.callId, requestId: row.callId, runId: row.runId, stepId: row.stepId, actionId: row.actionId, idempotencyKey: row.callId, sceneCode: row.sceneCode, configurationHash: row.configurationHash, configRevision: 3, priceVersion: row.priceVersion });
   };
-  return { state, source, input, budget };
+  return { state, source, input, budget, db };
 }
+
+test('text probe binds frozen command separately from its generated challenge intent', async () => {
+  const { textProbeIntent, TEXT_CAPABILITY_PROBE_TOOL } = require('../apps/api/src/modules/ai-native/text-capability-probe');
+  const { capabilityProfileFingerprint } = require('../apps/api/src/modules/ai-native/capability-verification');
+  const { AI_TOOL_DRAFT_VERSION } = require('@rental-os/shared');
+  const h = harness();
+  Object.assign(h.state.rows.aiProviderProfile[0], { profileKey: 'default', role: 'DEFAULT', allowedCapabilities: ['text'] });
+  const command = { operationId: 'probe-operation', profileKey: 'default',
+    profileFingerprint: capabilityProfileFingerprint(h.state.rows.aiProviderProfile[0]) };
+  const prepared = textProbeIntent(command.operationId, 'scope-1');
+  h.state.rows.aiTask[0].sceneCode = prepared.intent.sceneCode;
+  Object.assign(h.state.rows.aiStep[0], { toolCode: TEXT_CAPABILITY_PROBE_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION, inputRef: 'probe-input', requestFingerprint: requestFingerprint(command) });
+  h.state.rows.aiTaskActionInput.push({ id: 'probe-input', scopeId: 'scope-1', taskId: 'task-1', runId: 'run-1',
+    toolCode: TEXT_CAPABILITY_PROBE_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION, payload: command, fingerprint: requestFingerprint(command), expiresAt: new Date(now.getTime() + 60000) });
+  const input = { ...h.input(), intent: prepared.intent };
+  assert.equal((await h.source().register(input)).replayed, false);
+  assert.notEqual(h.state.rows.aiGatewayInvocation[0].stepFingerprint, h.state.rows.aiGatewayInvocation[0].intentHash);
+  assert.equal((await h.source().resolveForReserve(narrow, { callId: prepared.intent.requestId, model: config.model,
+    maxOutputTokens: 32, intentHash: prepared.intentHash })).association.stepId, 'step-1');
+  h.state.rows.aiTaskActionInput[0].payload.operationId = 'different-probe';
+  await assert.rejects(h.source().resolveForReserve(narrow, { callId: prepared.intent.requestId, model: config.model,
+    maxOutputTokens: 32, intentHash: prepared.intentHash }));
+  assert.equal(h.state.creates, 1);
+});
 
 test('real binding source registers one existing task step and survives service recreation', async () => {
   const h = harness();
@@ -83,6 +108,41 @@ test('real binding source registers one existing task step and survives service 
   let received;
   const adapter = new BudgetGatewayAdapter({ reserve: async command => { received = command; return { id: 'budget-1', association: command.association, callId: command.callId, sceneCode: command.sceneCode }; } }, h.source());
   assert.equal(await adapter.reserve(narrow, request), 'budget-1'); assert.equal(received.association.stepId, 'step-1');
+});
+
+test('customer invocation binds CUSTOMER task and run without borrowing a same-id USER owner', async () => {
+  const h = harness();
+  h.state.principal.context = { contractVersion: 'ain-c01-c02-draft-1', requestId: 'customer-current', authorizedAt: now.toISOString(),
+    audience: 'client', actor: { kind: 'customer', customerId: 'actor-1' }, scope: { kind: 'workspace', tenantId: 'tenant-1', workspaceId: 'workspace-1' } };
+  Object.assign(h.state.rows.aiTask[0], { ownerKind: 'CUSTOMER', audience: 'CLIENT' });
+  h.state.rows.aiRun[0].actorKind = 'CUSTOMER';
+  assert.equal((await h.source().register(h.input())).replayed, false);
+  assert.equal((await h.source().resolveForReserve(narrow, request)).actorId, 'actor-1');
+  const { PrismaGatewayCallPricing } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-call-pricing');
+  const { aiPersistenceScopeColumns } = require('../apps/api/src/modules/ai-native/persistence-scope');
+  const policies = [];
+  for (const [index, scope] of [{ kind: 'platform' }, { kind: 'tenant', tenantId: 'tenant-1' },
+    { kind: 'workspace', tenantId: 'tenant-1', workspaceId: 'workspace-1' }].entries()) {
+    const columns = aiPersistenceScopeColumns(scope);
+    const scopeId = index === 2 ? 'scope-1' : `pricing-scope-${index}`;
+    if (index !== 1) h.state.rows.aiScope.push({ id: scopeId, ...columns });
+    else Object.assign(h.state.rows.aiScope[0], columns);
+    policies.push({ scopeKind: columns.kind, scopeId: index === 1 ? 'owner-1' : scopeId, sceneCode: intent.sceneCode, unitKind: 'calls', priceVersion: 'price-1' });
+  }
+  h.db.aiBudgetPolicy = { findFirst: async ({ where }) => copy(policies.find(row => matches(row, where)) ?? null) };
+  const scopes = { resolveCurrent: async () => copy(h.state.principal) };
+  const pricing = new PrismaGatewayCallPricing(h.db, scopes, 'price-1', () => now);
+  const binding = await h.source().resolveForReserve(narrow, request);
+  const quotation = await pricing.quote({ association: binding.association, callId: request.callId, sceneCode: intent.sceneCode,
+    expiresAt: h.input().expiresAt }, { context: copy(h.state.principal.context), entitled: true, expiresAt: h.input().expiresAt });
+  assert.deepEqual(quotation.quantity, { unit: 'calls', value: 1 });
+  assert.deepEqual(quotation.policies.map(item => item.scopeKind), ['PLATFORM', 'TENANT', 'WORKSPACE']);
+  h.budget();
+  assert.equal((await h.source().resolveForReservation(narrow, 'budget-1')).association.runId, 'run-1');
+  h.state.rows.aiTask[0].ownerKind = 'USER';
+  await assert.rejects(h.source().resolveForReservation(narrow, 'budget-1'), { code: 'FORBIDDEN' });
+  h.state.rows.aiTask[0].ownerKind = 'CUSTOMER'; h.state.rows.aiRun[0].actorKind = 'USER';
+  await assert.rejects(h.source().resolveForReserve(narrow, request), { code: 'FORBIDDEN' });
 });
 
 test('runner invocation preparation uses the real binding repository and refuses replay as fresh readiness', async () => {

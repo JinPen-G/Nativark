@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { AiGatewayIntentDraft, AiGatewayFeatureDraft } from '@rental-os/shared';
-import { ModelGatewayError, modelRequestSchema } from './model-gateway.ports';
+import { ModelGatewayError, modelProtocolRequestBaseSchema, modelProtocolRequestSchema, modelRequestSchema, type GatewayContext, type ModelProtocolContent } from './model-gateway.ports';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 const feature = z.enum(['text', 'tools', 'structured_output', 'image', 'audio', 'streaming', 'embedding', 'reasoning']);
@@ -27,6 +28,111 @@ export interface PreparedGatewayTextIntent {
   request: Omit<z.infer<typeof modelRequestSchema>, 'model'>;
   requiredCapabilities: Array<'text' | 'streaming'>;
   omittedOptionalFeatures: AiGatewayFeatureDraft[];
+}
+
+/** Server-side attachment resolution boundary. The resolver owns current identity,
+ * tenant/workspace binding, active-file state and storage authorization. Gateway
+ * never accepts bytes, URLs or hashes from the Agent intent. */
+export interface GatewayMediaAttachmentResolver {
+  /** Fresh ACL/revision/hash validation after admission waits and before send.
+   * Optional for compatibility, but media dispatch rejects adapters without it. */
+  assertCurrent?(context: GatewayContext, references: readonly {
+    kind: 'image' | 'audio'; attachmentId: string; attachmentRevision: number; contentHash: string; mediaType: string;
+  }[], signal: AbortSignal): Promise<void>;
+  resolve(context: GatewayContext, reference: { kind: 'image' | 'audio'; attachmentId: string; attachmentRevision: number }, signal: AbortSignal): Promise<{
+    attachmentId: string; attachmentRevision: number;
+    mediaType: 'image/png' | 'image/jpeg' | 'audio/wav';
+    bytes: Uint8Array; contentHash: string;
+  } | null>;
+}
+export interface PreparedGatewayIntent {
+  sceneCode: string;
+  intentHash: string;
+  request: Omit<z.infer<typeof modelProtocolRequestSchema>, 'model'>;
+  requiredCapabilities: Array<'text' | 'streaming' | 'image' | 'audio'>;
+  omittedOptionalFeatures: AiGatewayFeatureDraft[];
+}
+
+const mediaKinds = new Set<AiGatewayFeatureDraft>(['image', 'audio']);
+const supportedMediaType = (kind: 'image' | 'audio', mediaType: string) =>
+  kind === 'image' ? mediaType === 'image/png' || mediaType === 'image/jpeg' : mediaType === 'audio/wav';
+
+/** Resolves public content references into a bounded protocol request immediately
+ * before routing. Missing resolver, stale attachment, bad hash or unsupported
+ * audio capability fails closed; no media is silently dropped. */
+export async function prepareGatewayIntent(
+  value: AiGatewayIntentDraft,
+  serverPolicy: GatewayTextIntentPolicy,
+  mode: 'invoke' | 'stream',
+  context: GatewayContext,
+  media?: GatewayMediaAttachmentResolver,
+  signal: AbortSignal = new AbortController().signal
+): Promise<PreparedGatewayIntent> {
+  context = structuredClone(context);
+  const parsed = intentSchema.safeParse(value), policy = gatewayTextIntentPolicySchema.safeParse(serverPolicy);
+  if (!policy.success || (mode !== 'invoke' && mode !== 'stream')) throw new ModelGatewayError('CONFIG_INVALID');
+  if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+  if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+  const input = parsed.data;
+  if (input.sceneCode !== policy.data.sceneCode) throw new ModelGatewayError('FORBIDDEN');
+  if (input.maxOutputTokens > policy.data.maxOutputTokens) throw new ModelGatewayError('INVALID_REQUEST');
+  const supported: AiGatewayFeatureDraft[] = mode === 'stream' ? ['text', 'streaming', 'image'] : ['text', 'image', 'audio'];
+  if (input.requiredFeatures.some(item => !supported.includes(item))) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  if (input.messages.reduce((count, message) => count + message.content.filter(part => part.kind !== 'text').length, 0) > 8) {
+    throw new ModelGatewayError('INVALID_REQUEST');
+  }
+  let hasMedia = false;
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: ModelProtocolContent[] }> = [];
+  for (const message of input.messages) {
+    const content: ModelProtocolContent[] = [];
+    for (const part of message.content) {
+      if (part.kind === 'text') { content.push({ kind: 'text', text: part.text }); continue; }
+      hasMedia = true;
+      if (message.role !== 'user' || !supported.includes(part.kind) || !input.requiredFeatures.includes(part.kind)) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+      if (!media) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+      if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+      let resolved: Awaited<ReturnType<GatewayMediaAttachmentResolver['resolve']>>;
+      try { resolved = await media.resolve(structuredClone(context), structuredClone(part), signal); }
+      catch (error) { if (error instanceof ModelGatewayError) throw error; throw new ModelGatewayError('CAPABILITY_UNSUPPORTED'); }
+      if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+      if (!resolved || resolved.attachmentId !== part.attachmentId || resolved.attachmentRevision !== part.attachmentRevision
+        || !supportedMediaType(part.kind, resolved.mediaType) || !(resolved.bytes instanceof Uint8Array)
+        || resolved.bytes.byteLength < 1 || resolved.bytes.byteLength > 524288 || !/^[a-f0-9]{64}$/u.test(resolved.contentHash)) {
+        throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+      }
+      const bytes = new Uint8Array(resolved.bytes), hash = createHash('sha256').update(bytes).digest('hex');
+      if (hash !== resolved.contentHash) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+      if (part.kind === 'image') {
+        if (resolved.mediaType !== 'image/png' && resolved.mediaType !== 'image/jpeg') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+        content.push({ kind: 'image', mediaType: resolved.mediaType, attachmentId: resolved.attachmentId,
+          attachmentRevision: resolved.attachmentRevision, contentHash: hash, data: Buffer.from(bytes).toString('base64') });
+      } else {
+        if (resolved.mediaType !== 'audio/wav') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+        content.push({ kind: 'audio', mediaType: resolved.mediaType, attachmentId: resolved.attachmentId,
+          attachmentRevision: resolved.attachmentRevision, contentHash: hash, data: Buffer.from(bytes).toString('base64') });
+      }
+    }
+    messages.push({ role: message.role, content });
+  }
+  if (hasMedia && !input.requiredFeatures.some(item => mediaKinds.has(item))) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  const mediaFeature = messages.some(message => typeof message.content !== 'string' && message.content.some(part => part.kind === 'audio')) ? 'audio' as const : hasMedia ? 'image' as const : undefined;
+  if (input.requiredFeatures.includes('audio') && mediaFeature !== 'audio') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  if (input.requiredFeatures.includes('image') && mediaFeature !== 'image') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  const features = [...(mediaFeature ? [mediaFeature] : []), ...(mode === 'stream' ? ['streaming' as const] : [])];
+  const request = modelProtocolRequestBaseSchema.omit({ model: true }).safeParse({ callId: input.requestId, messages,
+    maxOutputTokens: input.maxOutputTokens, ...(features.length ? { features } : {}) });
+  if (!request.success) throw new ModelGatewayError('INVALID_REQUEST');
+  if (!modelProtocolRequestSchema.safeParse({ ...request.data, model: 'validation-only' }).success) throw new ModelGatewayError('INVALID_REQUEST');
+  // Bind the bytes actually authorized and resolved, not just an attachment id.
+  // Text-only identities remain unchanged for existing persisted invocations.
+  const mediaBinding = hasMedia ? messages.map(message => ({ role: message.role,
+    media: message.content.filter(part => part.kind !== 'text').map(part => ({ kind: part.kind,
+      attachmentId: part.attachmentId, attachmentRevision: part.attachmentRevision,
+      mediaType: part.mediaType, contentHash: part.contentHash })) })) : undefined;
+  return { sceneCode: input.sceneCode, intentHash: requestFingerprint({ intent: input, mode,
+    ...(mediaBinding ? { media: mediaBinding } : {}) }), request: request.data,
+    requiredCapabilities: [...(hasMedia ? ['text' as const, ...(mediaFeature === 'audio' ? ['audio' as const] : ['image' as const])] : ['text' as const]), ...(mode === 'stream' ? ['streaming' as const] : [])],
+    omittedOptionalFeatures: input.optionalFeatures.filter(item => !supported.includes(item)) };
 }
 
 /** Text-only C03 ingress preparation, not authorization, evidence, routing, or a complete AiGatewayPortDraft.

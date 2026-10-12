@@ -57,5 +57,10 @@ export const AI_TASK_DRAFT_COMPONENT_SCHEMAS: Record<string, SchemaObject> = {
     closed({ ...eventBase, type: choice("access.revoked"), data: closed({ code: choice("AI_ACCESS_DENIED", "AI_SCOPE_CHANGED") }) })
   ] },
   AiTaskEventPageDraft: closed({ contractVersion: version, taskId: id(), events: list(ref("AiTaskEventDraft"), 100), nextCursor: cursor, hasMore: { type: "boolean" } }),
+  AiTaskSnapshotDraft: closed({ contractVersion: version, taskId: id(), revision, status,
+    sceneCode: id(), sceneVersion: id(), createdAt: time, updatedAt: time,
+    cancelRequestedAt: { ...time, nullable: true }, cursor,
+    steps: list(closed({ stepId: id(), runId: id(), sequence: revision, revision,
+      status: choice(...AI_STEP_STATUSES_DRAFT) }), 1000) }),
   AiTaskEventResetDraft: closed({ contractVersion: version, taskId: id(), status: choice("reset_required"), reason: choice("cursor_expired", "unsupported_version") })
 };

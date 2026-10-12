@@ -17,7 +17,18 @@ exports.dbFactory = function dbFactory() {
   };
   db.aiKnowledgeVersion = {
     async findFirst({ where }) { return clone([...state.versions.values()].find(v => Object.entries(where).every(([k, value]) => v[k] === value)) ?? null); },
-    async findMany({ where, take, include }) { return clone([...state.versions.values()].filter(v => v.documentId === where.documentId).sort((a, b) => a.version - b.version).slice(0, take).map(v => ({ ...v, chunks: include?.chunks ? [...state.chunks.values()].filter(c => c.versionId === v.id).sort((a, b) => a.chunkIndex - b.chunkIndex) : undefined }))); },
+    async findMany({ where, take, include, select }) {
+      return clone([...state.versions.values()].filter(v => {
+        const doc = state.documents.get(v.documentId);
+        return v.documentId === where.documentId && (!where.contentHash || v.contentHash === where.contentHash)
+          && (!where.document || doc && Object.entries(where.document).every(([key, value]) => doc[key] === value));
+      }).sort((a, b) => a.version - b.version).slice(0, take).map(v => {
+        const chunks = [...state.chunks.values()].filter(c => c.versionId === v.id).sort((a, b) => a.chunkIndex - b.chunkIndex);
+        if (select) return Object.fromEntries(Object.keys(select).map(key => [key,
+          key === '_count' ? { chunks: chunks.length } : v[key]]));
+        return { ...v, chunks: include?.chunks ? chunks.slice(0, include.chunks.take ?? chunks.length) : undefined };
+      }));
+    },
     async create({ data }) { const { chunks, ...row } = data; state.versions.set(row.id, clone(row)); for (const chunk of chunks?.create ?? []) state.chunks.set(chunk.id, { ...clone(chunk), versionId: row.id }); return clone(row); }
   };
   db.aiKnowledgeChunk = {

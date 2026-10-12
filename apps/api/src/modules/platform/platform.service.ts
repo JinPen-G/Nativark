@@ -898,7 +898,11 @@ export class PlatformService {
 
   testAiConnection(operator = "营运端"): SystemAiConnectionTestResult {
     const testedAt = new Date().toISOString();
-    this.systemRulesConfig.aiModel.lastTestStatus = "成功";
+    // This legacy endpoint has no server-bound AI Gateway/probe dependency.
+    // It must not claim that a configuration-only check contacted a provider.
+    // A real success is written only by the explicit AIN capability probe and
+    // its persisted invocation/evidence path.
+    this.systemRulesConfig.aiModel.lastTestStatus = "失败";
     this.systemRulesConfig.aiModel.lastTestTime = testedAt;
     this.systemRulesConfig.aiModel.logs.unshift({
       time: testedAt,
@@ -908,10 +912,10 @@ export class PlatformService {
       promptSourceText: this.systemRulesConfig.aiModel.promptSourceText,
       promptVersion: this.systemRulesConfig.aiModel.promptVersion,
       promptHash: this.systemRulesConfig.aiModel.promptHash,
-      filteredCount: 5,
-      status: "成功",
+      filteredCount: 0,
+      status: "失败",
       promptText:
-        "系统通用参数页发起 AI 连接测试。MVP 阶段仅校验配置结构，不连接真实模型服务。",
+        "系统通用参数页请求 AI 连接测试，但当前旧入口未装配 AI Gateway 能力探测。",
       requestPayload: JSON.stringify(
         {
           provider: this.systemRulesConfig.aiModel.provider,
@@ -924,8 +928,8 @@ export class PlatformService {
       ),
       responsePayload: JSON.stringify(
         {
-          status: "mock_success",
-          message: "配置结构校验通过，真实模型连接已预留。"
+          status: "unavailable",
+          message: "未装配服务端 AI Gateway 能力探测，未执行外部模型请求。"
         },
         null,
         2
@@ -935,11 +939,11 @@ export class PlatformService {
     this.systemRulesConfig.updatedBy = operator;
 
     return {
-      status: "成功",
+      status: "失败",
       testedAt,
       provider: this.systemRulesConfig.aiModel.provider,
       modelName: this.systemRulesConfig.aiModel.modelName,
-      message: "AI 模型连接测试已完成。MVP 阶段未调用真实外部模型。"
+      message: "AI 连接测试不可用：旧平台入口未装配服务端 AI Gateway 能力探测，未调用真实外部模型。"
     };
   }
 

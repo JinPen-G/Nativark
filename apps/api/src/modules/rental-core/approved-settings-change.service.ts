@@ -81,6 +81,19 @@ export class ApprovedSettingsChangeService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted }));
   }
 
+  /** Original immutable preparation evidence only. A later configuration or
+   * elapsed validity does not erase what was prepared; it still forbids a new
+   * decision/commit through the existing current-change checks. */
+  readHistoricalChange(value: unknown) {
+    const reference = parse(settingsChangeReferenceSchema, structuredClone(value));
+    return this.authority.withAuthorization('read', (actor, revalidate) => this.db.$transaction(async tx => {
+      const change = await this.findChange(reference, actor, tx);
+      const historical = this.review(change, actor);
+      await revalidate();
+      return historical;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }));
+  }
+
   commitApprovedChange(value: unknown) {
     const command = parse(commitSettingsChangeSchema, value);
     return this.authority.withAuthorization('write', async (actor, revalidate) => {

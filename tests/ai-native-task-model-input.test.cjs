@@ -5,12 +5,36 @@ require('ts-node').register({ transpileOnly: false, compilerOptions: { module: '
 const { authorizedRunnerHarness } = require('./fixtures/ai-native/task-authorized-runner.cjs');
 const { ApiAuthGuard } = require('../apps/api/src/common/api-auth.guard');
 const { composePersistedTaskModelInput } = require('../apps/api/src/modules/ai-native/model-input/persisted-task-model-input.composition');
-const { TASK_TEXT_MODEL_TOOL } = require('../apps/api/src/modules/ai-native/model-input/task-model-input');
+const { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL } = require('../apps/api/src/modules/ai-native/model-input/task-model-input');
 const { prepareGatewayTextIntent } = require('../apps/api/src/modules/ai-native/gateway-intent');
 const { PrismaGatewayInvocationBindings } = require('../apps/api/src/modules/ai-native/budget/prisma-gateway-invocation-bindings');
 const { AI_TOOL_DRAFT_VERSION, AI_TOOL_CODES, AI_TASK_STEP_CODES } = require('./fixtures/ai-native/local-shared.cjs');
 
-async function setup() {
+test('image input persists its original digest and uses one bound invocation; revoked media cannot register', async () => {
+  const h = await setup('image');
+  await h.root.publish(h.command());
+  const frozen = h.state.aiTaskActionInput[0];
+  assert.equal(frozen.toolCode, TASK_IMAGE_MODEL_TOOL);
+  assert.equal(frozen.payload.media[0].attachmentId, 'file-a');
+  assert.equal(JSON.stringify(frozen.payload).includes('iVBOR'), false);
+  const registered = await h.register();
+  await h.root.invocations.prepare(registered.ref, registered.lease);
+  assert.equal(h.state.aiGatewayInvocation[0].intentHash, frozen.fingerprint);
+  const executor = await h.root.executors.resolve(TASK_IMAGE_MODEL_TOOL, AI_TOOL_DRAFT_VERSION);
+  const result = await executor.execute(registered.binding, new AbortController().signal);
+  assert.equal(result.kind, 'succeeded');
+  assert.equal(h.control.sent.length, 1);
+  assert.equal(h.control.sent[0].messages[0].content[1].contentHash, frozen.payload.media[0].contentHash);
+  assert.equal(h.control.events.filter(e => e === 'reserve').length, 1);
+  assert.equal(h.control.events.filter(e => e === 'settle').length, 1);
+  const denied = await setup('image'); await denied.root.publish(denied.command());
+  const pending = await denied.register(); denied.control.mediaActive = false;
+  await assert.rejects(denied.root.invocations.prepare(pending.ref, pending.lease));
+  assert.equal(denied.state.aiGatewayInvocation.length, 0);
+  assert.deepEqual(denied.control.sent, []);
+});
+
+async function setup(kind) {
   const profile = { id: 'profile-a', scopeId: 'scope-tenant', scopeKind: 'TENANT', configRevision: 1,
     credentialRef: 'vault-a', protocol: 'openai_chat_completions', provider: 'synthetic', model: 'synthetic-model',
     serviceMode: 'tenant_managed', enabled: true, disabledAt: null };
@@ -28,7 +52,7 @@ async function setup() {
       return { context, consumerScope: { id: 'scope-a', kind: 'WORKSPACE', tenantId: 'tenant-a', workspaceId: 'workspace-a' },
         route: { profile: structuredClone(h.state.aiProviderProfile[0]), scope: { id: 'scope-tenant', kind: 'TENANT', tenantId: 'tenant-a' },
           role: 'DEFAULT', preflight: { allowed: true, required, missing: [], stale: [] } },
-        selection: { mode: 'tenant_managed', revision: 1 }, scene: 'chat', requiredCapabilities: required };
+        selection: { mode: 'tenant_managed', revision: 1 }, scene: kind === 'image' ? 'vision' : 'chat', requiredCapabilities: required };
     }, assertCurrent: async (_caller, route) => {
       if (route.route.profile.configRevision !== h.state.aiProviderProfile[0].configRevision) throw Error('synthetic stale route');
     } },
@@ -44,16 +68,30 @@ async function setup() {
     transport: { invoke: async (_context, request, _route, signal) => { assert.equal(signal.aborted, false);
       control.sent.push(structuredClone(request)); return structuredClone(control.result); }, stream: async function* () { throw Error('invoke-only test'); } }
   };
+  if (kind === 'image') {
+    const { AuthorizedGatewayMediaAttachmentResolver } = require('../apps/api/src/modules/ai-native/gateway-media-attachment.resolver');
+    const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a4aQAAAAASUVORK5CYII=', 'base64');
+    const digest = require('node:crypto').createHash('sha256').update(bytes).digest('hex');
+    control.mediaActive = true;
+    ports.media = new AuthorizedGatewayMediaAttachmentResolver({ authorize: async (context, ref) =>
+      control.mediaActive && context.tenantId === 'tenant-a' && context.workspaceId === 'workspace-a'
+        && ref.attachmentId === 'file-a' && ref.attachmentRevision === 1 ? {
+        attachmentId: 'file-a', attachmentRevision: 1, mediaType: 'image/png', sizeBytes: bytes.length,
+        contentHash: digest, readBinding: 'synthetic-original-file' } : null
+    }, { read: async () => new Uint8Array(bytes) });
+  }
   const config = { ...h.authorization, db: h.db, guard: new ApiAuthGuard(h.authorization.auth, undefined, undefined, undefined, {}),
-    scene: { code: 'synthetic-clarification', version: '1' }, gatewayScene: { sceneCode: 'synthetic-clarification', routeScene: 'chat', maxOutputTokens: 64 },
+    ...(kind ? { kind } : {}),
+    scene: { code: 'synthetic-clarification', version: '1' }, gatewayScene: { sceneCode: 'synthetic-clarification', routeScene: kind === 'image' ? 'vision' : 'chat', maxOutputTokens: 64 },
     priceVersion: 'synthetic-price-1', runtime: { ports, evidence: 'mock', verifyEvidence: async () => control.verified }, clock: () => new Date(h.control.now) };
   root = composePersistedTaskModelInput(config);
   await root.policy.put({ expectedRevision: null, enabled: true, limits: h.plan.limits, expiresAt: '2027-01-01T00:00:00Z' });
   const lease = await root.tasks.claimRun(h.claim());
   const material = { messages: [{ role: 'user', content: [{ kind: 'text', text: 'Explain these authorized facts only.' }] }], maxOutputTokens: 32 };
+  if (kind === 'image') material.messages[0].content.push({ kind: 'image', attachmentId: 'file-a', attachmentRevision: 1 });
   const command = () => ({ taskId: 'task-a', registrationRef: 'summary-a', expectedTaskRevision: h.state.aiTask[0].revision,
     lease: { ...lease, revision: h.state.aiRun[0].revision }, material: structuredClone(material) });
-  const planned = { registrationRef: 'summary-a', operation: 'external_unknown', toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION };
+  const planned = { registrationRef: 'summary-a', operation: 'external_unknown', toolCode: kind === 'image' ? TASK_IMAGE_MODEL_TOOL : TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION };
   const register = async (syntheticStart = true) => {
     await root.plans.savePlan({ taskId: 'task-a', runId: 'run-a', taskRevision: h.state.aiTask[0].revision, steps: [planned], limits: h.plan.limits }, command().lease);
     const { taskId, expiresAt, ...held } = command().lease;

@@ -1,16 +1,22 @@
-import { Prisma, type PrismaClient, type AiGatewayInvocation } from '@prisma/client';
-import type { AiGatewayConfigReferenceDraft, AiGatewayIntentDraft } from '@rental-os/shared';
+import { Prisma, type PrismaClient, type AiGatewayInvocation, type AiStep } from '@prisma/client';
+import { AI_TOOL_DRAFT_VERSION, type AiGatewayConfigReferenceDraft, type AiGatewayIntentDraft } from '@rental-os/shared';
 import { z } from 'zod';
 import type { AiScopeRepository } from '../ai-scope.repository';
 import { isGatewayConfig, isGatewayIntent } from '../gateway-contract-validation';
 import { prepareGatewayTextIntent } from '../gateway-intent';
+import { TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, parseTaskModelInput, taskModelFingerprint, taskModelIdentity } from '../model-input/task-model-input';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import type { GatewayContext } from '../model-gateway.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { BudgetError } from './budget.ports';
+import { gatewayBudgetPrincipal } from './gateway-budget-principal';
+import { textProbeCommandSchema, textProbeIntent, TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE } from '../text-capability-probe';
+import { capabilityProfileFingerprint } from '../capability-verification';
+import { PrismaProviderProfileRepository } from '../provider-profile.repository';
 import type { BudgetGatewayBindingSource, BudgetGatewayInvocationBinding, GatewayBudgetReserveRequest } from './budget-gateway-adapter';
 
-type Db = Pick<PrismaClient, '$transaction' | 'aiGatewayInvocation' | 'aiBudgetReservation' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiScope' | 'aiProviderProfile'>;
+type Db = Pick<PrismaClient, '$transaction' | 'aiGatewayInvocation' | 'aiBudgetReservation' | 'aiTask' | 'aiRun' | 'aiStep' | 'aiScope' | 'aiProviderProfile'>
+  & Partial<Pick<PrismaClient, 'aiTaskActionInput'>>;
 type Reader = Omit<Db, '$transaction'>;
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/).min(1);
 const registration = z.object({ stepId: id.max(36), mode: z.enum(['invoke', 'stream']),
@@ -34,12 +40,11 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
   private async current(context?: Readonly<GatewayContext>) {
     const resolved = structuredClone(await this.scopes.resolveCurrent());
     const { scope, context: principal } = resolved;
-    if (principal.actor.kind !== 'user' || !['operator', 'staff'].includes(principal.audience)
-      || principal.scope.kind !== 'workspace' || scope.kind !== 'WORKSPACE'
-      || scope.tenantId !== principal.scope.tenantId || scope.workspaceId !== principal.scope.workspaceId
-      || (context && (context.actorId !== principal.actor.userId || context.tenantId !== scope.tenantId || context.workspaceId !== scope.workspaceId))) throw new BudgetError('FORBIDDEN');
+    const subject = gatewayBudgetPrincipal(principal);
+    if (scope.kind !== 'WORKSPACE' || scope.tenantId !== subject.tenantId || scope.workspaceId !== subject.workspaceId
+      || (context && (context.actorId !== subject.actorId || context.tenantId !== scope.tenantId || context.workspaceId !== scope.workspaceId))) throw new BudgetError('FORBIDDEN');
     const { requestId: _, authorizedAt: __, ...identity } = principal;
-    return { scope, context: principal, actorId: principal.actor.userId, identityHash: requestFingerprint({ identity, scope }) };
+    return { scope, context: principal, actorId: subject.actorId, identityHash: requestFingerprint({ identity, scope }) };
   }
   private async revalidate(initial: Awaited<ReturnType<PrismaGatewayInvocationBindings['current']>>) {
     if ((await this.current()).identityHash !== initial.identityHash) throw new BudgetError('FORBIDDEN');
@@ -61,9 +66,23 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
     return profile;
   }
   private async task(db: Reader, scopeId: string, taskId: string, actorId: string, audience: string) {
-    const task = await db.aiTask.findFirst({ where: { id: taskId, scopeId, ownerId: actorId, ownerKind: 'USER' } });
+    const ownerKind = audience === 'client' ? 'CUSTOMER' : 'USER';
+    const task = await db.aiTask.findFirst({ where: { id: taskId, scopeId, ownerId: actorId, ownerKind } });
     if (!task || task.audience.toLowerCase() !== audience || task.archivedAt) throw new BudgetError('FORBIDDEN');
     return task;
+  }
+  private async probeInput(db: Reader, step: AiStep) {
+    if (step.toolCode !== TEXT_CAPABILITY_PROBE_TOOL || step.toolVersion !== AI_TOOL_DRAFT_VERSION || !step.inputRef
+      || typeof db.aiTaskActionInput?.findFirst !== 'function') throw new BudgetError('FORBIDDEN');
+    const saved = await db.aiTaskActionInput.findFirst({ where: { id: step.inputRef, scopeId: step.scopeId,
+      taskId: step.taskId, runId: step.runId, toolCode: step.toolCode, toolVersion: step.toolVersion } });
+    const command = textProbeCommandSchema.safeParse(saved?.payload);
+    if (!saved || !command.success || saved.id !== step.inputRef || saved.scopeId !== step.scopeId
+      || saved.taskId !== step.taskId || saved.runId !== step.runId || saved.toolCode !== step.toolCode
+      || saved.toolVersion !== step.toolVersion || saved.fingerprint !== step.requestFingerprint
+      || requestFingerprint(command.data) !== step.requestFingerprint || !(saved.expiresAt instanceof Date)
+      || !Number.isFinite(saved.expiresAt.getTime()) || saved.expiresAt <= this.now()) throw new BudgetError('FORBIDDEN');
+    return { command: command.data, prepared: textProbeIntent(command.data.operationId, step.scopeId) };
   }
   private async active(db: Reader, row: Pick<AiGatewayInvocation, 'scopeId' | 'taskId' | 'stepId' | 'runId' | 'actionId' | 'actorId' | 'stepFingerprint' | 'intentHash' | 'sceneCode' | 'leaseOwnerId' | 'fencingToken' | 'expiresAt'>, audience: string) {
     const task = await this.task(db, row.scopeId, row.taskId, row.actorId, audience);
@@ -71,11 +90,16 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
     const step = await db.aiStep.findFirst({ where: { id: row.stepId, scopeId: row.scopeId, taskId: row.taskId, runId: row.runId } });
     const now = this.now();
     if (task.status !== 'RUNNING' || task.cancelRequestedAt || task.sceneCode !== row.sceneCode
-      || !run || run.status !== 'RUNNING' || run.actorKind !== 'USER' || run.actorId !== row.actorId
+      || !run || run.status !== 'RUNNING' || run.actorKind !== task.ownerKind || run.actorId !== row.actorId
       || run.leaseOwnerId !== row.leaseOwnerId || !run.leaseExpiresAt || run.leaseExpiresAt <= now
       || !run.fencingToken.equals(row.fencingToken) || row.expiresAt <= now
       || !step || step.status !== 'RUNNING' || step.actionId !== row.actionId
-      || step.requestFingerprint !== row.stepFingerprint || step.requestFingerprint !== row.intentHash) throw new BudgetError('FORBIDDEN');
+      || step.requestFingerprint !== row.stepFingerprint) throw new BudgetError('FORBIDDEN');
+    if (step.toolCode === TEXT_CAPABILITY_PROBE_TOOL) {
+      if (audience === 'client') throw new BudgetError('FORBIDDEN');
+      const frozen = await this.probeInput(db, step);
+      if (row.sceneCode !== TEXT_PROBE_SCENE || row.intentHash !== frozen.prepared.intentHash) throw new BudgetError('FORBIDDEN');
+    } else if (step.requestFingerprint !== row.intentHash) throw new BudgetError('FORBIDDEN');
     return { task, run, step };
   }
   async register(value: RegisterGatewayInvocation): Promise<{ id: string; replayed: boolean }> {
@@ -84,23 +108,54 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
       || !('tenantId' in parsed.data.configuration)) throw new BudgetError('INVALID');
     const input = { ...parsed.data, intent: parsed.data.intent, configuration: parsed.data.configuration };
     if (input.expiresAt <= this.now() || BigInt(input.lease.fencingToken) > 18446744073709551615n) throw new BudgetError('INVALID');
-    const prepared = prepareGatewayTextIntent(input.intent, { sceneCode: input.intent.sceneCode, maxOutputTokens: input.intent.maxOutputTokens }, input.mode);
+    const hasMedia = input.intent.messages.some(message => message.content.some(part => part.kind !== 'text'));
     const principal = await this.current();
     try {
       return await this.db.$transaction(async tx => {
         const step = await tx.aiStep.findFirst({ where: { id: input.stepId, scopeId: principal.scope.id, runId: input.lease.runId } });
         if (!step) throw new BudgetError('FORBIDDEN');
+        let intentHash: string;
+        if (hasMedia) {
+          if (![TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL].includes(step.toolCode as typeof TASK_IMAGE_MODEL_TOOL | typeof TASK_AUDIO_MODEL_TOOL) || !step.inputRef || input.mode !== 'invoke'
+            || typeof tx.aiTaskActionInput?.findFirst !== 'function') throw new BudgetError('FORBIDDEN');
+          const mediaTool = step.toolCode === TASK_AUDIO_MODEL_TOOL ? TASK_AUDIO_MODEL_TOOL : TASK_IMAGE_MODEL_TOOL;
+          const saved = await tx.aiTaskActionInput.findFirst({ where: { id: step.inputRef, scopeId: step.scopeId,
+            taskId: step.taskId, runId: step.runId, toolCode: mediaTool, fingerprint: step.requestFingerprint } });
+          if (!saved || saved.expiresAt <= this.now()) throw new BudgetError('FORBIDDEN');
+          const policy = { sceneCode: input.intent.sceneCode, maxOutputTokens: input.intent.maxOutputTokens,
+            kind: mediaTool === TASK_AUDIO_MODEL_TOOL ? 'audio' as const : 'image' as const };
+          const frozen = parseTaskModelInput(saved.payload, policy);
+          if (frozen.identityHash !== taskModelIdentity(principal.context)
+            || requestFingerprint(frozen.intent) !== requestFingerprint(input.intent)
+            || requestFingerprint(frozen.configuration) !== requestFingerprint(input.configuration)
+            || frozen.priceVersion !== input.priceVersion) throw new BudgetError('FORBIDDEN');
+          intentHash = taskModelFingerprint(frozen, policy);
+        } else {
+          intentHash = prepareGatewayTextIntent(input.intent, { sceneCode: input.intent.sceneCode,
+            maxOutputTokens: input.intent.maxOutputTokens }, input.mode).intentHash;
+        }
         const candidate = { scopeId: principal.scope.id, taskId: step.taskId, runId: step.runId, stepId: step.id, actionId: step.actionId,
-          actorId: principal.actorId, stepFingerprint: step.requestFingerprint, intentHash: prepared.intentHash, sceneCode: input.intent.sceneCode,
+          actorId: principal.actorId, stepFingerprint: step.requestFingerprint, intentHash, sceneCode: input.intent.sceneCode,
           leaseOwnerId: input.lease.holderId, fencingToken: new Prisma.Decimal(input.lease.fencingToken), expiresAt: input.expiresAt };
         const active = await this.active(tx, candidate, principal.context.audience);
+        if (step.toolCode === TEXT_CAPABILITY_PROBE_TOOL) {
+          const frozen = await this.probeInput(tx, step);
+          if (input.mode !== 'invoke' || requestFingerprint(input.intent) !== requestFingerprint(frozen.prepared.intent)) throw new BudgetError('FORBIDDEN');
+        }
         if (input.expiresAt > active.run.leaseExpiresAt!) throw new BudgetError('INVALID');
         const taskLock = await tx.aiTask.updateMany({ where: { id: active.task.id, scopeId: candidate.scopeId, revision: active.task.revision, status: 'RUNNING', cancelRequestedAt: null, archivedAt: null }, data: { revision: active.task.revision } });
         const runLock = await tx.aiRun.updateMany({ where: { id: active.run.id, scopeId: candidate.scopeId, taskId: candidate.taskId, revision: active.run.revision,
           leaseOwnerId: candidate.leaseOwnerId, fencingToken: candidate.fencingToken, status: 'RUNNING', leaseExpiresAt: { gt: this.now() } }, data: { revision: active.run.revision } });
-        const stepLock = await tx.aiStep.updateMany({ where: { id: step.id, scopeId: candidate.scopeId, revision: step.revision, status: 'RUNNING', requestFingerprint: candidate.intentHash }, data: { revision: step.revision } });
+        const stepLock = await tx.aiStep.updateMany({ where: { id: step.id, scopeId: candidate.scopeId, revision: step.revision, status: 'RUNNING', requestFingerprint: candidate.stepFingerprint }, data: { revision: step.revision } });
         if (taskLock.count !== 1 || runLock.count !== 1 || stepLock.count !== 1) throw new BudgetError('FORBIDDEN');
         const profile = await this.profile(tx, input.configuration, principal.scope.tenantId!);
+        if (step.toolCode === TEXT_CAPABILITY_PROBE_TOOL) {
+          const frozen = await this.probeInput(tx, step);
+          const originalProfile = await new PrismaProviderProfileRepository(tx).get({ id: profile.scopeId,
+            kind: profile.scopeKind as 'PLATFORM' | 'TENANT' | 'WORKSPACE' }, frozen.command.profileKey);
+          if (!originalProfile || originalProfile.id !== input.configuration.configId
+            || capabilityProfileFingerprint(originalProfile) !== frozen.command.profileFingerprint) throw new BudgetError('FORBIDDEN');
+        }
         const profileLock = await tx.aiProviderProfile.updateMany({ where: { id: profile.id, configRevision: profile.configRevision, enabled: true, disabledAt: null }, data: { configRevision: profile.configRevision } });
         if (profileLock.count !== 1) throw new BudgetError('FORBIDDEN');
         const configurationHash = requestFingerprint(input.configuration);

@@ -9,6 +9,10 @@ export interface KnowledgeUploadRevision {
 export type KnowledgeAction = 'upload' | 'create' | 'read_metadata' | 'parse' | 'publish' | 'withdraw' | 'delete' | 'revise' | 'search' | 'read_body' | 'snippet' | 'resolve_source' | 'download' | 'index' | 'change_acl';
 export interface KnowledgeAuthorizationRequest {
   action: KnowledgeAction;
+  creation?: { documentId: string; documentVersion: string; attachmentId: string; title: string; validFrom: string; validUntil?: string; operationId: string };
+  lifecycle?: { action: 'revise'; expectedRevision: number; command: NonNullable<KnowledgeAuthorizationRequest['creation']> }
+    | { action: 'delete'; command: { documentId: string; expectedRevision: number; operationId: string } };
+  receiptOperationId?: string;
   upload?: { documentId: string; idempotencyKey: string; fileName: string; mimeType: string; sizeBytes: number; revision?: KnowledgeUploadRevision };
   scope: AiExecutionScope;
   document?: AiKnowledgeDocumentDraft;

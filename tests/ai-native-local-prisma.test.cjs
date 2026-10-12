@@ -29,6 +29,27 @@ test("up-to-date generation is an idempotent no-op and does not rewrite the shar
   assert.equal(hash(fs.readFileSync(sharedClient)), before);
 });
 
+test("generation environment keeps both original preloads and worktree-local caches", () => {
+  const script = path.join(root, "scripts/ai-native-generate-local-prisma.cjs");
+  const context = { require: createRequire(script), module: { exports: {} }, __dirname: path.dirname(script), process };
+  require("node:vm").runInNewContext(fs.readFileSync(script, "utf8") + '\nmodule.exports.environment = generationEnvironment;', context);
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "rental-os-ai-env-")), childTemp = path.join(temporary, "tmp");
+  fs.mkdirSync(childTemp);
+  const audit = path.join(temporary, "audit.log"); fs.writeFileSync(audit, "");
+  const env = context.module.exports.environment(temporary, audit, childTemp);
+  for (const key of ["TEMP", "TMP", "TMPDIR", "XDG_CACHE_HOME", "npm_config_cache", "V8_COMPILE_CACHE_CACHE_DIR", "NODE_COMPILE_CACHE"]) {
+    assert.equal(env[key], childTemp); assert.ok(path.isAbsolute(env[key]));
+  }
+  assert.equal(env.NODE_DISABLE_COMPILE_CACHE, "1"); assert.equal(env.DISABLE_V8_COMPILE_CACHE, "1"); assert.equal(env.TS_NODE_CACHE, "false");
+  assert.equal(env.DATABASE_URL, "mysql://offline:offline@127.0.0.1:1/rental_os_offline");
+  assert.equal(env.AI_OFFLINE_WRITE_ROOT, temporary); assert.equal(env.AI_OFFLINE_AUDIT, audit);
+  const code = 'console.log(JSON.stringify(JSON.parse(process.env.TS_NODE_COMPILER_OPTIONS).paths))';
+  const child = spawnSync(process.execPath, ["-e", code], { cwd: temporary, env, encoding: "utf8", timeout: 10000 });
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(JSON.parse(child.stdout)["@prisma/client"], ["apps/api/node_modules/@prisma/client/index.d.ts"]);
+  assert.equal(fs.readFileSync(audit, "utf8"), "");
+});
+
 test("generator cleanup preserves junctions under the original write guard", () => {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), "rental-os-ai-cleanup-"));
   const allowed = path.join(parent, "allowed"), outside = path.join(parent, "outside");

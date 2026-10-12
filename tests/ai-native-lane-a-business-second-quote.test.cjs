@@ -9,8 +9,16 @@ for (const code of ['camera', 'camping', 'vehicle', 'construction']) test(`${cod
   assert.equal(description.categoryCode, code);
   assert.ok(description.pricingUnits.every(unit => definition.businessModel.pricingUnits.includes(unit)));
   h.candidate.fulfillmentMode = description.fulfillmentModes[0];
-  const first = await h.tools.quote.candidates.prepare(h.candidate);
-  const revised = await h.tools.quote.candidates.prepare({ ...h.candidate, items: [{ productName: h.group.name, quantity: 2 }] });
+  const { originalQuoteAnswerContract, applyOriginalQuoteAnswers } = require('../apps/api/src/modules/ai-native/scenes/original-quote-input');
+  const incomplete = structuredClone(h.candidate); delete incomplete.items[0].pricingUnit;
+  const missing = await h.tools.quote.candidates.prepare(incomplete);
+  assert.equal(missing.status, 'missing_input'); assert.ok(missing.missingFields.includes('items.0.pricingUnit'));
+  const contract = originalQuoteAnswerContract(incomplete, missing, 'Select the current pricing unit');
+  const choice = contract.fields.find(field => field.fieldId === 'pricing_unit_selection');
+  assert.ok(choice.options.length > 0 && choice.options.every(row => description.pricingUnits.includes(row.value)));
+  const explicit = applyOriginalQuoteAnswers(incomplete, [{ contract, answers: [{ fieldId: choice.fieldId, value: h.candidate.items[0].pricingUnit }] }]);
+  const first = await h.tools.quote.candidates.prepare(explicit);
+  const revised = await h.tools.quote.candidates.prepare({ ...explicit, items: [{ ...explicit.items[0], quantity: 2 }] });
   assert.equal(first.status, 'needs_confirmation'); assert.equal(revised.request.lines[0].quantity, 2);
   assert.notDeepEqual(revised.request, first.request); assert.equal(revised.reservation, 'not_reserved');
   const alternatives = await h.tools.quote.businessPreparation.alternatives({ candidate: h.candidate, limit: 2 });

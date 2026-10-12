@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { assertAiReadContextBinding } from './tools/read-context-binding';
-import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext, type BookingMemberOption } from '@rental-os/shared';
+import { AI_CONTRACT_DRAFT_VERSION, type AiExecutionContext, type BookingMemberOption, type CustomerMembershipBookingOption } from '@rental-os/shared';
 import { ModelGatewayError } from './model-gateway.ports';
 import type { AiBusinessReadAuthority } from './business-read-route.authority';
 
@@ -18,6 +18,9 @@ const candidateSchema = z.object({
 export type AiMembershipCandidateReadAuthority = AiBusinessReadAuthority;
 export interface AiMembershipCandidateReadPort {
   listPersonalOptions(tenantId: string): Promise<readonly BookingMemberOption[]>;
+  listBookingOptionsPage?(tenantId: string, workspaceId: string, customerId: string, input: { limit: number; cursor?: string }): Promise<{
+    rows: readonly CustomerMembershipBookingOption[]; nextCursor?: string; truncated: boolean
+  }>;
   listPersonalOptionsPage?(tenantId: string, input: { limit: number; cursor?: string; name?: string; customerId?: string }): Promise<{
     rows: readonly BookingMemberOption[]; nextCursor?: string; truncated: boolean
   }>;
@@ -42,6 +45,38 @@ export class AiMembershipCandidateReadFactsService {
     private readonly authority: AiMembershipCandidateReadAuthority,
     private readonly clock: () => Date = () => new Date()) {
     if (typeof memberships?.listPersonalOptions !== 'function' || typeof authority?.withRead !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+  }
+
+  /** Original booking-member endpoint, not a corporate directory or proof of
+   * order eligibility. Server identity/visibility and relationship queries stay
+   * in Guard/ALS and MembershipService; this method never selects a relation. */
+  async readBookingOptions(value: unknown, expectedContext?: AiExecutionContext) {
+    const resourceId = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+    const parsed = z.object({ customerId: resourceId, limit: z.number().int().min(1).max(50), cursor: resourceId.optional() }).strict().safeParse(value);
+    if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+    const input = structuredClone(parsed.data);
+    return this.authority.withRead('booking_identity_options', { customerId: input.customerId }, async context => {
+      assertAiReadContextBinding(context, expectedContext);
+      if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user'
+        || !('access' in context) || !context.access.permissions.includes('rental-os:order:create')) throw new ModelGatewayError('FORBIDDEN');
+      if (typeof this.memberships.listBookingOptionsPage !== 'function') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+      const page = await this.memberships.listBookingOptionsPage(context.scope.tenantId, context.scope.workspaceId,
+        input.customerId, { limit: input.limit, ...(input.cursor ? { cursor: input.cursor } : {}) });
+      const option = z.object({ corporateCustomerId: resourceId, corporateCustomerName: z.string().min(1).max(191),
+        corporateMembershipId: resourceId, role: z.enum(['admin', 'employee']), effectiveTo: z.string().datetime({ offset: true }).optional() }).strict();
+      const rows = z.array(option).max(input.limit).safeParse(page?.rows);
+      if (!rows.success || typeof page.truncated !== 'boolean'
+        || new Set(rows.data.map(row => row.corporateMembershipId)).size !== rows.data.length
+        || (page.truncated ? rows.data.length !== input.limit || page.nextCursor !== rows.data[rows.data.length - 1]?.corporateMembershipId
+          : page.nextCursor !== undefined)) throw new ModelGatewayError('INVALID_RESPONSE');
+      const observed = this.clock();
+      if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new ModelGatewayError('CONFIG_INVALID');
+      return { contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: context.requestId, scope: context.scope, audience: context.audience,
+        customerId: input.customerId, observedAt: observed.toISOString(), options: rows.data, truncated: page.truncated,
+        ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+        selection: 'explicit_human_choice_required' as const, qualification: 'not_evaluated' as const,
+        execution: 'not_attempted' as const, source: { resourceType: 'booking_member' as const, resourceId: input.customerId } };
+    });
   }
 
   async read(value: unknown, expectedContext?: AiExecutionContext): Promise<AiMembershipCandidateReadProjection> {

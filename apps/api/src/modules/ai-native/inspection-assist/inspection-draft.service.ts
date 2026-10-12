@@ -17,6 +17,7 @@ const createSchema = targetSchema.extend({ operationId: inspectionId, bindingFin
   results: resultsSchema, evidence: z.array(evidenceRef).max(100) }).strict();
 const changeSchema = targetSchema.extend({ draftId: inspectionId, operationId: inspectionId,
   expectedRevision: z.number().int().min(1).max(999), bindingFingerprint: hash }).strict();
+const evidenceChangeSchema = changeSchema.extend({ evidence: z.array(evidenceRef).max(100) }).strict();
 const editSchema = changeSchema.extend({ edits: z.array(z.object({ fieldCode: inspectionId,
   decision: z.enum(['manual', 'accepted', 'modified', 'rejected']), value: scalar.optional(), candidateId: inspectionId.optional() }).strict()).min(1).max(100) }).strict();
 export const inspectionSubmissionMaterialSchema = z.object({ mode: z.enum(['original_single', 'manual_review_only']).optional(), actionId: inspectionId, requestHash: hash,
@@ -80,6 +81,7 @@ export class InspectionDraftService {
       for (const edit of input.edits) {
         const candidate = edit.candidateId ? state.candidates.find(item => item.candidateId === edit.candidateId && item.fieldCode === edit.fieldCode) : undefined;
         if (edit.decision !== 'manual' && !candidate || edit.decision === 'manual' && edit.candidateId) throw new InspectionAssistError('INVALID_INPUT');
+        if (candidate && edit.decision !== 'rejected' && !this.sourcesIncluded(candidate, state.evidence)) throw new InspectionAssistError('BINDING_CHANGED');
         let value = edit.value;
         if (edit.decision === 'accepted') {
           if (!candidate || candidate.status !== 'candidate' || edit.value !== undefined) throw new InspectionAssistError('INVALID_INPUT');
@@ -138,6 +140,50 @@ export class InspectionDraftService {
     });
   }
 
+  /** Explicit human draft change, not attachment deletion or business submission.
+   * Preserve candidate history, but invalidate prepared execution materials.
+   * A value dependent on removed evidence must first be explicitly corrected
+   * or cleared by the human through edit(); never silently rewrite their value. */
+  async replaceEvidence(value: unknown) {
+    const input = parseInspectionInput(evidenceChangeSchema, value), target = targetOf(input);
+    if (new Set(input.evidence.map(ref => ref.attachmentId)).size !== input.evidence.length) throw new InspectionAssistError('INVALID_INPUT');
+    return this.authority.withAction(target, 'write', async scope => {
+      const fingerprint = requestFingerprint({ kind: 'inspection.draft.evidence', scope, input });
+      const replay = await this.replay(scope, input.operationId, fingerprint);
+      if (replay) return replay;
+      const row = await this.load(scope, input.draftId, target);
+      this.editable(row, input.expectedRevision);
+      const binding = await this.binding(target, scope, input.bindingFingerprint);
+      if (row.bindingFingerprint !== input.bindingFingerprint) throw new InspectionAssistError('BINDING_CHANGED');
+      const state = this.state(row.state);
+      for (const field of Object.values(state.fields)) {
+        if (field.value === null || !field.candidateId) continue;
+        const candidate = state.candidates.find(item => item.candidateId === field.candidateId);
+        if (!candidate || !this.sourcesIncluded(candidate, input.evidence)) throw new InspectionAssistError('BINDING_CHANGED');
+      }
+      const values = Object.fromEntries(Object.entries(state.fields).map(([code, field]) => [code, field.value]));
+      // Check retained photo references before reading them: removal must not
+      // silently discard a manually selected photograph either.
+      this.photoReferences(binding, Object.fromEntries(Object.entries(values).filter((entry): entry is [string, string | number | boolean] => entry[1] !== null)), input.evidence);
+      const evidenceFingerprint = await this.evidenceHash(target, input.evidence);
+      const prepared = await this.manual.prepare({ ...target, bindingFingerprint: input.bindingFingerprint, results: values });
+      if (prepared.unavailableEvidenceFields.length) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+      state.evidence = input.evidence;
+      state.missingFields = prepared.missingFields;
+      state.reviewRequired = true;
+      delete state.submission;
+      delete state.recognitionInputs;
+      return this.authority.withAction(target, 'write', async current => {
+        this.sameScope(scope, current);
+        await this.binding(target, scope, input.bindingFingerprint);
+        if (await this.evidenceHash(target, input.evidence) !== evidenceFingerprint) throw new InspectionAssistError('BINDING_CHANGED');
+        return this.repository.change(scope, row.id, { operationId: input.operationId, fingerprint, expectedRevision: input.expectedRevision },
+          input.bindingFingerprint, { state: JSON.parse(JSON.stringify(state)), evidenceFingerprint,
+            inputFingerprint: null, submissionActionId: null, status: 'draft_saved' });
+      });
+    });
+  }
+
   async read(value: unknown) {
     const input = parseInspectionInput(targetSchema.extend({ draftId: inspectionId }).strict(), value), target = targetOf(input);
     return this.authority.withAction(target, 'read', async scope => {
@@ -165,10 +211,64 @@ export class InspectionDraftService {
     });
   }
 
+  /** Human review material from the persisted draft and original frozen
+   * template. No candidate is automatically adopted and no Core field is
+   * written. Read and revalidate again after the template wait so a concurrent
+   * human edit cannot be returned with an old revision or source association. */
+  async readReview(value: unknown) {
+    const input = parseInspectionInput(targetSchema.extend({ draftId: inspectionId }).strict(), value);
+    const target = targetOf(input);
+    return this.authority.withAction(target, 'read', async () => {
+      const before = await this.read(input);
+      let template: Awaited<ReturnType<InspectionTemplateService['read']>> | undefined;
+      try {
+        template = await this.templates.read(target);
+      } catch (error) {
+        if (!(error instanceof InspectionAssistError) || !['BINDING_CHANGED', 'TEMPLATE_UNAVAILABLE'].includes(error.code)) throw error;
+      }
+      const current = await this.read(input);
+      if (requestFingerprint(before) !== requestFingerprint(current)) throw new InspectionAssistError('REVISION_CONFLICT');
+      const bindingCurrent = template?.bindingFingerprint === current.bindingFingerprint;
+      const definitions = bindingCurrent ? template!.template.fields : [];
+      const codes = [...new Set([...definitions.map(field => field.code), ...Object.keys(current.state.fields),
+        ...current.state.candidates.map(candidate => candidate.fieldCode)])];
+      if (codes.length > 100) throw new InspectionAssistError('INVALID_INPUT');
+      const fields = codes.map(code => {
+        const definition = definitions.find(field => field.code === code);
+        const human = current.state.fields[code];
+        const candidates = current.state.candidates.filter(candidate => candidate.fieldCode === code);
+        const chosen = human?.candidateId ? candidates.find(candidate => candidate.candidateId === human.candidateId) : undefined;
+        if (human?.candidateId && !chosen) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+        return { fieldCode: code, ...(definition ? { label: definition.label, type: definition.type,
+          required: definition.required, ...(definition.unit ? { unit: definition.unit } : {}) } : {}),
+          human: human ? structuredClone(human) : null,
+          candidates: structuredClone(candidates),
+          candidateEvidence: candidates.map(candidate => ({ candidateId: candidate.candidateId,
+            sourcesMatchDraftEvidence: bindingCurrent && this.sourcesIncluded(candidate, current.state.evidence),
+            requiresCurrentEvidenceValidation: true as const })),
+          selectedSource: chosen ? structuredClone(chosen.sources) : [],
+          missing: current.state.missingFields.includes(code),
+          reviewRequired: current.state.reviewRequired || !bindingCurrent || candidates.some(candidate => candidate.candidateId !== human?.candidateId),
+        };
+      });
+      return { draftId: current.draftId, revision: current.revision, target: current.target,
+        assetId: current.assetId, templateVersion: current.templateVersion, bindingFingerprint: current.bindingFingerprint,
+        status: current.status, inspectionId: current.inspectionId,
+        binding: bindingCurrent ? 'current' as const : 'changed' as const,
+        fields, evidence: structuredClone(current.state.evidence),
+        reviewRequired: current.state.reviewRequired || !bindingCurrent,
+        next: current.status === 'submitted' ? 'read_original_inspection' as const
+          : current.status === 'submission_unknown' ? 'reconcile_original_submission' as const
+          : !bindingCurrent ? 'review_changed_resource' as const : 'human_review' as const,
+        semantics: 'persisted_human_draft_and_untrusted_candidates_not_core_facts' as const };
+    });
+  }
+
   async reconcileOperation(value: unknown) {
-    const input = parseInspectionInput(z.object({ kind: z.enum(['create', 'edit', 'candidates']), request: z.unknown() }).strict(), value);
+    const input = parseInspectionInput(z.object({ kind: z.enum(['create', 'edit', 'candidates', 'evidence']), request: z.unknown() }).strict(), value);
     const request = input.kind === 'create' ? parseInspectionInput(createSchema, input.request)
       : input.kind === 'edit' ? parseInspectionInput(editSchema, input.request)
+      : input.kind === 'evidence' ? parseInspectionInput(evidenceChangeSchema, input.request)
       : parseInspectionInput(changeSchema.extend({ candidates: z.array(z.unknown()).max(100) }).strict(), input.request);
     if ('candidates' in request) request.candidates = snapshotInspectionCandidates(request.candidates);
     const target = targetOf(request);
@@ -226,6 +326,11 @@ export class InspectionDraftService {
 
   private sameScope(a: AiInspectionActorScope, b: AiInspectionActorScope) {
     if (requestFingerprint(a) !== requestFingerprint(b)) throw new InspectionAssistError('ACCESS_DENIED');
+  }
+
+  private sourcesIncluded(candidate: AiInspectionDraftState['candidates'][number], refs: AiInspectionDraftState['evidence']) {
+    return candidate.sources.every(source => refs.some(ref => ref.attachmentId === source.attachmentId
+      && ref.attachmentRevision === source.attachmentRevision));
   }
 
   private async replay(scope: AiInspectionActorScope, operationId: string, fingerprint: string) {

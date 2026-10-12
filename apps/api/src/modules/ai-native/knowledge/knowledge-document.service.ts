@@ -1,5 +1,5 @@
 import { AI_KNOWLEDGE_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
-import type { KnowledgeDocumentPorts, KnowledgeRecord, KnowledgeAction } from './knowledge.ports';
+import type { KnowledgeDocumentPorts, KnowledgeRecord, KnowledgeAction, KnowledgeAuthorizationRequest } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, requiredPort } from './knowledge-errors';
 import { assertRecord, authorize, draftInput, fingerprint, mutationInput, operationFingerprint, parse, validateChunks, queueIndex } from './knowledge-validation';
 
@@ -14,15 +14,16 @@ export class KnowledgeDocumentService {
     return this.load(context, documentId, 'read_metadata');
   }
 
-  async load(context: AiExecutionContext, documentId: string, action: KnowledgeAction): Promise<KnowledgeRecord> {
+  async load(context: AiExecutionContext, documentId: string, action: KnowledgeAction,
+    binding: Pick<KnowledgeAuthorizationRequest, 'lifecycle' | 'receiptOperationId'> = {}): Promise<KnowledgeRecord> {
     const contextHash = fingerprint(context);
     const stableContext = structuredClone(context);
-    await authorize(this.ports.authorization, stableContext, { action, scope: stableContext.scope });
+    await authorize(this.ports.authorization, stableContext, { action, scope: stableContext.scope, ...binding });
     if (fingerprint(context) !== contextHash) throw new KnowledgeError('unavailable');
     const record = await this.ports.repository.read(stableContext.scope, documentId);
     assertRecord(record, stableContext.scope, documentId);
     if (fingerprint(context) !== contextHash) throw new KnowledgeError('unavailable');
-    await authorize(this.ports.authorization, stableContext, { action, scope: stableContext.scope, document: record.document });
+    await authorize(this.ports.authorization, stableContext, { action, scope: stableContext.scope, document: record.document, ...binding });
     if (fingerprint(context) !== contextHash) throw new KnowledgeError('unavailable');
     return structuredClone(record);
   }
@@ -43,28 +44,38 @@ export class KnowledgeDocumentService {
     if (fingerprint(context) !== contextHash || fingerprint(stable) !== stableHash) throw new KnowledgeError('unavailable');
   }
 
-  async save(context: AiExecutionContext, action: KnowledgeAction, before: KnowledgeRecord, next: KnowledgeRecord, operationId: string, hash: string, newVersion = false): Promise<KnowledgeRecord> {
+  async save(context: AiExecutionContext, action: KnowledgeAction, before: KnowledgeRecord, next: KnowledgeRecord, operationId: string, hash: string,
+    newVersion = false, binding: Pick<KnowledgeAuthorizationRequest, 'lifecycle'> = {}): Promise<KnowledgeRecord> {
     const contextHash = fingerprint(context);
     const stableContext = structuredClone(context);
     const stableContextHash = fingerprint(stableContext);
     const assertStableContext = () => {
       if (fingerprint(context) !== contextHash || fingerprint(stableContext) !== stableContextHash) throw new KnowledgeError('unavailable');
     };
-    await authorize(this.ports.authorization, structuredClone(stableContext), { action, scope: structuredClone(stableContext.scope), document: structuredClone(before.document) });
-    if (action === 'revise') await this.assertAttachmentBound(stableContext, next.document.documentId, next.document.attachmentId,
-      { documentVersion: next.document.documentVersion, expectedRevision: before.revision });
+    await authorize(this.ports.authorization, structuredClone(stableContext), { action, scope: structuredClone(stableContext.scope), document: structuredClone(before.document), ...binding });
+    if (action === 'revise') {
+      await this.assertAttachmentBound(stableContext, next.document.documentId, next.document.attachmentId,
+        { documentVersion: next.document.documentVersion, expectedRevision: before.revision });
+      await authorize(this.ports.authorization, structuredClone(stableContext), { action, scope: structuredClone(stableContext.scope),
+        document: structuredClone(before.document), ...binding });
+    }
     assertStableContext();
     const result = await this.ports.repository.commit({ scope: structuredClone(stableContext.scope), documentId: next.document.documentId, expectedRevision: before.revision, operation: { id: operationId, fingerprint: hash, ...(next.failure ? { failure: next.failure } : {}) }, next: structuredClone(next), newVersion });
     assertStableContext();
     if (result !== 'committed') throw new KnowledgeError('conflict');
     this.ports.cache?.invalidate(structuredClone(stableContext.scope), next.document.documentId);
-    return this.load(stableContext, next.document.documentId, action);
+    return this.load(stableContext, next.document.documentId, action, binding);
   }
 
   async create(context: AiExecutionContext, value: unknown): Promise<KnowledgeRecord> {
     const input = parse(draftInput, value);
-    const grant = await authorize(this.ports.authorization, context, { action: 'create', scope: context.scope, attachmentId: input.attachmentId });
-    await this.assertAttachmentBound(context, input.documentId, input.attachmentId);
+    const grant = await authorize(this.ports.authorization, context, { action: 'create', scope: context.scope, attachmentId: input.attachmentId, creation: input });
+    // A missing byte/file source must not disable lawful metadata creation.
+    // When an attachment authority is supplied, direct create still enforces
+    // the same binding as prepareCreate; parsing remains unavailable without it.
+    if (typeof this.ports.files?.assertBound === 'function') {
+      await this.assertAttachmentBound(context, input.documentId, input.attachmentId);
+    }
     const hash = operationFingerprint(context, ['create', input]);
     const existing = await this.ports.repository.read(context.scope, input.documentId);
     if (existing) {
@@ -73,8 +84,11 @@ export class KnowledgeDocumentService {
       throw new KnowledgeError('conflict');
     }
     const document = { draftVersion: AI_KNOWLEDGE_DRAFT_VERSION, documentId: input.documentId, documentVersion: input.documentVersion, attachmentId: input.attachmentId, owner: grant.actor, scope: grant.scope, aclRevision: 1, title: input.title, publication: 'draft' as const, parsing: 'pending' as const, indexing: 'not_indexed' as const, validFrom: input.validFrom, ...(input.validUntil ? { validUntil: input.validUntil } : {}) };
-    await authorize(this.ports.authorization, context, { action: 'create', scope: context.scope, document, attachmentId: input.attachmentId });
-    await this.assertAttachmentBound(context, input.documentId, input.attachmentId);
+    await authorize(this.ports.authorization, context, { action: 'create', scope: context.scope, document, attachmentId: input.attachmentId, creation: input });
+    if (typeof this.ports.files?.assertBound === 'function') {
+      await this.assertAttachmentBound(context, input.documentId, input.attachmentId);
+    }
+    await authorize(this.ports.authorization, context, { action: 'create', scope: context.scope, document, attachmentId: input.attachmentId, creation: input });
     const result = await this.ports.repository.commit({ scope: context.scope, documentId: input.documentId, expectedRevision: 0, operation: { id: input.operationId, fingerprint: hash }, next: { document, revision: 1 }, newVersion: true });
     if (result !== 'committed') throw new KnowledgeError('conflict');
     return this.load(context, input.documentId, 'create');
@@ -83,17 +97,18 @@ export class KnowledgeDocumentService {
   async newVersion(context: AiExecutionContext, expectedRevision: number, value: unknown): Promise<KnowledgeRecord> {
     const input = parse(draftInput, value);
     parse(mutationInput, { documentId: input.documentId, expectedRevision, operationId: input.operationId });
-    const before = await this.load(context, input.documentId, 'revise'), hash = operationFingerprint(context, ['revise', expectedRevision, input]);
+    const binding = { lifecycle: { action: 'revise' as const, expectedRevision, command: input } };
+    const before = await this.load(context, input.documentId, 'revise', binding), hash = operationFingerprint(context, ['revise', expectedRevision, input]);
     if (await this.replay(context, before, input.operationId, hash)) return before;
     // A pending parse receipt may have committed while its reply was lost.
     // Do not erase that unresolved boundary by admitting a replacement version.
     if (before.parseOperationId) throw new KnowledgeCommitUnknownError();
     if (before.revision !== expectedRevision || before.document.publication === 'deleted' || before.document.documentVersion === input.documentVersion) throw new KnowledgeError('conflict');
-    await authorize(this.ports.authorization, context, { action: 'revise', scope: context.scope, document: before.document, attachmentId: input.attachmentId });
+    await authorize(this.ports.authorization, context, { action: 'revise', scope: context.scope, document: before.document, attachmentId: input.attachmentId, ...binding });
     await this.assertAttachmentBound(context, input.documentId, input.attachmentId, { documentVersion: input.documentVersion, expectedRevision });
     const { validUntil: oldExpiry, ...previous } = before.document;
     const next: KnowledgeRecord = { revision: before.revision + 1, document: { ...previous, documentVersion: input.documentVersion, attachmentId: input.attachmentId, title: input.title, validFrom: input.validFrom, ...(input.validUntil ? { validUntil: input.validUntil } : {}), publication: 'draft', parsing: 'pending', indexing: 'not_indexed' } };
-    return this.save(context, 'revise', before, queueIndex(next, 'remove', `${input.operationId}:index`), input.operationId, hash, true);
+    return this.save(context, 'revise', before, queueIndex(next, 'remove', `${input.operationId}:index`), input.operationId, hash, true, binding);
   }
 
   async parseDocument(context: AiExecutionContext, value: unknown): Promise<KnowledgeRecord> {

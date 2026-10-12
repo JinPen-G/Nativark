@@ -66,7 +66,7 @@ export class HumanKnowledgeService {
     const input = parse(draftInput, value);
     return this.session.run(async context => {
       const grant = await this.authorization.authorize(context, { action: 'create', scope: context.scope,
-        attachmentId: input.attachmentId });
+        attachmentId: input.attachmentId, creation: input });
       if (!grant || typeof this.ports.files?.assertBound !== 'function' || context.scope.kind !== 'workspace') return unavailable();
       await this.ports.files.assertBound(context, { attachmentId: input.attachmentId,
         documentId: input.documentId, workspaceId: context.scope.workspaceId });
@@ -144,24 +144,69 @@ export class HumanKnowledgeService {
           : head.failure ? 'revise_new_version' as const : 'none' as const };
     });
   }
+  versions(documentId: string, limit = 20) {
+    parse(id, documentId);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new KnowledgeError('invalid_input');
+    return this.session.run(async context => {
+      const head = await this.documents.read(context, documentId);
+      const metadata = await this.authorization.authorize(context, { action: 'read_metadata', scope: context.scope, document: head.document });
+      if (!metadata) return unavailable();
+      const rows = await this.repository.versionMetadata(context.scope, documentId, limit);
+      const items = [];
+      for (const row of rows) {
+        const grant = await this.authorization.authorize(context, { action: 'read_metadata', scope: context.scope,
+          document: { ...head.document, documentVersion: row.contentHash } });
+        // A partial version list would leak that a hidden historical version
+        // exists. Refuse the whole list when any version cannot be authorized.
+        if (!grant) return unavailable();
+        items.push({ version: row.version, contentHash: row.contentHash, status: row.status, chunkCount: row.chunkCount });
+      }
+      if (fingerprint(await this.documents.read(context, documentId)) !== fingerprint(head)) throw new KnowledgeError('conflict');
+      return { documentId, currentVersion: head.document.documentVersion, items,
+        // The repository probes limit + 1 and rejects an overflowing window;
+        // a successful response therefore contains the complete bounded set.
+        truncated: false as const, body: 'unavailable' as const,
+        semantics: 'bounded_authorized_version_metadata_only' as const };
+    });
+  }
   compareVersions(documentId: string, leftVersion: string, rightVersion: string, maxChanges = 20) {
     parse(id, documentId); parse(id, leftVersion); parse(id, rightVersion);
     if (!Number.isInteger(maxChanges) || maxChanges < 1 || maxChanges > 20) throw new KnowledgeError('invalid_input');
     return this.session.run(async context => {
       const head = await this.documents.read(context, documentId);
-      const rows = await this.repository.versions(context.scope, documentId, 20);
+      const rows = await this.repository.versionMetadata(context.scope, documentId, 20);
+      for (const version of [leftVersion, rightVersion]) {
+        if (!await this.authorization.authorize(context, { action: 'read_metadata', scope: context.scope,
+          document: { ...head.document, documentVersion: version } })) return unavailable();
+      }
       const left = rows.find(row => row.contentHash === leftVersion), right = rows.find(row => row.contentHash === rightVersion);
       if (!left || !right) return { status: 'unavailable' as const, reason: 'historical_version_not_available' as const };
       const metadata = { documentId, left: { version: left.contentHash, status: left.status },
         right: { version: right.contentHash, status: right.status },
         sameBody: left.contentHash === right.contentHash, currentVersion: head.document.documentVersion };
-      const bodyGrant = await this.authorization.authorize(context, { action: 'read_body', scope: context.scope, document: head.document });
-      if (!bodyGrant) return { ...metadata, body: 'unavailable' as const, changes: [] as const,
+      // A grant for the current head is not proof that either historical
+      // version may be read. Bind both version hashes into separate policy
+      // checks; without historical grants, expose metadata only.
+      const leftGrant = await this.authorization.authorize(context, { action: 'read_body', scope: context.scope,
+        document: { ...head.document, documentVersion: left.contentHash } });
+      const rightGrant = await this.authorization.authorize(context, { action: 'read_body', scope: context.scope,
+        document: { ...head.document, documentVersion: right.contentHash } });
+      if (!leftGrant || !rightGrant) return { ...metadata, body: 'unavailable' as const, changes: [] as const,
         semantics: 'metadata_only_without_historical_body_permission' as const };
+      const leftBody = await this.repository.versionContent(context.scope, documentId, leftVersion);
+      const rightBody = leftVersion === rightVersion ? leftBody : await this.repository.versionContent(context.scope, documentId, rightVersion);
+      if (leftBody.version !== left.version || leftBody.status !== left.status || leftBody.chunks.length !== left.chunkCount
+        || rightBody.version !== right.version || rightBody.status !== right.status || rightBody.chunks.length !== right.chunkCount) return unavailable();
+      if (fingerprint(await this.documents.read(context, documentId)) !== fingerprint(head)) throw new KnowledgeError('conflict');
+      for (const [version, original] of [[leftVersion, leftGrant], [rightVersion, rightGrant]] as const) {
+        const latest = await this.authorization.authorize(context, { action: 'read_body', scope: context.scope,
+          document: { ...head.document, documentVersion: version } });
+        if (!latest || fingerprint(latest) !== fingerprint(original)) return unavailable();
+      }
       const changes = [];
-      const count = Math.max(left.chunks.length, right.chunks.length);
+      const count = Math.max(leftBody.chunks.length, rightBody.chunks.length);
       for (let index = 0; index < count && changes.length < maxChanges; index++) {
-        const a = left.chunks[index]?.text ?? null, b = right.chunks[index]?.text ?? null;
+        const a = leftBody.chunks[index]?.text ?? null, b = rightBody.chunks[index]?.text ?? null;
         if (a !== b) changes.push({ chunkIndex: index, left: a, right: b,
           leftPresent: a !== null, rightPresent: b !== null, clipped: false });
       }
@@ -225,9 +270,10 @@ export class HumanKnowledgeService {
   operation(documentId: string, operationId: string) {
     parse(id, documentId); parse(id, operationId);
     return this.session.run(async context => {
-      const before = await this.documents.read(context, documentId);
+      const binding = { receiptOperationId: operationId };
+      const before = await this.documents.load(context, documentId, 'read_metadata', binding);
       const receipt = await this.repository.operation(context.scope, documentId, operationId);
-      const after = await this.documents.read(context, documentId);
+      const after = await this.documents.load(context, documentId, 'read_metadata', binding);
       if (fingerprint(before) !== fingerprint(after)) throw new KnowledgeError('conflict');
       return { operationId, receipt: receipt ? 'recorded' as const : 'not_recorded' as const,
         // A receipt alone does not prove parse/index/business completion.
@@ -250,7 +296,7 @@ export class HumanKnowledgeService {
       const initial = await this.authorization.authorize(context, { action: 'read_metadata', scope });
       if (!initial) return unavailable();
       const rows = await this.ports.db.aiKnowledgeDocument.findMany({ where: { tenantId: scope.tenantId, workspaceId: scope.workspaceId },
-        select: { id: true, tenantId: true, workspaceId: true }, orderBy: { id: 'asc' }, take: 100 });
+        select: { id: true, tenantId: true, workspaceId: true }, orderBy: { id: 'asc' }, take: 101 });
       if (!Array.isArray(rows) || rows.length > 100) return unavailable();
       const visible: KnowledgeRecord[] = [], seen = new Set<string>(), documentGrants = new Map<string, string>();
       for (const row of rows) {

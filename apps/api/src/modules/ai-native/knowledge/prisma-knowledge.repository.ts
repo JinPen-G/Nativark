@@ -3,7 +3,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import type { AiExecutionScope, AiKnowledgeChunkDraft } from '@rental-os/shared';
 import type { KnowledgeOperation, KnowledgeRecord, KnowledgeRepositoryPort } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, unavailable } from './knowledge-errors';
-import { knowledgeFailureSchema, knowledgeRecordSchema, parse, parsePersisted, sameScope, scopeSchema, validateChunks } from './knowledge-validation';
+import { knowledgeFailureSchema, knowledgeRecordSchema, parse, parsePersisted, sameScope, scopeSchema, validateChunks, persistedKnowledgeChunkSchema } from './knowledge-validation';
 
 export type KnowledgePrismaClient = Pick<PrismaClient, '$transaction' | 'aiKnowledgeDocument' | 'aiKnowledgeVersion' | 'aiKnowledgeChunk' | 'aiKnowledgeOperation'>;
 
@@ -48,13 +48,75 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
   async versions(scope: AiExecutionScope, documentId: string, limit: number) {
     const value = workspace(scope);
     if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new KnowledgeError('invalid_input');
-    const rows = await this.db.aiKnowledgeVersion.findMany({ where: { documentId }, orderBy: { version: 'asc' }, take: limit + 1,
+    // Version rows do not carry tenant/workspace columns themselves. Keep the
+    // scope predicate on the relation so an ID collision or a malformed
+    // delegate cannot enumerate another workspace before the head recheck.
+    const rows = await this.db.aiKnowledgeVersion.findMany({ where: {
+      documentId, document: { tenantId: value.tenantId, workspaceId: value.workspaceId },
+    }, orderBy: { version: 'asc' }, take: limit + 1,
       include: { chunks: { orderBy: [{ chunkIndex: 'asc' }, { id: 'asc' }], take: 201 } } }).catch(() => unavailable());
     if (!Array.isArray(rows) || rows.length > limit) throw new KnowledgeError('limit_exceeded');
     const head = await this.read(scope, documentId);
     if (!head || head.document.scope.kind !== 'workspace' || head.document.scope.tenantId !== value.tenantId || head.document.scope.workspaceId !== value.workspaceId) return unavailable();
+    for (const row of rows) {
+      if (!Array.isArray(row.chunks) || row.chunks.length > 200
+        || row.chunks.reduce((total, chunk) => total + (typeof chunk.text === 'string' ? chunk.text.length : Number.MAX_SAFE_INTEGER), 0) > 200000) {
+        throw new KnowledgeError('limit_exceeded');
+      }
+    }
     return rows.map(row => ({ version: row.version, status: row.status, contentHash: row.contentHash,
       chunks: (row.chunks ?? []).map(chunk => ({ id: chunk.id, chunkIndex: chunk.chunkIndex, text: chunk.text, state: chunk.state })) }));
+  }
+
+  /** Management enumeration never selects historical body/state columns. */
+  async versionMetadata(scope: AiExecutionScope, documentId: string, limit: number) {
+    const value = workspace(scope);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new KnowledgeError('invalid_input');
+    const rows = await this.db.aiKnowledgeVersion.findMany({ where: {
+      documentId, document: { tenantId: value.tenantId, workspaceId: value.workspaceId },
+    }, orderBy: { version: 'asc' }, take: limit + 1,
+      select: { id: true, documentId: true, version: true, status: true, contentHash: true,
+        _count: { select: { chunks: true } } } }).catch(() => unavailable());
+    if (!Array.isArray(rows) || rows.length > limit) throw new KnowledgeError('limit_exceeded');
+    const head = await this.read(scope, documentId);
+    if (!head) return unavailable();
+    const versions = new Set<number>(), hashes = new Set<string>();
+    return rows.map(row => {
+      if (row.documentId !== documentId || !Number.isSafeInteger(row.version) || row.version < 1
+        || versions.has(row.version) || typeof row.contentHash !== 'string' || !row.contentHash.length
+        || row.contentHash.length > 128 || hashes.has(row.contentHash) || typeof row.status !== 'string'
+        || !Number.isSafeInteger(row._count?.chunks) || row._count.chunks < 0) return unavailable();
+      versions.add(row.version); hashes.add(row.contentHash);
+      return { version: row.version, status: row.status, contentHash: row.contentHash, chunkCount: row._count.chunks };
+    });
+  }
+
+  /** Call only after the human service grants the exact historical version. */
+  async versionContent(scope: AiExecutionScope, documentId: string, contentHash: string) {
+    const value = workspace(scope);
+    const rows = await this.db.aiKnowledgeVersion.findMany({ where: { documentId, contentHash,
+      document: { tenantId: value.tenantId, workspaceId: value.workspaceId } }, take: 2,
+      include: { chunks: { orderBy: [{ chunkIndex: 'asc' }, { id: 'asc' }], take: 201 } } }).catch(() => unavailable());
+    if (!Array.isArray(rows) || rows.length !== 1 || !await this.read(scope, documentId)) return unavailable();
+    const row = rows[0];
+    if (row.documentId !== documentId || row.contentHash !== contentHash
+      || !Number.isSafeInteger(row.version) || row.version < 1) return unavailable();
+    if (!Array.isArray(row.chunks) || row.chunks.length > 200 || row.chunks.reduce((total, chunk) =>
+      total + (typeof chunk.text === 'string' ? chunk.text.length : Number.MAX_SAFE_INTEGER), 0) > 200000) {
+      throw new KnowledgeError('limit_exceeded');
+    }
+    const logicalIds = new Set<string>();
+    for (let index = 0; index < row.chunks.length; index++) {
+      const chunk = row.chunks[index], body = parsePersisted(persistedKnowledgeChunkSchema, chunk.state);
+      // Historical ACL revisions may differ from the head. Keep the original
+      // body revision, but never borrow another document, version or workspace.
+      if (chunk.versionId !== row.id || chunk.chunkIndex !== index || chunk.text !== body.text
+        || body.documentId !== documentId || body.documentVersion !== contentHash
+        || !sameScope(body.scope, scope) || logicalIds.has(body.chunkId)) return unavailable();
+      logicalIds.add(body.chunkId);
+    }
+    return { version: row.version, status: row.status, contentHash: row.contentHash,
+      chunks: row.chunks.map(chunk => ({ id: chunk.id, chunkIndex: chunk.chunkIndex, text: chunk.text, state: chunk.state })) };
   }
 
   private receipt(row: Prisma.AiKnowledgeOperationGetPayload<{}>, scope: ReturnType<typeof workspace>, documentId: string, operationId: string): KnowledgeOperation {

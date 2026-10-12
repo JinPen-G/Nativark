@@ -12,10 +12,12 @@ import { composeApprovedOrderWaiting } from './approved-order-waiting.executor';
 import { composeApprovedOrderApplication } from './approved-order-application.composition';
 import { composeApprovedOrderReprepare } from './approved-order-reprepare.composition';
 import type { ApprovedOrderReprepareServicesFactory } from './approved-order-reprepare.ports';
+import type { PersistedTaskInputTool } from '../runner/prisma-task-plan-input.source';
 
 export type ControlledApprovedOrderDependencies = Omit<PersistedApprovedOrderDependencies, 'inputSource' | 'executionInput' | 'toolVersion'> & {
   confirmation: PersistedApprovedOrderDependencies['confirmation'] & Pick<RentalOrderConfirmationService, 'normalizeOrderInput'>;
   scene: { code: string; version: string };
+  planTools?: readonly PersistedTaskInputTool[];
   reprepareServices?: ApprovedOrderReprepareServicesFactory;
 };
 

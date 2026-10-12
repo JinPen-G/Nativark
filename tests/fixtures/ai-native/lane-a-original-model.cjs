@@ -10,12 +10,16 @@ const { PrismaGatewayInvocationBindings } = require('../../../apps/api/src/modul
 const { PrismaGatewayAccountingFacts } = require('../../../apps/api/src/modules/ai-native/budget/prisma-gateway-accounting-facts');
 const { AI_TOOL_DRAFT_VERSION } = require('./local-shared.cjs');
 
-exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation', knowledgeSetup) => {
+exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation', knowledgeSetup, quoteCandidate, extraTools = [], prepareBusiness) => {
   const profile = { id: 'profile-a', scopeId: 'scope-tenant', scopeKind: 'TENANT', configRevision: 1, credentialRef: 'vault-a',
     protocol: 'openai_chat_completions', provider: 'synthetic', model: 'synthetic-model', serviceMode: 'tenant_managed', enabled: true, disabledAt: null };
-  const tables = Object.fromEntries(['aiTaskResultArtifact', 'aiGatewayInvocation', 'aiTaskExecutionBudget', 'aiTaskExecutionCharge',
+  const tables = Object.fromEntries(['aiApprovedOrderSnapshot', 'aiProposal', 'aiProposalVersion', 'aiProposalAction', 'aiApproval',
+    'aiApprovalConsumption', 'aiApprovalReprepare', 'aiTaskExecutionPhaseStart', 'aiTaskExecutionPhaseReceipt',
+    'rentalOrder', 'rentalQuote', 'rentalOrderIdempotencyRecord',
+    'aiTaskQuoteSelection', 'aiTaskResultArtifact', 'aiGatewayInvocation', 'aiTaskExecutionBudget', 'aiTaskExecutionCharge',
     'aiTaskEvent', 'aiTaskInputRequest', 'aiTaskInputReceipt', 'aiGatewayAccountingReceipt', 'aiInvocationAdmission', 'aiBudgetReservation'].map(key => [key, []]));
-  const h = await setup({ ...tables, aiProviderProfile: [profile] }), beforeWrite = h.control.beforeWrite;
+  const h = await setup({ ...tables, businessWorkspace: [{ id: 'workspace-a', tenantId: 'tenant_001' }], aiProviderProfile: [profile] }, Boolean(prepareBusiness)), beforeWrite = h.control.beforeWrite;
+  if (prepareBusiness) await prepareBusiness(h.b);
   h.control.beforeRead = async (table, args) => {
     if (table === 'aiGatewayInvocation' && typeof args.where?.fencingToken === 'string') {
       args.where.fencingToken = new (require('../../../apps/api/node_modules/@prisma/client').Prisma.Decimal)(args.where.fencingToken);
@@ -33,9 +37,13 @@ exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation'
   h.state.aiBudgetPolicy = clone(h.b.h.state.aiBudgetPolicy).map(row => JSON.parse(JSON.stringify(row)
     .replaceAll('tenant-a', 'tenant_001').replaceAll('synthetic-clarification', sceneCode)));
   const policy = h.state.aiTaskPlanPolicy.find(row => row.sceneCode === sceneCode);
-  policy.allowedTools = [{ code: TASK_TEXT_MODEL_TOOL, version: AI_TOOL_DRAFT_VERSION }];
+  policy.allowedTools = [{ code: TASK_TEXT_MODEL_TOOL, version: AI_TOOL_DRAFT_VERSION }, ...clone(extraTools)];
   policy.limits = { ...h.b.h.plan.limits, maxTotalMs: 30000, maxStepMs: 5000 };
-  const created = await h.app.create(h.command(sceneCode)), taskId = created.task.taskId, reference = h.ref(created.receipt.inputRef);
+  const command=h.command(sceneCode);
+  if (quoteCandidate !== undefined) {
+    assert.equal(sceneCode,'quote_clarification'); command.input={candidate:clone(quoteCandidate)};
+  }
+  const created = await h.app.create(command), taskId = created.task.taskId, reference = h.ref(created.receipt.inputRef);
   for (const operation of ['read_metadata', 'read_events', 'claim_run', 'claim_recovery_run', 'release_run', 'transition_task',
     'read_step_terminal', 'request_input', 'submit_input', 'resume_input']) {
     h.state.aiTaskActionPolicy.push({ scopeId: 'scope-a', taskId, operation, revision: 1,
@@ -106,8 +114,8 @@ exports.originalModelApplicationHarness = async (sceneCode = 'order_explanation'
   return { ...h, created, reference, model, modelDependencies, run, app, execution, financial, supplemental };
 };
 
-exports.requestBoundOriginalModelHarness = async (sceneCode = 'order_explanation', knowledgeSetup) => {
-  const h = await exports.originalModelApplicationHarness(sceneCode, knowledgeSetup);
+exports.requestBoundOriginalModelHarness = async (sceneCode = 'order_explanation', knowledgeSetup, quoteCandidate, prepareBusiness) => {
+  const h = await exports.originalModelApplicationHarness(sceneCode, knowledgeSetup, quoteCandidate, [], prepareBusiness);
   const { AiOriginalScenesModule, AI_ORIGINAL_SCENE_MODEL_REQUESTS } = require('../../../apps/api/src/modules/ai-native/scenes/original-scenes.module');
   const { composePersistedTaskAuthorization } = require('../../../apps/api/src/modules/ai-native/task-authorization.composition');
   const { credentials, ...dependencies } = h.modelDependencies, factoryCalls = [];
@@ -147,7 +155,10 @@ exports.originalSceneKnowledgeFixture = async h => {
     const key = where.tenantId_workspaceId_actorKind_actorId_audience_domain_action_resourceKey;
     policyReads.push(structuredClone(key));
     return structuredClone(policyRows.find(row => Object.entries(key).every(([name, value]) => row[name] === value)) ?? null);
-  } } };
+  } },
+    // This fixture provisions original server policies, not managed policy operations.
+    aiKnowledgePolicyManagementOperation: { findFirst: async () => null },
+  };
   const grant = (domain, action, resource) => policyRows.push({ tenantId: scope.tenantId, workspaceId: scope.workspaceId,
     ...owner, audience: context.audience, domain, action, resourceKey: fingerprint(resource), resource: structuredClone(resource),
     revision: 1, enabled: true, requiredPermissions: ['rental-os:order:view'], expiresAt });

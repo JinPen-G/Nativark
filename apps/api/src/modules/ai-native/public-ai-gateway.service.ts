@@ -36,7 +36,9 @@ function identity(value: AiExecutionContext) {
   return requestFingerprint(rest);
 }
 
-/** C03 public port for the existing workspace/user engine. Other identities fail closed.
+/** C03 public port for the existing workspace/user engine. The customer `client`
+ * audience uses the same server-selected route and single ledger as operator/staff;
+ * automation and other identities still fail closed.
  * No production root registers this module automatically, and no default evidence verifier is supplied.
  */
 export class PublicAiGatewayService implements AiGatewayPortDraft {
@@ -59,12 +61,15 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
 
   private call(value: AiExecutionContext, intent: AiGatewayIntentDraft, signal?: AbortSignal) {
     if (!isGatewayIntent(intent)) throw new ModelGatewayError('INVALID_REQUEST');
-    if (!isAiStepExecutionContext(value) || value.scope.kind !== 'workspace' || value.actor.kind !== 'user'
-      || (value.audience !== 'operator' && value.audience !== 'staff')) throw new ModelGatewayError('FORBIDDEN');
+    if (!isAiStepExecutionContext(value) || value.scope.kind !== 'workspace'
+      || (value.audience === 'client' ? value.actor.kind !== 'customer' : value.actor.kind !== 'user')
+      || !['operator', 'staff', 'client'].includes(value.audience)) throw new ModelGatewayError('FORBIDDEN');
     const context = structuredClone(value), binding = this.scenes.get(intent?.sceneCode);
     if (!binding) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     const expected = identity(context);
-    const narrow: GatewayContext = { tenantId: value.scope.tenantId, workspaceId: value.scope.workspaceId, actorId: value.actor.userId };
+    const actorId = value.actor.kind === 'customer' ? value.actor.customerId
+      : 'userId' in value.actor ? value.actor.userId : (() => { throw new ModelGatewayError('FORBIDDEN'); })();
+    const narrow: GatewayContext = { tenantId: value.scope.tenantId, workspaceId: value.scope.workspaceId, actorId };
     const life = new GatewayDeadline(this.timeoutMs, signal);
     let resolution: GatewayRoutingResolution | undefined, actual: AiGatewayConfigReferenceDraft | undefined, dispatched = false;
     const ports = this.runtime.ports;
@@ -130,7 +135,10 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
   async invoke(context: AiExecutionContext, value: AiGatewayIntentDraft, signal?: AbortSignal): Promise<AiGatewayResultDraft> {
     const intent = structuredClone(value), call = this.call(context, intent, signal);
     try {
-      const result = await call.gateway.invokeTextIntent(call.narrow, intent, call.life.controller.signal);
+      const hasMedia = intent.messages.some(message => message.content.some(part => part.kind !== 'text'));
+      const result = await (hasMedia
+        ? call.gateway.invokeIntent(call.narrow, intent, call.life.controller.signal)
+        : call.gateway.invokeTextIntent(call.narrow, intent, call.life.controller.signal));
       await call.life.wait(call.current);
       return checkedResult(call.completed(result));
     } catch (error) {
@@ -144,7 +152,10 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
 
   async *stream(context: AiExecutionContext, value: AiGatewayIntentDraft, signal?: AbortSignal): AsyncIterable<AiGatewayStreamEventDraft> {
     const intent = structuredClone(value), call = this.call(context, intent, signal);
-    const iterator = call.gateway.streamTextIntent(call.narrow, intent, call.life.controller.signal);
+    const hasMedia = intent.messages.some(message => message.content.some(part => part.kind !== 'text'));
+    const iterator = hasMedia
+      ? call.gateway.streamIntent(call.narrow, intent, call.life.controller.signal)
+      : call.gateway.streamTextIntent(call.narrow, intent, call.life.controller.signal);
     let sequence = 1, started = false;
     const header = () => ({ draftVersion: VERSION, requestId: intent.requestId, sequence: sequence++ });
     try {

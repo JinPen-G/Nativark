@@ -43,6 +43,17 @@ const clone = value => JSON.parse(JSON.stringify(value));
 const version = shared.AI_TASK_DRAFT_VERSION;
 const at = "2026-10-03T10:00:00Z";
 const context = { contractVersion: shared.AI_CONTRACT_DRAFT_VERSION, requestId: "r1", authorizedAt: at, audience: "operator", actor: { kind: "user", userId: "u1" }, scope: { kind: "workspace", tenantId: "t1", workspaceId: "w1" }, access: { permissions: [], dataScope: "own", locationScope: { mode: "selected", locationIds: [] } } };
+test('public task snapshot is closed and carries a string watermark, not execution authority', () => {
+  const snapshot = { contractVersion: version, taskId: 't1', revision: 1, status: 'waiting_external',
+    sceneCode: 'order_explanation', sceneVersion: '1', createdAt: at, updatedAt: at,
+    cancelRequestedAt: null, cursor: '9007199254740995',
+    steps: [{ stepId: 's1', runId: 'r1', sequence: 1, revision: 1, status: 'unknown' }] };
+  valid('AiTaskSnapshotDraft', snapshot);
+  for (const patch of [{ cursor: 9007199254740995 }, { holderId: 'worker' }, { createdContext: context },
+    { status: 'unknown' }, { steps: [{ ...snapshot.steps[0], inputRef: 'private' }] }]) {
+    invalid('AiTaskSnapshotDraft', { ...snapshot, ...patch });
+  }
+});
 const fact = { scope: context.scope, resourceType: "order", resourceId: "o1", observedAt: at, basis: { kind: "snapshot", version: "v1" } };
 const outcomes = {
   pending: { status: "pending", effect: "none" }, running: { status: "running", effect: "possible" },

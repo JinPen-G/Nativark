@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException, HttpException, HttpStatus, Inject, Injectable, Logger, NotFoundException, OnApplicationBootstrap, OnModuleInit, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import { requestFingerprint } from './rental-idempotency.repository';
+import type { RentalQuoteOriginalOperation } from './rental-business-fact.repository';
 import { isDeepStrictEqual } from "node:util";
 import { snapshotInspectionTemplate } from "./rental-inspection-template-snapshot";
 import { CapabilityBlockedException, CapabilityHookRuntime } from "./capability-hook.runtime";
@@ -4720,7 +4722,53 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     return roundMoney(Math.min(base, benefit.maximum === undefined ? raw : Math.min(raw, benefit.maximum)));
   }
 
-  async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest, preResolvedDeliveryAddress?: RentalDeliveryAddressSnapshot) {
+  /** Internal server port. The originating authority derives the opaque key;
+   * current original route/Guard checks remain mandatory at the caller. */
+  /** Exposes the SAME server-owned defaults used by the manual quote path.
+   * Normalization does not establish membership or enterprise eligibility;
+   * createQuote still resolves those facts from MembershipService. */
+  normalizeQuoteInput(value: RentalQuoteRequest): RentalQuoteRequest {
+    const input = structuredClone(value);
+    return this.memberships && !input.bookingIdentity
+      ? { ...input, bookingIdentity: { bookingIdentity: 'personal' } } : input;
+  }
+
+  async createQuoteForOriginalOperation(tenantId: string, context: BusinessContext, value: RentalQuoteRequest,
+    proof: RentalQuoteOriginalOperation): Promise<RentalQuoteSnapshotV1> {
+    const input = structuredClone(value), currentContext = structuredClone(context),
+      original = Object.freeze({ key: proof?.key, inputHash: proof?.inputHash });
+    if (!/^[a-f0-9]{64}$/u.test(original.key ?? '') || original.inputHash !== requestFingerprint(input))
+      throw new ConflictException('报价原操作输入绑定无效');
+    if (!this.factStore.findQuoteForOriginalOperation || !this.factStore.saveQuoteForOriginalOperation)
+      throw new ServiceUnavailableException('报价原操作持久化不可用');
+    const stored = await this.factStore.findQuoteForOriginalOperation(tenantId, original);
+    if (stored) {
+      const state = this.state(tenantId, currentContext);
+      if (!state.quotes.some(row => row.id === stored.id)) state.quotes.unshift(stored);
+      return stored;
+    }
+    return this.createQuote(tenantId, currentContext, input, undefined, original);
+  }
+
+  async readQuoteForOriginalOperation(tenantId: string, proof: RentalQuoteOriginalOperation) {
+    if (!this.factStore.findQuoteForOriginalOperation) throw new ServiceUnavailableException('报价原操作读取不可用');
+    return this.factStore.findQuoteForOriginalOperation(tenantId, Object.freeze({ key: proof?.key, inputHash: proof?.inputHash }));
+  }
+
+  /** Observation only; never recomputes prices, revives expiry or creates a row. */
+  async readQuoteForOriginalReference(tenantId: string, key: string) {
+    if (!this.factStore.findQuoteForOriginalReference) throw new ServiceUnavailableException('报价历史原操作读取不可用');
+    return this.factStore.findQuoteForOriginalReference(tenantId, key);
+  }
+
+  async createQuote(tenantId: string, context: BusinessContext, input: RentalQuoteRequest, preResolvedDeliveryAddress?: RentalDeliveryAddressSnapshot,
+    original?: RentalQuoteOriginalOperation) {
+    if (original) {
+      input = structuredClone(input);
+      original = Object.freeze({ key: original.key, inputHash: original.inputHash });
+      if (!/^[a-f0-9]{64}$/u.test(original.key) || original.inputHash !== requestFingerprint(input))
+        throw new ConflictException('报价原操作输入绑定无效');
+    }
     let categoryVersionId: string | undefined;
     let categoryAdoptionRevision: number | undefined;
     if (this.categoryResolver) {
@@ -4735,7 +4783,7 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
       categoryVersionId = resolved.categoryVersionId;
       categoryAdoptionRevision = resolved.adoptionRevision;
     }
-    if (this.memberships && !input.bookingIdentity) input = { ...input, bookingIdentity: { bookingIdentity: "personal" } };
+    input = this.normalizeQuoteInput(input);
     const state = this.state(tenantId, context);
     // 新空间的默认价格是懒加载配置：首个报价不能先因为版本表为空而失败，
     // 再等一个无关的保存动作来触发持久化。MySQL 路径在报价前补落计划与首版，
@@ -5455,11 +5503,16 @@ export class RentalBusinessService implements OnModuleInit, OnApplicationBootstr
     // Review P1-5：判定结果必须写进报价并返回，否则「需转接环」这类风险虽被发现，
     // 用户却无从知道要确认什么，下单侧也只能凭空重构一遍判断。
     quote.capabilityDecisions = await this.runQuoteHook(tenantId, context, quote);
-    await this.factStore.upsertQuote(quote, categoryVersionId && categoryAdoptionRevision !== undefined
-      ? { categoryVersionId, adoptionRevision: categoryAdoptionRevision } : undefined);
+    const expectedBinding = categoryVersionId && categoryAdoptionRevision !== undefined
+      ? { categoryVersionId, adoptionRevision: categoryAdoptionRevision } : undefined;
+    let persisted = quote;
+    if (original) {
+      if (!this.factStore.saveQuoteForOriginalOperation) throw new ServiceUnavailableException('报价原操作持久化不可用');
+      persisted = await this.factStore.saveQuoteForOriginalOperation(quote, original, expectedBinding);
+    } else await this.factStore.upsertQuote(quote, expectedBinding);
     // 缓存只在成功提交之后发布；并发采用新版造成拒绝时不能留下幽灵报价。
-    state.quotes.unshift(quote);
-    return quote;
+    if (!state.quotes.some(row => row.id === persisted.id)) state.quotes.unshift(persisted);
+    return persisted;
   }
 
   /**

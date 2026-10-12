@@ -2889,6 +2889,7 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
       usageReadings,
       returnedItems: partialReturnItems,
       exceptions: (input.exceptions ?? []).map((exception) => ({
+        ...(template.stage === 'return' ? { id: randomUUID() } : {}),
         code: exception.code,
         description: exception.description,
         allocationId: exception.allocationId,

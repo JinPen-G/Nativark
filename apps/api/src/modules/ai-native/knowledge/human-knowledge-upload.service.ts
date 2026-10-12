@@ -23,7 +23,7 @@ export function knowledgeUploadRequest(value: unknown, revision?: KnowledgeUploa
 
 export class HumanKnowledgeUploadService {
   constructor(private readonly session: KnowledgeCurrentSession,
-    private readonly runtime: Pick<FileStorageRuntimeService, 'createUploadSession' | 'completeUpload'>,
+    private readonly runtime: Pick<FileStorageRuntimeService, 'createUploadSession' | 'completeUpload'> & Partial<Pick<FileStorageRuntimeService, 'readKnowledgeUpload'>>,
     private readonly repository: Pick<PrismaKnowledgeRepository, 'read'>) {}
 
   begin(value: unknown) {
@@ -69,6 +69,29 @@ export class HumanKnowledgeUploadService {
         workspaceId: context.scope.workspaceId, actorUserId: context.actor.userId, knowledgeRevision: revision });
       return { attachmentId: asset.id, documentId: input.documentId, documentVersion: input.targetVersion, expectedRevision: input.expectedRevision,
         status: 'attachment_bound' as const, semantics: 'uploaded_not_revised_or_published' as const };
+    });
+  }
+
+  observe(value: unknown) {
+    const input = parse(z.object({ documentId: id, sessionId: id }).strict(), value);
+    return this.observeOriginal(input);
+  }
+
+  observeRevision(value: unknown) {
+    const input = parse(revisionSelection.extend({ sessionId: id }).strict(), value);
+    return this.observeOriginal(input);
+  }
+
+  private observeOriginal(input: { documentId: string; sessionId: string; expectedRevision?: number; targetVersion?: string }) {
+    return this.session.run(async context => {
+      if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user' || !this.runtime.readKnowledgeUpload) return unavailable();
+      const revision = input.expectedRevision === undefined || input.targetVersion === undefined ? undefined
+        : await this.revision(context, { documentId: input.documentId, expectedRevision: input.expectedRevision, targetVersion: input.targetVersion });
+      const result = await this.runtime.readKnowledgeUpload(context.scope.tenantId, input.sessionId, {
+        businessType: 'ai_knowledge_document', businessId: input.documentId, uploadScene: 'ai-knowledge',
+        workspaceId: context.scope.workspaceId, actorUserId: context.actor.userId, ...(revision ? { knowledgeRevision: revision } : {}) });
+      return { ...result, documentId: input.documentId, ...(revision ? { targetVersion: revision.targetVersion, expectedRevision: revision.expectedRevision } : {}),
+        semantics: 'observed_upload_not_document_commit' as const };
     });
   }
 

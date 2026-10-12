@@ -533,6 +533,37 @@ export class FileStorageRuntimeService implements OnApplicationBootstrap, OnAppl
     return { scanned, deleted, pending };
   }
 
+  /** Current-authorized observation of the original knowledge upload only.
+   * Never creates a session, signs a URL, checks object storage, or completes it. */
+  async readKnowledgeUpload(tenantId: string, sessionId: string, owner: FileBusinessOwner): Promise<FileUploadSessionSummary> {
+    const boundOwner = structuredClone(owner);
+    if (boundOwner?.businessType !== 'ai_knowledge_document' || !boundOwner.actorUserId || !boundOwner.workspaceId)
+      throw new NotFoundException('知识上传归属不可用');
+    const load = async () => {
+      const session = await this.prisma.fileUploadSession.findFirst({ where: { id: sessionId, tenantId } });
+      const asset = session && await this.prisma.fileAsset.findFirst({ where: { id: session.fileAssetId, tenantId } });
+      if (!session || !asset || !this.matchesOwner(asset, boundOwner)) throw new NotFoundException('知识上传会话不可用');
+      this.assertKnowledgeUploadAsset(asset, boundOwner);
+      if (asset.businessModule !== 'ai-native' || session.fileAssetId !== asset.id || session.provider !== asset.storageProvider
+        || session.storageKey !== asset.storageKey || session.tenantId !== tenantId)
+        throw new ConflictException('知识上传关联已变化');
+      if (!(session.status === 'pending_upload' && asset.status === 'pending_upload'
+        || session.status === 'completed' && asset.status === 'active'
+        || session.status === 'failed' && asset.status === 'failed')) throw new ConflictException('知识上传状态不可用');
+      return { session, asset };
+    };
+    const before = structuredClone(await load());
+    const input: CreateFileUploadSessionRequest = { businessModule: before.asset.businessModule,
+      businessType: before.asset.businessType, businessId: before.asset.businessId ?? '', uploadScene: before.asset.uploadScene,
+      fileName: before.asset.fileName, mimeType: before.asset.mimeType, sizeBytes: before.asset.sizeBytes,
+      idempotencyKey: before.session.idempotencyKey ?? '' };
+    await this.authorizeKnowledgeUpload(tenantId, input, boundOwner);
+    if (requestFingerprint(before) !== requestFingerprint(await load())) throw new ConflictException('知识上传观察期间已变化');
+    await this.authorizeKnowledgeUpload(tenantId, input, boundOwner);
+    if (requestFingerprint(before) !== requestFingerprint(await load())) throw new ConflictException('知识上传观察期间已变化');
+    return this.sessionSummary(before.session, before.asset, 'provider');
+  }
+
   async completeUpload(
     tenantId: string,
     sessionId: string,

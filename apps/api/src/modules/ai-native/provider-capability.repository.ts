@@ -7,12 +7,13 @@ import { capabilityNameSchema, capabilityProfileFingerprint } from './capability
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 const id = z.string().min(1).max(36), revision = z.number().int().min(1).max(4294967295);
+const capabilityCount = capabilityNameSchema.options.length;
 const profileSchema = z.object({ id, scopeId: id, scopeKind: z.enum(['PLATFORM', 'TENANT', 'WORKSPACE']),
   profileKey: z.string().min(1).max(64), role: z.enum(['DEFAULT', 'REASONING', 'VISION', 'EMBEDDING']),
   serviceMode: z.enum(['platform_managed', 'tenant_managed']), protocol: z.string().min(1).max(64),
   provider: z.string().min(1).max(128), model: z.string().min(1).max(256), credentialRef: z.string().min(1).max(191),
   configRevision: revision, enabled: z.boolean(), disabledAt: z.date().nullable(),
-  allowedCapabilities: z.array(capabilityNameSchema).max(7).refine(values => new Set(values).size === values.length)
+  allowedCapabilities: z.array(capabilityNameSchema).max(capabilityCount).refine(values => new Set(values).size === values.length)
 });
 const fields = { capability: capabilityNameSchema, status: z.enum(['supported', 'unsupported', 'unverified']),
   source: z.enum(['connection_test', 'declared', 'manual']), evidenceHash: z.string().min(1).max(128),
@@ -59,8 +60,8 @@ export class PrismaProviderCapabilityEvidenceRepository implements ProviderCapab
   async list(value: AiProviderProfileRecord) {
     const profile = profileSchema.strict().parse(structuredClone(value));
     const rows = await this.db.aiProviderCapabilityEvidence.findMany({ where: { profileId: profile.id,
-      scopeId: profile.scopeId, scopeKind: profile.scopeKind }, orderBy: { capability: 'asc' }, take: 8 });
-    if (rows.length > 7) throw new Error('AI_CAPABILITY_EVIDENCE_INVALID_ROW');
+      scopeId: profile.scopeId, scopeKind: profile.scopeKind }, orderBy: { capability: 'asc' }, take: capabilityCount + 1 });
+    if (rows.length > capabilityCount) throw new Error('AI_CAPABILITY_EVIDENCE_INVALID_ROW');
     const result = rows.map(record);
     if (result.some(row => row.profileId !== profile.id || row.scope.id !== profile.scopeId || row.scope.kind !== profile.scopeKind)
       || new Set(result.map(row => row.capability)).size !== result.length) throw new Error('AI_CAPABILITY_EVIDENCE_INVALID_ROW');

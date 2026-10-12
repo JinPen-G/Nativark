@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowRightOutlined, CheckCircleOutlined, LoadingOutlined } from '@ant-design/icons';
 import { useSite } from '../SiteContext';
@@ -6,6 +6,7 @@ import { useAuth } from '../AuthContext';
 import { sessionApi } from '../data/authClient';
 import { siteRepository } from '../data/siteRepository';
 import { Img } from '../components/Img';
+import { customerOrderFacts } from '../features/ai-native/customer-order-facts';
 
 const money = (amount: unknown, currency = 'CNY') => `${currency === 'CNY' ? '¥' : ''}${Number(amount ?? 0)}`;
 
@@ -47,11 +48,13 @@ export function OrdersPage() {
 
 /** 订单详情：真实租户 + 已登录走 /orders/:id 并支持发起在线支付；否则回退演示记录。 */
 export function OrderDetailPage() {
-  const { tenant, href, isRemote, localizeProduct, language, t } = useSite();
-  const { isAuthenticated } = useAuth();
+  const { tenant, tenantCode, href, isRemote, localizeProduct, language, t } = useSite();
+  const { isAuthenticated, session, currentWorkspace } = useAuth();
   const { orderId } = useParams();
   const remote = isRemote && isAuthenticated;
-  const [order, setOrder] = useState<any | null>(null);
+  const owner = useMemo(() => ({}), [remote, tenantCode, orderId, session, currentWorkspace?.workspaceCode]);
+  const [orderRecord, setOrderRecord] = useState<{ owner: object; order: any } | null>(null);
+  const order = orderRecord?.owner === owner ? orderRecord.order : null;
   const [loading, setLoading] = useState(remote);
   const [error, setError] = useState('');
   const [methods, setMethods] = useState<string[]>([]);
@@ -62,13 +65,14 @@ export function OrderDetailPage() {
   useEffect(() => {
     if (!remote || !orderId) return;
     let cancelled = false;
+    setOrderRecord(null);
     setLoading(true); setError('');
     Promise.all([sessionApi.order(orderId), sessionApi.paymentCapabilities().catch(() => ({ methods: [] as string[] }))])
-      .then(([o, caps]) => { if (cancelled) return; setOrder(o); const list = (caps.methods as string[] | undefined) ?? Object.keys(caps).filter(k => (caps as any)[k] === true); setMethods(list.filter(m => m === 'alipay' || m === 'wechat_pay')); })
+      .then(([o, caps]) => { if (cancelled) return; setOrderRecord({ owner, order: o }); const list = (caps.methods as string[] | undefined) ?? Object.keys(caps).filter(k => (caps as any)[k] === true); setMethods(list.filter(m => m === 'alipay' || m === 'wechat_pay')); })
       .catch((e: any) => { if (!cancelled) setError(e?.message || t('loadFailed')); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [remote, orderId]);
+  }, [owner]);
 
   const pay = useCallback(async (method: string) => {
     if (!orderId) return;
@@ -88,7 +92,20 @@ export function OrderDetailPage() {
     const cur = order.currency || 'CNY';
     const lines: any[] = Array.isArray(order.lines) ? order.lines : [];
     const chargeLines: any[] = Array.isArray(order.chargeLines) ? order.chargeLines : [];
+    const facts = customerOrderFacts(order, orderId ?? '');
     return <div className="shell simple-page"><div className="page-intro"><h1>{order.orderNo}</h1><p>{t('orderStatus', { status: t(`orderStatus_${order.status}` as any) || order.status })}</p></div>
+      {facts && <details className="booking-card">
+        <summary>{language === 'en' ? 'Original order facts (not an AI answer)' : '原订单事实（非AI回答）'}</summary>
+        <dl className="spec-list">
+          <div><dt>应收 / Receivable</dt><dd>{facts.receivable}</dd></div>
+          <div><dt>实收 / Received</dt><dd>{facts.paid}</dd></div>
+          <div><dt>押金要求 / Deposit requirement</dt><dd>{facts.deposit}</dd></div>
+          <div><dt>预授权要求 / Preauthorization requirement</dt><dd>{facts.preAuth}</dd></div>
+          <div><dt>退款 / Refund</dt><dd>{facts.refundStatus}</dd></div>
+          <div><dt>原状态码 / Original status code</dt><dd>{facts.status}</dd></div>
+          <div><dt>来源 / Source</dt><dd>{facts.sourceId} / {facts.updatedAt}</dd></div>
+        </dl><p>{facts.note}</p>
+      </details>}
       <div className="booking-card order-detail-card"><h2>{t('bookingInfo')}</h2>
         {lines.length > 0 && <div className="order-lines">{lines.map((line, i) => <div className="order-line" key={line.id ?? i}><span>{line.itemGroupName || line.itemGroupId} × {line.quantity ?? 1}</span><b>{money(line.amount ?? (line.unitPrice ?? 0) * (line.quantity ?? 1), cur)}</b></div>)}</div>}
         <dl className="spec-list">

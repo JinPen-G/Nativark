@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ReadableStreamReadResult } from 'node:stream/web';
 import { InspectionAssistError } from './inspection-assist.validation';
+import { inspectPcmWav } from '../pcm-wav';
 
 export const INSPECTION_OBJECT_READER = Symbol('INSPECTION_OBJECT_READER');
 export interface InspectionObjectReader {
@@ -68,23 +69,10 @@ function inspectMedia(bytes: Buffer): { mediaType: string; width: number | null;
       offset += 2 + length;
     }
   }
-  if (bytes.length >= 44 && bytes.toString('ascii',0,4) === 'RIFF' && bytes.toString('ascii',8,12) === 'WAVE'
-    && bytes.readUInt32LE(4) + 8 === bytes.length) {
-    let offset = 12, byteRate = 0, dataBytes = 0;
-    while (offset + 8 <= bytes.length) {
-      const size = bytes.readUInt32LE(offset + 4), end = offset + 8 + size;
-      if (end > bytes.length) throw new InspectionAssistError('INVALID_INPUT');
-      const kind = bytes.toString('ascii', offset, offset + 4);
-      if (kind === 'fmt ' && size >= 16 && bytes.readUInt16LE(offset + 8) === 1) {
-        const channels = bytes.readUInt16LE(offset + 10), rate = bytes.readUInt32LE(offset + 12), bits = bytes.readUInt16LE(offset + 22);
-        byteRate = bytes.readUInt32LE(offset + 16);
-        if (![1,2].includes(channels) || ![8,16,24,32].includes(bits) || rate < 8000 || rate > 192000
-          || byteRate !== rate * channels * bits / 8) throw new InspectionAssistError('INVALID_INPUT');
-      }
-      if (kind === 'data') dataBytes += size;
-      offset = end + size % 2;
-    }
-    if (byteRate && dataBytes) return { mediaType: 'audio/wav', width: null, height: null, durationMs: Math.floor(dataBytes / byteRate * 1000) };
+  if (bytes.length >= 12 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WAVE') {
+    const audio = inspectPcmWav(bytes);
+    if (!audio) throw new InspectionAssistError('INVALID_INPUT');
+    return { mediaType: 'audio/wav', width: null, height: null, durationMs: audio.durationMs };
   }
   throw new InspectionAssistError('CAPABILITY_UNSUPPORTED');
 }

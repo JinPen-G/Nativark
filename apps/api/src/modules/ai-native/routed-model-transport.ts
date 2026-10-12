@@ -1,11 +1,12 @@
 import { z } from 'zod';
 import { capabilityProfileFingerprint } from './capability-verification';
-import { ModelAdapterError, ModelGatewayError, modelRequestSchema, type GatewayContext, type ModelAdapter, type ModelRequest } from './model-gateway.ports';
+import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema, type GatewayContext, type ModelAdapter, type ModelProtocolRequest } from './model-gateway.ports';
 import type { AiProviderProfileRecord } from './provider-profile.ports';
 import type { ProviderRouteDecision } from './provider-router.ports';
 import type { UnifiedGatewayTransport } from './unified-ai-gateway.ports';
 import { normalizeTenantModelBaseUrl, type TenantModelConfigService } from './tenant-model-config.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import type { TextCapabilityProbeAuthority } from './text-capability-probe.authority';
 
 export interface GatewayConnection {
   profileFingerprint: string;
@@ -44,7 +45,8 @@ export class TenantModelConnectionResolver implements GatewayConnectionResolver 
 /** Protocol registry behind the authorized route. No supplier fallback, SDK-selected model, or secret in output. */
 export class RoutedModelTransport implements UnifiedGatewayTransport {
   private readonly adapters = new Map<string, ModelAdapter>();
-  constructor(private readonly resolvers: { platform: GatewayConnectionResolver; tenant: GatewayConnectionResolver }, adapters: readonly ModelAdapter[]) {
+  constructor(private readonly resolvers: { platform: GatewayConnectionResolver; tenant: GatewayConnectionResolver }, adapters: readonly ModelAdapter[],
+    private readonly probe?: TextCapabilityProbeAuthority) {
     if (typeof resolvers?.platform?.resolve !== 'function' || typeof resolvers?.tenant?.resolve !== 'function' || !Array.isArray(adapters) || !adapters.length) throw new ModelGatewayError('CONFIG_INVALID');
     for (const adapter of adapters) {
       if (!adapter || typeof adapter.provider !== 'string' || !adapter.provider || this.adapters.has(adapter.provider)
@@ -53,13 +55,17 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
     }
   }
   private cancelled(signal: AbortSignal) { if (signal.aborted) throw new ModelGatewayError('CANCELLED'); }
-  private async prepare(value: GatewayContext, requestValue: ModelRequest, routeValue: ProviderRouteDecision, signal: AbortSignal, streaming: boolean) {
-    const parsedContext = contextSchema.safeParse(value), parsedRequest = modelRequestSchema.safeParse(requestValue);
+  private async prepare(value: GatewayContext, requestValue: ModelProtocolRequest, routeValue: ProviderRouteDecision, signal: AbortSignal, streaming: boolean) {
+    const parsedContext = contextSchema.safeParse(value), parsedRequest = modelProtocolRequestSchema.safeParse(requestValue);
     if (!parsedContext.success || !parsedRequest.success) throw new ModelGatewayError('INVALID_REQUEST');
     const context = parsedContext.data, request = parsedRequest.data, route = structuredClone(routeValue), profile = route.profile;
     this.cancelled(signal);
-    if (!profile?.enabled || profile.disabledAt || !route.scope || !route.preflight?.allowed || request.model !== profile.model
+    if (!profile?.enabled || profile.disabledAt || !route.scope || request.model !== profile.model
       || profile.scopeId !== route.scope.id || profile.scopeKind !== route.scope.kind) throw new ModelGatewayError('CONFIG_INVALID');
+    if (route.probe) {
+      if (!this.probe || streaming) throw new ModelGatewayError('FORBIDDEN');
+      await this.probe.authorizeDispatch(context, request, route);
+    } else if (!route.preflight?.allowed) throw new ModelGatewayError('CONFIG_INVALID');
     if (profile.serviceMode === 'platform_managed' ? route.scope.kind !== 'PLATFORM'
       : profile.serviceMode !== 'tenant_managed' || route.scope.kind !== 'TENANT' || route.scope.tenantId !== context.tenantId) throw new ModelGatewayError('FORBIDDEN');
     const adapter = this.adapters.get(profile.protocol);
@@ -76,7 +82,10 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
       return { ...parsed.data, baseUrl: normalizeTenantModelBaseUrl(parsed.data.baseUrl) };
     };
     const connection = await resolve(), binding = requestFingerprint(connection);
-    const recheck = async () => { if (requestFingerprint(await resolve()) !== binding) throw new ModelGatewayError('CONFIG_INVALID'); };
+    const recheck = async () => {
+      if (requestFingerprint(await resolve()) !== binding) throw new ModelGatewayError('CONFIG_INVALID');
+      if (route.probe) await this.probe!.authorizeDispatch(context, request, route);
+    };
     await recheck();
     return { request, adapter, connection, recheck };
   }
@@ -88,7 +97,7 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
   private rejectSecret(value: unknown, credential: string) {
     if (JSON.stringify(value)?.includes(credential)) throw new ModelGatewayError('INVALID_RESPONSE');
   }
-  async invoke(context: GatewayContext, request: ModelRequest, route: ProviderRouteDecision, signal: AbortSignal) {
+  async invoke(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal) {
     try {
       const prepared = await this.prepare(context, request, route, signal, false);
       const result = await prepared.adapter.generate({ ...structuredClone(prepared.request), signal }, prepared.connection.credential, { baseUrl: prepared.connection.baseUrl });
@@ -97,7 +106,7 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
       return { ...structuredClone(result) };
     } catch (error) { throw this.safeError(error); }
   }
-  async *stream(context: GatewayContext, request: ModelRequest, route: ProviderRouteDecision, signal: AbortSignal) {
+  async *stream(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, signal: AbortSignal) {
     try {
       const prepared = await this.prepare(context, request, route, signal, true);
       let pending = '', terminal = false;

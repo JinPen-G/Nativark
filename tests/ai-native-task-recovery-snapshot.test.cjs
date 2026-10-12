@@ -35,6 +35,23 @@ test('released partial work exposes original results, task-wide counters and exi
   assert.deepEqual(h.state, before); noWrites(h, start); assert.deepEqual(h.executions, ['input-clarify']);
 });
 
+test('terminal payload requires the step original result reference and unknown payload stays hidden', async () => {
+  const { h, root } = await make();
+  assert.equal((await root.runner.run(h.claim())).status, 'succeeded');
+  const artifact = h.state.aiTaskResultArtifact[0], step = h.state.aiStep[0];
+  const input = { taskId: 'task-a', resultId: artifact.id };
+  assert.equal((await root.results.read(input)).status, 'succeeded');
+  const reference = step.resultRef;
+  step.resultRef = null;
+  await assert.rejects(root.results.read(input), e => e.code === 'AI_STORAGE_UNAVAILABLE');
+  step.resultRef = reference;
+  artifact.completeMeasurement = false;
+  const unknown = await root.results.read(input);
+  assert.equal(unknown.status, 'unknown'); assert.equal(unknown.payload, null);
+  artifact.completeMeasurement = true; artifact.outcome = 'UNKNOWN'; step.status = 'UNKNOWN';
+  assert.equal((await root.results.read(input)).payload, null, 'unknown cannot become a result through a measurement flag');
+});
+
 test('an incomplete artifact remains running and unknown occupied resources stay reserved in the read model', async () => {
   const { h, root } = await make(); h.control.execute = async () => { throw Error('synthetic interrupted result'); };
   assert.equal((await root.runner.run(h.claim())).status, 'unknown');
