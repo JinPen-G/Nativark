@@ -7,7 +7,7 @@ test.after(() => assert.deepEqual(h.attempts, []));
 test('declared parser capability and rejected input correct through a new immutable version', async () => {
   const { ports, f, db } = fixture();
   let unsupported = true;
-  const api = new HumanKnowledgeService({ ...ports, files: { read: async (...args) => unsupported
+  const api = new HumanKnowledgeService({ ...ports, files: { ...f.files, read: async (...args) => unsupported
     ? { mediaType: 'application/pdf', bytes: new Uint8Array([65]) } : f.files.read(...args) } });
   assert.deepEqual(api.parserCapabilities().mediaTypes, ['text/plain', 'text/markdown']);
   assert.equal(api.parserCapabilities().maxBytes, 262144);
