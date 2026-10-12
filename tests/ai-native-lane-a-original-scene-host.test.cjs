@@ -904,10 +904,14 @@ test('request-bound model keeps unknown receipts and cancellation distinct from 
   aborted.db.aiPlatformModelConnection.update = async () => { throw new Error('must not update connection'); };
   assert.throws(() => composeRequestBoundPersistedOriginalSceneModel({ ...formalDependencies, gateway, runtime }, formalOptions),
     e => e.code === 'AI_RESOURCE_UNAVAILABLE');
-  const formal = composeRequestBoundPersistedOriginalSceneModel({ ...formalDependencies, gateway }, formalOptions);
+  const { AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.module');
+  const { AiOriginalSceneModelActionsController } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.controller');
+  const module = AiOriginalScenesModule.registerHttpPersistedModel({ ...formalDependencies, gateway }, formalOptions);
+  const formal = module.providers.find(provider => provider.provide === AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS).useFactory();
+  assert.deepEqual(module.controllers, [AiOriginalScenesController, AiOriginalSceneModelActionsController]);
   await assert.rejects(formal.start(aborted.request, { ...aborted.reference, taskId: aborted.created.task.taskId }),
     e => e.code === 'AI_INVALID_INPUT');
-  const formalStopped = await formal.start(aborted.request, aborted.reference, signal.signal);
+  const formalStopped = await new AiOriginalSceneModelActionsController(formal).start({ ...aborted.request, aborted: true }, aborted.reference);
   assert.deepEqual(formalStopped.execution, { kind: 'not_started', reason: 'host_aborted' });
   assert.equal(aborted.state.aiTaskActionInput.length, 0); assert.equal(aborted.state.aiGatewayInvocation.length, 0);
 });

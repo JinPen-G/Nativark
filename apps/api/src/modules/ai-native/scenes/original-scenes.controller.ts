@@ -1,11 +1,13 @@
 import { Body, Controller, HttpException, Inject, Post, Req } from '@nestjs/common';
 import type { IncomingMessage } from 'node:http';
-import type { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneModel, AiSceneHttpRequest } from './request-bound-scenes.application';
+import type { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneModel,
+  composeRequestBoundPersistedOriginalSceneModel, AiSceneHttpRequest } from './request-bound-scenes.application';
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT } from '@rental-os/shared';
 
 export const AI_ORIGINAL_SCENES = Symbol('AI_ORIGINAL_SCENES');
 export const AI_ORIGINAL_SCENE_REQUESTS = Symbol('AI_ORIGINAL_SCENE_REQUESTS');
 export const AI_ORIGINAL_SCENE_MODEL_REQUESTS = Symbol('AI_ORIGINAL_SCENE_MODEL_REQUESTS');
+export const AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS = Symbol('AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS');
 type Scenes = ReturnType<typeof composeRequestBoundOriginalScenes>;
 async function respondAiScene<T>(work: () => Promise<T>, unknownAction = 'reconcile') {
   try { return await work(); }
@@ -63,45 +65,9 @@ export class AiOriginalScenesController {
 /** No root-module registration. The server must provide the actual authorized
  * runner/Gateway/financial evidence assembly; request bodies cannot do so. */
 @Controller(AI_SCENE_MODEL_HTTP_DRAFT.basePath)
-export class AiOriginalSceneModelController {
-  constructor(@Inject(AI_ORIGINAL_SCENE_MODEL_REQUESTS)
-    private readonly model: ReturnType<typeof composeRequestBoundOriginalSceneModel>) {}
-  @Post(AI_SCENE_MODEL_HTTP_DRAFT.startSettingsTask)
-  startSettingsTask(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.model.startSettingsTask(request, body, signal)));
-  }
-  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readSettingsConfirmation)
-  readSettingsConfirmation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.model.readSettingsConfirmation(request, body));
-  }
-  @Post(AI_SCENE_MODEL_HTTP_DRAFT.decideSettingsProposal)
-  decideSettingsProposal(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.model.decideSettingsProposal(request, body), 'read_decision_receipt');
-  }
-  // Unknown decision acknowledgement is reread by its original proposal reference,
-  // never by creating a replacement approval or restarting execution.
-  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readSettingsDecision)
-  readSettingsDecision(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.model.readSettingsDecision(request, body), 'read_decision_receipt');
-  }
-  @Post(AI_SCENE_MODEL_HTTP_DRAFT.continueSettingsConfirmation)
-  continueSettingsConfirmation(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.model.continueSettingsConfirmation(request, body, signal)));
-  }
-  @Post(AI_SCENE_MODEL_HTTP_DRAFT.reconcileSettingsTask)
-  reconcileSettingsTask(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.model.reconcileSettingsTask(request, body, signal)));
-  }
-  @Post(AI_SCENE_MODEL_HTTP_DRAFT.cancelSettingsTask)
-  cancelSettingsTask(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.model.cancelSettingsTask(request, body));
-  }
-  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage)
-  readTaskPage(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.model.readTaskPage(request, body)); }
-  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents)
-  readTaskEvents(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.model.readTaskEvents(request, body)); }
-  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene)
-  readTaskScene(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.model.readTaskScene(request, body)); }
+export class AiOriginalSceneModelActionsController {
+  constructor(@Inject(AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS)
+    protected readonly model: ReturnType<typeof composeRequestBoundPersistedOriginalSceneModel>) {}
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.start)
   start(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => withRequestAbort(request, signal => this.model.start(request, body, signal)));
@@ -161,4 +127,46 @@ export class AiOriginalSceneModelController {
   readModelResult(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.model.readModelResult(request, body)); }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.reopenModelSource)
   reopenModelSource(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.model.reopenModelSource(request, body)); }
+}
+
+/** Existing full server assembly keeps its business/center routes. Model action
+ * implementations are inherited, not a second controller execution chain. */
+@Controller(AI_SCENE_MODEL_HTTP_DRAFT.basePath)
+export class AiOriginalSceneModelController extends AiOriginalSceneModelActionsController {
+  constructor(@Inject(AI_ORIGINAL_SCENE_MODEL_REQUESTS)
+    private readonly fullModel: ReturnType<typeof composeRequestBoundOriginalSceneModel>) { super(fullModel); }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.startSettingsTask)
+  startSettingsTask(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.fullModel.startSettingsTask(request, body, signal)));
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readSettingsConfirmation)
+  readSettingsConfirmation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.fullModel.readSettingsConfirmation(request, body));
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.decideSettingsProposal)
+  decideSettingsProposal(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.fullModel.decideSettingsProposal(request, body), 'read_decision_receipt');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readSettingsDecision)
+  readSettingsDecision(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.fullModel.readSettingsDecision(request, body), 'read_decision_receipt');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.continueSettingsConfirmation)
+  continueSettingsConfirmation(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.fullModel.continueSettingsConfirmation(request, body, signal)));
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.reconcileSettingsTask)
+  reconcileSettingsTask(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.fullModel.reconcileSettingsTask(request, body, signal)));
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.cancelSettingsTask)
+  cancelSettingsTask(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.fullModel.cancelSettingsTask(request, body));
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage)
+  readTaskPage(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.fullModel.readTaskPage(request, body)); }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents)
+  readTaskEvents(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.fullModel.readTaskEvents(request, body)); }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene)
+  readTaskScene(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.fullModel.readTaskScene(request, body)); }
 }

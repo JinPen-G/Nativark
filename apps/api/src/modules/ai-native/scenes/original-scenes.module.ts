@@ -1,18 +1,31 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './original-scenes.composition';
 import { AI_ORIGINAL_SCENES, AI_ORIGINAL_SCENE_REQUESTS, AiOriginalScenesController,
-  AI_ORIGINAL_SCENE_MODEL_REQUESTS, AiOriginalSceneModelController } from './original-scenes.controller';
+  AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS,
+  AiOriginalSceneModelController, AiOriginalSceneModelActionsController } from './original-scenes.controller';
 import { composeAiOriginalSceneModel, type AiOriginalSceneModelDependencies } from './original-scene-model.composition';
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneModel, type RequestBoundOriginalSceneDependencies,
   composeRequestBoundPersistedOriginalSceneModel, type RequestBoundPersistedOriginalSceneModelDependencies,
   type RequestBoundOriginalSceneModelDependencies, type AiSceneModelRequestOptions, type AiSceneRequestOptions } from './request-bound-scenes.application';
 
 export const AI_ORIGINAL_SCENE_MODEL = Symbol('AI_ORIGINAL_SCENE_MODEL');
-export const AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS = Symbol('AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS');
-export { AI_ORIGINAL_SCENE_MODEL_REQUESTS } from './original-scenes.controller';
+export { AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS } from './original-scenes.controller';
 
 @Module({})
 export class AiOriginalScenesModule {
+  /** Explicit host selection, not production activation. Mount this OR the
+   * existing registerHttpModel, never two drivers for the same route/action.
+   * Only available model actions and original business request producers are
+   * declared; settings/task-center endpoints need their existing own assembly. */
+  static registerHttpPersistedModel(dependencies: RequestBoundPersistedOriginalSceneModelDependencies,
+    options: Parameters<typeof composeRequestBoundPersistedOriginalSceneModel>[1]): DynamicModule {
+    const persisted = this.registerPersistedRequestModel(dependencies, options);
+    const server = { ...dependencies }, selected = { enabled: options.enabled, audience: options.audience };
+    return { ...persisted, providers: [...(persisted.providers ?? []),
+      { provide: AI_ORIGINAL_SCENE_REQUESTS, useFactory: () => composeRequestBoundOriginalScenes(server, selected) }],
+      exports: [AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS],
+      controllers: [AiOriginalScenesController, AiOriginalSceneModelActionsController] };
+  }
   /** Server opt-in only. No controllers, AppModule activation or background
    * execution. Do not bind this narrower model-action service to the existing
    * full task-center controller, which also requires business-only readers. */
