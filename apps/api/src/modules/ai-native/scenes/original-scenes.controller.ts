@@ -142,6 +142,19 @@ export class AiOriginalSceneModelController {
   reconcile(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => withRequestAbort(request, signal => this.model.reconcile(request, body, signal)));
   }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readExecution)
+  readExecution(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.readExecution(request, body));
+  }
+  /** Reclaim the original persisted run only. No fresh plan or invocation. */
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.recover)
+  recover(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.recover(request, body, signal)), 'read_execution');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.takeover)
+  takeover(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.takeover(request, body, signal)), 'read_execution');
+  }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.requestCancel)
   requestCancel(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.model.requestCancel(request, body)); }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readModelResult)

@@ -32,6 +32,14 @@ export interface AiSceneRequestReadDraft {
   draftVersion: typeof AI_SCENE_REQUEST_DRAFT_VERSION;
   inputRef: string;
 }
+/** Explicit same-owner recovery takeover. Revisions describe an observed
+ * original run; they are not permission or a caller-selected worker lease. */
+export interface AiSceneModelTakeoverDraft {
+  original: AiSceneRequestReadDraft;
+  expectedTaskRevision: number;
+  expectedRunRevision: number;
+  expectedFencingToken: string;
+}
 /** Confirms only the displayed Core quote parameters, not order creation or
  * approval. Hashes bind the current authorized preparation, not authority. */
 export interface AiSceneQuoteReceiptReadDraft extends AiSceneRequestReadDraft {
@@ -83,6 +91,7 @@ export const AI_SCENE_REQUEST_HTTP_DRAFT = Object.freeze({
 export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
   basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/model`, method: 'POST',
   start: 'start', readInput: 'input', refreshInput: 'input/refresh', resume: 'resume', reconcile: 'reconcile',
+  readExecution: 'execution', recover: 'recover', takeover: 'takeover',
   readAnswer: 'input/receipt', continueAnswer: 'input/continue',
   readQuotePreparation: 'input/quote-preparation',
   confirmClarifiedQuote: 'input/quote-confirm', readClarifiedQuoteReceipt: 'input/quote-receipt',

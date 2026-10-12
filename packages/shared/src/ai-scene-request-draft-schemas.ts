@@ -51,6 +51,8 @@ export const AI_SCENE_REQUEST_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> =
   AiSceneModelQuoteConfirmDraft: object({ original: originalReference, submission: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft,
     selectionRevision: hash, inputFingerprint: hash, confirmQuote: { type: 'boolean', const: true } }),
   AiSceneModelCancelDraft: object({ original: originalReference, expectedRevision: integer(1, 4294967294) }),
+  AiSceneModelTakeoverDraft: object({ original: originalReference, expectedTaskRevision: integer(1, 4294967294),
+    expectedRunRevision: integer(1, 4294967294), expectedFencingToken: { type: 'string', pattern: '^[1-9][0-9]{0,19}$' } }),
   AiSceneModelResultReadDraft: object({ original: originalReference, resultId: id() }),
   AiSceneModelSourceReadDraft: object({ original: originalReference, resultId: id(), sourceIndex: integer(0, 4),
     sourceKind: choice('order', 'knowledge') }, ['original', 'resultId', 'sourceIndex']),
