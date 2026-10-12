@@ -1,6 +1,18 @@
 <view class="inspection-assist" aria-label="检查辅助草稿">
   <text role="status">{{phase}} · 草稿不代表检查完成</text><text wx:if="{{error}}" role="alert">{{error}}</text>
+  <view wx:if="{{originalReceiptObserved}}" role="status">
+    <text>已读到原检查收据：{{originalInspectionId}}</text>
+    <text wx:if="{{draftLinkStatus === 'not_linked'}}">原检查已提交，草稿关联尚未写回；核对不会重新提交。</text>
+    <text wx:elif="{{draftLinkStatus === 'unknown'}}">草稿关联状态未知，请核对原操作。</text>
+    <text wx:else>草稿已关联原检查。收据不代表判责或结算结果。</text>
+  </view>
   <ai-task-workbench id="workbench"><ai-inspection-draft slot="inspection-draft" items="{{items}}" missing="{{missing}}" readonly="{{!editable}}" candidate-actions="{{editable}}" revision="{{revision}}" bind:draftchange="onEdit" bind:candidatedecision="onCandidate" /></ai-task-workbench>
+  <view aria-label="原识别结果待人工审阅">
+    <text role="status">原识别结果：{{recognitionStatus}}。候选未采用，不代表业务事实。</text>
+    <view wx:for="{{recognitionItems}}" wx:key="candidateId"><text>{{item.fieldCode}}：{{item.value}} · {{item.status}}</text><text>依据：{{item.sourceLabel}}</text></view>
+    <button disabled="{{!canReadRecognition || pending}}" bindtap="onReadRecognition">读取原识别结果</button>
+    <button disabled="{{!canSaveRecognition || pending}}" bindtap="onSaveRecognition">保存候选供逐项人工核实</button>
+  </view>
   <view wx:for="{{evidence}}" wx:key="attachmentId"><text>{{item.attachmentId}} @ {{item.attachmentRevision}}</text><button disabled="{{!canRemove || pending}}" data-id="{{item.attachmentId}}" bindtap="onRemove">从草稿移除附件</button></view>
   <button disabled="{{pending || phase === 'unavailable'}}" bindtap="onRead">重读原稿</button>
   <button disabled="{{!canReview}}" bindtap="onReview">准备人工审阅材料</button>

@@ -3,14 +3,14 @@ import { z } from 'zod';
 import type { AiKnowledgeActionPolicy, AiKnowledgePolicyManagementAuthority, PrismaClient } from '@prisma/client';
 import { knowledgeRecordSchema, memoryDraftSchema, sameScope } from './knowledge-validation';
 import { AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION } from '../../../../../../packages/shared/src/ai-knowledge-policy-management-draft';
-import { preparedKnowledgeResourceBasis } from './knowledge-policy-preparation-target';
+import { preparedKnowledgeResourceBasis, knowledgeLifecycleResourceBasis, knowledgeRevisionUploadResourceBasis, validateLifecycleResource } from './knowledge-policy-preparation-target';
 import { canonicalPolicyResource, managementActions, managementFingerprint as hash, managementParse as parse,
   permissions, policyKey, policyKeyHash, policyChange, policySnapshot, preparationFingerprint, originalResourceKey, revision,
-  preparedTargetSpec, preparedUploadResource, authorityFingerprint, KnowledgePolicyManagementError } from './knowledge-policy-management.validation';
+  authorityTargetSpec, preparedUploadResource, revisionUploadResource, authorityFingerprint, KnowledgePolicyManagementError } from './knowledge-policy-management.validation';
 
 export type KnowledgePolicyReadDb = Pick<PrismaClient, 'aiKnowledgeActionPolicy' | 'aiKnowledgePolicyManagementAuthority'
   | 'aiKnowledgePolicyPreparation' | 'aiKnowledgePolicyManagementOperation' | 'businessWorkspace' | 'user' | 'workspaceMember'
-  | 'aiKnowledgeDocument' | 'aiKnowledgeAcl' | 'aiStructuredMemory' | 'aiKnowledgePolicyPreparationTarget' | 'fileAsset' | 'fileUploadSession'>;
+  | 'aiKnowledgeDocument' | 'aiKnowledgeVersion' | 'aiKnowledgeOperation' | 'aiKnowledgeAcl' | 'aiStructuredMemory' | 'aiKnowledgePolicyPreparationTarget' | 'fileAsset' | 'fileUploadSession'>;
 export type ManagementScope = { tenantId: string; workspaceId: string };
 const denied = () => new KnowledgePolicyManagementError('unavailable');
 
@@ -29,9 +29,14 @@ export function validateKnowledgeManagementAuthority(row: AiKnowledgePolicyManag
     || live && (!row.enabled || row.expiresAt <= now)) throw denied();
   if ('owner' in resource && resource.owner?.actorId !== row.targetActorId) throw denied();
   if (row.preparationTarget != null) {
-    const target = parse(preparedTargetSpec, row.preparationTarget);
-    if (row.domain !== 'knowledge' || !['upload', 'create'].includes(row.action) || Date.parse(target.expiresAt) > row.expiresAt.getTime()
-      || row.action === 'upload' && hash(resource) !== hash(preparedUploadResource(target))) throw denied();
+    const target = parse(authorityTargetSpec, row.preparationTarget);
+    if (Date.parse(target.expiresAt) > row.expiresAt.getTime()) throw denied();
+    if (target.version === 'knowledge-prepared-target-1') {
+      if (row.domain !== 'knowledge' || !['upload', 'create'].includes(row.action)
+        || row.action === 'upload' && hash(resource) !== hash(preparedUploadResource(target))) throw denied();
+    } else if (target.version === 'knowledge-revision-upload-target-1') {
+      if (row.domain !== 'knowledge' || row.action !== 'upload' || hash(resource) !== hash(revisionUploadResource(target))) throw denied();
+    } else validateLifecycleResource({ row, resource }, target);
   } else if (row.domain === 'knowledge' && ['upload', 'create'].includes(row.action)) throw denied();
   return { row, key: policyKey(row), resource, required, allowed, operations, authorizationHash: authorityFingerprint(row) };
 }
@@ -61,6 +66,11 @@ export async function knowledgePolicyParticipants(db: KnowledgePolicyReadDb, aut
 export async function knowledgePolicyResourceBasis(db: KnowledgePolicyReadDb, authority: KnowledgeManagementAuthority, closing = false, now = new Date()) {
   const scope = await knowledgePolicyParticipants(db, authority, closing), { row, resource } = authority;
   if (closing) return { closing: true, key: authority.key };
+  if (row.preparationTarget != null) {
+    const target = parse(authorityTargetSpec, row.preparationTarget);
+    if (target.version === 'knowledge-revision-upload-target-1') return knowledgeRevisionUploadResourceBasis(db, authority, now);
+    if (target.version !== 'knowledge-prepared-target-1') return knowledgeLifecycleResourceBasis(db, authority, now);
+  }
   if (row.domain === 'knowledge' && ['upload', 'create'].includes(row.action)) return preparedKnowledgeResourceBasis(db, authority, now);
   if ('documentId' in resource && resource.documentId) {
     const document = await db.aiKnowledgeDocument.findFirst({ where: { ...scope, id: resource.documentId } });

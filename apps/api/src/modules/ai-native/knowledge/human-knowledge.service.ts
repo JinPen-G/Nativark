@@ -270,9 +270,10 @@ export class HumanKnowledgeService {
   operation(documentId: string, operationId: string) {
     parse(id, documentId); parse(id, operationId);
     return this.session.run(async context => {
-      const before = await this.documents.read(context, documentId);
+      const binding = { receiptOperationId: operationId };
+      const before = await this.documents.load(context, documentId, 'read_metadata', binding);
       const receipt = await this.repository.operation(context.scope, documentId, operationId);
-      const after = await this.documents.read(context, documentId);
+      const after = await this.documents.load(context, documentId, 'read_metadata', binding);
       if (fingerprint(before) !== fingerprint(after)) throw new KnowledgeError('conflict');
       return { operationId, receipt: receipt ? 'recorded' as const : 'not_recorded' as const,
         // A receipt alone does not prove parse/index/business completion.

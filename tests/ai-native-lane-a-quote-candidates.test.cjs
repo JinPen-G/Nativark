@@ -21,10 +21,12 @@ async function setup(categoryCode='camera'){
  const memberships=new MembershipService({customerProfile:{findMany:async q=>structuredClone(customers.filter(row =>
    (!q.where.id || row.id === q.where.id) && (!q.where.name || row.name.includes(q.where.name.contains))).slice(0,q.take))}},{});
  const authority=new AiBusinessReadRouteAuthority(new ApiAuthGuard(h.authorization.auth,undefined,undefined,undefined,{}),h.authorization.credentials,()=>new Date('2026-10-07T16:30:00Z'));
- const readers={catalog:new AiCatalogReadFactsService(core,authority),members:new AiMembershipCandidateReadFactsService(memberships,authority)};
+ // Effective-rate projection double only; integration smokes use the real Core price reader.
+ const rateRows=bc.groups.flatMap(group=>bc.settings.pricing.enabledUnits.map(unit=>({id:`rate-${group.id}-${unit}`,itemGroupId:group.id,unit,baseAmount:100})));
+ const readers={catalog:new AiCatalogReadFactsService(core,authority),members:new AiMembershipCandidateReadFactsService(memberships,authority),rates:{read:async()=>structuredClone(rateRows)}};
  const contexts={current:async()=>bc},clock=()=>new Date('2026-10-07T16:30:00Z');
  const service=new AiQuoteCandidatePreparationService(readers,contexts,clock);
- const candidate={customerType:'personal',customerId:'customer-a',items:[{productName:bc.groups[0].name,quantity:1}],start:'明天 09:00',end:'后天 09:00',fulfillmentMode:bc.settings.fulfillment.enabledModes[0],locationName:bc.locations[0].name};
+ const candidate={customerType:'personal',customerId:'customer-a',items:[{productName:bc.groups[0].name,quantity:1,pricingUnit:bc.settings.pricing.enabledUnits[0]}],start:'明天 09:00',end:'后天 09:00',fulfillmentMode:bc.settings.fulfillment.enabledModes[0],locationName:bc.locations[0].name};
  return {...h,bc,readers,contexts,clock,service,candidate,customers};
 }
 test('server resolves finite extracted candidates through real Guard/catalog/member readers without quoting',async()=>{const h=await setup(),out=await h.service.prepare(h.candidate);assert.equal(out.status,'needs_confirmation');assert.equal(out.request.lines[0].itemGroupId,h.bc.groups[0].id);assert.equal(out.request.startAt,'2026-10-09T01:00:00.000Z');assert.equal(out.request.endAt,'2026-10-10T01:00:00.000Z');assert.equal(out.request.customerId,'customer-a');assert.equal(out.timeZone,'Asia/Shanghai');assert.equal(out.reservation,'not_reserved');});
@@ -34,7 +36,9 @@ test('explicit personal booking identity survives authorized candidate preparati
  assert.equal(ordinary.status,'needs_confirmation');assert.equal(ordinary.request.bookingIdentity,undefined);
  const explicit=await h.service.prepare({...h.candidate,bookingIdentity:{bookingIdentity:'personal'}});
  assert.equal(explicit.status,'needs_confirmation');assert.deepEqual(explicit.request.bookingIdentity,{bookingIdentity:'personal'});
- assert.equal((await h.service.prepare({...h.candidate,bookingIdentity:{bookingIdentity:'enterprise_employee',corporateCustomerId:'enterprise-a'}})).status,'missing_input');
+ // This fixture has no formal relationship/qualification source; fail closed,
+ // not a successful empty candidate list that could authorize an enterprise.
+ await assert.rejects(h.service.prepare({...h.candidate,bookingIdentity:{bookingIdentity:'enterprise_employee',corporateCustomerId:'enterprise-a'}}));
  h.identity.user.permissions=['rental-core:catalog:view'];
  await assert.rejects(h.service.prepare({...h.candidate,bookingIdentity:{bookingIdentity:'personal'}}));
 });
@@ -60,7 +64,7 @@ test('actionable clarification to explicit resource IDs rereads original readers
  assert.deepEqual(partial.clarifications.find(row=>row.field==='fulfillmentMode').candidates.map(row=>row.id),[allowedMode]);
  assert.ok(partial.clarifications.some(row=>row.field==='customerId'&&row.candidates.length===2));
  assert.ok(partial.clarifications.some(row=>row.field==='start'&&row.action==='supply_absolute_time'));
- const selected={...h.candidate,items:[{itemGroupId:h.bc.groups[0].id,quantity:1,productName:'untrusted ignored name'}],locationId:h.bc.locations[0].id,locationName:'untrusted ignored location',selectionRevision:partial.selectionRevision};
+ const selected={...h.candidate,items:[{...h.candidate.items[0],itemGroupId:h.bc.groups[0].id,quantity:1,productName:'untrusted ignored name'}],locationId:h.bc.locations[0].id,locationName:'untrusted ignored location',selectionRevision:partial.selectionRevision};
  const narrowed=await h.service.prepare(selected);assert.equal(narrowed.status,'missing_input');
  assert.equal(narrowed.clarifications[0].action,'reread_and_reconfirm');
  selected.selectionRevision=narrowed.selectionRevision;
@@ -77,7 +81,12 @@ test('actionable clarification to explicit resource IDs rereads original readers
  assert.equal(selected.selectionRevision,narrowed.selectionRevision);
  assert.equal((await h.service.prepare(confirmed)).status,'needs_confirmation');
  const usage=await setup('construction');
- const input={...usage.candidate,items:[{...usage.candidate.items[0],pricingUnit:'usage'}]};
+ const invalidUnit={...usage.candidate,items:[{...usage.candidate.items[0],pricingUnit:'night'}]};
+ const unitChoice=await usage.service.prepare(invalidUnit);
+ const unitContract=originalQuoteAnswerContract(invalidUnit,unitChoice,'Select an applicable unit, not a price');
+ assert.ok(unitContract.fields.find(field=>field.fieldId==='pricing_unit_selection').options.some(row=>row.value==='usage'));
+ assert.throws(()=>applyOriginalQuoteAnswers(invalidUnit,[{contract:unitContract,answers:[{fieldId:'pricing_unit_selection',value:'night'}]}]));
+ const input=applyOriginalQuoteAnswers(invalidUnit,[{contract:unitContract,answers:[{fieldId:'pricing_unit_selection',value:'usage'}]}]);
  const needsUsage=await usage.service.prepare(input);
  assert.ok(needsUsage.missingFields.includes('items.0.usageQuantity'));
  const usageContract=originalQuoteAnswerContract(input,needsUsage,'Supply actual planned usage, not a price');
@@ -86,10 +95,51 @@ test('actionable clarification to explicit resource IDs rereads original readers
  const supplied=applyOriginalQuoteAnswers(input,[{contract:usageContract,answers:usageAnswers}]);
  assert.equal((await usage.service.prepare(supplied)).request.lines[0].usageQuantity,1.5);
  assert.equal(input.items[0].usageQuantity,undefined);
+ const previousRates=usage.readers.rates.read;
+ usage.readers.rates.read=async()=> (await previousRates()).map(row=>({...row,baseAmount:101}));
+ const rateChanged=await usage.service.prepare(supplied);
+ assert.equal(rateChanged.status,'missing_input');assert.notEqual(rateChanged.selectionRevision,supplied.selectionRevision);
+ const reselect=originalQuoteAnswerContract(input,await usage.service.prepare(input),'Re-select the changed pricing basis');
+ assert.equal(reselect.fields.some(field=>field.fieldId==='usage_quantity'),false);
+ const timeBased=applyOriginalQuoteAnswers(input,[{contract:reselect,answers:reselect.fields.filter(field=>field.required)
+   .map(field=>({fieldId:field.fieldId,value:field.options[0].value}))}]);
+ assert.notEqual(timeBased.items[0].pricingUnit,'usage');assert.equal(timeBased.items[0].usageQuantity,undefined);
+ assert.equal((await usage.service.prepare(timeBased)).status,'needs_confirmation');
+ usage.readers.rates.read=async()=>[];
+ assert.equal((await usage.service.prepare(supplied)).reason,'current_product_rates_unavailable');
  for(const value of ['-1','NaN','1e3','1000001','0.10000000000000000001'])assert.throws(()=>applyOriginalQuoteAnswers(input,[{contract:usageContract,answers:usageAnswers.map(answer=>answer.fieldId==='usage_quantity'?{...answer,value}:answer)}]));
 });
 test('forged selected ID cannot be rescued by a valid returned name',async()=>{
  const h=await setup(),before=await h.service.prepare(h.candidate);
  const out=await h.service.prepare({...h.candidate,selectionRevision:before.selectionRevision,items:[{itemGroupId:'foreign-product',productName:h.bc.groups[0].name,quantity:1}]});
  assert.equal(out.status,'missing_input');assert.equal(out.request,undefined);assert.ok(out.missingFields.includes('items.0'));
+});
+
+test('delivery address selection flows through original answers and must be reselected after address or customer changes',async()=>{
+ const h=await setup();
+ const row={id:'address-a',revision:1,recipient:'Synthetic recipient',phoneMasked:'138****0000',countryCode:'CN',
+   province:'Synthetic province',city:'Synthetic city',detail:'Synthetic detail',isDefault:true,updatedAt:'2026-10-07T00:00:00Z'};
+ const rows=[row];
+ h.bc.category={...h.bc.category,businessModel:{...h.bc.category.businessModel,deliveryDestination:'customer_address'}};
+ h.bc.settings.fulfillment.enabledModes=[...new Set([...h.bc.settings.fulfillment.enabledModes,'delivery'])];
+ h.bc.category.businessModel.fulfillmentModes=[...new Set([...h.bc.category.businessModel.fulfillmentModes,'delivery'])];
+ h.readers.addresses={list:async()=>({identityHash:'a'.repeat(64),rows:structuredClone(rows)})};
+ const input={...h.candidate,fulfillmentMode:'delivery'};
+ const pending=await h.service.prepare(input);
+ const {originalQuoteAnswerContract,applyOriginalQuoteAnswers}=require('../apps/api/src/modules/ai-native/scenes/original-quote-input');
+ const contract=originalQuoteAnswerContract(input,pending,'Choose an authorized address');
+ assert.deepEqual(contract.fields.find(f=>f.fieldId==='delivery_address_selection').options.map(o=>o.value),['address-a']);
+ const selected=applyOriginalQuoteAnswers(input,[{contract,answers:[{fieldId:'delivery_address_selection',value:'address-a'}]}]);
+ assert.equal(input.deliveryAddressId,undefined);
+ const ready=await h.service.prepare(selected);
+ assert.equal(ready.status,'needs_confirmation');assert.equal(ready.request.deliveryAddressId,'address-a');
+ assert.match(ready.addressFingerprint,/^[a-f0-9]{64}$/);assert.equal(ready.reservation,'not_reserved');
+ row.revision++;
+ const changed=await h.service.prepare(selected);assert.equal(changed.status,'missing_input');assert.equal(changed.request,undefined);
+ assert.notEqual(changed.selectionRevision,selected.selectionRevision);
+ const customerContract={...contract,fields:[{fieldId:'customer_selection',kind:'choice',required:true,label:'Choose customer',options:[{value:'customer-b',label:'Second customer'}]}]};
+ const other=applyOriginalQuoteAnswers(selected,[{contract:customerContract,answers:[{fieldId:'customer_selection',value:'customer-b'}]}]);
+ assert.equal(other.deliveryAddressId,undefined);
+ rows.length=0;
+ assert.equal((await h.service.prepare(selected)).reason,'current_customer_addresses_unavailable');
 });

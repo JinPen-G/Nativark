@@ -9,6 +9,7 @@ import type { SubscriptionBudgetEntitlementAdapter } from '../budget/budget-depe
 import type { AiTaskCreationAuthority } from '../ai-task-creation.repository';
 import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import { returnExceptionSource } from '../business-events/return-exception-source';
+import type { BusinessFailureReadAuthority } from '../business-events/business-failure-read.authority';
 
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u);
 const revision = z.number().int().min(1).max(4294967294);
@@ -53,14 +54,16 @@ export type AutomationSnapshot = Awaited<ReturnType<PrismaAutomationAuthority['s
 export class PrismaAutomationAuthority implements AiTaskCreationAuthority {
   private readonly policyId: string;
   constructor(private readonly db: AutomationReadDb, policyId: string,
-    private readonly entitlements: SubscriptionBudgetEntitlementAdapter, private readonly clock: () => Date = () => new Date()) {
+    private readonly entitlements: SubscriptionBudgetEntitlementAdapter, private readonly clock: () => Date = () => new Date(),
+    private readonly humanReads?: BusinessFailureReadAuthority) {
     this.policyId = parse(id.max(36), policyId);
   }
 
   async inspect(eventId: string, db: AutomationReadDb = this.db) {
-    const now = this.clock();
+    const now = this.clock(), human = await this.humanReads?.current();
     const policy = parse(policySchema, await db.aiAutomationPolicy.findUnique({ where: { id: this.policyId } }));
     const scope = { tenantId: policy.tenantId, workspaceId: policy.workspaceId };
+    if (human && (human.scope.tenantId !== scope.tenantId || human.scope.workspaceId !== scope.workspaceId)) throw unavailable();
     if (policy.id !== this.policyId || policy.validFrom > now || policy.expiresAt <= now) throw unavailable();
     const subject = parse(subjectSchema, await db.aiAutomationSubject.findFirst({ where: { id: policy.subjectId, ...scope } }));
     if (subject.id !== policy.subjectId || subject.tenantId !== scope.tenantId || subject.workspaceId !== scope.workspaceId
@@ -68,9 +71,16 @@ export class PrismaAutomationAuthority implements AiTaskCreationAuthority {
     const workspace = await db.businessWorkspace.findFirst({ where: { tenantId: scope.tenantId, id: scope.workspaceId, status: 'ACTIVE' },
       select: { id: true, tenantId: true, status: true } });
     if (!workspace || workspace.tenantId !== scope.tenantId || workspace.id !== scope.workspaceId || workspace.status !== 'ACTIVE') throw unavailable();
-    const event = parse(eventSchema, await db.aiBusinessFailureOutbox.findFirst({ where: { id: eventId, ...scope } }));
+    const eventRow = await db.aiBusinessFailureOutbox.findFirst({ where: { id: eventId, ...scope } });
+    const event = parse(eventSchema, eventRow);
     if (event.id !== eventId || event.tenantId !== scope.tenantId || event.workspaceId !== scope.workspaceId
       || event.occurredAt > now || event.expiresAt <= now || !policy.allowedEventTypes.includes(event.eventType)) throw unavailable();
+    // The HTTP consumer needs BOTH the human's original resource read and the
+    // existing automation policy below. Read access never becomes a grant.
+    if (this.humanReads) {
+      if (!eventRow || event.status !== 'ready') throw unavailable();
+      await this.humanReads.withEvent(eventRow, async () => undefined);
+    }
     let sourceRevision: number, orderId: string | null, sourceHash: string | undefined;
     if (event.eventType !== 'inspection.return_exception' && (event.inspectionId || event.exceptionId)) throw unavailable();
     if (event.eventType === 'notification.failed') {
@@ -199,11 +209,13 @@ export class PrismaAutomationAuthority implements AiTaskCreationAuthority {
 
   async input(inputRef: string) {
     if (!z.string().uuid().safeParse(inputRef).success) throw new AutomationError('invalid_input');
-    const row = await this.db.aiAutomationInput.findFirst({ where: { id: inputRef, policyId: this.policyId } });
+    const human = await this.humanReads?.current();
+    const inputKey = { id: inputRef, policyId: this.policyId, ...(human ? human.scope : {}) };
+    const row = await this.db.aiAutomationInput.findFirst({ where: inputKey });
     if (!row || row.id !== inputRef) throw unavailable();
     const current = await this.snapshot(row.eventId);
     this.verifyInput(row, current);
-    const again = await this.db.aiAutomationInput.findFirst({ where: { id: inputRef, policyId: this.policyId } });
+    const again = await this.db.aiAutomationInput.findFirst({ where: inputKey });
     if (!again || again.id !== inputRef) throw unavailable();
     const latest = await this.snapshot(again.eventId);
     if (latest.authorityHash !== current.authorityHash) throw unavailable();

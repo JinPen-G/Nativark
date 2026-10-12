@@ -27,6 +27,7 @@ test('image model host executes the original queued task with one invocation, or
 
 test('model host starts queued task and run, publishes under one lease, then settles the original invocation and four resources', async () => {
   const h = await modelHostHarness(), originalFence = h.state.aiRun[0].fencingToken, start = h.trace.length;
+  h.state.aiTaskActionPolicy = h.state.aiTaskActionPolicy.filter(row => !['request_input', 'submit_input', 'resume_input'].includes(row.operation));
   h.config.task.material.messages[0].content[0].text = 'late caller mutation';
   h.storeControl.beforeWrite = async (name, args, data) => {
     if (name === 'aiGatewayInvocation') {
@@ -38,6 +39,9 @@ test('model host starts queued task and run, publishes under one lease, then set
   const result = await h.root.application.start(h.query);
   assert.equal(result.kind, 'run_outcome'); assert.equal(result.outcome.status, 'succeeded');
   assert.equal(h.state.aiTask[0].status, 'SUCCEEDED'); assert.equal(h.state.aiStep[0].status, 'SUCCEEDED');
+  assert.equal(h.state.aiTaskInputRequest.length, 0);
+  assert.equal(h.state.aiTaskInputReceipt.length, 0);
+  await assert.rejects(h.root.authorization.authority.resolve(h.query.taskId, 'request_input'), error => error.code === 'AI_RESOURCE_UNAVAILABLE');
   assert.equal(h.state.aiStep[0].effect, 'NONE'); assert.equal(h.state.aiRun[0].leaseOwnerId, null);
   assert.equal(h.state.aiRun[0].fencingToken.toFixed(0), originalFence.add(1).toFixed(0));
   assert.equal(h.state.aiTaskActionInput.length, 1); assert.equal(h.state.aiTaskRunPlan.length, 1); assert.equal(h.state.aiStep.length, 1);

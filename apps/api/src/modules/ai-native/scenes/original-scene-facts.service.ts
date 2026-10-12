@@ -121,7 +121,7 @@ export class AiOriginalSceneFactsService {
     const result = await this.tools.quote.preview.previewOriginal(selected.request, {
       reference: `${ref.inputRef}:${original.receipt.contentHash}`,
       expectedIdentityHash: originalIdentityHash(grant.context)
-    }, selected.configurationFingerprint);
+    }, selected.configurationFingerprint, false, selected.addressFingerprint);
     const final = await this.requests.read(ref);
     const after = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
     if (originalIdentityHash(grant.context) !== originalIdentityHash(after.context)

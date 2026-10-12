@@ -96,6 +96,23 @@ export class HumanAutomationReviewService {
     });
   }
 
+  private async withStableTarget<T>(inputRef: string, read: (target: Target & { source: FailureSource }) => Promise<T>): Promise<T> {
+    const snapshot = (target: Target) => requestFingerprint({ row: target.row, event: target.event, task: target.task, principal: target.principal });
+    let observed: string | undefined, observedSource: string | undefined;
+    const result = await this.withTarget(inputRef, async target => {
+      observed = snapshot(target);
+      observedSource = requestFingerprint(target.source);
+      return read(target);
+    });
+    // The final row/task read can outlive withTarget's last source authorization.
+    const latest = await this.load(inputRef, this.db);
+    if (snapshot(latest) !== observed) throw conflict();
+    return this.reads.withEvent(latest.event, async source => {
+      if (requestFingerprint(source) !== observedSource) throw conflict();
+      return result;
+    });
+  }
+
   private operationKey(target: Target, operationKey: string) {
     return { scopeId: target.row.scopeId, actorId: target.person.actorId, audience: target.person.audience, operationKey };
   }
@@ -146,9 +163,11 @@ export class HumanAutomationReviewService {
 
   async read(value: unknown) {
     const { inputRef } = parse(readInput, value);
-    return this.withTarget(inputRef, async target => ({ inputRef, inputStatus: target.row.status, inputHash: target.row.inputHash,
+    return this.withStableTarget(inputRef, async target => ({ inputRef, inputStatus: target.row.status, inputHash: target.row.inputHash,
       inputMode: target.inputMode, policyReference: { policyId: target.row.policyId, revision: target.row.policyRevision },
       nextAction: target.row.reviewStatus === 'closed' ? 'read_review_operation' as const
+        : !target.source.failed || target.source.revision !== target.event.resourceRevision || target.event.expiresAt <= this.clock()
+          || ['closed', 'expired', 'dead_letter'].includes(target.event.status) ? 'read_original_resource' as const
         : target.row.status === 'creation_unknown' ? 'read_original_creation' as const : 'human_review' as const,
       review: { revision: target.row.reviewRevision, status: target.row.reviewStatus, closeReason: target.row.closeReason, feedbackCode: target.row.feedbackCode },
       event: { eventId: target.event.id, type: target.event.eventType, resourceRevision: target.event.resourceRevision,
@@ -177,6 +196,9 @@ export class HumanAutomationReviewService {
         if (view.event.eventId !== event.id || view.event.fence !== event.fence) throw conflict();
         items.push(view);
       }
+      for (const view of items) {
+        if (requestFingerprint(await this.read({ inputRef: view.inputRef })) !== requestFingerprint(view)) throw conflict();
+      }
       const latest = await this.db.aiBusinessFailureOutbox.findFirst({ where: { id: input.eventId, ...scope } });
       if (!latest || requestFingerprint(latest) !== requestFingerprint(event)) throw conflict();
       if (principal((await this.reads.current()).context) !== initialPrincipal) throw unavailable();
@@ -190,13 +212,15 @@ export class HumanAutomationReviewService {
             : { kind: 'refund' as const, id: event.refundId!, orderId: source.orderId, paymentIntentId: source.paymentIntentId },
         inputs: { state: items.length ? 'observed' as const : 'not_observed' as const, items, hasMore,
           nextAfter: hasMore ? items[items.length - 1].inputRef : null, coverage: 'bounded_authorized_event_window' as const },
-        nextAction: 'human_business_review' as const, ...readSemantics };
+        nextAction: !source.failed || source.revision !== event.resourceRevision || event.expiresAt <= this.clock()
+          || ['closed', 'expired', 'dead_letter'].includes(event.status) ? 'read_original_resource' as const : 'human_business_review' as const,
+        ...readSemantics };
     });
   }
 
   async operation(value: unknown) {
     const { inputRef, operationKey } = parse(operationInput, value);
-    return this.withTarget(inputRef, async target => {
+    return this.withStableTarget(inputRef, async target => {
       let row: AiAutomationReviewOperation | null;
       try { row = await this.db.aiAutomationReviewOperation.findFirst({ where: this.operationKey(target, operationKey) }); }
       catch { return { state: 'unknown' as const, inputRef, operationKey, retryable: false as const, nextAction: 'read_operation' as const, ...readSemantics }; }
@@ -220,6 +244,7 @@ export class HumanAutomationReviewService {
           await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_automation_inputs WHERE id = ${before.row.id} FOR UPDATE`);
           return this.withTarget(command.inputRef, async target => {
             if (target.principal !== before.principal) throw unavailable();
+            if (requestFingerprint(target.task) !== requestFingerprint(before.task)) throw conflict();
             const replay = await tx.aiAutomationReviewOperation.findFirst({ where: key });
             if (replay) return this.receipt(target, replay, command);
             if (target.row.reviewRevision !== command.expectedRevision || target.event.fence !== command.expectedEventFence
@@ -251,6 +276,7 @@ export class HumanAutomationReviewService {
               grantId: grant.id, grantRevision: grant.revision, authorizationHash: grant.authorizationHash } });
             if ((await this.grant(target, command.action, tx)).authorizationHash !== grant.authorizationHash) throw unavailable();
             const after = await this.load(command.inputRef, tx);
+            if (requestFingerprint(after.task) !== requestFingerprint(target.task)) throw conflict();
             return this.receipt(after, receipt, command);
           }, tx);
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });

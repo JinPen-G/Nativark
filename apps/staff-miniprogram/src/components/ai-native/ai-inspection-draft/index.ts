@@ -13,8 +13,8 @@ Component({
   properties: { items: { type: Array, value: [] }, missing: { type: Array, value: [] }, readonly: { type: Boolean, value: true },
     candidateActions: { type: Boolean, value: false }, revision: { type: Number, value: 0 } },
   data: { visibleItems: [] as { key: string; label: string; candidate: string; humanValue: string; sourceLabel: string;
-    candidateId: string; candidateActionable: boolean; decisionLabel: string }[], visibleMissing: [] as string[] },
-  lifetimes: { attached() { detachedViews.delete(this); this.project(); }, detached() { detachedViews.add(this); this.setData({ visibleItems: [], visibleMissing: [] }); } },
+    candidateId: string; candidateActionable: boolean; decisionLabel: string; error: string }[], visibleMissing: [] as string[] },
+  lifetimes: { attached() { detachedViews.delete(this); this.project(); }, detached() { detachedViews.add(this); } },
   observers: { "items,missing"() { this.project(); } },
   methods: {
     project() {
@@ -23,6 +23,7 @@ Component({
         key: item.key as string, label: typeof item.label === "string" ? boundedText(item.label, 200) : "检查项不可用",
         candidate: inspectionValue(item.candidate), humanValue: inspectionValue(item.humanValue),
         sourceLabel: typeof item.sourceLabel === "string" ? boundedText(item.sourceLabel, 200) : "来源不可用",
+        error: typeof item.error === "string" ? boundedText(item.error, 200) : "",
         candidateId: typeof item.candidateId === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(item.candidateId) ? item.candidateId : "",
         candidateActionable: item.candidateActionable === true,
         decisionLabel: item.decision === "accepted" ? "人工采用" : item.decision === "rejected" ? "人工拒绝" : item.decision === "modified" ? "人工更正" : item.decision === "manual" ? "人工填入" : "尚待核实",

@@ -418,7 +418,7 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
         const result = await scenes.tools.quote.preview.previewOriginal(selected.request, {
           reference: `scene-answer:${before.reference.inputRef}:${receipt.receiptId}`,
           expectedIdentityHash: originalIdentityHash(before.original.context)
-        }, selected.configurationFingerprint);
+        }, selected.configurationFingerprint, false, selected.addressFingerprint);
         await verify(before);
         return freezeOriginalInput({ original: before.original.receipt, receipt, result,
           observation: 'explicit_clarified_quote_request' as const, inventoryReservation: 'not_attempted' as const,

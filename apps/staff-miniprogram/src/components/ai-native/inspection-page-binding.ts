@@ -1,10 +1,10 @@
 import { currentSession, contextVersion, sessionEvents } from "../../core/session";
-import type { StaffInspectionHost } from "./inspection-host";
+import type { StaffInspectionHost, InspectionRecognitionReference } from "./inspection-host";
 import { createStaffInspectionTransportHost } from './inspection-transport';
 
 interface InspectionPage {
   data: { id: string };
-  template?: { id: string };
+  template?: { id: string; version?: string };
   setData(patch: Record<string, unknown>): void;
   selectComponent(selector: string): WechatMiniprogram.Component.TrivialInstance | null;
 }
@@ -23,15 +23,16 @@ export function hideInspectionPage(page: InspectionPage) {
 /** Explicit application invocation only. Never enabled by an onLoad query,
  * import, show, storage flag or a model-generated object. */
 export async function attachRemoteInspectionPage(page: InspectionPage, reference: { allocationId: string; draftId: string },
-  stage: 'pickup' | 'return', signatureFileAssetId?: string) {
+  stage: 'pickup' | 'return', signatureFileAssetId?: string, recognitionReference?: InspectionRecognitionReference) {
   clearInspectionPage(page);
-  const ticket = {}, orderId = page.data.id, templateId = page.template?.id, version = contextVersion();
+  const ticket = {}, orderId = page.data.id, templateId = page.template?.id, templateVersion = page.template?.version, version = contextVersion();
   if (!templateId || !orderId) return false;
   remoteLoads.set(page, ticket);
   try {
     const host = await createStaffInspectionTransportHost({ orderId, templateId, stage,
-      allocationId: reference.allocationId, draftId: reference.draftId }, signatureFileAssetId);
-    if (remoteLoads.get(page) !== ticket || contextVersion() !== version || page.data.id !== orderId || page.template?.id !== templateId) return false;
+      allocationId: reference.allocationId, draftId: reference.draftId }, signatureFileAssetId, recognitionReference);
+    if (remoteLoads.get(page) !== ticket || contextVersion() !== version || page.data.id !== orderId || page.template?.id !== templateId
+      || page.template?.version !== templateVersion) return false;
     attachInspectionPage(page, host, stage);
     return true;
   } catch { return false; /* Ordinary manual page remains available. */ }
@@ -45,14 +46,14 @@ export function attachInspectionPage(page: InspectionPage, host: StaffInspection
     || host.context.tenantId !== session.tenant.tenantId || host.context.workspaceId !== session.currentWorkspaceId
     || host.context.ownerId !== session.user.id || host.target.orderId !== page.data.id
     || host.target.stage !== stage || host.target.templateId !== page.template?.id) return;
-  const target = { ...host.target }, context = { ...host.context }, draftId = host.draftId;
+  const target = { ...host.target }, context = { ...host.context }, draftId = host.draftId, templateVersion = page.template?.version;
   const component = page.selectComponent("#ai-inspection-assist");
   if (typeof component?.attachHost !== "function") return;
   const current = () => {
     const now = currentSession();
     return contextVersion() === version && now?.tenant.tenantId === context.tenantId && now?.user.id === context.ownerId
       && now?.currentWorkspaceId === context.workspaceId && page.data.id === target.orderId
-      && page.template?.id === target.templateId && host.current() === true;
+      && page.template?.id === target.templateId && page.template?.version === templateVersion && host.current() === true;
   };
   subscriptions.set(page, sessionEvents.on(() => clearInspectionPage(page)));
   component.attachHost({ ...host, context, target, draftId, current });

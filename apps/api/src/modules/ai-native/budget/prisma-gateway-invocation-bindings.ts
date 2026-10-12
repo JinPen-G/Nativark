@@ -9,6 +9,7 @@ import { aiPersistenceScopeColumns } from '../persistence-scope';
 import type { GatewayContext } from '../model-gateway.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { BudgetError } from './budget.ports';
+import { gatewayBudgetPrincipal } from './gateway-budget-principal';
 import { textProbeCommandSchema, textProbeIntent, TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE } from '../text-capability-probe';
 import { capabilityProfileFingerprint } from '../capability-verification';
 import { PrismaProviderProfileRepository } from '../provider-profile.repository';
@@ -39,12 +40,11 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
   private async current(context?: Readonly<GatewayContext>) {
     const resolved = structuredClone(await this.scopes.resolveCurrent());
     const { scope, context: principal } = resolved;
-    if (principal.actor.kind !== 'user' || !['operator', 'staff'].includes(principal.audience)
-      || principal.scope.kind !== 'workspace' || scope.kind !== 'WORKSPACE'
-      || scope.tenantId !== principal.scope.tenantId || scope.workspaceId !== principal.scope.workspaceId
-      || (context && (context.actorId !== principal.actor.userId || context.tenantId !== scope.tenantId || context.workspaceId !== scope.workspaceId))) throw new BudgetError('FORBIDDEN');
+    const subject = gatewayBudgetPrincipal(principal);
+    if (scope.kind !== 'WORKSPACE' || scope.tenantId !== subject.tenantId || scope.workspaceId !== subject.workspaceId
+      || (context && (context.actorId !== subject.actorId || context.tenantId !== scope.tenantId || context.workspaceId !== scope.workspaceId))) throw new BudgetError('FORBIDDEN');
     const { requestId: _, authorizedAt: __, ...identity } = principal;
-    return { scope, context: principal, actorId: principal.actor.userId, identityHash: requestFingerprint({ identity, scope }) };
+    return { scope, context: principal, actorId: subject.actorId, identityHash: requestFingerprint({ identity, scope }) };
   }
   private async revalidate(initial: Awaited<ReturnType<PrismaGatewayInvocationBindings['current']>>) {
     if ((await this.current()).identityHash !== initial.identityHash) throw new BudgetError('FORBIDDEN');
@@ -66,7 +66,8 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
     return profile;
   }
   private async task(db: Reader, scopeId: string, taskId: string, actorId: string, audience: string) {
-    const task = await db.aiTask.findFirst({ where: { id: taskId, scopeId, ownerId: actorId, ownerKind: 'USER' } });
+    const ownerKind = audience === 'client' ? 'CUSTOMER' : 'USER';
+    const task = await db.aiTask.findFirst({ where: { id: taskId, scopeId, ownerId: actorId, ownerKind } });
     if (!task || task.audience.toLowerCase() !== audience || task.archivedAt) throw new BudgetError('FORBIDDEN');
     return task;
   }
@@ -89,12 +90,13 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
     const step = await db.aiStep.findFirst({ where: { id: row.stepId, scopeId: row.scopeId, taskId: row.taskId, runId: row.runId } });
     const now = this.now();
     if (task.status !== 'RUNNING' || task.cancelRequestedAt || task.sceneCode !== row.sceneCode
-      || !run || run.status !== 'RUNNING' || run.actorKind !== 'USER' || run.actorId !== row.actorId
+      || !run || run.status !== 'RUNNING' || run.actorKind !== task.ownerKind || run.actorId !== row.actorId
       || run.leaseOwnerId !== row.leaseOwnerId || !run.leaseExpiresAt || run.leaseExpiresAt <= now
       || !run.fencingToken.equals(row.fencingToken) || row.expiresAt <= now
       || !step || step.status !== 'RUNNING' || step.actionId !== row.actionId
       || step.requestFingerprint !== row.stepFingerprint) throw new BudgetError('FORBIDDEN');
     if (step.toolCode === TEXT_CAPABILITY_PROBE_TOOL) {
+      if (audience === 'client') throw new BudgetError('FORBIDDEN');
       const frozen = await this.probeInput(db, step);
       if (row.sceneCode !== TEXT_PROBE_SCENE || row.intentHash !== frozen.prepared.intentHash) throw new BudgetError('FORBIDDEN');
     } else if (step.requestFingerprint !== row.intentHash) throw new BudgetError('FORBIDDEN');

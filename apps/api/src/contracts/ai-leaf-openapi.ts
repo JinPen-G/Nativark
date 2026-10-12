@@ -40,7 +40,7 @@ export function aiLeafToOpenApi30(schema: unknown, path = "schema"): SchemaObjec
         if (typeof value !== "string") return fail(`${key} must be text`);
         output[key] = value;
         break;
-      case "minLength": case "maxLength": case "minItems": case "maxItems":
+      case "minLength": case "maxLength": case "minItems": case "maxItems": case "minProperties": case "maxProperties":
         if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return fail(`${key} must be a non-negative safe integer`);
         output[key] = value;
         break;

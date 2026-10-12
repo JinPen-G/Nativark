@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
+import { aiClientTaskReadRequestSchema } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiClientMaterialScope } from './prisma-client-scene-material.repository';
@@ -7,7 +8,7 @@ import type { AiClientTaskDb } from './client-task.authority';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
-export const clientTaskCommandSchema = z.object({ creationKey: id.max(128), materialRef: z.string().uuid() }).strict();
+export const clientTaskCommandSchema = aiClientTaskReadRequestSchema;
 const inputSchema = z.object({ id: z.string().uuid(), tenantId: id, workspaceId: id,
   channel: z.enum(['wechat_miniprogram', 'app', 'web']), principalKind: z.enum(['personal', 'corporate']), principalHash: hash,
   creationKey: id.max(128), materialRef: z.string().uuid(), materialInputHash: hash, materialHash: hash, materialRevision: z.literal(1),

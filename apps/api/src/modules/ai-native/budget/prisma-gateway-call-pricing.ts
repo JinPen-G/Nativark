@@ -7,6 +7,7 @@ import { PrismaGatewayInvocationBindings } from './prisma-gateway-invocation-bin
 import { BudgetError, type BudgetGrant, type BudgetQuotePort, type BudgetRecord, type BudgetReserveCommand } from './budget.ports';
 import type { GatewayActualUsagePricing } from './prisma-gateway-accounting-facts';
 import type { ModelUsage } from '../model-gateway.ports';
+import { gatewayBudgetPrincipal } from './gateway-budget-principal';
 
 const identity = (context: AiExecutionContext) => {
   const { requestId: _id, authorizedAt: _at, ...value } = context;
@@ -29,9 +30,11 @@ export class PrismaGatewayCallPricing implements BudgetQuotePort, GatewayActualU
   private async current() {
     const result = structuredClone(await this.scopes.resolveCurrent());
     const context = result.context;
-    if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace' || result.scope.kind !== 'WORKSPACE'
-      || context.scope.tenantId !== result.scope.tenantId || context.scope.workspaceId !== result.scope.workspaceId) throw new BudgetError('FORBIDDEN');
-    return { ...result, gateway: { actorId: context.actor.userId, tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId } };
+    const principal = gatewayBudgetPrincipal(context);
+    if (result.scope.kind !== 'WORKSPACE' || principal.tenantId !== result.scope.tenantId
+      || principal.workspaceId !== result.scope.workspaceId) throw new BudgetError('FORBIDDEN');
+    const { actorKind: _, ...gateway } = principal;
+    return { ...result, gateway };
   }
   async quote(value: Readonly<BudgetReserveCommand>, grantValue: Readonly<BudgetGrant>) {
     const command = structuredClone(value), grant = structuredClone(grantValue), before = await this.current();

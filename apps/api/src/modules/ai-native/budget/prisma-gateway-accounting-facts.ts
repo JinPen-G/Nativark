@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import type { AiUsageQuantityDraft } from '@rental-os/shared';
 import type { AiScopeRepository } from '../ai-scope.repository';
+import { gatewayBudgetPrincipal } from './gateway-budget-principal';
 import type { GatewayAccountingCall } from '../gateway-accounting.ports';
 import { dispatchBindingSchema } from '../invocation-dispatch.service';
 import { isGatewayConfig } from '../gateway-contract-validation';
@@ -47,8 +48,7 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
   }
   private async current(reservationId: string) {
     const resolved = structuredClone(await this.scopes.resolveCurrent());
-    if (resolved.context.actor.kind !== 'user' || resolved.context.scope.kind !== 'workspace') throw new BudgetError('FORBIDDEN');
-    const context = { actorId: resolved.context.actor.userId, tenantId: resolved.context.scope.tenantId, workspaceId: resolved.context.scope.workspaceId };
+    const { actorKind: _, ...context } = gatewayBudgetPrincipal(resolved.context);
     return { context, binding: structuredClone(await this.bindings.resolveForReservation(structuredClone(context), reservationId)) };
   }
   private async admission(db: Reader, call: GatewayAccountingCall, active: boolean) {
@@ -112,11 +112,14 @@ export class PrismaGatewayAccountingFacts implements GatewayAccountingFacts, Per
   async dispatch(value: GatewayAccountingCall, reservationId: string) {
     const call = checkedAccountingCall(value);
     await this.assertClaim(call);
+    const principal = gatewayBudgetPrincipal((await this.scopes.resolveCurrent()).context);
+    if (principal.actorId !== call.context.actorId || principal.tenantId !== call.context.tenantId
+      || principal.workspaceId !== call.context.workspaceId) throw new BudgetError('FORBIDDEN');
     await this.db.$transaction(async tx => {
       const rows = await this.rows(tx, reservationId); this.matchCall(rows, call);
-      const task = await tx.aiTask.findFirst({ where: { id: rows.invocation.taskId, scopeId: rows.invocation.scopeId, ownerId: call.context.actorId, ownerKind: 'USER', status: 'RUNNING', cancelRequestedAt: null, archivedAt: null } });
+      const task = await tx.aiTask.findFirst({ where: { id: rows.invocation.taskId, scopeId: rows.invocation.scopeId, ownerId: call.context.actorId, ownerKind: principal.actorKind, status: 'RUNNING', cancelRequestedAt: null, archivedAt: null } });
       const run = await tx.aiRun.findFirst({ where: { id: rows.invocation.runId, taskId: rows.invocation.taskId, scopeId: rows.invocation.scopeId,
-        status: 'RUNNING', actorId: call.context.actorId, actorKind: 'USER', leaseOwnerId: rows.invocation.leaseOwnerId, fencingToken: rows.invocation.fencingToken, leaseExpiresAt: { gt: this.clock() } } });
+        status: 'RUNNING', actorId: call.context.actorId, actorKind: principal.actorKind, leaseOwnerId: rows.invocation.leaseOwnerId, fencingToken: rows.invocation.fencingToken, leaseExpiresAt: { gt: this.clock() } } });
       if (!task || !run || rows.invocation.expiresAt <= this.clock()) throw new BudgetError('FORBIDDEN');
       await this.admission(tx, call, true);
       if (rows.reservation.status !== 'reserved' || rows.reservation.dispatchState !== 'dispatched') throw new BudgetError('PENDING_RECONCILIATION');

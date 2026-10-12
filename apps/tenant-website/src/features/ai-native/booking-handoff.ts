@@ -134,6 +134,7 @@ export function createBookingHandoffConsumer(host: BookingHandoffHost | null, co
   };
   const action = async (kind: 'accept' | 'submit' | 'reconcile') => {
     if (destroyed || paused || pending || !submissionsAvailable()) return;
+    if (kind === 'reconcile' && !acceptance) return;
     if ((kind === 'accept' && (attempted || state.status !== 'continued'))
       || (kind === 'submit' && (attempted || !acceptance || state.status !== 'accepted'))) return;
     const epoch = ++generation; pending = true;
@@ -158,12 +159,13 @@ export function createBookingHandoffConsumer(host: BookingHandoffHost | null, co
     finally { if (epoch === generation) pending = false; }
   };
   return { read: () => read(false), continue: () => read(true), submissionsAvailable,
+    canReconcile: () => Boolean(acceptance && submissionsAvailable()),
     accept: () => action('accept'), submit: () => action('submit'), reconcile: () => action('reconcile'),
     pause() { generation++; pending = false; paused = true; emit({ status: attempted ? 'pending_reconcile' : 'disabled', handoff: null }); },
     resume() { paused = false; },
     mount() { generation++; destroyed = false; paused = false; pending = false; state = { status: 'disabled', handoff: null }; },
     invalidate() { generation++; pending = false; host?.dispose?.(); emit({ status: 'unavailable', handoff: null }); },
-    destroy() { generation++; destroyed = true; pending = false; host?.dispose?.(); state = { status: 'disabled', handoff: null }; } };
+    destroy() { generation++; destroyed = true; pending = false; host?.dispose?.(); acceptance = undefined; state = { status: 'disabled', handoff: null }; } };
 }
 
 export function handoffLocalInput(value: string, timeZone: string): string {

@@ -2,11 +2,11 @@
 export const AI_TASK_INPUT_DRAFT_VERSION = "ain-c04-input-draft-1" as const;
 export type AiTaskInputOperation = "request_input" | "submit_input" | "resume_input";
 export const AI_TASK_INPUT_FIELD_IDS_DRAFT = Object.freeze([
-  "customer_selection", "item_selection", "pickup_location", "return_location", "fulfillment_selection", "enterprise_selection", "enterprise_payer_selection",
+  "customer_selection", "item_selection", "pickup_location", "return_location", "fulfillment_selection", "pricing_unit_selection", "delivery_address_selection", "enterprise_selection", "enterprise_payer_selection",
   "quantity", "usage_quantity", "starts_at", "ends_at", "clarification_text"
 ] as const);
 export type AiTaskInputFieldIdDraft = typeof AI_TASK_INPUT_FIELD_IDS_DRAFT[number];
-type ChoiceId = "customer_selection" | "item_selection" | "pickup_location" | "return_location" | "fulfillment_selection" | "enterprise_selection" | "enterprise_payer_selection";
+type ChoiceId = "customer_selection" | "item_selection" | "pickup_location" | "return_location" | "fulfillment_selection" | "pricing_unit_selection" | "delivery_address_selection" | "enterprise_selection" | "enterprise_payer_selection";
 interface FieldBase { required: boolean; label: string }
 export type AiTaskInputFieldDraft = FieldBase & (
   | { fieldId: ChoiceId; kind: "choice"; options: { value: string; label: string }[] }
@@ -45,7 +45,7 @@ export function isAiTaskInputContractDraft(value: unknown): value is AiTaskInput
   return value.fields.every(field => {
     if (!object(field) || !fieldId(field.fieldId) || seen.has(field.fieldId) || typeof field.required !== "boolean" || !text(field.label, 160)) return false;
     seen.add(field.fieldId);
-    if (field.kind === "choice") return ["customer_selection", "item_selection", "pickup_location", "return_location", "fulfillment_selection", "enterprise_selection", "enterprise_payer_selection"].includes(field.fieldId)
+    if (field.kind === "choice") return ["customer_selection", "item_selection", "pickup_location", "return_location", "fulfillment_selection", "pricing_unit_selection", "delivery_address_selection", "enterprise_selection", "enterprise_payer_selection"].includes(field.fieldId)
       && closed(field, ["fieldId", "kind", "required", "label", "options"]) && Array.isArray(field.options) && field.options.length > 0 && field.options.length <= 50
       && field.options.every(option => object(option) && closed(option, ["value", "label"]) && id(option.value) && text(option.label, 160))
       && new Set(field.options.map(option => option.value)).size === field.options.length;

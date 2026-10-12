@@ -15,6 +15,7 @@ import { jsapiEnabled, offlineMethods } from "../../core/payment";
 import { contextVersion, currentServiceCode, currentSession, membershipStatus, sessionEvents } from "../../core/session";
 import { PUBLIC_CONFIG } from "../../config/public";
 import { createCustomerBookingConsumer, type CustomerBookingHost, type CustomerHandoffView } from "../../components/ai-native/booking-handoff";
+import { createCustomerBookingHostFactory, type CustomerBookingPublication } from "../../components/ai-native/booking-host.factory";
 import { cachedMerchant } from "../../core/merchant";
 import { formatBusinessDate, formatBusinessTime, splitInstant, todayInZone, zoneLabel, zonedToInstant } from "../../core/time";
 import { themeBehavior } from "../../core/theme-behavior";
@@ -60,6 +61,7 @@ interface CheckoutData {
   aiLocationId: string;
   aiSelection: { itemGroupId: string; quantity: number }[];
   aiSubmissionAvailable: boolean;
+  aiReceiptAvailable: boolean;
   aiOrderId: string;
   aiReceiptStatus: string;
   view: ViewState;
@@ -144,6 +146,7 @@ Page({
     aiLocationId: "",
     aiSelection: [],
     aiSubmissionAvailable: false,
+    aiReceiptAvailable: false,
     aiOrderId: "",
     aiReceiptStatus: "none",
     view: loadingState(),
@@ -224,6 +227,27 @@ Page({
   aiVisible: false,
   aiDisposed: false,
   aiUnsubscribe: undefined as (() => void) | undefined,
+  aiFactory: undefined as ReturnType<typeof createCustomerBookingHostFactory> | undefined,
+  aiBindingEpoch: 0,
+
+  // Called explicitly by a trusted published entry, never from route parameters.
+  // The publication is client isolation input; the factory/server reauthorize it.
+  async attachPublishedBooking(publication: CustomerBookingPublication | null, handoffRef: string) {
+    if (this.aiDisposed || !this.aiVisible || !publication) return false;
+    const epoch = ++this.aiBindingEpoch;
+    this.aiFactory?.dispose(); this.aiConsumer?.destroy();
+    this.aiConsumer = undefined; this.aiHost = undefined; this.aiAcceptance = undefined;
+    this.aiMode = true; this.requestVersion++; this.stopTicker(); this.clearBookingHandoff();
+    const owner = createCustomerBookingHostFactory(publication);
+    this.aiFactory = owner;
+    const host = await owner.openFromUser(handoffRef);
+    if (this.aiDisposed || !this.aiVisible || this.aiBindingEpoch !== epoch || this.aiFactory !== owner) {
+      owner.dispose(); return false;
+    }
+    if (!host) { this.clearBookingHandoff(); return false; }
+    this.attachHost(host);
+    return true;
+  },
 
   attachHost(host: CustomerBookingHost) {
     if (this.aiDisposed) return;
@@ -240,6 +264,7 @@ Page({
 
   detachHost() {
     if (this.aiDisposed) return;
+    this.aiBindingEpoch++; this.aiFactory?.dispose(); this.aiFactory = undefined;
     this.aiConsumer?.destroy(); this.aiConsumer = undefined; this.aiHost = undefined;
     this.aiAcceptance = undefined;
     this.aiMode = false; this.requestVersion++; this.clearBookingHandoff();
@@ -247,7 +272,7 @@ Page({
 
   clearBookingHandoff() {
     this.setData({ aiEnabled: this.aiMode, aiStatus: this.aiMode ? "unavailable" : "disabled", aiReference: "", aiRevision: 0,
-      aiSubmissionAvailable: false, aiOrderId: "", aiReceiptStatus: "none",
+      aiSubmissionAvailable: false, aiReceiptAvailable: false, aiOrderId: "", aiReceiptStatus: "none",
       aiExpiresAt: "", aiQuoteId: "", aiLocationId: "", aiSelection: [], quote: undefined, charges: [], benefits: [], cart: undefined,
       lines: [], payable: 0, deposit: 0, preAuth: 0, currency: "", agreed: false, startText: "", endText: "",
       locked: this.aiMode, view: this.aiMode ? readyState() : loadingState() });
@@ -269,7 +294,7 @@ Page({
     const start = h && view.status === "continued" ? splitInstant(h.fields.startAt, h.fields.timeZone) : undefined;
     const end = h && view.status === "continued" ? splitInstant(h.fields.endAt, h.fields.timeZone) : undefined;
     this.setData({ aiStatus: view.status, aiReference: h?.handoffRef ?? "", aiRevision: h?.revision ?? 0,
-      aiSubmissionAvailable: view.submissionAvailable === true, aiOrderId: view.receipt?.state === "observed" ? view.receipt.orderId : "",
+      aiSubmissionAvailable: view.submissionAvailable === true, aiReceiptAvailable: view.receiptAvailable === true, aiOrderId: view.receipt?.state === "observed" ? view.receipt.orderId : "",
       aiReceiptStatus: view.receipt?.state ?? "none", ruleVersion: quote?.ruleVersion ?? "",
       aiExpiresAt: h?.expiresAt ?? "", aiQuoteId: h?.fields.quoteId ?? "", aiSelection: h?.fields.lines ?? [],
       startText: h?.fields.startAt ?? "", endText: h?.fields.endAt ?? "", timeZone: h?.fields.timeZone ?? DEFAULT_ZONE,
@@ -305,6 +330,7 @@ Page({
     this.aiUnsubscribe?.();
     this.aiUnsubscribe = sessionEvents.on(() => {
       if (!this.aiMode) return;
+      this.aiBindingEpoch++; this.aiFactory?.dispose(); this.aiFactory = undefined;
       this.aiConsumer?.destroy(); this.aiConsumer = undefined; this.aiHost = undefined;
       this.aiAcceptance = undefined;
       this.requestVersion++; this.stopTicker(); this.clearBookingHandoff();
@@ -320,6 +346,7 @@ Page({
   },
 
   onHide() {
+    this.aiBindingEpoch++; this.aiFactory?.hide(); this.aiFactory = undefined;
     this.aiAcceptance = this.aiConsumer?.snapshotAcceptance() ?? this.aiAcceptance;
     this.aiVisible = false; this.aiConsumer?.destroy(); this.aiConsumer = undefined;
     if (this.aiMode) this.clearBookingHandoff();
@@ -327,6 +354,7 @@ Page({
   },
 
   onUnload() {
+    this.aiBindingEpoch++; this.aiFactory?.dispose(); this.aiFactory = undefined;
     this.aiDisposed = true;
     this.aiVisible = false; this.aiConsumer?.destroy(); this.aiConsumer = undefined; this.aiHost = undefined;
     this.aiAcceptance = undefined;

@@ -9,7 +9,7 @@ import { TenantModelConfigurationAuthority } from '../tenant-model-config.author
 import { knowledgeManagementAuthority, knowledgePolicyParticipants, knowledgePolicyResourceBasis, type KnowledgePolicyReadDb } from './knowledge-policy-management-authority';
 import { readPreparedKnowledgeTarget, preparedKnowledgeUploadBinding, targetSpecHash } from './knowledge-policy-preparation-target';
 import { KnowledgePolicyManagementError, managementParse as parse, managementFingerprint as hash, managementIdentityHash,
-  preparedTargetSpec, preparedUploadResource, managementHash, policyChange, policySnapshot, policyWhere, policyKeyHash, preparationFingerprint, receiptSelection, commitSelection, type PolicyChange } from './knowledge-policy-management.validation';
+  preparedTargetSpec, authorityTargetSpec, lifecycleTargetSpec, preparedUploadResource, managementHash, policyChange, policySnapshot, policyWhere, policyKeyHash, preparationFingerprint, receiptSelection, commitSelection, type PolicyChange } from './knowledge-policy-management.validation';
 import type { AiKnowledgePolicyManagementReceiptDraft, AiKnowledgePolicyManagementUnknownDraft } from '../../../../../../packages/shared/src/ai-knowledge-policy-management-draft';
 
 export type KnowledgePolicyManagementDependencies = {
@@ -56,7 +56,7 @@ export class HumanKnowledgePolicyManagementService {
     if (!authority.operations.includes(command.action) || command.requiredPermissions.some(p => !access.permissions.includes(p) || !authority.allowed.includes(p))) throw unavailable();
     const closing = command.action === 'disable';
     const basis = await knowledgePolicyResourceBasis(db, authority, closing, this.clock());
-    if (!closing && authority.row.preparationTarget != null && Date.parse(command.expiresAt) > Date.parse(parse(preparedTargetSpec, authority.row.preparationTarget).expiresAt)) throw unavailable();
+    if (!closing && authority.row.preparationTarget != null && Date.parse(command.expiresAt) > Date.parse(parse(authorityTargetSpec, authority.row.preparationTarget).expiresAt)) throw unavailable();
     const row = await db.aiKnowledgeActionPolicy.findUnique({ where: policyWhere(authority.key) });
     if (row && (Object.entries(authority.key).some(([key, value]) => row[key as keyof typeof row] !== value)
       || hash(row.resource) !== hash(authority.resource))) throw unavailable();
@@ -231,13 +231,43 @@ export class HumanKnowledgePolicyManagementService {
     if (operation) { const result = this.receipt(operation, row); await this.sameAccess(access, 'read'); return result; }
     if (row.commitSlot) { await this.sameAccess(access, 'read'); return this.unknown(selected, 'read_operation'); }
     let state: 'prepared' | 'expired' | 'stale' = row.expiresAt <= this.clock() ? 'expired' : 'prepared';
+    let lifecycleTarget: z.infer<typeof lifecycleTargetSpec> | undefined;
     try {
       const fresh = await this.source(command, access, this.db);
       if (fresh.sourceHash !== row.sourceHash || fresh.authority.authorizationHash !== row.authorizationHash) state = 'stale';
+      const target = lifecycleTargetSpec.safeParse(fresh.authority.row.preparationTarget);
+      if (state === 'prepared' && target.success) lifecycleTarget = target.data;
     } catch (error) { if (error instanceof KnowledgePolicyManagementError) state = 'stale'; else throw error; }
     await this.sameAccess(access, 'read');
     return { state, preparationId: row.id, operationKey: row.operationKey, changeHash: row.changeHash, policyKeyHash: row.policyKeyHash,
-      before: row.beforeJson, proposal: command, expiresAt: row.expiresAt.toISOString(), executionPermission: false as const };
+      before: row.beforeJson, proposal: command, ...(lifecycleTarget ? { lifecycleTarget } : {}),
+      expiresAt: row.expiresAt.toISOString(), executionPermission: false as const };
+  }
+
+  async reviewLifecycleTarget(value: unknown) {
+    const selected = parse(receiptSelection, value), access = await this.access('read');
+    const row = await this.db.aiKnowledgePolicyPreparation.findFirst({ where: this.key(access, selected.operationKey) });
+    if (!row || row.tenantId !== access.scope.tenantId || row.workspaceId !== access.scope.workspaceId
+      || row.actorId !== access.actorId || row.audience !== access.audience || row.operationKey !== selected.operationKey
+      || row.changeHash !== selected.changeHash || row.changeHash !== preparationFingerprint(row)) throw conflict();
+    const command = parse(policyChange, row.commandJson);
+    if (command.authorityId !== row.authorityId || command.expectedRevision !== row.expectedRevision || command.operationKey !== row.operationKey) throw conflict();
+    let result: { state: 'current'; target: z.infer<typeof lifecycleTargetSpec> } | { state: 'unavailable' | 'not_applicable' } = { state: 'unavailable' };
+    try {
+      const authority = await this.authority(access, row.authorityId, this.db, true);
+      if (authority.authorizationHash !== row.authorizationHash || authority.row.revision !== row.authorityRevision
+        || policyKeyHash(authority.key) !== row.policyKeyHash) throw unavailable();
+      const target = lifecycleTargetSpec.safeParse(authority.row.preparationTarget);
+      if (target.success) {
+        const basis = await knowledgePolicyResourceBasis(this.db, authority, false, this.clock());
+        const fresh = await this.authority(access, row.authorityId, this.db, true);
+        if (fresh.authorizationHash !== row.authorizationHash
+          || hash(await knowledgePolicyResourceBasis(this.db, fresh, false, this.clock())) !== hash(basis)) throw unavailable();
+        result = { state: 'current', target: target.data };
+      } else result = { state: 'not_applicable' };
+    } catch { result = { state: 'unavailable' }; }
+    await this.sameAccess(access, 'read');
+    return result;
   }
 
   async operation(value: unknown) {

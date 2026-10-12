@@ -52,6 +52,13 @@ for (const mode of ['platform_managed', 'tenant_managed']) test(`${mode}: public
   assert.equal(result.actual.configurationScope.kind, mode === 'platform_managed' ? 'platform' : 'tenant');
   assert.equal(result.requestId, 'request-1'); assert.deepEqual(result.usage, { kind: 'reported', inputTokens: 1, outputTokens: 2 });
 });
+test('client audience uses the same guarded Gateway and budget lifecycle', async () => {
+  const f = setup(); f.context.audience = 'client'; f.context.actor = { kind: 'customer', customerId: 'customer-1' }; delete f.context.access;
+  const result = await f.service.invoke(f.context, intent());
+  assert.equal(result.status, 'completed');
+  assert.equal(result.actual.configurationScope.kind, 'platform');
+  assert.ok(f.events.includes('reserve')); assert.ok(f.events.includes('settle'));
+});
 test('public stream emits started, delta and terminal with positive consecutive sequences', async () => {
   const f = setup(), out = []; for await (const event of f.service.stream(f.context, intent())) { assert.equal(isGatewayEvent(event), true); out.push(event); }
   assert.deepEqual(out.map(event => event.kind), ['started', 'text_delta', 'terminal']); assert.deepEqual(out.map(event => event.sequence), [1,2,3]);

@@ -5,6 +5,7 @@ import { prepareGatewayTextIntent, type GatewayTextIntentPolicy } from '../gatew
 import type { GatewayRoutingResolution } from '../gateway-routing.service';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { gatewayBudgetPrincipal } from '../budget/gateway-budget-principal';
 
 export const TASK_TEXT_MODEL_TOOL = AI_TEXT_MODEL_STEP_CODE;
 export const TASK_IMAGE_MODEL_TOOL = AI_IMAGE_MODEL_STEP_CODE;
@@ -114,19 +115,20 @@ export function taskModelIntent(taskId: string, runId: string, registrationRef: 
 
 export function taskModelConfiguration(route: GatewayRoutingResolution): AiGatewayConfigReferenceDraft {
   const context = route.context, profile = route.route.profile, owner = route.route.scope;
-  if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace'
-    || !['operator', 'staff'].includes(context.audience) || route.consumerScope.kind !== 'WORKSPACE'
-    || route.consumerScope.tenantId !== context.scope.tenantId || route.consumerScope.workspaceId !== context.scope.workspaceId
+  let principal: ReturnType<typeof gatewayBudgetPrincipal>;
+  try { principal = gatewayBudgetPrincipal(context); } catch { throw new ModelGatewayError('FORBIDDEN'); }
+  if (route.consumerScope.kind !== 'WORKSPACE'
+    || route.consumerScope.tenantId !== principal.tenantId || route.consumerScope.workspaceId !== principal.workspaceId
     || profile.scopeId !== owner.id || profile.scopeKind !== owner.kind || profile.serviceMode !== route.selection.mode) {
     throw new ModelGatewayError('FORBIDDEN');
   }
   const base = { configId: profile.id, configRevision: profile.configRevision, credentialRef: profile.credentialRef,
-    protocol: profile.protocol, provider: profile.provider, model: profile.model, tenantId: context.scope.tenantId };
+    protocol: profile.protocol, provider: profile.provider, model: profile.model, tenantId: principal.tenantId };
   let result: AiGatewayConfigReferenceDraft;
   if (route.selection.mode === 'platform_managed' && owner.kind === 'PLATFORM') {
     result = { ...base, serviceMode: 'platform_managed', configurationScope: { kind: 'platform' } };
-  } else if (route.selection.mode === 'tenant_managed' && owner.kind === 'TENANT' && owner.tenantId === context.scope.tenantId) {
-    result = { ...base, serviceMode: 'tenant_managed', configurationScope: { kind: 'tenant', tenantId: context.scope.tenantId } };
+  } else if (route.selection.mode === 'tenant_managed' && owner.kind === 'TENANT' && owner.tenantId === principal.tenantId) {
+    result = { ...base, serviceMode: 'tenant_managed', configurationScope: { kind: 'tenant', tenantId: principal.tenantId } };
   } else throw new ModelGatewayError('CONFIG_INVALID');
   if (!isGatewayConfig(result)) throw new ModelGatewayError('CONFIG_INVALID');
   return result;

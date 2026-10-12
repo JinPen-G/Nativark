@@ -62,9 +62,13 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
   }
 
   private narrow(context: AiExecutionContext) {
-    if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user'
-      || !['operator', 'staff'].includes(context.audience)) throw denied();
-    return { tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, actorId: context.actor.userId };
+    if (context.scope.kind !== 'workspace'
+      || (context.audience === 'client' ? context.actor.kind !== 'customer' : context.actor.kind !== 'user')
+      || !['operator', 'staff', 'client'].includes(context.audience)) throw denied();
+    const actorId = context.actor.kind === 'customer' ? context.actor.customerId
+      : 'userId' in context.actor ? context.actor.userId : undefined;
+    if (!actorId) throw denied();
+    return { tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, actorId };
   }
   private async route(context: AiExecutionContext) {
     const route = structuredClone(await this.runtime.ports.routing.resolve(this.narrow(context), this.kind ? ['text', this.kind === 'image' ? 'vision' : 'audio'] : ['text']));

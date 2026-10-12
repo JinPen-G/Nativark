@@ -54,3 +54,7 @@ export { AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS } from "./ai-entry-management-draft-s
 export * from "./ai-entry-http-draft";
 export * from "./ai-client-entry-draft-schemas";
 export * from "./ai-knowledge-consumption-http-draft";
+export * from "./ai-knowledge-management-http-draft";
+export * from "./ai-memory-management-http-draft";
+export * from "./ai-text-capability-http-draft";
+export * from "./ai-automation-review-queue-http-draft";

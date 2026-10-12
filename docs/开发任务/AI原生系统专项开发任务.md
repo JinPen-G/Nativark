@@ -1,5 +1,7 @@
 # Rental OS AI Native 系统专项开发任务
 
+> 2026-10-12五树整合核对：共同基线a63954aa；已保全并三方接入客户/员工消费者，保留主线后续知识/客户模型修复，补人工复核末次来源复验。定向行为两套12/12、3/3 exit0，API/shared 618roots和三端源码类型零诊断，diff check exit0；不是全量/真环境验收，不上调功能分数或整项状态。实际冲突决定、未验项和续派见《20261008-Codex主线与AB恢复协同》20261012五树整合节；继续自研底座，不安装Runtime/SDK，不生产启用。固定交付SHA以本轮后续Git提交为准。
+
 > **底座开发与派工必读｜现在自研，同时为开源 Agent Runtime 与 Provider SDK 接入做好准备。** LangGraph 等编排 Runtime 与 AI SDK Provider 等模型协议 SDK 是两条独立替换边界，都必须在当前开发中做好隔离、映射和接手文档，而不是未来再推倒重写。原“开发建议”与后文细则同时保留；功能优先，当前不安装或切换框架/SDK。
 >
 > **每批底座任务必须携带以下提醒（包括 Codex、Claude 及其他接手者）：** 当前继续自研，但编排运行层与业务工具、授权、审批、唯一 Gateway/预算单账、Core 和知识服务保持清晰边界；使用本系统稳定契约与显式组合入口，避免依赖具体运行器内部对象。随代码记录接口、状态/持久化映射、耦合点、可复用服务及未来切换/回退注意事项。允许合法参考和复用成熟开源成果，不要求全部从零写；不提前安装 LangGraph、不造空适配层、不重写已有成果。详见[需求说明的重点约束](../AI原生系统专项需求说明.md#agent-底座的后续-runtime-可替换性重点开发约束)。
@@ -295,7 +297,7 @@
 
 ### 3.1 百分比口径与强制同步规则
 
-**核对基线：2026-10-10，专项主线 `ai/ai-native-contracts-s01-20261002`，固定 `b852cb54015a6a5aef44315392ecf5274b33897c`。研发里程碑进度为 49.1%（55/112），正式验收仍为 0/28＝0%。** AIN-01～24已有实际开发，改为In Progress；AIN-25～28的专项测量/验收/发布/独立交付尚未形成可计入成果，保持Pending。不是所有Pending都代表此前没有准备资料。
+**源码接续基线：2026-10-12，专项主线 `ai/ai-native-contracts-s01-20261002`，固定 `a63954aa48edde098a54188cf78474467f810782`。已确认研发里程碑仍为 49.1%（55/112），正式验收仍为 0/28＝0%。** 本次核对交接及相关调用链，未逐项重新核验全部G3/G4，不因新增提交或未提交修复自动加分。AIN-01～24保持In Progress；AIN-25～28的专项测量/验收/发布/独立交付尚未形成可计入成果，保持Pending。
 
 百分比是**主线已实现里程碑的覆盖率，不是工时/代码量估算、全部需求覆盖率或上线就绪度**。每项四个固定计分门槛，各25%，不用凭感觉填写82%或95%：
 
@@ -304,7 +306,7 @@
 - **G3：** 下表指定的主消费者/公开发布/原宿主已接回实际生产代码；显式默认关闭的组合可计代码装配，但不是生产启用。本门槛不表示所有业务变体已齐备。
 - **G4：** 本任务全文要求及剩余变体补齐，取得所需真实环境/独立验收并归档。只有G1～G4全满足才100%。离线结果不能代替G4。
 
-0%=尚无已核实门槛，25%=G1，50%=G1/G2，75%=G1/G2/G3；部分实现、仅作者报告、证据待核实均不多计。整体为28项等权平均，任务规模并不等长，因此不能据此推算剩余工期。ENTRY增量18项另算，不重复加入28项分母。当前未提交的人工选择任务HTTP/result修正单列WIP，不提前增加分数。
+0%=尚无已核实门槛，25%=G1，50%=G1/G2，75%=G1/G2/G3；部分实现、仅作者报告、证据待核实均不多计。整体为28项等权平均，任务规模并不等长，因此不能据此推算剩余工期。ENTRY增量18项另算，不重复加入28项分母。本轮未提交的批量身份隔离修复及四线新功能单列WIP，不提前增加分数。
 
 **所有开发者及主线整合者必须执行：** 本文件只同步任务状态、百分比、依赖和简明余项；收包、测试日志、WIP、会话派工和心跳记录放接续手册/协作记录，不能以进度同步为由在此追加过程说明。
 
@@ -316,7 +318,7 @@
 
 ### 3.2 本次计分依据与真实剩余项
 
-本表G1/G2/G3对应上文门槛；固定代码均在上述主线基线，历史验证只作原记录，不冒充本轮新跑。所有任务G4均未满足。右列是固定提交点的余项，其中当前WIP已补齐的任务中心、企业澄清、音频、员工task及Booking受理见[接续总册](附件/AI原生系统协作切片/20261007-Codex接管关键长任务总册-A-B-AIN06-AIN07.md)，不再派发重复实现。
+本表G1/G2/G3对应上文门槛；源码基线已前移至a63954aa，计分沿用已确认门槛，历史局部验证不冒充最新全量。所有任务G4均未满足。任务中心、企业澄清、音频、员工task、Booking受理及文本能力探针已存在的实现不再列为待从零开发；本轮修复及四线在途范围详见[接续总册](附件/AI原生系统协作切片/20261007-Codex接管关键长任务总册-A-B-AIN06-AIN07.md)。
 
 | 任务 | 已计入门槛及源码/事实依据 | 下一未满足门槛或余项 |
 | --- | --- | --- |
@@ -324,24 +326,24 @@
 | AIN-02 | G1/G2/G3：版本化shared合同、严格叶子及[公共组件发布](../../apps/api/src/contracts/ai-leaf-components.ts) | G4全范围契约/多端消费验收，新增任务result等合同仍需随功能维护 |
 | AIN-03 | G1/G2：原task/run/input/phase/approval/knowledge模型和迁移，含报价原键字段 | G3全表真实升级/回读组合尚无统一就绪证明；真库迁移未获准执行 |
 | AIN-04 | G1/G2/G3：[持久授权组合](../../apps/api/src/modules/ai-native/task-authorization.composition.ts)与request-bound/Auth/Guard/ALS进入原模型、业务、员工和客户代码 | G4全端撤权/跨范围真实等价验收，不以当前离线负例结项 |
-| AIN-05 | G1/G2：唯一Gateway、平台/BYOK、媒体受权派发、配置与计量；图片已可持久运行 | G3完整媒体/能力/取消/usage消费，音频仍未进入持久任务链；真供应商未验 |
+| AIN-05 | G1/G2：唯一Gateway、平台/BYOK、图片/PCM音频持久执行与单账；文本探针已接原请求/runner/财务和可信receipt verifier | G3完整媒体/能力/取消/usage消费；文本管理与历史请求已接WIP，非文本专用能力证明待补，真供应商未验 |
 | AIN-06 | G1/G2/G3：[原场景模型宿主](../../apps/api/src/modules/ai-native/scenes/original-scene-model.composition.ts)已接原runner、澄清后继run、累计资源、恢复及结果；3eea8e4a补原报价business_parameters证明与输入hash绑定 | G4广义恢复/中断及真库并发验收；报价参数证明已实现，不等于全部场景、多轮业务参数及审批执行闭环 |
 | AIN-07 | G1/G2/G3：[受控批准组合](../../apps/api/src/modules/ai-native/approval-execution/controlled-approved-order.composition.ts)、Core参与者、原收据及正式reprepare均已消费 | G4真实并发/所有失败窗及多动作范围验收；后续场景继续复用，不能继承旧批准 |
 | AIN-08 | G1/G2/G3：[业务工具组合](../../apps/api/src/modules/ai-native/tools/business-tools.composition.ts)已将目录/可用性/客户/订单/风险事实接入原场景 | G4四品类事实及历史依据真实对照，缺能力仍明确unavailable |
 | AIN-09 | G1/G2：Core正式报价、原操作键保存/恢复、原请求quoteReview/confirmQuote/readQuoteReceipt已接 | G3四品类/企业身份/歧义到明确参数的完整消费者；不是缺Core原键端口 |
 | AIN-10 | G1/G2/G3：[正式知识组合](../../apps/api/src/modules/ai-native/knowledge/persistent-knowledge.composition.ts)已接文件、政策、版本、确认记忆及原场景输入 | G4真实存储、撤回传播、全来源/格式与隐私验收；词法检索不是向量检索 |
 | AIN-11 | G1/G2：平台/租户配置、权益、原财务/任务资源单账已有实现 | G3版本发布/全部场景及端侧设置完整接线；真实成本、并发与停用验收未完 |
-| AIN-12 | G1/G2：任务中心列表/事件/快照/多轮模型场景已有request-bound API | G3审批/settings/订单结果尚未注入此场景聚合；后台全流程未接完 |
+| AIN-12 | G1/G2：任务中心列表/事件/快照/多轮模型已有request-bound API，审批/settings/原订单结果已有聚合依赖，91ae86b1绑定分页筛选 | G3后台完整消费者仍待核验与补齐，不再重复实现已有聚合接点；全流程验收未完 |
 | AIN-13 | G1/G2/G3：[订单解释及下一步](../../apps/api/src/modules/ai-native/tools/business-tools.composition.ts)与原模型结果读取/来源重开进入原场景 | G4实际订单状态、确定性金额和后台实流验证；不推断支付/退款成功 |
 | AIN-14 | G1/G2：开业检查、风险、分区事实/差异及人工入口，遗留WIP已由72774773接收 | G3各适用分区提案→正式保存/审核/采用的消费，不是分区readSection尚未实现 |
-| AIN-15 | G1/G2：持久人类选择、正式审批/Core、已提交selected quote host | G3客户端无执行凭证的任务/业务结果一体消费；当前HTTP/result改动仍WIP，企业及四品类全闭环待补 |
+| AIN-15 | G1/G2：持久人类选择、正式审批/Core、selected quote任务HTTP/原业务结果已进入固定基线 | G3企业付款资格与四品类参数/履约完整闭环待补，客户端完整消费仍须逐项核验；不重做已提交HTTP/result |
 | AIN-16 | G1/G2：资料差异/人工材料；通知设置原host、批准、Core与原收据已实现 | G3资料/各获准分区完整写入消费者，配置变化或过期后历史恢复仍有缺口 |
-| AIN-17 | G1/G2：[业务失败组合](../../apps/api/src/modules/ai-native/business-events/business-failure.composition.ts)接通知/退款明确失败同事务Outbox | G3其余限定事件及可靠有界消费者/死信处理，不启动worker代替代码交付 |
-| AIN-18 | G1/G2：独立automation主体/政策、冻结事件任务、人类review/close/feedback与管理 | G3完整影子/人工确认结果消费；自动执行与生产白名单未授权 |
-| AIN-19 | G1/G2：PNG/JPEG冻结输入→原image host/invocation/单账→持久结果→候选保存/核对 | G3员工原请求到task创建/启动尚未装配，音频及图片多轮尚不支持 |
-| AIN-20 | G1/G2：[员工请求工厂](../../apps/api/src/modules/ai-native/inspection-assist/inspection-assist.composition.ts)及原pickup/return宿主已有候选/人工采用/准备核对 | G3可信staff transport/gate和正式任务来源；设备/弱网全链未验 |
-| AIN-21 | G1/G2：独立客户Guard、材料/政策/原task、Booking选择/handoff与opt-in请求消费者 | G3可信发布/实际宿主及handoff→原Booking受理关联，不借管理员链代替 |
-| AIN-22 | G1/G2：原租户网站与客户checkout已消费handoff，默认无host走原人工路径 | G3原受理键/收据和实际host transport；当前AI材料提交仍禁用，不是页面接点不存在 |
+| AIN-17 | G1/G2：[业务失败组合](../../apps/api/src/modules/ai-native/business-events/business-failure.composition.ts)接通知/退款明确失败及归还异常同事务Outbox | G3其余限定事件及可靠有界消费者/死信处理，批量当前身份复验修复仍WIP；不启worker代替交付 |
+| AIN-18 | G1/G2：独立automation主体/政策、冻结事件任务、人类review/close/feedback与管理 | G3请求、政策门禁与受权队列已接WIP，当前来源复验及完整影子/人工确认仍待收口验收；自动执行与生产白名单未授权 |
+| AIN-19 | G1/G2：图片/PCM音频冻结输入、持久任务及后继结果已有员工请求接点 | G3完整媒体能力证明/正式来源和员工链组合待核验；真实识别、供应商和存储未验，不重复task创建/启动 |
+| AIN-20 | G1/G2：[员工请求工厂](../../apps/api/src/modules/ai-native/inspection-assist/inspection-assist.composition.ts)及原pickup/return宿主已有候选/人工采用/准备核对、固定transport/正式任务 | G3可信staff gate与完整宿主消费仍待核验；设备/弱网全链未验 |
+| AIN-21 | G1/G2：独立客户Guard、材料/政策/原task、Booking选择/handoff及原受理键，已有只读host能力与opt-in请求消费者 | G3客户执行/模型配置/Gateway已有WIP，完整正向/unknown单账及澄清授权未闭合；可信发布/实际宿主和企业授权仍待验 |
+| AIN-22 | G1/G2：原租户网站与客户checkout已有handoff/明确确认及原受理收据消费，默认无host走原人工路径 | G3可信host transport与两端实际消费待核验；真实浏览器/微信宿主/设备未验，不重做受理链 |
 | AIN-23 | G1/G2：[CategoryDraftApplication](../../apps/api/src/modules/ai-native/category-assist/category-draft.application.ts)复用正式detail/create/patch/validate/review | G3发布、资格和采用的高风险确认/消费，当前返回publication/adoption unavailable |
 | AIN-24 | G1/G2：已有威胁/负例与各功能离线验证、审计约束 | G3全已开放端/工具覆盖和隐私保留删除传播闭合，集中安全/独立验收未做 |
 | AIN-25 | 无可计门槛：已有单账/超时归05/06/11，不重复计为SLO测量 | G1冻结获批SLO、容量和测量基线；不编造真实性能/成本 |

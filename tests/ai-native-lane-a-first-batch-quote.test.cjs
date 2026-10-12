@@ -62,6 +62,11 @@ test('enterprise identity uses current authorized options and real Core membersh
   assert.equal(preview.status,'quoted');assert.equal(preview.quote.reservation,'not_reserved');assert.equal(resolved,1);
   // Core persistence is allowed for quotes, never inventory ownership or approval.
   assert.equal(h.businessFacts.writes.some(row=>/order|reservation/i.test(row.kind)),false);
+  const corporatePayer={...selected,bookingIdentity:{...selectedIdentity,enterpriseContractAndPayer:true}};
+  const unsupported=await h.tools.quote.candidates.prepare(corporatePayer);
+  assert.equal(unsupported.status,'unavailable');assert.equal(unsupported.reason,'enterprise_payer_authority_unavailable');
+  await assert.rejects(h.tools.quote.preview.preview({...prepared.request,bookingIdentity:corporatePayer.bookingIdentity}),e=>e.code==='CAPABILITY_UNSUPPORTED');
+  assert.equal(resolved,1,'unsupported payer never reaches Core or silently becomes personal payer');
   const unknown=await h.tools.quote.candidates.prepare({...selected,bookingIdentity:{...candidate.bookingIdentity,corporateCustomerId:'other'}});
   assert.equal(unknown.status,'missing_input');assert.ok(unknown.missingFields.includes('bookingIdentity.corporateCustomerId'));
   h.membershipRows.bookingOptions=[];

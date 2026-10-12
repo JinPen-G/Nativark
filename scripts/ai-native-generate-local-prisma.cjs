@@ -57,7 +57,19 @@ function copyClientContents(source, destination, top = true) {
     else throw new Error("Unsupported generated client entry");
   }
 }
-function generateLocalAiPrismaClient() {
+function generationEnvironment(temporary, audit, childTemp) {
+  const env = {};
+  for (const key of ["PATH", "SystemRoot", "WINDIR"]) if (process.env[key]) env[key] = process.env[key];
+  const preload = name => path.join(root, "tests/fixtures/ai-native", name).replace(/\\/gu, "/");
+  return Object.assign(env, { DATABASE_URL: "mysql://offline:offline@127.0.0.1:1/rental_os_offline", AI_OFFLINE_AUDIT: audit, AI_OFFLINE_WRITE_ROOT: temporary,
+    HOME: temporary, USERPROFILE: temporary, APPDATA: temporary, LOCALAPPDATA: temporary, TEMP: childTemp, TMP: childTemp, TMPDIR: childTemp,
+    XDG_CACHE_HOME: childTemp, npm_config_cache: childTemp, V8_COMPILE_CACHE_CACHE_DIR: childTemp, NODE_COMPILE_CACHE: childTemp,
+    TS_NODE_CACHE: "false", NODE_DISABLE_COMPILE_CACHE: "1", DISABLE_V8_COMPILE_CACHE: "1",
+    NODE_OPTIONS: `--require "${preload("prisma-offline-preload.cjs")}" --require "${preload("lane-b-local-runtime.cjs")}"`,
+    CHECKPOINT_DISABLE: "1", PRISMA_HIDE_UPDATE_MESSAGE: "1", PRISMA_DISABLE_TELEMETRY: "1", PRISMA_GENERATE_SKIP_AUTOINSTALL: "1", NO_COLOR: "1" });
+}
+function generateLocalAiPrismaClient({ preserveArtifacts = true } = {}) {
+  if (typeof preserveArtifacts !== "boolean") throw new Error("preserveArtifacts must be boolean");
   if (!fs.lstatSync(path.join(root, ".git")).isFile()) throw new Error("Run only in an isolated git worktree");
   const schema = fs.readFileSync(path.join(root, "apps/api/prisma/schema.prisma"), "utf8");
   const sourceHash = hash(schema.replace(/\r\n/gu, "\n"));
@@ -101,13 +113,8 @@ function generateLocalAiPrismaClient() {
     const cli = path.join(modules, "prisma/build/index.js");
     const sharedFiles = [path.join(sharedModules, "@prisma/client/package.json"), path.join(sharedModules, ".prisma/client/index.js"), path.join(sharedModules, ".prisma/client/index.d.ts"), path.join(sharedModules, ".prisma/client/schema.prisma")];
     const sharedBefore = sharedFiles.map(file => fs.existsSync(file) ? hash(fs.readFileSync(file)) : null);
-    const env = {};
-    for (const key of ["PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "USERPROFILE", "LOCALAPPDATA", "APPDATA"]) if (process.env[key]) env[key] = process.env[key];
-    const preload = path.join(root, "tests/fixtures/ai-native/prisma-offline-preload.cjs").replace(/\\/gu, "/");
     const childTemp = path.join(temporary, "tmp"); fs.mkdirSync(childTemp);
-    Object.assign(env, { DATABASE_URL: "mysql://offline:offline@127.0.0.1:1/rental_os_offline", AI_OFFLINE_AUDIT: audit, AI_OFFLINE_WRITE_ROOT: temporary,
-      HOME: temporary, USERPROFILE: temporary, APPDATA: temporary, LOCALAPPDATA: temporary, TEMP: childTemp, TMP: childTemp,
-      NODE_OPTIONS: `--require "${preload}"`, CHECKPOINT_DISABLE: "1", PRISMA_HIDE_UPDATE_MESSAGE: "1", PRISMA_DISABLE_TELEMETRY: "1", PRISMA_GENERATE_SKIP_AUTOINSTALL: "1", NO_COLOR: "1" });
+    const env = generationEnvironment(temporary, audit, childTemp);
     const child = spawnSync(process.execPath, [cli, "generate", "--generator", "client", "--schema", "schema.prisma"], { cwd: temporary, env, encoding: "utf8", timeout: 120000, maxBuffer: 8 * 1024 * 1024 });
     const violations = fs.readFileSync(audit, "utf8");
     const sharedAfter = sharedFiles.map(file => fs.existsSync(file) ? hash(fs.readFileSync(file)) : null);
@@ -132,15 +139,15 @@ function generateLocalAiPrismaClient() {
     }
     fs.renameSync(staged, target); staged = undefined;
     if (!completeClient(target)) throw new Error("Installed client is incomplete");
-    if (backup) { if (!removeOwnedDirectory(backup)) cleanupRetained.push(backup); backup = undefined; }
-    return { generated: true, target, schemaHash: sourceHash, guardViolations: 0, sharedArtifactsUnchanged: true, cleanupRetained };
+    if (backup) { if (preserveArtifacts || !removeOwnedDirectory(backup)) cleanupRetained.push(backup); backup = undefined; }
+    return { generated: true, target, schemaHash: sourceHash, guardViolations: 0, sharedArtifactsUnchanged: true, preserveArtifacts, cleanupRetained };
   } catch (error) {
     if (backup && !fs.existsSync(target)) { fs.renameSync(backup, target); backup = undefined; }
     throw error;
   } finally {
     try {
-      if (staged && !removeOwnedDirectory(staged)) cleanupRetained.push(staged);
-      if (temporary && !removeOwnedDirectory(temporary)) cleanupRetained.push(temporary);
+      if (staged && (preserveArtifacts || !removeOwnedDirectory(staged))) cleanupRetained.push(staged);
+      if (temporary && (preserveArtifacts || !removeOwnedDirectory(temporary))) cleanupRetained.push(temporary);
     } finally {
       if (fs.existsSync(lock) && fs.readFileSync(lock, "utf8") === token) fs.unlinkSync(lock);
     }

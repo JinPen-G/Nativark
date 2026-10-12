@@ -1,4 +1,4 @@
-import type { AiClientHostCapabilities } from '@rental-os/shared';
+import type { AiClientHostCapabilities, AiBookingSubmissionAcceptance, AiBookingSubmissionDecision } from '@rental-os/shared';
 import type { BookingHandoffHost } from './booking-handoff';
 import { captureBookingHostSession, sessionApi } from '../../data/authClient';
 
@@ -8,10 +8,12 @@ const validId = (value: unknown): value is string => typeof value === 'string' &
 export function createBookingHandoffHostFactory(publication: Publication | null = null) {
   const expected = publication ? { ...publication, scope: { ...publication.scope } } : null;
   let closed = false, started = false;
+  let clearSubmission: (() => void) | undefined;
   const visible = () => typeof document === 'undefined' || !document.hidden;
   const onVisibility = () => { if (!visible()) dispose(); };
   const dispose = () => {
     closed = true;
+    clearSubmission?.(); clearSubmission = undefined;
     if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility);
     if (typeof window !== 'undefined') window.removeEventListener('pagehide', dispose);
   };
@@ -53,6 +55,8 @@ export function createBookingHandoffHostFactory(publication: Publication | null 
         const initial = validate(await sessionApi.readBookingHostCapabilities());
         expiresAt = Date.parse(initial.expiresAt);
         const policyRevision = initial.policy.revision;
+        let busy = false, attempted = false, acceptance: AiBookingSubmissionAcceptance | undefined;
+        clearSubmission = () => { acceptance = undefined; };
         const recheck = async () => {
           if (!current()) throw Error('booking_host_unavailable');
           const value = validate(await sessionApi.readBookingHostCapabilities());
@@ -60,16 +64,59 @@ export function createBookingHandoffHostFactory(publication: Publication | null 
           expiresAt = Math.min(expiresAt, Date.parse(value.expiresAt));
           if (!current()) throw Error('booking_host_unavailable');
         };
+        const action = async <T>(call: () => Promise<T>): Promise<T> => {
+          if (busy || !current()) throw Error('booking_host_unavailable');
+          busy = true;
+          try {
+            try { await recheck(); } catch { dispose(); throw Error('booking_host_unavailable'); }
+            let result: T;
+            try { result = await call(); }
+            catch {
+              try { await recheck(); } catch { dispose(); }
+              throw Error('booking_action_unavailable');
+            }
+            const snapshot = structuredClone(result);
+            try { await recheck(); } catch { dispose(); throw Error('booking_host_unavailable'); }
+            return snapshot;
+          } finally { busy = false; }
+        };
+        const reference = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9-]{36}$/iu.test(value);
+        const submission = [sessionApi.acceptBookingSubmission, sessionApi.submitAcceptedBooking, sessionApi.readBookingSubmission]
+          .every(method => typeof method === 'function') ? {
+          async acceptBookingSubmission(input: { handoffRef: string }) {
+            if (input.handoffRef !== handoffRef || attempted) throw Error('booking_host_reference_changed');
+            return action(async () => {
+              const value = await sessionApi.acceptBookingSubmission({ handoffRef });
+              if (!current() || !value || value.handoffRef !== handoffRef || !reference(value.acceptanceRef) || value.execution !== 'not_attested') throw Error('booking_acceptance_unavailable');
+              acceptance = structuredClone(value);
+              return acceptance;
+            });
+          },
+          async submitAcceptedBooking(input: AiBookingSubmissionDecision) {
+            const ref = input.acceptanceRef, decision = input.decision;
+            if (!acceptance || ref !== acceptance.acceptanceRef || decision !== 'submit_original_booking' || attempted) throw Error('booking_submission_unavailable');
+            return action(() => {
+              attempted = true;
+              return sessionApi.submitAcceptedBooking({ acceptanceRef: ref, decision });
+            });
+          },
+          async readBookingSubmission(input: { acceptanceRef: string }) {
+            const ref = input.acceptanceRef;
+            if (!reference(ref) || (acceptance && ref !== acceptance.acceptanceRef)) throw Error('booking_host_reference_changed');
+            return action(() => sessionApi.readBookingSubmission({ acceptanceRef: ref }));
+          }
+        } : {};
         return Object.freeze({
           get enabled() { return current(); }, handoffRef,
           capability: Object.freeze({ tenantCode: expected.tenantCode, workspaceCode: expected.serviceCode, customerId: session.customerId,
             tenantId: expected.scope.tenantId, workspaceId: expected.scope.workspaceId, releaseRevision: expected.releaseRevision }),
           isCurrent: current, dispose,
+          ...submission,
           async readBookingHandoff(input: { handoffRef: string }) {
             try {
               if (input.handoffRef !== handoffRef) throw Error('booking_host_reference_changed');
               await recheck();
-              const handoff = await sessionApi.readBookingHandoff(handoffRef);
+              const handoff = structuredClone(await sessionApi.readBookingHandoff(handoffRef));
               await recheck();
               return handoff;
             } catch { dispose(); throw Error('booking_host_unavailable'); }

@@ -121,7 +121,10 @@ function harness() {
   } };
   const scopes = { resolveCurrent: async () => {
     if (state.revoked) throw Error('revoked');
-    return { context: { actor: { kind: 'user', userId: 'actor' }, scope: association.scope } };
+    return { context: { contractVersion: 'ain-c01-c02-draft-1', requestId: 'accounting-current', authorizedAt: time.toISOString(),
+      ...(state.customer ? { audience: 'client', actor: { kind: 'customer', customerId: 'actor' } }
+        : { audience: 'operator', actor: { kind: 'user', userId: 'actor' }, access: { permissions: ['ai:use'], dataScope: 'all', locationScope: { mode: 'all', locationIds: [] } } }),
+      scope: association.scope }, scope: { id: 'scope', kind: 'WORKSPACE', tenantId: 'tenant', workspaceId: 'workspace' } };
   } };
   const source = () => new PrismaGatewayAccountingFacts(db, bindings, scopes, { quantity: async (record, usage) => {
     state.pricing?.(record);
@@ -137,6 +140,14 @@ test('actual accounting repository persists usage, replays it after recreation a
   assert.equal(h.state.writes, 1);
   assert.equal((await h.source().readUsage('reservation', 'receipt', false)).quantity.value, 3);
   await assert.rejects(h.source().recordUsage(call, 'reservation', { inputTokens: 1, outputTokens: 3 }), e => e.code === 'IDEMPOTENCY_CONFLICT');
+});
+
+test('customer accounting reads only original dispatch usage and retains revoked-current refusal', async () => {
+  const h = harness(); h.state.customer = true;
+  await h.source().recordUsage(call, 'reservation', { inputTokens: 1, outputTokens: 2 });
+  assert.equal((await h.source().readUsage('reservation', 'receipt', false)).quantity.value, 3);
+  h.state.revoked = true;
+  await assert.rejects(h.source().readUsage('reservation', 'receipt', false));
 });
 for (const fail of ['write', 'commit', 'ack']) test(`actual accounting transaction ${fail} failure retains accurate persisted state`, async () => {
   const h = harness(); h.state.fail = fail;

@@ -1,6 +1,6 @@
 import type { AiInspectionActorScope, AiInspectionTarget, AiInspectionDraftState, AiInspectionDraftEditRequest,
   AiInspectionPrepareSubmissionRequest, AiInspectionSubmitRequest, AiInspectionReceiptLookup, AiInspectionEvidenceRef,
-  RentalInspectionTemplate } from "@rental-os/shared";
+  RentalInspectionTemplate, AiInspectionRecognitionTaskReference } from "@rental-os/shared";
 import { boundedText } from "./display-format";
 import type { NativeAiHost } from "./ai-task-workbench/index";
 
@@ -11,17 +11,34 @@ export interface InspectionHostDetail {
 }
 type PendingInspectionCommand =
   | { kind: "prepare" | "prepareReview"; request: AiInspectionPrepareSubmissionRequest }
-  | { kind: "edit" | "evidence" | "submission"; request: unknown };
+  | { kind: "edit" | "evidence" | "submission" | "recognition"; request: unknown };
+/** Feature-local consumption of the existing result-read/save endpoints. Not a dispatch request. */
+export type InspectionRecognitionReference = AiInspectionRecognitionTaskReference & { taskId: string; resultId: string };
+export type InspectionRecognitionObservation = InspectionRecognitionReference & {
+  status: "available" | "unknown" | "failed";
+  candidates: AiInspectionDraftState["candidates"];
+  trust: "untrusted_candidate"; automaticRetry: false; persistence: "not_saved"; execution: "not_attempted";
+};
+/** Original business receipt observation, independent of the draft back-write. */
+export interface InspectionSubmissionObservation {
+  status: string; inspectionId?: string; draftLinked?: boolean;
+}
 export interface StaffInspectionHost {
   context: AiInspectionActorScope & { audience: "staff" };
   target: AiInspectionTarget;
   draftId: string;
   serverEnabled: boolean;
   current: () => boolean;
-  operationId: (kind: "edit" | "evidence" | "review" | "prepare" | "submit", revision: number) => string;
+  operationId: (kind: "edit" | "evidence" | "review" | "prepare" | "submit" | "candidates", revision: number) => string;
   actionId: string;
   handoverSignatureFileAssetId?: string;
   taskHost?: NativeAiHost;
+  recognition?: {
+    reference: InspectionRecognitionReference;
+    read: () => Promise<InspectionRecognitionObservation>;
+    save?: (operationId: string) => Promise<unknown>;
+    reconcileSave?: (operationId: string) => Promise<AiInspectionReceiptLookup>;
+  };
   templates: { read: (target: AiInspectionTarget) => Promise<{ bindingFingerprint: string; template: RentalInspectionTemplate }> };
   drafts: {
     read: (request: AiInspectionTarget & { draftId: string }) => Promise<InspectionHostDetail>;
@@ -34,14 +51,16 @@ export interface StaffInspectionHost {
   submission?: {
     prepareReview?: (request: AiInspectionPrepareSubmissionRequest) => Promise<unknown>;
     prepare?: (request: AiInspectionPrepareSubmissionRequest) => Promise<unknown>;
-    submit?: (request: AiInspectionSubmitRequest) => Promise<{ status: string }>;
-    reconcile?: (request: AiInspectionTarget & { draftId: string }) => Promise<{ status: string }>;
+    submit?: (request: AiInspectionSubmitRequest) => Promise<InspectionSubmissionObservation>;
+    reconcile?: (request: AiInspectionTarget & { draftId: string }) => Promise<InspectionSubmissionObservation>;
     reconcilePreparation?: (command: { kind: "prepare" | "prepareReview"; request: AiInspectionPrepareSubmissionRequest }) =>
       Promise<AiInspectionReceiptLookup & { execution: "not_attested"; mode?: "manual_review_only" | "original_single" }>;
   };
 }
 export const emptyInspectionView = () => ({ phase: "unavailable", pending: false, error: "", revision: 0, items: [] as unknown[],
-  missing: [] as string[], evidence: [] as AiInspectionEvidenceRef[], editable: false, canRemove: false, canReview: false, canSubmit: false, canReconcile: false });
+  missing: [] as string[], evidence: [] as AiInspectionEvidenceRef[], editable: false, canRemove: false, canReview: false, canSubmit: false, canReconcile: false,
+  originalReceiptObserved: false, originalInspectionId: "", draftLinkStatus: "unknown",
+  recognitionStatus: "unavailable", recognitionItems: [] as unknown[], canReadRecognition: false, canSaveRecognition: false });
 
 /** No timers, storage, network, token or shared state. Old epochs cannot update this view. */
 export class StaffInspectionHostBinding {
@@ -52,19 +71,28 @@ export class StaffInspectionHostBinding {
   private detail?: InspectionHostDetail;
   private template?: RentalInspectionTemplate;
   private uncertain?: PendingInspectionCommand;
+  private receipt?: InspectionSubmissionObservation;
+  private recognition?: InspectionRecognitionObservation;
+  private fieldErrors: Record<string, string> = {};
+  private disposed = false;
   constructor(private readonly display: (view: ReturnType<typeof emptyInspectionView>) => void,
     private readonly onContextInvalidated?: () => void) {}
-  attachHost(host: StaffInspectionHost) { this.detachHost(); this.host = { ...host, context: { ...host.context }, target: { ...host.target },
+  attachHost(host: StaffInspectionHost) { if (this.disposed) return; this.detachHost(); this.host = { ...host, context: { ...host.context }, target: { ...host.target },
     templates: { ...host.templates }, drafts: { ...host.drafts }, ...(host.submission ? { submission: { ...host.submission } } : {}),
+    ...(host.recognition ? { recognition: { ...host.recognition, reference: { ...host.recognition.reference } } } : {}),
     ...(host.evidence ? { evidence: { ...host.evidence } } : {}) }; }
   generation() { return this.epoch; }
+  isActive(generation: number) { return this.active(generation); }
   revision() { return this.detail?.revision; }
   detachHost() { this.epoch++; this.host = undefined; this.shown = false; this.pending = false; this.detail = undefined;
-    this.template = undefined; this.uncertain = undefined; this.display(emptyInspectionView()); }
-  hide() { this.epoch++; this.shown = false; this.pending = false; this.detail = undefined; this.template = undefined; this.display(emptyInspectionView()); }
+    this.template = undefined; this.uncertain = undefined; this.receipt = undefined; this.recognition = undefined; this.fieldErrors = {}; if (!this.disposed) this.display(emptyInspectionView()); }
+  dispose() { this.disposed = true; this.detachHost(); }
+  hide() { this.epoch++; this.shown = false; this.pending = false; this.detail = undefined; this.template = undefined; this.receipt = undefined; this.recognition = undefined;
+    this.fieldErrors = {};
+    if (!this.disposed) this.display(emptyInspectionView()); }
   private active(epoch = this.epoch) {
     const host = this.host;
-    if (!this.shown || epoch !== this.epoch || !host || host.serverEnabled !== true) return false;
+    if (this.disposed || !this.shown || epoch !== this.epoch || !host || host.serverEnabled !== true) return false;
     let current = false;
     try { current = host.current() === true; } catch { /* A context that cannot be verified is not usable. */ }
     if (epoch !== this.epoch || this.host !== host) return false;
@@ -75,16 +103,28 @@ export class StaffInspectionHostBinding {
     }
     return true;
   }
-  async show() { this.shown = true; if (!this.active()) { this.display(emptyInspectionView()); return; } await this.read(); }
+  async show() { if (this.disposed) return; this.shown = true; if (!this.active()) { this.display(emptyInspectionView()); return; } await this.read(); }
   private view(phase: string, error = "") {
     const view = emptyInspectionView(), d = this.detail, host = this.host;
     view.phase = phase; view.error = error; view.pending = this.pending;
+    if (this.receipt) {
+      view.originalReceiptObserved = true;
+      view.originalInspectionId = this.receipt.inspectionId!;
+      view.draftLinkStatus = this.receipt.draftLinked === true ? "linked" : this.receipt.draftLinked === false ? "not_linked" : "unknown";
+    }
     if (d && this.template) {
+      view.canReadRecognition = !this.pending && !this.uncertain && !!host?.recognition && host.recognition.reference.expectedRevision === d.revision;
+      view.recognitionStatus = this.recognition?.status ?? "unavailable";
+      view.recognitionItems = this.recognition?.candidates.map(candidate => ({
+        candidateId: boundedText(candidate.candidateId, 191), fieldCode: boundedText(candidate.fieldCode, 200), status: candidate.status,
+        value: candidate.status === "candidate" ? boundedText(String(candidate.value.kind === "photo" ? candidate.value.attachmentId : candidate.value.value), 4000) : "待人工核实",
+        sourceLabel: candidate.sources.map(source => `${source.attachmentId}@${source.attachmentRevision}`).join(", ").slice(0, 200)
+      })) ?? [];
       view.revision = d.revision;
       view.items = this.template.fields.slice(0, 64).map(field => {
         const matches = d.state.candidates.filter(item => item.fieldCode === field.code);
         const candidate = matches.length === 1 ? matches[0] : undefined;
-        return { key: field.code, label: boundedText(field.label, 200),
+        return { key: field.code, label: boundedText(field.label, 200), error: this.fieldErrors[field.code] ?? "",
           candidate: candidate?.status === "candidate" ? (candidate.value.kind === "photo" ? candidate.value.attachmentId : candidate.value.value) : null,
           candidateId: candidate?.candidateId ?? "",
           candidateActionable: candidate?.status === "candidate" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(candidate.candidateId)
@@ -94,11 +134,12 @@ export class StaffInspectionHostBinding {
           sourceLabel: candidate?.sources.map(source => `${source.attachmentId}@${source.attachmentRevision}`).join(", ").slice(0, 200) ?? "来源不可用" };
       });
       view.missing = d.state.missingFields.slice(0, 64); view.evidence = d.state.evidence.slice(0, 100);
-      const editable = !this.pending && !this.uncertain && ["draft_saved", "prepared"].includes(d.status);
+      const editable = !this.pending && !this.uncertain && !this.receipt && ["draft_saved", "prepared"].includes(d.status);
       view.editable = editable && typeof host?.drafts.edit === "function";
       view.canRemove = editable && typeof host?.drafts.replaceEvidence === "function";
       view.canReview = editable && typeof host?.submission?.prepareReview === "function";
-      view.canSubmit = !this.pending && !this.uncertain && !d.state.reviewRequired && ["draft_saved", "prepared"].includes(d.status)
+      view.canSaveRecognition = editable && this.recognition?.status === "available" && !!host?.recognition?.save;
+      view.canSubmit = !this.pending && !this.uncertain && !this.receipt && !d.state.reviewRequired && ["draft_saved", "prepared"].includes(d.status)
         && typeof host?.submission?.prepare === "function" && typeof host?.submission.submit === "function";
       view.canReconcile = !this.pending && ((d.status === "submission_unknown" || this.uncertain?.kind === "submission") && typeof host?.submission?.reconcile === "function"
         || (this.uncertain?.kind === "edit" || this.uncertain?.kind === "evidence") && typeof host?.drafts.reconcileOperation === "function");
@@ -106,9 +147,16 @@ export class StaffInspectionHostBinding {
     if (this.uncertain?.kind === "prepare" || this.uncertain?.kind === "prepareReview") {
       view.canReconcile = !this.pending && typeof host?.submission?.reconcilePreparation === "function";
     }
+    if (this.uncertain?.kind === "recognition") view.canReconcile = !this.pending && !!host?.recognition?.reconcileSave;
+    if (this.uncertain?.kind === "submission") view.canReconcile = !this.pending && !!host?.submission?.reconcile;
+    if (this.uncertain?.kind === "edit" || this.uncertain?.kind === "evidence") view.canReconcile = !this.pending && !!host?.drafts.reconcileOperation;
     this.display(view);
   }
+  private clearMaterial() {
+    this.detail = undefined; this.template = undefined; this.recognition = undefined; this.fieldErrors = {};
+  }
   private async load(epoch: number) {
+    this.clearMaterial();
     const host = this.host!;
     const target = { ...host.target };
     const binding = await host.templates.read(target);
@@ -129,13 +177,68 @@ export class StaffInspectionHostBinding {
   }
   async read() {
     if (!this.active() || this.pending) return;
-    const epoch = this.epoch; this.pending = true; this.detail = undefined; this.view("loading");
+    const epoch = this.epoch; this.pending = true; this.clearMaterial(); this.receipt = undefined; this.view("loading");
     let error = "";
     try { await this.load(epoch); }
     catch { error = "读取不可用，请保留原人工流程"; }
     finally { if (this.active(epoch)) { this.pending = false; this.view(this.loadedPhase(), error); } }
   }
-  private loadedPhase() { return this.detail ? (this.uncertain ? "unknown" : this.detail.status) : "read_failed"; }
+  private loadedPhase() { return this.uncertain ? "unknown" : this.detail?.status ?? "read_failed"; }
+  async readRecognition() {
+    if (!this.active() || this.pending || this.uncertain || !this.detail || !this.host?.recognition) return;
+    const host = this.host, port = host.recognition!, epoch = this.epoch, revision = this.detail.revision;
+    if (port.reference.expectedRevision !== revision || port.reference.draftId !== host.draftId || Object.entries(host.target).some(([key, expected]) =>
+      port.reference[key as keyof InspectionRecognitionReference] !== expected)) {
+      this.recognition = undefined; this.view(this.loadedPhase(), "原识别引用与当前检查不一致，请保留人工流程"); return;
+    }
+    this.clearMaterial(); this.receipt = undefined; this.pending = true; this.view("recognition_reading");
+    let error = "";
+    try {
+      const value = await port.read();
+      if (!this.active(epoch)) return;
+      await this.load(epoch);
+      if (!this.active(epoch)) return;
+      if (this.detail?.revision !== revision || revision !== port.reference.expectedRevision
+        || Object.entries(port.reference).some(([key, expected]) => value[key as keyof InspectionRecognitionObservation] !== expected)
+        || value.trust !== "untrusted_candidate" || value.automaticRetry !== false || value.execution !== "not_attempted" || value.persistence !== "not_saved"
+        || !["available", "unknown", "failed"].includes(value.status) || !Array.isArray(value.candidates) || value.candidates.length > 100
+        || value.status !== "available" && value.candidates.length > 0
+        || JSON.stringify(value).length > 128000 || value.candidates.some(candidate =>
+          !candidate || typeof candidate.candidateId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(candidate.candidateId)
+          || !this.template?.fields.some(field => field.code === candidate.fieldCode) || !["candidate", "missing", "blurred"].includes(candidate.status)
+          || !Array.isArray(candidate.sources) || candidate.sources.length > 100
+          || candidate.sources.some(source => !source || !this.detail?.state.evidence.some(ref =>
+            ref.attachmentId === source.attachmentId && ref.attachmentRevision === source.attachmentRevision))
+          || candidate.status === "candidate" && (!candidate.value || !["number", "boolean", "text", "select", "photo"].includes(candidate.value.kind)
+            || candidate.value.kind === "number" && !Number.isFinite(candidate.value.value)
+            || candidate.value.kind === "boolean" && typeof candidate.value.value !== "boolean"
+            || ["text", "select"].includes(candidate.value.kind) && (typeof (candidate.value as { value?: unknown }).value !== "string"
+              || String((candidate.value as { value?: unknown }).value).length > 4000)))) throw Error("recognition binding changed");
+      this.recognition = JSON.parse(JSON.stringify(value));
+    } catch { if (this.active(epoch)) this.clearMaterial(); error = "原识别结果不可用，请保留人工填单；不自动重新识别"; }
+    finally { if (this.active(epoch)) { this.pending = false; this.view(this.loadedPhase(), error); } }
+  }
+  async saveRecognition() {
+    if (!this.active() || this.pending || this.uncertain || this.receipt || !this.detail || !this.host?.recognition?.save
+      || this.recognition?.status !== "available" || this.detail.revision !== this.recognition.expectedRevision
+      || !["draft_saved", "prepared"].includes(this.detail.status)) return;
+    const port = this.host.recognition, request = this.base("candidates");
+    // Saving candidate evidence is not human adoption or business submission.
+    this.recognition = undefined;
+    await this.action({ kind: "recognition", request }, async () => {
+      const result = await port.save!(request.operationId) as { status?: string; result?: { draftId?: string; revision?: number } };
+      if (result?.status !== "saved" || result.result?.draftId !== request.draftId || result.result.revision !== request.expectedRevision + 1) {
+        throw Error("candidate save requires reconciliation");
+      }
+    });
+  }
+  private observeReceipt(value: InspectionSubmissionObservation | undefined) {
+    if (value?.status !== "submitted" || typeof value.inspectionId !== "string"
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(value.inspectionId)) return false;
+    this.receipt = { status: "submitted", inspectionId: value.inspectionId,
+      ...(typeof value.draftLinked === "boolean" ? { draftLinked: value.draftLinked } : {}) };
+    return true;
+  }
   private base(kind: Parameters<StaffInspectionHost["operationId"]>[0]) {
     const host = this.host!, detail = this.detail!, epoch = this.epoch, revision = detail.revision;
     const operationId = host.operationId(kind, detail.revision);
@@ -146,25 +249,32 @@ export class StaffInspectionHostBinding {
   private async action(command: PendingInspectionCommand, run: () => Promise<unknown>) {
     if (!this.active() || this.pending || this.uncertain) return;
     const epoch = this.epoch; this.pending = true;
+    this.recognition = undefined; this.receipt = undefined;
     // The injected callback receives a separate object, never our recovery material.
     const original: PendingInspectionCommand = JSON.parse(JSON.stringify(command));
     this.uncertain = original; this.view("pending");
     try { await run(); if (this.active(epoch)) { await this.load(epoch);
-      if (this.uncertain === original || this.uncertain?.kind === "submission" && this.detail?.status === "submitted") this.uncertain = undefined; } }
-    catch { /* Retain the original operation, including a nested submission. */ }
+      if (this.active(epoch) && (this.uncertain === original || this.uncertain?.kind === "submission" && this.detail?.status === "submitted")) this.uncertain = undefined; } }
+    catch { if (this.active(epoch)) this.clearMaterial(); }
     finally { if (this.active(epoch)) { this.pending = false; this.view(this.uncertain ? "unknown" : this.detail?.status ?? "unavailable",
       this.uncertain ? "原操作结果待核对，勿重复提交" : ""); } }
   }
   async edit(fieldCode: string, text: string) {
     if (!this.active() || this.pending || this.uncertain || !this.detail || !["draft_saved", "prepared"].includes(this.detail.status) || !this.host?.drafts.edit) return;
     const field = this.template?.fields.find(item => item.code === fieldCode);
-    if (!field || typeof text !== "string" || text.length > 4000 || field.type === "photo") return;
+    if (!field) return;
+    const invalid = () => { this.fieldErrors[fieldCode] = "值不符合当前模板，请在原人工流程核实"; this.view(this.loadedPhase()); };
+    if (typeof text !== "string" || text.length > 4000 || field.type === "photo") { invalid(); return; }
     let value: string | number | boolean = text;
-    if (field.type === "number") { if (!text.trim() || !Number.isFinite(Number(text))) return; value = Number(text); }
-    if (field.type === "boolean") { if (text !== "true" && text !== "false") return; value = text === "true"; }
-    if (field.type === "select" && !field.options?.includes(text)) return;
-    const request = { ...this.base("edit"), bindingFingerprint: this.detail.bindingFingerprint, edits: [{ fieldCode, decision: "manual" as const, value }] };
-    await this.action({ kind: "edit", request }, () => this.host!.drafts.edit!(request));
+    if (field.type === "number") { if (!text.trim() || !Number.isFinite(Number(text)) || Number.isInteger(Number(text)) && !Number.isSafeInteger(Number(text))) { invalid(); return; } value = Number(text); }
+    if (field.type === "boolean") { if (text !== "true" && text !== "false") { invalid(); return; } value = text === "true"; }
+    if (field.type === "select" && !field.options?.includes(text)) { invalid(); return; }
+    const epoch = this.epoch;
+    try {
+      const request = { ...this.base("edit"), bindingFingerprint: this.detail.bindingFingerprint, edits: [{ fieldCode, decision: "manual" as const, value }] };
+      delete this.fieldErrors[fieldCode];
+      await this.action({ kind: "edit", request }, () => this.host!.drafts.edit!(request));
+    } catch { if (this.active(epoch)) invalid(); }
   }
   /** An explicit human choice of the exact current candidate, never a supplied final value. */
   async decideCandidate(fieldCode: string, candidateId: string, decision: "accepted" | "rejected", revision: number) {
@@ -214,15 +324,20 @@ export class StaffInspectionHostBinding {
       const submit = this.base("submit");
       // Persist the exact submission before waiting; lost replies must only reconcile.
       this.uncertain = { kind: "submission", request: { ...submit } };
-      await host.submission!.submit!(submit);
+      const result = await host.submission!.submit!(submit);
+      if (this.active(epoch)) this.observeReceipt(result);
     });
   }
   async reconcile() {
     if (!this.active() || this.pending || !this.host) return;
     const host = this.host, epoch = this.epoch, command = this.uncertain;
-    const preparing = command?.kind === "prepare" || command?.kind === "prepareReview";
-    if (preparing ? !host.submission?.reconcilePreparation : !this.detail) return;
-    this.pending = true; this.view("reconciling");
+    const readingSubmission = command?.kind === "submission" || this.detail?.status === "submission_unknown";
+    const available = command?.kind === "prepare" || command?.kind === "prepareReview" ? !!host.submission?.reconcilePreparation
+      : command?.kind === "recognition" ? !!host.recognition?.reconcileSave
+      : command?.kind === "edit" || command?.kind === "evidence" ? !!host.drafts.reconcileOperation
+      : !!host.submission?.reconcile && readingSubmission;
+    if (!available) return;
+    this.pending = true; this.receipt = undefined; this.clearMaterial(); this.view("reconciling");
     let error = "";
     try {
       if (command?.kind === "prepare" || command?.kind === "prepareReview") {
@@ -244,9 +359,19 @@ export class StaffInspectionHostBinding {
         }
         return;
       }
-      if (this.detail?.status === "submission_unknown" || this.uncertain?.kind === "submission") {
+      if (command?.kind === "recognition") {
+        const request = command.request as { operationId: string; expectedRevision: number };
+        const result = await host.recognition?.reconcileSave?.(request.operationId);
+        if (!this.active(epoch)) return;
+        this.detail = undefined; this.template = undefined;
+        await this.load(epoch);
+        if (this.active(epoch) && result?.status === "found" && result.result.draftId === host.draftId
+          && result.result.revision === request.expectedRevision + 1 && this.detail
+          && this.currentDetail()!.revision >= result.result.revision) this.uncertain = undefined;
+        return;
+      } else if (readingSubmission) {
         const result = await host.submission?.reconcile?.({ ...host.target, draftId: host.draftId });
-        if (this.active(epoch) && result?.status === "submitted") this.uncertain = undefined;
+        if (this.active(epoch) && this.observeReceipt(result)) this.uncertain = undefined;
       } else if (this.uncertain?.kind === "edit" || this.uncertain?.kind === "evidence") {
         const result = await host.drafts.reconcileOperation?.({ kind: this.uncertain.kind, request: this.uncertain.request });
         if (this.active(epoch) && result?.status === "found") this.uncertain = undefined;

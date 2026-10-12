@@ -4,6 +4,9 @@ export const AI_CLIENT_ENTRY_HTTP_DRAFT = Object.freeze({
   /** Current Client Guard authenticates this prefix; old opt-in path is retained. */
   authenticatedBasePath: 'client/v1/ai-native/entry',
   readHostCapabilities: 'host-capabilities/read',
+  /** Original task command only; neither endpoint starts or resumes execution. */
+  readTaskSnapshot: 'tasks/snapshot/read', readTaskEvents: 'tasks/events/read',
+  readOrderExplanation: 'orders/explanation/read', readSource: 'sources/read',
   issueAction: 'action', createBookingDraft: 'booking-drafts/create',
   chooseBookingDraft: 'booking-drafts/choose', readBookingDraft: 'booking-drafts/read',
   handoffBookingDraft: 'booking-drafts/handoff', readBookingHandoff: 'booking-handoffs/read',

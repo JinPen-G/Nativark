@@ -9,6 +9,7 @@ import { PersistentGatewayBudget } from './persistent-gateway-budget';
 import { PrismaGatewayAccountingFacts, type GatewayActualUsagePricing } from './prisma-gateway-accounting-facts';
 import { PrismaGatewayInvocationBindings } from './prisma-gateway-invocation-bindings';
 import { PrismaTaskBudgetAuthorizationSource } from './prisma-task-budget-authorization.source';
+import { PrismaClientTaskBudgetAuthorizationSource } from './prisma-client-task-budget-authorization.source';
 
 export function createPersistedGatewayBudget(input: {
   db: ConstructorParameters<typeof PrismaGatewayInvocationBindings>[0] & ConstructorParameters<typeof PrismaGatewayAccountingFacts>[0];
@@ -32,5 +33,14 @@ export function createAuthorizedPersistedGatewayBudget(input:
   Omit<Parameters<typeof createPersistedGatewayBudget>[0], 'authorization' | 'scopes' | 'db'>
   & ConstructorParameters<typeof PrismaTaskBudgetAuthorizationSource>[0]) {
   const authorization = new PrismaTaskBudgetAuthorizationSource(input);
+  return createPersistedGatewayBudget({ ...input, authorization, scopes: authorization.scopes });
+}
+
+/** Explicit customer assembly; requires current original material authorization,
+ * persisted execution policy and trusted pricing. Does not enable client models. */
+export function createAuthorizedClientPersistedGatewayBudget(input:
+  Omit<Parameters<typeof createPersistedGatewayBudget>[0], 'authorization' | 'scopes' | 'db'>
+  & ConstructorParameters<typeof PrismaClientTaskBudgetAuthorizationSource>[0]) {
+  const authorization = new PrismaClientTaskBudgetAuthorizationSource(input);
   return createPersistedGatewayBudget({ ...input, authorization, scopes: authorization.scopes });
 }

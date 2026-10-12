@@ -63,6 +63,41 @@ export class PersistentMemoryConsentService {
     return this.memory.read(await this.current(), parse(id, memoryId));
   }
 
+  /** Bounded owner-only discovery, not preference reuse or an atomic snapshot.
+   * Probe rows receive the same resource checks as displayed rows. */
+  async list(value: unknown) {
+    const input = parse(z.object({ limit: z.number().int().min(1).max(30), after: id.optional() }).strict(), value);
+    const context = await this.current(), owner = actor(context);
+    await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner });
+    if (context.scope.kind !== 'workspace') return unavailable();
+    requiredPort(this.ports.db.aiStructuredMemory, ['findMany']);
+    const rows = await this.ports.db.aiStructuredMemory.findMany({ where: {
+      tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId,
+      ownerKind: owner.actorKind, ownerId: owner.actorId, ...(input.after ? { id: { gt: input.after } } : {}),
+    }, orderBy: { id: 'asc' }, take: input.limit + 1,
+    select: { id: true, tenantId: true, workspaceId: true, ownerKind: true, ownerId: true },
+    }).catch(() => unavailable());
+    if (rows.length > input.limit + 1 || new Set(rows.map(row => row.id)).size !== rows.length) return unavailable();
+    for (const row of rows) {
+      parse(id, row.id);
+      if (row.tenantId !== context.scope.tenantId || row.workspaceId !== context.scope.workspaceId
+        || row.ownerKind !== owner.actorKind || row.ownerId !== owner.actorId) return unavailable();
+    }
+    // Let the database collation define keyset order; never sort an already
+    // limited page with a different JavaScript collation.
+    const observed = [];
+    for (const row of rows) observed.push(await this.state(row.id));
+    // A later row's await must not leave earlier metadata authorized by an old
+    // policy or conceal consent revocation during page assembly.
+    for (const state of observed) {
+      if (fingerprint(await this.state(state.memoryId)) !== fingerprint(state)) throw new KnowledgeError('conflict');
+    }
+    await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner });
+    const items = observed.slice(0, input.limit);
+    return { items, nextAfter: rows.length > input.limit ? items[items.length - 1].memoryId : null,
+      semantics: 'owner_metadata_not_preference_reuse' as const };
+  }
+
   /** Management metadata remains readable with the formal read action even
    * when revoked consent correctly prevents preference reuse. No preference
    * body is returned by this status endpoint.
@@ -146,8 +181,9 @@ export class PersistentMemoryConsentService {
 
   /** Reconciliation material for an interrupted memory operation. Absence of
    * a receipt is deliberately reported as unknown, never as proof that the
-   * durable write did not happen. The caller must retry the same operation or
-   * present the current state to a human; this method never creates a record. */
+   * durable write did not happen. This observes a key, NOT the operation payload:
+   * changeStatus/confirmationStatus must verify the original command. Absence
+   * never authorizes blind replay; this method never creates a record. */
   async operationRecovery(value: unknown) {
     const input = parse(z.object({ memoryId: id, operationId: id.max(110), expectedRevision: z.number().int().min(1).max(4294967293),
       operation: z.enum(['propose', 'modify', 'confirm', 'revoke', 'delete']) }).strict(), value);
@@ -162,6 +198,7 @@ export class PersistentMemoryConsentService {
     await this.authorizeRequest(context, { action: 'read', scope: context.scope, owner, memory: after });
     return { memoryId: input.memoryId, operationId: input.operationId, requestedOperation: input.operation,
       receipt: receipt ? 'recorded' as const : 'unknown' as const,
+      binding: 'key_only_not_command_attestation' as const,
       current: { status: after.status, revision: after.revision, expiresAt: after.expiresAt },
       nextStep: receipt ? 'reconcile_recorded_operation' as const : 'reconcile_same_operation' as const,
       absenceSemantics: 'no_receipt_is_not_proof_of_non_execution' as const };

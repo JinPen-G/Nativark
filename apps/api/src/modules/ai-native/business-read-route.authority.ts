@@ -10,7 +10,7 @@ import { aiQuotePreviewInputSchema } from './quote-preview.service';
 import type { RentalQuoteRequest } from '@rental-os/shared';
 import { z } from 'zod';
 
-export type AiBusinessReadKind = 'catalog' | 'availability' | 'membership_candidates' | 'booking_identity_options' | 'opening' | 'risk' | 'quote_context' | 'payment_intents' | 'payment_refunds';
+export type AiBusinessReadKind = 'catalog' | 'availability' | 'membership_candidates' | 'booking_identity_options' | 'booking_delivery_addresses' | 'opening' | 'risk' | 'quote_context' | 'payment_intents' | 'payment_refunds';
 export interface AiBusinessReadAuthority {
   withRead<T>(kind: AiBusinessReadKind, input: unknown, read: (context: AiExecutionContext) => Promise<T>): Promise<T>;
 }
@@ -19,6 +19,7 @@ const routes = {
   availability: { method: 'POST', path: '/rental/v1/availability' },
   membership_candidates: { method: 'GET', path: '/rental/v1/booking-members' },
   booking_identity_options: { method: 'GET', path: '/rental/v1/booking-members/:customerId/booking-options' },
+  booking_delivery_addresses: { method: 'GET', path: '/rental/v1/booking-members/:customerId/delivery-addresses' },
   opening: { method: 'GET', path: '/rental/v1/tenant-readiness' },
   risk: { method: 'GET', path: '/rental/v1/reports/operations' },
   quote_context: { method: 'GET', path: '/rental/v1/business-settings' },
@@ -65,7 +66,7 @@ export class AiBusinessReadRouteAuthority implements AiBusinessReadAuthority {
     const body = structuredClone(input);
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ModelGatewayError('INVALID_REQUEST');
     let route: { method: string; path: string } = routes[kind];
-    if (kind === 'booking_identity_options') {
+    if (kind === 'booking_identity_options' || kind === 'booking_delivery_addresses') {
       const parsed = z.object({ customerId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict().safeParse(body);
       if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
       route = { method: 'GET', path: route.path.replace(':customerId', parsed.data.customerId) };

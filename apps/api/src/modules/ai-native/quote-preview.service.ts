@@ -4,6 +4,7 @@ import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES, type AiExecutionCo
 import type { RentalBusinessService, BusinessContext } from "../rental-core/rental-business.service";
 import { ModelGatewayError } from "./model-gateway.ports";
 import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
+import { assertCurrentQuoteAddress, type AiQuoteAddressSource } from './scenes/original-quote-address';
 
 const id = z.string().trim().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const timestamp = z.string().datetime({ offset: true });
@@ -105,25 +106,26 @@ export class AiQuotePreviewService {
     private readonly contexts: AiQuoteCoreContextSource,
     private readonly authority: AiQuotePreviewAuthority,
     private readonly clock: () => Date = () => new Date(),
-    private readonly resolver?: Pick<import('../rental-core/rental-core.service').RentalCoreService, 'resolvePricingGroupQuoteRequest'>
+    private readonly resolver?: Pick<import('../rental-core/rental-core.service').RentalCoreService, 'resolvePricingGroupQuoteRequest'>,
+    private readonly addresses?: AiQuoteAddressSource
   ) {
     if (typeof core?.createQuote !== "function" || typeof contexts?.current !== "function" || typeof authority?.withQuote !== "function") throw new ModelGatewayError("CONFIG_INVALID");
   }
 
-  async preview(value: unknown, expectedConfigurationFingerprint?: string): Promise<AiQuotePreviewResult> {
-    return this.execute(value, expectedConfigurationFingerprint);
+  async preview(value: unknown, expectedConfigurationFingerprint?: string, expectedAddressFingerprint?: string): Promise<AiQuotePreviewResult> {
+    return this.execute(value, expectedConfigurationFingerprint, undefined, expectedAddressFingerprint);
   }
 
   /** Internal original-request consumer only. The reference and identity come
    * from the authorized immutable repository, never model parameters. Read-only
    * recovery cannot fall through to quote creation when no row is observed. */
   async previewOriginal(value: unknown, original: Readonly<{ reference: string; expectedIdentityHash: string }>,
-    expectedConfigurationFingerprint?: string, readOnly = false): Promise<AiQuotePreviewResult> {
+    expectedConfigurationFingerprint?: string, readOnly = false, expectedAddressFingerprint?: string): Promise<AiQuotePreviewResult> {
     const binding = structuredClone(original);
     if (!binding.reference || binding.reference.length > 512 || !/^[a-f0-9]{64}$/.test(binding.expectedIdentityHash)
       || typeof this.core.createQuoteForOriginalOperation !== 'function'
       || typeof this.core.readQuoteForOriginalOperation !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
-    return this.execute(value, expectedConfigurationFingerprint, { ...binding, readOnly });
+    return this.execute(value, expectedConfigurationFingerprint, { ...binding, readOnly }, expectedAddressFingerprint);
   }
 
   /** Called inside the guarded read composition with a currently authorized
@@ -157,7 +159,8 @@ export class AiQuotePreviewService {
   }
 
   private async execute(value: unknown, expectedConfigurationFingerprint?: string,
-    original?: Readonly<{ reference: string; expectedIdentityHash: string; readOnly: boolean }>): Promise<AiQuotePreviewResult> {
+    original?: Readonly<{ reference: string; expectedIdentityHash: string; readOnly: boolean }>,
+    expectedAddressFingerprint?: string): Promise<AiQuotePreviewResult> {
     const parsed = aiQuotePreviewInputSchema.safeParse(value);
     if (!parsed.success) {
       const fields = [...new Set(parsed.error.issues.map(issue => issue.path.join(".")).filter(Boolean))];
@@ -197,6 +200,7 @@ export class AiQuotePreviewService {
           if (binding(current) !== binding(context)) throw new ModelGatewayError('FORBIDDEN');
           const latest = structuredClone(await this.contexts.current(structuredClone(scope)));
           if (requestFingerprint(business) !== requestFingerprint(latest)) throw new ModelGatewayError('CONFIG_INVALID');
+          if (!original?.readOnly) await assertCurrentQuoteAddress(this.addresses, current, formalRequest, expectedAddressFingerprint);
           // The last awaited source may itself wait for category/config data.
           // Recheck the original quote permission immediately before R1 work.
           return this.authority.withQuote(structuredClone(parsed.data) as RentalQuoteRequest, async final => {
@@ -223,6 +227,7 @@ export class AiQuotePreviewService {
           });
         });
         if (outcome.kind === 'failure') return { ...this.failure(context, outcome.status, 'Core 未能生成报价；请核对输入或转人工处理'), quotePersistence: 'unknown', nextAction: 'reconcile', retryable: false };
+        if (!original?.readOnly) await assertCurrentQuoteAddress(this.addresses, context, formalRequest, expectedAddressFingerprint, outcome.quote);
         return this.project(context, outcome.quote, expectedRequest, parsed.data.lines.length);
       } catch (error) {
         if (error instanceof ModelGatewayError) throw error;

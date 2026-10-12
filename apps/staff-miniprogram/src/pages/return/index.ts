@@ -12,7 +12,7 @@ import { formatBusinessRange } from "../../core/time";
 import { ROUTES, buildUrl, confirmDialog, relaunch, toast } from "../../core/ui";
 import { uploadStaffImage } from "../../api/uploads";
 import { attachInspectionPage, attachRemoteInspectionPage, hideInspectionPage, clearInspectionPage } from "../../components/ai-native/inspection-page-binding";
-import type { StaffInspectionHost } from "../../components/ai-native/inspection-host";
+import type { StaffInspectionHost, InspectionRecognitionReference } from "../../components/ai-native/inspection-host";
 
 /** 逐设备卡：一台可归还资源一张卡，卡内是本次归还的选择/数量与**逐台**勾选的 boolean 验收项。 */
 interface ReturnAllocation { id: string; title: string; identifier: string; max: number; quantity: string; selected: boolean; fields: InspectionFieldRow[]; }
@@ -29,8 +29,8 @@ Page({
   signatureContext: undefined as WechatMiniprogram.CanvasContext | undefined,
   signatureDrawing: false,
   attachInspectionHost(host: StaffInspectionHost) { attachInspectionPage(this, host, "return"); },
-  attachRemoteInspectionHost(reference: { allocationId: string; draftId: string }) {
-    return attachRemoteInspectionPage(this, reference, 'return', this.data.signatureFileAssetId || undefined);
+  attachRemoteInspectionHost(reference: { allocationId: string; draftId: string }, recognitionReference?: InspectionRecognitionReference) {
+    return attachRemoteInspectionPage(this, reference, 'return', this.data.signatureFileAssetId || undefined, recognitionReference);
   },
   onHide() { hideInspectionPage(this); },
   onUnload() { clearInspectionPage(this); },

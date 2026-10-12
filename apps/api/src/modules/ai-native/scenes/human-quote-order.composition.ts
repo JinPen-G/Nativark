@@ -35,6 +35,11 @@ const reviewCommand = z.object({ selection: z.unknown(), proposal: reviewReferen
 const decisionCommand = z.object({ selection: z.unknown(), proposal: reviewReference.extend({ decision: z.enum(['approve', 'reject']) }) }).strict();
 const executionCommand = z.object({ selection: z.unknown(), command: approvedOrderCommandSchema }).strict();
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
+// New effects need a current independent payer authority, which this host does
+// not have. Historical selected receipts and original-order recovery stay readable.
+const assertPayerSupported = (body: { bookingIdentity?: { enterpriseContractAndPayer?: boolean } }) => {
+  if (body.bookingIdentity?.enterpriseContractAndPayer === true) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+};
 
 // Publication and preparation are separate transactions; only explicit submit can create an order.
 export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies) {
@@ -43,6 +48,7 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
   const registrationRef = (selectionId: string) => `quote-selection:${selectionId}`;
   const fresh = async (reference: unknown, bindingHash: string) => {
     const current = await selections.readAuthorized(reference);
+    assertPayerSupported(current.body);
     if (current.bindingHash !== bindingHash) throw denied();
     return current;
   };
@@ -73,6 +79,7 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
     const { ref, review } = await selectedReview(selection, { contractVersion: AI_PROPOSAL_DRAFT_VERSION,
       proposalId: command.proposalId, proposalRevision: command.proposalRevision, reviewedPayloadHash: command.reviewedPayloadHash });
     if (command.taskId !== ref.taskId || command.lease.runId !== ref.runId || command.actionId !== review.proposal.payload.actions[0].actionId) throw denied();
+    if (operation === 'submit') assertPayerSupported((await selections.readAuthorized(ref)).body);
     return controlled[operation](command);
   };
   const reprepareOperation = async (value: unknown, operation: 'reprepare' | 'readReprepareReceipt') => {
@@ -85,6 +92,7 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
     const replacementSelection = parseQuoteSelectionProof({ draftVersion: AI_QUOTE_SELECTION_DRAFT_VERSION,
       originalInputRef: command.replacement.originalInputRef, selectionId: command.replacement.quoteSelectionRef,
       taskId: command.replacement.taskId, runId: command.replacement.runId, inputHash: command.replacement.fingerprint });
+    if (operation === 'reprepare') assertPayerSupported((await selections.readAuthorized(replacementSelection)).body);
     const receipt = await controlled.application[operation](ref.taskId, command);
     let replacement: { selection: ReturnType<typeof parseQuoteSelectionProof>;
       review: Awaited<ReturnType<typeof controlled.application.readProposal>> } | null = null;
@@ -110,7 +118,8 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const { decision, ...reference } = parsed.data.proposal;
       const { ref } = await selectedReview(parsed.data.selection, reference);
-      await selections.readAuthorized(ref);
+      const selected = await selections.readAuthorized(ref);
+      if (decision === 'approve') assertPayerSupported(selected.body);
       const receipt = await controlled.application.decide(ref.taskId, { ...reference, decision });
       if (receipt.kind !== 'recorded') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       return freezeOriginalInput({ approval: receipt.record, order: 'not_created_by_decision' as const });
@@ -157,6 +166,7 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const command = parsed.data, ref = parseQuoteSelectionProof(command.selection);
       const proof = await selections.readAuthorized(ref);
+      assertPayerSupported(proof.body);
       if (command.lease.taskId !== proof.taskId || command.lease.runId !== proof.runId) throw denied();
       const input = await controlled.source.publishOrderInput({ taskId: proof.taskId,
         registrationRef: registrationRef(proof.selectionId), expectedTaskRevision: command.expectedTaskRevision,
@@ -177,6 +187,7 @@ export function composeHumanQuoteOrder(dependencies: HumanQuoteOrderDependencies
         runId: proof.runId,
         read: async () => {
           const current = await selections.readAuthorized(proof);
+          assertPayerSupported(current.body);
           return structuredClone(current.body);
         }
       });
@@ -237,7 +248,7 @@ export function composeSelectedQuoteTaskApplication(dependencies: HumanQuoteOrde
     const read = () => selections.read({ draftVersion: proof.draftVersion, originalInputRef: proof.originalInputRef, selectionId: proof.selectionId });
     const selected = await read();
     if (selected.taskId !== proof.taskId || selected.runId !== proof.runId || selected.inputHash !== proof.inputHash) throw denied();
-    if (active) await selections.readAuthorized(proof);
+    if (active) assertPayerSupported((await selections.readAuthorized(proof)).body);
     const root = composeSelectedQuoteTaskHost({ ...dependencies, host, monotonic: configuration.monotonic,
       task: { taskId: proof.taskId, runId: proof.runId, selection: proof, limits } });
     const before = await root.authorization.tasks.resolveAccess(proof.taskId, 'read_metadata');

@@ -22,6 +22,7 @@ import { createPersistedTextCapabilityEvidence, PrismaTextCapabilityReceiptRepos
 import { matchesProbeProfile, probeContextSchema, textProbeCommandSchema, textProbeConfiguration, textProbeDescriptorSchema,
   textProbeEvidenceHash, textProbeIntent, TEXT_PROBE_METHOD, TEXT_PROBE_SCENE, type TextProbeCommand } from './text-capability-probe';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { capabilityProfileFingerprint } from './capability-verification';
 import type { PersistedBudgetEvidenceSource } from './budget/budget-dependency-adapters';
 
 export type TextCapabilityProbeDependencies = Omit<Parameters<typeof createPersistedGatewayBudget>[0], 'scopes' | 'db'> & {
@@ -96,6 +97,30 @@ export class TextCapabilityProbeApplication {
     if ((await this.currentRequest()).binding !== before.binding) throw new ModelGatewayError('FORBIDDEN');
     return result;
   }
+  /** Management request preparation is metadata-only. The request key never
+   * chooses a model/profile; the platform ID is fixed by the server factory.
+   * Persist this command once, then read it back instead of preparing on retry. */
+  prepareRequestCurrent(requestKey: string, platformProfileId: string) {
+    const key = textProbeCommandSchema.shape.operationId.parse(requestKey);
+    const platformId = textProbeDescriptorSchema.shape.profileId.parse(platformProfileId);
+    return this.forCurrentRequest(async context => {
+      await this.input.management.authorize(context, 'manage');
+      const selection = await this.input.configuration.selectionForInvocation(context);
+      const resolved = await this.input.scopes.resolveRoutingScopes(selection.mode);
+      const candidates = (await this.profiles.list(resolved.configurationScope)).filter(profile =>
+        profile.enabled && !profile.disabledAt && profile.allowedCapabilities.includes('text')
+        && profile.serviceMode === selection.mode && profile.configRevision === selection.revision
+        && (selection.mode === 'platform_managed' ? profile.id === platformId : profile.role === 'DEFAULT'));
+      if (candidates.length !== 1) throw new ModelGatewayError('CONFIG_INVALID');
+      const profile = candidates[0];
+      const command = textProbeCommandSchema.parse({ operationId: `text-probe:${requestFingerprint({ requestKey: key, context })}`,
+        profileKey: profile.profileKey, profileFingerprint: capabilityProfileFingerprint(profile) });
+      // The existing authority rechecks selection, scope, config revision and
+      // enabled/text policy. No configuration credential() or Vault read here.
+      const prepared = await this.prepare(context, command);
+      return { command, configurationRevision: prepared.configuration.configRevision, methodVersion: TEXT_PROBE_METHOD };
+    });
+  }
   prepareCurrent(command: TextProbeCommand) {
     const snapshot = textProbeCommandSchema.parse(structuredClone(command));
     return this.forCurrentRequest(context => this.prepare(context, snapshot));
@@ -157,6 +182,9 @@ export class TextCapabilityProbeApplication {
     await authority.assertCurrent(context, resolution);
     if (!row.observation) return { capability: 'text' as const, status: 'unverified' as const, receiptId: row.id, reason: 'original_receipt_pending' };
     const observation = row.observation;
+    const observed = { methodVersion: descriptor.methodVersion,
+      mode: observation.transport === 'node_https' ? 'live' as const : 'mock' as const,
+      configurationRevision: profile.configRevision, checkedAt: observation.checkedAt, expiresAt: observation.expiresAt };
     const candidate = { profile, capability: 'text' as const,
       status: observation.transport === 'node_https' && observation.matched ? 'supported' as const : 'unverified' as const,
       source: 'connection_test' as const, evidenceHash: textProbeEvidenceHash(row), checkedAt: new Date(observation.checkedAt),
@@ -165,11 +193,19 @@ export class TextCapabilityProbeApplication {
         capability: 'text', profileFingerprint: descriptor.profileFingerprint
       } } };
     if (candidate.status === 'supported' && !await this.receipts.verify(candidate)) {
-      return { capability: 'text' as const, status: 'unverified' as const, receiptId: row.id, reason: 'original_receipt_pending' };
+      return { capability: 'text' as const, status: 'unverified' as const, receiptId: row.id, reason: 'original_receipt_pending', observation: observed };
     }
-    const saved = await this.capabilities.record(candidate);
+    let saved: Awaited<ReturnType<ProviderCapabilityService['record']>>;
+    try { saved = await this.capabilities.record(candidate); }
+    catch {
+      // The shared service collapses storage/commit uncertainty to CONFIG_INVALID.
+      // Recheck config outside that write boundary, then conservatively require
+      // the original receipt again; never claim the evidence write did not commit.
+      await authority.assertCurrent(context, resolution);
+      throw new ModelGatewayError('ACCOUNTING_PENDING');
+    }
     await authority.assertCurrent(context, resolution);
-    return { capability: 'text' as const, status: saved.status, receiptId: row.id, evidenceHash: saved.evidenceHash };
+    return { capability: 'text' as const, status: saved.status, receiptId: row.id, evidenceHash: saved.evidenceHash, observation: observed };
   }
   async run(value: GatewayContext, commandValue: TextProbeCommand,
     execution: Pick<RegisterGatewayInvocation, 'stepId' | 'lease' | 'priceVersion' | 'expiresAt'>, signal?: AbortSignal) {

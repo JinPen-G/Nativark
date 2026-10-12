@@ -44,6 +44,11 @@ const material = object({ selection, sources, deliveryAddress: object({ addressI
 // Publication describes payload shape, not current authorization or permission
 // to navigate/execute. Runtime consumers must still verify the original binding.
 export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
+  AiClientTaskReadRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid }),
+  AiClientTaskEventsReadRequest: object({ creationKey: { ...id, maxLength: 128 }, materialRef: uuid,
+    after: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }),
+  AiClientOrderExplanationReadRequest: object({ orderId: id, question: { enum: ['status', 'fees'], description: 'Omitted question uses status.' } }, ['orderId']),
+  AiClientSourceReadRequest: object({ materialRef: uuid }),
   AiClientHostCapabilitiesRequest: object({}),
   AiClientHostCapabilities: object({ contractVersion: literal(AI_CLIENT_HOST_CAPABILITIES_VERSION),
     enabled: { type: 'boolean' }, audience: literal('customer'), surface: { enum: [...AI_CUSTOMER_ENTRY_SURFACES] },

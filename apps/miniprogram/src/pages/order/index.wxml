@@ -14,6 +14,10 @@
   <state-view wx:if="{{view.status !== 'ready'}}" state="{{view.status}}" title="{{view.title}}" message="{{view.message}}" actionText="{{view.actionText}}" bind:action="onViewAction"></state-view>
 
   <block wx:elif="{{order}}">
+    <view wx:if="{{aiNativeOrderProjection}}" class="section">
+      <button class="btn btn--block" bindtap="onToggleOrderFacts">{{aiOrderFactsExpanded ? '收起订单事实' : '查看订单事实（非AI回答）'}}</button>
+      <ai-order-explanation wx:if="{{aiOrderFactsExpanded}}" order="{{aiNativeOrderProjection}}" available="{{true}}" />
+    </view>
     <view class="section">
       <view class="card head">
         <view class="row row--between">

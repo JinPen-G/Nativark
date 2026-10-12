@@ -196,7 +196,26 @@ export function composeInspectionAssist(dependencies: Dependencies) {
         (await selectResults(reference)).inputSource(reference).validateAnswers(...args) });
     }
   };
-  return { templates, manual, candidates, drafts, evidence, submission, recognition, recognitionResults };
+  /** Persisted result + current human review, not adoption or business facts.
+   * Shared by explicit server composition and the request-bound staff factory. */
+  const readRecognitionReview = async (value: unknown) => {
+    if (!drafts) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+    const reference = structuredClone(value);
+    const result = await recognitionResults.read(reference);
+    const target = { orderId: result.orderId, allocationId: result.allocationId,
+      stage: result.stage, templateId: result.templateId, draftId: result.draftId };
+    return authority.withAction(target, 'bind', async () => {
+      const review = await drafts.readReview(target);
+      if (review.revision !== result.expectedRevision || review.binding !== 'current') throw new InspectionAssistError('BINDING_CHANGED');
+      const current = await recognitionResults.read(reference);
+      if (requestFingerprint(current) !== requestFingerprint(result)) throw new InspectionAssistError('BINDING_CHANGED');
+      const finalReview = await drafts.readReview(target);
+      if (requestFingerprint(finalReview) !== requestFingerprint(review)) throw new InspectionAssistError('REVISION_CONFLICT');
+      return { recognition: result, review, adoption: 'not_attempted' as const,
+        businessActionRequested: false as const, automaticRetry: false as const };
+    });
+  };
+  return { templates, manual, candidates, drafts, evidence, submission, recognition, recognitionResults, readRecognitionReview };
 }
 
 /** No Controller/AppModule/worker registration. Original business pages remain available. */

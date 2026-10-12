@@ -46,6 +46,7 @@ function quoteSnapshotFingerprint(quote: RentalQuoteSnapshotV1) {
   return JSON.stringify(canonicalize({
     categoryCode: quote.categoryCode,
     request: quote.request,
+    deliveryAddressSnapshot: quote.deliveryAddressSnapshot,
     membershipSnapshot: quote.membershipSnapshot,
     membershipBenefitEvaluations: quote.membershipBenefitEvaluations,
     chargeLines: quote.chargeLines,

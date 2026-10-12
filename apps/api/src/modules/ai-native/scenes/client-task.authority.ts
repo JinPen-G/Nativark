@@ -13,7 +13,7 @@ import type { AiClientMaterialDb, AiClientMaterialScope, AiClientSceneMaterial }
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 export const clientTaskSceneSchema = z.object({ sceneCode: id.max(128), sceneVersion: id.max(64) }).strict();
 export type AiClientTaskScene = z.infer<typeof clientTaskSceneSchema>;
-export type AiClientTaskDb = AiClientMaterialDb & Pick<PrismaClient, 'aiScope' | 'aiTask' | 'aiBudgetPolicy'>;
+export type AiClientTaskDb = AiClientMaterialDb & Pick<PrismaClient, 'aiScope' | 'aiTask' | 'aiRun' | 'aiBudgetPolicy'>;
 export type AiClientTaskDependencies = AiClientTaskScene & {
   db: AiClientTaskDb;
   subscriptions: Pick<SubscriptionService, 'readCategoryCommercialContext'>;
@@ -23,6 +23,7 @@ const sqlBoolean = z.union([z.boolean(), z.literal(0), z.literal(1)]).transform(
 const policySchema = z.object({ id: z.string().uuid(), tenantId: id, workspaceId: id,
   channel: z.enum(['wechat_miniprogram', 'app', 'web']), customerType: z.enum(['personal', 'corporate']),
   sceneCode: id.max(128), sceneVersion: id.max(64), enabled: sqlBoolean, allowCreate: sqlBoolean, allowRead: sqlBoolean,
+  allowExecute: sqlBoolean.optional().default(false),
   revision: z.number().int().min(1).max(4294967294), expiresAt: z.date() }).strict();
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -36,7 +37,8 @@ export class AiClientPolicyAuthority {
     private readonly requestId: string, private readonly clock: () => Date) {
     this.entitlements = new PrismaSubscriptionBudgetReader(dependencies.db, dependencies.subscriptions, clock);
   }
-  async policy(subject: ClientPolicySubject, operation: 'create' | 'read' | 'capabilities') {
+  async policy(subject: ClientPolicySubject, operation: 'create' | 'read' | 'capabilities' | 'execute') {
+    subject = structuredClone(subject);
     const { identity } = subject;
     let rows: unknown[];
     try {
@@ -51,7 +53,8 @@ export class AiClientPolicyAuthority {
       || identity.membershipStatus !== 'active' || !identity.sessionId || !identity.customerId
       || policy.tenantId !== subject.tenantId || policy.workspaceId !== subject.workspaceId || policy.channel !== subject.channel
       || policy.customerType !== subject.principalKind || policy.sceneCode !== this.scene.sceneCode || policy.sceneVersion !== this.scene.sceneVersion
-      || !policy.enabled || !(operation === 'create' ? policy.allowCreate : policy.allowRead) || policy.expiresAt <= this.clock()) throw denied();
+      || !policy.enabled || !(operation === 'create' ? policy.allowCreate : operation === 'execute' ? policy.allowExecute : policy.allowRead)
+      || policy.expiresAt <= this.clock()) throw denied();
     return policy;
   }
   private async gates(context: AiExecutionContext) {
@@ -76,9 +79,12 @@ export class AiClientPolicyAuthority {
         gates.push({ key, id: row.id, revision: row.configRevision, settings });
       }
       return gates;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
+    // This is an authorization snapshot, not an atomic reservation. Non-locking
+    // reads must not wait on the caller's budget transaction's own policy locks.
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
   }
-  async authorize(subject: ClientPolicySubject, operation: 'create' | 'read' | 'capabilities') {
+  async authorize(subject: ClientPolicySubject, operation: 'create' | 'read' | 'capabilities' | 'execute') {
+    subject = structuredClone(subject);
     const policy = await this.policy(subject, operation);
     const context: AiExecutionContext = { contractVersion: AI_CONTRACT_DRAFT_VERSION, requestId: this.requestId,
       authorizedAt: this.clock().toISOString(), audience: 'client', actor: { kind: 'customer', customerId: subject.identity.customerId },
@@ -103,10 +109,10 @@ export class AiClientTaskAuthority {
     requestId: string, clock: () => Date) {
     this.authority = new AiClientPolicyAuthority(dependencies, scene, requestId, clock);
   }
-  async authorize(materialRef: string, operation: 'create' | 'read') {
-    const material = await this.loadMaterial(materialRef);
+  async authorize(materialRef: string, operation: 'create' | 'read' | 'execute') {
+    const material = structuredClone(await this.loadMaterial(materialRef));
     const grant = await this.authority.authorize({ ...material.row, identity: material.identity }, operation);
-    const current = await this.loadMaterial(materialRef);
+    const current = structuredClone(await this.loadMaterial(materialRef));
     const latest = await this.authority.policy({ ...current.row, identity: current.identity }, operation);
     if (requestFingerprint({ ...grant.policy, expiresAt: grant.policy.expiresAt.toISOString() }) !== requestFingerprint({ ...latest, expiresAt: latest.expiresAt.toISOString() })
       || current.row.bindingHash !== material.row.bindingHash || current.row.materialHash !== material.row.materialHash

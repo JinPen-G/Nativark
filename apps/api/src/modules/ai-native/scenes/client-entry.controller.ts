@@ -1,14 +1,16 @@
-import { Body, Controller, HttpException, Inject, Post, Req } from '@nestjs/common';
+import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import { AI_CLIENT_ENTRY_HTTP_DRAFT } from '@rental-os/shared';
 import { z } from 'zod';
 import { AiClientEntryError } from './client-entry-action';
+import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiClientApplicationRequest, composeRequestBoundClientApplication } from './client-request.application';
 
 export const AI_CLIENT_ENTRY_APPLICATION = Symbol('AI_CLIENT_ENTRY_APPLICATION');
 type Application = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
   'readHostCapabilities' | 'issueAction' | 'createBookingDraft' | 'chooseBookingDraft' | 'readBookingDraft' |
   'handoffBookingDraft' | 'readBookingHandoff' | 'readBookingOperation' |
-  'acceptBookingSubmission' | 'submitAcceptedBooking' | 'readBookingSubmission'>;
+  'acceptBookingSubmission' | 'submitAcceptedBooking' | 'readBookingSubmission' | 'readTaskSnapshot' | 'readTaskEvents' |
+  'readOrderExplanation' | 'readSource'>;
 
 @Controller([AI_CLIENT_ENTRY_HTTP_DRAFT.basePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath])
 export class AiClientEntryController {
@@ -27,6 +29,7 @@ export class AiClientEntryController {
       let code = 'AI_RESOURCE_UNAVAILABLE';
       if (error instanceof z.ZodError) code = 'AI_INVALID_INPUT';
       else if (error instanceof AiClientEntryError) code = error.code;
+      else if (error instanceof AiTaskRepositoryError) code = error.code === 'AI_STORAGE_UNAVAILABLE' ? 'AI_RESOURCE_UNAVAILABLE' : error.code;
       else if (error instanceof Error && aliases[error.message]) code = aliases[error.message];
       else if (error instanceof HttpException) {
         if (error.getStatus() === 400) code = 'AI_INVALID_INPUT';
@@ -37,6 +40,23 @@ export class AiClientEntryController {
       throw new HttpException({ code, retryable: false,
         ...(code === 'AI_RESULT_UNKNOWN' ? { nextAction: unknownAction } : {}) }, statuses[code]);
     }
+  }
+
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskSnapshot) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTaskSnapshot(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(() => this.application.readTaskSnapshot(request, body));
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readTaskEvents) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTaskEvents(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(() => this.application.readTaskEvents(request, body));
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readOrderExplanation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readOrderExplanation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(() => this.application.readOrderExplanation(request, body));
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readSource) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readSource(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(() => this.application.readSource(request, body));
   }
 
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readHostCapabilities)

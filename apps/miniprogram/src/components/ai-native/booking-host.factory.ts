@@ -1,19 +1,21 @@
-import type { AiClientHostCapabilities } from "@rental-os/shared";
+import type { AiClientHostCapabilities, AiBookingSubmissionAcceptance, AiBookingSubmissionDecision } from "@rental-os/shared";
 import type { CustomerBookingHost } from "./booking-handoff";
-import { readBookingHostCapabilities, readBookingHandoff } from "../../api/orders";
+import { readBookingHostCapabilities, readBookingHandoff, acceptBookingSubmission, submitAcceptedBooking, readBookingSubmission } from "../../api/orders";
 import { PUBLIC_CONFIG } from "../../config/public";
 import { serverNow } from "../../core/clock";
 import { contextVersion, currentSession, sessionEvents } from "../../core/session";
 
-type Publication = Pick<AiClientHostCapabilities, "tenantCode" | "serviceCode" | "scope" | "releaseRevision">;
+export type CustomerBookingPublication = Pick<AiClientHostCapabilities, "tenantCode" | "serviceCode" | "scope" | "releaseRevision">;
 const validId = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(value);
 
-export function createCustomerBookingHostFactory(publication: Publication | null = null) {
+export function createCustomerBookingHostFactory(publication: CustomerBookingPublication | null = null) {
   const expected = publication ? { ...publication, scope: { ...publication.scope } } : null;
   let closed = false, started = false;
   let unsubscribe: (() => void) | undefined;
+  let clearSubmission: (() => void) | undefined;
   const dispose = () => {
     closed = true; unsubscribe?.(); unsubscribe = undefined;
+    clearSubmission?.(); clearSubmission = undefined;
     if (typeof wx.offAppHide === "function") wx.offAppHide(dispose);
   };
   return Object.freeze({
@@ -58,6 +60,8 @@ export function createCustomerBookingHostFactory(publication: Publication | null
         const initial = validate(await readBookingHostCapabilities());
         expiresAt = Date.parse(initial.expiresAt);
         const policyRevision = initial.policy.revision;
+        let busy = false, attempted = false, acceptance: AiBookingSubmissionAcceptance | undefined;
+        clearSubmission = () => { acceptance = undefined; };
         const recheck = async () => {
           if (!current()) throw Error("booking_host_unavailable");
           const value = validate(await readBookingHostCapabilities());
@@ -65,16 +69,58 @@ export function createCustomerBookingHostFactory(publication: Publication | null
           expiresAt = Math.min(expiresAt, Date.parse(value.expiresAt));
           if (!current()) throw Error("booking_host_unavailable");
         };
+        const action = async <T>(call: () => Promise<T>): Promise<T> => {
+          if (busy || !current()) throw Error("booking_host_unavailable");
+          busy = true;
+          try {
+            try { await recheck(); } catch { dispose(); throw Error("booking_host_unavailable"); }
+            let result: T;
+            try { result = await call(); }
+            catch {
+              try { await recheck(); } catch { dispose(); }
+              throw Error("booking_action_unavailable");
+            }
+            const snapshot = JSON.parse(JSON.stringify(result)) as T;
+            try { await recheck(); } catch { dispose(); throw Error("booking_host_unavailable"); }
+            return snapshot;
+          } finally { busy = false; }
+        };
+        const reference = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9-]{36}$/iu.test(value);
+        const submission = [acceptBookingSubmission, submitAcceptedBooking, readBookingSubmission].every(method => typeof method === "function") ? {
+          async acceptBookingSubmission(input: { handoffRef: string }) {
+            if (input.handoffRef !== handoffRef || attempted) throw Error("booking_host_reference_changed");
+            return action(async () => {
+              const value = await acceptBookingSubmission({ handoffRef });
+              if (!current() || !value || value.handoffRef !== handoffRef || !reference(value.acceptanceRef) || value.execution !== "not_attested") throw Error("booking_acceptance_unavailable");
+              acceptance = JSON.parse(JSON.stringify(value)) as AiBookingSubmissionAcceptance;
+              return acceptance;
+            });
+          },
+          async submitAcceptedBooking(input: AiBookingSubmissionDecision) {
+            const ref = input.acceptanceRef, decision = input.decision;
+            if (!acceptance || ref !== acceptance.acceptanceRef || decision !== "submit_original_booking" || attempted) throw Error("booking_submission_unavailable");
+            return action(() => {
+              attempted = true;
+              return submitAcceptedBooking({ acceptanceRef: ref, decision });
+            });
+          },
+          async readBookingSubmission(input: { acceptanceRef: string }) {
+            const ref = input.acceptanceRef;
+            if (!reference(ref) || (acceptance && ref !== acceptance.acceptanceRef)) throw Error("booking_host_reference_changed");
+            return action(() => readBookingSubmission({ acceptanceRef: ref }));
+          }
+        } : {};
         return Object.freeze({
           get enabled() { return current(); }, handoffRef,
           capability: Object.freeze({ tenantCode: expected.tenantCode, serviceCode: expected.serviceCode, customerId,
             tenantId: expected.scope.tenantId, workspaceId: expected.scope.workspaceId, releaseRevision: expected.releaseRevision }),
           isCurrent: current, dispose,
+          ...submission,
           async readBookingHandoff(input: { handoffRef: string }) {
             try {
               if (input.handoffRef !== handoffRef) throw Error("booking_host_reference_changed");
               await recheck();
-              const handoff = await readBookingHandoff(handoffRef);
+              const handoff = JSON.parse(JSON.stringify(await readBookingHandoff(handoffRef))) as Awaited<ReturnType<typeof readBookingHandoff>>;
               await recheck();
               return handoff;
             } catch { dispose(); throw Error("booking_host_unavailable"); }

@@ -38,6 +38,30 @@ export const authorityFingerprint = (row: { expiresAt: Date; preparationTarget?:
 export const knowledgePolicyActions = z.enum(['upload', 'create', 'read_metadata', 'parse', 'publish', 'withdraw', 'delete', 'revise', 'search', 'read_body', 'snippet', 'resolve_source', 'download', 'index', 'change_acl']);
 export const memoryPolicyActions = z.enum(['read', 'propose', 'modify', 'confirm', 'delete']);
 export const documentResource = z.object({ documentId: id, documentVersion: id, attachmentId: id, aclRevision: revision }).strict();
+const lifecycleHead = documentResource.extend({ revision: revision.max(4294967293) }).strict();
+// A server-provisioned exact upload authority, not a second first-create target.
+// Revisions use the existing versioned file-session key and immutable head.
+export const revisionUploadTargetSpec = z.object({ version: z.literal('knowledge-revision-upload-target-1'),
+  from: lifecycleHead, upload: knowledgeUploadInput.strict(), targetVersion: id,
+  expiresAt: z.string().datetime({ offset: true }) }).strict().refine(v => v.upload.documentId === v.from.documentId
+    && v.targetVersion !== v.from.documentVersion);
+export const revisionUploadResource = (spec: z.infer<typeof revisionUploadTargetSpec>) => ({ upload: {
+  documentId: spec.upload.documentId, idempotencyKey: knowledgeUploadKey(spec.from.documentId, spec.targetVersion),
+  fileName: spec.upload.fileName, mimeType: spec.upload.mimeType, sizeBytes: spec.upload.sizeBytes,
+  revision: { documentVersion: spec.from.documentVersion, expectedRevision: spec.from.revision,
+    aclRevision: spec.from.aclRevision, targetVersion: spec.targetVersion }
+} });
+const successorTarget = z.object({ version: z.literal('knowledge-successor-target-1'), action: z.literal('revise'),
+  operationId: id, from: lifecycleHead,
+  to: z.object({ documentVersion: id, attachmentId: id, uploadSessionId: id, title: z.string().min(1).max(256),
+    validFrom: z.string().datetime({ offset: true }), validUntil: z.string().datetime({ offset: true }).optional() }).strict(),
+  expiresAt: z.string().datetime({ offset: true }) }).strict().refine(v => v.to.documentVersion !== v.from.documentVersion
+    && v.to.attachmentId !== v.from.attachmentId && (!v.to.validUntil || Date.parse(v.to.validUntil) > Date.parse(v.to.validFrom)));
+const deletionTarget = z.object({ version: z.literal('knowledge-deletion-target-1'), action: z.literal('delete'),
+  operationId: id, from: lifecycleHead, expiresAt: z.string().datetime({ offset: true }) }).strict();
+export const lifecycleTargetSpec = z.union([successorTarget, deletionTarget]);
+export const authorityTargetSpec = z.union([preparedTargetSpec, revisionUploadTargetSpec, lifecycleTargetSpec]);
+export type KnowledgeLifecycleTarget = z.infer<typeof lifecycleTargetSpec>;
 export const memoryResource = z.object({ memoryId: id, revision, aclRevision: revision, owner }).strict();
 export const memoryOwnerResource = z.object({ owner }).strict();
 export function canonicalPolicyResource(domain: string, action: string, input: unknown) {

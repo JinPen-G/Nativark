@@ -33,7 +33,9 @@ export class PrismaModelStepEvidenceAuthority extends PrismaTaskStepEvidenceAuth
   }
   protected override async additionalEvidence(step: AiStep, artifact: AiTaskResultArtifact | null,
     charges: AiTaskExecutionCharge[], context: AiExecutionContext) {
-    if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace' || !step.inputRef) throw denied();
+    const actorId = context.audience === 'client' && context.actor.kind === 'customer' ? context.actor.customerId
+      : ['operator', 'staff'].includes(context.audience) && context.actor.kind === 'user' ? context.actor.userId : null;
+    if (!actorId || context.scope.kind !== 'workspace' || !step.inputRef) throw denied();
     const key = { scopeId: step.scopeId, taskId: step.taskId, runId: step.runId };
     const saved = await this.modelDb.aiTaskActionInput.findFirst({ where: { ...key, id: step.inputRef } });
     if (!saved || saved.scopeId !== key.scopeId || saved.taskId !== key.taskId || saved.runId !== key.runId
@@ -49,7 +51,7 @@ export class PrismaModelStepEvidenceAuthority extends PrismaTaskStepEvidenceAuth
     if (!invocation || invocation.id !== call.gatewayInvocationId || invocation.scopeId !== key.scopeId
       || invocation.taskId !== key.taskId || invocation.runId !== key.runId || invocation.stepId !== step.id
       || invocation.actionId !== step.actionId || invocation.stepFingerprint !== step.requestFingerprint
-      || invocation.actorId !== context.actor.userId || invocation.callId !== input.intent.requestId
+      || invocation.actorId !== actorId || invocation.callId !== input.intent.requestId
       || invocation.intentHash !== step.requestFingerprint || invocation.mode !== input.mode
       || invocation.sceneCode !== input.intent.sceneCode || invocation.priceVersion !== input.priceVersion
       || invocation.configurationHash !== requestFingerprint(input.configuration)

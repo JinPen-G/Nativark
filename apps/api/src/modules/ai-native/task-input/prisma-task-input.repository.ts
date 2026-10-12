@@ -208,7 +208,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     }
     const step = await tx.aiStep.findFirst({ where: { scopeId, taskId, runId, id: stepId } });
     if (!step || step.id !== stepId || step.scopeId !== scopeId || step.taskId !== taskId || step.runId !== runId || step.status !== 'SUCCEEDED' || !step.resultRef || !step.inputRef) throw unavailable();
-    const access = await this.access(taskId, 'read_metadata');
+    const access = await this.tasks.resolveAccess(taskId, 'read_metadata');
     const index = parsed.data.steps.findIndex(p => step.actionId === `ai-action-${requestFingerprint({ version: 'ai-step-registration-1', scope: access.scope, taskId, registrationRef: p.registrationRef })}`);
     const planned = parsed.data.steps[index];
     if (!planned || planned.toolCode !== step.toolCode || planned.toolVersion !== step.toolVersion) throw denied();
@@ -261,7 +261,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
 
   async afterSucceeded(ref: AiTaskRunnerStepRef, lease: AiTaskRunnerLease) {
     ref = structuredClone(ref); lease = structuredClone(lease);
-    const before = await this.access(lease.taskId, 'request_input');
+    const before = await this.tasks.resolveAccess(lease.taskId, 'read_step_terminal');
     return this.writeTransaction(async tx => {
       const task = await this.task(tx, lease.taskId, before), run = await this.run(tx, task.id, task.scopeId, lease.runId, before);
       this.held(run, lease);
@@ -272,6 +272,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
         scopeId: task.scopeId, taskId: task.id, runId: run.id, stepId: facts.step.id, planHash: facts.binding.planHash } } });
       const requirement = await this.requirement(facts.binding);
       if (prior) {
+        await this.access(task.id, 'request_input', before);
         const contract = this.validateRequest(prior, facts.binding, before);
         await verifyQuestionHistory(tx, prior);
         const receipt = this.receipt(prior, await tx.aiTaskInputReceipt.findUnique({ where: { scopeId_taskId_requestId: { scopeId: task.scopeId, taskId: task.id, requestId: prior.id } } }), before);
@@ -280,7 +281,12 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
         await this.access(task.id, 'request_input', before);
         return null;
       }
-      if (requirement.kind === 'not_required') { await this.access(task.id, 'request_input', before); return null; }
+      // Completing a single turn does not grant permission to create a clarification.
+      if (requirement.kind === 'not_required') {
+        if ((await this.tasks.resolveAccess(task.id, 'read_step_terminal')).bindingKey !== before.bindingKey) throw denied();
+        return null;
+      }
+      await this.access(task.id, 'request_input', before);
       const modelContinuation = facts.planned.operation === 'external_unknown' && continuableModel(facts.planned.toolCode)
         && facts.plan.steps.length === 1;
       if ((!modelContinuation && facts.planned.operation !== 'readonly') || facts.step.effect !== 'NONE'

@@ -1,8 +1,10 @@
 import type { AiKnowledgePolicyPreparationTarget } from '@prisma/client';
 import type { KnowledgeManagementAuthority, KnowledgePolicyReadDb } from './knowledge-policy-management-authority';
 import { authorityFingerprint, managementFingerprint as hash, managementParse as parse, preparedTargetSpec,
-  preparedUploadResource, KnowledgePolicyManagementError } from './knowledge-policy-management.validation';
-import { draftInput, knowledgeRecordSchema, sameScope } from './knowledge-validation';
+  preparedUploadResource, lifecycleTargetSpec, revisionUploadTargetSpec, revisionUploadResource, type KnowledgeLifecycleTarget, KnowledgePolicyManagementError } from './knowledge-policy-management.validation';
+import { draftInput, knowledgeRecordSchema, mutationInput, operationFingerprint, sameScope } from './knowledge-validation';
+import { knowledgeUploadKey, knowledgeUploadRevisionSchema } from './human-knowledge-upload.service';
+import type { KnowledgeAuthorizationRequest } from './knowledge.ports';
 
 const denied = () => new KnowledgePolicyManagementError('unavailable');
 export const targetSpecHash = (authority: KnowledgeManagementAuthority) => hash({ tenantId: authority.row.tenantId,
@@ -83,4 +85,131 @@ export async function assertPreparedKnowledgeCreation(db: KnowledgePolicyReadDb,
   const creation = parse(draftInput, input);
   const expected = { documentId: spec.upload.documentId, ...spec.document, attachmentId: row.attachmentId };
   if (hash(creation) !== hash(expected)) throw denied();
+}
+
+export function lifecycleCommand(target: KnowledgeLifecycleTarget): NonNullable<KnowledgeAuthorizationRequest['lifecycle']> {
+  if (target.action === 'delete') return { action: 'delete', command: parse(mutationInput, {
+    documentId: target.from.documentId, expectedRevision: target.from.revision, operationId: target.operationId }) };
+  return { action: 'revise', expectedRevision: target.from.revision, command: parse(draftInput, {
+    documentId: target.from.documentId, documentVersion: target.to.documentVersion, attachmentId: target.to.attachmentId,
+    title: target.to.title, validFrom: target.to.validFrom, ...(target.to.validUntil ? { validUntil: target.to.validUntil } : {}),
+    operationId: target.operationId }) };
+}
+
+/** Authorize the original version-specific upload against the current persisted
+ * head. No placeholder document, mutable target reuse or default owner grant. */
+export async function knowledgeRevisionUploadResourceBasis(db: KnowledgePolicyReadDb, authority: KnowledgeManagementAuthority, now: Date) {
+  const target = parse(revisionUploadTargetSpec, authority.row.preparationTarget), { row } = authority;
+  if (row.domain !== 'knowledge' || row.action !== 'upload' || hash(authority.resource) !== hash(revisionUploadResource(target))
+    || !Number.isFinite(now.getTime()) || Date.parse(target.expiresAt) <= now.getTime()) throw denied();
+  const where = { id: target.from.documentId, tenantId: row.tenantId, workspaceId: row.workspaceId };
+  const stored = await db.aiKnowledgeDocument.findFirst({ where });
+  if (!stored || stored.id !== where.id || stored.tenantId !== where.tenantId || stored.workspaceId !== where.workspaceId) throw denied();
+  const state = parse(knowledgeRecordSchema, stored.state), d = state.document;
+  if (stored.revision !== state.revision || stored.status !== d.publication || stored.title !== d.title || state.parseOperationId
+    || state.revision !== target.from.revision || d.documentId !== where.id || d.documentVersion !== target.from.documentVersion
+    || d.attachmentId !== target.from.attachmentId || d.aclRevision !== target.from.aclRevision || d.publication === 'deleted'
+    || !sameScope(d.scope, { kind: 'workspace', ...{ tenantId: row.tenantId, workspaceId: row.workspaceId } })) throw denied();
+  const grants = [];
+  for (const [actorId, permission] of [[row.managerId, 'manage_policy'], [row.targetActorId, 'upload']]) {
+    if (d.owner.actorKind === 'user' && d.owner.actorId === actorId) continue;
+    const grant = await db.aiKnowledgeAcl.findFirst({ where: { documentId: d.documentId, subjectType: 'user', subjectId: actorId, permission } });
+    if (!grant || grant.documentId !== d.documentId || grant.subjectType !== 'user' || grant.subjectId !== actorId || grant.permission !== permission) throw denied();
+    grants.push({ id: grant.id, subjectId: actorId, permission });
+  }
+  if (await db.aiKnowledgeVersion.findFirst({ where: { documentId: where.id, contentHash: target.targetVersion }, select: { documentId: true } })) throw denied();
+  if (hash(stored) !== hash(await db.aiKnowledgeDocument.findFirst({ where }))) throw denied();
+  return { target, owner: d.owner, grants, uploadKey: revisionUploadResource(target).upload.idempotencyKey };
+}
+
+export function validateLifecycleResource(authority: { row: { domain: string; action: string }; resource: unknown }, target: KnowledgeLifecycleTarget) {
+  const { row, resource } = authority, { revision: _revision, ...from } = target.from;
+  if (row.domain !== 'knowledge' || ![target.action, 'read_metadata'].includes(row.action)) throw denied();
+  const resources = [from];
+  if (target.action === 'revise') {
+    resources.push({ ...from, documentVersion: target.to.documentVersion, attachmentId: target.to.attachmentId });
+    if (row.action === 'revise') resources.push({ ...from, attachmentId: target.to.attachmentId });
+  }
+  if (!resources.some(candidate => hash(candidate) === hash(resource))) throw denied();
+}
+
+async function successorAttachment(db: KnowledgePolicyReadDb, authority: KnowledgeManagementAuthority,
+  target: Extract<KnowledgeLifecycleTarget, { action: 'revise' }>, now: Date) {
+  const { row } = authority, expected = { documentVersion: target.from.documentVersion, expectedRevision: target.from.revision,
+    aclRevision: target.from.aclRevision, targetVersion: target.to.documentVersion };
+  const session = await db.fileUploadSession.findFirst({ where: { id: target.to.uploadSessionId, tenantId: row.tenantId } });
+  const asset = await db.fileAsset.findFirst({ where: { id: target.to.attachmentId, tenantId: row.tenantId } });
+  const metadata = asset?.metadata;
+  if (!session || session.id !== target.to.uploadSessionId || session.tenantId !== row.tenantId
+    || session.fileAssetId !== target.to.attachmentId || session.status !== 'completed'
+    || session.idempotencyKey !== knowledgeUploadKey(target.from.documentId, target.to.documentVersion)
+    || !(session.completedAt instanceof Date) || !Number.isFinite(session.completedAt.getTime())
+    || !(session.expiresAt instanceof Date) || !Number.isFinite(session.expiresAt.getTime())
+    || session.completedAt > session.expiresAt || session.completedAt > now
+    || !asset || asset.id !== target.to.attachmentId || asset.tenantId !== row.tenantId || asset.status !== 'active'
+    || asset.businessModule !== 'ai-native' || asset.businessType !== 'ai_knowledge_document'
+    || asset.businessId !== target.from.documentId || asset.uploadScene !== 'ai-knowledge'
+    || asset.uploadedBy !== row.targetActorId || asset.storageProvider === 'local_mock'
+    || asset.storageProvider !== session.provider || asset.storageKey !== session.storageKey
+    || !metadata || Array.isArray(metadata) || typeof metadata !== 'object'
+    || metadata.workspaceId !== row.workspaceId || metadata.knowledgeUploadVersion !== 1
+    || hash(parse(knowledgeUploadRevisionSchema, metadata.knowledgeRevision)) !== hash(expected)) throw denied();
+  return hash({ sessionId: session.id, completedAt: session.completedAt.toISOString(), attachmentId: asset.id,
+    storageKey: asset.storageKey, provider: asset.storageProvider, revision: expected });
+}
+
+export async function knowledgeLifecycleResourceBasis(db: KnowledgePolicyReadDb, authority: KnowledgeManagementAuthority, now: Date) {
+  const { row } = authority, target = parse(lifecycleTargetSpec, row.preparationTarget);
+  validateLifecycleResource(authority, target);
+  if (!Number.isFinite(now.getTime()) || Date.parse(target.expiresAt) <= now.getTime()) throw denied();
+  const scope = { kind: 'workspace' as const, tenantId: row.tenantId, workspaceId: row.workspaceId };
+  const where = { id: target.from.documentId, tenantId: row.tenantId, workspaceId: row.workspaceId };
+  const record = await db.aiKnowledgeDocument.findFirst({ where });
+  if (!record || record.id !== where.id || record.tenantId !== where.tenantId || record.workspaceId !== where.workspaceId) throw denied();
+  const state = parse(knowledgeRecordSchema, record.state), d = state.document;
+  if (!sameScope(d.scope, scope) || record.revision !== state.revision || record.status !== d.publication
+    || record.title !== d.title || d.documentId !== where.id || d.aclRevision !== target.from.aclRevision || state.parseOperationId) throw denied();
+  const before = state.revision === target.from.revision && d.documentVersion === target.from.documentVersion
+    && d.attachmentId === target.from.attachmentId && d.publication !== 'deleted';
+  const after = state.revision === target.from.revision + 1 && state.indexJob?.operationId === `${target.operationId}:index`
+    && state.indexJob.kind === 'remove' && state.indexJob.generation === state.revision
+    && d.indexing === 'not_indexed' && (target.action === 'delete'
+      ? d.documentVersion === target.from.documentVersion && d.attachmentId === target.from.attachmentId && d.publication === 'deleted'
+      : d.documentVersion === target.to.documentVersion && d.attachmentId === target.to.attachmentId && d.publication === 'draft'
+        && d.parsing === 'pending' && !state.failure && d.title === target.to.title
+        && d.validFrom === target.to.validFrom && d.validUntil === target.to.validUntil);
+  if (!before && !after) throw denied();
+  const operation = lifecycleCommand(target);
+  const expected = operationFingerprint({ scope, actor: { kind: 'user', userId: row.targetActorId }, audience: row.targetAudience as 'operator' | 'staff' },
+    operation.action === 'revise' ? ['revise', operation.expectedRevision, operation.command] : ['delete', operation.command]);
+  const receipt = await db.aiKnowledgeOperation.findFirst({ where: { tenantId: row.tenantId, workspaceId: row.workspaceId,
+    documentId: where.id, operationId: target.operationId } });
+  if (before && receipt || after && (!receipt || receipt.tenantId !== row.tenantId || receipt.workspaceId !== row.workspaceId
+    || receipt.documentId !== where.id || receipt.operationId !== target.operationId || receipt.fingerprint !== expected)) throw denied();
+  let attachmentBinding: string | undefined;
+  if (target.action === 'revise') {
+    attachmentBinding = await successorAttachment(db, authority, target, now);
+    const version = await db.aiKnowledgeVersion.findFirst({ where: { documentId: where.id, contentHash: target.to.documentVersion },
+      select: { documentId: true, contentHash: true } });
+    if (before && version || after && (!version || version.documentId !== where.id || version.contentHash !== target.to.documentVersion)) throw denied();
+  }
+  const acl = [];
+  for (const [actorId, permission] of [[row.managerId, 'manage_policy'], [row.targetActorId, row.action]]) {
+    if (d.owner.actorKind === 'user' && d.owner.actorId === actorId) continue;
+    const grant = await db.aiKnowledgeAcl.findFirst({ where: { documentId: d.documentId, subjectType: 'user', subjectId: actorId, permission } });
+    if (!grant || grant.documentId !== d.documentId || grant.subjectType !== 'user' || grant.subjectId !== actorId || grant.permission !== permission) throw denied();
+    acl.push({ id: grant.id, subjectId: actorId, permission });
+  }
+  if (hash(record) !== hash(await db.aiKnowledgeDocument.findFirst({ where }))) throw denied();
+  return { target, owner: d.owner, acl, ...(attachmentBinding ? { attachmentBinding } : {}), phase: before ? 'before' as const : 'committed' as const };
+}
+
+export async function assertLifecycleConsumption(db: KnowledgePolicyReadDb, authority: KnowledgeManagementAuthority,
+  request: KnowledgeAuthorizationRequest, now: Date) {
+  const basis = await knowledgeLifecycleResourceBasis(db, authority, now), target = basis.target;
+  if (request.action === 'read_metadata') {
+    if (target.action === 'delete' && (basis.phase !== 'committed' || request.receiptOperationId !== target.operationId)) throw denied();
+    return;
+  }
+  if (request.action !== target.action || hash(request.lifecycle) !== hash(lifecycleCommand(target))) throw denied();
 }

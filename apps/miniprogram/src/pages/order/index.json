@@ -6,6 +6,7 @@
     "money-text": "/components/money-text/index",
     "status-tag": "/components/status-tag/index",
     "sheet": "/components/sheet/index",
-    "ai-task-workbench": "/components/ai-native/ai-task-workbench/index"
+    "ai-task-workbench": "/components/ai-native/ai-task-workbench/index",
+    "ai-order-explanation": "/components/ai-native/ai-order-explanation/index"
   }
 }

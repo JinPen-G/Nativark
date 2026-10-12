@@ -71,6 +71,7 @@ export function BookingHandoffPanel({ host, context, sessionIdentity, onContinue
               onClick={() => { if (agreed) void consumer.controller.accept(); }}>{available ? text('受理原预约材料', 'Accept original booking material') : text('提交能力未接通', 'Submission unavailable')}</button>}
       </>}
       {available && ['disabled', 'unavailable', 'pending_reconcile'].includes(state.status) && <button type="button" className="button button-dark"
+        disabled={busy || !consumer.controller.canReconcile()}
         onClick={() => { void consumer.controller.reconcile(); }}>{text('只核对原提交', 'Read original receipt only')}</button>}
       {state.receipt?.state === 'observed' && <Link className="button button-dark" to={href(`/orders/${encodeURIComponent(state.receipt.orderId)}`)}>
         {text('查看原订单', 'View original order')}</Link>}

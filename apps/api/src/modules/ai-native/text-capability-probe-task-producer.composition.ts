@@ -71,7 +71,7 @@ export function composeTextCapabilityProbeTaskProducer(input: TextCapabilityProb
     }
   };
   const creation = new AiTaskCreationRepository(input.db, authority, input.clock);
-  const task = async (ref: string, result: { taskId: string; runId: string }) => {
+  const task = async (ref: string, result: Awaited<ReturnType<AiTaskCreationRepository['create']>>) => {
     const original = await source.read(ref);
     return { ...result, registrationRef: original.registrationRef, command: structuredClone(original.command),
       priceVersion: original.priceVersion, limits: structuredClone(original.limits), toolCode: TEXT_CAPABILITY_PROBE_TOOL };

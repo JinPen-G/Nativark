@@ -3,12 +3,12 @@ import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
-import { composePersistedTaskModelInput } from '../model-input/persisted-task-model-input.composition';
+import { composePersistedTaskModelInput, composeCurrentAuthorizedTaskModelInput } from '../model-input/persisted-task-model-input.composition';
 import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, taskModelMaterialSchema, taskImageMaterialSchema, taskAudioMaterialSchema, parseTaskModelInput, taskModelFingerprint, continueTaskModelMaterial } from '../model-input/task-model-input';
 import { isGatewayResult } from '../gateway-contract-validation';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { aiTaskRunnerLimitsSchema } from './prisma-task-run-evidence.repository';
-import { composeAuthorizedPersistentTaskInputRunner } from './authorized-persistent-task-input.composition';
+import { composeCurrentAuthorizedPersistentTaskInputRunner } from './authorized-persistent-task-input.composition';
 import type { AiTaskApplicationHost } from './prisma-task-application';
 import type { AiTaskHeldPreparation } from './ai-task-runner.service';
 
@@ -25,11 +25,17 @@ export type TaskModelHostDependencies = Parameters<typeof composePersistedTaskMo
 };
 
 export function composeTaskModelHost(input: TaskModelHostDependencies) {
+  return composeTaskModelHostWithModel(input, composePersistedTaskModelInput(input));
+}
+
+/** Server-only reuse point, not a second execution engine or dispatch grant. */
+export function composeTaskModelHostWithModel<T extends ReturnType<typeof composeCurrentAuthorizedTaskModelInput>>(
+  input: Omit<TaskModelHostDependencies, 'auth' | 'credentials' | 'subscriptions'>, model: T,
+) {
   if (typeof input?.financialEvidence?.readDispatch !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const task = (input.kind === 'image' ? taskSchema.extend({ material: taskImageMaterialSchema })
     : input.kind === 'audio' ? taskSchema.extend({ material: taskAudioMaterialSchema }) : taskSchema).parse(structuredClone(input.task));
   const tool = input.kind === 'image' ? TASK_IMAGE_MODEL_TOOL : input.kind === 'audio' ? TASK_AUDIO_MODEL_TOOL : TASK_TEXT_MODEL_TOOL;
-  const model = composePersistedTaskModelInput(input);
   const prepare: AiTaskHeldPreparation = async ({ lease, taskRevision, signal }) => {
     if (lease.taskId !== task.taskId || signal?.aborted) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     let { registrationRef, material, limits } = task;
@@ -59,12 +65,11 @@ export function composeTaskModelHost(input: TaskModelHostDependencies) {
       steps: [{ registrationRef, toolCode: tool, toolVersion: AI_TOOL_DRAFT_VERSION, operation: 'external_unknown' }],
       limits: structuredClone(limits) }, lease);
   };
-  const root = composeAuthorizedPersistentTaskInputRunner({ db: input.db,
-    authorization: { auth: input.auth, credentials: input.credentials, subscriptions: input.subscriptions },
+  const root = composeCurrentAuthorizedPersistentTaskInputRunner({ db: input.db,
     registrationAuthority: model.planAuthority, transitionAuthority: model.createTransitionAuthority(input.financialEvidence),
     planAuthority: model.planAuthority, commands: model.commands, executors: model.executors,
     invocations: model.invocations, toolCatalog: model.toolCatalog, financialEvidence: input.financialEvidence,
-    inputSource: input.inputSource, wall: input.clock, monotonic: input.monotonic });
+    inputSource: input.inputSource, wall: input.clock, monotonic: input.monotonic }, model.authorization);
   const application = root.createApplication(input.host, prepare);
   return Object.freeze({ model, ...root, application });
 }

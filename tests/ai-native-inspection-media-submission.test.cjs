@@ -141,8 +141,9 @@ function submissionFixture(mode='committed'){
     receipts.set(req.headers['idempotency-key'],{requestHash:requestFingerprint({orderId,...body,returnItems:[],exceptions:[]}),orderId,response});
     if(mode==='lost')throw Error('reply lost after original commit');return response;
   }};
-  f.services=composeInspectionAssist({...f.ports,originalInspection:{controller,receipts:new RentalIdempotencyRepository(f.db)}});
-  return {...f,receipts,calls:()=>calls,lookups:()=>lookups};
+  const originalInspection={controller,receipts:new RentalIdempotencyRepository(f.db)};
+  f.services=composeInspectionAssist({...f.ports,originalInspection});
+  return {...f,originalInspection,receipts,calls:()=>calls,lookups:()=>lookups};
 }
 async function prepared(f){
   const d=await draft(f);
@@ -392,6 +393,11 @@ for(const mediaKind of ['image','audio']) test(`original inspection frozen ${med
   }
   assert.equal((await f.services.recognitionResults.read(reference)).status,'available');
   assert.deepEqual((await f.services.recognitionResults.read(reference)).candidates,[unclearCandidate]);
+  const reviewObservation=await f.services.readRecognitionReview(reference);
+  assert.equal(reviewObservation.recognition.status,'available');
+  assert.equal(reviewObservation.review.fields.find(field=>field.fieldCode==='mileage').human.value,42);
+  assert.equal(reviewObservation.adoption,'not_attempted');
+  assert.deepEqual((await f.services.drafts.read({...target,draftId:d.result.draftId})).state,detail.state);
   await assert.rejects(f.services.recognitionResults.read({...reference,payload:[candidate]}),{code:'INVALID_INPUT'});
   const originalStep=h.state.aiGatewayInvocation[0].stepId;
   h.state.aiGatewayInvocation[0].stepId='another-step';await assert.rejects(f.services.recognitionResults.read(reference));
@@ -399,6 +405,9 @@ for(const mediaKind of ['image','audio']) test(`original inspection frozen ${med
   h.state.aiTaskResultArtifact[0].completeMeasurement=false;
   const unknown=await f.services.recognitionResults.read(reference);
   assert.equal(unknown.status,'unknown');assert.deepEqual(unknown.candidates,[]);
+  const incomplete=await f.services.readRecognitionReview(reference);
+  assert.equal(incomplete.recognition.status,'unknown');assert.deepEqual(incomplete.recognition.candidates,[]);
+  assert.equal(incomplete.automaticRetry,false);assert.equal(incomplete.review.fields.find(field=>field.fieldCode==='mileage').human.value,42);
   await assert.rejects(f.services.recognitionResults.save({...reference,operationId:'save-unknown'}));
   h.state.aiTaskResultArtifact[0].completeMeasurement=true;
   h.state.aiTaskResultArtifact[0].outcome='FAILED';h.state.aiStep.find(s=>s.id===reference.stepId||s.resultRef===reference.resultId).status='FAILED';
@@ -438,9 +447,11 @@ for(const mediaKind of ['image','audio']) test(`original inspection frozen ${med
   assert.equal((await f.services.recognitionResults.reconcileSave(save)).status,'found');
   const after=await f.services.drafts.read({...target,draftId:d.result.draftId});
   assert.equal(after.state.fields.mileage.value,42);assert.deepEqual(after.state.candidates,[candidate]);
+  await assert.rejects(f.services.readRecognitionReview(successorReference),{code:'REVISION_CONFLICT'});
   assert.equal(h.modelControl.sent.length,2);
   await assert.rejects(f.services.recognitionResults.save({...save,operationId:'new-key-old-revision'}));
   h.identity.membership=false;
+  await assert.rejects(f.services.readRecognitionReview({...successorReference,expectedRevision:after.revision}));
   await assert.rejects(composeInspectionRecognitionTaskHost(f.services.recognition,{...target,draftId:d.result.draftId,inputId:frozen.inputId,expectedRevision:detail.revision},{...dependencies,task}));
 });
 
@@ -515,6 +526,8 @@ test('human attachment replacement invalidates frozen input and submission witho
   assert.equal(detail.status,'draft_saved');assert.equal(detail.state.fields.mileage.value,44);
   assert.equal(detail.state.candidates.length,1);assert.deepEqual(detail.state.evidence,[]);
   assert.equal(detail.state.submission,undefined);assert.equal(detail.state.recognitionInputs,undefined);
+  const removedReview=await f.services.drafts.readReview({...target,draftId:d.result.draftId});
+  assert.equal(removedReview.fields.find(field=>field.fieldCode==='mileage').candidateEvidence[0].sourcesMatchDraftEvidence,false);
   assert.equal(f.state.drafts.get(d.result.draftId).inputFingerprint,null);
   assert.equal(f.state.drafts.get(d.result.draftId).submissionActionId,null);
   await assert.rejects(f.services.drafts.replaceEvidence({...request,evidence:[ref]}),{code:'REVISION_CONFLICT'});
@@ -564,12 +577,29 @@ test('multi-allocation review preserves per-item materials and cannot dispatch a
 });
 test('failed draft back-write preserves original submission and recovery never re-submits',async()=>{
   const f=submissionFixture(),input=await prepared(f);f.state.failLink=true;
-  const result=await f.services.submission.submit(input);
+  const {StaffInspectionRequestFactory}=require('../apps/api/src/modules/ai-native/inspection-assist/inspection-assist.composition');
+  const {StaffInspectionAssistController}=require('../apps/api/src/modules/ai-native/inspection-assist/staff-inspection-assist.controller');
+  const credential=await f.ports.credentials.current();
+  const controller=new StaffInspectionAssistController(new StaffInspectionRequestFactory({...f.ports,originalInspection:f.originalInspection}),true);
+  const request={headers:{authorization:credential.authorization}};
+  const result=await controller.consume(request,'submission-submit',input);
   assert.equal(result.status,'submitted');assert.equal(result.inspectionId,'inspection-original');assert.equal(result.draftLinked,false);
   assert.equal(f.state.drafts.get(input.draftId).status,'submission_unknown');
   f.order.allocations[0].status='returned';
+  const snapshot=structuredClone(f.state.drafts.get(input.draftId)),operations=f.state.operations.size;
+  const observed=await controller.consume(request,'submission-read',{...target,draftId:input.draftId});
+  assert.equal(observed.status,'submitted');assert.equal(observed.inspectionId,'inspection-original');assert.equal(observed.draftLinked,false);
+  assert.deepEqual(f.state.drafts.get(input.draftId),snapshot);assert.equal(f.state.operations.size,operations);assert.equal(f.calls(),1);
   const repaired=await f.services.submission.reconcile({...target,draftId:input.draftId});
   assert.equal(repaired.draftLinked,true);assert.equal(f.calls(),1);
+});
+
+test('staff submission refuses a template-resource change during pre-submit waits',async()=>{
+  const f=submissionFixture(),input=await prepared(f);
+  const original=f.services.templates.read.bind(f.services.templates);let reads=0;
+  f.services.templates.read=async target=>{const result=await original(target);if(++reads===2)f.order.allocations[0].assetId='reassigned-asset';return result;};
+  await assert.rejects(f.services.submission.submit(input),{code:'BINDING_CHANGED'});
+  assert.equal(f.calls(),0);assert.equal(f.state.drafts.get(input.draftId).status,'prepared');
 });
 test('absent original receipt stays unknown with exact action material and never retries automatically',async()=>{
   const f=submissionFixture('absent'),input=await prepared(f);

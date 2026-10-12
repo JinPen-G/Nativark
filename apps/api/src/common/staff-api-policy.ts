@@ -13,6 +13,15 @@ const STAFF_AUTH_PATHS = new Set([
   "/staff/v1/auth/switch-workspace"
 ]);
 
+const humanAutomationActions = new Set([
+  'candidates/read', 'candidates/prepare', 'candidates/prepare-pending', 'inputs/prepare', 'inputs/read',
+  'tasks/create', 'tasks/read-creation', 'reviews/read', 'reviews/for-event', 'reviews/close', 'reviews/feedback', 'reviews/operation', 'reviews/queue'
+]);
+export function isHumanAutomationRoute(method: string, path: string, audience: 'operator' | 'staff') {
+  const prefix = `/ai-native/automation/${audience}/`;
+  return method.toUpperCase() === 'POST' && path.startsWith(prefix) && humanAutomationActions.has(path.slice(prefix.length));
+}
+
 export function isStaffAuthPath(path: string) {
   return STAFF_AUTH_PATHS.has(path);
 }
@@ -21,6 +30,7 @@ export function isStaffAuthPath(path: string) {
 export function isStaffBusinessRouteAllowed(method: string, path: string) {
   const verb = method.toUpperCase();
   if (path.startsWith("/staff/v1/auth/")) return isStaffAuthPath(path);
+  if (isHumanAutomationRoute(verb, path, 'staff')) return true;
   if (inspectionAssistPaths.has(path)) return verb === "POST";
   // Exact opt-in AI recognition task routes. Original order/attachment/action
   // authorities still recheck ownership, location and the current stage.
@@ -78,6 +88,7 @@ export function isStaffBusinessRouteAllowed(method: string, path: string) {
 }
 
 export function staffRoutePermissions(method: string, path: string, body?: unknown) {
+  if (isHumanAutomationRoute(method, path, 'staff')) return ['rental-os:order:view'];
   if (method.toUpperCase() === 'POST' && inspectionAssistPaths.has(path)) return ['rental-os:order:view'];
   if (method.toUpperCase() === inspectionTaskMethod && inspectionTaskPaths.has(path)) {
     // Entry permission only, not model execution or inspection submission.

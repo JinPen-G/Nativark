@@ -43,14 +43,24 @@ export class StaffInspectionAssistController {
           case 'draft-operation': return services.drafts ? services.drafts.reconcileOperation(input) : absent();
           case 'input-prepare': return services.recognition ? services.recognition.prepare(input, signal) : absent();
           case 'input-receipt': return services.recognition ? services.recognition.readPreparation(input) : absent();
-          case 'result-read': return services.recognitionResults.read(input);
+          // Preserve the existing wire projection while checking that the
+          // original result still belongs to the current human-review draft.
+          case 'result-read': return (await services.readRecognitionReview(input)).recognition;
           case 'result-save': return services.recognitionResults.save(input);
           case 'result-save-receipt': return services.recognitionResults.reconcileSave(input);
           case 'submission-review': return services.submission ? services.submission.prepareReview(input) : absent();
           case 'submission-prepare': return services.submission ? services.submission.prepare(input) : absent();
           case 'submission-preparation': return services.submission ? services.submission.reconcilePreparation(input) : absent();
           case 'submission-submit': return services.submission ? services.submission.submit(input) : absent();
-          case 'submission-read': return services.submission ? services.submission.reconcile(input) : absent();
+          // Querying the original receipt must not write a draft link or
+          // initiate another inspection. Explicit submit remains separate.
+          case 'submission-read': {
+            if (!services.submission) return absent();
+            const receipt = await services.submission.readReceipt(input);
+            return receipt.status === 'not_observed' || receipt.status === 'unavailable'
+              ? { ...receipt, status: 'submission_unknown' as const, nextAction: 'manual_reconcile_original_action' as const }
+              : receipt;
+          }
           default: throw new InspectionAssistError('INVALID_INPUT');
         }
       }));

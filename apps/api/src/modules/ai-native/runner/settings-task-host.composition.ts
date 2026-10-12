@@ -97,11 +97,17 @@ export function composeTaskSettingsHost(input: ApprovedSettingsApplicationDepend
     const before = structuredClone(await authorization.tasks.resolveAccess(task.taskId, confirmation ? 'claim_recovery_run' : 'read_metadata'));
     const stored = await input.db.aiTask.findFirst({ where: before.where });
     const run = stored && await input.db.aiRun.findFirst({ where: { id: task.runId, taskId: task.taskId, scopeId: stored.scopeId } });
-    if (!stored || !run || run.actorKind !== before.actorKind || run.actorId !== before.actorId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    if (!stored || !run || run.actorKind !== before.actorKind || run.actorId !== before.actorId
+      || before.scope.kind !== 'WORKSPACE' || !before.scope.tenantId || !before.scope.workspaceId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     // Terminal recovery is observation, not reacquisition. A committed Core
     // receipt remains a fact even if the aggregate ultimately failed/cancelled.
     // Missing receipts never attest rollback or authorize another execution.
-    if (!confirmation && AI_TASK_TERMINAL_STATUSES_DRAFT.some(status => status === stored.status.toLowerCase())) {
+    const change = !confirmation ? await input.db.rentalApprovedSettingsChange.findFirst({ where: {
+      id: task.change.changeId, changeHash: task.change.changeHash, tenantId: before.scope.tenantId,
+      workspaceId: before.scope.workspaceId, actorId: before.actorId }, select: { expiresAt: true } }) : null;
+    const expired = change?.expiresAt instanceof Date && change.expiresAt.getTime() <= (input.clock?.() ?? new Date()).getTime();
+    // Expired input permits original observation only, never another recovery claim.
+    if (!confirmation && (expired || AI_TASK_TERMINAL_STATUSES_DRAFT.some(status => status === stored.status.toLowerCase()))) {
       const key = { taskId: task.taskId, runId: task.runId };
       const snapshot = await application.inspect(key);
       const receipt = await settings.readCommittedChange({ taskId: task.taskId, ...task.change });

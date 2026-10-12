@@ -8,7 +8,7 @@ Component({
       bindings.set(this, new StaffInspectionHostBinding(view => this.setData(view),
         () => this.selectComponent("#workbench")?.detachHost?.()));
     },
-    detached() { bindings.get(this)?.detachHost(); bindings.delete(this); },
+    detached() { bindings.get(this)?.dispose(); bindings.delete(this); this.selectComponent?.("#workbench")?.detachHost?.(); },
   },
   methods: {
     attachHost(host: StaffInspectionHost) {
@@ -16,10 +16,18 @@ Component({
       if (host.taskHost && host.serverEnabled === true) this.selectComponent("#workbench")?.attachHost?.(host.taskHost);
     },
     detachHost() { bindings.get(this)?.detachHost(); this.selectComponent("#workbench")?.detachHost?.(); },
-    async hostShow() { await bindings.get(this)?.show(); if (this.data.phase !== "unavailable") this.selectComponent("#workbench")?.hostShow?.(true); },
+    async hostShow() {
+      const binding = bindings.get(this), generation = binding?.generation();
+      await binding?.show();
+      if (binding && bindings.get(this) === binding && generation !== undefined && binding.isActive(generation)) {
+        this.selectComponent("#workbench")?.hostShow?.(true);
+      }
+    },
     hostHide() { bindings.get(this)?.hide(); this.selectComponent("#workbench")?.hostHide?.(); },
     hostLogout() { this.detachHost(); },
     async onRead() { await bindings.get(this)?.read(); },
+    async onReadRecognition() { await bindings.get(this)?.readRecognition(); },
+    async onSaveRecognition() { await bindings.get(this)?.saveRecognition(); },
     async onEdit(event: WechatMiniprogram.CustomEvent) { await bindings.get(this)?.edit(event.detail?.key, event.detail?.humanValue); },
     async onCandidate(event: WechatMiniprogram.CustomEvent) {
       await bindings.get(this)?.decideCandidate(event.detail?.key, event.detail?.candidateId, event.detail?.decision, event.detail?.revision);

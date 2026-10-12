@@ -2,7 +2,7 @@ import type { AiInspectionTarget, AiInspectionDraftReadRequest, AiStaffInspectio
   AiInspectionReceiptLookup, RentalInspectionTemplate } from '@rental-os/shared';
 import { request } from '../../core/http';
 import { contextVersion, currentSession } from '../../core/session';
-import type { InspectionHostDetail, StaffInspectionHost } from './inspection-host';
+import type { InspectionHostDetail, InspectionSubmissionObservation, InspectionRecognitionReference, InspectionRecognitionObservation, StaffInspectionHost } from './inspection-host';
 
 const root = '/ai-native/inspection-assist/';
 const id = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value);
@@ -12,10 +12,15 @@ const sameTarget = (left: AiInspectionTarget, right: AiInspectionTarget) => ['or
 /** Called explicitly by the existing page, never from import/show/load. The
  * current session is a local isolation check, not server-side authorization. */
 export async function createStaffInspectionTransportHost(reference: AiInspectionDraftReadRequest,
-  signatureFileAssetId?: string): Promise<StaffInspectionHost> {
+  signatureFileAssetId?: string, recognitionReference?: InspectionRecognitionReference): Promise<StaffInspectionHost> {
   const input = { ...reference }, session = currentSession(), version = contextVersion();
+  const originalResult = recognitionReference ? { ...recognitionReference } : undefined;
   if (!session || !id(input.orderId) || !id(input.allocationId) || !id(input.templateId) || !id(input.draftId)
     || !['pickup', 'return'].includes(input.stage) || signatureFileAssetId !== undefined && !id(signatureFileAssetId)) throw Error('inspection unavailable');
+  if (originalResult && (!sameTarget(originalResult, input) || originalResult.draftId !== input.draftId
+    || !id(originalResult.inputId) || !id(originalResult.taskId) || !id(originalResult.resultId)
+    || !Number.isSafeInteger(originalResult.expectedRevision) || originalResult.expectedRevision < 1 || originalResult.expectedRevision > 999
+    || Object.keys(originalResult).some(key => !['orderId', 'allocationId', 'templateId', 'stage', 'draftId', 'inputId', 'taskId', 'resultId', 'expectedRevision'].includes(key)))) throw Error('inspection unavailable');
   const context = { tenantId: session.tenant.tenantId, workspaceId: session.currentWorkspaceId,
     ownerId: session.user.id, audience: 'staff' as const };
   const current = () => { const now = currentSession(); return contextVersion() === version && now?.tenant.tenantId === context.tenantId
@@ -40,6 +45,12 @@ export async function createStaffInspectionTransportHost(reference: AiInspection
     return value;
   };
   return { context, target, draftId: input.draftId, serverEnabled: true, current, actionId,
+    ...(originalResult ? { recognition: {
+      reference: { ...originalResult },
+      read: () => call<InspectionRecognitionObservation>('result-read', originalResult),
+      ...(capabilities.edit ? { save: (operationId: string) => call('result-save', { ...originalResult, operationId }, true) } : {}),
+      reconcileSave: (operationId: string) => call<AiInspectionReceiptLookup>('result-save-receipt', { ...originalResult, operationId })
+    } } : {}),
     ...(signatureFileAssetId ? { handoverSignatureFileAssetId: signatureFileAssetId } : {}),
     operationId: (kind, revision) => { if (!current() || !Number.isSafeInteger(revision) || revision < 1) throw Error('inspection context changed');
       return `${actionId}:${kind}:${revision}`; },
@@ -53,8 +64,8 @@ export async function createStaffInspectionTransportHost(reference: AiInspection
       ...(capabilities.review ? { prepareReview: (value: Parameters<NonNullable<NonNullable<StaffInspectionHost['submission']>['prepareReview']>>[0]) => call('submission-review', bound(value), true) } : {}),
       ...(capabilities.submit && signatureFileAssetId ? {
         prepare: (value: Parameters<NonNullable<NonNullable<StaffInspectionHost['submission']>['prepare']>>[0]) => call('submission-prepare', bound(value), true),
-        submit: (value: Parameters<NonNullable<NonNullable<StaffInspectionHost['submission']>['submit']>>[0]) => call<{ status: string }>('submission-submit', bound(value), true) } : {}),
-      reconcile: value => call<{ status: string }>('submission-read', bound(value)),
+        submit: (value: Parameters<NonNullable<NonNullable<StaffInspectionHost['submission']>['submit']>>[0]) => call<InspectionSubmissionObservation>('submission-submit', bound(value), true) } : {}),
+      reconcile: value => call<InspectionSubmissionObservation>('submission-read', bound(value)),
       reconcilePreparation: value => call('submission-preparation', { ...value, request: bound(value.request) }) },
   };
 }

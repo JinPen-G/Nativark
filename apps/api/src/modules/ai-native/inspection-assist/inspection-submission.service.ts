@@ -107,6 +107,13 @@ export class InspectionSubmissionService {
       await this.singleAllocation(scope, target);
       const binding = await this.templates.read(target);
       if (binding.bindingFingerprint !== row.bindingFingerprint) throw new InspectionAssistError('BINDING_CHANGED');
+      // The original evidence/template read predates allocation and template
+      // waits. Do not claim the business action from a stale human draft.
+      const latest = await this.drafts.read({ ...target, draftId: row.id });
+      if (latest.revision !== row.revision) throw new InspectionAssistError('REVISION_CONFLICT');
+      if (latest.state.reviewRequired || requestFingerprint(latest.state) !== requestFingerprint(detail.state)) {
+        throw new InspectionAssistError('BINDING_CHANGED');
+      }
       const claim = await this.authority.withAction(target, 'submit', current => {
         this.sameScope(scope, current);
         return this.repository.claimSubmission(scope, row.id, { operationId: input.operationId, fingerprint, expectedRevision: row.revision }, row.bindingFingerprint);

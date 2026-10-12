@@ -5,6 +5,7 @@ import { requestFingerprint } from '../rental-core/rental-idempotency.repository
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from './ai-task.repository';
 import { AiScopeRepository } from './ai-scope.repository';
 import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';
+import { TenantModelConfigurationAuthority } from './tenant-model-config.authority';
 import type { AiTaskCredentialSource } from './task-current-action.authority';
 import type { AuthService } from '../auth/auth.service';
 import type { ApiAuthGuard } from '../../common/api-auth.guard';
@@ -51,6 +52,9 @@ export class PrismaTextProbeOriginalRequestRepository implements TextCapabilityP
     scopes: Pick<AiScopeRepository, 'resolveCurrent'>;
     policy: Pick<PrismaTaskPlanPolicyRepository, 'read'>;
     probe: Pick<TextCapabilityProbeApplication, 'prepareCurrent'>;
+    /** Only historical reads use this real current management authority. A
+     * missing port keeps history closed, never substitutes old authorization. */
+    management?: Pick<TenantModelConfigurationAuthority, 'authorize'>;
     /** Trusted server composition, not fields accepted from an HTTP body.
      * The existing Gateway pricing port must validate this version at execution. */
     sceneVersion: string; priceVersion: string;
@@ -115,11 +119,44 @@ export class PrismaTextProbeOriginalRequestRepository implements TextCapabilityP
     if (!row || row.id !== inputRef) throw unavailable();
     return this.checked(row);
   }
+  private async historicalAccess() {
+    if (typeof this.input.management?.authorize !== 'function') throw unavailable();
+    const before = await this.access(), context = before.context;
+    if (context.actor.kind !== 'user' || context.scope.kind !== 'workspace') throw denied();
+    await this.input.management.authorize({ actorId: context.actor.userId, tenantId: context.scope.tenantId,
+      workspaceId: context.scope.workspaceId }, 'manage');
+    const after = await this.access();
+    if (after.binding !== before.binding || requestFingerprint(after.owner) !== requestFingerprint(before.owner)) throw denied();
+    return after;
+  }
+  /** Immutable original locator only, not permission to create or execute. Past
+   * policy/config hashes are integrity evidence, never today's authorization. */
+  async readHistoricalOriginal(requestKey: string) {
+    if (!id.max(128).safeParse(requestKey).success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const before = await this.historicalAccess();
+    const row = await this.db.aiTaskOriginalRequest.findFirst({ where: { ...before.owner, requestKey,
+      contractVersion: version, sceneCode: TEXT_PROBE_SCENE } });
+    const after = await this.historicalAccess();
+    if (after.binding !== before.binding || requestFingerprint(after.owner) !== requestFingerprint(before.owner)) throw denied();
+    if (!row) return null;
+    const value = payload.parse(structuredClone(row.payload));
+    if (Object.entries(after.owner).some(([key, expected]) => row[key as keyof Row] !== expected)
+      || row.requestKey !== requestKey || row.contractVersion !== version || row.sceneCode !== TEXT_PROBE_SCENE
+      || !id.max(64).safeParse(row.sceneVersion).success || row.status !== 'STORED' || row.revision !== 1
+      || row.previousRequestId !== null || !Number.isFinite(row.expiresAt.getTime())) throw unavailable();
+    const binding = { ...after.owner, sceneVersion: row.sceneVersion, requestKey: row.requestKey, revision: row.revision,
+      policyRevision: row.policyRevision, policyHash: row.policyHash, authorizationBindingHash: row.authorizationBindingHash, payload: value };
+    if (row.contentHash !== this.hash(binding)) throw unavailable();
+    return { context: after.context, owner: after.owner, sceneVersion: row.sceneVersion,
+      inputRef: row.id, inputRevision: row.revision, inputHash: row.contentHash, expiresAt: row.expiresAt.toISOString(),
+      command: structuredClone(value.command), preparationHash: value.preparationHash };
+  }
   async readOriginal(requestKey: string) {
     if (!id.max(128).safeParse(requestKey).success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const access = await this.access();
     const row = await this.db.aiTaskOriginalRequest.findFirst({ where: { ...access.owner, requestKey, contractVersion: version, sceneCode: TEXT_PROBE_SCENE } });
     if (!row) return { state: 'not_found' as const };
+    if (row.requestKey !== requestKey) throw conflict();
     const original = await this.checked(row);
     return { state: 'stored' as const, inputRef: original.inputRef, inputHash: original.inputHash };
   }
@@ -184,9 +221,11 @@ export function composeAuthorizedTextProbeTaskProducer(db: Db, input: {
   guard: Pick<ApiAuthGuard, 'canActivate'>; probe: Pick<TextCapabilityProbeApplication, 'prepareCurrent'>;
   sceneVersion: string; priceVersion: string; clock?: () => Date;
 }) {
-  const scopes = new AiScopeRepository(db, new AiTaskCurrentIdentityAuthority(input.auth, input.credentials, input.clock), input.clock);
+  const current = new AiTaskCurrentIdentityAuthority(input.auth, input.credentials, input.clock);
+  const scopes = new AiScopeRepository(db, current, input.clock);
+  const management = new TenantModelConfigurationAuthority(input.guard, input.credentials, current);
   const policy = new PrismaTaskPlanPolicyRepository(db, { auth: input.auth, credentials: input.credentials, guard: input.guard,
     scene: { code: TEXT_PROBE_SCENE, version: input.sceneVersion }, tool: TEXT_CAPABILITY_PROBE_TOOL }, input.clock);
-  return composePersistedTextProbeTaskProducer(db, { scopes, policy, probe: input.probe,
+  return composePersistedTextProbeTaskProducer(db, { scopes, policy, probe: input.probe, management,
     sceneVersion: input.sceneVersion, priceVersion: input.priceVersion }, input.clock);
 }

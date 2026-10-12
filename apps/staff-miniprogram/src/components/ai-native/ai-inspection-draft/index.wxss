@@ -1,1 +1,3 @@
 .ai-inspection-draft { padding: 24rpx; }.ai-inspection-draft__row { padding: 20rpx 0; border-bottom: 1rpx solid var(--border, #e5e7eb); display: flex; flex-direction: column; gap: 8rpx; font-size: 26rpx; }.source, .missing { color: var(--secondary, #6b7280); }.missing { padding-top: 16rpx; }
+.ai-inspection-draft__row { overflow-wrap: anywhere; word-break: break-word; }
+.ai-inspection-draft__row input, .ai-inspection-draft__row button { min-height: 88rpx; white-space: normal; }

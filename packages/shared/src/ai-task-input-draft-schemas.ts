@@ -4,7 +4,7 @@ const id = (maxLength = 191) => ({ type: "string", minLength: 1, maxLength, patt
 const text = (maxLength: number) => ({ type: "string", minLength: 1, maxLength, pattern: "\\S", not: { pattern: "[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f]" } });
 const base = { required: { type: "boolean" }, label: text(160) };
 const field: AiLeafSchemaDraft = { oneOf: [
-  obj({ ...base, fieldId: choice("customer_selection", "item_selection", "pickup_location", "return_location", "fulfillment_selection", "enterprise_selection", "enterprise_payer_selection"), kind: choice("choice"),
+  obj({ ...base, fieldId: choice("customer_selection", "item_selection", "pickup_location", "return_location", "fulfillment_selection", "pricing_unit_selection", "delivery_address_selection", "enterprise_selection", "enterprise_payer_selection"), kind: choice("choice"),
     options: { type: "array", minItems: 1, maxItems: 50, uniqueItems: true, items: obj({ value: id(), label: text(160) }) } }),
   obj({ ...base, fieldId: choice("quantity"), kind: choice("integer"), minimum: int(1, 1000000), maximum: int(1, 1000000) }),
   obj({ ...base, fieldId: choice("starts_at", "ends_at", "usage_quantity", "clarification_text"), kind: choice("text"), maxLength: int(1, 2048) })

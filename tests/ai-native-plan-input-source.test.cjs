@@ -339,7 +339,7 @@ test('settings normal host cancellation blocks confirmation and preserves origin
   }
 });
 
-for (const mode of ['missing operation', 'cancelled committed operation']) test(`settings normal host recovers ${mode} without executing again`, { timeout: 20000 }, async () => {
+for (const mode of ['missing operation', 'cancelled committed operation', 'expired committed operation']) test(`settings normal host recovers ${mode} without executing again`, { timeout: 20000 }, async () => {
   const h = await settingsNormalHostSetup(), host = h.rebuild(), key = { taskId: 'task-a', runId: 'run-a' };
   let calls = 0;
   h.dependencies.core.commitNotificationSettings = async (_tenant, notifications) => {
@@ -357,7 +357,7 @@ for (const mode of ['missing operation', 'cancelled committed operation']) test(
     proposalId: proposal.proposalId, proposalRevision: proposal.proposalRevision,
     reviewedPayloadHash: proposal.reviewedPayloadHash, decision: 'approve' });
   await host.authorization.tasks.claimRecoveryRun(h.claim());
-  if (mode === 'cancelled committed operation') h.storeControl.beforeWrite = async (name, args) => {
+  if (mode !== 'missing operation') h.storeControl.beforeWrite = async (name, args) => {
     if (name === 'aiStep' && args.data?.status === 'SUCCEEDED') throw Error('synthetic result bookkeeping unavailable');
   };
   const continued = host.application.continueConfirmation({ ...key, checkpointRef: checkpoint.id });
@@ -370,10 +370,27 @@ for (const mode of ['missing operation', 'cancelled committed operation']) test(
     assert.equal(h.state.aiStep[0].status, 'RUNNING');
     assert.equal(h.state.aiTaskExecutionPhaseReceipt[1].kind, 'succeeded');
     h.storeControl.beforeWrite = null;
-    await host.application.requestCancel({ taskId: key.taskId, expectedRevision: h.state.aiTask[0].revision });
+    if (mode === 'cancelled committed operation') {
+      await host.application.requestCancel({ taskId: key.taskId, expectedRevision: h.state.aiTask[0].revision });
+    }
   }
   assert.equal(calls, 1);
   const rebuilt = h.rebuild();
+  if (mode === 'expired committed operation') {
+    h.control.now = new Date('2026-10-08T12:00:00Z');
+    h.current.settingsRevision++;
+    h.current.settings.notifications = { enabledEvents: [], editableChannels: ['email'] };
+    const before = h.clone(h.state);
+    const observed = await rebuilt.application.reconcileOriginal(key);
+    assert.equal(observed.mode, 'read_only'); assert.equal(observed.businessOutcome, 'committed');
+    assert.equal(observed.operation.receipt.changeHash, h.reference.changeHash);
+    assert.equal(observed.operation.receipt.resultRevision, 2);
+    assert.deepEqual(h.clone(h.state), before); assert.equal(calls, 1);
+    assert.equal(h.state.aiStep[0].status, 'RUNNING'); assert.equal(h.timers.size, 0);
+    h.identity.membership = false;
+    await assert.rejects(rebuilt.application.reconcileOriginal(key));
+    return;
+  }
   await rebuilt.authorization.tasks.claimRecoveryRun(h.claim());
   const lease = h.held();
   await assert.rejects(rebuilt.inputs.source.publishSettingsInput({ taskId: key.taskId, registrationRef: 'new-settings',

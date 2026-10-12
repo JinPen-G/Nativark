@@ -69,7 +69,7 @@ function runtime(handler) {
   });
   function load(relative) {
     let absolute = path.resolve(src, relative);
-    if (!path.extname(absolute)) absolute += ".ts";
+    if (!fs.existsSync(absolute) && fs.existsSync(`${absolute}.ts`)) absolute += ".ts";
     if (modules.has(absolute)) return modules.get(absolute).exports;
     assert.ok(absolute.startsWith(src + path.sep), `模块不能逃出 src：${relative}`);
     const module = { exports: {} };
@@ -98,6 +98,64 @@ const sessionResponse = (accessToken = "access-one", refreshToken = "refresh-one
 });
 const ok = (req, data, header = {}) => req.success({ statusCode: 200, data: { data, requestId: "request-one" }, header });
 const status = (req, statusCode, message = "error") => req.success({ statusCode, data: { statusCode, message }, header: {} });
+
+test("原订单事实：实际页面零金额、缺依据、切身份与卸载隔离", async () => {
+  const r = runtime();
+  const session = r.load("core/session");
+  session.saveSession(sessionResponse(), "camera", "synthetic");
+  const { customerOrderFacts } = r.load("components/ai-native/customer-order-facts");
+  const order = { id: "own-order", status: "pending", currency: "CNY", finalPayableAmount: 0,
+    depositAmount: 0, preAuthAmount: null, startAt: "2030-01-01T00:00:00Z", endAt: "2030-01-02T00:00:00Z",
+    updatedAt: "2030-01-01T00:00:00Z", lines: [], chargeLines: [], customerName: "private", internalNote: "secret" };
+  const facts = customerOrderFacts(order, order.id);
+  assert.equal(facts.receivable, "0 CNY"); assert.equal(facts.preAuth, "未知");
+  assert.equal(facts.paid.startsWith("未知"), true);
+  assert.equal(JSON.stringify(facts).includes("private"), false);
+  assert.equal(JSON.stringify(facts).includes("secret"), false);
+  assert.equal(customerOrderFacts(order, "another-order"), null);
+  assert.equal(customerOrderFacts({ ...order, finalPayableAmount: Infinity }, order.id).receivable, "未知");
+  r.load("pages/order/index"); const page = r.page;
+  let writes = 0; page.setData = patch => { writes++; Object.assign(page.data, patch); };
+  page.onLoad({ id: order.id, service: "camera" });
+  page.render(order, undefined, undefined, [], { available: false, loadError: "" });
+  assert.equal(page.data.aiNativeOrderProjection.receivable, "0 CNY");
+  assert.equal(page.data.aiOrderFactsExpanded, false); page.onToggleOrderFacts();
+  assert.equal(page.data.aiOrderFactsExpanded, true);
+  session.sessionEvents.emit({ type: "service-changed", serviceCode: "camping", reason: "synthetic" });
+  assert.equal(page.data.aiNativeOrderProjection, null); assert.equal(page.data.aiOrderFactsExpanded, false);
+  page.onHide(); page.onToggleOrderFacts(); assert.equal(page.data.aiNativeOrderProjection, null);
+  page.onUnload(); const count = writes;
+  session.sessionEvents.emit({ type: "signed-out", reason: "synthetic" }); assert.equal(writes, count);
+  assert.equal(r.calls.length, 0, "display uses original supplied facts, no extra AI or finance read");
+  const switched = runtime(), auth = switched.load("core/session"), api = switched.load("api/orders");
+  auth.saveSession(sessionResponse(), "camera", "synthetic");
+  let switches = 0, orderReads = 0;
+  switched.load("core/flow").ensureServiceForOrder = async code => {
+    switches++; auth.saveSession(sessionResponse("switched-token"), code, "switch-service"); return true;
+  };
+  Object.assign(api, { fetchOrder: async () => { orderReads++; return order; }, fetchFunding: async () => undefined,
+    fetchFulfillment: async () => undefined, listExtensions: async () => [], fetchFeeItems: async () => ({ items: [], pendingCount: 0 }) });
+  switched.load("core/catalogStore").loadCatalog = async () => undefined;
+  switched.load("core/zones").ensureCurrentZone = async () => undefined;
+  switched.load("pages/order/index"); const originalPage = switched.page;
+  originalPage.setData = patch => Object.assign(originalPage.data, patch);
+  originalPage.onLoad({ id: order.id, service: "camping" });
+  await originalPage.load();
+  assert.equal(switches, 1); assert.equal(orderReads, 1); assert.equal(auth.currentServiceCode(), "camping");
+  assert.equal(originalPage.data.view.status, "ready"); assert.equal(originalPage.data.aiNativeOrderProjection.receivable, "0 CNY");
+  api.fetchOrder = async () => {
+    auth.saveSession(sessionResponse("refreshed-token"), "camping", "refresh"); return { ...order, finalPayableAmount: 12 };
+  };
+  await originalPage.load(); assert.equal(originalPage.data.aiNativeOrderProjection.receivable, "12 CNY");
+  let finish;
+  api.fetchOrder = () => new Promise(resolve => { finish = resolve; });
+  const hidden = originalPage.load(); originalPage.onHide(); finish(order); await hidden;
+  assert.equal(originalPage.data.aiNativeOrderProjection, null);
+  originalPage.aiOrderFactsActive = true;
+  const changed = originalPage.load(); auth.clearSession("logout-during-read"); finish(order); await changed;
+  assert.equal(originalPage.data.aiNativeOrderProjection, null); originalPage.onUnload();
+  assert.equal(switched.calls.length, 0, "page lifecycle runs with explicit offline source boundaries");
+});
 
 test("AI原checkout交接：实例host、人工复读原报价、默认关闭与hide/登录隔离", async () => {
   const handoff = {
@@ -161,6 +219,12 @@ test("AI原checkout交接：实例host、人工复读原报价、默认关闭与
   let hostCurrent = true, finishAcceptance;
   const lateStates = [];
   const { createCustomerBookingConsumer } = r.load("components/ai-native/booking-handoff");
+  const noReceiptConsumer = createCustomerBookingConsumer(submissionHost,
+    () => ({ tenantCode: "merchant", serviceCode: "camera", customerId: "customer-one", version: 1 }),
+    async () => quote, () => {});
+  const acceptsBeforeRecovery = acceptedCalls;
+  await noReceiptConsumer.reconcile(); assert.equal(acceptedCalls, acceptsBeforeRecovery);
+  noReceiptConsumer.destroy();
   const lateConsumer = createCustomerBookingConsumer({ ...submissionHost, isCurrent: () => hostCurrent,
     acceptBookingSubmission: () => new Promise(resolve => { finishAcceptance = resolve; }) },
     () => ({ tenantCode: "merchant", serviceCode: "camera", customerId: "customer-one", version: 1 }),
@@ -200,11 +264,18 @@ test("AI原checkout交接：实例host、人工复读原报价、默认关闭与
     observedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60000).toISOString(),
     capabilities: { entryActions: ["CREATE_BOOKING_DRAFT", "OPEN_BOOKING"], bookingDrafts: true, savedDeliveryAddresses: false },
     authorization: "observation_only_recheck_each_action" };
-  let pendingCapability, holdCapability = false;
+  let pendingCapability, holdCapability = false, hostSubmitCalls = 0, holdSubmission = false, pendingSubmission;
   const factoryRuntime = runtime(req => {
     assert.equal(req.method, "POST"); assert.equal(req.header.Authorization, "Bearer access-one");
     if (req.url.endsWith("/api/client/v1/ai-native/entry/host-capabilities/read")) {
       same(req.data, {}); if (holdCapability) pendingCapability = req; else ok(req, plain(capability));
+    } else if (req.url.endsWith("/booking-submissions/accept")) {
+      same(req.data, { handoffRef: handoff.handoffRef }); ok(req, acceptance);
+    } else if (req.url.endsWith("/booking-submissions/submit")) {
+      hostSubmitCalls++; same(req.data, { acceptanceRef: acceptance.acceptanceRef, decision: "submit_original_booking" });
+      if (holdSubmission) pendingSubmission = req; else ok(req, { ...receipt, state: "unknown", orderId: null });
+    } else if (req.url.endsWith("/booking-submissions/read")) {
+      same(req.data, { acceptanceRef: acceptance.acceptanceRef }); ok(req, receipt);
     } else {
       assert.ok(req.url.endsWith("/api/client/v1/ai-native/entry/booking-handoffs/read"));
       same(req.data, { handoffRef: handoff.handoffRef }); ok(req, handoff);
@@ -216,9 +287,37 @@ test("AI原checkout交接：实例host、人工复读原报价、默认关闭与
   const inert = factory(); assert.equal(await inert.openFromUser(handoff.handoffRef), null); assert.equal(factoryRuntime.calls.length, 0);
   const owner = factory(publication); assert.equal(factoryRuntime.calls.length, 0);
   const trusted = await owner.openFromUser(handoff.handoffRef); assert.ok(trusted?.enabled);
-  assert.equal(trusted.submitAcceptedBooking, undefined); assert.equal(JSON.stringify(trusted).includes("access-one"), false);
+  assert.equal(typeof trusted.submitAcceptedBooking, "function"); assert.equal(JSON.stringify(trusted).includes("access-one"), false);
   same(await trusted.readBookingHandoff({ handoffRef: handoff.handoffRef }), handoff);
   assert.equal(factoryRuntime.calls.length, 4, "one initial read, then capability/handoff/capability for an explicit action");
+  same(await trusted.acceptBookingSubmission({ handoffRef: handoff.handoffRef }), acceptance);
+  const submitDecision = { acceptanceRef: acceptance.acceptanceRef, decision: "submit_original_booking" };
+  const sent = trusted.submitAcceptedBooking(submitDecision);
+  await assert.rejects(trusted.submitAcceptedBooking(submitDecision));
+  assert.equal((await sent).state, "unknown"); assert.equal(hostSubmitCalls, 1);
+  await assert.rejects(trusted.submitAcceptedBooking(submitDecision));
+  assert.equal((await trusted.readBookingSubmission({ acceptanceRef: acceptance.acceptanceRef })).state, "observed");
+  assert.equal(hostSubmitCalls, 1, "unknown recovery only reads the original receipt");
+  factoryRuntime.load("pages/checkout/index");
+  const boundPage = { ...factoryRuntime.page, data: plain(factoryRuntime.page.data), writes: 0,
+    setData(update) { Object.assign(this.data, update); this.writes++; } };
+  boundPage.onLoad(); boundPage.attachHost(trusted); boundPage.onShow();
+  assert.equal(await boundPage.attachPublishedBooking(publication, handoff.handoffRef), true);
+  assert.equal(boundPage.data.aiReceiptAvailable, false);
+  const beforeEmptyRecovery = factoryRuntime.calls.length;
+  await boundPage.onReadBookingSubmission(); assert.equal(factoryRuntime.calls.length, beforeEmptyRecovery);
+  holdCapability = true;
+  const lateBinding = boundPage.attachPublishedBooking(publication, handoff.handoffRef);
+  await new Promise(resolve => setImmediate(resolve)); boundPage.onHide();
+  const afterHide = boundPage.writes; ok(pendingCapability, capability);
+  assert.equal(await lateBinding, false); assert.equal(boundPage.writes, afterHide);
+  boundPage.onUnload(); holdCapability = false;
+  const lateOwner = factory(publication), lateHost = await lateOwner.openFromUser(handoff.handoffRef);
+  await lateHost.acceptBookingSubmission({ handoffRef: handoff.handoffRef }); holdSubmission = true;
+  const lateSubmit = lateHost.submitAcceptedBooking(submitDecision);
+  const lateRejected = assert.rejects(lateSubmit);
+  await new Promise(resolve => setImmediate(resolve)); lateOwner.hide(); ok(pendingSubmission, receipt);
+  await lateRejected; assert.equal(lateHost.enabled, false); holdSubmission = false;
   capability.policy.revision++;
   await assert.rejects(trusted.readBookingHandoff({ handoffRef: handoff.handoffRef })); assert.equal(trusted.enabled, false);
   capability.policy.revision--;
@@ -276,7 +375,7 @@ test("app.json 声明 21 个页面、4 个 Tab（带图标），每个页面与�
   if ((app.requiredPrivateInfos ?? []).includes("getLocation")) {
     assert.ok(app.permission && app.permission["scope.userLocation"] && app.permission["scope.userLocation"].desc, "声明 getLocation 必须同时配 permission.scope.userLocation.desc");
   }
-  const componentTags = ["nav-bar", "ui-icon", "state-view", "money-text", "status-tag", "sheet", "lazy-image", "ai-task-workbench"];
+  const componentTags = ["nav-bar", "ui-icon", "state-view", "money-text", "status-tag", "sheet", "lazy-image", "ai-task-workbench", "ai-order-explanation"];
   const registeredComponents = new Set();
   for (const route of app.pages) {
     for (const ext of ["ts", "json", "wxml", "wxss"]) assert.ok(read(`${route}.${ext}`).trim(), `${route}.${ext} 缺失或为空`);
@@ -289,7 +388,7 @@ test("app.json 声明 21 个页面、4 个 Tab（带图标），每个页面与�
     const declared = Object.keys(pageJson.usingComponents ?? {});
     same([...used].sort(), [...declared].sort(), `${route} 使用的组件与 usingComponents 声明不一致`);
     for (const [tag, componentPath] of Object.entries(pageJson.usingComponents ?? {})) {
-      const expectedPath = tag === "ai-task-workbench" ? "/components/ai-native/ai-task-workbench/index" : `/components/${tag}/index`;
+      const expectedPath = ["ai-task-workbench", "ai-order-explanation"].includes(tag) ? `/components/ai-native/${tag}/index` : `/components/${tag}/index`;
       assert.equal(componentPath, expectedPath);
       registeredComponents.add(componentPath);
     }

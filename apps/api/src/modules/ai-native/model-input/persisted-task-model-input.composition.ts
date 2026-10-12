@@ -16,8 +16,9 @@ import { PrismaModelStepEvidenceAuthority } from './prisma-model-step-evidence.a
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
 import type { AiTaskRunnerRepositoryCommandFactory } from '../runner/ai-task-runner.repository-adapter';
 import { AiTaskRepositoryError } from '../ai-task.repository';
+import type { CurrentPersistentTaskAuthorization } from '../runner/authorized-persistent-task-input.composition';
 
-export function composePersistedTaskModelInput(input: PersistedTaskAuthorizationDependencies & {
+type TaskModelCompositionInput = Pick<PersistedTaskAuthorizationDependencies, 'db' | 'clock'> & {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   scene: { code: string; version: string };
   gatewayScene: GatewayTextIntentBinding;
@@ -27,14 +28,23 @@ export function composePersistedTaskModelInput(input: PersistedTaskAuthorization
   kind?: TaskModelKind;
   /** Explicit server scene assembly; policy management still requires its Guard and CAS. */
   planTools?: readonly PersistedTaskInputTool[];
-}) {
+};
+export function composePersistedTaskModelInput(input: PersistedTaskAuthorizationDependencies & TaskModelCompositionInput) {
+  const authorization = composePersistedTaskAuthorization(input);
+  const tool = input.kind === 'image' ? TASK_IMAGE_MODEL_TOOL : input.kind === 'audio' ? TASK_AUDIO_MODEL_TOOL : TASK_TEXT_MODEL_TOOL;
+  const policy = new PrismaTaskPlanPolicyRepository(input.db, { ...input, tool, tools: input.planTools }, input.clock);
+  return Object.freeze({ ...composeCurrentAuthorizedTaskModelInput(input, authorization), policy });
+}
+
+/** Shared model publication/execution assembly. The original operator helper
+ * above retains its management policy; a client authority cannot manage it. */
+export function composeCurrentAuthorizedTaskModelInput(input: TaskModelCompositionInput,
+  authorization: CurrentPersistentTaskAuthorization) {
   if (input.scene.code !== input.gatewayScene.sceneCode) throw new Error('Model scene binding mismatch');
   const clock = input.clock ?? (() => new Date());
   const tool = input.kind === 'image' ? TASK_IMAGE_MODEL_TOOL : input.kind === 'audio' ? TASK_AUDIO_MODEL_TOOL : TASK_TEXT_MODEL_TOOL;
   const modelPolicy = { sceneCode: input.gatewayScene.sceneCode, maxOutputTokens: input.gatewayScene.maxOutputTokens,
     ...(input.kind ? { kind: input.kind } : {}) };
-  const authorization = composePersistedTaskAuthorization(input);
-  const policy = new PrismaTaskPlanPolicyRepository(input.db, { ...input, tool, tools: input.planTools }, clock);
   const source = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, clock,
     tool, undefined, modelPolicy);
   const scopes = new PrismaTaskExecutionScopeAuthority(authorization.tasks, input.db);
@@ -65,7 +75,7 @@ export function composePersistedTaskModelInput(input: PersistedTaskAuthorization
         lease: { runId: lease.runId, holderId: lease.holderId, revision: lease.revision, fencingToken: lease.fencingToken } };
     }
   };
-  return Object.freeze({ authorization, tasks: authorization.tasks, policy, planAuthority: source, plans, registrations,
+  return Object.freeze({ authorization, tasks: authorization.tasks, planAuthority: source, plans, registrations,
     publish: inputs.publish.bind(inputs), invocations, executors: inputs.registeredExecutors(), commands, createTransitionAuthority,
     toolCatalog: { resolve: async (code: string, version: string) => code === tool && version === AI_TOOL_DRAFT_VERSION
       ? { modelCall: true } : null } });

@@ -4,7 +4,8 @@ import type { AiExecutionContext } from '@rental-os/shared';
 import type { FormalActionPolicy, FormalKnowledgePolicySource, FormalMemoryPolicySource, FormalPolicyResource } from './formal-knowledge-authorization.adapter';
 import { actor, fingerprint } from './knowledge-validation';
 import type { KnowledgeAuthorizationRequest } from './knowledge.ports';
-import { assertPreparedKnowledgeCreation } from './knowledge-policy-preparation-target';
+import { assertPreparedKnowledgeCreation, assertLifecycleConsumption } from './knowledge-policy-preparation-target';
+import { lifecycleTargetSpec } from './knowledge-policy-management.validation';
 
 export class PrismaKnowledgeActionPolicySource {
   readonly knowledge: FormalKnowledgePolicySource;
@@ -41,6 +42,10 @@ export class PrismaKnowledgeActionPolicySource {
     try {
       const managed = await managedKnowledgePolicyCurrent(this.db, row, this.clock());
       if (managed && request?.creation) await assertPreparedKnowledgeCreation(this.db, managed, request.creation, this.clock());
+      if (managed && lifecycleTargetSpec.safeParse(managed.row.preparationTarget).success) {
+        if (!request) return null;
+        await assertLifecycleConsumption(this.db, managed, request, this.clock());
+      }
     } catch { return null; }
     return { action, scope: structuredClone(context.scope), audience: context.audience, actor: principal,
       revision: row.revision, expiresAt: row.expiresAt.toISOString(), requiredPermissions: row.requiredPermissions as string[],

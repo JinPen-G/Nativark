@@ -12,10 +12,20 @@ import { composePrismaFormalHumanKnowledge, type PrismaFormalKnowledgeDependenci
 import { KNOWLEDGE_POLICY_MANAGEMENT, type KnowledgePolicyManagementApplication } from './knowledge-policy-management.composition';
 import { HumanKnowledgeConsumptionRequestFactory, type HumanKnowledgeConsumptionDependencies } from './human-knowledge-consumption.composition';
 import { HumanKnowledgeConsumptionController } from './human-knowledge-consumption.controller';
+import { HumanKnowledgeManagementRequestFactory, type HumanKnowledgeManagementDependencies } from './human-knowledge-management.composition';
+import { HumanKnowledgeManagementController } from './human-knowledge-management.controller';
 import { unavailable } from './knowledge-errors';
+import { HumanMemoryManagementRequestFactory, type HumanMemoryManagementDependencies } from './human-memory-management.composition';
+import { HumanMemoryManagementController } from './human-memory-management.controller';
 
 @Module({})
 export class HumanKnowledgeModule {
+  static registerMemoryManagementHttp(options: { enabled?: boolean; dependencies?: HumanMemoryManagementDependencies } = {}): DynamicModule {
+    if (options.enabled !== true) return { module: HumanKnowledgeModule, controllers: [], providers: [] };
+    if (!options.dependencies) return unavailable();
+    return { module: HumanKnowledgeModule, controllers: [HumanMemoryManagementController],
+      providers: [{ provide: HumanMemoryManagementRequestFactory, useValue: new HumanMemoryManagementRequestFactory(options.dependencies) }] };
+  }
   static register(ports: HumanKnowledgeInputDependencies): DynamicModule {
     return this.services(composePersistedHumanKnowledge(ports));
   }
@@ -30,6 +40,14 @@ export class HumanKnowledgeModule {
     const requests = new HumanKnowledgeConsumptionRequestFactory(options.dependencies);
     return { module: HumanKnowledgeModule, controllers: [HumanKnowledgeConsumptionController],
       providers: [{ provide: HumanKnowledgeConsumptionRequestFactory, useValue: requests }] };
+  }
+
+  static registerManagementHttp(options: { enabled?: boolean; dependencies?: HumanKnowledgeManagementDependencies } = {}): DynamicModule {
+    if (options.enabled !== true) return { module: HumanKnowledgeModule, controllers: [], providers: [] };
+    if (!options.dependencies) return unavailable();
+    const requests = new HumanKnowledgeManagementRequestFactory(options.dependencies);
+    return { module: HumanKnowledgeModule, controllers: [HumanKnowledgeManagementController],
+      providers: [{ provide: HumanKnowledgeManagementRequestFactory, useValue: requests }] };
   }
 
   static registerFiles(ports: KnowledgeFileApplicationDependencies): DynamicModule {

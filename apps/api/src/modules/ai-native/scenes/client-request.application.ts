@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { aiClientOrderExplanationReadRequestSchema, aiClientSourceReadRequestSchema } from '@rental-os/shared';
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '../../../common/request-identity';
@@ -14,7 +15,12 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AI_CLIENT_HOST_CAPABILITIES_VERSION, aiClientHostCapabilitiesRequestSchema, aiClientHostCapabilitiesSchema,
   type AiClientHostCapabilities } from '../../../../../../packages/shared/src/ai-client-entry-draft-schemas';
 import { AiClientEntryError, assertEntryAction, clientEntrySurface, entryActionSchema, materialEntryAction, parseEntry } from './client-entry-action';
-import { composeClientMaterialTasks } from './client-task.composition';
+import { composeClientMaterialTasks, clientTaskEventsCommandSchema } from './client-task.composition';
+import { composePersistedClientTaskAuthorization } from './client-task-execution.composition';
+import { composeClientOriginalTaskModelHost } from './client-task-model-host.composition';
+import { composeClientTaskModelConfiguration, type ClientCallGatewayDependencies } from './client-task-model-configuration.composition';
+import type { SecretBox } from '../../../common/secret-box';
+import type { PublicGatewayRuntime } from '../public-ai-gateway.service';
 import { AiClientTaskUnknownError, clientTaskCommandSchema } from './prisma-client-task-input.repository';
 import { prepareClientOrderExplanation } from './client-order-explanation';
 import { bookingSelectionSchema, readClientBookingMaterial } from './client-booking-material';
@@ -35,8 +41,8 @@ const commandSchema = z.discriminatedUnion('kind', [
 ]);
 const operationSchema = z.object({ operationKey: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
   command: commandSchema }).strict();
-const sourceSchema = z.object({ materialRef: z.string().uuid() }).strict();
-const explanationSchema = z.object({ orderId: id, question: z.enum(['status', 'fees']).default('status') }).strict();
+const sourceSchema = aiClientSourceReadRequestSchema;
+const explanationSchema = aiClientOrderExplanationReadRequestSchema;
 const taskSceneSchema = clientTaskCommandSchema.extend({ question: z.enum(['status', 'fees']).default('status') }).strict();
 const bearerSchema = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
 export type AiClientRequestConfiguration = z.infer<typeof configurationSchema>;
@@ -180,8 +186,8 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     if (!input.success) return fail('AI_CLIENT_INVALID_INPUT');
     return freezeOriginalInput(input.data);
   };
-  const taskOperation = async (request: AiClientApplicationRequest, value: unknown, operation: 'create' | 'readCreation') => {
-    const parsed = clientTaskCommandSchema.safeParse(structuredClone(value));
+  const taskOperation = async (request: AiClientApplicationRequest, value: unknown, operation: 'create' | 'readCreation' | 'readSnapshot' | 'readEvents') => {
+    const parsed = (operation === 'readEvents' ? clientTaskEventsCommandSchema : clientTaskCommandSchema).safeParse(structuredClone(value));
     if (!parsed.success) return fail('AI_CLIENT_INVALID_INPUT');
     if (!taskDependencies) return fail('AI_CLIENT_CAPABILITY_UNAVAILABLE');
     const command = freezeOriginalInput(parsed.data);
@@ -202,6 +208,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         const result = await tasks[operation](command);
         returned = true;
         const material = await load(command.materialRef);
+        if (operation === 'readSnapshot' || operation === 'readEvents') return freezeOriginalInput(result);
         return freezeOriginalInput({ ...result, source: { materialRef: material.row.id, materialHash: material.row.materialHash,
           tenantCode: server.tenantCode, serviceCode: server.serviceCode, channel: server.channel } });
       });
@@ -214,7 +221,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     if (!server.entry || !taskDependencies) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'entry_disabled');
     return clientEntrySurface(server.channel);
   };
-  const entryGrant = async (bound: Bound, row: AiClientSceneMaterial) => {
+  const entryGrant = async (bound: Bound, row: AiClientSceneMaterial, operation: 'create' | 'read' = 'create') => {
     requireEntry();
     if (!taskDependencies || !bound.identity) throw new AiClientEntryError('AI_ACCESS_DENIED', 'client_required');
     const identity = bound.identity;
@@ -223,8 +230,9 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       await bound.assertCurrent();
       return { row, identity };
     }, randomUUID(), clock);
-    const grant = await authority.authorize(row.id, 'create');
-    return { policyFingerprint: requestFingerprint({ policyHash: grant.policyHash, release: server.entry }), expiresAt: grant.policy.expiresAt };
+    const grant = await authority.authorize(row.id, operation);
+    return { policyFingerprint: requestFingerprint({ policyHash: grant.policyHash ?? requestFingerprint(grant.policy),
+      release: server.entry }), expiresAt: grant.policy.expiresAt };
   };
   const verifyEntryMaterial = async (bound: Bound, row: AiClientSceneMaterial) => {
     const key = `entry-invalid:${row.id}`, scope = scopeOf(bound);
@@ -293,14 +301,17 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       throw error;
     }
   };
-  const submissionPort = () => {
+  const hasSubmissionPort = () => {
     const port = dependencies.bookingSubmission;
-    if (!port || (port as unknown) !== dependencies.client || ['prepareOrderSubmission', 'readOrderSubmission', 'createOrder']
-      .some(key => typeof port[key as keyof typeof port] !== 'function')) {
+    return !!port && (port as unknown) === dependencies.client && ['prepareOrderSubmission', 'readOrderSubmission', 'createOrder']
+      .every(key => typeof port[key as keyof typeof port] === 'function');
+  };
+  const submissionPort = () => {
+    if (!hasSubmissionPort()) {
       throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'original_booking_submission_not_assembled');
     }
     requireBooking();
-    return port;
+    return dependencies.bookingSubmission!;
   };
   const submissionDraft = z.object({ handoffRef: z.string().uuid(), contactPhone: z.string().max(32).optional() }).strict();
   const acceptedRef = z.object({ acceptanceRef: z.string().uuid() }).strict();
@@ -330,9 +341,13 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       || material.accepted.workspaceId !== bound.identity?.workspaceId
       || material.accepted.customerId !== bound.identity?.customerId) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'booking_acceptance_invalid');
     // Reauthorize historical receipt access without re-consuming an already used quote.
-    await entryGrant(bound, row);
+    const grant = await entryGrant(bound, row, 'read');
+    const latest = await repository.findSource(scopeOf(bound), ref);
+    if (!latest || jsonHash(latest) !== jsonHash(row)) {
+      throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_acceptance_changed');
+    }
     await bound.assertCurrent();
-    return { row, material };
+    return { row, material, policyFingerprint: grant.policyFingerprint };
   };
   const originalBookingCall = async <T>(request: AiClientApplicationRequest, bound: Bound, body: { quoteId: string; contactPhone?: string },
     write: boolean, consume: (identity: ClientRequestContext) => Promise<T>) => runWithRequestIdentity({}, async () => {
@@ -347,11 +362,20 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       || current.userId !== guarded.client.customerId || current.isSaasAdmin) throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_identity_scope_missing');
     return consume(structuredClone(guarded.client));
   });
-  const readSubmission = async (request: AiClientApplicationRequest, bound: Bound, material: Acceptance) => {
+  const readSubmission = async (request: AiClientApplicationRequest, bound: Bound, acceptance: Awaited<ReturnType<typeof loadAcceptance>>) => {
+    const { row, material, policyFingerprint } = freezeOriginalInput(structuredClone(acceptance));
     const result = await originalBookingCall(request, bound, { quoteId: material.quoteId }, false,
-      identity => submissionPort().readOrderSubmission(identity, material.accepted, material.operationKey));
+      identity => submissionPort().readOrderSubmission(identity, structuredClone(material.accepted), material.operationKey));
+    const receipt = structuredClone(result);
+    const latest = await loadAcceptance(bound, row.id);
+    if (latest.policyFingerprint !== policyFingerprint) {
+      throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_receipt_policy_changed');
+    }
+    if (jsonHash(latest.row) !== jsonHash(row)) {
+      throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_acceptance_changed');
+    }
     await bound.assertCurrent();
-    return freezeOriginalInput({ ...result, operationKey: material.operationKey, retryable: false as const,
+    return freezeOriginalInput({ ...receipt, operationKey: material.operationKey, retryable: false as const,
       payment: 'not_inferred' as const, fulfillment: 'not_inferred' as const });
   };
   return Object.freeze({
@@ -389,21 +413,22 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       request = structuredClone(request);
       submissionPort(); const command = parseEntry(acceptedRef, structuredClone(value));
       return withBinding(request, true, 'order', async bound => readSubmission(request, bound,
-        (await loadAcceptance(bound, command.acceptanceRef)).material));
+        await loadAcceptance(bound, command.acceptanceRef)));
     },
     async submitAcceptedBooking(request: AiClientApplicationRequest, value: unknown) {
       request = structuredClone(request);
       const port = submissionPort(), command = parseEntry(confirmedAcceptance, structuredClone(value));
       return withBinding(request, true, 'order', async bound => {
-        const { row, material } = await loadAcceptance(bound, command.acceptanceRef);
+        const acceptance = await loadAcceptance(bound, command.acceptanceRef);
+        const { row, material } = acceptance;
         const attemptKey = `booking-attempt:${row.id}`;
-        if (await repository.findOperation(scopeOf(bound), attemptKey)) return readSubmission(request, bound, material);
+        if (await repository.findOperation(scopeOf(bound), attemptKey)) return readSubmission(request, bound, acceptance);
         if (row.expiresAt <= clock()) throw new AiClientEntryError('AI_PROPOSAL_STALE', 'booking_acceptance_expired');
         // Before the ORIGINAL business call, commit a stable local attempt. A
         // crashed/unknown attempt is observed only, never automatically resent.
         await booking(bound).readHandoff({ handoffRef: material.handoffRef });
         const attempt = await repository.save({ ...row, id: randomUUID(), operationKey: attemptKey });
-        if (attempt.replayed) return readSubmission(request, bound, material);
+        if (attempt.replayed) return readSubmission(request, bound, acceptance);
         const original = parseEntry(submissionDraft, row.command);
         const body = { quoteId: material.quoteId, ...(original.contactPhone !== undefined ? { contactPhone: original.contactPhone } : {}) };
         let called = false;
@@ -418,9 +443,51 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         } catch (error) {
           if (!called) throw error;
           // Only the original persisted Core receipt can attest success after a lost reply.
-          return readSubmission(request, bound, material);
+          return readSubmission(request, bound, acceptance);
         }
-        return readSubmission(request, bound, material);
+        return readSubmission(request, bound, acceptance);
+      });
+    },
+    /** Internal server consumer only. Runtime/pricing/plan/host configuration is
+     * injected by the application, never accepted in a customer HTTP body. */
+    async startOriginalTaskModel(request: AiClientApplicationRequest, value: unknown,
+      model: Omit<Parameters<typeof composeClientOriginalTaskModelHost>[0],
+        'subscriptions' | 'clientScene' | 'loadMaterial' | 'guard' | 'clock' | 'runtime' | 'priceVersion' | 'financialEvidence'> & (
+          { runtime: PublicGatewayRuntime; priceVersion: string;
+            financialEvidence: Parameters<typeof composeClientOriginalTaskModelHost>[0]['financialEvidence']; gateway?: never }
+          | { gateway: ClientCallGatewayDependencies & { secrets: SecretBox };
+            runtime?: never; priceVersion?: never; financialEvidence?: never }),
+      signal?: AbortSignal) {
+      requireEntry();
+      if (!taskDependencies || model?.db !== dependencies.db) {
+        throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_model_dependencies_missing');
+      }
+      const gatewayServer = model.gateway ? { ...model.gateway, adapters: [...model.gateway.adapters] } : null;
+      if (gatewayServer && (gatewayServer.db !== dependencies.db
+        || gatewayServer.routeScene !== model.gatewayScene.routeScene)) {
+        throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_model_dependencies_mismatch');
+      }
+      const command = parseEntry(clientTaskCommandSchema, structuredClone(value));
+      return withBinding(request, true, 'order', async bound => {
+        const loadMaterial = async (materialRef: string) => {
+          await bound.assertCurrent();
+          const row = await repository.findSource(scopeOf(bound), materialRef);
+          if (!row || !bound.identity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          await verify(bound, row);
+          await bound.assertCurrent();
+          return { row, identity: structuredClone(bound.identity) };
+        };
+        const configured = gatewayServer ? (await composeClientTaskModelConfiguration({ ...taskDependencies,
+          db: gatewayServer.db, secrets: gatewayServer.secrets, loadMaterial, clock }, command)).createCallGateway(gatewayServer) : null;
+        const runtime = configured?.runtime ?? model.runtime, priceVersion = configured?.callPriceVersion ?? model.priceVersion;
+        const financialEvidence = configured?.financialEvidence ?? model.financialEvidence;
+        if (!runtime || !priceVersion || !financialEvidence) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_model_dependencies_missing');
+        const host = await composeClientOriginalTaskModelHost({ ...model, runtime, priceVersion, financialEvidence,
+          subscriptions: taskDependencies.subscriptions, clientScene: taskDependencies,
+          loadMaterial, guard: dependencies.guard, clock }, command);
+        const result = await host.start(signal);
+        await bound.assertCurrent();
+        return result;
       });
     },
     async readHostCapabilities(request: AiClientApplicationRequest, value: unknown): Promise<AiClientHostCapabilities> {
@@ -472,7 +539,15 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     chooseBookingDraft: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, true, (app, command) => app.choose(command)),
     handoffBookingDraft: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, true, (app, command) => app.handoff(command)),
     readBookingHandoff: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, false, (app, command) => app.readHandoff(command)),
-    readBookingPreparation: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, false, (app, command) => app.readPreparation(command)),
+    readBookingPreparation: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, false, async (app, command) => {
+      const preparation = await app.readPreparation(command);
+      // This is current dependency availability, not an accepted request or a
+      // business receipt. Acceptance/submission still use their explicit,
+      // independently authorized original-page operations.
+      return freezeOriginalInput({ ...preparation, submission: hasSubmissionPort()
+        ? 'explicit_original_page_submission_and_receipt_only' as const
+        : 'unavailable_original_page_acceptance_receipt_missing' as const });
+    }),
     readBookingOperation: (request: AiClientApplicationRequest, value: unknown) => bookingOperation(request, value, false, (app, command) => app.readOperation(command)),
     async issueAction(request: AiClientApplicationRequest, value: unknown) {
       requireEntry();
@@ -508,6 +583,66 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     },
     createTask: (request: AiClientApplicationRequest, value: unknown) => taskOperation(request, value, 'create'),
     readTaskCreation: (request: AiClientApplicationRequest, value: unknown) => taskOperation(request, value, 'readCreation'),
+    /** Server-only composition callback, deliberately absent from HTTP controller.
+     * Reuses the original request's Guard/ALS/publication-aware material loader.
+     * Providing authority does not publish a plan, reserve budget or start a run. */
+    /** Server-only Gateway composition callback. No HTTP export and no model
+     * configuration/credential returned by a public client route. All subsequent
+     * resolves remain bound to this live Guard/ALS request and original task. */
+    async withTaskModelConfiguration<T>(request: AiClientApplicationRequest, value: unknown,
+      configuration: Pick<Parameters<typeof composeClientTaskModelConfiguration>[0], 'db' | 'secrets'>,
+      consume: (configuration: Awaited<ReturnType<typeof composeClientTaskModelConfiguration>>) => Promise<T>) {
+      requireEntry();
+      if (!taskDependencies || configuration.db !== taskDependencies.db || typeof consume !== 'function') {
+        return fail('AI_CLIENT_CAPABILITY_UNAVAILABLE');
+      }
+      const command = freezeOriginalInput(clientTaskCommandSchema.parse(structuredClone(value)));
+      return withBinding(request, true, 'order', async bound => {
+        if (!bound.identity) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
+        const identity = structuredClone(bound.identity);
+        const loadMaterial = async (materialRef: string) => {
+          await bound.assertCurrent();
+          const row = await repository.findSource(scopeOf(bound), materialRef);
+          if (!row) return fail('AI_CLIENT_MATERIAL_STALE');
+          await verify(bound, row);
+          await bound.assertCurrent();
+          return { row, identity };
+        };
+        const current = await composeClientTaskModelConfiguration({ ...taskDependencies,
+          ...configuration, loadMaterial, clock }, command);
+        const result = await consume(current);
+        await bound.assertCurrent();
+        return result;
+      });
+    },
+    async withTaskAuthorization<T>(request: AiClientApplicationRequest, value: unknown,
+      consume: (authorization: ReturnType<typeof composePersistedClientTaskAuthorization>) => Promise<T>) {
+      requireEntry();
+      const parsed = clientTaskCommandSchema.safeParse(structuredClone(value));
+      if (!parsed.success || typeof consume !== 'function') return fail('AI_CLIENT_INVALID_INPUT');
+      if (!taskDependencies) return fail('AI_CLIENT_CAPABILITY_UNAVAILABLE');
+      const command = freezeOriginalInput(parsed.data);
+      return withBinding(request, true, 'order', async bound => {
+        const identity = bound.identity;
+        if (!identity) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
+        const load = async (materialRef: string) => {
+          await bound.assertCurrent();
+          const row = await repository.findSource(scopeOf(bound), materialRef);
+          if (!row) return fail('AI_CLIENT_MATERIAL_STALE');
+          await verify(bound, row);
+          await bound.assertCurrent();
+          return { row, identity };
+        };
+        const authorization = composePersistedClientTaskAuthorization(taskDependencies, command, load, clock);
+        await authorization.scopes.resolveCurrent();
+        const result = await consume(authorization);
+        await authorization.scopes.resolveCurrent();
+        await bound.assertCurrent();
+        return result;
+      });
+    },
+    readTaskSnapshot: (request: AiClientApplicationRequest, value: unknown) => taskOperation(request, value, 'readSnapshot'),
+    readTaskEvents: (request: AiClientApplicationRequest, value: unknown) => taskOperation(request, value, 'readEvents'),
     async readOrderExplanation(request: AiClientApplicationRequest, value: unknown) {
       const parsed = explanationSchema.safeParse(structuredClone(value));
       if (!parsed.success) return fail('AI_CLIENT_INVALID_INPUT');
@@ -631,14 +766,16 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       savedDeliveryAddresses: server.entry && taskDependencies && server.channel !== 'app'
         && typeof dependencies.addresses?.list === 'function' && typeof dependencies.addresses.requireOwnAddress === 'function'
         ? 'current_saved_address_snapshot_only' as const : 'unavailable' as const,
-      bookingSubmission: dependencies.bookingSubmission === (dependencies.client as unknown)
+      bookingSubmission: hasSubmissionPort()
         ? 'explicit_original_page_submission_and_receipt_only' as const : 'unavailable_original_page_acceptance_receipt_missing' as const,
       crossSurfaceHandoff: 'unavailable' as const,
       materialKinds: ['catalog', 'help', 'profile', 'order', 'cancellation_preview'] as const,
       orderExplanation: 'current_client_order_projection_only' as const,
       taskScenes: taskDependencies ? 'original_creation_and_order_facts_only' as const : 'unavailable' as const,
       persistentMaterials: 'authenticated_client_session_only' as const, publicReads: ['catalog', 'help'] as const,
-      tasks: taskDependencies ? 'create_and_read_only' as const : 'unavailable' as const, models: 'unavailable' as const, events: 'unavailable' as const,
+      tasks: taskDependencies ? 'create_and_read_only' as const : 'unavailable' as const, models: 'unavailable' as const,
+      taskSnapshots: taskDependencies ? 'original_task_snapshot_read_only' as const : 'unavailable' as const,
+      events: taskDependencies ? 'original_task_events_read_only' as const : 'unavailable' as const,
       downloads: 'unavailable' as const, historyMigration: 'unavailable' as const,
       excluded: ['operator_tools', 'staff_tools', 'tenant_inventory', 'costs', 'review_notes', 'model_urls'] as const })
   });

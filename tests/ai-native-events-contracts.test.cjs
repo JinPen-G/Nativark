@@ -51,6 +51,35 @@ const retry: AiBusinessDeliveryDraft = { draftVersion: "${f.version}", eventId: 
 `), []);
 });
 
+test('failure batch refuses identity replacement, permission loss and earlier candidate revocation', async () => {
+  const { BusinessFailureCandidateService } = require('../apps/api/src/modules/ai-native/business-events/business-failure-candidate.service');
+  const { BusinessFailureError } = require('../apps/api/src/modules/ai-native/business-events/prisma-business-failure-outbox');
+  const scope = { tenantId: 'tenant-a', workspaceId: 'workspace-a' };
+  for (const mode of ['identity', 'permission', 'earlier', 'unknown']) {
+    let principal = 'actor-a', prepared = 0, read = 0;
+    const authority = { async current() { return { scope, context: { actor: { kind: 'user', userId: principal }, scope, audience: 'operator' } }; } };
+    const service = new BusinessFailureCandidateService({ aiBusinessFailureOutbox: {
+      async findMany({ take }) { assert.equal(take, 2); return [{ id: 'a' }, { id: 'b' }]; }
+    } }, authority);
+    // Only DB/authority boundaries are substituted; exercise the actual batch coordinator.
+    service.prepare = async ({ eventId }) => {
+      prepared++;
+      if (mode === 'identity') principal = 'actor-b';
+      if (mode === 'permission' && prepared === 2) throw new BusinessFailureError('unavailable');
+      if (mode === 'unknown' && prepared === 2) throw new BusinessFailureError('result_unknown');
+      return { eventId, material: { sensitive: true } };
+    };
+    service.read = async ({ eventId }) => {
+      read++;
+      if (mode === 'earlier' && eventId === 'a') throw new BusinessFailureError('unavailable');
+      return { eventId };
+    };
+    await assert.rejects(service.preparePending({ limit: 2 }), mode === 'unknown' ? /result_unknown/ : /unavailable/, mode);
+    if (mode === 'identity') assert.equal(prepared, 1);
+    if (mode === 'earlier') assert.equal(read, 1);
+  }
+});
+
 test('CB08/CB09 real failures produce authorized candidates and original automation tasks', async () => {
   const { composeBusinessFailureEvents, composeBusinessFailureAutomation } = require('../apps/api/src/modules/ai-native/business-events/business-failure.composition');
   const { RentalBusinessFactRepository } = require('../apps/api/src/modules/rental-core/rental-business-fact.repository');

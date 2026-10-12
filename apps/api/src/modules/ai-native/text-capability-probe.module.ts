@@ -4,6 +4,8 @@ import { TextCapabilityProbeApplication, type TextCapabilityProbeDependencies } 
 import { composeAuthorizedTextProbeTaskProducer } from './prisma-text-probe-original-request.repository';
 import { composePersistedTextProbeWorkflow } from './text-capability-probe-task.composition';
 import { composeAuthorizedPersistedTextProbeWorkflow, type AuthorizedTextProbeWorkflowDependencies } from './text-capability-probe.composition';
+import { TextCapabilityProbeRequestFactory, type TextCapabilityRequestDependencies } from './text-capability-probe-request.factory';
+import { TextCapabilityProbeController, TEXT_CAPABILITY_PROBE_REQUESTS } from './text-capability-probe.controller';
 
 export const TEXT_CAPABILITY_PROBE_TASK_PRODUCER = Symbol('TEXT_CAPABILITY_PROBE_TASK_PRODUCER');
 export const TEXT_CAPABILITY_PROBE_WORKFLOW = Symbol('TEXT_CAPABILITY_PROBE_WORKFLOW');
@@ -14,6 +16,15 @@ const AUTHORIZED_TEXT_PROBE_ROOT = Symbol('AUTHORIZED_TEXT_PROBE_ROOT');
  * evidence; the original Gateway still owns admission and the single ledger. */
 @Module({})
 export class TextCapabilityProbeModule {
+  /** No AppModule import. Enabling mounts management requests only; plan/action
+   * policies and budgets must already be explicitly provisioned by their owners. */
+  static registerHttp(options: { enabled?: boolean; dependencies?: TextCapabilityRequestDependencies } = {}): DynamicModule {
+    if (options.enabled !== true) return { module: TextCapabilityProbeModule, controllers: [], providers: [] };
+    if (!options.dependencies) throw new Error('TEXT_PROBE_REQUEST_DEPENDENCIES_REQUIRED');
+    return { module: TextCapabilityProbeModule, controllers: [TextCapabilityProbeController], providers: [
+      { provide: TEXT_CAPABILITY_PROBE_REQUESTS, useValue: new TextCapabilityProbeRequestFactory(options.dependencies) },
+    ] };
+  }
   /** Preferred real server root. One application/ledger/evidence instance;
    * explicit registration alone never publishes or starts a probe task. */
   static registerAuthorizedWorkflow(dependencies: AuthorizedTextProbeWorkflowDependencies): DynamicModule {

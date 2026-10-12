@@ -1,4 +1,4 @@
-import { AI_TASK_INPUT_DRAFT_VERSION, RENTAL_FULFILLMENT_MODES, isAiTaskInputContractDraft, validateAiTaskInputAnswersDraft, parseAiTaskUsageQuantityDraft,
+import { AI_TASK_INPUT_DRAFT_VERSION, RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES, isAiTaskInputContractDraft, validateAiTaskInputAnswersDraft, parseAiTaskUsageQuantityDraft,
   type AiTaskInputContractDraft, type AiTaskInputAnswerDraft, type AiTaskInputFieldDraft } from '@rental-os/shared';
 import { aiQuoteCandidateInputSchema, AI_QUOTE_CANDIDATE_LIMITS } from '../tools/quote-candidate-preparation.service';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -38,6 +38,13 @@ export function applyOriginalQuoteAnswers(value: unknown, rounds: readonly {
         ...(typeof selectedItem === 'string' ? { itemGroupId: selectedItem } : {}) }];
       if (selectedItem !== undefined) delete candidate.items[0].productName;
     }
+    const pricing = answers.get('pricing_unit_selection');
+    if (pricing !== undefined) {
+      const unit = RENTAL_PRICING_UNIT_CODES.find(value => value === pricing);
+      if (!unit || candidate.items?.length !== 1) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      candidate.items[0].pricingUnit = unit;
+      if (unit !== 'usage') delete candidate.items[0].usageQuantity;
+    }
     const usage = answers.get('usage_quantity');
     if (usage !== undefined) {
       const parsedUsage = parseAiTaskUsageQuantityDraft(usage);
@@ -55,13 +62,19 @@ export function applyOriginalQuoteAnswers(value: unknown, rounds: readonly {
       const mode = RENTAL_FULFILLMENT_MODES.find(value => value === fulfillment);
       if (!mode) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       candidate.fulfillmentMode = mode;
+      delete candidate.deliveryAddressId;
     }
     for (const [field, property, oldName] of [['customer_selection', 'customerId', 'customerName'],
       ['pickup_location', 'locationId', 'locationName'], ['return_location', 'returnLocationId', 'returnLocationName']] as const) {
       const answer = answers.get(field);
-      if (typeof answer === 'string') { candidate[property] = answer; delete candidate[oldName]; }
+      if (typeof answer === 'string') {
+        candidate[property] = answer; delete candidate[oldName];
+        if (field === 'customer_selection') delete candidate.deliveryAddressId;
+      }
     }
-    if (round.answers.some(answer => ['customer_selection', 'item_selection', 'pickup_location', 'return_location', 'fulfillment_selection', 'enterprise_selection', 'enterprise_payer_selection'].includes(answer.fieldId))) {
+    const deliveryAddress = answers.get('delivery_address_selection');
+    if (typeof deliveryAddress === 'string') candidate.deliveryAddressId = deliveryAddress;
+    if (round.answers.some(answer => ['customer_selection', 'item_selection', 'pickup_location', 'return_location', 'fulfillment_selection', 'delivery_address_selection', 'pricing_unit_selection', 'enterprise_selection', 'enterprise_payer_selection'].includes(answer.fieldId))) {
       if (!/^[a-f0-9]{64}$/u.test(round.contract.version)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
       // Revision belongs to the persisted offered candidates, not the caller
       // or the newer configuration discovered during subsequent preparation.
@@ -83,7 +96,10 @@ export function originalQuoteAnswerContract(candidate: ReturnType<typeof applyOr
   const fields: AiTaskInputFieldDraft[] = [];
   const single = !candidate.items || candidate.items.length === 1;
   for (const clarification of result.clarifications ?? []) {
-    if (single && clarification.field === 'items.0.usageQuantity' && candidate.items?.[0].pricingUnit === 'usage') {
+    // Re-select the unit first; a person switching away from usage must not be
+    // forced to answer an inapplicable usage quantity in the same round.
+    if (single && clarification.field === 'items.0.usageQuantity' && candidate.items?.[0].pricingUnit === 'usage'
+      && !result.clarifications?.some(row => row.field === 'items.0.pricingUnit' && row.candidates?.length)) {
       fields.push({ fieldId: 'usage_quantity', kind: 'text', required: true, maxLength: 32,
         label: '明确计划用量（普通十进制，例如1.5；不是价格或批准）' });
       continue;
@@ -97,6 +113,8 @@ export function originalQuoteAnswerContract(candidate: ReturnType<typeof applyOr
       : clarification.field === 'bookingIdentity.corporateCustomerId' ? 'enterprise_selection'
       : clarification.field === 'bookingIdentity.enterpriseContractAndPayer' ? 'enterprise_payer_selection'
       : clarification.field === 'fulfillmentMode' ? 'fulfillment_selection'
+      : single && clarification.field === 'items.0.pricingUnit' ? 'pricing_unit_selection'
+      : clarification.field === 'deliveryAddressId' ? 'delivery_address_selection'
       : clarification.field === 'location' ? 'pickup_location' : clarification.field === 'returnLocation' ? 'return_location'
       : single && ['items', 'items.0'].includes(clarification.field) ? 'item_selection' : undefined;
     if (!fieldId || !/^[a-f0-9]{64}$/u.test(result.selectionRevision ?? '') || !clarification.candidates?.length) continue;

@@ -1,4 +1,4 @@
-import { Body, Controller, HttpException, Inject, Post, Req } from '@nestjs/common';
+import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { AI_KNOWLEDGE_POLICY_HTTP_DRAFT as paths, AI_KNOWLEDGE_POLICY_HTTP_ERRORS as errors } from '@rental-os/shared';
@@ -37,11 +37,19 @@ export class KnowledgePolicyManagementController {
   @Post(paths.read)
   read(@Req() request: KnowledgePolicyHttpRequest, @Body() body: unknown) { return this.call('read', request, body); }
   @Post(paths.prepare)
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
   prepare(@Req() request: KnowledgePolicyHttpRequest, @Body() body: unknown) { return this.call('prepare', request, body); }
   @Post(paths.preparation)
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
   preparation(@Req() request: KnowledgePolicyHttpRequest, @Body() body: unknown) { return this.call('preparation', request, body); }
   @Post(paths.commit)
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
   commit(@Req() request: KnowledgePolicyHttpRequest, @Body() body: unknown) { return this.call('commit', request, body); }
   @Post(paths.operation)
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
   operation(@Req() request: KnowledgePolicyHttpRequest, @Body() body: unknown) { return this.call('operation', request, body); }
 }

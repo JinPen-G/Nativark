@@ -21,6 +21,8 @@ Component({
         deposit: customerText(order.deposit), preAuth: customerText(order.preAuth),
         refundStatus: typeof order.refundStatus === "string" ? order.refundStatus.slice(0, 200) : "待核对",
         availabilityLabel: typeof order.availabilityLabel === "string" ? order.availabilityLabel.slice(0, 200) : "状态待核对",
+        source: typeof order.source === "string" ? boundedText(order.source, 400) : "来源未加载",
+        note: typeof order.note === "string" ? boundedText(order.note, 400) : "",
       } });
     },
   },

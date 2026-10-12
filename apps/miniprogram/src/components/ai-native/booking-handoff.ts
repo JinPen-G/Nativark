@@ -21,6 +21,7 @@ export interface CustomerHandoffView {
   quote: RentalQuoteSnapshotV1 | null;
   submissionAvailable?: boolean;
   receipt?: AiBookingSubmissionReceipt | null;
+  receiptAvailable?: boolean;
 }
 
 export function createCustomerBookingConsumer(host: CustomerBookingHost, current: () => BookingClientContext,
@@ -40,7 +41,7 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
     && bound.capability.releaseRevision && bound.capability.tenantId && bound.capability.workspaceId && (bound.isCurrent?.() ?? true);
   const submissionAvailable = () => eligible() && [bound.acceptBookingSubmission, bound.submitAcceptedBooking, bound.readBookingSubmission]
     .every(method => typeof method === "function");
-  const emit = (next: CustomerHandoffView) => { view = { ...next, submissionAvailable: Boolean(submissionAvailable()) };
+  const emit = (next: CustomerHandoffView) => { view = { ...next, submissionAvailable: Boolean(submissionAvailable()), receiptAvailable: Boolean(acceptance && submissionAvailable()) };
     if (active && sameContext()) publish(view); };
   const validateAcceptance = (value: AiBookingSubmissionAcceptance) => {
     const copy = JSON.parse(JSON.stringify(value)) as AiBookingSubmissionAcceptance;
@@ -126,6 +127,7 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
   };
   const action = async (kind: "accept" | "submit" | "reconcile") => {
     if (!active || pending || !sameContext() || !submissionAvailable()) return;
+    if (kind === "reconcile" && !acceptance) return;
     if ((kind === "accept" && (attempted || view.status !== "continued"))
       || (kind === "submit" && (attempted || !acceptance || view.status !== "accepted"))) return;
     const epoch = ++generation; pending = true;
@@ -156,5 +158,5 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
   return { read: () => read(false), continue: () => read(true), accept: () => action("accept"),
     submit: () => action("submit"), reconcile: () => action("reconcile"),
     snapshotAcceptance: () => acceptance ? JSON.parse(JSON.stringify(acceptance)) as AiBookingSubmissionAcceptance : undefined,
-    destroy() { active = false; generation++; pending = false; bound.dispose?.(); view = { status: "disabled", handoff: null, quote: null }; } };
+    destroy() { active = false; generation++; pending = false; bound.dispose?.(); acceptance = undefined; view = { status: "disabled", handoff: null, quote: null }; } };
 }

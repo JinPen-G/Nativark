@@ -74,6 +74,89 @@ function fileFixture() {
     api: composeKnowledgeFileApplication(deps), reads: () => reads };
 }
 
+test('memory management request uses persisted human consent and fails closed without current policy', async () => {
+  const f = fileFixture();
+  const { HumanMemoryManagementRequestFactory } = h.load('human-memory-management.composition');
+  const { HumanMemoryManagementController } = h.load('human-memory-management.controller');
+  assert.deepEqual(HumanKnowledgeModule.registerMemoryManagementHttp().controllers, []);
+  const deps = { db: f.db, auth: f.identity.auth, clock: f.ports.clock };
+  const controller = new HumanMemoryManagementController(new HumanMemoryManagementRequestFactory(deps));
+  const request = { headers: { authorization: 'Bearer synthetic-session' } };
+  const { requiredPermissions } = require('../apps/api/src/common/api-auth.guard');
+  assert.deepEqual(requiredPermissions('POST', '/ai-native/memory-management/consent/revoke'), ['system:params:manage']);
+  const { AI_LEAF_COMPONENT_SCHEMAS } = require('../apps/api/src/contracts/ai-leaf-components');
+  assert.equal(AI_LEAF_COMPONENT_SCHEMAS.AiMemoryManagementConfirmRequestDraft.additionalProperties, false);
+  const memoryId = 'memory-http', owner = { actorKind: 'user', actorId: 'user-1' };
+  const expiresAt = new Date(h.now + 3600000).toISOString();
+  const command = { memoryId, operationId: 'propose-http', expiresAt, preference: { kind: 'locale', value: 'zh-CN' } };
+  await assert.rejects(controller.propose(request, { confirmation: 'propose_memory_preference', command }), e => e.getResponse().code === 'AI_RESOURCE_UNAVAILABLE');
+  assert.equal(f.db.state.memories.size, 0);
+  for (const action of ['propose', 'read', 'confirm', 'modify', 'delete']) {
+    f.allow(action, { owner }, undefined, 'memory');
+    for (const revision of [1, 2, 3, 4]) f.allow(action, { memoryId, revision, aclRevision: 1, owner }, undefined, 'memory');
+  }
+  await assert.rejects(controller.propose(request, { confirmation: 'propose_memory_preference', command: { ...command, owner } }), e => e.getResponse().code === 'AI_INVALID_INPUT');
+  const proposed = await controller.propose(request, { confirmation: 'propose_memory_preference', command });
+  assert.equal(proposed.memory.status, 'proposed');
+  const page = await controller.list(request, { limit: 1 });
+  assert.equal(page.items.length, 1);
+  assert.equal(page.items[0].memoryId, memoryId);
+  assert.equal(page.items[0].consentStatus, 'not_confirmed');
+  assert.equal('preference' in page.items[0], false);
+  assert.equal(page.nextAfter, null);
+  assert.deepEqual((await controller.list(request, { limit: 1, after: memoryId })).items, []);
+  await assert.rejects(controller.list(request, { limit: 31 }), e => e.getResponse().code === 'AI_INVALID_INPUT');
+  await assert.rejects(controller.list(request, { limit: 1, owner }), e => e.getResponse().code === 'AI_INVALID_INPUT');
+  const secondId = 'memory-zz';
+  f.allow('propose', { memoryId: secondId, revision: 1, aclRevision: 1, owner }, undefined, 'memory');
+  f.allow('read', { memoryId: secondId, revision: 1, aclRevision: 1, owner }, undefined, 'memory');
+  await controller.propose(request, { confirmation: 'propose_memory_preference', command: { ...command, memoryId: secondId, operationId: 'propose-second' } });
+  const boundedRead = f.db.aiStructuredMemory.findMany;
+  f.db.aiStructuredMemory.findMany = async args => {
+    assert.equal(args.take, 2); assert.deepEqual(args.orderBy, { id: 'asc' });
+    assert.equal(args.where.ownerId, 'user-1'); assert.equal(args.where.workspaceId, 'space-1');
+    assert.equal('content' in args.select, false); assert.equal('state' in args.select, false);
+    return boundedRead(args);
+  };
+  const firstPage = await controller.list(request, { limit: 1 });
+  assert.equal(firstPage.nextAfter, memoryId);
+  assert.equal((await controller.list(request, { limit: 1, after: memoryId })).items[0].memoryId, secondId);
+  f.db.aiStructuredMemory.findMany = async args => { const rows = await boundedRead(args); f.flags.active = false; return rows; };
+  await assert.rejects(controller.list(request, { limit: 1 }), e => e.getResponse().code === 'AI_RESOURCE_UNAVAILABLE');
+  f.flags.active = true; f.db.aiStructuredMemory.findMany = boundedRead;
+  const confirmed = await controller.confirm(request, { confirmation: 'confirm_memory_preference', command: { memoryId, expectedRevision: 1, operationId: 'confirm-http', expiresAt } });
+  assert.equal(confirmed.memory.status, 'confirmed');
+  assert.equal(confirmed.semantics, 'human_preference_not_business_approval');
+  const original = { memoryId, expectedRevision: 1, operationId: 'confirm-http', expiresAt };
+  assert.equal((await controller.confirmation(request, original)).status, 'confirmed');
+  assert.equal((await controller.resumeConfirmation(request, original)).memory.revision, 2);
+  assert.equal((await controller.state(request, { memoryId })).usable, true);
+  assert.deepEqual((await controller.read(request, { memoryId })).memory.preference, { kind: 'locale', value: 'zh-CN' });
+  const revoked = await controller.revoke(request, { confirmation: 'revoke_memory_consent', command: { memoryId, expectedRevision: 2 } });
+  assert.equal(revoked.semantics, 'consent_revoked_not_memory_deleted');
+  const state = await controller.state(request, { memoryId });
+  assert.equal(state.usable, false); assert.equal(state.consentStatus, 'revoked');
+  assert.equal('preference' in state, false);
+  assert.equal((await controller.list(request, { limit: 1 })).items[0].consentStatus, 'revoked');
+  await assert.rejects(controller.read(request, { memoryId }), e => e.getResponse().code === 'AI_RESOURCE_UNAVAILABLE');
+  const commandChange = { draftVersion: 'ain-c06-draft-1', memoryId, expectedRevision: 2, operation: 'modify', preference: { kind: 'locale', value: 'en-US' } };
+  await controller.change(request, { confirmation: 'change_memory_preference', operationId: 'modify-http', command: commandChange });
+  const observed = await controller.changeStatus(request, { operationId: 'modify-http', command: commandChange });
+  assert.equal(observed.status, 'committed_current');
+  await assert.rejects(controller.changeStatus(request, { operationId: 'modify-http', command: { ...commandChange, preference: { kind: 'locale', value: 'zh-CN' } } }), e => e.getResponse().code === 'AI_REVISION_CONFLICT');
+  const keyed = await controller.operation(request, { memoryId, operationId: 'modify-http', expectedRevision: 1, operation: 'delete' });
+  assert.equal(keyed.binding, 'key_only_not_command_attestation');
+  assert.equal(keyed.receipt, 'recorded'); // Observing a key does not attest the caller's alleged delete.
+  assert.equal((await controller.state(request, { memoryId })).usable, false);
+  await controller.change(request, { confirmation: 'change_memory_preference', operationId: 'delete-http', command: { draftVersion: 'ain-c06-draft-1', memoryId, expectedRevision: 3, operation: 'delete' } });
+  assert.equal((await controller.read(request, { memoryId })).memory.status, 'deleted');
+  const scoped = new HumanMemoryManagementRequestFactory(deps).open(request); scoped.close();
+  await assert.rejects(scoped.state({ memoryId }), { code: 'unavailable' });
+  f.flags.active = false;
+  await assert.rejects(controller.list(request, { limit: 1 }), e => e.getResponse().code === 'AI_RESOURCE_UNAVAILABLE');
+  await assert.rejects(controller.state(request, { memoryId }), e => e.getResponse().code === 'AI_RESOURCE_UNAVAILABLE');
+});
+
 async function completed(f, t) {
   const old = FileStorageRuntimeService.prototype.objectExists;
   FileStorageRuntimeService.prototype.objectExists = async function (_config, key, mime, size) {
@@ -84,6 +167,27 @@ async function completed(f, t) {
   const upload = await f.api.uploads.begin(f.input);
   return { upload, bound: await f.api.uploads.complete({ documentId: 'doc-1', sessionId: upload.sessionId }) };
 }
+
+test('management request uploads use the original file policy and close request credentials', async t => {
+  const f = fileFixture();
+  const { HumanKnowledgeManagementRequestFactory } = h.load('human-knowledge-management.composition');
+  const { HumanKnowledgeManagementController } = h.load('human-knowledge-management.controller');
+  const { requiredPermissions } = require('../apps/api/src/common/api-auth.guard');
+  const { AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT: paths } = require('../packages/shared/src/ai-knowledge-management-http-draft');
+  const factory = new HumanKnowledgeManagementRequestFactory(f.deps), controller = new HumanKnowledgeManagementController(factory);
+  const request = { headers: { authorization: 'Bearer synthetic-session' } };
+  assert.deepEqual(requiredPermissions('POST', `/${paths.basePath}/${paths.beginRevisionUpload}`), ['system:params:manage']);
+  await assert.rejects(controller.beginUpload(request, f.input));
+  assert.equal(f.db.state.uploads.size, 0);
+  f.allowUpload();
+  const result = await controller.beginUpload(request, f.input);
+  assert.equal(result.semantics, 'upload_intent_not_document');
+  assert.equal(f.db.state.documents.size, 0); assert.equal(f.db.state.uploads.size, 1);
+  const scoped = factory.open(request); scoped.close();
+  await assert.rejects(scoped.beginUpload(f.input));
+  await assert.rejects(controller.beginRevisionUpload(request, { ...f.input, expectedRevision: 1, targetVersion: 'v2' }));
+  assert.equal(f.db.state.uploads.size, 1);
+});
 
 test('first creation uses original upload receipt then real create parse index publish withdraw lifecycle', async t => {
   const f = fileFixture();
@@ -212,13 +316,18 @@ test('late body revocation remains pending and exact reconciliation never reads 
 
 test('revision uploads preserve frozen source identity, reject retargeting and consume the original revise receipt', async t => {
   const f = fileFixture(), { bound } = await completed(f, t); f.allowDocument(bound.attachmentId);
+  const { HumanKnowledgeManagementRequestFactory } = h.load('human-knowledge-management.composition');
+  const { HumanKnowledgeManagementController } = h.load('human-knowledge-management.controller');
+  const http = new HumanKnowledgeManagementController(new HumanKnowledgeManagementRequestFactory(f.deps));
+  const requestHeader = { headers: { authorization: 'Bearer synthetic-session' } };
   await f.api.management.create(h.draft({ attachmentId: bound.attachmentId }));
   await f.api.management.parse({ documentId: 'doc-1', expectedRevision: 1, operationId: 'parse-v1' });
   const revision = { documentVersion: 'v1', expectedRevision: 3, aclRevision: 1, targetVersion: 'v2' };
   const file = { ...f.input, fileName: 'sop-v2.txt' }, selection = { ...file, expectedRevision: 3, targetVersion: 'v2' };
   await assert.rejects(f.api.uploads.beginRevision(selection), { code: 'unavailable' });
   f.allowUpload(file, undefined, revision);
-  const [a, b] = await Promise.all([f.api.uploads.beginRevision(selection), f.api.uploads.beginRevision(selection)]);
+  const [a, b] = await Promise.all([http.beginRevisionUpload(requestHeader, selection), f.api.uploads.beginRevision(selection)]);
+  assert.equal(a.semantics, 'upload_intent_not_revision_commit');
   assert.equal(a.fileAssetId, b.fileAssetId); assert.notEqual(a.fileAssetId, bound.attachmentId); assert.equal(f.db.state.uploads.size, 2);
   f.allowUpload({ ...file, fileName: 'changed.txt' }, undefined, revision);
   await assert.rejects(f.api.uploads.beginRevision({ ...selection, fileName: 'changed.txt' }));
@@ -230,7 +339,22 @@ test('revision uploads preserve frozen source identity, reject retargeting and c
   f.db.state.documents.set('doc-1', original);
   f.db.responseError = new Error('revision upload completed but reply lost');
   await assert.rejects(f.api.uploads.completeRevision(completion), /reply lost/); f.db.responseError = null;
-  const uploaded = await f.api.uploads.completeRevision(completion); assert.equal(uploaded.attachmentId, a.fileAssetId);
+  const transaction = f.db.$transaction, objectExists = FileStorageRuntimeService.prototype.objectExists;
+  f.db.$transaction = async () => { throw Error('observation must not write'); };
+  FileStorageRuntimeService.prototype.objectExists = async () => { throw Error('observation must not access storage'); };
+  try {
+    const observed = await http.observeRevisionUpload(requestHeader, completion);
+    const schemas = require('../packages/shared/src/ai-knowledge-management-http-draft').AI_KNOWLEDGE_MANAGEMENT_HTTP_SCHEMAS;
+    const validate = require('./fixtures/ai-native/contract-consumer.cjs').validatorsFor(schemas, {}).AiKnowledgeManagementObserveUploadResponseDraft;
+    assert.equal(validate(observed), true, JSON.stringify(validate.errors));
+    assert.equal(observed.status, 'completed'); assert.equal(observed.fileAssetId, a.fileAssetId);
+    assert.equal(observed.semantics, 'observed_upload_not_document_commit');
+    assert.equal('uploadUrl' in observed, false); assert.equal('uploadHeaders' in observed, false);
+    assert.equal((await f.api.management.versionStatus('doc-1')).currentVersion, 'v1');
+    await assert.rejects(http.observeRevisionUpload(requestHeader, { ...completion, targetVersion: 'v3' }));
+  } finally { f.db.$transaction = transaction; FileStorageRuntimeService.prototype.objectExists = objectExists; }
+  const uploaded = await http.completeRevisionUpload(requestHeader, completion); assert.equal(uploaded.attachmentId, a.fileAssetId);
+  assert.equal(uploaded.semantics, 'uploaded_not_revised_or_published');
   f.allowDocument(uploaded.attachmentId); f.allowDocument(uploaded.attachmentId, 1, 'v2');
   const request = h.draft({ documentVersion: 'v2', attachmentId: uploaded.attachmentId, operationId: 'revise-v2' });
   const revised = await f.api.management.revise(3, request); assert.equal(revised.revision, 4);

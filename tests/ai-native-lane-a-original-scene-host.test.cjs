@@ -48,7 +48,7 @@ test('original quote review consumes revised formal requests without saving a qu
   const read = await controller.quoteReview(request, h.ref(first.receipt.inputRef));
   assert.equal(read.facts.status, 'missing_input');
   assert.equal(read.facts.next, 'clarify_input');
-  const candidate = { ...h.b.candidate, locationId: h.b.location.id, items: [{ itemGroupId: h.b.group.id, quantity: 1 }] };
+  const candidate = { ...h.b.candidate, locationId: h.b.location.id, items: [{ ...h.b.candidate.items[0], itemGroupId: h.b.group.id, quantity: 1 }] };
   const revised = await controller.reissue(request, { ...h.command('quote_clarification', 'quote-revised'),
     previousInputRef: first.receipt.inputRef, input: { candidate } });
   const unconfirmed = await controller.quoteReview(request, h.ref(revised.receipt.inputRef));
@@ -567,8 +567,10 @@ test('opt-in model controller executes persisted quote clarification and denies 
   const { AiOriginalSceneModelController } = require('../apps/api/src/modules/ai-native/scenes/original-scenes.controller');
   const { AI_SCENE_MODEL_HTTP_DRAFT } = require('../packages/shared/src/ai-scene-request-draft');
   const { AI_TASK_INPUT_DRAFT_VERSION } = require('./fixtures/ai-native/local-shared.cjs');
-  const h = await requestBoundOriginalModelHarness('quote_clarification',undefined,{customerType:'personal',
-    customerId:'customer-a',bookingIdentity:{bookingIdentity:'enterprise_employee'},fulfillmentMode:'store_pickup_return'}, async b=>{
+  const quoteIntent={customerType:'personal',customerId:'customer-a',bookingIdentity:{bookingIdentity:'enterprise_employee'},fulfillmentMode:'store_pickup_return',
+    start:'2027-02-01T00:00:00.000Z',end:'2027-02-02T00:00:00.000Z'};
+  const h = await requestBoundOriginalModelHarness('quote_clarification',undefined,quoteIntent, async b=>{
+    quoteIntent.items=[{productName:b.group.name,quantity:2}]; // Pricing remains an unanswered business choice.
     b.membershipRows.corporateCustomers=[{id:'company-a',tenantId:'tenant_001',customerType:'corporate',name:'Synthetic enterprise'}];
     b.membershipRows.corporateLinks=[{tenantId:'tenant_001',customerId:'company-a',status:'active'}];
     b.membershipRows.bookingOptions=[{id:'relationship-a',tenantId:'tenant_001',personalCustomerId:'customer-a',
@@ -598,6 +600,7 @@ test('opt-in model controller executes persisted quote clarification and denies 
   let pending = await controller.readInput(h.request, h.reference);
   assert.ok(pending.contract.fields.some(field=>field.fieldId==='enterprise_selection'));
   assert.ok(pending.contract.fields.some(field=>field.fieldId==='enterprise_payer_selection'));
+  assert.ok(pending.contract.fields.some(field=>field.fieldId==='pricing_unit_selection'&&field.kind==='choice'));
   const refresh = { original: h.reference, requestId: pending.requestId, expectedRevision: pending.revision };
   const refreshValid = ajv.compile(AI_SCENE_REQUEST_DRAFT_SCHEMAS.AiSceneModelInputRefreshDraft);
   assert.equal(refreshValid(refresh), true); assert.equal(refreshValid({ ...refresh, actorId: 'other' }), false);
@@ -663,6 +666,7 @@ test('opt-in model controller executes persisted quote clarification and denies 
   const prepared=await controller.readQuotePreparation(h.request,{original:h.reference,submission});
   assert.equal(prepared.candidate.start,'2027-02-01T00:00:00.000Z');
   assert.equal(prepared.candidate.items[0].quantity,2);
+  assert.equal(prepared.candidate.items[0].pricingUnit,submission.answers.find(answer=>answer.fieldId==='pricing_unit_selection').value);
   assert.deepEqual(prepared.candidate.bookingIdentity,{bookingIdentity:'enterprise_employee',
     corporateCustomerId:'company-a',enterpriseContractAndPayer:false});
   assert.equal(prepared.quotation,'not_attempted');assert.equal(prepared.orderApproval,'not_granted');
@@ -874,7 +878,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
     sceneCode, allowedScenes: [sceneCode], allowedModels: ['synthetic-model'], maxConcurrent: 1, maxCallsPerRun: 1,
     budget: { state: 'limited', quantity: { unit: 'calls', value: 10 } },
     gates: Object.fromEntries(['platform', 'tenant', 'scene'].map(kind => [kind, { enabled: true, revision: 1 }])) });
-  const taskStore = createTaskInputStore({ aiScope: scopes, aiTask: [], aiRun: [], aiStep: [], aiTaskRunPlan: [],
+  const taskStore = createTaskInputStore({ aiScope: scopes, aiTask: [], aiRun: [], aiStep: [], aiTaskRunPlan: [], aiTaskEvent: [],
     aiBudgetPolicy: scopes.map(scope => ({ id: `${scope.id}-budget`, scopeId: scope.id, scopeKind: scope.kind, sceneCode,
       configRevision: 1, enabled: true, settingsJson: settingsFor(scope) })) },
     { aiTask: [['id'], ['scopeId', 'audience', 'ownerKind', 'ownerId', 'creationKey']] });
@@ -1063,7 +1067,7 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   await assert.rejects(clientTasks.createTask(request, taskCommand), e => e.code === 'AI_RESOURCE_UNAVAILABLE');
   assert.equal(taskInputs.length, 0); assert.equal(taskStore.state.aiTask.length, 0);
   taskPolicies.push({ id: 'b77ec266-e3a2-48a4-98be-d5b49222d5b1', tenantId: 'tenant-client', workspaceId: 'workspace-client',
-    channel: 'app', customerType: 'personal', sceneCode, sceneVersion, enabled: 1, allowCreate: 1, allowRead: 1,
+    channel: 'app', customerType: 'personal', sceneCode, sceneVersion, enabled: 1, allowCreate: 1, allowRead: 1, allowExecute: 1,
     revision: 1, expiresAt: new Date('2027-01-01') });
   taskPolicies[0].allowCreate = 0;
   await assert.rejects(clientTasks.createTask(request, taskCommand), e => e.code === 'AI_ACCESS_DENIED');
@@ -1087,6 +1091,96 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.equal(taskStore.state.aiTask[0].inputHash, taskInputs[0].inputHash);
   assert.equal(taskStore.state.aiRun[0].fencingToken.toFixed(0), '0'); assert.equal(taskInputs[0].dispatchState, 'UNKNOWN');
   const countCreates = () => taskStore.trace.filter(value => value === 'aiTask.create').length;
+  const { composePersistedClientTaskAuthorization } = require('../apps/api/src/modules/ai-native/scenes/client-task-execution.composition');
+  const loadExecutionMaterial = async materialRef => {
+    await clientTasks.readSource(request, { materialRef });
+    return { row: clone(materialRows.find(row => row.id === materialRef)), identity: await source.current() };
+  };
+  const executionAuthorization = composePersistedClientTaskAuthorization(taskDependencies.tasks, taskCommand, loadExecutionMaterial, () => now);
+  const { composeClientTaskModelConfiguration } = require('../apps/api/src/modules/ai-native/scenes/client-task-model-configuration.composition');
+  let configReads = 0;
+  const unusedWrite = async () => { throw Error('configuration writes are forbidden'); };
+  const customerConfigDb = { ...db, aiTenantModelConfiguration: { findUnique: async query => {
+      assert.equal(query.where.tenantId, 'tenant-client'); configReads++;
+      return { tenantId: 'tenant-client', mode: 'platform_managed', revision: 1, settings: null, credentialsEncrypted: null };
+    }, create: unusedWrite, updateMany: unusedWrite },
+    aiProviderProfile: { findFirst: async () => null, create: unusedWrite, updateMany: unusedWrite },
+    systemParameterSet: { findFirst: async () => null } };
+  const customerConfiguration = await composeClientTaskModelConfiguration({ ...taskDependencies.tasks,
+    db: customerConfigDb,
+    secrets: { encrypt: () => { throw Error('no credential operation'); }, decrypt: () => { throw Error('no credential operation'); } },
+    loadMaterial: loadExecutionMaterial, clock: () => now }, taskCommand);
+  const customerConfigContext = { tenantId: 'tenant-client', workspaceId: 'workspace-client', actorId: 'person-client' };
+  // Seed only the database running state; the actual original-material/current
+  // policy authority and config repository are executed, not a fake grant.
+  const priorTaskStatus = taskStore.state.aiTask[0].status;
+  await assert.rejects(customerConfiguration.configuration.selectionForInvocation(customerConfigContext));
+  assert.equal(configReads, 0);
+  taskStore.state.aiTask[0].status = 'RUNNING';
+  try {
+    const authorizedContext = await executionAuthorization.execution.authorize(created.task.taskId);
+    customerConfigContext.workspaceId = authorizedContext.scope.workspaceId;
+    assert.deepEqual(await customerConfiguration.configuration.selectionForInvocation(customerConfigContext), { mode: 'platform_managed', revision: 1 });
+    const profile = { id: 'client-profile', scopeId: scopes[0].id, scopeKind: 'PLATFORM', profileKey: 'default',
+      role: 'DEFAULT', serviceMode: 'platform_managed', protocol: 'openai_chat_completions', provider: 'openai_chat_completions',
+      model: 'synthetic-model', credentialRef: 'vault-original', configRevision: 1, enabled: true, disabledAt: null, allowedCapabilities: ['text'] };
+    customerConfigDb.aiProviderProfile.findMany = async () => [clone(profile)];
+    customerConfigDb.aiProviderCapabilityEvidence = { findMany: async () => [], findUnique: async () => null, upsert: unusedWrite };
+    const blockedTransport = { provider: 'openai_chat_completions', features: ['text'], generate: unusedWrite };
+    const gatewayServer = { db: customerConfigDb, routeScene: 'chat', callPriceVersion: 'customer-original-calls-1',
+      adapters: [blockedTransport], platformConnection: { resolve: unusedWrite }, audit: { append: unusedWrite } };
+    assert.throws(() => customerConfiguration.createCallGateway({ ...gatewayServer, db: {} }), e => e.code === 'CONFIG_INVALID');
+    const beforeGatewayWrites = taskStore.trace.length;
+    const configured = customerConfiguration.createCallGateway(gatewayServer);
+    assert.equal(configured.runtime.evidence, 'live');
+    assert.equal(configured.callPriceVersion, 'customer-original-calls-1');
+    assert.equal(configured.runtime.ports.budget.constructor.name, 'PersistentGatewayBudget');
+    assert.equal(configured.runtime.ports.admission.constructor.name, 'InvocationAdmissionService');
+    assert.equal(configured.runtime.ports.dispatch.constructor.name, 'InvocationDispatchService');
+    // Real router + persisted capability consumer reject absent live receipts;
+    // this does not make a mock profile into a verified supplier.
+    await assert.rejects(configured.runtime.ports.routing.resolve(customerConfigContext, ['text']),
+      e => e.code === 'CAPABILITY_UNSUPPORTED');
+    assert.equal(taskStore.trace.slice(beforeGatewayWrites).some(value => /\.create|\.update/.test(value)), false);
+    await assert.rejects(customerConfiguration.configuration.selection(customerConfigContext), e => e.code === 'FORBIDDEN');
+    await assert.rejects(customerConfiguration.configuration.selectionForInvocation({ ...customerConfigContext, actorId: 'another-customer' }), e => e.code === 'FORBIDDEN');
+    taskPolicies[0].allowExecute = 0;
+    await assert.rejects(customerConfiguration.configuration.selectionForInvocation(customerConfigContext), e => e.code === 'FORBIDDEN');
+  } finally { taskPolicies[0].allowExecute = 1; taskStore.state.aiTask[0].status = priorTaskStatus; }
+  const { PrismaClientTaskBudgetAuthorizationSource } = require('../apps/api/src/modules/ai-native/budget/prisma-client-task-budget-authorization.source');
+  const customerBudgetAuthority = new PrismaClientTaskBudgetAuthorizationSource({ ...taskDependencies.tasks,
+    db: { ...taskDependencies.tasks.db, aiGatewayInvocation: { findUnique: async () => null } },
+    command: taskCommand, loadMaterial: loadExecutionMaterial, clock: () => now });
+  const customerBudgetContext = await customerBudgetAuthority.resolveContext();
+  await assert.rejects(customerBudgetAuthority.authorize('settings', customerBudgetContext, {}), e => e.code === 'FORBIDDEN');
+  await assert.rejects(customerBudgetAuthority.authorize('reserve', customerBudgetContext,
+    { association: { requestId: 'missing-original-invocation', scope: customerBudgetContext.scope } }), e => e.code === 'FORBIDDEN');
+  await (async authorization => {
+    assert.equal((await authorization.scopes.resolveCurrent()).context.actor.customerId, 'person-client');
+    const claim = { taskId: created.task.taskId, runId: created.task.runId, holderId: 'client-worker',
+      expectedTaskRevision: 1, expectedRunRevision: 1, expectedFencingToken: '0', leaseMs: 1000 };
+    delete taskPolicies[0].allowExecute;
+    await assert.rejects(authorization.tasks.claimRun(claim), e => e.code === 'AI_ACCESS_DENIED');
+    taskPolicies[0].allowExecute = 1;
+    await assert.rejects(authorization.authority.resolve('another-task', 'read_metadata'), e => e.code === 'AI_ACCESS_DENIED');
+    await assert.rejects(authorization.authority.resolve(created.task.taskId, 'takeover_run'), e => e.code === 'AI_ACCESS_DENIED');
+    assert.equal((await authorization.authority.resolve(created.task.taskId, 'transition_task')).actor.kind, 'customer');
+    await assert.rejects(authorization.execution.authorize(created.task.taskId), e => e.code === 'AI_ACCESS_DENIED');
+    const lease = await authorization.tasks.claimRun(claim);
+    assert.equal(lease.fencingToken, '1'); assert.equal(taskStore.state.aiRun[0].actorKind, 'CUSTOMER');
+    taskPolicies[0].allowExecute = 0;
+    await assert.rejects(authorization.execution.authorize(created.task.taskId), e => e.code === 'AI_ACCESS_DENIED');
+    const { composeClientOriginalTaskModelHost } = require('../apps/api/src/modules/ai-native/scenes/client-task-model-host.composition');
+    await assert.rejects(composeClientOriginalTaskModelHost({ db, subscriptions, clientScene: { sceneCode, sceneVersion },
+      loadMaterial: loadExecutionMaterial, systemPrompt: 'Explain only the original authorized facts.', clock: () => now,
+      gatewayScene: { sceneCode, routeScene: 'chat', maxOutputTokens: 32 },
+      limits: { maxSteps: 1, maxCalls: 1, maxConcurrent: 1, maxTotalMs: 1000, maxStepMs: 1000, maxOutputBytes: 1024 },
+      host: { holderId: 'client-model-worker', leaseMs: 1000 } }, taskCommand), e => e.code === 'AI_ACCESS_DENIED');
+    const { leaseMs: _leaseMs, ...release } = claim;
+    assert.equal((await authorization.tasks.releaseRun({ ...release,
+      expectedRunRevision: lease.revision, expectedFencingToken: lease.fencingToken })).released, true);
+    taskPolicies[0].allowExecute = 1;
+  })(executionAuthorization);
   const { AI_ENTRY_ACTION_CONTRACT_VERSION } = require('../packages/shared/src/ai-entry-action-draft');
   const entryConfig = { ...configuration, channel: 'web', entry: { enabled: true, releaseRevision: 'entry-1' } };
   client.prisma.websiteChannelProfile = { findUnique: async () => null };
@@ -1297,6 +1391,18 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   });
   client.orders = originalOrders;
   const submissionApp = composeRequestBoundClientApplication({ ...taskDependencies, bookingSubmission: client }, entryConfig);
+  const submissionPreparation = await submissionApp.readBookingPreparation(request, { handoffRef: handed.handoff.handoffRef });
+  assert.equal(submissionPreparation.submission, 'explicit_original_page_submission_and_receipt_only');
+  assert.equal(submissionPreparation.approval, 'not_granted');
+  assert.equal(submissionPreparation.inventory, 'not_reserved');
+  assert.equal(submissionPreparation.draft.execution, 'not_submitted');
+  assert.equal(originalWrites, 0);
+  assert.ok(Object.isFrozen(submissionPreparation));
+  const incompleteSubmission = { prepareOrderSubmission: client.prepareOrderSubmission };
+  const incompleteApp = composeRequestBoundClientApplication({ ...taskDependencies, bookingSubmission: incompleteSubmission }, entryConfig);
+  assert.equal(incompleteApp.capabilities.bookingSubmission, 'unavailable_original_page_acceptance_receipt_missing');
+  assert.equal((await incompleteApp.readBookingPreparation(request, { handoffRef: handed.handoff.handoffRef })).submission,
+    'unavailable_original_page_acceptance_receipt_missing');
   const submissionModule = AiClientEntryModule.registerHttp({ ...taskDependencies, bookingSubmission: client }, entryConfig);
   const submissionHttp = new AiClientEntryController(submissionModule.providers[0].useFactory());
   const { ExecutionContextHost } = require('@nestjs/core/helpers/execution-context-host');
@@ -1325,6 +1431,20 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.ok(AI_LEAF_COMPONENT_SCHEMAS.AiBookingSubmissionReceipt);
   assert.equal(submitted.state, 'observed'); assert.equal(submitted.orderId, 'own-order');
   assert.equal(submitted.payment, 'not_inferred'); assert.equal(originalWrites, 1);
+  const receiptLookup = originalOrders.idempotency.find;
+  originalOrders.idempotency.find = async (...args) => {
+    const receipt = await receiptLookup(...args);
+    taskPolicies[1].allowRead = 0;
+    return receipt;
+  };
+  try {
+    await assert.rejects(submissionApp.readBookingSubmission(request, { acceptanceRef: accepted.acceptanceRef }),
+      e => e.code === 'AI_ACCESS_DENIED');
+    assert.equal(originalWrites, 1);
+  } finally {
+    taskPolicies[1].allowRead = 1;
+    originalOrders.idempotency.find = receiptLookup;
+  }
   client.business.getQuote = () => { throw Error('quote consumed; current/latest quote must not be substituted'); };
   const submissionRestart = composeRequestBoundClientApplication({ ...taskDependencies, bookingSubmission: client }, entryConfig);
   assert.equal((await submissionRestart.submitAcceptedBooking(request, explicitSubmit)).state, 'observed');
@@ -1425,10 +1545,32 @@ test('client scene authenticates through actual client Guard/Auth and rechecks a
   assert.equal(clientScene.facts.orderId, 'own-order'); assert.equal(clientScene.facts.amounts.payableAmount.value, 0);
   assert.equal(clientScene.taskOutcome, 'not_inferred_from_order_facts');
   assert.equal(clientScene.execution, 'read_only_no_task_start');
+  const taskReaderController = new AiClientEntryController(taskRestart);
+  assert.equal((await taskReaderController.readOrderExplanation(request, { orderId: 'own-order', question: 'status' })).facts.orderId, 'own-order');
+  await assert.rejects(taskReaderController.readOrderExplanation(request, { orderId: 'other-order', question: 'status' }), e => e.getStatus?.() === 403);
+  assert.equal((await taskReaderController.readSource(request, { materialRef: own.materialRef })).materialRef, own.materialRef);
+  const snapshot = await taskReaderController.readTaskSnapshot(request, taskCommand);
+  assert.equal(snapshot.taskId, created.task.taskId);
+  assert.equal(snapshot.cursor, '0'); assert.deepEqual(snapshot.steps, []);
+  const page = await taskReaderController.readTaskEvents(request, { ...taskCommand, after: snapshot.cursor, limit: 10 });
+  assert.deepEqual(page.events, []); assert.equal(page.nextCursor, '0');
+  // The actual persisted watermark is a decimal string, never a Number or an invented cursor.
+  taskStore.state.aiTask.find(row => row.id === created.task.taskId).eventCursor = 9007199254740993n;
+  const precise = await taskRestart.readTaskSnapshot(request, taskCommand);
+  assert.equal(precise.cursor, '9007199254740993');
+  assert.equal((await taskRestart.readTaskEvents(request, { ...taskCommand, after: '0', limit: 10 })).status, 'reset_required');
+  assert.equal((await taskRestart.readTaskEvents(request, { ...taskCommand, after: precise.cursor, limit: 10 })).nextCursor, precise.cursor);
+  await assert.rejects(taskRestart.readTaskSnapshot(request, { ...taskCommand, taskId: 'forged' }), /AI_CLIENT_INVALID_INPUT/);
+  taskStore.control.beforeRead = async table => { if (table === 'aiStep') revoked = true; };
+  await assert.rejects(taskReaderController.readTaskSnapshot(request, taskCommand), e => e.getStatus?.() === 403);
+  taskStore.control.beforeRead = null; revoked = false;
   assert.equal(countCreates(), beforeDuplicate);
   taskPolicies[0].allowRead = 0;
   await assert.rejects(taskRestart.readTaskCreation(request, taskCommand), e => e.code === 'AI_ACCESS_DENIED');
   await assert.rejects(taskRestart.readTaskScene(request, taskCommand), e => e.code === 'AI_ACCESS_DENIED');
+  await assert.rejects(taskRestart.readTaskSnapshot(request, taskCommand), e => e.code === 'AI_ACCESS_DENIED');
+  await assert.rejects(taskRestart.readTaskEvents(request, { ...taskCommand, after: '0', limit: 10 }), e => e.code === 'AI_ACCESS_DENIED');
+  await assert.rejects(taskReaderController.readTaskSnapshot(request, taskCommand), e => e.getStatus?.() === 403);
   taskPolicies[0].allowRead = 1; taskPolicies[0].allowCreate = 1; taskStore.state.aiBudgetPolicy[0].enabled = true;
   await assert.rejects(taskRestart.createTask(request, { ...taskCommand, materialRef: distinctCase.materialRef }), e => e.code === 'AI_REVISION_CONFLICT');
   const taskLost = { ...taskCommand, creationKey: 'task-lost-ack' };

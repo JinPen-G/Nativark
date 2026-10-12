@@ -84,3 +84,33 @@ test('Core quote binding remains pure and rejects changed customer, booking iden
   }
   assert.deepEqual(quote.request, input);
 });
+
+test('Core confirmation binds the delivery snapshot inside the quote consumption transaction', async () => {
+  const h = await require('./fixtures/ai-native/approved-order-composition.cjs').approvedOrderHarness();
+  const { runWithRequestIdentity } = require('../apps/api/src/common/request-identity');
+  h.body.fulfillmentMode = 'delivery';
+  const stored = h.state.records.quote[0];
+  Object.assign(stored.request, { fulfillmentMode: 'delivery', deliveryAddressId: 'address-a' });
+  stored.deliveryAddressSnapshot = { addressId: 'address-a', recipient: 'Synthetic customer', phoneMasked: '138****0000',
+    countryCode: 'CN', province: 'Synthetic province', city: 'Synthetic city', detail: 'Original destination' };
+  const original = structuredClone(stored.deliveryAddressSnapshot);
+  let injected = false;
+  h.state.onOperation = ({ model, op, records, inTransaction }) => {
+    if (inTransaction && model === 'rentalOrder' && op === 'create') {
+      injected = true; records.quote[0].deliveryAddressSnapshot.detail = 'Changed destination';
+    }
+  };
+  const create = () => runWithRequestIdentity({ tenantId: 'tenant-a', workspaceId: 'workspace-a', userId: 'operator-a' },
+    () => h.dependencies.confirmation.createOrder('tenant-a', h.body, 'Synthetic operator', { category: { code: 'camera' } }, 'delivery-binding'));
+  await assert.rejects(create(), error => error.getStatus?.() === 409 && /报价事实已变化/u.test(error.message));
+  assert.equal(injected, true);
+  assert.equal(h.state.records.rentalOrder.length, 0);
+  assert.equal(h.state.records.rentalOrderIdempotencyRecord.length, 0);
+  assert.equal(h.state.records.quote[0].consumedAt, undefined);
+  assert.deepEqual(h.state.records.quote[0].deliveryAddressSnapshot, original);
+  h.state.onOperation = undefined;
+  assert.equal((await create()).replayed, false);
+  assert.equal((await create()).replayed, true);
+  assert.equal(h.state.records.rentalOrder.length, 1);
+  assert.equal(h.state.records.rentalOrderIdempotencyRecord.length, 1);
+});
