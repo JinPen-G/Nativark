@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
 import { AI_TASK_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiScopeRepository } from '../ai-scope.repository';
@@ -9,9 +10,10 @@ import { AiClientTaskAuthority, clientTaskSceneSchema, type AiAuthorizedClientMa
   type AiClientTaskDependencies } from './client-task.authority';
 import { composeClientMaterialTasks } from './client-task.composition';
 import { clientTaskCommandSchema, PrismaClientTaskInputRepository } from './prisma-client-task-input.repository';
+import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
-type ClientTaskOperation = 'read' | 'claim' | 'execute' | 'transition' | 'accounting' | 'request_input' | 'submit_input' | 'resume_input';
+type ClientTaskOperation = 'read' | 'claim' | 'execute' | 'transition' | 'accounting' | 'request_input' | 'submit_input' | 'resume_input' | 'cancel';
 const identityHash = (context: AiExecutionContext) => {
   const { requestId: _request, authorizedAt: _at, ...identity } = context;
   return requestFingerprint(identity);
@@ -33,14 +35,14 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
 
   const snapshot = async (taskId: string | null, operation: ClientTaskOperation) => {
     const grant = await authority.authorize(command.materialRef, operation === 'read' ? 'read'
-      : operation === 'request_input' || operation === 'submit_input' || operation === 'resume_input' ? operation : 'execute');
+      : operation === 'request_input' || operation === 'submit_input' || operation === 'resume_input' || operation === 'cancel' ? operation : 'execute');
     const receipt = await creation.readCreation(command);
     if (!receipt.task || (taskId !== null && receipt.task.taskId !== taskId)) throw denied();
     const id = receipt.task.taskId;
     const input = await inputs.findCreation(grant.material, command.creationKey);
     if (!input || input.id !== receipt.inputRef || input.inputHash !== receipt.inputHash
       || input.sceneCode !== scene.sceneCode || input.sceneVersion !== scene.sceneVersion
-      || input.policyId !== grant.policy.id || (operation !== 'read' && input.policyRevision !== grant.policy.revision)) throw denied();
+      || input.policyId !== grant.policy.id || (!['read', 'cancel'].includes(operation) && input.policyRevision !== grant.policy.revision)) throw denied();
     const access = aiTaskAccessFromContext(grant.context, id, clock());
     const task = await dependencies.db.aiTask.findFirst({ where: access.where, select: {
       id: true, scopeId: true, scopeKind: true, scope: true, audience: true, ownerKind: true, ownerId: true,
@@ -59,6 +61,8 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
     // The repository proves the legal transition and holder/fence. Starting a
     // queued run or converging cancellation is not permission for a new effect.
     if (operation === 'transition' && !['QUEUED', 'RUNNING', 'WAITING_INPUT', 'WAITING_CONFIRMATION',
+      'WAITING_EXTERNAL', 'CANCEL_REQUESTED'].includes(task.status)) throw denied();
+    if (operation === 'cancel' && !['QUEUED', 'RUNNING', 'WAITING_INPUT', 'WAITING_CONFIRMATION',
       'WAITING_EXTERNAL', 'CANCEL_REQUESTED'].includes(task.status)) throw denied();
     if (['request_input', 'submit_input', 'resume_input'].includes(operation) && (task.cancelRequestedAt !== null
       || (operation === 'request_input' ? !['RUNNING', 'WAITING_INPUT'].includes(task.status) : task.status !== 'WAITING_INPUT'))) throw denied();
@@ -85,6 +89,25 @@ export function composePersistedClientTaskAuthorization(dependencies: AiClientTa
   };
   const scopes = new AiScopeRepository(dependencies.db, { resolve: () => authorize(null, 'read') }, clock);
   return Object.freeze({ scopes, authority: actions, tasks: new AiTaskRepository(dependencies.db, actions, clock),
+    /** Narrow cancellation consumer, not a general transition/execute grant.
+     * Only the fixed cancel_requested command can reach this private writer. */
+    cancellation: Object.freeze({ async request(value: unknown) {
+      const parsed = z.object({ expectedRevision: z.number().int().min(1).max(4294967294) }).strict()
+        .safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const before = await readGrant(null, 'cancel');
+      const cancellationAuthority: AiTaskRepositoryAuthority = { resolve: (taskId, operation) => {
+        if (taskId !== before.taskId || operation !== 'transition_task') return Promise.reject(denied());
+        return authorize(taskId, 'cancel');
+      } };
+      const receipt = await new AiTaskTransitionRepository(dependencies.db, cancellationAuthority, clock).transition({
+        taskId: before.taskId, expectedRevision: parsed.data.expectedRevision,
+        to: 'cancel_requested', reason: 'cancel_requested' });
+      const after = await readGrant(before.taskId, 'cancel');
+      if (identityHash(before.context) !== identityHash(after.context)) throw denied();
+      return freezeOriginalInput({ receipt, cancellation: 'requested_not_rollback' as const,
+        retryable: false as const, nextAction: 'read_original_task' as const });
+    } }),
     execution: Object.freeze({ authorize: (taskId: string) => authorize(taskId, 'execute'),
       authorizeAccounting: (taskId: string) => authorize(taskId, 'accounting'),
       readGrant: (taskId: string, operation: 'read' | 'execute' | 'accounting') => readGrant(taskId, operation) }) });

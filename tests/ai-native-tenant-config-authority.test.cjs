@@ -126,6 +126,7 @@ test('customer task policy management uses original Guard, scoped CAS and atomic
   assert.equal(created.state, 'observed'); assert.equal(created.execution, 'not_attested');
   assert.equal(rows[0].allowExecute, true); assert.equal(rows[0].tenantId, 'tenant-a'); assert.equal(rows[0].workspaceId, 'workspace-a');
   assert.equal(rows[0].allowRequestInput, false); assert.equal(rows[0].allowSubmitInput, false); assert.equal(rows[0].allowResumeInput, false);
+  assert.equal(rows[0].allowCancel, false);
   assert.equal(logs[0].userId, 'operator-a'); assert.equal(logs[0].detail.result.id, rows[0].id);
   assert.equal((await service.change(input)).result.revision, 1); assert.equal(logs.length, 1);
   await assert.rejects(service.change({ ...input, allowExecute: false }), e => e.code === 'AI_REVISION_CONFLICT');

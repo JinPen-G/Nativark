@@ -450,6 +450,29 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     });
   };
   return Object.freeze({
+    /** Original customer cancellation request only. No caller task/run/holder,
+     * provider, approval, budget release or claim of external rollback. */
+    async requestOriginalTaskCancellation(request: AiClientApplicationRequest, value: unknown) {
+      if (!server.entry) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'entry_disabled');
+      if (!taskDependencies) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'client_task_dependencies_missing');
+      const parsed = parseEntry(clientTaskCommandSchema.extend({
+        expectedRevision: z.number().int().min(1).max(4294967294) }).strict(), structuredClone(value));
+      const { expectedRevision, ...original } = parsed;
+      return withBinding(structuredClone(request), true, 'order', async bound => {
+        const loadMaterial = async (materialRef: string) => {
+          await bound.assertCurrent();
+          const row = await repository.findSource(scopeOf(bound), materialRef);
+          if (!row || !bound.identity) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+          await verify(bound, row);
+          await bound.assertCurrent();
+          return { row, identity: structuredClone(bound.identity) };
+        };
+        const authorized = composePersistedClientTaskAuthorization(taskDependencies, original, loadMaterial, clock);
+        const result = await authorized.cancellation.request({ expectedRevision });
+        await bound.assertCurrent();
+        return result;
+      });
+    },
     /** Server-only original execution read. No provider, lease, cancellation,
      * retry or financial authority is acquired by observing these facts. */
     async readOriginalTaskExecution(request: AiClientApplicationRequest, value: unknown,

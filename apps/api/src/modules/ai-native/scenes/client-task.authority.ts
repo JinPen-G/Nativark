@@ -26,10 +26,11 @@ const policySchema = z.object({ id: z.string().uuid(), tenantId: id, workspaceId
   allowExecute: sqlBoolean.optional().default(false),
   allowRequestInput: sqlBoolean.optional().default(false), allowSubmitInput: sqlBoolean.optional().default(false),
   allowResumeInput: sqlBoolean.optional().default(false),
+  allowCancel: sqlBoolean.optional().default(false),
   revision: z.number().int().min(1).max(4294967294), expiresAt: z.date() }).strict();
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-type ClientPolicyOperation = 'create' | 'read' | 'capabilities' | 'execute' | 'request_input' | 'submit_input' | 'resume_input';
+type ClientPolicyOperation = 'create' | 'read' | 'capabilities' | 'execute' | 'request_input' | 'submit_input' | 'resume_input' | 'cancel';
 const permits = (policy: z.infer<typeof policySchema>, operation: ClientPolicyOperation) => {
   switch (operation) {
     case 'create': return policy.allowCreate;
@@ -37,6 +38,7 @@ const permits = (policy: z.infer<typeof policySchema>, operation: ClientPolicyOp
     case 'request_input': return policy.allowRequestInput;
     case 'submit_input': return policy.allowSubmitInput;
     case 'resume_input': return policy.allowResumeInput;
+    case 'cancel': return policy.allowCancel;
     case 'read': case 'capabilities': return policy.allowRead;
   }
 };
@@ -103,7 +105,10 @@ export class AiClientPolicyAuthority {
       authorizedAt: this.clock().toISOString(), audience: 'client', actor: { kind: 'customer', customerId: subject.identity.customerId },
       scope: { kind: 'workspace', tenantId: subject.tenantId, workspaceId: subject.workspaceId } };
     let policyHash: string | null = null;
-    if (operation !== 'read') {
+    // Stopping an original task does not reserve/dispatch another AI call.
+    // Its current independent policy remains mandatory, but exhausted usage
+    // must not force the customer to keep an existing task running.
+    if (operation !== 'read' && operation !== 'cancel') {
       const gates = await this.gates(context), entitlement = await this.entitlements.read(subject.tenantId, 'ai.native.use');
       if (entitlement.entitlements.length !== 1 || entitlement.entitlements[0].code !== 'ai.native.use' || !entitlement.entitlements[0].available) throw unavailable();
       policyHash = requestFingerprint({ policy: { ...policy, expiresAt: policy.expiresAt.toISOString() }, gates, entitlement });

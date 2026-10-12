@@ -18,12 +18,14 @@ const changeSchema = keySchema.extend({ operationKey: z.string().min(1).max(128)
   expectedRevision: z.number().int().min(0).max(4294967293), enabled: z.boolean(), allowCreate: z.boolean(),
   allowRead: z.boolean(), allowExecute: z.boolean(), allowRequestInput: z.boolean().optional(),
   allowSubmitInput: z.boolean().optional(), allowResumeInput: z.boolean().optional(),
+  allowCancel: z.boolean().optional(),
   expiresAt: z.string().datetime({ offset: true }) }).strict();
 const observationSchema = keySchema.extend({ operationKey: changeSchema.shape.operationKey }).strict();
 const snapshotSchema = keySchema.extend({ id: z.string().uuid(), tenantId: z.string(), workspaceId: z.string(),
   sceneCode: z.string(), sceneVersion: z.string(), enabled: z.boolean(), allowCreate: z.boolean(), allowRead: z.boolean(),
   allowExecute: z.boolean(), allowRequestInput: z.boolean().optional().default(false),
   allowSubmitInput: z.boolean().optional().default(false), allowResumeInput: z.boolean().optional().default(false),
+  allowCancel: z.boolean().optional().default(false),
   revision: z.number().int().min(1).max(4294967294), expiresAt: z.string().datetime({ offset: true }) }).strict();
 const auditSchema = z.object({ version: z.literal('client-task-policy-management-1'), operationKey: changeSchema.shape.operationKey,
   commandHash: z.string().regex(/^[a-f0-9]{64}$/u), actorId: z.string(), before: snapshotSchema.nullable(),
@@ -83,6 +85,7 @@ export class HumanClientTaskPolicyManagementService {
       channel: row.channel, customerType: row.customerType, sceneCode: row.sceneCode, sceneVersion: row.sceneVersion,
       enabled: row.enabled, allowCreate: row.allowCreate, allowRead: row.allowRead, allowExecute: row.allowExecute,
       allowRequestInput: row.allowRequestInput, allowSubmitInput: row.allowSubmitInput, allowResumeInput: row.allowResumeInput,
+      allowCancel: row.allowCancel,
       revision: row.revision, expiresAt: row.expiresAt.toISOString() });
   }
   private receiptId(manager: Manager, key: z.infer<typeof keySchema>, operationKey: string) {
@@ -147,10 +150,12 @@ export class HumanClientTaskPolicyManagementService {
           allowCreate: input.allowCreate, allowRead: input.allowRead, allowExecute: input.allowExecute,
           allowRequestInput: input.allowRequestInput ?? false, allowSubmitInput: input.allowSubmitInput ?? false,
           allowResumeInput: input.allowResumeInput ?? false,
+          allowCancel: input.allowCancel ?? false,
           revision: input.expectedRevision + 1, expiresAt: expiresAt.toISOString() });
         const data = { enabled: result.enabled, allowCreate: result.allowCreate, allowRead: result.allowRead,
           allowExecute: result.allowExecute, allowRequestInput: result.allowRequestInput,
           allowSubmitInput: result.allowSubmitInput, allowResumeInput: result.allowResumeInput,
+          allowCancel: result.allowCancel,
           revision: result.revision, expiresAt };
         await this.recheck(manager);
         if (!previous) await tx.aiClientTaskPolicy.create({ data: { id: result.id, ...policyKey, ...data } });
