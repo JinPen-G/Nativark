@@ -325,7 +325,7 @@
 | AIN-03 | G1/G2：原task/run/input/phase/approval/knowledge模型和迁移，含报价原键字段 | G3全表真实升级/回读组合尚无统一就绪证明；真库迁移未获准执行 |
 | AIN-04 | G1/G2/G3：[持久授权组合](../../apps/api/src/modules/ai-native/task-authorization.composition.ts)与request-bound/Auth/Guard/ALS进入原模型、业务、员工和客户代码 | G4全端撤权/跨范围真实等价验收，不以当前离线负例结项 |
 | AIN-05 | G1/G2：唯一Gateway、平台/BYOK、媒体受权派发、配置与计量；图片已可持久运行 | G3完整媒体/能力/取消/usage消费，音频仍未进入持久任务链；真供应商未验 |
-| AIN-06 | G1/G2/G3：[原场景模型宿主](../../apps/api/src/modules/ai-native/scenes/original-scene-model.composition.ts)已接原runner、澄清后继run、累计资源、恢复及结果 | G4广义恢复/中断及真库并发验收；R04正式来源目前仅一次context_only补充，不能称全业务参数闭环 |
+| AIN-06 | G1/G2/G3：[原场景模型宿主](../../apps/api/src/modules/ai-native/scenes/original-scene-model.composition.ts)已接原runner、澄清后继run、累计资源、恢复及结果；3eea8e4a补原报价business_parameters证明与输入hash绑定 | G4广义恢复/中断及真库并发验收；报价参数证明已实现，不等于全部场景、多轮业务参数及审批执行闭环 |
 | AIN-07 | G1/G2/G3：[受控批准组合](../../apps/api/src/modules/ai-native/approval-execution/controlled-approved-order.composition.ts)、Core参与者、原收据及正式reprepare均已消费 | G4真实并发/所有失败窗及多动作范围验收；后续场景继续复用，不能继承旧批准 |
 | AIN-08 | G1/G2/G3：[业务工具组合](../../apps/api/src/modules/ai-native/tools/business-tools.composition.ts)已将目录/可用性/客户/订单/风险事实接入原场景 | G4四品类事实及历史依据真实对照，缺能力仍明确unavailable |
 | AIN-09 | G1/G2：Core正式报价、原操作键保存/恢复、原请求quoteReview/confirmQuote/readQuoteReceipt已接 | G3四品类/企业身份/歧义到明确参数的完整消费者；不是缺Core原键端口 |
