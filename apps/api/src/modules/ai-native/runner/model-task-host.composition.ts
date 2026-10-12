@@ -71,5 +71,46 @@ export function composeTaskModelHostWithModel<T extends ReturnType<typeof compos
     invocations: model.invocations, toolCatalog: model.toolCatalog, financialEvidence: input.financialEvidence,
     inputSource: input.inputSource, wall: input.clock, monotonic: input.monotonic }, model.authorization);
   const application = root.createApplication(input.host, prepare);
-  return Object.freeze({ model, ...root, application });
+  const originalRun = Object.freeze({ taskId: task.taskId, runId: task.runId });
+  const recoveryHost = Object.freeze(structuredClone(input.host));
+  const recoverOriginal = async (signal?: AbortSignal) => {
+    if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
+    const snapshot = await application.inspect(originalRun);
+    // A terminal or never-dispatched run remains observation. Recovery cannot
+    // prepare/publish a new input or save another plan to make it runnable.
+    if (!snapshot.plan || !['running', 'waiting_input', 'waiting_confirmation', 'waiting_external', 'cancel_requested'].includes(snapshot.task.status)) {
+      return { kind: 'not_started' as const, reason: 'task_not_runnable' as const };
+    }
+    const lease = await root.authorization.tasks.claimRecoveryRun({ ...originalRun,
+      holderId: recoveryHost.holderId, leaseMs: recoveryHost.leaseMs,
+      expectedTaskRevision: snapshot.task.revision, expectedRunRevision: snapshot.run.revision,
+      expectedFencingToken: snapshot.run.fencingToken });
+    // Repository CAS fences the previous holder. The original runner rechecks
+    // authority and persisted plan/evidence and owns bounded lease cleanup;
+    // external_unknown is reconciliation only, never a provider retry.
+    return { kind: 'run_outcome' as const, outcome: await root.runner.recover(lease, signal) };
+  };
+  const requestCancelOriginal = async (value: unknown) => {
+    const parsed = z.object({ expectedRevision: z.number().int().min(1).max(4294967294) })
+      .strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const before = structuredClone(await root.authorization.tasks.resolveAccess(task.taskId, 'read_metadata'));
+    // The original transition repository supplies action authorization, scoped
+    // revision CAS and durable cancellation/event ordering. No run is started,
+    // accounting released or external effect claimed to have been rolled back.
+    const receipt = await root.taskTransitions.transition({ taskId: task.taskId,
+      expectedRevision: parsed.data.expectedRevision, to: 'cancel_requested', reason: 'cancel_requested' });
+    const after = await root.authorization.tasks.resolveAccess(task.taskId, 'read_metadata');
+    if (before.bindingKey !== after.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    return { receipt, cancellation: 'requested_not_rollback' as const,
+      retryable: false as const, nextAction: 'read_original_task' as const };
+  };
+  return Object.freeze({ model, ...root, application,
+    requestCancelOriginal,
+    recoverOriginal,
+    // Inspection is observation only, including after a process rebuild.
+    // Reconciliation uses the existing application's held-lease gate; a new
+    // holder receives recovery_lease_unavailable, not new dispatch permission.
+    readOriginalRecovery: () => application.inspect(originalRun),
+    reconcileOriginal: (signal?: AbortSignal) => application.reconcile(originalRun, signal) });
 }

@@ -291,6 +291,7 @@ test('model host keeps missing provider usage unknown and never settles it as ze
 
 for (const complete of [true, false]) test(`model host recovery reads ${complete ? 'completed' : 'unknown'} original evidence with the already-held lease and no new call`, async () => {
   const h = await modelHostHarness();
+  if (!complete) { h.config.host = { holderId: 'model-host', leaseMs: 1000 }; h.root = composeTaskModelHost(h.config); }
   if (!complete) h.modelControl.onInvoke = async () => { throw Error('synthetic interrupted transport'); };
   h.storeControl.beforeWrite = async (name, args) => {
     if (name === 'aiStep' && args.data?.status === 'SUCCEEDED' || name === 'aiRun' && args.data?.leaseOwnerId === null) throw Error('synthetic interrupted worker');
@@ -298,19 +299,31 @@ for (const complete of [true, false]) test(`model host recovery reads ${complete
   await assert.rejects(h.root.application.start(h.query)); h.storeControl.beforeWrite = null;
   const artifacts = h.clone(h.state.aiTaskResultArtifact), invocation = h.clone(h.state.aiGatewayInvocation);
   const charges = h.state.aiTaskExecutionCharge.map(c => c.chargeId), fence = h.state.aiRun[0].fencingToken.toFixed(0);
-  const result = await h.root.application.reconcile(h.query);
+  let result;
+  if (complete) result = await h.root.reconcileOriginal();
+  else {
+    h.control.now = new Date(h.control.now.getTime() + 1001);
+    const rebuilt = composeTaskModelHost({ ...h.config, host: { holderId: 'recovery-host', leaseMs: 1000 } });
+    result = await rebuilt.recoverOriginal();
+  }
   assert.equal(result.outcome.status, complete ? 'succeeded' : 'unknown');
   assert.deepEqual(h.state.aiTaskResultArtifact, artifacts); assert.deepEqual(h.state.aiGatewayInvocation, invocation);
   assert.deepEqual(h.state.aiTaskExecutionCharge.map(c => c.chargeId), charges);
-  assert.equal(h.state.aiRun[0].fencingToken.toFixed(0), fence); assert.equal(h.state.aiRun[0].leaseOwnerId, null);
+  assert.equal(h.state.aiRun[0].fencingToken.toFixed(0), complete ? fence : (BigInt(fence) + 1n).toString());
+  assert.equal(h.state.aiRun[0].leaseOwnerId, null);
   assert.equal(h.state.aiTaskExecutionBudget[0].consumedCalls, complete ? 1n : 0n);
   assert.equal(h.state.aiTaskExecutionBudget[0].reservedCalls, complete ? 0n : 1n); assert.equal(h.modelControl.sent.length, 1);
 });
 
 test('model host cancellation during dispatch preserves original unknown occupancy and never emits a fresh invocation', async () => {
   const h = await modelHostHarness();
-  h.modelControl.onInvoke = async () => h.root.taskTransitions.transition({ taskId: h.query.taskId,
-    expectedRevision: h.state.aiTask[0].revision, to: 'cancel_requested', reason: 'cancel_requested' });
+  await assert.rejects(h.root.requestCancelOriginal({ taskId: 'other-task', expectedRevision: h.state.aiTask[0].revision }),
+    e => e.code === 'AI_INVALID_INPUT');
+  h.modelControl.onInvoke = async () => {
+    const requested = await h.root.requestCancelOriginal({ expectedRevision: h.state.aiTask[0].revision });
+    assert.equal(requested.cancellation, 'requested_not_rollback');
+    assert.equal(requested.retryable, false);
+  };
   const result = await h.root.application.start(h.query);
   assert.equal(result.outcome.status, 'unknown'); assert.equal(h.state.aiTask[0].status, 'CANCEL_REQUESTED');
   assert.equal(h.state.aiGatewayInvocation.length, 1); assert.equal(h.modelControl.sent.length, 1);
