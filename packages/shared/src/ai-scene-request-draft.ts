@@ -119,11 +119,12 @@ export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
   reconcileSettingsTask: 'settings/reconcile', cancelSettingsTask: 'settings/cancel'
 } as const);
 
-/** Distinct server-opt-in two-step order read chain. Every operation resolves
+/** Distinct server-opt-in fixed order read chain. Every operation resolves
  * the original task/run/result on the server; never a client-selected resultId. */
 export const AI_SCENE_ORDER_READ_HTTP_DRAFT = Object.freeze({
   basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/order-read`, method: 'POST',
   start: 'start', recover: 'recover', readOrderResult: 'order-result',
+  readPreparation: 'preparation', resumePrepared: 'preparation/resume', readAnswer: 'answer',
   readModelResult: 'model-result', readTaskScene: 'scene', readNextSteps: 'next-steps',
   readTaskSnapshot: 'snapshot', reopenModelSource: 'source', requestCancel: 'cancel', takeover: 'takeover',
   readTakeoverReceipt: 'takeover/receipt', readCancellationReceipt: 'cancel/receipt',

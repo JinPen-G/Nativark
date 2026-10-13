@@ -285,6 +285,25 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
       await verify(before);
       return freezeOriginalInput({ original: before.original.receipt, taskId: before.task.taskId, runId: before.task.runId, result });
     },
+    async readModelResult(value: unknown) {
+      const { before, key, modelRegistrationRef } = await assemble(value, false);
+      const frozen = await input.db.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: modelRegistrationRef } });
+      if (!frozen) throw unavailable();
+      const steps = await input.db.aiStep.findMany({ where: { ...key, inputRef: frozen.id,
+        toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION }, take: 2 });
+      if (steps.length !== 1 || !steps[0].resultRef || steps[0].requestFingerprint !== frozen.fingerprint) throw unavailable();
+      const result = await results.read({ original: before.ref, resultId: steps[0].resultRef });
+      await verify(before);
+      return result;
+    },
+    async reopenOrderSource(value: unknown) {
+      const before = await bound(value);
+      const result = await application.readModelResult(before.ref);
+      if (result.status !== 'available' || !result.sources?.length) throw unavailable();
+      const source = await results.reopenSource({ original: before.ref, resultId: result.resultId, sourceIndex: 0 });
+      await verify(before);
+      return source;
+    },
     async readAnswer(value: unknown) {
       if (!answerRoundTrip) throw unavailable();
       const { before, runner, key, answerRegistrationRef } = await assemble(value, false);

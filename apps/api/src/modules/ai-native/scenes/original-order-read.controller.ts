@@ -12,6 +12,9 @@ export const AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS = Symbol('AI_ORIGINAL_ORDER_RE
 export interface OriginalOrderReadHttpRequests {
   start(request: AiSceneHttpRequest, original: AiSceneRequestReadDraft, signal?: AbortSignal): Promise<unknown>;
   recover(request: AiSceneHttpRequest, original: AiSceneRequestReadDraft, signal?: AbortSignal): Promise<unknown>;
+  readPreparation(request: AiSceneHttpRequest, original: AiSceneRequestReadDraft): Promise<unknown>;
+  resumePrepared(request: AiSceneHttpRequest, original: AiSceneRequestReadDraft, signal?: AbortSignal): Promise<unknown>;
+  readAnswer(request: AiSceneHttpRequest, original: AiSceneRequestReadDraft): Promise<unknown>;
   takeover(request: AiSceneHttpRequest, command: AiSceneModelTakeoverDraft, signal?: AbortSignal): Promise<unknown>;
   readTakeoverReceipt(request: AiSceneHttpRequest, command: AiSceneModelTakeoverDraft): Promise<unknown>;
   readOrderResult(request: AiSceneHttpRequest, original: AiSceneRequestReadDraft): Promise<unknown>;
@@ -52,6 +55,21 @@ export class AiOriginalOrderReadController {
   recover(@Req() request: Request, @Body() body: unknown) {
     const original = reference(body);
     return respondAiScene(() => withRequestAbort(request, signal => this.app.recover(request, original, signal)), 'read_execution');
+  }
+  // Repair is separate from start/recover: its real application rejects any
+  // execution/occupancy evidence, and never retries an unknown dispatch.
+  @Post(AI_SCENE_ORDER_READ_HTTP_DRAFT.resumePrepared)
+  resumePrepared(@Req() request: Request, @Body() body: unknown) {
+    const original = reference(body);
+    return respondAiScene(() => withRequestAbort(request, signal => this.app.resumePrepared(request, original, signal)), 'read_execution');
+  }
+  @Post(AI_SCENE_ORDER_READ_HTTP_DRAFT.readPreparation)
+  readPreparation(@Req() request: Request, @Body() body: unknown) {
+    return respondAiScene(() => this.app.readPreparation(request, reference(body)));
+  }
+  @Post(AI_SCENE_ORDER_READ_HTTP_DRAFT.readAnswer)
+  readAnswer(@Req() request: Request, @Body() body: unknown) {
+    return respondAiScene(() => this.app.readAnswer(request, reference(body)));
   }
   @Post(AI_SCENE_ORDER_READ_HTTP_DRAFT.takeover)
   takeover(@Req() request: Request, @Body() body: unknown) {
