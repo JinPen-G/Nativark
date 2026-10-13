@@ -46,6 +46,8 @@ export function composeAiTaskCenterScene(input: {
   selections?: Pick<PrismaQuoteSelectionRepository, 'read'>;
   approvals?: Pick<ReturnType<typeof composeHumanQuoteOrder>, 'readSelectedProposal' | 'readSelectedDecisionReceipt'>;
   orders?: Pick<ReturnType<typeof composeSelectedQuoteTaskApplication>, 'readResult'>;
+  /** Original two-step model -> readonly order host; never the order writer. */
+  orderFacts?: { read(value: unknown): Promise<{ taskId: string; runId: string; result: unknown }> };
   scenes: Pick<OriginalScenes, 'readTaskReceipt' | 'readRecovery'> & {
     requests: Pick<OriginalScenes['requests'], 'readHistorical'>;
   };
@@ -100,6 +102,16 @@ export function composeAiTaskCenterScene(input: {
     readModelResult: async (value: unknown) => {
       if (typeof input.modelResults?.read !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
       return input.modelResults.read(value);
+    },
+    readOrderFacts: async (value: unknown) => {
+      const parsed = originalRequestReferenceSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      if (typeof input.orderFacts?.read !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const task = await readObservedTask(parsed.data);
+      const result = structuredClone(await input.orderFacts.read(parsed.data));
+      if (result.taskId !== task.taskId || result.runId !== task.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      await assertStillCurrent(parsed.data, task);
+      return freezeOriginalInput(result);
     },
     readInput: async (value: unknown) => {
       const parsed = taskRead.safeParse(structuredClone(value));
@@ -258,10 +270,13 @@ export function composeAiTaskCenterScene(input: {
         : { availability: 'not_requested' as const };
       const business = command.order !== undefined ? await readers.readOrderResult({ original: command.original, taskId: current.taskId, reference: command.order })
         : { availability: 'not_requested' as const };
+      const orderFacts = input.orderFacts && original.request.sceneCode === 'order_explanation'
+        ? await readers.readOrderFacts(command.original) : { availability: 'not_requested' as const };
       await assertStillCurrent(command.original, current);
       return freezeOriginalInput({ kind: command.kind, taskId: current.taskId, runId: command.runId,
         originRunId: current.runId, task, snapshot,
-        originalInput, pendingInput, model, review, decision, business, submission: 'not_attested_by_approval' as const,
+        originalInput, pendingInput, model, review, decision, business,
+        ...(input.orderFacts ? { orderFacts } : {}), submission: 'not_attested_by_approval' as const,
         consistency: 'independent_authorized_reads' as const, execution: 'read_only_no_start_no_reconnect_side_effect' as const });
     }
   });
