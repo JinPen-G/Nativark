@@ -18,6 +18,10 @@ export interface GatewayInvocationObservation {
   reservationId: string;
   route: ProviderRouteDecision;
   result: GatewayInvocationResult;
+  /** Gateway-owned transport traversal, never a provider capability grant.
+   * Optional only for preserved callers predating delivery observations. */
+  delivery?: { mode: 'invoke' } | { mode: 'stream'; eventCount: number; deltaCount: number;
+    deltaBytes: number; deltaHash: string };
 }
 export interface UnifiedGatewayAudit { append(entry: { callId: string; tenantId: string; workspaceId: string; event: string; status: string; detail?: string }): Promise<void>; }
 export interface UnifiedGatewayPorts { routing: Pick<AiGatewayRoutingService, 'resolve' | 'assertCurrent'>; admission: InvocationAdmissionService; dispatch: Pick<InvocationDispatchService, 'claim' | 'finish'>; budget: UnifiedGatewayBudget; transport: UnifiedGatewayTransport; audit: UnifiedGatewayAudit; media?: GatewayMediaAttachmentResolver; observation?: { record(value: GatewayInvocationObservation): Promise<void> }; }

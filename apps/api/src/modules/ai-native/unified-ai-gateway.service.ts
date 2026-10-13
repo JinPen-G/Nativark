@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { AiGatewayIntentDraft } from '@rental-os/shared';
 import { gatewayTextIntentBindingSchema, prepareGatewayIntent, prepareGatewayTextIntent, type GatewayTextIntentBinding } from './gateway-intent';
@@ -171,7 +171,8 @@ export class UnifiedAiGatewayService {
       const rawResult = structuredClone(await life.wait(() => this.ports.transport.invoke(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal)));
       const result = intentBinding ? this.textResult(rawResult) : rawResult;
       if (this.ports.observation) {
-        await life.wait(() => this.ports.observation!.record(structuredClone({ call, reservationId: usage.id, route, result })));
+        await life.wait(() => this.ports.observation!.record(structuredClone({ call, reservationId: usage.id, route, result,
+          delivery: { mode: 'invoke' as const } })));
       }
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       const reported = result.usage;
@@ -216,6 +217,10 @@ export class UnifiedAiGatewayService {
     let iterator: AsyncIterator<GatewayStreamEvent> | undefined;
     let sourceDone = false;
     let finalResult: GatewayInvocationResult | undefined;
+    // Independent of provider token accounting: bounded transient delivery,
+    // not a tokenizer, price estimator or a second task resource ledger.
+    let eventCount = 0, deltaCount = 0, deltaBytes = 0;
+    const deltaDigest = createHash('sha256');
     try {
       const resolution = structuredClone(await life.wait(() => this.ports.routing.resolve(context, this.required(request, true))));
       if (intentBinding && resolution.scene !== intentBinding.routeScene) throw new ModelGatewayError('CONFIG_INVALID');
@@ -256,20 +261,31 @@ export class UnifiedAiGatewayService {
       while (true) {
         const item = await life.wait(() => iterator!.next());
         if (item.done) { sourceDone = true; break; }
+        if (++eventCount > 4094) throw new ModelGatewayError('INVALID_RESPONSE');
         const event = item.value;
         if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
         if (!event || result) throw new ModelGatewayError('INVALID_RESPONSE');
         if (event.kind === 'result') {
-          if (!event.result || typeof event.result.text !== 'string') throw new ModelGatewayError('INVALID_RESPONSE');
+          if (!event.result || typeof event.result.text !== 'string' || event.result.text.length > 128000
+            || Buffer.byteLength(event.result.text, 'utf8') > 512000) throw new ModelGatewayError('INVALID_RESPONSE');
           result = intentBinding ? this.textResult(event.result) : structuredClone(event.result);
         } else if (event.kind === 'text_delta' && typeof event.delta === 'string') {
           const delta = event.delta;
+          if (delta.length > 128000 || (deltaBytes += Buffer.byteLength(delta, 'utf8')) > 512000) throw new ModelGatewayError('INVALID_RESPONSE');
+          deltaCount++;
+          deltaDigest.update(delta, 'utf8');
           await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
           yield { kind: 'text_delta', delta };
         } else throw new ModelGatewayError('INVALID_RESPONSE');
       }
       if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       if (!result) throw new ModelGatewayError('PROVIDER_FAILED');
+      await life.wait(() => this.ports.routing.assertCurrent(context, structuredClone(resolution)));
+      if (this.ports.observation) {
+        await life.wait(() => this.ports.observation!.record(structuredClone({ call, reservationId: usage.id, route, result,
+          delivery: { mode: 'stream' as const, eventCount, deltaCount, deltaBytes, deltaHash: deltaDigest.digest('hex') } })));
+      }
+      if (life.controller.signal.aborted) throw new ModelGatewayError(life.reason() ?? 'CANCELLED');
       const reported = result.usage;
       if (reported) { await life.wait(() => this.ports.budget.settle(structuredClone(call), usage.id, `stream:${request.callId}`, reported)); accounted = true; }
       else { await life.wait(() => this.ports.budget.abandon(structuredClone(call), usage.id, 'USAGE_UNAVAILABLE')); accounted = true; }

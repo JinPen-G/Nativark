@@ -111,7 +111,9 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
   async observe(id: string, value: GatewayInvocationObservation, transport: 'node_https' | 'mock') {
     const input = structuredClone(value), call = checkedAccountingCall(input.call);
     const row = await this.read(id);
-    if (!row || call.binding.scope.id !== row.descriptor.scopeId || call.binding.profileId !== row.descriptor.profileId
+    // The original text-echo-1 receipt is an invoke challenge. A stream
+    // observation cannot silently upgrade it into a streaming capability proof.
+    if (input.delivery?.mode === 'stream' || !row || call.binding.scope.id !== row.descriptor.scopeId || call.binding.profileId !== row.descriptor.profileId
       || requestFingerprint(call.context) !== requestFingerprint(row.descriptor.context)
       || call.request.callId !== row.descriptor.callId || call.request.intentHash !== row.descriptor.intentHash
       || call.request.model !== row.descriptor.configuration.model || call.request.maxOutputTokens !== 32
