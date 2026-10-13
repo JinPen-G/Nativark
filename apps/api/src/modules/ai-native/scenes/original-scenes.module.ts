@@ -3,12 +3,14 @@ import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './ori
 import { AI_ORIGINAL_SCENES, AI_ORIGINAL_SCENE_REQUESTS, AiOriginalScenesController,
   AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS,
   AiOriginalSceneModelController, AiOriginalSceneModelActionsController,
-  AI_ORIGINAL_TASK_ACTION_POLICIES, AiOriginalTaskActionPolicyController } from './original-scenes.controller';
+  AI_ORIGINAL_TASK_ACTION_POLICIES, AiOriginalTaskActionPolicyController,
+  AI_SCENE_PLAN_POLICIES, AiScenePlanPolicyController } from './original-scenes.controller';
 import { composeAiOriginalSceneModel, type AiOriginalSceneModelDependencies } from './original-scene-model.composition';
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneModel, type RequestBoundOriginalSceneDependencies,
   composeRequestBoundPersistedOriginalSceneModel, type RequestBoundPersistedOriginalSceneModelDependencies,
   type RequestBoundOriginalSceneModelDependencies, type AiSceneModelRequestOptions, type AiSceneRequestOptions } from './request-bound-scenes.application';
 import { composeRequestBoundOriginalTaskActionPolicies, type AiOriginalTaskActionPolicyOptions } from './request-bound-scenes.application';
+import { composeRequestBoundScenePlanPolicies, type AiScenePlanPolicyConfiguration } from './request-bound-scenes.application';
 
 export const AI_ORIGINAL_SCENE_MODEL = Symbol('AI_ORIGINAL_SCENE_MODEL');
 export { AI_ORIGINAL_TASK_ACTION_POLICIES } from './original-scenes.controller';
@@ -16,6 +18,14 @@ export { AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQ
 
 @Module({})
 export class AiOriginalScenesModule {
+  /** Explicit scene-management host, never production activation. */
+  static registerHttpPlanPolicies(dependencies: RequestBoundOriginalSceneDependencies,
+    options: AiScenePlanPolicyConfiguration): DynamicModule {
+    const selected = structuredClone(options);
+    return { module: AiOriginalScenesModule, controllers: [AiScenePlanPolicyController],
+      providers: [{ provide: AI_SCENE_PLAN_POLICIES,
+        useFactory: () => composeRequestBoundScenePlanPolicies(dependencies, selected) }], exports: [AI_SCENE_PLAN_POLICIES] };
+  }
   /** Explicit opt-in transport. No task policy is automatically written. */
   static registerHttpTaskActionPolicies(dependencies: RequestBoundOriginalSceneDependencies,
     options: AiOriginalTaskActionPolicyOptions): DynamicModule {

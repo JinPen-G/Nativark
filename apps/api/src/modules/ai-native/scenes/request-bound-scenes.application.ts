@@ -23,6 +23,7 @@ import { composeTaskActionPolicyManagement } from '../task-action-policy-managem
 import { taskActionPolicyOperations, type AiTaskActionPolicyMutation } from '../prisma-task-action-policy.repository';
 import { PrismaTaskTakeoverRepository } from '../runner/prisma-task-takeover.repository';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
+import { PrismaTaskPlanPolicyRepository } from '../runner/prisma-task-plan-policy.repository';
 
 export type AiSceneHttpRequest = { headers: { authorization?: unknown } };
 export type AiSceneRequestOptions = { enabled: boolean; audience: 'operator' | 'staff' };
@@ -31,6 +32,10 @@ export type AiOriginalTaskActionPolicyOptions = AiSceneRequestOptions & {
    * action-policy creation. The current owner must also pass config Guard. */
   templates: readonly Pick<AiTaskActionPolicyMutation, 'operation' | 'requiredPermissions'>[];
   ttlMs: number;
+};
+export type AiScenePlanPolicyConfiguration = AiSceneRequestOptions & {
+  scenes: readonly { scene: { code: string; version: string };
+    tools: NonNullable<ConstructorParameters<typeof PrismaTaskPlanPolicyRepository>[1]['tools']> }[];
 };
 export type RequestBoundOriginalSceneDependencies = Omit<AiOriginalSceneDependencies, 'credentials'>;
 export type RequestBoundOriginalSceneModelDependencies = Omit<AiOriginalSceneModelDependencies, 'credentials'>;
@@ -89,6 +94,47 @@ function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequ
       } }, command), command));
     } finally { active = false; }
   };
+}
+
+/** Human-owned plan configuration, not task ownership or dispatch authority.
+ * The scene/tool registry is fixed by the server and never taken from a body. */
+export function composeRequestBoundScenePlanPolicies(dependencies: RequestBoundOriginalSceneDependencies,
+  options: AiScenePlanPolicyConfiguration) {
+  if (options.audience !== 'operator') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  const scenes = freezeOriginalInput(structuredClone(options.scenes));
+  if (!Array.isArray(scenes) || !scenes.length || scenes.length > 32
+    || scenes.some(row => !row?.scene || !Array.isArray(row.tools) || !row.tools.length || row.tools.length > 16)
+    || new Set(scenes.map(row => row.scene.code)).size !== scenes.length) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  const readSchema = z.object({ sceneCode: z.string().min(1).max(64).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
+  const changeSchema = readSchema.extend({ change: z.unknown() }).strict();
+  const call = bindRequests(dependencies, { enabled: options.enabled, audience: 'operator' }, input => ({
+    repository(code: string) {
+      const selected = scenes.find(row => row.scene.code === code);
+      if (!selected) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return new PrismaTaskPlanPolicyRepository(input.db, { auth: input.auth, credentials: input.credentials,
+        guard: input.guard, scene: selected.scene, tool: selected.tools[0], tools: selected.tools, audit: true }, input.clock);
+    }
+  }));
+  return Object.freeze({
+    read(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = readSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = readSchema.parse(command);
+        return { sceneCode: input.sceneCode, ...await root.repository(input.sceneCode).read(),
+          execution: 'not_attested' as const, taskActionPolicy: 'not_granted' as const };
+      });
+    },
+    change(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = changeSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = changeSchema.parse(command);
+        return { sceneCode: input.sceneCode, ...await root.repository(input.sceneCode).put(input.change),
+          execution: 'not_attested' as const, taskActionPolicy: 'not_granted' as const };
+      });
+    },
+  });
 }
 
 /** Original operator scenes can now configure their own execution policies
