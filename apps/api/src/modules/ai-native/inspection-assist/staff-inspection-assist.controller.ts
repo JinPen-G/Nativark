@@ -38,7 +38,7 @@ export class StaffInspectionAssistController {
           }
           case 'draft-create': return services.drafts ? services.drafts.create(input) : absent();
           case 'draft-read': return services.drafts ? services.drafts.read(input) : absent();
-          case 'draft-edit': return services.drafts ? services.drafts.edit(input) : absent();
+          case 'draft-edit': return (await services.editHumanReview(input)).mutation;
           case 'evidence-replace': return services.drafts ? services.drafts.replaceEvidence(input) : absent();
           case 'draft-operation': return services.drafts ? services.drafts.reconcileOperation(input) : absent();
           case 'input-prepare': return services.recognition ? services.recognition.prepare(input, signal) : absent();
@@ -56,7 +56,7 @@ export class StaffInspectionAssistController {
           // initiate another inspection. Explicit submit remains separate.
           case 'submission-read': {
             if (!services.submission) return absent();
-            const receipt = await services.submission.readReceipt(input);
+            const receipt = (await services.readSubmissionReview(input)).receipt;
             return receipt.status === 'not_observed' || receipt.status === 'unavailable'
               ? { ...receipt, status: 'submission_unknown' as const, nextAction: 'manual_reconcile_original_action' as const }
               : receipt;

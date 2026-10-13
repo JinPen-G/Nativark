@@ -17,6 +17,7 @@ export type HumanKnowledgeManagementRequest = {
   indexStatus(value: unknown): Promise<Awaited<ReturnType<HumanKnowledgeIndexService['status']>>>;
   requestIndex(value: unknown): ReturnType<HumanKnowledgeIndexService['request']>;
   resumeIndex(value: unknown): ReturnType<HumanKnowledgeIndexService['resume']>;
+  indexOperationStatus(value: unknown): ReturnType<HumanKnowledgeIndexService['operationStatus']>;
   close(): void;
 };
 
@@ -83,6 +84,7 @@ export class HumanKnowledgeManagementRequestFactory {
       indexStatus: value => index.status(parse(z.object({ documentId: id }).strict(), value).documentId),
       requestIndex: value => index.request(value),
       resumeIndex: value => index.resume(value),
+      indexOperationStatus: value => index.operationStatus(value),
       observeUpload: value => uploads.observe(value),
       observeRevisionUpload: value => uploads.observeRevision(value),
       beginUpload: async value => {

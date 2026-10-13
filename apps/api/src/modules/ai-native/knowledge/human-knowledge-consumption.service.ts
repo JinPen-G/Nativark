@@ -174,4 +174,7 @@ export class HumanKnowledgeConsumptionService {
   collectInput(value: unknown, options: unknown = { includePreferences: false }) {
     return this.preparation.collect(value, options);
   }
+  /** Reuse the exact collected material. Revocation or changed content requires
+   * recollection; never substitute a fresh body under an old fingerprint. */
+  revalidateInput(value: unknown) { return this.preparation.revalidate(value); }
 }

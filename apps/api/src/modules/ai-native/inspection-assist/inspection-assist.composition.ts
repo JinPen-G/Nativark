@@ -245,8 +245,38 @@ export function composeInspectionAssist(dependencies: Dependencies) {
     }
     return { ...observation, receipt: saved };
   };
+  const reviewTarget = (value: unknown) => {
+    const input = z.record(z.unknown()).parse(structuredClone(value));
+    return inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId }).parse(
+      Object.fromEntries(['orderId', 'allocationId', 'stage', 'templateId', 'draftId'].map(key => [key, input[key]])));
+  };
+  /** Explicit human patch only. Recognition never chooses the final value. A
+   * late observation failure still requires the ORIGINAL edit receipt. */
+  const editHumanReview = async (value: unknown) => {
+    if (!drafts) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+    const command = structuredClone(value), target = reviewTarget(command);
+    const mutation = await drafts.edit(command);
+    const before = await drafts.readReview(target), review = await drafts.readReview(target);
+    if (requestFingerprint(before) !== requestFingerprint(review)) throw new InspectionAssistError('REVISION_CONFLICT');
+    return { mutation, review, operationRevisionMatchesCurrent: mutation.revision === review.revision,
+      semantics: 'human_draft_patch_not_inspection_submission' as const, businessActionRequested: false as const };
+  };
+  /** Receipt observation is independent of the current draft head and never
+   * performs submission, repairs linkage or re-runs recognition. */
+  const readSubmissionReview = async (value: unknown) => {
+    if (!drafts || !submission) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+    const target = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId }).strict().parse(structuredClone(value));
+    return authority.withAction(target, 'submit', async () => {
+      const receipt = await submission.readReceipt(target), review = await drafts.readReview(target);
+      const currentReceipt = await submission.readReceipt(target), currentReview = await drafts.readReview(target);
+      if (requestFingerprint(receipt) !== requestFingerprint(currentReceipt)
+        || requestFingerprint(review) !== requestFingerprint(currentReview)) throw new InspectionAssistError('REVISION_CONFLICT');
+      return { receipt, review, businessActionRequested: false as const, automaticRetry: false as const,
+        semantics: 'original_inspection_receipt_and_current_draft_are_separate' as const };
+    });
+  };
   return { templates, manual, candidates, drafts, evidence, submission, recognition, recognitionResults, readRecognitionReview,
-    readRecognitionSaveReview, saveRecognitionReview };
+    readRecognitionSaveReview, saveRecognitionReview, editHumanReview, readSubmissionReview };
 }
 
 /** No Controller/AppModule/worker registration. Original business pages remain available. */

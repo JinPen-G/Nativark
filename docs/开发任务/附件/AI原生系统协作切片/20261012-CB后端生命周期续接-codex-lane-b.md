@@ -64,3 +64,23 @@ API compiler API noEmit：原严格选项，内存 rootDir/baseUrl 本树，shar
 5. 关系索引任务接续与单进程缓存/当前 head 拒绝不等于外部分布式物理删除完成；逻辑墓碑仍保留 physicalIndexDeletion=not_verified。没有新增队列/调度或留存清理政策。
 
 本包合法源码接线已交，未接公共合同与真实环境按以上逐项保留，不宣称 AIN10/19/20/24 或 M1 完成。没有改三端 UI/主文档/中央记录/身份内核/共享 schema/迁移/Gateway/预算/审批/Core，无生产启用。
+
+## 20261013 固定基线后的后端接续完整包
+
+基线 `ebc036ea81cf01f3f8e60cc5120338affcfff75e`，开工分支正确、tracked/index 干净、无 MERGE_HEAD/CHERRY_PICK_HEAD，仅历史 output 保留。没有重复导入前包或套用旧 stash。严格没有新增或修改 tests、fixture、测试脚本；沿原服务、组合与模块施工。
+
+三个源码提交顺序：
+
+1. `35ebdd8353d30013157aea9bacf3c137837d3821`：`HumanKnowledgeIndexService.operationStatus({documentId,operationId,generation})` 接 `HumanKnowledgeManagementRequest.indexOperationStatus`。复用当前正式 index 授权、仓储/关系索引收据，纯查询不推进任务。返回所请求 generation 的 pending/completed/failed 或 not_observed/superseded，不能拿最新任务当原任务成功；被新 remove 替代的旧 upsert 不复活。历史完整 job 未存于 receipt，不从当前 head 反推旧事实，historicalCompletion=not_attested、physicalIndexDeletion=not_verified。原 request/resume 不变，同原键显式接续、缺政策拒绝；已有 server module 继续导出同 factory，未新增 HTTP。
+2. `2fb777997a980e107db5f242784f1670e597ef33`：既有 `HumanKnowledgeInputService.collect` 接可选 `preferenceKinds`，复用原 `PersistentMemoryConsentService.selectPreferences`，只带明确类型的当前确认项，拒绝重复 kinds 或 includePreferences=false 却提供 kinds。沿原材料格式投影，不另造 frozen 输入/账本；原 legacy includePreferences 路径保持。`HumanKnowledgeConsumptionService.revalidateInput` 与同请求 factory 的 `collectInput/revalidateInput` 现接实际准备/复验服务，使用前失权、撤销、版本/hash/期限变化拒绝，不静默换正文。无新增持久缓存，失败不返回旧材料；原历史包不能被当当前许可。
+3. `231821c9cd4d3e06f57176e8a507532e9e96350b`：InspectionAssist 组合/Staff request 新 `editHumanReview` 调原 drafts.edit，再读当前人工审阅；原员工 draft-edit 保持旧 mutation 载荷。新 `readSubmissionReview` 纯原收据→当前审阅→收据/审阅重读，包裹原 submit 动作复验，strict 原 target/draft 输入，不接受额外 scope。原 submission-read 保持旧 receipt 载荷，不回写、不新提交、不识别。人工修订与原收据分别表达，迟到观察失败仍按原 edit/提交键核对，不能假定未写。仅改 inspection-assist.composition/staff controller，不改 Core、文件基础设施或媒体执行链。
+
+实际验证：只一次直接 Node 内联冒烟场景（失败修正后复验同一场景，没有新增脚本/扩矩阵）。命令入口 `node -r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs -e <本对话内联生命周期冒烟>`，原 prisma-offline-preload 经 NODE_OPTIONS 注入。内联调用既有 lane-b-functional/inspection-persistent 的事务替身，真实知识/index/consent/inspection 服务：create→parse→index pending/原 resume→publish；两个确认偏好只选择 locale；原材料复验；撤销旧材料拒绝；withdraw 后旧 generation superseded/禁 resume、新 remove 同键完成；撤权 index 查询拒绝；员工人工 42→43、原收据 not_prepared 只读零操作写入、缺持久识别来源拒绝。最终 stdout `smoke=passed; knowledge/index/consent/inspection services; synthetic transactions/auth only; no media/model execution`、exit 0。不是 node:test suite，故不伪填 pass/fail/skip 数量；首轮 exit1 是源码误取 AiInspectionOperationResult.result，已改真实扁平 revision；内联 draft.create 也按真实扁平 draftId/revision 读取，后续相关复验 exit0。
+
+必要 compiler API noEmit 使用原 apps/api/tsconfig 严格选项和内存 shared/本树私有 Prisma paths、incremental=false，根为 human-knowledge-management.composition / human-knowledge-consumption.composition / inspection-assist.composition：最终 1139 files、0 diagnostics、exit 0；首轮一个真实 result 属性错误保留，不放宽类型。diff check exit 0，仅继承 CRLF 提示；无生成共享产物。
+
+Node DATABASE_URL 固定 mysql://offline:offline@127.0.0.1:1/rental_os_offline；write-root 为本树绝对路径，audit=本树 output/inspection-lb05-tmp/20261013-backend.audit，TEMP/TMP 同该目录，禁 compile cache。原测试替身 Auth/事务不是本次真实 MySQL/正式政策部署或对象存储验证；未读取 .env、启服务、安装、执行迁移、连接 HTTP/DB/DNS/模型/支付/存储、push/main/生产启用。
+
+精确接入边界：服务器消费 factory 已接原知识/记忆授权、file runtime、索引与材料服务，但索引 generation 查询 HTTP 仍无 shared/Guard 合同。本线不改 `scenes/original-scene-knowledge.ts`：其现有 collect→原 publisher 保持；若主线要在场景冻结时指定 preferenceKinds，需在该原 collect 调用 `services.preparation.collect(..., {includePreferences,maxPreferences,preferenceKinds})` 的可信服务器配置位置传递，不从模型或任意 caller scope 取值。本次验证了原消费服务材料，不冒称该场景新选择策略已发布或完整财务/模型链新验。
+
+员工正式新任务动作政策/partial-safe 公共结果、真实受控 ObjectReader/来源部署、多 allocation 原办理能力仍为前文准确硬依赖。已有图片/语音 Task/Gateway 输入、文件绑定与预算单账全部保留，不用文本桩声称识别；缺来源明确拒绝。仅当前合法人工更正与原收据消费已接，原签名/资格/责任/费用不在此层决策。真实外部存储/模型/设备/MySQL均未验，原 AIN 完成率不变。

@@ -5,12 +5,18 @@ import type { AiKnowledgeConsumptionHttpResponsesDraft } from '../../../../../..
 import { composePrismaFormalHumanKnowledge, type PrismaFormalKnowledgeDependencies } from './prisma-formal-knowledge.composition';
 import { KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
 import { documentSourceSchema, id, parse } from './knowledge-validation';
+import type { HumanKnowledgeConsumptionService } from './human-knowledge-consumption.service';
 
 export type HumanKnowledgeConsumptionDependencies = Omit<PrismaFormalKnowledgeDependencies, 'credentials' | 'policyManagement'>;
 export type HumanKnowledgeConsumptionHttpRequest = { headers: { authorization?: unknown } };
 export type HumanKnowledgeConsumptionRequest = {
   [K in keyof AiKnowledgeConsumptionHttpResponsesDraft]: (value: unknown) => Promise<AiKnowledgeConsumptionHttpResponsesDraft[K]>;
-} & { close(): void };
+} & {
+  /** Server-only input preparation, not an HTTP/model tool or permanent grant. */
+  collectInput(value: unknown, options?: unknown): ReturnType<HumanKnowledgeConsumptionService['collectInput']>;
+  revalidateInput(value: unknown): ReturnType<HumanKnowledgeConsumptionService['revalidateInput']>;
+  close(): void;
+};
 
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
 const documentInput = z.object({ documentId: id, previewLimit: z.number().int().min(1).max(10).optional() }).strict();
@@ -57,6 +63,8 @@ export class HumanKnowledgeConsumptionRequestFactory {
     } };
     const services = composePrismaFormalHumanKnowledge({ ...this.dependencies, credentials });
     return {
+      collectInput: (value, options) => services.consumption.collectInput(value, options),
+      revalidateInput: value => services.consumption.revalidateInput(value),
       readDocument: async value => {
         const input = parse(documentInput, value);
         return services.management.session.run(async context => {
