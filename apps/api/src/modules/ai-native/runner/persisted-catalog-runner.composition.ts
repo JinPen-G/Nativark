@@ -46,6 +46,41 @@ export function composePersistedAvailabilityTaskRunner(input: ReadonlyRunnerDepe
 export function composePersistedOrderFactsTaskRunner(input: ReadonlyRunnerDependencies & { core: Pick<RentalCoreService, 'getOrder'> }) {
   return composeReadonly(input, 'rental.order.explain');
 }
+/** One immutable server plan and one cumulative resource ledger for a closed
+ * group of actual readers. Agent tool names cannot extend this registry. */
+export function composePersistedReadonlyBusinessTaskRunner(input: ReadonlyRunnerDependencies & {
+  tools: readonly PersistedReadonlyTool[];
+}) {
+  const tools = [...input.tools];
+  if (tools.length < 2 || tools.length > 3 || new Set(tools).size !== tools.length
+    || tools.some(tool => !['rental.catalog.search', 'rental.availability.check', 'rental.order.explain'].includes(tool))) throw unavailable();
+  const readers = tools.map(tool => ({ tool, root: composeReadonly(input, tool) }));
+  PrismaTaskPlanInputSource.bindReadonlyPlanSources(readers.map(reader => reader.root.source));
+  const selected = (code: string) => readers.find(reader => reader.tool === code)?.root;
+  const first = readers[0].root;
+  const root = composeAuthorizedReadonlyPersistentTaskInputRunner({ ...input,
+    planAuthority: first.source,
+    registrationAuthority: { resolve: async command => {
+      const access = await first.authorization.tasks.resolveAccess(command.taskId, 'transition_task');
+      const task = await input.db.aiTask.findFirst({ where: access.where });
+      if (!task) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const row = await input.db.aiTaskActionInput.findFirst({ where: { scopeId: task.scopeId,
+        taskId: task.id, runId: command.lease.runId, registrationRef: command.registrationRef } });
+      const reader = row && selected(row.toolCode);
+      if (!reader) throw unavailable();
+      return reader.source.resolve(command);
+    } },
+    commands: first.commands,
+    executors: { resolve: async (code, version) => selected(code)?.executors.resolve(code, version) ?? null },
+    inputSource: { resolve: async binding => {
+      const reader = selected(binding.toolCode);
+      if (!reader) throw unavailable();
+      return reader.inputSource.resolve(binding);
+    }, validateAnswers: async () => { throw unavailable(); } },
+    toolCatalog: { resolve: async (code, version) => selected(code)?.toolCatalog.resolve(code, version) ?? null }
+  });
+  return Object.freeze({ ...root, sources: Object.freeze(Object.fromEntries(readers.map(reader => [reader.tool, reader.root.source]))) });
+}
 function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReadonlyTool) {
   if (typeof input?.guard?.canActivate !== 'function'
     || (tool === 'rental.catalog.search' ? typeof input?.core?.listItemGroups
@@ -106,8 +141,9 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
     },
     async validateAnswers() { throw unavailable(); }
   };
+  const toolCatalog = { resolve: async (code: string, version: string) => code === tool && version === AI_TOOL_DRAFT_VERSION ? { modelCall: false } : null };
   const root = composeAuthorizedReadonlyPersistentTaskInputRunner({ ...input, authorization: input.authorization,
     planAuthority: source, registrationAuthority: source, inputSource, commands, executors,
-    toolCatalog: { resolve: async (code, version) => code === tool && version === AI_TOOL_DRAFT_VERSION ? { modelCall: false } : null } });
-  return Object.freeze({ ...root, source });
+    toolCatalog });
+  return Object.freeze({ ...root, source, commands, executors, inputSource, toolCatalog });
 }
