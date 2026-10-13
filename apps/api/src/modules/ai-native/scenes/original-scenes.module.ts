@@ -1,5 +1,6 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { AiTaskRepositoryError } from '../ai-task.repository';
+import { AiOriginalOrderReadHttpModule } from './original-order-read-http.module';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './original-scenes.composition';
 import { AI_ORIGINAL_SCENES, AI_ORIGINAL_SCENE_REQUESTS, AiOriginalScenesController,
   AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS,
@@ -15,7 +16,13 @@ export { AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQ
 
 @Module({})
 export class AiOriginalScenesModule {
-  /** Explicit two-step server host. No new HTTP contract or default driver. */
+  /** Uses the published original-order-read contract, never legacy model routes. */
+  static registerHttpOrderReadChain(dependencies: RequestBoundPersistedOriginalSceneModelDependencies,
+    options: Parameters<typeof AiOriginalScenesModule.registerPersistedOrderReadChain>[1]): DynamicModule {
+    return AiOriginalOrderReadHttpModule.register(this.registerPersistedOrderReadChain(dependencies, options),
+      AI_ORIGINAL_ORDER_READ_REQUESTS);
+  }
+  /** Explicit two/three-step server host. No new HTTP contract or default driver. */
   static registerPersistedOrderReadChain(dependencies: RequestBoundPersistedOriginalSceneModelDependencies,
     options: Parameters<typeof composeRequestBoundPersistedOriginalSceneModel>[1] & {
       orderReadChain: NonNullable<Parameters<typeof composeRequestBoundPersistedOriginalSceneModel>[1]['orderReadChain']>

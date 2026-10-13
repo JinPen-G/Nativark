@@ -100,12 +100,13 @@ export function composeRequestBoundPersistedOriginalSceneModel(
   options: AiSceneRequestOptions & { host: AiTaskApplicationHost;
     clock?: AiOriginalSceneRunDependencies['clock']; monotonic?: AiOriginalSceneRunDependencies['monotonic'];
     /** Server configuration only. Absence preserves the original single model. */
-    orderReadChain?: { enabled: true; inputSource: AiTaskInputSource } }) {
+    orderReadChain?: { enabled: true; inputSource: AiTaskInputSource; answerRoundTrip?: true } }) {
   if (!dependencies.gateway || dependencies.gateway.routeScene !== dependencies.gatewayScene.routeScene
     || 'runtime' in dependencies || 'priceVersion' in dependencies || 'kind' in dependencies
     || 'runServices' in options) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
   const { host, clock, monotonic, orderReadChain, ...requestOptions } = options;
   if (orderReadChain && (orderReadChain.enabled !== true || dependencies.scene.code !== 'order_explanation'
+    || orderReadChain.answerRoundTrip !== undefined && orderReadChain.answerRoundTrip !== true
     || dependencies.gatewayScene.orderExplainTool !== true || dependencies.gatewayScene.structuredOutput
     || typeof orderReadChain.inputSource?.resolve !== 'function'
     || typeof orderReadChain.inputSource.validateAnswers !== 'function')) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -113,6 +114,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     resolve: orderReadChain.inputSource.resolve.bind(orderReadChain.inputSource),
     validateAnswers: orderReadChain.inputSource.validateAnswers.bind(orderReadChain.inputSource)
   }) : undefined;
+  const answerRoundTrip = orderReadChain?.answerRoundTrip === true;
   const serverHost = freezeOriginalInput(structuredClone(host));
   const { gateway, ...sceneDependencies } = dependencies;
   const serverGateway = Object.freeze({ ...gateway, adapters: Object.freeze([...gateway.adapters]) });
@@ -135,14 +137,16 @@ export function composeRequestBoundPersistedOriginalSceneModel(
       taskId: task.taskId, clock: input.clock });
     const model = composeAiOriginalSceneModel({ ...input, runtime: persisted.runtime, priceVersion: persisted.priceVersion });
     const orderApplication = orderSource ? model.createModelOrderApplication(serverHost, {
-      inputSource: orderSource, financialEvidence: persisted.financialEvidence, clock, monotonic }) : undefined;
-    // The two-step host has no separate clarification/quote/takeover protocol.
+      inputSource: orderSource, financialEvidence: persisted.financialEvidence, clock, monotonic },
+      answerRoundTrip ? { answerRoundTrip: true } : undefined) : undefined;
+    // Clarification and quote actions retain separate protocols. Control and
+    // receipts belong to this original chain, never the single-model fallback.
     // Unsupported actions reject, never silently run the old single-model host.
     const unsupported = async (): Promise<never> => { throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE'); };
     const application = orderApplication ? { ...orderApplication,
-      readInput: unsupported, refreshInput: unsupported, resume: unsupported, readAnswer: unsupported,
+      readInput: unsupported, refreshInput: unsupported, resume: unsupported,
       continueAnswer: unsupported, readQuotePreparation: unsupported, confirmClarifiedQuote: unsupported,
-      readClarifiedQuoteReceipt: unsupported, takeover: unsupported,
+      readClarifiedQuoteReceipt: unsupported,
       reconcile: orderApplication.recover, readExecution: orderApplication.readScene }
       : model.createApplication(serverHost, { inputSource: 'original_scene',
         financialEvidence: persisted.financialEvidence, clock, monotonic });
@@ -158,6 +162,12 @@ export function composeRequestBoundPersistedOriginalSceneModel(
       readOrderResult: orderApplication?.readOrderResult ?? unsupported,
       readTaskScene: orderApplication?.readScene ?? unsupported,
       readNextSteps: orderApplication?.readNextSteps ?? unsupported,
+      readTakeoverReceipt: orderApplication?.readTakeoverReceipt ?? unsupported,
+      readCancellationReceipt: orderApplication?.readCancellationReceipt ?? unsupported,
+      settleUnstartedCancellation: orderApplication?.settleUnstartedCancellation ?? unsupported,
+      readCancellationSettlementReceipt: orderApplication?.readCancellationSettlementReceipt ?? unsupported,
+      readPreparation: orderApplication?.readPreparation ?? unsupported,
+      resumePrepared: orderApplication?.resumePrepared ?? unsupported,
       readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot(scenes, composePersistedTaskCenter(input).events, value) });
   });
   return Object.freeze({
@@ -165,6 +175,12 @@ export function composeRequestBoundPersistedOriginalSceneModel(
       readOrderResult: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readOrderResult(command)),
       readTaskScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskScene(command)),
       readNextSteps: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readNextSteps(command)),
+      readTakeoverReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTakeoverReceipt(command)),
+      readCancellationReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readCancellationReceipt(command)),
+      settleUnstartedCancellation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.settleUnstartedCancellation(command)),
+      readCancellationSettlementReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readCancellationSettlementReceipt(command)),
+      readPreparation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readPreparation(command)),
+      resumePrepared: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.resumePrepared(command, signal)),
       readTaskSnapshot: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskSnapshot(command))
     } : {}),
     start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
@@ -173,7 +189,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     refreshInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.refreshInput(command)),
     resume: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, (app, command) => app.resume(command, signal)),
-    readAnswer: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readAnswer(command)),
+    readAnswer: (request: AiSceneHttpRequest, value: unknown) => call(request, value, async (app, command) => await app.readAnswer(command)),
     readModelResult: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readModelResult(command)),
     reopenModelSource: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reopenModelSource(command)),
     readQuotePreparation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readQuotePreparation(command)),
@@ -187,8 +203,8 @@ export function composeRequestBoundPersistedOriginalSceneModel(
       call(request, value, async (app, command) => await app.recover(command, signal)),
     readExecution: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readExecution(command)),
     takeover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (app, command) => app.takeover(command, signal)),
-    requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.requestCancel(command))
+      call(request, value, async (app, command) => await app.takeover(command, signal)),
+    requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value, async (app, command) => await app.requestCancel(command))
   });
 }
 
