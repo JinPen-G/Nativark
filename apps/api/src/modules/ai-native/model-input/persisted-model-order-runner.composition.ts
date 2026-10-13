@@ -195,14 +195,7 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
       validateAnswers: (binding, contract, answers) => input.inputSource.validateAnswers(binding, contract, answers) },
     toolCatalog: { resolve: (code, version) => code === TASK_TEXT_MODEL_TOOL ? model.toolCatalog.resolve(code, version) : order.toolCatalog.resolve(code, version) }
   }, model.authorization);
-  const prepare: AiTaskHeldPreparation = async ({ lease, taskRevision, signal }) => {
-    if (signal?.aborted || lease.taskId !== task.taskId || lease.runId !== task.runId) throw denied();
-    await assertOriginal(true);
-    await model.publish({ taskId: task.taskId, registrationRef: task.modelRegistrationRef,
-      expectedTaskRevision: taskRevision, lease, material: task.material });
-    await order.source.publishOrderExplainInput({ taskId: task.taskId, registrationRef: task.orderRegistrationRef,
-      expectedTaskRevision: taskRevision, lease, input: { contractVersion: AI_CONTRACT_DRAFT_VERSION,
-        toolCode: 'rental.order.explain', toolVersion: AI_TOOL_DRAFT_VERSION, input: { orderId: task.orderId } } });
+  const publishAnswer: AiTaskHeldPreparation = async ({ lease, taskRevision, signal }) => {
     if (task.answerRegistrationRef) {
       const original = await assertOriginal(true);
       const authority = new AiOrderRouteContextAuthority(input.guard, input.credentials, task.orderId, input.clock);
@@ -221,6 +214,17 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
             { role: 'user', content: parts }] } });
     }
     if (signal?.aborted) throw unavailable();
+  };
+  const prepare: AiTaskHeldPreparation = async held => {
+    const { lease, taskRevision, signal } = held;
+    if (signal?.aborted || lease.taskId !== task.taskId || lease.runId !== task.runId) throw denied();
+    await assertOriginal(true);
+    await model.publish({ taskId: task.taskId, registrationRef: task.modelRegistrationRef,
+      expectedTaskRevision: taskRevision, lease, material: task.material });
+    await order.source.publishOrderExplainInput({ taskId: task.taskId, registrationRef: task.orderRegistrationRef,
+      expectedTaskRevision: taskRevision, lease, input: { contractVersion: AI_CONTRACT_DRAFT_VERSION,
+        toolCode: 'rental.order.explain', toolVersion: AI_TOOL_DRAFT_VERSION, input: { orderId: task.orderId } } });
+    await publishAnswer(held);
     await root.evidence.savePlan({ taskId: task.taskId, runId: task.runId, taskRevision, steps: expectedSteps, limits: task.limits }, lease);
   };
   const readOrderResult = async (value: unknown) => {
@@ -391,7 +395,8 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
     await assertOriginal(true);
     // The ordinary application obtains a fresh current-authority/CAS lease.
-    // Its preparation hook only consumes already published original inputs.
+    // Its preparation hook preserves the original published prefix and only
+    // completes never-published fixed inputs before the plan exists.
     const frozenPreparation: AiTaskHeldPreparation = async ({ lease, taskRevision, signal: heldSignal }) => {
       if (heldSignal?.aborted || lease.taskId !== task.taskId || lease.runId !== task.runId) throw denied();
       await assertOriginal(true);
@@ -411,19 +416,31 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
       ]);
       if (evidence.some(Boolean)) throw unavailable();
       const rows = await input.db.aiTaskActionInput.findMany({ where: key, take: expectedSteps.length + 1 });
-      if (rows.length !== expectedSteps.length || new Set(rows.map(value => value.registrationRef)).size !== rows.length
+      const saved = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
+      if (rows.length < 1 || rows.length > expectedSteps.length || (saved && rows.length !== expectedSteps.length)
+        || !rows.some(value => value.registrationRef === task.modelRegistrationRef)
+        || new Set(rows.map(value => value.registrationRef)).size !== rows.length
+        || expectedSteps.slice(0, rows.length).some(step => !rows.some(value => value.registrationRef === step.registrationRef))
         || rows.some(value => !expectedSteps.some(step => step.registrationRef === value.registrationRef
           && step.toolCode === value.toolCode && step.toolVersion === value.toolVersion))) throw unavailable();
       await model.revalidatePublished({ taskId: task.taskId, runId: task.runId, registrationRef: task.modelRegistrationRef });
-      if (task.answerRegistrationRef) await model.revalidatePublished({ taskId: task.taskId,
+      const hasAnswer = task.answerRegistrationRef && rows.some(value => value.registrationRef === task.answerRegistrationRef);
+      if (hasAnswer) await model.revalidatePublished({ taskId: task.taskId,
         runId: task.runId, registrationRef: task.answerRegistrationRef });
-      const read = await order.source.readReadonlyInputReceipt({ taskId: task.taskId, runId: task.runId,
-        registrationRef: task.orderRegistrationRef });
       const expected = { contractVersion: AI_CONTRACT_DRAFT_VERSION, toolCode: 'rental.order.explain',
         toolVersion: AI_TOOL_DRAFT_VERSION, input: { orderId: task.orderId } };
-      if (read.state !== 'published' || requestFingerprint(read.payload) !== requestFingerprint(expected)
-        || read.fingerprint !== requestFingerprint(expected)) throw denied();
-      const saved = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
+      if (rows.some(value => value.registrationRef === task.orderRegistrationRef)) {
+        const read = await order.source.readReadonlyInputReceipt({ taskId: task.taskId, runId: task.runId,
+          registrationRef: task.orderRegistrationRef });
+        if (read.state !== 'published' || requestFingerprint(read.payload) !== requestFingerprint(expected)
+          || read.fingerprint !== requestFingerprint(expected)) throw denied();
+      } else {
+        // Original task/run/lease and policy are rechecked inside publication.
+        // Its existing plan gate prevents any late input injection.
+        await order.source.publishOrderExplainInput({ taskId: task.taskId, registrationRef: task.orderRegistrationRef,
+          expectedTaskRevision: taskRevision, lease, input: expected });
+      }
+      if (task.answerRegistrationRef && !hasAnswer) await publishAnswer({ lease, taskRevision, signal: heldSignal });
       const plan = saved ? aiTaskRunPlanSchema.parse(structuredClone(saved.payload))
         : { taskId: task.taskId, runId: task.runId, taskRevision, steps: expectedSteps, limits: task.limits };
       if (saved && (saved.scopeId !== key.scopeId || saved.taskId !== key.taskId || saved.runId !== key.runId
@@ -431,7 +448,7 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
       if (requestFingerprint(plan.steps) !== requestFingerprint(expectedSteps)
         || requestFingerprint(plan.limits) !== requestFingerprint(task.limits)) throw denied();
       // Held lease and original input/policy hashes are rechecked under the
-      // existing task/run locks. No input is regenerated or overwritten.
+      // existing task/run locks. No published input is regenerated/overwritten.
       await root.evidence.savePlan(plan, lease);
       await assertOriginal(true);
     };

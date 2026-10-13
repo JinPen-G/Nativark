@@ -120,6 +120,43 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
     return { before, runner, key, orderRegistrationRef, answerRegistrationRef, modelRegistrationRef };
   };
   const application = Object.freeze({
+    /** Observe original preparation without claiming a lease, regenerating
+     * input, or treating publication as proof that execution never started. */
+    async readPreparation(value: unknown) {
+      const before = await bound(value), key = { scopeId: before.scopeId,
+        taskId: before.task.taskId, runId: before.task.runId };
+      const refs = [`scene-model:${before.ref.inputRef}`, `scene-order:${before.ref.inputRef}`,
+        ...(answerRoundTrip ? [`scene-answer:${before.ref.inputRef}`] : [])];
+      const observe = async () => {
+        const inputs = await input.db.aiTaskActionInput.findMany({ where: key, take: refs.length + 1 });
+        const plan = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
+        if (inputs.length > refs.length || new Set(inputs.map(row => row.registrationRef)).size !== inputs.length
+          || inputs.some(row => row.scopeId !== key.scopeId || row.taskId !== key.taskId || row.runId !== key.runId
+            || !refs.includes(row.registrationRef))
+          || refs.slice(0, inputs.length).some(ref => !inputs.some(row => row.registrationRef === ref))) throw denied();
+        if (plan) {
+          const parsed = aiTaskRunPlanSchema.parse(structuredClone(plan.payload));
+          if (inputs.length !== refs.length || plan.scopeId !== key.scopeId || plan.taskId !== key.taskId
+            || plan.runId !== key.runId || parsed.taskId !== key.taskId || parsed.runId !== key.runId
+            || requestFingerprint(parsed) !== plan.planHash
+            || requestFingerprint(parsed.steps.map(step => step.registrationRef)) !== requestFingerprint(refs)) throw denied();
+        }
+        return { inputs: inputs.map(row => ({ id: row.id, registrationRef: row.registrationRef,
+          fingerprint: row.fingerprint, policyRevision: row.policyRevision, expiresAt: row.expiresAt.toISOString() }))
+          .sort((a, b) => refs.indexOf(a.registrationRef) - refs.indexOf(b.registrationRef)),
+          planHash: plan?.planHash ?? null };
+      };
+      const observed = await observe();
+      await verify(before);
+      if (requestFingerprint(await observe()) !== requestFingerprint(observed)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      await verify(before);
+      return freezeOriginalInput({ original: before.original.receipt,
+        preparation: { publishedInputs: observed.inputs.length, requiredInputs: refs.length,
+          missing: refs.filter(ref => !observed.inputs.some(row => row.registrationRef === ref))
+            .map(ref => refs.indexOf(ref) === 1 ? 'order_read' : refs.indexOf(ref) === 0 ? 'model_request' : 'model_answer'),
+          planPublished: observed.planHash !== null, execution: 'not_attested' as const },
+        observation: 'revalidated_not_atomic' as const, automaticRetry: false as const });
+    },
     async requestCancel(value: unknown) {
       const parsed = z.object({ original: originalRequestReferenceSchema,
         expectedRevision: z.number().int().min(1).max(4294967294) }).strict().safeParse(structuredClone(value));
