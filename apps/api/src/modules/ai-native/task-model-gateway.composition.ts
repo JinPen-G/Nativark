@@ -22,6 +22,8 @@ import type { PublicGatewayRuntime } from './public-ai-gateway.service';
 import type { UnifiedGatewayAudit } from './unified-ai-gateway.ports';
 import type { AiRouteScene } from './provider-router.ports';
 import { composeTaskModelHost, type TaskModelHostDependencies } from './runner/model-task-host.composition';
+import type { GatewayMediaAttachmentResolver } from './gateway-intent';
+import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 export type PersistedTaskCallGatewayDependencies = PersistedTaskAuthorizationDependencies & {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
@@ -33,6 +35,9 @@ export type PersistedTaskCallGatewayDependencies = PersistedTaskAuthorizationDep
   callPriceVersion: string;
   adapters: readonly ModelAdapter[];
   audit: UnifiedGatewayAudit;
+  /** Server-created original attachment ACL/ObjectReader adapter, not request
+   * bytes/URL or a capability grant. Absent means media remains unavailable. */
+  media?: GatewayMediaAttachmentResolver;
 };
 
 /** Inert server composition for workspace operator/staff tasks. Real current
@@ -54,6 +59,33 @@ export function composePersistedTaskCallGateway(input: PersistedTaskCallGatewayD
   const authorization = composePersistedTaskAuthorization(dependencies);
   const invocation = { resolve: () => authorization.execution.authorize(taskId) };
   const scopes = new AiScopeRepository(db, invocation, clock);
+  let media: GatewayMediaAttachmentResolver | undefined;
+  if (input.media) {
+    if (routeScene !== 'vision' || typeof input.media.resolve !== 'function'
+      || typeof input.media.assertCurrent !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+    const resolve = input.media.resolve.bind(input.media), assertCurrent = input.media.assertCurrent.bind(input.media);
+    const currentMediaIdentity = async (context: Parameters<GatewayMediaAttachmentResolver['resolve']>[0]) => {
+      const current = await scopes.resolveCurrent(), principal = gatewayBudgetPrincipal(current.context);
+      if (principal.tenantId !== context.tenantId || principal.workspaceId !== context.workspaceId
+        || principal.actorId !== context.actorId) throw new ModelGatewayError('FORBIDDEN');
+      const { authorizedAt: _at, requestId: _id, ...identity } = current.context;
+      return requestFingerprint(identity);
+    };
+    media = Object.freeze<GatewayMediaAttachmentResolver>({ resolve: async (context, reference, signal) => {
+      context = structuredClone(context); reference = structuredClone(reference);
+      const before = await currentMediaIdentity(context);
+      const result = await resolve(context, reference, signal);
+      if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+      if (await currentMediaIdentity(context) !== before) throw new ModelGatewayError('FORBIDDEN');
+      return result;
+    }, assertCurrent: async (context, references, signal) => {
+      context = structuredClone(context); references = structuredClone(references);
+      const before = await currentMediaIdentity(context);
+      await assertCurrent(context, references, signal);
+      if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+      if (await currentMediaIdentity(context) !== before) throw new ModelGatewayError('FORBIDDEN');
+    } });
+  }
   const configAuthority = new TenantModelConfigurationAuthority(guard, credentials, invocation);
   const configuration = createPersistedTenantModelConfiguration({ db, secrets,
     authorize: configAuthority.authorize.bind(configAuthority) });
@@ -74,7 +106,7 @@ export function composePersistedTaskCallGateway(input: PersistedTaskCallGatewayD
     evidence: 'live',
     ports: { routing, admission: new InvocationAdmissionService(admissions, clock),
       dispatch: new InvocationDispatchService(admissions), budget: accounting.budget, audit,
-      transport: new RoutedModelTransport({ platform, tenant }, adapters) },
+      transport: new RoutedModelTransport({ platform, tenant }, adapters), ...(media ? { media } : {}) },
     verifyEvidence: async (resolution, mode) => {
       if (mode !== 'live' || resolution.scene !== routeScene) return false;
       const { actorKind: _, ...context } = gatewayBudgetPrincipal(resolution.context);
@@ -101,9 +133,10 @@ export function composePersistedCallTaskModelHost(input:
       keyof PersistedTaskAuthorizationDependencies | 'guard' | 'taskId'>;
   }) {
   const { gateway, ...host } = input;
-  // This root has no authorized media ObjectReader. Do not advertise media
-  // support merely because an adapter implements a vision/audio protocol.
-  if (host.kind || !gateway || gateway.routeScene !== host.gatewayScene.routeScene) {
+  // Protocol support alone is insufficient: media requires the explicit
+  // original ACL/ObjectReader dependency and the server-selected vision route.
+  if (!gateway || gateway.routeScene !== host.gatewayScene.routeScene
+    || (host.kind && (!gateway.media || gateway.routeScene !== 'vision'))) {
     throw new ModelGatewayError('CONFIG_INVALID');
   }
   const runtime = composePersistedTaskCallGateway({ ...gateway, db: host.db, auth: host.auth,
