@@ -8,6 +8,7 @@ import { AI_CONTRACT_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } from '@rental-os/sha
 import { AI_NATIVE_COMPONENT_SCHEMAS } from '../../contracts/ai-native-schemas';
 import type { ModelResponsePolicy, ProtocolToolCall } from './model-gateway.ports';
 import { modelEgressEvidence } from './model-egress.transport';
+import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 export interface ChatProtocolOptions {
   /** Supplied by trusted server registration; only the existing C02 input is supported. */
@@ -32,6 +33,7 @@ function boundedSchema(value: unknown, depth = 0, count = { value: 0 }): void {
 /** Restricted protocol validation, not an executable tool registry or authorization. */
 export class ChatProtocolPolicy implements ModelResponsePolicy {
   readonly tools: boolean; readonly structured: boolean;
+  readonly structuredSchemaHash?: string;
   private readonly tool?: ChatProtocolOptions['orderExplainTool'];
   private readonly output?: ChatProtocolOptions['structuredOutput'];
   private readonly validateInput: ValidateFunction;
@@ -53,6 +55,8 @@ export class ChatProtocolPolicy implements ModelResponsePolicy {
       if (!encoded || !name.test(this.output.name) || Object.keys(this.output).some(key => !['name', 'schema'].includes(key)) || Buffer.byteLength(encoded) > 32768) throw new ModelGatewayError('CONFIG_INVALID');
       boundedSchema(this.output.schema);
       try { this.validateOutput = ajv.compile(this.output.schema); } catch { throw new ModelGatewayError('CONFIG_INVALID'); }
+      this.structuredSchemaHash = requestFingerprint({ version: 'rental-response-schema-1', name: this.output.name,
+        schema: this.output.schema, strict: true });
     }
   }
   body(features: readonly ModelFeature[]): Record<string, unknown> {
@@ -109,6 +113,7 @@ const responseSchema = z.object({
 export class ChatCompletionsAdapter implements ModelAdapter {
   readonly provider = "openai_chat_completions";
   get evidenceMode(): 'live' | 'mock' { return modelEgressEvidence(this.transport); }
+  get structuredSchemaHash(): string | undefined { return this.policy.structuredSchemaHash; }
   private readonly policy: ChatProtocolPolicy;
   private readonly mediaInput: readonly ('image' | 'audio')[];
   get features(): readonly ModelFeature[] { return [...this.mediaInput, ...(typeof this.transport.postStream === "function" ? ['streaming' as const] : []), ...(this.policy.tools ? ['tools' as const] : []), ...(this.policy.structured ? ['structuredOutput' as const] : [])]; }
@@ -125,8 +130,11 @@ export class ChatCompletionsAdapter implements ModelAdapter {
     if (!input || !input.signal || typeof input.signal.aborted !== 'boolean' || typeof input.signal.addEventListener !== 'function' || typeof input.signal.removeEventListener !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
     // Project only server protocol fields. Later caller mutations cannot replace
     // messages or the cancellation signal; forged top-level tool definitions are ignored.
-    const parsed = modelProtocolRequestSchema.safeParse({ callId: input.callId, model: input.model, messages: input.messages, maxOutputTokens: input.maxOutputTokens, features: input.features });
+    const parsed = modelProtocolRequestSchema.safeParse({ callId: input.callId, model: input.model, messages: input.messages, maxOutputTokens: input.maxOutputTokens, features: input.features,
+      ...(input.structuredSchemaHash !== undefined ? { structuredSchemaHash: input.structuredSchemaHash } : {}) });
     if (!parsed.success) throw new ModelGatewayError('INVALID_REQUEST');
+    if (parsed.data.structuredSchemaHash && (!parsed.data.features?.includes('structuredOutput')
+      || parsed.data.structuredSchemaHash !== this.structuredSchemaHash)) throw new ModelGatewayError('CONFIG_INVALID');
     if (parsed.data.features?.some(feature => (feature === 'image' || feature === 'audio') && !this.mediaInput.includes(feature))) {
       throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     }

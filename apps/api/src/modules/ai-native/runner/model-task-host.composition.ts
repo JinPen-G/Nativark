@@ -46,6 +46,7 @@ export function composeTaskModelHostWithModel<T extends ReturnType<typeof compos
       const policy = { sceneCode: input.gatewayScene.sceneCode, maxOutputTokens: input.gatewayScene.maxOutputTokens,
       ...(input.gatewayScene.orderExplainTool !== undefined ? { orderExplainTool: input.gatewayScene.orderExplainTool } : {}),
       ...(input.gatewayScene.structuredOutput !== undefined ? { structuredOutput: input.gatewayScene.structuredOutput } : {}),
+      ...(input.gatewayScene.structuredSchemaHash ? { structuredSchemaHash: input.gatewayScene.structuredSchemaHash } : {}),
       ...(input.kind ? { kind: input.kind } : {}) };
       const previous = parseTaskModelInput(continuation.input, policy), result = continuation.result;
       if (continuation.resourceOriginRunId !== task.runId || taskModelFingerprint(previous, policy) !== continuation.inputHash

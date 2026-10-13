@@ -21,6 +21,8 @@ export function taskModelPolicy(value: TaskModelPolicy): TaskModelPolicy {
   if ((kind !== undefined && kind !== 'image' && kind !== 'audio')
     || (kind && (parsed.structuredOutput || parsed.orderExplainTool))
     || (parsed.structuredOutput && parsed.orderExplainTool)) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  if (parsed.structuredOutput && !parsed.structuredSchemaHash
+    || parsed.structuredSchemaHash && !parsed.structuredOutput) throw new ModelGatewayError('CONFIG_INVALID');
   return Object.freeze({ ...parsed, ...(kind ? { kind } : {}) });
 }
 export function taskModelCapabilities(value: TaskModelPolicy): Array<'text' | 'vision' | 'audio' | 'tools' | 'structured_output'> {
@@ -58,6 +60,7 @@ export const taskAudioMediaSchema = z.array(audioMediaReference).min(1).max(8);
 export const taskModelMediaSchema = z.array(z.union([imageMediaReference, audioMediaReference])).min(1).max(8);
 const storedSchema = z.object({ mode: z.literal('invoke'), intent: z.unknown(), configuration: z.unknown(),
   priceVersion: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u), routingHash: hash, identityHash: hash,
+  structuredSchemaHash: hash.optional(),
   media: taskModelMediaSchema.optional() }).strict();
 
 export function taskModelIdentity({ requestId: _, authorizedAt: __, ...context }: AiExecutionContext) {
@@ -69,6 +72,8 @@ export function parseTaskModelInput(value: unknown, policy: TaskModelPolicy) {
   const parsed = storedSchema.parse(structuredClone(value));
   if (!isGatewayIntent(parsed.intent) || !isGatewayConfig(parsed.configuration)) throw new ModelGatewayError('INVALID_REQUEST');
   const input = { ...parsed, intent: parsed.intent, configuration: parsed.configuration };
+  if (policy.structuredOutput ? input.structuredSchemaHash !== policy.structuredSchemaHash
+    : input.structuredSchemaHash !== undefined) throw new ModelGatewayError('CONFIG_INVALID');
   if (policy.kind === 'image' || policy.kind === 'audio') {
     (policy.kind === 'image' ? taskImageMaterialSchema : taskAudioMaterialSchema).parse({ messages: input.intent.messages, maxOutputTokens: input.intent.maxOutputTokens });
     if (input.intent.sceneCode !== policy.sceneCode || input.intent.maxOutputTokens > policy.maxOutputTokens
@@ -118,6 +123,7 @@ export function taskModelFingerprint(input: TaskModelInput, policy: TaskModelPol
       }) }));
     return requestFingerprint({ intent: input.intent, mode: input.mode, media });
   }
+  if (policy.structuredOutput) input = parseTaskModelInput(input, policy);
   return prepareGatewayTextIntent(input.intent, taskModelPolicy(policy), input.mode).intentHash;
 }
 

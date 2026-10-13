@@ -46,6 +46,7 @@ export function composeCurrentAuthorizedTaskModelInput(input: TaskModelCompositi
   const modelPolicy = taskModelPolicy({ sceneCode: input.gatewayScene.sceneCode, maxOutputTokens: input.gatewayScene.maxOutputTokens,
     ...(input.gatewayScene.orderExplainTool !== undefined ? { orderExplainTool: input.gatewayScene.orderExplainTool } : {}),
     ...(input.gatewayScene.structuredOutput !== undefined ? { structuredOutput: input.gatewayScene.structuredOutput } : {}),
+    ...(input.gatewayScene.structuredSchemaHash ? { structuredSchemaHash: input.gatewayScene.structuredSchemaHash } : {}),
     ...(input.kind ? { kind: input.kind } : {}) });
   const source = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, clock,
     tool, undefined, modelPolicy);

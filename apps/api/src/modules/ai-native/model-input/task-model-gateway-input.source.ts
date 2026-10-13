@@ -102,6 +102,7 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
       intent: taskModelIntent(command.taskId, command.lease.runId, command.registrationRef, this.scene.sceneCode, command.material, this.kind,
         this.scene.orderExplainTool === true, this.scene.structuredOutput === true),
       configuration: taskModelConfiguration(route), priceVersion: this.priceVersion,
+      ...(this.scene.structuredSchemaHash ? { structuredSchemaHash: this.scene.structuredSchemaHash } : {}),
       routingHash: gatewayRoutingBinding(route), identityHash: taskModelIdentity(context) };
     if (this.kind) input.media = (await this.media(context, input.intent)).references;
     if ('expectedMedia' in command && command.expectedMedia
