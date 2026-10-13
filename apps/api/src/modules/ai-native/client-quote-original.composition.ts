@@ -10,7 +10,9 @@ import { requestFingerprint } from '../rental-core/rental-idempotency.repository
 
 const reference = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const readSchema = z.object({ reference }).strict();
-const createSchema = readSchema.extend({ input: z.unknown() }).strict();
+const createSchema = readSchema.extend({ input: z.unknown(), prepared: z.object({
+  inputHash: z.string().regex(/^[a-f0-9]{64}$/u), configurationHash: z.string().regex(/^[a-f0-9]{64}$/u)
+}).strict().optional() }).strict();
 export class AiClientQuoteResultUnknownError extends Error {
   readonly code = 'AI_RESULT_UNKNOWN'; readonly retryable = false;
   readonly nextAction = 'read_original_quote';
@@ -23,7 +25,8 @@ export class AiClientQuoteResultUnknownError extends Error {
 export function composeGuardedClientOriginalQuotes(input: {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   credentials: { current(): Promise<{ authorization: string; ip?: string }> };
-  client: Pick<ClientApiService, 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation'>;
+  client: Pick<ClientApiService, 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation'>
+    & Partial<Pick<ClientApiService, 'prepareQuoteForOriginalOperation'>>;
 }) {
   if ([input?.guard?.canActivate, input?.credentials?.current, input?.client?.createQuoteForOriginalOperation,
     input?.client?.readQuoteForOriginalOperation].some(method => typeof method !== 'function')) throw new ServiceUnavailableException();
@@ -50,6 +53,13 @@ export function composeGuardedClientOriginalQuotes(input: {
     catch (error) { await recheck(); throw error; }
   });
   return Object.freeze({
+    async prepare(value: unknown) {
+      const parsed = z.object({ input: z.unknown() }).strict().safeParse(structuredClone(value));
+      if (!parsed.success) throw new BadRequestException();
+      if (typeof input.client.prepareQuoteForOriginalOperation !== 'function') throw new ServiceUnavailableException();
+      const body = await validation.transform(parsed.data.input, { type: 'body', metatype: ClientCreateQuoteRequestDto });
+      return current('POST', 'quotes', body, context => input.client.prepareQuoteForOriginalOperation!(context, body));
+    },
     async create(value: unknown) {
       const parsed = createSchema.safeParse(structuredClone(value));
       if (!parsed.success) throw new BadRequestException();
@@ -57,7 +67,7 @@ export function composeGuardedClientOriginalQuotes(input: {
       const body = await validation.transform(command.input, { type: 'body', metatype: ClientCreateQuoteRequestDto });
       return current('POST', 'quotes', body, async context => {
         try {
-          const quote = await input.client.createQuoteForOriginalOperation(context, body, command.reference);
+          const quote = await input.client.createQuoteForOriginalOperation(context, body, command.reference, command.prepared);
           return { quote, quotePersistence: 'saved' as const, inventoryReservation: 'not_attempted' as const,
             orderExecution: 'not_attempted' as const, retryable: false as const };
         } catch (error) {
