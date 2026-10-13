@@ -1,6 +1,6 @@
 # Rental OS AI Native 系统专项需求说明
 
-> **最新底座功能（2026-10-13）：`08a518a5`。** 视觉固定PNG挑战→当前管理授权/原媒体引用与hash→持久任务/Gateway/单账→原收据验证已接；只接受服务器生成探针图片，不绕普通业务文件ACL。完整实际Controller/Auth/Guard/runner/财务适配离线冒烟，一个invocation/settle；mock始终unverified。627源码零诊断，没有新增或修改测试脚本。保留text/stream及用量/配置接线；audio/tools/structured证明、可信计价、版本发布/端侧设置及真环境未闭合；55/112＝49.1%、ENTRY35/72＝48.6%、正式验收0/28不涨。
+> **最新底座功能（2026-10-13）：`40a582b6`。** strict JSON挑战及服务器显式结构化许可已接原Controller/输入/runner/Gateway/单账/收据，实际Schema校验及text/parsed object一致性，普通JSON回声不算证明；默认不开放、不授予业务执行。完整离线实际服务冒烟一个invocation/settle，mock始终unverified，627源码零诊断，没有新增或修改测试脚本。保留text/stream/vision与用量/配置接线；audio/tools、可信计价、版本发布/端侧设置及真环境未闭合；55/112＝49.1%、ENTRY35/72＝48.6%、正式验收0/28不涨。
 
 > **最新消费交付（2026-10-13）：`c4ae990970268ca1f736f909b3db579573a3ee21`。** 客户当前原模型结果发现/读取已接显式HTTP：仅最新合法run、当前权限和受控纯文本，unknown不展示正文，不公开供应商/密钥/账务配置，不将文本当业务事实。正常未产出结果/撤权拒绝离线通过；成功文本的完整客户财务正向及真环境仍未验，正式门槛不涨。
 

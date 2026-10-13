@@ -1,6 +1,6 @@
 # Rental OS AI Native 系统专项开发任务
 
-> **最新底座功能（2026-10-13）：`08a518a5`。** 视觉固定PNG挑战→当前管理授权/原媒体引用与hash→持久任务/Gateway/单账→原收据验证已接；只接受服务器生成探针图片，不绕普通业务文件ACL。完整实际Controller/Auth/Guard/runner/财务适配离线冒烟，一个invocation/settle；mock始终unverified。627源码零诊断，没有新增或修改测试脚本。保留text/stream及用量/配置接线；audio/tools/structured证明、可信计价、版本发布/端侧设置及真环境未闭合；55/112＝49.1%、ENTRY35/72＝48.6%、正式验收0/28不涨。
+> **最新底座功能（2026-10-13）：`40a582b6`。** strict JSON挑战及服务器显式结构化许可已接原Controller/输入/runner/Gateway/单账/收据，实际Schema校验及text/parsed object一致性，普通JSON回声不算证明；默认不开放、不授予业务执行。完整离线实际服务冒烟一个invocation/settle，mock始终unverified，627源码零诊断，没有新增或修改测试脚本。保留text/stream/vision与用量/配置接线；audio/tools、可信计价、版本发布/端侧设置及真环境未闭合；55/112＝49.1%、ENTRY35/72＝48.6%、正式验收0/28不涨。
 
 > **2026-10-13最新源码 `c4ae990970268ca1f736f909b3db579573a3ee21`：** 客户原模型结果发现/受控读取已消费到HTTP，复用原谱系和结果仓储，拒绝caller resultId/旧run回退，未知不出正文，620源码零诊断及原客户用例1/1。成功文本/完整配置财务正向未验，不把未产出读取当生成成功；原门槛计分保持。
 
@@ -346,7 +346,7 @@
 | AIN-02 | G1/G2/G3：版本化shared合同、严格叶子及[公共组件发布](../../apps/api/src/contracts/ai-leaf-components.ts) | G4全范围契约/多端消费验收，新增任务result等合同仍需随功能维护 |
 | AIN-03 | G1/G2：原task/run/input/phase/approval/knowledge模型和迁移，含报价原键字段 | G3全表真实升级/回读组合尚无统一就绪证明；真库迁移未获准执行 |
 | AIN-04 | G1/G2/G3：[持久授权组合](../../apps/api/src/modules/ai-native/task-authorization.composition.ts)与request-bound/Auth/Guard/ALS进入原模型、业务、员工和客户代码；d8575806客户allowCancel默认false、独立动作政策及原管理CAS | G4全端撤权/跨范围真实等价验收，不以当前离线负例结项；客户取消不等于通用transition/派发权限 |
-| AIN-05 | G1/G2：唯一Gateway、平台/BYOK及单账；原任务配置/能力/calls预算已有显式请求；e1097163流式挑战及08a518a5视觉PNG挑战已接原runner/账本/receipt verifier，mock不授予live支持 | G3音频/tools/structured专用能力证明、全部场景/端侧及可信token/money计价仍缺；视觉基本挑战不等于识别准确性或真实供应商验收 |
+| AIN-05 | G1/G2：唯一Gateway、平台/BYOK及单账；原配置/能力/calls预算已有请求；流式/视觉及40a582b6 strict JSON挑战接原runner/账本/receipt，mock不授予live支持 | G3音频/tools、全部场景/端侧及可信token/money仍缺；基本挑战不等于全部Schema/识别准确性或真实供应商验收 |
 | AIN-06 | G1/G2/G3：[原场景模型宿主](../../apps/api/src/modules/ai-native/scenes/original-scene-model.composition.ts)已接原runner、澄清后继run、累计资源及结果；3089346a合法后继恢复、d7067ef5已释放输入取消证明、9285c308场景序列化修复、044de984提交原收据→显式继续接回原模型宿主 | G4广义恢复/中断及真库并发验收；客户完整配置/财务/多轮模型与全部取消窗口、所有业务参数及审批链仍待补；已有步骤只原证据核对，unknown不重派 |
 | AIN-07 | G1/G2/G3：[受控批准组合](../../apps/api/src/modules/ai-native/approval-execution/controlled-approved-order.composition.ts)、Core参与者、原收据及正式reprepare均已消费 | G4真实并发/所有失败窗及多动作范围验收；后续场景继续复用，不能继承旧批准 |
 | AIN-08 | G1/G2/G3：[业务工具组合](../../apps/api/src/modules/ai-native/tools/business-tools.composition.ts)已将目录/可用性/客户/订单/风险事实接入原场景；339f7843/3663ae54去掉会员及资金reader全量回退，消费原服务分页与当前权限 | G4四品类事实及历史依据真实对照；DB执行计划和其他reader未全量重验，缺能力仍明确unavailable |

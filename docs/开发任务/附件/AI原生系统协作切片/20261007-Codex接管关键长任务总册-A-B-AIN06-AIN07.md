@@ -1,6 +1,6 @@
 # Rental OS AI Native 关键长任务总接续册
 
-> **最新底座功能（2026-10-13）：`08a518a5`。** 视觉固定PNG挑战→当前管理授权/原媒体引用与hash→持久任务/Gateway/单账→原收据验证已接；只接受服务器生成探针图片，不绕普通业务文件ACL。完整实际Controller/Auth/Guard/runner/财务适配离线冒烟，一个invocation/settle；mock始终unverified。627源码零诊断，没有新增或修改测试脚本。保留text/stream及用量/配置接线；audio/tools/structured证明、可信计价、版本发布/端侧设置及真环境未闭合；55/112＝49.1%、ENTRY35/72＝48.6%、正式验收0/28不涨。
+> **最新底座功能（2026-10-13）：`40a582b6`。** strict JSON挑战及服务器显式结构化许可已接原Controller/输入/runner/Gateway/单账/收据，实际Schema校验及text/parsed object一致性，普通JSON回声不算证明；默认不开放、不授予业务执行。完整离线实际服务冒烟一个invocation/settle，mock始终unverified，627源码零诊断，没有新增或修改测试脚本。保留text/stream/vision与用量/配置接线；audio/tools、可信计价、版本发布/端侧设置及真环境未闭合；55/112＝49.1%、ENTRY35/72＝48.6%、正式验收0/28不涨。
 
 > 最新源码（2026-10-13）`c4ae990970268ca1f736f909b3db579573a3ee21`：客户当前原模型结果HTTP消费已接，旧run不回填、撤权拒绝、unknown无正文，生成文本不是Core事实。未产出结果正常与权限变化离线通过，完整成功文本/客户财务正向仍未验；55/112＝49.1%、ENTRY35/72＝48.6%、正式验收0/28不变，只主线施工。
 
