@@ -518,6 +518,10 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       const command = structuredClone(value);
       return withQuotePreparation(request, preparation => preparation.prepare(command));
     },
+    async readQuotePreparationOperation(request: AiClientApplicationRequest, value: unknown) {
+      const command = structuredClone(value);
+      return withQuotePreparation(request, preparation => preparation.readPreparationOperation(command));
+    },
     async confirmQuoteParameters(request: AiClientApplicationRequest, value: unknown) {
       const command = structuredClone(value);
       return withQuotePreparation(request, preparation => preparation.confirm(command));
