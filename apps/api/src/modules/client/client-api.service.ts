@@ -1004,8 +1004,10 @@ export class ClientApiService {
   /** Internal server port for an immutable AI request, not an additional client
    * HTTP route. The caller must use current ClientGuard and prove the originating
    * request/explicit selection; the reference itself grants no authority. */
-  async createQuoteForOriginalOperation(context: ClientRequestContext, input: ClientCreateQuoteRequest, reference: string) {
+  async createQuoteForOriginalOperation(context: ClientRequestContext, input: ClientCreateQuoteRequest, reference: string,
+    prepared?: { inputHash: string; configurationHash: string }) {
     context = structuredClone(context); input = structuredClone(input);
+    prepared = prepared && structuredClone(prepared);
     const key = this.clientQuoteOriginalKey(context, reference);
     await this.currentWorkspace(context);
     const business = await this.context(context.tenantId);
@@ -1013,6 +1015,8 @@ export class ClientApiService {
       bookingIdentity: input.bookingIdentity ?? { bookingIdentity: 'personal' } };
     const resolved = await this.core.resolvePricingGroupQuoteRequest(context.tenantId, request);
     const normalized = this.business.normalizeQuoteInput(structuredClone(resolved));
+    if (prepared && (prepared.inputHash !== requestFingerprint(normalized)
+      || prepared.configurationHash !== requestFingerprint(business))) throw new ConflictException('报价准备依据已变化，请重新确认');
     this.clientQuoteOriginalKey(context, reference);
     const quote = await this.business.createQuoteForOriginalOperation(context.tenantId, business, normalized,
       { key, inputHash: requestFingerprint(normalized) });
@@ -1020,6 +1024,24 @@ export class ClientApiService {
     if (quote.tenantId !== context.tenantId || quote.request.customerId !== context.customerId
       || requestFingerprint(quote.request) !== requestFingerprint(normalized)) throw new ConflictException('报价原操作依据不一致');
     return structuredClone(quote);
+  }
+
+  /** Current Core normalization only. No quote creation, price calculation,
+   * reservation or eligibility attestation; used before explicit confirmation. */
+  async prepareQuoteForOriginalOperation(context: ClientRequestContext, input: ClientCreateQuoteRequest) {
+    context = structuredClone(context); input = structuredClone(input);
+    this.clientQuoteOriginalKey(context, 'preparation');
+    await this.currentWorkspace(context);
+    const business = await this.context(context.tenantId);
+    const request: RentalQuoteRequest = { ...input, customerType: 'personal', customerId: context.customerId,
+      bookingIdentity: input.bookingIdentity ?? { bookingIdentity: 'personal' } };
+    const resolved = await this.core.resolvePricingGroupQuoteRequest(context.tenantId, request);
+    const normalized = this.business.normalizeQuoteInput(structuredClone(resolved));
+    this.clientQuoteOriginalKey(context, 'preparation');
+    return { request: structuredClone(normalized), inputHash: requestFingerprint(normalized),
+      configurationHash: requestFingerprint(business), tenantId: context.tenantId,
+      workspaceId: context.workspaceId, customerId: context.customerId,
+      semantics: 'normalized_parameters_not_business_eligibility' as const, execution: 'not_attempted' as const };
   }
 
   /** Exact persisted original observation, including a previously expired quote.
