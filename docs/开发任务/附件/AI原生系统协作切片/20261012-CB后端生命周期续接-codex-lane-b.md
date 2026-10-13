@@ -116,3 +116,23 @@ Node DATABASE_URL 固定 mysql://offline:offline@127.0.0.1:1/rental_os_offline�
 5. 已保存候选/人工检查仍走原 result-save/edit/submission/receipt；读 result 的 reference 修订必须仍合法，历史保存后变更/提交终态不能靠重建旧活跃宿主放行。更窄历史读取政策和 partial-safe 合同需主线明确，当前保持拒绝。原确认偏好/知识撤回复验与模块服务器出口已接，不私造索引HTTP。
 
 本包可做正式依赖装配与消费已交；未连接真实 DB/DNS/HTTP/模型/支付/对象存储，未读.env/安装/启服务/共享生成/迁移/main/push/部署/生产启用。无完成率或整项验收声明，中央记录由主线整合固定提交后更新。
+
+## 20261013 CB07/CB10 原结果到人工审阅消费
+
+原树 HEAD `62adf34a852fcdc6d7038bf69cf796e7f43de98b`，tracked/index 干净。按负责人授权只 merge 固定 `c07bf52f35959fd1e81386d5622e8a1e3ac06af1`，无冲突，合并点 `4f5b26a62defe28082521af09fe0ac027f1e8b64`；62ad/bfd 及原输出全保留，不追活动 HEAD。公共目录变化仅来自该授权 merge，本线施工仍只 knowledge/inspection-assist。
+
+- `9a6b0cc787da230ac8344ac082701ffffe1df846`：原 result service 新服务器 `readEvidence` 复用同一 collect 全链，返回 recognition 与每个有界候选的 sourceEvidence；定位 position 仍原验证过的 image region/audio span，contentHash/mediaType/sizeBytes 取原冻结媒体而非模型 JSON。当前文件/模板/原 invocation/持久结果/用量证据复验不变。unknown/failed 不返回候选依据，原 JSON/template/资源约束仍拒绝非法字段，不另造解析器。
+- 同提交的 `readRecognitionReview` 将同一依据和人工审阅联读，两次指纹比较；原 Controller result-read 仍只返回旧 recognition 合同，不扩 shared/HTTP。服务器实际 app 新 `saveResultReview(request,reference,{resultId,operationId})` 从原 creation 收据派生 taskId，接同财务证据的原 saveRecognitionReview。只保存候选证据，不人工采用、不提交 Core；丢应答继续原 operation/result-save-receipt，不换键重做。人工 edit/prepare/submit/readReceipt 沿既有代码复用；当前 reference 失效时仍拒绝，未伪造历史执行许可。
+- `e76e15891efe1954604eadacdd445a1e1474092e`：实际 `composeKnowledgeFileApplication.sceneKnowledge(includePreferences, preferenceKinds?)` 现在把可信服务器选择传给主线已实现的原 `composeOriginalSceneKnowledge.collect`→preparation→原冻结 publisher。只支持原 preferenceSchema 三类，重复/未知 kinds 或关闭偏好却提供 kinds 拒绝；参数拷贝冻结，晚改宿主数组不改变材料。没有第二知识系统、输入存储/发送器或新的公共 DTO，也没修改主线 scenes 文件。
+
+### 快检与未验
+
+直接入口 `node -r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs -e <本对话内联单场景>`：actual 知识/consent/index/inspection 服务与原事务/身份替身；已发布知识+明确 locale 偏好 collect/revalidate 成功，撤销偏好后旧材料拒绝、withdraw 后原知识包拒绝；员工原人工 42→43 review 实际读回，原 receipt not_prepared 查询零新增 operation，撤权后 review 拒绝；缺原持久识别来源 readEvidence 拒绝。正式知识组合以空持久动作政策验证 collect 关闭，同时验证 sceneKnowledge 选择快照/重复及冲突参数拒绝。最终完成标记 `smoke=passed; actual material/consent revocation and human review/receipt reads; missing persisted recognition refused; no model dispatch`，exit 0。补同场景组合入口断言后相关复验同结果，不新增测试脚本/fixture、不扩矩阵；非 node:test 不编造 pass/skip 总数。
+
+必要 strict compiler API noEmit 根 inspection-recognition-task.application 与 knowledge-file.composition，源码映射原 private Prisma/shared，1164 files、0 diagnostics、exit 0；diff check exit 0。最初工具内存未保留 env 字符串形成 undefinednode 命令，exit1 未执行验证；重设原边界后检查 exit0，未假称首轮通过。DATABASE_URL 固定无效离线地址，原 prisma guard+local runtime，write-root/audit/TEMP/TMP 全本树，audit=`output/inspection-lb05-tmp/20261013-result-consumption.audit`。
+
+本次没有新执行真实/替身模型产生成功持久结果，所以新增 sourceEvidence 正向输出/任务 app saveResultReview 的完整 dispatch→计量→结果→保存正链只获必要类型与复用实现接线证据，**未用人工候选或零发送构造冒称该链已验**。媒体 readEvidence 缺来源关闭、人工 review/receipt 和知识撤销为此次行为证据。未新增或修改任何 tests/fixtures/UI；noEmit不等于API构建/真实数据库/存储/供应商/设备验收。
+
+主线仍需正式新 task/step 动作政策、真实 file runtime/附件绑定、平台/BYOK能力/价格预算、audio官方 proof 和 partial-safe结果合同；`prisma-text-capability-receipt.repository.ts` 的音频仍关闭，未知不恢复候选、不文本替代音频。保存后 reference 修订失效时应走原 staff result-save-receipt/readReview，不能再创建新识别调用修复未知。主线 preferenceKinds 原消费已同步，本线 factory传参现闭合，仍需主线选择受控服务器政策而非模型/客户声明。
+
+源码包固定提交以上两项，记录提交 SHA 由本轮 Git/对话给出；仅本树提交，无生产启用、外联、安装、迁移、shared生成、push/main或完成率调整。
