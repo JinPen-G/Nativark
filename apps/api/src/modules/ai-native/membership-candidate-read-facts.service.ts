@@ -87,16 +87,17 @@ export class AiMembershipCandidateReadFactsService {
     if (context.scope.kind !== 'workspace' || context.actor.kind !== 'user' || (context.audience !== 'operator' && context.audience !== 'staff')
       || !access?.permissions.includes('rental-os:order:create')) throw new ModelGatewayError('FORBIDDEN');
     const workspace = context.scope;
-    let rows: readonly BookingMemberOption[], truncated = false, nextCursor: string | undefined;
-    if (!this.memberships.listPersonalOptionsPage && (input.data.customerId || input.data.name || input.data.cursor)) {
+    // A limit on the returned projection is not a bound on a legacy query.
+    // Even an unfiltered first page must use the original database-bounded port.
+    if (typeof this.memberships.listPersonalOptionsPage !== 'function') {
       throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     }
+    let page: Awaited<ReturnType<NonNullable<AiMembershipCandidateReadPort['listPersonalOptionsPage']>>>;
     try {
-      if (typeof this.memberships.listPersonalOptionsPage === 'function') {
-        const page = await this.memberships.listPersonalOptionsPage(workspace.tenantId, input.data);
-        rows = page.rows; truncated = page.truncated; nextCursor = page.nextCursor;
-      } else rows = await this.memberships.listPersonalOptions(workspace.tenantId);
+      page = await this.memberships.listPersonalOptionsPage(workspace.tenantId, input.data);
     } catch { throw new ModelGatewayError('PROVIDER_UNAVAILABLE'); }
+    if (!page) throw new ModelGatewayError('INVALID_RESPONSE');
+    const { rows, truncated, nextCursor } = page;
     if (!Array.isArray(rows) || rows.length > input.data.limit || typeof truncated !== 'boolean') throw new ModelGatewayError('INVALID_RESPONSE');
     if (nextCursor !== undefined && (!truncated || !z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).safeParse(nextCursor).success)) throw new ModelGatewayError('INVALID_RESPONSE');
     if (input.data.customerId && rows.some(row => row.customerId !== input.data.customerId)) throw new ModelGatewayError('INVALID_RESPONSE');
