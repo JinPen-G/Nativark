@@ -1,6 +1,6 @@
 # Rental OS AI Native 系统专项开发任务
 
-> **最新底座功能（2026-10-13）：`40a582b6`。** strict JSON挑战及服务器显式结构化许可已接原Controller/输入/runner/Gateway/单账/收据，实际Schema校验及text/parsed object一致性，普通JSON回声不算证明；默认不开放、不授予业务执行。完整离线实际服务冒烟一个invocation/settle，mock始终unverified，627源码零诊断，没有新增或修改测试脚本。保留text/stream/vision与用量/配置接线；audio/tools、可信计价、版本发布/端侧设置及真环境未闭合；55/112＝49.1%、ENTRY35/72＝48.6%、正式验收0/28不涨。
+> **最新底座功能（2026-10-13）：`05baeac1`。** 原C02订单解释工具候选接入server-only许可的C03/Unified/Public出口，原schema核验后保留，不再静默丢弃；最多8条有界且默认关闭，候选不是权限/批准/业务执行。实际协议/Gateway＋离线端口冒烟通过，627源码零诊断，无新增或修改测试脚本。保留text/stream/vision/strict JSON探针及用量/配置；tools持久挑战和实际业务消费仍待接，audio/可信计价/端侧及真环境未闭合；55/112＝49.1%、ENTRY35/72＝48.6%、正式验收0/28不涨。
 
 > **2026-10-13最新源码 `c4ae990970268ca1f736f909b3db579573a3ee21`：** 客户原模型结果发现/受控读取已消费到HTTP，复用原谱系和结果仓储，拒绝caller resultId/旧run回退，未知不出正文，620源码零诊断及原客户用例1/1。成功文本/完整配置财务正向未验，不把未产出读取当生成成功；原门槛计分保持。
 
