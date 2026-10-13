@@ -1,4 +1,4 @@
-import { AI_APPROVAL_APPLICATION_DRAFT_VERSION } from '../../../../../../packages/shared/src/ai-approval-application-draft';
+import { AI_APPROVAL_APPLICATION_DRAFT_VERSION } from '@rental-os/shared';
 import type { ControlledApprovedOrderDependencies } from './controlled-approved-order.composition';
 import type { composeApprovedOrderHumanApproval } from './approved-order-human.composition';
 import { approvalApplicationContract } from './approval-application-contracts';

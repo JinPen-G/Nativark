@@ -12,7 +12,7 @@ import { PrismaTaskPlanPolicyRepository } from './runner/prisma-task-plan-policy
 import { PrismaTaskExecutionScopeAuthority } from './runner/prisma-task-execution-scope.authority';
 import { PrismaTaskRunEvidenceRepository } from './runner/prisma-task-run-evidence.repository';
 import { registeredSettingsTool } from './approval-execution/approved-settings-contracts';
-import type { AiApprovedSettingsOperationReceiptDraft } from '../../../../../packages/shared/src/ai-approved-settings-draft';
+import type { AiApprovedSettingsOperationReceiptDraft } from '@rental-os/shared';
 
 /** Publishes references to Core-prepared immutable notification changes. No
  * active settings write, approval decision, worker, timer or production seed.

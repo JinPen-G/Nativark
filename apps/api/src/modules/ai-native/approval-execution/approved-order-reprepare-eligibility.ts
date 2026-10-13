@@ -1,6 +1,6 @@
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
-import { AI_APPROVAL_APPLICATION_DRAFT_VERSION } from '../../../../../../packages/shared/src/ai-approval-application-draft';
-import type { AiApprovalReprepareEligibilityDraft } from '../../../../../../packages/shared/src/ai-approval-application-draft';
+import { AI_APPROVAL_APPLICATION_DRAFT_VERSION } from '@rental-os/shared';
+import type { AiApprovalReprepareEligibilityDraft } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { ControlledApprovedOrderDependencies } from './controlled-approved-order.composition';

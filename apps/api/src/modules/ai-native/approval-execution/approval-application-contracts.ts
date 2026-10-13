@@ -2,10 +2,10 @@ import Ajv, { type ValidateFunction } from 'ajv';
 import { z } from 'zod';
 import { AI_PROPOSAL_DRAFT_SCHEMAS } from '@rental-os/shared';
 import { AI_NATIVE_COMPONENT_SCHEMAS } from '../../../contracts/ai-native-schemas';
-import { AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS } from '../../../../../../packages/shared/src/ai-approval-application-draft-schemas';
+import { AI_APPROVAL_APPLICATION_DRAFT_SCHEMAS } from '@rental-os/shared';
 import type { AiApprovalApplicationReferenceDraft, AiApprovalApplicationDecisionDraft, AiApprovalApplicationReceiptDraft,
   AiApprovalApplicationReviewDraft, AiApprovalReprepareEligibilityRequestDraft, AiApprovalReprepareEligibilityDraft,
-  AiApprovalReprepareCommandDraft, AiApprovalReprepareReceiptDraft, AiApprovalApplicationErrorDraft } from '../../../../../../packages/shared/src/ai-approval-application-draft';
+  AiApprovalReprepareCommandDraft, AiApprovalReprepareReceiptDraft, AiApprovalApplicationErrorDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 
 type Contracts = {

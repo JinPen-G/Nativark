@@ -1,5 +1,5 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
-import { AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT as paths, type AiKnowledgeManagementHttpErrorDraft } from '../../../../../../packages/shared/src/ai-knowledge-management-http-draft';
+import { AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT as paths, type AiKnowledgeManagementHttpErrorDraft } from '@rental-os/shared';
 import { runWithRequestIdentity } from '../../../common/request-identity';
 import { HumanKnowledgeManagementRequestFactory, type HumanKnowledgeManagementHttpRequest,
   type HumanKnowledgeManagementRequest } from './human-knowledge-management.composition';
