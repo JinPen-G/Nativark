@@ -387,6 +387,57 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
       businessExecution: 'readonly_not_business_commit' as const };
   };
   const application = root.createApplication(input.host, prepare);
+  const resumePreparedOriginal = async (signal?: AbortSignal) => {
+    if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
+    await assertOriginal(true);
+    // The ordinary application obtains a fresh current-authority/CAS lease.
+    // Its preparation hook only consumes already published original inputs.
+    const frozenPreparation: AiTaskHeldPreparation = async ({ lease, taskRevision, signal: heldSignal }) => {
+      if (heldSignal?.aborted || lease.taskId !== task.taskId || lease.runId !== task.runId) throw denied();
+      await assertOriginal(true);
+      const access = await model.tasks.resolveAccess(task.taskId, 'read_metadata');
+      const row = await input.db.aiTask.findFirst({ where: access.where });
+      if (!row || row.status !== 'RUNNING' || row.cancelRequestedAt !== null) throw denied();
+      const key = { scopeId: row.scopeId, taskId: task.taskId, runId: task.runId };
+      const runs = await input.db.aiRun.findMany({ where: { scopeId: key.scopeId, taskId: key.taskId }, take: 2 });
+      if (runs.length !== 1 || runs[0].id !== task.runId) throw unavailable();
+      const evidence = await Promise.all([
+        input.db.aiStep.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } }),
+        input.db.aiTaskResultArtifact.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } }),
+        input.db.aiGatewayInvocation.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } }),
+        input.db.aiTaskExecutionBudget.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } }),
+        input.db.aiTaskExecutionCharge.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } }),
+        input.db.aiBudgetReservation.findFirst({ where: { scopeId: key.scopeId, runId: key.runId } })
+      ]);
+      if (evidence.some(Boolean)) throw unavailable();
+      const rows = await input.db.aiTaskActionInput.findMany({ where: key, take: expectedSteps.length + 1 });
+      if (rows.length !== expectedSteps.length || new Set(rows.map(value => value.registrationRef)).size !== rows.length
+        || rows.some(value => !expectedSteps.some(step => step.registrationRef === value.registrationRef
+          && step.toolCode === value.toolCode && step.toolVersion === value.toolVersion))) throw unavailable();
+      await model.revalidatePublished({ taskId: task.taskId, runId: task.runId, registrationRef: task.modelRegistrationRef });
+      if (task.answerRegistrationRef) await model.revalidatePublished({ taskId: task.taskId,
+        runId: task.runId, registrationRef: task.answerRegistrationRef });
+      const read = await order.source.readReadonlyInputReceipt({ taskId: task.taskId, runId: task.runId,
+        registrationRef: task.orderRegistrationRef });
+      const expected = { contractVersion: AI_CONTRACT_DRAFT_VERSION, toolCode: 'rental.order.explain',
+        toolVersion: AI_TOOL_DRAFT_VERSION, input: { orderId: task.orderId } };
+      if (read.state !== 'published' || requestFingerprint(read.payload) !== requestFingerprint(expected)
+        || read.fingerprint !== requestFingerprint(expected)) throw denied();
+      const saved = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
+      const plan = saved ? aiTaskRunPlanSchema.parse(structuredClone(saved.payload))
+        : { taskId: task.taskId, runId: task.runId, taskRevision, steps: expectedSteps, limits: task.limits };
+      if (saved && (saved.scopeId !== key.scopeId || saved.taskId !== key.taskId || saved.runId !== key.runId
+        || requestFingerprint(plan) !== saved.planHash)) throw denied();
+      if (requestFingerprint(plan.steps) !== requestFingerprint(expectedSteps)
+        || requestFingerprint(plan.limits) !== requestFingerprint(task.limits)) throw denied();
+      // Held lease and original input/policy hashes are rechecked under the
+      // existing task/run locks. No input is regenerated or overwritten.
+      await root.evidence.savePlan(plan, lease);
+      await assertOriginal(true);
+    };
+    const resumed = root.createApplication(input.host, frozenPreparation);
+    return resumed.start({ taskId: task.taskId, runId: task.runId }, signal);
+  };
   const recoveryHost = Object.freeze(structuredClone(input.host));
   const takeoverRevisionSchema = z.object({ expectedTaskRevision: z.number().int().min(1).max(4294967294),
     expectedRunRevision: z.number().int().min(1).max(4294967294),
@@ -456,5 +507,6 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
       expectedFencingToken: snapshot.run.fencingToken });
     return { kind: 'run_outcome' as const, outcome: await root.runner.recover(lease, signal) };
   };
-  return Object.freeze({ ...root, model, readOrderResult, readAnswerResult, recoverOriginal, takeoverOriginal, readOriginalTakeoverReceipt, application });
+  return Object.freeze({ ...root, model, readOrderResult, readAnswerResult, resumePreparedOriginal,
+    recoverOriginal, takeoverOriginal, readOriginalTakeoverReceipt, application });
 }

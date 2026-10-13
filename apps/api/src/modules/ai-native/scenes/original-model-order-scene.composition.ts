@@ -57,7 +57,7 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
       || after.task.taskId !== before.task.taskId || after.task.runId !== before.task.runId) throw denied();
     return after;
   };
-  const assemble = async (value: unknown, fresh: boolean) => {
+  const assemble = async (value: unknown, fresh: boolean | 'prepared') => {
     const before = await bound(value), { task, original, ref } = before;
     const scopeId = before.scopeId;
     const key = { scopeId, taskId: task.taskId, runId: task.runId };
@@ -65,7 +65,7 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
     const answerRegistrationRef = answerRoundTrip ? `scene-answer:${ref.inputRef}` : undefined;
     const stored = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
     let material: z.infer<typeof taskModelMaterialSchema>, limits: z.infer<typeof aiTaskRunnerLimitsSchema>;
-    if (fresh) {
+    if (fresh === true) {
       if (stored || original.receipt.state !== 'stored') throw unavailable();
       const existing = await input.db.aiTaskActionInput.findMany({ where: key, take: 1 });
       if (existing.length) throw unavailable();
@@ -84,23 +84,33 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
       limits = aiTaskRunnerLimitsSchema.parse(structuredClone(current.limits));
       if (limits.maxSteps < (answerRoundTrip ? 3 : 2) || limits.maxCalls < (answerRoundTrip ? 3 : 2)) throw unavailable();
     } else {
-      if (!stored || stored.scopeId !== scopeId || stored.taskId !== task.taskId || stored.runId !== task.runId) throw unavailable();
-      const plan = aiTaskRunPlanSchema.parse(structuredClone(stored.payload));
-      if (requestFingerprint(plan) !== stored.planHash) throw denied();
+      if (!stored && fresh !== 'prepared') throw unavailable();
+      if (stored && (stored.scopeId !== scopeId || stored.taskId !== task.taskId || stored.runId !== task.runId)) throw denied();
+      const plan = stored ? aiTaskRunPlanSchema.parse(structuredClone(stored.payload)) : null;
+      if (plan && requestFingerprint(plan) !== stored!.planHash) throw denied();
       const expected = [
         { registrationRef: modelRegistrationRef, toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION, operation: 'external_unknown' },
         { registrationRef: orderRegistrationRef, toolCode: 'rental.order.explain', toolVersion: AI_TOOL_DRAFT_VERSION, operation: 'readonly' },
         ...(answerRegistrationRef ? [{ registrationRef: answerRegistrationRef, toolCode: TASK_TEXT_MODEL_TOOL,
           toolVersion: AI_TOOL_DRAFT_VERSION, operation: 'external_unknown' }] : [])
       ];
-      if (plan.taskId !== task.taskId || plan.runId !== task.runId || requestFingerprint(plan.steps) !== requestFingerprint(expected)) throw denied();
+      if (plan && (plan.taskId !== task.taskId || plan.runId !== task.runId || requestFingerprint(plan.steps) !== requestFingerprint(expected))) throw denied();
       const saved = await input.db.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: modelRegistrationRef } });
       if (!saved || saved.scopeId !== scopeId || saved.taskId !== task.taskId || saved.runId !== task.runId
         || saved.toolCode !== TASK_TEXT_MODEL_TOOL || saved.toolVersion !== AI_TOOL_DRAFT_VERSION) throw denied();
       const parsed = parseTaskModelInput(saved.payload, policy);
       if (taskModelFingerprint(parsed, policy) !== saved.fingerprint) throw denied();
       material = taskModelMaterialSchema.parse({ messages: parsed.intent.messages, maxOutputTokens: parsed.intent.maxOutputTokens });
-      limits = plan.limits;
+      if (plan) limits = plan.limits;
+      else {
+        // Only the original published input may supply model material. Current
+        // policy is independently revalidated against every input by the held
+        // preparation; no regenerated facts, input or replacement run.
+        const current = await input.db.aiTaskPlanPolicy.findFirst({ where: { scopeId,
+          sceneCode: original.request.sceneCode, sceneVersion: original.receipt.sceneVersion } });
+        if (!current?.enabled || current.expiresAt && current.expiresAt.getTime() <= (input.clock?.() ?? new Date()).getTime()) throw unavailable();
+        limits = aiTaskRunnerLimitsSchema.parse(structuredClone(current.limits));
+      }
     }
     await verify(before);
     const runner = composePersistedModelOrderTaskRunner({ ...input, host: serverHost, originalRequests: scenes.requests,
@@ -191,6 +201,14 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
       const { before, runner } = await assemble(value, false);
       const outcome = await runner.recoverOriginal(signal); await verify(before);
       return freezeOriginalInput({ original: before.original.receipt, outcome, automaticRetry: false as const });
+    },
+    async resumePrepared(value: unknown, signal?: AbortSignal) {
+      const { before, runner } = await assemble(value, 'prepared');
+      const outcome = await runner.resumePreparedOriginal(signal);
+      await verify(before);
+      return freezeOriginalInput({ original: before.original.receipt, outcome,
+        automaticRetry: false as const, preparation: 'original_inputs_only' as const,
+        businessExecution: 'readonly_not_business_commit' as const });
     },
     async takeover(value: unknown, signal?: AbortSignal) {
       const parsed = z.object({ original: originalRequestReferenceSchema,

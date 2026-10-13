@@ -79,7 +79,8 @@ export function composeCurrentAuthorizedTaskModelInput(input: TaskModelCompositi
     }
   };
   return Object.freeze({ authorization, tasks: authorization.tasks, planAuthority: source, plans, registrations,
-    publish: inputs.publish.bind(inputs), invocations, executors: inputs.registeredExecutors(), commands, createTransitionAuthority,
+    publish: inputs.publish.bind(inputs), revalidatePublished: inputs.revalidatePublished.bind(inputs),
+    invocations, executors: inputs.registeredExecutors(), commands, createTransitionAuthority,
     toolCatalog: { resolve: async (code: string, version: string) => code === tool && version === AI_TOOL_DRAFT_VERSION
       ? { modelCall: true } : null } });
 }
