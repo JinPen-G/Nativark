@@ -1,14 +1,15 @@
-import { Body, Controller, HttpException, Inject, Post, Req } from '@nestjs/common';
+import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import type { IncomingMessage } from 'node:http';
 import { withRequestAbort } from './request-abort';
 import type { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneModel,
-  composeRequestBoundPersistedOriginalSceneModel, AiSceneHttpRequest } from './request-bound-scenes.application';
-import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT } from '@rental-os/shared';
+  composeRequestBoundPersistedOriginalSceneModel, composeRequestBoundOriginalTaskActionPolicies, AiSceneHttpRequest } from './request-bound-scenes.application';
+import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT } from '@rental-os/shared';
 
 export const AI_ORIGINAL_SCENES = Symbol('AI_ORIGINAL_SCENES');
 export const AI_ORIGINAL_SCENE_REQUESTS = Symbol('AI_ORIGINAL_SCENE_REQUESTS');
 export const AI_ORIGINAL_SCENE_MODEL_REQUESTS = Symbol('AI_ORIGINAL_SCENE_MODEL_REQUESTS');
 export const AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS = Symbol('AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS');
+export const AI_ORIGINAL_TASK_ACTION_POLICIES = Symbol('AI_ORIGINAL_TASK_ACTION_POLICIES');
 type Scenes = ReturnType<typeof composeRequestBoundOriginalScenes>;
 export async function respondAiScene<T>(work: () => Promise<T>, unknownAction = 'reconcile') {
   try { return await work(); }
@@ -28,6 +29,23 @@ export async function respondAiScene<T>(work: () => Promise<T>, unknownAction = 
   }
 }
 type SceneRunHttpRequest = AiSceneHttpRequest & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
+@Controller(AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.basePath)
+export class AiOriginalTaskActionPolicyController {
+  constructor(@Inject(AI_ORIGINAL_TASK_ACTION_POLICIES)
+    private readonly application: ReturnType<typeof composeRequestBoundOriginalTaskActionPolicies>) {}
+  @Post(AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.configure) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  configure(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.application.configure(request, body), 'read_original_task_action_policy');
+  }
+  @Post(AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.clear) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  clear(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.application.clear(request, body), 'read_original_task_action_policy');
+  }
+  @Post(AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.read) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  read(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.application.read(request, body), 'read_original_task_action_policy');
+  }
+}
 @Controller(AI_SCENE_REQUEST_HTTP_DRAFT.basePath)
 export class AiOriginalScenesController {
   constructor(@Inject(AI_ORIGINAL_SCENE_REQUESTS) private readonly scenes: Scenes) {}

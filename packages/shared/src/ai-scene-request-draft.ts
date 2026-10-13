@@ -103,6 +103,11 @@ export const AI_SCENE_REQUEST_HTTP_DRAFT = Object.freeze({
   createTask: 'create-task', material: 'material', recovery: 'recovery', quoteReview: 'quote-review',
   quoteConfirm: 'quote-confirm', quoteReceipt: 'quote-receipt'
 } as const);
+/** Owner-only operator policy management; never execution or business approval. */
+export const AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT = Object.freeze({
+  basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/task-actions`, method: 'POST',
+  configure: 'configure', read: 'read', clear: 'clear'
+} as const);
 /** Server opt-in only. Bodies reuse original references and the existing input
  * submission contract; callers never supply leases, prompts or model settings. */
 export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({

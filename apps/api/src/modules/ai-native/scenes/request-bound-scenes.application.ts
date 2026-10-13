@@ -104,6 +104,7 @@ export function composeRequestBoundOriginalTaskActionPolicies(
   const ttlMs = z.number().int().min(1).max(120000).parse(options.ttlMs);
   const readSchema = z.object({ original: originalRequestReferenceSchema, operation }).strict();
   const configureSchema = readSchema.extend({ expectedRevision: z.number().int().min(1).max(4294967294).nullable() }).strict();
+  const clearSchema = readSchema.extend({ expectedRevision: z.number().int().min(1).max(4294967293) }).strict();
   const call = bindRequests(dependencies, { enabled: options.enabled, audience: 'operator' }, input => ({
     scenes: composeAiOriginalScenes(input), policies: composeTaskActionPolicyManagement(input), clock: input.clock ?? (() => new Date())
   }));
@@ -126,6 +127,18 @@ export function composeRequestBoundOriginalTaskActionPolicies(
     return { taskId: task.taskId, template, expiresAt: before.receipt.expiresAt, verify };
   };
   return Object.freeze({
+    clear(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = clearSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = clearSchema.parse(command), found = await target(root, input.original, input.operation);
+        const policy = await root.policies.clear(found.taskId,
+          found.template.operation as AiTaskActionPolicyMutation['operation'], input.expectedRevision);
+        await found.verify();
+        return { original: input.original, state: 'revoked' as const, policy, retryable: false as const,
+          semantics: 'new_task_actions_denied_not_remote_rollback' as const };
+      });
+    },
     configure(request: AiSceneHttpRequest, value: unknown) {
       const parsed = configureSchema.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');

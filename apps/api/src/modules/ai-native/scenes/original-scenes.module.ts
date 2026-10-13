@@ -2,7 +2,8 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './original-scenes.composition';
 import { AI_ORIGINAL_SCENES, AI_ORIGINAL_SCENE_REQUESTS, AiOriginalScenesController,
   AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS,
-  AiOriginalSceneModelController, AiOriginalSceneModelActionsController } from './original-scenes.controller';
+  AiOriginalSceneModelController, AiOriginalSceneModelActionsController,
+  AI_ORIGINAL_TASK_ACTION_POLICIES, AiOriginalTaskActionPolicyController } from './original-scenes.controller';
 import { composeAiOriginalSceneModel, type AiOriginalSceneModelDependencies } from './original-scene-model.composition';
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneModel, type RequestBoundOriginalSceneDependencies,
   composeRequestBoundPersistedOriginalSceneModel, type RequestBoundPersistedOriginalSceneModelDependencies,
@@ -10,11 +11,16 @@ import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneMode
 import { composeRequestBoundOriginalTaskActionPolicies, type AiOriginalTaskActionPolicyOptions } from './request-bound-scenes.application';
 
 export const AI_ORIGINAL_SCENE_MODEL = Symbol('AI_ORIGINAL_SCENE_MODEL');
-export const AI_ORIGINAL_TASK_ACTION_POLICIES = Symbol('AI_ORIGINAL_TASK_ACTION_POLICIES');
+export { AI_ORIGINAL_TASK_ACTION_POLICIES } from './original-scenes.controller';
 export { AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS } from './original-scenes.controller';
 
 @Module({})
 export class AiOriginalScenesModule {
+  /** Explicit opt-in transport. No task policy is automatically written. */
+  static registerHttpTaskActionPolicies(dependencies: RequestBoundOriginalSceneDependencies,
+    options: AiOriginalTaskActionPolicyOptions): DynamicModule {
+    return { ...this.registerTaskActionPolicies(dependencies, options), controllers: [AiOriginalTaskActionPolicyController] };
+  }
   /** Explicit non-HTTP supplier; does not seed or enable any task policy. */
   static registerTaskActionPolicies(dependencies: RequestBoundOriginalSceneDependencies,
     options: AiOriginalTaskActionPolicyOptions): DynamicModule {
