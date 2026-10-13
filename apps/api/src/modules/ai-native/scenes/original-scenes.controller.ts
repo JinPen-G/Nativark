@@ -132,7 +132,11 @@ export class AiOriginalSceneModelActionsController {
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.takeover)
   takeover(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => withRequestAbort(request, signal => this.model.takeover(request, body, signal)), 'read_execution');
+    return respondAiScene(() => withRequestAbort(request, signal => this.model.takeover(request, body, signal)), 'read_takeover_receipt');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTakeoverReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTakeoverReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.readTakeoverReceipt(request, body), 'read_takeover_receipt');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.requestCancel)
   requestCancel(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.model.requestCancel(request, body)); }

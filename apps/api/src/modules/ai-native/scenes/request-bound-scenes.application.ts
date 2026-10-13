@@ -21,6 +21,7 @@ import { originalIdentityHash } from '../task-request/original-request.authority
 import { composePersistedTaskCallGateway, type PersistedTaskCallGatewayDependencies } from '../task-model-gateway.composition';
 import { composeTaskActionPolicyManagement } from '../task-action-policy-management.composition';
 import { taskActionPolicyOperations, type AiTaskActionPolicyMutation } from '../prisma-task-action-policy.repository';
+import { PrismaTaskTakeoverRepository } from '../runner/prisma-task-takeover.repository';
 
 export type AiSceneHttpRequest = { headers: { authorization?: unknown } };
 export type AiSceneRequestOptions = { enabled: boolean; audience: 'operator' | 'staff' };
@@ -168,6 +169,45 @@ export function composeRequestBoundOriginalTaskActionPolicies(
   });
 }
 
+/** Read an original takeover receipt without constructing a model, Gateway,
+ * budget admission or runner. Current original-resource and action permissions
+ * remain mandatory; a later clarification does not replace the referenced run. */
+export function composeRequestBoundOriginalTaskRecoveryReaders(
+  dependencies: RequestBoundOriginalSceneDependencies, options: AiSceneRequestOptions) {
+  const schema = z.object({ original: originalRequestReferenceSchema,
+    runId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+    expectedTaskRevision: z.number().int().min(1).max(4294967294),
+    expectedRunRevision: z.number().int().min(1).max(4294967294),
+    expectedFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict();
+  const call = bindRequests(dependencies, options, input => {
+    const authorization = composePersistedTaskAuthorization(input);
+    return { scenes: composeAiOriginalScenes(input),
+      takeovers: new PrismaTaskTakeoverRepository(input.db, authorization.authority, input.clock) };
+  });
+  return Object.freeze({
+    readTakeoverReceipt(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = schema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = schema.parse(command);
+        const before = await root.scenes.requests.readHistorical(input.original);
+        const task = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const { original: _reference, ...generation } = input;
+        const receipt = await root.takeovers.readReceipt({ ...generation, taskId: task.taskId });
+        const after = await root.scenes.requests.readHistorical(input.original);
+        const latest = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (after.receipt.state === 'revoked' || after.receipt.contentHash !== before.receipt.contentHash
+          || originalIdentityHash(after.context) !== originalIdentityHash(before.context)
+          || latest.state !== 'observed' || latest.taskId !== task.taskId || latest.runId !== task.runId)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return freezeOriginalInput({ original: input.original, receipt,
+          execution: 'read_only_no_lease_or_dispatch' as const });
+      });
+    },
+  });
+}
+
 export type RequestBoundPersistedOriginalSceneModelDependencies =
   Omit<RequestBoundOriginalSceneModelDependencies, 'runtime' | 'priceVersion' | 'kind'> & {
     /** Server-owned configuration. No request may choose a provider or task. */
@@ -191,6 +231,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
   const { host, clock, monotonic, ...requestOptions } = options;
   const serverHost = freezeOriginalInput(structuredClone(host));
   const { gateway, ...sceneDependencies } = dependencies;
+  const recoveryReaders = composeRequestBoundOriginalTaskRecoveryReaders(sceneDependencies, requestOptions);
   const serverGateway = Object.freeze({ ...gateway, adapters: Object.freeze([...gateway.adapters]) });
   const call = bindRequests(sceneDependencies, requestOptions, async (input, command) => {
     const raw = command && typeof command === 'object' && 'original' in command ? command.original : command;
@@ -219,6 +260,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     return Object.freeze({ ...application, readModelResult: model.readModelResult, reopenModelSource: model.reopenModelSource });
   });
   return Object.freeze({
+    readTakeoverReceipt: recoveryReaders.readTakeoverReceipt,
     start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, (app, command) => app.start(command, signal)),
     readInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readInput(command)),
@@ -265,6 +307,7 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
     scene: structuredClone(settingsTask.dependencies.scene) }, configuration: {
     host: structuredClone(settingsTask.configuration.host), task: structuredClone(settingsTask.configuration.task) } } : undefined;
   const serverHost = Object.freeze(structuredClone(host));
+  const recoveryReaders = composeRequestBoundOriginalTaskRecoveryReaders(dependencies, requestOptions);
   const call = bindRequests(dependencies, requestOptions, input => {
     const model = composeAiOriginalSceneModel(input);
     // A business-only read must not construct model execution dependencies.
@@ -292,6 +335,7 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
       readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot(model.scenes, persisted.events, value) };
   });
   return Object.freeze({
+    readTakeoverReceipt: recoveryReaders.readTakeoverReceipt,
     startSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, (app, command) => app.requireSettings(command).application.start(command, signal)),
     readSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown) =>
