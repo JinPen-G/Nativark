@@ -1,5 +1,5 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
-import { AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT as paths, type AiKnowledgeConsumptionHttpErrorDraft } from '../../../../../../packages/shared/src/ai-knowledge-consumption-http-draft';
+import { AI_KNOWLEDGE_CONSUMPTION_HTTP_DRAFT as paths, type AiKnowledgeConsumptionHttpErrorDraft } from '@rental-os/shared';
 import { runWithRequestIdentity } from '../../../common/request-identity';
 import { HumanKnowledgeConsumptionRequestFactory, type HumanKnowledgeConsumptionHttpRequest,
   type HumanKnowledgeConsumptionRequest } from './human-knowledge-consumption.composition';

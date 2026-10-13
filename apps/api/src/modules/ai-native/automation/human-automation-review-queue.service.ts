@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { PrismaClient } from '@prisma/client';
-import type { AiAutomationReviewQueueItemDraft, AiAutomationReviewQueueResponseDraft } from '../../../../../../packages/shared/src/ai-automation-review-queue-http-draft';
+import type { AiAutomationReviewQueueItemDraft, AiAutomationReviewQueueResponseDraft } from '@rental-os/shared';
 import { requestFingerprint as hash } from '../../rental-core/rental-idempotency.repository';
 import type { BusinessFailureReadAuthority } from '../business-events/business-failure-read.authority';
 import { HumanAutomationReviewService } from './human-automation-review.service';

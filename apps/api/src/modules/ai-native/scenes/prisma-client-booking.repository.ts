@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
-import { AI_BOOKING_DRAFT_STATES } from '../../../../../../packages/shared/src/ai-booking-draft';
+import { AI_BOOKING_DRAFT_STATES } from '@rental-os/shared';
 import type { AiClientMaterialDb, AiClientMaterialScope, AiClientSceneMaterial } from './prisma-client-scene-material.repository';
 import { AiClientEntryError, entryHash, entryId } from './client-entry-action';
 

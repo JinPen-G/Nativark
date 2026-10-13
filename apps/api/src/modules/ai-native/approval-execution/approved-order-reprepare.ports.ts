@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import type { AiExecutionContext, CreateRentalOrderRequest } from '@rental-os/shared';
-import type { AiApprovalReprepareCommandDraft, AiApprovalReprepareReceiptDraft } from '../../../../../../packages/shared/src/ai-approval-application-draft';
+import type { AiApprovalReprepareCommandDraft, AiApprovalReprepareReceiptDraft } from '@rental-os/shared';
 import type { ControlledApprovedOrderDependencies } from './controlled-approved-order.composition';
 import type { AiApprovedOrderInput } from './approved-order.ports';
 
