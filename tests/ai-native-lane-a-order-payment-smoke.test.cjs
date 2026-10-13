@@ -17,7 +17,7 @@ async function create() {
   };
   const payments = new PaymentRuntimeService(db, {}, {});
   const routes = new AiBusinessReadRouteAuthority(h.guard, h.credentials);
-  return { ...h, queries, service: new AiOrderPaymentFactsService(payments, h.core, h.authority, routes) };
+  return { ...h, queries, payments, service: new AiOrderPaymentFactsService(payments, h.core, h.authority, routes) };
 }
 test('actual payment local read preserves paid/accepted/funding_pending/succeeded/failed and strips sensitive fields', async () => {
   const h = await create(), result = await h.service.read();
@@ -26,6 +26,13 @@ test('actual payment local read preserves paid/accepted/funding_pending/succeede
   assert.equal(result.fundingLedger, 'not_loaded'); assert.equal(result.totals, 'not_computed');
   const text = JSON.stringify(result); for (const secret of ['checkoutUrl', 'failureReason', 'private customer reason', 'private-provider-id']) assert.equal(text.includes(secret), false);
   for (const query of h.queries) { assert.equal(query.where.tenantId, 'tenant-a'); assert.equal(query.where.workspaceId, 'workspace-a'); assert.equal(query.where.orderId, 'order-a'); }
+  assert.deepEqual(h.queries.filter(query => query.take !== undefined).map(query => query.take), [21, 51]);
+  for (const name of ['listPaymentIntentsPage', 'listPaymentRefundsPage']) {
+    const unavailable = await create(); unavailable.payments[name] = undefined;
+    // The original order authority deliberately masks dependency details.
+    await assert.rejects(unavailable.service.read(), error => error.message === 'AI_ACCESS_DENIED');
+    assert.equal(unavailable.queries.length, 0, 'no legacy query when either bounded capability is missing');
+  }
 });
 test('ordinary order access does not grant finance read and cannot read any payment record', async () => {
   const h = await create(); h.state.user.permissions = ['rental-os:order:view'];
