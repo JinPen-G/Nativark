@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AI_CONTRACT_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
+import { AI_CONTRACT_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, AI_SCENE_REQUEST_DRAFT_VERSION } from '@rental-os/shared';
 import type { RentalCoreService } from '../../rental-core/rental-core.service';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -18,6 +18,7 @@ import type { AiTaskHeldPreparation } from '../runner/ai-task-runner.service';
 import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-effects';
 import type { AiStepTransitionAuthority } from '../ai-step-transition.repository';
 import type { TaskModelHostDependencies } from '../runner/model-task-host.composition';
+import { PrismaOriginalRequestRepository } from '../task-request/prisma-original-request.repository';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const taskSchema = z.object({ taskId: id.max(36), runId: id.max(36), modelRegistrationRef: id,
@@ -25,6 +26,7 @@ const taskSchema = z.object({ taskId: id.max(36), runId: id.max(36), modelRegist
   .refine(task => task.modelRegistrationRef !== task.orderRegistrationRef);
 type Dependencies = Omit<TaskModelHostDependencies, 'task' | 'kind' | 'planTools'> & {
   core: Pick<RentalCoreService, 'getOrder'>;
+  originalRequests: PrismaOriginalRequestRepository;
   /** Frozen server task input, never a public model prompt/permission switch. */
   task: z.infer<typeof taskSchema>;
 };
@@ -37,10 +39,36 @@ const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 export function composePersistedModelOrderTaskRunner(input: Dependencies) {
   const task = taskSchema.parse(structuredClone(input.task));
   if (input.gatewayScene.orderExplainTool !== true || input.gatewayScene.structuredOutput
-    || typeof input.financialEvidence?.readDispatch !== 'function') throw unavailable();
+    || typeof input.financialEvidence?.readDispatch !== 'function'
+    || !(input.originalRequests instanceof PrismaOriginalRequestRepository)) throw unavailable();
   const { routeScene: _route, ...serverPolicy } = structuredClone(input.gatewayScene);
   const policy = taskModelPolicy(serverPolicy);
-  const model = composePersistedTaskModelInput({ ...input, planTools: [TASK_TEXT_MODEL_TOOL, 'rental.order.explain'] });
+  const assertOriginal = async (forExecution = false) => {
+    const access = await model.tasks.resolveAccess(task.taskId, 'read_metadata');
+    const row = await input.db.aiTask.findFirst({ where: access.where });
+    if (!row?.inputRef || row.sceneCode !== 'order_explanation') throw denied();
+    const original = await input.originalRequests.readHistorical({ draftVersion: AI_SCENE_REQUEST_DRAFT_VERSION, inputRef: row.inputRef });
+    const receipt = await input.originalRequests.readTaskReceipt(row.inputRef);
+    if (original.receipt.state === 'revoked' || (forExecution && original.receipt.state !== 'stored')
+      || original.request.sceneCode !== 'order_explanation'
+      || original.request.input.orderId !== task.orderId || original.receipt.contentHash !== row.inputHash
+      || original.receipt.revision !== row.inputRevision || receipt.state !== 'observed'
+      || receipt.taskId !== task.taskId || receipt.runId !== task.runId
+      || (await model.tasks.resolveAccess(task.taskId, 'read_metadata')).bindingKey !== access.bindingKey) throw denied();
+    return original;
+  };
+  const runtime = input.runtime;
+  const model = composePersistedTaskModelInput({ ...input, runtime: { ...runtime, ports: { ...runtime.ports,
+    routing: { resolve: async (...args) => {
+      await assertOriginal(true);
+      const route = await runtime.ports.routing.resolve(...args);
+      await assertOriginal(true);
+      return route;
+    }, assertCurrent: async (...args) => {
+      await runtime.ports.routing.assertCurrent(...args);
+      await assertOriginal(true);
+    } }
+  } }, planTools: [TASK_TEXT_MODEL_TOOL, 'rental.order.explain'] });
   const order = composePersistedOrderFactsTaskRunner({ db: input.db, authorization: input,
     guard: input.guard, core: input.core, wall: input.clock, monotonic: input.monotonic });
   PrismaTaskPlanInputSource.bindModelOrderPlanSources(model.planAuthority, order.source);
@@ -59,6 +87,7 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
   const candidate = async (binding: { taskId: string; runId: string; inputRef: string; fingerprint: string }) => {
     binding = structuredClone(binding);
     if (binding.taskId !== task.taskId || binding.runId !== task.runId) throw denied();
+    await assertOriginal(true);
     const access = await model.tasks.resolveAccess(task.taskId, 'read_step_terminal');
     const row = await input.db.aiTask.findFirst({ where: access.where });
     if (!row) throw denied();
@@ -127,6 +156,7 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
   }, model.authorization);
   const prepare: AiTaskHeldPreparation = async ({ lease, taskRevision, signal }) => {
     if (signal?.aborted || lease.taskId !== task.taskId || lease.runId !== task.runId) throw denied();
+    await assertOriginal(true);
     await model.publish({ taskId: task.taskId, registrationRef: task.modelRegistrationRef,
       expectedTaskRevision: taskRevision, lease, material: task.material });
     await order.source.publishOrderExplainInput({ taskId: task.taskId, registrationRef: task.orderRegistrationRef,
@@ -138,6 +168,7 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
   const readOrderResult = async (value: unknown) => {
     const command = z.object({ resultId: id }).strict().safeParse(structuredClone(value));
     if (!command.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    await assertOriginal();
     const access = await model.tasks.resolveAccess(task.taskId, 'read_step_terminal');
     const row = await input.db.aiTask.findFirst({ where: access.where });
     if (!row) throw denied();
@@ -179,6 +210,7 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     if (taskModelIdentity(await authority.resolve()) !== taskModelIdentity(currentContext)) throw denied();
     if (latest.status !== 'succeeded' || latest.contentHash !== original.contentHash || latest.actionId !== original.actionId
       || latest.stepId !== original.stepId || (await model.tasks.resolveAccess(task.taskId, 'read_step_terminal')).bindingKey !== access.bindingKey) throw denied();
+    await assertOriginal();
     const changed = requestFingerprint(saved.data.order) !== requestFingerprint(current.order);
     return Object.freeze({ ...base, status: changed ? 'stale' as const : 'available' as const,
       facts: changed ? null : structuredClone(current), nextAction: changed ? 'reread_current_facts' : 'read_only',
@@ -188,6 +220,7 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
   const recoveryHost = Object.freeze(structuredClone(input.host));
   const recoverOriginal = async (signal?: AbortSignal) => {
     if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
+    await assertOriginal();
     const snapshot = await application.inspect({ taskId: task.taskId, runId: task.runId });
     if (!snapshot.plan || !['running', 'waiting_external', 'cancel_requested'].includes(snapshot.task.status)) {
       return { kind: 'not_started' as const, reason: 'task_not_runnable' as const };
