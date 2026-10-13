@@ -3,7 +3,7 @@ import { ChatCompletionsAdapter } from './chat-completions.adapter';
 import { createNativeModelEgressTransport } from './model-egress.transport';
 import { RoutedModelTransport, TenantModelConnectionResolver, type GatewayConnectionResolver } from './routed-model-transport';
 import { PublicAiGatewayService } from './public-ai-gateway.service';
-import type { AiGatewayResultDraft } from '@rental-os/shared';
+import { AI_TOOL_DRAFT_VERSION, type AiGatewayResultDraft } from '@rental-os/shared';
 import { PrismaAdmissionRepository } from './invocation-admission.repository';
 import { InvocationAdmissionService } from './invocation-admission.service';
 import { InvocationDispatchService } from './invocation-dispatch.service';
@@ -102,7 +102,7 @@ export class TextCapabilityProbeApplication {
    * chooses a model/profile; the platform ID is fixed by the server factory.
    * Persist this command once, then read it back instead of preparing on retry. */
   prepareRequestCurrent(requestKey: string, platformProfileId: string, capability: TextProbeCapability = 'text') {
-    if (capability !== 'text' && capability !== 'streaming' && capability !== 'vision' && capability !== 'structured_output') throw new ModelGatewayError('INVALID_REQUEST');
+    if (capability !== 'text' && capability !== 'streaming' && capability !== 'vision' && capability !== 'structured_output' && capability !== 'tools') throw new ModelGatewayError('INVALID_REQUEST');
     const key = textProbeCommandSchema.shape.operationId.parse(requestKey);
     const platformId = textProbeDescriptorSchema.shape.profileId.parse(platformProfileId);
     return this.forCurrentRequest(async context => {
@@ -259,7 +259,9 @@ export class TextCapabilityProbeApplication {
       ? new ChatCompletionsAdapter(this.input.protocol ?? createNativeModelEgressTransport(), { structuredOutput: {
         name: 'rental_capability_token', schema: { type: 'object', properties: { token: { type: 'string', maxLength: 22,
           const: (JSON.parse(prepared.expected) as { token: string }).token } }, required: ['token'], additionalProperties: false } } })
-      : this.adapter;
+      : textProbeCapability(command) === 'tools'
+        ? new ChatCompletionsAdapter(this.input.protocol ?? createNativeModelEgressTransport(), {
+          orderExplainTool: { name: 'rental_order_explain', version: AI_TOOL_DRAFT_VERSION } }) : this.adapter;
     const transport = new RoutedModelTransport({ tenant, platform }, [adapter], authority);
     const gateway = new PublicAiGatewayService({ ports: { routing: authority, admission: this.admission, dispatch: this.dispatch,
       budget: this.accounting.budget, transport, audit: this.input.audit,
@@ -273,7 +275,8 @@ export class TextCapabilityProbeApplication {
         && proof.operationId === command.operationId && proof.profileFingerprint === command.profileFingerprint
         && proof.intentHash === prepared.intentHash;
     } }, [{ sceneCode: TEXT_PROBE_SCENE, routeScene: 'chat', maxOutputTokens: 32,
-      ...(textProbeCapability(command) === 'structured_output' ? { structuredOutput: true } : {}) }], 30000);
+      ...(textProbeCapability(command) === 'structured_output' ? { structuredOutput: true } : {}),
+      ...(textProbeCapability(command) === 'tools' ? { orderExplainTool: true } : {}) }], 30000);
     try {
       let result: AiGatewayResultDraft | undefined;
       if (textProbeMode(command) === 'stream') {

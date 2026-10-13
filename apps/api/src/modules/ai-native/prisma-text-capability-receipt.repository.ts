@@ -9,6 +9,7 @@ import type { RecordCapabilityEvidenceInput } from './provider-capability.ports'
 import { capabilityProfileFingerprint, capabilityVerificationSchema } from './capability-verification';
 import { checkedAccountingCall } from './budget/prisma-gateway-accounting-facts';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { isGatewayOrderExplainRequest } from './gateway-contract-validation';
 import { matchesProbeProfile, probeUsageSchema, textDigest, textProbeDescriptorSchema, textProbeEvidenceHash,
   textProbeIntent, textProbeObservationSchema, textProbeCapability, textProbeMethod, textProbeMode, TEXT_PROBE_TTL_MS,
   type TextProbeDescriptor, type TextProbeObservation, type TextProbeReceipt } from './text-capability-probe';
@@ -123,6 +124,12 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
     const now = this.clock(), prepared = textProbeIntent(row.descriptor.command.operationId, row.descriptor.scopeId, textProbeCapability(row.descriptor.command));
     const usage = probeUsageSchema.safeParse(input.result.usage);
     let observedText = input.result.text, structuredMatched = true;
+    if (textProbeCapability(row.descriptor.command) === 'tools') {
+      const requests = input.result.toolRequests;
+      structuredMatched = Array.isArray(requests) && requests.length === 1 && requests.every(isGatewayOrderExplainRequest)
+        && requestFingerprint(requests) === requestFingerprint(JSON.parse(prepared.expected));
+      if (structuredMatched && Array.isArray(requests)) observedText = JSON.stringify(requests);
+    }
     if (textProbeCapability(row.descriptor.command) === 'structured_output') {
       const output = input.result.structuredOutput, token = (JSON.parse(prepared.expected) as { token: string }).token;
       let decoded: unknown;
@@ -151,7 +158,7 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
   async verify(input: RecordCapabilityEvidenceInput): Promise<boolean> {
     const proof = capabilityVerificationSchema.safeParse(input.details?.verification);
     if (!proof.success || proof.data.evidence !== 'live'
-      || !['text', 'streaming', 'vision', 'structured_output'].includes(input.capability) || proof.data.capability !== input.capability || input.source !== 'connection_test'
+      || !['text', 'streaming', 'vision', 'structured_output', 'tools'].includes(input.capability) || proof.data.capability !== input.capability || input.source !== 'connection_test'
       || typeof input.details?.receiptId !== 'string') return false;
     const row = await this.read(input.details.receiptId), now = this.clock();
     if (!row || !row.observation || !matchesProbeProfile(row.descriptor, input.profile)
@@ -177,7 +184,7 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
 
 /** Shared by the probe producer and normal Gateway routing. Reading this
  * service never dispatches a probe; only the original text and explicit stream
- * and generated vision/strict JSON challenges are accepted. Audio/tools evidence
+ * and generated vision/strict JSON/controlled tool challenges are accepted. Audio evidence
  * stays fail-closed; this is not recognition-accuracy or business approval. */
 export function createPersistedTextCapabilityEvidence(db: TextProbeReceiptDb
   & ConstructorParameters<typeof PrismaProviderCapabilityEvidenceRepository>[0], clock: () => Date = () => new Date()) {

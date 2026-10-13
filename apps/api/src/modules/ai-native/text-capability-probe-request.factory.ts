@@ -175,7 +175,8 @@ export class TextCapabilityProbeRequestFactory {
       }),
       preflight: value => run(requestSchema, value, async ({ requestKey }) => {
         const result = await root.workflow.preflightOriginal(await originalKey(requestKey));
-        return { requestKey, capability: result.required.includes('structured_output') ? 'structured_output' as const
+        return { requestKey, capability: result.required.includes('tools') ? 'tools' as const
+          : result.required.includes('structured_output') ? 'structured_output' as const
           : result.required.includes('vision') ? 'vision' as const
           : result.required.includes('streaming') ? 'streaming' as const : 'text' as const, allowed: result.allowed,
           missing: result.missing.length > 0, stale: result.stale.length > 0,

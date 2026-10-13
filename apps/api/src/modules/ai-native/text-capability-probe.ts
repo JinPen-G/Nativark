@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { AiGatewayIntentDraft, AiGatewayConfigReferenceDraft } from '@rental-os/shared';
+import { AI_CONTRACT_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import type { AiProviderProfileRecord } from './provider-profile.ports';
 import { capabilityProfileFingerprint } from './capability-verification';
 import { prepareGatewayTextIntent } from './gateway-intent';
@@ -10,7 +11,8 @@ import { visionCapabilityChallenge, VISION_PROBE_METHOD } from './vision-capabil
 export const TEXT_PROBE_METHOD = 'text-echo-1';
 export const STREAM_PROBE_METHOD = 'text-stream-1';
 export const STRUCTURED_PROBE_METHOD = 'structured-json-1';
-export type TextProbeCapability = 'text' | 'streaming' | 'vision' | 'structured_output';
+export const TOOLS_PROBE_METHOD = 'order-tool-call-1';
+export type TextProbeCapability = 'text' | 'streaming' | 'vision' | 'structured_output' | 'tools';
 export const TEXT_PROBE_SCENE = 'ai.capability.text';
 /** Mirrored by the shared source contract; local literal keeps the isolated
  * runtime usable before a shared client regeneration. */
@@ -19,13 +21,14 @@ export const TEXT_PROBE_TTL_MS = 3_600_000;
 const id = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 export const probeDigest = z.string().regex(/^[0-9a-f]{64}$/u);
 export const textProbeCommandSchema = z.object({ operationId: id, profileKey: id.max(64), profileFingerprint: probeDigest,
-  capability: z.enum(['text', 'streaming', 'vision', 'structured_output']).optional() }).strict();
+  capability: z.enum(['text', 'streaming', 'vision', 'structured_output', 'tools']).optional() }).strict();
 export type TextProbeCommand = z.infer<typeof textProbeCommandSchema>;
 export const textProbeCapability = (command: TextProbeCommand): TextProbeCapability => command.capability ?? 'text';
 export const textProbeMode = (command: TextProbeCommand) => textProbeCapability(command) === 'streaming' ? 'stream' as const : 'invoke' as const;
-export const textProbeMethod = (command: TextProbeCommand) => textProbeCapability(command) === 'structured_output' ? STRUCTURED_PROBE_METHOD : textProbeCapability(command) === 'vision' ? VISION_PROBE_METHOD
+export const textProbeMethod = (command: TextProbeCommand) => textProbeCapability(command) === 'tools' ? TOOLS_PROBE_METHOD : textProbeCapability(command) === 'structured_output' ? STRUCTURED_PROBE_METHOD : textProbeCapability(command) === 'vision' ? VISION_PROBE_METHOD
   : textProbeCapability(command) === 'streaming' ? STREAM_PROBE_METHOD : TEXT_PROBE_METHOD;
-export const textProbeRequirements = (command: TextProbeCommand): Array<'text' | 'streaming' | 'vision' | 'structured_output'> => textProbeCapability(command) === 'structured_output'
+export const textProbeRequirements = (command: TextProbeCommand): Array<'text' | 'streaming' | 'vision' | 'structured_output' | 'tools'> => textProbeCapability(command) === 'tools'
+  ? ['text', 'tools'] : textProbeCapability(command) === 'structured_output'
   ? ['text', 'structured_output'] : textProbeCapability(command) === 'vision'
   ? ['text', 'vision'] : textProbeMode(command) === 'stream' ? ['text', 'streaming'] : ['text'];
 export const probeContextSchema = z.object({ tenantId: id, workspaceId: id, actorId: id }).strict();
@@ -33,7 +36,7 @@ export const probeUsageSchema = z.object({ inputTokens: z.number().int().positiv
   outputTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).strict();
 export const textProbeDescriptorSchema = z.object({
   command: textProbeCommandSchema, context: probeContextSchema, scopeId: id.max(36), profileId: id.max(36),
-  methodVersion: z.enum([TEXT_PROBE_METHOD, STREAM_PROBE_METHOD, VISION_PROBE_METHOD, STRUCTURED_PROBE_METHOD]), callId: id, intentHash: probeDigest, challengeHash: probeDigest,
+  methodVersion: z.enum([TEXT_PROBE_METHOD, STREAM_PROBE_METHOD, VISION_PROBE_METHOD, STRUCTURED_PROBE_METHOD, TOOLS_PROBE_METHOD]), callId: id, intentHash: probeDigest, challengeHash: probeDigest,
   profileFingerprint: probeDigest, configuration: z.record(z.unknown()), configurationHash: probeDigest,
   stepId: id.max(36), runId: id.max(36)
 }).strict();
@@ -53,7 +56,17 @@ export interface TextProbeReceipt {
 export function textDigest(text: string) { return createHash('sha256').update(text).digest('hex'); }
 export function textProbeIntent(operationId: string, scopeId: string, capability: TextProbeCapability = 'text'): { intent: AiGatewayIntentDraft; expected: string; intentHash: string; challengeHash: string } {
   id.parse(operationId); id.max(36).parse(scopeId);
-  z.enum(['text', 'streaming', 'vision', 'structured_output']).parse(capability);
+  z.enum(['text', 'streaming', 'vision', 'structured_output', 'tools']).parse(capability);
+  if (capability === 'tools') {
+    const key = requestFingerprint({ method: TOOLS_PROBE_METHOD, scopeId, operationId }), orderId = `PROBE_${key.slice(0, 16)}`;
+    const expected = JSON.stringify([{ contractVersion: AI_CONTRACT_DRAFT_VERSION, toolCode: 'rental.order.explain',
+      toolVersion: AI_TOOL_DRAFT_VERSION, input: { orderId } }]);
+    const intent: AiGatewayIntentDraft = { draftVersion: 'ain-c03-draft-2', requestId: `capability:${key}`, sceneCode: TEXT_PROBE_SCENE,
+      messages: [{ role: 'user', content: [{ kind: 'text', text: `Call rental_order_explain exactly once with orderId ${orderId}. This is a format-only challenge; no business tool is executed. Return no prose.` }] }],
+      requiredFeatures: ['text', 'tools'], optionalFeatures: [], maxOutputTokens: 32 };
+    const prepared = prepareGatewayTextIntent(intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32, orderExplainTool: true }, 'invoke');
+    return { intent, expected, intentHash: prepared.intentHash, challengeHash: requestFingerprint(intent.messages) };
+  }
   if (capability === 'structured_output') {
     const key = requestFingerprint({ method: STRUCTURED_PROBE_METHOD, scopeId, operationId });
     const expected = JSON.stringify({ token: `PROBE_${key.slice(0, 16)}` });
