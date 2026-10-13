@@ -90,7 +90,7 @@ export function createPersistedGatewayBudget(input: {
           : { mode: 'tenant_managed' as const, allowedModels: [...stored.allowedModels] },
         configurationMeaning: 'saved_policy_reference_not_current_selection' as const };
     },
-    save: async (value: unknown) => {
+    save: async (value: unknown, revalidateSelection?: () => Promise<void>) => {
       const parsed = write.safeParse(structuredClone(value));
       if (!parsed.success) throw new BudgetError('INVALID');
       const command = parsed.data, proposed = command.settings as AiUsageSettingsDraft;
@@ -108,6 +108,7 @@ export function createPersistedGatewayBudget(input: {
         structuredClone(await input.authorization.resolveContext()), { policy: current.key });
       if (!grant) throw new BudgetError('FORBIDDEN');
       const revalidateConfiguration = async () => {
+        await revalidateSelection?.();
         const ownerColumns = aiPersistenceScopeColumns(proposed.config.configurationScope);
         const owner = await input.db.aiScope.findFirst({ where: ownerColumns });
         const profile = await input.db.aiProviderProfile.findFirst({ where: { id: proposed.config.configId,
