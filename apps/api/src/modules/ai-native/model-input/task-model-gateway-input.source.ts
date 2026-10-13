@@ -11,7 +11,7 @@ import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from '../runner/ai-task-r
 import type { PrismaTaskPlanInputSource } from '../runner/prisma-task-plan-input.source';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, taskModelConfiguration, taskModelIdentity, taskModelIntent,
-  taskModelMaterialSchema, taskImageMaterialSchema, taskAudioMaterialSchema, taskModelMediaSchema, taskModelFingerprint, type TaskModelInput, type TaskModelKind } from './task-model-input';
+  taskModelMaterialSchema, taskImageMaterialSchema, taskAudioMaterialSchema, taskModelMediaSchema, taskModelFingerprint, taskModelPolicy, taskModelCapabilities, type TaskModelInput, type TaskModelKind } from './task-model-input';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);
@@ -32,6 +32,7 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
     runtime: PublicGatewayRuntime, scene: GatewayTextIntentBinding, priceVersion: string,
   private readonly clock: () => Date = () => new Date(), private readonly kind?: TaskModelKind) {
     this.scene = gatewayTextIntentBindingSchema.parse(structuredClone(scene));
+    taskModelPolicy(this.policy);
     this.priceVersion = id.max(64).parse(priceVersion);
     if (typeof inputs?.publishModelInput !== 'function' || typeof inputs?.readModelForExecution !== 'function'
       || typeof execution?.authorize !== 'function' || typeof runtime?.ports?.routing?.resolve !== 'function'
@@ -44,7 +45,10 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
     } }, verifyEvidence: runtime.verifyEvidence.bind(runtime) };
   }
   private get tool() { return this.kind === 'image' ? TASK_IMAGE_MODEL_TOOL : this.kind === 'audio' ? TASK_AUDIO_MODEL_TOOL : TASK_TEXT_MODEL_TOOL; }
-  private get policy() { return { ...this.scene, ...(this.kind ? { kind: this.kind } : {}) }; }
+  private get policy() {
+    const { routeScene: _, ...policy } = this.scene;
+    return taskModelPolicy({ ...policy, ...(this.kind ? { kind: this.kind } : {}) });
+  }
   private async media(context: AiExecutionContext, intent: TaskModelInput['intent'], signal = new AbortController().signal) {
     const prepared = await prepareGatewayIntent(intent, { sceneCode: this.scene.sceneCode, maxOutputTokens: this.scene.maxOutputTokens },
       'invoke', this.narrow(context), this.runtime.ports.media, signal);
@@ -71,13 +75,13 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
     return { tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId, actorId };
   }
   private async route(context: AiExecutionContext) {
-    const route = structuredClone(await this.runtime.ports.routing.resolve(this.narrow(context), this.kind ? ['text', this.kind === 'image' ? 'vision' : 'audio'] : ['text']));
+    const route = structuredClone(await this.runtime.ports.routing.resolve(this.narrow(context), taskModelCapabilities(this.policy)));
     await this.verifyRoute(context, route);
     return route;
   }
   private async verifyRoute(context: AiExecutionContext, route: GatewayRoutingResolution) {
     if (taskModelIdentity(route.context) !== taskModelIdentity(context) || route.scene !== this.scene.routeScene
-      || requestFingerprint(route.requiredCapabilities) !== requestFingerprint(this.kind ? ['text', this.kind === 'image' ? 'vision' : 'audio'] : ['text'])
+      || requestFingerprint(route.requiredCapabilities) !== requestFingerprint(taskModelCapabilities(this.policy))
       || await this.runtime.verifyEvidence(structuredClone(route), this.runtime.evidence) !== true) throw denied();
     taskModelConfiguration(route);
   }
@@ -95,7 +99,8 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
     const context = structuredClone(await this.execution.authorize(command.taskId));
     const route = await this.route(context);
     const input: TaskModelInput = { mode: 'invoke',
-      intent: taskModelIntent(command.taskId, command.lease.runId, command.registrationRef, this.scene.sceneCode, command.material, this.kind),
+      intent: taskModelIntent(command.taskId, command.lease.runId, command.registrationRef, this.scene.sceneCode, command.material, this.kind,
+        this.scene.orderExplainTool === true),
       configuration: taskModelConfiguration(route), priceVersion: this.priceVersion,
       routingHash: gatewayRoutingBinding(route), identityHash: taskModelIdentity(context) };
     if (this.kind) input.media = (await this.media(context, input.intent)).references;

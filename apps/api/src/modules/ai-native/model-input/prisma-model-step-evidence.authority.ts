@@ -5,7 +5,7 @@ import { AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-tas
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
 import type { AiTaskPlanEvidenceAuthority } from '../runner/prisma-task-run-evidence.repository';
 import { PrismaTaskStepEvidenceAuthority } from '../runner/prisma-task-step-evidence.authority';
-import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, parseTaskModelInput, taskModelFingerprint, taskModelIdentity, type TaskModelPolicy } from './task-model-input';
+import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, parseTaskModelInput, taskModelFingerprint, taskModelIdentity, taskModelPolicy, type TaskModelPolicy } from './task-model-input';
 import { isGatewayResult } from '../gateway-contract-validation';
 
 type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskResultArtifact'
@@ -25,7 +25,7 @@ export class PrismaModelStepEvidenceAuthority extends PrismaTaskStepEvidenceAuth
     if (typeof financial?.readDispatch !== 'function'
       || !['aiTaskActionInput', 'aiGatewayInvocation', 'aiGatewayAccountingReceipt', 'aiInvocationAdmission']
         .every(name => typeof (modelDb[name as keyof Db] as { findFirst?: unknown })?.findFirst === 'function')) throw unavailable();
-    this.policy = { sceneCode: policy.sceneCode, maxOutputTokens: policy.maxOutputTokens, ...(policy.kind ? { kind: policy.kind } : {}) };
+    this.policy = taskModelPolicy(policy);
   }
   protected override accepts(step: AiStep, operation: string) {
     return step.toolCode === (this.policy.kind === 'image' ? TASK_IMAGE_MODEL_TOOL : this.policy.kind === 'audio' ? TASK_AUDIO_MODEL_TOOL : TASK_TEXT_MODEL_TOOL)

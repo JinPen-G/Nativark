@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { AI_TEXT_MODEL_STEP_CODE, AI_IMAGE_MODEL_STEP_CODE, AI_AUDIO_MODEL_STEP_CODE, type AiExecutionContext, type AiGatewayConfigReferenceDraft, type AiGatewayIntentDraft, type AiTaskInputAnswerDraft } from '@rental-os/shared';
 import { isGatewayConfig, isGatewayIntent, isGatewayResult } from '../gateway-contract-validation';
-import { prepareGatewayTextIntent, type GatewayTextIntentPolicy } from '../gateway-intent';
+import { gatewayTextIntentPolicySchema, prepareGatewayTextIntent, type GatewayTextIntentPolicy } from '../gateway-intent';
 import type { GatewayRoutingResolution } from '../gateway-routing.service';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -13,6 +13,20 @@ export const TASK_AUDIO_MODEL_TOOL = AI_AUDIO_MODEL_STEP_CODE;
 export const isTaskModelTool = (value: string) => value === TASK_TEXT_MODEL_TOOL || value === TASK_IMAGE_MODEL_TOOL || value === TASK_AUDIO_MODEL_TOOL;
 export type TaskModelKind = 'image' | 'audio';
 export type TaskModelPolicy = GatewayTextIntentPolicy & { kind?: TaskModelKind };
+/** Capture server configuration, never flags supplied in model material. Keep
+ * the same policy through publication, fingerprinting and terminal evidence. */
+export function taskModelPolicy(value: TaskModelPolicy): TaskModelPolicy {
+  const { kind, ...raw } = structuredClone(value);
+  const parsed = gatewayTextIntentPolicySchema.parse(raw);
+  if ((kind !== undefined && kind !== 'image' && kind !== 'audio')
+    || parsed.structuredOutput || (kind && parsed.orderExplainTool)) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  return Object.freeze({ ...parsed, ...(kind ? { kind } : {}) });
+}
+export function taskModelCapabilities(value: TaskModelPolicy): Array<'text' | 'vision' | 'audio' | 'tools'> {
+  const policy = taskModelPolicy(value);
+  return policy.kind ? ['text', policy.kind === 'image' ? 'vision' : 'audio']
+    : policy.orderExplainTool ? ['text', 'tools'] : ['text'];
+}
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 export const taskModelMaterialSchema = z.object({
   messages: z.array(z.object({ role: z.enum(['system', 'user', 'assistant']),
@@ -50,6 +64,7 @@ export function taskModelIdentity({ requestId: _, authorizedAt: __, ...context }
 }
 
 export function parseTaskModelInput(value: unknown, policy: TaskModelPolicy) {
+  policy = taskModelPolicy(policy);
   const parsed = storedSchema.parse(structuredClone(value));
   if (!isGatewayIntent(parsed.intent) || !isGatewayConfig(parsed.configuration)) throw new ModelGatewayError('INVALID_REQUEST');
   const input = { ...parsed, intent: parsed.intent, configuration: parsed.configuration };
@@ -102,15 +117,18 @@ export function taskModelFingerprint(input: TaskModelInput, policy: TaskModelPol
       }) }));
     return requestFingerprint({ intent: input.intent, mode: input.mode, media });
   }
-  return prepareGatewayTextIntent(input.intent, { sceneCode: policy.sceneCode, maxOutputTokens: policy.maxOutputTokens }, input.mode).intentHash;
+  return prepareGatewayTextIntent(input.intent, taskModelPolicy(policy), input.mode).intentHash;
 }
 
 export function taskModelIntent(taskId: string, runId: string, registrationRef: string, sceneCode: string,
-  material: z.infer<typeof taskImageMaterialSchema> | z.infer<typeof taskAudioMaterialSchema>, kind?: TaskModelKind): AiGatewayIntentDraft {
+  material: z.infer<typeof taskImageMaterialSchema> | z.infer<typeof taskAudioMaterialSchema>, kind?: TaskModelKind,
+  orderExplainTool = false): AiGatewayIntentDraft {
+  if (kind && orderExplainTool) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
   return { draftVersion: 'ain-c03-draft-2',
     requestId: `model-${requestFingerprint({ taskId, runId, registrationRef })}`, sceneCode,
     messages: material.messages, maxOutputTokens: material.maxOutputTokens,
-    requiredFeatures: kind === 'image' ? ['text', 'image'] : kind === 'audio' ? ['text', 'audio'] : ['text'], optionalFeatures: [] };
+    requiredFeatures: kind === 'image' ? ['text', 'image'] : kind === 'audio' ? ['text', 'audio']
+      : orderExplainTool ? ['text', 'tools'] : ['text'], optionalFeatures: [] };
 }
 
 export function taskModelConfiguration(route: GatewayRoutingResolution): AiGatewayConfigReferenceDraft {

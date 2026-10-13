@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { AiScopeRepository } from '../ai-scope.repository';
 import { isGatewayConfig, isGatewayIntent } from '../gateway-contract-validation';
 import { prepareGatewayTextIntent } from '../gateway-intent';
-import { TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, parseTaskModelInput, taskModelFingerprint, taskModelIdentity } from '../model-input/task-model-input';
+import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, parseTaskModelInput, taskModelFingerprint, taskModelIdentity, taskModelPolicy, type TaskModelPolicy } from '../model-input/task-model-input';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import type { GatewayContext } from '../model-gateway.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
@@ -28,9 +28,11 @@ export interface RegisterGatewayInvocation {
 }
 
 export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSource {
+  private readonly modelPolicy?: TaskModelPolicy;
   constructor(private readonly db: Db, private readonly scopes: Pick<AiScopeRepository, 'resolveCurrent'>,
-    private readonly clock: () => Date = () => new Date()) {
+    private readonly clock: () => Date = () => new Date(), modelPolicy?: TaskModelPolicy) {
     if (typeof scopes?.resolveCurrent !== 'function' || typeof db?.$transaction !== 'function') throw new BudgetError('UNAVAILABLE');
+    if (modelPolicy) this.modelPolicy = taskModelPolicy(modelPolicy);
   }
   private now() {
     const now = this.clock();
@@ -120,6 +122,22 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
           if (input.mode !== textProbeMode(frozen.command)
             || requestFingerprint(input.intent) !== requestFingerprint(frozen.prepared.intent)) throw new BudgetError('FORBIDDEN');
           intentHash = frozen.prepared.intentHash;
+        } else if (step.toolCode === TASK_TEXT_MODEL_TOOL && this.modelPolicy) {
+          // Explicit server scene policy, not a flag inferred from Agent input.
+          // Original publication/plan permission remains the execution gate.
+          if (hasMedia || !step.inputRef || input.mode !== 'invoke' || !tx.aiTaskActionInput) throw new BudgetError('FORBIDDEN');
+          const saved = await tx.aiTaskActionInput.findFirst({ where: { id: step.inputRef, scopeId: step.scopeId,
+            taskId: step.taskId, runId: step.runId, toolCode: step.toolCode, toolVersion: step.toolVersion,
+            fingerprint: step.requestFingerprint } });
+          if (!saved || saved.id !== step.inputRef || saved.scopeId !== step.scopeId || saved.taskId !== step.taskId
+            || saved.runId !== step.runId || saved.toolCode !== step.toolCode || saved.toolVersion !== step.toolVersion
+            || saved.fingerprint !== step.requestFingerprint || saved.expiresAt <= this.now()) throw new BudgetError('FORBIDDEN');
+          const frozen = parseTaskModelInput(saved.payload, this.modelPolicy);
+          if (frozen.identityHash !== taskModelIdentity(principal.context)
+            || requestFingerprint(frozen.intent) !== requestFingerprint(input.intent)
+            || requestFingerprint(frozen.configuration) !== requestFingerprint(input.configuration)
+            || frozen.priceVersion !== input.priceVersion) throw new BudgetError('FORBIDDEN');
+          intentHash = taskModelFingerprint(frozen, this.modelPolicy);
         } else if (hasMedia) {
           if (![TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL].includes(step.toolCode as typeof TASK_IMAGE_MODEL_TOOL | typeof TASK_AUDIO_MODEL_TOOL) || !step.inputRef || input.mode !== 'invoke'
             || typeof tx.aiTaskActionInput?.findFirst !== 'function') throw new BudgetError('FORBIDDEN');

@@ -9,7 +9,7 @@ import type { AiApprovedOrderRouteAuthority } from '../approval-execution/approv
 import type { ApprovedOrderInputAuthority, ApprovedOrderInputReference } from '../order-task-input.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { gatewayTextIntentPolicySchema } from '../gateway-intent';
-import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, isTaskModelTool, parseTaskModelInput, taskModelFingerprint, type TaskModelPolicy } from '../model-input/task-model-input';
+import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, isTaskModelTool, parseTaskModelInput, taskModelFingerprint, taskModelPolicy, type TaskModelPolicy } from '../model-input/task-model-input';
 import { aiCatalogReadInputSchema } from '../catalog-read-facts.service';
 import { aiAvailabilityReadInputSchema } from '../availability-read-facts.service';
 import { aiTaskAccessFromContext, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
@@ -70,8 +70,7 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
       || (isTaskModelTool(toolCode) && !gatewayTextIntentPolicySchema.safeParse(modelPolicy && { sceneCode: modelPolicy.sceneCode, maxOutputTokens: modelPolicy.maxOutputTokens }).success)
       || (isTaskModelTool(toolCode) && ((toolCode === TASK_IMAGE_MODEL_TOOL ? 'image' : toolCode === TASK_AUDIO_MODEL_TOOL ? 'audio' : undefined) !== modelPolicy?.kind))
       || (toolCode === 'tenant.notifications.commit' && typeof settings?.verify !== 'function')) throw unavailable();
-    if (modelPolicy) this.modelPolicy = { ...gatewayTextIntentPolicySchema.parse({ sceneCode: modelPolicy.sceneCode,
-      maxOutputTokens: modelPolicy.maxOutputTokens }), ...(modelPolicy.kind ? { kind: modelPolicy.kind } : {}) };
+    if (modelPolicy) this.modelPolicy = taskModelPolicy(modelPolicy);
   }
 
   private fingerprint(payload: unknown) {

@@ -1,10 +1,10 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
+import { AI_TOOL_DRAFT_VERSION, type AiOrderExplainRequestDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError, type AiTaskRepository } from '../ai-task.repository';
 import { AiTaskResultRepository } from '../runner/ai-task-result.repository';
-import { isGatewayResult } from '../gateway-contract-validation';
-import { parseTaskModelInput, TASK_TEXT_MODEL_TOOL, taskModelFingerprint, taskModelIdentity } from '../model-input/task-model-input';
+import { isGatewayResult, isGatewayOrderExplainRequest } from '../gateway-contract-validation';
+import { parseTaskModelInput, TASK_TEXT_MODEL_TOOL, taskModelFingerprint, taskModelIdentity, taskModelPolicy } from '../model-input/task-model-input';
 import type { GatewayTextIntentBinding, GatewayTextIntentPolicy } from '../gateway-intent';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
@@ -128,7 +128,9 @@ export class AiOriginalSceneResultService {
     private readonly scenes: Scenes, policy: GatewayTextIntentBinding, clock: () => Date = () => new Date(),
     private readonly knowledge?: AiOriginalSceneKnowledge) {
     this.results = new AiTaskResultRepository(db, tasks, clock);
-    this.policy = { sceneCode: policy.sceneCode, maxOutputTokens: policy.maxOutputTokens };
+    this.policy = taskModelPolicy({ sceneCode: policy.sceneCode, maxOutputTokens: policy.maxOutputTokens,
+      ...(policy.orderExplainTool !== undefined ? { orderExplainTool: policy.orderExplainTool } : {}),
+      ...(policy.structuredOutput !== undefined ? { structuredOutput: policy.structuredOutput } : {}) });
   }
 
   async read(value: unknown) {
@@ -155,6 +157,7 @@ export class AiOriginalSceneResultService {
       text: { value: string; trust: 'unverified_model_text_not_execution_evidence' } | null;
       nextAction: string; automaticRetry?: false; materialHash?: string; callId?: string; facts?: unknown;
       sources?: z.infer<typeof sourceSchema>[]; knowledge?: AiOriginalSceneKnowledgeSnapshot;
+      toolCandidates?: { requests: AiOrderExplainRequestDraft[]; execution: 'not_attempted'; authorization: 'not_granted' };
       citationValidation?: 'supplied_sources_only_text_not_validated' };
     if (result.status !== 'succeeded') {
       output = { ...base, status: result.status, text: null,
@@ -182,7 +185,12 @@ export class AiOriginalSceneResultService {
         const gateway = result.payload;
         if (!isGatewayResult(gateway) || gateway.status !== 'completed' || gateway.usage.kind !== 'reported'
           || gateway.requestId !== invocation.callId || requestFingerprint(gateway.actual) !== invocation.configurationHash
-          || gateway.toolRequests.length !== 0 || Buffer.byteLength(gateway.text, 'utf8') > 131072) throw unavailable();
+          || Buffer.byteLength(gateway.text, 'utf8') > 131072) throw unavailable();
+        const orderId = original.request.sceneCode === 'order_explanation' ? original.request.input.orderId : null;
+        if (gateway.toolRequests.length && (!this.policy.orderExplainTool || !orderId
+          || !input.intent.requiredFeatures.includes('tools') || gateway.toolRequests.length > 8
+          || gateway.toolRequests.some(candidate => !isGatewayOrderExplainRequest(candidate)
+            || candidate.input.orderId !== orderId))) throw denied();
         const envelope = readOriginalSceneEnvelope(input);
         if (!provenance.continuation && envelope.clarifications) throw denied();
         if (provenance.continuation) {
@@ -195,7 +203,7 @@ export class AiOriginalSceneResultService {
         if (receiptFingerprint(envelope.original) !== receiptFingerprint(original.receipt)
           || requestFingerprint(envelope.facts) !== envelope.materialHash) throw denied();
         return { text: gateway.text, material: envelope.facts, materialHash: envelope.materialHash,
-          callId: invocation.callId, knowledge: envelope.knowledge };
+          callId: invocation.callId, knowledge: envelope.knowledge, toolRequests: structuredClone(gateway.toolRequests) };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
       // Re-read through the actual scene's authority, including independent
       // finance visibility or user-selected opening sections. Never reuse an
@@ -215,6 +223,8 @@ export class AiOriginalSceneResultService {
         ? { ...base, status: 'available', text: { value: frozen.text, trust: 'unverified_model_text_not_execution_evidence' },
           materialHash: frozen.materialHash, callId: frozen.callId, facts: current, sources: isOrder ? orderSources(frozen.material) : [],
           ...(frozen.knowledge ? { knowledge: frozen.knowledge } : {}),
+          ...(frozen.toolRequests.length ? { toolCandidates: { requests: frozen.toolRequests,
+            execution: 'not_attempted' as const, authorization: 'not_granted' as const } } : {}),
           citationValidation: 'supplied_sources_only_text_not_validated', nextAction: 'read_only' }
         : { ...base, status: 'stale', text: null, nextAction: 'reread_facts', automaticRetry: false };
     }

@@ -10,7 +10,7 @@ import { PrismaTaskGatewayInvocationPreparation } from '../runner/prisma-task-ga
 import { PrismaGatewayInvocationBindings } from '../budget/prisma-gateway-invocation-bindings';
 import type { PublicGatewayRuntime } from '../public-ai-gateway.service';
 import type { GatewayTextIntentBinding } from '../gateway-intent';
-import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, type TaskModelKind } from './task-model-input';
+import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, taskModelPolicy, type TaskModelKind } from './task-model-input';
 import { TaskModelGatewayInputSource } from './task-model-gateway-input.source';
 import { PrismaModelStepEvidenceAuthority } from './prisma-model-step-evidence.authority';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
@@ -43,8 +43,10 @@ export function composeCurrentAuthorizedTaskModelInput(input: TaskModelCompositi
   if (input.scene.code !== input.gatewayScene.sceneCode) throw new Error('Model scene binding mismatch');
   const clock = input.clock ?? (() => new Date());
   const tool = input.kind === 'image' ? TASK_IMAGE_MODEL_TOOL : input.kind === 'audio' ? TASK_AUDIO_MODEL_TOOL : TASK_TEXT_MODEL_TOOL;
-  const modelPolicy = { sceneCode: input.gatewayScene.sceneCode, maxOutputTokens: input.gatewayScene.maxOutputTokens,
-    ...(input.kind ? { kind: input.kind } : {}) };
+  const modelPolicy = taskModelPolicy({ sceneCode: input.gatewayScene.sceneCode, maxOutputTokens: input.gatewayScene.maxOutputTokens,
+    ...(input.gatewayScene.orderExplainTool !== undefined ? { orderExplainTool: input.gatewayScene.orderExplainTool } : {}),
+    ...(input.gatewayScene.structuredOutput !== undefined ? { structuredOutput: input.gatewayScene.structuredOutput } : {}),
+    ...(input.kind ? { kind: input.kind } : {}) });
   const source = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, clock,
     tool, undefined, modelPolicy);
   const scopes = new PrismaTaskExecutionScopeAuthority(authorization.tasks, input.db);
@@ -52,7 +54,7 @@ export function composeCurrentAuthorizedTaskModelInput(input: TaskModelCompositi
   const registrations = new AiStepRegistrationRepository(input.db, source, clock);
   const inputs = new TaskModelGatewayInputSource(input.db, source, authorization.execution, input.runtime,
     input.gatewayScene, input.priceVersion, clock, input.kind);
-  const bindings = new PrismaGatewayInvocationBindings(input.db, authorization.scopes, clock);
+  const bindings = new PrismaGatewayInvocationBindings(input.db, authorization.scopes, clock, modelPolicy);
   const invocations = new PrismaTaskGatewayInvocationPreparation(bindings, inputs);
   const createTransitionAuthority = (financial: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>) =>
     new PrismaModelStepEvidenceAuthority(input.db, authorization.authority, source, modelPolicy, financial, clock);

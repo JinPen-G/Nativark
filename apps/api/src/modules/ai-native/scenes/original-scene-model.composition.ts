@@ -4,7 +4,7 @@ import { AI_TOOL_DRAFT_VERSION, AI_TASK_INPUT_DRAFT_VERSION, isAiTaskInputSubmis
 import { AiTaskRepositoryError, aiTaskAccessFromContext } from '../ai-task.repository';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './original-scenes.composition';
 import { composePersistedTaskModelInput } from '../model-input/persisted-task-model-input.composition';
-import { TASK_TEXT_MODEL_TOOL, taskModelMaterialSchema, parseTaskModelInput, taskModelFingerprint } from '../model-input/task-model-input';
+import { TASK_TEXT_MODEL_TOOL, taskModelMaterialSchema, parseTaskModelInput, taskModelFingerprint, taskModelPolicy } from '../model-input/task-model-input';
 import { composeOriginalSceneKnowledge, continueOriginalSceneMaterial, readOriginalSceneEnvelope, type AiOriginalSceneKnowledgeOptions } from './original-scene-knowledge';
 import { readTaskModelRunOrigin, type PrismaTaskInputRepository } from '../task-input/prisma-task-input.repository';
 import { isGatewayResult } from '../gateway-contract-validation';
@@ -50,7 +50,8 @@ const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDependencies) {
   const scene = Object.freeze(structuredClone(dependencies.scene));
   const gatewayScene = gatewayTextIntentBindingSchema.parse(structuredClone(dependencies.gatewayScene));
-  const modelPolicy = { sceneCode: gatewayScene.sceneCode, maxOutputTokens: gatewayScene.maxOutputTokens };
+  const { routeScene: _routeScene, ...serverPolicy } = gatewayScene;
+  const modelPolicy = taskModelPolicy(serverPolicy);
   const scenes = composeAiOriginalScenes(dependencies);
   const clock = dependencies.clock ?? (() => new Date());
   const knowledge = dependencies.knowledge ? composeOriginalSceneKnowledge(dependencies.knowledge, dependencies, clock) : undefined;
