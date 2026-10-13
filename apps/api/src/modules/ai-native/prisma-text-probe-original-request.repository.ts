@@ -119,6 +119,16 @@ export class PrismaTextProbeOriginalRequestRepository implements TextCapabilityP
     if (!row || row.id !== inputRef) throw unavailable();
     return this.checked(row);
   }
+  async readPolicyExpiry(requestKey: string) {
+    if (!id.max(128).safeParse(requestKey).success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const before = await this.access();
+    const row = await this.db.aiTaskOriginalRequest.findFirst({ where: { ...before.owner, requestKey,
+      contractVersion: version, sceneCode: TEXT_PROBE_SCENE } });
+    if (!row) throw unavailable();
+    await this.checked(row);
+    if ((await this.access()).binding !== before.binding) throw denied();
+    return row.expiresAt.toISOString();
+  }
   private async historicalAccess() {
     if (typeof this.input.management?.authorize !== 'function') throw unavailable();
     const before = await this.access(), context = before.context;

@@ -6,22 +6,30 @@ export const AI_TEXT_CAPABILITY_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/text-capability', method: 'POST',
   prepare: 'prepare', publish: 'original/publish', readOriginal: 'original/read',
   createTask: 'task/create', readTask: 'task/read', start: 'task/start', inspect: 'task/inspect',
+  configureTaskAction: 'task/action/configure', readTaskAction: 'task/action/read',
   cancel: 'task/cancel', reconcile: 'task/reconcile', readCapabilityReceipt: 'receipt/read', preflight: 'preflight', readHistory: 'history/read',
 });
 export type AiTextCapabilityRequestDraft = { requestKey: string };
 /** Selection is constrained by the server whitelist and current management
  * authorization; this field cannot select a provider or confer capability. */
 export type AiTextCapabilityPrepareRequestDraft = AiTextCapabilityRequestDraft & {
-  capability?: 'text' | 'streaming' | 'vision' | 'structured_output' | 'tools';
+  capability?: 'text' | 'streaming' | 'vision' | 'audio' | 'structured_output' | 'tools';
 };
 export type AiTextCapabilityCancelRequestDraft = AiTextCapabilityRequestDraft & { expectedRevision: number };
+export type AiTextCapabilityActionRequestDraft = AiTextCapabilityRequestDraft & { operation: string };
+export type AiTextCapabilityConfigureActionDraft = AiTextCapabilityActionRequestDraft & { expectedRevision: number | null };
+type ActionPolicy = { taskId: string; operation: string; revision: number; requiredPermissions: readonly string[]; expiresAt: string };
 type Task = { taskId: string; runId: string; status: string; revision: number; replayed: boolean };
 type Run = { kind: 'not_started'; reason: string } | { kind: 'run_outcome'; outcome: {
   status: string; completedSteps: number; cleanupFailed: number;
 } };
 type RunResponse = AiTextCapabilityRequestDraft & Run & { retryable: false; semantics: 'task_outcome_not_capability_evidence' };
 export type AiTextCapabilityHttpResponsesDraft = {
-  prepare: AiTextCapabilityRequestDraft & { state: 'prepared'; capability: 'text' | 'streaming' | 'vision' | 'structured_output' | 'tools'; methodVersion: string;
+  configureTaskAction: AiTextCapabilityRequestDraft & { state: 'configured'; policy: ActionPolicy; retryable: false;
+    semantics: 'action_policy_not_dispatch_or_business_approval' };
+  readTaskAction: AiTextCapabilityRequestDraft & { state: 'observed' | 'not_observed'; policy: ActionPolicy | null; retryable: false;
+    semantics: 'action_policy_not_dispatch_or_business_approval' };
+  prepare: AiTextCapabilityRequestDraft & { state: 'prepared'; capability: 'text' | 'streaming' | 'vision' | 'audio' | 'structured_output' | 'tools'; methodVersion: string;
     configurationRevision: number; execution: 'not_started' };
   publish: AiTextCapabilityRequestDraft & { state: 'stored'; inputRef: string; inputHash: string; replayed: boolean; retryable: false };
   readOriginal: AiTextCapabilityRequestDraft & ({ state: 'stored'; inputRef: string; inputHash: string; retryable: false }
@@ -34,7 +42,7 @@ export type AiTextCapabilityHttpResponsesDraft = {
     run: { runId: string; status: string }; semantics: 'task_outcome_not_capability_evidence' };
   cancel: AiTextCapabilityRequestDraft & { status: 'cancel_requested'; revision: number; retryable: false };
   reconcile: RunResponse;
-  readCapabilityReceipt: AiTextCapabilityRequestDraft & { capability: 'text' | 'streaming' | 'vision' | 'structured_output' | 'tools'; status: 'supported' | 'unsupported' | 'unverified';
+  readCapabilityReceipt: AiTextCapabilityRequestDraft & { capability: 'text' | 'streaming' | 'vision' | 'audio' | 'structured_output' | 'tools'; status: 'supported' | 'unsupported' | 'unverified';
     receiptId?: string; evidenceHash?: string; reason?: string; observation: null | { methodVersion: string; mode: 'mock' | 'live';
       configurationRevision: number; checkedAt: string; expiresAt: string };
     retryable: false; semantics: 'original_receipt_not_task_outcome' };
@@ -47,13 +55,13 @@ export type AiTextCapabilityHttpResponsesDraft = {
     observation: null | { receiptId: string; methodVersion: string; mode: 'mock' | 'live'; checkedAt: string; expiresAt: string;
       validity: 'expired' | 'historical_only'; matched: boolean; reportedUsage: null | { inputTokens: number; outputTokens: number } };
   };
-  preflight: AiTextCapabilityRequestDraft & { capability: 'text' | 'streaming' | 'vision' | 'structured_output' | 'tools'; allowed: boolean; missing: boolean; stale: boolean;
+  preflight: AiTextCapabilityRequestDraft & { capability: 'text' | 'streaming' | 'vision' | 'audio' | 'structured_output' | 'tools'; allowed: boolean; missing: boolean; stale: boolean;
     semantics: 'current_preflight_not_dispatch_permission' };
 };
 export type AiTextCapabilityHttpErrorDraft = {
   code: 'AI_INVALID_INPUT' | 'AI_ACCESS_DENIED' | 'AI_SCOPE_CHANGED' | 'AI_RESOURCE_UNAVAILABLE'
     | 'AI_REVISION_CONFLICT' | 'AI_STORAGE_UNAVAILABLE' | 'AI_RESULT_UNKNOWN';
-  retryable: false; nextAction?: 'readOriginal' | 'readTask' | 'inspect' | 'reconcile' | 'readCapabilityReceipt' | 'readHistory';
+  retryable: false; nextAction?: 'readOriginal' | 'readTask' | 'readTaskAction' | 'inspect' | 'reconcile' | 'readCapabilityReceipt' | 'readHistory';
 };
 const id: AiLeafSchemaDraft = { ...text(128), pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' };
 const hash: AiLeafSchemaDraft = { ...text(64, 64), pattern: '^[a-f0-9]{64}$' };
@@ -61,6 +69,8 @@ const bool: AiLeafSchemaDraft = { type: 'boolean' }, no: AiLeafSchemaDraft = { t
 const revision = int(1, 4294967295), key = { requestKey: id };
 const task = { taskId: id, runId: id, status: text(64), revision, replayed: bool };
 const stored = { ...key, state: choice('stored'), inputRef: id, inputHash: hash, retryable: no };
+const actionPolicy = obj({ taskId: id, operation: text(64), revision,
+  requiredPermissions: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: text(191) }, expiresAt: time });
 const run = { oneOf: [
   obj({ ...key, kind: choice('not_started'), reason: text(64), retryable: no, semantics: choice('task_outcome_not_capability_evidence') }),
   obj({ ...key, kind: choice('run_outcome'), outcome: obj({ status: text(64), completedSteps: int(0, 10000), cleanupFailed: int(0, 10000) }),
@@ -68,9 +78,17 @@ const run = { oneOf: [
 ] } satisfies AiLeafSchemaDraft;
 export const AI_TEXT_CAPABILITY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiTextCapabilityRequestDraft: obj(key),
-  AiTextCapabilityPrepareRequestDraft: obj({ ...key, capability: choice('text', 'streaming', 'vision', 'structured_output', 'tools') }, ['requestKey']),
+  AiTextCapabilityActionRequestDraft: obj({ ...key, operation: text(64) }),
+  AiTextCapabilityConfigureActionDraft: obj({ ...key, operation: text(64), expectedRevision: {
+    oneOf: [int(1, 4294967293), { type: 'null' }] } }),
+  AiTextCapabilityConfigureActionResponseDraft: obj({ ...key, state: choice('configured'), policy: actionPolicy,
+    retryable: no, semantics: choice('action_policy_not_dispatch_or_business_approval') }),
+  AiTextCapabilityReadActionResponseDraft: obj({ ...key, state: choice('observed', 'not_observed'),
+    policy: { oneOf: [actionPolicy, { type: 'null' }] }, retryable: no,
+    semantics: choice('action_policy_not_dispatch_or_business_approval') }),
+  AiTextCapabilityPrepareRequestDraft: obj({ ...key, capability: choice('text', 'streaming', 'vision', 'audio', 'structured_output', 'tools') }, ['requestKey']),
   AiTextCapabilityCancelRequestDraft: obj({ ...key, expectedRevision: int(1, 4294967294) }),
-  AiTextCapabilityPrepareResponseDraft: obj({ ...key, state: choice('prepared'), capability: choice('text', 'streaming', 'vision', 'structured_output', 'tools'), methodVersion: text(64),
+  AiTextCapabilityPrepareResponseDraft: obj({ ...key, state: choice('prepared'), capability: choice('text', 'streaming', 'vision', 'audio', 'structured_output', 'tools'), methodVersion: text(64),
     configurationRevision: int(0, 4294967295), execution: choice('not_started') }),
   AiTextCapabilityPublishResponseDraft: obj({ ...stored, replayed: bool }),
   AiTextCapabilityReadOriginalResponseDraft: { oneOf: [obj(stored), obj({ ...key, state: choice('not_observed'), retryable: no })] },
@@ -82,7 +100,7 @@ export const AI_TEXT_CAPABILITY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> 
     task: obj({ taskId: id, revision, status: text(64), cancelRequestedAt: { oneOf: [time, { type: 'null' }] } }),
     run: obj({ runId: id, status: text(64) }), semantics: choice('task_outcome_not_capability_evidence') }),
   AiTextCapabilityCancelResponseDraft: obj({ ...key, status: choice('cancel_requested'), revision, retryable: no }),
-  AiTextCapabilityReceiptResponseDraft: obj({ ...key, capability: choice('text', 'streaming', 'vision', 'structured_output', 'tools'), status: choice('supported', 'unsupported', 'unverified'),
+  AiTextCapabilityReceiptResponseDraft: obj({ ...key, capability: choice('text', 'streaming', 'vision', 'audio', 'structured_output', 'tools'), status: choice('supported', 'unsupported', 'unverified'),
     receiptId: id, evidenceHash: hash, reason: text(64), observation: { oneOf: [{ type: 'null' }, obj({
       methodVersion: text(64), mode: choice('mock', 'live'), configurationRevision: int(1, 4294967295), checkedAt: time, expiresAt: time })] },
     retryable: no, semantics: choice('original_receipt_not_task_outcome') },
@@ -98,9 +116,9 @@ export const AI_TEXT_CAPABILITY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> 
       checkedAt: time, expiresAt: time, validity: choice('expired', 'historical_only'), matched: bool,
       reportedUsage: { oneOf: [{ type: 'null' }, obj({ inputTokens: int(1, Number.MAX_SAFE_INTEGER), outputTokens: int(1, Number.MAX_SAFE_INTEGER) })] } })] },
   }),
-  AiTextCapabilityPreflightResponseDraft: obj({ ...key, capability: choice('text', 'streaming', 'vision', 'structured_output', 'tools'), allowed: bool, missing: bool, stale: bool,
+  AiTextCapabilityPreflightResponseDraft: obj({ ...key, capability: choice('text', 'streaming', 'vision', 'audio', 'structured_output', 'tools'), allowed: bool, missing: bool, stale: bool,
     semantics: choice('current_preflight_not_dispatch_permission') }),
   AiTextCapabilityHttpErrorDraft: obj({ code: choice('AI_INVALID_INPUT', 'AI_ACCESS_DENIED', 'AI_SCOPE_CHANGED', 'AI_RESOURCE_UNAVAILABLE',
     'AI_REVISION_CONFLICT', 'AI_STORAGE_UNAVAILABLE', 'AI_RESULT_UNKNOWN'), retryable: no,
-    nextAction: choice('readOriginal', 'readTask', 'inspect', 'reconcile', 'readCapabilityReceipt', 'readHistory') }, ['code', 'retryable']),
+    nextAction: choice('readOriginal', 'readTask', 'readTaskAction', 'inspect', 'reconcile', 'readCapabilityReceipt', 'readHistory') }, ['code', 'retryable']),
 };

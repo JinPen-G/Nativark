@@ -158,7 +158,7 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
   async verify(input: RecordCapabilityEvidenceInput): Promise<boolean> {
     const proof = capabilityVerificationSchema.safeParse(input.details?.verification);
     if (!proof.success || proof.data.evidence !== 'live'
-      || !['text', 'streaming', 'vision', 'structured_output', 'tools'].includes(input.capability) || proof.data.capability !== input.capability || input.source !== 'connection_test'
+      || !['text', 'streaming', 'vision', 'audio', 'structured_output', 'tools'].includes(input.capability) || proof.data.capability !== input.capability || input.source !== 'connection_test'
       || typeof input.details?.receiptId !== 'string') return false;
     const row = await this.read(input.details.receiptId), now = this.clock();
     if (!row || !row.observation || !matchesProbeProfile(row.descriptor, input.profile)
@@ -184,8 +184,9 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
 
 /** Shared by the probe producer and normal Gateway routing. Reading this
  * service never dispatches a probe; only the original text and explicit stream
- * and generated vision/strict JSON/controlled tool challenges are accepted. Audio evidence
- * stays fail-closed; this is not recognition-accuracy or business approval. */
+ * and generated vision/audio pulse/strict JSON/controlled tool challenges are accepted.
+ * Audio evidence proves the versioned bounded input challenge only, not speech
+ * recognition accuracy or business approval. Missing original evidence stays closed. */
 export function createPersistedTextCapabilityEvidence(db: TextProbeReceiptDb
   & ConstructorParameters<typeof PrismaProviderCapabilityEvidenceRepository>[0], clock: () => Date = () => new Date()) {
   return new ProviderCapabilityService(new PrismaProviderCapabilityEvidenceRepository(db),

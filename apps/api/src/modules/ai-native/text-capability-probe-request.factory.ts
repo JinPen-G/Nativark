@@ -11,6 +11,8 @@ import { textProbeCommandSchema, type TextProbeCapability } from './text-capabil
 import { TextProbeOriginalRequestUnknownError } from './prisma-text-probe-original-request.repository';
 import { textProbeTaskCreationKey } from './text-capability-probe-task.composition';
 import type { AiTaskApplicationStartResult } from './runner/prisma-task-application';
+import type { AiTaskRepositoryOperation } from './ai-task.repository';
+import { taskActionPolicyOperations } from './prisma-task-action-policy.repository';
 
 export type TextCapabilityHttpRequest = { headers: { authorization?: unknown } };
 export type TextCapabilityRequestDependencies = Omit<AuthorizedTextProbeWorkflowDependencies, 'credentials' | 'pricing'> & {
@@ -19,6 +21,9 @@ export type TextCapabilityRequestDependencies = Omit<AuthorizedTextProbeWorkflow
   probeCapability?: TextProbeCapability;
   /** Optional server-owned selection whitelist. Default remains one kind. */
   probeCapabilities?: readonly TextProbeCapability[];
+  /** Explicit server policy templates, never a default task-creation grant. */
+  taskActionPolicies?: readonly { operation: AiTaskRepositoryOperation; requiredPermissions: readonly string[] }[];
+  taskActionPolicyTtlMs?: number;
 };
 export type TextCapabilityRequest = {
   [K in keyof AiTextCapabilityHttpResponsesDraft]: (value: unknown, signal?: AbortSignal) => Promise<AiTextCapabilityHttpResponsesDraft[K]>;
@@ -27,6 +32,8 @@ const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/
 const requestSchema = z.object({ requestKey: textProbeCommandSchema.shape.operationId }).strict();
 const prepareSchema = requestSchema.extend({ capability: textProbeCommandSchema.shape.capability }).strict();
 const cancelSchema = requestSchema.extend({ expectedRevision: z.number().int().min(1).max(4294967294) }).strict();
+const actionReadSchema = requestSchema.extend({ operation: z.string().min(1).max(64) }).strict();
+const actionConfigureSchema = actionReadSchema.extend({ expectedRevision: z.number().int().min(1).max(4294967293).nullable() }).strict();
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 function taskSummary(task: { taskId: string; runId: string; status: string; revision: number; replayed: boolean }) {
@@ -49,10 +56,21 @@ export class TextCapabilityProbeRequestFactory {
       || [dependencies.auth?.resolveAccessContext, dependencies.guard?.canActivate, dependencies.db?.$transaction]
         .some(method => typeof method !== 'function')) throw unavailable();
     const capabilities = [...(dependencies.probeCapabilities ?? [dependencies.probeCapability ?? 'text'])];
-    if (!capabilities.length || capabilities.length > 5 || new Set(capabilities).size !== capabilities.length
+    if (!capabilities.length || capabilities.length > 6 || new Set(capabilities).size !== capabilities.length
       || capabilities.some(value => !textProbeCommandSchema.shape.capability.unwrap().safeParse(value).success)
       || !capabilities.includes(dependencies.probeCapability ?? 'text')) throw unavailable();
+    const policies = structuredClone(dependencies.taskActionPolicies ?? []);
+    const ttl = dependencies.taskActionPolicyTtlMs ?? 60000;
+    if (!Number.isSafeInteger(ttl) || ttl < 1 || ttl > 120000 || policies.length > taskActionPolicyOperations.length
+      || new Set(policies.map(policy => policy.operation)).size !== policies.length
+      || policies.some(policy => !taskActionPolicyOperations.includes(policy.operation)
+        || !Array.isArray(policy.requiredPermissions) || !policy.requiredPermissions.length || policy.requiredPermissions.length > 64
+        || new Set(policy.requiredPermissions).size !== policy.requiredPermissions.length
+        || policy.requiredPermissions.some(permission => typeof permission !== 'string'
+          || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(permission)))) throw unavailable();
     this.dependencies = { ...dependencies, probeCapabilities: Object.freeze(capabilities),
+      taskActionPolicies: Object.freeze(policies.map(policy => Object.freeze({ ...policy,
+        requiredPermissions: Object.freeze([...policy.requiredPermissions]) }))), taskActionPolicyTtlMs: ttl,
       host: structuredClone(dependencies.host), pricing: { ...dependencies.pricing } };
   }
   open(request: TextCapabilityHttpRequest): TextCapabilityRequest {
@@ -114,7 +132,31 @@ export class TextCapabilityProbeRequestFactory {
       if (!dependencies.probeCapabilities!.includes(value)) throw unavailable();
       return value;
     };
+    const actionTask = async (requestKey: string, operation: string) => {
+      const template = dependencies.taskActionPolicies!.find(policy => policy.operation === operation);
+      if (!template) throw unavailable();
+      const found = await root.workflow.readCreation(await originalKey(requestKey));
+      if (!found.task) throw unavailable();
+      return { taskId: found.task.taskId, template };
+    };
     return Object.freeze({
+      configureTaskAction: value => run(actionConfigureSchema, value, async ({ requestKey, operation, expectedRevision }) => {
+        const target = await actionTask(requestKey, operation);
+        const originalExpiry = Date.parse(await root.workflow.readOriginalPolicyExpiry(requestKey));
+        const now = (dependencies.clock ?? (() => new Date()))().getTime();
+        if (!Number.isFinite(now) || !Number.isFinite(originalExpiry) || originalExpiry <= now) throw unavailable();
+        const policy = await root.workflow.taskPolicies.put({ taskId: target.taskId, operation: target.template.operation,
+          requiredPermissions: target.template.requiredPermissions,
+          expiresAt: new Date(Math.min(originalExpiry, now + dependencies.taskActionPolicyTtlMs!)) }, expectedRevision);
+        return { requestKey, state: 'configured' as const, policy, retryable: false as const,
+          semantics: 'action_policy_not_dispatch_or_business_approval' as const };
+      }, true),
+      readTaskAction: value => run(actionReadSchema, value, async ({ requestKey, operation }) => {
+        const target = await actionTask(requestKey, operation);
+        const result = await root.workflow.taskPolicies.read(target.taskId, target.template.operation);
+        return { requestKey, state: result.state, policy: result.state === 'observed' ? result.policy : null,
+          retryable: false as const, semantics: 'action_policy_not_dispatch_or_business_approval' as const };
+      }),
       prepare: value => run(prepareSchema, value, async ({ requestKey, capability }) => {
         const kind = selected(capability);
         if ((await root.workflow.readOriginal(requestKey)).state === 'stored'
@@ -201,6 +243,7 @@ export class TextCapabilityProbeRequestFactory {
         return { requestKey, capability: result.required.includes('tools') ? 'tools' as const
           : result.required.includes('structured_output') ? 'structured_output' as const
           : result.required.includes('vision') ? 'vision' as const
+          : result.required.includes('audio') ? 'audio' as const
           : result.required.includes('streaming') ? 'streaming' as const : 'text' as const, allowed: result.allowed,
           missing: result.missing.length > 0, stale: result.stale.length > 0,
           semantics: 'current_preflight_not_dispatch_permission' as const };
