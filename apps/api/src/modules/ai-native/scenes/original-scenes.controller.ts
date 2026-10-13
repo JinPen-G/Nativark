@@ -140,6 +140,10 @@ export class AiOriginalSceneModelActionsController {
   readExecution(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => this.model.readExecution(request, body));
   }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readRecoverySnapshot) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readRecoverySnapshot(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.readRecoverySnapshot(request, body));
+  }
   /** Reclaim the original persisted run only. No fresh plan or invocation. */
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.recover)
   recover(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {

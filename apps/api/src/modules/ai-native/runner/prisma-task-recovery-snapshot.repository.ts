@@ -22,7 +22,8 @@ const fence = (value: Prisma.Decimal) => {
 };
 const ref = (value: string | null) => value === null ? null : id.parse(value);
 const taskSelect = { id: true, scopeId: true, status: true, revision: true, contractVersion: true, eventCursor: true, cancelRequestedAt: true } satisfies Prisma.AiTaskSelect;
-const runSelect = { id: true, scopeId: true, taskId: true, status: true, revision: true, fencingToken: true } satisfies Prisma.AiRunSelect;
+const runSelect = { id: true, scopeId: true, taskId: true, actorKind: true, actorId: true,
+  status: true, revision: true, fencingToken: true } satisfies Prisma.AiRunSelect;
 const planSelect = { scopeId: true, taskId: true, runId: true, planHash: true, policyVersion: true } satisfies Prisma.AiTaskRunPlanSelect;
 const stepSelect = { id: true, scopeId: true, taskId: true, runId: true, sequence: true, revision: true, actionId: true,
   requestFingerprint: true, toolCode: true, toolVersion: true, status: true, effect: true, inputRef: true, resultRef: true, errorCode: true } satisfies Prisma.AiStepSelect;
@@ -58,9 +59,11 @@ export class PrismaTaskRecoverySnapshotRepository implements AiTaskRecoverySnaps
         if (task.id !== input.taskId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         if (task.contractVersion !== AI_TASK_DRAFT_VERSION) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
         const key = { scopeId: task.scopeId, taskId: task.id, runId: input.runId };
-        const run = await tx.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: key.runId }, select: runSelect });
+        const run = await tx.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: key.runId,
+          actorKind: initial.actorKind, actorId: initial.actorId }, select: runSelect });
         if (!run) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-        if (run.scopeId !== key.scopeId || run.taskId !== key.taskId || run.id !== key.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        if (run.scopeId !== key.scopeId || run.taskId !== key.taskId || run.id !== key.runId
+          || run.actorKind !== initial.actorKind || run.actorId !== initial.actorId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         const plan = await tx.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key }, select: planSelect });
         const steps = await tx.aiStep.findMany({ where: key, select: stepSelect, orderBy: { sequence: 'asc' }, take: 1001 });
         const artifacts = await tx.aiTaskResultArtifact.findMany({ where: key, select: artifactSelect, orderBy: { id: 'asc' }, take: 2001 });

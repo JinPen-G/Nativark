@@ -24,6 +24,8 @@ import { taskActionPolicyOperations, type AiTaskActionPolicyMutation } from '../
 import { PrismaTaskTakeoverRepository } from '../runner/prisma-task-takeover.repository';
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import { PrismaTaskPlanPolicyRepository } from '../runner/prisma-task-plan-policy.repository';
+import { PrismaTaskRecoverySnapshotRepository } from '../runner/prisma-task-recovery-snapshot.repository';
+import { AI_TASK_RECOVERY_READ_VERSION, type AiSceneModelRecoverySnapshotReadResponse } from '@rental-os/shared';
 
 export type AiSceneHttpRequest = { headers: { authorization?: unknown } };
 export type AiSceneRequestOptions = { enabled: boolean; audience: 'operator' | 'staff' };
@@ -221,6 +223,8 @@ export function composeRequestBoundOriginalTaskActionPolicies(
  * remain mandatory; a later clarification does not replace the referenced run. */
 export function composeRequestBoundOriginalTaskRecoveryReaders(
   dependencies: RequestBoundOriginalSceneDependencies, options: AiSceneRequestOptions) {
+  const snapshotSchema = z.object({ original: originalRequestReferenceSchema,
+    runId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
   const cancellationSchema = z.object({ original: originalRequestReferenceSchema,
     expectedRevision: z.number().int().min(1).max(4294967294) }).strict();
   const schema = z.object({ original: originalRequestReferenceSchema,
@@ -231,6 +235,7 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
   const call = bindRequests(dependencies, options, input => {
     const authorization = composePersistedTaskAuthorization(input);
     return { scenes: composeAiOriginalScenes(input),
+      snapshots: new PrismaTaskRecoverySnapshotRepository(input.db, authorization.tasks),
       transitions: new AiTaskTransitionRepository(input.db, authorization.authority, input.clock),
       takeovers: new PrismaTaskTakeoverRepository(input.db, authorization.authority, input.clock) };
   });
@@ -255,6 +260,29 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     });
   };
   return Object.freeze({
+    readRecoverySnapshot(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = snapshotSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = snapshotSchema.parse(command), before = await root.scenes.requests.readHistorical(input.original);
+        const task = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const snapshot = await root.snapshots.read({ taskId: task.taskId, runId: input.runId });
+        const after = await root.scenes.requests.readHistorical(input.original);
+        const latest = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (after.receipt.state === 'revoked' || after.receipt.contentHash !== before.receipt.contentHash
+          || originalIdentityHash(after.context) !== originalIdentityHash(before.context)
+          || latest.state !== 'observed' || latest.taskId !== task.taskId || latest.runId !== task.runId
+          || snapshot.task.taskId !== task.taskId || snapshot.run.runId !== input.runId)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const response: AiSceneModelRecoverySnapshotReadResponse = { contractVersion: AI_TASK_RECOVERY_READ_VERSION,
+          original: input.original, snapshot,
+          execution: 'read_only_no_lease_or_dispatch' as const,
+          resources: 'task_cumulative_not_new_allowance' as const };
+        if (Buffer.byteLength(JSON.stringify(response), 'utf8') > 524288) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        return freezeOriginalInput(response);
+      });
+    },
     /** Stopping original work must not construct a fresh financial/model
      * admission. Only record the current authorized cancellation intent;
      * settlement still requires the existing runner/input witness. */
@@ -355,6 +383,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
   });
   return Object.freeze({
     readTakeoverReceipt: recoveryReaders.readTakeoverReceipt,
+    readRecoverySnapshot: recoveryReaders.readRecoverySnapshot,
     requestCancellationIntent: recoveryReaders.requestCancellationIntent,
     readCancellationReceipt: recoveryReaders.readCancellationReceipt,
     readCancellationSettlementReceipt: recoveryReaders.readCancellationSettlementReceipt,
@@ -433,6 +462,7 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
   });
   return Object.freeze({
     readTakeoverReceipt: recoveryReaders.readTakeoverReceipt,
+    readRecoverySnapshot: recoveryReaders.readRecoverySnapshot,
     requestCancellationIntent: recoveryReaders.requestCancellationIntent,
     readCancellationReceipt: recoveryReaders.readCancellationReceipt,
     readCancellationSettlementReceipt: recoveryReaders.readCancellationSettlementReceipt,

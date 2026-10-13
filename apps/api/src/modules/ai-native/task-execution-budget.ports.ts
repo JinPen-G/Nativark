@@ -1,4 +1,5 @@
-export type AiTaskExecutionResource = 'steps' | 'calls' | 'active_ms' | 'output_bytes';
+import type { AiTaskResourceKindDraft } from '@rental-os/shared';
+export type AiTaskExecutionResource = AiTaskResourceKindDraft;
 export type AiTaskExecutionCounters = Readonly<Record<AiTaskExecutionResource, bigint>>;
 export interface AiTaskExecutionPolicy {
   version: string;

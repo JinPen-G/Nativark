@@ -68,6 +68,11 @@ export interface AiSceneModelCancellationReceiptReadDraft {
   original: AiSceneRequestReadDraft;
   expectedRevision: number;
 }
+/** A previously observed owned run, not a lease or authority to execute. */
+export interface AiSceneModelRecoverySnapshotReadDraft {
+  original: AiSceneRequestReadDraft;
+  runId: string;
+}
 /** Confirms only the displayed Core quote parameters, not order creation or
  * approval. Hashes bind the current authorized preparation, not authority. */
 export interface AiSceneQuoteReceiptReadDraft extends AiSceneRequestReadDraft {
@@ -128,7 +133,7 @@ export const AI_SCENE_PLAN_POLICY_HTTP_DRAFT = Object.freeze({
 export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
   basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/model`, method: 'POST',
   start: 'start', readInput: 'input', refreshInput: 'input/refresh', resume: 'resume', reconcile: 'reconcile',
-  readExecution: 'execution', recover: 'recover', takeover: 'takeover', readTakeoverReceipt: 'takeover/receipt',
+  readExecution: 'execution', readRecoverySnapshot: 'execution/snapshot', recover: 'recover', takeover: 'takeover', readTakeoverReceipt: 'takeover/receipt',
   readAnswer: 'input/receipt', continueAnswer: 'input/continue',
   readQuotePreparation: 'input/quote-preparation',
   confirmClarifiedQuote: 'input/quote-confirm', readClarifiedQuoteReceipt: 'input/quote-receipt',
