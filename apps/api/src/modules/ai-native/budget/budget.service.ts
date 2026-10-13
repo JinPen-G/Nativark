@@ -62,14 +62,20 @@ export class BudgetService {
     await session.revalidate();
     return result;
   }
-  async saveSettings(key: BudgetPolicyKey, settings: AiUsageSettingsDraft, expectedRevision: number) {
+  async saveSettings(key: BudgetPolicyKey, settings: AiUsageSettingsDraft, expectedRevision: number,
+    revalidateConfiguration?: () => Promise<void>) {
     key = structuredClone(key);
     settings = structuredClone(settings);
     validateBudgetSettings(settings);
     if (settings.sceneCode !== key.sceneCode) throw new BudgetError('INVALID');
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new BudgetError('INVALID');
     const session = await this.session('settings_write', { policy: key });
-    return this.repository.saveSettings(structuredClone(key), structuredClone(settings), expectedRevision, session.revalidate);
+    return this.repository.saveSettings(structuredClone(key), structuredClone(settings), expectedRevision, async () => {
+      // An application may add a current-profile check, never replace the
+      // mandatory action/entitlement revalidation with its own success gate.
+      await session.revalidate();
+      await revalidateConfiguration?.();
+    });
   }
   async reserve(value: BudgetReserveCommand) {
     const command = structuredClone(value);
