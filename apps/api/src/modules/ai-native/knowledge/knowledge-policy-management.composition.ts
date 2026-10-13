@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { AiKnowledgePolicyChangeDraft, AiKnowledgePolicyHttpLifecycleDraft, AiKnowledgePolicyHttpResultDraft,
-  AiKnowledgePolicySnapshotDraft } from '../../../../../../packages/shared/src/ai-knowledge-policy-management-draft';
+  AiKnowledgePolicySnapshotDraft } from '@rental-os/shared';
 import { HumanKnowledgePolicyManagementService, type KnowledgePolicyManagementDb, type KnowledgePolicyManagementDependencies } from './human-knowledge-policy-management.service';
 import { KnowledgePolicyManagementError, managementParse, policySnapshot } from './knowledge-policy-management.validation';
 

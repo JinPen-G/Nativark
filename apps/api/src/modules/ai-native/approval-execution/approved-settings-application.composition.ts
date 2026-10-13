@@ -1,7 +1,7 @@
 import { HttpException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AI_PROPOSAL_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION, type AiProposalPayloadDraft, type AiApprovalRecordDraft } from '@rental-os/shared';
-import { AI_APPROVED_SETTINGS_DRAFT_VERSION, type AiApprovedSettingsReferenceDraft } from '../../../../../../packages/shared/src/ai-approved-settings-draft';
+import { AI_APPROVED_SETTINGS_DRAFT_VERSION, type AiApprovedSettingsReferenceDraft } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { lockActiveCategoryBinding } from '../../rental-core/category-active-write';
 import { ApprovedSettingsRouteAuthority } from '../../rental-core/approved-settings-route.authority';

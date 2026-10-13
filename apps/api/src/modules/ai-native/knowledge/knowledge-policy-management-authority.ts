@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import type { AiKnowledgeActionPolicy, AiKnowledgePolicyManagementAuthority, PrismaClient } from '@prisma/client';
 import { knowledgeRecordSchema, memoryDraftSchema, sameScope } from './knowledge-validation';
-import { AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION } from '../../../../../../packages/shared/src/ai-knowledge-policy-management-draft';
+import { AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION } from '@rental-os/shared';
 import { preparedKnowledgeResourceBasis, knowledgeLifecycleResourceBasis, knowledgeRevisionUploadResourceBasis, validateLifecycleResource } from './knowledge-policy-preparation-target';
 import { canonicalPolicyResource, managementActions, managementFingerprint as hash, managementParse as parse,
   permissions, policyKey, policyKeyHash, policyChange, policySnapshot, preparationFingerprint, originalResourceKey, revision,

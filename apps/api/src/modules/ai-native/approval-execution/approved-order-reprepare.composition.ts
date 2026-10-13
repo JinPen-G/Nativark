@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { AI_PROPOSAL_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
-import { AI_APPROVAL_APPLICATION_DRAFT_VERSION, type AiApprovalReprepareCommandDraft, type AiApprovalReprepareReceiptDraft } from '../../../../../../packages/shared/src/ai-approval-application-draft';
+import { AI_APPROVAL_APPLICATION_DRAFT_VERSION, type AiApprovalReprepareCommandDraft, type AiApprovalReprepareReceiptDraft } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { isAiStepExecutionContext } from '../task-contract-validation';

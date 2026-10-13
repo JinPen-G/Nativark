@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { AiApprovalApplicationErrorDraft } from '../../../../../../packages/shared/src/ai-approval-application-draft';
+import type { AiApprovalApplicationErrorDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { approvalApplicationContract, approvalApplicationError } from './approval-application-contracts';
 import { composeControlledApprovedOrder, type ControlledApprovedOrderDependencies } from './controlled-approved-order.composition';

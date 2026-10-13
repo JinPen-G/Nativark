@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { AI_KNOWLEDGE_DRAFT_VERSION, type AiMemoryDraft } from '@rental-os/shared';
-import type { AiMemoryManagementResponsesDraft } from '../../../../../../packages/shared/src/ai-memory-management-http-draft';
+import type { AiMemoryManagementResponsesDraft } from '@rental-os/shared';
 import type { AuthService } from '../../auth/auth.service';
 import type { KnowledgePolicyReadDb } from './knowledge-policy-management-authority';
 import type { MemoryPrismaClient } from './prisma-memory.repository';

@@ -1,5 +1,5 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
-import { AI_MEMORY_MANAGEMENT_HTTP_DRAFT as paths, type AiMemoryManagementErrorDraft } from '../../../../../../packages/shared/src/ai-memory-management-http-draft';
+import { AI_MEMORY_MANAGEMENT_HTTP_DRAFT as paths, type AiMemoryManagementErrorDraft } from '@rental-os/shared';
 import { runWithRequestIdentity } from '../../../common/request-identity';
 import { HumanMemoryManagementRequestFactory, type HumanMemoryManagementRequest } from './human-memory-management.composition';
 import { KnowledgeError } from './knowledge-errors';

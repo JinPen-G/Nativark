@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { fingerprint, id } from './knowledge-validation';
 import { knowledgeUploadInput, knowledgeUploadRevisionSchema, knowledgeUploadKey } from './human-knowledge-upload.service';
-import { AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION, type AiKnowledgePolicyChangeDraft } from '../../../../../../packages/shared/src/ai-knowledge-policy-management-draft';
+import { AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION, type AiKnowledgePolicyChangeDraft } from '@rental-os/shared';
 
 export class KnowledgePolicyManagementError extends Error {
   constructor(readonly code: 'invalid_input' | 'unavailable' | 'conflict' | 'trusted_authority_missing') { super(code); }
