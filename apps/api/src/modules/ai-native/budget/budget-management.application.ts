@@ -15,6 +15,7 @@ import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authori
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import type { AiExecutionContext, AiGatewayConfigReferenceDraft } from '@rental-os/shared';
 import { AI_USAGE_DRAFT_VERSION } from '@rental-os/shared';
+import { registerCurrentAiConfigurationScopes } from '../configuration-scope-registration';
 
 const code = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const read = z.object({ scope: z.enum(['tenant', 'workspace']), sceneCode: code }).strict();
@@ -90,7 +91,7 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       audience: 'operator', requestId: requestId }) };
     return runWithRequestIdentity({}, () => consume(credentials, command));
   };
-  const tenantRoot = async (credentials: AiTaskCredentialSource) => {
+  const tenantRoot = async (credentials: AiTaskCredentialSource, expectedContext?: AiExecutionContext) => {
     if (!tenant) throw new BudgetError('UNAVAILABLE');
     const source = new PrismaTaskBudgetAuthorizationSource({ ...tenant, credentials });
     const initial = structuredClone(await source.scopes.resolveCurrent());
@@ -98,6 +99,7 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       const { requestId: _, authorizedAt: __, ...value } = context;
       return requestFingerprint(value);
     };
+    if (expectedContext && identity(initial.context) !== identity(expectedContext)) throw new BudgetError('FORBIDDEN');
     const scopes = { resolveCurrent: async () => {
       const current = structuredClone(await source.scopes.resolveCurrent());
       if (initial.scope.id !== current.scope.id || identity(initial.context) !== identity(current.context)) throw new BudgetError('FORBIDDEN');
@@ -117,10 +119,12 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
     initialize: (request: BudgetManagementRequest, value: unknown) => call(request, value, async (credentials, value) => {
       const parsed = initialize.safeParse(value);
       if (!parsed.success) throw new BudgetError('INVALID');
-      const command = parsed.data, root = await tenantRoot(credentials), producer = tenant?.initialConfiguration;
+      const command = parsed.data, producer = tenant?.initialConfiguration;
+      if (!tenant || !producer || !Object.is(producer.db, tenant.db)) throw new BudgetError('UNAVAILABLE');
+      const expected = await registerCurrentAiConfigurationScopes({ ...tenant, credentials });
+      const root = await tenantRoot(credentials, expected);
       const selector = { scope: command.scope, sceneCode: command.sceneCode };
       if (await root.settings.read(selector)) throw new BudgetError('REVISION_CONFLICT');
-      if (!tenant || !producer || !Object.is(producer.db, tenant.db)) throw new BudgetError('UNAVAILABLE');
       const invocation = new AiTaskCurrentIdentityAuthority(tenant.auth, credentials, tenant.clock);
       const management = new TenantModelConfigurationAuthority(tenant.guard, credentials, invocation);
       const configuration = createPersistedTenantModelConfiguration({ db: producer.db, secrets: producer.secrets,
