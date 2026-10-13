@@ -63,8 +63,8 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
     if (!profile?.enabled || profile.disabledAt || !route.scope || request.model !== profile.model
       || profile.scopeId !== route.scope.id || profile.scopeKind !== route.scope.kind) throw new ModelGatewayError('CONFIG_INVALID');
     if (route.probe) {
-      if (!this.probe || streaming) throw new ModelGatewayError('FORBIDDEN');
-      await this.probe.authorizeDispatch(context, request, route);
+      if (!this.probe) throw new ModelGatewayError('FORBIDDEN');
+      await this.probe.authorizeDispatch(context, request, route, streaming ? 'stream' : 'invoke');
     } else if (!route.preflight?.allowed) throw new ModelGatewayError('CONFIG_INVALID');
     if (profile.serviceMode === 'platform_managed' ? route.scope.kind !== 'PLATFORM'
       : profile.serviceMode !== 'tenant_managed' || route.scope.kind !== 'TENANT' || route.scope.tenantId !== context.tenantId) throw new ModelGatewayError('FORBIDDEN');
@@ -84,7 +84,7 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
     const connection = await resolve(), binding = requestFingerprint(connection);
     const recheck = async () => {
       if (requestFingerprint(await resolve()) !== binding) throw new ModelGatewayError('CONFIG_INVALID');
-      if (route.probe) await this.probe!.authorizeDispatch(context, request, route);
+      if (route.probe) await this.probe!.authorizeDispatch(context, request, route, streaming ? 'stream' : 'invoke');
     };
     await recheck();
     return { request, adapter, connection, recheck };

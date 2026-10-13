@@ -20,7 +20,8 @@ import { ModelGatewayError, type GatewayContext } from './model-gateway.ports';
 import { TextCapabilityProbeAuthority } from './text-capability-probe.authority';
 import { createPersistedTextCapabilityEvidence, PrismaTextCapabilityReceiptRepository, type TextProbeReceiptDb } from './prisma-text-capability-receipt.repository';
 import { matchesProbeProfile, probeContextSchema, textProbeCommandSchema, textProbeConfiguration, textProbeDescriptorSchema,
-  textProbeEvidenceHash, textProbeIntent, TEXT_PROBE_METHOD, TEXT_PROBE_SCENE, type TextProbeCommand } from './text-capability-probe';
+  textProbeEvidenceHash, textProbeIntent, textProbeCapability, textProbeMethod, textProbeMode, textProbeRequirements,
+  TEXT_PROBE_SCENE, type TextProbeCommand, type TextProbeCapability } from './text-capability-probe';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { capabilityProfileFingerprint } from './capability-verification';
 import type { PersistedBudgetEvidenceSource } from './budget/budget-dependency-adapters';
@@ -100,7 +101,8 @@ export class TextCapabilityProbeApplication {
   /** Management request preparation is metadata-only. The request key never
    * chooses a model/profile; the platform ID is fixed by the server factory.
    * Persist this command once, then read it back instead of preparing on retry. */
-  prepareRequestCurrent(requestKey: string, platformProfileId: string) {
+  prepareRequestCurrent(requestKey: string, platformProfileId: string, capability: TextProbeCapability = 'text') {
+    if (capability !== 'text' && capability !== 'streaming') throw new ModelGatewayError('INVALID_REQUEST');
     const key = textProbeCommandSchema.shape.operationId.parse(requestKey);
     const platformId = textProbeDescriptorSchema.shape.profileId.parse(platformProfileId);
     return this.forCurrentRequest(async context => {
@@ -114,11 +116,12 @@ export class TextCapabilityProbeApplication {
       if (candidates.length !== 1) throw new ModelGatewayError('CONFIG_INVALID');
       const profile = candidates[0];
       const command = textProbeCommandSchema.parse({ operationId: `text-probe:${requestFingerprint({ requestKey: key, context })}`,
-        profileKey: profile.profileKey, profileFingerprint: capabilityProfileFingerprint(profile) });
+        profileKey: profile.profileKey, profileFingerprint: capabilityProfileFingerprint(profile),
+        ...(capability === 'streaming' ? { capability } : {}) });
       // The existing authority rechecks selection, scope, config revision and
       // enabled/text policy. No configuration credential() or Vault read here.
       const prepared = await this.prepare(context, command);
-      return { command, configurationRevision: prepared.configuration.configRevision, methodVersion: TEXT_PROBE_METHOD };
+      return { command, capability, configurationRevision: prepared.configuration.configRevision, methodVersion: textProbeMethod(command) };
     });
   }
   prepareCurrent(command: TextProbeCommand) {
@@ -151,7 +154,7 @@ export class TextCapabilityProbeApplication {
     const owner = await this.currentRequest();
     const prepared = await this.prepare(owner.context, command);
     const registered = structuredClone(await this.accounting.bindings.register({ ...execution,
-      intent: prepared.intent, configuration: prepared.configuration, mode: 'invoke' }));
+      intent: prepared.intent, configuration: prepared.configuration, mode: textProbeMode(command) }));
     if (registered.replayed) throw new ModelGatewayError('ACCOUNTING_PENDING');
     if ((await this.currentRequest()).binding !== owner.binding) throw new ModelGatewayError('FORBIDDEN');
     let used = false;
@@ -168,32 +171,35 @@ export class TextCapabilityProbeApplication {
   }
   async prepare(value: GatewayContext, commandValue: TextProbeCommand) {
     const context = probeContextSchema.parse(structuredClone(value)), command = textProbeCommandSchema.parse(structuredClone(commandValue));
-    const authority = this.authority(context, command), resolution = await authority.resolve(context, ['text']);
+    const authority = this.authority(context, command), resolution = await authority.resolve(context, textProbeRequirements(command));
     this.requirePlatformConnection(resolution.route.profile.serviceMode);
-    const prepared = textProbeIntent(command.operationId, resolution.consumerScope.id);
+    const prepared = textProbeIntent(command.operationId, resolution.consumerScope.id, textProbeCapability(command));
     return { ...prepared, configuration: textProbeConfiguration(resolution.route.profile, context.tenantId) };
   }
   private async collect(context: GatewayContext, command: TextProbeCommand) {
-    const authority = this.authority(context, command), resolution = await authority.resolve(context, ['text']);
+    const capability = textProbeCapability(command);
+    const authority = this.authority(context, command), resolution = await authority.resolve(context, textProbeRequirements(command));
     const row = await this.receipts.find(resolution.consumerScope.id, command.operationId);
-    if (!row) return { capability: 'text' as const, status: 'unverified' as const, reason: 'receipt_unavailable' };
+    if (!row) return { capability, status: 'unverified' as const, reason: 'receipt_unavailable' };
     const descriptor = row.descriptor, profile = resolution.route.profile;
-    if (requestFingerprint(descriptor.context) !== requestFingerprint(context) || !matchesProbeProfile(descriptor, profile)) throw new ModelGatewayError('FORBIDDEN');
+    if (requestFingerprint(descriptor.context) !== requestFingerprint(context)
+      || requestFingerprint(descriptor.command) !== requestFingerprint(command)
+      || !matchesProbeProfile(descriptor, profile)) throw new ModelGatewayError('FORBIDDEN');
     await authority.assertCurrent(context, resolution);
-    if (!row.observation) return { capability: 'text' as const, status: 'unverified' as const, receiptId: row.id, reason: 'original_receipt_pending' };
+    if (!row.observation) return { capability, status: 'unverified' as const, receiptId: row.id, reason: 'original_receipt_pending' };
     const observation = row.observation;
     const observed = { methodVersion: descriptor.methodVersion,
       mode: observation.transport === 'node_https' ? 'live' as const : 'mock' as const,
       configurationRevision: profile.configRevision, checkedAt: observation.checkedAt, expiresAt: observation.expiresAt };
-    const candidate = { profile, capability: 'text' as const,
+    const candidate = { profile, capability,
       status: observation.transport === 'node_https' && observation.matched ? 'supported' as const : 'unverified' as const,
       source: 'connection_test' as const, evidenceHash: textProbeEvidenceHash(row), checkedAt: new Date(observation.checkedAt),
       expiresAt: new Date(observation.expiresAt), details: { receiptId: row.id, verification: {
-        evidence: observation.transport === 'node_https' ? 'live' : 'mock', methodVersion: TEXT_PROBE_METHOD,
-        capability: 'text', profileFingerprint: descriptor.profileFingerprint
+        evidence: observation.transport === 'node_https' ? 'live' : 'mock', methodVersion: textProbeMethod(command),
+        capability, profileFingerprint: descriptor.profileFingerprint
       } } };
     if (candidate.status === 'supported' && !await this.receipts.verify(candidate)) {
-      return { capability: 'text' as const, status: 'unverified' as const, receiptId: row.id, reason: 'original_receipt_pending', observation: observed };
+      return { capability, status: 'unverified' as const, receiptId: row.id, reason: 'original_receipt_pending', observation: observed };
     }
     let saved: Awaited<ReturnType<ProviderCapabilityService['record']>>;
     try { saved = await this.capabilities.record(candidate); }
@@ -205,7 +211,7 @@ export class TextCapabilityProbeApplication {
       throw new ModelGatewayError('ACCOUNTING_PENDING');
     }
     await authority.assertCurrent(context, resolution);
-    return { capability: 'text' as const, status: saved.status, receiptId: row.id, evidenceHash: saved.evidenceHash, observation: observed };
+    return { capability, status: saved.status, receiptId: row.id, evidenceHash: saved.evidenceHash, observation: observed };
   }
   async run(value: GatewayContext, commandValue: TextProbeCommand,
     execution: Pick<RegisterGatewayInvocation, 'stepId' | 'lease' | 'priceVersion' | 'expiresAt'>, signal?: AbortSignal) {
@@ -217,11 +223,11 @@ export class TextCapabilityProbeApplication {
     const context = probeContextSchema.parse(structuredClone(value)), command = textProbeCommandSchema.parse(structuredClone(commandValue));
     execution = structuredClone(execution);
     if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
-    const authority = this.authority(context, command), resolution = await authority.resolve(context, ['text']);
-    const prepared = textProbeIntent(command.operationId, resolution.consumerScope.id), profile = resolution.route.profile;
+    const authority = this.authority(context, command), resolution = await authority.resolve(context, textProbeRequirements(command));
+    const prepared = textProbeIntent(command.operationId, resolution.consumerScope.id, textProbeCapability(command)), profile = resolution.route.profile;
     const configuration = textProbeConfiguration(profile, context.tenantId);
     const descriptor = textProbeDescriptorSchema.parse({ command, context, scopeId: resolution.consumerScope.id, profileId: profile.id,
-      profileFingerprint: command.profileFingerprint, methodVersion: TEXT_PROBE_METHOD, callId: prepared.intent.requestId,
+      profileFingerprint: command.profileFingerprint, methodVersion: textProbeMethod(command), callId: prepared.intent.requestId,
       intentHash: prepared.intentHash, challengeHash: prepared.challengeHash, configuration,
       configurationHash: requestFingerprint(configuration), stepId: execution.stepId, runId: execution.lease.runId });
     // An original receipt is observational only, never permission to dispatch
@@ -232,7 +238,7 @@ export class TextCapabilityProbeApplication {
     // Validate and persist the real task/step/lease association before reserving
     // the probe operation key. A rejected execution must not poison that key.
     const registered = ownedInvocationId ? { id: ownedInvocationId, replayed: false }
-      : await this.accounting.bindings.register({ ...execution, intent: prepared.intent, configuration, mode: 'invoke' });
+      : await this.accounting.bindings.register({ ...execution, intent: prepared.intent, configuration, mode: textProbeMode(command) });
     // Registration may have committed before its response (or the probe receipt)
     // was lost. Re-reading that association cannot reacquire dispatch permission.
     if (registered.replayed) return this.collect(context, command);
@@ -262,7 +268,13 @@ export class TextCapabilityProbeApplication {
         && proof.intentHash === prepared.intentHash;
     } }, [{ sceneCode: TEXT_PROBE_SCENE, routeScene: 'chat', maxOutputTokens: 32 }], 30000);
     try {
-      const result = await gateway.invoke(resolution.context, prepared.intent, signal);
+      let result: AiGatewayResultDraft | undefined;
+      if (textProbeMode(command) === 'stream') {
+        for await (const event of gateway.stream(resolution.context, prepared.intent, signal)) {
+          if (event.kind === 'terminal') result = event.result;
+        }
+        if (!result) throw new ModelGatewayError('ACCOUNTING_PENDING');
+      } else result = await gateway.invoke(resolution.context, prepared.intent, signal);
       observedResult?.(result);
     }
     catch (error) {
@@ -278,8 +290,8 @@ export class TextCapabilityProbeApplication {
   async preflight(context: GatewayContext, command: TextProbeCommand) {
     context = probeContextSchema.parse(structuredClone(context));
     command = textProbeCommandSchema.parse(structuredClone(command));
-    const authority = this.authority(context, command), current = await authority.resolve(context, ['text']);
-    const result = await this.capabilities.preflight(current.route.profile, ['text']);
+    const authority = this.authority(context, command), current = await authority.resolve(context, textProbeRequirements(command));
+    const result = await this.capabilities.preflight(current.route.profile, textProbeRequirements(command));
     await authority.assertCurrent(context, current);
     return result;
   }

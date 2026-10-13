@@ -10,7 +10,7 @@ import type { GatewayContext } from '../model-gateway.ports';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { BudgetError } from './budget.ports';
 import { gatewayBudgetPrincipal } from './gateway-budget-principal';
-import { textProbeCommandSchema, textProbeIntent, TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE } from '../text-capability-probe';
+import { textProbeCommandSchema, textProbeIntent, textProbeCapability, textProbeMode, TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE } from '../text-capability-probe';
 import { capabilityProfileFingerprint } from '../capability-verification';
 import { PrismaProviderProfileRepository } from '../provider-profile.repository';
 import type { BudgetGatewayBindingSource, BudgetGatewayInvocationBinding, GatewayBudgetReserveRequest } from './budget-gateway-adapter';
@@ -82,7 +82,7 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
       || saved.toolVersion !== step.toolVersion || saved.fingerprint !== step.requestFingerprint
       || requestFingerprint(command.data) !== step.requestFingerprint || !(saved.expiresAt instanceof Date)
       || !Number.isFinite(saved.expiresAt.getTime()) || saved.expiresAt <= this.now()) throw new BudgetError('FORBIDDEN');
-    return { command: command.data, prepared: textProbeIntent(command.data.operationId, step.scopeId) };
+    return { command: command.data, prepared: textProbeIntent(command.data.operationId, step.scopeId, textProbeCapability(command.data)) };
   }
   private async active(db: Reader, row: Pick<AiGatewayInvocation, 'scopeId' | 'taskId' | 'stepId' | 'runId' | 'actionId' | 'actorId' | 'stepFingerprint' | 'intentHash' | 'sceneCode' | 'leaseOwnerId' | 'fencingToken' | 'expiresAt'>, audience: string) {
     const task = await this.task(db, row.scopeId, row.taskId, row.actorId, audience);
@@ -140,7 +140,8 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
         const active = await this.active(tx, candidate, principal.context.audience);
         if (step.toolCode === TEXT_CAPABILITY_PROBE_TOOL) {
           const frozen = await this.probeInput(tx, step);
-          if (input.mode !== 'invoke' || requestFingerprint(input.intent) !== requestFingerprint(frozen.prepared.intent)) throw new BudgetError('FORBIDDEN');
+          if (input.mode !== textProbeMode(frozen.command)) throw new BudgetError('FORBIDDEN');
+          if (requestFingerprint(input.intent) !== requestFingerprint(frozen.prepared.intent)) throw new BudgetError('FORBIDDEN');
         }
         if (input.expiresAt > active.run.leaseExpiresAt!) throw new BudgetError('INVALID');
         const taskLock = await tx.aiTask.updateMany({ where: { id: active.task.id, scopeId: candidate.scopeId, revision: active.task.revision, status: 'RUNNING', cancelRequestedAt: null, archivedAt: null }, data: { revision: active.task.revision } });

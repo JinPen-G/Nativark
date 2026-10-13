@@ -5,7 +5,7 @@ import type { PersistedBudgetEvidenceSource } from './budget/budget-dependency-a
 import type { AiTaskPlanEvidenceAuthority } from './runner/prisma-task-run-evidence.repository';
 import { PrismaTaskStepEvidenceAuthority } from './runner/prisma-task-step-evidence.authority';
 import { isGatewayConfig, isGatewayResult } from './gateway-contract-validation';
-import { textProbeCommandSchema, textProbeIntent, TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE } from './text-capability-probe';
+import { textProbeCommandSchema, textProbeIntent, textProbeCapability, textProbeMode, TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE } from './text-capability-probe';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 type Db = Pick<PrismaClient, 'aiTask' | 'aiRun' | 'aiStep' | 'aiTaskRunPlan' | 'aiTaskResultArtifact'
@@ -40,7 +40,7 @@ export class PrismaTextProbeStepEvidenceAuthority extends PrismaTaskStepEvidence
       || saved.fingerprint !== step.requestFingerprint || !(saved.expiresAt instanceof Date)
       || !Number.isFinite(saved.expiresAt.getTime()) || saved.expiresAt <= this.clock()) throw denied();
     const command = textProbeCommandSchema.parse(saved.payload);
-    const prepared = textProbeIntent(command.operationId, step.scopeId);
+    const prepared = textProbeIntent(command.operationId, step.scopeId, textProbeCapability(command));
     if (requestFingerprint(command) !== step.requestFingerprint) throw denied();
     if (!artifact) return { inputRef: saved.id, inputHash: saved.fingerprint };
     if (charges.length !== 4 || charges.filter(c => c.resource === 'CALLS').length !== 1) throw denied();
@@ -51,7 +51,7 @@ export class PrismaTextProbeStepEvidenceAuthority extends PrismaTaskStepEvidence
       || invocation.actionId !== step.actionId || invocation.stepFingerprint !== step.requestFingerprint
       || invocation.actorId !== context.actor.userId || invocation.callId !== prepared.intent.requestId
       || invocation.intentHash !== prepared.intentHash || invocation.sceneCode !== TEXT_PROBE_SCENE
-      || invocation.maxOutputTokens !== 32 || invocation.mode !== 'invoke' || invocation.priceVersion !== this.priceVersion
+      || invocation.maxOutputTokens !== 32 || invocation.mode !== textProbeMode(command) || invocation.priceVersion !== this.priceVersion
       || !isGatewayConfig(invocation.configuration) || requestFingerprint(invocation.configuration) !== invocation.configurationHash
       || invocation.leaseOwnerId !== artifact.leaseOwnerId || invocation.fencingToken.toFixed(0) !== artifact.fencingToken.toFixed(0)) throw denied();
     const result = artifact.payload;

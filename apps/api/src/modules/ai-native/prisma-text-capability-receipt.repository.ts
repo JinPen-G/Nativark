@@ -10,7 +10,7 @@ import { capabilityProfileFingerprint, capabilityVerificationSchema } from './ca
 import { checkedAccountingCall } from './budget/prisma-gateway-accounting-facts';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { matchesProbeProfile, probeUsageSchema, textDigest, textProbeDescriptorSchema, textProbeEvidenceHash,
-  textProbeIntent, textProbeObservationSchema, TEXT_PROBE_METHOD, TEXT_PROBE_TTL_MS,
+  textProbeIntent, textProbeObservationSchema, textProbeCapability, textProbeMethod, textProbeMode, TEXT_PROBE_TTL_MS,
   type TextProbeDescriptor, type TextProbeObservation, type TextProbeReceipt } from './text-capability-probe';
 
 export type TextProbeReceiptDb = Pick<PrismaClient, '$transaction' | '$queryRaw' | '$executeRaw' | 'aiGatewayInvocation'
@@ -23,8 +23,8 @@ function receipt(row: StoredReceipt): TextProbeReceipt {
   const observation = row.observation == null ? null : textProbeObservationSchema.parse(decode(row.observation));
   if (row.descriptorHash !== requestFingerprint(descriptor)
     || (observation ? row.observationHash !== requestFingerprint(observation) : row.observationHash !== null)) throw new ModelGatewayError('CONFIG_INVALID');
-  const prepared = textProbeIntent(descriptor.command.operationId, descriptor.scopeId);
-  if (descriptor.methodVersion !== TEXT_PROBE_METHOD || descriptor.callId !== prepared.intent.requestId
+  const prepared = textProbeIntent(descriptor.command.operationId, descriptor.scopeId, textProbeCapability(descriptor.command));
+  if (descriptor.methodVersion !== textProbeMethod(descriptor.command) || descriptor.callId !== prepared.intent.requestId
     || descriptor.intentHash !== prepared.intentHash || descriptor.challengeHash !== prepared.challengeHash
     || descriptor.configurationHash !== requestFingerprint(descriptor.configuration)) throw new ModelGatewayError('CONFIG_INVALID');
   return { id: row.id, descriptor, descriptorHash: row.descriptorHash, observation, observationHash: row.observationHash };
@@ -76,7 +76,7 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
       || accounting.dispatchToken !== o.dispatchId || accounting.requestHash !== o.requestHash || accounting.state !== 'dispatched'
       || invocation.scopeId !== d.scopeId || invocation.taskId !== accounting.taskId || invocation.actorId !== d.context.actorId
       || invocation.callId !== d.callId || invocation.intentHash !== d.intentHash || invocation.stepFingerprint !== requestFingerprint(d.command)
-      || invocation.runId !== d.runId || invocation.stepId !== d.stepId || invocation.mode !== 'invoke'
+      || invocation.runId !== d.runId || invocation.stepId !== d.stepId || invocation.mode !== textProbeMode(d.command)
       || invocation.sceneCode !== 'ai.capability.text' || invocation.maxOutputTokens !== 32
       || invocation.configurationHash !== d.configurationHash || requestFingerprint(invocation.configuration) !== d.configurationHash
       || reservation.scopeId !== d.scopeId || reservation.scopeKind !== 'WORKSPACE'
@@ -111,20 +111,25 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
   async observe(id: string, value: GatewayInvocationObservation, transport: 'node_https' | 'mock') {
     const input = structuredClone(value), call = checkedAccountingCall(input.call);
     const row = await this.read(id);
-    // The original text-echo-1 receipt is an invoke challenge. A stream
-    // observation cannot silently upgrade it into a streaming capability proof.
-    if (input.delivery?.mode === 'stream' || !row || call.binding.scope.id !== row.descriptor.scopeId || call.binding.profileId !== row.descriptor.profileId
+    // A stream observation must belong to an explicitly frozen stream challenge,
+    // never upgrade the original text-echo-1 receipt or another invocation.
+    if (!row || (textProbeMode(row.descriptor.command) === 'stream' ? input.delivery?.mode !== 'stream' : input.delivery?.mode === 'stream')
+      || call.binding.scope.id !== row.descriptor.scopeId || call.binding.profileId !== row.descriptor.profileId
       || requestFingerprint(call.context) !== requestFingerprint(row.descriptor.context)
       || call.request.callId !== row.descriptor.callId || call.request.intentHash !== row.descriptor.intentHash
       || call.request.model !== row.descriptor.configuration.model || call.request.maxOutputTokens !== 32
       || capabilityProfileFingerprint(input.route.profile) !== row.descriptor.profileFingerprint
       || typeof input.result.text !== 'string' || input.result.text.length > 256) throw new ModelGatewayError('CONFIG_INVALID');
-    const now = this.clock(), prepared = textProbeIntent(row.descriptor.command.operationId, row.descriptor.scopeId);
+    const now = this.clock(), prepared = textProbeIntent(row.descriptor.command.operationId, row.descriptor.scopeId, textProbeCapability(row.descriptor.command));
     const usage = probeUsageSchema.safeParse(input.result.usage);
     const observation = textProbeObservationSchema.parse({ admissionId: call.binding.id, dispatchId: call.binding.dispatchId,
       requestHash: call.binding.requestHash, reservationId: input.reservationId, transport,
-      responseHash: textDigest(input.result.text), matched: input.result.text === prepared.expected,
-      usage: usage.success ? usage.data : null, checkedAt: now.toISOString(), expiresAt: new Date(now.getTime() + TEXT_PROBE_TTL_MS).toISOString() });
+      responseHash: textDigest(input.result.text), matched: input.result.text === prepared.expected
+        && (input.delivery?.mode !== 'stream' || input.delivery.deltaHash === textDigest(prepared.expected)
+          && input.delivery.deltaBytes === Buffer.byteLength(prepared.expected, 'utf8')
+          && input.delivery.deltaCount > 0 && input.delivery.eventCount === input.delivery.deltaCount + 1),
+      usage: usage.success ? usage.data : null, checkedAt: now.toISOString(), expiresAt: new Date(now.getTime() + TEXT_PROBE_TTL_MS).toISOString(),
+      ...(input.delivery?.mode === 'stream' ? { delivery: input.delivery } : {}) });
     await this.db.$transaction(async tx => {
       if (!await this.original(tx, row, observation, false)) throw new ModelGatewayError('ACCOUNTING_PENDING');
       const hash = requestFingerprint(observation);
@@ -135,18 +140,25 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
   }
   async verify(input: RecordCapabilityEvidenceInput): Promise<boolean> {
     const proof = capabilityVerificationSchema.safeParse(input.details?.verification);
-    if (!proof.success || proof.data.evidence !== 'live' || proof.data.methodVersion !== TEXT_PROBE_METHOD
-      || proof.data.capability !== 'text' || input.capability !== 'text' || input.source !== 'connection_test'
+    if (!proof.success || proof.data.evidence !== 'live'
+      || !['text', 'streaming'].includes(input.capability) || proof.data.capability !== input.capability || input.source !== 'connection_test'
       || typeof input.details?.receiptId !== 'string') return false;
     const row = await this.read(input.details.receiptId), now = this.clock();
-    if (!row || !row.observation || !matchesProbeProfile(row.descriptor, input.profile)) return false;
+    if (!row || !row.observation || !matchesProbeProfile(row.descriptor, input.profile)
+      || input.capability !== textProbeCapability(row.descriptor.command)
+      || proof.data.methodVersion !== textProbeMethod(row.descriptor.command)) return false;
     const o = row.observation;
     if (o.transport !== 'node_https' || !o.matched || !o.usage
       || proof.data.profileFingerprint !== row.descriptor.profileFingerprint
       || input.evidenceHash !== textProbeEvidenceHash(row) || input.checkedAt.toISOString() !== o.checkedAt
       || input.expiresAt?.toISOString() !== o.expiresAt || Date.parse(o.checkedAt) > now.getTime()
       || Date.parse(o.expiresAt) <= now.getTime() || Date.parse(o.expiresAt) - Date.parse(o.checkedAt) !== TEXT_PROBE_TTL_MS
-      || o.responseHash !== textDigest(textProbeIntent(row.descriptor.command.operationId, row.descriptor.scopeId).expected)) return false;
+      || o.responseHash !== textDigest(textProbeIntent(row.descriptor.command.operationId, row.descriptor.scopeId, textProbeCapability(row.descriptor.command)).expected)) return false;
+    if (input.capability === 'streaming' && (!o.delivery || o.delivery.deltaCount < 1
+      || o.delivery.eventCount !== o.delivery.deltaCount + 1 || o.delivery.deltaHash !== o.responseHash
+      || o.delivery.deltaBytes !== Buffer.byteLength(textProbeIntent(row.descriptor.command.operationId,
+        row.descriptor.scopeId, 'streaming').expected, 'utf8'))) return false;
+    if (input.capability === 'text' && o.delivery) return false;
     return this.db.$transaction(async tx => !!await this.original(tx, row, o, true), {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000
     });
@@ -154,7 +166,8 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
 }
 
 /** Shared by the probe producer and normal Gateway routing. Reading this
- * service never dispatches a probe; non-text evidence remains fail-closed. */
+ * service never dispatches a probe; only the original text and explicit stream
+ * challenges are accepted. Media/tools/structured evidence stays fail-closed. */
 export function createPersistedTextCapabilityEvidence(db: TextProbeReceiptDb
   & ConstructorParameters<typeof PrismaProviderCapabilityEvidenceRepository>[0], clock: () => Date = () => new Date()) {
   return new ProviderCapabilityService(new PrismaProviderCapabilityEvidenceRepository(db),

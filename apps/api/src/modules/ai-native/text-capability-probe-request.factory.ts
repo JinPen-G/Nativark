@@ -7,7 +7,7 @@ import { AiTaskRepositoryError } from './ai-task.repository';
 import { AiTaskCurrentIdentityAuthority } from './task-current-identity.authority';
 import { TenantModelConfigurationAuthority } from './tenant-model-config.authority';
 import { composeAuthorizedPersistedTextProbeWorkflow, type AuthorizedTextProbeWorkflowDependencies } from './text-capability-probe.composition';
-import { textProbeCommandSchema } from './text-capability-probe';
+import { textProbeCommandSchema, type TextProbeCapability } from './text-capability-probe';
 import { TextProbeOriginalRequestUnknownError } from './prisma-text-probe-original-request.repository';
 import { textProbeTaskCreationKey } from './text-capability-probe-task.composition';
 import type { AiTaskApplicationStartResult } from './runner/prisma-task-application';
@@ -15,6 +15,8 @@ import type { AiTaskApplicationStartResult } from './runner/prisma-task-applicat
 export type TextCapabilityHttpRequest = { headers: { authorization?: unknown } };
 export type TextCapabilityRequestDependencies = Omit<AuthorizedTextProbeWorkflowDependencies, 'credentials' | 'pricing'> & {
   pricing: { mode: 'persisted_calls'; priceVersion: string };
+  /** Server-selected challenge kind; never accepted from the request body. */
+  probeCapability?: TextProbeCapability;
 };
 export type TextCapabilityRequest = {
   [K in keyof AiTextCapabilityHttpResponsesDraft]: (value: unknown, signal?: AbortSignal) => Promise<AiTextCapabilityHttpResponsesDraft[K]>;
@@ -101,14 +103,14 @@ export class TextCapabilityProbeRequestFactory {
     };
     return Object.freeze({
       prepare: value => run(requestSchema, value, async ({ requestKey }) => {
-        const prepared = await root.application.prepareRequestCurrent(requestKey, dependencies.platformProfileId);
-        return { requestKey, state: 'prepared' as const, capability: 'text' as const, methodVersion: prepared.methodVersion,
+        const prepared = await root.application.prepareRequestCurrent(requestKey, dependencies.platformProfileId, dependencies.probeCapability);
+        return { requestKey, state: 'prepared' as const, capability: prepared.capability, methodVersion: prepared.methodVersion,
           configurationRevision: prepared.configurationRevision, execution: 'not_started' as const };
       }),
       publish: value => run(requestSchema, value, async ({ requestKey }) => {
         const previous = await root.workflow.readOriginal(requestKey);
         if (previous.state === 'stored') return { requestKey, ...previous, replayed: true, retryable: false as const };
-        const { command } = await root.application.prepareRequestCurrent(requestKey, dependencies.platformProfileId);
+        const { command } = await root.application.prepareRequestCurrent(requestKey, dependencies.platformProfileId, dependencies.probeCapability);
         return { requestKey, ...await root.workflow.publishOriginal({ requestKey, command }), retryable: false as const };
       }, true),
       readOriginal: value => run(requestSchema, value, async ({ requestKey }) => {
@@ -146,7 +148,7 @@ export class TextCapabilityProbeRequestFactory {
         // Existing reconciliation may record verified capability evidence; it
         // cannot register, reserve or dispatch. This is deliberately a POST.
         const result = await root.workflow.readCapabilityReceipt(await originalKey(requestKey));
-        return { requestKey, capability: 'text' as const, status: result.status,
+        return { requestKey, capability: result.capability, status: result.status,
           ...('receiptId' in result ? { receiptId: result.receiptId } : {}),
           ...('evidenceHash' in result ? { evidenceHash: result.evidenceHash } : {}),
           ...('reason' in result ? { reason: result.reason } : {}),
@@ -173,8 +175,8 @@ export class TextCapabilityProbeRequestFactory {
       }),
       preflight: value => run(requestSchema, value, async ({ requestKey }) => {
         const result = await root.workflow.preflightOriginal(await originalKey(requestKey));
-        return { requestKey, capability: 'text' as const, allowed: result.allowed,
-          missing: result.missing.includes('text'), stale: result.stale.includes('text'),
+        return { requestKey, capability: result.required.includes('streaming') ? 'streaming' as const : 'text' as const, allowed: result.allowed,
+          missing: result.missing.length > 0, stale: result.stale.length > 0,
           semantics: 'current_preflight_not_dispatch_permission' as const };
       }),
       close() { authorization = undefined; },

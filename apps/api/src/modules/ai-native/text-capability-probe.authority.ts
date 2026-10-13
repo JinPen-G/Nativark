@@ -9,7 +9,7 @@ import { gatewayRoutingBinding } from './gateway-routing.service';
 import { ModelGatewayError, type GatewayContext, type ModelProtocolRequest } from './model-gateway.ports';
 import { capabilityProfileFingerprint } from './capability-verification';
 import { prepareGatewayTextIntent } from './gateway-intent';
-import { probeContextSchema, textProbeCommandSchema, textProbeIntent, TEXT_PROBE_SCENE, type TextProbeCommand } from './text-capability-probe';
+import { probeContextSchema, textProbeCommandSchema, textProbeIntent, textProbeCapability, textProbeMode, textProbeRequirements, TEXT_PROBE_SCENE, type TextProbeCommand } from './text-capability-probe';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 export interface TextProbeAuthorityDependencies {
@@ -45,18 +45,21 @@ export class TextCapabilityProbeAuthority {
     const profile = await d.profiles.get(scope, this.command.profileKey);
     if (!profile || !profile.enabled || profile.disabledAt || profile.serviceMode !== selection.mode
       || profile.scopeId !== scope.id || profile.scopeKind !== scope.kind || profile.configRevision !== selection.revision
-      || !profile.allowedCapabilities.includes('text') || capabilityProfileFingerprint(profile) !== this.command.profileFingerprint) {
+      || !textProbeRequirements(this.command).every(value => profile.allowedCapabilities.includes(value))
+      || capabilityProfileFingerprint(profile) !== this.command.profileFingerprint) {
       throw new ModelGatewayError('CONFIG_INVALID');
     }
-    const prepared = textProbeIntent(this.command.operationId, resolved.consumerScope.id);
-    return { context: c, consumerScope: resolved.consumerScope, selection, scene: 'chat', requiredCapabilities: ['text'],
+    const prepared = textProbeIntent(this.command.operationId, resolved.consumerScope.id, textProbeCapability(this.command));
+    const required = textProbeRequirements(this.command);
+    return { context: c, consumerScope: resolved.consumerScope, selection, scene: 'chat', requiredCapabilities: required,
       route: { profile, scope, role: profile.role,
-        preflight: { allowed: false, required: ['text'], missing: ['text'], stale: [] },
+        preflight: { allowed: false, required, missing: required, stale: [] },
         probe: { purpose: 'capability_text_probe', operationId: this.command.operationId,
           profileFingerprint: this.command.profileFingerprint, intentHash: prepared.intentHash } } };
   }
   async resolve(value: GatewayContext, required: readonly AiProfileCapability[]) {
-    if (requestFingerprint(value) !== requestFingerprint(this.context) || required.length !== 1 || required[0] !== 'text') {
+    if (requestFingerprint(value) !== requestFingerprint(this.context)
+      || requestFingerprint(required) !== requestFingerprint(textProbeRequirements(this.command))) {
       throw new ModelGatewayError('FORBIDDEN');
     }
     const initial = await this.current(), current = await this.current();
@@ -64,12 +67,13 @@ export class TextCapabilityProbeAuthority {
     return structuredClone(current);
   }
   async assertCurrent(context: GatewayContext, resolution: GatewayRoutingResolution) {
-    if (gatewayRoutingBinding(await this.resolve(context, ['text'])) !== gatewayRoutingBinding(resolution)) throw new ModelGatewayError('CONFIG_INVALID');
+    if (gatewayRoutingBinding(await this.resolve(context, textProbeRequirements(this.command))) !== gatewayRoutingBinding(resolution)) throw new ModelGatewayError('CONFIG_INVALID');
   }
-  async authorizeDispatch(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision) {
-    const current = await this.resolve(context, ['text']);
-    const prepared = textProbeIntent(this.command.operationId, current.consumerScope.id);
-    const expected = prepareGatewayTextIntent(prepared.intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32 }, 'invoke').request;
+  async authorizeDispatch(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, mode: 'invoke' | 'stream' = 'invoke') {
+    if (mode !== textProbeMode(this.command)) throw new ModelGatewayError('FORBIDDEN');
+    const current = await this.resolve(context, textProbeRequirements(this.command));
+    const prepared = textProbeIntent(this.command.operationId, current.consumerScope.id, textProbeCapability(this.command));
+    const expected = prepareGatewayTextIntent(prepared.intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32 }, textProbeMode(this.command)).request;
     if (requestFingerprint(request) !== requestFingerprint({ ...expected, model: current.route.profile.model })
       || requestFingerprint(route) !== requestFingerprint(current.route)) throw new ModelGatewayError('FORBIDDEN');
     await this.dependencies.bindings.resolveForReserve(context, { callId: request.callId, model: request.model,

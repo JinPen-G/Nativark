@@ -7,6 +7,8 @@ import { prepareGatewayTextIntent } from './gateway-intent';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 export const TEXT_PROBE_METHOD = 'text-echo-1';
+export const STREAM_PROBE_METHOD = 'text-stream-1';
+export type TextProbeCapability = 'text' | 'streaming';
 export const TEXT_PROBE_SCENE = 'ai.capability.text';
 /** Mirrored by the shared source contract; local literal keeps the isolated
  * runtime usable before a shared client regeneration. */
@@ -14,14 +16,19 @@ export const TEXT_CAPABILITY_PROBE_TOOL = 'ai.capability.text.probe' as const;
 export const TEXT_PROBE_TTL_MS = 3_600_000;
 const id = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 export const probeDigest = z.string().regex(/^[0-9a-f]{64}$/u);
-export const textProbeCommandSchema = z.object({ operationId: id, profileKey: id.max(64), profileFingerprint: probeDigest }).strict();
+export const textProbeCommandSchema = z.object({ operationId: id, profileKey: id.max(64), profileFingerprint: probeDigest,
+  capability: z.enum(['text', 'streaming']).optional() }).strict();
 export type TextProbeCommand = z.infer<typeof textProbeCommandSchema>;
+export const textProbeCapability = (command: TextProbeCommand): TextProbeCapability => command.capability ?? 'text';
+export const textProbeMode = (command: TextProbeCommand) => textProbeCapability(command) === 'streaming' ? 'stream' as const : 'invoke' as const;
+export const textProbeMethod = (command: TextProbeCommand) => textProbeCapability(command) === 'streaming' ? STREAM_PROBE_METHOD : TEXT_PROBE_METHOD;
+export const textProbeRequirements = (command: TextProbeCommand): Array<'text' | 'streaming'> => textProbeMode(command) === 'stream' ? ['text', 'streaming'] : ['text'];
 export const probeContextSchema = z.object({ tenantId: id, workspaceId: id, actorId: id }).strict();
 export const probeUsageSchema = z.object({ inputTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   outputTokens: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).strict();
 export const textProbeDescriptorSchema = z.object({
   command: textProbeCommandSchema, context: probeContextSchema, scopeId: id.max(36), profileId: id.max(36),
-  methodVersion: z.literal(TEXT_PROBE_METHOD), callId: id, intentHash: probeDigest, challengeHash: probeDigest,
+  methodVersion: z.enum([TEXT_PROBE_METHOD, STREAM_PROBE_METHOD]), callId: id, intentHash: probeDigest, challengeHash: probeDigest,
   profileFingerprint: probeDigest, configuration: z.record(z.unknown()), configurationHash: probeDigest,
   stepId: id.max(36), runId: id.max(36)
 }).strict();
@@ -29,7 +36,9 @@ export type TextProbeDescriptor = z.infer<typeof textProbeDescriptorSchema>;
 export const textProbeObservationSchema = z.object({
   admissionId: id.max(36), dispatchId: id, requestHash: probeDigest, reservationId: id.max(36),
   transport: z.enum(['node_https', 'mock']), responseHash: probeDigest, matched: z.boolean(),
-  usage: probeUsageSchema.nullable(), checkedAt: z.string().datetime(), expiresAt: z.string().datetime()
+  usage: probeUsageSchema.nullable(), checkedAt: z.string().datetime(), expiresAt: z.string().datetime(),
+  delivery: z.object({ mode: z.literal('stream'), eventCount: z.number().int().min(2).max(4094),
+    deltaCount: z.number().int().min(1).max(4093), deltaBytes: z.number().int().min(1).max(256), deltaHash: probeDigest }).strict().optional()
 }).strict();
 export type TextProbeObservation = z.infer<typeof textProbeObservationSchema>;
 export interface TextProbeReceipt {
@@ -37,14 +46,16 @@ export interface TextProbeReceipt {
   observation: TextProbeObservation | null; observationHash: string | null;
 }
 export function textDigest(text: string) { return createHash('sha256').update(text).digest('hex'); }
-export function textProbeIntent(operationId: string, scopeId: string): { intent: AiGatewayIntentDraft; expected: string; intentHash: string; challengeHash: string } {
+export function textProbeIntent(operationId: string, scopeId: string, capability: TextProbeCapability = 'text'): { intent: AiGatewayIntentDraft; expected: string; intentHash: string; challengeHash: string } {
   id.parse(operationId); id.max(36).parse(scopeId);
-  const key = requestFingerprint({ method: TEXT_PROBE_METHOD, scopeId, operationId });
+  z.enum(['text', 'streaming']).parse(capability);
+  const method = capability === 'streaming' ? STREAM_PROBE_METHOD : TEXT_PROBE_METHOD;
+  const key = requestFingerprint({ method, scopeId, operationId });
   const expected = `PROBE_${key.slice(0, 16)}`;
   const intent: AiGatewayIntentDraft = { draftVersion: 'ain-c03-draft-2', requestId: `capability:${key}`, sceneCode: TEXT_PROBE_SCENE,
     messages: [{ role: 'user', content: [{ kind: 'text', text: `Return exactly this token and nothing else: ${expected}` }] }],
-    requiredFeatures: ['text'], optionalFeatures: [], maxOutputTokens: 32 };
-  const prepared = prepareGatewayTextIntent(intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32 }, 'invoke');
+    requiredFeatures: capability === 'streaming' ? ['text', 'streaming'] : ['text'], optionalFeatures: [], maxOutputTokens: 32 };
+  const prepared = prepareGatewayTextIntent(intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32 }, capability === 'streaming' ? 'stream' : 'invoke');
   return { intent, expected, intentHash: prepared.intentHash, challengeHash: requestFingerprint(intent.messages) };
 }
 export function textProbeConfiguration(profile: AiProviderProfileRecord, tenantId: string): AiGatewayConfigReferenceDraft {
@@ -57,7 +68,8 @@ export function textProbeConfiguration(profile: AiProviderProfileRecord, tenantI
 export function matchesProbeProfile(descriptor: TextProbeDescriptor, profile: AiProviderProfileRecord) {
   const expectedScopeKind = profile.serviceMode === 'platform_managed' ? 'PLATFORM' : 'TENANT';
   return profile.scopeKind === expectedScopeKind
-    && profile.enabled && !profile.disabledAt && profile.allowedCapabilities.includes('text')
+    && profile.enabled && !profile.disabledAt && textProbeRequirements(descriptor.command).every(value => profile.allowedCapabilities.includes(value))
+    && descriptor.methodVersion === textProbeMethod(descriptor.command)
     && descriptor.profileId === profile.id && descriptor.profileFingerprint === capabilityProfileFingerprint(profile)
     && descriptor.command.profileFingerprint === descriptor.profileFingerprint
     && descriptor.configurationHash === requestFingerprint(textProbeConfiguration(profile, descriptor.context.tenantId));

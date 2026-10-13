@@ -8,7 +8,7 @@ import { PrismaTaskPlanInputSource } from './runner/prisma-task-plan-input.sourc
 import { PrismaTaskRunEvidenceRepository } from './runner/prisma-task-run-evidence.repository';
 import { PrismaTaskExecutionScopeAuthority } from './runner/prisma-task-execution-scope.authority';
 import { PrismaTextProbeStepEvidenceAuthority } from './prisma-text-probe-step-evidence.authority';
-import { textProbeCommandSchema, textProbeIntent, TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE, type TextProbeCommand } from './text-capability-probe';
+import { textProbeCommandSchema, textProbeIntent, textProbeCapability, textProbeMode, TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE, type TextProbeCommand } from './text-capability-probe';
 import { PrismaTextCapabilityReceiptRepository } from './prisma-text-capability-receipt.repository';
 import { PrismaTaskRecoverySnapshotRepository } from './runner/prisma-task-recovery-snapshot.repository';
 import type { TextCapabilityProbeApplication } from './text-capability-probe.application';
@@ -98,7 +98,7 @@ function createRoot(input: TextCapabilityProbeTaskComposition, task: TextProbeTa
       const prepared = await input.probe.prepare({ tenantId: context.scope.tenantId,
         workspaceId: context.scope.workspaceId, actorId: context.actor.userId },
         textProbeCommandSchema.parse(stored.input));
-      return { stepId: row.id, mode: 'invoke' as const, lease: { runId: lease.runId, holderId: lease.holderId, fencingToken: lease.fencingToken },
+      return { stepId: row.id, mode: textProbeMode(textProbeCommandSchema.parse(stored.input)), lease: { runId: lease.runId, holderId: lease.holderId, fencingToken: lease.fencingToken },
         intent: prepared.intent, configuration: prepared.configuration, priceVersion: task.priceVersion,
         expiresAt: new Date(Math.min(Date.parse(stored.expiresAt), Date.parse(lease.expiresAt))) };
     }
@@ -249,7 +249,7 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
           || requestFingerprint(d.command) !== requestFingerprint(original.command)
           || requestFingerprint(d.context) !== requestFingerprint({ tenantId: context.scope.tenantId,
             workspaceId: context.scope.workspaceId, actorId: context.actor.userId })
-          || requestFingerprint({ ...textProbeIntent(original.command.operationId, stored.scopeId), configuration: d.configuration }) !== original.preparationHash) throw unavailable();
+          || requestFingerprint({ ...textProbeIntent(original.command.operationId, stored.scopeId, textProbeCapability(original.command)), configuration: d.configuration }) !== original.preparationHash) throw unavailable();
         configurationRevision = z.number().int().min(1).max(4294967295).parse(d.configuration.configRevision);
         const o = receipt.observation;
         if (o) observation = { receiptId: receipt.id, methodVersion: d.methodVersion,
