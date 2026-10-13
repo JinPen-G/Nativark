@@ -148,3 +148,11 @@ Node DATABASE_URL 固定 mysql://offline:offline@127.0.0.1:1/rental_os_offline�
 一次直接内联 `node -r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs -e <原员工审阅场景>` 调实际 factory/service 和原 inspection-persistent 显式身份/事务替身：确认两次原 receipt 读取；not_prepared 准确返回；两次收据变化时 REVISION_CONFLICT；operation 数量不变；close 后 ACCESS_DENIED。完成标记 `smoke=passed; actual staff review uses two original receipt reads; changed receipt rejected; zero writes; closed session denied`，exit0。没有新增或修改测试/fixture/脚本。必要原API strict compiler noEmit：1119 files，0 diagnostics，exit0；diff check exit0。使用本树 preload、固定无效 DATABASE_URL、write-root/audit/TEMP/TMP 全本树。没有真实MySQL/HTTP/对象存储/媒体/模型/设备验证。
 
 追加队列的事件准备、原automation输入/task创建/creation核对、人类close/feedback/operation和有界queue当前已有真实request consumer，后续仅补实际缺口，不把已存在方法重新计交付。UI目录尚需主线确认归属；本片未写页面/登录/上传链。音频proof、partial-safe、正式任务政策和真实来源仍原硬依赖，未放行或重建影子实现。
+
+### 20261013 已认领组件 WIP 安全收口
+
+主线明确允许 inspection-host 等自有组件，后又将UI优先级后置。本片仅收口已实现的原操作恢复缺口：edit/evidence reconcile 不再接受任意 found 就清 unknown；原请求副本传给宿主，返回需绑定原draftId、expectedRevision+1及当前持久草稿。复读等待后检查epoch/同一原command，hide后的迟到结果不能解锁新视图。不写pickup/return业务页或上传登录支付链。
+
+一次内联直接Node调用实际 StaffInspectionHostBinding、原inspection-persistent事务替身及真实 drafts.edit/reconcileOperation/read：编辑已经持久保存但回调拒绝→unknown；外来draft收据及宿主篡改传入副本不能解锁；原请求operationId保留；原收据恢复revision2；hide/show重新读取、dispose不更新。完成标记 `smoke=passed; actual draft edit lost reply; foreign receipt rejected; original request preserved; original receipt recovers; hide/show/dispose isolated`，exit0；无新增/修改测试脚本或fixture。原员工tsconfig noEmit（保留原依赖解析）227 files、0 diagnostics、exit0，diff check exit0。另一次额外源码paths检查228 files、1 diagnostic/exit1：shared ai-client-entry-draft-schemas.ts 的BigInt字面量与员工原ES2019目标不兼容，未修改shared或抬目标掩盖；不能把源码模式也说通过。
+
+该证据为实际组件控制器+离线事务，不是微信/真机/真实HTTP提交。后续按最新主线指令回到核心，不继续治理/UI展示。原政策、媒体持久结果正链和公共文件依赖未验口径不变。
