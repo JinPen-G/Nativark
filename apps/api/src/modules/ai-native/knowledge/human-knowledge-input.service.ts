@@ -45,12 +45,21 @@ export class HumanKnowledgeInputService {
   collect(value: unknown, options: unknown = { includePreferences: false }) {
     const input = parse(knowledgeContextInputSchema, value);
     const settings = parse(z.object({ includePreferences: z.boolean(),
-      maxPreferences: z.number().int().min(1).max(10).optional() }).strict(), options);
+      maxPreferences: z.number().int().min(1).max(10).optional(),
+      preferenceKinds: z.array(z.enum(['locale', 'fulfillment_location', 'display_density'])).min(1).max(3).optional() }).strict(), options);
+    if (settings.preferenceKinds && (!settings.includePreferences || new Set(settings.preferenceKinds).size !== settings.preferenceKinds.length)) {
+      throw new KnowledgeError('invalid_input');
+    }
     if (settings.includePreferences && !this.memory) return unavailable();
     return this.session.run(async () => {
       const knowledge = await this.context.collect(input);
-      const preferences = settings.includePreferences
-        ? await this.memory!.confirmedPreferences({ limit: settings.maxPreferences ?? 10 }) : undefined;
+      const selected = settings.preferenceKinds ? await this.memory!.selectPreferences({ kinds: settings.preferenceKinds,
+        limit: settings.maxPreferences ?? 10 }) : undefined;
+      const preferences = selected ? { items: selected.items, ambiguities: selected.ambiguities,
+        ambiguityCoverage: selected.ambiguityCoverage, businessCompatibility: selected.businessCompatibility,
+        truncated: selected.truncated, coverage: 'bounded_window' as const, pagination: 'unavailable' as const,
+        semantics: 'preference_not_authority' as const }
+        : settings.includePreferences ? await this.memory!.confirmedPreferences({ limit: settings.maxPreferences ?? 10 }) : undefined;
       // Check both sources again after all collection waits. This is not a
       // cross-resource transaction and must be repeated at actual consumption.
       if (knowledge.status === 'ready' || knowledge.status === 'partial') await this.context.revalidate(knowledge);
