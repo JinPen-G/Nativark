@@ -102,7 +102,7 @@ export class TextCapabilityProbeApplication {
    * chooses a model/profile; the platform ID is fixed by the server factory.
    * Persist this command once, then read it back instead of preparing on retry. */
   prepareRequestCurrent(requestKey: string, platformProfileId: string, capability: TextProbeCapability = 'text') {
-    if (capability !== 'text' && capability !== 'streaming' && capability !== 'vision') throw new ModelGatewayError('INVALID_REQUEST');
+    if (capability !== 'text' && capability !== 'streaming' && capability !== 'vision' && capability !== 'structured_output') throw new ModelGatewayError('INVALID_REQUEST');
     const key = textProbeCommandSchema.shape.operationId.parse(requestKey);
     const platformId = textProbeDescriptorSchema.shape.profileId.parse(platformProfileId);
     return this.forCurrentRequest(async context => {
@@ -255,7 +255,12 @@ export class TextCapabilityProbeApplication {
     await authority.assertCurrent(context, resolution);
     const tenant = new TenantModelConnectionResolver(this.input.configuration);
     const platform = this.input.platformConnection ?? { resolve: async () => { throw new ModelGatewayError('CREDENTIAL_UNAVAILABLE'); } };
-    const transport = new RoutedModelTransport({ tenant, platform }, [this.adapter], authority);
+    const adapter = textProbeCapability(command) === 'structured_output'
+      ? new ChatCompletionsAdapter(this.input.protocol ?? createNativeModelEgressTransport(), { structuredOutput: {
+        name: 'rental_capability_token', schema: { type: 'object', properties: { token: { type: 'string', maxLength: 22,
+          const: (JSON.parse(prepared.expected) as { token: string }).token } }, required: ['token'], additionalProperties: false } } })
+      : this.adapter;
+    const transport = new RoutedModelTransport({ tenant, platform }, [adapter], authority);
     const gateway = new PublicAiGatewayService({ ports: { routing: authority, admission: this.admission, dispatch: this.dispatch,
       budget: this.accounting.budget, transport, audit: this.input.audit,
       ...(authority.media ? { media: authority.media } : {}),
@@ -267,7 +272,8 @@ export class TextCapabilityProbeApplication {
       return mode === this.adapter.evidenceMode && proof?.purpose === 'capability_text_probe'
         && proof.operationId === command.operationId && proof.profileFingerprint === command.profileFingerprint
         && proof.intentHash === prepared.intentHash;
-    } }, [{ sceneCode: TEXT_PROBE_SCENE, routeScene: 'chat', maxOutputTokens: 32 }], 30000);
+    } }, [{ sceneCode: TEXT_PROBE_SCENE, routeScene: 'chat', maxOutputTokens: 32,
+      ...(textProbeCapability(command) === 'structured_output' ? { structuredOutput: true } : {}) }], 30000);
     try {
       let result: AiGatewayResultDraft | undefined;
       if (textProbeMode(command) === 'stream') {

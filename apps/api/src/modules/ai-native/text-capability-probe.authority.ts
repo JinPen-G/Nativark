@@ -97,7 +97,8 @@ export class TextCapabilityProbeAuthority {
     const prepared = textProbeIntent(this.command.operationId, current.consumerScope.id, textProbeCapability(this.command));
     const expected = textProbeCapability(this.command) === 'vision'
       ? (await prepareGatewayIntent(prepared.intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32 }, mode, context, this.media, signal)).request
-      : prepareGatewayTextIntent(prepared.intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32 }, mode).request;
+      : prepareGatewayTextIntent(prepared.intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32,
+        ...(textProbeCapability(this.command) === 'structured_output' ? { structuredOutput: true } : {}) }, mode).request;
     if (requestFingerprint(request) !== requestFingerprint({ ...expected, model: current.route.profile.model })
       || requestFingerprint(route) !== requestFingerprint(current.route)) throw new ModelGatewayError('FORBIDDEN');
     await this.dependencies.bindings.resolveForReserve(context, { callId: request.callId, model: request.model,

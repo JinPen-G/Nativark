@@ -16,7 +16,7 @@ type Run = { kind: 'not_started'; reason: string } | { kind: 'run_outcome'; outc
 } };
 type RunResponse = AiTextCapabilityRequestDraft & Run & { retryable: false; semantics: 'task_outcome_not_capability_evidence' };
 export type AiTextCapabilityHttpResponsesDraft = {
-  prepare: AiTextCapabilityRequestDraft & { state: 'prepared'; capability: 'text' | 'streaming' | 'vision'; methodVersion: string;
+  prepare: AiTextCapabilityRequestDraft & { state: 'prepared'; capability: 'text' | 'streaming' | 'vision' | 'structured_output'; methodVersion: string;
     configurationRevision: number; execution: 'not_started' };
   publish: AiTextCapabilityRequestDraft & { state: 'stored'; inputRef: string; inputHash: string; replayed: boolean; retryable: false };
   readOriginal: AiTextCapabilityRequestDraft & ({ state: 'stored'; inputRef: string; inputHash: string; retryable: false }
@@ -29,7 +29,7 @@ export type AiTextCapabilityHttpResponsesDraft = {
     run: { runId: string; status: string }; semantics: 'task_outcome_not_capability_evidence' };
   cancel: AiTextCapabilityRequestDraft & { status: 'cancel_requested'; revision: number; retryable: false };
   reconcile: RunResponse;
-  readCapabilityReceipt: AiTextCapabilityRequestDraft & { capability: 'text' | 'streaming' | 'vision'; status: 'supported' | 'unsupported' | 'unverified';
+  readCapabilityReceipt: AiTextCapabilityRequestDraft & { capability: 'text' | 'streaming' | 'vision' | 'structured_output'; status: 'supported' | 'unsupported' | 'unverified';
     receiptId?: string; evidenceHash?: string; reason?: string; observation: null | { methodVersion: string; mode: 'mock' | 'live';
       configurationRevision: number; checkedAt: string; expiresAt: string };
     retryable: false; semantics: 'original_receipt_not_task_outcome' };
@@ -42,7 +42,7 @@ export type AiTextCapabilityHttpResponsesDraft = {
     observation: null | { receiptId: string; methodVersion: string; mode: 'mock' | 'live'; checkedAt: string; expiresAt: string;
       validity: 'expired' | 'historical_only'; matched: boolean; reportedUsage: null | { inputTokens: number; outputTokens: number } };
   };
-  preflight: AiTextCapabilityRequestDraft & { capability: 'text' | 'streaming' | 'vision'; allowed: boolean; missing: boolean; stale: boolean;
+  preflight: AiTextCapabilityRequestDraft & { capability: 'text' | 'streaming' | 'vision' | 'structured_output'; allowed: boolean; missing: boolean; stale: boolean;
     semantics: 'current_preflight_not_dispatch_permission' };
 };
 export type AiTextCapabilityHttpErrorDraft = {
@@ -64,7 +64,7 @@ const run = { oneOf: [
 export const AI_TEXT_CAPABILITY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiTextCapabilityRequestDraft: obj(key),
   AiTextCapabilityCancelRequestDraft: obj({ ...key, expectedRevision: int(1, 4294967294) }),
-  AiTextCapabilityPrepareResponseDraft: obj({ ...key, state: choice('prepared'), capability: choice('text', 'streaming', 'vision'), methodVersion: text(64),
+  AiTextCapabilityPrepareResponseDraft: obj({ ...key, state: choice('prepared'), capability: choice('text', 'streaming', 'vision', 'structured_output'), methodVersion: text(64),
     configurationRevision: int(0, 4294967295), execution: choice('not_started') }),
   AiTextCapabilityPublishResponseDraft: obj({ ...stored, replayed: bool }),
   AiTextCapabilityReadOriginalResponseDraft: { oneOf: [obj(stored), obj({ ...key, state: choice('not_observed'), retryable: no })] },
@@ -76,7 +76,7 @@ export const AI_TEXT_CAPABILITY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> 
     task: obj({ taskId: id, revision, status: text(64), cancelRequestedAt: { oneOf: [time, { type: 'null' }] } }),
     run: obj({ runId: id, status: text(64) }), semantics: choice('task_outcome_not_capability_evidence') }),
   AiTextCapabilityCancelResponseDraft: obj({ ...key, status: choice('cancel_requested'), revision, retryable: no }),
-  AiTextCapabilityReceiptResponseDraft: obj({ ...key, capability: choice('text', 'streaming', 'vision'), status: choice('supported', 'unsupported', 'unverified'),
+  AiTextCapabilityReceiptResponseDraft: obj({ ...key, capability: choice('text', 'streaming', 'vision', 'structured_output'), status: choice('supported', 'unsupported', 'unverified'),
     receiptId: id, evidenceHash: hash, reason: text(64), observation: { oneOf: [{ type: 'null' }, obj({
       methodVersion: text(64), mode: choice('mock', 'live'), configurationRevision: int(1, 4294967295), checkedAt: time, expiresAt: time })] },
     retryable: no, semantics: choice('original_receipt_not_task_outcome') },
@@ -92,7 +92,7 @@ export const AI_TEXT_CAPABILITY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> 
       checkedAt: time, expiresAt: time, validity: choice('expired', 'historical_only'), matched: bool,
       reportedUsage: { oneOf: [{ type: 'null' }, obj({ inputTokens: int(1, Number.MAX_SAFE_INTEGER), outputTokens: int(1, Number.MAX_SAFE_INTEGER) })] } })] },
   }),
-  AiTextCapabilityPreflightResponseDraft: obj({ ...key, capability: choice('text', 'streaming', 'vision'), allowed: bool, missing: bool, stale: bool,
+  AiTextCapabilityPreflightResponseDraft: obj({ ...key, capability: choice('text', 'streaming', 'vision', 'structured_output'), allowed: bool, missing: bool, stale: bool,
     semantics: choice('current_preflight_not_dispatch_permission') }),
   AiTextCapabilityHttpErrorDraft: obj({ code: choice('AI_INVALID_INPUT', 'AI_ACCESS_DENIED', 'AI_SCOPE_CHANGED', 'AI_RESOURCE_UNAVAILABLE',
     'AI_REVISION_CONFLICT', 'AI_STORAGE_UNAVAILABLE', 'AI_RESULT_UNKNOWN'), retryable: no,
