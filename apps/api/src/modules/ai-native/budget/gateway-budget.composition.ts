@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { isGatewayConfig } from '../gateway-contract-validation';
-import { validateBudgetSettings } from './budget-settings';
+import { validateBudgetSettings, presentBudgetSettingsFields } from './budget-settings';
 import type { BudgetAuthorizationSource } from './budget-dependency-adapters';
 import { PersistedBudgetEvidenceAdapter } from './budget-dependency-adapters';
 import { BudgetGatewayAdapter } from './budget-gateway-adapter';
@@ -82,8 +82,7 @@ export function createPersistedGatewayBudget(input: {
       if (stored.scope.kind !== 'tenant' || !('tenantId' in stored.config)
         || stored.config.tenantId !== stored.scope.tenantId) throw new BudgetError('FORBIDDEN');
       return { ...base, state: 'configured' as const, revision: policy.revision,
-        settings: structuredClone({ gates: stored.gates, budget: stored.budget, allowedScenes: stored.allowedScenes,
-          maxConcurrent: stored.maxConcurrent, maxCallsPerRun: stored.maxCallsPerRun }),
+        settings: presentBudgetSettingsFields(stored),
         // Platform provider/model/credential metadata must not reach tenant UI,
         // including through an allowedModels whitelist used internally.
         modelPolicy: stored.config.serviceMode === 'platform_managed'

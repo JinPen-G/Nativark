@@ -1,8 +1,11 @@
 import { AI_USAGE_DRAFT_VERSION } from "./ai-usage-draft";
 import { leafClosed as obj, leafEnum as choice, leafRef as ref, leafId as id, leafInt as int, leafList as list, leafText as text, type AiLeafSchemaDraft } from "./ai-gateway-draft-schemas";
-const v = choice(AI_USAGE_DRAFT_VERSION), bool = { type: "boolean" }, money = { type: "string", minLength: 8, maxLength: 19, pattern: "^(0|[1-9][0-9]{0,11})\\.[0-9]{6}$" };
+const v = choice(AI_USAGE_DRAFT_VERSION), bool = { type: "boolean" }, money = { type: "string", minLength: 8, maxLength: 25, pattern: "^(0|[1-9][0-9]{0,17})\\.[0-9]{6}$" };
 const currency = { type: "string", pattern: "^[A-Z]{3}$", minLength: 3, maxLength: 3 }, scale = { type: "integer", const: 6 };
-const quantity = (mode: "any" | "zero" | "positive"): AiLeafSchemaDraft => ({ oneOf: [obj({ unit: choice("tokens", "calls"), value: mode === "zero" ? { type: "integer", const: 0 } : int(mode === "positive" ? 1 : 0) }), obj({ unit: choice("money"), amount: mode === "zero" ? { type: "string", const: "0.000000" } : mode === "positive" ? { ...money, not: { const: "0.000000" } } : money, currency, scale })] });
+const quantity = (mode: "any" | "zero" | "positive"): AiLeafSchemaDraft => ({ oneOf: [
+  obj({ unit: choice("tokens"), value: mode === "zero" ? { type: "integer", const: 0 } : int(mode === "positive" ? 1 : 0, Number.MAX_SAFE_INTEGER) }),
+  obj({ unit: choice("calls"), value: mode === "zero" ? { type: "integer", const: 0 } : int(mode === "positive" ? 1 : 0, 4294967295) }),
+  obj({ unit: choice("money"), amount: mode === "zero" ? { type: "string", const: "0.000000" } : mode === "positive" ? { ...money, not: { const: "0.000000" } } : money, currency, scale })] });
 const gate = obj({ enabled: bool, revision: int(1) });
 const model = text(256), baseUrl = { type: "string", format: "uri", minLength: 9, maxLength: 2048, pattern: "^https://[^/@?#\\s]+(?:/[^?#\\s]*)?$" };
 const record = { draftVersion: v, reservationId: id(), revision: int(1), association: ref("AiUsageAssociationDraft") };

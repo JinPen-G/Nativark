@@ -56,5 +56,6 @@ export * from "./ai-client-entry-draft-schemas";
 export * from "./ai-knowledge-consumption-http-draft";
 export * from "./ai-knowledge-management-http-draft";
 export * from "./ai-memory-management-http-draft";
+export * from "./ai-budget-management-http-draft";
 export * from "./ai-text-capability-http-draft";
 export * from "./ai-automation-review-queue-http-draft";

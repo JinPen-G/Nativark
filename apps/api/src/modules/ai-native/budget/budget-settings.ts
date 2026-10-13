@@ -18,6 +18,24 @@ export function validateBudgetSettings(value: AiUsageSettingsDraft): void {
   if (value.budget.state === 'zero' && quantityAtoms(value.budget.quantity) !== 0n) throw new BudgetError('INVALID');
   if (value.budget.state === 'limited') assertPositiveQuantity(value.budget.quantity);
 }
+/** Closed management projection: old JSON extension keys are not public data.
+ * Values and precision remain unchanged; this does not calculate admission. */
+export function presentBudgetSettingsFields(value: AiUsageSettingsDraft) {
+  validateBudgetSettings(value);
+  const limit = value.budget;
+  const budget = limit.state === 'not_configured' ? { state: limit.state } : {
+    state: limit.state, quantity: limit.quantity.unit === 'money'
+      ? { unit: limit.quantity.unit, amount: limit.quantity.amount, currency: limit.quantity.currency, scale: limit.quantity.scale }
+      : { unit: limit.quantity.unit, value: limit.quantity.value }
+  };
+  const gates = {
+    platform: { enabled: value.gates.platform.enabled, revision: value.gates.platform.revision },
+    tenant: { enabled: value.gates.tenant.enabled, revision: value.gates.tenant.revision },
+    scene: { enabled: value.gates.scene.enabled, revision: value.gates.scene.revision }
+  };
+  return { budget, gates, allowedScenes: [...value.allowedScenes],
+    maxConcurrent: value.maxConcurrent, maxCallsPerRun: value.maxCallsPerRun };
+}
 /** Save accepts a disabled/zero policy; admission never interprets it as unlimited. */
 export function assertBudgetSettingsPermit(value: AiUsageSettingsDraft, model: string, scene: string): void {
   validateBudgetSettings(value);
