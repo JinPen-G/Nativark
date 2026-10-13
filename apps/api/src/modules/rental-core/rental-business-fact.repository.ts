@@ -213,7 +213,9 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
     const workspaceId = await resolveScopeWorkspaceId(this.prisma, tenantId);
     const row = await this.prisma.rentalQuote.findFirst({ where: { tenantId, workspaceId, originalOperationKey: original.key } });
     if (!row) return undefined; // Absence is not proof that an in-flight write failed.
-    if (row.originalInputHash !== original.inputHash) throw new ConflictException('报价原操作输入冲突');
+    if (row.originalInputHash !== original.inputHash || row.originalOperationKey !== original.key
+      || row.tenantId !== tenantId || row.workspaceId !== workspaceId
+      || requestFingerprint(row.request) !== original.inputHash) throw new ConflictException('报价原操作输入冲突');
     return this.toQuote(row);
   }
 
@@ -480,7 +482,9 @@ export class RentalBusinessFactRepository implements RentalBusinessFactStore {
 
   async saveQuoteForOriginalOperation(quote: RentalQuoteSnapshotV1, value: RentalQuoteOriginalOperation,
     expectedBinding?: { categoryVersionId: string; adoptionRevision: number }): Promise<RentalQuoteSnapshotV1> {
-    return this.persistQuote(structuredClone(quote), expectedBinding && { ...expectedBinding }, quoteOriginalOperation(value));
+    const snapshot = structuredClone(quote), original = quoteOriginalOperation(value);
+    if (requestFingerprint(snapshot.request) !== original.inputHash) throw new ConflictException('报价原操作输入冲突');
+    return this.persistQuote(snapshot, expectedBinding && { ...expectedBinding }, original);
   }
 
   private async persistQuote(quote: RentalQuoteSnapshotV1, expectedBinding?: { categoryVersionId: string; adoptionRevision: number },

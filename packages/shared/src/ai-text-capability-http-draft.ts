@@ -9,6 +9,11 @@ export const AI_TEXT_CAPABILITY_HTTP_DRAFT = Object.freeze({
   cancel: 'task/cancel', reconcile: 'task/reconcile', readCapabilityReceipt: 'receipt/read', preflight: 'preflight', readHistory: 'history/read',
 });
 export type AiTextCapabilityRequestDraft = { requestKey: string };
+/** Selection is constrained by the server whitelist and current management
+ * authorization; this field cannot select a provider or confer capability. */
+export type AiTextCapabilityPrepareRequestDraft = AiTextCapabilityRequestDraft & {
+  capability?: 'text' | 'streaming' | 'vision' | 'structured_output' | 'tools';
+};
 export type AiTextCapabilityCancelRequestDraft = AiTextCapabilityRequestDraft & { expectedRevision: number };
 type Task = { taskId: string; runId: string; status: string; revision: number; replayed: boolean };
 type Run = { kind: 'not_started'; reason: string } | { kind: 'run_outcome'; outcome: {
@@ -63,6 +68,7 @@ const run = { oneOf: [
 ] } satisfies AiLeafSchemaDraft;
 export const AI_TEXT_CAPABILITY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiTextCapabilityRequestDraft: obj(key),
+  AiTextCapabilityPrepareRequestDraft: obj({ ...key, capability: choice('text', 'streaming', 'vision', 'structured_output', 'tools') }, ['requestKey']),
   AiTextCapabilityCancelRequestDraft: obj({ ...key, expectedRevision: int(1, 4294967294) }),
   AiTextCapabilityPrepareResponseDraft: obj({ ...key, state: choice('prepared'), capability: choice('text', 'streaming', 'vision', 'structured_output', 'tools'), methodVersion: text(64),
     configurationRevision: int(0, 4294967295), execution: choice('not_started') }),
