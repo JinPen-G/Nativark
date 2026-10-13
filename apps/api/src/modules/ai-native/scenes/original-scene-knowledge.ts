@@ -5,9 +5,12 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { taskModelMaterialSchema, type parseTaskModelInput } from '../model-input/task-model-input';
+import { preferenceSchema } from '../knowledge/knowledge-validation';
 
 export type AiOriginalSceneKnowledgeOptions = Omit<PrismaFormalKnowledgeDependencies, 'auth' | 'credentials' | 'clock'> & {
   includePreferences: boolean;
+  /** Trusted scene selection, never a model/request-owned permission. */
+  preferenceKinds?: ReadonlyArray<z.infer<typeof preferenceSchema>['kind']>;
 };
 const snapshotSchema = z.object({ version: z.literal('ain-scene-knowledge-1'), originalInputRef: z.string().uuid(),
   contentHash: z.string().regex(/^[a-f0-9]{64}$/u), material: z.unknown() }).strict();
@@ -50,8 +53,13 @@ export function continueOriginalSceneMaterial(previous: ReturnType<typeof parseT
 
 export function composeOriginalSceneKnowledge(options: AiOriginalSceneKnowledgeOptions,
   identity: Pick<PrismaFormalKnowledgeDependencies, 'auth' | 'credentials'>, clock: () => Date) {
-  const { includePreferences, ...infrastructure } = options;
+  const { includePreferences, preferenceKinds: selectedKinds, ...infrastructure } = options;
   if (typeof includePreferences !== 'boolean') throw unavailable();
+  const preferenceKinds = selectedKinds === undefined ? undefined : Object.freeze([...selectedKinds]);
+  const allowedKinds = preferenceSchema.options.map(schema => schema.shape.kind.value);
+  if (preferenceKinds && (!includePreferences || preferenceKinds.length < 1
+    || preferenceKinds.length > allowedKinds.length || new Set(preferenceKinds).size !== preferenceKinds.length
+    || preferenceKinds.some(kind => !allowedKinds.includes(kind)))) throw unavailable();
   const services = composePrismaFormalHumanKnowledge({ ...infrastructure, auth: identity.auth,
     credentials: identity.credentials, clock: { now: () => clock().getTime() } });
   const revalidate = async (value: unknown, originalInputRef: string) => {
@@ -71,7 +79,8 @@ export function composeOriginalSceneKnowledge(options: AiOriginalSceneKnowledgeO
         : request.sceneCode === 'opening_diagnosis' ? request.input.sections.join(' ') : 'quote';
       try {
         const material = await services.preparation.collect({ requestId: `scene_knowledge_${originalInputRef}`, query,
-          maxSources: 4, maxSnippetChars: 1000, maxTotalBytes }, { includePreferences, maxPreferences: 4 });
+          maxSources: 4, maxSnippetChars: 1000, maxTotalBytes }, { includePreferences, maxPreferences: 4,
+          ...(preferenceKinds ? { preferenceKinds } : {}) });
         if (material.status !== 'ready' && material.status !== 'partial') throw unavailable();
         return await revalidate({ version: 'ain-scene-knowledge-1', originalInputRef,
           contentHash: requestFingerprint(material), material }, originalInputRef);

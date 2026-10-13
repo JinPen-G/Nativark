@@ -182,6 +182,31 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     if (!isTaskModelTool(this.toolCode)) throw unavailable();
     return this.publish(value);
   }
+  /** Internal original publication observation, not an execution attestation. */
+  async readModelInputReceipt(value: unknown) {
+    if (!isTaskModelTool(this.toolCode)) throw unavailable();
+    return this.readPreparedInput(value);
+  }
+  async readReadonlyInputReceipt(value: unknown) {
+    if (!['rental.catalog.search', 'rental.availability.check', 'rental.order.explain'].includes(this.toolCode)) throw unavailable();
+    return this.readPreparedInput(value);
+  }
+  private async readPreparedInput(value: unknown) {
+    const parsed = z.object({ taskId: id.max(36), runId: id.max(36), registrationRef: id }).strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const command = parsed.data, before = await this.access(command.taskId, 'read_metadata');
+    const key = { scopeId: before.task.scopeId, ...command };
+    const raw = await this.db.aiTaskActionInput.findFirst({ where: key });
+    const stored = raw ? await this.input(raw, key) : null;
+    if (stored && stored.policyRevision !== before.policy.revision) throw conflict();
+    const after = await this.access(command.taskId, 'read_metadata');
+    if (after.access.bindingKey !== before.access.bindingKey || after.policyHash !== before.policyHash) throw denied();
+    const latest = await this.db.aiTaskActionInput.findFirst({ where: key });
+    if (Boolean(latest) !== Boolean(stored)) throw conflict();
+    if (stored && requestFingerprint(await this.input(latest, key)) !== requestFingerprint(stored)) throw denied();
+    return stored ? { state: 'published' as const, execution: 'not_attested' as const,
+      context: after.context, ...stored } : { state: 'not_observed' as const, execution: 'not_attested' as const };
+  }
 
   async publishSettingsInput(value: unknown) {
     if (this.toolCode !== 'tenant.notifications.commit') throw unavailable();

@@ -11,7 +11,7 @@ import type { AiTaskRunnerLease, AiTaskRunnerStepRef } from '../runner/ai-task-r
 import type { PrismaTaskPlanInputSource } from '../runner/prisma-task-plan-input.source';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, taskModelConfiguration, taskModelIdentity, taskModelIntent,
-  taskModelMaterialSchema, taskImageMaterialSchema, taskAudioMaterialSchema, taskModelMediaSchema, taskModelFingerprint, taskModelPolicy, taskModelCapabilities, type TaskModelInput, type TaskModelKind } from './task-model-input';
+  parseTaskModelInput, taskModelMaterialSchema, taskImageMaterialSchema, taskAudioMaterialSchema, taskModelMediaSchema, taskModelFingerprint, taskModelPolicy, taskModelCapabilities, type TaskModelInput, type TaskModelKind } from './task-model-input';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);
@@ -102,6 +102,7 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
       intent: taskModelIntent(command.taskId, command.lease.runId, command.registrationRef, this.scene.sceneCode, command.material, this.kind,
         this.scene.orderExplainTool === true, this.scene.structuredOutput === true),
       configuration: taskModelConfiguration(route), priceVersion: this.priceVersion,
+      ...(this.scene.structuredSchemaHash ? { structuredSchemaHash: this.scene.structuredSchemaHash } : {}),
       routingHash: gatewayRoutingBinding(route), identityHash: taskModelIdentity(context) };
     if (this.kind) input.media = (await this.media(context, input.intent)).references;
     if ('expectedMedia' in command && command.expectedMedia
@@ -113,6 +114,25 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
     this.frozen(await this.execution.authorize(command.taskId), input, await this.route(context));
     await this.verifyMedia(context, input);
     return result;
+  }
+  /** Revalidate an original frozen publication without regenerating messages,
+   * changing its price/config binding, registering or dispatching a call. */
+  async revalidatePublished(value: unknown) {
+    const parsed = z.object({ taskId: id.max(36), runId: id.max(36), registrationRef: id }).strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const command = parsed.data, context = await this.execution.authorize(command.taskId);
+    const receipt = await this.inputs.readModelInputReceipt(command);
+    if (receipt.state !== 'published') throw unavailable();
+    const input = parseTaskModelInput(receipt.payload, this.policy);
+    if (taskModelFingerprint(input, this.policy) !== receipt.fingerprint
+      || taskModelIdentity(receipt.context) !== taskModelIdentity(context)) throw denied();
+    this.frozen(context, input, await this.route(context));
+    await this.verifyMedia(context, input);
+    const latest = await this.inputs.readModelInputReceipt(command);
+    if (latest.state !== 'published' || latest.id !== receipt.id || latest.fingerprint !== receipt.fingerprint
+      || requestFingerprint(latest.payload) !== requestFingerprint(receipt.payload)
+      || taskModelIdentity(await this.execution.authorize(command.taskId)) !== taskModelIdentity(context)) throw denied();
+    return { inputRef: receipt.id, fingerprint: receipt.fingerprint, execution: 'not_attested' as const };
   }
 
   async resolve(presented: AiTaskRunnerStepRef, held: AiTaskRunnerLease) {

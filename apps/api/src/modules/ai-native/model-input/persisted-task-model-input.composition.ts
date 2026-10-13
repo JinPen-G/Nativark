@@ -46,6 +46,7 @@ export function composeCurrentAuthorizedTaskModelInput(input: TaskModelCompositi
   const modelPolicy = taskModelPolicy({ sceneCode: input.gatewayScene.sceneCode, maxOutputTokens: input.gatewayScene.maxOutputTokens,
     ...(input.gatewayScene.orderExplainTool !== undefined ? { orderExplainTool: input.gatewayScene.orderExplainTool } : {}),
     ...(input.gatewayScene.structuredOutput !== undefined ? { structuredOutput: input.gatewayScene.structuredOutput } : {}),
+    ...(input.gatewayScene.structuredSchemaHash ? { structuredSchemaHash: input.gatewayScene.structuredSchemaHash } : {}),
     ...(input.kind ? { kind: input.kind } : {}) });
   const source = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, clock,
     tool, undefined, modelPolicy);
@@ -78,7 +79,8 @@ export function composeCurrentAuthorizedTaskModelInput(input: TaskModelCompositi
     }
   };
   return Object.freeze({ authorization, tasks: authorization.tasks, planAuthority: source, plans, registrations,
-    publish: inputs.publish.bind(inputs), invocations, executors: inputs.registeredExecutors(), commands, createTransitionAuthority,
+    publish: inputs.publish.bind(inputs), revalidatePublished: inputs.revalidatePublished.bind(inputs),
+    invocations, executors: inputs.registeredExecutors(), commands, createTransitionAuthority,
     toolCatalog: { resolve: async (code: string, version: string) => code === tool && version === AI_TOOL_DRAFT_VERSION
       ? { modelCall: true } : null } });
 }

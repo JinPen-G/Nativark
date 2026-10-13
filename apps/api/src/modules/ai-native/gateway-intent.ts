@@ -19,10 +19,11 @@ const intentSchema = z.object({
   maxOutputTokens: z.number().int().min(1).max(32768)
 }).strict().refine(value => !value.requiredFeatures.some(item => value.optionalFeatures.includes(item)));
 export const gatewayTextIntentPolicySchema = z.object({ sceneCode: id, maxOutputTokens: z.number().int().min(1).max(32768),
-  structuredOutput: z.boolean().optional(), orderExplainTool: z.boolean().optional() }).strict();
+  structuredOutput: z.boolean().optional(), structuredSchemaHash: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
+  orderExplainTool: z.boolean().optional() }).strict();
 export const gatewayTextIntentBindingSchema = gatewayTextIntentPolicySchema.extend({ routeScene: z.enum(['chat', 'builder', 'vision', 'knowledge', 'reasoning']) }).strict();
 export type GatewayTextIntentBinding = z.infer<typeof gatewayTextIntentBindingSchema>;
-export interface GatewayTextIntentPolicy { sceneCode: string; maxOutputTokens: number; structuredOutput?: boolean; orderExplainTool?: boolean; }
+export interface GatewayTextIntentPolicy { sceneCode: string; maxOutputTokens: number; structuredOutput?: boolean; structuredSchemaHash?: string; orderExplainTool?: boolean; }
 export interface PreparedGatewayTextIntent {
   sceneCode: string;
   intentHash: string;
@@ -149,6 +150,7 @@ export function prepareGatewayTextIntent(value: AiGatewayIntentDraft, serverPoli
   if (input.maxOutputTokens > policy.data.maxOutputTokens) throw new ModelGatewayError('INVALID_REQUEST');
   const structured = mode === 'invoke' && policy.data.structuredOutput === true && input.requiredFeatures.includes('structured_output');
   const tools = mode === 'invoke' && policy.data.orderExplainTool === true && input.requiredFeatures.includes('tools');
+  if (policy.data.structuredSchemaHash && !structured) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
   const supported: AiGatewayFeatureDraft[] = mode === 'stream' ? ['text', 'streaming'] : structured ? ['text', 'structured_output'] : tools ? ['text', 'tools'] : ['text'];
   if (input.requiredFeatures.some(item => !supported.includes(item))) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
   const messages = input.messages.map(message => {
@@ -157,8 +159,10 @@ export function prepareGatewayTextIntent(value: AiGatewayIntentDraft, serverPoli
     return { role: message.role, content: message.content.map(part => part.kind === 'text' ? part.text : '').join('') };
   });
   const request = modelRequestSchema.omit({ model: true }).safeParse({ callId: input.requestId, messages,
-    maxOutputTokens: input.maxOutputTokens, ...(mode === 'stream' ? { features: ['streaming'] } : structured ? { features: ['structuredOutput'] } : tools ? { features: ['tools'] } : {}) });
+    maxOutputTokens: input.maxOutputTokens, ...(structured && policy.data.structuredSchemaHash ? { structuredSchemaHash: policy.data.structuredSchemaHash } : {}),
+    ...(mode === 'stream' ? { features: ['streaming'] } : structured ? { features: ['structuredOutput'] } : tools ? { features: ['tools'] } : {}) });
   if (!request.success) throw new ModelGatewayError('INVALID_REQUEST');
-  return { sceneCode: input.sceneCode, intentHash: requestFingerprint({ intent: input, mode }), request: request.data, requiredCapabilities: mode === 'stream' ? ['text', 'streaming'] : structured ? ['text', 'structured_output'] : tools ? ['text', 'tools'] : ['text'],
+  return { sceneCode: input.sceneCode, intentHash: requestFingerprint({ intent: input, mode,
+    ...(structured && policy.data.structuredSchemaHash ? { structuredSchemaHash: policy.data.structuredSchemaHash } : {}) }), request: request.data, requiredCapabilities: mode === 'stream' ? ['text', 'streaming'] : structured ? ['text', 'structured_output'] : tools ? ['text', 'tools'] : ['text'],
     omittedOptionalFeatures: input.optionalFeatures.filter(item => !supported.includes(item)) };
 }

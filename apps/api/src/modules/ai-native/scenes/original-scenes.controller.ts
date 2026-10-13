@@ -10,10 +10,14 @@ export const AI_ORIGINAL_SCENE_REQUESTS = Symbol('AI_ORIGINAL_SCENE_REQUESTS');
 export const AI_ORIGINAL_SCENE_MODEL_REQUESTS = Symbol('AI_ORIGINAL_SCENE_MODEL_REQUESTS');
 export const AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS = Symbol('AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS');
 type Scenes = ReturnType<typeof composeRequestBoundOriginalScenes>;
-async function respondAiScene<T>(work: () => Promise<T>, unknownAction = 'reconcile') {
+export async function respondAiScene<T>(work: () => Promise<T>, unknownAction = 'reconcile') {
   try { return await work(); }
   catch (error) {
-    const rawCode = error instanceof Error && 'code' in error ? error.code : 'AI_STORAGE_UNAVAILABLE';
+    const response = error instanceof HttpException ? error.getResponse() : undefined;
+    // Preserve only the known public code, never an arbitrary exception body,
+    // message, stack, request content or provider details.
+    const rawCode = response && typeof response === 'object' && 'code' in response ? response.code
+      : error instanceof Error && 'code' in error ? error.code : 'AI_STORAGE_UNAVAILABLE';
     const gatewayCodes: Record<string, string> = { FORBIDDEN: 'AI_ACCESS_DENIED', INVALID_REQUEST: 'AI_INVALID_INPUT',
       CONFIG_INVALID: 'AI_RESOURCE_UNAVAILABLE', CAPABILITY_UNSUPPORTED: 'AI_RESOURCE_UNAVAILABLE', INVALID_RESPONSE: 'AI_RESOURCE_UNAVAILABLE' };
     const code = typeof rawCode === 'string' && Object.prototype.hasOwnProperty.call(gatewayCodes, rawCode) ? gatewayCodes[rawCode] : rawCode;
