@@ -1,5 +1,7 @@
 # Rental OS AI Native 系统专项开发任务
 
+> **最新底座事实读取（2026-10-13）：源码 `3663ae549b99862d341476d6f19acf02fcde7c1f`，前置 `339f78432a57524ce48f509624838d93ad818655`。** AIN-04/08会员候选与订单支付/退款读取已强制复用原业务有界分页，缺能力拒绝且不回退旧全量查询；原Guard/ALS、资金权限和局部事实口径保留。既有用例会员9项、实际授权组合2项、支付2项定向通过，620源码零诊断；首轮失败/修复和命令见接续记录，无新增测试脚本。并非全量或真实DB/支付验收，执行计划、客户完整财务正向、价格/媒体专用能力仍未验/待补。55/112＝49.1%、ENTRY35/72＝48.6%、正式验收0/28保持；Runtime/SDK替换不得绕过同一业务权限与有界来源。
+
 > **2026-10-13最新源码 `c4ae990970268ca1f736f909b3db579573a3ee21`：** 客户原模型结果发现/受控读取已消费到HTTP，复用原谱系和结果仓储，拒绝caller resultId/旧run回退，未知不出正文，620源码零诊断及原客户用例1/1。成功文本/完整配置财务正向未验，不把未产出读取当生成成功；原门槛计分保持。
 
 > **2026-10-13最新源码 `2bc3c4b3c499e4711b89bea3da291b131f560d60`：** AIN-05/11原派发证据等待后稳定性修复；首轮红测1 fail，复验3项及实际预算服务/Prisma组合1项通过，620源码零诊断。只读变化返回待核对，不写账/退额/重派；无新测试脚本。完整价格/媒体/真环境未闭合，原G门槛计分保持。
@@ -345,7 +347,7 @@
 | AIN-05 | G1/G2：唯一Gateway、平台/BYOK及单账；ccaf625a/7d24c6fc/d1dc10ab已接原任务当前配置/能力/持久calls预算到显式请求和HTTP模块；已有文本探针可信receipt verifier | G3非文本专用可信能力证明、完整公开媒体输入/usage消费及全部场景尚未齐；可信token/money计价、真实配置完整财务组合/供应商未验，不能用文本链代替媒体 |
 | AIN-06 | G1/G2/G3：[原场景模型宿主](../../apps/api/src/modules/ai-native/scenes/original-scene-model.composition.ts)已接原runner、澄清后继run、累计资源及结果；3089346a合法后继恢复、d7067ef5已释放输入取消证明、9285c308场景序列化修复、044de984提交原收据→显式继续接回原模型宿主 | G4广义恢复/中断及真库并发验收；客户完整配置/财务/多轮模型与全部取消窗口、所有业务参数及审批链仍待补；已有步骤只原证据核对，unknown不重派 |
 | AIN-07 | G1/G2/G3：[受控批准组合](../../apps/api/src/modules/ai-native/approval-execution/controlled-approved-order.composition.ts)、Core参与者、原收据及正式reprepare均已消费 | G4真实并发/所有失败窗及多动作范围验收；后续场景继续复用，不能继承旧批准 |
-| AIN-08 | G1/G2/G3：[业务工具组合](../../apps/api/src/modules/ai-native/tools/business-tools.composition.ts)已将目录/可用性/客户/订单/风险事实接入原场景 | G4四品类事实及历史依据真实对照，缺能力仍明确unavailable |
+| AIN-08 | G1/G2/G3：[业务工具组合](../../apps/api/src/modules/ai-native/tools/business-tools.composition.ts)已将目录/可用性/客户/订单/风险事实接入原场景；339f7843/3663ae54去掉会员及资金reader全量回退，消费原服务分页与当前权限 | G4四品类事实及历史依据真实对照；DB执行计划和其他reader未全量重验，缺能力仍明确unavailable |
 | AIN-09 | G1/G2：Core正式报价、原操作键保存/恢复、原请求quoteReview/confirmQuote/readQuoteReceipt已接 | G3四品类/企业身份/歧义到明确参数的完整消费者；不是缺Core原键端口 |
 | AIN-10 | G1/G2/G3：[正式知识组合](../../apps/api/src/modules/ai-native/knowledge/persistent-knowledge.composition.ts)已接文件、政策、版本、确认记忆及原场景输入 | G4真实存储、撤回传播、全来源/格式与隐私验收；词法检索不是向量检索 |
 | AIN-11 | G1/G2：平台/租户配置、权益、财务单账与task累计资源已有实现；ccaf625a/d1dc10ab原task到持久calls预算消费者已接 | G3版本发布/全部场景与端侧设置完整接线；可信tokens/money价格及计量上界、真实成本/并发/停用验收未完 |
