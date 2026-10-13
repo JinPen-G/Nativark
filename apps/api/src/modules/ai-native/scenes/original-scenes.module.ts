@@ -1,4 +1,5 @@
 import { Module, type DynamicModule } from '@nestjs/common';
+import { AiTaskRepositoryError } from '../ai-task.repository';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './original-scenes.composition';
 import { AI_ORIGINAL_SCENES, AI_ORIGINAL_SCENE_REQUESTS, AiOriginalScenesController,
   AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS,
@@ -9,16 +10,30 @@ import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneMode
   type RequestBoundOriginalSceneModelDependencies, type AiSceneModelRequestOptions, type AiSceneRequestOptions } from './request-bound-scenes.application';
 
 export const AI_ORIGINAL_SCENE_MODEL = Symbol('AI_ORIGINAL_SCENE_MODEL');
+export const AI_ORIGINAL_ORDER_READ_REQUESTS = Symbol('AI_ORIGINAL_ORDER_READ_REQUESTS');
 export { AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS } from './original-scenes.controller';
 
 @Module({})
 export class AiOriginalScenesModule {
+  /** Explicit two-step server host. No new HTTP contract or default driver. */
+  static registerPersistedOrderReadChain(dependencies: RequestBoundPersistedOriginalSceneModelDependencies,
+    options: Parameters<typeof composeRequestBoundPersistedOriginalSceneModel>[1] & {
+      orderReadChain: NonNullable<Parameters<typeof composeRequestBoundPersistedOriginalSceneModel>[1]['orderReadChain']>
+    }): DynamicModule {
+    if (!options?.orderReadChain) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const registered = this.registerPersistedRequestModel(dependencies, options);
+    return { ...registered, providers: (registered.providers ?? []).map(provider =>
+      typeof provider === 'object' && 'provide' in provider
+        ? { ...provider, provide: AI_ORIGINAL_ORDER_READ_REQUESTS } : provider),
+      exports: [AI_ORIGINAL_ORDER_READ_REQUESTS] };
+  }
   /** Explicit host selection, not production activation. Mount this OR the
    * existing registerHttpModel, never two drivers for the same route/action.
    * Only available model actions and original business request producers are
    * declared; settings/task-center endpoints need their existing own assembly. */
   static registerHttpPersistedModel(dependencies: RequestBoundPersistedOriginalSceneModelDependencies,
     options: Parameters<typeof composeRequestBoundPersistedOriginalSceneModel>[1]): DynamicModule {
+    if (options.orderReadChain) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const persisted = this.registerPersistedRequestModel(dependencies, options);
     const server = { ...dependencies }, selected = { enabled: options.enabled, audience: options.audience };
     return { ...persisted, providers: [...(persisted.providers ?? []),

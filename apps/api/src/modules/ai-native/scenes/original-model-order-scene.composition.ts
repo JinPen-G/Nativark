@@ -102,6 +102,28 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
     return { before, runner, key, orderRegistrationRef };
   };
   const application = Object.freeze({
+    async requestCancel(value: unknown) {
+      const { before, runner } = await assemble(value, false);
+      const receipt = await runner.taskTransitions.transition({ taskId: before.task.taskId,
+        expectedRevision: before.task.revision, to: 'cancel_requested', reason: 'cancel_requested' });
+      await verify(before);
+      return freezeOriginalInput({ receipt, cancellation: 'requested_not_rollback' as const });
+    },
+    async readModelResult(value: unknown) {
+      const { before, key } = await assemble(value, false);
+      const steps = await input.db.aiStep.findMany({ where: { ...key, toolCode: TASK_TEXT_MODEL_TOOL,
+        toolVersion: AI_TOOL_DRAFT_VERSION }, take: 2 });
+      if (steps.length !== 1 || !steps[0].resultRef) throw unavailable();
+      const result = await results.read({ original: before.ref, resultId: steps[0].resultRef });
+      await verify(before); return result;
+    },
+    async reopenOrderSource(value: unknown) {
+      const before = await bound(value);
+      const result = await application.readModelResult(before.ref);
+      if (result.status !== 'available' || !result.sources?.length) throw unavailable();
+      const source = await results.reopenSource({ original: before.ref, resultId: result.resultId, sourceIndex: 0 });
+      await verify(before); return source;
+    },
     async start(value: unknown, signal?: AbortSignal) {
       if (signal?.aborted) return { outcome: { kind: 'not_started' as const, reason: 'host_aborted' as const } };
       const { before, runner } = await assemble(value, true);
