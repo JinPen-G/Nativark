@@ -410,13 +410,22 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
         input.db.aiStep.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } }),
         input.db.aiTaskResultArtifact.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } }),
         input.db.aiGatewayInvocation.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } }),
-        input.db.aiTaskExecutionBudget.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } }),
         input.db.aiTaskExecutionCharge.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } }),
         input.db.aiBudgetReservation.findFirst({ where: { scopeId: key.scopeId, runId: key.runId } })
       ]);
       if (evidence.some(Boolean)) throw unavailable();
+      const resource = await input.db.aiTaskExecutionBudget.findUnique({ where: { scopeId_taskId: {
+        scopeId: key.scopeId, taskId: key.taskId } } });
       const rows = await input.db.aiTaskActionInput.findMany({ where: key, take: expectedSteps.length + 1 });
       const saved = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
+      // Resource initialization can commit before the first step is registered.
+      // Only the original saved plan and an untouched, zero-occupancy ledger
+      // permit continuation. initialize/open below must reuse and validate it;
+      // no deletes, refunds, policy replacement or counter reset are allowed.
+      if (resource && (!saved || resource.scopeId !== key.scopeId || resource.taskId !== key.taskId
+        || ['reservedSteps', 'reservedCalls', 'reservedActiveMs', 'reservedOutputBytes',
+          'consumedSteps', 'consumedCalls', 'consumedActiveMs', 'consumedOutputBytes']
+          .some(field => resource[field as keyof typeof resource] !== 0n))) throw unavailable();
       if (rows.length < 1 || rows.length > expectedSteps.length || (saved && rows.length !== expectedSteps.length)
         || !rows.some(value => value.registrationRef === task.modelRegistrationRef)
         || new Set(rows.map(value => value.registrationRef)).size !== rows.length
