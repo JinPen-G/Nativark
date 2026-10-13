@@ -115,7 +115,12 @@ export class PrismaGatewayInvocationBindings implements BudgetGatewayBindingSour
         const step = await tx.aiStep.findFirst({ where: { id: input.stepId, scopeId: principal.scope.id, runId: input.lease.runId } });
         if (!step) throw new BudgetError('FORBIDDEN');
         let intentHash: string;
-        if (hasMedia) {
+        if (step.toolCode === TEXT_CAPABILITY_PROBE_TOOL) {
+          const frozen = await this.probeInput(tx, step);
+          if (input.mode !== textProbeMode(frozen.command)
+            || requestFingerprint(input.intent) !== requestFingerprint(frozen.prepared.intent)) throw new BudgetError('FORBIDDEN');
+          intentHash = frozen.prepared.intentHash;
+        } else if (hasMedia) {
           if (![TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL].includes(step.toolCode as typeof TASK_IMAGE_MODEL_TOOL | typeof TASK_AUDIO_MODEL_TOOL) || !step.inputRef || input.mode !== 'invoke'
             || typeof tx.aiTaskActionInput?.findFirst !== 'function') throw new BudgetError('FORBIDDEN');
           const mediaTool = step.toolCode === TASK_AUDIO_MODEL_TOOL ? TASK_AUDIO_MODEL_TOOL : TASK_IMAGE_MODEL_TOOL;

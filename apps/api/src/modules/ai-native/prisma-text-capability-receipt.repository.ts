@@ -141,7 +141,7 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
   async verify(input: RecordCapabilityEvidenceInput): Promise<boolean> {
     const proof = capabilityVerificationSchema.safeParse(input.details?.verification);
     if (!proof.success || proof.data.evidence !== 'live'
-      || !['text', 'streaming'].includes(input.capability) || proof.data.capability !== input.capability || input.source !== 'connection_test'
+      || !['text', 'streaming', 'vision'].includes(input.capability) || proof.data.capability !== input.capability || input.source !== 'connection_test'
       || typeof input.details?.receiptId !== 'string') return false;
     const row = await this.read(input.details.receiptId), now = this.clock();
     if (!row || !row.observation || !matchesProbeProfile(row.descriptor, input.profile)
@@ -158,7 +158,7 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
       || o.delivery.eventCount !== o.delivery.deltaCount + 1 || o.delivery.deltaHash !== o.responseHash
       || o.delivery.deltaBytes !== Buffer.byteLength(textProbeIntent(row.descriptor.command.operationId,
         row.descriptor.scopeId, 'streaming').expected, 'utf8'))) return false;
-    if (input.capability === 'text' && o.delivery) return false;
+    if (input.capability !== 'streaming' && o.delivery) return false;
     return this.db.$transaction(async tx => !!await this.original(tx, row, o, true), {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000
     });
@@ -167,7 +167,8 @@ export class PrismaTextCapabilityReceiptRepository implements AiLiveCapabilityEv
 
 /** Shared by the probe producer and normal Gateway routing. Reading this
  * service never dispatches a probe; only the original text and explicit stream
- * challenges are accepted. Media/tools/structured evidence stays fail-closed. */
+ * and generated vision challenges are accepted. Audio/tools/structured evidence
+ * stays fail-closed; this is not recognition-accuracy or business approval. */
 export function createPersistedTextCapabilityEvidence(db: TextProbeReceiptDb
   & ConstructorParameters<typeof PrismaProviderCapabilityEvidenceRepository>[0], clock: () => Date = () => new Date()) {
   return new ProviderCapabilityService(new PrismaProviderCapabilityEvidenceRepository(db),

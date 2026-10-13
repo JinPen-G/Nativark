@@ -67,7 +67,7 @@ export class TextCapabilityProbeApplication {
     const admissions = new PrismaAdmissionRepository(input.db);
     this.admission = new InvocationAdmissionService(admissions, input.clock);
     this.dispatch = new InvocationDispatchService(admissions);
-    this.adapter = new ChatCompletionsAdapter(input.protocol ?? createNativeModelEgressTransport());
+    this.adapter = new ChatCompletionsAdapter(input.protocol ?? createNativeModelEgressTransport(), { mediaInput: ['image'] });
   }
   private authority(context: GatewayContext, command: TextProbeCommand) {
     return new TextCapabilityProbeAuthority({ management: this.input.management, scopes: this.input.scopes,
@@ -102,7 +102,7 @@ export class TextCapabilityProbeApplication {
    * chooses a model/profile; the platform ID is fixed by the server factory.
    * Persist this command once, then read it back instead of preparing on retry. */
   prepareRequestCurrent(requestKey: string, platformProfileId: string, capability: TextProbeCapability = 'text') {
-    if (capability !== 'text' && capability !== 'streaming') throw new ModelGatewayError('INVALID_REQUEST');
+    if (capability !== 'text' && capability !== 'streaming' && capability !== 'vision') throw new ModelGatewayError('INVALID_REQUEST');
     const key = textProbeCommandSchema.shape.operationId.parse(requestKey);
     const platformId = textProbeDescriptorSchema.shape.profileId.parse(platformProfileId);
     return this.forCurrentRequest(async context => {
@@ -117,7 +117,7 @@ export class TextCapabilityProbeApplication {
       const profile = candidates[0];
       const command = textProbeCommandSchema.parse({ operationId: `text-probe:${requestFingerprint({ requestKey: key, context })}`,
         profileKey: profile.profileKey, profileFingerprint: capabilityProfileFingerprint(profile),
-        ...(capability === 'streaming' ? { capability } : {}) });
+        ...(capability !== 'text' ? { capability } : {}) });
       // The existing authority rechecks selection, scope, config revision and
       // enabled/text policy. No configuration credential() or Vault read here.
       const prepared = await this.prepare(context, command);
@@ -258,6 +258,7 @@ export class TextCapabilityProbeApplication {
     const transport = new RoutedModelTransport({ tenant, platform }, [this.adapter], authority);
     const gateway = new PublicAiGatewayService({ ports: { routing: authority, admission: this.admission, dispatch: this.dispatch,
       budget: this.accounting.budget, transport, audit: this.input.audit,
+      ...(authority.media ? { media: authority.media } : {}),
       observation: { record: observation => this.receipts.observe(started.receipt.id, observation,
         this.adapter.evidenceMode === 'live' ? 'node_https' : 'mock') }
     }, evidence: this.adapter.evidenceMode, verifyEvidence: async (route, mode) => {

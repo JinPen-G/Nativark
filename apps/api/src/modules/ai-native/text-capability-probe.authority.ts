@@ -8,7 +8,8 @@ import type { GatewayRoutingResolution } from './gateway-routing.service';
 import { gatewayRoutingBinding } from './gateway-routing.service';
 import { ModelGatewayError, type GatewayContext, type ModelProtocolRequest } from './model-gateway.ports';
 import { capabilityProfileFingerprint } from './capability-verification';
-import { prepareGatewayTextIntent } from './gateway-intent';
+import { prepareGatewayTextIntent, prepareGatewayIntent, type GatewayMediaAttachmentResolver } from './gateway-intent';
+import { visionCapabilityChallenge } from './vision-capability-challenge';
 import { probeContextSchema, textProbeCommandSchema, textProbeIntent, textProbeCapability, textProbeMode, textProbeRequirements, TEXT_PROBE_SCENE, type TextProbeCommand } from './text-capability-probe';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
@@ -25,6 +26,27 @@ export class TextCapabilityProbeAuthority {
   constructor(private readonly dependencies: TextProbeAuthorityDependencies, context: GatewayContext, command: TextProbeCommand) {
     this.context = probeContextSchema.parse(structuredClone(context));
     this.command = textProbeCommandSchema.parse(structuredClone(command));
+  }
+  /** Only this server-created immutable challenge, never an uploaded file ACL
+   * bypass. Business attachment references are not accepted by this resolver. */
+  get media(): GatewayMediaAttachmentResolver | undefined {
+    if (textProbeCapability(this.command) !== 'vision') return undefined;
+    const resolve: GatewayMediaAttachmentResolver['resolve'] = async (context, reference, signal) => {
+      if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+      const current = await this.resolve(context, textProbeRequirements(this.command));
+      const image = visionCapabilityChallenge(this.command.operationId, current.consumerScope.id);
+      if (reference.kind !== 'image' || reference.attachmentId !== image.attachmentId
+        || reference.attachmentRevision !== image.attachmentRevision) throw new ModelGatewayError('FORBIDDEN');
+      await this.assertCurrent(context, current);
+      if (signal.aborted) throw new ModelGatewayError('CANCELLED');
+      const { expected: _, ...result } = image;
+      return result;
+    };
+    return { resolve, assertCurrent: async (context, references, signal) => {
+      if (references.length !== 1) throw new ModelGatewayError('FORBIDDEN');
+      const reference = references[0], image = await resolve(context, reference, signal);
+      if (!image || image.mediaType !== reference.mediaType || image.contentHash !== reference.contentHash) throw new ModelGatewayError('FORBIDDEN');
+    } };
   }
   private async current(): Promise<GatewayRoutingResolution> {
     const d = this.dependencies, context = structuredClone(this.context);
@@ -69,11 +91,13 @@ export class TextCapabilityProbeAuthority {
   async assertCurrent(context: GatewayContext, resolution: GatewayRoutingResolution) {
     if (gatewayRoutingBinding(await this.resolve(context, textProbeRequirements(this.command))) !== gatewayRoutingBinding(resolution)) throw new ModelGatewayError('CONFIG_INVALID');
   }
-  async authorizeDispatch(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, mode: 'invoke' | 'stream' = 'invoke') {
+  async authorizeDispatch(context: GatewayContext, request: ModelProtocolRequest, route: ProviderRouteDecision, mode: 'invoke' | 'stream' = 'invoke', signal = new AbortController().signal) {
     if (mode !== textProbeMode(this.command)) throw new ModelGatewayError('FORBIDDEN');
     const current = await this.resolve(context, textProbeRequirements(this.command));
     const prepared = textProbeIntent(this.command.operationId, current.consumerScope.id, textProbeCapability(this.command));
-    const expected = prepareGatewayTextIntent(prepared.intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32 }, textProbeMode(this.command)).request;
+    const expected = textProbeCapability(this.command) === 'vision'
+      ? (await prepareGatewayIntent(prepared.intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32 }, mode, context, this.media, signal)).request
+      : prepareGatewayTextIntent(prepared.intent, { sceneCode: TEXT_PROBE_SCENE, maxOutputTokens: 32 }, mode).request;
     if (requestFingerprint(request) !== requestFingerprint({ ...expected, model: current.route.profile.model })
       || requestFingerprint(route) !== requestFingerprint(current.route)) throw new ModelGatewayError('FORBIDDEN');
     await this.dependencies.bindings.resolveForReserve(context, { callId: request.callId, model: request.model,
