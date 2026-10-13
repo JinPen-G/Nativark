@@ -1,6 +1,6 @@
 import { Body, Controller, HttpException, Inject, Post, Req } from '@nestjs/common';
 import { z } from 'zod';
-import { AI_SCENE_ORDER_READ_HTTP_DRAFT, type AiSceneRequestReadDraft } from '@rental-os/shared';
+import { AI_SCENE_ORDER_READ_HTTP_DRAFT, type AiSceneRequestReadDraft, type AiSceneModelTakeoverDraft } from '@rental-os/shared';
 import { originalRequestReferenceSchema } from '../task-request/original-request.validation';
 import type { AiSceneHttpRequest } from './request-bound-scenes.application';
 import { respondAiScene } from './original-scenes.controller';
@@ -12,6 +12,7 @@ export const AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS = Symbol('AI_ORIGINAL_ORDER_RE
 export interface OriginalOrderReadHttpRequests {
   start(request: AiSceneHttpRequest, original: AiSceneRequestReadDraft, signal?: AbortSignal): Promise<unknown>;
   recover(request: AiSceneHttpRequest, original: AiSceneRequestReadDraft, signal?: AbortSignal): Promise<unknown>;
+  takeover(request: AiSceneHttpRequest, command: AiSceneModelTakeoverDraft, signal?: AbortSignal): Promise<unknown>;
   readOrderResult(request: AiSceneHttpRequest, original: AiSceneRequestReadDraft): Promise<unknown>;
   readModelResult(request: AiSceneHttpRequest, original: AiSceneRequestReadDraft): Promise<unknown>;
   readTaskScene(request: AiSceneHttpRequest, original: AiSceneRequestReadDraft): Promise<unknown>;
@@ -22,6 +23,9 @@ export interface OriginalOrderReadHttpRequests {
 }
 const cancelSchema = z.object({ original: originalRequestReferenceSchema,
   expectedRevision: z.number().int().min(1).max(4294967294) }).strict();
+const takeoverSchema = z.object({ original: originalRequestReferenceSchema,
+  expectedTaskRevision: z.number().int().min(1).max(4294967294), expectedRunRevision: z.number().int().min(1).max(4294967294),
+  expectedFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict();
 type Request = AiSceneHttpRequest & AiRequestAbortSource;
 const invalid = () => new HttpException({ code: 'AI_INVALID_INPUT', retryable: false }, 400);
 function reference(value: unknown): AiSceneRequestReadDraft {
@@ -44,6 +48,13 @@ export class AiOriginalOrderReadController {
   recover(@Req() request: Request, @Body() body: unknown) {
     const original = reference(body);
     return respondAiScene(() => withRequestAbort(request, signal => this.app.recover(request, original, signal)), 'read_execution');
+  }
+  @Post(AI_SCENE_ORDER_READ_HTTP_DRAFT.takeover)
+  takeover(@Req() request: Request, @Body() body: unknown) {
+    const parsed = takeoverSchema.safeParse(body);
+    if (!parsed.success) throw invalid();
+    const command = structuredClone(parsed.data);
+    return respondAiScene(() => withRequestAbort(request, signal => this.app.takeover(request, command, signal)), 'read_execution');
   }
   @Post(AI_SCENE_ORDER_READ_HTTP_DRAFT.readOrderResult)
   readOrderResult(@Req() request: Request, @Body() body: unknown) { return respondAiScene(() => this.app.readOrderResult(request, reference(body))); }

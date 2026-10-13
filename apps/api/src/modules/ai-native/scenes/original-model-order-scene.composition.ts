@@ -114,6 +114,20 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
       const outcome = await runner.recoverOriginal(signal); await verify(before);
       return freezeOriginalInput({ original: before.original.receipt, outcome, automaticRetry: false as const });
     },
+    async takeover(value: unknown, signal?: AbortSignal) {
+      const parsed = z.object({ original: originalRequestReferenceSchema,
+        expectedTaskRevision: z.number().int().min(1).max(4294967294),
+        expectedRunRevision: z.number().int().min(1).max(4294967294),
+        expectedFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict().safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const { original, ...command } = parsed.data;
+      const { before, runner } = await assemble(original, false);
+      const outcome = await runner.takeoverOriginal(command, signal);
+      await verify(before);
+      return freezeOriginalInput({ original: before.original.receipt, outcome,
+        takeover: 'same_owner_recovery_only' as const, automaticRetry: false as const,
+        businessExecution: 'readonly_not_business_commit' as const });
+    },
     async readOrderResult(value: unknown) {
       const { before, runner, key, orderRegistrationRef } = await assemble(value, false);
       const steps = await input.db.aiStep.findMany({ where: { ...key, toolCode: 'rental.order.explain', toolVersion: AI_TOOL_DRAFT_VERSION }, take: 2 });

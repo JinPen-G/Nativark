@@ -48,6 +48,8 @@ export const AI_SCENE_REQUEST_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> =
   AiSceneModelReferenceDraft: originalReference,
   AiSceneOrderReadReferenceDraft: originalReference,
   AiSceneOrderReadCancelDraft: object({ original: originalReference, expectedRevision: integer(1, 4294967294) }),
+  AiSceneOrderReadTakeoverDraft: object({ original: originalReference, expectedTaskRevision: integer(1, 4294967294),
+    expectedRunRevision: integer(1, 4294967294), expectedFencingToken: { type: 'string', pattern: '^[1-9][0-9]{0,19}$' } }),
   AiSceneTaskUsageReadDraft: object({ original: originalReference, taskId: text(36), limit: integer(1, 20), after: text(36) }, ['original', 'limit']),
   AiTaskBudgetUsagePageDraft: object({ taskId: text(36), items: list({ oneOf: [
     object({ invocationId: text(36), callId: text(128), accounting: choice('not_recorded') }),
