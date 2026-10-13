@@ -50,11 +50,21 @@ export class PrismaModelStepEvidenceAuthority extends PrismaTaskStepEvidenceAuth
       || charges.some(charge => charge.scopeId !== key.scopeId || charge.taskId !== taskId || charge.runId !== step.runId
         || charge.stepId !== stepId || charge.actionId !== step.actionId || charge.stepFingerprint !== step.requestFingerprint
         || charge.status !== 'RECORDED' || charge.leaseOwnerId !== artifact.leaseOwnerId
-        || charge.fencingToken.toFixed(0) !== artifact.fencingToken.toFixed(0))) throw denied();
+        || charge.fencingToken.toFixed(0) !== artifact.fencingToken.toFixed(0)
+        || charge.actualAmount !== (charge.resource === 'ACTIVE_MS' ? artifact.activeMs
+          : charge.resource === 'OUTPUT_BYTES' ? artifact.outputBytes : 1n))) throw denied();
+    const chargeBinding = (rows: AiTaskExecutionCharge[]) => requestFingerprint(rows.map(charge => ({
+      id: charge.chargeId, scopeId: charge.scopeId, taskId: charge.taskId, runId: charge.runId, stepId: charge.stepId,
+      actionId: charge.actionId, fingerprint: charge.stepFingerprint, resource: charge.resource, status: charge.status,
+      amount: charge.actualAmount?.toString(), invocation: charge.gatewayInvocationId,
+      owner: charge.leaseOwnerId, fence: charge.fencingToken.toFixed(0), revision: charge.revision
+    })).sort((left, right) => left.id.localeCompare(right.id)));
+    const chargeHash = chargeBinding(charges);
     const evidence = await this.additionalEvidence(step, artifact, charges, context);
     const current = await this.modelAuthorization.resolve(taskId, 'read_step_terminal');
     const latest = await this.modelDb.aiTaskResultArtifact.findFirst({ where: { ...key, id: resultId } });
     const latestStep = await this.modelDb.aiStep.findFirst({ where: { ...key, id: stepId } });
+    const latestCharges = await this.modelDb.aiTaskExecutionCharge.findMany({ where: { ...key, runId: step.runId, stepId }, take: 5 });
     const stepBinding = (row: AiStep) => ({ id: row.id, scopeId: row.scopeId, taskId: row.taskId, runId: row.runId,
       revision: row.revision, status: row.status, inputRef: row.inputRef, resultRef: row.resultRef,
       actionId: row.actionId, fingerprint: row.requestFingerprint, toolCode: row.toolCode, toolVersion: row.toolVersion });
@@ -65,7 +75,8 @@ export class PrismaModelStepEvidenceAuthority extends PrismaTaskStepEvidenceAuth
       || latest.outcome !== 'SUCCEEDED' || !latest.completeMeasurement || latest.errorCode !== null
       || latest.outputBytes !== artifact.outputBytes || latest.activeMs !== artifact.activeMs
       || latest.leaseOwnerId !== artifact.leaseOwnerId || latest.fencingToken.toFixed(0) !== artifact.fencingToken.toFixed(0)
-      || requestFingerprint(stepBinding(latestStep)) !== requestFingerprint(stepBinding(step))) throw denied();
+      || requestFingerprint(stepBinding(latestStep)) !== requestFingerprint(stepBinding(step))
+      || chargeBinding(latestCharges) !== chargeHash) throw denied();
     // Keep Prisma Decimal/BigInt implementation objects behind the repository
     // boundary. Consumers need the immutable result binding, not raw rows.
     return { context: structuredClone(current), step: stepBinding(step), artifact: {
