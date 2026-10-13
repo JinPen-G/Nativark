@@ -5,7 +5,7 @@ import { leafClosed as obj, leafEnum as choice, leafRef as ref, leafInt as int, 
 /** Explicit server registration only. These paths are not production switches. */
 export const AI_BUDGET_MANAGEMENT_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/budget-settings', method: 'POST',
-  read: 'read', change: 'change', initialize: 'initialize', platformRead: 'platform/read', platformSave: 'platform/save'
+  read: 'read', change: 'change', initialize: 'initialize', refreshConfiguration: 'refresh-configuration', platformRead: 'platform/read', platformSave: 'platform/save'
 });
 export type AiBudgetSettingsReadDraft = { scope: 'tenant' | 'workspace'; sceneCode: string };
 export type AiBudgetSettingsChangeDraft = AiBudgetSettingsReadDraft & {
@@ -16,6 +16,11 @@ export type AiBudgetSettingsChangeDraft = AiBudgetSettingsReadDraft & {
 export type AiPlatformBudgetSettingsReadDraft = { sceneCode: string };
 export type AiBudgetSettingsInitializeDraft = AiBudgetSettingsReadDraft & {
   expectedRevision: 0; budget: AiBudgetLimitDraft; maxConcurrent: number; maxCallsPerRun: number; enabled: boolean;
+};
+/** Rebinds the server-selected current configuration, retaining limits and
+ * historical reservations. The changed policy gate is saved disabled. */
+export type AiBudgetSettingsRefreshConfigurationDraft = AiBudgetSettingsReadDraft & {
+  expectedRevision: number; confirmCurrentConfiguration: true;
 };
 export type AiPlatformBudgetSettingsSaveDraft = AiPlatformBudgetSettingsReadDraft & {
   expectedRevision: number;
@@ -37,6 +42,8 @@ const modelPolicy = { oneOf: [obj({ mode: choice('platform_managed'), serviceNam
 const admission = choice('not_granted'), none = { type: 'null' };
 export const AI_BUDGET_MANAGEMENT_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiBudgetSettingsReadDraft: obj(selector),
+  AiBudgetSettingsRefreshConfigurationDraft: obj({ ...selector, expectedRevision: int(1, 4294967294),
+    confirmCurrentConfiguration: { type: 'boolean', const: true } }),
   AiBudgetSettingsInitializeDraft: obj({ ...selector, expectedRevision: { type: 'integer', const: 0 }, budget: ref('AiBudgetLimitDraft'),
     maxConcurrent: int(0, 10000), maxCallsPerRun: int(0, 10000), enabled: { type: 'boolean' } }),
   AiBudgetSettingsChangeDraft: obj({ ...selector, expectedRevision: int(0, 4294967294), changes: {

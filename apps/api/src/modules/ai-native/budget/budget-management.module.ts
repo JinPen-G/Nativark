@@ -56,6 +56,10 @@ export class AiBudgetManagementController {
   initialize(@Req() request: BudgetManagementRequest, @Body() body: unknown) {
     return this.respond(async () => this.checked(await this.application.initialize(request, body), false, true));
   }
+  @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.refreshConfiguration) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  refreshConfiguration(@Req() request: BudgetManagementRequest, @Body() body: unknown) {
+    return this.respond(async () => this.checked(await this.application.refreshConfiguration(request, body), false, true));
+  }
   @Post(AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformRead) @HttpCode(200) @Header('Cache-Control', 'no-store')
   platformRead(@Req() request: BudgetManagementRequest, @Body() body: unknown) {
     return this.respond(async () => this.checked(await this.application.platformRead(request, body), true));

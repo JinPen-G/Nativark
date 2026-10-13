@@ -13,7 +13,7 @@ import { createPersistedTenantModelConfiguration } from '../tenant-model-config.
 import { TenantModelConfigurationAuthority } from '../tenant-model-config.authority';
 import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
-import type { AiExecutionContext, AiGatewayConfigReferenceDraft } from '@rental-os/shared';
+import type { AiExecutionContext, AiGatewayConfigReferenceDraft, AiUsageSettingsDraft } from '@rental-os/shared';
 import { AI_USAGE_DRAFT_VERSION } from '@rental-os/shared';
 import { registerCurrentAiConfigurationScopes } from '../configuration-scope-registration';
 
@@ -43,6 +43,8 @@ const change = read.extend({ expectedRevision: revision, changes: z.object({ bud
   .strict().refine(value => Object.keys(value).length > 0) }).strict();
 const initialize = read.extend({ expectedRevision: z.literal(0), budget, maxConcurrent: count,
   maxCallsPerRun: count, enabled: z.boolean() }).strict();
+const refreshConfiguration = read.extend({ expectedRevision: z.number().int().min(1).max(4294967294),
+  confirmCurrentConfiguration: z.literal(true) }).strict();
 const gate = z.object({ enabled: z.boolean(), revision: z.number().int().min(1).max(4294967295) }).strict();
 const platformRead = z.object({ sceneCode: code }).strict();
 const platformSave = platformRead.extend({ expectedRevision: revision, settings: z.object({
@@ -113,18 +115,18 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
     if (!platform) throw new BudgetError('UNAVAILABLE');
     return createAuthorizedPlatformBudgetSettings({ ...platform, credentials });
   };
-  return Object.freeze({
-    read: (request: BudgetManagementRequest, value: unknown) => call(request, value, async (credentials, command) =>
-      (await tenantRoot(credentials)).settings.summary(command)),
-    initialize: (request: BudgetManagementRequest, value: unknown) => call(request, value, async (credentials, value) => {
-      const parsed = initialize.safeParse(value);
+  // First provisioning and explicit re-binding use the same actual config
+  // producer. Re-binding never resets allocations or opens a gate by itself.
+  const configure = (request: BudgetManagementRequest, value: unknown, refresh: boolean) => call(request, value, async (credentials, value) => {
+      const parsed = refresh ? refreshConfiguration.safeParse(value) : initialize.safeParse(value);
       if (!parsed.success) throw new BudgetError('INVALID');
       const command = parsed.data, producer = tenant?.initialConfiguration;
       if (!tenant || !producer || !Object.is(producer.db, tenant.db)) throw new BudgetError('UNAVAILABLE');
-      const expected = await registerCurrentAiConfigurationScopes({ ...tenant, credentials });
+      const expected = refresh ? undefined : await registerCurrentAiConfigurationScopes({ ...tenant, credentials });
       const root = await tenantRoot(credentials, expected);
       const selector = { scope: command.scope, sceneCode: command.sceneCode };
-      if (await root.settings.read(selector)) throw new BudgetError('REVISION_CONFLICT');
+      const previous = await root.settings.read(selector);
+      if (refresh ? !previous || previous.revision !== command.expectedRevision : previous !== null) throw new BudgetError('REVISION_CONFLICT');
       const invocation = new AiTaskCurrentIdentityAuthority(tenant.auth, credentials, tenant.clock);
       const management = new TenantModelConfigurationAuthority(tenant.guard, credentials, invocation);
       const configuration = createPersistedTenantModelConfiguration({ db: producer.db, secrets: producer.secrets,
@@ -140,7 +142,8 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
           scopeId: owners.configurationScope.id, scopeKind: owners.configurationScope.kind, role: 'DEFAULT',
           serviceMode: selection.mode, ...(selection.mode === 'platform_managed'
             ? { id: producer.platformProfileId } : { profileKey: 'default' }) } }));
-        if (!profile || profile.scopeId !== owners.configurationScope.id || profile.scopeKind !== owners.configurationScope.kind
+        if (!profile || !profile.enabled || profile.disabledAt !== null
+          || profile.scopeId !== owners.configurationScope.id || profile.scopeKind !== owners.configurationScope.kind
           || profile.role !== 'DEFAULT' || profile.serviceMode !== selection.mode
           || (selection.mode === 'platform_managed' ? profile.id !== producer.platformProfileId : profile.configRevision !== selection.revision)) throw new BudgetError('UNAVAILABLE');
         if (selection.mode === 'tenant_managed') {
@@ -158,13 +161,21 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
       };
       const selected = await selectConfiguration(), context = (await root.current()).context;
       if (context.scope.kind !== 'workspace') throw new BudgetError('FORBIDDEN');
-      const enabled = { enabled: true, revision: 1 }, controlled = { enabled: command.enabled, revision: 1 };
-      const saved = await root.settings.save({ ...selector, expectedRevision: 0, settings: { draftVersion: AI_USAGE_DRAFT_VERSION,
+      const initial = refresh ? null : initialize.parse(value);
+      const enabled = { enabled: true, revision: 1 }, controlled = { enabled: initial?.enabled ?? false, revision: 1 };
+      const settings: AiUsageSettingsDraft = previous ? structuredClone(previous.settings) : { draftVersion: AI_USAGE_DRAFT_VERSION,
         scope: { kind: 'tenant', tenantId: context.scope.tenantId }, config: selected.config, sceneCode: command.sceneCode,
-        allowedModels: [selected.model], allowedScenes: [command.sceneCode], budget: command.budget,
-        maxConcurrent: command.maxConcurrent, maxCallsPerRun: command.maxCallsPerRun,
+        allowedModels: [selected.model], allowedScenes: [command.sceneCode], budget: initial!.budget,
+        maxConcurrent: initial!.maxConcurrent, maxCallsPerRun: initial!.maxCallsPerRun,
         gates: { platform: enabled, tenant: command.scope === 'tenant' ? controlled : enabled,
-          scene: command.scope === 'workspace' ? controlled : enabled } } }, async () => {
+          scene: command.scope === 'workspace' ? controlled : enabled } };
+      if (refresh) {
+        settings.config = selected.config;
+        settings.allowedModels = [selected.model];
+        const layer = command.scope === 'tenant' ? 'tenant' : 'scene';
+        settings.gates[layer] = { enabled: false, revision: command.expectedRevision + 1 };
+      }
+      const saved = await root.settings.save({ ...selector, expectedRevision: command.expectedRevision, settings }, async () => {
         if ((await selectConfiguration()).fingerprint !== selected.fingerprint) throw new BudgetError('REVISION_CONFLICT');
       });
       try {
@@ -174,7 +185,12 @@ export function composeRequestBoundBudgetManagement(dependencies: BudgetManageme
           observation: policy.revision === saved.revision ? 'same_revision' as const : 'changed_after_save' as const };
       }
       catch { throw new BudgetError('PENDING_RECONCILIATION'); }
-    }),
+    });
+  return Object.freeze({
+    read: (request: BudgetManagementRequest, value: unknown) => call(request, value, async (credentials, command) =>
+      (await tenantRoot(credentials)).settings.summary(command)),
+    initialize: (request: BudgetManagementRequest, value: unknown) => configure(request, value, false),
+    refreshConfiguration: (request: BudgetManagementRequest, value: unknown) => configure(request, value, true),
     change: (request: BudgetManagementRequest, value: unknown) => call(request, value, async (credentials, value) => {
       const parsed = change.safeParse(value);
       if (!parsed.success) throw new BudgetError('INVALID');
