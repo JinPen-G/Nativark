@@ -1,6 +1,7 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiOriginalOrderReadHttpModule } from './original-order-read-http.module';
+import { AiSettingsTaskHttpModule } from './settings-task-http.module';
 import { AiHumanQuoteSelectionModule } from '../task-request/human-quote-selection.module';
 import type { FormalApprovedOrderReprepareConfiguration } from '../approval-execution/formal-approved-order-reprepare.composition';
 import type { SelectedQuoteTaskConfiguration } from './human-quote-order.composition';
@@ -23,6 +24,17 @@ export { AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQ
 
 @Module({})
 export class AiOriginalScenesModule {
+  /** Default closed, explicitly selected instead of the legacy full-model
+   * settings routes. No model runtime is constructed by this HTTP assembly. */
+  static registerHttpSettingsTask(input?: {
+    dependencies: Parameters<typeof composeRequestBoundSettingsTask>[0]; options: AiSceneRequestOptions;
+    configuration: Parameters<typeof composeRequestBoundSettingsTask>[2]
+  }): DynamicModule {
+    if (!input?.options?.enabled) return AiSettingsTaskHttpModule.register();
+    return AiSettingsTaskHttpModule.register({ enabled: true,
+      requestModule: this.registerRequestBoundSettingsTask(input.dependencies, input.options, input.configuration),
+      requestToken: AI_ORIGINAL_SETTINGS_TASK_REQUESTS });
+  }
   /** Current-request settings chain without constructing a model/provider.
    * Host task/change references are server-selected, never caller configuration. */
   static registerRequestBoundSettingsTask(
