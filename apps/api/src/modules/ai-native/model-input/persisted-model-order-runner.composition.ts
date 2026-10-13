@@ -5,7 +5,9 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { isGatewayOrderExplainRequest, isGatewayResult } from '../gateway-contract-validation';
 import { composePersistedTaskModelInput } from './persisted-task-model-input.composition';
-import { TASK_TEXT_MODEL_TOOL, taskModelMaterialSchema, taskModelPolicy, parseTaskModelInput, taskModelFingerprint } from './task-model-input';
+import { AiOrderReadFactsService } from '../order-read-facts.service';
+import { AiOrderRouteContextAuthority } from '../order-route-context.authority';
+import { TASK_TEXT_MODEL_TOOL, taskModelMaterialSchema, taskModelPolicy, parseTaskModelInput, taskModelFingerprint, taskModelIdentity } from './task-model-input';
 import { PrismaTaskPlanInputSource } from '../runner/prisma-task-plan-input.source';
 import { composePersistedOrderFactsTaskRunner } from '../runner/persisted-catalog-runner.composition';
 import { composeCurrentAuthorizedPersistentTaskInputRunner } from '../runner/authorized-persistent-task-input.composition';
@@ -133,5 +135,54 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
     if (signal?.aborted) throw unavailable();
     await root.evidence.savePlan({ taskId: task.taskId, runId: task.runId, taskRevision, steps: expectedSteps, limits: task.limits }, lease);
   };
-  return Object.freeze({ ...root, model, application: root.createApplication(input.host, prepare) });
+  const readOrderResult = async (value: unknown) => {
+    const command = z.object({ resultId: id }).strict().safeParse(structuredClone(value));
+    if (!command.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const access = await model.tasks.resolveAccess(task.taskId, 'read_step_terminal');
+    const row = await input.db.aiTask.findFirst({ where: access.where });
+    if (!row) throw denied();
+    const original = await root.results.read({ taskId: task.taskId, resultId: command.data.resultId });
+    if (original.runId !== task.runId) throw denied();
+    const key = { scopeId: row.scopeId, taskId: task.taskId, runId: task.runId };
+    const step = await input.db.aiStep.findFirst({ where: { ...key, id: original.stepId } });
+    if (!step || step.scopeId !== key.scopeId || step.taskId !== task.taskId || step.runId !== task.runId
+      || step.toolCode !== 'rental.order.explain' || step.toolVersion !== AI_TOOL_DRAFT_VERSION
+      || step.actionId !== original.actionId || !step.inputRef) throw denied();
+    const stored = await input.db.aiTaskActionInput.findFirst({ where: { ...key, id: step.inputRef,
+      registrationRef: task.orderRegistrationRef } });
+    const expected = { contractVersion: AI_CONTRACT_DRAFT_VERSION, toolCode: 'rental.order.explain',
+      toolVersion: AI_TOOL_DRAFT_VERSION, input: { orderId: task.orderId } };
+    if (!stored || stored.scopeId !== key.scopeId || stored.taskId !== task.taskId || stored.runId !== task.runId
+      || stored.id !== step.inputRef || stored.registrationRef !== task.orderRegistrationRef
+      || stored.toolCode !== step.toolCode || stored.toolVersion !== step.toolVersion
+      || requestFingerprint(stored.payload) !== requestFingerprint(expected) || stored.fingerprint !== step.requestFingerprint
+      || stored.fingerprint !== requestFingerprint(expected)) throw denied();
+    const base = { taskId: task.taskId, runId: task.runId, resultId: original.resultId,
+      observedAt: original.observedAt, businessExecution: 'readonly_not_business_commit' as const,
+      automaticRetry: false as const };
+    if (original.status !== 'succeeded') {
+      if ((await model.tasks.resolveAccess(task.taskId, 'read_step_terminal')).bindingKey !== access.bindingKey) throw denied();
+      return Object.freeze({ ...base, status: original.status, facts: null,
+        nextAction: original.status === 'unknown' ? 'reconcile_original_task' : 'manual_review' });
+    }
+    // A persisted successful read is historical evidence, not current resource
+    // permission. Reopen through the original order Guard/ALS before exposure.
+    const authority = new AiOrderRouteContextAuthority(input.guard, input.credentials, task.orderId, input.clock);
+    const currentContext = await authority.resolve();
+    const current = await new AiOrderReadFactsService(input.core, authority, input.clock).read(currentContext);
+    const saved = z.object({ audience: z.string(), scope: z.unknown(), order: z.record(z.unknown()),
+      sources: z.array(z.unknown()).max(1), paymentEvidence: z.literal('not_loaded'), historicalFeeEvidence: z.literal('not_loaded') })
+      .passthrough().safeParse(original.payload);
+    if (!saved.success || saved.data.order.id !== task.orderId || saved.data.audience !== current.audience
+      || requestFingerprint(saved.data.scope) !== requestFingerprint(current.scope)) throw denied();
+    const latest = await root.results.read({ taskId: task.taskId, resultId: original.resultId });
+    if (taskModelIdentity(await authority.resolve()) !== taskModelIdentity(currentContext)) throw denied();
+    if (latest.status !== 'succeeded' || latest.contentHash !== original.contentHash || latest.actionId !== original.actionId
+      || latest.stepId !== original.stepId || (await model.tasks.resolveAccess(task.taskId, 'read_step_terminal')).bindingKey !== access.bindingKey) throw denied();
+    const changed = requestFingerprint(saved.data.order) !== requestFingerprint(current.order);
+    return Object.freeze({ ...base, status: changed ? 'stale' as const : 'available' as const,
+      facts: changed ? null : structuredClone(current), nextAction: changed ? 'reread_current_facts' : 'read_only',
+      modelText: 'not_used_as_business_evidence' as const });
+  };
+  return Object.freeze({ ...root, model, readOrderResult, application: root.createApplication(input.host, prepare) });
 }
