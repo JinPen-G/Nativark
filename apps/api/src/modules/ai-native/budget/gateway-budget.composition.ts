@@ -56,14 +56,40 @@ export function createPersistedGatewayBudget(input: {
   // Management consumers use the SAME service/repository/entitlement as the
   // financial lifecycle. These are internal server methods, not public DTOs
   // or a client-supplied scope ID. Platform policy remains platform-owned.
+  const readSettings = async (value: unknown) => {
+    const parsed = selector.safeParse(value);
+    if (!parsed.success) throw new BudgetError('INVALID');
+    const current = await target(parsed.data);
+    const policy = await service.settings(current.key);
+    await current.recheck();
+    if (policy && (policy.scopeId !== current.key.scopeId || policy.scopeKind !== current.key.scopeKind
+      || policy.sceneCode !== current.key.sceneCode || policy.settings.sceneCode !== current.key.sceneCode
+      || policy.settings.scope.kind !== 'tenant' || policy.settings.scope.tenantId !== current.tenantId)) throw new BudgetError('FORBIDDEN');
+    return policy;
+  };
   const settings = Object.freeze({
-    read: async (value: unknown) => {
+    read: readSettings,
+    /** Tenant-facing data projection, not a model capability/dispatch grant.
+     * The raw read above remains an internal server management result. */
+    summary: async (value: unknown) => {
       const parsed = selector.safeParse(value);
       if (!parsed.success) throw new BudgetError('INVALID');
-      const current = await target(parsed.data);
-      const policy = await service.settings(current.key);
-      await current.recheck();
-      return policy;
+      const policy = await readSettings(parsed.data);
+      const base = { scope: parsed.data.scope, sceneCode: parsed.data.sceneCode, admission: 'not_granted' as const };
+      if (!policy) return { ...base, state: 'not_configured' as const, revision: null, settings: null, modelPolicy: null };
+      const stored = policy.settings;
+      if (!isGatewayConfig(stored.config)) throw new BudgetError('UNAVAILABLE');
+      if (stored.scope.kind !== 'tenant' || !('tenantId' in stored.config)
+        || stored.config.tenantId !== stored.scope.tenantId) throw new BudgetError('FORBIDDEN');
+      return { ...base, state: 'configured' as const, revision: policy.revision,
+        settings: structuredClone({ gates: stored.gates, budget: stored.budget, allowedScenes: stored.allowedScenes,
+          maxConcurrent: stored.maxConcurrent, maxCallsPerRun: stored.maxCallsPerRun }),
+        // Platform provider/model/credential metadata must not reach tenant UI,
+        // including through an allowedModels whitelist used internally.
+        modelPolicy: stored.config.serviceMode === 'platform_managed'
+          ? { mode: 'platform_managed' as const, serviceName: 'Rental OS AI' as const, selection: 'managed_by_platform' as const }
+          : { mode: 'tenant_managed' as const, allowedModels: [...stored.allowedModels] },
+        configurationMeaning: 'saved_policy_reference_not_current_selection' as const };
     },
     save: async (value: unknown) => {
       const parsed = write.safeParse(structuredClone(value));
