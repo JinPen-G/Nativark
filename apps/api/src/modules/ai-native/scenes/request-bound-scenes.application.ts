@@ -15,6 +15,7 @@ import { composePersistedTaskAuthorization } from '../task-authorization.composi
 import { AiOriginalSceneRecoveryService } from './original-scene-recovery.service';
 import { composeTaskSettingsHost, type AiSettingsTask } from '../runner/settings-task-host.composition';
 import { composeAiSettingsBusinessConsumer } from './settings-business-consumer.composition';
+import { composeApprovedSettingsApplication } from '../approval-execution/approved-settings-application.composition';
 import type { ApprovedSettingsApplicationDependencies } from '../approval-execution/approved-settings-task.authority';
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
 import { originalIdentityHash } from '../task-request/original-request.authority';
@@ -445,5 +446,43 @@ export function composeRequestBoundHumanQuoteOrder(dependencies: RequestBoundQuo
     readSelectedReprepareEligibility: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedReprepareEligibility(command)),
     reprepareSelectedProposal: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reprepareSelectedProposal(command)),
     readSelectedReprepareReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readSelectedReprepareReceipt(command))
+  });
+}
+
+/** Settings business requests do not need a model runtime or a quote/order
+ * host. Every action consumes the existing settings application/runner only. */
+export function composeRequestBoundSettingsTask(
+  dependencies: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>,
+  options: AiSceneRequestOptions,
+  configuration: { host: AiTaskApplicationHost; task: AiSettingsTask }) {
+  const selected = freezeOriginalInput(structuredClone(configuration));
+  const call = bindRequests(dependencies, options, input => {
+    const settings = composeApprovedSettingsApplication(input);
+    let host: ReturnType<typeof composeTaskSettingsHost> | undefined;
+    const requireHost = () => host ??= composeTaskSettingsHost({ ...input, host: selected.host, task: selected.task });
+    const requireTask = (value: unknown) => {
+      if (!value || typeof value !== 'object' || !('taskId' in value) || value.taskId !== selected.task.taskId
+        || 'runId' in value && value.runId !== selected.task.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return requireHost();
+    };
+    return { settings, requireTask, get consumer() {
+      return composeAiSettingsBusinessConsumer({ ...input, settingsHost: requireHost() });
+    } };
+  });
+  return Object.freeze({
+    readCurrent: (request: AiSceneHttpRequest) => call(request, {}, app => app.settings.readCurrent()),
+    prepareChange: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.settings.prepareChange(command)),
+    readChangeReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.settings.readChangeReceipt(command)),
+    readBusiness: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => {
+      app.requireTask(command && typeof command === 'object' && 'preparation' in command ? command.preparation : undefined);
+      return app.consumer.read(command);
+    }),
+    start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.requireTask(command).application.start(command, signal)),
+    readConfirmation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.requireTask(command).application.readConfirmation(command)),
+    decide: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.requireTask(command).settings.application.decide(command)),
+    readDecisionReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.requireTask(command).settings.application.readDecisionReceipt(command)),
+    continueConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.requireTask(command).application.continueOriginalConfirmation(command, signal)),
+    reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.requireTask(command).application.reconcileOriginal(command, signal)),
+    requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.requireTask(command).application.requestCancelOriginal(command))
   });
 }

@@ -12,15 +12,28 @@ import { composeAiOriginalSceneModel, type AiOriginalSceneModelDependencies } fr
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneModel, type RequestBoundOriginalSceneDependencies,
   composeRequestBoundPersistedOriginalSceneModel, type RequestBoundPersistedOriginalSceneModelDependencies,
   type RequestBoundOriginalSceneModelDependencies, type AiSceneModelRequestOptions, type AiSceneRequestOptions,
-  type RequestBoundQuoteOrderDependencies, composeRequestBoundClarifiedQuoteSelection } from './request-bound-scenes.application';
+  type RequestBoundQuoteOrderDependencies, composeRequestBoundClarifiedQuoteSelection,
+  composeRequestBoundSettingsTask } from './request-bound-scenes.application';
 
 export const AI_ORIGINAL_SCENE_MODEL = Symbol('AI_ORIGINAL_SCENE_MODEL');
 export const AI_ORIGINAL_ORDER_READ_REQUESTS = Symbol('AI_ORIGINAL_ORDER_READ_REQUESTS');
 export const AI_CLARIFIED_QUOTE_SELECTION_REQUESTS = Symbol('AI_CLARIFIED_QUOTE_SELECTION_REQUESTS');
+export const AI_ORIGINAL_SETTINGS_TASK_REQUESTS = Symbol('AI_ORIGINAL_SETTINGS_TASK_REQUESTS');
 export { AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS } from './original-scenes.controller';
 
 @Module({})
 export class AiOriginalScenesModule {
+  /** Current-request settings chain without constructing a model/provider.
+   * Host task/change references are server-selected, never caller configuration. */
+  static registerRequestBoundSettingsTask(
+    dependencies: Parameters<typeof composeRequestBoundSettingsTask>[0], options: AiSceneRequestOptions,
+    configuration: Parameters<typeof composeRequestBoundSettingsTask>[2]): DynamicModule {
+    const server = { ...dependencies, scene: structuredClone(dependencies.scene) };
+    const selected = structuredClone(configuration), requestOptions = { ...options };
+    return { module: AiOriginalScenesModule, providers: [{ provide: AI_ORIGINAL_SETTINGS_TASK_REQUESTS,
+      useFactory: () => composeRequestBoundSettingsTask(server, requestOptions, selected) }],
+      exports: [AI_ORIGINAL_SETTINGS_TASK_REQUESTS] };
+  }
   /** One explicit host for model clarification and the existing human flow.
    * Registration performs no business action; quote confirmation is not approval. */
   static registerHttpQuoteFlow(dependencies: RequestBoundPersistedOriginalSceneModelDependencies,
