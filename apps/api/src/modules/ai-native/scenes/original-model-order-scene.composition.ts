@@ -25,7 +25,10 @@ const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 /** Explicit server assembly; the runner owns claims, immutable plans and recovery.
  * No prompt/task/run/limits or result payload is accepted from a caller. */
 export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDependencies, scenes: Scenes,
-  host: AiTaskApplicationHost, run: Run, results: Pick<AiOriginalSceneResultService, 'read' | 'reopenSource'>) {
+  host: AiTaskApplicationHost, run: Run, results: Pick<AiOriginalSceneResultService, 'read' | 'reopenSource'>,
+  options?: { answerRoundTrip: true }) {
+  if (options && (options.answerRoundTrip !== true || Object.keys(options).some(key => key !== 'answerRoundTrip'))) throw unavailable();
+  const answerRoundTrip = options?.answerRoundTrip === true;
   if (input.scene.code !== 'order_explanation' || input.gatewayScene.orderExplainTool !== true
     || input.gatewayScene.structuredOutput || typeof run?.inputSource?.resolve !== 'function'
     || typeof run.inputSource.validateAnswers !== 'function' || typeof run.financialEvidence?.readDispatch !== 'function') throw unavailable();
@@ -59,6 +62,7 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
     const scopeId = before.scopeId;
     const key = { scopeId, taskId: task.taskId, runId: task.runId };
     const modelRegistrationRef = `scene-model:${ref.inputRef}`, orderRegistrationRef = `scene-order:${ref.inputRef}`;
+    const answerRegistrationRef = answerRoundTrip ? `scene-answer:${ref.inputRef}` : undefined;
     const stored = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
     let material: z.infer<typeof taskModelMaterialSchema>, limits: z.infer<typeof aiTaskRunnerLimitsSchema>;
     if (fresh) {
@@ -78,14 +82,16 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
         sceneCode: original.request.sceneCode, sceneVersion: original.receipt.sceneVersion } });
       if (!current?.enabled || current.expiresAt && current.expiresAt.getTime() <= (input.clock?.() ?? new Date()).getTime()) throw unavailable();
       limits = aiTaskRunnerLimitsSchema.parse(structuredClone(current.limits));
-      if (limits.maxSteps < 2 || limits.maxCalls < 2) throw unavailable();
+      if (limits.maxSteps < (answerRoundTrip ? 3 : 2) || limits.maxCalls < (answerRoundTrip ? 3 : 2)) throw unavailable();
     } else {
       if (!stored || stored.scopeId !== scopeId || stored.taskId !== task.taskId || stored.runId !== task.runId) throw unavailable();
       const plan = aiTaskRunPlanSchema.parse(structuredClone(stored.payload));
       if (requestFingerprint(plan) !== stored.planHash) throw denied();
       const expected = [
         { registrationRef: modelRegistrationRef, toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION, operation: 'external_unknown' },
-        { registrationRef: orderRegistrationRef, toolCode: 'rental.order.explain', toolVersion: AI_TOOL_DRAFT_VERSION, operation: 'readonly' }
+        { registrationRef: orderRegistrationRef, toolCode: 'rental.order.explain', toolVersion: AI_TOOL_DRAFT_VERSION, operation: 'readonly' },
+        ...(answerRegistrationRef ? [{ registrationRef: answerRegistrationRef, toolCode: TASK_TEXT_MODEL_TOOL,
+          toolVersion: AI_TOOL_DRAFT_VERSION, operation: 'external_unknown' }] : [])
       ];
       if (plan.taskId !== task.taskId || plan.runId !== task.runId || requestFingerprint(plan.steps) !== requestFingerprint(expected)) throw denied();
       const saved = await input.db.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: modelRegistrationRef } });
@@ -100,8 +106,8 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
     const runner = composePersistedModelOrderTaskRunner({ ...input, host: serverHost, originalRequests: scenes.requests,
       inputSource: run.inputSource, financialEvidence: run.financialEvidence, monotonic: run.monotonic,
       task: { taskId: task.taskId, runId: task.runId, orderId: original.request.sceneCode === 'order_explanation' ? original.request.input.orderId : '',
-        modelRegistrationRef, orderRegistrationRef, material, limits } });
-    return { before, runner, key, orderRegistrationRef };
+        modelRegistrationRef, orderRegistrationRef, ...(answerRegistrationRef ? { answerRegistrationRef } : {}), material, limits } });
+    return { before, runner, key, orderRegistrationRef, answerRegistrationRef, modelRegistrationRef };
   };
   const application = Object.freeze({
     async requestCancel(value: unknown) {
@@ -224,6 +230,19 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
       await verify(before);
       return freezeOriginalInput({ original: before.original.receipt, taskId: before.task.taskId, runId: before.task.runId, result });
     },
+    async readAnswer(value: unknown) {
+      if (!answerRoundTrip) throw unavailable();
+      const { before, runner, key, answerRegistrationRef } = await assemble(value, false);
+      const frozen = await input.db.aiTaskActionInput.findFirst({ where: { ...key, registrationRef: answerRegistrationRef } });
+      if (!frozen) throw unavailable();
+      const steps = await input.db.aiStep.findMany({ where: { ...key, inputRef: frozen.id,
+        toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION }, take: 2 });
+      if (steps.length > 1) throw denied();
+      const result = steps[0]?.resultRef ? await runner.readAnswerResult({ resultId: steps[0].resultRef })
+        : { status: 'not_observed' as const, text: null, automaticRetry: false as const };
+      await verify(before);
+      return freezeOriginalInput({ original: before.original.receipt, result });
+    },
     async readNextSteps(value: unknown) {
       const before = await bound(value);
       if (before.original.request.sceneCode !== 'order_explanation') throw denied();
@@ -237,14 +256,19 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
       const persisted = composePersistedTaskCenter(input);
       const center = composeAiTaskCenterScene({ ...persisted, scenes, modelResults: results,
         orderFacts: { read: application.readOrderResult } });
-      const steps = await input.db.aiStep.findMany({ where: { scopeId: before.scopeId,
-        taskId: before.task.taskId, runId: before.task.runId, toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION }, take: 2 });
+      const modelInput = await input.db.aiTaskActionInput.findFirst({ where: { scopeId: before.scopeId,
+        taskId: before.task.taskId, runId: before.task.runId, registrationRef: `scene-model:${before.ref.inputRef}` } });
+      const steps = modelInput ? await input.db.aiStep.findMany({ where: { scopeId: before.scopeId,
+        taskId: before.task.taskId, runId: before.task.runId, inputRef: modelInput.id,
+        toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION }, take: 2 }) : [];
       if (steps.length > 1) throw denied();
       const result = await center.readScene({ kind: 'original', original: before.ref,
         taskId: before.task.taskId, runId: before.task.runId, ...(steps[0]?.resultRef ? { resultId: steps[0].resultRef } : {}) });
       const handoff = await application.readNextSteps(before.ref);
       await verify(before);
-      return freezeOriginalInput({ ...result, handoff });
+      const answer = answerRoundTrip ? await application.readAnswer(before.ref) : undefined;
+      await verify(before);
+      return freezeOriginalInput({ ...result, handoff, ...(answer ? { answer } : {}) });
     }
   });
   return application;
