@@ -67,7 +67,7 @@ export class TextCapabilityProbeApplication {
     const admissions = new PrismaAdmissionRepository(input.db);
     this.admission = new InvocationAdmissionService(admissions, input.clock);
     this.dispatch = new InvocationDispatchService(admissions);
-    this.adapter = new ChatCompletionsAdapter(input.protocol ?? createNativeModelEgressTransport(), { mediaInput: ['image'] });
+    this.adapter = new ChatCompletionsAdapter(input.protocol ?? createNativeModelEgressTransport(), { mediaInput: ['image', 'audio'] });
   }
   private authority(context: GatewayContext, command: TextProbeCommand) {
     return new TextCapabilityProbeAuthority({ management: this.input.management, scopes: this.input.scopes,
@@ -102,7 +102,7 @@ export class TextCapabilityProbeApplication {
    * chooses a model/profile; the platform ID is fixed by the server factory.
    * Persist this command once, then read it back instead of preparing on retry. */
   prepareRequestCurrent(requestKey: string, platformProfileId: string, capability: TextProbeCapability = 'text') {
-    if (capability !== 'text' && capability !== 'streaming' && capability !== 'vision' && capability !== 'structured_output' && capability !== 'tools') throw new ModelGatewayError('INVALID_REQUEST');
+    if (!textProbeCommandSchema.shape.capability.unwrap().safeParse(capability).success) throw new ModelGatewayError('INVALID_REQUEST');
     const key = textProbeCommandSchema.shape.operationId.parse(requestKey);
     const platformId = textProbeDescriptorSchema.shape.profileId.parse(platformProfileId);
     return this.forCurrentRequest(async context => {
