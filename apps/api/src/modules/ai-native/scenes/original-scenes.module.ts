@@ -12,10 +12,11 @@ import { composeAiOriginalSceneModel, type AiOriginalSceneModelDependencies } fr
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneModel, type RequestBoundOriginalSceneDependencies,
   composeRequestBoundPersistedOriginalSceneModel, type RequestBoundPersistedOriginalSceneModelDependencies,
   type RequestBoundOriginalSceneModelDependencies, type AiSceneModelRequestOptions, type AiSceneRequestOptions,
-  type RequestBoundQuoteOrderDependencies } from './request-bound-scenes.application';
+  type RequestBoundQuoteOrderDependencies, composeRequestBoundClarifiedQuoteSelection } from './request-bound-scenes.application';
 
 export const AI_ORIGINAL_SCENE_MODEL = Symbol('AI_ORIGINAL_SCENE_MODEL');
 export const AI_ORIGINAL_ORDER_READ_REQUESTS = Symbol('AI_ORIGINAL_ORDER_READ_REQUESTS');
+export const AI_CLARIFIED_QUOTE_SELECTION_REQUESTS = Symbol('AI_CLARIFIED_QUOTE_SELECTION_REQUESTS');
 export { AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS } from './original-scenes.controller';
 
 @Module({})
@@ -34,8 +35,12 @@ export class AiOriginalScenesModule {
     const model = this.registerHttpPersistedModel(dependencies, options);
     const human = AiHumanQuoteSelectionModule.registerHttpTask(business.dependencies,
       { enabled: options.enabled, audience: options.audience }, business.task, business.reprepare);
+    const serverDependencies = { ...dependencies, gateway: { ...dependencies.gateway, adapters: [...dependencies.gateway.adapters] } };
+    const serverOptions = { ...options, host: structuredClone(options.host) }, serverBusiness = { ...business.dependencies };
     return { ...model, imports: [...(model.imports ?? []), human],
-      exports: [...(model.exports ?? []), AiHumanQuoteSelectionModule] };
+      providers: [...(model.providers ?? []), { provide: AI_CLARIFIED_QUOTE_SELECTION_REQUESTS,
+        useFactory: () => composeRequestBoundClarifiedQuoteSelection(serverDependencies, serverOptions, serverBusiness) }],
+      exports: [...(model.exports ?? []), AiHumanQuoteSelectionModule, AI_CLARIFIED_QUOTE_SELECTION_REQUESTS] };
   }
   /** Uses the published original-order-read contract, never legacy model routes. */
   static registerHttpOrderReadChain(dependencies: RequestBoundPersistedOriginalSceneModelDependencies,

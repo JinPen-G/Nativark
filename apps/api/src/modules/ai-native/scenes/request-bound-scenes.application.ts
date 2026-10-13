@@ -20,6 +20,7 @@ import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-req
 import { originalIdentityHash } from '../task-request/original-request.authority';
 import { composePersistedTaskCallGateway, type PersistedTaskCallGatewayDependencies } from '../task-model-gateway.composition';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
+import { parseQuoteSelection } from '../task-request/quote-selection.validation';
 
 export type AiSceneHttpRequest = { headers: { authorization?: unknown } };
 export type AiSceneRequestOptions = { enabled: boolean; audience: 'operator' | 'staff' };
@@ -346,6 +347,49 @@ export function composeRequestBoundQuoteSelections(dependencies: RequestBoundQuo
     select: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.select(command)),
     read: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.read(command)),
     reconcile: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reconcile(command))
+  });
+}
+
+/** Server consumer of two existing commands, not a new HTTP protocol. Human
+ * selection must point at the exact clarified Core operation and its durable
+ * successor, never an arbitrary authorized quote or a completed model plan. */
+export function composeRequestBoundClarifiedQuoteSelection(
+  dependencies: RequestBoundPersistedOriginalSceneModelDependencies,
+  options: Parameters<typeof composeRequestBoundPersistedOriginalSceneModel>[1],
+  business: RequestBoundQuoteOrderDependencies) {
+  if (dependencies.scene.code !== 'quote_clarification' || business.scene.code !== dependencies.scene.code
+    || business.scene.version !== dependencies.scene.version || options.orderReadChain
+    || business.db !== dependencies.db || business.auth !== dependencies.auth || business.guard !== dependencies.guard
+    || business.core !== dependencies.core || business.subscriptions !== dependencies.subscriptions) {
+    throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  }
+  const model = composeRequestBoundPersistedOriginalSceneModel(dependencies, options);
+  const selections = composeRequestBoundQuoteSelections(business, { enabled: options.enabled, audience: options.audience });
+  const clarificationSchema = z.object({ original: originalRequestReferenceSchema, submission: z.unknown() }).strict();
+  return Object.freeze({
+    async select(request: AiSceneHttpRequest, value: unknown, clarification: unknown) {
+      const command = parseQuoteSelection(structuredClone(value));
+      const parsed = clarificationSchema.safeParse(structuredClone(clarification));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const source = freezeOriginalInput(parsed.data);
+      if (command.originalInputRef !== source.original.inputRef) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      // Snapshot credentials once; mutable caller request/command objects must
+      // not switch actors or payloads between awaited source checks and select.
+      const currentRequest = freezeOriginalInput({ headers: { authorization: request?.headers?.authorization } });
+      const observed = await model.readClarifiedQuoteReceipt(currentRequest, source);
+      if (!('result' in observed) || observed.receipt.state !== 'observed' || observed.result.status !== 'quoted'
+        || !observed.result.quote) {
+        throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      }
+      if (observed.receipt.taskId !== command.taskId || observed.receipt.runId !== command.runId
+        || observed.original.inputRef !== command.originalInputRef || observed.result.quote.id !== command.order.quoteId) {
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      }
+      // Existing repository rechecks current quote, owner, human payload,
+      // revision, successor ancestry and absence of a frozen order/model plan.
+      // This does not start that successor or attest an order/approval.
+      return selections.select(currentRequest, command);
+    }
   });
 }
 
