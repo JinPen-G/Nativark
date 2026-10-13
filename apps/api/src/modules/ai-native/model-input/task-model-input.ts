@@ -19,13 +19,14 @@ export function taskModelPolicy(value: TaskModelPolicy): TaskModelPolicy {
   const { kind, ...raw } = structuredClone(value);
   const parsed = gatewayTextIntentPolicySchema.parse(raw);
   if ((kind !== undefined && kind !== 'image' && kind !== 'audio')
-    || parsed.structuredOutput || (kind && parsed.orderExplainTool)) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+    || (kind && (parsed.structuredOutput || parsed.orderExplainTool))
+    || (parsed.structuredOutput && parsed.orderExplainTool)) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
   return Object.freeze({ ...parsed, ...(kind ? { kind } : {}) });
 }
-export function taskModelCapabilities(value: TaskModelPolicy): Array<'text' | 'vision' | 'audio' | 'tools'> {
+export function taskModelCapabilities(value: TaskModelPolicy): Array<'text' | 'vision' | 'audio' | 'tools' | 'structured_output'> {
   const policy = taskModelPolicy(value);
   return policy.kind ? ['text', policy.kind === 'image' ? 'vision' : 'audio']
-    : policy.orderExplainTool ? ['text', 'tools'] : ['text'];
+    : policy.orderExplainTool ? ['text', 'tools'] : policy.structuredOutput ? ['text', 'structured_output'] : ['text'];
 }
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 export const taskModelMaterialSchema = z.object({
@@ -122,13 +123,13 @@ export function taskModelFingerprint(input: TaskModelInput, policy: TaskModelPol
 
 export function taskModelIntent(taskId: string, runId: string, registrationRef: string, sceneCode: string,
   material: z.infer<typeof taskImageMaterialSchema> | z.infer<typeof taskAudioMaterialSchema>, kind?: TaskModelKind,
-  orderExplainTool = false): AiGatewayIntentDraft {
-  if (kind && orderExplainTool) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+  orderExplainTool = false, structuredOutput = false): AiGatewayIntentDraft {
+  if ((kind && (orderExplainTool || structuredOutput)) || (orderExplainTool && structuredOutput)) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
   return { draftVersion: 'ain-c03-draft-2',
     requestId: `model-${requestFingerprint({ taskId, runId, registrationRef })}`, sceneCode,
     messages: material.messages, maxOutputTokens: material.maxOutputTokens,
     requiredFeatures: kind === 'image' ? ['text', 'image'] : kind === 'audio' ? ['text', 'audio']
-      : orderExplainTool ? ['text', 'tools'] : ['text'], optionalFeatures: [] };
+      : orderExplainTool ? ['text', 'tools'] : structuredOutput ? ['text', 'structured_output'] : ['text'], optionalFeatures: [] };
 }
 
 export function taskModelConfiguration(route: GatewayRoutingResolution): AiGatewayConfigReferenceDraft {

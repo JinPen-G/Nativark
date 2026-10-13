@@ -100,7 +100,7 @@ export class TaskModelGatewayInputSource implements AiTaskGatewayInputSource {
     const route = await this.route(context);
     const input: TaskModelInput = { mode: 'invoke',
       intent: taskModelIntent(command.taskId, command.lease.runId, command.registrationRef, this.scene.sceneCode, command.material, this.kind,
-        this.scene.orderExplainTool === true),
+        this.scene.orderExplainTool === true, this.scene.structuredOutput === true),
       configuration: taskModelConfiguration(route), priceVersion: this.priceVersion,
       routingHash: gatewayRoutingBinding(route), identityHash: taskModelIdentity(context) };
     if (this.kind) input.media = (await this.media(context, input.intent)).references;
