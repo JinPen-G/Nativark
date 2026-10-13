@@ -2,7 +2,10 @@ import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } 
 import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientTaskCancelReceiptSchema,
   aiClientTaskInputCancellationReceiptSchema, aiClientTaskInputReadResponseSchema, AI_TASK_INPUT_DRAFT_VERSION,
   aiClientTaskInputSubmissionRequestSchema, aiClientTaskInputSubmissionReceiptSchema,
-  aiClientTaskInputReceiptReadResponseSchema, aiClientTaskModelControlResponseSchema, AI_TASK_DRAFT_VERSION } from '@rental-os/shared';
+  aiClientTaskInputReceiptReadResponseSchema, aiClientTaskModelControlResponseSchema, AI_TASK_DRAFT_VERSION,
+  AI_CLIENT_QUOTE_PREPARATION_VERSION, aiClientQuotePreparationRequestSchema, aiClientQuoteConfirmationRequestSchema,
+  aiClientQuotePreparationResponseSchema, aiClientQuotePreparationReadResponseSchema,
+  aiClientQuoteResultReadResponseSchema } from '@rental-os/shared';
 import { z } from 'zod';
 import { AiClientEntryError } from './client-entry-action';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -10,6 +13,7 @@ import { AiTaskTransitionResultUnknownError } from '../ai-task-transition.reposi
 import { AiTaskInputResultUnknownError } from '../task-input/task-input.errors';
 import { withRequestAbort, type AiRequestAbortSource } from './request-abort';
 import type { AiClientApplicationRequest, composeRequestBoundClientApplication } from './client-request.application';
+import { AiClientQuoteResultUnknownError } from '../client-quote-original.composition';
 
 export const AI_CLIENT_ENTRY_APPLICATION = Symbol('AI_CLIENT_ENTRY_APPLICATION');
 type Application = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
@@ -19,7 +23,8 @@ type Application = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
   'readOrderExplanation' | 'readSource' | 'requestOriginalTaskCancellation' | 'reconcileOriginalTaskInputCancellation' |
   'readOriginalTaskModelInput' | 'submitOriginalTaskModelInput' | 'readOriginalTaskModelInputReceipt' |
   'startOriginalTaskModel' | 'recoverOriginalTaskModel' | 'reconcileOriginalTaskModel' | 'continueOriginalTaskModelInput' |
-  'readOriginalTaskModelResult'>;
+  'readOriginalTaskModelResult' | 'prepareQuoteParameters' | 'confirmQuoteParameters' |
+  'readQuotePreparationOperation' | 'readPreparedQuoteOriginal'>;
 type ClientModelHttpRequest = AiClientApplicationRequest & AiRequestAbortSource;
 
 @Controller([AI_CLIENT_ENTRY_HTTP_DRAFT.basePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath])
@@ -38,7 +43,8 @@ export class AiClientEntryController {
         AI_RESOURCE_UNAVAILABLE: 503, AI_PROPOSAL_STALE: 409, AI_REVISION_CONFLICT: 409, AI_RESULT_UNKNOWN: 409 };
       let code = 'AI_RESOURCE_UNAVAILABLE';
       if (error instanceof z.ZodError) code = 'AI_INVALID_INPUT';
-      else if (error instanceof AiTaskTransitionResultUnknownError || error instanceof AiTaskInputResultUnknownError) code = 'AI_RESULT_UNKNOWN';
+      else if (error instanceof AiTaskTransitionResultUnknownError || error instanceof AiTaskInputResultUnknownError
+        || error instanceof AiClientQuoteResultUnknownError) code = 'AI_RESULT_UNKNOWN';
       else if (error instanceof AiClientEntryError) code = error.code;
       else if (error instanceof AiTaskRepositoryError) code = error.code === 'AI_STORAGE_UNAVAILABLE' ? 'AI_RESOURCE_UNAVAILABLE' : error.code;
       else if (error instanceof Error && aliases[error.message]) code = aliases[error.message];
@@ -51,6 +57,62 @@ export class AiClientEntryController {
       throw new HttpException({ code, retryable: false,
         ...(code === 'AI_RESULT_UNKNOWN' ? { nextAction: unknownAction } : {}) }, statuses[code]);
     }
+  }
+  private preparedQuoteObservation(value: unknown) {
+    const result = value as { state?: unknown; quote?: unknown; source?: unknown };
+    const raw = result?.quote;
+    let quote: unknown = null;
+    if (raw !== null && raw !== undefined) {
+      if (typeof raw !== 'object' || Array.isArray(raw)) throw new AiClientQuoteResultUnknownError();
+      const facts = raw as Record<string, unknown>;
+      const lines = facts.chargeLines;
+      if (lines !== undefined && lines !== null && (!Array.isArray(lines) || lines.length > 100)) throw new AiClientQuoteResultUnknownError();
+      quote = { quoteId: facts.id, currency: facts.currency ?? null, payableAmount: facts.payableAmount ?? null,
+        depositAmount: facts.depositAmount ?? null, preAuthAmount: facts.preAuthAmount ?? null,
+        pricingPlanVersion: facts.pricingPlanVersion ?? null, ruleVersion: facts.ruleVersion ?? null,
+        priceVersionId: facts.priceVersionId ?? null, calendarVersion: facts.calendarVersion ?? null,
+        categoryVersionId: facts.categoryVersionId ?? null, createdAt: facts.createdAt ?? null, expiresAt: facts.expiresAt ?? null,
+        chargeLines: Array.isArray(lines) ? lines.map(line => {
+          if (!line || typeof line !== 'object' || Array.isArray(line)) throw new AiClientQuoteResultUnknownError();
+          const item = line as Record<string, unknown>;
+          return { type: item.type, amount: item.amount, sourceId: item.sourceId ?? null, sourceVersion: item.sourceVersion ?? null };
+        }) : null };
+    }
+    const response = aiClientQuoteResultReadResponseSchema.safeParse({ contractVersion: AI_CLIENT_QUOTE_PREPARATION_VERSION,
+      state: quote === null ? 'unknown' : 'observed', source: result?.source, quote,
+      quotePersistence: quote === null ? 'unknown' : 'saved', inventoryReservation: 'not_attempted',
+      orderExecution: 'not_attempted', confirmation: 'parameters_only_not_order_approval', retryable: false,
+      nextAction: 'read_original_quote' });
+    if (!response.success || Buffer.byteLength(JSON.stringify(response.data), 'utf8') > 32768) throw new AiClientQuoteResultUnknownError();
+    return response.data;
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.prepareQuoteParameters) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  prepareQuoteParameters(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(async () => {
+      const value = await this.application.prepareQuoteParameters(request, aiClientQuotePreparationRequestSchema.parse(body));
+      const response = aiClientQuotePreparationResponseSchema.safeParse({ ...value, contractVersion: AI_CLIENT_QUOTE_PREPARATION_VERSION });
+      if (!response.success) throw new AiClientQuoteResultUnknownError();
+      return response.data;
+    }, 'read_quote_preparation_operation');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readQuotePreparationOperation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readQuotePreparationOperation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(async () => {
+      const value = await this.application.readQuotePreparationOperation(request, aiClientQuotePreparationRequestSchema.parse(body));
+      const response = aiClientQuotePreparationReadResponseSchema.safeParse({ ...value, contractVersion: AI_CLIENT_QUOTE_PREPARATION_VERSION });
+      if (!response.success) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return response.data;
+    }, 'read_quote_preparation_operation');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.confirmQuoteParameters) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  confirmQuoteParameters(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(async () => this.preparedQuoteObservation(await this.application.confirmQuoteParameters(request,
+      aiClientQuoteConfirmationRequestSchema.parse(body))), 'read_original_quote');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readPreparedQuoteOriginal) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readPreparedQuoteOriginal(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(async () => this.preparedQuoteObservation(await this.application.readPreparedQuoteOriginal(request,
+      aiClientQuoteConfirmationRequestSchema.parse(body))), 'read_original_quote');
   }
   private modelObservation(value: unknown) {
     const wrapped = value && typeof value === 'object' && 'execution' in value ? value.execution : value;
