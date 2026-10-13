@@ -67,9 +67,20 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
   /** Server composition only. Freeze a closed group of the existing readers;
    * no caller registry, policy seed or executable write is introduced. */
   static bindReadonlyPlanSources(sources: readonly PrismaTaskPlanInputSource[]) {
-    if (sources.length < 2 || sources.length > 3 || new Set(sources.map(source => source.toolCode)).size !== sources.length
+    this.bindClosedPlanSources(sources, ['rental.catalog.search', 'rental.availability.check', 'rental.order.explain'], 3);
+  }
+  /** The first supported model/tool handoff is a fixed text-model and original
+   * order-read pair. This does not enable arbitrary model-selected operations. */
+  static bindModelOrderPlanSources(model: PrismaTaskPlanInputSource, order: PrismaTaskPlanInputSource) {
+    if (model.toolCode !== TASK_TEXT_MODEL_TOOL || model.modelPolicy?.orderExplainTool !== true
+      || order.toolCode !== 'rental.order.explain') throw unavailable();
+    this.bindClosedPlanSources([model, order], [TASK_TEXT_MODEL_TOOL, 'rental.order.explain'], 2);
+  }
+  private static bindClosedPlanSources(sources: readonly PrismaTaskPlanInputSource[], allowed: readonly string[], max: number) {
+    if (!Array.isArray(sources) || sources.length < 2 || sources.length > max
       || sources.some(source => !(source instanceof PrismaTaskPlanInputSource) || source.planSources
-        || source.db !== sources[0].db || !['rental.catalog.search', 'rental.availability.check', 'rental.order.explain'].includes(source.toolCode))) throw unavailable();
+        || source.db !== sources[0].db || !allowed.includes(source.toolCode))
+      || new Set(sources.map(source => source.toolCode)).size !== sources.length) throw unavailable();
     const registry = new Map(sources.map(source => [source.toolCode, source]));
     for (const source of sources) source.planSources = registry;
   }

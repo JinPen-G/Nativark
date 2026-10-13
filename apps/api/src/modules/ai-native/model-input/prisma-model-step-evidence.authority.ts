@@ -1,7 +1,7 @@
 import type { PrismaClient, AiStep, AiTaskResultArtifact, AiTaskExecutionCharge } from '@prisma/client';
 import { AI_TOOL_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
-import { AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
+import { AiTaskRepositoryError, aiTaskAccessFromContext, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import type { PersistedBudgetEvidenceSource } from '../budget/budget-dependency-adapters';
 import type { AiTaskPlanEvidenceAuthority } from '../runner/prisma-task-run-evidence.repository';
 import { PrismaTaskStepEvidenceAuthority } from '../runner/prisma-task-step-evidence.authority';
@@ -18,14 +18,59 @@ const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 export class PrismaModelStepEvidenceAuthority extends PrismaTaskStepEvidenceAuthority {
   protected override readonly modelStep = true;
   private readonly policy: TaskModelPolicy;
-  constructor(private readonly modelDb: Db, authority: AiTaskRepositoryAuthority, plans: AiTaskPlanEvidenceAuthority,
+  constructor(private readonly modelDb: Db, private readonly modelAuthorization: AiTaskRepositoryAuthority, plans: AiTaskPlanEvidenceAuthority,
     policy: TaskModelPolicy, private readonly financial: Pick<PersistedBudgetEvidenceSource, 'readDispatch'>,
     private readonly clock: () => Date = () => new Date()) {
-    super(modelDb, authority, plans, clock);
+    super(modelDb, modelAuthorization, plans, clock);
     if (typeof financial?.readDispatch !== 'function'
       || !['aiTaskActionInput', 'aiGatewayInvocation', 'aiGatewayAccountingReceipt', 'aiInvocationAdmission']
         .every(name => typeof (modelDb[name as keyof Db] as { findFirst?: unknown })?.findFirst === 'function')) throw unavailable();
     this.policy = taskModelPolicy(policy);
+  }
+  /** Reuse original model/financial evidence for a dependent read, without
+   * turning terminal observation into dispatch or reconciliation permission. */
+  async readCompletedEvidence(taskId: string, stepId: string, resultId: string) {
+    const context = structuredClone(await this.modelAuthorization.resolve(taskId, 'read_step_terminal'));
+    const access = aiTaskAccessFromContext(context, taskId, this.clock());
+    const task = await this.modelDb.aiTask.findFirst({ where: access.where });
+    if (!task) throw denied();
+    const key = { scopeId: task.scopeId, taskId };
+    const step = await this.modelDb.aiStep.findFirst({ where: { ...key, id: stepId, resultRef: resultId, status: 'SUCCEEDED' } });
+    if (!step || step.id !== stepId || step.scopeId !== key.scopeId || step.taskId !== taskId
+      || !this.accepts(step, 'external_unknown') || step.status !== 'SUCCEEDED' || step.resultRef !== resultId) throw denied();
+    const artifact = await this.modelDb.aiTaskResultArtifact.findFirst({ where: { ...key, runId: step.runId, stepId, id: resultId } });
+    if (!artifact || artifact.id !== resultId || artifact.scopeId !== key.scopeId || artifact.taskId !== taskId
+      || artifact.runId !== step.runId || artifact.stepId !== stepId || artifact.actionId !== step.actionId
+      || artifact.stepFingerprint !== step.requestFingerprint || artifact.outcome !== 'SUCCEEDED' || !artifact.completeMeasurement
+      || artifact.errorCode !== null || requestFingerprint(artifact.payload) !== artifact.contentHash
+      || BigInt(Buffer.byteLength(JSON.stringify(artifact.payload), 'utf8')) !== artifact.outputBytes) throw denied();
+    const charges = await this.modelDb.aiTaskExecutionCharge.findMany({ where: { ...key, runId: step.runId, stepId }, take: 5 });
+    if (charges.length !== 4 || new Set(charges.map(charge => charge.resource)).size !== 4
+      || !['STEPS', 'CALLS', 'ACTIVE_MS', 'OUTPUT_BYTES'].every(resource => charges.some(charge => charge.resource === resource))
+      || charges.some(charge => charge.scopeId !== key.scopeId || charge.taskId !== taskId || charge.runId !== step.runId
+        || charge.stepId !== stepId || charge.actionId !== step.actionId || charge.stepFingerprint !== step.requestFingerprint
+        || charge.status !== 'RECORDED' || charge.leaseOwnerId !== artifact.leaseOwnerId
+        || charge.fencingToken.toFixed(0) !== artifact.fencingToken.toFixed(0))) throw denied();
+    const evidence = await this.additionalEvidence(step, artifact, charges, context);
+    const current = await this.modelAuthorization.resolve(taskId, 'read_step_terminal');
+    const latest = await this.modelDb.aiTaskResultArtifact.findFirst({ where: { ...key, id: resultId } });
+    const latestStep = await this.modelDb.aiStep.findFirst({ where: { ...key, id: stepId } });
+    const stepBinding = (row: AiStep) => ({ id: row.id, scopeId: row.scopeId, taskId: row.taskId, runId: row.runId,
+      revision: row.revision, status: row.status, inputRef: row.inputRef, resultRef: row.resultRef,
+      actionId: row.actionId, fingerprint: row.requestFingerprint, toolCode: row.toolCode, toolVersion: row.toolVersion });
+    if (taskModelIdentity(context) !== taskModelIdentity(current) || !latest || !latestStep
+      || latest.contentHash !== artifact.contentHash || requestFingerprint(latest.payload) !== artifact.contentHash
+      || latest.scopeId !== key.scopeId || latest.taskId !== taskId || latest.runId !== step.runId || latest.stepId !== stepId
+      || latest.actionId !== step.actionId || latest.stepFingerprint !== step.requestFingerprint
+      || latest.outcome !== 'SUCCEEDED' || !latest.completeMeasurement || latest.errorCode !== null
+      || latest.outputBytes !== artifact.outputBytes || latest.activeMs !== artifact.activeMs
+      || latest.leaseOwnerId !== artifact.leaseOwnerId || latest.fencingToken.toFixed(0) !== artifact.fencingToken.toFixed(0)
+      || requestFingerprint(stepBinding(latestStep)) !== requestFingerprint(stepBinding(step))) throw denied();
+    // Keep Prisma Decimal/BigInt implementation objects behind the repository
+    // boundary. Consumers need the immutable result binding, not raw rows.
+    return { context: structuredClone(current), step: stepBinding(step), artifact: {
+      id: artifact.id, contentHash: artifact.contentHash, payload: structuredClone(artifact.payload)
+    }, evidence: structuredClone(evidence) };
   }
   protected override accepts(step: AiStep, operation: string) {
     return step.toolCode === (this.policy.kind === 'image' ? TASK_IMAGE_MODEL_TOOL : this.policy.kind === 'audio' ? TASK_AUDIO_MODEL_TOOL : TASK_TEXT_MODEL_TOOL)
