@@ -1,5 +1,5 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
-import { AI_AUTOMATION_REVIEW_QUEUE_HTTP_DRAFT } from '../../../../../../packages/shared/src/ai-automation-review-queue-http-draft';
+import { AI_AUTOMATION_REVIEW_QUEUE_HTTP_DRAFT } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { BusinessFailureError } from '../business-events/prisma-business-failure-outbox';
 import { AutomationError } from './prisma-automation.authority';

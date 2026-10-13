@@ -2,7 +2,7 @@ import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req, R
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { runWithRequestIdentity } from '../../common/request-identity';
 import { AI_TEXT_CAPABILITY_HTTP_DRAFT as routes, type AiTextCapabilityHttpErrorDraft,
-  type AiTextCapabilityHttpResponsesDraft } from '../../../../../packages/shared/src/ai-text-capability-http-draft';
+  type AiTextCapabilityHttpResponsesDraft } from '@rental-os/shared';
 import { TextCapabilityProbeRequestFactory, type TextCapabilityHttpRequest, type TextCapabilityRequest } from './text-capability-probe-request.factory';
 
 export const TEXT_CAPABILITY_PROBE_REQUESTS = Symbol('TEXT_CAPABILITY_PROBE_REQUESTS');

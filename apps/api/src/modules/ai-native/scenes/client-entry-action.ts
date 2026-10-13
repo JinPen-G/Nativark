@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { AI_ENTRY_ACTION_CONTRACT_VERSION, AI_ENTRY_ACTION_REGISTRY, AI_CUSTOMER_ENTRY_SURFACES, type AiEntryActionDraft,
-  type AiEntryFailureDraft, type AiCustomerEntrySurface } from '../../../../../../packages/shared/src/ai-entry-action-draft';
+  type AiEntryFailureDraft, type AiCustomerEntrySurface } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import type { AiClientSceneMaterial } from './prisma-client-scene-material.repository';
 

@@ -1,7 +1,7 @@
 import { AI_TOOL_DRAFT_VERSION, AI_PROPOSAL_DRAFT_VERSION } from '@rental-os/shared';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
-import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE } from '../../../../../../packages/shared/src/ai-approved-settings-draft';
+import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import type { AiTaskRegisteredExecutor } from '../runner/prisma-task-measured-effects';
