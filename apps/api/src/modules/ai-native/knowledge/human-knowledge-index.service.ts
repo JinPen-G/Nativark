@@ -48,6 +48,22 @@ export class HumanKnowledgeIndexService {
     const input = parse(resumeInput, value);
     return this.human.session.run(context => this.resumeCurrent(context, input));
   }
+  /** Observe the requested generation, not whichever job happens to be latest.
+   * Historical job payloads are not stored in the operation receipt; a newer
+   * head cannot be used to reconstruct an older job's completion. */
+  operationStatus(value: unknown) {
+    const input = parse(resumeInput, value);
+    return this.human.session.run(async context => {
+      const state = await this.inspect(context, input.documentId), job = state.head.indexJob;
+      const same = job?.operationId === input.operationId && job.generation === input.generation;
+      return { document: knowledgeManagementView(state.head), reference: input,
+        status: !job ? 'not_observed' as const : !same ? 'superseded' as const : job.status,
+        receipt: same ? state.receipt : 'unavailable' as const,
+        nextStep: !same ? 'read_original_operation' as const : job.status === 'failed' ? 'manual' as const
+          : job.status === 'pending' ? state.receipt === 'recorded' ? 'complete_same_job' as const : 'resume_same_relational_job' as const : 'none' as const,
+        historicalCompletion: 'not_attested' as const, physicalIndexDeletion: 'not_verified' as const };
+    });
+  }
   /** Explicit human-selected jobs, not a background queue or automatic retry.
    * Fail-fast: earlier items may have committed; reconcile each original job.
    */
