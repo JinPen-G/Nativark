@@ -184,14 +184,14 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
     // Resolve them only for an actual model action or pending-input read.
     let application: ReturnType<typeof model.createApplication> | undefined;
     const modelApplication = () => application ??= model.createApplication(serverHost, runServices(input));
-    const persisted = composePersistedTaskCenter(input);
+    const persisted = composePersistedTaskCenter({ ...input, usageDb: input.db });
     const quote = business ? composeQuoteTaskCenterReaders({ ...business.dependencies,
       credentials: input.credentials, originals: model.scenes.requests }, business.configuration) : {};
     const settingsHost = settingsBusiness ? composeTaskSettingsHost({ ...settingsBusiness.dependencies,
       credentials: input.credentials, host: settingsBusiness.configuration.host, task: settingsBusiness.configuration.task }) : undefined;
     const settings = settingsHost && settingsBusiness ? composeAiSettingsBusinessConsumer({ ...settingsBusiness.dependencies,
       credentials: input.credentials, settingsHost }) : undefined;
-    const center = composeAiTaskCenterScene({ list: persisted.list, events: persisted.events,
+    const center = composeAiTaskCenterScene({ list: persisted.list, events: persisted.events, usage: persisted.usage,
       ...quote, ...(settings ? { settings } : {}),
       scenes: model.scenes, modelResults: { read: model.readModelResult, reopenSource: model.reopenModelSource },
       input: { read: value => modelApplication().readInput(value) } });
@@ -222,6 +222,7 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
     readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readPage(command)),
     readTaskSnapshot: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskSnapshot(command)),
     readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readEvents(command)),
+    readTaskUsage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readUsage(command)),
     readTaskScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readScene(command)),
     reopenOrderCitation: (request: AiSceneHttpRequest, value: unknown) =>
       call(request, value, (app, command) => app.model.scenes.reopenOrderCitation(command)),
@@ -304,17 +305,18 @@ export function composeRequestBoundSelectedQuoteTask(dependencies: RequestBoundQ
     const originals = composeFormalApprovedOrderReprepareServices(input, { holderId: server.host.holderId,
       creationRules: input.creationRules, memberships: input.memberships }).originals;
     const tasks = composeSelectedQuoteTaskApplication({ ...input, originals }, server);
-    const business = composeQuoteTaskCenterReaders({ ...input, originals }, server), persisted = composePersistedTaskCenter(input);
+    const business = composeQuoteTaskCenterReaders({ ...input, originals }, server), persisted = composePersistedTaskCenter({ ...input, usageDb: input.db });
     const recovery = new AiOriginalSceneRecoveryService(input.db, originals, composePersistedTaskAuthorization(input).tasks);
-    const center = composeAiTaskCenterScene({ list: persisted.list, events: persisted.events, ...business, scenes: { requests: originals,
+    const center = composeAiTaskCenterScene({ list: persisted.list, events: persisted.events, usage: persisted.usage, ...business, scenes: { requests: originals,
         readTaskReceipt: originals.readTaskReceipt.bind(originals), readRecovery: recovery.read.bind(recovery) } });
     return Object.freeze({ ...tasks, readScene: center.readScene,
       readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot({ requests: originals,
         readTaskReceipt: originals.readTaskReceipt.bind(originals) }, persisted.events, value),
-      readTaskPage: center.readPage, readTaskEvents: center.readEvents });
+      readTaskPage: center.readPage, readTaskEvents: center.readEvents, readTaskUsage: center.readUsage });
   });
   return Object.freeze({
     readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskPage(command)),
+    readTaskUsage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskUsage(command)),
     readTaskSnapshot: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskSnapshot(command)),
     readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskEvents(command)),
     readScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readScene(command)),

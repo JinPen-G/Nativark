@@ -46,6 +46,18 @@ export const AI_SCENE_REQUEST_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> =
     object({ kind: choice('settings'), taskId: id(), runId: id(), reference: {} })
   ] },
   AiSceneModelReferenceDraft: originalReference,
+  AiSceneTaskUsageReadDraft: object({ original: originalReference, taskId: text(36), limit: integer(1, 20), after: text(36) }, ['original', 'limit']),
+  AiTaskBudgetUsagePageDraft: object({ taskId: text(36), items: list({ oneOf: [
+    object({ invocationId: text(36), callId: text(128), accounting: choice('not_recorded') }),
+    object({ invocationId: text(36), callId: text(128), accounting: choice('recorded'), reservationId: text(36), sceneCode: text(128),
+      runId: text(36), stepId: text(36), revision: integer(1, 4294967295), observedVersionAt: leafTime,
+      status: choice('reserved', 'settled', 'released', 'pending_reconciliation'), reserved: { $ref: '#/components/schemas/AiUsageQuantityDraft' },
+      actual: { oneOf: [{ $ref: '#/components/schemas/AiUsageQuantityDraft' }, { type: 'null' }] }, budgetDispatchMarked: { type: 'boolean' },
+      modelPolicy: { oneOf: [object({ mode: choice('platform_managed'), serviceName: choice('Rental OS AI') }),
+        object({ mode: choice('tenant_managed'), model: text(256) })] } })] }, 20), nextAfter: { oneOf: [text(36), { type: 'null' }] },
+    observedAt: leafTime, coverage: choice('page_not_total'), totals: choice('not_computed'),
+    consistency: choice('revalidated_reads_not_atomic_snapshot'), absenceSemantics: choice('no_record_is_not_proof_of_no_consumption'),
+    businessExecution: choice('not_inferred_from_usage'), admission: choice('not_granted') }),
   AiSceneModelInputRefreshDraft: object({ original: originalReference, requestId: id(), expectedRevision: integer(1, 4294967293) }),
   AiSceneModelResumeDraft: object({ original: originalReference, submission: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft }),
   AiSceneModelQuoteConfirmDraft: object({ original: originalReference, submission: AI_TASK_INPUT_DRAFT_SCHEMAS.AiTaskInputSubmissionDraft,

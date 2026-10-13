@@ -158,6 +158,8 @@ export class AiOriginalSceneModelController extends AiOriginalSceneModelActionsC
   readTaskPage(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.fullModel.readTaskPage(request, body)); }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents)
   readTaskEvents(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.fullModel.readTaskEvents(request, body)); }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskUsage)
+  readTaskUsage(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.fullModel.readTaskUsage(request, body)); }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene)
   readTaskScene(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.fullModel.readTaskScene(request, body)); }
 }

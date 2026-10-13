@@ -12,6 +12,7 @@ import type { composeHumanQuoteOrder, composeSelectedQuoteTaskApplication } from
 import { parseQuoteSelectionProof } from './task-request/quote-selection.validation';
 import type { composeAiSettingsBusinessConsumer } from './scenes/settings-business-consumer.composition';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { BudgetError } from './budget/budget.ports';
 
 type OriginalScenes = ReturnType<typeof composeAiOriginalScenes>;
 const page = z.object({ limit: z.number().int().min(1).max(50).optional(), cursor: z.string().max(512).optional(),
@@ -37,6 +38,7 @@ const aggregateRead = z.discriminatedUnion('kind', [
  */
 export function composeAiTaskCenterScene(input: {
   list: Pick<AiTaskListRepository, 'readPage'>;
+  usage?: { read(value: unknown): Promise<unknown> };
   events?: Pick<AiTaskEventRepository, 'readPage'> & Partial<Pick<AiTaskEventRepository, 'readSnapshot'>>;
   settings?: Pick<ReturnType<typeof composeAiSettingsBusinessConsumer>, 'read'>;
   modelResults?: Pick<AiOriginalSceneResultService, 'read'> & Partial<Pick<AiOriginalSceneResultService, 'reopenSource'>>;
@@ -57,6 +59,22 @@ export function composeAiTaskCenterScene(input: {
       const parsed = page.safeParse(value);
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       return input.list.readPage(parsed.data);
+    },
+    readUsage: async (value: unknown) => {
+      const parsed = taskRead.extend({ limit: z.number().int().min(1).max(20), after: z.string().min(1).max(36).optional() })
+        .strict().safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      if (!input.usage) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const command = parsed.data, task = await readObservedTask(command.original, command.taskId);
+      let usage: unknown;
+      try { usage = await input.usage.read({ taskId: task.taskId, limit: command.limit, ...(command.after ? { after: command.after } : {}) }); }
+      catch (error) {
+        if (!(error instanceof BudgetError)) throw error;
+        throw new AiTaskRepositoryError(error.code === 'INVALID' ? 'AI_INVALID_INPUT' : error.code === 'FORBIDDEN'
+          ? 'AI_ACCESS_DENIED' : error.code === 'PENDING_RECONCILIATION' ? 'AI_REVISION_CONFLICT' : 'AI_RESOURCE_UNAVAILABLE');
+      }
+      await assertStillCurrent(command.original, task);
+      return freezeOriginalInput(usage);
     },
     readEvents: async (value: unknown) => {
       const parsed = eventRead.safeParse(structuredClone(value));
