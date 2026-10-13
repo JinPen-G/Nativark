@@ -49,7 +49,7 @@ export class TextCapabilityProbeRequestFactory {
       || [dependencies.auth?.resolveAccessContext, dependencies.guard?.canActivate, dependencies.db?.$transaction]
         .some(method => typeof method !== 'function')) throw unavailable();
     const capabilities = [...(dependencies.probeCapabilities ?? [dependencies.probeCapability ?? 'text'])];
-    if (!capabilities.length || capabilities.length > 5 || new Set(capabilities).size !== capabilities.length
+    if (!capabilities.length || capabilities.length > 6 || new Set(capabilities).size !== capabilities.length
       || capabilities.some(value => !textProbeCommandSchema.shape.capability.unwrap().safeParse(value).success)
       || !capabilities.includes(dependencies.probeCapability ?? 'text')) throw unavailable();
     this.dependencies = { ...dependencies, probeCapabilities: Object.freeze(capabilities),
@@ -201,6 +201,7 @@ export class TextCapabilityProbeRequestFactory {
         return { requestKey, capability: result.required.includes('tools') ? 'tools' as const
           : result.required.includes('structured_output') ? 'structured_output' as const
           : result.required.includes('vision') ? 'vision' as const
+          : result.required.includes('audio') ? 'audio' as const
           : result.required.includes('streaming') ? 'streaming' as const : 'text' as const, allowed: result.allowed,
           missing: result.missing.length > 0, stale: result.stale.length > 0,
           semantics: 'current_preflight_not_dispatch_permission' as const };
