@@ -494,7 +494,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     ?? (dependencies.taskInputs && { db: dependencies.taskInputs.db })
     ?? (dependencies.taskModel && { db: dependencies.taskModel.db });
   const withQuotePreparation = async <T>(request: AiClientApplicationRequest,
-    consume: (preparation: ReturnType<typeof composeClientOriginalQuotePreparation>) => Promise<T>) => {
+    consume: (preparation: ReturnType<typeof composeClientOriginalQuotePreparation>, bound: Bound) => Promise<T>) => {
     if (!server.entry || !taskDependencies || server.channel === 'app' || !dependencies.quotePreparation)
       return fail('AI_CLIENT_CAPABILITY_UNAVAILABLE');
     const credential = bearerSchema.safeParse(request?.headers?.authorization);
@@ -506,7 +506,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         credentials: { current: async () => ({ authorization, ip }) }, tasks: taskDependencies,
         tenantCode: server.tenantCode, serviceCode: server.serviceCode,
         channel: server.channel as 'web' | 'wechat_miniprogram', clock });
-      const result = await consume(preparation);
+      const result = await consume(preparation, bound);
       await bound.assertCurrent();
       return result;
     });
@@ -525,6 +525,41 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     async readPreparedQuoteOriginal(request: AiClientApplicationRequest, value: unknown) {
       const command = structuredClone(value);
       return withQuotePreparation(request, preparation => preparation.readOriginal(command));
+    },
+    /** Human-host consumer of an exact original quote and an explicit booking
+     * selection. The full Core snapshot never crosses this read boundary.
+     * No quote creation, draft persistence, stock lock or order submission. */
+    async readPreparedQuoteBookingMaterial(request: AiClientApplicationRequest, value: unknown, selection: unknown) {
+      const command = freezeOriginalInput(structuredClone(value));
+      const chosen = freezeOriginalInput(parseEntry(bookingSelectionSchema, structuredClone(selection)));
+      return withQuotePreparation(request, async (preparation, bound) => {
+        if (!bound.identity) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
+        const original = await preparation.readOriginal(command);
+        if (original.state !== 'observed' || !original.quote) {
+          return freezeOriginalInput({ source: original.source, state: 'unknown' as const,
+            material: null, quotePersistence: 'unknown' as const, retryable: false as const,
+            nextAction: 'read_original_quote' as const, inventoryReservation: 'not_attempted' as const,
+            orderExecution: 'not_attempted' as const });
+        }
+        if (chosen.quoteId !== original.quote.id) throw new AiClientEntryError('AI_ACCESS_DENIED', 'quote_original_selection_mismatch');
+        // Existing material reader checks customer ownership, original quote
+        // parameters, membership, publication/catalog, locations and stock.
+        const material = await readClientBookingMaterial(bound.scenes, bound.identity, chosen, clock());
+        if (material.quote.quoteVersion !== jsonHash(original.quote)) {
+          throw new AiClientEntryError('AI_REVISION_CONFLICT', 'quote_material_basis_changed');
+        }
+        const latest = await preparation.readOriginal(command);
+        if (latest.state !== 'observed' || !latest.quote
+          || jsonHash(latest.source) !== jsonHash(original.source)
+          || jsonHash(latest.quote) !== jsonHash(original.quote)) {
+          throw new AiClientEntryError('AI_REVISION_CONFLICT', 'quote_original_changed');
+        }
+        await bound.assertCurrent();
+        return freezeOriginalInput({ source: original.source, state: 'observed' as const, material,
+          quotePersistence: 'saved' as const, selection: 'explicit_booking_parameters_revalidated' as const,
+          inventoryReservation: 'not_attempted' as const, orderExecution: 'not_attempted' as const,
+          draftPersistence: 'not_attempted' as const, retryable: false as const });
+      });
     },
     /** Discover only this original task's latest proved model run. No caller
      * result/run ID, earlier-run fallback, arbitrary artifact or raw config. */
