@@ -26,10 +26,25 @@ import { InspectionCandidateService, type InspectionEvidenceAuthority } from './
 import { InspectionAssistError } from './inspection-assist.validation';
 import { inspectionTargetSchema, inspectionId } from './inspection-assist.validation';
 import { composeTaskModelHost, type TaskModelHostDependencies } from '../runner/model-task-host.composition';
+import { composePersistedTaskCallGateway, type PersistedTaskCallGatewayDependencies } from '../task-model-gateway.composition';
 import { AI_STAFF_INSPECTION_REQUESTS, AI_STAFF_INSPECTION_ENABLED, StaffInspectionAssistController } from './staff-inspection-assist.controller';
 
 /** Server composition only: material comes from the original authorized frozen
  * inspection input, never a request-provided prompt/hash or an SDK result. */
+function inspectionTaskMaterial(bound: Awaited<ReturnType<InspectionRecognitionService['gatewayMedia']>>, maxOutputTokens: number) {
+  const kind = inspectionRecognitionMediaKind(bound.input);
+  const text = JSON.stringify({ purpose: 'inspection_candidates_only_not_business_facts',
+    draftId: bound.draftId, draftRevision: bound.draftRevision, inputFingerprint: bound.input.inputFingerprint,
+    question: bound.input.question, template: bound.input.template });
+  return (kind === 'audio' ? taskAudioMaterialSchema : taskImageMaterialSchema).parse({ maxOutputTokens,
+    messages: [{ role: 'user', content: [{ kind: 'text', text }, ...bound.input.media.map(ref => ({ kind,
+      attachmentId: ref.attachmentId, attachmentRevision: ref.attachmentRevision }))] }] });
+}
+export type PersistedInspectionTaskHostDependencies = Omit<TaskModelHostDependencies, 'runtime' | 'priceVersion' | 'financialEvidence' | 'inputSource' | 'kind' | 'task'> & {
+  task: Omit<TaskModelHostDependencies['task'], 'material'>;
+  gateway: Omit<PersistedTaskCallGatewayDependencies, keyof PersistedTaskAuthorizationDependencies | 'guard' | 'taskId' | 'media'>;
+};
+
 export async function composeInspectionRecognitionTaskHost(recognition: Pick<InspectionRecognitionService, 'gatewayMedia'>,
   reference: unknown, dependencies: Omit<TaskModelHostDependencies, 'kind' | 'task'> & {
     task: Omit<TaskModelHostDependencies['task'], 'material'>;
@@ -37,13 +52,7 @@ export async function composeInspectionRecognitionTaskHost(recognition: Pick<Ins
   if (typeof recognition?.gatewayMedia !== 'function') throw new InspectionAssistError('STORAGE_UNAVAILABLE');
   const bound = await recognition.gatewayMedia(structuredClone(reference));
   const kind = inspectionRecognitionMediaKind(bound.input);
-  const text = JSON.stringify({ purpose: 'inspection_candidates_only_not_business_facts',
-    draftId: bound.draftId, draftRevision: bound.draftRevision, inputFingerprint: bound.input.inputFingerprint,
-    question: bound.input.question, template: bound.input.template });
-  const material = (kind === 'audio' ? taskAudioMaterialSchema : taskImageMaterialSchema).parse({
-    maxOutputTokens: dependencies.gatewayScene.maxOutputTokens,
-    messages: [{ role: 'user', content: [{ kind: 'text', text }, ...bound.input.media.map(ref => ({ kind,
-      attachmentId: ref.attachmentId, attachmentRevision: ref.attachmentRevision }))] }] });
+  const material = inspectionTaskMaterial(bound, dependencies.gatewayScene.maxOutputTokens);
   return composeTaskModelHost({ ...dependencies, kind,
     runtime: { ...dependencies.runtime, ports: { ...dependencies.runtime.ports, media: bound.media } },
     task: { ...dependencies.task, material } });
@@ -142,6 +151,45 @@ export class StaffInspectionRequestFactory {
         return composeInspectionRecognitionTaskHost(services.recognition, reference, {
           ...dependencies, credentials,
         });
+      },
+      /** Original persisted task receipt consumer. No task ID from an HTTP body
+       * becomes dispatch authority; task/input/run and current access re-bind. */
+      recognitionPersistedTaskHost: async (reference: unknown, dependencies: Omit<PersistedInspectionTaskHostDependencies, 'credentials'>) => {
+        dependencies = { ...dependencies, task: structuredClone(dependencies.task), scene: structuredClone(dependencies.scene),
+          gatewayScene: structuredClone(dependencies.gatewayScene), host: structuredClone(dependencies.host),
+          gateway: { ...dependencies.gateway, adapters: [...dependencies.gateway.adapters] } };
+        if (!services.recognition || authorization === undefined || dependencies.db !== this.dependencies.db
+          || dependencies.guard !== this.dependencies.guard || dependencies.gateway.routeScene !== 'vision'
+          || dependencies.gatewayScene.routeScene !== 'vision' || 'runtime' in dependencies || 'credentials' in dependencies
+          || 'financialEvidence' in dependencies || 'priceVersion' in dependencies || 'media' in dependencies.gateway) {
+          throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+        }
+        const input = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId, inputId: inspectionId,
+          expectedRevision: z.number().int().min(1).max(999) }).strict().parse(structuredClone(reference));
+        const access = composePersistedTaskAuthorization({ ...dependencies, credentials });
+        const before = await access.tasks.resolveAccess(dependencies.task.taskId, 'read_metadata');
+        const task = await dependencies.db.aiTask.findFirst({ where: before.where });
+        const run = await dependencies.db.aiRun.findFirst({ where: { id: dependencies.task.runId, taskId: dependencies.task.taskId,
+          scopeId: task?.scopeId ?? '' } });
+        if (!task || task.id !== dependencies.task.taskId || task.inputRef !== input.inputId
+          || task.sceneCode !== dependencies.scene.code || task.sceneVersion !== dependencies.scene.version
+          || !run || run.taskId !== task.id || run.id !== dependencies.task.runId
+          || run.actorId !== before.actorId || run.actorKind !== before.actorKind) throw new InspectionAssistError('ACCESS_DENIED');
+        const bound = await services.recognition.gatewayMedia(input), kind = inspectionRecognitionMediaKind(bound.input);
+        const after = await access.tasks.resolveAccess(task.id, 'read_metadata');
+        if (before.bindingKey !== after.bindingKey) throw new InspectionAssistError('ACCESS_DENIED');
+        const { gateway, ...host } = dependencies;
+        const persisted = composePersistedTaskCallGateway({ ...gateway, db: dependencies.db, auth: dependencies.auth,
+          subscriptions: dependencies.subscriptions, guard: dependencies.guard, credentials, clock: dependencies.clock,
+          taskId: task.id, media: bound.media });
+        const inspection = composeInspectionAssist({ ...this.dependencies, credentials, audioRecognitionResults: undefined,
+          recognitionResults: { db: dependencies.db, auth: dependencies.auth, subscriptions: dependencies.subscriptions,
+            clock: dependencies.clock, financialEvidence: persisted.financialEvidence,
+            policy: { kind, sceneCode: dependencies.gatewayScene.sceneCode, maxOutputTokens: dependencies.gatewayScene.maxOutputTokens } } });
+        const root = composeTaskModelHost({ ...host, credentials, ...persisted, kind,
+          inputSource: inspection.recognitionResults.inputSource(input),
+          task: { ...host.task, material: inspectionTaskMaterial(bound, dependencies.gatewayScene.maxOutputTokens) } });
+        return { ...root, inspection };
       },
       close() { authorization = undefined; } };
   }
