@@ -13,6 +13,7 @@ const unknownRead: Record<Method, NonNullable<AiTextCapabilityHttpErrorDraft['ne
   prepare: 'readOriginal', publish: 'readOriginal', readOriginal: 'readOriginal', createTask: 'readTask', readTask: 'readTask',
   start: 'reconcile', inspect: 'inspect', cancel: 'inspect', reconcile: 'reconcile', readCapabilityReceipt: 'readCapabilityReceipt', preflight: 'readCapabilityReceipt',
   readHistory: 'readHistory',
+  configureTaskAction: 'readTaskAction', readTaskAction: 'readTaskAction',
 };
 const statuses = { AI_INVALID_INPUT: 400, AI_ACCESS_DENIED: 403, AI_SCOPE_CHANGED: 403, AI_RESOURCE_UNAVAILABLE: 404,
   AI_REVISION_CONFLICT: 409, AI_STORAGE_UNAVAILABLE: 503, AI_RESULT_UNKNOWN: 409 } as const;
@@ -60,6 +61,11 @@ export class TextCapabilityProbeController {
   }
   @Post(routes.prepare) @HttpCode(200) @Header('Cache-Control', 'no-store')
   prepare(@Req() request: Request, @Body() body: unknown) { return this.call('prepare', request, body); }
+  // Policy configuration is an explicit management call, never part of task creation.
+  @Post(routes.configureTaskAction) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  configureTaskAction(@Req() request: Request, @Body() body: unknown) { return this.call('configureTaskAction', request, body); }
+  @Post(routes.readTaskAction) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTaskAction(@Req() request: Request, @Body() body: unknown) { return this.call('readTaskAction', request, body); }
   @Post(routes.publish) @HttpCode(200) @Header('Cache-Control', 'no-store')
   publish(@Req() request: Request, @Body() body: unknown) { return this.call('publish', request, body); }
   @Post(routes.readOriginal) @HttpCode(200) @Header('Cache-Control', 'no-store')
