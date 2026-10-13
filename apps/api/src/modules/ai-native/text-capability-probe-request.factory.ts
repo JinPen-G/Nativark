@@ -15,14 +15,17 @@ import type { AiTaskApplicationStartResult } from './runner/prisma-task-applicat
 export type TextCapabilityHttpRequest = { headers: { authorization?: unknown } };
 export type TextCapabilityRequestDependencies = Omit<AuthorizedTextProbeWorkflowDependencies, 'credentials' | 'pricing'> & {
   pricing: { mode: 'persisted_calls'; priceVersion: string };
-  /** Server-selected challenge kind; never accepted from the request body. */
+  /** Server-selected default; request selection is limited to the server whitelist. */
   probeCapability?: TextProbeCapability;
+  /** Optional server-owned selection whitelist. Default remains one kind. */
+  probeCapabilities?: readonly TextProbeCapability[];
 };
 export type TextCapabilityRequest = {
   [K in keyof AiTextCapabilityHttpResponsesDraft]: (value: unknown, signal?: AbortSignal) => Promise<AiTextCapabilityHttpResponsesDraft[K]>;
 } & { close(): void };
 const bearer = z.string().min(1).max(8192).regex(/^Bearer [A-Za-z0-9._~+/-]+=*$/u);
 const requestSchema = z.object({ requestKey: textProbeCommandSchema.shape.operationId }).strict();
+const prepareSchema = requestSchema.extend({ capability: textProbeCommandSchema.shape.capability }).strict();
 const cancelSchema = requestSchema.extend({ expectedRevision: z.number().int().min(1).max(4294967294) }).strict();
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -45,7 +48,12 @@ export class TextCapabilityProbeRequestFactory {
       || dependencies.pricing.priceVersion !== dependencies.priceVersion
       || [dependencies.auth?.resolveAccessContext, dependencies.guard?.canActivate, dependencies.db?.$transaction]
         .some(method => typeof method !== 'function')) throw unavailable();
-    this.dependencies = { ...dependencies, host: structuredClone(dependencies.host), pricing: { ...dependencies.pricing } };
+    const capabilities = [...(dependencies.probeCapabilities ?? [dependencies.probeCapability ?? 'text'])];
+    if (!capabilities.length || capabilities.length > 5 || new Set(capabilities).size !== capabilities.length
+      || capabilities.some(value => !textProbeCommandSchema.shape.capability.unwrap().safeParse(value).success)
+      || !capabilities.includes(dependencies.probeCapability ?? 'text')) throw unavailable();
+    this.dependencies = { ...dependencies, probeCapabilities: Object.freeze(capabilities),
+      host: structuredClone(dependencies.host), pricing: { ...dependencies.pricing } };
   }
   open(request: TextCapabilityHttpRequest): TextCapabilityRequest {
     const header = bearer.safeParse(request?.headers?.authorization);
@@ -101,16 +109,28 @@ export class TextCapabilityProbeRequestFactory {
       // key or task ID. The producer also binds the immutable input fingerprint.
       return { creationKey: textProbeTaskCreationKey(requestKey), inputRef: original.inputRef };
     };
+    const selected = (capability?: TextProbeCapability) => {
+      const value = capability ?? dependencies.probeCapability ?? 'text';
+      if (!dependencies.probeCapabilities!.includes(value)) throw unavailable();
+      return value;
+    };
     return Object.freeze({
-      prepare: value => run(requestSchema, value, async ({ requestKey }) => {
-        const prepared = await root.application.prepareRequestCurrent(requestKey, dependencies.platformProfileId, dependencies.probeCapability);
+      prepare: value => run(prepareSchema, value, async ({ requestKey, capability }) => {
+        const kind = selected(capability);
+        if ((await root.workflow.readOriginal(requestKey)).state === 'stored'
+          && await root.workflow.readOriginalCapability(requestKey) !== kind) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        const prepared = await root.application.prepareRequestCurrent(requestKey, dependencies.platformProfileId, kind);
         return { requestKey, state: 'prepared' as const, capability: prepared.capability, methodVersion: prepared.methodVersion,
           configurationRevision: prepared.configurationRevision, execution: 'not_started' as const };
       }),
-      publish: value => run(requestSchema, value, async ({ requestKey }) => {
+      publish: value => run(prepareSchema, value, async ({ requestKey, capability }) => {
+        const kind = selected(capability);
         const previous = await root.workflow.readOriginal(requestKey);
-        if (previous.state === 'stored') return { requestKey, ...previous, replayed: true, retryable: false as const };
-        const { command } = await root.application.prepareRequestCurrent(requestKey, dependencies.platformProfileId, dependencies.probeCapability);
+        if (previous.state === 'stored') {
+          if (await root.workflow.readOriginalCapability(requestKey) !== kind) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+          return { requestKey, ...previous, replayed: true, retryable: false as const };
+        }
+        const { command } = await root.application.prepareRequestCurrent(requestKey, dependencies.platformProfileId, kind);
         return { requestKey, ...await root.workflow.publishOriginal({ requestKey, command }), retryable: false as const };
       }, true),
       readOriginal: value => run(requestSchema, value, async ({ requestKey }) => {
@@ -130,8 +150,11 @@ export class TextCapabilityProbeRequestFactory {
         return { requestKey, state: 'observed' as const, task: taskSummary({ ...found.task,
           status: metadata.status, revision: metadata.revision }), retryable: false as const };
       }),
-      start: (value, signal) => run(requestSchema, value, async ({ requestKey }) =>
-        runSummary(requestKey, await root.workflow.startOriginal(await originalKey(requestKey), signal)), true),
+      start: (value, signal) => run(requestSchema, value, async ({ requestKey }) => {
+        const key = await originalKey(requestKey);
+        selected(await root.workflow.readOriginalCapability(requestKey));
+        return runSummary(requestKey, await root.workflow.startOriginal(key, signal));
+      }, true),
       inspect: value => run(requestSchema, value, async ({ requestKey }) => {
         const snapshot = await root.workflow.inspectOriginal(await originalKey(requestKey));
         return { requestKey, task: { taskId: snapshot.task.taskId, revision: snapshot.task.revision,
