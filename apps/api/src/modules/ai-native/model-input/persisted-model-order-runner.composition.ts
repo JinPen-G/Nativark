@@ -218,6 +218,47 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
   };
   const application = root.createApplication(input.host, prepare);
   const recoveryHost = Object.freeze(structuredClone(input.host));
+  const takeoverOriginal = async (value: unknown, signal?: AbortSignal) => {
+    const parsed = z.object({ expectedTaskRevision: z.number().int().min(1).max(4294967294),
+      expectedRunRevision: z.number().int().min(1).max(4294967294),
+      expectedFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
+    const original = await assertOriginal();
+    const snapshot = await application.inspect({ taskId: task.taskId, runId: task.runId });
+    if (!snapshot.plan || snapshot.task.revision !== parsed.data.expectedTaskRevision
+      || snapshot.run.revision !== parsed.data.expectedRunRevision
+      || snapshot.run.fencingToken !== parsed.data.expectedFencingToken) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    const access = await model.tasks.resolveAccess(task.taskId, 'takeover_run');
+    const row = await input.db.aiTask.findFirst({ where: access.where });
+    if (!row || row.inputRef !== original.receipt.inputRef) throw denied();
+    const key = { scopeId: row.scopeId, taskId: task.taskId, runId: task.runId };
+    const storedPlan = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
+    if (!storedPlan) throw unavailable();
+    const plan = aiTaskRunPlanSchema.parse(structuredClone(storedPlan.payload));
+    if (storedPlan.scopeId !== key.scopeId || storedPlan.taskId !== key.taskId || storedPlan.runId !== key.runId
+      || plan.taskId !== task.taskId || plan.runId !== task.runId
+      || requestFingerprint(plan) !== storedPlan.planHash || snapshot.plan.planHash !== storedPlan.planHash
+      || requestFingerprint(plan.steps) !== requestFingerprint(expectedSteps)) throw denied();
+    const run = await input.db.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: task.runId,
+      actorKind: access.actorKind, actorId: access.actorId } });
+    if (!run?.leaseOwnerId || run.leaseOwnerId === recoveryHost.holderId
+      || run.revision !== parsed.data.expectedRunRevision || !run.fencingToken.equals(parsed.data.expectedFencingToken)) {
+      throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    }
+    const current = await assertOriginal();
+    if (current.receipt.contentHash !== original.receipt.contentHash
+      || taskModelIdentity(current.context) !== taskModelIdentity(original.context)
+      || (await model.tasks.resolveAccess(task.taskId, 'takeover_run')).bindingKey !== access.bindingKey) throw denied();
+    // Previous/new holders are server-derived. The original transactional
+    // takeover performs owner/action authorization, task/run CAS and fencing.
+    // Recovery only observes original facts; it never publishes or dispatches.
+    const outcome = await root.takeoverAndRecover({ ...parsed.data, taskId: task.taskId, runId: task.runId,
+      previousHolderId: run.leaseOwnerId, holderId: recoveryHost.holderId, leaseMs: recoveryHost.leaseMs }, signal);
+    await assertOriginal();
+    return { kind: 'run_outcome' as const, outcome, takeover: 'same_owner_recovery_only' as const,
+      automaticRetry: false as const, businessExecution: 'readonly_not_business_commit' as const };
+  };
   const recoverOriginal = async (signal?: AbortSignal) => {
     if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
     await assertOriginal();
@@ -234,5 +275,5 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
       expectedFencingToken: snapshot.run.fencingToken });
     return { kind: 'run_outcome' as const, outcome: await root.runner.recover(lease, signal) };
   };
-  return Object.freeze({ ...root, model, readOrderResult, recoverOriginal, application });
+  return Object.freeze({ ...root, model, readOrderResult, recoverOriginal, takeoverOriginal, application });
 }
