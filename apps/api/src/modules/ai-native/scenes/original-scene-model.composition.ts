@@ -279,8 +279,9 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       invocations: model.invocations, executors, toolCatalog: model.toolCatalog }),
     prepareHeldRun,
     createModelOrderApplication(host: AiTaskApplicationHost,
-      run: Omit<AiOriginalSceneRunDependencies, 'inputSource'> & { inputSource: AiTaskInputSource }) {
-      return composeOriginalModelOrderScene(dependencies, scenes, host, run, results);
+      run: Omit<AiOriginalSceneRunDependencies, 'inputSource'> & { inputSource: AiTaskInputSource },
+      options?: { answerRoundTrip: true }) {
+      return composeOriginalModelOrderScene(dependencies, scenes, host, run, results, options);
     },
     /** Server-only assembly. Client input is exclusively the existing original
      * reference: never a holder, lease, plan, task ID, prompt or configuration.

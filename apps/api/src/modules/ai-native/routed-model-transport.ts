@@ -70,6 +70,11 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
       : profile.serviceMode !== 'tenant_managed' || route.scope.kind !== 'TENANT' || route.scope.tenantId !== context.tenantId) throw new ModelGatewayError('FORBIDDEN');
     const adapter = this.adapters.get(profile.protocol);
     if (!adapter) throw new ModelGatewayError('PROVIDER_UNAVAILABLE');
+    const assertSchema = () => {
+      if (request.structuredSchemaHash && (!request.features?.includes('structuredOutput')
+        || request.structuredSchemaHash !== adapter.structuredSchemaHash)) throw new ModelGatewayError('CONFIG_INVALID');
+    };
+    assertSchema();
     if ((streaming && (typeof adapter.stream !== 'function' || !adapter.features.includes('streaming')))
       || request.features?.some(feature => !adapter.features.includes(feature))) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
     const resolver = profile.serviceMode === 'platform_managed' ? this.resolvers.platform : this.resolvers.tenant;
@@ -83,6 +88,7 @@ export class RoutedModelTransport implements UnifiedGatewayTransport {
     };
     const connection = await resolve(), binding = requestFingerprint(connection);
     const recheck = async () => {
+      assertSchema();
       if (requestFingerprint(await resolve()) !== binding) throw new ModelGatewayError('CONFIG_INVALID');
       if (route.probe) await this.probe!.authorizeDispatch(context, request, route, streaming ? 'stream' : 'invoke', signal);
     };

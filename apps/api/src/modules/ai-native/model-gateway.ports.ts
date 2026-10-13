@@ -10,6 +10,8 @@ export interface ModelRequest {
   messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
   maxOutputTokens: number;
   features?: ModelFeature[];
+  /** Server-pinned protocol response contract, not an Agent schema. */
+  structuredSchemaHash?: string;
 }
 /** One existing internal request validator shared by Gateway and protocol adapters.
  * Not a new public contract or an authorization decision. */
@@ -18,7 +20,8 @@ export const modelRequestSchema = z.object({
   model: z.string().min(1).max(256).regex(/^[\w./:-]+$/u),
   messages: z.array(z.object({ role: z.enum(['system', 'user', 'assistant']), content: z.string().max(32000) }).strict()).min(1).max(64),
   maxOutputTokens: z.number().int().positive().max(32768),
-  features: z.array(z.enum(['tools', 'structuredOutput', 'streaming'])).max(3).optional()
+  features: z.array(z.enum(['tools', 'structuredOutput', 'streaming'])).max(3).optional(),
+  structuredSchemaHash: z.string().regex(/^[a-f0-9]{64}$/u).optional()
 }).strict();
 const mediaReference = {
   attachmentId: z.string().min(1).max(128).regex(/^[\w.:-]+$/u),
@@ -84,6 +87,7 @@ export interface ModelResponsePolicy {
 export type AdapterStreamEvent = { kind: "text_delta"; delta: string } | { kind: "result"; result: AdapterResult };
 export interface ModelAdapter {
   readonly provider: string;
+  readonly structuredSchemaHash?: string;
   readonly features: readonly ModelFeature[];
   generate(input: Readonly<ModelProtocolRequest> & { signal: AbortSignal }, credential: string,
     connection?: Readonly<{ baseUrl: string }>): Promise<AdapterResult>;
