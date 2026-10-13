@@ -10,6 +10,7 @@ import { ModelGatewayError, modelProtocolRequestSchema, modelRequestSchema, type
 import type { UnifiedGatewayPorts, GatewayInvocationResult, GatewayStreamEvent } from './unified-ai-gateway.ports';
 import { gatewayRoutingBinding } from './gateway-routing.service';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
+import { isGatewayOrderExplainRequest } from './gateway-contract-validation';
 
 type UnresolvedRequest = Omit<ModelRequest, 'model'> & { model?: string };
 type UnresolvedProtocolRequest = Omit<ModelProtocolRequest, 'model'> & { model?: string };
@@ -33,11 +34,15 @@ export class UnifiedAiGatewayService {
   }
 
   // Workspace-only C03 input bridge. Public actual/evidence/result envelopes are not fabricated here.
+  private policy(binding: GatewayTextIntentBinding) {
+    const { routeScene: _, ...policy } = binding;
+    return policy;
+  }
   async invokeTextIntent(context: GatewayContext, intent: AiGatewayIntentDraft, signal?: AbortSignal) {
     if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
     const binding = this.intentBinding;
     if (!binding) throw new ModelGatewayError('CONFIG_INVALID');
-    const prepared = prepareGatewayTextIntent(intent, { sceneCode: binding.sceneCode, maxOutputTokens: binding.maxOutputTokens, ...(binding.structuredOutput ? { structuredOutput: true } : {}) }, 'invoke');
+    const prepared = prepareGatewayTextIntent(intent, this.policy(binding), 'invoke');
     return this.invokeRequest(context, prepared.request, signal, { ...binding, intentHash: prepared.intentHash });
   }
 
@@ -45,7 +50,7 @@ export class UnifiedAiGatewayService {
     if (signal?.aborted) throw new ModelGatewayError('CANCELLED');
     const binding = this.intentBinding;
     if (!binding) throw new ModelGatewayError('CONFIG_INVALID');
-    const prepared = prepareGatewayTextIntent(intent, { sceneCode: binding.sceneCode, maxOutputTokens: binding.maxOutputTokens, ...(binding.structuredOutput ? { structuredOutput: true } : {}) }, 'stream');
+    const prepared = prepareGatewayTextIntent(intent, this.policy(binding), 'stream');
     yield* this.streamRequest(context, prepared.request, signal, { ...binding, intentHash: prepared.intentHash });
   }
 
@@ -56,7 +61,7 @@ export class UnifiedAiGatewayService {
     if (!binding) throw new ModelGatewayError('CONFIG_INVALID');
     const life = this.deadline(signal);
     let prepared;
-    try { prepared = await life.wait(() => prepareGatewayIntent(intent, { sceneCode: binding.sceneCode, maxOutputTokens: binding.maxOutputTokens, ...(binding.structuredOutput ? { structuredOutput: true } : {}) }, 'invoke', context, this.ports.media, life.controller.signal)); }
+    try { prepared = await life.wait(() => prepareGatewayIntent(intent, this.policy(binding), 'invoke', context, this.ports.media, life.controller.signal)); }
     finally { life.close(); }
     return this.invokeRequest(context, prepared.request, signal, { ...binding, intentHash: prepared.intentHash });
   }
@@ -68,7 +73,7 @@ export class UnifiedAiGatewayService {
     if (!binding) throw new ModelGatewayError('CONFIG_INVALID');
     const life = this.deadline(signal);
     let prepared;
-    try { prepared = await life.wait(() => prepareGatewayIntent(intent, { sceneCode: binding.sceneCode, maxOutputTokens: binding.maxOutputTokens, ...(binding.structuredOutput ? { structuredOutput: true } : {}) }, 'stream', context, this.ports.media, life.controller.signal)); }
+    try { prepared = await life.wait(() => prepareGatewayIntent(intent, this.policy(binding), 'stream', context, this.ports.media, life.controller.signal)); }
     finally { life.close(); }
     yield* this.streamRequest(context, prepared.request, signal, { ...binding, intentHash: prepared.intentHash });
   }
@@ -100,10 +105,12 @@ export class UnifiedAiGatewayService {
     return parsed.data;
   }
 
-  private textResult(value: unknown, structured = false): GatewayInvocationResult {
-    const parsed = (structured ? textResultSchema.extend({ structuredOutput: z.record(z.unknown()) }) : textResultSchema).safeParse(value);
+  private textResult(value: unknown, structured = false, tools = false): GatewayInvocationResult {
+    const parsed = (structured ? textResultSchema.extend({ structuredOutput: z.record(z.unknown()) })
+      : tools ? textResultSchema.extend({ toolRequests: z.array(z.unknown()).max(8).optional() }) : textResultSchema).safeParse(value);
     if (!parsed.success) throw new ModelGatewayError('INVALID_RESPONSE');
-    if (structured && Buffer.byteLength(JSON.stringify(parsed.data), 'utf8') > 131072) throw new ModelGatewayError('INVALID_RESPONSE');
+    if ((structured || tools) && Buffer.byteLength(JSON.stringify(parsed.data), 'utf8') > 131072) throw new ModelGatewayError('INVALID_RESPONSE');
+    if (tools && parsed.data.toolRequests?.some(value => !isGatewayOrderExplainRequest(value))) throw new ModelGatewayError('INVALID_RESPONSE');
     if (structured) {
       let decoded: unknown;
       try { decoded = JSON.parse(parsed.data.text); } catch { throw new ModelGatewayError('INVALID_RESPONSE'); }
@@ -177,7 +184,9 @@ export class UnifiedAiGatewayService {
       await life.wait(() => this.assertMediaCurrent(context, transportRequest, life.controller.signal));
       dispatched = true;
       const rawResult = structuredClone(await life.wait(() => this.ports.transport.invoke(structuredClone(context), structuredClone(transportRequest), structuredClone(route), life.controller.signal)));
-      const result = intentBinding ? this.textResult(rawResult, intentBinding.structuredOutput === true && transportRequest.features?.includes('structuredOutput') === true) : rawResult;
+      const result = intentBinding ? this.textResult(rawResult,
+        intentBinding.structuredOutput === true && transportRequest.features?.includes('structuredOutput') === true,
+        intentBinding.orderExplainTool === true && transportRequest.features?.includes('tools') === true) : rawResult;
       if (this.ports.observation) {
         await life.wait(() => this.ports.observation!.record(structuredClone({ call, reservationId: usage.id, route, result,
           delivery: { mode: 'invoke' as const } })));

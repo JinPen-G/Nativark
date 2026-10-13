@@ -3,7 +3,7 @@ import type { AiExecutionContext, AiGatewayConfigReferenceDraft, AiGatewayFailur
   AiGatewayPortDraft, AiGatewayResultDraft, AiGatewayStreamEventDraft, AiGatewayUsageDraft } from '@rental-os/shared';
 import { z } from 'zod';
 import { GatewayDeadline } from './gateway-deadline';
-import { isGatewayConfig, isGatewayEvent, isGatewayIntent, isGatewayResult } from './gateway-contract-validation';
+import { isGatewayConfig, isGatewayEvent, isGatewayIntent, isGatewayResult, isGatewayOrderExplainRequest } from './gateway-contract-validation';
 import { gatewayTextIntentBindingSchema, type GatewayTextIntentBinding } from './gateway-intent';
 import { type GatewayRoutingResolution } from './gateway-routing.service';
 import { ModelGatewayError, type GatewayContext, type ModelAdapter } from './model-gateway.ports';
@@ -116,7 +116,12 @@ export class PublicAiGatewayService implements AiGatewayPortDraft {
     const completed = (result: GatewayInvocationResult): AiGatewayResultDraft => {
       const usage: AiGatewayUsageDraft = result.usage ? { kind: 'reported', ...result.usage }
         : { kind: 'unknown', reason: 'not_returned', nextAction: 'reconcile' };
-      return { ...base(), status: 'completed', text: result.text, toolRequests: [], usage };
+      const proposed = binding.orderExplainTool === true && intent.requiredFeatures.includes('tools')
+        ? result.toolRequests ?? [] : [];
+      if (!Array.isArray(proposed) || proposed.length > 8 || !proposed.every(isGatewayOrderExplainRequest)) throw new ModelGatewayError('INVALID_RESPONSE');
+      // Requests are unexecuted model candidates. The receiving business tool
+      // must still resolve current scope/ownership/permission and Core facts.
+      return { ...base(), status: 'completed', text: result.text, toolRequests: structuredClone(proposed), usage };
     };
     const failed = (error: unknown): AiGatewayResultDraft => {
       const code = error instanceof ModelGatewayError ? error.code : 'PROVIDER_FAILED';
