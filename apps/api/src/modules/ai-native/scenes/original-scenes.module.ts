@@ -1,6 +1,9 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AiOriginalOrderReadHttpModule } from './original-order-read-http.module';
+import { AiHumanQuoteSelectionModule } from '../task-request/human-quote-selection.module';
+import type { FormalApprovedOrderReprepareConfiguration } from '../approval-execution/formal-approved-order-reprepare.composition';
+import type { SelectedQuoteTaskConfiguration } from './human-quote-order.composition';
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './original-scenes.composition';
 import { AI_ORIGINAL_SCENES, AI_ORIGINAL_SCENE_REQUESTS, AiOriginalScenesController,
   AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS,
@@ -8,7 +11,8 @@ import { AI_ORIGINAL_SCENES, AI_ORIGINAL_SCENE_REQUESTS, AiOriginalScenesControl
 import { composeAiOriginalSceneModel, type AiOriginalSceneModelDependencies } from './original-scene-model.composition';
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneModel, type RequestBoundOriginalSceneDependencies,
   composeRequestBoundPersistedOriginalSceneModel, type RequestBoundPersistedOriginalSceneModelDependencies,
-  type RequestBoundOriginalSceneModelDependencies, type AiSceneModelRequestOptions, type AiSceneRequestOptions } from './request-bound-scenes.application';
+  type RequestBoundOriginalSceneModelDependencies, type AiSceneModelRequestOptions, type AiSceneRequestOptions,
+  type RequestBoundQuoteOrderDependencies } from './request-bound-scenes.application';
 
 export const AI_ORIGINAL_SCENE_MODEL = Symbol('AI_ORIGINAL_SCENE_MODEL');
 export const AI_ORIGINAL_ORDER_READ_REQUESTS = Symbol('AI_ORIGINAL_ORDER_READ_REQUESTS');
@@ -16,6 +20,23 @@ export { AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQ
 
 @Module({})
 export class AiOriginalScenesModule {
+  /** One explicit host for model clarification and the existing human flow.
+   * Registration performs no business action; quote confirmation is not approval. */
+  static registerHttpQuoteFlow(dependencies: RequestBoundPersistedOriginalSceneModelDependencies,
+    options: Parameters<typeof AiOriginalScenesModule.registerHttpPersistedModel>[1],
+    business: { dependencies: RequestBoundQuoteOrderDependencies; task: SelectedQuoteTaskConfiguration;
+      reprepare?: FormalApprovedOrderReprepareConfiguration }): DynamicModule {
+    if (dependencies.scene.code !== 'quote_clarification' || business.dependencies.scene.code !== 'quote_clarification'
+      || dependencies.scene.version !== business.dependencies.scene.version || options.orderReadChain
+      || business.dependencies.db !== dependencies.db || business.dependencies.auth !== dependencies.auth
+      || business.dependencies.guard !== dependencies.guard || business.dependencies.core !== dependencies.core
+      || business.dependencies.subscriptions !== dependencies.subscriptions) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const model = this.registerHttpPersistedModel(dependencies, options);
+    const human = AiHumanQuoteSelectionModule.registerHttpTask(business.dependencies,
+      { enabled: options.enabled, audience: options.audience }, business.task, business.reprepare);
+    return { ...model, imports: [...(model.imports ?? []), human],
+      exports: [...(model.exports ?? []), AiHumanQuoteSelectionModule] };
+  }
   /** Uses the published original-order-read contract, never legacy model routes. */
   static registerHttpOrderReadChain(dependencies: RequestBoundPersistedOriginalSceneModelDependencies,
     options: Parameters<typeof AiOriginalScenesModule.registerPersistedOrderReadChain>[1]): DynamicModule {
