@@ -139,7 +139,21 @@ export class AiOriginalSceneModelActionsController {
     return respondAiScene(() => this.model.readTakeoverReceipt(request, body), 'read_takeover_receipt');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.requestCancel)
-  requestCancel(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.model.requestCancel(request, body)); }
+  requestCancel(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.requestCancel(request, body), 'read_cancellation_receipt');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readCancellationReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readCancellationReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.readCancellationReceipt(request, body), 'read_cancellation_receipt');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.requestCancellationIntent) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  requestCancellationIntent(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.requestCancellationIntent(request, body), 'read_cancellation_receipt');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readCancellationSettlementReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readCancellationSettlementReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.model.readCancellationSettlementReceipt(request, body), 'read_cancellation_settlement_receipt');
+  }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readModelResult)
   readModelResult(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.model.readModelResult(request, body)); }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.reopenModelSource)

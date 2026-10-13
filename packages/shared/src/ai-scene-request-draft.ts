@@ -62,6 +62,12 @@ export interface AiSceneModelTakeoverDraft {
 export interface AiSceneModelTakeoverReceiptReadDraft extends AiSceneModelTakeoverDraft {
   runId: string;
 }
+/** expectedRevision is the exact revision before the observed transition.
+ * Cancellation intent and its later settlement are separate observations. */
+export interface AiSceneModelCancellationReceiptReadDraft {
+  original: AiSceneRequestReadDraft;
+  expectedRevision: number;
+}
 /** Confirms only the displayed Core quote parameters, not order creation or
  * approval. Hashes bind the current authorized preparation, not authority. */
 export interface AiSceneQuoteReceiptReadDraft extends AiSceneRequestReadDraft {
@@ -122,7 +128,8 @@ export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
   readAnswer: 'input/receipt', continueAnswer: 'input/continue',
   readQuotePreparation: 'input/quote-preparation',
   confirmClarifiedQuote: 'input/quote-confirm', readClarifiedQuoteReceipt: 'input/quote-receipt',
-  requestCancel: 'cancel', readModelResult: 'result', reopenModelSource: 'source',
+  requestCancel: 'cancel', requestCancellationIntent: 'cancel/intent', readCancellationReceipt: 'cancel/receipt',
+  readCancellationSettlementReceipt: 'cancel/settlement-receipt', readModelResult: 'result', reopenModelSource: 'source',
   readTaskPage: 'tasks', readTaskEvents: 'events', readTaskUsage: 'usage', readTaskScene: 'scene',
   startSettingsTask: 'settings/start', readSettingsConfirmation: 'settings/confirmation',
   decideSettingsProposal: 'settings/decision', readSettingsDecision: 'settings/decision-receipt', continueSettingsConfirmation: 'settings/continue',
