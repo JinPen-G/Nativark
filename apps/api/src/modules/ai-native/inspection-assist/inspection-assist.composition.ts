@@ -139,10 +139,9 @@ export class StaffInspectionRequestFactory {
         const review = await services.drafts.readReview(value);
         if (!includeReceipt) return { review, receipt: { status: 'not_requested' as const }, businessActionRequested: false as const };
         if (!services.submission) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
-        const receipt = await services.submission.readReceipt({ ...review.target, draftId: review.draftId });
-        const current = await services.drafts.readReview(value);
-        if (requestFingerprint(current) !== requestFingerprint(review)) throw new InspectionAssistError('REVISION_CONFLICT');
-        return { review, receipt, businessActionRequested: false as const };
+        const observation = await services.readSubmissionReview({ ...review.target, draftId: review.draftId });
+        if (requestFingerprint(observation.review) !== requestFingerprint(review)) throw new InspectionAssistError('REVISION_CONFLICT');
+        return { review: observation.review, receipt: observation.receipt, businessActionRequested: false as const };
       },
       recognitionTaskHost: (reference: unknown, dependencies: Parameters<typeof composeInspectionRecognitionTaskHost>[2]) => {
         if (!services.recognition || authorization === undefined) throw new InspectionAssistError('STORAGE_UNAVAILABLE');

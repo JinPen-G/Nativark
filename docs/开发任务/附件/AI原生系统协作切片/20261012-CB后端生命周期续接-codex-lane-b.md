@@ -136,3 +136,15 @@ Node DATABASE_URL 固定 mysql://offline:offline@127.0.0.1:1/rental_os_offline�
 主线仍需正式新 task/step 动作政策、真实 file runtime/附件绑定、平台/BYOK能力/价格预算、audio官方 proof 和 partial-safe结果合同；`prisma-text-capability-receipt.repository.ts` 的音频仍关闭，未知不恢复候选、不文本替代音频。保存后 reference 修订失效时应走原 staff result-save-receipt/readReview，不能再创建新识别调用修复未知。主线 preferenceKinds 原消费已同步，本线 factory传参现闭合，仍需主线选择受控服务器政策而非模型/客户声明。
 
 源码包固定提交以上两项，记录提交 SHA 由本轮 Git/对话给出；仅本树提交，无生产启用、外联、安装、迁移、shared生成、push/main或完成率调整。
+
+## 20261013 追加队列：员工审阅原收据消费
+
+从 `35a2616a` 无冲突同步固定主线 `f59ecabb41325e6553ea8c5de2b650e60cc47ef7`，合并点 `3ee8396cb0ae9d91e1893c71856fe8e2cb268cee`。原提交和 output 保留，公共目录仅随授权 merge 同步，没有在公共目录施工。
+
+核对第一包：现有 `sceneKnowledge` 已交原 `composeOriginalSceneKnowledge` collect/revalidate/open，原冻结材料格式和主线发送前消费者继续复用，不新建平行输入格式。确认偏好选择已接；当前正式政策、文件及能力依赖缺失仍拒绝。
+
+员工 `StaffInspectionRequestFactory.open().readCurrentReview(value,true)` 改接已有 `readSubmissionReview`，不再保留只复读草稿的弱收据联读。原 submit 动作权限及收据→草稿→收据→草稿一致性均复用。返回仍是旧 review/receipt/businessActionRequested 结构，没有改变 shared/HTTP 合同；默认不查询收据、无候选采用、Core写入或unknown重试。
+
+一次直接内联 `node -r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs -e <原员工审阅场景>` 调实际 factory/service 和原 inspection-persistent 显式身份/事务替身：确认两次原 receipt 读取；not_prepared 准确返回；两次收据变化时 REVISION_CONFLICT；operation 数量不变；close 后 ACCESS_DENIED。完成标记 `smoke=passed; actual staff review uses two original receipt reads; changed receipt rejected; zero writes; closed session denied`，exit0。没有新增或修改测试/fixture/脚本。必要原API strict compiler noEmit：1119 files，0 diagnostics，exit0；diff check exit0。使用本树 preload、固定无效 DATABASE_URL、write-root/audit/TEMP/TMP 全本树。没有真实MySQL/HTTP/对象存储/媒体/模型/设备验证。
+
+追加队列的事件准备、原automation输入/task创建/creation核对、人类close/feedback/operation和有界queue当前已有真实request consumer，后续仅补实际缺口，不把已存在方法重新计交付。UI目录尚需主线确认归属；本片未写页面/登录/上传链。音频proof、partial-safe、正式任务政策和真实来源仍原硬依赖，未放行或重建影子实现。
