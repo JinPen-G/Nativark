@@ -14,7 +14,7 @@ import type { TextCapabilityProbeOriginalInputSource } from './text-capability-p
 import { composeTextCapabilityProbeTaskProducer } from './text-capability-probe-task-producer.composition';
 import { PrismaTaskPlanPolicyRepository } from './runner/prisma-task-plan-policy.repository';
 import { aiTaskRunnerLimitsSchema } from './runner/prisma-task-run-evidence.repository';
-import { textProbeCommandSchema, TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE } from './text-capability-probe';
+import { textProbeCommandSchema, textProbeCapability, TEXT_CAPABILITY_PROBE_TOOL, TEXT_PROBE_SCENE } from './text-capability-probe';
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 
 const version = 'text-probe-original-1';
@@ -159,6 +159,16 @@ export class PrismaTextProbeOriginalRequestRepository implements TextCapabilityP
     if (row.requestKey !== requestKey) throw conflict();
     const original = await this.checked(row);
     return { state: 'stored' as const, inputRef: original.inputRef, inputHash: original.inputHash };
+  }
+  async readOriginalCapability(requestKey: string) {
+    if (!id.max(128).safeParse(requestKey).success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const access = await this.access();
+    const row = await this.db.aiTaskOriginalRequest.findFirst({ where: { ...access.owner, requestKey,
+      contractVersion: version, sceneCode: TEXT_PROBE_SCENE } });
+    if (!row || row.requestKey !== requestKey) throw unavailable();
+    const original = await this.checked(row);
+    if ((await this.access()).binding !== access.binding) throw denied();
+    return textProbeCapability(original.command);
   }
   async publish(value: unknown) {
     const parsed = request.safeParse(structuredClone(value));
