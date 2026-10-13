@@ -184,5 +184,22 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
       facts: changed ? null : structuredClone(current), nextAction: changed ? 'reread_current_facts' : 'read_only',
       modelText: 'not_used_as_business_evidence' as const });
   };
-  return Object.freeze({ ...root, model, readOrderResult, application: root.createApplication(input.host, prepare) });
+  const application = root.createApplication(input.host, prepare);
+  const recoveryHost = Object.freeze(structuredClone(input.host));
+  const recoverOriginal = async (signal?: AbortSignal) => {
+    if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
+    const snapshot = await application.inspect({ taskId: task.taskId, runId: task.runId });
+    if (!snapshot.plan || !['running', 'waiting_external', 'cancel_requested'].includes(snapshot.task.status)) {
+      return { kind: 'not_started' as const, reason: 'task_not_runnable' as const };
+    }
+    // Recovery receives the repository's current-authority/CAS recovery lease.
+    // The runner reloads and validates expectedSteps through planAuthority.
+    // It never calls prepare(), publishes inputs or dispatches a model again.
+    const lease = await model.tasks.claimRecoveryRun({ taskId: task.taskId, runId: task.runId,
+      holderId: recoveryHost.holderId, leaseMs: recoveryHost.leaseMs,
+      expectedTaskRevision: snapshot.task.revision, expectedRunRevision: snapshot.run.revision,
+      expectedFencingToken: snapshot.run.fencingToken });
+    return { kind: 'run_outcome' as const, outcome: await root.runner.recover(lease, signal) };
+  };
+  return Object.freeze({ ...root, model, readOrderResult, recoverOriginal, application });
 }
