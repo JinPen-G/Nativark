@@ -16,6 +16,12 @@
 - 已确认该旧夹具的 absorbing business fact store 没有 findQuoteForOriginalOperation/saveQuoteForOriginalOperation/findQuoteForOriginalReference；正式 RentalBusinessService 对缺方法明确拒绝。没有给它补假成功，也没有修改 fixtures。正式宿主需注入既有 RentalBusinessFactStore 的这三个持久方法，才可验证原操作正向和应答不明读取。
 - 当前权限撤销和跨依赖 db 拒绝由直接调用检查；没有执行真实 MySQL、HTTP、模型、支付、迁移或 AppModule 启用。
 
+## 生产来源核实（不能混同夹具缺口）
+
+正式 `rental-business-fact.repository.ts` 已实现三方法：findQuoteForOriginalOperation（tenant+当前workspace+originalOperationKey，并核 originalInputHash）、findQuoteForOriginalReference（同范围读取并核持久 request 指纹）、saveQuoteForOriginalOperation（persistQuote 原事务）。`RentalBusinessService` 已公开相应原操作 create/read 方法，本线 quote-route 注入的实际 business 服务直接消费它们。因此上述失败是旧离线 store 缺方法，不是生产 Core 未实现，也不要求主线重复开发这三个端口。
+
+生产宿主应使用现有 RentalBusinessService 所绑定的正式 RentalBusinessFactRepository；本包没有替换为另一套内存 store。真实持久适配的正向调用和人类审批建单仍未验证。拒绝路径最后内联复验 exit 0，覆盖 unknown不重报、收据不可读拒绝、撤权与跨db依赖拒绝；它没有使此前正向红测变为成功证据。
+
 ## 未完成与下一步
 
 本包只是实际消费者统一装配，不是报价→人类选择→审批→Core 建单全正向验收。财务配置、可信计价和完整原操作持久 store/approval policies 仍需合法宿主提供；不足保持 unavailable/unknown，不重新创建报价。后续优先核验原请求/明确选择/原审批执行衔接断点，不扩展示、导航或风险包装；公共核心缺口给主线精确方法及调用位置。
