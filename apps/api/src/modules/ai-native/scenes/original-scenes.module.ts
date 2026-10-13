@@ -7,12 +7,22 @@ import { composeAiOriginalSceneModel, type AiOriginalSceneModelDependencies } fr
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneModel, type RequestBoundOriginalSceneDependencies,
   composeRequestBoundPersistedOriginalSceneModel, type RequestBoundPersistedOriginalSceneModelDependencies,
   type RequestBoundOriginalSceneModelDependencies, type AiSceneModelRequestOptions, type AiSceneRequestOptions } from './request-bound-scenes.application';
+import { composeRequestBoundOriginalTaskActionPolicies, type AiOriginalTaskActionPolicyOptions } from './request-bound-scenes.application';
 
 export const AI_ORIGINAL_SCENE_MODEL = Symbol('AI_ORIGINAL_SCENE_MODEL');
+export const AI_ORIGINAL_TASK_ACTION_POLICIES = Symbol('AI_ORIGINAL_TASK_ACTION_POLICIES');
 export { AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS } from './original-scenes.controller';
 
 @Module({})
 export class AiOriginalScenesModule {
+  /** Explicit non-HTTP supplier; does not seed or enable any task policy. */
+  static registerTaskActionPolicies(dependencies: RequestBoundOriginalSceneDependencies,
+    options: AiOriginalTaskActionPolicyOptions): DynamicModule {
+    const selected = structuredClone(options);
+    return { module: AiOriginalScenesModule, providers: [{ provide: AI_ORIGINAL_TASK_ACTION_POLICIES,
+      useFactory: () => composeRequestBoundOriginalTaskActionPolicies(dependencies, selected) }],
+      exports: [AI_ORIGINAL_TASK_ACTION_POLICIES] };
+  }
   /** Explicit host selection, not production activation. Mount this OR the
    * existing registerHttpModel, never two drivers for the same route/action.
    * Only available model actions and original business request producers are

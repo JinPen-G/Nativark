@@ -19,9 +19,17 @@ import type { ApprovedSettingsApplicationDependencies } from '../approval-execut
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
 import { originalIdentityHash } from '../task-request/original-request.authority';
 import { composePersistedTaskCallGateway, type PersistedTaskCallGatewayDependencies } from '../task-model-gateway.composition';
+import { composeTaskActionPolicyManagement } from '../task-action-policy-management.composition';
+import { taskActionPolicyOperations, type AiTaskActionPolicyMutation } from '../prisma-task-action-policy.repository';
 
 export type AiSceneHttpRequest = { headers: { authorization?: unknown } };
 export type AiSceneRequestOptions = { enabled: boolean; audience: 'operator' | 'staff' };
+export type AiOriginalTaskActionPolicyOptions = AiSceneRequestOptions & {
+  /** Explicit server configuration. No client permission lists or automatic
+   * action-policy creation. The current owner must also pass config Guard. */
+  templates: readonly Pick<AiTaskActionPolicyMutation, 'operation' | 'requiredPermissions'>[];
+  ttlMs: number;
+};
 export type RequestBoundOriginalSceneDependencies = Omit<AiOriginalSceneDependencies, 'credentials'>;
 export type RequestBoundOriginalSceneModelDependencies = Omit<AiOriginalSceneModelDependencies, 'credentials'>;
 export type AiSceneModelRequestOptions = AiSceneRequestOptions & {
@@ -79,6 +87,72 @@ function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequ
       } }, command), command));
     } finally { active = false; }
   };
+}
+
+/** Original operator scenes can now configure their own execution policies
+ * through the existing config authority/CAS repository. This does not grant
+ * staff/client/automation policies, business approval or dispatch ownership. */
+export function composeRequestBoundOriginalTaskActionPolicies(
+  dependencies: RequestBoundOriginalSceneDependencies, options: AiOriginalTaskActionPolicyOptions) {
+  if (options.audience !== 'operator') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  const operation = z.string().refine(value => taskActionPolicyOperations.includes(value));
+  const permission = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+  const templates = freezeOriginalInput(z.array(z.object({ operation,
+    requiredPermissions: z.array(permission).min(1).max(64).refine(value => new Set(value).size === value.length)
+  }).strict()).min(1).max(taskActionPolicyOperations.length).parse(structuredClone(options.templates)));
+  if (new Set(templates.map(template => template.operation)).size !== templates.length) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  const ttlMs = z.number().int().min(1).max(120000).parse(options.ttlMs);
+  const readSchema = z.object({ original: originalRequestReferenceSchema, operation }).strict();
+  const configureSchema = readSchema.extend({ expectedRevision: z.number().int().min(1).max(4294967294).nullable() }).strict();
+  const call = bindRequests(dependencies, { enabled: options.enabled, audience: 'operator' }, input => ({
+    scenes: composeAiOriginalScenes(input), policies: composeTaskActionPolicyManagement(input), clock: input.clock ?? (() => new Date())
+  }));
+  type Root = { scenes: ReturnType<typeof composeAiOriginalScenes>;
+    policies: ReturnType<typeof composeTaskActionPolicyManagement>; clock: () => Date };
+  const target = async (root: Root, original: z.infer<typeof originalRequestReferenceSchema>, selected: string) => {
+    const template = templates.find(value => value.operation === selected);
+    if (!template) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const before = await root.scenes.requests.readHistorical(original);
+    const task = await root.scenes.readTaskReceipt(original.inputRef);
+    if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const verify = async () => {
+      const current = await root.scenes.requests.readHistorical(original), latest = await root.scenes.readTaskReceipt(original.inputRef);
+      if (current.receipt.state === 'revoked' || current.receipt.contentHash !== before.receipt.contentHash
+        || originalIdentityHash(current.context) !== originalIdentityHash(before.context)
+        || latest.state !== 'observed' || latest.taskId !== task.taskId || latest.runId !== task.runId || latest.revision !== task.revision)
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    };
+    await verify();
+    return { taskId: task.taskId, template, expiresAt: before.receipt.expiresAt, verify };
+  };
+  return Object.freeze({
+    configure(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = configureSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = configureSchema.parse(command), found = await target(root, input.original, input.operation);
+        const now = root.clock().getTime(), expiry = Math.min(Date.parse(found.expiresAt), now + ttlMs);
+        if (!Number.isFinite(expiry) || expiry <= now) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const policy = await root.policies.put({ taskId: found.taskId,
+          operation: found.template.operation as AiTaskActionPolicyMutation['operation'],
+          requiredPermissions: found.template.requiredPermissions, expiresAt: new Date(expiry) }, input.expectedRevision);
+        await found.verify();
+        return { original: input.original, state: 'configured' as const, policy, retryable: false as const,
+          semantics: 'action_policy_not_dispatch_or_business_approval' as const };
+      });
+    },
+    read(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = readSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = readSchema.parse(command), found = await target(root, input.original, input.operation);
+        const policy = await root.policies.read(found.taskId, found.template.operation as AiTaskActionPolicyMutation['operation']);
+        await found.verify();
+        return { original: input.original, state: policy.state, policy: policy.state === 'observed' ? policy.policy : null,
+          retryable: false as const, semantics: 'action_policy_not_dispatch_or_business_approval' as const };
+      });
+    },
+  });
 }
 
 export type RequestBoundPersistedOriginalSceneModelDependencies =
