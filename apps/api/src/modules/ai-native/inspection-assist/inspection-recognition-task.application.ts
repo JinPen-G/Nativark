@@ -235,6 +235,17 @@ export class InspectionRecognitionTaskApplication {
       return inspection.readRecognitionReview({ ...original, taskId: query.taskId, resultId: result.data });
     });
   }
+  /** Explicit evidence save, never field adoption or Core submission. Lost
+   * replies are recovered by the original result-save receipt in staff service. */
+  saveResultReview(request: Request, reference: unknown, value: unknown) {
+    const command = z.object({ resultId: inspectionId, operationId: inspectionId }).strict().safeParse(structuredClone(value));
+    if (!command.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return this.request(request, reference, async (bound, original) => {
+      const { inspection, query } = await bound.existing();
+      return inspection.saveRecognitionReview({ ...original, taskId: query.taskId,
+        resultId: command.data.resultId, operationId: command.data.operationId });
+    });
+  }
   readInput(request: Request, reference: unknown) {
     return this.request(request, reference, async bound => {
       const { root, query } = await bound.existing();
