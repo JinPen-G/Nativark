@@ -1,6 +1,6 @@
 # Rental OS AI Native 系统专项开发任务
 
-> **最新底座功能（2026-10-13）：源码 `6f8107797dabddec98b22d27615cc9abf337517b`，请求/合同前置 `0f043a59adca426a0ecd932b1379f2223c99b318`。** 预算管理已有请求绑定、显式默认关闭HTTP模块、共享/OpenAPI组件、租户安全读/既有政策变更、平台政策读写及原全局Guard精确路径；保存修订与当前观测分开，未知只读同政策不重试。直接Controller/Guard冒烟通过，624源码零诊断，没有写改测试脚本。未启HTTP/生产或真实DB；首份租户政策配置生产、端侧设置挂载、版本发布、可信计价/媒体及真环境仍待补。55/112＝49.1%、ENTRY35/72＝48.6%、正式验收0/28保持，Runtime/SDK/权限/单账/unknown边界不变。
+> **最新底座功能（2026-10-13）：`08ecf1b9f9ae2e740ef531224a5828885772ee58`。** 预算initialize已接原持久租户模式/规范Profile生产首份政策，平台/BYOK无降级、密钥不输出；请求全程身份/scope绑定，事务复验配置选择，缺源/缺规范scope拒绝。真实服务/Controller直接冒烟及624源码零诊断通过，没有写改测试脚本。保留原管理HTTP/合同/Guard成果，仍默认不注册生产；规范scope首次装配、端侧设置/发布治理、可信计价/媒体及真环境未闭合。55/112＝49.1%、ENTRY35/72＝48.6%、正式验收0/28保持，Runtime/SDK/授权/单账/unknown规则不变。
 
 > **2026-10-13最新源码 `c4ae990970268ca1f736f909b3db579573a3ee21`：** 客户原模型结果发现/受控读取已消费到HTTP，复用原谱系和结果仓储，拒绝caller resultId/旧run回退，未知不出正文，620源码零诊断及原客户用例1/1。成功文本/完整配置财务正向未验，不把未产出读取当生成成功；原门槛计分保持。
 
@@ -352,7 +352,7 @@
 | AIN-08 | G1/G2/G3：[业务工具组合](../../apps/api/src/modules/ai-native/tools/business-tools.composition.ts)已将目录/可用性/客户/订单/风险事实接入原场景；339f7843/3663ae54去掉会员及资金reader全量回退，消费原服务分页与当前权限 | G4四品类事实及历史依据真实对照；DB执行计划和其他reader未全量重验，缺能力仍明确unavailable |
 | AIN-09 | G1/G2：Core正式报价、原操作键保存/恢复、原请求quoteReview/confirmQuote/readQuoteReceipt已接 | G3四品类/企业身份/歧义到明确参数的完整消费者；不是缺Core原键端口 |
 | AIN-10 | G1/G2/G3：[正式知识组合](../../apps/api/src/modules/ai-native/knowledge/persistent-knowledge.composition.ts)已接文件、政策、版本、确认记忆及原场景输入 | G4真实存储、撤回传播、全来源/格式与隐私验收；词法检索不是向量检索 |
-| AIN-11 | G1/G2：平台/租户配置、权益、单账与task资源已有实现；原task到持久calls预算、配置CAS/unknown、平台管理/租户摘要保留；0f043a59/6f810779预算请求/默认关闭HTTP/合同/精确Guard接点已接 | G3首份租户政策配置生产、版本发布/全部场景与端侧设置实际挂载；可信tokens/money价格及上界、真实成本/并发/停用验收未完 |
+| AIN-11 | G1/G2：平台/租户配置、权益、单账与task资源已有实现；原task到持久calls预算、CAS/unknown、平台管理/租户摘要保留；0f043a59/6f810779请求/合同/Guard、08ecf1b9原配置生产initialize已接 | G3规范scope首次配置装配、版本发布/全部场景与端侧设置实际挂载；可信tokens/money价格及上界、真实成本/并发/停用验收未完 |
 | AIN-12 | G1/G2：任务中心列表/事件/快照/多轮模型已有request-bound API，审批/settings/原订单结果已有聚合依赖，91ae86b1绑定分页筛选 | G3后台完整消费者仍待核验与补齐，不再重复实现已有聚合接点；全流程验收未完 |
 | AIN-13 | G1/G2/G3：[订单解释及下一步](../../apps/api/src/modules/ai-native/tools/business-tools.composition.ts)与原模型结果读取/来源重开进入原场景 | G4实际订单状态、确定性金额和后台实流验证；不推断支付/退款成功 |
 | AIN-14 | G1/G2：开业检查、风险、分区事实/差异及人工入口，遗留WIP已由72774773接收 | G3各适用分区提案→正式保存/审核/采用的消费，不是分区readSection尚未实现 |
