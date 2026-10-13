@@ -65,9 +65,13 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
   }
 
   async saveSettings(key: BudgetPolicyKey, settings: AiUsageSettingsDraft, expectedRevision: number, revalidate: () => Promise<void>) {
+    key = structuredClone(key);
+    settings = structuredClone(settings);
     validateBudgetSettings(settings);
+    if (settings.sceneCode !== key.sceneCode) throw new BudgetError('INVALID');
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new BudgetError('INVALID');
     await revalidate();
+    let callbackCompleted = false;
     try {
       return await this.db.$transaction(async tx => {
         const where = policyWhere(key);
@@ -76,16 +80,29 @@ export class PrismaBudgetRepository implements BudgetTransactionRepository {
             id: randomUUID(), ...where, configRevision: 1, enabled: policyEnabled(settings), allowedModels: json(settings.allowedModels), allowedScenes: json(settings.allowedScenes), settingsJson: json(settings), unitKind: settings.budget.state === 'limited' ? settings.budget.quantity.unit : 'tokens',
             maxConcurrent: settings.maxConcurrent, maxCallsPerRun: settings.maxCallsPerRun, priceVersion: undefined
           }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } });
-          await revalidate(); return policy(created);
+          await revalidate();
+          const saved = policy(created);
+          callbackCompleted = true;
+          return saved;
         }
         const changed = await tx.aiBudgetPolicy.updateMany({ where: { ...where, configRevision: expectedRevision }, data: { configRevision: { increment: 1 }, enabled: policyEnabled(settings), allowedModels: json(settings.allowedModels), allowedScenes: json(settings.allowedScenes), settingsJson: json(settings), unitKind: settings.budget.state === 'limited' ? settings.budget.quantity.unit : 'tokens', maxConcurrent: settings.maxConcurrent, maxCallsPerRun: settings.maxCallsPerRun, priceVersion: undefined } });
         if (changed.count !== 1) throw new BudgetError('REVISION_CONFLICT');
         await revalidate();
         const next = await tx.aiBudgetPolicy.findUnique({ where: { scopeId_scopeKind_sceneCode: where }, select: { id: true, scopeId: true, scopeKind: true, sceneCode: true, configRevision: true, settingsJson: true } });
         if (!next) throw new BudgetError('UNAVAILABLE');
-        return policy(next);
+        const saved = policy(next);
+        callbackCompleted = true;
+        return saved;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, maxWait: 2500, timeout: 5000 });
-    } catch (error) { if (error instanceof BudgetError) throw error; throw new BudgetError('REVISION_CONFLICT'); }
+    } catch (error) {
+      // Callback completion is not a COMMIT acknowledgement. Never tell a
+      // caller to retry an apparently conflicting write after its result was
+      // lost; read the same policy/revision first. No transaction retry here.
+      if (callbackCompleted) throw new BudgetError('PENDING_RECONCILIATION');
+      if (error instanceof BudgetError) throw error;
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new BudgetError('REVISION_CONFLICT');
+      throw new BudgetError('PENDING_RECONCILIATION');
+    }
   }
 
   private async lockPolicies(tx: Tx, keys: readonly BudgetPolicyKey[]) {

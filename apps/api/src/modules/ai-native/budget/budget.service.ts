@@ -56,13 +56,17 @@ export class BudgetService {
     return context.actor.kind === 'saas_admin' ? context.actor.userId : context.actor.kind === 'user' ? context.actor.userId : context.actor.kind === 'customer' ? context.actor.customerId : context.actor.subjectId;
   }
   async settings(key: BudgetPolicyKey) {
+    key = structuredClone(key);
     const session = await this.session('settings_read', { policy: key });
     const result = await this.repository.settings(structuredClone(key));
     await session.revalidate();
     return result;
   }
   async saveSettings(key: BudgetPolicyKey, settings: AiUsageSettingsDraft, expectedRevision: number) {
+    key = structuredClone(key);
+    settings = structuredClone(settings);
     validateBudgetSettings(settings);
+    if (settings.sceneCode !== key.sceneCode) throw new BudgetError('INVALID');
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new BudgetError('INVALID');
     const session = await this.session('settings_write', { policy: key });
     return this.repository.saveSettings(structuredClone(key), structuredClone(settings), expectedRevision, session.revalidate);
