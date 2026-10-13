@@ -80,6 +80,26 @@ export function composeClientOriginalQuotePreparation(input: {
     quotePersistence: 'not_attempted' as const, inventoryReservation: 'not_attempted' as const,
     humanAction: 'explicit_confirmation_required' as const });
   return Object.freeze({
+    /** Observe an uncertain material INSERT without attempting another write.
+     * Absence is unknown, not evidence that preparation did not commit. */
+    async readPreparationOperation(value: unknown) {
+      const parsed = z.object({ operationKey: id, input: z.unknown() }).strict().safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const bound = await current();
+      await grant(bound, 'read');
+      const row = await repository.findOperation(bound.scope, parsed.data.operationKey);
+      if (!row) {
+        await check(bound);
+        await grant(bound, 'read');
+        return { state: 'unknown' as const, operationKey: parsed.data.operationKey,
+          retryable: false as const, execution: 'read_only' as const };
+      }
+      const command = { kind: 'quote_preparation' as const, inputHash: requestFingerprint(canonical(parsed.data.input)) };
+      if (row.inputHash !== requestFingerprint(command) || row.bindingHash !== bound.bindingHash) throw stale();
+      decode(row); await check(bound); await grant(bound, 'read');
+      return { state: 'observed' as const, ...packet(row), retryable: false as const,
+        execution: 'read_only' as const, freshness: 'recheck_at_confirmation' as const };
+    },
     async prepare(value: unknown) {
       const parsed = z.object({ operationKey: id, input: z.unknown() }).strict().safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
