@@ -120,24 +120,6 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
     return { before, runner, key, orderRegistrationRef, answerRegistrationRef, modelRegistrationRef };
   };
   const application = Object.freeze({
-    async readModelResult(value: unknown) {
-      const { before, key, modelRegistrationRef } = await assemble(value, false);
-      const originalInput = await input.db.aiTaskActionInput.findFirst({ where: { ...key,
-        registrationRef: modelRegistrationRef, toolCode: TASK_TEXT_MODEL_TOOL, toolVersion: AI_TOOL_DRAFT_VERSION } });
-      if (!originalInput) throw unavailable();
-      const steps = await input.db.aiStep.findMany({ where: { ...key, inputRef: originalInput.id, toolCode: TASK_TEXT_MODEL_TOOL,
-        toolVersion: AI_TOOL_DRAFT_VERSION }, take: 2 });
-      if (steps.length !== 1 || !steps[0].resultRef) throw unavailable();
-      const result = await results.read({ original: before.ref, resultId: steps[0].resultRef });
-      await verify(before); return result;
-    },
-    async reopenOrderSource(value: unknown) {
-      const before = await bound(value);
-      const result = await application.readModelResult(before.ref);
-      if (result.status !== 'available' || !result.sources?.length) throw unavailable();
-      const source = await results.reopenSource({ original: before.ref, resultId: result.resultId, sourceIndex: 0 });
-      await verify(before); return source;
-    },
     /** Observe original preparation without claiming a lease, regenerating
      * input, or treating publication as proof that execution never started. */
     async readPreparation(value: unknown) {
