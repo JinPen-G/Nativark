@@ -10,7 +10,7 @@ import { aiPersistenceScopeColumns } from '../persistence-scope';
 import { validateBudgetSettings } from '../budget/budget-settings';
 import { PrismaSubscriptionBudgetReader } from '../budget/prisma-subscription-budget-reader';
 import { SubscriptionBudgetEntitlementAdapter } from '../budget/budget-dependency-adapters';
-import { AI_APPROVED_SETTINGS_TOOL_CODE } from '../../../../../../packages/shared/src/ai-approved-settings-draft';
+import { AI_APPROVED_SETTINGS_TOOL_CODE } from '@rental-os/shared';
 import { registeredSettingsTool } from './approved-settings-contracts';
 
 export interface ApprovedSettingsApplicationDependencies extends PersistedTaskAuthorizationDependencies {

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { RENTAL_FULFILLMENT_MODES } from '@rental-os/shared';
-import type { AiBookingMaterial, AiBookingSelection } from '../../../../../../packages/shared/src/ai-booking-draft';
+import type { AiBookingMaterial, AiBookingSelection } from '@rental-os/shared';
 import type { ClientRequestContext } from '../../client/client-auth.service';
 import type { composeAiClientScenes } from '../client-scene.composition';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';

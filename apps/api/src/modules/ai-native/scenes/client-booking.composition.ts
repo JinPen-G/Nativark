@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { AI_BOOKING_DRAFT_CONTRACT_VERSION, type AiBookingDraft, type AiBookingHandoff, type AiBookingMaterial } from '../../../../../../packages/shared/src/ai-booking-draft';
-import type { AiCustomerEntrySurface, AiEntryActionDraft } from '../../../../../../packages/shared/src/ai-entry-action-draft';
+import { AI_BOOKING_DRAFT_CONTRACT_VERSION, type AiBookingDraft, type AiBookingHandoff, type AiBookingMaterial } from '@rental-os/shared';
+import type { AiCustomerEntrySurface, AiEntryActionDraft } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import type { AiClientMaterialScope, AiClientSceneMaterial } from './prisma-client-scene-material.repository';

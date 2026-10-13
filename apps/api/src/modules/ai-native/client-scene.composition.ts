@@ -1,7 +1,7 @@
 import type { ClientApiService } from '../client/client-api.service';
 import type { ClientDeliveryAddressService } from '../client/client-delivery-address.service';
 import type { RentalDeliveryAddressSnapshot } from '@rental-os/shared';
-import type { AiBookingAddressEvidence } from '../../../../../packages/shared/src/ai-booking-draft';
+import type { AiBookingAddressEvidence } from '@rental-os/shared';
 import { AiClientEntryError } from './scenes/client-entry-action';
 import type { ClientRequestContext } from '../client/client-auth.service';
 import type { ClientMyOrdersQuery } from '@rental-os/shared';

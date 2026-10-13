@@ -10,7 +10,7 @@ import { knowledgeManagementAuthority, knowledgePolicyParticipants, knowledgePol
 import { readPreparedKnowledgeTarget, preparedKnowledgeUploadBinding, targetSpecHash } from './knowledge-policy-preparation-target';
 import { KnowledgePolicyManagementError, managementParse as parse, managementFingerprint as hash, managementIdentityHash,
   preparedTargetSpec, authorityTargetSpec, lifecycleTargetSpec, preparedUploadResource, managementHash, policyChange, policySnapshot, policyWhere, policyKeyHash, preparationFingerprint, receiptSelection, commitSelection, type PolicyChange } from './knowledge-policy-management.validation';
-import type { AiKnowledgePolicyManagementReceiptDraft, AiKnowledgePolicyManagementUnknownDraft } from '../../../../../../packages/shared/src/ai-knowledge-policy-management-draft';
+import type { AiKnowledgePolicyManagementReceiptDraft, AiKnowledgePolicyManagementUnknownDraft } from '@rental-os/shared';
 
 export type KnowledgePolicyManagementDependencies = {
   auth: Pick<AuthService, 'resolveAccessContext'>;
