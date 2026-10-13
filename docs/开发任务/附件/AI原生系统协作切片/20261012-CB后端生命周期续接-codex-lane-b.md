@@ -164,3 +164,11 @@ Node DATABASE_URL 固定 mysql://offline:offline@127.0.0.1:1/rental_os_offline�
 一次直接内联 Node 冒烟实际构造服务器组合及DynamicModule，真实身份入口返回无会话：prepare在读取automation policy前拒绝，policy reads=0、writes=0。stdout `smoke=passed; actual human event composition/module enforce current identity before automation policy; no writes or task/model execution`，exit0。此证据仅失效身份的实际服务组合，不声称新的正向事件任务创建/模型链通过。必要原API strict源码paths noEmit：1021 files、0 diagnostics、exit0；diff check exit0，无新增/修改测试或fixture，离线环境同前。
 
 知识冻结消费者经当前源码核验：original-scene-model.composition 的原envelope.knowledge进入knowledge.revalidate，并通过dispatchChecks交Gateway transport前原复验；后再复验，不修改主线场景/模型输入文件。已存在链不重复包装。withdraw/consent拒绝是前包行为证据，当前仅代码核验，不声称本次新增全派发证据。正式任务动作政策/audio官方proof/partial-safe结果与真实文件/价格能力仍公共依赖；核心后续以这些精确依赖为界，不用临时政策或预填artifact造成功。
+
+### 20261013 原事件人类办理的分页消费闭环
+
+继续核实原automation.prepare/create/reconcile与review close/feedback/operation，已有原输入、原creation收据及人类操作收据接口，不重写或把列表未出现称已解决。实际 `HumanAutomationReviewService.forEvent` 先前用未逐项复验的limit+1探测行生成hasMore；现包括探测行在内全部走原read/当前资源授权、再复读一致性，拒绝超量、重复或乱序ID，仍仅返回limit项。hasMore属于存在性输出，不能因探测行不返回正文就免授权。未新增公共合同或业务操作。
+
+一次直接内联实际 HumanAutomationReviewService（明确合成DB/资源授权替身，不是正式政策生产者）：正常两项、limit1，输出一项/hasMore且探测行至少两次复读；探测行返回另一tenant后unavailable、不泄漏分页存在性。完成标记 `smoke=passed; actual review service validates and rechecks pagination sentinel; foreign sentinel rejected; no writes/tasks/model`，exit0。必要原API strict源码paths noEmit772 files、0 diagnostics、exit0，diff check0；无测试脚本/fixture变更，无新队列或任务。
+
+公共阻塞方法再次核对（只读）：`InspectionRecognitionResultService.collect/readBinding` 调 `tasks.resolveAccess(taskId,'read_step_terminal')` 和同actor/scope的invocation/accounting evidence，正式新识别任务需合法持久action policy，不用临时grant。`PrismaTextCapabilityReceiptRepository.verify`仅text/streaming/vision/structured_output/tools，缺audio挑战及持久证明生产者；`AiTaskResultProjection.status`仅succeeded/failed/unknown，unknown payload=null，缺partial-safe完整性合同不能读截断候选。真实Storage runtime/attachment绑定与Gateway配置价格权益仍按原依赖，B不修改公共模块。新增成功sourceEvidence/完整候选保存派发链依然未验，离线人类读回与原键恢复不等于正式模型/数据库/HTTP/设备验收。
