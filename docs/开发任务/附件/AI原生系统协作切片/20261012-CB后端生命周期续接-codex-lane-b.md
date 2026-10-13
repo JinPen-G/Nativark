@@ -156,3 +156,11 @@ Node DATABASE_URL 固定 mysql://offline:offline@127.0.0.1:1/rental_os_offline�
 一次内联直接Node调用实际 StaffInspectionHostBinding、原inspection-persistent事务替身及真实 drafts.edit/reconcileOperation/read：编辑已经持久保存但回调拒绝→unknown；外来draft收据及宿主篡改传入副本不能解锁；原请求operationId保留；原收据恢复revision2；hide/show重新读取、dispose不更新。完成标记 `smoke=passed; actual draft edit lost reply; foreign receipt rejected; original request preserved; original receipt recovers; hide/show/dispose isolated`，exit0；无新增/修改测试脚本或fixture。原员工tsconfig noEmit（保留原依赖解析）227 files、0 diagnostics、exit0，diff check exit0。另一次额外源码paths检查228 files、1 diagnostic/exit1：shared ai-client-entry-draft-schemas.ts 的BigInt字面量与员工原ES2019目标不兼容，未修改shared或抬目标掩盖；不能把源码模式也说通过。
 
 该证据为实际组件控制器+离线事务，不是微信/真机/真实HTTP提交。后续按最新主线指令回到核心，不继续治理/UI展示。原政策、媒体持久结果正链和公共文件依赖未验口径不变。
+
+### 20261013 核心事件组合的人类资源授权接线
+
+现有HTTP HumanAutomationRequestFactory已把BusinessFailureReadAuthority交给automation；但服务器 `composeBusinessFailureAutomation` 及 `BusinessFailureEventsModule.registerAutomation` 没有传递其已有Auth/credentials/Guard/Core生产者。现改为传入实际BusinessFailureReadAuthority，复用PrismaAutomationAuthority已有current/withEvent检查；人类组合必须同时满足当前人类资源访问与独立automation主体/政策/权益/UTC限额。原独立后台AutomationFailureTasksModule调用仍可不传humanReads，由原持久automation政策负责；没有新主体、权限码或默认grant，没有新增worker或自动执行。
+
+一次直接内联 Node 冒烟实际构造服务器组合及DynamicModule，真实身份入口返回无会话：prepare在读取automation policy前拒绝，policy reads=0、writes=0。stdout `smoke=passed; actual human event composition/module enforce current identity before automation policy; no writes or task/model execution`，exit0。此证据仅失效身份的实际服务组合，不声称新的正向事件任务创建/模型链通过。必要原API strict源码paths noEmit：1021 files、0 diagnostics、exit0；diff check exit0，无新增/修改测试或fixture，离线环境同前。
+
+知识冻结消费者经当前源码核验：original-scene-model.composition 的原envelope.knowledge进入knowledge.revalidate，并通过dispatchChecks交Gateway transport前原复验；后再复验，不修改主线场景/模型输入文件。已存在链不重复包装。withdraw/consent拒绝是前包行为证据，当前仅代码核验，不声称本次新增全派发证据。正式任务动作政策/audio官方proof/partial-safe结果与真实文件/价格能力仍公共依赖；核心后续以这些精确依赖为界，不用临时政策或预填artifact造成功。

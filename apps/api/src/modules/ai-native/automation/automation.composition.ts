@@ -27,8 +27,8 @@ export function composeAutomationFailureTasks(input: AutomationDependencies, hum
 
 @Module({})
 export class AutomationFailureTasksModule {
-  static register(input: AutomationDependencies): DynamicModule {
+  static register(input: AutomationDependencies, humanReads?: BusinessFailureReadAuthority): DynamicModule {
     return { module: AutomationFailureTasksModule,
-      providers: [{ provide: AutomationFailureTaskService, useValue: composeAutomationFailureTasks(input) }], exports: [AutomationFailureTaskService] };
+      providers: [{ provide: AutomationFailureTaskService, useValue: composeAutomationFailureTasks(input, humanReads) }], exports: [AutomationFailureTaskService] };
   }
 }
