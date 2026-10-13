@@ -13,7 +13,7 @@ import { PrismaClientSceneMaterialRepository, AiClientMaterialError, type AiClie
 import { AiClientPolicyAuthority, AiClientTaskAuthority, clientTaskSceneSchema, type AiClientTaskDependencies } from './client-task.authority';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AI_CLIENT_HOST_CAPABILITIES_VERSION, aiClientHostCapabilitiesRequestSchema, aiClientHostCapabilitiesSchema,
-  type AiClientHostCapabilities } from '../../../../../../packages/shared/src/ai-client-entry-draft-schemas';
+  type AiClientHostCapabilities } from '@rental-os/shared';
 import { AiClientEntryError, assertEntryAction, clientEntrySurface, entryActionSchema, materialEntryAction, parseEntry } from './client-entry-action';
 import { composeClientMaterialTasks, clientTaskEventsCommandSchema } from './client-task.composition';
 import { composePersistedClientTaskAuthorization } from './client-task-execution.composition';
@@ -33,7 +33,7 @@ import { prepareClientOrderExplanation } from './client-order-explanation';
 import { bookingSelectionSchema, readClientBookingMaterial } from './client-booking-material';
 import { PrismaClientBookingRepository } from './prisma-client-booking.repository';
 import { composeClientBooking } from './client-booking.composition';
-import type { AiBookingMaterial } from '../../../../../../packages/shared/src/ai-booking-draft';
+import type { AiBookingMaterial } from '@rental-os/shared';
 import type { ClientApiService } from '../../client/client-api.service';
 
 const id = z.string().trim().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);

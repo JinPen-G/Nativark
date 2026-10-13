@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { AiKnowledgeManagementHttpResponsesDraft, AiKnowledgeManagementStateDraft } from '../../../../../../packages/shared/src/ai-knowledge-management-http-draft';
+import type { AiKnowledgeManagementHttpResponsesDraft, AiKnowledgeManagementStateDraft } from '@rental-os/shared';
 import { composeKnowledgeFileApplication, type KnowledgeFileApplicationDependencies } from './knowledge-file.composition';
 import { knowledgeManagementView } from './human-knowledge.service';
 import { requiredPort, unavailable } from './knowledge-errors';

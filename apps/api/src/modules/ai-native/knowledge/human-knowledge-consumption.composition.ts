@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { AiExecutionScope, AiKnowledgeLocatorDraft, AiPreferenceValueDraft } from '@rental-os/shared';
-import type { AiKnowledgeConsumptionHttpResponsesDraft } from '../../../../../../packages/shared/src/ai-knowledge-consumption-http-draft';
+import type { AiKnowledgeConsumptionHttpResponsesDraft } from '@rental-os/shared';
 import { composePrismaFormalHumanKnowledge, type PrismaFormalKnowledgeDependencies } from './prisma-formal-knowledge.composition';
 import { KnowledgeError, requiredPort, unavailable } from './knowledge-errors';
 import { documentSourceSchema, id, parse } from './knowledge-validation';

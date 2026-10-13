@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
-import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE } from '../../../../../../packages/shared/src/ai-approved-settings-draft';
+import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE } from '@rental-os/shared';
 import { composeApprovedSettingsApplication } from '../approval-execution/approved-settings-application.composition';
 import { ApprovedSettingsTaskAuthority, type ApprovedSettingsApplicationDependencies } from '../approval-execution/approved-settings-task.authority';
 import { settingsContract, ApprovedSettingsApplicationUnknownError } from '../approval-execution/approved-settings-contracts';

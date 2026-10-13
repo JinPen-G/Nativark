@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { AiTextCapabilityHttpResponsesDraft } from '../../../../../packages/shared/src/ai-text-capability-http-draft';
+import type { AiTextCapabilityHttpResponsesDraft } from '@rental-os/shared';
 import { runWithRequestIdentity } from '../../common/request-identity';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError } from './ai-task.repository';

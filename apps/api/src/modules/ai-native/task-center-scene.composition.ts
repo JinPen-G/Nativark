@@ -6,7 +6,7 @@ import { AiTaskRepositoryError } from './ai-task.repository';
 import type { AiOriginalSceneResultService } from './scenes/original-scene-result.service';
 import type { AiTaskEventRepository } from './ai-task-event.repository';
 import { originalIdentityHash } from './task-request/original-request.authority';
-import { AI_QUOTE_SELECTION_DRAFT_VERSION } from '../../../../../packages/shared/src/ai-quote-selection-draft';
+import { AI_QUOTE_SELECTION_DRAFT_VERSION } from '@rental-os/shared';
 import type { PrismaQuoteSelectionRepository } from './task-request/prisma-quote-selection.repository';
 import type { composeHumanQuoteOrder, composeSelectedQuoteTaskApplication } from './scenes/human-quote-order.composition';
 import { parseQuoteSelectionProof } from './task-request/quote-selection.validation';
