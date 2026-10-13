@@ -26,6 +26,9 @@ import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import { PrismaTaskPlanPolicyRepository } from '../runner/prisma-task-plan-policy.repository';
 import { PrismaTaskRecoverySnapshotRepository } from '../runner/prisma-task-recovery-snapshot.repository';
 import { AI_TASK_RECOVERY_READ_VERSION, type AiSceneModelRecoverySnapshotReadResponse } from '@rental-os/shared';
+import { AiOriginalSceneResultService } from './original-scene-result.service';
+import { composeOriginalSceneKnowledge, type AiOriginalSceneKnowledgeOptions } from './original-scene-knowledge';
+import { gatewayTextIntentBindingSchema } from '../gateway-intent';
 
 export type AiSceneHttpRequest = { headers: { authorization?: unknown } };
 export type AiSceneRequestOptions = { enabled: boolean; audience: 'operator' | 'staff' };
@@ -222,7 +225,10 @@ export function composeRequestBoundOriginalTaskActionPolicies(
  * budget admission or runner. Current original-resource and action permissions
  * remain mandatory; a later clarification does not replace the referenced run. */
 export function composeRequestBoundOriginalTaskRecoveryReaders(
-  dependencies: RequestBoundOriginalSceneDependencies, options: AiSceneRequestOptions) {
+  dependencies: RequestBoundOriginalSceneDependencies, options: AiSceneRequestOptions,
+  results?: { policy: ConstructorParameters<typeof AiOriginalSceneResultService>[3]; knowledge?: AiOriginalSceneKnowledgeOptions }) {
+  const resultPolicy = results ? freezeOriginalInput(gatewayTextIntentBindingSchema.parse(structuredClone(results.policy))) : undefined;
+  const knowledgeOptions = results?.knowledge;
   const snapshotSchema = z.object({ original: originalRequestReferenceSchema,
     runId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
   const cancellationSchema = z.object({ original: originalRequestReferenceSchema,
@@ -234,7 +240,15 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     expectedFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict();
   const call = bindRequests(dependencies, options, input => {
     const authorization = composePersistedTaskAuthorization(input);
-    return { scenes: composeAiOriginalScenes(input),
+    const scenes = composeAiOriginalScenes(input);
+    // Construct knowledge services only for actual result/source reads. These
+    // still revalidate current ACL/consent; absence never means trusted content.
+    const resultReader = () => {
+      if (!resultPolicy) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const knowledge = knowledgeOptions ? composeOriginalSceneKnowledge(knowledgeOptions, input, input.clock ?? (() => new Date())) : undefined;
+      return new AiOriginalSceneResultService(input.db, authorization.tasks, scenes, resultPolicy, input.clock, knowledge);
+    };
+    return { scenes, resultReader,
       snapshots: new PrismaTaskRecoverySnapshotRepository(input.db, authorization.tasks),
       transitions: new AiTaskTransitionRepository(input.db, authorization.authority, input.clock),
       takeovers: new PrismaTaskTakeoverRepository(input.db, authorization.authority, input.clock) };
@@ -260,6 +274,12 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     });
   };
   return Object.freeze({
+    readModelResult(request: AiSceneHttpRequest, value: unknown) {
+      return call(request, value, (root, command) => root.resultReader().read(command));
+    },
+    reopenModelSource(request: AiSceneHttpRequest, value: unknown) {
+      return call(request, value, (root, command) => root.resultReader().reopenSource(command));
+    },
     readRecoverySnapshot(request: AiSceneHttpRequest, value: unknown) {
       const parsed = snapshotSchema.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -353,7 +373,8 @@ export function composeRequestBoundPersistedOriginalSceneModel(
   const { host, clock, monotonic, ...requestOptions } = options;
   const serverHost = freezeOriginalInput(structuredClone(host));
   const { gateway, ...sceneDependencies } = dependencies;
-  const recoveryReaders = composeRequestBoundOriginalTaskRecoveryReaders(sceneDependencies, requestOptions);
+  const recoveryReaders = composeRequestBoundOriginalTaskRecoveryReaders(sceneDependencies, requestOptions,
+    { policy: dependencies.gatewayScene, knowledge: dependencies.knowledge });
   const serverGateway = Object.freeze({ ...gateway, adapters: Object.freeze([...gateway.adapters]) });
   const call = bindRequests(sceneDependencies, requestOptions, async (input, command) => {
     const raw = command && typeof command === 'object' && 'original' in command ? command.original : command;
@@ -394,8 +415,8 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     resume: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, (app, command) => app.resume(command, signal)),
     readAnswer: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readAnswer(command)),
-    readModelResult: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readModelResult(command)),
-    reopenModelSource: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reopenModelSource(command)),
+    readModelResult: recoveryReaders.readModelResult,
+    reopenModelSource: recoveryReaders.reopenModelSource,
     readQuotePreparation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readQuotePreparation(command)),
     confirmClarifiedQuote: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.confirmClarifiedQuote(command)),
     readClarifiedQuoteReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readClarifiedQuoteReceipt(command)),
@@ -433,7 +454,8 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
     scene: structuredClone(settingsTask.dependencies.scene) }, configuration: {
     host: structuredClone(settingsTask.configuration.host), task: structuredClone(settingsTask.configuration.task) } } : undefined;
   const serverHost = Object.freeze(structuredClone(host));
-  const recoveryReaders = composeRequestBoundOriginalTaskRecoveryReaders(dependencies, requestOptions);
+  const recoveryReaders = composeRequestBoundOriginalTaskRecoveryReaders(dependencies, requestOptions,
+    { policy: dependencies.gatewayScene, knowledge: dependencies.knowledge });
   const call = bindRequests(dependencies, requestOptions, input => {
     const model = composeAiOriginalSceneModel(input);
     // A business-only read must not construct model execution dependencies.
@@ -517,8 +539,8 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
     takeover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, (app, command) => app.application.takeover(command, signal)),
     requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.requestCancel(command)),
-    readModelResult: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.model.readModelResult(command)),
-    reopenModelSource: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.model.reopenModelSource(command))
+    readModelResult: recoveryReaders.readModelResult,
+    reopenModelSource: recoveryReaders.reopenModelSource
   });
 }
 
