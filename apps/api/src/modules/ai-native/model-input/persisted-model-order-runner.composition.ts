@@ -218,10 +218,21 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
   };
   const application = root.createApplication(input.host, prepare);
   const recoveryHost = Object.freeze(structuredClone(input.host));
+  const takeoverRevisionSchema = z.object({ expectedTaskRevision: z.number().int().min(1).max(4294967294),
+    expectedRunRevision: z.number().int().min(1).max(4294967294),
+    expectedFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict();
+  const readOriginalTakeoverReceipt = async (value: unknown) => {
+    const parsed = takeoverRevisionSchema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const original = await assertOriginal();
+    const receipt = await root.readTakeoverReceipt({ ...parsed.data, taskId: task.taskId, runId: task.runId });
+    const current = await assertOriginal();
+    if (original.receipt.contentHash !== current.receipt.contentHash
+      || taskModelIdentity(original.context) !== taskModelIdentity(current.context)) throw denied();
+    return receipt;
+  };
   const takeoverOriginal = async (value: unknown, signal?: AbortSignal) => {
-    const parsed = z.object({ expectedTaskRevision: z.number().int().min(1).max(4294967294),
-      expectedRunRevision: z.number().int().min(1).max(4294967294),
-      expectedFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict().safeParse(structuredClone(value));
+    const parsed = takeoverRevisionSchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
     const original = await assertOriginal();
@@ -275,5 +286,5 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
       expectedFencingToken: snapshot.run.fencingToken });
     return { kind: 'run_outcome' as const, outcome: await root.runner.recover(lease, signal) };
   };
-  return Object.freeze({ ...root, model, readOrderResult, recoverOriginal, takeoverOriginal, application });
+  return Object.freeze({ ...root, model, readOrderResult, recoverOriginal, takeoverOriginal, readOriginalTakeoverReceipt, application });
 }

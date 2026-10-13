@@ -125,5 +125,6 @@ export const AI_SCENE_ORDER_READ_HTTP_DRAFT = Object.freeze({
   basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/order-read`, method: 'POST',
   start: 'start', recover: 'recover', readOrderResult: 'order-result',
   readModelResult: 'model-result', readTaskScene: 'scene', readNextSteps: 'next-steps',
-  readTaskSnapshot: 'snapshot', reopenModelSource: 'source', requestCancel: 'cancel', takeover: 'takeover'
+  readTaskSnapshot: 'snapshot', reopenModelSource: 'source', requestCancel: 'cancel', takeover: 'takeover',
+  readTakeoverReceipt: 'takeover/receipt'
 } as const);

@@ -15,7 +15,7 @@ export class AiOriginalOrderReadHttpModule {
     return { module: AiOriginalOrderReadHttpModule, imports: [requestModule],
       providers: [{ provide: AI_ORIGINAL_ORDER_READ_HTTP_REQUESTS, inject: [requestToken],
         useFactory: (app: OriginalOrderReadHttpRequests) => {
-          const methods = ['start', 'recover', 'takeover', 'readOrderResult', 'readModelResult', 'readTaskScene',
+          const methods = ['start', 'recover', 'takeover', 'readTakeoverReceipt', 'readOrderResult', 'readModelResult', 'readTaskScene',
             'readNextSteps', 'readTaskSnapshot', 'reopenModelSource', 'requestCancel'] as const;
           if (methods.some(method => typeof app?.[method] !== 'function')) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
           return Object.freeze(Object.fromEntries(methods.map(method => [method, app[method].bind(app)]))) as unknown as OriginalOrderReadHttpRequests;

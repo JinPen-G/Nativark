@@ -2,13 +2,27 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { AI_TASK_DRAFT_VERSION } from '@rental-os/shared';
 import { AiTaskRepository, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const revision = z.number().int().min(1).max(4294967294);
+/** Transaction completed locally; the server did not observe COMMIT's reply. */
+export class AiTaskTakeoverCommitUnknownError extends Error {
+  readonly code = 'AI_RESULT_UNKNOWN' as const;
+  readonly retryable = false;
+  readonly nextAction = 'read_takeover_receipt' as const;
+  constructor() { super('AI_RESULT_UNKNOWN'); }
+}
 const command = z.object({ taskId: id, runId: id, previousHolderId: id, holderId: id,
   expectedTaskRevision: revision, expectedRunRevision: revision,
   expectedFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u),
   leaseMs: z.number().int().min(1).max(120000) }).strict();
+const receiptCommand = command.pick({ taskId: true, runId: true, expectedTaskRevision: true,
+  expectedRunRevision: true, expectedFencingToken: true });
+function receiptId(scopeId: string, actorId: string, input: z.infer<typeof receiptCommand>) {
+  const hash = requestFingerprint({ version: 'original-run-takeover-1', scopeId, actorId, ...input });
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+}
 
 /** Same-owner human takeover only. Changes the original run's fencing generation
  * and records an internal audit in the same transaction. It does not change any
@@ -17,7 +31,7 @@ const command = z.object({ taskId: id, runId: id, previousHolderId: id, holderId
  */
 export class PrismaTaskTakeoverRepository {
   private readonly access: AiTaskRepository;
-  constructor(private readonly db: Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiRun'>,
+  constructor(private readonly db: Pick<PrismaClient, '$transaction' | 'aiTask' | 'aiRun'> & Partial<Pick<PrismaClient, 'operationLog'>>,
     authority: AiTaskRepositoryAuthority, private readonly clock: () => Date = () => new Date()) {
     this.access = new AiTaskRepository(db, authority, clock);
   }
@@ -29,6 +43,7 @@ export class PrismaTaskTakeoverRepository {
     const input = parsed.data;
     const initial = await this.access.resolveAccess(input.taskId, 'takeover_run');
     if (initial.actorKind !== 'USER' || !initial.scope.tenantId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    let callbackCompleted = false;
     try {
       return await this.db.$transaction(async tx => {
         const found = await tx.aiTask.findFirst({ where: initial.where, select: { id: true, scopeId: true } });
@@ -58,23 +73,93 @@ export class PrismaTaskTakeoverRepository {
         }, data: { revision: { increment: 1 }, fencingToken: { increment: new Prisma.Decimal(1) },
           leaseOwnerId: input.holderId, leaseExpiresAt: expiresAt, authorizedAt: current.authorizedAt } });
         if (changed.count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-        await tx.operationLog.create({ data: { tenantId: initial.scope.tenantId!, workspaceId: initial.scope.workspaceId,
+        const reference = receiptCommand.parse(Object.fromEntries(Object.keys(receiptCommand.shape).map(key => [key, input[key as keyof typeof input]])));
+        await tx.operationLog.create({ data: { id: receiptId(found.scopeId, current.actorId, reference),
+          tenantId: initial.scope.tenantId!, workspaceId: initial.scope.workspaceId,
           userId: current.actorId, action: 'ai_task_run_takeover', detail: {
+            receiptVersion: 'original-run-takeover-1',
             taskId: input.taskId, runId: input.runId, requestId: current.requestId,
             previousHolderId: input.previousHolderId, holderId: input.holderId,
             previousFencingToken: input.expectedFencingToken, fencingToken: (BigInt(input.expectedFencingToken) + 1n).toString(),
             taskRevision: input.expectedTaskRevision, runRevision: input.expectedRunRevision + 1,
+            expiresAt: expiresAt.toISOString(),
             purpose: 'recovery_only'
           } } });
         const final = await this.access.resolveAccess(input.taskId, 'takeover_run');
         if (final.bindingKey !== initial.bindingKey || expiresAt <= final.now) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        callbackCompleted = true;
         return { taskId: input.taskId, runId: input.runId, holderId: input.holderId,
           revision: input.expectedRunRevision + 1, fencingToken: (BigInt(input.expectedFencingToken) + 1n).toString(),
           expiresAt: expiresAt.toISOString(), purpose: 'recovery_only' as const };
       });
     } catch (error) {
       if (error instanceof AiTaskRepositoryError) throw error;
+      if (callbackCompleted) throw new AiTaskTakeoverCommitUnknownError();
       throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
     }
+  }
+
+  /** Original generation observation only. A receipt is NOT a new held lease,
+   * permission to execute, a refund, or evidence that remote work stopped. */
+  async readReceipt(value: unknown) {
+    const parsed = receiptCommand.safeParse(structuredClone(value));
+    if (!parsed.success || BigInt(parsed.data.expectedFencingToken) >= 99999999999999999999n) {
+      throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    }
+    if (typeof this.db.operationLog?.findFirst !== 'function') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const input = parsed.data, before = await this.access.resolveAccess(input.taskId, 'takeover_run');
+    if (before.actorKind !== 'USER' || !before.scope.tenantId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const task = structuredClone(await this.db.aiTask.findFirst({ where: before.where, select: { id: true, scopeId: true } }));
+    if (!task || task.id !== input.taskId) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    const auditId = receiptId(task.scopeId, before.actorId, input);
+    const where = { id: auditId, tenantId: before.scope.tenantId,
+      workspaceId: before.scope.workspaceId ?? null, userId: before.actorId, action: 'ai_task_run_takeover' };
+    const row = structuredClone(await this.db.operationLog.findFirst({ where }));
+    const run = await this.db.aiRun.findFirst({ where: { id: input.runId, taskId: input.taskId,
+      scopeId: task.scopeId, actorKind: before.actorKind, actorId: before.actorId } });
+    if (!run || run.id !== input.runId || run.taskId !== input.taskId || run.scopeId !== task.scopeId
+      || run.actorKind !== before.actorKind || run.actorId !== before.actorId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const observedRunRevision = run.revision, observedFence = run.fencingToken.toFixed(0);
+    if (!/^[1-9][0-9]{0,19}$/u.test(observedFence) || !run.fencingToken.equals(observedFence)) {
+      throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+    }
+    const nextFence = (BigInt(input.expectedFencingToken) + 1n).toString();
+    if (row) {
+      const detail = z.object({ receiptVersion: z.literal('original-run-takeover-1'),
+        taskId: id, runId: id, taskRevision: revision, runRevision: revision,
+        previousFencingToken: z.string(), fencingToken: z.string(), purpose: z.literal('recovery_only'),
+        expiresAt: z.string().datetime({ offset: true }) }).passthrough().safeParse(row.detail);
+      if (!detail.success || row.id !== auditId || row.tenantId !== where.tenantId || row.workspaceId !== where.workspaceId
+        || row.userId !== where.userId || row.action !== where.action
+        || detail.data.taskId !== input.taskId || detail.data.runId !== input.runId
+        || detail.data.taskRevision !== input.expectedTaskRevision || detail.data.runRevision !== input.expectedRunRevision + 1
+        || detail.data.previousFencingToken !== input.expectedFencingToken || detail.data.fencingToken !== nextFence) {
+        throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+      }
+    }
+    const after = await this.access.resolveAccess(input.taskId, 'takeover_run');
+    const latest = structuredClone(await this.db.operationLog.findFirst({ where }));
+    if (after.bindingKey !== before.bindingKey || !await this.db.aiTask.findFirst({ where: after.where, select: { id: true } })) {
+      throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    }
+    if (requestFingerprint(latest ?? null) !== requestFingerprint(row ?? null)) {
+      throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    }
+    const currentRun = await this.db.aiRun.findFirst({ where: { id: input.runId, taskId: input.taskId,
+      scopeId: task.scopeId, actorKind: before.actorKind, actorId: before.actorId } });
+    if (!currentRun || currentRun.id !== input.runId || currentRun.scopeId !== task.scopeId || currentRun.taskId !== input.taskId
+      || currentRun.actorKind !== before.actorKind || currentRun.actorId !== before.actorId
+      || currentRun.revision !== observedRunRevision || !currentRun.fencingToken.equals(observedFence)) {
+      throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    }
+    if ((await this.access.resolveAccess(input.taskId, 'takeover_run')).bindingKey !== before.bindingKey) {
+      throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    }
+    return Object.freeze({ taskId: input.taskId, runId: input.runId, status: row ? 'observed' as const : 'not_observed' as const,
+      ...(row ? { receiptId: auditId, recordedRunRevision: input.expectedRunRevision + 1, recordedFencingToken: nextFence } : {}),
+      currentGeneration: row && observedFence === nextFence ? 'recorded_generation' as const : 'not_attested' as const,
+      admission: 'not_granted' as const, automaticRetry: false as const,
+      consistency: 'revalidated_reads_not_atomic_snapshot' as const,
+      remoteCancellation: 'not_attested' as const, absenceSemantics: 'not_observed_is_not_proof_of_rollback' as const });
   }
 }

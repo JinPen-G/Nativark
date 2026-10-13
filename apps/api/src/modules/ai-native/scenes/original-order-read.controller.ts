@@ -13,6 +13,7 @@ export interface OriginalOrderReadHttpRequests {
   start(request: AiSceneHttpRequest, original: AiSceneRequestReadDraft, signal?: AbortSignal): Promise<unknown>;
   recover(request: AiSceneHttpRequest, original: AiSceneRequestReadDraft, signal?: AbortSignal): Promise<unknown>;
   takeover(request: AiSceneHttpRequest, command: AiSceneModelTakeoverDraft, signal?: AbortSignal): Promise<unknown>;
+  readTakeoverReceipt(request: AiSceneHttpRequest, command: AiSceneModelTakeoverDraft): Promise<unknown>;
   readOrderResult(request: AiSceneHttpRequest, original: AiSceneRequestReadDraft): Promise<unknown>;
   readModelResult(request: AiSceneHttpRequest, original: AiSceneRequestReadDraft): Promise<unknown>;
   readTaskScene(request: AiSceneHttpRequest, original: AiSceneRequestReadDraft): Promise<unknown>;
@@ -54,7 +55,13 @@ export class AiOriginalOrderReadController {
     const parsed = takeoverSchema.safeParse(body);
     if (!parsed.success) throw invalid();
     const command = structuredClone(parsed.data);
-    return respondAiScene(() => withRequestAbort(request, signal => this.app.takeover(request, command, signal)), 'read_execution');
+    return respondAiScene(() => withRequestAbort(request, signal => this.app.takeover(request, command, signal)), 'read_takeover_receipt');
+  }
+  @Post(AI_SCENE_ORDER_READ_HTTP_DRAFT.readTakeoverReceipt)
+  readTakeoverReceipt(@Req() request: Request, @Body() body: unknown) {
+    const parsed = takeoverSchema.safeParse(body);
+    if (!parsed.success) throw invalid();
+    return respondAiScene(() => this.app.readTakeoverReceipt(request, structuredClone(parsed.data)), 'read_takeover_receipt');
   }
   @Post(AI_SCENE_ORDER_READ_HTTP_DRAFT.readOrderResult)
   readOrderResult(@Req() request: Request, @Body() body: unknown) { return respondAiScene(() => this.app.readOrderResult(request, reference(body))); }
