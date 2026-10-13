@@ -21,6 +21,9 @@ export interface OriginalOrderReadHttpRequests {
   readTaskSnapshot(request: AiSceneHttpRequest, original: AiSceneRequestReadDraft): Promise<unknown>;
   reopenModelSource(request: AiSceneHttpRequest, original: AiSceneRequestReadDraft): Promise<unknown>;
   requestCancel(request: AiSceneHttpRequest, command: { original: AiSceneRequestReadDraft; expectedRevision: number }): Promise<unknown>;
+  readCancellationReceipt(request: AiSceneHttpRequest, command: { original: AiSceneRequestReadDraft; expectedRevision: number }): Promise<unknown>;
+  settleUnstartedCancellation(request: AiSceneHttpRequest, command: { original: AiSceneRequestReadDraft; expectedRevision: number }): Promise<unknown>;
+  readCancellationSettlementReceipt(request: AiSceneHttpRequest, command: { original: AiSceneRequestReadDraft; expectedRevision: number }): Promise<unknown>;
 }
 const cancelSchema = z.object({ original: originalRequestReferenceSchema,
   expectedRevision: z.number().int().min(1).max(4294967294) }).strict();
@@ -79,6 +82,24 @@ export class AiOriginalOrderReadController {
   requestCancel(@Req() request: Request, @Body() body: unknown) {
     const parsed = cancelSchema.safeParse(body);
     if (!parsed.success) throw invalid();
-    return respondAiScene(() => this.app.requestCancel(request, structuredClone(parsed.data)), 'read_execution');
+    return respondAiScene(() => this.app.requestCancel(request, structuredClone(parsed.data)), 'read_cancellation_receipt');
+  }
+  @Post(AI_SCENE_ORDER_READ_HTTP_DRAFT.readCancellationReceipt)
+  readCancellationReceipt(@Req() request: Request, @Body() body: unknown) {
+    const parsed = cancelSchema.safeParse(body);
+    if (!parsed.success) throw invalid();
+    return respondAiScene(() => this.app.readCancellationReceipt(request, structuredClone(parsed.data)), 'read_cancellation_receipt');
+  }
+  @Post(AI_SCENE_ORDER_READ_HTTP_DRAFT.settleUnstartedCancellation)
+  settleUnstartedCancellation(@Req() request: Request, @Body() body: unknown) {
+    const parsed = cancelSchema.safeParse(body);
+    if (!parsed.success) throw invalid();
+    return respondAiScene(() => this.app.settleUnstartedCancellation(request, structuredClone(parsed.data)), 'read_cancellation_settlement_receipt');
+  }
+  @Post(AI_SCENE_ORDER_READ_HTTP_DRAFT.readCancellationSettlementReceipt)
+  readCancellationSettlementReceipt(@Req() request: Request, @Body() body: unknown) {
+    const parsed = cancelSchema.safeParse(body);
+    if (!parsed.success) throw invalid();
+    return respondAiScene(() => this.app.readCancellationSettlementReceipt(request, structuredClone(parsed.data)), 'read_cancellation_settlement_receipt');
   }
 }

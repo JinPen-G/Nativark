@@ -9,6 +9,7 @@ import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-req
 import { originalIdentityHash } from '../task-request/original-request.authority';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiTaskRepositoryError } from '../ai-task.repository';
+import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import type { AiOriginalSceneModelDependencies, AiOriginalSceneRunDependencies } from './original-scene-model.composition';
 import type { composeAiOriginalScenes } from './original-scenes.composition';
 import { composePersistedTaskAuthorization } from '../task-authorization.composition';
@@ -30,6 +31,7 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
     || typeof run.inputSource.validateAnswers !== 'function' || typeof run.financialEvidence?.readDispatch !== 'function') throw unavailable();
   const serverHost = structuredClone(host);
   const authorization = composePersistedTaskAuthorization(input);
+  const taskTransitions = new AiTaskTransitionRepository(input.db, authorization.authority, input.clock);
   const policy = { sceneCode: input.gatewayScene.sceneCode, maxOutputTokens: input.gatewayScene.maxOutputTokens, orderExplainTool: true };
   const bound = async (value: unknown) => {
     const parsed = originalRequestReferenceSchema.safeParse(structuredClone(value));
@@ -102,6 +104,76 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
     return { before, runner, key, orderRegistrationRef };
   };
   const application = Object.freeze({
+    async requestCancel(value: unknown) {
+      const parsed = z.object({ original: originalRequestReferenceSchema,
+        expectedRevision: z.number().int().min(1).max(4294967294) }).strict().safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const before = await bound(parsed.data.original);
+      const receipt = await taskTransitions.transition({ taskId: before.task.taskId,
+        expectedRevision: parsed.data.expectedRevision, to: 'cancel_requested', reason: 'cancel_requested' });
+      await verify(before);
+      return freezeOriginalInput({ original: before.original.receipt, receipt,
+        cancellation: 'requested_not_rollback' as const, automaticRetry: false as const });
+    },
+    async readCancellationReceipt(value: unknown) {
+      const parsed = z.object({ original: originalRequestReferenceSchema,
+        expectedRevision: z.number().int().min(1).max(4294967294) }).strict().safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const before = await bound(parsed.data.original);
+      const receipt = await taskTransitions.readCancellationReceipt({ taskId: before.task.taskId, expectedRevision: parsed.data.expectedRevision });
+      await verify(before);
+      return freezeOriginalInput({ original: before.original.receipt, receipt, automaticRetry: false as const });
+    },
+    async settleUnstartedCancellation(value: unknown) {
+      const parsed = z.object({ original: originalRequestReferenceSchema,
+        expectedRevision: z.number().int().min(1).max(4294967294) }).strict().safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const before = await bound(parsed.data.original);
+      const access = await authorization.tasks.resolveAccess(before.task.taskId, 'transition_task');
+      const receipt = await taskTransitions.settleInputCancellation({ taskId: before.task.taskId,
+        expectedRevision: parsed.data.expectedRevision, to: 'cancelled', reason: 'cancel_settled' }, async (tx, locked) => {
+        if (locked.id !== before.task.taskId || locked.scopeId !== before.scopeId) throw denied();
+        const key = { scopeId: locked.scopeId, taskId: locked.id };
+        const runs = await tx.aiRun.findMany({ where: key, take: 2 });
+        const held = runs[0];
+        if (runs.length !== 1 || !held || held.id !== before.task.runId || held.taskId !== key.taskId || held.scopeId !== key.scopeId
+          || held.actorKind !== access.actorKind || held.actorId !== access.actorId || held.status !== 'QUEUED'
+          || held.startedAt != null || (held.leaseOwnerId === null ? held.leaseExpiresAt !== null
+            : !(held.leaseExpiresAt instanceof Date) || !Number.isFinite(held.leaseExpiresAt.getTime()))) throw unavailable();
+        const fence = held.fencingToken.toFixed(0);
+        if (!/^(0|[1-9][0-9]{0,19})$/u.test(fence) || !held.fencingToken.equals(fence)
+          || BigInt(fence) >= 99999999999999999999n) throw unavailable();
+        // Absence is only used under the original task lock for a never
+        // activated run. Claiming alone is not activation or dispatch. Any
+        // published/started/occupied evidence requires normal recovery.
+        const evidence = await Promise.all([
+          tx.aiStep.findFirst({ where: key }), tx.aiTaskRunPlan.findFirst({ where: key }),
+          tx.aiTaskActionInput.findFirst({ where: key }), tx.aiTaskResultArtifact.findFirst({ where: key }),
+          tx.aiGatewayInvocation.findFirst({ where: key }), tx.aiTaskExecutionBudget.findFirst({ where: key }),
+          tx.aiTaskExecutionCharge.findFirst({ where: key }),
+          tx.aiBudgetReservation.findFirst({ where: { scopeId: key.scopeId, runId: held.id } })
+        ]);
+        if (evidence.some(Boolean)) throw unavailable();
+        const changed = await tx.aiRun.updateMany({ where: { id: held.id, ...key, status: 'QUEUED', revision: held.revision,
+          fencingToken: held.fencingToken, leaseOwnerId: held.leaseOwnerId, leaseExpiresAt: held.leaseExpiresAt,
+          actorKind: access.actorKind, actorId: access.actorId },
+          data: { status: 'CANCELLED', revision: { increment: 1 }, fencingToken: { increment: 1 },
+            leaseOwnerId: null, leaseExpiresAt: null, endedAt: input.clock?.() ?? new Date() } });
+        if (changed.count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      });
+      await verify(before);
+      return freezeOriginalInput({ original: before.original.receipt, receipt,
+        cancellation: 'unstarted_task_cancelled_not_business_rollback' as const, automaticRetry: false as const });
+    },
+    async readCancellationSettlementReceipt(value: unknown) {
+      const parsed = z.object({ original: originalRequestReferenceSchema,
+        expectedRevision: z.number().int().min(1).max(4294967294) }).strict().safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const before = await bound(parsed.data.original);
+      const receipt = await taskTransitions.readCancellationSettlementReceipt({ taskId: before.task.taskId, expectedRevision: parsed.data.expectedRevision });
+      await verify(before);
+      return freezeOriginalInput({ original: before.original.receipt, receipt, automaticRetry: false as const });
+    },
     async start(value: unknown, signal?: AbortSignal) {
       if (signal?.aborted) return { outcome: { kind: 'not_started' as const, reason: 'host_aborted' as const } };
       const { before, runner } = await assemble(value, true);
