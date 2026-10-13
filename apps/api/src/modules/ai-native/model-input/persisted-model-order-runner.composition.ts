@@ -407,16 +407,36 @@ export function composePersistedModelOrderTaskRunner(input: Dependencies) {
       const runs = await input.db.aiRun.findMany({ where: { scopeId: key.scopeId, taskId: key.taskId }, take: 2 });
       if (runs.length !== 1 || runs[0].id !== task.runId) throw unavailable();
       const evidence = await Promise.all([
-        input.db.aiStep.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } }),
         input.db.aiTaskResultArtifact.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } }),
         input.db.aiGatewayInvocation.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } }),
-        input.db.aiTaskExecutionBudget.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } }),
         input.db.aiTaskExecutionCharge.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId } }),
         input.db.aiBudgetReservation.findFirst({ where: { scopeId: key.scopeId, runId: key.runId } })
       ]);
       if (evidence.some(Boolean)) throw unavailable();
+      const resource = await input.db.aiTaskExecutionBudget.findUnique({ where: { scopeId_taskId: {
+        scopeId: key.scopeId, taskId: key.taskId } } });
       const rows = await input.db.aiTaskActionInput.findMany({ where: key, take: expectedSteps.length + 1 });
       const saved = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: key } });
+      const registered = await input.db.aiStep.findMany({ where: { scopeId: key.scopeId, taskId: key.taskId }, take: 2 });
+      const firstInput = rows.find(value => value.registrationRef === task.modelRegistrationRef);
+      // Registration and its event can commit before any resource reservation.
+      // Only the first original, untouched PENDING/NONE step is resumable;
+      // the existing registration replay and transition authorities still
+      // verify its action/input and the new current CAS lease before starting.
+      if (registered.length && (!saved || !resource || registered.length !== 1 || !firstInput
+        || registered.some(step => step.scopeId !== key.scopeId || step.taskId !== key.taskId || step.runId !== key.runId
+          || step.sequence !== 1 || step.revision !== 1 || step.status !== 'PENDING' || step.effect !== 'NONE'
+          || step.resultRef !== null || step.errorCode !== null || step.inputRef !== firstInput.id
+          || step.requestFingerprint !== firstInput.fingerprint || step.toolCode !== TASK_TEXT_MODEL_TOOL
+          || step.toolVersion !== AI_TOOL_DRAFT_VERSION))) throw unavailable();
+      // Resource initialization can commit before the first step is registered.
+      // Only the original saved plan and an untouched, zero-occupancy ledger
+      // permit continuation. initialize/open below must reuse and validate it;
+      // no deletes, refunds, policy replacement or counter reset are allowed.
+      if (resource && (!saved || resource.scopeId !== key.scopeId || resource.taskId !== key.taskId
+        || ['reservedSteps', 'reservedCalls', 'reservedActiveMs', 'reservedOutputBytes',
+          'consumedSteps', 'consumedCalls', 'consumedActiveMs', 'consumedOutputBytes']
+          .some(field => resource[field as keyof typeof resource] !== 0n))) throw unavailable();
       if (rows.length < 1 || rows.length > expectedSteps.length || (saved && rows.length !== expectedSteps.length)
         || !rows.some(value => value.registrationRef === task.modelRegistrationRef)
         || new Set(rows.map(value => value.registrationRef)).size !== rows.length
