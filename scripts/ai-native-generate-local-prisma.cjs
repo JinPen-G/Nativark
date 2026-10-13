@@ -65,12 +65,16 @@ function generationEnvironment(temporary, audit, childTemp) {
     HOME: temporary, USERPROFILE: temporary, APPDATA: temporary, LOCALAPPDATA: temporary, TEMP: childTemp, TMP: childTemp, TMPDIR: childTemp,
     XDG_CACHE_HOME: childTemp, npm_config_cache: childTemp, V8_COMPILE_CACHE_CACHE_DIR: childTemp, NODE_COMPILE_CACHE: childTemp,
     TS_NODE_CACHE: "false", NODE_DISABLE_COMPILE_CACHE: "1", DISABLE_V8_COMPILE_CACHE: "1",
-    NODE_OPTIONS: `--require "${preload("prisma-offline-preload.cjs")}" --require "${preload("lane-b-local-runtime.cjs")}"`,
+    // Generation must also work before a private client exists. The test
+    // resolver requires that client, but is not an offline safety guard.
+    NODE_OPTIONS: `--require "${preload("prisma-offline-preload.cjs")}"`,
     CHECKPOINT_DISABLE: "1", PRISMA_HIDE_UPDATE_MESSAGE: "1", PRISMA_DISABLE_TELEMETRY: "1", PRISMA_GENERATE_SKIP_AUTOINSTALL: "1", NO_COLOR: "1" });
 }
-function generateLocalAiPrismaClient({ preserveArtifacts = true } = {}) {
+function generateLocalAiPrismaClient({ preserveArtifacts = true, allowPrimaryCheckout = false } = {}) {
   if (typeof preserveArtifacts !== "boolean") throw new Error("preserveArtifacts must be boolean");
-  if (!fs.lstatSync(path.join(root, ".git")).isFile()) throw new Error("Run only in an isolated git worktree");
+  if (typeof allowPrimaryCheckout !== "boolean") throw new Error("allowPrimaryCheckout must be boolean");
+  const gitEntry = fs.lstatSync(path.join(root, ".git"));
+  if (!gitEntry.isFile() && !(allowPrimaryCheckout && gitEntry.isDirectory())) throw new Error("Run only in an isolated git worktree, or explicitly select --primary-checkout");
   const schema = fs.readFileSync(path.join(root, "apps/api/prisma/schema.prisma"), "utf8");
   const sourceHash = hash(schema.replace(/\r\n/gu, "\n"));
   const version = require("prisma/package.json").version;
@@ -154,7 +158,7 @@ function generateLocalAiPrismaClient({ preserveArtifacts = true } = {}) {
   }
 }
 if (require.main === module) {
-  try { console.log(JSON.stringify(generateLocalAiPrismaClient(), null, 2)); }
+  try { console.log(JSON.stringify(generateLocalAiPrismaClient({ allowPrimaryCheckout: process.argv.includes("--primary-checkout") }), null, 2)); }
   catch (error) { console.error(error.message); process.exitCode = 1; }
 }
 module.exports = { generateLocalAiPrismaClient };
