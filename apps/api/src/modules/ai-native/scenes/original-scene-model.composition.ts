@@ -22,6 +22,7 @@ import { composeAuthorizedPersistentTaskInputRunner,
 import type { AiTaskApplicationHost } from '../runner/prisma-task-application';
 import type { AiTaskInputSource, AiTaskInputBinding } from '../task-input/task-input.ports';
 import { applyOriginalQuoteAnswers, originalQuoteAnswerContract } from './original-quote-input';
+import { composeOriginalModelOrderScene } from './original-model-order-scene.composition';
 
 type ModelDependencies = Parameters<typeof composePersistedTaskModelInput>[0];
 export type AiOriginalSceneModelDependencies = AiOriginalSceneDependencies & ModelDependencies & {
@@ -277,6 +278,10 @@ export function composeAiOriginalSceneModel(dependencies: AiOriginalSceneModelDe
       planAuthority: model.planAuthority, plans: model.plans, registrations: model.registrations,
       invocations: model.invocations, executors, toolCatalog: model.toolCatalog }),
     prepareHeldRun,
+    createModelOrderApplication(host: AiTaskApplicationHost,
+      run: Omit<AiOriginalSceneRunDependencies, 'inputSource'> & { inputSource: AiTaskInputSource }) {
+      return composeOriginalModelOrderScene(dependencies, scenes, host, run, results);
+    },
     /** Server-only assembly. Client input is exclusively the existing original
      * reference: never a holder, lease, plan, task ID, prompt or configuration.
      * The original runner alone claims/starts the task and meters execution. */
