@@ -45,6 +45,7 @@ export type AiScenePlanPolicyConfiguration = AiSceneRequestOptions & {
 };
 export type RequestBoundOriginalSceneDependencies = Omit<AiOriginalSceneDependencies, 'credentials'>;
 export type RequestBoundOriginalSceneModelDependencies = Omit<AiOriginalSceneModelDependencies, 'credentials'>;
+export type AiSettingsTaskRequestOptions = AiSceneRequestOptions & { host: AiTaskApplicationHost; task: AiSettingsTask };
 export type AiSceneModelRequestOptions = AiSceneRequestOptions & {
   host: AiTaskApplicationHost;
   runServices: (dependencies: AiOriginalSceneModelDependencies) => AiOriginalSceneRunDependencies;
@@ -100,6 +101,36 @@ function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequ
       } }, command), command));
     } finally { active = false; }
   };
+}
+
+/** Independent real notification-settings runner/approval consumer. No model
+ * execution dependency or caller-selected task/holder/plan enters this root. */
+export function composeRequestBoundSettingsTask(dependencies: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>,
+  options: AiSettingsTaskRequestOptions) {
+  const host = Object.freeze(structuredClone(options.host)), task = freezeOriginalInput(structuredClone(options.task));
+  const scene = freezeOriginalInput(structuredClone(dependencies.scene));
+  const call = bindRequests({ ...dependencies, scene }, { enabled: options.enabled, audience: options.audience }, (input, value) => {
+    if (!value || typeof value !== 'object' || !('taskId' in value) || value.taskId !== task.taskId
+      || 'runId' in value && value.runId !== task.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const settingsHost = composeTaskSettingsHost({ ...input, host, task });
+    return { settingsHost };
+  });
+  return Object.freeze({
+    startSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (root, command) => root.settingsHost.application.start(command, signal)),
+    readSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (root, command) => root.settingsHost.application.readConfirmation(command)),
+    decideSettingsProposal: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (root, command) => root.settingsHost.settings.application.decide(command)),
+    readSettingsDecision: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (root, command) => root.settingsHost.settings.application.readDecisionReceipt(command)),
+    continueSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (root, command) => root.settingsHost.application.continueOriginalConfirmation(command, signal)),
+    reconcileSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      call(request, value, (root, command) => root.settingsHost.application.reconcileOriginal(command, signal)),
+    cancelSettingsTask: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (root, command) => root.settingsHost.application.requestCancelOriginal(command))
+  });
 }
 
 /** Human-owned plan configuration, not task ownership or dispatch authority.
@@ -533,6 +564,12 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
   const settingsBusiness = settingsTask ? { dependencies: { ...settingsTask.dependencies,
     scene: structuredClone(settingsTask.dependencies.scene) }, configuration: {
     host: structuredClone(settingsTask.configuration.host), task: structuredClone(settingsTask.configuration.task) } } : undefined;
+  const settingsRequests = settingsBusiness ? composeRequestBoundSettingsTask(settingsBusiness.dependencies,
+    { ...requestOptions, ...settingsBusiness.configuration }) : undefined;
+  const requireSettingsRequests = () => {
+    if (!settingsRequests) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    return settingsRequests;
+  };
   const serverHost = Object.freeze(structuredClone(host));
   const recoveryReaders = composeRequestBoundOriginalTaskRecoveryReaders(dependencies, requestOptions,
     { policy: dependencies.gatewayScene, knowledge: dependencies.knowledge });
@@ -553,13 +590,7 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
       ...quote, ...(settings ? { settings } : {}),
       scenes: model.scenes, modelResults: { read: model.readModelResult, reopenSource: model.reopenModelSource },
       input: { read: value => modelApplication().readInput(value) } });
-    const requireSettings = (value: unknown) => {
-      if (!settingsHost || !settingsBusiness) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-      if (!value || typeof value !== 'object' || !('taskId' in value) || value.taskId !== settingsBusiness.configuration.task.taskId
-        || 'runId' in value && value.runId !== settingsBusiness.configuration.task.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-      return settingsHost;
-    };
-    return { model, get application() { return modelApplication(); }, center, requireSettings,
+    return { model, get application() { return modelApplication(); }, center,
       readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot(model.scenes, persisted.events, value) };
   });
   return Object.freeze({
@@ -571,19 +602,19 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
     readCancellationReceipt: recoveryReaders.readCancellationReceipt,
     readCancellationSettlementReceipt: recoveryReaders.readCancellationSettlementReceipt,
     startSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (app, command) => app.requireSettings(command).application.start(command, signal)),
+      requireSettingsRequests().startSettingsTask(request, value, signal),
     readSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown) =>
-      call(request, value, (app, command) => app.requireSettings(command).application.readConfirmation(command)),
+      requireSettingsRequests().readSettingsConfirmation(request, value),
     decideSettingsProposal: (request: AiSceneHttpRequest, value: unknown) =>
-      call(request, value, (app, command) => app.requireSettings(command).settings.application.decide(command)),
+      requireSettingsRequests().decideSettingsProposal(request, value),
     readSettingsDecision: (request: AiSceneHttpRequest, value: unknown) =>
-      call(request, value, (app, command) => app.requireSettings(command).settings.application.readDecisionReceipt(command)),
+      requireSettingsRequests().readSettingsDecision(request, value),
     continueSettingsConfirmation: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (app, command) => app.requireSettings(command).application.continueOriginalConfirmation(command, signal)),
+      requireSettingsRequests().continueSettingsConfirmation(request, value, signal),
     reconcileSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
-      call(request, value, (app, command) => app.requireSettings(command).application.reconcileOriginal(command, signal)),
+      requireSettingsRequests().reconcileSettingsTask(request, value, signal),
     cancelSettingsTask: (request: AiSceneHttpRequest, value: unknown) =>
-      call(request, value, (app, command) => app.requireSettings(command).application.requestCancelOriginal(command)),
+      requireSettingsRequests().cancelSettingsTask(request, value),
     readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readPage(command)),
     readTaskSnapshot: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskSnapshot(command)),
     readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readEvents(command)),
