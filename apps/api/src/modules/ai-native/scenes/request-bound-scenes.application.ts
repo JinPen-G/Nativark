@@ -1035,6 +1035,8 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
       call(request, value, (app, command) => app.model.scenes.prepareOrderManualHandoff(command)),
     readQuoteCatalog: (request: AiSceneHttpRequest, value: unknown) =>
       call(request, value, (app, command) => app.model.scenes.readQuoteCatalog(command)),
+    compareOriginalQuotes: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (app, command) => app.model.scenes.compareOriginalQuotes(command)),
     prepareOpeningSections: (request: AiSceneHttpRequest, value: unknown) =>
       call(request, value, (app, command) => app.model.scenes.prepareOpeningSections(command)),
     readOpeningSection: (request: AiSceneHttpRequest, value: unknown) =>
@@ -1090,6 +1092,7 @@ export function composeRequestBoundOriginalScenes(dependencies: RequestBoundOrig
     reopenOrderCitation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reopenOrderCitation(command)),
     prepareOrderManualHandoff: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.prepareOrderManualHandoff(command)),
     readQuoteCatalog: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readQuoteCatalog(command)),
+    compareOriginalQuotes: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.compareOriginalQuotes(command)),
     prepareOpeningSections: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.prepareOpeningSections(command)),
     readOpeningSection: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readOpeningSection(command)),
     reviewQuote: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reviewQuote(command)),

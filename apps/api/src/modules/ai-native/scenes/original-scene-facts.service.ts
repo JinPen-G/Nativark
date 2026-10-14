@@ -166,6 +166,41 @@ export class AiOriginalSceneFactsService {
    * The caller cannot supply a price, actor, scope or Core operation key. */
   confirmQuote(value: unknown) { return this.originalQuote(value); }
 
+  /** Compare only two exact, currently authorized original Core operations.
+   * The existing formatter cannot itself establish ownership or provenance. */
+  async compareOriginalQuotes(value: unknown) {
+    const parsed = z.object({ previous: originalRequestReferenceSchema, current: originalRequestReferenceSchema })
+      .strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const command = freezeOriginalInput(parsed.data);
+    const previousOwner = await this.requests.readHistorical(command.previous);
+    const currentOwner = await this.requests.readHistorical(command.current);
+    const identity = originalIdentityHash(previousOwner.context);
+    if (identity !== originalIdentityHash(currentOwner.context)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const previous = await this.readQuoteReceipt(command.previous), current = await this.readQuoteReceipt(command.current);
+    const stable = (value: typeof previous) => requestFingerprint({ original: value.original,
+      scope: value.result.scope, status: value.result.status, quote: value.result.quote,
+      quotePersistence: value.result.quotePersistence });
+    if (stable(previous) !== stable(await this.readQuoteReceipt(command.previous))
+      || stable(current) !== stable(await this.readQuoteReceipt(command.current))) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    for (const [reference, original] of [[command.previous, previousOwner], [command.current, currentOwner]] as const) {
+      const latest = await this.requests.readHistorical(reference);
+      if (originalIdentityHash(latest.context) !== identity || latest.receipt.contentHash !== original.receipt.contentHash) {
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      }
+    }
+    const available = (result: typeof previous.result) => Boolean(result.quote)
+      && (result.status === 'quoted' || result.status === 'expired') && result.quotePersistence === 'saved';
+    if (!available(previous.result) || !available(current.result)) return freezeOriginalInput({
+      status: 'unavailable_original_quote' as const, previous, current, comparison: null,
+      retryable: false as const, nextAction: 'read_original_quote_receipt' as const,
+      quotation: 'not_attempted' as const, orderApproval: 'not_granted' as const });
+    return freezeOriginalInput({ status: 'compared' as const, previous, current,
+      comparison: this.tools.quote.businessPreparation.compareQuotes(previous.result.quote, current.result.quote),
+      quotation: 'not_attempted' as const, inventoryReservation: 'not_attempted' as const,
+      orderApproval: 'not_granted' as const, approvalReuse: 'forbidden_new_quote_requires_new_confirmation' as const });
+  }
+
   /** Exact original-operation observation only; a missing row stays unknown.
    * No create, latest-quote lookup or replacement operation is attempted. */
   async readQuoteReceipt(value: unknown) {
