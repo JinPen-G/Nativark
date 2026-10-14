@@ -984,6 +984,7 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
     readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readPage(command)),
     readTaskSnapshot: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskSnapshot(command)),
     readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readEvents(command)),
+    readTaskReconnect: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readReconnect(command)),
     readTaskUsage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readUsage(command)),
     readTaskScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.center.readScene(command)),
     reopenOrderCitation: (request: AiSceneHttpRequest, value: unknown) =>
@@ -1117,13 +1118,14 @@ export function composeRequestBoundSelectedQuoteTask(dependencies: RequestBoundQ
     return Object.freeze({ ...tasks, readScene: center.readScene,
       readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot({ requests: originals,
         readTaskReceipt: originals.readTaskReceipt.bind(originals) }, persisted.events, value),
-      readTaskPage: center.readPage, readTaskEvents: center.readEvents, readTaskUsage: center.readUsage });
+      readTaskPage: center.readPage, readTaskEvents: center.readEvents, readTaskReconnect: center.readReconnect, readTaskUsage: center.readUsage });
   });
   return Object.freeze({
     readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskPage(command)),
     readTaskUsage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskUsage(command)),
     readTaskSnapshot: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskSnapshot(command)),
     readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskEvents(command)),
+    readTaskReconnect: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readTaskReconnect(command)),
     readScene: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readScene(command)),
     start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) => call(request, value, (app, command) => app.start(command, signal)),
     readConfirmation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readConfirmation(command)),
