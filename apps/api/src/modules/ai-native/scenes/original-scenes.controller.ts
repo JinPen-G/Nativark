@@ -138,6 +138,10 @@ export class AiOriginalSceneRecoveryController {
   reopenModelSource(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => this.observations.reopenModelSource(request, body));
   }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.reopenOpeningModelSource) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  reopenOpeningModelSource(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.observations.reopenOpeningModelSource(request, body));
+  }
 }
 
 /** No root-module registration. The server must provide the actual authorized

@@ -33,6 +33,13 @@ export interface AiSceneRequestReadDraft {
   draftVersion: typeof AI_SCENE_REQUEST_DRAFT_VERSION;
   inputRef: string;
 }
+/** Reopen only a readiness section selected by the original request. This is
+ * a current authorized observation, not a URL or historical configuration. */
+export interface AiSceneOpeningModelSourceReadDraft {
+  original: AiSceneRequestReadDraft;
+  resultId: string;
+  key: string;
+}
 export interface AiSceneTaskUsageReadDraft {
   original: AiSceneRequestReadDraft; taskId?: string; limit: number; after?: string;
 }
@@ -141,6 +148,7 @@ export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
   settleUnstartedCancellation: 'cancel/settle-unstarted',
   settleReleasedInputCancellation: 'cancel/settle-input-wait',
   readCancellationSettlementReceipt: 'cancel/settlement-receipt', readModelResult: 'result', reopenModelSource: 'source',
+  reopenOpeningModelSource: 'source/opening-section',
   readTaskPage: 'tasks', readTaskEvents: 'events', readTaskUsage: 'usage', readTaskScene: 'scene',
   startSettingsTask: 'settings/start', readSettingsConfirmation: 'settings/confirmation',
   createSettingsTask: 'settings/create-task', readSettingsTaskCreation: 'settings/create-task/receipt',
