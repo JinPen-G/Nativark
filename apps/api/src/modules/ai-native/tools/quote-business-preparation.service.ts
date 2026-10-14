@@ -50,7 +50,8 @@ export class AiQuoteBusinessPreparationService {
       if (prepared.status !== 'needs_confirmation') return prepared;
       if (prepared.request.lines.length !== 1) return { status: 'unavailable' as const, reason: 'explicit_single_line_selection_required' as const };
       const catalog = await this.sources.catalog.read({ limit: 100 }, context);
-      const original = catalog.items.find(row => row.id === prepared.request.lines[0].itemGroupId);
+      const originalPage = await this.sources.catalog.read({ limit: 1, itemGroupId: prepared.request.lines[0].itemGroupId }, context);
+      const original = originalPage.items.find(row => row.id === prepared.request.lines[0].itemGroupId);
       if (!original) throw new ModelGatewayError('CONFIG_INVALID');
       const candidates = catalog.items.filter(row => row.status === 'enabled' && row.id !== original.id);
       const rows = [];
@@ -62,12 +63,15 @@ export class AiQuoteBusinessPreparationService {
           inventoryMode: availability.result.lines[0].inventoryMode },
           differences: { unitChanged: candidate.unit !== original.unit, originalInventoryMode: 'not_projected' as const },
           availability, price: 'not_quoted' as const, compatibility: 'not_verified' as const,
-          source: { scope: catalog.scope, resourceType: 'item_group' as const, resourceId: candidate.id, observedAt: catalog.observedAt } });
+          source: { scope: catalog.scope, resourceType: 'item_group' as const, resourceId: candidate.id, observedAt: catalog.observedAt,
+            configurationVersion: catalog.configurationVersion } });
       }
       const latest = await this.candidates.prepare(input.candidate, context);
       if (latest.status !== 'needs_confirmation' || latest.selectionRevision !== prepared.selectionRevision) throw new ModelGatewayError('CONFIG_INVALID');
       return { status: 'candidates_only' as const, scope: catalog.scope, originalItemGroupId: original.id,
         selectionRevision: prepared.selectionRevision, rows, notQueried: candidates.length - rows.length,
+        candidateCoverage: catalog.truncated ? 'partial_persisted_page' as const : 'complete_persisted_page' as const,
+        nextCursor: catalog.nextCursor, configurationVersion: catalog.configurationVersion,
         automaticReplacement: false as const, selection: 'explicit_reprepare_required' as const, prices: 'not_combined' as const };
     });
   }
