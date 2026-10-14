@@ -15,8 +15,14 @@ import { PrismaService } from "../database/prisma.service";
 import { roundMoney, roundRatio } from "./rental-money";
 import { getRequestDataScope, getRequestLocationIds, getRequestUserId } from "../../common/request-identity";
 
-/** 一次分页读取的订单数。内存上限与总订单量解耦，不随经营空间变大而变大。 */
+/** 一次分页读取的订单数；普通报表仍遍历全区间，AI 另有总扫描上限。 */
 const SCAN_PAGE_SIZE = 500;
+const AI_REPORT_MAX_ORDERS = 5000;
+
+/** Overflow never yields a partial report that could be mistaken for totals. */
+export class RentalReportReadLimitError extends Error {
+  constructor() { super('operation_report_read_limit_exceeded'); this.name = 'RentalReportReadLimitError'; }
+}
 
 /**
  * REPORT-01B：当前事实无法还原的口径，逐条登记。
@@ -127,9 +133,9 @@ export class RentalWorkspaceReportRepository {
    *
    * 为什么合成一趟：这三件都需要逐行读订单，其中费用行是 JSON、租期时长是两列相减，
    * 都无法在 SQL 里可移植地聚合。分成三趟会把同一批行读三遍；一趟里累计
-   * 内存上限仍只由 `SCAN_PAGE_SIZE` 和维度基数决定，与总订单量无关。
+   * 分页限制单次取数，但去重集合和维度累计仍随订单量增长；AI 入口另加总量上限。
    */
-  private async scanOrderDetails(where: Prisma.RentalOrderWhereInput) {
+  private async scanOrderDetails(where: Prisma.RentalOrderWhereInput, maxOrders?: number) {
     const exceptionTypes = new Set<string>(RENTAL_EXCEPTION_CHARGE_TYPES);
     const perType = new Map<RentalExceptionChargeType, { amount: number; orders: Set<string> }>();
     for (const type of RENTAL_EXCEPTION_CHARGE_TYPES) perType.set(type, { amount: 0, orders: new Set() });
@@ -137,9 +143,11 @@ export class RentalWorkspaceReportRepository {
     const exceptionByCustomer = new Map<string, number>();
     let occupancyHours = 0;
     let scannedOrders = 0;
+    const seenIds = maxOrders === undefined ? undefined : new Set<string>();
 
     let cursor: string | undefined;
     do {
+      const pageSize = maxOrders === undefined ? SCAN_PAGE_SIZE : Math.min(SCAN_PAGE_SIZE, maxOrders - scannedOrders + 1);
       const rows = await this.prisma.rentalOrder.findMany({
         where,
         select: {
@@ -153,10 +161,17 @@ export class RentalWorkspaceReportRepository {
           customerName: true
         },
         orderBy: { id: "asc" },
-        take: SCAN_PAGE_SIZE,
+        take: pageSize,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {})
       });
+      if (maxOrders !== undefined && (rows.length > pageSize || scannedOrders + rows.length > maxOrders)) {
+        throw new RentalReportReadLimitError();
+      }
       for (const row of rows) {
+        if (seenIds) {
+          if (!row.id || seenIds.has(row.id)) throw new RentalReportReadLimitError();
+          seenIds.add(row.id);
+        }
         scannedOrders += 1;
         // 占用时长算到**当前**归还时间：续租延长出来的那几天同样占着资产，
         // 读原 `endAt` 会让续租过的订单在报表里显示成没占用过那段时间。
@@ -185,7 +200,7 @@ export class RentalWorkspaceReportRepository {
           exceptionByCustomer.set(customerKey, (exceptionByCustomer.get(customerKey) ?? 0) + orderExceptionAmount);
         }
       }
-      cursor = rows.length === SCAN_PAGE_SIZE ? rows.at(-1)?.id : undefined;
+      cursor = rows.length === pageSize ? rows.at(-1)?.id : undefined;
     } while (cursor);
 
     return { perType, exceptionByLocation, exceptionByCustomer, occupancyHours, scannedOrders };
@@ -285,14 +300,19 @@ export class RentalWorkspaceReportRepository {
    */
   private async loadLocationBreakdown(
     where: Prisma.RentalOrderWhereInput,
-    exceptionByLocation: Map<string, number>
+    exceptionByLocation: Map<string, number>,
+    maxGroups?: number
   ): Promise<RentalWorkspaceLocationBreakdownRow[]> {
     const groups = await this.prisma.rentalOrder.groupBy({
       by: ["fulfillmentLocationId", "fulfillmentLocationName"],
       where,
+      ...(maxGroups === undefined ? {} : { take: maxGroups + 1 }),
+      orderBy: maxGroups === undefined ? undefined
+        : [{ fulfillmentLocationId: "asc" }, { fulfillmentLocationName: "asc" }],
       _count: { _all: true },
       _sum: { rentalAmount: true, discountAmount: true, couponAmount: true, finalPayableAmount: true }
     });
+    if (maxGroups !== undefined && groups.length > maxGroups) throw new RentalReportReadLimitError();
     const merged = new Map<string, RentalWorkspaceLocationBreakdownRow & { nameVotes: Map<string, number> }>();
     for (const row of groups) {
       const id = row.fulfillmentLocationId;
@@ -335,14 +355,19 @@ export class RentalWorkspaceReportRepository {
    */
   private async loadCustomerBreakdown(
     where: Prisma.RentalOrderWhereInput,
-    exceptionByCustomer: Map<string, number>
+    exceptionByCustomer: Map<string, number>,
+    maxGroups?: number
   ): Promise<RentalWorkspaceCustomerBreakdownRow[]> {
     const groups = await this.prisma.rentalOrder.groupBy({
       by: ["customerId", "customerName", "customerType"],
       where,
+      ...(maxGroups === undefined ? {} : { take: maxGroups + 1 }),
+      orderBy: maxGroups === undefined ? undefined
+        : [{ customerId: "asc" }, { customerName: "asc" }, { customerType: "asc" }],
       _count: { _all: true },
       _sum: { rentalAmount: true, discountAmount: true, couponAmount: true, finalPayableAmount: true }
     });
+    if (maxGroups !== undefined && groups.length > maxGroups) throw new RentalReportReadLimitError();
     const merged = new Map<string, RentalWorkspaceCustomerBreakdownRow>();
     for (const row of groups) {
       const key = this.customerKey(row.customerId, row.customerName);
@@ -382,6 +407,23 @@ export class RentalWorkspaceReportRepository {
      */
     currency: RentalCurrency = "CNY"
   ): Promise<RentalWorkspaceOperationReport> {
+    return this.buildOperationReport(tenantId, workspaceId, categoryCode, filter, currency);
+  }
+
+  /** Server-selected AI read port, not a caller-controlled limit or a new report algorithm.
+   * At most 5000 orders plus one overflow witness; dimensions also have DB take bounds.
+   * This bounds materialized rows, not database aggregate execution time or isolation. */
+  async getBoundedOperationReport(
+    tenantId: string, workspaceId: string, categoryCode: RentalCategoryCode,
+    filter: RentalWorkspaceReportFilter = {}, currency: RentalCurrency = "CNY"
+  ): Promise<RentalWorkspaceOperationReport> {
+    return this.buildOperationReport(tenantId, workspaceId, categoryCode, filter, currency, AI_REPORT_MAX_ORDERS);
+  }
+
+  private async buildOperationReport(
+    tenantId: string, workspaceId: string, categoryCode: RentalCategoryCode,
+    filter: RentalWorkspaceReportFilter, currency: RentalCurrency, maxOrders?: number
+  ): Promise<RentalWorkspaceOperationReport> {
     // “仅本人”可按订单/工单归属筛订单，但库存与资产利用率是空间级快照，
     // 没有可证明的本人归属。混合返回订单小计与全空间库存会泄露总量，故整份报表拒绝。
     if (getRequestDataScope() === "own") {
@@ -396,7 +438,7 @@ export class RentalWorkspaceReportRepository {
         where,
         _sum: { rentalAmount: true, discountAmount: true, couponAmount: true, finalPayableAmount: true, taxAmount: true }
       }),
-      this.scanOrderDetails(where)
+      this.scanOrderDetails(where, maxOrders)
     ]);
 
     const exceptionFeeBreakdown = RENTAL_EXCEPTION_CHARGE_TYPES.map((type) => {
@@ -408,13 +450,16 @@ export class RentalWorkspaceReportRepository {
     for (const bucket of scanned.perType.values()) for (const id of bucket.orders) exceptionOrders.add(id);
 
     const orderCount = grouped.reduce((total, row) => total + row._count._all, 0);
+    if (maxOrders !== undefined && (orderCount > maxOrders || orderCount !== scanned.scannedOrders)) {
+      throw new RentalReportReadLimitError();
+    }
     const [utilization, locationBreakdown, customerBreakdown] = await Promise.all([
       this.loadUtilization(tenantId, workspaceId, filter, {
         orderCount,
         hours: scanned.occupancyHours
       }),
-      this.loadLocationBreakdown(where, scanned.exceptionByLocation),
-      this.loadCustomerBreakdown(where, scanned.exceptionByCustomer)
+      this.loadLocationBreakdown(where, scanned.exceptionByLocation, maxOrders),
+      this.loadCustomerBreakdown(where, scanned.exceptionByCustomer, maxOrders)
     ]);
 
     return {

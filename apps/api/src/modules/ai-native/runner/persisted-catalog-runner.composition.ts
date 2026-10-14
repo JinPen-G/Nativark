@@ -46,7 +46,7 @@ type ReadonlyRunnerDependencies = {
    * composition, supplied by the server host rather than a task payload. */
   diagnosticCore?: ConstructorParameters<typeof AiGuardedQuoteCoreContextSource>[0];
   business?: Pick<RentalBusinessService, 'tenantReadiness'>;
-  reports?: Pick<RentalWorkspaceReportRepository, 'getOperationReport'>;
+  reports?: Pick<RentalWorkspaceReportRepository, 'getBoundedOperationReport'>;
   /** Optional server-owned original request check. It is an additional
    * constraint, never a replacement for Task or business authorization. */
   revalidateOriginal?: () => Promise<void>;
@@ -224,7 +224,7 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
       ? typeof input?.memberships?.listPersonalOptions !== 'function' || typeof input?.memberships?.listPersonalOptionsPage !== 'function'
       : tool === 'tenant.opening.diagnose' || tool === 'operations.risks.list'
         ? !input?.diagnosticCore || (tool === 'tenant.opening.diagnose'
-          ? typeof input?.business?.tenantReadiness : typeof input?.reports?.getOperationReport) !== 'function'
+          ? typeof input?.business?.tenantReadiness : typeof input?.reports?.getBoundedOperationReport) !== 'function'
         : (tool === 'rental.catalog.search' ? typeof input?.core?.listItemGroups
         : tool === 'rental.availability.check' ? typeof input?.core?.availability : typeof input?.core?.getOrder) !== 'function')) throw unavailable();
   const authorization = composePersistedTaskAuthorization({ ...input.authorization, db: input.db, clock: input.wall });

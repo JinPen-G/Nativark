@@ -39,7 +39,7 @@ export function composeAiAuthorizedBusinessTools(input: {
     | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'resolvePricingGroupQuoteRequest'> & Partial<Pick<RentalCoreService, 'listInspections' | 'listItemGroupsPage'>>;
   memberships: AiMembershipCandidateReadPort;
   business: Pick<RentalBusinessService, 'createQuote' | 'getQuote' | 'tenantReadiness'> & Partial<Pick<RentalBusinessService, 'normalizeQuoteInput' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>;
-  reports: Pick<RentalWorkspaceReportRepository, 'getOperationReport'>;
+  reports: Pick<RentalWorkspaceReportRepository, 'getBoundedOperationReport'>;
   payments?: AiOrderPaymentReadPort;
   /** Explicit AIN-07 dependencies for an EXISTING persisted task/action. No
    * default original input, policy or approval is supplied by this lane. */
@@ -47,7 +47,7 @@ export function composeAiAuthorizedBusinessTools(input: {
   approvedSettings?: Omit<AiSettingsBusinessDependencies, 'guard' | 'credentials'>;
   clock?: () => Date;
 }) {
-  for (const [port, method] of [[input?.business, 'getQuote'], [input?.reports, 'getOperationReport']] as const) {
+  for (const [port, method] of [[input?.business, 'getQuote'], [input?.reports, 'getBoundedOperationReport']] as const) {
     if (!port || typeof (port as unknown as Record<string, unknown>)[method] !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   }
   const routes = new AiBusinessReadRouteAuthority(input.guard, input.credentials, input.clock);

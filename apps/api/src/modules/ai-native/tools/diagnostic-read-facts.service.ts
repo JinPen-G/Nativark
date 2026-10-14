@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { AiExecutionContext, RentalCategoryCode, RentalCurrency } from '@rental-os/shared';
 import type { RentalBusinessService, BusinessContext } from '../../rental-core/rental-business.service';
-import type { RentalWorkspaceReportRepository } from '../../rental-core/rental-workspace-report.repository';
+import { RentalReportReadLimitError, type RentalWorkspaceReportRepository } from '../../rental-core/rental-workspace-report.repository';
 import { ModelGatewayError } from '../model-gateway.ports';
 import { assertAiReadContextBinding } from './read-context-binding';
 
@@ -75,12 +75,12 @@ export class AiOpeningReadFactsService {
 }
 
 export class AiRiskReadFactsService {
-  constructor(private readonly reports: Pick<RentalWorkspaceReportRepository, 'getOperationReport'>,
+  constructor(private readonly reports: Pick<RentalWorkspaceReportRepository, 'getBoundedOperationReport'>,
     private readonly settings: {
       category(scope: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>): Promise<RentalCategoryCode>;
       currency(scope: Extract<AiExecutionContext['scope'], { kind: 'workspace' }>): Promise<RentalCurrency>;
     }, private readonly authority: AiDiagnosticReadAuthority, private readonly clock: () => Date = () => new Date()) {
-    requireMethod(reports, 'getOperationReport'); requireMethod(settings, 'category'); requireMethod(settings, 'currency'); requireMethod(authority, 'withRead');
+    requireMethod(reports, 'getBoundedOperationReport'); requireMethod(settings, 'category'); requireMethod(settings, 'currency'); requireMethod(authority, 'withRead');
   }
   async read(value: unknown, expectedContext?: AiExecutionContext) {
     const input = aiRiskReadInputSchema.safeParse(value);
@@ -88,7 +88,12 @@ export class AiRiskReadFactsService {
     return this.authority.withRead('risk', input.data, async context => {
       assertAiReadContextBinding(context, expectedContext);
       const scope = workspace(context), category = await this.settings.category(scope), currency = await this.settings.currency(scope);
-      const parsed = report.safeParse(await this.reports.getOperationReport(scope.tenantId, scope.workspaceId, category, input.data, currency));
+      const facts = await this.reports.getBoundedOperationReport(scope.tenantId, scope.workspaceId, category, input.data, currency)
+        .catch(error => {
+          if (error instanceof RentalReportReadLimitError) throw new ModelGatewayError('RATE_LIMITED');
+          throw error;
+        });
+      const parsed = report.safeParse(facts);
       if (!parsed.success || parsed.data.tenantId !== scope.tenantId || parsed.data.workspaceId !== scope.workspaceId || parsed.data.currency !== currency)
         throw new ModelGatewayError('INVALID_RESPONSE');
       const r = parsed.data;
