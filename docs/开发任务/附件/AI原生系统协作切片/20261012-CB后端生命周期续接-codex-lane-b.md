@@ -234,3 +234,11 @@ Node DATABASE_URL 固定 mysql://offline:offline@127.0.0.1:1/rental_os_offline�
 一次直接inline调用actual stored root.staffRequests.withRequest与原inspection-persistent显式事务/身份替身：当前模板→创建人工草稿mileage42→原editHumanReview更正43→当前review读回→原readSubmissionReview准确not_prepared，receipt读取不增加operation、不调业务提交或模型/对象字节；withRequest关闭后templates.read ACCESS_DENIED。完整完成标记 `smoke=passed; stored root supplies actual staff human create/edit/review/original receipt service; no task host/bytes/business submit; private request closed`，exit0。最初内联误用review.items导致TypeError/exit1，按真实review.fields修正内联同场景复验，生产源码未迁就错误断言。
 
 必要原API strict noEmit1129files、0diagnostics/exit0，diff check0；源码在恢复时与该验证一致，没有为新数字扩大回归。无tests/fixture/脚本新增或修改。此正向证据为人工草稿/原收据消费与默认供应，不是成功识别、候选保存、签名/原Core正式提交验收。原业务提交只有提供真实OriginalInspectionApplication依赖并满足当前订单/阶段/单allocation/签名/模板/证据条件时可用，多allocation仍manual_review_only；unknown仅原键核对，不能自动采用或重派。
+
+### 20261014 影子事件当前人类服务器消费供应
+
+核查知识后继链：HumanKnowledgeContextService.revalidate仍重新search/每文档当前head与read_body/resolve_source/hash，original scene collect→不可变envelope→transport前dispatchChecks及结果source重开消费已连通；Memory确认/撤销经原preparation逐项复验，未造同义包装。转事件实际供应缺口：HumanAutomationRequestModule原只提供HTTP controllers注册、不导出factory。现registerRequests显式默认空模块，enabled+正式dependencies才供并export原HumanAutomationRequestFactory，controllers为空；不是后台执行主体、无worker或定时扫描。调用仍call(request,audience,action,原command)，实际Auth/Guard/独立automation政策与人类动作grant均保留。
+
+一次inline从新module provider取得实际factory，复用既有automation-request-bound初始化前缀（仅内存、避免重复ts-node注册，无node:test注册或脚本/fixture修改）：原return_exception→prepareCandidate→prepareInput→原影子Task create/readCreation→current人类view；无close grant拒绝；明确合成持久grant后close提交成功应答丢失返回unknown；原operation读取observed/closed，读不增加writes、Task仅创建一次；身份撤销后原operation拒绝。真实AuthService/ApiAuthGuard/automation及review/事务仓储实现不替换，DB/资源/权益与正式委托数据是既有fixture显式合成，不是实际部署。stdout `smoke=passed; exported actual server factory event/input/original shadow Task/human close lost ack/original receipt recovery; missing grant and revocation denied; no automatic business execution`，exit0。
+
+必要原API strict noEmit1024files、0diagnostics/exit0，diff check0，无tests/fixture/脚本变更。证据是原影子任务与人类办理/原键恢复，不是退款执行、模型建议、通知发送或Core修复。关闭待办不改变原检查事实；未调用真实DB/存储/HTTP/模型/支付，不安装、生产启用或调整AIN完成率。
