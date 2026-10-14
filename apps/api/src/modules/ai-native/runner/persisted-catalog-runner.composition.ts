@@ -2,11 +2,16 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { AI_TOOL_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import type { RentalCoreService } from '../../rental-core/rental-core.service';
+import type { RentalBusinessService } from '../../rental-core/rental-business.service';
+import type { RentalWorkspaceReportRepository } from '../../rental-core/rental-workspace-report.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiCatalogReadFactsService, aiCatalogReadInputSchema } from '../catalog-read-facts.service';
 import { AiAvailabilityReadFactsService, aiAvailabilityReadInputSchema } from '../availability-read-facts.service';
 import { AiOrderReadFactsService } from '../order-read-facts.service';
 import { AiMembershipCandidateReadFactsService, aiMembershipCandidateReadInputSchema, type AiMembershipCandidateReadPort } from '../membership-candidate-read-facts.service';
+import { AiOpeningReadFactsService, AiRiskReadFactsService, aiOpeningReadInputSchema, aiRiskReadInputSchema } from '../tools/diagnostic-read-facts.service';
+import { AiDiagnosticRouteAuthority } from '../tools/diagnostic-route.authority';
+import { AiGuardedQuoteCoreContextSource } from '../tools/quote-route.composition';
 import { AiOrderRouteContextAuthority } from '../order-route-context.authority';
 import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -32,6 +37,11 @@ type ReadonlyRunnerDependencies = {
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   core: Partial<Pick<RentalCoreService, 'listItemGroups' | 'listItemGroupsPage' | 'availability' | 'getOrder'>>;
   memberships?: AiMembershipCandidateReadPort;
+  /** Same current Core configuration producer as the original diagnostic
+   * composition, supplied by the server host rather than a task payload. */
+  diagnosticCore?: ConstructorParameters<typeof AiGuardedQuoteCoreContextSource>[0];
+  business?: Pick<RentalBusinessService, 'tenantReadiness'>;
+  reports?: Pick<RentalWorkspaceReportRepository, 'getOperationReport'>;
   wall?: () => Date;
   monotonic?: () => number;
   clock?: AiTaskRunnerClock;
@@ -52,6 +62,16 @@ export function composePersistedOrderFactsTaskRunner(input: ReadonlyRunnerDepend
  * completing this read does not choose a customer or establish eligibility. */
 export function composePersistedMembershipCandidateTaskRunner(input: ReadonlyRunnerDependencies & { memberships: AiMembershipCandidateReadPort }) {
   return composeReadonly(input, 'membership.customer.resolve');
+}
+export function composePersistedOpeningTaskRunner(input: ReadonlyRunnerDependencies & {
+  diagnosticCore: NonNullable<ReadonlyRunnerDependencies['diagnosticCore']>; business: NonNullable<ReadonlyRunnerDependencies['business']>
+}) {
+  return composeReadonly(input, 'tenant.opening.diagnose');
+}
+export function composePersistedRiskTaskRunner(input: ReadonlyRunnerDependencies & {
+  diagnosticCore: NonNullable<ReadonlyRunnerDependencies['diagnosticCore']>; reports: NonNullable<ReadonlyRunnerDependencies['reports']>
+}) {
+  return composeReadonly(input, 'operations.risks.list');
 }
 /** One immutable server plan and one cumulative resource ledger for a closed
  * group of actual readers. Agent tool names cannot extend this registry. */
@@ -92,11 +112,19 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
   if (typeof input?.guard?.canActivate !== 'function'
     || (tool === 'membership.customer.resolve'
       ? typeof input?.memberships?.listPersonalOptions !== 'function' || typeof input?.memberships?.listPersonalOptionsPage !== 'function'
-      : (tool === 'rental.catalog.search' ? typeof input?.core?.listItemGroups
+      : tool === 'tenant.opening.diagnose' || tool === 'operations.risks.list'
+        ? !input?.diagnosticCore || (tool === 'tenant.opening.diagnose'
+          ? typeof input?.business?.tenantReadiness : typeof input?.reports?.getOperationReport) !== 'function'
+        : (tool === 'rental.catalog.search' ? typeof input?.core?.listItemGroups
         : tool === 'rental.availability.check' ? typeof input?.core?.availability : typeof input?.core?.getOrder) !== 'function')) throw unavailable();
   const authorization = composePersistedTaskAuthorization({ ...input.authorization, db: input.db, clock: input.wall });
   const source = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, input.wall, tool);
   const route = new AiBusinessReadRouteAuthority(input.guard, input.authorization.credentials, input.wall);
+  // Validate the real configuration producer without reading configuration or
+  // granting a policy during inert construction.
+  if (tool === 'tenant.opening.diagnose' || tool === 'operations.risks.list') {
+    new AiGuardedQuoteCoreContextSource(input.diagnosticCore!, route);
+  }
   const commands: AiTaskRunnerRepositoryCommandFactory = {
     async register(plan, lease) {
       const task = await authorization.tasks.readMetadata(lease.taskId);
@@ -125,7 +153,17 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
             if (signal.aborted || identity(context) !== identity(stored.context)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
             return read(context);
           }) };
-        const result = tool === 'membership.customer.resolve'
+        const diagnosticContext = tool === 'tenant.opening.diagnose' || tool === 'operations.risks.list'
+          ? new AiGuardedQuoteCoreContextSource(input.diagnosticCore!, boundAuthority) : undefined;
+        const result = tool === 'tenant.opening.diagnose'
+          ? await new AiOpeningReadFactsService(input.business!, diagnosticContext!,
+            new AiDiagnosticRouteAuthority(boundAuthority), input.wall).read(aiOpeningReadInputSchema.parse(stored.input), stored.context)
+          : tool === 'operations.risks.list'
+            ? await new AiRiskReadFactsService(input.reports!, {
+              category: async scope => (await diagnosticContext!.current(scope)).category.code,
+              currency: async scope => (await diagnosticContext!.current(scope)).settings.pricing.currency
+            }, new AiDiagnosticRouteAuthority(boundAuthority), input.wall).read(aiRiskReadInputSchema.parse(stored.input), stored.context)
+          : tool === 'membership.customer.resolve'
           ? await new AiMembershipCandidateReadFactsService(input.memberships!, boundAuthority, input.wall)
             .read(aiMembershipCandidateReadInputSchema.parse(stored.input), stored.context)
           : tool === 'rental.catalog.search'
@@ -150,7 +188,9 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
       const key = { taskId: binding.taskId, runId: binding.runId, inputRef: binding.inputRef, fingerprint: binding.inputHash };
       const stored = tool === 'rental.catalog.search' ? await source.readCatalogInput(key)
         : tool === 'rental.availability.check' ? await source.readAvailabilityInput(key)
-          : tool === 'membership.customer.resolve' ? await source.readMembershipCandidateInput(key) : await source.readOrderExplainInput(key);
+          : tool === 'membership.customer.resolve' ? await source.readMembershipCandidateInput(key)
+            : tool === 'tenant.opening.diagnose' ? await source.readOpeningInput(key)
+              : tool === 'operations.risks.list' ? await source.readRiskInput(key) : await source.readOrderExplainInput(key);
       if (stored.registrationRef !== binding.registrationRef || binding.toolCode !== tool
         || binding.toolVersion !== AI_TOOL_DRAFT_VERSION) throw unavailable();
       return { kind: 'not_required' };

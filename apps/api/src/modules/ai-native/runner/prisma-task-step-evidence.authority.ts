@@ -11,7 +11,7 @@ const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 // A ceiling for this adapter, never a grant or executable registry. These are
 // the existing AIN-08 bounded readers. A plan cannot relabel a write as a read.
 const readonlyTools = new Set(['rental.order.explain', 'rental.catalog.search',
-  'rental.availability.check', 'membership.customer.resolve']);
+  'rental.availability.check', 'membership.customer.resolve', 'tenant.opening.diagnose', 'operations.risks.list']);
 const identity = ({ authorizedAt: _at, requestId: _id, ...context }: AiExecutionContext) => requestFingerprint(context);
 
 /** Evidence adapter, not a state machine or execution grant. Only registered

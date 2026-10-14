@@ -13,6 +13,7 @@ import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, isT
 import { aiCatalogReadInputSchema } from '../catalog-read-facts.service';
 import { aiAvailabilityReadInputSchema } from '../availability-read-facts.service';
 import { aiMembershipCandidateReadInputSchema } from '../membership-candidate-read-facts.service';
+import { aiOpeningReadInputSchema, aiRiskReadInputSchema } from '../tools/diagnostic-read-facts.service';
 import { isGatewayOrderExplainRequest } from '../gateway-contract-validation';
 import { aiTaskAccessFromContext, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import type { AiStepRegistrationAuthority, AiStepRegistrationCommand } from '../ai-step-registration.repository';
@@ -38,7 +39,7 @@ const orderPublishSchema = publishSchema.extend({ input: z.unknown() });
 export const aiPersistedOrderExplainInputSchema = z.custom<AiOrderExplainRequestDraft>(isGatewayOrderExplainRequest)
   .transform(value => structuredClone(value));
 const orderExplainPublishSchema = publishSchema.extend({ input: aiPersistedOrderExplainInputSchema });
-export const PERSISTED_READONLY_TOOLS = ['rental.catalog.search', 'rental.availability.check', 'rental.order.explain', 'membership.customer.resolve'] as const;
+export const PERSISTED_READONLY_TOOLS = ['rental.catalog.search', 'rental.availability.check', 'rental.order.explain', 'membership.customer.resolve', 'tenant.opening.diagnose', 'operations.risks.list'] as const;
 export type PersistedReadonlyTool = typeof PERSISTED_READONLY_TOOLS[number];
 export type PersistedTaskInputTool = PersistedReadonlyTool | 'rental.order.commit' | 'tenant.notifications.commit' | typeof TASK_TEXT_MODEL_TOOL | typeof TASK_IMAGE_MODEL_TOOL | typeof TASK_AUDIO_MODEL_TOOL | typeof TEXT_CAPABILITY_PROBE_TOOL;
 export interface SettingsInputDependencies {
@@ -110,6 +111,8 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     if (this.toolCode === 'rental.catalog.search') return aiCatalogReadInputSchema.parse(structuredClone(value));
     if (this.toolCode === 'rental.availability.check') return aiAvailabilityReadInputSchema.parse(structuredClone(value));
     if (this.toolCode === 'membership.customer.resolve') return aiMembershipCandidateReadInputSchema.parse(structuredClone(value));
+    if (this.toolCode === 'tenant.opening.diagnose') return aiOpeningReadInputSchema.parse(structuredClone(value));
+    if (this.toolCode === 'operations.risks.list') return aiRiskReadInputSchema.parse(structuredClone(value));
     if (this.toolCode === 'rental.order.explain') return aiPersistedOrderExplainInputSchema.parse(structuredClone(value));
     if (isTaskModelTool(this.toolCode)) return parseTaskModelInput(value, this.modelPolicy!);
     if (this.toolCode === 'tenant.notifications.commit') return settingsChangeReferenceSchema.parse(structuredClone(value));
@@ -178,6 +181,16 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
 
   async publishMembershipCandidateInput(value: unknown) {
     if (this.toolCode !== 'membership.customer.resolve') throw unavailable();
+    return this.publish(value);
+  }
+
+  async publishOpeningInput(value: unknown) {
+    if (this.toolCode !== 'tenant.opening.diagnose') throw unavailable();
+    return this.publish(value);
+  }
+
+  async publishRiskInput(value: unknown) {
+    if (this.toolCode !== 'operations.risks.list') throw unavailable();
     return this.publish(value);
   }
 
@@ -277,7 +290,9 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     const schema = this.toolCode === 'rental.catalog.search' ? publishSchema
       : this.toolCode === 'rental.availability.check' ? availabilityPublishSchema
         : this.toolCode === 'rental.order.explain' ? orderExplainPublishSchema
-          : this.toolCode === 'membership.customer.resolve' ? publishSchema.extend({ input: aiMembershipCandidateReadInputSchema }) : orderPublishSchema;
+          : this.toolCode === 'membership.customer.resolve' ? publishSchema.extend({ input: aiMembershipCandidateReadInputSchema })
+            : this.toolCode === 'tenant.opening.diagnose' ? publishSchema.extend({ input: aiOpeningReadInputSchema })
+              : this.toolCode === 'operations.risks.list' ? publishSchema.extend({ input: aiRiskReadInputSchema }) : orderPublishSchema;
     const parsed = schema.safeParse(value);
     if (!parsed.success || parsed.data.lease.purpose === 'recovery_only') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const command = parsed.data, payload = await this.parseInput(command.input);
@@ -495,6 +510,18 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     if (this.toolCode !== 'membership.customer.resolve') throw unavailable();
     const stored = await this.readStoredInput(binding);
     return { ...stored, input: aiMembershipCandidateReadInputSchema.parse(stored.input) };
+  }
+
+  async readOpeningInput(binding: { taskId: string; runId: string; inputRef: string; fingerprint: string }) {
+    if (this.toolCode !== 'tenant.opening.diagnose') throw unavailable();
+    const stored = await this.readStoredInput(binding);
+    return { ...stored, input: aiOpeningReadInputSchema.parse(stored.input) };
+  }
+
+  async readRiskInput(binding: { taskId: string; runId: string; inputRef: string; fingerprint: string }) {
+    if (this.toolCode !== 'operations.risks.list') throw unavailable();
+    const stored = await this.readStoredInput(binding);
+    return { ...stored, input: aiRiskReadInputSchema.parse(stored.input) };
   }
 
   private async readStoredInput(binding: { taskId: string; runId: string; inputRef: string; fingerprint: string }) {
