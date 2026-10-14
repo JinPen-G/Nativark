@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
-import { AI_TASK_DRAFT_VERSION, type AiExecutionContext } from "@rental-os/shared";
+import { AI_TASK_DRAFT_VERSION, AI_TASK_STATUSES_DRAFT, type AiExecutionContext } from "@rental-os/shared";
 import { requestFingerprint } from "../rental-core/rental-idempotency.repository";
 import { aiTaskAccessFromContext, AiTaskRepositoryError } from "./ai-task.repository";
 
@@ -19,6 +19,15 @@ export interface AiTaskCreationAuthority {
     inputRef: string; inputRevision: number; inputHash: string;
   }>;
 }
+/** Current read authorization and an ORIGINAL immutable input proof. This
+ * carries no creation permission and never re-prices or re-plans old work. */
+export interface AiTaskCreationReceiptAuthority {
+  resolve(sceneCode: string, inputRef: string): Promise<{
+    context: AiExecutionContext; sceneCode: string; sceneVersion: string;
+    inputRef: string; inputRevision: number; inputHash: string;
+  }>;
+}
+const receiptGrantSchema = grantSchema.omit({ creationAllowed: true });
 const selectedTask = {
   id: true, status: true, revision: true, contractVersion: true, archivedAt: true, creationKey: true, creationFingerprint: true,
   runs: { where: { sequence: 1 }, select: { id: true }, take: 1 }
@@ -29,16 +38,73 @@ type TaskRow = Prisma.AiTaskGetPayload<{ select: typeof selectedTask }>;
 export class AiTaskCreationRepository {
   constructor(
     private readonly db: Pick<PrismaClient, "$transaction" | "aiScope" | "aiTask">,
-    private readonly authority: AiTaskCreationAuthority,
+    private readonly authority: AiTaskCreationAuthority | undefined,
     private readonly clock: () => Date = () => new Date(),
-    private readonly newId: () => string = randomUUID
+    private readonly newId: () => string = randomUUID,
+    private readonly receiptAuthority?: AiTaskCreationReceiptAuthority
   ) {
-    if (!authority || typeof authority.resolve !== "function") throw new AiTaskRepositoryError("AI_ACCESS_DENIED");
+    if (receiptAuthority ? typeof receiptAuthority.resolve !== 'function'
+      : !authority || typeof authority.resolve !== "function") throw new AiTaskRepositoryError("AI_ACCESS_DENIED");
+  }
+
+  /** Only the original receipt method escapes. No dummy creation grant and no
+   * mutable repository/creation method is exposed to a recovery consumer. */
+  static receiptReader(db: ConstructorParameters<typeof AiTaskCreationRepository>[0],
+    authority: AiTaskCreationReceiptAuthority, clock: () => Date = () => new Date()) {
+    const repository = new AiTaskCreationRepository(db, undefined, clock, randomUUID, authority);
+    return Object.freeze({ readCreation: repository.readCreation.bind(repository) });
+  }
+
+  private async readOriginalReceipt(input: z.infer<typeof commandSchema>) {
+    const access = async () => {
+      let value: unknown;
+      try { value = structuredClone(await this.receiptAuthority!.resolve(input.sceneCode, input.inputRef)); }
+      catch { throw new AiTaskRepositoryError('AI_ACCESS_DENIED'); }
+      const parsed = receiptGrantSchema.safeParse(value);
+      if (!parsed.success || parsed.data.sceneCode !== input.sceneCode || parsed.data.inputRef !== input.inputRef)
+        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return { grant: parsed.data, access: aiTaskAccessFromContext(parsed.data.context as AiExecutionContext,
+        input.creationKey, this.clock()) };
+    };
+    const initial = await access();
+    const where: Prisma.AiTaskWhereInput = { scope: { is: initial.access.scope }, scopeKind: initial.access.scope.kind,
+      audience: initial.access.audience, ownerKind: initial.access.actorKind, ownerId: initial.access.actorId,
+      creationKey: input.creationKey };
+    let row, observed = false;
+    try {
+      row = structuredClone(await this.db.aiTask.findFirst({ where, select: { ...selectedTask, scope: true, scopeId: true, scopeKind: true,
+        audience: true, ownerKind: true, ownerId: true, sceneCode: true, sceneVersion: true,
+        inputRef: true, inputHash: true, inputRevision: true } }));
+      observed = true;
+    } catch { /* Read uncertainty is not proof that the original write failed. */ }
+    const current = await access();
+    const proof = (grant: z.infer<typeof receiptGrantSchema>) => ({ sceneCode: grant.sceneCode, sceneVersion: grant.sceneVersion,
+      inputRef: grant.inputRef, inputRevision: grant.inputRevision, inputHash: grant.inputHash });
+    if (current.access.bindingKey !== initial.access.bindingKey
+      || requestFingerprint(proof(current.grant)) !== requestFingerprint(proof(initial.grant))) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    if (!observed || !row) return { state: observed ? 'not_observed' as const : 'unknown' as const,
+      creationKey: input.creationKey, retryable: false as const, nextAction: 'reconcile' as const, task: null };
+    const originalFingerprint = row.creationFingerprint;
+    if (!row.scope || row.scope.id !== row.scopeId || row.scope.kind !== initial.access.scope.kind || row.scope.scopeKey !== initial.access.scope.scopeKey
+      || row.scope.tenantId !== initial.access.scope.tenantId || row.scope.workspaceId !== initial.access.scope.workspaceId
+      || row.scopeKind !== initial.access.scope.kind || row.ownerKind !== initial.access.actorKind || row.ownerId !== initial.access.actorId
+      || row.audience !== initial.access.audience || row.creationKey !== input.creationKey
+      || row.sceneCode !== initial.grant.sceneCode || row.sceneVersion !== initial.grant.sceneVersion
+      || row.inputRef !== initial.grant.inputRef || row.inputRevision !== initial.grant.inputRevision
+      || row.inputHash !== initial.grant.inputHash || typeof originalFingerprint !== 'string' || !/^[a-f0-9]{64}$/u.test(originalFingerprint))
+      throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    if (!id.max(36).safeParse(row.id).success || !Number.isInteger(row.revision) || row.revision < 1 || row.revision > 4294967295
+      || typeof row.status !== 'string' || !z.enum(AI_TASK_STATUSES_DRAFT).safeParse(row.status.toLowerCase()).success
+      || row.runs.length !== 1 || !id.max(36).safeParse(row.runs[0].id).success) throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
+    // The durable ORIGINAL fingerprint is not recomputed from today's role,
+    // model or policy. Current authority still verifies the immutable input.
+    return { state: 'observed' as const, creationKey: input.creationKey, retryable: false as const,
+      nextAction: 'read_original_task' as const, task: this.result(row, input.creationKey, originalFingerprint, true) };
   }
 
   private async grant(sceneCode: string, inputRef: string, candidateId: string) {
     let value: unknown;
-    try { value = await this.authority.resolve(sceneCode, inputRef); }
+    try { value = await this.authority!.resolve(sceneCode, inputRef); }
     catch { throw new AiTaskRepositoryError("AI_ACCESS_DENIED"); }
     const parsed = grantSchema.safeParse(value);
     if (!parsed.success || parsed.data.sceneCode !== sceneCode || parsed.data.inputRef !== inputRef) throw new AiTaskRepositoryError("AI_ACCESS_DENIED");
@@ -63,6 +129,7 @@ export class AiTaskCreationRepository {
     const parsed = commandSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
     const input = parsed.data;
+    if (this.receiptAuthority) return this.readOriginalReceipt(structuredClone(input));
     const initial = await this.grant(input.sceneCode, input.inputRef, input.creationKey);
     const where: Prisma.AiTaskWhereInput = {
       scope: { is: initial.access.scope }, scopeKind: initial.access.scope.kind,
@@ -81,6 +148,7 @@ export class AiTaskCreationRepository {
   }
 
   async create(value: unknown) {
+    if (this.receiptAuthority) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const parsed = commandSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError("AI_INVALID_INPUT");
     const input = parsed.data, candidateId = this.newId();
