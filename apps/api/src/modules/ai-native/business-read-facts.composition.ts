@@ -15,7 +15,7 @@ import type { AiOrderRouteContextAuthority } from './order-route-context.authori
  * dispatch handler.
  */
 export interface AiBusinessReadFactsCompositionInput {
-  core: Pick<RentalCoreService, 'listItemGroups' | 'availability' | 'getOrder'>;
+  core: Pick<RentalCoreService, 'listItemGroups' | 'availability' | 'getOrder'> & Partial<Pick<RentalCoreService, 'listItemGroupsPage'>>;
   memberships: AiMembershipCandidateReadPort;
   businessAuthority: AiBusinessReadAuthority;
   orderAuthority: Pick<AiOrderRouteContextAuthority, 'withOrderRead'>;

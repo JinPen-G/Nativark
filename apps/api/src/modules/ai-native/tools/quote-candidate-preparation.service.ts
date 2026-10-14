@@ -78,7 +78,35 @@ export class AiQuoteCandidatePreparationService {
     if (input.customerType === 'corporate') return { status: 'qualification_required' as const, reason: 'enterprise_identity_reader_unavailable' as const,
       clarifications: [{ field: 'customerId', reason: 'trusted_enterprise_qualification_required', action: 'use_original_qualification_flow', candidates: [] }] };
     const memberQuery = { limit: 50, ...(input.customerId ? { customerId: input.customerId } : input.customerName ? { name: input.customerName } : {}) };
-    const catalog = await this.readers.catalog.read({ limit: 100 }, expectedContext), members = await this.readers.members.read(memberQuery, expectedContext);
+    // Exact persisted lookups for the supplied lines; never scan additional
+    // pages until a name appears unique. One page per distinct query, <=50
+    // queries and <=100 distinct returned items, followed by one revalidation.
+    const queries = [...new Map((input.items?.length ? input.items : [{}]).map(row => {
+      const query = 'itemGroupId' in row && row.itemGroupId ? { itemGroupId: row.itemGroupId }
+        : 'productName' in row && row.productName ? { name: row.productName } : {};
+      return [JSON.stringify(query), query];
+    })).values()];
+    const readCatalog = async () => {
+      const pages = [];
+      const items = new Map<string, Awaited<ReturnType<AiCatalogReadFactsService['read']>>['items'][number]>();
+      for (const query of queries) {
+        const result = await this.readers.catalog.read({ limit: 100, ...query }, expectedContext);
+        if (pages.length && (!isDeepStrictEqual(result.scope, pages[0].result.scope)
+          || result.audience !== pages[0].result.audience)) throw new ModelGatewayError('FORBIDDEN');
+        for (const item of result.items) {
+          const previous = items.get(item.id);
+          if (previous && !isDeepStrictEqual(previous, item)) throw new ModelGatewayError('CONFIG_INVALID');
+          items.set(item.id, item);
+        }
+        if (items.size > 100) throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
+        pages.push({ query, result });
+      }
+      const basis = pages.map(({ query, result }) => ({ query, version: result.configurationVersion,
+        truncated: result.truncated, nextCursor: result.nextCursor }));
+      return { ...pages[0].result, items: [...items.values()], truncated: pages.some(page => page.result.truncated),
+        configurationVersion: requestFingerprint(basis), queryBasis: basis };
+    };
+    const catalog = await readCatalog(), members = await this.readers.members.read(memberQuery, expectedContext);
     const enterprise = input.bookingIdentity?.bookingIdentity === 'enterprise_employee' ? input.bookingIdentity : undefined;
     if (enterprise && typeof this.readers.members.readBookingOptions !== 'function') {
       return { status: 'qualification_required' as const, reason: 'enterprise_identity_reader_unavailable' as const,
@@ -106,8 +134,8 @@ export class AiQuoteCandidatePreparationService {
     if (rates && !Array.isArray(rates)) throw new ModelGatewayError('INVALID_RESPONSE');
     const clarifications: Array<{ field: string; reason: string; action: string;
       candidates: Array<{ id: string; label: string; phoneMasked?: string }>; truncated?: boolean }> = [];
-    const choose = (field: string, reason: string, rows: Array<{ id: string; label: string; phoneMasked?: string }>) => {
-      clarifications.push({ field, reason, action: 'select_authorized_id', candidates: rows.slice(0, 10), truncated: rows.length > 10 });
+    const choose = (field: string, reason: string, rows: Array<{ id: string; label: string; phoneMasked?: string }>, sourceTruncated = false) => {
+      clarifications.push({ field, reason, action: 'select_authorized_id', candidates: rows.slice(0, 10), truncated: sourceTruncated || rows.length > 10 });
     };
     if (enterprise && bookingOptions && !bookingOptions.options.some(row => row.corporateCustomerId === enterprise.corporateCustomerId)) {
       missingFields.push('bookingIdentity.corporateCustomerId');
@@ -121,7 +149,7 @@ export class AiQuoteCandidatePreparationService {
         { id: 'enterprise_payer', label: '申请由所选企业签约与付款（仍须原资格与审批）' }
       ]);
     }
-    if (!input.items) { missingFields.push('items'); choose('items', 'product_and_quantity_required', catalog.items.filter(row => row.status === 'enabled').map(row => ({ id: row.id, label: row.name }))); }
+    if (!input.items) { missingFields.push('items'); choose('items', 'product_and_quantity_required', catalog.items.filter(row => row.status === 'enabled').map(row => ({ id: row.id, label: row.name })), catalog.truncated); }
     // Core owns effective-date/version resolution. Offer only units with an
     // actual rate for this exact product; never fall back to a configuration default.
     const pricingUnits = context.category.businessModel.pricingUnits.filter(unit => context.settings.pricing.enabledUnits.includes(unit));
@@ -129,10 +157,13 @@ export class AiQuoteCandidatePreparationService {
       (rate.pricingGroupId ?? rate.itemGroupId) === itemGroupId && rate.unit === unit));
     const unavailableRates: string[] = [];
     const lines = (input.items ?? []).map((item, index) => {
-      const matches = catalog.items.filter(row => row.status === 'enabled' && (item.itemGroupId ? row.id === item.itemGroupId : row.name === item.productName));
+      const partialName = !item.itemGroupId && catalog.queryBasis.some(page => 'name' in page.query
+        && page.query.name === item.productName && page.truncated);
+      const availableMatches = catalog.items.filter(row => row.status === 'enabled' && (item.itemGroupId ? row.id === item.itemGroupId : row.name === item.productName));
+      const matches = partialName ? [] : availableMatches;
       if (matches.length !== 1) (matches.length ? ambiguous : missingFields).push(`items.${index}`);
-      if (matches.length !== 1) choose(`items.${index}`, matches.length ? 'ambiguous_product' : 'product_not_resolved',
-        (matches.length ? matches : catalog.items.filter(row => row.status === 'enabled')).map(row => ({ id: row.id, label: row.name })));
+      if (matches.length !== 1) choose(`items.${index}`, partialName ? 'partial_name_candidates_require_explicit_id' : matches.length ? 'ambiguous_product' : 'product_not_resolved',
+        (availableMatches.length ? availableMatches : catalog.items.filter(row => row.status === 'enabled')).map(row => ({ id: row.id, label: row.name })), partialName);
       const units = matches.length === 1 ? unitsFor(matches[0].id) : [];
       if (matches.length === 1 && startAt && !units.length) unavailableRates.push(`items.${index}.pricingUnit`);
       if (!item.pricingUnit || !units.includes(item.pricingUnit)) {
@@ -185,11 +216,12 @@ export class AiQuoteCandidatePreparationService {
       reason: 'explicit_time_with_offset_required', action: 'supply_absolute_time', candidates: [] });
     // Re-read existing protected projections after config awaits. This is a
     // sequential read consistency check, NOT atomic authorization or dispatch.
-    const currentCatalog = await this.readers.catalog.read({ limit: 100 }, expectedContext), currentMembers = await this.readers.members.read(memberQuery, expectedContext);
+    const currentCatalog = await readCatalog(), currentMembers = await this.readers.members.read(memberQuery, expectedContext);
     if (JSON.stringify(currentCatalog.scope) !== JSON.stringify(scope) || JSON.stringify(currentMembers.scope) !== JSON.stringify(scope)
       || currentCatalog.audience !== catalog.audience || currentMembers.audience !== members.audience
       || JSON.stringify(currentCatalog.items) !== JSON.stringify(catalog.items)
       || JSON.stringify(currentMembers.candidates) !== JSON.stringify(members.candidates)) throw new ModelGatewayError('FORBIDDEN');
+    if (currentCatalog.configurationVersion !== catalog.configurationVersion) throw new ModelGatewayError('CONFIG_INVALID');
     const currentContext = structuredClone(await this.contexts.current(scope));
     if (!isDeepStrictEqual(currentContext, context)) throw new ModelGatewayError('CONFIG_INVALID');
     if (rates && startAt && !isDeepStrictEqual(rates, await this.readers.rates!.read(scope, context, startAt))) throw new ModelGatewayError('CONFIG_INVALID');
@@ -200,7 +232,8 @@ export class AiQuoteCandidatePreparationService {
         || !isDeepStrictEqual(current.options, bookingOptions.options) || current.truncated !== bookingOptions.truncated
         || current.nextCursor !== bookingOptions.nextCursor) throw new ModelGatewayError('FORBIDDEN');
     }
-    const selectionRevision = requestFingerprint({ scope, context, items: catalog.items, members: members.candidates,
+    const selectionRevision = requestFingerprint({ scope, context, items: catalog.items,
+      catalogBasis: catalog.queryBasis, members: members.candidates,
       pricing: rates ? { at: startAt, ratesHash: requestFingerprint(rates) } : null,
       ...(addresses ? { addresses } : {}),
       ...(bookingOptions ? { bookingOptions: bookingOptions.options, truncated: bookingOptions.truncated, nextCursor: bookingOptions.nextCursor } : {}) });

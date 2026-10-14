@@ -36,7 +36,7 @@ export function composeAiAuthorizedBusinessTools(input: {
   credentials: AiOrderRouteCredentialSource;
   core: Pick<RentalCoreService, 'listItemGroups' | 'availability' | 'getOrder' | 'getProfile'
     | 'getWorkspaceCategory' | 'getBusinessSettings' | 'listPricingGroups'
-    | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'resolvePricingGroupQuoteRequest'> & Partial<Pick<RentalCoreService, 'listInspections'>>;
+    | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'resolvePricingGroupQuoteRequest'> & Partial<Pick<RentalCoreService, 'listInspections' | 'listItemGroupsPage'>>;
   memberships: AiMembershipCandidateReadPort;
   business: Pick<RentalBusinessService, 'createQuote' | 'getQuote' | 'tenantReadiness'> & Partial<Pick<RentalBusinessService, 'normalizeQuoteInput' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>;
   reports: Pick<RentalWorkspaceReportRepository, 'getOperationReport'>;
