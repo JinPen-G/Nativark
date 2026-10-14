@@ -330,6 +330,9 @@ export function composeStoredInspectionRecognitionRuntime(input: StoredInspectio
   taskPolicies?: StaffInspectionTaskPolicyOptions) {
   const dependencies = storedInspectionDependencies(input);
   return { application: new InspectionRecognitionTaskApplication(dependencies),
+    // Human editing/preparation/original receipt lookup uses the SAME current
+    // Guard and controlled file runtime, without reopening a model task host.
+    staffRequests: new StaffInspectionRequestFactory(dependencies.inspection),
     ...(taskPolicies?.enabled === true ? { taskPolicies: composeStaffInspectionTaskPolicies(dependencies, taskPolicies) } : {}) };
 }
 
@@ -343,8 +346,10 @@ export class InspectionRecognitionTaskModule {
     const services = composeStoredInspectionRecognitionRuntime(options.dependencies, options.taskPolicies);
     return { module: InspectionRecognitionTaskModule, controllers: [],
       providers: [{ provide: InspectionRecognitionTaskApplication, useValue: services.application },
+        { provide: StaffInspectionRequestFactory, useValue: services.staffRequests },
         ...(services.taskPolicies ? [{ provide: AI_STAFF_INSPECTION_TASK_POLICIES, useValue: services.taskPolicies }] : [])],
-      exports: [InspectionRecognitionTaskApplication, ...(services.taskPolicies ? [AI_STAFF_INSPECTION_TASK_POLICIES] : [])] };
+      exports: [InspectionRecognitionTaskApplication, StaffInspectionRequestFactory,
+        ...(services.taskPolicies ? [AI_STAFF_INSPECTION_TASK_POLICIES] : [])] };
   }
   /** Explicit server DI, never imported by the production root automatically. */
   static registerHttp(dependencies: InspectionRecognitionTaskDependencies): DynamicModule {

@@ -226,3 +226,11 @@ Node DATABASE_URL 固定 mysql://offline:offline@127.0.0.1:1/rental_os_offline�
 一次inline沿原media初始化（仅内存提取、不注册或改tests），实际staff Auth/Guard/冻结媒体/原新UUID Task：持久plan revision递增并停用后app.readCreation仍observed同task；原create/start拒绝；额外taskId字段AI_INVALID_INPUT；当前staff撤权拒绝。附件bytes读取次数和Task数量未增加，provider sends0，旧expectedRevision未改。完成标记 `smoke=passed; actual staff app original UUID receipt readable after plan revision/disable; no bytes/task writes; live create/start denied; forged ref/revocation denied; no provider sends`，exit0。必要strict noEmit1129files、0diagnostics/exit0，diff check0，无新增/修改测试脚本/fixture。该正向是实际原metadata收据，不是完整识别/账本/候选保存链，DB/对象来源仍原明确离线替身，不声称真库/设备。
 
 保存后draft revision的原result-save-receipt/readReview路径不变，不把只读Task receipt拼成旧Gateway执行宿主。原sourceEvidence需要原artifact/usage/当前文件和正式terminal授权，unknown无payload仍保留；正式存储/config/价格/能力依赖未齐时按真实来源拒绝，不新ID修复。
+
+### 20261014 原存储型识别根的人类办理供应收口
+
+安全快进固定1542f0044e700622d9f8b96440573960000e2407；保留在途本线inspection-recognition-task.application.ts修改，未同步活动HEAD。原stored根已有application/policies，现同时返回原StaffInspectionRequestFactory为staffRequests，并在registerStored显式provider/export该factory。其实际templates/drafts/editHumanReview/readRecognitionSaveReview/readSubmissionReview仍原服务，复用同一受控ObjectReader/FileStorageRuntime、Guard、Core及原inspection提交依赖。人工处理不必重开Gateway宿主，不新增DTO/HTTP/自动提交/替代草稿状态机；默认关闭空module不变。
+
+一次直接inline调用actual stored root.staffRequests.withRequest与原inspection-persistent显式事务/身份替身：当前模板→创建人工草稿mileage42→原editHumanReview更正43→当前review读回→原readSubmissionReview准确not_prepared，receipt读取不增加operation、不调业务提交或模型/对象字节；withRequest关闭后templates.read ACCESS_DENIED。完整完成标记 `smoke=passed; stored root supplies actual staff human create/edit/review/original receipt service; no task host/bytes/business submit; private request closed`，exit0。最初内联误用review.items导致TypeError/exit1，按真实review.fields修正内联同场景复验，生产源码未迁就错误断言。
+
+必要原API strict noEmit1129files、0diagnostics/exit0，diff check0；源码在恢复时与该验证一致，没有为新数字扩大回归。无tests/fixture/脚本新增或修改。此正向证据为人工草稿/原收据消费与默认供应，不是成功识别、候选保存、签名/原Core正式提交验收。原业务提交只有提供真实OriginalInspectionApplication依赖并满足当前订单/阶段/单allocation/签名/模板/证据条件时可用，多allocation仍manual_review_only；unknown仅原键核对，不能自动采用或重派。
