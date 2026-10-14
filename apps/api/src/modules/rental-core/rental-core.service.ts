@@ -118,7 +118,8 @@ import { effectiveExtensionRule, effectiveNoShowRule, effectiveUnpaidHoldRule, i
 import { redactDeliveryAddressPhone } from "./rental-delivery-address-privacy";
 import { carrierSerializedCapacityConflict, carrierShipmentInventoryMutationBlocked, rentalOrderDueAt, shiftedCarrierDueAt } from "./rental-carrier-shipment";
 import { RentalFundingService } from "./rental-funding.service";
-import { RentalCoreConfigRepository, type RentalConfigStore, type RentalConfigTx } from "./rental-core-config.repository";
+import { RentalCoreConfigRepository, parseRentalItemGroupPageQuery, type RentalConfigStore, type RentalConfigTx,
+  type RentalItemGroupPageQuery, type RentalItemGroupPage } from "./rental-core-config.repository";
 import { lockActiveCategoryBinding, type CategoryWriteBinding } from "./category-active-write";
 import { requestFingerprint } from "./rental-idempotency.repository";
 import type { ApprovedSettingsNotifications, NotificationSettingsPreview, VersionedBusinessSettings } from "./approved-settings-change.ports";
@@ -1062,6 +1063,17 @@ export class RentalCoreService implements OnModuleInit, OnApplicationBootstrap {
     return result;
   }
   listItemGroups(tenantId: string) { return this.state(tenantId).itemGroups.map((group) => this.publicItemGroup(group)); }
+  /** Minimal persisted read port for bounded consumers. Existing cached/manual
+   * list and all pricing/write semantics remain unchanged. No fallback scan. */
+  async listItemGroupsPage(tenantId: string, value: RentalItemGroupPageQuery): Promise<RentalItemGroupPage> {
+    const query = parseRentalItemGroupPageQuery(value), workspaceId = this.workspaceOf(tenantId);
+    if (!this.configStore.listItemGroupsPage) throw new ServiceUnavailableException('商品持久分页读取不可用');
+    const result = structuredClone(await this.configStore.listItemGroupsPage(tenantId, workspaceId, query));
+    if (this.workspaceOf(tenantId) !== workspaceId || result.rows.length > query.limit
+      || result.rows.some(row => row.tenantId !== tenantId) || result.source !== 'persisted_workspace_configuration')
+      throw new ConflictException('商品分页读取来源变化');
+    return { ...result, rows: result.rows.map(row => this.publicItemGroup(row)) };
+  }
 
   listPricingGroups(tenantId: string) { return this.state(tenantId).pricingGroups; }
 

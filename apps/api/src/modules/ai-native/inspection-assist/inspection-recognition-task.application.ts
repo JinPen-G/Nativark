@@ -16,14 +16,28 @@ import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.rep
 import type { TaskModelHostDependencies } from '../runner/model-task-host.composition';
 import { originalIdentityHash } from '../task-request/original-request.authority';
 import { InspectionActionAuthority } from './inspection-action.authority';
-import { StaffInspectionRequestFactory } from './inspection-assist.composition';
+import { StaffInspectionRequestFactory, type PersistedInspectionTaskHostDependencies } from './inspection-assist.composition';
 import { inspectionTargetSchema, inspectionId } from './inspection-assist.validation';
 import { INSPECTION_RECOGNITION_TASKS, InspectionRecognitionTaskController } from './inspection-recognition-task.controller';
+import type { PrismaService } from '../../database/prisma.service';
+import type { TenantIntegrationService } from '../../integrations/tenant-integration.service';
+import { FileStorageRuntimeService } from '../../integrations/file-storage.runtime.service';
+import { TenantInspectionObjectReader } from '../../integrations/inspection-object-reader';
+import { composeStaffInspectionTaskPolicies, AI_STAFF_INSPECTION_TASK_POLICIES,
+  type StaffInspectionTaskPolicyOptions } from '../staff-inspection-task-policy.composition';
 
 const referenceSchema = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId,
   inputId: inspectionId, expectedRevision: z.number().int().min(1).max(999) }).strict();
 type Reference = z.infer<typeof referenceSchema>;
-type Model = Omit<TaskModelHostDependencies, 'credentials' | 'kind' | 'task' | 'inputSource'>;
+type LegacyModel = Omit<TaskModelHostDependencies, 'credentials' | 'kind' | 'task' | 'inputSource'>;
+type PersistentModel = Omit<PersistedInspectionTaskHostDependencies, 'credentials' | 'task'>;
+type Model = LegacyModel | PersistentModel;
+export type StoredInspectionRecognitionDependencies = {
+  db: PrismaService; integrations: TenantIntegrationService;
+  inspection: Omit<InspectionRecognitionTaskDependencies['inspection'], 'db' | 'storage' | 'recognitionResults' | 'audioRecognitionResults'>;
+  model: PersistentModel; audioModel?: PersistentModel;
+  limits: InspectionRecognitionTaskDependencies['limits']; mediaKind?: 'image' | 'audio'; enabled: boolean;
+};
 export type InspectionRecognitionTaskDependencies = {
   inspection: ConstructorParameters<typeof StaffInspectionRequestFactory>[0];
   model: Model;
@@ -61,19 +75,28 @@ export class InspectionRecognitionTaskApplication {
         || audio.scene.code !== audio.gatewayScene.sceneCode || audio.scene.code === dependencies.model.scene.code
         || audio.gatewayScene.routeScene !== 'vision') throw unavailable();
     }
-    this.server = { ...dependencies, inspection: { ...dependencies.inspection, recognitionResults: {
+    const persistent = 'gateway' in dependencies.model;
+    if (persistent && ('runtime' in dependencies.model || 'financialEvidence' in dependencies.model || 'priceVersion' in dependencies.model
+      || dependencies.model.gateway.routeScene !== 'vision' || dependencies.model.gatewayScene.routeScene !== 'vision')) throw unavailable();
+    if (dependencies.audioModel && ('gateway' in dependencies.audioModel) !== persistent) throw unavailable();
+    if (dependencies.audioModel && 'gateway' in dependencies.audioModel && ('runtime' in dependencies.audioModel
+      || 'financialEvidence' in dependencies.audioModel || 'priceVersion' in dependencies.audioModel
+      || dependencies.audioModel.gateway.routeScene !== 'vision')) throw unavailable();
+    this.server = { ...dependencies, inspection: { ...dependencies.inspection, recognitionResults: !persistent ? {
       db: dependencies.model.db, auth: dependencies.model.auth, subscriptions: dependencies.model.subscriptions,
-      clock: dependencies.model.clock, financialEvidence: dependencies.model.financialEvidence,
+      clock: dependencies.model.clock, financialEvidence: (dependencies.model as LegacyModel).financialEvidence,
       policy: { kind: dependencies.mediaKind ?? 'image', sceneCode: dependencies.model.gatewayScene.sceneCode,
-        maxOutputTokens: dependencies.model.gatewayScene.maxOutputTokens } },
-      audioRecognitionResults: dependencies.audioModel ? {
+        maxOutputTokens: dependencies.model.gatewayScene.maxOutputTokens } } : undefined,
+      audioRecognitionResults: dependencies.audioModel && !persistent ? {
         db: dependencies.audioModel.db, auth: dependencies.audioModel.auth, subscriptions: dependencies.audioModel.subscriptions,
-        clock: dependencies.audioModel.clock, financialEvidence: dependencies.audioModel.financialEvidence,
+        clock: dependencies.audioModel.clock, financialEvidence: (dependencies.audioModel as LegacyModel).financialEvidence,
         policy: { kind: 'audio', sceneCode: dependencies.audioModel.gatewayScene.sceneCode,
           maxOutputTokens: dependencies.audioModel.gatewayScene.maxOutputTokens } } : undefined },
       model: { ...dependencies.model, host: structuredClone(dependencies.model.host),
+        ...('gateway' in dependencies.model ? { gateway: { ...dependencies.model.gateway, adapters: [...dependencies.model.gateway.adapters] } } : {}),
         scene: structuredClone(dependencies.model.scene), gatewayScene: structuredClone(dependencies.model.gatewayScene) },
       ...(dependencies.audioModel ? { audioModel: { ...dependencies.audioModel,
+        ...('gateway' in dependencies.audioModel ? { gateway: { ...dependencies.audioModel.gateway, adapters: [...dependencies.audioModel.gateway.adapters] } } : {}),
         host: structuredClone(dependencies.audioModel.host), scene: structuredClone(dependencies.audioModel.scene),
         gatewayScene: structuredClone(dependencies.audioModel.gatewayScene) } } : {}), limits };
   }
@@ -103,7 +126,7 @@ export class InspectionRecognitionTaskApplication {
             const model = this.server.audioModel;
             audioInspection = new StaffInspectionRequestFactory({ ...this.server.inspection,
               audioRecognitionResults: undefined,
-              recognitionResults: { db: model.db, auth: model.auth, subscriptions: model.subscriptions,
+              recognitionResults: 'gateway' in model ? undefined : { db: model.db, auth: model.auth, subscriptions: model.subscriptions,
                 clock: model.clock, financialEvidence: model.financialEvidence,
                 policy: { kind: 'audio', sceneCode: model.gatewayScene.sceneCode,
                   maxOutputTokens: model.gatewayScene.maxOutputTokens } } }).open({
@@ -153,7 +176,7 @@ export class InspectionRecognitionTaskApplication {
       return { context: after.context, inputHash: requestFingerprint({ version: 'inspection-task-original-1', reference,
         frozen: media.input, scene: model.scene, policy: { revision: row.revision, allowedTools: row.allowedTools,
           limits: row.limits, expiresAt: row.expiresAt.toISOString() }, entitlement, limits,
-        gatewayScene: model.gatewayScene, priceVersion: model.priceVersion }),
+        gatewayScene: model.gatewayScene, priceVersion: 'gateway' in model ? model.gateway.callPriceVersion : model.priceVersion }),
         creationKey: `inspection:${requestFingerprint({ scope: context.scope, actor: context.actor,
           audience: context.audience, draftId: reference.draftId, inputId: reference.inputId })}` };
     };
@@ -167,11 +190,16 @@ export class InspectionRecognitionTaskApplication {
     const existing = async () => {
       const receipt = await creation.readCreation(await command());
       if (receipt.state !== 'observed' || !receipt.task) throw unavailable();
+      const task = { taskId: receipt.task.taskId, runId: receipt.task.runId,
+        registrationRef: `inspection-model:${requestFingerprint({ inputId: reference.inputId })}`, limits };
+      const query = { taskId: receipt.task.taskId, runId: receipt.task.runId };
+      if ('gateway' in model) {
+        const root = await inspection.recognitionPersistedTaskHost(reference, { ...model, task });
+        return { root, inspection: root.inspection, query };
+      }
       const root = await inspection.recognitionTaskHost(reference, { ...model, credentials,
-        inputSource: inspection.recognitionResults.inputSource(reference),
-        task: { taskId: receipt.task.taskId, runId: receipt.task.runId,
-          registrationRef: `inspection-model:${requestFingerprint({ inputId: reference.inputId })}`, limits } });
-      return { root, query: { taskId: receipt.task.taskId, runId: receipt.task.runId } };
+        inputSource: inspection.recognitionResults.inputSource(reference), task });
+      return { root, inspection, query };
     };
     return { creation, command, existing };
   }
@@ -197,6 +225,27 @@ export class InspectionRecognitionTaskApplication {
     return this.request(request, reference, async bound => {
       const { root, query } = await bound.existing();
       return root.application.reconcile(query, signal);
+    });
+  }
+  /** Server consumer only. The task identity is taken from the ORIGINAL
+   * creation receipt, not a client-selected task or a second financial source. */
+  readResultReview(request: Request, reference: unknown, resultId: unknown) {
+    const result = inspectionId.safeParse(resultId);
+    if (!result.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return this.request(request, reference, async (bound, original) => {
+      const { inspection, query } = await bound.existing();
+      return inspection.readRecognitionReview({ ...original, taskId: query.taskId, resultId: result.data });
+    });
+  }
+  /** Explicit evidence save, never field adoption or Core submission. Lost
+   * replies are recovered by the original result-save receipt in staff service. */
+  saveResultReview(request: Request, reference: unknown, value: unknown) {
+    const command = z.object({ resultId: inspectionId, operationId: inspectionId }).strict().safeParse(structuredClone(value));
+    if (!command.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return this.request(request, reference, async (bound, original) => {
+      const { inspection, query } = await bound.existing();
+      return inspection.saveRecognitionReview({ ...original, taskId: query.taskId,
+        resultId: command.data.resultId, operationId: command.data.operationId });
     });
   }
   readInput(request: Request, reference: unknown) {
@@ -253,9 +302,42 @@ export class InspectionRecognitionTaskApplication {
   }
 }
 
+/** Formal storage producer -> original staff application -> single persisted
+ * Gateway. Construction is inert; no generic signed-URL fetch or fake bytes. */
+function storedInspectionDependencies(input: StoredInspectionRecognitionDependencies): InspectionRecognitionTaskDependencies {
+  if (input?.enabled !== true || input.model.db !== input.db || input.audioModel && input.audioModel.db !== input.db
+    || typeof input.db?.fileAsset?.findFirst !== 'function' || typeof input.db?.rentalOrder?.findFirst !== 'function'
+    || typeof input.integrations?.runtimeConfig !== 'function' || !('gateway' in input.model)) throw unavailable();
+  const objects = new TenantInspectionObjectReader(input.db, input.integrations);
+  const storage = new FileStorageRuntimeService(input.db, input.integrations, undefined, objects);
+  return { ...input, inspection: { ...input.inspection, db: input.db, storage } };
+}
+export function composeStoredInspectionRecognitionApplication(input: StoredInspectionRecognitionDependencies) {
+  return new InspectionRecognitionTaskApplication(storedInspectionDependencies(input));
+}
+
+/** One real file producer and the original application/policy producers. This
+ * only supplies explicit methods: no policy is issued and no task is started. */
+export function composeStoredInspectionRecognitionRuntime(input: StoredInspectionRecognitionDependencies,
+  taskPolicies?: StaffInspectionTaskPolicyOptions) {
+  const dependencies = storedInspectionDependencies(input);
+  return { application: new InspectionRecognitionTaskApplication(dependencies),
+    ...(taskPolicies?.enabled === true ? { taskPolicies: composeStaffInspectionTaskPolicies(dependencies, taskPolicies) } : {}) };
+}
+
 /** Explicit DI only. No HTTP, root module, polling loop or default enablement. */
 @Module({})
 export class InspectionRecognitionTaskModule {
+  static registerStored(options: { enabled?: boolean; dependencies?: StoredInspectionRecognitionDependencies;
+    taskPolicies?: StaffInspectionTaskPolicyOptions } = {}): DynamicModule {
+    if (options.enabled !== true) return { module: InspectionRecognitionTaskModule, controllers: [], providers: [], exports: [] };
+    if (!options.dependencies) throw unavailable();
+    const services = composeStoredInspectionRecognitionRuntime(options.dependencies, options.taskPolicies);
+    return { module: InspectionRecognitionTaskModule, controllers: [],
+      providers: [{ provide: InspectionRecognitionTaskApplication, useValue: services.application },
+        ...(services.taskPolicies ? [{ provide: AI_STAFF_INSPECTION_TASK_POLICIES, useValue: services.taskPolicies }] : [])],
+      exports: [InspectionRecognitionTaskApplication, ...(services.taskPolicies ? [AI_STAFF_INSPECTION_TASK_POLICIES] : [])] };
+  }
   /** Explicit server DI, never imported by the production root automatically. */
   static registerHttp(dependencies: InspectionRecognitionTaskDependencies): DynamicModule {
     if (dependencies.enabled !== true) throw unavailable();

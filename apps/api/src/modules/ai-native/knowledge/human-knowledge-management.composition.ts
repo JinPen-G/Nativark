@@ -7,8 +7,11 @@ import { requiredPort, unavailable } from './knowledge-errors';
 import { draftInput, id, mutationInput, parse } from './knowledge-validation';
 import type { FileUploadSessionSummary } from '@rental-os/shared';
 import type { HumanKnowledgeIndexService } from './human-knowledge-index.service';
+import type { KnowledgePolicyManagementApplication } from './knowledge-policy-management.composition';
 
-export type HumanKnowledgeManagementDependencies = Omit<KnowledgeFileApplicationDependencies, 'credentials' | 'policyManagement' | 'memory'>;
+export type HumanKnowledgeManagementDependencies = Omit<KnowledgeFileApplicationDependencies, 'credentials' | 'memory'>;
+type PolicyAction = keyof KnowledgePolicyManagementApplication;
+const policyActions: readonly PolicyAction[] = ['prepareTarget', 'target', 'bindTarget', 'read', 'prepare', 'preparation', 'commit', 'operation'];
 export type HumanKnowledgeManagementHttpRequest = { headers: { authorization?: unknown } };
 export type HumanKnowledgeManagementRequest = {
   [K in keyof AiKnowledgeManagementHttpResponsesDraft]: (value: unknown) => Promise<AiKnowledgeManagementHttpResponsesDraft[K]>;
@@ -18,6 +21,8 @@ export type HumanKnowledgeManagementRequest = {
   requestIndex(value: unknown): ReturnType<HumanKnowledgeIndexService['request']>;
   resumeIndex(value: unknown): ReturnType<HumanKnowledgeIndexService['resume']>;
   indexOperationStatus(value: unknown): ReturnType<HumanKnowledgeIndexService['operationStatus']>;
+  /** Explicit server management only, never a model tool or HTTP permission. */
+  managePolicy(action: PolicyAction, value: unknown): Promise<Awaited<ReturnType<KnowledgePolicyManagementApplication[PolicyAction]>>>;
   close(): void;
 };
 
@@ -52,6 +57,7 @@ export class HumanKnowledgeManagementRequestFactory {
     requiredPort(dependencies?.db?.aiKnowledgeActionPolicy, ['findUnique']);
     requiredPort(dependencies?.db?.aiKnowledgePolicyManagementOperation, ['findFirst']);
     requiredPort(dependencies?.integrations, ['runtimeConfig', 'assertEnabledInTransaction']);
+    if (dependencies.policyManagement?.enabled === true) requiredPort(dependencies.policyManagement.guard, ['canActivate']);
   }
 
   open(request: HumanKnowledgeManagementHttpRequest): HumanKnowledgeManagementRequest {
@@ -63,9 +69,18 @@ export class HumanKnowledgeManagementRequestFactory {
       if (authorization === undefined) return unavailable();
       return { authorization, requestId, audience: 'operator' as const };
     } };
-    const { db, auth, clock, integrations, objectIO } = this.dependencies;
+    const { db, auth, clock, integrations, objectIO, policyManagement: policyOptions } = this.dependencies;
+    // The policy factory owns a short-lived copy of credentials. Keep its Auth
+    // reads bound to the parent request too, including close() during an await.
+    const requestAuth: typeof auth = { resolveAccessContext: async (...args) => {
+      await credentials.current();
+      const current = await auth.resolveAccessContext(...args);
+      await credentials.current();
+      return current;
+    } };
     // File access carries a session too; never reuse a runtime bound to another request.
-    const { management, uploads, index } = composeKnowledgeFileApplication({ db, auth, clock, integrations, objectIO, credentials });
+    const { management, uploads, index, policyManagement } = composeKnowledgeFileApplication({ db, auth: requestAuth, clock, integrations, objectIO, credentials,
+      ...(policyOptions?.enabled === true ? { policyManagement: policyOptions } : {}) });
     const uploadSession = (result: FileUploadSessionSummary & { documentId: string }) => ({
       sessionId: result.sessionId, fileAssetId: result.fileAssetId, provider: result.provider,
       mode: result.mode, status: result.status, expiresAt: result.expiresAt,
@@ -81,6 +96,14 @@ export class HumanKnowledgeManagementRequestFactory {
       return response(command.operationId, await management[action](command));
     };
     return {
+      managePolicy: async (action, value) => {
+        if (!policyActions.includes(action) || !policyManagement) return unavailable();
+        const command = structuredClone(value);
+        // The caller supplies only the existing management command; credentials
+        // come from this request and close() invalidates subsequent operations.
+        const current = await credentials.current();
+        return policyManagement[action](current, command);
+      },
       indexStatus: value => index.status(parse(z.object({ documentId: id }).strict(), value).documentId),
       requestIndex: value => index.request(value),
       resumeIndex: value => index.resume(value),

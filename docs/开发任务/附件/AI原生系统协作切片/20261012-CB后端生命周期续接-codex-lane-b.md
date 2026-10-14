@@ -84,3 +84,127 @@ Node DATABASE_URL 固定 mysql://offline:offline@127.0.0.1:1/rental_os_offline�
 精确接入边界：服务器消费 factory 已接原知识/记忆授权、file runtime、索引与材料服务，但索引 generation 查询 HTTP 仍无 shared/Guard 合同。本线不改 `scenes/original-scene-knowledge.ts`：其现有 collect→原 publisher 保持；若主线要在场景冻结时指定 preferenceKinds，需在该原 collect 调用 `services.preparation.collect(..., {includePreferences,maxPreferences,preferenceKinds})` 的可信服务器配置位置传递，不从模型或任意 caller scope 取值。本次验证了原消费服务材料，不冒称该场景新选择策略已发布或完整财务/模型链新验。
 
 员工正式新任务动作政策/partial-safe 公共结果、真实受控 ObjectReader/来源部署、多 allocation 原办理能力仍为前文准确硬依赖。已有图片/语音 Task/Gateway 输入、文件绑定与预算单账全部保留，不用文本桩声称识别；缺来源明确拒绝。仅当前合法人工更正与原收据消费已接，原签名/资格/责任/费用不在此层决策。真实外部存储/模型/设备/MySQL均未验，原 AIN 完成率不变。
+
+## 20261013 持久媒体 Gateway 正式依赖装配包
+
+固定基线 `b0ed18f3c3b4c8ba40a220b93284c494d9a8c24e`，tracked/index 干净、无 merge/cherry 状态，旧 output 全保留。只认领 inspection-assist 两个组合文件及 human-knowledge.module，不触碰公共 Gateway/runner/model-input/scenes/Auth/shared/schema 或页面。
+
+### 实际功能与固定提交
+
+- `8f0eb162d9f9d69919a69d38325f4e2a15e662cb`：原 `InspectionRecognitionTaskApplication` 支持显式 persistent model（gateway 参数）与旧 injected-runtime 两条互斥服务器路径；image/audio 均不双跑。original task ID/run ID 从 `creation.readCreation` 收据取得，原 `StaffInspectionRequestFactory.recognitionPersistedTaskHost` 再逐动作 read_metadata 复核 task/inputRef/scene/run/当前主体，当前字段/模板/附件/hash 仍经原 `recognition.gatewayMedia`。参数在等待前快照，拒绝混入 credentials/runtime/priceVersion/另一个 financialEvidence 或 caller media。
+- 同一原 `composePersistedTaskCallGateway` 接当前 media.resolve/assertCurrent；vision route 必需。其 readDispatch 财务证据同时用于原 recognition-result 消费/inputSource，不另造财务账本，不自发派发许可。原实际 runner 继续消费，Provider 与 Runtime 边界仍独立。公共组合的 `composePersistedCallTaskModelHost` 已开放媒体依赖；本线使用它内部同一 Gateway+原 composeTaskModelHost 分两步，以便将同一 readDispatch 绑定原候选/后继输入消费者，不复制派发器。
+- 原 app 新服务器 `readResultReview(request,reference,resultId)` 从原任务收据派生 taskId，接同财务源的原结果→当前人工审阅。仅服务器方法，不扩 HTTP/shared。after save 的旧 revision、未知结果等仍按原政策拒绝，不以构建宿主成功冒充识别或审批完成。原人工更正/提交/收据入口沿已整合版本保留，不重做。
+- `composeStoredInspectionRecognitionApplication` 和 opt-in `InspectionRecognitionTaskModule.registerStored` 接原 `TenantInspectionObjectReader`→`FileStorageRuntimeService`→原附件业务 ACL/版本/hash/有界 bytes；默认模块空 provider，无 HTTP/worker/root 注册。显式启用需完整原 PrismaService/TenantIntegrationService/model/guard，构造不读对象、secret 或配置；没有任意 URL/fetch 下载或测试字节默认 adapter。
+- `78d8ef5e260418aaaf68dbc5613c00585ba62c5d`：`HumanKnowledgeModule.registerConsumptionRequests` 将原请求消费 factory 显式导出，不要求 HTTP 注册。默认空；当前请求 open→原 collectInput/revalidateInput→close，知识/确认偏好沿同一正式政策/file runtime/consent 服务。主线自有 scenes 的 preferenceKinds 参数接入不在本线双写。
+
+### 一次直接内联冒烟与必要类型（无脚本新增）
+
+入口：`node -r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs -e <本对话内联媒体/知识场景>`；原 prisma-offline-preload 经 NODE_OPTIONS，固定无效 DB URL，write-root 为本树，audit=`output/inspection-lb05-tmp/20261013-persistent-media.audit`，TEMP/TMP 同本树目录，禁 compile cache。只是同场景失败修正/相关复验，不新增或改 tests/fixtures。
+
+最终显式完成标记：`smoke=passed; persisted staff media host assembled with real services and explicit offline storage/db doubles; zero provider sends; knowledge withdrawal denied`，exit 0。调用实际 staff request factory/AuthService/Guard、inspection 冻结材料/当前附件验证、持久 Gateway 与实际模型 host；数据库及 object stream 为原 fixture 的明确替身。原 scene/正式 plan 条件下创建 queued 原任务，未置备完整执行依赖的新任务启动拒绝，provider sends=0；拒绝他 task、请求关闭后重用、混入旧 runtime、缺正式存储依赖；知识 collect/revalidate 成功后撤回旧包拒绝。不是实际媒体派发、模型识别准确性或财务成功测试。
+
+失败历史真实保留：原请求冒烟漏 requestId，factory正确 ACCESS_DENIED；类型首轮 priceVersion 在持久分支不存在，修为原 gateway.callPriceVersion；新增原结果消费联合返回被 TS 推为 unknown，按互斥分支明确返回修正，未放宽类型。直接内联创建时原串行事务替身出现嵌套等待，Node 曾 exit0 但没有完成标记，**该次不算通过**；沿已有用例的 AsyncLocalStorage 事务替身适配并加45秒 watchdog 后复验正常完成。PowerShell双引号展开 `$transaction` 曾导致纯命令SyntaxError，改单引号字面传递后复验；不改生产事务、fixture或授权绕过。
+
+最后必要 compiler API noEmit 根 inspection-recognition-task.application/human-knowledge.module，原 API strict 配置、内存 shared源码/本树私有Prisma paths：1171 files、0 diagnostics、exit 0；diff check exit 0。没有共享生成物修改、迁移执行、全量回归或新的测试文件。正向为离线服务装配/原创建，非真实 MySQL/对象存储/HTTP/供应商/设备验收。
+
+### 精确公共依赖与下一接入
+
+1. 主线显式服务器提供 model.gateway 的 secrets/platformProfileId/vision route/callPriceVersion/adapters/audit，原 scene/host/limits/auth/subscriptions/db/guard。参考 `StoredInspectionRecognitionDependencies` 与 `PersistedInspectionTaskHostDependencies`；调用输入仍只有原 reference，不能让客户端指定 taskId、scope、模型或 URL。settings/权益/预算/当前工具政策仍原服务复验。
+2. 当前持久 capability producer `createPersistedTextCapabilityEvidence`（prisma-text-capability-receipt.repository.ts）支持 text/streaming/vision/structured_output/tools，**audio 仍 fail closed**。audio 服务器路径已能装配不代表正式音频能力证据已齐；音频 proof producer/feature验证由主线补公共能力，不在本线造 verified:true。
+3. 新原识别 task 需要合法 task-action-policy 与 scene/plan/execution 配置；代码不默认发布政策。public partial-safe 结果/截断 JSON 仍缺，unknown 无候选，不能换Provider/ID重发。实际 platform/BYOK secret/config/能力、预算call定价与额度缺失均拒绝。
+4. 正式对象存储 runtimeConfig、合法 upload/fileAsset/binding、当前附件版本/hash 与租户订单资源须真实存在；本线提供实际原生产者组合，不声明真实读取已验。无来源时拒绝，原人工填单不受AI开启失败替代。
+5. 已保存候选/人工检查仍走原 result-save/edit/submission/receipt；读 result 的 reference 修订必须仍合法，历史保存后变更/提交终态不能靠重建旧活跃宿主放行。更窄历史读取政策和 partial-safe 合同需主线明确，当前保持拒绝。原确认偏好/知识撤回复验与模块服务器出口已接，不私造索引HTTP。
+
+本包可做正式依赖装配与消费已交；未连接真实 DB/DNS/HTTP/模型/支付/对象存储，未读.env/安装/启服务/共享生成/迁移/main/push/部署/生产启用。无完成率或整项验收声明，中央记录由主线整合固定提交后更新。
+
+## 20261013 CB07/CB10 原结果到人工审阅消费
+
+原树 HEAD `62adf34a852fcdc6d7038bf69cf796e7f43de98b`，tracked/index 干净。按负责人授权只 merge 固定 `c07bf52f35959fd1e81386d5622e8a1e3ac06af1`，无冲突，合并点 `4f5b26a62defe28082521af09fe0ac027f1e8b64`；62ad/bfd 及原输出全保留，不追活动 HEAD。公共目录变化仅来自该授权 merge，本线施工仍只 knowledge/inspection-assist。
+
+- `9a6b0cc787da230ac8344ac082701ffffe1df846`：原 result service 新服务器 `readEvidence` 复用同一 collect 全链，返回 recognition 与每个有界候选的 sourceEvidence；定位 position 仍原验证过的 image region/audio span，contentHash/mediaType/sizeBytes 取原冻结媒体而非模型 JSON。当前文件/模板/原 invocation/持久结果/用量证据复验不变。unknown/failed 不返回候选依据，原 JSON/template/资源约束仍拒绝非法字段，不另造解析器。
+- 同提交的 `readRecognitionReview` 将同一依据和人工审阅联读，两次指纹比较；原 Controller result-read 仍只返回旧 recognition 合同，不扩 shared/HTTP。服务器实际 app 新 `saveResultReview(request,reference,{resultId,operationId})` 从原 creation 收据派生 taskId，接同财务证据的原 saveRecognitionReview。只保存候选证据，不人工采用、不提交 Core；丢应答继续原 operation/result-save-receipt，不换键重做。人工 edit/prepare/submit/readReceipt 沿既有代码复用；当前 reference 失效时仍拒绝，未伪造历史执行许可。
+- `e76e15891efe1954604eadacdd445a1e1474092e`：实际 `composeKnowledgeFileApplication.sceneKnowledge(includePreferences, preferenceKinds?)` 现在把可信服务器选择传给主线已实现的原 `composeOriginalSceneKnowledge.collect`→preparation→原冻结 publisher。只支持原 preferenceSchema 三类，重复/未知 kinds 或关闭偏好却提供 kinds 拒绝；参数拷贝冻结，晚改宿主数组不改变材料。没有第二知识系统、输入存储/发送器或新的公共 DTO，也没修改主线 scenes 文件。
+
+### 快检与未验
+
+直接入口 `node -r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs -e <本对话内联单场景>`：actual 知识/consent/index/inspection 服务与原事务/身份替身；已发布知识+明确 locale 偏好 collect/revalidate 成功，撤销偏好后旧材料拒绝、withdraw 后原知识包拒绝；员工原人工 42→43 review 实际读回，原 receipt not_prepared 查询零新增 operation，撤权后 review 拒绝；缺原持久识别来源 readEvidence 拒绝。正式知识组合以空持久动作政策验证 collect 关闭，同时验证 sceneKnowledge 选择快照/重复及冲突参数拒绝。最终完成标记 `smoke=passed; actual material/consent revocation and human review/receipt reads; missing persisted recognition refused; no model dispatch`，exit 0。补同场景组合入口断言后相关复验同结果，不新增测试脚本/fixture、不扩矩阵；非 node:test 不编造 pass/skip 总数。
+
+必要 strict compiler API noEmit 根 inspection-recognition-task.application 与 knowledge-file.composition，源码映射原 private Prisma/shared，1164 files、0 diagnostics、exit 0；diff check exit 0。最初工具内存未保留 env 字符串形成 undefinednode 命令，exit1 未执行验证；重设原边界后检查 exit0，未假称首轮通过。DATABASE_URL 固定无效离线地址，原 prisma guard+local runtime，write-root/audit/TEMP/TMP 全本树，audit=`output/inspection-lb05-tmp/20261013-result-consumption.audit`。
+
+本次没有新执行真实/替身模型产生成功持久结果，所以新增 sourceEvidence 正向输出/任务 app saveResultReview 的完整 dispatch→计量→结果→保存正链只获必要类型与复用实现接线证据，**未用人工候选或零发送构造冒称该链已验**。媒体 readEvidence 缺来源关闭、人工 review/receipt 和知识撤销为此次行为证据。未新增或修改任何 tests/fixtures/UI；noEmit不等于API构建/真实数据库/存储/供应商/设备验收。
+
+主线仍需正式新 task/step 动作政策、真实 file runtime/附件绑定、平台/BYOK能力/价格预算、audio官方 proof 和 partial-safe结果合同；`prisma-text-capability-receipt.repository.ts` 的音频仍关闭，未知不恢复候选、不文本替代音频。保存后 reference 修订失效时应走原 staff result-save-receipt/readReview，不能再创建新识别调用修复未知。主线 preferenceKinds 原消费已同步，本线 factory传参现闭合，仍需主线选择受控服务器政策而非模型/客户声明。
+
+源码包固定提交以上两项，记录提交 SHA 由本轮 Git/对话给出；仅本树提交，无生产启用、外联、安装、迁移、shared生成、push/main或完成率调整。
+
+## 20261013 追加队列：员工审阅原收据消费
+
+从 `35a2616a` 无冲突同步固定主线 `f59ecabb41325e6553ea8c5de2b650e60cc47ef7`，合并点 `3ee8396cb0ae9d91e1893c71856fe8e2cb268cee`。原提交和 output 保留，公共目录仅随授权 merge 同步，没有在公共目录施工。
+
+核对第一包：现有 `sceneKnowledge` 已交原 `composeOriginalSceneKnowledge` collect/revalidate/open，原冻结材料格式和主线发送前消费者继续复用，不新建平行输入格式。确认偏好选择已接；当前正式政策、文件及能力依赖缺失仍拒绝。
+
+员工 `StaffInspectionRequestFactory.open().readCurrentReview(value,true)` 改接已有 `readSubmissionReview`，不再保留只复读草稿的弱收据联读。原 submit 动作权限及收据→草稿→收据→草稿一致性均复用。返回仍是旧 review/receipt/businessActionRequested 结构，没有改变 shared/HTTP 合同；默认不查询收据、无候选采用、Core写入或unknown重试。
+
+一次直接内联 `node -r ./tests/fixtures/ai-native/lane-b-local-runtime.cjs -e <原员工审阅场景>` 调实际 factory/service 和原 inspection-persistent 显式身份/事务替身：确认两次原 receipt 读取；not_prepared 准确返回；两次收据变化时 REVISION_CONFLICT；operation 数量不变；close 后 ACCESS_DENIED。完成标记 `smoke=passed; actual staff review uses two original receipt reads; changed receipt rejected; zero writes; closed session denied`，exit0。没有新增或修改测试/fixture/脚本。必要原API strict compiler noEmit：1119 files，0 diagnostics，exit0；diff check exit0。使用本树 preload、固定无效 DATABASE_URL、write-root/audit/TEMP/TMP 全本树。没有真实MySQL/HTTP/对象存储/媒体/模型/设备验证。
+
+追加队列的事件准备、原automation输入/task创建/creation核对、人类close/feedback/operation和有界queue当前已有真实request consumer，后续仅补实际缺口，不把已存在方法重新计交付。UI目录尚需主线确认归属；本片未写页面/登录/上传链。音频proof、partial-safe、正式任务政策和真实来源仍原硬依赖，未放行或重建影子实现。
+
+### 20261013 已认领组件 WIP 安全收口
+
+主线明确允许 inspection-host 等自有组件，后又将UI优先级后置。本片仅收口已实现的原操作恢复缺口：edit/evidence reconcile 不再接受任意 found 就清 unknown；原请求副本传给宿主，返回需绑定原draftId、expectedRevision+1及当前持久草稿。复读等待后检查epoch/同一原command，hide后的迟到结果不能解锁新视图。不写pickup/return业务页或上传登录支付链。
+
+一次内联直接Node调用实际 StaffInspectionHostBinding、原inspection-persistent事务替身及真实 drafts.edit/reconcileOperation/read：编辑已经持久保存但回调拒绝→unknown；外来draft收据及宿主篡改传入副本不能解锁；原请求operationId保留；原收据恢复revision2；hide/show重新读取、dispose不更新。完成标记 `smoke=passed; actual draft edit lost reply; foreign receipt rejected; original request preserved; original receipt recovers; hide/show/dispose isolated`，exit0；无新增/修改测试脚本或fixture。原员工tsconfig noEmit（保留原依赖解析）227 files、0 diagnostics、exit0，diff check exit0。另一次额外源码paths检查228 files、1 diagnostic/exit1：shared ai-client-entry-draft-schemas.ts 的BigInt字面量与员工原ES2019目标不兼容，未修改shared或抬目标掩盖；不能把源码模式也说通过。
+
+该证据为实际组件控制器+离线事务，不是微信/真机/真实HTTP提交。后续按最新主线指令回到核心，不继续治理/UI展示。原政策、媒体持久结果正链和公共文件依赖未验口径不变。
+
+### 20261013 核心事件组合的人类资源授权接线
+
+现有HTTP HumanAutomationRequestFactory已把BusinessFailureReadAuthority交给automation；但服务器 `composeBusinessFailureAutomation` 及 `BusinessFailureEventsModule.registerAutomation` 没有传递其已有Auth/credentials/Guard/Core生产者。现改为传入实际BusinessFailureReadAuthority，复用PrismaAutomationAuthority已有current/withEvent检查；人类组合必须同时满足当前人类资源访问与独立automation主体/政策/权益/UTC限额。原独立后台AutomationFailureTasksModule调用仍可不传humanReads，由原持久automation政策负责；没有新主体、权限码或默认grant，没有新增worker或自动执行。
+
+一次直接内联 Node 冒烟实际构造服务器组合及DynamicModule，真实身份入口返回无会话：prepare在读取automation policy前拒绝，policy reads=0、writes=0。stdout `smoke=passed; actual human event composition/module enforce current identity before automation policy; no writes or task/model execution`，exit0。此证据仅失效身份的实际服务组合，不声称新的正向事件任务创建/模型链通过。必要原API strict源码paths noEmit：1021 files、0 diagnostics、exit0；diff check exit0，无新增/修改测试或fixture，离线环境同前。
+
+知识冻结消费者经当前源码核验：original-scene-model.composition 的原envelope.knowledge进入knowledge.revalidate，并通过dispatchChecks交Gateway transport前原复验；后再复验，不修改主线场景/模型输入文件。已存在链不重复包装。withdraw/consent拒绝是前包行为证据，当前仅代码核验，不声称本次新增全派发证据。正式任务动作政策/audio官方proof/partial-safe结果与真实文件/价格能力仍公共依赖；核心后续以这些精确依赖为界，不用临时政策或预填artifact造成功。
+
+### 20261013 原事件人类办理的分页消费闭环
+
+继续核实原automation.prepare/create/reconcile与review close/feedback/operation，已有原输入、原creation收据及人类操作收据接口，不重写或把列表未出现称已解决。实际 `HumanAutomationReviewService.forEvent` 先前用未逐项复验的limit+1探测行生成hasMore；现包括探测行在内全部走原read/当前资源授权、再复读一致性，拒绝超量、重复或乱序ID，仍仅返回limit项。hasMore属于存在性输出，不能因探测行不返回正文就免授权。未新增公共合同或业务操作。
+
+一次直接内联实际 HumanAutomationReviewService（明确合成DB/资源授权替身，不是正式政策生产者）：正常两项、limit1，输出一项/hasMore且探测行至少两次复读；探测行返回另一tenant后unavailable、不泄漏分页存在性。完成标记 `smoke=passed; actual review service validates and rechecks pagination sentinel; foreign sentinel rejected; no writes/tasks/model`，exit0。必要原API strict源码paths noEmit772 files、0 diagnostics、exit0，diff check0；无测试脚本/fixture变更，无新队列或任务。
+
+公共阻塞方法再次核对（只读）：`InspectionRecognitionResultService.collect/readBinding` 调 `tasks.resolveAccess(taskId,'read_step_terminal')` 和同actor/scope的invocation/accounting evidence，正式新识别任务需合法持久action policy，不用临时grant。`PrismaTextCapabilityReceiptRepository.verify`仅text/streaming/vision/structured_output/tools，缺audio挑战及持久证明生产者；`AiTaskResultProjection.status`仅succeeded/failed/unknown，unknown payload=null，缺partial-safe完整性合同不能读截断候选。真实Storage runtime/attachment绑定与Gateway配置价格权益仍按原依赖，B不修改公共模块。新增成功sourceEvidence/完整候选保存派发链依然未验，离线人类读回与原键恢复不等于正式模型/数据库/HTTP/设备验收。
+
+## 20261014 当前知识管理请求的正式政策生产消费接线
+
+固定主线631a9fec同步点为f067b11094b25db4c4b646adf0444744d5588654，保留此前所有B提交/output；公共目录仅授权merge变化。当前音频a8069a3f生产已包含：早期音频缺生产者记录为当时状态，现已纠正为实现存在、live/识别质量未验；不增加supported或partial-safe。
+
+实际修改 human-knowledge-management.composition：原dependencies不再排除显式policyManagement选项，启用时复用同db/原Auth和Guard的createKnowledgePolicyManagementFactory。新服务器managePolicy动作白名单prepareTarget/target/bindTarget/read/prepare/preparation/commit/operation，私有credentials由当前request生产，caller只交原管理command，不传context/actor/scope授权。不新增HTTP/shared路由或政策、CAS/权限仍原服务；默认未配置拒绝，同原module导出的factory可实际调用后继续上传/文档生命周期，close后不能启动新管理操作。政策配置成功不是文档发布、索引同步或模型派发成功。
+
+一次直接内联原factory→实际原policy服务冒烟：默认关闭拒绝且不解析身份；显式启用确实进入原身份来源、缺当前身份拒绝；未知动作拒绝；close后拒绝且不再读取身份。完成标记smoke=passed，exit0。仅验证真实调用和拒绝边界，**没有执行正向policy commit→上传→冻结→模型派发**，不以该冒烟冒称生产全链。必要原API strict compiler noEmit847 files、0 diagnostics、exit0；diff check0，无tests/fixture/脚本更改。
+
+真实失败保留：会话工具store未保留env造成undefinednode，命令未执行验证，虽壳退出0不算通过；重设本树preload/固定无效DB/audit/TEMP后再执行。新增方法ReturnType联合Promise首轮1诊断/exit1，改为Promise<Awaited<原返回联合>>后0诊断；内联初始简化DB缺实际仓储构造方法被unavailable拒绝，改用已有lane-b-functional显式仓储替身，未放宽生产检查。当前audit本树output/inspection-lb05-tmp/20261014-policy-consumer.audit，无外联或共享生成。
+
+员工原候选/人工更正/提交和原键收据继续已有服务，不以新wrapper代替合法政策。保存后revision用原staff result-save-receipt/readReview，不更改旧expectedRevision；unknown仍无可采用payload。事件独立主体/政策/影子输入/Task creation未知与人类close/feedback/operation服务已有，前次修复受权组合及有界分页原实现保留。剩余正式staff task action政策记录、真实附件/存储及价格预算/能力置备由主线提供；未跑真实MySQL/模型/对象存储/HTTP/设备，本包不声明AIN验收。
+
+### 20261014 影子任务原创建收据与不可变输入一致性
+
+原AutomationFailureTaskService.reconcile在tasks.readCreation等待后再读authority.input，现明确比较两次原输入的tenant/workspace/scope/subject、授权和policy revision、event/resource revision、scene、creationKey/inputHash/authorityHash、payload及期限。持久status/task链接字段允许原合法推进，但不可变材料任一变化返回result_unknown，不把旧收据拼到新输入，不新建任务或操作。
+
+一次内联实际AutomationFailureTaskService、明确authority/receipt端口替身：稳定原键not_observed返回；readCreation等待期间creationKey变化拒绝result_unknown；未调用create/write/dispatch。stdout `smoke=passed; actual original creation reconcile rejects changed immutable input across receipt await; no create/write/dispatch`，exit0。必要strict noEmit1011 files、0 diagnostics/exit0，diff check0。该证据不是Prisma正向影子任务创建/政策生产验收；未新建或修改测试脚本/fixture。原human request、close/feedback/operation消费者保持，原键未知只读核对。
+
+### 20261014 同请求政策正向消费与关闭隔离
+
+原managePolicy调用的内部工厂会复制请求凭据，现HumanKnowledgeManagementRequestFactory将其原Auth读取绑定到父请求：resolveAccessContext等待前/后均检查私有credentials.current；close期间的身份读取不能继续返回可用结果。仍调用原AuthService，不自造身份/授权，不修改Guard或政策/CAS，正常生命周期也沿该同请求身份入口。关闭不声称撤销已提交事务，未知操作仍读原键。
+
+一次直接内联调用原factory，复用已有formal-authorization文件中管理fixture定义（仅在内存读取其fixture前缀，无test注册、无文件修改）。实际AuthService/ApiAuthGuard/HumanKnowledgePolicyManagementService/Prisma适配代码完成create_disabled准备/确认CAS提交、enable准备/确认CAS提交、原operation读取与revision2策略读取；然后可控Promise在Auth已读、未返回时close，迟到读取拒绝。权威管理委托记录、DB及ObjectIO是该既有fixture的显式合成来源，不是正式部署，也不是authorized:true替身；没有模型或真实存储调用。stdout `smoke=passed; actual AuthService/ApiAuthGuard/policy prepare-CAS-commit-original receipt via current request; parent close during Auth await rejected; explicit offline delegated authority and DB/ObjectIO doubles; no model/storage connection`，exit0。该正向证据限政策生产消费，不包含新上传/索引/冻结/派发全链。
+
+必要原API strict noEmit847files、0diagnostics/exit0；diff check0，未新增/修改测试脚本或fixture，无全量回归/新worker/HTTP启用。主线正在认领公共staff-inspection-task-policy.composition.ts，B不双写该正式staff生产者，固定交付后再沿现有识别任务消费者接入。
+
+### 20261014 正式staff政策到原存储型识别装配
+
+从441aa77e安全同步主线固定449caae3，合并点1e76629048b2a7ae0acc3aeed12dc839506f0fa7；公共变化仅授权merge，原B提交/output保留。公共composeStaffInspectionTaskPolicies已交付，不再把staff生产者称不存在。
+
+本线只改inspection-recognition-task.application：将已有TenantInspectionObjectReader→FileStorageRuntimeService的依赖创建提取复用，原composeStoredInspectionRecognitionApplication返回保持；新composeStoredInspectionRecognitionRuntime返回原application与显式可选taskPolicies。registerStored({enabled:true,dependencies,taskPolicies})导出原application和AI_STAFF_INSPECTION_TASK_POLICIES token，同原db/Auth/Guard/文件生产者供主线policy根复验。默认空模块、缺policyOptions不提供政策接口；构造不签发、不start、不自动configure所有动作，没有新HTTP、账本、worker、权限适配或owner扩张。宿主仍显式调用原read/configure/clear，再调用原task application；配置读取不是派发许可，执行仍原runner/Gateway/能力/价格预算复验。
+
+一次inline实际构造并加载上述服务/模块（包含公共根与application双向导入），确认token导出/默认不提供、缺当前staff身份read拒绝，storage/dispatch0。完成标记 `smoke=passed; actual stored app/policy producers loaded and exported; default absent; missing current staff rejected; zero storage/dispatch; full positive policy/model chain not exercised`，exit0。必要strict noEmit1128files、0diagnostics/exit0，diff check0，无新增/修改tests/fixture/脚本。此为真实装配与拒绝行为，不冒称新正向政策CAS、完整识别/计量/结果保存/原Core提交已验；主线此前公共政策正向证据不算本线新验。
+
+宿主实际依赖StoredInspectionRecognitionDependencies及StaffInspectionTaskPolicyOptions（服务器有限operations、ttlMs<=120000），原reference不增加taskId/scope；原Task ID由creation.readCreation取得。保存后revision继续原staff result-save-receipt/readReview；晚到结果/旧附件或模板由原gatewayMedia/current/resultBinding拒绝，unknown不能采用或换键。已实现音频pulse证明不是转写质量，partial-safe仍未提供。真实文件/配置价格预算和正式scene/plan记录必须由主线完整置备，不用离线预填artifact冒充模型成功。

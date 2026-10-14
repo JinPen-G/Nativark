@@ -10,10 +10,12 @@ import { PrismaKnowledgeFileAccess } from './prisma-knowledge-file-access';
 import { HumanKnowledgeUploadService } from './human-knowledge-upload.service';
 import type { AiOriginalSceneKnowledgeOptions } from '../scenes/original-scene-knowledge';
 import { KnowledgeError } from './knowledge-errors';
+import { preferenceSchema } from './knowledge-validation';
 
 /** Server DI only. Never serialize these request-bound producers to clients. */
 export const KNOWLEDGE_SCENE_OPTIONS = Symbol('KNOWLEDGE_SCENE_OPTIONS');
-export type KnowledgeSceneOptionsFactory = (includePreferences: boolean) => AiOriginalSceneKnowledgeOptions;
+export type KnowledgeSceneOptionsFactory = (includePreferences: boolean,
+  preferenceKinds?: AiOriginalSceneKnowledgeOptions['preferenceKinds']) => AiOriginalSceneKnowledgeOptions;
 
 export type KnowledgeFileApplicationDependencies = Omit<PrismaFormalKnowledgeDependencies, 'fileRuntime' | 'policyDb' | 'db'> & {
   db: PrismaService;
@@ -33,11 +35,17 @@ export function composeKnowledgeFileApplication(input: KnowledgeFileApplicationD
   // Feed the original scene consumer the SAME file runtime and exact policy
   // source as document management. Do not reconstruct a generic download
   // service or grant owner permission at the model-input boundary.
-  const sceneKnowledge: KnowledgeSceneOptionsFactory = includePreferences => {
+  const sceneKnowledge: KnowledgeSceneOptionsFactory = (includePreferences, preferenceKinds) => {
     if (typeof includePreferences !== 'boolean') throw new KnowledgeError('invalid_input');
     if (includePreferences && !base.memory) throw new KnowledgeError('unavailable');
+    if (preferenceKinds !== undefined && (!includePreferences || !Array.isArray(preferenceKinds) || preferenceKinds.length < 1
+      || preferenceKinds.length > 3 || new Set(preferenceKinds).size !== preferenceKinds.length
+      || preferenceKinds.some(kind => !preferenceSchema.options.some(option => option.shape.kind.value === kind)))) {
+      throw new KnowledgeError('invalid_input');
+    }
     const { auth: _auth, credentials: _credentials, clock: _clock, policyManagement: _management, ...infrastructure } = base;
-    return { ...infrastructure, policyDb: input.db, fileRuntime, includePreferences };
+    return { ...infrastructure, policyDb: input.db, fileRuntime, includePreferences,
+      ...(preferenceKinds ? { preferenceKinds: Object.freeze([...preferenceKinds]) } : {}) };
   };
   return { ...composePrismaFormalHumanKnowledge({ ...base, policyDb: input.db, fileRuntime }),
     uploads: new HumanKnowledgeUploadService(session, fileRuntime, access.repository), sceneKnowledge };

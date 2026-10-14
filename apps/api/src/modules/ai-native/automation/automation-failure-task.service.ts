@@ -3,6 +3,7 @@ import { Prisma, type PrismaClient, type AiAutomationInput } from '@prisma/clien
 import { z } from 'zod';
 import { AiTaskCreationRepository } from '../ai-task-creation.repository';
 import { AutomationError, PrismaAutomationAuthority } from './prisma-automation.authority';
+import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 
 const eventCommand = z.object({ eventId: z.string().uuid() }).strict();
 const inputCommand = z.object({ inputRef: z.string().uuid() }).strict();
@@ -12,6 +13,12 @@ const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
   return parsed.data;
 };
 const command = (row: AiAutomationInput) => ({ creationKey: row.creationKey, sceneCode: row.sceneCode, inputRef: row.id });
+const originalInput = (row: AiAutomationInput) => requestFingerprint({ id: row.id, tenantId: row.tenantId,
+  workspaceId: row.workspaceId, scopeId: row.scopeId, subjectId: row.subjectId, authorizationRevision: row.authorizationRevision,
+  eventId: row.eventId, policyId: row.policyId, policyRevision: row.policyRevision, resourceRevision: row.resourceRevision,
+  deduplicationKey: row.deduplicationKey, sceneCode: row.sceneCode, sceneVersion: row.sceneVersion,
+  creationKey: row.creationKey, inputRevision: row.inputRevision, inputHash: row.inputHash, authorityHash: row.authorityHash,
+  payload: row.payload, expiresAt: row.expiresAt });
 const semantics = { dispatchRequested: false as const, confirmationGranted: false as const, semantics: 'metadata_only_not_execution_permission' as const };
 
 export class AutomationFailureTaskService {
@@ -107,8 +114,10 @@ export class AutomationFailureTaskService {
   async reconcile(value: unknown) {
     const { inputRef } = parse(inputCommand, value);
     const { row } = await this.authority.input(inputRef);
+    const binding = originalInput(row);
     const receipt = await this.tasks.readCreation(command(row));
     const current = await this.authority.input(inputRef);
+    if (originalInput(current.row) !== binding) throw new AutomationError('result_unknown');
     if (receipt.state === 'observed' && current.row.status === 'linked'
       && (current.row.taskId !== receipt.task.taskId || current.row.runId !== receipt.task.runId)) throw new AutomationError('result_unknown');
     return { ...receipt, inputRef: row.id, inputStatus: current.row.status, ...semantics };

@@ -59,6 +59,24 @@ export interface TenantConfigSnapshot {
  * 因此每个写方法都允许调用方传入外层事务；不传时各自独立提交。
  */
 export type RentalConfigTx = Prisma.TransactionClient;
+/** Bounded configuration read, not pricing or inventory reservation. */
+export interface RentalItemGroupPageQuery { limit: number; cursor?: string; itemGroupId?: string; name?: string; }
+export interface RentalItemGroupPage {
+  rows: RentalItemGroup[]; nextCursor: string | null; truncated: boolean;
+  configurationVersion: string; source: 'persisted_workspace_configuration';
+}
+export function parseRentalItemGroupPageQuery(value: RentalItemGroupPageQuery): RentalItemGroupPageQuery {
+  const input = structuredClone(value), id = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u;
+  if (!input || typeof input !== 'object' || Array.isArray(input)
+    || Object.keys(input).some(key => !['limit', 'cursor', 'itemGroupId', 'name'].includes(key))
+    || !Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100
+    || (input.cursor !== undefined && (typeof input.cursor !== 'string' || !id.test(input.cursor)))
+    || (input.itemGroupId !== undefined && (typeof input.itemGroupId !== 'string' || !id.test(input.itemGroupId)))
+    || (input.name !== undefined && (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 191)))
+    throw new BadRequestException('商品分页查询参数无效');
+  if (input.name !== undefined) input.name = input.name.trim();
+  return input;
+}
 
 /**
  * 服务层只依赖这个接口，不依赖 Prisma。
@@ -71,6 +89,7 @@ export type RentalConfigTx = Prisma.TransactionClient;
  */
 export interface RentalConfigStore {
   loadAll(): Promise<TenantConfigSnapshot[]>;
+  listItemGroupsPage?(tenantId: string, workspaceId: string, query: RentalItemGroupPageQuery): Promise<RentalItemGroupPage>;
   listInspectionTemplates?(tenantId: string, workspaceId: string): Promise<RentalInspectionTemplate[]>;
   listCouponTemplates?(tenantId: string, workspaceId: string): Promise<RentalCouponTemplate[]>;
   /** 全部启用的经营空间，用于服务层按空间建状态并解析「租户 → 默认空间」。 */
@@ -108,6 +127,29 @@ function upper<T extends string>(value: string): T {
 @Injectable()
 export class RentalCoreConfigRepository implements RentalConfigStore {
   constructor(private readonly prisma: PrismaService) {}
+
+  async listItemGroupsPage(tenantId: string, workspaceId: string, value: RentalItemGroupPageQuery): Promise<RentalItemGroupPage> {
+    const query = parseRentalItemGroupPageQuery(value);
+    // Reuse the original server request-space/tenant check, not a caller scope.
+    const currentSpace = await resolveScopeWorkspaceId(this.prisma, tenantId);
+    if (currentSpace !== workspaceId) throw new ConflictException('商品读取经营空间变化');
+    const rows = await this.prisma.rentalItemGroup.findMany({ where: { tenantId, workspaceId,
+      ...(query.itemGroupId ? { id: query.itemGroupId } : {}), ...(query.name ? { name: query.name } : {}),
+      ...(query.cursor ? { AND: [{ id: { gt: query.cursor } }] } : {}) }, orderBy: { id: 'asc' }, take: query.limit + 1,
+      include: { bundleComponents: { take: 257, include: { componentItemGroup: {
+        select: { code: true, name: true, tenantId: true, workspaceId: true } } } } } });
+    // Even the pagination sentinel must have the requested ownership. Bundle
+    // joins are bounded and cannot disclose names from another workspace.
+    if (rows.some(row => row.tenantId !== tenantId || row.workspaceId !== workspaceId || row.bundleComponents.length > 256
+      || row.bundleComponents.some(component => component.componentItemGroup.tenantId !== tenantId
+        || component.componentItemGroup.workspaceId !== workspaceId))) throw new ConflictException('商品配置来源无效或超出读取上限');
+    if ((await resolveScopeWorkspaceId(this.prisma, tenantId)) !== workspaceId) throw new ConflictException('商品读取经营空间变化');
+    const truncated = rows.length > query.limit, page = rows.slice(0, query.limit);
+    return { rows: page.map(row => this.toItemGroup(row)), nextCursor: truncated ? page[page.length - 1].id : null,
+      truncated, source: 'persisted_workspace_configuration',
+      configurationVersion: createHash('sha256').update(JSON.stringify(page.map(row => ({ id: row.id,
+        updatedAt: row.updatedAt.toISOString(), attributes: row.attributes, bundleComponents: row.bundleComponents })))).digest('hex') };
+  }
 
   async listInspectionTemplates(tenantId: string, workspaceId: string): Promise<RentalInspectionTemplate[]> {
     const rows = await this.prisma.rentalInspectionTemplate.findMany({

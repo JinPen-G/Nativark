@@ -372,9 +372,20 @@ export class StaffInspectionHostBinding {
       } else if (readingSubmission) {
         const result = await host.submission?.reconcile?.({ ...host.target, draftId: host.draftId });
         if (this.active(epoch) && this.observeReceipt(result)) this.uncertain = undefined;
-      } else if (this.uncertain?.kind === "edit" || this.uncertain?.kind === "evidence") {
-        const result = await host.drafts.reconcileOperation?.({ kind: this.uncertain.kind, request: this.uncertain.request });
-        if (this.active(epoch) && result?.status === "found") this.uncertain = undefined;
+      } else if (command?.kind === "edit" || command?.kind === "evidence") {
+        // The host cannot mutate the original recovery key/material. A found
+        // receipt alone does not prove that this draft's operation completed.
+        const request = command.request as { draftId: string; expectedRevision: number };
+        const result = await host.drafts.reconcileOperation?.({ kind: command.kind,
+          request: JSON.parse(JSON.stringify(command.request)) });
+        if (!this.active(epoch) || this.uncertain !== command) return;
+        await this.load(epoch);
+        if (!this.active(epoch) || this.uncertain !== command) return;
+        const current = this.currentDetail();
+        if (result?.status === "found" && result.result.draftId === request.draftId
+          && result.result.revision === request.expectedRevision + 1 && current
+          && current.draftId === request.draftId && current.revision >= result.result.revision) this.uncertain = undefined;
+        return;
       }
       if (this.active(epoch)) await this.load(epoch);
     } catch { error = "核对暂不可用，请保留原操作，不要重复提交"; }
