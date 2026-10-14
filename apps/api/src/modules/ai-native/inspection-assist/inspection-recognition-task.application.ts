@@ -23,6 +23,8 @@ import type { PrismaService } from '../../database/prisma.service';
 import type { TenantIntegrationService } from '../../integrations/tenant-integration.service';
 import { FileStorageRuntimeService } from '../../integrations/file-storage.runtime.service';
 import { TenantInspectionObjectReader } from '../../integrations/inspection-object-reader';
+import { composeStaffInspectionTaskPolicies, AI_STAFF_INSPECTION_TASK_POLICIES,
+  type StaffInspectionTaskPolicyOptions } from '../staff-inspection-task-policy.composition';
 
 const referenceSchema = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId,
   inputId: inspectionId, expectedRevision: z.number().int().min(1).max(999) }).strict();
@@ -302,24 +304,39 @@ export class InspectionRecognitionTaskApplication {
 
 /** Formal storage producer -> original staff application -> single persisted
  * Gateway. Construction is inert; no generic signed-URL fetch or fake bytes. */
-export function composeStoredInspectionRecognitionApplication(input: StoredInspectionRecognitionDependencies) {
+function storedInspectionDependencies(input: StoredInspectionRecognitionDependencies): InspectionRecognitionTaskDependencies {
   if (input?.enabled !== true || input.model.db !== input.db || input.audioModel && input.audioModel.db !== input.db
     || typeof input.db?.fileAsset?.findFirst !== 'function' || typeof input.db?.rentalOrder?.findFirst !== 'function'
     || typeof input.integrations?.runtimeConfig !== 'function' || !('gateway' in input.model)) throw unavailable();
   const objects = new TenantInspectionObjectReader(input.db, input.integrations);
   const storage = new FileStorageRuntimeService(input.db, input.integrations, undefined, objects);
-  return new InspectionRecognitionTaskApplication({ ...input, inspection: { ...input.inspection, db: input.db, storage } });
+  return { ...input, inspection: { ...input.inspection, db: input.db, storage } };
+}
+export function composeStoredInspectionRecognitionApplication(input: StoredInspectionRecognitionDependencies) {
+  return new InspectionRecognitionTaskApplication(storedInspectionDependencies(input));
+}
+
+/** One real file producer and the original application/policy producers. This
+ * only supplies explicit methods: no policy is issued and no task is started. */
+export function composeStoredInspectionRecognitionRuntime(input: StoredInspectionRecognitionDependencies,
+  taskPolicies?: StaffInspectionTaskPolicyOptions) {
+  const dependencies = storedInspectionDependencies(input);
+  return { application: new InspectionRecognitionTaskApplication(dependencies),
+    ...(taskPolicies?.enabled === true ? { taskPolicies: composeStaffInspectionTaskPolicies(dependencies, taskPolicies) } : {}) };
 }
 
 /** Explicit DI only. No HTTP, root module, polling loop or default enablement. */
 @Module({})
 export class InspectionRecognitionTaskModule {
-  static registerStored(options: { enabled?: boolean; dependencies?: StoredInspectionRecognitionDependencies } = {}): DynamicModule {
+  static registerStored(options: { enabled?: boolean; dependencies?: StoredInspectionRecognitionDependencies;
+    taskPolicies?: StaffInspectionTaskPolicyOptions } = {}): DynamicModule {
     if (options.enabled !== true) return { module: InspectionRecognitionTaskModule, controllers: [], providers: [], exports: [] };
     if (!options.dependencies) throw unavailable();
+    const services = composeStoredInspectionRecognitionRuntime(options.dependencies, options.taskPolicies);
     return { module: InspectionRecognitionTaskModule, controllers: [],
-      providers: [{ provide: InspectionRecognitionTaskApplication, useValue: composeStoredInspectionRecognitionApplication(options.dependencies) }],
-      exports: [InspectionRecognitionTaskApplication] };
+      providers: [{ provide: InspectionRecognitionTaskApplication, useValue: services.application },
+        ...(services.taskPolicies ? [{ provide: AI_STAFF_INSPECTION_TASK_POLICIES, useValue: services.taskPolicies }] : [])],
+      exports: [InspectionRecognitionTaskApplication, ...(services.taskPolicies ? [AI_STAFF_INSPECTION_TASK_POLICIES] : [])] };
   }
   /** Explicit server DI, never imported by the production root automatically. */
   static registerHttp(dependencies: InspectionRecognitionTaskDependencies): DynamicModule {
