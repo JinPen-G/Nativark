@@ -172,3 +172,15 @@ Node DATABASE_URL 固定 mysql://offline:offline@127.0.0.1:1/rental_os_offline�
 一次直接内联实际 HumanAutomationReviewService（明确合成DB/资源授权替身，不是正式政策生产者）：正常两项、limit1，输出一项/hasMore且探测行至少两次复读；探测行返回另一tenant后unavailable、不泄漏分页存在性。完成标记 `smoke=passed; actual review service validates and rechecks pagination sentinel; foreign sentinel rejected; no writes/tasks/model`，exit0。必要原API strict源码paths noEmit772 files、0 diagnostics、exit0，diff check0；无测试脚本/fixture变更，无新队列或任务。
 
 公共阻塞方法再次核对（只读）：`InspectionRecognitionResultService.collect/readBinding` 调 `tasks.resolveAccess(taskId,'read_step_terminal')` 和同actor/scope的invocation/accounting evidence，正式新识别任务需合法持久action policy，不用临时grant。`PrismaTextCapabilityReceiptRepository.verify`仅text/streaming/vision/structured_output/tools，缺audio挑战及持久证明生产者；`AiTaskResultProjection.status`仅succeeded/failed/unknown，unknown payload=null，缺partial-safe完整性合同不能读截断候选。真实Storage runtime/attachment绑定与Gateway配置价格权益仍按原依赖，B不修改公共模块。新增成功sourceEvidence/完整候选保存派发链依然未验，离线人类读回与原键恢复不等于正式模型/数据库/HTTP/设备验收。
+
+## 20261014 当前知识管理请求的正式政策生产消费接线
+
+固定主线631a9fec同步点为f067b11094b25db4c4b646adf0444744d5588654，保留此前所有B提交/output；公共目录仅授权merge变化。当前音频a8069a3f生产已包含：早期音频缺生产者记录为当时状态，现已纠正为实现存在、live/识别质量未验；不增加supported或partial-safe。
+
+实际修改 human-knowledge-management.composition：原dependencies不再排除显式policyManagement选项，启用时复用同db/原Auth和Guard的createKnowledgePolicyManagementFactory。新服务器managePolicy动作白名单prepareTarget/target/bindTarget/read/prepare/preparation/commit/operation，私有credentials由当前request生产，caller只交原管理command，不传context/actor/scope授权。不新增HTTP/shared路由或政策、CAS/权限仍原服务；默认未配置拒绝，同原module导出的factory可实际调用后继续上传/文档生命周期，close后不能启动新管理操作。政策配置成功不是文档发布、索引同步或模型派发成功。
+
+一次直接内联原factory→实际原policy服务冒烟：默认关闭拒绝且不解析身份；显式启用确实进入原身份来源、缺当前身份拒绝；未知动作拒绝；close后拒绝且不再读取身份。完成标记smoke=passed，exit0。仅验证真实调用和拒绝边界，**没有执行正向policy commit→上传→冻结→模型派发**，不以该冒烟冒称生产全链。必要原API strict compiler noEmit847 files、0 diagnostics、exit0；diff check0，无tests/fixture/脚本更改。
+
+真实失败保留：会话工具store未保留env造成undefinednode，命令未执行验证，虽壳退出0不算通过；重设本树preload/固定无效DB/audit/TEMP后再执行。新增方法ReturnType联合Promise首轮1诊断/exit1，改为Promise<Awaited<原返回联合>>后0诊断；内联初始简化DB缺实际仓储构造方法被unavailable拒绝，改用已有lane-b-functional显式仓储替身，未放宽生产检查。当前audit本树output/inspection-lb05-tmp/20261014-policy-consumer.audit，无外联或共享生成。
+
+员工原候选/人工更正/提交和原键收据继续已有服务，不以新wrapper代替合法政策。保存后revision用原staff result-save-receipt/readReview，不更改旧expectedRevision；unknown仍无可采用payload。事件独立主体/政策/影子输入/Task creation未知与人类close/feedback/operation服务已有，前次修复受权组合及有界分页原实现保留。剩余正式staff task action政策记录、真实附件/存储及价格预算/能力置备由主线提供；未跑真实MySQL/模型/对象存储/HTTP/设备，本包不声明AIN验收。
