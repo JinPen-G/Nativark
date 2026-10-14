@@ -190,13 +190,21 @@ export class HumanAutomationReviewService {
       if (principal((await this.reads.current()).context) !== initialPrincipal) throw unavailable();
       const rows = await this.db.aiAutomationInput.findMany({ where: { ...scope, eventId: input.eventId,
         ...(input.after ? { id: { gt: input.after } } : {}) }, orderBy: { id: 'asc' }, take: input.limit + 1, select: { id: true } });
+      if (rows.length > input.limit + 1) throw unavailable();
       const items = [];
-      for (const row of rows.slice(0, input.limit)) {
+      // hasMore also discloses existence. The sentinel must use the same
+      // current resource authorization and binding as the returned rows.
+      const observed = [];
+      let previous = input.after ?? '';
+      for (const row of rows) {
+        if (!uuid.safeParse(row.id).success || row.id <= previous) throw unavailable();
+        previous = row.id;
         const view = await this.read({ inputRef: row.id });
         if (view.event.eventId !== event.id || view.event.fence !== event.fence) throw conflict();
-        items.push(view);
+        observed.push(view);
+        if (items.length < input.limit) items.push(view);
       }
-      for (const view of items) {
+      for (const view of observed) {
         if (requestFingerprint(await this.read({ inputRef: view.inputRef })) !== requestFingerprint(view)) throw conflict();
       }
       const latest = await this.db.aiBusinessFailureOutbox.findFirst({ where: { id: input.eventId, ...scope } });

@@ -55,6 +55,12 @@ export class InspectionRecognitionResultService {
     const input = parseInspectionInput(referenceSchema, value);
     return (await this.collect(input, false)).projection;
   }
+  /** Server review evidence derived from the SAME validated persisted result,
+   * not model-supplied hashes or permission to reopen an attachment. */
+  async readEvidence(value: unknown) {
+    const input = parseInspectionInput(referenceSchema, value), collected = await this.collect(input, false);
+    return { recognition: collected.projection, sourceEvidence: collected.sourceEvidence };
+  }
 
   /** Server-bound frozen input -> current persisted candidate evidence -> human
    * clarification. Caller/model text never supplies a question contract or a
@@ -201,7 +207,15 @@ export class InspectionRecognitionResultService {
       if (status === 'available' && isGatewayResult(payload) && payload.usage.kind === 'reported') {
         await this.verifyDispatch(currentBinding, scope, payload.usage);
       }
-      return { currentRevision: detail.revision, bindingFingerprint: bound.input.bindingFingerprint,
+      const sourceEvidence = values.map(candidate => ({ candidateId: candidate.candidateId,
+        sources: candidate.sources.map(position => {
+          const original = bound.input.media.find(item => item.attachmentId === position.attachmentId
+            && item.attachmentRevision === position.attachmentRevision);
+          if (!original) throw changed();
+          return { position: structuredClone(position), contentHash: original.contentHash,
+            mediaType: original.mediaType, sizeBytes: original.sizeBytes };
+        }) }));
+      return { currentRevision: detail.revision, bindingFingerprint: bound.input.bindingFingerprint, sourceEvidence,
         projection: { status, ...input, candidates: values, resultHash: result.contentHash, inputFingerprint: bound.input.inputFingerprint,
           runId: result.runId, stepId: result.stepId, observedAt: result.observedAt, trust: 'untrusted_candidate' as const,
           recognitionEvidence: status === 'available' ? (source.policy.kind === 'audio' ? 'persisted_audio_step' as const : 'persisted_image_step' as const) : 'not_confirmed' as const,

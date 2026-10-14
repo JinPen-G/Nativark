@@ -34,7 +34,8 @@ export function composeBusinessFailureEvents(input: BusinessFailureDependencies)
 }
 
 export function composeBusinessFailureAutomation(input: BusinessFailureDependencies & Pick<AutomationDependencies, 'policyId' | 'subscriptions'>) {
-  return { ...composeBusinessFailureEvents(input), automation: composeAutomationFailureTasks(input) };
+  const humanReads = new BusinessFailureReadAuthority(input.db, input.auth, input.credentials, input.guard, input.core, input.clock);
+  return { ...composeBusinessFailureEvents(input), automation: composeAutomationFailureTasks(input, humanReads) };
 }
 
 @Module({})
@@ -45,7 +46,8 @@ export class BusinessFailureEventsModule {
 
   static registerAutomation(input: BusinessFailureDependencies & Pick<AutomationDependencies, 'policyId' | 'subscriptions'>): DynamicModule {
     const base = this.register(input);
-    return { ...base, imports: [AutomationFailureTasksModule.register(input)], exports: [...(base.exports ?? []), AutomationFailureTasksModule] };
+    const humanReads = new BusinessFailureReadAuthority(input.db, input.auth, input.credentials, input.guard, input.core, input.clock);
+    return { ...base, imports: [AutomationFailureTasksModule.register(input, humanReads)], exports: [...(base.exports ?? []), AutomationFailureTasksModule] };
   }
   static register(input: BusinessFailureDependencies): DynamicModule {
     const services = composeBusinessFailureEvents(input);

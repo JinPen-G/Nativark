@@ -58,6 +58,15 @@ export class HumanKnowledgeModule {
     return { module: HumanKnowledgeModule, controllers: [HumanKnowledgeConsumptionController],
       providers: [{ provide: HumanKnowledgeConsumptionRequestFactory, useValue: requests }] };
   }
+  /** Same current-request consumer, without requiring HTTP registration. The
+   * original model caller may collect/revalidate then close in its finally. */
+  static registerConsumptionRequests(options: { enabled?: boolean; dependencies?: HumanKnowledgeConsumptionDependencies } = {}): DynamicModule {
+    if (options.enabled !== true) return { module: HumanKnowledgeModule, controllers: [], providers: [], exports: [] };
+    if (!options.dependencies) return unavailable();
+    return { module: HumanKnowledgeModule, controllers: [],
+      providers: [{ provide: HumanKnowledgeConsumptionRequestFactory, useValue: new HumanKnowledgeConsumptionRequestFactory(options.dependencies) }],
+      exports: [HumanKnowledgeConsumptionRequestFactory] };
+  }
 
   static registerManagementHttp(options: { enabled?: boolean; dependencies?: HumanKnowledgeManagementDependencies } = {}): DynamicModule {
     if (options.enabled !== true) return { module: HumanKnowledgeModule, controllers: [], providers: [] };
