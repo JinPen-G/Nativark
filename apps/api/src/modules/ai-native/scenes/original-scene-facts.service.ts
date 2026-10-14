@@ -20,6 +20,34 @@ const quoteConfirmation = originalRequestReferenceSchema.extend({
 
 export class AiOriginalSceneFactsService {
   constructor(private readonly requests: PrismaOriginalRequestRepository, private readonly tools: ReturnType<typeof composeAiAuthorizedBusinessTools>) {}
+  /** Resolve one displayed candidate for the original next-steps question.
+   * This is material for the human destination, never an allowed-actions grant. */
+  async prepareOrderManualHandoff(value: unknown) {
+    const parsed = originalRequestReferenceSchema.extend({
+      expectedOrderVersion: z.string().min(1).max(191),
+      code: z.enum(['rental.order.explain', 'rental.quote.preview', 'rental.change.preview', 'rental.order.commit'])
+    }).strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const command = freezeOriginalInput(parsed.data), ref = { draftVersion: command.draftVersion, inputRef: command.inputRef };
+    const original = await this.requests.read(ref);
+    if (original.request.sceneCode !== 'order_explanation' || original.request.input.question !== 'next_steps') {
+      throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    }
+    const grant = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
+    const orderId = original.request.input.orderId, reader = this.tools.order(orderId);
+    const before = await reader.read(grant.context);
+    if (before.order.updatedAt !== command.expectedOrderVersion) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    const handoff = await this.tools.orderManualHandoff(orderId, { code: command.code });
+    const latest = await reader.read(grant.context);
+    if (requestFingerprint(before.order) !== requestFingerprint(latest.order)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    const after = await this.requests.read(ref), current = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
+    if (originalIdentityHash(grant.context) !== originalIdentityHash(current.context)
+      || original.receipt.contentHash !== after.receipt.contentHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    return freezeOriginalInput({ original: original.receipt,
+      source: { scope: grant.context.scope, resourceType: 'order' as const, resourceId: orderId,
+        version: before.order.updatedAt, observedAt: latest.observedAt },
+      handoff, approval: 'not_granted' as const, execution: 'not_attempted' as const });
+  }
   async readOpeningSection(value: unknown) {
     const parsed = originalRequestReferenceSchema.extend({
       key: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u)
