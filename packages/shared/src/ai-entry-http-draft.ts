@@ -20,6 +20,9 @@ export const AI_CLIENT_ENTRY_HTTP_DRAFT = Object.freeze({
   /** Current owner/original lineage result discovery; never model execution. */
   readTaskModelResult: 'tasks/model/result/read',
   readOrderExplanation: 'orders/explanation/read', readSource: 'sources/read',
+  /** Current human parameters -> original Core quote. Never order approval. */
+  prepareQuoteParameters: 'quotes/parameters/prepare', readQuotePreparationOperation: 'quotes/preparation/read',
+  confirmQuoteParameters: 'quotes/parameters/confirm', readPreparedQuoteOriginal: 'quotes/original/read',
   issueAction: 'action', createBookingDraft: 'booking-drafts/create',
   chooseBookingDraft: 'booking-drafts/choose', readBookingDraft: 'booking-drafts/read',
   handoffBookingDraft: 'booking-drafts/handoff', readBookingHandoff: 'booking-handoffs/read',

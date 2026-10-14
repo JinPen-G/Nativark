@@ -73,7 +73,8 @@ import { CustomerCorporateSettlementService } from "../platform/customer-corpora
 import { ClientDeliveryAddressService } from "./client-delivery-address.service";
 import { ClientWechatAuthService } from "./client-wechat-auth.service";
 import { validateInspectionCustomerResponse } from "../rental-core/rental-inspection-customer-response";
-import { runWithRequestIdentity } from "../../common/request-identity";
+import { getRequestIdentity, runWithRequestIdentity } from "../../common/request-identity";
+import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 const DELIVERY_MODES = new Set<string>(["delivery", "onsite_delivery"]);
 
@@ -998,6 +999,80 @@ export class ClientApiService {
     // 地址随报价/订单快照落库，客户端、运营后台看到同一份，不再各存客户端旁表。
     const resolved = await this.core.resolvePricingGroupQuoteRequest(context.tenantId, request);
     return this.business.createQuote(context.tenantId, business, resolved);
+  }
+
+  /** Internal server port for an immutable AI request, not an additional client
+   * HTTP route. The caller must use current ClientGuard and prove the originating
+   * request/explicit selection; the reference itself grants no authority. */
+  async createQuoteForOriginalOperation(context: ClientRequestContext, input: ClientCreateQuoteRequest, reference: string,
+    prepared?: { inputHash: string; configurationHash: string }) {
+    context = structuredClone(context); input = structuredClone(input);
+    prepared = prepared && structuredClone(prepared);
+    const key = this.clientQuoteOriginalKey(context, reference);
+    await this.currentWorkspace(context);
+    const business = await this.context(context.tenantId);
+    const request: RentalQuoteRequest = { ...input, customerType: 'personal', customerId: context.customerId,
+      bookingIdentity: input.bookingIdentity ?? { bookingIdentity: 'personal' } };
+    const resolved = await this.core.resolvePricingGroupQuoteRequest(context.tenantId, request);
+    const normalized = this.business.normalizeQuoteInput(structuredClone(resolved));
+    if (prepared && (prepared.inputHash !== requestFingerprint(normalized)
+      || prepared.configurationHash !== requestFingerprint(business))) throw new ConflictException('报价准备依据已变化，请重新确认');
+    this.clientQuoteOriginalKey(context, reference);
+    const quote = await this.business.createQuoteForOriginalOperation(context.tenantId, business, normalized,
+      { key, inputHash: requestFingerprint(normalized) });
+    this.clientQuoteOriginalKey(context, reference);
+    if (quote.tenantId !== context.tenantId || quote.request.customerId !== context.customerId
+      || requestFingerprint(quote.request) !== requestFingerprint(normalized)) throw new ConflictException('报价原操作依据不一致');
+    return structuredClone(quote);
+  }
+
+  /** Current Core normalization only. No quote creation, price calculation,
+   * reservation or eligibility attestation; used before explicit confirmation. */
+  async prepareQuoteForOriginalOperation(context: ClientRequestContext, input: ClientCreateQuoteRequest) {
+    context = structuredClone(context); input = structuredClone(input);
+    this.clientQuoteOriginalKey(context, 'preparation');
+    await this.currentWorkspace(context);
+    const business = await this.context(context.tenantId);
+    const request: RentalQuoteRequest = { ...input, customerType: 'personal', customerId: context.customerId,
+      bookingIdentity: input.bookingIdentity ?? { bookingIdentity: 'personal' } };
+    const resolved = await this.core.resolvePricingGroupQuoteRequest(context.tenantId, request);
+    const normalized = this.business.normalizeQuoteInput(structuredClone(resolved));
+    this.clientQuoteOriginalKey(context, 'preparation');
+    return { request: structuredClone(normalized), inputHash: requestFingerprint(normalized),
+      configurationHash: requestFingerprint(business), tenantId: context.tenantId,
+      workspaceId: context.workspaceId, customerId: context.customerId,
+      semantics: 'normalized_parameters_not_business_eligibility' as const, execution: 'not_attempted' as const };
+  }
+
+  /** Exact persisted original observation, including a previously expired quote.
+   * Does not normalize against today's prices, create, reserve or replace an ID. */
+  async readQuoteForOriginalOperation(context: ClientRequestContext, reference: string) {
+    context = structuredClone(context);
+    const key = this.clientQuoteOriginalKey(context, reference);
+    await this.currentWorkspace(context);
+    this.clientQuoteOriginalKey(context, reference);
+    const quote = await this.business.readQuoteForOriginalReference(context.tenantId, key);
+    this.clientQuoteOriginalKey(context, reference);
+    if (quote && (quote.tenantId !== context.tenantId || quote.request.customerId !== context.customerId)) {
+      throw new NotFoundException('报价不存在');
+    }
+    return quote ? structuredClone(quote) : undefined;
+  }
+
+  private clientQuoteOriginalKey(context: ClientRequestContext, reference: string) {
+    this.requireActiveMembership(context);
+    if (typeof reference !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(reference)) {
+      throw new BadRequestException('报价原操作引用无效');
+    }
+    const current = getRequestIdentity();
+    if (!current || current.tenantId !== context.tenantId || current.workspaceId !== context.workspaceId
+      || current.userId !== context.customerId || current.isSaasAdmin !== false || current.staffApi === true) {
+      throw new ForbiddenException('报价原操作客户上下文失效');
+    }
+    // Relogin does not change the original operation. Tenant/workspace/customer
+    // and frozen originating reference remain part of the database key.
+    return requestFingerprint({ version: 'client-quote-original-1', tenantId: context.tenantId,
+      workspaceId: context.workspaceId, customerId: context.customerId, customerType: context.customerType, reference });
   }
 
   private requireAddressService(): ClientDeliveryAddressService {

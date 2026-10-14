@@ -42,9 +42,13 @@ export class PrismaTaskPlanPolicyRepository {
     input: { auth: Pick<AuthService, 'resolveAccessContext'>; credentials: AiTaskCredentialSource;
       guard: Pick<ApiAuthGuard, 'canActivate'>; scene: z.infer<typeof scene>; tool?: PersistedTaskInputTool;
       /** Server-owned scene assembly only; put() never accepts tool names. */
-      tools?: readonly PersistedTaskInputTool[] },
+      tools?: readonly PersistedTaskInputTool[];
+      /** New management hosts require audit in the same policy transaction.
+       * Existing legacy suppliers remain explicit; no caller can select this. */
+      audit?: boolean },
     private readonly wall: () => Date = () => new Date()) {
     this.selected = scene.parse(structuredClone(input.scene));
+    this.audit = input.audit === true;
     this.tool = input.tool ?? 'rental.catalog.search';
     if (!['rental.catalog.search', 'rental.availability.check', 'rental.order.explain', 'rental.order.commit', 'tenant.notifications.commit', TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, TEXT_CAPABILITY_PROBE_TOOL].includes(this.tool)) throw unavailable();
     const configured = aiPersistedPlanToolsSchema.safeParse((input.tools ?? [this.tool]).map(code => ({ code, version: AI_TOOL_DRAFT_VERSION })));
@@ -65,7 +69,8 @@ export class PrismaTaskPlanPolicyRepository {
       const again = await this.scopes.resolveCurrent();
       if (identity(c) !== identity(again.context) || current.scope.id !== again.scope.id) throw denied();
       return { key: { scopeId: current.scope.id, sceneCode: this.selected.code, sceneVersion: this.selected.version },
-        binding: requestFingerprint({ scope: current.scope.id, identity: identity(again.context) }) };
+        binding: requestFingerprint({ scope: current.scope.id, identity: identity(again.context) }),
+        manager: { tenantId: c.scope.tenantId, workspaceId: c.scope.workspaceId, userId: c.actor.userId } };
     } catch { throw denied(); }
   }
   private project(row: Prisma.AiTaskPlanPolicyGetPayload<{}>) {
@@ -76,6 +81,7 @@ export class PrismaTaskPlanPolicyRepository {
     return { revision: row.revision, enabled: row.enabled, limits, expiresAt: row.expiresAt.toISOString() };
   }
   private readonly tool: PersistedTaskInputTool;
+  private readonly audit: boolean;
   private readonly configuredTools: z.infer<typeof aiPersistedPlanToolsSchema>;
   private tools() { return structuredClone(this.configuredTools); }
   async read() {
@@ -94,6 +100,7 @@ export class PrismaTaskPlanPolicyRepository {
     let completed = false;
     try {
       return await this.db.$transaction(async tx => {
+        if (this.audit && typeof tx.operationLog?.create !== 'function') throw unavailable();
         // Scope exists even on first create, so absent policy rows still have a
         // stable lock owner. Existing input publication locks policy afterwards.
         await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_scopes WHERE id = ${before.key.scopeId} FOR UPDATE`);
@@ -115,6 +122,17 @@ export class PrismaTaskPlanPolicyRepository {
           || requestFingerprint(saved.limits) !== requestFingerprint(next.limits)
           || saved.expiresAt.getTime() !== next.expiresAt.getTime()) throw unavailable();
         const result = this.project(saved);
+        if (this.audit) {
+          const detail = { version: 'task-plan-policy-audit-1', ...before.key,
+            previousRevision: current?.revision ?? null, revision: next.revision, enabled: next.enabled,
+            beforeHash: current ? requestFingerprint({ enabled: current.enabled, limits: current.limits,
+              allowedTools: current.allowedTools, expiresAt: current.expiresAt.toISOString() }) : null,
+            afterHash: requestFingerprint(next), dispatch: 'not_granted' };
+          const hash = requestFingerprint({ manager: before.manager, detail });
+          const auditId = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+          await tx.operationLog.create({ data: { id: auditId, ...before.manager,
+            action: 'ai_task_plan_policy_changed', detail } });
+        }
         if ((await this.access()).binding !== before.binding) throw denied();
         if (Date.parse(command.expiresAt) <= this.wall().getTime()) throw denied();
         completed = true;

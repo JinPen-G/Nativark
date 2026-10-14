@@ -47,6 +47,7 @@ import { PrismaClientBookingRepository } from './prisma-client-booking.repositor
 import { composeClientBooking } from './client-booking.composition';
 import type { AiBookingMaterial } from '@rental-os/shared';
 import type { ClientApiService } from '../../client/client-api.service';
+import { composeClientOriginalQuotePreparation } from './client-quote-preparation.composition';
 
 const id = z.string().trim().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const configurationSchema = z.object({ enabled: z.literal(true), tenantCode: id, serviceCode: id,
@@ -85,6 +86,9 @@ export type AiClientRequestDependencies = {
   /** Original booking page only, explicit server assembly. Same ClientApiService
    * singleton as the read projection; never an Agent-selected executor. */
   bookingSubmission?: Pick<ClientApiService, 'prepareOrderSubmission' | 'readOrderSubmission' | 'createOrder'>;
+  /** Same authorized client service; explicit human parameter confirmation,
+   * never an automatically selected model tool or order approval. */
+  quotePreparation?: Pick<ClientApiService, 'prepareQuoteForOriginalOperation' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation'>;
 };
 type Command = z.infer<typeof commandSchema>;
 const fail = (code: 'AI_CLIENT_INVALID_INPUT' | 'AI_CLIENT_CONTEXT_UNAVAILABLE' | 'AI_CLIENT_CAPABILITY_UNAVAILABLE' | 'AI_CLIENT_MATERIAL_STALE'): never => { throw new Error(code); };
@@ -489,7 +493,43 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   const configuredResultSource = dependencies.taskResults
     ?? (dependencies.taskInputs && { db: dependencies.taskInputs.db })
     ?? (dependencies.taskModel && { db: dependencies.taskModel.db });
+  const withQuotePreparation = async <T>(request: AiClientApplicationRequest,
+    consume: (preparation: ReturnType<typeof composeClientOriginalQuotePreparation>) => Promise<T>) => {
+    if (!server.entry || !taskDependencies || server.channel === 'app' || !dependencies.quotePreparation)
+      return fail('AI_CLIENT_CAPABILITY_UNAVAILABLE');
+    const credential = bearerSchema.safeParse(request?.headers?.authorization);
+    if (!credential.success) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
+    const authorization = credential.data, ip = request.ip;
+    return withBinding(request, true, 'quotes', async bound => {
+      const preparation = composeClientOriginalQuotePreparation({ enabled: true,
+        client: dependencies.quotePreparation!, guard: dependencies.guard,
+        credentials: { current: async () => ({ authorization, ip }) }, tasks: taskDependencies,
+        tenantCode: server.tenantCode, serviceCode: server.serviceCode,
+        channel: server.channel as 'web' | 'wechat_miniprogram', clock });
+      const result = await consume(preparation);
+      await bound.assertCurrent();
+      return result;
+    });
+  };
   return Object.freeze({
+    /** Server-only request consumers. Public transport must use its formal
+     * whitelist contract; these methods are not registered by this composition. */
+    async prepareQuoteParameters(request: AiClientApplicationRequest, value: unknown) {
+      const command = structuredClone(value);
+      return withQuotePreparation(request, preparation => preparation.prepare(command));
+    },
+    async readQuotePreparationOperation(request: AiClientApplicationRequest, value: unknown) {
+      const command = structuredClone(value);
+      return withQuotePreparation(request, preparation => preparation.readPreparationOperation(command));
+    },
+    async confirmQuoteParameters(request: AiClientApplicationRequest, value: unknown) {
+      const command = structuredClone(value);
+      return withQuotePreparation(request, preparation => preparation.confirm(command));
+    },
+    async readPreparedQuoteOriginal(request: AiClientApplicationRequest, value: unknown) {
+      const command = structuredClone(value);
+      return withQuotePreparation(request, preparation => preparation.readOriginal(command));
+    },
     /** Discover only this original task's latest proved model run. No caller
      * result/run ID, earlier-run fallback, arbitrary artifact or raw config. */
     async readOriginalTaskModelResult(request: AiClientApplicationRequest, value: unknown, source = configuredResultSource) {
@@ -1056,7 +1096,9 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         return freezeOriginalInput({ ...packet(row, await verify(bound, row)), verifiedAt: clock().toISOString() });
       });
     },
-    capabilities: Object.freeze({ entryActions: server.entry && taskDependencies && server.channel !== 'app'
+    capabilities: Object.freeze({ quotePreparation: server.entry && taskDependencies && server.channel !== 'app'
+      && dependencies.quotePreparation ? 'explicit_human_confirmation_original_quote_only' as const : 'unavailable' as const,
+      entryActions: server.entry && taskDependencies && server.channel !== 'app'
       ? (typeof dependencies.client.getQuote === 'function' && typeof dependencies.client.bookingOptions === 'function'
         ? ['OPEN_ORDER', 'CREATE_BOOKING_DRAFT', 'OPEN_BOOKING'] as const : ['OPEN_ORDER'] as const) : [],
       bookingDrafts: server.entry && taskDependencies && server.channel !== 'app' && typeof dependencies.client.getQuote === 'function'

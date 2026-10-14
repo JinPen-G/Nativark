@@ -201,6 +201,7 @@ export function composePersistedTextProbeWorkflow(input: Omit<TextCapabilityProb
     publishOriginal: (value: unknown) => producer.originals.publish(value),
     readOriginal: (requestKey: string) => producer.originals.readOriginal(requestKey),
     readOriginalCapability: (requestKey: string) => producer.originals.readOriginalCapability(requestKey),
+    readOriginalPolicyExpiry: (requestKey: string) => producer.originals.readPolicyExpiry(requestKey),
     createTask: (value: unknown) => producer.create(value),
     readCreation: (value: unknown) => producer.readCreation(value),
     async readHistoricalOriginal(requestKey: string) {

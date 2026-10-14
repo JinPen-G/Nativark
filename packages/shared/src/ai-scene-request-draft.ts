@@ -57,6 +57,22 @@ export interface AiSceneModelTakeoverDraft {
   expectedRunRevision: number;
   expectedFencingToken: string;
 }
+/** Exact previously observed run, including a prior clarification generation.
+ * This reference is observation only and cannot select a run for execution. */
+export interface AiSceneModelTakeoverReceiptReadDraft extends AiSceneModelTakeoverDraft {
+  runId: string;
+}
+/** expectedRevision is the exact revision before the observed transition.
+ * Cancellation intent and its later settlement are separate observations. */
+export interface AiSceneModelCancellationReceiptReadDraft {
+  original: AiSceneRequestReadDraft;
+  expectedRevision: number;
+}
+/** A previously observed owned run, not a lease or authority to execute. */
+export interface AiSceneModelRecoverySnapshotReadDraft {
+  original: AiSceneRequestReadDraft;
+  runId: string;
+}
 /** Confirms only the displayed Core quote parameters, not order creation or
  * approval. Hashes bind the current authorized preparation, not authority. */
 export interface AiSceneQuoteReceiptReadDraft extends AiSceneRequestReadDraft {
@@ -103,18 +119,31 @@ export const AI_SCENE_REQUEST_HTTP_DRAFT = Object.freeze({
   createTask: 'create-task', material: 'material', recovery: 'recovery', quoteReview: 'quote-review',
   quoteConfirm: 'quote-confirm', quoteReceipt: 'quote-receipt'
 } as const);
+/** Owner-only operator policy management; never execution or business approval. */
+export const AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT = Object.freeze({
+  basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/task-actions`, method: 'POST',
+  configure: 'configure', read: 'read', clear: 'clear'
+} as const);
+/** Current workspace manager, with a closed server-selected scene/tool registry. */
+export const AI_SCENE_PLAN_POLICY_HTTP_DRAFT = Object.freeze({
+  basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/plan-policies`, method: 'POST', read: 'read', change: 'change'
+} as const);
 /** Server opt-in only. Bodies reuse original references and the existing input
  * submission contract; callers never supply leases, prompts or model settings. */
 export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
   basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/model`, method: 'POST',
   start: 'start', readInput: 'input', refreshInput: 'input/refresh', resume: 'resume', reconcile: 'reconcile',
-  readExecution: 'execution', recover: 'recover', takeover: 'takeover',
+  readExecution: 'execution', readRecoverySnapshot: 'execution/snapshot', recover: 'recover', takeover: 'takeover', readTakeoverReceipt: 'takeover/receipt',
   readAnswer: 'input/receipt', continueAnswer: 'input/continue',
   readQuotePreparation: 'input/quote-preparation',
   confirmClarifiedQuote: 'input/quote-confirm', readClarifiedQuoteReceipt: 'input/quote-receipt',
-  requestCancel: 'cancel', readModelResult: 'result', reopenModelSource: 'source',
+  requestCancel: 'cancel', requestCancellationIntent: 'cancel/intent', readCancellationReceipt: 'cancel/receipt',
+  settleUnstartedCancellation: 'cancel/settle-unstarted',
+  settleReleasedInputCancellation: 'cancel/settle-input-wait',
+  readCancellationSettlementReceipt: 'cancel/settlement-receipt', readModelResult: 'result', reopenModelSource: 'source',
   readTaskPage: 'tasks', readTaskEvents: 'events', readTaskUsage: 'usage', readTaskScene: 'scene',
   startSettingsTask: 'settings/start', readSettingsConfirmation: 'settings/confirmation',
+  createSettingsTask: 'settings/create-task', readSettingsTaskCreation: 'settings/create-task/receipt',
   decideSettingsProposal: 'settings/decision', readSettingsDecision: 'settings/decision-receipt', continueSettingsConfirmation: 'settings/continue',
   reconcileSettingsTask: 'settings/reconcile', cancelSettingsTask: 'settings/cancel'
 } as const);

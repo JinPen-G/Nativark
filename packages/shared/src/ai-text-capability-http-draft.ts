@@ -6,6 +6,7 @@ export const AI_TEXT_CAPABILITY_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/text-capability', method: 'POST',
   prepare: 'prepare', publish: 'original/publish', readOriginal: 'original/read',
   createTask: 'task/create', readTask: 'task/read', start: 'task/start', inspect: 'task/inspect',
+  configureTaskAction: 'task/action/configure', readTaskAction: 'task/action/read',
   cancel: 'task/cancel', reconcile: 'task/reconcile', readCapabilityReceipt: 'receipt/read', preflight: 'preflight', readHistory: 'history/read',
 });
 export type AiTextCapabilityRequestDraft = { requestKey: string };
@@ -15,12 +16,19 @@ export type AiTextCapabilityPrepareRequestDraft = AiTextCapabilityRequestDraft &
   capability?: 'text' | 'streaming' | 'vision' | 'audio' | 'structured_output' | 'tools';
 };
 export type AiTextCapabilityCancelRequestDraft = AiTextCapabilityRequestDraft & { expectedRevision: number };
+export type AiTextCapabilityActionRequestDraft = AiTextCapabilityRequestDraft & { operation: string };
+export type AiTextCapabilityConfigureActionDraft = AiTextCapabilityActionRequestDraft & { expectedRevision: number | null };
+type ActionPolicy = { taskId: string; operation: string; revision: number; requiredPermissions: readonly string[]; expiresAt: string };
 type Task = { taskId: string; runId: string; status: string; revision: number; replayed: boolean };
 type Run = { kind: 'not_started'; reason: string } | { kind: 'run_outcome'; outcome: {
   status: string; completedSteps: number; cleanupFailed: number;
 } };
 type RunResponse = AiTextCapabilityRequestDraft & Run & { retryable: false; semantics: 'task_outcome_not_capability_evidence' };
 export type AiTextCapabilityHttpResponsesDraft = {
+  configureTaskAction: AiTextCapabilityRequestDraft & { state: 'configured'; policy: ActionPolicy; retryable: false;
+    semantics: 'action_policy_not_dispatch_or_business_approval' };
+  readTaskAction: AiTextCapabilityRequestDraft & { state: 'observed' | 'not_observed'; policy: ActionPolicy | null; retryable: false;
+    semantics: 'action_policy_not_dispatch_or_business_approval' };
   prepare: AiTextCapabilityRequestDraft & { state: 'prepared'; capability: 'text' | 'streaming' | 'vision' | 'audio' | 'structured_output' | 'tools'; methodVersion: string;
     configurationRevision: number; execution: 'not_started' };
   publish: AiTextCapabilityRequestDraft & { state: 'stored'; inputRef: string; inputHash: string; replayed: boolean; retryable: false };
@@ -53,7 +61,7 @@ export type AiTextCapabilityHttpResponsesDraft = {
 export type AiTextCapabilityHttpErrorDraft = {
   code: 'AI_INVALID_INPUT' | 'AI_ACCESS_DENIED' | 'AI_SCOPE_CHANGED' | 'AI_RESOURCE_UNAVAILABLE'
     | 'AI_REVISION_CONFLICT' | 'AI_STORAGE_UNAVAILABLE' | 'AI_RESULT_UNKNOWN';
-  retryable: false; nextAction?: 'readOriginal' | 'readTask' | 'inspect' | 'reconcile' | 'readCapabilityReceipt' | 'readHistory';
+  retryable: false; nextAction?: 'readOriginal' | 'readTask' | 'readTaskAction' | 'inspect' | 'reconcile' | 'readCapabilityReceipt' | 'readHistory';
 };
 const id: AiLeafSchemaDraft = { ...text(128), pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' };
 const hash: AiLeafSchemaDraft = { ...text(64, 64), pattern: '^[a-f0-9]{64}$' };
@@ -61,6 +69,8 @@ const bool: AiLeafSchemaDraft = { type: 'boolean' }, no: AiLeafSchemaDraft = { t
 const revision = int(1, 4294967295), key = { requestKey: id };
 const task = { taskId: id, runId: id, status: text(64), revision, replayed: bool };
 const stored = { ...key, state: choice('stored'), inputRef: id, inputHash: hash, retryable: no };
+const actionPolicy = obj({ taskId: id, operation: text(64), revision,
+  requiredPermissions: { type: 'array', minItems: 1, maxItems: 64, uniqueItems: true, items: text(191) }, expiresAt: time });
 const run = { oneOf: [
   obj({ ...key, kind: choice('not_started'), reason: text(64), retryable: no, semantics: choice('task_outcome_not_capability_evidence') }),
   obj({ ...key, kind: choice('run_outcome'), outcome: obj({ status: text(64), completedSteps: int(0, 10000), cleanupFailed: int(0, 10000) }),
@@ -68,6 +78,14 @@ const run = { oneOf: [
 ] } satisfies AiLeafSchemaDraft;
 export const AI_TEXT_CAPABILITY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
   AiTextCapabilityRequestDraft: obj(key),
+  AiTextCapabilityActionRequestDraft: obj({ ...key, operation: text(64) }),
+  AiTextCapabilityConfigureActionDraft: obj({ ...key, operation: text(64), expectedRevision: {
+    oneOf: [int(1, 4294967293), { type: 'null' }] } }),
+  AiTextCapabilityConfigureActionResponseDraft: obj({ ...key, state: choice('configured'), policy: actionPolicy,
+    retryable: no, semantics: choice('action_policy_not_dispatch_or_business_approval') }),
+  AiTextCapabilityReadActionResponseDraft: obj({ ...key, state: choice('observed', 'not_observed'),
+    policy: { oneOf: [actionPolicy, { type: 'null' }] }, retryable: no,
+    semantics: choice('action_policy_not_dispatch_or_business_approval') }),
   AiTextCapabilityPrepareRequestDraft: obj({ ...key, capability: choice('text', 'streaming', 'vision', 'audio', 'structured_output', 'tools') }, ['requestKey']),
   AiTextCapabilityCancelRequestDraft: obj({ ...key, expectedRevision: int(1, 4294967294) }),
   AiTextCapabilityPrepareResponseDraft: obj({ ...key, state: choice('prepared'), capability: choice('text', 'streaming', 'vision', 'audio', 'structured_output', 'tools'), methodVersion: text(64),
@@ -102,5 +120,5 @@ export const AI_TEXT_CAPABILITY_HTTP_SCHEMAS: Record<string, AiLeafSchemaDraft> 
     semantics: choice('current_preflight_not_dispatch_permission') }),
   AiTextCapabilityHttpErrorDraft: obj({ code: choice('AI_INVALID_INPUT', 'AI_ACCESS_DENIED', 'AI_SCOPE_CHANGED', 'AI_RESOURCE_UNAVAILABLE',
     'AI_REVISION_CONFLICT', 'AI_STORAGE_UNAVAILABLE', 'AI_RESULT_UNKNOWN'), retryable: no,
-    nextAction: choice('readOriginal', 'readTask', 'inspect', 'reconcile', 'readCapabilityReceipt', 'readHistory') }, ['code', 'retryable']),
+    nextAction: choice('readOriginal', 'readTask', 'readTaskAction', 'inspect', 'reconcile', 'readCapabilityReceipt', 'readHistory') }, ['code', 'retryable']),
 };
