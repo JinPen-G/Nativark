@@ -1,11 +1,15 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import type { IncomingMessage } from 'node:http';
+import { z } from 'zod';
 import { withRequestAbort } from './request-abort';
 import type { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneModel,
   composeRequestBoundPersistedOriginalSceneModel, composeRequestBoundOriginalTaskActionPolicies,
-  composeRequestBoundScenePlanPolicies, composeRequestBoundOriginalTaskRecoveryReaders, AiSceneHttpRequest } from './request-bound-scenes.application';
+  composeRequestBoundScenePlanPolicies, composeRequestBoundOriginalTaskRecoveryReaders,
+  composeRequestBoundOriginalOpeningReadTask, AiSceneHttpRequest } from './request-bound-scenes.application';
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT,
-  AI_SCENE_PLAN_POLICY_HTTP_DRAFT } from '@rental-os/shared';
+  AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_OPENING_READ_TASK_HTTP_DRAFT } from '@rental-os/shared';
+import { originalRequestReferenceSchema } from '../task-request/original-request.validation';
+import { AiTaskRepositoryError } from '../ai-task.repository';
 
 export const AI_ORIGINAL_SCENES = Symbol('AI_ORIGINAL_SCENES');
 export const AI_ORIGINAL_SCENE_REQUESTS = Symbol('AI_ORIGINAL_SCENE_REQUESTS');
@@ -14,6 +18,7 @@ export const AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS = Symbol('AI_ORIGINAL_SC
 export const AI_ORIGINAL_TASK_ACTION_POLICIES = Symbol('AI_ORIGINAL_TASK_ACTION_POLICIES');
 export const AI_SCENE_PLAN_POLICIES = Symbol('AI_SCENE_PLAN_POLICIES');
 export const AI_ORIGINAL_SCENE_RECOVERY_REQUESTS = Symbol('AI_ORIGINAL_SCENE_RECOVERY_REQUESTS');
+export const AI_ORIGINAL_OPENING_READ_TASK_REQUESTS = Symbol('AI_ORIGINAL_OPENING_READ_TASK_REQUESTS');
 type Scenes = ReturnType<typeof composeRequestBoundOriginalScenes>;
 export async function respondAiScene<T>(work: () => Promise<T>, unknownAction = 'reconcile') {
   try { return await work(); }
@@ -34,6 +39,63 @@ export async function respondAiScene<T>(work: () => Promise<T>, unknownAction = 
   }
 }
 type SceneRunHttpRequest = AiSceneHttpRequest & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
+
+/** Separate, opt-in read-task transport. It offers no model, approval, input
+ * submission or configuration-write route, and never selects an arbitrary tool. */
+@Controller(AI_OPENING_READ_TASK_HTTP_DRAFT.basePath)
+export class AiOriginalOpeningReadTaskController {
+  constructor(@Inject(AI_ORIGINAL_OPENING_READ_TASK_REQUESTS)
+    private readonly tasks: ReturnType<typeof composeRequestBoundOriginalOpeningReadTask>) {}
+  @Post(AI_OPENING_READ_TASK_HTTP_DRAFT.start) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  start(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.tasks.start(request, body, signal)), 'read_execution');
+  }
+  @Post(AI_OPENING_READ_TASK_HTTP_DRAFT.recover) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  recover(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.tasks.recover(request, body, signal)), 'read_execution');
+  }
+  @Post(AI_OPENING_READ_TASK_HTTP_DRAFT.reconcile) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  reconcile(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.tasks.reconcile(request, body, signal)), 'read_execution');
+  }
+  @Post(AI_OPENING_READ_TASK_HTTP_DRAFT.inspect) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  inspect(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.tasks.inspect(request, body)); }
+  @Post(AI_OPENING_READ_TASK_HTTP_DRAFT.takeover) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  takeover(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.tasks.takeover(request, body, signal)), 'read_takeover_receipt');
+  }
+  @Post(AI_OPENING_READ_TASK_HTTP_DRAFT.readTakeoverReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTakeoverReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.tasks.readTakeoverReceipt(request, body));
+  }
+  @Post(AI_OPENING_READ_TASK_HTTP_DRAFT.requestCancellationIntent) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  requestCancellationIntent(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.tasks.requestCancellationIntent(request, body), 'read_cancellation_receipt');
+  }
+  @Post(AI_OPENING_READ_TASK_HTTP_DRAFT.settleUnstartedCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  settleUnstartedCancellation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.tasks.settleUnstartedCancellation(request, body), 'read_cancellation_settlement_receipt');
+  }
+  @Post(AI_OPENING_READ_TASK_HTTP_DRAFT.readCancellationReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readCancellationReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.tasks.readCancellationReceipt(request, body));
+  }
+  @Post(AI_OPENING_READ_TASK_HTTP_DRAFT.readCancellationSettlementReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readCancellationSettlementReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.tasks.readCancellationSettlementReceipt(request, body));
+  }
+  @Post(AI_OPENING_READ_TASK_HTTP_DRAFT.reopenSource) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  reopenSource(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => {
+      // Reuse AiSceneModelResultReadDraft's original/resultId reference shape.
+      // No URL, historic payload, tool code or caller Task ID is forwarded.
+      const parsed = z.object({ original: originalRequestReferenceSchema, resultId: z.string().uuid() }).strict().safeParse(structuredClone(body));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return withRequestAbort(request, signal => this.tasks.reopenSource(request,
+        { ...parsed.data.original, resultId: parsed.data.resultId }, signal));
+    });
+  }
+}
 @Controller(AI_SCENE_PLAN_POLICY_HTTP_DRAFT.basePath)
 export class AiScenePlanPolicyController {
   constructor(@Inject(AI_SCENE_PLAN_POLICIES) private readonly application: ReturnType<typeof composeRequestBoundScenePlanPolicies>) {}

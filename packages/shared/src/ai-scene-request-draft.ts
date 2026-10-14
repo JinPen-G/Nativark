@@ -172,6 +172,17 @@ export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
   reconcileSettingsTask: 'settings/reconcile', cancelSettingsTask: 'settings/cancel'
 } as const);
 
+/** Explicit original opening READ host, not model execution or production
+ * activation. Inputs reuse the original request, takeover, cancellation and
+ * result-reference drafts above; clients cannot choose a Task or tool. */
+export const AI_OPENING_READ_TASK_HTTP_DRAFT = Object.freeze({
+  basePath: `${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/opening-read`, method: 'POST',
+  start: 'start', recover: 'recover', reconcile: 'reconcile', inspect: 'execution',
+  takeover: 'takeover', readTakeoverReceipt: 'takeover/receipt', reopenSource: 'source',
+  requestCancellationIntent: 'cancel/intent', readCancellationReceipt: 'cancel/receipt',
+  settleUnstartedCancellation: 'cancel/settle-unstarted', readCancellationSettlementReceipt: 'cancel/settlement-receipt'
+} as const);
+
 /** Distinct server-opt-in fixed order read chain. Every operation resolves
  * the original task/run/result on the server; never a client-selected resultId. */
 export const AI_SCENE_ORDER_READ_HTTP_DRAFT = Object.freeze({

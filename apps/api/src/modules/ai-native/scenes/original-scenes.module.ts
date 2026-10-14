@@ -11,7 +11,8 @@ import { AI_ORIGINAL_SCENES, AI_ORIGINAL_SCENE_REQUESTS, AiOriginalScenesControl
   AiOriginalSceneModelController, AiOriginalSceneModelActionsController,
   AI_ORIGINAL_TASK_ACTION_POLICIES, AiOriginalTaskActionPolicyController,
   AI_SCENE_PLAN_POLICIES, AiScenePlanPolicyController,
-  AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, AiOriginalSceneRecoveryController } from './original-scenes.controller';
+  AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, AiOriginalSceneRecoveryController,
+  AI_ORIGINAL_OPENING_READ_TASK_REQUESTS, AiOriginalOpeningReadTaskController } from './original-scenes.controller';
 import { composeAiOriginalSceneModel, type AiOriginalSceneModelDependencies } from './original-scene-model.composition';
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneModel, type RequestBoundOriginalSceneDependencies,
   composeRequestBoundPersistedOriginalSceneModel, type RequestBoundPersistedOriginalSceneModelDependencies,
@@ -24,7 +25,7 @@ export const AI_ORIGINAL_SCENE_MODEL = Symbol('AI_ORIGINAL_SCENE_MODEL');
 export const AI_ORIGINAL_ORDER_READ_REQUESTS = Symbol('AI_ORIGINAL_ORDER_READ_REQUESTS');
 export const AI_CLARIFIED_QUOTE_SELECTION_REQUESTS = Symbol('AI_CLARIFIED_QUOTE_SELECTION_REQUESTS');
 export const AI_ORIGINAL_SETTINGS_TASK_REQUESTS = Symbol('AI_ORIGINAL_SETTINGS_TASK_REQUESTS');
-export const AI_ORIGINAL_OPENING_READ_TASK_REQUESTS = Symbol('AI_ORIGINAL_OPENING_READ_TASK_REQUESTS');
+export { AI_ORIGINAL_OPENING_READ_TASK_REQUESTS } from './original-scenes.controller';
 import { composeRequestBoundOriginalTaskActionPolicies, type AiOriginalTaskActionPolicyOptions } from './request-bound-scenes.application';
 import { composeRequestBoundScenePlanPolicies, type AiScenePlanPolicyConfiguration } from './request-bound-scenes.application';
 import { composeRequestBoundOriginalTaskRecoveryReaders } from './request-bound-scenes.application';
@@ -34,6 +35,14 @@ export { AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQ
 
 @Module({})
 export class AiOriginalScenesModule {
+  /** Explicit transport for the same original read host. The host must not
+   * also register a model driver for these runs; no root activation here. */
+  static registerHttpOpeningReadTask(
+    dependencies: RequestBoundOriginalSceneDependencies, options: AiSceneRequestOptions,
+    configuration: Parameters<typeof composeRequestBoundOriginalOpeningReadTask>[2]): DynamicModule {
+    const registered = this.registerRequestBoundOpeningReadTask(dependencies, options, configuration);
+    return options?.enabled ? { ...registered, controllers: [AiOriginalOpeningReadTaskController] } : registered;
+  }
   /** Inert alternative opening read host, never mounted alongside a model
    * driver on the same original run. No HTTP or default execution policy. */
   static registerRequestBoundOpeningReadTask(
