@@ -698,6 +698,9 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     reopenModelSource(request: AiSceneHttpRequest, value: unknown) {
       return call(request, value, (root, command) => root.resultReader().reopenSource(command));
     },
+    reopenOpeningModelSource(request: AiSceneHttpRequest, value: unknown) {
+      return call(request, value, (root, command) => root.resultReader().reopenOpeningSection(command));
+    },
     readRecoverySnapshot(request: AiSceneHttpRequest, value: unknown) {
       const parsed = snapshotSchema.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -933,6 +936,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     readAnswer: recoveryReaders.readAnswer,
     readModelResult: recoveryReaders.readModelResult,
     reopenModelSource: recoveryReaders.reopenModelSource,
+    reopenOpeningModelSource: recoveryReaders.reopenOpeningModelSource,
     readOrderReadChainAnswer: (request: AiSceneHttpRequest, value: unknown) => call(request, value, async (app, command) => await app.readAnswer(command)),
     readOrderReadChainModelResult: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readModelResult(command)),
     reopenOrderReadChainSource: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reopenModelSource(command)),
@@ -1068,7 +1072,8 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
       call(request, value, (app, command) => app.application.takeover(command, signal)),
     requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.requestCancel(command)),
     readModelResult: recoveryReaders.readModelResult,
-    reopenModelSource: recoveryReaders.reopenModelSource
+    reopenModelSource: recoveryReaders.reopenModelSource,
+    reopenOpeningModelSource: recoveryReaders.reopenOpeningModelSource
   });
 }
 
