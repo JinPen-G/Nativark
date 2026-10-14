@@ -23,6 +23,10 @@ import { composeAuthorizedReadonlyPersistentTaskInputRunner } from './authorized
 import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repository-adapter';
 import type { AiTaskRunnerClock } from './ai-task-runner.ports';
 import type { AiTaskRegisteredExecutor } from './prisma-task-measured-effects';
+import { aiTaskRunnerLimitsSchema, aiTaskRunPlanSchema } from './prisma-task-run-evidence.repository';
+import type { AiTaskApplicationHost } from './prisma-task-application';
+import type { AiTaskHeldPreparation } from './ai-task-runner.service';
+import { PrismaTaskPlanPolicyRepository } from './prisma-task-plan-policy.repository';
 
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
 const identity = ({ authorizedAt: _at, requestId: _id, ...context }: AiExecutionContext) => requestFingerprint(context);
@@ -73,6 +77,96 @@ export function composePersistedRiskTaskRunner(input: ReadonlyRunnerDependencies
   diagnosticCore: NonNullable<ReadonlyRunnerDependencies['diagnosticCore']>; reports: NonNullable<ReadonlyRunnerDependencies['reports']>
 }) {
   return composeReadonly(input, 'operations.risks.list');
+}
+
+const hostResourceId = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+const readonlyHostTaskSchema = z.object({ taskId: hostResourceId.max(36), runId: hostResourceId.max(36),
+  steps: z.array(z.object({ registrationRef: hostResourceId, toolCode: z.enum(PERSISTED_READONLY_TOOLS),
+    input: z.unknown() }).strict()).min(1).max(6), limits: aiTaskRunnerLimitsSchema
+}).strict().refine(task => new Set(task.steps.map(step => step.registrationRef)).size === task.steps.length
+  && task.steps.length <= task.limits.maxSteps && task.steps.length <= task.limits.maxCalls);
+
+/** Normal host for existing server-created tasks. The host selects the closed
+ * tool/input set from its authorized original request, never from model tool
+ * names or HTTP fields. The original runner acquires the lease before input
+ * publication and saves one immutable plan; no synthetic RUNNING/lease state.
+ * Policy management is separate and defaults to not_configured/disabled. */
+export function composePersistedReadonlyBusinessTaskHost(input: ReadonlyRunnerDependencies & {
+  host: AiTaskApplicationHost;
+  task: z.infer<typeof readonlyHostTaskSchema>;
+  scene: { code: string; version: string };
+}) {
+  const parsed = readonlyHostTaskSchema.safeParse(structuredClone(input.task));
+  if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+  const task = parsed.data;
+  const scene = { ...input.scene };
+  // Eagerly validate server inputs with the existing tool schemas and copy
+  // them. A caller retaining the config object cannot change the later plan.
+  const schemaFor = (tool: PersistedReadonlyTool) => tool === 'rental.catalog.search' ? aiCatalogReadInputSchema
+    : tool === 'rental.availability.check' ? aiAvailabilityReadInputSchema
+      : tool === 'membership.customer.resolve' ? aiMembershipCandidateReadInputSchema
+        : tool === 'tenant.opening.diagnose' ? aiOpeningReadInputSchema
+          : tool === 'operations.risks.list' ? aiRiskReadInputSchema : aiPersistedOrderExplainInputSchema;
+  for (const step of task.steps) {
+    const normalized = schemaFor(step.toolCode).safeParse(step.input);
+    if (!normalized.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    step.input = structuredClone(normalized.data);
+  }
+  const tools = [...new Set(task.steps.map(step => step.toolCode))];
+  const single = tools.length === 1 ? composeReadonly(input, tools[0]) : undefined;
+  const multi = single ? undefined : composePersistedReadonlyBusinessTaskRunner({ ...input, tools });
+  const root = single ?? multi!;
+  const sourceFor = (tool: PersistedReadonlyTool) => single ? single.source : multi!.sources[tool];
+  const first = sourceFor(tools[0]);
+  const prepare: AiTaskHeldPreparation = async ({ lease, taskRevision, signal }) => {
+    if (signal?.aborted || lease.taskId !== task.taskId || lease.runId !== task.runId) throw unavailable();
+    const access = await root.authorization.tasks.resolveAccess(task.taskId, 'transition_task');
+    const owner = await input.db.aiTask.findFirst({ where: access.where });
+    if (!owner || owner.sceneCode !== scene.code || owner.sceneVersion !== scene.version) throw unavailable();
+    for (const step of task.steps) {
+      if (signal?.aborted) throw unavailable();
+      const source = sourceFor(step.toolCode);
+      const command = { taskId: task.taskId, registrationRef: step.registrationRef, expectedTaskRevision: taskRevision,
+        lease, input: structuredClone(step.input) };
+      if (step.toolCode === 'rental.catalog.search') await source.publishCatalogInput(command);
+      else if (step.toolCode === 'rental.availability.check') await source.publishAvailabilityInput(command);
+      else if (step.toolCode === 'membership.customer.resolve') await source.publishMembershipCandidateInput(command);
+      else if (step.toolCode === 'tenant.opening.diagnose') await source.publishOpeningInput(command);
+      else if (step.toolCode === 'operations.risks.list') await source.publishRiskInput(command);
+      else await source.publishOrderExplainInput(command);
+    }
+    const steps = task.steps.map(step => ({ registrationRef: step.registrationRef,
+      toolCode: step.toolCode, toolVersion: AI_TOOL_DRAFT_VERSION, operation: 'readonly' as const }));
+    const saved = await input.db.aiTaskRunPlan.findUnique({ where: { scopeId_taskId_runId: {
+      scopeId: owner.scopeId, taskId: task.taskId, runId: task.runId } } });
+    if (saved) {
+      const plan = aiTaskRunPlanSchema.parse(structuredClone(saved.payload));
+      if (saved.scopeId !== owner.scopeId || saved.taskId !== task.taskId || saved.runId !== task.runId
+        || plan.taskId !== task.taskId || plan.runId !== task.runId || requestFingerprint(plan) !== saved.planHash
+        || requestFingerprint(plan.steps) !== requestFingerprint(steps)
+        || requestFingerprint(plan.limits) !== requestFingerprint(task.limits)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      const proof = await first.authorize(plan, lease);
+      if (proof.authorityHash !== saved.authorityHash || proof.policyVersion !== saved.policyVersion) throw unavailable();
+      return;
+    }
+    if (signal?.aborted) throw unavailable();
+    await root.evidence.savePlan({ taskId: task.taskId, runId: task.runId, taskRevision, steps,
+      limits: structuredClone(task.limits) }, lease);
+  };
+  const application = root.createApplication({ ...input.host }, prepare);
+  const policy = new PrismaTaskPlanPolicyRepository(input.db, { ...input.authorization,
+    guard: input.guard, scene, tool: tools[0], tools }, input.wall);
+  const reference = (value: unknown) => {
+    const parsed = z.object({ taskId: hostResourceId.max(36), runId: hostResourceId.max(36) }).strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    if (parsed.data.taskId !== task.taskId || parsed.data.runId !== task.runId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    return parsed.data;
+  };
+  return Object.freeze({ ...root, policy, prepare, application: Object.freeze({
+    start: (value: unknown, signal?: AbortSignal) => application.start(reference(value), signal),
+    reconcile: (value: unknown, signal?: AbortSignal) => application.reconcile(reference(value), signal),
+    inspect: (value: unknown) => application.inspect(reference(value))
+  }) });
 }
 /** One immutable server plan and one cumulative resource ledger for a closed
  * group of actual readers. Agent tool names cannot extend this registry. */
