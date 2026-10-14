@@ -177,19 +177,23 @@ export function composeRequestBoundSettingsTaskCreation(
         return { context: after.context, change: original.change };
       });
       const original = await read();
-      const repository = new AiTaskCreationRepository(input.db, { resolve: async (sceneCode, inputRef) => {
+      const resolveOriginal = async (sceneCode: string, inputRef: string) => {
         if (sceneCode !== scene.code || inputRef !== original.change.changeId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         const current = await read();
         if (original.change.changeId !== current.change.changeId || original.change.changeHash !== current.change.changeHash
           || originalIdentityHash(original.context) !== originalIdentityHash(current.context)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-        return { context: current.context, creationAllowed: true, sceneCode: scene.code, sceneVersion: scene.version,
+        return { context: current.context, sceneCode: scene.code, sceneVersion: scene.version,
           // The immutable change row is revision one. Its business baseRevision
           // is already hash-bound and must not become a fabricated input revision.
           inputRef: current.change.changeId, inputRevision: 1, inputHash: current.change.changeHash };
-      } }, clock);
+      };
+      const repository = creating ? new AiTaskCreationRepository(input.db, { resolve: async (sceneCode, inputRef) =>
+        ({ ...await resolveOriginal(sceneCode, inputRef), creationAllowed: true as const }) }, clock)
+        : AiTaskCreationRepository.receiptReader(input.db, { resolve: resolveOriginal }, clock);
       const target = { creationKey: command.creationKey, sceneCode: scene.code, inputRef: original.change.changeId };
       let receipt;
-      try { receipt = creating ? await repository.create(target) : await repository.readCreation(target); }
+      try { receipt = creating && repository instanceof AiTaskCreationRepository
+        ? await repository.create(target) : await repository.readCreation(target); }
       catch (error) {
         if (creating && error instanceof AiTaskRepositoryError && error.code === 'AI_STORAGE_UNAVAILABLE') {
           // The repository cannot prove a failed transaction reply was uncommitted.
