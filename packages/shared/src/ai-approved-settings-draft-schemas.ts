@@ -18,6 +18,8 @@ const snapshot = object({ recordId: id(36), revision: literal(1), contentHash: h
 
 export const AI_APPROVED_SETTINGS_DRAFT_SCHEMAS = {
   AiApprovedSettingsTaskCreationDraft: object({ creationKey: id(128), changeKey: id(128) }),
+  AiApprovedSettingsTaskCancellationDraft: object({ creationKey: id(128), changeKey: id(128),
+    expectedRevision: { type: 'integer', minimum: 1, maximum: 4294967293 } }),
   AiApprovedSettingsTaskPolicyReadDraft: object({ creationKey: id(128), changeKey: id(128), operation: id() }),
   AiApprovedSettingsTaskPolicyConfigureDraft: object({ creationKey: id(128), changeKey: id(128), operation: id(),
     expectedRevision: { anyOf: [revision, { type: 'null' }] } }),

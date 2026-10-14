@@ -9,6 +9,8 @@ export interface AiApprovedSettingsTaskCreationDraft { creationKey: string; chan
 export interface AiApprovedSettingsTaskPolicyReadDraft extends AiApprovedSettingsTaskCreationDraft { operation: string; }
 export interface AiApprovedSettingsTaskPolicyConfigureDraft extends AiApprovedSettingsTaskPolicyReadDraft { expectedRevision: number | null; }
 export interface AiApprovedSettingsTaskPolicyClearDraft extends AiApprovedSettingsTaskPolicyReadDraft { expectedRevision: number; }
+/** The original receipt, not a caller task/run or cancellation proof. */
+export interface AiApprovedSettingsTaskCancellationDraft extends AiApprovedSettingsTaskCreationDraft { expectedRevision: number; }
 export interface AiApprovedSettingsReferenceDraft {
   draftVersion: typeof AI_APPROVED_SETTINGS_DRAFT_VERSION;
   taskId: string;

@@ -225,6 +225,7 @@ export function composeRequestBoundSettingsTaskControls(
   const readSchema = reference.extend({ operation: z.string() }).strict();
   const writeSchema = readSchema.extend({ expectedRevision: z.number().int().min(1).max(4294967294).nullable() }).strict();
   const clearSchema = readSchema.extend({ expectedRevision: z.number().int().min(1).max(4294967293) }).strict();
+  const cancellationSchema = reference.extend({ expectedRevision: z.number().int().min(1).max(4294967293) }).strict();
   const call = bindRequests({ ...dependencies, scene }, { enabled: options.enabled, audience: options.audience }, input => ({
     input, policies: composeTaskActionPolicyManagement(input), settings: composeApprovedSettingsApplication(input),
     clock: input.clock ?? (() => new Date())
@@ -270,7 +271,30 @@ export function composeRequestBoundSettingsTaskControls(
       return freezeOriginalInput({ receipt, semantics: 'policy_not_approval_or_dispatch' as const });
     });
   };
+  const cancellation = (request: AiSceneHttpRequest, value: unknown,
+    mode: 'request' | 'settle_unstarted' | 'read_request' | 'read_settlement') => {
+    const parsed = cancellationSchema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return call(request, parsed.data, async (root, value) => {
+      const command = cancellationSchema.parse(value), found = await target(root, request,
+        reference.parse({ creationKey: command.creationKey, changeKey: command.changeKey }));
+      const authorization = composePersistedTaskAuthorization(root.input);
+      const transitions = new AiTaskTransitionRepository(root.input.db, authorization.authority, root.clock);
+      const input = { taskId: found.task.taskId, expectedRevision: command.expectedRevision };
+      const receipt = mode === 'read_request' ? await transitions.readCancellationReceipt(input)
+        : mode === 'read_settlement' ? await transitions.readCancellationSettlementReceipt(input)
+          : mode === 'request' ? await transitions.transition({ ...input, to: 'cancel_requested', reason: 'cancel_requested' })
+            : await transitions.settleUnstartedCancellation({ ...input, to: 'cancelled', reason: 'cancel_settled' }, found.task.runId);
+      await found.verify();
+      return freezeOriginalInput({ receipt, cancellation: 'not_business_rollback' as const,
+        automaticRetry: false as const, financialRelease: 'not_performed' as const });
+    });
+  };
   return Object.freeze({
+    requestCancellation: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, 'request'),
+    settleUnstartedCancellation: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, 'settle_unstarted'),
+    readCancellation: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, 'read_request'),
+    readCancellationSettlement: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, 'read_settlement'),
     readPolicy: (request: AiSceneHttpRequest, value: unknown) => policy(request, value, 'read'),
     configurePolicy: (request: AiSceneHttpRequest, value: unknown) => policy(request, value, 'configure'),
     clearPolicy: (request: AiSceneHttpRequest, value: unknown) => policy(request, value, 'clear'),
