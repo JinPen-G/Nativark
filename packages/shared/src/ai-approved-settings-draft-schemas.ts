@@ -20,6 +20,13 @@ export const AI_APPROVED_SETTINGS_DRAFT_SCHEMAS = {
   AiApprovedSettingsChangePrepareDraft: object({ changeKey: id(128), baseRevision: revision, expiresAt: time,
     notifications: object({ enabledEvents: stringArray, editableChannels: channels }) }),
   AiApprovedSettingsChangeReceiptReadDraft: object({ changeKey: id(128) }),
+  AiApprovedSettingsCurrentDraft: object({ settingsRevision: { type: 'integer', minimum: 1, maximum: 4294967295 },
+    notifications: object({ enabledEvents: stringArray, editableChannels: channels }) }),
+  AiApprovedSettingsChangePreparationResultDraft: object({ change: ref('AiApprovedSettingsChangeReviewDraft'),
+    task: literal('not_created'), approval: literal('not_granted'), activeSettings: literal('not_modified') }),
+  AiApprovedSettingsChangeReceiptDraft: { oneOf: [
+    object({ state: literal('prepared_not_approved'), change: ref('AiApprovedSettingsChangeReviewDraft') }),
+    object({ state: literal('not_observed'), nextAction: literal('read_change_receipt') })] },
   AiApprovedSettingsTaskCreationDraft: object({ creationKey: id(128), changeKey: id(128) }),
   AiApprovedSettingsTaskCancellationDraft: object({ creationKey: id(128), changeKey: id(128),
     expectedRevision: { type: 'integer', minimum: 1, maximum: 4294967293 } }),

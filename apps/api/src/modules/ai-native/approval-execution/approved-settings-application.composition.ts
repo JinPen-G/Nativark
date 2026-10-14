@@ -158,11 +158,12 @@ export function composeApprovedSettingsApplication(d: ApprovedSettingsApplicatio
   };
   // Preparing a frozen business change is distinct from creating an AI
   // proposal, deciding approval and committing active settings.
-  const readCurrent = () => domain().readCurrent();
+  const readCurrent = async () => settingsContract('AiApprovedSettingsCurrentDraft', await domain().readCurrent(), true);
   const prepareChange = async (value: unknown) => {
-    try { return await domain().prepareChange(structuredClone(value)); }
+    try { return settingsContract('AiApprovedSettingsChangeReviewDraft', await domain().prepareChange(structuredClone(value)), true); }
     catch (error) {
-      if (error instanceof AiTaskRepositoryError || error instanceof HttpException && error.getStatus() < 500) throw error;
+      if (error instanceof AiTaskRepositoryError && error.code !== 'AI_RESOURCE_UNAVAILABLE'
+        || error instanceof HttpException && error.getStatus() < 500) throw error;
       // The domain transaction may have committed its immutable change. Never
       // turn a lost acknowledgement into permission to generate another key.
       throw new ApprovedSettingsApplicationUnknownError('read_change_receipt');
@@ -173,15 +174,16 @@ export function composeApprovedSettingsApplication(d: ApprovedSettingsApplicatio
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const changeKey = parsed.data.changeKey;
     return route.withAuthorization('read', async (actor, revalidate) => {
-      const change = await d.db.rentalApprovedSettingsChange.findUnique({
+      const change = structuredClone(await d.db.rentalApprovedSettingsChange.findUnique({
         where: { workspaceId_actorId_changeKey: { workspaceId: actor.workspaceId, actorId: actor.actorId, changeKey } }
-      });
-      if (!change) return { state: 'not_observed' as const, nextAction: 'read_change_receipt' as const };
+      }));
+      if (!change) return settingsContract('AiApprovedSettingsChangeReceiptDraft',
+        { state: 'not_observed', nextAction: 'read_change_receipt' }, true);
       if (change.workspaceId !== actor.workspaceId || change.tenantId !== actor.tenantId
         || change.actorId !== actor.actorId || change.changeKey !== changeKey) throw settingsDenied();
       const review = await domain().readHistoricalChange({ changeId: change.id, changeHash: change.changeHash });
       await revalidate();
-      return { state: 'prepared_not_approved' as const, change: review };
+      return settingsContract('AiApprovedSettingsChangeReceiptDraft', { state: 'prepared_not_approved', change: review }, true);
     });
   };
   const publishTaskInput = (value: unknown) => composePersistedSettingsTaskInput(d).source.publishSettingsInput(value);

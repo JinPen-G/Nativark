@@ -4,6 +4,7 @@ import type { AiSceneHttpRequest, composeRequestBoundOriginalSceneModel, compose
   composeRequestBoundSettingsTaskControls, composeRequestBoundSettingsChanges } from './request-bound-scenes.application';
 import { respondAiScene } from './original-scenes.controller';
 import { withRequestAbort, type AiRequestAbortSource } from './request-abort';
+import { settingsContract } from '../approval-execution/approved-settings-contracts';
 
 export const AI_SETTINGS_TASK_HTTP_REQUESTS = Symbol('AI_SETTINGS_TASK_HTTP_REQUESTS');
 export const AI_SETTINGS_TASK_CREATION_REQUESTS = Symbol('AI_SETTINGS_TASK_CREATION_REQUESTS');
@@ -29,7 +30,17 @@ export class AiSettingsChangeController {
   @Post(routes.readCurrentSettings) @Header('Cache-Control', 'no-store')
   readCurrent(@Req() request: AiSceneHttpRequest) { return this.respond(() => this.changes.readCurrent(request)); }
   @Post(routes.prepareOriginalSettingsChange) @Header('Cache-Control', 'no-store')
-  prepare(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.changes.prepare(request, body)); }
+  prepare(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return this.respond(async () => {
+      const result = await this.changes.prepare(request, body);
+      try { return settingsContract('AiApprovedSettingsChangePreparationResultDraft', result, true); }
+      catch {
+        // Preparation may already be durable. A malformed acknowledgement is
+        // not permission to prepare again under a different operation key.
+        throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN', retryable: false });
+      }
+    });
+  }
   @Post(routes.readOriginalSettingsChange) @Header('Cache-Control', 'no-store')
   readReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.changes.readReceipt(request, body)); }
 }

@@ -8,6 +8,21 @@ export interface AiApprovedSettingsChangePrepareDraft {
   notifications: { enabledEvents: string[]; editableChannels: Array<'sms' | 'app_push' | 'wechat' | 'email'> };
 }
 export interface AiApprovedSettingsChangeReceiptReadDraft { changeKey: string; }
+/** Only the current notification projection, never secrets or execution proof. */
+export interface AiApprovedSettingsCurrentDraft {
+  settingsRevision: number;
+  notifications: AiApprovedSettingsChangePrepareDraft['notifications'];
+}
+export interface AiApprovedSettingsChangePreparationResultDraft {
+  change: AiApprovedSettingsChangeReviewDraft;
+  task: 'not_created';
+  approval: 'not_granted';
+  activeSettings: 'not_modified';
+}
+/** Historical preparation evidence is not a current approval or a commit. */
+export type AiApprovedSettingsChangeReceiptDraft =
+  | { state: 'prepared_not_approved'; change: AiApprovedSettingsChangeReviewDraft }
+  | { state: 'not_observed'; nextAction: 'read_change_receipt' };
 /** References the original Core preparation; never supplies task ownership,
  * a plan, approval or active configuration values. */
 export interface AiApprovedSettingsTaskCreationDraft { creationKey: string; changeKey: string; }

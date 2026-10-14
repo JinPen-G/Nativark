@@ -9,9 +9,14 @@ import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE, typ
   type AiApprovedSettingsReadOperationDraft, type AiApprovedSettingsPayloadDraft, type AiApprovedSettingsReviewDraft,
   type AiApprovedSettingsChangeReviewDraft, type AiApprovedSettingsOperationReceiptDraft, type AiApprovedSettingsOperationResultDraft,
   type AiApprovedSettingsDecisionReceiptDraft, type AiApprovedSettingsPreparationReceiptDraft, type AiApprovedSettingsErrorDraft } from '@rental-os/shared';
+import type { AiApprovedSettingsCurrentDraft, AiApprovedSettingsChangeReceiptDraft,
+  AiApprovedSettingsChangePreparationResultDraft } from '@rental-os/shared';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 
 type Contracts = {
+  AiApprovedSettingsCurrentDraft: AiApprovedSettingsCurrentDraft;
+  AiApprovedSettingsChangeReceiptDraft: AiApprovedSettingsChangeReceiptDraft;
+  AiApprovedSettingsChangePreparationResultDraft: AiApprovedSettingsChangePreparationResultDraft;
   AiApprovedSettingsPrepareDraft: AiApprovedSettingsPrepareDraft;
   AiApprovedSettingsReferenceDraft: AiApprovedSettingsReferenceDraft;
   AiApprovedSettingsDecisionDraft: AiApprovedSettingsDecisionDraft;
