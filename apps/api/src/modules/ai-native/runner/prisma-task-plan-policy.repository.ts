@@ -10,7 +10,7 @@ import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { TenantModelConfigurationAuthority } from '../tenant-model-config.authority';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { aiTaskRunnerLimitsSchema } from './prisma-task-run-evidence.repository';
-import { aiPersistedPlanToolsSchema, type PersistedTaskInputTool } from './prisma-task-plan-input.source';
+import { aiPersistedPlanToolsSchema, PERSISTED_READONLY_TOOLS, type PersistedTaskInputTool } from './prisma-task-plan-input.source';
 import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL } from '../model-input/task-model-input';
 import { TEXT_CAPABILITY_PROBE_TOOL } from '../text-capability-probe';
 
@@ -50,7 +50,7 @@ export class PrismaTaskPlanPolicyRepository {
     this.selected = scene.parse(structuredClone(input.scene));
     this.audit = input.audit === true;
     this.tool = input.tool ?? 'rental.catalog.search';
-    if (!['rental.catalog.search', 'rental.availability.check', 'rental.order.explain', 'rental.order.commit', 'tenant.notifications.commit', TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, TEXT_CAPABILITY_PROBE_TOOL].includes(this.tool)) throw unavailable();
+    if (![...PERSISTED_READONLY_TOOLS, 'rental.order.commit', 'tenant.notifications.commit', TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, TEXT_CAPABILITY_PROBE_TOOL].includes(this.tool)) throw unavailable();
     const configured = aiPersistedPlanToolsSchema.safeParse((input.tools ?? [this.tool]).map(code => ({ code, version: AI_TOOL_DRAFT_VERSION })));
     if (!configured.success || !configured.data.some(tool => tool.code === this.tool)) throw unavailable();
     this.configuredTools = structuredClone(configured.data);
