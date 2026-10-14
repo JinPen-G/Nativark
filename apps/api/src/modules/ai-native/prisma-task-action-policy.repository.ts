@@ -7,8 +7,10 @@ import type { AiScopeRepository } from './ai-scope.repository';
 
 const operations: readonly string[] = [
   'read_metadata', 'read_events', 'claim_run', 'claim_recovery_run', 'release_run',
-  'transition_task', 'read_step_terminal', 'takeover_run', 'request_input', 'submit_input', 'resume_input'
+  'transition_task', 'read_step_terminal', 'takeover_run', 'request_input', 'submit_input', 'resume_input', 'decide_approval'
 ];
+/** Existing human approval policy, not a new runner operation or model tool. */
+export type AiTaskActionPolicyOperation = AiTaskRepositoryOperation | 'decide_approval';
 export const taskActionPolicyOperations = Object.freeze([...operations]);
 const id = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u;
 const permission = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u;
@@ -21,14 +23,14 @@ export interface AiTaskActionPolicyMutationAuthority {
 
 export interface AiTaskActionPolicyMutation {
   taskId: string;
-  operation: AiTaskRepositoryOperation;
+  operation: AiTaskActionPolicyOperation;
   requiredPermissions: readonly string[];
   expiresAt: Date;
 }
 
 export interface AiTaskActionPolicyMutationResult {
   taskId: string;
-  operation: AiTaskRepositoryOperation;
+  operation: AiTaskActionPolicyOperation;
   revision: number;
   requiredPermissions: readonly string[];
   expiresAt: string;
@@ -96,19 +98,19 @@ export class PrismaTaskActionPolicyRepository {
   }
 
   private project(row: { taskId: string; operation: string; revision: number; requiredPermissions: unknown; expiresAt: Date }): AiTaskActionPolicyMutationResult {
-    if (!operations.includes(row.operation as AiTaskRepositoryOperation) || !Number.isSafeInteger(row.revision) || row.revision < 1 || row.revision > maxRevision
+    if (!operations.includes(row.operation as AiTaskActionPolicyOperation) || !Number.isSafeInteger(row.revision) || row.revision < 1 || row.revision > maxRevision
       || !Array.isArray(row.requiredPermissions) || row.requiredPermissions.length < 1 || row.requiredPermissions.length > 64
       || row.requiredPermissions.some(value => typeof value !== 'string' || !permission.test(value))
       || new Set(row.requiredPermissions).size !== row.requiredPermissions.length
       || !(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime())) throw error('AI_STORAGE_UNAVAILABLE');
-    return { taskId: row.taskId, operation: row.operation as AiTaskRepositoryOperation, revision: row.revision,
+    return { taskId: row.taskId, operation: row.operation as AiTaskActionPolicyOperation, revision: row.revision,
       requiredPermissions: [...row.requiredPermissions] as string[], expiresAt: row.expiresAt.toISOString() };
   }
 
   /** Original-key read for configuration/CAS recovery, including an expired
    * policy. Expired rows are not execution grants; the action consumer still
    * refuses them. A failed read never proves that a prior write did not commit. */
-  async read(taskId: string, operation: AiTaskRepositoryOperation) {
+  async read(taskId: string, operation: AiTaskActionPolicyOperation) {
     if (!operations.includes(operation)) throw error('AI_INVALID_INPUT');
     const access = await this.access(taskId);
     let row;
@@ -161,7 +163,7 @@ export class PrismaTaskActionPolicyRepository {
     }
   }
 
-  async clear(taskId: string, operation: AiTaskRepositoryOperation, expectedRevision: number): Promise<AiTaskActionPolicyMutationResult> {
+  async clear(taskId: string, operation: AiTaskActionPolicyOperation, expectedRevision: number): Promise<AiTaskActionPolicyMutationResult> {
     const now = this.clock();
     if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw error('AI_INVALID_INPUT');
     if (!operations.includes(operation) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 1 || expectedRevision >= maxRevision) throw error('AI_INVALID_INPUT');

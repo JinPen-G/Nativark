@@ -145,7 +145,10 @@ export class AiOriginalSceneRecoveryController {
 @Controller(AI_SCENE_MODEL_HTTP_DRAFT.basePath)
 export class AiOriginalSceneModelActionsController extends AiOriginalSceneRecoveryController {
   constructor(@Inject(AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS)
-    protected readonly model: ReturnType<typeof composeRequestBoundPersistedOriginalSceneModel>) { super(model); }
+    protected readonly model: ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders> &
+      Pick<ReturnType<typeof composeRequestBoundPersistedOriginalSceneModel>,
+        'start' | 'readInput' | 'refreshInput' | 'resume' | 'readQuotePreparation' | 'confirmClarifiedQuote' |
+        'readClarifiedQuoteReceipt' | 'continueAnswer' | 'reconcile' | 'recover' | 'readExecution' | 'takeover' | 'requestCancel'>) { super(model); }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.start)
   start(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => withRequestAbort(request, signal => this.model.start(request, body, signal)));
