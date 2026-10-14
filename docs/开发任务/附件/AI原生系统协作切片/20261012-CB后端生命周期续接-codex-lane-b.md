@@ -190,3 +190,11 @@ Node DATABASE_URL 固定 mysql://offline:offline@127.0.0.1:1/rental_os_offline�
 原AutomationFailureTaskService.reconcile在tasks.readCreation等待后再读authority.input，现明确比较两次原输入的tenant/workspace/scope/subject、授权和policy revision、event/resource revision、scene、creationKey/inputHash/authorityHash、payload及期限。持久status/task链接字段允许原合法推进，但不可变材料任一变化返回result_unknown，不把旧收据拼到新输入，不新建任务或操作。
 
 一次内联实际AutomationFailureTaskService、明确authority/receipt端口替身：稳定原键not_observed返回；readCreation等待期间creationKey变化拒绝result_unknown；未调用create/write/dispatch。stdout `smoke=passed; actual original creation reconcile rejects changed immutable input across receipt await; no create/write/dispatch`，exit0。必要strict noEmit1011 files、0 diagnostics/exit0，diff check0。该证据不是Prisma正向影子任务创建/政策生产验收；未新建或修改测试脚本/fixture。原human request、close/feedback/operation消费者保持，原键未知只读核对。
+
+### 20261014 同请求政策正向消费与关闭隔离
+
+原managePolicy调用的内部工厂会复制请求凭据，现HumanKnowledgeManagementRequestFactory将其原Auth读取绑定到父请求：resolveAccessContext等待前/后均检查私有credentials.current；close期间的身份读取不能继续返回可用结果。仍调用原AuthService，不自造身份/授权，不修改Guard或政策/CAS，正常生命周期也沿该同请求身份入口。关闭不声称撤销已提交事务，未知操作仍读原键。
+
+一次直接内联调用原factory，复用已有formal-authorization文件中管理fixture定义（仅在内存读取其fixture前缀，无test注册、无文件修改）。实际AuthService/ApiAuthGuard/HumanKnowledgePolicyManagementService/Prisma适配代码完成create_disabled准备/确认CAS提交、enable准备/确认CAS提交、原operation读取与revision2策略读取；然后可控Promise在Auth已读、未返回时close，迟到读取拒绝。权威管理委托记录、DB及ObjectIO是该既有fixture的显式合成来源，不是正式部署，也不是authorized:true替身；没有模型或真实存储调用。stdout `smoke=passed; actual AuthService/ApiAuthGuard/policy prepare-CAS-commit-original receipt via current request; parent close during Auth await rejected; explicit offline delegated authority and DB/ObjectIO doubles; no model/storage connection`，exit0。该正向证据限政策生产消费，不包含新上传/索引/冻结/派发全链。
+
+必要原API strict noEmit847files、0diagnostics/exit0；diff check0，未新增/修改测试脚本或fixture，无全量回归/新worker/HTTP启用。主线正在认领公共staff-inspection-task-policy.composition.ts，B不双写该正式staff生产者，固定交付后再沿现有识别任务消费者接入。
