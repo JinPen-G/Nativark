@@ -121,6 +121,10 @@ export class AiOriginalSceneRecoveryController {
   settleUnstartedCancellation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => this.observations.settleUnstartedCancellation(request, body), 'read_cancellation_settlement_receipt');
   }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.settleReleasedInputCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  settleReleasedInputCancellation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.observations.settleReleasedInputCancellation(request, body), 'read_cancellation_settlement_receipt');
+  }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readAnswer) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readAnswer(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => this.observations.readAnswer(request, body), 'read_answer');

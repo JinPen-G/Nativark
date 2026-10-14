@@ -252,6 +252,7 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     };
     return { scenes, resultReader, tasks: authorization.tasks, db: input.db,
       answers: () => PrismaTaskInputRepository.receiptReader(input.db, authorization.tasks, input.clock),
+      inputCancellation: () => PrismaTaskInputRepository.releasedCancellationWitness(input.db, authorization.tasks, input.clock),
       snapshots: new PrismaTaskRecoverySnapshotRepository(input.db, authorization.tasks),
       transitions: new AiTaskTransitionRepository(input.db, authorization.authority, input.clock),
       takeovers: new PrismaTaskTakeoverRepository(input.db, authorization.authority, input.clock) };
@@ -381,6 +382,28 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
       });
     },
     readCancellationReceipt: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, false),
+    /** Close only the original released, fully measured clarification wait.
+     * Its persisted witness is checked under the aggregate task CAS lock. */
+    settleReleasedInputCancellation(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = cancellationSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = cancellationSchema.parse(command), before = await root.scenes.requests.readHistorical(input.original);
+        const task = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const receipt = await root.transitions.settleInputCancellation({ taskId: task.taskId,
+          expectedRevision: input.expectedRevision, to: 'cancelled', reason: 'cancel_settled' }, root.inputCancellation());
+        const after = await root.scenes.requests.readHistorical(input.original);
+        const latest = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (after.receipt.state === 'revoked' || after.receipt.contentHash !== before.receipt.contentHash
+          || originalIdentityHash(after.context) !== originalIdentityHash(before.context)
+          || latest.state !== 'observed' || latest.taskId !== task.taskId || latest.runId !== task.runId)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return freezeOriginalInput({ original: input.original, receipt,
+          cancellation: 'released_input_wait_cancelled_not_business_rollback' as const,
+          resourceRelease: 'not_attempted' as const, automaticRetry: false as const });
+      });
+    },
     readCancellationSettlementReceipt: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, true),
     readTakeoverReceipt(request: AiSceneHttpRequest, value: unknown) {
       const parsed = schema.safeParse(structuredClone(value));
@@ -462,6 +485,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     readRecoverySnapshot: recoveryReaders.readRecoverySnapshot,
     requestCancellationIntent: recoveryReaders.requestCancellationIntent,
     settleUnstartedCancellation: recoveryReaders.settleUnstartedCancellation,
+    settleReleasedInputCancellation: recoveryReaders.settleReleasedInputCancellation,
     readCancellationReceipt: recoveryReaders.readCancellationReceipt,
     readCancellationSettlementReceipt: recoveryReaders.readCancellationSettlementReceipt,
     start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
@@ -543,6 +567,7 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
     readRecoverySnapshot: recoveryReaders.readRecoverySnapshot,
     requestCancellationIntent: recoveryReaders.requestCancellationIntent,
     settleUnstartedCancellation: recoveryReaders.settleUnstartedCancellation,
+    settleReleasedInputCancellation: recoveryReaders.settleReleasedInputCancellation,
     readCancellationReceipt: recoveryReaders.readCancellationReceipt,
     readCancellationSettlementReceipt: recoveryReaders.readCancellationSettlementReceipt,
     startSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>

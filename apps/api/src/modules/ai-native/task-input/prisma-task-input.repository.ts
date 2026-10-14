@@ -150,10 +150,11 @@ export async function readTaskModelRunOrigin(tx: Tx, access: Access,
 export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskInputReader {
   constructor(private readonly db: Db, private readonly tasks: Pick<AiTaskRepository, 'resolveAccess'>,
     private readonly plans: AiTaskPlanEvidenceAuthority | undefined, private readonly source: AiTaskInputSource | undefined,
-    private readonly clock: () => Date = () => new Date(), private readonly receiptOnly = false) {
+    private readonly clock: () => Date = () => new Date(), private readonly receiptOnly = false,
+    private readonly cancellationWitnessOnly = false) {
     if (typeof db?.$transaction !== 'function' || typeof db?.aiTaskInputRequest?.create !== 'function'
       || typeof db?.aiTaskInputReceipt?.create !== 'function' || typeof tasks?.resolveAccess !== 'function'
-      || !receiptOnly && (typeof plans?.authorize !== 'function' || typeof source?.resolve !== 'function'
+      || !(receiptOnly || cancellationWitnessOnly) && (typeof plans?.authorize !== 'function' || typeof source?.resolve !== 'function'
         || typeof source?.validateAnswers !== 'function')) throw unavailable();
   }
 
@@ -162,6 +163,13 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
   static receiptReader(db: Db, tasks: Pick<AiTaskRepository, 'resolveAccess'>, clock?: () => Date) {
     const repository = new PrismaTaskInputRepository(db, tasks, undefined, undefined, clock, true);
     return Object.freeze({ readSubmission: repository.readSubmission.bind(repository) });
+  }
+
+  /** Only the enclosing task-transition transaction may invoke this witness.
+   * It validates persisted released/measured input work, not a fresh model gate. */
+  static releasedCancellationWitness(db: Db, tasks: Pick<AiTaskRepository, 'resolveAccess'>, clock?: () => Date) {
+    const repository = new PrismaTaskInputRepository(db, tasks, undefined, undefined, clock, false, true);
+    return repository.closeCancelledInputWait.bind(repository);
   }
 
   private async access(taskId: string, operation: AiTaskRepositoryOperation, before?: Access) {
@@ -186,7 +194,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     }
   }
   private writeTransaction<T>(work: (tx: Tx) => Promise<T>) {
-    if (this.receiptOnly) throw unavailable();
+    if (this.receiptOnly || this.cancellationWitnessOnly) throw unavailable();
     return this.transaction(work, true);
   }
   private async task(tx: Tx, taskId: string, access: Access) {
