@@ -7,9 +7,12 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import { originalIdentityHash } from '../task-request/original-request.authority';
 import { freezeOriginalInput } from '../task-request/original-request.validation';
 import { PrismaTaskApplication } from '../runner/prisma-task-application';
+import { PrismaTaskRecoverySnapshotRepository } from '../runner/prisma-task-recovery-snapshot.repository';
 import { composePersistedTaskAuthorization } from '../task-authorization.composition';
 import { composeApprovedSettingsApplication } from '../approval-execution/approved-settings-application.composition';
-import { AI_APPROVED_SETTINGS_DRAFT_VERSION } from '@rental-os/shared';
+import { composeApprovedSettingsWaiting } from '../approval-execution/approved-settings-waiting.executor';
+import { ApprovedSettingsResultUnknownError } from '../../rental-core/approved-settings-change.ports';
+import { AI_APPROVED_SETTINGS_DRAFT_VERSION, AI_APPROVED_SETTINGS_TOOL_CODE, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import type { AiTaskCredentialSource } from '../task-current-action.authority';
 import { composeRequestBoundSettingsTaskCreation, type AiSceneHttpRequest,
@@ -70,6 +73,44 @@ export function composeRequestBoundSettingsTaskReads(
     } finally { active = false; }
   };
   return Object.freeze({
+    readResult(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = reference.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return consume(request, freezeOriginalInput(parsed.data), async (center, taskId, runId, change, bound) => {
+        const input = { taskId, runId };
+        const authorization = composePersistedTaskAuthorization(bound);
+        const recovery = new PrismaTaskRecoverySnapshotRepository(bound.db, authorization.tasks);
+        const snapshot = await recovery.read(input);
+        // Confirmation continuation ends in a phase receipt, not a model
+        // artifact. Preserve the original workflow projection and do not try
+        // to decode that receipt through the artifact-only result reader.
+        if (snapshot.steps.length > 1 || snapshot.steps.some(step =>
+          step.toolCode !== AI_APPROVED_SETTINGS_TOOL_CODE || step.toolVersion !== AI_TOOL_DRAFT_VERSION
+          || step.inputRef !== change.changeId || step.fingerprint !== change.changeHash))
+          throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const source = composeApprovedSettingsWaiting(bound);
+        const readOperation = async () => {
+          if (snapshot.steps.length === 0) return null;
+          try { return await source.readCommittedChange({ taskId, ...change }); }
+          catch (error) {
+            if (!(error instanceof ApprovedSettingsResultUnknownError)) throw error;
+            throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN', retryable: false });
+          }
+        };
+        // The existing reader derives the original key from THIS task/step,
+        // then verifies Core receipt + approval consumption. No caller key or
+        // latest workspace operation can stand in for this original action.
+        const operation = await readOperation();
+        if (requestFingerprint(await recovery.read(input)) !== requestFingerprint(snapshot)
+          || requestFingerprint(await readOperation()) !== requestFingerprint(operation))
+          throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        return freezeOriginalInput({ snapshot, operation,
+          businessOutcome: operation ? 'committed' as const
+            : snapshot.steps.some(step => step.status === 'unknown' || ['possible', 'committed'].includes(step.effect)) ? 'unknown' as const : 'not_observed' as const,
+          originalOperation: snapshot.steps.length ? 'original_task_step_key_read' as const : 'no_registered_step' as const,
+          execution: 'not_invoked' as const, automaticRetry: false as const });
+      });
+    },
     readConfirmation(request: AiSceneHttpRequest, value: unknown) {
       const parsed = reference.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
