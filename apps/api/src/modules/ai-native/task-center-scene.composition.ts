@@ -57,6 +57,30 @@ export function composeAiTaskCenterScene(input: {
     || typeof input.scenes.readRecovery !== 'function') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
 
   const readers = Object.freeze({
+    /** Reconnect observation only. Preserve the repository's exact page/reset
+     * and snapshot watermarks; neither event text nor metadata proves a
+     * business receipt, approval or a safe execution retry. */
+    readReconnect: async (value: unknown) => {
+      const parsed = eventRead.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      if (!input.events?.readSnapshot) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const command = freezeOriginalInput(parsed.data);
+      const before = await readObservedTask(command.original);
+      const snapshot = await input.events.readSnapshot({ taskId: before.taskId });
+      if (snapshot.taskId !== before.taskId || snapshot.revision !== before.revision) {
+        throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      }
+      const events = await input.events.readPage({ taskId: before.taskId, after: command.after, limit: command.limit });
+      const latest = await input.events.readSnapshot({ taskId: before.taskId });
+      await assertStillCurrent(command.original, before);
+      if (events.taskId !== before.taskId || requestFingerprint(snapshot) !== requestFingerprint(latest)) {
+        throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+      }
+      return freezeOriginalInput({ taskId: before.taskId, runId: before.runId, snapshot, events,
+        consistency: 'revalidated_reads_not_atomic_business_snapshot' as const,
+        execution: 'read_only_no_start_no_reconnect_side_effect' as const,
+        businessOutcome: 'not_inferred_from_events' as const });
+    },
     readPage: async (value: unknown = {}) => {
       const parsed = page.safeParse(value);
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
