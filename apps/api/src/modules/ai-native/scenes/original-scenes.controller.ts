@@ -1,13 +1,16 @@
 import { Body, Controller, Header, HttpCode, HttpException, Inject, Post, Req } from '@nestjs/common';
 import type { IncomingMessage } from 'node:http';
 import { z } from 'zod';
+import Ajv from 'ajv';
+import addFormats from 'ajv-formats';
 import { withRequestAbort } from './request-abort';
 import type { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneModel,
   composeRequestBoundPersistedOriginalSceneModel, composeRequestBoundOriginalTaskActionPolicies,
   composeRequestBoundScenePlanPolicies, composeRequestBoundOriginalTaskRecoveryReaders,
   composeRequestBoundOriginalOpeningReadTask, AiSceneHttpRequest } from './request-bound-scenes.application';
 import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT,
-  AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_OPENING_READ_TASK_HTTP_DRAFT } from '@rental-os/shared';
+  AI_SCENE_PLAN_POLICY_HTTP_DRAFT, AI_OPENING_READ_TASK_HTTP_DRAFT,
+  AI_SCENE_REQUEST_DRAFT_SCHEMAS, type AiOriginalOpeningReadSourceDraft } from '@rental-os/shared';
 import { originalRequestReferenceSchema } from '../task-request/original-request.validation';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 
@@ -39,6 +42,15 @@ export async function respondAiScene<T>(work: () => Promise<T>, unknownAction = 
   }
 }
 type SceneRunHttpRequest = AiSceneHttpRequest & Partial<Pick<IncomingMessage, 'aborted' | 'once' | 'removeListener'>>;
+const openingSourceAjv = new Ajv({ strict: true, coerceTypes: false, useDefaults: false, removeAdditional: false });
+addFormats(openingSourceAjv);
+const openingSourceDefinitions = JSON.parse(JSON.stringify(Object.fromEntries(
+  ['AiOriginalOpeningReadSourceDraft', 'AiOpeningReadFactsDraft', 'AiSceneRequestReceiptDraft']
+    .map(name => [name, AI_SCENE_REQUEST_DRAFT_SCHEMAS[name]])
+)).replaceAll('#/components/schemas/', '#/$defs/'));
+const validOpeningSource = openingSourceAjv.compile<AiOriginalOpeningReadSourceDraft>({
+  $ref: '#/$defs/AiOriginalOpeningReadSourceDraft', $defs: openingSourceDefinitions
+});
 
 /** Separate, opt-in read-task transport. It offers no model, approval, input
  * submission or configuration-write route, and never selects an arbitrary tool. */
@@ -86,13 +98,24 @@ export class AiOriginalOpeningReadTaskController {
   }
   @Post(AI_OPENING_READ_TASK_HTTP_DRAFT.reopenSource) @HttpCode(200) @Header('Cache-Control', 'no-store')
   reopenSource(@Req() request: SceneRunHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => {
+    return respondAiScene(async () => {
       // Reuse AiSceneModelResultReadDraft's original/resultId reference shape.
       // No URL, historic payload, tool code or caller Task ID is forwarded.
       const parsed = z.object({ original: originalRequestReferenceSchema, resultId: z.string().uuid() }).strict().safeParse(structuredClone(body));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      return withRequestAbort(request, signal => this.tasks.reopenSource(request,
-        { ...parsed.data.original, resultId: parsed.data.resultId }, signal));
+      const response = structuredClone(await withRequestAbort(request, signal => this.tasks.reopenSource(request,
+        { ...parsed.data.original, resultId: parsed.data.resultId }, signal)));
+      if (!validOpeningSource(response) || response.original.sceneCode !== 'opening_diagnosis'
+        || response.original.inputRef !== parsed.data.original.inputRef
+        || response.original.draftVersion !== parsed.data.original.draftVersion
+        || response.source.original.resultId !== parsed.data.resultId
+        || response.original.state === 'revoked' || response.source.facts.coverage !== 'requested_sections'
+        || BigInt(response.source.original.outputBytes) > 18446744073709551615n
+        || BigInt(response.source.original.activeMs) > 18446744073709551615n
+        || new Set(response.source.facts.items.map(row => row.key)).size !== response.source.facts.items.length) {
+        throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      }
+      return response;
     });
   }
 }

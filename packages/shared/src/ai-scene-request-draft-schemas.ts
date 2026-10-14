@@ -1,5 +1,5 @@
 import { AI_SCENE_REQUEST_DRAFT_VERSION, AI_SCENE_CODES } from './ai-scene-request-draft';
-import { AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT } from './ai-task-draft';
+import { AI_TASK_STATUSES_DRAFT, AI_STEP_STATUSES_DRAFT, AI_TASK_DRAFT_VERSION } from './ai-task-draft';
 import { RENTAL_FULFILLMENT_MODES, RENTAL_PRICING_UNIT_CODES } from './core';
 import { AI_TASK_INPUT_DRAFT_SCHEMAS } from './ai-task-input-draft-schemas';
 import { AI_QUOTE_SELECTION_DRAFT_SCHEMAS } from './ai-quote-selection-draft-schemas';
@@ -26,6 +26,18 @@ const observedTask = object({ state: choice('observed'), taskId: uuid, runId: uu
 const recoveryStep = object({ stepId: id(), runId: id(), actionId: id(), revision: integer(1, 4294967294), status: choice(...AI_STEP_STATUSES_DRAFT),
   effect: choice('none', 'possible', 'committed'), resultAvailable: { type: 'boolean' }, nextAction: choice('reconcile_original_action', 'read_authorized_result', 'runner_owned') });
 export const AI_SCENE_REQUEST_DRAFT_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiOpeningReadFactsDraft: object({ requestId: id(), scope: object({ kind: choice('workspace'), tenantId: id(), workspaceId: id() }),
+    observedAt: leafTime, ready: { type: 'boolean' }, readinessBasis: choice('core_workspace_aggregate'),
+    coverage: choice('requested_sections', 'all_readiness_sections'),
+    items: list(object({ key: id(), title: text(200), missing: text(1000, 0), optional: { type: 'boolean' },
+      status: choice('unavailable', 'ready', 'missing') }), 50) }),
+  AiOriginalOpeningReadSourceDraft: object({ original: { $ref: '#/components/schemas/AiSceneRequestReceiptDraft' },
+    source: object({ original: object({ contractVersion: choice(AI_TASK_DRAFT_VERSION),
+      taskId: uuid, resultId: uuid, runId: uuid, stepId: uuid, actionId: id(), status: choice('succeeded'), errorCode: { type: 'null' },
+      contentHash: hash, outputBytes: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' },
+      activeMs: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, completeMeasurement: { type: 'boolean', const: true }, observedAt: leafTime }),
+      facts: { $ref: '#/components/schemas/AiOpeningReadFactsDraft' }, observation: choice('current_authorized_reobservation'),
+      originalPayload: choice('not_returned'), execution: choice('not_invoked') }) }),
   AiSceneSettingsTaskDraft: object({ taskId: id(), runId: id() }),
   AiSceneSettingsConfirmationReadDraft: object({ taskId: id(), runId: id(), stepId: id() }),
   AiSceneSettingsContinueDraft: object({ taskId: id(), runId: id(), checkpointRef: id() }),

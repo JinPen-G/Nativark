@@ -1,6 +1,8 @@
 import type { RentalFulfillmentMode, RENTAL_PRICING_UNIT_CODES } from './core';
 import type { AiTaskStatusDraft, AiStepStateDraft } from './ai-task-draft';
 import type { AiUsageQuantityDraft, AiUsageRecordDraft } from './ai-usage-draft';
+import type { AiWorkspaceScope } from './ai-native';
+import type { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
 
 export const AI_SCENE_REQUEST_DRAFT_VERSION = 'ain-scene-request-draft-1' as const;
 export const AI_SCENE_REQUEST_MAX_BYTES = 32768;
@@ -111,6 +113,31 @@ export interface AiSceneRequestReceiptDraft {
   expiresAt: string;
   createdAt: string;
   state: 'stored' | 'expired' | 'revoked';
+}
+/** Current authorized diagnostic projection. `ready` remains the Core
+ * workspace aggregate, never a success recalculated from selected sections. */
+export interface AiOpeningReadFactsDraft {
+  requestId: string;
+  scope: AiWorkspaceScope;
+  observedAt: string;
+  ready: boolean;
+  readinessBasis: 'core_workspace_aggregate';
+  coverage: 'requested_sections' | 'all_readiness_sections';
+  items: Array<{ key: string; title: string; missing: string; optional: boolean;
+    status: 'unavailable' | 'ready' | 'missing' }>;
+}
+/** No historical payload or execution/approval grant accompanies this source. */
+export interface AiOriginalOpeningReadSourceDraft {
+  original: AiSceneRequestReceiptDraft;
+  source: {
+    original: { contractVersion: typeof AI_TASK_DRAFT_VERSION; taskId: string; resultId: string;
+      runId: string; stepId: string; actionId: string; status: 'succeeded'; errorCode: null;
+      contentHash: string; outputBytes: string; activeMs: string; completeMeasurement: true; observedAt: string };
+    facts: AiOpeningReadFactsDraft;
+    observation: 'current_authorized_reobservation';
+    originalPayload: 'not_returned';
+    execution: 'not_invoked';
+  };
 }
 export type AiSceneTaskReceiptDraft =
   | { state: 'not_observed'; retryable: false }
