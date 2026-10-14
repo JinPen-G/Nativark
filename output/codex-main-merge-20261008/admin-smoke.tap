@@ -1,0 +1,22 @@
+admin-account-menu: native motion/segment contracts, preference order, visible entries, permission guards and real logout passed (no browser verification)
+✔ tests\admin-account-menu.test.cjs (443.9831ms)
+admin-datetime-range: integrated datetime, prop forwarding, seconds, clearing and date-only Arc contracts passed (no browser verification)
+✔ tests\admin-datetime-range.test.cjs (499.9542ms)
+✔ AI feature controls render through the UI adapter boundary in offline host mode (280.0338ms)
+✔ supplement input keeps host draft controlled and exposes disabled/error states (9.2961ms)
+✔ task list disables navigation without a callback and retains rows during refresh errors (10.1045ms)
+✔ source and memory views redact content after withdrawal or expiry (14.3799ms)
+✔ AI service summary projects a whitelist and hides provider secrets/details (12.8804ms)
+✔ formatters preserve units and reject invalid numeric/time input (5.4289ms)
+✔ model text and proposals remain bounded and mark candidates as unexecuted (28.9434ms)
+✔ interactive shells expose labelled controls and live status relationships (11.3858ms)
+✔ read-only board composes feature-local views without transport props (86.4642ms)
+✔ timeline distinguishes an unknown enum from an unavailable step payload (8.4979ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1143.8694

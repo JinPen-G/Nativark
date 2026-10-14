@@ -5,7 +5,8 @@ import type {
   TenantRentalBusinessSettings,
 } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Col, Modal, Row, Space, Tag, Typography } from "antd";
+import { Card, Col, Row, Space, Tag, Typography } from "antd";
+import { App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Table } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -356,7 +357,7 @@ export function NotificationsTab({ permissions, settings }: { permissions: Gover
         title={`测试发送 · ${sendTemplate?.name ?? ""}`}
         open={Boolean(sendTemplate)}
         onCancel={() => setSendTemplate(undefined)}
-        onOk={() => sendForm.submit()}
+        onConfirm={() => sendForm.validateFields().then((values) => sendNotification.mutateAsync(values))}
         confirmLoading={sendNotification.isPending}
         forceRender
         destroyOnHidden

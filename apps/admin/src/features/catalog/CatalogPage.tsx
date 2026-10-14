@@ -1,7 +1,8 @@
 import { DeleteOutlined, MinusCircleOutlined, PlusOutlined, UploadOutlined } from "@ant-design/icons";
 import { RentalInventoryMode, type RentalAttributeDefinition, type RentalItemGroup, type SaveRentalItemGroupRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Col, Empty, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { App, Empty } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table, Upload } from "@/components/ui";
 import { Switch } from "@/components/ui";

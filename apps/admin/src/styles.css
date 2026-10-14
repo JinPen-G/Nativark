@@ -831,13 +831,18 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 
 /* 统一页面级加载态：3×3 像素网格 + 右侧文案。动作按钮里的小型 Spin 不在此范围。 */
 .rental-loading-state {
-  display: inline-flex;
-  align-items: center;
+  display: flex;
+  width: min(100%, 28rem);
+  flex-direction: column;
+  align-items: stretch;
   gap: 10px;
   color: var(--rental-color-text-secondary);
   font-size: var(--rental-typography-body-size);
   font-weight: var(--rental-typography-body-weight);
   line-height: var(--rental-typography-body-line-height);
+}
+.rental-loading-label {
+  text-align: center;
 }
 .rental-loading-grid {
   display: grid;
@@ -909,7 +914,13 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
   display: grid;
   min-height: 0;
   overflow-y: auto;
-  place-items: safe center;
+  /* Keep the tab strip's page coordinates stable while login methods change
+     content height. Vertical centring/scroll anchoring moves the entire strip
+     underneath UIArc's shared-layout selection animation. */
+  align-items: start;
+  justify-items: center;
+  overflow-anchor: none;
+  scrollbar-gutter: stable;
   padding: 64px 32px 40px;
   background: var(--rental-color-bg-layout);
 }
@@ -924,6 +935,10 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
   background: var(--rental-color-bg-container);
   box-shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 12px 32px rgba(0, 0, 0, .08);
 }
+/* Verification forms share the measured password-card height; their content
+   scrolls inside the existing right column instead of resizing the card. */
+.login-card--fixed { grid-template-rows: minmax(0, 1fr); }
+.login-card--fixed .login-card-form { min-height: 0; max-height: 100%; }
 @media (min-width: 880px) {
   .login-card {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr);
@@ -1003,7 +1018,7 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
   font-size: 12px;
   line-height: 1.75;
 }
-.login-card-form { min-width: 0; align-self: center; padding: 48px clamp(32px, 4.5vw, 64px); }
+.login-card-form { min-width: 0; align-self: start; overflow-y: auto; scrollbar-gutter: stable; padding: 48px clamp(32px, 4.5vw, 64px); }
 @media (max-width: 879px) {
   .login-card { max-width: 520px; }
   .login-card-form { padding: 40px 28px; }
@@ -1042,6 +1057,15 @@ html[data-appearance="dark"] .appearance-toggle-thumb {
 .login-code-preview { display: grid; gap: var(--space-5); }
 .login-preview-links { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
 .login-preview-target { color: var(--text-secondary); overflow-wrap: anywhere; margin: 0; }
+/* The original step's transform/filter creates a stacking context. Lift both
+   integration ancestors while the country picker is open so its source popup
+   stays above the back button and sibling provider buttons, without changing
+   the vendor animation or the fixed login-card height. */
+.login-code-preview:has(.arc-phone-field [data-open]),
+.login-preview-viewport:has(.arc-phone-field [data-open]) {
+  position: relative;
+  z-index: 1;
+}
 .login-preview-result { display: grid; gap: var(--space-3); }
 .login-provider-preview { display: grid; gap: var(--space-3); }
 .login-provider-preview > div:first-child { margin-bottom: 0; }

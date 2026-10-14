@@ -1,3 +1,4 @@
+import { SaveButton } from "@/components/ui";
 import { SaveOutlined } from "@ant-design/icons";
 import { useQuery } from "@tanstack/react-query";
 import type { TenantRentalBusinessSettings } from "@rental-os/shared";
@@ -29,7 +30,7 @@ export function MembershipRewardRulesTab({
   onSave,
   saving,
 }: Pick<GovernanceTabContext, "permissions" | "settings" | "saving"> & {
-  onSave: (values: MembershipSettingsFormValues) => void;
+  onSave: (values: MembershipSettingsFormValues) => Promise<unknown>;
 }) {
   const { t } = useLocale();
   const [form] = Form.useForm<MembershipSettingsFormValues>();
@@ -46,12 +47,10 @@ export function MembershipRewardRulesTab({
     .filter((item) => item.status === "active")
     .map((item) => ({ value: item.id, label: item.name }));
   return (
-    <Form<MembershipSettingsFormValues> form={form} layout="vertical" onFinish={onSave}>
+    <Form<MembershipSettingsFormValues> form={form} layout="vertical" onFinish={values => { void onSave(values).catch(() => undefined); }}>
       <div className="table-toolbar">
         <Typography.Text type="secondary">{t("只保存本页配置")}</Typography.Text>
-        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => form.submit()}>
-          {t("保存本页")}
-        </Button>
+        <SaveButton label={t("保存本页")} form={form} pending={saving} onSave={onSave} />
       </div>
       <Space orientation="vertical" size={16} style={{ width: "100%" }}>
       <Alert

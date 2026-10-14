@@ -10,13 +10,14 @@ import type {
   SavePlatformFilterPresetRequest,
   SavePlatformNumberRuleRequest,
 } from "@rental-os/shared";
-import { App, Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Table } from "@/components/ui";
 import { Switch } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Select } from "@/components/ui";
-import { Button, Drawer, Tabs } from "@/components/ui";
+import { Button, Drawer, SaveButton, Tabs } from "@/components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { platformOpsApi } from "@/api/platformOps";
@@ -59,6 +60,16 @@ export function PlatformToolsPage() {
   const runJob = useMutation({ mutationFn: platformOpsApi.runJob, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["async-jobs"] }); message.success(t("任务已执行")); }, onError: () => message.error(t("任务执行失败")) });
   const runDue = useMutation({ mutationFn: platformOpsApi.runDueJobs, onSuccess: async (result) => { await queryClient.invalidateQueries({ queryKey: ["async-jobs"] }); message.success(result.message); }, onError: () => message.error(t("到期任务执行失败")) });
 
+  async function saveEditor(values: Record<string, unknown>) {
+    if (editor === "dictionary") return saveDictionary.mutateAsync(values as unknown as SavePlatformDictionaryGroupRequest);
+    if (editor === "number") return saveNumber.mutateAsync(values as unknown as SavePlatformNumberRuleRequest);
+    if (editor === "preset") return savePreset.mutateAsync(values as unknown as SavePlatformFilterPresetRequest & { filtersText?: string });
+    if (editor === "file") return createFile.mutateAsync(values as unknown as CreateFileAssetRequest);
+    if (editor === "print") return createPrint.mutateAsync(values as unknown as CreatePrintJobRequest);
+    if (editor === "job") return createJob.mutateAsync(values as unknown as CreateAsyncJobRequest);
+    throw new Error("Platform editor unavailable");
+  }
+
   function editDictionary(record?: PlatformDictionaryGroup) { setEditingDictionary(record); form.setFieldsValue(record ? { ...record } : { code: "", name: "", module: "platform", description: "" }); setEditor("dictionary"); }
   function editNumber(record?: PlatformNumberRule) { setEditingNumber(record); form.setFieldsValue(record ? { ...record } : { code: "", name: "", module: "platform", prefix: "", datePattern: "yyyyMMdd", sequenceLength: 6, currentSequence: 0, resetCycle: "daily", enabled: true }); setEditor("number"); }
   function editPreset(record?: PlatformFilterPreset) { setEditingPreset(record); form.setFieldsValue(record ? { ...record, filtersText: JSON.stringify(record.filters, null, 2) } : { scopeKey: "rental-os.orders", name: "", description: "", filtersText: "{}", isDefault: false }); setEditor("preset"); }
@@ -79,14 +90,7 @@ export function PlatformToolsPage() {
       ]} /> },
     ]} /></Card>
 
-    <Drawer title={t("平台工具操作")} open={Boolean(editor)} size={600} destroyOnHidden onClose={closeEditor} extra={<Button type="primary" loading={saveDictionary.isPending || saveNumber.isPending || savePreset.isPending || createFile.isPending || createPrint.isPending || createJob.isPending} onClick={() => form.submit()}>{t("保存")}</Button>}><Form form={form} layout="vertical" onFinish={(values) => {
-      if (editor === "dictionary") saveDictionary.mutate(values as unknown as SavePlatformDictionaryGroupRequest);
-      if (editor === "number") saveNumber.mutate(values as unknown as SavePlatformNumberRuleRequest);
-      if (editor === "preset") savePreset.mutate(values as unknown as SavePlatformFilterPresetRequest & { filtersText?: string });
-      if (editor === "file") createFile.mutate(values as unknown as CreateFileAssetRequest);
-      if (editor === "print") createPrint.mutate(values as unknown as CreatePrintJobRequest);
-      if (editor === "job") createJob.mutate(values as unknown as CreateAsyncJobRequest);
-    }}>
+    <Drawer title={t("平台工具操作")} open={Boolean(editor)} size={600} destroyOnHidden onClose={closeEditor} extra={<SaveButton form={form} label={t("保存")} pending={saveDictionary.isPending || saveNumber.isPending || savePreset.isPending || createFile.isPending || createPrint.isPending || createJob.isPending} onSave={saveEditor} />}><Form form={form} layout="vertical" onFinish={(values) => { void saveEditor(values).catch(() => undefined); }}>
       {editor === "dictionary" && <><Form.Item name="code" label={t("字典编码")}><Input disabled={Boolean(editingDictionary)} /></Form.Item><Form.Item name="name" label={t("字典名称")}><Input /></Form.Item><Form.Item name="module" label={t("模块")}><Input /></Form.Item><Form.Item name="description" label={t("说明")}><Input.TextArea /></Form.Item><Typography.Text type="secondary">{t("字典项目继续保留当前")} {editingDictionary?.items.length ?? 0} {t("项")}</Typography.Text></>}
       {editor === "number" && <><Form.Item name="code" label={t("规则编码")}><Input disabled={Boolean(editingNumber)} /></Form.Item><Form.Item name="name" label={t("规则名称")}><Input /></Form.Item><Form.Item name="module" label={t("模块")}><Input /></Form.Item><Row gutter={12}><Col span={8}><Form.Item name="prefix" label={t("前缀")}><Input /></Form.Item></Col><Col span={8}><Form.Item name="datePattern" label={t("日期格式")}><Select options={["yyyyMMdd", "yyyyMM", "yyMMdd", "none"].map((value) => ({ value, label: value }))} /></Form.Item></Col><Col span={8}><Form.Item name="sequenceLength" label={t("序号长度")}><InputNumber min={1} /></Form.Item></Col></Row><Form.Item name="resetCycle" label={t("重置周期")}><Select options={["daily", "monthly", "yearly", "never"].map((value) => ({ value, label: value }))} /></Form.Item><Form.Item name="enabled" label={t("启用")} valuePropName="checked"><Switch /></Form.Item></>}
       {editor === "preset" && <><Form.Item name="scopeKey" label={t("作用域")}><Select options={["rental-os.orders", "rental-os.vehicles", "rental-os.members", "rental-os.corporates", "rental-os.stations", "rental-os.vehicle-transfer", "rental-os.contracts"].map((value) => ({ value, label: value }))} /></Form.Item><Form.Item name="name" label={t("预设名称")}><Input /></Form.Item><Form.Item name="description" label={t("说明")}><Input /></Form.Item><Form.Item name="filtersText" label={t("筛选 JSON")}><Input.TextArea rows={8} /></Form.Item><Form.Item name="isDefault" label={t("设为默认")} valuePropName="checked"><Switch /></Form.Item></>}

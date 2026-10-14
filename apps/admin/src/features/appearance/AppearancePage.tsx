@@ -1,4 +1,6 @@
-import { App, Card, Col, Row, Slider, Space, Typography } from "antd";
+import { Card, Col, Row, Space, Typography } from "antd";
+import { Slider } from "@/components/ui";
+import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Button, ColorPicker, SaveButton } from "@/components/ui";
@@ -27,9 +29,9 @@ function AdminRadiusSlider({ name, label, tooltip, allowFull = true }: { name: s
   return (
     <Form.Item name={name} label={label} tooltip={tooltip} extra={<span className="text-meta">{tooltip}</span>}
       getValueProps={(value) => ({ value: value === ADMIN_UI_CORNER_RADIUS_FULL ? sliderMax : value })}
-      normalize={(value) => typeof value === "number" && value > ADMIN_UI_CORNER_RADIUS_MAX ? (allowFull ? ADMIN_UI_CORNER_RADIUS_FULL : ADMIN_UI_CORNER_RADIUS_MAX) : value}>
-      <Slider min={ADMIN_UI_CORNER_RADIUS_MIN} max={sliderMax} step={1} marks={marks}
-        tooltip={{ formatter: (value) => value == null ? "" : allowFull && value > ADMIN_UI_CORNER_RADIUS_MAX ? `${ADMIN_UI_CORNER_RADIUS_FULL}px` : `${value}px` }} />
+      trigger="onValueChange" normalize={(value) => typeof value === "number" && value > ADMIN_UI_CORNER_RADIUS_MAX ? (allowFull ? ADMIN_UI_CORNER_RADIUS_FULL : ADMIN_UI_CORNER_RADIUS_MAX) : value}>
+      <Slider label={label} min={ADMIN_UI_CORNER_RADIUS_MIN} max={sliderMax} step={1} marks={Object.entries(marks).map(([value, label]) => ({ value: Number(value), label }))}
+        format={value => allowFull && value > ADMIN_UI_CORNER_RADIUS_MAX ? `${ADMIN_UI_CORNER_RADIUS_FULL}px` : `${value}px`} />
     </Form.Item>
   );
 }

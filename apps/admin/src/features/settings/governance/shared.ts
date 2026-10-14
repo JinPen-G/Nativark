@@ -65,7 +65,7 @@ export interface GovernanceTabContext {
   permissions: GovernancePermissions;
   category: RentalCategoryDefinition;
   settings: TenantRentalBusinessSettings;
-  saveTab: (patch: Partial<SaveTenantRentalBusinessSettingsRequest>) => void;
+  saveTab: (patch: Partial<SaveTenantRentalBusinessSettingsRequest>) => Promise<unknown>;
   saving: boolean;
 }
 

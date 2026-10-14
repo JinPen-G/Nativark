@@ -1,6 +1,7 @@
 import type { RentalCategoryDefinition, RentalRuleVersion } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Descriptions, Modal, Space, Tag, Typography } from "antd";
+import { Card, Descriptions, Space, Tag, Typography } from "antd";
+import { App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, DatePicker, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -457,7 +458,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
       <Modal
         title={`${t("发布规则版本")} v${rulePublishTarget?.version ?? ""}`}
         open={Boolean(rulePublishTarget)}
-        onOk={() => rulePublishForm.submit()}
+        onConfirm={() => rulePublishForm.validateFields().then((values) => publishRule.mutateAsync(values))}
         confirmLoading={publishRule.isPending}
         onCancel={() => {
           setRulePublishTarget(undefined);
@@ -532,7 +533,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
       <Modal
         title={`${t("恢复规则版本")} v${ruleRestoreTarget?.version ?? ""}`}
         open={Boolean(ruleRestoreTarget)}
-        onOk={() => ruleRestoreForm.submit()}
+        onConfirm={() => ruleRestoreForm.validateFields().then((values) => restoreRule.mutateAsync(values))}
         confirmLoading={restoreRule.isPending}
         onCancel={() => setRuleRestoreTarget(undefined)}
         okText={t("生成新草稿")}
@@ -563,7 +564,7 @@ export function RulesTab({ permissions, category }: { permissions: GovernancePer
       <Modal
         title={`${t("作废规则版本")} v${ruleVoidTarget?.version ?? ""}`}
         open={Boolean(ruleVoidTarget)}
-        onOk={() => ruleVoidForm.submit()}
+        onConfirm={() => ruleVoidForm.validateFields().then((values) => voidRule.mutateAsync(values))}
         confirmLoading={voidRule.isPending}
         onCancel={() => setRuleVoidTarget(undefined)}
         okText={t("确认作废")}

@@ -1,7 +1,9 @@
+import { SaveButton } from "@/components/ui";
 import { ApartmentOutlined, EditOutlined, KeyOutlined, PauseCircleOutlined, PlusOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import type { BusinessWorkspace, CreateBusinessWorkspaceRequest, RentalCategoryCode, TenantBootstrapRequest, TenantSummary, UpdateBusinessWorkspaceRequest, UpdateTenantStatusRequest } from "@rental-os/shared";
 import { RENTAL_CURRENCY_CODES, RENTAL_CURRENCY_META, TenantStatus } from "@rental-os/shared";
-import { App, Card, Descriptions, Space, Tag, Typography } from "antd";
+import { Card, Descriptions, Space, Tag, Typography } from "antd";
+import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Table } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -162,9 +164,10 @@ export function TenantManagementPage() {
   }
 
   async function submit(values: Record<string, unknown>) {
-    if (editor?.type === "create") createTenant.mutate(values as unknown as TenantBootstrapRequest);
-    if (editor?.type === "edit") saveTenant.mutate({ id: editor.tenant.tenantId, tenantName: String(values.tenantName ?? "") });
-    if (editor?.type === "status") changeStatus.mutate({ id: editor.tenant.tenantId, payload: values as unknown as UpdateTenantStatusRequest });
+    if (editor?.type === "create") return createTenant.mutateAsync(values as unknown as TenantBootstrapRequest);
+    if (editor?.type === "edit") return saveTenant.mutateAsync({ id: editor.tenant.tenantId, tenantName: String(values.tenantName ?? "") });
+    if (editor?.type === "status") return changeStatus.mutateAsync({ id: editor.tenant.tenantId, payload: values as unknown as UpdateTenantStatusRequest });
+    throw new Error("Tenant editor unavailable");
   }
 
   function submitWorkspace(values: CreateBusinessWorkspaceRequest & UpdateBusinessWorkspaceRequest) {
@@ -231,9 +234,9 @@ export function TenantManagementPage() {
         open={Boolean(editor)}
         destroyOnHidden
         onClose={closeEditor}
-        extra={<Button type="primary" loading={createTenant.isPending || saveTenant.isPending || changeStatus.isPending} onClick={() => form.submit()}>{t("保存")}</Button>}
+        extra={<SaveButton label={t("保存")} form={form} pending={createTenant.isPending || saveTenant.isPending || changeStatus.isPending} onSave={submit} />}
       >
-        <Form form={form} layout="vertical" onFinish={submit}>
+        <Form form={form} layout="vertical" onFinish={values => { void submit(values).catch(() => undefined); }}>
           {editor?.type === "create" && (
             <>
               <Form.Item name="tenantCode" label={t("租户编码")} extra={t("创建后不可修改，用于登录和数据隔离。")} rules={[{ required: true }, { pattern: /^[a-z][a-z0-9_-]{1,31}$/, message: t("以小写字母开头，仅支持小写字母、数字、_ 和 -") }]}><Input /></Form.Item>

@@ -1,7 +1,9 @@
+import { SaveButton } from "@/components/ui";
 import { ArrowLeftOutlined, CheckCircleOutlined, DollarOutlined, MinusCircleOutlined, PlusOutlined, RetweetOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { RentalCoreOrderStatus, formatRentalMoney, rentalCurrencySymbol, type AdjustRentalInspectionExceptionRequest, type ApplyRentalOrderChangeRequest, type CorrectRentalInspectionUsageRequest, type CreateRentalInspectionRequest, type PreviewRentalOrderChangeRequest, type RecordRentalInspectionExceptionCustomerResponseRequest, type RentalAllocation, type RentalDeliveryAddressSnapshot, type RentalFundingAction, type RentalFundingInstrument, type RentalInspectionTemplate, type RentalOfflinePaymentMethod, type RentalOrderExtension, type RentalOrderExtensionPreview, type RentalOrderFeeReview, type RentalOrderServiceOccurrence, type RentalReservation, type RentalServiceExecutionAction, type UpdateRentalServiceOccurrenceRequest, type RentalWorkOrder, type RentalStockDisposition, type RentalOrderChangePreview } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Descriptions, InputNumber, Modal, Space, Tag, Typography } from "antd";
+import { Card, Descriptions, InputNumber, Space, Tag, Typography } from "antd";
+import { App, Modal } from "@/components/ui";
 import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, DatePicker, Table, Upload } from "@/components/ui";
@@ -1077,7 +1079,7 @@ export function RentalOrderDetailPage() {
       footer={[
         <Button key="cancel" onClick={() => { setPostPickupExchangeOpen(false); setPostPickupExchangePreview(undefined); setExchangeTarget(undefined); postPickupExchangeForm.resetFields(); }}>{t("取消")}</Button>,
         <Button key="preview" loading={previewPostPickupExchange.isPending} onClick={() => postPickupExchangeForm.validateFields(["allocationId", "replacementItemGroupId", "replacementAssetId", "replacementPricingGroupId", "priceBasis", "originalDisposition", "condition", "cancelServiceOccurrenceIds"]).then((values) => previewPostPickupExchange.mutate(values))}>{t("试算换货差额")}</Button>,
-        <Button key="apply" type="primary" disabled={!postPickupExchangePreview} loading={applyPostPickupExchange.isPending} onClick={() => postPickupExchangeForm.submit()}>{t("确认换货")}</Button>
+        <SaveButton key="apply" disabled={!postPickupExchangePreview} label={t("确认换货")} form={postPickupExchangeForm} pending={applyPostPickupExchange.isPending} onSave={(values) => applyPostPickupExchange.mutateAsync(values)} />
       ]}
     >
       <Form
@@ -1197,7 +1199,7 @@ export function RentalOrderDetailPage() {
           }
           previewPartialCancel.mutate({ type: hasServices ? "service_cancel" : "partial_line_cancel", items, serviceOccurrenceIds, serviceItems });
         })}>{t("试算差额")}</Button>,
-        <Button key="apply" type="primary" disabled={!partialCancelPreview} loading={applyPartialCancel.isPending} onClick={() => partialCancelForm.submit()}>{t("确认并应用")}</Button>
+        <SaveButton key="apply" disabled={!partialCancelPreview} label={t("确认并应用")} form={partialCancelForm} pending={applyPartialCancel.isPending} onSave={(values) => applyPartialCancel.mutateAsync(values)} />
       ]}
     >
       <Form form={partialCancelForm} layout="vertical" onFinish={(values) => applyPartialCancel.mutate(values)} initialValues={{ customerConfirmed: false }}>
@@ -1258,15 +1260,15 @@ export function RentalOrderDetailPage() {
         </Card>}
       </Form>
     </Modal>
-    <Modal title={t("续租价差退款审核")} open={Boolean(extensionRefundReview)} onCancel={() => setExtensionRefundReview(undefined)} onOk={() => extensionRefundForm.submit()} confirmLoading={reviewExtensionRefund.isPending} destroyOnHidden>
+    <Modal title={t("续租价差退款审核")} open={Boolean(extensionRefundReview)} onCancel={() => setExtensionRefundReview(undefined)} onConfirm={() => extensionRefundForm.validateFields().then((values) => reviewExtensionRefund.mutateAsync(values))} confirmLoading={reviewExtensionRefund.isPending} destroyOnHidden>
       <Alert type="warning" showIcon title={`${t("待审核差额")} ${money(extensionRefundReview?.pricingSnapshot?.refundReview?.amount)}`} description={t("审核通过只核减订单应收，并不会自动向客户转账退款。实际退款需另行处理。")} />
       <Form form={extensionRefundForm} layout="vertical" onFinish={(values) => reviewExtensionRefund.mutate(values)}>
         <Form.Item name="decision" label={t("审核结果")} rules={[{ required: true }]}><Select options={[{ value: "approved", label: t("通过并核减应收") }, { value: "rejected", label: t("拒绝") }]} /></Form.Item>
         <Form.Item name="reason" label={t("审核原因")} rules={[{ required: true, whitespace: true }]}><Input.TextArea rows={3} maxLength={500} /></Form.Item>
       </Form>
     </Modal>
-    <Modal title={t("取消租赁订单")} open={cancelOpen} onCancel={() => setCancelOpen(false)} onOk={() => cancelForm.submit()} confirmLoading={cancel.isPending} destroyOnHidden><Form form={cancelForm} layout="vertical" onFinish={(values) => cancel.mutate(values)}><Alert type="info" showIcon title={t("系统会撤销未履行租金，再按当前冻结规则计入取消费。")} description={t("天气等特殊豁免必须走审批，不可由本页面直接免除。")} style={{ marginBottom: 16 }} /><Form.Item name="reason" label={t("取消原因")} rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item></Form></Modal>
-    <Modal title={t("确认客户爽约")} open={noShowOpen} onCancel={() => { setNoShowOpen(false); noShowForm.resetFields(); }} onOk={() => noShowForm.submit()} confirmLoading={confirmNoShow.isPending} destroyOnHidden>
+    <Modal title={t("取消租赁订单")} open={cancelOpen} onCancel={() => setCancelOpen(false)} onConfirm={() => cancelForm.validateFields().then((values) => cancel.mutateAsync(values))} confirmLoading={cancel.isPending} destroyOnHidden><Form form={cancelForm} layout="vertical" onFinish={(values) => cancel.mutate(values)}><Alert type="info" showIcon title={t("系统会撤销未履行租金，再按当前冻结规则计入取消费。")} description={t("天气等特殊豁免必须走审批，不可由本页面直接免除。")} style={{ marginBottom: 16 }} /><Form.Item name="reason" label={t("取消原因")} rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item></Form></Modal>
+    <Modal title={t("确认客户爽约")} open={noShowOpen} onCancel={() => { setNoShowOpen(false); noShowForm.resetFields(); }} onConfirm={() => noShowForm.validateFields().then((values) => confirmNoShow.mutateAsync(values))} confirmLoading={confirmNoShow.isPending} destroyOnHidden>
       <Alert type="warning" showIcon title={t(noShowFinalReady ? "最终时限已到。确认后会释放库存、服务容量和优惠券占用；已支付金额按规则进入待退款/资金处理。" : "这是有权限人员的提前确认。请确认已通知客户并填写事实原因；确认后会释放库存、服务容量和优惠券占用。")} style={{ marginBottom: 16 }} />
       <Form form={noShowForm} layout="vertical" onFinish={(values) => confirmNoShow.mutate(values)}>
         <Form.Item name="reason" label={t("爽约原因")} rules={[{ required: true, whitespace: true, message: t("请输入爽约原因") }]}>
@@ -1274,9 +1276,9 @@ export function RentalOrderDetailPage() {
         </Form.Item>
       </Form>
     </Modal>
-    <Modal title={t("替换套装组成")} open={Boolean(substitution)} onCancel={() => setSubstitution(undefined)} onOk={() => substitutionForm.submit()} confirmLoading={substitute.isPending} destroyOnHidden><Form form={substitutionForm} layout="vertical" onFinish={(values) => substitute.mutate(values)}><Form.Item label={t("当前组成")}><Input disabled value={groups.data?.find((group) => group.id === substitution?.fromItemGroupId)?.name} /></Form.Item><Form.Item name="toItemGroupId" label={t("替代商品")} rules={[{ required: true }]}><Select options={substitutionOptions} placeholder={t("选择同一替代组的候选商品")} /></Form.Item></Form></Modal>
+    <Modal title={t("替换套装组成")} open={Boolean(substitution)} onCancel={() => setSubstitution(undefined)} onConfirm={() => substitutionForm.validateFields().then((values) => substitute.mutateAsync(values))} confirmLoading={substitute.isPending} destroyOnHidden><Form form={substitutionForm} layout="vertical" onFinish={(values) => substitute.mutate(values)}><Form.Item label={t("当前组成")}><Input disabled value={groups.data?.find((group) => group.id === substitution?.fromItemGroupId)?.name} /></Form.Item><Form.Item name="toItemGroupId" label={t("替代商品")} rules={[{ required: true }]}><Select options={substitutionOptions} placeholder={t("选择同一替代组的候选商品")} /></Form.Item></Form></Modal>
     <Modal title={detail?.ruleSnapshot?.fulfillment?.returnInspectionRequired ? t("部分归还检查") : t("部分归还")} open={partialReturnOpen} onCancel={() => setPartialReturnOpen(false)} onOk={() => partialReturnForm.submit()} confirmLoading={partialReturn.isPending} destroyOnHidden><Form form={partialReturnForm} layout="vertical" onFinish={async (values) => { if (detail?.ruleSnapshot?.fulfillment?.returnInspectionRequired) { if (await beginInspection("return", values.items)) setPartialReturnOpen(false); return; } partialReturn.mutate(values); }}><Alert type="info" showIcon title={detail?.ruleSnapshot?.fulfillment?.returnInspectionRequired ? t("选择本批归还项后，下一步填写归还检查。") : t("本批实物会直接释放；最后一批仍须使用整单归还。")} style={{ marginBottom: 16 }} /><Form.List name="items">{(fields, { add, remove }) => <Space orientation="vertical" style={{ width: "100%" }}>{fields.map((field) => <Space key={field.key} align="start"><Form.Item name={[field.name, "allocationId"]} rules={[{ required: true }]}><Select style={{ width: 320 }} placeholder={t("选择待归还资产或数量项")} options={detail?.allocations.filter((allocation) => allocation.status === "picked_up").map((allocation) => ({ value: allocation.id, label: allocation.assetNo ?? `${groups.data?.find((group) => group.id === allocation.itemGroupId)?.name ?? t("数量库存")} · ${t("剩余")} ${allocation.quantity}` }))} /></Form.Item><Form.Item name={[field.name, "quantity"]} rules={[{ required: true }]}><InputNumber min={1} precision={0} style={{ width: 100 }} /></Form.Item><Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(field.name)} /></Space>)}<Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ quantity: 1 })}>{t("增加归还项")}</Button></Space>}</Form.List></Form></Modal>
-    <Modal title={fundingOperation ? `${t(FUNDING_ACTION_LABELS[fundingOperation.action])}${t(FUNDING_INSTRUMENT_LABELS[fundingOperation.instrument])}（${t("模拟")}）` : t("模拟资金操作")} open={Boolean(fundingOperation)} onCancel={() => { setFundingOperation(undefined); fundingForm.resetFields(); }} onOk={() => fundingForm.submit()} confirmLoading={fundingAction.isPending} destroyOnHidden>
+    <Modal title={fundingOperation ? `${t(FUNDING_ACTION_LABELS[fundingOperation.action])}${t(FUNDING_INSTRUMENT_LABELS[fundingOperation.instrument])}（${t("模拟")}）` : t("模拟资金操作")} open={Boolean(fundingOperation)} onCancel={() => { setFundingOperation(undefined); fundingForm.resetFields(); }} onConfirm={() => fundingForm.validateFields().then((values) => fundingAction.mutateAsync(values))} confirmLoading={fundingAction.isPending} destroyOnHidden>
       <Alert type="warning" showIcon title={t("本操作仅写入模拟资金流水，不会发起真实扣款或冻结。")} style={{ marginBottom: 16 }} />
       <Form form={fundingForm} layout="vertical" onFinish={(values) => fundingAction.mutate(values)}>
         {fundingOperation && !["initiate", "release", "fail"].includes(fundingOperation.action) && <Form.Item name="amount" label={t("金额")} rules={[{ required: true }]}><InputNumber min={0.01} precision={2} prefix={symbol} style={{ width: "100%" }} /></Form.Item>}
@@ -1285,7 +1287,7 @@ export function RentalOrderDetailPage() {
         <Form.Item name="reason" label={t("操作原因")} rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item>
       </Form>
     </Modal>
-    <Modal title={t("审核检查异常")} open={Boolean(exceptionReview)} onCancel={() => { setExceptionReview(undefined); exceptionReviewForm.resetFields(); }} onOk={() => exceptionReviewForm.submit()} confirmLoading={reviewException.isPending} destroyOnHidden>
+    <Modal title={t("审核检查异常")} open={Boolean(exceptionReview)} onCancel={() => { setExceptionReview(undefined); exceptionReviewForm.resetFields(); }} onConfirm={() => exceptionReviewForm.validateFields().then((values) => reviewException.mutateAsync(values))} confirmLoading={reviewException.isPending} destroyOnHidden>
       <Alert type="info" showIcon title={exceptionReview?.description} description={`${t("检查员建议费用：")}${exceptionReview?.suggested === undefined ? t("未填写") : money(exceptionReview.suggested)}。${t("最终费用由具备结算权限的人员确认。")}`} style={{ marginBottom: 16 }} />
       <Form form={exceptionReviewForm} layout="vertical" onFinish={(values) => reviewException.mutate(values)}>
         <Form.Item name="decision" label={t("审核结论")} rules={[{ required: true }]}><Select options={[{ value: "approved", label: t("通过并计费") }, { value: "rejected", label: t("驳回，不计费") }]} /></Form.Item>
@@ -1300,7 +1302,7 @@ export function RentalOrderDetailPage() {
         <Form.Item name="reason" label={t("审核理由")} rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item>
       </Form>
     </Modal>
-    <Modal title={t("记录客户确认 / 申诉")} open={Boolean(exceptionCustomerResponse)} onCancel={() => { setExceptionCustomerResponse(undefined); exceptionCustomerResponseForm.resetFields(); }} onOk={() => exceptionCustomerResponseForm.submit()} confirmLoading={recordExceptionCustomerResponse.isPending} destroyOnHidden>
+    <Modal title={t("记录客户确认 / 申诉")} open={Boolean(exceptionCustomerResponse)} onCancel={() => { setExceptionCustomerResponse(undefined); exceptionCustomerResponseForm.resetFields(); }} onConfirm={() => exceptionCustomerResponseForm.validateFields().then((values) => recordExceptionCustomerResponse.mutateAsync(values))} confirmLoading={recordExceptionCustomerResponse.isPending} destroyOnHidden>
       <Alert
         type={exceptionCustomerResponse?.status === "disputed" ? "warning" : "info"}
         showIcon
@@ -1317,7 +1319,7 @@ export function RentalOrderDetailPage() {
         </Form.Item>
       </Form>
     </Modal>
-    <Modal title={t("复核客户申诉费用")} open={Boolean(exceptionAdjustment)} onCancel={() => { setExceptionAdjustment(undefined); exceptionAdjustmentForm.resetFields(); }} onOk={() => exceptionAdjustmentForm.submit()} confirmLoading={adjustException.isPending} destroyOnHidden>
+    <Modal title={t("复核客户申诉费用")} open={Boolean(exceptionAdjustment)} onCancel={() => { setExceptionAdjustment(undefined); exceptionAdjustmentForm.resetFields(); }} onConfirm={() => exceptionAdjustmentForm.validateFields().then((values) => adjustException.mutateAsync(values))} confirmLoading={adjustException.isPending} destroyOnHidden>
       <Alert
         type="warning"
         showIcon
@@ -1338,7 +1340,7 @@ export function RentalOrderDetailPage() {
       title={usageCorrection ? `${t("修正")}${t(usageCorrection.stage === "pickup" ? "领取" : "归还")}${t("使用量")}：${usageCorrection.fieldCode}` : t("修正使用量")}
       open={Boolean(usageCorrection)}
       onCancel={() => { setUsageCorrection(undefined); usageCorrectionForm.resetFields(); }}
-      onOk={() => usageCorrectionForm.submit()}
+      onConfirm={() => usageCorrectionForm.validateFields().then((values) => correctUsage.mutateAsync(values))}
       confirmLoading={correctUsage.isPending}
       destroyOnHidden
     >
@@ -1365,7 +1367,7 @@ export function RentalOrderDetailPage() {
       title={serviceExecution ? `${t(serviceExecution.action === "start" ? "开始" : serviceExecution.action === "complete" ? "完成" : serviceExecution.action === "cancel" ? "取消" : serviceExecution.action === "no_show" ? "登记未到场" : "记录失败")}${t("服务")}：${serviceExecution.occurrence.serviceName}` : t("服务履约")}
       open={Boolean(serviceExecution)}
       onCancel={() => { setServiceExecution(undefined); serviceExecutionForm.resetFields(); }}
-      onOk={() => serviceExecutionForm.submit()}
+      onConfirm={() => serviceExecutionForm.validateFields().then((values) => executeService.mutateAsync(values))}
       confirmLoading={executeService.isPending}
       destroyOnHidden
     >
@@ -1395,7 +1397,7 @@ export function RentalOrderDetailPage() {
       title={serviceRefund ? `${t("办理服务退款：")}${serviceRefund.serviceName}` : t("办理服务退款")}
       open={Boolean(serviceRefund)}
       onCancel={() => { setServiceRefund(undefined); serviceRefundForm.resetFields(); }}
-      onOk={() => serviceRefundForm.submit()}
+      onConfirm={() => serviceRefundForm.validateFields().then((values) => refundService.mutateAsync(values))}
       confirmLoading={refundService.isPending}
       destroyOnHidden
     >
@@ -1420,7 +1422,7 @@ export function RentalOrderDetailPage() {
       title={feeReview ? `${t("裁定")}${t(FEE_REVIEW_TYPE_LABELS[feeReview.type])}` : t("费用裁定")}
       open={Boolean(feeReview)}
       onCancel={() => { setFeeReview(undefined); feeReviewForm.resetFields(); }}
-      onOk={() => feeReviewForm.submit()}
+      onConfirm={() => feeReviewForm.validateFields().then((values) => decideFeeReview.mutateAsync(values))}
       confirmLoading={decideFeeReview.isPending}
       okButtonProps={{ disabled: decideFeeReview.isPending }}
       destroyOnHidden

@@ -12,7 +12,8 @@ import type {
 } from "@rental-os/shared";
 import { RoleScope } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Col, Row, Space, Tag, Typography } from "antd";
+import { Card, Col, Row, Space, Tag, Typography } from "antd";
+import { App } from "@/components/ui";
 import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";

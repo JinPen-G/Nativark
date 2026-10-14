@@ -10,7 +10,8 @@ import type {
   SubmitRentalWorkOrderRequest
 } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Descriptions, Empty, Modal, Space, Tag, Typography } from "antd";
+import { Card, Descriptions, Space, Tag, Typography } from "antd";
+import { App, Empty, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -227,7 +228,7 @@ export function MaintenanceWorkOrdersPage() {
       </Card>
     </QueryState>
 
-    <Modal title={t("新建养护工单")} open={dialog === "create"} confirmLoading={run.isPending} onCancel={() => setDialog(undefined)} onOk={() => createForm.submit()} destroyOnHidden>
+    <Modal title={t("新建养护工单")} open={dialog === "create"} confirmLoading={run.isPending} onCancel={() => setDialog(undefined)} onConfirm={() => createForm.validateFields().then((data) => run.mutateAsync({ kind: "create", data }))} destroyOnHidden>
       <Form form={createForm} layout="vertical" onFinish={(data) => run.mutate({ kind: "create", data })}>
         <Form.Item name="dispositionId" label={t("归还处置")} rules={[{ required: true, message: t("请选择归还处置") }]}><Select options={workOrderDispositions.map((row) => ({ value: row.id, label: `${row.itemGroupId} · ${row.blockReason || (row.status === "buffered" ? t("周转清洁") : t("异常隔离"))} · ${row.quantity} ${t("件")}` }))} placeholder={t("选择待处理的归还处置")} /></Form.Item>
         <Form.Item name="type" label={t("工单类型")} rules={[{ required: true }]}><Select options={Object.entries(WORK_ORDER_TYPE_LABELS).map(([value, label]) => ({ value, label: t(label) }))} /></Form.Item>
@@ -235,7 +236,7 @@ export function MaintenanceWorkOrdersPage() {
         <Form.Item name="reason" label={t("处理要求")}><Input.TextArea rows={3} placeholder={t("可补充清洁、维修或缺件处理要求")} /></Form.Item>
       </Form>
     </Modal>
-    <Modal title={t("核销异常库存")} open={dialog === "writeoff"} confirmLoading={run.isPending} okText={t("确认核销")} okButtonProps={{ danger: true }} onCancel={() => setDialog(undefined)} onOk={() => writeOffForm.submit()} destroyOnHidden>
+    <Modal title={t("核销异常库存")} open={dialog === "writeoff"} confirmLoading={run.isPending} okText={t("确认核销")} okButtonProps={{ danger: true }} onCancel={() => setDialog(undefined)} onConfirm={() => writeOffForm.validateFields().then(async ({ reason }) => { const operation = writeOffTarget && run.mutateAsync({ kind: "writeoff", id: writeOffTarget.id, reason }); if (!operation) throw new Error("Operation unavailable"); return operation; })} destroyOnHidden>
       <Alert type="warning" showIcon title={t("核销后该数量将从在手库存中扣除，且不能恢复；请确认商品已无法修复。")} style={{ marginBottom: 16 }} />
       <Form form={writeOffForm} layout="vertical" onFinish={({ reason }) => writeOffTarget && run.mutate({ kind: "writeoff", id: writeOffTarget.id, reason })}>
         <Form.Item name="reason" label={t("核销原因")} rules={[{ required: true, whitespace: true, message: t("请填写核销原因") }, { max: 500, message: t("核销原因不能超过 500 个字符") }]}>
@@ -243,25 +244,25 @@ export function MaintenanceWorkOrdersPage() {
         </Form.Item>
       </Form>
     </Modal>
-    <Modal title={`${t("派工")}：${activeWorkOrder?.workNo ?? ""}`} open={dialog === "assign"} confirmLoading={run.isPending} onCancel={() => setDialog(undefined)} onOk={() => assignForm.submit()} destroyOnHidden>
+    <Modal title={`${t("派工")}：${activeWorkOrder?.workNo ?? ""}`} open={dialog === "assign"} confirmLoading={run.isPending} onCancel={() => setDialog(undefined)} onConfirm={() => assignForm.validateFields().then(async data => { const operation = activeWorkOrder && run.mutateAsync({ kind: "assign", id: activeWorkOrder.id, data }); if (!operation) throw new Error("Operation unavailable"); return operation; })} destroyOnHidden>
       <Form form={assignForm} layout="vertical" onFinish={(data) => activeWorkOrder && run.mutate({ kind: "assign", id: activeWorkOrder.id, data })}>
         <Form.Item name="assigneeId" label={t("当前空间运营账号")}><Select allowClear options={assignees.data?.map((item) => ({ value: item.id, label: `${item.displayName} · ${item.account}` }))} placeholder={t("清除派工可留空")} /></Form.Item>
       </Form>
     </Modal>
-    <Modal title={`${t("提交验收")}：${activeWorkOrder?.workNo ?? ""}`} open={dialog === "submit"} confirmLoading={run.isPending} onCancel={() => setDialog(undefined)} onOk={() => submitForm.submit()} destroyOnHidden>
+    <Modal title={`${t("提交验收")}：${activeWorkOrder?.workNo ?? ""}`} open={dialog === "submit"} confirmLoading={run.isPending} onCancel={() => setDialog(undefined)} onConfirm={() => submitForm.validateFields().then(async ({ attachmentsText, ...data }) => { const operation = activeWorkOrder && run.mutateAsync({ kind: "submit", id: activeWorkOrder.id, data: { ...data, attachments: attachmentsText?.split(/\r?\n/u).map((value) => value.trim()).filter(Boolean) } }); if (!operation) throw new Error("Operation unavailable"); return operation; })} destroyOnHidden>
       <Form form={submitForm} layout="vertical" onFinish={({ attachmentsText, ...data }) => activeWorkOrder && run.mutate({ kind: "submit", id: activeWorkOrder.id, data: { ...data, attachments: attachmentsText?.split(/\r?\n/u).map((value) => value.trim()).filter(Boolean) } })}>
         <Form.Item name="result" label={t("处理结果")} rules={[{ required: true, message: t("请填写处理结果") }]}><Input.TextArea rows={4} placeholder={t("说明完成了什么处理、检查结果是什么")} /></Form.Item>
         <Form.Item name="attachmentsText" label={t("证据附件引用")}><Input.TextArea rows={3} placeholder={t("填写文件服务返回的附件引用，每行一个；不填写本地路径")} /></Form.Item>
       </Form>
     </Modal>
-    <Modal title={`${t("验收工单")}：${activeWorkOrder?.workNo ?? ""}`} open={dialog === "review"} confirmLoading={run.isPending} onCancel={() => setDialog(undefined)} onOk={() => reviewForm.submit()} destroyOnHidden>
+    <Modal title={`${t("验收工单")}：${activeWorkOrder?.workNo ?? ""}`} open={dialog === "review"} confirmLoading={run.isPending} onCancel={() => setDialog(undefined)} onConfirm={() => reviewForm.validateFields().then(async data => { const operation = activeWorkOrder && run.mutateAsync({ kind: "review", id: activeWorkOrder.id, data }); if (!operation) throw new Error("Operation unavailable"); return operation; })} destroyOnHidden>
       <Descriptions size="small" column={1} style={{ marginBottom: 16 }} items={[{ key: "reason", label: t("处理原因"), children: activeWorkOrder?.reason }, { key: "result", label: t("处理结果"), children: activeWorkOrder?.result || t("尚未提交") }]} />
       <Form form={reviewForm} layout="vertical" onFinish={(data) => activeWorkOrder && run.mutate({ kind: "review", id: activeWorkOrder.id, data })}>
         <Form.Item name="decision" label={t("验收结论")} rules={[{ required: true }]}><Select options={[{ value: "approved", label: t("通过并进入周转缓冲") }, { value: "rejected", label: t("驳回，继续隔离") }]} /></Form.Item>
         <Form.Item name="reason" label={t("验收说明")} rules={[{ required: true, message: t("请填写验收说明") }]}><Input.TextArea rows={3} placeholder={t("填写通过或驳回的依据")} /></Form.Item>
       </Form>
     </Modal>
-    <Modal title={`${t("取消工单")}：${activeWorkOrder?.workNo ?? ""}`} open={dialog === "cancel"} confirmLoading={run.isPending} onCancel={() => setDialog(undefined)} onOk={() => cancelForm.submit()} destroyOnHidden>
+    <Modal title={`${t("取消工单")}：${activeWorkOrder?.workNo ?? ""}`} open={dialog === "cancel"} confirmLoading={run.isPending} onCancel={() => setDialog(undefined)} onConfirm={() => cancelForm.validateFields().then(async data => { const operation = activeWorkOrder && run.mutateAsync({ kind: "cancel", id: activeWorkOrder.id, data }); if (!operation) throw new Error("Operation unavailable"); return operation; })} destroyOnHidden>
       <Form form={cancelForm} layout="vertical" onFinish={(data) => activeWorkOrder && run.mutate({ kind: "cancel", id: activeWorkOrder.id, data })}>
         <Alert type="warning" showIcon title={t("取消不会恢复库存")} description={t("取消只结束当前工单；关联资源会继续保持异常隔离，后续必须重新建立并通过养护验收。")} style={{ marginBottom: 16 }} />
         <Form.Item name="reason" label={t("取消原因")} rules={[{ required: true, message: t("请填写取消原因") }]}><Input.TextArea rows={3} /></Form.Item>

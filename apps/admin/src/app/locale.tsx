@@ -12,6 +12,17 @@ const STORAGE_KEY = "rental_admin_locale";
  * 到中文，保证新增页面在补齐翻译前仍然可用。
  */
 const ENGLISH: Record<string, string> = {
+  "账号菜单": "Account menu",
+  "个人资料": "Profile",
+  "设置": "Settings",
+  "个人资料尚未接入": "Profile is not connected yet",
+  "此账号暂不可访问设置": "Settings are not available to this account",
+  "此账号暂不可访问账单": "Billing is not available to this account",
+  "账单": "Billing",
+  "浅色": "Light",
+  "深色": "Dark",
+  "跟随系统": "System",
+  "正在退出": "Signing out",
   "管理后台主题色": "Admin theme color",
   "保存主题色": "Save theme color",
   "主题色已保存": "Theme color saved",

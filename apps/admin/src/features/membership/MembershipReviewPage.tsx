@@ -1,6 +1,7 @@
 import type { CustomerMembershipReview, CustomerMembershipReviewStatus } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Modal, Radio, Space, Tag } from "antd";
+import { Card, Space, Tag } from "antd";
+import { App, Modal, Radio } from "@/components/ui";
 import { Alert, Button, Drawer, Form, Input, Select, Table } from "@/components/ui";
 import { useState } from "react";
 import { membershipApi } from "@/api/membership";
@@ -73,7 +74,7 @@ export function MembershipReviewPage() {
         </Space> },
       ]} />
     </Card>
-    <Modal title={selected ? `${t(typeText[selected.reviewType])}${t("审核")}` : t("审核")} open={Boolean(selected)} onCancel={() => setSelected(undefined)} onOk={() => form.submit()} okButtonProps={{ disabled: !selected || !canHandle(selected) }} confirmLoading={decide.isPending} destroyOnHidden>
+    <Modal title={selected ? `${t(typeText[selected.reviewType])}${t("审核")}` : t("审核")} open={Boolean(selected)} onCancel={() => setSelected(undefined)} onConfirm={() => form.validateFields().then(async values => { const operation = selected && canHandle(selected) && decide.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; })} okButtonProps={{ disabled: !selected || !canHandle(selected) }} confirmLoading={decide.isPending} destroyOnHidden>
       <Form form={form} layout="vertical" disabled={!selected || !canHandle(selected)} onFinish={(values) => selected && canHandle(selected) && decide.mutate(values)}>
         <Form.Item label={t("审核结论")} name="status" rules={[{ required: true }]}><Radio.Group options={[{ value: "approved", label: t("通过") }, { value: "supplement_required", label: t("补充资料") }, { value: "rejected", label: t("拒绝") }, { value: "cancelled", label: t("取消") }]} /></Form.Item>
         <Form.Item label={t("说明")} name="reason" dependencies={["status"]} rules={[({ getFieldValue }) => ({ required: getFieldValue("status") !== "approved", whitespace: true, message: t("补件、拒绝或取消审核必须填写原因") })]}><Input.TextArea maxLength={500} rows={3} placeholder={t("补件、拒绝或取消时请说明原因")} /></Form.Item>

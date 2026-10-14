@@ -1,7 +1,8 @@
 import { DeleteOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import { RENTAL_PRICING_UNIT_LABELS, formatRentalMoney, rentalCurrencySymbol, type RentalPricingGroup, type SaveRentalPricingGroupRequest, type UpdateRentalPricingGroupSecurityRatesRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, InputNumber, Space, Tag, Typography } from "antd";
+import { Card, InputNumber, Space, Tag, Typography } from "antd";
+import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Table } from "@/components/ui";
 import { Input } from "@/components/ui";

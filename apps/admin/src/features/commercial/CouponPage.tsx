@@ -1,8 +1,10 @@
+import { SaveButton } from "@/components/ui";
 import { EditOutlined, PlusOutlined } from "@ant-design/icons";
 import type { RentalCouponTemplate, RentalCustomerCoupon, SaveRentalCouponTemplateRequest } from "@rental-os/shared";
 import { formatRentalMoney, rentalCurrencySymbol } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Col, InputNumber, Modal, Row, Space, Tag, Typography } from "antd";
+import { Card, Col, InputNumber, Row, Space, Tag, Typography } from "antd";
+import { App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Table } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -81,7 +83,7 @@ export function CouponPage() {
         </QueryState>
       </Card>
 
-      <Drawer title={t(editing ? "编辑优惠券模板" : "新增优惠券模板")} size={640} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<Button type="primary" loading={save.isPending} onClick={() => form.submit()}>{t("保存")}</Button>}>
+      <Drawer title={t(editing ? "编辑优惠券模板" : "新增优惠券模板")} size={640} open={drawerOpen} destroyOnHidden onClose={() => setDrawerOpen(false)} extra={<SaveButton  label={t("保存")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync({ ...values, id: editing?.id })} />}>
         <Form<SaveRentalCouponTemplateRequest> form={form} layout="vertical" onFinish={(values) => save.mutate({ ...values, id: editing?.id })}>
           <Row gutter={12}>
             <Col span={12}><Form.Item name="code" label={t("模板编码")} rules={[{ required: true }]}><Input disabled={Boolean(editing)} /></Form.Item></Col>
@@ -107,13 +109,13 @@ export function CouponPage() {
           <Form.Item name="status" label={t("状态")} rules={[{ required: true }]}><Select options={[{ value: "draft", label: t("草稿") }, { value: "scheduled", label: t("待开始") }, { value: "active", label: t("进行中") }, { value: "paused", label: t("已暂停") }, { value: "ended", label: t("已结束") }, { value: "void", label: t("已作废") }]} /></Form.Item>
         </Form>
       </Drawer>
-      <Modal title={t("向客户发放优惠券")} open={claimOpen} onCancel={() => setClaimOpen(false)} onOk={() => claimForm.submit()} confirmLoading={claim.isPending} destroyOnHidden>
+      <Modal title={t("向客户发放优惠券")} open={claimOpen} onCancel={() => setClaimOpen(false)} onConfirm={() => claimForm.validateFields().then((values) => claim.mutateAsync(values))} confirmLoading={claim.isPending} destroyOnHidden>
         <Form form={claimForm} layout="vertical" onFinish={(values) => claim.mutate(values)}>
           <Form.Item name="customerId" label={t("客户 ID")} rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="templateId" label={t("优惠券模板")} rules={[{ required: true }]}><Select options={(templates.data ?? []).filter((item) => item.status === "active").map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))} /></Form.Item>
         </Form>
       </Modal>
-      <Modal title={t("作废客户优惠券")} open={Boolean(voiding)} onCancel={() => setVoiding(undefined)} onOk={() => voidForm.submit()} confirmLoading={voidCoupon.isPending} destroyOnHidden>
+      <Modal title={t("作废客户优惠券")} open={Boolean(voiding)} onCancel={() => setVoiding(undefined)} onConfirm={() => voidForm.validateFields().then((values) => voidCoupon.mutateAsync(values))} confirmLoading={voidCoupon.isPending} destroyOnHidden>
         <Form form={voidForm} layout="vertical" onFinish={(values) => voidCoupon.mutate(values)}>
           <Typography.Paragraph>{locale === "en-US" ? `This will void “${voiding?.templateName}”. A locked coupon must first be detached from its order; order amounts cannot be bypassed.` : <>将作废“{voiding?.templateName}”。已锁定券必须先取消关联订单，不能绕过订单金额处理。</>}</Typography.Paragraph>
           <Form.Item name="reason" label={t("作废原因")} rules={[{ required: true, whitespace: true }]}><Input.TextArea rows={3} /></Form.Item>

@@ -1,4 +1,4 @@
-import { App, Modal } from "antd";
+import { App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -57,7 +57,7 @@ export function SubscriptionRequestModal({ open, type, onClose }: { open: boolea
       title={type ? `${t("提交申请")}：${t(REQUEST_TYPE_LABEL[type])}` : t("提交申请")}
       okText={t("提交申请")}
       confirmLoading={mutation.isPending}
-      onOk={() => form.submit()}
+      onConfirm={() => form.validateFields().then((values) => mutation.mutateAsync(values))}
       onCancel={() => { form.resetFields(); onClose(); }}
       destroyOnHidden
     >

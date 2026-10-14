@@ -1,3 +1,4 @@
+import { SaveButton } from "@/components/ui";
 import { HistoryOutlined, SettingOutlined } from "@ant-design/icons";
 import type {
   RentalCapabilityConfigField,
@@ -7,7 +8,8 @@ import type {
   WorkspaceCapabilityView
 } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, InputNumber, Space, Tag, Typography } from "antd";
+import { Card, InputNumber, Space, Tag, Typography } from "antd";
+import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Switch } from "@/components/ui";
@@ -174,10 +176,10 @@ export function CapabilityGovernancePage() {
     );
   }
 
-  function submitLifecycle(values: LifecycleFormValues) {
-    if (!editing) return;
+  async function submitLifecycle(values: LifecycleFormValues) {
+    if (!editing) throw new Error("Capability editor unavailable");
     try {
-      save.mutate({
+      return save.mutateAsync({
         code: editing.definition.code,
         status: values.status,
         reason: values.reason,
@@ -186,6 +188,7 @@ export function CapabilityGovernancePage() {
       });
     } catch (error) {
       message.error(error instanceof Error ? error.message : t("兼容关系格式无效"));
+      throw error;
     }
   }
 
@@ -388,16 +391,14 @@ export function CapabilityGovernancePage() {
         destroyOnHidden
         onClose={() => setEditing(undefined)}
         extra={
-          <Button type="primary" loading={save.isPending} onClick={() => form.submit()}>
-            {t("保存")}
-          </Button>
+          <SaveButton label={t("保存")} form={form} pending={save.isPending} onSave={submitLifecycle} />
         }
       >
         {editing && (
           <Form<LifecycleFormValues>
             form={form}
             layout="vertical"
-            onFinish={submitLifecycle}
+            onFinish={values => { void submitLifecycle(values).catch(() => undefined); }}
           >
             <Alert
               type="info"

@@ -1,7 +1,9 @@
+import { SaveButton } from "@/components/ui";
 import { formatRentalMoney } from "@rental-os/shared";
 import type { GrantRentalRewardRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Space, Tag } from "antd";
+import { Card, Space, Tag } from "antd";
+import { App } from "@/components/ui";
 import { Alert, Button, Form, Input, Select, Table } from "@/components/ui";
 import { rentalCoreApi } from "@/api/rentalCore";
 import { useLocale } from "@/app/locale";
@@ -121,13 +123,7 @@ export function MembershipRewardsPage() {
               >
                 <Input />
               </Form.Item>
-              <Button
-                htmlType="submit"
-                type="primary"
-                loading={grantReward.isPending}
-              >
-                {t("生成并入账")}
-              </Button>
+              <SaveButton  label={t("生成并入账")} form={rewardForm} pending={grantReward.isPending} onSave={async values => { const operation = grantReward.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
             </Form>
           </Card>
           <Card className="data-panel" title={t("客户权益账户")}>

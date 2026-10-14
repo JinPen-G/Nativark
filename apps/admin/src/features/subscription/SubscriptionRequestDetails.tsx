@@ -1,4 +1,5 @@
-import { Descriptions, Empty, Space, Tag, Timeline } from "antd";
+import { Descriptions, Space, Tag, Timeline } from "antd";
+import { Empty } from "@/components/ui";
 import type { SubscriptionRequestRecord } from "@rental-os/shared";
 import { useLocale } from "@/app/locale";
 import { formatMoney, formatSubscriptionDate, PLAN_LABEL, REQUEST_STATUS_LABEL, REQUEST_STATUS_TONE, REQUEST_TYPE_LABEL } from "./subscriptionLabels";

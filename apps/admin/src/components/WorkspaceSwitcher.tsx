@@ -1,6 +1,7 @@
 import { AppstoreOutlined, CameraOutlined, CarOutlined, DownOutlined, FireOutlined, ToolOutlined } from "@ant-design/icons";
 import { RentalCategoryCode } from "@rental-os/shared";
-import { App, Spin } from "antd";
+import { Spin } from "antd";
+import { App } from "@/components/ui";
 import { Dropdown } from "@/components/ui";
 import type { ReactNode } from "react";
 import { useState } from "react";

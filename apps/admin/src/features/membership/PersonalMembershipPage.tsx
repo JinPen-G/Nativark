@@ -1,7 +1,9 @@
+import { SaveButton } from "@/components/ui";
 import type { CustomerAccountStatus, CustomerMembershipPlanAssignment, CustomerMembershipStatus, CustomerQualificationRevision, PersonalMembershipMember, SubmitCustomerQualificationRequest } from "@rental-os/shared";
 import { CUSTOMER_GENDERS, CUSTOMER_GENDER_LABELS, CUSTOMER_SOURCE_CHANNELS, CUSTOMER_SOURCE_CHANNEL_LABELS } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Radio, Space, Tag } from "antd";
+import { Card, Space, Tag } from "antd";
+import { App, Radio } from "@/components/ui";
 import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
@@ -132,7 +134,7 @@ export function PersonalMembershipPage() {
         {drawer === "create" && canManageAccount && <Form.Item label={t("临时密码（可选）")} name="temporaryPassword" rules={[{ min: 8 }]}><Input.Password /></Form.Item>}
         {drawer === "create" && <Form.Item name="directApprove" valuePropName="checked"><Checkbox disabled={!canDirectApprove}>{t("直接通过")}</Checkbox></Form.Item>}
         {drawer === "password" && <Form.Item label={t("新临时密码")} name="temporaryPassword" rules={[{ required: true, min: 8 }]}><Input.Password /></Form.Item>}
-        <Button type="primary" htmlType="submit" disabled={drawer === "password" ? !canManageAccount : !canManage} loading={create.isPending || edit.isPending || password.isPending}>{t("保存")}</Button>
+        <SaveButton disabled={drawer === "password" ? !canManageAccount : !canManage} label={t("保存")} form={form} pending={create.isPending || edit.isPending || password.isPending} onSave={async values => { const operation = drawer === "create" ? canManage && create.mutateAsync(values) : drawer === "edit" ? canManage && edit.mutateAsync(values) : canManageAccount && password.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
       </Form>}
       {drawer === "qualification" && <QueryState loading={types.isLoading || qualificationHistory.isLoading} error={types.error ?? qualificationHistory.error}>
         <Alert type="info" showIcon title={t("资质资料与审核结果在租户内共享")} description={t("此处按当前经营空间配置选择证件类型；其他空间是否要求该证件，由对应空间业务规则决定。")} style={{ marginBottom: 16 }} />
@@ -142,7 +144,7 @@ export function PersonalMembershipPage() {
           <Form.Item label={t("签发时间")} name="issuedAt"><Input placeholder="YYYY-MM-DD" /></Form.Item>
           <Form.Item label={t("失效时间")} name="expiresAt"><Input placeholder="YYYY-MM-DD" /></Form.Item>
           <Form.Item label={t("附件引用")} name="evidenceRef" extra={t("仅填写文件服务返回的不可变引用，不填写本地路径或 URL")}><Input /></Form.Item>
-          <Button type="primary" htmlType="submit" disabled={!canManage} loading={submitQualification.isPending}>{t("提交审核")}</Button>
+          <SaveButton disabled={!canManage} label={t("提交审核")} form={qualificationForm} pending={submitQualification.isPending} onSave={async values => { const operation = canManage && submitQualification.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
         </Form>
         <Card size="small" title={t("提交与审核历史")} style={{ marginTop: 20 }}>
           <Table<CustomerQualificationRevision> rowKey="id" size="small" loading={qualificationHistory.isLoading} dataSource={qualificationHistory.data ?? []} pagination={{ pageSize: 5 }} scroll={{ x: 1080 }} columns={[
@@ -165,7 +167,7 @@ export function PersonalMembershipPage() {
           <Form.Item label={t("生效时间")} name="effectiveFrom" extra={t("留空为提交时生效")}><Input placeholder="YYYY-MM-DD HH:mm" /></Form.Item>
           <Form.Item label={t("失效时间")} name="effectiveTo" extra={t("留空为长期有效")}><Input placeholder="YYYY-MM-DD HH:mm" /></Form.Item>
           <Form.Item label={t("授予原因")} name="reason" rules={[{ required: true, whitespace: true }]}><Input.TextArea rows={2} /></Form.Item>
-          <Button type="primary" htmlType="submit" disabled={!canGrant} loading={grant.isPending}>{t("确认授予")}</Button>
+          <SaveButton disabled={!canGrant} label={t("确认授予")} form={grantForm} pending={grant.isPending} onSave={async values => { const operation = canGrant && grant.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
         </Form>
         <Card size="small" title={t("当前方案授予记录")} style={{ marginTop: 20 }}>
           <Table<CustomerMembershipPlanAssignment> rowKey="id" size="small" loading={assignments.isLoading} dataSource={assignments.data ?? []} pagination={false} scroll={{ x: 750 }} columns={[
@@ -185,7 +187,7 @@ export function PersonalMembershipPage() {
       open={Boolean(statusTarget && statusScope)}
       destroyOnHidden
       onClose={() => { setStatusTarget(undefined); setStatusScope(undefined); statusForm.resetFields(); }}
-      extra={<Tooltip title={!statusAllowed ? t("缺少该状态操作的租户权限") : statusSubmitBlocked ? t("注销前置检查尚未通过") : undefined}><Button type="primary" loading={changeStatus.isPending} disabled={statusSubmitBlocked} onClick={() => statusForm.submit()}>{t("提交")}</Button></Tooltip>}
+      extra={<Tooltip title={!statusAllowed ? t("缺少该状态操作的租户权限") : statusSubmitBlocked ? t("注销前置检查尚未通过") : undefined}><SaveButton disabled={statusSubmitBlocked} label={t("提交")} form={statusForm} pending={changeStatus.isPending} onSave={async values => { const operation = !statusSubmitBlocked && changeStatus.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} /></Tooltip>}
     >
       <Alert
         type={statusScope === "account" ? "warning" : "info"}

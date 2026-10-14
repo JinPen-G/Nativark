@@ -1,5 +1,7 @@
+import { SaveButton } from "@/components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Modal, Space, Tag, Typography } from "antd";
+import { Card, Space, Tag, Typography } from "antd";
+import { App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Switch } from "@/components/ui";
@@ -202,9 +204,7 @@ export function OfficialCalendarSourcePage() {
         size={520}
         destroyOnHidden
         extra={
-          <Button type="primary" loading={saveSource.isPending} onClick={() => sourceForm.submit()}>
-            {t("保存")}
-          </Button>
+          <SaveButton  label={t("保存")} form={sourceForm} pending={saveSource.isPending} onSave={async values => { const operation = saveSource.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
         }
       >
         <Form form={sourceForm} layout="vertical" onFinish={(values) => saveSource.mutate(values)}>
@@ -231,7 +231,7 @@ export function OfficialCalendarSourcePage() {
         title={versionTarget ? `${t("登记年度版本")}：${versionTarget.name}` : t("登记年度版本")}
         open={Boolean(versionTarget)}
         onCancel={() => setVersionTarget(undefined)}
-        onOk={() => versionForm.submit()}
+        onConfirm={() => versionForm.validateFields().then((values) => registerVersion.mutateAsync(values))}
         confirmLoading={registerVersion.isPending}
         okText={t("登记")}
         width={680}

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useBlocker } from "react-router-dom";
-import { Modal } from "antd";
+import { Modal } from "@/components/ui";
 import { useLocale } from "@/app/locale";
 
 /** One mounted editor per route. Keep native unload and SPA navigation separate. */

@@ -1,6 +1,9 @@
+import { SaveButton } from "@/components/ui";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Form, Modal, Space, Tag } from "antd";
+import { Card, Space, Tag } from "antd";
+import { Form } from "@/components/ui";
+import { App, Modal } from "@/components/ui";
 import { Alert, Button, Input, Select, Table } from "@/components/ui";
 import { CATEGORY_GOVERNANCE_PERMISSIONS as P, type CategoryVersionView } from "@rental-os/shared";
 import { categoryGovernanceApi, type CategoryGovernanceSummary } from "@/api/categoryGovernance";
@@ -57,7 +60,7 @@ export function CategoryGovernancePage() {
           <Form.Item name="sourceVersionId" label={t("来源发布版本")} rules={[{ required: true }]}><Select options={detail.data?.versions.filter((v) => ["published", "legacy_baseline"].includes(v.status)).map((v) => ({ value: v.id, label: v.versionLabel }))} /></Form.Item>
           <Form.Item name="versionLabel" label={t("新版本号")} rules={[{ required: true }, { pattern: /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/ }]}><Input maxLength={64} /></Form.Item>
           <Form.Item name="reason" label={t("变更原因")} rules={[{ required: true, whitespace: true }]}><Input.TextArea maxLength={512} /></Form.Item>
-          <Space><Button type="primary" htmlType="submit" loading={copy.isPending}>{t("创建草稿")}</Button><Button onClick={() => setTarget(undefined)} disabled={copy.isPending}>{t("取消")}</Button></Space>
+          <Space><SaveButton  label={t("创建草稿")} form={form} pending={copy.isPending} onSave={(values) => copy.mutateAsync(values)} /><Button onClick={() => setTarget(undefined)} disabled={copy.isPending}>{t("取消")}</Button></Space>
         </Form>
       </QueryState>
     </Modal>

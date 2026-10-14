@@ -46,7 +46,10 @@ function RangePicker(props: RangePickerProps) {
     const allowEmpty = Array.isArray(props.allowEmpty) ? props.allowEmpty : [Boolean(props.allowEmpty), Boolean(props.allowEmpty)];
     if (pair.every(item => !item) || pair.every((item, index) => item || allowEmpty[index])) props.onChange?.(pair.every(item => !item) ? null : pair as [Dayjs, Dayjs], strings);
   };
-  if (props.disabledTime || props.onOk || props.needConfirm || props.open !== undefined || (props.picker && props.picker !== "date") || props.cellRender || props.panelRender || Array.isArray(props.format) || typeof props.format === "function" || (props.presets && (props.disabledDate || props.minDate || props.maxDate))) return <AntDatePicker.RangePicker {...props} />;
+  // Arc's range picker selects whole days only. A datetime range must stay one
+  // integrated control, with time/seconds/clear inside its picker, not endpoints.
+  // Forward showTime unchanged so precision, time limits and confirmation survive.
+  if (props.showTime || props.disabledTime || props.onOk || props.needConfirm || props.open !== undefined || (props.picker && props.picker !== "date") || props.cellRender || props.panelRender || Array.isArray(props.format) || typeof props.format === "function" || (props.presets && (props.disabledDate || props.minDate || props.maxDate))) return <AntDatePicker.RangePicker {...props} />;
   const partial = Array.isArray(props.allowEmpty) ? props.allowEmpty.some(Boolean) : props.allowEmpty;
   const simple = !props.showTime && !props.disabledDate && !partial && !disabled && !props.minDate && !props.maxDate;
   return <div className={`arc-date-range ${props.className ?? ""}`} style={props.style}><ArcLocale>

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { App, InputNumber, Modal, Space, Typography } from "antd";
+import { InputNumber, Space, Typography } from "antd";
+import { App, Modal } from "@/components/ui";
 import { Alert, Button, Input, Select, Tabs } from "@/components/ui";
 import { useEffect, useRef, useState } from "react";
 import { categoryPreparationApi, type CategoryPreparationOperation } from "@/api/categoryPreparation";

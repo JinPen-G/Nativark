@@ -1,10 +1,12 @@
+import { SaveButton } from "@/components/ui";
 import type {
   RentalCalendarDay,
   RentalCalendarVersionSummary,
   SaveRentalCalendarDayRequest,
 } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Descriptions, InputNumber, Modal, Space, Tag, Typography } from "antd";
+import { Card, Descriptions, InputNumber, Space, Tag, Typography } from "antd";
+import { App, Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Switch } from "@/components/ui";
@@ -528,13 +530,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
         forceRender
         destroyOnHidden
         extra={
-          <Button
-            type="primary"
-            loading={saveDay.isPending}
-            onClick={() => calendarDayForm.submit()}
-          >
-            {t("保存覆盖")}
-          </Button>
+          <SaveButton  label={t("保存覆盖")} form={calendarDayForm} pending={saveDay.isPending} onSave={async values => { const operation = saveDay.mutateAsync({ ...values, hours: calendarDay?.hours }); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
         }
       >
         <Form
@@ -700,7 +696,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
         title={t("发布年度营业日历")}
         open={publishOpen}
         onCancel={() => setPublishOpen(false)}
-        onOk={() => publishForm.submit()}
+        onConfirm={() => publishForm.validateFields().then((values) => publishCalendar.mutateAsync(values.changeReason))}
         confirmLoading={publishCalendar.isPending}
         okText={t("发布")}
         width={760}
@@ -1029,7 +1025,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
         title={voidTarget ? `${t("作废草稿")} v${voidTarget.version}` : t("作废草稿")}
         open={Boolean(voidTarget)}
         onCancel={() => setVoidTarget(undefined)}
-        onOk={() => voidForm.submit()}
+        onConfirm={() => voidForm.validateFields().then(async values => { const operation = voidTarget && voidVersion.mutateAsync({ version: voidTarget.version, reason: values.reason }); if (!operation) throw new Error("Operation unavailable"); return operation; })}
         confirmLoading={voidVersion.isPending}
         okText={t("确认作废")}
         okButtonProps={{ danger: true }}
@@ -1063,7 +1059,7 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
         title={restoreTarget ? `${t("以 v")} ${restoreTarget.version} ${t("的内容建新草稿")}` : t("恢复历史版本")}
         open={Boolean(restoreTarget)}
         onCancel={() => setRestoreTarget(undefined)}
-        onOk={() => restoreForm.submit()}
+        onConfirm={() => restoreForm.validateFields().then(async values => { const operation = restoreTarget && restoreVersion.mutateAsync({ version: restoreTarget.version, reason: values.reason }); if (!operation) throw new Error("Operation unavailable"); return operation; })}
         confirmLoading={restoreVersion.isPending}
         okText={t("生成新草稿")}
         forceRender
@@ -1096,7 +1092,11 @@ export function CalendarTab({ permissions }: { permissions: GovernancePermission
         title={`${t("移除")} ${revertTarget?.date ?? ""} ${t("的人工覆盖")}`}
         open={Boolean(revertTarget)}
         onCancel={() => setRevertTarget(undefined)}
-        onOk={() => revertForm.submit()}
+        onConfirm={() => revertForm.validateFields().then(async values => { const operation = revertTarget &&
+            removeDayOverride.mutateAsync({
+              date: revertTarget.date,
+              overrideReason: values.overrideReason,
+            }); if (!operation) throw new Error("Operation unavailable"); return operation; })}
         confirmLoading={removeDayOverride.isPending}
         okText={t("移除覆盖")}
         okButtonProps={{ danger: true }}

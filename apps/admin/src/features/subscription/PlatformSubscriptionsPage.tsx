@@ -1,5 +1,6 @@
 import { PlusOutlined } from "@ant-design/icons";
-import { Card, Modal, Space, Tag } from "antd";
+import { Card, Space, Tag } from "antd";
+import { Modal } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { SearchField, Select } from "@/components/ui";

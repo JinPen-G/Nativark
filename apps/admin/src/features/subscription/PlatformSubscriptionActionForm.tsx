@@ -1,5 +1,7 @@
+import { SaveButton } from "@/components/ui";
 import { useState } from "react";
-import { App, InputNumber, Space, Typography } from "antd";
+import { InputNumber, Space, Typography } from "antd";
+import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -138,7 +140,7 @@ export function PlatformSubscriptionActionForm({ tenantId, overview, standardPri
       <Form.Item name="reason" label={t(isExtend ? "临时延长原因（租户可见，不记录收款）" : "办理依据 / 调整原因（租户可见）")} rules={[{ required: true, whitespace: true }]}><Input.TextArea maxLength={500} rows={2} /></Form.Item>
       {!isExtend && <Form.Item name="note" label={t("转账核实 / 平台内部备注（不向租户展示）")}><Input.TextArea maxLength={2000} rows={2} /></Form.Item>}
       <Space wrap>
-        <Button type="primary" htmlType="submit" loading={mutation.isPending} disabled={stale || reloading || (!isExtend && values.source === SubscriptionSource.Sale && targetPlan === SubscriptionPlan.Pro)}>{t("保存办理")}</Button>
+        <SaveButton disabled={stale || reloading || (!isExtend && values.source === SubscriptionSource.Sale && targetPlan === SubscriptionPlan.Pro)} label={t("保存办理")} form={form} pending={mutation.isPending} onSave={(data) => mutation.mutateAsync(data)} />
         <Button loading={reloading} disabled={mutation.isPending} onClick={() => void reload()}>{t("重新载入最新授权（清空表单）")}</Button>
         <Typography.Text type="secondary">{t("编辑基于授权修订")} {snapshot.revision}</Typography.Text>
       </Space>

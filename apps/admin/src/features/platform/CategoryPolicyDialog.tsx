@@ -1,5 +1,8 @@
+import { SaveButton } from "@/components/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { App, Form, Modal, Space } from "antd";
+import { Space } from "antd";
+import { Form } from "@/components/ui";
+import { App, Modal } from "@/components/ui";
 import { Alert, Button, Input, Select } from "@/components/ui";
 import { useLocale } from "@/app/locale";
 import { categoryGovernanceApi, type CategoryGovernanceDetail } from "@/api/categoryGovernance";
@@ -36,7 +39,7 @@ export function CategoryPolicyDialog({ detail, version, saved, close }: { detail
           <Form.Item name="recommendedVersionId" label={t("默认推荐版本")}><Select options={detail.versions.filter((entry) => ["published", "legacy_baseline"].includes(entry.status)).map((entry) => ({ value: entry.id, label: entry.versionLabel }))} /></Form.Item>
         </>}
         <Form.Item name="reason" label={t("变更原因")} rules={[{ required: true, whitespace: true }]}><Input.TextArea maxLength={512} /></Form.Item>
-        <Space><Button type="primary" htmlType="submit" loading={save.isPending}>{t("保存政策")}</Button><Button disabled={save.isPending} onClick={close}>{t("取消")}</Button></Space>
+        <Space><SaveButton  label={t("保存政策")} form={form} pending={save.isPending} onSave={(values) => save.mutateAsync({ ...values, expectedRevision: initial.expectedRevision })} /><Button disabled={save.isPending} onClick={close}>{t("取消")}</Button></Space>
       </Form>
     </QueryState>
   </Modal>;

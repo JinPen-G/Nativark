@@ -1,4 +1,5 @@
-import { App, Card, Empty, Popconfirm, Space } from "antd";
+import { Card, Popconfirm, Space } from "antd";
+import { App, Empty } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Button } from "@/components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";

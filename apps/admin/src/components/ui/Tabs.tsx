@@ -17,9 +17,12 @@ export function Tabs(props: TabsProps) {
       if (item.children == null) return null;
       const destroy = item.destroyOnHidden ?? destroyOnHidden ?? false;
       if (destroy) return <TabsContent key={item.key} value={item.key}>{item.children}</TabsContent>;
-      // AntD defaults to retaining visited panels. Do not reset forms or trigger new queries on each switch.
+      // Only mount visited panels. Do not forceMount here: the original Arc TabsContent
+      // uses its non-forceMount branch for the directional presence animation. Most page
+      // state lives in the parent form/query hooks, so switching tabs keeps the business
+      // state while allowing the panel to animate in and out.
       if (item.key !== selected && !visited.has(item.key) && !item.forceRender) return null;
-      return <TabsContent key={item.key} value={item.key} forceMount hidden={item.key !== selected}>{item.children}</TabsContent>;
+      return <TabsContent key={item.key} value={item.key}>{item.children}</TabsContent>;
     })}
   </ArcTabs>;
 }

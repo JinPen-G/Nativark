@@ -1,5 +1,6 @@
 import { AppleOutlined, GoogleOutlined, WechatOutlined } from "@ant-design/icons";
-import { Modal, Typography } from "antd";
+import { Typography } from "antd";
+import { Modal } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -7,7 +8,7 @@ import { Button, PasswordField, SaveButton, Segmented, useFeedback } from "@/com
 import loginStyles from "@/registry/blocks/login-centered/login-centered.module.css";
 import { AuthCodePreview } from "./AuthCodePreview";
 import { isAxiosError } from "axios";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { clientChannelApi } from "@/api/clientChannel";
@@ -51,6 +52,8 @@ export function LoginPage() {
   const [demoAccountsOpen, setDemoAccountsOpen] = useState(false);
   const [loginError, setLoginError] = useState<string | undefined>(undefined);
   const [loginMode, setLoginMode] = useState<"password" | "phone" | "email" | "reset">("password");
+  const loginCardRef = useRef<HTMLDivElement>(null);
+  const [passwordCardHeight, setPasswordCardHeight] = useState<number>();
   const [loggingIn, setLoggingIn] = useState(false);
   const [providerPreview, setProviderPreview] = useState<string>();
   const watchedTenantCode = Form.useWatch("tenantCode", form)?.trim().toLowerCase();
@@ -105,6 +108,11 @@ export function LoginPage() {
   };
 
   const switchLoginMode = (mode: typeof loginMode) => {
+    // Capture the actual password layout before hiding it. Reuse this height
+    // across both verification tabs rather than sizing the card to each form.
+    if (loginMode === "password" && mode !== "password") {
+      setPasswordCardHeight(loginCardRef.current?.getBoundingClientRect().height);
+    }
     form.setFieldValue("password", "");
     setLoginError(undefined);
     setProviderPreview(undefined);
@@ -135,7 +143,7 @@ export function LoginPage() {
         <div className="login-appearance"><AppearanceSwitcher iconOnly /></div>
         <main className="login-workspace">
           {/* 内层：更大圆角的登录卡片，左品牌、右表单；窄屏左栏隐藏，卡片退化为单栏。 */}
-          <div className="login-card">
+          <div ref={loginCardRef} className={`login-card${loginMode === "phone" || loginMode === "email" ? " login-card--fixed" : ""}`} style={{ height: loginMode === "phone" || loginMode === "email" ? passwordCardHeight : undefined }}>
             <aside className="login-card-brand" aria-labelledby="login-brand-heading">
               {backgroundSrc ? <LoginBackground key={`${effectiveTenantCode}:${backgroundSrc}`} src={backgroundSrc} /> : null}
               <div className={`login-brand login-brand--hero${loginBrandLogo === ADMIN_DEFAULT_LOGO ? " login-brand--platform" : " login-brand--tenant"}`}>

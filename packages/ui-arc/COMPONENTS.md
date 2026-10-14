@@ -2,7 +2,11 @@
 
 > 由 `node scripts/audit-admin-components.cjs` 只读扫描生成。引用不等于运行验收，也不等于所有兼容分支均已替换。
 
-本地 123 个公开源码条目 / 262 个唯一文件；Pro 101 个仅有目录元数据；源码校验异常 0 个。
+本地 123 个公开源码条目 / 263 个唯一文件；Pro 101 个仅有目录元数据；源码校验异常 0 个（2026-10-08 全量校验）。
+
+2026-10-08 原源码复核：日期范围选择器的 TSX/CSS 曾偏离下载清单，已从官方 `https://uiarc.dev/r/date-range-picker.json` 重新同步，并补齐该版本新增的 `lib/use-today.ts`。恢复上游月份容器布局与 `AnimatePresence mode="popLayout"`；仅将上游导入路径映射到项目 vendor 别名，不修改样式、动画参数或行为。三个文件均与本次官网响应逐字核对（导入路径及换行规范化后）；manifest 分别记录上游响应哈希、本地规范化哈希及同步日期。
+
+适配层复核：Accordion、Dialog、RadioGroup、ToastStack、UserMenu、Dropdown 的动效常量、Motion 属性及 `animate()` 调用与各自保留的官方源码一致。业务接口、本地化、禁用状态、租户主题/圆角、音效和此前明确要求的登录容器布局继续由适配层负责；兼容分支不冒称原生 UIArc。类型检查及现有表单、日期范围、账号菜单、侧栏动效、主题动效静态回归通过；未进行浏览器视觉验收。
 
 ## 使用入口
 
@@ -13,6 +17,8 @@
 已导出的平台 API：`Button`、`Form`、`FormField`、`FormSection`、`SidebarMenu`、`Dropdown`、`Drawer`、`Tabs`、`Segmented`、`Tooltip`、`Input`、`SearchField`、`Select`、`Checkbox`、`Slider`、`PasswordField`、`PasswordStrength`、`PhoneInput`、`FeedbackProvider`、`useFeedback`、`ConfirmAction`、`Switch`、`ActionButton`、`SaveButton`、`CopyButton`、`Alert`、`Progress`、`Steps`、`Pagination`、`DatePicker`、`ColorPicker`、`RichTextEditor`、`Upload`、`Table`、`TimePicker`、`TimeInput`、`FileUpload`、`FileUploadItem`、`FileUploadProps`。
 
 ## 全量公开源码清单
+
+新增导出 `UserMenu`：复用原版个人菜单的样式、菜单动效和滑动分段开关，支持本地化与额外偏好行。业务账号接入由 `AccountMenu` 负责，主题行在语言行上方。
 
 | 名称 | 接入状态 | 当前引用位置 |
 | --- | --- | --- |
@@ -90,7 +96,7 @@
 | bar-chart | 已下载备用 | — |
 | activity-heatmap | 已下载备用 | — |
 | timeline | 已下载备用 | — |
-| user-menu | 已下载备用 | — |
+| user-menu | 已引用（适配层扩展语言行与本地化，复用原版 CSS/动效） | `components/ui/UserMenu.tsx`；账号接入 `components/AccountMenu.tsx` |
 | stepper | 已引用（可能含兼容分支） | `components/ui/Steps.tsx` |
 | signature-pad | 已下载备用 | — |
 | date-range-picker | 已引用（可能含兼容分支） | `components/ui/DatePicker.tsx` |

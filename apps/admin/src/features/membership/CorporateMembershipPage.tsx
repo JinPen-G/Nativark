@@ -1,6 +1,8 @@
+import { SaveButton } from "@/components/ui";
 import { formatRentalMoney, type CorporateMembershipMember, type CustomerCorporateContract, type CustomerCorporateCreditLedgerEntry, type CustomerCorporateMembership, type CustomerCorporateInvoiceProfile, type CustomerMembershipPlanAssignment, type CustomerCorporateCredit, type SaveCustomerContractRequest, type SaveCustomerInvoiceProfileRequest, type SaveCustomerCreditRequest, type SaveCorporateMembershipRequest, type SaveCustomerCorporateMembershipRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Descriptions, InputNumber, Space, Tag } from "antd";
+import { Card, Descriptions, InputNumber, Space, Tag } from "antd";
+import { App } from "@/components/ui";
 import { Checkbox } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, Table } from "@/components/ui";
@@ -259,7 +261,7 @@ export function CorporateMembershipPage() {
             </Form.Item>
             <Form.Item name="email" label={t("邮箱")}><Input maxLength={160} /></Form.Item>
             {editTarget && <Form.Item name="clearEmail" valuePropName="checked"><Checkbox>{t("清除已保存邮箱")}</Checkbox></Form.Item>}
-            <Button type="primary" htmlType="submit" disabled={!canManage} loading={saveCorporate.isPending}>{t("保存企业资料")}</Button>
+            <SaveButton disabled={!canManage} label={t("保存企业资料")} form={corporateForm} pending={saveCorporate.isPending} onSave={async values => { const operation = canManage && saveCorporate.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
           </Form>
         </> },
         { key: "invoice", label: t("开票资料"), disabled: !selected, children: <QueryState loading={invoiceProfiles.isLoading} error={invoiceProfiles.error}>
@@ -290,7 +292,7 @@ export function CorporateMembershipPage() {
             <Form.Item name="receiveEmail" label={t("接收邮箱")}><Input maxLength={160} /></Form.Item>
             <Form.Item name="isDefault" valuePropName="checked"><Checkbox>{t("设为默认开票资料")}</Checkbox></Form.Item>
             <Form.Item name="status" label={t("状态")}><Select options={[{ value: "active", label: t("启用") }, { value: "disabled", label: t("停用") }]} /></Form.Item>
-            <Button type="primary" htmlType="submit" disabled={!canManage} loading={saveInvoice.isPending}>{t("保存开票资料")}</Button>
+            <SaveButton disabled={!canManage} label={t("保存开票资料")} form={invoiceForm} pending={saveInvoice.isPending} onSave={async values => { const operation = canManage && selected && saveInvoice.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
           </Form>
         </QueryState> },
         { key: "contracts", label: t("企业合同"), disabled: !selected, children: <QueryState loading={contracts.isLoading} error={contracts.error}>
@@ -318,7 +320,7 @@ export function CorporateMembershipPage() {
             ]} /></Form.Item>
             <Form.Item name="fileRef" label={t("合同文件引用")}><Input maxLength={191} /></Form.Item>
             <Form.Item name="terminatedReason" label={t("终止原因")}><Input.TextArea rows={2} maxLength={500} /></Form.Item>
-            <Button type="primary" htmlType="submit" disabled={!canManage} loading={saveContract.isPending}>{t("保存合同")}</Button>
+            <SaveButton disabled={!canManage} label={t("保存合同")} form={contractForm} pending={saveContract.isPending} onSave={async values => { const operation = canManage && selected && saveContract.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
           </Form>
         </QueryState> }
       ]} />}
@@ -337,7 +339,7 @@ export function CorporateMembershipPage() {
           </Space>
           <Form.Item name="status" label={t("关系状态")} initialValue="active"><Select options={Object.entries(relationMeta).map(([value, meta]) => ({ value, label: t(meta.text) }))} /></Form.Item>
           <Form.Item name="reason" label={t("说明")}><Input.TextArea rows={2} /></Form.Item>
-          <Button type="primary" htmlType="submit" disabled={!canEmployeeManage} loading={saveEmployee.isPending}>{t("添加/更新成员")}</Button>
+          <SaveButton disabled={!canEmployeeManage} label={t("添加/更新成员")} form={employeeForm} pending={saveEmployee.isPending} onSave={async values => { const operation = canEmployeeManage && saveEmployee.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
         </Form>}
         <Table<CustomerCorporateMembership> style={{ marginTop: 24 }} rowKey="id" size="small" loading={employees.isLoading} dataSource={employees.data ?? []} pagination={false} columns={[
           { title: t("个人会员"), dataIndex: "personalCustomerName" },
@@ -355,7 +357,7 @@ export function CorporateMembershipPage() {
           <Form.Item name="effectiveFrom" label={t("生效时间")} extra={t("留空为提交时生效")}><Input placeholder="YYYY-MM-DD HH:mm" /></Form.Item>
           <Form.Item name="effectiveTo" label={t("失效时间")} extra={t("留空为长期有效")}><Input placeholder="YYYY-MM-DD HH:mm" /></Form.Item>
           <Form.Item name="reason" label={t("授予原因")} rules={[{ required: true, whitespace: true }]}><Input.TextArea rows={2} /></Form.Item>
-          <Button type="primary" htmlType="submit" disabled={!canGrant} loading={grant.isPending}>{t("确认授予")}</Button>
+          <SaveButton disabled={!canGrant} label={t("确认授予")} form={grantForm} pending={grant.isPending} onSave={async values => { const operation = canGrant && grant.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
         </Form>
         <Card size="small" title={t("当前方案授予记录")} style={{ marginTop: 20 }}>
           <Table<CustomerMembershipPlanAssignment> rowKey="id" size="small" loading={assignments.isLoading} dataSource={assignments.data ?? []} pagination={false} scroll={{ x: 750 }} columns={[
@@ -380,7 +382,7 @@ export function CorporateMembershipPage() {
               <Form.Item name="status" label={t("授信状态")} rules={[{ required: true }]}><Select style={{ width: 160 }} options={Object.entries(creditStatusLabel).map(([value, label]) => ({ value, label: t(label) }))} /></Form.Item>
             </Space>
             <Form.Item name="reason" label={t("变更原因")} rules={[{ required: true, whitespace: true, max: 500 }]}><Input.TextArea rows={2} maxLength={500} /></Form.Item>
-            <Button type="primary" htmlType="submit" disabled={!canManage} loading={saveCredit.isPending}>{t("保存授信配置")}</Button>
+            <SaveButton disabled={!canManage} label={t("保存授信配置")} form={creditForm} pending={saveCredit.isPending} onSave={async values => { const operation = canManage && saveCredit.mutateAsync(values); if (!operation) throw new Error("Operation unavailable"); return operation; }} />
           </Form>
         </Card>
         {creditConfig.data && <QueryState loading={creditAccount.isLoading || creditLedger.isLoading} error={creditAccount.error ?? creditLedger.error}>

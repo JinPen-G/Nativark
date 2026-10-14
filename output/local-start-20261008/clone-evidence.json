@@ -1,0 +1,17 @@
+{
+  "database": "rental_os_sandbox_local_20261008094920",
+  "source": "rental_os",
+  "sourceTables": 201,
+  "targetTables": 201,
+  "sourceMigrations": 209,
+  "targetMigrations": 209,
+  "sampled": [
+    "Tenant=4",
+    "business_workspaces=6",
+    "customer_profiles=9",
+    "_prisma_migrations=212"
+  ],
+  "allBaseTableCountsMatched": 201,
+  "sourceWrites": false,
+  "note": "Initial dump/import completed; interrupted per-table verification was replaced with batched verification. No dump contents retained."
+}

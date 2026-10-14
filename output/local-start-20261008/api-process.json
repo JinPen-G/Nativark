@@ -1,0 +1,6 @@
+{
+  "pid": 47852,
+  "database": "rental_os",
+  "port": 3000,
+  "dueJobsDisabled": true
+}

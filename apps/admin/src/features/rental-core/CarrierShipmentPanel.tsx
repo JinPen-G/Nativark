@@ -1,11 +1,12 @@
 import { DownloadOutlined, PlusOutlined } from "@ant-design/icons";
 import type { CreateRentalCarrierShipmentEventRequest, RentalCarrierShipmentEvent, RentalOrder } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App, Card, Descriptions, Space, Tag, Timeline } from "antd";
+import { Card, Descriptions, Space, Tag, Timeline } from "antd";
+import { App } from "@/components/ui";
 import { Form } from "@/components/ui";
 import { Alert, DatePicker, Upload } from "@/components/ui";
 import { Input } from "@/components/ui";
-import { Button } from "@/components/ui";
+import { Button, SaveButton } from "@/components/ui";
 import type { UploadFile, UploadProps } from "antd";
 import dayjs from "dayjs";
 import { useState } from "react";
@@ -72,14 +73,14 @@ export function CarrierShipmentPanel({ order }: { order: RentalOrder }) {
     }
   };
 
-  const onSubmit = (values: { carrierName: string; trackingNumber: string; occurredAt: dayjs.Dayjs }) => {
-    if (!nextType) return;
+  const onSubmit = async (values: { carrierName: string; trackingNumber: string; occurredAt: dayjs.Dayjs }) => {
+    if (!nextType) throw new Error(t("当前订单没有可登记的承运里程碑"));
     const evidenceFileAssetIds = files.filter((file) => file.status === "done").map((file) => file.response?.id).filter((id): id is string => Boolean(id));
     if (!evidenceFileAssetIds.length) {
       message.error(t("请先上传至少一份承运凭证"));
-      return;
+      throw new Error(t("请先上传至少一份承运凭证"));
     }
-    createEvent.mutate({ type: nextType, occurredAt: values.occurredAt.toISOString(), carrierName: values.carrierName, trackingNumber: values.trackingNumber, evidenceFileAssetIds });
+    return createEvent.mutateAsync({ type: nextType, occurredAt: values.occurredAt.toISOString(), carrierName: values.carrierName, trackingNumber: values.trackingNumber, evidenceFileAssetIds });
   };
 
   const eventLabels: Record<RentalCarrierShipmentEvent["type"], string> = {
@@ -107,7 +108,7 @@ export function CarrierShipmentPanel({ order }: { order: RentalOrder }) {
     {events.isError && <Alert type="error" showIcon title={t("承运时间线读取失败，请刷新后重试")} />}
     {timelineItems.length ? <Timeline items={timelineItems} /> : <div className="muted">{t("暂无承运里程碑")}</div>}
     {nextType && <Card size="small" title={t(nextType === "outbound_dispatched" ? "登记发出运单" : "登记客户交寄揽收")}>
-      <Form form={form} layout="vertical" onFinish={onSubmit} initialValues={{ occurredAt: dayjs() }}>
+      <Form form={form} layout="vertical" onFinish={(values) => { void onSubmit(values).catch(() => undefined); }} initialValues={{ occurredAt: dayjs() }}>
         <Form.Item name="carrierName" label={t("承运商")} rules={[{ required: true, whitespace: true }]}><Input maxLength={120} /></Form.Item>
         <Form.Item name="trackingNumber" label={t("运单号")} rules={[{ required: true, whitespace: true }]}><Input maxLength={191} /></Form.Item>
         <Form.Item name="occurredAt" label={t(nextType === "outbound_dispatched" ? "实际发出时间" : "承运商揽收时间")} rules={[{ required: true }]}><DatePicker showTime style={{ width: "100%" }} disabledDate={(date) => date.isAfter(dayjs(), "day")} /></Form.Item>
@@ -116,7 +117,7 @@ export function CarrierShipmentPanel({ order }: { order: RentalOrder }) {
             <Button icon={<PlusOutlined />}>{t("上传凭证（图片或 PDF）")}</Button>
           </Upload>
         </Form.Item>
-        <Button type="primary" htmlType="submit" loading={createEvent.isPending}>{t("登记里程碑")}</Button>
+        <SaveButton form={form} pending={createEvent.isPending} label={t("登记里程碑")} onSave={onSubmit} />
       </Form>
     </Card>}
   </Card>;

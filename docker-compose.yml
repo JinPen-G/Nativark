@@ -3,7 +3,8 @@ services:
     image: mysql:8.4
     container_name: rental-os-mysql
     restart: unless-stopped
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    # Local development: retain binary logs for seven days, without disabling logging.
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --binlog-expire-logs-seconds=604800 --binlog-expire-logs-auto-purge=ON
     environment:
       MYSQL_ROOT_PASSWORD: rental_os_root
       MYSQL_DATABASE: rental_os

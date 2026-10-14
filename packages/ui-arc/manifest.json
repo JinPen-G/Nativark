@@ -1622,14 +1622,24 @@
       "files": [
         {
           "path": "registry/components/date-range-picker/date-range-picker.tsx",
-          "sha256": "fb690ca0d1a31b1c1001580d53c82aba24a348626d64bc893238b139f49f61c9",
-          "normalizedSha256": "9ef5ba3e09f3e4b769d878da61a80d841e520a8f5469402e5fdea7ff13f8c0f3",
+          "sha256": "ca4172b1125a3ac22ff06e17b599a6dbbe496247a75f7be46fa340de20d54a2f",
+          "normalizedSha256": "aa102de0af9ea66d57d3d32c6df68b27c2095da7313e7f9fb5ac2d309abb4614",
+          "retrievedAt": "2026-10-08",
+          "importNormalization": "../lib/motion-tokens and ../lib/use-today mapped to project vendor aliases; no style or motion edits",
           "matches": true
         },
         {
           "path": "registry/components/date-range-picker/date-range-picker.module.css",
-          "sha256": "fae33a7e8804574e98700a0d5282ef04d7f9fbc3851ff3323b46be563cad1a0b",
-          "normalizedSha256": "751403eae88d14c536723cdb7b83b3b30f1d9c788b6854207ec812e1a6f50c61",
+          "sha256": "e83b9b26c0bc702dcfe613fe39b3a8cc75e44a5a354f5bca579bd36979e20597",
+          "normalizedSha256": "a94f9e4ad0cf80e6d2a5ef4cebd4f5057a93d54292d52ac9f129a38e4412a80b",
+          "retrievedAt": "2026-10-08",
+          "matches": true
+        },
+        {
+          "path": "lib/use-today.ts",
+          "sha256": "069a833b34cb103040013346c07ad453d235da1096ea011d2c50bd148029a3af",
+          "normalizedSha256": "ba09b5572c349f3562f4d32a1282b79795ba7ed7d762b0cba684345baf3d99a2",
+          "retrievedAt": "2026-10-08",
           "matches": true
         }
       ]

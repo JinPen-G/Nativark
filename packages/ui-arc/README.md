@@ -5,7 +5,7 @@
 - Official source: https://uiarc.dev/r/registry.json
 - Catalog: https://uiarc.dev/r/catalog.json
 - License: https://uiarc.dev/license (free source: MIT, copyright 2026 Elia Kuratli).
-- Snapshot: 122 public components/blocks plus foundation, 262 unique source files (2026-10-01 registry reconciliation).
+- Snapshot: 122 public components/blocks plus foundation, 263 unique source files (2026-10-08 date-range source reconciliation).
 - `manifest.json` records registry entries, dependencies and source hashes.
 - 101 Pro entries are catalog metadata only, not downloaded, installed or imitated. Their source requires an appropriate license.
 - The upstream agent skill is not installed as project instructions.
@@ -15,13 +15,15 @@
 - `vendor/registry/foundation.css`: original light/dark, eight accent palettes, chart colors, dimensions, shadows, CSS timing/easing.
 - `vendor/registry/motion-tokens.ts`: original durations, springs, easing, stagger and blur presets.
 - `vendor/registry/components`, `vendor/registry/blocks`: original React/CSS-module source, including currently unused components.
-- Admin aliases `@/registry/*` and `@/lib/motion-tokens` resolve here. Import individual modules, never a barrel of the entire library.
+- Admin aliases `@/registry/*`, `@/lib/motion-tokens` and `@/lib/use-today` resolve here. Import individual modules, never a barrel of the entire library.
 - Unused components are reserved source, not added to the production bundle or automatically given all optional dependencies.
 - Full import/source inventory: [COMPONENTS.md](./COMPONENTS.md). Re-scan with `node scripts/audit-admin-components.cjs` (stdout only); `--json` exposes remaining direct Ant imports and hash mismatches. Downloaded/referenced source is not runtime acceptance.
 
 2026-10-01 follow-up: ordinary standalone checkboxes, simple multiple selectors, label-filtered searchable single selectors and the sound-volume slider now use original public components. Complex group/event/search contracts still retain explicit compatibility paths; original sizes and motion are unchanged. Expanding-search and json-viewer were added as reserved source after checking the live registry.
 
 ## Usage and compatibility
+
+Account menu: `@/components/ui/UserMenu` is an attributed integration derivative of the public MIT UserMenu, reusing its original CSS module, panel/sheet springs, moving highlight, sliding segmented thumb and keyboard handling. Vendor source remains untouched. Only localized chrome and extra preference rows are added. `AccountMenu` places theme (light/dark/system) above language (Chinese/English), both using the original segmented row, and connects real logout and permission-checked settings/subscription routes. Profile remains a visible, explicitly unconnected entry; no fake profile, email, plan, shortcut or presence state is invented. System preference persists separately from its resolved light/dark appearance and follows OS changes. The old sidebar preference controls are no longer rendered; login's appearance control is unchanged. No browser acceptance is claimed.
 
 Authentication fields also expose the original PasswordField, PasswordStrength and PhoneInput adapters. Strength rules mirror the existing eight-character/letter/number/symbol policy rather than the upstream demo policy. The code/recovery preview uses E.164 phone validity and a non-clipping step frame. Only the source shell draws password focus; the inner input does not receive an extra generic outline. Login result messages use the original ToastStack through FeedbackProvider; other AntD message/notification consumers are not silently overridden. Rich inline Alert details use the source component; block/custom-rendered details retain an explicit compatibility fallback to avoid invalid nested paragraphs. Browser acceptance covered the recovery preview, rule meter, mismatch rejection, cleared password state, country selection, 375px sizing and zero API writes.
 
@@ -39,6 +41,8 @@ ConfirmAction must receive the actual `mutateAsync` promise. Offer Undo only if 
 
 Date/time adapters preserve Dayjs values and seconds, null clearing and Form disabled state. Complex disabled-time/custom-panel contracts explicitly retain AntD. TimeInput stores HH:mm strings. Table keeps AntD's business row/selection engine and uses Arc pagination for compatible configurations; custom sorting/filtering/tree pagination retains AntD. Alert/Steps/Progress retain AntD for unsupported complex content or special modes.
 
+日期时间范围规范：取还时间、租赁时间等带时分秒的范围统一使用 `@/components/ui` 的 `DatePicker.RangePicker showTime`，页面只显示一个完整的范围输入控件，日期与时间在弹层内选择，清空使用控件内置入口。不得将范围拆成独立日期、时间、秒输入和外置清空按钮。原版 UIArc DateRangePicker 仅支持整日范围，因此 `showTime` 分支明确使用主题化 AntD 一体式兼容控件；不修改 vendor、不截断已有秒值、不改变 Dayjs 表单/API 契约。纯日期范围仍使用原版 UIArc 组件。回归检查：`node tests/admin-datetime-range.test.cjs`（适配器契约测试，不代表浏览器视觉验收）。
+
 Use FileUpload for new uploads and return the real upload promise; failures must reject. Upload is the existing AntD-contract adapter, not a fake upload timer. Remote previews, custom removal vetoes and incompatible automatic-upload guards retain AntD. Cancelled uploads must not overwrite the persisted asset URL.
 
 RichTextEditor stores `rental-rich-text:v1` followed by whitelisted JSON document nodes in the existing body string, not executable HTML. Existing plain-text documents remain unchanged when opened. The shared codec rejects unsafe links/attributes/tags and limits document size/depth. The tenant website and customer miniprogram legal readers are updated together; other client implementations must consume this codec before enabling rich document authoring. API document bodies remain limited to 20,000 characters. Tests: `node tests/client-rich-text.test.cjs` after building shared.
@@ -52,6 +56,8 @@ The rich editor presents the upstream editing surface alongside Markdown/HTML ou
 2026-10-01 form integration: `@/components/ui/Form` retains Ant Form's store, validation, dependencies, dynamic lists, disabled context, static APIs and ref behavior while applying a shared field presentation via `Form`, `Form.Item` and optional `FormSection`. Labels, required marks, helper/error spacing and section spacing use named admin CSS tokens. Compatible plain UIArc Inputs receive the current Ant validation error through their original animated alert row; controls with richer/unsupported contracts retain Ant's own validation feedback. All existing admin Form imports route through the adapter entry. This is a presentation-layer change: no API payload or validation rule was changed.
 
 Original component motion and CSS stay in vendor, unchanged. Integration overrides belong to `apps/admin/src/components/ui/arc-bridge.css`.
+
+2026-10-08 source reconciliation: the date-range picker TSX/CSS were the only two files differing from the recorded normalized hashes. Re-synced the official public registry response and its new `lib/use-today.ts` dependency, restoring upstream month layout/presence rather than keeping a locally rewritten animation. Only installation import paths are mapped to vendor aliases; source and normalized local hashes are recorded separately. All 263 reserved files pass the inventory hash check. Localized/integration derivatives Accordion, Dialog, RadioGroup, ToastStack, UserMenu and Dropdown were also compared for motion constants, Motion attributes and animate calls without finding motion changes. This is source/static evidence, not browser acceptance.
 
 The default palette is UIArc neutral; tenant color overrides remain authoritative. Existing tenant radius values are preserved. If no legacy or explicit tenant value exists, defaults are button/input 18px and panel 26px. Button sounds still use the existing global interaction system.
 

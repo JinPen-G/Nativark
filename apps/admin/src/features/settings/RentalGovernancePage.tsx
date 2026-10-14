@@ -6,7 +6,7 @@ import {
 } from "@ant-design/icons";
 import type { SaveTenantRentalBusinessSettingsRequest } from "@rental-os/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { App } from "antd";
+import { App } from "@/components/ui";
 import { Tabs } from "@/components/ui";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { rentalCoreApi } from "@/api/rentalCore";
@@ -144,7 +144,7 @@ export function RentalGovernancePage() {
    * 从最近一次服务端快照合并，避免切换页签或保存一个页签时覆盖另一页签。
    */
   const saveTab = (patch: Partial<SaveTenantRentalBusinessSettingsRequest>) => {
-    if (!settings.data) return;
+    if (!settings.data) return Promise.reject(new Error("Settings unavailable"));
     const {
       tenantId: _tenant,
       categoryCode: _category,
@@ -153,7 +153,7 @@ export function RentalGovernancePage() {
       updatedBy: _updatedBy,
       ...current
     } = settings.data;
-    saveSettings.mutate({ ...current, ...patch });
+    return saveSettings.mutateAsync({ ...current, ...patch });
   };
 
   const activeTab = permittedTabs.find((definition) => definition.key === tab);
