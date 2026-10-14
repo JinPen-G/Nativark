@@ -25,7 +25,8 @@ import { PrismaTaskTakeoverRepository } from '../runner/prisma-task-takeover.rep
 import { AiTaskTransitionRepository } from '../ai-task-transition.repository';
 import { PrismaTaskPlanPolicyRepository } from '../runner/prisma-task-plan-policy.repository';
 import { PrismaTaskRecoverySnapshotRepository } from '../runner/prisma-task-recovery-snapshot.repository';
-import { AI_TASK_RECOVERY_READ_VERSION, type AiSceneModelRecoverySnapshotReadResponse } from '@rental-os/shared';
+import { AI_TASK_RECOVERY_READ_VERSION, isAiTaskInputSubmissionDraft, type AiSceneModelRecoverySnapshotReadResponse } from '@rental-os/shared';
+import { PrismaTaskInputRepository, readTaskModelRunOrigin } from '../task-input/prisma-task-input.repository';
 import { AiOriginalSceneResultService } from './original-scene-result.service';
 import { composeOriginalSceneKnowledge, type AiOriginalSceneKnowledgeOptions } from './original-scene-knowledge';
 import { gatewayTextIntentBindingSchema } from '../gateway-intent';
@@ -233,6 +234,7 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     runId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
   const cancellationSchema = z.object({ original: originalRequestReferenceSchema,
     expectedRevision: z.number().int().min(1).max(4294967294) }).strict();
+  const answerSchema = z.object({ original: originalRequestReferenceSchema, submission: z.unknown() }).strict();
   const schema = z.object({ original: originalRequestReferenceSchema,
     runId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
     expectedTaskRevision: z.number().int().min(1).max(4294967294),
@@ -248,7 +250,8 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
       const knowledge = knowledgeOptions ? composeOriginalSceneKnowledge(knowledgeOptions, input, input.clock ?? (() => new Date())) : undefined;
       return new AiOriginalSceneResultService(input.db, authorization.tasks, scenes, resultPolicy, input.clock, knowledge);
     };
-    return { scenes, resultReader,
+    return { scenes, resultReader, tasks: authorization.tasks, db: input.db,
+      answers: () => PrismaTaskInputRepository.receiptReader(input.db, authorization.tasks, input.clock),
       snapshots: new PrismaTaskRecoverySnapshotRepository(input.db, authorization.tasks),
       transitions: new AiTaskTransitionRepository(input.db, authorization.authority, input.clock),
       takeovers: new PrismaTaskTakeoverRepository(input.db, authorization.authority, input.clock) };
@@ -274,6 +277,38 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     });
   };
   return Object.freeze({
+    readAnswer(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = answerSchema.safeParse(structuredClone(value));
+      if (!parsed.success || !isAiTaskInputSubmissionDraft(parsed.data.submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = answerSchema.parse(command);
+        if (!isAiTaskInputSubmissionDraft(input.submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+        const before = await root.scenes.requests.readHistorical(input.original);
+        const task = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        if (input.submission.taskId !== task.taskId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const receipt = await root.answers().readSubmission(input.submission);
+        if (receipt.state === 'observed') {
+          const access = await root.tasks.resolveAccess(task.taskId, 'read_metadata');
+          await root.db.$transaction(async tx => {
+            const row = await tx.aiTask.findFirst({ where: access.where });
+            if (!row || row.inputRef !== input.original.inputRef || row.inputHash !== before.receipt.contentHash)
+              throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+            await readTaskModelRunOrigin(tx, access, { scopeId: row.scopeId, taskId: task.taskId, runId: receipt.runId,
+              originRunId: task.runId, registrationRef: `scene-model:${input.original.inputRef}` });
+          });
+          if ((await root.tasks.resolveAccess(task.taskId, 'read_metadata')).bindingKey !== access.bindingKey)
+            throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        }
+        const after = await root.scenes.requests.readHistorical(input.original);
+        const latest = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (after.receipt.state === 'revoked' || after.receipt.contentHash !== before.receipt.contentHash
+          || originalIdentityHash(after.context) !== originalIdentityHash(before.context)
+          || latest.state !== 'observed' || latest.taskId !== task.taskId || latest.runId !== task.runId)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return freezeOriginalInput(receipt);
+      });
+    },
     readModelResult(request: AiSceneHttpRequest, value: unknown) {
       return call(request, value, (root, command) => root.resultReader().read(command));
     },
@@ -435,7 +470,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     refreshInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.refreshInput(command)),
     resume: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, (app, command) => app.resume(command, signal)),
-    readAnswer: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readAnswer(command)),
+    readAnswer: recoveryReaders.readAnswer,
     readModelResult: recoveryReaders.readModelResult,
     reopenModelSource: recoveryReaders.reopenModelSource,
     readQuotePreparation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readQuotePreparation(command)),
@@ -547,7 +582,7 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
     refreshInput: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.refreshInput(command)),
     resume: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       call(request, value, (app, command) => app.application.resume(command, signal)),
-    readAnswer: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.readAnswer(command)),
+    readAnswer: recoveryReaders.readAnswer,
     readQuotePreparation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.readQuotePreparation(command)),
     confirmClarifiedQuote: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.confirmClarifiedQuote(command)),
     readClarifiedQuoteReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.readClarifiedQuoteReceipt(command)),

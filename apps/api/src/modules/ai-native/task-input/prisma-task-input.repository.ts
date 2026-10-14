@@ -149,11 +149,19 @@ export async function readTaskModelRunOrigin(tx: Tx, access: Access,
 
 export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskInputReader {
   constructor(private readonly db: Db, private readonly tasks: Pick<AiTaskRepository, 'resolveAccess'>,
-    private readonly plans: AiTaskPlanEvidenceAuthority, private readonly source: AiTaskInputSource,
-    private readonly clock: () => Date = () => new Date()) {
+    private readonly plans: AiTaskPlanEvidenceAuthority | undefined, private readonly source: AiTaskInputSource | undefined,
+    private readonly clock: () => Date = () => new Date(), private readonly receiptOnly = false) {
     if (typeof db?.$transaction !== 'function' || typeof db?.aiTaskInputRequest?.create !== 'function'
       || typeof db?.aiTaskInputReceipt?.create !== 'function' || typeof tasks?.resolveAccess !== 'function'
-      || typeof plans?.authorize !== 'function' || typeof source?.resolve !== 'function' || typeof source?.validateAnswers !== 'function') throw unavailable();
+      || !receiptOnly && (typeof plans?.authorize !== 'function' || typeof source?.resolve !== 'function'
+        || typeof source?.validateAnswers !== 'function')) throw unavailable();
+  }
+
+  /** Exact persisted answer observation; no executor, input producer or plan
+   * permission substitute is supplied. All mutations remain fail closed. */
+  static receiptReader(db: Db, tasks: Pick<AiTaskRepository, 'resolveAccess'>, clock?: () => Date) {
+    const repository = new PrismaTaskInputRepository(db, tasks, undefined, undefined, clock, true);
+    return Object.freeze({ readSubmission: repository.readSubmission.bind(repository) });
   }
 
   private async access(taskId: string, operation: AiTaskRepositoryOperation, before?: Access) {
@@ -177,7 +185,10 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
       throw new AiTaskRepositoryError('AI_STORAGE_UNAVAILABLE');
     }
   }
-  private writeTransaction<T>(work: (tx: Tx) => Promise<T>) { return this.transaction(work, true); }
+  private writeTransaction<T>(work: (tx: Tx) => Promise<T>) {
+    if (this.receiptOnly) throw unavailable();
+    return this.transaction(work, true);
+  }
   private async task(tx: Tx, taskId: string, access: Access) {
     await tx.$queryRaw(Prisma.sql`SELECT id FROM ai_tasks WHERE id = ${taskId} FOR UPDATE`);
     const task = await tx.aiTask.findFirst({ where: access.where, include: { scope: true } });
@@ -204,6 +215,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     const parsed = aiTaskRunPlanSchema.safeParse(row.payload);
     if (!parsed.success || parsed.data.taskId !== taskId || parsed.data.runId !== runId || requestFingerprint(parsed.data) !== row.planHash) throw denied();
     if (lease) {
+      if (!this.plans) throw unavailable();
       const proof = structuredClone(await this.plans.authorize(structuredClone(parsed.data), structuredClone(lease)));
       if (proof?.authorityHash !== row.authorityHash || proof.policyVersion !== row.policyVersion || !Number.isFinite(Date.parse(proof.expiresAt))
         || Date.parse(proof.expiresAt) <= this.clock().getTime()) throw denied();
@@ -225,6 +237,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     return { binding, step, artifact, plan: parsed.data, planned, index };
   }
   private async requirement(binding: AiTaskInputBinding) {
+    if (!this.source) throw unavailable();
     const result = structuredClone(await this.source.resolve(structuredClone(binding)));
     if (result?.kind === 'not_required' && Object.keys(result).length === 1) return result;
     if (result?.kind !== 'required' || !isAiTaskInputContractDraft(result.contract) || result.inputRef !== binding.inputRef
@@ -241,6 +254,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
     return contract;
   }
   private async validateAnswers(binding: AiTaskInputBinding, contract: AiTaskInputContractDraft, answers: AiTaskInputSubmissionDraft['answers']) {
+    if (!this.source) throw unavailable();
     if (!validateAiTaskInputAnswersDraft(contract, answers)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const proof = structuredClone(await this.source.validateAnswers(structuredClone(binding), structuredClone(contract), structuredClone(answers)));
     if (!proof || !['context_only', 'business_parameters'].includes(proof.disposition)
@@ -347,6 +361,7 @@ export class PrismaTaskInputRepository implements AiTaskRunnerInputPort, AiTaskI
   /** Called only while the aggregate cancellation transaction owns the task
    * lock. A released, fully measured model wait is proof; lease expiry is not. */
   async closeCancelledInputWait(tx: Tx, key: { id: string; scopeId: string; revision: number }) {
+    if (this.receiptOnly) throw unavailable();
     const before = await this.access(key.id, 'transition_task');
     const task = await this.task(tx, key.id, before);
     // The enclosing aggregate CAS already reserved its next revision.
