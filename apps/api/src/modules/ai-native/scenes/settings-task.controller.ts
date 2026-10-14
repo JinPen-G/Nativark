@@ -5,11 +5,25 @@ import type { AiSceneHttpRequest, composeRequestBoundOriginalSceneModel, compose
 import { respondAiScene } from './original-scenes.controller';
 import { withRequestAbort, type AiRequestAbortSource } from './request-abort';
 import { settingsContract } from '../approval-execution/approved-settings-contracts';
+import type { composeRequestBoundSettingsTaskReads } from './settings-task-read.composition';
 
 export const AI_SETTINGS_TASK_HTTP_REQUESTS = Symbol('AI_SETTINGS_TASK_HTTP_REQUESTS');
 export const AI_SETTINGS_TASK_CREATION_REQUESTS = Symbol('AI_SETTINGS_TASK_CREATION_REQUESTS');
 export const AI_SETTINGS_TASK_CONTROL_REQUESTS = Symbol('AI_SETTINGS_TASK_CONTROL_REQUESTS');
 export const AI_SETTINGS_CHANGE_REQUESTS = Symbol('AI_SETTINGS_CHANGE_REQUESTS');
+export const AI_SETTINGS_TASK_READ_REQUESTS = Symbol('AI_SETTINGS_TASK_READ_REQUESTS');
+@Controller(routes.basePath)
+export class AiSettingsTaskReadController {
+  constructor(@Inject(AI_SETTINGS_TASK_READ_REQUESTS) private readonly reads: ReturnType<typeof composeRequestBoundSettingsTaskReads>) {}
+  @Post(routes.readOriginalSettingsSnapshot) @Header('Cache-Control', 'no-store')
+  readSnapshot(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.reads.readSnapshot(request, body), 'read_settings_task_creation');
+  }
+  @Post(routes.readOriginalSettingsEvents) @Header('Cache-Control', 'no-store')
+  readEvents(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.reads.readEvents(request, body), 'read_settings_task_creation');
+  }
+}
 @Controller(routes.basePath)
 export class AiSettingsChangeController {
   constructor(@Inject(AI_SETTINGS_CHANGE_REQUESTS) private readonly changes: ReturnType<typeof composeRequestBoundSettingsChanges>) {}

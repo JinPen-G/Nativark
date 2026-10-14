@@ -146,6 +146,7 @@ export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
   createSettingsTask: 'settings/create-task', readSettingsTaskCreation: 'settings/create-task/receipt',
   readCurrentSettings: 'settings/current', prepareOriginalSettingsChange: 'settings/change/prepare',
   readOriginalSettingsChange: 'settings/change/receipt',
+  readOriginalSettingsSnapshot: 'settings/original/snapshot', readOriginalSettingsEvents: 'settings/original/events',
   readSettingsTaskPolicy: 'settings/task-policy/read', configureSettingsTaskPolicy: 'settings/task-policy/configure',
   clearSettingsTaskPolicy: 'settings/task-policy/clear', startOriginalSettingsTask: 'settings/start-original',
   requestOriginalSettingsCancellation: 'settings/original/cancel', readOriginalSettingsCancellation: 'settings/original/cancel/receipt',

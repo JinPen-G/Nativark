@@ -28,6 +28,8 @@ export const AI_APPROVED_SETTINGS_DRAFT_SCHEMAS = {
     object({ state: literal('prepared_not_approved'), change: ref('AiApprovedSettingsChangeReviewDraft') }),
     object({ state: literal('not_observed'), nextAction: literal('read_change_receipt') })] },
   AiApprovedSettingsTaskCreationDraft: object({ creationKey: id(128), changeKey: id(128) }),
+  AiApprovedSettingsTaskEventsReadDraft: object({ creationKey: id(128), changeKey: id(128),
+    after: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }),
   AiApprovedSettingsTaskCancellationDraft: object({ creationKey: id(128), changeKey: id(128),
     expectedRevision: { type: 'integer', minimum: 1, maximum: 4294967293 } }),
   AiApprovedSettingsTaskPolicyReadDraft: object({ creationKey: id(128), changeKey: id(128), operation: id() }),

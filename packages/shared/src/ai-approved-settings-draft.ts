@@ -26,6 +26,10 @@ export type AiApprovedSettingsChangeReceiptDraft =
 /** References the original Core preparation; never supplies task ownership,
  * a plan, approval or active configuration values. */
 export interface AiApprovedSettingsTaskCreationDraft { creationKey: string; changeKey: string; }
+/** Task-local cursor stays a string; a reset requires a new formal snapshot. */
+export interface AiApprovedSettingsTaskEventsReadDraft extends AiApprovedSettingsTaskCreationDraft {
+  after: string; limit: number;
+}
 /** Selects a server-registered action template, never permissions or an approval. */
 export interface AiApprovedSettingsTaskPolicyReadDraft extends AiApprovedSettingsTaskCreationDraft { operation: string; }
 export interface AiApprovedSettingsTaskPolicyConfigureDraft extends AiApprovedSettingsTaskPolicyReadDraft { expectedRevision: number | null; }

@@ -6,6 +6,8 @@ import { AiOriginalSceneModelController } from './original-scenes.controller';
 import { AiSettingsTaskCreationController, AI_SETTINGS_TASK_CREATION_REQUESTS } from './settings-task.controller';
 import { AiSettingsTaskControlController, AI_SETTINGS_TASK_CONTROL_REQUESTS } from './settings-task.controller';
 import { AiSettingsChangeController, AI_SETTINGS_CHANGE_REQUESTS } from './settings-task.controller';
+import { AiSettingsTaskReadController, AI_SETTINGS_TASK_READ_REQUESTS } from './settings-task.controller';
+import { composeRequestBoundSettingsTaskReads } from './settings-task-read.composition';
 import { composeRequestBoundSettingsTask, composeRequestBoundPersistedSettingsTask, composeRequestBoundSettingsTaskCreation,
   composeRequestBoundSettingsTaskControls, composeRequestBoundSettingsChanges, type AiSettingsTaskRequestOptions } from './request-bound-scenes.application';
 
@@ -15,7 +17,7 @@ import { composeRequestBoundSettingsTask, composeRequestBoundPersistedSettingsTa
  * this module: they represent the same seven public operations. */
 @Module({})
 export class AiSettingsTaskHttpModule {
-  /** One complete original-change lifecycle. All three producers share the
+  /** One complete original-change lifecycle. Producers and readers share the
    * same server scene/holder configuration and the same persisted machinery.
    * Do not mount this alongside legacy settings or the individual modules. */
   static registerOriginalLifecycle(dependencies: Parameters<typeof composeRequestBoundSettingsTaskControls>[0],
@@ -23,8 +25,10 @@ export class AiSettingsTaskHttpModule {
     if (options.enabled !== true) return { module: AiSettingsTaskHttpModule, controllers: [], providers: [] };
     const selected = structuredClone(options), server = { ...dependencies, scene: structuredClone(dependencies.scene) };
     return { module: AiSettingsTaskHttpModule,
-      controllers: [AiSettingsChangeController, AiSettingsTaskCreationController, AiSettingsTaskControlController, AiSettingsTaskController],
+      controllers: [AiSettingsChangeController, AiSettingsTaskCreationController, AiSettingsTaskControlController, AiSettingsTaskController, AiSettingsTaskReadController],
       providers: [
+        { provide: AI_SETTINGS_TASK_READ_REQUESTS,
+          useFactory: () => composeRequestBoundSettingsTaskReads(server, { enabled: selected.enabled, audience: selected.audience }) },
         { provide: AI_SETTINGS_CHANGE_REQUESTS,
           useFactory: () => composeRequestBoundSettingsChanges(server, selected) },
         { provide: AI_SETTINGS_TASK_CREATION_REQUESTS,
@@ -33,7 +37,16 @@ export class AiSettingsTaskHttpModule {
           useFactory: () => composeRequestBoundSettingsTaskControls(server, selected) },
         { provide: AI_SETTINGS_TASK_HTTP_REQUESTS,
           useFactory: () => composeRequestBoundPersistedSettingsTask(server, selected) }
-      ], exports: [AI_SETTINGS_CHANGE_REQUESTS, AI_SETTINGS_TASK_CREATION_REQUESTS, AI_SETTINGS_TASK_CONTROL_REQUESTS, AI_SETTINGS_TASK_HTTP_REQUESTS] };
+      ], exports: [AI_SETTINGS_CHANGE_REQUESTS, AI_SETTINGS_TASK_CREATION_REQUESTS, AI_SETTINGS_TASK_CONTROL_REQUESTS, AI_SETTINGS_TASK_HTTP_REQUESTS, AI_SETTINGS_TASK_READ_REQUESTS] };
+  }
+  /** Read-only original-task supply does not require a running model/plan. */
+  static registerReads(dependencies: Parameters<typeof composeRequestBoundSettingsTaskReads>[0],
+    options: Parameters<typeof composeRequestBoundSettingsTaskReads>[1]): DynamicModule {
+    if (options.enabled !== true) return { module: AiSettingsTaskHttpModule, controllers: [], providers: [] };
+    const selected = structuredClone(options), server = { ...dependencies, scene: structuredClone(dependencies.scene) };
+    return { module: AiSettingsTaskHttpModule, controllers: [AiSettingsTaskReadController], providers: [{
+      provide: AI_SETTINGS_TASK_READ_REQUESTS, useFactory: () => composeRequestBoundSettingsTaskReads(server, selected)
+    }], exports: [AI_SETTINGS_TASK_READ_REQUESTS] };
   }
   static registerChanges(dependencies: Parameters<typeof composeRequestBoundSettingsChanges>[0],
     options: Parameters<typeof composeRequestBoundSettingsChanges>[1]): DynamicModule {
