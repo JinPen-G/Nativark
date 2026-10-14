@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
+import { z } from 'zod';
 import { AI_TOOL_DRAFT_VERSION, type AiExecutionContext } from '@rental-os/shared';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import type { RentalCoreService } from '../../rental-core/rental-core.service';
@@ -106,7 +107,19 @@ export function composePersistedReadonlyBusinessTaskRunner(input: ReadonlyRunner
     }, validateAnswers: async () => { throw unavailable(); } },
     toolCatalog: { resolve: async (code, version) => selected(code)?.toolCatalog.resolve(code, version) ?? null }
   });
-  return Object.freeze({ ...root, sources: Object.freeze(Object.fromEntries(readers.map(reader => [reader.tool, reader.root.source]))) });
+  const reopenBusinessSource = async (value: unknown, signal?: AbortSignal) => {
+    const artifact = await root.results.read(value);
+    const access = await first.authorization.tasks.resolveAccess(artifact.taskId, 'read_step_terminal');
+    const task = await input.db.aiTask.findFirst({ where: access.where });
+    if (!task) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const step = await input.db.aiStep.findFirst({ where: { scopeId: task.scopeId, taskId: task.id,
+      runId: artifact.runId, id: artifact.stepId, resultRef: artifact.resultId } });
+    const reader = step && step.toolVersion === AI_TOOL_DRAFT_VERSION && selected(step.toolCode);
+    if (!reader) throw unavailable();
+    return reader.reopenBusinessSource(value, signal);
+  };
+  return Object.freeze({ ...root, reopenBusinessSource,
+    sources: Object.freeze(Object.fromEntries(readers.map(reader => [reader.tool, reader.root.source]))) });
 }
 function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReadonlyTool) {
   if (typeof input?.guard?.canActivate !== 'function'
@@ -140,12 +153,7 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
         lease: { runId: lease.runId, holderId: lease.holderId, revision: lease.revision, fencingToken: lease.fencingToken } };
     }
   };
-  const executors: AiTaskRegisteredExecutor = {
-    async resolve(code, version) {
-      if (code !== tool || version !== AI_TOOL_DRAFT_VERSION) return null;
-      return { operation: 'readonly', async execute(binding, signal) {
-        if (signal.aborted || binding.clarifications?.length) throw unavailable();
-        const stored = await source.readForExecution(binding);
+  const readFacts = async (stored: { input: unknown; context: AiExecutionContext }, signal: AbortSignal) => {
         // Per-execution closure: concurrent tasks cannot swap a shared expected identity.
         const readAuthority = { withRead: route.withRead.bind(route) };
         const boundAuthority: typeof readAuthority = { withRead: (kind, request, read) =>
@@ -176,6 +184,16 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
             : await new AiOrderReadFactsService({ getOrder: input.core.getOrder!.bind(input.core) },
               new AiOrderRouteContextAuthority(input.guard, input.authorization.credentials,
                 aiPersistedOrderExplainInputSchema.parse(stored.input).input.orderId, input.wall), input.wall).read(stored.context);
+        if (signal.aborted) throw unavailable();
+        return result;
+  };
+  const executors: AiTaskRegisteredExecutor = {
+    async resolve(code, version) {
+      if (code !== tool || version !== AI_TOOL_DRAFT_VERSION) return null;
+      return { operation: 'readonly', async execute(binding, signal) {
+        if (signal.aborted || binding.clarifications?.length) throw unavailable();
+        const stored = await source.readForExecution(binding);
+        const result = await readFacts(stored, signal);
         const current = await authorization.execution.authorize(binding.taskId);
         if (signal.aborted || identity(current) !== identity(stored.context)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
         const payload: Prisma.InputJsonObject = JSON.parse(JSON.stringify(result));
@@ -201,5 +219,29 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
   const root = composeAuthorizedReadonlyPersistentTaskInputRunner({ ...input, authorization: input.authorization,
     planAuthority: source, registrationAuthority: source, inputSource, commands, executors,
     toolCatalog });
-  return Object.freeze({ ...root, source, commands, executors, inputSource, toolCatalog });
+  /** Original artifact locates its exact input; the returned business facts
+   * are newly authorized observations, never unchecked historic payloads. */
+  const reopenBusinessSource = async (value: unknown, signal?: AbortSignal) => {
+    const resourceId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+    const parsed = z.object({ taskId: resourceId.max(36), resultId: resourceId.max(36) }).strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const command = parsed.data, abort = signal ?? new AbortController().signal;
+    if (abort.aborted) throw unavailable();
+    const original = await root.results.read(command);
+    if (original.status !== 'succeeded' || !original.completeMeasurement) throw unavailable();
+    const binding = { taskId: command.taskId, runId: original.runId, stepId: original.stepId };
+    const before = await source.readReadonlyResultInput(binding);
+    const facts = await readFacts(before, abort);
+    const after = await source.readReadonlyResultInput(binding), latest = await root.results.read(command);
+    if (abort.aborted || identity(before.context) !== identity(after.context) || before.binding !== after.binding) {
+      throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    }
+    if (requestFingerprint(original) !== requestFingerprint(latest)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    // Never return the old payload: previously visible customers/items may be
+    // outside the current business scope even while Task ownership remains.
+    const { payload: _historicalPayload, ...reference } = original;
+    return Object.freeze({ original: reference, facts, observation: 'current_authorized_reobservation' as const,
+      originalPayload: 'not_returned' as const, execution: 'not_invoked' as const });
+  };
+  return Object.freeze({ ...root, source, commands, executors, inputSource, toolCatalog, reopenBusinessSource });
 }

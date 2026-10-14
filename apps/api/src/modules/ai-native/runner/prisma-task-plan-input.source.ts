@@ -524,6 +524,47 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     return { ...stored, input: aiRiskReadInputSchema.parse(stored.input) };
   }
 
+  /** Historical source lookup, not execution admission. An expired or disabled
+   * execution policy cannot grant a new effect and is not needed to identify
+   * an original read; current terminal-read ownership still must be valid.
+   * Consumers must re-run the original business Guard before returning facts. */
+  async readReadonlyResultInput(value: unknown) {
+    if (!(PERSISTED_READONLY_TOOLS as readonly string[]).includes(this.toolCode)) throw unavailable();
+    const parsed = z.object({ taskId: id.max(36), runId: id.max(36), stepId: id.max(36) }).strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const command = parsed.data;
+    const read = async () => {
+      const context = structuredClone(await this.authorization.resolve(command.taskId, 'read_step_terminal'));
+      const access = aiTaskAccessFromContext(context, command.taskId, this.wall());
+      const task = structuredClone(await this.db.aiTask.findFirst({ where: access.where }));
+      if (!task || task.id !== command.taskId || task.ownerKind !== access.actorKind || task.ownerId !== access.actorId
+        || task.audience !== access.audience || task.archivedAt !== null) throw denied();
+      const key = { scopeId: task.scopeId, taskId: task.id, runId: command.runId };
+      const run = await this.db.aiRun.findFirst({ where: { scopeId: key.scopeId, taskId: key.taskId, id: key.runId,
+        actorKind: access.actorKind, actorId: access.actorId } });
+      if (!run || run.id !== key.runId || run.scopeId !== key.scopeId || run.taskId !== key.taskId
+        || run.actorKind !== access.actorKind || run.actorId !== access.actorId) throw denied();
+      const step = structuredClone(await this.db.aiStep.findFirst({ where: { ...key, id: command.stepId } }));
+      if (!step || step.id !== command.stepId || Object.entries(key).some(([field, expected]) => step[field as keyof typeof step] !== expected)
+        || step.toolCode !== this.toolCode || step.toolVersion !== AI_TOOL_DRAFT_VERSION || !step.inputRef) throw unavailable();
+      const row = structuredClone(await this.db.aiTaskActionInput.findFirst({ where: { ...key, id: step.inputRef } }));
+      if (!row || row.id !== step.inputRef || Object.entries(key).some(([field, expected]) => row[field as keyof typeof row] !== expected)
+        || row.toolCode !== this.toolCode || row.toolVersion !== AI_TOOL_DRAFT_VERSION
+        || row.fingerprint !== step.requestFingerprint || !id.safeParse(row.registrationRef).success) throw denied();
+      const expectedAction = `ai-action-${requestFingerprint({ version: 'ai-step-registration-1', scope: access.scope,
+        taskId: task.id, registrationRef: row.registrationRef })}`;
+      const input = await this.parseInput(structuredClone(row.payload));
+      if (step.actionId !== expectedAction || this.fingerprint(input) !== row.fingerprint) throw denied();
+      return { context, input, binding: requestFingerprint({ taskId: task.id, scopeId: task.scopeId,
+        runId: step.runId, stepId: step.id, actionId: step.actionId, inputRef: row.id,
+        fingerprint: row.fingerprint, toolCode: row.toolCode, toolVersion: row.toolVersion,
+        policyRevision: row.policyRevision, registrationRef: row.registrationRef }) };
+    };
+    const before = await read(), after = await read();
+    if (identity(before.context) !== identity(after.context) || before.binding !== after.binding) throw denied();
+    return { ...before, input: structuredClone(before.input) };
+  }
+
   private async readStoredInput(binding: { taskId: string; runId: string; inputRef: string; fingerprint: string }) {
     binding = structuredClone(binding);
     const before = await this.access(binding.taskId, 'transition_task');
