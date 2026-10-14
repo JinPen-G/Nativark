@@ -5,6 +5,7 @@ import { freezeOriginalInput, originalRequestReferenceSchema } from '../task-req
 import { originalIdentityHash } from '../task-request/original-request.authority';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { aiCatalogReadInputSchema } from '../catalog-read-facts.service';
 
 const fields = ['itemLabel', 'itemGroupLabel', 'assetLabel', 'fulfillmentLabel', 'pickupLabel', 'returnLabel'] as const;
 const citationSchema = originalRequestReferenceSchema.extend({ version: z.string().min(1).max(191),
@@ -20,6 +21,38 @@ const quoteConfirmation = originalRequestReferenceSchema.extend({
 
 export class AiOriginalSceneFactsService {
   constructor(private readonly requests: PrismaOriginalRequestRepository, private readonly tools: ReturnType<typeof composeAiAuthorizedBusinessTools>) {}
+  /** Current, bounded candidate source for an original quote question. Page
+   * references are observations, never human selection or pricing authority. */
+  async readQuoteCatalog(value: unknown) {
+    const hash = z.string().regex(/^[a-f0-9]{64}$/u);
+    const parsed = originalRequestReferenceSchema.extend({ query: aiCatalogReadInputSchema,
+      expectedConfigurationVersion: hash.optional(), expectedPageFingerprint: hash.optional()
+    }).strict().refine(row => (row.expectedConfigurationVersion === undefined) === (row.expectedPageFingerprint === undefined))
+      .safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const command = freezeOriginalInput(parsed.data), ref = { draftVersion: command.draftVersion, inputRef: command.inputRef };
+    const original = await this.requests.read(ref);
+    if (original.request.sceneCode !== 'quote_clarification') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const grant = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
+    const read = () => this.tools.catalog.read(command.query, grant.context);
+    const page = await read();
+    const basis = (value: typeof page) => ({ scope: value.scope, audience: value.audience, query: command.query,
+      items: value.items, configurationVersion: value.configurationVersion,
+      truncated: value.truncated, nextCursor: value.nextCursor, source: value.source });
+    const fingerprint = requestFingerprint(basis(page));
+    if (requestFingerprint(basis(await read())) !== fingerprint) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+    const after = await this.requests.read(ref), current = await this.requests.resolve(original.request.sceneCode, ref.inputRef);
+    if (originalIdentityHash(grant.context) !== originalIdentityHash(current.context)
+      || original.receipt.contentHash !== after.receipt.contentHash) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    const changed = (command.expectedConfigurationVersion !== undefined && command.expectedConfigurationVersion !== page.configurationVersion)
+      || (command.expectedPageFingerprint !== undefined && command.expectedPageFingerprint !== fingerprint);
+    return freezeOriginalInput({ original: original.receipt, page,
+      reference: { ...ref, query: command.query, expectedConfigurationVersion: page.configurationVersion,
+        expectedPageFingerprint: fingerprint },
+      state: changed ? 'changed_reconfirmation_required' as const : 'observed' as const,
+      selection: 'not_attested' as const, quotation: 'not_attempted' as const,
+      inventoryReservation: 'not_attempted' as const, execution: 'not_attempted' as const });
+  }
   /** Resolve one displayed candidate for the original next-steps question.
    * This is material for the human destination, never an allowed-actions grant. */
   async prepareOrderManualHandoff(value: unknown) {

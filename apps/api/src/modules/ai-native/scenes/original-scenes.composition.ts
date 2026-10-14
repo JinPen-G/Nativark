@@ -60,6 +60,7 @@ export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
     readTaskReceipt: requests.readTaskReceipt.bind(requests),
     readOpeningSection: facts.readOpeningSection.bind(facts),
     prepareOrderManualHandoff: facts.prepareOrderManualHandoff.bind(facts),
+    readQuoteCatalog: facts.readQuoteCatalog.bind(facts),
     reopenOrderCitation: facts.reopenOrderCitation.bind(facts), prepareOpeningSections: facts.prepareOpeningSections.bind(facts),
     reviewQuote: facts.reviewQuote.bind(facts),
     confirmQuote: facts.confirmQuote.bind(facts), readQuoteReceipt: facts.readQuoteReceipt.bind(facts),
