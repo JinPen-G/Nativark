@@ -1,10 +1,24 @@
 import { Body, Controller, Header, Inject, Post, Req } from '@nestjs/common';
 import { AI_SCENE_MODEL_HTTP_DRAFT as routes } from '@rental-os/shared';
-import type { AiSceneHttpRequest, composeRequestBoundOriginalSceneModel } from './request-bound-scenes.application';
+import type { AiSceneHttpRequest, composeRequestBoundOriginalSceneModel, composeRequestBoundSettingsTaskCreation } from './request-bound-scenes.application';
 import { respondAiScene } from './original-scenes.controller';
 import { withRequestAbort, type AiRequestAbortSource } from './request-abort';
 
 export const AI_SETTINGS_TASK_HTTP_REQUESTS = Symbol('AI_SETTINGS_TASK_HTTP_REQUESTS');
+export const AI_SETTINGS_TASK_CREATION_REQUESTS = Symbol('AI_SETTINGS_TASK_CREATION_REQUESTS');
+/** Metadata producer only. This neither publishes a run plan nor starts work. */
+@Controller(routes.basePath)
+export class AiSettingsTaskCreationController {
+  constructor(@Inject(AI_SETTINGS_TASK_CREATION_REQUESTS) private readonly creation: ReturnType<typeof composeRequestBoundSettingsTaskCreation>) {}
+  @Post(routes.createSettingsTask) @Header('Cache-Control', 'no-store')
+  create(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.creation.create(request, body), 'read_settings_task_creation');
+  }
+  @Post(routes.readSettingsTaskCreation) @Header('Cache-Control', 'no-store')
+  read(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.creation.read(request, body), 'read_settings_task_creation');
+  }
+}
 export const settingsTaskHttpMethods = Object.freeze(['startSettingsTask', 'readSettingsConfirmation',
   'decideSettingsProposal', 'readSettingsDecision', 'continueSettingsConfirmation', 'reconcileSettingsTask', 'cancelSettingsTask'] as const);
 /** Request-bound port only. No model runtime, raw lease, approval grant or Core

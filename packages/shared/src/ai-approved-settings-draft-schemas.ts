@@ -17,6 +17,7 @@ const channels = { type: 'array', items: { enum: ['sms', 'app_push', 'wechat', '
 const snapshot = object({ recordId: id(36), revision: literal(1), contentHash: hash });
 
 export const AI_APPROVED_SETTINGS_DRAFT_SCHEMAS = {
+  AiApprovedSettingsTaskCreationDraft: object({ creationKey: id(128), changeKey: id(128) }),
   AiApprovedSettingsReferenceDraft: object(reference),
   AiApprovedSettingsPrepareDraft: object({ ...base, runId: id(36), stepId: id(36), changeId: id(36), changeHash: hash }),
   AiApprovedSettingsPreparationReceiptDraft: { oneOf: [object({ draftVersion, state: literal('prepared'), reference: ref('AiApprovedSettingsReferenceDraft') }),

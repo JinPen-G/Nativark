@@ -18,6 +18,13 @@ import { composeApprovedSettingsApplication } from '../approval-execution/approv
 import { aiTaskRunPlanSchema } from '../runner/prisma-task-run-evidence.repository';
 import { settingsChangeReferenceSchema } from '../../rental-core/approved-settings-change.validation';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
+import { ApprovedSettingsRouteAuthority } from '../../rental-core/approved-settings-route.authority';
+import { AiTaskCreationRepository } from '../ai-task-creation.repository';
+import { AiTaskCurrentIdentityAuthority } from '../task-current-identity.authority';
+import { AiScopeRepository } from '../ai-scope.repository';
+import { PrismaSubscriptionBudgetReader } from '../budget/prisma-subscription-budget-reader';
+import { aiPersistedPlanToolsSchema } from '../runner/prisma-task-plan-input.source';
+import { aiTaskRunnerLimitsSchema } from '../runner/prisma-task-run-evidence.repository';
 import { composeAiSettingsBusinessConsumer } from './settings-business-consumer.composition';
 import type { ApprovedSettingsApplicationDependencies } from '../approval-execution/approved-settings-task.authority';
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
@@ -106,6 +113,96 @@ function bindRequests<D extends object, A>(dependencies: D, options: AiSceneRequ
       } }, command), command));
     } finally { active = false; }
   };
+}
+
+/** Core-prepared immutable change -> existing metadata creation repository.
+ * Neither creation nor receipt observation publishes a plan or grants actions. */
+export function composeRequestBoundSettingsTaskCreation(
+  dependencies: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>, options: AiSceneRequestOptions) {
+  const scene = freezeOriginalInput(z.object({ code: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+    version: z.string().min(1).max(64).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict().parse(structuredClone(dependencies.scene)));
+  const schema = z.object({ creationKey: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+    changeKey: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) }).strict();
+  const call = bindRequests({ ...dependencies, scene }, options, input => input);
+  const use = (request: AiSceneHttpRequest, value: unknown, creating: boolean) => {
+    const parsed = schema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return call(request, parsed.data, async (input, value) => {
+      const command = schema.parse(value), clock = input.clock ?? (() => new Date());
+      const scopes = new AiScopeRepository(input.db, new AiTaskCurrentIdentityAuthority(input.auth, input.credentials, clock), clock);
+      const route = new ApprovedSettingsRouteAuthority(input.guard, input.credentials);
+      const app = composeApprovedSettingsApplication(input);
+      const entitlements = new PrismaSubscriptionBudgetReader(input.db, input.subscriptions, clock);
+      let expectedPolicy: string | undefined;
+      const read = () => route.withAuthorization(creating ? 'write' : 'read', async (actor, revalidate) => {
+        const before = await scopes.resolveCurrent();
+        if (before.scope.kind !== 'WORKSPACE' || before.context.actor.kind !== 'user'
+          || before.context.actor.userId !== actor.actorId || before.scope.tenantId !== actor.tenantId
+          || before.scope.workspaceId !== actor.workspaceId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const original = structuredClone(await app.readChangeReceipt({ changeKey: command.changeKey }));
+        if (original.state !== 'prepared_not_approved') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const row = structuredClone(await input.db.rentalApprovedSettingsChange.findFirst({ where: { id: original.change.changeId, ...actor } }));
+        if (!row || row.changeKey !== command.changeKey || row.changeHash !== original.change.changeHash)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        if (creating) {
+          if (!(row.expiresAt instanceof Date) || !Number.isFinite(row.expiresAt.getTime()) || row.expiresAt <= clock())
+            throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          const current = structuredClone(await input.core.readVersionedBusinessSettings(actor.tenantId));
+          const workspace = structuredClone(await input.db.businessWorkspace.findFirst({ where: { id: actor.workspaceId, tenantId: actor.tenantId } }));
+          if (current.settingsRevision !== row.baseRevision || requestFingerprint(current.settings) !== row.baseSettingsHash
+            || !workspace || workspace.status !== 'ACTIVE' || workspace.categoryVersionId !== row.categoryVersionId
+            || workspace.categoryAdoptionRevision !== row.categoryAdoptionRevision) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+          const policy = structuredClone(await input.db.aiTaskPlanPolicy.findFirst({ where: { scopeId: before.scope.id, sceneCode: scene.code, sceneVersion: scene.version } }));
+          const tools = aiPersistedPlanToolsSchema.safeParse(structuredClone(policy?.allowedTools));
+          const limits = aiTaskRunnerLimitsSchema.safeParse(structuredClone(policy?.limits));
+          if (!policy || policy.scopeId !== before.scope.id || policy.sceneCode !== scene.code || policy.sceneVersion !== scene.version
+            || !Number.isInteger(policy.revision) || policy.revision < 1 || policy.revision > 4294967294
+            || policy.enabled !== true || !(policy.expiresAt instanceof Date) || !Number.isFinite(policy.expiresAt.getTime())
+            || policy.expiresAt <= clock() || !tools.success || !limits.success
+            || !tools.data.some(tool => tool.code === AI_APPROVED_SETTINGS_TOOL_CODE)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          const entitlement = await entitlements.read(actor.tenantId, 'ai.native.use');
+          if (entitlement.entitlements.length !== 1 || entitlement.entitlements[0].code !== 'ai.native.use'
+            || entitlement.entitlements[0].available !== true) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+          const hash = requestFingerprint({ scene, scopeId: before.scope.id, policyRevision: policy.revision,
+            tools: tools.data, limits: limits.data, expiresAt: policy.expiresAt.toISOString(), entitlement });
+          if (expectedPolicy !== undefined && expectedPolicy !== hash) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+          expectedPolicy = hash;
+        }
+        await revalidate();
+        const after = await scopes.resolveCurrent();
+        if (before.scope.id !== after.scope.id || originalIdentityHash(before.context) !== originalIdentityHash(after.context))
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return { context: after.context, change: original.change };
+      });
+      const original = await read();
+      const repository = new AiTaskCreationRepository(input.db, { resolve: async (sceneCode, inputRef) => {
+        if (sceneCode !== scene.code || inputRef !== original.change.changeId) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const current = await read();
+        if (original.change.changeId !== current.change.changeId || original.change.changeHash !== current.change.changeHash
+          || originalIdentityHash(original.context) !== originalIdentityHash(current.context)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return { context: current.context, creationAllowed: true, sceneCode: scene.code, sceneVersion: scene.version,
+          // The immutable change row is revision one. Its business baseRevision
+          // is already hash-bound and must not become a fabricated input revision.
+          inputRef: current.change.changeId, inputRevision: 1, inputHash: current.change.changeHash };
+      } }, clock);
+      const target = { creationKey: command.creationKey, sceneCode: scene.code, inputRef: original.change.changeId };
+      let receipt;
+      try { receipt = creating ? await repository.create(target) : await repository.readCreation(target); }
+      catch (error) {
+        if (creating && error instanceof AiTaskRepositoryError && error.code === 'AI_STORAGE_UNAVAILABLE') {
+          // The repository cannot prove a failed transaction reply was uncommitted.
+          throw Object.assign(new Error('AI_RESULT_UNKNOWN'), { code: 'AI_RESULT_UNKNOWN', retryable: false });
+        }
+        throw error;
+      }
+      return freezeOriginalInput({ original: { changeId: original.change.changeId, changeHash: original.change.changeHash },
+        receipt, execution: 'not_attested' as const, approval: 'not_granted' as const });
+    });
+  };
+  return Object.freeze({
+    create: (request: AiSceneHttpRequest, value: unknown) => use(request, value, true),
+    read: (request: AiSceneHttpRequest, value: unknown) => use(request, value, false)
+  });
 }
 
 /** Independent real notification-settings runner/approval consumer. No model
