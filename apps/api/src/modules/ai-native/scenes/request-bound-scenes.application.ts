@@ -1117,6 +1117,7 @@ export function composeRequestBoundOriginalOpeningReadTask(
     monotonic?: () => number }) {
   const limits = aiTaskRunnerLimitsSchema.parse(structuredClone(configuration.limits));
   const monotonic = configuration.monotonic;
+  const db = dependencies.db;
   const host = z.object({ holderId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
     leaseMs: z.number().int().min(1).max(120000) }).strict().parse(structuredClone(configuration.host));
   const call = bindRequests(dependencies, options, input => input);
@@ -1194,10 +1195,62 @@ export function composeRequestBoundOriginalOpeningReadTask(
     settleUnstartedCancellation: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, 'settleUnstartedCancellation'),
     readCancellationReceipt: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, 'readCancellationReceipt'),
     readCancellationSettlementReceipt: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, 'readCancellationSettlementReceipt'),
+    /** Existing takeover draft: the request supplies only an observed original
+     * generation, never worker names, lease duration or an execution token. */
+    takeover(request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) {
+      const parsed = z.object({ original: originalRequestReferenceSchema,
+        expectedTaskRevision: z.number().int().min(1).max(4294967294),
+        expectedRunRevision: z.number().int().min(1).max(4294967294),
+        expectedFencingToken: z.string().regex(/^[1-9][0-9]{0,19}$/u) }).strict().safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const observed = freezeOriginalInput(parsed.data);
+      return consume(request, observed.original, false, async (root, original, selected) => {
+        if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
+        const snapshot = await root.application.inspect(selected);
+        if (!snapshot.plan || snapshot.task.revision !== observed.expectedTaskRevision
+          || snapshot.run.revision !== observed.expectedRunRevision || snapshot.run.fencingToken !== observed.expectedFencingToken) {
+          throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        }
+        const access = await root.authorization.tasks.resolveAccess(selected.taskId, 'takeover_run');
+        const task = structuredClone(await db.aiTask.findFirst({ where: access.where,
+          select: { id: true, scopeId: true, inputRef: true } }));
+        if (!task || task.id !== selected.taskId || task.inputRef !== original.receipt.inputRef) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        const foundRun = await db.aiRun.findFirst({ where: { scopeId: task.scopeId, taskId: task.id,
+          id: selected.runId, actorKind: access.actorKind, actorId: access.actorId },
+          select: { id: true, scopeId: true, taskId: true, revision: true, fencingToken: true, leaseOwnerId: true } });
+        if (foundRun && !foundRun.fencingToken.equals(snapshot.run.fencingToken)) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        const run = foundRun && Object.freeze({ id: foundRun.id, scopeId: foundRun.scopeId, taskId: foundRun.taskId,
+          revision: foundRun.revision, fencingToken: foundRun.fencingToken.toFixed(0), leaseOwnerId: foundRun.leaseOwnerId });
+        if (!run || run.id !== selected.runId || run.taskId !== task.id || run.scopeId !== task.scopeId
+          || !run.leaseOwnerId || run.leaseOwnerId === host.holderId || run.revision !== snapshot.run.revision
+          || run.fencingToken !== snapshot.run.fencingToken) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
+        const outcome = await root.takeoverAndRecover({ taskId: task.id, runId: selected.runId,
+          previousHolderId: run.leaseOwnerId, holderId: host.holderId,
+          expectedTaskRevision: snapshot.task.revision, expectedRunRevision: snapshot.run.revision,
+          expectedFencingToken: snapshot.run.fencingToken, leaseMs: host.leaseMs }, signal);
+        return freezeOriginalInput({ kind: 'run_outcome' as const, outcome,
+          takeover: 'same_owner_recovery_only' as const, automaticRetry: false as const,
+          businessExecution: 'not_attested' as const });
+      });
+    },
+    readTakeoverReceipt: recoveryReaders.readTakeoverReceipt,
     start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       consume(request, value, false, async (root, original, task) => ({ original: original.receipt,
         execution: await root.application.start(task, signal), model: 'not_called' as const,
         configurationWrite: 'not_attempted' as const })),
+    /** Reacquire only the original run through claim_recovery_run. A released
+     * lease after a crash is not recovered by starting a new run/plan. */
+    recover: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      consume(request, value, false, async (root, original, selected) => {
+        if (signal?.aborted) return { kind: 'not_started' as const, reason: 'host_aborted' as const };
+        const snapshot = await root.application.inspect(selected);
+        if (!snapshot.plan) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const outcome = await root.runner.run({ ...selected, holderId: host.holderId, leaseMs: host.leaseMs,
+          expectedTaskRevision: snapshot.task.revision, expectedRunRevision: snapshot.run.revision,
+          expectedFencingToken: snapshot.run.fencingToken, recovery: true }, signal);
+        return freezeOriginalInput({ original: original.receipt, kind: 'run_outcome' as const, outcome,
+          recovery: 'original_run_evidence_only' as const, automaticRetry: false as const, model: 'not_called' as const });
+      }),
     reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       consume(request, value, false, async (root, original, task) => ({ original: original.receipt,
         execution: await root.application.reconcile(task, signal), model: 'not_called' as const,
