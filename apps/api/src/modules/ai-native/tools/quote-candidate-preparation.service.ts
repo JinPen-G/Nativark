@@ -232,7 +232,11 @@ export class AiQuoteCandidatePreparationService {
         || !isDeepStrictEqual(current.options, bookingOptions.options) || current.truncated !== bookingOptions.truncated
         || current.nextCursor !== bookingOptions.nextCursor) throw new ModelGatewayError('FORBIDDEN');
     }
-    const selectionRevision = requestFingerprint({ scope, context, items: catalog.items,
+    // The supplied revision is an assertion, not part of its own identity.
+    // Bind the full candidate so a quantity, period, payer, location or mode
+    // edit cannot silently reuse an earlier resource-choice confirmation.
+    const { selectionRevision: _assertedRevision, ...candidateInput } = input;
+    const selectionRevision = requestFingerprint({ scope, context, candidateInput, items: catalog.items,
       catalogBasis: catalog.queryBasis, members: members.candidates,
       pricing: rates ? { at: startAt, ratesHash: requestFingerprint(rates) } : null,
       ...(addresses ? { addresses } : {}),
