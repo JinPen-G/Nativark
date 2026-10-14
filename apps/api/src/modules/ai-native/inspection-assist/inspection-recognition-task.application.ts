@@ -25,6 +25,7 @@ import { FileStorageRuntimeService } from '../../integrations/file-storage.runti
 import { TenantInspectionObjectReader } from '../../integrations/inspection-object-reader';
 import { composeStaffInspectionTaskPolicies, AI_STAFF_INSPECTION_TASK_POLICIES,
   type StaffInspectionTaskPolicyOptions } from '../staff-inspection-task-policy.composition';
+import { composeStaffInspectionTaskReceiptReader } from '../staff-inspection-task-receipt.composition';
 
 const referenceSchema = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId,
   inputId: inspectionId, expectedRevision: z.number().int().min(1).max(999) }).strict();
@@ -212,8 +213,15 @@ export class InspectionRecognitionTaskApplication {
     });
   }
   readCreation(request: Request, reference: unknown) {
-    return this.request(request, reference, async bound => ({ ...await bound.creation.readCreation(await bound.command()),
-      execution: 'not_attested' as const }));
+    if (!this.server.enabled) throw unavailable();
+    const model = this.server.model, audio = this.server.audioModel;
+    // Observation uses the original durable task, not today's creation plan,
+    // price or Gateway. create/start and policy issuance keep their live gates.
+    return composeStaffInspectionTaskReceiptReader({ db: model.db, auth: model.auth,
+      inspection: this.server.inspection, clock: model.clock }, { enabled: true,
+      scenes: [{ kind: this.server.mediaKind ?? 'image', code: model.scene.code, version: model.scene.version },
+        ...(audio ? [{ kind: 'audio' as const, code: audio.scene.code, version: audio.scene.version }] : [])] })
+      .readCreation(request, reference);
   }
   start(request: Request, reference: unknown, signal?: AbortSignal) {
     return this.request(request, reference, async bound => {

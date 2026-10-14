@@ -2,6 +2,12 @@ import type { AiProposalActionDraft, AiProposalPayloadDraft, AiProposalRecordDra
 
 export const AI_APPROVED_SETTINGS_DRAFT_VERSION = 'ain-approved-settings-draft-1' as const;
 export const AI_APPROVED_SETTINGS_TOOL_CODE = 'tenant.notifications.commit' as const;
+/** Freeze an original change only, never active configuration or approval. */
+export interface AiApprovedSettingsChangePrepareDraft {
+  changeKey: string; baseRevision: number; expiresAt: string;
+  notifications: { enabledEvents: string[]; editableChannels: Array<'sms' | 'app_push' | 'wechat' | 'email'> };
+}
+export interface AiApprovedSettingsChangeReceiptReadDraft { changeKey: string; }
 /** References the original Core preparation; never supplies task ownership,
  * a plan, approval or active configuration values. */
 export interface AiApprovedSettingsTaskCreationDraft { creationKey: string; changeKey: string; }
