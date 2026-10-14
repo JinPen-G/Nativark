@@ -3,6 +3,8 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AI_SETTINGS_TASK_HTTP_REQUESTS, AiSettingsTaskController, settingsTaskHttpMethods,
   type SettingsTaskHttpRequests } from './settings-task.controller';
 import { AiOriginalSceneModelController } from './original-scenes.controller';
+import { AiSettingsTaskCreationController, AI_SETTINGS_TASK_CREATION_REQUESTS } from './settings-task.controller';
+import { composeRequestBoundSettingsTask, composeRequestBoundPersistedSettingsTask, composeRequestBoundSettingsTaskCreation, type AiSettingsTaskRequestOptions } from './request-bound-scenes.application';
 
 /** Explicit consumer of a real request module. Disabled by default, no
  * AppModule/worker/model dependency or business operation during registration.
@@ -10,6 +12,34 @@ import { AiOriginalSceneModelController } from './original-scenes.controller';
  * this module: they represent the same seven public operations. */
 @Module({})
 export class AiSettingsTaskHttpModule {
+  static registerCreation(dependencies: Parameters<typeof composeRequestBoundSettingsTaskCreation>[0],
+    options: Parameters<typeof composeRequestBoundSettingsTaskCreation>[1]): DynamicModule {
+    if (options.enabled !== true) return { module: AiSettingsTaskHttpModule, controllers: [], providers: [] };
+    const selected = structuredClone(options), server = { ...dependencies, scene: structuredClone(dependencies.scene) };
+    return { module: AiSettingsTaskHttpModule, controllers: [AiSettingsTaskCreationController],
+      providers: [{ provide: AI_SETTINGS_TASK_CREATION_REQUESTS,
+        useFactory: () => composeRequestBoundSettingsTaskCreation(server, selected) }], exports: [AI_SETTINGS_TASK_CREATION_REQUESTS] };
+  }
+  /** Original published-plan consumer. An unpublished task remains unavailable;
+   * the initial explicit producer is not replaced with guessed inputs/limits. */
+  static registerPersistedApplication(dependencies: Parameters<typeof composeRequestBoundPersistedSettingsTask>[0],
+    options: Parameters<typeof composeRequestBoundPersistedSettingsTask>[1]): DynamicModule {
+    if (options.enabled !== true) return { module: AiSettingsTaskHttpModule, controllers: [], providers: [] };
+    const selected = structuredClone(options), server = { ...dependencies, scene: structuredClone(dependencies.scene) };
+    return { module: AiSettingsTaskHttpModule, controllers: [AiSettingsTaskController],
+      providers: [{ provide: AI_SETTINGS_TASK_HTTP_REQUESTS,
+        useFactory: () => composeRequestBoundPersistedSettingsTask(server, selected) }], exports: [AI_SETTINGS_TASK_HTTP_REQUESTS] };
+  }
+  /** Actual Gateway-free server producer, not an injected success callback.
+   * Select this instead of legacy model settings routes; never mount both. */
+  static registerApplication(dependencies: Parameters<typeof composeRequestBoundSettingsTask>[0],
+    options: AiSettingsTaskRequestOptions): DynamicModule {
+    if (options.enabled !== true) return { module: AiSettingsTaskHttpModule, controllers: [], providers: [] };
+    const selected = structuredClone(options), server = { ...dependencies, scene: structuredClone(dependencies.scene) };
+    return { module: AiSettingsTaskHttpModule, controllers: [AiSettingsTaskController],
+      providers: [{ provide: AI_SETTINGS_TASK_HTTP_REQUESTS,
+        useFactory: () => composeRequestBoundSettingsTask(server, selected) }], exports: [AI_SETTINGS_TASK_HTTP_REQUESTS] };
+  }
   static register(options?: { enabled: boolean; requestModule: DynamicModule; requestToken: string | symbol }): DynamicModule {
     if (!options?.enabled) return { module: AiSettingsTaskHttpModule, controllers: [], providers: [] };
     const { requestModule, requestToken } = options;

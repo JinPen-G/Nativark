@@ -2,6 +2,9 @@ import type { AiProposalActionDraft, AiProposalPayloadDraft, AiProposalRecordDra
 
 export const AI_APPROVED_SETTINGS_DRAFT_VERSION = 'ain-approved-settings-draft-1' as const;
 export const AI_APPROVED_SETTINGS_TOOL_CODE = 'tenant.notifications.commit' as const;
+/** References the original Core preparation; never supplies task ownership,
+ * a plan, approval or active configuration values. */
+export interface AiApprovedSettingsTaskCreationDraft { creationKey: string; changeKey: string; }
 export interface AiApprovedSettingsReferenceDraft {
   draftVersion: typeof AI_APPROVED_SETTINGS_DRAFT_VERSION;
   taskId: string;

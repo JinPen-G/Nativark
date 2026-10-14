@@ -7,7 +7,7 @@ import {
   UnauthorizedException
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_DRAFT, RentalCategoryCode,
+import { AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, RentalCategoryCode,
   type RentalCapability, type SystemUserRow } from "@rental-os/shared";
 import { AuthService } from "../modules/auth/auth.service";
 import { ClientAuthService } from "../modules/client/client-auth.service";
@@ -175,6 +175,11 @@ const budgetPlatformRoutes = new Set([AI_BUDGET_MANAGEMENT_HTTP_DRAFT.platformRe
 const isBudgetPlatformRoute = (method: string, path: string) => budgetPlatformRoutes.has(`${method.toUpperCase()} ${path}`);
 
 export function requiredPermissions(method: string, path: string) {
+  if (method === 'POST' && [AI_SCENE_PLAN_POLICY_HTTP_DRAFT.read, AI_SCENE_PLAN_POLICY_HTTP_DRAFT.change]
+    .some(action => path === `/${AI_SCENE_PLAN_POLICY_HTTP_DRAFT.basePath}/${action}`)) return ['system:params:manage'];
+  if (method === 'POST' && [AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.configure, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.read,
+    AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.clear]
+    .some(action => path === `/${AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.basePath}/${action}`)) return ['system:params:manage'];
   if (budgetTenantRoutes.has(`${method.toUpperCase()} ${path}`)) return ['system:params:manage'];
   if (isBudgetPlatformRoute(method, path)) return ['system:ai-provider:manage'];
   if (aiManagementRoutes.has(`${method.toUpperCase()} ${path}`)) return ['system:params:manage'];

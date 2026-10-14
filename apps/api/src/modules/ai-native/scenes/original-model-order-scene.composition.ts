@@ -182,38 +182,8 @@ export function composeOriginalModelOrderScene(input: AiOriginalSceneModelDepend
         expectedRevision: z.number().int().min(1).max(4294967294) }).strict().safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
       const before = await bound(parsed.data.original);
-      const access = await authorization.tasks.resolveAccess(before.task.taskId, 'transition_task');
-      const receipt = await taskTransitions.settleInputCancellation({ taskId: before.task.taskId,
-        expectedRevision: parsed.data.expectedRevision, to: 'cancelled', reason: 'cancel_settled' }, async (tx, locked) => {
-        if (locked.id !== before.task.taskId || locked.scopeId !== before.scopeId) throw denied();
-        const key = { scopeId: locked.scopeId, taskId: locked.id };
-        const runs = await tx.aiRun.findMany({ where: key, take: 2 });
-        const held = runs[0];
-        if (runs.length !== 1 || !held || held.id !== before.task.runId || held.taskId !== key.taskId || held.scopeId !== key.scopeId
-          || held.actorKind !== access.actorKind || held.actorId !== access.actorId || held.status !== 'QUEUED'
-          || held.startedAt != null || (held.leaseOwnerId === null ? held.leaseExpiresAt !== null
-            : !(held.leaseExpiresAt instanceof Date) || !Number.isFinite(held.leaseExpiresAt.getTime()))) throw unavailable();
-        const fence = held.fencingToken.toFixed(0);
-        if (!/^(0|[1-9][0-9]{0,19})$/u.test(fence) || !held.fencingToken.equals(fence)
-          || BigInt(fence) >= 99999999999999999999n) throw unavailable();
-        // Absence is only used under the original task lock for a never
-        // activated run. Claiming alone is not activation or dispatch. Any
-        // published/started/occupied evidence requires normal recovery.
-        const evidence = await Promise.all([
-          tx.aiStep.findFirst({ where: key }), tx.aiTaskRunPlan.findFirst({ where: key }),
-          tx.aiTaskActionInput.findFirst({ where: key }), tx.aiTaskResultArtifact.findFirst({ where: key }),
-          tx.aiGatewayInvocation.findFirst({ where: key }), tx.aiTaskExecutionBudget.findFirst({ where: key }),
-          tx.aiTaskExecutionCharge.findFirst({ where: key }),
-          tx.aiBudgetReservation.findFirst({ where: { scopeId: key.scopeId, runId: held.id } })
-        ]);
-        if (evidence.some(Boolean)) throw unavailable();
-        const changed = await tx.aiRun.updateMany({ where: { id: held.id, ...key, status: 'QUEUED', revision: held.revision,
-          fencingToken: held.fencingToken, leaseOwnerId: held.leaseOwnerId, leaseExpiresAt: held.leaseExpiresAt,
-          actorKind: access.actorKind, actorId: access.actorId },
-          data: { status: 'CANCELLED', revision: { increment: 1 }, fencingToken: { increment: 1 },
-            leaseOwnerId: null, leaseExpiresAt: null, endedAt: input.clock?.() ?? new Date() } });
-        if (changed.count !== 1) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-      });
+      const receipt = await taskTransitions.settleUnstartedCancellation({ taskId: before.task.taskId,
+        expectedRevision: parsed.data.expectedRevision, to: 'cancelled', reason: 'cancel_settled' }, before.task.runId);
       await verify(before);
       return freezeOriginalInput({ original: before.original.receipt, receipt,
         cancellation: 'unstarted_task_cancelled_not_business_rollback' as const, automaticRetry: false as const });

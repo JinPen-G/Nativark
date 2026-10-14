@@ -8,18 +8,26 @@ import type { SelectedQuoteTaskConfiguration } from './human-quote-order.composi
 import { composeAiOriginalScenes, type AiOriginalSceneDependencies } from './original-scenes.composition';
 import { AI_ORIGINAL_SCENES, AI_ORIGINAL_SCENE_REQUESTS, AiOriginalScenesController,
   AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS,
-  AiOriginalSceneModelController, AiOriginalSceneModelActionsController } from './original-scenes.controller';
+  AiOriginalSceneModelController, AiOriginalSceneModelActionsController,
+  AI_ORIGINAL_TASK_ACTION_POLICIES, AiOriginalTaskActionPolicyController,
+  AI_SCENE_PLAN_POLICIES, AiScenePlanPolicyController,
+  AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, AiOriginalSceneRecoveryController } from './original-scenes.controller';
 import { composeAiOriginalSceneModel, type AiOriginalSceneModelDependencies } from './original-scene-model.composition';
 import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneModel, type RequestBoundOriginalSceneDependencies,
   composeRequestBoundPersistedOriginalSceneModel, type RequestBoundPersistedOriginalSceneModelDependencies,
   type RequestBoundOriginalSceneModelDependencies, type AiSceneModelRequestOptions, type AiSceneRequestOptions,
   type RequestBoundQuoteOrderDependencies, composeRequestBoundClarifiedQuoteSelection,
-  composeRequestBoundSettingsTask } from './request-bound-scenes.application';
+  composeRequestBoundSettingsBusinessTask } from './request-bound-scenes.application';
 
 export const AI_ORIGINAL_SCENE_MODEL = Symbol('AI_ORIGINAL_SCENE_MODEL');
 export const AI_ORIGINAL_ORDER_READ_REQUESTS = Symbol('AI_ORIGINAL_ORDER_READ_REQUESTS');
 export const AI_CLARIFIED_QUOTE_SELECTION_REQUESTS = Symbol('AI_CLARIFIED_QUOTE_SELECTION_REQUESTS');
 export const AI_ORIGINAL_SETTINGS_TASK_REQUESTS = Symbol('AI_ORIGINAL_SETTINGS_TASK_REQUESTS');
+import { composeRequestBoundOriginalTaskActionPolicies, type AiOriginalTaskActionPolicyOptions } from './request-bound-scenes.application';
+import { composeRequestBoundScenePlanPolicies, type AiScenePlanPolicyConfiguration } from './request-bound-scenes.application';
+import { composeRequestBoundOriginalTaskRecoveryReaders } from './request-bound-scenes.application';
+
+export { AI_ORIGINAL_TASK_ACTION_POLICIES } from './original-scenes.controller';
 export { AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQUESTS } from './original-scenes.controller';
 
 @Module({})
@@ -27,8 +35,8 @@ export class AiOriginalScenesModule {
   /** Default closed, explicitly selected instead of the legacy full-model
    * settings routes. No model runtime is constructed by this HTTP assembly. */
   static registerHttpSettingsTask(input?: {
-    dependencies: Parameters<typeof composeRequestBoundSettingsTask>[0]; options: AiSceneRequestOptions;
-    configuration: Parameters<typeof composeRequestBoundSettingsTask>[2]
+    dependencies: Parameters<typeof composeRequestBoundSettingsBusinessTask>[0]; options: AiSceneRequestOptions;
+    configuration: Parameters<typeof composeRequestBoundSettingsBusinessTask>[2]
   }): DynamicModule {
     if (!input?.options?.enabled) return AiSettingsTaskHttpModule.register();
     return AiSettingsTaskHttpModule.register({ enabled: true,
@@ -38,12 +46,12 @@ export class AiOriginalScenesModule {
   /** Current-request settings chain without constructing a model/provider.
    * Host task/change references are server-selected, never caller configuration. */
   static registerRequestBoundSettingsTask(
-    dependencies: Parameters<typeof composeRequestBoundSettingsTask>[0], options: AiSceneRequestOptions,
-    configuration: Parameters<typeof composeRequestBoundSettingsTask>[2]): DynamicModule {
+    dependencies: Parameters<typeof composeRequestBoundSettingsBusinessTask>[0], options: AiSceneRequestOptions,
+    configuration: Parameters<typeof composeRequestBoundSettingsBusinessTask>[2]): DynamicModule {
     const server = { ...dependencies, scene: structuredClone(dependencies.scene) };
     const selected = structuredClone(configuration), requestOptions = { ...options };
     return { module: AiOriginalScenesModule, providers: [{ provide: AI_ORIGINAL_SETTINGS_TASK_REQUESTS,
-      useFactory: () => composeRequestBoundSettingsTask(server, requestOptions, selected) }],
+      useFactory: () => composeRequestBoundSettingsBusinessTask(server, requestOptions, selected) }],
       exports: [AI_ORIGINAL_SETTINGS_TASK_REQUESTS] };
   }
   /** One explicit host for model clarification and the existing human flow.
@@ -80,10 +88,50 @@ export class AiOriginalScenesModule {
     }): DynamicModule {
     if (!options?.orderReadChain) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     const registered = this.registerPersistedRequestModel(dependencies, options);
-    return { ...registered, providers: (registered.providers ?? []).map(provider =>
-      typeof provider === 'object' && 'provide' in provider
-        ? { ...provider, provide: AI_ORIGINAL_ORDER_READ_REQUESTS } : provider),
+    const server = { ...dependencies, gateway: { ...dependencies.gateway, adapters: [...dependencies.gateway.adapters] } };
+    const selected = { ...options, host: structuredClone(options.host) };
+    return { ...registered, providers: [{ provide: AI_ORIGINAL_ORDER_READ_REQUESTS, useFactory: () => {
+      const app = composeRequestBoundPersistedOriginalSceneModel(server, selected);
+      return Object.freeze({ ...app, readAnswer: app.readOrderReadChainAnswer,
+        readModelResult: app.readOrderReadChainModelResult, reopenModelSource: app.reopenOrderReadChainSource,
+        readTakeoverReceipt: app.readOrderReadChainTakeoverReceipt,
+        readCancellationReceipt: app.readOrderReadChainCancellationReceipt,
+        settleUnstartedCancellation: app.settleOrderReadChainUnstartedCancellation,
+        readCancellationSettlementReceipt: app.readOrderReadChainCancellationSettlementReceipt });
+    } }],
       exports: [AI_ORIGINAL_ORDER_READ_REQUESTS] };
+  }
+  /** Gateway-free recovery host. Use instead of, not alongside, HTTP model
+   * registration at the same prefix. It cannot start or resume execution. */
+  static registerHttpRecovery(dependencies: RequestBoundOriginalSceneDependencies, options: AiSceneRequestOptions,
+    results?: Parameters<typeof composeRequestBoundOriginalTaskRecoveryReaders>[2]): DynamicModule {
+    if (options.enabled !== true) return { module: AiOriginalScenesModule, controllers: [], providers: [], exports: [] };
+    const selected = structuredClone(options), resultOptions = results ? { ...results, policy: structuredClone(results.policy) } : undefined;
+    return { module: AiOriginalScenesModule, controllers: [AiOriginalSceneRecoveryController],
+      providers: [{ provide: AI_ORIGINAL_SCENE_RECOVERY_REQUESTS,
+        useFactory: () => composeRequestBoundOriginalTaskRecoveryReaders(dependencies, selected, resultOptions) }],
+      exports: [AI_ORIGINAL_SCENE_RECOVERY_REQUESTS] };
+  }
+  /** Explicit scene-management host, never production activation. */
+  static registerHttpPlanPolicies(dependencies: RequestBoundOriginalSceneDependencies,
+    options: AiScenePlanPolicyConfiguration): DynamicModule {
+    const selected = structuredClone(options);
+    return { module: AiOriginalScenesModule, controllers: [AiScenePlanPolicyController],
+      providers: [{ provide: AI_SCENE_PLAN_POLICIES,
+        useFactory: () => composeRequestBoundScenePlanPolicies(dependencies, selected) }], exports: [AI_SCENE_PLAN_POLICIES] };
+  }
+  /** Explicit opt-in transport. No task policy is automatically written. */
+  static registerHttpTaskActionPolicies(dependencies: RequestBoundOriginalSceneDependencies,
+    options: AiOriginalTaskActionPolicyOptions): DynamicModule {
+    return { ...this.registerTaskActionPolicies(dependencies, options), controllers: [AiOriginalTaskActionPolicyController] };
+  }
+  /** Explicit non-HTTP supplier; does not seed or enable any task policy. */
+  static registerTaskActionPolicies(dependencies: RequestBoundOriginalSceneDependencies,
+    options: AiOriginalTaskActionPolicyOptions): DynamicModule {
+    const selected = structuredClone(options);
+    return { module: AiOriginalScenesModule, providers: [{ provide: AI_ORIGINAL_TASK_ACTION_POLICIES,
+      useFactory: () => composeRequestBoundOriginalTaskActionPolicies(dependencies, selected) }],
+      exports: [AI_ORIGINAL_TASK_ACTION_POLICIES] };
   }
   /** Explicit host selection, not production activation. Mount this OR the
    * existing registerHttpModel, never two drivers for the same route/action.
