@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { inspectPcmWav } from './pcm-wav';
+import { inspectBoundedImage } from './bounded-image';
 /** Internal implementation ports, NOT the centrally maintained AIN-C03 wire contract. */
 export type ModelFeature = "tools" | "structuredOutput" | "streaming" | "image" | "audio";
 export interface GatewayContext { tenantId: string; workspaceId: string; actorId: string; }
@@ -69,6 +70,9 @@ export const modelProtocolRequestSchema = modelProtocolRequestBaseSchema.superRe
       }
       if (part.kind === 'audio' && !inspectPcmWav(bytes)) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Audio must be a complete bounded PCM WAV' });
+      }
+      if (part.kind === 'image' && inspectBoundedImage(bytes)?.mediaType !== part.mediaType) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Image must be a bounded PNG/JPEG container with matching dimensions and type' });
       }
     }
   }

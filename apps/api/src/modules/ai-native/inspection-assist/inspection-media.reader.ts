@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ReadableStreamReadResult } from 'node:stream/web';
 import { InspectionAssistError } from './inspection-assist.validation';
 import { inspectPcmWav } from '../pcm-wav';
+import { inspectBoundedImage } from '../bounded-image';
 
 export const INSPECTION_OBJECT_READER = Symbol('INSPECTION_OBJECT_READER');
 export interface InspectionObjectReader {
@@ -51,23 +52,10 @@ export async function readInspectionMedia(stream: ReadableStream<Uint8Array>, ma
 }
 
 function inspectMedia(bytes: Buffer): { mediaType: string; width: number | null; height: number | null; durationMs: number | null } {
-  const dimensions = (mediaType: string, width: number, height: number) => {
-    if (!width || !height || width > 16384 || height > 16384 || width * height > 40000000) throw new InspectionAssistError('INVALID_INPUT');
-    return { mediaType, width, height, durationMs: null };
-  };
-  if (bytes.length >= 33 && bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))
-    && bytes.readUInt32BE(8) === 13 && bytes.toString('ascii', 12, 16) === 'IHDR') {
-    return dimensions('image/png', bytes.readUInt32BE(16), bytes.readUInt32BE(20));
-  }
-  if (bytes.length >= 4 && bytes[0] === 255 && bytes[1] === 216) {
-    let offset = 2;
-    while (offset + 4 <= bytes.length) {
-      if (bytes[offset] !== 255) break;
-      const marker = bytes[offset + 1], length = bytes.readUInt16BE(offset + 2);
-      if (marker === 218 || marker === 217 || length < 2 || offset + 2 + length > bytes.length) break;
-      if ([192,193,194].includes(marker) && length >= 8) return dimensions('image/jpeg', bytes.readUInt16BE(offset + 7), bytes.readUInt16BE(offset + 5));
-      offset += 2 + length;
-    }
+  const image = inspectBoundedImage(bytes);
+  if (image) return { ...image, durationMs: null };
+  if (bytes.length >= 2 && (bytes[0] === 137 && bytes[1] === 80 || bytes[0] === 255 && bytes[1] === 216)) {
+    throw new InspectionAssistError('INVALID_INPUT');
   }
   if (bytes.length >= 12 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WAVE') {
     const audio = inspectPcmWav(bytes);
