@@ -5,6 +5,10 @@ export const AI_APPROVED_SETTINGS_TOOL_CODE = 'tenant.notifications.commit' as c
 /** References the original Core preparation; never supplies task ownership,
  * a plan, approval or active configuration values. */
 export interface AiApprovedSettingsTaskCreationDraft { creationKey: string; changeKey: string; }
+/** Selects a server-registered action template, never permissions or an approval. */
+export interface AiApprovedSettingsTaskPolicyReadDraft extends AiApprovedSettingsTaskCreationDraft { operation: string; }
+export interface AiApprovedSettingsTaskPolicyConfigureDraft extends AiApprovedSettingsTaskPolicyReadDraft { expectedRevision: number | null; }
+export interface AiApprovedSettingsTaskPolicyClearDraft extends AiApprovedSettingsTaskPolicyReadDraft { expectedRevision: number; }
 export interface AiApprovedSettingsReferenceDraft {
   draftVersion: typeof AI_APPROVED_SETTINGS_DRAFT_VERSION;
   taskId: string;

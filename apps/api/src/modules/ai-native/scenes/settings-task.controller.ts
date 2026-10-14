@@ -1,11 +1,35 @@
 import { Body, Controller, Header, Inject, Post, Req } from '@nestjs/common';
 import { AI_SCENE_MODEL_HTTP_DRAFT as routes } from '@rental-os/shared';
-import type { AiSceneHttpRequest, composeRequestBoundOriginalSceneModel, composeRequestBoundSettingsTaskCreation } from './request-bound-scenes.application';
+import type { AiSceneHttpRequest, composeRequestBoundOriginalSceneModel, composeRequestBoundSettingsTaskCreation,
+  composeRequestBoundSettingsTaskControls } from './request-bound-scenes.application';
 import { respondAiScene } from './original-scenes.controller';
 import { withRequestAbort, type AiRequestAbortSource } from './request-abort';
 
 export const AI_SETTINGS_TASK_HTTP_REQUESTS = Symbol('AI_SETTINGS_TASK_HTTP_REQUESTS');
 export const AI_SETTINGS_TASK_CREATION_REQUESTS = Symbol('AI_SETTINGS_TASK_CREATION_REQUESTS');
+export const AI_SETTINGS_TASK_CONTROL_REQUESTS = Symbol('AI_SETTINGS_TASK_CONTROL_REQUESTS');
+/** Original receipt selects the owned task; the body cannot supply permissions,
+ * holder, limits, plan or approval. Configuration remains a guarded CAS action. */
+@Controller(routes.basePath)
+export class AiSettingsTaskControlController {
+  constructor(@Inject(AI_SETTINGS_TASK_CONTROL_REQUESTS) private readonly controls: ReturnType<typeof composeRequestBoundSettingsTaskControls>) {}
+  @Post(routes.readSettingsTaskPolicy) @Header('Cache-Control', 'no-store')
+  read(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.controls.readPolicy(request, body));
+  }
+  @Post(routes.configureSettingsTaskPolicy) @Header('Cache-Control', 'no-store')
+  configure(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.controls.configurePolicy(request, body), 'read_settings_task_policy');
+  }
+  @Post(routes.clearSettingsTaskPolicy) @Header('Cache-Control', 'no-store')
+  clear(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.controls.clearPolicy(request, body), 'read_settings_task_policy');
+  }
+  @Post(routes.startOriginalSettingsTask) @Header('Cache-Control', 'no-store')
+  start(@Req() request: AiSceneHttpRequest & AiRequestAbortSource, @Body() body: unknown) {
+    return respondAiScene(() => withRequestAbort(request, signal => this.controls.start(request, body, signal)));
+  }
+}
 /** Metadata producer only. This neither publishes a run plan nor starts work. */
 @Controller(routes.basePath)
 export class AiSettingsTaskCreationController {
