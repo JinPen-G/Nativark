@@ -59,12 +59,17 @@ export class PrismaTaskApplication {
 
   /** Read-only discovery of the original durable wait. This grants neither a
    * lease nor approval; continuation still validates the full original proof. */
-  async readConfirmation(value: unknown) {
+  readConfirmation(value: unknown) {
+    return PrismaTaskApplication.readConfirmation(this.deps, value);
+  }
+
+  /** The same durable wait reader without constructing an execution host. */
+  static async readConfirmation(dependencies: Pick<Dependencies, 'db' | 'tasks'>, value: unknown) {
     const parsed = requestSchema.extend({ stepId: id.max(36) }).safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const input = parsed.data;
-    const before = structuredClone(await this.deps.tasks.resolveAccess(input.taskId, 'read_step_terminal'));
-    const result = await this.deps.db.$transaction(async tx => {
+    const before = structuredClone(await dependencies.tasks.resolveAccess(input.taskId, 'read_step_terminal'));
+    const result = await dependencies.db.$transaction(async tx => {
       const task = await tx.aiTask.findFirst({ where: before.where });
       if (!task || task.id !== input.taskId || task.contractVersion !== AI_TASK_DRAFT_VERSION
         || task.status !== 'WAITING_CONFIRMATION' || task.cancelRequestedAt !== null) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -93,13 +98,13 @@ export class PrismaTaskApplication {
       return { ...input, taskRevision: revision.parse(task.revision), checkpointRef: receipt.id,
         proposal: structuredClone(payload.proposal), execution: 'not_attested' as const };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
-    const after = await this.deps.tasks.resolveAccess(input.taskId, 'read_step_terminal');
+    const after = await dependencies.tasks.resolveAccess(input.taskId, 'read_step_terminal');
     if (after.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-    const current = await this.deps.db.$transaction(tx => tx.aiTask.findFirst({ where: after.where,
+    const current = await dependencies.db.$transaction(tx => tx.aiTask.findFirst({ where: after.where,
       select: { id: true, revision: true, status: true, cancelRequestedAt: true } }));
     if (!current || current.id !== input.taskId || current.revision !== result.taskRevision
       || current.status !== 'WAITING_CONFIRMATION' || current.cancelRequestedAt !== null) throw new AiTaskRepositoryError('AI_REVISION_CONFLICT');
-    const final = await this.deps.tasks.resolveAccess(input.taskId, 'read_step_terminal');
+    const final = await dependencies.tasks.resolveAccess(input.taskId, 'read_step_terminal');
     if (final.bindingKey !== before.bindingKey) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
     return result;
   }

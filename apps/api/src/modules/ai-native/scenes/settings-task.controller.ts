@@ -15,6 +15,10 @@ export const AI_SETTINGS_TASK_READ_REQUESTS = Symbol('AI_SETTINGS_TASK_READ_REQU
 @Controller(routes.basePath)
 export class AiSettingsTaskReadController {
   constructor(@Inject(AI_SETTINGS_TASK_READ_REQUESTS) private readonly reads: ReturnType<typeof composeRequestBoundSettingsTaskReads>) {}
+  @Post(routes.readOriginalSettingsConfirmation) @Header('Cache-Control', 'no-store')
+  readConfirmation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.reads.readConfirmation(request, body), 'read_settings_task_creation');
+  }
   @Post(routes.readOriginalSettingsSnapshot) @Header('Cache-Control', 'no-store')
   readSnapshot(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => this.reads.readSnapshot(request, body), 'read_settings_task_creation');
