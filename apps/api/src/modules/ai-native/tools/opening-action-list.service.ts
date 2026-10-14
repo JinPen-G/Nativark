@@ -33,7 +33,16 @@ export class AiOpeningActionListService {
       const facts = await this.opening.read({ limit: 50 }, authorized);
       if (requestFingerprint(facts.scope) !== requestFingerprint(scope)) throw new ModelGatewayError('FORBIDDEN');
       let risk: Awaited<ReturnType<AiRiskReadFactsService['read']>> | undefined;
-      if (input.data.risks) { try { risk = await this.risks.read(input.data.risks, authorized); } catch { /* Optional report unavailable without details. */ } }
+      if (input.data.risks) {
+        try { risk = await this.risks.read(input.data.risks, authorized); }
+        catch (error) {
+          // An explicitly requested source may degrade only on a declared
+          // availability failure. Permission/context/response failures must
+          // not be hidden behind an otherwise successful opening result.
+          if (!(error instanceof ModelGatewayError)
+            || !['CAPABILITY_UNSUPPORTED', 'PROVIDER_UNAVAILABLE', 'TIMEOUT'].includes(error.code)) throw error;
+        }
+      }
       if (risk && requestFingerprint(risk.scope) !== requestFingerprint(scope)) throw new ModelGatewayError('FORBIDDEN');
       const after = await this.contexts.current(scope);
       if (requestFingerprint(before) !== requestFingerprint(after)) throw new ModelGatewayError('CONFIG_INVALID');
