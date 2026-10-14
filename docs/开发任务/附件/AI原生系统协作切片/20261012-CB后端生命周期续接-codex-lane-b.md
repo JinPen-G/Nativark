@@ -208,3 +208,21 @@ Node DATABASE_URL 固定 mysql://offline:offline@127.0.0.1:1/rental_os_offline�
 一次inline实际构造并加载上述服务/模块（包含公共根与application双向导入），确认token导出/默认不提供、缺当前staff身份read拒绝，storage/dispatch0。完成标记 `smoke=passed; actual stored app/policy producers loaded and exported; default absent; missing current staff rejected; zero storage/dispatch; full positive policy/model chain not exercised`，exit0。必要strict noEmit1128files、0diagnostics/exit0，diff check0，无新增/修改tests/fixture/脚本。此为真实装配与拒绝行为，不冒称新正向政策CAS、完整识别/计量/结果保存/原Core提交已验；主线此前公共政策正向证据不算本线新验。
 
 宿主实际依赖StoredInspectionRecognitionDependencies及StaffInspectionTaskPolicyOptions（服务器有限operations、ttlMs<=120000），原reference不增加taskId/scope；原Task ID由creation.readCreation取得。保存后revision继续原staff result-save-receipt/readReview；晚到结果/旧附件或模板由原gatewayMedia/current/resultBinding拒绝，unknown不能采用或换键。已实现音频pulse证明不是转写质量，partial-safe仍未提供。真实文件/配置价格预算和正式scene/plan记录必须由主线完整置备，不用离线预填artifact冒充模型成功。
+
+### 20261014 同原员工附件/UUID任务的政策正向供应补证据
+
+主线给出原inspection-media-submission初始化边界后，只读并在内存Module._compile首次test前导入、AST提取mediaFixture/draft/wav函数及image分支const bytes到replay之前setup，不注册node:test、不新增/修改脚本/fixture。原实际staff AuthService/Guard、附件绑定/冻结、草稿、AiTaskCreationRepository创建新的UUID Task，原combinedDb/ALS串行事务替身和对象流均明确合成。用新增composeStoredInspectionRecognitionRuntime替换旧硬绑task-a的routing供应，原priceVersion不变，不能改旧Task指纹或另建ID。
+
+正式原staff政策生产者configure/read read_metadata/read_step_terminal/claim_run/release_run/transition_task均经当前staff/原order权限/Task owner/inputHash/plan及Prisma政策CAS实际运行；原application.readCreation读回同一Task。撤权后policy.read拒绝。start供应端没有使用旧task-a路由，provider sends=0。
+
+首轮内联错误使用calls-v1而非原priceVersion，creation指纹正确拒绝AI_REVISION_CONFLICT；修正仅内联原价格版本，复验同场景。最终完成标记JSON含smoke=passed/originalStaffTask=true/formalPolicyCAS=true/persistedSupply=true/providerSends=0/positiveRecognition=false，exit0。为定位同一拒绝相关复验一次带调用位置，不扩测试矩阵。执行观察CONFIG_INVALID在PrismaTenantModelConfigRepository构造、随后PrismaTenantModelProfileRepository，具体缺的是**该既有合成DB**的aiTenantModelConfiguration.findUnique/create/updateMany、systemParameterSet.findFirst。此为离线初始化覆盖限制，不是确认生产仓储缺实现或应新增schema；不能报告成生产核心bug，不能用恒成功config绕过它。
+
+本次补实际原Task/政策CAS正向及供应复读，不是模型派发、预算结算、识别持久结果、候选保存或Core提交成功证据。此前1128files0诊断为源码供应提交的必要类型证据，此次源码未改，未伪报新增全量类型/测试数。无真实HTTP/DB/对象存储/模型/支付，原output保留，源码无WIP。
+
+### 20261014 原识别Task收据读取与执行准入分离
+
+同步主线固定9d403e9d，合并点56bb03bd1bbe663f77e2133f8a7fbd53c63a5975，原B记录与源码保留。本线仅改InspectionRecognitionTaskApplication.readCreation：enabled gate后直接原composeStaffInspectionTaskReceiptReader，同server db/Auth/inspection和服务器scene kind/code/version；不调用bound.command、当前plan/price/Gateway构造。原HTTP方法及stored root.application自然消费该实现，无新DTO/路由。create/start、bound.existing执行和policyconfigure仍各自原准入；收据observed不等于候选可读或派发许可。公共receipt与政策文件未修改。
+
+一次inline沿原media初始化（仅内存提取、不注册或改tests），实际staff Auth/Guard/冻结媒体/原新UUID Task：持久plan revision递增并停用后app.readCreation仍observed同task；原create/start拒绝；额外taskId字段AI_INVALID_INPUT；当前staff撤权拒绝。附件bytes读取次数和Task数量未增加，provider sends0，旧expectedRevision未改。完成标记 `smoke=passed; actual staff app original UUID receipt readable after plan revision/disable; no bytes/task writes; live create/start denied; forged ref/revocation denied; no provider sends`，exit0。必要strict noEmit1129files、0diagnostics/exit0，diff check0，无新增/修改测试脚本/fixture。该正向是实际原metadata收据，不是完整识别/账本/候选保存链，DB/对象来源仍原明确离线替身，不声称真库/设备。
+
+保存后draft revision的原result-save-receipt/readReview路径不变，不把只读Task receipt拼成旧Gateway执行宿主。原sourceEvidence需要原artifact/usage/当前文件和正式terminal授权，unknown无payload仍保留；正式存储/config/价格/能力依赖未齐时按真实来源拒绝，不新ID修复。
