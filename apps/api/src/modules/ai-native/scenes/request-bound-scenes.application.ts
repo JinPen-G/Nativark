@@ -1120,6 +1120,25 @@ export function composeRequestBoundOriginalOpeningReadTask(
   const host = z.object({ holderId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
     leaseMs: z.number().int().min(1).max(120000) }).strict().parse(structuredClone(configuration.host));
   const call = bindRequests(dependencies, options, input => input);
+  // These are the existing original-key cancellation transactions/readers.
+  // Do not construct an execution host merely to stop queued or running work.
+  const recoveryReaders = composeRequestBoundOriginalTaskRecoveryReaders(dependencies, options);
+  const cancellation = (request: AiSceneHttpRequest, value: unknown,
+    method: 'requestCancellationIntent' | 'settleUnstartedCancellation' | 'readCancellationReceipt' | 'readCancellationSettlementReceipt') => {
+    const schema = z.object({ original: originalRequestReferenceSchema,
+      expectedRevision: z.number().int().min(1).max(4294967294) }).strict();
+    const parsed = schema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return call(request, parsed.data, async input => {
+      const scenes = composeAiOriginalScenes(input), original = await scenes.requests.readHistorical(parsed.data.original);
+      if (original.request.sceneCode !== 'opening_diagnosis' || original.receipt.state === 'revoked') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      const receipt = await recoveryReaders[method](request, parsed.data);
+      const after = await scenes.requests.readHistorical(parsed.data.original);
+      if (after.receipt.state === 'revoked' || after.receipt.contentHash !== original.receipt.contentHash
+        || originalIdentityHash(after.context) !== originalIdentityHash(original.context)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+      return receipt;
+    });
+  };
   const consume = <T>(request: AiSceneHttpRequest, value: unknown, historical: boolean,
     work: (root: ReturnType<typeof composePersistedReadonlyBusinessTaskHost>,
       original: Awaited<ReturnType<ReturnType<typeof composeAiOriginalScenes>['requests']['readHistorical']>>,
@@ -1171,6 +1190,10 @@ export function composeRequestBoundOriginalOpeningReadTask(
     });
   };
   return Object.freeze({
+    requestCancellationIntent: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, 'requestCancellationIntent'),
+    settleUnstartedCancellation: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, 'settleUnstartedCancellation'),
+    readCancellationReceipt: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, 'readCancellationReceipt'),
+    readCancellationSettlementReceipt: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, 'readCancellationSettlementReceipt'),
     start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
       consume(request, value, false, async (root, original, task) => ({ original: original.receipt,
         execution: await root.application.start(task, signal), model: 'not_called' as const,
