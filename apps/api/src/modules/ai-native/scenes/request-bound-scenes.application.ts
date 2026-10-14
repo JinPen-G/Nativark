@@ -616,6 +616,11 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
   const call = bindRequests(dependencies, options, input => {
     const authorization = composePersistedTaskAuthorization(input);
     const scenes = composeAiOriginalScenes(input);
+    // The current formal root must not construct a model/Gateway merely to
+    // reconnect. Keep the existing repositories and source-bound consumer.
+    const persistedCenter = composePersistedTaskCenter({ ...input, usageDb: input.db });
+    const center = composeAiTaskCenterScene({ list: persistedCenter.list, events: persistedCenter.events,
+      usage: persistedCenter.usage, scenes });
     // Construct knowledge services only for actual result/source reads. These
     // still revalidate current ACL/consent; absence never means trusted content.
     const resultReader = () => {
@@ -623,7 +628,7 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
       const knowledge = knowledgeOptions ? composeOriginalSceneKnowledge(knowledgeOptions, input, input.clock ?? (() => new Date())) : undefined;
       return new AiOriginalSceneResultService(input.db, authorization.tasks, scenes, resultPolicy, input.clock, knowledge);
     };
-    return { scenes, resultReader, tasks: authorization.tasks, db: input.db,
+    return { scenes, center, resultReader, tasks: authorization.tasks, db: input.db,
       answers: () => PrismaTaskInputRepository.receiptReader(input.db, authorization.tasks, input.clock),
       inputCancellation: () => PrismaTaskInputRepository.releasedCancellationWitness(input.db, authorization.tasks, input.clock),
       snapshots: new PrismaTaskRecoverySnapshotRepository(input.db, authorization.tasks),
@@ -651,6 +656,10 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     });
   };
   return Object.freeze({
+    readTaskPage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readPage(command)),
+    readTaskEvents: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readEvents(command)),
+    readTaskReconnect: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readReconnect(command)),
+    readTaskUsage: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (root, command) => root.center.readUsage(command)),
     readAnswer(request: AiSceneHttpRequest, value: unknown) {
       const parsed = answerSchema.safeParse(structuredClone(value));
       if (!parsed.success || !isAiTaskInputSubmissionDraft(parsed.data.submission)) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -892,6 +901,10 @@ export function composeRequestBoundPersistedOriginalSceneModel(
       readTaskSnapshot: (value: unknown) => readOriginalTaskSnapshot(scenes, composePersistedTaskCenter(input).events, value) });
   });
   return Object.freeze({
+    readTaskPage: recoveryReaders.readTaskPage,
+    readTaskEvents: recoveryReaders.readTaskEvents,
+    readTaskReconnect: recoveryReaders.readTaskReconnect,
+    readTaskUsage: recoveryReaders.readTaskUsage,
     readRecoverySnapshot: recoveryReaders.readRecoverySnapshot,
     requestCancellationIntent: recoveryReaders.requestCancellationIntent,
     settleReleasedInputCancellation: recoveryReaders.settleReleasedInputCancellation,
