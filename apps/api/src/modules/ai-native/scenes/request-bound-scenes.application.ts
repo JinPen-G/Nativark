@@ -325,6 +325,26 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
           settlement: null, settlementState: 'not_attempted' as const });
       });
     },
+    /** This does not cancel started work or release any financial reservation. */
+    settleUnstartedCancellation(request: AiSceneHttpRequest, value: unknown) {
+      const parsed = cancellationSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, parsed.data, async (root, command) => {
+        const input = cancellationSchema.parse(command), before = await root.scenes.requests.readHistorical(input.original);
+        const task = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (before.receipt.state === 'revoked' || task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+        const receipt = await root.transitions.settleUnstartedCancellation({ taskId: task.taskId,
+          expectedRevision: input.expectedRevision, to: 'cancelled', reason: 'cancel_settled' }, task.runId);
+        const after = await root.scenes.requests.readHistorical(input.original);
+        const latest = await root.scenes.readTaskReceipt(input.original.inputRef);
+        if (after.receipt.state === 'revoked' || after.receipt.contentHash !== before.receipt.contentHash
+          || originalIdentityHash(after.context) !== originalIdentityHash(before.context)
+          || latest.state !== 'observed' || latest.taskId !== task.taskId || latest.runId !== task.runId)
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        return freezeOriginalInput({ original: input.original, receipt,
+          cancellation: 'unstarted_task_cancelled_not_business_rollback' as const, automaticRetry: false as const });
+      });
+    },
     readCancellationReceipt: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, false),
     readCancellationSettlementReceipt: (request: AiSceneHttpRequest, value: unknown) => cancellation(request, value, true),
     readTakeoverReceipt(request: AiSceneHttpRequest, value: unknown) {
@@ -406,6 +426,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     readTakeoverReceipt: recoveryReaders.readTakeoverReceipt,
     readRecoverySnapshot: recoveryReaders.readRecoverySnapshot,
     requestCancellationIntent: recoveryReaders.requestCancellationIntent,
+    settleUnstartedCancellation: recoveryReaders.settleUnstartedCancellation,
     readCancellationReceipt: recoveryReaders.readCancellationReceipt,
     readCancellationSettlementReceipt: recoveryReaders.readCancellationSettlementReceipt,
     start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
@@ -486,6 +507,7 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
     readTakeoverReceipt: recoveryReaders.readTakeoverReceipt,
     readRecoverySnapshot: recoveryReaders.readRecoverySnapshot,
     requestCancellationIntent: recoveryReaders.requestCancellationIntent,
+    settleUnstartedCancellation: recoveryReaders.settleUnstartedCancellation,
     readCancellationReceipt: recoveryReaders.readCancellationReceipt,
     readCancellationSettlementReceipt: recoveryReaders.readCancellationSettlementReceipt,
     startSettingsTask: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>

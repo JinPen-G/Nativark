@@ -138,6 +138,7 @@ export const AI_SCENE_MODEL_HTTP_DRAFT = Object.freeze({
   readQuotePreparation: 'input/quote-preparation',
   confirmClarifiedQuote: 'input/quote-confirm', readClarifiedQuoteReceipt: 'input/quote-receipt',
   requestCancel: 'cancel', requestCancellationIntent: 'cancel/intent', readCancellationReceipt: 'cancel/receipt',
+  settleUnstartedCancellation: 'cancel/settle-unstarted',
   readCancellationSettlementReceipt: 'cancel/settlement-receipt', readModelResult: 'result', reopenModelSource: 'source',
   readTaskPage: 'tasks', readTaskEvents: 'events', readTaskUsage: 'usage', readTaskScene: 'scene',
   startSettingsTask: 'settings/start', readSettingsConfirmation: 'settings/confirmation',

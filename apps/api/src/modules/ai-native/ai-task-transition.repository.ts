@@ -154,6 +154,41 @@ export class AiTaskTransitionRepository {
     return this.transitionState(value, true, undefined, witness);
   }
 
+  /** Server-bound original run only. The task lock fences activation before
+   * absence can attest never-started work; expiry alone proves nothing. */
+  settleUnstartedCancellation(value: unknown, originalRunId: string) {
+    if (!id.safeParse(originalRunId).success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return this.settleInputCancellation(value, async (tx, task) => {
+      const access = await this.access.resolveAccess(task.id, 'transition_task');
+      const key = { scopeId: task.scopeId, taskId: task.id };
+      const runs = await tx.aiRun.findMany({ where: key, take: 2 });
+      const held = runs[0];
+      if (runs.length !== 1 || !held || held.id !== originalRunId || held.taskId !== key.taskId || held.scopeId !== key.scopeId
+        || held.actorKind !== access.actorKind || held.actorId !== access.actorId || held.status !== 'QUEUED'
+        || held.startedAt != null || !revision.safeParse(held.revision).success
+        || (held.leaseOwnerId === null ? held.leaseExpiresAt !== null
+          : !(held.leaseExpiresAt instanceof Date) || !Number.isFinite(held.leaseExpiresAt.getTime())))
+        throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const fence = held.fencingToken.toFixed(0);
+      if (!/^(0|[1-9][0-9]{0,19})$/u.test(fence) || !held.fencingToken.equals(fence)
+        || BigInt(fence) >= 99999999999999999999n) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const evidence = await Promise.all([
+        tx.aiStep.findFirst({ where: key }), tx.aiTaskRunPlan.findFirst({ where: key }),
+        tx.aiTaskActionInput.findFirst({ where: key }), tx.aiTaskResultArtifact.findFirst({ where: key }),
+        tx.aiGatewayInvocation.findFirst({ where: key }), tx.aiTaskExecutionBudget.findFirst({ where: key }),
+        tx.aiTaskExecutionCharge.findFirst({ where: key }),
+        tx.aiBudgetReservation.findFirst({ where: { scopeId: key.scopeId, runId: held.id } })
+      ]);
+      if (evidence.some(Boolean)) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const changed = await tx.aiRun.updateMany({ where: { id: held.id, ...key, status: 'QUEUED', revision: held.revision,
+        fencingToken: held.fencingToken, leaseOwnerId: held.leaseOwnerId, leaseExpiresAt: held.leaseExpiresAt,
+        actorKind: access.actorKind, actorId: access.actorId },
+        data: { status: 'CANCELLED', revision: { increment: 1 }, fencingToken: { increment: 1 },
+          leaseOwnerId: null, leaseExpiresAt: null, endedAt: access.now } });
+      if (changed.count !== 1) throw conflict();
+    });
+  }
+
   async pauseConfirmation(value: unknown) {
     const parsed = confirmationCommandSchema.safeParse(value);
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
