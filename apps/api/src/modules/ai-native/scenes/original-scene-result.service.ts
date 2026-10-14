@@ -247,6 +247,35 @@ export class AiOriginalSceneResultService {
     return freezeOriginalInput(output);
   }
 
+  /** Opening evidence uses the original readiness partition reader, not an
+   * order citation, a model URL or permission to edit configuration. */
+  async reopenOpeningSection(value: unknown) {
+    const parsed = commandSchema.extend({ key: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u) })
+      .strict().safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const { key, ...command } = freezeOriginalInput(parsed.data);
+    const before = await this.read(command);
+    if (before.status !== 'available' || before.sceneCode !== 'opening_diagnosis') throw unavailable();
+    const original = await this.scenes.requests.readHistorical(command.original);
+    if (original.request.sceneCode !== 'opening_diagnosis' || !original.request.input.sections.includes(key)) throw denied();
+    const evidence = z.object({ scope: z.unknown(), resourceType: z.literal('readiness_item'), resourceId: z.string(), version: z.string() });
+    const material = z.object({ sections: z.array(z.object({ key: z.string(), evidence }).passthrough()).max(9) })
+      .passthrough().parse(before.facts);
+    const expected = material.sections.find(section => section.key === key)?.evidence;
+    if (!expected) throw unavailable();
+    const source = await this.scenes.readOpeningSection({ ...command.original, key });
+    if (source.section.status === 'unavailable' || source.section.key !== key) throw unavailable();
+    if (requestFingerprint(evidence.parse(source.section.evidence)) !== requestFingerprint(expected)) throw unavailable();
+    const after = await this.read(command);
+    if (after.status !== 'available' || after.materialHash !== before.materialHash
+      || receiptFingerprint(after.original) !== receiptFingerprint(before.original)) throw unavailable();
+    return freezeOriginalInput({ original: before.original, resultId: before.resultId, key,
+      reference: source.section.evidence, source: source.section,
+      frozenBasis: { materialHash: before.materialHash, reference: expected },
+      observation: 'current_authorized_reobservation' as const, historicalConfiguration: 'not_loaded' as const,
+      execution: 'not_attempted' as const, proposalPersistence: 'not_attempted' as const });
+  }
+
   async reopenSource(value: unknown) {
     const parsed = reopenSchema.safeParse(structuredClone(value));
     if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');

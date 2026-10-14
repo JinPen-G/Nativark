@@ -698,6 +698,9 @@ export function composeRequestBoundOriginalTaskRecoveryReaders(
     reopenModelSource(request: AiSceneHttpRequest, value: unknown) {
       return call(request, value, (root, command) => root.resultReader().reopenSource(command));
     },
+    reopenOpeningModelSource(request: AiSceneHttpRequest, value: unknown) {
+      return call(request, value, (root, command) => root.resultReader().reopenOpeningSection(command));
+    },
     readRecoverySnapshot(request: AiSceneHttpRequest, value: unknown) {
       const parsed = snapshotSchema.safeParse(structuredClone(value));
       if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
@@ -933,6 +936,7 @@ export function composeRequestBoundPersistedOriginalSceneModel(
     readAnswer: recoveryReaders.readAnswer,
     readModelResult: recoveryReaders.readModelResult,
     reopenModelSource: recoveryReaders.reopenModelSource,
+    reopenOpeningModelSource: recoveryReaders.reopenOpeningModelSource,
     readOrderReadChainAnswer: (request: AiSceneHttpRequest, value: unknown) => call(request, value, async (app, command) => await app.readAnswer(command)),
     readOrderReadChainModelResult: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readModelResult(command)),
     reopenOrderReadChainSource: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reopenModelSource(command)),
@@ -1035,6 +1039,8 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
       call(request, value, (app, command) => app.model.scenes.prepareOrderManualHandoff(command)),
     readQuoteCatalog: (request: AiSceneHttpRequest, value: unknown) =>
       call(request, value, (app, command) => app.model.scenes.readQuoteCatalog(command)),
+    compareOriginalQuotes: (request: AiSceneHttpRequest, value: unknown) =>
+      call(request, value, (app, command) => app.model.scenes.compareOriginalQuotes(command)),
     prepareOpeningSections: (request: AiSceneHttpRequest, value: unknown) =>
       call(request, value, (app, command) => app.model.scenes.prepareOpeningSections(command)),
     readOpeningSection: (request: AiSceneHttpRequest, value: unknown) =>
@@ -1066,7 +1072,8 @@ export function composeRequestBoundOriginalSceneModel(dependencies: RequestBound
       call(request, value, (app, command) => app.application.takeover(command, signal)),
     requestCancel: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.application.requestCancel(command)),
     readModelResult: recoveryReaders.readModelResult,
-    reopenModelSource: recoveryReaders.reopenModelSource
+    reopenModelSource: recoveryReaders.reopenModelSource,
+    reopenOpeningModelSource: recoveryReaders.reopenOpeningModelSource
   });
 }
 
@@ -1090,6 +1097,7 @@ export function composeRequestBoundOriginalScenes(dependencies: RequestBoundOrig
     reopenOrderCitation: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reopenOrderCitation(command)),
     prepareOrderManualHandoff: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.prepareOrderManualHandoff(command)),
     readQuoteCatalog: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readQuoteCatalog(command)),
+    compareOriginalQuotes: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.compareOriginalQuotes(command)),
     prepareOpeningSections: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.prepareOpeningSections(command)),
     readOpeningSection: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readOpeningSection(command)),
     reviewQuote: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.reviewQuote(command)),

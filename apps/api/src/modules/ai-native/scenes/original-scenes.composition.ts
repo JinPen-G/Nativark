@@ -64,6 +64,7 @@ export function composeAiOriginalScenes(input: AiOriginalSceneDependencies) {
     reopenOrderCitation: facts.reopenOrderCitation.bind(facts), prepareOpeningSections: facts.prepareOpeningSections.bind(facts),
     reviewQuote: facts.reviewQuote.bind(facts),
     confirmQuote: facts.confirmQuote.bind(facts), readQuoteReceipt: facts.readQuoteReceipt.bind(facts),
+    compareOriginalQuotes: facts.compareOriginalQuotes.bind(facts),
     async readRecovery(value: unknown) {
       const authorization = composePersistedTaskAuthorization(input);
       return new AiOriginalSceneRecoveryService(input.db, requests, authorization.tasks).read(value);
