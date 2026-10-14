@@ -29,7 +29,7 @@ type ReadonlyRunnerDependencies = {
   db: PrismaClient;
   authorization: Omit<PersistedTaskAuthorizationDependencies, 'db' | 'clock'>;
   guard: Pick<ApiAuthGuard, 'canActivate'>;
-  core: Partial<Pick<RentalCoreService, 'listItemGroups' | 'availability' | 'getOrder'>>;
+  core: Partial<Pick<RentalCoreService, 'listItemGroups' | 'listItemGroupsPage' | 'availability' | 'getOrder'>>;
   wall?: () => Date;
   monotonic?: () => number;
   clock?: AiTaskRunnerClock;
@@ -117,7 +117,10 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
             return read(context);
           }) };
         const result = tool === 'rental.catalog.search'
-          ? await new AiCatalogReadFactsService({ listItemGroups: input.core.listItemGroups!.bind(input.core) }, boundAuthority, input.wall).read(aiCatalogReadInputSchema.parse(stored.input))
+          ? await new AiCatalogReadFactsService({ listItemGroups: input.core.listItemGroups!.bind(input.core),
+            ...(typeof input.core.listItemGroupsPage === 'function'
+              ? { listItemGroupsPage: input.core.listItemGroupsPage.bind(input.core) } : {}) }, boundAuthority, input.wall)
+            .read(aiCatalogReadInputSchema.parse(stored.input))
           : tool === 'rental.availability.check'
             ? await new AiAvailabilityReadFactsService({ availability: input.core.availability!.bind(input.core) }, boundAuthority, input.wall).read(aiAvailabilityReadInputSchema.parse(stored.input))
             : await new AiOrderReadFactsService({ getOrder: input.core.getOrder!.bind(input.core) },

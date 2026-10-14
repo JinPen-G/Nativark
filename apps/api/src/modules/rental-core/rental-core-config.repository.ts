@@ -147,8 +147,7 @@ export class RentalCoreConfigRepository implements RentalConfigStore {
     const truncated = rows.length > query.limit, page = rows.slice(0, query.limit);
     return { rows: page.map(row => this.toItemGroup(row)), nextCursor: truncated ? page[page.length - 1].id : null,
       truncated, source: 'persisted_workspace_configuration',
-      configurationVersion: createHash('sha256').update(JSON.stringify(page.map(row => ({ id: row.id,
-        updatedAt: row.updatedAt.toISOString(), attributes: row.attributes, bundleComponents: row.bundleComponents })))).digest('hex') };
+      configurationVersion: createHash('sha256').update(JSON.stringify(page)).digest('hex') };
   }
 
   async listInspectionTemplates(tenantId: string, workspaceId: string): Promise<RentalInspectionTemplate[]> {
