@@ -18,11 +18,13 @@ import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalSceneMode
   type RequestBoundOriginalSceneModelDependencies, type AiSceneModelRequestOptions, type AiSceneRequestOptions,
   type RequestBoundQuoteOrderDependencies, composeRequestBoundClarifiedQuoteSelection,
   composeRequestBoundSettingsBusinessTask } from './request-bound-scenes.application';
+import { composeRequestBoundOriginalOpeningReadTask } from './request-bound-scenes.application';
 
 export const AI_ORIGINAL_SCENE_MODEL = Symbol('AI_ORIGINAL_SCENE_MODEL');
 export const AI_ORIGINAL_ORDER_READ_REQUESTS = Symbol('AI_ORIGINAL_ORDER_READ_REQUESTS');
 export const AI_CLARIFIED_QUOTE_SELECTION_REQUESTS = Symbol('AI_CLARIFIED_QUOTE_SELECTION_REQUESTS');
 export const AI_ORIGINAL_SETTINGS_TASK_REQUESTS = Symbol('AI_ORIGINAL_SETTINGS_TASK_REQUESTS');
+export const AI_ORIGINAL_OPENING_READ_TASK_REQUESTS = Symbol('AI_ORIGINAL_OPENING_READ_TASK_REQUESTS');
 import { composeRequestBoundOriginalTaskActionPolicies, type AiOriginalTaskActionPolicyOptions } from './request-bound-scenes.application';
 import { composeRequestBoundScenePlanPolicies, type AiScenePlanPolicyConfiguration } from './request-bound-scenes.application';
 import { composeRequestBoundOriginalTaskRecoveryReaders } from './request-bound-scenes.application';
@@ -32,6 +34,17 @@ export { AI_ORIGINAL_SCENE_MODEL_REQUESTS, AI_ORIGINAL_SCENE_PERSISTED_MODEL_REQ
 
 @Module({})
 export class AiOriginalScenesModule {
+  /** Inert alternative opening read host, never mounted alongside a model
+   * driver on the same original run. No HTTP or default execution policy. */
+  static registerRequestBoundOpeningReadTask(
+    dependencies: RequestBoundOriginalSceneDependencies, options: AiSceneRequestOptions,
+    configuration: Parameters<typeof composeRequestBoundOriginalOpeningReadTask>[2]): DynamicModule {
+    if (!options?.enabled) return { module: AiOriginalScenesModule, controllers: [], providers: [], exports: [] };
+    const selected = { ...configuration, host: structuredClone(configuration.host), limits: structuredClone(configuration.limits) };
+    return { module: AiOriginalScenesModule, controllers: [], providers: [{ provide: AI_ORIGINAL_OPENING_READ_TASK_REQUESTS,
+      useFactory: () => composeRequestBoundOriginalOpeningReadTask({ ...dependencies }, { ...options }, selected) }],
+      exports: [AI_ORIGINAL_OPENING_READ_TASK_REQUESTS] };
+  }
   /** Default closed, explicitly selected instead of the legacy full-model
    * settings routes. No model runtime is constructed by this HTTP assembly. */
   static registerHttpSettingsTask(input?: {

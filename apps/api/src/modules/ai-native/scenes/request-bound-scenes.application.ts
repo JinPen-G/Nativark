@@ -45,6 +45,7 @@ import { PrismaTaskInputRepository, readTaskModelRunOrigin } from '../task-input
 import { AiOriginalSceneResultService } from './original-scene-result.service';
 import { composeOriginalSceneKnowledge, type AiOriginalSceneKnowledgeOptions } from './original-scene-knowledge';
 import { gatewayTextIntentBindingSchema } from '../gateway-intent';
+import { composePersistedReadonlyBusinessTaskHost } from '../runner/persisted-catalog-runner.composition';
 
 export type AiSceneHttpRequest = { headers: { authorization?: unknown } };
 export type AiSceneRequestOptions = { enabled: boolean; audience: 'operator' | 'staff' };
@@ -1104,6 +1105,86 @@ export function composeRequestBoundOriginalScenes(dependencies: RequestBoundOrig
     confirmQuote: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.confirmQuote(command)),
     readQuoteReceipt: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readQuoteReceipt(command)),
     readRecovery: (request: AiSceneHttpRequest, value: unknown) => call(request, value, (app, command) => app.readRecovery(command))
+  });
+}
+
+/** Alternative server-selected original opening READ host, not a second
+ * driver alongside the model host for the same run. No caller task/lease/tool
+ * or config input is accepted; the original saved plan prevents replacement. */
+export function composeRequestBoundOriginalOpeningReadTask(
+  dependencies: RequestBoundOriginalSceneDependencies, options: AiSceneRequestOptions,
+  configuration: { host: AiTaskApplicationHost; limits: z.infer<typeof aiTaskRunnerLimitsSchema>;
+    monotonic?: () => number }) {
+  const limits = aiTaskRunnerLimitsSchema.parse(structuredClone(configuration.limits));
+  const monotonic = configuration.monotonic;
+  const host = z.object({ holderId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+    leaseMs: z.number().int().min(1).max(120000) }).strict().parse(structuredClone(configuration.host));
+  const call = bindRequests(dependencies, options, input => input);
+  const consume = <T>(request: AiSceneHttpRequest, value: unknown, historical: boolean,
+    work: (root: ReturnType<typeof composePersistedReadonlyBusinessTaskHost>,
+      original: Awaited<ReturnType<ReturnType<typeof composeAiOriginalScenes>['requests']['readHistorical']>>,
+      command: { taskId: string; runId: string }, resultId?: string) => Promise<T>, result = false) => {
+    const schema = result ? originalRequestReferenceSchema.extend({ resultId: z.string().uuid() }).strict() : originalRequestReferenceSchema;
+    const parsed = schema.safeParse(structuredClone(value));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    return call(request, parsed.data, async (input, value) => {
+      const command = schema.parse(value), reference = freezeOriginalInput({ draftVersion: command.draftVersion, inputRef: command.inputRef });
+      const scenes = composeAiOriginalScenes(input);
+      const readOriginal = async () => {
+        if (!historical) await scenes.requests.read(reference);
+        return scenes.requests.readHistorical(reference);
+      };
+      const original = await readOriginal();
+      if (original.request.sceneCode !== 'opening_diagnosis') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      const task = await scenes.requests.readTaskReceipt(reference.inputRef);
+      if (task.state !== 'observed') throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      const expected = originalIdentityHash(original.context);
+      const verifyOriginal = async () => {
+        const current = await readOriginal();
+        const currentTask = await scenes.requests.readTaskReceipt(reference.inputRef);
+        if (originalIdentityHash(current.context) !== expected || current.receipt.contentHash !== original.receipt.contentHash
+          || currentTask.state !== 'observed' || currentTask.taskId !== task.taskId || currentTask.runId !== task.runId) {
+          throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+        }
+      };
+      const root = composePersistedReadonlyBusinessTaskHost({ db: input.db,
+        authorization: { auth: input.auth, credentials: input.credentials, subscriptions: input.subscriptions },
+        guard: input.guard, core: input.core, diagnosticCore: input.core, business: input.business,
+        wall: input.clock, monotonic, host, revalidateOriginal: verifyOriginal,
+        scene: { code: original.receipt.sceneCode, version: original.receipt.sceneVersion },
+        task: { taskId: task.taskId, runId: task.runId, limits,
+          steps: [{ registrationRef: `opening-read:${reference.inputRef}`, toolCode: 'tenant.opening.diagnose',
+            input: { limit: 50, sections: [...original.request.input.sections] } }] } });
+      // Recheck the original request while the real runner holds its lease,
+      // not merely once before waiting for Task acquisition.
+      const application = root.createApplication(host, async held => {
+        await verifyOriginal();
+        await root.prepare(held);
+        await verifyOriginal();
+      });
+      const selected = Object.freeze({ ...root, application });
+      await verifyOriginal();
+      const observed = await work(selected, original, { taskId: task.taskId, runId: task.runId },
+        'resultId' in command && typeof command.resultId === 'string' ? command.resultId : undefined);
+      await verifyOriginal();
+      return observed;
+    });
+  };
+  return Object.freeze({
+    start: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      consume(request, value, false, async (root, original, task) => ({ original: original.receipt,
+        execution: await root.application.start(task, signal), model: 'not_called' as const,
+        configurationWrite: 'not_attempted' as const })),
+    reconcile: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      consume(request, value, false, async (root, original, task) => ({ original: original.receipt,
+        execution: await root.application.reconcile(task, signal), model: 'not_called' as const,
+        configurationWrite: 'not_attempted' as const })),
+    inspect: (request: AiSceneHttpRequest, value: unknown) =>
+      consume(request, value, true, async (root, original, task) => ({ original: original.receipt,
+        snapshot: await root.application.inspect(task), execution: 'not_invoked' as const })),
+    reopenSource: (request: AiSceneHttpRequest, value: unknown, signal?: AbortSignal) =>
+      consume(request, value, true, async (root, original, task, resultId) => ({ original: original.receipt,
+        source: await root.reopenBusinessSource({ taskId: task.taskId, resultId }, signal) }), true)
   });
 }
 

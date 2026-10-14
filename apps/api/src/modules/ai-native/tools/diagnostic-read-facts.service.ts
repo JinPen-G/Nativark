@@ -11,7 +11,10 @@ import { assertAiReadContextBinding } from './read-context-binding';
 export interface AiDiagnosticReadAuthority {
   withRead<T>(kind: 'opening' | 'risk', input: unknown, consume: (context: AiExecutionContext) => Promise<T>): Promise<T>;
 }
-export const aiOpeningReadInputSchema = z.object({ limit: z.number().int().min(1).max(50) }).strict();
+export const aiOpeningReadInputSchema = z.object({ limit: z.number().int().min(1).max(50),
+  sections: z.array(z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u)).min(1).max(9)
+    .refine(rows => new Set(rows).size === rows.length).optional()
+}).strict();
 const instant = z.string().max(40).datetime({ offset: true });
 export const aiRiskReadInputSchema = z.object({
   from: instant, to: instant, locationId: z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u).optional()
@@ -58,8 +61,14 @@ export class AiOpeningReadFactsService {
       if (!parsed.success || parsed.data.tenantId !== scope.tenantId || parsed.data.workspaceId !== scope.workspaceId
         || parsed.data.items.length > input.data.limit || new Set(parsed.data.items.map(x => x.key)).size !== parsed.data.items.length)
         throw new ModelGatewayError('INVALID_RESPONSE');
+      if (input.data.sections?.some(key => !parsed.data.items.some(row => row.key === key))) throw new ModelGatewayError('INVALID_REQUEST');
+      const selected = input.data.sections && new Set(input.data.sections);
       return { requestId: context.requestId, scope: { ...scope }, observedAt: observed(this.clock), ready: parsed.data.ready,
-        items: parsed.data.items.map(row => ({ key: row.key, title: row.title, missing: row.missing,
+        // The Core aggregate is not recalculated from a selected subset. This
+        // is output minimization only, not a per-section database query.
+        readinessBasis: 'core_workspace_aggregate' as const,
+        coverage: selected ? 'requested_sections' as const : 'all_readiness_sections' as const,
+        items: parsed.data.items.filter(row => !selected || selected.has(row.key)).map(row => ({ key: row.key, title: row.title, missing: row.missing,
           optional: row.optional === true, status: row.unavailable ? 'unavailable' as const : row.done ? 'ready' as const : 'missing' as const })) };
     });
   }

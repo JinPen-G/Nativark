@@ -47,6 +47,9 @@ type ReadonlyRunnerDependencies = {
   diagnosticCore?: ConstructorParameters<typeof AiGuardedQuoteCoreContextSource>[0];
   business?: Pick<RentalBusinessService, 'tenantReadiness'>;
   reports?: Pick<RentalWorkspaceReportRepository, 'getOperationReport'>;
+  /** Optional server-owned original request check. It is an additional
+   * constraint, never a replacement for Task or business authorization. */
+  revalidateOriginal?: () => Promise<void>;
   wall?: () => Date;
   monotonic?: () => number;
   clock?: AiTaskRunnerClock;
@@ -248,6 +251,8 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
     }
   };
   const readFacts = async (stored: { input: unknown; context: AiExecutionContext }, signal: AbortSignal) => {
+        if (signal.aborted) throw unavailable();
+        await input.revalidateOriginal?.();
         // Per-execution closure: concurrent tasks cannot swap a shared expected identity.
         const readAuthority = { withRead: route.withRead.bind(route) };
         const boundAuthority: typeof readAuthority = { withRead: (kind, request, read) =>
@@ -278,6 +283,7 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
             : await new AiOrderReadFactsService({ getOrder: input.core.getOrder!.bind(input.core) },
               new AiOrderRouteContextAuthority(input.guard, input.authorization.credentials,
                 aiPersistedOrderExplainInputSchema.parse(stored.input).input.orderId, input.wall), input.wall).read(stored.context);
+        await input.revalidateOriginal?.();
         if (signal.aborted) throw unavailable();
         return result;
   };
