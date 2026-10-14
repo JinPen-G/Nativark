@@ -6,12 +6,13 @@ import { requestFingerprint } from '../../rental-core/rental-idempotency.reposit
 import { AiCatalogReadFactsService, aiCatalogReadInputSchema } from '../catalog-read-facts.service';
 import { AiAvailabilityReadFactsService, aiAvailabilityReadInputSchema } from '../availability-read-facts.service';
 import { AiOrderReadFactsService } from '../order-read-facts.service';
+import { AiMembershipCandidateReadFactsService, aiMembershipCandidateReadInputSchema, type AiMembershipCandidateReadPort } from '../membership-candidate-read-facts.service';
 import { AiOrderRouteContextAuthority } from '../order-route-context.authority';
 import { AiBusinessReadRouteAuthority } from '../business-read-route.authority';
 import { AiTaskRepositoryError } from '../ai-task.repository';
 import { composePersistedTaskAuthorization, type PersistedTaskAuthorizationDependencies } from '../task-authorization.composition';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
-import { PrismaTaskPlanInputSource, aiPersistedOrderExplainInputSchema, type PersistedReadonlyTool } from './prisma-task-plan-input.source';
+import { PrismaTaskPlanInputSource, aiPersistedOrderExplainInputSchema, PERSISTED_READONLY_TOOLS, type PersistedReadonlyTool } from './prisma-task-plan-input.source';
 import { composeAuthorizedReadonlyPersistentTaskInputRunner } from './authorized-persistent-task-input.composition';
 import type { AiTaskRunnerRepositoryCommandFactory } from './ai-task-runner.repository-adapter';
 import type { AiTaskRunnerClock } from './ai-task-runner.ports';
@@ -30,6 +31,7 @@ type ReadonlyRunnerDependencies = {
   authorization: Omit<PersistedTaskAuthorizationDependencies, 'db' | 'clock'>;
   guard: Pick<ApiAuthGuard, 'canActivate'>;
   core: Partial<Pick<RentalCoreService, 'listItemGroups' | 'listItemGroupsPage' | 'availability' | 'getOrder'>>;
+  memberships?: AiMembershipCandidateReadPort;
   wall?: () => Date;
   monotonic?: () => number;
   clock?: AiTaskRunnerClock;
@@ -46,14 +48,19 @@ export function composePersistedAvailabilityTaskRunner(input: ReadonlyRunnerDepe
 export function composePersistedOrderFactsTaskRunner(input: ReadonlyRunnerDependencies & { core: Pick<RentalCoreService, 'getOrder'> }) {
   return composeReadonly(input, 'rental.order.explain');
 }
+/** Current guarded, bounded member candidates only. Publishing an input or
+ * completing this read does not choose a customer or establish eligibility. */
+export function composePersistedMembershipCandidateTaskRunner(input: ReadonlyRunnerDependencies & { memberships: AiMembershipCandidateReadPort }) {
+  return composeReadonly(input, 'membership.customer.resolve');
+}
 /** One immutable server plan and one cumulative resource ledger for a closed
  * group of actual readers. Agent tool names cannot extend this registry. */
 export function composePersistedReadonlyBusinessTaskRunner(input: ReadonlyRunnerDependencies & {
   tools: readonly PersistedReadonlyTool[];
 }) {
   const tools = [...input.tools];
-  if (tools.length < 2 || tools.length > 3 || new Set(tools).size !== tools.length
-    || tools.some(tool => !['rental.catalog.search', 'rental.availability.check', 'rental.order.explain'].includes(tool))) throw unavailable();
+  if (tools.length < 2 || tools.length > PERSISTED_READONLY_TOOLS.length || new Set(tools).size !== tools.length
+    || tools.some(tool => !(PERSISTED_READONLY_TOOLS as readonly string[]).includes(tool))) throw unavailable();
   const readers = tools.map(tool => ({ tool, root: composeReadonly(input, tool) }));
   PrismaTaskPlanInputSource.bindReadonlyPlanSources(readers.map(reader => reader.root.source));
   const selected = (code: string) => readers.find(reader => reader.tool === code)?.root;
@@ -83,8 +90,10 @@ export function composePersistedReadonlyBusinessTaskRunner(input: ReadonlyRunner
 }
 function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReadonlyTool) {
   if (typeof input?.guard?.canActivate !== 'function'
-    || (tool === 'rental.catalog.search' ? typeof input?.core?.listItemGroups
-      : tool === 'rental.availability.check' ? typeof input?.core?.availability : typeof input?.core?.getOrder) !== 'function') throw unavailable();
+    || (tool === 'membership.customer.resolve'
+      ? typeof input?.memberships?.listPersonalOptions !== 'function' || typeof input?.memberships?.listPersonalOptionsPage !== 'function'
+      : (tool === 'rental.catalog.search' ? typeof input?.core?.listItemGroups
+        : tool === 'rental.availability.check' ? typeof input?.core?.availability : typeof input?.core?.getOrder) !== 'function')) throw unavailable();
   const authorization = composePersistedTaskAuthorization({ ...input.authorization, db: input.db, clock: input.wall });
   const source = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, input.wall, tool);
   const route = new AiBusinessReadRouteAuthority(input.guard, input.authorization.credentials, input.wall);
@@ -116,7 +125,10 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
             if (signal.aborted || identity(context) !== identity(stored.context)) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
             return read(context);
           }) };
-        const result = tool === 'rental.catalog.search'
+        const result = tool === 'membership.customer.resolve'
+          ? await new AiMembershipCandidateReadFactsService(input.memberships!, boundAuthority, input.wall)
+            .read(aiMembershipCandidateReadInputSchema.parse(stored.input), stored.context)
+          : tool === 'rental.catalog.search'
           ? await new AiCatalogReadFactsService({ listItemGroups: input.core.listItemGroups!.bind(input.core),
             ...(typeof input.core.listItemGroupsPage === 'function'
               ? { listItemGroupsPage: input.core.listItemGroupsPage.bind(input.core) } : {}) }, boundAuthority, input.wall)
@@ -137,7 +149,8 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
     async resolve(binding) {
       const key = { taskId: binding.taskId, runId: binding.runId, inputRef: binding.inputRef, fingerprint: binding.inputHash };
       const stored = tool === 'rental.catalog.search' ? await source.readCatalogInput(key)
-        : tool === 'rental.availability.check' ? await source.readAvailabilityInput(key) : await source.readOrderExplainInput(key);
+        : tool === 'rental.availability.check' ? await source.readAvailabilityInput(key)
+          : tool === 'membership.customer.resolve' ? await source.readMembershipCandidateInput(key) : await source.readOrderExplainInput(key);
       if (stored.registrationRef !== binding.registrationRef || binding.toolCode !== tool
         || binding.toolVersion !== AI_TOOL_DRAFT_VERSION) throw unavailable();
       return { kind: 'not_required' };

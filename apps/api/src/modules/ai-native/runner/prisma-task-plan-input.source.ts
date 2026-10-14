@@ -12,6 +12,7 @@ import { gatewayTextIntentPolicySchema } from '../gateway-intent';
 import { TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, isTaskModelTool, parseTaskModelInput, taskModelFingerprint, taskModelPolicy, type TaskModelPolicy } from '../model-input/task-model-input';
 import { aiCatalogReadInputSchema } from '../catalog-read-facts.service';
 import { aiAvailabilityReadInputSchema } from '../availability-read-facts.service';
+import { aiMembershipCandidateReadInputSchema } from '../membership-candidate-read-facts.service';
 import { isGatewayOrderExplainRequest } from '../gateway-contract-validation';
 import { aiTaskAccessFromContext, AiTaskRepositoryError, type AiTaskRepositoryAuthority } from '../ai-task.repository';
 import type { AiStepRegistrationAuthority, AiStepRegistrationCommand } from '../ai-step-registration.repository';
@@ -37,7 +38,8 @@ const orderPublishSchema = publishSchema.extend({ input: z.unknown() });
 export const aiPersistedOrderExplainInputSchema = z.custom<AiOrderExplainRequestDraft>(isGatewayOrderExplainRequest)
   .transform(value => structuredClone(value));
 const orderExplainPublishSchema = publishSchema.extend({ input: aiPersistedOrderExplainInputSchema });
-export type PersistedReadonlyTool = 'rental.catalog.search' | 'rental.availability.check' | 'rental.order.explain';
+export const PERSISTED_READONLY_TOOLS = ['rental.catalog.search', 'rental.availability.check', 'rental.order.explain', 'membership.customer.resolve'] as const;
+export type PersistedReadonlyTool = typeof PERSISTED_READONLY_TOOLS[number];
 export type PersistedTaskInputTool = PersistedReadonlyTool | 'rental.order.commit' | 'tenant.notifications.commit' | typeof TASK_TEXT_MODEL_TOOL | typeof TASK_IMAGE_MODEL_TOOL | typeof TASK_AUDIO_MODEL_TOOL | typeof TEXT_CAPABILITY_PROBE_TOOL;
 export interface SettingsInputDependencies {
   /** Current original Guard and immutable domain evidence, without acquiring
@@ -49,7 +51,7 @@ type OrderInputDependencies = {
   route: Pick<AiApprovedOrderRouteAuthority, 'withOrderPreparation'>;
   confirmation: Pick<RentalOrderConfirmationService, 'normalizeOrderInput'>;
 };
-export const aiPersistedPlanToolsSchema = z.array(z.object({ code: z.enum(['rental.catalog.search', 'rental.availability.check', 'rental.order.explain', 'rental.order.commit', 'tenant.notifications.commit', TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, TEXT_CAPABILITY_PROBE_TOOL]), version: z.literal(AI_TOOL_DRAFT_VERSION) }).strict()).min(1).max(8)
+export const aiPersistedPlanToolsSchema = z.array(z.object({ code: z.enum([...PERSISTED_READONLY_TOOLS, 'rental.order.commit', 'tenant.notifications.commit', TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, TEXT_CAPABILITY_PROBE_TOOL]), version: z.literal(AI_TOOL_DRAFT_VERSION) }).strict()).min(1).max(8)
   .refine(tools => new Set(tools.map(tool => tool.code)).size === tools.length);
 const denied = () => new AiTaskRepositoryError('AI_ACCESS_DENIED');
 const unavailable = () => new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
@@ -67,7 +69,7 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
   /** Server composition only. Freeze a closed group of the existing readers;
    * no caller registry, policy seed or executable write is introduced. */
   static bindReadonlyPlanSources(sources: readonly PrismaTaskPlanInputSource[]) {
-    this.bindClosedPlanSources(sources, ['rental.catalog.search', 'rental.availability.check', 'rental.order.explain'], 3);
+    this.bindClosedPlanSources(sources, PERSISTED_READONLY_TOOLS, PERSISTED_READONLY_TOOLS.length);
   }
   /** The first supported model/tool handoff is a fixed text-model and original
    * order-read pair. This does not enable arbitrary model-selected operations. */
@@ -90,7 +92,7 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     private readonly modelPolicy?: TaskModelPolicy, private readonly settings?: SettingsInputDependencies) {
     if (typeof db?.$transaction !== 'function' || typeof db.aiTaskPlanPolicy?.findFirst !== 'function'
       || typeof db.aiTaskActionInput?.create !== 'function' || typeof authorization?.resolve !== 'function'
-      || typeof execution?.authorize !== 'function' || !['rental.catalog.search', 'rental.availability.check', 'rental.order.explain', 'rental.order.commit', 'tenant.notifications.commit', TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, TEXT_CAPABILITY_PROBE_TOOL].includes(toolCode)
+      || typeof execution?.authorize !== 'function' || ![...PERSISTED_READONLY_TOOLS, 'rental.order.commit', 'tenant.notifications.commit', TASK_TEXT_MODEL_TOOL, TASK_IMAGE_MODEL_TOOL, TASK_AUDIO_MODEL_TOOL, TEXT_CAPABILITY_PROBE_TOOL].includes(toolCode)
       || (toolCode === 'rental.order.commit' && (typeof order?.route?.withOrderPreparation !== 'function'
         || typeof order?.confirmation?.normalizeOrderInput !== 'function'))
       || (isTaskModelTool(toolCode) && !gatewayTextIntentPolicySchema.safeParse(modelPolicy && { sceneCode: modelPolicy.sceneCode, maxOutputTokens: modelPolicy.maxOutputTokens }).success)
@@ -107,6 +109,7 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
   private async parseInput(value: unknown) {
     if (this.toolCode === 'rental.catalog.search') return aiCatalogReadInputSchema.parse(structuredClone(value));
     if (this.toolCode === 'rental.availability.check') return aiAvailabilityReadInputSchema.parse(structuredClone(value));
+    if (this.toolCode === 'membership.customer.resolve') return aiMembershipCandidateReadInputSchema.parse(structuredClone(value));
     if (this.toolCode === 'rental.order.explain') return aiPersistedOrderExplainInputSchema.parse(structuredClone(value));
     if (isTaskModelTool(this.toolCode)) return parseTaskModelInput(value, this.modelPolicy!);
     if (this.toolCode === 'tenant.notifications.commit') return settingsChangeReferenceSchema.parse(structuredClone(value));
@@ -173,6 +176,11 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     return this.publish(value);
   }
 
+  async publishMembershipCandidateInput(value: unknown) {
+    if (this.toolCode !== 'membership.customer.resolve') throw unavailable();
+    return this.publish(value);
+  }
+
   async publishProbeInput(value: unknown) {
     if (this.toolCode !== TEXT_CAPABILITY_PROBE_TOOL) throw unavailable();
     return this.publish(value);
@@ -188,7 +196,7 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     return this.readPreparedInput(value);
   }
   async readReadonlyInputReceipt(value: unknown) {
-    if (!['rental.catalog.search', 'rental.availability.check', 'rental.order.explain'].includes(this.toolCode)) throw unavailable();
+    if (!(PERSISTED_READONLY_TOOLS as readonly string[]).includes(this.toolCode)) throw unavailable();
     return this.readPreparedInput(value);
   }
   private async readPreparedInput(value: unknown) {
@@ -268,7 +276,8 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
   private async publish(value: unknown, orderContext?: AiExecutionContext) {
     const schema = this.toolCode === 'rental.catalog.search' ? publishSchema
       : this.toolCode === 'rental.availability.check' ? availabilityPublishSchema
-        : this.toolCode === 'rental.order.explain' ? orderExplainPublishSchema : orderPublishSchema;
+        : this.toolCode === 'rental.order.explain' ? orderExplainPublishSchema
+          : this.toolCode === 'membership.customer.resolve' ? publishSchema.extend({ input: aiMembershipCandidateReadInputSchema }) : orderPublishSchema;
     const parsed = schema.safeParse(value);
     if (!parsed.success || parsed.data.lease.purpose === 'recovery_only') throw new AiTaskRepositoryError('AI_INVALID_INPUT');
     const command = parsed.data, payload = await this.parseInput(command.input);
@@ -480,6 +489,12 @@ export class PrismaTaskPlanInputSource implements AiTaskPlanEvidenceAuthority, A
     if (this.toolCode !== 'rental.order.explain') throw unavailable();
     const stored = await this.readStoredInput(binding);
     return { ...stored, input: aiPersistedOrderExplainInputSchema.parse(stored.input) };
+  }
+
+  async readMembershipCandidateInput(binding: { taskId: string; runId: string; inputRef: string; fingerprint: string }) {
+    if (this.toolCode !== 'membership.customer.resolve') throw unavailable();
+    const stored = await this.readStoredInput(binding);
+    return { ...stored, input: aiMembershipCandidateReadInputSchema.parse(stored.input) };
   }
 
   private async readStoredInput(binding: { taskId: string; runId: string; inputRef: string; fingerprint: string }) {
