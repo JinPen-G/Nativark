@@ -17,6 +17,7 @@ import { composeTaskSettingsHost, type AiSettingsTask } from '../runner/settings
 import { composeApprovedSettingsApplication } from '../approval-execution/approved-settings-application.composition';
 import { aiTaskRunPlanSchema } from '../runner/prisma-task-run-evidence.repository';
 import { settingsChangeReferenceSchema } from '../../rental-core/approved-settings-change.validation';
+import { prepareSettingsChangeSchema } from '../../rental-core/approved-settings-change.validation';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { ApprovedSettingsRouteAuthority } from '../../rental-core/approved-settings-route.authority';
 import { AiTaskCreationRepository } from '../ai-task-creation.repository';
@@ -60,6 +61,30 @@ export type AiScenePlanPolicyConfiguration = AiSceneRequestOptions & {
 export type RequestBoundOriginalSceneDependencies = Omit<AiOriginalSceneDependencies, 'credentials'>;
 export type RequestBoundOriginalSceneModelDependencies = Omit<AiOriginalSceneModelDependencies, 'credentials'>;
 export type AiSettingsTaskRequestOptions = AiSceneRequestOptions & { host: AiTaskApplicationHost; task: AiSettingsTask };
+/** Original business change preparation, before any Task exists. */
+export function composeRequestBoundSettingsChanges(
+  dependencies: Omit<ApprovedSettingsApplicationDependencies, 'credentials'>, options: AiSceneRequestOptions) {
+  if (options.audience !== 'operator') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+  const call = bindRequests(dependencies, options, composeApprovedSettingsApplication);
+  const read = prepareSettingsChangeSchema.pick({ changeKey: true });
+  return Object.freeze({
+    readCurrent: (request: AiSceneHttpRequest) => call(request, {}, app => app.readCurrent()),
+    prepare: (request: AiSceneHttpRequest, value: unknown) => {
+      const parsed = prepareSettingsChangeSchema.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, freezeOriginalInput(parsed.data), async (app, command) => {
+        const change = await app.prepareChange(command);
+        return freezeOriginalInput({ change, task: 'not_created' as const, approval: 'not_granted' as const,
+          activeSettings: 'not_modified' as const });
+      });
+    },
+    readReceipt: (request: AiSceneHttpRequest, value: unknown) => {
+      const parsed = read.safeParse(structuredClone(value));
+      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+      return call(request, freezeOriginalInput(parsed.data), (app, command) => app.readChangeReceipt(command));
+    }
+  });
+}
 export type AiSceneModelRequestOptions = AiSceneRequestOptions & {
   host: AiTaskApplicationHost;
   runServices: (dependencies: AiOriginalSceneModelDependencies) => AiOriginalSceneRunDependencies;

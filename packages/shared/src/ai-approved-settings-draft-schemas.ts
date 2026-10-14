@@ -17,6 +17,9 @@ const channels = { type: 'array', items: { enum: ['sms', 'app_push', 'wechat', '
 const snapshot = object({ recordId: id(36), revision: literal(1), contentHash: hash });
 
 export const AI_APPROVED_SETTINGS_DRAFT_SCHEMAS = {
+  AiApprovedSettingsChangePrepareDraft: object({ changeKey: id(128), baseRevision: revision, expiresAt: time,
+    notifications: object({ enabledEvents: stringArray, editableChannels: channels }) }),
+  AiApprovedSettingsChangeReceiptReadDraft: object({ changeKey: id(128) }),
   AiApprovedSettingsTaskCreationDraft: object({ creationKey: id(128), changeKey: id(128) }),
   AiApprovedSettingsTaskCancellationDraft: object({ creationKey: id(128), changeKey: id(128),
     expectedRevision: { type: 'integer', minimum: 1, maximum: 4294967293 } }),

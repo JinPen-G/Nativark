@@ -5,8 +5,9 @@ import { AI_SETTINGS_TASK_HTTP_REQUESTS, AiSettingsTaskController, settingsTaskH
 import { AiOriginalSceneModelController } from './original-scenes.controller';
 import { AiSettingsTaskCreationController, AI_SETTINGS_TASK_CREATION_REQUESTS } from './settings-task.controller';
 import { AiSettingsTaskControlController, AI_SETTINGS_TASK_CONTROL_REQUESTS } from './settings-task.controller';
+import { AiSettingsChangeController, AI_SETTINGS_CHANGE_REQUESTS } from './settings-task.controller';
 import { composeRequestBoundSettingsTask, composeRequestBoundPersistedSettingsTask, composeRequestBoundSettingsTaskCreation,
-  composeRequestBoundSettingsTaskControls, type AiSettingsTaskRequestOptions } from './request-bound-scenes.application';
+  composeRequestBoundSettingsTaskControls, composeRequestBoundSettingsChanges, type AiSettingsTaskRequestOptions } from './request-bound-scenes.application';
 
 /** Explicit consumer of a real request module. Disabled by default, no
  * AppModule/worker/model dependency or business operation during registration.
@@ -22,15 +23,25 @@ export class AiSettingsTaskHttpModule {
     if (options.enabled !== true) return { module: AiSettingsTaskHttpModule, controllers: [], providers: [] };
     const selected = structuredClone(options), server = { ...dependencies, scene: structuredClone(dependencies.scene) };
     return { module: AiSettingsTaskHttpModule,
-      controllers: [AiSettingsTaskCreationController, AiSettingsTaskControlController, AiSettingsTaskController],
+      controllers: [AiSettingsChangeController, AiSettingsTaskCreationController, AiSettingsTaskControlController, AiSettingsTaskController],
       providers: [
+        { provide: AI_SETTINGS_CHANGE_REQUESTS,
+          useFactory: () => composeRequestBoundSettingsChanges(server, selected) },
         { provide: AI_SETTINGS_TASK_CREATION_REQUESTS,
           useFactory: () => composeRequestBoundSettingsTaskCreation(server, selected) },
         { provide: AI_SETTINGS_TASK_CONTROL_REQUESTS,
           useFactory: () => composeRequestBoundSettingsTaskControls(server, selected) },
         { provide: AI_SETTINGS_TASK_HTTP_REQUESTS,
           useFactory: () => composeRequestBoundPersistedSettingsTask(server, selected) }
-      ], exports: [AI_SETTINGS_TASK_CREATION_REQUESTS, AI_SETTINGS_TASK_CONTROL_REQUESTS, AI_SETTINGS_TASK_HTTP_REQUESTS] };
+      ], exports: [AI_SETTINGS_CHANGE_REQUESTS, AI_SETTINGS_TASK_CREATION_REQUESTS, AI_SETTINGS_TASK_CONTROL_REQUESTS, AI_SETTINGS_TASK_HTTP_REQUESTS] };
+  }
+  static registerChanges(dependencies: Parameters<typeof composeRequestBoundSettingsChanges>[0],
+    options: Parameters<typeof composeRequestBoundSettingsChanges>[1]): DynamicModule {
+    if (options.enabled !== true) return { module: AiSettingsTaskHttpModule, controllers: [], providers: [] };
+    const selected = structuredClone(options), server = { ...dependencies, scene: structuredClone(dependencies.scene) };
+    return { module: AiSettingsTaskHttpModule, controllers: [AiSettingsChangeController], providers: [{
+      provide: AI_SETTINGS_CHANGE_REQUESTS, useFactory: () => composeRequestBoundSettingsChanges(server, selected)
+    }], exports: [AI_SETTINGS_CHANGE_REQUESTS] };
   }
   /** Separate original-reference producer/start routes. Combine with creation
    * and one persisted consumer, never register competing execution drivers. */
