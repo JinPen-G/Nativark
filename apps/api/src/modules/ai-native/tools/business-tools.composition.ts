@@ -14,8 +14,7 @@ import { AiOpeningReadFactsService, AiRiskReadFactsService } from './diagnostic-
 import { AiGuardedQuoteCoreContextSource, composeAiGuardedQuoteTools } from './quote-route.composition';
 import { AiOrderSavedQuoteSource } from './order-saved-quote.source';
 import { ModelGatewayError } from '../model-gateway.ports';
-import type { PaymentRuntimeService } from '../../integrations/payment.runtime.service';
-import { AiOrderPaymentFactsService } from './order-payment-facts.service';
+import { AiOrderPaymentFactsService, type AiOrderPaymentReadPort } from './order-payment-facts.service';
 import { AiOrderExplanationFactsService } from './order-explanation-facts.service';
 import { AiOrderNextStepsService } from './order-next-steps.service';
 import { AiOpeningActionListService } from './opening-action-list.service';
@@ -41,7 +40,7 @@ export function composeAiAuthorizedBusinessTools(input: {
   memberships: AiMembershipCandidateReadPort;
   business: Pick<RentalBusinessService, 'createQuote' | 'getQuote' | 'tenantReadiness'> & Partial<Pick<RentalBusinessService, 'normalizeQuoteInput' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>;
   reports: Pick<RentalWorkspaceReportRepository, 'getOperationReport'>;
-  payments?: Pick<PaymentRuntimeService, 'listPaymentIntents' | 'listPaymentRefunds'>;
+  payments?: AiOrderPaymentReadPort;
   /** Explicit AIN-07 dependencies for an EXISTING persisted task/action. No
    * default original input, policy or approval is supplied by this lane. */
   approvedOrder?: Omit<PersistedApprovedOrderDependencies, 'guard' | 'credentials'>;

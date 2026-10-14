@@ -24,12 +24,13 @@ const binding = (context: AiExecutionContext) => {
   return requestFingerprint(value);
 };
 
+export type AiOrderPaymentReadPort = Pick<PaymentRuntimeService, 'listPaymentIntents' | 'listPaymentRefunds'>
+  & Partial<Pick<PaymentRuntimeService, 'listPaymentIntentsPage' | 'listPaymentRefundsPage'>>;
+
 /** Local reads only: never refresh providers, create payments or issue refunds.
  * The original order AND finance route Guards are both required. */
 export class AiOrderPaymentFactsService {
-  constructor(private readonly payments: Pick<PaymentRuntimeService, 'listPaymentIntents' | 'listPaymentRefunds'> & {
-    listPaymentIntentsPage?: PaymentRuntimeService['listPaymentIntentsPage']; listPaymentRefundsPage?: PaymentRuntimeService['listPaymentRefundsPage']
-  },
+  constructor(private readonly payments: AiOrderPaymentReadPort,
     private readonly core: Pick<RentalCoreService, 'getOrder'>,
     private readonly orderAuthority: Pick<AiOrderRouteContextAuthority, 'withOrderRead'>,
     private readonly routes: AiBusinessReadAuthority, private readonly clock: () => Date = () => new Date()) {
@@ -58,13 +59,15 @@ export class AiOrderPaymentFactsService {
         const refunds: z.infer<typeof refundSchema>[] = [];
         let refundsTruncated = intentPage.truncated;
         for (const intent of intents) {
+          const limit = Math.min(50, 100 - refunds.length);
+          if (limit === 0) { refundsTruncated = true; break; }
           const refundPage = await this.routes.withRead('payment_refunds', { orderId, intentId: intent.intentId }, async current => {
             if (binding(current) !== expected) throw new ModelGatewayError('FORBIDDEN');
             if (typeof this.payments.listPaymentRefundsPage !== 'function') throw new ModelGatewayError('CAPABILITY_UNSUPPORTED');
-            return this.payments.listPaymentRefundsPage(scope.tenantId, scope.workspaceId, orderId, intent.intentId, { limit: 50 });
+            return this.payments.listPaymentRefundsPage(scope.tenantId, scope.workspaceId, orderId, intent.intentId, { limit });
           });
           if (!refundPage || typeof refundPage.truncated !== 'boolean') throw new ModelGatewayError('INVALID_RESPONSE');
-          const rows = z.array(refundSchema).max(50).parse(refundPage.rows);
+          const rows = z.array(refundSchema).max(limit).parse(refundPage.rows);
           refundsTruncated ||= refundPage.truncated;
           if (rows.some(row => row.orderId !== orderId || row.paymentIntentId !== intent.intentId || row.currency !== order.currency)) throw new ModelGatewayError('INVALID_RESPONSE');
           refunds.push(...rows);
