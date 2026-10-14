@@ -184,3 +184,9 @@ Node DATABASE_URL 固定 mysql://offline:offline@127.0.0.1:1/rental_os_offline�
 真实失败保留：会话工具store未保留env造成undefinednode，命令未执行验证，虽壳退出0不算通过；重设本树preload/固定无效DB/audit/TEMP后再执行。新增方法ReturnType联合Promise首轮1诊断/exit1，改为Promise<Awaited<原返回联合>>后0诊断；内联初始简化DB缺实际仓储构造方法被unavailable拒绝，改用已有lane-b-functional显式仓储替身，未放宽生产检查。当前audit本树output/inspection-lb05-tmp/20261014-policy-consumer.audit，无外联或共享生成。
 
 员工原候选/人工更正/提交和原键收据继续已有服务，不以新wrapper代替合法政策。保存后revision用原staff result-save-receipt/readReview，不更改旧expectedRevision；unknown仍无可采用payload。事件独立主体/政策/影子输入/Task creation未知与人类close/feedback/operation服务已有，前次修复受权组合及有界分页原实现保留。剩余正式staff task action政策记录、真实附件/存储及价格预算/能力置备由主线提供；未跑真实MySQL/模型/对象存储/HTTP/设备，本包不声明AIN验收。
+
+### 20261014 影子任务原创建收据与不可变输入一致性
+
+原AutomationFailureTaskService.reconcile在tasks.readCreation等待后再读authority.input，现明确比较两次原输入的tenant/workspace/scope/subject、授权和policy revision、event/resource revision、scene、creationKey/inputHash/authorityHash、payload及期限。持久status/task链接字段允许原合法推进，但不可变材料任一变化返回result_unknown，不把旧收据拼到新输入，不新建任务或操作。
+
+一次内联实际AutomationFailureTaskService、明确authority/receipt端口替身：稳定原键not_observed返回；readCreation等待期间creationKey变化拒绝result_unknown；未调用create/write/dispatch。stdout `smoke=passed; actual original creation reconcile rejects changed immutable input across receipt await; no create/write/dispatch`，exit0。必要strict noEmit1011 files、0 diagnostics/exit0，diff check0。该证据不是Prisma正向影子任务创建/政策生产验收；未新建或修改测试脚本/fixture。原human request、close/feedback/operation消费者保持，原键未知只读核对。
