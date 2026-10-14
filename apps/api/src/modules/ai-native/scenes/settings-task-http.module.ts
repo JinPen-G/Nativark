@@ -3,7 +3,7 @@ import { AiTaskRepositoryError } from '../ai-task.repository';
 import { AI_SETTINGS_TASK_HTTP_REQUESTS, AiSettingsTaskController, settingsTaskHttpMethods,
   type SettingsTaskHttpRequests } from './settings-task.controller';
 import { AiOriginalSceneModelController } from './original-scenes.controller';
-import { composeRequestBoundSettingsTask, type AiSettingsTaskRequestOptions } from './request-bound-scenes.application';
+import { composeRequestBoundSettingsTask, composeRequestBoundPersistedSettingsTask, type AiSettingsTaskRequestOptions } from './request-bound-scenes.application';
 
 /** Explicit consumer of a real request module. Disabled by default, no
  * AppModule/worker/model dependency or business operation during registration.
@@ -11,6 +11,16 @@ import { composeRequestBoundSettingsTask, type AiSettingsTaskRequestOptions } fr
  * this module: they represent the same seven public operations. */
 @Module({})
 export class AiSettingsTaskHttpModule {
+  /** Original published-plan consumer. An unpublished task remains unavailable;
+   * the initial explicit producer is not replaced with guessed inputs/limits. */
+  static registerPersistedApplication(dependencies: Parameters<typeof composeRequestBoundPersistedSettingsTask>[0],
+    options: Parameters<typeof composeRequestBoundPersistedSettingsTask>[1]): DynamicModule {
+    if (options.enabled !== true) return { module: AiSettingsTaskHttpModule, controllers: [], providers: [] };
+    const selected = structuredClone(options), server = { ...dependencies, scene: structuredClone(dependencies.scene) };
+    return { module: AiSettingsTaskHttpModule, controllers: [AiSettingsTaskController],
+      providers: [{ provide: AI_SETTINGS_TASK_HTTP_REQUESTS,
+        useFactory: () => composeRequestBoundPersistedSettingsTask(server, selected) }], exports: [AI_SETTINGS_TASK_HTTP_REQUESTS] };
+  }
   /** Actual Gateway-free server producer, not an injected success callback.
    * Select this instead of legacy model settings routes; never mount both. */
   static registerApplication(dependencies: Parameters<typeof composeRequestBoundSettingsTask>[0],
