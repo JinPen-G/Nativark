@@ -953,29 +953,40 @@ export function composeRequestBoundClarifiedQuoteSelection(
   const model = composeRequestBoundPersistedOriginalSceneModel(dependencies, options);
   const selections = composeRequestBoundQuoteSelections(business, { enabled: options.enabled, audience: options.audience });
   const clarificationSchema = z.object({ original: originalRequestReferenceSchema, submission: z.unknown() }).strict();
+  const resolveOriginalSelection = async (request: AiSceneHttpRequest, value: unknown, clarification: unknown, historical = false) => {
+    const command = parseQuoteSelection(structuredClone(value));
+    const parsed = clarificationSchema.safeParse(structuredClone(clarification));
+    if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
+    const source = freezeOriginalInput(parsed.data);
+    if (command.originalInputRef !== source.original.inputRef) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    // Snapshot credentials once; mutable caller request/command objects must
+    // not switch actors or payloads between awaited source checks and reads.
+    const currentRequest = freezeOriginalInput({ headers: { authorization: request?.headers?.authorization } });
+    const observed = await model.readClarifiedQuoteReceipt(currentRequest, source);
+    if (!('result' in observed) || observed.receipt.state !== 'observed'
+      || !(observed.result.status === 'quoted' || historical && observed.result.status === 'expired')
+      || !observed.result.quote) {
+      throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+    }
+    if (observed.receipt.taskId !== command.taskId || observed.receipt.runId !== command.runId
+      || observed.original.inputRef !== command.originalInputRef || observed.result.quote.id !== command.order.quoteId) {
+      throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    }
+    return { currentRequest, command };
+  };
   return Object.freeze({
     async select(request: AiSceneHttpRequest, value: unknown, clarification: unknown) {
-      const command = parseQuoteSelection(structuredClone(value));
-      const parsed = clarificationSchema.safeParse(structuredClone(clarification));
-      if (!parsed.success) throw new AiTaskRepositoryError('AI_INVALID_INPUT');
-      const source = freezeOriginalInput(parsed.data);
-      if (command.originalInputRef !== source.original.inputRef) throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-      // Snapshot credentials once; mutable caller request/command objects must
-      // not switch actors or payloads between awaited source checks and select.
-      const currentRequest = freezeOriginalInput({ headers: { authorization: request?.headers?.authorization } });
-      const observed = await model.readClarifiedQuoteReceipt(currentRequest, source);
-      if (!('result' in observed) || observed.receipt.state !== 'observed' || observed.result.status !== 'quoted'
-        || !observed.result.quote) {
-        throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
-      }
-      if (observed.receipt.taskId !== command.taskId || observed.receipt.runId !== command.runId
-        || observed.original.inputRef !== command.originalInputRef || observed.result.quote.id !== command.order.quoteId) {
-        throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
-      }
+      const { currentRequest, command } = await resolveOriginalSelection(request, value, clarification);
       // Existing repository rechecks current quote, owner, human payload,
       // revision, successor ancestry and absence of a frozen order/model plan.
       // This does not start that successor or attest an order/approval.
       return selections.select(currentRequest, command);
+    },
+    /** Lost selection replies are observed by the exact original key/payload.
+     * This never selects again, grants approval or retries an unknown order. */
+    async readOperation(request: AiSceneHttpRequest, value: unknown, clarification: unknown) {
+      const { currentRequest, command } = await resolveOriginalSelection(request, value, clarification, true);
+      return selections.reconcile(currentRequest, command);
     }
   });
 }
