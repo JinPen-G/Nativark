@@ -93,6 +93,12 @@ export interface AiSceneQuoteConfirmDraft extends AiSceneQuoteReceiptReadDraft {
   inputFingerprint: string;
   confirmQuote: true;
 }
+/** Two server-owned original operations, never caller quote bodies or prices.
+ * Comparison preserves each receipt's unknown/expiry and grants no approval. */
+export interface AiSceneOriginalQuotesCompareDraft {
+  previous: AiSceneRequestReadDraft;
+  current: AiSceneRequestReadDraft;
+}
 export interface AiSceneRequestReceiptDraft {
   draftVersion: typeof AI_SCENE_REQUEST_DRAFT_VERSION;
   inputRef: string;
@@ -124,7 +130,7 @@ export const AI_SCENE_REQUEST_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/scene-requests', method: 'POST',
   create: '', read: 'read', reissue: 'reissue', reconcile: 'reconcile', reconcileReissue: 'reconcile-reissue',
   createTask: 'create-task', material: 'material', recovery: 'recovery', quoteReview: 'quote-review',
-  quoteConfirm: 'quote-confirm', quoteReceipt: 'quote-receipt'
+  quoteConfirm: 'quote-confirm', quoteReceipt: 'quote-receipt', compareOriginalQuotes: 'quote-compare'
 } as const);
 /** Owner-only operator policy management; never execution or business approval. */
 export const AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT = Object.freeze({

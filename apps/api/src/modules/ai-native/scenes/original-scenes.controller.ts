@@ -90,6 +90,10 @@ export class AiOriginalScenesController {
   quoteConfirm(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.confirmQuote(request, body)); }
   @Post(AI_SCENE_REQUEST_HTTP_DRAFT.quoteReceipt)
   quoteReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return this.respond(() => this.scenes.readQuoteReceipt(request, body)); }
+  @Post(AI_SCENE_REQUEST_HTTP_DRAFT.compareOriginalQuotes) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  compareOriginalQuotes(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return this.respond(() => this.scenes.compareOriginalQuotes(request, body));
+  }
 }
 
 /** Shared original recovery transport. Mount this OR an execution controller
