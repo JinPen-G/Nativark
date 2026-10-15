@@ -245,19 +245,23 @@ export function createRecordedPricingGatewayBudget(input:
   const gateway = createPersistedGatewayBudget({ ...input, pricing });
   const pricingRecords = new GatewayPricingRecordManagement(input.db, input.scopes, input.authorization,
     input.pricingEvidence, gateway.bindings, input.sceneCode, input.clock);
-  const recovery = Object.freeze({ ...gateway.recovery, readPricing: async (value: unknown) => {
+  const readPricing = async (value: unknown, readOriginal: typeof gateway.recovery.read) => {
     const command = structuredClone(value);
-    const original = await gateway.recovery.read(command);
+    const original = await readOriginal(command);
     const basis = await pricing.receipt(original);
-    const current = await gateway.recovery.read(command);
+    const current = await readOriginal(command);
     if (requestFingerprint(original) !== requestFingerprint(current)) throw new BudgetError('PENDING_RECONCILIATION');
     const latest = await pricing.receipt(current);
     if (requestFingerprint(basis) !== requestFingerprint(latest)) throw new BudgetError('PENDING_RECONCILIATION');
-    const confirmed = await gateway.recovery.read(command);
+    const confirmed = await readOriginal(command);
     if (requestFingerprint(current) !== requestFingerprint(confirmed)) throw new BudgetError('PENDING_RECONCILIATION');
     return { ...basis, reservationStatus: confirmed.status, configurationRevision: confirmed.association.config.configRevision,
       dispatched: confirmed.dispatched, recordedActualQuantity: confirmed.actual };
-  } });
+  };
+  const recovery = Object.freeze({ ...gateway.recovery,
+    readPricing: (value: unknown) => readPricing(value, gateway.recovery.read),
+    readPricingCall: (value: unknown) => readPricing(value, gateway.recovery.readCall)
+  });
   return { ...gateway, pricingRecords, recovery };
 }
 
