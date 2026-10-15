@@ -19,7 +19,11 @@ export class KnowledgePublicationService {
     const d = before.document, now = this.documents.ports.clock.now();
     if (action === 'publish' && (d.parsing !== 'parsed' || d.indexing !== 'indexed' || (d.publication !== 'draft' && d.publication !== 'withdrawn') || (d.validUntil && Date.parse(d.validUntil) <= now))) throw new KnowledgeError('not_ready');
     if (action === 'withdraw' && d.publication !== 'published') throw new KnowledgeError('conflict');
-    const next: KnowledgeRecord = { ...before, revision: before.revision + 1, document: { ...d, indexing: action === 'publish' ? d.indexing : 'not_indexed', publication: action === 'publish' ? 'published' : action === 'withdraw' ? 'withdrawn' : 'deleted' } };
+    const next: KnowledgeRecord = { ...before, revision: before.revision + 1, document: { ...d,
+      // Keep the scoped/versioned tombstone and original operation receipt, not
+      // potentially sensitive document text in a deleted management title.
+      title: action === 'delete' ? '[已删除]' : d.title,
+      indexing: action === 'publish' ? d.indexing : 'not_indexed', publication: action === 'publish' ? 'published' : action === 'withdraw' ? 'withdrawn' : 'deleted' } };
     return this.documents.save(context, action, before, queueIndex(next, action === 'publish' ? 'upsert' : 'remove', `${input.operationId}:index`), input.operationId, hash, false, binding);
   }
 }

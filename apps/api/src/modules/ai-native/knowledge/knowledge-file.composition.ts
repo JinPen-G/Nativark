@@ -11,6 +11,7 @@ import { HumanKnowledgeUploadService } from './human-knowledge-upload.service';
 import type { AiOriginalSceneKnowledgeOptions } from '../scenes/original-scene-knowledge';
 import { KnowledgeError } from './knowledge-errors';
 import { preferenceSchema } from './knowledge-validation';
+import { HumanKnowledgeContentErasure } from '../privacy/knowledge-content-erasure';
 
 /** Server DI only. Never serialize these request-bound producers to clients. */
 export const KNOWLEDGE_SCENE_OPTIONS = Symbol('KNOWLEDGE_SCENE_OPTIONS');
@@ -47,6 +48,7 @@ export function composeKnowledgeFileApplication(input: KnowledgeFileApplicationD
     return { ...infrastructure, policyDb: input.db, fileRuntime, includePreferences,
       ...(preferenceKinds ? { preferenceKinds: Object.freeze([...preferenceKinds]) } : {}) };
   };
-  return { ...composePrismaFormalHumanKnowledge({ ...base, policyDb: input.db, fileRuntime }),
+  const services = composePrismaFormalHumanKnowledge({ ...base, policyDb: input.db, fileRuntime });
+  return { ...services, erasure: new HumanKnowledgeContentErasure(services.management, input.db),
     uploads: new HumanKnowledgeUploadService(session, fileRuntime, access.repository), sceneKnowledge };
 }

@@ -104,6 +104,19 @@ export class PrismaStructuredMemoryRepository implements MemoryRepositoryPort, M
             workspaceId: value.workspaceId, ownerKind: input.owner.actorKind, ownerId: input.owner.actorId, revision: input.expectedRevision }, data });
           if (changed.count !== 1) throw new KnowledgeError('conflict');
         }
+        if (input.next.status === 'deleted') {
+          // Confirmation JSON contains the same preference as the memory head,
+          // including older revisions. Keep receipt IDs/hashes, but atomically
+          // remove this owner's duplicate plaintext and revoke its reuse. The
+          // JSON predicates exclude generic approvals and colliding subjects.
+          await transaction.aiHumanConfirmation.updateMany({ where: {
+            tenantId: value.tenantId, workspaceId: value.workspaceId, subjectId: input.memoryId,
+            confirmedBy: input.owner.actorId,
+            AND: [{ state: { path: '$.memoryId', equals: input.memoryId } },
+              { state: { path: '$.owner.actorKind', equals: input.owner.actorKind } },
+              { state: { path: '$.owner.actorId', equals: input.owner.actorId } }],
+          }, data: { status: 'revoked', state: Prisma.DbNull } });
+        }
         await transaction.aiMemoryOperation.create({ data: { id: randomUUID(), memoryId: input.memoryId, tenantId: value.tenantId, workspaceId: value.workspaceId, operationId: input.operation.id, fingerprint: input.operation.fingerprint } });
         callbackCompleted = true;
         return 'committed';
