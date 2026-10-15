@@ -96,11 +96,34 @@ export class AiTaskRunner {
     input = structuredClone(input);
     const recovery = input.recovery === true;
     const { recovery: _recovery, ...claimInput } = input;
-    const initial = structuredClone(await this.deps.leases.readMetadata(input.taskId));
+    let initial: AiTaskRunnerTaskMetadata;
+    try {
+      initial = structuredClone(await this.callBounded(() => this.deps.leases.readMetadata(input.taskId), 5000, 'initial_metadata', signal));
+    } catch (error) {
+      // No claim was attempted. Stop this host without inventing a task
+      // failure, releasing somebody else's lease or starting another run.
+      if (signal?.aborted || error instanceof AiTaskRunnerError && error.code === 'AI_RUN_LIMIT') {
+        return { status: 'unavailable', completedSteps: 0, cleanupFailed: 0 };
+      }
+      throw error;
+    }
     if (initial.taskId !== input.taskId) throw new AiTaskRunnerError('AI_RESOURCE_UNAVAILABLE');
     if (signal?.aborted) return { status: 'unavailable', completedSteps: 0, cleanupFailed: 0 };
     if (initial.status === 'waiting_input') return { status: 'paused', completedSteps: 0, cleanupFailed: 0 };
-    const lease = structuredClone(recovery ? await this.deps.leases.claimRecoveryRun(claimInput) : await this.deps.leases.claimRun(claimInput));
+    let lease: AiTaskRunnerLease;
+    try {
+      lease = structuredClone(await this.callBounded(() => recovery
+        ? this.deps.leases.claimRecoveryRun(structuredClone(claimInput))
+        : this.deps.leases.claimRun(structuredClone(claimInput)), 5000, 'claim_run', signal));
+    } catch (error) {
+      // A transaction may have committed. A late acknowledgement is observed
+      // by callBounded but NEVER re-enters runHeld or grants execution rights.
+      // No automatic second claim or guessed lease release is safe here.
+      if (error instanceof AiTaskRunnerError && ['AI_RUN_LIMIT', 'AI_RESULT_UNKNOWN'].includes(error.code)) {
+        throw new AiTaskRunnerError('AI_RESULT_UNKNOWN', 'lease claim acknowledgement is uncertain');
+      }
+      throw error;
+    }
     return this.runHeld(input, recovery, initial, lease, signal, false, prepare);
   }
 
@@ -422,7 +445,8 @@ export class AiTaskRunner {
     const port = this.deps.taskOutcome;
     if (!port) return { outcome, lease, taskRevision };
     let committed: Awaited<ReturnType<AiTaskRunnerOutcomePort["commit"]>>;
-    try { committed = structuredClone(await port.commit({ taskId: lease.taskId, taskRevision, lease: { ...lease }, outcome: { ...outcome } })); }
+    try { committed = structuredClone(await this.callBounded(() => port.commit({ taskId: lease.taskId,
+      taskRevision, lease: { ...lease }, outcome: { ...outcome } }), 5000, 'task_outcome')); }
     catch { throw new AiTaskRunnerError("AI_STORAGE_UNAVAILABLE", "task outcome commit is unavailable"); }
     if (!committed || !Number.isSafeInteger(committed.taskRevision) || committed.taskRevision <= taskRevision
       || !committed.lease || committed.lease.taskId !== lease.taskId || committed.lease.runId !== lease.runId
