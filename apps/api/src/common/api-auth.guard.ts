@@ -182,6 +182,7 @@ const originalOrderReadRoutes = new Set(['', AI_SCENE_REQUEST_HTTP_DRAFT.read,
   `POST /${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}${action ? `/${action}` : ''}`));
 
 export function requiredPermissions(method: string, path: string) {
+  if (method.toUpperCase() === 'POST' && /^\/ai-native\/privacy\/(?:cleanup|receipt|receipts)$/u.test(path)) return ['system:params:manage'];
   if (originalOrderReadRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:view'];
   if (method === 'POST' && [AI_SCENE_PLAN_POLICY_HTTP_DRAFT.read, AI_SCENE_PLAN_POLICY_HTTP_DRAFT.change]
     .some(action => path === `/${AI_SCENE_PLAN_POLICY_HTTP_DRAFT.basePath}/${action}`)) return ['system:params:manage'];

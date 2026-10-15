@@ -4,8 +4,10 @@ import type { AiExecutionScope, AiKnowledgeChunkDraft } from '@rental-os/shared'
 import type { KnowledgeOperation, KnowledgeRecord, KnowledgeRepositoryPort } from './knowledge.ports';
 import { KnowledgeCommitUnknownError, KnowledgeError, unavailable } from './knowledge-errors';
 import { knowledgeFailureSchema, knowledgeRecordSchema, parse, parsePersisted, sameScope, scopeSchema, validateChunks, persistedKnowledgeChunkSchema } from './knowledge-validation';
+import { fingerprint } from './knowledge-validation';
+import { AI_RETENTION_POLICY } from '../privacy/retention-policy';
 
-export type KnowledgePrismaClient = Pick<PrismaClient, '$transaction' | 'aiKnowledgeDocument' | 'aiKnowledgeVersion' | 'aiKnowledgeChunk' | 'aiKnowledgeOperation'>;
+export type KnowledgePrismaClient = Pick<PrismaClient, '$transaction' | 'aiKnowledgeDocument' | 'aiKnowledgeVersion' | 'aiKnowledgeChunk' | 'aiKnowledgeOperation' | 'aiDataErasure'>;
 
 const workspace = (scope: AiExecutionScope) => {
   const parsed = scopeSchema.safeParse(scope);
@@ -20,7 +22,7 @@ const json = (value: KnowledgeRecord | AiKnowledgeChunkDraft): Prisma.InputJsonV
 
 export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
   constructor(private readonly db: KnowledgePrismaClient, private readonly clock: () => Date = () => new Date()) {
-    for (const key of ['aiKnowledgeDocument', 'aiKnowledgeVersion', 'aiKnowledgeChunk', 'aiKnowledgeOperation'] as const) {
+    for (const key of ['aiKnowledgeDocument', 'aiKnowledgeVersion', 'aiKnowledgeChunk', 'aiKnowledgeOperation', 'aiDataErasure'] as const) {
       if (!db || typeof db[key] !== 'object') throw new KnowledgeError('unavailable');
     }
     if (typeof db.$transaction !== 'function') throw new KnowledgeError('unavailable');
@@ -145,6 +147,8 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
         if (operation) return this.receipt(operation, value, input.documentId, input.operation.id).fingerprint === input.operation.fingerprint ? 'committed' : 'conflict';
         const existing = await transaction.aiKnowledgeDocument.findFirst({ where: columns(input.scope, input.documentId), include: { versions: { orderBy: { version: 'desc' }, take: 1 } } });
         const currentRevision = existing?.revision ?? 0;
+        if (!existing && await transaction.aiDataErasure.findUnique({ where: { id: fingerprint([
+          AI_RETENTION_POLICY.version, value.tenantId, value.workspaceId, 'knowledge', input.documentId]) } })) throw new KnowledgeError('conflict');
         if (!Number.isSafeInteger(currentRevision) || currentRevision !== input.expectedRevision || input.next.revision !== currentRevision + 1) return 'conflict';
         if (input.newVersion && await transaction.aiKnowledgeVersion.findFirst({ where: { documentId: input.documentId, contentHash: input.next.document.documentVersion }, select: { id: true } })) throw new KnowledgeError('conflict');
         const now = this.clock();
@@ -157,6 +161,16 @@ export class PrismaKnowledgeRepository implements KnowledgeRepositoryPort {
         else {
           const changed = await transaction.aiKnowledgeDocument.updateMany({ where: { ...columns(input.scope, input.documentId), revision: input.expectedRevision }, data: documentData });
           if (changed.count !== 1) throw new KnowledgeError('conflict');
+        }
+        if (existing && ['deleted', 'withdrawn', 'published'].includes(input.next.document.publication)) {
+          const erasureId = fingerprint([AI_RETENTION_POLICY.version, value.tenantId, value.workspaceId, 'knowledge', input.documentId]);
+          const targetHash = fingerprint(['knowledge', input.documentId, existing.createdAt.toISOString()]);
+          const state = input.next.document.publication === 'deleted' ? 'prepared'
+            : input.next.document.publication === 'withdrawn' ? 'withdrawn' : 'superseded';
+          await transaction.aiDataErasure.upsert({ where: { id: erasureId }, create: { id: erasureId,
+            tenantId: value.tenantId, workspaceId: value.workspaceId, kind: 'knowledge', resourceId: input.documentId,
+            policyVersion: AI_RETENTION_POLICY.version, targetHash, state },
+            update: { state, revision: { increment: 1 } } });
         }
         const chunks = (input.chunks ?? []).map((chunk, index) => ({ id: randomUUID(), chunkIndex: index, text: chunk.text, tokenCount: chunk.text.length, state: json(chunk) }));
         if (input.newVersion) {

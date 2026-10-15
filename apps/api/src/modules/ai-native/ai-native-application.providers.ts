@@ -10,6 +10,11 @@ import { MembershipService } from '../platform/membership.service';
 import { PaymentRuntimeService } from '../integrations/payment.runtime.service';
 import { ClientApiService } from '../client/client-api.service';
 import { composeStandardClientBookingEntry, AI_WEBSITE_ENTRY, AI_WECHAT_ENTRY } from './scenes/standard-client-entry.application';
+import { randomUUID } from 'node:crypto';
+import { FileStorageRuntimeService } from '../integrations/file-storage.runtime.service';
+import { AiRetentionService } from './privacy/retention.service';
+import { AI_RETENTION_REQUESTS, type AiRetentionRequestFactory } from './privacy/retention.controller';
+import { AiTaskRepositoryError } from './ai-task.repository';
 import { composeRequestBoundOriginalScenes } from './scenes/request-bound-scenes.application';
 import { AI_ORIGINAL_SCENE_REQUESTS } from './scenes/original-scenes.controller';
 import { StaffInspectionRequestFactory } from './inspection-assist/inspection-assist.composition';
@@ -25,6 +30,15 @@ export const AI_NATIVE_CLIENT_ENTRY_PROVIDERS: FactoryProvider[] = ([
       tasks: { db, subscriptions, sceneCode: 'quote_clarification', sceneVersion: '1' },
       quotePreparation: client, bookingSubmission: client }, channel),
 }));
+
+export const AI_NATIVE_RETENTION_PROVIDER: FactoryProvider = {
+  provide: AI_RETENTION_REQUESTS, inject: [PrismaService, AuthService, FileStorageRuntimeService],
+  useFactory: (db: PrismaService, auth: AuthService, files: FileStorageRuntimeService): AiRetentionRequestFactory => request => {
+    const authorization = request.headers.authorization, requestId = randomUUID();
+    if (typeof authorization !== 'string') throw new AiTaskRepositoryError('AI_ACCESS_DENIED');
+    return new AiRetentionService(db, auth, { current: async () => ({ authorization, requestId, audience: 'operator' }) }, files);
+  },
+};
 
 /** Historical observations only. No storage reader, recognition driver or Core
  * submission port is supplied; normal staff pages can reopen owned history,

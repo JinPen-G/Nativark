@@ -356,7 +356,8 @@ export class PersistentMemoryConsentService {
     try {
       return await this.ports.db.$transaction(async tx => {
         const repository = new PrismaStructuredMemoryRepository({ $transaction: this.ports.db.$transaction.bind(this.ports.db),
-          aiStructuredMemory: tx.aiStructuredMemory, aiMemoryOperation: tx.aiMemoryOperation, aiHumanConfirmation: tx.aiHumanConfirmation },
+          aiStructuredMemory: tx.aiStructuredMemory, aiMemoryOperation: tx.aiMemoryOperation, aiHumanConfirmation: tx.aiHumanConfirmation,
+          aiDataErasure: tx.aiDataErasure },
         () => new Date(this.ports.clock.now()));
         const memory = await repository.read(scope, owner, input.memoryId);
         if (!memory || memory.status !== 'confirmed') return unavailable();
@@ -466,7 +467,8 @@ export class PersistentMemoryConsentService {
     try {
       proof = await this.ports.db.$transaction(async tx => {
         const repository = new PrismaStructuredMemoryRepository({ $transaction: this.ports.db.$transaction.bind(this.ports.db),
-          aiStructuredMemory: tx.aiStructuredMemory, aiMemoryOperation: tx.aiMemoryOperation, aiHumanConfirmation: tx.aiHumanConfirmation },
+          aiStructuredMemory: tx.aiStructuredMemory, aiMemoryOperation: tx.aiMemoryOperation, aiHumanConfirmation: tx.aiHumanConfirmation,
+          aiDataErasure: tx.aiDataErasure },
         () => new Date(this.ports.clock.now()));
         const memory = await repository.read(scope, owner, input.memoryId);
         if (!memory || memory.status === 'deleted' || Date.parse(memory.expiresAt) <= this.ports.clock.now()) return unavailable();

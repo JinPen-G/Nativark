@@ -1985,6 +1985,18 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
 ];
 
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
+  { method: 'post', path: '/api/ai-native/privacy/cleanup', tag: 'AI Native', operationId: 'cleanupAiRetention',
+    permissions: ['system:params:manage'], authRequired: true,
+    summary: 'Explicit bounded retention cleanup. Requires current full-workspace operator scope; unknown effects and original business receipts are held. No timer or automatic retry.',
+    requestSchema: { type: 'object', additionalProperties: false, required: ['kind'], properties: {
+      kind: { type: 'string', enum: ['task', 'request', 'knowledge', 'memory', 'material', 'attachment'] },
+      limit: { type: 'integer', minimum: 1, maximum: 10 } } } },
+  { method: 'post', path: '/api/ai-native/privacy/receipt', tag: 'AI Native', operationId: 'readAiRetentionReceipt',
+    permissions: ['system:params:manage'], authRequired: true, summary: 'Observe only an owned original cleanup receipt; does not resend an unknown object deletion.',
+    requestSchema: { type: 'object', additionalProperties: false, required: ['id'], properties: { id: { type: 'string', pattern: '^[a-f0-9]{64}$' } } } },
+  { method: 'post', path: '/api/ai-native/privacy/receipts', tag: 'AI Native', operationId: 'listAiRetentionReceipts',
+    permissions: ['system:params:manage'], authRequired: true, summary: 'Bounded current-workspace receipt observation after an ambiguous batch reply.',
+    requestSchema: { type: 'object', additionalProperties: false, properties: { limit: { type: 'integer', minimum: 1, maximum: 50 }, before: { type: 'string', format: 'date-time' } } } },
   ...([AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedWechatBasePath]
     .flatMap((base, surface) => ([
       [AI_CLIENT_ENTRY_HTTP_DRAFT.readHostCapabilities, 'AiClientHostCapabilitiesRequest', 'AiClientHostCapabilities'],

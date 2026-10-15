@@ -775,6 +775,7 @@ model AiClientSceneMaterial {
   revision        Int @default(1) @db.UnsignedInt
   createdAt       DateTime @db.DateTime(3)
   expiresAt       DateTime @db.DateTime(3)
+  erasedAt        DateTime? @db.DateTime(3)
   workspace       BusinessWorkspace @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_client_materials_workspace_fk")
   taskInputs      AiClientTaskInput[]
   bookingDrafts   AiClientBookingDraft[]
@@ -6089,6 +6090,7 @@ model AiTaskOriginalRequest {
   status                   AiTaskOriginalRequestStatus @default(STORED)
   expiresAt                DateTime @db.DateTime(3)
   createdAt                DateTime @default(now()) @db.DateTime(3)
+  erasedAt                 DateTime? @db.DateTime(3)
   scope                    AiScope @relation(fields: [scopeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   previous                 AiTaskOriginalRequest? @relation("OriginalRequestVersions", fields: [scopeId, previousRequestId], references: [scopeId, id], onDelete: Restrict, onUpdate: Restrict)
   reissues                 AiTaskOriginalRequest[] @relation("OriginalRequestVersions")
@@ -6517,4 +6519,24 @@ model AiGatewayInputBoundRecord {
 
   @@unique([scopeId, invocationId], map: "ai_gateway_input_bounds_invocation")
   @@map("ai_gateway_input_bound_records")
+}
+
+/// Privacy tombstones survive content expiry and must be exported outside the
+/// data backup before that backup can be restored. No body, URL or credentials.
+model AiDataErasure {
+  id             String @id @db.Char(64)
+  tenantId       String @db.VarChar(191)
+  workspaceId    String @db.VarChar(191)
+  kind           String @db.VarChar(24)
+  resourceId     String @db.VarChar(191)
+  policyVersion  String @db.VarChar(64)
+  targetHash     String @db.Char(64)
+  state          String @db.VarChar(24)
+  revision       Int @default(1) @db.UnsignedInt
+  createdAt      DateTime @default(now()) @db.DateTime(3)
+  erasedAt       DateTime? @db.DateTime(3)
+
+  @@index([tenantId, workspaceId, createdAt, id], map: "ai_data_erasure_scope_created_idx")
+  @@index([tenantId, workspaceId, state], map: "ai_data_erasure_scope_state_idx")
+  @@map("ai_data_erasures")
 }

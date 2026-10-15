@@ -18,7 +18,7 @@ import { FileStorageKnowledgeFileAdapter } from './file-storage-knowledge.adapte
 import type { MemoryPrismaClient } from './prisma-memory.repository';
 
 export interface PersistentKnowledgeDependencies {
-  db: Pick<PrismaClient, '$transaction' | 'aiKnowledgeDocument' | 'aiKnowledgeVersion' | 'aiKnowledgeChunk' | 'aiKnowledgeOperation' | 'aiStructuredMemory' | 'aiMemoryOperation' | 'aiHumanConfirmation'>;
+  db: Pick<PrismaClient, '$transaction' | 'aiKnowledgeDocument' | 'aiKnowledgeVersion' | 'aiKnowledgeChunk' | 'aiKnowledgeOperation' | 'aiStructuredMemory' | 'aiMemoryOperation' | 'aiHumanConfirmation' | 'aiDataErasure'>;
   authorization: KnowledgeModulePorts['documents']['authorization'];
   memoryAuthorization: KnowledgeModulePorts['memory']['authorization'];
   files: KnowledgeModulePorts['documents']['files'];
@@ -48,6 +48,7 @@ export function createPersistedKnowledgePorts(input: PersistentKnowledgeDependen
   }
   requiredPort(input.db.aiKnowledgeDocument, ['updateMany']); requiredPort(input.db.aiStructuredMemory, ['updateMany']);
   requiredPort(input.db.aiKnowledgeChunk, ['findFirst', 'findMany', 'create']); requiredPort(input.db.aiHumanConfirmation, ['findFirst']);
+  requiredPort(input.db.aiDataErasure, ['findUnique', 'upsert']);
   const clock = () => new Date(input.clock.now());
   const repository = new PrismaKnowledgeRepository(input.db, clock);
   const memory = new PrismaStructuredMemoryRepository(input.db, clock);

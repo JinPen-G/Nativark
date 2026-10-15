@@ -2,7 +2,7 @@
 // Only Prisma execution is substituted; lifecycle, repository, authorization
 // consumers and retrieval are real product classes. No network or clock work.
 exports.dbFactory = function dbFactory() {
-  const state = { documents: new Map(), versions: new Map(), chunks: new Map(), operations: new Map(), memories: new Map(), memoryOperations: new Map(), confirmations: new Map() };
+  const state = { documents: new Map(), versions: new Map(), chunks: new Map(), operations: new Map(), memories: new Map(), memoryOperations: new Map(), confirmations: new Map(), erasures: new Map() };
   const clone = value => structuredClone(value);
   const db = { state, queries: [], afterRead: null, responseError: null, failReceipt: false };
   db.aiKnowledgeDocument = {
@@ -12,7 +12,7 @@ exports.dbFactory = function dbFactory() {
       if (include?.versions) out.versions = [...state.versions.values()].filter(v => v.documentId === row.id).sort((a, b) => b.version - a.version).slice(0, include.versions.take);
       return out;
     },
-    async create({ data }) { if (state.documents.has(data.id)) throw new Error('duplicate'); state.documents.set(data.id, clone(data)); return clone(data); },
+    async create({ data }) { if (state.documents.has(data.id)) throw new Error('duplicate'); const row = { createdAt: new Date('2026-10-03T00:00:00Z'), ...clone(data) }; state.documents.set(data.id, row); return clone(row); },
     async updateMany({ where, data }) { const row = state.documents.get(where.id); if (!row || !Object.entries(where).every(([k, value]) => row[k] === value)) return { count: 0 }; Object.assign(row, clone(data)); return { count: 1 }; }
   };
   db.aiKnowledgeVersion = {
@@ -52,12 +52,22 @@ exports.dbFactory = function dbFactory() {
   };
   const memoryDelegate = map => ({
     async findFirst({ where }) { return clone([...map().values()].find(v => Object.entries(where).every(([k, value]) => v[k] === value)) ?? null); },
-    async create({ data }) { if (map().has(data.id)) throw new Error('duplicate'); map().set(data.id, clone(data)); return clone(data); },
+    async create({ data }) { if (map().has(data.id)) throw new Error('duplicate'); const row = { createdAt: new Date('2026-10-03T00:00:00Z'), ...clone(data) }; map().set(data.id, row); return clone(row); },
     async updateMany({ where, data }) { const row = map().get(where.id); if (!row || !Object.entries(where).every(([k, value]) => row[k] === value)) return { count: 0 }; Object.assign(row, clone(data)); return { count: 1 }; }
   });
   db.aiStructuredMemory = memoryDelegate(() => state.memories);
   db.aiMemoryOperation = memoryDelegate(() => state.memoryOperations);
   db.aiHumanConfirmation = memoryDelegate(() => state.confirmations);
+  db.aiDataErasure = {
+    async findUnique({ where }) { return clone(state.erasures.get(where.id) ?? null); },
+    async upsert({ where, create, update }) {
+      const row = state.erasures.get(where.id);
+      if (!row) { const value = { revision: 1, createdAt: new Date('2026-10-03T00:00:00Z'), ...clone(create) }; state.erasures.set(where.id, value); return clone(value); }
+      for (const [key, value] of Object.entries(update)) row[key] = value && typeof value === 'object' && 'increment' in value
+        ? row[key] + value.increment : clone(value);
+      return clone(row);
+    }
+  };
   db.$transaction = async callback => {
     const snapshot = clone(state);
     let result;

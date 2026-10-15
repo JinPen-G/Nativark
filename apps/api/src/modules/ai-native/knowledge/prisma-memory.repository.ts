@@ -5,15 +5,16 @@ import type { KnowledgeOperation, MemoryConfirmation, MemoryConfirmationPort, Me
 import { KnowledgeCommitUnknownError, KnowledgeError, unavailable } from './knowledge-errors';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { actor, confirmationSchema, memoryConfirmationHash, memoryDraftSchema, parse, parsePersisted, sameScope, scopeSchema } from './knowledge-validation';
+import { AI_RETENTION_POLICY } from '../privacy/retention-policy';
 
-export type MemoryPrismaClient = Pick<PrismaClient, '$transaction' | 'aiStructuredMemory' | 'aiMemoryOperation' | 'aiHumanConfirmation'>;
+export type MemoryPrismaClient = Pick<PrismaClient, '$transaction' | 'aiStructuredMemory' | 'aiMemoryOperation' | 'aiHumanConfirmation' | 'aiDataErasure'>;
 const workspace = (scope: AiExecutionScope) => { const result = scopeSchema.safeParse(scope); if (!result.success || result.data.kind !== 'workspace') throw new KnowledgeError('unavailable'); return result.data; };
 const json = (value: object): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 export class PrismaStructuredMemoryRepository implements MemoryRepositoryPort, MemoryConfirmationPort {
   constructor(private readonly db: MemoryPrismaClient, private readonly clock: () => Date = () => new Date()) {
-    for (const key of ['aiStructuredMemory', 'aiMemoryOperation', 'aiHumanConfirmation'] as const) if (!db || typeof db[key] !== 'object') throw new KnowledgeError('unavailable');
+    for (const key of ['aiStructuredMemory', 'aiMemoryOperation', 'aiHumanConfirmation', 'aiDataErasure'] as const) if (!db || typeof db[key] !== 'object') throw new KnowledgeError('unavailable');
     if (typeof db.$transaction !== 'function') throw new KnowledgeError('unavailable');
   }
 
@@ -73,6 +74,8 @@ export class PrismaStructuredMemoryRepository implements MemoryRepositoryPort, M
     try {
       return await this.db.$transaction(async transaction => {
         const existing = await transaction.aiStructuredMemory.findFirst({ where: { id: input.memoryId, tenantId: value.tenantId, workspaceId: value.workspaceId, ownerKind: input.owner.actorKind, ownerId: input.owner.actorId } });
+        if (!existing && await transaction.aiDataErasure.findUnique({ where: { id: hash([
+          AI_RETENTION_POLICY.version, value.tenantId, value.workspaceId, 'memory', input.memoryId]) } })) throw new KnowledgeError('conflict');
         if (existing) this.memory(existing, value, input.owner, input.memoryId);
         const existingOperation = await transaction.aiMemoryOperation.findFirst({ where: { tenantId: value.tenantId, workspaceId: value.workspaceId, memoryId: input.memoryId, operationId: input.operation.id } });
         if (existingOperation) {
@@ -105,6 +108,13 @@ export class PrismaStructuredMemoryRepository implements MemoryRepositoryPort, M
           if (changed.count !== 1) throw new KnowledgeError('conflict');
         }
         if (input.next.status === 'deleted') {
+          if (!existing) throw new KnowledgeError('conflict');
+          const erasureId = hash([AI_RETENTION_POLICY.version, value.tenantId, value.workspaceId, 'memory', input.memoryId]);
+          const targetHash = hash(['memory', input.memoryId, existing.ownerKind, existing.ownerId, existing.createdAt.toISOString()]);
+          await transaction.aiDataErasure.upsert({ where: { id: erasureId }, create: { id: erasureId,
+            tenantId: value.tenantId, workspaceId: value.workspaceId, kind: 'memory', resourceId: input.memoryId,
+            policyVersion: AI_RETENTION_POLICY.version, targetHash, state: 'erased', erasedAt: this.clock() },
+            update: { state: 'erased', erasedAt: this.clock(), revision: { increment: 1 } } });
           // Confirmation JSON contains the same preference as the memory head,
           // including older revisions. Keep receipt IDs/hashes, but atomically
           // remove this owner's duplicate plaintext and revoke its reuse. The

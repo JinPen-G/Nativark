@@ -47,6 +47,7 @@ export class PrismaOriginalRequestRepository implements AiTaskCreationAuthority 
   }
   private exact(row: Row, access: AiOriginalRequestAccess) {
     if (Object.entries(this.owned(access)).some(([key, value]) => row[key as keyof Row] !== value)) throw denied();
+    if (row.erasedAt) throw unavailable();
     if (row.contractVersion !== AI_SCENE_REQUEST_DRAFT_VERSION || !Number.isSafeInteger(row.revision) || row.revision < 1
       || row.contentHash !== this.hash(row)) throw unavailable();
     this.body(row);

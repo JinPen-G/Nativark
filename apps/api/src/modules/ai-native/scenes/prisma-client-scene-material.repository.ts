@@ -15,7 +15,7 @@ type Reader = Pick<Prisma.TransactionClient, '$queryRaw'>;
 
 export class AiClientMaterialError extends Error {
   readonly retryable = false;
-  constructor(readonly code: 'AI_CLIENT_RESULT_UNKNOWN' | 'AI_CLIENT_REVISION_CONFLICT' | 'AI_CLIENT_STORAGE_UNAVAILABLE') { super(code); }
+  constructor(readonly code: 'AI_CLIENT_RESULT_UNKNOWN' | 'AI_CLIENT_REVISION_CONFLICT' | 'AI_CLIENT_STORAGE_UNAVAILABLE' | 'AI_CLIENT_RESOURCE_ERASED') { super(code); }
   get nextAction() { return this.code === 'AI_CLIENT_RESULT_UNKNOWN' ? 'readOperation' : 'manual_review'; }
 }
 
@@ -37,7 +37,9 @@ export class PrismaClientSceneMaterialRepository {
   }
 
   private decode(value: unknown, scope: AiClientMaterialScope) {
-    const row = rowSchema.parse(value);
+    const { erasedAt, ...stored } = z.object({ erasedAt: z.date().nullable().optional() }).passthrough().parse(value);
+    if (erasedAt) throw new AiClientMaterialError('AI_CLIENT_RESOURCE_ERASED');
+    const row = rowSchema.parse(stored);
     if (row.expiresAt <= row.createdAt || (['tenantId', 'workspaceId', 'channel', 'principalHash', 'principalKind'] as const)
       .some(key => row[key] !== scope[key])
       || Buffer.byteLength(JSON.stringify(row.command), 'utf8') > 2048
