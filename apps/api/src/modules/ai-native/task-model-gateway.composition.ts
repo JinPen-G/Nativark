@@ -7,6 +7,8 @@ import { createPersistedTenantModelConfiguration, createScopeBoundTenantModelCon
 import { createAuthorizedPlatformModelConfiguration } from './platform-model-config.composition';
 import { PrismaTaskBudgetAuthorizationSource } from './budget/prisma-task-budget-authorization.source';
 import { PrismaGatewayCallPricing } from './budget/prisma-gateway-call-pricing';
+import { PrismaGatewayRecordedPricing } from './budget/prisma-gateway-recorded-pricing';
+import { z } from 'zod';
 import { createPersistedGatewayBudget } from './budget/gateway-budget.composition';
 import { createPersistedTextCapabilityEvidence } from './prisma-text-capability-receipt.repository';
 import { PrismaProviderProfileRepository } from './provider-profile.repository';
@@ -40,6 +42,26 @@ export type PersistedTaskCallGatewayDependencies = PersistedTaskAuthorizationDep
   media?: GatewayMediaAttachmentResolver;
 };
 
+const taskPricingSchema = z.object({ kind: z.enum(['calls', 'recorded']),
+  priceVersion: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/u) }).strict();
+export type PersistedTaskGatewayPricing = z.infer<typeof taskPricingSchema>;
+export type PersistedTaskGatewayDependencies = Omit<PersistedTaskCallGatewayDependencies, 'callPriceVersion'> & {
+  /** Server policy only. Recorded mode reads the invocation's persisted price
+   * and certified input bound; it never falls back to calls or guesses a rate. */
+  pricing: PersistedTaskGatewayPricing;
+};
+
+function checkedPricing(value: unknown) {
+  const parsed = taskPricingSchema.safeParse(structuredClone(value));
+  if (!parsed.success) throw new ModelGatewayError('CONFIG_INVALID');
+  return Object.freeze(parsed.data);
+}
+function taskPricing(db: PersistedTaskAuthorizationDependencies['db'], scopes: Pick<AiScopeRepository, 'resolveCurrent'>,
+  selection: PersistedTaskGatewayPricing, clock: () => Date) {
+  return selection.kind === 'recorded' ? new PrismaGatewayRecordedPricing(db, scopes, clock)
+    : new PrismaGatewayCallPricing(db, scopes, selection.priceVersion, clock);
+}
+
 /** Original-task accounting recovery is deliberately independent of model
  * configuration, adapters, credentials and the RUNNING-only execution gate.
  * It still requires current task read/reconcile action authority, entitlement
@@ -47,11 +69,22 @@ export type PersistedTaskCallGatewayDependencies = PersistedTaskAuthorizationDep
  * on this surface, including after a worker restart or AI configuration stop. */
 export function composePersistedTaskCallAccountingRecovery(input: PersistedTaskAuthorizationDependencies &
   Pick<PersistedTaskCallGatewayDependencies, 'guard' | 'taskId' | 'callPriceVersion'>) {
+  if (!input || 'pricing' in input) throw new ModelGatewayError('CONFIG_INVALID');
+  const { callPriceVersion, ...dependencies } = input;
+  return composePersistedTaskAccountingRecovery({ ...dependencies, pricing: { kind: 'calls', priceVersion: callPriceVersion } });
+}
+
+/** Original recorded pricing is read by the accounting adapter, even after
+ * that price expires or a new configuration is published. This composition
+ * requires no model adapter, profile selection, secret or settings-write grant. */
+export function composePersistedTaskAccountingRecovery(input: PersistedTaskAuthorizationDependencies &
+  Pick<PersistedTaskCallGatewayDependencies, 'guard' | 'taskId'> & { pricing: PersistedTaskGatewayPricing }) {
   if (!input || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(input.taskId)
-    || typeof input.guard?.canActivate !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+    || 'callPriceVersion' in input || typeof input.guard?.canActivate !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+  const selection = checkedPricing(input.pricing);
   const clock = input.clock ?? (() => new Date());
   const authorization = new PrismaTaskBudgetAuthorizationSource(input);
-  const pricing = new PrismaGatewayCallPricing(input.db, authorization.scopes, input.callPriceVersion, clock);
+  const pricing = taskPricing(input.db, authorization.scopes, selection, clock);
   return createPersistedGatewayBudget({ db: input.db, scopes: authorization.scopes,
     subscriptions: input.subscriptions, authorization, pricing, clock }).recovery;
 }
@@ -64,12 +97,26 @@ export function composePersistedTaskCallAccountingRecovery(input: PersistedTaskA
  * No root registration, timer, model call or credential read on construction.
  */
 export function composePersistedTaskCallGateway(input: PersistedTaskCallGatewayDependencies) {
+  if (!input || 'pricing' in input) throw new ModelGatewayError('CONFIG_INVALID');
+  const { callPriceVersion, ...dependencies } = input;
+  return composePersistedTaskGateway({ ...dependencies, pricing: { kind: 'calls', priceVersion: callPriceVersion } });
+}
+
+/** Same Gateway, dispatch owner and ledger for calls or trusted recorded
+ * token/money pricing. Evidence publication stays with the original authorized
+ * pricing producer; this does not publish prices or certify token counts. */
+export function composePersistedTaskGateway(input: PersistedTaskGatewayDependencies) {
   if (!input || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/u.test(input.taskId)
     || !['chat', 'builder', 'vision', 'knowledge', 'reasoning'].includes(input.routeScene)
+    || 'callPriceVersion' in input
     || !Array.isArray(input.adapters) || !input.adapters.length
     || typeof input.audit?.append !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+  const selection = checkedPricing(input.pricing);
+  // Recorded evidence currently attests plain-text input/output tokens only.
+  // Never price image/audio traffic with an unrelated text/calls upper bound.
+  if (selection.kind === 'recorded' && (input.media || input.routeScene === 'vision')) throw new ModelGatewayError('CONFIG_INVALID');
   const { db, auth, credentials, subscriptions, guard, secrets, taskId, platformProfileId,
-    routeScene, callPriceVersion, audit } = input;
+    routeScene, audit } = input;
   const clock = input.clock ?? (() => new Date()), adapters = [...input.adapters];
   const dependencies = { db, auth, credentials, subscriptions, clock };
   const authorization = composePersistedTaskAuthorization(dependencies);
@@ -111,7 +158,7 @@ export function composePersistedTaskCallGateway(input: PersistedTaskCallGatewayD
   // Terminal accounting must remain readable: its authority is current identity
   // plus original invocation/action binding, not the new-effect RUNNING gate.
   const budgetAuthority = new PrismaTaskBudgetAuthorizationSource({ ...dependencies, guard, taskId });
-  const pricing = new PrismaGatewayCallPricing(db, budgetAuthority.scopes, callPriceVersion, clock);
+  const pricing = taskPricing(db, budgetAuthority.scopes, selection, clock);
   const accounting = createPersistedGatewayBudget({ db, scopes: budgetAuthority.scopes,
     subscriptions, authorization: budgetAuthority, pricing, clock });
   const capabilities = createPersistedTextCapabilityEvidence(db, clock);
@@ -134,7 +181,7 @@ export function composePersistedTaskCallGateway(input: PersistedTaskCallGatewayD
   // still re-read by the services, not frozen into a permanent grant.
   Object.freeze(runtime.ports);
   Object.freeze(runtime);
-  return Object.freeze({ runtime, priceVersion: callPriceVersion, accountingRecovery: accounting.recovery,
+  return Object.freeze({ runtime, priceVersion: selection.priceVersion, accountingRecovery: accounting.recovery,
     financialEvidence: Object.freeze({ readDispatch: accounting.facts.readDispatch.bind(accounting.facts) }) });
 }
 
@@ -148,6 +195,17 @@ export function composePersistedCallTaskModelHost(input:
     gateway: Omit<PersistedTaskCallGatewayDependencies,
       keyof PersistedTaskAuthorizationDependencies | 'guard' | 'taskId'>;
   }) {
+  if (!input?.gateway || 'pricing' in input.gateway) throw new ModelGatewayError('CONFIG_INVALID');
+  const { callPriceVersion, ...gateway } = input.gateway;
+  return composePersistedTaskModelHost({ ...input, gateway: { ...gateway,
+    pricing: { kind: 'calls', priceVersion: callPriceVersion } } });
+}
+
+export function composePersistedTaskModelHost(input:
+  Omit<TaskModelHostDependencies, 'runtime' | 'priceVersion' | 'financialEvidence'> & {
+    gateway: Omit<PersistedTaskGatewayDependencies,
+      keyof PersistedTaskAuthorizationDependencies | 'guard' | 'taskId'>;
+  }) {
   const { gateway, ...host } = input;
   // Protocol support alone is insufficient: media requires the explicit
   // original ACL/ObjectReader dependency and the server-selected vision route.
@@ -155,7 +213,7 @@ export function composePersistedCallTaskModelHost(input:
     || (host.kind && (!gateway.media || gateway.routeScene !== 'vision'))) {
     throw new ModelGatewayError('CONFIG_INVALID');
   }
-  const runtime = composePersistedTaskCallGateway({ ...gateway, db: host.db, auth: host.auth,
+  const runtime = composePersistedTaskGateway({ ...gateway, db: host.db, auth: host.auth,
     credentials: host.credentials, subscriptions: host.subscriptions, guard: host.guard,
     taskId: host.task.taskId, clock: host.clock });
   return composeTaskModelHost({ ...host, ...runtime });

@@ -17,6 +17,11 @@ const bindingCommand = reference.extend({ callId: key.max(128) }).strict();
 const selector = z.object({ configurationHash: z.string().regex(/^[a-f0-9]{64}$/u), priceVersion: key.max(64) }).strict();
 export type GatewayPricingRecordDb = Pick<PrismaClient,
   'aiGatewayInvocation' | 'aiProviderProfile' | 'aiScope' | 'aiGatewayPriceRecord' | 'aiGatewayInputBoundRecord'>;
+/** Pricing consumes a cloneable projection, not the full invocation row (its
+ * Prisma Decimal fencing token is validated by the original binding source). */
+export const gatewayPricingInvocationSelect = Object.freeze({ id: true, scopeId: true, callId: true, actorId: true,
+  sceneCode: true, configuration: true, configurationHash: true, registrationHash: true,
+  intentHash: true, priceVersion: true, maxOutputTokens: true } satisfies Prisma.AiGatewayInvocationSelect);
 export interface GatewayPricingEvidenceSource {
   readPrice(reference: string, context: Readonly<AiExecutionContext>): Promise<unknown>;
   readInputBound(reference: string, context: Readonly<AiExecutionContext>, binding: Readonly<{
@@ -140,7 +145,8 @@ export class GatewayPricingRecordManagement {
   }
   async publishInputBound(value: unknown) {
     const command = parse(bindingCommand, value), current = await this.authorize('settings_write');
-    const row = structuredClone(await this.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: current.scope.id, callId: command.callId } } }));
+    const row = structuredClone(await this.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: current.scope.id, callId: command.callId } },
+      select: gatewayPricingInvocationSelect }));
     if (!row || row.scopeId !== current.scope.id || row.actorId !== current.principal.actorId || row.sceneCode !== this.sceneCode
       || !isGatewayConfig(row.configuration) || hash(row.configuration) !== row.configurationHash) throw new BudgetError('FORBIDDEN');
     const { actorKind: _, ...context } = current.principal;
@@ -191,7 +197,8 @@ export class GatewayPricingRecordManagement {
   }
   async readInputBound(value: unknown) {
     const command = parse(z.object({ callId: key.max(128) }).strict(), value), current = await this.authorize('settings_read');
-    const row = structuredClone(await this.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: current.scope.id, callId: command.callId } } }));
+    const row = structuredClone(await this.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: current.scope.id, callId: command.callId } },
+      select: gatewayPricingInvocationSelect }));
     if (!row || row.actorId !== current.principal.actorId || row.scopeId !== current.scope.id || row.sceneCode !== this.sceneCode) throw new BudgetError('FORBIDDEN');
     const result = await this.records.bound(current.scope.id, row.id);
     if (result.evidence.registrationHash !== row.registrationHash || result.evidence.intentHash !== row.intentHash

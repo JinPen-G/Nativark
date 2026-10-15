@@ -30,7 +30,8 @@ import { composeAiSettingsBusinessConsumer } from './settings-business-consumer.
 import type { ApprovedSettingsApplicationDependencies } from '../approval-execution/approved-settings-task.authority';
 import { originalRequestReferenceSchema, freezeOriginalInput } from '../task-request/original-request.validation';
 import { originalIdentityHash } from '../task-request/original-request.authority';
-import { composePersistedTaskCallGateway, type PersistedTaskCallGatewayDependencies } from '../task-model-gateway.composition';
+import { composePersistedTaskCallGateway, composePersistedTaskGateway,
+  type PersistedTaskCallGatewayDependencies, type PersistedTaskGatewayDependencies } from '../task-model-gateway.composition';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import { parseQuoteSelection } from '../task-request/quote-selection.validation';
 import { composeTaskActionPolicyManagement } from '../task-action-policy-management.composition';
@@ -822,7 +823,9 @@ export type RequestBoundPersistedOriginalSceneModelDependencies =
   Omit<RequestBoundOriginalSceneModelDependencies, 'runtime' | 'priceVersion' | 'kind'> & {
     /** Server-owned configuration. No request may choose a provider or task. */
     gateway: Pick<PersistedTaskCallGatewayDependencies,
-      'secrets' | 'platformProfileId' | 'routeScene' | 'callPriceVersion' | 'adapters' | 'audit'>;
+      'secrets' | 'platformProfileId' | 'routeScene' | 'callPriceVersion' | 'adapters' | 'audit'>
+      | Pick<PersistedTaskGatewayDependencies,
+        'secrets' | 'platformProfileId' | 'routeScene' | 'pricing' | 'adapters' | 'audit'>;
   };
 
 /** Formal original-reference model actions. Resolve the current original task
@@ -855,7 +858,9 @@ export function composeRequestBoundPersistedOriginalSceneModel(
   const { gateway, ...sceneDependencies } = dependencies;
   const recoveryReaders = composeRequestBoundOriginalTaskRecoveryReaders(sceneDependencies, requestOptions,
     { policy: dependencies.gatewayScene, knowledge: dependencies.knowledge });
-  const serverGateway = Object.freeze({ ...gateway, adapters: Object.freeze([...gateway.adapters]) });
+  if ('pricing' in gateway && 'callPriceVersion' in gateway) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+  const serverGateway = Object.freeze({ ...gateway, adapters: Object.freeze([...gateway.adapters]),
+    ...('pricing' in gateway ? { pricing: freezeOriginalInput(structuredClone(gateway.pricing)) } : {}) });
   const call = bindRequests(sceneDependencies, requestOptions, async (input, command) => {
     const raw = command && typeof command === 'object' && 'original' in command ? command.original : command;
     const parsed = originalRequestReferenceSchema.safeParse(raw);
@@ -870,9 +875,12 @@ export function composeRequestBoundPersistedOriginalSceneModel(
       || original.request.sceneCode !== input.scene.code || original.receipt.sceneVersion !== input.scene.version) {
       throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
     }
-    const persisted = composePersistedTaskCallGateway({ ...serverGateway, db: input.db, auth: input.auth,
+    const gatewayDependencies = { ...serverGateway, db: input.db, auth: input.auth,
       credentials: input.credentials, subscriptions: input.subscriptions, guard: input.guard,
-      taskId: task.taskId, clock: input.clock });
+      taskId: task.taskId, clock: input.clock };
+    const persisted = 'pricing' in serverGateway
+      ? composePersistedTaskGateway({ ...gatewayDependencies, pricing: serverGateway.pricing! })
+      : composePersistedTaskCallGateway({ ...gatewayDependencies, callPriceVersion: serverGateway.callPriceVersion });
     const model = composeAiOriginalSceneModel({ ...input, runtime: persisted.runtime, priceVersion: persisted.priceVersion });
     const orderApplication = orderSource ? model.createModelOrderApplication(serverHost, {
       inputSource: orderSource, financialEvidence: persisted.financialEvidence, clock, monotonic },

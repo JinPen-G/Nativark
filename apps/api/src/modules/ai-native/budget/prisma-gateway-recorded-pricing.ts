@@ -9,7 +9,7 @@ import type { ModelUsage } from '../model-gateway.ports';
 import { BudgetError, type BudgetGrant, type BudgetQuotePort, type BudgetRecord, type BudgetReserveCommand } from './budget.ports';
 import type { GatewayActualUsagePricing } from './prisma-gateway-accounting-facts';
 import { PrismaGatewayInvocationBindings } from './prisma-gateway-invocation-bindings';
-import { PrismaGatewayPricingRecords, type GatewayPricingRecordDb } from './prisma-gateway-pricing-records';
+import { PrismaGatewayPricingRecords, gatewayPricingInvocationSelect, type GatewayPricingRecordDb } from './prisma-gateway-pricing-records';
 import { priceGatewayTokens } from './gateway-pricing-evidence';
 import { gatewayBudgetPrincipal } from './gateway-budget-principal';
 import { quantityAtoms, sameUnit } from './budget-quantity';
@@ -38,7 +38,8 @@ export class PrismaGatewayRecordedPricing implements BudgetQuotePort, GatewayAct
     return { ...current, gateway: context };
   }
   private async evidence(current: Awaited<ReturnType<PrismaGatewayRecordedPricing['current']>>, callId: string) {
-    const invocation = structuredClone(await this.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: current.scope.id, callId } } }));
+    const invocation = structuredClone(await this.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: current.scope.id, callId } },
+      select: gatewayPricingInvocationSelect }));
     if (!invocation || invocation.callId !== callId || invocation.scopeId !== current.scope.id || invocation.actorId !== current.gateway.actorId
       || !isGatewayConfig(invocation.configuration) || hash(invocation.configuration) !== invocation.configurationHash) throw new BudgetError('FORBIDDEN');
     const proof = await this.records.bound(current.scope.id, invocation.id), b = proof.evidence;
