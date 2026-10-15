@@ -36,7 +36,7 @@ export function composeAiAuthorizedBusinessTools(input: {
   credentials: AiOrderRouteCredentialSource;
   core: Pick<RentalCoreService, 'listItemGroups' | 'availability' | 'getOrder' | 'getProfile'
     | 'getWorkspaceCategory' | 'getBusinessSettings' | 'listPricingGroups'
-    | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'resolvePricingGroupQuoteRequest'> & Partial<Pick<RentalCoreService, 'listInspections' | 'listItemGroupsPage'>>;
+    | 'listCouponTemplates' | 'listLocations' | 'listOperators' | 'resolvePricingGroupQuoteRequest'> & Partial<Pick<RentalCoreService, 'listInspectionsPage' | 'listItemGroupsPage'>>;
   memberships: AiMembershipCandidateReadPort;
   business: Pick<RentalBusinessService, 'createQuote' | 'getQuote' | 'tenantReadiness'> & Partial<Pick<RentalBusinessService, 'normalizeQuoteInput' | 'createQuoteForOriginalOperation' | 'readQuoteForOriginalOperation' | 'readQuoteForOriginalReference'>>;
   reports: Pick<RentalWorkspaceReportRepository, 'getBoundedOperationReport'>;
@@ -60,8 +60,8 @@ export function composeAiAuthorizedBusinessTools(input: {
     const authority = new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock);
     return new AiOrderExplanationFactsService(authority, order(serverOrderId), input.payments
       ? new AiOrderPaymentFactsService(input.payments, input.core, authority, routes, input.clock) : undefined, input.clock,
-      typeof input.core.listInspections === 'function' ? new AiOrderInspectionFactsService({
-        getOrder: input.core.getOrder.bind(input.core), listInspections: input.core.listInspections.bind(input.core)
+      typeof input.core.listInspectionsPage === 'function' ? new AiOrderInspectionFactsService({
+        getOrder: input.core.getOrder.bind(input.core), listInspectionsPage: input.core.listInspectionsPage.bind(input.core)
       }, new AiOrderRouteContextAuthority(input.guard, input.credentials, serverOrderId, input.clock, 'inspections'), input.clock) : undefined);
   };
   if (typeof input.core.availability !== 'function' || typeof input.core.getOrder !== 'function'
