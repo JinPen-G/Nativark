@@ -47,7 +47,7 @@ export class PrismaGatewayPricingRecords {
   boundId(scopeId: string, invocationId: string) { return hash({ kind: 'gateway-bound-key-1', scopeId, invocationId }); }
   async price(scopeId: string, configurationHash: string, priceVersion: string) {
     const id = this.priceId(scopeId, configurationHash, priceVersion);
-    const row = await this.db.aiGatewayPriceRecord.findUnique({ where: { id } });
+    const row = structuredClone(await this.db.aiGatewayPriceRecord.findUnique({ where: { id } }));
     if (!row || row.id !== id || row.scopeId !== scopeId || row.configurationHash !== configurationHash
       || row.priceVersion !== priceVersion || hash(row.payload) !== row.payloadHash) throw new BudgetError('UNAVAILABLE');
     const evidence = parse(gatewayPriceEvidenceSchema, row.payload);
@@ -57,7 +57,7 @@ export class PrismaGatewayPricingRecords {
   }
   async bound(scopeId: string, invocationId: string) {
     const id = this.boundId(scopeId, invocationId);
-    const row = await this.db.aiGatewayInputBoundRecord.findUnique({ where: { id } });
+    const row = structuredClone(await this.db.aiGatewayInputBoundRecord.findUnique({ where: { id } }));
     if (!row || row.id !== id || row.scopeId !== scopeId || row.invocationId !== invocationId
       || hash(row.payload) !== row.payloadHash) throw new BudgetError('UNAVAILABLE');
     const evidence = parse(gatewayInputBoundEvidenceSchema, row.payload);
@@ -87,7 +87,7 @@ export class GatewayPricingRecordManagement {
     if (current.scope.kind !== 'WORKSPACE' || current.context.audience !== 'operator' || current.context.actor.kind !== 'user'
       || principal.tenantId !== current.scope.tenantId || principal.workspaceId !== current.scope.workspaceId) throw new BudgetError('FORBIDDEN');
     const resource = { policy: { scopeId: current.scope.id, scopeKind: 'WORKSPACE', sceneCode: this.sceneCode } };
-    const grant = await this.authorization.authorize(action, current.context, resource);
+    const grant = structuredClone(await this.authorization.authorize(action, structuredClone(current.context), structuredClone(resource)));
     if (!grant?.authorizationKey || !Number.isFinite(grant.expiresAt?.getTime()) || grant.expiresAt <= this.clock()) throw new BudgetError('FORBIDDEN');
     return { ...current, principal, resource, grant };
   }
@@ -104,8 +104,8 @@ export class GatewayPricingRecordManagement {
     const c = evidence.configuration;
     if (!('tenantId' in c) || c.tenantId !== tenantId) throw new BudgetError('FORBIDDEN');
     const columns = aiPersistenceScopeColumns(c.configurationScope);
-    const owner = await this.db.aiScope.findFirst({ where: columns });
-    const row = await this.db.aiProviderProfile.findFirst({ where: { id: c.configId } });
+    const owner = structuredClone(await this.db.aiScope.findFirst({ where: columns }));
+    const row = structuredClone(await this.db.aiProviderProfile.findFirst({ where: { id: c.configId } }));
     if (!owner || Object.entries(columns).some(([name, expected]) => owner[name as keyof typeof owner] !== expected)
       || !row || row.scopeId !== owner.id || row.scopeKind !== owner.kind
       || (c.serviceMode === 'platform_managed' ? owner.kind !== 'PLATFORM' : owner.kind !== 'TENANT' || owner.tenantId !== tenantId)
@@ -119,24 +119,28 @@ export class GatewayPricingRecordManagement {
     this.active(evidence); await this.profile(evidence, current.principal.tenantId);
     const scopeId = current.scope.id, configurationHash = hash(evidence.configuration), priceVersion = evidence.priceVersion;
     const id = this.records.priceId(scopeId, configurationHash, priceVersion), payloadHash = hash(evidence);
-    const existing = await this.db.aiGatewayPriceRecord.findUnique({ where: { id } });
+    const existing = structuredClone(await this.db.aiGatewayPriceRecord.findUnique({ where: { id } }));
     if (existing && existing.payloadHash !== payloadHash) throw new BudgetError('IDEMPOTENCY_CONFLICT');
     const confirmed = parse(gatewayPriceEvidenceSchema, await this.source.readPrice(command.reference, structuredClone(current.context)));
     if (hash(confirmed) !== payloadHash) throw new BudgetError('REVISION_CONFLICT');
     this.active(confirmed); await this.profile(confirmed, current.principal.tenantId);
     await this.recheck(current, 'settings_write');
+    // Source/profile/authorization reads may outlive the evidence. Refuse
+    // before any append, not merely when a later dispatch tries to use it.
+    this.active(confirmed);
     try {
       if (!existing) await this.db.aiGatewayPriceRecord.create({ data: { id, scopeId, configurationHash, priceVersion,
         sourceReference: command.reference, payloadHash, payload: json(evidence) } });
       const result = await this.records.price(scopeId, configurationHash, priceVersion);
       if (result.hash !== payloadHash) throw new BudgetError('IDEMPOTENCY_CONFLICT');
       await this.recheck(current, 'settings_write');
+      this.active(confirmed);
       return { state: 'recorded' as const, id, payloadHash, configurationHash, priceVersion, executionPermission: false as const };
     } catch { throw new BudgetError('PENDING_RECONCILIATION'); }
   }
   async publishInputBound(value: unknown) {
     const command = parse(bindingCommand, value), current = await this.authorize('settings_write');
-    const row = await this.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: current.scope.id, callId: command.callId } } });
+    const row = structuredClone(await this.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: current.scope.id, callId: command.callId } } }));
     if (!row || row.scopeId !== current.scope.id || row.actorId !== current.principal.actorId || row.sceneCode !== this.sceneCode
       || !isGatewayConfig(row.configuration) || hash(row.configuration) !== row.configurationHash) throw new BudgetError('FORBIDDEN');
     const { actorKind: _, ...context } = current.principal;
@@ -151,25 +155,27 @@ export class GatewayPricingRecordManagement {
       || evidence.provenance.reference !== command.reference) throw new BudgetError('FORBIDDEN');
     this.active(evidence);
     const id = this.records.boundId(row.scopeId, row.id), payloadHash = hash(evidence);
-    const existing = await this.db.aiGatewayInputBoundRecord.findUnique({ where: { id } });
+    const existing = structuredClone(await this.db.aiGatewayInputBoundRecord.findUnique({ where: { id } }));
     if (existing && existing.payloadHash !== payloadHash) throw new BudgetError('IDEMPOTENCY_CONFLICT');
     const confirmed = parse(gatewayInputBoundEvidenceSchema,
       await this.source.readInputBound(command.reference, structuredClone(current.context), structuredClone(binding)));
     if (hash(confirmed) !== payloadHash) throw new BudgetError('REVISION_CONFLICT');
     this.active(confirmed); this.active(price.evidence);
     await this.bindings.resolveForReserve(context, request); await this.recheck(current, 'settings_write');
+    this.active(confirmed); this.active(price.evidence);
     try {
       if (!existing) await this.db.aiGatewayInputBoundRecord.create({ data: { id, scopeId: row.scopeId, invocationId: row.id,
         priceRecordId: price.id, payloadHash, payload: json(evidence) } });
       const result = await this.records.bound(row.scopeId, row.id);
       if (result.hash !== payloadHash) throw new BudgetError('IDEMPOTENCY_CONFLICT');
       await this.recheck(current, 'settings_write');
+      this.active(confirmed); this.active(price.evidence);
       return { state: 'recorded' as const, id, payloadHash, callId: row.callId, executionPermission: false as const };
     } catch { throw new BudgetError('PENDING_RECONCILIATION'); }
   }
   async readPublication(value: unknown) {
     const command = parse(reference, value), current = await this.authorize('settings_read');
-    const row = await this.db.aiGatewayPriceRecord.findFirst({ where: { scopeId: current.scope.id, sourceReference: command.reference } });
+    const row = structuredClone(await this.db.aiGatewayPriceRecord.findFirst({ where: { scopeId: current.scope.id, sourceReference: command.reference } }));
     if (!row) throw new BudgetError('PENDING_RECONCILIATION');
     if (row.scopeId !== current.scope.id || row.sourceReference !== command.reference) throw new BudgetError('FORBIDDEN');
     const result = await this.records.price(current.scope.id, row.configurationHash, row.priceVersion);
@@ -185,7 +191,7 @@ export class GatewayPricingRecordManagement {
   }
   async readInputBound(value: unknown) {
     const command = parse(z.object({ callId: key.max(128) }).strict(), value), current = await this.authorize('settings_read');
-    const row = await this.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: current.scope.id, callId: command.callId } } });
+    const row = structuredClone(await this.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: current.scope.id, callId: command.callId } } }));
     if (!row || row.actorId !== current.principal.actorId || row.scopeId !== current.scope.id || row.sceneCode !== this.sceneCode) throw new BudgetError('FORBIDDEN');
     const result = await this.records.bound(current.scope.id, row.id);
     if (result.evidence.registrationHash !== row.registrationHash || result.evidence.intentHash !== row.intentHash

@@ -38,8 +38,8 @@ export class PrismaGatewayRecordedPricing implements BudgetQuotePort, GatewayAct
     return { ...current, gateway: context };
   }
   private async evidence(current: Awaited<ReturnType<PrismaGatewayRecordedPricing['current']>>, callId: string) {
-    const invocation = await this.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: current.scope.id, callId } } });
-    if (!invocation || invocation.scopeId !== current.scope.id || invocation.actorId !== current.gateway.actorId
+    const invocation = structuredClone(await this.db.aiGatewayInvocation.findUnique({ where: { scopeId_callId: { scopeId: current.scope.id, callId } } }));
+    if (!invocation || invocation.callId !== callId || invocation.scopeId !== current.scope.id || invocation.actorId !== current.gateway.actorId
       || !isGatewayConfig(invocation.configuration) || hash(invocation.configuration) !== invocation.configurationHash) throw new BudgetError('FORBIDDEN');
     const proof = await this.records.bound(current.scope.id, invocation.id), b = proof.evidence;
     if (b.registrationHash !== invocation.registrationHash || b.intentHash !== invocation.intentHash
@@ -82,6 +82,7 @@ export class PrismaGatewayRecordedPricing implements BudgetQuotePort, GatewayAct
     if (again.proof.hash !== proof.hash || again.proof.price.hash !== proof.price.hash
       || again.invocation.registrationHash !== invocation.registrationHash) throw new BudgetError('FORBIDDEN');
     await this.recheck(current);
+    if (expiresAt <= this.clock() || grant.expiresAt <= this.clock()) throw new BudgetError('FORBIDDEN');
     return { association: binding.association, callId: command.callId, sceneCode: command.sceneCode,
       model: command.association.config.model, actorId: binding.actorId, quantity, policies, consumerScope: policies[2], expiresAt,
       evidenceHash: hash({ kind: 'recorded-gateway-quote-1', invocationId: invocation.id, registrationHash: invocation.registrationHash,
@@ -117,8 +118,10 @@ export class PrismaGatewayRecordedPricing implements BudgetQuotePort, GatewayAct
   async quantity(value: Readonly<BudgetRecord>, usageValue: Readonly<ModelUsage>) {
     const record = structuredClone(value), parsed = usageSchema.safeParse(structuredClone(usageValue)), current = await this.current();
     if (!parsed.success || !record.dispatched || record.actorId !== current.gateway.actorId || record.reserved.unit === 'calls') throw new BudgetError('UNAVAILABLE');
+    if (record.scopeId !== current.scope.id || record.scopeKind !== 'WORKSPACE') throw new BudgetError('FORBIDDEN');
     const binding = await this.bindings.resolveForReservation(current.gateway, record.id);
-    if (hash(binding.association) !== hash(record.association)) throw new BudgetError('FORBIDDEN');
+    if (hash(binding.association) !== hash(record.association) || record.callId !== binding.association.requestId
+      || record.sceneCode !== binding.sceneCode) throw new BudgetError('FORBIDDEN');
     const original = await this.evidence(current, record.callId), { proof } = original;
     if (!sameUnit(record.reserved, original.quantity) || quantityAtoms(record.reserved) !== quantityAtoms(original.quantity)
       || record.association.priceVersion !== proof.price.evidence.priceVersion
