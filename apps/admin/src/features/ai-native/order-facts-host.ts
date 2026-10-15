@@ -14,7 +14,7 @@ const string = (value: unknown, max = 191): string => {
   return value;
 };
 const statuses = new Set(['queued', 'running', 'waiting_input', 'waiting_confirmation', 'waiting_external',
-  'cancel_requested', 'succeeded', 'partially_succeeded', 'failed', 'cancelled']);
+  'cancel_requested', 'succeeded', 'partially_succeeded', 'failed', 'cancelled', 'unknown']);
 export type OrderAssistantPacket = {
   reference: AiSceneRequestReadDraft; original: AiSceneRequestReceiptDraft;
   task: Extract<AiSceneTaskReceiptDraft, { state: 'observed' }>;
@@ -111,9 +111,23 @@ export class OrderFactsHost {
       return projectOrderAssistantPacket(packet, { ...this.input, inputRef, question });
     } finally { if (generation === this.generation) this.busy = false; }
   }
-  detail(packet: OrderAssistantPacket, taskId: string, signal: AbortSignal): AiTaskDetailProjection {
-    this.check();
-    if (signal.aborted || packet.task.taskId !== taskId) throw Error('原任务详情已过期');
-    return { task: structuredClone(packet.task), factRows: structuredClone(packet.rows) };
+  async detail(packet: OrderAssistantPacket, taskId: string, signal: AbortSignal): Promise<AiTaskDetailProjection> {
+    const generation = this.generation;
+    this.check(generation);
+    const previous = structuredClone(packet);
+    const selected = [...this.originals.entries()].find(([, command]) => command.requestKey === previous.original.requestKey);
+    if (signal.aborted || previous.task.taskId !== taskId || !selected
+      || previous.reference.inputRef !== previous.original.inputRef) throw Error('原任务详情已过期');
+    // A local generation check is not current authorization. Reopen only the
+    // same original material through the real Guard; never fall back to the
+    // cached body after revocation, network failure or a late response.
+    const raw = await this.input.post(`/${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}/${AI_SCENE_REQUEST_HTTP_DRAFT.material}`,
+      structuredClone(previous.reference));
+    this.check(generation);
+    if (signal.aborted) throw Error('原任务详情已过期');
+    const fresh = projectOrderAssistantPacket(raw, { ...this.input, inputRef: previous.reference.inputRef, question: selected[0] });
+    if (fresh.task.taskId !== taskId || fresh.original.requestKey !== previous.original.requestKey
+      || fresh.original.contentHash !== previous.original.contentHash) throw Error('原请求关联已变化');
+    return { task: structuredClone(fresh.task), factRows: structuredClone(fresh.rows) };
   }
 }
