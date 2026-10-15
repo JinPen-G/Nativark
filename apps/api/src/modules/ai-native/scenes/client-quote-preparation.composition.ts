@@ -136,7 +136,10 @@ export function composeClientOriginalQuotePreparation(input: {
       await check(bound);
       if ((await grant(bound, 'execute')).policyHash !== permission.policyHash) throw stale();
       const latest = await repository.findSource(bound.scope, row.id);
-      if (!latest || requestFingerprint(latest) !== requestFingerprint(row)) throw stale();
+      // Parameter normalization, current authority and storage reads may wait.
+      // A material that expired during those waits cannot initiate the R1 quote
+      // write, even if its content and current policy are otherwise unchanged.
+      if (!latest || requestFingerprint(latest) !== requestFingerprint(row) || latest.expiresAt <= clock()) throw stale();
       const result = await quotes.create({ reference: `${row.id}:${row.materialHash}`, input: material.input,
         prepared: { inputHash: material.inputHash, configurationHash: material.configurationHash } });
       await check(bound);
