@@ -1,4 +1,4 @@
-import { StaffInspectionHostBinding, emptyInspectionView, type StaffInspectionHost } from "../inspection-host";
+import { StaffInspectionHostBinding, emptyInspectionView, type StaffInspectionHost, type StaffInspectionReceiptHost } from "../inspection-host";
 const bindings = new WeakMap<object, StaffInspectionHostBinding>();
 const dialogs = new WeakSet<object>();
 Component({
@@ -15,17 +15,19 @@ Component({
       this.detachHost(); bindings.get(this)?.attachHost(host);
       if (host.taskHost && host.serverEnabled === true) this.selectComponent("#workbench")?.attachHost?.(host.taskHost);
     },
+    attachReceiptHost(host: StaffInspectionReceiptHost) { this.detachHost(); bindings.get(this)?.attachReceiptHost(host); },
     detachHost() { bindings.get(this)?.detachHost(); this.selectComponent("#workbench")?.detachHost?.(); },
     async hostShow() {
       const binding = bindings.get(this), generation = binding?.generation();
       await binding?.show();
-      if (binding && bindings.get(this) === binding && generation !== undefined && binding.isActive(generation)) {
+      if (this.data.mode !== "receipt_only" && binding && bindings.get(this) === binding && generation !== undefined && binding.isActive(generation)) {
         this.selectComponent("#workbench")?.hostShow?.(true);
       }
     },
     hostHide() { bindings.get(this)?.hide(); this.selectComponent("#workbench")?.hostHide?.(); },
     hostLogout() { this.detachHost(); },
     async onRead() { await bindings.get(this)?.read(); },
+    async onReadReceipts() { await bindings.get(this)?.readReceipts(); },
     async onReadRecognition() { await bindings.get(this)?.readRecognition(); },
     async onSaveRecognition() { await bindings.get(this)?.saveRecognition(); },
     async onEdit(event: WechatMiniprogram.CustomEvent) { await bindings.get(this)?.edit(event.detail?.key, event.detail?.humanValue); },

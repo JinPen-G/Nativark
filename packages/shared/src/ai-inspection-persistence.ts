@@ -1,3 +1,4 @@
+import { leafClosed as object, leafEnum as choice, leafInt as integer, leafList as array, leafText as text, type AiLeafSchemaDraft } from './ai-gateway-draft-schemas';
 import type { AiInspectionCandidateDraft } from './ai-inspection-draft';
 import type { AiTaskInputSubmissionDraft } from './ai-task-input-draft';
 
@@ -102,6 +103,48 @@ export interface AiStaffInspectionHostProjection {
   observedAt: string;
   execution: 'not_attested';
 }
+export type AiStaffInspectionSavedReference = AiInspectionRecognitionTaskReference & {
+  taskId: string; resultId: string; operationId: string;
+};
+export type AiStaffInspectionHistoryRequest = { orderId: string; stage: 'pickup' | 'return'; limit: number; after?: string };
+export type AiStaffInspectionHistoryItem = {
+  draftId: string; target: AiInspectionTarget; revision: number; status: AiInspectionDraftStatus;
+  recognitionSaves: AiStaffInspectionSavedReference[]; recognitionSavesTruncated: boolean;
+  recognitionReceipt: 'references_available' | 'manual_reconcile';
+};
+export type AiStaffInspectionHistoryResponse = {
+  mode: 'history_selection'; context: AiInspectionActorScope & { audience: 'staff' };
+  items: AiStaffInspectionHistoryItem[]; nextAfter: string | null; semantics: 'selection_not_execution_permission';
+};
+export type AiStaffInspectionReceiptHostRequest = AiInspectionDraftReadRequest & {
+  mode: 'receipt_only'; recognitionSave?: AiStaffInspectionSavedReference;
+};
+export type AiStaffInspectionReceiptHostProjection = {
+  mode: 'receipt_only'; serverEnabled: true; context: AiInspectionActorScope & { audience: 'staff' };
+  target: AiInspectionTarget; draftId: string; recognitionSave: AiStaffInspectionSavedReference | null;
+  capabilities: { recognitionReceipt: boolean; submissionReceipt: boolean };
+  semantics: 'receipts_only_not_execution_permission';
+};
+const historyId: AiLeafSchemaDraft = { ...text(128), pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$' };
+const historyTarget = { orderId: historyId, allocationId: historyId, templateId: historyId, stage: choice('pickup', 'return') };
+const historyScope = object({ tenantId: historyId, workspaceId: historyId, ownerId: historyId, audience: choice('staff') });
+const historyReference = object({ ...historyTarget, draftId: historyId, inputId: historyId, taskId: historyId,
+  resultId: historyId, operationId: historyId, expectedRevision: integer(1, 999) });
+export const AI_STAFF_INSPECTION_HISTORY_SCHEMAS: Record<string, AiLeafSchemaDraft> = {
+  AiStaffInspectionHistoryRequest: object({ orderId: historyId, stage: choice('pickup', 'return'), limit: integer(1, 20), after: historyId }, ['orderId', 'stage', 'limit']),
+  AiStaffInspectionHistoryResponse: object({ mode: choice('history_selection'), context: historyScope,
+    items: array(object({ draftId: historyId, target: object(historyTarget), revision: integer(1, 1000),
+      status: choice('draft_saved', 'prepared', 'submission_unknown', 'submitted'), recognitionSaves: array(historyReference, 20),
+      recognitionSavesTruncated: { type: 'boolean' }, recognitionReceipt: choice('references_available', 'manual_reconcile') }), 20),
+    nextAfter: { oneOf: [historyId, { type: 'null' }] }, semantics: choice('selection_not_execution_permission') }),
+  AiStaffInspectionReceiptHostRequest: object({ ...historyTarget, draftId: historyId, mode: choice('receipt_only'), recognitionSave: historyReference },
+    [...Object.keys(historyTarget), 'draftId', 'mode']),
+  AiStaffInspectionReceiptHostProjection: object({ mode: choice('receipt_only'), serverEnabled: { type: 'boolean', const: true }, context: historyScope,
+    target: object(historyTarget), draftId: historyId, recognitionSave: { oneOf: [historyReference, { type: 'null' }] },
+    capabilities: object({ recognitionReceipt: { type: 'boolean' }, submissionReceipt: { type: 'boolean' } }),
+    semantics: choice('receipts_only_not_execution_permission') }),
+};
+
 export type AiInspectionSubmitRequest = AiInspectionDraftReadRequest & { operationId: string; expectedRevision: number };
 export type AiInspectionPrepareSubmissionRequest = AiInspectionSubmitRequest & { actionId: string; handoverSignatureFileAssetId?: string };
 export type AiInspectionOriginalOperationRequest =

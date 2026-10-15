@@ -28,6 +28,25 @@ export class InspectionTemplateService {
       || typeof dependencies.core?.listInspectionTemplates !== 'function') throw new InspectionAssistError('TEMPLATE_UNAVAILABLE');
   }
 
+  async readHistoryAccess(value: unknown) {
+    const input = parseInspectionInput(z.object({ orderId: inspectionId, stage: z.enum(['pickup', 'return']) }).strict(), value);
+    const authority = new AiOrderRouteContextAuthority(this.dependencies.guard, this.dependencies.credentials, input.orderId);
+    try {
+      return await authority.withOrderRead(async context => {
+        if (context.audience !== 'staff' || context.scope.kind !== 'workspace' || context.actor.kind !== 'user' || !('access' in context)) {
+          throw new InspectionAssistError('ACCESS_DENIED');
+        }
+        const order = await this.dependencies.core.getOrder(context.scope.tenantId, input.orderId);
+        const locationId = input.stage === 'pickup' ? order.fulfillmentLocationId : order.returnLocationId ?? order.fulfillmentLocationId;
+        const locations = context.access.locationScope;
+        if (order.id !== input.orderId || order.tenantId !== context.scope.tenantId || !inspectionId.safeParse(locationId).success
+          || !locations || locations.mode === 'selected' && !locations.locationIds.includes(locationId)) throw new InspectionAssistError('ACCESS_DENIED');
+        return { context: { tenantId: context.scope.tenantId, workspaceId: context.scope.workspaceId,
+          ownerId: context.actor.userId, audience: 'staff' as const }, orderId: input.orderId, stage: input.stage, locationId };
+      });
+    } catch { throw new InspectionAssistError('ACCESS_DENIED'); }
+  }
+
   async read(value: unknown) {
     const input = parseInspectionInput(requestSchema, value);
     const authority = new AiOrderRouteContextAuthority(this.dependencies.guard, this.dependencies.credentials, input.orderId);

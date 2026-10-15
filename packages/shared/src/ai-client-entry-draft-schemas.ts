@@ -15,7 +15,7 @@ export const aiClientTaskCancelRequestSchema = aiClientTaskReadRequestSchema.ext
 export const aiClientTaskCancelReceiptSchema = z.object({
   contractVersion: z.literal(AI_TASK_DRAFT_VERSION), taskId: id.max(36),
   taskRevision: z.number().int().min(1).max(4294967295),
-  cursor: z.string().regex(/^[1-9][0-9]{0,19}$/u).refine(value => BigInt(value) <= 18446744073709551615n),
+  cursor: z.string().regex(/^[1-9][0-9]{0,19}$/u).refine(value => value.length < 20 || value <= '18446744073709551615'),
   observedAt: z.string().datetime({ offset: true }),
   status: z.literal('cancel_requested'), cancellation: z.literal('requested_not_rollback'),
   retryable: z.literal(false), nextAction: z.literal('read_original_task')

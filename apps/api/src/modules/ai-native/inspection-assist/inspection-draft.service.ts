@@ -278,6 +278,27 @@ export class InspectionDraftService {
     });
   }
 
+  async readHistory(value: unknown) {
+    const input = parseInspectionInput(z.object({ orderId: inspectionId, stage: z.enum(['pickup', 'return']),
+      limit: z.number().int().min(1).max(20), after: inspectionId.optional() }).strict(), value);
+    const target = { orderId: input.orderId, stage: input.stage };
+    const before = await this.templates.readHistoryAccess(target);
+    const history = await this.repository.history(before.context, input);
+    const after = await this.templates.readHistoryAccess(target);
+    if (requestFingerprint(before) !== requestFingerprint(after)) throw new InspectionAssistError('ACCESS_DENIED');
+    return { mode: 'history_selection' as const, context: after.context, ...history, semantics: 'selection_not_execution_permission' as const };
+  }
+
+  async readHistorySelection(value: unknown) {
+    const input = parseInspectionInput(targetSchema.extend({ draftId: inspectionId }).strict(), value), target = targetOf(input);
+    const selection = { orderId: target.orderId, stage: target.stage };
+    const before = await this.templates.readHistoryAccess(selection);
+    await this.load(before.context, input.draftId, target);
+    const after = await this.templates.readHistoryAccess(selection);
+    if (requestFingerprint(before) !== requestFingerprint(after)) throw new InspectionAssistError('ACCESS_DENIED');
+    return { context: after.context, target, draftId: input.draftId };
+  }
+
   async reconcileOperation(value: unknown) {
     const input = parseInspectionInput(z.object({ kind: z.enum(['create', 'edit', 'candidates', 'evidence']), request: z.unknown() }).strict(), value);
     const request = input.kind === 'create' ? parseInspectionInput(createSchema, input.request)

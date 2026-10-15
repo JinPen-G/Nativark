@@ -6,6 +6,12 @@
     <text wx:elif="{{draftLinkStatus === 'unknown'}}">草稿关联状态未知，请核对原操作。</text>
     <text wx:else>草稿已关联原检查。收据不代表判责或结算结果。</text>
   </view>
+  <view wx:if="{{recognitionSaveObserved}}" role="status">
+    <text>已确认原识别候选保存于草稿版本 {{recognitionSavedRevision}}；这是历史保存事实，不表示当前候选可采用或检查已提交。</text>
+  </view>
+  <button disabled="{{!canReadReceipts}}" bindtap="onReadReceipts">只核对原收据（不读取当前材料）</button>
+  <text wx:if="{{mode === 'receipt_only'}}" role="status">历史收据只读模式；不载入当前候选、不授予编辑或再次提交权限。</text>
+  <block wx:if="{{mode !== 'receipt_only'}}">
   <ai-task-workbench id="workbench"><ai-inspection-draft slot="inspection-draft" items="{{items}}" missing="{{missing}}" readonly="{{!editable}}" candidate-actions="{{editable}}" revision="{{revision}}" bind:draftchange="onEdit" bind:candidatedecision="onCandidate" /></ai-task-workbench>
   <view aria-label="原识别结果待人工审阅">
     <text role="status">原识别结果：{{recognitionStatus}}。候选未采用，不代表业务事实。</text>
@@ -18,5 +24,6 @@
   <button disabled="{{!canReview}}" bindtap="onReview">准备人工审阅材料</button>
   <button disabled="{{!canSubmit}}" bindtap="onSubmit">核实后请求原检查提交</button>
   <button disabled="{{!canReconcile}}" bindtap="onReconcile">核对原操作</button>
+  </block>
   <text>识别能力未接通时请使用原人工填单；未知结果不要重复提交。</text>
 </view>

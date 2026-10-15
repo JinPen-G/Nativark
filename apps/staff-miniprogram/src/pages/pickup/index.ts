@@ -13,7 +13,7 @@ import { themeBehavior } from "../../core/theme-behavior";
 import { formatBusinessRange } from "../../core/time";
 import { ROUTES, buildUrl, confirmDialog, relaunch, toast } from "../../core/ui";
 import { uploadStaffImage } from "../../api/uploads";
-import { attachInspectionPage, attachRemoteInspectionPage, hideInspectionPage, clearInspectionPage } from "../../components/ai-native/inspection-page-binding";
+import { attachInspectionPage, attachRemoteInspectionPage, hideInspectionPage, clearInspectionPage, openInspectionReceiptHistory } from "../../components/ai-native/inspection-page-binding";
 import type { StaffInspectionHost, InspectionRecognitionReference } from "../../components/ai-native/inspection-host";
 
 /** 逐设备分组：每台参与本次交接的资源一张卡，卡内只放**逐台**勾选的 boolean 检查项。 */
@@ -26,7 +26,7 @@ const RESERVATION_DEAD = ["released", "expired", "cancelled"];
 
 Page({
   behaviors: [themeBehavior],
-  data: { view: loadingState() as ViewState, id: "", orderNo: "", customer: "", phone: "", period: "", location: "", itemLabel: "物品", pickupLabel: "领取", groups: [] as DeviceGroup[], sharedFields: [] as InspectionFieldRow[], hasBulk: false, gates: [] as GateItem[], templateName: "", noTemplate: false, hasDeliveryAddress: false, deliveryLabel: "配送", deliveryRecipient: "", deliveryPhone: "", deliveryAddressText: "", busy: false, uploading: false, signatureWidth: 320, signatureHeight: 150, signatureDrawn: false, signatureFileAssetId: "", error: "" },
+  data: { aiInspectionVisible: false, aiInspectionHistoryLoading: false, aiInspectionHistoryMessage: "", view: loadingState() as ViewState, id: "", orderNo: "", customer: "", phone: "", period: "", location: "", itemLabel: "物品", pickupLabel: "领取", groups: [] as DeviceGroup[], sharedFields: [] as InspectionFieldRow[], hasBulk: false, gates: [] as GateItem[], templateName: "", noTemplate: false, hasDeliveryAddress: false, deliveryLabel: "配送", deliveryRecipient: "", deliveryPhone: "", deliveryAddressText: "", busy: false, uploading: false, signatureWidth: 320, signatureHeight: 150, signatureDrawn: false, signatureFileAssetId: "", error: "" },
   order: undefined as RentalOrder | undefined,
   template: undefined as RentalInspectionTemplate | undefined,
   boolCodes: [] as string[],
@@ -36,9 +36,10 @@ Page({
   attachRemoteInspectionHost(reference: { allocationId: string; draftId: string }, recognitionReference?: InspectionRecognitionReference) {
     return attachRemoteInspectionPage(this, reference, 'pickup', this.data.signatureFileAssetId || undefined, recognitionReference);
   },
+  onInspectionHistory() { return openInspectionReceiptHistory(this, 'pickup'); },
   onHide() { hideInspectionPage(this); },
   onUnload() { clearInspectionPage(this); },
-  onLoad(query: Record<string, string>) { const width = Math.max(240, wx.getSystemInfoSync().windowWidth - 48); this.setData({ id: query.id ?? "", signatureWidth: width }); },
+  onLoad(query: Record<string, string>) { clearInspectionPage(this); const width = Math.max(240, wx.getSystemInfoSync().windowWidth - 48); this.setData({ id: query.id ?? "", signatureWidth: width }); },
   onShow() { if (!isSignedIn()) { clearInspectionPage(this); relaunch(ROUTES.login); return; } void this.selectComponent("#ai-inspection-assist")?.hostShow?.(); if (!this.order) void this.load(); },
   async load() {
     if (!this.data.id) { this.setData({ view: blockedState("缺少订单编号", "请从订单详情重新进入") }); return; }

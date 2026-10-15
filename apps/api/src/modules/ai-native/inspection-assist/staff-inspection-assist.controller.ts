@@ -29,6 +29,8 @@ export class StaffInspectionAssistController {
       return withInspectionRequestSignal(request, signal => this.requests.withRequest(request, async services => {
         const absent = () => { throw new InspectionAssistError('STORAGE_UNAVAILABLE'); };
         switch (operation) {
+          case 'history-read': return services.readHistory(input);
+          case 'receipt-host-read': return services.readReceiptHost(input);
           case 'host-read': return services.readHost(input);
           case 'template-read': return services.templates.read(input);
           case 'evidence-bind': return services.evidence ? services.evidence.bind(input) : absent();
@@ -49,7 +51,7 @@ export class StaffInspectionAssistController {
           case 'result-save': return (await services.saveRecognitionReview(input)).receipt;
           // Receipt recovery observes only the saved association. It must not
           // reopen current/withdrawn media or load a candidate review body.
-          case 'result-save-receipt': return services.recognitionResults.reconcileSave(input);
+          case 'result-save-receipt': return services.recognitionResults.readSavedReceipt(input);
           case 'submission-review': return services.submission ? services.submission.prepareReview(input) : absent();
           case 'submission-prepare': return services.submission ? services.submission.prepare(input) : absent();
           case 'submission-preparation': return services.submission ? services.submission.reconcilePreparation(input) : absent();
@@ -58,7 +60,7 @@ export class StaffInspectionAssistController {
           // initiate another inspection. Explicit submit remains separate.
           case 'submission-read': {
             if (!services.submission) return absent();
-            const receipt = (await services.readSubmissionReview(input)).receipt;
+            const receipt = await services.submission.readReceipt(input);
             return receipt.status === 'not_observed' || receipt.status === 'unavailable'
               ? { ...receipt, status: 'submission_unknown' as const, nextAction: 'manual_reconcile_original_action' as const }
               : receipt;

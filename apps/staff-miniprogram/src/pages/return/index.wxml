@@ -28,5 +28,7 @@
     <view wx:if="{{error}}" class="section small" style="color:var(--danger)">{{error}}</view>
     <view class="bottom-bar"><button class="btn btn--primary btn--block" loading="{{busy}}" disabled="{{busy || uploading || !allocations.length}}" bindtap="onSubmit">确认{{returnLabel}}</button></view>
   </block>
+  <button class="btn btn--secondary" disabled="{{aiInspectionHistoryLoading || !id}}" bindtap="onInspectionHistory">选择本人检查历史（只读）</button>
+  <text wx:if="{{aiInspectionHistoryMessage}}" role="status">{{aiInspectionHistoryMessage}}</text>
   <ai-inspection-assist id="ai-inspection-assist" hidden="{{!aiInspectionVisible}}" />
 </view>

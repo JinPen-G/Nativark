@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { runWithRequestIdentity } from '../../../common/request-identity';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
-import type { AiStaffInspectionHostProjection } from '@rental-os/shared';
+import type { AiStaffInspectionHostProjection, AiStaffInspectionReceiptHostProjection } from '@rental-os/shared';
+import { recognitionSaveReferenceSchema } from './inspection-recognition-save.association';
 import type { AiTaskInputSource } from '../task-input/task-input.ports';
 import type { PrismaClient } from '@prisma/client';
 import { InspectionActionAuthority } from './inspection-action.authority';
@@ -107,6 +108,39 @@ export class StaffInspectionRequestFactory {
     const services = composeInspectionAssist({ ...this.dependencies, credentials });
     const authority = new InspectionActionAuthority(this.dependencies.guard, credentials);
     return { ...services,
+      readHistory: async (value: unknown) => {
+        if (!services.drafts) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+        return services.drafts.readHistory(value);
+      },
+      readReceiptHost: async (value: unknown): Promise<AiStaffInspectionReceiptHostProjection> => {
+        if (!services.drafts) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+        const input = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId,
+          mode: z.literal('receipt_only'), recognitionSave: recognitionSaveReferenceSchema.optional() }).strict().parse(structuredClone(value));
+        const target = { orderId: input.orderId, allocationId: input.allocationId, templateId: input.templateId, stage: input.stage };
+        const selected = { ...target, draftId: input.draftId };
+        const before = await services.drafts.readHistorySelection(selected);
+        let recognitionSave: AiStaffInspectionReceiptHostProjection['recognitionSave'] = null;
+        if (input.recognitionSave) {
+          const reference = input.recognitionSave;
+          if (Object.entries(selected).some(([key, expected]) => reference[key as keyof typeof reference] !== expected)) {
+            throw new InspectionAssistError('BINDING_CHANGED');
+          }
+          const receipt = await services.recognitionResults.readSavedReceipt(input.recognitionSave);
+          if (receipt.status === 'found') recognitionSave = input.recognitionSave;
+        }
+        const after = await services.drafts.readHistorySelection(selected);
+        if (requestFingerprint(before) !== requestFingerprint(after)) throw new InspectionAssistError('ACCESS_DENIED');
+        let submissionReceipt = false;
+        if (services.submission && typeof this.dependencies.originalInspection?.receipts?.find === 'function') {
+          try { submissionReceipt = await authority.withAction(target, 'submit', async () => true); }
+          catch (error) { if (!(error instanceof InspectionAssistError) || error.code !== 'ACCESS_DENIED') throw error; }
+        }
+        const finalSelection = await services.drafts.readHistorySelection(selected);
+        if (requestFingerprint(after) !== requestFingerprint(finalSelection)) throw new InspectionAssistError('ACCESS_DENIED');
+        return { mode: 'receipt_only', serverEnabled: true, context: finalSelection.context, target, draftId: input.draftId,
+          recognitionSave, capabilities: { recognitionReceipt: recognitionSave !== null, submissionReceipt },
+          semantics: 'receipts_only_not_execution_permission' };
+      },
       readHost: async (value: unknown): Promise<AiStaffInspectionHostProjection> => {
         if (!services.drafts) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
         const detail = await services.drafts.read(structuredClone(value));
@@ -235,6 +269,7 @@ export function composeInspectionAssist(dependencies: Dependencies) {
     read: async (value: unknown) => (await selectResults(value)).read(value),
     readEvidence: async (value: unknown) => (await selectResults(value)).readEvidence(value),
     save: async (value: unknown) => (await selectResults(value)).save(value),
+    readSavedReceipt: (value: unknown) => primaryResults.readSavedReceipt(value),
     reconcileSave: async (value: unknown) => {
       const reference = structuredClone(value);
       const original = await primaryResults.readSavedReceipt(reference);

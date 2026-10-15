@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient, type AiInspectionDraft } from '@prisma/client';
 import { z } from 'zod';
-import type { AiInspectionActorScope, AiInspectionOperationResult, AiInspectionReceiptLookup, AiInspectionTarget } from '@rental-os/shared';
+import type { AiInspectionActorScope, AiInspectionOperationResult, AiInspectionReceiptLookup, AiInspectionTarget, AiStaffInspectionHistoryItem, AiStaffInspectionHistoryRequest } from '@rental-os/shared';
 import { InspectionAssistError } from './inspection-assist.validation';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { recognitionSaveAssociationSchema, type RecognitionSaveAssociation, type RecognitionSaveReference } from './inspection-recognition-save.association';
@@ -67,6 +67,34 @@ export class PrismaInspectionDraftRepository {
       orderBy: { id: 'asc' }, take: limit,
       select: { id: true, revision: true, status: true, orderId: true, allocationId: true, assetId: true,
         stage: true, templateId: true, templateVersion: true, bindingFingerprint: true, updatedAt: true } });
+  }
+
+  async history(scope: AiInspectionActorScope, query: AiStaffInspectionHistoryRequest) {
+    const rows = await this.db.aiInspectionDraft.findMany({ where: { ...scope, orderId: query.orderId, stage: query.stage,
+      ...(query.after ? { id: { gt: query.after } } : {}) }, orderBy: { id: 'asc' }, take: query.limit + 1,
+      select: { id: true, tenantId: true, workspaceId: true, ownerId: true, audience: true,
+        orderId: true, allocationId: true, templateId: true, stage: true, revision: true, status: true } });
+    const items: AiStaffInspectionHistoryItem[] = [];
+    for (const row of rows.slice(0, query.limit)) {
+      if (Object.entries(scope).some(([key, value]) => row[key as keyof typeof row] !== value)
+        || row.orderId !== query.orderId || row.stage !== query.stage) throw new InspectionAssistError('ACCESS_DENIED');
+      const operations = await this.db.aiInspectionOperation.findMany({ where: { ...scope, draftId: row.id }, orderBy: { id: 'asc' }, take: 21,
+        select: { tenantId: true, workspaceId: true, ownerId: true, audience: true, draftId: true, operationId: true,
+          fingerprint: true, expectedRevision: true, resultRevision: true, result: true } });
+      const recognitionSaves: AiStaffInspectionHistoryItem['recognitionSaves'] = [];
+      for (const operation of operations.slice(0, 20)) {
+        if (operation.draftId !== row.id || Object.entries(scope).some(([key, value]) => operation[key as keyof typeof operation] !== value)) {
+          throw new InspectionAssistError('ACCESS_DENIED');
+        }
+        const reference = this.decodeReceipt(operation, scope)?.recognitionSave?.reference;
+        if (reference && reference.orderId === row.orderId && reference.allocationId === row.allocationId
+          && reference.templateId === row.templateId && reference.stage === row.stage) recognitionSaves.push(structuredClone(reference));
+      }
+      items.push({ draftId: row.id, target: { orderId: row.orderId, allocationId: row.allocationId, templateId: row.templateId, stage: query.stage },
+        revision: row.revision, status: receiptResult.shape.status.parse(row.status), recognitionSaves,
+        recognitionSavesTruncated: operations.length > 20, recognitionReceipt: recognitionSaves.length ? 'references_available' : 'manual_reconcile' });
+    }
+    return { items, nextAfter: rows.length > query.limit ? items[items.length - 1].draftId : null };
   }
 
   async receipt(scope: AiInspectionActorScope, operationId: string, fingerprint: string,
