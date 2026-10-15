@@ -79,32 +79,40 @@ export class KnowledgeCitationSession {
       maxTotalBytes: z.number().int().min(1024).max(65536) }).strict(), value);
     await this.verify();
     const items: Array<Record<string, unknown>> = [];
+    const seen = new Set<string>();
+    let status: 'complete' | 'limit_exceeded' = 'complete';
     for (const id of input.sourceIds) {
-      if (items.some(item => item.sourceId === id)) throw new KnowledgeError('invalid_input');
+      if (seen.has(id)) throw new KnowledgeError('invalid_input');
+      seen.add(id);
       const entry = this.snapshot.sources.find(source => source.sourceId === id);
-      if (!entry) { items.push({ sourceId: id, status: 'unavailable' as const }); continue; }
-      try {
-        const chunk = await this.ports.read(structuredClone(entry.source));
-        await this.ports.check();
-        if (fingerprint(chunk.text) !== entry.contentFingerprint) {
-          items.push({ sourceId: id, status: 'unknown' as const }); continue;
+      let item: Record<string, unknown> = { sourceId: id, status: 'unavailable' };
+      if (entry) {
+        try {
+          const chunk = await this.ports.read(structuredClone(entry.source));
+          await this.ports.check();
+          if (fingerprint(chunk.text) !== entry.contentFingerprint) {
+            item = { sourceId: id, status: 'unknown' };
+          } else {
+            let snippet = chunk.text.slice(0, input.maxSnippetChars);
+            if (/[\uD800-\uDBFF]$/.test(snippet)) snippet = snippet.slice(0, -1);
+            item = { ...this.manifestEntry(entry), status: 'available' as const, snippet,
+              snippetFingerprint: fingerprint(snippet), truncated: snippet !== chunk.text,
+              trust: 'untrusted_data' as const };
+          }
+        } catch (error) {
+          item = { sourceId: id, status: error instanceof KnowledgeError && error.code === 'result_unknown' ? 'unknown' : 'unavailable' };
         }
-        let snippet = chunk.text.slice(0, input.maxSnippetChars);
-        if (/[\uD800-\uDBFF]$/.test(snippet)) snippet = snippet.slice(0, -1);
-        const item = { ...this.manifestEntry(entry), status: 'available' as const, snippet,
-          snippetFingerprint: fingerprint(snippet), truncated: snippet !== chunk.text,
-          trust: 'untrusted_data' as const };
-        const candidate = { items: [...items, item], trust: 'untrusted_data' as const };
-        if (Buffer.byteLength(JSON.stringify(candidate), 'utf8') > input.maxTotalBytes) {
-          return { items, status: 'limit_exceeded' as const, trust: 'untrusted_data' as const };
-        }
-        items.push(item);
-      } catch (error) {
-        items.push({ sourceId: id, status: error instanceof KnowledgeError && error.code === 'result_unknown' ? 'unknown' as const : 'unavailable' as const });
       }
+      // Metadata-only failures count too. Even a bounded prefix must finish
+      // current ACL/source validation before any earlier text can be returned.
+      if (Buffer.byteLength(JSON.stringify({ items: [...items, item], status: 'limit_exceeded', trust: 'untrusted_data' }), 'utf8') > input.maxTotalBytes) {
+        status = 'limit_exceeded';
+        break;
+      }
+      items.push(item);
     }
     await this.verify();
-    return { items, status: 'complete' as const, trust: 'untrusted_data' as const };
+    return { items, status, trust: 'untrusted_data' as const };
   }
   async recollect(input: unknown) {
     // Old sources may be invalid: check the current principal, not the old

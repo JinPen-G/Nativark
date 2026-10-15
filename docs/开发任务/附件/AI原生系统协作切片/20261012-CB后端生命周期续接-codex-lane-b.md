@@ -242,3 +242,25 @@ Node DATABASE_URL 固定 mysql://offline:offline@127.0.0.1:1/rental_os_offline�
 一次inline从新module provider取得实际factory，复用既有automation-request-bound初始化前缀（仅内存、避免重复ts-node注册，无node:test注册或脚本/fixture修改）：原return_exception→prepareCandidate→prepareInput→原影子Task create/readCreation→current人类view；无close grant拒绝；明确合成持久grant后close提交成功应答丢失返回unknown；原operation读取observed/closed，读不增加writes、Task仅创建一次；身份撤销后原operation拒绝。真实AuthService/ApiAuthGuard/automation及review/事务仓储实现不替换，DB/资源/权益与正式委托数据是既有fixture显式合成，不是实际部署。stdout `smoke=passed; exported actual server factory event/input/original shadow Task/human close lost ack/original receipt recovery; missing grant and revocation denied; no automatic business execution`，exit0。
 
 必要原API strict noEmit1024files、0diagnostics/exit0，diff check0，无tests/fixture/脚本变更。证据是原影子任务与人类办理/原键恢复，不是退款执行、模型建议、通知发送或Core修复。关闭待办不改变原检查事实；未调用真实DB/存储/HTTP/模型/支付，不安装、生产启用或调整AIN完成率。
+
+## 20261015 同步主线后的引用限额/撤回传播收口
+
+强制开工先核原HEAD0651b5e9、branch正确、tracked/index无WIP、无MERGE_HEAD/CHERRY_PICK_HEAD，再安全快进固定5faa55a5d5bda3f3ce9e17c74feae23bc0fcda4e，merge-base --is-ancestor exit0且HEAD为该固定提交；该历史包含原B成果。主线合入的UI/output/shared生成文件仅来自授权固定同步，本线不编辑或清理。读取正式需求AIN-R08、任务AIN10/19/20及本线/中央最新记录，不重做七项公共Gateway/runner/目录修复。
+
+实际缺陷在KnowledgeCitationSession.openManySafe：达到总字节上限提前return，跳过末尾verify/current ACL/撤回/版本复验；可能带回早先读到的旧片段。现统一累计item，超限只break，仍完成原最终verify才返回有界前缀；未知ID/失败占位项也计总字节（包括响应status/trust开销），重复输入仍拒绝，不回显不可见来源详情，不将撤权吞成partial旧文本。沿HumanKnowledgeContextService.beginCitations原真实消费者生效，无新factory/协议或持久缓存。
+
+一次inline调用实际composePersistedHumanKnowledge服务、Prisma仓储适配及原citation：文档create→parse→原index request/resume→publish→beginCitations两来源；maxTotalBytes1024返回一个有界片段/limit_exceeded，JSON字节不超限。包装原read端口只做可控时序，在第二个实际片段读完后执行真实management.withdraw；再次openManySafe必须拒绝而非提前返回第一片段。stdout `smoke=passed; actual knowledge lifecycle and citation consumer bounded prefix; withdrawal during second read denies early-limit return; no scripts/network/model; explicit offline db/identity policy doubles`，exit0。数据库与身份/动作政策来自既有lane-b-functional明确替身，不把它们称正式Auth/ACL部署证明。未新增或修改任何测试脚本/fixture，无模型调用。
+
+必要原API strict Compiler API noEmit778 files、0diagnostics/exit0，diff check0（CRLF提示不视失败）；preload为本树原prisma-offline，DATABASE_URL固定无效，write-root/TEMP/TMP/audit均本树，audit=output/inspection-lb05-tmp/20261015-citation-limit.audit。无真实HTTP/DB/DNS/存储/模型/支付、依赖安装、服务、共享生成、迁移、main/push或生产启用；作者局部验证不等于原AIN验收。原引用失效仍要求重新收集，不静默换正文或重派unknown。
+
+### 20261015 人类Memory提议入口同样保留原命令
+
+继续原同意服务核查，propose也在await current前持有caller可变对象。一次直接inline受控身份Promise实际复现：caller将memoryId/operationId/locale替换后，旧实现实际保存proposal-mutated而不是proposal-original（assertion失败，exit1）。现入口structuredClone后只把私有快照交原StructuredMemoryService；仍由原schema、动作授权、Prisma仓储及operation fingerprint校验，不能直接确认或增加自由文本类型。
+
+同一inline场景复验exit0：实际保存原ID/zh-CN/proposed；同原operationId和原payload重放返回revision1、仓储仅一条；permanent_authority非法偏好拒绝。未新增或修改测试、fixture、脚本。必要strict noEmit769files/0diagnostics/exit0；diff --check独立exit0。身份/DB/动作政策仍既有lane-b-functional明确离线替身，不能据此声称正式ACL或MySQL验收；预加载及固定无效DATABASE_URL不变，audit留本树output/inspection-lb05-tmp/20261015-memory-proposal.audit。无真实网络/模型/存储/业务提交，提议不是同意，尚未验证生产全链路。
+
+### 20261015 人类Memory变更在身份等待前冻结
+
+PersistentMemoryConsentService.change原来先检查caller原value.operation为modify/delete，再await current()，随后把同一可变对象交给允许confirm的底层。身份等待期间可被换成另一操作或内容。本片在任何await前structuredClone并对私有快照限定modify/delete，之后只交该快照；无法clone拒绝invalid_input。沿原StructuredMemoryService/CAS/operationId/confirmation仓储，不复制状态机、不给任意confirmationRecordId消费入口。
+
+一次inline实际PersistentMemoryConsentService及StructuredMemoryService/Prisma adapter，原lane-b-functional明确DB/身份政策替身：propose locale zh-CN；发起modify en-US时可控Auth Promise暂停，caller换成delete并移除preference；完成后仍proposed/en-US/revision2，原changeStatus同operationId/原payload可核；直接confirm命令invalid_input。stdout `smoke=passed; actual Memory modify snapshots before identity wait; caller delete mutation cannot change operation; same-key recovery; direct confirm refused; explicit offline db/auth policy doubles`，exit0。必要原strict noEmit769files、0diagnostics/exit0，diff check0。无测试脚本/fixture变更、无模型或真实DB/存储调用；修改候选不等于重新确认，撤销/删除仍原语义。
