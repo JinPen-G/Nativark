@@ -45,3 +45,18 @@ temp/
 备份.zip
 .claude/
 .worktrees/
+
+# Local design originals and downloaded references (keep runtime assets in apps).
+/Rental-OS_Brand-Assets/
+/参考资料/
+/apps/设计图/
+/apps/*设计图.png
+/apps/miniprogram/设计图/
+/apps/tenant-website/public/qa/
+
+# Generated screenshots, smoke reports and machine-local launch artifacts.
+output/
+playwright-report/
+test-results/
+/autocad_data.db
+project.private.config.json
