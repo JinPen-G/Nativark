@@ -2,7 +2,7 @@ import { z } from "zod";
 import { normalizeTenantModelBaseUrl } from "./tenant-model-config.service";
 import { ModelAdapterError, ModelGatewayError, modelProtocolRequestSchema, type AdapterResult, type AdapterStreamEvent, type ModelAdapter, type ModelFeature, type ModelProtocolRequest } from "./model-gateway.ports";
 import { MODEL_REQUEST_BYTES } from './model-response-limits';
-import { ChatCompletionsStream } from "./chat-completions-stream";
+import { ChatCompletionsStream, chatCompletionsUsageSchema } from "./chat-completions-stream";
 import Ajv, { type ValidateFunction } from 'ajv';
 import { AI_CONTRACT_DRAFT_VERSION, AI_TOOL_DRAFT_VERSION } from '@rental-os/shared';
 import { AI_NATIVE_COMPONENT_SCHEMAS } from '../../contracts/ai-native-schemas';
@@ -105,8 +105,7 @@ export interface ModelJsonTransport {
 const responseSchema = z.object({
   choices: z.array(z.object({ message: z.object({ content: z.string().nullable(), refusal: z.string().nullable().optional(), tool_calls: z.array(z.object({ id: z.string(), type: z.literal('function'), function: z.object({ name: z.string(), arguments: z.string() }).strict() }).strict()).max(8).optional() }),
     finish_reason: z.string().nullable().optional() })).length(1),
-  usage: z.object({ prompt_tokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-    completion_tokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) }).optional()
+  usage: chatCompletionsUsageSchema.optional()
 });
 
 /** OpenAI-compatible Chat Completions protocol. No fixed supplier or model. */

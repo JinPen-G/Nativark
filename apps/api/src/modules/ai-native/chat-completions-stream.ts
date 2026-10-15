@@ -1,7 +1,14 @@
 import { z } from "zod";
 import { ModelGatewayError, type AdapterResult, type ModelResponsePolicy, type ProtocolToolCall } from "./model-gateway.ports";
+const tokenCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+/** Protocol-owned counters, never an estimate or a price. Do not synthesize
+ * missing usage or replace contradicting provider totals with a guessed sum. */
+export const chatCompletionsUsageSchema = z.object({ prompt_tokens: tokenCount, completion_tokens: tokenCount,
+  total_tokens: tokenCount.optional() }).refine(usage => usage.total_tokens === undefined
+    || BigInt(usage.total_tokens) === BigInt(usage.prompt_tokens) + BigInt(usage.completion_tokens),
+  'Provider token counters disagree');
 const fragment = z.object({ index: z.number().int().min(0).max(7), id: z.string().min(1).max(128).optional(), type: z.literal('function').optional(), function: z.object({ name: z.string().max(64).optional(), arguments: z.string().max(16000).optional() }).strict().optional() }).strict();
-const frame = z.object({ choices: z.array(z.object({ index: z.literal(0), delta: z.object({ content: z.string().nullable().optional(), role: z.literal("assistant").optional(), tool_calls: z.array(z.unknown()).max(8).optional(), refusal: z.string().nullable().optional() }), finish_reason: z.string().nullable().optional() })).max(1), usage: z.object({ prompt_tokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER), completion_tokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) }).optional() });
+const frame = z.object({ choices: z.array(z.object({ index: z.literal(0), delta: z.object({ content: z.string().nullable().optional(), role: z.literal("assistant").optional(), tool_calls: z.array(z.unknown()).max(8).optional(), refusal: z.string().nullable().optional() }), finish_reason: z.string().nullable().optional() })).max(1), usage: chatCompletionsUsageSchema.optional() });
 /** Bounded incremental text/tool decoder; structured values are validated only at termination. */
 export class ChatCompletionsStream {
   private readonly decoder = new TextDecoder("utf-8", { fatal: true });
@@ -50,7 +57,11 @@ export class ChatCompletionsStream {
     if (!parsed.success) throw new ModelGatewayError("INVALID_RESPONSE");
     const value = parsed.data, choice = value.choices[0];
     if (value.usage) {
-      if (this.usage) throw new ModelGatewayError("INVALID_RESPONSE");
+      // Only a terminal usage frame (or a valid finishing choice) attests the
+      // completed response. An interim count must never settle later output.
+      if (this.usage || (!this.stopped && choice?.finish_reason !== 'stop' && choice?.finish_reason !== 'tool_calls')) {
+        throw new ModelGatewayError("INVALID_RESPONSE");
+      }
       this.usage = { inputTokens: value.usage.prompt_tokens, outputTokens: value.usage.completion_tokens };
     }
     if (!choice) return "";
