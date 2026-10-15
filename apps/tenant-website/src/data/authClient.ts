@@ -2,7 +2,8 @@
 // 令牌按租户隔离存储（每个租户官网是独立品牌，会话不跨租户），并在 401 时用 refresh token 自动续期一次。
 
 import { API_BASE } from './apiClient';
-import type { AiBookingHandoff, AiBookingSubmissionAcceptance, AiBookingSubmissionDecision, AiBookingSubmissionReceipt }
+import type { AiBookingHandoff, AiBookingSubmissionAcceptance, AiBookingSubmissionDecision, AiBookingSubmissionReceipt,
+  AiBookingAcceptanceReadRequest, AiBookingAcceptanceReadResponse }
   from '../../../../packages/shared/src/ai-booking-draft';
 import type { AiClientHostCapabilities } from '@rental-os/shared';
 
@@ -183,8 +184,12 @@ export const sessionApi = {
   availability(payload: unknown) { return authedJson<Record<string, unknown>>('/availability', { method: 'POST', body: JSON.stringify(payload) }); },
   createQuote(payload: unknown) { return authedJson<Record<string, unknown>>('/quotes', { method: 'POST', body: JSON.stringify(payload) }); },
   getQuote(id: string) { return authedJson<Record<string, unknown>>(`/quotes/${encodeURIComponent(id)}`); },
-  acceptBookingSubmission(input: { handoffRef: string }) {
-    return authedJson<AiBookingSubmissionAcceptance>('/ai-native/entry/booking-submissions/accept', { method: 'POST', body: JSON.stringify(input) });
+  async readBookingAcceptance(input: AiBookingAcceptanceReadRequest): Promise<AiBookingAcceptanceReadResponse> {
+    return parse(await authedFetch('/ai-native/entry/booking-submissions/acceptance/read',
+      { method: 'POST', body: JSON.stringify(input) }, false));
+  },
+  async acceptBookingSubmission(input: { handoffRef: string }): Promise<AiBookingSubmissionAcceptance> {
+    return parse(await authedFetch('/ai-native/entry/booking-submissions/accept', { method: 'POST', body: JSON.stringify(input) }, false));
   },
   async submitAcceptedBooking(input: AiBookingSubmissionDecision): Promise<AiBookingSubmissionReceipt> {
     // Late authorization failures do not prove the original business call was absent.

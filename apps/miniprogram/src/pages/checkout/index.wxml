@@ -2,19 +2,30 @@
 <view class="screen {{themeClass}}">
   <nav-bar title="确认订单"></nav-bar>
 
+  <view class="section">
+    <view class="card">
+      <view class="subtitle">核对原预约</view>
+      <view class="muted mt-16">输入此前的原预约交接引用，仅查询本人在当前服务的受理和提交结果，不重新准备或下单。</view>
+      <view class="input-box mt-16"><input value="{{aiReceiptLookup}}" maxlength="36" placeholder="原预约交接引用" disabled="{{aiReceiptOpening || submitting || (!aiEnabled && locked)}}" bindinput="onReceiptLookupInput" /></view>
+      <view wx:if="{{aiReceiptError}}" class="notice notice--warning mt-16">{{aiReceiptError}}</view>
+      <button class="btn btn--block mt-16" bindtap="onOpenOriginalReceipt" loading="{{aiReceiptOpening}}" disabled="{{aiReceiptOpening || submitting || (!aiEnabled && locked)}}">只读原受理与提交结果</button>
+    </view>
+  </view>
+
   <view wx:if="{{aiEnabled}}" class="section">
     <view class="card">
-      <view class="subtitle">原预约材料交接</view>
+      <view class="subtitle">{{aiReadOnly ? '原预约只读核对' : '原预约材料交接'}}</view>
       <view class="notice mt-16">材料和受理不代表建单。明确提交后只按原操作收据核对；付款和履约状态须在原订单页查看。</view>
       <view wx:if="{{aiStatus === 'unavailable' || aiStatus === 'disabled'}}" class="muted mt-16">材料不可用、已失效或无法映射，请回原人工入口。</view>
       <view wx:if="{{aiReference}}" class="mt-16" style="overflow-wrap:anywhere;word-break:break-all;">
-        <view>原引用：{{aiReference}}</view><view>修订：{{aiRevision}}</view>
-        <view>有效期：{{aiExpiresAt}}</view><view>原报价：{{aiQuoteId}}</view>
-        <view>原起止：{{startText}} / {{endText}}</view><view>时区：{{timeZone}}</view>
+        <view>原引用：{{aiReference}}</view>
+        <block wx:if="{{!aiReadOnly && aiRevision}}"><view>修订：{{aiRevision}}</view>
+          <view>有效期：{{aiExpiresAt}}</view><view>原报价：{{aiQuoteId}}</view>
+          <view>原起止：{{startText}} / {{endText}}</view><view>时区：{{timeZone}}</view></block>
       </view>
-      <button wx:if="{{aiStatus === 'idle' || aiStatus === 'available' || aiStatus === 'unavailable' || aiStatus === 'loading'}}" class="btn btn--primary btn--block mt-16" bindtap="onReadBookingHandoff" disabled="{{aiStatus === 'loading'}}" loading="{{aiStatus === 'loading'}}">读取原材料</button>
-      <button wx:if="{{aiStatus === 'available'}}" class="btn btn--primary btn--block mt-16" bindtap="onContinueBookingHandoff">人工继续：复验原报价</button>
-      <block wx:if="{{aiStatus === 'continued' || aiStatus === 'accepting' || aiStatus === 'accepted'}}">
+      <button wx:if="{{!aiReadOnly && (aiStatus === 'idle' || aiStatus === 'available' || aiStatus === 'unavailable' || aiStatus === 'loading')}}" class="btn btn--primary btn--block mt-16" bindtap="onReadBookingHandoff" disabled="{{aiStatus === 'loading'}}" loading="{{aiStatus === 'loading'}}">读取原材料</button>
+      <button wx:if="{{!aiReadOnly && aiStatus === 'available'}}" class="btn btn--primary btn--block mt-16" bindtap="onContinueBookingHandoff">人工继续：复验原报价</button>
+      <block wx:if="{{!aiReadOnly && (aiStatus === 'continued' || aiStatus === 'accepting' || aiStatus === 'accepted')}}">
         <view class="line" wx:for="{{aiSelection}}" wx:key="itemGroupId"><view style="overflow-wrap:anywhere;word-break:break-all;">商品引用：{{item.itemGroupId}}</view><view>数量：{{item.quantity}}</view></view>
         <view>履约：{{method === 'delivery' ? '配送' : '自取'}}；地点引用：{{aiLocationId}}</view>
         <view>归还地点：{{returnLabel}}</view><view wx:if="{{addressLabel}}">本人地址引用：{{addressLabel}}</view>
@@ -31,7 +42,7 @@
       <view wx:if="{{aiStatus === 'submitting' || aiStatus === 'checking'}}" class="muted mt-16">{{aiStatus === 'checking' ? '正在核对原操作收据…' : '正在提交原预约…'}}</view>
       <block wx:if="{{aiStatus === 'pending_reconcile'}}"><view class="notice notice--warning mt-16">结果仍待核对；没有找到收据也不代表未执行，不会自动再次下单。</view><button class="btn btn--primary btn--block mt-16" bindtap="onReadBookingSubmission" disabled="{{!aiReceiptAvailable}}">核对原提交结果</button></block>
       <block wx:if="{{aiStatus === 'order_observed'}}"><view class="notice mt-16">原订单已找到，付款和履约未据此确认。</view><button class="btn btn--primary btn--block mt-16" bindtap="onOpenAiOrder">查看原订单</button></block>
-      <button wx:if="{{aiSubmissionAvailable && (aiStatus === 'idle' || aiStatus === 'unavailable')}}" class="btn btn--block mt-16" bindtap="onReadBookingSubmission" disabled="{{!aiReceiptAvailable}}">只核对原提交，不再次下单</button>
+      <button wx:if="{{aiReceiptAvailable && (aiStatus === 'idle' || aiStatus === 'unavailable' || aiStatus === 'disabled')}}" class="btn btn--block mt-16" bindtap="onReadBookingSubmission" disabled="{{!aiReceiptAvailable}}">只核对原提交，不再次下单</button>
     </view>
   </view>
 

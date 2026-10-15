@@ -1,5 +1,7 @@
 import type {
   AiBookingHandoff,
+  AiBookingAcceptanceReadRequest,
+  AiBookingAcceptanceReadResponse,
   AiBookingSubmissionAcceptance,
   AiBookingSubmissionDecision,
   AiBookingSubmissionReceipt,
@@ -46,8 +48,11 @@ export async function createOrder(quoteId: string, idempotencyKey: string): Prom
 
 /** Explicit AI page host ports. Exporting these never enables or binds a host.
  * Routes are the authenticated alias published by AI_CLIENT_ENTRY_HTTP_DRAFT. */
+export function readBookingAcceptance(input: AiBookingAcceptanceReadRequest): Promise<AiBookingAcceptanceReadResponse> {
+  return request("/ai-native/entry/booking-submissions/acceptance/read", { method: "POST", data: input, replayAfterRefresh: false });
+}
 export function acceptBookingSubmission(input: { handoffRef: string }): Promise<AiBookingSubmissionAcceptance> {
-  return request<AiBookingSubmissionAcceptance>("/ai-native/entry/booking-submissions/accept", { method: "POST", data: input });
+  return request<AiBookingSubmissionAcceptance>("/ai-native/entry/booking-submissions/accept", { method: "POST", data: input, replayAfterRefresh: false });
 }
 export function submitAcceptedBooking(input: AiBookingSubmissionDecision): Promise<AiBookingSubmissionReceipt> {
   // A 401 may be a late current-identity recheck. Never let refresh resend a write.

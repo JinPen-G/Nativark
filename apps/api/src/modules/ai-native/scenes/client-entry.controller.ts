@@ -5,7 +5,7 @@ import { AI_CLIENT_ENTRY_HTTP_DRAFT, aiClientTaskCancelReceiptSchema,
   aiClientTaskInputReceiptReadResponseSchema, aiClientTaskModelControlResponseSchema, AI_TASK_DRAFT_VERSION,
   AI_CLIENT_QUOTE_PREPARATION_VERSION, aiClientQuotePreparationRequestSchema, aiClientQuoteConfirmationRequestSchema,
   aiClientQuotePreparationResponseSchema, aiClientQuotePreparationReadResponseSchema,
-  aiClientQuoteResultReadResponseSchema } from '@rental-os/shared';
+  aiClientQuoteResultReadResponseSchema, aiBookingAcceptanceReadRequestSchema, aiBookingAcceptanceReadResponseSchema } from '@rental-os/shared';
 import { z } from 'zod';
 import { AiClientEntryError } from './client-entry-action';
 import { AiTaskRepositoryError } from '../ai-task.repository';
@@ -19,7 +19,7 @@ export const AI_CLIENT_ENTRY_APPLICATION = Symbol('AI_CLIENT_ENTRY_APPLICATION')
 type Application = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
   'readHostCapabilities' | 'issueAction' | 'createBookingDraft' | 'chooseBookingDraft' | 'readBookingDraft' |
   'handoffBookingDraft' | 'readBookingHandoff' | 'readBookingOperation' |
-  'acceptBookingSubmission' | 'submitAcceptedBooking' | 'readBookingSubmission' | 'readTaskSnapshot' | 'readTaskEvents' |
+  'acceptBookingSubmission' | 'readBookingAcceptance' | 'submitAcceptedBooking' | 'readBookingSubmission' | 'readTaskSnapshot' | 'readTaskEvents' |
   'readOrderExplanation' | 'readSource' | 'requestOriginalTaskCancellation' | 'reconcileOriginalTaskInputCancellation' |
   'readOriginalTaskModelInput' | 'submitOriginalTaskModelInput' | 'readOriginalTaskModelInputReceipt' |
   'startOriginalTaskModel' | 'recoverOriginalTaskModel' | 'reconcileOriginalTaskModel' | 'continueOriginalTaskModelInput' |
@@ -274,10 +274,19 @@ export class AiClientEntryController {
     return this.respond(() => this.application.readBookingOperation(request, body));
   }
 
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingAcceptance) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readBookingAcceptance(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(async () => {
+      const value = await this.application.readBookingAcceptance(request, aiBookingAcceptanceReadRequestSchema.parse(body));
+      const result = aiBookingAcceptanceReadResponseSchema.safeParse(value);
+      if (!result.success || Buffer.byteLength(JSON.stringify(result.data), 'utf8') > 8192) throw new AiTaskRepositoryError('AI_RESOURCE_UNAVAILABLE');
+      return result.data;
+    }, 'read_booking_acceptance');
+  }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.acceptBookingSubmission)
   acceptBookingSubmission(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     // Same handoff re-read can recover an acceptance; it does not submit an order.
-    return this.respond(() => this.application.acceptBookingSubmission(request, body), 'accept_booking_submission');
+    return this.respond(() => this.application.acceptBookingSubmission(request, body), 'read_booking_acceptance');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.submitAcceptedBooking)
   submitAcceptedBooking(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
