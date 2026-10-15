@@ -253,6 +253,12 @@ Node DATABASE_URL 固定 mysql://offline:offline@127.0.0.1:1/rental_os_offline�
 
 必要原API strict Compiler API noEmit778 files、0diagnostics/exit0，diff check0（CRLF提示不视失败）；preload为本树原prisma-offline，DATABASE_URL固定无效，write-root/TEMP/TMP/audit均本树，audit=output/inspection-lb05-tmp/20261015-citation-limit.audit。无真实HTTP/DB/DNS/存储/模型/支付、依赖安装、服务、共享生成、迁移、main/push或生产启用；作者局部验证不等于原AIN验收。原引用失效仍要求重新收集，不静默换正文或重派unknown。
 
+### 20261015 人类Memory提议入口同样保留原命令
+
+继续原同意服务核查，propose也在await current前持有caller可变对象。一次直接inline受控身份Promise实际复现：caller将memoryId/operationId/locale替换后，旧实现实际保存proposal-mutated而不是proposal-original（assertion失败，exit1）。现入口structuredClone后只把私有快照交原StructuredMemoryService；仍由原schema、动作授权、Prisma仓储及operation fingerprint校验，不能直接确认或增加自由文本类型。
+
+同一inline场景复验exit0：实际保存原ID/zh-CN/proposed；同原operationId和原payload重放返回revision1、仓储仅一条；permanent_authority非法偏好拒绝。未新增或修改测试、fixture、脚本。必要strict noEmit769files/0diagnostics/exit0；diff --check独立exit0。身份/DB/动作政策仍既有lane-b-functional明确离线替身，不能据此声称正式ACL或MySQL验收；预加载及固定无效DATABASE_URL不变，audit留本树output/inspection-lb05-tmp/20261015-memory-proposal.audit。无真实网络/模型/存储/业务提交，提议不是同意，尚未验证生产全链路。
+
 ### 20261015 人类Memory变更在身份等待前冻结
 
 PersistentMemoryConsentService.change原来先检查caller原value.operation为modify/delete，再await current()，随后把同一可变对象交给允许confirm的底层。身份等待期间可被换成另一操作或内容。本片在任何await前structuredClone并对私有快照限定modify/delete，之后只交该快照；无法clone拒绝invalid_input。沿原StructuredMemoryService/CAS/operationId/confirmation仓储，不复制状态机、不给任意confirmationRecordId消费入口。

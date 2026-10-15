@@ -227,7 +227,12 @@ export class PersistentMemoryConsentService {
   }
 
   async propose(value: unknown): Promise<AiMemoryDraft> {
-    return this.memory.propose(await this.current(), value);
+    // Preserve the human's original proposal across current-identity awaits.
+    // Validation and operation binding still belong to StructuredMemoryService.
+    let input: unknown;
+    try { input = structuredClone(value); }
+    catch { throw new KnowledgeError('invalid_input'); }
+    return this.memory.propose(await this.current(), input);
   }
 
   async previewChange(value: unknown) {
