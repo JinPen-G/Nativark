@@ -104,6 +104,18 @@ export interface AiBookingSubmissionAcceptance {
   execution: 'not_attested';
 }
 
+export const AI_BOOKING_ACCEPTANCE_READ_VERSION = 'ain-booking-acceptance-read-1' as const;
+export type AiBookingAcceptanceReadRequest = { handoffRef: string; contactPhone?: string };
+export type AiBookingAcceptanceReadResponse = {
+  contractVersion: typeof AI_BOOKING_ACCEPTANCE_READ_VERSION;
+  handoffRef: string;
+  operationKey: string;
+  currentUse: 'not_authorized_by_receipt';
+  execution: 'not_attested';
+  retryable: false;
+} & ({ state: 'observed'; acceptance: AiBookingSubmissionAcceptance; nextAction: 'read_original_submission' }
+  | { state: 'unknown'; acceptance: null; nextAction: 'read_original_acceptance' });
+
 export interface AiBookingSubmissionDecision {
   acceptanceRef: string;
   decision: 'submit_original_booking';

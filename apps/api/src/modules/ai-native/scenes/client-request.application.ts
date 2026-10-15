@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { aiClientOrderExplanationReadRequestSchema, aiClientSourceReadRequestSchema,
   aiClientTaskCancelRequestSchema, aiClientTaskInputSubmissionRequestSchema, AI_TOOL_DRAFT_VERSION,
-  AI_TASK_DRAFT_VERSION, aiClientTaskModelResultReadResponseSchema } from '@rental-os/shared';
+  AI_TASK_DRAFT_VERSION, aiClientTaskModelResultReadResponseSchema, AI_BOOKING_ACCEPTANCE_READ_VERSION,
+  aiBookingAcceptanceReadRequestSchema } from '@rental-os/shared';
 import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host';
 import type { ApiAuthGuard } from '../../../common/api-auth.guard';
 import { getRequestIdentity, runWithRequestIdentity } from '../../../common/request-identity';
@@ -355,6 +356,13 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     return !!port && (port as unknown) === dependencies.client && ['prepareOrderSubmission', 'readOrderSubmission', 'createOrder']
       .every(key => typeof port[key as keyof typeof port] === 'function');
   };
+  const hasReceiptPort = () => !!dependencies.bookingSubmission && (dependencies.bookingSubmission as unknown) === dependencies.client
+    && typeof dependencies.bookingSubmission.readOrderSubmission === 'function';
+  const receiptPort = () => {
+    requireEntry();
+    if (!hasReceiptPort()) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'original_booking_receipt_not_assembled');
+    return dependencies.bookingSubmission!;
+  };
   const submissionPort = () => {
     if (!hasSubmissionPort()) {
       throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'original_booking_submission_not_assembled');
@@ -414,7 +422,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
   const readSubmission = async (request: AiClientApplicationRequest, bound: Bound, acceptance: Awaited<ReturnType<typeof loadAcceptance>>) => {
     const { row, material, policyFingerprint } = freezeOriginalInput(structuredClone(acceptance));
     const result = await originalBookingCall(request, bound, { quoteId: material.quoteId }, false,
-      identity => submissionPort().readOrderSubmission(identity, structuredClone(material.accepted), material.operationKey));
+      identity => receiptPort().readOrderSubmission(identity, structuredClone(material.accepted), material.operationKey));
     const receipt = structuredClone(result);
     const latest = await loadAcceptance(bound, row.id);
     if (latest.policyFingerprint !== policyFingerprint) {
@@ -763,31 +771,31 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         return freezeOriginalInput(result);
       });
     },
-    /** Observe the original page acceptance by its exact input, without
-     * preparing another acceptance or requiring a still-usable quote. */
     async readBookingAcceptance(request: AiClientApplicationRequest, value: unknown) {
-      const command = parseEntry(submissionDraft, structuredClone(value));
-      if (!server.entry || !taskDependencies) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'entry_disabled');
+      requireEntry();
+      const command = parseEntry(aiBookingAcceptanceReadRequestSchema, structuredClone(value));
       return withBinding(structuredClone(request), true, 'order', async bound => {
-        if (!bound.identity) throw new AiClientEntryError('AI_ACCESS_DENIED', 'client_required');
-        const scope = scopeOf(bound), policy = new AiClientPolicyAuthority(taskDependencies, taskDependencies, randomUUID(), clock);
+        if (!taskDependencies || !bound.identity) throw new AiClientEntryError('AI_ACCESS_DENIED', 'client_required');
+        const scope = scopeOf(bound), operationKey = `booking-order:${jsonHash({ scope, handoffRef: command.handoffRef })}`;
+        const policy = new AiClientPolicyAuthority(taskDependencies, taskDependencies, randomUUID(), clock);
         const subject = { ...scope, identity: structuredClone(bound.identity) };
         const before = await policy.authorize(subject, 'read');
-        const operationKey = `booking-order:${jsonHash({ scope, handoffRef: command.handoffRef })}`;
         const row = await repository.findOperation(scope, operationKey);
-        if (!row) {
-          await bound.assertCurrent();
-          assertReadPolicyUnchanged(before, await policy.authorize(subject, 'read'));
-          return freezeOriginalInput({ state: 'unknown' as const, operationKey, retryable: false as const,
-            nextAction: 'read_original_acceptance' as const, execution: 'not_attested' as const,
-            absenceSemantics: 'not_proof_of_no_persistence' as const });
+        let acceptance: ReturnType<typeof acceptedView> | null = null;
+        if (row) {
+          if (row.inputHash !== jsonHash(command)) throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_accepted_input_changed');
+          const existing = await loadAcceptance(bound, row.id);
+          if (jsonHash(existing.row) !== jsonHash(row)) throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_acceptance_changed');
+          acceptance = acceptedView(existing.row, existing.material);
         }
-        if (row.inputHash !== jsonHash(command)) throw new AiClientEntryError('AI_REVISION_CONFLICT', 'booking_accepted_input_changed');
-        const original = await loadAcceptance(bound, row.id);
         await bound.assertCurrent();
-        assertReadPolicyUnchanged(before, await policy.authorize(subject, 'read'));
-        return freezeOriginalInput({ state: 'observed' as const, ...acceptedView(original.row, original.material),
-          currentUse: 'not_authorized_by_receipt' as const, retryable: false as const });
+        const after = await policy.authorize(subject, 'read');
+        assertReadPolicyUnchanged(before, after);
+        return freezeOriginalInput({ contractVersion: AI_BOOKING_ACCEPTANCE_READ_VERSION,
+          state: acceptance ? 'observed' as const : 'unknown' as const,
+          handoffRef: command.handoffRef, operationKey, acceptance,
+          currentUse: 'not_authorized_by_receipt' as const, execution: 'not_attested' as const,
+          retryable: false as const, nextAction: acceptance ? 'read_original_submission' as const : 'read_original_acceptance' as const });
       });
     },
     /** Explicit human booking-page request, not an AI Tool or approval bypass. */
@@ -822,7 +830,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
     },
     async readBookingSubmission(request: AiClientApplicationRequest, value: unknown) {
       request = structuredClone(request);
-      submissionPort(); const command = parseEntry(acceptedRef, structuredClone(value));
+      receiptPort(); const command = parseEntry(acceptedRef, structuredClone(value));
       return withBinding(request, true, 'order', async bound => readSubmission(request, bound,
         await loadAcceptance(bound, command.acceptanceRef)));
     },
@@ -917,7 +925,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         if (!bound.identity) throw new AiClientEntryError('AI_ACCESS_DENIED', 'client_required');
         const identity = bound.identity, subject = { ...scopeOf(bound), identity };
         const readGrant = async () => {
-          try { return await authority.authorize(subject, 'capabilities'); }
+          try { return await authority.authorize(subject, 'read'); }
           catch (error) {
             const code = error instanceof AiTaskRepositoryError && error.code === 'AI_ACCESS_DENIED'
               ? 'AI_ACCESS_DENIED' : 'AI_RESOURCE_UNAVAILABLE';
@@ -925,25 +933,36 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
           }
         };
         const grant = await readGrant();
+        let creationAllowed = false;
+        if (grant.policy.allowCreate) {
+          try {
+            const first = await authority.authorize(subject, 'capabilities');
+            const second = await authority.authorize(subject, 'capabilities');
+            assertReadPolicyUnchanged(first, second);
+            if (jsonHash(second.policy) !== jsonHash(grant.policy)) throw new AiClientEntryError('AI_ACCESS_DENIED', 'host_policy_changed');
+            creationAllowed = true;
+          } catch (error) {
+            if (!(error instanceof AiTaskRepositoryError) || !['AI_ACCESS_DENIED', 'AI_RESOURCE_UNAVAILABLE'].includes(error.code)) throw error;
+          }
+        }
         await bound.assertCurrent();
         const latest = await readGrant();
-        if (grant.policyHash !== latest.policyHash || latest.policy.expiresAt <= clock()) {
-          throw new AiClientEntryError('AI_ACCESS_DENIED', 'host_policy_changed');
-        }
+        assertReadPolicyUnchanged(grant, latest);
+        const bookingReceiptRead = latest.policy.allowRead && hasReceiptPort();
         const entryActions: AiClientHostCapabilities['capabilities']['entryActions'] = [];
-        if (latest.policy.allowCreate && typeof dependencies.client.getOrder === 'function') entryActions.push('OPEN_ORDER');
-        const bookingDrafts = latest.policy.allowCreate && identity.customerType === 'personal'
+        if (creationAllowed && typeof dependencies.client.getOrder === 'function') entryActions.push('OPEN_ORDER');
+        const bookingDrafts = creationAllowed && identity.customerType === 'personal'
           && typeof dependencies.client.getQuote === 'function' && typeof dependencies.client.bookingOptions === 'function';
         if (bookingDrafts) entryActions.push('CREATE_BOOKING_DRAFT', 'OPEN_BOOKING');
         const result = aiClientHostCapabilitiesSchema.parse({
-          contractVersion: AI_CLIENT_HOST_CAPABILITIES_VERSION, enabled: entryActions.length > 0, audience: 'customer', surface,
+          contractVersion: AI_CLIENT_HOST_CAPABILITIES_VERSION, enabled: entryActions.length > 0 || bookingReceiptRead, audience: 'customer', surface,
           channel: server.channel, customerId: identity.customerId, customerType: identity.customerType,
           tenantCode: server.tenantCode, serviceCode: server.serviceCode,
           scope: { kind: 'workspace', tenantId: subject.tenantId, workspaceId: subject.workspaceId },
           policy: { revision: latest.policy.revision, allowRead: latest.policy.allowRead, allowCreate: latest.policy.allowCreate },
           releaseRevision, observedAt: observedAt.toISOString(),
           expiresAt: new Date(Math.min(observedAt.getTime() + lifetimeMs, latest.policy.expiresAt.getTime())).toISOString(),
-          capabilities: { entryActions, bookingDrafts, savedDeliveryAddresses: bookingDrafts
+          capabilities: { entryActions, bookingDrafts, bookingReceiptRead, savedDeliveryAddresses: bookingDrafts
             && typeof dependencies.addresses?.list === 'function' && typeof dependencies.addresses.requireOwnAddress === 'function' },
           authorization: 'observation_only_recheck_each_action'
         });

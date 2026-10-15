@@ -1,6 +1,6 @@
 import { AI_ENTRY_ACTION_CONTRACT_VERSION, AI_CUSTOMER_ENTRY_SURFACES } from './ai-entry-action-draft';
 import { AI_KNOWLEDGE_POLICY_MANAGEMENT_VERSION } from './ai-knowledge-policy-management-draft';
-import { AI_BOOKING_DRAFT_CONTRACT_VERSION, AI_BOOKING_DRAFT_STATES, AI_BOOKING_INPUT_SOURCES } from './ai-booking-draft';
+import { AI_BOOKING_DRAFT_CONTRACT_VERSION, AI_BOOKING_DRAFT_STATES, AI_BOOKING_INPUT_SOURCES, AI_BOOKING_ACCEPTANCE_READ_VERSION } from './ai-booking-draft';
 import { RENTAL_FULFILLMENT_MODES } from './core';
 import { AI_CLIENT_HOST_CAPABILITIES_VERSION } from './ai-client-entry-draft-schemas';
 
@@ -58,7 +58,7 @@ export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
     releaseRevision: id, observedAt: date, expiresAt: date,
     capabilities: object({ entryActions: { type: 'array', maxItems: 3, uniqueItems: true,
       items: { enum: ['OPEN_ORDER', 'CREATE_BOOKING_DRAFT', 'OPEN_BOOKING'] } },
-      bookingDrafts: { type: 'boolean' }, savedDeliveryAddresses: { type: 'boolean' } }),
+      bookingDrafts: { type: 'boolean' }, savedDeliveryAddresses: { type: 'boolean' }, bookingReceiptRead: { type: 'boolean' } }),
     authorization: literal('observation_only_recheck_each_action') }),
   AiKnowledgePreparationTargetSpecDraft: object({ version: literal('knowledge-prepared-target-1'), operationKey: knowledgeId,
     upload: object({ documentId: { ...knowledgeId, maxLength: 36 }, fileName: { type: 'string', minLength: 1, maxLength: 180 },
@@ -71,6 +71,16 @@ export const AI_ENTRY_MANAGEMENT_DRAFT_SCHEMAS = {
     expectedRevision: literal(1), confirm: literal('bind_knowledge_upload') }),
   AiBookingSelection: selection,
   AiBookingSubmissionAcceptanceRequest: object({ handoffRef: uuid, contactPhone: { type: 'string', maxLength: 32 } }, ['handoffRef']),
+  AiBookingAcceptanceReadRequest: object({ handoffRef: uuid, contactPhone: { type: 'string', maxLength: 32 } }, ['handoffRef']),
+  AiBookingAcceptanceReadResponse: { oneOf: [
+    object({ contractVersion: literal(AI_BOOKING_ACCEPTANCE_READ_VERSION), handoffRef: uuid, operationKey: id,
+      currentUse: literal('not_authorized_by_receipt'), execution: literal('not_attested'), retryable: literal(false),
+      state: literal('observed'), acceptance: { $ref: '#/components/schemas/AiBookingSubmissionAcceptance' },
+      nextAction: literal('read_original_submission') }),
+    object({ contractVersion: literal(AI_BOOKING_ACCEPTANCE_READ_VERSION), handoffRef: uuid, operationKey: id,
+      currentUse: literal('not_authorized_by_receipt'), execution: literal('not_attested'), retryable: literal(false),
+      state: literal('unknown'), acceptance: { type: 'null' }, nextAction: literal('read_original_acceptance') })
+  ] },
   AiBookingSubmissionSelection: object({ acceptanceRef: uuid }),
   AiBookingSubmissionDecision: object({ acceptanceRef: uuid, decision: literal('submit_original_booking') }),
   AiBookingSubmissionAcceptance: object({ acceptanceRef: uuid, handoffRef: uuid, bookingDraftId: uuid,

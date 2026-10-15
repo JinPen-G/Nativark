@@ -1,12 +1,37 @@
 import type { AiBookingHandoff, AiBookingSubmissionAcceptance, AiBookingSubmissionDecision, AiBookingSubmissionReceipt,
+  AiBookingAcceptanceReadRequest, AiBookingAcceptanceReadResponse,
   RentalQuoteSnapshotV1 } from "@rental-os/shared";
+
+export function normalizeBookingAcceptanceObservation(value: AiBookingAcceptanceReadResponse, handoffRef: string): AiBookingAcceptanceReadResponse {
+  const id = (x: unknown) => typeof x === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(x);
+  const uuid = (x: unknown) => typeof x === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.test(x);
+  if (!value || JSON.stringify(value).length > 8192 || value.contractVersion !== "ain-booking-acceptance-read-1"
+    || value.handoffRef !== handoffRef || !uuid(handoffRef) || !id(value.operationKey) || value.retryable !== false
+    || value.currentUse !== "not_authorized_by_receipt" || value.execution !== "not_attested") throw Error("invalid_acceptance_observation");
+  const base = { contractVersion: value.contractVersion, handoffRef, operationKey: value.operationKey,
+    currentUse: "not_authorized_by_receipt" as const, execution: "not_attested" as const, retryable: false as const };
+  if (value.state === "unknown" && value.acceptance === null && value.nextAction === "read_original_acceptance") {
+    return { ...base, state: "unknown", acceptance: null, nextAction: "read_original_acceptance" };
+  }
+  const receipt = value.acceptance;
+  if (value.state !== "observed" || value.nextAction !== "read_original_submission" || !receipt
+    || !uuid(receipt.acceptanceRef) || !uuid(receipt.bookingDraftId) || receipt.handoffRef !== handoffRef
+    || receipt.operationKey !== value.operationKey || !id(receipt.quoteId) || receipt.execution !== "not_attested"
+    || !Number.isSafeInteger(receipt.selectionRevision) || receipt.selectionRevision < 1 || receipt.selectionRevision > 4294967294
+    || !/^[a-f0-9]{64}$/u.test(receipt.inputFingerprint)) throw Error("invalid_acceptance_observation");
+  return { ...base, state: "observed", nextAction: "read_original_submission", acceptance: {
+    acceptanceRef: receipt.acceptanceRef, handoffRef, bookingDraftId: receipt.bookingDraftId, selectionRevision: receipt.selectionRevision,
+    inputFingerprint: receipt.inputFingerprint, quoteId: receipt.quoteId, operationKey: receipt.operationKey, execution: "not_attested" } };
+}
 
 /** Local instance binding, not a serializable property or authorization credential. */
 export interface CustomerBookingHost {
   enabled: boolean;
+  mode: "interactive" | "receipt_only";
   handoffRef: string;
   capability: { tenantCode: string; serviceCode: string; customerId: string; tenantId: string; workspaceId: string; releaseRevision: string };
-  readBookingHandoff(input: { handoffRef: string }): Promise<AiBookingHandoff>;
+  readBookingHandoff?(input: { handoffRef: string }): Promise<AiBookingHandoff>;
+  readBookingAcceptance?(input: AiBookingAcceptanceReadRequest): Promise<AiBookingAcceptanceReadResponse>;
   acceptBookingSubmission?(input: { handoffRef: string }): Promise<AiBookingSubmissionAcceptance>;
   submitAcceptedBooking?(input: AiBookingSubmissionDecision): Promise<AiBookingSubmissionReceipt>;
   readBookingSubmission?(input: { acceptanceRef: string }): Promise<AiBookingSubmissionReceipt>;
@@ -35,13 +60,17 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
     ? JSON.parse(JSON.stringify(originalAcceptance)) : undefined;
   let attempted = Boolean(acceptance);
   const sameContext = () => JSON.stringify(current()) === JSON.stringify(identity);
-  const eligible = () => bound.enabled === true && typeof bound.readBookingHandoff === "function"
+  const eligible = () => bound.enabled === true
+    && ((bound.mode === "interactive" && typeof bound.readBookingHandoff === "function")
+      || (bound.mode === "receipt_only" && typeof bound.readBookingAcceptance === "function" && typeof bound.readBookingSubmission === "function"))
     && identity.customerId && identity.customerId === bound.capability.customerId
     && identity.serviceCode === bound.capability.serviceCode && identity.tenantCode === bound.capability.tenantCode
     && bound.capability.releaseRevision && bound.capability.tenantId && bound.capability.workspaceId && (bound.isCurrent?.() ?? true);
-  const submissionAvailable = () => eligible() && [bound.acceptBookingSubmission, bound.submitAcceptedBooking, bound.readBookingSubmission]
+  const submissionAvailable = () => eligible() && bound.mode === "interactive" && [bound.acceptBookingSubmission, bound.submitAcceptedBooking, bound.readBookingSubmission]
     .every(method => typeof method === "function");
-  const emit = (next: CustomerHandoffView) => { view = { ...next, submissionAvailable: Boolean(submissionAvailable()), receiptAvailable: Boolean(acceptance && submissionAvailable()) };
+  const canReconcile = () => Boolean(eligible() && typeof bound.readBookingSubmission === "function"
+    && (acceptance || typeof bound.readBookingAcceptance === "function"));
+  const emit = (next: CustomerHandoffView) => { view = { ...next, submissionAvailable: Boolean(submissionAvailable()), receiptAvailable: canReconcile() };
     if (active && sameContext()) publish(view); };
   const validateAcceptance = (value: AiBookingSubmissionAcceptance) => {
     const copy = JSON.parse(JSON.stringify(value)) as AiBookingSubmissionAcceptance;
@@ -98,6 +127,7 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
     if (!active || pending) return;
     if (attempted) { emit({ ...view, status: "pending_reconcile" }); return; }
     if (!sameContext() || !eligible()) { emit({ status: "disabled", handoff: null, quote: null }); return; }
+    if (bound.mode !== "interactive" || !bound.readBookingHandoff) { emit({ status: "pending_reconcile", handoff: null, quote: null }); return; }
     const before = view.handoff, epoch = ++generation; pending = true;
     emit({ status: "loading", handoff: null, quote: null });
     try {
@@ -126,8 +156,8 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
     finally { if (epoch === generation) pending = false; }
   };
   const action = async (kind: "accept" | "submit" | "reconcile") => {
-    if (!active || pending || !sameContext() || !submissionAvailable()) return;
-    if (kind === "reconcile" && !acceptance) return;
+    if (!active || pending || !sameContext() || !eligible()) return;
+    if (kind === "reconcile" ? !canReconcile() : !submissionAvailable()) return;
     if ((kind === "accept" && (attempted || view.status !== "continued"))
       || (kind === "submit" && (attempted || !acceptance || view.status !== "accepted"))) return;
     const epoch = ++generation; pending = true;
@@ -135,14 +165,24 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
     emit({ ...view, status: kind === "accept" ? "accepting" : kind === "submit" ? "submitting" : "checking", receipt: null });
     const valid = () => active && generation === epoch && sameContext() && (bound.isCurrent?.() ?? true);
     try {
-      if (kind === "accept" || !acceptance) {
+      if (kind === "accept") {
+        attempted = true;
         const accepted = validateAcceptance(await bound.acceptBookingSubmission!({ handoffRef: bound.handoffRef }));
         if (!valid()) return;
         acceptance = accepted;
+      } else if (kind === "reconcile" && bound.readBookingAcceptance) {
+        const observation = normalizeBookingAcceptanceObservation(await bound.readBookingAcceptance({ handoffRef: bound.handoffRef }), bound.handoffRef);
+        if (!valid()) return;
+        if (observation.state === "unknown") {
+          acceptance = undefined; emit({ status: "pending_reconcile", handoff: null, quote: null, receipt: null }); return;
+        }
+        const restored = validateAcceptance(observation.acceptance);
+        if (acceptance && JSON.stringify(restored) !== JSON.stringify(validateAcceptance(acceptance))) throw Error("acceptance_changed");
+        acceptance = restored;
       }
       if (!valid()) return;
       if (acceptance) acceptance = validateAcceptance(acceptance);
-      if (kind === "accept") { emit({ ...view, status: "accepted" }); return; }
+      if (kind === "accept") { attempted = false; emit({ ...view, status: "accepted" }); return; }
       const original = acceptance!;
       // Once a business call was attempted, never call it again. Reconcile only.
       if (kind === "submit") attempted = true;
@@ -151,7 +191,7 @@ export function createCustomerBookingConsumer(host: CustomerBookingHost, current
         : await bound.readBookingSubmission!({ acceptanceRef: original.acceptanceRef }));
       if (!valid()) return;
       emit({ ...view, status: receipt.state === "observed" ? "order_observed" : "pending_reconcile", receipt });
-    } catch { if (valid()) emit({ status: kind === "accept" ? "unavailable" : "pending_reconcile",
+    } catch { if (valid()) emit({ status: "pending_reconcile",
       handoff: null, quote: null, receipt: null }); }
     finally { if (epoch === generation) pending = false; }
   };

@@ -30,15 +30,20 @@ export function composeClientOriginalBookingFlow(application: Application) {
       // Existing material persistence uses an exact operation key/hash and
       // current independent client policy. No draft/choice/approval is created.
       const material = await application.prepare(currentRequest, before.operation);
-      const after = await resolve(currentRequest, command);
-      if (!after.operation || requestFingerprint(after.read) !== requestFingerprint(before.read)) {
+      try {
+        const after = await resolve(currentRequest, command);
+        if (!after.operation || requestFingerprint(after.read) !== requestFingerprint(before.read)) {
+          throw new AiClientMaterialError('AI_CLIENT_RESULT_UNKNOWN');
+        }
+        const action = await application.issueAction(currentRequest,
+          { actionCode: 'CREATE_BOOKING_DRAFT', materialRef: material.materialRef });
+        return freezeOriginalInput({ originalQuote: before.read.source, material, action,
+          draft: 'not_created' as const, humanSelection: 'required_before_handoff' as const,
+          pageAcceptance: 'not_attempted' as const, orderExecution: 'not_attempted' as const });
+      } catch {
+        // Persistence succeeded; a later failure cannot authorize a second preparation.
         throw new AiClientMaterialError('AI_CLIENT_RESULT_UNKNOWN');
       }
-      const action = await application.issueAction(currentRequest,
-        { actionCode: 'CREATE_BOOKING_DRAFT', materialRef: material.materialRef });
-      return freezeOriginalInput({ originalQuote: before.read.source, material, action,
-        draft: 'not_created' as const, humanSelection: 'required_before_handoff' as const,
-        pageAcceptance: 'not_attempted' as const, orderExecution: 'not_attempted' as const });
     },
     async readOperation(request: AiClientApplicationRequest, value: unknown) {
       const command = freezeOriginalInput(parseEntry(commandSchema, structuredClone(value)));
@@ -77,8 +82,11 @@ export function composeClientOriginalBookingFlow(application: Application) {
     },
     /** The original page acceptance and business receipt remain separate from
      * draft handoff. These are the real existing independently guarded methods. */
+    readCurrentMaterial: application.readSource.bind(application),
     readPagePreparation: application.readBookingPreparation.bind(application),
+    readPageAcceptance: application.readBookingAcceptance.bind(application),
     acceptPage: application.acceptBookingSubmission.bind(application),
+    submitPage: application.submitAcceptedBooking.bind(application),
     readSubmission: application.readBookingSubmission.bind(application),
     readDraftOperation: application.readBookingOperation.bind(application)
   });

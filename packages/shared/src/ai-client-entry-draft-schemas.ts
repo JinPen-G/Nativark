@@ -1,10 +1,11 @@
 import { z } from 'zod';
 import { AI_CUSTOMER_ENTRY_SURFACES } from './ai-entry-action-draft';
 import { AI_TASK_DRAFT_VERSION } from './ai-task-draft';
+import { AI_BOOKING_ACCEPTANCE_READ_VERSION } from './ai-booking-draft';
 import { AI_TASK_INPUT_DRAFT_VERSION, isAiTaskInputContractDraft, isAiTaskInputSubmissionDraft,
   type AiTaskInputContractDraft, type AiTaskInputSubmissionDraft } from './ai-task-input-draft';
 
-export const AI_CLIENT_HOST_CAPABILITIES_VERSION = 'ain-client-host-capabilities-1' as const;
+export const AI_CLIENT_HOST_CAPABILITIES_VERSION = 'ain-client-host-capabilities-2' as const;
 const id = z.string().min(1).max(191).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 /** Reads bind the original creation/material reference; no caller task, owner or scope. */
 export const aiClientTaskReadRequestSchema = z.object({ creationKey: id.max(128), materialRef: z.string().uuid() }).strict();
@@ -88,6 +89,23 @@ export const aiClientTaskEventsReadRequestSchema = aiClientTaskReadRequestSchema
 export const aiClientOrderExplanationReadRequestSchema = z.object({ orderId: id,
   question: z.enum(['status', 'fees']).default('status') }).strict();
 export const aiClientSourceReadRequestSchema = z.object({ materialRef: z.string().uuid() }).strict();
+export const aiBookingAcceptanceReadRequestSchema = z.object({ handoffRef: z.string().uuid(), contactPhone: z.string().max(32).optional() }).strict();
+const bookingAcceptance = z.object({ acceptanceRef: z.string().uuid(), handoffRef: z.string().uuid(),
+  bookingDraftId: z.string().uuid(), selectionRevision: z.number().int().min(1).max(4294967294),
+  inputFingerprint: z.string().regex(/^[a-f0-9]{64}$/u), quoteId: id, operationKey: id,
+  execution: z.literal('not_attested') }).strict();
+const acceptanceObservation = { contractVersion: z.literal(AI_BOOKING_ACCEPTANCE_READ_VERSION), handoffRef: z.string().uuid(),
+  operationKey: id, currentUse: z.literal('not_authorized_by_receipt'), execution: z.literal('not_attested'), retryable: z.literal(false) };
+export const aiBookingAcceptanceReadResponseSchema = z.discriminatedUnion('state', [
+  z.object({ ...acceptanceObservation, state: z.literal('observed'), acceptance: bookingAcceptance,
+    nextAction: z.literal('read_original_submission') }).strict(),
+  z.object({ ...acceptanceObservation, state: z.literal('unknown'), acceptance: z.null(),
+    nextAction: z.literal('read_original_acceptance') }).strict()
+]).superRefine((value, context) => {
+  if (value.acceptance && (value.acceptance.handoffRef !== value.handoffRef || value.acceptance.operationKey !== value.operationKey)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: 'Inconsistent acceptance observation' });
+  }
+});
 export const aiClientHostCapabilitiesRequestSchema = z.object({}).strict();
 export const aiClientHostCapabilitiesSchema = z.object({
   contractVersion: z.literal(AI_CLIENT_HOST_CAPABILITIES_VERSION),
@@ -99,7 +117,7 @@ export const aiClientHostCapabilitiesSchema = z.object({
   releaseRevision: id, observedAt: z.string().datetime({ offset: true }), expiresAt: z.string().datetime({ offset: true }),
   capabilities: z.object({
     entryActions: z.array(z.enum(['OPEN_ORDER', 'CREATE_BOOKING_DRAFT', 'OPEN_BOOKING'])).max(3),
-    bookingDrafts: z.boolean(), savedDeliveryAddresses: z.boolean()
+    bookingDrafts: z.boolean(), savedDeliveryAddresses: z.boolean(), bookingReceiptRead: z.boolean()
   }).strict(),
   authorization: z.literal('observation_only_recheck_each_action')
 }).strict().superRefine((value, context) => {
@@ -107,8 +125,8 @@ export const aiClientHostCapabilitiesSchema = z.object({
   if (value.surface !== (value.channel === 'web' ? 'tenant_website' : 'client_miniprogram')
     || Date.parse(value.expiresAt) <= Date.parse(value.observedAt)
     || new Set(actions).size !== actions.length
-    || value.enabled !== (actions.length > 0)
-    || (!value.policy.allowCreate && (value.enabled || value.capabilities.bookingDrafts || value.capabilities.savedDeliveryAddresses))
+    || value.enabled !== (actions.length > 0 || value.capabilities.bookingReceiptRead)
+    || (!value.policy.allowCreate && (actions.length > 0 || value.capabilities.bookingDrafts || value.capabilities.savedDeliveryAddresses))
     || value.capabilities.bookingDrafts !== (actions.includes('CREATE_BOOKING_DRAFT') && actions.includes('OPEN_BOOKING'))
     || (value.capabilities.savedDeliveryAddresses && !value.capabilities.bookingDrafts)) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'Inconsistent client host capabilities' });
