@@ -181,12 +181,24 @@ export class AiOriginalScenesController {
   }
 }
 
-/** Shared original recovery transport. Mount this OR an execution controller
- * at this prefix, never both. It has no start/recover/resume/approval methods. */
+/** Observation transport can be mounted without a model/runner. Mount it OR
+ * a derived execution controller at this prefix, never both. */
 @Controller(AI_SCENE_MODEL_HTTP_DRAFT.basePath)
-export class AiOriginalSceneRecoveryController {
+export class AiOriginalSceneObservationController {
   constructor(@Inject(AI_ORIGINAL_SCENE_RECOVERY_REQUESTS)
-    private readonly observations: ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>) {}
+    protected readonly observations: ReturnType<typeof composeRequestBoundOriginalTaskRecoveryReaders>) {}
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTaskPage(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.observations.readTaskPage(request, body));
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTaskEvents(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.observations.readTaskEvents(request, body));
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskUsage) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  readTaskUsage(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.observations.readTaskUsage(request, body));
+  }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readRecoverySnapshot) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readRecoverySnapshot(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => this.observations.readRecoverySnapshot(request, body));
@@ -199,21 +211,9 @@ export class AiOriginalSceneRecoveryController {
   readCancellationReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => this.observations.readCancellationReceipt(request, body), 'read_cancellation_receipt');
   }
-  @Post(AI_SCENE_MODEL_HTTP_DRAFT.requestCancellationIntent) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  requestCancellationIntent(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.observations.requestCancellationIntent(request, body), 'read_cancellation_receipt');
-  }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readCancellationSettlementReceipt) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readCancellationSettlementReceipt(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => this.observations.readCancellationSettlementReceipt(request, body), 'read_cancellation_settlement_receipt');
-  }
-  @Post(AI_SCENE_MODEL_HTTP_DRAFT.settleUnstartedCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  settleUnstartedCancellation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.observations.settleUnstartedCancellation(request, body), 'read_cancellation_settlement_receipt');
-  }
-  @Post(AI_SCENE_MODEL_HTTP_DRAFT.settleReleasedInputCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
-  settleReleasedInputCancellation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
-    return respondAiScene(() => this.observations.settleReleasedInputCancellation(request, body), 'read_cancellation_settlement_receipt');
   }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readAnswer) @HttpCode(200) @Header('Cache-Control', 'no-store')
   readAnswer(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
@@ -230,6 +230,23 @@ export class AiOriginalSceneRecoveryController {
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.reopenOpeningModelSource) @HttpCode(200) @Header('Cache-Control', 'no-store')
   reopenOpeningModelSource(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => this.observations.reopenOpeningModelSource(request, body));
+  }
+}
+
+/** Original cancellation is deliberately absent from the standard read host. */
+@Controller(AI_SCENE_MODEL_HTTP_DRAFT.basePath)
+export class AiOriginalSceneRecoveryController extends AiOriginalSceneObservationController {
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.requestCancellationIntent) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  requestCancellationIntent(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.observations.requestCancellationIntent(request, body), 'read_cancellation_receipt');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.settleUnstartedCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  settleUnstartedCancellation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.observations.settleUnstartedCancellation(request, body), 'read_cancellation_settlement_receipt');
+  }
+  @Post(AI_SCENE_MODEL_HTTP_DRAFT.settleReleasedInputCancellation) @HttpCode(200) @Header('Cache-Control', 'no-store')
+  settleReleasedInputCancellation(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
+    return respondAiScene(() => this.observations.settleReleasedInputCancellation(request, body), 'read_cancellation_settlement_receipt');
   }
 }
 
@@ -331,12 +348,6 @@ export class AiOriginalSceneModelController extends AiOriginalSceneModelActionsC
   cancelSettingsTask(@Req() request: AiSceneHttpRequest, @Body() body: unknown) {
     return respondAiScene(() => this.fullModel.cancelSettingsTask(request, body));
   }
-  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage)
-  readTaskPage(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.fullModel.readTaskPage(request, body)); }
-  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents)
-  readTaskEvents(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.fullModel.readTaskEvents(request, body)); }
-  @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskUsage)
-  readTaskUsage(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.fullModel.readTaskUsage(request, body)); }
   @Post(AI_SCENE_MODEL_HTTP_DRAFT.readTaskScene)
   readTaskScene(@Req() request: AiSceneHttpRequest, @Body() body: unknown) { return respondAiScene(() => this.fullModel.readTaskScene(request, body)); }
 }

@@ -15,8 +15,9 @@ import { FileStorageRuntimeService } from '../integrations/file-storage.runtime.
 import { AiRetentionService } from './privacy/retention.service';
 import { AI_RETENTION_REQUESTS, type AiRetentionRequestFactory } from './privacy/retention.controller';
 import { AiTaskRepositoryError } from './ai-task.repository';
-import { composeRequestBoundOriginalScenes } from './scenes/request-bound-scenes.application';
-import { AI_ORIGINAL_SCENE_REQUESTS } from './scenes/original-scenes.controller';
+import { composeRequestBoundOriginalScenes, composeRequestBoundOriginalTaskRecoveryReaders,
+  type RequestBoundOriginalSceneDependencies } from './scenes/request-bound-scenes.application';
+import { AI_ORIGINAL_SCENE_REQUESTS, AI_ORIGINAL_SCENE_RECOVERY_REQUESTS } from './scenes/original-scenes.controller';
 import { StaffInspectionRequestFactory } from './inspection-assist/inspection-assist.composition';
 import { AI_STAFF_INSPECTION_REQUESTS, AI_STAFF_INSPECTION_ENABLED,
   AI_STAFF_INSPECTION_OPERATIONS } from './inspection-assist/staff-inspection-assist.controller';
@@ -62,15 +63,25 @@ export const AI_NATIVE_STAFF_RECEIPT_PROVIDERS: FactoryProvider[] = [{
  * Only the existing order-fact preparation is selected for this first host;
  * model execution and business writes have no registered driver in this graph.
  */
-export const AI_NATIVE_ORIGINAL_REQUEST_PROVIDER: FactoryProvider = {
-  provide: AI_ORIGINAL_SCENE_REQUESTS,
-  inject: [PrismaService, AuthService, ApiAuthGuard, SubscriptionService, RentalCoreService,
-    RentalBusinessService, RentalWorkspaceReportRepository, MembershipService, PaymentRuntimeService],
-  useFactory: (db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
+const originalSceneInjection = [PrismaService, AuthService, ApiAuthGuard, SubscriptionService, RentalCoreService,
+  RentalBusinessService, RentalWorkspaceReportRepository, MembershipService, PaymentRuntimeService];
+function originalSceneDependencies(db: PrismaService, auth: AuthService, guard: ApiAuthGuard, subscriptions: SubscriptionService,
     core: RentalCoreService, business: RentalBusinessService, reports: RentalWorkspaceReportRepository,
-    memberships: MembershipService, payments: PaymentRuntimeService) => composeRequestBoundOriginalScenes({
-      db, auth, guard, subscriptions, core, business, reports, memberships, payments,
+    memberships: MembershipService, payments: PaymentRuntimeService): RequestBoundOriginalSceneDependencies {
+  return { db, auth, guard, subscriptions, core, business, reports, memberships, payments,
       creationRules: [{ sceneCode: 'order_explanation', sceneVersion: '1', revision: 1,
-        audiences: ['operator'], requiredPermissions: ['rental-os:order:view'], maxInputAgeMs: 300000 }]
-    }, { enabled: true, audience: 'operator' })
+        audiences: ['operator'], requiredPermissions: ['rental-os:order:view'], maxInputAgeMs: 300000 }] };
+}
+export const AI_NATIVE_ORIGINAL_REQUEST_PROVIDER: FactoryProvider = {
+  provide: AI_ORIGINAL_SCENE_REQUESTS, inject: originalSceneInjection,
+  useFactory: (...args: Parameters<typeof originalSceneDependencies>) =>
+    composeRequestBoundOriginalScenes(originalSceneDependencies(...args), { enabled: true, audience: 'operator' })
+};
+
+/** Existing current-task policies gate each read. No model route, new-call
+ * entitlement, runner driver or pricing producer is constructed for history. */
+export const AI_NATIVE_ORIGINAL_OBSERVATION_PROVIDER: FactoryProvider = {
+  provide: AI_ORIGINAL_SCENE_RECOVERY_REQUESTS, inject: originalSceneInjection,
+  useFactory: (...args: Parameters<typeof originalSceneDependencies>) =>
+    composeRequestBoundOriginalTaskRecoveryReaders(originalSceneDependencies(...args), { enabled: true, audience: 'operator' })
 };

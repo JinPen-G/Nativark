@@ -7,7 +7,7 @@ import {
   UnauthorizedException
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, RentalCategoryCode,
+import { AI_SCENE_REQUEST_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT, AI_MEMORY_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_MANAGEMENT_HTTP_DRAFT, AI_KNOWLEDGE_POLICY_HTTP_DRAFT, AI_TEXT_CAPABILITY_HTTP_DRAFT, AI_BUDGET_MANAGEMENT_HTTP_DRAFT, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT, AI_SCENE_PLAN_POLICY_HTTP_DRAFT, RentalCategoryCode,
   type RentalCapability, type SystemUserRow } from "@rental-os/shared";
 import { AuthService } from "../modules/auth/auth.service";
 import { ClientAuthService } from "../modules/client/client-auth.service";
@@ -180,10 +180,18 @@ const originalOrderReadRoutes = new Set(['', AI_SCENE_REQUEST_HTTP_DRAFT.read,
   AI_SCENE_REQUEST_HTTP_DRAFT.reconcile, AI_SCENE_REQUEST_HTTP_DRAFT.material,
   AI_SCENE_REQUEST_HTTP_DRAFT.recovery].map(action =>
   `POST /${AI_SCENE_REQUEST_HTTP_DRAFT.basePath}${action ? `/${action}` : ''}`));
+const originalTaskObservationRoutes = new Set([
+  AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage, AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents, AI_SCENE_MODEL_HTTP_DRAFT.readTaskUsage,
+  AI_SCENE_MODEL_HTTP_DRAFT.readRecoverySnapshot, AI_SCENE_MODEL_HTTP_DRAFT.readTakeoverReceipt,
+  AI_SCENE_MODEL_HTTP_DRAFT.readCancellationReceipt, AI_SCENE_MODEL_HTTP_DRAFT.readCancellationSettlementReceipt,
+  AI_SCENE_MODEL_HTTP_DRAFT.readAnswer, AI_SCENE_MODEL_HTTP_DRAFT.readModelResult,
+  AI_SCENE_MODEL_HTTP_DRAFT.reopenModelSource, AI_SCENE_MODEL_HTTP_DRAFT.reopenOpeningModelSource,
+].map(action => `POST /${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`));
 
 export function requiredPermissions(method: string, path: string) {
   if (method.toUpperCase() === 'POST' && /^\/ai-native\/privacy\/(?:cleanup|receipt|receipts)$/u.test(path)) return ['system:params:manage'];
   if (originalOrderReadRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:view'];
+  if (originalTaskObservationRoutes.has(`${method.toUpperCase()} ${path}`)) return ['rental-os:order:view'];
   if (method === 'POST' && [AI_SCENE_PLAN_POLICY_HTTP_DRAFT.read, AI_SCENE_PLAN_POLICY_HTTP_DRAFT.change]
     .some(action => path === `/${AI_SCENE_PLAN_POLICY_HTTP_DRAFT.basePath}/${action}`)) return ['system:params:manage'];
   if (method === 'POST' && [AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.configure, AI_ORIGINAL_TASK_ACTION_POLICY_HTTP_DRAFT.read,

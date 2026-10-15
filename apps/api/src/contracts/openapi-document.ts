@@ -1,7 +1,7 @@
 import { AI_NATIVE_COMPONENT_SCHEMAS } from "./ai-native-schemas";
 import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "./ai-task-draft-schemas";
 import { AI_LEAF_COMPONENT_SCHEMAS } from "./ai-leaf-components";
-import { AI_CLIENT_ENTRY_HTTP_DRAFT } from "@rental-os/shared";
+import { AI_CLIENT_ENTRY_HTTP_DRAFT, AI_SCENE_MODEL_HTTP_DRAFT } from "@rental-os/shared";
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -2031,6 +2031,28 @@ export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
   { method: 'post', path: '/api/ai-native/scene-requests/reconcile', tag: 'AI Native', operationId: 'reconcileOriginalOrderFactsRequest',
     summary: 'Observe the exact original request key after an uncertain acknowledgement. Absence is not permission to create another request.',
     permissions: ['rental-os:order:view'], requestSchema: 'AiSceneRequestCreateDraft' },
+  ...([
+    [AI_SCENE_MODEL_HTTP_DRAFT.readTaskPage, objectOf({ limit: { type: 'integer', minimum: 1, maximum: 50 },
+      cursor: { type: 'string', maxLength: 512 }, status: { type: 'string', maxLength: 64 },
+      sceneCode: { type: 'string', maxLength: 191 } }, [], false)],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readTaskEvents, objectOf({ original: { $ref: '#/components/schemas/AiSceneRequestReadDraft' },
+      after: { type: 'string', pattern: '^(0|[1-9][0-9]{0,19})$' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, ['original', 'after', 'limit'], false)],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readTaskUsage, 'AiSceneTaskUsageReadDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readRecoverySnapshot, objectOf({ original: { $ref: '#/components/schemas/AiSceneRequestReadDraft' }, runId: { type: 'string', minLength: 1, maxLength: 191 } }, ['original', 'runId'], false)],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readTakeoverReceipt, objectOf({ original: { $ref: '#/components/schemas/AiSceneRequestReadDraft' },
+      runId: { type: 'string', minLength: 1, maxLength: 191 }, expectedTaskRevision: { type: 'integer', minimum: 1, maximum: 4294967294 },
+      expectedRunRevision: { type: 'integer', minimum: 1, maximum: 4294967294 }, expectedFencingToken: { type: 'string', pattern: '^[1-9][0-9]{0,19}$' } },
+      ['original', 'runId', 'expectedTaskRevision', 'expectedRunRevision', 'expectedFencingToken'], false)],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readCancellationReceipt, 'AiSceneModelCancelDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readCancellationSettlementReceipt, 'AiSceneModelCancelDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readAnswer, 'AiSceneModelResumeDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.readModelResult, 'AiSceneModelResultReadDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.reopenModelSource, 'AiSceneModelSourceReadDraft'],
+    [AI_SCENE_MODEL_HTTP_DRAFT.reopenOpeningModelSource, 'AiSceneOpeningModelSourceReadDraft'],
+  ] as const).map(([action, requestSchema]) => ({ method: 'post' as const,
+    path: `/api/${AI_SCENE_MODEL_HTTP_DRAFT.basePath}/${action}`, tag: 'AI Native', operationId: `observeOriginalAiTask_${action.replace(/\//gu, '_')}`,
+    permissions: ['rental-os:order:view'], authRequired: true, requestSchema,
+    summary: 'Current owner, scope, original resource and action policy are rechecked. Read-only original task/receipt observation without a model, runner, new execution grant or budget reservation. Missing result policy/ACL remains unavailable.' })),
   { method: "get", path: "/api/rental/v1/category-adoption/candidates", tag: "Rental Core", operationId: "listCategoryAdoptionCandidates", summary: "List same-category published target IDs and labels allowed for the session tenant/space; operation=upgrade|restore; no bodies, pilot lists or platform drafts", permissions: ["rental-os:category:adopt"], responseSchema: "GenericObject" },
   { method: "get", path: "/api/rental/v1/category-adoption/{targetId}/preparation", tag: "Rental Core", operationId: "previewCategoryAdoptionPreparation", summary: "Read current-session-space candidate fields, differences and staged inputs; operation=upgrade|restore, no active facts changed", permissions: ["rental-os:category:adopt"], responseSchema: "GenericObject" },
   { method: "put", path: "/api/rental/v1/category-adoption/{targetId}/preparation", tag: "Rental Core", operationId: "saveCategoryAdoptionPreparation", summary: "Stage target-version model/asset attribute patches with source and entity revision checks; does not adopt or publish prices/rules", permissions: ["rental-os:category:adopt"], requestSchema: objectOf({
