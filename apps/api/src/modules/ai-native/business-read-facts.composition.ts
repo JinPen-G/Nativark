@@ -1,7 +1,7 @@
 import type { RentalCoreService } from '../rental-core/rental-core.service';
 import { ModelGatewayError } from './model-gateway.ports';
 import { AiAvailabilityReadFactsService } from './availability-read-facts.service';
-import { AiCatalogReadFactsService } from './catalog-read-facts.service';
+import { AiCatalogReadFactsService, type AiCatalogReadPort } from './catalog-read-facts.service';
 import { AiMembershipCandidateReadFactsService, type AiMembershipCandidateReadPort } from './membership-candidate-read-facts.service';
 import { AiOrderReadFactsService } from './order-read-facts.service';
 import type { AiBusinessReadAuthority } from './business-read-route.authority';
@@ -15,7 +15,7 @@ import type { AiOrderRouteContextAuthority } from './order-route-context.authori
  * dispatch handler.
  */
 export interface AiBusinessReadFactsCompositionInput {
-  core: Pick<RentalCoreService, 'listItemGroups' | 'availability' | 'getOrder'> & Partial<Pick<RentalCoreService, 'listItemGroupsPage'>>;
+  core: Pick<RentalCoreService, 'availability' | 'getOrder'> & AiCatalogReadPort;
   memberships: AiMembershipCandidateReadPort;
   businessAuthority: AiBusinessReadAuthority;
   orderAuthority: Pick<AiOrderRouteContextAuthority, 'withOrderRead'>;
@@ -59,7 +59,7 @@ const requireMethod = (value: unknown, name: string): void => {
 export function composeAiBusinessReadFacts(
   input: AiBusinessReadFactsCompositionInput
 ): AiBusinessReadFactsComposition {
-  requireMethod(input?.core, 'listItemGroups');
+  requireMethod(input?.core, 'listItemGroupsPage');
   requireMethod(input?.core, 'availability');
   requireMethod(input?.core, 'getOrder');
   requireMethod(input?.memberships, 'listPersonalOptions');

@@ -12,14 +12,19 @@ export const aiCatalogReadInputSchema = z.object({ limit: z.number().int().min(1
 const input = aiCatalogReadInputSchema;
 
 export type AiCatalogReadAuthority = AiBusinessReadAuthority;
-export type AiCatalogReadPort = Pick<RentalCoreService, 'listItemGroups'> & Partial<Pick<RentalCoreService, 'listItemGroupsPage'>>;
+/** Bounded-only hosts need not expose the legacy unbounded method. The legacy
+ * shape is retained for older compositions, but read() never calls it. */
+export type AiCatalogReadPort = Pick<RentalCoreService, 'listItemGroupsPage'>
+  | (Pick<RentalCoreService, 'listItemGroups'> & Partial<Pick<RentalCoreService, 'listItemGroupsPage'>>);
 export interface AiCatalogReadProjection { contractVersion: typeof AI_CONTRACT_DRAFT_VERSION; requestId: string; audience: AiExecutionContext['audience']; scope: AiExecutionContext['scope']; observedAt: string; items: Array<{ id: string; code: string; name: string; categoryCode: string; status: 'enabled' | 'disabled'; unit: string }>;
   truncated: boolean; nextCursor: string | null; configurationVersion: string; source: 'persisted_workspace_configuration'; }
 
 /** Bounded read-only projection; it does not reserve stock, calculate price or select a customer. */
 export class AiCatalogReadFactsService {
   constructor(private readonly core: AiCatalogReadPort, private readonly authority: AiCatalogReadAuthority, private readonly clock: () => Date = () => new Date()) {
-    if (!core || typeof core.listItemGroups !== 'function' || typeof authority?.withRead !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+    if (!core || (typeof core.listItemGroupsPage !== 'function'
+      && (!('listItemGroups' in core) || typeof core.listItemGroups !== 'function'))
+      || typeof authority?.withRead !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
   }
   async read(value: unknown, expectedContext?: AiExecutionContext): Promise<AiCatalogReadProjection> {
     const request = input.safeParse(structuredClone(value)); if (!request.success) throw new ModelGatewayError('INVALID_REQUEST');

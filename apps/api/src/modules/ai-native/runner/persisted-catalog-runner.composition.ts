@@ -40,7 +40,7 @@ type ReadonlyRunnerDependencies = {
   db: PrismaClient;
   authorization: Omit<PersistedTaskAuthorizationDependencies, 'db' | 'clock'>;
   guard: Pick<ApiAuthGuard, 'canActivate'>;
-  core: Partial<Pick<RentalCoreService, 'listItemGroups' | 'listItemGroupsPage' | 'availability' | 'getOrder'>>;
+  core: Partial<Pick<RentalCoreService, 'listItemGroupsPage' | 'availability' | 'getOrder'>>;
   memberships?: AiMembershipCandidateReadPort;
   /** Same current Core configuration producer as the original diagnostic
    * composition, supplied by the server host rather than a task payload. */
@@ -54,7 +54,7 @@ type ReadonlyRunnerDependencies = {
   monotonic?: () => number;
   clock?: AiTaskRunnerClock;
 };
-export function composePersistedCatalogTaskRunner(input: ReadonlyRunnerDependencies & { core: Pick<RentalCoreService, 'listItemGroups'> }) {
+export function composePersistedCatalogTaskRunner(input: ReadonlyRunnerDependencies & { core: Pick<RentalCoreService, 'listItemGroupsPage'> }) {
   return composeReadonly(input, 'rental.catalog.search');
 }
 export function composePersistedAvailabilityTaskRunner(input: ReadonlyRunnerDependencies & { core: Pick<RentalCoreService, 'availability'> }) {
@@ -225,7 +225,7 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
       : tool === 'tenant.opening.diagnose' || tool === 'operations.risks.list'
         ? !input?.diagnosticCore || (tool === 'tenant.opening.diagnose'
           ? typeof input?.business?.tenantReadiness : typeof input?.reports?.getBoundedOperationReport) !== 'function'
-        : (tool === 'rental.catalog.search' ? typeof input?.core?.listItemGroups
+        : (tool === 'rental.catalog.search' ? typeof input?.core?.listItemGroupsPage
         : tool === 'rental.availability.check' ? typeof input?.core?.availability : typeof input?.core?.getOrder) !== 'function')) throw unavailable();
   const authorization = composePersistedTaskAuthorization({ ...input.authorization, db: input.db, clock: input.wall });
   const source = new PrismaTaskPlanInputSource(input.db, authorization.authority, authorization.execution, input.wall, tool);
@@ -274,9 +274,7 @@ function composeReadonly(input: ReadonlyRunnerDependencies, tool: PersistedReado
           ? await new AiMembershipCandidateReadFactsService(input.memberships!, boundAuthority, input.wall)
             .read(aiMembershipCandidateReadInputSchema.parse(stored.input), stored.context)
           : tool === 'rental.catalog.search'
-          ? await new AiCatalogReadFactsService({ listItemGroups: input.core.listItemGroups!.bind(input.core),
-            ...(typeof input.core.listItemGroupsPage === 'function'
-              ? { listItemGroupsPage: input.core.listItemGroupsPage.bind(input.core) } : {}) }, boundAuthority, input.wall)
+          ? await new AiCatalogReadFactsService({ listItemGroupsPage: input.core.listItemGroupsPage!.bind(input.core) }, boundAuthority, input.wall)
             .read(aiCatalogReadInputSchema.parse(stored.input))
           : tool === 'rental.availability.check'
             ? await new AiAvailabilityReadFactsService({ availability: input.core.availability!.bind(input.core) }, boundAuthority, input.wall).read(aiAvailabilityReadInputSchema.parse(stored.input))
