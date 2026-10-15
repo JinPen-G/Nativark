@@ -6487,3 +6487,34 @@ model AiTaskEvent {
   @@id([scopeId, taskId, cursor])
   @@map("ai_task_events")
 }
+
+model AiGatewayPriceRecord {
+  id                String @id @db.Char(64)
+  scopeId           String @db.VarChar(36)
+  configurationHash String @db.Char(64)
+  priceVersion      String @db.VarChar(64)
+  sourceReference   String @db.VarChar(191)
+  payloadHash       String @db.Char(64)
+  payload           Json
+  createdAt         DateTime @default(now()) @db.DateTime(3)
+  inputBounds       AiGatewayInputBoundRecord[]
+
+  @@unique([scopeId, id], map: "ai_gateway_price_records_scope_id")
+  @@unique([scopeId, configurationHash, priceVersion], map: "ai_gateway_price_records_version")
+  @@unique([scopeId, sourceReference], map: "ai_gateway_price_records_source")
+  @@map("ai_gateway_price_records")
+}
+
+model AiGatewayInputBoundRecord {
+  id            String @id @db.Char(64)
+  scopeId       String @db.VarChar(36)
+  invocationId  String @db.VarChar(36)
+  priceRecordId String @db.Char(64)
+  payloadHash   String @db.Char(64)
+  payload       Json
+  createdAt     DateTime @default(now()) @db.DateTime(3)
+  priceRecord   AiGatewayPriceRecord @relation(fields: [scopeId, priceRecordId], references: [scopeId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([scopeId, invocationId], map: "ai_gateway_input_bounds_invocation")
+  @@map("ai_gateway_input_bound_records")
+}
