@@ -179,7 +179,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
       case 'booking_quote':
         requireBooking();
         if (!bound.identity) return fail('AI_CLIENT_CONTEXT_UNAVAILABLE');
-        value = await readClientBookingMaterial(bound.scenes, bound.identity, command.selection, clock());
+        value = await readClientBookingMaterial(bound.scenes, bound.identity, command.selection, clock);
         break;
     }
     const text = JSON.stringify(value);
@@ -548,7 +548,7 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         if (chosen.quoteId !== original.quote.id) throw new AiClientEntryError('AI_ACCESS_DENIED', 'quote_original_selection_mismatch');
         // Existing material reader checks customer ownership, original quote
         // parameters, membership, publication/catalog, locations and stock.
-        const material = await readClientBookingMaterial(bound.scenes, bound.identity, chosen, clock());
+        const material = await readClientBookingMaterial(bound.scenes, bound.identity, chosen, clock);
         if (material.quote.quoteVersion !== jsonHash(original.quote)) {
           throw new AiClientEntryError('AI_REVISION_CONFLICT', 'quote_material_basis_changed');
         }
@@ -1111,6 +1111,56 @@ export function composeRequestBoundClientApplication(dependencies: AiClientReque
         if (error instanceof AiClientMaterialError || !submitted) throw error;
         throw new AiClientMaterialError('AI_CLIENT_RESULT_UNKNOWN');
       }
+    },
+    /** Server-host receipt observation only, independent of a new quote or
+     * stock query. It cannot supply a Booking Draft, Action or execution grant.
+     * Public readOperation/readSource keep their current-material semantics. */
+    async readBookingMaterialReceipt(request: AiClientApplicationRequest, value: unknown) {
+      const input = parseOperation(value);
+      if (input.command.kind !== 'booking_quote') return fail('AI_CLIENT_INVALID_INPUT');
+      const selected = input.command.selection;
+      requireEntry();
+      return withBinding(structuredClone(request), true, 'booking_quote', async bound => {
+        if (!taskDependencies || !bound.identity) throw new AiClientEntryError('AI_ACCESS_DENIED', 'client_required');
+        const scope = scopeOf(bound), policy = new AiClientPolicyAuthority(taskDependencies, taskDependencies, randomUUID(), clock);
+        const subject = { ...scope, identity: structuredClone(bound.identity) };
+        const before = await policy.authorize(subject, 'read');
+        const row = await repository.findOperation(scope, input.operationKey);
+        if (!row) {
+          await bound.assertCurrent();
+          const after = await policy.authorize(subject, 'read');
+          if (jsonHash(before) !== jsonHash(after)) throw new AiClientEntryError('AI_ACCESS_DENIED', 'entry_policy_changed');
+          return freezeOriginalInput({ state: 'unknown' as const, operationKey: input.operationKey,
+            retryable: false as const, nextAction: 'read_original_material_receipt' as const,
+            absenceSemantics: 'not_proof_of_no_persistence' as const });
+        }
+        const saved = commandSchema.safeParse(row.command);
+        if (!saved.success || saved.data.kind !== 'booking_quote'
+          || row.inputHash !== requestFingerprint(saved.data) || row.materialHash !== materialHash(saved.data, row.material)
+          || row.bindingHash !== bound.bindingHash || row.publicationHash !== requestFingerprint(bound.published.value)
+          || row.publicationHash !== requestFingerprint(row.publication)) return fail('AI_CLIENT_MATERIAL_STALE');
+        // The original quote may have supplied its recorded default return
+        // location. Only that omitted optional field may be reconstructed from
+        // the immutable saved command; no current configuration is consulted.
+        const originalCommand = { kind: 'booking_quote' as const, selection: {
+          ...selected, ...(selected.returnLocationId === undefined && saved.data.selection.returnLocationId !== undefined
+            ? { returnLocationId: saved.data.selection.returnLocationId } : {})
+        } };
+        if (row.inputHash !== requestFingerprint(originalCommand)) throw new AiClientMaterialError('AI_CLIENT_REVISION_CONFLICT');
+        const latest = await repository.findOperation(scope, input.operationKey);
+        if (!latest || jsonHash(latest) !== jsonHash(row)) throw new AiClientMaterialError('AI_CLIENT_REVISION_CONFLICT');
+        await bound.assertCurrent();
+        const after = await policy.authorize(subject, 'read');
+        if (jsonHash(before) !== jsonHash(after)) throw new AiClientEntryError('AI_ACCESS_DENIED', 'entry_policy_changed');
+        const observed = clock();
+        if (!(observed instanceof Date) || !Number.isFinite(observed.getTime())) throw new AiClientEntryError('AI_RESOURCE_UNAVAILABLE', 'clock_unavailable');
+        return freezeOriginalInput({ state: 'observed' as const, operationKey: row.operationKey,
+          inputHash: row.inputHash, materialRef: row.id, materialHash: row.materialHash, revision: row.revision,
+          createdAt: row.createdAt.toISOString(), expiresAt: row.expiresAt.toISOString(), observedAt: observed.toISOString(),
+          materialValidity: row.expiresAt <= observed ? 'expired' as const : 'not_revalidated' as const,
+          currentUse: 'not_authorized_by_receipt' as const, execution: 'not_attested' as const,
+          retryable: false as const, nextAction: 'read_current_material_or_manual_review' as const });
+      });
     },
     async readOperation(request: AiClientApplicationRequest, value: unknown) {
       const input = parseOperation(value), inputHash = requestFingerprint(input.command);
