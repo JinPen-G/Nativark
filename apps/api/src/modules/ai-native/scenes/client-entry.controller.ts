@@ -19,7 +19,7 @@ export const AI_CLIENT_ENTRY_APPLICATION = Symbol('AI_CLIENT_ENTRY_APPLICATION')
 type Application = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
   'readHostCapabilities' | 'issueAction' | 'createBookingDraft' | 'chooseBookingDraft' | 'readBookingDraft' |
   'handoffBookingDraft' | 'readBookingHandoff' | 'readBookingOperation' |
-  'acceptBookingSubmission' | 'submitAcceptedBooking' | 'readBookingSubmission' | 'readTaskSnapshot' | 'readTaskEvents' |
+  'acceptBookingSubmission' | 'readBookingAcceptance' | 'submitAcceptedBooking' | 'readBookingSubmission' | 'readTaskSnapshot' | 'readTaskEvents' |
   'readOrderExplanation' | 'readSource' | 'requestOriginalTaskCancellation' | 'reconcileOriginalTaskInputCancellation' |
   'readOriginalTaskModelInput' | 'submitOriginalTaskModelInput' | 'readOriginalTaskModelInputReceipt' |
   'startOriginalTaskModel' | 'recoverOriginalTaskModel' | 'reconcileOriginalTaskModel' | 'continueOriginalTaskModelInput' |
@@ -282,6 +282,10 @@ export class AiClientEntryController {
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.submitAcceptedBooking)
   submitAcceptedBooking(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.submitAcceptedBooking(request, body), 'read_booking_submission');
+  }
+  @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingAcceptance)
+  readBookingAcceptance(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
+    return this.respond(() => this.application.readBookingAcceptance(request, body), 'read_original_acceptance');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingSubmission)
   readBookingSubmission(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {

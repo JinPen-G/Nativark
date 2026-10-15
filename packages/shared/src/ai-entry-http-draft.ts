@@ -28,6 +28,7 @@ export const AI_CLIENT_ENTRY_HTTP_DRAFT = Object.freeze({
   handoffBookingDraft: 'booking-drafts/handoff', readBookingHandoff: 'booking-handoffs/read',
   readBookingOperation: 'booking-operations/read',
   acceptBookingSubmission: 'booking-submissions/accept',
+  readBookingAcceptance: 'booking-submissions/acceptance/read',
   submitAcceptedBooking: 'booking-submissions/submit',
   readBookingSubmission: 'booking-submissions/read',
 });
@@ -51,7 +52,8 @@ export const AI_INSPECTION_RECOGNITION_TASK_HTTP_DRAFT = Object.freeze({
 /** Original staff inspection services, never an arbitrary tool dispatcher. */
 export const AI_STAFF_INSPECTION_HTTP_DRAFT = Object.freeze({
   basePath: 'staff/v1/ai-native/inspection-assist', method: 'POST',
-  operations: Object.freeze({ hostRead: 'host-read', templateRead: 'template-read', evidenceBind: 'evidence-bind', evidenceFingerprint: 'evidence-fingerprint',
+  operations: Object.freeze({ hostRead: 'host-read', historyRead: 'history-read', receiptHostRead: 'receipt-host-read',
+    templateRead: 'template-read', evidenceBind: 'evidence-bind', evidenceFingerprint: 'evidence-fingerprint',
     draftCreate: 'draft-create', draftRead: 'draft-read', draftEdit: 'draft-edit', evidenceReplace: 'evidence-replace',
     draftOperation: 'draft-operation', inputPrepare: 'input-prepare', inputReceipt: 'input-receipt', resultRead: 'result-read',
     resultSave: 'result-save', resultSaveReceipt: 'result-save-receipt',
