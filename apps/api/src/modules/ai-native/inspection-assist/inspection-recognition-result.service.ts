@@ -15,6 +15,7 @@ import { InspectionRecognitionService } from './inspection-recognition.service';
 import { InspectionDraftService } from './inspection-draft.service';
 import { InspectionCandidateService, snapshotInspectionCandidates } from './inspection-candidate.service';
 import { InspectionAssistError, inspectionId, inspectionTargetSchema, parseInspectionInput } from './inspection-assist.validation';
+import { type RecognitionSaveAssociation } from './inspection-recognition-save.association';
 
 const referenceSchema = inspectionTargetSchema.extend({ templateId: inspectionId, draftId: inspectionId, inputId: inspectionId,
   expectedRevision: z.number().int().min(1).max(999), taskId: inspectionId, resultId: inspectionId }).strict();
@@ -113,7 +114,9 @@ export class InspectionRecognitionResultService {
    * receipt are reused; a repeated result is never a second recognition call. */
   async save(value: unknown) {
     const input = parseInspectionInput(saveSchema, value);
-    return this.authority.withAction(targetOf(input), 'write', async () => {
+    return this.authority.withAction(targetOf(input), 'write', async scope => {
+      const original = await this.readSavedReceipt(input);
+      if (original.status === 'found') return { status: 'saved' as const, result: original.result, execution: 'not_attempted' as const };
       const collected = await this.collect(input, true);
       if (collected.projection.status !== 'available') throw new InspectionAssistError('RECONCILIATION_REQUIRED');
       const request = this.saveRequest(input, collected);
@@ -121,7 +124,14 @@ export class InspectionRecognitionResultService {
       if (receipt.status === 'unavailable') throw new InspectionAssistError('RECONCILIATION_REQUIRED');
       if (receipt.status === 'found') return { status: 'saved' as const, result: receipt.result, execution: 'not_attempted' as const };
       if (collected.currentRevision !== input.expectedRevision) throw new InspectionAssistError('REVISION_CONFLICT');
-      const result = await this.drafts!.saveCandidates(request);
+      const association: RecognitionSaveAssociation = { version: 1, reference: input, scope,
+        runId: collected.projection.runId, stepId: collected.projection.stepId,
+        actionId: collected.association.actionId, actionInputId: collected.association.actionInputId,
+        inputHash: collected.association.inputHash, resultHash: collected.projection.resultHash,
+        inputFingerprint: collected.projection.inputFingerprint, bindingFingerprint: collected.bindingFingerprint,
+        candidateHash: requestFingerprint(request.candidates),
+        commandHash: requestFingerprint({ kind: 'inspection.draft.candidates', scope, input: request }) };
+      const result = await this.drafts!.saveCandidates(request, association);
       return { status: 'saved' as const, result, execution: 'not_attempted' as const };
     });
   }
@@ -129,9 +139,20 @@ export class InspectionRecognitionResultService {
   /** Read-only recovery of the SAME save. Absence is not remote no-consumption
    * evidence and does not initiate another write or generate a new operation. */
   async reconcileSave(value: unknown) {
-    const input = parseInspectionInput(saveSchema, value), collected = await this.collect(input, true);
+    const input = parseInspectionInput(saveSchema, value);
+    const original = await this.readSavedReceipt(input);
+    if (original.status === 'found') return original;
+    // Legacy receipts have no immutable recognition association. Only the
+    // original full-command path can verify them; never backfill old evidence.
+    const collected = await this.collect(input, true);
     if (collected.projection.status !== 'available') throw new InspectionAssistError('RECONCILIATION_REQUIRED');
     return this.drafts!.reconcileOperation({ kind: 'candidates', request: this.saveRequest(input, collected) });
+  }
+
+  async readSavedReceipt(value: unknown) {
+    const input = parseInspectionInput(saveSchema, value);
+    if (!this.drafts) throw new InspectionAssistError('STORAGE_UNAVAILABLE');
+    return this.drafts.reconcileRecognitionSave(input);
   }
 
   private saveRequest(input: z.infer<typeof saveSchema>, collected: Awaited<ReturnType<InspectionRecognitionResultService['collect']>>) {
@@ -216,6 +237,8 @@ export class InspectionRecognitionResultService {
             mediaType: original.mediaType, sizeBytes: original.sizeBytes };
         }) }));
       return { currentRevision: detail.revision, bindingFingerprint: bound.input.bindingFingerprint, sourceEvidence,
+        association: { actionId: result.actionId, actionInputId: persisted.actionInputId,
+          inputHash: taskModelFingerprint(persisted.input, source.policy) },
         projection: { status, ...input, candidates: values, resultHash: result.contentHash, inputFingerprint: bound.input.inputFingerprint,
           runId: result.runId, stepId: result.stepId, observedAt: result.observedAt, trust: 'untrusted_candidate' as const,
           recognitionEvidence: status === 'available' ? (source.policy.kind === 'audio' ? 'persisted_audio_step' as const : 'persisted_image_step' as const) : 'not_confirmed' as const,
@@ -267,7 +290,7 @@ export class InspectionRecognitionResultService {
       const lineage = await readTaskModelRunOrigin(tx, access, { scopeId: task.scopeId, taskId: task.id,
         runId: run.id, originRunId: run.resourceOriginRunId ?? run.id, registrationRef: saved.registrationRef, includeHistory: true });
       if (lineage.registrationRef !== saved.registrationRef) throw changed();
-      return { input, invocation, history: lineage.history };
+      return { input, invocation, actionInputId: saved.id, history: lineage.history };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 2500, timeout: 5000 });
   }
 

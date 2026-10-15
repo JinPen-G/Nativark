@@ -235,7 +235,11 @@ export function composeInspectionAssist(dependencies: Dependencies) {
     read: async (value: unknown) => (await selectResults(value)).read(value),
     readEvidence: async (value: unknown) => (await selectResults(value)).readEvidence(value),
     save: async (value: unknown) => (await selectResults(value)).save(value),
-    reconcileSave: async (value: unknown) => (await selectResults(value)).reconcileSave(value),
+    reconcileSave: async (value: unknown) => {
+      const reference = structuredClone(value);
+      const original = await primaryResults.readSavedReceipt(reference);
+      return original.status === 'found' ? original : (await selectResults(reference)).reconcileSave(reference);
+    },
     inputSource: (value: unknown): AiTaskInputSource => {
       const reference = structuredClone(value);
       return Object.freeze({ resolve: async (...args: Parameters<AiTaskInputSource['resolve']>) =>
@@ -278,7 +282,9 @@ export function composeInspectionAssist(dependencies: Dependencies) {
       if (requestFingerprint(currentReceipt) !== requestFingerprint(receipt)) throw new InspectionAssistError('REVISION_CONFLICT');
       const currentReview = await drafts.readReview(target);
       if (requestFingerprint(currentReview) !== requestFingerprint(review)) throw new InspectionAssistError('REVISION_CONFLICT');
-      if (review.binding !== 'current') throw new InspectionAssistError('BINDING_CHANGED');
+      // The original save fact survives template/evidence changes. The current
+      // human draft review remains separately authorized and marked stale;
+      // observing this receipt never makes old candidates adoptable again.
       return { receipt, review,
         savedRevisionMatchesCurrent: receipt.status === 'found' && receipt.result.draftId === review.draftId && receipt.result.revision === review.revision,
         adoption: 'not_attempted' as const, businessActionRequested: false as const, automaticRetry: false as const };

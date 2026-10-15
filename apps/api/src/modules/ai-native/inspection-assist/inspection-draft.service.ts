@@ -7,6 +7,7 @@ import { InspectionManualPreparationService } from './inspection-manual-preparat
 import { InspectionCandidateService, snapshotInspectionCandidates } from './inspection-candidate.service';
 import { PrismaInspectionDraftRepository } from './prisma-inspection-draft.repository';
 import { InspectionAssistError, inspectionId, inspectionTargetSchema, parseInspectionInput } from './inspection-assist.validation';
+import { recognitionSaveAssociationSchema, recognitionSaveReferenceSchema, type RecognitionSaveAssociation } from './inspection-recognition-save.association';
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 const targetSchema = inspectionTargetSchema.extend({ templateId: inspectionId }).strict();
@@ -111,14 +112,26 @@ export class InspectionDraftService {
     });
   }
 
-  async saveCandidates(value: unknown) {
+  async saveCandidates(value: unknown, recognitionSave?: RecognitionSaveAssociation) {
     const input = parseInspectionInput(changeSchema.extend({ candidates: z.array(z.unknown()).max(100) }).strict(), value);
+    const association = recognitionSave ? parseInspectionInput(recognitionSaveAssociationSchema, recognitionSave) : undefined;
     const snapshot = snapshotInspectionCandidates(input.candidates), target = targetOf(input);
     input.candidates = snapshot;
     return this.authority.withAction(target, 'write', async scope => {
       const fingerprint = requestFingerprint({ kind: 'inspection.draft.candidates', scope, input });
-      const replay = await this.replay(scope, input.operationId, fingerprint);
-      if (replay) return replay;
+      if (association && (requestFingerprint(association.scope) !== requestFingerprint(scope)
+        || requestFingerprint(targetOf(association.reference)) !== requestFingerprint(target)
+        || association.reference.draftId !== input.draftId || association.reference.expectedRevision !== input.expectedRevision
+        || association.reference.operationId !== input.operationId || association.bindingFingerprint !== input.bindingFingerprint
+        || association.candidateHash !== requestFingerprint(snapshot) || association.commandHash !== fingerprint)) {
+        throw new InspectionAssistError('BINDING_CHANGED');
+      }
+      const receipt = await this.repository.receipt(scope, input.operationId, fingerprint, association);
+      if (receipt.status === 'unavailable') throw new InspectionAssistError('RECONCILIATION_REQUIRED');
+      if (receipt.status === 'found') {
+        await this.load(scope, receipt.result.draftId, target);
+        return receipt.result;
+      }
       const row = await this.load(scope, input.draftId, target);
       this.editable(row, input.expectedRevision);
       if (row.bindingFingerprint !== input.bindingFingerprint) throw new InspectionAssistError('BINDING_CHANGED');
@@ -134,7 +147,8 @@ export class InspectionDraftService {
       await this.binding(target, scope, input.bindingFingerprint);
       return this.authority.withAction(target, 'write', current => {
         this.sameScope(scope, current);
-        return this.repository.change(scope, row.id, { operationId: input.operationId, fingerprint, expectedRevision: input.expectedRevision },
+        return this.repository.change(scope, row.id, { operationId: input.operationId, fingerprint, expectedRevision: input.expectedRevision,
+          ...(association ? { recognitionSave: association } : {}) },
           input.bindingFingerprint, { state: JSON.parse(JSON.stringify(state)), status: 'draft_saved' });
       });
     });
@@ -277,6 +291,21 @@ export class InspectionDraftService {
       const result = await this.repository.receipt(scope, request.operationId, fingerprint);
       if (result.status === 'found') await this.load(scope, result.result.draftId, target);
       return result;
+    });
+  }
+
+  /** Receipt metadata is independent of current template/evidence validity.
+   * Current order read authority and the exact draft owner/target still apply.
+   * No candidate, file body or model result is read or returned here. */
+  async reconcileRecognitionSave(value: unknown) {
+    const reference = parseInspectionInput(recognitionSaveReferenceSchema, value), target = targetOf(reference);
+    return this.authority.withAction(target, 'read', async scope => {
+      await this.load(scope, reference.draftId, target);
+      const before = await this.repository.recognitionReceipt(scope, reference);
+      await this.load(scope, reference.draftId, target);
+      const after = await this.repository.recognitionReceipt(scope, reference);
+      if (requestFingerprint(before) !== requestFingerprint(after)) throw new InspectionAssistError('REVISION_CONFLICT');
+      return after;
     });
   }
 

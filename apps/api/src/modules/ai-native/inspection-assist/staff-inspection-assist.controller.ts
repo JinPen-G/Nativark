@@ -47,7 +47,9 @@ export class StaffInspectionAssistController {
           // original result still belongs to the current human-review draft.
           case 'result-read': return (await services.readRecognitionReview(input)).recognition;
           case 'result-save': return (await services.saveRecognitionReview(input)).receipt;
-          case 'result-save-receipt': return (await services.readRecognitionSaveReview(input)).receipt;
+          // Receipt recovery observes only the saved association. It must not
+          // reopen current/withdrawn media or load a candidate review body.
+          case 'result-save-receipt': return services.recognitionResults.reconcileSave(input);
           case 'submission-review': return services.submission ? services.submission.prepareReview(input) : absent();
           case 'submission-prepare': return services.submission ? services.submission.prepare(input) : absent();
           case 'submission-preparation': return services.submission ? services.submission.reconcilePreparation(input) : absent();
