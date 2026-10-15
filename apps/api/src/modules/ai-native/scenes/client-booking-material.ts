@@ -5,6 +5,7 @@ import type { ClientRequestContext } from '../../client/client-auth.service';
 import type { composeAiClientScenes } from '../client-scene.composition';
 import { requestFingerprint } from '../../rental-core/rental-idempotency.repository';
 import { AiClientEntryError, entryDate, entryId, parseEntry } from './client-entry-action';
+import { freezeOriginalInput } from '../task-request/original-request.validation';
 
 const serviceSchema = z.object({ serviceId: entryId, quantity: z.number().int().min(1).max(999),
   scheduledStartAt: entryDate.optional(), scheduledEndAt: entryDate.optional(), serviceLocationId: entryId.optional() }).strict();
@@ -30,15 +31,16 @@ const amount = z.number().finite().nonnegative();
 
 export async function readClientBookingMaterial(scenes: ReturnType<typeof composeAiClientScenes>, identity: ClientRequestContext,
   input: AiBookingSelection, now: Date): Promise<AiBookingMaterial> {
+  identity = freezeOriginalInput(structuredClone(identity));
   const selection = parseEntry(bookingSelectionSchema, input);
-  const catalog = await scenes.member.catalog();
+  const catalog = freezeOriginalInput(structuredClone(await scenes.member.catalog()));
   if (catalog.tenantCode !== identity.tenantCode || catalog.workspace.workspaceCode !== identity.workspaceCode
     || catalog.categoryCode !== identity.categoryCode) return stale('catalog_scope_changed');
   if (!catalog.timeZone || selection.timeZone !== catalog.timeZone) {
     throw new AiClientEntryError('AI_INVALID_INPUT', 'confirm_space_time_zone', 'clarify');
   }
   if (Date.parse(selection.startAt) <= now.getTime()) return stale('rental_start_elapsed');
-  const quote = await scenes.member.quote(selection.quoteId);
+  const quote = freezeOriginalInput(structuredClone(await scenes.member.quote(selection.quoteId)));
   if (quote.id !== selection.quoteId || quote.tenantId !== identity.tenantId || quote.categoryCode !== identity.categoryCode
     || identity.customerType !== 'personal' || quote.request.customerType !== 'personal' || quote.request.customerId !== identity.customerId) {
     throw new AiClientEntryError('AI_ACCESS_DENIED', 'quote_owner_or_scope');
@@ -66,11 +68,12 @@ export async function readClientBookingMaterial(scenes: ReturnType<typeof compos
     ...(membership.corporateCustomerId ? { corporateCustomerId: membership.corporateCustomerId } : {}),
     enterpriseContractAndPayer: membership.enterpriseContractAndPayer };
   if (hashJson(actualIdentity) !== hashJson(selection.bookingIdentity)) return stale('booking_identity_changed');
-  const options = await scenes.member.bookingOptions();
-  const matching = options.filter(option => option.eligible && option.bookingIdentity === actualIdentity.bookingIdentity
+  const options = freezeOriginalInput(structuredClone(await scenes.member.bookingOptions()));
+  const matchingIdentity = (values: typeof options) => values.filter(option => option.eligible && option.bookingIdentity === actualIdentity.bookingIdentity
     && (actualIdentity.bookingIdentity === 'personal' || ('corporateCustomerId' in option
       && option.corporateCustomerId === actualIdentity.corporateCustomerId && 'membershipId' in option
       && option.membershipId === membership.corporateMembershipId)));
+  const matching = matchingIdentity(options);
   if (matching.length !== 1) throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_membership_revoked');
   const lines = quote.request.lines.map(line => ({ itemGroupId: line.itemGroupId, quantity: line.quantity }));
   const normalized = { ...selection, startAt: quote.request.startAt, endAt: quote.request.endAt,
@@ -95,14 +98,32 @@ export async function readClientBookingMaterial(scenes: ReturnType<typeof compos
     return found[0];
   });
   const confirmed = parseEntry(bookingSelectionSchema, normalized);
-  const availability = await scenes.member.availability({ locationId: confirmed.fulfillmentLocationId,
-    startAt: confirmed.startAt, endAt: confirmed.endAt, lines: confirmed.lines });
+  const availability = freezeOriginalInput(structuredClone(await scenes.member.availability({ locationId: confirmed.fulfillmentLocationId,
+    startAt: confirmed.startAt, endAt: confirmed.endAt, lines: confirmed.lines })));
   if (availability.locationId !== confirmed.fulfillmentLocationId || availability.startAt !== confirmed.startAt
     || availability.endAt !== confirmed.endAt || availability.lines.length !== confirmed.lines.length
     || availability.available !== true || confirmed.lines.some(line => {
       const matches = availability.lines.filter(value => value.itemGroupId === line.itemGroupId && value.requestedQuantity === line.quantity);
       return matches.length !== 1 || matches[0].available !== true;
     })) return stale('availability_changed');
+  // These reads are separate authorized observations, not a Core transaction.
+  // A slow stock read must not return material based on withdrawn configuration,
+  // a consumed quote or membership that has since been revoked. Compare only
+  // this selection's catalog facts; unrelated products do not invalidate it.
+  const catalogBasis = (current: typeof catalog) => ({ tenantCode: current.tenantCode,
+    workspace: current.workspace.workspaceCode, categoryCode: current.categoryCode,
+    timeZone: current.timeZone, fulfillment: current.fulfillment,
+    items: lines.map(line => current.items.filter(item => item.id === line.itemGroupId)),
+    locations: [normalized.fulfillmentLocationId, normalized.returnLocationId]
+      .map(id => current.locations.filter(location => location.id === id)) });
+  const latestCatalog = structuredClone(await scenes.member.catalog());
+  if (hashJson(catalogBasis(latestCatalog)) !== hashJson(catalogBasis(catalog))) return stale('catalog_changed_during_preparation');
+  const latestQuote = structuredClone(await scenes.member.quote(selection.quoteId));
+  if (hashJson(latestQuote) !== hashJson(quote)) return stale('quote_changed_during_preparation');
+  const latestOptions = structuredClone(await scenes.member.bookingOptions());
+  if (hashJson(matchingIdentity(latestOptions)) !== hashJson(matching)) {
+    throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_membership_changed_during_preparation');
+  }
   const quoteFacts = { quoteId: quote.id, quoteVersion: hashJson(quote), pricingPlanVersion: quote.pricingPlanVersion,
     ruleVersion: quote.ruleVersion, priceVersionId: quote.priceVersionId ?? null, calendarVersion: quote.calendarVersion ?? null,
     categoryVersionId: quote.categoryVersionId ?? null, currency: quote.currency!, payableAmount: amount.parse(quote.payableAmount),
@@ -118,5 +139,5 @@ export async function readClientBookingMaterial(scenes: ReturnType<typeof compos
   }, ...(deliveryAddress ? { deliveryAddress } : {}), quote: quoteFacts, catalogVersion: hashJson({ items, locations, timeZone: catalog.timeZone, fulfillment: catalog.fulfillment }),
     availabilityVersion: hashJson(availability), identityVersion: hashJson(matching[0]), availability: 'available_at_observation_not_reserved' };
   if (Buffer.byteLength(JSON.stringify(result), 'utf8') > 32768) return unavailable('booking_material_too_large');
-  return result;
+  return freezeOriginalInput(result);
 }
