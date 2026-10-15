@@ -30,7 +30,15 @@ const unavailable = (reason: string): never => { throw new AiClientEntryError('A
 const amount = z.number().finite().nonnegative();
 
 export async function readClientBookingMaterial(scenes: ReturnType<typeof composeAiClientScenes>, identity: ClientRequestContext,
-  input: AiBookingSelection, now: Date): Promise<AiBookingMaterial> {
+  input: AiBookingSelection, at: Date | (() => Date)): Promise<AiBookingMaterial> {
+  // Existing Date callers remain compatible; request hosts should pass their
+  // server clock so elapsed time across dependency waits can be rechecked.
+  const currentTime = () => {
+    const value = typeof at === 'function' ? at() : at;
+    if (!(value instanceof Date) || !Number.isFinite(value.getTime())) return unavailable('booking_clock_unavailable');
+    return new Date(value.getTime());
+  };
+  const now = currentTime();
   identity = freezeOriginalInput(structuredClone(identity));
   const selection = parseEntry(bookingSelectionSchema, input);
   const catalog = freezeOriginalInput(structuredClone(await scenes.member.catalog()));
@@ -124,6 +132,9 @@ export async function readClientBookingMaterial(scenes: ReturnType<typeof compos
   if (hashJson(matchingIdentity(latestOptions)) !== hashJson(matching)) {
     throw new AiClientEntryError('AI_ACCESS_DENIED', 'booking_membership_changed_during_preparation');
   }
+  const completedAt = currentTime();
+  if (Date.parse(quote.expiresAt) <= completedAt.getTime()) return stale('quote_expired_during_preparation');
+  if (Date.parse(confirmed.startAt) <= completedAt.getTime()) return stale('rental_start_elapsed_during_preparation');
   const quoteFacts = { quoteId: quote.id, quoteVersion: hashJson(quote), pricingPlanVersion: quote.pricingPlanVersion,
     ruleVersion: quote.ruleVersion, priceVersionId: quote.priceVersionId ?? null, calendarVersion: quote.calendarVersion ?? null,
     categoryVersionId: quote.categoryVersionId ?? null, currency: quote.currency!, payableAmount: amount.parse(quote.payableAmount),
