@@ -26,7 +26,11 @@ export class AiOrderExplanationPreparationService {
       if (requestFingerprint(latest.order.value) !== requestFingerprint(facts.order.value)) throw new ModelGatewayError('CONFIG_INVALID');
       const status = { coverage: facts.order.coverage, value: { id: orderId, status: facts.order.value.status,
         updatedAt: facts.orderVersion }, source: facts.order.source };
-      const projection = question === 'fees' ? { order: status, amounts: facts.amounts, history: facts.history, inspections: facts.inspections }
+      // A fee explanation needs the actual current rental period alongside
+      // its separately labelled saved quote/rule basis. Reuse the existing
+      // authorized projection; do not infer a duration or recalculate fees.
+      const projection = question === 'fees' ? { order: status, amounts: facts.amounts,
+        fulfillment: facts.fulfillment, history: facts.history, inspections: facts.inspections }
         : question === 'payments' ? { order: status, amounts: facts.amounts, payments: facts.payments,
           actualReceivedTotal: facts.actualReceivedTotal, fundingLedger: facts.fundingLedger }
         : { order: status };
