@@ -242,3 +242,13 @@ Node DATABASE_URL 固定 mysql://offline:offline@127.0.0.1:1/rental_os_offline�
 一次inline从新module provider取得实际factory，复用既有automation-request-bound初始化前缀（仅内存、避免重复ts-node注册，无node:test注册或脚本/fixture修改）：原return_exception→prepareCandidate→prepareInput→原影子Task create/readCreation→current人类view；无close grant拒绝；明确合成持久grant后close提交成功应答丢失返回unknown；原operation读取observed/closed，读不增加writes、Task仅创建一次；身份撤销后原operation拒绝。真实AuthService/ApiAuthGuard/automation及review/事务仓储实现不替换，DB/资源/权益与正式委托数据是既有fixture显式合成，不是实际部署。stdout `smoke=passed; exported actual server factory event/input/original shadow Task/human close lost ack/original receipt recovery; missing grant and revocation denied; no automatic business execution`，exit0。
 
 必要原API strict noEmit1024files、0diagnostics/exit0，diff check0，无tests/fixture/脚本变更。证据是原影子任务与人类办理/原键恢复，不是退款执行、模型建议、通知发送或Core修复。关闭待办不改变原检查事实；未调用真实DB/存储/HTTP/模型/支付，不安装、生产启用或调整AIN完成率。
+
+## 20261015 同步主线后的引用限额/撤回传播收口
+
+强制开工先核原HEAD0651b5e9、branch正确、tracked/index无WIP、无MERGE_HEAD/CHERRY_PICK_HEAD，再安全快进固定5faa55a5d5bda3f3ce9e17c74feae23bc0fcda4e，merge-base --is-ancestor exit0且HEAD为该固定提交；该历史包含原B成果。主线合入的UI/output/shared生成文件仅来自授权固定同步，本线不编辑或清理。读取正式需求AIN-R08、任务AIN10/19/20及本线/中央最新记录，不重做七项公共Gateway/runner/目录修复。
+
+实际缺陷在KnowledgeCitationSession.openManySafe：达到总字节上限提前return，跳过末尾verify/current ACL/撤回/版本复验；可能带回早先读到的旧片段。现统一累计item，超限只break，仍完成原最终verify才返回有界前缀；未知ID/失败占位项也计总字节（包括响应status/trust开销），重复输入仍拒绝，不回显不可见来源详情，不将撤权吞成partial旧文本。沿HumanKnowledgeContextService.beginCitations原真实消费者生效，无新factory/协议或持久缓存。
+
+一次inline调用实际composePersistedHumanKnowledge服务、Prisma仓储适配及原citation：文档create→parse→原index request/resume→publish→beginCitations两来源；maxTotalBytes1024返回一个有界片段/limit_exceeded，JSON字节不超限。包装原read端口只做可控时序，在第二个实际片段读完后执行真实management.withdraw；再次openManySafe必须拒绝而非提前返回第一片段。stdout `smoke=passed; actual knowledge lifecycle and citation consumer bounded prefix; withdrawal during second read denies early-limit return; no scripts/network/model; explicit offline db/identity policy doubles`，exit0。数据库与身份/动作政策来自既有lane-b-functional明确替身，不把它们称正式Auth/ACL部署证明。未新增或修改任何测试脚本/fixture，无模型调用。
+
+必要原API strict Compiler API noEmit778 files、0diagnostics/exit0，diff check0（CRLF提示不视失败）；preload为本树原prisma-offline，DATABASE_URL固定无效，write-root/TEMP/TMP/audit均本树，audit=output/inspection-lb05-tmp/20261015-citation-limit.audit。无真实HTTP/DB/DNS/存储/模型/支付、依赖安装、服务、共享生成、迁移、main/push或生产启用；作者局部验证不等于原AIN验收。原引用失效仍要求重新收集，不静默换正文或重派unknown。
