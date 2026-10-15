@@ -5,6 +5,25 @@ import { inspectBoundedImage } from './bounded-image';
 /** Internal implementation ports, NOT the centrally maintained AIN-C03 wire contract. */
 export type ModelFeature = "tools" | "structuredOutput" | "streaming" | "image" | "audio";
 export interface GatewayContext { tenantId: string; workspaceId: string; actorId: string; }
+/** Content bytes, not provider tokens or the serialized HTTP envelope. Keep
+ * the existing media ceiling for every ingress, including text-only calls. */
+export const GATEWAY_MAX_INPUT_BYTES = 900_000;
+export function isBoundedGatewayInput(messages: readonly { content: string | readonly (
+  { kind: 'text'; text: string } | { kind: 'image' | 'audio'; data?: string }
+)[] }[]): boolean {
+  let bytes = 0;
+  for (const message of messages) {
+    if (typeof message.content === 'string') bytes += Buffer.byteLength(message.content, 'utf8');
+    else for (const part of message.content) {
+      // Unresolved attachment references are authorized/read later. Their
+      // actual base64 content must pass this same bound after resolution.
+      bytes += part.kind === 'text' ? Buffer.byteLength(part.text, 'utf8') : part.data?.length ?? 0;
+      if (bytes > GATEWAY_MAX_INPUT_BYTES) return false;
+    }
+    if (bytes > GATEWAY_MAX_INPUT_BYTES) return false;
+  }
+  return true;
+}
 export interface ModelRequest {
   callId: string;
   model: string;
@@ -19,7 +38,8 @@ export interface ModelRequest {
 export const modelRequestSchema = z.object({
   callId: z.string().min(1).max(128).regex(/^[\w.:-]+$/u),
   model: z.string().min(1).max(256).regex(/^[\w./:-]+$/u),
-  messages: z.array(z.object({ role: z.enum(['system', 'user', 'assistant']), content: z.string().max(32000) }).strict()).min(1).max(64),
+  messages: z.array(z.object({ role: z.enum(['system', 'user', 'assistant']), content: z.string().max(32000) }).strict()).min(1).max(64)
+    .refine(isBoundedGatewayInput, 'Protocol input exceeds its byte limit'),
   maxOutputTokens: z.number().int().positive().max(32768),
   features: z.array(z.enum(['tools', 'structuredOutput', 'streaming'])).max(3).optional(),
   structuredSchemaHash: z.string().regex(/^[a-f0-9]{64}$/u).optional()
@@ -43,15 +63,11 @@ export const modelProtocolRequestBaseSchema = modelRequestSchema.extend({
   features: z.array(z.enum(['tools', 'structuredOutput', 'streaming', 'image', 'audio'])).max(5).optional()
 });
 export const modelProtocolRequestSchema = modelProtocolRequestBaseSchema.superRefine((input, ctx) => {
-  let size = 0, mediaCount = 0;
+  let mediaCount = 0;
   for (const message of input.messages) {
-    if (typeof message.content === 'string') size += Buffer.byteLength(message.content);
-    else for (const part of message.content) {
-      size += part.kind === 'text' ? Buffer.byteLength(part.text) : part.data.length;
-      if (part.kind !== 'text') mediaCount++;
-    }
+    if (typeof message.content !== 'string') mediaCount += message.content.filter(part => part.kind !== 'text').length;
   }
-  if (mediaCount > 8 || mediaCount > 0 && size > 900000) {
+  if (mediaCount > 8 || !isBoundedGatewayInput(input.messages)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Protocol input exceeds its byte limit' });
     return;
   }

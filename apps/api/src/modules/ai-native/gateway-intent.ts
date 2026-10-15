@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { AiGatewayIntentDraft, AiGatewayFeatureDraft } from '@rental-os/shared';
-import { ModelGatewayError, modelProtocolRequestBaseSchema, modelProtocolRequestSchema, modelRequestSchema, type GatewayContext, type ModelProtocolContent } from './model-gateway.ports';
+import { ModelGatewayError, isBoundedGatewayInput, modelProtocolRequestBaseSchema, modelProtocolRequestSchema, modelRequestSchema, type GatewayContext, type ModelProtocolContent } from './model-gateway.ports';
 import { requestFingerprint } from '../rental-core/rental-idempotency.repository';
 
 const feature = z.enum(['text', 'tools', 'structured_output', 'image', 'audio', 'streaming', 'embedding', 'reasoning']);
@@ -14,7 +14,8 @@ const content = z.discriminatedUnion('kind', [
 ]);
 const intentSchema = z.object({
   draftVersion: z.literal('ain-c03-draft-2'), requestId: id, sceneCode: id,
-  messages: z.array(z.object({ role: z.enum(['system', 'user', 'assistant']), content: z.array(content).min(1).max(64) }).strict()).min(1).max(64),
+  messages: z.array(z.object({ role: z.enum(['system', 'user', 'assistant']), content: z.array(content).min(1).max(64) }).strict()).min(1).max(64)
+    .refine(isBoundedGatewayInput, 'Protocol input exceeds its byte limit'),
   requiredFeatures: features, optionalFeatures: features,
   maxOutputTokens: z.number().int().min(1).max(32768)
 }).strict().refine(value => !value.requiredFeatures.some(item => value.optionalFeatures.includes(item)));
