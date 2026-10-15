@@ -149,6 +149,28 @@ export function createPersistedGatewayBudget(input: {
       if (identity(before) !== identity(await input.scopes.resolveCurrent())) throw new BudgetError('FORBIDDEN');
       return structuredClone(record);
     },
+    /** Complete only a previously persisted NOT-SENT cancellation. Neither
+     * expiry nor a failed provider request is evidence permitting a refund. */
+    releaseUnsent: async (value: unknown) => {
+      const { before, binding, record: original, reservationId } = await originalReservation(value);
+      const dispatch = await facts.readDispatch(reservationId);
+      if (dispatch.state !== 'not_dispatched' || original.dispatched
+        || !['reserved', 'released'].includes(original.status)) throw new BudgetError('PENDING_RECONCILIATION');
+      let record;
+      try {
+        record = original.status === 'released' ? await service.read(reservationId, binding.association)
+          : await service.release(reservationId, binding.association, requestFingerprint({
+            method: 'persisted-original-unsent-release-1', reservationId, association: binding.association }));
+      } catch (error) {
+        if (error instanceof BudgetError) throw error;
+        throw new BudgetError('PENDING_RECONCILIATION');
+      }
+      try {
+        if (identity(before) !== identity(await input.scopes.resolveCurrent()) || record.id !== reservationId
+          || record.status !== 'released' || record.dispatched) throw new BudgetError('PENDING_RECONCILIATION');
+      } catch { throw new BudgetError('PENDING_RECONCILIATION'); }
+      return structuredClone(record);
+    },
     /** Server-only explicit recovery, not a background sweep or a new dispatch.
      * Auth, entitlement and original usage are rechecked by the existing service.
      * A lost mutation response stays unknown; never retry the write here. */

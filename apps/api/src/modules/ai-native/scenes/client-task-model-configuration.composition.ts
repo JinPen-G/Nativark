@@ -37,6 +37,26 @@ export type ClientCallGatewayDependencies = {
 /** Formal platform Vault producer; no caller-provided connection or grant. */
 export type ClientPersistedCallGatewayDependencies = Omit<ClientCallGatewayDependencies, 'platformConnection'>;
 
+/** Original customer request accounting only. No operator credentials, model
+ * configuration or new dispatch dependency is required to observe old usage.
+ * The original material loader and client policy are rechecked on every call. */
+export function composeClientTaskCallAccountingRecovery(input: AiClientTaskDependencies & {
+  db: PrismaClient;
+  loadMaterial: (materialRef: string) => Promise<AiAuthorizedClientMaterial>;
+  callPriceVersion: string;
+  clock?: () => Date;
+}, value: unknown) {
+  const command = structuredClone(clientTaskCommandSchema.parse(structuredClone(value)));
+  if (typeof input?.loadMaterial !== 'function') throw new ModelGatewayError('CONFIG_INVALID');
+  const clock = input.clock ?? (() => new Date());
+  const authorization = new PrismaClientTaskBudgetAuthorizationSource({ db: input.db,
+    subscriptions: input.subscriptions, sceneCode: input.sceneCode, sceneVersion: input.sceneVersion,
+    loadMaterial: input.loadMaterial, command, clock });
+  const pricing = new PrismaGatewayCallPricing(input.db, authorization.scopes, input.callPriceVersion, clock);
+  return createPersistedGatewayBudget({ db: input.db, scopes: authorization.scopes,
+    subscriptions: input.subscriptions, authorization, pricing, clock }).recovery;
+}
+
 /** Server-only invocation configuration for one original customer task. The
  * loader is the existing authenticated material source; caller scope is not an
  * authority. No configuration management, dispatch grant or production enable.
@@ -112,7 +132,7 @@ export async function composeClientTaskModelConfiguration(input: AiClientTaskDep
           return (await capabilities.preflight(resolution.route.profile, resolution.requiredCapabilities)).allowed;
         }
       };
-      return Object.freeze({ runtime, callPriceVersion,
+      return Object.freeze({ runtime, callPriceVersion, accountingRecovery: accounting.recovery,
         financialEvidence: Object.freeze({ readDispatch: accounting.facts.readDispatch.bind(accounting.facts) }) });
   };
   return Object.freeze({ configuration, scopes, connection, createCallGateway,
