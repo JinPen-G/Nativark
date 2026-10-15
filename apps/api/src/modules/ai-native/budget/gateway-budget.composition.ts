@@ -17,6 +17,8 @@ import { PrismaGatewayInvocationBindings } from './prisma-gateway-invocation-bin
 import { PrismaTaskBudgetAuthorizationSource } from './prisma-task-budget-authorization.source';
 import { PrismaClientTaskBudgetAuthorizationSource } from './prisma-client-task-budget-authorization.source';
 import { gatewayBudgetPrincipal } from './gateway-budget-principal';
+import { PrismaGatewayRecordedPricing } from './prisma-gateway-recorded-pricing';
+import { GatewayPricingRecordManagement, type GatewayPricingEvidenceSource } from './prisma-gateway-pricing-records';
 
 export function createPersistedGatewayBudget(input: {
   db: ConstructorParameters<typeof PrismaGatewayInvocationBindings>[0] & ConstructorParameters<typeof PrismaGatewayAccountingFacts>[0];
@@ -234,6 +236,33 @@ export function createPersistedGatewayBudget(input: {
     }
   });
   return { bindings, facts, settings, recovery, budget: new PersistentGatewayBudget(new BudgetGatewayAdapter(service, bindings), facts) };
+}
+
+export function createRecordedPricingGatewayBudget(input:
+  Omit<Parameters<typeof createPersistedGatewayBudget>[0], 'pricing'>
+  & { db: ConstructorParameters<typeof PrismaGatewayRecordedPricing>[0]; pricingEvidence: GatewayPricingEvidenceSource; sceneCode: string }) {
+  const pricing = new PrismaGatewayRecordedPricing(input.db, input.scopes, input.clock);
+  const gateway = createPersistedGatewayBudget({ ...input, pricing });
+  const pricingRecords = new GatewayPricingRecordManagement(input.db, input.scopes, input.authorization,
+    input.pricingEvidence, gateway.bindings, input.sceneCode, input.clock);
+  const readPricing = async (value: unknown, readOriginal: typeof gateway.recovery.read) => {
+    const command = structuredClone(value);
+    const original = await readOriginal(command);
+    const basis = await pricing.receipt(original);
+    const current = await readOriginal(command);
+    if (requestFingerprint(original) !== requestFingerprint(current)) throw new BudgetError('PENDING_RECONCILIATION');
+    const latest = await pricing.receipt(current);
+    if (requestFingerprint(basis) !== requestFingerprint(latest)) throw new BudgetError('PENDING_RECONCILIATION');
+    const confirmed = await readOriginal(command);
+    if (requestFingerprint(current) !== requestFingerprint(confirmed)) throw new BudgetError('PENDING_RECONCILIATION');
+    return { ...basis, reservationStatus: confirmed.status, configurationRevision: confirmed.association.config.configRevision,
+      dispatched: confirmed.dispatched, recordedActualQuantity: confirmed.actual };
+  };
+  const recovery = Object.freeze({ ...gateway.recovery,
+    readPricing: (value: unknown) => readPricing(value, gateway.recovery.read),
+    readPricingCall: (value: unknown) => readPricing(value, gateway.recovery.readCall)
+  });
+  return { ...gateway, pricingRecords, recovery };
 }
 
 /** Workspace-user server assembly with real current task/configuration
