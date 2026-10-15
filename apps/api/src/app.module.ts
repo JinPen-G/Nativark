@@ -102,8 +102,9 @@ import { PublicDemoRequestController } from "./modules/demo-requests/public-demo
 import { PlatformDemoRequestController } from "./modules/demo-requests/platform-demo-request.controller";
 import { DemoRequestService } from "./modules/demo-requests/demo-request.service";
 import { AiOriginalScenesController } from "./modules/ai-native/scenes/original-scenes.controller";
-import { AI_NATIVE_ORIGINAL_REQUEST_PROVIDER, AI_NATIVE_STAFF_RECEIPT_PROVIDERS } from "./modules/ai-native/ai-native-application.providers";
+import { AI_NATIVE_ORIGINAL_REQUEST_PROVIDER, AI_NATIVE_STAFF_RECEIPT_PROVIDERS, AI_NATIVE_CLIENT_ENTRY_PROVIDERS } from "./modules/ai-native/ai-native-application.providers";
 import { StaffInspectionAssistController } from "./modules/ai-native/inspection-assist/staff-inspection-assist.controller";
+import { WebsiteClientEntryController, WechatClientEntryController } from "./modules/ai-native/scenes/standard-client-entry.application";
 
 @Module({
   imports: [
@@ -116,6 +117,8 @@ import { StaffInspectionAssistController } from "./modules/ai-native/inspection-
   controllers: [
     AiOriginalScenesController,
     StaffInspectionAssistController,
+    WebsiteClientEntryController,
+    WechatClientEntryController,
     HealthController,
     OpenApiController,
     AuthController,
@@ -154,6 +157,7 @@ import { StaffInspectionAssistController } from "./modules/ai-native/inspection-
     ApiAuthGuard,
     AI_NATIVE_ORIGINAL_REQUEST_PROVIDER,
     ...AI_NATIVE_STAFF_RECEIPT_PROVIDERS,
+    ...AI_NATIVE_CLIENT_ENTRY_PROVIDERS,
     AuthService,
     PlatformService,
     PlatformRepository,

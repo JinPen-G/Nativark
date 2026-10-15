@@ -1,6 +1,7 @@
 import { AI_NATIVE_COMPONENT_SCHEMAS } from "./ai-native-schemas";
 import { AI_TASK_DRAFT_COMPONENT_SCHEMAS } from "./ai-task-draft-schemas";
 import { AI_LEAF_COMPONENT_SCHEMAS } from "./ai-leaf-components";
+import { AI_CLIENT_ENTRY_HTTP_DRAFT } from "@rental-os/shared";
 
 type HttpMethod = "get" | "post" | "put" | "patch" | "delete";
 
@@ -1984,6 +1985,16 @@ const INTEGRATION_BACKLOG_OPERATIONS: ContractOperation[] = [
 ];
 
 export const API_CONTRACT_OPERATIONS: ContractOperation[] = [
+  ...([AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedWechatBasePath]
+    .flatMap((base, surface) => ([
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readHostCapabilities, 'AiClientHostCapabilitiesRequest', 'AiClientHostCapabilities'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.acceptBookingSubmission, 'AiBookingSubmissionAcceptanceRequest', 'AiBookingSubmissionAcceptance'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.submitAcceptedBooking, 'AiBookingSubmissionDecision', 'AiBookingSubmissionReceipt'],
+      [AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingSubmission, 'AiBookingSubmissionSelection', 'AiBookingSubmissionReceipt'],
+    ] as const).map(([route, requestSchema, responseSchema]) => clientOperation('post', `/api/${base}/${route}`,
+      `clientAi_${surface}_${route.replace(/\//gu, '_')}`,
+      'Current independent customer identity and persisted surface/scene policy required. Observation does not grant execution; only an explicit original-page decision submits through Core. Unknown uses the same original receipt, never automatic resubmission.',
+      { requestSchema, responseSchema })))),
   { method: 'post', path: '/api/staff/v1/ai-native/inspection-assist/history-read', tag: 'AI Native',
     operationId: 'readOwnedStaffInspectionHistory', permissions: ['rental-os:order:view'],
     summary: 'Read bounded owned historical inspection draft references under current staff/order/location authorization; no media access or execution.',

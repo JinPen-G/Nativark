@@ -1,7 +1,7 @@
 import type { AiBookingSubmissionAcceptance, ClientCatalogLocation, ClientCatalogResponse, ClientCreateQuoteRequest, ClientDeliveryAddressView, RentalCustomerCoupon, RentalFulfillmentMode, RentalQuoteSnapshotV1 } from "@rental-os/shared";
 import { listAddresses } from "../../api/addresses";
 import { createQuote, fetchCoupons, fetchQuote } from "../../api/catalog";
-import { createOrder } from "../../api/orders";
+import { createOrder, readBookingHostCapabilities } from "../../api/orders";
 import { fetchPaymentCapabilities } from "../../api/payments";
 import { CartLocked, abandonSubmission, beginSubmission, bindQuote, cartMissing, completeSubmission, getCart, isDeliveryMode, markSubmissionUnknown, quoteIsCurrent, removeLine, setLineQuantity, updateCart, type CartState } from "../../core/cart";
 import { catalogPricingUnitLabel, loadCatalog, primaryLocation } from "../../core/catalogStore";
@@ -52,6 +52,9 @@ interface CouponRow {
 }
 
 interface CheckoutData {
+  aiHandoffInput: string;
+  aiHandoffOffered: boolean;
+  aiHandoffOpening: boolean;
   aiEnabled: boolean;
   aiStatus: CustomerHandoffView["status"];
   aiReference: string;
@@ -137,6 +140,9 @@ const DEFAULT_ZONE = "Asia/Shanghai";
 Page({
   behaviors: [themeBehavior],
   data: {
+    aiHandoffInput: "",
+    aiHandoffOffered: false,
+    aiHandoffOpening: false,
     aiEnabled: false,
     aiStatus: "disabled",
     aiReference: "",
@@ -229,6 +235,31 @@ Page({
   aiUnsubscribe: undefined as (() => void) | undefined,
   aiFactory: undefined as ReturnType<typeof createCustomerBookingHostFactory> | undefined,
   aiBindingEpoch: 0,
+  aiPendingHandoffRef: undefined as string | undefined,
+  aiOffHandoff: undefined as (() => void) | undefined,
+  aiOpeningGeneration: 0,
+
+  onHandoffReferenceInput(event: WechatMiniprogram.Input) {
+    if (this.aiDisposed || this.data.aiHandoffOpening || this.aiMode) return;
+    const reference = event.detail.value.trim();
+    this.aiPendingHandoffRef = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(reference) ? reference : undefined;
+    this.setData({ aiHandoffInput: reference, aiHandoffOffered: Boolean(this.aiPendingHandoffRef) });
+  },
+
+  async onOpenPublishedBooking() {
+    if (this.aiDisposed || !this.aiVisible || this.data.aiHandoffOpening || !this.aiPendingHandoffRef || getCart()?.submission) return;
+    const reference = this.aiPendingHandoffRef, epoch = this.aiBindingEpoch, version = contextVersion();
+    const attempt = ++this.aiOpeningGeneration;
+    this.setData({ aiHandoffOpening: true });
+    try {
+      const publication = await readBookingHostCapabilities();
+      if (this.aiDisposed || !this.aiVisible || attempt !== this.aiOpeningGeneration || epoch !== this.aiBindingEpoch || version !== contextVersion()
+        || publication.surface !== 'client_miniprogram' || publication.channel !== 'wechat_miniprogram'
+        || publication.enabled !== true) return;
+      if (!await this.attachPublishedBooking(publication, reference)) toast('AI草稿不可用，请继续人工办理');
+    } catch { if (!this.aiDisposed && this.aiVisible && attempt === this.aiOpeningGeneration) toast('AI入口尚不可用，未提交订单'); }
+    finally { if (!this.aiDisposed && attempt === this.aiOpeningGeneration) this.setData({ aiHandoffOpening: false }); }
+  },
 
   // Called explicitly by a trusted published entry, never from route parameters.
   // The publication is client isolation input; the factory/server reauthorize it.
@@ -237,14 +268,20 @@ Page({
     const epoch = ++this.aiBindingEpoch;
     this.aiFactory?.dispose(); this.aiConsumer?.destroy();
     this.aiConsumer = undefined; this.aiHost = undefined; this.aiAcceptance = undefined;
-    this.aiMode = true; this.requestVersion++; this.stopTicker(); this.clearBookingHandoff();
+    // Do not blank or lock the ordinary booking form while capabilities are
+    // still being checked. A failed AI connection must preserve manual work.
+    const hadAiHost = this.aiMode;
+    this.aiMode = false;
+    if (hadAiHost) { this.requestVersion++; this.clearBookingHandoff(); void this.prepare(); this.startTicker(); }
     const owner = createCustomerBookingHostFactory(publication);
     this.aiFactory = owner;
-    const host = await owner.openFromUser(handoffRef);
+    let host: CustomerBookingHost | null;
+    try { host = await owner.openFromUser(handoffRef); }
+    catch { owner.dispose(); if (this.aiFactory === owner) this.aiFactory = undefined; return false; }
     if (this.aiDisposed || !this.aiVisible || this.aiBindingEpoch !== epoch || this.aiFactory !== owner) {
       owner.dispose(); return false;
     }
-    if (!host) { this.clearBookingHandoff(); return false; }
+    if (!host) { owner.dispose(); this.aiFactory = undefined; return false; }
     this.attachHost(host);
     return true;
   },
@@ -327,8 +364,28 @@ Page({
   },
 
   onLoad() {
+    // Native event channel carries a reference only, never functions, scope or
+    // an enable flag. No AI read happens until the human presses the button.
+    const channel = (this as unknown as { getOpenerEventChannel?: () => {
+      on(name: string, handler: (value: unknown) => void): void;
+      off(name: string, handler: (value: unknown) => void): void;
+    } }).getOpenerEventChannel?.();
+    const offer = (value: unknown) => {
+      const ref = value && typeof value === 'object' && 'handoffRef' in value ? value.handoffRef : undefined;
+      if (this.aiDisposed || this.aiMode || typeof ref !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$/u.test(ref)) return;
+      this.aiOpeningGeneration++; this.aiBindingEpoch++;
+      this.aiFactory?.dispose(); this.aiFactory = undefined;
+      this.aiPendingHandoffRef = ref;
+      this.setData({ aiHandoffInput: ref, aiHandoffOffered: true, aiHandoffOpening: false });
+    };
+    if (typeof channel?.on === 'function' && typeof channel.off === 'function') {
+      channel.on('ai-booking-handoff', offer);
+      this.aiOffHandoff = () => channel.off('ai-booking-handoff', offer);
+    }
     this.aiUnsubscribe?.();
     this.aiUnsubscribe = sessionEvents.on(() => {
+      this.aiOpeningGeneration++; this.aiPendingHandoffRef = undefined;
+      this.setData({ aiHandoffOpening: false, aiHandoffInput: '', aiHandoffOffered: false });
       if (!this.aiMode) return;
       this.aiBindingEpoch++; this.aiFactory?.dispose(); this.aiFactory = undefined;
       this.aiConsumer?.destroy(); this.aiConsumer = undefined; this.aiHost = undefined;
@@ -346,6 +403,7 @@ Page({
   },
 
   onHide() {
+    this.aiOpeningGeneration++; this.setData({ aiHandoffOpening: false });
     this.aiBindingEpoch++; this.aiFactory?.hide(); this.aiFactory = undefined;
     this.aiAcceptance = this.aiConsumer?.snapshotAcceptance() ?? this.aiAcceptance;
     this.aiVisible = false; this.aiConsumer?.destroy(); this.aiConsumer = undefined;
@@ -354,6 +412,8 @@ Page({
   },
 
   onUnload() {
+    this.aiOpeningGeneration++;
+    this.aiOffHandoff?.(); this.aiOffHandoff = undefined; this.aiPendingHandoffRef = undefined;
     this.aiBindingEpoch++; this.aiFactory?.dispose(); this.aiFactory = undefined;
     this.aiDisposed = true;
     this.aiVisible = false; this.aiConsumer?.destroy(); this.aiConsumer = undefined; this.aiHost = undefined;

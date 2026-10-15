@@ -7,6 +7,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { RouteTransition } from './components/RouteTransition';
 import { RouteProgress } from './components/RouteProgress';
 import { ToastProvider } from './components/Toast';
+import { BookingHandoffBridge } from './features/ai-native/BookingHandoffBridge';
 
 // 路由级分包：首屏只加载首页所需代码，其余页面按需加载，减小初始包体。
 const HomePageV2 = lazy(() => import('./pages/HomePageV2').then(m => ({ default: m.HomePageV2 })));
@@ -44,7 +45,7 @@ export function App() {
               <Route path="/products" element={<ProductsPage />} />
               <Route path="/category/:categoryId" element={<ProductsPage />} />
               <Route path="/product/:productId" element={<ProductDetailPage />} />
-              <Route path="/booking/:productId" element={<BookingPage />} />
+              <Route path="/booking/:productId" element={<BookingHandoffBridge><BookingPage /></BookingHandoffBridge>} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/account" element={<AccountPage />} />
               <Route path="/orders" element={<OrdersPage />} />

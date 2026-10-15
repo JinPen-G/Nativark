@@ -1,6 +1,12 @@
 <page-meta page-style="{{themeStyle}}" root-class="{{themeClass}}"></page-meta>
 <view class="screen {{themeClass}}">
   <nav-bar title="确认订单"></nav-bar>
+  <view wx:if="{{!aiEnabled}}" class="card mt-16">
+    <view>核对本人AI预约草稿；未发布或失效时继续使用原人工表单。</view>
+    <label for="ai-original-handoff">原预约草稿交接编号</label>
+    <input id="ai-original-handoff" value="{{aiHandoffInput}}" maxlength="191" disabled="{{aiHandoffOpening || locked}}" bindinput="onHandoffReferenceInput" />
+    <button class="btn btn--block" loading="{{aiHandoffOpening}}" disabled="{{!aiHandoffOffered || aiHandoffOpening || locked}}" bindtap="onOpenPublishedBooking">核对AI预约草稿</button>
+  </view>
 
   <view wx:if="{{aiEnabled}}" class="section">
     <view class="card">

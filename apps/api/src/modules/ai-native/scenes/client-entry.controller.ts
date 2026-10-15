@@ -16,7 +16,7 @@ import type { AiClientApplicationRequest, composeRequestBoundClientApplication }
 import { AiClientQuoteResultUnknownError } from '../client-quote-original.composition';
 
 export const AI_CLIENT_ENTRY_APPLICATION = Symbol('AI_CLIENT_ENTRY_APPLICATION');
-type Application = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
+export type AiClientEntryApplication = Pick<ReturnType<typeof composeRequestBoundClientApplication>,
   'readHostCapabilities' | 'issueAction' | 'createBookingDraft' | 'chooseBookingDraft' | 'readBookingDraft' |
   'handoffBookingDraft' | 'readBookingHandoff' | 'readBookingOperation' |
   'acceptBookingSubmission' | 'readBookingAcceptance' | 'submitAcceptedBooking' | 'readBookingSubmission' | 'readTaskSnapshot' | 'readTaskEvents' |
@@ -29,7 +29,7 @@ type ClientModelHttpRequest = AiClientApplicationRequest & AiRequestAbortSource;
 
 @Controller([AI_CLIENT_ENTRY_HTTP_DRAFT.basePath, AI_CLIENT_ENTRY_HTTP_DRAFT.authenticatedBasePath])
 export class AiClientEntryController {
-  constructor(@Inject(AI_CLIENT_ENTRY_APPLICATION) private readonly application: Application) {}
+  constructor(@Inject(AI_CLIENT_ENTRY_APPLICATION) private readonly application: AiClientEntryApplication) {}
 
   private async respond<T>(work: () => Promise<T>, unknownAction = 'read_booking_operation'): Promise<T> {
     try { return await work(); }
@@ -242,52 +242,64 @@ export class AiClientEntryController {
   }
 
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readHostCapabilities)
+  @HttpCode(200) @Header('Cache-Control', 'no-store')
   readHostCapabilities(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.readHostCapabilities(request, body));
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.issueAction)
+  @HttpCode(200) @Header('Cache-Control', 'no-store')
   issueAction(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.issueAction(request, body));
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.createBookingDraft)
+  @HttpCode(200) @Header('Cache-Control', 'no-store')
   createBookingDraft(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.createBookingDraft(request, body));
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.chooseBookingDraft)
+  @HttpCode(200) @Header('Cache-Control', 'no-store')
   chooseBookingDraft(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.chooseBookingDraft(request, body));
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingDraft)
+  @HttpCode(200) @Header('Cache-Control', 'no-store')
   readBookingDraft(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.readBookingDraft(request, body));
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.handoffBookingDraft)
+  @HttpCode(200) @Header('Cache-Control', 'no-store')
   handoffBookingDraft(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.handoffBookingDraft(request, body));
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingHandoff)
+  @HttpCode(200) @Header('Cache-Control', 'no-store')
   readBookingHandoff(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.readBookingHandoff(request, body));
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingOperation)
+  @HttpCode(200) @Header('Cache-Control', 'no-store')
   readBookingOperation(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.readBookingOperation(request, body));
   }
 
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.acceptBookingSubmission)
+  @HttpCode(200) @Header('Cache-Control', 'no-store')
   acceptBookingSubmission(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     // Same handoff re-read can recover an acceptance; it does not submit an order.
     return this.respond(() => this.application.acceptBookingSubmission(request, body), 'accept_booking_submission');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.submitAcceptedBooking)
+  @HttpCode(200) @Header('Cache-Control', 'no-store')
   submitAcceptedBooking(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.submitAcceptedBooking(request, body), 'read_booking_submission');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingAcceptance)
+  @HttpCode(200) @Header('Cache-Control', 'no-store')
   readBookingAcceptance(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.readBookingAcceptance(request, body), 'read_original_acceptance');
   }
   @Post(AI_CLIENT_ENTRY_HTTP_DRAFT.readBookingSubmission)
+  @HttpCode(200) @Header('Cache-Control', 'no-store')
   readBookingSubmission(@Req() request: AiClientApplicationRequest, @Body() body: unknown) {
     return this.respond(() => this.application.readBookingSubmission(request, body), 'read_booking_submission');
   }

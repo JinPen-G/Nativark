@@ -19,13 +19,13 @@ import { request } from "../core/http";
 import type { AiClientHostCapabilities } from "@rental-os/shared";
 
 export function readBookingHostCapabilities(): Promise<AiClientHostCapabilities> {
-  return request("/ai-native/entry/host-capabilities/read", { method: "POST", data: {}, replayAfterRefresh: false });
+  return request("/ai-native/wechat-entry/host-capabilities/read", { method: "POST", data: {}, replayAfterRefresh: false });
 }
 
 /** Both explicit page consumers and capability-bound factories use this same read. */
 export function readBookingHandoff(input: string | { handoffRef: string }): Promise<AiBookingHandoff> {
   const handoffRef = typeof input === "string" ? input : input.handoffRef;
-  return request("/ai-native/entry/booking-handoffs/read", { method: "POST", data: { handoffRef }, replayAfterRefresh: false });
+  return request("/ai-native/wechat-entry/booking-handoffs/read", { method: "POST", data: { handoffRef }, replayAfterRefresh: false });
 }
 
 export interface CreateOrderResult {
@@ -47,15 +47,15 @@ export async function createOrder(quoteId: string, idempotencyKey: string): Prom
 /** Explicit AI page host ports. Exporting these never enables or binds a host.
  * Routes are the authenticated alias published by AI_CLIENT_ENTRY_HTTP_DRAFT. */
 export function acceptBookingSubmission(input: { handoffRef: string }): Promise<AiBookingSubmissionAcceptance> {
-  return request<AiBookingSubmissionAcceptance>("/ai-native/entry/booking-submissions/accept", { method: "POST", data: input });
+  return request<AiBookingSubmissionAcceptance>("/ai-native/wechat-entry/booking-submissions/accept", { method: "POST", data: input });
 }
 export function submitAcceptedBooking(input: AiBookingSubmissionDecision): Promise<AiBookingSubmissionReceipt> {
   // A 401 may be a late current-identity recheck. Never let refresh resend a write.
-  return request<AiBookingSubmissionReceipt>("/ai-native/entry/booking-submissions/submit",
+  return request<AiBookingSubmissionReceipt>("/ai-native/wechat-entry/booking-submissions/submit",
     { method: "POST", data: input, replayAfterRefresh: false });
 }
 export function readBookingSubmission(input: { acceptanceRef: string }): Promise<AiBookingSubmissionReceipt> {
-  return request<AiBookingSubmissionReceipt>("/ai-native/entry/booking-submissions/read", { method: "POST", data: input });
+  return request<AiBookingSubmissionReceipt>("/ai-native/wechat-entry/booking-submissions/read", { method: "POST", data: input });
 }
 
 /** 统一本人订单索引：本租户各服务的本人订单，只读，不含他人订单。 */

@@ -8,11 +8,23 @@ import { RentalBusinessService } from '../rental-core/rental-business.service';
 import { RentalWorkspaceReportRepository } from '../rental-core/rental-workspace-report.repository';
 import { MembershipService } from '../platform/membership.service';
 import { PaymentRuntimeService } from '../integrations/payment.runtime.service';
+import { ClientApiService } from '../client/client-api.service';
+import { composeStandardClientBookingEntry, AI_WEBSITE_ENTRY, AI_WECHAT_ENTRY } from './scenes/standard-client-entry.application';
 import { composeRequestBoundOriginalScenes } from './scenes/request-bound-scenes.application';
 import { AI_ORIGINAL_SCENE_REQUESTS } from './scenes/original-scenes.controller';
 import { StaffInspectionRequestFactory } from './inspection-assist/inspection-assist.composition';
 import { AI_STAFF_INSPECTION_REQUESTS, AI_STAFF_INSPECTION_ENABLED,
   AI_STAFF_INSPECTION_OPERATIONS } from './inspection-assist/staff-inspection-assist.controller';
+
+export const AI_NATIVE_CLIENT_ENTRY_PROVIDERS: FactoryProvider[] = ([
+  [AI_WEBSITE_ENTRY, 'web'], [AI_WECHAT_ENTRY, 'wechat_miniprogram'],
+] as const).map(([provide, channel]) => ({
+  provide, inject: [PrismaService, ApiAuthGuard, SubscriptionService, ClientApiService],
+  useFactory: (db: PrismaService, guard: ApiAuthGuard, subscriptions: SubscriptionService, client: ClientApiService) =>
+    composeStandardClientBookingEntry({ db, guard, client,
+      tasks: { db, subscriptions, sceneCode: 'quote_clarification', sceneVersion: '1' },
+      quotePreparation: client, bookingSubmission: client }, channel),
+}));
 
 /** Historical observations only. No storage reader, recognition driver or Core
  * submission port is supplied; normal staff pages can reopen owned history,

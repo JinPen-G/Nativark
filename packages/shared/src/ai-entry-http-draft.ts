@@ -3,6 +3,9 @@ export const AI_CLIENT_ENTRY_HTTP_DRAFT = Object.freeze({
   basePath: 'ai-native/client-entry', method: 'POST',
   /** Current Client Guard authenticates this prefix; old opt-in path is retained. */
   authenticatedBasePath: 'client/v1/ai-native/entry',
+  /** Fixed WeChat surface alias. It still requires current client identity,
+   * publication, persisted scene policy and every original business guard. */
+  authenticatedWechatBasePath: 'client/v1/ai-native/wechat-entry',
   readHostCapabilities: 'host-capabilities/read',
   /** Original task command only; neither endpoint starts or resumes execution. */
   readTaskSnapshot: 'tasks/snapshot/read', readTaskEvents: 'tasks/events/read',
